@@ -292,7 +292,7 @@ function CatalogCard({product, navigate }) {
       <h2>{productName(product)}</h2>
       <p>{productPromise(product)}</p>
       <div className="buyer-v2__card-footer">
-        <div><strong>{accessStatus(access) === "active" ? t("In your library") : product.availability === "published" ? t("Free") : t("Unavailable")}</strong><span>{product.availability === "published" ? t("Permanent access") : t("Not available")}</span></div>
+        <div><strong>{accessStatus(access) === "active" ? t("In your library") : product.availability === "published" ? t("Free") : t("Unavailable")}</strong><span>{product.availability === "published" ? t("Access included") : t("Not available")}</span></div>
         <LinkButton variant="secondary" to={path} navigate={navigate}>{t('View details')}</LinkButton>
       </div>
     </article>
@@ -336,7 +336,7 @@ function ProductPage({route, request, navigate, session, downloadUrl }) {
         <span className="buyer-v2__eyebrow">{t('How it works')}</span>
         <h2>{t('From access to useful work.')}</h2>
         <ol className="buyer-v2__steps">
-          <li><span>1</span><div><strong>{t('Add the Agent')}</strong><p>{t('Confirm permanent access for this Product.')}</p></div></li>
+          <li><span>1</span><div><strong>{t('Add the Agent')}</strong><p>{t('Confirm access to this Product.')}</p></div></li>
           <li><span>2</span><div><strong>{t('Open Hatch Desktop')}</strong><p>{t('Sign in with the same account and choose a local Workspace.')}</p></div></li>
           <li><span>3</span><div><strong>{t('Work with the Agent')}</strong><p>{t('Use the method as often as you need in your own Workspace.')}</p></div></li>
         </ol>
@@ -467,7 +467,7 @@ function AccountHelpPage({session, navigate }) {
 function SubscriptionsPage({navigate }) {
   const t = useBuyerCopy();
   usePageTitle("Subscriptions");
-  return <div className="buyer-v2__container buyer-v2__page"><StatePanel eyebrow="Subscriptions" title="No subscription products are enabled." body="Every published Product currently grants permanent access at no charge. Paid access and subscriptions are not available."><LinkButton to={EXPLORE_ROOT} navigate={navigate}>{t('Explore products')}</LinkButton></StatePanel></div>;
+  return <div className="buyer-v2__container buyer-v2__page"><StatePanel eyebrow="Subscriptions" title="No subscription products are enabled." body="Every published Product is currently available at no charge. Paid access and subscriptions are not available."><LinkButton to={EXPLORE_ROOT} navigate={navigate}>{t('Explore products')}</LinkButton></StatePanel></div>;
 }
 
 function AuthPage({mode, search, request, navigate, session }) {
@@ -521,7 +521,7 @@ function AuthPage({mode, search, request, navigate, session }) {
         <div>
           <span className="buyer-v2__eyebrow">{t('Continue your task')}</span>
           {productIntent && intent.status === "loading" ? <div className="buyer-v2__auth-intent-skeleton" aria-label={t("Loading Product")} /> : null}
-          {productIntent && intent.status === "ready" ? <><h1>{productName(intent.data)}</h1><p>{productPromise(intent.data)}</p><strong>{t('Permanent access')}</strong><small>{creatorName(intent.data)}</small></> : null}
+          {productIntent && intent.status === "ready" ? <><h1>{productName(intent.data)}</h1><p>{productPromise(intent.data)}</p><strong>{t('Access included')}</strong><small>{creatorName(intent.data)}</small></> : null}
           {!productIntent ? <><h1>{t('Your method, made useful.')}</h1><p>{t('Turn the way you think into an agent people can use.')}</p></> : null}
         </div>
       </section>
@@ -612,19 +612,19 @@ function CheckoutPage({id, request, navigate, session }) {
   return (
     <div className="buyer-v2__container buyer-v2__page buyer-v2__checkout-page">
       <RouterLink className="buyer-v2__back-link" to={productPath(product)} navigate={navigate}>{t('← Back to product')}</RouterLink>
-      <header className="buyer-v2__page-heading"><span className="buyer-v2__eyebrow">{t('Permanent access')}</span><h1>{t('Confirm this Product.')}</h1><p>{t('Your access is pinned to the Product release shown here.')}</p></header>
+      <header className="buyer-v2__page-heading"><span className="buyer-v2__eyebrow">{t('Access included')}</span><h1>{t('Confirm this Product.')}</h1><p>{t('Your access is pinned to the Product release shown here.')}</p></header>
       <div className="buyer-v2__checkout-grid">
         <section className="buyer-v2__receipt-card">
           <div className="buyer-v2__receipt-product"><span>{creatorName(checkout.creator || product)}</span><h2>{productName(product)}</h2><p>{productPromise(product)}</p></div>
           <DefinitionList rows={[
             [t("Release"), checkout.release_label || checkout.release_snapshot?.label || product.release_label || "Current approved release"],
-            [t("Access"), "Permanent access"],
+            [t("Access"), t("Access included")],
             [t("Payment"), "Not required"]
           ]} />
         </section>
         <CheckoutSummary
           product={{ ...product, name: productName(product), currency: "USD" }}
-          lineItems={[{ label: t("Permanent access"), detail: checkout.release_label || checkout.release_snapshot?.label || product.release_label || t("Current approved release"), amount_minor: 0 }]}
+          lineItems={[{ label: t("Access included"), detail: checkout.release_label || checkout.release_snapshot?.label || product.release_label || t("Current approved release"), amount_minor: 0 }]}
           totals={{ subtotal_minor: 0, total_minor: 0, subtotal_label: t("Free"), total_label: t("Free"), currency: "USD" }}
           busy={mutation.status === "pending"}
           error={mutation.error ? friendlyError(mutation.error) : undefined}
@@ -784,7 +784,7 @@ function EntitlementPage({id, request, navigate, session, downloadUrl }) {
         ]} />{orderId ? <RouterLink className="buyer-v2__text-link" to={`${ORDERS_ROOT}/${encodeURIComponent(orderId)}`} navigate={navigate}>{t('View originating order →')}</RouterLink> : null}</section>
         <aside className="buyer-v2__activation-card"><span className="buyer-v2__eyebrow">{t('Desktop activation')}</span><h2>{canOpen ? "Continue in your Workspace." : t(entitlementRecoveryTitle(status))}</h2><p>{t(entitlementRecoveryCopy(status))}</p>{canOpen ? <Button asChild><a href={desktopUrl(entitlement, product)} onClick={() => trackPortalEvent(request, "desktop_open_clicked", productTelemetry(product))}>{t('Open Hatch Desktop')}</a></Button> : null}<a className="buyer-v2__secondary-download" href={downloadUrl} target="_blank" rel="noreferrer" onClick={() => trackPortalEvent(request, "desktop_download_clicked", productTelemetry(product))}>{t('Download Hatch Desktop')}</a></aside>
       </div>
-      <section className="buyer-v2__timeline-section"><div><span className="buyer-v2__eyebrow">{t('Access history')}</span><h2>{t('Activity, without your private content.')}</h2><p>{t('Your purchase and access status stay visible on Web. Workspace paths, source files and conversations stay private.')}</p></div>{deliveries.length ? <Timeline entries={deliveries.map(deliveryTimelineEntry)} /> : <EmptyState compact title={t('Permanent access')} body="Open Hatch Desktop when you are ready to use this access." />}</section>
+      <section className="buyer-v2__timeline-section"><div><span className="buyer-v2__eyebrow">{t('Access history')}</span><h2>{t('Activity, without your private content.')}</h2><p>{t('Your purchase and access status stay visible on Web. Workspace paths, source files and conversations stay private.')}</p></div>{deliveries.length ? <Timeline entries={deliveries.map(deliveryTimelineEntry)} /> : <EmptyState compact title={t('Access included')} body="Open Hatch Desktop when you are ready to use this access." />}</section>
     </div>
   );
 }
@@ -1255,7 +1255,7 @@ function entitlementStatusLabel(status) {
 
 function entitlementSummary(value) {
   const status = accessStatus(value);
-  if (value?.access_mode === "unmetered") return value.summary || "Permanent access. Open Hatch Desktop with this account and choose a Workspace.";
+  if (value?.access_mode === "unmetered") return value.summary || "Access included. Open Hatch Desktop with this account and choose a Workspace.";
   if (status === "reserved") return "Access setup is in progress.";
   if (status === "consumed") return "This access is no longer active.";
   if (status === "expired") return "This access has expired. Return to the Product to get access again.";
@@ -1264,7 +1264,7 @@ function entitlementSummary(value) {
 }
 
 function unitsLabel(value) {
-  if (value?.access_mode === "unmetered" || value?.unlimited === true) return "Permanent access";
+  if (value?.access_mode === "unmetered" || value?.unlimited === true) return "Access included";
   if (value.remaining_units == null && value.units_remaining == null) return "Access details";
   const units = Number(value.remaining_units ?? value.units_remaining);
   return `${units} access ${units === 1 ? "use" : "uses"} available`;

@@ -188,7 +188,7 @@ const MESSAGES = {
     ,zeroProductOwnership: "You bring the expertise. We help build it. You own it."
     ,zeroProductPricing: "No monthly fee. Nothing upfront. Hatch earns 20% when the Agent completes paid work."
     ,buildFirstAgent: "Build your first Agent"
-    ,permanentAccess: "Permanent access"
+    ,accessIncluded: "Access included"
     ,purchases: "purchases"
     ,viewAccessRecords: "View access records"
     ,recentActivity: "Recent activity"
@@ -421,7 +421,7 @@ const MESSAGES = {
     ,zeroProductOwnership: "你带来专业能力，我们帮你把它做出来。Agent 属于你。"
     ,zeroProductPricing: "没有月费，也不需要预付。Agent 完成付费工作后，Hatch 收取 20%。"
     ,buildFirstAgent: "创建我的第一个 Agent"
-    ,permanentAccess: "永久使用权"
+    ,accessIncluded: "包含使用权"
     ,purchases: "购买"
     ,viewAccessRecords: "查看使用记录"
     ,recentActivity: "最近动态"
@@ -654,7 +654,7 @@ const MESSAGES = {
     ,zeroProductOwnership: "専門知識を持ち込むのはあなた。形にするのは私たち。Agent はあなたのものです。"
     ,zeroProductPricing: "月額料金も初期費用もありません。Agent が有料の仕事を完了したとき、Hatch は 20% を受け取ります。"
     ,buildFirstAgent: "最初の Agent を作る"
-    ,permanentAccess: "永久アクセス"
+    ,accessIncluded: "アクセス込み"
     ,purchases: "購入"
     ,viewAccessRecords: "アクセス記録を見る"
     ,recentActivity: "最近のアクティビティ"
@@ -752,7 +752,7 @@ const PORTAL_MESSAGES = {
     creatorDashboard: "Creator dashboard",
     candidate: "Candidate",
     notReady: "Not ready",
-    freePermanentAccess: "Free · Permanent access",
+    freeAccess: "Free · Access included",
     release: "Release",
     publicUrl: "Public URL",
     notPublic: "Not public",
@@ -786,7 +786,7 @@ const PORTAL_MESSAGES = {
     noBlindedComparison: "No blinded comparison was included in this report.",
     boundCandidateDigest: "Bound to this candidate digest",
     approveCandidateFirst: "Approve the candidate first",
-    permanentAccessConfigured: "Permanent access is configured",
+    accessConfigured: "Access is configured",
     noCharge: "No charge",
     registryMaterialization: "Registry materialization",
     readyToMaterialize: "Ready to materialize on publish",
@@ -856,14 +856,14 @@ const PORTAL_MESSAGES = {
     previewLoadError: "We couldn't build the storefront preview",
     copyFailed: "Copy failed. Select the link and copy it manually.",
     yourProductLive: "Your Product is live",
-    publishedPermanentBody: "People can now purchase this immutable release at no charge and keep permanent access.",
+    publishedAccessBody: "People can now purchase this immutable release at no charge and use it in Hatch Desktop.",
     publicationCompleted: "Publication completed",
     shareLink: "Share link",
     copied: "Copied",
     copyLink: "Copy link",
     backToProduct: "Back to Product",
     seeExactly: "See exactly what people will see.",
-    previewBody: "This preview is pinned to the approved candidate. Access is free and permanent after you publish.",
+    previewBody: "This preview is pinned to the approved candidate. Access is free after you publish.",
     previewViewport: "Preview viewport",
     desktop: "Desktop",
     mobile: "Mobile",
@@ -932,7 +932,7 @@ const PORTAL_MESSAGES = {
     reviewRevoke: "Review revoke",
     noRevokeAvailable: "No revoke action is available for this order state.",
     refundRecorded: "The refund request was recorded. Refreshing the authoritative order state.",
-    permanent: "Permanent",
+    included: "Included",
     metered: "Metered",
     statusActive: "Active",
     statusCompleted: "Completed",
@@ -1005,7 +1005,7 @@ const PORTAL_MESSAGES = {
     creatorDashboard: "创作者控制台",
     candidate: "候选版本",
     notReady: "尚未准备好",
-    freePermanentAccess: "免费 · 永久使用权",
+    freeAccess: "免费 · 包含使用权",
     release: "发布版本",
     publicUrl: "公开 URL",
     notPublic: "尚未公开",
@@ -1039,7 +1039,7 @@ const PORTAL_MESSAGES = {
     noBlindedComparison: "报告没有包含盲测对比。",
     boundCandidateDigest: "已绑定此候选版本摘要",
     approveCandidateFirst: "请先批准候选版本",
-    permanentAccessConfigured: "永久使用权已配置",
+    accessConfigured: "使用权已配置",
     noCharge: "不收费",
     registryMaterialization: "注册表物化",
     readyToMaterialize: "发布时可以物化",
@@ -1109,14 +1109,14 @@ const PORTAL_MESSAGES = {
     previewLoadError: "无法构建 storefront 预览",
     copyFailed: "复制失败。请选择链接后手动复制。",
     yourProductLive: "你的产品已上线",
-    publishedPermanentBody: "用户现在可以免费购买这个不可变发布版本，并永久使用。",
+    publishedAccessBody: "用户现在可以免费获取这个不可变发布版本，并在 Hatch Desktop 中使用。",
     publicationCompleted: "发布已完成",
     shareLink: "分享链接",
     copied: "已复制",
     copyLink: "复制链接",
     backToProduct: "返回产品",
     seeExactly: "准确查看用户将看到的内容。",
-    previewBody: "预览固定到已批准的候选版本。发布后使用权免费且永久。",
+    previewBody: "预览固定到已批准的候选版本。发布后即可免费使用。",
     previewViewport: "预览视口",
     desktop: "桌面端",
     mobile: "移动端",
@@ -1185,7 +1185,7 @@ const PORTAL_MESSAGES = {
     reviewRevoke: "检查撤销",
     noRevokeAvailable: "当前订单状态不支持撤销使用权。",
     refundRecorded: "退款申请已记录，正在刷新权威订单状态。",
-    permanent: "永久",
+    included: "已包含",
     metered: "按量",
     statusActive: "有效",
     statusCompleted: "已完成",
@@ -1258,7 +1258,7 @@ const PORTAL_MESSAGES = {
     creatorDashboard: "クリエイターダッシュボード",
     candidate: "候補",
     notReady: "準備未完了",
-    freePermanentAccess: "無料 · 永久アクセス",
+    freeAccess: "無料 · アクセス込み",
     release: "リリース",
     publicUrl: "公開 URL",
     notPublic: "非公開",
@@ -1292,7 +1292,7 @@ const PORTAL_MESSAGES = {
     noBlindedComparison: "このレポートにブラインド比較は含まれていません。",
     boundCandidateDigest: "この候補ダイジェストに固定",
     approveCandidateFirst: "まず候補を承認してください",
-    permanentAccessConfigured: "永久アクセスを設定済み",
+    accessConfigured: "アクセスを設定済み",
     noCharge: "無料",
     registryMaterialization: "レジストリのマテリアライズ",
     readyToMaterialize: "公開時にマテリアライズ可能",
@@ -1362,14 +1362,14 @@ const PORTAL_MESSAGES = {
     previewLoadError: "ストアフロントのプレビューを作成できませんでした",
     copyFailed: "コピーに失敗しました。リンクを選択して手動でコピーしてください。",
     yourProductLive: "プロダクトが公開中です",
-    publishedPermanentBody: "このイミュータブルなリリースを無料で購入でき、永久にアクセスできます。",
+    publishedAccessBody: "このイミュータブルなリリースを無料で入手し、Hatch Desktop で利用できます。",
     publicationCompleted: "公開完了",
     shareLink: "共有リンク",
     copied: "コピー済み",
     copyLink: "リンクをコピー",
     backToProduct: "プロダクトに戻る",
     seeExactly: "購入者に表示される内容を正確に確認します。",
-    previewBody: "このプレビューは承認済み候補に固定されています。公開後のアクセスは無料かつ永久です。",
+    previewBody: "このプレビューは承認済み候補に固定されています。公開後は無料で利用できます。",
     previewViewport: "プレビュー表示",
     desktop: "デスクトップ",
     mobile: "モバイル",
@@ -1438,7 +1438,7 @@ const PORTAL_MESSAGES = {
     reviewRevoke: "取り消しを確認",
     noRevokeAvailable: "この注文状態では取り消し操作を利用できません。",
     refundRecorded: "返金リクエストを記録しました。正規の注文状態を更新しています。",
-    permanent: "永久",
+    included: "含まれる",
     metered: "メータリング",
     statusActive: "有効",
     statusCompleted: "完了",

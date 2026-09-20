@@ -13,7 +13,7 @@ const CREATOR_STUDIO_KEYS = [
   "orders",
   "account",
   "creatorHome",
-  "permanentAccess",
+  "accessIncluded",
   "viewAccessRecords",
   "recentActivity",
   "ordersAndAccess",
