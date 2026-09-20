@@ -20,7 +20,10 @@ export class WorkbenchRuntime {
   readonly events = new EventEmitter();
   private active = new Map<string, AbortController>();
   private runs = new Map<string, Promise<void>>();
+  private scribeRuns = new Map<string, Promise<void>>();
+  private scribeControllers = new Set<AbortController>();
   private runIds = new Map<string, string>();
+  private closing = false;
   private readonly env: NodeJS.ProcessEnv;
   constructor(readonly store: WorkbenchStore, private options: WorkbenchRuntimeOptions = {}) {
     this.env = { HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash", ...(options.env ?? process.env) };
@@ -54,43 +57,44 @@ export class WorkbenchRuntime {
     void run.finally(() => { if (this.runs.get(id) === run) this.runs.delete(id); });
   }
   stop(id: string): void { this.active.get(id)?.abort(); }
-  async scribeVoiceEvidence(id: string, evidence: AgentMessage[]): Promise<void> {
+  triggerScribeVoiceEvidence(id: string, evidence: AgentMessage[]): void {
     if (!evidence.length) return;
-    if (this.active.has(id)) throw new Error("This conversation is already running");
+    const previous = this.scribeRuns.get(id) ?? Promise.resolve();
+    const run = previous.catch(() => undefined).then(async () => {
+      if (this.closing) return;
+      await this.runScribeVoiceEvidence(id, evidence);
+    });
+    this.scribeRuns.set(id, run);
+    void run.then(
+      () => { if (this.scribeRuns.get(id) === run) this.scribeRuns.delete(id); },
+      error => {
+        if (this.scribeRuns.get(id) === run) this.scribeRuns.delete(id);
+        if (!this.closing) {
+          const message = safeError(error);
+          void this.store.update(id, state => { state.error = message; }).catch(() => undefined);
+          this.emit(id, "scribe_error", { message });
+        }
+      },
+    );
+  }
+  async close(): Promise<void> {
+    this.closing = true;
+    for (const controller of this.active.values()) controller.abort();
+    for (const controller of this.scribeControllers) controller.abort();
+    await Promise.allSettled([...this.runs.values(), ...this.scribeRuns.values()]);
+  }
+
+  private async runScribeVoiceEvidence(id: string, evidence: AgentMessage[]): Promise<void> {
     const controller = new AbortController();
-    this.active.set(id, controller);
+    this.scribeControllers.add(controller);
     try {
-      await this.store.update(id, state => {
-        if (state.role !== "voice") throw new Error("Voice scribe is only available in the Voice Agent");
-        state.status = "running";
-        state.lastRunAt = new Date().toISOString();
-        delete state.error;
-      });
-      this.emit(id, "state");
       const scribePrompt = await readFile(fileURLToPath(new URL("voice/SCRIBE.md", new URL("../../prompts/factory-agents/", import.meta.url))), "utf8");
       const changed = () => this.emit(id, "files");
       const current = await this.store.get(id);
       await this.run(id, scribePrompt, current.scribeContext ?? [], JSON.stringify({ turn: evidence }, null, 2), fileTools(this.store, id, { changed }), controller, "scribe");
-      await this.store.update(id, state => { state.status = "completed"; });
-    } catch (error) {
-      await this.store.update(id, state => {
-        if (controller.signal.aborted) {
-          state.status = "interrupted";
-          delete state.error;
-        } else {
-          state.status = "failed";
-          state.error = safeError(error);
-        }
-      });
-      if (!controller.signal.aborted) throw error;
     } finally {
-      this.active.delete(id);
-      this.emit(id, "state");
+      this.scribeControllers.delete(controller);
     }
-  }
-  async close(): Promise<void> {
-    for (const controller of this.active.values()) controller.abort();
-    await Promise.allSettled(this.runs.values());
   }
   private async main(id: string, message: string, controller: AbortController): Promise<void> {
     let system = "";
@@ -116,9 +120,8 @@ export class WorkbenchRuntime {
       const visibleMessages = await this.run(id, system, s.context, message, tools, controller);
       if (s.role === "voice" && !controller.signal.aborted && !hasTrailingAskUser(visibleMessages)) {
         const latest = await this.store.get(id);
-        const scribePrompt = await readFile(fileURLToPath(new URL("voice/SCRIBE.md", new URL("../../prompts/factory-agents/", import.meta.url))), "utf8");
         const evidence = latest.messages.slice(messageCount);
-        await this.run(id, scribePrompt, latest.scribeContext ?? [], JSON.stringify({ turn: evidence }, null, 2), fileTools(this.store, id, { changed }), controller, "scribe");
+        this.triggerScribeVoiceEvidence(id, evidence);
       }
       await this.store.update(id, state => { state.status = controller.signal.aborted ? "interrupted" : "completed"; delete state.activeTool; });
       this.emit(id, controller.signal.aborted ? "voice.run_interrupted" : "voice.run_completed", { runId: this.runIds.get(id) });
