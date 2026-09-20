@@ -75,7 +75,20 @@ export class GeminiLiveSession {
   async start(): Promise<void> {
     if (this.session) return;
     this.closed = false;
-    await this.connect();
+    try {
+      await this.connect();
+    } catch (error) {
+      // A resumption handle belongs to the previous Live connection. If it
+      // has expired or been closed by Gemini, retry this start once as a new
+      // session instead of surfacing a false voice-session failure.
+      if (!this.resumptionHandle || this.closed) throw error;
+      this.connectionId += 1;
+      const staleSession = this.session as Session | undefined;
+      staleSession?.close();
+      this.session = undefined;
+      this.resumptionHandle = undefined;
+      await this.connect();
+    }
   }
 
   private async connect(): Promise<void> {
@@ -87,6 +100,9 @@ export class GeminiLiveSession {
       resolveReady = () => { if (!readySettled) { readySettled = true; resolve(); } };
       rejectReady = error => { if (!readySettled) { readySettled = true; reject(error); } };
     });
+    // The SDK can report a close before `live.connect()` returns. Keep the
+    // rejection observed even while the connection promise is being awaited.
+    ready.catch(() => undefined);
     const session = await this.client.live.connect({
       model: this.model,
       config: {
@@ -128,8 +144,15 @@ export class GeminiLiveSession {
         },
         onclose: event => {
           const error = new Error(`Gemini Live closed (${event.code}): ${event.reason || "connection lost"}`);
-          rejectReady(error);
-          if (!this.closed && connectionId === this.connectionId) void this.reconnect(error).catch(() => undefined);
+          if (this.closed || connectionId !== this.connectionId) return;
+          // A connection that never completed setup is an initial-connect
+          // failure. Let `start()` handle it once; reconnecting here races the
+          // original setup promise and can create an unhandled rejection.
+          if (!readySettled) {
+            rejectReady(error);
+            return;
+          }
+          void this.reconnect(error).catch(() => undefined);
         },
       },
     });

@@ -10,7 +10,7 @@ export type Todo = { title: string; status: "pending" | "in_progress" | "complet
 export type FileRecord = { path: string; bytes: number; mimeType: string; origin?: { sessionId: string; path: string }; readonly?: boolean };
 export type Comment = { id: string; path: string; start: number; end: number; quote: string; text: string; replacement?: string; createdAt: string };
 export type FactoryProductScope = { creatorId: string; productId: string; briefSpec?: unknown };
-export type AgentDefinitionSource = { list(): Promise<Array<{ role: Role; systemPrompt: string; tools: string[]; dependencies: { required: Role[]; normal: Role[] } }>> };
+export type AgentDefinitionSource = { list(): Promise<Array<{ role: Role; systemPrompt: string; tools: string[]; dependencies: { required: Role[]; normal: Role[]; updates: Role[] } }>> };
 export type Session = {
   id: string; role: Role; title: string; createdAt: string; updatedAt: string;
   revision: number; turn: number; status: "idle" | "running" | "completed" | "failed" | "interrupted";
@@ -40,7 +40,7 @@ export class WorkbenchStore {
     if (!definition) throw Object.assign(new Error(`Factory Agent definition is missing: ${role}`), { code: "agent_definitions_invalid", status: 503 });
     return definition;
   }
-  async dependencies(role: Role): Promise<{ required: Role[]; normal: Role[] }> {
+  async dependencies(role: Role): Promise<{ required: Role[]; normal: Role[]; updates: Role[] }> {
     return (await this.definition(role)).dependencies;
   }
   private directory(id: string): string {
@@ -94,7 +94,7 @@ export class WorkbenchStore {
     return (await Promise.all(names.map(s => this.get(s)))).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
   private async save(session: Session): Promise<void> { const { todos, ...metadata } = session; await Promise.all([atomicWrite(path.join(this.directory(session.id), "session.json"), JSON.stringify(metadata)), atomicWrite(path.join(this.directory(session.id), "todo.json"), JSON.stringify({ todos }))]); }
-  private async upstream(id: string): Promise<Array<{ role: Role; session: Session }>> { if (!this.definitions) return []; const current = await this.get(id); const dependencies = await this.dependencies(current.role); const allowed = [...dependencies.required, ...dependencies.normal]; const sessions = await this.list(); return allowed.flatMap(role => { const session = sessions.filter(candidate => candidate.role === role && candidate.id !== id).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]; return session ? [{ role, session }] : []; }); }
+  private async upstream(id: string): Promise<Array<{ role: Role; session: Session }>> { if (!this.definitions) return []; const current = await this.get(id); const dependencies = await this.dependencies(current.role); const allowed = [...dependencies.required, ...dependencies.normal, ...dependencies.updates]; const sessions = await this.list(); return allowed.flatMap(role => { const session = sessions.filter(candidate => candidate.role === role && candidate.id !== id).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]; return session ? [{ role, session }] : []; }); }
   async contextFiles(id: string): Promise<FileRecord[]> { const current = await this.get(id); const manual = await this.manualFiles(); const inherited = (await this.upstream(id)).flatMap(({ role, session }) => session.files.filter(file => file.path.startsWith("output/")).map(file => ({ ...file, path: `input/${role}/${file.path.slice(7)}`, origin: { sessionId: session.id, path: file.path }, readonly: true }))); return [...current.files.filter(file => !file.path.startsWith("input/manual/") && !file.path.startsWith("input/handoff/")), ...manual, ...inherited]; }
   async update<T>(id: string, change: (session: Session) => T | Promise<T>): Promise<T> {
     const previous = this.queues.get(id) ?? Promise.resolve();

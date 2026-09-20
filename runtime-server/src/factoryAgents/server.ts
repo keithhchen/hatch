@@ -128,6 +128,9 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
             const session = await store.get(id);
             const evidence = session.messages.slice(liveStartCounts.get(id) ?? session.messages.length);
             liveStartCounts.delete(id);
+            // A cleanly stopped Live session must not seed the next start with
+            // a handle that belongs to the previous connection.
+            await store.update(id, state => { delete state.voiceLive; });
             if (evidence.length) await runtime.scribeVoiceEvidence(id, evidence);
             else { await store.update(id, state => { state.status = "completed"; }); runtime.emit(id, "state"); }
           },

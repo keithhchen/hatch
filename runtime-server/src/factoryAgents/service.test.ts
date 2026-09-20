@@ -45,8 +45,8 @@ test("Factory workspaces are partitioned by authenticated Creator and existing P
     assert.ok(navigation.agents.every(agent => agent.availability));
     assert.ok(navigation.agents.every(agent => !("systemPrompt" in agent) && !("tools" in agent)));
     const changedDefinitions = await initialAgentDefinitions();
-    changedDefinitions.find(definition => definition.role === "research")!.dependencies = { required: ["voice"], normal: [] };
-    changedDefinitions.find(definition => definition.role === "voice")!.dependencies = { required: [], normal: [] };
+  changedDefinitions.find(definition => definition.role === "research")!.dependencies = { required: ["voice"], normal: [], updates: [] };
+  changedDefinitions.find(definition => definition.role === "voice")!.dependencies = { required: [], normal: [], updates: [] };
     definitions.replace(changedDefinitions);
     const lockedMessage = await call("creator-a", PRODUCT_B, `sessions/${b.id}/message`, "POST", { content: "must be rejected before Runtime" });
     assert.equal(lockedMessage.status, 409);

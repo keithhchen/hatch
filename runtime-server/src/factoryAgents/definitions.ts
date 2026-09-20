@@ -14,15 +14,16 @@ const definitionSchema = z.object({
   hint: localizedSchema,
   systemPrompt: z.string().min(100),
   tools: z.array(toolSchema).min(1),
-  dependencies: z.object({ required: z.array(roleSchema), normal: z.array(roleSchema) }).strict(),
+  dependencies: z.object({ required: z.array(roleSchema), normal: z.array(roleSchema), updates: z.array(roleSchema).default([]) }).strict(),
 }).strict();
 const definitionsSchema = z.array(definitionSchema).length(ROLES.length).superRefine((definitions, context) => {
   if (new Set(definitions.map(item => item.role)).size !== ROLES.length) context.addIssue({ code: "custom", message: "Every Factory Agent role must be defined exactly once" });
   if (new Set(definitions.map(item => item.order)).size !== definitions.length) context.addIssue({ code: "custom", message: "Factory Agent order values must be unique" });
   for (const definition of definitions) {
     const dependencies = [...definition.dependencies.required, ...definition.dependencies.normal];
-    if (dependencies.includes(definition.role)) context.addIssue({ code: "custom", message: `${definition.role} cannot depend on itself` });
-    if (new Set(dependencies).size !== dependencies.length) context.addIssue({ code: "custom", message: `${definition.role} dependencies must not repeat` });
+    const updateDependencies = definition.dependencies.updates;
+    if ([...dependencies, ...updateDependencies].includes(definition.role)) context.addIssue({ code: "custom", message: `${definition.role} cannot depend on itself` });
+    if (new Set([...dependencies, ...updateDependencies]).size !== dependencies.length + updateDependencies.length) context.addIssue({ code: "custom", message: `${definition.role} dependencies must not repeat` });
     if (new Set(definition.tools).size !== definition.tools.length) context.addIssue({ code: "custom", message: `${definition.role} tools must not repeat` });
   }
   const reachable = new Set<Role>();
@@ -96,6 +97,7 @@ export class PostgresAgentDefinitionRepository implements AgentDefinitionReposit
     if (count === 0) await repository.bootstrap();
     else {
       await repository.migrateLegacyDependencyGraph();
+      await repository.migrateUpdateDependencies();
       await repository.migrateTemporaryYoutubeTranscriptDisable();
     }
     await repository.list();
@@ -145,24 +147,32 @@ export class PostgresAgentDefinitionRepository implements AgentDefinitionReposit
   }
   private async migrateLegacyDependencyGraph(): Promise<void> {
     const definitions = await this.list();
-    const legacy: Record<Role, { required: Role[]; normal: Role[] }> = {
-      research: { required: [], normal: [] },
-      voice: { required: ["research"], normal: [] },
-      generation: { required: ["research"], normal: ["voice", "evaluator"] },
-      "case-generation": { required: ["generation"], normal: [] },
-      evaluator: { required: ["generation", "case-generation"], normal: [] },
+    const legacy: Record<Role, { required: Role[]; normal: Role[]; updates: Role[] }> = {
+      research: { required: [], normal: [], updates: [] },
+      voice: { required: ["research"], normal: [], updates: [] },
+      generation: { required: ["research"], normal: ["voice", "evaluator"], updates: [] },
+      "case-generation": { required: ["generation"], normal: [], updates: [] },
+      evaluator: { required: ["generation", "case-generation"], normal: [], updates: [] },
     };
     const matchesLegacy = definitions.every(definition => JSON.stringify(definition.dependencies) === JSON.stringify(legacy[definition.role]));
     if (!matchesLegacy) return;
     const next = definitions.map(definition => ({
       ...definition,
       dependencies: definition.role === "generation"
-        ? { required: [] as Role[], normal: ["research", "voice"] as Role[] }
+        ? { required: [] as Role[], normal: ["research", "voice"] as Role[], updates: ["evaluator"] as Role[] }
         : definition.role === "voice"
-          ? { required: [] as Role[], normal: [] as Role[] }
+          ? { required: [] as Role[], normal: [] as Role[], updates: [] as Role[] }
           : definition.dependencies,
     }));
     await this.replace(next);
+  }
+  private async migrateUpdateDependencies(): Promise<void> {
+    const definitions = await this.list();
+    const generation = definitions.find(definition => definition.role === "generation");
+    if (!generation || generation.dependencies.updates.includes("evaluator")) return;
+    await this.replace(definitions.map(definition => definition.role === "generation"
+      ? { ...definition, dependencies: { ...definition.dependencies, updates: ["evaluator"] as Role[] } }
+      : definition));
   }
   private async migrateTemporaryYoutubeTranscriptDisable(): Promise<void> {
     const current = await this.read();
@@ -183,11 +193,11 @@ export async function initialAgentDefinitions(): Promise<AgentDefinition[]> {
   const common = await readFile(fileURLToPath(new URL("COMMON.md", promptRoot)), "utf8");
   const askUserGuidance = await readFile(fileURLToPath(new URL("ASKUSER.md", promptRoot)), "utf8");
   const seed = [
-    { role: "research", order: 1, name: { en: "Deep Research", zh: "深度研究", ja: "深掘り調査" }, hint: { en: "Find primary evidence and reconstruct the Creator as a whole person.", zh: "寻找一手证据，还原一个有血有肉的 Creator。", ja: "一次情報から、Creator という人物全体を立体的に捉えます。" }, tools: ["update_todo", "list", "read", "write", "web_search", "web_scrape"], dependencies: { required: [], normal: [] } },
-    { role: "voice", order: 2, name: { en: "Voice Interview", zh: "语音访谈", ja: "音声インタビュー" }, hint: { en: "Draw out stories and tacit judgment in a natural conversation.", zh: "用自然对话挖出经历、故事和隐性判断。", ja: "自然な対話から経験、物語、暗黙の判断を引き出します。" }, tools: ["update_todo", "list", "read", "write", "web_search", "web_scrape"], dependencies: { required: [], normal: [] } },
-    { role: "generation", order: 3, name: { en: "Agent Builder", zh: "Agent 构建", ja: "Agent 構築" }, hint: { en: "Turn the Creator's identity and judgment into an executable expert Agent.", zh: "把 Creator 的人格与判断变成可执行的专家 Agent。", ja: "Creator の人格と判断を、実行可能な専門 Agent に変えます。" }, tools: ["update_todo", "list", "read", "write", "corpus_upload"], dependencies: { required: [], normal: ["research", "voice"] } },
-    { role: "case-generation", order: 4, name: { en: "Case Builder", zh: "案例构建", ja: "ケース構築" }, hint: { en: "Build one realistic client situation that demands expert judgment.", zh: "构造一个真正需要专家判断的现实客户情境。", ja: "専門家の判断が本当に必要な顧客状況を構築します。" }, tools: ["update_todo", "list", "read", "write"], dependencies: { required: ["generation"], normal: [] } },
-    { role: "evaluator", order: 5, name: { en: "Evaluator", zh: "效果评估", ja: "効果評価" }, hint: { en: "Run this Product and judge what its result truly gets right and wrong.", zh: "运行当前 Product，判断结果真正做对和做错了什么。", ja: "現在の Product を実行し、結果の本質的な良し悪しを評価します。" }, tools: ["update_todo", "list", "read", "write", "hatch_tool"], dependencies: { required: ["generation", "case-generation"], normal: [] } },
+    { role: "research", order: 1, name: { en: "Deep Research", zh: "深度研究", ja: "深掘り調査" }, hint: { en: "Find primary evidence and reconstruct the Creator as a whole person.", zh: "寻找一手证据，还原一个有血有肉的 Creator。", ja: "一次情報から、Creator という人物全体を立体的に捉えます。" }, tools: ["update_todo", "list", "read", "write", "web_search", "web_scrape"], dependencies: { required: [], normal: [], updates: [] } },
+    { role: "voice", order: 2, name: { en: "Voice Interview", zh: "语音访谈", ja: "音声インタビュー" }, hint: { en: "Draw out stories and tacit judgment in a natural conversation.", zh: "用自然对话挖出经历、故事和隐性判断。", ja: "自然な対話から経験、物語、暗黙の判断を引き出します。" }, tools: ["update_todo", "list", "read", "write", "web_search", "web_scrape"], dependencies: { required: [], normal: [], updates: [] } },
+    { role: "generation", order: 3, name: { en: "Agent Builder", zh: "Agent 构建", ja: "Agent 構築" }, hint: { en: "Turn the Creator's identity and judgment into an executable expert Agent.", zh: "把 Creator 的人格与判断变成可执行的专家 Agent。", ja: "Creator の人格と判断を、実行可能な専門 Agent に変えます。" }, tools: ["update_todo", "list", "read", "write", "corpus_upload"], dependencies: { required: [], normal: ["research", "voice"], updates: ["evaluator"] } },
+    { role: "case-generation", order: 4, name: { en: "Case Builder", zh: "案例构建", ja: "ケース構築" }, hint: { en: "Build one realistic client situation that demands expert judgment.", zh: "构造一个真正需要专家判断的现实客户情境。", ja: "専門家の判断が本当に必要な顧客状況を構築します。" }, tools: ["update_todo", "list", "read", "write"], dependencies: { required: ["generation"], normal: [], updates: [] } },
+    { role: "evaluator", order: 5, name: { en: "Evaluator", zh: "效果评估", ja: "効果評価" }, hint: { en: "Run this Product and judge what its result truly gets right and wrong.", zh: "运行当前 Product，判断结果真正做对和做错了什么。", ja: "現在の Product を実行し、結果の本質的な良し悪しを評価します。" }, tools: ["update_todo", "list", "read", "write", "hatch_tool"], dependencies: { required: ["generation", "case-generation"], normal: [], updates: [] } },
   ] as const;
   return validateDefinitions(await Promise.all(seed.map(async definition => ({
     ...definition,
@@ -210,7 +220,7 @@ export function agentEntries(definitions: AgentDefinition[], sessions: Session[]
     const missingRequired = definition.dependencies.required.filter(dependency => !hasOutput(byRole.get(dependency)));
     const normalRequired = definition.dependencies.normal.length > 0;
     const normalSatisfied = !normalRequired || definition.dependencies.normal.some(dependency => hasOutput(byRole.get(dependency)));
-    const dependencies = [...definition.dependencies.required, ...definition.dependencies.normal];
+    const dependencies = [...definition.dependencies.required, ...definition.dependencies.normal, ...definition.dependencies.updates];
     const changedDependencies = session?.outputUpdatedAt ? dependencies.filter(dependency => {
       const updatedAt = byRole.get(dependency)?.outputUpdatedAt;
       return Boolean(updatedAt && updatedAt > session.outputUpdatedAt!);

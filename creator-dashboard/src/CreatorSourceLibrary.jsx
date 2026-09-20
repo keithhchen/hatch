@@ -120,14 +120,14 @@ export function CreatorProductFiles({ token, productId, navigate, locale = "en" 
   }
 
   if (!productId) {
-    return <section className="cpv2-card cpv2-panel cpv2-source-library">
+    return <section className="cpv2-source-library">
       <BackToProducts navigate={navigate} t={t} />
       <PageHeader label={t("createProduct")} title={t("startProductTitle")} body={t("startProductBody")} />
       {error ? <InlineAlert tone="error" title={t("productCouldNotBeCreated")}>{error}</InlineAlert> : null}
       <div className="cpv2-create-product-layout">
         <form onSubmit={create} className="cpv2-source-product-form">
-          <FormField label={t("productName")} required hint={t("productNameHint")}><Input required value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder={t("productNameExample")} /></FormField>
-          <FormField label={t("whatProductDelivers")} required><Textarea required value={draft.promise} onChange={(event) => setDraft((current) => ({ ...current, promise: event.target.value }))} placeholder={t("describeResult")} /></FormField>
+          <FormField label={t("productName")}><Input required value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder={t("productNameExample")} /></FormField>
+          <FormField label={t("whatProductDelivers")}><Textarea required value={draft.promise} onChange={(event) => setDraft((current) => ({ ...current, promise: event.target.value }))} placeholder={t("describeResult")} /></FormField>
           <Button type="submit" loading={busy}>{t("createProduct")}</Button>
         </form>
         <FactoryBuildPath t={t} />

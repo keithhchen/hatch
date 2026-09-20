@@ -18,15 +18,19 @@ test("Agent dependency state uses output timestamps, not run timestamps", async 
   assert.deepEqual(entries.find(entry => entry.role === "generation")?.availability, {
     missingRequired: [], normal: { required: true, satisfied: false }
   });
-  assert.deepEqual(entries.find(entry => entry.role === "generation")?.dependencies, { required: [], normal: ["research", "voice"] });
+  assert.deepEqual(entries.find(entry => entry.role === "generation")?.dependencies, { required: [], normal: ["research", "voice"], updates: ["evaluator"] });
 
   const research = session("research", { outputUpdatedAt: "2026-09-10T01:00:00.000Z", lastRunAt: "2026-09-10T00:30:00.000Z" });
   const voice = session("voice", { outputUpdatedAt: "2026-09-10T02:00:00.000Z", lastRunAt: "2026-09-10T01:30:00.000Z" });
   const generation = session("generation", { outputUpdatedAt: "2026-09-10T02:30:00.000Z", lastRunAt: "2026-09-10T02:15:00.000Z" });
+  const evaluator = session("evaluator", { outputUpdatedAt: "2026-09-10T03:00:00.000Z", lastRunAt: "2026-09-10T02:45:00.000Z" });
   assert.equal(agentEntries(definitions, [research]).find(entry => entry.role === "generation")?.state, "ready");
   assert.equal(agentEntries(definitions, [voice]).find(entry => entry.role === "generation")?.state, "ready");
   entries = agentEntries(definitions, [research, voice, generation]);
   assert.equal(entries.find(entry => entry.role === "generation")?.state, "complete");
+  entries = agentEntries(definitions, [research, voice, generation, evaluator]);
+  assert.equal(entries.find(entry => entry.role === "generation")?.state, "update_available");
+  assert.deepEqual(entries.find(entry => entry.role === "generation")?.availability, { missingRequired: [], normal: { required: true, satisfied: true } });
 
   voice.outputUpdatedAt = "2026-09-10T03:00:00.000Z";
   entries = agentEntries(definitions, [research, voice, generation]);
@@ -75,16 +79,16 @@ test("database cold start seeds atomically, then the database remains the only a
   assert.deepEqual((await repository.list()).find(row => row.role === "voice")?.dependencies.required, []);
   await assert.rejects(repository.replace(replacement.slice(0, 4)));
   await assert.rejects(repository.replace(replacement.map((row, index) => ({ ...row, order: index === 1 ? replacement[0]!.order : row.order }))));
-  await assert.rejects(repository.replace(replacement.map(row => row.role === "research" ? { ...row, dependencies: { required: ["research"], normal: [] } } : row)));
+  await assert.rejects(repository.replace(replacement.map(row => row.role === "research" ? { ...row, dependencies: { required: ["research"], normal: [], updates: [] } } : row)));
   assert.equal((await repository.list()).length, 5);
 
   const legacy = await initialAgentDefinitions();
-  legacy.find(row => row.role === "voice")!.dependencies = { required: ["research"], normal: [] };
-  legacy.find(row => row.role === "generation")!.dependencies = { required: ["research"], normal: ["voice", "evaluator"] };
+  legacy.find(row => row.role === "voice")!.dependencies = { required: ["research"], normal: [], updates: [] };
+  legacy.find(row => row.role === "generation")!.dependencies = { required: ["research"], normal: ["voice", "evaluator"], updates: [] };
   rows.splice(0, rows.length, ...legacy.map(definition => ({ role: definition.role, definition: structuredClone(definition) })));
   const migrated = await PostgresAgentDefinitionRepository.open(pool);
-  assert.deepEqual((await migrated.list()).find(row => row.role === "voice")?.dependencies, { required: [], normal: [] });
-  assert.deepEqual((await migrated.list()).find(row => row.role === "generation")?.dependencies, { required: [], normal: ["research", "voice"] });
+  assert.deepEqual((await migrated.list()).find(row => row.role === "voice")?.dependencies, { required: [], normal: [], updates: [] });
+  assert.deepEqual((await migrated.list()).find(row => row.role === "generation")?.dependencies, { required: [], normal: ["research", "voice"], updates: ["evaluator"] });
   const customHint = { en: "Custom English", zh: "自定义中文", ja: "カスタム" };
   (rows.find(row => row.role === "research")!.definition as { hint?: unknown }).hint = customHint;
   assert.deepEqual((await (await PostgresAgentDefinitionRepository.open(pool)).list()).find(item => item.role === "research")?.hint, customHint);

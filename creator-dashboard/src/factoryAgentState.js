@@ -25,7 +25,7 @@ export function agentStateKey(agent) {
 export function changedDependencies(agent, agents = []) {
   if (!agent?.outputUpdatedAt) return [];
   const byRole = new Map(agents.map(candidate => [candidate.role, candidate]));
-  const roles = [...(agent.dependencies?.required || []), ...(agent.dependencies?.normal || [])];
+  const roles = [...(agent.dependencies?.required || []), ...(agent.dependencies?.normal || []), ...(agent.dependencies?.updates || [])];
   return unique(roles).filter(role => {
     const dependency = byRole.get(role);
     return Boolean(dependency?.outputUpdatedAt && dependency.outputUpdatedAt > agent.outputUpdatedAt);

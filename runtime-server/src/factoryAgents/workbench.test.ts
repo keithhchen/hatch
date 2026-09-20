@@ -144,7 +144,7 @@ test("declared upstream outputs are live read-only inputs without copying files"
     await store.put(voice.id, "output/VOICE.md", Buffer.from("# Live voice\n"), { actor: "agent" });
     await store.put(evaluator.id, "output/EVALUATION.md", Buffer.from("# Live evaluation\n"), { actor: "agent" });
     await store.put(generation.id, "input/manual/brief.md", Buffer.from("# Shared manual\n"), { actor: "user" });
-    assert.deepEqual((await store.contextFiles(generation.id)).map(file => file.path).sort(), ["input/manual/brief.md", "input/research/RESEARCH.md", "input/voice/CREATOR_PERSONA.md", "input/voice/VOICE.md"]);
+    assert.deepEqual((await store.contextFiles(generation.id)).map(file => file.path).sort(), ["input/evaluator/EVALUATION.md", "input/manual/brief.md", "input/research/RESEARCH.md", "input/voice/CREATOR_PERSONA.md", "input/voice/VOICE.md"]);
     assert.equal((await store.read(generation.id, "input/research/RESEARCH.md")).bytes.toString(), "# Live research\n");
     await store.put(research.id, "output/RESEARCH.md", Buffer.from("# Updated live research\n"), { actor: "agent" });
     assert.equal((await store.read(generation.id, "input/research/RESEARCH.md")).bytes.toString(), "# Updated live research\n");

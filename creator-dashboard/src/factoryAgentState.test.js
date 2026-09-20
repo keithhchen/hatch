@@ -24,13 +24,14 @@ test('database Agent copy uses current locale and falls back only to English', (
 });
 
 test('dependency badges are derived separately from upstream output timestamps', () => {
-  const generation = { role: 'generation', outputUpdatedAt: '2026-09-10T03:00:00.000Z', dependencies: { required: [], normal: ['research', 'voice'] } };
+  const generation = { role: 'generation', outputUpdatedAt: '2026-09-10T03:00:00.000Z', dependencies: { required: [], normal: ['research', 'voice'], updates: ['evaluator'] } };
   const agents = [
     { role: 'research', outputUpdatedAt: '2026-09-10T04:00:00.000Z' },
     { role: 'voice', outputUpdatedAt: '2026-09-10T05:00:00.000Z' },
+    { role: 'evaluator', outputUpdatedAt: '2026-09-10T06:00:00.000Z' },
     generation,
   ];
-  assert.deepEqual(changedDependencies(generation, agents), ['research', 'voice']);
-  generation.outputUpdatedAt = '2026-09-10T06:00:00.000Z';
+  assert.deepEqual(changedDependencies(generation, agents), ['research', 'voice', 'evaluator']);
+  generation.outputUpdatedAt = '2026-09-10T07:00:00.000Z';
   assert.deepEqual(changedDependencies(generation, agents), []);
 });

@@ -3,14 +3,14 @@ import { createRoot } from "react-dom/client";
 import "@hatch/ui/fonts";
 import "@hatch/ui/theme.css";
 import { Button, HatchBrand, HatchUIProvider, UnavailableState } from "@hatch/ui";
-import { BuyerPortalV2 } from "./BuyerPortalV2.jsx";
-import { CreatorPortalV2 } from "./CreatorPortalV2.jsx";
-import { DownloadPage } from "./DownloadPage.jsx";
 import { LocaleProvider } from "./locale.jsx";
 import { dashboardRequest } from "./data.js";
 import "./styles.css";
 
 const CREATOR_ROOT = "/studio";
+const BuyerPortalV2 = React.lazy(() => import("./BuyerPortalV2.jsx").then(({ BuyerPortalV2: Component }) => ({ default: Component })));
+const CreatorPortalV2 = React.lazy(() => import("./CreatorPortalV2.jsx").then(({ CreatorPortalV2: Component }) => ({ default: Component })));
+const DownloadPage = React.lazy(() => import("./DownloadPage.jsx").then(({ DownloadPage: Component }) => ({ default: Component })));
 const WebPage = React.lazy(() => import("./web/WebPage.jsx"));
 
 class AppErrorBoundary extends React.Component {
@@ -140,7 +140,9 @@ function App() {
   // legacy paths must remain 404 so stale links cannot silently target a
   // different resource.
 
-  if (isDownloadRoute) return <DownloadPage />;
+  if (isDownloadRoute) {
+    return <Suspense fallback={<AppLoading />}><DownloadPage /></Suspense>;
+  }
 
   if (isWebRoute) {
     return (
@@ -163,27 +165,31 @@ function App() {
       }} />;
     }
     return (
-      <CreatorPortalV2
-        pathname={location.pathname}
-        navigate={location.navigate}
-        request={dashboardRequest}
-        profile={profile}
-        onLogout={async () => {
-          await signOut();
-          location.navigate("/explore", { replace: true });
-        }}
-      />
+      <Suspense fallback={<AppLoading />}>
+        <CreatorPortalV2
+          pathname={location.pathname}
+          navigate={location.navigate}
+          request={dashboardRequest}
+          profile={profile}
+          onLogout={async () => {
+            await signOut();
+            location.navigate("/explore", { replace: true });
+          }}
+        />
+      </Suspense>
     );
   }
 
   return (
-    <BuyerPortalV2
-      pathname={location.pathname}
-      search={location.search}
-      navigate={location.navigate}
-      request={dashboardRequest}
-      session={buyerSession}
-    />
+    <Suspense fallback={<AppLoading />}>
+      <BuyerPortalV2
+        pathname={location.pathname}
+        search={location.search}
+        navigate={location.navigate}
+        request={dashboardRequest}
+        session={buyerSession}
+      />
+    </Suspense>
   );
 }
 

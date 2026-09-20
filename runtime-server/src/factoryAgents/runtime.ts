@@ -29,7 +29,7 @@ export class WorkbenchRuntime {
   async prompt(role: Role, snapshot?: Awaited<ReturnType<AgentDefinitionSource["list"]>>[number]): Promise<string> {
     const definition = snapshot ?? await this.store.definition(role);
     const dependencies = definition.dependencies;
-    const folders = ["input/manual", ...[...dependencies.required, ...dependencies.normal].map(source => `input/${source}`)];
+    const folders = ["input/manual", ...[...dependencies.required, ...dependencies.normal, ...dependencies.updates].map(source => `input/${source}`)];
     const interaction = role === "voice"
       ? "# 对话方式\n\n这是连续的语音访谈。通过自然的语音对话逐步追问缺失事实、具体故事和判断依据，不暂停等待结构化问答。"
       : `# 向用户提问\n\n你可以使用 askuser，但通常只在缺少的信息或选择会实质改变当前工作、且无法从已有输入得到时使用。${role === "evaluator" ? "完成一轮真实模拟后，按照 Evaluator 的角色指令用一次 askuser，请 Creator 一起看几处真正需要他拿捏的细节；这不是例行确认。" : ""}一次只调用一个 askuser，把相关问题合并到 questions 数组；如果提供 options，每个 option 必须是只有一个单行 \`content\` 字段的对象；选项之外用户界面总会提供自由回答框。调用后本轮立即结束，不要继续调用工具或写成果；用户下一条普通消息就是回答。不要用它做进度汇报或把内部标准交给用户决定。`;
