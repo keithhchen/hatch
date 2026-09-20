@@ -141,7 +141,7 @@ test('Factory uses live dependency state at each interaction boundary', async ()
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   assert.match(source, /changedDependencies\(entry, agents\)/);
   assert.match(source, /const updatedDependencies = entry\?\.state === "update_available" \? changedDependencies\(entry, agents\) : \[\]/);
-  assert.match(source, /updatedDependencies\.length > 0 && <Button[^>]*onClick=\{onUseLatest\}/);
+  assert.match(source, /updatedDependencies\.length > 0 && <Button[^>]*variant="contained"[^>]*color="primary"[^>]*onClick=\{onUseLatest\}/);
   assert.match(source, /const composerDisabled = locked \|\| busy \|\| Boolean\(pendingAskUser\) \|\| !config\?\.services\.model/);
   assert.match(source, /<ChatComposer disabled=\{composerDisabled\}/);
   assert.match(source, /const targetStage = factorySectionForAgent\(role\)/);

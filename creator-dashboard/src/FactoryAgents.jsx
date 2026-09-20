@@ -209,7 +209,7 @@ function ChatPanel({ session, entry, agents, root, id, config, busy, draft, setD
     <Stack className="factory-composer-toolbar" direction="row" spacing={1} alignItems="center" sx={{ px: 1.5, pb: 1 }}>
       <StartAgentButton role={session.role} draft={draft} setDraft={setDraft} composer={composer} disabled={composerDisabled || running} t={t} />
       {session.role === "voice" && <VoiceControls root={root} id={id} enabled={!locked && config?.services.voice} handler={voiceHandler} onSpeaking={setSpeaking} onError={setError} t={t} />}
-      {updatedDependencies.length > 0 && <Button size="small" variant="outlined" disabled={busy} onClick={onUseLatest} sx={{ ml: "auto", maxWidth: "100%", whiteSpace: "normal", textAlign: "left" }}>{`${updatedDependencies.map(role => t("dependencyUpdated", agentName(role))).join(" · ")} · ${t("improveWithLatest")}`}</Button>}
+      {updatedDependencies.length > 0 && <Button size="small" variant="contained" color="primary" disabled={busy} onClick={onUseLatest} sx={{ ml: "auto", maxWidth: "100%", whiteSpace: "normal", textAlign: "left" }}>{`${updatedDependencies.map(role => t("dependencyUpdated", agentName(role))).join(" · ")} · ${t("improveWithLatest")}`}</Button>}
     </Stack>
     <Box className="factory-chat-composer" sx={{ p: 1.5, borderTop: 1, borderColor: "divider" }}>
       <ChatProvider adapter={composerAdapter} composerValue={draft} onComposerValueChange={setDraft}>
