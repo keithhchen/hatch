@@ -40,7 +40,7 @@ export class QwenStreamingStt implements StreamingSttProvider {
     this.model = options.environment.HATCH_FACTORY_QWEN_STT_MODEL?.trim() || "qwen-audio-3.0-asr-flash-streaming";
     this.apiKey = options.environment.DASHSCOPE_API_KEY?.trim() || "";
     this.endpoint = options.environment.HATCH_FACTORY_QWEN_STT_URL?.trim() || "wss://dashscope.aliyuncs.com/api-ws/v1/inference";
-    this.maxSentenceSilence = parsePositiveInteger(options.environment.HATCH_FACTORY_QWEN_STT_MAX_SENTENCE_SILENCE_MS, 2500);
+    this.maxSentenceSilence = parsePositiveInteger(options.environment.HATCH_FACTORY_VOICE_PAUSE_MS, 2500);
     this.callbacks = options;
   }
 

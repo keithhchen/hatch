@@ -21,7 +21,7 @@ test("Factory STT exposes the sentence pause as an environment setting", () => {
     ...callbacks,
     environment: {
       DASHSCOPE_API_KEY: "test-key",
-      HATCH_FACTORY_QWEN_STT_MAX_SENTENCE_SILENCE_MS: "3200"
+      HATCH_FACTORY_VOICE_PAUSE_MS: "3200"
     }
   });
   const command = qwenStartTask("00000000-0000-4000-8000-000000000000", provider.model, 3200);
