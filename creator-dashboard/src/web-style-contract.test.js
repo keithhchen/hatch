@@ -64,6 +64,15 @@ test("Web eyebrow labels stay visible despite the shared global eyebrow rule", (
   assert.match(styles, /\.site \.eyebrow\s*\{[\s\S]*?display:\s*block;/);
 });
 
+test("Auth language switcher lives in the auth navbar", () => {
+  const styles = read("creator-dashboard/src/buyerPortalV2.css");
+  const page = read("creator-dashboard/src/BuyerPortalV2.jsx");
+
+  assert.match(page, /buyer-v2__auth-navbar[\s\S]*?LanguageSwitcher className="buyer-v2__auth-language"/);
+  assert.match(styles, /\.buyer-v2__auth-navbar\s*\{[\s\S]*?grid-area:\s*navbar;[\s\S]*?justify-content:\s*space-between;/);
+  assert.match(styles, /grid-template-areas:\s*"navbar navbar"\s*"context form";/);
+});
+
 test("Web home keeps the public narrative sections and real CTAs", () => {
   const page = read("creator-dashboard/src/web/HatchPage.tsx");
   const styles = read("creator-dashboard/src/web/web.css");

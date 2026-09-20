@@ -513,8 +513,11 @@ function AuthPage({mode, search, request, navigate, session }) {
 
   return (
     <main className="buyer-v2 buyer-v2__auth-page">
-      <section className="buyer-v2__auth-context">
+      <header className="buyer-v2__auth-navbar">
         <HatchBrand as={RouterLink} className={authBrandClassName} to={EXPLORE_ROOT} navigate={navigate} aria-label="Hatch home" />
+        <LanguageSwitcher className="buyer-v2__auth-language" />
+      </header>
+      <section className="buyer-v2__auth-context">
         <div>
           <span className="buyer-v2__eyebrow">{t('Continue your task')}</span>
           {productIntent && intent.status === "loading" ? <div className="buyer-v2__auth-intent-skeleton" aria-label={t("Loading Product")} /> : null}
@@ -523,7 +526,6 @@ function AuthPage({mode, search, request, navigate, session }) {
         </div>
       </section>
       <section className="buyer-v2__auth-form-panel">
-        <LanguageSwitcher className="buyer-v2__auth-language" />
         <form className="buyer-v2__auth-form" onSubmit={submit}>
           <span className="buyer-v2__eyebrow">{creatorIntent ? t("Creator account") : t("Hatch account")}</span>
           <h2>{signingUp ? (creatorIntent ? t("Create your Creator account") : t("Create your account")) : t("Sign in to Hatch")}</h2>
