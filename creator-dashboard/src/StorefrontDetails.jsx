@@ -31,8 +31,7 @@ export function StorefrontDetails({
           {model.promise ? <p>{model.promise}</p> : null}
           {releaseLabel ? <small>{releaseLabel}</small> : null}
         </div>
-        <aside className="storefront-shared__access" aria-label={mode === "preview" ? "Preview access" : "Product access"}>
-          <span>{mode === "preview" ? "Preview" : "Access"}</span>
+        <aside className="storefront-shared__access" aria-label={mode === "preview" ? "Preview offer" : "Product offer"}>
           <strong>Free</strong>
           {action}
         </aside>

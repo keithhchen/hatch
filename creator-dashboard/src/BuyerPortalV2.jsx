@@ -292,7 +292,7 @@ function CatalogCard({product, navigate }) {
       <h2>{productName(product)}</h2>
       <p>{productPromise(product)}</p>
       <div className="buyer-v2__card-footer">
-        <div><strong>{accessStatus(access) === "active" ? t("In your library") : product.availability === "published" ? t("Free") : t("Unavailable")}</strong><span>{product.availability === "published" ? t("Access included") : t("Not available")}</span></div>
+        <div><strong>{accessStatus(access) === "active" ? t("In your library") : product.availability === "published" ? t("Free") : t("Unavailable")}</strong></div>
         <LinkButton variant="secondary" to={path} navigate={navigate}>{t('View details')}</LinkButton>
       </div>
     </article>
@@ -336,7 +336,7 @@ function ProductPage({route, request, navigate, session, downloadUrl }) {
         <span className="buyer-v2__eyebrow">{t('How it works')}</span>
         <h2>{t('From access to useful work.')}</h2>
         <ol className="buyer-v2__steps">
-          <li><span>1</span><div><strong>{t('Add the Agent')}</strong><p>{t('Confirm access to this Product.')}</p></div></li>
+          <li><span>1</span><div><strong>{t('Add the Agent')}</strong></div></li>
           <li><span>2</span><div><strong>{t('Open Hatch Desktop')}</strong><p>{t('Sign in with the same account and choose a local Workspace.')}</p></div></li>
           <li><span>3</span><div><strong>{t('Work with the Agent')}</strong><p>{t('Use the method as often as you need in your own Workspace.')}</p></div></li>
         </ol>
@@ -414,8 +414,7 @@ function ProductAction({product, currentPath, request, navigate, session, downlo
   );
   if (embedded) return <div className="buyer-v2__storefront-action">{contents}</div>;
   return (
-    <aside className="buyer-v2__action-card" aria-label="Product access">
-      <span className="buyer-v2__eyebrow">{t('Access')}</span>
+    <aside className="buyer-v2__action-card" aria-label="Product action">
       <div className="buyer-v2__price"><strong>{t('Free')}</strong></div>
       {contents}
     </aside>
@@ -521,7 +520,7 @@ function AuthPage({mode, search, request, navigate, session }) {
         <div>
           <span className="buyer-v2__eyebrow">{t('Continue your task')}</span>
           {productIntent && intent.status === "loading" ? <div className="buyer-v2__auth-intent-skeleton" aria-label={t("Loading Product")} /> : null}
-          {productIntent && intent.status === "ready" ? <><h1>{productName(intent.data)}</h1><p>{productPromise(intent.data)}</p><strong>{t('Access included')}</strong><small>{creatorName(intent.data)}</small></> : null}
+          {productIntent && intent.status === "ready" ? <><h1>{productName(intent.data)}</h1><p>{productPromise(intent.data)}</p><small>{creatorName(intent.data)}</small></> : null}
           {!productIntent ? <><h1>{t('Your method, made useful.')}</h1><p>{t('Turn the way you think into an agent people can use.')}</p></> : null}
         </div>
       </section>
@@ -612,19 +611,18 @@ function CheckoutPage({id, request, navigate, session }) {
   return (
     <div className="buyer-v2__container buyer-v2__page buyer-v2__checkout-page">
       <RouterLink className="buyer-v2__back-link" to={productPath(product)} navigate={navigate}>{t('← Back to product')}</RouterLink>
-      <header className="buyer-v2__page-heading"><span className="buyer-v2__eyebrow">{t('Access included')}</span><h1>{t('Confirm this Product.')}</h1><p>{t('Your access is pinned to the Product release shown here.')}</p></header>
+      <header className="buyer-v2__page-heading"><h1>{t('Confirm this Product.')}</h1><p>{t('The approved release is shown here.')}</p></header>
       <div className="buyer-v2__checkout-grid">
         <section className="buyer-v2__receipt-card">
           <div className="buyer-v2__receipt-product"><span>{creatorName(checkout.creator || product)}</span><h2>{productName(product)}</h2><p>{productPromise(product)}</p></div>
           <DefinitionList rows={[
             [t("Release"), checkout.release_label || checkout.release_snapshot?.label || product.release_label || "Current approved release"],
-            [t("Access"), t("Access included")],
             [t("Payment"), "Not required"]
           ]} />
         </section>
         <CheckoutSummary
           product={{ ...product, name: productName(product), currency: "USD" }}
-          lineItems={[{ label: t("Access included"), detail: checkout.release_label || checkout.release_snapshot?.label || product.release_label || t("Current approved release"), amount_minor: 0 }]}
+          lineItems={[{ label: productName(product), detail: checkout.release_label || checkout.release_snapshot?.label || product.release_label || t("Current approved release"), amount_minor: 0 }]}
           totals={{ subtotal_minor: 0, total_minor: 0, subtotal_label: t("Free"), total_label: t("Free"), currency: "USD" }}
           busy={mutation.status === "pending"}
           error={mutation.error ? friendlyError(mutation.error) : undefined}
@@ -689,9 +687,8 @@ function SuccessPage({id, request, navigate, downloadUrl, session }) {
     <div className="buyer-v2__container buyer-v2__page buyer-v2__success-page">
       <section className="buyer-v2__success-hero">
         <span className="buyer-v2__success-mark" aria-hidden="true">✓</span>
-        <span className="buyer-v2__eyebrow">{t('Access granted')}</span>
         <h1>{productName(product)} is ready.</h1>
-        <p>Order #{orderReference(order)} · {amount === 0 ? "Free" : money(amount, order.currency)} · Access granted</p>
+        <p>Order #{orderReference(order)} · {amount === 0 ? "Free" : money(amount, order.currency)}</p>
         {entitlementError ? <HatchInlineAlert tone="warning" action={<Button size="small" variant="ghost" type="button" onClick={resource.reload}>{t('Retry')}</Button>}>{t('Purchase completed; some access details are temporarily unavailable.')}</HatchInlineAlert> : null}
         <div className="buyer-v2__success-actions">
           <Button asChild><a href={desktopUrl(entitlement, product)} onClick={() => trackPortalEvent(request, "desktop_open_clicked", productTelemetry(product))}>{t('Open Hatch Desktop')}</a></Button>
@@ -723,7 +720,7 @@ function LibraryPage({search, request, navigate }) {
 
   return (
     <div className="buyer-v2__container buyer-v2__page">
-      <header className="buyer-v2__page-heading"><span className="buyer-v2__eyebrow">{t('Your library')}</span><h1>{t('Agents linked to your account.')}</h1><p>{t('Access and release policy stay visible here. Zero-price purchases do not expire or run out.')}</p></header>
+      <header className="buyer-v2__page-heading"><span className="buyer-v2__eyebrow">{t('Your library')}</span><h1>{t('Agents linked to your account.')}</h1><p>{t('Product and release details stay visible here. Zero-price purchases are recorded in your account.')}</p></header>
       {resource.status === "loading" ? <CardSkeleton count={2} label={t('Loading your library')} /> : null}
       {resource.status === "error" ? <RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo={LIBRARY_ROOT} /> : null}
       {resource.status === "ready" && resource.items.length ? <section className="buyer-v2__list-grid" aria-label={t('Your entitlements')}>{resource.items.map((item) => <EntitlementCard key={entitlementIdFor(item)} entitlement={item} navigate={navigate} />)}</section> : null}
@@ -743,7 +740,7 @@ function EntitlementCard({entitlement, navigate }) {
       <div className="buyer-v2__card-topline"><StatusChip status={status} label={t(entitlementStatusLabel(status))} /><span>{creatorName(entitlement.creator || product)}</span></div>
       <h2>{productName(product)}</h2>
       <p>{entitlementSummary(entitlement)}</p>
-      <div className="buyer-v2__card-footer"><span>{t(unitsLabel(entitlement))}</span><LinkButton variant="secondary" to={`${LIBRARY_ROOT}/${encodeURIComponent(id)}`} navigate={navigate}>{t('View access')}</LinkButton></div>
+      <div className="buyer-v2__card-footer"><LinkButton variant="secondary" to={`${LIBRARY_ROOT}/${encodeURIComponent(id)}`} navigate={navigate}>{t('View access')}</LinkButton></div>
     </article>
   );
 }
@@ -772,7 +769,6 @@ function EntitlementPage({id, request, navigate, session, downloadUrl }) {
       <div className="buyer-v2__detail-grid">
         <section className="buyer-v2__detail-card"><h2>{t('Your entitlement')}</h2><DefinitionList rows={[
           [t("Status"), t(entitlementStatusLabel(status))],
-          [t("Access"), t(unitsLabel(entitlement))],
           [t("Release"), entitlement.release_label || entitlement.release?.label || entitlement.release_id || "Pinned purchase release"],
           [t("Purchased version"), entitlement.purchased_corpus_digest || entitlement.corpus_digest || "—"],
           [t("Effective version"), entitlement.effective_corpus_digest || entitlement.purchased_corpus_digest || entitlement.corpus_digest || "—"],
@@ -784,7 +780,7 @@ function EntitlementPage({id, request, navigate, session, downloadUrl }) {
         ]} />{orderId ? <RouterLink className="buyer-v2__text-link" to={`${ORDERS_ROOT}/${encodeURIComponent(orderId)}`} navigate={navigate}>{t('View originating order →')}</RouterLink> : null}</section>
         <aside className="buyer-v2__activation-card"><span className="buyer-v2__eyebrow">{t('Desktop activation')}</span><h2>{canOpen ? "Continue in your Workspace." : t(entitlementRecoveryTitle(status))}</h2><p>{t(entitlementRecoveryCopy(status))}</p>{canOpen ? <Button asChild><a href={desktopUrl(entitlement, product)} onClick={() => trackPortalEvent(request, "desktop_open_clicked", productTelemetry(product))}>{t('Open Hatch Desktop')}</a></Button> : null}<a className="buyer-v2__secondary-download" href={downloadUrl} target="_blank" rel="noreferrer" onClick={() => trackPortalEvent(request, "desktop_download_clicked", productTelemetry(product))}>{t('Download Hatch Desktop')}</a></aside>
       </div>
-      <section className="buyer-v2__timeline-section"><div><span className="buyer-v2__eyebrow">{t('Access history')}</span><h2>{t('Activity, without your private content.')}</h2><p>{t('Your purchase and access status stay visible on Web. Workspace paths, source files and conversations stay private.')}</p></div>{deliveries.length ? <Timeline entries={deliveries.map(deliveryTimelineEntry)} /> : <EmptyState compact title={t('Access included')} body="Open Hatch Desktop when you are ready to use this access." />}</section>
+      <section className="buyer-v2__timeline-section"><div><span className="buyer-v2__eyebrow">{t('Access history')}</span><h2>{t('Activity, without your private content.')}</h2><p>{t('Your purchase and access status stay visible on Web. Workspace paths, source files and conversations stay private.')}</p></div>{deliveries.length ? <Timeline entries={deliveries.map(deliveryTimelineEntry)} /> : <EmptyState compact title={t('No activity yet')} body="Open Hatch Desktop when you are ready to continue." />}</section>
     </div>
   );
 }
@@ -1255,19 +1251,12 @@ function entitlementStatusLabel(status) {
 
 function entitlementSummary(value) {
   const status = accessStatus(value);
-  if (value?.access_mode === "unmetered") return value.summary || "Access included. Open Hatch Desktop with this account and choose a Workspace.";
+  if (value?.access_mode === "unmetered") return value.summary || "Open Hatch Desktop with this account and choose a Workspace.";
   if (status === "reserved") return "Access setup is in progress.";
   if (status === "consumed") return "This access is no longer active.";
   if (status === "expired") return "This access has expired. Return to the Product to get access again.";
   if (["suspended", "revoked"].includes(status)) return value.status_reason_label || "Access is unavailable. Review the recovery details.";
   return value.summary || "Open Hatch Desktop with this account and choose a Workspace.";
-}
-
-function unitsLabel(value) {
-  if (value?.access_mode === "unmetered" || value?.unlimited === true) return "Access included";
-  if (value.remaining_units == null && value.units_remaining == null) return "Access details";
-  const units = Number(value.remaining_units ?? value.units_remaining);
-  return `${units} access ${units === 1 ? "use" : "uses"} available`;
 }
 
 function orderAmount(order) { return numberOr(order?.total_minor, numberOr(order?.amount_minor, numberOr(order?.gross_minor, 0))); }
@@ -1285,7 +1274,7 @@ function orderStatus(order) {
 
 function orderStatusLabel(order) {
   const status = orderStatus(order);
-  return ({ fulfilled: "Access granted", pending: "Pending", payment_pending: "Payment pending", refund_pending: "Refund pending", refunded: "Refunded", cancelled: "Cancelled", failed: "Failed" })[status] || sentenceCase(status);
+  return ({ fulfilled: "Fulfilled", pending: "Pending", payment_pending: "Payment pending", refund_pending: "Refund pending", refunded: "Refunded", cancelled: "Cancelled", failed: "Failed" })[status] || sentenceCase(status);
 }
 
 function paymentStatusLabel(status, amount) {
@@ -1325,7 +1314,7 @@ function orderTimeline(order) {
   if (orderAmount(order) === 0 || paymentStatus === "not_required") entries.push({ label: "Payment not required", time: order.payment?.updated_at || order.created_at });
   else if (["succeeded", "paid"].includes(paymentStatus)) entries.push({ label: "Payment succeeded", time: order.payment?.succeeded_at || order.paid_at });
   else if (paymentStatus) entries.push({ label: `Payment ${sentenceCase(paymentStatus)}`, time: order.payment?.updated_at, tone: paymentFailed(order) ? "error" : "" });
-  if (order.entitlement_id || order.entitlement) entries.push({ label: "Access granted", time: order.entitlement?.granted_at || order.fulfilled_at });
+  if (order.entitlement_id || order.entitlement) entries.push({ label: "Order fulfilled", time: order.entitlement?.granted_at || order.fulfilled_at });
   for (const delivery of arrayValue(order.deliveries, [])) entries.push(deliveryTimelineEntry(delivery));
   const refundStatus = meaningfulReversalStatus(order.refund?.status, order.refund_status, orderStatus(order) === "refunded" ? "refunded" : null);
   if (refundStatus) entries.push({ label: `Refund ${sentenceCase(refundStatus)}`, time: order.refund?.updated_at || order.refunded_at });
