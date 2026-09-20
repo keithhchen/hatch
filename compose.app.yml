@@ -48,6 +48,7 @@ services:
       ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
       ELEVENLABS_VOICE_ID: ${ELEVENLABS_VOICE_ID:-SAz9YHcvj6GT2YYXdXww}
       HATCH_FACTORY_STT_PROVIDER: ${HATCH_FACTORY_STT_PROVIDER:-qwen}
+      HATCH_FACTORY_QWEN_STT_MAX_SENTENCE_SILENCE_MS: ${HATCH_FACTORY_QWEN_STT_MAX_SENTENCE_SILENCE_MS:-2500}
       HATCH_FACTORY_RUNTIME_URL: ${HATCH_FACTORY_RUNTIME_URL:-wss://hatch.tokenquadrant.cn/v1/runtime}
       HATCH_WEB_SEARCH_URL: ${HATCH_WEB_SEARCH_URL:-https://api.bocha.cn/v1/web-search}
       HATCH_WEB_SEARCH_PROVIDER: ${HATCH_WEB_SEARCH_PROVIDER:-bocha}
@@ -292,6 +293,9 @@ services:
     ports:
       - "80:80"
       - "443:443"
+      # Caddy serves HTTP/3 over QUIC when UDP 443 is reachable. Keep the
+      # TCP mapping above for HTTP/1.1 and HTTP/2 fallback clients.
+      - "443:443/udp"
     volumes:
       - caddy_data:/data
       - caddy_config:/config

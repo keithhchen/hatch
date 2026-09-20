@@ -30,6 +30,7 @@ export class QwenStreamingStt implements StreamingSttProvider {
   readonly model: string;
   private readonly apiKey: string;
   private readonly endpoint: string;
+  private readonly maxSentenceSilence: number;
   private readonly callbacks: StreamingSttCallbacks;
   private readonly taskId = randomUUID();
   private socket?: WebSocket;
@@ -39,6 +40,7 @@ export class QwenStreamingStt implements StreamingSttProvider {
     this.model = options.environment.HATCH_FACTORY_QWEN_STT_MODEL?.trim() || "qwen-audio-3.0-asr-flash-streaming";
     this.apiKey = options.environment.DASHSCOPE_API_KEY?.trim() || "";
     this.endpoint = options.environment.HATCH_FACTORY_QWEN_STT_URL?.trim() || "wss://dashscope.aliyuncs.com/api-ws/v1/inference";
+    this.maxSentenceSilence = parsePositiveInteger(options.environment.HATCH_FACTORY_QWEN_STT_MAX_SENTENCE_SILENCE_MS, 2500);
     this.callbacks = options;
   }
 
@@ -51,7 +53,7 @@ export class QwenStreamingStt implements StreamingSttProvider {
     this.socket = socket;
     return new Promise<void>((resolve, reject) => {
       let started = false;
-      socket.once("open", () => socket.send(JSON.stringify(qwenStartTask(this.taskId, this.model))));
+      socket.once("open", () => socket.send(JSON.stringify(qwenStartTask(this.taskId, this.model, this.maxSentenceSilence))));
       socket.once("error", (error) => {
         if (this.cancelled) resolve();
         else if (!started) reject(error);
@@ -162,7 +164,7 @@ export class ElevenLabsStreamingStt implements StreamingSttProvider {
   }
 }
 
-export function qwenStartTask(taskId: string, model: string) {
+export function qwenStartTask(taskId: string, model: string, maxSentenceSilence = 2500) {
   return {
     header: { action: "run-task", task_id: taskId, streaming: "duplex" },
     payload: {
@@ -174,7 +176,7 @@ export function qwenStartTask(taskId: string, model: string) {
         format: "pcm",
         sample_rate: 16000,
         semantic_punctuation_enabled: false,
-        max_sentence_silence: 1800,
+        max_sentence_silence: maxSentenceSilence,
         speech_noise_threshold: 0.2,
         heartbeat: true,
         vocabulary: { Hatch: 5, Creator: 5, Agent: 5 }
@@ -182,6 +184,11 @@ export function qwenStartTask(taskId: string, model: string) {
       input: {}
     }
   };
+}
+
+function parsePositiveInteger(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function qwenFinishTask(taskId: string) {
