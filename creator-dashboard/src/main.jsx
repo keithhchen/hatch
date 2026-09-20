@@ -1,6 +1,5 @@
 import React, { Suspense, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import "@hatch/ui/fonts";
 import "@hatch/ui/theme.css";
 import { Button, HatchBrand, HatchUIProvider, UnavailableState } from "@hatch/ui";
 import { LocaleProvider } from "./locale.jsx";
@@ -249,3 +248,15 @@ createRoot(document.getElementById("root")).render(
     </HatchUIProvider>
   </AppErrorBoundary>
 );
+
+scheduleFontAssets();
+
+function scheduleFontAssets() {
+  if (typeof window === "undefined") return;
+  const load = () => { void import("@hatch/ui/fonts"); };
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(load, { timeout: 1000 });
+  } else {
+    window.setTimeout(load, 0);
+  }
+}

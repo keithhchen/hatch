@@ -1,7 +1,5 @@
-import { FactoryAgents } from "./FactoryAgents.jsx";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Menu } from "lucide-react";
-import { CreatorProductFiles } from "./CreatorSourceLibrary.jsx";
 import {
   Breadcrumbs as HatchBreadcrumbs,
   Button,
@@ -31,11 +29,13 @@ import { StorefrontDetails } from "./StorefrontDetails.jsx";
 import { creatorOrderQuery } from "./storefrontModel.js";
 import { creatorFactoryPath, creatorProductPath, parseCreatorRoute } from "./creatorRoutes.js";
 import { createCreatorTranslator } from "./creatorI18n.js";
-import { CreatorProductWorkspace } from "./CreatorProductWorkspace.jsx";
 import { useLocale } from "./locale.jsx";
 import "./creatorPortalV2.css";
 
 const ROOT = "/studio";
+const FactoryAgents = React.lazy(() => import("./FactoryAgents.jsx").then(({ FactoryAgents: Component }) => ({ default: Component })));
+const CreatorProductFiles = React.lazy(() => import("./CreatorSourceLibrary.jsx").then(({ CreatorProductFiles: Component }) => ({ default: Component })));
+const CreatorProductWorkspace = React.lazy(() => import("./CreatorProductWorkspace.jsx").then(({ CreatorProductWorkspace: Component }) => ({ default: Component })));
 const PRODUCT_TABS = [
   ["overview", "overview"],
   ["test", "testImprove"],
@@ -172,18 +172,22 @@ function CreatorRoute({ route, token, request, navigate, locale, t, registerNavi
     return <RouteProblem title={t("creatorPortalUnavailable")} body={t("creatorPortalUnavailableBody")} />;
   }
   if (route.kind === "factory-index") return <FactoryIndexRedirect navigate={navigate} />;
-  if (route.kind === "factory-agents") return <FactoryAgents key={route.productId} productId={route.productId} section={route.factorySection} agent={route.factoryAgent} navigate={navigate} locale={locale} />;
+  if (route.kind === "factory-agents") return <Suspense fallback={<CreatorRouteLoading />}><FactoryAgents key={route.productId} productId={route.productId} section={route.factorySection} agent={route.factoryAgent} navigate={navigate} locale={locale} /></Suspense>;
   if (route.kind === "home") return <CreatorHome token={token} request={request} navigate={navigate} t={t} locale={locale} />;
   if (route.kind === "products") return <ProductsPage token={token} request={request} navigate={navigate} t={t} />;
-  if (route.kind === "product-create") return <CreatorProductFiles token={token} navigate={navigate} locale={locale} />;
+  if (route.kind === "product-create") return <Suspense fallback={<CreatorRouteLoading />}><CreatorProductFiles token={token} navigate={navigate} locale={locale} /></Suspense>;
   if (route.kind === "product" && ["overview", "files", "about-you", "corpus", "brief", "complete"].includes(route.tab)) return <FactoryProductRedirect productId={route.productId} navigate={navigate} />;
   if (route.kind === "product") return <ProductPage token={token} request={request} navigate={navigate} productId={route.productId} tab={route.tab} t={t} />;
-  if (route.kind === "candidate") return <CreatorProductWorkspace token={token} request={request} navigate={navigate} productId={route.productId} tab="corpus" locale={locale} />;
+  if (route.kind === "candidate") return <Suspense fallback={<CreatorRouteLoading />}><CreatorProductWorkspace token={token} request={request} navigate={navigate} productId={route.productId} tab="corpus" locale={locale} /></Suspense>;
   if (route.kind === "preview") return <PreviewPage token={token} request={request} navigate={navigate} productId={route.productId} t={t} />;
   if (route.kind === "release") return <ReleasePage token={token} request={request} navigate={navigate} productId={route.productId} releaseId={route.releaseId} t={t} locale={locale} />;
   if (route.kind === "orders") return <OrdersPage token={token} request={request} navigate={navigate} t={t} locale={locale} />;
   if (route.kind === "order") return <OrderPage token={token} request={request} navigate={navigate} orderId={route.orderId} t={t} locale={locale} />;
   return <RouteProblem title={t("pageNotFound")} body={t("pageNotFoundBody")} action={t("backToProducts")} onAction={() => navigate(`${ROOT}/products`)} />;
+}
+
+function CreatorRouteLoading() {
+  return <div className="loading-page" aria-busy="true"><HatchBrand className="loading-brand" /></div>;
 }
 
 function CreatorHome({ token, request, navigate, t, locale }) {
