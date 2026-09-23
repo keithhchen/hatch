@@ -9,8 +9,6 @@
 .download-page__row:hover { padding-inline: 8px; color: var(--hatch-accent); }
 .download-page__row svg { width: 18px; height: 18px; flex: none; }
 .download-page__row small { margin-left: 12px; color: var(--hatch-accent); font-family: var(--hatch-font-pill); font-size: var(--hatch-type-meta); font-weight: var(--hatch-weight-medium); }
-.download-page__row--disabled { color: var(--hatch-text-secondary); }
-.download-page__availability { font-size: var(--hatch-type-meta); font-weight: var(--hatch-weight-regular); }
 .download-page__unavailable { display: flex; min-height: 76px; align-items: center; justify-content: space-between; gap: 20px; border-block: 1px solid var(--hatch-border); }
 .download-page__unavailable button { display: inline-flex; align-items: center; gap: 7px; border: 0; color: var(--hatch-accent); background: transparent; cursor: pointer; font: inherit; }
 .download-page__unavailable svg { width: 15px; height: 15px; }

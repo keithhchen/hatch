@@ -9,7 +9,7 @@ test("normalizes the three supported download locales", () => {
 });
 
 test("provides concise device-aware copy in Chinese, English, and Japanese", () => {
-  assert.equal(downloadCopy("en").recommended("Apple Silicon"), "Recommended for this Mac: Apple Silicon");
-  assert.equal(downloadCopy("zh").comingSoon, "即将推出");
+  assert.equal(downloadCopy("en").recommended("Apple Silicon"), "Recommended for this device: Apple Silicon");
+  assert.equal(downloadCopy("zh").windows, "Windows · x64");
   assert.equal(downloadCopy("ja").title, "Hatch をダウンロード。");
 });
