@@ -183,8 +183,8 @@ A non-loopback Runtime fails closed unless `HATCH_RUNTIME_DATABASE_URL` points
 to its dedicated Postgres role/schema. Production does not fall back to the
 global JSONL file or reuse the Registry database credential. Postgres writes
 use bounded connection/query deadlines, atomic per-conversation and binding
-scope quotas, and a compacted replay window; visible history remains a
-separate bounded recent window rather than becoming model context again.
+scope quotas, and a replay window beginning at the latest compaction checkpoint.
+Visible history is read separately from model context. History reads have no event-count or byte-size cap.
 
 The client declares its full local tool capability once in `client.hello` with `local_tools`; Agent Corpus metadata does not reduce that declaration, and permission decisions remain exclusively in the Desktop executor. Duplicate `client.hello` messages on the same connection are rejected. Each `client.message` sends only the current user message plus `conversation_id`. Before any Registry await, the Runtime synchronously reserves the connection and bound conversation, then re-introspects an opaque Registry session when configured and always resolves an existing entitlement binding again. A revoke after `client.hello` therefore takes effect on the next turn without allowing parallel messages to amplify Registry work. Registry verification, including its response body, is bounded by `HATCH_REGISTRY_AUTH_TIMEOUT_MS` and is cancelled when the socket closes. The Consumer-selected Workspace grant remains Desktop-only and is applied when the Desktop executes a local tool call; only the resulting tool content crosses the Runtime boundary. The server hydrates prior user/assistant messages from this store before each agent run.
 Explicitly bound conversation history is namespaced by creator, user, Agent,

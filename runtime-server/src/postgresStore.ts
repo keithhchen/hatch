@@ -145,22 +145,6 @@ SELECT payload
 FROM hatch_conversation_events
 `;
 
-const REPLAY_WINDOW_STATS_SQL = `
-WITH latest_checkpoint AS (
-  SELECT COALESCE(MAX(id), 0) AS start_id
-  FROM hatch_conversation_events
-  WHERE conversation_id = $1 AND event_type = 'conversation.compacted'
-)
-SELECT
-  latest_checkpoint.start_id::bigint AS start_id,
-  COUNT(events.id)::bigint AS event_count,
-  COALESCE(SUM(octet_length(events.payload::text)), 0)::bigint AS total_bytes
-FROM latest_checkpoint
-LEFT JOIN hatch_conversation_events AS events
-  ON events.conversation_id = $1 AND events.id >= latest_checkpoint.start_id
-GROUP BY latest_checkpoint.start_id
-`;
-
 const SELECT_REPLAY_WINDOW_SQL = `
 WITH latest_checkpoint AS (
   SELECT COALESCE(MAX(id), 0) AS start_id
@@ -172,22 +156,6 @@ FROM hatch_conversation_events AS events
 CROSS JOIN latest_checkpoint
 WHERE events.conversation_id = $1 AND events.id >= latest_checkpoint.start_id
 ORDER BY events.id ASC
-LIMIT $2
-`;
-
-const VISIBLE_WINDOW_STATS_SQL = `
-WITH visible_window AS (
-  SELECT payload
-  FROM hatch_conversation_events
-  WHERE conversation_id = $1
-  ORDER BY id DESC
-  LIMIT $2
-)
-SELECT
-  (SELECT COUNT(*) FROM hatch_conversation_events WHERE conversation_id = $1)::bigint AS total_count,
-  COUNT(*)::bigint AS event_count,
-  COALESCE(SUM(octet_length(payload::text)), 0)::bigint AS total_bytes
-FROM visible_window
 `;
 
 const SELECT_VISIBLE_WINDOW_SQL = `
@@ -196,7 +164,6 @@ WITH visible_window AS (
   FROM hatch_conversation_events
   WHERE conversation_id = $1
   ORDER BY id DESC
-  LIMIT $2
 )
 SELECT payload
 FROM visible_window
@@ -218,8 +185,6 @@ export type PostgresStoreOptions = {
   maxGlobalBytes?: number;
   maxScopeEvents?: number;
   maxScopeBytes?: number;
-  maxReplayEvents?: number;
-  maxReplayBytes?: number;
   environment?: NodeJS.ProcessEnv;
 };
 
@@ -234,8 +199,6 @@ export class PostgresStore extends RuntimeStore {
   private readonly maxGlobalBytes: number;
   private readonly maxScopeEvents: number;
   private readonly maxScopeBytes: number;
-  private readonly maxReplayEvents: number;
-  private readonly maxReplayBytes: number;
   private schemaPromise: Promise<void> | undefined;
   private readonly appendChains = new Map<string, Promise<void>>();
   private readonly pendingAppends = new Set<Promise<void>>();
@@ -256,8 +219,6 @@ export class PostgresStore extends RuntimeStore {
       this.maxGlobalBytes = 1024 * 1024 * 1024;
       this.maxScopeEvents = 100_000;
       this.maxScopeBytes = 256 * 1024 * 1024;
-      this.maxReplayEvents = 2_000;
-      this.maxReplayBytes = 8 * 1024 * 1024;
       this.pool = new Pool({
         connectionString: input,
         connectionTimeoutMillis: 5_000,
@@ -276,8 +237,6 @@ export class PostgresStore extends RuntimeStore {
       this.maxGlobalBytes = 1024 * 1024 * 1024;
       this.maxScopeEvents = 100_000;
       this.maxScopeBytes = 256 * 1024 * 1024;
-      this.maxReplayEvents = 2_000;
-      this.maxReplayBytes = 8 * 1024 * 1024;
       this.pool = input;
       this.ownsPool = false;
       return;
@@ -337,22 +296,6 @@ export class PostgresStore extends RuntimeStore {
       "HATCH_RUNTIME_MAX_SCOPE_EVENT_BYTES",
       1_024,
       1024 * 1024 * 1024
-    );
-    this.maxReplayEvents = boundedDatabaseSetting(
-      input.maxReplayEvents,
-      environment.HATCH_RUNTIME_MAX_REPLAY_EVENTS,
-      2_000,
-      "HATCH_RUNTIME_MAX_REPLAY_EVENTS",
-      1,
-      100_000
-    );
-    this.maxReplayBytes = boundedDatabaseSetting(
-      input.maxReplayBytes,
-      environment.HATCH_RUNTIME_MAX_HISTORY_BYTES,
-      8 * 1024 * 1024,
-      "HATCH_RUNTIME_MAX_HISTORY_BYTES",
-      1_024,
-      256 * 1024 * 1024
     );
 
     if (input.pool) {
@@ -843,13 +786,7 @@ export class PostgresStore extends RuntimeStore {
   }
 
   async visibleConversationTruncated(conversationId: string): Promise<boolean> {
-    await this.waitForConversationAppends(conversationId);
-    await this.ensureSchema();
-    const stats = await this.query<VisibleWindowStatsRow>(VISIBLE_WINDOW_STATS_SQL, [
-      conversationId,
-      this.maxReplayEvents
-    ]);
-    return numericRowValue(stats.rows[0]?.total_count) > this.maxReplayEvents;
+    return false;
   }
 
   async readCompactionState(conversationId: string): Promise<{
@@ -882,34 +819,14 @@ export class PostgresStore extends RuntimeStore {
   private async readReplayEvents(conversationId: string): Promise<StoreEvent[]> {
     await this.waitForConversationAppends(conversationId);
     await this.ensureSchema();
-    const stats = await this.query<ReplayWindowStatsRow>(REPLAY_WINDOW_STATS_SQL, [conversationId]);
-    const eventCount = numericRowValue(stats.rows[0]?.event_count);
-    const totalBytes = numericRowValue(stats.rows[0]?.total_bytes);
-    if (eventCount > this.maxReplayEvents || totalBytes > this.maxReplayBytes) {
-      throw new Error("Conversation replay window exceeds the bounded history limit; compact or start a new conversation.");
-    }
-    const result = await this.query<PayloadRow>(SELECT_REPLAY_WINDOW_SQL, [
-      conversationId,
-      this.maxReplayEvents
-    ]);
+    const result = await this.query<PayloadRow>(SELECT_REPLAY_WINDOW_SQL, [conversationId]);
     return result.rows.map((row) => eventFromPayload(row.payload));
   }
 
   private async readVisibleEvents(conversationId: string): Promise<StoreEvent[]> {
     await this.waitForConversationAppends(conversationId);
     await this.ensureSchema();
-    const stats = await this.query<ConversationQuotaRow>(VISIBLE_WINDOW_STATS_SQL, [
-      conversationId,
-      this.maxReplayEvents
-    ]);
-    const totalBytes = numericRowValue(stats.rows[0]?.total_bytes);
-    if (totalBytes > this.maxReplayBytes) {
-      throw new Error("Visible conversation window exceeds the bounded history limit.");
-    }
-    const result = await this.query<PayloadRow>(SELECT_VISIBLE_WINDOW_SQL, [
-      conversationId,
-      this.maxReplayEvents
-    ]);
+    const result = await this.query<PayloadRow>(SELECT_VISIBLE_WINDOW_SQL, [conversationId]);
     return result.rows.map((row) => eventFromPayload(row.payload));
   }
 
@@ -949,8 +866,6 @@ export { PostgresStore as PostgresConversationStore, PostgresStore as PostgresRu
 
 type PayloadRow = QueryResultRow & { payload: unknown };
 type ConversationQuotaRow = QueryResultRow & { event_count: string | number; total_bytes: string | number };
-type ReplayWindowStatsRow = ConversationQuotaRow & { start_id: string | number };
-type VisibleWindowStatsRow = ConversationQuotaRow & { total_count: string | number };
 type QuotaReservation = {
   scope_key: string;
   event_count: number;
