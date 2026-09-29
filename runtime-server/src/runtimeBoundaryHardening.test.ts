@@ -473,9 +473,9 @@ test("an existing session re-resolves Creator tool bindings and blocks a disable
   const socket = await connectEntitledSocket(port, entitlement, "creator-refresh-session", "creator-disabled-conversation");
   try {
     const rejected = waitForMessage(socket, (message) => message.run_id === "creator-disabled-run"
-      && (message.error as { code?: string } | undefined)?.code === "agent_updated");
+      && (message.error as { code?: string } | undefined)?.code === "authorization_unavailable");
     socket.send(JSON.stringify(clientMessage("creator-disabled-run", "creator-disabled-conversation")));
-    assert.equal(((await rejected).error as { code?: string }).code, "agent_updated");
+    assert.equal(((await rejected).error as { code?: string }).code, "authorization_unavailable");
     assert.equal(resolutionCalls, 2);
     assert.equal(runCalls, 0);
   } finally {
@@ -1615,20 +1615,29 @@ test("entitlement-backed turns reject a creator identity even with a permissive 
   }
 });
 
-test("a republished Agent Corpus fails the next turn with agent_updated before model work", async () => {
+test("an existing session runs the latest Agent Corpus on its next turn", async () => {
   const entitlement = fixtureEntitlement();
-  const initial = await fixtureCorpusResolver(entitlement).resolve(entitlement.creator_id, entitlement.agent_id);
-  let currentDigest = initial.digest;
+  const initialFixture = await writeCreatorCorpusFixture(entitlement, "Version A instructions.", false);
+  let currentFixture = initialFixture;
   const corpusResolver = {
-    resolve: async () => ({ ...initial, digest: currentDigest })
+    resolve: async (creatorId: string, productId: string, signal?: AbortSignal) => (
+      new AgentCorpusResolver(currentFixture.baseRoot).resolve(creatorId, productId, signal)
+    )
   } as unknown as AgentCorpusResolver;
   const identityResolver: AuthIdentityResolver = {
     resolveIdentity: async () => ({ sub: entitlement.user_id, role: "user" })
   };
   let runCalls = 0;
+  let observedPrompt = "";
   const conversationRepository = await authBoundaryConversations(entitlement, ["agent-updated-install"]);
   const runtime = createRuntimeServer({
-    createRuntime: () => completingRuntime(() => { runCalls += 1; }),
+    createRuntime: () => ({
+      async *run(input, context) {
+        runCalls += 1;
+        observedPrompt = context.agentSystemPrompt ?? "";
+        yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
+      }
+    }),
     conversationStore: new RuntimeStore(conversationRepository.localAuthority),
     conversationRepository,
     authIdentityResolver: identityResolver,
@@ -1638,15 +1647,28 @@ test("a republished Agent Corpus fails the next turn with agent_updated before m
   const port = await listen(runtime);
   const socket = await connectEntitledSocket(port, entitlement, "agent-updated-session", "agent-updated-install");
   try {
-    currentDigest = `sha256:${"f".repeat(64)}`;
-    const rejected = waitForMessage(socket, (message) => message.run_id === "agent-updated-run"
-      && (message.error as { code?: string } | undefined)?.code === "agent_updated");
+    currentFixture = await writeCreatorCorpusFixture(entitlement, "Version B instructions.", false);
+    const current = await new AgentCorpusResolver(currentFixture.baseRoot)
+      .resolve(entitlement.creator_id, entitlement.agent_id);
+    const completed = waitForMessage(socket, (message) => message.type === "turn.completed"
+      && message.run_id === "agent-updated-run");
     socket.send(JSON.stringify(clientMessage("agent-updated-run", "agent-updated-install")));
-    assert.equal(((await rejected).error as { code?: string }).code, "agent_updated");
-    assert.equal(runCalls, 0);
+    assert.equal((await completed).type, "turn.completed");
+    assert.equal(runCalls, 1);
+    assert.match(observedPrompt, /Version B instructions\./);
+    assert.doesNotMatch(observedPrompt, /Version A instructions\./);
+    const conversationId = durableConversationId({
+      creatorId: entitlement.creator_id,
+      userId: entitlement.user_id,
+      productId: entitlement.product_id
+    }, "agent-updated-install");
+    const run = await conversationRepository.getRunByClientMessageId(conversationId, "agent-updated-run");
+    assert.equal(run?.corpusDigest, current.digest);
   } finally {
     socket.close();
     await runtime.close();
+    await rm(initialFixture.baseRoot, { recursive: true, force: true });
+    if (currentFixture !== initialFixture) await rm(currentFixture.baseRoot, { recursive: true, force: true });
   }
 });
 
@@ -1739,12 +1761,15 @@ function fixtureCreatorToolCorpus(entitlement: EntitlementBinding): AgentCorpus 
   } as unknown as AgentCorpus;
 }
 
-async function writeCreatorCorpusFixture(entitlement: EntitlementBinding): Promise<{ baseRoot: string }> {
+async function writeCreatorCorpusFixture(
+  entitlement: EntitlementBinding,
+  system = "Use the current Creator tool binding.",
+  includeCreatorTool = true
+): Promise<{ baseRoot: string }> {
   const baseRoot = await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-creator-rotation-corpus-"));
   const corpusRoot = path.join(baseRoot, entitlement.creator_id, entitlement.agent_id);
   await mkdir(path.join(corpusRoot, "instructions"), { recursive: true });
   await mkdir(path.join(corpusRoot, "evals"), { recursive: true });
-  const system = "Use the current Creator tool binding.";
   const evaluations = "[]";
   await writeFile(path.join(corpusRoot, "instructions/system.md"), system, "utf8");
   await writeFile(path.join(corpusRoot, "evals/evals.json"), evaluations, "utf8");
@@ -1757,14 +1782,14 @@ async function writeCreatorCorpusFixture(entitlement: EntitlementBinding): Promi
     knowledge: { documents: [] },
     tools: [
       { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
-      {
+      ...(includeCreatorTool ? [{
         id: "creator.boundary.lookup",
         kind: "http_function",
         connection_ref: "boundary-api",
         operation: "lookup",
         description: "Lookup a boundary fixture.",
         input_schema: { type: "object", properties: {}, additionalProperties: false }
-      }
+      }] : [])
     ],
     evaluations: {
       synthetic_qa: [corpusAsset("synthetic", "evals/evals.json", evaluations)],

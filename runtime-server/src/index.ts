@@ -67,7 +67,7 @@ import {
 } from "./delivery.js";
 import { HttpCommerceEventSink } from "./commerceHttpSink.js";
 import { DeliveryAccountingOutbox, type DeliveryAccountingCommand } from "./deliveryOutbox.js";
-import { AgentCorpusChangedError, materializeAgentCorpus } from "./agentCorpusMaterialization.js";
+import { materializeAgentCorpus } from "./agentCorpusMaterialization.js";
 import { creatorToolControlPlaneFromEnvironment, resolveCreatorTools, type CreatorToolControlPlane } from "./creatorTools.js";
 import {
   AgentCorpusResolver as FilesystemAgentCorpusResolver,
@@ -2400,7 +2400,7 @@ async function handleRuntimeSocket(
               authorizationSlotRunId = message.run_id;
               try {
                 await revalidateTurnAuthorization(hello, binding, entitlementResolver, authIdentityResolver,
-                  agentCorpusResolver, connectionAbortController.signal);
+                  connectionAbortController.signal);
                 const conversation = await conversationRepository.getConversation(storageConversationId);
                 if (!conversation) throw new ConversationRepositoryError("conversation_not_found", "Conversation was not found");
                 assertConversationBinding(conversation, conversationBinding(binding));
@@ -2576,25 +2576,32 @@ async function handleRuntimeSocket(
               binding,
               entitlementResolver,
               authIdentityResolver,
-              agentCorpusResolver,
               authorizationController.signal
             );
+            if (authorizationController.signal.aborted || pendingAuthorization.cancelled) {
+              throw new EntitlementError("authorization_cancelled", "Authorization verification was cancelled.");
+            }
             if (binding.agentCorpus) {
-              try {
-                serverTools.setResolvedCreatorTools(await resolveCreatorTools(
-                  creatorToolControlPlane,
-                  binding.creatorId,
-                  binding.productId,
-                  binding.agentCorpus,
-                  authorizationController.signal
-                ));
-              } catch (error) {
-                authorizationController.signal.throwIfAborted();
-                throw new EntitlementError(
-                  "agent_updated",
-                  `This Creator Agent's tool bindings changed. Reconnect before starting another turn: ${errorMessage(error)}`
-                );
-              }
+              binding = await resolveTurnAgentBinding(
+                binding,
+                agentCorpusResolver,
+                authorizationController.signal
+              );
+              serverTools.setKnowledgeScope({
+                provider: createKnowledgeProvider(binding.agentCorpusRoot!, binding.agentCorpus!, binding.corpusDigest),
+                creatorId: binding.creatorId,
+                agentId: binding.productId,
+                corpusDigest: binding.corpusDigest
+              });
+              serverTools.setResolvedCreatorTools(await resolveCreatorTools(
+                creatorToolControlPlane,
+                binding.creatorId,
+                binding.productId,
+                binding.agentCorpus!,
+                authorizationController.signal
+              ));
+              sessionSkills = await buildSessionSkills(binding.agentCorpusRoot);
+              authorizationController.signal.throwIfAborted();
             }
             if (authorizationController.signal.aborted || pendingAuthorization.cancelled) {
               throw new EntitlementError("authorization_cancelled", "Authorization verification was cancelled.");
@@ -3281,7 +3288,7 @@ async function runOneTurn(
       type: "turn.failed",
       run_id: input.run_id,
       error: {
-        code: error instanceof AgentCorpusChangedError ? "agent_updated" : "run_failed",
+        code: "run_failed",
         message: errorMessage(error)
       }
     });
@@ -3524,7 +3531,6 @@ async function revalidateTurnAuthorization(
   binding: SessionBinding,
   entitlementResolver?: EntitlementResolver,
   authIdentityResolver?: AuthIdentityResolver,
-  agentCorpusResolver?: AgentCorpusResolver,
   signal?: AbortSignal
 ): Promise<void> {
   const authToken = hello.auth_token ?? hello.license_token;
@@ -3560,21 +3566,30 @@ async function revalidateTurnAuthorization(
     }
   }
 
-  if (binding.agentCorpus) {
-    if (!agentCorpusResolver) {
-      throw new EntitlementError("agent_updated", "This Creator Agent changed. Reconnect before starting another turn.");
-    }
-    // Production resolves the current Registry publication for every caller.
-    // Reconnect after a publication changes an already-open session so its
-    // next turn cannot execute the previously loaded instructions.
-    const current = await agentCorpusResolver.resolve(binding.creatorId, binding.productId, signal);
-    if (current.digest !== binding.corpusDigest
-      || current.corpus.creator.id !== binding.creatorId
-      || current.corpus.agent_id !== binding.productId
-      || current.corpus.product.id !== binding.productId) {
-      throw new EntitlementError("agent_updated", "This Creator Agent changed. Reconnect before starting another turn.");
-    }
+}
+
+async function resolveTurnAgentBinding(
+  binding: SessionBinding,
+  agentCorpusResolver: AgentCorpusResolver | undefined,
+  signal?: AbortSignal
+): Promise<SessionBinding> {
+  if (!agentCorpusResolver) {
+    throw new EntitlementError("agent_corpus_unavailable", "The current Creator Agent is unavailable.");
   }
+  const current = await agentCorpusResolver.resolve(binding.creatorId, binding.productId, signal);
+  if (current.corpus.creator.id !== binding.creatorId
+    || current.corpus.agent_id !== binding.productId
+    || current.corpus.product.id !== binding.productId) {
+    throw new EntitlementError("agent_entitlement_mismatch", "The current Creator Agent does not match this session.");
+  }
+  return {
+    ...binding,
+    corpusDigest: current.digest,
+    runtimeDigest: current.runtimeDigest,
+    briefSpec: current.corpus.product.brief_spec as BriefSpec | undefined,
+    agentCorpus: current.corpus,
+    agentCorpusRoot: current.root
+  };
 }
 
 function controlledTurnAuthorizationError(error: unknown): { code: string; message: string } {
@@ -3591,12 +3606,6 @@ function controlledTurnAuthorizationError(error: unknown): { code: string; messa
     return {
       code: "entitlement_required",
       message: "Access to this Creator Agent is no longer available. Refresh your Creator Agents and choose an available Agent."
-    };
-  }
-  if (code === "agent_updated") {
-    return {
-      code: "agent_updated",
-      message: "This Creator Agent was updated. Reconnect to load the current version before continuing."
     };
   }
   return {
