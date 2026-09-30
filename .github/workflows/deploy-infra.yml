@@ -32,14 +32,17 @@ jobs:
       - name: Materialize GitHub production environment
         env:
           HATCH_PRODUCTION_ENV: ${{ secrets.HATCH_PRODUCTION_ENV }}
+          HATCH_CREATOR_NAS_GATEWAY_TOKEN: ${{ secrets.HATCH_CREATOR_NAS_GATEWAY_TOKEN }}
         run: |
           set -euo pipefail
           test -n "$HATCH_PRODUCTION_ENV"
+          test -n "$HATCH_CREATOR_NAS_GATEWAY_TOKEN"
           temp_env="$(mktemp /opt/hatch/.env.github.XXXXXX)"
           trap 'rm -f "$temp_env"' EXIT
           umask 077
           printf '%s\n' "$HATCH_PRODUCTION_ENV" > "$temp_env"
           test -s "$temp_env"
+          printf 'HATCH_CREATOR_NAS_GATEWAY_TOKEN=%s\n' "$HATCH_CREATOR_NAS_GATEWAY_TOKEN" >> "$temp_env"
           grep -Eq '^HATCH_DOMAIN=[^[:space:]]+$' "$temp_env"
           chmod 600 "$temp_env"
           mv -f "$temp_env" /opt/hatch/.env
