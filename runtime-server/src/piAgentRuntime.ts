@@ -45,6 +45,8 @@ import {
   type SkillRecord
 } from "./skills.js";
 
+const MAX_TOOL_CALLS_PER_RUN = 30;
+
 
 export type PiToolDefinition = {
   type: "function";
@@ -178,10 +180,12 @@ export class PiAgentRuntime implements AgentRuntime {
       ctx.knowledgeAvailable,
       ctx.externalToolDefinitions
     );
+    const toolCallBudget = { used: 0 };
     const tools = toolDefinitions.map((definition) => this.createTool(
       input,
       ctx,
       definition,
+      toolCallBudget,
       () => activeSkills,
       setActiveSkills,
       () => resourceRoots,
@@ -453,6 +457,7 @@ export class PiAgentRuntime implements AgentRuntime {
     input: RunStart,
     ctx: RunContext,
     definition: PiToolDefinition,
+    toolCallBudget: { used: number },
     getActiveSkills: () => ActivatedSkill[],
     setActiveSkills: (skills: ActivatedSkill[]) => void,
     getResourceRoots: () => string[],
@@ -467,6 +472,21 @@ export class PiAgentRuntime implements AgentRuntime {
       execute: async (toolCallId, args, signal) => {
         ensureNotCancelled(ctx);
         if (signal?.aborted) throw new Error("Tool execution aborted");
+        if (toolCallBudget.used >= MAX_TOOL_CALLS_PER_RUN) {
+          const result = {
+            status: "error",
+            error: {
+              code: "tool_call_limit_exceeded",
+              message: `本次回复的工具调用次数已达到 ${MAX_TOOL_CALLS_PER_RUN} 次上限。请整理已收集的证据；证据不足时说明不确定之处，再作答。`
+            }
+          };
+          const modelResult = modelVisibleToolResult(definition.function.name, result);
+          return {
+            content: piToolResultContent(modelResult),
+            details: boundToolResult(stripBinaryToolPayload(modelResult))
+          };
+        }
+        toolCallBudget.used += 1;
         const result = await executeChatTool(
           input,
           ctx,
