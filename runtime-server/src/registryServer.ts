@@ -56,6 +56,7 @@ import type { AboutYouAnswerPair } from "./creatorLearning/aboutYouNode.js";
 import { PostgresDistillationGraphStore } from "./creatorLearning/distillationGraphStore.js";
 import { CorpusPublisher, CorpusPublishError } from "./creatorLearning/corpusPublisher.js";
 import { CreatorRegistryReleaseStore, type CreatorRegistryRelease } from "./creatorLearning/creatorRegistryRelease.js";
+import { CREATOR_REGISTRY_ARTIFACT_SCHEMA } from "./creatorLearning/creatorRegistry.js";
 import { QdrantKnowledgeIndexer } from "./qdrantIndexer.js";
 import {
   HttpRequestGate,
@@ -1068,11 +1069,12 @@ async function route(
       return;
     }
     try {
-      const connection = await context.store.resolveCreatorToolConnection({
-        tenantId,
-        agentId: decodeURIComponent(runtimeToolMatch[2]!),
-        toolId: decodeURIComponent(runtimeToolMatch[3]!)
-      });
+      const productId = decodeURIComponent(runtimeToolMatch[2]!);
+      const toolId = decodeURIComponent(runtimeToolMatch[3]!);
+      const release = await context.releaseStore.getLive(productId);
+      const connection = release
+        ? await resolvePublishedCreatorToolConnection(context, release, tenantId, productId, toolId)
+        : await context.store.resolveCreatorToolConnection({ tenantId, agentId: productId, toolId });
       sendJson(response, 200, { id: connection.id, tenant_id: connection.tenant_id, kind: connection.kind, secret_ref: connection.secret_ref, secret: connection.secret, config: connection.config, status: connection.status });
     } catch (error) {
       sendJson(response, 404, { detail: error instanceof Error ? error.message : String(error) });
@@ -1080,6 +1082,34 @@ async function route(
     return;
   }
   sendJson(response, 404, { detail: "Route not found." });
+}
+
+async function resolvePublishedCreatorToolConnection(
+  context: RegistryContext,
+  release: CreatorRegistryRelease,
+  tenantId: string,
+  productId: string,
+  toolId: string
+) {
+  if (release.creator_id !== tenantId || release.product_id !== productId) {
+    throw new Error("published Creator release does not match the requested product");
+  }
+  if (!context.nodeObjectStore) throw new Error("Creator Registry object storage is unavailable");
+  const artifact = CREATOR_REGISTRY_ARTIFACT_SCHEMA.parse(
+    JSON.parse((await context.nodeObjectStore.get(release.corpus_ref)).toString("utf8"))
+  );
+  if (artifact.creator.id !== tenantId || artifact.product.id !== productId) {
+    throw new Error("published Creator Corpus identity does not match its Registry release");
+  }
+  const declared = artifact.corpus.tools.find((tool) => tool.id === toolId);
+  if (!declared || (declared.kind !== "http_function" && declared.kind !== "mcp_tool") || !declared.connection_ref) {
+    throw new Error(`published Creator tool does not exist or has no connection reference: ${toolId}`);
+  }
+  return context.store.resolveCreatorToolConnectionByReference({
+    tenantId,
+    connectionId: declared.connection_ref,
+    expectedKind: declared.kind === "http_function" ? "http" : "mcp"
+  });
 }
 
 const SESSION_QUERY_REJECTED = Symbol("session-query-rejected");
