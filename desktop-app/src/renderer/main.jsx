@@ -239,7 +239,7 @@ function DesktopAuxiliaryWindow({ kind }) {
   return (
     <main className="desktop-auxiliary-window" aria-labelledby="auxiliary-window-title">
       <header className="desktop-auxiliary-header" data-tauri-drag-region>
-        <HatchBrand className="desktop-auxiliary-brand" aria-label="Hatch." />
+        <HatchBrand className="desktop-auxiliary-brand" logoVariant="lockup" aria-label="Hatch." />
         <div>
           <h1 id="auxiliary-window-title">{about ? "About Hatch" : t("settings.title")}</h1>
         </div>
@@ -249,7 +249,7 @@ function DesktopAuxiliaryWindow({ kind }) {
           <p className="desktop-auxiliary-lede">Creator agents, on your terms.</p>
           <p>Hatch keeps the desktop boundary native while React renders the conversation work surface.</p>
           <dl className="desktop-auxiliary-facts">
-          <div><dt>Version</dt><dd>0.1.33</dd></div>
+          <div><dt>Version</dt><dd>0.1.34</dd></div>
             <div><dt>Architecture</dt><dd>Tauri Hybrid</dd></div>
           </dl>
         </section>
@@ -804,18 +804,6 @@ function App() {
       return "rejected";
     }
     return "waiting";
-  }
-
-  async function checkPendingSubmission() {
-    const holder = draftSessionRef.current;
-    try {
-      const outcome = await reconcilePendingSubmission();
-      if (draftSessionRef.current !== holder || sessionDraftKeyRef.current !== holder?.key) return;
-      setStatus(t(outcome === "retry" ? "submission.retryReady" : outcome === "rejected" ? "submission.rejected"
-        : outcome === "accepted" ? "submission.accepted" : "submission.unknown"));
-    } catch (error) {
-      if (draftSessionRef.current === holder && sessionDraftKeyRef.current === holder?.key) setStatus(errorMessage(error));
-    }
   }
 
   async function returnPendingToDraft() {
@@ -1488,8 +1476,22 @@ function App() {
   const sendUserMessage = useCallback(async (appendMessage) => {
     if (!draftEditable || submissionPreparingRef.current) return;
     submissionPreparingRef.current = true;
+    let optimisticRunId = "";
+    let optimisticStartedAt = 0;
+    let submissionDispatched = false;
     try {
     const submittingSession = draftSessionRef.current.session;
+    const initialPending = submittingSession.snapshot().pending;
+    const initialText = initialPending?.text ?? textFromAppendMessage(appendMessage).trim();
+    const initialFiles = initialPending?.attachments ?? droppedFiles;
+    if (!initialPending && (initialText || initialFiles.length > 0)) {
+      optimisticRunId = `run_${stableRandomId()}`;
+      optimisticStartedAt = Date.now();
+      setMessages((current) => [
+        ...current.filter((message) => message.id !== `${optimisticRunId}_user`),
+        makeUserMessage(`${optimisticRunId}_user`, initialText, optimisticStartedAt, { runId: optimisticRunId })
+      ]);
+    }
     const submittedTextVersion = submittingSession.textVersion();
     try { await submittingSession.flush(); }
     catch (error) {
@@ -1531,8 +1533,8 @@ function App() {
       return;
     }
 
-    const content = savedPending?.text ?? textFromAppendMessage(appendMessage).trim();
-    const submissionFiles = savedPending?.attachments ?? droppedFiles;
+    const content = savedPending?.text ?? initialText;
+    const submissionFiles = savedPending?.attachments ?? initialFiles;
     if (!content && submissionFiles.length === 0) return;
     // Workspace and permission changes are pending Desktop preferences until a
     // new turn starts. The native window captures this exact snapshot before
@@ -1540,7 +1542,7 @@ function App() {
     // an `approved_by_user` flag to authorize the tool itself.
     const accessSnapshot = savedPending ? requirePendingAccessSnapshot(savedPending)
       : createTurnAccessSnapshot(workspaceGrant?.grant_id, workspace, permissionMode);
-    const submissionRunId = savedPending?.runId ?? `run_${stableRandomId()}`;
+    const submissionRunId = savedPending?.runId ?? optimisticRunId ?? `run_${stableRandomId()}`;
     const submissionMessageId = savedPending?.clientMessageId ?? `message_${stableRandomId()}`;
     try {
       await synchronizeNativeToolContext(accessSnapshot, activeConversationId, submissionRunId);
@@ -1592,7 +1594,7 @@ function App() {
     permissionRef.current = permissionMode;
 
     const assistantId = `${runId}_assistant`;
-    const startedAt = Date.now();
+    const startedAt = optimisticStartedAt || Date.now();
     textRevealRef.current?.discard();
     activeRunRef.current = {
       runId,
@@ -1615,6 +1617,7 @@ function App() {
       setStatus("Service unavailable. Your message will stay here.");
       return;
     }
+    submissionDispatched = true;
     // The outbox and composer remain intact until message.accepted (or the
     // canonical acceptance lookup) confirms server persistence.
     publishDraftSession(draftSessionRef.current);
@@ -1632,6 +1635,9 @@ function App() {
       publishDraftSession(draftSessionRef.current);
       setStatus(errorMessage(error));
     } finally {
+      if (optimisticRunId && !submissionDispatched) {
+        setMessages((current) => current.filter((message) => message.id !== `${optimisticRunId}_user`));
+      }
       submissionPreparingRef.current = false;
     }
   }, [conversationSession, buyerProfile.id, conversationId, conversationLibraryStatus, conversationReady, draftEditable, droppedFiles, permissionMode, send, workspace, workspaceGrant]);
@@ -2392,7 +2398,7 @@ function App() {
         auth_token: buyerSession.accessToken,
         entitlement_id: targetEntitlementId,
         conversation_id: conversationSession.scope.conversationId,
-        client_version: "0.1.33",
+        client_version: "0.1.34",
         local_tools: [...PLATFORM_LOCAL_TOOLS],
       }));
     },
@@ -3863,11 +3869,10 @@ function App() {
                 </ThreadPrimitive.Viewport>
                 <ThreadPrimitive.ViewportFooter className="composer-footer">
                   {sessionCloseError ? <div role="alert">{sessionCloseError}</div> : null}
-                  {pendingSubmission ? (
+                  {pendingSubmission?.status === "failed" ? (
                     <div role="status">
-                      <small>{t(pendingSubmission.status === "failed" ? "submission.rejected" : "submission.unknown")}</small>
-                      <Button type="button" onClick={() => void checkPendingSubmission()}>{t("submission.check")}</Button>
-                      {pendingSubmission.status === "failed" ? <Button type="button" onClick={() => void returnPendingToDraft()}>{t("submission.returnToDraft")}</Button> : null}
+                      <small>{t("submission.rejected")}</small>
+                      <Button type="button" onClick={() => void returnPendingToDraft()}>{t("submission.returnToDraft")}</Button>
                     </div>
                   ) : null}
                   {draftState.key === draftKey && draftState.error ? (
@@ -3985,7 +3990,7 @@ function DesktopSidebar({
   return (
     <div className="desktop-sidebar-content">
       <div className="desktop-sidebar-heading">
-        <HatchBrand className="desktop-sidebar-brand" aria-label="Hatch." />
+        <HatchBrand className="desktop-sidebar-brand" logoVariant="lockup" aria-label="Hatch." />
       </div>
       <nav className="desktop-source-list" aria-label={t("sidebar.creatorAgents")}>
         <div className="desktop-source-list-label">{t("sidebar.yourExperts")}</div>
@@ -4860,7 +4865,7 @@ function LaunchScreen() {
   return (
     <main className="welcome-screen status-screen">
       <WelcomeTitlebarDragRegion />
-      <HatchBrand className="welcome-brand" aria-label="Hatch" />
+      <HatchBrand className="welcome-brand" logoVariant="lockup" aria-label="Hatch" />
       <section className="status-card">
         <span className="eyebrow">{t("app.name")}</span>
         <h1>{t("startup.openingWorkspace")}</h1>
@@ -4875,7 +4880,7 @@ function NetworkErrorScreen({ message, onRetry, onSignOut }) {
   return (
     <main className="welcome-screen status-screen">
       <WelcomeTitlebarDragRegion />
-      <HatchBrand className="welcome-brand" aria-label="Hatch" />
+      <HatchBrand className="welcome-brand" logoVariant="lockup" aria-label="Hatch" />
       <section className="status-card">
         <span className="eyebrow">{t("connection.eyebrow")}</span>
         <h1>{t("connection.cannotReachTitle")}</h1>
@@ -4893,7 +4898,7 @@ function UnsupportedRoleScreen({ profile, onSignOut }) {
   return (
     <main className="welcome-screen status-screen">
       <WelcomeTitlebarDragRegion />
-      <HatchBrand className="welcome-brand" aria-label="Hatch" />
+      <HatchBrand className="welcome-brand" logoVariant="lockup" aria-label="Hatch" />
       <section className="status-card">
         <span className="eyebrow">{t("auth.consumerDesktopEyebrow")}</span>
         <h1>{t("auth.buyerAccountTitle")}</h1>
@@ -4910,7 +4915,7 @@ function EmptyAgentsScreen({ profile, onBrowse, onRefresh, onSignOut, refreshing
   return (
     <main className="welcome-screen status-screen empty-agents-screen">
       <WelcomeTitlebarDragRegion />
-      <HatchBrand className="welcome-brand" aria-label="Hatch" />
+      <HatchBrand className="welcome-brand" logoVariant="lockup" aria-label="Hatch" />
       <section className="status-card empty-agents-card">
         <div className="empty-agents-header">
           <span className="avatar">{profile.initials}</span>
@@ -4946,7 +4951,7 @@ function SignInScreen({ onSignIn, status, error }) {
     <main className="welcome-screen">
       <WelcomeTitlebarDragRegion />
       <section className="sign-in-card">
-        <HatchBrand className="welcome-brand" aria-label="Hatch" />
+        <HatchBrand className="welcome-brand" logoVariant="lockup" aria-label="Hatch" />
         <h1>{t("auth.signInTitle")}</h1>
         <form className="sign-in-form" onSubmit={submit}>
           <FormField className="field" label={t("auth.email")}>

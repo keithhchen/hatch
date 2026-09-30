@@ -42,6 +42,7 @@
 .hatch-brand__mark { display: block; width: 30px; height: 30px; flex: 0 0 auto; }
 .hatch-brand__wordmark { display: block; width: auto; height: 1em; font-size: var(--hatch-type-title); line-height: 1; }
 .hatch-brand__wordmark-image { display: block; width: auto; height: 100%; }
+.hatch-brand__lockup { display: block; width: auto; height: 30px; flex: 0 0 auto; }
 
 .hui-atmospheric-paper {
   position: relative;
