@@ -56,7 +56,7 @@ import type { AboutYouAnswerPair } from "./creatorLearning/aboutYouNode.js";
 import { PostgresDistillationGraphStore } from "./creatorLearning/distillationGraphStore.js";
 import { CorpusPublisher, CorpusPublishError } from "./creatorLearning/corpusPublisher.js";
 import { CreatorRegistryReleaseStore, type CreatorRegistryRelease } from "./creatorLearning/creatorRegistryRelease.js";
-import { CREATOR_REGISTRY_ARTIFACT_SCHEMA } from "./creatorLearning/creatorRegistry.js";
+import { corpusOutputSchema } from "./creatorLearning/corpusNode.js";
 import { QdrantKnowledgeIndexer } from "./qdrantIndexer.js";
 import {
   HttpRequestGate,
@@ -1095,13 +1095,10 @@ async function resolvePublishedCreatorToolConnection(
     throw new Error("published Creator release does not match the requested product");
   }
   if (!context.nodeObjectStore) throw new Error("Creator Registry object storage is unavailable");
-  const artifact = CREATOR_REGISTRY_ARTIFACT_SCHEMA.parse(
+  const corpus = corpusOutputSchema.parse(
     JSON.parse((await context.nodeObjectStore.get(release.corpus_ref)).toString("utf8"))
   );
-  if (artifact.creator.id !== tenantId || artifact.product.id !== productId) {
-    throw new Error("published Creator Corpus identity does not match its Registry release");
-  }
-  const declared = artifact.corpus.tools.find((tool) => tool.id === toolId);
+  const declared = corpus.tools.find((tool) => tool.id === toolId);
   if (!declared || (declared.kind !== "http_function" && declared.kind !== "mcp_tool") || !declared.connection_ref) {
     throw new Error(`published Creator tool does not exist or has no connection reference: ${toolId}`);
   }
