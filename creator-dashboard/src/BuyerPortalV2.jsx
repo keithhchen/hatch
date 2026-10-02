@@ -740,7 +740,7 @@ function EntitlementCard({entitlement, navigate }) {
       <div className="buyer-v2__card-topline"><StatusChip status={status} label={t(entitlementStatusLabel(status))} /><span>{creatorName(entitlement.creator || product)}</span></div>
       <h2>{productName(product)}</h2>
       <p>{entitlementSummary(entitlement)}</p>
-      <div className="buyer-v2__card-footer"><LinkButton variant="secondary" to={`${LIBRARY_ROOT}/${encodeURIComponent(id)}`} navigate={navigate}>{t('View access')}</LinkButton></div>
+      <div className="buyer-v2__card-footer"><LinkButton variant="secondary" to={`${LIBRARY_ROOT}/${encodeURIComponent(id)}`} navigate={navigate}>{t('View access')}</LinkButton>{["active", "reserved"].includes(status) ? <LinkButton to={`/chat/product/${encodeURIComponent(productId(entitlement))}`} navigate={navigate}>Chat in browser</LinkButton> : null}</div>
     </article>
   );
 }
@@ -778,7 +778,7 @@ function EntitlementPage({id, request, navigate, session, downloadUrl }) {
           [t("Refund / cancellation"), reversalStatus ? sentenceCase(reversalStatus) : (status === "revoked" ? "Access revoked" : null)],
           [t("Support reference"), entitlement.entitlement_id || entitlement.id]
         ]} />{orderId ? <RouterLink className="buyer-v2__text-link" to={`${ORDERS_ROOT}/${encodeURIComponent(orderId)}`} navigate={navigate}>{t('View originating order →')}</RouterLink> : null}</section>
-        <aside className="buyer-v2__activation-card"><span className="buyer-v2__eyebrow">{t('Desktop activation')}</span><h2>{canOpen ? "Continue in your Workspace." : t(entitlementRecoveryTitle(status))}</h2><p>{t(entitlementRecoveryCopy(status))}</p>{canOpen ? <Button asChild><a href={desktopUrl(entitlement, product)} onClick={() => trackPortalEvent(request, "desktop_open_clicked", productTelemetry(product))}>{t('Open Hatch Desktop')}</a></Button> : null}<a className="buyer-v2__secondary-download" href={downloadUrl} target="_blank" rel="noreferrer" onClick={() => trackPortalEvent(request, "desktop_download_clicked", productTelemetry(product))}>{t('Download Hatch Desktop')}</a></aside>
+        <aside className="buyer-v2__activation-card"><span className="buyer-v2__eyebrow">{t('Your Agent')}</span><h2>{canOpen ? "Continue your conversation." : t(entitlementRecoveryTitle(status))}</h2><p>{t(entitlementRecoveryCopy(status))}</p>{canOpen ? <><LinkButton to={`/chat/product/${encodeURIComponent(productId(entitlement))}`} navigate={navigate}>Chat in browser</LinkButton><Button asChild><a href={desktopUrl(entitlement, product)} onClick={() => trackPortalEvent(request, "desktop_open_clicked", productTelemetry(product))}>{t('Open Hatch Desktop')}</a></Button></> : null}<a className="buyer-v2__secondary-download" href={downloadUrl} target="_blank" rel="noreferrer" onClick={() => trackPortalEvent(request, "desktop_download_clicked", productTelemetry(product))}>{t('Download Hatch Desktop')}</a></aside>
       </div>
       <section className="buyer-v2__timeline-section"><div><span className="buyer-v2__eyebrow">{t('Access history')}</span><h2>{t('Activity, without your private content.')}</h2><p>{t('Your purchase and access status stay visible on Web. Workspace paths, source files and conversations stay private.')}</p></div>{deliveries.length ? <Timeline entries={deliveries.map(deliveryTimelineEntry)} /> : <EmptyState compact title={t('No activity yet')} body="Open Hatch Desktop when you are ready to continue." />}</section>
     </div>

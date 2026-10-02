@@ -201,7 +201,7 @@ export class PiAgentRuntime implements AgentRuntime {
       // summary delimiters.
       convertToLlm,
       initialState: {
-        systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow, ctx.briefSnapshot),
+        systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools),
         model,
         thinkingLevel: resolveLlmProfile().thinkingLevel,
         messages: [...contextMessages, ...storedMessages],
@@ -215,7 +215,7 @@ export class PiAgentRuntime implements AgentRuntime {
             toolName: toolCall.name,
             arguments: args as Record<string, unknown>,
             messages: auditMessagesForRun(ctx, transcriptMessages, undefined),
-            systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow, ctx.briefSnapshot),
+            systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools),
             auditContext: ctx.deliveryAuditContext,
             signal
           });
@@ -328,7 +328,7 @@ export class PiAgentRuntime implements AgentRuntime {
           workflow: deliveryWorkflow,
           draft: draftContent,
           messages: auditMessagesForRun(ctx, transcriptMessages, finalAssistant),
-          systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow, ctx.briefSnapshot),
+          systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools),
           auditContext: ctx.deliveryAuditContext,
           signal: ctx.abortSignal
         })
@@ -727,7 +727,7 @@ function auditMessagesForRun(
     ? transcriptMessages.slice(0, -1)
     : transcriptMessages;
   return [
-    { role: "system", content: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow, ctx.briefSnapshot) },
+    { role: "system", content: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools) },
     ...buildRuntimeContextMessages(
       ctx.sessionSkills.rendered.section,
       ctx.activatedSkills ?? []

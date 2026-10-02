@@ -16,11 +16,13 @@ import {
 import { createAgentRuntime, type AgentRuntime, type RuntimeSessionSkills } from "./agentRuntime.js";
 import {
   clientMessageInputDigest,
+  ClientToolCapabilityPolicy,
   persistedAttachment,
   MAX_RICH_TOOL_RESULT_BYTES,
   parseInboundMessage,
   TASK_START_MESSAGE_CONTENT,
   type ConversationMessage,
+  type BoundRunStart,
   type ClientHello,
   type OutboundMessage,
   type OutputFinishReason,
@@ -2773,7 +2775,11 @@ async function handleRuntimeSocket(
             return;
           }
 
-          const boundMessage: RunStart = { ...message, conversation_id: storageConversationId };
+          const boundMessage: BoundRunStart = {
+            ...message,
+            conversation_id: storageConversationId,
+            local_tools: new ClientToolCapabilityPolicy(hello.local_tools).forRun(message.local_tools)
+          };
           const runAbortController = new AbortController();
           activeRunAbortControllers.set(message.run_id, runAbortController);
           const state = new RunStateMachine(message.run_id, storageConversationId, store, async (status, reason) => {
@@ -2932,7 +2938,7 @@ export function protectPrivateAgentBoundary(
 }
 
 async function runOneTurn(
-  input: RunStart,
+  input: BoundRunStart,
   persistedUserMessage: ConversationMessage,
   hello: ClientHello,
   sessionSkills: RuntimeSessionSkills,
@@ -2985,7 +2991,7 @@ async function runOneTurn(
       ? await materializeAgentCorpus(
         binding.agentCorpusRoot,
         input.message.content,
-        hello.local_tools,
+        input.local_tools,
         binding.runtimeDigest ?? binding.corpusDigest,
         abortSignal
       )
@@ -3214,7 +3220,7 @@ async function runOneTurn(
       messages,
       sessionSkills,
       activatedSkills: [],
-      clientTools: materializedAgent?.localTools ?? hello.local_tools,
+      clientTools: materializedAgent?.localTools ?? input.local_tools,
       allowedExternalTools: materializedAgent?.externalTools,
       externalToolDefinitions: materializedAgent?.externalToolDefinitions,
       persistModelMessage: async (message) => {

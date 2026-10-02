@@ -27,6 +27,7 @@ COPY packages/brand /app/packages/brand
 COPY creator-dashboard/package.json creator-dashboard/package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=build /workspace/creator-dashboard/server.mjs ./server.mjs
+COPY --from=build /workspace/creator-dashboard/webChatRuntimeBridge.mjs ./webChatRuntimeBridge.mjs
 COPY --from=build /workspace/creator-dashboard/portalState.mjs ./portalState.mjs
 COPY --from=build /workspace/creator-dashboard/contactForm.mjs ./contactForm.mjs
 COPY --from=build /workspace/creator-dashboard/providerAdapters.mjs ./providerAdapters.mjs

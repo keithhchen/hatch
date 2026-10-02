@@ -11,6 +11,7 @@ const BuyerPortalV2 = React.lazy(() => import("./BuyerPortalV2.jsx").then(({ Buy
 const CreatorPortalV2 = React.lazy(() => import("./CreatorPortalV2.jsx").then(({ CreatorPortalV2: Component }) => ({ default: Component })));
 const DownloadPage = React.lazy(() => import("./DownloadPage.jsx").then(({ DownloadPage: Component }) => ({ default: Component })));
 const WebPage = React.lazy(() => import("./web/WebPage.jsx"));
+const WebChatPage = React.lazy(() => import("./WebChatPage.jsx"));
 
 class AppErrorBoundary extends React.Component {
   constructor(props) {
@@ -149,6 +150,16 @@ function App() {
         <WebPage />
       </Suspense>
     );
+  }
+
+  const chatMatch = location.pathname.match(/^\/chat\/product\/([0-9a-f-]{36})$/i);
+  if (chatMatch) {
+    if (sessionStatus === "loading") return <AppLoading />;
+    if (sessionStatus !== "authenticated") {
+      return <RouteRedirect to={`/sign-in?returnTo=${encodeURIComponent(location.href)}`} navigate={location.navigate} />;
+    }
+    if (profile?.role !== "user") return <RoleBoundary navigate={location.navigate} />;
+    return <Suspense fallback={<AppLoading />}><WebChatPage productId={chatMatch[1]} request={dashboardRequest} /></Suspense>;
   }
 
   if (location.pathname === CREATOR_ROOT
