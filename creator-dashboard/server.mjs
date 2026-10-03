@@ -2710,6 +2710,7 @@ function publicProfile(profile) {
     id: profile.id,
     role: profile.role,
     display_name: displayName,
+    avatar_url: profile.avatar_url ?? null,
     handle: profile.handle ?? `@${profile.id}`,
     initials,
     capabilities: Array.isArray(profile.capabilities) ? profile.capabilities.map(String) : []
