@@ -72,8 +72,9 @@ or separate production Runtime exists. The server uses two Compose projects:
    project-level `HatchRuntimeRole` to the ECS instance before deploying; the
    container obtains short-lived credentials from IMDSv2 and uses the Shanghai
    Guardrails VPC endpoint.
-   Avatar uploads also require `oss:ProcessImm`, `oss:PutObjectAcl`, and
-   `oss:DeleteObject` scoped to the bucket's `account-avatars/*` object prefix.
+   Avatar uploads also require `oss:ProcessImm`, `oss:PostProcessTask`,
+   `oss:PutObjectAcl`, and `oss:DeleteObject` scoped to the bucket's
+   `account-avatars/*` object prefix.
    Keep `HATCH_COMMERCE_PAYMENT_MODE=disabled` until a production provider
    bridge is configured. Enabling `provider` makes CD require non-empty
    `HATCH_PAYMENT_PROVIDER_BASE_URL`, `HATCH_PAYMENT_PROVIDER_API_TOKEN`, and
