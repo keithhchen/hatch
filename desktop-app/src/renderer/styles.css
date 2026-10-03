@@ -3351,7 +3351,7 @@ h2 {
   border-radius: 50%;
   background: #111;
   color: #fffaf3;
-  font-family: var(--hatch-font-display);
+  font-family: var(--hatch-font-ui);
   font-weight: var(--hui-weight-regular);
 }
 
