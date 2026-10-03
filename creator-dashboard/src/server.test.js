@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -75,6 +75,81 @@ test("Dashboard readiness fails closed when Registry is unavailable", async (con
   assert.equal((await unhealthy.json()).error.code, "dashboard_not_ready");
   const live = await fetch(`${serverUrl(api)}/healthz`);
   assert.equal(live.status, 200);
+});
+
+test("consumer avatar changes proxy through the authenticated Registry session", async (context) => {
+  const account = {
+    id: "buyer-avatar-test",
+    role: "user",
+    email: "buyer@example.test",
+    display_name: "Buyer"
+  };
+  const avatarRequests = [];
+  const registry = createServer(async (request, response) => {
+    const requestUrl = new URL(request.url ?? "/", "http://registry.test");
+    const body = [];
+    for await (const chunk of request) body.push(Buffer.from(chunk));
+    const payload = Buffer.concat(body);
+    response.setHeader("content-type", "application/json");
+    if (requestUrl.pathname === "/v1/auth/signin") {
+      response.end(JSON.stringify({ token: "signed-user-token", account }));
+      return;
+    }
+    if (requestUrl.pathname === "/v1/auth/me") {
+      response.end(JSON.stringify(account));
+      return;
+    }
+    if (requestUrl.pathname === "/v1/auth/me/avatar") {
+      avatarRequests.push({ method: request.method, authorization: request.headers.authorization, contentType: request.headers["content-type"], body: payload });
+      response.end(JSON.stringify({ ...account, avatar_url: request.method === "PUT" ? "https://avatar.example.test/account.webp" : null }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: { code: "not_found", message: "Not found." } }));
+  });
+  await listen(registry);
+  context.after(() => registry.close());
+
+  const stateDirectory = path.join(path.dirname(new URL(import.meta.url).pathname), "../.local-uat", `avatar-proxy-${randomUUID()}`);
+  await mkdir(stateDirectory, { recursive: true });
+  const dashboard = await createDashboardApp({
+    ledgerPath: path.join(stateDirectory, "ledger.jsonl"),
+    registryUrl: serverUrl(registry)
+  });
+  const api = createServer(dashboard.handler);
+  await listen(api);
+  context.after(() => api.close());
+
+  const login = await fetch(`${serverUrl(api)}/v1/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: account.email, password: "test-only" })
+  });
+  assert.equal(login.status, 200);
+  const cookies = login.headers.getSetCookie();
+  const cookie = cookies.map((value) => value.split(";", 1)[0]).join("; ");
+  const csrfCookie = cookies.find((value) => value.startsWith("hatch_web_csrf="));
+  assert.ok(csrfCookie);
+  const csrf = decodeURIComponent(csrfCookie.split(";", 1)[0].slice("hatch_web_csrf=".length));
+
+  const upload = await fetch(`${serverUrl(api)}/v1/auth/me/avatar`, {
+    method: "PUT",
+    headers: { cookie, "x-csrf-token": csrf, "content-type": "image/png" },
+    body: Buffer.from("avatar-image-bytes")
+  });
+  assert.equal(upload.status, 200);
+  assert.equal((await upload.json()).avatar_url, "https://avatar.example.test/account.webp");
+  assert.equal(avatarRequests[0].authorization, "Bearer signed-user-token");
+  assert.equal(avatarRequests[0].contentType, "image/png");
+  assert.deepEqual(avatarRequests[0].body, Buffer.from("avatar-image-bytes"));
+
+  const remove = await fetch(`${serverUrl(api)}/v1/auth/me/avatar`, {
+    method: "DELETE",
+    headers: { cookie, "x-csrf-token": csrf }
+  });
+  assert.equal(remove.status, 200);
+  assert.equal((await remove.json()).avatar_url, null);
+  assert.deepEqual(avatarRequests.map(({ method }) => method), ["PUT", "DELETE"]);
 });
 
 test("browser authentication keeps its session through a transient Registry failure", async (context) => {
