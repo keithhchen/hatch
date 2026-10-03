@@ -160,6 +160,7 @@ export default function WebChatPage({ productId, request, navigate, profile, onS
   const [conversationCursor, setConversationCursor] = useState(null);
   const [conversationId, setConversationId] = useState("");
   const [messages, setMessages] = useState([]);
+  const [snapshotConversationId, setSnapshotConversationId] = useState(null);
   const [historyCursor, setHistoryCursor] = useState(null);
   const [draft, setDraft] = useState("");
   const [images, setImages] = useState([]);
@@ -207,12 +208,14 @@ export default function WebChatPage({ productId, request, navigate, profile, onS
 
   const statusText = status.text ?? t(status.key);
   const errorText = webChatErrorText(error, locale);
+  const snapshotPending = Boolean(conversationId && snapshotConversationId !== conversationId);
   const refresh = useCallback(async (id) => {
     const snapshot = await client.snapshot(id);
     if (conversationRef.current !== id) return { snapshot, messages: visibleMessagesRef.current, stale: true };
     if (snapshot.conversation?.id !== id) throw new WebChatPresentationError("historyIdentityMismatch");
     const reconciliation = snapshotReconcilerRef.current.reconcile(id, visibleMessagesRef.current, snapshot);
     if (!reconciliation.accepted) return { snapshot, messages: reconciliation.messages, stale: true };
+    setSnapshotConversationId(id);
     const briefSnapshot = snapshot.conversation?.brief_snapshot;
     if (briefSnapshot) setConversations(current => current.map(item => item.id === id ? { ...item, brief_snapshot: briefSnapshot } : item));
     setHistoryCursor(current => current ?? snapshot.before_cursor ?? null);
@@ -269,6 +272,7 @@ export default function WebChatPage({ productId, request, navigate, profile, onS
     setAccess(null);
     setConversations([]);
     setConversationId("");
+    setSnapshotConversationId(null);
     setStatus({ key: "checkingSubscription" });
     request("/v1/user/product-access").then(async payload => {
       const entitlement = payload.creator_agents?.find(entry => entry.product_id === productId);
@@ -296,6 +300,7 @@ export default function WebChatPage({ productId, request, navigate, profile, onS
     liveTimelineRef.current.reset();
     setLiveTimeline([]);
     setHistoryCursor(null);
+    setSnapshotConversationId(null);
     updateMessages([]);
     setStatus({ key: "connecting" });
     socket.onopen = () => connection.hello();
@@ -498,7 +503,7 @@ export default function WebChatPage({ productId, request, navigate, profile, onS
 
   const send = async event => {
     event.preventDefault();
-    if (!conversationId || !access || activeRun || (!draft.trim() && images.length === 0)) return;
+    if (!conversationId || snapshotPending || !access || activeRun || (!draft.trim() && images.length === 0)) return;
     const connection = socketRef.current;
     if (!connection?.ready) { setError(new WebChatPresentationError("disconnected")); return; }
     followOutputRef.current = true;
@@ -610,17 +615,18 @@ export default function WebChatPage({ productId, request, navigate, profile, onS
       </header>
       {error && access ? <div className="web-chat__error" role="alert"><CircleAlert aria-hidden="true" /><span>{errorText}</span><button type="button" onClick={() => { setError(null); setConnectionVersion(value => value + 1); }}><RotateCw aria-hidden="true" /><span>{t("retry")}</span></button></div> : null}
       <div className="web-chat__messages" ref={messagesRef} onScroll={event => { const element = event.currentTarget; followOutputRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 112; }} aria-label={t("chatMessages")}>
-        {historyCursor ? <button type="button" className="web-chat__history" onClick={() => void loadHistory().catch(cause => setError(cause))}><span>{t("viewEarlierMessages")}</span><ChevronUp aria-hidden="true" /></button> : null}
+        {!snapshotPending && historyCursor ? <button type="button" className="web-chat__history" onClick={() => void loadHistory().catch(cause => setError(cause))}><span>{t("viewEarlierMessages")}</span><ChevronUp aria-hidden="true" /></button> : null}
         {!access && !error ? <div className="web-chat__gate" role="status"><LoaderCircle aria-hidden="true" /><span>{statusText}</span></div> : null}
         {!access && error ? <div className="web-chat__gate web-chat__gate--error" role="alert"><CircleAlert aria-hidden="true" /><h2>{t("unableToOpenChat")}</h2><p>{errorText}</p><button type="button" onClick={() => location.reload()}><RotateCw aria-hidden="true" /><span>{t("checkingSubscriptionAgain")}</span></button></div> : null}
-        {access && messages.length === 0 && !activeRun ? <div className="web-chat__empty">
+        {access && snapshotPending && !error ? <div className="web-chat__gate" role="status"><LoaderCircle aria-hidden="true" /><span>{t("loadingConversation")}</span></div> : null}
+        {access && !conversationId && messages.length === 0 && !activeRun ? <div className="web-chat__empty">
           <span className="web-chat__empty-mark"><Sparkles aria-hidden="true" /></span>
           <span className="web-chat__eyebrow">{t("startWithAnIdea")}</span>
           <h2>{t("emptyHeadline")}</h2>
           <p>{t("emptyConversationBody", { agent: name })}</p>
           {!conversationId ? <button type="button" className="web-chat__empty-action" onClick={newConversation} disabled={!access}><Plus aria-hidden="true" />{t("newChat")}</button> : null}
         </div> : null}
-        {messages.map(message => <article className={`web-chat__message web-chat__message--${message.role}`} key={message.renderKey ?? `${message.run_id}-${message.role}`}>
+        {!snapshotPending ? messages.map(message => <article className={`web-chat__message web-chat__message--${message.role}`} key={message.renderKey ?? `${message.run_id}-${message.role}`}>
           <div className="web-chat__message-body">
             {message.role === "assistant" ? <span className="web-chat__speaker">{name}</span> : null}
             {message.role === "assistant"
@@ -638,16 +644,16 @@ export default function WebChatPage({ productId, request, navigate, profile, onS
               </WebChatImageViewer>;
             })}
           </div>
-        </article>)}
+        </article>) : null}
       </div>
-      <form className="web-chat__composer" onSubmit={send}>
-        {images.length ? <div className="web-chat__images" aria-label={t("imagesToSend")}>{images.map(file => <span className="web-chat__image-chip" key={`${file.name}-${file.lastModified}`}><Paperclip aria-hidden="true" /><span title={file.name}>{file.name}</span><button type="button" aria-label={t("removeImage", { name: file.name })} onClick={() => setImages(current => current.filter(entry => entry !== file))}><X aria-hidden="true" /></button></span>)}</div> : null}
-        <textarea ref={draftRef} aria-label={t("messageAgent", { agent: name })} value={draft} onChange={event => setDraft(event.target.value)} placeholder={t("messagePlaceholder")} disabled={!conversationId || Boolean(activeRun)} onKeyDown={event => { if (event.key !== "Enter" || event.shiftKey || isImeConfirmation(event)) return; event.preventDefault(); void send(event); }} />
+      {conversationId ? <form className="web-chat__composer" aria-busy={snapshotPending} onSubmit={send}>
+        {images.length ? <div className="web-chat__images" aria-label={t("imagesToSend")}>{images.map(file => <span className="web-chat__image-chip" key={`${file.name}-${file.lastModified}`}><Paperclip aria-hidden="true" /><span title={file.name}>{file.name}</span><button type="button" aria-label={t("removeImage", { name: file.name })} onClick={() => setImages(current => current.filter(entry => entry !== file))} disabled={snapshotPending}><X aria-hidden="true" /></button></span>)}</div> : null}
+        <textarea ref={draftRef} aria-label={t("messageAgent", { agent: name })} value={draft} onChange={event => setDraft(event.target.value)} placeholder={t("messagePlaceholder")} disabled={snapshotPending || Boolean(activeRun)} onKeyDown={event => { if (event.key !== "Enter" || event.shiftKey || isImeConfirmation(event)) return; event.preventDefault(); void send(event); }} />
         <div className="web-chat__actions">
-          <div className="web-chat__composer-tools"><label className="web-chat__attach"><Image aria-hidden="true" /><input type="file" accept="image/*" multiple aria-label={t("addImages")} onChange={event => { const selected = [...event.target.files]; if (images.length + selected.length > 8) setError(new WebChatPresentationError("imageCountLimit")); else setImages(current => [...current, ...selected]); event.target.value = ""; }} disabled={!conversationId || Boolean(activeRun)} /></label></div>
-          {activeRun ? <button type="button" className="web-chat__stop" aria-label={t("stopReply")} onClick={cancel}><Square aria-hidden="true" /><span>{t("stopReply")}</span></button> : <button type="submit" className="web-chat__send" aria-label={t("sendMessage")} disabled={!conversationId || (!draft.trim() && !images.length)}><span>{t("send")}</span><ArrowUp aria-hidden="true" /></button>}
+          <div className="web-chat__composer-tools"><label className="web-chat__attach"><Image aria-hidden="true" /><input type="file" accept="image/*" multiple aria-label={t("addImages")} onChange={event => { const selected = [...event.target.files]; if (images.length + selected.length > 8) setError(new WebChatPresentationError("imageCountLimit")); else setImages(current => [...current, ...selected]); event.target.value = ""; }} disabled={snapshotPending || Boolean(activeRun)} /></label></div>
+          {activeRun ? <button type="button" className="web-chat__stop" aria-label={t("stopReply")} onClick={cancel}><Square aria-hidden="true" /><span>{t("stopReply")}</span></button> : <button type="submit" className="web-chat__send" aria-label={t("sendMessage")} disabled={snapshotPending || (!draft.trim() && !images.length)}><span>{t("send")}</span><ArrowUp aria-hidden="true" /></button>}
         </div>
-      </form>
+      </form> : null}
     </main>
     {briefOpen ? <div className="web-chat__brief-backdrop"><form ref={briefDialogRef} className="web-chat__brief" role="dialog" aria-modal="true" aria-labelledby="web-chat-brief-title" onSubmit={submitBrief}>
       <button type="button" className="web-chat__brief-close" aria-label={t("close")} onClick={() => setBriefOpen(false)}><X aria-hidden="true" /></button>
