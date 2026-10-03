@@ -248,14 +248,15 @@ function makeSessionFromAccount(account, accessToken, expiresAt) {
     id: account.id,
     name: account.display_name,
     role: account.role,
+    avatarUrl: account.avatar_url ?? null,
     accessToken,
     expiresAt
   });
 }
 
-function makeSession({ id, name, role, accessToken, expiresAt }) {
+function makeSession({ id, name, role, avatarUrl, accessToken, expiresAt }) {
   return Object.freeze({
-    ...(id && name && role ? { profile: Object.freeze({ id, name, role, initials: initials(name) }) } : {}),
+    ...(id && name && role ? { profile: Object.freeze({ id, name, role, initials: initials(name), avatar_url: avatarUrl ?? null }) } : {}),
     accessToken,
     ...(expiresAt ? { expiresAt } : {})
   });

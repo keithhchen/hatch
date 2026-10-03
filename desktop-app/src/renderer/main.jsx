@@ -10,6 +10,7 @@ import "@hatch/ui/theme.css";
 import {
   Button,
   ButtonControl,
+  Avatar,
   DropdownMenu,
   FormField,
   HatchBrand,
@@ -4003,7 +4004,7 @@ function DesktopSidebar({
                 active={selected}
                 aria-expanded={selected}
                 className={`desktop-source-row agent ${selected ? "selected" : ""}`}
-                icon={<span className="creator-avatar">{agent.creatorInitials}</span>}
+                icon={<Avatar className="desktop-account-avatar creator-avatar" src={agent.creatorAvatarUrl} name={agent.creator} fallback={agent.creatorInitials?.charAt(0)} size="small" />}
                 trailing={selected
                   ? <ChevronDown className="desktop-agent-disclosure" aria-hidden="true" />
                   : <ChevronRight className="desktop-agent-disclosure" aria-hidden="true" />}
@@ -4066,7 +4067,7 @@ function DesktopSidebar({
       </nav>
       <div className="desktop-sidebar-footer">
         <div className="desktop-sidebar-footer__identity">
-          <span className="avatar">{profile.initials}</span>
+          <Avatar className="desktop-account-avatar avatar" src={profile.avatar_url} name={profile.name} fallback={profile.initials?.charAt(0)} size="small" />
           <span className="desktop-sidebar-account"><strong>{profile.name}</strong></span>
         </div>
         <div className="profile-menu">
@@ -4741,7 +4742,7 @@ function EmptyThread({ connected, creatorAgent, loadingKey }) {
   }
   return (
     <div className="empty-thread">
-      <span className="creator-avatar large">{creatorAgent.creatorInitials}</span>
+      <Avatar className="desktop-account-avatar creator-avatar large" src={creatorAgent.creatorAvatarUrl} name={creatorAgent.creator} fallback={creatorAgent.creatorInitials?.charAt(0)} size="large" />
       <span className="empty-kicker">{creatorAgent.creator}</span>
       <h2>
         {connected
@@ -4918,7 +4919,7 @@ function EmptyAgentsScreen({ profile, onBrowse, onRefresh, onSignOut, refreshing
       <HatchBrand className="welcome-brand" logoVariant="lockup" aria-label="Hatch" />
       <section className="status-card empty-agents-card">
         <div className="empty-agents-header">
-          <span className="avatar">{profile.initials}</span>
+          <Avatar className="desktop-account-avatar avatar" src={profile.avatar_url} name={profile.name} fallback={profile.initials?.charAt(0)} size="small" />
           <span><strong>{profile.name}</strong></span>
           <Button className="profile-sign-out" variant="ghost" size="small" type="button" onClick={onSignOut}>{t("auth.signOut")}</Button>
         </div>

@@ -52,6 +52,11 @@ describe("desktop system appearance contract", () => {
     );
   });
 
+  it("keeps account and Creator fallback avatars black, circular, and fixed-size", () => {
+    expect(stylesheet).toMatch(/\.desktop-account-avatar\.hui-avatar\s*\{[\s\S]*?aspect-ratio:\s*1;[\s\S]*?border-radius:\s*50%;[\s\S]*?background:\s*#111;/);
+    expect(stylesheet).toMatch(/\.desktop-sidebar-footer \.desktop-account-avatar\.hui-avatar\.is-small\s*\{[\s\S]*?min-width:\s*30px;[\s\S]*?min-height:\s*30px;/);
+  });
+
   it("keeps the creator label regular and lets the sidebar use the shared brand scale", () => {
     expect(stylesheet).toMatch(
       /\.desktop-source-list-label\s*\{[\s\S]*?font-family:\s*var\(--hatch-font-pill\);[\s\S]*?font-weight:\s*400;/

@@ -35,7 +35,7 @@ describe("account sessions", () => {
 
   it("signs in against the Registry and accepts an empty Agent library", async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
-      account: { id: userId, role: "user", email: "jordan@example.com", display_name: "Jordan Lee" },
+      account: { id: userId, role: "user", email: "jordan@example.com", display_name: "Jordan Lee", avatar_url: "https://media.example/jordan.webp" },
       session: { token: "opaque-token", expires_at: "2026-11-08T00:00:00.000Z" }
     }), { status: 200, headers: { "content-type": "application/json" } }));
     const signedIn = await signInAuthSession(
@@ -44,7 +44,7 @@ describe("account sessions", () => {
       fetchImpl
     );
     expect(signedIn).toEqual({
-      profile: { id: userId, name: "Jordan Lee", role: "user", initials: "JL" },
+      profile: { id: userId, name: "Jordan Lee", role: "user", initials: "JL", avatar_url: "https://media.example/jordan.webp" },
       accessToken: "opaque-token",
       expiresAt: "2026-11-08T00:00:00.000Z"
     });
@@ -70,11 +70,12 @@ describe("account sessions", () => {
       role: "user",
       email: "jordan@example.com",
       display_name: "Jordan Lee",
+      avatar_url: "https://media.example/jordan.webp",
       session_expires_at: "2026-11-08T00:00:00.000Z"
     }), { status: 200 }));
     const account = await fetchAuthAccount("https://hatch.example", "opaque-token", fetchImpl);
     expect(hydrateAuthSession({ accessToken: "opaque-token" }, account)).toMatchObject({
-      profile: { id: userId, role: "user" },
+      profile: { id: userId, role: "user", avatar_url: "https://media.example/jordan.webp" },
       accessToken: "opaque-token",
       expiresAt: "2026-11-08T00:00:00.000Z"
     });

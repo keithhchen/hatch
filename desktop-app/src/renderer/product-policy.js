@@ -15,6 +15,7 @@ export function creatorAgentFromSession(message) {
     id: agent.product.id,
     creator: agent.creator.name,
     creatorInitials: initials(agent.creator.name),
+    creatorAvatarUrl: agent.creator.avatar_url ?? agent.creator.image_url ?? null,
     name: agent.product.name,
     description: agent.product.description || "Work with this Creator Agent in your own files and context.",
     boundary: "",
@@ -58,7 +59,11 @@ export function creatorAgentFromBoundSession(message, entitlement, currentAgent)
     || expected.creatorId !== received.creatorId) {
     return currentAgent;
   }
-  return creatorAgentFromSession(message);
+  const runtimeAgent = creatorAgentFromSession(message);
+  return Object.freeze({
+    ...runtimeAgent,
+    creatorAvatarUrl: runtimeAgent.creatorAvatarUrl ?? currentAgent?.creatorAvatarUrl ?? null
+  });
 }
 
 function initials(name) {

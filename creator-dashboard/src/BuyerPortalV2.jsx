@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Menu } from "lucide-react";
 import {
-  Avatar,
   Button,
   DropdownMenu,
   Checkbox as HatchCheckbox,
@@ -17,6 +16,7 @@ import {
 } from "@hatch/ui";
 import { CheckoutSummary } from "@hatch/ui/product";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
+import { AccountAvatar } from "./AccountAvatar.jsx";
 import { LanguageSwitcher } from "./LanguageSwitcher.jsx";
 import { useLocale } from "./locale.jsx";
 import { buyerT } from "./buyerI18n.js";
@@ -214,7 +214,7 @@ function BuyerShell({route, navigate, session, downloadUrl, children }) {
             <a className="buyer-v2__download-quiet" href={downloadUrl} target="_blank" rel="noreferrer">{t('Download')}</a>
             {authenticated ? (
               <>
-                <RouterLink className="buyer-v2__avatar" to={ACCOUNT_ROOT} navigate={navigate} aria-label={t('Account settings')} aria-current={active === "settings" ? "page" : undefined}>{initialsFor(session.user)}</RouterLink>
+                <RouterLink className="buyer-v2__avatar" to={ACCOUNT_ROOT} navigate={navigate} aria-label={t('Account settings')} aria-current={active === "settings" ? "page" : undefined}><AccountAvatar size="medium" src={session.user?.avatar_url} name={session.user?.display_name || t("Hatch account")} /></RouterLink>
                 <Button type="button" variant="ghost" size="small" disabled={signingOut} onClick={signOut}>{signingOut ? t("Signing out…") : t("Sign out")}</Button>
               </>
             ) : (
@@ -268,7 +268,7 @@ function CreatorPublicPage({creatorId, request, navigate, session }) {
     <div className="buyer-v2__container buyer-v2__page">
       <RouterLink className="buyer-v2__back-link" to={EXPLORE_ROOT} navigate={navigate}>{t('← Explore')}</RouterLink>
       <header className="buyer-v2__page-heading buyer-v2__creator-heading">
-        <Avatar className="buyer-v2__creator-profile-avatar" size="large" src={creatorAvatarUrl(creator)} name={creator?.name ?? creator?.display_name ?? creatorId} />
+        <AccountAvatar className="buyer-v2__creator-profile-avatar" size="large" src={creatorAvatarUrl(creator)} name={creator?.name ?? creator?.display_name ?? creatorId} />
         <div>
           <h1>{creator?.name ?? creator?.display_name ?? creatorId}</h1>
           <p>{creator?.bio ?? creator?.description ?? "Published methods for work in your own Workspace."}</p>
@@ -286,7 +286,7 @@ function CatalogCard({product, navigate }) {
   return (
     <article className="buyer-v2__catalog-card">
       <div className="buyer-v2__card-topline">
-        <span className="buyer-v2__eyebrow">{creatorName(product)}</span>
+        <CreatorIdentity className="buyer-v2__catalog-creator" value={product} />
         {product.creator_verified || product.creator?.verified ? <span className="buyer-v2__verified">{t('Verified')}</span> : null}
       </div>
       <h2>{productName(product)}</h2>
@@ -325,7 +325,7 @@ function ProductPage({route, request, navigate, session, downloadUrl }) {
       <StorefrontDetails
         product={product}
         creatorName={productCreatorByline}
-        creatorInitial={productCreatorName.trim().charAt(0)}
+        creatorAvatarName={productCreatorName}
         creatorAvatarUrl={product.creator_avatar_url || product.creator?.avatar_url || product.creator?.image_url}
         desktopRequirement={desktopRequirement}
         releaseLabel={product.release_label || product.release?.label}
@@ -442,7 +442,7 @@ function SettingsPage({session, navigate }) {
     <header className="buyer-v2__page-heading"><span className="buyer-v2__eyebrow">{t('Account')}</span><h1>{t('Your Hatch account.')}</h1><p>{t('Use the same account on Web and Desktop. Signing out keeps your access records intact.')}</p></header>
     <section className="buyer-v2__settings-surface" aria-label={t('Signed-in account')}>
       <div className="buyer-v2__settings-identity">
-        <Avatar className="buyer-v2__settings-avatar" size="large" name={session.user?.display_name || t("Hatch account")} fallback={session.user?.initials} />
+        <AccountAvatar className="buyer-v2__settings-avatar" size="large" src={session.user?.avatar_url} name={session.user?.display_name || t("Hatch account")} />
         <div><h2>{session.user?.display_name || t("Hatch account")}</h2><p>{t('Signed in to Hatch')}</p></div>
       </div>
       {error ? <InlineError error={error} /> : null}
@@ -910,9 +910,9 @@ function DefinitionList({ rows }) {
   return <dl className="buyer-v2__definition-list">{rows.filter(([, value]) => value !== undefined && value !== null && value !== "").map(([term, value]) => <div key={term}><dt>{term}</dt><dd>{value}</dd></div>)}</dl>;
 }
 
-function CreatorIdentity({ value }) {
+function CreatorIdentity({ value, className = "" }) {
   const name = creatorName(value);
-  return <span className="buyer-v2__creator-identity"><Avatar className="buyer-v2__creator-avatar" size="medium" src={creatorAvatarUrl(value)} name={name} /><span>{name}</span></span>;
+  return <span className={`buyer-v2__creator-identity ${className}`.trim()}><AccountAvatar className="buyer-v2__creator-avatar" size="medium" src={creatorAvatarUrl(value)} name={name} /><span>{name}</span></span>;
 }
 
 function PriceRow({ label, value, total = false }) {
@@ -1369,12 +1369,6 @@ function dateTime(value, dateOnly = false) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
   return new Intl.DateTimeFormat("en-US", dateOnly ? { dateStyle: "medium" } : { dateStyle: "medium", timeStyle: "short" }).format(date);
-}
-
-function initialsFor(user) {
-  if (user?.initials) return user.initials;
-  const value = user?.display_name || user?.name || user?.email || "Account";
-  return value.split(/\s+|@/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "A";
 }
 
 function friendlyError(error) {
