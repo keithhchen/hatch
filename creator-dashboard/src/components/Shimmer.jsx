@@ -1,9 +1,16 @@
-import React, { memo, useMemo } from "react";
+import React, { Children, isValidElement, memo, useMemo } from "react";
 import { motion } from "motion/react";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 
 const motionComponentCache = new Map();
+
+function textCharacterCount(children) {
+  return Children.toArray(children).reduce((count, child) => {
+    if (typeof child === "string" || typeof child === "number") return count + Array.from(String(child)).length;
+    return isValidElement(child) ? count + textCharacterCount(child.props.children) : count;
+  }, 0);
+}
 
 function getMotionComponent(element) {
   let component = motionComponentCache.get(element);
@@ -16,7 +23,7 @@ function getMotionComponent(element) {
 
 function ShimmerComponent({ children, as: Element = "p", className, duration = 2, spread = 2 }) {
   const MotionElement = getMotionComponent(Element);
-  const dynamicSpread = useMemo(() => (children?.length ?? 0) * spread, [children, spread]);
+  const dynamicSpread = useMemo(() => textCharacterCount(children) * spread, [children, spread]);
 
   return <MotionElement
     animate={{ backgroundPosition: "0% center" }}

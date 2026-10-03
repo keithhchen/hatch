@@ -1,5 +1,10 @@
 # Hatch development rules
 
+## Overarching engineering principles
+
+- DDD, ports and adapters, GoF, OOP. 高度抽象，可插拔，不要写纯过程式代码。
+- 使用高阶函数封装可复用行为；内部实现只依赖输入与返回值契约，不依赖外部如何调用它。
+
 ## Real product paths only
 
 - 不得用 fixture、mock、static preview、demo state 或硬编码数据替代产品实现，并将其呈现为真实功能、产品构建或 UAT 结果。

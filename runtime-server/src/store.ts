@@ -49,6 +49,7 @@ export type VisibleConversationMessage = {
 
 export type VisibleConversationPart =
   | { type: "text"; start: number; end: number }
+  | { type: "thinking"; contentIndex: number; content: string }
   | { type: "tool_call"; tool_call_id: string }
   | {
       type: "skill_event";

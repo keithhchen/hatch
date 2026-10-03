@@ -26,11 +26,8 @@ export const LANGUAGE_OPTIONS = Object.freeze([
 ]);
 
 const EN_MESSAGES = Object.freeze({
-  "submission.unknown": "Waiting to confirm this message was saved. Its text and files are retained.",
-  "submission.check": "Check send result",
   "submission.retryReady": "The message was not found. Send again to retry the same message.",
   "submission.rejected": "This run ended without accepting the message. Restore it to your draft to send again.",
-  "submission.accepted": "Message saved.",
   "submission.returnToDraft": "Restore message to draft",
   "draft.inUse": "This draft is being edited in another window. Close that editor, then retry.",
   "draft.saveFailed": "Your draft could not be saved or loaded. Unsaved edits are retained in this window; retry before closing.",
@@ -412,11 +409,8 @@ const EN_MESSAGES = Object.freeze({
 });
 
 const ZH_CN_MESSAGES = Object.freeze({
-  "submission.unknown": "正在确认消息是否已保存，正文和附件仍保留。",
-  "submission.check": "核对发送结果",
   "submission.retryReady": "未查到此消息，再次发送将使用原消息 ID 重试。",
   "submission.rejected": "本次运行已结束，但消息未被接受。可恢复到草稿后重新发送。",
-  "submission.accepted": "消息已保存。",
   "submission.returnToDraft": "恢复消息到草稿",
   "draft.inUse": "此对话的草稿正在另一个窗口中编辑。关闭那个编辑窗口后重试。",
   "draft.saveFailed": "草稿保存或加载失败。未保存的内容仍保留在此窗口，请重试后再关闭。",
@@ -798,11 +792,8 @@ const ZH_CN_MESSAGES = Object.freeze({
 });
 
 const JA_MESSAGES = Object.freeze({
-  "submission.unknown": "保存結果を確認しています。本文と添付は保持されています。",
-  "submission.check": "送信結果を確認",
   "submission.retryReady": "メッセージが見つかりません。同じIDで再送できます。",
   "submission.rejected": "メッセージを受け付ける前に実行が終了しました。下書きに戻して再送してください。",
-  "submission.accepted": "メッセージを保存しました。",
   "submission.returnToDraft": "下書きに戻す",
   "draft.inUse": "別のウィンドウで編集中です。その編集画面を閉じて再試行してください。",
   "draft.saveFailed": "下書きを保存または読み込めませんでした。未保存の編集はこのウィンドウに保持されています。閉じる前に再試行してください。",

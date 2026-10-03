@@ -54,6 +54,7 @@ export function createHatchCandidateRuntimeExecutor(): HatchCandidateExecutor {
           run_id: runId,
           client_message_id: runId,
           conversation_id: conversationId,
+          local_tools: [],
           message: { role: "user", content: execution.question }
         }, {
           abortSignal: execution.signal,

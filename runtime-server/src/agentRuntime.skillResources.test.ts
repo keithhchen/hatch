@@ -23,7 +23,7 @@ async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
     clientBroker: { execute() { throw new Error("Unexpected native fallback"); } },
     serverTools: { execute() { throw new Error("Unexpected generic server fallback"); } }
   } as unknown as RunContext;
-  const input: RunStart = { type: "client.message", run_id: "first", conversation_id: "conversation", message: { role: "user", content: "edit" } };
+  const input: RunStart = { type: "client.message", run_id: "first", conversation_id: "conversation", local_tools: [], message: { role: "user", content: "edit" } };
   const call = (target: string, name = "file_read", active: ActivatedSkill[] = [], roots: string[] = []) =>
     executeChatTool(input, ctx, "resource", name, { path: target }, roots, active, ctx.sessionSkills.rendered.aliases, createWorkspacePathPolicy(""));
   return { root, directory, record, ctx, input, call };

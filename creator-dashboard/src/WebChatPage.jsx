@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowUp, ChevronDown, ChevronUp, CircleAlert, Image, LoaderC
 import { Avatar, HatchBrand, Select } from "@hatch/ui";
 import { WebChatImageViewer } from "./components/WebChatImageViewer.jsx";
 import { Shimmer } from "./components/Shimmer.jsx";
+import { WebChatThinkingTicker } from "./components/WebChatThinkingTicker.jsx";
 import { WebChatMessageResponse } from "./WebChatMessageResponse.jsx";
 import { BuyerAccountMenu } from "./BuyerAccountControls.jsx";
 import { useLocale, documentLanguage } from "./locale.jsx";
@@ -26,30 +27,57 @@ function isImeConfirmation(event) {
 
 function TaskBriefDropdown({ snapshot, t }) {
   const detailsRef = useRef(null);
+  const [mobilePanelPosition, setMobilePanelPosition] = useState(null);
+
+  const updateMobilePanelPosition = useCallback(() => {
+    const details = detailsRef.current;
+    if (!details?.open || !window.matchMedia("(max-width: 760px)").matches) {
+      setMobilePanelPosition(null);
+      return;
+    }
+
+    const anchor = details.querySelector("summary").getBoundingClientRect();
+    const container = details.getBoundingClientRect();
+    const margin = 14;
+    const width = Math.min(430, window.innerWidth - margin * 2);
+    const height = Math.min(window.innerHeight * 0.66, 560);
+    const left = Math.max(margin, Math.min(anchor.right - width, window.innerWidth - width - margin));
+    const top = Math.max(margin, Math.min(anchor.bottom + 10, window.innerHeight - height - margin));
+    setMobilePanelPosition({ left: left - container.left, top: top - container.top, width });
+  }, []);
 
   useEffect(() => {
     const closeOnOutsidePointer = event => {
       const details = detailsRef.current;
-      if (details?.open && !details.contains(event.target)) details.open = false;
+      if (details?.open && !details.contains(event.target)) {
+        details.open = false;
+        setMobilePanelPosition(null);
+      }
     };
     const closeOnEscape = event => {
       const details = detailsRef.current;
       if (event.key !== "Escape" || !details?.open) return;
       details.open = false;
+      setMobilePanelPosition(null);
       details.querySelector("summary")?.focus();
     };
+    const reposition = () => updateMobilePanelPosition();
     document.addEventListener("pointerdown", closeOnOutsidePointer);
     document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("resize", reposition);
+    window.addEventListener("scroll", reposition, true);
     return () => {
       document.removeEventListener("pointerdown", closeOnOutsidePointer);
       document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("resize", reposition);
+      window.removeEventListener("scroll", reposition, true);
     };
-  }, []);
+  }, [updateMobilePanelPosition]);
 
   if (!snapshot?.fields?.length) return null;
-  return <details ref={detailsRef} className="web-chat__task-brief">
+  return <details ref={detailsRef} className="web-chat__task-brief" onToggle={updateMobilePanelPosition}>
     <summary aria-label={t("taskBrief")}><span>{t("taskBrief")}</span><ChevronDown aria-hidden="true" /></summary>
-    <div className="web-chat__task-brief-panel" role="group" aria-label={t("taskBrief")}><dl className="web-chat__task-brief-fields">
+    <div className="web-chat__task-brief-panel" style={mobilePanelPosition ? { left: `${mobilePanelPosition.left}px`, top: `${mobilePanelPosition.top}px`, width: `${mobilePanelPosition.width}px` } : undefined} role="group" aria-label={t("taskBrief")}><dl className="web-chat__task-brief-fields">
       {snapshot.fields.map(field => <div className="web-chat__task-brief-field" key={field.id}>
         <dt>{field.label}</dt>
         <dd>{field.value || t("notProvided")}</dd>
@@ -58,7 +86,7 @@ function TaskBriefDropdown({ snapshot, t }) {
   </details>;
 }
 
-function WebChatAccountControls({ profile, navigate, onSignOut }) {
+function WebChatAccountControls({ profile, navigate, onSignOut, className = "" }) {
   const { locale } = useLocale();
   const [signingOut, setSigningOut] = useState(false);
   const [error, setError] = useState(null);
@@ -77,7 +105,7 @@ function WebChatAccountControls({ profile, navigate, onSignOut }) {
   }
 
   return <>
-    <div className="buyer-account-controls buyer-account-controls--chat">
+    <div className={`buyer-account-controls buyer-account-controls--chat ${className}`.trim()}>
       <BuyerAccountMenu user={profile} onSignOut={() => void signOut()} signingOut={signingOut} showLanguageOptions />
     </div>
     {error ? <p className="web-chat__account-error" role="alert">{webChatErrorText(error, locale)}</p> : null}
@@ -103,6 +131,7 @@ function WebChatActivityModal({ entries, isLastItem, client, conversationId, loc
   const lastEntry = entries.at(-1);
   const lastPresentation = activityPresentations[lastEntry.kind](lastEntry, { locale, t });
   const triggerTitle = isLastItem ? lastPresentation.title : t("activityProcessed");
+  const thinkingPreview = isLastItem && lastEntry.kind === "thinking" ? lastEntry.content : "";
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -112,8 +141,10 @@ function WebChatActivityModal({ entries, isLastItem, client, conversationId, loc
   }, [open]);
 
   return <>
-    <button type="button" className="web-chat__activity-trigger" aria-haspopup="dialog" onClick={() => { setHasOpened(true); setOpen(true); }}>
-      {isLastItem ? <Shimmer as="span">{triggerTitle}</Shimmer> : <span>{triggerTitle}</span>}
+    <button type="button" className={`web-chat__activity-trigger${isLastItem ? "" : " web-chat__activity-trigger--processed"}`} aria-haspopup="dialog" onClick={() => { setHasOpened(true); setOpen(true); }}>
+      {isLastItem
+        ? <span className="web-chat__activity-trigger-label"><Shimmer as="span" className="web-chat__activity-trigger-title">{triggerTitle}</Shimmer>{thinkingPreview ? <WebChatThinkingTicker content={thinkingPreview} /> : null}</span>
+        : <span className="web-chat__activity-trigger-label"><span>{triggerTitle}</span></span>}
     </button>
     <dialog ref={dialogRef} className="web-chat__activity-modal" aria-label={t("activityDetails")} onClose={() => setOpen(false)} onClick={event => { if (event.target === event.currentTarget) setOpen(false); }}>
       <header className="web-chat__activity-modal-header">
@@ -621,6 +652,31 @@ export default function WebChatPage({ productId, conversationId: routedConversat
       <button type="button" className="web-chat__new" aria-label={t("newChat")} onClick={newConversation} disabled={!access}>
         <Plus aria-hidden="true" /><span>{t("newChat")}</span>
       </button>
+      <div className="web-chat__section-heading"><span>{t("recentConversations")}</span></div>
+      <nav className="web-chat__conversation-list" aria-label={t("conversationHistory")}>
+        {conversations.map(item => (
+          <button type="button" key={item.id} className="web-chat__conversation" aria-pressed={item.id === conversationId} onClick={() => { followOutputRef.current = true; selectConversation(item.id); }}>
+            <span className="web-chat__conversation-title">{item.title || t("newConversation")}</span>
+            <time className="web-chat__conversation-date" dateTime={item.created_at}>{conversationDate(item.created_at, locale)}</time>
+          </button>
+        ))}
+        {conversations.length === 0 && access ? <p className="web-chat__list-empty">{t("conversationsEmpty")}</p> : null}
+      </nav>
+      {conversationCursor ? <button type="button" className="web-chat__load-more" onClick={() => void loadConversations().catch(cause => setError(cause))}><span>{t("loadEarlierConversations")}</span><ChevronDown aria-hidden="true" /></button> : null}
+      <WebChatAccountControls profile={profile} navigate={navigate} onSignOut={onSignOut} />
+    </aside>
+    <header className="web-chat__mobile-topbar" inert={briefOpen}>
+      <HatchBrand className="web-chat__mobile-brand" logoVariant="lockup" />
+      <a href="/library" className="web-chat__mobile-back" aria-label={t("backToLibrary")}><ArrowLeft aria-hidden="true" /><span>{t("backToLibrary")}</span></a>
+      <WebChatAccountControls profile={profile} navigate={navigate} onSignOut={onSignOut} className="web-chat__mobile-account" />
+    </header>
+    <div className="web-chat__mobile-conversation-bar" inert={briefOpen}>
+      <div className="web-chat__mobile-agent">
+        <Avatar className="web-chat__heading-avatar" src={creatorAvatarUrl} name={creator.name ?? name} size="medium" />
+        <h1>{name}</h1>
+      </div>
+      <button type="button" className="web-chat__mobile-new" aria-label={t("newChat")} onClick={newConversation} disabled={!access}><Plus aria-hidden="true" /></button>
+      {selectedConversation?.brief_snapshot ? <div className="web-chat__mobile-task-brief"><TaskBriefDropdown key={conversationId} snapshot={selectedConversation.brief_snapshot} t={t} /></div> : null}
       <div className="web-chat__mobile-history">
         <Select
           label={t("conversationHistory")}
@@ -646,19 +702,7 @@ export default function WebChatPage({ productId, conversationId: routedConversat
           className="web-chat__mobile-history-trigger"
         />
       </div>
-      <div className="web-chat__section-heading"><span>{t("recentConversations")}</span></div>
-      <nav className="web-chat__conversation-list" aria-label={t("conversationHistory")}>
-        {conversations.map(item => (
-          <button type="button" key={item.id} className="web-chat__conversation" aria-pressed={item.id === conversationId} onClick={() => { followOutputRef.current = true; selectConversation(item.id); }}>
-            <span className="web-chat__conversation-title">{item.title || t("newConversation")}</span>
-            <time className="web-chat__conversation-date" dateTime={item.created_at}>{conversationDate(item.created_at, locale)}</time>
-          </button>
-        ))}
-        {conversations.length === 0 && access ? <p className="web-chat__list-empty">{t("conversationsEmpty")}</p> : null}
-      </nav>
-      {conversationCursor ? <button type="button" className="web-chat__load-more" onClick={() => void loadConversations().catch(cause => setError(cause))}><span>{t("loadEarlierConversations")}</span><ChevronDown aria-hidden="true" /></button> : null}
-      <WebChatAccountControls profile={profile} navigate={navigate} onSignOut={onSignOut} />
-    </aside>
+    </div>
     <main className={`web-chat__main${error && access ? " web-chat__main--error" : ""}`} inert={briefOpen}>
       <header className="web-chat__header">
         <div className="web-chat__heading-copy"><Avatar className="web-chat__heading-avatar" src={creatorAvatarUrl} name={creator.name ?? name} size="medium" /><h1>{name}</h1></div>

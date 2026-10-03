@@ -197,7 +197,7 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
           : voiceProvider === "legacy"
             ? Boolean(env.ELEVENLABS_API_KEY?.trim() && env.ELEVENLABS_VOICE_ID?.trim())
             : false;
-        return json(res, 200, { roles: ROLES, agents: await entries(), runtimeUrl: env.HATCH_FACTORY_RUNTIME_URL ?? "", services: { model: Boolean(env[resolveFactoryLlmProfile(env).apiKeyEnv]?.trim()), search: Boolean(env.TAVILY_API_KEY), scrape: Boolean(env.HATCH_FACTORY_SCRAPE_PROVIDER === "firecrawl" ? env.FIRECRAWL_API_KEY : env.TAVILY_API_KEY), hatch: Boolean(env.HATCH_FACTORY_RUNTIME_URL && env.HATCH_FACTORY_CREATOR_TOKEN), corpus: Boolean(env.HATCH_FACTORY_REGISTRY_URL && env.HATCH_FACTORY_CREATOR_TOKEN), voice: voiceReady } });
+        return json(res, 200, { roles: ROLES, agents: await entries(), runtimeUrl: env.HATCH_FACTORY_RUNTIME_URL ?? "", services: { model: Boolean(env[resolveFactoryLlmProfile(env).apiKeyEnv]?.trim()), search: Boolean(env.FIRECRAWL_API_KEY?.trim()), scrape: Boolean(env.HATCH_FACTORY_SCRAPE_PROVIDER === "firecrawl" ? env.FIRECRAWL_API_KEY : env.TAVILY_API_KEY), hatch: Boolean(env.HATCH_FACTORY_RUNTIME_URL && env.HATCH_FACTORY_CREATOR_TOKEN), corpus: Boolean(env.HATCH_FACTORY_REGISTRY_URL && env.HATCH_FACTORY_CREATOR_TOKEN), voice: voiceReady } });
       }
 
       if (url.pathname === "/api/sessions" && req.method === "GET") { const sessions = await store.list(); return json(res, 200, { sessions: sessions.map(s => ({ ...publicSession(s), messages: undefined })), agents: agentEntries(await options.definitions.list(), sessions), manualFiles: await store.listManualFiles() }); }

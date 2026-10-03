@@ -42,6 +42,18 @@ test("Agent dependency state uses output timestamps, not run timestamps", async 
   assert.equal(agentEntries(definitions, [research, voice, generation]).find(entry => entry.role === "generation")?.state, "failed");
 });
 
+test("Evaluator is a Creator calibration loop, not a publishing or scoring loop", async () => {
+  const evaluator = (await initialAgentDefinitions()).find(definition => definition.role === "evaluator");
+  assert.ok(evaluator);
+  assert.match(evaluator.systemPrompt, /找出最可能改变下一版 Agent 的少数关键错位/);
+  assert.match(evaluator.systemPrompt, /挑出 1–3 个高杠杆/);
+  assert.match(evaluator.systemPrompt, /调用 askuser 后不得自动重跑案例/);
+  assert.match(evaluator.systemPrompt, /一次真实运行最多发出一个 askuser 批次/);
+  assert.match(evaluator.systemPrompt, /观察到的行为 → 对客户\/交付的后果/);
+  assert.match(evaluator.systemPrompt, /上传 corpus、发布 Product/);
+  assert.match(evaluator.systemPrompt, /不要把报告写成 pass\/fail 评分表/);
+});
+
 test("definition repository is read dynamically for each request", async () => {
   const repository = new MemoryAgentDefinitionRepository(await initialAgentDefinitions());
   const changed = await repository.list();
@@ -87,7 +99,7 @@ test("database cold start seeds atomically, then the database remains the only a
   legacy.find(row => row.role === "generation")!.dependencies = { required: ["research"], normal: ["voice", "evaluator"], updates: [] };
   rows.splice(0, rows.length, ...legacy.map(definition => ({ role: definition.role, definition: structuredClone(definition) })));
   const migrated = await PostgresAgentDefinitionRepository.open(pool);
-  assert.deepEqual((await migrated.list()).find(row => row.role === "voice")?.dependencies, { required: [], normal: [], updates: [] });
+  assert.deepEqual((await migrated.list()).find(row => row.role === "voice")?.dependencies, { required: [], normal: [], updates: ["research"] });
   assert.deepEqual((await migrated.list()).find(row => row.role === "generation")?.dependencies, { required: [], normal: ["research", "voice"], updates: ["evaluator"] });
   const customHint = { en: "Custom English", zh: "自定义中文", ja: "カスタム" };
   (rows.find(row => row.role === "research")!.definition as { hint?: unknown }).hint = customHint;

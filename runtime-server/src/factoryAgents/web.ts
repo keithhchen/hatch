@@ -1,18 +1,18 @@
 import { Type } from "@earendil-works/pi-ai";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { TavilySearchProvider, TavilyScrapeProvider, FirecrawlScrapeProvider } from "./webProviders.js";
+import { FirecrawlSearchProvider, TavilyScrapeProvider, FirecrawlScrapeProvider } from "./webProviders.js";
 import { digest, result } from "./files.js";
 import { WorkbenchStore } from "./store.js";
 import { fetchYoutubeTranscript } from "./youtubeTranscript.js";
 
 export function webTools(store: WorkbenchStore, id: string, changed: () => void, env: NodeJS.ProcessEnv = process.env): AgentTool[] {
-  const search = new TavilySearchProvider({ apiKey: env.TAVILY_API_KEY });
+  const search = new FirecrawlSearchProvider({ apiKey: env.FIRECRAWL_API_KEY });
   const scrape = env.HATCH_FACTORY_SCRAPE_PROVIDER === "firecrawl"
     ? new FirecrawlScrapeProvider({ apiKey: env.FIRECRAWL_API_KEY })
     : new TavilyScrapeProvider({ apiKey: env.TAVILY_API_KEY });
   if (env.HATCH_FACTORY_SCRAPE_PROVIDER && !["tavily", "firecrawl"].includes(env.HATCH_FACTORY_SCRAPE_PROVIDER)) throw new Error("Unknown scrape provider");
   return [
-    { name: "web_search", label: "搜索资料", description: "Search public web evidence using Tavily. Returns source links/snippets, not verified full documents. Follow useful leads with web_scrape. No generated answer.", parameters: Type.Object({ query: Type.String({ minLength: 1 }), max_results: Type.Optional(Type.Integer({ minimum: 1, maximum: 10 })), domains: Type.Optional(Type.Array(Type.String(), { maxItems: 10 })), topic: Type.Optional(Type.Union([Type.Literal("general"), Type.Literal("news")])) }), execute: async (_id, raw, signal) => {
+    { name: "web_search", label: "搜索资料", description: "Search public web evidence using Firecrawl. Returns source links/snippets, not verified full documents. Follow useful leads with web_scrape. No generated answer.", parameters: Type.Object({ query: Type.String({ minLength: 1 }), max_results: Type.Optional(Type.Integer({ minimum: 1, maximum: 10 })), domains: Type.Optional(Type.Array(Type.String(), { maxItems: 10 })), topic: Type.Optional(Type.Union([Type.Literal("general"), Type.Literal("news")])) }), execute: async (_id, raw, signal) => {
       const a = raw as { query: string; max_results?: number; domains?: string[]; topic?: "general" | "news" };
       const evidence = await search.search({ query: a.query, maxResults: a.max_results ?? 6, includeDomains: a.domains, topic: a.topic, searchDepth: "advanced" }, AbortSignal.any([signal ?? new AbortController().signal, AbortSignal.timeout(90000)]));
       return result(evidence);

@@ -288,7 +288,7 @@ function CatalogCard({product, navigate }) {
   return (
     <article className="buyer-v2__catalog-card">
       <div className="buyer-v2__card-topline">
-        <span className="buyer-v2__eyebrow">{creatorName(product)}</span>
+        <CreatorIdentity className="buyer-v2__catalog-creator" value={product} />
         {product.creator_verified || product.creator?.verified ? <span className="buyer-v2__verified">{t('Verified')}</span> : null}
       </div>
       <h2>{productName(product)}</h2>
@@ -441,7 +441,7 @@ function SettingsPage({session, navigate }) {
     }
   }
   return <div className="buyer-v2__container buyer-v2__page">
-    <header className="buyer-v2__page-heading"><span className="buyer-v2__eyebrow">{t('Account')}</span><h1>{t('Your Hatch account.')}</h1><p>{t('Use the same account on Web and Desktop. Signing out keeps your access records intact.')}</p></header>
+    <header className="buyer-v2__page-heading"><span className="buyer-v2__eyebrow">{t('Account')}</span><h1>{t('Your Hatch account.')}</h1></header>
     <section className="buyer-v2__settings-surface" aria-label={t('Signed-in account')}>
       <div className="buyer-v2__settings-identity">
         <div><h2>{session.user?.display_name || t("Hatch account")}</h2></div>
@@ -947,9 +947,9 @@ function DefinitionList({ rows }) {
   return <dl className="buyer-v2__definition-list">{rows.filter(([, value]) => value !== undefined && value !== null && value !== "").map(([term, value]) => <div key={term}><dt>{term}</dt><dd>{value}</dd></div>)}</dl>;
 }
 
-function CreatorIdentity({ value }) {
+function CreatorIdentity({ value, className = "" }) {
   const name = creatorName(value);
-  return <span className="buyer-v2__creator-identity"><Avatar className="buyer-v2__creator-avatar" size="medium" src={creatorAvatarUrl(value)} name={name} /><span>{name}</span></span>;
+  return <span className={`buyer-v2__creator-identity ${className}`.trim()}><Avatar className="buyer-v2__creator-avatar" size="medium" src={creatorAvatarUrl(value)} name={name} /><span>{name}</span></span>;
 }
 
 function PriceRow({ label, value, total = false }) {

@@ -18,6 +18,7 @@ const parentInput: RunStart = {
   type: "client.message",
   run_id: "parent-run",
   conversation_id: "skill-runtime-contract",
+  local_tools: [],
   message: { role: "user", content: "Run the protected workflow." }
 };
 

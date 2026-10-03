@@ -473,9 +473,9 @@ test("an existing session re-resolves Creator tool bindings and blocks a disable
   const socket = await connectEntitledSocket(port, entitlement, "creator-refresh-session", "creator-disabled-conversation");
   try {
     const rejected = waitForMessage(socket, (message) => message.run_id === "creator-disabled-run"
-      && (message.error as { code?: string } | undefined)?.code === "agent_updated");
+      && (message.error as { code?: string } | undefined)?.code === "authorization_unavailable");
     socket.send(JSON.stringify(clientMessage("creator-disabled-run", "creator-disabled-conversation")));
-    assert.equal(((await rejected).error as { code?: string }).code, "agent_updated");
+    assert.equal(((await rejected).error as { code?: string }).code, "authorization_unavailable");
     assert.equal(resolutionCalls, 2);
     assert.equal(runCalls, 0);
   } finally {
@@ -983,7 +983,7 @@ test("network-tool cancellation and timeout settle the run before releasing glob
   }
 });
 
-test("ready connection caps release on close and distinguish per-user from global pressure", async () => {
+test("ready connections have no per-user cap and release global capacity on close", async () => {
   const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-connection-capacity-")));
   const conversationIds = [
     "connection-one",
@@ -1005,8 +1005,7 @@ test("ready connection caps release on close and distinguish per-user from globa
         role: "user"
       })
     },
-    maxEstablishedConnectionsGlobal: 2,
-    maxEstablishedConnectionsPerUser: 1
+    maxEstablishedConnectionsGlobal: 3
   });
   const port = await listen(runtime);
   const sockets: WebSocket[] = [];
@@ -1019,9 +1018,9 @@ test("ready connection caps release on close and distinguish per-user from globa
 
     const sameUser = await openSocket(port);
     sockets.push(sameUser);
-    const userRejected = waitForMessage(sameUser, (message) => (message.error as { code?: string } | undefined)?.code === "user_connection_capacity");
+    const sameUserReady = waitForMessage(sameUser, (message) => message.type === "session.ready");
     sameUser.send(JSON.stringify(hello("connection-token-two", conversationIds[1]!)));
-    assert.equal(((await userRejected).error as { code?: string }).code, "user_connection_capacity");
+    await sameUserReady;
 
     const secondUser = await openSocket(port);
     sockets.push(secondUser);
@@ -1148,9 +1147,17 @@ test("turn.cancel tombstones pending authorization and an abort-ignoring resolve
     assert.equal(firstMessages.filter((message) => message.run_id === "run-pending-cancel"
       && (message.error as { code?: string } | undefined)?.code === "run_cancelled").length, 1);
 
-    const afterLateReturn = waitForMessage(first, (message) => message.type === "turn.completed" && message.run_id === "run-after-late-auth");
-    first.send(JSON.stringify(clientMessage("run-after-late-auth", "shared-conversation")));
-    await afterLateReturn;
+    let afterLateReturn: Record<string, unknown> | undefined;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const response = waitForMessage(first, (message) => message.run_id === "run-after-late-auth"
+        && (message.type === "turn.completed" || message.type === "turn.failed"));
+      first.send(JSON.stringify(clientMessage("run-after-late-auth", "shared-conversation")));
+      afterLateReturn = await response;
+      if (afterLateReturn.type === "turn.completed") break;
+      assert.equal((afterLateReturn.error as { code?: string } | undefined)?.code, "connection_busy");
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(afterLateReturn?.type, "turn.completed");
     assert.equal(runCalls, 2);
   } finally {
     releaseIgnoredAuthorization({ sub: entitlement.user_id, role: "user" });
@@ -1558,10 +1565,10 @@ test("disconnect cleanup finishes when cancellation persistence fails", async ()
   let closed = false;
   try {
     const ready = waitForMessage(socket, (message) => message.type === "session.ready");
-    socket.send(JSON.stringify({ ...hello("fixture-token", conversationId), local_tools: ["file_read"] }));
+    socket.send(JSON.stringify(hello("fixture-token", conversationId)));
     await ready;
     const requested = waitForMessage(socket, (message) => message.type === "tool_call.request");
-    socket.send(JSON.stringify(clientMessage(`disconnect-run-${attemptId}`, conversationId)));
+    socket.send(JSON.stringify({ ...clientMessage(`disconnect-run-${attemptId}`, conversationId), local_tools: ["file_read"] }));
     await requested;
     socket.close();
 
@@ -1615,7 +1622,7 @@ test("entitlement-backed turns reject a creator identity even with a permissive 
   }
 });
 
-test("a republished Agent Corpus fails the next turn with agent_updated before model work", async () => {
+test("an existing session runs the latest Agent Corpus on its next turn", async () => {
   const entitlement = fixtureEntitlement();
   const initial = await fixtureCorpusResolver(entitlement).resolve(entitlement.creator_id, entitlement.agent_id);
   let currentDigest = initial.digest;
@@ -1639,11 +1646,18 @@ test("a republished Agent Corpus fails the next turn with agent_updated before m
   const socket = await connectEntitledSocket(port, entitlement, "agent-updated-session", "agent-updated-install");
   try {
     currentDigest = `sha256:${"f".repeat(64)}`;
-    const rejected = waitForMessage(socket, (message) => message.run_id === "agent-updated-run"
-      && (message.error as { code?: string } | undefined)?.code === "agent_updated");
+    const completed = waitForMessage(socket, (message) => message.type === "turn.completed"
+      && message.run_id === "agent-updated-run");
     socket.send(JSON.stringify(clientMessage("agent-updated-run", "agent-updated-install")));
-    assert.equal(((await rejected).error as { code?: string }).code, "agent_updated");
-    assert.equal(runCalls, 0);
+    assert.equal((await completed).type, "turn.completed");
+    assert.equal(runCalls, 1);
+    const conversationId = durableConversationId({
+      creatorId: entitlement.creator_id,
+      userId: entitlement.user_id,
+      productId: entitlement.product_id
+    }, "agent-updated-install");
+    const run = await conversationRepository.getRunByClientMessageId(conversationId, "agent-updated-run");
+    assert.equal(run?.corpusDigest, currentDigest);
   } finally {
     socket.close();
     await runtime.close();
@@ -1676,6 +1690,7 @@ function clientMessage(runId: string, conversationId: string): Record<string, un
     type: "client.message",
     run_id: runId,
     conversation_id: conversationId,
+    local_tools: [],
     message: { role: "user", content: "Run the authorized product." }
   };
 }

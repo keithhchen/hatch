@@ -196,15 +196,15 @@ test("legacy dotted JSONL local-tool names normalize to canonical underscore nam
 });
 
 test("current wire and parser reject old dotted Desktop capability names", () => {
-  const legacyHello = {
-    type: "client.hello",
-    protocol_version: PROTOCOL_VERSION,
-    auth_token: "legacy-token",
+  const legacyMessage = {
+    type: "client.message",
+    run_id: "run_legacy",
+    conversation_id: "conv_legacy",
+    message: { role: "user", content: "Hello" },
     local_tools: ["fs.list", "fs.read", "shell.exec", "git.diff", "file_read"]
   };
 
-  assert.equal(ClientHelloSchema.safeParse(legacyHello).success, false);
-  assert.throws(() => parseInboundMessage(legacyHello));
+  assert.throws(() => parseInboundMessage(legacyMessage));
 });
 
 test("Conversation API schema declares durable cursor, idempotency, and interrupted recovery state", async () => {
@@ -448,6 +448,7 @@ test("task_start persists a model turn, assembles it, and hides it only from vis
     type: "client.message",
     run_id: "run_task_start_history",
     conversation_id: "task-start-history",
+    local_tools: [],
     task_start: true,
     message: { role: "user", content: "" }
   }));
@@ -545,6 +546,7 @@ test(`visible history preserves text and tool interleave order (guard=${guardEna
     type: "client.message",
     run_id: "run_ordered_history",
     conversation_id: "ordered-history",
+    local_tools: [],
     message: { role: "user", content: "Use a tool between two text segments." }
   }));
   await waitForSocketMessage(messages, (message) => (
@@ -621,6 +623,7 @@ test("Output Guard releases passed segments but commits only a blocked terminal 
     type: "client.message",
     run_id: "run_guard_block",
     conversation_id: "guard-conversation",
+    local_tools: [],
     message: { role: "user", content: "Try to disclose the secret." }
   }));
 
@@ -632,7 +635,7 @@ test("Output Guard releases passed segments but commits only a blocked terminal 
   assert.equal(
     messages
       .filter((message) => message.type === "assistant.delta" && message.delta.kind === "text")
-      .map((message) => message.type === "assistant.delta" ? message.delta.content : "")
+      .map((message) => message.type === "assistant.delta" && message.delta.kind === "text" ? message.delta.content : "")
       .join(""),
     "a".repeat(DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS)
   );
@@ -663,6 +666,92 @@ test("Output Guard releases passed segments but commits only a blocked terminal 
     { role: "user", content: "Try to disclose the secret.", finish_reason: undefined },
     { role: "assistant", content: "", finish_reason: "content_filter" }
   ]);
+  socket.close();
+});
+
+test("thinking deltas stream with Pi indexes and persist the same ordered snapshot parts", async () => {
+  const dataDir = await tempWorkspace();
+  const store = new RuntimeStore(dataDir);
+  const runtime: AgentRuntime = {
+    async *run(input) {
+      yield {
+        type: "assistant.delta",
+        run_id: input.run_id,
+        delta: { kind: "thinking_start", contentIndex: 3 }
+      };
+      yield {
+        type: "assistant.delta",
+        run_id: input.run_id,
+        delta: { kind: "thinking_delta", contentIndex: 3, delta: "considering " }
+      };
+      yield {
+        type: "assistant.delta",
+        run_id: input.run_id,
+        delta: { kind: "thinking_delta", contentIndex: 3, delta: "the request" }
+      };
+      yield {
+        type: "assistant.delta",
+        run_id: input.run_id,
+        delta: { kind: "thinking_end", contentIndex: 3, content: "considering the request" }
+      };
+      yield {
+        type: "assistant.delta",
+        run_id: input.run_id,
+        delta: { kind: "text", content: "Done." }
+      };
+      yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
+    }
+  };
+  runtimeServer = createRuntimeServer({
+    conversationStore: store,
+    conversationRepository: await seedLocalConversations(store, ["thinking-conversation"]),
+    createRuntime: () => runtime
+  });
+  const serverUrl = await listen(runtimeServer);
+  const socket = new WebSocket(serverUrl);
+  const messages: OutboundMessage[] = [];
+  socket.on("message", (data) => messages.push(JSON.parse(String(data)) as OutboundMessage));
+  await new Promise<void>((resolve, reject) => {
+    socket.once("open", resolve);
+    socket.once("error", reject);
+  });
+  socket.send(JSON.stringify({
+    type: "client.hello",
+    protocol_version: PROTOCOL_VERSION,
+    conversation_id: "thinking-conversation",
+    license_token: "thinking-test",
+    local_tools: []
+  }));
+  await waitForSocketMessage(messages, (message) => message.type === "session.ready");
+  socket.send(JSON.stringify({
+    type: "client.message",
+    run_id: "run_thinking",
+    conversation_id: "thinking-conversation",
+    local_tools: [],
+    message: { role: "user", content: "Explain the answer." }
+  }));
+
+  await waitForSocketMessage(messages, (message) => (
+    message.type === "turn.completed" && message.run_id === "run_thinking"
+  ));
+  assert.deepEqual(
+    messages
+      .filter((message) => message.type === "assistant.delta" && message.run_id === "run_thinking")
+      .map((message) => message.type === "assistant.delta" ? message.delta : undefined),
+    [
+      { kind: "thinking_start", contentIndex: 3 },
+      { kind: "thinking_delta", contentIndex: 3, delta: "considering " },
+      { kind: "thinking_delta", contentIndex: 3, delta: "the request" },
+      { kind: "thinking_end", contentIndex: 3, content: "considering the request" },
+      { kind: "text", content: "Done." }
+    ]
+  );
+  const visible = await store.readVisibleConversation("thinking-conversation");
+  assert.deepEqual(visible.at(-1)?.parts, [
+    { type: "thinking", contentIndex: 3, content: "considering the request" },
+    { type: "text", start: 0, end: 5 }
+  ]);
+  assert.equal(visible.at(-1)?.content, "Done.");
   socket.close();
 });
 
@@ -710,6 +799,7 @@ test("Output Guard provider errors degrade to a normal committed response", asyn
     type: "client.message",
     run_id: "run_guard_error",
     conversation_id: "guard-error-conversation",
+    local_tools: [],
     message: { role: "user", content: "Give me a normal answer." }
   }));
 
@@ -721,7 +811,7 @@ test("Output Guard provider errors degrade to a normal committed response", asyn
   assert.equal(
     messages
       .filter((message) => message.type === "assistant.delta" && message.delta.kind === "text")
-      .map((message) => message.type === "assistant.delta" ? message.delta.content : "")
+      .map((message) => message.type === "assistant.delta" && message.delta.kind === "text" ? message.delta.content : "")
       .join(""),
     "A normal answer after Guard degradation."
   );
@@ -792,7 +882,6 @@ test("client hello does not accept explicit skill selection", () => {
     protocol_version: PROTOCOL_VERSION,
     conversation_id: "conversation-x",
     license_token: "license_x",
-    local_tools: [],
     skill_id: "repo-assistant"
   }), /Unrecognized key/);
 });
@@ -813,6 +902,7 @@ test("run start accepts only the current user message, not a client transcript o
     type: "client.message",
     run_id: "run_x",
     conversation_id: "conv_x",
+    local_tools: [],
     message: { role: "user", content: "message 1" },
     enabled_tools: ["file_read"]
   }), /Unrecognized key/);
@@ -821,6 +911,7 @@ test("run start accepts only the current user message, not a client transcript o
     type: "client.message",
     run_id: "run_x",
     conversation_id: "conv_x",
+    local_tools: [],
     message: { role: "user", content: "message 1" }
   }));
 
@@ -839,6 +930,7 @@ test("run start accepts only the current user message, not a client transcript o
     run_id: "run_attachment",
     client_message_id: "message_attachment",
     conversation_id: "conv_x",
+    local_tools: [],
     message: { role: "user", content: "Review this.", attachments: [attachment] }
   });
   assert.equal(parsed.type, "client.message");
@@ -853,6 +945,7 @@ test("run start accepts only the current user message, not a client transcript o
     type: "client.message",
     run_id: "run_attachment_invalid",
     conversation_id: "conv_x",
+    local_tools: [],
     message: {
       role: "user",
       content: "Review this.",
@@ -861,54 +954,54 @@ test("run start accepts only the current user message, not a client transcript o
   }), /Unrecognized key|text_sha256/);
 });
 
-test("client hello declares local tool capability and rejects server tools", () => {
+test("client message declares local tool capability and rejects server tools", () => {
   assert.doesNotThrow(() => parseInboundMessage({
-    type: "client.hello",
-    protocol_version: PROTOCOL_VERSION,
+    type: "client.message",
+    run_id: "run_x",
     conversation_id: "conversation-x",
-    license_token: "license_x",
+    message: { role: "user", content: "Hello" },
     local_tools: ["file_read", "file_search", "git_diff"]
   }));
 
   assert.throws(() => parseInboundMessage({
-    type: "client.hello",
-    protocol_version: PROTOCOL_VERSION,
+    type: "client.message",
+    run_id: "run_x",
     conversation_id: "conversation-x",
-    license_token: "license_x",
+    message: { role: "user", content: "Hello" },
     local_tools: ["web.search"]
   }), /Invalid option/);
 
   assert.throws(() => parseInboundMessage({
-    type: "client.hello",
-    protocol_version: PROTOCOL_VERSION,
+    type: "client.message",
+    run_id: "run_x",
     conversation_id: "conversation-x",
-    license_token: "license_x",
+    message: { role: "user", content: "Hello" },
     workspace_root: "/private/consumer/workspace",
     local_tools: ["file_read"]
   }), /Unrecognized key/);
 });
 
-test("client hello requires an explicit local tool capability list", () => {
-  assert.throws(() => parseInboundMessage({
-    type: "client.hello",
-    protocol_version: PROTOCOL_VERSION,
+test("client message accepts inherited or explicitly declared local tool capabilities", () => {
+  assert.doesNotThrow(() => parseInboundMessage({
+    type: "client.message",
+    run_id: "run_x",
     conversation_id: "conversation-x",
-    license_token: "license_x"
+    message: { role: "user", content: "Hello" }
   }));
 
   assert.doesNotThrow(() => parseInboundMessage({
-    type: "client.hello",
-    protocol_version: PROTOCOL_VERSION,
+    type: "client.message",
+    run_id: "run_x",
     conversation_id: "conversation-x",
-    license_token: "license_x",
+    message: { role: "user", content: "Hello" },
     local_tools: []
   }));
 
   assert.doesNotThrow(() => parseInboundMessage({
-    type: "client.hello",
-    protocol_version: PROTOCOL_VERSION,
+    type: "client.message",
+    run_id: "run_x",
     conversation_id: "conversation-x",
-    license_token: "license_x",
+    message: { role: "user", content: "Hello" },
     local_tools: ["file_read"]
   }));
 });
@@ -2147,8 +2240,7 @@ test("server rejects protocol 0.7 and a missing conversation before accepting bo
     type: "client.hello",
     protocol_version: "0.7",
     conversation_id: "conversation-protocol-current",
-    license_token: "license_protocol_07",
-    local_tools: ["file_read"]
+    license_token: "license_protocol_07"
   }));
   const rejected = await waitForSocketMessage(messages, (message) => message.type === "turn.failed");
   assert.ok(rejected.type === "turn.failed");
@@ -2158,8 +2250,7 @@ test("server rejects protocol 0.7 and a missing conversation before accepting bo
   socket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
-    license_token: "license_protocol_missing_conversation",
-    local_tools: ["file_read"]
+    license_token: "license_protocol_missing_conversation"
   }));
   const missingConversation = await waitForSocketMessage(
     messages,
@@ -2184,7 +2275,7 @@ test("server rejects protocol 0.7 and a missing conversation before accepting bo
     protocol_version: PROTOCOL_VERSION,
     conversation_id: "conversation-protocol-current",
     license_token: "license_protocol_current",
-    local_tools: ["file_read"]
+    local_tools: []
   }));
   const currentReady = await waitForSocketMessage(currentMessages, (message) => message.type === "session.ready");
   assert.ok(currentReady.type === "session.ready");
@@ -2229,7 +2320,7 @@ test("server rejects duplicate client hello on the same connection", async () =>
     protocol_version: PROTOCOL_VERSION,
     conversation_id: "duplicate-hello",
     license_token: "license_once",
-    local_tools: ["file_read"]
+    local_tools: []
   }));
   await waitForSocketMessage(messages, (message) => message.type === "session.ready");
 
@@ -2238,7 +2329,7 @@ test("server rejects duplicate client hello on the same connection", async () =>
     protocol_version: PROTOCOL_VERSION,
     conversation_id: "duplicate-hello",
     license_token: "license_twice",
-    local_tools: ["file_write"]
+    local_tools: []
   }));
   const error = await waitForSocketMessage(messages, (message) => message.type === "turn.failed");
   assert.ok(error.type === "turn.failed");
@@ -2249,7 +2340,7 @@ test("server rejects duplicate client hello on the same connection", async () =>
   const sessions = events.filter((event) => event.type === "session.started");
   assert.equal(sessions.length, 1);
   assert.ok(sessions[0]?.type === "session.started");
-  assert.deepEqual(sessions[0].local_tools, ["file_read"]);
+  assert.deepEqual(sessions[0].local_tools, []);
 });
 
 test("server requires client hello before tool results", async () => {
@@ -2313,7 +2404,7 @@ test("server rejects concurrent runs for the same conversation across WebSocket 
     protocol_version: PROTOCOL_VERSION,
     conversation_id: "conv_busy",
     license_token: "license_busy",
-    local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"]
+    local_tools: []
   }));
   await waitForSocketMessage(firstMessages, (message) => message.type === "session.ready");
 
@@ -2321,6 +2412,7 @@ test("server rejects concurrent runs for the same conversation across WebSocket 
     type: "client.message",
     run_id: "run_busy_1",
     conversation_id: "conv_busy",
+    local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"],
     message: { role: "user", content: "Find Hatch." }
   }));
   await waitForSocketMessage(firstMessages, (message) => message.type === "tool_call.request" && message.run_id === "run_busy_1");
@@ -2339,7 +2431,7 @@ test("server rejects concurrent runs for the same conversation across WebSocket 
     protocol_version: PROTOCOL_VERSION,
     conversation_id: "conv_busy",
     license_token: "license_busy",
-    local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"]
+    local_tools: []
   }));
   await waitForSocketMessage(secondMessages, (message) => message.type === "session.ready");
 
@@ -2347,6 +2439,7 @@ test("server rejects concurrent runs for the same conversation across WebSocket 
     type: "client.message",
     run_id: "run_busy_2",
     conversation_id: "conv_busy",
+    local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"],
     message: { role: "user", content: "This should be rejected." }
   }));
   const busy = await waitForSocketMessage(secondMessages, (message) => message.type === "turn.failed" && message.run_id === "run_busy_2");
@@ -2391,7 +2484,7 @@ test("server releases a conversation lock when the client disconnects mid-run", 
     protocol_version: PROTOCOL_VERSION,
     conversation_id: "conv_disconnect_lock",
     license_token: "license_disconnect_lock",
-    local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"]
+    local_tools: []
   }));
   await waitForSocketMessage(firstMessages, (message) => message.type === "session.ready");
 
@@ -2399,6 +2492,7 @@ test("server releases a conversation lock when the client disconnects mid-run", 
     type: "client.message",
     run_id: "run_disconnect_lock_1",
     conversation_id: "conv_disconnect_lock",
+    local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"],
     message: { role: "user", content: "Find Hatch." }
   }));
   const firstToolRequest = await waitForSocketMessage(firstMessages, (message) => (
@@ -2430,7 +2524,7 @@ test("server releases a conversation lock when the client disconnects mid-run", 
     protocol_version: PROTOCOL_VERSION,
     conversation_id: "conv_disconnect_lock",
     license_token: "license_disconnect_lock",
-    local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"]
+    local_tools: []
   }));
   await waitForSocketMessage(secondMessages, (message) => message.type === "session.ready");
 
@@ -2438,6 +2532,7 @@ test("server releases a conversation lock when the client disconnects mid-run", 
     type: "client.message",
     run_id: "run_disconnect_lock_2",
     conversation_id: "conv_disconnect_lock",
+    local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"],
     message: { role: "user", content: "Find Hatch after reconnect." }
   }));
   const accepted = await waitForSocketMessage(secondMessages, (message) => (
@@ -2493,7 +2588,7 @@ test("run cancel for an unknown run does not cancel the active run", async () =>
     protocol_version: PROTOCOL_VERSION,
     conversation_id: "conv_cancel_targeted",
     license_token: "license_cancel_targeted",
-    local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"]
+    local_tools: []
   }));
   await waitForSocketMessage(messages, (message) => message.type === "session.ready");
 
@@ -2501,6 +2596,7 @@ test("run cancel for an unknown run does not cancel the active run", async () =>
     type: "client.message",
     run_id: "run_cancel_active",
     conversation_id: "conv_cancel_targeted",
+    local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"],
     message: { role: "user", content: "Find Hatch." }
   }));
   const toolRequest = await waitForSocketMessage(messages, (message) => message.type === "tool_call.request" && message.run_id === "run_cancel_active");

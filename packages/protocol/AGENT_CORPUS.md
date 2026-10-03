@@ -64,7 +64,7 @@ agent-corpus/
 
 ## 工具与认证
 
-`hatch.web_search` 与 `hatch.file_search` 是每个 Corpus 都必须声明的 Hatch built-in。后者由 Registry 为每个 `creator.id + agent_id` 提供隔离的 retrieval namespace，即使 `knowledge.documents` 为空也保持一致。`hatch.local.*` 只描述 Creator Agent 的产品依赖；它不裁剪 Desktop 在 `client.hello` 中固定声明的完整本地工具集，也不参与 Ask/Allow 决策。Native Workspace grant、Desktop change policy 与本机 runner 才是执行权限边界。
+`hatch.web_search` 与 `hatch.file_search` 是每个 Corpus 都必须声明的 Hatch built-in。后者由 Registry 为每个 `creator.id + agent_id` 提供隔离的 retrieval namespace，即使 `knowledge.documents` 为空也保持一致。`hatch.local.*` 描述 Creator Agent 的产品依赖；Desktop 在 `client.hello` 声明 `local_tools`，Web 在 `client.hello` 和 `client.message` 声明空数组。Runtime 优先使用当前消息的声明，没有该字段时使用会话声明。Native Workspace grant、Desktop change policy 与本机 runner 负责执行权限。
 
 Creator HTTP/MCP 工具分别使用 `kind: "http_function"` 或 `kind: "mcp_tool"`，只声明 `creator.*` 的 id、`connection_ref`、允许的 operation/tool name 和 input schema。没有 URL、API key、OAuth token 或 MCP bearer token。
 

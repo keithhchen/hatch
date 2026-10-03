@@ -629,6 +629,7 @@ function runMessage(runId: string, conversationId: string): JsonRecord {
     type: "client.message",
     run_id: runId,
     conversation_id: conversationId,
+    local_tools: [],
     message: { role: "user", content: "Create the purchased delivery." }
   };
 }

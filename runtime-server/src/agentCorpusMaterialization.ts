@@ -4,13 +4,6 @@ import { hatchPlatformPrompt } from "./hatchPlatformPrompt.js";
 
 export const MAX_MATERIALIZED_AGENT_PROMPT_BYTES = 4 * 1024 * 1024;
 
-export class AgentCorpusChangedError extends Error {
-  constructor() {
-    super("This Creator Agent changed. Reconnect before starting another turn.");
-    this.name = "AgentCorpusChangedError";
-  }
-}
-
 export type MaterializedAgentCorpus = {
   systemPrompt: string;
   localTools: ClientToolName[];
@@ -41,7 +34,7 @@ export async function materializeAgentCorpus(
   signal?.throwIfAborted();
   const corpus = await loadAgentCorpus(corpusRoot, signal);
   if (expectedDigest && await agentCorpusDigest(corpusRoot, corpus, signal) !== expectedDigest) {
-    throw new AgentCorpusChangedError();
+    throw new Error("Creator Agent assets do not match the resolved release.");
   }
   const system = await readCorpusAsset(corpusRoot, corpus.instructions.system, signal);
   // Skill bodies and references are not eagerly materialized into the system
@@ -57,7 +50,7 @@ export async function materializeAgentCorpus(
   // the old manifest's asset digest, and this final manifest digest ensures a
   // publish did not swap the root while those assets were being assembled.
   if (expectedDigest && await agentCorpusDigest(corpusRoot, corpus, signal) !== expectedDigest) {
-    throw new AgentCorpusChangedError();
+    throw new Error("Creator Agent assets do not match the resolved release.");
   }
   return {
     systemPrompt: protectedKnowledge,

@@ -118,6 +118,7 @@ export class SkillRuntime {
       type: "client.message",
       run_id: this.options.parentInput.run_id,
       conversation_id: this.options.parentInput.conversation_id,
+      local_tools: this.options.parentInput.local_tools,
       message: { role: "user", content: product }
     };
     const workerMessages: RuntimeCompactionMessage[] = [workerInput.message];

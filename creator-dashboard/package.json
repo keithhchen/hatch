@@ -27,6 +27,7 @@
     "motion": "^14.0.0",
     "pg": "^8.23.0",
     "prop-types": "^15.8.1",
+    "react-easy-crop": "^6.2.3",
     "react-resizable-panels": "^4.12.4",
     "streamdown": "^2.7.0",
     "tailwind-merge": "^3.7.0",

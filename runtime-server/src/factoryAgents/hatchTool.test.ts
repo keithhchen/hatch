@@ -85,6 +85,7 @@ test("HTool uses the shared Runtime for its host Product, isolates private files
     }
     assert.deepEqual(outbound.map(event => event.message.content), ["Customer task", "Customer answer"]);
     assert.ok(outbound.every(event => event.conversation_id === "conv_test" && event.run_id));
+    assert.ok(outbound.every(event => Array.isArray(event.local_tools) && event.local_tools.length === 0));
     await tool.execute("asset", { operation: "read_asset", asset_id: "asset_test" });
     assert.equal((await store.read(s.id, "output/RESULT.md")).bytes.toString(), "# Actual asset fixture\r\nOriginal bytes.\r\n");
     mismatch = true;

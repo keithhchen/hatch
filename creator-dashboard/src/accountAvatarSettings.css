@@ -1,4 +1,4 @@
-.account-avatar-settings { display: flex; align-items: center; gap: 20px; padding: 24px 0; border-bottom: 1px solid var(--buyer-border-subtle); }
+.account-avatar-settings { display: flex; align-items: center; gap: 20px; padding: 24px 0; }
 .hui-avatar.account-avatar-settings__image { width: 72px; height: 72px; min-width: 72px; flex: 0 0 72px; aspect-ratio: 1; border: 2px solid rgba(255,255,255,.94); box-shadow: 0 4px 14px rgba(69,49,35,.13); }
 .account-avatar-settings__content { min-width: 0; }
 .account-avatar-settings__content h3 { margin: 0 0 5px; font-size: var(--hatch-type-ui); font-weight: 650; }
@@ -7,4 +7,10 @@
 .account-avatar-settings__actions input { display: none; }
 .account-avatar-settings__content .account-avatar-settings__status { margin-top: 9px; color: #346149; }
 .account-avatar-settings__content .account-avatar-settings__error { margin-top: 9px; color: var(--hui-danger, #9b3526); }
+.hui-dialog.account-avatar-crop-dialog { width: min(560px, calc(100vw - 24px)); }
+.account-avatar-crop-dialog .hui-dialog__body { margin-top: 16px; }
+.account-avatar-crop__viewport { position: relative; width: min(100%, 420px); aspect-ratio: 1; margin: 0 auto; overflow: hidden; background: #000; }
+.account-avatar-crop__zoom { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 16px; max-width: 420px; margin: 18px auto 0; color: var(--buyer-muted); font-size: var(--hatch-type-meta); }
+.account-avatar-crop__zoom input { width: 100%; accent-color: var(--hui-accent); }
+.account-avatar-crop-dialog .hui-dialog__footer { flex-wrap: wrap; }
 @media (max-width: 540px) { .account-avatar-settings { align-items: flex-start; gap: 14px; } .hui-avatar.account-avatar-settings__image { width: 58px; height: 58px; min-width: 58px; flex-basis: 58px; } }

@@ -215,6 +215,7 @@ jobs:
           for key in LLM_API_KEY GEMINI_API_KEY HATCH_DATABASE_URL HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN HATCH_OAUTH_STATE_KEY DASHSCOPE_API_KEY POSTGRES_PASSWORD; do
             grep -Eq "^${key}=[^[:space:]]+" .env || { echo "Missing non-empty $key in /opt/hatch/.env"; exit 1; }
           done
+          grep -Eq '^FIRECRAWL_API_KEY=[^[:space:]]+' .env || { echo "Factory web search requires a non-empty FIRECRAWL_API_KEY in /opt/hatch/.env"; exit 1; }
           payment_mode="$(sed -n 's/^HATCH_COMMERCE_PAYMENT_MODE=//p' .env | tail -n 1)"
           payment_mode="${payment_mode:-disabled}"
           case "$payment_mode" in

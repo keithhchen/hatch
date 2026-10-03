@@ -456,7 +456,7 @@ test("WebSocket retries use client_message_id without creating a second run or r
     protocol_version: PROTOCOL_VERSION,
     conversation_id: conversationId,
     license_token: "retry-license",
-    local_tools: ["file_search"]
+    local_tools: []
   }));
   await waitForSocket(messages, (message) => message.type === "session.ready");
   socket.send(JSON.stringify({
@@ -464,6 +464,7 @@ test("WebSocket retries use client_message_id without creating a second run or r
     run_id: "run_transport_first",
     client_message_id: "message_stable_once",
     conversation_id: conversationId,
+    local_tools: ["file_search"],
     message: { role: "user", content: "Find Hatch." }
   }));
   await waitForSocket(messages, (message) => message.type === "tool_call.delta" && message.run_id === "run_transport_first");
@@ -482,6 +483,7 @@ test("WebSocket retries use client_message_id without creating a second run or r
     run_id: "run_transport_retry",
     client_message_id: "message_stable_once",
     conversation_id: conversationId,
+    local_tools: ["file_search"],
     message: { role: "user", content: "Find Hatch." }
   }));
   const replay = await waitForSocket(messages, (message) => (
@@ -534,6 +536,7 @@ test("a conversation-bound socket rejects a mismatched message before persistenc
       run_id: "mismatched-run",
       client_message_id: "mismatched-message",
       conversation_id: "conversation-other",
+      local_tools: [],
       message: { role: "user", content: "Must never run." }
     }));
     const failed = await waitForSocket(messages, (message) => (
@@ -579,7 +582,7 @@ test("local attachments commit references and fixed image bytes without using th
     sha256: createHash("sha256").update(imageBytes).digest("hex"), data_base64: imageBytes.toString("base64") };
   try {
     socket.send(JSON.stringify({ type: "client.message", run_id: "local-run", client_message_id: "local-message",
-      conversation_id: conversationId, message: { role: "user", content: "Read attachments", attachments: [document, image] } }));
+      conversation_id: conversationId, local_tools: [], message: { role: "user", content: "Read attachments", attachments: [document, image] } }));
     await waitForSocket(messages, (message) => message.type === "message.accepted");
     const committed = (await new RuntimeStore(dataDir).readConversation(conversationId))[0]!;
     const { data_base64: _bytes, ...imageReference } = image;
@@ -617,7 +620,7 @@ test("completed assistant body is stored once and journal carries only one notif
   const socket = await openRuntimeSocket(base, conversationId, messages);
   try {
     socket.send(JSON.stringify({ type: "client.message", run_id: "canonical-run",
-      client_message_id: "canonical-message", conversation_id: conversationId,
+      client_message_id: "canonical-message", conversation_id: conversationId, local_tools: [],
       message: { role: "user", content: "Review my document." } }));
     await waitForSocket(messages, (message) => message.type === "turn.completed");
     const journal = await repository.snapshot(conversationId);
@@ -649,7 +652,7 @@ test("a failed manual compaction does not lose the already accepted user command
   const socket = await openRuntimeSocket(base, conversationId, messages);
   try {
     socket.send(JSON.stringify({ type: "client.message", run_id: "compact-run",
-      client_message_id: "compact-message", conversation_id: conversationId,
+      client_message_id: "compact-message", conversation_id: conversationId, local_tools: [],
       message: { role: "user", content: "/compact" } }));
     // The provider failure is injected; this test never calls a live model.
     await waitForSocket(messages, (message) => message.type === "turn.failed");
@@ -732,6 +735,7 @@ test("two windows get distinct executor leases; disconnect is Interrupted and re
     run_id: "run_recovery_first",
     client_message_id: "message_recovery_first",
     conversation_id: conversationId,
+    local_tools: ["file_search"],
     message: { role: "user", content: "Find Hatch." }
   }));
   await waitForSocket(firstMessages, (message) => message.type === "tool_call.delta" && message.run_id === "run_recovery_first");
@@ -748,6 +752,7 @@ test("two windows get distinct executor leases; disconnect is Interrupted and re
     run_id: "run_recovery_parallel",
     client_message_id: "message_recovery_parallel",
     conversation_id: conversationId,
+    local_tools: ["file_search"],
     message: { role: "user", content: "Start another product." }
   }));
   const busy = await waitForSocket(secondMessages, (message) => (
@@ -774,6 +779,7 @@ test("two windows get distinct executor leases; disconnect is Interrupted and re
     run_id: "run_recovery_retry",
     client_message_id: "message_recovery_first",
     conversation_id: conversationId,
+    local_tools: ["file_search"],
     message: { role: "user", content: "Find Hatch." }
   }));
   const retry = await waitForSocket(secondMessages, (message) => (
@@ -792,6 +798,7 @@ test("two windows get distinct executor leases; disconnect is Interrupted and re
     run_id: "run_recovery_replacement",
     client_message_id: "message_recovery_replacement",
     conversation_id: conversationId,
+    local_tools: ["file_search"],
     message: { role: "user", content: "Find Hatch again." }
   }));
   const replacement = await waitForSocket(secondMessages, (message) => (
@@ -827,6 +834,7 @@ test("missing image fails before accepting, and retry uses fixed committed bytes
   const messages: OutboundMessage[] = [];
   const socket = await openRuntimeSocket(await listen(runtime.server), "atomic-image", messages);
   const request = { type: "client.message", conversation_id: "atomic-image", run_id: "image-run", client_message_id: "image-message",
+    local_tools: [],
     message: { role: "user", content: "look", attachments: [attachment] } };
   try {
     socket.send(JSON.stringify(request));
@@ -887,7 +895,7 @@ for (const boundary of ["before", "after"] as const) {
     const messages: OutboundMessage[] = [];
     const socket = await openRuntimeSocket(base, "atomic-socket", messages);
     const request = { type: "client.message", conversation_id: "atomic-socket", run_id: "first",
-      client_message_id: "stable", message: { role: "user", content: "accepted exactly once" } };
+      client_message_id: "stable", local_tools: [], message: { role: "user", content: "accepted exactly once" } };
     socket.send(JSON.stringify(request));
     try {
       await waitForCondition(() => reached);
@@ -973,7 +981,7 @@ async function openRuntimeSocket(base: string, conversationId: string, messages:
     protocol_version: PROTOCOL_VERSION,
     conversation_id: conversationId,
     license_token: "recovery-license",
-    local_tools: ["file_search"]
+    local_tools: []
   }));
   const ready = await waitForSocket(messages, (message) => message.type === "session.ready");
   assert.equal(ready.type === "session.ready" ? ready.conversation_id : undefined, conversationId);

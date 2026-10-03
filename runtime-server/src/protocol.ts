@@ -49,6 +49,14 @@ export const ClientToolNameSchema = z.enum([
 ]);
 export type ClientToolName = z.infer<typeof ClientToolNameSchema>;
 
+export class ClientToolCapabilityPolicy {
+  constructor(private readonly sessionTools: readonly ClientToolName[]) {}
+
+  forRun(messageTools: readonly ClientToolName[] | undefined): ClientToolName[] {
+    return [...(messageTools ?? this.sessionTools)];
+  }
+}
+
 export const ClientHelloSchema = z.object({
   type: z.literal("client.hello"),
   protocol_version: ProtocolVersionSchema,
@@ -247,6 +255,8 @@ export const ClientMessageSchema = z.object({
   */
   client_message_id: ProtocolIdSchema.optional(),
   conversation_id: ProtocolIdSchema,
+  /** A browser can explicitly declare the capabilities for this run. */
+  local_tools: z.array(ClientToolNameSchema).max(ClientToolNameSchema.options.length).optional(),
   message: UserMessageSchema,
   /** Requests the first Agent run; Runtime materializes its internal marked user turn. */
   task_start: z.literal(true).optional()
@@ -290,7 +300,7 @@ export const InboundMessageSchema = z.discriminatedUnion("type", [
 ]);
 
 export type ClientHello = z.infer<typeof ClientHelloSchema>;
-export type RunStart = z.infer<typeof ClientMessageSchema>;
+export type RunStart = z.infer<typeof ClientMessageSchema> & { local_tools: ClientToolName[] };
 export type ContextAttachment = z.infer<typeof ContextAttachmentSchema>;
 export type TextContextAttachment = z.infer<typeof TextContextAttachmentSchema>;
 export type AssetAttachment = z.infer<typeof AssetAttachmentSchema>;
@@ -390,7 +400,21 @@ export type AgentDelta = {
   type: "assistant.delta";
   run_id: string;
   delta: {
-    kind: "text" | "status";
+    kind: "text";
+    content: string;
+  } | {
+    kind: "status";
+    content: string;
+  } | {
+    kind: "thinking_start";
+    contentIndex: number;
+  } | {
+    kind: "thinking_delta";
+    contentIndex: number;
+    delta: string;
+  } | {
+    kind: "thinking_end";
+    contentIndex: number;
     content: string;
   };
 };

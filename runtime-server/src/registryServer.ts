@@ -56,7 +56,9 @@ import type { AboutYouAnswerPair } from "./creatorLearning/aboutYouNode.js";
 import { PostgresDistillationGraphStore } from "./creatorLearning/distillationGraphStore.js";
 import { CorpusPublisher, CorpusPublishError } from "./creatorLearning/corpusPublisher.js";
 import { CreatorRegistryReleaseStore, type CreatorRegistryRelease } from "./creatorLearning/creatorRegistryRelease.js";
+import { CREATOR_REGISTRY_ARTIFACT_SCHEMA } from "./creatorLearning/creatorRegistry.js";
 import { QdrantKnowledgeIndexer } from "./qdrantIndexer.js";
+import { accountAvatarApplicationServiceFromEnvironment, MAX_ACCOUNT_AVATAR_BYTES } from "./accountAvatar.js";
 import {
   HttpRequestGate,
   PublishWorkGate,
@@ -72,6 +74,7 @@ export const CREATOR_FACTORY_JSON_BODY_MAX_BYTES = 32 * 1024 * 1024;
 type RegistryContext = {
   store: RegistryStoreTs;
   accounts: AccountStoreTs;
+  accountAvatars?: ReturnType<typeof accountAvatarApplicationServiceFromEnvironment>;
   authRateLimiter: AuthRateLimiter;
   sessionQueryGate: SessionQueryGate;
   publishWorkGate: PublishWorkGate;
@@ -97,6 +100,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const store = await RegistryStoreTs.open({ environment });
   const accounts = new AccountStoreTs(store.databasePool(), new PasswordHasher(passwordWorkOptions));
   await accounts.ensureSchema();
+  const accountAvatars = accountAvatarApplicationServiceFromEnvironment(accounts, environment);
   const factoryRepository = creatorFactoryRepositoryForRegistry(environment, store.databasePool());
   await factoryRepository.initialize();
   const factoryRoot = path.resolve(environment.HATCH_CREATOR_FACTORY_ROOT ?? "creator-factory-runs");
@@ -196,7 +200,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const publishWorkGate = new PublishWorkGate(publishWorkLimitOptionsFromEnvironment(environment));
   const httpLimits = httpRequestLimitOptionsFromEnvironment(environment);
   const httpRequestGate = new HttpRequestGate(httpLimits);
-  const registryContext: RegistryContext = { store, accounts, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, nodeObjectStore, releaseStore, authSecret };
+  const registryContext: RegistryContext = { store, accounts, accountAvatars, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, nodeObjectStore, releaseStore, authSecret };
   const server = http.createServer((request, response) => {
     const suppliedBearer = bearer(request);
     const internalRuntime = Boolean(
@@ -528,6 +532,24 @@ async function route(
     }
     context.authRateLimiter.recordSuccess("signin", identity);
     sendAuthJson(response, 200, sessionResponse(account, await context.accounts.createSession(account)));
+    return;
+  }
+  if (url.pathname === "/v1/auth/me/avatar" && (request.method === "PUT" || request.method === "DELETE")) {
+    const account = await authenticate(request, response, context);
+    if (account === SESSION_QUERY_REJECTED) return;
+    if (!account) { sendAuthJson(response, 401, { detail: "A valid account token is required." }); return; }
+    if (!context.accountAvatars) {
+      sendAuthJson(response, 503, { error: { code: "avatar_storage_unavailable", message: "Avatar storage is not configured." } });
+      return;
+    }
+    const updated = request.method === "DELETE"
+      ? await context.accountAvatars.remove(account.id)
+      : await context.accountAvatars.replace(
+        account.id,
+        Buffer.from(await readBytes(request, MAX_ACCOUNT_AVATAR_BYTES)),
+        String(request.headers["content-type"] ?? "").split(";", 1)[0]!.trim().toLowerCase()
+      );
+    sendAuthJson(response, 200, accountPublic(updated));
     return;
   }
   if (url.pathname === "/v1/auth/me" && request.method === "GET") {
@@ -976,10 +998,15 @@ async function route(
     const limit = boundedQueryInteger(url, "limit", 20, 1, 20);
     const offset = boundedQueryInteger(url, "offset", 0, 0, 100_000);
     const rows = (await publicCatalogRows(context)).slice(0, Math.min(20_001, offset + limit + 1));
-    const creators = new Map<string, { id: string; name: string; product_count: number }>();
+    const creators = new Map<string, { id: string; name: string; avatar_url: string | null; product_count: number }>();
     for (const row of rows) {
       const creatorId = String(row.creator_id ?? "");
-      const current = creators.get(creatorId) ?? { id: creatorId, name: String(row.creator_name ?? creatorId), product_count: 0 };
+      const current = creators.get(creatorId) ?? {
+        id: creatorId,
+        name: String(row.creator_name ?? creatorId),
+        avatar_url: typeof row.creator_avatar_url === "string" ? row.creator_avatar_url : null,
+        product_count: 0
+      };
       current.product_count += 1;
       creators.set(creatorId, current);
     }
@@ -1009,7 +1036,10 @@ async function route(
     const rows = (await publicCatalogRows(context))
       .filter((row) => row.creator_id === creatorId);
     if (!rows.length) { sendJson(response, 404, { detail: "Creator not found." }); return; }
-    sendJson(response, 200, { creator: { id: creatorId, name: rows[0]!.creator_name }, products: rows.map(publicProductRow) });
+    sendJson(response, 200, {
+      creator: { id: creatorId, name: rows[0]!.creator_name, avatar_url: rows[0]!.creator_avatar_url ?? null },
+      products: rows.map(publicProductRow)
+    });
     return;
   }
 
@@ -1068,11 +1098,12 @@ async function route(
       return;
     }
     try {
-      const connection = await context.store.resolveCreatorToolConnection({
-        tenantId,
-        agentId: decodeURIComponent(runtimeToolMatch[2]!),
-        toolId: decodeURIComponent(runtimeToolMatch[3]!)
-      });
+      const productId = decodeURIComponent(runtimeToolMatch[2]!);
+      const toolId = decodeURIComponent(runtimeToolMatch[3]!);
+      const release = await context.releaseStore.getLive(productId);
+      const connection = release
+        ? await resolvePublishedCreatorToolConnection(context, release, tenantId, productId, toolId)
+        : await context.store.resolveCreatorToolConnection({ tenantId, agentId: productId, toolId });
       sendJson(response, 200, { id: connection.id, tenant_id: connection.tenant_id, kind: connection.kind, secret_ref: connection.secret_ref, secret: connection.secret, config: connection.config, status: connection.status });
     } catch (error) {
       sendJson(response, 404, { detail: error instanceof Error ? error.message : String(error) });
@@ -1080,6 +1111,34 @@ async function route(
     return;
   }
   sendJson(response, 404, { detail: "Route not found." });
+}
+
+async function resolvePublishedCreatorToolConnection(
+  context: RegistryContext,
+  release: CreatorRegistryRelease,
+  tenantId: string,
+  productId: string,
+  toolId: string
+) {
+  if (release.creator_id !== tenantId || release.product_id !== productId) {
+    throw new Error("published Creator release does not match the requested product");
+  }
+  if (!context.nodeObjectStore) throw new Error("Creator Registry object storage is unavailable");
+  const artifact = CREATOR_REGISTRY_ARTIFACT_SCHEMA.parse(
+    JSON.parse((await context.nodeObjectStore.get(release.corpus_ref)).toString("utf8"))
+  );
+  if (artifact.creator.id !== tenantId || artifact.product.id !== productId) {
+    throw new Error("published Creator Corpus identity does not match its Registry release");
+  }
+  const declared = artifact.corpus.tools.find((tool) => tool.id === toolId);
+  if (!declared || (declared.kind !== "http_function" && declared.kind !== "mcp_tool") || !declared.connection_ref) {
+    throw new Error(`published Creator tool does not exist or has no connection reference: ${toolId}`);
+  }
+  return context.store.resolveCreatorToolConnectionByReference({
+    tenantId,
+    connectionId: declared.connection_ref,
+    expectedKind: declared.kind === "http_function" ? "http" : "mcp"
+  });
 }
 
 const SESSION_QUERY_REJECTED = Symbol("session-query-rejected");
@@ -1167,10 +1226,14 @@ async function publicCatalogRows(context: RegistryContext): Promise<Record<strin
       ))
       .map((release) => [release.product_id, release as unknown as Record<string, unknown>]),
   );
-  return [...rows.values()].sort((left, right) => {
+  const ordered = [...rows.values()].sort((left, right) => {
     const time = Date.parse(String(right.published_at ?? "")) - Date.parse(String(left.published_at ?? ""));
     return time || String(left.product_id ?? "").localeCompare(String(right.product_id ?? ""));
   });
+  const creatorIds = [...new Set(ordered.map(row => String(row.creator_id ?? "")).filter(Boolean))];
+  const creatorAccounts = await Promise.all(creatorIds.map(id => context.accounts.getById(id)));
+  const avatars = new Map(creatorIds.map((id, index) => [id, creatorAccounts[index]?.avatar_url ?? null]));
+  return ordered.map(row => ({ ...row, creator_avatar_url: avatars.get(String(row.creator_id ?? "")) ?? null }));
 }
 
 function publicProductRow(row: Record<string, unknown>): Record<string, unknown> {
@@ -1179,7 +1242,8 @@ function publicProductRow(row: Record<string, unknown>): Record<string, unknown>
   const productId = String(publicRow.product_id ?? "");
   return {
     ...publicRow,
-    creator: { id: publicRow.creator_id, name: publicRow.creator_name },
+    creator: { id: publicRow.creator_id, name: publicRow.creator_name, avatar_url: publicRow.creator_avatar_url ?? null },
+    creator_avatar_url: publicRow.creator_avatar_url ?? null,
     product: { id: publicRow.product_id, name: publicRow.product_name },
     promise,
     description: publicRow.product_description ?? promise,

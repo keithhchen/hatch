@@ -45,6 +45,8 @@ import {
   type SkillRecord
 } from "./skills.js";
 
+const MAX_TOOL_CALLS_PER_RUN = 30;
+
 
 export type PiToolDefinition = {
   type: "function";
@@ -178,10 +180,12 @@ export class PiAgentRuntime implements AgentRuntime {
       ctx.knowledgeAvailable,
       ctx.externalToolDefinitions
     );
+    const toolCallBudget = { used: 0 };
     const tools = toolDefinitions.map((definition) => this.createTool(
       input,
       ctx,
       definition,
+      toolCallBudget,
       () => activeSkills,
       setActiveSkills,
       () => resourceRoots,
@@ -197,7 +201,7 @@ export class PiAgentRuntime implements AgentRuntime {
       // summary delimiters.
       convertToLlm,
       initialState: {
-        systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow, ctx.briefSnapshot),
+        systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools),
         model,
         thinkingLevel: resolveLlmProfile().thinkingLevel,
         messages: [...contextMessages, ...storedMessages],
@@ -211,7 +215,7 @@ export class PiAgentRuntime implements AgentRuntime {
             toolName: toolCall.name,
             arguments: args as Record<string, unknown>,
             messages: auditMessagesForRun(ctx, transcriptMessages, undefined),
-            systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow, ctx.briefSnapshot),
+            systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools),
             auditContext: ctx.deliveryAuditContext,
             signal
           });
@@ -324,7 +328,7 @@ export class PiAgentRuntime implements AgentRuntime {
           workflow: deliveryWorkflow,
           draft: draftContent,
           messages: auditMessagesForRun(ctx, transcriptMessages, finalAssistant),
-          systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow, ctx.briefSnapshot),
+          systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools),
           auditContext: ctx.deliveryAuditContext,
           signal: ctx.abortSignal
         })
@@ -453,6 +457,7 @@ export class PiAgentRuntime implements AgentRuntime {
     input: RunStart,
     ctx: RunContext,
     definition: PiToolDefinition,
+    toolCallBudget: { used: number },
     getActiveSkills: () => ActivatedSkill[],
     setActiveSkills: (skills: ActivatedSkill[]) => void,
     getResourceRoots: () => string[],
@@ -467,6 +472,21 @@ export class PiAgentRuntime implements AgentRuntime {
       execute: async (toolCallId, args, signal) => {
         ensureNotCancelled(ctx);
         if (signal?.aborted) throw new Error("Tool execution aborted");
+        if (toolCallBudget.used >= MAX_TOOL_CALLS_PER_RUN) {
+          const result = {
+            status: "error",
+            error: {
+              code: "tool_call_limit_exceeded",
+              message: `本次回复的工具调用次数已达到 ${MAX_TOOL_CALLS_PER_RUN} 次上限。请整理已收集的证据；证据不足时说明不确定之处，再作答。`
+            }
+          };
+          const modelResult = modelVisibleToolResult(definition.function.name, result);
+          return {
+            content: piToolResultContent(modelResult),
+            details: boundToolResult(stripBinaryToolPayload(modelResult))
+          };
+        }
+        toolCallBudget.used += 1;
         const result = await executeChatTool(
           input,
           ctx,
@@ -543,6 +563,31 @@ export class PiAgentRuntime implements AgentRuntime {
           type: "assistant.delta",
           run_id: input.run_id,
           delta: { kind: "status", content: "Thinking through the product." }
+        });
+        queue.push({
+          type: "assistant.delta",
+          run_id: input.run_id,
+          delta: { kind: "thinking_start", contentIndex: event.assistantMessageEvent.contentIndex }
+        });
+      } else if (event.assistantMessageEvent.type === "thinking_delta") {
+        queue.push({
+          type: "assistant.delta",
+          run_id: input.run_id,
+          delta: {
+            kind: "thinking_delta",
+            contentIndex: event.assistantMessageEvent.contentIndex,
+            delta: event.assistantMessageEvent.delta
+          }
+        });
+      } else if (event.assistantMessageEvent.type === "thinking_end") {
+        queue.push({
+          type: "assistant.delta",
+          run_id: input.run_id,
+          delta: {
+            kind: "thinking_end",
+            contentIndex: event.assistantMessageEvent.contentIndex,
+            content: event.assistantMessageEvent.content
+          }
         });
       }
       return;
@@ -707,7 +752,7 @@ function auditMessagesForRun(
     ? transcriptMessages.slice(0, -1)
     : transcriptMessages;
   return [
-    { role: "system", content: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow, ctx.briefSnapshot) },
+    { role: "system", content: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools) },
     ...buildRuntimeContextMessages(
       ctx.sessionSkills.rendered.section,
       ctx.activatedSkills ?? []

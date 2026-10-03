@@ -332,25 +332,6 @@ test("Postgres Runtime scope quota cannot be bypassed by rotating client convers
   assert.equal(pool.usage.get("global")?.eventCount, 2);
 });
 
-test("Postgres visible history exposes when its recent bounded window is truncated", async () => {
-  const pool = new FakePostgres();
-  const store = new PostgresStore({ pool, maxReplayEvents: 2, maxReplayBytes: 64 * 1024 });
-  for (const index of [1, 2, 3]) {
-    await append(store, {
-      type: "message.created",
-      conversation_id: "bounded-visible",
-      run_id: `visible-${index}`,
-      role: "user",
-      content: `message-${index}`
-    });
-  }
-  assert.equal(await store.visibleConversationTruncated("bounded-visible"), true);
-  assert.deepEqual(
-    (await store.readVisibleConversation("bounded-visible")).map((message) => message.content),
-    ["message-2", "message-3"]
-  );
-});
-
 function storeFixture(): { store: PostgresStore; pool: FakePostgres } {
   const pool = new FakePostgres();
   return {

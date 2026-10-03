@@ -10,7 +10,7 @@ Current boundaries:
 ```text
 server owns: sessions, history, LLM calls, skills, server tools
 local runner owns: filesystem, shell, git, workspace containment
-client sends: current user message and declared local workspace capability
+client sends: current user message and declared local tool capabilities
 server streams: assistant deltas, tool requests/results, turn state, final answer
 ```
 
@@ -63,6 +63,9 @@ Creator Agent binding during the hello handshake. Every later
 `client.message.conversation_id` must equal the hello value; mismatches fail
 before persistence or execution. Both `session.ready` and `message.accepted`
 echo the bound `conversation_id` so clients can fail closed on routing errors.
+Desktop declares `local_tools` in `client.hello`; its messages inherit that
+declaration. Browser declares `local_tools: []` in both `client.hello` and
+`client.message`. Runtime uses the message declaration when present.
 Protocol 0.7 and hello messages without `conversation_id` are invalid; there
 is no compatibility fallback on the Runtime socket.
 

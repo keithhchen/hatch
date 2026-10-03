@@ -168,11 +168,22 @@ export class PostgresAgentDefinitionRepository implements AgentDefinitionReposit
   }
   private async migrateUpdateDependencies(): Promise<void> {
     const definitions = await this.list();
+    const voice = definitions.find(definition => definition.role === "voice");
     const generation = definitions.find(definition => definition.role === "generation");
-    if (!generation || generation.dependencies.updates.includes("evaluator")) return;
-    await this.replace(definitions.map(definition => definition.role === "generation"
-      ? { ...definition, dependencies: { ...definition.dependencies, updates: ["evaluator"] as Role[] } }
-      : definition));
+    const needsVoiceResearch = Boolean(voice && ![
+      ...voice.dependencies.required, ...voice.dependencies.normal, ...voice.dependencies.updates
+    ].includes("research"));
+    const needsGenerationEvaluator = Boolean(generation && !generation.dependencies.updates.includes("evaluator"));
+    if (!needsVoiceResearch && !needsGenerationEvaluator) return;
+    await this.replace(definitions.map(definition => {
+      if (definition.role === "voice" && needsVoiceResearch) return {
+        ...definition, dependencies: { ...definition.dependencies, updates: [...definition.dependencies.updates, "research"] as Role[] }
+      };
+      if (definition.role === "generation" && needsGenerationEvaluator) return {
+        ...definition, dependencies: { ...definition.dependencies, updates: [...definition.dependencies.updates, "evaluator"] as Role[] }
+      };
+      return definition;
+    }));
   }
   private async migrateTemporaryYoutubeTranscriptDisable(): Promise<void> {
     const current = await this.read();
@@ -194,10 +205,10 @@ export async function initialAgentDefinitions(): Promise<AgentDefinition[]> {
   const askUserGuidance = await readFile(fileURLToPath(new URL("ASKUSER.md", promptRoot)), "utf8");
   const seed = [
     { role: "research", order: 1, name: { en: "Deep Research", zh: "深度研究", ja: "深掘り調査" }, hint: { en: "Find primary evidence and reconstruct the Creator as a whole person.", zh: "寻找一手证据，还原一个有血有肉的 Creator。", ja: "一次情報から、Creator という人物全体を立体的に捉えます。" }, tools: ["update_todo", "list", "read", "write", "web_search", "web_scrape"], dependencies: { required: [], normal: [], updates: [] } },
-    { role: "voice", order: 2, name: { en: "Voice Interview", zh: "语音访谈", ja: "音声インタビュー" }, hint: { en: "Draw out stories and tacit judgment in a natural conversation.", zh: "用自然对话挖出经历、故事和隐性判断。", ja: "自然な対話から経験、物語、暗黙の判断を引き出します。" }, tools: ["update_todo", "list", "read", "write", "web_search", "web_scrape"], dependencies: { required: [], normal: [], updates: [] } },
+    { role: "voice", order: 2, name: { en: "Voice Interview", zh: "语音访谈", ja: "音声インタビュー" }, hint: { en: "Draw out stories and tacit judgment in a natural conversation.", zh: "用自然对话挖出经历、故事和隐性判断。", ja: "自然な対話から経験、物語、暗黙の判断を引き出します。" }, tools: ["update_todo", "list", "read", "write", "web_search", "web_scrape"], dependencies: { required: [], normal: [], updates: ["research"] } },
     { role: "generation", order: 3, name: { en: "Agent Builder", zh: "Agent 构建", ja: "Agent 構築" }, hint: { en: "Turn the Creator's identity and judgment into an executable expert Agent.", zh: "把 Creator 的人格与判断变成可执行的专家 Agent。", ja: "Creator の人格と判断を、実行可能な専門 Agent に変えます。" }, tools: ["update_todo", "list", "read", "write", "corpus_upload"], dependencies: { required: [], normal: ["research", "voice"], updates: ["evaluator"] } },
     { role: "case-generation", order: 4, name: { en: "Case Builder", zh: "案例构建", ja: "ケース構築" }, hint: { en: "Build one realistic client situation that demands expert judgment.", zh: "构造一个真正需要专家判断的现实客户情境。", ja: "専門家の判断が本当に必要な顧客状況を構築します。" }, tools: ["update_todo", "list", "read", "write"], dependencies: { required: ["generation"], normal: [], updates: [] } },
-    { role: "evaluator", order: 5, name: { en: "Evaluator", zh: "效果评估", ja: "効果評価" }, hint: { en: "Run this Product and judge what its result truly gets right and wrong.", zh: "运行当前 Product，判断结果真正做对和做错了什么。", ja: "現在の Product を実行し、結果の本質的な良し悪しを評価します。" }, tools: ["update_todo", "list", "read", "write", "hatch_tool"], dependencies: { required: ["generation", "case-generation"], normal: [], updates: [] } },
+    { role: "evaluator", order: 5, name: { en: "Evaluator", zh: "效果评估", ja: "効果評価" }, hint: { en: "Find the few changes that matter most, then calibrate them with the Creator.", zh: "找出最影响客户结果的少数错位，再请 Creator 校准。", ja: "結果を大きく変える少数のずれを見つけ、Creator と校正します。" }, tools: ["update_todo", "list", "read", "write", "hatch_tool"], dependencies: { required: ["generation", "case-generation"], normal: [], updates: [] } },
   ] as const;
   return validateDefinitions(await Promise.all(seed.map(async definition => ({
     ...definition,

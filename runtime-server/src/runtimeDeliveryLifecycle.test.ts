@@ -370,6 +370,7 @@ function clientMessage(runId: string): Record<string, unknown> {
   return {
     type: "client.message",
     run_id: runId,
+    local_tools: [],
     conversation_id: `conversation-${runId}`,
     message: { role: "user", content: "Create the delivery." }
   };

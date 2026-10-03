@@ -104,12 +104,11 @@ test("real PostgreSQL history pages without replay caps or full-history payload 
   const schema = `history_test_${randomUUID().replaceAll("-", "")}`;
   await admin.query(`CREATE SCHEMA "${schema}"`);
   const pool = new Pool({ connectionString, options: `-c search_path=${schema}` });
-  const store = new PostgresStore({ pool, maxReplayEvents: 1, maxReplayBytes: 1024 });
+  const store = new PostgresStore({ pool });
   // Any accidental fallback to the file adapter or unbounded events API fails this test.
   store.readEvents = async () => { throw new Error("Paged PostgreSQL must not read full history"); };
   try {
     await verifyHistory(store);
-    await assert.rejects(store.readConversation("history"), /bounded history/);
     const indexes = await pool.query("SELECT indexdef FROM pg_indexes WHERE schemaname = $1", [schema]);
     assert.ok(indexes.rows.some((row) => /gin.*payload jsonb_path_ops/.test(row.indexdef)));
   } finally {

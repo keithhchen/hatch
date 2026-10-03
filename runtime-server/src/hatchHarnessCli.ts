@@ -289,6 +289,7 @@ async function executeOneTurn(
           messageSent = true;
           socket.send(JSON.stringify({
             type: "client.message",
+            local_tools: [...LOCAL_TOOLS],
             run_id: runId,
             client_message_id: runId,
             conversation_id: conversationId,

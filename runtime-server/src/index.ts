@@ -14,8 +14,10 @@ import {
   type RuntimeCompactionMessage
 } from "./compaction.js";
 import { createAgentRuntime, type AgentRuntime, type RuntimeSessionSkills } from "./agentRuntime.js";
+import { ThinkingPartJournal } from "./thinkingPartJournal.js";
 import {
   clientMessageInputDigest,
+  ClientToolCapabilityPolicy,
   persistedAttachment,
   MAX_RICH_TOOL_RESULT_BYTES,
   parseInboundMessage,
@@ -67,7 +69,7 @@ import {
 } from "./delivery.js";
 import { HttpCommerceEventSink } from "./commerceHttpSink.js";
 import { DeliveryAccountingOutbox, type DeliveryAccountingCommand } from "./deliveryOutbox.js";
-import { AgentCorpusChangedError, materializeAgentCorpus } from "./agentCorpusMaterialization.js";
+import { materializeAgentCorpus } from "./agentCorpusMaterialization.js";
 import { creatorToolControlPlaneFromEnvironment, resolveCreatorTools, type CreatorToolControlPlane } from "./creatorTools.js";
 import {
   AgentCorpusResolver as FilesystemAgentCorpusResolver,
@@ -161,8 +163,6 @@ export type RuntimeServerOptions = {
   maxActiveRunsGlobal?: number;
   /** Authenticated, ready WebSocket connections across the Runtime process. */
   maxEstablishedConnectionsGlobal?: number;
-  /** Authenticated, ready WebSocket connections for one user. */
-  maxEstablishedConnectionsPerUser?: number;
   /** Ping interval used to reap connections that no longer answer. */
   connectionHeartbeatMs?: number;
   /** Maximum time a ready connection may receive no client messages. */
@@ -316,12 +316,6 @@ export async function createRuntimeServerFromEnvironment(
     160 * 1024 * 1024,
     256 * 1024 * 1024
   );
-  const maxEstablishedConnectionsPerUser = runtimeCapacityLimit(
-    "HATCH_RUNTIME_MAX_ESTABLISHED_CONNECTIONS_PER_USER",
-    environment.HATCH_RUNTIME_MAX_ESTABLISHED_CONNECTIONS_PER_USER,
-    8,
-    10_000
-  );
   const connectionHeartbeatMs = runtimeDurationMs(
     "HATCH_RUNTIME_CONNECTION_HEARTBEAT_MS",
     environment.HATCH_RUNTIME_CONNECTION_HEARTBEAT_MS,
@@ -471,7 +465,6 @@ export async function createRuntimeServerFromEnvironment(
     maxActiveRunsPerUser,
     maxActiveRunsGlobal,
     maxEstablishedConnectionsGlobal,
-    maxEstablishedConnectionsPerUser,
     maxOpenConnectionsGlobal,
     maxOpenConnectionsPerSource,
     maxSocketBufferedBytes,
@@ -716,10 +709,6 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     options.maxOpenConnectionsPerSource ?? 16,
     "maxOpenConnectionsPerSource"
   );
-  const establishedConnectionPerUserGate = new KeyedCapacityGate(
-    options.maxEstablishedConnectionsPerUser ?? 8,
-    "maxEstablishedConnectionsPerUser"
-  );
   const connectionHeartbeatMs = options.connectionHeartbeatMs ?? 30_000;
   if (!Number.isSafeInteger(connectionHeartbeatMs) || connectionHeartbeatMs < 1) {
     throw new Error("connectionHeartbeatMs must be a positive safe integer");
@@ -927,7 +916,6 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       activeRunGate,
       activeRunPerUserGate,
       establishedConnectionGate,
-      establishedConnectionPerUserGate,
       maxActiveRunsPerConnection,
       helloTimeoutMs,
       connectionHeartbeatMs,
@@ -1943,7 +1931,6 @@ async function handleRuntimeSocket(
   activeRunGate: CapacityGate,
   activeRunPerUserGate: KeyedCapacityGate,
   establishedConnectionGate: CapacityGate,
-  establishedConnectionPerUserGate: KeyedCapacityGate,
   maxActiveRunsPerConnection: number,
   helloTimeoutMs: number,
   connectionHeartbeatMs: number,
@@ -2165,23 +2152,7 @@ async function handleRuntimeSocket(
               socket.close(1013, "Connection capacity reached");
               return;
             }
-            const releaseUserConnection = establishedConnectionPerUserGate.tryAcquire(nextBinding.userId);
-            if (!releaseUserConnection) {
-              releaseGlobalConnection();
-              await send({
-                type: "turn.failed",
-                error: {
-                  code: "user_connection_capacity",
-                  message: "This account already has the maximum number of connected sessions."
-                }
-              });
-              socket.close(1013, "User connection capacity reached");
-              return;
-            }
-            releaseEstablishedConnection = combineCapacityReleases(
-              releaseGlobalConnection,
-              releaseUserConnection
-            );
+            releaseEstablishedConnection = releaseGlobalConnection;
             if (nextBinding.agentCorpus && nextBinding.agentCorpusRoot) {
               serverTools.setKnowledgeScope({
                 provider: createKnowledgeProvider(nextBinding.agentCorpusRoot, nextBinding.agentCorpus, nextBinding.corpusDigest),
@@ -2400,7 +2371,7 @@ async function handleRuntimeSocket(
               authorizationSlotRunId = message.run_id;
               try {
                 await revalidateTurnAuthorization(hello, binding, entitlementResolver, authIdentityResolver,
-                  agentCorpusResolver, connectionAbortController.signal);
+                  connectionAbortController.signal);
                 const conversation = await conversationRepository.getConversation(storageConversationId);
                 if (!conversation) throw new ConversationRepositoryError("conversation_not_found", "Conversation was not found");
                 assertConversationBinding(conversation, conversationBinding(binding));
@@ -2576,25 +2547,29 @@ async function handleRuntimeSocket(
               binding,
               entitlementResolver,
               authIdentityResolver,
-              agentCorpusResolver,
               authorizationController.signal
             );
             if (binding.agentCorpus) {
-              try {
-                serverTools.setResolvedCreatorTools(await resolveCreatorTools(
-                  creatorToolControlPlane,
-                  binding.creatorId,
-                  binding.productId,
-                  binding.agentCorpus,
-                  authorizationController.signal
-                ));
-              } catch (error) {
-                authorizationController.signal.throwIfAborted();
-                throw new EntitlementError(
-                  "agent_updated",
-                  `This Creator Agent's tool bindings changed. Reconnect before starting another turn: ${errorMessage(error)}`
-                );
-              }
+              binding = await resolveTurnAgentBinding(
+                binding,
+                agentCorpusResolver,
+                authorizationController.signal
+              );
+              serverTools.setKnowledgeScope({
+                provider: createKnowledgeProvider(binding.agentCorpusRoot!, binding.agentCorpus!, binding.corpusDigest),
+                creatorId: binding.creatorId,
+                agentId: binding.productId,
+                corpusDigest: binding.corpusDigest
+              });
+              serverTools.setResolvedCreatorTools(await resolveCreatorTools(
+                creatorToolControlPlane,
+                binding.creatorId,
+                binding.productId,
+                binding.agentCorpus!,
+                authorizationController.signal
+              ));
+              sessionSkills = await buildSessionSkills(binding.agentCorpusRoot);
+              authorizationController.signal.throwIfAborted();
             }
             if (authorizationController.signal.aborted || pendingAuthorization.cancelled) {
               throw new EntitlementError("authorization_cancelled", "Authorization verification was cancelled.");
@@ -2766,7 +2741,11 @@ async function handleRuntimeSocket(
             return;
           }
 
-          const boundMessage: RunStart = { ...message, conversation_id: storageConversationId };
+          const boundMessage: RunStart = {
+            ...message,
+            conversation_id: storageConversationId,
+            local_tools: new ClientToolCapabilityPolicy(hello.local_tools).forRun(message.local_tools)
+          };
           const runAbortController = new AbortController();
           activeRunAbortControllers.set(message.run_id, runAbortController);
           const state = new RunStateMachine(message.run_id, storageConversationId, store, async (status, reason) => {
@@ -2978,7 +2957,7 @@ async function runOneTurn(
       ? await materializeAgentCorpus(
         binding.agentCorpusRoot,
         input.message.content,
-        hello.local_tools,
+        input.local_tools,
         binding.runtimeDigest ?? binding.corpusDigest,
         abortSignal
       )
@@ -2996,6 +2975,7 @@ async function runOneTurn(
     );
     let approvedAssistantText = "";
     const visibleParts: VisibleConversationPart[] = [];
+    const thinkingPartJournal = new ThinkingPartJournal(visibleParts);
     const visibleActivityKeys = new Set<string>();
     const recordVisiblePart = (message: OutboundMessage): void => {
       if (!("run_id" in message) || message.run_id !== input.run_id) return;
@@ -3009,6 +2989,18 @@ async function runOneTurn(
         } else {
           visibleParts.push({ type: "text", start, end });
         }
+        return;
+      }
+      if (message.type === "assistant.delta" && message.delta.kind === "thinking_start") {
+        thinkingPartJournal.accept(message.delta);
+        return;
+      }
+      if (message.type === "assistant.delta" && message.delta.kind === "thinking_delta") {
+        thinkingPartJournal.accept(message.delta);
+        return;
+      }
+      if (message.type === "assistant.delta" && message.delta.kind === "thinking_end") {
+        thinkingPartJournal.accept(message.delta);
         return;
       }
       if (message.type === "tool_call.delta") {
@@ -3079,7 +3071,9 @@ async function runOneTurn(
         run_id: input.run_id,
         message: { role: "assistant", content },
         finish_reason: finishReason,
-        visible_parts: finishReason === "content_filter" ? [] : visibleParts
+        visible_parts: finishReason === "content_filter"
+          ? visibleParts.filter((part) => part.type === "thinking")
+          : visibleParts
       });
       await conversationRepository.appendEvent({
         conversationId: input.conversation_id,
@@ -3207,7 +3201,7 @@ async function runOneTurn(
       messages,
       sessionSkills,
       activatedSkills: [],
-      clientTools: materializedAgent?.localTools ?? hello.local_tools,
+      clientTools: materializedAgent?.localTools ?? input.local_tools,
       allowedExternalTools: materializedAgent?.externalTools,
       externalToolDefinitions: materializedAgent?.externalToolDefinitions,
       persistModelMessage: async (message) => {
@@ -3281,7 +3275,7 @@ async function runOneTurn(
       type: "turn.failed",
       run_id: input.run_id,
       error: {
-        code: error instanceof AgentCorpusChangedError ? "agent_updated" : "run_failed",
+        code: "run_failed",
         message: errorMessage(error)
       }
     });
@@ -3524,7 +3518,6 @@ async function revalidateTurnAuthorization(
   binding: SessionBinding,
   entitlementResolver?: EntitlementResolver,
   authIdentityResolver?: AuthIdentityResolver,
-  agentCorpusResolver?: AgentCorpusResolver,
   signal?: AbortSignal
 ): Promise<void> {
   const authToken = hello.auth_token ?? hello.license_token;
@@ -3560,21 +3553,30 @@ async function revalidateTurnAuthorization(
     }
   }
 
-  if (binding.agentCorpus) {
-    if (!agentCorpusResolver) {
-      throw new EntitlementError("agent_updated", "This Creator Agent changed. Reconnect before starting another turn.");
-    }
-    // Production resolves the current Registry publication for every caller.
-    // Reconnect after a publication changes an already-open session so its
-    // next turn cannot execute the previously loaded instructions.
-    const current = await agentCorpusResolver.resolve(binding.creatorId, binding.productId, signal);
-    if (current.digest !== binding.corpusDigest
-      || current.corpus.creator.id !== binding.creatorId
-      || current.corpus.agent_id !== binding.productId
-      || current.corpus.product.id !== binding.productId) {
-      throw new EntitlementError("agent_updated", "This Creator Agent changed. Reconnect before starting another turn.");
-    }
+}
+
+async function resolveTurnAgentBinding(
+  binding: SessionBinding,
+  agentCorpusResolver: AgentCorpusResolver | undefined,
+  signal?: AbortSignal
+): Promise<SessionBinding> {
+  if (!agentCorpusResolver) {
+    throw new EntitlementError("agent_corpus_unavailable", "The current Creator Agent is unavailable.");
   }
+  const current = await agentCorpusResolver.resolve(binding.creatorId, binding.productId, signal);
+  if (current.corpus.creator.id !== binding.creatorId
+    || current.corpus.agent_id !== binding.productId
+    || current.corpus.product.id !== binding.productId) {
+    throw new EntitlementError("agent_entitlement_mismatch", "The current Creator Agent does not match this session.");
+  }
+  return {
+    ...binding,
+    corpusDigest: current.digest,
+    runtimeDigest: current.runtimeDigest,
+    briefSpec: current.corpus.product.brief_spec as BriefSpec | undefined,
+    agentCorpus: current.corpus,
+    agentCorpusRoot: current.root
+  };
 }
 
 function controlledTurnAuthorizationError(error: unknown): { code: string; message: string } {
@@ -3593,15 +3595,9 @@ function controlledTurnAuthorizationError(error: unknown): { code: string; messa
       message: "Access to this Creator Agent is no longer available. Refresh your Creator Agents and choose an available Agent."
     };
   }
-  if (code === "agent_updated") {
-    return {
-      code: "agent_updated",
-      message: "This Creator Agent was updated. Reconnect to load the current version before continuing."
-    };
-  }
   return {
     code: "authorization_unavailable",
-    message: "Hatch could not verify access for this turn. Check your connection and try again."
+    message: errorMessage(error)
   };
 }
 

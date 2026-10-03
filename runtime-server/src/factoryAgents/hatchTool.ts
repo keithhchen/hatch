@@ -158,7 +158,7 @@ async function runTarget(target: RuntimeTarget, token: string, conversationId: s
             if (sent) throw new Error("Duplicate session.ready");
             sent = true;
             submitting();
-            const request = { type: "client.message", run_id: runId, client_message_id: runId, conversation_id: conversationId, message: { role: "user", content: message } };
+            const request = { type: "client.message", run_id: runId, client_message_id: runId, conversation_id: conversationId, local_tools: [], message: { role: "user", content: message } };
             ws.send(JSON.stringify(request));
             observe(request);
           } else if (event.type === "tool_call.request") throw new Error("Runtime requested a local extension despite local_tools=[]; no local executor exists");

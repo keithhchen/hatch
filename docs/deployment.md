@@ -17,7 +17,10 @@ or separate production Runtime exists. The server uses two Compose projects:
 
 1. Install Docker Engine and the Compose plugin on the Shanghai host.
 2. Create `/opt/hatch/.env` from the root `.env.example` and fill the LLM,
-   DashScope, Postgres, Web Search, and publish-token values.
+   DashScope, Postgres, web search, and publish-token values. User Runtime
+   search remains on Bocha; Creator Factory production search requires a
+   non-empty `FIRECRAWL_API_KEY`. `TAVILY_API_KEY` remains available for Factory
+   scraping when selected.
    Never commit this file or put these values in GitHub Actions.
    The file must also contain the non-empty `HATCH_DATABASE_URL`.
    Runtime and Creator Factory both use the full `kimi-k2.6` profile. The
@@ -72,6 +75,12 @@ or separate production Runtime exists. The server uses two Compose projects:
    project-level `HatchRuntimeRole` to the ECS instance before deploying; the
    container obtains short-lived credentials from IMDSv2 and uses the Shanghai
    Guardrails VPC endpoint.
+   Account avatars use the Creator OSS bucket under `account-avatars/`. Set
+   `HATCH_ACCOUNT_AVATAR_PUBLIC_BASE_URL` to that bucket's public HTTPS base
+   URL. Grant `HatchRuntimeRole` `oss:PutObject`, `oss:GetObject`,
+   `oss:DeleteObject`, and `oss:PutObjectAcl` only on the
+   `account-avatars/*` object prefix. Each processed avatar receives
+   `public-read`; other Creator objects keep their existing ACL.
    Keep `HATCH_COMMERCE_PAYMENT_MODE=disabled` until a production provider
    bridge is configured. Enabling `provider` makes CD require non-empty
    `HATCH_PAYMENT_PROVIDER_BASE_URL`, `HATCH_PAYMENT_PROVIDER_API_TOKEN`, and

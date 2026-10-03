@@ -260,7 +260,7 @@ Rules:
 All Workspace file and shell tools execute on Desktop. Runtime sends a typed request;
 Desktop returns a typed result.
 
-Every supported Desktop advertises the same complete local capability set in every
+Every supported Desktop advertises its local capability set in
 `client.hello`: `file_list`, `file_search`, `file_read`, `file_write`,
 `file_patch`, `shell_exec`, and `git_diff`. Agent Corpus metadata and the selected
 change policy must not remove tools from that list. These exact underscore names
@@ -269,6 +269,8 @@ boundaries; there is no parallel `fs.*` family or provider-only rename. The
 server-owned Creator knowledge tool remains explicitly namespaced as
 `hatch.file_search` (model function `hatch_file_search`) and is not the local
 Workspace `file_search` tool.
+Browser hello and messages declare `local_tools: []`. Runtime uses the current
+message's declaration when present and otherwise uses the hello declaration.
 
 Required request fields:
 

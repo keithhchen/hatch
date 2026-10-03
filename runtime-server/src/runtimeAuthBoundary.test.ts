@@ -191,7 +191,7 @@ test("Runtime blocks a real WebSocket turn when its entitlement is revoked after
   }
 });
 
-test("existing buyer uses the current Product across Library, snapshot, hello and turns after republication", { timeout: 10000 }, async () => {
+test("existing buyer uses the current Product in an open session after republication", { timeout: 10000 }, async () => {
   const scenario = await createRevocableRuntimeScenario();
   const headers = { authorization: "Bearer opaque-user-session" };
   const query = `entitlement_id=${scenario.entitlement.entitlement_id}`;
@@ -202,11 +202,20 @@ test("existing buyer uses the current Product across Library, snapshot, hello an
     scenario.socket = await connectAuthorizedSocket(scenario.runtimePort, scenario.entitlement);
     scenario.registryState.corpusDigest = `sha256:${"2".repeat(64)}`;
 
-    const staleTurn = waitForSocketMessage(scenario.socket, (message) => message.type === "turn.failed");
-    scenario.socket.send(JSON.stringify(clientMessage("before-reconnect")));
-    assert.equal(((await staleTurn).error as { code: string }).code, "agent_updated");
-    assert.equal(scenario.runCalls(), 0, "a previously loaded definition must not execute after publication");
-    scenario.socket.close();
+    const completedOnOpenSession = waitForSocketMessage(scenario.socket, (message) => (
+      message.type === "turn.completed" || message.type === "turn.failed"
+    ));
+    scenario.socket.send(JSON.stringify(clientMessage("after-republication")));
+    const openSessionTerminal = await completedOnOpenSession;
+    assert.equal(openSessionTerminal.type, "turn.completed", JSON.stringify(openSessionTerminal));
+    assert.equal(scenario.runCalls(), 1, "the existing session must run the latest published Agent");
+    const conversationId = durableConversationId({
+      creatorId: scenario.entitlement.creator_id,
+      userId: scenario.entitlement.user_id,
+      productId: scenario.entitlement.product_id
+    }, "conversation-revocable-access");
+    const run = await scenario.conversationRepository.getRunByClientMessageId(conversationId, "after-republication");
+    assert.equal(run?.corpusDigest, scenario.registryState.corpusDigest);
 
     for (const route of ["/v1/conversations", "/v1/conversations/conversation-revocable-access/snapshot"]) {
       const response = await fetch(`${base}${route}?${query}`, { headers });
@@ -220,14 +229,8 @@ test("existing buyer uses the current Product across Library, snapshot, hello an
     assert.equal(catalog.status, 200);
     assert.match(await catalog.text(), new RegExp(scenario.registryState.corpusDigest));
 
-    scenario.socket = await connectAuthorizedSocket(scenario.runtimePort, scenario.entitlement);
-    const completed = waitForSocketMessage(scenario.socket, (message) => ["turn.completed", "turn.failed"].includes(String(message.type)));
-    scenario.socket.send(JSON.stringify(clientMessage("after-reconnect")));
-    const terminal = await completed;
-    assert.equal(terminal.type, "turn.completed", JSON.stringify(terminal));
-    assert.equal(scenario.runCalls(), 1);
     assert.notEqual(scenario.entitlement.purchased_corpus_digest, scenario.registryState.corpusDigest,
-      "connecting must not rewrite the historical purchase");
+      "running the latest Agent must not rewrite the historical purchase");
 
     scenario.registryState.entitlementActive = false;
     const denied = await fetch(`${base}/v1/conversations?${query}`, { headers });
@@ -501,7 +504,7 @@ test("Runtime turns a Registry authorization timeout into a controlled unavailab
       run_id: "run-registry-timeout",
       error: {
         code: "authorization_unavailable",
-        message: "Hatch could not verify access for this turn. Check your connection and try again."
+        message: "Hatch account verification is temporarily unavailable."
       }
     });
     assert.equal(identityCalls, 2);
@@ -616,6 +619,7 @@ async function createRevocableRuntimeScenario(): Promise<{
   registryCalls: { identity: number; access: number };
   runtimePort: number;
   runCalls: () => number;
+  conversationRepository: InMemoryConversationRepository;
   socket?: WebSocket;
   close: () => Promise<void>;
 }> {
@@ -706,6 +710,7 @@ async function createRevocableRuntimeScenario(): Promise<{
     registryCalls: { identity: number; access: number };
     runtimePort: number;
     runCalls: () => number;
+    conversationRepository: InMemoryConversationRepository;
     socket?: WebSocket;
     close: () => Promise<void>;
   } = {
@@ -714,6 +719,7 @@ async function createRevocableRuntimeScenario(): Promise<{
     registryCalls,
     runtimePort: runtimeAddress.port,
     runCalls: () => runtimeRunCalls,
+    conversationRepository: repository,
     close: async () => {
       scenario.socket?.close();
       await runtime.close();
@@ -790,6 +796,7 @@ function clientMessage(
     type: "client.message",
     run_id: runId,
     conversation_id: conversationId,
+    local_tools: [],
     message: { role: "user", content: "Review this." }
   };
 }

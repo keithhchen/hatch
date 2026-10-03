@@ -18,7 +18,7 @@ const COPY = {
     "Evidence, without exposing protected instructions.": "展示能力依据，同时保护内部指令。", Access: "使用权", "Download Desktop": "下载 Desktop",
     Account: "账户", "Your Hatch account.": "你的 Hatch 账户", "Use the same account on Web and Desktop. Signing out keeps your access records intact.": "Web 与 Desktop 请使用同一账户。退出登录不会删除使用权记录。",
     "Signed-in account": "已登录账户", "Hatch account": "Hatch 账户", "Signed in to Hatch": "已登录 Hatch", "Account help": "账户帮助",
-    "Profile photo": "头像", "Your photo appears beside your account and Agent identity.": "头像会显示在账号和 Agent 身份旁边。", "Choose a profile photo": "选择头像", "Upload photo": "上传头像", "Remove photo": "删除头像", "Profile photo updated.": "头像已更新。", "Profile photo removed.": "头像已删除。",
+    "Profile photo": "头像", "Your photo appears beside your account and Agent identity.": "头像会显示在账号和 Agent 身份旁边。", "Choose a profile photo": "选择头像", "Upload photo": "上传头像", "Remove photo": "删除头像", "Profile photo updated.": "头像已更新。", "Profile photo removed.": "头像已删除。", "Crop your photo": "裁剪头像", "Move and zoom the image to choose a square crop.": "移动和缩放图片，选择正方形裁剪区域。", "Cancel": "取消", "Uploading…": "正在上传…", "Crop and upload": "裁剪并上传", "Zoom": "缩放", "This image could not be opened.": "无法打开这张图片。",
     "Your Agent library": "你的 Agent 资料库", "Your library": "你的资料库", "Your subscribed products.": "你订阅的产品。", Chat: "聊天",
     "Start a chat with a product or review its order.": "与已订阅的产品聊天，或查看对应订单。", "Chat with this product from your library.": "直接在资料库中与此产品聊天。",
     "Loading your library": "正在加载资料库", "Your entitlements": "你的使用权", "Your library is empty": "资料库还是空的",

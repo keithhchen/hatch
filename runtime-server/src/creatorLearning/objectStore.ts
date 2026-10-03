@@ -70,6 +70,9 @@ export class LocalArtifactObjectStore implements ArtifactObjectStore {
 type AliOssClient = {
   put(name: string, content: Buffer, options?: Record<string, unknown>): Promise<unknown>;
   get(name: string, options?: Record<string, unknown>): Promise<{ content: Buffer }>;
+  delete(name: string): Promise<unknown>;
+  putACL(name: string, acl: "private" | "public-read" | "public-read-write"): Promise<{ res?: { status?: number } }>;
+  processObjectSave(source: string, target: string, process: string): Promise<{ res?: { status?: number } }>;
   list(query?: Record<string, unknown>, options?: Record<string, unknown>): Promise<{ objects?: Array<{ name?: string }>; isTruncated?: boolean; nextMarker?: string | null }>;
 };
 
@@ -155,6 +158,36 @@ export class AliyunArtifactObjectStore implements ArtifactObjectStore {
       return result.content;
     } catch (error) {
       throw this.withContext("GET", error);
+    }
+  }
+
+  async processImageSave(source: string, target: string, process: string): Promise<void> {
+    try {
+      const result = await (await this.client()).processObjectSave(
+        objectKey(this.options.prefix, source),
+        objectKey(this.options.prefix, target),
+        process
+      );
+      if (result.res?.status !== 200) throw new Error(`OSS image processing returned status ${result.res?.status ?? "unknown"}`);
+    } catch (error) {
+      throw this.withContext("IMAGE PROCESS", error);
+    }
+  }
+
+  async makePublicRead(key: string): Promise<void> {
+    try {
+      const result = await (await this.client()).putACL(objectKey(this.options.prefix, key), "public-read");
+      if (result.res?.status !== 200) throw new Error(`OSS object ACL update returned status ${result.res?.status ?? "unknown"}`);
+    } catch (error) {
+      throw this.withContext("SET PUBLIC READ", error);
+    }
+  }
+
+  async delete(key: string): Promise<void> {
+    try {
+      await (await this.client()).delete(objectKey(this.options.prefix, key));
+    } catch (error) {
+      throw this.withContext("DELETE", error);
     }
   }
 

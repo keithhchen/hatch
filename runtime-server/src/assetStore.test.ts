@@ -54,6 +54,7 @@ test("rich asset payload is validated and stored outside the conversation record
       run_id: "run_asset",
       client_message_id: "message_asset",
       conversation_id: "conversation_asset",
+      local_tools: [],
       message: { role: "user", content: "What is this?", attachments: [attachment] }
     });
     assert.equal(parsed.type, "client.message");
@@ -85,12 +86,14 @@ test("Runtime accepts a rich asset at the 100 MiB boundary and rejects the next 
     type: "client.message",
     run_id: "run_boundary",
     conversation_id: "conversation_boundary",
+    local_tools: [],
     message: { role: "user", content: "Inspect this", attachments: [attachment] }
   }));
   assert.throws(() => parseInboundMessage({
     type: "client.message",
     run_id: "run_boundary_over",
     conversation_id: "conversation_boundary",
+    local_tools: [],
     message: {
       role: "user",
       content: "Inspect this",
