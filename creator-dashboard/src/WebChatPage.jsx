@@ -10,6 +10,7 @@ import { BrowserImageAttachments, WebChatClient } from "./webChatClient.js";
 import { WebChatPresentationError, webChatErrorText, webChatT } from "./webChatI18n.js";
 import { WebChatSnapshotReconciler } from "./webChatSnapshotReconciler.js";
 import { groupTimelineEntries, PendingWebSubmission, WebChatTimeline } from "./webChatTimeline.js";
+import { WebChatRoute } from "./webChatRoute.js";
 import "./webChat.css";
 
 const LOAD_EARLIER_CONVERSATIONS = "__load-earlier-conversations__";
@@ -193,13 +194,13 @@ function WebChatToolDetails({ content, status, client, conversationId, locale, t
   </>;
 }
 
-export default function WebChatPage({ productId, request, navigate, profile, onSignOut }) {
+export default function WebChatPage({ productId, conversationId: routedConversationId, request, navigate, profile, onSignOut }) {
   const { locale } = useLocale();
   const t = useCallback((key, values) => webChatT(locale, key, values), [locale]);
   const [access, setAccess] = useState(null);
   const [conversations, setConversations] = useState([]);
   const [conversationCursor, setConversationCursor] = useState(null);
-  const [conversationId, setConversationId] = useState("");
+  const conversationId = routedConversationId ?? "";
   const [messages, setMessages] = useState([]);
   const [snapshotConversationId, setSnapshotConversationId] = useState(null);
   const [historyCursor, setHistoryCursor] = useState(null);
@@ -231,6 +232,9 @@ export default function WebChatPage({ productId, request, navigate, profile, onS
   const followOutputRef = useRef(true);
 
   const client = useMemo(() => access ? new WebChatClient(request, access.entitlement_id) : null, [access, request]);
+  const selectConversation = useCallback(id => {
+    navigate(id ? WebChatRoute.conversationPath(productId, id) : WebChatRoute.productPath(productId));
+  }, [navigate, productId]);
   const updateMessages = useCallback(update => {
     const next = typeof update === "function" ? update(visibleMessagesRef.current) : update;
     visibleMessagesRef.current = next;
@@ -257,8 +261,10 @@ export default function WebChatPage({ productId, request, navigate, profile, onS
     const reconciliation = snapshotReconcilerRef.current.reconcile(id, visibleMessagesRef.current, snapshot);
     if (!reconciliation.accepted) return { snapshot, messages: reconciliation.messages, stale: true };
     setSnapshotConversationId(id);
-    const briefSnapshot = snapshot.conversation?.brief_snapshot;
-    if (briefSnapshot) setConversations(current => current.map(item => item.id === id ? { ...item, brief_snapshot: briefSnapshot } : item));
+    const snapshotConversation = snapshot.conversation;
+    setConversations(current => current.some(item => item.id === id)
+      ? current.map(item => item.id === id ? { ...item, ...snapshotConversation } : item)
+      : [snapshotConversation, ...current]);
     setHistoryCursor(current => current ?? snapshot.before_cursor ?? null);
     const running = snapshot.runs?.find(run => ["queued", "running", "waiting_for_tool", "waiting_for_approval"].includes(run.status));
     let projectedMessages = reconciliation.messages;
@@ -312,7 +318,6 @@ export default function WebChatPage({ productId, request, navigate, profile, onS
     let live = true;
     setAccess(null);
     setConversations([]);
-    setConversationId("");
     setSnapshotConversationId(null);
     setStatus({ key: "checkingSubscription" });
     request("/v1/user/product-access").then(async payload => {
@@ -323,11 +328,16 @@ export default function WebChatPage({ productId, request, navigate, profile, onS
       setAccess(entitlement);
       setConversations(page.conversations ?? []);
       setConversationCursor(page.next_cursor ?? null);
-      setConversationId(page.conversations?.[0]?.id ?? "");
-      setStatus({ key: page.conversations?.length ? "loadingConversation" : "startChatToBegin" });
+      setStatus({ key: conversationRef.current || page.conversations?.length ? "loadingConversation" : "startChatToBegin" });
     }).catch(cause => { if (live) { setError(cause); setStatus({ key: "unableToOpenChat" }); } });
     return () => { live = false; };
   }, [productId, request]);
+
+  useEffect(() => {
+    const firstConversation = conversations[0];
+    if (!access || conversationId || !firstConversation) return;
+    navigate(WebChatRoute.conversationPath(productId, firstConversation.id), { replace: true });
+  }, [access, conversationId, conversations, navigate, productId]);
 
   useEffect(() => {
     if (!access || !conversationId) return undefined;
@@ -510,7 +520,7 @@ export default function WebChatPage({ productId, request, navigate, profile, onS
     setConversations(current => [result.conversation, ...current]);
     if (briefAnswersInput) taskStartRef.current = result.conversation.id;
     setBriefOpen(false);
-    setConversationId(result.conversation.id);
+    selectConversation(result.conversation.id);
   };
 
   const newConversation = event => {
@@ -631,7 +641,7 @@ export default function WebChatPage({ productId, request, navigate, profile, onS
               return;
             }
             followOutputRef.current = true;
-            setConversationId(value);
+            selectConversation(value);
           }}
           className="web-chat__mobile-history-trigger"
         />
@@ -639,7 +649,7 @@ export default function WebChatPage({ productId, request, navigate, profile, onS
       <div className="web-chat__section-heading"><span>{t("recentConversations")}</span></div>
       <nav className="web-chat__conversation-list" aria-label={t("conversationHistory")}>
         {conversations.map(item => (
-          <button type="button" key={item.id} className="web-chat__conversation" aria-pressed={item.id === conversationId} onClick={() => { followOutputRef.current = true; setConversationId(item.id); }}>
+          <button type="button" key={item.id} className="web-chat__conversation" aria-pressed={item.id === conversationId} onClick={() => { followOutputRef.current = true; selectConversation(item.id); }}>
             <span className="web-chat__conversation-title">{item.title || t("newConversation")}</span>
             <time className="web-chat__conversation-date" dateTime={item.created_at}>{conversationDate(item.created_at, locale)}</time>
           </button>

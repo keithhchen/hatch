@@ -5,6 +5,7 @@ import { Button, HatchBrand, HatchUIProvider, UnavailableState } from "@hatch/ui
 import { LocaleProvider, useLocale } from "./locale.jsx";
 import { buyerT } from "./buyerI18n.js";
 import { dashboardRequest } from "./data.js";
+import { WebChatRoute } from "./webChatRoute.js";
 import "./styles.css";
 
 const CREATOR_ROOT = "/studio";
@@ -159,14 +160,14 @@ function App() {
     );
   }
 
-  const chatMatch = location.pathname.match(/^\/chat\/product\/([0-9a-f-]{36})$/i);
-  if (chatMatch) {
+  const chatRoute = WebChatRoute.parse(location.pathname);
+  if (chatRoute) {
     if (sessionStatus === "loading") return <AppLoading />;
     if (sessionStatus !== "authenticated") {
       return <RouteRedirect to={`/sign-in?returnTo=${encodeURIComponent(location.href)}`} navigate={location.navigate} />;
     }
     if (profile?.role !== "user") return <RoleBoundary navigate={location.navigate} />;
-    return <Suspense fallback={<AppLoading />}><WebChatPage productId={chatMatch[1]} request={dashboardRequest} navigate={location.navigate} profile={profile} onSignOut={signOutFromChat} /></Suspense>;
+    return <Suspense fallback={<AppLoading />}><WebChatPage productId={chatRoute.productId} conversationId={chatRoute.conversationId} request={dashboardRequest} navigate={location.navigate} profile={profile} onSignOut={signOutFromChat} /></Suspense>;
   }
 
   if (location.pathname === CREATOR_ROOT
