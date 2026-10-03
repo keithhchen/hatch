@@ -73,7 +73,9 @@ type AliOssClient = {
   get(name: string, options?: Record<string, unknown>): Promise<{ content: Buffer }>;
   delete(name: string): Promise<unknown>;
   putACL(name: string, acl: "private" | "public-read" | "public-read-write"): Promise<{ res?: { status?: number } }>;
-  processObjectSave(source: string, target: string, process: string): Promise<{ res?: { status?: number } }>;
+  processObjectSave(source: string, target: string, process: string): Promise<{
+    res?: { status?: number; headers?: Record<string, unknown> };
+  }>;
   list(query?: Record<string, unknown>, options?: Record<string, unknown>): Promise<{ objects?: Array<{ name?: string }>; isTruncated?: boolean; nextMarker?: string | null }>;
 };
 
@@ -171,7 +173,14 @@ export class AliyunArtifactObjectStore implements ArtifactObjectStore {
         objectKey(this.options.prefix, target),
         process
       );
-      if (result.res?.status !== 200) throw new Error(`OSS image processing returned status ${result.res?.status ?? "unknown"}`);
+      if (result.res?.status !== 200) {
+        throw Object.assign(new Error(`OSS image processing returned status ${result.res?.status ?? "unknown"}`), {
+          code: responseHeader(result.res?.headers, "x-oss-ec-code")
+            ?? responseHeader(result.res?.headers, "x-oss-ec"),
+          requestId: responseHeader(result.res?.headers, "x-oss-request-id"),
+          hostId: responseHeader(result.res?.headers, "x-oss-ec-host-id")
+        });
+      }
     } catch (error) {
       throw this.withContext("IMAGE PROCESS", error);
     }
@@ -366,6 +375,11 @@ async function walk(root: string, directory: string): Promise<string[]> {
 
 function sha256(bytes: Buffer): string {
   return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+}
+
+function responseHeader(headers: Record<string, unknown> | undefined, name: string): string | undefined {
+  const value = headers?.[name];
+  return typeof value === "string" ? value : undefined;
 }
 
 function requireCredential(value: string | undefined, label: string): string {
