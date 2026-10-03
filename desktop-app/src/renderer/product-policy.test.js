@@ -30,12 +30,12 @@ describe("consumer product contract", () => {
   it("renders Creator identity from public Release metadata", () => {
     expect(creatorAgentFromSession({
       creator_agent: {
-        creator: { id: "creator-1", name: "Ari Cole" },
+        creator: { id: "creator-1", name: "Ari Cole", avatar_url: "https://media.example/ari.webp" },
         product: { id: "plan", name: "Adaptive Plan", description: "A useful plan." },
         presentation: { accent: "green" }
       }
     })).toEqual({
-      id: "plan", creator: "Ari Cole", creatorInitials: "AC", name: "Adaptive Plan",
+      id: "plan", creator: "Ari Cole", creatorInitials: "AC", creatorAvatarUrl: "https://media.example/ari.webp", name: "Adaptive Plan",
       description: "A useful plan.", boundary: "", presentation: { accent: "green" }
     });
   });

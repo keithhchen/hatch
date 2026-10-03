@@ -1214,10 +1214,21 @@ async function publicCatalogRows(context: RegistryContext): Promise<Record<strin
       ))
       .map((release) => [release.product_id, release as unknown as Record<string, unknown>]),
   );
-  return [...rows.values()].sort((left, right) => {
+  const ordered = [...rows.values()].sort((left, right) => {
     const time = Date.parse(String(right.published_at ?? "")) - Date.parse(String(left.published_at ?? ""));
     return time || String(left.product_id ?? "").localeCompare(String(right.product_id ?? ""));
   });
+  return attachCreatorAvatars(ordered, (creatorId) => context.accounts.getById(creatorId));
+}
+
+export async function attachCreatorAvatars<T extends Record<string, unknown>>(
+  rows: T[],
+  readAccount: (creatorId: string) => Promise<{ avatar_url: string | null } | undefined>
+): Promise<Array<T & { creator_avatar_url: string | null }>> {
+  const creatorIds = [...new Set(rows.map(row => String(row.creator_id ?? "")).filter(Boolean))];
+  const accounts = await Promise.all(creatorIds.map(readAccount));
+  const avatars = new Map(creatorIds.map((creatorId, index) => [creatorId, accounts[index]?.avatar_url ?? null]));
+  return rows.map(row => ({ ...row, creator_avatar_url: avatars.get(String(row.creator_id ?? "")) ?? null }));
 }
 
 function publicProductRow(row: Record<string, unknown>): Record<string, unknown> {
@@ -1226,7 +1237,8 @@ function publicProductRow(row: Record<string, unknown>): Record<string, unknown>
   const productId = String(publicRow.product_id ?? "");
   return {
     ...publicRow,
-    creator: { id: publicRow.creator_id, name: publicRow.creator_name },
+    creator: { id: publicRow.creator_id, name: publicRow.creator_name, avatar_url: publicRow.creator_avatar_url ?? null },
+    creator_avatar_url: publicRow.creator_avatar_url ?? null,
     product: { id: publicRow.product_id, name: publicRow.product_name },
     promise,
     description: publicRow.product_description ?? promise,

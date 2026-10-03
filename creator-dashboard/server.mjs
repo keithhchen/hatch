@@ -1056,6 +1056,7 @@ export async function createDashboardApp(options = {}) {
           creator: {
             id: first.creator_id,
             name: first.creator_name ?? first.creator_display_name ?? first.creator_id,
+            avatar_url: first.creator_avatar_url ?? first.creator?.avatar_url ?? null,
             verified: Boolean(first.creator_verified)
           },
           products
@@ -3385,9 +3386,13 @@ function publicCatalogAgent(agent, creatorState) {
     product_slug_aliases: _productAliases,
     ...authorityAgent
   } = deployedAgent;
+  const creatorAvatarUrl = Object.hasOwn(agent, "creator_avatar_url")
+    ? agent.creator_avatar_url
+    : agent.creator?.avatar_url ?? authorityAgent.creator_avatar_url ?? authorityAgent.creator?.avatar_url ?? null;
   return {
     ...authorityAgent,
-    creator: { id: authorityAgent.creator_id, name: authorityAgent.creator_name ?? authorityAgent.creator_display_name ?? authorityAgent.creator_id },
+    creator_avatar_url: creatorAvatarUrl,
+    creator: { id: authorityAgent.creator_id, name: authorityAgent.creator_name ?? authorityAgent.creator_display_name ?? authorityAgent.creator_id, avatar_url: creatorAvatarUrl },
     product: { id: authorityAgent.product_id, name: authorityAgent.product_name ?? authorityAgent.name ?? authorityAgent.product_id },
     promise: deployedAgent.product_promise ?? deployedAgent.product_description ?? "",
     description: deployedAgent.product_description ?? "",
@@ -3712,7 +3717,7 @@ function enrichEntitlements(entitlements, catalog, deliveries = []) {
         promise: agent.product_promise,
         ...(agent.brief_spec ? { brief_spec: structuredClone(agent.brief_spec) } : {})
       } : { id: entitlement.product_id, product_id: entitlement.product_id, name: entitlement.product_id },
-      creator: agent ? { id: agent.creator_id, name: agent.creator_name } : { id: entitlement.creator_id },
+      creator: agent ? { id: agent.creator_id, name: agent.creator_name, avatar_url: agent.creator_avatar_url ?? agent.creator?.avatar_url ?? null } : { id: entitlement.creator_id, avatar_url: null },
       version_policy: entitlement.version_policy ?? "pinned",
       ...(unmetered ? {} : {
         granted_units: entitlement.granted_units,

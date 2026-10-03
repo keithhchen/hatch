@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { HatchBrand } from "@hatch/ui";
+import { AccountAvatar } from "./AccountAvatar.jsx";
 import { BrowserImageAttachments, WebChatClient } from "./webChatClient.js";
 import "./webChat.css";
 
@@ -217,15 +218,14 @@ export default function WebChatPage({ productId, request }) {
   return <div className="web-chat">
     <aside className="web-chat__sidebar">
       <a href="/library" className="web-chat__brand"><HatchBrand /> <span>返回订阅</span></a>
-      <div className="web-chat__agent"><span>CREATOR AGENT</span><h2>{name}</h2></div>
       <button type="button" className="web-chat__new" onClick={newConversation} disabled={!access}>新建聊天</button>
       <nav aria-label="聊天记录">{conversations.map(item => <button type="button" key={item.id} className={item.id === conversationId ? "is-active" : ""} onClick={() => setConversationId(item.id)}>{item.title || new Date(item.created_at).toLocaleDateString("zh-CN")}</button>)}</nav>
       {conversationCursor ? <button type="button" className="web-chat__older" onClick={() => void loadConversations().catch(cause => setError(cause.message))}>加载更多聊天</button> : null}
     </aside>
     <main className="web-chat__main">
-      <header className="web-chat__header"><h1>{name}</h1><span>{status}</span></header>
+      <header className="web-chat__header"><div className="web-chat__identity"><AccountAvatar size="medium" src={access?.creator?.avatar_url} name={access?.creator?.name || name} /><h1>{name}</h1></div><span>{status}</span></header>
       {error ? <div className="web-chat__error" role="alert">{error}<button type="button" onClick={() => { if (!access) location.reload(); else { setError(""); setConnectionVersion(value => value + 1); } }}>重试</button></div> : null}
-      {briefOpen ? <form className="web-chat__brief" onSubmit={submitBrief}><h2>开始新任务</h2>{(access?.brief_spec?.fields ?? access?.product?.brief_spec?.fields ?? []).map(field => <label key={field.id}>{field.label}<textarea required={field.required} maxLength={32000} value={briefAnswers[field.id] ?? ""} onChange={event => setBriefAnswers(current => ({ ...current, [field.id]: event.target.value }))} /></label>)}<div><button type="button" onClick={() => setBriefOpen(false)}>取消</button><button type="submit">开始</button></div></form> : null}
+      {briefOpen ? <form className="web-chat__brief" onSubmit={submitBrief}><AccountAvatar size="large" src={access?.creator?.avatar_url} name={access?.creator?.name || name} /><h2>开始新任务</h2>{(access?.brief_spec?.fields ?? access?.product?.brief_spec?.fields ?? []).map(field => <label key={field.id}>{field.label}<textarea required={field.required} maxLength={32000} value={briefAnswers[field.id] ?? ""} onChange={event => setBriefAnswers(current => ({ ...current, [field.id]: event.target.value }))} /></label>)}<div><button type="button" onClick={() => setBriefOpen(false)}>取消</button><button type="submit">开始</button></div></form> : null}
       <div className="web-chat__messages">
         {historyCursor ? <button type="button" className="web-chat__older" onClick={() => void loadHistory().catch(cause => setError(cause.message))}>加载更早的消息</button> : null}
         {messages.length === 0 ? <div className="web-chat__empty">{conversationId ? "发送消息，开始和 Agent 聊天。" : "新建聊天，开始和 Agent 聊天。"}</div> : null}

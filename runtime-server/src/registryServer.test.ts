@@ -4,7 +4,7 @@ import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { createRegistryServerFromEnvironment, mergeCreatorProductListings } from "./registryServer.js";
+import { attachCreatorAvatars, createRegistryServerFromEnvironment, mergeCreatorProductListings } from "./registryServer.js";
 
 const CREATOR_ID = "11111111-1111-4111-8111-111111111111";
 const PRODUCT_ID = "22222222-2222-4222-8222-222222222222";
@@ -49,6 +49,14 @@ test("Creator product listing keeps authoring fields when a published corpus has
     updated_at: "2026-08-16T01:00:00.000Z",
     brief_spec: { contract_version: "1", fields: [{ id: "goal", label: "Goal", required: true }] }
   });
+});
+
+test("published catalog rows include the current Creator account avatar", async () => {
+  const rows = await attachCreatorAvatars(
+    [{ creator_id: CREATOR_ID, product_id: PRODUCT_ID }],
+    async creatorId => creatorId === CREATOR_ID ? { avatar_url: "https://media.example/avatar.webp" } : undefined
+  );
+  assert.deepEqual(rows, [{ creator_id: CREATOR_ID, product_id: PRODUCT_ID, creator_avatar_url: "https://media.example/avatar.webp" }]);
 });
 
 test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () => {

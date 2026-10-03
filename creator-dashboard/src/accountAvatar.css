@@ -1,0 +1,30 @@
+.hatch-account-avatar.hui-avatar {
+  flex: 0 0 auto;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: #111;
+  color: #fffaf3;
+  font-family: var(--hatch-font-display);
+  font-weight: var(--hui-weight-regular);
+}
+
+.hatch-account-avatar.hui-avatar.is-small {
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  min-height: 26px;
+}
+
+.hatch-account-avatar.hui-avatar.is-medium {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  min-height: 34px;
+}
+
+.hatch-account-avatar.hui-avatar.is-large {
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  min-height: 48px;
+}
