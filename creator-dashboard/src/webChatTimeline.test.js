@@ -11,10 +11,14 @@ test("Web Chat timeline keeps text, thinking, and tool activity in event order",
   timeline.updateThinking("正在整理结果");
   timeline.appendText("C");
 
-  assert.deepEqual(timeline.snapshot().map(({ kind, content, status }) => ({ kind, content, status })), [
+  assert.deepEqual(timeline.snapshot().map(({ kind, content, status }) => ({
+    kind,
+    content: kind === "tool" ? content.name : content,
+    status
+  })), [
     { kind: "text", content: "AB", status: undefined },
     { kind: "thinking", content: "正在查找资料", status: undefined },
-    { kind: "tool", content: undefined, status: "requested" },
+    { kind: "tool", content: "web_search", status: "requested" },
     { kind: "thinking", content: "正在整理结果", status: undefined },
     { kind: "text", content: "C", status: undefined }
   ]);
@@ -42,8 +46,8 @@ test("Web Chat tool updates replace the existing timeline item in place", () => 
 
   assert.deepEqual(timeline.snapshot().map(entry => entry.kind), ["thinking", "tool", "thinking"]);
   assert.equal(timeline.snapshot()[1].status, "completed");
-  assert.deepEqual(timeline.snapshot()[1].arguments, { query: "docs" });
-  assert.deepEqual(timeline.snapshot()[1].result, { matches: ["a", "b"] });
+  assert.deepEqual(timeline.snapshot()[1].content.arguments, { query: "docs" });
+  assert.deepEqual(timeline.snapshot()[1].content.result, { matches: ["a", "b"] });
 });
 
 test("Web Chat does not duplicate terminal tool events as thinking entries", () => {
@@ -82,6 +86,7 @@ test("Web Chat thinking deltas update one indexed block and history restores its
     kind: "thinking",
     id: thinkingId,
     contentIndex: 4,
+    title: "thinking",
     content: "first second",
     streaming: false
   }]);
@@ -99,17 +104,19 @@ test("Web Chat thinking deltas update one indexed block and history restores its
   ]);
 });
 
-test("Web Chat groups only consecutive thinking and tool blocks when a run has multiple blocks", () => {
-  const thinking = { kind: "thinking", id: "thinking-1", content: "Reviewing" };
-  const tool = { kind: "tool", id: "tool-1", status: "completed" };
-  const laterThinking = { kind: "thinking", id: "thinking-2", content: "Summarizing" };
+test("Web Chat puts every thinking or tool block in its own activity modal group", () => {
+  const thinking = { kind: "thinking", id: "thinking-1", title: "thinking", content: "Reviewing" };
+  const tool = { kind: "tool", id: "tool-1", title: "web search", content: {}, status: "completed" };
+  const laterThinking = { kind: "thinking", id: "thinking-2", title: "thinking", content: "Summarizing" };
   const text = { kind: "text", id: "text-1", content: "Result" };
 
-  assert.deepEqual(groupTimelineEntries([thinking]), [thinking]);
+  assert.deepEqual(groupTimelineEntries([thinking]), [
+    { kind: "activity_group", id: "activity-group-thinking-1", entries: [thinking] }
+  ]);
   assert.deepEqual(groupTimelineEntries([thinking, tool, text, laterThinking]), [
     { kind: "activity_group", id: "activity-group-thinking-1", entries: [thinking, tool] },
     text,
-    laterThinking
+    { kind: "activity_group", id: "activity-group-thinking-2", entries: [laterThinking] }
   ]);
 });
 

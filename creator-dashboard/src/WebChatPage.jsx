@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowUp, ChevronDown, ChevronUp, CircleAlert, Image, LoaderCircle, Paperclip, Plus, RotateCw, Sparkles, Square, X } from "lucide-react";
+import { ArrowLeft, ArrowUp, ChevronDown, ChevronUp, CircleAlert, Image, LoaderCircle, Paperclip, Plus, RotateCw, Square, X } from "lucide-react";
 import { Avatar, HatchBrand, Select } from "@hatch/ui";
 import { WebChatImageViewer } from "./components/WebChatImageViewer.jsx";
+import { Shimmer } from "./components/Shimmer.jsx";
 import { WebChatMessageResponse } from "./WebChatMessageResponse.jsx";
 import { BuyerAccountMenu } from "./BuyerAccountControls.jsx";
 import { useLocale, documentLanguage } from "./locale.jsx";
@@ -82,74 +83,116 @@ function WebChatAccountControls({ profile, navigate, onSignOut }) {
   </>;
 }
 
-function WebChatTimelineEntry({ entry, client, conversationId, locale, t, isAnimating = false }) {
+function WebChatTimelineEntry({ entry, client, conversationId, locale, t, isAnimating = false, isLastItem = true }) {
   if (entry.kind === "text") {
     return <div className="web-chat__content" key={entry.id}><WebChatMessageResponse isAnimating={isAnimating}>{entry.content}</WebChatMessageResponse></div>;
   }
   if (entry.kind === "status") {
-    return <div className="web-chat__runtime-status" key={entry.id}><Sparkles aria-hidden="true" /><span>{entry.content}</span></div>;
+    return <div className="web-chat__runtime-status" key={entry.id}><span>{entry.content}</span></div>;
   }
-  if (entry.kind === "activity_group") {
-    const inProgress = entry.entries.some(activity => activity.streaming || activity.status === "requested");
-    const failed = entry.entries.some(activity => activity.status === "failed");
-    const summaryState = failed ? t("needsAttention") : inProgress ? t("activityInProgress") : t("activityComplete");
-    return <details className="web-chat__activity-accordion" key={entry.id} defaultOpen={inProgress}>
-      <summary aria-label={t("activityGroupLabel", { count: entry.entries.length })}>
-        <Sparkles aria-hidden="true" />
-        <span>{t("activityBlocks", { count: entry.entries.length })}</span>
-        <span className="web-chat__activity-accordion-state">{summaryState}</span>
-        <ChevronDown aria-hidden="true" />
-      </summary>
-      <div className="web-chat__activity-accordion-items">
-        {entry.entries.map(activity => <WebChatActivityBlock key={activity.id} entry={activity} client={client} conversationId={conversationId} locale={locale} t={t} />)}
-      </div>
-    </details>;
-  }
+  if (entry.kind === "activity_group") return <WebChatActivityModal key={entry.id} entries={entry.entries} isLastItem={isLastItem} client={client} conversationId={conversationId} locale={locale} t={t} />;
+  if (entry.kind === "thinking" || entry.kind === "tool") return <WebChatActivityModal key={entry.id} entries={[entry]} isLastItem={isLastItem} client={client} conversationId={conversationId} locale={locale} t={t} />;
   return <WebChatActivityBlock key={entry.id} entry={entry} client={client} conversationId={conversationId} locale={locale} t={t} />;
 }
 
-function WebChatActivityBlock({ entry, client, conversationId, locale, t }) {
-  if (entry.kind === "thinking") {
-    return <article className="web-chat__activity-block web-chat__activity-block--thinking" aria-label={t("thinking")}>
-      <div className="web-chat__activity-heading"><Sparkles aria-hidden="true" /><strong>{t("thinking")}</strong>{entry.streaming ? <span className="web-chat__activity-live">{t("activityInProgress")}</span> : null}</div>
-      {entry.content ? <div className="web-chat__activity-content">{entry.content}</div> : null}
-    </article>;
-  }
-  return <WebChatToolActivity entry={entry} client={client} conversationId={conversationId} locale={locale} t={t} />;
+function WebChatActivityModal({ entries, isLastItem, client, conversationId, locale, t }) {
+  const [open, setOpen] = useState(false);
+  const [hasOpened, setHasOpened] = useState(false);
+  const dialogRef = useRef(null);
+  const lastEntry = entries.at(-1);
+  const lastPresentation = activityPresentations[lastEntry.kind](lastEntry, { locale, t });
+  const triggerTitle = isLastItem ? lastPresentation.title : t("activityProcessed");
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (open && !dialog.open) dialog.showModal();
+    if (!open && dialog.open) dialog.close();
+  }, [open]);
+
+  return <>
+    <button type="button" className="web-chat__activity-trigger" aria-haspopup="dialog" onClick={() => { setHasOpened(true); setOpen(true); }}>
+      {lastPresentation.ongoing && isLastItem ? <Shimmer as="span">{triggerTitle}</Shimmer> : <span>{triggerTitle}</span>}
+    </button>
+    <dialog ref={dialogRef} className="web-chat__activity-modal" aria-label={t("activityDetails")} onClose={() => setOpen(false)} onClick={event => { if (event.target === event.currentTarget) setOpen(false); }}>
+      <header className="web-chat__activity-modal-header">
+        <h2>{t("activityDetails")}</h2>
+        <button type="button" aria-label={t("close")} onClick={() => setOpen(false)}><X aria-hidden="true" /></button>
+      </header>
+      {hasOpened ? <div className="web-chat__activity-modal-items">
+        {entries.map(activity => <WebChatActivityBlock key={activity.id} entry={activity} client={client} conversationId={conversationId} locale={locale} t={t} />)}
+      </div> : null}
+    </dialog>
+  </>;
 }
 
-function WebChatToolActivity({ entry, client, conversationId, locale, t }) {
+const activityPresentations = Object.freeze({
+  thinking: (entry, { t }) => ({
+    title: t(entry.streaming ? "thinkingRunningTitle" : "thinkingCompleteTitle"),
+    ongoing: entry.streaming
+  }),
+  tool: (entry, { t }) => {
+    const titleKeys = {
+      requested: "toolRunningTitle",
+      completed: "toolCompleteTitle",
+      failed: "toolFailedTitle",
+      cancelled: "toolCancelledTitle"
+    };
+    return {
+      title: t(titleKeys[entry.status] ?? "toolRunningTitle", { name: entry.title }),
+      ongoing: entry.status === "requested"
+    };
+  }
+});
+
+function WebChatActivityBlock({ entry, client, conversationId, locale, t }) {
+  const present = activityPresentations[entry.kind];
+  if (!present) throw new Error(`Unsupported Web Chat activity kind: ${entry.kind}`);
+  const presentation = present(entry, { locale, t });
+  return <details className="web-chat__activity-block">
+    <summary className="web-chat__activity-heading">
+      <strong>{presentation.ongoing ? <Shimmer as="span">{presentation.title}</Shimmer> : presentation.title}</strong>
+      <ChevronDown aria-hidden="true" />
+    </summary>
+    {entry.content ? <div className="web-chat__activity-content">{entry.kind === "thinking"
+      ? entry.content
+      : <WebChatToolDetails content={entry.content} status={entry.status} client={client} conversationId={conversationId} locale={locale} t={t} />}</div> : null}
+  </details>;
+}
+
+function WebChatToolDetails({ content, status, client, conversationId, locale, t }) {
   const [detail, setDetail] = useState(null);
   const [detailError, setDetailError] = useState("");
   const [detailLoading, setDetailLoading] = useState(false);
-  const statusKeys = { requested: "toolRunning", completed: "toolCompleted", failed: "toolFailed", cancelled: "toolCancelled" };
-  const label = entry.toolName.replaceAll("_", " ");
-  const loadDetail = async () => {
-    if (!entry.detailRef || detail || detailLoading) return;
+  const requestedDetailRef = useRef(null);
+  const detailRunId = content.detailRef?.run_id;
+  const detailToolCallId = content.detailRef?.tool_call_id;
+  useEffect(() => {
+    const terminal = ["completed", "failed", "cancelled"].includes(status);
+    if (!terminal || !detailRunId || !detailToolCallId || content.result !== undefined || content.error !== undefined
+      || requestedDetailRef.current === `${detailRunId}:${detailToolCallId}`) return;
+    requestedDetailRef.current = `${detailRunId}:${detailToolCallId}`;
     setDetailLoading(true);
     setDetailError("");
-    try {
-      const payload = await client.toolDetail(conversationId, entry.detailRef.run_id, entry.detailRef.tool_call_id);
-      setDetail(payload.tool);
-    } catch (cause) {
-      setDetailError(cause.message);
-    } finally {
-      setDetailLoading(false);
-    }
-  };
-  const argumentsValue = detail?.arguments ?? entry.arguments;
-  const resultValue = detail?.result ?? entry.result ?? entry.error;
-  return <article className={"web-chat__activity-block web-chat__activity-block--tool web-chat__activity-block--" + entry.status} aria-label={t("toolCall", { name: label })}>
-    <div className="web-chat__activity-heading"><span className="web-chat__tool-mark" aria-hidden="true">⌘</span><strong>{label}</strong><span className="web-chat__tool-status">{statusKeys[entry.status] ? t(statusKeys[entry.status]) : entry.status}</span></div>
-    {entry.error ? <p className="web-chat__tool-error">{webChatErrorText(entry.error, locale)}</p> : null}
-    {entry.detailRef || argumentsValue || resultValue ? <details className="web-chat__tool-details" onToggle={event => { if (event.currentTarget.open) void loadDetail(); }}>
-      <summary>{t("viewToolDetails")}</summary>
-      {detailLoading ? <span role="status">{t("loadingToolDetails")}</span> : null}
-      {detailError ? <span role="alert">{detailError}</span> : null}
-      <strong>{t("arguments")}</strong><pre>{JSON.stringify(argumentsValue ?? {}, null, 2)}</pre>
-      {resultValue !== undefined ? <><strong>{t("result")}</strong><pre>{JSON.stringify(resultValue, null, 2)}</pre></> : null}
-    </details> : null}
-  </article>;
+    let active = true;
+    client.toolDetail(conversationId, detailRunId, detailToolCallId).then(payload => {
+      if (active) setDetail(payload.tool);
+    }).catch(cause => {
+      if (active) setDetailError(cause.message);
+    }).finally(() => {
+      if (active) setDetailLoading(false);
+    });
+    return () => { active = false; };
+  }, [client, conversationId, detailRunId, detailToolCallId, content.result, content.error, status]);
+  const argumentsValue = detail?.arguments ?? content.arguments;
+  const resultValue = detail?.result ?? content.result;
+  return <>
+    {content.error ? <p className="web-chat__tool-error">{webChatErrorText(content.error, locale)}</p> : null}
+    {detailLoading ? <span role="status">{t("loadingToolDetails")}</span> : null}
+    {detailError ? <span role="alert">{detailError}</span> : null}
+    <div>{t("arguments")}: {JSON.stringify(argumentsValue ?? {}, null, 2)}</div>
+    {resultValue !== undefined ? <div>{t("result")}: {JSON.stringify(resultValue, null, 2)}</div> : null}
+  </>;
 }
 
 export default function WebChatPage({ productId, request, navigate, profile, onSignOut }) {
@@ -620,21 +663,19 @@ export default function WebChatPage({ productId, request, navigate, profile, onS
         {!access && error ? <div className="web-chat__gate web-chat__gate--error" role="alert"><CircleAlert aria-hidden="true" /><h2>{t("unableToOpenChat")}</h2><p>{errorText}</p><button type="button" onClick={() => location.reload()}><RotateCw aria-hidden="true" /><span>{t("checkingSubscriptionAgain")}</span></button></div> : null}
         {access && snapshotPending && !error ? <div className="web-chat__gate" role="status"><LoaderCircle aria-hidden="true" /><span>{t("loadingConversation")}</span></div> : null}
         {access && !conversationId && messages.length === 0 && !activeRun ? <div className="web-chat__empty">
-          <span className="web-chat__empty-mark"><Sparkles aria-hidden="true" /></span>
           <span className="web-chat__eyebrow">{t("startWithAnIdea")}</span>
           <h2>{t("emptyHeadline")}</h2>
           <p>{t("emptyConversationBody", { agent: name })}</p>
-          {!conversationId ? <button type="button" className="web-chat__empty-action" onClick={newConversation} disabled={!access}><Plus aria-hidden="true" />{t("newChat")}</button> : null}
+          <button type="button" className="web-chat__empty-action" onClick={newConversation} disabled={!access}><Plus aria-hidden="true" />{t("newChat")}</button>
         </div> : null}
         {!snapshotPending ? messages.map(message => <article className={`web-chat__message web-chat__message--${message.role}`} key={message.renderKey ?? `${message.run_id}-${message.role}`}>
           <div className="web-chat__message-body">
-            {message.role === "assistant" ? <span className="web-chat__speaker">{name}</span> : null}
             {message.role === "assistant"
-              ? message.transient
+                ? message.transient
                   ? message.timeline?.length
-                  ? groupTimelineEntries(message.timeline).map(entry => <WebChatTimelineEntry key={entry.id} entry={entry} client={client} conversationId={conversationId} locale={locale} t={t} isAnimating />)
+                  ? groupTimelineEntries(message.timeline).map((entry, index, timeline) => <WebChatTimelineEntry key={entry.id} entry={entry} isLastItem={index === timeline.length - 1} client={client} conversationId={conversationId} locale={locale} t={t} isAnimating />)
                   : <div className="web-chat__working"><LoaderCircle aria-hidden="true" />{statusText}</div>
-                : groupTimelineEntries(WebChatTimeline.fromHistory(message)).map(entry => <WebChatTimelineEntry key={entry.id} entry={entry} client={client} conversationId={conversationId} locale={locale} t={t} />)
+                : groupTimelineEntries(WebChatTimeline.fromHistory(message)).map((entry, index, timeline) => <WebChatTimelineEntry key={entry.id} entry={entry} isLastItem={index === timeline.length - 1} client={client} conversationId={conversationId} locale={locale} t={t} />)
               : <div className="web-chat__content"><WebChatMessageResponse>{message.content || ""}</WebChatMessageResponse></div>}
             {message.attachments?.some(item => !BrowserImageAttachments.accepts(item.media_type)) ? <div className="web-chat__attachments">{message.attachments.filter(item => !BrowserImageAttachments.accepts(item.media_type)).map(item => <span key={item.attachment_id}><Paperclip aria-hidden="true" />{item.display_name}</span>)}</div> : null}
             {!message.optimistic && message.attachments?.filter(item => BrowserImageAttachments.accepts(item.media_type) && item.asset_id).map(item => {

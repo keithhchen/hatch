@@ -14,5 +14,5 @@ const streamingAnimation = Object.freeze({
 });
 
 export function WebChatMessageResponse({ children, isAnimating = false }) {
-  return <Streamdown animated={streamingAnimation} components={markdownComponents} isAnimating={isAnimating}>{children}</Streamdown>;
+  return <Streamdown animated={streamingAnimation} components={markdownComponents} controls={{ code: false }} isAnimating={isAnimating}>{children}</Streamdown>;
 }

@@ -31,6 +31,7 @@ export class WebChatTimeline {
       kind: "thinking",
       id: "thinking-" + contentIndex + "-" + ++this.sequence,
       contentIndex,
+      title: "thinking",
       content: "",
       streaming: true
     };
@@ -60,6 +61,7 @@ export class WebChatTimeline {
       kind: "thinking",
       id: "thinking-" + contentIndex + "-" + ++this.sequence,
       contentIndex,
+      title: "thinking",
       content,
       streaming: false
     }];
@@ -70,50 +72,52 @@ export class WebChatTimeline {
     if (!content) return this.entries;
     const current = this.entries.at(-1);
     if (current?.kind === "thinking" && current.contentIndex === undefined) {
-      this.entries = [...this.entries.slice(0, -1), { ...current, content }];
+      this.entries = [...this.entries.slice(0, -1), { ...current, title: "thinking", content }];
     } else {
-      this.entries = [...this.entries, { kind: "thinking", id: `thinking-${++this.sequence}`, content }];
+      this.entries = [...this.entries, { kind: "thinking", id: `thinking-${++this.sequence}`, title: "thinking", content }];
     }
     return this.entries;
   }
 
   updateRuntimeStatus(content) {
-    if (content === "Thinking through the product.") return this.entries;
-    if (this.isRedundantToolStatus(content)) return this.entries;
-    if (!content) return this.entries;
+    const normalizedContent = content?.trim();
+    if (normalizedContent === "Thinking through the product.") return this.entries;
+    if (this.isRedundantToolStatus(normalizedContent)) return this.entries;
+    if (!normalizedContent) return this.entries;
     const current = this.entries.at(-1);
     if (current?.kind === "status") {
-      this.entries = [...this.entries.slice(0, -1), { ...current, content }];
+      this.entries = [...this.entries.slice(0, -1), { ...current, content: normalizedContent }];
     } else {
-      this.entries = [...this.entries, { kind: "status", id: "status-" + ++this.sequence, content }];
+      this.entries = [...this.entries, { kind: "status", id: "status-" + ++this.sequence, content: normalizedContent }];
     }
     return this.entries;
   }
 
   isRedundantToolStatus(content) {
-    const toolStatus = /^Calling tool .+\.$/.test(content)
-      ? "requested"
-      : /^Tool .+ (completed|failed)\.$/.exec(content)?.[1];
-    const current = this.entries.at(-1);
-    return Boolean(toolStatus && current?.kind === "tool" && current.status === toolStatus);
+    const normalizedContent = content?.trim();
+    return typeof normalizedContent === "string"
+      && (/^Calling tool .+\.$/i.test(normalizedContent) || /^Tool .+ (completed|failed)\.$/i.test(normalizedContent));
   }
 
   upsertTool(event) {
-    const index = this.entries.findIndex(entry => entry.kind === "tool" && entry.toolCallId === event.tool_call_id);
+    const index = this.entries.findIndex(entry => entry.kind === "tool" && entry.content.toolCallId === event.tool_call_id);
     const previous = index < 0 ? null : this.entries[index];
     const next = {
       kind: "tool",
       id: previous?.id ?? `tool-${event.tool_call_id}`,
-      runId: event.run_id ?? previous?.runId,
-      toolCallId: event.tool_call_id,
-      toolName: event.name ?? previous?.toolName ?? "tool",
-      arguments: event.arguments ?? previous?.arguments ?? {},
-      locality: event.locality ?? previous?.locality,
-      approval: event.approval ?? previous?.approval,
+      title: (event.name ?? previous?.content?.name ?? "tool").replaceAll("_", " "),
+      content: {
+        runId: event.run_id ?? previous?.content?.runId,
+        toolCallId: event.tool_call_id,
+        name: event.name ?? previous?.content?.name ?? "tool",
+        arguments: event.arguments ?? previous?.content?.arguments ?? {},
+        locality: event.locality ?? previous?.content?.locality,
+        approval: event.approval ?? previous?.content?.approval,
+        result: event.result ?? previous?.content?.result,
+        error: event.error ?? previous?.content?.error,
+        detailRef: event.detail_ref ?? previous?.content?.detailRef
+      },
       status: event.status ?? previous?.status ?? "requested",
-      result: event.result ?? previous?.result,
-      error: event.error ?? previous?.error,
-      detailRef: event.detail_ref ?? previous?.detailRef
     };
     if (index < 0) this.entries = [...this.entries, next];
     else this.entries = this.entries.map((entry, entryIndex) => entryIndex === index ? next : entry);
@@ -204,9 +208,7 @@ export function groupTimelineEntries(entries) {
       activities.push(entries[index]);
       index++;
     }
-    grouped.push(activities.length > 1
-      ? { kind: "activity_group", id: "activity-group-" + activities[0].id, entries: activities }
-      : activities[0]);
+    grouped.push({ kind: "activity_group", id: "activity-group-" + activities[0].id, entries: activities });
   }
   return grouped;
 }
