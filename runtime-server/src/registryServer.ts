@@ -275,7 +275,6 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       });
     holdAdmissionUntilRequestAndRouteSettle(request, response, routePromise, admission);
   });
-  server.maxConnections = httpLimits.maxConnections;
   server.headersTimeout = httpLimits.headersTimeoutMs;
   server.requestTimeout = httpLimits.requestTimeoutMs;
   server.keepAliveTimeout = 5_000;

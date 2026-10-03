@@ -187,83 +187,28 @@ test("unauthenticated WebSocket is terminated when the client hello deadline exp
   }
 });
 
-test("global open-socket capacity bounds silent pre-hello clients and releases on close", async () => {
-  const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-open-capacity-")));
-  const conversationRepository = await seedLocalConversations(store, ["open-capacity-user"]);
+test("runtime does not cap open sockets by source or total count", async () => {
   const runtime = createRuntimeServer({
-    conversationStore: store,
-    conversationRepository,
     clientHelloTimeoutMs: 2_000,
-    maxOpenConnectionsGlobal: 2
-  });
-  const port = await listen(runtime);
-  const first = await openSocket(port);
-  const second = await openSocket(port);
-  let overflow: WebSocket | undefined;
-  let admitted: WebSocket | undefined;
-  try {
-    overflow = new WebSocket(`ws://127.0.0.1:${port}/runtime`);
-    overflow.on("error", () => undefined);
-    assert.equal(await Promise.race([
-      new Promise<boolean>((resolve) => overflow!.once("close", () => resolve(true))),
-      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 500))
-    ]), true);
-
-    const firstClosed = new Promise<void>((resolve) => first.once("close", () => resolve()));
-    first.close();
-    await firstClosed;
-    admitted = await openSocket(port);
-    const ready = waitForMessage(admitted, (message) => message.type === "session.ready");
-    admitted.send(JSON.stringify(hello("open-capacity-admitted", "open-capacity-user")));
-    await ready;
-  } finally {
-    first.close();
-    second.close();
-    overflow?.close();
-    admitted?.close();
-    await runtime.close();
-  }
-});
-
-test("per-source open-socket capacity prevents one proxy client from starving another", async () => {
-  const runtime = createRuntimeServer({
-    conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-source-open-capacity-"))),
-    clientHelloTimeoutMs: 2_000,
-    maxOpenConnectionsGlobal: 2,
-    maxOpenConnectionsPerSource: 1,
     trustedProxyPolicy: authTrustedProxyPolicyFromEnvironment({
       HATCH_AUTH_TRUSTED_PROXY_CIDRS: "127.0.0.1/32"
     })
   });
   const port = await listen(runtime);
-  const first = await openSocket(port, { "x-forwarded-for": "203.0.113.10" });
-  const overflow = new WebSocket(`ws://127.0.0.1:${port}/runtime`, {
-    headers: { "x-forwarded-for": "203.0.113.10" }
-  });
-  overflow.on("error", () => undefined);
-  let otherSource: WebSocket | undefined;
-  let replacement: WebSocket | undefined;
+  const sockets: WebSocket[] = [];
   try {
-    assert.equal(await Promise.race([
-      new Promise<boolean>((resolve) => overflow.once("close", () => resolve(true))),
-      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 500))
-    ]), true);
-    otherSource = await openSocket(port, { "x-forwarded-for": "203.0.113.11" });
-
-    const firstClosed = new Promise<void>((resolve) => first.once("close", () => resolve()));
-    first.close();
-    await firstClosed;
-    replacement = await openSocket(port, { "x-forwarded-for": "203.0.113.10" });
+    for (let index = 0; index < 20; index += 1) {
+      sockets.push(await openSocket(port, { "x-forwarded-for": "203.0.113.10" }));
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    assert.ok(sockets.every((socket) => socket.readyState === WebSocket.OPEN));
   } finally {
-    first.close();
-    overflow.close();
-    otherSource?.close();
-    replacement?.close();
+    for (const socket of sockets) socket.close();
     await runtime.close();
   }
 });
 
-test("global hello authorization capacity rejects N+1 without calling the resolver and releases reliably", async () => {
+test("hello authorization accepts concurrent sessions without a count ceiling", async () => {
   const resolverCalls: string[] = [];
   const releases: Array<(identity: undefined) => void> = [];
   const authIdentityResolver: AuthIdentityResolver = {
@@ -276,34 +221,23 @@ test("global hello authorization capacity rejects N+1 without calling the resolv
     conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-hello-capacity-"))),
     authIdentityResolver,
     clientHelloTimeoutMs: 2_000,
-    maxPendingHelloAuthorizations: 2
   });
   const port = await listen(runtime);
   const sockets: WebSocket[] = [];
   try {
-    for (const index of [1, 2]) {
+    for (const index of [1, 2, 3]) {
       const socket = await openSocket(port);
       sockets.push(socket);
       socket.send(JSON.stringify(hello(`pending-session-${index}`, `pending-install-${index}`)));
     }
-    await waitUntil(() => resolverCalls.length === 2);
-
-    const overflow = await openSocket(port);
-    sockets.push(overflow);
-    const rejected = waitForMessage(overflow, (message) => (message.error as { code?: string } | undefined)?.code === "authentication_busy");
-    overflow.send(JSON.stringify(hello("overflow-session", "overflow-install")));
-    assert.equal(((await rejected).error as { code?: string }).code, "authentication_busy");
-    assert.equal(resolverCalls.length, 2);
-
-    const firstRejected = waitForMessage(sockets[0]!, (message) => (message.error as { code?: string } | undefined)?.code === "authentication_required");
-    releases[0]?.(undefined);
-    await firstRejected;
-
-    const admitted = await openSocket(port);
-    sockets.push(admitted);
-    admitted.send(JSON.stringify(hello("admitted-session", "admitted-install")));
     await waitUntil(() => resolverCalls.length === 3);
-    assert.deepEqual(resolverCalls, ["pending-session-1", "pending-session-2", "admitted-session"]);
+    const authenticationFailures = sockets.map((socket) => waitForMessage(
+      socket,
+      (message) => (message.error as { code?: string } | undefined)?.code === "authentication_required"
+    ));
+    for (const release of releases) release(undefined);
+    await Promise.all(authenticationFailures);
+    assert.deepEqual(resolverCalls, ["pending-session-1", "pending-session-2", "pending-session-3"]);
   } finally {
     for (const release of releases) release(undefined);
     for (const socket of sockets) socket.close();
@@ -311,7 +245,7 @@ test("global hello authorization capacity rejects N+1 without calling the resolv
   }
 });
 
-test("per-user hello capacity is acquired after identity but before Agent Corpus resolution", async () => {
+test("one account can resolve multiple sessions concurrently", async () => {
   const entitlement = fixtureEntitlement();
   const resolvedCorpus = await fixtureCorpusResolver(entitlement).resolve(entitlement.creator_id, entitlement.agent_id);
   let corpusCalls = 0;
@@ -339,9 +273,7 @@ test("per-user hello capacity is acquired after identity but before Agent Corpus
     conversationRepository,
     authIdentityResolver: identityResolver,
     entitlementResolver: fixtureEntitlementResolver(entitlement),
-    agentCorpusResolver: corpusResolver,
-    maxPendingHelloAuthorizations: 4,
-    maxPendingHelloAuthorizationsPerUser: 1
+    agentCorpusResolver: corpusResolver
   });
   const port = await listen(runtime);
   const first = await openSocket(port);
@@ -354,16 +286,15 @@ test("per-user hello capacity is acquired after identity but before Agent Corpus
     }));
     await corpusStarted;
 
-    const rejected = waitForMessage(second, (message) => (message.error as { code?: string } | undefined)?.code === "user_authentication_busy");
+    const secondReady = waitForMessage(second, (message) => message.type === "session.ready");
     second.send(JSON.stringify({
       ...hello("same-user-session-two", "same-user-install-two"),
       entitlement_id: entitlement.entitlement_id
     }));
-    assert.equal(((await rejected).error as { code?: string }).code, "user_authentication_busy");
-    assert.equal(corpusCalls, 1);
+    await waitUntil(() => corpusCalls === 2);
 
     releaseCorpus();
-    await firstReady;
+    await Promise.all([firstReady, secondReady]);
   } finally {
     releaseCorpus();
     first.close();
@@ -372,16 +303,16 @@ test("per-user hello capacity is acquired after identity but before Agent Corpus
   }
 });
 
-test("hello setup keeps its admission lease and aborts Creator tool resolution on close", async () => {
+test("concurrent hello setup aborts Creator tool resolution when its socket closes", async () => {
   const entitlement = fixtureEntitlement();
   const corpus = fixtureCreatorToolCorpus(entitlement);
-  let setupSignal: AbortSignal | undefined;
+  const setupSignals: AbortSignal[] = [];
   let markSetupStarted!: () => void;
   const setupStarted = new Promise<void>((resolve) => { markSetupStarted = resolve; });
   const controlPlane: CreatorToolControlPlane = {
     resolve: async (request) => {
-      setupSignal = request.signal;
-      markSetupStarted();
+      setupSignals.push(request.signal!);
+      if (setupSignals.length === 1) markSetupStarted();
       return new Promise((_resolve, reject) => {
         request.signal?.addEventListener("abort", () => reject(request.signal?.reason), { once: true });
       });
@@ -400,12 +331,11 @@ test("hello setup keeps its admission lease and aborts Creator tool resolution o
       resolve: async () => ({ root: "/fixture-corpus", corpus, digest: `sha256:${"1".repeat(64)}` })
     } as unknown as AgentCorpusResolver,
     creatorToolControlPlane: controlPlane,
-    maxPendingHelloAuthorizations: 1,
     clientHelloTimeoutMs: 2_000
   });
   const port = await listen(runtime);
   const first = await openSocket(port);
-  let overflow: WebSocket | undefined;
+  const second = await openSocket(port);
   try {
     first.send(JSON.stringify({
       ...hello("creator-setup-one", "creator-setup-install-one"),
@@ -413,21 +343,20 @@ test("hello setup keeps its admission lease and aborts Creator tool resolution o
     }));
     await setupStarted;
 
-    overflow = await openSocket(port);
-    const rejected = waitForMessage(overflow, (message) => (message.error as { code?: string } | undefined)?.code === "authentication_busy");
-    overflow.send(JSON.stringify({
+    const secondSetupStarted = waitUntil(() => setupSignals.length === 2);
+    second.send(JSON.stringify({
       ...hello("creator-setup-two", "creator-setup-install-two"),
       entitlement_id: entitlement.entitlement_id
     }));
-    assert.equal(((await rejected).error as { code?: string }).code, "authentication_busy");
+    await secondSetupStarted;
 
     const closed = new Promise<void>((resolve) => first.once("close", () => resolve()));
     first.close();
     await closed;
-    await waitUntil(() => setupSignal?.aborted === true);
+    await waitUntil(() => setupSignals[0]?.aborted === true);
   } finally {
     first.close();
-    overflow?.close();
+    second.close();
     await runtime.close();
   }
 });
@@ -983,81 +912,26 @@ test("network-tool cancellation and timeout settle the run before releasing glob
   }
 });
 
-test("one user may hold multiple ready connections and the global cap releases on close", async () => {
-  const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-connection-capacity-")));
-  const conversationIds = [
-    "connection-one",
-    "connection-same-user",
-    "connection-second-user-overflow",
-    "connection-global-overflow",
-    "connection-admitted-same-user",
-    "connection-admitted-other-user"
-  ];
+test("one account can keep more than eight ready connections", async () => {
+  const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-connections-")));
+  const conversationIds = Array.from({ length: 10 }, (_, index) => `connection-${index + 1}`);
   const runtime = createRuntimeServer({
     conversationStore: store,
     conversationRepository: await seedLocalConversations(store, conversationIds),
     authIdentityResolver: {
-      resolveIdentity: async (token) => ({
-        sub: token === "connection-token-three"
-          ? "connection-account-two"
-          : token === "connection-token-four"
-            ? "connection-account-three"
-            : "connection-account-one",
-        role: "user"
-      })
-    },
-    maxEstablishedConnectionsGlobal: 2
+      resolveIdentity: async () => ({ sub: "connection-account-one", role: "user" })
+    }
   });
   const port = await listen(runtime);
   const sockets: WebSocket[] = [];
   try {
-    const first = await openSocket(port);
-    sockets.push(first);
-    const firstReady = waitForMessage(first, (message) => message.type === "session.ready");
-    first.send(JSON.stringify(hello("connection-token-one", conversationIds[0]!)));
-    await firstReady;
-
-    const sameUser = await openSocket(port);
-    sockets.push(sameUser);
-    const sameUserReady = waitForMessage(sameUser, (message) => message.type === "session.ready");
-    sameUser.send(JSON.stringify(hello("connection-token-two", conversationIds[1]!)));
-    await sameUserReady;
-
-    const secondUser = await openSocket(port);
-    sockets.push(secondUser);
-    const secondUserRejected = waitForMessage(secondUser, (message) => (message.error as { code?: string } | undefined)?.code === "connection_capacity");
-    secondUser.send(JSON.stringify(hello("connection-token-three", conversationIds[2]!)));
-    assert.equal(((await secondUserRejected).error as { code?: string }).code, "connection_capacity");
-
-    const globalOverflow = await openSocket(port);
-    sockets.push(globalOverflow);
-    const globalRejected = waitForMessage(globalOverflow, (message) => (message.error as { code?: string } | undefined)?.code === "connection_capacity");
-    globalOverflow.send(JSON.stringify(hello("connection-token-four", conversationIds[3]!)));
-    assert.equal(((await globalRejected).error as { code?: string }).code, "connection_capacity");
-
-    const firstClosed = new Promise<void>((resolve) => first.once("close", () => resolve()));
-    first.close();
-    await firstClosed;
-    const admitted = await openSocket(port);
-    sockets.push(admitted);
-    const admittedReady = waitForMessage(admitted, (message) => message.type === "session.ready");
-    admitted.send(JSON.stringify(hello("connection-token-five", conversationIds[4]!)));
-    await admittedReady;
-
-    const admittedOtherUser = await openSocket(port);
-    sockets.push(admittedOtherUser);
-    const otherUserRejected = waitForMessage(admittedOtherUser, (message) => (message.error as { code?: string } | undefined)?.code === "connection_capacity");
-    admittedOtherUser.send(JSON.stringify(hello("connection-token-three", conversationIds[5]!)));
-    assert.equal(((await otherUserRejected).error as { code?: string }).code, "connection_capacity");
-
-    const sameUserClosed = new Promise<void>((resolve) => sameUser.once("close", () => resolve()));
-    sameUser.close();
-    await sameUserClosed;
-    const admittedAfterClose = await openSocket(port);
-    sockets.push(admittedAfterClose);
-    const otherUserReady = waitForMessage(admittedAfterClose, (message) => message.type === "session.ready");
-    admittedAfterClose.send(JSON.stringify(hello("connection-token-three", conversationIds[5]!)));
-    await otherUserReady;
+    for (const [index, conversationId] of conversationIds.entries()) {
+      const socket = await openSocket(port);
+      sockets.push(socket);
+      const ready = waitForMessage(socket, (message) => message.type === "session.ready");
+      socket.send(JSON.stringify(hello(`connection-token-${index + 1}`, conversationId)));
+      await ready;
+    }
   } finally {
     for (const socket of sockets) socket.close();
     await runtime.close();

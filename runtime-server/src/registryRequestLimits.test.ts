@@ -173,13 +173,11 @@ test("Registry request limit environment settings are bounded", () => {
   assert.deepEqual(httpRequestLimitOptionsFromEnvironment({
     HATCH_REGISTRY_HTTP_MAX_CONCURRENT: "8",
     HATCH_REGISTRY_HTTP_MAX_CONCURRENT_PER_SOURCE: "2",
-    HATCH_REGISTRY_HTTP_MAX_CONNECTIONS: "16",
     HATCH_REGISTRY_HTTP_HEADERS_TIMEOUT_MS: "3000",
     HATCH_REGISTRY_HTTP_REQUEST_TIMEOUT_MS: "5000",
   }), {
     maxConcurrent: 8,
     maxConcurrentPerSource: 2,
-    maxConnections: 16,
     headersTimeoutMs: 3_000,
     requestTimeoutMs: 5_000,
   });

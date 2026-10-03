@@ -21,7 +21,6 @@ export type PublishWorkLimitOptions = {
 export type HttpRequestLimitOptions = {
   maxConcurrent: number;
   maxConcurrentPerSource: number;
-  maxConnections: number;
   headersTimeoutMs: number;
   requestTimeoutMs: number;
 };
@@ -47,7 +46,6 @@ export const DEFAULT_PUBLISH_WORK_LIMIT_OPTIONS: PublishWorkLimitOptions = {
 export const DEFAULT_HTTP_REQUEST_LIMIT_OPTIONS: HttpRequestLimitOptions = {
   maxConcurrent: 128,
   maxConcurrentPerSource: 16,
-  maxConnections: 512,
   headersTimeoutMs: 10_000,
   requestTimeoutMs: 30_000,
 };
@@ -270,7 +268,6 @@ export function httpRequestLimitOptionsFromEnvironment(
   const options = {
     maxConcurrent: integerSetting(environment, "HATCH_REGISTRY_HTTP_MAX_CONCURRENT", 128, 1, 100_000),
     maxConcurrentPerSource: integerSetting(environment, "HATCH_REGISTRY_HTTP_MAX_CONCURRENT_PER_SOURCE", 16, 1, 10_000),
-    maxConnections: integerSetting(environment, "HATCH_REGISTRY_HTTP_MAX_CONNECTIONS", 512, 1, 100_000),
     headersTimeoutMs: integerSetting(environment, "HATCH_REGISTRY_HTTP_HEADERS_TIMEOUT_MS", 10_000, 1_000, 120_000),
     requestTimeoutMs: integerSetting(environment, "HATCH_REGISTRY_HTTP_REQUEST_TIMEOUT_MS", 30_000, 1_000, 10 * 60 * 1000),
   };
