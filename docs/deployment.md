@@ -74,7 +74,9 @@ or separate production Runtime exists. The server uses two Compose projects:
    Guardrails VPC endpoint.
    Avatar uploads also require `oss:ProcessImm`, `oss:PostProcessTask`,
    `oss:PutObjectAcl`, and `oss:DeleteObject` scoped to the bucket's
-   `account-avatars/*` object prefix.
+   `account-avatars/*` object prefix. The bucket ACL remains `private`; disable
+   bucket-level Block Public Access so avatar objects can use their scoped
+   `public-read` ACL. Account-level Block Public Access remains unchanged.
    Keep `HATCH_COMMERCE_PAYMENT_MODE=disabled` until a production provider
    bridge is configured. Enabling `provider` makes CD require non-empty
    `HATCH_PAYMENT_PROVIDER_BASE_URL`, `HATCH_PAYMENT_PROVIDER_API_TOKEN`, and

@@ -140,7 +140,7 @@ Candidate approval 与 Product publish/open 是同一个 `Release` command，不
 
 Postgres：Task、Run、RunRevision、Node execution、event graph、gate assessments、Release、artifact index、幂等/lease/version。
 
-OSS bucket `hatch-creator-distillation-1771409462189426`（private、versioning enabled）：原始文件、Markdown projection、Snapshot、LLM 输出、Eval report、Correction、Corpus bundle、trace。运行身份是 ECS `HatchRuntimeRole`，可在该 bucket 执行 Put/Get/List；头像图片转换与另存、公开读取 ACL 和清理权限仅限 `account-avatars/*`，包括 ProcessImm、PostProcessTask、PutObjectAcl 与 DeleteObject。
+OSS bucket `hatch-creator-distillation-1771409462189426`（private、versioning enabled）：原始文件、Markdown projection、Snapshot、LLM 输出、Eval report、Correction、Corpus bundle、trace。运行身份是 ECS `HatchRuntimeRole`，可在该 bucket 执行 Put/Get/List；头像图片转换与另存、公开读取 ACL 和清理权限仅限 `account-avatars/*`，包括 ProcessImm、PostProcessTask、PutObjectAcl 与 DeleteObject。Bucket 级 Block Public Access 关闭，使头像对象可设置 `public-read`；Bucket ACL 保持 `private`，账号级 Block Public Access 保持原设置。
 
 ## 八、最小接口
 
