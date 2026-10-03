@@ -879,8 +879,10 @@ export async function createDashboardApp(options = {}) {
         return send(response, 200, authentication.profile);
       }
       if (url.pathname === "/v1/auth/me/avatar" && ["PUT", "DELETE"].includes(request.method)) {
-        const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
+        const authentication = await authenticateAccount(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
+        const csrfError = cookieCsrfError(request);
+        if (csrfError) return send(response, csrfError.status, csrfError.body);
         const body = request.method === "PUT"
           ? await readRawBody(request, ACCOUNT_AVATAR_BODY_MAX_BYTES)
           : undefined;
@@ -2695,6 +2697,10 @@ async function optionalBuyer(request, registryUrl, fetchImpl, portalState) {
   if (!bearerTokenFromAuthorization(request) && !requestCookies(request).hatch_web_session) return undefined;
   const authentication = await authenticate(request, registryUrl, undefined, fetchImpl, portalState);
   return authentication.profile?.role === "user" ? authentication.profile : undefined;
+}
+
+async function authenticateAccount(request, registryUrl, fetchImpl, portalState) {
+  return authenticate(request, registryUrl, undefined, fetchImpl, portalState);
 }
 
 function publicProfile(profile) {
