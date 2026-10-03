@@ -238,7 +238,7 @@
 }
 
 .web-chat__heading-copy { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; gap: 12px; }
-.hui-avatar.web-chat__heading-avatar { width: 42px; height: 42px; min-width: 42px; flex: 0 0 42px; aspect-ratio: 1; border: 1px solid var(--chat-border-soft); }
+.hui-avatar.web-chat__heading-avatar { width: 42px; height: 42px; min-width: 42px; flex: 0 0 42px; aspect-ratio: 1; }
 .web-chat__eyebrow { color: var(--chat-muted); font-family: var(--hatch-font-pill, Inter, sans-serif); font-size: 9px; font-weight: 650; letter-spacing: .15em; }
 .web-chat__eyebrow > span { padding: 0 4px; color: #ba8066; }
 .web-chat__header h1 { overflow: hidden; max-width: min(62vw, 700px); margin: 0; color: var(--chat-ink); font-family: var(--hatch-font-ui, sans-serif); font-size: 17px; font-weight: 600; letter-spacing: -.018em; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }

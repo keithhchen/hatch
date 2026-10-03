@@ -145,7 +145,7 @@
 }
 .buyer-v2__page-heading p { max-width: 650px; margin-bottom: 0; color: var(--buyer-muted); font-size: var(--hatch-type-body); line-height: 1.65; }
 .buyer-v2__creator-heading { display: grid; max-width: none; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 18px; }
-.hui-avatar.buyer-v2__creator-profile-avatar { width: 56px; height: 56px; min-width: 56px; flex-basis: 56px; aspect-ratio: 1; margin-top: 5px; border: 2px solid rgba(255,255,255,.96); border-radius: 50%; box-shadow: 0 5px 20px rgba(69,49,35,.16); font-size: var(--hatch-type-body); }
+.hui-avatar.buyer-v2__creator-profile-avatar { width: 56px; height: 56px; min-width: 56px; flex-basis: 56px; aspect-ratio: 1; margin-top: 5px; border-radius: 50%; font-size: var(--hatch-type-body); }
 .buyer-v2__creator-heading h1 { margin-bottom: 8px; }
 .buyer-v2__catalog-heading { padding-top: clamp(10px, 3vw, 32px); }
 .buyer-v2__eyebrow {
@@ -352,10 +352,10 @@
 .buyer-v2__creator-identity { display: inline-flex; min-width: 0; align-items: center; gap: 9px; margin-bottom: 14px; color: var(--buyer-ink); font-family: var(--hatch-font-pill, Inter, sans-serif); font-size: var(--hatch-type-ui); font-weight: 680; }
 .buyer-v2__catalog-creator { min-height: 34px; margin: 0 auto 0 0; }
 .buyer-v2__catalog-creator .hui-avatar { width: 28px; height: 28px; }
-.buyer-v2__creator-avatar { flex: 0 0 auto; border: 2px solid rgba(255,255,255,.96); border-radius: 50%; box-shadow: 0 2px 9px rgba(69,49,35,.16); }
+.buyer-v2__creator-avatar { flex: 0 0 auto; border-radius: 50%; }
 .buyer-v2__settings-surface { padding: 30px 4px 24px; }
 .buyer-v2__settings-identity { display: flex; min-height: 76px; align-items: center; gap: 16px; }
-.buyer-v2__settings-avatar { border: 2px solid rgba(255,255,255,.96); border-radius: 50%; box-shadow: 0 3px 12px rgba(69,49,35,.14); }
+.buyer-v2__settings-avatar { border-radius: 50%; }
 .buyer-v2__settings-identity h2 { margin: 0 0 5px; font-size: var(--hatch-type-title); line-height: 1.25; }
 .buyer-v2__settings-identity p { margin: 0; color: var(--buyer-muted); font-size: var(--hatch-type-ui); }
 .buyer-v2__settings-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 28px; padding-top: 20px; }

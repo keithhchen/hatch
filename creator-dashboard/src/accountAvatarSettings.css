@@ -1,5 +1,5 @@
 .account-avatar-settings { display: flex; align-items: center; gap: 20px; padding: 24px 0; }
-.hui-avatar.account-avatar-settings__image { width: 72px; height: 72px; min-width: 72px; flex: 0 0 72px; aspect-ratio: 1; border: 2px solid rgba(255,255,255,.94); box-shadow: 0 4px 14px rgba(69,49,35,.13); }
+.hui-avatar.account-avatar-settings__image { width: 72px; height: 72px; min-width: 72px; flex: 0 0 72px; aspect-ratio: 1; }
 .account-avatar-settings__content { min-width: 0; }
 .account-avatar-settings__content h3 { margin: 0 0 5px; font-size: var(--hatch-type-ui); font-weight: 650; }
 .account-avatar-settings__content p { margin: 0; color: var(--buyer-muted); font-size: var(--hatch-type-meta); line-height: 1.55; }

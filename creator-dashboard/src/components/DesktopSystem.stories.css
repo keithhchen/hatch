@@ -21,7 +21,7 @@
 .hui-desktop-story__agent strong, .hui-desktop-story__agent small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hui-desktop-story__agent strong { font-family: var(--hatch-font-pill); font-size: var(--hatch-type-meta); font-weight: 680; }
 .hui-desktop-story__agent small { color: var(--hatch-ui-ink-faint); font-size: var(--hatch-type-meta); }
-.hui-desktop-story__avatar { width: 28px; height: 28px; display: grid; place-items: center; flex: 0 0 auto; border: 1px solid var(--hatch-ui-light-edge); border-radius: 50%; color: var(--hatch-ui-accent); background: var(--hatch-ui-surface-bright); font-family: var(--hatch-font-pill); font-size: var(--hatch-type-meta); font-weight: 700; }
+.hui-desktop-story__avatar { width: 28px; height: 28px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 50%; color: var(--hatch-ui-accent); background: var(--hatch-ui-surface-bright); font-family: var(--hatch-font-pill); font-size: var(--hatch-type-meta); font-weight: 700; }
 .hui-desktop-story__new { margin-top: 4px; }
 .hui-desktop-story__account { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 14px; border-top: 1px solid var(--hatch-ui-separator); font-family: var(--hatch-font-pill); font-size: var(--hatch-type-meta); }
 .hui-desktop-story__account .hui-icon-button { margin-left: auto; }

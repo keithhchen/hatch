@@ -7,6 +7,7 @@ const source = readFileSync(new URL("./BuyerPortalV2.jsx", import.meta.url), "ut
 const appSource = readFileSync(new URL("./main.jsx", import.meta.url), "utf8");
 const avatarSource = readFileSync(new URL("./AccountAvatar.jsx", import.meta.url), "utf8");
 const avatarStyles = readFileSync(new URL("./accountAvatar.css", import.meta.url), "utf8");
+const sharedUiStyles = readFileSync(new URL("../../packages/ui/src/hatch-ui.css", import.meta.url), "utf8");
 
 test("buyer detail values remain inside their grid at long real identifiers", () => {
   assert.match(stylesheet, /\.buyer-v2__detail-card\s*\{[^}]*min-width:\s*0;/);
@@ -23,7 +24,7 @@ test("account avatars share a black circular single-letter fallback", () => {
   assert.match(avatarSource, /charAt\(0\)\.toLocaleUpperCase\(\)/);
   assert.match(avatarStyles, /aspect-ratio:\s*1;/);
   assert.match(avatarStyles, /border-radius:\s*50%;/);
-  assert.match(avatarStyles, /background:\s*#111;/);
+  assert.match(sharedUiStyles, /\.hui-avatar__fallback\s*\{[^}]*background:\s*#000;/);
   assert.match(avatarStyles, /font-family:\s*var\(--hatch-font-ui\);/);
 });
 

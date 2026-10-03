@@ -2,7 +2,7 @@
   flex: 0 0 auto;
   aspect-ratio: 1;
   border-radius: 50%;
-  background: #111;
+  background: transparent;
   color: #fffaf3;
   font-family: var(--hatch-font-ui);
   font-weight: var(--hui-weight-regular);
