@@ -24,7 +24,7 @@ test("account avatars share a black circular single-letter fallback", () => {
   assert.match(avatarStyles, /aspect-ratio:\s*1;/);
   assert.match(avatarStyles, /border-radius:\s*50%;/);
   assert.match(avatarStyles, /background:\s*#111;/);
-  assert.match(avatarStyles, /font-family:\s*var\(--hatch-font-display\);/);
+  assert.match(avatarStyles, /font-family:\s*var\(--hatch-font-ui\);/);
 });
 
 test("a non-Creator account is sent to the real Creator signup intent", () => {
