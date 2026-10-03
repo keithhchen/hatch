@@ -34,6 +34,7 @@ import { WebChatRuntimeBridge } from "./webChatRuntimeBridge.mjs";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_JSON_BODY_MAX_BYTES = 1024 * 1024;
+const ACCOUNT_AVATAR_BODY_MAX_BYTES = 5 * 1024 * 1024;
 const CORPUS_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/;
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export const CREATOR_FACTORY_JSON_BODY_MAX_BYTES = 32 * 1024 * 1024;
@@ -876,6 +877,23 @@ export async function createDashboardApp(options = {}) {
         const authentication = await authenticate(request, registryUrl, undefined, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         return send(response, 200, authentication.profile);
+      }
+      if (url.pathname === "/v1/auth/me/avatar" && ["PUT", "DELETE"].includes(request.method)) {
+        const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
+        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
+        const body = request.method === "PUT"
+          ? await readRawBody(request, ACCOUNT_AVATAR_BODY_MAX_BYTES)
+          : undefined;
+        const upstream = await fetchImpl(new URL("/v1/auth/me/avatar", registryUrl), {
+          method: request.method,
+          headers: {
+            authorization: `Bearer ${authentication.token}`,
+            ...(request.method === "PUT" ? { "content-type": request.headers["content-type"] ?? "" } : {})
+          },
+          ...(body ? { body } : {})
+        });
+        const payload = upstream.status === 204 ? undefined : await upstream.json();
+        return send(response, upstream.status, payload);
       }
 
       // Browser OAuth is an authorization-code + PKCE bridge to the existing
