@@ -164,8 +164,6 @@ export type RuntimeServerOptions = {
   maxActiveRunsGlobal?: number;
   /** Authenticated, ready WebSocket connections across the Runtime process. */
   maxEstablishedConnectionsGlobal?: number;
-  /** Authenticated, ready WebSocket connections for one user. */
-  maxEstablishedConnectionsPerUser?: number;
   /** Ping interval used to reap connections that no longer answer. */
   connectionHeartbeatMs?: number;
   /** Maximum time a ready connection may receive no client messages. */
@@ -319,12 +317,6 @@ export async function createRuntimeServerFromEnvironment(
     160 * 1024 * 1024,
     256 * 1024 * 1024
   );
-  const maxEstablishedConnectionsPerUser = runtimeCapacityLimit(
-    "HATCH_RUNTIME_MAX_ESTABLISHED_CONNECTIONS_PER_USER",
-    environment.HATCH_RUNTIME_MAX_ESTABLISHED_CONNECTIONS_PER_USER,
-    8,
-    10_000
-  );
   const connectionHeartbeatMs = runtimeDurationMs(
     "HATCH_RUNTIME_CONNECTION_HEARTBEAT_MS",
     environment.HATCH_RUNTIME_CONNECTION_HEARTBEAT_MS,
@@ -474,7 +466,6 @@ export async function createRuntimeServerFromEnvironment(
     maxActiveRunsPerUser,
     maxActiveRunsGlobal,
     maxEstablishedConnectionsGlobal,
-    maxEstablishedConnectionsPerUser,
     maxOpenConnectionsGlobal,
     maxOpenConnectionsPerSource,
     maxSocketBufferedBytes,
@@ -719,10 +710,6 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     options.maxOpenConnectionsPerSource ?? 16,
     "maxOpenConnectionsPerSource"
   );
-  const establishedConnectionPerUserGate = new KeyedCapacityGate(
-    options.maxEstablishedConnectionsPerUser ?? 8,
-    "maxEstablishedConnectionsPerUser"
-  );
   const connectionHeartbeatMs = options.connectionHeartbeatMs ?? 30_000;
   if (!Number.isSafeInteger(connectionHeartbeatMs) || connectionHeartbeatMs < 1) {
     throw new Error("connectionHeartbeatMs must be a positive safe integer");
@@ -930,7 +917,6 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       activeRunGate,
       activeRunPerUserGate,
       establishedConnectionGate,
-      establishedConnectionPerUserGate,
       maxActiveRunsPerConnection,
       helloTimeoutMs,
       connectionHeartbeatMs,
@@ -1946,7 +1932,6 @@ async function handleRuntimeSocket(
   activeRunGate: CapacityGate,
   activeRunPerUserGate: KeyedCapacityGate,
   establishedConnectionGate: CapacityGate,
-  establishedConnectionPerUserGate: KeyedCapacityGate,
   maxActiveRunsPerConnection: number,
   helloTimeoutMs: number,
   connectionHeartbeatMs: number,
@@ -2168,23 +2153,7 @@ async function handleRuntimeSocket(
               socket.close(1013, "Connection capacity reached");
               return;
             }
-            const releaseUserConnection = establishedConnectionPerUserGate.tryAcquire(nextBinding.userId);
-            if (!releaseUserConnection) {
-              releaseGlobalConnection();
-              await send({
-                type: "turn.failed",
-                error: {
-                  code: "user_connection_capacity",
-                  message: "This account already has the maximum number of connected sessions."
-                }
-              });
-              socket.close(1013, "User connection capacity reached");
-              return;
-            }
-            releaseEstablishedConnection = combineCapacityReleases(
-              releaseGlobalConnection,
-              releaseUserConnection
-            );
+            releaseEstablishedConnection = releaseGlobalConnection;
             if (nextBinding.agentCorpus && nextBinding.agentCorpusRoot) {
               serverTools.setKnowledgeScope({
                 provider: createKnowledgeProvider(nextBinding.agentCorpusRoot, nextBinding.agentCorpus, nextBinding.corpusDigest),

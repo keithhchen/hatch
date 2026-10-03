@@ -983,14 +983,15 @@ test("network-tool cancellation and timeout settle the run before releasing glob
   }
 });
 
-test("ready connection caps release on close and distinguish per-user from global pressure", async () => {
+test("one user may hold multiple ready connections and the global cap releases on close", async () => {
   const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-connection-capacity-")));
   const conversationIds = [
     "connection-one",
     "connection-same-user",
-    "connection-second-user",
+    "connection-second-user-overflow",
     "connection-global-overflow",
-    "connection-admitted"
+    "connection-admitted-same-user",
+    "connection-admitted-other-user"
   ];
   const runtime = createRuntimeServer({
     conversationStore: store,
@@ -1005,8 +1006,7 @@ test("ready connection caps release on close and distinguish per-user from globa
         role: "user"
       })
     },
-    maxEstablishedConnectionsGlobal: 2,
-    maxEstablishedConnectionsPerUser: 1
+    maxEstablishedConnectionsGlobal: 2
   });
   const port = await listen(runtime);
   const sockets: WebSocket[] = [];
@@ -1019,15 +1019,15 @@ test("ready connection caps release on close and distinguish per-user from globa
 
     const sameUser = await openSocket(port);
     sockets.push(sameUser);
-    const userRejected = waitForMessage(sameUser, (message) => (message.error as { code?: string } | undefined)?.code === "user_connection_capacity");
+    const sameUserReady = waitForMessage(sameUser, (message) => message.type === "session.ready");
     sameUser.send(JSON.stringify(hello("connection-token-two", conversationIds[1]!)));
-    assert.equal(((await userRejected).error as { code?: string }).code, "user_connection_capacity");
+    await sameUserReady;
 
     const secondUser = await openSocket(port);
     sockets.push(secondUser);
-    const secondReady = waitForMessage(secondUser, (message) => message.type === "session.ready");
+    const secondUserRejected = waitForMessage(secondUser, (message) => (message.error as { code?: string } | undefined)?.code === "connection_capacity");
     secondUser.send(JSON.stringify(hello("connection-token-three", conversationIds[2]!)));
-    await secondReady;
+    assert.equal(((await secondUserRejected).error as { code?: string }).code, "connection_capacity");
 
     const globalOverflow = await openSocket(port);
     sockets.push(globalOverflow);
@@ -1043,6 +1043,21 @@ test("ready connection caps release on close and distinguish per-user from globa
     const admittedReady = waitForMessage(admitted, (message) => message.type === "session.ready");
     admitted.send(JSON.stringify(hello("connection-token-five", conversationIds[4]!)));
     await admittedReady;
+
+    const admittedOtherUser = await openSocket(port);
+    sockets.push(admittedOtherUser);
+    const otherUserRejected = waitForMessage(admittedOtherUser, (message) => (message.error as { code?: string } | undefined)?.code === "connection_capacity");
+    admittedOtherUser.send(JSON.stringify(hello("connection-token-three", conversationIds[5]!)));
+    assert.equal(((await otherUserRejected).error as { code?: string }).code, "connection_capacity");
+
+    const sameUserClosed = new Promise<void>((resolve) => sameUser.once("close", () => resolve()));
+    sameUser.close();
+    await sameUserClosed;
+    const admittedAfterClose = await openSocket(port);
+    sockets.push(admittedAfterClose);
+    const otherUserReady = waitForMessage(admittedAfterClose, (message) => message.type === "session.ready");
+    admittedAfterClose.send(JSON.stringify(hello("connection-token-three", conversationIds[5]!)));
+    await otherUserReady;
   } finally {
     for (const socket of sockets) socket.close();
     await runtime.close();
