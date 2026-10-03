@@ -2,8 +2,8 @@ import { createHash, createHmac, randomBytes, randomUUID, scrypt, timingSafeEqua
 import { Pool } from "pg";
 
 export type AccountRole = "user" | "creator";
-export type Account = { id: string; role: AccountRole; email: string; display_name: string; password_salt: string; password_hash: string; created_at: string };
-export type AccountPublic = Pick<Account, "id" | "role" | "email" | "display_name">;
+export type Account = { id: string; role: AccountRole; email: string; display_name: string; avatar_url: string | null; password_salt: string; password_hash: string; created_at: string };
+export type AccountPublic = Pick<Account, "id" | "role" | "email" | "display_name" | "avatar_url">;
 export type AccountSession = {
   id: string;
   account_id: string;
@@ -114,10 +114,12 @@ export class AccountStoreTs {
       role TEXT NOT NULL CHECK (role IN ('user', 'creator')),
       email TEXT NOT NULL UNIQUE,
       display_name TEXT NOT NULL,
+      avatar_url TEXT,
       password_salt TEXT NOT NULL,
       password_hash TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL
     );
+    ALTER TABLE accounts ADD COLUMN IF NOT EXISTS avatar_url TEXT;
     CREATE TABLE IF NOT EXISTS account_sessions (
       id UUID PRIMARY KEY,
       account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -137,13 +139,13 @@ export class AccountStoreTs {
   async getByEmail(email: string): Promise<Account | undefined> {
     const normalized = normalizeAccountIdentity(email);
     if (!this.pool) return [...this.accounts.values()].find((account) => account.email === normalized);
-    const result = await this.pool.query("SELECT id, role, email, display_name, password_salt, password_hash, created_at FROM accounts WHERE email=$1", [normalized]);
+    const result = await this.pool.query("SELECT id, role, email, display_name, avatar_url, password_salt, password_hash, created_at FROM accounts WHERE email=$1", [normalized]);
     return result.rows[0] ? rowToAccount(result.rows[0]) : undefined;
   }
 
   async getById(id: string): Promise<Account | undefined> {
     if (!this.pool) return this.accounts.get(id);
-    const result = await this.pool.query("SELECT id, role, email, display_name, password_salt, password_hash, created_at FROM accounts WHERE id=$1", [id]);
+    const result = await this.pool.query("SELECT id, role, email, display_name, avatar_url, password_salt, password_hash, created_at FROM accounts WHERE id=$1", [id]);
     return result.rows[0] ? rowToAccount(result.rows[0]) : undefined;
   }
 
@@ -175,17 +177,18 @@ export class AccountStoreTs {
       role,
       email: normalizedEmail,
       display_name: normalizedDisplayName,
+      avatar_url: null,
       password_salt: salt.toString("base64url"),
       password_hash: await this.passwordHasher.derive(password, salt),
       created_at: new Date().toISOString(),
     };
     if (this.pool) {
       const result = await this.pool.query(
-        `INSERT INTO accounts (id, role, email, display_name, password_salt, password_hash, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)
+        `INSERT INTO accounts (id, role, email, display_name, avatar_url, password_salt, password_hash, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
          ON CONFLICT (email) DO NOTHING
          RETURNING id`,
-        [account.id, account.role, account.email, account.display_name, account.password_salt, account.password_hash, account.created_at],
+        [account.id, account.role, account.email, account.display_name, account.avatar_url, account.password_salt, account.password_hash, account.created_at],
       );
       if (result.rowCount !== 1) throw new Error("email_already_registered");
     } else this.accounts.set(account.id, account);
@@ -257,7 +260,7 @@ export class AccountStoreTs {
       RETURNING
         s.id, s.account_id, s.token_hash, s.client_type, s.created_at, s.last_seen_at,
         s.idle_expires_at, s.absolute_expires_at, s.revoked_at,
-        a.id AS account_id_value, a.role, a.email, a.display_name,
+        a.id AS account_id_value, a.role, a.email, a.display_name, a.avatar_url,
         a.password_salt, a.password_hash, a.created_at AS account_created_at`, [
       tokenHash,
       nowIso,
@@ -271,6 +274,7 @@ export class AccountStoreTs {
       role: row.role as AccountRole,
       email: String(row.email),
       display_name: String(row.display_name),
+      avatar_url: row.avatar_url == null ? null : String(row.avatar_url),
       password_salt: String(row.password_salt),
       password_hash: String(row.password_hash),
       created_at: new Date(row.account_created_at).toISOString()
@@ -288,13 +292,29 @@ export class AccountStoreTs {
     this.sessions.delete(tokenHash);
   }
 
+  async setAvatarUrl(id: string, avatarUrl: string | null): Promise<Account> {
+    const account = await this.getById(id);
+    if (!account) throw new Error("account_not_found");
+    if (!this.pool) {
+      const updated = { ...account, avatar_url: avatarUrl };
+      this.accounts.set(id, updated);
+      return updated;
+    }
+    const result = await this.pool.query(
+      "UPDATE accounts SET avatar_url=$2 WHERE id=$1 RETURNING id, role, email, display_name, avatar_url, password_salt, password_hash, created_at",
+      [id, avatarUrl]
+    );
+    if (!result.rows[0]) throw new Error("account_not_found");
+    return rowToAccount(result.rows[0]);
+  }
+
   async verifyPassword(password: string, account: Account | undefined): Promise<boolean> {
     return verifyPassword(password, account, this.passwordHasher);
   }
 }
 
 export function accountPublic(account: Account): AccountPublic {
-  return { id: account.id, role: account.role, email: account.email, display_name: account.display_name };
+  return { id: account.id, role: account.role, email: account.email, display_name: account.display_name, avatar_url: account.avatar_url };
 }
 
 export function normalizeAccountIdentity(email: string): string {
@@ -409,6 +429,7 @@ function rowToAccount(row: Record<string, any>): Account {
     role: row.role as AccountRole,
     email: String(row.email),
     display_name: String(row.display_name),
+    avatar_url: row.avatar_url == null ? null : String(row.avatar_url),
     password_salt: String(row.password_salt),
     password_hash: String(row.password_hash),
     created_at: new Date(row.created_at).toISOString(),
