@@ -84,6 +84,7 @@ test("consumer avatar changes proxy through the authenticated Registry session",
     email: "buyer@example.test",
     display_name: "Buyer"
   };
+  let avatarUrl = null;
   const avatarRequests = [];
   const registry = createServer(async (request, response) => {
     const requestUrl = new URL(request.url ?? "/", "http://registry.test");
@@ -96,12 +97,13 @@ test("consumer avatar changes proxy through the authenticated Registry session",
       return;
     }
     if (requestUrl.pathname === "/v1/auth/me") {
-      response.end(JSON.stringify(account));
+      response.end(JSON.stringify({ ...account, avatar_url: avatarUrl }));
       return;
     }
     if (requestUrl.pathname === "/v1/auth/me/avatar") {
       avatarRequests.push({ method: request.method, authorization: request.headers.authorization, contentType: request.headers["content-type"], body: payload });
-      response.end(JSON.stringify({ ...account, avatar_url: request.method === "PUT" ? "https://avatar.example.test/account.webp" : null }));
+      avatarUrl = request.method === "PUT" ? "https://avatar.example.test/account.webp" : null;
+      response.end(JSON.stringify({ ...account, avatar_url: avatarUrl }));
       return;
     }
     response.statusCode = 404;
@@ -142,6 +144,10 @@ test("consumer avatar changes proxy through the authenticated Registry session",
   assert.equal(avatarRequests[0].authorization, "Bearer signed-user-token");
   assert.equal(avatarRequests[0].contentType, "image/png");
   assert.deepEqual(avatarRequests[0].body, Buffer.from("avatar-image-bytes"));
+
+  const refreshedProfile = await fetch(`${serverUrl(api)}/v1/auth/me`, { headers: { cookie } });
+  assert.equal(refreshedProfile.status, 200);
+  assert.equal((await refreshedProfile.json()).avatar_url, "https://avatar.example.test/account.webp");
 
   const remove = await fetch(`${serverUrl(api)}/v1/auth/me/avatar`, {
     method: "DELETE",
