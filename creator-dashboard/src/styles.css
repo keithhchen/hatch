@@ -1,4 +1,5 @@
 :root {
+  --hatch-display-leading: 1.08;
   font-family: var(--hatch-font-ui);
   color: var(--hatch-ink);
   background: var(--hatch-canvas);

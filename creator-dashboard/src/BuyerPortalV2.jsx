@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Menu } from "lucide-react";
+import { ChevronDown, Menu, Monitor } from "lucide-react";
 import {
   Avatar,
   Button,
@@ -22,6 +22,8 @@ import { useLocale } from "./locale.jsx";
 import { buyerT } from "./buyerI18n.js";
 import { humanizeIdentifier, meaningfulReversalStatus } from "./buyerPresentation.js";
 import { creatorPublicModel } from "./storefrontModel.js";
+import { BuyerAccountControls, BuyerLanguageMenu } from "./BuyerAccountControls.jsx";
+import { AccountAvatarSettings } from "./AccountAvatarSettings.jsx";
 import "./buyerPortalV2.css";
 
 const DEFAULT_DOWNLOAD_URL = "/download";
@@ -197,6 +199,7 @@ function BuyerShell({route, navigate, session, downloadUrl, children }) {
             <RouterLink to={EXPLORE_ROOT} navigate={navigate} aria-current={active === "explore" ? "page" : undefined}>{t('Explore')}</RouterLink>
             {authenticated ? <RouterLink to={LIBRARY_ROOT} navigate={navigate} aria-current={active === "library" ? "page" : undefined}>{t('Library')}</RouterLink> : null}
             {authenticated ? <RouterLink to={ORDERS_ROOT} navigate={navigate} aria-current={active === "orders" ? "page" : undefined}>{t('Orders')}</RouterLink> : null}
+            <a href={downloadUrl} target="_blank" rel="noreferrer">{t('Download')}</a>
           </nav>
           <div className="buyer-v2__mobile-nav">
             <DropdownMenu
@@ -205,20 +208,19 @@ function BuyerShell({route, navigate, session, downloadUrl, children }) {
               items={[
                 { value: "explore", label: t("Explore"), active: active === "explore", onSelect: () => navigateTo(navigate, EXPLORE_ROOT) },
                 ...(authenticated ? [{ value: "library", label: t("Library"), active: active === "library", onSelect: () => navigateTo(navigate, LIBRARY_ROOT) }] : []),
-                ...(authenticated ? [{ value: "orders", label: t("Orders"), active: active === "orders", onSelect: () => navigateTo(navigate, ORDERS_ROOT) }] : [])
+                ...(authenticated ? [{ value: "orders", label: t("Orders"), active: active === "orders", onSelect: () => navigateTo(navigate, ORDERS_ROOT) }] : []),
+                { value: "download", label: t("Download"), onSelect: () => window.open(downloadUrl, "_blank", "noopener,noreferrer") }
               ]}
             />
           </div>
           <div className="buyer-v2__account">
-            <LanguageSwitcher className="buyer-v2__language" compact />
-            <a className="buyer-v2__download-quiet" href={downloadUrl} target="_blank" rel="noreferrer">{t('Download')}</a>
             {authenticated ? (
-              <>
-                <RouterLink className="buyer-v2__avatar" to={ACCOUNT_ROOT} navigate={navigate} aria-label={t('Account settings')} aria-current={active === "settings" ? "page" : undefined}>{initialsFor(session.user)}</RouterLink>
-                <Button type="button" variant="ghost" size="small" disabled={signingOut} onClick={signOut}>{signingOut ? t("Signing out…") : t("Sign out")}</Button>
-              </>
+              <BuyerAccountControls user={session.user} onSignOut={signOut} signingOut={signingOut} className="buyer-account-controls--header" />
             ) : (
-              <LinkButton variant="secondary" size="small" to={`/sign-in?returnTo=${encodeURIComponent(EXPLORE_ROOT)}`} navigate={navigate}>{t('Sign in')}</LinkButton>
+              <>
+                <BuyerLanguageMenu />
+                <LinkButton variant="secondary" size="small" to={`/sign-in?returnTo=${encodeURIComponent(EXPLORE_ROOT)}`} navigate={navigate}>{t('Sign in')}</LinkButton>
+              </>
             )}
           </div>
         </div>
@@ -442,11 +444,11 @@ function SettingsPage({session, navigate }) {
     <header className="buyer-v2__page-heading"><span className="buyer-v2__eyebrow">{t('Account')}</span><h1>{t('Your Hatch account.')}</h1><p>{t('Use the same account on Web and Desktop. Signing out keeps your access records intact.')}</p></header>
     <section className="buyer-v2__settings-surface" aria-label={t('Signed-in account')}>
       <div className="buyer-v2__settings-identity">
-        <Avatar className="buyer-v2__settings-avatar" size="large" name={session.user?.display_name || t("Hatch account")} fallback={session.user?.initials} />
-        <div><h2>{session.user?.display_name || t("Hatch account")}</h2><p>{t('Signed in to Hatch')}</p></div>
+        <div><h2>{session.user?.display_name || t("Hatch account")}</h2></div>
       </div>
+      <AccountAvatarSettings user={session.user} onUserUpdated={session.updateUser ?? (() => {})} t={t} />
       {error ? <InlineError error={error} /> : null}
-      <div className="buyer-v2__settings-actions"><Button type="button" variant="secondary" loading={status === "pending"} onClick={signOut}>{t('Sign out')}</Button><RouterLink to="/account/help" navigate={navigate}>{t('Account help')}</RouterLink></div>
+      <div className="buyer-v2__settings-actions"><Button type="button" variant="secondary" loading={status === "pending"} onClick={signOut}>{t('Sign out')}</Button></div>
     </section>
   </div>;
 }
@@ -527,14 +529,10 @@ function AuthPage({mode, search, request, navigate, session }) {
       <section className="buyer-v2__auth-form-panel">
         <form className="buyer-v2__auth-form" onSubmit={submit}>
           <span className="buyer-v2__eyebrow">{creatorIntent ? t("Creator account") : t("Hatch account")}</span>
-          <h2>{signingUp ? (creatorIntent ? t("Create your Creator account") : t("Create your account")) : t("Sign in to Hatch")}</h2>
-          <p>{signingUp
-            ? creatorIntent
-              ? t("Create a Creator account, then open Creator Studio to publish your work.")
-              : t("Create an account, then return to the Product you selected.")
-            : creatorIntent
-              ? t("Sign in with your Creator account to open Creator Studio.")
-              : t("Sign in, then continue exactly where you left off.")}</p>
+          <h2 className="hui-heading--display">{signingUp ? (creatorIntent ? t("Create your Creator account") : t("Create your account")) : t("Sign in to Hatch")}</h2>
+          {signingUp ? <p>{creatorIntent
+            ? t("Create a Creator account, then open Creator Studio to publish your work.")
+            : t("Create an account, then return to the Product you selected.")}</p> : null}
           {signingUp ? <Field label={t('Name')}><Input required autoComplete="name" value={form.display_name} onChange={(event) => setForm({ ...form, display_name: event.target.value })} /></Field> : null}
           <Field label={t('Email')}><Input required type="email" autoComplete="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></Field>
           <Field label={t('Password')}><Input required minLength={8} type="password" autoComplete={signingUp ? "new-password" : "current-password"} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></Field>
@@ -709,38 +707,77 @@ function SuccessPage({id, request, navigate, downloadUrl, session }) {
 
 function LibraryPage({search, request, navigate }) {
   const t = useBuyerCopy();
-  const resource = useCursorCollection(async (cursor, signal) => {
-    const query = new URLSearchParams();
-    query.set("status", "active");
-    if (cursor) query.set("cursor", cursor);
-    const response = await callRequest(request, `${BUYER_PORTAL_V2_ENDPOINTS.entitlements}?${query}`, { signal });
-    return pageFrom(response, ["entitlements", "creator_agents", "items"]);
-  }, "entitlements");
-  usePageTitle(t("Your Agent library"));
+  const resource = useCursorCollection((_cursor, signal) => loadSubscribedProducts(request, signal), "entitlements");
+  usePageTitle(t("Your subscribed products."));
 
   return (
     <div className="buyer-v2__container buyer-v2__page">
-      <header className="buyer-v2__page-heading"><span className="buyer-v2__eyebrow">{t('Your library')}</span><h1>{t('Agents linked to your account.')}</h1><p>{t('Product and release details stay visible here. Zero-price purchases are recorded in your account.')}</p></header>
+      <header className="buyer-v2__page-heading"><span className="buyer-v2__eyebrow">{t('Your library')}</span><h1>{t('Your subscribed products.')}</h1><p>{t('Start a chat with a product or review its order.')}</p></header>
       {resource.status === "loading" ? <CardSkeleton count={2} label={t('Loading your library')} /> : null}
       {resource.status === "error" ? <RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo={LIBRARY_ROOT} /> : null}
-      {resource.status === "ready" && resource.items.length ? <section className="buyer-v2__list-grid" aria-label={t('Your entitlements')}>{resource.items.map((item) => <EntitlementCard key={entitlementIdFor(item)} entitlement={item} navigate={navigate} />)}</section> : null}
+      {resource.status === "ready" && resource.items.length ? <section className="buyer-v2__list-grid" aria-label={t('Your subscribed products.')}>{resource.items.map((item) => <EntitlementCard key={entitlementIdFor(item)} entitlement={item} navigate={navigate} request={request} />)}</section> : null}
       {resource.status === "ready" && !resource.items.length ? <EmptyState title={t('Your library is empty')} body={t('Explore products and choose a method that fits your task.')} action={<LinkButton to={EXPLORE_ROOT} navigate={navigate}>{t('Explore products')}</LinkButton>} /> : null}
       {resource.nextCursor ? <LoadMore resource={resource} /> : null}
     </div>
   );
 }
 
-function EntitlementCard({entitlement, navigate }) {
+async function loadSubscribedProducts(request, signal) {
+  const items = [];
+  const visitedCursors = new Set();
+  let cursor = null;
+  do {
+    const query = new URLSearchParams({ status: "active", limit: "100" });
+    if (cursor) query.set("cursor", cursor);
+    const response = await callRequest(request, `${BUYER_PORTAL_V2_ENDPOINTS.entitlements}?${query}`, { signal });
+    const page = pageFrom(response, ["entitlements", "creator_agents", "items"]);
+    items.push(...page.items);
+    cursor = page.nextCursor;
+    if (cursor && visitedCursors.has(cursor)) throw new Error("The subscribed product list repeated its pagination cursor.");
+    if (cursor) visitedCursors.add(cursor);
+  } while (cursor);
+  return { items: dedupeItems(items).sort(compareEntitlementsNewestFirst), nextCursor: null };
+}
+
+function compareEntitlementsNewestFirst(left, right) {
+  const timestamp = entitlement => {
+    const value = Date.parse(entitlement.granted_at ?? entitlement.valid_from ?? entitlement.created_at ?? "");
+    return Number.isFinite(value) ? value : 0;
+  };
+  return timestamp(right) - timestamp(left)
+    || String(right.entitlement_id ?? "").localeCompare(String(left.entitlement_id ?? ""));
+}
+
+function EntitlementCard({entitlement, navigate, request }) {
   const t = useBuyerCopy();
-  const id = entitlementIdFor(entitlement);
   const status = accessStatus(entitlement);
   const product = entitlement.product || entitlement.product_snapshot || entitlement;
+  const creator = entitlement.creator || product.creator || product;
+  const summary = entitlementSummary(entitlement, product);
+  const orderId = entitlement.order_id || entitlement.order?.order_id || entitlement.order?.id;
+  function openDesktop() {
+    trackPortalEvent(request, "desktop_open_clicked", productTelemetry(product));
+    window.location.assign(desktopUrl(entitlement, product));
+  }
+
   return (
     <article className="buyer-v2__access-card">
-      <div className="buyer-v2__card-topline"><StatusChip status={status} label={t(entitlementStatusLabel(status))} /><span>{creatorName(entitlement.creator || product)}</span></div>
+      <CreatorIdentity value={creator} />
       <h2>{productName(product)}</h2>
-      <p>{entitlementSummary(entitlement)}</p>
-      <div className="buyer-v2__card-footer"><LinkButton variant="secondary" to={`${LIBRARY_ROOT}/${encodeURIComponent(id)}`} navigate={navigate}>{t('View access')}</LinkButton></div>
+      {summary ? <p>{summary}</p> : null}
+      <div className="buyer-v2__card-footer">
+        {status === "active" ? (
+          <div className="buyer-v2__chat-actions">
+            <LinkButton className="buyer-v2__chat-primary" to={`/chat/product/${encodeURIComponent(productId(product))}`} navigate={navigate}>{t('Chat')}</LinkButton>
+            <DropdownMenu
+              label={t('Open options')}
+              trigger={<button type="button" className="buyer-v2__chat-menu-trigger" aria-label={t('Open options')} title={t('Open options')}><ChevronDown aria-hidden="true" /></button>}
+              items={[{ value: "open-desktop", label: t("Open Hatch Desktop"), icon: <Monitor aria-hidden="true" />, onSelect: openDesktop }]}
+            />
+          </div>
+        ) : null}
+        {orderId ? <LinkButton variant="secondary" to={`${ORDERS_ROOT}/${encodeURIComponent(orderId)}`} navigate={navigate}>{t('View order')}</LinkButton> : null}
+      </div>
     </article>
   );
 }
@@ -778,7 +815,7 @@ function EntitlementPage({id, request, navigate, session, downloadUrl }) {
           [t("Refund / cancellation"), reversalStatus ? sentenceCase(reversalStatus) : (status === "revoked" ? "Access revoked" : null)],
           [t("Support reference"), entitlement.entitlement_id || entitlement.id]
         ]} />{orderId ? <RouterLink className="buyer-v2__text-link" to={`${ORDERS_ROOT}/${encodeURIComponent(orderId)}`} navigate={navigate}>{t('View originating order →')}</RouterLink> : null}</section>
-        <aside className="buyer-v2__activation-card"><span className="buyer-v2__eyebrow">{t('Desktop activation')}</span><h2>{canOpen ? "Continue in your Workspace." : t(entitlementRecoveryTitle(status))}</h2><p>{t(entitlementRecoveryCopy(status))}</p>{canOpen ? <Button asChild><a href={desktopUrl(entitlement, product)} onClick={() => trackPortalEvent(request, "desktop_open_clicked", productTelemetry(product))}>{t('Open Hatch Desktop')}</a></Button> : null}<a className="buyer-v2__secondary-download" href={downloadUrl} target="_blank" rel="noreferrer" onClick={() => trackPortalEvent(request, "desktop_download_clicked", productTelemetry(product))}>{t('Download Hatch Desktop')}</a></aside>
+        <aside className="buyer-v2__activation-card"><span className="buyer-v2__eyebrow">{t('Your Agent')}</span><h2>{canOpen ? "Continue your conversation." : t(entitlementRecoveryTitle(status))}</h2><p>{t(entitlementRecoveryCopy(status))}</p>{canOpen ? <Button asChild><a href={`/chat/product/${encodeURIComponent(productId(product))}`}>{t('Chat in browser')}</a></Button> : null}{canOpen ? <Button asChild variant="secondary"><a href={desktopUrl(entitlement, product)} onClick={() => trackPortalEvent(request, "desktop_open_clicked", productTelemetry(product))}>{t('Open Hatch Desktop')}</a></Button> : null}<a className="buyer-v2__secondary-download" href={downloadUrl} target="_blank" rel="noreferrer" onClick={() => trackPortalEvent(request, "desktop_download_clicked", productTelemetry(product))}>{t('Download Hatch Desktop')}</a></aside>
       </div>
       <section className="buyer-v2__timeline-section"><div><span className="buyer-v2__eyebrow">{t('Access history')}</span><h2>{t('Activity, without your private content.')}</h2><p>{t('Your purchase and access status stay visible on Web. Workspace paths, source files and conversations stay private.')}</p></div>{deliveries.length ? <Timeline entries={deliveries.map(deliveryTimelineEntry)} /> : <EmptyState compact title={t('No activity yet')} body="Open Hatch Desktop when you are ready to continue." />}</section>
     </div>
@@ -1141,21 +1178,11 @@ function normalizeSearch(value) {
 }
 
 function safeReturnTo(value) {
-  const candidate = canonicalWebPath(String(value || ""));
+  const candidate = String(value || "");
   if (!candidate.startsWith("/") || candidate.startsWith("//") || candidate.includes("\\") || /[\u0000-\u001f]/.test(candidate)) return EXPLORE_ROOT;
-  const pathname = candidate.split("?")[0].split("#")[0];
-  const allowed = pathname === "/"
-    || pathname === EXPLORE_ROOT
-    || pathname.startsWith("/creators/")
-    || pathname.startsWith("/products/")
-    || pathname.startsWith("/library")
-    || pathname.startsWith("/orders")
-    || pathname.startsWith("/checkout/")
-    || pathname === "/studio"
-    || pathname.startsWith("/studio/")
-    || pathname === ACCOUNT_ROOT
-    || pathname.startsWith("/account/");
-  return allowed ? candidate : EXPLORE_ROOT;
+  const destination = new URL(candidate, "https://hatch.invalid");
+  if (destination.origin !== "https://hatch.invalid") return EXPLORE_ROOT;
+  return `${destination.pathname}${destination.search}${destination.hash}`;
 }
 
 function navigateTo(navigate, to, options) {
@@ -1249,14 +1276,22 @@ function entitlementStatusLabel(status) {
   return ({ active: "Available", reserved: "In progress", pending: "Setting up", consumed: "Used", expired: "Expired", suspended: "Paused", revoked: "Access ended", none: "No access" })[status] || sentenceCase(status);
 }
 
-function entitlementSummary(value) {
+function entitlementSummary(value, product) {
   const status = accessStatus(value);
-  if (value?.access_mode === "unmetered") return value.summary || "Open Hatch Desktop with this account and choose a Workspace.";
+  const summary = product?.promise
+    || product?.product_promise
+    || product?.product_description
+    || product?.description
+    || product?.summary
+    || value?.product_promise
+    || value?.product_description
+    || value?.summary;
+  const desktopWorkspaceSummary = "Open Hatch Desktop with this account and choose a Workspace.";
   if (status === "reserved") return "Access setup is in progress.";
   if (status === "consumed") return "This access is no longer active.";
   if (status === "expired") return "This access has expired. Return to the Product to get access again.";
   if (["suspended", "revoked"].includes(status)) return value.status_reason_label || "Access is unavailable. Review the recovery details.";
-  return value.summary || "Open Hatch Desktop with this account and choose a Workspace.";
+  return summary && summary !== desktopWorkspaceSummary ? summary : null;
 }
 
 function orderAmount(order) { return numberOr(order?.total_minor, numberOr(order?.amount_minor, numberOr(order?.gross_minor, 0))); }
@@ -1369,12 +1404,6 @@ function dateTime(value, dateOnly = false) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
   return new Intl.DateTimeFormat("en-US", dateOnly ? { dateStyle: "medium" } : { dateStyle: "medium", timeStyle: "short" }).format(date);
-}
-
-function initialsFor(user) {
-  if (user?.initials) return user.initials;
-  const value = user?.display_name || user?.name || user?.email || "Account";
-  return value.split(/\s+|@/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "A";
 }
 
 function friendlyError(error) {

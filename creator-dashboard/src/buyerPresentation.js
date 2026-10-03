@@ -21,3 +21,9 @@ export function humanizeIdentifier(value) {
     .trim();
   return text ? `${text[0].toUpperCase()}${text.slice(1)}` : "Unknown";
 }
+
+export function accountInitials(user) {
+  if (user?.initials) return user.initials;
+  const value = user?.display_name || user?.name || user?.email || "Account";
+  return value.split(/\s+|@/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "A";
+}

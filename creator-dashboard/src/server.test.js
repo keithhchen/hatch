@@ -902,13 +902,28 @@ test("zero-value checkout creates an idempotent Agent Corpus order and entitleme
   assert.equal(replay.status, 200);
   assert.equal(dashboard.ledger.listEvents().length, 2);
 
+  await new Promise((resolve) => setTimeout(resolve, 20));
   const secondPurchase = await checkout("legacy-free-checkout-two");
   const secondBody = await secondPurchase.json();
   assert.equal(secondPurchase.status, 201);
   assert.notEqual(secondBody.order.order_id, firstBody.order.order_id);
   assert.notEqual(secondBody.entitlement.entitlement_id, firstBody.entitlement.entitlement_id);
+  assert.ok(Date.parse(secondBody.entitlement.granted_at) > Date.parse(firstBody.entitlement.granted_at));
   assert.equal(dashboard.ledger.listEvents().filter((event) => event.event_type === "order.placed").length, 2);
   assert.equal(dashboard.ledger.listEvents().filter((event) => event.event_type === "entitlement.granted").length, 2);
+
+  const newestPageResponse = await fetch(`${serverUrl(api)}/v1/library?status=active&limit=1`, {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  const newestPage = await newestPageResponse.json();
+  assert.equal(newestPageResponse.status, 200);
+  assert.equal(newestPage.entitlements[0].entitlement_id, secondBody.entitlement.entitlement_id);
+  const olderPageResponse = await fetch(`${serverUrl(api)}/v1/library?status=active&limit=1&cursor=${encodeURIComponent(newestPage.next_cursor)}`, {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  const olderPage = await olderPageResponse.json();
+  assert.equal(olderPageResponse.status, 200);
+  assert.equal(olderPage.entitlements[0].entitlement_id, firstBody.entitlement.entitlement_id);
 });
 
 test("V2 checkout session persists a free receipt and entitlement detail", async (context) => {

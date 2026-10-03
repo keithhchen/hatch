@@ -42,6 +42,8 @@
 .hatch-brand__mark { display: block; width: 30px; height: 30px; flex: 0 0 auto; }
 .hatch-brand__wordmark { display: block; width: auto; height: 1em; font-size: var(--hatch-type-title); line-height: 1; }
 .hatch-brand__wordmark-image { display: block; width: auto; height: 100%; }
+.hatch-brand__lockup { display: block; width: auto; height: 30px; flex: 0 0 auto; }
+.hui-heading--display { color: var(--hui-ink); font-family: var(--hui-font-display); font-weight: var(--hui-weight-regular); letter-spacing: var(--hatch-display-tracking); line-height: var(--hatch-display-leading); }
 
 .hui-atmospheric-paper {
   position: relative;
@@ -402,11 +404,12 @@
 .hui-state p { max-width: 420px; margin: 0 0 18px; font-size: var(--hatch-type-ui); line-height: 1.55; }
 .hui-state.is-error > svg { color: var(--hui-danger); }
 
-.hui-avatar { display: inline-grid; flex: 0 0 auto; place-items: center; overflow: hidden; border-radius: 36%; color: #fffaf3; background: var(--hui-accent); font-size: var(--hatch-type-ui); font-weight: var(--hui-weight-medium); box-shadow: inset 0 0 0 1px rgba(255,255,255,.28); }
+.hui-avatar { display: inline-grid; flex: 0 0 auto; place-items: center; overflow: hidden; border-radius: 50%; clip-path: circle(closest-side at center); color: #fffaf3; background: var(--hui-accent); font-family: var(--hatch-font-display); font-size: var(--hatch-type-ui); font-weight: var(--hui-weight-regular); box-shadow: inset 0 0 0 1px rgba(255,255,255,.28); }
 .hui-avatar.is-small { width: 26px; height: 26px; }
 .hui-avatar.is-medium { width: 34px; height: 34px; }
 .hui-avatar.is-large { width: 48px; height: 48px; font-size: var(--hatch-type-ui); }
 .hui-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.hui-avatar__fallback { display: grid; width: 100%; height: 100%; place-items: center; color: #fff; background: #000; font-family: var(--hatch-font-display); font-weight: var(--hui-weight-regular); line-height: 1; }
 .hui-avatar-group { display: flex; padding-left: 7px; }
 .hui-avatar-group .hui-avatar { margin-left: -7px; box-shadow: 0 0 0 2px var(--hui-panel); }
 .hui-avatar-more { background: #83796e; }

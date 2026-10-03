@@ -1,7 +1,7 @@
 const MESSAGES = {
   en: {
     research: 'Deep Research', voice: 'Voice Interview', generation: 'Agent Builder', generationShort: 'Builder', caseGeneration: 'Case Builder', caseShort: 'Cases', evaluator: 'Evaluator',
-    researchDescription: 'Finds primary evidence and reconstructs how the expert actually thinks.', voiceDescription: 'Learns the person behind the work through stories, influences, values, taste, and trade-offs.', generationDescription: 'Turns the evidence into an executable expert Agent.', caseDescription: 'Builds one realistic client situation that demands expert judgment.', evaluatorDescription: 'Runs the selected Agent and judges what its result gets right and wrong.',
+    researchDescription: 'Finds primary evidence and reconstructs how the expert actually thinks.', voiceDescription: 'Learns the person behind the work through stories, influences, values, taste, and trade-offs.', generationDescription: 'Turns the evidence into an executable expert Agent.', caseDescription: 'Builds one realistic client situation that demands expert judgment.', evaluatorDescription: 'Finds the few changes that matter most and calibrates them with the Creator.',
     idle: 'Waiting for input', running: 'Working', completed: 'Turn complete', failed: 'Run failed', interrupted: 'Stopped',
     chats: 'Chats', newChat: '+ New chat', currentChat: 'Current chat', selectChat: 'Select a chat', progressUnreported: 'Progress not reported', startChat: 'Start a chat', workspaceConnectionLost: 'Connection paused. Reconnecting…', loadingWorkspace: 'Loading workspace…',
     chat: 'Chat', files: 'Files', workspacePanels: 'Workspace panels', taskProgress: 'Task progress', awaitingReport: 'Awaiting report', previousProgress: n => `Previous ${n}%`, startChatHeading: 'Start chatting', agent: 'Agent', you: 'You',
@@ -16,7 +16,7 @@ const MESSAGES = {
   },
   zh: {
     research: '深度研究', voice: '语音访谈', generation: 'Agent 构建', generationShort: '构建', caseGeneration: '案例构建', caseShort: '案例', evaluator: '效果评估',
-    researchDescription: '寻找一手证据，还原专家真正如何思考和判断。', voiceDescription: '通过故事、影响、价值取舍、审美与矛盾，认识工作背后的完整的人。', generationDescription: '把研究证据变成可执行的专家 Agent。', caseDescription: '构造一个真正需要专家判断的现实客户情境。', evaluatorDescription: '运行选中的 Agent，判断结果真正做对和做错了什么。',
+    researchDescription: '寻找一手证据，还原专家真正如何思考和判断。', voiceDescription: '通过故事、影响、价值取舍、审美与矛盾，认识工作背后的完整的人。', generationDescription: '把研究证据变成可执行的专家 Agent。', caseDescription: '构造一个真正需要专家判断的现实客户情境。', evaluatorDescription: '找出最影响客户结果的少数错位，请 Creator 一起校准。',
     idle: '等待输入', running: '工作中', completed: '本轮结束', failed: '运行失败', interrupted: '已停止', chats: '聊天', newChat: '＋ 新建聊天', currentChat: '当前聊天', selectChat: '选择聊天', progressUnreported: '完成度待报告', startChat: '开始一个聊天', workspaceConnectionLost: '连接暂时中断，正在恢复。', loadingWorkspace: '正在读取工作区…',
     chat: '聊天', files: '文件', workspacePanels: '工作区面板', taskProgress: '任务完成度', awaitingReport: '待报告', previousProgress: n => `上轮 ${n}%`, startChatHeading: '开始聊天', agent: 'Agent', you: '你', callingTool: name => `正在调用 ${name}`, thinking: '正在思考', compacting: '正在整理上下文', toolErrorContinuing: name => `${name} 返回错误，Agent 正在处理`, continuing: '继续工作', toolCalls: n => `${n} 个工具调用`, reconnecting: '连接中断，正在重新连接', working: '正在工作',
     messageLabel: '给 Agent 的消息', messagePlaceholder: role => ({ research: '告诉 Agent 你是谁、做什么，以及它可以在哪里找到你的公开资料…', voice: '从你的经历、影响、价值取舍、审美和矛盾讲起，让 Agent 认识完整的你…', generation: '查看 Agent 构建的结果，或指出需要调整的地方…', 'case-generation': '查看 Agent 构建的客户案例，或指出哪里不符合真实情况…', evaluator: '告诉 Agent 这份结果哪里需要改进…' }[role] ?? '告诉 Agent 你希望它完成什么…'), askUserTitle: '需要你回答', askUserDescription: 'Agent 需要你的输入才能继续。', askUserOtherPlaceholder: '或者直接写下你的回答…', askUserSubmit: '继续', askUserSubmitting: '正在继续…', stop: '停止', send: '发送', fileReference: path => `文件：${path}`, fileTooLarge: name => `${name} 超过 20 MiB`, fileCount: n => `${n} 份文件`, manualUploads: '手动上传', attachments: '附件', addFiles: '＋ 添加文件', uploadInputFiles: '上传输入文件', removeFile: path => `移除 ${path}`, deleteFile: '删除文件', dropFiles: '拖入文件', outputs: '输出', noFiles: '暂无文件', chooseFile: '选择文件', unsupportedFileType: name => `${name} 不是支持的文件类型`, uploadProcessing: '正在上传并转换…', uploadComplete: '已完成', uploadFailed: '失败',
@@ -26,7 +26,7 @@ const MESSAGES = {
   },
   ja: {
     research: '深掘り調査', voice: '音声インタビュー', generation: 'Agent 構築', generationShort: '構築', caseGeneration: 'ケース構築', caseShort: 'ケース', evaluator: '効果評価',
-    researchDescription: '一次情報を集め、専門家が実際にどう考え判断するかを再現します。', voiceDescription: '物語、影響、価値観、美意識、葛藤から、仕事の背後にいる人物全体を理解します。', generationDescription: '調査の根拠を、実行可能な専門家 Agent に変換します。', caseDescription: '専門家の判断が本当に必要になる現実的な顧客状況を作ります。', evaluatorDescription: '選択した Agent を実行し、結果の良し悪しを実質的に評価します。',
+    researchDescription: '一次情報を集め、専門家が実際にどう考え判断するかを再現します。', voiceDescription: '物語、影響、価値観、美意識、葛藤から、仕事の背後にいる人物全体を理解します。', generationDescription: '調査の根拠を、実行可能な専門家 Agent に変換します。', caseDescription: '専門家の判断が本当に必要になる現実的な顧客状況を作ります。', evaluatorDescription: '結果を大きく変える少数のずれを見つけ、Creator と校正します。',
     idle: '入力待ち', running: '作業中', completed: 'ターン完了', failed: '実行失敗', interrupted: '停止済み', chats: 'チャット', newChat: '＋ 新規チャット', currentChat: '現在のチャット', selectChat: 'チャットを選択', progressUnreported: '進捗未報告', startChat: 'チャットを開始', workspaceConnectionLost: '接続が一時中断しました。復旧しています。', loadingWorkspace: 'ワークスペースを読み込み中…',
     chat: 'チャット', files: 'ファイル', workspacePanels: 'ワークスペースパネル', taskProgress: 'タスク進捗', awaitingReport: '報告待ち', previousProgress: n => `前回 ${n}%`, startChatHeading: 'チャットを始める', agent: 'Agent', you: 'あなた', callingTool: name => `${name} を呼び出しています`, thinking: '考えています', compacting: 'コンテキストを整理しています', toolErrorContinuing: name => `${name} でエラーが発生しました。Agent が処理しています。`, continuing: '作業を続けています', toolCalls: n => `${n} 件のツール呼び出し`, reconnecting: '接続が切れました。再接続しています。', working: '作業中',
     messageLabel: 'Agent へのメッセージ', messagePlaceholder: role => ({ research: 'あなたが誰で、何をしていて、公開情報をどこで見つけられるかを Agent に伝えてください…', voice: '経験、影響、価値観、美意識、葛藤から、あなた全体を Agent に伝えてください…', generation: 'Agent が構築した結果を確認し、変更点を伝えてください…', 'case-generation': 'Agent が構築した顧客ケースを確認し、現実的でない点を伝えてください…', evaluator: 'この結果のどこを改善すべきか伝えてください…' }[role] ?? 'この Agent にしてほしいことを説明してください…'), askUserTitle: '確認したいこと', askUserDescription: '続ける前に、あなたの入力が必要です。', askUserOtherPlaceholder: 'または自由に入力してください…', askUserSubmit: '続ける', askUserSubmitting: '続けています…', stop: '停止', send: '送信', fileReference: path => `ファイル：${path}`, fileTooLarge: name => `${name} は 20 MiB を超えています`, fileCount: n => `${n} 件のファイル`, manualUploads: '手動アップロード', attachments: '添付', addFiles: '＋ ファイルを追加', uploadInputFiles: '入力ファイルをアップロード', removeFile: path => `${path} を削除`, deleteFile: 'ファイルを削除', dropFiles: 'ここにファイルをドロップ', outputs: '出力', noFiles: 'ファイルはまだありません', chooseFile: 'ファイルを選択', unsupportedFileType: name => `${name} は対応していないファイル形式です`, uploadProcessing: 'アップロードして変換中…', uploadComplete: '完了', uploadFailed: '失敗',
@@ -41,7 +41,7 @@ Object.assign(MESSAGES.en, {
   dependencyUpdated: name => `${name} updated`,
   overview: 'Overview', productOverview: 'Product overview', overviewDescription: 'Define what this product promises before you build the Agent.', productDetails: 'Product details', productName: 'Product name', productPromise: 'Product promise', save: 'Save changes', saving: 'Saving…', productDetailsSaved: 'Product details saved.',
   viewPublishedProduct: 'View product',
-  sourcesStage: 'Get to know the Creator', sourcesStageDescription: 'Let the Agent learn who the Creator is through conversation and public evidence.', generationStage: 'Generate Your Agent', generationStageDescription: 'Let the Agent turn what it learned into an executable way of working.', evaluationStage: 'Examine Your Agent', evaluationStageDescription: 'Review the examples, correct the weak spots, and decide whether this is ready to ship.', factoryPromise: 'Teach your Agent how to make decisions.', factoryPromiseDescription: 'Review the examples, correct the weak spots, and decide whether this is ready to ship.',
+  sourcesStage: 'Get to know you', sourcesStageDescription: 'Let the Agent learn who you are through conversation and public evidence.', generationStage: 'Generate Your Agent', generationStageDescription: 'Let the Agent turn what it learned into an executable way of working.', evaluationStage: 'Examine Your Agent', evaluationStageDescription: 'Review the examples, correct the weak spots, and decide whether this is ready to ship.', factoryPromise: 'Teach your Agent how to make decisions.', factoryPromiseDescription: 'Review the examples, correct the weak spots, and decide whether this is ready to ship.',
 });
 Object.assign(MESSAGES.zh, {
   callingTool: name => `正在${name}`, toolErrorContinuing: '这一步需要你的注意，Agent 将继续处理。', toolCalls: n => `${n} 个操作`, toolActionsCompleted: n => `${n} 个操作已完成`, toolWorkGather: '正在整理你的资料', toolWorkBuild: '正在构建 Agent 方法', toolWorkPublish: '正在准备发布这一版本', toolWorkMethod: '正在完善你的方法', toolActionList: '正在查看你的资料', toolActionRead: '正在研究你的判断方式', toolActionWrite: '正在保存新的方法规则', toolActionUpdateTodo: '正在更新工作计划', toolActionCorpusUpload: '正在准备发布这一版本', toolActionEvaluate: '正在检查结果是否符合你的标准', toolActionSearch: '正在寻找支持证据', toolActionUnknown: '正在完善你的方法', toolTechnicalDetails: '技术细节', toolFailed: '需要你的注意', toolCalling: '进行中',
@@ -49,7 +49,7 @@ Object.assign(MESSAGES.zh, {
   dependencyUpdated: name => `${name}已更新`,
   overview: '概览', productOverview: '产品简介', overviewDescription: '先定义这个产品要兑现的承诺，再开始构建 Agent。', productDetails: '产品信息', productName: '产品名称', productPromise: '产品承诺', save: '保存修改', saving: '保存中…', productDetailsSaved: '产品信息已保存。',
   viewPublishedProduct: '查看产品',
-  sourcesStage: '认识 Creator', sourcesStageDescription: '让 Agent 通过你的回答和公开资料认识 Creator。', generationStage: '生成你的 Agent', generationStageDescription: '让 Agent 把已经学到的内容变成可执行的工作方式。', evaluationStage: '检查你的 Agent', evaluationStageDescription: '查看案例、纠正薄弱部分，然后决定是否可以发布。', factoryPromise: '让 Agent 学会你会如何判断。', factoryPromiseDescription: '查看案例、纠正薄弱部分，然后决定是否可以发布。',
+  sourcesStage: '认识你', sourcesStageDescription: '让 Agent 通过你的回答和公开资料认识你。', generationStage: '生成你的 Agent', generationStageDescription: '让 Agent 把已经学到的内容变成可执行的工作方式。', evaluationStage: '检查你的 Agent', evaluationStageDescription: '查看案例、纠正薄弱部分，然后决定是否可以发布。', factoryPromise: '让 Agent 学会你会如何判断。', factoryPromiseDescription: '查看案例、纠正薄弱部分，然后决定是否可以发布。',
 });
 Object.assign(MESSAGES.ja, {
   callingTool: name => `${name} を進めています`, toolErrorContinuing: 'このステップには確認が必要です。Agent は続行します。', toolCalls: n => `${n} 件のアクション`, toolActionsCompleted: n => `${n} 件のアクションが完了`, toolWorkGather: '資料を集めています', toolWorkBuild: 'Agent の方法を構築しています', toolWorkPublish: 'このバージョンを公開する準備をしています', toolWorkMethod: 'あなたの方法を整えています', toolActionList: '資料を確認しています', toolActionRead: '判断方法を学んでいます', toolActionWrite: '新しい方法ルールを保存しています', toolActionUpdateTodo: '作業計画を更新しています', toolActionCorpusUpload: 'このバージョンを公開する準備をしています', toolActionEvaluate: '結果が基準に合うか確認しています', toolActionSearch: '根拠を探しています', toolActionUnknown: 'あなたの方法を整えています', toolTechnicalDetails: '技術情報', toolFailed: '確認が必要です', toolCalling: '進行中',
@@ -57,8 +57,35 @@ Object.assign(MESSAGES.ja, {
   dependencyUpdated: name => `${name}を更新`,
   overview: '概要', productOverview: 'プロダクト概要', overviewDescription: 'Agent を構築する前に、このプロダクトが約束することを定義します。', productDetails: 'プロダクト情報', productName: 'プロダクト名', productPromise: 'プロダクトの約束', save: '変更を保存', saving: '保存中…', productDetailsSaved: 'プロダクト情報を保存しました。',
   viewPublishedProduct: 'プロダクトを見る',
-  sourcesStage: 'Creator を知る', sourcesStageDescription: '会話と公開情報を通じて、Agent が Creator を理解します。', generationStage: 'Agent を生成する', generationStageDescription: '学んだ内容を、実行可能な仕事の進め方に変えます。', evaluationStage: 'Agent を確認する', evaluationStageDescription: '実例を確認し、弱い部分を直して、公開できるか判断します。', factoryPromise: 'Agent にあなたの判断方法を教える。', factoryPromiseDescription: '実例を確認し、弱い部分を直して、公開できるか判断します。',
+  sourcesStage: 'あなたを知る', sourcesStageDescription: '会話と公開情報を通じて、Agent があなたを理解します。', generationStage: 'Agent を生成する', generationStageDescription: '学んだ内容を、実行可能な仕事の進め方に変えます。', evaluationStage: 'Agent を確認する', evaluationStageDescription: '実例を確認し、弱い部分を直して、公開できるか判断します。', factoryPromise: 'Agent にあなたの判断方法を教える。', factoryPromiseDescription: '実例を確認し、弱い部分を直して、公開できるか判断します。',
 });
+
+const evaluatorStartMessage = {
+  en: 'Run the full case call. Find the 1–3 highest-leverage contradictions, improvements, or open questions, ask me to assess them in one askuser batch, then record my calibration and stop.',
+  zh: '请重新运行一次完整的案例调用，找出 1–3 个最影响结果的核心矛盾、改进点或疑问点，用一次 askuser 让我评估；收到我的回答后记录校准结果并停止。',
+  ja: '完全なケース呼び出しを実行し、結果を大きく変える 1〜3 個の矛盾・改善点・疑問を見つけ、一度の askuser で私に評価させてください。回答後は校正結果を記録して停止してください。',
+};
+for (const [locale, text] of Object.entries(evaluatorStartMessage)) {
+  const messages = MESSAGES[locale];
+  const previous = messages.startAgentMessage;
+  messages.startAgentMessage = role => role === 'evaluator' ? text : previous(role);
+}
+const evaluatorUpdateMessage = {
+  en: 'The Agent was updated. Rerun the full case call. Find the 1–3 highest-leverage contradictions, improvements, or open questions, ask me to assess them in one askuser batch, then record my calibration and stop.',
+  zh: 'Agent 已更新。请重新运行一次完整的案例调用，找出 1–3 个最影响结果的核心矛盾、改进点或疑问点，用一次 askuser 让我评估；收到我的回答后记录校准结果并停止。',
+  ja: 'Agent が更新されました。完全なケース呼び出しを再実行し、結果を大きく変える 1〜3 個の矛盾・改善点・疑問を見つけ、一度の askuser で私に評価させてください。回答後は校正結果を記録して停止してください。',
+};
+for (const [locale, text] of Object.entries(evaluatorUpdateMessage)) {
+  const messages = MESSAGES[locale];
+  const previous = messages.useLatestMessage;
+  messages.useLatestMessage = role => role === 'evaluator' ? text : previous;
+}
+MESSAGES.en.toolActionEvaluate = 'Surfacing high-leverage gaps';
+MESSAGES.zh.toolActionEvaluate = '正在找出最需要你批改的关键问题';
+MESSAGES.ja.toolActionEvaluate = '最も重要なずれを見つけています';
+MESSAGES.en.startAgentLabel = role => role === 'evaluator' ? 'Agent updated — rerun the full call and let me assess it' : 'Start Agent';
+MESSAGES.zh.startAgentLabel = role => role === 'evaluator' ? 'Agent 已更新，重新运行一次完整的调用并让我评估' : '开始 Agent';
+MESSAGES.ja.startAgentLabel = role => role === 'evaluator' ? 'Agent が更新されました。完全な呼び出しを再実行して私に評価させる' : 'Agent を開始';
 delete MESSAGES.en.toolReturned;
 delete MESSAGES.zh.toolReturned;
 delete MESSAGES.ja.toolReturned;

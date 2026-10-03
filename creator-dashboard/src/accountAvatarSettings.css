@@ -1,0 +1,10 @@
+.account-avatar-settings { display: flex; align-items: center; gap: 20px; padding: 24px 0; border-bottom: 1px solid var(--buyer-border-subtle); }
+.hui-avatar.account-avatar-settings__image { width: 72px; height: 72px; min-width: 72px; flex: 0 0 72px; aspect-ratio: 1; border: 2px solid rgba(255,255,255,.94); box-shadow: 0 4px 14px rgba(69,49,35,.13); }
+.account-avatar-settings__content { min-width: 0; }
+.account-avatar-settings__content h3 { margin: 0 0 5px; font-size: var(--hatch-type-ui); font-weight: 650; }
+.account-avatar-settings__content p { margin: 0; color: var(--buyer-muted); font-size: var(--hatch-type-meta); line-height: 1.55; }
+.account-avatar-settings__actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 13px; }
+.account-avatar-settings__actions input { display: none; }
+.account-avatar-settings__content .account-avatar-settings__status { margin-top: 9px; color: #346149; }
+.account-avatar-settings__content .account-avatar-settings__error { margin-top: 9px; color: var(--hui-danger, #9b3526); }
+@media (max-width: 540px) { .account-avatar-settings { align-items: flex-start; gap: 14px; } .hui-avatar.account-avatar-settings__image { width: 58px; height: 58px; min-width: 58px; flex-basis: 58px; } }

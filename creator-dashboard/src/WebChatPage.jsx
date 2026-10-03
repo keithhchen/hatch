@@ -1,0 +1,660 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, ArrowUp, ChevronDown, ChevronUp, CircleAlert, Image, LoaderCircle, Paperclip, Plus, RotateCw, Sparkles, Square, X } from "lucide-react";
+import { Avatar, HatchBrand, Select } from "@hatch/ui";
+import { WebChatImageViewer } from "./components/WebChatImageViewer.jsx";
+import { WebChatMessageResponse } from "./WebChatMessageResponse.jsx";
+import { BuyerAccountMenu } from "./BuyerAccountControls.jsx";
+import { useLocale, documentLanguage } from "./locale.jsx";
+import { BrowserImageAttachments, WebChatClient } from "./webChatClient.js";
+import { WebChatPresentationError, webChatErrorText, webChatT } from "./webChatI18n.js";
+import { WebChatSnapshotReconciler } from "./webChatSnapshotReconciler.js";
+import { groupTimelineEntries, PendingWebSubmission, WebChatTimeline } from "./webChatTimeline.js";
+import "./webChat.css";
+
+const LOAD_EARLIER_CONVERSATIONS = "__load-earlier-conversations__";
+
+function conversationDate(value, locale) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat(documentLanguage(locale), { month: "short", day: "numeric" }).format(date);
+}
+
+function isImeConfirmation(event) {
+  return event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
+}
+
+function TaskBriefDropdown({ snapshot, t }) {
+  const detailsRef = useRef(null);
+
+  useEffect(() => {
+    const closeOnOutsidePointer = event => {
+      const details = detailsRef.current;
+      if (details?.open && !details.contains(event.target)) details.open = false;
+    };
+    const closeOnEscape = event => {
+      const details = detailsRef.current;
+      if (event.key !== "Escape" || !details?.open) return;
+      details.open = false;
+      details.querySelector("summary")?.focus();
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, []);
+
+  if (!snapshot?.fields?.length) return null;
+  return <details ref={detailsRef} className="web-chat__task-brief">
+    <summary aria-label={t("taskBrief")}><span>{t("taskBrief")}</span><ChevronDown aria-hidden="true" /></summary>
+    <div className="web-chat__task-brief-panel" role="group" aria-label={t("taskBrief")}><dl className="web-chat__task-brief-fields">
+      {snapshot.fields.map(field => <div className="web-chat__task-brief-field" key={field.id}>
+        <dt>{field.label}</dt>
+        <dd>{field.value || t("notProvided")}</dd>
+      </div>)}
+    </dl></div>
+  </details>;
+}
+
+function WebChatAccountControls({ profile, navigate, onSignOut }) {
+  const { locale } = useLocale();
+  const [signingOut, setSigningOut] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function signOut() {
+    if (signingOut) return;
+    setSigningOut(true);
+    setError(null);
+    try {
+      await onSignOut();
+    } catch (cause) {
+      setError(cause);
+    } finally {
+      setSigningOut(false);
+    }
+  }
+
+  return <>
+    <div className="buyer-account-controls buyer-account-controls--chat">
+      <BuyerAccountMenu user={profile} onSignOut={() => void signOut()} signingOut={signingOut} showLanguageOptions />
+    </div>
+    {error ? <p className="web-chat__account-error" role="alert">{webChatErrorText(error, locale)}</p> : null}
+  </>;
+}
+
+function WebChatTimelineEntry({ entry, client, conversationId, locale, t, isAnimating = false }) {
+  if (entry.kind === "text") {
+    return <div className="web-chat__content" key={entry.id}><WebChatMessageResponse isAnimating={isAnimating}>{entry.content}</WebChatMessageResponse></div>;
+  }
+  if (entry.kind === "status") {
+    return <div className="web-chat__runtime-status" key={entry.id}><Sparkles aria-hidden="true" /><span>{entry.content}</span></div>;
+  }
+  if (entry.kind === "activity_group") {
+    const inProgress = entry.entries.some(activity => activity.streaming || activity.status === "requested");
+    const failed = entry.entries.some(activity => activity.status === "failed");
+    const summaryState = failed ? t("needsAttention") : inProgress ? t("activityInProgress") : t("activityComplete");
+    return <details className="web-chat__activity-accordion" key={entry.id} defaultOpen={inProgress}>
+      <summary aria-label={t("activityGroupLabel", { count: entry.entries.length })}>
+        <Sparkles aria-hidden="true" />
+        <span>{t("activityBlocks", { count: entry.entries.length })}</span>
+        <span className="web-chat__activity-accordion-state">{summaryState}</span>
+        <ChevronDown aria-hidden="true" />
+      </summary>
+      <div className="web-chat__activity-accordion-items">
+        {entry.entries.map(activity => <WebChatActivityBlock key={activity.id} entry={activity} client={client} conversationId={conversationId} locale={locale} t={t} />)}
+      </div>
+    </details>;
+  }
+  return <WebChatActivityBlock key={entry.id} entry={entry} client={client} conversationId={conversationId} locale={locale} t={t} />;
+}
+
+function WebChatActivityBlock({ entry, client, conversationId, locale, t }) {
+  if (entry.kind === "thinking") {
+    return <article className="web-chat__activity-block web-chat__activity-block--thinking" aria-label={t("thinking")}>
+      <div className="web-chat__activity-heading"><Sparkles aria-hidden="true" /><strong>{t("thinking")}</strong>{entry.streaming ? <span className="web-chat__activity-live">{t("activityInProgress")}</span> : null}</div>
+      {entry.content ? <div className="web-chat__activity-content">{entry.content}</div> : null}
+    </article>;
+  }
+  return <WebChatToolActivity entry={entry} client={client} conversationId={conversationId} locale={locale} t={t} />;
+}
+
+function WebChatToolActivity({ entry, client, conversationId, locale, t }) {
+  const [detail, setDetail] = useState(null);
+  const [detailError, setDetailError] = useState("");
+  const [detailLoading, setDetailLoading] = useState(false);
+  const statusKeys = { requested: "toolRunning", completed: "toolCompleted", failed: "toolFailed", cancelled: "toolCancelled" };
+  const label = entry.toolName.replaceAll("_", " ");
+  const loadDetail = async () => {
+    if (!entry.detailRef || detail || detailLoading) return;
+    setDetailLoading(true);
+    setDetailError("");
+    try {
+      const payload = await client.toolDetail(conversationId, entry.detailRef.run_id, entry.detailRef.tool_call_id);
+      setDetail(payload.tool);
+    } catch (cause) {
+      setDetailError(cause.message);
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+  const argumentsValue = detail?.arguments ?? entry.arguments;
+  const resultValue = detail?.result ?? entry.result ?? entry.error;
+  return <article className={"web-chat__activity-block web-chat__activity-block--tool web-chat__activity-block--" + entry.status} aria-label={t("toolCall", { name: label })}>
+    <div className="web-chat__activity-heading"><span className="web-chat__tool-mark" aria-hidden="true">⌘</span><strong>{label}</strong><span className="web-chat__tool-status">{statusKeys[entry.status] ? t(statusKeys[entry.status]) : entry.status}</span></div>
+    {entry.error ? <p className="web-chat__tool-error">{webChatErrorText(entry.error, locale)}</p> : null}
+    {entry.detailRef || argumentsValue || resultValue ? <details className="web-chat__tool-details" onToggle={event => { if (event.currentTarget.open) void loadDetail(); }}>
+      <summary>{t("viewToolDetails")}</summary>
+      {detailLoading ? <span role="status">{t("loadingToolDetails")}</span> : null}
+      {detailError ? <span role="alert">{detailError}</span> : null}
+      <strong>{t("arguments")}</strong><pre>{JSON.stringify(argumentsValue ?? {}, null, 2)}</pre>
+      {resultValue !== undefined ? <><strong>{t("result")}</strong><pre>{JSON.stringify(resultValue, null, 2)}</pre></> : null}
+    </details> : null}
+  </article>;
+}
+
+export default function WebChatPage({ productId, request, navigate, profile, onSignOut }) {
+  const { locale } = useLocale();
+  const t = useCallback((key, values) => webChatT(locale, key, values), [locale]);
+  const [access, setAccess] = useState(null);
+  const [conversations, setConversations] = useState([]);
+  const [conversationCursor, setConversationCursor] = useState(null);
+  const [conversationId, setConversationId] = useState("");
+  const [messages, setMessages] = useState([]);
+  const [historyCursor, setHistoryCursor] = useState(null);
+  const [draft, setDraft] = useState("");
+  const [images, setImages] = useState([]);
+  const [status, setStatus] = useState({ key: "loading" });
+  const [error, setError] = useState(null);
+  const [activeRun, setActiveRun] = useState(null);
+  const [connectionVersion, setConnectionVersion] = useState(0);
+  const [liveTimeline, setLiveTimeline] = useState([]);
+  const [briefOpen, setBriefOpen] = useState(false);
+  const [briefAnswers, setBriefAnswers] = useState({});
+  const localeRef = useRef(locale);
+  localeRef.current = locale;
+  const conversationRef = useRef(conversationId);
+  conversationRef.current = conversationId;
+  const socketRef = useRef(null);
+  const runRef = useRef(null);
+  const pendingSubmissionRef = useRef(null);
+  const taskStartRef = useRef(null);
+  const liveTimelineRef = useRef(new WebChatTimeline());
+  const visibleMessagesRef = useRef([]);
+  const snapshotReconcilerRef = useRef(new WebChatSnapshotReconciler());
+  const terminalRunRef = useRef(null);
+  const messagesRef = useRef(null);
+  const draftRef = useRef(null);
+  const briefTriggerRef = useRef(null);
+  const briefDialogRef = useRef(null);
+  const followOutputRef = useRef(true);
+
+  const client = useMemo(() => access ? new WebChatClient(request, access.entitlement_id) : null, [access, request]);
+  const updateMessages = useCallback(update => {
+    const next = typeof update === "function" ? update(visibleMessagesRef.current) : update;
+    visibleMessagesRef.current = next;
+    setMessages(next);
+    return next;
+  }, []);
+
+  const updateLiveTimeline = useCallback(update => {
+    const items = update(liveTimelineRef.current);
+    const runId = runRef.current?.id;
+    setLiveTimeline(items);
+    updateMessages(current => current.map(message => message.transient && message.run_id === runId
+      ? { ...message, timeline: items }
+      : message));
+  }, [updateMessages]);
+
+  const statusText = status.text ?? t(status.key);
+  const errorText = webChatErrorText(error, locale);
+  const refresh = useCallback(async (id) => {
+    const snapshot = await client.snapshot(id);
+    if (conversationRef.current !== id) return { snapshot, messages: visibleMessagesRef.current, stale: true };
+    if (snapshot.conversation?.id !== id) throw new WebChatPresentationError("historyIdentityMismatch");
+    const reconciliation = snapshotReconcilerRef.current.reconcile(id, visibleMessagesRef.current, snapshot);
+    if (!reconciliation.accepted) return { snapshot, messages: reconciliation.messages, stale: true };
+    const briefSnapshot = snapshot.conversation?.brief_snapshot;
+    if (briefSnapshot) setConversations(current => current.map(item => item.id === id ? { ...item, brief_snapshot: briefSnapshot } : item));
+    setHistoryCursor(current => current ?? snapshot.before_cursor ?? null);
+    const running = snapshot.runs?.find(run => ["queued", "running", "waiting_for_tool", "waiting_for_approval"].includes(run.status));
+    let projectedMessages = reconciliation.messages;
+    if (running && !projectedMessages.some(message => message.run_id === running.id && message.role === "assistant")) {
+      projectedMessages = updateMessages([...projectedMessages, WebChatTimeline.streamingAssistantMessage(running.id)]);
+      if (runRef.current?.id !== running.id) runRef.current = { id: running.id };
+    } else {
+      updateMessages(projectedMessages);
+    }
+    const terminal = terminalRunRef.current;
+    const terminalMessage = terminal && projectedMessages.some(message => (
+      message.run_id === terminal.id && message.role === "assistant" && !message.transient
+    ));
+    if (terminalMessage) {
+      terminalRunRef.current = null;
+      liveTimelineRef.current.reset();
+      setLiveTimeline([]);
+      setActiveRun(running?.id ?? null);
+      setStatus({ key: running ? "agentReplying" : "connected" });
+    } else if (terminal?.failed) {
+      terminalRunRef.current = null;
+      updateMessages(current => current.filter(message => !(message.transient && message.run_id === terminal.id && message.role === "assistant")));
+      liveTimelineRef.current.reset();
+      setLiveTimeline([]);
+      setActiveRun(running?.id ?? null);
+      setStatus({ key: running ? "agentReplying" : "connected" });
+    } else if (terminal) {
+      setActiveRun(terminal.id);
+      setStatus({ key: "syncingReply" });
+    } else {
+      setActiveRun(running?.id ?? null);
+      setStatus({ key: running ? "agentReplying" : "connected" });
+    }
+    return { snapshot, messages: projectedMessages, stale: false };
+  }, [client, updateMessages]);
+
+  const restoreSubmission = useCallback(submission => {
+    if (!submission) return;
+    updateMessages(current => current.filter(message => message.id !== submission.optimisticMessageId
+      && !(message.transient && message.run_id === submission.runId && message.role === "assistant")));
+    setDraft(submission.content);
+    setImages(submission.imageFiles);
+    if (runRef.current?.id === submission.runId) runRef.current = null;
+    if (pendingSubmissionRef.current === submission) pendingSubmissionRef.current = null;
+    liveTimelineRef.current.reset();
+    setLiveTimeline([]);
+    setActiveRun(null);
+  }, [updateMessages]);
+
+  useEffect(() => {
+    let live = true;
+    setAccess(null);
+    setConversations([]);
+    setConversationId("");
+    setStatus({ key: "checkingSubscription" });
+    request("/v1/user/product-access").then(async payload => {
+      const entitlement = payload.creator_agents?.find(entry => entry.product_id === productId);
+      if (!entitlement) throw new WebChatPresentationError("noAgentAccess");
+      const page = await new WebChatClient(request, entitlement.entitlement_id).list();
+      if (!live) return;
+      setAccess(entitlement);
+      setConversations(page.conversations ?? []);
+      setConversationCursor(page.next_cursor ?? null);
+      setConversationId(page.conversations?.[0]?.id ?? "");
+      setStatus({ key: page.conversations?.length ? "loadingConversation" : "startChatToBegin" });
+    }).catch(cause => { if (live) { setError(cause); setStatus({ key: "unableToOpenChat" }); } });
+    return () => { live = false; };
+  }, [productId, request]);
+
+  useEffect(() => {
+    if (!access || !conversationId) return undefined;
+    let live = true;
+    const connection = client.openRuntime(conversationId);
+    const socket = connection.socket;
+    socketRef.current = connection;
+    runRef.current = null;
+    terminalRunRef.current = null;
+    snapshotReconcilerRef.current.reset(conversationId);
+    liveTimelineRef.current.reset();
+    setLiveTimeline([]);
+    setHistoryCursor(null);
+    updateMessages([]);
+    setStatus({ key: "connecting" });
+    socket.onopen = () => connection.hello();
+    socket.onmessage = async event => {
+      const message = JSON.parse(event.data);
+      if (message.type === "tool_call.request") {
+        if (message.run_id === runRef.current?.id) {
+          const failedTool = { ...message, locality: "client", status: "failed", error: { code: "web_local_tool_unavailable" } };
+          updateLiveTimeline(timeline => timeline.upsertTool(failedTool));
+          connection.toolResult(message.run_id, message.tool_call_id, { ...failedTool.error, message: webChatErrorText(failedTool.error, localeRef.current) });
+        }
+        return;
+      }
+      if (message.type === "session.ready") {
+        if (message.conversation_id !== conversationId) { socket.close(); setError(new WebChatPresentationError("conversationIdentityMismatch")); return; }
+        try {
+          await refresh(conversationId);
+          const pending = pendingSubmissionRef.current;
+          if (pending?.conversationId === conversationId) {
+            try {
+              const receipt = await client.receipt(conversationId, pending.runId);
+              if (receipt.submission?.client_message_id === pending.clientMessageId) {
+                pendingSubmissionRef.current = null;
+                setDraft(""); setImages([]);
+                await refresh(conversationId);
+              } else {
+                restoreSubmission(pending);
+              }
+            } catch (cause) {
+              if (cause.status === 404) restoreSubmission(pending);
+              else throw cause;
+            }
+          }
+          if (taskStartRef.current === conversationId) {
+            taskStartRef.current = null;
+            const runId = `run_${crypto.randomUUID().replaceAll("-", "")}`;
+            runRef.current = { id: runId };
+            liveTimelineRef.current.reset();
+            setLiveTimeline([]);
+            updateMessages(current => [...current, WebChatTimeline.streamingAssistantMessage(runId)]);
+            setActiveRun(runId);
+            setStatus({ key: "sending" });
+            connection.message({ runId, clientMessageId: `message_${crypto.randomUUID().replaceAll("-", "")}`, taskStart: true });
+          }
+        } catch (cause) { if (live) setError(cause); }
+        return;
+      }
+      if (message.type === "message.accepted" && message.run_id === runRef.current?.id) {
+        const submission = pendingSubmissionRef.current;
+        pendingSubmissionRef.current = null;
+        if (submission) updateMessages(current => current.map(entry => entry.id === submission.optimisticMessageId ? { ...entry, optimistic: false, provisional: true } : entry));
+        setDraft(""); setImages([]);
+        return;
+      }
+      if (message.type === "assistant.delta" && message.run_id === runRef.current?.id) {
+        if (message.delta?.kind === "text") {
+          updateLiveTimeline(timeline => timeline.appendText(message.delta.content));
+          setStatus({ key: "agentReplying" });
+        } else if (message.delta?.kind === "thinking_start") {
+          updateLiveTimeline(timeline => timeline.startThinking(message.delta.contentIndex));
+          setStatus({ key: "agentReplying" });
+        } else if (message.delta?.kind === "thinking_delta") {
+          updateLiveTimeline(timeline => timeline.appendThinking(message.delta.contentIndex, message.delta.delta));
+          setStatus({ key: "agentReplying" });
+        } else if (message.delta?.kind === "thinking_end") {
+          updateLiveTimeline(timeline => timeline.finishThinking(message.delta.contentIndex, message.delta.content));
+        } else if (message.delta?.kind === "status" && message.delta.content) {
+          if (!liveTimelineRef.current.isRedundantToolStatus(message.delta.content)) {
+            updateLiveTimeline(timeline => timeline.updateRuntimeStatus(message.delta.content));
+            setStatus({ text: message.delta.content });
+          }
+        }
+        return;
+      }
+      if (message.type === "tool_call.delta" && message.run_id === runRef.current?.id) {
+        updateLiveTimeline(timeline => timeline.upsertTool(message));
+        return;
+      }
+      if ((message.type === "approval.request" || message.type === "approval.result") && message.run_id === runRef.current?.id) {
+        const toolStatus = message.type === "approval.request" ? "requested" : message.status === "denied" ? "failed" : "requested";
+        const approvalTool = {
+          ...message,
+          locality: "client",
+          status: message.type === "approval.request" ? "failed" : toolStatus,
+          ...(message.type === "approval.request" ? { error: { code: "browser_approval_unavailable" } } : {}),
+          ...(message.status === "denied" ? { error: message.reason ? { message: message.reason } : { code: "approval_denied" } } : {})
+        };
+        updateLiveTimeline(timeline => timeline.upsertTool(approvalTool));
+        if (message.type === "approval.request") connection.toolResult(message.run_id, message.tool_call_id, { ...approvalTool.error, message: webChatErrorText(approvalTool.error, localeRef.current) });
+        return;
+      }
+      if ((message.type === "turn.completed" || message.type === "turn.failed") && message.run_id === runRef.current?.id) {
+        const pending = pendingSubmissionRef.current;
+        if (pending?.runId === message.run_id) restoreSubmission(pending);
+        else terminalRunRef.current = { id: message.run_id, failed: message.type === "turn.failed" };
+        runRef.current = null;
+        if (message.type === "turn.failed") setError(message.error ?? new WebChatPresentationError("replyFailed"));
+        if (!pending) {
+          setActiveRun(message.run_id);
+          setStatus({ key: "syncingReply" });
+        }
+        try { await refresh(conversationId); } catch (cause) { if (live) setError(cause); }
+        return;
+      }
+      if (message.type === "session.error") {
+        const pending = pendingSubmissionRef.current;
+        if (pending?.runId === runRef.current?.id) restoreSubmission(pending);
+        setError(message.error ?? new WebChatPresentationError("connectionFailed"));
+      }
+    };
+    socket.onclose = () => { if (live) { const pending = pendingSubmissionRef.current; if (pending?.conversationId === conversationId) restoreSubmission(pending); setStatus({ key: "disconnected" }); setError(current => current || new WebChatPresentationError("disconnected")); socketRef.current = null; } };
+    socket.onerror = () => { if (live) { const pending = pendingSubmissionRef.current; if (pending?.conversationId === conversationId) restoreSubmission(pending); setError(new WebChatPresentationError("couldNotConnectRuntime")); } };
+    return () => { live = false; connection.close(); if (socketRef.current === connection) socketRef.current = null; };
+  }, [client, conversationId, refresh, connectionVersion, restoreSubmission, updateLiveTimeline, updateMessages]);
+
+  useEffect(() => {
+    const composer = draftRef.current;
+    if (composer) {
+      const maxHeight = Number.parseFloat(window.getComputedStyle(composer).maxHeight);
+      const heightLimit = Number.isFinite(maxHeight) ? maxHeight : 190;
+      composer.style.height = "auto";
+      composer.style.height = `${Math.min(composer.scrollHeight, heightLimit)}px`;
+      composer.style.overflowY = composer.scrollHeight > heightLimit ? "auto" : "hidden";
+    }
+    const viewport = messagesRef.current;
+    if (viewport && followOutputRef.current) viewport.scrollTop = viewport.scrollHeight;
+  }, [messages, status, liveTimeline, draft]);
+
+  useEffect(() => {
+    if (!briefOpen) {
+      briefTriggerRef.current?.focus({ preventScroll: true });
+      return undefined;
+    }
+    const closeOnEscape = event => {
+      if (event.key === "Escape") {
+        setBriefOpen(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const controls = briefDialogRef.current?.querySelectorAll("button:not(:disabled), textarea:not(:disabled), input:not(:disabled)");
+      if (!controls?.length) return;
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [briefOpen]);
+
+  useEffect(() => {
+    if (!activeRun || !conversationId || runRef.current?.id === activeRun) return undefined;
+    const timer = setInterval(() => { void refresh(conversationId).catch(cause => setError(cause)); }, 2000);
+    return () => clearInterval(timer);
+  }, [activeRun, conversationId, refresh]);
+
+  const createConversation = async (briefAnswersInput) => {
+    if (!access) return;
+    setError(null);
+    const result = await client.create(briefAnswersInput);
+    setConversations(current => [result.conversation, ...current]);
+    if (briefAnswersInput) taskStartRef.current = result.conversation.id;
+    setBriefOpen(false);
+    setConversationId(result.conversation.id);
+  };
+
+  const newConversation = event => {
+    const fields = access?.brief_spec?.fields ?? access?.product?.brief_spec?.fields;
+    if (fields?.length) { briefTriggerRef.current = event?.currentTarget ?? null; setBriefAnswers({}); setBriefOpen(true); return; }
+    void createConversation().catch(cause => setError(cause));
+  };
+
+  const submitBrief = event => {
+    event.preventDefault();
+    const fields = access?.brief_spec?.fields ?? access?.product?.brief_spec?.fields ?? [];
+    const missing = fields.find(field => field.required && !String(briefAnswers[field.id] ?? "").trim());
+    if (missing) { setError(new WebChatPresentationError("missingBriefField", { field: missing.label })); return; }
+    void createConversation(fields.map(field => ({ field_id: field.id, value: String(briefAnswers[field.id] ?? "") }))).catch(cause => setError(cause));
+  };
+
+  const loadHistory = async () => {
+    if (!historyCursor) return;
+    followOutputRef.current = false;
+    const page = await client.history(conversationId, historyCursor);
+    updateMessages(current => [...(page.messages ?? []), ...current]);
+    setHistoryCursor(page.before_cursor ?? null);
+  };
+
+  const loadConversations = async () => {
+    if (!conversationCursor) return;
+    const page = await client.list(conversationCursor);
+    setConversations(current => [...current, ...(page.conversations ?? []).filter(entry => !current.some(existing => existing.id === entry.id))]);
+    setConversationCursor(page.next_cursor ?? null);
+  };
+
+  const send = async event => {
+    event.preventDefault();
+    if (!conversationId || !access || activeRun || (!draft.trim() && images.length === 0)) return;
+    const connection = socketRef.current;
+    if (!connection?.ready) { setError(new WebChatPresentationError("disconnected")); return; }
+    followOutputRef.current = true;
+    setError(null);
+    try {
+      const pending = pendingSubmissionRef.current?.conversationId === conversationId ? pendingSubmissionRef.current : null;
+      if (pending) {
+        try {
+          const receipt = await client.receipt(conversationId, pending.runId);
+          if (receipt.submission?.client_message_id === pending.clientMessageId) {
+            pendingSubmissionRef.current = null;
+            setDraft(""); setImages([]);
+            await refresh(conversationId);
+            return;
+          }
+        } catch (cause) { if (cause.status !== 404) throw cause; }
+      }
+      const imageFiles = pending?.imageFiles ?? [...images];
+      const attachments = pending ? pending.attachments : await BrowserImageAttachments.prepareAll(imageFiles);
+      const runId = pending?.runId ?? `run_${crypto.randomUUID().replaceAll("-", "")}`;
+      const clientMessageId = pending?.clientMessageId ?? `message_${crypto.randomUUID().replaceAll("-", "")}`;
+      const content = pending?.content ?? draft;
+      const submission = pending ?? new PendingWebSubmission({ conversationId, runId, clientMessageId, content, attachments, imageFiles });
+      runRef.current = { id: runId };
+      pendingSubmissionRef.current = submission;
+      updateMessages(current => {
+        const next = current.some(message => message.id === submission.optimisticMessageId)
+          ? current
+          : [...current, submission.optimisticMessage()];
+        return next.some(message => message.transient && message.run_id === runId && message.role === "assistant")
+          ? next
+          : [...next, WebChatTimeline.streamingAssistantMessage(runId)];
+      });
+      liveTimelineRef.current.reset();
+      setLiveTimeline([]);
+      setDraft("");
+      setImages([]);
+      connection.message({ runId, clientMessageId, content, attachments });
+      setActiveRun(runId);
+      setStatus({ key: "sending" });
+    } catch (cause) {
+      const pending = pendingSubmissionRef.current;
+      if (pending?.conversationId === conversationId) restoreSubmission(pending);
+      setError(cause);
+    }
+  };
+
+  const cancel = () => {
+    if (!runRef.current || !socketRef.current?.ready) return;
+    socketRef.current.cancel(runRef.current.id);
+    setStatus({ key: "stopping" });
+  };
+
+  const name = access?.product?.name ?? access?.product_name ?? "Creator Agent";
+  const creator = access?.creator ?? access?.product?.creator ?? { name };
+  const creatorAvatarUrl = creator.avatar_url ?? access?.creator_avatar_url ?? access?.product?.creator_avatar_url;
+  const selectedConversation = conversations.find(item => item.id === conversationId);
+  return <div className="web-chat" aria-busy={!access && !error}>
+    <aside className="web-chat__sidebar" inert={briefOpen}>
+      <div className="web-chat__sidebar-top">
+        <HatchBrand className="web-chat__brand" logoVariant="lockup" />
+        <a href="/library" className="web-chat__back" aria-label={t("backToLibrary")}><ArrowLeft aria-hidden="true" /><span>{t("backToLibrary")}</span></a>
+      </div>
+      <button type="button" className="web-chat__new" aria-label={t("newChat")} onClick={newConversation} disabled={!access}>
+        <Plus aria-hidden="true" /><span>{t("newChat")}</span>
+      </button>
+      <div className="web-chat__mobile-history">
+        <Select
+          label={t("conversationHistory")}
+          value={conversationId || undefined}
+          placeholder={t("recentConversations")}
+          options={[
+            ...(conversations.length
+              ? conversations.map(item => ({
+                value: item.id,
+                label: [item.title || t("newConversation"), conversationDate(item.created_at, locale)].filter(Boolean).join(" · ")
+              }))
+              : [{ value: "__no-conversations__", label: t("conversationsEmpty"), disabled: true }]),
+            ...(conversationCursor ? [{ value: LOAD_EARLIER_CONVERSATIONS, label: t("loadEarlierConversations") }] : [])
+          ]}
+          onValueChange={value => {
+            if (value === LOAD_EARLIER_CONVERSATIONS) {
+              void loadConversations().catch(cause => setError(cause));
+              return;
+            }
+            followOutputRef.current = true;
+            setConversationId(value);
+          }}
+          className="web-chat__mobile-history-trigger"
+        />
+      </div>
+      <div className="web-chat__section-heading"><span>{t("recentConversations")}</span></div>
+      <nav className="web-chat__conversation-list" aria-label={t("conversationHistory")}>
+        {conversations.map(item => (
+          <button type="button" key={item.id} className="web-chat__conversation" aria-pressed={item.id === conversationId} onClick={() => { followOutputRef.current = true; setConversationId(item.id); }}>
+            <span className="web-chat__conversation-title">{item.title || t("newConversation")}</span>
+            <time className="web-chat__conversation-date" dateTime={item.created_at}>{conversationDate(item.created_at, locale)}</time>
+          </button>
+        ))}
+        {conversations.length === 0 && access ? <p className="web-chat__list-empty">{t("conversationsEmpty")}</p> : null}
+      </nav>
+      {conversationCursor ? <button type="button" className="web-chat__load-more" onClick={() => void loadConversations().catch(cause => setError(cause))}><span>{t("loadEarlierConversations")}</span><ChevronDown aria-hidden="true" /></button> : null}
+      <WebChatAccountControls profile={profile} navigate={navigate} onSignOut={onSignOut} />
+    </aside>
+    <main className={`web-chat__main${error && access ? " web-chat__main--error" : ""}`} inert={briefOpen}>
+      <header className="web-chat__header">
+        <div className="web-chat__heading-copy"><Avatar className="web-chat__heading-avatar" src={creatorAvatarUrl} name={creator.name ?? name} size="medium" /><h1>{name}</h1></div>
+        {selectedConversation?.brief_snapshot ? <div className="web-chat__header-tools"><TaskBriefDropdown key={conversationId} snapshot={selectedConversation.brief_snapshot} t={t} /></div> : null}
+      </header>
+      {error && access ? <div className="web-chat__error" role="alert"><CircleAlert aria-hidden="true" /><span>{errorText}</span><button type="button" onClick={() => { setError(null); setConnectionVersion(value => value + 1); }}><RotateCw aria-hidden="true" /><span>{t("retry")}</span></button></div> : null}
+      <div className="web-chat__messages" ref={messagesRef} onScroll={event => { const element = event.currentTarget; followOutputRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 112; }} aria-label={t("chatMessages")}>
+        {historyCursor ? <button type="button" className="web-chat__history" onClick={() => void loadHistory().catch(cause => setError(cause))}><span>{t("viewEarlierMessages")}</span><ChevronUp aria-hidden="true" /></button> : null}
+        {!access && !error ? <div className="web-chat__gate" role="status"><LoaderCircle aria-hidden="true" /><span>{statusText}</span></div> : null}
+        {!access && error ? <div className="web-chat__gate web-chat__gate--error" role="alert"><CircleAlert aria-hidden="true" /><h2>{t("unableToOpenChat")}</h2><p>{errorText}</p><button type="button" onClick={() => location.reload()}><RotateCw aria-hidden="true" /><span>{t("checkingSubscriptionAgain")}</span></button></div> : null}
+        {access && messages.length === 0 && !activeRun ? <div className="web-chat__empty">
+          <span className="web-chat__empty-mark"><Sparkles aria-hidden="true" /></span>
+          <span className="web-chat__eyebrow">{t("startWithAnIdea")}</span>
+          <h2>{t("emptyHeadline")}</h2>
+          <p>{t("emptyConversationBody", { agent: name })}</p>
+          {!conversationId ? <button type="button" className="web-chat__empty-action" onClick={newConversation} disabled={!access}><Plus aria-hidden="true" />{t("newChat")}</button> : null}
+        </div> : null}
+        {messages.map(message => <article className={`web-chat__message web-chat__message--${message.role}`} key={message.renderKey ?? `${message.run_id}-${message.role}`}>
+          <div className="web-chat__message-body">
+            {message.role === "assistant" ? <span className="web-chat__speaker">{name}</span> : null}
+            {message.role === "assistant"
+              ? message.transient
+                  ? message.timeline?.length
+                  ? groupTimelineEntries(message.timeline).map(entry => <WebChatTimelineEntry key={entry.id} entry={entry} client={client} conversationId={conversationId} locale={locale} t={t} isAnimating />)
+                  : <div className="web-chat__working"><LoaderCircle aria-hidden="true" />{statusText}</div>
+                : groupTimelineEntries(WebChatTimeline.fromHistory(message)).map(entry => <WebChatTimelineEntry key={entry.id} entry={entry} client={client} conversationId={conversationId} locale={locale} t={t} />)
+              : <div className="web-chat__content"><WebChatMessageResponse>{message.content || ""}</WebChatMessageResponse></div>}
+            {message.attachments?.some(item => !BrowserImageAttachments.accepts(item.media_type)) ? <div className="web-chat__attachments">{message.attachments.filter(item => !BrowserImageAttachments.accepts(item.media_type)).map(item => <span key={item.attachment_id}><Paperclip aria-hidden="true" />{item.display_name}</span>)}</div> : null}
+            {!message.optimistic && message.attachments?.filter(item => BrowserImageAttachments.accepts(item.media_type) && item.asset_id).map(item => {
+              const src = client.assetUrl(conversationId, item.asset_id);
+              return <WebChatImageViewer key={item.attachment_id} src={src} alt={item.display_name} title={t("imagePreview")} closeLabel={t("close")} viewLabel={t("viewImage")}>
+                <img className="web-chat__attachment-image" alt="" src={src} />
+              </WebChatImageViewer>;
+            })}
+          </div>
+        </article>)}
+      </div>
+      <form className="web-chat__composer" onSubmit={send}>
+        {images.length ? <div className="web-chat__images" aria-label={t("imagesToSend")}>{images.map(file => <span className="web-chat__image-chip" key={`${file.name}-${file.lastModified}`}><Paperclip aria-hidden="true" /><span title={file.name}>{file.name}</span><button type="button" aria-label={t("removeImage", { name: file.name })} onClick={() => setImages(current => current.filter(entry => entry !== file))}><X aria-hidden="true" /></button></span>)}</div> : null}
+        <textarea ref={draftRef} aria-label={t("messageAgent", { agent: name })} value={draft} onChange={event => setDraft(event.target.value)} placeholder={t("messagePlaceholder")} disabled={!conversationId || Boolean(activeRun)} onKeyDown={event => { if (event.key !== "Enter" || event.shiftKey || isImeConfirmation(event)) return; event.preventDefault(); void send(event); }} />
+        <div className="web-chat__actions">
+          <div className="web-chat__composer-tools"><label className="web-chat__attach"><Image aria-hidden="true" /><input type="file" accept="image/*" multiple aria-label={t("addImages")} onChange={event => { const selected = [...event.target.files]; if (images.length + selected.length > 8) setError(new WebChatPresentationError("imageCountLimit")); else setImages(current => [...current, ...selected]); event.target.value = ""; }} disabled={!conversationId || Boolean(activeRun)} /></label></div>
+          {activeRun ? <button type="button" className="web-chat__stop" aria-label={t("stopReply")} onClick={cancel}><Square aria-hidden="true" /><span>{t("stopReply")}</span></button> : <button type="submit" className="web-chat__send" aria-label={t("sendMessage")} disabled={!conversationId || (!draft.trim() && !images.length)}><span>{t("send")}</span><ArrowUp aria-hidden="true" /></button>}
+        </div>
+      </form>
+    </main>
+    {briefOpen ? <div className="web-chat__brief-backdrop"><form ref={briefDialogRef} className="web-chat__brief" role="dialog" aria-modal="true" aria-labelledby="web-chat-brief-title" onSubmit={submitBrief}>
+      <button type="button" className="web-chat__brief-close" aria-label={t("close")} onClick={() => setBriefOpen(false)}><X aria-hidden="true" /></button>
+      <Avatar className="web-chat__brief-avatar" src={creatorAvatarUrl} name={creator.name ?? name} size="large" />
+      <h2 id="web-chat-brief-title">{t("startNewTask")}</h2>
+      {(access?.brief_spec?.fields ?? access?.product?.brief_spec?.fields ?? []).map((field, index) => <label key={field.id}>{field.label}{field.required ? <span aria-hidden="true"> · {t("required")}</span> : null}<textarea autoFocus={index === 0} required={field.required} maxLength={32000} value={briefAnswers[field.id] ?? ""} onChange={event => setBriefAnswers(current => ({ ...current, [field.id]: event.target.value }))} /></label>)}
+      <div className="web-chat__brief-actions"><button type="button" onClick={() => setBriefOpen(false)}>{t("later")}</button><button type="submit"><span>{t("startConversation")}</span><ArrowUp aria-hidden="true" /></button></div>
+    </form></div> : null}
+  </div>;
+}

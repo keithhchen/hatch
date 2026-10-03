@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { humanizeIdentifier, meaningfulReversalStatus } from "./buyerPresentation.js";
+import { accountInitials, humanizeIdentifier, meaningfulReversalStatus } from "./buyerPresentation.js";
+
+test("buyer avatar initials come from the signed-in account identity", () => {
+  assert.equal(accountInitials({ initials: "KC" }), "KC");
+  assert.equal(accountInitials({ display_name: "Keith Chen" }), "KC");
+  assert.equal(accountInitials({ email: "keith@example.com" }), "KE");
+  assert.equal(accountInitials({}), "A");
+});
 
 test("buyer presentation omits no-op refund and cancellation states", () => {
   assert.equal(meaningfulReversalStatus(undefined, "none"), null);

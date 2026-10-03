@@ -26,6 +26,7 @@
     "pg": "^8.23.0",
     "prop-types": "^15.8.1",
     "react-resizable-panels": "^4.12.4",
+    "streamdown": "^2.7.0",
     "ws": "^8.21.3"
   },
   "devDependencies": {

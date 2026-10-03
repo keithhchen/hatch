@@ -1,4 +1,5 @@
 import React from "react";
+import { Avatar } from "@hatch/ui";
 import { storefrontModel } from "./storefrontModel.js";
 import "./storefrontDetails.css";
 
@@ -22,9 +23,7 @@ export function StorefrontDetails({
       <header className="storefront-shared__hero">
         <div>
           <span className="storefront-shared__creator">
-            <span className="storefront-shared__creator-avatar" aria-hidden="true">
-              {creatorAvatarUrl ? <img src={creatorAvatarUrl} alt="" /> : (creatorInitial || (typeof creatorName === "string" ? creatorName.trim().charAt(0) : ""))}
-            </span>
+            <Avatar className="storefront-shared__creator-avatar" src={creatorAvatarUrl} name={creatorName || "Creator"} fallback={creatorInitial} size="small" />
             <span className="storefront-shared__creator-name">{creatorName || "Creator"}</span>
           </span>
           <Heading>{model.name}</Heading>

@@ -2,10 +2,10 @@ import React from "react";
 import * as AvatarPrimitive from "@radix-ui/react-avatar";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { IconButton } from "./Button.jsx";
-import { cn, initials } from "./utils.js";
+import { avatarLetter, cn } from "./utils.js";
 
 export function Avatar({ src, alt = "", name, fallback, size = "medium", className }) {
-  return <AvatarPrimitive.Root className={cn("hui-avatar", `is-${size}`, className)}><AvatarPrimitive.Image src={src} alt={alt} /><AvatarPrimitive.Fallback delayMs={src ? 300 : 0}>{fallback || initials(name)}</AvatarPrimitive.Fallback></AvatarPrimitive.Root>;
+  return <AvatarPrimitive.Root className={cn("hui-avatar", `is-${size}`, className)}><AvatarPrimitive.Image src={src} alt={alt} /><AvatarPrimitive.Fallback className="hui-avatar__fallback" delayMs={src ? 300 : 0}>{avatarLetter(fallback || name)}</AvatarPrimitive.Fallback></AvatarPrimitive.Root>;
 }
 export function AvatarGroup({ people, max = 4, size = "medium", className }) {
   const visible = people.slice(0, max);

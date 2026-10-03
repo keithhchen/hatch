@@ -56,6 +56,9 @@ test('Factory overview removes duplicate chrome without removing real navigation
   assert.match(source, /<SimpleTreeView/);
   assert.match(source, /onClick=\{\(\) => goToFactory\(id\)\}/);
   assert.match(source, /onClick=\{\(\) => onOpenAgent\(entry\.role\)\}/);
+  assert.doesNotMatch(source, /<Typography variant="h6" sx=\{\{ mb: 1\.5 \}\}>\{t\("factory"\)\}<\/Typography>/);
+  assert.doesNotMatch(source, /\$\{index \+ 1\}  \$\{t\(title\)\}/);
+  assert.match(source, /<ListItemIcon sx=\{\{ minWidth: 72 \}\}>/);
 });
 
 test('Factory overview is the first live Product page and retires the old workflow pages', async () => {
@@ -86,7 +89,9 @@ test('Deep Research starts from Creator identity and public evidence, not manual
   const i18n = await readFile(new URL('./factoryAgentsI18n.js', import.meta.url), 'utf8');
   const prompt = await readFile(new URL('../../runtime-server/prompts/factory-agents/research/SYSTEM.md', import.meta.url), 'utf8');
   assert.match(i18n, /research: '告诉 Agent 你是谁、做什么，以及它可以在哪里找到你的公开资料/);
-  assert.match(i18n, /sourcesStage: '认识 Creator'/);
+  assert.match(i18n, /sourcesStage: '认识你'/);
+  assert.match(i18n, /sourcesStage: 'Get to know you'/);
+  assert.match(i18n, /sourcesStage: 'あなたを知る'/);
   assert.match(prompt, /不是一个等待用户整理资料的资料摄入 Agent/);
   assert.match(prompt, /主动使用 web_search 和 web_scrape/);
   assert.doesNotMatch(prompt, /youtube_transcript/);
@@ -175,6 +180,18 @@ test('Every chat offers a start button that fills the Composer without sending',
   assert.match(source, /setDraft\(current => current\.trim\(\) \? current : message\)/);
   assert.match(source, /requestAnimationFrame\(\(\) => composer\.current\?\.focus\(\)\)/);
   assert.match(i18n, /startAgentMessage: role =>/);
+  assert.match(source, /t\("startAgentLabel", role\)/);
+  assert.match(i18n, /startAgentLabel = role => role === 'evaluator'/);
+});
+
+test('Factory start and dependency-update prompts follow the evaluator calibration flow', async () => {
+  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
+  const i18n = await readFile(new URL('./factoryAgentsI18n.js', import.meta.url), 'utf8');
+  assert.match(source, /t\("useLatestMessage", session\.role\)/);
+  assert.match(i18n, /useLatestMessage = role => role === 'evaluator'/);
+  assert.match(i18n, /1–3 个最影响结果的核心矛盾、改进点或疑问点/);
+  assert.match(i18n, /一次 askuser 让我评估/);
+  assert.match(i18n, /记录校准结果并停止/);
 });
 
 test('Factory chat keeps scrolling inside the workbench pane', async () => {

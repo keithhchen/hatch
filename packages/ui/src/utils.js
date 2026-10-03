@@ -11,3 +11,10 @@ export function initials(value = "") {
     .map((part) => part[0]?.toUpperCase())
     .join("") || "H";
 }
+
+export function avatarLetter(value = "") {
+  const letter = String(value).trim().slice(0, 1);
+  if (!letter) return "H";
+  const upper = letter.toLocaleUpperCase();
+  return Array.from(upper).length === 1 ? upper : letter;
+}

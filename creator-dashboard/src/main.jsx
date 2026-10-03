@@ -2,7 +2,8 @@ import React, { Suspense, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "@hatch/ui/theme.css";
 import { Button, HatchBrand, HatchUIProvider, UnavailableState } from "@hatch/ui";
-import { LocaleProvider } from "./locale.jsx";
+import { LocaleProvider, useLocale } from "./locale.jsx";
+import { buyerT } from "./buyerI18n.js";
 import { dashboardRequest } from "./data.js";
 import "./styles.css";
 
@@ -11,6 +12,7 @@ const BuyerPortalV2 = React.lazy(() => import("./BuyerPortalV2.jsx").then(({ Buy
 const CreatorPortalV2 = React.lazy(() => import("./CreatorPortalV2.jsx").then(({ CreatorPortalV2: Component }) => ({ default: Component })));
 const DownloadPage = React.lazy(() => import("./DownloadPage.jsx").then(({ DownloadPage: Component }) => ({ default: Component })));
 const WebPage = React.lazy(() => import("./web/WebPage.jsx"));
+const WebChatPage = React.lazy(() => import("./WebChatPage.jsx"));
 
 class AppErrorBoundary extends React.Component {
   constructor(props) {
@@ -121,6 +123,11 @@ function App() {
     }
   }, [clearSession]);
 
+  const signOutFromChat = useCallback(async () => {
+    await signOut();
+    location.navigate("/explore", { replace: true });
+  }, [location.navigate, signOut]);
+
   const invalidate = useCallback((error) => {
     if (!error || error.status === 401) clearSession();
   }, [clearSession]);
@@ -128,6 +135,7 @@ function App() {
   const buyerSession = {
     status: sessionStatus,
     user: profile,
+    updateUser: setProfile,
     signIn,
     signUp,
     creatorSignUp,
@@ -149,6 +157,16 @@ function App() {
         <WebPage />
       </Suspense>
     );
+  }
+
+  const chatMatch = location.pathname.match(/^\/chat\/product\/([0-9a-f-]{36})$/i);
+  if (chatMatch) {
+    if (sessionStatus === "loading") return <AppLoading />;
+    if (sessionStatus !== "authenticated") {
+      return <RouteRedirect to={`/sign-in?returnTo=${encodeURIComponent(location.href)}`} navigate={location.navigate} />;
+    }
+    if (profile?.role !== "user") return <RoleBoundary navigate={location.navigate} />;
+    return <Suspense fallback={<AppLoading />}><WebChatPage productId={chatMatch[1]} request={dashboardRequest} navigate={location.navigate} profile={profile} onSignOut={signOutFromChat} /></Suspense>;
   }
 
   if (location.pathname === CREATOR_ROOT
@@ -226,7 +244,8 @@ function RouteRedirect({ to, navigate }) {
 }
 
 function AppLoading() {
-  return <main className="loading-page" aria-busy="true"><HatchBrand className="loading-brand" /><p>Opening your workspace…</p></main>;
+  const { locale } = useLocale();
+  return <main className="loading-page" aria-busy="true"><HatchBrand className="loading-brand" /><p>{buyerT(locale, "Expert agents that work.")}</p></main>;
 }
 
 function RoleBoundary({ navigate, onCreateCreator }) {

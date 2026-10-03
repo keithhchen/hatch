@@ -30,6 +30,7 @@ import {
   injectProductNoScriptFallback
 } from "./publicMetadata.mjs";
 import { PortalTelemetryStore } from "./telemetry.mjs";
+import { WebChatRuntimeBridge } from "./webChatRuntimeBridge.mjs";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_JSON_BODY_MAX_BYTES = 1024 * 1024;
@@ -60,10 +61,14 @@ export async function createDashboardApp(options = {}) {
   const registryUrl = options.registryUrl
     ?? process.env.HATCH_REGISTRY_URL
     ?? "http://127.0.0.1:8100";
+  const runtimeUrl = options.runtimeUrl
+    ?? process.env.HATCH_RUNTIME_URL
+    ?? "http://127.0.0.1:8400";
   const publicOrigin = options.publicOrigin
     ?? process.env.HATCH_PUBLIC_ORIGIN
     ?? (process.env.NODE_ENV === "production" ? "https://hatch.tokenquadrant.cn" : "http://127.0.0.1:8500");
   const voiceWss = new WebSocketServer({ noServer: true, maxPayload: 128 * 1024 });
+  const chatWss = new WebSocketServer({ noServer: true, maxPayload: 160 * 1024 * 1024 });
   let PostgresPool = options.PostgresPool;
   let ledger = options.ledger;
   if (!ledger && commerceDatabaseUrl) {
@@ -437,6 +442,33 @@ export async function createDashboardApp(options = {}) {
       response.setHeader("x-request-id", requestId);
       if (request.method === "GET" && url.pathname === "/healthz") {
         return send(response, 200, { ok: true });
+      }
+      if (url.pathname === "/v1/web-chat/conversations" || url.pathname.startsWith("/v1/web-chat/conversations/")) {
+        if (!["GET", "POST", "PATCH"].includes(request.method)) {
+          return send(response, 405, { error: { code: "method_not_allowed", message: "Method not allowed." } });
+        }
+        const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
+        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
+        if (request.method !== "GET") {
+          const csrfError = cookieCsrfError(request);
+          if (csrfError) return send(response, csrfError.status, csrfError.body);
+        }
+        const suffix = url.pathname.slice("/v1/web-chat".length);
+        const upstreamUrl = new URL(`/v1${suffix}${url.search}`, runtimeUrl);
+        const upstream = await fetchImpl(upstreamUrl, {
+          method: request.method,
+          headers: {
+            authorization: `Bearer ${authentication.token}`,
+            ...(request.method !== "GET" ? { "content-type": "application/json" } : {})
+          },
+          ...(request.method !== "GET" ? { body: JSON.stringify(await readJson(request)) } : {})
+        });
+        response.statusCode = upstream.status;
+        response.setHeader("content-type", upstream.headers.get("content-type") ?? "application/json");
+        response.setHeader("cache-control", "no-store");
+        if (upstream.body) await pipeline(Readable.fromWeb(upstream.body), response);
+        else response.end();
+        return;
       }
       if (request.method === "GET" && url.pathname === "/readyz") {
         try {
@@ -840,6 +872,22 @@ export async function createDashboardApp(options = {}) {
         clearWebSessionCookies(request, response);
         return send(response, 204, undefined);
       }
+      if (url.pathname === "/v1/auth/me/avatar" && ["PUT", "DELETE"].includes(request.method)) {
+        const authentication = await authenticate(request, registryUrl, undefined, fetchImpl, portalState);
+        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
+        const csrfError = cookieCsrfError(request);
+        if (csrfError) return send(response, csrfError.status, csrfError.body);
+        const headers = { authorization: `Bearer ${authentication.token}` };
+        const body = request.method === "PUT" ? await readRawBody(request, 5 * 1024 * 1024) : undefined;
+        if (body) headers["content-type"] = request.headers["content-type"] ?? "application/octet-stream";
+        const upstream = await fetchImpl(new URL("/v1/auth/me/avatar", registryUrl), {
+          method: request.method,
+          headers,
+          ...(body ? { body } : {})
+        });
+        const payload = upstream.status === 204 ? undefined : await upstream.json();
+        return send(response, upstream.status, upstream.ok ? publicProfile(payload) : payload);
+      }
       if (request.method === "GET" && url.pathname === "/v1/auth/me") {
         const authentication = await authenticate(request, registryUrl, undefined, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
@@ -1004,6 +1052,7 @@ export async function createDashboardApp(options = {}) {
           creator: {
             id: first.creator_id,
             name: first.creator_name ?? first.creator_display_name ?? first.creator_id,
+            avatar_url: first.creator_avatar_url ?? null,
             verified: Boolean(first.creator_verified)
           },
           products
@@ -2009,7 +2058,9 @@ export async function createDashboardApp(options = {}) {
           commerce.listBuyerEntitlements(authentication.profile.id),
           catalog,
           commerce.listDeliveries({ buyerId: authentication.profile.id })
-        ).filter((entitlement) => entitlementMatchesStatus(entitlement, status));
+        )
+          .filter((entitlement) => entitlementMatchesStatus(entitlement, status))
+          .sort(compareEntitlementsNewestFirst);
         const page = paginate(entitlements, url);
         return send(response, 200, {
           buyer_id: authentication.profile.id,
@@ -2063,6 +2114,20 @@ export async function createDashboardApp(options = {}) {
   const handleUpgrade = async (request, socket, head) => {
     request.__oauthStateKey = oauthStateKey;
     const url = new URL(request.url ?? "/", publicOrigin);
+    if (url.pathname === "/v1/web-chat/runtime") {
+      const origin = request.headers.origin ? new URL(request.headers.origin).origin : "";
+      const allowedOrigins = [new URL(publicOrigin).origin];
+      if (process.env.NODE_ENV !== "production") allowedOrigins.push("http://127.0.0.1:8510");
+      if (!allowedOrigins.includes(origin)) {
+        throw Object.assign(new Error("Cross-origin WebSocket request rejected"), { status: 403 });
+      }
+      const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
+      if (authentication.error) throw Object.assign(new Error("Sign in to continue."), { status: authentication.error.status });
+      chatWss.handleUpgrade(request, socket, head, browser => {
+        new WebChatRuntimeBridge({ browser, runtimeUrl, token: authentication.token }).connect();
+      });
+      return;
+    }
     if (!/^\/v1\/creator\/products\/[^/]+\/factory-agents\/sessions\/[0-9a-f-]{36}\/voice\/live$/.test(url.pathname)) {
       throw Object.assign(new Error("Unknown WebSocket route"), { status: 404 });
     }
@@ -2123,6 +2188,8 @@ export async function createDashboardApp(options = {}) {
     closeVoiceSockets: () => {
       for (const socket of voiceWss.clients) socket.terminate();
       voiceWss.close();
+      for (const socket of chatWss.clients) socket.terminate();
+      chatWss.close();
     },
     ledger,
     commerce,
@@ -2636,6 +2703,7 @@ function publicProfile(profile) {
     id: profile.id,
     role: profile.role,
     display_name: displayName,
+    avatar_url: profile.avatar_url ?? null,
     handle: profile.handle ?? `@${profile.id}`,
     initials,
     capabilities: Array.isArray(profile.capabilities) ? profile.capabilities.map(String) : []
@@ -3312,7 +3380,12 @@ function publicCatalogAgent(agent, creatorState) {
   } = deployedAgent;
   return {
     ...authorityAgent,
-    creator: { id: authorityAgent.creator_id, name: authorityAgent.creator_name ?? authorityAgent.creator_display_name ?? authorityAgent.creator_id },
+    creator: {
+      id: authorityAgent.creator_id,
+      name: authorityAgent.creator_name ?? authorityAgent.creator_display_name ?? authorityAgent.creator_id,
+      avatar_url: agent.creator_avatar_url ?? authorityAgent.creator_avatar_url ?? authorityAgent.creator?.avatar_url ?? null
+    },
+    creator_avatar_url: agent.creator_avatar_url ?? authorityAgent.creator_avatar_url ?? null,
     product: { id: authorityAgent.product_id, name: authorityAgent.product_name ?? authorityAgent.name ?? authorityAgent.product_id },
     promise: deployedAgent.product_promise ?? deployedAgent.product_description ?? "",
     description: deployedAgent.product_description ?? "",
@@ -3637,7 +3710,11 @@ function enrichEntitlements(entitlements, catalog, deliveries = []) {
         promise: agent.product_promise,
         ...(agent.brief_spec ? { brief_spec: structuredClone(agent.brief_spec) } : {})
       } : { id: entitlement.product_id, product_id: entitlement.product_id, name: entitlement.product_id },
-      creator: agent ? { id: agent.creator_id, name: agent.creator_name } : { id: entitlement.creator_id },
+      creator: agent ? {
+        id: agent.creator_id,
+        name: agent.creator_name,
+        avatar_url: agent.creator_avatar_url ?? agent.creator?.avatar_url ?? null
+      } : { id: entitlement.creator_id },
       version_policy: entitlement.version_policy ?? "pinned",
       ...(unmetered ? {} : {
         granted_units: entitlement.granted_units,
@@ -3653,6 +3730,15 @@ function entitlementMatchesStatus(entitlement, status) {
   if (status === "active") return entitlement.status === "active" || entitlement.status === "reserved";
   if (status === "past") return ["consumed", "expired", "revoked"].includes(entitlement.status);
   return entitlement.status === status;
+}
+
+function compareEntitlementsNewestFirst(left, right) {
+  const timestamp = entitlement => {
+    const value = Date.parse(entitlement.granted_at ?? entitlement.valid_from ?? entitlement.created_at ?? "");
+    return Number.isFinite(value) ? value : 0;
+  };
+  return timestamp(right) - timestamp(left)
+    || String(right.entitlement_id ?? "").localeCompare(String(left.entitlement_id ?? ""));
 }
 
 function orderDetail(order, events = []) {
@@ -4252,6 +4338,7 @@ function isPublicPortalRoute(pathname) {
     || pathname.startsWith("/products/")
     || pathname === "/library"
     || pathname.startsWith("/library/")
+    || pathname.startsWith("/chat/product/")
     || pathname === "/orders"
     || pathname.startsWith("/orders/")
     || pathname === "/checkout"
