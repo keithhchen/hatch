@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
@@ -9,11 +8,13 @@ import { createDesktopDownloadManifest } from "./create-desktop-download-manifes
 
 const SOURCE_SHA = "0123456789abcdef0123456789abcdef01234567";
 
-test("creates versioned and fixed latest URLs for both macOS builds", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-download-manifest-"));
+test("creates versioned and fixed latest URLs for all Desktop builds", async (context) => {
+  const root = await mkdtemp(path.join(process.cwd(), ".hatch-test-artifacts-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
   const files = [
     { key: "macos-apple-silicon", platform: "macos", architecture: "ARM64", filename: "Hatch_0.1.17_arm64.dmg", bytes: "apple" },
-    { key: "macos-intel", platform: "macos", architecture: "X64", filename: "Hatch_0.1.17_x86_64.dmg", bytes: "intel" }
+    { key: "macos-intel", platform: "macos", architecture: "X64", filename: "Hatch_0.1.17_x86_64.dmg", bytes: "intel" },
+    { key: "windows-x64", platform: "windows", architecture: "X64", filename: "Hatch_0.1.17_x64-setup.exe", bytes: "windows" }
   ];
   const artifactFiles = [];
   for (const file of files) {
@@ -47,6 +48,8 @@ test("creates versioned and fixed latest URLs for both macOS builds", async () =
   );
   assert.equal(manifest.artifacts["macos-intel"].filename, "Hatch-0.1.17-macOS-Intel.dmg");
   assert.equal(manifest.artifacts["macos-apple-silicon"].label, "Mac · Apple Silicon preview");
+  assert.equal(manifest.artifacts["windows-x64"].filename, "Hatch-0.1.17-Windows-x64.exe");
+  assert.equal(manifest.artifacts["windows-x64"].latest_url, "https://hatch-downloads.oss-cn-shanghai.aliyuncs.com/desktop/latest/windows/x64.exe");
 });
 
 async function writeEvidence(directory, file, content) {

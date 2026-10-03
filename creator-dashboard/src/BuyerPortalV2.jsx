@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Menu, Monitor } from "lucide-react";
 import {
-  Avatar,
   Button,
   DropdownMenu,
   Checkbox as HatchCheckbox,
@@ -17,6 +16,7 @@ import {
 } from "@hatch/ui";
 import { CheckoutSummary } from "@hatch/ui/product";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
+import { AccountAvatar } from "./AccountAvatar.jsx";
 import { LanguageSwitcher } from "./LanguageSwitcher.jsx";
 import { useLocale } from "./locale.jsx";
 import { buyerT } from "./buyerI18n.js";
@@ -270,7 +270,7 @@ function CreatorPublicPage({creatorId, request, navigate, session }) {
     <div className="buyer-v2__container buyer-v2__page">
       <RouterLink className="buyer-v2__back-link" to={EXPLORE_ROOT} navigate={navigate}>{t('← Explore')}</RouterLink>
       <header className="buyer-v2__page-heading buyer-v2__creator-heading">
-        <Avatar className="buyer-v2__creator-profile-avatar" size="large" src={creatorAvatarUrl(creator)} name={creator?.name ?? creator?.display_name ?? creatorId} />
+        <AccountAvatar className="buyer-v2__creator-profile-avatar" size="large" src={creatorAvatarUrl(creator)} name={creator?.name ?? creator?.display_name ?? creatorId} />
         <div>
           <h1>{creator?.name ?? creator?.display_name ?? creatorId}</h1>
           <p>{creator?.bio ?? creator?.description ?? "Published methods for work in your own Workspace."}</p>
@@ -327,7 +327,7 @@ function ProductPage({route, request, navigate, session, downloadUrl }) {
       <StorefrontDetails
         product={product}
         creatorName={productCreatorByline}
-        creatorInitial={productCreatorName.trim().charAt(0)}
+        creatorAvatarName={productCreatorName}
         creatorAvatarUrl={product.creator_avatar_url || product.creator?.avatar_url || product.creator?.image_url}
         desktopRequirement={desktopRequirement}
         releaseLabel={product.release_label || product.release?.label}
@@ -444,7 +444,8 @@ function SettingsPage({session, navigate }) {
     <header className="buyer-v2__page-heading"><span className="buyer-v2__eyebrow">{t('Account')}</span><h1>{t('Your Hatch account.')}</h1></header>
     <section className="buyer-v2__settings-surface" aria-label={t('Signed-in account')}>
       <div className="buyer-v2__settings-identity">
-        <div><h2>{session.user?.display_name || t("Hatch account")}</h2></div>
+        <AccountAvatar className="buyer-v2__settings-avatar" size="large" src={session.user?.avatar_url} name={session.user?.display_name || t("Hatch account")} />
+        <div><h2>{session.user?.display_name || t("Hatch account")}</h2><p>{t('Signed in to Hatch')}</p></div>
       </div>
       <AccountAvatarSettings user={session.user} onUserUpdated={session.updateUser ?? (() => {})} t={t} />
       {error ? <InlineError error={error} /> : null}
@@ -949,7 +950,7 @@ function DefinitionList({ rows }) {
 
 function CreatorIdentity({ value, className = "" }) {
   const name = creatorName(value);
-  return <span className={`buyer-v2__creator-identity ${className}`.trim()}><Avatar className="buyer-v2__creator-avatar" size="medium" src={creatorAvatarUrl(value)} name={name} /><span>{name}</span></span>;
+  return <span className={`buyer-v2__creator-identity ${className}`.trim()}><AccountAvatar className="buyer-v2__creator-avatar" size="medium" src={creatorAvatarUrl(value)} name={name} /><span>{name}</span></span>;
 }
 
 function PriceRow({ label, value, total = false }) {

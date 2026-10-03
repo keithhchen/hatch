@@ -142,18 +142,21 @@ jobs:
         env:
           HATCH_PRODUCTION_ENV: ${{ secrets.HATCH_PRODUCTION_ENV }}
           HATCH_GEMINI_API_KEY: ${{ secrets.HATCH_GEMINI_API_KEY }}
+          HATCH_CREATOR_NAS_GATEWAY_TOKEN: ${{ secrets.HATCH_CREATOR_NAS_GATEWAY_TOKEN }}
         run: |
           set -euo pipefail
           test -n "$HATCH_PRODUCTION_ENV"
           test -n "$HATCH_GEMINI_API_KEY"
+          test -n "$HATCH_CREATOR_NAS_GATEWAY_TOKEN"
           temp_env="$(mktemp /opt/hatch/.env.github.XXXXXX)"
           normalized_env="$(mktemp /opt/hatch/.env.github.normalized.XXXXXX)"
           trap 'rm -f "$temp_env" "$normalized_env"' EXIT
           umask 077
           printf '%s\n' "$HATCH_PRODUCTION_ENV" > "$temp_env"
           test -s "$temp_env"
-          grep -Ev '^(GEMINI_API_KEY|HATCH_LLM_PROFILE|HATCH_FACTORY_LLM_PROFILE|HATCH_FACTORY_VOICE_PROVIDER|HATCH_FACTORY_LIVE_MODEL|HATCH_FACTORY_LIVE_VOICE|HATCH_FACTORY_STT_PROVIDER|HATCH_FACTORY_VOICE_PAUSE_MS)=' "$temp_env" > "$normalized_env"
+          grep -Ev '^(GEMINI_API_KEY|HATCH_LLM_PROFILE|HATCH_FACTORY_LLM_PROFILE|HATCH_FACTORY_VOICE_PROVIDER|HATCH_FACTORY_LIVE_MODEL|HATCH_FACTORY_LIVE_VOICE|HATCH_FACTORY_STT_PROVIDER|HATCH_FACTORY_VOICE_PAUSE_MS|HATCH_CREATOR_NAS_GATEWAY_TOKEN)=' "$temp_env" > "$normalized_env"
           printf 'GEMINI_API_KEY=%s\nHATCH_LLM_PROFILE=kimi-k2.6\nHATCH_FACTORY_LLM_PROFILE=gemini-api\nHATCH_FACTORY_VOICE_PROVIDER=legacy\nHATCH_FACTORY_LIVE_MODEL=gemini-3.8-live\nHATCH_FACTORY_LIVE_VOICE=\nHATCH_FACTORY_STT_PROVIDER=qwen\nHATCH_FACTORY_VOICE_PAUSE_MS=2500\n' "$HATCH_GEMINI_API_KEY" >> "$normalized_env"
+          printf 'HATCH_CREATOR_NAS_GATEWAY_TOKEN=%s\n' "$HATCH_CREATOR_NAS_GATEWAY_TOKEN" >> "$normalized_env"
           mv -f "$normalized_env" "$temp_env"
           grep -Eq '^HATCH_DOMAIN=[^[:space:]]+$' "$temp_env"
           chmod 600 "$temp_env"

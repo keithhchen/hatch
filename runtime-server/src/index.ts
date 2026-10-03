@@ -23,6 +23,7 @@ import {
   parseInboundMessage,
   TASK_START_MESSAGE_CONTENT,
   type ConversationMessage,
+  type BoundRunStart,
   type ClientHello,
   type OutboundMessage,
   type OutputFinishReason,
@@ -147,10 +148,6 @@ export type RuntimeServerOptions = {
   legacyHmacSecret?: string;
   /** Deadline for an accepted socket to complete authenticated hello setup. */
   clientHelloTimeoutMs?: number;
-  /** Global cap on concurrent hello identity/entitlement verification. */
-  maxPendingHelloAuthorizations?: number;
-  /** Per-user cap after identity introspection and before Corpus resolution. */
-  maxPendingHelloAuthorizationsPerUser?: number;
   /** Global cap on concurrent per-turn Registry authorization checks. */
   maxPendingTurnAuthorizations?: number;
   /** Per-user cap on concurrent per-turn Registry authorization checks. */
@@ -161,22 +158,14 @@ export type RuntimeServerOptions = {
   maxActiveRunsPerUser?: number;
   /** Pending and active runs admitted across the Runtime process. */
   maxActiveRunsGlobal?: number;
-  /** Authenticated, ready WebSocket connections across the Runtime process. */
-  maxEstablishedConnectionsGlobal?: number;
   /** Ping interval used to reap connections that no longer answer. */
   connectionHeartbeatMs?: number;
   /** Maximum time a ready connection may receive no client messages. */
   connectionIdleTimeoutMs?: number;
-  /** All accepted WebSockets, including clients that have not sent hello. */
-  maxOpenConnectionsGlobal?: number;
-  /** Accepted WebSockets from one trusted source address, including pre-hello clients. */
-  maxOpenConnectionsPerSource?: number;
   /** Hard cap for a socket's queued outbound bytes. */
   maxSocketBufferedBytes?: number;
   /** Hard deadline for Runtime-owned network tools. */
   serverToolTimeoutMs?: number;
-  /** TCP connections accepted by the shared HTTP/WebSocket server. */
-  maxHttpConnections?: number;
   /** In-flight HTTP handlers across the Runtime process. */
   maxHttpRequestsGlobal?: number;
   /** In-flight HTTP handlers from one remote address. */
@@ -257,14 +246,6 @@ export async function createRuntimeServerFromEnvironment(
   const runtimeDatabaseUrl = environment.HATCH_RUNTIME_DATABASE_URL?.trim();
   const runtimeHost = environment.HATCH_RUNTIME_HOST?.trim() || "127.0.0.1";
   const helloTimeoutMs = runtimeClientHelloTimeoutMs(environment.HATCH_RUNTIME_HELLO_TIMEOUT_MS);
-  const maxPendingHelloAuthorizations = runtimeMaxPendingHelloAuthorizations(
-    environment.HATCH_RUNTIME_MAX_PENDING_HELLO_AUTHORIZATIONS
-  );
-  const maxPendingHelloAuthorizationsPerUser = runtimeCapacityLimit(
-    "HATCH_RUNTIME_MAX_PENDING_HELLO_AUTHORIZATIONS_PER_USER",
-    environment.HATCH_RUNTIME_MAX_PENDING_HELLO_AUTHORIZATIONS_PER_USER,
-    2
-  );
   const maxPendingTurnAuthorizations = runtimeCapacityLimit(
     "HATCH_RUNTIME_MAX_PENDING_TURN_AUTHORIZATIONS",
     environment.HATCH_RUNTIME_MAX_PENDING_TURN_AUTHORIZATIONS,
@@ -290,24 +271,6 @@ export async function createRuntimeServerFromEnvironment(
     "HATCH_RUNTIME_MAX_ACTIVE_RUNS_PER_USER",
     environment.HATCH_RUNTIME_MAX_ACTIVE_RUNS_PER_USER,
     2,
-    10_000
-  );
-  const maxEstablishedConnectionsGlobal = runtimeCapacityLimit(
-    "HATCH_RUNTIME_MAX_ESTABLISHED_CONNECTIONS_GLOBAL",
-    environment.HATCH_RUNTIME_MAX_ESTABLISHED_CONNECTIONS_GLOBAL,
-    256,
-    100_000
-  );
-  const maxOpenConnectionsGlobal = runtimeCapacityLimit(
-    "HATCH_RUNTIME_MAX_OPEN_CONNECTIONS_GLOBAL",
-    environment.HATCH_RUNTIME_MAX_OPEN_CONNECTIONS_GLOBAL,
-    512,
-    100_000
-  );
-  const maxOpenConnectionsPerSource = runtimeCapacityLimit(
-    "HATCH_RUNTIME_MAX_OPEN_CONNECTIONS_PER_SOURCE",
-    environment.HATCH_RUNTIME_MAX_OPEN_CONNECTIONS_PER_SOURCE,
-    16,
     10_000
   );
   const maxSocketBufferedBytes = runtimeCapacityLimit(
@@ -336,12 +299,6 @@ export async function createRuntimeServerFromEnvironment(
     120_000,
     1_000,
     300_000
-  );
-  const maxHttpConnections = runtimeCapacityLimit(
-    "HATCH_RUNTIME_MAX_HTTP_CONNECTIONS",
-    environment.HATCH_RUNTIME_MAX_HTTP_CONNECTIONS,
-    768,
-    100_000
   );
   const maxHttpRequestsGlobal = runtimeCapacityLimit(
     "HATCH_RUNTIME_MAX_HTTP_REQUESTS_GLOBAL",
@@ -457,21 +414,15 @@ export async function createRuntimeServerFromEnvironment(
     assetStore: runtimeAssetStoreFromEnvironment(environment, runtimeDataDir),
     clientToolTimeoutMs: clientToolTimeoutMs(environment.HATCH_CLIENT_TOOL_TIMEOUT_MS),
     clientHelloTimeoutMs: helloTimeoutMs,
-    maxPendingHelloAuthorizations,
-    maxPendingHelloAuthorizationsPerUser,
     maxPendingTurnAuthorizations,
     maxPendingTurnAuthorizationsPerUser,
     maxActiveRunsPerConnection,
     maxActiveRunsPerUser,
     maxActiveRunsGlobal,
-    maxEstablishedConnectionsGlobal,
-    maxOpenConnectionsGlobal,
-    maxOpenConnectionsPerSource,
     maxSocketBufferedBytes,
     connectionHeartbeatMs,
     connectionIdleTimeoutMs,
     serverToolTimeoutMs,
-    maxHttpConnections,
     maxHttpRequestsGlobal,
     maxHttpRequestsPerSource,
     httpHeadersTimeoutMs,
@@ -517,10 +468,6 @@ export function runtimeClientHelloTimeoutMs(raw: string | undefined): number {
     throw new Error("HATCH_RUNTIME_HELLO_TIMEOUT_MS must be an integer between 1000 and 60000");
   }
   return parsed;
-}
-
-export function runtimeMaxPendingHelloAuthorizations(raw: string | undefined): number {
-  return runtimeCapacityLimit("HATCH_RUNTIME_MAX_PENDING_HELLO_AUTHORIZATIONS", raw, 8);
 }
 
 function runtimeCapacityLimit(
@@ -673,14 +620,6 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   if (!Number.isSafeInteger(helloTimeoutMs) || helloTimeoutMs < 1) {
     throw new Error("clientHelloTimeoutMs must be a positive safe integer");
   }
-  const helloAuthorizationGate = new CapacityGate(
-    options.maxPendingHelloAuthorizations ?? 8,
-    "maxPendingHelloAuthorizations"
-  );
-  const helloAuthorizationPerUserGate = new KeyedCapacityGate(
-    options.maxPendingHelloAuthorizationsPerUser ?? 2,
-    "maxPendingHelloAuthorizationsPerUser"
-  );
   const turnAuthorizationGate = new CapacityGate(
     options.maxPendingTurnAuthorizations ?? 16,
     "maxPendingTurnAuthorizations"
@@ -696,18 +635,6 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   const activeRunPerUserGate = new KeyedCapacityGate(
     options.maxActiveRunsPerUser ?? 2,
     "maxActiveRunsPerUser"
-  );
-  const establishedConnectionGate = new CapacityGate(
-    options.maxEstablishedConnectionsGlobal ?? 256,
-    "maxEstablishedConnectionsGlobal"
-  );
-  const openConnectionGate = new CapacityGate(
-    options.maxOpenConnectionsGlobal ?? 512,
-    "maxOpenConnectionsGlobal"
-  );
-  const openConnectionPerSourceGate = new KeyedCapacityGate(
-    options.maxOpenConnectionsPerSource ?? 16,
-    "maxOpenConnectionsPerSource"
   );
   const connectionHeartbeatMs = options.connectionHeartbeatMs ?? 30_000;
   if (!Number.isSafeInteger(connectionHeartbeatMs) || connectionHeartbeatMs < 1) {
@@ -796,10 +723,6 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   if (!Number.isSafeInteger(httpRequestTimeoutMs) || httpRequestTimeoutMs < 1) {
     throw new Error("httpRequestTimeoutMs must be a positive safe integer");
   }
-  const maxHttpConnections = options.maxHttpConnections ?? 768;
-  if (!Number.isSafeInteger(maxHttpConnections) || maxHttpConnections < 1) {
-    throw new Error("maxHttpConnections must be a positive safe integer");
-  }
   const httpHeadersTimeoutMs = options.httpHeadersTimeoutMs ?? 5_000;
   if (!Number.isSafeInteger(httpHeadersTimeoutMs) || httpHeadersTimeoutMs < 1) {
     throw new Error("httpHeadersTimeoutMs must be a positive safe integer");
@@ -874,7 +797,6 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       releaseRequest();
     });
   });
-  server.maxConnections = maxHttpConnections;
   server.headersTimeout = httpHeadersTimeoutMs;
   server.requestTimeout = httpRequestTimeoutMs;
   const acceptedConnections = new Set<import("node:net").Socket>();
@@ -888,34 +810,18 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     path: "/runtime",
     maxPayload: MAX_RUNTIME_WEBSOCKET_PAYLOAD_BYTES
   });
-  wss.on("connection", (socket, request) => {
+  wss.on("connection", (socket) => {
     // `ws` emits an error before close for malformed/oversized frames. Owning
     // the event prevents a process-level uncaught exception; close performs
     // the same reservation and broker cleanup as any other disconnect.
     socket.on("error", () => undefined);
-    const releaseOpenConnection = openConnectionGate.tryAcquire();
-    if (!releaseOpenConnection) {
-      socket.terminate();
-      return;
-    }
-    const source = authRequestSourceIp(request, options.trustedProxyPolicy);
-    const releaseSourceOpenConnection = openConnectionPerSourceGate.tryAcquire(source);
-    if (!releaseSourceOpenConnection) {
-      releaseOpenConnection();
-      socket.terminate();
-      return;
-    }
-    socket.once("close", combineCapacityReleases(releaseOpenConnection, releaseSourceOpenConnection));
     const product = handleRuntimeSocket(
       socket,
       activeConversationRuns,
-      helloAuthorizationGate,
-      helloAuthorizationPerUserGate,
       turnAuthorizationGate,
       turnAuthorizationPerUserGate,
       activeRunGate,
       activeRunPerUserGate,
-      establishedConnectionGate,
       maxActiveRunsPerConnection,
       helloTimeoutMs,
       connectionHeartbeatMs,
@@ -1924,13 +1830,10 @@ async function materializeUserMessageAssets(
 async function handleRuntimeSocket(
   socket: WebSocket,
   activeConversationRuns: Map<string, string>,
-  helloAuthorizationGate: CapacityGate,
-  helloAuthorizationPerUserGate: KeyedCapacityGate,
   turnAuthorizationGate: CapacityGate,
   turnAuthorizationPerUserGate: KeyedCapacityGate,
   activeRunGate: CapacityGate,
   activeRunPerUserGate: KeyedCapacityGate,
-  establishedConnectionGate: CapacityGate,
   maxActiveRunsPerConnection: number,
   helloTimeoutMs: number,
   connectionHeartbeatMs: number,
@@ -1980,7 +1883,6 @@ async function handleRuntimeSocket(
   const cancellingRunIds = new Set<string>();
   let helloPending = false;
   let authorizationSlotRunId: string | undefined;
-  let releaseEstablishedConnection: (() => void) | undefined;
   let heartbeatTimer: NodeJS.Timeout | undefined;
   let awaitingPong = false;
   let lastClientActivityAt = Date.now();
@@ -2020,8 +1922,6 @@ async function handleRuntimeSocket(
     clearTimeout(helloDeadline);
     if (heartbeatTimer) clearInterval(heartbeatTimer);
     heartbeatTimer = undefined;
-    releaseEstablishedConnection?.();
-    releaseEstablishedConnection = undefined;
     connectionAbortController.abort(new Error("Runtime socket closed"));
     for (const pending of pendingTurnAuthorizations.values()) {
       pending.cancelled = true;
@@ -2076,42 +1976,13 @@ async function handleRuntimeSocket(
             return;
           }
           helloPending = true;
-          let releaseHelloAuthorization: (() => void) | undefined;
-          let releaseUserHelloAuthorization: (() => void) | undefined;
           try {
-            releaseHelloAuthorization = helloAuthorizationGate.tryAcquire();
-            if (!releaseHelloAuthorization) {
-              await send({
-                type: "turn.failed",
-                error: {
-                  code: "authentication_busy",
-                  message: "Hatch is already verifying the maximum number of new sessions. Try again shortly."
-                }
-              });
-              socket.close(1013, "Authentication capacity reached");
-              return;
-            }
             const authClaims = await resolveHelloAuthClaims(
               message,
               authIdentityResolver,
               legacyHmacAuth,
               connectionAbortController.signal
             );
-            const userKey = authClaims?.sub
-              ?? message.user_id
-              ?? shortHash(message.auth_token ?? message.license_token ?? "anonymous");
-            releaseUserHelloAuthorization = helloAuthorizationPerUserGate.tryAcquire(userKey);
-            if (!releaseUserHelloAuthorization) {
-              await send({
-                type: "turn.failed",
-                error: {
-                  code: "user_authentication_busy",
-                  message: "This account is already opening the maximum number of sessions. Try again shortly."
-                }
-              });
-              socket.close(1013, "User authentication capacity reached");
-              return;
-            }
             const nextBinding = await resolveSessionBinding(
               message,
               entitlementResolver,
@@ -2140,19 +2011,6 @@ async function handleRuntimeSocket(
             }
             assertConversationBinding(conversation, conversationBinding(nextBinding));
             connectionAbortController.signal.throwIfAborted();
-            const releaseGlobalConnection = establishedConnectionGate.tryAcquire();
-            if (!releaseGlobalConnection) {
-              await send({
-                type: "turn.failed",
-                error: {
-                  code: "connection_capacity",
-                  message: "Hatch is already serving the maximum number of connected sessions. Try again shortly."
-                }
-              });
-              socket.close(1013, "Connection capacity reached");
-              return;
-            }
-            releaseEstablishedConnection = releaseGlobalConnection;
             if (nextBinding.agentCorpus && nextBinding.agentCorpusRoot) {
               serverTools.setKnowledgeScope({
                 provider: createKnowledgeProvider(nextBinding.agentCorpusRoot, nextBinding.agentCorpus, nextBinding.corpusDigest),
@@ -2236,12 +2094,6 @@ async function handleRuntimeSocket(
             });
             startEstablishedConnectionHeartbeat();
           } finally {
-            releaseUserHelloAuthorization?.();
-            releaseHelloAuthorization?.();
-            if (!hello) {
-              releaseEstablishedConnection?.();
-              releaseEstablishedConnection = undefined;
-            }
             helloPending = false;
           }
           return;
@@ -2549,6 +2401,9 @@ async function handleRuntimeSocket(
               authIdentityResolver,
               authorizationController.signal
             );
+            if (authorizationController.signal.aborted || pendingAuthorization.cancelled) {
+              throw new EntitlementError("authorization_cancelled", "Authorization verification was cancelled.");
+            }
             if (binding.agentCorpus) {
               binding = await resolveTurnAgentBinding(
                 binding,
@@ -2741,7 +2596,7 @@ async function handleRuntimeSocket(
             return;
           }
 
-          const boundMessage: RunStart = {
+          const boundMessage: BoundRunStart = {
             ...message,
             conversation_id: storageConversationId,
             local_tools: new ClientToolCapabilityPolicy(hello.local_tools).forRun(message.local_tools)
@@ -2904,7 +2759,7 @@ export function protectPrivateAgentBoundary(
 }
 
 async function runOneTurn(
-  input: RunStart,
+  input: BoundRunStart,
   persistedUserMessage: ConversationMessage,
   hello: ClientHello,
   sessionSkills: RuntimeSessionSkills,
@@ -2991,15 +2846,12 @@ async function runOneTurn(
         }
         return;
       }
-      if (message.type === "assistant.delta" && message.delta.kind === "thinking_start") {
-        thinkingPartJournal.accept(message.delta);
-        return;
-      }
-      if (message.type === "assistant.delta" && message.delta.kind === "thinking_delta") {
-        thinkingPartJournal.accept(message.delta);
-        return;
-      }
-      if (message.type === "assistant.delta" && message.delta.kind === "thinking_end") {
+      if (
+        message.type === "assistant.delta"
+        && (message.delta.kind === "thinking_start"
+          || message.delta.kind === "thinking_delta"
+          || message.delta.kind === "thinking_end")
+      ) {
         thinkingPartJournal.accept(message.delta);
         return;
       }

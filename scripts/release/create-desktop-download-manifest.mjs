@@ -25,16 +25,26 @@ export const DESKTOP_DOWNLOAD_ARTIFACTS = Object.freeze([
     reportArgument: "intel-report",
     artifactArgument: "intel-artifact",
     fileName: (version) => `Hatch-${version}-macOS-Intel.dmg`
+  },
+  {
+    key: "windows-x64",
+    platform: "windows",
+    label: "Windows · x64 preview",
+    latestPath: "desktop/latest/windows/x64.exe",
+    expectedRunnerArchitecture: "X64",
+    reportArgument: "windows-report",
+    artifactArgument: "windows-artifact",
+    fileName: (version) => `Hatch-${version}-Windows-x64.exe`
   }
 ]);
 
 export function buildDesktopDownloadManifest({
   version,
   releaseTag,
-    sourceSha,
-    publicBaseUrl,
-    artifacts,
-    now = new Date()
+  sourceSha,
+  publicBaseUrl,
+  artifacts,
+  now = new Date()
 }) {
   const normalizedVersion = normalizeVersion(version);
   const normalizedReleaseTag = normalizeReleaseTag(releaseTag, normalizedVersion);
@@ -119,6 +129,9 @@ function validateArtifact(definition, artifact, sourceSha, version) {
   }
   if (definition.platform === "macos" && !artifact.filename.endsWith(".dmg")) {
     throw new Error(`macOS artifact ${definition.key} must be a DMG.`);
+  }
+  if (definition.platform === "windows" && !artifact.filename.endsWith(".exe")) {
+    throw new Error(`Windows artifact ${definition.key} must be an EXE.`);
   }
   if (!Number.isSafeInteger(artifact.bytes) || artifact.bytes <= 0) {
     throw new Error(`Invalid byte count for ${definition.key}.`);
@@ -210,6 +223,8 @@ function readCliArguments(argv) {
     "apple-artifact",
     "intel-report",
     "intel-artifact",
+    "windows-report",
+    "windows-artifact",
     "output",
     "published-at"
   ]);

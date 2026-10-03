@@ -69,10 +69,13 @@ export class LocalArtifactObjectStore implements ArtifactObjectStore {
 
 type AliOssClient = {
   put(name: string, content: Buffer, options?: Record<string, unknown>): Promise<unknown>;
+  generateObjectUrl(name: string): string;
   get(name: string, options?: Record<string, unknown>): Promise<{ content: Buffer }>;
   delete(name: string): Promise<unknown>;
   putACL(name: string, acl: "private" | "public-read" | "public-read-write"): Promise<{ res?: { status?: number } }>;
-  processObjectSave(source: string, target: string, process: string): Promise<{ res?: { status?: number } }>;
+  processObjectSave(source: string, target: string, process: string): Promise<{
+    res?: { status?: number; headers?: Record<string, unknown> };
+  }>;
   list(query?: Record<string, unknown>, options?: Record<string, unknown>): Promise<{ objects?: Array<{ name?: string }>; isTruncated?: boolean; nextMarker?: string | null }>;
 };
 
@@ -85,6 +88,8 @@ type AliOssConstructor = new (options: Record<string, unknown>) => AliOssClient;
  */
 export class AliyunArtifactObjectStore implements ArtifactObjectStore {
   private clientPromise?: Promise<AliOssClient>;
+  private publicUrlClientPromise?: Promise<AliOssClient>;
+  private credentialProvider?: { getCredential(): Promise<{ accessKeyId?: string; accessKeySecret?: string; securityToken?: string }> };
 
   constructor(
     private readonly options: {
@@ -168,7 +173,14 @@ export class AliyunArtifactObjectStore implements ArtifactObjectStore {
         objectKey(this.options.prefix, target),
         process
       );
-      if (result.res?.status !== 200) throw new Error(`OSS image processing returned status ${result.res?.status ?? "unknown"}`);
+      if (result.res?.status !== 200) {
+        throw Object.assign(new Error(`OSS image processing returned status ${result.res?.status ?? "unknown"}`), {
+          code: responseHeader(result.res?.headers, "x-oss-ec-code")
+            ?? responseHeader(result.res?.headers, "x-oss-ec"),
+          requestId: responseHeader(result.res?.headers, "x-oss-request-id"),
+          hostId: responseHeader(result.res?.headers, "x-oss-ec-host-id")
+        });
+      }
     } catch (error) {
       throw this.withContext("IMAGE PROCESS", error);
     }
@@ -214,6 +226,11 @@ export class AliyunArtifactObjectStore implements ArtifactObjectStore {
     return names;
   }
 
+  async generatePublicObjectUrl(key: string): Promise<string> {
+    this.publicUrlClientPromise ??= this.createClient(true);
+    return (await this.publicUrlClientPromise).generateObjectUrl(objectKey(this.options.prefix, key));
+  }
+
   private withContext(operation: string, error: unknown): Error {
     const source = error instanceof Error ? error : new Error(String(error));
     const value = error && typeof error === "object" ? error as {
@@ -250,15 +267,15 @@ export class AliyunArtifactObjectStore implements ArtifactObjectStore {
     return this.clientPromise;
   }
 
-  private async createClient(): Promise<AliOssClient> {
-    const credential = this.options.credential ?? defaultCredential();
+  private async createClient(publicEndpoint = false): Promise<AliOssClient> {
+    const credential = this.credentialProvider ??= this.options.credential ?? defaultCredential();
     const initial = await credential.getCredential();
     const OSS = requireAliOss();
     return new OSS({
       bucket: this.options.bucket,
       region: this.options.region ?? "oss-cn-shanghai",
-      ...(this.options.endpoint ? { endpoint: this.options.endpoint } : {}),
-      ...(this.options.internal === undefined ? {} : { internal: this.options.internal }),
+      ...(!publicEndpoint && this.options.endpoint ? { endpoint: this.options.endpoint } : {}),
+      ...(publicEndpoint ? { internal: false } : this.options.internal === undefined ? {} : { internal: this.options.internal }),
       accessKeyId: requireCredential(initial.accessKeyId, "accessKeyId"),
       accessKeySecret: requireCredential(initial.accessKeySecret, "accessKeySecret"),
       ...(initial.securityToken ? { stsToken: initial.securityToken } : {}),
@@ -358,6 +375,11 @@ async function walk(root: string, directory: string): Promise<string[]> {
 
 function sha256(bytes: Buffer): string {
   return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+}
+
+function responseHeader(headers: Record<string, unknown> | undefined, name: string): string | undefined {
+  const value = headers?.[name];
+  return typeof value === "string" ? value : undefined;
 }
 
 function requireCredential(value: string | undefined, label: string): string {

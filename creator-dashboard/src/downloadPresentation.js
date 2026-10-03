@@ -18,12 +18,20 @@ export const DESKTOP_DOWNLOAD_TARGETS = Object.freeze({
     label: "Mac · Intel",
     latestPath: "mac/intel.dmg",
     primaryLabel: "Download preview"
+  }),
+  "windows-x64": Object.freeze({
+    key: "windows-x64",
+    platform: "windows",
+    label: "Windows · x64",
+    latestPath: "windows/x64.exe",
+    primaryLabel: "Download preview"
   })
 });
 
 export const DESKTOP_DOWNLOAD_TARGET_ORDER = Object.freeze([
   "macos-apple-silicon",
-  "macos-intel"
+  "macos-intel",
+  "windows-x64"
 ]);
 
 export function normalizeDownloadBaseUrl(value) {
@@ -46,7 +54,7 @@ export function detectDownloadTarget(navigatorLike = globalThis.navigator) {
   const platform = String(userAgentData.platform ?? navigatorValue.platform ?? navigatorValue.userAgent ?? "").toLowerCase();
   const architecture = normalizeArchitecture(userAgentData.architecture);
 
-  if (platform.includes("win")) return "unsupported";
+  if (platform.includes("win")) return "windows-x64";
   if (platform.includes("mac") || platform.includes("darwin")) {
     if (architecture === "arm" || architecture === "arm64" || architecture === "aarch64") {
       return "macos-apple-silicon";

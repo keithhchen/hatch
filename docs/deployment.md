@@ -75,12 +75,17 @@ or separate production Runtime exists. The server uses two Compose projects:
    project-level `HatchRuntimeRole` to the ECS instance before deploying; the
    container obtains short-lived credentials from IMDSv2 and uses the Shanghai
    Guardrails VPC endpoint.
+    Avatar uploads also require `oss:ProcessImm`, `oss:PostProcessTask`,
+    `oss:PutObjectAcl`, and `oss:DeleteObject` scoped to the bucket's
+    `account-avatars/*` object prefix. The bucket ACL remains `private`; disable
+    bucket-level Block Public Access so avatar objects can use their scoped
+    `public-read` ACL. Account-level Block Public Access remains unchanged.
    Account avatars use the Creator OSS bucket under `account-avatars/`. Set
    `HATCH_ACCOUNT_AVATAR_PUBLIC_BASE_URL` to that bucket's public HTTPS base
    URL. Grant `HatchRuntimeRole` `oss:PutObject`, `oss:GetObject`,
-   `oss:DeleteObject`, and `oss:PutObjectAcl` only on the
-   `account-avatars/*` object prefix. Each processed avatar receives
-   `public-read`; other Creator objects keep their existing ACL.
+   `oss:ProcessImm`, `oss:PostProcessTask`, `oss:DeleteObject`, and
+   `oss:PutObjectAcl` only on the `account-avatars/*` prefix. Each processed
+   avatar receives `public-read`; other Creator objects keep their existing ACL.
    Keep `HATCH_COMMERCE_PAYMENT_MODE=disabled` until a production provider
    bridge is configured. Enabling `provider` makes CD require non-empty
    `HATCH_PAYMENT_PROVIDER_BASE_URL`, `HATCH_PAYMENT_PROVIDER_API_TOKEN`, and
@@ -171,13 +176,11 @@ playbook from the private application network; internal Commerce routes are
 not exposed by Caddy.
 
 The Desktop app is not part of the server Compose project. A `vMAJOR.MINOR.PATCH`
-tag runs `Hatch Desktop CI`, which builds the two macOS distribution
-artifacts—Apple Silicon and Intel—and an unsigned Windows NSIS UAT installer,
-then verifies each artifact's exact source SHA, byte count, and SHA-256. The
-macOS artifacts are uploaded to OSS for the Web fixed aliases; all three
-installers and their provenance reports are also published to the public
-GitHub Release repository. The OSS path does not create a GitHub Release, so
-GitHub's automatic Source code zip/tar assets are not exposed as downloads.
+tag runs `Hatch Desktop CI`, which builds macOS Apple Silicon, macOS Intel,
+and unsigned Windows x64 NSIS installers from the same source. The workflow
+verifies each package's source SHA, byte count, and SHA-256, publishes all
+three to OSS with fixed Web download aliases, and then publishes the installers
+and provenance reports to the public GitHub Release repository.
 The one-time OSS bucket, RAM policy, and repository variable/secret setup is
 documented in [`desktop-download-oss-setup.md`](desktop-download-oss-setup.md).
 
@@ -193,8 +196,8 @@ The same lane must set `HATCH_PERSISTENT_SESSION=1` and the expected
 Application signature, Team ID, and bundle identifier before it may use the
 production Keychain session item. The build also checks those values from the
 final signed `.app`, rather than trusting the requested signing identity.
-Ad-hoc DMGs remain local UAT artifacts, never persist a session to Login
-Keychain, and are never published.
+Ad-hoc DMGs published through Desktop CI remain process-memory-only UAT
+packages and never persist a session to Login Keychain.
 
 Windows signed distribution is currently paused. A future signed Windows lane
 remains blocked on a device-bound/session-challenge backend,

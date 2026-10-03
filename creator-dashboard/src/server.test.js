@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -75,6 +75,87 @@ test("Dashboard readiness fails closed when Registry is unavailable", async (con
   assert.equal((await unhealthy.json()).error.code, "dashboard_not_ready");
   const live = await fetch(`${serverUrl(api)}/healthz`);
   assert.equal(live.status, 200);
+});
+
+test("consumer avatar changes proxy through the authenticated Registry session", async (context) => {
+  const account = {
+    id: "buyer-avatar-test",
+    role: "user",
+    email: "buyer@example.test",
+    display_name: "Buyer"
+  };
+  let avatarUrl = null;
+  const avatarRequests = [];
+  const registry = createServer(async (request, response) => {
+    const requestUrl = new URL(request.url ?? "/", "http://registry.test");
+    const body = [];
+    for await (const chunk of request) body.push(Buffer.from(chunk));
+    const payload = Buffer.concat(body);
+    response.setHeader("content-type", "application/json");
+    if (requestUrl.pathname === "/v1/auth/signin") {
+      response.end(JSON.stringify({ token: "signed-user-token", account }));
+      return;
+    }
+    if (requestUrl.pathname === "/v1/auth/me") {
+      response.end(JSON.stringify({ ...account, avatar_url: avatarUrl }));
+      return;
+    }
+    if (requestUrl.pathname === "/v1/auth/me/avatar") {
+      avatarRequests.push({ method: request.method, authorization: request.headers.authorization, contentType: request.headers["content-type"], body: payload });
+      avatarUrl = request.method === "PUT" ? "https://avatar.example.test/account.webp" : null;
+      response.end(JSON.stringify({ ...account, avatar_url: avatarUrl }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: { code: "not_found", message: "Not found." } }));
+  });
+  await listen(registry);
+  context.after(() => registry.close());
+
+  const stateDirectory = path.join(path.dirname(new URL(import.meta.url).pathname), "../.local-uat", `avatar-proxy-${randomUUID()}`);
+  await mkdir(stateDirectory, { recursive: true });
+  const dashboard = await createDashboardApp({
+    ledgerPath: path.join(stateDirectory, "ledger.jsonl"),
+    registryUrl: serverUrl(registry)
+  });
+  const api = createServer(dashboard.handler);
+  await listen(api);
+  context.after(() => api.close());
+
+  const login = await fetch(`${serverUrl(api)}/v1/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: account.email, password: "test-only" })
+  });
+  assert.equal(login.status, 200);
+  const cookies = login.headers.getSetCookie();
+  const cookie = cookies.map((value) => value.split(";", 1)[0]).join("; ");
+  const csrfCookie = cookies.find((value) => value.startsWith("hatch_web_csrf="));
+  assert.ok(csrfCookie);
+  const csrf = decodeURIComponent(csrfCookie.split(";", 1)[0].slice("hatch_web_csrf=".length));
+
+  const upload = await fetch(`${serverUrl(api)}/v1/auth/me/avatar`, {
+    method: "PUT",
+    headers: { cookie, "x-csrf-token": csrf, "content-type": "image/png" },
+    body: Buffer.from("avatar-image-bytes")
+  });
+  assert.equal(upload.status, 200);
+  assert.equal((await upload.json()).avatar_url, "https://avatar.example.test/account.webp");
+  assert.equal(avatarRequests[0].authorization, "Bearer signed-user-token");
+  assert.equal(avatarRequests[0].contentType, "image/png");
+  assert.deepEqual(avatarRequests[0].body, Buffer.from("avatar-image-bytes"));
+
+  const refreshedProfile = await fetch(`${serverUrl(api)}/v1/auth/me`, { headers: { cookie } });
+  assert.equal(refreshedProfile.status, 200);
+  assert.equal((await refreshedProfile.json()).avatar_url, "https://avatar.example.test/account.webp");
+
+  const remove = await fetch(`${serverUrl(api)}/v1/auth/me/avatar`, {
+    method: "DELETE",
+    headers: { cookie, "x-csrf-token": csrf }
+  });
+  assert.equal(remove.status, 200);
+  assert.equal((await remove.json()).avatar_url, null);
+  assert.deepEqual(avatarRequests.map(({ method }) => method), ["PUT", "DELETE"]);
 });
 
 test("browser authentication keeps its session through a transient Registry failure", async (context) => {
@@ -930,7 +1011,8 @@ test("V2 checkout session persists a free receipt and entitlement detail", async
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-v2-checkout-"));
   const accessBodies = [];
   const revokedEntitlements = [];
-  const registry = registryFixture({ role: "user", accessBodies, revokedEntitlements });
+  const creatorAvatar = "https://media.example/creator-avatar.webp";
+  const registry = registryFixture({ role: "user", agent: { ...catalogAgent, creator_avatar_url: creatorAvatar }, accessBodies, revokedEntitlements });
   await listen(registry);
   context.after(() => registry.close());
   const dashboard = await createDashboardApp({
@@ -950,6 +1032,7 @@ test("V2 checkout session persists a free receipt and entitlement detail", async
   assert.equal(detailResponse.status, 200);
   assert.equal(detail.product.available, true);
   assert.equal(detail.product.availability, "published");
+  assert.equal(detail.product.creator.avatar_url, creatorAvatar);
   assert.equal("offer" in detail.product, false);
   const canonicalDetailResponse = await fetch(`${serverUrl(api)}/v1/public/products/${catalogAgent.product_id}`);
   const canonicalDetail = await canonicalDetailResponse.json();
@@ -1015,6 +1098,7 @@ test("V2 checkout session persists a free receipt and entitlement detail", async
   const canonicalLibrary = await canonicalLibraryResponse.json();
   assert.equal(canonicalLibraryResponse.status, 200);
   assert.equal(canonicalLibrary.entitlements.length, 1);
+  assert.equal(canonicalLibrary.entitlements[0].creator.avatar_url, creatorAvatar);
 
   const entitlementResponse = await fetch(`${serverUrl(api)}/v1/user/entitlements/${confirmed.entitlement_id}`, { headers });
   const entitlement = (await entitlementResponse.json()).entitlement;
@@ -1042,6 +1126,7 @@ test("V2 checkout session persists a free receipt and entitlement detail", async
   assert.equal(desktopAccess.creator_agents[0].entitlement_id, confirmed.entitlement_id);
   assert.equal(desktopAccess.creator_agents[0].user_id, "buyer-zero");
   assert.equal(desktopAccess.creator_agents[0].product.id, catalogAgent.product_id);
+  assert.equal(desktopAccess.creator_agents[0].creator.avatar_url, creatorAvatar);
   assert.equal(desktopAccess.creator_agents[0].access_mode, "unmetered");
   assert.equal("remaining_units" in desktopAccess.creator_agents[0], false);
 
@@ -1049,6 +1134,35 @@ test("V2 checkout session persists a free receipt and entitlement detail", async
   assert.equal(secondTurnAuthorization.access_mode, "unmetered");
   assert.equal(secondTurnAuthorization.status, "active");
   assert.deepEqual(revokedEntitlements, []);
+});
+
+test("public Creator and Product profiles expose the Registry account avatar", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-public-avatar-"));
+  const avatar = "https://media.example/creator-avatar.webp";
+  const registry = registryFixture({ role: "user", agent: { ...catalogAgent, creator_avatar_url: avatar } });
+  await listen(registry);
+  context.after(() => registry.close());
+  const dashboard = await createDashboardApp({
+    ledgerPath: path.join(directory, "ledger.jsonl"),
+    registryUrl: serverUrl(registry)
+  });
+  const api = createServer(dashboard.handler);
+  await listen(api);
+  context.after(() => api.close());
+
+  const productResponse = await fetch(`${serverUrl(api)}/v1/public/products/${catalogAgent.product_id}`);
+  const product = (await productResponse.json()).product;
+  assert.equal(product.creator_avatar_url, avatar);
+  assert.equal(product.creator.avatar_url, avatar);
+
+  const creatorsResponse = await fetch(`${serverUrl(api)}/v1/public/creators`);
+  const creators = await creatorsResponse.json();
+  assert.equal(creators[0].avatar_url, avatar);
+
+  const creatorResponse = await fetch(`${serverUrl(api)}/v1/public/creators/${catalogAgent.creator_id}`);
+  const creator = await creatorResponse.json();
+  assert.equal(creator.creator.avatar_url, avatar);
+  assert.equal(creator.products[0].creator_avatar_url, avatar);
 });
 
 test("a zero-price purchase is permanent and has no buyer cancellation action", async (context) => {
@@ -1267,6 +1381,15 @@ function registryFixture({
     }
     if (requestUrl.pathname === "/v1/public/products") {
       response.end(JSON.stringify(publishedCatalogAgents));
+      return;
+    }
+    if (requestUrl.pathname === "/v1/public/creators") {
+      const creators = [...new Map(publishedCatalogAgents.map(entry => [entry.creator_id, {
+        id: entry.creator_id,
+        name: entry.creator_name,
+        avatar_url: entry.creator_avatar_url ?? null
+      }])).values()];
+      response.end(JSON.stringify(creators));
       return;
     }
     if (requestUrl.pathname === "/v1/creator/products") {

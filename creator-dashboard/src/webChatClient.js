@@ -9,7 +9,6 @@ export class WebChatClientError extends Error {
     this.code = code;
   }
 }
-
 export class WebChatClient {
   constructor(request, entitlementId) {
     this.request = request;
@@ -47,7 +46,6 @@ export class WebChatClient {
     const path = [conversationId, "tools", runId, toolCallId].map(encodeURIComponent).join("/");
     return this.request(this.url(`/${path}`));
   }
-
   receipt(conversationId, runId) {
     return this.request(this.url(`/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}`));
   }
@@ -93,7 +91,6 @@ export class BrowserRuntimeConnection {
       error
     });
   }
-
   cancel(runId) { this.send({ type: "turn.cancel", run_id: runId }); }
   send(message) { this.socket.send(JSON.stringify(message)); }
   get ready() { return this.socket.readyState === WebSocket.OPEN; }

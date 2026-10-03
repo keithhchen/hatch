@@ -44,9 +44,6 @@ export function DownloadPage() {
             {orderedTargets(targets, detectedTarget).map((target) => (
               <DownloadRow key={target.key} target={target} copy={copy} recommended={target.key === detectedTarget} />
             ))}
-            <div className="download-page__row download-page__row--disabled">
-              <span>{copy.windows}</span><span className="download-page__availability">{copy.comingSoon}</span>
-            </div>
           </div>
         )}
       </main>
@@ -56,22 +53,26 @@ export function DownloadPage() {
 
 function orderedTargets(targets, detectedTarget) {
   if (!DESKTOP_DOWNLOAD_TARGETS[detectedTarget]) return targets;
-  return [...targets].sort((target) => target.key === detectedTarget ? -1 : 1);
+  return [...targets].sort((left, right) =>
+    Number(right.key === detectedTarget) - Number(left.key === detectedTarget)
+  );
 }
 
 function deviceMessage(copy, detectedTarget, ready) {
   if (!ready) return copy.detecting;
   if (detectedTarget === "macos-apple-silicon") return copy.recommended(copy.appleSilicon);
   if (detectedTarget === "macos-intel") return copy.recommended(copy.intel);
-  if (detectedTarget === "unsupported") return copy.windowsNotice;
-  return copy.chooseMac;
+  if (detectedTarget === "windows-x64") return copy.recommended(copy.windows);
+  return copy.chooseDevice;
 }
 
 function DownloadRow({ target, copy, recommended }) {
-  const architecture = target.key === "macos-apple-silicon" ? copy.appleSilicon : copy.intel;
+  const label = target.platform === "windows"
+    ? copy.windows
+    : copy.mac(target.key === "macos-apple-silicon" ? copy.appleSilicon : copy.intel);
   return (
     <a className={`download-page__row${recommended ? " is-recommended" : ""}`} href={target.url}>
-      <span>{copy.mac(architecture)}{recommended ? <small>{copy.recommendedLabel}</small> : null}</span>
+      <span>{label}{recommended ? <small>{copy.recommendedLabel}</small> : null}</span>
       <ArrowDown aria-hidden="true" />
     </a>
   );

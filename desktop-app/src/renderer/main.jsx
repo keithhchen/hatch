@@ -250,7 +250,7 @@ function DesktopAuxiliaryWindow({ kind }) {
           <p className="desktop-auxiliary-lede">Creator agents, on your terms.</p>
           <p>Hatch keeps the desktop boundary native while React renders the conversation work surface.</p>
           <dl className="desktop-auxiliary-facts">
-          <div><dt>Version</dt><dd>0.1.32</dd></div>
+          <div><dt>Version</dt><dd>0.1.34</dd></div>
             <div><dt>Architecture</dt><dd>Tauri Hybrid</dd></div>
           </dl>
         </section>
@@ -2399,7 +2399,7 @@ function App() {
         auth_token: buyerSession.accessToken,
         entitlement_id: targetEntitlementId,
         conversation_id: conversationSession.scope.conversationId,
-        client_version: "0.1.32",
+        client_version: "0.1.34",
         local_tools: [...PLATFORM_LOCAL_TOOLS],
       }));
     },
@@ -4004,7 +4004,7 @@ function DesktopSidebar({
                 active={selected}
                 aria-expanded={selected}
                 className={`desktop-source-row agent ${selected ? "selected" : ""}`}
-                icon={<Avatar className="creator-avatar" src={agent.creatorAvatarUrl} name={agent.creator} size="small" />}
+                icon={<Avatar className="desktop-account-avatar creator-avatar" src={agent.creatorAvatarUrl} name={agent.creator} fallback={agent.creatorInitials?.charAt(0)} size="small" />}
                 trailing={selected
                   ? <ChevronDown className="desktop-agent-disclosure" aria-hidden="true" />
                   : <ChevronRight className="desktop-agent-disclosure" aria-hidden="true" />}
@@ -4067,7 +4067,7 @@ function DesktopSidebar({
       </nav>
       <div className="desktop-sidebar-footer">
         <div className="desktop-sidebar-footer__identity">
-          <Avatar className="avatar" src={profile.avatar_url} name={profile.name} size="small" />
+          <Avatar className="desktop-account-avatar avatar" src={profile.avatar_url} name={profile.name} fallback={profile.initials?.charAt(0)} size="small" />
           <span className="desktop-sidebar-account"><strong>{profile.name}</strong></span>
         </div>
         <div className="profile-menu">
@@ -4742,7 +4742,7 @@ function EmptyThread({ connected, creatorAgent, loadingKey }) {
   }
   return (
     <div className="empty-thread">
-      <Avatar className="creator-avatar large" src={creatorAgent.creatorAvatarUrl} name={creatorAgent.creator} size="large" />
+      <Avatar className="desktop-account-avatar creator-avatar large" src={creatorAgent.creatorAvatarUrl} name={creatorAgent.creator} fallback={creatorAgent.creatorInitials?.charAt(0)} size="large" />
       <span className="empty-kicker">{creatorAgent.creator}</span>
       <h2>
         {connected
@@ -4919,7 +4919,7 @@ function EmptyAgentsScreen({ profile, onBrowse, onRefresh, onSignOut, refreshing
       <HatchBrand className="welcome-brand" logoVariant="lockup" aria-label="Hatch" />
       <section className="status-card empty-agents-card">
         <div className="empty-agents-header">
-          <Avatar className="avatar" src={profile.avatar_url} name={profile.name} size="small" />
+          <Avatar className="desktop-account-avatar avatar" src={profile.avatar_url} name={profile.name} fallback={profile.initials?.charAt(0)} size="small" />
           <span><strong>{profile.name}</strong></span>
           <Button className="profile-sign-out" variant="ghost" size="small" type="button" onClick={onSignOut}>{t("auth.signOut")}</Button>
         </div>

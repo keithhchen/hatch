@@ -107,37 +107,36 @@ into source code.
 
 ## 4. What OSS stores
 
-Every annotated `vMAJOR.MINOR.PATCH` tag writes the two macOS packages and a
+Every annotated `vMAJOR.MINOR.PATCH` tag writes two macOS packages and one Windows package with a
 manifest under an immutable versioned prefix, then updates the fixed aliases:
 
 ```text
 desktop/releases/v0.1.17/
   Hatch-0.1.17-macOS-Apple-Silicon.dmg
   Hatch-0.1.17-macOS-Intel.dmg
+  Hatch-0.1.17-Windows-x64.exe
   manifest.json
 
 desktop/latest/
   mac/apple-silicon.dmg
   mac/intel.dmg
+  windows/x64.exe
   manifest.json
 ```
 
-At the current implementation stage these OSS objects are ad-hoc macOS UAT
-candidates. The same annotated tag also builds an unsigned Windows NSIS UAT
-package and publishes it, together with both macOS packages, to the public
-GitHub Release repository. The OSS layout is production-safe for version and
-artifact identity, but none of these packages may be described as signed
-production distribution until the protected signing and target-device gates
-are complete.
+These OSS objects contain ad-hoc macOS and unsigned Windows UAT packages. The
+same annotated tag also publishes all three to the public GitHub Release
+repository. The published provenance identifies their source and exact bytes;
+the packages are preview distributions.
 
 `desktop/latest/manifest.json` is the current version pointer and the machine
 source of truth for version, tag, source commit, publication time, download
 URLs, byte counts, and SHA-256 values. The download page never renders those
-implementation details; it links the two fixed latest objects only.
+implementation details; it links the three fixed latest objects only.
 
 The versioned objects are immutable and can be retained for rollback/audit.
 The latest aliases are the only mutable objects. The tag job downloads the
-latest manifest and both latest packages back through their public URLs and
+latest manifest and all three latest packages back through their public URLs and
 compares their SHA-256 values before it succeeds. It also refuses to move
 the latest pointer backwards: an older tag cannot replace a newer current
 version, and a same-version tag with a different source SHA fails closed.

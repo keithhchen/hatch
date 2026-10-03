@@ -1,13 +1,13 @@
 import React from "react";
-import { Avatar } from "@hatch/ui";
+import { AccountAvatar } from "./AccountAvatar.jsx";
 import { storefrontModel } from "./storefrontModel.js";
 import "./storefrontDetails.css";
 
 export function StorefrontDetails({
   product,
   creatorName,
+  creatorAvatarName,
   creatorAvatarUrl,
-  creatorInitial,
   action,
   mode = "public",
   headingLevel = 1,
@@ -23,7 +23,7 @@ export function StorefrontDetails({
       <header className="storefront-shared__hero">
         <div>
           <span className="storefront-shared__creator">
-            <Avatar className="storefront-shared__creator-avatar" src={creatorAvatarUrl} name={creatorName || "Creator"} fallback={creatorInitial} size="small" />
+            <AccountAvatar className="storefront-shared__creator-avatar" size="small" src={creatorAvatarUrl} name={creatorAvatarName || (typeof creatorName === "string" ? creatorName : "Creator")} />
             <span className="storefront-shared__creator-name">{creatorName || "Creator"}</span>
           </span>
           <Heading>{model.name}</Heading>

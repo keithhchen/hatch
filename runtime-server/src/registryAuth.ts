@@ -292,10 +292,6 @@ export class AccountStoreTs {
     this.sessions.delete(tokenHash);
   }
 
-  async verifyPassword(password: string, account: Account | undefined): Promise<boolean> {
-    return verifyPassword(password, account, this.passwordHasher);
-  }
-
   async setAvatarUrl(id: string, avatarUrl: string | null): Promise<Account> {
     const account = await this.getById(id);
     if (!account) throw new Error("account_not_found");
@@ -311,6 +307,11 @@ export class AccountStoreTs {
     if (!result.rows[0]) throw new Error("account_not_found");
     return rowToAccount(result.rows[0]);
   }
+
+  async verifyPassword(password: string, account: Account | undefined): Promise<boolean> {
+    return verifyPassword(password, account, this.passwordHasher);
+  }
+
 }
 
 export function accountPublic(account: Account): AccountPublic {

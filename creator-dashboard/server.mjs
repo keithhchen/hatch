@@ -34,6 +34,7 @@ import { WebChatRuntimeBridge } from "./webChatRuntimeBridge.mjs";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_JSON_BODY_MAX_BYTES = 1024 * 1024;
+const ACCOUNT_AVATAR_BODY_MAX_BYTES = 5 * 1024 * 1024;
 const CORPUS_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/;
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export const CREATOR_FACTORY_JSON_BODY_MAX_BYTES = 32 * 1024 * 1024;
@@ -893,6 +894,25 @@ export async function createDashboardApp(options = {}) {
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         return send(response, 200, authentication.profile);
       }
+      if (url.pathname === "/v1/auth/me/avatar" && ["PUT", "DELETE"].includes(request.method)) {
+        const authentication = await authenticateAccount(request, registryUrl, fetchImpl, portalState);
+        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
+        const csrfError = cookieCsrfError(request);
+        if (csrfError) return send(response, csrfError.status, csrfError.body);
+        const body = request.method === "PUT"
+          ? await readRawBody(request, ACCOUNT_AVATAR_BODY_MAX_BYTES)
+          : undefined;
+        const upstream = await fetchImpl(new URL("/v1/auth/me/avatar", registryUrl), {
+          method: request.method,
+          headers: {
+            authorization: `Bearer ${authentication.token}`,
+            ...(request.method === "PUT" ? { "content-type": request.headers["content-type"] ?? "" } : {})
+          },
+          ...(body ? { body } : {})
+        });
+        const payload = upstream.status === 204 ? undefined : await upstream.json();
+        return send(response, upstream.status, payload);
+      }
 
       // Browser OAuth is an authorization-code + PKCE bridge to the existing
       // Hatch web session. External Creator tools can request access, but only
@@ -1052,7 +1072,7 @@ export async function createDashboardApp(options = {}) {
           creator: {
             id: first.creator_id,
             name: first.creator_name ?? first.creator_display_name ?? first.creator_id,
-            avatar_url: first.creator_avatar_url ?? null,
+            avatar_url: first.creator_avatar_url ?? first.creator?.avatar_url ?? null,
             verified: Boolean(first.creator_verified)
           },
           products
@@ -2115,7 +2135,9 @@ export async function createDashboardApp(options = {}) {
     request.__oauthStateKey = oauthStateKey;
     const url = new URL(request.url ?? "/", publicOrigin);
     if (url.pathname === "/v1/web-chat/runtime") {
-      const origin = request.headers.origin ? new URL(request.headers.origin).origin : "";
+      let origin;
+      try { origin = request.headers.origin ? new URL(request.headers.origin).origin : ""; }
+      catch { origin = ""; }
       const allowedOrigins = [new URL(publicOrigin).origin];
       if (process.env.NODE_ENV !== "production") allowedOrigins.push("http://127.0.0.1:8510");
       if (!allowedOrigins.includes(origin)) {
@@ -2694,6 +2716,10 @@ async function optionalBuyer(request, registryUrl, fetchImpl, portalState) {
   if (!bearerTokenFromAuthorization(request) && !requestCookies(request).hatch_web_session) return undefined;
   const authentication = await authenticate(request, registryUrl, undefined, fetchImpl, portalState);
   return authentication.profile?.role === "user" ? authentication.profile : undefined;
+}
+
+async function authenticateAccount(request, registryUrl, fetchImpl, portalState) {
+  return authenticate(request, registryUrl, undefined, fetchImpl, portalState);
 }
 
 function publicProfile(profile) {
@@ -3378,14 +3404,13 @@ function publicCatalogAgent(agent, creatorState) {
     product_slug_aliases: _productAliases,
     ...authorityAgent
   } = deployedAgent;
+  const creatorAvatarUrl = Object.hasOwn(agent, "creator_avatar_url")
+    ? agent.creator_avatar_url
+    : agent.creator?.avatar_url ?? authorityAgent.creator_avatar_url ?? authorityAgent.creator?.avatar_url ?? null;
   return {
     ...authorityAgent,
-    creator: {
-      id: authorityAgent.creator_id,
-      name: authorityAgent.creator_name ?? authorityAgent.creator_display_name ?? authorityAgent.creator_id,
-      avatar_url: agent.creator_avatar_url ?? authorityAgent.creator_avatar_url ?? authorityAgent.creator?.avatar_url ?? null
-    },
-    creator_avatar_url: agent.creator_avatar_url ?? authorityAgent.creator_avatar_url ?? null,
+    creator_avatar_url: creatorAvatarUrl,
+    creator: { id: authorityAgent.creator_id, name: authorityAgent.creator_name ?? authorityAgent.creator_display_name ?? authorityAgent.creator_id, avatar_url: creatorAvatarUrl },
     product: { id: authorityAgent.product_id, name: authorityAgent.product_name ?? authorityAgent.name ?? authorityAgent.product_id },
     promise: deployedAgent.product_promise ?? deployedAgent.product_description ?? "",
     description: deployedAgent.product_description ?? "",

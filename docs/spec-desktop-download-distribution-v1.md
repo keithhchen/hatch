@@ -6,14 +6,14 @@
 system and keeps the visible choice small:
 
 - one recommended primary download;
-- Mac Apple Silicon and Mac Intel as alternate choices;
-- a small preview-build label for the current unsigned/UAT distribution;
+- Mac Apple Silicon, Mac Intel, and Windows x64 as choices;
 - no visible version number, filename, SHA-256, runner, or storage details.
 
 The recommendation is determined locally from the browser platform. Chromium
 User-Agent Client Hints are used when available. A Mac browser that cannot
 reliably expose its CPU architecture leaves the user at the version chooser;
-it must not silently send the wrong DMG.
+it must not silently send the wrong DMG. Windows browsers recommend the x64
+installer.
 
 ## OSS layout
 
@@ -24,16 +24,18 @@ updates only these fixed public objects:
 desktop/releases/v0.1.17/
   Hatch-0.1.17-macOS-Apple-Silicon.dmg
   Hatch-0.1.17-macOS-Intel.dmg
+  Hatch-0.1.17-Windows-x64.exe
   manifest.json
 
 desktop/latest/
   mac/apple-silicon.dmg
   mac/intel.dmg
+  windows/x64.exe
   manifest.json
 ```
 
-The page links only to the two `desktop/latest/` objects. Each new tag uploads
-the versioned objects first, then replaces the two latest aliases and the
+The page links to the three `desktop/latest/` objects. Each new tag uploads
+the versioned objects first, then replaces the three latest aliases and the
 latest manifest. Latest aliases use revalidation-oriented cache
 headers; versioned objects are immutable and long-cacheable.
 
@@ -53,14 +55,10 @@ annotated tag timestamp rather than the runner clock.
 The manifest is not rendered into the page. This keeps the download surface
 quiet while retaining a durable source of truth for release operations.
 
-The OSS distribution lane publishes ad-hoc macOS UAT candidates. The same tag
-also runs the Windows LocalRunner/native bridge checks, builds an unsigned
-Windows NSIS UAT package, and publishes all three installers to the public
-GitHub Release repository. This is not a signed production-distribution
-claim. The protected signed macOS validation lane remains separate until its
-external credentials and target-device approvals exist; Windows signed
-distribution and persistent-session validation remain paused for the same
-reason.
+The OSS distribution lane publishes ad-hoc macOS and unsigned Windows UAT
+packages from the same annotated tag. The tag also publishes all three
+installers to the public GitHub Release repository. These packages are preview
+distributions without signed-package or real target-device UAT claims.
 
 ## GitHub configuration
 
@@ -97,7 +95,6 @@ The Web CD must build with `VITE_HATCH_DESKTOP_DOWNLOAD_BASE_URL` set to the
 same public `desktop/latest` prefix. If it is missing, the page shows the real
 unavailable state instead of inventing a fallback download URL.
 
-The workflow verifies both fixed URLs by downloading them back from the public
+The workflow verifies all three fixed URLs by downloading them back from the public
 OSS endpoint and comparing their bytes to the CI evidence SHA-256. It
-does not create a GitHub Release, so GitHub's automatic source-code assets are
-not part of the desktop distribution surface.
+also verifies the matching assets in the public GitHub Release.

@@ -56,7 +56,7 @@ import type { AboutYouAnswerPair } from "./creatorLearning/aboutYouNode.js";
 import { PostgresDistillationGraphStore } from "./creatorLearning/distillationGraphStore.js";
 import { CorpusPublisher, CorpusPublishError } from "./creatorLearning/corpusPublisher.js";
 import { CreatorRegistryReleaseStore, type CreatorRegistryRelease } from "./creatorLearning/creatorRegistryRelease.js";
-import { CREATOR_REGISTRY_ARTIFACT_SCHEMA } from "./creatorLearning/creatorRegistry.js";
+import { corpusOutputSchema } from "./creatorLearning/corpusNode.js";
 import { QdrantKnowledgeIndexer } from "./qdrantIndexer.js";
 import { accountAvatarApplicationServiceFromEnvironment, MAX_ACCOUNT_AVATAR_BYTES } from "./accountAvatar.js";
 import {
@@ -275,7 +275,6 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       });
     holdAdmissionUntilRequestAndRouteSettle(request, response, routePromise, admission);
   });
-  server.maxConnections = httpLimits.maxConnections;
   server.headersTimeout = httpLimits.headersTimeoutMs;
   server.requestTimeout = httpLimits.requestTimeoutMs;
   server.keepAliveTimeout = 5_000;
@@ -568,6 +567,24 @@ async function route(
     } finally {
       lease.release();
     }
+    return;
+  }
+  if (url.pathname === "/v1/auth/me/avatar" && (request.method === "PUT" || request.method === "DELETE")) {
+    const account = await authenticate(request, response, context);
+    if (account === SESSION_QUERY_REJECTED) return;
+    if (!account) { sendAuthJson(response, 401, { detail: "A valid account token is required." }); return; }
+    if (!context.accountAvatars) {
+      sendAuthJson(response, 503, { error: { code: "avatar_storage_unavailable", message: "Avatar storage is not configured." } });
+      return;
+    }
+    const updated = request.method === "DELETE"
+      ? await context.accountAvatars.remove(account.id)
+      : await context.accountAvatars.replace(
+        account.id,
+        Buffer.from(await readBytes(request, MAX_ACCOUNT_AVATAR_BYTES)),
+        String(request.headers["content-type"] ?? "").split(";", 1)[0]!.trim().toLowerCase()
+      );
+    sendAuthJson(response, 200, accountPublic(updated));
     return;
   }
   if (url.pathname === "/v1/auth/logout" && request.method === "POST") {
@@ -1124,13 +1141,10 @@ async function resolvePublishedCreatorToolConnection(
     throw new Error("published Creator release does not match the requested product");
   }
   if (!context.nodeObjectStore) throw new Error("Creator Registry object storage is unavailable");
-  const artifact = CREATOR_REGISTRY_ARTIFACT_SCHEMA.parse(
+  const corpus = corpusOutputSchema.parse(
     JSON.parse((await context.nodeObjectStore.get(release.corpus_ref)).toString("utf8"))
   );
-  if (artifact.creator.id !== tenantId || artifact.product.id !== productId) {
-    throw new Error("published Creator Corpus identity does not match its Registry release");
-  }
-  const declared = artifact.corpus.tools.find((tool) => tool.id === toolId);
+  const declared = corpus.tools.find((tool) => tool.id === toolId);
   if (!declared || (declared.kind !== "http_function" && declared.kind !== "mcp_tool") || !declared.connection_ref) {
     throw new Error(`published Creator tool does not exist or has no connection reference: ${toolId}`);
   }
@@ -1230,10 +1244,17 @@ async function publicCatalogRows(context: RegistryContext): Promise<Record<strin
     const time = Date.parse(String(right.published_at ?? "")) - Date.parse(String(left.published_at ?? ""));
     return time || String(left.product_id ?? "").localeCompare(String(right.product_id ?? ""));
   });
-  const creatorIds = [...new Set(ordered.map(row => String(row.creator_id ?? "")).filter(Boolean))];
-  const creatorAccounts = await Promise.all(creatorIds.map(id => context.accounts.getById(id)));
-  const avatars = new Map(creatorIds.map((id, index) => [id, creatorAccounts[index]?.avatar_url ?? null]));
-  return ordered.map(row => ({ ...row, creator_avatar_url: avatars.get(String(row.creator_id ?? "")) ?? null }));
+  return attachCreatorAvatars(ordered, (creatorId) => context.accounts.getById(creatorId));
+}
+
+export async function attachCreatorAvatars<T extends Record<string, unknown>>(
+  rows: T[],
+  readAccount: (creatorId: string) => Promise<{ avatar_url: string | null } | undefined>
+): Promise<Array<T & { creator_avatar_url: string | null }>> {
+  const creatorIds = [...new Set(rows.map(row => String(row.creator_id ?? "")).filter(Boolean))];
+  const accounts = await Promise.all(creatorIds.map(readAccount));
+  const avatars = new Map(creatorIds.map((creatorId, index) => [creatorId, accounts[index]?.avatar_url ?? null]));
+  return rows.map(row => ({ ...row, creator_avatar_url: avatars.get(String(row.creator_id ?? "")) ?? null }));
 }
 
 function publicProductRow(row: Record<string, unknown>): Record<string, unknown> {

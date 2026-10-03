@@ -19,6 +19,18 @@
       "Resource": [
         "acs:oss:*:*:hatch-creator-distillation-1771409462189426"
       ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "oss:DeleteObject",
+        "oss:PutObjectAcl",
+        "oss:ProcessImm",
+        "oss:PostProcessTask"
+      ],
+      "Resource": [
+        "acs:oss:*:1771409462189426:hatch-creator-distillation-1771409462189426/account-avatars/*"
+      ]
     }
   ]
 }

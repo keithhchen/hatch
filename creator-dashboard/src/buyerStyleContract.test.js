@@ -5,6 +5,8 @@ import test from "node:test";
 const stylesheet = readFileSync(new URL("./buyerPortalV2.css", import.meta.url), "utf8");
 const source = readFileSync(new URL("./BuyerPortalV2.jsx", import.meta.url), "utf8");
 const appSource = readFileSync(new URL("./main.jsx", import.meta.url), "utf8");
+const avatarSource = readFileSync(new URL("./AccountAvatar.jsx", import.meta.url), "utf8");
+const avatarStyles = readFileSync(new URL("./accountAvatar.css", import.meta.url), "utf8");
 
 test("buyer detail values remain inside their grid at long real identifiers", () => {
   assert.match(stylesheet, /\.buyer-v2__detail-card\s*\{[^}]*min-width:\s*0;/);
@@ -15,6 +17,14 @@ test("creator identity stays circular and never falls back to a byline", () => {
   assert.match(stylesheet, /\.buyer-v2__creator-avatar\s*\{[^}]*border-radius:\s*50%;/);
   assert.match(stylesheet, /\.buyer-v2__creator-profile-avatar\s*\{[^}]*border-radius:\s*50%;/);
   assert.doesNotMatch(source, />by\s+\{/);
+});
+
+test("account avatars share a black circular single-letter fallback", () => {
+  assert.match(avatarSource, /charAt\(0\)\.toLocaleUpperCase\(\)/);
+  assert.match(avatarStyles, /aspect-ratio:\s*1;/);
+  assert.match(avatarStyles, /border-radius:\s*50%;/);
+  assert.match(avatarStyles, /background:\s*#111;/);
+  assert.match(avatarStyles, /font-family:\s*var\(--hatch-font-display\);/);
 });
 
 test("a non-Creator account is sent to the real Creator signup intent", () => {

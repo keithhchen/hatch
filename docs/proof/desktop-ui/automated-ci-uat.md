@@ -1,13 +1,14 @@
 # Automated desktop UAT candidates
 
-`Hatch CI` now has a reproducible package-candidate lane on every pull request,
-`master` push, and manual `workflow_dispatch` run. It produces two short-lived,
+`Hatch Desktop CI` has a reproducible package-candidate lane on every pull request,
+`master` push, and manual `workflow_dispatch` run. It produces three short-lived,
 **non-production UAT-only** artifacts:
 
 | Runner | Package | Evidence report |
 | --- | --- | --- |
 | `macos-latest` (Apple Silicon) | ad-hoc `.app` → `.dmg` | `artifacts/desktop-uat/macos.json` |
 | `macos-15-intel` (Intel) | ad-hoc `.app` → `.dmg` | `artifacts/desktop-uat/macos.json` |
+| `windows-latest` (x64) | unsigned NSIS `.exe` | `artifacts/desktop-uat/windows.json` |
 
 The reports are emitted by
 [`scripts/uat/record-desktop-uat-artifact.mjs`](../../../scripts/uat/record-desktop-uat-artifact.mjs).
@@ -17,12 +18,12 @@ script rejects missing, ambiguous, empty, or persistent-session package output.
 
 This makes a CI package a useful input to a target-device UAT: the reviewer can
 download a single immutable candidate and verify it before installation. It does
-not turn a hosted runner into a substitute for a real macOS desktop.
+not turn a hosted runner into a substitute for a real target device.
 Pull-request, `master`, and manual-run artifacts expire after seven days and
-are not standalone releases. A SemVer tag may promote the exact two tagged
-macOS candidate packages to the dedicated OSS download prefix after the source,
-architecture, byte, and SHA checks pass; that promotion remains explicitly
-UAT-level and does not create a GitHub Release.
+are not standalone releases. A SemVer tag publishes the exact three tagged
+packages to the dedicated OSS download prefix and public GitHub Release after
+the source, architecture, byte, and SHA checks pass. The packages remain
+explicitly UAT-level.
 
 ## What the automated lanes establish
 
@@ -37,7 +38,7 @@ UAT-level and does not create a GitHub Release.
 - Both macOS architectures additionally run renderer tests/web build, Rust
   formatting, LocalRunner tests, Tauri bridge tests, and strict ad-hoc DMG
   construction before upload.
-- Windows CI now runs the Windows LocalRunner/native bridge checks and records
+- Windows CI runs the Windows LocalRunner/native bridge checks and records
   an unsigned NSIS UAT package; signed distribution and target-device
   acceptance remain separate.
 
