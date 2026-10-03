@@ -23,7 +23,9 @@
     {
       "Effect": "Allow",
       "Action": [
-        "oss:DeleteObject"
+        "oss:DeleteObject",
+        "oss:PutObjectAcl",
+        "oss:ProcessImm"
       ],
       "Resource": [
         "acs:oss:*:1771409462189426:hatch-creator-distillation-1771409462189426/account-avatars/*"
