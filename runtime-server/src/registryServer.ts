@@ -58,6 +58,7 @@ import { CorpusPublisher, CorpusPublishError } from "./creatorLearning/corpusPub
 import { CreatorRegistryReleaseStore, type CreatorRegistryRelease } from "./creatorLearning/creatorRegistryRelease.js";
 import { corpusOutputSchema } from "./creatorLearning/corpusNode.js";
 import { QdrantKnowledgeIndexer } from "./qdrantIndexer.js";
+import { accountAvatarApplicationServiceFromEnvironment, MAX_ACCOUNT_AVATAR_BYTES } from "./accountAvatar.js";
 import {
   HttpRequestGate,
   PublishWorkGate,
@@ -73,6 +74,7 @@ export const CREATOR_FACTORY_JSON_BODY_MAX_BYTES = 32 * 1024 * 1024;
 type RegistryContext = {
   store: RegistryStoreTs;
   accounts: AccountStoreTs;
+  accountAvatars?: ReturnType<typeof accountAvatarApplicationServiceFromEnvironment>;
   authRateLimiter: AuthRateLimiter;
   sessionQueryGate: SessionQueryGate;
   publishWorkGate: PublishWorkGate;
@@ -98,6 +100,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const store = await RegistryStoreTs.open({ environment });
   const accounts = new AccountStoreTs(store.databasePool(), new PasswordHasher(passwordWorkOptions));
   await accounts.ensureSchema();
+  const accountAvatars = accountAvatarApplicationServiceFromEnvironment(accounts, environment);
   const factoryRepository = creatorFactoryRepositoryForRegistry(environment, store.databasePool());
   await factoryRepository.initialize();
   const factoryRoot = path.resolve(environment.HATCH_CREATOR_FACTORY_ROOT ?? "creator-factory-runs");
@@ -197,7 +200,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const publishWorkGate = new PublishWorkGate(publishWorkLimitOptionsFromEnvironment(environment));
   const httpLimits = httpRequestLimitOptionsFromEnvironment(environment);
   const httpRequestGate = new HttpRequestGate(httpLimits);
-  const registryContext: RegistryContext = { store, accounts, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, nodeObjectStore, releaseStore, authSecret };
+  const registryContext: RegistryContext = { store, accounts, accountAvatars, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, nodeObjectStore, releaseStore, authSecret };
   const server = http.createServer((request, response) => {
     const suppliedBearer = bearer(request);
     const internalRuntime = Boolean(
@@ -547,6 +550,24 @@ async function route(
     } finally {
       lease.release();
     }
+    return;
+  }
+  if (url.pathname === "/v1/auth/me/avatar" && (request.method === "PUT" || request.method === "DELETE")) {
+    const account = await authenticate(request, response, context);
+    if (account === SESSION_QUERY_REJECTED) return;
+    if (!account) { sendAuthJson(response, 401, { detail: "A valid account token is required." }); return; }
+    if (!context.accountAvatars) {
+      sendAuthJson(response, 503, { error: { code: "avatar_storage_unavailable", message: "Avatar storage is not configured." } });
+      return;
+    }
+    const updated = request.method === "DELETE"
+      ? await context.accountAvatars.remove(account.id)
+      : await context.accountAvatars.replace(
+        account.id,
+        Buffer.from(await readBytes(request, MAX_ACCOUNT_AVATAR_BYTES)),
+        String(request.headers["content-type"] ?? "").split(";", 1)[0]!.trim().toLowerCase()
+      );
+    sendAuthJson(response, 200, accountPublic(updated));
     return;
   }
   if (url.pathname === "/v1/auth/logout" && request.method === "POST") {
