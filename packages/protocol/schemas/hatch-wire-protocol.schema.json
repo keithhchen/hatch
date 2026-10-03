@@ -326,11 +326,48 @@
         "delta": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["kind", "content"],
           "properties": {
-            "kind": { "type": "string", "enum": ["text", "status"] },
-            "content": { "type": "string" }
-          }
+            "kind": { "type": "string" },
+            "content": { "type": "string" },
+            "contentIndex": { "type": "integer", "minimum": 0 },
+            "delta": { "type": "string" }
+          },
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "required": ["kind", "content"],
+              "properties": {
+                "kind": { "type": "string", "enum": ["text", "status"] },
+                "content": { "type": "string" }
+              }
+            },
+            {
+              "additionalProperties": false,
+              "required": ["kind", "contentIndex"],
+              "properties": {
+                "kind": { "const": "thinking_start" },
+                "contentIndex": { "type": "integer", "minimum": 0 }
+              }
+            },
+            {
+              "additionalProperties": false,
+              "required": ["kind", "contentIndex", "delta"],
+              "properties": {
+                "kind": { "const": "thinking_delta" },
+                "contentIndex": { "type": "integer", "minimum": 0 },
+                "delta": { "type": "string" }
+              }
+            },
+            {
+              "additionalProperties": false,
+              "required": ["kind", "contentIndex", "content"],
+              "properties": {
+                "kind": { "const": "thinking_end" },
+                "contentIndex": { "type": "integer", "minimum": 0 },
+                "content": { "type": "string" }
+              }
+            }
+          ]
         }
       }
     },

@@ -12,6 +12,39 @@ import { TASK_START_MESSAGE_CONTENT, type ConversationMessage, type OutboundMess
 import { discoverSkills, renderSkillsSection } from "./skills.js";
 import { persistToolMessage } from "./toolMessage.js";
 
+test("Pi thinking lifecycle preserves each event kind, content index and payload", async () => {
+  const runtime = new PiAgentRuntime({ toolDefinitions: [] });
+  const input = {
+    type: "client.message",
+    run_id: "run_pi_thinking",
+    conversation_id: "conversation_pi_thinking",
+    message: { role: "user", content: "Continue." }
+  } as RunStart;
+  const emitted: OutboundMessage[] = [];
+  const queue = { push: (message: OutboundMessage) => emitted.push(message) };
+  const handleEvent = Reflect.get(runtime, "handleEvent");
+  assert.equal(typeof handleEvent, "function");
+
+  for (const assistantMessageEvent of [
+    { type: "thinking_start", contentIndex: 7, partial: {} },
+    { type: "thinking_delta", contentIndex: 7, delta: "reasoning", partial: {} },
+    { type: "thinking_end", contentIndex: 7, content: "reasoning", partial: {} }
+  ]) {
+    await Reflect.apply(handleEvent as (...args: unknown[]) => unknown, runtime, [{
+      event: { type: "message_update", assistantMessageEvent },
+      input,
+      queue
+    }]);
+  }
+
+  assert.deepEqual(emitted.map((message) => message.type === "assistant.delta" ? message.delta : undefined), [
+    { kind: "status", content: "Thinking through the product." },
+    { kind: "thinking_start", contentIndex: 7 },
+    { kind: "thinking_delta", contentIndex: 7, delta: "reasoning" },
+    { kind: "thinking_end", contentIndex: 7, content: "reasoning" }
+  ]);
+});
+
 test("committed user and tool images reach repeated provider requests without asset reads", async (t) => {
   const originalProfile = process.env.HATCH_LLM_PROFILE;
   const originalKey = process.env.LLM_API_KEY;

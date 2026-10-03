@@ -564,6 +564,31 @@ export class PiAgentRuntime implements AgentRuntime {
           run_id: input.run_id,
           delta: { kind: "status", content: "Thinking through the product." }
         });
+        queue.push({
+          type: "assistant.delta",
+          run_id: input.run_id,
+          delta: { kind: "thinking_start", contentIndex: event.assistantMessageEvent.contentIndex }
+        });
+      } else if (event.assistantMessageEvent.type === "thinking_delta") {
+        queue.push({
+          type: "assistant.delta",
+          run_id: input.run_id,
+          delta: {
+            kind: "thinking_delta",
+            contentIndex: event.assistantMessageEvent.contentIndex,
+            delta: event.assistantMessageEvent.delta
+          }
+        });
+      } else if (event.assistantMessageEvent.type === "thinking_end") {
+        queue.push({
+          type: "assistant.delta",
+          run_id: input.run_id,
+          delta: {
+            kind: "thinking_end",
+            contentIndex: event.assistantMessageEvent.contentIndex,
+            content: event.assistantMessageEvent.content
+          }
+        });
       }
       return;
     }

@@ -14,6 +14,7 @@ import {
   type RuntimeCompactionMessage
 } from "./compaction.js";
 import { createAgentRuntime, type AgentRuntime, type RuntimeSessionSkills } from "./agentRuntime.js";
+import { ThinkingPartJournal } from "./thinkingPartJournal.js";
 import {
   clientMessageInputDigest,
   ClientToolCapabilityPolicy,
@@ -3009,6 +3010,7 @@ async function runOneTurn(
     );
     let approvedAssistantText = "";
     const visibleParts: VisibleConversationPart[] = [];
+    const thinkingPartJournal = new ThinkingPartJournal(visibleParts);
     const visibleActivityKeys = new Set<string>();
     const recordVisiblePart = (message: OutboundMessage): void => {
       if (!("run_id" in message) || message.run_id !== input.run_id) return;
@@ -3022,6 +3024,15 @@ async function runOneTurn(
         } else {
           visibleParts.push({ type: "text", start, end });
         }
+        return;
+      }
+      if (
+        message.type === "assistant.delta"
+        && (message.delta.kind === "thinking_start"
+          || message.delta.kind === "thinking_delta"
+          || message.delta.kind === "thinking_end")
+      ) {
+        thinkingPartJournal.accept(message.delta);
         return;
       }
       if (message.type === "tool_call.delta") {

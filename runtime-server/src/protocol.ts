@@ -399,10 +399,11 @@ export type DeliveryReady = {
 export type AgentDelta = {
   type: "assistant.delta";
   run_id: string;
-  delta: {
-    kind: "text" | "status";
-    content: string;
-  };
+  delta:
+    | { kind: "text" | "status"; content: string }
+    | { kind: "thinking_start"; contentIndex: number }
+    | { kind: "thinking_delta"; contentIndex: number; delta: string }
+    | { kind: "thinking_end"; contentIndex: number; content: string };
 };
 
 export type ToolRequest = {

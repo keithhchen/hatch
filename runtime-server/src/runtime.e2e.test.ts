@@ -632,7 +632,7 @@ test("Output Guard releases passed segments but commits only a blocked terminal 
   assert.equal(
     messages
       .filter((message) => message.type === "assistant.delta" && message.delta.kind === "text")
-      .map((message) => message.type === "assistant.delta" ? message.delta.content : "")
+      .map((message) => message.type === "assistant.delta" && message.delta.kind === "text" ? message.delta.content : "")
       .join(""),
     "a".repeat(DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS)
   );
@@ -721,7 +721,7 @@ test("Output Guard provider errors degrade to a normal committed response", asyn
   assert.equal(
     messages
       .filter((message) => message.type === "assistant.delta" && message.delta.kind === "text")
-      .map((message) => message.type === "assistant.delta" ? message.delta.content : "")
+      .map((message) => message.type === "assistant.delta" && message.delta.kind === "text" ? message.delta.content : "")
       .join(""),
     "A normal answer after Guard degradation."
   );
