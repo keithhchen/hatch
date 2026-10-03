@@ -112,7 +112,7 @@ function WebChatActivityModal({ entries, isLastItem, client, conversationId, loc
 
   return <>
     <button type="button" className="web-chat__activity-trigger" aria-haspopup="dialog" onClick={() => { setHasOpened(true); setOpen(true); }}>
-      {lastPresentation.ongoing && isLastItem ? <Shimmer as="span">{triggerTitle}</Shimmer> : <span>{triggerTitle}</span>}
+      {isLastItem ? <Shimmer as="span">{triggerTitle}</Shimmer> : <span>{triggerTitle}</span>}
     </button>
     <dialog ref={dialogRef} className="web-chat__activity-modal" aria-label={t("activityDetails")} onClose={() => setOpen(false)} onClick={event => { if (event.target === event.currentTarget) setOpen(false); }}>
       <header className="web-chat__activity-modal-header">
@@ -128,8 +128,7 @@ function WebChatActivityModal({ entries, isLastItem, client, conversationId, loc
 
 const activityPresentations = Object.freeze({
   thinking: (entry, { t }) => ({
-    title: t(entry.streaming ? "thinkingRunningTitle" : "thinkingCompleteTitle"),
-    ongoing: entry.streaming
+    title: t(entry.streaming ? "thinkingRunningTitle" : "thinkingCompleteTitle")
   }),
   tool: (entry, { t }) => {
     const titleKeys = {
@@ -139,8 +138,7 @@ const activityPresentations = Object.freeze({
       cancelled: "toolCancelledTitle"
     };
     return {
-      title: t(titleKeys[entry.status] ?? "toolRunningTitle", { name: entry.title }),
-      ongoing: entry.status === "requested"
+      title: t(titleKeys[entry.status] ?? "toolRunningTitle", { name: entry.title })
     };
   }
 });
@@ -151,7 +149,7 @@ function WebChatActivityBlock({ entry, client, conversationId, locale, t }) {
   const presentation = present(entry, { locale, t });
   return <details className="web-chat__activity-block">
     <summary className="web-chat__activity-heading">
-      <strong>{presentation.ongoing ? <Shimmer as="span">{presentation.title}</Shimmer> : presentation.title}</strong>
+      <strong>{presentation.title}</strong>
       <ChevronDown aria-hidden="true" />
     </summary>
     {entry.content ? <div className="web-chat__activity-content">{entry.kind === "thinking"
