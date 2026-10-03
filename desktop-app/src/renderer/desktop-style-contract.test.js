@@ -53,7 +53,8 @@ describe("desktop system appearance contract", () => {
   });
 
   it("keeps account and Creator fallback avatars black, circular, and fixed-size", () => {
-    expect(stylesheet).toMatch(/\.desktop-account-avatar\.hui-avatar\s*\{[\s\S]*?aspect-ratio:\s*1;[\s\S]*?border-radius:\s*50%;[\s\S]*?background:\s*#111;/);
+    expect(stylesheet).toMatch(/\.desktop-account-avatar\.hui-avatar\s*\{[\s\S]*?aspect-ratio:\s*1;[\s\S]*?border-radius:\s*50%;/);
+    expect(sharedStylesheet).toMatch(/\.hui-avatar__fallback\s*\{[^}]*background:\s*#000;/);
     expect(stylesheet).toMatch(/\.desktop-sidebar-footer \.desktop-account-avatar\.hui-avatar\.is-small\s*\{[\s\S]*?min-width:\s*30px;[\s\S]*?min-height:\s*30px;/);
   });
 
