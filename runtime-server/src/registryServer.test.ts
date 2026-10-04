@@ -59,6 +59,19 @@ test("published catalog rows use the current Creator account name and avatar", a
   assert.deepEqual(rows, [{ creator_id: CREATOR_ID, creator_name: "Current account name", product_id: PRODUCT_ID, creator_avatar_url: "https://media.example/avatar.webp" }]);
 });
 
+test("published catalog rows omit products whose Creator account is missing", async () => {
+  const rows = await attachCreatorAvatars(
+    [
+      { creator_id: CREATOR_ID, creator_name: "Old Corpus name", product_id: PRODUCT_ID },
+      { creator_id: "missing-creator", creator_name: "Orphaned Corpus name", product_id: "orphaned-product" }
+    ],
+    async creatorId => creatorId === CREATOR_ID
+      ? { display_name: "Current account name", avatar_url: null, role: "creator" }
+      : undefined
+  );
+  assert.deepEqual(rows, [{ creator_id: CREATOR_ID, creator_name: "Current account name", product_id: PRODUCT_ID, creator_avatar_url: null }]);
+});
+
 test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-ts-registry-server-"));
   const registry = await createRegistryServerFromEnvironment({

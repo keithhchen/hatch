@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowUp, ChevronDown, ChevronUp, CircleAlert, Image, LoaderCircle, Paperclip, Plus, RotateCw, Square, X } from "lucide-react";
-import { Avatar, HatchBrand, Select } from "@hatch/ui";
+import { ArrowLeft, ArrowUp, ChevronDown, ChevronUp, CircleAlert, Image, LoaderCircle, Menu, Paperclip, Plus, RotateCw, Square, X } from "lucide-react";
+import { Avatar, HatchBrand } from "@hatch/ui";
 import { WebChatImageViewer } from "./components/WebChatImageViewer.jsx";
 import { Shimmer } from "./components/Shimmer.jsx";
 import { WebChatThinkingTicker } from "./components/WebChatThinkingTicker.jsx";
@@ -13,8 +13,6 @@ import { WebChatSnapshotReconciler } from "./webChatSnapshotReconciler.js";
 import { groupTimelineEntries, PendingWebSubmission, WebChatTimeline } from "./webChatTimeline.js";
 import { WebChatRoute } from "./webChatRoute.js";
 import "./webChat.css";
-
-const LOAD_EARLIER_CONVERSATIONS = "__load-earlier-conversations__";
 
 function conversationDate(value, locale) {
   const date = new Date(value);
@@ -243,6 +241,7 @@ export default function WebChatPage({ productId, conversationId: routedConversat
   const [connectionVersion, setConnectionVersion] = useState(0);
   const [liveTimeline, setLiveTimeline] = useState([]);
   const [briefOpen, setBriefOpen] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [briefAnswers, setBriefAnswers] = useState({});
   const localeRef = useRef(locale);
   localeRef.current = locale;
@@ -262,10 +261,14 @@ export default function WebChatPage({ productId, conversationId: routedConversat
   const draftRef = useRef(null);
   const briefTriggerRef = useRef(null);
   const briefDialogRef = useRef(null);
+  const mobileSidebarTriggerRef = useRef(null);
+  const mobileSidebarRef = useRef(null);
+  const mobileSidebarWasOpenRef = useRef(false);
   const followOutputRef = useRef(true);
 
   const client = useMemo(() => access ? new WebChatClient(request, access.entitlement_id) : null, [access, request]);
   const selectConversation = useCallback(id => {
+    setMobileSidebarOpen(false);
     navigate(id ? WebChatRoute.conversationPath(productId, id) : WebChatRoute.productPath(productId));
   }, [navigate, productId]);
   const updateMessages = useCallback(update => {
@@ -564,6 +567,47 @@ export default function WebChatPage({ productId, conversationId: routedConversat
   }, [briefOpen]);
 
   useEffect(() => {
+    if (!mobileSidebarOpen) {
+      if (mobileSidebarWasOpenRef.current) {
+        mobileSidebarWasOpenRef.current = false;
+        if (window.matchMedia("(max-width: 760px)").matches) {
+          mobileSidebarTriggerRef.current?.focus({ preventScroll: true });
+        }
+      }
+      return undefined;
+    }
+    mobileSidebarWasOpenRef.current = true;
+    const controls = mobileSidebarRef.current?.querySelectorAll("button:not(:disabled), a[href], [tabindex]:not([tabindex='-1'])");
+    controls?.[0]?.focus({ preventScroll: true });
+    const closeOnEscape = event => {
+      if (event.key === "Escape") setMobileSidebarOpen(false);
+      if (event.key !== "Tab") return;
+      const focusable = mobileSidebarRef.current?.querySelectorAll("button:not(:disabled), a[href], [tabindex]:not([tabindex='-1'])");
+      if (!focusable?.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !mobileSidebarRef.current?.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !mobileSidebarRef.current?.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [mobileSidebarOpen]);
+
+  useEffect(() => {
+    const mobileLayout = window.matchMedia("(max-width: 760px)");
+    const closeOnDesktop = event => {
+      if (!event.matches) setMobileSidebarOpen(false);
+    };
+    mobileLayout.addEventListener("change", closeOnDesktop);
+    return () => mobileLayout.removeEventListener("change", closeOnDesktop);
+  }, []);
+
+  useEffect(() => {
     if (!activeRun || !conversationId || runRef.current?.id === activeRun) return undefined;
     const timer = setInterval(() => { void refresh(conversationId).catch(cause => setError(cause)); }, 2000);
     return () => clearInterval(timer);
@@ -580,8 +624,16 @@ export default function WebChatPage({ productId, conversationId: routedConversat
   };
 
   const newConversation = event => {
+    setMobileSidebarOpen(false);
     const fields = access?.brief_spec?.fields ?? access?.product?.brief_spec?.fields;
-    if (fields?.length) { briefTriggerRef.current = event?.currentTarget ?? null; setBriefAnswers({}); setBriefOpen(true); return; }
+    if (fields?.length) {
+      briefTriggerRef.current = mobileSidebarWasOpenRef.current && window.matchMedia("(max-width: 760px)").matches
+        ? mobileSidebarTriggerRef.current
+        : event?.currentTarget ?? null;
+      setBriefAnswers({});
+      setBriefOpen(true);
+      return;
+    }
     void createConversation().catch(cause => setError(cause));
   };
 
@@ -666,7 +718,8 @@ export default function WebChatPage({ productId, conversationId: routedConversat
   const creatorAvatarUrl = creator.avatar_url ?? access?.creator_avatar_url ?? access?.product?.creator_avatar_url;
   const selectedConversation = conversations.find(item => item.id === conversationId);
   return <div className="web-chat" aria-busy={!access && !error}>
-    <aside className="web-chat__sidebar" inert={briefOpen}>
+    {mobileSidebarOpen ? <button type="button" className="web-chat__sidebar-backdrop" aria-label={t("closeMenu")} onClick={() => setMobileSidebarOpen(false)} /> : null}
+    <aside id="web-chat-mobile-sidebar" ref={mobileSidebarRef} className={`web-chat__sidebar${mobileSidebarOpen ? " web-chat__sidebar--mobile-open" : ""}`} role={mobileSidebarOpen ? "dialog" : undefined} aria-modal={mobileSidebarOpen || undefined} aria-label={t("conversationHistory")} inert={briefOpen}>
       <div className="web-chat__sidebar-top">
         <HatchBrand className="web-chat__brand" logoVariant="lockup" />
         <a href="/library" className="web-chat__back" aria-label={t("backToLibrary")}><ArrowLeft aria-hidden="true" /><span>{t("backToLibrary")}</span></a>
@@ -688,42 +741,15 @@ export default function WebChatPage({ productId, conversationId: routedConversat
       <WebChatAccountControls profile={profile} navigate={navigate} onSignOut={onSignOut} />
     </aside>
     <header className="web-chat__mobile-topbar" inert={briefOpen}>
+      <button type="button" ref={mobileSidebarTriggerRef} className="web-chat__mobile-menu" aria-label={t("openMenu")} aria-expanded={mobileSidebarOpen} aria-controls="web-chat-mobile-sidebar" onClick={() => setMobileSidebarOpen(true)}><Menu aria-hidden="true" /></button>
       <HatchBrand className="web-chat__mobile-brand" logoVariant="lockup" />
-      <a href="/library" className="web-chat__mobile-back" aria-label={t("backToLibrary")}><ArrowLeft aria-hidden="true" /><span>{t("backToLibrary")}</span></a>
-      <WebChatAccountControls profile={profile} navigate={navigate} onSignOut={onSignOut} className="web-chat__mobile-account" />
     </header>
     <div className="web-chat__mobile-conversation-bar" inert={briefOpen}>
       <div className="web-chat__mobile-agent">
         <Avatar className="web-chat__heading-avatar" src={creatorAvatarUrl} name={creator.name ?? name} size="medium" />
         <h1>{name}</h1>
       </div>
-      <button type="button" className="web-chat__mobile-new" aria-label={t("newChat")} onClick={newConversation} disabled={!access}><Plus aria-hidden="true" /></button>
       {selectedConversation?.brief_snapshot ? <div className="web-chat__mobile-task-brief"><TaskBriefDropdown key={conversationId} snapshot={selectedConversation.brief_snapshot} t={t} /></div> : null}
-      <div className="web-chat__mobile-history">
-        <Select
-          label={t("conversationHistory")}
-          value={conversationId || undefined}
-          placeholder={t("recentConversations")}
-          options={[
-            ...(conversations.length
-              ? conversations.map(item => ({
-                value: item.id,
-                label: [item.title || t("newConversation"), conversationDate(item.created_at, locale)].filter(Boolean).join(" · ")
-              }))
-              : [{ value: "__no-conversations__", label: t("conversationsEmpty"), disabled: true }]),
-            ...(conversationCursor ? [{ value: LOAD_EARLIER_CONVERSATIONS, label: t("loadEarlierConversations") }] : [])
-          ]}
-          onValueChange={value => {
-            if (value === LOAD_EARLIER_CONVERSATIONS) {
-              void loadConversations().catch(cause => setError(cause));
-              return;
-            }
-            followOutputRef.current = true;
-            selectConversation(value);
-          }}
-          className="web-chat__mobile-history-trigger"
-        />
-      </div>
     </div>
     <main className={`web-chat__main${error && access ? " web-chat__main--error" : ""}`} inert={briefOpen}>
       <header className="web-chat__header">

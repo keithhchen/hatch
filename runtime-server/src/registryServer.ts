@@ -1273,15 +1273,12 @@ export async function attachCreatorAvatars<T extends Record<string, unknown>>(
   const accounts = await Promise.all(creatorIds.map(readAccount));
   const creators = new Map(creatorIds.map((creatorId, index) => {
     const account = accounts[index];
-    if (!account || account.role && account.role !== "creator") {
-      throw new Error(`Published product references missing Creator account ${creatorId}.`);
-    }
+    if (!account || account.role && account.role !== "creator") return [creatorId, undefined];
     return [creatorId, account];
   }));
-  return rows.map(row => {
+  return rows.flatMap(row => {
     const account = creators.get(String(row.creator_id ?? ""));
-    if (!account) throw new Error(`Published product references missing Creator account ${String(row.creator_id ?? "")}.`);
-    return { ...row, creator_name: account.display_name, creator_avatar_url: account.avatar_url };
+    return account ? [{ ...row, creator_name: account.display_name, creator_avatar_url: account.avatar_url }] : [];
   });
 }
 
