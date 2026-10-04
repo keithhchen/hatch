@@ -46,10 +46,6 @@ export class WebChatClient {
     const path = [conversationId, "tools", runId, toolCallId].map(encodeURIComponent).join("/");
     return this.request(this.url(`/${path}`));
   }
-  receipt(conversationId, runId) {
-    return this.request(this.url(`/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}`));
-  }
-
   assetUrl(conversationId, assetId) {
     return this.url(`/${encodeURIComponent(conversationId)}/assets/${encodeURIComponent(assetId)}`);
   }

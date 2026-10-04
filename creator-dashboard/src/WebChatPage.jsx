@@ -249,6 +249,8 @@ export default function WebChatPage({ productId, conversationId: routedConversat
   const conversationRef = useRef(conversationId);
   conversationRef.current = conversationId;
   const socketRef = useRef(null);
+  const reconnectAttemptsRef = useRef(0);
+  const reconnectTimerRef = useRef(null);
   const runRef = useRef(null);
   const pendingSubmissionRef = useRef(null);
   const taskStartRef = useRef(null);
@@ -332,14 +334,14 @@ export default function WebChatPage({ productId, conversationId: routedConversat
     return { snapshot, messages: projectedMessages, stale: false };
   }, [client, updateMessages]);
 
-  const restoreSubmission = useCallback(submission => {
+  const restoreSubmission = useCallback((submission, preservePending = false) => {
     if (!submission) return;
     updateMessages(current => current.filter(message => message.id !== submission.optimisticMessageId
       && !(message.transient && message.run_id === submission.runId && message.role === "assistant")));
     setDraft(submission.content);
     setImages(submission.imageFiles);
     if (runRef.current?.id === submission.runId) runRef.current = null;
-    if (pendingSubmissionRef.current === submission) pendingSubmissionRef.current = null;
+    if (!preservePending && pendingSubmissionRef.current === submission) pendingSubmissionRef.current = null;
     liveTimelineRef.current.reset();
     setLiveTimeline([]);
     setActiveRun(null);
@@ -373,6 +375,10 @@ export default function WebChatPage({ productId, conversationId: routedConversat
   useEffect(() => {
     if (!access || !conversationId) return undefined;
     let live = true;
+    if (reconnectTimerRef.current) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
     const connection = client.openRuntime(conversationId);
     const socket = connection.socket;
     socketRef.current = connection;
@@ -398,24 +404,24 @@ export default function WebChatPage({ productId, conversationId: routedConversat
       }
       if (message.type === "session.ready") {
         if (message.conversation_id !== conversationId) { socket.close(); setError(new WebChatPresentationError("conversationIdentityMismatch")); return; }
+        reconnectAttemptsRef.current = 0;
         try {
-          await refresh(conversationId);
           const pending = pendingSubmissionRef.current;
           if (pending?.conversationId === conversationId) {
-            try {
-              const receipt = await client.receipt(conversationId, pending.runId);
-              if (receipt.submission?.client_message_id === pending.clientMessageId) {
-                pendingSubmissionRef.current = null;
-                setDraft(""); setImages([]);
-                await refresh(conversationId);
-              } else {
-                restoreSubmission(pending);
-              }
-            } catch (cause) {
-              if (cause.status === 404) restoreSubmission(pending);
-              else throw cause;
-            }
+            updateMessages(current => {
+              const withUser = current.some(entry => entry.run_id === pending.runId && entry.role === "user")
+                ? current
+                : [...current, pending.optimisticMessage()];
+              return withUser.some(entry => entry.transient && entry.run_id === pending.runId && entry.role === "assistant")
+                ? withUser
+                : [...withUser, WebChatTimeline.streamingAssistantMessage(pending.runId)];
+            });
+            runRef.current = { id: pending.runId };
+            connection.message({ runId: pending.runId, clientMessageId: pending.clientMessageId, content: pending.content, attachments: pending.attachments });
+            setActiveRun(pending.runId);
+            setStatus({ key: "sending" });
           }
+          await refresh(conversationId);
           if (taskStartRef.current === conversationId) {
             taskStartRef.current = null;
             const runId = `run_${crypto.randomUUID().replaceAll("-", "")}`;
@@ -493,9 +499,28 @@ export default function WebChatPage({ productId, conversationId: routedConversat
         setError(message.error ?? new WebChatPresentationError("connectionFailed"));
       }
     };
-    socket.onclose = () => { if (live) { const pending = pendingSubmissionRef.current; if (pending?.conversationId === conversationId) restoreSubmission(pending); setStatus({ key: "disconnected" }); setError(current => current || new WebChatPresentationError("disconnected")); socketRef.current = null; } };
-    socket.onerror = () => { if (live) { const pending = pendingSubmissionRef.current; if (pending?.conversationId === conversationId) restoreSubmission(pending); setError(new WebChatPresentationError("couldNotConnectRuntime")); } };
-    return () => { live = false; connection.close(); if (socketRef.current === connection) socketRef.current = null; };
+    socket.onclose = () => {
+      if (!live) return;
+      const pending = pendingSubmissionRef.current;
+      if (pending?.conversationId === conversationId) restoreSubmission(pending, true);
+      if (socketRef.current === connection) socketRef.current = null;
+      if (reconnectAttemptsRef.current >= 3) return;
+      const attempt = ++reconnectAttemptsRef.current;
+      const delay = Math.round(400 * (2 ** (attempt - 1)) * (0.75 + Math.random() * 0.5));
+      reconnectTimerRef.current = window.setTimeout(() => {
+        reconnectTimerRef.current = null;
+        if (live && conversationRef.current === conversationId) setConnectionVersion(value => value + 1);
+      }, delay);
+    };
+    return () => {
+      live = false;
+      if (reconnectTimerRef.current) {
+        window.clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      connection.close();
+      if (socketRef.current === connection) socketRef.current = null;
+    };
   }, [client, conversationId, refresh, connectionVersion, restoreSubmission, updateLiveTimeline, updateMessages]);
 
   useEffect(() => {
@@ -587,22 +612,10 @@ export default function WebChatPage({ productId, conversationId: routedConversat
     event.preventDefault();
     if (!conversationId || snapshotPending || !access || activeRun || (!draft.trim() && images.length === 0)) return;
     const connection = socketRef.current;
-    if (!connection?.ready) { setError(new WebChatPresentationError("disconnected")); return; }
     followOutputRef.current = true;
     setError(null);
     try {
       const pending = pendingSubmissionRef.current?.conversationId === conversationId ? pendingSubmissionRef.current : null;
-      if (pending) {
-        try {
-          const receipt = await client.receipt(conversationId, pending.runId);
-          if (receipt.submission?.client_message_id === pending.clientMessageId) {
-            pendingSubmissionRef.current = null;
-            setDraft(""); setImages([]);
-            await refresh(conversationId);
-            return;
-          }
-        } catch (cause) { if (cause.status !== 404) throw cause; }
-      }
       const imageFiles = pending?.imageFiles ?? [...images];
       const attachments = pending ? pending.attachments : await BrowserImageAttachments.prepareAll(imageFiles);
       const runId = pending?.runId ?? `run_${crypto.randomUUID().replaceAll("-", "")}`;
@@ -623,7 +636,16 @@ export default function WebChatPage({ productId, conversationId: routedConversat
       setLiveTimeline([]);
       setDraft("");
       setImages([]);
-      connection.message({ runId, clientMessageId, content, attachments });
+      if (connection?.ready) {
+        connection.message({ runId, clientMessageId, content, attachments });
+      } else {
+        if (reconnectTimerRef.current) {
+          window.clearTimeout(reconnectTimerRef.current);
+          reconnectTimerRef.current = null;
+        }
+        reconnectAttemptsRef.current = 0;
+        setConnectionVersion(value => value + 1);
+      }
       setActiveRun(runId);
       setStatus({ key: "sending" });
     } catch (cause) {
@@ -740,10 +762,10 @@ export default function WebChatPage({ productId, conversationId: routedConversat
         </article>) : null}
       </div>
       {conversationId ? <form className="web-chat__composer" aria-busy={snapshotPending} onSubmit={send}>
-        {images.length ? <div className="web-chat__images" aria-label={t("imagesToSend")}>{images.map(file => <span className="web-chat__image-chip" key={`${file.name}-${file.lastModified}`}><Paperclip aria-hidden="true" /><span title={file.name}>{file.name}</span><button type="button" aria-label={t("removeImage", { name: file.name })} onClick={() => setImages(current => current.filter(entry => entry !== file))} disabled={snapshotPending}><X aria-hidden="true" /></button></span>)}</div> : null}
-        <textarea ref={draftRef} aria-label={t("messageAgent", { agent: name })} value={draft} onChange={event => setDraft(event.target.value)} placeholder={t("messagePlaceholder")} disabled={snapshotPending || Boolean(activeRun)} onKeyDown={event => { if (event.key !== "Enter" || event.shiftKey || isImeConfirmation(event)) return; event.preventDefault(); void send(event); }} />
+        {images.length ? <div className="web-chat__images" aria-label={t("imagesToSend")}>{images.map(file => <span className="web-chat__image-chip" key={`${file.name}-${file.lastModified}`}><Paperclip aria-hidden="true" /><span title={file.name}>{file.name}</span><button type="button" aria-label={t("removeImage", { name: file.name })} onClick={() => { pendingSubmissionRef.current = null; setImages(current => current.filter(entry => entry !== file)); }} disabled={snapshotPending}><X aria-hidden="true" /></button></span>)}</div> : null}
+        <textarea ref={draftRef} aria-label={t("messageAgent", { agent: name })} value={draft} onChange={event => { pendingSubmissionRef.current = null; setDraft(event.target.value); }} placeholder={t("messagePlaceholder")} disabled={snapshotPending || Boolean(activeRun)} onKeyDown={event => { if (event.key !== "Enter" || event.shiftKey || isImeConfirmation(event)) return; event.preventDefault(); void send(event); }} />
         <div className="web-chat__actions">
-          <div className="web-chat__composer-tools"><label className="web-chat__attach"><Image aria-hidden="true" /><input type="file" accept="image/*" multiple aria-label={t("addImages")} onChange={event => { const selected = [...event.target.files]; if (images.length + selected.length > 8) setError(new WebChatPresentationError("imageCountLimit")); else setImages(current => [...current, ...selected]); event.target.value = ""; }} disabled={snapshotPending || Boolean(activeRun)} /></label></div>
+          <div className="web-chat__composer-tools"><label className="web-chat__attach"><Image aria-hidden="true" /><input type="file" accept="image/*" multiple aria-label={t("addImages")} onChange={event => { const selected = [...event.target.files]; if (images.length + selected.length > 8) setError(new WebChatPresentationError("imageCountLimit")); else { pendingSubmissionRef.current = null; setImages(current => [...current, ...selected]); } event.target.value = ""; }} disabled={snapshotPending || Boolean(activeRun)} /></label></div>
           {activeRun ? <button type="button" className="web-chat__stop" aria-label={t("stopReply")} onClick={cancel}><Square aria-hidden="true" /><span>{t("stopReply")}</span></button> : <button type="submit" className="web-chat__send" aria-label={t("sendMessage")} disabled={snapshotPending || (!draft.trim() && !images.length)}><span>{t("send")}</span><ArrowUp aria-hidden="true" /></button>}
         </div>
       </form> : null}
