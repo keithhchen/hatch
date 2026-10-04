@@ -348,6 +348,18 @@ async function route(
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/v1/internal/creator-accounts") {
+    requireDeploymentServiceAuth(request, context.deploymentServiceToken);
+    const rawIds = url.searchParams.get("ids") ?? "";
+    const ids = rawIds ? [...new Set(rawIds.split(",").map((id) => id.trim()))] : [];
+    if (ids.length > 100 || ids.some((id) => !isUuidV4(id))) {
+      const error = Object.assign(new Error("ids must contain up to 100 Creator account UUIDs."), { status: 400 });
+      throw error;
+    }
+    sendJson(response, 200, { accounts: await context.accounts.getCreatorPublicByIds(ids) }, { "cache-control": "no-store" });
+    return;
+  }
+
   if (url.pathname === "/v1/internal/factory-agent-definitions" && ["GET", "PUT"].includes(request.method ?? "")) {
     requireDeploymentServiceAuth(request, context.deploymentServiceToken);
     if (!context.factoryAgentDefinitions) {
@@ -820,7 +832,13 @@ async function route(
         product.status = "published";
         product.release = release;
       }));
-      sendJson(response, 200, { products });
+      sendJson(response, 200, {
+        products: products.map((product) => ({
+          ...product,
+          ...(Object.hasOwn(product, "creator_name") ? { creator_name: account.display_name } : {}),
+          ...(Object.hasOwn(product, "creator_display_name") ? { creator_display_name: account.display_name } : {})
+        }))
+      });
       return;
     }
     const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
@@ -1020,7 +1038,7 @@ async function route(
       const creatorId = String(row.creator_id ?? "");
       const current = creators.get(creatorId) ?? {
         id: creatorId,
-        name: String(row.creator_name ?? creatorId),
+        name: String(row.creator_name),
         avatar_url: typeof row.creator_avatar_url === "string" ? row.creator_avatar_url : null,
         product_count: 0
       };
@@ -1249,12 +1267,22 @@ async function publicCatalogRows(context: RegistryContext): Promise<Record<strin
 
 export async function attachCreatorAvatars<T extends Record<string, unknown>>(
   rows: T[],
-  readAccount: (creatorId: string) => Promise<{ avatar_url: string | null } | undefined>
-): Promise<Array<T & { creator_avatar_url: string | null }>> {
+  readAccount: (creatorId: string) => Promise<{ display_name: string; avatar_url: string | null; role?: string } | undefined>
+): Promise<Array<T & { creator_name: string; creator_avatar_url: string | null }>> {
   const creatorIds = [...new Set(rows.map(row => String(row.creator_id ?? "")).filter(Boolean))];
   const accounts = await Promise.all(creatorIds.map(readAccount));
-  const avatars = new Map(creatorIds.map((creatorId, index) => [creatorId, accounts[index]?.avatar_url ?? null]));
-  return rows.map(row => ({ ...row, creator_avatar_url: avatars.get(String(row.creator_id ?? "")) ?? null }));
+  const creators = new Map(creatorIds.map((creatorId, index) => {
+    const account = accounts[index];
+    if (!account || account.role && account.role !== "creator") {
+      throw new Error(`Published product references missing Creator account ${creatorId}.`);
+    }
+    return [creatorId, account];
+  }));
+  return rows.map(row => {
+    const account = creators.get(String(row.creator_id ?? ""));
+    if (!account) throw new Error(`Published product references missing Creator account ${String(row.creator_id ?? "")}.`);
+    return { ...row, creator_name: account.display_name, creator_avatar_url: account.avatar_url };
+  });
 }
 
 function publicProductRow(row: Record<string, unknown>): Record<string, unknown> {

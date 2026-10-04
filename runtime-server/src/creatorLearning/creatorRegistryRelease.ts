@@ -176,13 +176,13 @@ export class CreatorRegistryReleaseStore {
              r.brief_spec, r.status, r.published_at,
              COALESCE(p.name, r.product_id::text) AS product_name,
              COALESCE(p.promise, '') AS product_promise,
-             COALESCE(c.display_name, r.creator_id::text) AS creator_name
+             a.display_name AS creator_name
       FROM hatch_creator_registry_live AS l
       JOIN hatch_creator_registry_releases AS r
         ON r.product_id=l.product_id AND r.release_digest=l.release_digest
       LEFT JOIN hatch_creator_products AS p
         ON p.id=r.product_id::text AND p.status='active'
-      LEFT JOIN creators AS c ON c.id=r.creator_id
+      JOIN accounts AS a ON a.id=r.creator_id AND a.role='creator'
       WHERE r.status='published'
       ORDER BY r.published_at DESC, r.product_id ASC
       LIMIT $1 OFFSET $2

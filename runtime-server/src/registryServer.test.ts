@@ -51,12 +51,12 @@ test("Creator product listing keeps authoring fields when a published corpus has
   });
 });
 
-test("published catalog rows include the current Creator account avatar", async () => {
+test("published catalog rows use the current Creator account name and avatar", async () => {
   const rows = await attachCreatorAvatars(
-    [{ creator_id: CREATOR_ID, product_id: PRODUCT_ID }],
-    async creatorId => creatorId === CREATOR_ID ? { avatar_url: "https://media.example/avatar.webp" } : undefined
+    [{ creator_id: CREATOR_ID, creator_name: "Old Corpus name", product_id: PRODUCT_ID }],
+    async creatorId => creatorId === CREATOR_ID ? { display_name: "Current account name", avatar_url: "https://media.example/avatar.webp" } : undefined
   );
-  assert.deepEqual(rows, [{ creator_id: CREATOR_ID, product_id: PRODUCT_ID, creator_avatar_url: "https://media.example/avatar.webp" }]);
+  assert.deepEqual(rows, [{ creator_id: CREATOR_ID, creator_name: "Current account name", product_id: PRODUCT_ID, creator_avatar_url: "https://media.example/avatar.webp" }]);
 });
 
 test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () => {
@@ -67,6 +67,7 @@ test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () =
     HATCH_AGENT_CORPUS_ROOT: path.join(root, "corpora"),
     HATCH_REGISTRY_STATE_PATH: path.join(root, "state.json"),
     HATCH_AUTH_SIGNING_SECRET: "test-secret",
+    HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN: "deployment-test-token",
     HATCH_QDRANT_URL: "",
     DASHSCOPE_API_KEY: ""
   });
@@ -92,6 +93,14 @@ test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () =
     const mePayload = await me.json() as { id: string; session_expires_at: string };
     assert.match(mePayload.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     assert.match(mePayload.session_expires_at, /^20/);
+    const creatorSignup = await fetch(`${base}/v1/auth/signup`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "creator@example.com", password: "password-123", role: "creator", display_name: "Account Creator Name" }) });
+    assert.equal(creatorSignup.status, 201);
+    const creatorAuth = await creatorSignup.json() as { account: { id: string } };
+    const creatorAccounts = await fetch(`${base}/v1/internal/creator-accounts?ids=${creatorAuth.account.id}`, { headers: { authorization: "Bearer deployment-test-token" } });
+    assert.equal(creatorAccounts.status, 200);
+    assert.deepEqual(await creatorAccounts.json(), { accounts: [{ id: creatorAuth.account.id, display_name: "Account Creator Name" }] });
+    const unauthorizedCreatorAccounts = await fetch(`${base}/v1/internal/creator-accounts?ids=${creatorAuth.account.id}`);
+    assert.equal(unauthorizedCreatorAccounts.status, 401);
 
     const legacy = legacyAuthToken(auth.account.id, "user", "test-secret");
     const rejectedLegacy = await fetch(`${base}/v1/auth/me`, {

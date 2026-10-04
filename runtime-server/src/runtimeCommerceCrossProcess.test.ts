@@ -327,6 +327,15 @@ async function startRegistryFixture(corpus: CorpusReleases): Promise<RegistryFix
           ? json(response, 200, { id: BUYER_ID, role: "user", display_name: "Cross Process Buyer" })
           : json(response, 401, { detail: "A valid account token is required." });
       }
+      if (request.method === "GET" && url.pathname === "/v1/internal/creator-accounts") {
+        if (bearer(request.headers.authorization) !== DEPLOYMENT_SERVICE_TOKEN) {
+          return json(response, 401, { detail: "A valid deployment service token is required." });
+        }
+        const ids = new Set((url.searchParams.get("ids") ?? "").split(","));
+        return json(response, 200, {
+          accounts: ids.has(CREATOR_ID) ? [{ id: CREATOR_ID, display_name: "Cross Process Creator" }] : []
+        });
+      }
       if (request.method === "GET" && ["/v1/catalog/agents", "/v1/public/products"].includes(url.pathname)) {
         return json(response, 200, [{
           creator_id: CREATOR_ID,

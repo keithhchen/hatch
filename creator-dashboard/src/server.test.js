@@ -479,6 +479,7 @@ test("creator products are projected directly from the Agent Corpus Registry", a
   const dashboard = await createDashboardApp({
     ledgerPath: path.join(directory, "ledger.jsonl"),
     registryAccessServiceToken: "test-access-service",
+    registryDeploymentServiceToken: "test-deployment-service",
     registryUrl: serverUrl(registry),
     exposeBearerTokens: true
   });
@@ -948,6 +949,7 @@ test("zero-value checkout creates an idempotent Agent Corpus order and entitleme
   const dashboard = await createDashboardApp({
     ledgerPath: path.join(directory, "ledger.jsonl"),
     registryAccessServiceToken: "test-access-service",
+    registryDeploymentServiceToken: "test-deployment-service",
     registryUrl: serverUrl(registry),
     exposeBearerTokens: true
   });
@@ -1012,12 +1014,13 @@ test("V2 checkout session persists a free receipt and entitlement detail", async
   const accessBodies = [];
   const revokedEntitlements = [];
   const creatorAvatar = "https://media.example/creator-avatar.webp";
-  const registry = registryFixture({ role: "user", agent: { ...catalogAgent, creator_avatar_url: creatorAvatar }, accessBodies, revokedEntitlements });
+  const registry = registryFixture({ role: "user", agent: { ...catalogAgent, creator_name: "Old Corpus Name", creator_avatar_url: creatorAvatar }, accessBodies, revokedEntitlements });
   await listen(registry);
   context.after(() => registry.close());
   const dashboard = await createDashboardApp({
     ledgerPath: path.join(directory, "ledger.jsonl"),
     registryAccessServiceToken: "test-access-service",
+    registryDeploymentServiceToken: "test-deployment-service",
     registryUrl: serverUrl(registry),
     exposeBearerTokens: true
   });
@@ -1051,6 +1054,10 @@ test("V2 checkout session persists a free receipt and entitlement detail", async
   const firstSession = (await firstSessionResponse.json()).checkout_session;
   assert.equal(firstSessionResponse.status, 201);
   assert.equal(firstSession.totals.total_minor, 0);
+  const storedSession = dashboard.portalState.getCheckoutSession(firstSession.checkout_session_id);
+  assert.deepEqual(Object.keys(firstSession).sort(), Object.keys(storedSession).sort());
+  assert.deepEqual(Object.keys(firstSession.product).sort(), Object.keys(storedSession.product).sort());
+  assert.equal(firstSession.product.creator_name, "Maya Chen");
   const replaySessionResponse = await createSession();
   assert.equal(replaySessionResponse.status, 200);
   assert.equal((await replaySessionResponse.json()).checkout_session.checkout_session_id, firstSession.checkout_session_id);
@@ -1065,6 +1072,10 @@ test("V2 checkout session persists a free receipt and entitlement detail", async
   assert.equal(confirmedResponse.status, 201);
   assert.equal(confirmed.payment.status, "not_required");
   assert.equal(confirmed.order.status, "fulfilled");
+  const storedOrder = dashboard.commerce.getOrder(confirmed.order_id);
+  assert.deepEqual(Object.keys(confirmed.order).sort(), Object.keys(storedOrder).sort());
+  assert.equal(confirmed.order.creator_snapshot.name, "Maya Chen");
+  assert.equal("creator" in confirmed.order, false);
   assert.equal(confirmed.entitlement.access_mode, "unmetered");
   assert.equal("remaining_units" in confirmed.entitlement, false);
   assert.equal(accessBodies.length, 0);
@@ -1083,6 +1094,7 @@ test("V2 checkout session persists a free receipt and entitlement detail", async
   assert.equal(order.total_minor, 0);
   assert.equal(order.entitlement_status, "active");
   assert.equal(order.access_mode, "unmetered");
+  assert.equal(order.creator.name, "Maya Chen");
   assert.equal("delivery_status" in order, false);
   assert.equal(order.actions.can_request_refund, false);
   assert.equal(order.actions.can_cancel_access, false);
@@ -1099,6 +1111,7 @@ test("V2 checkout session persists a free receipt and entitlement detail", async
   assert.equal(canonicalLibraryResponse.status, 200);
   assert.equal(canonicalLibrary.entitlements.length, 1);
   assert.equal(canonicalLibrary.entitlements[0].creator.avatar_url, creatorAvatar);
+  assert.equal(canonicalLibrary.entitlements[0].creator.name, "Maya Chen");
 
   const entitlementResponse = await fetch(`${serverUrl(api)}/v1/user/entitlements/${confirmed.entitlement_id}`, { headers });
   const entitlement = (await entitlementResponse.json()).entitlement;
@@ -1174,6 +1187,7 @@ test("a zero-price purchase is permanent and has no buyer cancellation action", 
   const dashboard = await createDashboardApp({
     ledgerPath: path.join(directory, "ledger.jsonl"),
     registryAccessServiceToken: "test-access-service",
+    registryDeploymentServiceToken: "test-deployment-service",
     registryUrl: serverUrl(registry),
     exposeBearerTokens: true
   });
@@ -1377,6 +1391,13 @@ function registryFixture({
     }
     if (requestUrl.pathname === "/v1/auth/me") {
       response.end(JSON.stringify(account));
+      return;
+    }
+    if (requestUrl.pathname === "/v1/internal/creator-accounts") {
+      const ids = new Set((requestUrl.searchParams.get("ids") ?? "").split(","));
+      response.end(JSON.stringify({ accounts: publishedCatalogAgents
+        .filter((entry) => ids.has(entry.creator_id))
+        .map((entry) => ({ id: entry.creator_id, display_name: "Maya Chen" })) }));
       return;
     }
     if (requestUrl.pathname === "/v1/public/products") {

@@ -171,6 +171,34 @@ export async function createDashboardApp(options = {}) {
   const payoutReconcileAfterMs = Math.max(0, Number(options.payoutReconcileAfterMs
     ?? process.env.HATCH_PAYOUT_RECONCILE_AFTER_MS
     ?? 60_000));
+  const resolveCreatorNames = async (creatorIds) => {
+    const ids = [...new Set(creatorIds.map((id) => String(id ?? "")).filter(Boolean))];
+    if (!ids.length) return new Map();
+    if (!registryDeploymentServiceToken) {
+      throw stateError("creator_account_authority_unavailable", "Creator account names require Registry service authorization.", 503);
+    }
+    const batches = [];
+    for (let index = 0; index < ids.length; index += 100) batches.push(ids.slice(index, index + 100));
+    const responses = await Promise.all(batches.map((batch) => registryRequest(
+      registryUrl,
+      `/v1/internal/creator-accounts?ids=${encodeURIComponent(batch.join(","))}`,
+      { fetchImpl, headers: { authorization: `Bearer ${registryDeploymentServiceToken}` } }
+    )));
+    const accounts = responses.flatMap((payload) => {
+      if (!Array.isArray(payload?.accounts)) throw new Error("Registry Creator account response is malformed.");
+      return payload.accounts;
+    });
+    const names = new Map(accounts.map((account) => {
+      if (typeof account?.id !== "string" || typeof account.display_name !== "string" || !account.display_name.trim()) {
+        throw new Error("Registry returned an invalid Creator account name.");
+      }
+      return [account.id, account.display_name];
+    }));
+    for (const id of ids) {
+      if (!names.has(id)) throw stateError("creator_account_not_found", `Creator account ${id} was not found.`, 502);
+    }
+    return names;
+  };
 
   const compensateFailedCheckout = async (session) => {
     const amountMinor = Number(session.totals?.total_minor ?? 0);
@@ -795,13 +823,13 @@ export async function createDashboardApp(options = {}) {
                 productId: agent.product_id,
                 routePrefix: "/products",
                 productName: product.product_name ?? product.name,
-                creatorName: product.creator_name ?? product.creator_display_name ?? agent.creator_id,
+                creatorName: product.creator_name,
                 description: product.promise ?? product.description,
                 imageUrl: product.image_url ?? product.presentation?.image_url
               });
               noScriptFallback = createProductNoScriptFallback({
                 creatorId: product.creator_id,
-                creatorName: product.creator_name ?? product.creator_display_name,
+                creatorName: product.creator_name,
                 productId: product.product_id,
                 productName: product.product_name ?? product.name,
                 description: product.promise ?? product.description
@@ -1035,7 +1063,9 @@ export async function createDashboardApp(options = {}) {
       if (request.method === "GET" && url.pathname === "/v1/public/products") {
         const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
         const buyer = await optionalBuyer(request, registryUrl, fetchImpl, portalState);
-        const entitlements = buyer ? commerce.listBuyerEntitlements(buyer.id) : [];
+        const sourceEntitlements = buyer ? commerce.listBuyerEntitlements(buyer.id) : [];
+        const creatorNames = await resolveCreatorNames(sourceEntitlements.map((entry) => entry.creator_id));
+        const entitlements = buyer ? enrichEntitlements(sourceEntitlements, catalog, [], creatorNames) : [];
         await recordTelemetry("catalog_viewed", { request_id: requestId }, `catalog-viewed:${requestId}`);
         const visible = catalog.filter((agent) => portalState.getCreatorProduct(agent.creator_id, agent.product_id)?.status !== "withdrawn");
         const products = await Promise.all(visible.map(async (agent) => {
@@ -1071,7 +1101,7 @@ export async function createDashboardApp(options = {}) {
         return send(response, 200, {
           creator: {
             id: first.creator_id,
-            name: first.creator_name ?? first.creator_display_name ?? first.creator_id,
+            name: first.creator_name,
             avatar_url: first.creator_avatar_url ?? first.creator?.avatar_url ?? null,
             verified: Boolean(first.creator_verified)
           },
@@ -1088,7 +1118,9 @@ export async function createDashboardApp(options = {}) {
         const creatorState = agent ? portalState.getCreatorProduct(agent.creator_id, agent.product_id) : undefined;
         if (!agent || creatorState?.status === "withdrawn") return send(response, 404, { error: { code: "agent_unavailable", message: "The published Agent could not be found." } });
         const buyer = await optionalBuyer(request, registryUrl, fetchImpl, portalState);
-        const entitlements = buyer ? commerce.listBuyerEntitlements(buyer.id) : [];
+        const sourceEntitlements = buyer ? commerce.listBuyerEntitlements(buyer.id) : [];
+        const creatorNames = await resolveCreatorNames(sourceEntitlements.map((entry) => entry.creator_id));
+        const entitlements = buyer ? enrichEntitlements(sourceEntitlements, catalog, [], creatorNames) : [];
         await recordTelemetry("product_viewed", {
           creator_id: agent.creator_id,
           product_id: agent.product_id,
@@ -1154,7 +1186,8 @@ export async function createDashboardApp(options = {}) {
           release_id: product.release_id,
           request_id: requestId
         }, `checkout-started:${session.checkout_session_id}`);
-        return send(response, existing ? 200 : 201, { checkout_session: session });
+        const creatorName = (await resolveCreatorNames([session.product.creator_id])).get(session.product.creator_id);
+        return send(response, existing ? 200 : 201, { checkout_session: checkoutSessionPublic(session, creatorName) });
       }
 
       const checkoutSessionMatch = url.pathname.match(/^\/v1\/checkout-sessions\/([^/]+)$/);
@@ -1165,7 +1198,8 @@ export async function createDashboardApp(options = {}) {
         if (!session || session.buyer_id !== authentication.profile.id) {
           return send(response, 404, { error: { code: "checkout_not_found", message: "Checkout session was not found." } });
         }
-        return send(response, 200, { checkout_session: session });
+        const creatorName = (await resolveCreatorNames([session.product.creator_id])).get(session.product.creator_id);
+        return send(response, 200, { checkout_session: checkoutSessionPublic(session, creatorName) });
       }
 
       const checkoutConfirmMatch = url.pathname.match(/^\/v1\/checkout-sessions\/([^/]+)\/confirm$/);
@@ -1192,17 +1226,17 @@ export async function createDashboardApp(options = {}) {
           paymentScenario: body.sandbox_scenario
         });
         await recordCheckoutTelemetry(recordTelemetry, outcome.body, session, requestId);
-        return send(response, outcome.replayed ? 200 : 201, outcome.body);
+        const creatorName = (await resolveCreatorNames([session.product.creator_id])).get(session.product.creator_id);
+        return send(response, outcome.replayed ? 200 : 201, checkoutOutcomePublic(outcome.body, session, creatorName));
       }
 
       if (request.method === "GET" && url.pathname === "/v1/user/product-access") {
         const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
-        const entitlements = enrichEntitlements(
-          commerce.listBuyerEntitlements(authentication.profile.id).filter((entry) => entry.status === "active"),
-          catalog
-        );
+        const activeEntitlements = commerce.listBuyerEntitlements(authentication.profile.id).filter((entry) => entry.status === "active");
+        const creatorNames = await resolveCreatorNames(activeEntitlements.map((entry) => entry.creator_id));
+        const entitlements = enrichEntitlements(activeEntitlements, catalog, [], creatorNames);
         const creatorAgents = entitlements.map((entry) => ({
           ...entry,
           user_id: entry.buyer_id,
@@ -1220,8 +1254,10 @@ export async function createDashboardApp(options = {}) {
         const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const status = url.searchParams.get("status");
-        const orders = commerce.listBuyerOrders(authentication.profile.id)
-          .map((order) => orderDetail(order))
+        const sourceOrders = commerce.listBuyerOrders(authentication.profile.id);
+        const creatorNames = await resolveCreatorNames(sourceOrders.map((order) => order.creator_id));
+        const orders = sourceOrders
+          .map((order) => orderDetail(order, [], creatorNames.get(order.creator_id)))
           .filter((order) => !status || status === "all" || order.status === status);
         const page = paginate(orders, url);
         return send(response, 200, { orders: page.items, next_cursor: page.next_cursor });
@@ -1236,7 +1272,8 @@ export async function createDashboardApp(options = {}) {
           return send(response, 404, { error: { code: "order_not_found", message: "Order was not found." } });
         }
         if (!order) return send(response, 404, { error: { code: "order_not_found", message: "Order was not found." } });
-        return send(response, 200, { order: orderDetail(order) });
+        const creatorName = (await resolveCreatorNames([order.creator_id])).get(order.creator_id);
+        return send(response, 200, { order: orderDetail(order, [], creatorName) });
       }
 
       const buyerRefundMatch = url.pathname.match(/^\/v1\/(?:user\/orders|orders)\/([^/]+)\/(refund-requests|cancel)$/);
@@ -1281,7 +1318,8 @@ export async function createDashboardApp(options = {}) {
           reason: String(body.reason ?? "buyer_request"),
           ...providerRefund
         }, { idempotencyKey: commandKey });
-        return send(response, 201, { refund: order.refunds.at(-1), order: orderDetail(order), access_status: "revoked" });
+        const creatorName = (await resolveCreatorNames([order.creator_id])).get(order.creator_id);
+        return send(response, 201, { refund: order.refunds.at(-1), order: orderDetail(order, [], creatorName), access_status: "revoked" });
       }
 
       if (request.method === "POST" && url.pathname === "/v1/user/checkout") {
@@ -1314,7 +1352,8 @@ export async function createDashboardApp(options = {}) {
             paymentProvider,
             commandKey
           });
-          return send(response, outcome.replayed ? 200 : 201, outcome.body);
+          const creatorName = (await resolveCreatorNames([existing.product.creator_id])).get(existing.product.creator_id);
+          return send(response, outcome.replayed ? 200 : 201, checkoutOutcomePublic(outcome.body, existing, creatorName));
         }
         const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
         const agent = catalog.find((entry) => entry.creator_id === creatorId && entry.product_id === productId);
@@ -1364,7 +1403,8 @@ export async function createDashboardApp(options = {}) {
           paymentProvider,
           commandKey
         });
-        return send(response, outcome.replayed ? 200 : 201, outcome.body);
+        const creatorName = (await resolveCreatorNames([session.product.creator_id])).get(session.product.creator_id);
+        return send(response, outcome.replayed ? 200 : 201, checkoutOutcomePublic(outcome.body, session, creatorName));
       }
 
       const accessMatch = url.pathname.match(/^\/v1\/user\/products\/([^/]+)\/access$/);
@@ -1566,7 +1606,7 @@ export async function createDashboardApp(options = {}) {
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const profile = authentication.profile;
         const projection = commerce.getCreatorDashboard(profile.id);
-        const creatorOrders = commerce.listCreatorOrders(profile.id).map((order) => orderDetail(order));
+        const creatorOrders = commerce.listCreatorOrders(profile.id).map((order) => orderDetail(order, [], profile.display_name));
         let creatorAgentsPromise;
         const creatorAgents = async () => {
           creatorAgentsPromise ??= registryRequest(registryUrl, "/v1/creator/products", {
@@ -1595,7 +1635,7 @@ export async function createDashboardApp(options = {}) {
             profile.id
           ).map((product) => {
             const state = portalState.getCreatorProduct(profile.id, product.product_id);
-            return {
+          return {
               ...product,
               readiness: publishReadiness(product, state),
               access: { mode: "free", included_deliveries: 1 }
@@ -2000,7 +2040,7 @@ export async function createDashboardApp(options = {}) {
             ...providerRefund
           }, { idempotencyKey: commandKey });
           dispatchCommerceOutbox().catch(() => undefined);
-          return send(response, 201, { refund: order.refunds.at(-1), order: orderDetail(order), access_status: "syncing" });
+          return send(response, 201, { refund: order.refunds.at(-1), order: orderDetail(order, [], profile.display_name), access_status: "syncing" });
         }
         if (request.method === "GET" && url.pathname === "/v1/creator/payouts") {
           requireCapability(profile, "payout:read");
@@ -2074,10 +2114,13 @@ export async function createDashboardApp(options = {}) {
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
         const status = url.searchParams.get("status");
+        const sourceEntitlements = commerce.listBuyerEntitlements(authentication.profile.id);
+        const creatorNames = await resolveCreatorNames(sourceEntitlements.map((entry) => entry.creator_id));
         const entitlements = enrichEntitlements(
-          commerce.listBuyerEntitlements(authentication.profile.id),
+          sourceEntitlements,
           catalog,
-          commerce.listDeliveries({ buyerId: authentication.profile.id })
+          commerce.listDeliveries({ buyerId: authentication.profile.id }),
+          creatorNames
         )
           .filter((entitlement) => entitlementMatchesStatus(entitlement, status))
           .sort(compareEntitlementsNewestFirst);
@@ -2094,10 +2137,13 @@ export async function createDashboardApp(options = {}) {
         const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
+        const sourceEntitlements = commerce.listBuyerEntitlements(authentication.profile.id);
+        const creatorNames = await resolveCreatorNames(sourceEntitlements.map((entry) => entry.creator_id));
         const entitlement = enrichEntitlements(
-          commerce.listBuyerEntitlements(authentication.profile.id),
+          sourceEntitlements,
           catalog,
-          commerce.listDeliveries({ buyerId: authentication.profile.id })
+          commerce.listDeliveries({ buyerId: authentication.profile.id }),
+          creatorNames
         ).find((entry) => entry.entitlement_id === decodeURIComponent(libraryIdMatch[1]));
         if (!entitlement) return send(response, 404, { error: { code: "entitlement_not_found", message: "Access record was not found." } });
         return send(response, 200, { entitlement });
@@ -2108,10 +2154,13 @@ export async function createDashboardApp(options = {}) {
         const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
+        const sourceEntitlements = commerce.listBuyerEntitlements(authentication.profile.id);
+        const creatorNames = await resolveCreatorNames(sourceEntitlements.map((entry) => entry.creator_id));
         const entitlement = enrichEntitlements(
-          commerce.listBuyerEntitlements(authentication.profile.id),
+          sourceEntitlements,
           catalog,
-          commerce.listDeliveries({ buyerId: authentication.profile.id })
+          commerce.listDeliveries({ buyerId: authentication.profile.id }),
+          creatorNames
         ).find((entry) => entry.entitlement_id === decodeURIComponent(buyerEntitlementMatch[1]));
         if (!entitlement) return send(response, 404, { error: { code: "entitlement_not_found", message: "Access record was not found." } });
         return send(response, 200, { entitlement });
@@ -3361,6 +3410,42 @@ function checkoutOutcomeBody(session, order, entitlement, payment) {
   };
 }
 
+function checkoutSessionPublic(session, creatorDisplayName) {
+  if (!creatorDisplayName) throw new Error(`Current Creator account name is required for checkout session ${String(session.checkout_session_id)}.`);
+  return {
+    ...session,
+    ...currentCreatorNameProjection(session, creatorDisplayName),
+    product: currentCreatorNameProjection(session.product, creatorDisplayName)
+  };
+}
+
+function checkoutOutcomePublic(outcome, session, creatorDisplayName) {
+  if (!creatorDisplayName) throw new Error(`Current Creator account name is required for checkout session ${String(session.checkout_session_id)}.`);
+  return {
+    ...outcome,
+    ...(outcome.order ? { order: currentCreatorNameProjection(outcome.order, creatorDisplayName) } : {}),
+    ...(outcome.entitlement && typeof outcome.entitlement === "object"
+      ? { entitlement: currentCreatorNameProjection(outcome.entitlement, creatorDisplayName) }
+      : {})
+  };
+}
+
+function currentCreatorNameProjection(value, creatorDisplayName) {
+  const projected = { ...value };
+  if (Object.hasOwn(value, "creator_name")) projected.creator_name = creatorDisplayName;
+  if (Object.hasOwn(value, "creator_display_name")) projected.creator_display_name = creatorDisplayName;
+  for (const key of ["creator", "creator_snapshot"]) {
+    const creator = value[key];
+    if (Object.hasOwn(value, key) && creator && typeof creator === "object" && !Array.isArray(creator)) {
+      const currentCreator = { ...creator };
+      if (Object.hasOwn(creator, "name")) currentCreator.name = creatorDisplayName;
+      if (Object.hasOwn(creator, "display_name")) currentCreator.display_name = creatorDisplayName;
+      projected[key] = currentCreator;
+    }
+  }
+  return projected;
+}
+
 async function authoritativeCatalog(registryUrl, fetchImpl, _portalState) {
   const registryCatalog = await registryRequest(registryUrl, "/v1/public/products", { fetchImpl });
   const byProduct = new Map((Array.isArray(registryCatalog) ? registryCatalog : []).map((product) => {
@@ -3373,7 +3458,7 @@ async function authoritativeCatalog(registryUrl, fetchImpl, _portalState) {
 function publicAgentSnapshot(product) {
   return {
     creator_id: product.creator_id,
-    creator_name: product.creator_name ?? product.creator_display_name ?? product.creator_id,
+    creator_name: product.creator_name,
     product_id: product.product_id,
     product_name: product.product_name ?? product.name,
     product_description: product.product_description ?? product.description ?? "",
@@ -3409,8 +3494,9 @@ function publicCatalogAgent(agent, creatorState) {
     : agent.creator?.avatar_url ?? authorityAgent.creator_avatar_url ?? authorityAgent.creator?.avatar_url ?? null;
   return {
     ...authorityAgent,
+    creator_name: agent.creator_name,
     creator_avatar_url: creatorAvatarUrl,
-    creator: { id: authorityAgent.creator_id, name: authorityAgent.creator_name ?? authorityAgent.creator_display_name ?? authorityAgent.creator_id, avatar_url: creatorAvatarUrl },
+    creator: { id: authorityAgent.creator_id, name: agent.creator_name, avatar_url: creatorAvatarUrl },
     product: { id: authorityAgent.product_id, name: authorityAgent.product_name ?? authorityAgent.name ?? authorityAgent.product_id },
     promise: deployedAgent.product_promise ?? deployedAgent.product_description ?? "",
     description: deployedAgent.product_description ?? "",
@@ -3698,7 +3784,7 @@ function approvalMatchesCandidate(approval, candidate) {
   );
 }
 
-function enrichEntitlements(entitlements, catalog, deliveries = []) {
+function enrichEntitlements(entitlements, catalog, deliveries = [], creatorNames = new Map()) {
   const byProduct = new Map((Array.isArray(catalog) ? catalog : []).map((agent) => [
     `${agent.creator_id}:${agent.product_id}`,
     agent
@@ -3713,6 +3799,10 @@ function enrichEntitlements(entitlements, catalog, deliveries = []) {
   return entitlements.map((entitlement) => {
     const unmetered = entitlement.access_mode === "unmetered" || Number(entitlement.gross_minor ?? 0) === 0;
     const agent = byProduct.get(`${entitlement.creator_id}:${entitlement.product_id}`);
+    const currentEntitlement = currentCreatorNameProjection(
+      entitlement,
+      creatorNames.get(entitlement.creator_id) ?? agent?.creator_name
+    );
     const {
       agent_id: _agentId,
       creator_slug: _creatorSlug,
@@ -3720,13 +3810,13 @@ function enrichEntitlements(entitlements, catalog, deliveries = []) {
       creator_slug_aliases: _creatorAliases,
       product_slug_aliases: _productAliases,
       ...publicEntitlement
-    } = entitlement;
+    } = currentEntitlement;
     return {
       ...publicEntitlement,
-      product_id: entitlement.product_id ?? entitlement.agent_id,
+      product_id: currentEntitlement.product_id ?? currentEntitlement.agent_id,
       access_mode: unmetered ? "unmetered" : "metered",
       ...(agent?.brief_spec ? { brief_spec: structuredClone(agent.brief_spec) } : {}),
-      status: entitlement.status === "active" && !unmetered && entitlement.reserved_units > 0 ? "reserved" : entitlement.status,
+      status: currentEntitlement.status === "active" && !unmetered && currentEntitlement.reserved_units > 0 ? "reserved" : currentEntitlement.status,
       product: agent ? {
         id: agent.product_id,
         product_id: agent.product_id,
@@ -3734,12 +3824,12 @@ function enrichEntitlements(entitlements, catalog, deliveries = []) {
         description: agent.product_description,
         promise: agent.product_promise,
         ...(agent.brief_spec ? { brief_spec: structuredClone(agent.brief_spec) } : {})
-      } : { id: entitlement.product_id, product_id: entitlement.product_id, name: entitlement.product_id },
+      } : { id: currentEntitlement.product_id, product_id: currentEntitlement.product_id, name: currentEntitlement.product_id },
       creator: agent ? {
         id: agent.creator_id,
-        name: agent.creator_name,
+        name: creatorNames.get(currentEntitlement.creator_id) ?? agent.creator_name,
         avatar_url: agent.creator_avatar_url ?? agent.creator?.avatar_url ?? null
-      } : { id: entitlement.creator_id },
+      } : { id: currentEntitlement.creator_id },
       version_policy: entitlement.version_policy ?? "pinned",
       ...(unmetered ? {} : {
         granted_units: entitlement.granted_units,
@@ -3766,10 +3856,14 @@ function compareEntitlementsNewestFirst(left, right) {
     || String(right.entitlement_id ?? "").localeCompare(String(left.entitlement_id ?? ""));
 }
 
-function orderDetail(order, events = []) {
+function orderDetail(order, events = [], creatorDisplayName) {
+  if (typeof creatorDisplayName !== "string" || !creatorDisplayName) {
+    throw new Error(`Current Creator account name is required for order ${String(order.order_id ?? order.id ?? "unknown")}.`);
+  }
   const paymentStatus = order.payment_status ?? (order.gross_minor === 0 ? "not_required" : "paid");
   const unmetered = order.access_mode === "unmetered" || Number(order.gross_minor ?? 0) === 0;
-  const entitlement = order.entitlement ?? (order.entitlement_id ? { entitlement_id: order.entitlement_id, status: order.status === "refunded" ? "revoked" : "active" } : null);
+  const storedEntitlement = order.entitlement ?? (order.entitlement_id ? { entitlement_id: order.entitlement_id, status: order.status === "refunded" ? "revoked" : "active" } : null);
+  const entitlement = storedEntitlement ? currentCreatorNameProjection(storedEntitlement, creatorDisplayName) : null;
   const entitlementId = entitlement?.entitlement_id ?? null;
   const deliveries = unmetered
     ? []
@@ -3799,11 +3893,13 @@ function orderDetail(order, events = []) {
     ...publicOrder
   } = order;
   return {
-    ...publicOrder,
+    ...currentCreatorNameProjection(publicOrder, creatorDisplayName),
     product_id: order.product_id ?? order.agent_id,
     access_mode: unmetered ? "unmetered" : "metered",
     order_number: order.order_number ?? stableOrderNumber(order),
-    creator: order.creator_snapshot ?? { id: order.creator_id, name: order.creator_display_name ?? order.creator_id },
+    creator: order.creator_snapshot
+      ? currentCreatorNameProjection({ creator_snapshot: order.creator_snapshot }, creatorDisplayName).creator_snapshot
+      : { id: order.creator_id, name: creatorDisplayName },
     status: refunded
       ? order.status
       : deliveries.length

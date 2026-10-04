@@ -4,6 +4,7 @@ import { Pool } from "pg";
 export type AccountRole = "user" | "creator";
 export type Account = { id: string; role: AccountRole; email: string; display_name: string; avatar_url: string | null; password_salt: string; password_hash: string; created_at: string };
 export type AccountPublic = Pick<Account, "id" | "role" | "email" | "display_name" | "avatar_url">;
+export type CreatorAccountPublic = Pick<Account, "id" | "display_name">;
 export type AccountSession = {
   id: string;
   account_id: string;
@@ -147,6 +148,22 @@ export class AccountStoreTs {
     if (!this.pool) return this.accounts.get(id);
     const result = await this.pool.query("SELECT id, role, email, display_name, avatar_url, password_salt, password_hash, created_at FROM accounts WHERE id=$1", [id]);
     return result.rows[0] ? rowToAccount(result.rows[0]) : undefined;
+  }
+
+  async getCreatorPublicByIds(ids: readonly string[]): Promise<CreatorAccountPublic[]> {
+    if (!this.pool) {
+      return ids.flatMap((id) => {
+        const account = this.accounts.get(id);
+        return account?.role === "creator"
+          ? [{ id: account.id, display_name: account.display_name }]
+          : [];
+      });
+    }
+    const result = await this.pool.query(
+      "SELECT id, display_name FROM accounts WHERE role='creator' AND id = ANY($1::uuid[])",
+      [ids]
+    );
+    return result.rows.map((row) => ({ id: String(row.id), display_name: String(row.display_name) }));
   }
 
   async create(email: string, password: string, role: AccountRole, displayName: string): Promise<Account> {

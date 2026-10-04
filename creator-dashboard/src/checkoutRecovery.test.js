@@ -40,6 +40,10 @@ test("confirmed checkout commits access without a Registry ownership projection"
       response.end(JSON.stringify([agent]));
       return;
     }
+    if (request.url.startsWith("/v1/internal/creator-accounts?")) {
+      response.end(JSON.stringify({ accounts: [{ id: agent.creator_id, display_name: "Current Recovery Creator" }] }));
+      return;
+    }
     if (request.url === `/v1/user/products/${agent.product_id}/access`) {
       grantAttempts += 1;
       const input = JSON.parse(body);
@@ -69,6 +73,7 @@ test("confirmed checkout commits access without a Registry ownership projection"
     ledgerPath: path.join(directory, "ledger.jsonl"),
     portalStatePath: path.join(directory, "portal.json"),
     registryUrl: serverUrl(registry),
+    registryDeploymentServiceToken: "registry-deployment-recovery",
     registryAccessServiceToken: "access-service",
     exposeBearerTokens: true
   });
@@ -95,13 +100,19 @@ test("confirmed checkout commits access without a Registry ownership projection"
     body: JSON.stringify({ product_id: agent.product_id })
   });
   const session = (await created.json()).checkout_session;
+  const storedSession = dashboard.portalState.getCheckoutSession(session.checkout_session_id);
+  assert.deepEqual(Object.keys(session).sort(), Object.keys(storedSession).sort());
+  assert.deepEqual(Object.keys(session.product).sort(), Object.keys(storedSession.product).sort());
+  assert.equal(session.product.creator_name, "Current Recovery Creator");
 
   const firstConfirm = await fetch(`${serverUrl(api)}/v1/checkout-sessions/${session.checkout_session_id}/confirm`, {
     method: "POST",
     headers,
     body: "{}"
   });
+  const firstConfirmBody = await firstConfirm.json();
   assert.equal(firstConfirm.status, 201);
+  assert.equal("creator" in firstConfirmBody.order, false);
   assert.equal(dashboard.portalState.getCheckoutSession(session.checkout_session_id).status, "completed");
   assert.deepEqual(dashboard.ledger.listEvents().map((event) => event.event_type), [
     "order.placed",
