@@ -20,12 +20,12 @@ test("creator identity stays circular and never falls back to a byline", () => {
   assert.doesNotMatch(source, />by\s+\{/);
 });
 
-test("account avatars share a black circular single-letter fallback", () => {
+test("account avatars share a gradient circular single-letter fallback", () => {
   assert.match(avatarSource, /charAt\(0\)\.toLocaleUpperCase\(\)/);
   assert.match(avatarStyles, /aspect-ratio:\s*1;/);
   assert.match(avatarStyles, /border-radius:\s*50%;/);
-  assert.match(sharedUiStyles, /\.hui-avatar__fallback\s*\{[^}]*background:\s*#000;/);
-  assert.match(avatarStyles, /font-family:\s*var\(--hatch-font-ui\);/);
+  assert.match(sharedUiStyles, /\.hui-avatar__fallback\s*\{[^}]*background:\s*var\(--hatch-avatar-gradient\);/);
+  assert.match(sharedUiStyles, /\.hui-avatar__fallback\s*\{[^}]*font-family:\s*var\(--hatch-font-ui\);[^}]*font-weight:\s*var\(--hatch-weight-bold\);/);
 });
 
 test("a non-Creator account is sent to the real Creator signup intent", () => {

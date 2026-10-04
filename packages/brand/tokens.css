@@ -20,6 +20,7 @@
   --hatch-weight-regular: 400;
   --hatch-weight-medium: 500;
   --hatch-weight-strong: 600;
+  --hatch-weight-bold: 700;
   --hatch-type-meta: 0.75rem;
   --hatch-type-ui: 0.875rem;
   --hatch-type-body: 1rem;
@@ -114,6 +115,7 @@
   --hatch-atmosphere-base: #f3efe8;
   --hatch-atmosphere-warm-field: radial-gradient(ellipse at 38% 42%, rgba(219,111,76,.56) 0%, rgba(219,111,76,.34) 31%, rgba(221,177,98,.20) 53%, transparent 74%);
   --hatch-atmosphere-cool-field: radial-gradient(ellipse at 54% 46%, rgba(84,124,105,.44) 0%, rgba(84,124,105,.27) 36%, rgba(214,170,91,.13) 57%, transparent 76%);
+  --hatch-avatar-gradient: linear-gradient(125deg, color-mix(in srgb, var(--hatch-accent-hover) 96%, #211b17) 0%, color-mix(in srgb, var(--hatch-accent) 72%, var(--hatch-ui-moss)) 52%, color-mix(in srgb, var(--hatch-ui-moss) 97%, #211b17) 100%);
 }
 
 .hui-theme-material {

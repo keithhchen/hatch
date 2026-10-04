@@ -737,10 +737,10 @@ export default function WebChatPage({ productId, conversationId: routedConversat
         {!access && error ? <div className="web-chat__gate web-chat__gate--error" role="alert"><CircleAlert aria-hidden="true" /><h2>{t("unableToOpenChat")}</h2><p>{errorText}</p><button type="button" onClick={() => location.reload()}><RotateCw aria-hidden="true" /><span>{t("checkingSubscriptionAgain")}</span></button></div> : null}
         {access && snapshotPending && !error ? <div className="web-chat__gate" role="status"><LoaderCircle aria-hidden="true" /><span>{t("loadingConversation")}</span></div> : null}
         {access && !conversationId && messages.length === 0 && !activeRun ? <div className="web-chat__empty">
-          <span className="web-chat__eyebrow">{t("startWithAnIdea")}</span>
-          <h2>{t("emptyHeadline")}</h2>
-          <p>{t("emptyConversationBody", { agent: name })}</p>
-          <button type="button" className="web-chat__empty-action" onClick={newConversation} disabled={!access}><Plus aria-hidden="true" />{t("newChat")}</button>
+          <span className="web-chat__empty-avatar-frame"><Avatar className="web-chat__empty-avatar" src={creatorAvatarUrl} name={creator.name ?? name} size="large" /></span>
+          <h2>{name}</h2>
+          {access.product?.promise ? <p>{access.product.promise}</p> : null}
+          <button type="button" className="web-chat__empty-action" onClick={newConversation} disabled={!access}><Plus aria-hidden="true" />{t("startConversation")}</button>
         </div> : null}
         {!snapshotPending ? messages.map(message => <article className={`web-chat__message web-chat__message--${message.role}`} key={message.renderKey ?? `${message.run_id}-${message.role}`}>
           <div className="web-chat__message-body">

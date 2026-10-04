@@ -52,9 +52,10 @@ describe("desktop system appearance contract", () => {
     );
   });
 
-  it("keeps account and Creator fallback avatars black, circular, and fixed-size", () => {
+  it("keeps account and Creator fallback avatars gradient-filled, circular, and fixed-size", () => {
     expect(stylesheet).toMatch(/\.desktop-account-avatar\.hui-avatar\s*\{[\s\S]*?aspect-ratio:\s*1;[\s\S]*?border-radius:\s*50%;/);
-    expect(sharedStylesheet).toMatch(/\.hui-avatar__fallback\s*\{[^}]*background:\s*#000;/);
+    expect(sharedStylesheet).toMatch(/\.hui-avatar__fallback\s*\{[^}]*background:\s*var\(--hatch-avatar-gradient\);/);
+    expect(sharedStylesheet).toMatch(/\.hui-avatar__fallback\s*\{[^}]*font-family:\s*var\(--hatch-font-ui\);[^}]*font-weight:\s*var\(--hatch-weight-bold\);/);
     expect(stylesheet).toMatch(/\.desktop-sidebar-footer \.desktop-account-avatar\.hui-avatar\.is-small\s*\{[\s\S]*?min-width:\s*30px;[\s\S]*?min-height:\s*30px;/);
   });
 

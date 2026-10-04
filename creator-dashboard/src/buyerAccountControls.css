@@ -69,11 +69,11 @@ body:has(.buyer-account-controls__language[data-state="open"]) .hui-menu > .hui-
   flex: 0 0 40px;
   place-items: center;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, .18);
+  border: 0;
   border-radius: 50%;
   color: var(--buyer-inverse-text, #f4f1e9);
-  background: var(--buyer-inverse, var(--chat-primary, #202522));
-  box-shadow: 0 2px 7px rgba(36, 29, 23, .12), inset 0 1px rgba(255, 255, 255, .1);
+  background: transparent;
+  box-shadow: none;
   cursor: pointer;
   font-size: 11px;
   font-weight: 680;
@@ -85,9 +85,9 @@ body:has(.buyer-account-controls__language[data-state="open"]) .hui-menu > .hui-
 
 .buyer-account-controls__avatar:hover,
 .buyer-account-controls__avatar[data-state="open"] {
-  background: var(--buyer-ink, var(--chat-primary-hover, #302b26));
-  box-shadow: 0 4px 11px rgba(36, 29, 23, .18), inset 0 1px rgba(255, 255, 255, .12);
-  transform: translateY(-1px);
+  background: transparent;
+  box-shadow: none;
+  transform: none;
 }
 
 .buyer-account-controls__avatar[aria-busy="true"] { cursor: progress; opacity: .72; }

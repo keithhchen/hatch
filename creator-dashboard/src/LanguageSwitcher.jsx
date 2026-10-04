@@ -3,7 +3,7 @@ import { LOCALES, useLocale } from "./locale.jsx";
 import "./languageSwitcher.css";
 
 const DEFAULT_LABELS = { zh: "中文", en: "English", ja: "日本語" };
-const SHORT_LABELS = { zh: "中", en: "EN", ja: "日" };
+const SHORT_LABELS = { en: "EN", zh: "中", ja: "日" };
 
 export function LanguageSwitcher({ className = "", labels = DEFAULT_LABELS, compact = false }) {
   const { locale, setLocale } = useLocale();

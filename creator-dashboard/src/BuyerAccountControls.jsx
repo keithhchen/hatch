@@ -82,9 +82,8 @@ export function BuyerAccountMenu({ user, onSignOut, signingOut = false, showLang
 export function BuyerAccountControls({ user, onSignOut, signingOut = false, children, className = "" }) {
   return (
     <div className={`buyer-account-controls ${className}`.trim()}>
-      <BuyerLanguageMenu />
       {children}
-      <BuyerAccountMenu user={user} onSignOut={onSignOut} signingOut={signingOut} />
+      <BuyerAccountMenu user={user} onSignOut={onSignOut} signingOut={signingOut} showLanguageOptions />
     </div>
   );
 }
