@@ -48,10 +48,7 @@ export class AccountAvatarApplicationService {
 }
 
 export class AliyunAccountAvatarFileStore implements AccountAvatarFileStore {
-  constructor(
-    private readonly objectStore: AliyunArtifactObjectStore,
-    private readonly publicBaseUrl: URL
-  ) {}
+  constructor(private readonly objectStore: AliyunArtifactObjectStore) {}
 
   async publish(accountId: string, image: Buffer, mediaType: string): Promise<string> {
     const revision = randomUUID();
@@ -69,19 +66,29 @@ export class AliyunAccountAvatarFileStore implements AccountAvatarFileStore {
     } finally {
       await this.objectStore.delete(sourceKey);
     }
-    return new URL(`${targetKey}`, ensureTrailingSlash(this.publicBaseUrl)).toString();
+    return this.objectStore.generatePublicObjectUrl(targetKey);
   }
 
   async remove(publicUrl: string): Promise<void> {
+    const objectKey = await this.objectKeyFromPublicUrl(publicUrl);
+    await this.objectStore.delete(objectKey);
+  }
+
+  private async objectKeyFromPublicUrl(publicUrl: string): Promise<string> {
+    const probeKey = `${AVATAR_OBJECT_PREFIX}/__url_probe__`;
+    const probeUrl = new URL(await this.objectStore.generatePublicObjectUrl(probeKey));
     const url = new URL(publicUrl);
-    if (url.origin !== this.publicBaseUrl.origin) throw new Error("avatar_url_origin_invalid");
-    const basePath = ensureTrailingSlash(this.publicBaseUrl).pathname;
-    if (!url.pathname.startsWith(basePath)) throw new Error("avatar_url_path_invalid");
-    const objectKey = decodeURIComponent(url.pathname.slice(basePath.length));
-    if (!objectKey.startsWith(`${AVATAR_OBJECT_PREFIX}/`) || objectKey.split("/").some(part => part === ".." || part === "")) {
+    if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || url.origin !== probeUrl.origin) {
+      throw new Error("avatar_url_origin_invalid");
+    }
+    if (!probeUrl.pathname.endsWith(probeKey)) throw new Error("avatar_public_url_invalid");
+    const publicPathPrefix = probeUrl.pathname.slice(0, -probeKey.length);
+    if (!url.pathname.startsWith(publicPathPrefix)) throw new Error("avatar_url_path_invalid");
+    const objectKey = decodeURIComponent(url.pathname.slice(publicPathPrefix.length));
+    if (!objectKey.startsWith(`${AVATAR_OBJECT_PREFIX}/`) || objectKey.split("/").some(part => part === ".." || part === "." || part === "")) {
       throw new Error("avatar_url_path_invalid");
     }
-    await this.objectStore.delete(objectKey);
+    return objectKey;
   }
 }
 
@@ -94,20 +101,10 @@ export function accountAvatarApplicationServiceFromEnvironment(
     if (environment.NODE_ENV === "production") throw new Error("OSS storage is required for account avatars in production");
     return undefined;
   }
-  const publicBase = environment.HATCH_ACCOUNT_AVATAR_PUBLIC_BASE_URL?.trim();
-  if (!publicBase) throw new Error("HATCH_ACCOUNT_AVATAR_PUBLIC_BASE_URL is required when account avatar storage is enabled");
-  const publicBaseUrl = new URL(ensureTrailingSlash(new URL(publicBase)));
-  if (publicBaseUrl.protocol !== "https:") throw new Error("HATCH_ACCOUNT_AVATAR_PUBLIC_BASE_URL must use HTTPS");
-  return new AccountAvatarApplicationService(accounts, new AliyunAccountAvatarFileStore(objectStore, publicBaseUrl));
+  return new AccountAvatarApplicationService(accounts, new AliyunAccountAvatarFileStore(objectStore));
 }
 
 function validateAvatarImage(image: Buffer, mediaType: string): void {
   if (!AVATAR_MEDIA_TYPES.has(mediaType)) throw new Error("avatar_media_type_invalid");
   if (image.byteLength === 0 || image.byteLength > MAX_ACCOUNT_AVATAR_BYTES) throw new Error("avatar_size_invalid");
-}
-
-function ensureTrailingSlash(url: URL): URL {
-  const normalized = new URL(url);
-  if (!normalized.pathname.endsWith("/")) normalized.pathname += "/";
-  return normalized;
 }
