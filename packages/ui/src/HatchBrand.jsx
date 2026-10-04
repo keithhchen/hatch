@@ -9,7 +9,7 @@ export { hatchMarkUrl, hatchLogoLockupUrl, hatchWordmarkUrl };
  * The product mark is shared by the public storefront and Creator Studio.
  * Render either the complete approved lockup or its separate responsive parts.
  */
-export function HatchBrand({ as: Element = "span", className = "", logoVariant = "split", children, ...props }) {
+export function HatchBrand({ as: Element = "span", className = "", logoVariant = "lockup", children, ...props }) {
   if (logoVariant !== "split" && logoVariant !== "lockup") throw new Error(`Unknown Hatch logo variant: ${logoVariant}`);
   const classes = ["hatch-brand", className].filter(Boolean).join(" ");
   return (
