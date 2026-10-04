@@ -21,7 +21,6 @@ services:
       HATCH_CREATOR_OBJECT_STORE_ENDPOINT: ${HATCH_CREATOR_OBJECT_STORE_ENDPOINT:-}
       HATCH_CREATOR_OBJECT_STORE_INTERNAL: ${HATCH_CREATOR_OBJECT_STORE_INTERNAL:-true}
       HATCH_CREATOR_OBJECT_STORE_PREFIX: ${HATCH_CREATOR_OBJECT_STORE_PREFIX:-hatch}
-      HATCH_ACCOUNT_AVATAR_PUBLIC_BASE_URL: ${HATCH_ACCOUNT_AVATAR_PUBLIC_BASE_URL:-}
       # Registry handles the synchronous Creator Factory start path. Keep its
       # provider/runtime inputs identical to the durable factory-worker so a
       # user-triggered run cannot fail merely because it was claimed in this
