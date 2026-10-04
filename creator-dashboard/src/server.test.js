@@ -1009,6 +1009,76 @@ test("zero-value checkout creates an idempotent Agent Corpus order and entitleme
   assert.equal(olderPage.entitlements[0].entitlement_id, firstBody.entitlement.entitlement_id);
 });
 
+test("buyer list APIs omit records whose Creator account is missing and return the remaining records", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-missing-creator-"));
+  const missingCreatorAgent = {
+    ...catalogAgent,
+    creator_id: "2c6a0c4e-6a9a-4c5e-9926-2c0e997cad12",
+    agent_id: "c867f6fc-8fb0-4bca-b1c7-93c77941d1a4",
+    product_id: "c867f6fc-8fb0-4bca-b1c7-93c77941d1a4",
+    product_name: "Missing Creator Product"
+  };
+  const missingCreatorAccountIds = new Set();
+  const registry = registryFixture({
+    role: "user",
+    catalogAgents: [catalogAgent, missingCreatorAgent],
+    missingCreatorAccountIds
+  });
+  await listen(registry);
+  context.after(() => registry.close());
+  const dashboard = await createDashboardApp({
+    ledgerPath: path.join(directory, "ledger.jsonl"),
+    registryAccessServiceToken: "test-access-service",
+    registryDeploymentServiceToken: "test-deployment-service",
+    registryUrl: serverUrl(registry),
+    exposeBearerTokens: true
+  });
+  const api = createServer(dashboard.handler);
+  await listen(api);
+  context.after(() => api.close());
+
+  const token = await login(api);
+  const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  const purchase = async (agent, key) => {
+    const response = await fetch(`${serverUrl(api)}/v1/user/checkout`, {
+      method: "POST",
+      headers: { ...headers, "idempotency-key": key },
+      body: JSON.stringify({ creator_id: agent.creator_id, product_id: agent.product_id })
+    });
+    assert.equal(response.status, 201);
+    return response.json();
+  };
+  const validPurchase = await purchase(catalogAgent, "missing-creator-valid-purchase");
+  const orphanedPurchase = await purchase(missingCreatorAgent, "missing-creator-orphaned-purchase");
+  missingCreatorAccountIds.add(missingCreatorAgent.creator_id);
+
+  const accessResponse = await fetch(`${serverUrl(api)}/v1/user/product-access`, { headers });
+  assert.equal(accessResponse.status, 200);
+  const access = await accessResponse.json();
+  assert.deepEqual(access.creator_agents.map((entry) => entry.entitlement_id), [validPurchase.entitlement.entitlement_id]);
+
+  const libraryResponse = await fetch(`${serverUrl(api)}/v1/library?limit=1`, { headers });
+  assert.equal(libraryResponse.status, 200);
+  const library = await libraryResponse.json();
+  assert.deepEqual(library.entitlements.map((entry) => entry.entitlement_id), [validPurchase.entitlement.entitlement_id]);
+  assert.equal(library.next_cursor, null);
+
+  const ordersResponse = await fetch(`${serverUrl(api)}/v1/orders?limit=1`, { headers });
+  assert.equal(ordersResponse.status, 200);
+  const orders = await ordersResponse.json();
+  assert.deepEqual(orders.orders.map((entry) => entry.order_id), [validPurchase.order.order_id]);
+  assert.equal(orders.next_cursor, null);
+
+  const publicProductsResponse = await fetch(`${serverUrl(api)}/v1/public/products`, { headers });
+  assert.equal(publicProductsResponse.status, 200);
+  assert.equal((await publicProductsResponse.json()).length, 2);
+
+  const orphanedLibraryResponse = await fetch(`${serverUrl(api)}/v1/library/${orphanedPurchase.entitlement.entitlement_id}`, { headers });
+  assert.equal(orphanedLibraryResponse.status, 404);
+  const orphanedOrderResponse = await fetch(`${serverUrl(api)}/v1/orders/${orphanedPurchase.order.order_id}`, { headers });
+  assert.equal(orphanedOrderResponse.status, 404);
+});
+
 test("V2 checkout session persists a free receipt and entitlement detail", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-v2-checkout-"));
   const accessBodies = [];
@@ -1364,6 +1434,7 @@ function registryFixture({
   agent = catalogAgent,
   creatorAgents,
   catalogAgents,
+  missingCreatorAccountIds = new Set(),
   factoryRun = null,
   briefCalls = [],
   publishCalls = [],
@@ -1396,7 +1467,7 @@ function registryFixture({
     if (requestUrl.pathname === "/v1/internal/creator-accounts") {
       const ids = new Set((requestUrl.searchParams.get("ids") ?? "").split(","));
       response.end(JSON.stringify({ accounts: publishedCatalogAgents
-        .filter((entry) => ids.has(entry.creator_id))
+        .filter((entry) => ids.has(entry.creator_id) && !missingCreatorAccountIds.has(entry.creator_id))
         .map((entry) => ({ id: entry.creator_id, display_name: "Maya Chen" })) }));
       return;
     }

@@ -194,9 +194,6 @@ export async function createDashboardApp(options = {}) {
       }
       return [account.id, account.display_name];
     }));
-    for (const id of ids) {
-      if (!names.has(id)) throw stateError("creator_account_not_found", `Creator account ${id} was not found.`, 502);
-    }
     return names;
   };
 
@@ -1158,6 +1155,9 @@ export async function createDashboardApp(options = {}) {
         }
         const requestKey = commandKey;
         const existing = portalState.findCheckoutSessionByRequest(authentication.profile.id, requestKey);
+        const sessionCreatorId = existing?.product.creator_id ?? product.creator_id;
+        const creatorName = (await resolveCreatorNames([sessionCreatorId])).get(sessionCreatorId);
+        if (!creatorName) return send(response, 404, { error: { code: "agent_unavailable", message: "The published Agent could not be found." } });
         const session = existing ?? await portalState.createCheckoutSession({
           request_key: requestKey,
           buyer_id: authentication.profile.id,
@@ -1186,7 +1186,6 @@ export async function createDashboardApp(options = {}) {
           release_id: product.release_id,
           request_id: requestId
         }, `checkout-started:${session.checkout_session_id}`);
-        const creatorName = (await resolveCreatorNames([session.product.creator_id])).get(session.product.creator_id);
         return send(response, existing ? 200 : 201, { checkout_session: checkoutSessionPublic(session, creatorName) });
       }
 
@@ -1199,6 +1198,7 @@ export async function createDashboardApp(options = {}) {
           return send(response, 404, { error: { code: "checkout_not_found", message: "Checkout session was not found." } });
         }
         const creatorName = (await resolveCreatorNames([session.product.creator_id])).get(session.product.creator_id);
+        if (!creatorName) return send(response, 404, { error: { code: "checkout_not_found", message: "Checkout session was not found." } });
         return send(response, 200, { checkout_session: checkoutSessionPublic(session, creatorName) });
       }
 
@@ -1212,6 +1212,8 @@ export async function createDashboardApp(options = {}) {
         if (!session || session.buyer_id !== authentication.profile.id) {
           return send(response, 404, { error: { code: "checkout_not_found", message: "Checkout session was not found." } });
         }
+        const creatorName = (await resolveCreatorNames([session.product.creator_id])).get(session.product.creator_id);
+        if (!creatorName) return send(response, 404, { error: { code: "checkout_not_found", message: "Checkout session was not found." } });
         const outcome = await confirmCheckoutSession({
           session,
           authentication,
@@ -1226,7 +1228,6 @@ export async function createDashboardApp(options = {}) {
           paymentScenario: body.sandbox_scenario
         });
         await recordCheckoutTelemetry(recordTelemetry, outcome.body, session, requestId);
-        const creatorName = (await resolveCreatorNames([session.product.creator_id])).get(session.product.creator_id);
         return send(response, outcome.replayed ? 200 : 201, checkoutOutcomePublic(outcome.body, session, creatorName));
       }
 
@@ -1257,6 +1258,7 @@ export async function createDashboardApp(options = {}) {
         const sourceOrders = commerce.listBuyerOrders(authentication.profile.id);
         const creatorNames = await resolveCreatorNames(sourceOrders.map((order) => order.creator_id));
         const orders = sourceOrders
+          .filter((order) => creatorNames.has(order.creator_id))
           .map((order) => orderDetail(order, [], creatorNames.get(order.creator_id)))
           .filter((order) => !status || status === "all" || order.status === status);
         const page = paginate(orders, url);
@@ -1273,6 +1275,7 @@ export async function createDashboardApp(options = {}) {
         }
         if (!order) return send(response, 404, { error: { code: "order_not_found", message: "Order was not found." } });
         const creatorName = (await resolveCreatorNames([order.creator_id])).get(order.creator_id);
+        if (!creatorName) return send(response, 404, { error: { code: "order_not_found", message: "Order was not found." } });
         return send(response, 200, { order: orderDetail(order, [], creatorName) });
       }
 
@@ -1285,6 +1288,8 @@ export async function createDashboardApp(options = {}) {
         if (!current || (current.buyer_id && current.buyer_id !== authentication.profile.id)) {
           return send(response, 404, { error: { code: "order_not_found", message: "Order was not found." } });
         }
+        const creatorName = (await resolveCreatorNames([current.creator_id])).get(current.creator_id);
+        if (!creatorName) return send(response, 404, { error: { code: "order_not_found", message: "Order was not found." } });
         const orderId = current.order_id;
         const isCancel = buyerRefundMatch[2] === "cancel";
         const unmetered = current.access_mode === "unmetered" || Number(current.gross_minor ?? 0) === 0;
@@ -1318,7 +1323,6 @@ export async function createDashboardApp(options = {}) {
           reason: String(body.reason ?? "buyer_request"),
           ...providerRefund
         }, { idempotencyKey: commandKey });
-        const creatorName = (await resolveCreatorNames([order.creator_id])).get(order.creator_id);
         return send(response, 201, { refund: order.refunds.at(-1), order: orderDetail(order, [], creatorName), access_status: "revoked" });
       }
 
@@ -1341,6 +1345,8 @@ export async function createDashboardApp(options = {}) {
           if (!checkoutSessionMatchesSelector(existing, creatorId, productId)) {
             throw stateError("idempotency_conflict", "This Idempotency-Key was already used for a different checkout intent.", 409);
           }
+          const creatorName = (await resolveCreatorNames([existing.product.creator_id])).get(existing.product.creator_id);
+          if (!creatorName) return send(response, 404, { error: { code: "agent_unavailable", message: "The published Agent could not be found." } });
           const outcome = await confirmCheckoutSession({
             session: existing,
             authentication,
@@ -1352,7 +1358,6 @@ export async function createDashboardApp(options = {}) {
             paymentProvider,
             commandKey
           });
-          const creatorName = (await resolveCreatorNames([existing.product.creator_id])).get(existing.product.creator_id);
           return send(response, outcome.replayed ? 200 : 201, checkoutOutcomePublic(outcome.body, existing, creatorName));
         }
         const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
@@ -1367,6 +1372,8 @@ export async function createDashboardApp(options = {}) {
         if (product.availability !== "published") {
           return send(response, 409, { error: { code: "product_unavailable", message: "This Product is not available." } });
         }
+        const creatorName = (await resolveCreatorNames([product.creator_id])).get(product.creator_id);
+        if (!creatorName) return send(response, 404, { error: { code: "agent_unavailable", message: "The published Agent could not be found." } });
         // The key identifies one Buyer intent, not a permanent
         // Buyer/product pair. Replaying the same intent is idempotent while a
         // fresh key creates a fresh checkout and a separate purchase record.
@@ -1403,7 +1410,6 @@ export async function createDashboardApp(options = {}) {
           paymentProvider,
           commandKey
         });
-        const creatorName = (await resolveCreatorNames([session.product.creator_id])).get(session.product.creator_id);
         return send(response, outcome.replayed ? 200 : 201, checkoutOutcomePublic(outcome.body, session, creatorName));
       }
 
@@ -3796,12 +3802,14 @@ function enrichEntitlements(entitlements, catalog, deliveries = [], creatorNames
     history.push(delivery);
     deliveriesByEntitlement.set(delivery.entitlement_id, history);
   }
-  return entitlements.map((entitlement) => {
+  return entitlements
+    .filter((entitlement) => creatorNames.has(entitlement.creator_id))
+    .map((entitlement) => {
     const unmetered = entitlement.access_mode === "unmetered" || Number(entitlement.gross_minor ?? 0) === 0;
     const agent = byProduct.get(`${entitlement.creator_id}:${entitlement.product_id}`);
     const currentEntitlement = currentCreatorNameProjection(
       entitlement,
-      creatorNames.get(entitlement.creator_id) ?? agent?.creator_name
+      creatorNames.get(entitlement.creator_id)
     );
     const {
       agent_id: _agentId,
@@ -3827,7 +3835,7 @@ function enrichEntitlements(entitlements, catalog, deliveries = [], creatorNames
       } : { id: currentEntitlement.product_id, product_id: currentEntitlement.product_id, name: currentEntitlement.product_id },
       creator: agent ? {
         id: agent.creator_id,
-        name: creatorNames.get(currentEntitlement.creator_id) ?? agent.creator_name,
+        name: creatorNames.get(currentEntitlement.creator_id),
         avatar_url: agent.creator_avatar_url ?? agent.creator?.avatar_url ?? null
       } : { id: currentEntitlement.creator_id },
       version_policy: entitlement.version_policy ?? "pinned",
