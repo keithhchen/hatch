@@ -68,6 +68,14 @@ export async function createDashboardApp(options = {}) {
   const publicOrigin = options.publicOrigin
     ?? process.env.HATCH_PUBLIC_ORIGIN
     ?? (process.env.NODE_ENV === "production" ? "https://hatch.tokenquadrant.cn" : "http://127.0.0.1:8500");
+  const allowedPublicOrigins = new Set([
+    new URL(publicOrigin).origin,
+    ...(options.publicOrigins ?? process.env.HATCH_PUBLIC_ORIGINS?.split(",") ?? [])
+      .map(origin => origin.trim())
+      .filter(Boolean)
+      .map(origin => new URL(origin).origin)
+  ]);
+  if (process.env.NODE_ENV !== "production") allowedPublicOrigins.add("http://127.0.0.1:8510");
   const voiceWss = new WebSocketServer({ noServer: true, maxPayload: 128 * 1024 });
   const chatWss = new WebSocketServer({ noServer: true, maxPayload: 160 * 1024 * 1024 });
   let PostgresPool = options.PostgresPool;
@@ -2193,9 +2201,7 @@ export async function createDashboardApp(options = {}) {
       let origin;
       try { origin = request.headers.origin ? new URL(request.headers.origin).origin : ""; }
       catch { origin = ""; }
-      const allowedOrigins = [new URL(publicOrigin).origin];
-      if (process.env.NODE_ENV !== "production") allowedOrigins.push("http://127.0.0.1:8510");
-      if (!allowedOrigins.includes(origin)) {
+      if (!allowedPublicOrigins.has(origin)) {
         throw Object.assign(new Error("Cross-origin WebSocket request rejected"), { status: 403 });
       }
       const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
@@ -2210,7 +2216,7 @@ export async function createDashboardApp(options = {}) {
     }
     let requestOrigin;
     try { requestOrigin = request.headers.origin ? new URL(request.headers.origin).origin : ""; } catch { requestOrigin = ""; }
-    if (!requestOrigin || requestOrigin !== new URL(publicOrigin).origin) {
+    if (!requestOrigin || !allowedPublicOrigins.has(requestOrigin)) {
       throw Object.assign(new Error("Cross-origin WebSocket request rejected"), { status: 403 });
     }
     const authentication = await authenticate(request, registryUrl, "creator", fetchImpl, portalState);

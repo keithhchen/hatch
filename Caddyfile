@@ -1,4 +1,4 @@
-{$HATCH_DOMAIN} {
+(hatch_routes) {
     encode gzip
 
     # Public deploy probes expose readiness without opening service command
@@ -113,4 +113,12 @@
     handle {
         reverse_proxy dashboard:8500
     }
+}
+
+{$HATCH_DOMAIN} {
+    import hatch_routes
+}
+
+{$HATCH_DOMAIN_ALIAS} {
+    import hatch_routes
 }

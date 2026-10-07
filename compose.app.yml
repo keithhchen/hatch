@@ -261,6 +261,7 @@ services:
       HATCH_CREATOR_DASHBOARD_API_PORT: 8500
       HATCH_REGISTRY_URL: http://registry:8100
       HATCH_RUNTIME_URL: http://runtime:8400
+      HATCH_PUBLIC_ORIGINS: ${HATCH_PUBLIC_ORIGINS:-https://hatch.tokenquadrant.cn,https://gethatchapp.com}
       HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN: ${HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN:?set HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN in /opt/hatch/.env}
       HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN: ${HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN:?set HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN in /opt/hatch/.env}
       HATCH_OAUTH_STATE_KEY: ${HATCH_OAUTH_STATE_KEY:?set HATCH_OAUTH_STATE_KEY in /opt/hatch/.env}
@@ -287,6 +288,7 @@ services:
     restart: unless-stopped
     environment:
       HATCH_DOMAIN: ${HATCH_DOMAIN:?set HATCH_DOMAIN in /opt/hatch/.env}
+      HATCH_DOMAIN_ALIAS: ${HATCH_DOMAIN_ALIAS:-gethatchapp.com}
     ports:
       - "80:80"
       - "443:443"

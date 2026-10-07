@@ -331,25 +331,29 @@ jobs:
       - name: Verify public health endpoints
         env:
           HATCH_DOMAIN: ${{ vars.HATCH_DOMAIN }}
+          HATCH_DOMAIN_ALIAS: ${{ vars.HATCH_DOMAIN_ALIAS || 'gethatchapp.com' }}
         run: |
           set -euo pipefail
           test -n "$HATCH_DOMAIN"
-          curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$HATCH_DOMAIN/health/dashboard" >/dev/null
-          curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$HATCH_DOMAIN/health/runtime" >/dev/null
-          curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$HATCH_DOMAIN/health/registry" >/dev/null
-          curl -4 --noproxy '*' --fail --location --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$HATCH_DOMAIN/explore" >/dev/null
-          logout_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' -X POST "https://$HATCH_DOMAIN/v1/auth/logout")"
-          test "$logout_status" = 204
-          me_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' "https://$HATCH_DOMAIN/v1/auth/me")"
-          test "$me_status" = 401
-          public_grant_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' -X POST "https://$HATCH_DOMAIN/v1/user/products/probe/access")"
-          test "$public_grant_status" = 404
-          private_grant_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' -X POST "https://$HATCH_DOMAIN/v1/commerce/product-access")"
-          test "$private_grant_status" = 404
+          for domain in "$HATCH_DOMAIN" "$HATCH_DOMAIN_ALIAS"; do
+            curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/dashboard" >/dev/null
+            curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/runtime" >/dev/null
+            curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/registry" >/dev/null
+            curl -4 --noproxy '*' --fail --location --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/explore" >/dev/null
+            logout_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' -X POST "https://$domain/v1/auth/logout")"
+            test "$logout_status" = 204
+            me_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' "https://$domain/v1/auth/me")"
+            test "$me_status" = 401
+            public_grant_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' -X POST "https://$domain/v1/user/products/probe/access")"
+            test "$public_grant_status" = 404
+            private_grant_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' -X POST "https://$domain/v1/commerce/product-access")"
+            test "$private_grant_status" = 404
+          done
       - name: Roll back application release when health fails
         if: failure()
         env:
           HATCH_DOMAIN: ${{ vars.HATCH_DOMAIN }}
+          HATCH_DOMAIN_ALIAS: ${{ vars.HATCH_DOMAIN_ALIAS || 'gethatchapp.com' }}
         run: |
           set -euo pipefail
           cd /opt/hatch
@@ -362,9 +366,11 @@ jobs:
             docker compose --env-file .env --env-file .release.env -f compose.app.yml up -d --no-deps registry runtime caddy
             docker compose --env-file .env --env-file .release.env -f compose.app.yml ps --status running --services | grep -Fxq registry
             test -n "$HATCH_DOMAIN"
-            curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$HATCH_DOMAIN/health/dashboard" >/dev/null
-            curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$HATCH_DOMAIN/health/runtime" >/dev/null
-            curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$HATCH_DOMAIN/health/registry" >/dev/null
+            for domain in "$HATCH_DOMAIN" "$HATCH_DOMAIN_ALIAS"; do
+              curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/dashboard" >/dev/null
+              curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/runtime" >/dev/null
+              curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/registry" >/dev/null
+            done
           else
             # A first release has no known-good image to restore. Do not leave
             # an unverified stack serving traffic or let its tag become the
