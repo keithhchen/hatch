@@ -90,7 +90,7 @@ export class RuntimeReleaseAgentCorpusResolver implements AgentCorpusResolverLik
       throw new Error("Registry runtime manifest reference is not canonical");
     }
     if (release.product_id !== agentId || release.creator_id !== creatorId) {
-      throw new Error("Registry release binding does not match the requested Creator Agent");
+      throw new Error("Registry release binding does not match the requested Expert Agent");
     }
 
     const releaseDirectory = releaseDirectoryName(release.release_digest);
@@ -171,7 +171,7 @@ function releaseDirectoryName(releaseDigest: string): string {
 function runtimeManifestToAgentCorpus(manifest: RuntimeCorpusManifest): AgentCorpus {
   return AgentCorpusSchema.parse({
     contract_version: "1",
-    creator: { id: manifest.creator.id, name: "Creator" },
+    creator: { id: manifest.creator.id, name: "Expert" },
     product: {
       id: manifest.product.id,
       name: manifest.product.name,
@@ -185,7 +185,7 @@ function runtimeManifestToAgentCorpus(manifest: RuntimeCorpusManifest): AgentCor
         id: "system",
         path: manifest.system_ref.path,
         sha256: manifest.system_ref.sha256,
-        description: "Creator system instructions"
+        description: "Expert system instructions"
       }
     },
     skills: manifest.skills.map((skill) => ({

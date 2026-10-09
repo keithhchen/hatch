@@ -292,7 +292,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
         const claims = verifyAuthToken(token, authSecret);
         account = claims ? await accounts.getById(claims.sub) : undefined;
       }
-      if (!account || account.role !== "creator") throw Object.assign(new Error("A valid Creator account token is required."), { status: 401 });
+      if (!account || account.role !== "creator") throw Object.assign(new Error("A valid Expert account token is required."), { status: 401 });
       const productId = decodeURIComponent(match[1]!);
       const product = await productForCreator(registryContext, account.id, productId);
       if (!product) throw Object.assign(new Error("Product was not found."), { status: 404 });
@@ -353,7 +353,7 @@ async function route(
     const rawIds = url.searchParams.get("ids") ?? "";
     const ids = rawIds ? [...new Set(rawIds.split(",").map((id) => id.trim()))] : [];
     if (ids.length > 100 || ids.some((id) => !isUuidV4(id))) {
-      const error = Object.assign(new Error("ids must contain up to 100 Creator account UUIDs."), { status: 400 });
+      const error = Object.assign(new Error("ids must contain up to 100 Expert account UUIDs."), { status: 400 });
       throw error;
     }
     sendJson(response, 200, { accounts: await context.accounts.getCreatorPublicByIds(ids) }, { "cache-control": "no-store" });
@@ -376,7 +376,7 @@ async function route(
   if (factoryAgentsMatch) {
     const account = await authenticate(request, response, context, "creator");
     if (account === SESSION_QUERY_REJECTED) return;
-    if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
+    if (!account) { sendJson(response, 401, { detail: "A valid Expert account token is required." }); return; }
     const productId = decodeURIComponent(factoryAgentsMatch[1]!);
     const product = await productForCreator(context, account.id, productId);
     if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
@@ -388,7 +388,7 @@ async function route(
   if (registryPublishMatch && request.method === "POST") {
     const account = await authenticate(request, response, context, "creator");
     if (account === SESSION_QUERY_REJECTED) return;
-    if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
+    if (!account) { sendJson(response, 401, { detail: "A valid Expert account token is required." }); return; }
     if (!context.corpusPublisher) {
       sendJson(response, 503, { error: { code: "publish_unavailable", message: "Corpus Publisher is unavailable." } });
       return;
@@ -705,7 +705,7 @@ async function route(
   if (factoryNodeMatch) {
     const account = await authenticate(request, response, context, "creator");
     if (account === SESSION_QUERY_REJECTED) return;
-    if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
+    if (!account) { sendJson(response, 401, { detail: "A valid Expert account token is required." }); return; }
     if (!context.factoryNodeService) {
       sendJson(response, 503, { error: { code: "node_unavailable", message: "Factory Node runtime is unavailable." } });
       return;
@@ -743,7 +743,7 @@ async function route(
     const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
     if (isAnswers) {
       if (node !== "about-you" || !executionId) {
-        sendJson(response, 404, { error: { code: "execution_not_found", message: "Creator answers belong to an About You execution." } });
+        sendJson(response, 404, { error: { code: "execution_not_found", message: "Expert answers belong to an About You execution." } });
         return;
       }
       const answers = parseAboutYouAnswers(body.answers);
@@ -795,7 +795,7 @@ async function route(
     || /^\/v1\/creator\/products\/[^/]+\/graph$/.test(url.pathname)) {
     const account = await authenticate(request, response, context, "creator");
     if (account === SESSION_QUERY_REJECTED) return;
-    if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
+    if (!account) { sendJson(response, 401, { detail: "A valid Expert account token is required." }); return; }
     const result = await handleCreatorFactoryHttp({
       method: request.method ?? "GET",
       pathname: url.pathname,
@@ -814,7 +814,7 @@ async function route(
   if (url.pathname === "/v1/creator/products" && (request.method === "GET" || request.method === "POST")) {
     const account = await authenticate(request, response, context, "creator");
     if (account === SESSION_QUERY_REJECTED) return;
-    if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
+    if (!account) { sendJson(response, 401, { detail: "A valid Expert account token is required." }); return; }
     if (request.method === "GET") {
       const products = mergeCreatorProductListings(
         await context.store.listAgentCorpora(account.id),
@@ -867,7 +867,7 @@ async function route(
   if (productRootMatch && (request.method === "GET" || request.method === "PATCH" || request.method === "DELETE")) {
     const account = await authenticate(request, response, context, "creator");
     if (account === SESSION_QUERY_REJECTED) return;
-    if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
+    if (!account) { sendJson(response, 401, { detail: "A valid Expert account token is required." }); return; }
     const productId = decodeURIComponent(productRootMatch[1]!);
     const product = await productForCreator(context, account.id, productId);
     if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
@@ -923,7 +923,7 @@ async function route(
   if (productWithdrawMatch && request.method === "POST") {
     const account = await authenticate(request, response, context, "creator");
     if (account === SESSION_QUERY_REJECTED) return;
-    if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
+    if (!account) { sendJson(response, 401, { detail: "A valid Expert account token is required." }); return; }
     const productId = decodeURIComponent(productWithdrawMatch[1]!);
     const product = await productForCreator(context, account.id, productId);
     if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
@@ -937,7 +937,7 @@ async function route(
   if (productBriefSpecMatch && request.method === "PUT") {
     const account = await authenticate(request, response, context, "creator");
     if (account === SESSION_QUERY_REJECTED) return;
-    if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
+    if (!account) { sendJson(response, 401, { detail: "A valid Expert account token is required." }); return; }
     const productId = decodeURIComponent(productBriefSpecMatch[1]!);
     const product = await productForCreator(context, account.id, productId);
     if (!product?.repositoryId) {
@@ -959,7 +959,7 @@ async function route(
   if (productFilesMatch) {
     const account = await authenticate(request, response, context, "creator");
     if (account === SESSION_QUERY_REJECTED) return;
-    if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
+    if (!account) { sendJson(response, 401, { detail: "A valid Expert account token is required." }); return; }
     const productId = decodeURIComponent(productFilesMatch[1]!);
     const product = await productForCreator(context, account.id, productId);
     if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
@@ -1067,10 +1067,10 @@ async function route(
   const publicCreatorMatch = url.pathname.match(/^\/v1\/public\/creators\/([^/]+)$/);
   if (publicCreatorMatch && request.method === "GET") {
     const creatorId = decodeURIComponent(publicCreatorMatch[1]!);
-    if (!isUuidV4(creatorId)) { sendJson(response, 404, { detail: "Creator not found." }); return; }
+    if (!isUuidV4(creatorId)) { sendJson(response, 404, { detail: "Expert not found." }); return; }
     const rows = (await publicCatalogRows(context))
       .filter((row) => row.creator_id === creatorId);
-    if (!rows.length) { sendJson(response, 404, { detail: "Creator not found." }); return; }
+    if (!rows.length) { sendJson(response, 404, { detail: "Expert not found." }); return; }
     sendJson(response, 200, {
       creator: { id: creatorId, name: rows[0]!.creator_name, avatar_url: rows[0]!.creator_avatar_url ?? null },
       products: rows.map(publicProductRow)
@@ -1156,15 +1156,15 @@ async function resolvePublishedCreatorToolConnection(
   toolId: string
 ) {
   if (release.creator_id !== tenantId || release.product_id !== productId) {
-    throw new Error("published Creator release does not match the requested product");
+    throw new Error("published Expert release does not match the requested product");
   }
-  if (!context.nodeObjectStore) throw new Error("Creator Registry object storage is unavailable");
+  if (!context.nodeObjectStore) throw new Error("Expert Registry object storage is unavailable");
   const corpus = corpusOutputSchema.parse(
     JSON.parse((await context.nodeObjectStore.get(release.corpus_ref)).toString("utf8"))
   );
   const declared = corpus.tools.find((tool) => tool.id === toolId);
   if (!declared || (declared.kind !== "http_function" && declared.kind !== "mcp_tool") || !declared.connection_ref) {
-    throw new Error(`published Creator tool does not exist or has no connection reference: ${toolId}`);
+    throw new Error(`published Expert tool does not exist or has no connection reference: ${toolId}`);
   }
   return context.store.resolveCreatorToolConnectionByReference({
     tenantId,

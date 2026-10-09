@@ -21,9 +21,9 @@ import {
 } from "./product-policy.js";
 
 describe("consumer product contract", () => {
-  it("uses generic agent-home copy while presenting the demo creator", () => {
+  it("uses generic agent-home copy while presenting the default Expert", () => {
     expect(PRODUCT_COPY.home).toBe("Your agents");
-    expect(DEFAULT_CREATOR_AGENT.name).toBe("Creator Agent");
+    expect(DEFAULT_CREATOR_AGENT.name).toBe("Expert Agent");
     expect(PRODUCT_COPY.workspaceRequired).toMatch(/workspace/i);
   });
 

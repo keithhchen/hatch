@@ -278,7 +278,7 @@ async function executeOneTurn(
             );
           }
           if (message.creator_id !== input.creatorId || message.product_id !== input.agentId) {
-            throw new Error("Hatch Runtime bound a different Creator Agent");
+            throw new Error("Hatch Runtime bound a different Expert Agent");
           }
           if (message.conversation_id !== conversationId) {
             throw new Error("Hatch Runtime bound a different conversation");

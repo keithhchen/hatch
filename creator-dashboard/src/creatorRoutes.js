@@ -73,16 +73,16 @@ export function parseCreatorRoute(pathname) {
 
 export function creatorRouteTitle(route) {
   if (route.kind === "factory-agents" || route.kind === "factory-index") return "Factory";
-  if (route.kind === "home") return "Creator home";
+  if (route.kind === "home") return "Expert home";
   if (route.kind === "products") return "Products";
   if (route.kind === "product-create") return "Create product";
   if (route.kind === "candidate") return "Candidate review";
   if (route.kind === "preview") return "Storefront preview";
   if (route.kind === "release") return "Release";
-  if (route.kind === "orders") return "Creator orders";
-  if (route.kind === "order") return "Creator order";
+  if (route.kind === "orders") return "Expert orders";
+  if (route.kind === "order") return "Expert order";
   if (route.kind === "product") return "Product";
-  return "Creator dashboard";
+  return "Expert dashboard";
 }
 
 function safeDecode(value) {

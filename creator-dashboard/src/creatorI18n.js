@@ -88,7 +88,7 @@ const MESSAGES = {
     sealedHeldout: "Sealed held-out",
     heldoutCheckTitle: "Generalization check",
     heldoutCheckBody: (passed, total) => `${passed} / ${total} sealed cases passed. Held-out content stays sealed.`,
-    heldoutCorrectionTitle: "Creator correction required",
+    heldoutCorrectionTitle: "Expert correction required",
     heldoutCorrectionBody: (count) => `${count} sealed case${count === 1 ? "" : "s"} failed. The case text and candidate output stay hidden; describe the behavior that must change before Hatch evaluates a new version.`,
     heldoutCorrectionLabel: "What behavior should change?",
     startHeldoutCorrection: "Start correction version",
@@ -163,22 +163,22 @@ const MESSAGES = {
     ,download: "Download"
     ,orders: "Orders"
     ,account: "Account"
-    ,hatchCreatorHome: "Hatch Creator home"
-    ,creatorNavigation: "Creator navigation"
+    ,hatchCreatorHome: "Hatch Expert home"
+    ,creatorNavigation: "Expert navigation"
     ,openNavigation: "Open navigation"
     ,hatchNavigation: "Hatch navigation"
-    ,creator: "Creator"
-    ,creatorAccount: "Creator account"
+    ,creator: "Expert"
+    ,creatorAccount: "Expert account"
     ,signOut: "Sign out"
-    ,creatorPortalUnavailable: "Creator Studio is unavailable"
+    ,creatorPortalUnavailable: "Hatch Studio is unavailable"
     ,creatorPortalUnavailableBody: "We couldn't load this workspace."
     ,pageNotFound: "Page not found"
-    ,pageNotFoundBody: "This Creator page does not exist or has moved."
+    ,pageNotFoundBody: "This Expert page does not exist or has moved."
     ,backToProducts: "Back to Products"
     ,workspaceLoadError: "We couldn't open your workspace"
     ,retry: "Retry"
-    ,creatorHome: "Creator home"
-    ,creatorOverview: "Creator overview"
+    ,creatorHome: "Expert home"
+    ,creatorOverview: "Expert overview"
     ,zeroProductTitle: "Your best work shouldn’t be limited by your calendar."
     ,zeroProductSpotify: "Spotify doesn’t make the music. It distributes it and takes a cut when people listen."
     ,zeroProductRecord: "Hatch does that for expertise — and we also help make the record."
@@ -320,7 +320,7 @@ const MESSAGES = {
     sealedHeldout: "密封留出评估",
     heldoutCheckTitle: "泛化检查",
     heldoutCheckBody: (passed, total) => `${passed} / ${total} 个密封案例通过。留出内容保持密封。`,
-    heldoutCorrectionTitle: "需要创作者修正",
+    heldoutCorrectionTitle: "需要 Expert 修正",
     heldoutCorrectionBody: (count) => `${count} 个密封案例未通过。案例文本和候选输出保持隐藏；请描述在重新评估前必须改变的行为。`,
     heldoutCorrectionLabel: "应该改变什么行为？",
     startHeldoutCorrection: "开始修正版本",
@@ -395,22 +395,22 @@ const MESSAGES = {
     ,download: "下载"
     ,orders: "订单"
     ,account: "账户"
-    ,hatchCreatorHome: "Hatch 创作者首页"
-    ,creatorNavigation: "创作者导航"
+    ,hatchCreatorHome: "Hatch Expert 首页"
+    ,creatorNavigation: "Expert 导航"
     ,openNavigation: "打开导航"
     ,hatchNavigation: "Hatch 导航"
-    ,creator: "创作者"
-    ,creatorAccount: "创作者账户"
+    ,creator: "Expert"
+    ,creatorAccount: "Expert 账户"
     ,signOut: "退出登录"
-    ,creatorPortalUnavailable: "Creator Studio 暂不可用"
+    ,creatorPortalUnavailable: "Hatch Studio 暂不可用"
     ,creatorPortalUnavailableBody: "暂时无法加载这个工作区。"
     ,pageNotFound: "页面不存在"
-    ,pageNotFoundBody: "这个创作者页面不存在或已移动。"
+    ,pageNotFoundBody: "这个 Expert 页面不存在或已移动。"
     ,backToProducts: "返回产品"
     ,workspaceLoadError: "无法打开你的工作区"
     ,retry: "重试"
-    ,creatorHome: "创作者首页"
-    ,creatorOverview: "创作者概览"
+    ,creatorHome: "Expert 首页"
+    ,creatorOverview: "Expert 概览"
     ,zeroProductTitle: "你最好的工作，不该受限于你的时间。"
     ,zeroProductSpotify: "Spotify 不创作音乐。它帮助音乐被更多人听见，并从中获得分成。"
     ,zeroProductRecord: "Hatch 为专家做同样的事——而且我们还帮你把“唱片”做出来。"
@@ -552,7 +552,7 @@ const MESSAGES = {
     sealedHeldout: "シールドされたホールドアウト",
     heldoutCheckTitle: "汎化チェック",
     heldoutCheckBody: (passed, total) => `${passed} / ${total} 件のシールドケースに合格。ホールドアウト内容は封印されています。`,
-    heldoutCorrectionTitle: "クリエイターの修正が必要",
+    heldoutCorrectionTitle: "Expert の修正が必要",
     heldoutCorrectionBody: (count) => `${count} 件のシールドケースに失敗しました。ケース本文と候補出力は非表示のままです。新しいバージョンを評価する前に変えるべき動作を説明してください。`,
     heldoutCorrectionLabel: "どの動作を変えるべきですか？",
     startHeldoutCorrection: "修正版を開始",
@@ -627,22 +627,22 @@ const MESSAGES = {
     ,download: "ダウンロード"
     ,orders: "注文"
     ,account: "アカウント"
-    ,hatchCreatorHome: "Hatch クリエイターホーム"
-    ,creatorNavigation: "クリエイターナビゲーション"
+    ,hatchCreatorHome: "Hatch Expert ホーム"
+    ,creatorNavigation: "Expert ナビゲーション"
     ,openNavigation: "ナビゲーションを開く"
     ,hatchNavigation: "Hatch ナビゲーション"
-    ,creator: "クリエイター"
-    ,creatorAccount: "クリエイターアカウント"
+    ,creator: "Expert"
+    ,creatorAccount: "Expert アカウント"
     ,signOut: "サインアウト"
-    ,creatorPortalUnavailable: "Creator Studio を利用できません"
+    ,creatorPortalUnavailable: "Hatch Studio を利用できません"
     ,creatorPortalUnavailableBody: "このワークスペースを読み込めませんでした。"
     ,pageNotFound: "ページが見つかりません"
-    ,pageNotFoundBody: "このクリエイターページは存在しないか、移動しました。"
+    ,pageNotFoundBody: "この Expert ページは存在しないか、移動しました。"
     ,backToProducts: "プロダクトに戻る"
     ,workspaceLoadError: "ワークスペースを開けませんでした"
     ,retry: "再試行"
-    ,creatorHome: "クリエイターホーム"
-    ,creatorOverview: "クリエイター概要"
+    ,creatorHome: "Expert ホーム"
+    ,creatorOverview: "Expert 概要"
     ,zeroProductTitle: "最高の仕事を、あなたの時間だけに縛られないものへ。"
     ,zeroProductSpotify: "Spotify は音楽を作りません。音楽を届け、聴かれたときに収益の一部を受け取ります。"
     ,zeroProductRecord: "Hatch は専門知識で同じことをします。しかも、その「レコード」を作るところから支援します。"
@@ -746,7 +746,7 @@ const PORTAL_MESSAGES = {
     reason: "Reason",
     factoryRun: "Version",
     creatorFactory: "Product workflow",
-    creatorDashboard: "Creator dashboard",
+    creatorDashboard: "Expert dashboard",
     candidate: "Candidate",
     notReady: "Not ready",
     release: "Release",
@@ -935,10 +935,10 @@ const PORTAL_MESSAGES = {
     statusReady: "Ready",
     statusPreparing: "Preparing",
     statusRetired: "Retired",
-    loadingCreatorPage: "Loading Creator page",
+    loadingCreatorPage: "Loading Expert page",
     unexpectedError: "An unexpected error occurred.",
     sessionExpired: "Your session expired. Sign in again to continue.",
-    creatorForbidden: "This Creator account cannot access that resource.",
+    creatorForbidden: "This Expert account cannot access that resource.",
     requestedResourceMissing: "The requested resource no longer exists.",
     pageChanged: "This page changed in another tab. Refresh the latest version before trying again.",
     tooManyRequests: "Too many requests. Your work is preserved; try again shortly.",
@@ -997,7 +997,7 @@ const PORTAL_MESSAGES = {
     reason: "原因",
     factoryRun: "版本",
     creatorFactory: "产品流程",
-    creatorDashboard: "创作者控制台",
+    creatorDashboard: "Expert 控制台",
     candidate: "候选版本",
     notReady: "尚未准备好",
     release: "发布版本",
@@ -1186,10 +1186,10 @@ const PORTAL_MESSAGES = {
     statusReady: "已准备好",
     statusPreparing: "准备中",
     statusRetired: "已停用",
-    loadingCreatorPage: "正在加载创作者页面",
+    loadingCreatorPage: "正在加载 Expert 页面",
     unexpectedError: "发生意外错误。",
     sessionExpired: "登录状态已过期，请重新登录后继续。",
-    creatorForbidden: "这个创作者账户无权访问该资源。",
+    creatorForbidden: "这个 Expert 账户无权访问该资源。",
     requestedResourceMissing: "请求的资源已不存在。",
     pageChanged: "此页面已在另一个标签页中变化，请刷新最新版本后再试。",
     tooManyRequests: "请求过于频繁。你的工作已保留，请稍后再试。",
@@ -1248,7 +1248,7 @@ const PORTAL_MESSAGES = {
     reason: "理由",
     factoryRun: "バージョン",
     creatorFactory: "プロダクトの流れ",
-    creatorDashboard: "クリエイターダッシュボード",
+    creatorDashboard: "Expert ダッシュボード",
     candidate: "候補",
     notReady: "準備未完了",
     release: "リリース",
@@ -1437,10 +1437,10 @@ const PORTAL_MESSAGES = {
     statusReady: "準備完了",
     statusPreparing: "準備中",
     statusRetired: "終了",
-    loadingCreatorPage: "クリエイターページを読み込み中",
+    loadingCreatorPage: "Expert ページを読み込み中",
     unexpectedError: "予期しないエラーが発生しました。",
     sessionExpired: "セッションの有効期限が切れました。再度サインインしてください。",
-    creatorForbidden: "このクリエイターアカウントはそのリソースにアクセスできません。",
+    creatorForbidden: "この Expert アカウントはそのリソースにアクセスできません。",
     requestedResourceMissing: "要求されたリソースは存在しません。",
     pageChanged: "別のタブでページが変更されました。最新バージョンを更新してから再試行してください。",
     tooManyRequests: "リクエストが多すぎます。作業は保存されています。しばらくしてから再試行してください。",

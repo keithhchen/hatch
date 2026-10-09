@@ -261,8 +261,8 @@ function CreatorPublicPage({creatorId, request, navigate, session }) {
   const endpoint = `/v1/public/creators/${encodeURIComponent(creatorId)}`;
   const resource = useRemote(async (signal) => callRequest(request, endpoint, { signal }), endpoint);
   const publicModel = creatorPublicModel(resource.data);
-  usePageTitle(publicModel.creator?.name ? `${publicModel.creator.name} · Hatch` : "Creator · Hatch");
-  if (resource.status === "loading") return <div className="buyer-v2__container buyer-v2__page"><PageSkeleton label={t('Loading creator')} /></div>;
+  usePageTitle(publicModel.creator?.name ? `${publicModel.creator.name} · Hatch` : t("Expert · Hatch"));
+  if (resource.status === "loading") return <div className="buyer-v2__container buyer-v2__page"><PageSkeleton label={t('Loading expert')} /></div>;
   if (resource.status === "error") return <div className="buyer-v2__container buyer-v2__page"><RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo={`/creators/${encodeURIComponent(creatorId)}`} /></div>;
   const creator = publicModel.creator;
   const products = publicModel.products;
@@ -276,7 +276,7 @@ function CreatorPublicPage({creatorId, request, navigate, session }) {
           <p>{creator?.bio ?? creator?.description ?? "Published methods for work in your own Workspace."}</p>
         </div>
       </header>
-      {products.length ? <section className="buyer-v2__catalog-grid" aria-label={`${creator?.name ?? creatorId} products`}>{products.map((product) => <CatalogCard key={productKey(product)} product={product} navigate={navigate} authenticated={session.status === "authenticated"} />)}</section> : <EmptyState title={t('No public products yet')} body={t('This Creator has not published a product that can be browsed.')} action={<LinkButton to={EXPLORE_ROOT} navigate={navigate}>{t('Explore all products')}</LinkButton>} />}
+      {products.length ? <section className="buyer-v2__catalog-grid" aria-label={`${creator?.name ?? creatorId} products`}>{products.map((product) => <CatalogCard key={productKey(product)} product={product} navigate={navigate} authenticated={session.status === "authenticated"} />)}</section> : <EmptyState title={t('No public products yet')} body={t('This Expert has not published a product that can be browsed.')} action={<LinkButton to={EXPLORE_ROOT} navigate={navigate}>{t('Explore all products')}</LinkButton>} />}
     </div>
   );
 }
@@ -397,7 +397,7 @@ function ProductAction({product, currentPath, request, navigate, session, downlo
     action = <Button type="button" loading>{t('Setting up access')}</Button>;
   } else if (!purchasable) {
     title = "This Product is unavailable.";
-    body = "The Creator has withdrawn this Product. Existing receipts remain available.";
+    body = "The Expert has withdrawn this Product. Existing receipts remain available.";
   } else if (isAnonymous) {
     const authPath = `/sign-in?returnTo=${encodeURIComponent(currentPath)}`;
     action = <LinkButton to={authPath} navigate={navigate}>{t('Get access')}</LinkButton>;
@@ -906,7 +906,7 @@ function OrderPage({id, request, navigate, session }) {
       <header className="buyer-v2__detail-heading"><div><span className="buyer-v2__eyebrow">Order #{orderReference(order)}</span><h1>{productName(product)}</h1><p>Created {dateTime(order.created_at || order.occurred_at)}</p></div><StatusChip status={orderStatus(order)} label={t(orderStatusLabel(order))} /></header>
       <div className="buyer-v2__detail-grid">
         <section className="buyer-v2__detail-card"><h2>{t('Receipt')}</h2><DefinitionList rows={[
-          [t("Creator"), creatorName(order.creator || product)],
+          [t("Expert"), creatorName(order.creator || product)],
           [t("Subtotal"), subtotalMinor === 0 ? "Free" : money(subtotalMinor, order.currency)],
           [t("Discount"), discountMinor === 0 ? money(0, order.currency) : `−${money(discountMinor, order.currency)}`],
           [t("Tax"), taxLabel],
@@ -1237,9 +1237,9 @@ function accessFor(value) {
 }
 
 function productId(value) { return value?.product_id || value?.product?.id || value?.product?.product_id || value?.id; }
-function productName(value) { return value?.product_name || value?.name || value?.product?.name || "Creator Agent"; }
-function productPromise(value) { return value?.promise || value?.product_description || value?.description || value?.product?.promise || value?.product?.description || "A practical Creator method for work in your own Workspace."; }
-function creatorName(value) { return value?.creator_name || value?.creator_display_name || value?.display_name || value?.name || value?.creator?.display_name || value?.creator?.name || value?.creator?.handle || "Hatch Creator"; }
+function productName(value) { return value?.product_name || value?.name || value?.product?.name || "Expert Agent"; }
+function productPromise(value) { return value?.promise || value?.product_description || value?.description || value?.product?.promise || value?.product?.description || "An Expert method for work in your own Workspace."; }
+function creatorName(value) { return value?.creator_name || value?.creator_display_name || value?.display_name || value?.name || value?.creator?.display_name || value?.creator?.name || value?.creator?.handle || "Hatch Expert"; }
 function creatorAvatarUrl(value) { return value?.creator_avatar_url || value?.avatar_url || value?.image_url || value?.creator?.avatar_url || value?.creator?.image_url; }
 function creatorId(value) { return value?.creator_id || value?.creator?.id || ""; }
 function entitlementIdFor(value) { return value?.entitlement_id || value?.id || ""; }

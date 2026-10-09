@@ -181,7 +181,7 @@ test("Runtime blocks a real WebSocket turn when its entitlement is revoked after
       run_id: "run-entitlement-revoked",
       error: {
         code: "entitlement_required",
-        message: "Access to this Creator Agent is no longer available. Refresh your Creator Agents and choose an available Agent."
+        message: "Access to this Expert Agent is no longer available. Refresh your Expert Agents and choose an available Agent."
       }
     });
     assert.equal(scenario.runCalls(), 0);
@@ -341,7 +341,7 @@ test("Runtime rechecks a fixture entitlement every turn without an identity reso
       run_id: "run-fixture-revoked",
       error: {
         code: "entitlement_required",
-        message: "Access to this Creator Agent is no longer available. Refresh your Creator Agents and choose an available Agent."
+        message: "Access to this Expert Agent is no longer available. Refresh your Expert Agents and choose an available Agent."
       }
     });
     assert.equal(entitlementCalls, 2);

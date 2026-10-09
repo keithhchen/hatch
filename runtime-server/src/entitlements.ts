@@ -183,7 +183,7 @@ export class FileEntitlementResolver implements EntitlementResolver {
 
   async resolve(input: EntitlementLookup & { entitlementId: string }): Promise<EntitlementBinding> {
     const binding = (await this.list(input)).find((entry) => entry.entitlement_id === input.entitlementId);
-    if (!binding) throw new EntitlementError("entitlement_not_found", "This Creator Agent is not available for the signed-in account.");
+    if (!binding) throw new EntitlementError("entitlement_not_found", "This Expert Agent is not available for the signed-in account.");
     return binding;
   }
 
@@ -232,7 +232,7 @@ export class RegistryEntitlementResolver implements EntitlementResolver, AuthIde
         `/v1/internal/access/users/${encodeURIComponent(identity.sub)}/entitlements`,
         input.signal
       );
-      if (!response.ok) throw new EntitlementError("access_service_unavailable", "Creator Agent access is temporarily unavailable.");
+      if (!response.ok) throw new EntitlementError("access_service_unavailable", "Expert Agent access is temporarily unavailable.");
       try {
         const payload = JSON.parse(body) as { entitlements?: unknown };
         return parseCommerceEntitlements(payload.entitlements);
@@ -248,12 +248,12 @@ export class RegistryEntitlementResolver implements EntitlementResolver, AuthIde
       "entitlement"
     );
     if (response.status === 401) throw new EntitlementError("auth_invalid", "Your Hatch session is no longer valid.");
-    if (!response.ok) throw new EntitlementError("entitlement_registry_unavailable", "Creator Agent access is temporarily unavailable.");
+    if (!response.ok) throw new EntitlementError("entitlement_registry_unavailable", "Expert Agent access is temporarily unavailable.");
     let payload: unknown;
     try {
       payload = JSON.parse(body);
     } catch {
-      throw new EntitlementError("entitlement_registry_unavailable", "Creator Agent access is temporarily unavailable.");
+      throw new EntitlementError("entitlement_registry_unavailable", "Expert Agent access is temporarily unavailable.");
     }
     return parseRegistryEntitlements(payload);
   }
@@ -270,14 +270,14 @@ export class RegistryEntitlementResolver implements EntitlementResolver, AuthIde
         input.signal
       );
       if (response.status === 404) {
-        throw new EntitlementError("entitlement_not_found", "This Creator Agent is not available for the signed-in account.");
+        throw new EntitlementError("entitlement_not_found", "This Expert Agent is not available for the signed-in account.");
       }
-      if (!response.ok) throw new EntitlementError("access_service_unavailable", "Creator Agent access is temporarily unavailable.");
+      if (!response.ok) throw new EntitlementError("access_service_unavailable", "Expert Agent access is temporarily unavailable.");
       try {
         const payload = JSON.parse(body) as { entitlement?: unknown };
         const [binding] = parseCommerceEntitlements([payload.entitlement]);
         if (!binding || binding.entitlement_id !== input.entitlementId || binding.user_id !== identity.sub) {
-          throw new EntitlementError("entitlement_not_found", "This Creator Agent is not available for the signed-in account.");
+          throw new EntitlementError("entitlement_not_found", "This Expert Agent is not available for the signed-in account.");
         }
         return binding;
       } catch (error) {
@@ -292,12 +292,12 @@ export class RegistryEntitlementResolver implements EntitlementResolver, AuthIde
       "entitlement",
     );
     if (response.status === 401) throw new EntitlementError("auth_invalid", "Your Hatch session is no longer valid.");
-    if (!response.ok) throw new EntitlementError("entitlement_registry_unavailable", "Creator Agent access is temporarily unavailable.");
+    if (!response.ok) throw new EntitlementError("entitlement_registry_unavailable", "Expert Agent access is temporarily unavailable.");
     let payload: unknown;
     try { payload = JSON.parse(body); }
-    catch { throw new EntitlementError("entitlement_registry_unavailable", "Creator Agent access is temporarily unavailable."); }
+    catch { throw new EntitlementError("entitlement_registry_unavailable", "Expert Agent access is temporarily unavailable."); }
     const binding = parseRegistryEntitlements(payload).find((entry) => entry.entitlement_id === input.entitlementId);
-    if (!binding) throw new EntitlementError("entitlement_not_found", "This Creator Agent is not available for the signed-in account.");
+    if (!binding) throw new EntitlementError("entitlement_not_found", "This Expert Agent is not available for the signed-in account.");
     return binding;
   }
 
@@ -362,7 +362,7 @@ export class RegistryEntitlementResolver implements EntitlementResolver, AuthIde
       if (boundary === "identity") {
         throw new EntitlementError("auth_registry_unavailable", "Hatch account verification is temporarily unavailable.");
       }
-      throw new EntitlementError("entitlement_registry_unavailable", "Creator Agent access is temporarily unavailable.");
+      throw new EntitlementError("entitlement_registry_unavailable", "Expert Agent access is temporarily unavailable.");
     } finally {
       clearTimeout(timer);
       externalSignal?.removeEventListener("abort", abortFromCaller);
@@ -394,7 +394,7 @@ export class RegistryEntitlementResolver implements EntitlementResolver, AuthIde
       if (externalSignal?.aborted) {
         throw new EntitlementError("authorization_cancelled", "Authorization verification was cancelled.");
       }
-      throw new EntitlementError("access_service_unavailable", "Creator Agent access is temporarily unavailable.");
+      throw new EntitlementError("access_service_unavailable", "Expert Agent access is temporarily unavailable.");
     } finally {
       clearTimeout(timer);
       externalSignal?.removeEventListener("abort", abortFromCaller);

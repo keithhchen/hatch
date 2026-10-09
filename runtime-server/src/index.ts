@@ -924,7 +924,7 @@ async function handleHttpRequest(
   if (req.method === "GET" && url.pathname === "/v1/me/creator-agents") {
     const authToken = bearerToken(req);
     if (!authToken) {
-      writeJson(res, 401, { error: { code: "authentication_required", message: "Sign in to view purchased Creator Agents." } });
+      writeJson(res, 401, { error: { code: "authentication_required", message: "Sign in to view purchased Expert Agents." } });
       return;
     }
     let identity: AuthIdentity | undefined;
@@ -940,7 +940,7 @@ async function handleHttpRequest(
       return;
     }
     if (!claims && !entitlementResolver) {
-      writeJson(res, 503, { error: { code: "entitlements_unavailable", message: "Creator Agent purchases are temporarily unavailable." } });
+      writeJson(res, 503, { error: { code: "entitlements_unavailable", message: "Expert Agent purchases are temporarily unavailable." } });
       return;
     }
     try {
@@ -1476,7 +1476,7 @@ async function requireConversationBinding(
       legacyHmacAuth,
       signal
     );
-    if (!binding) throw new ConversationHttpError(400, "binding_required", "A signed-in Creator Agent binding is required.");
+    if (!binding) throw new ConversationHttpError(400, "binding_required", "A signed-in Expert Agent binding is required.");
     return binding;
   } catch (error) {
     if (error instanceof ConversationHttpError) throw error;
@@ -1727,7 +1727,7 @@ function writeHttpAuthorizationFailure(
     || code === "entitlement_not_found"
     || code === "agent_entitlement_mismatch") {
     writeJson(res, 403, {
-      error: { code: forbiddenCode, message: "This Creator Agent is not available for the signed-in account." }
+      error: { code: forbiddenCode, message: "This Expert Agent is not available for the signed-in account." }
     });
     return;
   }
@@ -3189,26 +3189,26 @@ async function resolveSessionBinding(
     if (!agentCorpusResolver) {
       throw new EntitlementError(
         "agent_corpus_unavailable",
-        "The requested Creator Agent is not available on this Runtime."
+        "The requested Expert Agent is not available on this Runtime."
       );
     }
     const selectedCreatorId = authClaims?.role === "creator"
       ? authClaims.sub
       : hello.creator_id;
     if (!selectedCreatorId) {
-      throw new EntitlementError("creator_required", "creator_id is required when selecting a Creator Agent.");
+      throw new EntitlementError("creator_required", "creator_id is required when selecting an Expert Agent.");
     }
     const resolved = await agentCorpusResolver.resolve(selectedCreatorId, hello.product_id, signal);
     let corpusEntitlement: Awaited<ReturnType<EntitlementResolver["resolve"]>> | undefined;
     if (authClaims?.role !== "creator" && !entitlementResolver) {
       throw new EntitlementError(
         "entitlement_configuration_incomplete",
-        "Creator Agent access is unavailable because entitlement verification is not fully configured."
+        "Expert Agent access is unavailable because entitlement verification is not fully configured."
       );
     }
     if (authClaims?.role !== "creator" && entitlementResolver) {
       if (!hello.entitlement_id) {
-        throw new EntitlementError("entitlement_required", "A valid Creator Agent entitlement is required.");
+        throw new EntitlementError("entitlement_required", "A valid Expert Agent entitlement is required.");
       }
       const entitlement = await entitlementResolver.resolve({
         authToken,
@@ -3220,7 +3220,7 @@ async function resolveSessionBinding(
       if (entitlement.product_id !== hello.product_id
         || entitlement.creator_id !== resolved.corpus.creator.id
         || entitlement.product_id !== resolved.corpus.product.id) {
-        throw new EntitlementError("agent_entitlement_mismatch", "This Creator Agent is not available for the signed-in account.");
+        throw new EntitlementError("agent_entitlement_mismatch", "This Expert Agent is not available for the signed-in account.");
       }
       corpusEntitlement = entitlement;
     }
@@ -3261,11 +3261,11 @@ async function resolveSessionBinding(
     if (!entitlementResolver || !agentCorpusResolver) {
       throw new EntitlementError(
         "entitlement_configuration_incomplete",
-        "Creator Agent access is unavailable because entitlement verification is not fully configured."
+        "Expert Agent access is unavailable because entitlement verification is not fully configured."
       );
     }
     if (!hello.entitlement_id) {
-      throw new EntitlementError("entitlement_required", "A valid Creator Agent entitlement is required.");
+      throw new EntitlementError("entitlement_required", "A valid Expert Agent entitlement is required.");
     }
     const entitlement = await entitlementResolver.resolve({
       authToken,
@@ -3356,7 +3356,7 @@ function assertEntitlementMatchesIdentity(
   entitlement: { user_id: string }
 ): void {
   if (identity && (identity.role !== "user" || entitlement.user_id !== identity.sub)) {
-    throw new EntitlementError("agent_entitlement_mismatch", "This Creator Agent is not available for the signed-in account.");
+    throw new EntitlementError("agent_entitlement_mismatch", "This Expert Agent is not available for the signed-in account.");
   }
 }
 
@@ -3388,7 +3388,7 @@ async function revalidateTurnAuthorization(
     }
   } else {
     if ((authIdentityResolver && identity?.role !== "user") || !entitlementResolver) {
-      throw new EntitlementError("entitlement_required", "The Creator Agent access binding is no longer valid.");
+      throw new EntitlementError("entitlement_required", "The Expert Agent access binding is no longer valid.");
     }
     const entitlement = await entitlementResolver.resolve({
       authToken,
@@ -3401,7 +3401,7 @@ async function revalidateTurnAuthorization(
       || entitlement.user_id !== binding.userId
       || entitlement.creator_id !== binding.creatorId
       || entitlement.product_id !== binding.productId) {
-      throw new EntitlementError("entitlement_required", "The Creator Agent access binding is no longer valid.");
+      throw new EntitlementError("entitlement_required", "The Expert Agent access binding is no longer valid.");
     }
   }
 
@@ -3413,13 +3413,13 @@ async function resolveTurnAgentBinding(
   signal?: AbortSignal
 ): Promise<SessionBinding> {
   if (!agentCorpusResolver) {
-    throw new EntitlementError("agent_corpus_unavailable", "The current Creator Agent is unavailable.");
+    throw new EntitlementError("agent_corpus_unavailable", "The current Expert Agent is unavailable.");
   }
   const current = await agentCorpusResolver.resolve(binding.creatorId, binding.productId, signal);
   if (current.corpus.creator.id !== binding.creatorId
     || current.corpus.agent_id !== binding.productId
     || current.corpus.product.id !== binding.productId) {
-    throw new EntitlementError("agent_entitlement_mismatch", "The current Creator Agent does not match this session.");
+    throw new EntitlementError("agent_entitlement_mismatch", "The current Expert Agent does not match this session.");
   }
   return {
     ...binding,
@@ -3444,7 +3444,7 @@ function controlledTurnAuthorizationError(error: unknown): { code: string; messa
     || code === "agent_entitlement_mismatch") {
     return {
       code: "entitlement_required",
-      message: "Access to this Creator Agent is no longer available. Refresh your Creator Agents and choose an available Agent."
+      message: "Access to this Expert Agent is no longer available. Refresh your Expert Agents and choose an available Agent."
     };
   }
   return {
@@ -3501,11 +3501,11 @@ async function bindingFromHistoryRequest(
     if (!entitlementResolver || !agentCorpusResolver) {
       throw new EntitlementError(
         "entitlement_configuration_incomplete",
-        "Creator Agent access is unavailable because entitlement verification is not fully configured."
+        "Expert Agent access is unavailable because entitlement verification is not fully configured."
       );
     }
     if (!entitlementId || !authToken) {
-      throw new EntitlementError("entitlement_required", "A Bearer token and Creator Agent entitlement are required.");
+      throw new EntitlementError("entitlement_required", "A Bearer token and Expert Agent entitlement are required.");
     }
     if (authIdentityResolver && !authIdentity) {
       throw new EntitlementError("authentication_required", "A valid Hatch session is required.");

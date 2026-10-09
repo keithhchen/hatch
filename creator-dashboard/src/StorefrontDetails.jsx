@@ -23,8 +23,8 @@ export function StorefrontDetails({
       <header className="storefront-shared__hero">
         <div>
           <span className="storefront-shared__creator">
-            <AccountAvatar className="storefront-shared__creator-avatar" size="small" src={creatorAvatarUrl} name={creatorAvatarName || (typeof creatorName === "string" ? creatorName : "Creator")} />
-            <span className="storefront-shared__creator-name">{creatorName || "Creator"}</span>
+            <AccountAvatar className="storefront-shared__creator-avatar" size="small" src={creatorAvatarUrl} name={creatorAvatarName || (typeof creatorName === "string" ? creatorName : "Hatch Expert")} />
+            <span className="storefront-shared__creator-name">{creatorName || "Hatch Expert"}</span>
           </span>
           <Heading>{model.name}</Heading>
           {model.promise ? <p>{model.promise}</p> : null}

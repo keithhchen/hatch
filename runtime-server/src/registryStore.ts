@@ -255,13 +255,13 @@ export class RegistryStoreTs {
         .reduce((total, [, files]) => total + files, 0);
       const globalFiles = [...this.corpusFiles.values()].reduce((total, files) => total + files, 0);
       if (creatorBytes - existingBytes + verified.totalBytes > MAX_CORPUS_BYTES_PER_CREATOR) {
-        throw new AgentCorpusVerificationError("Creator Agent Corpus storage quota exceeded");
+        throw new AgentCorpusVerificationError("Expert Agent Corpus storage quota exceeded");
       }
       if (globalBytes - existingBytes + verified.totalBytes > MAX_CORPUS_BYTES_GLOBAL) {
         throw new AgentCorpusVerificationError("Registry Agent Corpus storage quota exceeded");
       }
       if (creatorFiles - existingFiles + verified.totalFiles > MAX_CORPUS_FILES_PER_CREATOR) {
-        throw new AgentCorpusVerificationError("Creator Agent Corpus file quota exceeded");
+        throw new AgentCorpusVerificationError("Expert Agent Corpus file quota exceeded");
       }
       if (globalFiles - existingFiles + verified.totalFiles > MAX_CORPUS_FILES_GLOBAL) {
         throw new AgentCorpusVerificationError("Registry Agent Corpus file quota exceeded");
@@ -274,7 +274,7 @@ export class RegistryStoreTs {
           ...[...this.corpusBytes.keys()].filter((candidate) => candidate.startsWith(`${verified.creator.id}:`)).map((candidate) => candidate.slice(verified.creator.id.length + 1)),
         ]).size >= MAX_AGENT_CORPORA_PER_CREATOR
       ) {
-        throw new AgentCorpusVerificationError(`A Creator may publish at most ${MAX_AGENT_CORPORA_PER_CREATOR} Agents`);
+        throw new AgentCorpusVerificationError(`An Expert may publish at most ${MAX_AGENT_CORPORA_PER_CREATOR} Agents`);
       }
       const knowledgeDocuments = verified.corpus.knowledge.documents;
       if (knowledgeDocuments.length > 0 && !this.indexer) {
@@ -760,7 +760,7 @@ export class RegistryStoreTs {
         product: {
           id: corpus.product_id,
           name: corpus.product_name,
-          description: corpus.product_description ?? "Work with this Creator Agent in your own files and context.",
+          description: corpus.product_description ?? "Work with this Expert Agent in your own files and context.",
           ...(corpus.brief_spec ? { brief_spec: corpus.brief_spec } : {})
         },
         presentation: corpus.presentation
@@ -998,8 +998,8 @@ export class RegistryStoreTs {
         const productId = productIdFor(creatorLegacy, productLegacy);
         const productKey = `${creatorId}\u0000${productId}`;
         if (!products.has(productKey)) {
-          const creatorName = text(row.creator_name, String(creatorLegacy ?? "Creator"));
-          const productName = text(row.product_name, String(productLegacy ?? "Creator Agent"));
+          const creatorName = text(row.creator_name, String(creatorLegacy ?? "Expert"));
+          const productName = text(row.product_name, String(productLegacy ?? "Expert Agent"));
           await executor.query(
             `INSERT INTO creators (id, display_name) VALUES ($1,$2)
              ON CONFLICT (id) DO UPDATE SET display_name=EXCLUDED.display_name`,
@@ -1788,7 +1788,7 @@ function rowToAccessPresentation(row: Record<string, any>): AgentAccessPresentat
       name: String(row.product_name),
       description: row.product_description
         ? String(row.product_description)
-        : "Work with this Creator Agent in your own files and context.",
+        : "Work with this Expert Agent in your own files and context.",
       ...(product.brief_spec ? { brief_spec: normalizeBriefSpec(product.brief_spec) } : {}),
     },
     presentation: product.presentation && typeof product.presentation === "object"

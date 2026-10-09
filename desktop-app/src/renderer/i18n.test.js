@@ -96,7 +96,7 @@ describe("createTranslator", () => {
     expect(createTranslator("ja")("settings.language.label")).toBe("言語");
 
     expect(createTranslator("zh-CN")("approval.allowActionTitle")).toBe("允许此操作吗？");
-    expect(createTranslator("ja")("creatorMethod.generic")).toBe("クリエイターメソッド");
+    expect(createTranslator("ja")("creatorMethod.generic")).toBe("Expert メソッド");
   });
 
   it("interpolates named values without discarding unknown placeholders", () => {

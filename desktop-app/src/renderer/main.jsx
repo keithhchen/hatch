@@ -247,10 +247,10 @@ function DesktopAuxiliaryWindow({ kind }) {
       </header>
       {about ? (
         <section className="desktop-auxiliary-content">
-          <p className="desktop-auxiliary-lede">Creator agents, on your terms.</p>
+          <p className="desktop-auxiliary-lede">Expert agents, on your terms.</p>
           <p>Hatch keeps the desktop boundary native while React renders the conversation work surface.</p>
           <dl className="desktop-auxiliary-facts">
-          <div><dt>Version</dt><dd>0.1.35</dd></div>
+          <div><dt>Version</dt><dd>0.1.36</dd></div>
             <div><dt>Architecture</dt><dd>Tauri Hybrid</dd></div>
           </dl>
         </section>
@@ -910,7 +910,7 @@ function App() {
     setCreatorAgentEntitlements(entitlements);
     setSelectedEntitlementId(selected?.entitlement_id || "");
     setEntitlementError(launchBinding && !selected
-      ? "This Conversation window's Creator Agent binding is no longer available in this account."
+      ? "This Conversation window's Expert Agent binding is no longer available in this account."
       : "");
     if (selected) setProfileSetting("last_selected_entitlement_id", selected.entitlement_id, profileId);
     setStartupError("");
@@ -1329,7 +1329,7 @@ function App() {
       conversationLibraryRetryableRef.current = false;
       clearConversationLibraryRetryTimer();
       setConversationLibraryStatus("unavailable");
-      setConversationLibraryError("This Conversation window needs its Creator Agent binding before it can be restored.");
+      setConversationLibraryError("This Conversation window needs its Expert Agent binding before it can be restored.");
       return;
     }
     if (conversationWindowRef.current && launchBinding && !runtimeBindingMatches(launchBinding, binding)) {
@@ -1390,7 +1390,7 @@ function App() {
         }
       }
       if (requested && isServerConversationId(requested) && !requestedServerConversation) {
-        setConversationLibraryError("That Conversation is not available for the selected Creator Agent.");
+        setConversationLibraryError("That Conversation is not available for the selected Expert Agent.");
       }
       requestedConversationIdRef.current = "";
       requestedTaskStartRef.current = false;
@@ -1811,7 +1811,7 @@ function App() {
       && item.product_id === binding.productId);
     if (!selected) {
       if (selectedEntitlementId) setSelectedEntitlementId("");
-      setEntitlementError("This Conversation window's Creator Agent binding is no longer available in this account.");
+      setEntitlementError("This Conversation window's Expert Agent binding is no longer available in this account.");
       return;
     }
     if (selectedEntitlementId !== selected.entitlement_id) {
@@ -2301,7 +2301,7 @@ function App() {
     }
     if (!targetServerUrl.trim() || !buyerSession?.accessToken || !targetEntitlementId) {
       setChatLoading(false);
-      setStatus("Sign in and choose a Creator Agent before starting the connection.");
+      setStatus("Sign in and choose an Expert Agent before starting the connection.");
       return;
     }
 
@@ -2399,7 +2399,7 @@ function App() {
         auth_token: buyerSession.accessToken,
         entitlement_id: targetEntitlementId,
         conversation_id: conversationSession.scope.conversationId,
-        client_version: "0.1.35",
+        client_version: "0.1.36",
         local_tools: [...PLATFORM_LOCAL_TOOLS],
       }));
     },
@@ -2603,7 +2603,7 @@ function App() {
     if (message.type === "skill.activated" || message.type === "skill.invoked") {
       if (!message.run_id || activeRunRef.current?.runId !== message.run_id) return;
       upsertSkillEvent(message);
-      setStatus(`${message.status === "activated" ? "Creator method ready" : "Creator method applied"}: ${message.name}`);
+      setStatus(`${message.status === "activated" ? "Expert method ready" : "Expert method applied"}: ${message.name}`);
       return;
     }
 
@@ -2952,7 +2952,7 @@ function App() {
   async function createLibraryConversation({ briefAnswers = undefined, purpose = "create" } = {}) {
     const binding = conversationBindingFor();
     if (!binding || !buyerSession?.accessToken) {
-      setStatus("Choose a Creator Agent before starting a conversation.");
+      setStatus("Choose an Expert Agent before starting a conversation.");
       return "";
     }
     const creation = conversationCreationRequest(binding, purpose);
@@ -2999,7 +2999,7 @@ function App() {
     }
     const binding = conversationBindingFor();
     if (!binding?.entitlementId) {
-      setStatus("Choose a Creator Agent before opening a Conversation window.");
+      setStatus("Choose an Expert Agent before opening a Conversation window.");
       return false;
     }
     try {
@@ -3027,7 +3027,7 @@ function App() {
     const draft = briefTask;
     const spec = draft?.spec ?? briefSpecForSelectedEntitlement();
     if (!Array.isArray(spec?.fields) || spec.fields.length === 0) {
-      setBriefTask((current) => current ? { ...current, error: "This Creator Agent has not published a Brief yet." } : current);
+      setBriefTask((current) => current ? { ...current, error: "This Expert Agent has not published a Brief yet." } : current);
       return false;
     }
     const answers = draft?.answers ?? {};
@@ -5485,7 +5485,7 @@ function SkillRunActivityPart({ data }) {
     <div className={`activity-row skill-activity skill-run-${status}`}>
       <span className="skill-icon">{icon}</span>
       <span className="skill-label">{label}</span>
-      <span className="skill-meta">{data.error?.message || "Creator method"}</span>
+      <span className="skill-meta">{data.error?.message || "Expert method"}</span>
     </div>
   );
 }
@@ -5527,22 +5527,22 @@ function skillActivityDisplay(data) {
   return {
     icon: status === "invoked" ? "◆" : "◇",
     label,
-    meta: "Creator method"
+    meta: "Expert method"
   };
 }
 
 function skillRunStatusLabel(event) {
   const methodName = methodDisplayName(event.name);
-  if (event.status === "completed") return `Creator method applied: ${methodName}`;
-  if (event.status === "failed") return `Couldn't apply Creator method: ${methodName}`;
-  if (event.status === "cancelled") return `Stopped applying Creator method: ${methodName}`;
-  if (event.status === "requested") return `Preparing Creator method: ${methodName}`;
-  return `Applying Creator method: ${methodName}`;
+  if (event.status === "completed") return `Expert method applied: ${methodName}`;
+  if (event.status === "failed") return `Couldn't apply Expert method: ${methodName}`;
+  if (event.status === "cancelled") return `Stopped applying Expert method: ${methodName}`;
+  if (event.status === "requested") return `Preparing Expert method: ${methodName}`;
+  return `Applying Expert method: ${methodName}`;
 }
 
 function methodDisplayName(name) {
   const value = String(name ?? "").trim();
-  if (!value) return "Creator method";
+  if (!value) return "Expert method";
   if (!/^[a-z0-9_-]+$/.test(value)) return value;
   return value
     .split(/[-_]+/)

@@ -730,7 +730,7 @@ export default function WebChatPage({ productId, conversationId: routedConversat
     setStatus({ key: "stopping" });
   };
 
-  const name = access?.product?.name ?? access?.product_name ?? "Creator Agent";
+  const name = access?.product?.name ?? access?.product_name ?? "Expert Agent";
   const creator = access?.creator ?? access?.product?.creator ?? { name };
   const creatorAvatarUrl = creator.avatar_url ?? access?.creator_avatar_url ?? access?.product?.creator_avatar_url;
   const selectedConversation = conversations.find(item => item.id === conversationId);

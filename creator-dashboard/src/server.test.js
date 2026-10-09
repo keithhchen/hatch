@@ -340,7 +340,7 @@ test("browser OAuth PKCE keeps state and authorizes Product Files without Versio
   })}`, { headers: { cookie } });
   assert.equal(authorize.status, 200);
   const consentHtml = await authorize.text();
-  assert.match(consentHtml, /Create and update your Creator Products/);
+  assert.match(consentHtml, /Create and update your Expert Products/);
   assert.doesNotMatch(consentHtml, /Version/);
   const transactionId = consentHtml.match(/name="transaction_id" value="([^"]+)"/)?.[1];
   const formCsrf = consentHtml.match(/name="csrf_token" value="([^"]+)"/)?.[1];

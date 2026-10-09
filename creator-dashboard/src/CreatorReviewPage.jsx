@@ -62,8 +62,8 @@ export function CreatorReviewPage({ token, request, runId, onBack, onRevision, o
       const result = await submitFactoryReview(token, { id: runId, version: review?.version }, {
         action: "heldout_correction",
         candidateDigest: review.candidate_digest,
-        correction: "Confirmed sealed failure; incorporate the Creator correction loop before re-evaluating.",
-        why: "The sealed case failed and must be promoted only after explicit Creator confirmation."
+        correction: "Confirmed sealed failure; incorporate the Expert correction loop before re-evaluating.",
+        why: "The sealed case failed and must be promoted only after explicit Expert confirmation."
       }, crypto.randomUUID(), request);
       if (result.next_run && typeof onRevision === "function") onRevision(result.next_run);
     } catch (error) {
@@ -86,7 +86,7 @@ export function CreatorReviewPage({ token, request, runId, onBack, onRevision, o
     </div>
     <CorpusPanel corpus={review.corpus} />
     {cases.length ? <div className="creator-review-cases">{cases.map((item) => <ReviewCase key={item.id} item={item} draft={drafts[item.id] ?? {}} setDraft={(next) => setDrafts((current) => ({ ...current, [item.id]: { ...(current[item.id] ?? {}), ...next } }))} busy={state.busy} onAction={act} />)}</div> : <article className="creator-review-empty"><h2>No known cases yet</h2><p>Known cases will appear here after the candidate has been evaluated.</p></article>}
-    <article className="creator-review-blind"><div><span className="creator-review-eyebrow">Sealed held-out</span><h2>{review.blind.failed ? "Creator confirmation required" : "Generalization check"}</h2><p>{review.blind.failed ? `${review.blind.failed} sealed case(s) failed. The case text, answer, and candidate output stay hidden until you confirm the correction loop.` : `${review.blind.passed} / ${review.blind.total} sealed cases passed. Held-out content is not included in the Corpus.`}</p></div><div className="creator-review-actions">{review.blind.needs_creator_action ? <Button type="button" loading={state.busy === "heldout_correction"} disabled={Boolean(state.busy)} onClick={confirmHeldout}>Confirm and start correction</Button> : null}{review.release_ready && onRelease ? <Button type="button" onClick={onRelease}>Open Release preview</Button> : null}</div></article>
+    <article className="creator-review-blind"><div><span className="creator-review-eyebrow">Sealed held-out</span><h2>{review.blind.failed ? "Expert confirmation required" : "Generalization check"}</h2><p>{review.blind.failed ? `${review.blind.failed} sealed case(s) failed. The case text, answer, and candidate output stay hidden until you confirm the correction loop.` : `${review.blind.passed} / ${review.blind.total} sealed cases passed. Held-out content is not included in the Corpus.`}</p></div><div className="creator-review-actions">{review.blind.needs_creator_action ? <Button type="button" loading={state.busy === "heldout_correction"} disabled={Boolean(state.busy)} onClick={confirmHeldout}>Confirm and start correction</Button> : null}{review.release_ready && onRelease ? <Button type="button" onClick={onRelease}>Open Release preview</Button> : null}</div></article>
   </section>;
 }
 

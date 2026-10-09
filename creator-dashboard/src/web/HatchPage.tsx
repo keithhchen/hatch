@@ -10,15 +10,15 @@ type Lang = "zh" | "en" | "ja";
 
 const copy = {
   zh: {
-    meta: "EXPERT CREATOR ECONOMY",
+    meta: "EXPERT ECONOMY",
     nav: ["产品缺口", "如何创建", "商业模式", "长期愿景", "合作伙伴", "联系"],
-    exploreCreators: "探索 Creator",
+    exploreCreators: "探索 Expert",
     buildProduct: "创建你的 Expert 产品",
     contactLink: "与 Hatch 深度合作",
     heroTitleA: "把知识付费",
     heroTitleB: "变成能干活的 Agent。",
     heroBody:
-      "Hatch 让已经拥有受众的 Expert Creator，把自己的方法做成可收费、能交付成果的 Agent——无需组建软件团队，也不必亲自完成每一次服务。",
+      "Hatch 让已经拥有受众的 Expert，把自己的方法做成可收费、能交付成果的 Agent——无需组建软件团队，也不必亲自完成每一次服务。",
     heroFilmLabel: "Hatch 产品发布影片",
         heroFilmPoster: "/assets/web/hatch-launch-poster.jpg",
         heroFilmSrc: webMediaUrl("hatch-launch-zh.mp4"),
@@ -31,34 +31,34 @@ const copy = {
       {
         label: "HATCH AGENT",
         title: "Agent 产品",
-        body: "按照 Creator 的标准，针对用户 Context 完成工作。",
+        body: "按照 Expert 的标准，针对用户 Context 完成工作。",
       },
       {
         label: "CONSULTING",
         title: "咨询",
-        body: "可以解决具体问题，但依赖 Creator 本人的时间。",
+        body: "可以解决具体问题，但依赖 Expert 本人的时间。",
       },
     ],
     continuumBridge: "两者之间缺失的产品层",
     gapEyebrow: "01 · THE PRODUCT GAP",
-    gapTitle: "Creator 有了受众之后，\n还能卖什么？",
+    gapTitle: "Expert 有了受众之后，\n还能卖什么？",
     gapBody:
-      "Expert Creator 已经可以通过社交媒体、课程、社群和 Newsletter 建立信任与分发。但他们仍然只能在可规模化的内容，与高价值却无法规模化的本人服务之间选择。",
+      "Expert 已经可以通过社交媒体、课程、社群和 Newsletter 建立信任与分发。但他们仍然只能在可规模化的内容，与高价值却无法规模化的本人服务之间选择。",
     gapBody2:
-      "与此同时，用户已经在把 Creator 的公开视频、文章和方法交给通用 AI，请它修改材料、生成方案或完成工作。需求并没有消失，但由 AI 产生的使用和收入正在绕过 Creator。",
+      "与此同时，用户已经在把 Expert 的公开视频、文章和方法交给通用 AI，请它修改材料、生成方案或完成工作。需求并没有消失，但由 AI 产生的使用和收入正在绕过 Expert。",
     gapList: [
       ["内容与课程", "规模化，但个性化交付很浅。"],
       ["咨询、批改与陪跑", "更接近结果，但受限于本人时间。"],
       ["Prompt 与 Skill", "容易复制、安装门槛高，也不是完整消费产品。"],
     ],
     productEyebrow: "02 · THE PLATFORM",
-    productTitle: "Creator 自己创建。\nHatch 在背后运行。",
+    productTitle: "Expert 自己创建。\nHatch 在背后运行。",
     productBody:
-      "Hatch 是标准化平台，不是定制 Agent 工作室，也不做以 Hatch 为中心的 Consumer Marketplace。Creator 的身份、风格和产品体验始终在前。",
+      "Hatch 是标准化平台，不是定制 Agent 工作室，也不做以 Hatch 为中心的 Consumer Marketplace。Expert 的身份、风格和产品体验始终在前。",
     productPrinciple:
-      "Hatch 不先复制一个完整的人，再为分身寻找用途。它先确定用户愿意付费让这位 Creator 完成什么，再提取这项产品所需要的方法、判断、数据、工具和人工介入。",
+      "Hatch 不先复制一个完整的人，再为分身寻找用途。它先确定用户愿意付费让这位 Expert 完成什么，再提取这项产品所需要的方法、判断、数据、工具和人工介入。",
     processIntro:
-      "把一套方法做成真正可用、可收费的产品，通常需要产品设计、Agent 工程、质量评估、支付和持续运营。Hatch 将这套工作变成 Creator 可以自行完成的标准流程。",
+      "把一套方法做成真正可用、可收费的产品，通常需要产品设计、Agent 工程、质量评估、支付和持续运营。Hatch 将这套工作变成 Expert 可以自行完成的标准流程。",
     steps: [
       {
         n: "01",
@@ -73,7 +73,7 @@ const copy = {
       {
         n: "03",
         title: "生成并校准",
-        body: "Hatch 组合方法、数据、工具和工作流，并生成 Expert Evals；Creator 通过比较和修改校准自己的标准。",
+        body: "Hatch 组合方法、数据、工具和工作流，并生成 Expert Evals；Expert 通过比较和修改校准自己的标准。",
       },
       {
         n: "04",
@@ -83,7 +83,7 @@ const copy = {
       {
         n: "05",
         title: "持续交付",
-        body: "Agent 完成主要工作，Creator 处理边界案例；真实纠正继续更新产品的标准与边界。",
+        body: "Agent 完成主要工作，Expert 处理边界案例；真实纠正继续更新产品的标准与边界。",
       },
     ],
     skillLabel: "A SKILL IS NOT YET A PRODUCT",
@@ -91,7 +91,7 @@ const copy = {
     skillBody:
       "Skill 通常只能装下一套 SOP、instructions 或 taste。真正能工作的专家产品，还可能需要专有数据库、工具、历史案例和 Eval。",
     fullProduct:
-      "Hatch 把这些能力放进一个低摩擦、可支付、受控运行的完整体验。用户得到成果，却不必安装 Skill，也拿不到 Creator 的底层方法与数据。",
+      "Hatch 把这些能力放进一个低摩擦、可支付、受控运行的完整体验。用户得到成果，却不必安装 Skill，也拿不到 Expert 的底层方法与数据。",
     workExamples: [
       "改好的简历",
       "Growth Audit",
@@ -119,30 +119,30 @@ const copy = {
       "品牌命名清单",
     ],
     businessEyebrow: "03 · BUSINESS MODEL",
-    businessTitle: "Creator 获得收入，\nHatch 才获得收入。",
+    businessTitle: "Expert 获得收入，\nHatch 才获得收入。",
     businessBody:
-      "Creator 自行定义产品、价格和体验，并通过已有受众分发。最终用户按次购买或订阅某一位 Creator 的 Agent；Hatch 不收固定月费，也不运营面向消费者的 Agent Marketplace，而是从交易收入中获得 10%。",
+      "Expert 自行定义产品、价格和体验，并通过已有受众分发。最终用户按次购买或订阅某一位 Expert 的 Agent；Hatch 不收固定月费，也不运营面向消费者的 Agent Marketplace，而是从交易收入中获得 10%。",
     businessClosing:
-      "这些平台主要帮助 Creator 销售内容与会员。Hatch 要增加下一类商品：能够读取用户 Context、执行工作并交付成果的 Creator Agent。",
+      "这些平台主要帮助 Expert 销售内容与会员。Hatch 要增加下一类商品：能够读取用户 Context、执行工作并交付成果的 Expert Agent。",
     scale:
-      "Hatch 的增长不来自软件席位，而来自 Creator 持续产生的 AI Agent GMV。",
+      "Hatch 的增长不来自软件席位，而来自 Expert 持续产生的 AI Agent GMV。",
     visionBody:
-      "过去，一位专家要把自己的服务变成可规模化产品，要么亲自交付，要么组建产品、工程、运营和服务团队。Hatch 把这套产品化与履约能力标准化，让 Creator 可以自行创建、发布和经营自己的 AI 产品。",
+      "过去，一位专家要把自己的服务变成可规模化产品，要么亲自交付，要么组建产品、工程、运营和服务团队。Hatch 把这套产品化与履约能力标准化，让 Expert 可以自行创建、发布和经营自己的 AI 产品。",
     final:
-      "Hatch 是 Expert Creator Economy 的产品、履约与交易基础设施。Expert Creator 无需组建软件团队，也能拥有一个持续创收的 AI 产品。",
+      "Hatch 是 Expert Economy 的产品、履约与交易基础设施。Expert 无需组建软件团队，也能拥有一个持续创收的 AI 产品。",
     partnersKicker: "一起 Hatch 点什么。",
     partnersLabel: "WHO WE WANT TO PARTNER WITH",
     partnersTitle: "我们希望与谁合作",
     partnerTypes: [
       {
-        label: "CREATORS",
-        title: "已有受众、方法与服务的创作者",
+        label: "EXPERTS",
+        title: "已有受众、方法与服务的 Expert",
         body: "将课程、咨询或内容，延展为自己的 Agent 产品。",
       },
       {
         label: "INSTITUTIONS",
-        title: "内容版权方、媒体/IP 机构或创作者渠道方",
-        body: "让成熟内容资产，或一批 Creator 的方法，变成新的 Agent 产品。",
+        title: "内容版权方、媒体/IP 机构或 Expert 渠道方",
+        body: "让成熟内容资产，或一批 Expert 的方法，变成新的 Agent 产品。",
       },
     ],
     contactLabel: "START A CONVERSATION",
@@ -155,7 +155,7 @@ const copy = {
       partnerType: "你的身份是什么？",
       message: "想做的产品、已有的内容资产，或任何想告诉我们的事（选填）",
     },
-    contactOptions: ["创作者", "内容版权方、媒体/IP 机构或创作者渠道方", "投资人"],
+    contactOptions: ["Expert", "内容版权方、媒体/IP 机构或 Expert 渠道方", "投资人"],
     contactLaunch: "联系 Hatch",
     contactClose: "关闭",
     contactSubmit: "发送信息",
@@ -164,15 +164,15 @@ const copy = {
     contactError: "暂时没有发送成功，请稍后再试。",
   },
   en: {
-    meta: "EXPERT CREATOR ECONOMY",
+    meta: "EXPERT ECONOMY",
     nav: ["The gap", "How it works", "Business model", "Vision", "Partners", "Contact"],
-    exploreCreators: "Explore creators",
+    exploreCreators: "Explore experts",
     buildProduct: "Build your own expert product",
     contactLink: "Partner deeply with Hatch",
     heroTitleA: "Turn knowledge products",
     heroTitleB: "into agents that do the work.",
     heroBody:
-      "Hatch lets expert creators with an audience turn their methods into paid agents that deliver usable work—without a software team or doing every job themselves.",
+      "Hatch lets experts with an audience turn their methods into paid agents that deliver usable work—without a software team or doing every job themselves.",
     heroFilmLabel: "Hatch product launch film",
     heroFilmPoster: "/assets/web/hatch-launch-poster.jpg",
     heroFilmSrc: webMediaUrl("hatch-launch-en.mp4"),
@@ -185,39 +185,39 @@ const copy = {
       {
         label: "HATCH AGENT",
         title: "Agent products",
-        body: "They use each user’s context and follow the creator’s standards.",
+        body: "They use each user’s context and follow the expert’s standards.",
       },
       {
         label: "CONSULTING",
         title: "Consulting",
-        body: "It solves specific problems, but depends on the creator’s time.",
+        body: "It solves specific problems, but depends on the expert’s time.",
       },
     ],
     continuumBridge: "The missing layer between them",
     gapEyebrow: "01 · THE PRODUCT GAP",
-    gapTitle: "Creators own the audience.\nWhat can they sell next?",
+    gapTitle: "Experts own the audience.\nWhat can they sell next?",
     gapBody:
-      "Expert creators already build trust and reach through social media, courses, communities, and newsletters. Yet they still choose between scalable content and high-value services that depend on their own time.",
+      "Experts already build trust and reach through social media, courses, communities, and newsletters. Yet they still choose between scalable content and high-value services that depend on their own time.",
     gapBody2:
-      "Meanwhile, audiences are already feeding creators’ public videos, writing, and methods into general-purpose AI to revise materials, generate plans, and complete work. Demand remains, but the resulting usage and revenue bypass the creator.",
+      "Meanwhile, audiences are already feeding experts’ public videos, writing, and methods into general-purpose AI to revise materials, generate plans, and complete work. Demand remains, but the resulting usage and revenue bypass the expert.",
     gapList: [
       ["Content and courses", "They scale, but offer little personalization."],
-      ["Consulting, review, and coaching", "More tailored, but constrained by the creator’s time."],
+      ["Consulting, review, and coaching", "More tailored, but constrained by the expert’s time."],
       ["Prompts and Skills", "Easy to copy, hard to install, and not products on their own."],
     ],
     productEyebrow: "02 · THE PLATFORM",
-    productTitle: "Creators build it.\nHatch runs it.",
+    productTitle: "Experts build it.\nHatch runs it.",
     productBody:
-      "Hatch is a platform, not a custom agent studio or a consumer marketplace. The creator—not Hatch—owns the identity, style, and customer experience.",
+      "Hatch is a platform for experts to own the identity, style, and customer experience of their products.",
     productPrinciple:
-      "Hatch starts with the job people would pay a creator to do—not a full digital clone. It then assembles the method, judgment, data, tools, and human oversight needed to deliver it.",
+      "Hatch starts with the job people would pay an expert to do. It then assembles the method, judgment, data, tools, and human oversight needed to deliver it.",
     processIntro:
-      "Making a method into a product people can use and pay for normally takes product design, agent engineering, evaluation, payments, and operations. Hatch packages that work into a repeatable creation flow for creators.",
+      "Making a method into a product people can use and pay for normally takes product design, agent engineering, evaluation, payments, and operations. Hatch packages that work into a repeatable creation flow for experts.",
     steps: [
       {
         n: "01",
         title: "Define the product",
-        body: "Specify who buys it, what they receive, how it is priced, what good looks like, and when the creator needs to step in.",
+        body: "Specify who buys it, what they receive, how it is priced, what good looks like, and when the expert needs to step in.",
       },
       {
         n: "02",
@@ -227,7 +227,7 @@ const copy = {
       {
         n: "03",
         title: "Generate and calibrate",
-        body: "Hatch combines the method, data, tools, and workflow, then builds expert-specific evals. The creator calibrates the agent through testing and correction.",
+        body: "Hatch combines the method, data, tools, and workflow, then builds expert-specific evals. The expert calibrates the agent through testing and correction.",
       },
       {
         n: "04",
@@ -237,7 +237,7 @@ const copy = {
       {
         n: "05",
         title: "Deliver continuously",
-        body: "The agent does the core work; the creator handles edge cases. Corrections from real use keep refining the product.",
+        body: "The agent does the core work; the expert handles edge cases. Corrections from real use keep refining the product.",
       },
     ],
     skillLabel: "A SKILL IS NOT YET A PRODUCT",
@@ -245,7 +245,7 @@ const copy = {
     skillBody:
       "A Skill can capture an SOP, instructions, or taste. A real expert product often also needs proprietary data, tools, prior cases, and evals.",
     fullProduct:
-      "Hatch turns them into a paid product that is easy to use and controlled by the creator. Users get the finished work without installing a Skill—or taking the creator’s method or data.",
+      "Hatch turns them into a paid product that is easy to use and controlled by the expert. Users get the finished work without installing a Skill—or taking the expert’s method or data.",
     workExamples: [
       "Rewritten résumé",
       "Growth audit",
@@ -273,30 +273,30 @@ const copy = {
       "Brand naming shortlist",
     ],
     businessEyebrow: "03 · BUSINESS MODEL",
-    businessTitle: "Hatch earns only\nwhen the creator earns.",
+    businessTitle: "Hatch earns only\nwhen the expert earns.",
     businessBody:
-      "Creators set the product, price, and experience, then sell to the audience they have already built. Customers buy a task or subscribe to a particular creator’s agent. Hatch charges no monthly fee and takes 10% of each transaction; it does not run a consumer marketplace.",
+      "Experts set the product, price, and experience, then sell to the audience they have already built. Customers buy a task or subscribe to a particular expert’s agent. Hatch charges no monthly fee and takes 10% of each transaction; it does not run a consumer marketplace.",
     businessClosing:
-      "Those platforms help creators sell content and memberships. Hatch adds a new category: creator agents that work with a customer’s context and deliver usable outputs.",
+      "Those platforms help experts sell content and memberships. Hatch adds a new category: expert agents that work with a customer’s context and deliver usable outputs.",
     scale:
-      "Hatch grows with creator-agent GMV, not software seats.",
+      "Hatch grows with expert-agent GMV, not software seats.",
     visionBody:
-      "Until now, an expert who wanted to make a service scalable had two choices: deliver it personally or build product, engineering, operations, and service teams. Hatch standardizes the work of productizing and delivering that service, so creators can build, publish, and run their own AI products.",
+      "Until now, an expert who wanted to make a service scalable had two choices: deliver it personally or build product, engineering, operations, and service teams. Hatch standardizes the work of productizing and delivering that service, so experts can build, publish, and run their own AI products.",
     final:
-      "Hatch is the product, fulfillment, and commerce infrastructure for the expert creator economy. Expert creators can own a revenue-generating AI product—without a software team.",
+      "Hatch is the product, fulfillment, and commerce infrastructure for the expert economy. Experts can own a revenue-generating AI product—without a software team.",
     partnersKicker: "LET’S HATCH SOMETHING.",
     partnersLabel: "WHO WE WANT TO PARTNER WITH",
     partnersTitle: "Who we want to partner with",
     partnerTypes: [
       {
-        label: "CREATORS",
-        title: "Creators with an audience, a distinct method, and a service to scale",
+        label: "EXPERTS",
+        title: "Experts with an audience, a distinct method, and a service to scale",
         body: "Turn courses, consulting, or content into agent products.",
       },
       {
         label: "INSTITUTIONS",
-        title: "Content rights holders, media/IP organizations, and creator channels",
-        body: "Turn established content assets—or a roster of creators—into new agent products.",
+        title: "Content rights holders, media/IP organizations, and expert channels",
+        body: "Turn established content assets—or a roster of experts—into new agent products.",
       },
     ],
     contactLabel: "START A CONVERSATION",
@@ -309,7 +309,7 @@ const copy = {
       partnerType: "Which best describes you?",
       message: "A product, asset, or idea you’d like to explore (optional)",
     },
-    contactOptions: ["Creator", "Content rights holder, media/IP organization, or creator channel", "Investor"],
+    contactOptions: ["Expert", "Content rights holder, media/IP organization, or expert channel", "Investor"],
     contactLaunch: "Contact Hatch",
     contactClose: "Close",
     contactSubmit: "Send",

@@ -82,12 +82,12 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     name: "hatch.file_search",
     locality: "server",
     approval: "none",
-    description: "Search the current Creator Agent's retrieval-only knowledge space.",
+    description: "Search the current Expert Agent's retrieval-only knowledge space.",
     schema: z.object({ query: z.string(), limit: z.number().int().min(1).max(6).default(6) }).strict(),
     model: {
       name: "hatch_file_search",
       locality: "server",
-      description: "Search the current Creator Agent knowledge space when the answer requires long-tail reference material.",
+      description: "Search the current Expert Agent knowledge space when the answer requires long-tail reference material.",
       properties: {
         query: stringSchema("Search query."),
         limit: numberSchema("Maximum number of knowledge hits, from 1 to 6.")

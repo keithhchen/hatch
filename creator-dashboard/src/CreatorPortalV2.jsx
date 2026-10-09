@@ -270,7 +270,7 @@ function ProductCard({ product, onOpen, request, token, onChanged, t }) {
     if (!published || busy) return;
     setBusy(true); setError("");
     try {
-      await request(`/v1/creator/products/${encodeURIComponent(idOf(product, "product"))}/withdraw`, { method: "POST", token, headers: { "idempotency-key": mutationKey() }, body: JSON.stringify({ reason: "Creator unpublished this Product." }) });
+      await request(`/v1/creator/products/${encodeURIComponent(idOf(product, "product"))}/withdraw`, { method: "POST", token, headers: { "idempotency-key": mutationKey() }, body: JSON.stringify({ reason: "Expert unpublished this Product." }) });
       onChanged?.();
     } catch (nextError) { setError(friendlyError(nextError, t)); }
     finally { setBusy(false); }

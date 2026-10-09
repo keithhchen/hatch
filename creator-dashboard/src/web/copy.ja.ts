@@ -1,7 +1,7 @@
 import { webMediaUrl } from "./media";
 
 export const jaCopy = {
-  meta: "EXPERT CREATOR ECONOMY",
+  meta: "EXPERT ECONOMY",
   nav: [
     "プロダクトの空白",
     "つくり方",
@@ -10,13 +10,13 @@ export const jaCopy = {
     "パートナー",
     "お問い合わせ",
   ],
-  exploreCreators: "Creatorを探す",
+  exploreCreators: "Expertを探す",
   buildProduct: "自分のExpertプロダクトをつくる",
   contactLink: "Hatchと深く協業する",
   heroTitleA: "知識ビジネスを",
   heroTitleB: "仕事をするAgentに。",
   heroBody:
-    "Hatchは、すでにオーディエンスを持つExpert Creatorが、自分の方法を、成果を届ける有料のAgentに変えるためのプラットフォームです。ソフトウェアチームを組む必要も、すべてのサービスを自ら提供する必要もありません。",
+    "Hatchは、すでにオーディエンスを持つExpertが、自分の方法を、成果を届ける有料のAgentに変えるためのプラットフォームです。ソフトウェアチームを組む必要も、すべてのサービスを自ら提供する必要もありません。",
   heroFilmLabel: "Hatch プロダクトローンチフィルム",
   heroFilmPoster: "/assets/web/hatch-launch-poster.jpg",
   heroFilmSrc: webMediaUrl("hatch-launch-ja.mp4"),
@@ -29,34 +29,34 @@ export const jaCopy = {
     {
       label: "HATCH AGENT",
       title: "Agentプロダクト",
-      body: "Creatorの基準に従い、ユーザーのContextで仕事を行う。",
+      body: "Expertの基準に従い、ユーザーのContextで仕事を行う。",
     },
     {
       label: "CONSULTING",
       title: "コンサルティング",
-      body: "個別の課題を解けるが、Creator本人の時間に縛られる。",
+      body: "個別の課題を解けるが、Expert本人の時間に縛られる。",
     },
   ],
   continuumBridge: "両者の間に欠けているプロダクトレイヤー",
   gapEyebrow: "01 · THE PRODUCT GAP",
-  gapTitle: "クリエイターは、すでに受け手を持っている。\n次に、何を売る？",
+  gapTitle: "Expertは、すでに受け手を持っている。\n次に、何を売る？",
   gapBody:
-    "Expert Creatorはすでに、SNS、講座、コミュニティ、ニュースレターを通じて信頼とリーチを築いています。しかし、スケールするコンテンツと、本人の時間に頼る高価値なサービスの間で、今なお選ばなければなりません。",
+    "Expertはすでに、SNS、講座、コミュニティ、ニュースレターを通じて信頼とリーチを築いています。しかし、スケールするコンテンツと、本人の時間に頼る高価値なサービスの間で、今なお選ばなければなりません。",
   gapBody2:
-    "同時に、ユーザーはすでにCreatorの公開動画、文章、方法を汎用AIに渡し、資料の修正、プランの作成、仕事の完了を頼んでいます。需要は消えていない。ただ、そこから生まれる利用と収益はCreatorを迂回しています。",
+    "同時に、ユーザーはすでにExpertの公開動画、文章、方法を汎用AIに渡し、資料の修正、プランの作成、仕事の完了を頼んでいます。需要は消えていない。ただ、そこから生まれる利用と収益はExpertを迂回しています。",
   gapList: [
     ["コンテンツと講座", "スケールするが、一人ひとりへの提供は浅い。"],
-    ["コンサルティング、レビュー、伴走", "より個別的だが、Creator本人の時間に制約される。"],
+    ["コンサルティング、レビュー、伴走", "より個別的だが、Expert本人の時間に制約される。"],
     ["PromptとSkill", "複製されやすく、導入しにくく、それ自体ではプロダクトにならない。"],
   ],
   productEyebrow: "02 · THE PLATFORM",
-  productTitle: "Creatorがつくる。\nHatchが裏で動かす。",
+  productTitle: "Expertがつくる。\nHatchが裏で動かす。",
   productBody:
-    "Hatchは標準化されたプラットフォームです。個別受託のAgent開発スタジオでも、Hatchを前面に出すConsumer Marketplaceでもありません。Creatorのアイデンティティ、スタイル、プロダクト体験が常に前に立ちます。",
+    "Hatchは標準化されたプラットフォームです。個別受託のAgent開発スタジオでも、Hatchを前面に出すConsumer Marketplaceでもありません。Expertのアイデンティティ、スタイル、プロダクト体験が常に前に立ちます。",
   productPrinciple:
-    "Hatchは、まず一人のCreatorを丸ごと再現し、後から用途を探すことはしません。ユーザーがそのCreatorに何を頼むために支払うのかを先に定め、そのために必要な方法、判断、データ、ツール、人の介入を組み立てます。",
+    "Hatchは、まず一人のExpertを丸ごと再現し、後から用途を探すことはしません。ユーザーがそのExpertに何を頼むために支払うのかを先に定め、そのために必要な方法、判断、データ、ツール、人の介入を組み立てます。",
   processIntro:
-    "方法を、人が使えて支払えるプロダクトにするには、本来、プロダクト設計、Agentエンジニアリング、評価、決済、運用が必要です。Hatchはそれを、Creatorが自ら使える再現可能な作成フローにします。",
+    "方法を、人が使えて支払えるプロダクトにするには、本来、プロダクト設計、Agentエンジニアリング、評価、決済、運用が必要です。Hatchはそれを、Expertが自ら使える再現可能な作成フローにします。",
   steps: [
     {
       n: "01",
@@ -71,7 +71,7 @@ export const jaCopy = {
     {
       n: "03",
       title: "生成し、調整する",
-      body: "Hatchが方法、データ、ツール、ワークフローを組み合わせ、Expert Evalsを生成する。Creatorは比較と修正を通じて、自分の基準を調整する。",
+      body: "Hatchが方法、データ、ツール、ワークフローを組み合わせ、Expert Evalsを生成する。Expertは比較と修正を通じて、自分の基準を調整する。",
     },
     {
       n: "04",
@@ -81,7 +81,7 @@ export const jaCopy = {
     {
       n: "05",
       title: "継続して届ける",
-      body: "Agentが中核の仕事を担い、Creatorは境界事例を扱う。実際の利用から得られる修正が、プロダクトの基準と境界を磨き続ける。",
+      body: "Agentが中核の仕事を担い、Expertは境界事例を扱う。実際の利用から得られる修正が、プロダクトの基準と境界を磨き続ける。",
     },
   ],
   skillLabel: "A SKILL IS NOT YET A PRODUCT",
@@ -89,7 +89,7 @@ export const jaCopy = {
   skillBody:
     "Skillに入れられるのは、SOP、instructions、あるいは一つのtasteにすぎません。実際に機能する専門家プロダクトには、専有データ、ツール、過去の事例、Evalも必要になり得ます。",
   fullProduct:
-    "Hatchはそれらを、使いやすく、有料で、Creatorが管理できるプロダクトにします。ユーザーはSkillをインストールせずに成果を受け取り、Creatorの方法やデータを持ち出すこともできません。",
+    "Hatchはそれらを、使いやすく、有料で、Expertが管理できるプロダクトにします。ユーザーはSkillをインストールせずに成果を受け取り、Expertの方法やデータを持ち出すこともできません。",
   workExamples: [
     "書き直した履歴書",
     "Growth Audit",
@@ -117,30 +117,30 @@ export const jaCopy = {
     "ブランド名の候補",
   ],
   businessEyebrow: "03 · BUSINESS MODEL",
-  businessTitle: "Creatorが収益を得て、\n初めてHatchも収益を得る。",
+  businessTitle: "Expertが収益を得て、\n初めてHatchも収益を得る。",
   businessBody:
-    "Creatorがプロダクト、価格、体験を自ら定め、すでに築いたオーディエンスへ届けます。ユーザーは単発で購入するか、特定のCreatorのAgentを購読します。Hatchは固定月額を取らず、Consumer Agent Marketplaceも運営しません。各取引の10%を受け取ります。",
+    "Expertがプロダクト、価格、体験を自ら定め、すでに築いたオーディエンスへ届けます。ユーザーは単発で購入するか、特定のExpertのAgentを購読します。Hatchは固定月額を取らず、Consumer Agent Marketplaceも運営しません。各取引の10%を受け取ります。",
   businessClosing:
-    "これらのプラットフォームは、Creatorがコンテンツやメンバーシップを売る手助けをしている。Hatchはそこに、ユーザーのContextで仕事をし、使える成果を届けるCreator Agentという新しい商品を加える。",
+    "これらのプラットフォームは、Expertがコンテンツやメンバーシップを売る手助けをしている。Hatchはそこに、ユーザーのContextで仕事をし、使える成果を届けるExpert Agentという新しい商品を加える。",
   scale:
-    "Hatchの成長はソフトウェア席数ではなく、Creatorが生み出し続けるAI Agent GMVにある。",
+    "Hatchの成長はソフトウェア席数ではなく、Expertが生み出し続けるAI Agent GMVにある。",
   visionBody:
-    "これまで、専門家が自分のサービスをスケールするプロダクトにするには、自ら提供し続けるか、プロダクト、エンジニアリング、運用、サービスのチームを組むしかありませんでした。Hatchは、そのサービスをプロダクト化し、届けるための仕事を標準化し、Creatorが自分のAIプロダクトをつくり、公開し、運営できるようにします。",
+    "これまで、専門家が自分のサービスをスケールするプロダクトにするには、自ら提供し続けるか、プロダクト、エンジニアリング、運用、サービスのチームを組むしかありませんでした。Hatchは、そのサービスをプロダクト化し、届けるための仕事を標準化し、Expertが自分のAIプロダクトをつくり、公開し、運営できるようにします。",
   final:
-    "Hatchは、Expert Creator Economyのプロダクト、提供、取引の基盤です。Expert Creatorは、ソフトウェアチームを組まずに、継続的に収益を生むAIプロダクトを持てる。",
+    "Hatchは、Expert Economyのプロダクト、提供、取引の基盤です。Expertは、ソフトウェアチームを組まずに、継続的に収益を生むAIプロダクトを持てる。",
   partnersKicker: "一緒に、何をHatchしよう？",
   partnersLabel: "WHO WE WANT TO PARTNER WITH",
   partnersTitle: "ともに取り組みたい方",
   partnerTypes: [
     {
-      label: "CREATORS",
-      title: "オーディエンス、方法、サービスを持つCreator",
+      label: "EXPERTS",
+      title: "オーディエンス、方法、サービスを持つExpert",
       body: "講座、コンサルティング、コンテンツを、自分のAgentプロダクトへ。",
     },
     {
       label: "INSTITUTIONS",
-      title: "コンテンツ権利保有者、メディア／IP組織、Creatorネットワーク",
-      body: "成熟したコンテンツ資産、またはCreatorの方法を、新しいAgentプロダクトへ。",
+      title: "コンテンツ権利保有者、メディア／IP組織、Expertネットワーク",
+      body: "成熟したコンテンツ資産、またはExpertの方法を、新しいAgentプロダクトへ。",
     },
   ],
   contactLabel: "START A CONVERSATION",
@@ -154,8 +154,8 @@ export const jaCopy = {
     message: "探りたいプロダクト、資産、またはアイデア（任意）",
   },
   contactOptions: [
-    "クリエイター",
-    "コンテンツ権利保有者、メディア／IP組織、またはCreatorネットワーク",
+    "Expert",
+    "コンテンツ権利保有者、メディア／IP組織、またはExpertネットワーク",
     "投資家",
   ],
   contactLaunch: "Hatchに連絡する",

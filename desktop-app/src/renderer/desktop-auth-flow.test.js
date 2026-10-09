@@ -83,7 +83,7 @@ describe("Consumer Desktop authentication flow", () => {
     });
     expect(storage.value).toBe("opaque-creator");
     expect(fetchImpl).toHaveBeenCalledTimes(2);
-    expect(CONSUMER_DESKTOP_ROLE_MESSAGE).toMatch(/Creator account is valid/);
+    expect(CONSUMER_DESKTOP_ROLE_MESSAGE).toMatch(/Expert account is valid/);
     expect(CONSUMER_DESKTOP_ROLE_MESSAGE_KEY).toBe("error.auth.unsupportedCreatorRole");
   });
 

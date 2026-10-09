@@ -162,7 +162,7 @@ async function requiredRelease(
   } catch {
     throw new EntitlementError(
       "entitlement_release_unavailable",
-      `The ${kind} Creator Agent release is not available on this Runtime.`
+      `The ${kind} Expert Agent release is not available on this Runtime.`
     );
   }
 }

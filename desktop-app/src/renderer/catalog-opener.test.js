@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { openCreatorAgentCatalog } from "./catalog-opener.js";
 
-describe("Creator Agent catalog opener", () => {
+describe("Expert Agent catalog opener", () => {
   it("does not fall back to a WebView when the packaged native opener fails", async () => {
     const open = vi.fn();
     const error = await openCreatorAgentCatalog({
@@ -11,7 +11,7 @@ describe("Creator Agent catalog opener", () => {
       packaged: true
     }).catch((caught) => caught);
     expect(error).toMatchObject({
-      message: "Hatch couldn't open the Creator Agent catalog in your system browser. Try again.",
+      message: "Hatch couldn't open the Expert Agent catalog in your system browser. Try again.",
       i18nKey: "error.catalog.openSystemBrowserFailed"
     });
     expect(open).not.toHaveBeenCalled();
@@ -26,7 +26,7 @@ describe("Creator Agent catalog opener", () => {
     }).catch((caught) => caught);
 
     expect(error).toMatchObject({
-      message: "Allow pop-ups to open the Creator Agent catalog in your browser.",
+      message: "Allow pop-ups to open the Expert Agent catalog in your browser.",
       i18nKey: "error.catalog.popupsBlocked"
     });
   });

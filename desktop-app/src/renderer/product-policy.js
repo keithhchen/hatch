@@ -1,10 +1,10 @@
 export const DEFAULT_CREATOR_AGENT = Object.freeze({
   id: "creator-agent",
-  creator: "Creator",
+  creator: "Expert",
   creatorInitials: "C",
-  name: "Creator Agent",
-  description: "Work with this Creator Agent in your own files and context.",
-  boundary: "The Agent works within the scope defined by its Creator.",
+  name: "Expert Agent",
+  description: "Work with this Expert Agent in your own files and context.",
+  boundary: "The Agent works within the scope defined by its Expert.",
   presentation: {}
 });
 
@@ -17,7 +17,7 @@ export function creatorAgentFromSession(message) {
     creatorInitials: initials(agent.creator.name),
     creatorAvatarUrl: agent.creator.avatar_url ?? agent.creator.image_url ?? null,
     name: agent.product.name,
-    description: agent.product.description || "Work with this Creator Agent in your own files and context.",
+    description: agent.product.description || "Work with this Expert Agent in your own files and context.",
     boundary: "",
     presentation: agent.presentation || {},
     ...(agent.product.brief_spec ? { briefSpec: agent.product.brief_spec } : {})

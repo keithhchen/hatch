@@ -1288,7 +1288,7 @@ function assertSameConversationBinding(existing: ConversationRecord, expected: C
     || existing.agentId !== expected.agentId
     || existing.productId !== expected.productId
   ) {
-    throw new ConversationRepositoryError("conversation_binding_mismatch", "Conversation is outside the authenticated Creator Agent binding");
+    throw new ConversationRepositoryError("conversation_binding_mismatch", "Conversation is outside the authenticated Expert Agent binding");
   }
   const expectedBrief = (expected as ConversationBinding & { briefSnapshot?: BriefSnapshot }).briefSnapshot;
   const existingBrief = existing.briefSnapshot;

@@ -183,7 +183,7 @@ export async function createDashboardApp(options = {}) {
     const ids = [...new Set(creatorIds.map((id) => String(id ?? "")).filter(Boolean))];
     if (!ids.length) return new Map();
     if (!registryDeploymentServiceToken) {
-      throw stateError("creator_account_authority_unavailable", "Creator account names require Registry service authorization.", 503);
+      throw stateError("creator_account_authority_unavailable", "Expert account names require Registry service authorization.", 503);
     }
     const batches = [];
     for (let index = 0; index < ids.length; index += 100) batches.push(ids.slice(index, index + 100));
@@ -193,12 +193,12 @@ export async function createDashboardApp(options = {}) {
       { fetchImpl, headers: { authorization: `Bearer ${registryDeploymentServiceToken}` } }
     )));
     const accounts = responses.flatMap((payload) => {
-      if (!Array.isArray(payload?.accounts)) throw new Error("Registry Creator account response is malformed.");
+      if (!Array.isArray(payload?.accounts)) throw new Error("Registry Expert account response is malformed.");
       return payload.accounts;
     });
     const names = new Map(accounts.map((account) => {
       if (typeof account?.id !== "string" || typeof account.display_name !== "string" || !account.display_name.trim()) {
-        throw new Error("Registry returned an invalid Creator account name.");
+        throw new Error("Registry returned an invalid Expert account name.");
       }
       return [account.id, account.display_name];
     }));
@@ -801,10 +801,10 @@ export async function createDashboardApp(options = {}) {
         const productRoute = url.pathname.match(/^\/products\/([^/]+)$/);
         const creatorRoute = url.pathname.match(/^\/creators\/([^/]+)$/);
         if (url.pathname.startsWith("/creators/") && !creatorRoute) {
-          return send(response, 404, { error: { code: "creator_not_found", message: "Creator URL must use one UUID v4 segment." } });
+          return send(response, 404, { error: { code: "creator_not_found", message: "Expert URL must use one UUID v4 segment." } });
         }
         if (creatorRoute && !UUID_V4_PATTERN.test(decodeURIComponent(creatorRoute[1]))) {
-          return send(response, 404, { error: { code: "creator_not_found", message: "Creator URL must use a UUID v4." } });
+          return send(response, 404, { error: { code: "creator_not_found", message: "Expert URL must use a UUID v4." } });
         }
         if (productRoute) {
           const productSelector = decodeURIComponent(productRoute[1]);
@@ -1007,7 +1007,7 @@ export async function createDashboardApp(options = {}) {
         const decision = String(form.decision ?? "deny").toLowerCase();
         if (decision !== "approve") {
           redirect.searchParams.set("error", "access_denied");
-          redirect.searchParams.set("error_description", "The Creator did not approve access.");
+          redirect.searchParams.set("error_description", "The Expert did not approve access.");
         } else {
           const code = `oauth_code_${randomId()}`;
           await portalState.saveOAuthAuthorizationCode(oauthTokenDigest(code), {
@@ -1092,12 +1092,12 @@ export async function createDashboardApp(options = {}) {
       if (request.method === "GET" && publicCreatorMatch) {
         const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
         const creatorSelector = decodeURIComponent(publicCreatorMatch[1]);
-        if (!UUID_V4_PATTERN.test(creatorSelector)) return send(response, 404, { error: { code: "creator_not_found", message: "Creator was not found." } });
+        if (!UUID_V4_PATTERN.test(creatorSelector)) return send(response, 404, { error: { code: "creator_not_found", message: "Expert was not found." } });
         const creatorProducts = catalog.filter((entry) => (
           String(entry.creator_id) === String(creatorSelector)
           && portalState.getCreatorProduct(entry.creator_id, entry.product_id)?.status !== "withdrawn"
         ));
-        if (!creatorProducts.length) return send(response, 404, { error: { code: "creator_not_found", message: "Creator was not found." } });
+        if (!creatorProducts.length) return send(response, 404, { error: { code: "creator_not_found", message: "Expert was not found." } });
         const products = await Promise.all(creatorProducts.map(async (entry) => {
           const state = portalState.getCreatorProduct(entry.creator_id, entry.product_id);
           return publicCatalogAgent(entry, state);
@@ -2466,7 +2466,7 @@ async function verifyEntitlementVersionAuthority({
     || release.status !== "published") {
     throw stateError(
       "version_release_binding_mismatch",
-      "The target release is not bound to this entitlement's Creator, Agent, and product.",
+      "The target release is not bound to this entitlement's Expert, Agent, and product.",
       409
     );
   }
@@ -2665,15 +2665,15 @@ function oauthEndpointScope(request) {
 }
 
 function oauthConsentPage({ transactionId, csrfToken, profile, clientId, scopes }) {
-  const displayName = escapeHtml(profile?.display_name ?? "your Creator account");
+  const displayName = escapeHtml(profile?.display_name ?? "your Expert account");
   const scopeText = scopes.map((scope) => `<li>${escapeHtml(oauthScopeLabel(scope))}</li>`).join("");
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect Hatch</title><style>body{font-family:system-ui,-apple-system,sans-serif;background:#f5f1e9;color:#171513;display:grid;place-items:center;min-height:100vh;margin:0}.card{background:#fffdf8;border:1px solid #ded6c8;border-radius:20px;max-width:520px;padding:32px;box-shadow:0 20px 60px #2a241610}h1{font-size:28px;margin:0 0 10px}p{line-height:1.5;color:#5e584f}ul{padding-left:22px;line-height:1.8}.actions{display:flex;gap:12px;margin-top:26px}button{border:0;border-radius:999px;padding:12px 18px;font-weight:650;cursor:pointer}button[name=decision][value=approve]{background:#1d1b19;color:white}button[value=deny]{background:#eee9df;color:#292621}</style></head><body><main class="card"><h1>Connect ${escapeHtml(clientId)} to Hatch</h1><p>You are signed in as <strong>${displayName}</strong>. Allow this tool to work with your Creator Products?</p><ul>${scopeText}</ul><form method="post" action="/v1/auth/authorize/consent"><input type="hidden" name="transaction_id" value="${escapeHtml(transactionId)}"><input type="hidden" name="csrf_token" value="${escapeHtml(csrfToken)}"><div class="actions"><button type="submit" name="decision" value="deny">Cancel</button><button type="submit" name="decision" value="approve">Allow access</button></div></form></main></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect Hatch</title><style>body{font-family:system-ui,-apple-system,sans-serif;background:#f5f1e9;color:#171513;display:grid;place-items:center;min-height:100vh;margin:0}.card{background:#fffdf8;border:1px solid #ded6c8;border-radius:20px;max-width:520px;padding:32px;box-shadow:0 20px 60px #2a241610}h1{font-size:28px;margin:0 0 10px}p{line-height:1.5;color:#5e584f}ul{padding-left:22px;line-height:1.8}.actions{display:flex;gap:12px;margin-top:26px}button{border:0;border-radius:999px;padding:12px 18px;font-weight:650;cursor:pointer}button[name=decision][value=approve]{background:#1d1b19;color:white}button[value=deny]{background:#eee9df;color:#292621}</style></head><body><main class="card"><h1>Connect ${escapeHtml(clientId)} to Hatch</h1><p>You are signed in as <strong>${displayName}</strong>. Allow this tool to work with your Expert Products?</p><ul>${scopeText}</ul><form method="post" action="/v1/auth/authorize/consent"><input type="hidden" name="transaction_id" value="${escapeHtml(transactionId)}"><input type="hidden" name="csrf_token" value="${escapeHtml(csrfToken)}"><div class="actions"><button type="submit" name="decision" value="deny">Cancel</button><button type="submit" name="decision" value="approve">Allow access</button></div></form></main></body></html>`;
 }
 
 function oauthScopeLabel(scope) {
   return {
-    "creator:products:read": "View your Creator Products",
-    "creator:products:write": "Create and update your Creator Products",
+    "creator:products:read": "View your Expert Products",
+    "creator:products:write": "Create and update your Expert Products",
     "creator:files:read": "Read files attached to a Product",
     "creator:files:write": "Upload files to a Product after you approve them"
   }[scope] ?? scope;
@@ -2851,7 +2851,7 @@ function mergeRegistryAgents(access, catalog) {
       product: {
         id: entry.product_id,
         name: entry.product_name,
-        description: entry.product_description || "Work with this Creator Agent in your own files and context.",
+        description: entry.product_description || "Work with this Expert Agent in your own files and context.",
         promise: entry.product_promise || entry.product_description || ""
       },
       presentation: entry.presentation ?? {}
@@ -3423,7 +3423,7 @@ function checkoutOutcomeBody(session, order, entitlement, payment) {
 }
 
 function checkoutSessionPublic(session, creatorDisplayName) {
-  if (!creatorDisplayName) throw new Error(`Current Creator account name is required for checkout session ${String(session.checkout_session_id)}.`);
+  if (!creatorDisplayName) throw new Error(`Current Expert account name is required for checkout session ${String(session.checkout_session_id)}.`);
   return {
     ...session,
     ...currentCreatorNameProjection(session, creatorDisplayName),
@@ -3432,7 +3432,7 @@ function checkoutSessionPublic(session, creatorDisplayName) {
 }
 
 function checkoutOutcomePublic(outcome, session, creatorDisplayName) {
-  if (!creatorDisplayName) throw new Error(`Current Creator account name is required for checkout session ${String(session.checkout_session_id)}.`);
+  if (!creatorDisplayName) throw new Error(`Current Expert account name is required for checkout session ${String(session.checkout_session_id)}.`);
   return {
     ...outcome,
     ...(outcome.order ? { order: currentCreatorNameProjection(outcome.order, creatorDisplayName) } : {}),
@@ -3749,7 +3749,7 @@ function publishReadiness(product, state) {
     [candidateApproved, "candidate approval is stale"],
     [noCriticalFailures, "critical candidate gates are incomplete"],
     [copyComplete, "public promise, description, or boundaries are incomplete"],
-    [ownershipValid, "Creator ownership is missing"],
+    [ownershipValid, "Expert ownership is missing"],
     [materializationReady, "Registry materialization is not ready"],
     [productIdentityValid, "canonical Product UUID is invalid"]
   ];
@@ -3872,7 +3872,7 @@ function compareEntitlementsNewestFirst(left, right) {
 
 function orderDetail(order, events = [], creatorDisplayName) {
   if (typeof creatorDisplayName !== "string" || !creatorDisplayName) {
-    throw new Error(`Current Creator account name is required for order ${String(order.order_id ?? order.id ?? "unknown")}.`);
+    throw new Error(`Current Expert account name is required for order ${String(order.order_id ?? order.id ?? "unknown")}.`);
   }
   const paymentStatus = order.payment_status ?? (order.gross_minor === 0 ? "not_required" : "paid");
   const unmetered = order.access_mode === "unmetered" || Number(order.gross_minor ?? 0) === 0;
@@ -4578,5 +4578,5 @@ function contentType(filePath) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const { host, port } = await startDashboardServer();
-  console.log(`Hatch Creator Dashboard API listening on http://${host}:${port}`);
+  console.log(`Hatch Expert Dashboard API listening on http://${host}:${port}`);
 }

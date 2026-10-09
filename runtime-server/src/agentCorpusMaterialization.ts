@@ -34,7 +34,7 @@ export async function materializeAgentCorpus(
   signal?.throwIfAborted();
   const corpus = await loadAgentCorpus(corpusRoot, signal);
   if (expectedDigest && await agentCorpusDigest(corpusRoot, corpus, signal) !== expectedDigest) {
-    throw new Error("Creator Agent assets do not match the resolved release.");
+    throw new Error("Expert Agent assets do not match the resolved release.");
   }
   const system = await readCorpusAsset(corpusRoot, corpus.instructions.system, signal);
   // Skill bodies and references are not eagerly materialized into the system
@@ -50,7 +50,7 @@ export async function materializeAgentCorpus(
   // the old manifest's asset digest, and this final manifest digest ensures a
   // publish did not swap the root while those assets were being assembled.
   if (expectedDigest && await agentCorpusDigest(corpusRoot, corpus, signal) !== expectedDigest) {
-    throw new Error("Creator Agent assets do not match the resolved release.");
+    throw new Error("Expert Agent assets do not match the resolved release.");
   }
   return {
     systemPrompt: protectedKnowledge,
