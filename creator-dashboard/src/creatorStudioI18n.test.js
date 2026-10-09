@@ -69,7 +69,7 @@ test("Products entry does not read a global Factory run list", async () => {
 
 test("Creator shell uses Home, brands the Studio surface, and hides order navigation", async () => {
   const source = await readFile(new URL("./CreatorPortalV2.jsx", import.meta.url), "utf8");
-  assert.match(source, /className="cpv2-brand__product">\{t\("studio"\)\}/);
+  assert.match(source, /className="hatch-brand__product">\{t\("studio"\)\}/);
   assert.match(source, /label: t\("home"\)/);
   assert.doesNotMatch(source, /value: "space-orders"/);
   assert.doesNotMatch(source, /<SpaceLink href="\/studio\/orders"/);

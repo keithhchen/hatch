@@ -250,13 +250,15 @@ function AppLoading() {
 }
 
 function RoleBoundary({ navigate, onCreateCreator }) {
+  const { locale } = useLocale();
+  const t = (key) => buyerT(locale, key);
   return (
     <main className="loading-page">
       <HatchBrand className="loading-brand" />
-      <h1>Creator access is required.</h1>
-      <p>This account can use purchased Agents, but it cannot edit Creator products.</p>
-      {onCreateCreator ? <Button type="button" onClick={() => void onCreateCreator()}>Create a Creator account</Button> : null}
-      <Button type="button" onClick={() => navigate("/library", { replace: true })}>Open your library</Button>
+      <h1>{t(onCreateCreator ? "Hatch Expert access is required." : "A Hatch account is required.")}</h1>
+      <p>{t(onCreateCreator ? "Create a Hatch Expert account to work on your products in Studio." : "Use a Hatch account to open this Agent conversation.")}</p>
+      {onCreateCreator ? <Button type="button" onClick={() => void onCreateCreator()}>{t("Create your Hatch Expert account")}</Button> : null}
+      <Button type="button" onClick={() => navigate("/library", { replace: true })}>{t("Open your library")}</Button>
     </main>
   );
 }

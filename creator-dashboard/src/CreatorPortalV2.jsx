@@ -99,7 +99,7 @@ export function CreatorPortalV2({
     <ThemeProvider theme={creatorMuiTheme}>
       <div className="cpv2">
       <aside className="cpv2-sidebar">
-        <HatchBrand as="button" className="cpv2-brand" type="button" onClick={() => go(ROOT)} aria-label={t("hatchCreatorHome")}><span className="cpv2-brand__product">{t("studio")}</span></HatchBrand>
+        <HatchBrand as="button" className="cpv2-brand" type="button" onClick={() => go(ROOT)} aria-label={t("hatchCreatorHome")}><span className="hatch-brand__product">{t("studio")}</span></HatchBrand>
         <div className="cpv2-mobile-nav">
           <DropdownMenu
             label={t("creatorNavigation")}

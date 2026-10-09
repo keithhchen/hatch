@@ -43,6 +43,7 @@
 .hatch-brand__wordmark { display: block; width: auto; height: 1em; font-size: var(--hatch-type-title); line-height: 1; }
 .hatch-brand__wordmark-image { display: block; width: auto; height: 100%; }
 .hatch-brand__lockup { display: block; width: auto; height: 30px; flex: 0 0 auto; }
+.hatch-brand__product { margin-left: 3px; color: var(--hatch-text-secondary, #74675e); font-family: var(--hatch-font-pill, Inter, sans-serif); font-size: var(--hatch-type-meta); font-weight: 700; letter-spacing: .04em; }
 .hui-heading--display { color: var(--hui-ink); font-family: var(--hui-font-display); font-weight: var(--hui-weight-regular); letter-spacing: var(--hatch-display-tracking); line-height: var(--hatch-display-leading); }
 
 .hui-atmospheric-paper {

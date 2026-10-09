@@ -33,7 +33,6 @@
 .cpv2-mobile-nav .hui-icon-button svg { width: 17px; height: 17px; }
 .cpv2-brand .hatch-brand__mark { width: 22px; height: 22px; }
 .cpv2-brand .hatch-brand__wordmark { font-size: var(--hatch-type-heading); }
-.cpv2-brand__product { margin-left: 3px; color: var(--hatch-text-secondary, #74675e); font-family: var(--hatch-font-pill, Inter, sans-serif); font-size: var(--hatch-type-meta); font-weight: 700; letter-spacing: .04em; }
 .cpv2-global-nav { display: grid; min-width: 0; gap: 2px; margin-top: 14px; }
 .cpv2-global-nav a, .cpv2-global-nav button { position: relative; display: flex; width: 100%; min-height: 36px; align-items: center; gap: 8px; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--hatch-text-secondary, #74675e); font-family: var(--hatch-font-pill, Inter, sans-serif); font-size: var(--hatch-type-ui); font-weight: 540; letter-spacing: normal; line-height: 1.2; text-align: left; text-decoration: none; }
 .cpv2-global-nav a:hover, .cpv2-global-nav button:hover { color: var(--hatch-ink, #201813); }

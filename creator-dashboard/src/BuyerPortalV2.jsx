@@ -17,9 +17,9 @@ import {
 import { CheckoutSummary } from "@hatch/ui/product";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
 import { AccountAvatar } from "./AccountAvatar.jsx";
-import { LanguageSwitcher } from "./LanguageSwitcher.jsx";
 import { useLocale } from "./locale.jsx";
 import { buyerT } from "./buyerI18n.js";
+import { createAuthPagePresentation } from "./authPagePresentation.js";
 import { humanizeIdentifier, meaningfulReversalStatus } from "./buyerPresentation.js";
 import { creatorPublicModel } from "./storefrontModel.js";
 import { BuyerAccountControls, BuyerLanguageMenu } from "./BuyerAccountControls.jsx";
@@ -477,17 +477,17 @@ function AuthPage({mode, search, request, navigate, session }) {
   const signingUp = mode === "sign-up";
   const params = new URLSearchParams(search);
   const returnTo = safeReturnTo(params.get("returnTo") || LIBRARY_ROOT);
-  const creatorIntent = returnTo === "/studio" || returnTo.startsWith("/studio/");
+  const returnPath = new URL(returnTo, "https://hatch.invalid").pathname;
+  const creatorIntent = returnPath === "/studio" || returnPath.startsWith("/studio/");
   const intentRoute = matchBuyerRoute(returnTo.split("?")[0]);
   const productIntent = intentRoute.name === "product";
+  const presentation = createAuthPagePresentation(t)({ signingUp, studioIntent: creatorIntent, productIntent });
   const intentEndpoint = productIntent ? `${BUYER_PORTAL_V2_ENDPOINTS.catalog}/${encodeURIComponent(intentRoute.params.productId)}` : "";
   const intent = useRemote(async (signal) => unwrap(await callRequest(request, intentEndpoint, { signal }), ["agent", "product"]), intentEndpoint || "no-intent", productIntent);
   const [form, setForm] = useState({ display_name: "", email: "", password: "" });
   const [submission, setSubmission] = useState({ status: "idle", error: null });
   const authBrandClassName = "buyer-v2__brand";
-  usePageTitle(signingUp
-    ? (creatorIntent ? t(t("Create your Creator account")) : t("Create your Hatch account"))
-    : t("Sign in to Hatch"));
+  usePageTitle(presentation.title);
 
   useEffect(() => {
     const canSwitchIntoCreatorSignup = signingUp && creatorIntent && session.user?.role !== "creator";
@@ -516,31 +516,31 @@ function AuthPage({mode, search, request, navigate, session }) {
   return (
     <main className="buyer-v2 buyer-v2__auth-page">
       <header className="buyer-v2__auth-navbar">
-        <HatchBrand as={RouterLink} className={authBrandClassName} to={EXPLORE_ROOT} navigate={navigate} aria-label="Hatch home" />
-        <LanguageSwitcher className="buyer-v2__auth-language" />
+        <HatchBrand as={RouterLink} className={authBrandClassName} to={creatorIntent ? "/studio" : EXPLORE_ROOT} navigate={navigate} aria-label={creatorIntent ? "Hatch Studio" : "Hatch home"}>
+          {creatorIntent ? <span className="hatch-brand__product">Studio</span> : null}
+        </HatchBrand>
+        <BuyerLanguageMenu className="buyer-v2__auth-language" />
       </header>
       <section className="buyer-v2__auth-context">
         <div>
-          <span className="buyer-v2__eyebrow">{t('Continue your task')}</span>
+          <span className="buyer-v2__eyebrow">{presentation.eyebrow}</span>
           {productIntent && intent.status === "loading" ? <div className="buyer-v2__auth-intent-skeleton" aria-label={t("Loading Product")} /> : null}
           {productIntent && intent.status === "ready" ? <><h1>{productName(intent.data)}</h1><p>{productPromise(intent.data)}</p><small>{creatorName(intent.data)}</small></> : null}
-          {!productIntent ? <><h1>{t('Your method, made useful.')}</h1><p>{t('Turn the way you think into an agent people can use.')}</p></> : null}
+          {!productIntent ? <><h1>{presentation.heroTitle}</h1><p>{presentation.heroDescription}</p></> : null}
         </div>
       </section>
       <section className="buyer-v2__auth-form-panel">
         <form className="buyer-v2__auth-form" onSubmit={submit}>
-          <span className="buyer-v2__eyebrow">{creatorIntent ? t("Creator account") : t("Hatch account")}</span>
-          <h2 className="hui-heading--display">{signingUp ? (creatorIntent ? t("Create your Creator account") : t("Create your account")) : t("Sign in to Hatch")}</h2>
-          {signingUp ? <p>{creatorIntent
-            ? t("Create a Creator account, then open Creator Studio to publish your work.")
-            : t("Create an account, then return to the Product you selected.")}</p> : null}
+          <span className="buyer-v2__eyebrow">{presentation.accountLabel}</span>
+          <h2 className="hui-heading--display">{presentation.title}</h2>
+          {presentation.description ? <p>{presentation.description}</p> : null}
           {signingUp ? <Field label={t('Name')}><Input required autoComplete="name" value={form.display_name} onChange={(event) => setForm({ ...form, display_name: event.target.value })} /></Field> : null}
           <Field label={t('Email')}><Input required type="email" autoComplete="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></Field>
           <Field label={t('Password')}><Input required minLength={8} type="password" autoComplete={signingUp ? "new-password" : "current-password"} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></Field>
           {submission.error ? <InlineError error={submission.error} /> : null}
           <div className="buyer-v2__auth-actions">
-            <Button className="buyer-v2__button--wide" loading={submission.status === "pending"}>{signingUp ? (creatorIntent ? t("Create Creator account") : t("Create account")) : t("Sign in")}</Button>
-            <p className="buyer-v2__auth-switch">{signingUp ? t("Already have an account?") : (creatorIntent ? t("New to Creator Studio?") : t("New to Hatch?"))} <RouterLink to={`${signingUp ? "/sign-in" : "/sign-up"}?returnTo=${encodeURIComponent(returnTo)}`} navigate={navigate}>{signingUp ? t("Sign in") : (creatorIntent ? t("Create Creator account") : t("Create account"))}</RouterLink></p>
+            <Button className="buyer-v2__button--wide" loading={submission.status === "pending"}>{presentation.action}</Button>
+            <p className="buyer-v2__auth-switch">{presentation.switchPrompt} <RouterLink to={`${signingUp ? "/sign-in" : "/sign-up"}?returnTo=${encodeURIComponent(returnTo)}`} navigate={navigate}>{presentation.switchAction}</RouterLink></p>
           </div>
         </form>
       </section>
