@@ -523,7 +523,6 @@ function AuthPage({mode, search, request, navigate, session }) {
       </header>
       <section className="buyer-v2__auth-context">
         <div>
-          <span className="buyer-v2__eyebrow">{presentation.eyebrow}</span>
           {productIntent && intent.status === "loading" ? <div className="buyer-v2__auth-intent-skeleton" aria-label={t("Loading Product")} /> : null}
           {productIntent && intent.status === "ready" ? <><h1>{productName(intent.data)}</h1><p>{productPromise(intent.data)}</p><small>{creatorName(intent.data)}</small></> : null}
           {!productIntent ? <><h1>{presentation.heroTitle}</h1><p>{presentation.heroDescription}</p></> : null}
@@ -531,7 +530,6 @@ function AuthPage({mode, search, request, navigate, session }) {
       </section>
       <section className="buyer-v2__auth-form-panel">
         <form className="buyer-v2__auth-form" onSubmit={submit}>
-          <span className="buyer-v2__eyebrow">{presentation.accountLabel}</span>
           <h2 className="hui-heading--display">{presentation.title}</h2>
           {presentation.description ? <p>{presentation.description}</p> : null}
           {signingUp ? <Field label={t('Name')}><Input required autoComplete="name" value={form.display_name} onChange={(event) => setForm({ ...form, display_name: event.target.value })} /></Field> : null}

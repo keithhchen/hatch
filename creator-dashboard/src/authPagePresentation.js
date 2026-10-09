@@ -3,10 +3,8 @@ export function createAuthPagePresentation(t) {
     const surface = studioIntent ? "studio" : productIntent ? "product" : "hatch";
     const shared = {
       hatch: {
-        eyebrow: "Hatch",
         heroTitle: "Expert agents that deliver.",
         heroDescription: "View the expert products you subscribe to on Hatch.",
-        accountLabel: "Hatch account",
         signInTitle: "Sign in to Hatch",
         signUpTitle: "Create your Hatch account",
         signInDescription: "",
@@ -17,10 +15,8 @@ export function createAuthPagePresentation(t) {
         signUpSwitch: "Already have an account?"
       },
       studio: {
-        eyebrow: "Hatch Studio",
         heroTitle: "Turn your expertise into an Agent product.",
         heroDescription: "Build an Agent product from your professional methods.",
-        accountLabel: "Hatch Expert account",
         signInTitle: "Sign in to your Hatch Expert account",
         signUpTitle: "Create your Hatch Expert account",
         signInDescription: "Sign in to your Hatch Expert account and return to your products in Studio.",
@@ -31,10 +27,8 @@ export function createAuthPagePresentation(t) {
         signUpSwitch: "Already have a Hatch Expert account?"
       },
       product: {
-        eyebrow: "Selected Agent",
         heroTitle: "",
         heroDescription: "",
-        accountLabel: "Hatch account",
         signInTitle: "Sign in to Hatch",
         signUpTitle: "Create your Hatch account",
         signInDescription: "Sign in to return to this Agent product.",
@@ -47,10 +41,8 @@ export function createAuthPagePresentation(t) {
     }[surface];
 
     return {
-      eyebrow: t(shared.eyebrow),
       heroTitle: t(shared.heroTitle),
       heroDescription: t(shared.heroDescription),
-      accountLabel: t(shared.accountLabel),
       title: t(signingUp ? shared.signUpTitle : shared.signInTitle),
       description: t(signingUp ? shared.signUpDescription : shared.signInDescription),
       action: t(signingUp ? shared.signUpAction : shared.signInAction),

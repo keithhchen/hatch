@@ -31,7 +31,6 @@ test("Studio sign-in and signup share the Agent product promise and use Hatch Ex
     const signIn = presentation(locale, { signingUp: false, studioIntent: true, productIntent: false });
     const signUp = presentation(locale, { signingUp: true, studioIntent: true, productIntent: false });
     assert.equal(signIn.heroTitle, signUp.heroTitle);
-    assert.match(signIn.accountLabel, /Hatch Expert/);
     assert.match(signUp.title, /Hatch Expert/);
     assert.match(signUp.action, /Hatch Expert/);
     assert.notEqual(signIn.title, signUp.title);
