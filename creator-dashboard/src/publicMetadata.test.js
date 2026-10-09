@@ -67,7 +67,7 @@ test("unavailable product metadata keeps the requested canonical URL without inv
   const metadata = createUnavailableProductMetadata("https://hatch.example", "f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42");
   assert.equal(metadata.title, "Agent unavailable · Hatch");
   assert.equal(metadata.canonicalUrl, "https://hatch.example/products/f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42");
-  assert.match(renderProductMetadataTags(metadata), /Creator Agent is unavailable or has been withdrawn/);
+  assert.match(renderProductMetadataTags(metadata), /Expert Agent is unavailable or has been withdrawn/);
 });
 
 test("public Product shell remains useful with JavaScript disabled", () => {

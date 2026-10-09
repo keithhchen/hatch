@@ -1,5 +1,5 @@
-const DEFAULT_TITLE = "Hatch Creator Agents";
-const DEFAULT_DESCRIPTION = "Discover Creator Agents you can use with Hatch Desktop.";
+const DEFAULT_TITLE = "Hatch Expert Agents";
+const DEFAULT_DESCRIPTION = "Discover Expert Agents you can use with Hatch Desktop.";
 
 /**
  * Builds the client-safe metadata model for a canonical public product route.
@@ -10,8 +10,8 @@ export function createProductMetadata(input = {}) {
   const origin = safeOrigin(input.origin);
   const creatorId = requiredUuid(input.creatorId, "creatorId");
   const productId = requiredUuid(input.productId, "productId");
-  const productName = cleanText(input.productName, "Creator Agent", 120);
-  const creatorName = cleanText(input.creatorName, "Hatch Creator", 120);
+  const productName = cleanText(input.productName, "Expert Agent", 120);
+  const creatorName = cleanText(input.creatorName, "Hatch Expert", 120);
   const description = cleanText(input.description, DEFAULT_DESCRIPTION, 300);
   const routePrefix = String(input.routePrefix ?? "/products").replace(/\/+$/, "") || "/products";
   const canonicalUrl = new URL(
@@ -90,7 +90,7 @@ export function createUnavailableProductMetadata(origin, productId, _unused = un
   ).toString();
   return Object.freeze({
     title: "Agent unavailable · Hatch",
-    description: "This Creator Agent is unavailable or has been withdrawn.",
+    description: "This Expert Agent is unavailable or has been withdrawn.",
     canonicalUrl
   });
 }
@@ -104,8 +104,8 @@ export function createUnavailableProductMetadata(origin, productId, _unused = un
 export function createProductNoScriptFallback(input = {}) {
   const productId = requiredUuid(input.productId, "productId");
   const creatorId = requiredUuid(input.creatorId, "creatorId");
-  const productName = cleanText(input.productName, "Creator Agent", 120);
-  const creatorName = cleanText(input.creatorName, "Hatch Creator", 120);
+  const productName = cleanText(input.productName, "Expert Agent", 120);
+  const creatorName = cleanText(input.creatorName, "Hatch Expert", 120);
   const description = cleanText(input.description, DEFAULT_DESCRIPTION, 300);
   const productPath = `/products/${productId}`;
   const creatorPath = `/creators/${creatorId}`;

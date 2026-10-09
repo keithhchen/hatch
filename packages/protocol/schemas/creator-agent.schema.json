@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hatch.dev/agent/creator-agent-v1.schema.json",
-  "title": "Hatch Creator Agent v1",
+  "title": "Hatch Expert Agent v1",
   "description": "The self-contained canonical contract for one runtime-free Hatch Agent Corpus.",
   "type": "object",
   "additionalProperties": false,

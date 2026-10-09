@@ -78,9 +78,9 @@ def create_app(
     configured_publish_service_token = token_source.strip()
 
     api = FastAPI(
-        title="Hatch Creator Agent Registry",
+        title="Hatch Expert Agent Registry",
         version="1.0.0",
-        summary="Registry for the current runnable Creator Agent Corpus.",
+        summary="Registry for the current runnable Expert Agent Corpus.",
     )
     api.add_middleware(
         CORSMiddleware,

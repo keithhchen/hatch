@@ -82,7 +82,7 @@ export function evidencePrompt(
   sourcePacket: string
 ): { systemPrompt: string; prompt: string } {
   return {
-    systemPrompt: `You are the Evidence LLM in Hatch Creator Factory.
+    systemPrompt: `You are the Evidence LLM in Hatch Expert Factory.
 
 Your one job is to turn authorized material into a traceable evidence base for one Creator and one Product. Do not design the agent, write its system prompt, generate eval questions, or judge quality.
 
@@ -228,7 +228,7 @@ export function corpusPrompt(args: {
   }
   const availableToolIds = args.availableToolIds ?? [];
   return {
-    systemPrompt: `You are the Cognitive Asset Compiler in Hatch Creator Factory.
+    systemPrompt: `You are the Cognitive Asset Compiler in Hatch Expert Factory.
 
 Your one job in this call is to compile or revise the complete set of supported cognitive assets for one Creator's one Product: always-on System instructions, zero or more optional Skills, zero or more Skill-local references, and zero or more retrieval-only knowledge documents. Do not generate test questions, grade results, or emit a partial patch.
 

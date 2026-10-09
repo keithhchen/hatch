@@ -2089,7 +2089,7 @@ fn patch_window_settings(
 #[tauri::command]
 fn open_external_url(url: String) -> Result<(), String> {
     if !is_allowed_browse_url(&url) {
-        return Err("Only the Hatch Creator Agent catalog can be opened from this action".into());
+        return Err("Only the Hatch Expert Agent catalog can be opened from this action".into());
     }
     #[cfg(target_os = "macos")]
     let status = Command::new("/usr/bin/open").arg(&url).status();
