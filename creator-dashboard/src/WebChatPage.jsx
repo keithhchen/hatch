@@ -239,6 +239,7 @@ export default function WebChatPage({ productId, conversationId: routedConversat
   const [error, setError] = useState(null);
   const [activeRun, setActiveRun] = useState(null);
   const [connectionVersion, setConnectionVersion] = useState(0);
+  const [snapshotRetryVersion, setSnapshotRetryVersion] = useState(0);
   const [liveTimeline, setLiveTimeline] = useState([]);
   const [briefOpen, setBriefOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -256,6 +257,7 @@ export default function WebChatPage({ productId, conversationId: routedConversat
   const liveTimelineRef = useRef(new WebChatTimeline());
   const visibleMessagesRef = useRef([]);
   const snapshotReconcilerRef = useRef(new WebChatSnapshotReconciler());
+  const conversationGenerationRef = useRef(0);
   const terminalRunRef = useRef(null);
   const messagesRef = useRef(null);
   const draftRef = useRef(null);
@@ -291,8 +293,11 @@ export default function WebChatPage({ productId, conversationId: routedConversat
   const errorText = webChatErrorText(error, locale);
   const snapshotPending = Boolean(conversationId && snapshotConversationId !== conversationId);
   const refresh = useCallback(async (id) => {
+    const generation = conversationGenerationRef.current;
     const snapshot = await client.snapshot(id);
-    if (conversationRef.current !== id) return { snapshot, messages: visibleMessagesRef.current, stale: true };
+    if (conversationRef.current !== id || generation !== conversationGenerationRef.current) {
+      return { snapshot, messages: visibleMessagesRef.current, stale: true };
+    }
     if (snapshot.conversation?.id !== id) throw new WebChatPresentationError("historyIdentityMismatch");
     const reconciliation = snapshotReconcilerRef.current.reconcile(id, visibleMessagesRef.current, snapshot);
     if (!reconciliation.accepted) return { snapshot, messages: reconciliation.messages, stale: true };
@@ -376,15 +381,10 @@ export default function WebChatPage({ productId, conversationId: routedConversat
   }, [access, conversationId, conversations, navigate, productId]);
 
   useEffect(() => {
-    if (!access || !conversationId) return undefined;
+    if (!client || !conversationId) return undefined;
     let live = true;
-    if (reconnectTimerRef.current) {
-      window.clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = null;
-    }
-    const connection = client.openRuntime(conversationId);
-    const socket = connection.socket;
-    socketRef.current = connection;
+    conversationGenerationRef.current += 1;
+    reconnectAttemptsRef.current = 0;
     runRef.current = null;
     terminalRunRef.current = null;
     snapshotReconcilerRef.current.reset(conversationId);
@@ -393,7 +393,25 @@ export default function WebChatPage({ productId, conversationId: routedConversat
     setHistoryCursor(null);
     setSnapshotConversationId(null);
     updateMessages([]);
-    setStatus({ key: "connecting" });
+    setActiveRun(null);
+    setError(null);
+    setStatus({ key: "loadingConversation" });
+    void refresh(conversationId).catch(cause => {
+      if (live && conversationRef.current === conversationId) setError(cause);
+    });
+    return () => { live = false; };
+  }, [client, conversationId, refresh, snapshotRetryVersion, updateMessages]);
+
+  useEffect(() => {
+    if (!access || !client || !conversationId || snapshotConversationId !== conversationId) return undefined;
+    let live = true;
+    if (reconnectTimerRef.current) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    const connection = client.openRuntime(conversationId);
+    const socket = connection.socket;
+    socketRef.current = connection;
     socket.onopen = () => connection.hello();
     socket.onmessage = async event => {
       const message = JSON.parse(event.data);
@@ -424,7 +442,6 @@ export default function WebChatPage({ productId, conversationId: routedConversat
             setActiveRun(pending.runId);
             setStatus({ key: "sending" });
           }
-          await refresh(conversationId);
           if (taskStartRef.current === conversationId) {
             taskStartRef.current = null;
             const runId = `run_${crypto.randomUUID().replaceAll("-", "")}`;
@@ -524,7 +541,7 @@ export default function WebChatPage({ productId, conversationId: routedConversat
       connection.close();
       if (socketRef.current === connection) socketRef.current = null;
     };
-  }, [client, conversationId, refresh, connectionVersion, restoreSubmission, updateLiveTimeline, updateMessages]);
+  }, [access, client, conversationId, snapshotConversationId, refresh, connectionVersion, restoreSubmission, updateLiveTimeline, updateMessages]);
 
   useEffect(() => {
     const composer = draftRef.current;
@@ -756,7 +773,7 @@ export default function WebChatPage({ productId, conversationId: routedConversat
         <div className="web-chat__heading-copy"><Avatar className="web-chat__heading-avatar" src={creatorAvatarUrl} name={creator.name ?? name} size="medium" /><h1>{name}</h1></div>
         {selectedConversation?.brief_snapshot ? <div className="web-chat__header-tools"><TaskBriefDropdown key={conversationId} snapshot={selectedConversation.brief_snapshot} t={t} /></div> : null}
       </header>
-      {error && access ? <div className="web-chat__error" role="alert"><CircleAlert aria-hidden="true" /><span>{errorText}</span><button type="button" onClick={() => { setError(null); setConnectionVersion(value => value + 1); }}><RotateCw aria-hidden="true" /><span>{t("retry")}</span></button></div> : null}
+      {error && access ? <div className="web-chat__error" role="alert"><CircleAlert aria-hidden="true" /><span>{errorText}</span><button type="button" onClick={() => { setError(null); if (snapshotPending) setSnapshotRetryVersion(value => value + 1); else setConnectionVersion(value => value + 1); }}><RotateCw aria-hidden="true" /><span>{t("retry")}</span></button></div> : null}
       <div className="web-chat__messages" ref={messagesRef} onScroll={event => { const element = event.currentTarget; followOutputRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 112; }} aria-label={t("chatMessages")}>
         {!snapshotPending && historyCursor ? <button type="button" className="web-chat__history" onClick={() => void loadHistory().catch(cause => setError(cause))}><span>{t("viewEarlierMessages")}</span><ChevronUp aria-hidden="true" /></button> : null}
         {!access && !error ? <div className="web-chat__gate" role="status"><LoaderCircle aria-hidden="true" /><span>{statusText}</span></div> : null}
