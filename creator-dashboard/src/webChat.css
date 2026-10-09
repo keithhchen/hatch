@@ -319,8 +319,10 @@
 
 .web-chat__empty-action {
   display: inline-flex;
+  max-width: 100%;
   min-height: 40px;
   align-items: center;
+  justify-content: center;
   gap: 7px;
   margin-top: 24px;
   padding: 0 13px;
@@ -330,6 +332,8 @@
   background: rgba(255, 253, 249, .64);
   cursor: pointer;
   font-size: 12px;
+  overflow-wrap: anywhere;
+  text-align: center;
   transition: color var(--chat-motion), border-color var(--chat-motion), background var(--chat-motion), transform var(--chat-motion);
 }
 
