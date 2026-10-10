@@ -58,6 +58,7 @@ import { CorpusPublisher, CorpusPublishError } from "./creatorLearning/corpusPub
 import { CreatorRegistryReleaseStore, type CreatorRegistryRelease } from "./creatorLearning/creatorRegistryRelease.js";
 import { corpusOutputSchema } from "./creatorLearning/corpusNode.js";
 import { QdrantKnowledgeIndexer } from "./qdrantIndexer.js";
+import { flushLangfuseObservability, initializeLangfuseObservability } from "./langfuse.js";
 import { accountAvatarApplicationServiceFromEnvironment, MAX_ACCOUNT_AVATAR_BYTES } from "./accountAvatar.js";
 import {
   HttpRequestGate,
@@ -94,6 +95,7 @@ type RegistryContext = {
 };
 
 export async function createRegistryServerFromEnvironment(environment: NodeJS.ProcessEnv = process.env): Promise<RegistryServer> {
+  initializeLangfuseObservability(environment);
   const authRateLimitOptions = authRateLimitOptionsFromEnvironment(environment);
   const passwordWorkOptions = passwordWorkOptionsFromEnvironment(environment);
   const trustedProxies = authTrustedProxyPolicyFromEnvironment(environment);
@@ -314,6 +316,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await factoryRepository.close();
     await store.close();
+    await flushLangfuseObservability();
     if (ownsReleasePool) await releasePool?.end();
   } };
 }

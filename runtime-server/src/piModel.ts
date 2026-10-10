@@ -15,6 +15,7 @@ import { createModels, createProvider } from "@earendil-works/pi-ai";
 import { envApiKeyAuth } from "@earendil-works/pi-ai";
 import { KIMI_TEMPERATURE } from "./kimiProvider.js";
 import { requireLlmApiKey, resolveLlmProfile, type LlmProfile } from "./llmProfiles.js";
+import { traceProviderStream } from "./langfuse.js";
 
 export const KIMI_MODEL = "kimi-k2.6" as const;
 export const KIMI_DEFAULT_BASE_URL = "https://api.moonshot.cn/v1";
@@ -221,7 +222,7 @@ function streamFnFor(config: ResolvedKimiOptions): StreamFn {
       timeoutMs: options?.timeoutMs ?? config.timeoutMs
     };
 
-    return api.streamSimple(model, context, streamOptions);
+    return traceProviderStream(() => api.streamSimple(model, context, streamOptions), model, context, streamOptions);
   };
 }
 
@@ -523,33 +524,39 @@ function piStreamFnFor(config: ResolvedKimiOptions & { profile: LlmProfile }): S
   if (config.profile.name === "kimi-k2.6") return streamFnFor(config);
   if (config.profile.api === "google-generative-ai") {
     const api = googleGenerativeAIApi();
-    return (model, context, options?: SimpleStreamOptions) => api.streamSimple(model, context, {
+    return (model, context, options?: SimpleStreamOptions) => {
+      const streamOptions: SimpleStreamOptions = {
+        ...options,
+        apiKey: options?.apiKey ?? config.apiKey,
+        headers: config.headers || options?.headers ? { ...config.headers, ...options?.headers } : undefined,
+        maxRetries: options?.maxRetries ?? config.maxRetries,
+        maxRetryDelayMs: options?.maxRetryDelayMs ?? config.maxRetryDelayMs,
+        ...(options?.maxTokens === undefined && config.maxTokens !== undefined ? { maxTokens: config.maxTokens } : {}),
+        reasoning: options?.reasoning ?? config.thinkingLevel,
+        timeoutMs: options?.timeoutMs ?? config.timeoutMs
+      };
+      return traceProviderStream(() => api.streamSimple(model, context, streamOptions), model, context, streamOptions);
+    };
+  }
+  const api = openAICompletionsApi();
+  return (model, context, options?: SimpleStreamOptions) => {
+    const streamOptions: SimpleStreamOptions = {
       ...options,
       apiKey: options?.apiKey ?? config.apiKey,
+      fetch: finishAwareFetch(options?.fetch ?? config.fetch ?? globalThis.fetch, config.timeoutMs ?? KIMI_DEFAULT_HTTP_IDLE_TIMEOUT_MS),
       headers: config.headers || options?.headers ? { ...config.headers, ...options?.headers } : undefined,
       maxRetries: options?.maxRetries ?? config.maxRetries,
       maxRetryDelayMs: options?.maxRetryDelayMs ?? config.maxRetryDelayMs,
       ...(options?.maxTokens === undefined && config.maxTokens !== undefined ? { maxTokens: config.maxTokens } : {}),
-      reasoning: options?.reasoning ?? config.thinkingLevel,
+      onPayload: async (payload, payloadModel) => {
+        const normalized = normalizeProfilePayload(payload, config.profile);
+        const transformed = await options?.onPayload?.(normalized, payloadModel);
+        return transformed === undefined ? normalized : transformed;
+      },
       timeoutMs: options?.timeoutMs ?? config.timeoutMs
-    });
-  }
-  const api = openAICompletionsApi();
-  return (model, context, options?: SimpleStreamOptions) => api.streamSimple(model, context, {
-    ...options,
-    apiKey: options?.apiKey ?? config.apiKey,
-    fetch: finishAwareFetch(options?.fetch ?? config.fetch ?? globalThis.fetch, config.timeoutMs ?? KIMI_DEFAULT_HTTP_IDLE_TIMEOUT_MS),
-    headers: config.headers || options?.headers ? { ...config.headers, ...options?.headers } : undefined,
-    maxRetries: options?.maxRetries ?? config.maxRetries,
-    maxRetryDelayMs: options?.maxRetryDelayMs ?? config.maxRetryDelayMs,
-    ...(options?.maxTokens === undefined && config.maxTokens !== undefined ? { maxTokens: config.maxTokens } : {}),
-    onPayload: async (payload, payloadModel) => {
-      const normalized = normalizeProfilePayload(payload, config.profile);
-      const transformed = await options?.onPayload?.(normalized, payloadModel);
-      return transformed === undefined ? normalized : transformed;
-    },
-    timeoutMs: options?.timeoutMs ?? config.timeoutMs
-  });
+    };
+    return traceProviderStream(() => api.streamSimple(model, context, streamOptions), model, context, streamOptions);
+  };
 }
 
 function normalizeProfilePayload(payload: unknown, profile: LlmProfile): unknown {

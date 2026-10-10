@@ -12,6 +12,7 @@ import type {
 } from "@earendil-works/pi-ai";
 import { createModels, createProvider, envApiKeyAuth } from "@earendil-works/pi-ai";
 import { requireLlmApiKey, resolveFactoryLlmProfile, type FactoryLlmProfileName, type LlmProfile } from "../llmProfiles.js";
+import { traceProviderStream } from "../langfuse.js";
 
 /**
  * Factory's own Pi boundary.
@@ -200,20 +201,23 @@ export function createFactoryPiStreamFn(options: FactoryPiAdapterOptions = {}): 
   const config = resolveFactoryPi(options);
   if (config.profile.api === "google-generative-ai") {
     const api = googleGenerativeAIApi();
-    return (model, context, streamOptions?: SimpleStreamOptions) => api.streamSimple(model, context, {
-      ...streamOptions,
-      apiKey: streamOptions?.apiKey ?? config.apiKey,
-      headers: config.headers || streamOptions?.headers
-        ? { ...config.headers, ...streamOptions?.headers }
-        : undefined,
-      maxRetries: streamOptions?.maxRetries ?? config.maxRetries,
-      maxRetryDelayMs: streamOptions?.maxRetryDelayMs ?? config.maxRetryDelayMs,
-      ...(streamOptions?.maxTokens === undefined
-        ? { maxTokens: config.maxTokens ?? config.profile.maxTokens }
-        : {}),
-      reasoning: streamOptions?.reasoning ?? config.thinkingLevel,
-      timeoutMs: streamOptions?.timeoutMs ?? config.timeoutMs
-    });
+    return (model, context, streamOptions?: SimpleStreamOptions) => {
+      const requestOptions: SimpleStreamOptions = {
+        ...streamOptions,
+        apiKey: streamOptions?.apiKey ?? config.apiKey,
+        headers: config.headers || streamOptions?.headers
+          ? { ...config.headers, ...streamOptions?.headers }
+          : undefined,
+        maxRetries: streamOptions?.maxRetries ?? config.maxRetries,
+        maxRetryDelayMs: streamOptions?.maxRetryDelayMs ?? config.maxRetryDelayMs,
+        ...(streamOptions?.maxTokens === undefined
+          ? { maxTokens: config.maxTokens ?? config.profile.maxTokens }
+          : {}),
+        reasoning: streamOptions?.reasoning ?? config.thinkingLevel,
+        timeoutMs: streamOptions?.timeoutMs ?? config.timeoutMs
+      };
+      return traceProviderStream(() => api.streamSimple(model, context, requestOptions), model, context, requestOptions);
+    };
   }
   const api = openAICompletionsApi();
   return (model, context, streamOptions?: SimpleStreamOptions) => {
@@ -248,7 +252,7 @@ export function createFactoryPiStreamFn(options: FactoryPiAdapterOptions = {}): 
         : streamOptions?.reasoning ?? config.thinkingLevel,
       timeoutMs: streamOptions?.timeoutMs ?? config.timeoutMs
     };
-    return api.streamSimple(model, context, requestOptions);
+    return traceProviderStream(() => api.streamSimple(model, context, requestOptions), model, context, requestOptions);
   };
 }
 

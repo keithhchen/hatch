@@ -37,6 +37,7 @@ import {
 } from "./agentRuntime.js";
 import { SUMMARY_PREFIX, SUMMARY_SUFFIX } from "./compaction.js";
 import { createPiModel, createPiStreamFn } from "./piModel.js";
+import { traceAgentTools } from "./langfuse.js";
 import { resolveLlmProfile } from "./llmProfiles.js";
 import { runPiAgentPrompt, type PiAgentPromptRunner } from "./piPrompt.js";
 import {
@@ -205,7 +206,7 @@ export class PiAgentRuntime implements AgentRuntime {
         model,
         thinkingLevel: resolveLlmProfile().thinkingLevel,
         messages: [...contextMessages, ...storedMessages],
-        tools
+        tools: traceAgentTools(tools)
       },
       beforeToolCall: deliveryReviewer && deliveryWorkflow
         ? async ({ toolCall, args }, signal) => {

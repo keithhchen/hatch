@@ -7,6 +7,7 @@ import { classifyFactoryProviderFailure } from "../creatorLearning/factoryLlm.js
 import { WorkbenchStore, type AgentDefinitionSource, type Role, type Session } from "./store.js";
 import { factoryAgentTools } from "./factoryTools.js";
 import { fileTools } from "./tools.js";
+import { traceAgentTools, withLangfuseTurn } from "../langfuse.js";
 
 export type WorkbenchRuntimeOptions = {
   env?: NodeJS.ProcessEnv;
@@ -50,7 +51,7 @@ export class WorkbenchRuntime {
     } catch (error) { this.active.delete(id); throw error; }
     this.emit(id, "state");
     this.emit(id, "voice.run_started", { runId });
-    const run = this.main(id, message, controller).catch(error => {
+    const run = withLangfuseTurn("studio.turn", message, () => this.main(id, message, controller)).catch(error => {
       if (!controller.signal.aborted) this.emit(id, "error", { message: safeError(error) });
     });
     this.runs.set(id, run);
@@ -91,7 +92,7 @@ export class WorkbenchRuntime {
       const scribePrompt = await readFile(fileURLToPath(new URL("voice/SCRIBE.md", new URL("../../prompts/factory-agents/", import.meta.url))), "utf8");
       const changed = () => this.emit(id, "files");
       const current = await this.store.get(id);
-      await this.run(id, scribePrompt, current.scribeContext ?? [], JSON.stringify({ turn: evidence }, null, 2), fileTools(this.store, id, { changed }), controller, "scribe");
+      await withLangfuseTurn("studio.turn", evidence, () => this.run(id, scribePrompt, current.scribeContext ?? [], JSON.stringify({ turn: evidence }, null, 2), fileTools(this.store, id, { changed }), controller, "scribe"));
     } finally {
       this.scribeControllers.delete(controller);
     }
@@ -151,7 +152,7 @@ export class WorkbenchRuntime {
     let persistenceError: unknown;
     let summarizedCount = 0;
     let summaryMessage: AgentMessage | undefined;
-    const agent = factory({ env: this.env, maxTokens: 32768, initialState: { systemPrompt, messages: history, tools }, agentOptions: {
+    const agent = factory({ env: this.env, maxTokens: 32768, initialState: { systemPrompt, messages: history, tools: traceAgentTools(tools) }, agentOptions: {
       toolExecution: "sequential",
       // askuser is a turn boundary. The tool result is persisted as a normal
       // tool result, then the next user message starts a fresh Agent turn.

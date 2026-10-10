@@ -98,6 +98,7 @@ import {
 } from "./outputGuard.js";
 import { writeOperationalError } from "./operationalLogging.js";
 import { RuntimeAssetStore, runtimeAssetStoreFromEnvironment } from "./assetStore.js";
+import { flushLangfuseObservability, initializeLangfuseObservability, withLangfuseTurn } from "./langfuse.js";
 
 type AgentCorpusResolver = AgentCorpusResolverLike;
 
@@ -228,6 +229,7 @@ export async function commerceEventSinkFromEnvironment(
 export async function createRuntimeServerFromEnvironment(
   environment: NodeJS.ProcessEnv = process.env
 ): Promise<RuntimeServer> {
+  initializeLangfuseObservability(environment);
   const registryUrl = environment.HATCH_REGISTRY_URL?.trim();
   const runtimeCorpusRoot = environment.HATCH_RUNTIME_CORPUS_ROOT?.trim();
   const runtimeDataDir = environment.HATCH_RUNTIME_DATA_DIR?.trim() || path.resolve(".hatch-runtime");
@@ -821,6 +823,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       await Promise.allSettled([...reconciliationTasks]);
       await conversationStore.close();
       await conversationRepository.close();
+      await flushLangfuseObservability();
     }
   };
 }
@@ -2706,7 +2709,11 @@ export function protectPrivateAgentBoundary(
   return message;
 }
 
-async function runOneTurn(
+async function runOneTurn(...args: Parameters<typeof runOneTurnInternal>): Promise<void> {
+  return withLangfuseTurn("user-runtime.turn", args[0].message.content, () => runOneTurnInternal(...args));
+}
+
+async function runOneTurnInternal(
   input: BoundRunStart,
   persistedUserMessage: ConversationMessage,
   hello: ClientHello,
