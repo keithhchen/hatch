@@ -2710,7 +2710,12 @@ export function protectPrivateAgentBoundary(
 }
 
 async function runOneTurn(...args: Parameters<typeof runOneTurnInternal>): Promise<void> {
-  return withLangfuseTurn("user-runtime.turn", args[0].message.content, () => runOneTurnInternal(...args));
+  const [input, , , , binding] = args;
+  return withLangfuseTurn("user-runtime.turn", input.message.content, () => runOneTurnInternal(...args), {
+    productId: binding.productId,
+    userId: binding.userId,
+    conversationId: input.conversation_id
+  });
 }
 
 async function runOneTurnInternal(

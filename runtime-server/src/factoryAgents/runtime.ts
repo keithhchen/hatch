@@ -7,7 +7,7 @@ import { classifyFactoryProviderFailure } from "../creatorLearning/factoryLlm.js
 import { WorkbenchStore, type AgentDefinitionSource, type Role, type Session } from "./store.js";
 import { factoryAgentTools } from "./factoryTools.js";
 import { fileTools } from "./tools.js";
-import { traceAgentTools, withLangfuseTurn } from "../langfuse.js";
+import { traceAgentTools, withLangfuseTurn, type LangfuseTurnIdentifiers } from "../langfuse.js";
 
 export type WorkbenchRuntimeOptions = {
   env?: NodeJS.ProcessEnv;
@@ -28,6 +28,10 @@ export class WorkbenchRuntime {
   private readonly env: NodeJS.ProcessEnv;
   constructor(readonly store: WorkbenchStore, private options: WorkbenchRuntimeOptions = {}) {
     this.env = { HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash", ...(options.env ?? process.env) };
+  }
+  private traceIdentifiers(): LangfuseTurnIdentifiers | undefined {
+    const scope = this.store.scope;
+    return scope ? { productId: scope.productId, userId: scope.creatorId } : undefined;
   }
   emit(id: string, type: string, data: Record<string, unknown> = {}): void { this.events.emit("event", { sessionId: id, type, ...data }); }
   async prompt(role: Role, snapshot?: Awaited<ReturnType<AgentDefinitionSource["list"]>>[number]): Promise<string> {
@@ -51,7 +55,7 @@ export class WorkbenchRuntime {
     } catch (error) { this.active.delete(id); throw error; }
     this.emit(id, "state");
     this.emit(id, "voice.run_started", { runId });
-    const run = withLangfuseTurn("studio.turn", message, () => this.main(id, message, controller)).catch(error => {
+    const run = withLangfuseTurn("studio.turn", message, () => this.main(id, message, controller), this.traceIdentifiers()).catch(error => {
       if (!controller.signal.aborted) this.emit(id, "error", { message: safeError(error) });
     });
     this.runs.set(id, run);
@@ -92,7 +96,7 @@ export class WorkbenchRuntime {
       const scribePrompt = await readFile(fileURLToPath(new URL("voice/SCRIBE.md", new URL("../../prompts/factory-agents/", import.meta.url))), "utf8");
       const changed = () => this.emit(id, "files");
       const current = await this.store.get(id);
-      await withLangfuseTurn("studio.turn", evidence, () => this.run(id, scribePrompt, current.scribeContext ?? [], JSON.stringify({ turn: evidence }, null, 2), fileTools(this.store, id, { changed }), controller, "scribe"));
+      await withLangfuseTurn("studio.turn", evidence, () => this.run(id, scribePrompt, current.scribeContext ?? [], JSON.stringify({ turn: evidence }, null, 2), fileTools(this.store, id, { changed }), controller, "scribe"), this.traceIdentifiers());
     } finally {
       this.scribeControllers.delete(controller);
     }

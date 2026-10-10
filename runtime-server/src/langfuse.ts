@@ -1,6 +1,6 @@
 import { LangfuseSpanProcessor } from "@langfuse/otel";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { startActiveObservation, startObservation, type LangfuseGenerationAttributes } from "@langfuse/tracing";
+import { propagateAttributes, startActiveObservation, startObservation, type LangfuseGenerationAttributes } from "@langfuse/tracing";
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, AssistantMessageEventStream, Context, SimpleStreamOptions } from "@earendil-works/pi-ai";
@@ -11,6 +11,12 @@ type LangfuseConfig = {
   baseUrl: string;
   environment?: string;
   release?: string;
+};
+
+export type LangfuseTurnIdentifiers = {
+  productId: string;
+  userId: string;
+  conversationId?: string;
 };
 
 let runtime: { sdk: NodeSDK; processor: LangfuseSpanProcessor } | undefined;
@@ -66,9 +72,14 @@ function maskSecrets(value: unknown): unknown {
   ]));
 }
 
-export async function withLangfuseTurn<T>(name: string, input: unknown, operation: () => Promise<T>): Promise<T> {
+export async function withLangfuseTurn<T>(
+  name: string,
+  input: unknown,
+  operation: () => Promise<T>,
+  identifiers?: LangfuseTurnIdentifiers
+): Promise<T> {
   if (!isEnabled()) return operation();
-  return startActiveObservation(name, observation => activeTurn.run({}, async () => {
+  const run = () => startActiveObservation(name, observation => activeTurn.run({}, async () => {
     observation.update({ input });
     try {
       const result = await operation();
@@ -80,6 +91,15 @@ export async function withLangfuseTurn<T>(name: string, input: unknown, operatio
       throw error;
     }
   }), { asType: "agent" });
+  if (!identifiers) return run();
+  return propagateAttributes({
+    userId: identifiers.userId,
+    ...(identifiers.conversationId ? { sessionId: identifiers.conversationId } : {}),
+    metadata: {
+      productId: identifiers.productId,
+      ...(identifiers.conversationId ? { conversationId: identifiers.conversationId } : {})
+    }
+  }, run);
 }
 
 export function traceAgentTools(tools: AgentTool[]): AgentTool[] {
