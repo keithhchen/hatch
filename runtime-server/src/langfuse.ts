@@ -1,4 +1,5 @@
 import { LangfuseSpanProcessor } from "@langfuse/otel";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { startActiveObservation, startObservation, type LangfuseGenerationAttributes } from "@langfuse/tracing";
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
@@ -13,6 +14,7 @@ type LangfuseConfig = {
 };
 
 let runtime: { sdk: NodeSDK; processor: LangfuseSpanProcessor } | undefined;
+const activeTurn = new AsyncLocalStorage<{ output?: AssistantMessage }>();
 
 export function initializeLangfuseObservability(environment: NodeJS.ProcessEnv = process.env): void {
   const enabled = environment.LANGFUSE_ENABLED;
@@ -66,15 +68,18 @@ function maskSecrets(value: unknown): unknown {
 
 export async function withLangfuseTurn<T>(name: string, input: unknown, operation: () => Promise<T>): Promise<T> {
   if (!isEnabled()) return operation();
-  return startActiveObservation(name, async observation => {
+  return startActiveObservation(name, observation => activeTurn.run({}, async () => {
     observation.update({ input });
     try {
-      return await operation();
+      const result = await operation();
+      const output = activeTurn.getStore()?.output;
+      if (output) observation.update({ output });
+      return result;
     } catch (error) {
       observation.update({ level: "ERROR", statusMessage: error instanceof Error ? error.message : String(error) });
       throw error;
     }
-  }, { asType: "agent" });
+  }), { asType: "agent" });
 }
 
 export function traceAgentTools(tools: AgentTool[]): AgentTool[] {
@@ -129,9 +134,10 @@ export function traceProviderStream(
   options?: SimpleStreamOptions
 ): AssistantMessageEventStream {
   if (!isEnabled()) return createSource();
-  const generation = startObservation(`llm.${model.provider}.${model.id}`, {
+  const generation = startObservation("generate-response", {
     model: model.id,
     input: context,
+    metadata: { provider: model.provider },
     modelParameters: {
       ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
       ...(options?.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
@@ -146,10 +152,12 @@ export function traceProviderStream(
     generation.end();
     throw error;
   }
+  const turn = activeTurn.getStore();
   void source.result().then(
     message => {
       generation.update(generationAttributes(message));
       generation.end();
+      if (turn) turn.output = message;
     },
     error => {
       generation.update({ level: "ERROR", statusMessage: error instanceof Error ? error.message : String(error) });
