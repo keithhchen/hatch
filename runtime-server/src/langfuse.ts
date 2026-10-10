@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { propagateAttributes, startActiveObservation, startObservation, type LangfuseGenerationAttributes } from "@langfuse/tracing";
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, AssistantMessageEventStream, Context, SimpleStreamOptions } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream, type AssistantMessage, type AssistantMessageEvent, type AssistantMessageEventStream, type Context, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 
 type LangfuseConfig = {
   publicKey: string;
@@ -147,6 +147,11 @@ function generationAttributes(message: AssistantMessage): LangfuseGenerationAttr
   };
 }
 
+function hasCompletionDelta(event: AssistantMessageEvent): boolean {
+  return (event.type === "text_delta" || event.type === "thinking_delta" || event.type === "toolcall_delta")
+    && event.delta.length > 0;
+}
+
 export function traceProviderStream(
   createSource: () => AssistantMessageEventStream,
   model: { id: string; provider: string },
@@ -172,19 +177,32 @@ export function traceProviderStream(
     generation.end();
     throw error;
   }
+  const forwarded = createAssistantMessageEventStream();
   const turn = activeTurn.getStore();
-  void source.result().then(
-    message => {
+  void (async () => {
+    let recordedFirstToken = false;
+    let recordedResult = false;
+    const recordResult = (message: AssistantMessage) => {
       generation.update(generationAttributes(message));
       generation.end();
       if (turn) turn.output = message;
-    },
-    error => {
-      generation.update({ level: "ERROR", statusMessage: error instanceof Error ? error.message : String(error) });
-      generation.end();
+    };
+    for await (const event of source) {
+      if (!recordedFirstToken && hasCompletionDelta(event)) {
+        recordedFirstToken = true;
+        generation.update({ completionStartTime: new Date() });
+      }
+      if (event.type === "done" || event.type === "error") {
+        recordedResult = true;
+        recordResult(event.type === "done" ? event.message : event.error);
+      }
+      forwarded.push(event);
     }
-  );
-  return source;
+    const result = await source.result();
+    if (!recordedResult) recordResult(result);
+    forwarded.end(result);
+  })();
+  return forwarded;
 }
 
 export async function flushLangfuseObservability(): Promise<void> {
