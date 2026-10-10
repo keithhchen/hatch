@@ -9,7 +9,6 @@ import { WebSocket } from "ws";
 import { AgentCorpusResolver, type AgentCorpus } from "./agentCorpus.js";
 import type { AgentRuntime, RunContext } from "./agentRuntime.js";
 import { InMemoryConversationRepository } from "./conversationRepository.js";
-import { authTrustedProxyPolicyFromEnvironment } from "./authRateLimit.js";
 import { creatorModelToolName, type CreatorToolControlPlane } from "./creatorTools.js";
 import {
   EntitlementError,
@@ -189,16 +188,13 @@ test("unauthenticated WebSocket is terminated when the client hello deadline exp
 
 test("runtime does not cap open sockets by source or total count", async () => {
   const runtime = createRuntimeServer({
-    clientHelloTimeoutMs: 2_000,
-    trustedProxyPolicy: authTrustedProxyPolicyFromEnvironment({
-      HATCH_AUTH_TRUSTED_PROXY_CIDRS: "127.0.0.1/32"
-    })
+    clientHelloTimeoutMs: 2_000
   });
   const port = await listen(runtime);
   const sockets: WebSocket[] = [];
   try {
     for (let index = 0; index < 20; index += 1) {
-      sockets.push(await openSocket(port, { "x-forwarded-for": "203.0.113.10" }));
+      sockets.push(await openSocket(port));
     }
     await new Promise<void>((resolve) => setTimeout(resolve, 50));
     assert.ok(sockets.every((socket) => socket.readyState === WebSocket.OPEN));
@@ -1315,7 +1311,7 @@ test("HTTP Registry authorization failures return controlled 503 responses", asy
   }
 });
 
-test("HTTP per-source gate keeps a disconnected resolver lease until the work settles", async () => {
+test("a disconnected HTTP request does not block another request from the same source", async () => {
   const signals: AbortSignal[] = [];
   const releases: Array<(identity: { sub: string; role: "user" } | undefined) => void> = [];
   const identityResolver: AuthIdentityResolver = {
@@ -1329,12 +1325,10 @@ test("HTTP per-source gate keeps a disconnected resolver lease until the work se
     resolve: async () => fixtureEntitlement()
   };
   const runtime = createRuntimeServer({
-    conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-http-source-gate-"))),
+    conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-http-disconnect-"))),
     authIdentityResolver: identityResolver,
     entitlementResolver: entitlements,
     agentCorpusResolver: fixtureCorpusResolver(fixtureEntitlement()),
-    maxHttpRequestsGlobal: 4,
-    maxHttpRequestsPerSource: 1,
     httpRequestTimeoutMs: 1_000
   });
   const port = await listen(runtime);
@@ -1349,29 +1343,20 @@ test("HTTP per-source gate keeps a disconnected resolver lease until the work se
     await assert.rejects(disconnected, /abort/i);
     await waitUntil(() => signals[0]?.aborted === true);
 
-    const blocked = await fetch(`http://127.0.0.1:${port}/v1/me/creator-agents`, {
-      headers: { authorization: "Bearer source-overflow" }
-    });
-    assert.equal(blocked.status, 429);
-    assert.equal(((await blocked.json()) as { error: { code: string } }).error.code, "source_busy");
-    assert.equal(releases.length, 1);
-
-    releases[0]?.(undefined);
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    await new Promise<void>((resolve) => setImmediate(resolve));
     const admitted = fetch(`http://127.0.0.1:${port}/v1/me/creator-agents`, {
-      headers: { authorization: "Bearer source-admitted" }
+      headers: { authorization: "Bearer same-source" }
     });
     await waitUntil(() => releases.length === 2);
     releases[1]?.({ sub: "http-user", role: "user" });
     assert.equal((await admitted).status, 200);
+    releases[0]?.(undefined);
   } finally {
     for (const release of releases) release(undefined);
     await runtime.close();
   }
 });
 
-test("HTTP global gate and request deadline bound abort-ignoring authorization work", async () => {
+test("HTTP request deadlines bound concurrent abort-ignoring authorization work", async () => {
   const signals: AbortSignal[] = [];
   const releases: Array<(identity: undefined) => void> = [];
   const identityResolver: AuthIdentityResolver = {
@@ -1381,15 +1366,13 @@ test("HTTP global gate and request deadline bound abort-ignoring authorization w
     }
   };
   const runtime = createRuntimeServer({
-    conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-http-global-gate-"))),
+    conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-http-deadline-"))),
     authIdentityResolver: identityResolver,
     entitlementResolver: {
       list: async () => [],
       resolve: async () => fixtureEntitlement()
     },
     agentCorpusResolver: fixtureCorpusResolver(fixtureEntitlement()),
-    maxHttpRequestsGlobal: 2,
-    maxHttpRequestsPerSource: 3,
     httpRequestTimeoutMs: 35
   });
   const port = await listen(runtime);
@@ -1405,12 +1388,12 @@ test("HTTP global gate and request deadline bound abort-ignoring authorization w
     assert.equal((await second).status, 504);
     assert.ok(signals.every((signal) => signal.aborted));
 
-    const blocked = await fetch(`http://127.0.0.1:${port}/v1/me/creator-agents`, {
-      headers: { authorization: "Bearer global-overflow" }
+    const third = fetch(`http://127.0.0.1:${port}/v1/me/creator-agents`, {
+      headers: { authorization: "Bearer third-request" }
     });
-    assert.equal(blocked.status, 503);
-    assert.equal(((await blocked.json()) as { error: { code: string } }).error.code, "http_busy");
-    assert.equal(releases.length, 2);
+    await waitUntil(() => releases.length === 3);
+    assert.equal((await third).status, 504);
+    assert.ok(signals[2]?.aborted);
   } finally {
     for (const release of releases) release(undefined);
     await new Promise<void>((resolve) => setImmediate(resolve));

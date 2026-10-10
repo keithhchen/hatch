@@ -89,11 +89,6 @@ import {
 import { verifyHatchAuthToken } from "./authToken.js";
 import { BriefValidationError, createBriefSnapshot, type BriefSnapshot, type BriefSpec } from "./brief.js";
 import {
-  authRequestSourceIp,
-  authTrustedProxyPolicyFromEnvironment,
-  type TrustedProxyPolicy
-} from "./authRateLimit.js";
-import {
   createOutputGuardFromEnvironment,
   GuardedAssistantOutput,
   OUTPUT_GUARD_BLOCKED_MODEL_MESSAGE,
@@ -166,18 +161,12 @@ export type RuntimeServerOptions = {
   maxSocketBufferedBytes?: number;
   /** Hard deadline for Runtime-owned network tools. */
   serverToolTimeoutMs?: number;
-  /** In-flight HTTP handlers across the Runtime process. */
-  maxHttpRequestsGlobal?: number;
-  /** In-flight HTTP handlers from one remote address. */
-  maxHttpRequestsPerSource?: number;
   /** Deadline for receiving HTTP headers. */
   httpHeadersTimeoutMs?: number;
   /** End-to-end deadline for a Runtime HTTP handler. */
   httpRequestTimeoutMs?: number;
   /** Maximum serialized JSON response size for discovery and history. */
   maxHttpResponseBytes?: number;
-  /** Explicit reverse proxies allowed to supply X-Forwarded-For. */
-  trustedProxyPolicy?: TrustedProxyPolicy;
 };
 
 type LegacyHmacAuth = {
@@ -300,18 +289,6 @@ export async function createRuntimeServerFromEnvironment(
     1_000,
     300_000
   );
-  const maxHttpRequestsGlobal = runtimeCapacityLimit(
-    "HATCH_RUNTIME_MAX_HTTP_REQUESTS_GLOBAL",
-    environment.HATCH_RUNTIME_MAX_HTTP_REQUESTS_GLOBAL,
-    64,
-    10_000
-  );
-  const maxHttpRequestsPerSource = runtimeCapacityLimit(
-    "HATCH_RUNTIME_MAX_HTTP_REQUESTS_PER_SOURCE",
-    environment.HATCH_RUNTIME_MAX_HTTP_REQUESTS_PER_SOURCE,
-    8,
-    1_024
-  );
   const httpHeadersTimeoutMs = runtimeDurationMs(
     "HATCH_RUNTIME_HTTP_HEADERS_TIMEOUT_MS",
     environment.HATCH_RUNTIME_HTTP_HEADERS_TIMEOUT_MS,
@@ -423,12 +400,9 @@ export async function createRuntimeServerFromEnvironment(
     connectionHeartbeatMs,
     connectionIdleTimeoutMs,
     serverToolTimeoutMs,
-    maxHttpRequestsGlobal,
-    maxHttpRequestsPerSource,
     httpHeadersTimeoutMs,
     httpRequestTimeoutMs,
     maxHttpResponseBytes,
-    trustedProxyPolicy: authTrustedProxyPolicyFromEnvironment(environment),
     enableLegacyHmacAuth: legacyHmacEnabled,
     legacyHmacSecret
   });
@@ -711,14 +685,6 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     : undefined;
   reconciliationInterval?.unref();
   const outputGuard = options.outputGuard ?? new PassThroughOutputGuard();
-  const httpRequestGate = new CapacityGate(
-    options.maxHttpRequestsGlobal ?? 64,
-    "maxHttpRequestsGlobal"
-  );
-  const httpRequestPerSourceGate = new KeyedCapacityGate(
-    options.maxHttpRequestsPerSource ?? 8,
-    "maxHttpRequestsPerSource"
-  );
   const httpRequestTimeoutMs = options.httpRequestTimeoutMs ?? 10_000;
   if (!Number.isSafeInteger(httpRequestTimeoutMs) || httpRequestTimeoutMs < 1) {
     throw new Error("httpRequestTimeoutMs must be a positive safe integer");
@@ -736,23 +702,6 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     throw new Error("maxHttpResponseBytes must be an integer of at least 1024");
   }
   const server = http.createServer((req, res) => {
-    const releaseGlobalRequest = httpRequestGate.tryAcquire();
-    if (!releaseGlobalRequest) {
-      writeJson(res, 503, {
-        error: { code: "http_busy", message: "The Runtime is already handling the maximum number of requests." }
-      });
-      return;
-    }
-    const source = authRequestSourceIp(req, options.trustedProxyPolicy);
-    const releaseSourceRequest = httpRequestPerSourceGate.tryAcquire(source);
-    if (!releaseSourceRequest) {
-      releaseGlobalRequest();
-      writeJson(res, 429, {
-        error: { code: "source_busy", message: "Too many requests are already in progress from this client." }
-      });
-      return;
-    }
-    const releaseRequest = combineCapacityReleases(releaseGlobalRequest, releaseSourceRequest);
     const requestAbortController = new AbortController();
     const abortDisconnectedRequest = () => {
       requestAbortController.abort(new Error("Runtime HTTP client disconnected"));
@@ -794,7 +743,6 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     }).finally(() => {
       clearTimeout(requestDeadline);
       req.off("aborted", abortDisconnectedRequest);
-      releaseRequest();
     });
   });
   server.headersTimeout = httpHeadersTimeoutMs;
