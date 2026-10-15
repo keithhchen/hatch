@@ -317,6 +317,7 @@ for (const scenario of ["invalid_resource", "execution_error", "unknown_tool"] a
     // resolution, Pi's registry, error handling and model loop are real paths.
     // An absent catalog entry stays unauthorized with or without activation.
     const args = { path: scenario === "execution_error" ? "reference.txt" : "skill://not-in-authorized-catalog/references/missing.md" };
+    const providerArgs = { ...args, activity_message: "Checking whether the requested reference is available" };
     const toolCallId = `classification-${scenario}`;
     const input = {
       type: "client.message", run_id: toolCallId, conversation_id: toolCallId,
@@ -358,7 +359,7 @@ for (const scenario of ["invalid_resource", "execution_error", "unknown_tool"] a
         id: toolCallId, object: "chat.completion.chunk", created: 1, model: "kimi-k2.6",
         choices: [{ index: 0, delta: first
           ? { role: "assistant", tool_calls: [{ index: 0, id: toolCallId, type: "function",
-            function: { name: toolName, arguments: JSON.stringify(args) } }] }
+            function: { name: toolName, arguments: JSON.stringify(providerArgs) } }] }
           : { role: "assistant", content: "The reference is unavailable; I can continue without it." }, finish_reason: null }]
       }, {
         id: toolCallId, object: "chat.completion.chunk", created: 1, model: "kimi-k2.6",
