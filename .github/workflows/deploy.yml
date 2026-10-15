@@ -261,8 +261,8 @@ jobs:
           docker network inspect hatch_internal >/dev/null
           df -h / /var/lib/docker || true
           df -i / /var/lib/docker || true
-          docker info --format 'server={{.ServerVersion}} storage={{.Driver}} root={{.DockerRootDir}}' || true
-          docker system df || true
+          timeout 15s docker info --format 'server={{.ServerVersion}} storage={{.Driver}} root={{.DockerRootDir}}' || true
+          timeout 15s docker system df || true
           docker image prune -f >/dev/null 2>&1 || true
           if test -f .release.env; then
             cp -f .release.env .release.env.previous
@@ -286,7 +286,7 @@ jobs:
               if timeout 1800s docker pull "$image"; then
                 return 0
               fi
-              docker system df || true
+              timeout 15s docker system df || true
               sleep $((attempt * 10))
             done
             echo "$label image pull timed out or failed." >&2
