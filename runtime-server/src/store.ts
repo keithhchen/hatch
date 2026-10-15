@@ -305,7 +305,7 @@ export class LocalRuntimeAuthority {
     this.database = db;
     // SQLite supplies crash-safe record framing and OS-managed writer locks.
     // The application owns only this append-only table; no snapshot dual write.
-    db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS commits (sequence INTEGER PRIMARY KEY, payload TEXT NOT NULL)");
+    db.exec("PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS commits (sequence INTEGER PRIMARY KEY, payload TEXT NOT NULL)");
     db.exec("BEGIN IMMEDIATE");
     try {
       if (!(db.prepare("SELECT 1 FROM commits LIMIT 1").get())) {
