@@ -399,7 +399,6 @@
 .web-chat__runtime-status { display: flex; align-items: baseline; gap: 8px; padding: 5px 0; color: #857465; font-size: 12px; line-height: 1.6; }
 .web-chat__activity-block { min-width: 0; margin: 7px 0; padding: 11px 13px; border: 1px solid var(--chat-border-soft); border-radius: 12px; background: rgba(243, 237, 227, .58); }
 .web-chat__activity-heading { display: flex; min-width: 0; align-items: center; gap: 8px; color: #59483a; cursor: pointer; font-size: 12px; list-style: none; }
-.web-chat__activity-heading--static { cursor: default; }
 .web-chat__activity-heading::-webkit-details-marker { display: none; }
 .web-chat__activity-heading > strong { min-width: 0; overflow-wrap: anywhere; font-weight: 620; }
 .web-chat__activity-heading > svg { width: 14px; height: 14px; flex: 0 0 auto; margin-left: auto; color: #87796c; transform: rotate(-90deg); transition: transform var(--chat-motion); }

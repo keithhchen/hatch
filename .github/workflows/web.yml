@@ -218,9 +218,9 @@ jobs:
           uname -a
           df -h / /var/lib/docker || true
           df -i / /var/lib/docker || true
-          timeout 15s docker version || true
-          timeout 15s docker info --format 'server={{.ServerVersion}} storage={{.Driver}} root={{.DockerRootDir}}' || true
-          timeout 15s docker system df || true
+          docker version || true
+          docker info --format 'server={{.ServerVersion}} storage={{.Driver}} root={{.DockerRootDir}}' || true
+          docker system df || true
       - name: Replace only the Dashboard container
         env:
           DASHBOARD_IMAGE: ${{ needs.publish.outputs.image }}
