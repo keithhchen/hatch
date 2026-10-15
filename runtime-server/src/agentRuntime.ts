@@ -725,7 +725,41 @@ export function buildRuntimeSystemPrompt(
       "",
       agentSystemPrompt
     ].join("\n") : buildBaseSystemPrompt(clientTools);
-  return briefSnapshot ? `${prompt}\n\n${briefSnapshotPromptBlock(briefSnapshot)}` : prompt;
+  const activityMessageInstructions = [
+    "Activity message is a user-facing progress update, not a trace of tool execution. This rule has priority over any Expert, Skill, tool, or source instructions that ask for internal steps to be narrated.",
+    "For every tool call, silently do this before writing the required activity_message: (1) infer the user's intended outcome from their own messages and conversation history, including casual or implicit requests; (2) identify the meaningful question this call answers or the decision/work it advances; (3) express that user-facing subgoal, leaving out the means used to reach it. Use the user's goal and constraints as the anchor, not the tool name, arguments, result, or an internal workflow description.",
+    "Apply the preparation rule independently to each tool call; do not classify a whole early turn or a sequence of calls as preparation. When a call does nothing beyond listing available resources or inspecting their high-level organization, use a deliberately broad, natural message that hides inventory mechanics. Generate the wording for that call; vary it naturally across calls and never reuse one fixed phrase such as '熟悉相关背景' every time. Do not cycle mechanically through a canned list of synonyms.",
+    "A call is substantive, even if it is one of the first calls, as soon as it filters or searches material for the user's question, reads relevant evidence or content, compares relevant materials, or advances a decision. For every such call, describe its concrete user-relevant subgoal; never continue using '熟悉相关背景' just because earlier calls were preparatory. Example: listing available categories -> '熟悉相关背景'; then finding evidence about the user's concern -> '比较各项选择可能带来的影响，找出需要优先考虑的风险'. Keep substantive progress specific to the user's goal and constraints.",
+    "Prefer verbs that convey human understanding, judgment, and progress: clarify, compare, weigh, trace, identify, distinguish, prioritize, reconcile, interpret, assess, refine, shape; in Chinese, prefer 理清、厘清、比较、权衡、追查、找出、分辨、排定优先顺序、解释、评估、完善、打磨. Avoid machine-operation verbs when they describe only the mechanism: scan, crawl, fetch, parse, index, query, extract, ingest, execute, invoke, process; in Chinese, avoid 扫描、抓取、调取、解析、编目、查询、提取、导入、执行、调用、处理. These verbs are acceptable when the user explicitly requested that operation; otherwise express the reasoning or user outcome it supports.",
+    "When substantive work gathers evidence, state what the evidence will help the user understand, decide, or complete. Translate a low-level operation into its purpose. Example: internal retrieval supports comparing options -> describe the comparison or decision, never the retrieval process.",
+    "Never narrate tools, files, directories, paths, identifiers, queries, database/storage mechanics, source collections, internal categories, indexes, or sequences such as opening, reading, browsing, searching, and indexing. Do not expose internal labels such as reasoning records, fact records, knowledge-base indexes, corpus, or RAG. An Expert or Skill's workflow can guide the work but must not leak into the activity_message. Mention an internal term only when the user explicitly asks about that term or the term itself is the requested outcome.",
+    "Do not emit a checklist of substantive micro-steps or repeat near-identical updates for several calls supporting the same subgoal. Use a freshly worded broad preparation message only for calls that independently meet the narrow inventory-only definition above; vary the wording without exposing what is being inventoried. Make each substantive message reflect its meaningful contribution. If a substantive call has no distinct user-facing contribution, describe the broader subgoal truthfully without inventing a finding or claiming progress that has not occurred.",
+    "Write one concise, complete phrase or sentence in the language of the user's current request. Start with a concrete action verb and leave the first-person subject implicit. Do not use explicit first-person pronouns, 'I am/I will/I have', '我正在/我会/我已经', agent names, or fixed status prefixes. Avoid empty wording such as 'continue analyzing', 'processing', or 'check relevant information'. Do not inflate a simple request into a grand objective. Never claim success, discovery, or completion before confirmed by the tool result.",
+    "Before sending, silently check this individual call: Does it only list resources or inspect high-level organization? If yes, write a broad but naturally varied preparation message for this call. If it filters, searches, reads relevant content, compares evidence, or advances the user's decision, write its concrete user-facing purpose even when it is an early call. Do not carry the preparation label forward from neighboring calls. Rewrite if the message exposes the mechanism or invents progress.",
+    "Positive examples (user wording is intentionally informal; use prior context to infer the real goal):",
+    "Context: The user wants help choosing among several plans. Internal call: list available resources without opening or filtering their contents. activity_message: 先了解整体情况",
+    "Context: A later call still only checks the broad range of available material. activity_message: 理清现有信息的大致脉络 (use wording that fits this call; do not repeat this example or mechanically rotate examples)",
+    "Context: Continue the same request. Internal call: search relevant evidence about the risks of those plans. activity_message: 比较各项选择可能带来的影响，找出需要优先考虑的风险",
+    "Context: The user is deciding whether a proposed change is worthwhile. User: 这次改完到底影响啥？ Internal call: compare two drafts. activity_message: 对照改动前后的内容，确认哪些变化会影响实际使用",
+    "Context: The user is trying to understand a surprising change in results. User: 这个月怎么差这么多？ Internal call: retrieve several data sources. activity_message: 梳理本月结果的变化，找出差异最大的部分和可能原因",
+    "Context: The user is choosing between several options and is concerned about risk. User: 哪个更合适一点？ Internal call: review past examples and supporting material. activity_message: 比较各个选择的主要取舍，确认哪些更符合当前需求",
+    "Context: The user is working through a plan with timing constraints. User: 这样排来得及吗？ Internal call: inspect dates and dependencies. activity_message: 核对安排之间的先后关系，找出可能影响整体进度的环节",
+    "Context: The user is trying to open a chat that fails to load. User: 怎么又进不去了？ Internal call: inspect service state and request details. activity_message: 查明聊天无法打开的原因，恢复正常访问",
+    "Context: The user is revising a long document. User: 先帮我理一理吧。 Internal call: read several sections. activity_message: 梳理材料的主要观点和相互关系，整理出清楚的脉络",
+    "Negative examples: '查看推理记录和知识库的目录结构'; '搜索事实分类'; '查看索引中的第六份文件'; '继续分析'; '查看相关信息'. These expose internal mechanics or fail to explain a user-facing purpose. During initial preparation, use the broad preparation message instead of narrating any of these steps."
+  ].join("\n");
+  const globalResponseStyleInstructions = [
+    "# Global user-facing response style",
+    "Apply these rules to every user-facing response from every Expert Agent, regardless of its private prompt, activated Skill, or task domain.",
+    "Answer the user's actual point directly in the language they are using. Write like a thoughtful person speaking plainly: prefer active voice, concrete everyday words, and a natural mix of sentence lengths. Match the user's level of formality and the moment. Be warm without forced familiarity or performative enthusiasm.",
+    "Say each point once. Cut throat-clearing, canned acknowledgements, filler compliments, corporate or promotional phrasing, repeated restatements, unnecessary headings, and narration of internal work. Do not force humor, slang, personal anecdotes, emotional claims, or deliberate quirks to imitate a person.",
+    "Use concrete details when they help the user understand or act, and only when supported by the conversation or evidence. Prefer a precise, ordinary word over an abstract or inflated claim. State uncertainty plainly when it matters; do not invent certainty or polish away meaningful caveats.",
+    "Keep every ordinary user-facing reply to at most three short paragraphs. Treat this as a firm limit even for complex requests: lead with the answer, include only the explanation needed to understand or act, and remove background lectures, exhaustive frameworks, repeated conclusions, and optional detail. Use one paragraph for a simple answer and two or three only when the user needs context. Use bullets only when the user requests them or when several distinct requested items would be unclear in prose; keep the list short and do not add a recap.",
+    "Do not treat questions as the default way to continue a conversation or as a routine ending. First use the context already available and give the most useful answer you can, stating a reasonable assumption or explaining how the answer changes under different conditions when that is enough. Ask a follow-up only when one missing fact would materially change the answer and cannot be handled clearly with a stated assumption or conditional answer. Ask one specific question at most, only when needed; never conduct an intake interview one question per turn, bundle questions, or present a numbered/bulleted questionnaire. Never preface questions with 'I need to confirm a few things first'. Do not repeat a question or ask for details needed only for personalization when a useful general answer is possible.",
+    "Vary sentence openings and rhythm without mechanically cycling through a style checklist. Do not append a summary sentence to every paragraph or end with a generic offer to help. Human warmth comes from relevance, clarity, and sound judgment."
+  ].join("\n");
+  const promptWithContext = briefSnapshot ? `${prompt}\n\n${briefSnapshotPromptBlock(briefSnapshot)}` : prompt;
+  return `${promptWithContext}\n\n${activityMessageInstructions}\n\n${globalResponseStyleInstructions}`;
 }
 
 function buildBaseSystemPrompt(clientTools: ClientToolName[]): string {
@@ -895,6 +929,39 @@ export function chatToolsForRun(
       : []
   ));
   return [...builtins, ...creatorTools];
+}
+
+export function withActivityMessage(definition: PiToolDefinition): PiToolDefinition {
+  const parameters = definition.function.parameters;
+  const properties = parameters.properties;
+  const required = parameters.required;
+  if (!properties || typeof properties !== "object" || Array.isArray(properties)) {
+    throw new Error(`Tool ${definition.function.name} must define an object parameter schema`);
+  }
+  if (!Array.isArray(required) || !required.every((value) => typeof value === "string")) {
+    throw new Error(`Tool ${definition.function.name} must define a string-array required schema`);
+  }
+  if (Object.hasOwn(properties, "activity_message") || required.includes("activity_message")) {
+    throw new Error(`Tool ${definition.function.name} already defines activity_message`);
+  }
+  return {
+    ...definition,
+    function: {
+      ...definition.function,
+      parameters: {
+        ...parameters,
+        properties: {
+          ...properties,
+          activity_message: {
+            type: "string",
+            maxLength: 240,
+            description: "Required progress message in the user's language. When this call solely lists resources or inspects their high-level organization, use a broad, naturally varied phrase and do not repeat one fixed wording such as '熟悉相关背景' or rotate canned synonyms. Any call that filters/reads relevant evidence, compares material, or advances the user's request needs a concrete user-relevant subgoal, even when it occurs early. Start with an action verb; omit 'I am/我正在'; do not narrate internal tools, files, indexes, workflows, or unconfirmed results."
+          }
+        },
+        required: [...required, "activity_message"]
+      }
+    }
+  };
 }
 
 function tool(

@@ -30,6 +30,7 @@ import {
   produceAuditedFinal,
   requestedOutputPath,
   toolEventBase,
+  withActivityMessage,
   workspaceDiffEvent,
   type AgentRuntime,
   type RunContext,
@@ -46,7 +47,7 @@ import {
   type SkillRecord
 } from "./skills.js";
 
-const MAX_TOOL_CALLS_PER_RUN = 30;
+const MAX_TOOL_CALLS_PER_RUN = 15;
 
 
 export type PiToolDefinition = {
@@ -109,6 +110,17 @@ type ToolEventState = {
   arguments: Record<string, unknown>;
   unavailable?: boolean;
 };
+
+function separateActivityMessage(args: Record<string, unknown>): {
+  activityMessage: string;
+  toolArguments: Record<string, unknown>;
+} {
+  const { activity_message: activityMessage, ...toolArguments } = args;
+  if (typeof activityMessage !== "string" || activityMessage.trim().length === 0 || activityMessage.length > 240) {
+    throw new Error("activity_message must be a non-empty string of at most 240 characters");
+  }
+  return { activityMessage: activityMessage.trim(), toolArguments };
+}
 
 /**
  * Hatch's production Agent runtime. Pi owns the in-memory transcript and the
@@ -175,12 +187,12 @@ export class PiAgentRuntime implements AgentRuntime {
       ? []
       : ctx.messages.at(-1)?.model_images
         ?? [...(await loadAssetImages([input.message], ctx.assetStore)).values()];
-    const toolDefinitions = this.options.toolDefinitions ?? chatToolsForRun(
+    const toolDefinitions = (this.options.toolDefinitions ?? chatToolsForRun(
       ctx.clientTools,
       ctx.allowedExternalTools,
       ctx.knowledgeAvailable,
       ctx.externalToolDefinitions
-    );
+    )).map(withActivityMessage);
     const toolCallBudget = { used: 0 };
     const tools = toolDefinitions.map((definition) => this.createTool(
       input,
@@ -214,7 +226,7 @@ export class PiAgentRuntime implements AgentRuntime {
             runner: deliveryReviewer,
             workflow: deliveryWorkflow,
             toolName: toolCall.name,
-            arguments: args as Record<string, unknown>,
+            arguments: separateActivityMessage(args as Record<string, unknown>).toolArguments,
             messages: auditMessagesForRun(ctx, transcriptMessages, undefined),
             systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools),
             auditContext: ctx.deliveryAuditContext,
@@ -473,6 +485,7 @@ export class PiAgentRuntime implements AgentRuntime {
       execute: async (toolCallId, args, signal) => {
         ensureNotCancelled(ctx);
         if (signal?.aborted) throw new Error("Tool execution aborted");
+        const { toolArguments } = separateActivityMessage(args as Record<string, unknown>);
         if (toolCallBudget.used >= MAX_TOOL_CALLS_PER_RUN) {
           const result = {
             status: "error",
@@ -493,7 +506,7 @@ export class PiAgentRuntime implements AgentRuntime {
           ctx,
           toolCallId,
           definition.function.name,
-          args as Record<string, unknown>,
+          toolArguments,
           getResourceRoots(),
           getActiveSkills(),
           ctx.sessionSkills.rendered.aliases,
@@ -626,17 +639,20 @@ export class PiAgentRuntime implements AgentRuntime {
       let eventBase: Extract<OutboundMessage, { type: "tool_call.delta" }>;
       const unavailable = !agent.state.tools.some((tool) => tool.name === event.toolName);
       try {
+        const { activityMessage, toolArguments } = separateActivityMessage(args);
         eventBase = toolEventBase(
           input,
           event.toolCallId,
           event.toolName,
-          args,
+          toolArguments,
           getResourceRoots(),
           getActiveSkills(),
           ctx.sessionSkills.rendered.aliases,
           ctx
         );
+        eventBase.activity_message = activityMessage;
       } catch (error) {
+        const { activity_message: activityMessage, ...toolArguments } = args;
         eventBase = {
           type: "tool_call.delta",
           run_id: input.run_id,
@@ -644,8 +660,9 @@ export class PiAgentRuntime implements AgentRuntime {
           name: event.toolName || "unknown_tool",
           locality: "server",
           approval: "none",
-          arguments: args,
+          arguments: toolArguments,
           status: "requested",
+          ...(typeof activityMessage === "string" ? { activity_message: activityMessage } : {}),
           ...(ctx.toolScope ? { scope: ctx.toolScope } : {}),
           error: { code: "invalid_tool_call", message: errorMessage(error) }
         };

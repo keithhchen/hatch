@@ -1,16 +1,9 @@
-import React, { Children, isValidElement, memo, useMemo } from "react";
+import React, { memo, useLayoutEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 
 const motionComponentCache = new Map();
-
-function textCharacterCount(children) {
-  return Children.toArray(children).reduce((count, child) => {
-    if (typeof child === "string" || typeof child === "number") return count + Array.from(String(child)).length;
-    return isValidElement(child) ? count + textCharacterCount(child.props.children) : count;
-  }, 0);
-}
 
 function getMotionComponent(element) {
   let component = motionComponentCache.get(element);
@@ -21,19 +14,33 @@ function getMotionComponent(element) {
   return component;
 }
 
-function ShimmerComponent({ children, as: Element = "p", className, duration = 2, spread = 2 }) {
+function ShimmerComponent({ children, as: Element = "p", className, speed = 43, spread = 40 }) {
   const MotionElement = getMotionComponent(Element);
-  const dynamicSpread = useMemo(() => textCharacterCount(children) * spread, [children, spread]);
+  const elementRef = useRef(null);
+  const [elementWidth, setElementWidth] = useState(0);
+
+  useLayoutEffect(() => {
+    const element = elementRef.current;
+    if (!element) return undefined;
+    const updateWidth = () => setElementWidth(element.getBoundingClientRect().width);
+    const observer = new ResizeObserver(updateWidth);
+    updateWidth();
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  const animationDuration = elementWidth > 0 ? elementWidth * 1.5 / speed : 100 * 1.5 / speed;
 
   return <MotionElement
+    ref={elementRef}
     animate={{ backgroundPosition: "0% center" }}
     className={twMerge(clsx("web-chat__shimmer", className))}
     initial={{ backgroundPosition: "100% center" }}
     style={{
-      "--spread": `${dynamicSpread}px`,
+      "--spread": `${spread}px`,
       backgroundImage: "var(--bg), linear-gradient(var(--chat-ink), var(--chat-ink))"
     }}
-    transition={{ duration, ease: "linear", repeat: Number.POSITIVE_INFINITY }}
+    transition={{ duration: animationDuration, ease: "linear", repeat: Number.POSITIVE_INFINITY }}
   >
     {children}
   </MotionElement>;

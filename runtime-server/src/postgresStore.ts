@@ -643,6 +643,7 @@ export class PostgresStore extends RuntimeStore {
           name: event.name,
           arguments: event.arguments,
           status: event.status,
+          activity_message: event.activity_message ?? existing?.activity_message,
           locality: event.locality ?? existing?.locality,
           approval: event.approval ?? existing?.approval,
           scope: event.scope ?? existing?.scope,

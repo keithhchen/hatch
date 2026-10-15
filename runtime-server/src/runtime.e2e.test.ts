@@ -1038,9 +1038,9 @@ test("tool result requires a matching payload for its status", () => {
   }), /error/);
 });
 
-test("skills expose official catalog metadata only", async () => {
+test("skills expose catalog metadata only", async () => {
   const catalog = await listSkills();
-  const skill = catalog.find((item) => item.name === "repo-assistant");
+  const skill = catalog.find((item) => item.name === "documents");
   assert.ok(skill);
   assert.equal(Object.keys(skill).sort().join(","), "description,id,name,path");
 });
@@ -1488,7 +1488,7 @@ test("server discovers vendored OpenAI-format skills without loading their bodie
   const records = await discoverSkills(skillsRoot());
   const byName = new Map(records.map((skill) => [skill.name, skill]));
 
-  for (const name of ["pdf", "security-best-practices", "gh-fix-ci"]) {
+  for (const name of ["pdf"]) {
     const skill = byName.get(name);
     assert.ok(skill, `expected official OpenAI skill ${name} to be discovered`);
     assert.ok(skill.path.endsWith(`${path.sep}SKILL.md`));
@@ -1500,17 +1500,13 @@ test("server discovers vendored OpenAI-format skills without loading their bodie
 
   const catalog = await listSkills(skillsRoot());
   assert.deepEqual(
-    catalog.filter((skill) => ["pdf", "security-best-practices", "gh-fix-ci"].includes(skill.name)).map((skill) => skill.name).sort(),
-    ["gh-fix-ci", "pdf", "security-best-practices"]
+    catalog.filter((skill) => ["pdf"].includes(skill.name)).map((skill) => skill.name).sort(),
+    ["pdf"]
   );
 
   const { section } = renderSkillsSection(records, { prompt: "Review a PDF and inspect code security." });
   assert.match(section, /- pdf: /);
-  assert.match(section, /- security-best-practices: /);
-  assert.match(section, /- gh-fix-ci: /);
   assert.doesNotMatch(section, /# PDF Skill/);
-  assert.doesNotMatch(section, /# Security Best Practices/);
-  assert.doesNotMatch(section, /# GitHub Fix CI/);
 });
 
 test("skill policy products restrict model-visible discovery to the current product", async () => {
@@ -1892,12 +1888,10 @@ test("skills section renders Codex-style progressive disclosure without SKILL.md
   const { section, report } = renderSkillsSection(catalog, { prompt: "Find Hatch." });
 
   assert.match(section, /## Skills/);
-  assert.match(section, /- repo-assistant: Inspect a local workspace through brokered filesystem tools while all model reasoning runs on the server\./);
-  assert.match(section, /- review-contract: /);
+  assert.match(section, /- documents: Read, create, edit, validate, convert, and visually review Word documents and DOCX files/);
   assert.match(section, /call the registered `Skill` function tool/);
   assert.doesNotMatch(section, /\(file: .*SKILL\.md\)/);
-  assert.doesNotMatch(section, /# Repo Assistant/);
-  assert.doesNotMatch(section, /# \/review-contract/);
+  assert.doesNotMatch(section, /# Documents Skill/);
   assert.ok(report.included_count >= 2);
 });
 
@@ -2200,11 +2194,11 @@ test("multiple compaction checkpoints replay from the latest replacement history
 
 test("skill resources can be read by catalog path and cannot escape the skills root", async () => {
   const catalog = await listSkills();
-  const skill = catalog.find((item) => item.name === "repo-assistant");
+  const skill = catalog.find((item) => item.name === "documents");
   assert.ok(skill);
 
   const content = await readSkillResourceByPath(skill.path);
-  assert.match(content, /name: repo-assistant/);
+  assert.match(content, /name: documents/);
   await assert.rejects(() => readSkillResourceByPath(path.join(path.dirname(skill.path), "..", "..", "package.json")), /escapes skills root/);
 });
 
@@ -2700,7 +2694,7 @@ async function createMockChatCompletionsServer(): Promise<{
         && request.messages.some((message: Record<string, unknown>) => message.role === "tool");
 
       if (!hasToolMessage) {
-        const skillCatalog = runtimeContextContent(request, /repo-assistant/);
+        const skillCatalog = runtimeContextContent(request, /documents/);
         const skillPath = skillCatalog.match(/\(file: ([^)]+\/SKILL\.md)\)/)?.[1];
         assert.ok(skillPath, "mock runtime expected a SKILL.md path in the skills section");
         writeSse(res, [
@@ -3095,7 +3089,7 @@ async function createSkillRetentionChatCompletionsServer(): Promise<{
         && request.messages.some((message: Record<string, unknown>) => message.role === "tool");
 
       if (requests.length === 1) {
-        const skillCatalog = runtimeContextContent(request, /repo-assistant/);
+        const skillCatalog = runtimeContextContent(request, /documents/);
         const skillPath = skillCatalog.match(/\(file: ([^)]+\/SKILL\.md)\)/)?.[1];
         assert.ok(skillPath, "mock runtime expected a SKILL.md path in the skills section");
         writeSse(res, [
@@ -3132,7 +3126,7 @@ async function createSkillRetentionChatCompletionsServer(): Promise<{
         assert.ok(hasToolMessage);
         assert.ok(request.messages.some((message: Record<string, unknown>) => (
           message.role === "tool"
-          && String(message.content ?? "").includes("# Repo Assistant")
+          && String(message.content ?? "").includes("# Documents Skill")
         )));
         writeSse(res, [
           {
@@ -3151,8 +3145,8 @@ async function createSkillRetentionChatCompletionsServer(): Promise<{
 
       assert.ok(!runtimeContexts(request).some((content) => (
         content.includes("<skill>")
-        && content.includes("<name>repo-assistant</name>")
-        && content.includes("# Repo Assistant")
+        && content.includes("<name>documents</name>")
+        && content.includes("# Documents Skill")
       )));
       writeSse(res, [
         {

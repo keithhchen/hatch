@@ -9,21 +9,9 @@ context.
 Source: https://github.com/openai/skills/tree/main/skills/.curated
 
 - `pdf`
-- `security-best-practices`
-- `gh-fix-ci`
 
-These directories retain the upstream `SKILL.md`, `agents/openai.yaml`,
-licenses, and bundled references/assets/scripts.
-
-## Legal Agent Skills
-
-Source: https://github.com/anthropics/knowledge-work-plugins/tree/main/legal/skills
-
-- `brief`
-- `compliance-check`
-- `legal-risk-assessment`
-- `triage-nda`
-- `review-contract`
+The directory retains the upstream `SKILL.md`, `agents/openai.yaml`, license,
+and bundled assets/scripts.
 
 ## Hatch first-party document Skills
 

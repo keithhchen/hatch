@@ -443,6 +443,7 @@ export type ToolEvent = {
   locality: "server" | "client";
   approval: "none" | "auto" | "ask";
   status: "requested" | "completed" | "failed" | "cancelled";
+  activity_message?: string;
   arguments?: Record<string, unknown>;
   result?: Record<string, unknown>;
   error?: {

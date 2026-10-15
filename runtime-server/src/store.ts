@@ -77,6 +77,7 @@ export type VisibleConversationToolCall = {
   name: string;
   arguments: Record<string, unknown>;
   status: "requested" | "completed" | "failed" | "cancelled";
+  activity_message?: string;
   locality?: "server" | "client";
   approval?: "none" | "auto" | "ask";
   scope?: "main" | "skill_run";
@@ -162,6 +163,7 @@ export type StoreEvent =
       name: string;
       arguments: Record<string, unknown>;
       status: "requested" | "completed" | "failed" | "cancelled";
+      activity_message?: string;
       locality?: "server" | "client";
       approval?: "none" | "auto" | "ask";
       scope?: "main" | "skill_run";
@@ -600,6 +602,7 @@ export class RuntimeStore {
           name: event.name,
           arguments: event.arguments,
           status: event.status,
+          activity_message: event.activity_message ?? existing?.activity_message,
           locality: event.locality ?? existing?.locality,
           approval: event.approval ?? existing?.approval,
           scope: event.scope ?? existing?.scope,

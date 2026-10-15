@@ -80,6 +80,7 @@ import {
   type AgentCorpusResolverLike
 } from "./agentCorpus.js";
 import { RuntimeReleaseAgentCorpusResolver } from "./runtimeCorpusResolver.js";
+import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
 import {
   discoverSkills,
   includeSkillInstructions,
@@ -384,6 +385,7 @@ export async function createRuntimeServerFromEnvironment(
         registryUrl,
         serviceToken: runtimeRegistryToken,
         corpusRoot: runtimeCorpusRoot || path.join(runtimeDataDir, "corpora"),
+        objectStore: objectStoreFromEnvironment(environment),
         timeoutMs: registryAuthorizationTimeoutMs(environment)
       })
       : runtimeCorpusRoot
@@ -3624,6 +3626,7 @@ async function persistServerToolCallEvent(
     name: event.name,
     arguments: event.arguments ?? {},
     status: event.status,
+    activity_message: event.activity_message,
     locality: event.locality,
     approval: event.approval,
     ...(event.result ? { result: event.result } : {}),

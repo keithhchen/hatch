@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { readFile } from "node:fs/promises";
 import { z } from "zod";
 import { readBoundedJsonObject } from "./boundedResponse.js";
 import {
@@ -13,6 +14,7 @@ import {
 } from "./agentCorpus.js";
 import { requireUuidV4 } from "./identity.js";
 import { runtimeCorpusManifestSchema, type RuntimeCorpusManifest } from "./runtimeReleaseContract.js";
+import type { ArtifactObjectStore } from "./creatorLearning/objectStore.js";
 
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 
@@ -38,23 +40,27 @@ export type RuntimeReleaseAgentCorpusResolverOptions = {
   serviceToken: string;
   /** Shared, publish-time materialized Runtime Corpus directory. */
   corpusRoot: string;
+  /** Reads the current published release when it is absent from the local Runtime volume. */
+  objectStore?: ArtifactObjectStore;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
 };
 
 /**
- * Resolves the live Registry pointer and reads the already-published Corpus
- * from the shared Runtime volume.
+ * Resolves the live Registry pointer and reads the published Corpus from the
+ * shared Runtime volume. When a local release is absent, it reads only that
+ * release's immutable assets from the configured Object Store.
  *
  * Publish owns the expensive work: OSS -> shared disk, OSS -> Qdrant, then
- * Postgres live pointer. Runtime never downloads Corpus assets or creates a
- * Knowledge index while serving a request.
+ * Postgres live pointer. Runtime reads the live pointer from Registry and
+ * fetches missing immutable files from OSS without scanning the bucket.
  */
 export class RuntimeReleaseAgentCorpusResolver implements AgentCorpusResolverLike {
   private readonly fetchImpl: typeof fetch;
   private readonly registryUrl: string;
   private readonly serviceToken: string;
   private readonly corpusRoot: string;
+  private readonly objectStore?: ArtifactObjectStore;
   private readonly timeoutMs: number;
 
   constructor(options: RuntimeReleaseAgentCorpusResolverOptions) {
@@ -66,6 +72,7 @@ export class RuntimeReleaseAgentCorpusResolver implements AgentCorpusResolverLik
     this.registryUrl = registryUrl;
     this.serviceToken = serviceToken;
     this.corpusRoot = path.resolve(options.corpusRoot);
+    this.objectStore = options.objectStore;
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.timeoutMs = positiveTimeout(options.timeoutMs ?? 30_000);
   }
@@ -95,6 +102,17 @@ export class RuntimeReleaseAgentCorpusResolver implements AgentCorpusResolverLik
 
     const releaseDirectory = releaseDirectoryName(release.release_digest);
     const root = containedCorpusPath(this.corpusRoot, agentId, releaseDirectory);
+    if (this.objectStore && !(await fileExists(path.join(root, "runtime/manifest.json")))) {
+      await materializePublishedRuntimeRelease({
+        objectStore: this.objectStore,
+        root,
+        releaseRef: release.release_ref,
+        manifestRef: response.runtime_manifest_ref,
+        creatorId,
+        productId: agentId,
+        corpusDigest: release.corpus_digest
+      });
+    }
     let corpus: AgentCorpus;
     try {
       const manifestBytes = await readFile(path.join(root, "runtime", "manifest.json"), signal ? { signal } : undefined);
@@ -169,6 +187,10 @@ function releaseDirectoryName(releaseDigest: string): string {
 }
 
 function runtimeManifestToAgentCorpus(manifest: RuntimeCorpusManifest): AgentCorpus {
+  const rootPath = (value: string): string => {
+    if (!value.startsWith("runtime/")) throw new Error(`Runtime asset path is invalid: ${value}`);
+    return value.slice("runtime/".length);
+  };
   return AgentCorpusSchema.parse({
     contract_version: "1",
     creator: { id: manifest.creator.id, name: "Expert" },
@@ -183,7 +205,7 @@ function runtimeManifestToAgentCorpus(manifest: RuntimeCorpusManifest): AgentCor
     instructions: {
       system: {
         id: "system",
-        path: manifest.system_ref.path,
+        path: rootPath(manifest.system_ref.path),
         sha256: manifest.system_ref.sha256,
         description: "Expert system instructions"
       }
@@ -194,7 +216,7 @@ function runtimeManifestToAgentCorpus(manifest: RuntimeCorpusManifest): AgentCor
       when_to_use: skill.description,
       instruction: {
         id: `skill-${skill.id}`,
-        path: skill.ref.path,
+        path: rootPath(skill.ref.path),
         sha256: skill.ref.sha256,
         description: skill.description
       },
@@ -202,7 +224,7 @@ function runtimeManifestToAgentCorpus(manifest: RuntimeCorpusManifest): AgentCor
         kind: reference.kind,
         asset: {
           id: `ref-${skill.id}-${reference.id}`,
-          path: reference.ref.path,
+          path: rootPath(reference.ref.path),
           sha256: reference.ref.sha256,
           description: `${skill.name} reference`
         }
@@ -212,7 +234,7 @@ function runtimeManifestToAgentCorpus(manifest: RuntimeCorpusManifest): AgentCor
     knowledge: {
       documents: manifest.knowledge.map((document) => ({
         id: document.id,
-        path: document.ref.path,
+        path: rootPath(document.ref.path),
         sha256: document.ref.sha256,
         retrieval_only: true,
         title: document.title
@@ -236,6 +258,76 @@ async function verifyRuntimeManifestAssets(root: string, corpus: AgentCorpus, si
   for (const asset of assets) {
     signal?.throwIfAborted();
     await readCorpusAsset(root, asset, signal);
+  }
+}
+
+async function materializePublishedRuntimeRelease(input: {
+  objectStore: ArtifactObjectStore;
+  root: string;
+  releaseRef: string;
+  manifestRef: string;
+  creatorId: string;
+  productId: string;
+  corpusDigest: string;
+}): Promise<void> {
+  const expectedReleaseRef = `registry/${input.productId}/releases/${path.basename(input.root)}`;
+  if (input.releaseRef !== expectedReleaseRef || input.manifestRef !== `${expectedReleaseRef}/runtime/manifest.json`) {
+    throw new Error("Registry release references are not canonical");
+  }
+  await mkdir(input.root, { recursive: true });
+  const manifestBytes = await input.objectStore.get(input.manifestRef);
+  if (manifestBytes.byteLength > 1_048_576) throw new Error("Runtime Corpus manifest is too large");
+  const manifest = runtimeCorpusManifestSchema.parse(JSON.parse(manifestBytes.toString("utf8")));
+  if (manifest.creator.id !== input.creatorId || manifest.product.id !== input.productId || manifest.corpus_digest !== input.corpusDigest) {
+    throw new Error("Runtime manifest binding does not match the Registry release");
+  }
+  const corpus = runtimeManifestToAgentCorpus(manifest);
+  const assets = [
+    manifest.system_ref,
+    ...manifest.skills.flatMap((skill) => [skill.ref, ...skill.references.map((reference) => reference.ref)]),
+    ...manifest.knowledge.map((document) => document.ref)
+  ];
+  for (const asset of assets) {
+    const relativeRuntimePath = safeRuntimeAssetPath(asset.path);
+    const bytes = await input.objectStore.get(`${input.releaseRef}/${relativeRuntimePath}`);
+    const actualDigest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+    if (actualDigest !== asset.sha256) throw new Error(`Published Runtime asset digest mismatch: ${relativeRuntimePath}`);
+    await writeImmutableLocalFile(input.root, relativeRuntimePath.slice("runtime/".length), bytes);
+    await writeImmutableLocalFile(input.root, relativeRuntimePath, bytes);
+  }
+  const agentManifest = Object.fromEntries(Object.entries(corpus).filter(([key]) => key !== "agent_id"));
+  await writeImmutableLocalFile(input.root, "agent.json", Buffer.from(JSON.stringify(agentManifest, null, 2), "utf8"));
+  await writeImmutableLocalFile(input.root, "runtime/manifest.json", manifestBytes);
+}
+
+async function writeImmutableLocalFile(root: string, relativePath: string, bytes: Buffer): Promise<void> {
+  const destination = path.resolve(root, relativePath);
+  if (!destination.startsWith(`${path.resolve(root)}${path.sep}`)) throw new Error("Runtime asset path escapes its release directory");
+  await mkdir(path.dirname(destination), { recursive: true });
+  try {
+    await writeFile(destination, bytes, { flag: "wx" });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    const existing = await readFile(destination);
+    if (!existing.equals(bytes)) throw new Error(`Runtime release already contains different bytes: ${relativePath}`);
+  }
+}
+
+function safeRuntimeAssetPath(value: string): string {
+  const normalized = value.replaceAll("\\", "/");
+  if (!normalized.startsWith("runtime/") || normalized.split("/").some((part) => !part || part === "." || part === "..")) {
+    throw new Error(`Runtime asset path is invalid: ${value}`);
+  }
+  return normalized;
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await readFile(filePath);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
   }
 }
 

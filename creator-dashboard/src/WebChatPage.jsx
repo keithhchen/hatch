@@ -150,7 +150,7 @@ function WebChatActivityModal({ entries, isLastItem, client, conversationId, loc
         <button type="button" aria-label={t("close")} onClick={() => setOpen(false)}><X aria-hidden="true" /></button>
       </header>
       {hasOpened ? <div className="web-chat__activity-modal-items">
-        {entries.map(activity => <WebChatActivityBlock key={activity.id} entry={activity} client={client} conversationId={conversationId} locale={locale} t={t} />)}
+        {entries.map(activity => <WebChatActivityBlock key={activity.id} entry={activity} client={client} conversationId={conversationId} locale={locale} t={t} expandable={false} />)}
       </div> : null}
     </dialog>
   </>;
@@ -168,15 +168,21 @@ const activityPresentations = Object.freeze({
       cancelled: "toolCancelledTitle"
     };
     return {
-      title: t(titleKeys[entry.status] ?? "toolRunningTitle", { name: entry.title })
+      title: entry.content.activityMessage?.trim()
+        || t(titleKeys[entry.status] ?? "toolRunningTitle", { name: entry.title })
     };
   }
 });
 
-function WebChatActivityBlock({ entry, client, conversationId, locale, t }) {
+function WebChatActivityBlock({ entry, client, conversationId, locale, t, expandable = true }) {
   const present = activityPresentations[entry.kind];
   if (!present) throw new Error(`Unsupported Web Chat activity kind: ${entry.kind}`);
   const presentation = present(entry, { locale, t });
+  if (!expandable) return <div className="web-chat__activity-block">
+    <div className="web-chat__activity-heading web-chat__activity-heading--static">
+      <strong>{presentation.title}</strong>
+    </div>
+  </div>;
   return <details className="web-chat__activity-block">
     <summary className="web-chat__activity-heading">
       <strong>{presentation.title}</strong>
