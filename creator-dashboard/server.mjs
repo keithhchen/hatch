@@ -510,7 +510,7 @@ export async function createDashboardApp(options = {}) {
             && (!registryDeploymentServiceToken || !commerceRuntimeServiceToken)) {
             throw new Error("Dashboard service credentials are not configured");
           }
-          await ledger.refresh?.();
+          await ledger.ready?.();
           await portalState.ready?.();
           await telemetry.ready?.();
           const registryHealth = await fetchImpl(new URL("/readyz", registryUrl), {

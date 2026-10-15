@@ -291,6 +291,11 @@ export class PostgresCommerceLedger {
     return this.#readModelSequence;
   }
 
+  async ready() {
+    await this.#pool.query("SELECT 1");
+    return true;
+  }
+
   async refresh() {
     return this.#enqueueWrite(async () => {
       this.#assertOpen();

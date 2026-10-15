@@ -55,6 +55,17 @@ test("Postgres ledger hydrates and atomically writes events with their outbox re
   assert.equal(pool.createdTables.has("commerce_read_model_state"), true);
 });
 
+test("Postgres ledger readiness checks the connection without replaying events", async () => {
+  const pool = new FakePool();
+  const ledger = await deterministicLedger(pool);
+  ledger.refresh = () => {
+    throw new Error("readiness should not rebuild commerce read models");
+  };
+
+  assert.equal(await ledger.ready(), true);
+  assert.equal(pool.readinessChecks, 1);
+});
+
 test("read-time migration preserves retired Offer history without reopening Offer writes", async () => {
   const pool = new FakePool();
   const offerPayload = {
@@ -399,6 +410,7 @@ class FakePool {
   constructor() {
     this.database = emptyDatabase();
     this.createdTables = new Set();
+    this.readinessChecks = 0;
     this.failNextOutboxInsert = false;
     this.failNextReadModelInsert = false;
     this.endCalls = 0;
@@ -446,6 +458,10 @@ class FakeClient {
 
 function runQuery(pool, database, sql, parameters) {
   const command = normalizeSql(sql);
+  if (command === "SELECT 1") {
+    pool.readinessChecks += 1;
+    return result([{ "?column?": 1 }]);
+  }
   if (command.startsWith("CREATE TABLE IF NOT EXISTS")) {
     const match = command.match(/^CREATE TABLE IF NOT EXISTS ([A-Z_]+)/);
     if (match) pool.createdTables.add(match[1].toLowerCase());
