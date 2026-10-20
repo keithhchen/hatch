@@ -162,7 +162,7 @@ export type LandingCopy = typeof zh;
 
 const en: LandingCopy = {
   nav: { story: "How it takes clients", learn: "How it learns you", pricing: "Pricing", faq: "FAQ", login: "Log in", try: "Try it free" },
-  heroEyebrow: "Private intelligence for experts",
+  heroEyebrow: "Private Intelligence for Experts",
   heroTitleA: ["Too many ", "?"] as [string, string],
   heroWords: ["DMs", "inquiries", "clients", "orders", "deliverables"],
   heroTitleB: "Hand them to your AI persona.",
