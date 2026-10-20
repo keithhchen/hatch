@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowDown, RotateCcw } from "lucide-react";
-import { HatchBrand } from "@hatch/ui";
+import { ArrowDown, ArrowRight, RotateCcw } from "lucide-react";
+import { WebBrand } from "./WebBrand.jsx";
 import { DESKTOP_DOWNLOAD_BASE_URL, DESKTOP_DOWNLOAD_TARGETS, DESKTOP_DOWNLOAD_TARGET_ORDER, desktopDownloadUrl, detectDownloadTargetAsync } from "./downloadPresentation.js";
 import { downloadCopy } from "./downloadI18n.js";
 import { useLocale } from "./locale.jsx";
@@ -33,19 +33,33 @@ export function DownloadPage() {
   return (
     <div className="download-page">
       <header className="download-page__header">
-        <HatchBrand as="a" className="download-page__brand" href="/explore" aria-label={copy.homeLabel} />
+        <WebBrand className="download-page__brand" href="/explore" aria-label={copy.homeLabel} />
         <LanguageSwitcher className="download-page__language" />
       </header>
       <main className="download-page__main">
-        <h1>{copy.title}</h1>
-        <p className="download-page__device" role="status">{deviceMessage(copy, detectedTarget, detectionReady)}</p>
-        {!hasDownloads ? <UnavailableDownloadState copy={copy} /> : (
-          <div className="download-page__list" aria-label={copy.downloadsLabel}>
-            {orderedTargets(targets, detectedTarget).map((target) => (
-              <DownloadRow key={target.key} target={target} copy={copy} recommended={target.key === detectedTarget} />
-            ))}
+        <section className="download-page__copy">
+          <span className="web-pill">{copy.pill}</span>
+          <h1>{copy.title}</h1>
+          <p className="download-page__lead">{copy.lead}</p>
+          <div className="download-page__card web-card">
+            {hasDownloads ? <p className="download-page__device" role="status">{deviceMessage(copy, detectedTarget, detectionReady)}</p> : null}
+            {!hasDownloads ? <UnavailableDownloadState copy={copy} /> : (
+              <div className="download-page__list" aria-label={copy.downloadsLabel}>
+                {orderedTargets(targets, detectedTarget).map((target) => (
+                  <DownloadRow key={target.key} target={target} copy={copy} recommended={target.key === detectedTarget} />
+                ))}
+              </div>
+            )}
           </div>
-        )}
+          <a className="download-page__web" href="/library">
+            <span><strong>{copy.webTitle}</strong><small>{copy.webBody}</small></span>
+            <em>{copy.webAction}<ArrowRight aria-hidden="true" /></em>
+          </a>
+        </section>
+        <figure className="download-page__visual">
+          <img src="/assets/web/photos/trust.jpg" alt="" />
+          <figcaption>{copy.caption}</figcaption>
+        </figure>
       </main>
     </div>
   );
@@ -81,7 +95,10 @@ function DownloadRow({ target, copy, recommended }) {
 function UnavailableDownloadState({ copy }) {
   return (
     <div className="download-page__unavailable" role="status">
-      <span>{copy.unavailable}</span>
+      <div>
+        <strong>{copy.unavailable}</strong>
+        <p>{copy.unavailableBody}</p>
+      </div>
       <button type="button" onClick={() => window.location.reload()}><RotateCcw aria-hidden="true" /> {copy.tryAgain}</button>
     </div>
   );

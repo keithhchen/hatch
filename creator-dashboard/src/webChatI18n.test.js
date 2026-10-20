@@ -16,6 +16,8 @@ test("Web Chat translates interpolated copy and known client errors", () => {
   assert.equal(webChatT("ja", "subscribeToExpertProduct", { name: "Maya" }), "Mayaの製品を購読する");
   assert.equal(webChatErrorText({ code: "web_local_tool_unavailable" }, "en"), "This browser cannot run local tools.");
   assert.equal(webChatErrorText({ code: "imageCountLimit" }, "zh"), "每条消息最多添加 8 张图片。");
+  assert.equal(webChatT("ja", "expertAi", { name: "Maya" }), "MayaのAI");
+  assert.equal(webChatErrorText({ code: "agent_unavailable", message: "The published Agent could not be found." }, "en"), "This expert's AI isn't available right now. It may not be published yet, or it's paused.");
 });
 
 test("Web Chat preserves server-owned error messages", () => {

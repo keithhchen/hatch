@@ -1,22 +1,35 @@
+/* Segmented pill, matching the landing language select. */
 .hatch-language-switcher {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 7px;
-  color: inherit;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--web-rule, #e8e2d4);
+  border-radius: 999px;
+  background: var(--web-card, #fffdf8);
+  color: var(--web-muted, #6b6455);
   font: inherit;
+  font-size: var(--hatch-type-ui);
 }
 
+.hatch-language-switcher > span { display: none; }
+
 .hatch-language-switcher button {
+  min-height: 32px;
   border: 0;
-  padding: 6px 2px;
+  padding: 0 12px;
+  border-radius: 999px;
   background: transparent;
   color: inherit;
   font: inherit;
-  opacity: .58;
   cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
 }
 
-.hatch-language-switcher button:hover,
+.hatch-language-switcher button:hover { color: var(--web-ink, #17150f); }
+
 .hatch-language-switcher button.active {
-  opacity: 1;
+  background: var(--web-yolk-soft, #fff3cc);
+  color: var(--web-ink, #17150f);
+  font-weight: 700;
 }

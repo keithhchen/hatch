@@ -598,7 +598,7 @@
   font-size: .75rem;
   font-weight: 700;
   letter-spacing: .12em;
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .cpv2-review-label {

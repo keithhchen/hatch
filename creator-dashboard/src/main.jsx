@@ -1,12 +1,15 @@
 import React, { Suspense, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "@hatch/ui/theme.css";
-import { Button, HatchBrand, HatchUIProvider, UnavailableState } from "@hatch/ui";
+import { Button, HatchUIProvider, UnavailableState } from "@hatch/ui";
 import { LocaleProvider, useLocale } from "./locale.jsx";
 import { buyerT } from "./buyerI18n.js";
 import { dashboardRequest } from "./data.js";
 import { WebChatRoute } from "./webChatRoute.js";
+import { WebChatRoleGate } from "./webChatGate.jsx";
+import { WebBrand } from "./WebBrand.jsx";
 import "./styles.css";
+import "./webTheme.css";
 
 const CREATOR_ROOT = "/studio";
 const BuyerPortalV2 = React.lazy(() => import("./BuyerPortalV2.jsx").then(({ BuyerPortalV2: Component }) => ({ default: Component })));
@@ -166,7 +169,7 @@ function App() {
     if (sessionStatus !== "authenticated") {
       return <RouteRedirect to={`/sign-in?returnTo=${encodeURIComponent(location.href)}`} navigate={location.navigate} />;
     }
-    if (profile?.role !== "user") return <RoleBoundary navigate={location.navigate} />;
+    if (profile?.role !== "user") return <WebChatRoleGate navigate={location.navigate} onSignOut={signOutFromChat} />;
     return <Suspense fallback={<AppLoading />}><WebChatPage productId={chatRoute.productId} conversationId={chatRoute.conversationId} request={dashboardRequest} navigate={location.navigate} profile={profile} onSignOut={signOutFromChat} /></Suspense>;
   }
 
@@ -246,7 +249,7 @@ function RouteRedirect({ to, navigate }) {
 
 function AppLoading() {
   const { locale } = useLocale();
-  return <main className="loading-page" aria-busy="true"><HatchBrand className="loading-brand" /><p>{buyerT(locale, "Expert agents that work.")}</p></main>;
+  return <main className="loading-page" aria-busy="true"><WebBrand as="span" className="loading-brand" /><p>{buyerT(locale, "Expert agents that work.")}</p></main>;
 }
 
 function RoleBoundary({ navigate, onCreateCreator }) {
@@ -254,7 +257,7 @@ function RoleBoundary({ navigate, onCreateCreator }) {
   const t = (key) => buyerT(locale, key);
   return (
     <main className="loading-page">
-      <HatchBrand className="loading-brand" />
+      <WebBrand as="span" className="loading-brand" />
       <h1>{t(onCreateCreator ? "Hatch Expert access is required." : "A Hatch account is required.")}</h1>
       <p>{t(onCreateCreator ? "Create a Hatch Expert account to work on your products in Studio." : "Use a Hatch account to open this Agent conversation.")}</p>
       {onCreateCreator ? <Button type="button" onClick={() => void onCreateCreator()}>{t("Create your Hatch Expert account")}</Button> : null}

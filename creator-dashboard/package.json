@@ -19,6 +19,8 @@
     "@emotion/cache": "^11.14.0",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
+    "@fontsource-variable/dm-sans": "^5.3.0",
+    "@fontsource/instrument-serif": "^5.3.0",
     "@mui/icons-material": "^9.4.0",
     "@mui/material": "^9.4.0",
     "@mui/x-chat": "^9.0.0-alpha.18",
@@ -35,7 +37,6 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
-    "@fontsource/dm-mono": "^5.3.0",
     "@hatch/ui": "file:../packages/ui",
     "@playwright/test": "^1.62.1",
     "@storybook/addon-a11y": "^10.5.7",

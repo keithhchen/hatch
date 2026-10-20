@@ -40,32 +40,25 @@ test('Factory navigation is URL-controlled down to the Agent page', async () => 
   const portal = await readFile(new URL('./CreatorPortalV2.jsx', import.meta.url), 'utf8');
   assert.match(source, /navigate\(creatorFactoryPath\(productId, nextStage, nextAgent\)\)/);
   assert.match(source, /const stage = section \?\? null/);
-  assert.match(source, /const selected = agent \?\? null/);
+  assert.match(source, /const selected = agent \?\? \(stage \? FIRST_PAGE\[stage\] : null\)/);
   assert.doesNotMatch(source, /setStage\(|setSelected\(/);
   assert.match(portal, /section=\{route\.factorySection\}/);
   assert.match(portal, /agent=\{route\.factoryAgent\}/);
 });
 
-test('Factory overview removes duplicate chrome without removing real navigation', async () => {
+test('Factory overview is a guided path, not an admin tree', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
-  assert.doesNotMatch(source, /<Avatar[^>]*>F<\/Avatar>/);
-  assert.doesNotMatch(source, /<Chip size="small" label=\{t\("factory"\)\} variant="outlined"/);
-  assert.doesNotMatch(source, /<Typography variant="overline" color="primary\.main"[^>]*>\{t\("factory"\)\}<\/Typography>/);
-  assert.doesNotMatch(source, /<Typography variant="overline" color="text\.secondary"[^>]*>\{t\("factory"\)\}<\/Typography>/);
-  assert.doesNotMatch(source, /bgcolor: "#fbfcfe", borderBottom: 1, borderColor: "divider"\}\}><Typography variant="subtitle2" fontWeight=\{750\}>\{t\("factory"\)\}/);
-  assert.match(source, /<SimpleTreeView/);
-  assert.match(source, /onClick=\{\(\) => goToFactory\(id\)\}/);
+  assert.doesNotMatch(source, /<SimpleTreeView|<TreeItem/);
+  assert.match(source, /studioPathStates\(agents, product\)/);
+  assert.match(source, /function FactoryStepper/);
+  assert.match(source, /onClick=\{\(\) => goToStep\(step\)\}/);
   assert.match(source, /onClick=\{\(\) => onOpenAgent\(entry\.role\)\}/);
-  assert.doesNotMatch(source, /<Typography variant="h6" sx=\{\{ mb: 1\.5 \}\}>\{t\("factory"\)\}<\/Typography>/);
-  assert.doesNotMatch(source, /\$\{index \+ 1\}  \$\{t\(title\)\}/);
-  assert.match(source, /<ListItemIcon sx=\{\{ minWidth: 72 \}\}>/);
 });
 
 test('Factory overview is the first live Product page and retires the old workflow pages', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   const portal = await readFile(new URL('./CreatorPortalV2.jsx', import.meta.url), 'utf8');
-  assert.match(source, /<TreeItem itemId="overview"/);
-  assert.match(source, /<Typography variant="h4"[^>]*>\{t\("productOverview"\)\}/);
+  assert.match(source, /function FactoryOverview/);
   assert.match(source, /expected_updated_at: product\.updated_at/);
   assert.match(source, /<TextField label=\{t\("productName"\)\}/);
   assert.match(source, /<TextField label=\{t\("productPromise"\)\}/);
@@ -73,16 +66,13 @@ test('Factory overview is the first live Product page and retires the old workfl
   assert.doesNotMatch(portal, /CreatorProductOverview/);
 });
 
-test('Upload sources is a peer Factory page with real file upload and no duplicate stage card', async () => {
+test('Upload sources is a peer Factory page with real file upload', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
-  assert.match(source, /FACTORY_SECTION_PAGES/);
   assert.match(source, /selected === "uploads"/);
   assert.match(source, /function SourceUploadWorkspace/);
   assert.match(source, /input\/manual\//);
   assert.match(source, /<input ref=\{importPicker\} hidden type="file"(?:[^>]*)multiple/);
-  assert.match(source, /function StageOverview\(\{ stage, agents, sessions, agentName, onOpenAgent, onOpenUpload, locale, t \}\)/);
-  assert.match(source, /stage === "sources"/);
-  assert.match(source, /onClick=\{onOpenUpload\}/);
+  assert.match(source, /onDrop=\{event => \{[^}]*uploadProjectFiles\(\[\.\.\.event\.dataTransfer\.files\]\)/);
 });
 
 test('Deep Research starts from Creator identity and public evidence, not manual upload', async () => {
@@ -137,7 +127,7 @@ test('Factory connection errors use a floating toast and plain-language copy', a
 
 test('Factory JSX keeps visible copy in i18n and reads Agent identity from database definitions', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
-  assert.match(source, /localizeAgentText\(entry\.name, locale\)/);
+  assert.match(source, /localizeAgentText\(agentEntry\(role\)\?\.name, locale\)/);
   assert.match(source, /localizeAgentText\(entry\.hint, locale\)/);
   assert.doesNotMatch(source, /const ROLES|researchDescription|caseDescription/);
 });
@@ -212,17 +202,17 @@ test('Factory voice controls and Composer share the Hatch chat surface', async (
   const styles = await readFile(new URL('./factoryAgents.css', import.meta.url), 'utf8');
   assert.match(source, /className="factory-voice-controls"/);
   assert.match(source, /className="factory-composer-toolbar"/);
-  assert.match(styles, /\.factory-voice-controls,[\s\S]*\.factory-composer-toolbar,[\s\S]*\.factory-chat-composer\s*\{[^}]*var\(--hatch-ui-surface-window/s);
+  assert.match(styles, /\.factory-voice-controls,[\s\S]*\.factory-composer-toolbar,[\s\S]*\.factory-chat-composer\s*\{[^}]*var\(--web-card/s);
 });
 
-test('Factory workbench uses stable shell panes instead of card-driven page chrome', async () => {
+test('Factory workbench is a two-pane chat grid inside the Studio shell', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   const portalStyles = await readFile(new URL('./creatorPortalV2.css', import.meta.url), 'utf8');
   const factoryStyles = await readFile(new URL('./factoryAgents.css', import.meta.url), 'utf8');
-  assert.match(source, /className="factory-stage-rail"/);
+  assert.doesNotMatch(source, /factory-stage-rail|react-resizable-panels/);
   assert.match(source, /className="factory-workspace"/);
-  assert.match(source, /className="factory-pane-header"/);
-  assert.match(`${portalStyles}\n${factoryStyles}`, /grid-template-columns:\s*256px minmax\(0, 1fr\)/);
+  assert.match(factoryStyles, /\.factory-workspace\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 340px/);
+  assert.match(portalStyles, /\.cpv2-main--workbench\s*\{[^}]*overflow:\s*hidden/);
   assert.match(factoryStyles, /\.factory-chat-scroll\s*\{[^}]*background:/);
   assert.match(factoryStyles, /\.factory-inspector-scroll\s*\{[^}]*background:/);
   assert.match(factoryStyles, /\.factory-app \.MuiAccordion-root\s*\{/);
@@ -324,7 +314,7 @@ test('Collect sources lists the real manual-upload files from the research sessi
   assert.match(source, /setManualFiles\(value\.manualFiles \|\| \[\]\)/);
   assert.match(source, /records\.map\(record =>/);
   assert.match(source, /onOpenAgent\("research"\)/);
-  assert.match(source, /t\("manualUploads"\)/);
+  assert.match(source, /t\("factoryUploadedTitle"\)/);
 });
 
 test('Factory chat keeps streamed blocks stable through terminal persistence', async () => {

@@ -17,27 +17,20 @@ const webStylesheets = [
   "creator-dashboard/src/downloadPage.css"
 ];
 
-test("Web page CSS consumes the shared Hatch typography scale", () => {
-  const styles = webStylesheets.map(read).join("\n");
+test("Web CSS follows the visual guidelines: no monospace, no uppercase labels", () => {
+  const styles = [...webStylesheets, "creator-dashboard/src/webTheme.css", "creator-dashboard/src/web/web.css", "creator-dashboard/src/webChat.css"].map(read).join("\n").replace(/\/\*[\s\S]*?\*\//g, "");
 
-  assert.doesNotMatch(styles, /font-size:\s*[0-9]+(?:\.[0-9]+)?(?:px|rem)/);
-  assert.doesNotMatch(styles, /font-size:\s*clamp\(\s*[0-9]/);
-  assert.doesNotMatch(styles, /line-height:\s*[0-9]+(?:\.[0-9]+)?px/);
-  assert.match(styles, /var\(--hatch-type-(?:label|control|body|reading|title|display)\)/);
+  assert.doesNotMatch(styles, /monospace|DM Mono|font-family:\s*var\(--mono\)/);
+  assert.doesNotMatch(styles, /text-transform:\s*uppercase/);
 });
 
-test("Web reserves the display serif for primary headings", () => {
-  const baseStyles = read("creator-dashboard/src/styles.css");
-  const creatorStyles = read("creator-dashboard/src/creatorPortalV2.css");
-  const buyerStyles = read("creator-dashboard/src/buyerPortalV2.css");
-  const storefrontStyles = read("creator-dashboard/src/storefrontDetails.css");
+test("Web headings use DM Sans; the serif is reserved for brand moments", () => {
+  const theme = read("creator-dashboard/src/webTheme.css");
+  const entry = read("creator-dashboard/src/main.jsx");
 
-  assert.match(baseStyles, /h1\s*\{[^}]*font-family:\s*var\(--hatch-font-display\)/s);
-  assert.match(baseStyles, /h2\s*\{[^}]*font-family:\s*var\(--hatch-font-ui\)/s);
-  assert.match(creatorStyles, /\.cpv2 h2\s*\{[^}]*font-family:\s*var\(--hatch-font-ui/);
-  assert.match(buyerStyles, /\.buyer-v2 h2\s*\{[^}]*font-family:\s*var\(--hatch-font-ui/);
-  assert.match(storefrontStyles, /\.storefront-shared__hero h2\s*\{[^}]*font-family:\s*var\(--hatch-font-ui/);
-  assert.match(baseStyles, /\.hatch-app-paper h2\s*\{[^}]*font-family:\s*var\(--hatch-font-ui\)/s);
+  assert.match(entry, /import "\.\/webTheme\.css"/);
+  assert.match(theme, /--hatch-font-display:\s*var\(--web-sans\)/);
+  assert.match(theme, /html body h1,[^{]*\{[^}]*font-family:\s*var\(--web-sans\);[^}]*font-weight:\s*700/s);
 });
 
 test("Web entrypoint consumes HUI instead of a second component stylesheet", () => {
@@ -48,14 +41,14 @@ test("Web entrypoint consumes HUI instead of a second component stylesheet", () 
   assert.doesNotMatch(entry, /components\/ui\//);
 });
 
-test("Sign-in uses the regular Hatch wordmark", () => {
+test("Sign-in uses the Web lockup", () => {
   const source = read("creator-dashboard/src/BuyerPortalV2.jsx");
-  const brand = read("packages/ui/src/HatchBrand.jsx");
+  const brand = read("creator-dashboard/src/WebBrand.jsx");
 
   assert.match(source, /const authBrandClassName = "buyer-v2__brand"/);
-  assert.match(source, /<HatchBrand as=\{RouterLink\} className=\{authBrandClassName\}/);
-  assert.match(brand, /src=\{hatchWordmarkUrl\}/);
-  assert.doesNotMatch(brand, /hatchWordmarkInverseUrl|wordmark-image--inverse/);
+  assert.match(source, /<WebBrand as=\{RouterLink\} className=\{authBrandClassName\}/);
+  assert.doesNotMatch(source, /HatchBrand/);
+  assert.match(brand, /hatch-lockup\.svg/);
 });
 
 test("Web eyebrow labels stay visible despite the shared global eyebrow rule", () => {

@@ -1,23 +1,14 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Menu } from "lucide-react";
 import {
-  Breadcrumbs as HatchBreadcrumbs,
-  Avatar,
   Button,
-  Checkbox,
   DropdownMenu,
-  EmptyState as HatchEmptyState,
   FormField,
-  HatchBrand,
   IconButton,
   InlineAlert as HatchInlineAlert,
   Input,
-  NavigationItem,
-  PageHeader as HatchPageHeader,
-  SectionHeader as HatchSectionHeader,
+  Select,
   Skeleton,
-  StatusTag as HatchStatusTag,
-  Tabs as HatchTabs,
   Textarea,
   UnavailableState
 } from "@hatch/ui";
@@ -25,12 +16,14 @@ import { ButtonBase, Divider as MuiDivider, ListItemIcon, ListItemText, Menu as 
 import { Check, ExpandMore, Language as LanguageIcon, Logout } from "@mui/icons-material";
 import { createTheme, ThemeProvider } from "@mui/material/styles";
 import { hatchMuiThemeOptions } from "@hatch/ui";
-import { AutosaveStatus } from "@hatch/ui/product";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
 import { AccountAvatar } from "./AccountAvatar.jsx";
+import { WebBrand } from "./WebBrand.jsx";
 import { creatorOrderQuery } from "./storefrontModel.js";
 import { creatorFactoryPath, creatorProductPath, parseCreatorRoute } from "./creatorRoutes.js";
 import { createCreatorTranslator } from "./creatorI18n.js";
+import { isProductLive, STUDIO_PATH, studioNextStep, studioPathStates, studioPhoto } from "./studioPath.js";
+import { StudioPathCards } from "./studioPathCards.jsx";
 import { useLocale } from "./locale.jsx";
 import "./creatorPortalV2.css";
 
@@ -38,13 +31,6 @@ const ROOT = "/studio";
 const FactoryAgents = React.lazy(() => import("./FactoryAgents.jsx").then(({ FactoryAgents: Component }) => ({ default: Component })));
 const CreatorProductFiles = React.lazy(() => import("./CreatorSourceLibrary.jsx").then(({ CreatorProductFiles: Component }) => ({ default: Component })));
 const CreatorProductWorkspace = React.lazy(() => import("./CreatorProductWorkspace.jsx").then(({ CreatorProductWorkspace: Component }) => ({ default: Component })));
-const PRODUCT_TABS = [
-  ["overview", "overview"],
-  ["test", "testImprove"],
-  ["examples", "examples"],
-  ["versions", "versions"],
-  ["data-controls", "dataControls"]
-];
 
 const creatorMuiTheme = createTheme(hatchMuiThemeOptions);
 
@@ -74,9 +60,10 @@ export function CreatorPortalV2({
     navigate(nextPath);
   }, [navigate]);
 
+  const inAgents = route.section === "products";
   const mobileNavigationItems = [
     { value: "space-studio", label: t("home"), active: route.kind === "home", onSelect: () => void go(ROOT) },
-    { value: "products", label: t("products"), active: route.section === "products" && route.kind !== "files", onSelect: () => void go(`${ROOT}/products`) },
+    { value: "products", label: t("navAgents"), active: inAgents, onSelect: () => void go(`${ROOT}/products`) },
     { value: "download", label: t("download"), onSelect: () => void go("/download") },
     { value: "space-account", label: t("account"), onSelect: () => void go("/account") }
   ];
@@ -94,61 +81,64 @@ export function CreatorPortalV2({
 
   const accountMenuOpen = Boolean(accountAnchorEl);
   const closeAccountMenu = () => setAccountAnchorEl(null);
+  const displayName = profile?.display_name || t("creator");
 
   return (
     <ThemeProvider theme={creatorMuiTheme}>
       <div className="cpv2">
-      <aside className="cpv2-sidebar">
-        <HatchBrand as="button" className="cpv2-brand" type="button" onClick={() => go(ROOT)} aria-label={t("hatchCreatorHome")}><span className="hatch-brand__product">{t("studio")}</span></HatchBrand>
-        <div className="cpv2-mobile-nav">
-          <DropdownMenu
-            label={t("creatorNavigation")}
-            trigger={<IconButton label={t("openNavigation")} variant="secondary" size="small"><Menu aria-hidden="true" /></IconButton>}
-            items={mobileNavigationItems}
-          />
-        </div>
-        <nav className="cpv2-global-nav" aria-label={t("hatchNavigation")}>
-          <SpaceLink href="/studio" navigate={go} active={route.kind === "home"}>{t("home")}</SpaceLink>
-          <NavButton active={route.section === "products" && route.kind !== "files"} onClick={() => go(`${ROOT}/products`)}>{t("products")}</NavButton>
-          <SpaceLink href="/download" navigate={go}>{t("download")}</SpaceLink>
-          <SpaceLink href="/account" navigate={go}>{t("account")}</SpaceLink>
-        </nav>
-        <div className="cpv2-account">
-          <ButtonBase
-            className="cpv2-account-trigger"
-            onClick={(event) => setAccountAnchorEl(event.currentTarget)}
-            aria-controls={accountMenuOpen ? "creator-account-menu" : undefined}
-            aria-expanded={accountMenuOpen ? "true" : undefined}
-            aria-haspopup="menu"
-          >
-            <AccountAvatar className="cpv2-avatar" src={profile?.avatar_url} name={profile?.display_name || t("creator")} size="medium" />
-            <span className="cpv2-account-copy"><strong>{profile?.display_name || t("creator")}</strong></span>
-            <ExpandMore className="cpv2-account-chevron" fontSize="small" aria-hidden="true" />
-          </ButtonBase>
+        <header className="cpv2-topbar">
+          <WebBrand className="cpv2-brand" label={t("studio")} href={ROOT} aria-label={t("hatchCreatorHome")} onClick={(event) => { event.preventDefault(); void go(ROOT); }} />
+          <nav className="cpv2-global-nav" aria-label={t("hatchNavigation")}>
+            <SpaceLink href={ROOT} navigate={go} active={route.kind === "home"}>{t("home")}</SpaceLink>
+            <SpaceLink href={`${ROOT}/products`} navigate={go} active={inAgents}>{t("navAgents")}</SpaceLink>
+          </nav>
+          <div className="cpv2-topbar-end">
+            <ButtonBase
+              className="cpv2-account-trigger"
+              onClick={(event) => setAccountAnchorEl(event.currentTarget)}
+              aria-controls={accountMenuOpen ? "creator-account-menu" : undefined}
+              aria-expanded={accountMenuOpen ? "true" : undefined}
+              aria-haspopup="menu"
+              aria-label={t("account")}
+            >
+              <AccountAvatar className="cpv2-avatar" src={profile?.avatar_url} name={displayName} size="small" />
+              <span className="cpv2-account-name">{displayName}</span>
+              <ExpandMore className="cpv2-account-chevron" fontSize="small" aria-hidden="true" />
+            </ButtonBase>
+            <div className="cpv2-mobile-nav">
+              <DropdownMenu
+                label={t("creatorNavigation")}
+                trigger={<IconButton label={t("openNavigation")} variant="secondary" size="small"><Menu aria-hidden="true" /></IconButton>}
+                items={mobileNavigationItems}
+              />
+            </div>
+          </div>
           <MuiMenu
             id="creator-account-menu"
             anchorEl={accountAnchorEl}
             open={accountMenuOpen}
             onClose={closeAccountMenu}
-            anchorOrigin={{ vertical: "top", horizontal: "left" }}
-            transformOrigin={{ vertical: "bottom", horizontal: "left" }}
-            PaperProps={{ sx: { minWidth: 256, mb: 1, border: "1px solid var(--hatch-ui-border-soft, rgba(54,43,33,.12))", borderRadius: "var(--hatch-radius-dialog, 14px)", backgroundColor: "var(--hatch-ui-surface-solid, #fbf8f2)", boxShadow: "var(--hatch-shadow-popover, 0 16px 42px rgba(47,35,26,.16))" } }}
+            anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+            transformOrigin={{ vertical: "top", horizontal: "right" }}
+            PaperProps={{ className: "cpv2-account-menu", sx: { minWidth: 248, mt: 1 } }}
             MenuListProps={{ dense: true, "aria-label": t("account") }}
           >
             <div className="cpv2-account-menu-header">
-              <AccountAvatar className="cpv2-avatar" src={profile?.avatar_url} name={profile?.display_name || t("creator")} size="small" />
-              <MuiTypography variant="subtitle2" fontWeight={750}>{profile?.display_name || t("creator")}</MuiTypography>
+              <AccountAvatar className="cpv2-avatar" src={profile?.avatar_url} name={displayName} size="small" />
+              <MuiTypography variant="subtitle2" fontWeight={700}>{displayName}</MuiTypography>
             </div>
             <MuiDivider />
-            <div className="cpv2-account-menu-label"><LanguageIcon fontSize="small" /><MuiTypography variant="overline">{t("language")}</MuiTypography></div>
+            <MuiMenuItem onClick={() => { closeAccountMenu(); void go("/account"); }}><ListItemText primary={t("account")} /></MuiMenuItem>
+            <MuiMenuItem onClick={() => { closeAccountMenu(); void go("/download"); }}><ListItemText primary={t("download")} /></MuiMenuItem>
+            <MuiDivider />
+            <div className="cpv2-account-menu-label"><LanguageIcon fontSize="small" /><span>{t("language")}</span></div>
             {[['en', t("english")], ['zh', t("chinese")], ['ja', t("japanese")]].map(([value, label]) => <MuiMenuItem key={value} selected={locale === value} onClick={() => { setLocale(value); closeAccountMenu(); }}><ListItemIcon>{locale === value ? <Check fontSize="small" /> : <span className="cpv2-menu-icon-placeholder" />}</ListItemIcon><ListItemText primary={label} /></MuiMenuItem>)}
             {onLogout ? <><MuiDivider /><MuiMenuItem onClick={() => { closeAccountMenu(); void onLogout(); }}><ListItemIcon><Logout fontSize="small" /></ListItemIcon><ListItemText primary={t("signOut")} /></MuiMenuItem></> : null}
           </MuiMenu>
-        </div>
-      </aside>
-      <main id="creator-main" className={`cpv2-main${route.kind === "factory-agents" ? " cpv2-main--workbench" : ""}`} ref={mainRef}>
-        <CreatorRoute route={route} token={token} request={request} navigate={go} locale={locale} t={t} profile={profile} registerNavigationGuard={registerNavigationGuard} />
-      </main>
+        </header>
+        <main id="creator-main" className={`cpv2-main${route.kind === "factory-agents" ? " cpv2-main--workbench" : ""}`} ref={mainRef}>
+          <CreatorRoute route={route} token={token} request={request} navigate={go} locale={locale} t={t} profile={profile} registerNavigationGuard={registerNavigationGuard} />
+        </main>
       </div>
     </ThemeProvider>
   );
@@ -163,22 +153,17 @@ function SpaceLink({ href, navigate, active = false, children }) {
   return <a href={href} aria-current={active ? "page" : undefined} onClick={handleClick}>{children}</a>;
 }
 
-function NavButton({ active, children, onClick }) {
-  return <NavigationItem active={active} aria-current={active ? "page" : undefined} onClick={onClick}>{children}</NavigationItem>;
-}
-
-function CreatorRoute({ route, token, request, navigate, locale, t, profile, registerNavigationGuard }) {
+function CreatorRoute({ route, token, request, navigate, locale, t, profile }) {
   if (typeof request !== "function") {
     return <RouteProblem title={t("creatorPortalUnavailable")} body={t("creatorPortalUnavailableBody")} />;
   }
   if (route.kind === "factory-index") return <FactoryIndexRedirect navigate={navigate} />;
-  if (route.kind === "factory-agents") return <Suspense fallback={<CreatorRouteLoading />}><FactoryAgents key={route.productId} productId={route.productId} section={route.factorySection} agent={route.factoryAgent} navigate={navigate} locale={locale} /></Suspense>;
-  if (route.kind === "home") return <CreatorHome token={token} request={request} navigate={navigate} t={t} locale={locale} />;
+  if (route.kind === "factory-agents") return <Suspense fallback={<LoadingState t={t} />}><FactoryAgents key={route.productId} productId={route.productId} section={route.factorySection} agent={route.factoryAgent} navigate={navigate} locale={locale} /></Suspense>;
+  if (route.kind === "home") return <CreatorHome token={token} request={request} navigate={navigate} t={t} locale={locale} profile={profile} />;
   if (route.kind === "products") return <ProductsPage token={token} request={request} navigate={navigate} t={t} />;
-  if (route.kind === "product-create") return <Suspense fallback={<CreatorRouteLoading />}><CreatorProductFiles token={token} navigate={navigate} locale={locale} /></Suspense>;
-  if (route.kind === "product" && ["overview", "files", "about-you", "corpus", "brief", "complete"].includes(route.tab)) return <FactoryProductRedirect productId={route.productId} navigate={navigate} />;
-  if (route.kind === "product") return <ProductPage token={token} request={request} navigate={navigate} productId={route.productId} tab={route.tab} t={t} />;
-  if (route.kind === "candidate") return <Suspense fallback={<CreatorRouteLoading />}><CreatorProductWorkspace token={token} request={request} navigate={navigate} productId={route.productId} tab="corpus" locale={locale} /></Suspense>;
+  if (route.kind === "product-create") return <Suspense fallback={<LoadingState t={t} />}><CreatorProductFiles token={token} navigate={navigate} locale={locale} /></Suspense>;
+  if (route.kind === "product") return <FactoryProductRedirect productId={route.productId} navigate={navigate} />;
+  if (route.kind === "candidate") return <Suspense fallback={<LoadingState t={t} />}><CreatorProductWorkspace token={token} request={request} navigate={navigate} productId={route.productId} tab="corpus" locale={locale} /></Suspense>;
   if (route.kind === "preview") return <PreviewPage token={token} request={request} navigate={navigate} productId={route.productId} profile={profile} t={t} />;
   if (route.kind === "release") return <ReleasePage token={token} request={request} navigate={navigate} productId={route.productId} releaseId={route.releaseId} profile={profile} t={t} locale={locale} />;
   if (route.kind === "orders") return <OrdersPage token={token} request={request} navigate={navigate} t={t} locale={locale} />;
@@ -186,11 +171,9 @@ function CreatorRoute({ route, token, request, navigate, locale, t, profile, reg
   return <RouteProblem title={t("pageNotFound")} body={t("pageNotFoundBody")} action={t("backToProducts")} onAction={() => navigate(`${ROOT}/products`)} />;
 }
 
-function CreatorRouteLoading() {
-  return <div className="loading-page" aria-busy="true"><HatchBrand className="loading-brand" /></div>;
-}
+/* ---------- Home ---------- */
 
-function CreatorHome({ token, request, navigate, t, locale }) {
+function CreatorHome({ token, request, navigate, t, locale, profile }) {
   const resource = useRemote(request, "/v1/creator/overview", token);
   return (
     <PageBoundary resource={resource} title={t("workspaceLoadError")} retryLabel={t("retry")} t={t}>
@@ -198,51 +181,66 @@ function CreatorHome({ token, request, navigate, t, locale }) {
         const overview = unwrap(payload, "overview");
         const products = arrayOf(overview?.products);
         const orders = arrayOf(overview?.recent_orders ?? overview?.orders);
-        if (products.length === 0) {
-          return <CreatorZeroProductIntro navigate={navigate} t={t} />;
-        }
-        const next = nextCreatorAction(products, t);
+        if (products.length === 0) return <CreatorZeroProductIntro navigate={navigate} t={t} />;
         const metrics = overview?.metrics ?? {};
-        const purchaseCount = Number(metrics.order_count ?? orders.length) || 0;
+        const live = products.filter(isProductLive);
+        const next = products.find((product) => !isProductLive(product)) ?? products[0];
+        const purchaseCount = Number(metrics.orders ?? metrics.order_count ?? orders.length) || 0;
+        const firstName = profile?.display_name;
         return <>
-          <section className={`cpv2-grid cpv2-home-grid${purchaseCount > 0 ? "" : " cpv2-home-grid--single"}`} aria-label={t("creatorOverview")}>
-            <article className="cpv2-card cpv2-next-card">
-              {next.label ? <StatusChip status={next.tone}>{next.label}</StatusChip> : null}
-              <h2>{next.title}</h2>
-              <p>{next.body}</p>
-              <Button type="button" trailing={<span aria-hidden="true">→</span>} onClick={() => navigate(next.href)}>{next.action}</Button>
-            </article>
-            {purchaseCount > 0 ? <article className="cpv2-card cpv2-balance-card">
-              <strong>{purchaseCount}</strong>
-              <p>{t("purchases")}</p>
-              <Button className="cpv2-inverse" variant="secondary" type="button" onClick={() => navigate(`${ROOT}/orders`)}>{t("viewAccessRecords")}</Button>
-            </article> : null}
+          <Hero pill={t("homePill")} title={firstName ? t("homeGreeting", firstName) : t("homeGreetingPlain")} />
+          <NextAgentCard product={next} request={request} token={token} navigate={navigate} t={t} />
+          <dl className="cpv2-stats">
+            <div><dt>{t("homeStatOrders")}</dt><dd>{purchaseCount}</dd></div>
+            <div><dt>{t("homeStatLive")}</dt><dd>{live.length}</dd></div>
+            <div><dt>{t("homeStatDraft")}</dt><dd>{products.length - live.length}</dd></div>
+          </dl>
+          <SectionHeading title={t("homeYourAgents")} action={t("newAgent")} onAction={() => navigate(`${ROOT}/products/new`)} />
+          <section className="cpv2-product-grid" aria-label={t("homeYourAgents")}>
+            {products.map((product) => <ProductCard key={idOf(product, "product")} product={product} t={t} request={request} token={token} onChanged={resource.retry} onOpen={() => navigate(creatorProductPath(idOf(product, "product")))} />)}
           </section>
-          <SectionHeading eyebrow={t("recentActivity")} title={t("ordersAndAccess")} />
-          {orders.length ? <OrderList orders={orders} onOpen={(order) => navigate(`${ROOT}/orders/${encodeURIComponent(idOf(order, "order"))}`)} t={t} locale={locale} /> : <EmptyState title={t("noAccessRecords")} body={t("noAccessRecordsBody")} />}
+          <SectionHeading title={t("homeRecentOrders")} action={orders.length ? t("homeSeeOrders") : undefined} onAction={() => navigate(`${ROOT}/orders`)} />
+          {orders.length ? <OrderList orders={orders} onOpen={(order) => navigate(`${ROOT}/orders/${encodeURIComponent(idOf(order, "order"))}`)} t={t} locale={locale} /> : <p className="cpv2-quiet">{t("homeNoOrders")}</p>}
         </>;
       }}
     </PageBoundary>
   );
 }
 
-function CreatorZeroProductIntro({ navigate, t }) {
-  return <section className="cpv2-zero-product" aria-labelledby="creator-zero-product-title">
-    <div className="cpv2-zero-product__story">
-      <h1 id="creator-zero-product-title">{t("zeroProductTitle")}</h1>
-      <p className="cpv2-zero-product__spotify">{t("zeroProductSpotify")}</p>
-      <p>{t("zeroProductRecord")}</p>
-      <p>{t("zeroProductRealWork")}</p>
-      <div className="cpv2-zero-product__standard">
-        <strong>{t("zeroProductNotChatbot")}</strong>
-        <p>{t("zeroProductTest")}</p>
-      </div>
-      <p>{t("zeroProductOwnership")}</p>
-      <p>{t("zeroProductPricing")}</p>
-      <Button type="button" trailing={<span aria-hidden="true">→</span>} onClick={() => navigate(`${ROOT}/products/new`)}>{t("buildFirstAgent")}</Button>
+function NextAgentCard({ product, request, token, navigate, t }) {
+  const productId = idOf(product, "product");
+  const factory = useRemote(request, `/v1/creator/products/${encodeURIComponent(productId)}/factory-agents/config`, token);
+  const live = isProductLive(product);
+  const states = factory.state === "ready" ? studioPathStates(arrayOf(factory.data?.agents), product) : null;
+  const next = states ? studioNextStep(states) : null;
+  const photo = (next?.step ?? STUDIO_PATH[live ? 4 : 0]).photo;
+  return <article className="cpv2-next web-card">
+    <img className="cpv2-next__photo" src={studioPhoto(photo)} alt="" />
+    <div className="cpv2-next__body">
+      <span className="web-pill">{t("homeContinue")}</span>
+      <h2>{product.name ?? product.product_name ?? t("untitledProduct")}</h2>
+      <p>{live ? t("homeLiveBody") : product.promise ?? product.description ?? ""}</p>
+      {states ? <ol className="cpv2-path-dots" aria-label={t("factoryStepsLabel")}>{states.map(({ step, state }) => <li key={step.id} className={`is-${state}${next?.step.id === step.id ? " is-next" : ""}`}><span aria-hidden="true" /><small>{t(step.title)}</small></li>)}</ol> : null}
+      {next && !live ? <p className="cpv2-next__step">{t("homeNext", t(next.step.title))}</p> : null}
+      <Button className="web-btn-yolk" type="button" trailing={<span aria-hidden="true">→</span>} onClick={() => navigate(creatorProductPath(productId))}>{live ? t("agentOpen") : t("agentContinue")}</Button>
     </div>
+  </article>;
+}
+
+function CreatorZeroProductIntro({ navigate, t }) {
+  return <section className="cpv2-welcome" aria-labelledby="creator-zero-product-title">
+    <div className="cpv2-welcome__intro">
+      <span className="web-pill">{t("homeEmptyPill")}</span>
+      <h1 id="creator-zero-product-title">{t("homeEmptyTitle")}</h1>
+      <p>{t("homeEmptyBody")}</p>
+      <Button className="web-btn-yolk" type="button" trailing={<span aria-hidden="true">→</span>} onClick={() => navigate(`${ROOT}/products/new`)}>{t("homeStartFirst")}</Button>
+    </div>
+    <h2 className="cpv2-welcome__path-title">{t("homePathTitle")}</h2>
+    <StudioPathCards t={t} />
   </section>;
 }
+
+/* ---------- Agents (Products) ---------- */
 
 function ProductsPage({ token, request, navigate, t }) {
   const resource = useRemote(request, "/v1/creator/products", token);
@@ -251,10 +249,10 @@ function ProductsPage({ token, request, navigate, t }) {
       {(payload) => {
         const products = arrayOf(unwrap(payload, "products"));
         return <>
-          <PageHeader eyebrow={t("products")} title={t("productsPageTitle")} body={t("productsPageBody")} action={t("createProduct")} onAction={() => navigate(`${ROOT}/products/new`)} />
-          {products.length ? <section className="cpv2-product-grid" aria-label={t("products")}>
+          <Hero pill={t("agentsPill")} title={t("agentsTitle")} action={t("newAgent")} onAction={() => navigate(`${ROOT}/products/new`)} />
+          {products.length ? <section className="cpv2-product-grid" aria-label={t("navAgents")}>
             {products.map((product) => <ProductCard key={idOf(product, "product")} product={product} t={t} request={request} token={token} onChanged={resource.retry} onOpen={() => navigate(creatorProductPath(idOf(product, "product")))} />)}
-          </section> : <EmptyState title={t("createFirstProduct")} body={t("createFirstProductBody")} action={t("createProduct")} onAction={() => navigate(`${ROOT}/products/new`)} />}
+          </section> : <EmptyState title={t("agentsEmptyTitle")} body={t("agentsEmptyBody")} action={t("homeStartFirst")} onAction={() => navigate(`${ROOT}/products/new`)} />}
         </>;
       }}
     </PageBoundary>
@@ -262,12 +260,12 @@ function ProductsPage({ token, request, navigate, t }) {
 }
 
 function ProductCard({ product, onOpen, request, token, onChanged, t }) {
-  const published = product.status === "published" || product.status === "live";
+  const published = isProductLive(product);
   const publicHref = published ? `/products/${encodeURIComponent(idOf(product, "product"))}` : "";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function withdraw() {
-    if (!published || busy) return;
+    if (!published || busy || !window.confirm(t("agentUnpublishConfirm"))) return;
     setBusy(true); setError("");
     try {
       await request(`/v1/creator/products/${encodeURIComponent(idOf(product, "product"))}/withdraw`, { method: "POST", token, headers: { "idempotency-key": mutationKey() }, body: JSON.stringify({ reason: "Expert unpublished this Product." }) });
@@ -276,7 +274,7 @@ function ProductCard({ product, onOpen, request, token, onChanged, t }) {
     finally { setBusy(false); }
   }
   async function remove() {
-    if (published || busy || !window.confirm(t("deleteProductConfirm"))) return;
+    if (published || busy || !window.confirm(t("agentDeleteConfirm"))) return;
     setBusy(true); setError("");
     try {
       await request(`/v1/creator/products/${encodeURIComponent(idOf(product, "product"))}`, { method: "DELETE", token });
@@ -284,98 +282,19 @@ function ProductCard({ product, onOpen, request, token, onChanged, t }) {
     } catch (nextError) { setError(friendlyError(nextError, t)); }
     finally { setBusy(false); }
   }
-  return <article className="cpv2-card cpv2-product-card">
-    <div className="cpv2-card-top"><Button variant={published ? "secondary" : "link"} size="small" type="button" disabled={!published || busy} loading={busy} onClick={() => void withdraw()}>{published ? t("published") : t("notPublished")}</Button></div>
+  return <article className="cpv2-product-card web-card">
+    <span className={`cpv2-state${published ? " is-live" : ""}`}>{published ? t("agentLive") : t("agentDraft")}</span>
     <h2>{product.name ?? product.product_name ?? t("untitledProduct")}</h2>
     <p>{product.promise ?? product.description ?? t("addProductPromise")}</p>
     {error ? <InlineError>{error}</InlineError> : null}
     <div className="cpv2-card-foot">
-      <Button variant="secondary" type="button" onClick={onOpen}>{t("openProduct")}</Button>
-      {publicHref ? <Button asChild variant="link"><a href={publicHref} target="_blank" rel="noreferrer">{t("viewProduct")}</a></Button> : <Button variant="link" type="button" disabled={busy} onClick={() => void remove()}>{t("deleteProduct")}</Button>}
+      <Button type="button" onClick={onOpen}>{published ? t("agentOpen") : t("agentContinue")}</Button>
+      {publicHref ? <a className="cpv2-text-link" href={publicHref} target="_blank" rel="noreferrer">{t("viewProduct")}</a> : null}
+      {published
+        ? <button className="cpv2-text-link cpv2-text-link--quiet" type="button" disabled={busy} onClick={() => void withdraw()}>{t("agentUnpublish")}</button>
+        : <button className="cpv2-text-link cpv2-text-link--quiet" type="button" disabled={busy} onClick={() => void remove()}>{t("agentDelete")}</button>}
     </div>
   </article>;
-}
-
-function ProductPage({ token, request, navigate, productId, tab, t }) {
-  const resource = useRemote(request, `/v1/creator/products/${encodeURIComponent(productId)}`, token);
-  return (
-    <PageBoundary resource={resource} title={t("productLoadError")} retryLabel={t("retry")} t={t}>
-      {(payload) => {
-        const product = unwrap(payload, "product") ?? payload;
-        const candidate = candidateOf(product);
-        const next = productNextAction(product, candidate, t);
-        return <>
-          <Breadcrumb onClick={() => navigate(`${ROOT}/products`)}>{t("products")}</Breadcrumb>
-          <PageHeader eyebrow={productStatus(product.status, t)} title={product.name ?? product.product_name ?? t("untitledProduct")} body={product.promise ?? product.description ?? t("defineProductPromise")} action={next.action} onAction={() => navigate(next.href(productId, candidate))} />
-          <ProductTabs productId={productId} active={tab} navigate={navigate} t={t} />
-          {tab === "overview" ? <ProductOverview product={product} candidate={candidate} navigate={navigate} token={token} request={request} onChanged={resource.retry} t={t} /> : null}
-          {tab === "test" ? <TestPanel product={product} candidate={candidate} navigate={navigate} t={t} /> : null}
-          {tab === "examples" ? <ExamplesPanel product={product} t={t} /> : null}
-          {tab === "versions" ? <VersionsPanel product={product} candidate={candidate} productId={productId} navigate={navigate} t={t} /> : null}
-          {tab === "data-controls" ? <DataControlsPanel product={product} t={t} /> : null}
-        </>;
-      }}
-    </PageBoundary>
-  );
-}
-
-function ProductTabs({ productId, active, navigate, t }) {
-  return <HatchTabs
-    className="cpv2-tabs"
-    value={active}
-    ariaLabel={t("productSections")}
-    onValueChange={(value) => navigate(`${ROOT}/products/${encodeURIComponent(productId)}/${value}`)}
-    items={PRODUCT_TABS.map(([value, key]) => ({ value, label: t(key) }))}
-  />;
-}
-
-function ProductOverview({ product, candidate, navigate, token, request, onChanged, t }) {
-  const productId = idOf(product, "product");
-  const alreadyPublished = product.status === "published" || product.status === "live";
-  const [withdraw, setWithdraw] = useState({ reason: "", confirming: false, busy: false, error: "", done: false });
-  const steps = [
-    { label: t("productFiles"), done: Boolean(product.files_count || product.source_count || product.source_snapshot_id), action: t("openFiles"), href: `${ROOT}/products/${encodeURIComponent(productId)}/files` },
-    { label: t("versionCandidate"), done: Boolean(candidate || alreadyPublished || product.corpus_digest), action: t("continueProduct"), href: `${ROOT}/products/${encodeURIComponent(productId)}/about-you` },
-    { label: t("candidateApproval"), done: isApproved(candidate) || alreadyPublished, action: t("reviewCandidate"), href: candidate ? `${ROOT}/products/${encodeURIComponent(productId)}/candidates/${encodeURIComponent(idOf(candidate, "candidate"))}` : null },
-    { label: t("storefrontPreview"), done: Boolean(product.previewed_at || product.preview_ready), action: t("preview"), href: `${ROOT}/products/${encodeURIComponent(productId)}/preview` },
-    { label: t("published"), done: product.status === "published" || product.status === "live", action: t("viewStorefront"), href: product.public_url, external: true }
-  ];
-  async function withdrawProduct() {
-    if (!withdraw.reason.trim() || withdraw.busy) return;
-    setWithdraw((current) => ({ ...current, busy: true, error: "", done: false }));
-    try {
-      await request(`/v1/creator/products/${encodeURIComponent(productId)}/withdraw`, { method: "POST", token, headers: { "idempotency-key": mutationKey() }, body: JSON.stringify({ reason: withdraw.reason.trim() }) });
-      setWithdraw((current) => ({ ...current, busy: false, error: "", done: true, confirming: false }));
-      onChanged?.();
-    } catch (error) { setWithdraw((current) => ({ ...current, busy: false, error: friendlyError(error, t), done: false })); }
-  }
-  return <><div className="cpv2-detail-grid">
-    <article className="cpv2-card cpv2-workflow">
-      <span className="cpv2-kicker">{t("publishingWorkflow")}</span><h2>{t("deliberateGate")}</h2>
-      <ol>{steps.map((step, index) => <li key={step.label} className={step.done ? "is-done" : ""}><span>{step.done ? "✓" : index + 1}</span><strong>{step.label}</strong>{step.href ? step.external ? <Button asChild variant="link" size="small"><a href={safePublicUrl(step.href)} target="_blank" rel="noreferrer">{step.action}</a></Button> : <Button variant="link" size="small" type="button" onClick={() => navigate(step.href)}>{step.action}</Button> : <small>{t("completePreviousStep")}</small>}</li>)}</ol>
-    </article>
-    <article className="cpv2-card cpv2-facts"><span className="cpv2-kicker">{t("currentProduct")}</span><dl><Fact label={t("candidate")} value={candidate ? `v${candidate.version ?? "—"} · ${approvalLabel(candidate, t)}` : t("notReady")} /><Fact label={t("release")} value={product.active_release?.label ?? product.release?.label ?? product.release_label ?? t("notPublished")} /><Fact label={t("publicUrl")} value={product.public_url ?? t("notPublic")} /></dl></article>
-  </div>{withdraw.error ? <InlineError>{withdraw.error}</InlineError> : null}{withdraw.done ? <SuccessNotice>{t("withdrawSuccess")}</SuccessNotice> : null}{alreadyPublished ? <article className="cpv2-card cpv2-panel cpv2-withdraw"><SectionHeading eyebrow={t("productLifecycle")} title={t("withdrawProduct")} /><p>{t("withdrawalStopsNewAccess")}</p><FormField label={t("auditReason")}><Textarea value={withdraw.reason} onChange={(event) => setWithdraw((current) => ({ ...current, reason: event.target.value, confirming: false }))} placeholder={t("withdrawReasonPlaceholder")} /></FormField>{withdraw.confirming ? <div className="cpv2-confirm"><p><strong>{t("withdrawPublicProduct")}</strong><br />{t("existingAccessKeepRecords")}</p><Button variant="secondary" type="button" onClick={() => setWithdraw((current) => ({ ...current, confirming: false }))}>{t("cancel")}</Button><Button variant="danger" type="button" loading={withdraw.busy} disabled={!withdraw.reason.trim()} onClick={withdrawProduct}>{t("confirmWithdrawal")}</Button></div> : <Button variant="danger" type="button" disabled={!withdraw.reason.trim()} onClick={() => setWithdraw((current) => ({ ...current, confirming: true }))}>{t("reviewWithdrawal")}</Button>}</article> : null}</>;
-}
-
-function TestPanel({ product, candidate, navigate, t }) {
-  const gates = arrayOf(candidate?.gates ?? product.evaluation?.gates);
-  return <article className="cpv2-card cpv2-panel"><SectionHeading eyebrow={t("evaluation")} title={t("behaviorEvidence")} />{gates.length ? <ul className="cpv2-gates">{gates.map((gate, index) => <li key={gate.id ?? index}><StatusChip status={gate.passed === false ? "failed" : "passed"}>{gate.passed === false ? t("failed") : t("passed")}</StatusChip><span><strong>{gate.name ?? gate.label ?? t("gateNumber", index + 1)}</strong><small>{gate.detail ?? gate.message ?? t("deterministicEvaluationGate")}</small></span></li>)}</ul> : <EmptyInline>{t("noEvaluationReport")}</EmptyInline>}{candidate ? <Button variant="secondary" type="button" onClick={() => navigate(`${ROOT}/products/${encodeURIComponent(idOf(product, "product"))}/candidates/${encodeURIComponent(idOf(candidate, "candidate"))}`)}>{t("openCandidateReport")}</Button> : null}</article>;
-}
-
-function ExamplesPanel({ product, t }) {
-  const examples = arrayOf(product.examples ?? product.presentation?.examples);
-  return <article className="cpv2-card cpv2-panel"><SectionHeading eyebrow={t("buyerProof")} title={t("representativeExamples")} />{examples.length ? <div className="cpv2-examples">{examples.map((example, index) => <section key={example.id ?? index}><h3>{example.title ?? t("example", index + 1)}</h3><p>{example.summary ?? example.description ?? String(example)}</p></section>)}</div> : <EmptyInline>{t("clientSafeExamples")} {t("protectedInstructionsNeverAppear")}</EmptyInline>}</article>;
-}
-
-function VersionsPanel({ product, candidate, productId, navigate, t }) {
-  const releases = arrayOf(product.releases).length ? arrayOf(product.releases) : (product.release ? [{ ...product.release, current: true }] : []);
-  return <article className="cpv2-card cpv2-panel"><SectionHeading eyebrow={t("immutableHistory")} title={t("candidatesAndReleases")} />{candidate ? <NavigationItem className="cpv2-version" onClick={() => navigate(`${ROOT}/products/${encodeURIComponent(productId)}/candidates/${encodeURIComponent(idOf(candidate, "candidate"))}`)} trailing={<StatusChip status={candidate.status}>{approvalLabel(candidate, t)}</StatusChip>}><span><strong>{t("candidateVersion", candidate.version ?? "—")}</strong><small>{shortDigest(candidate.digest)}</small></span></NavigationItem> : null}{releases.map((release) => <NavigationItem className="cpv2-version" type="button" key={idOf(release, "release")} onClick={() => navigate(`${ROOT}/products/${encodeURIComponent(productId)}/releases/${encodeURIComponent(idOf(release, "release"))}`)} trailing={<StatusChip status={release.current ? "published" : "retired"}>{release.current ? t("current") : t("previous")}</StatusChip>}><span><strong>{release.label ?? `${t("release")} ${release.version ?? ""}`}</strong><small>{shortDigest(release.corpus_digest ?? release.digest)}</small></span></NavigationItem>)}{!candidate && !releases.length ? <EmptyInline>{t("noCandidateRelease")}</EmptyInline> : null}</article>;
-}
-
-function DataControlsPanel({ product, t }) {
-  const boundaries = arrayOf(product.boundaries ?? product.product_boundaries);
-  return <div className="cpv2-detail-grid"><article className="cpv2-card cpv2-panel"><SectionHeading eyebrow={t("productBoundaries")} title={t("willNotDo")} />{boundaries.length ? <ul className="cpv2-bullets">{boundaries.map((item, index) => <li key={index}>{typeof item === "string" ? item : item.label ?? item.description}</li>)}</ul> : <EmptyInline>{t("addExplicitBoundaries")}</EmptyInline>}</article><article className="cpv2-card cpv2-panel"><SectionHeading eyebrow={t("privacy")} title={t("buyerWorkPrivate")} /><p>{t("accessRecordsNeverInclude")}</p><dl><Fact label={t("corpusDigest")} value={shortDigest(product.corpus_digest ?? product.active_release?.corpus_digest)} /><Fact label={t("versionPolicy")} value={product.version_policy ?? t("pinnedPurchasedRelease")} /></dl></article></div>;
 }
 
 function FactoryIndexRedirect({ navigate }) {
@@ -388,73 +307,7 @@ function FactoryProductRedirect({ productId, navigate }) {
   return null;
 }
 
-function CandidatePage({ token, request, navigate, productId, candidateId, t, locale }) {
-  const resource = useRemote(request, `/v1/creator/products/${encodeURIComponent(productId)}/candidates/${encodeURIComponent(candidateId)}`, token);
-  const productResource = useRemote(request, `/v1/creator/products/${encodeURIComponent(productId)}`, token);
-  const [acknowledged, setAcknowledged] = useState([]);
-  const [mutation, setMutation] = useState({ state: "idle", error: "" });
-  const [confirmReject, setConfirmReject] = useState(false);
-
-  async function decide(action, candidate, expectedVersion) {
-    setMutation({ state: action, error: "" });
-    try {
-      await request(`/v1/creator/products/${encodeURIComponent(productId)}/candidates/${encodeURIComponent(candidateId)}/${action}`, {
-        method: "POST", token, headers: { "idempotency-key": mutationKey() },
-        body: JSON.stringify({
-          expected_version: expectedVersion,
-          ...(action === "approve" ? {
-            report_digest: candidate?.report_digest,
-            acknowledgements: acknowledged
-          } : {})
-        })
-      });
-      navigate(action === "approve" ? `${ROOT}/products/${encodeURIComponent(productId)}/preview` : `${ROOT}/products/${encodeURIComponent(productId)}/versions`);
-    } catch (error) {
-      setMutation({ state: "idle", error: friendlyError(error, t) });
-    }
-  }
-
-  if (productResource.state === "loading") return <LoadingState t={t} />;
-  if (productResource.state === "error") return <RouteProblem title={t("productLoadError")} body={friendlyError(productResource.error, t)} action={t("retry")} onAction={productResource.retry} />;
-  return <PageBoundary resource={resource} title={t("candidateLoadError")} retryLabel={t("retry")} t={t}>{(payload) => {
-    const raw = unwrap(payload, "candidate") ?? payload;
-    const candidate = raw?.candidate ? { ...raw, ...raw.candidate, run_status: raw.status } : raw;
-    const product = unwrap(productResource.data, "product") ?? productResource.data;
-    const gates = arrayOf(candidate?.gates ?? candidate?.critical_gates ?? candidate?.evaluation?.gates);
-    const losses = arrayOf(candidate?.non_critical_losses ?? candidate?.known_losses);
-    const changes = arrayOf(candidate?.material_changes);
-    const boundaries = arrayOf(candidate?.product_boundaries ?? candidate?.boundaries);
-    const comparisons = arrayOf(candidate?.blinded_comparison ?? candidate?.comparisons ?? candidate?.behavior_comparison);
-    const criticalFailed = candidate?.corpus_verified === false || candidate?.critical_gates_passed === false || gates.some((gate) => (gate?.critical || gate?.severity === "critical" || candidate?.critical_gates === gates) && gate?.passed === false);
-    const allAcknowledged = losses.every((loss, index) => acknowledged.includes(loss?.id ?? String(index)));
-    const alreadyApproved = product?.approval?.status === "approved"
-      && product.approval.candidate_id === candidateId
-      && product.approval.candidate_digest === candidate?.digest
-      && product.approval.report_digest === candidate?.report_digest;
-    // The candidate endpoint returns the version that was read together with
-    // this immutable candidate/report snapshot. Prefer it over the separate
-    // Product request: those two reads can complete in either order while a
-    // deployment reconciler is updating the same workflow record.
-    const expectedVersion = candidate?.resource_version ?? product?.resource_version ?? product?.version ?? 0;
-    const busy = mutation.state !== "idle";
-    return <>
-      <Breadcrumb onClick={() => navigate(`${ROOT}/products/${encodeURIComponent(productId)}/versions`)}>{t("versions")}</Breadcrumb>
-      <PageHeader eyebrow={t("candidateReview")} title={t("candidateReviewTitle", candidate?.version ?? "—")} body={t("candidateReviewBody")} />
-      {mutation.error ? <InlineError>{mutation.error}</InlineError> : null}
-      <div className="cpv2-detail-grid cpv2-review-grid">
-        <article className="cpv2-card cpv2-panel"><SectionHeading eyebrow={t("provenance")} title={t("whatWasEvaluated")} /><dl className="cpv2-fact-grid"><Fact label={t("candidateDigest")} value={candidate?.digest ?? t("notProvided")} /><Fact label={t("baseRelease")} value={candidate?.base_release?.label ?? candidate?.base_release_id ?? t("notProvided")} /><Fact label={t("datasetEvalSet")} value={candidate?.eval_set?.name ?? candidate?.eval_set_id ?? candidate?.dataset_id ?? t("notProvided")} /><Fact label={t("regressionDigest")} value={candidate?.regression_digest ?? candidate?.eval_set?.digest ?? t("notProvided")} /><Fact label={t("heldOutDigest")} value={candidate?.held_out_digest ?? t("notProvided")} /><Fact label={t("heldOutSamples")} value={candidate?.held_out_sample_count ?? candidate?.evaluation?.sample_count ?? t("notProvided")} /><Fact label={t("criticalGates")} value={candidate?.critical_case_count ?? candidate?.evaluation?.critical_case_count ?? gates.filter((gate) => gate?.critical || gate?.severity === "critical").length} /><Fact label={t("failedCriticalCases")} value={candidate?.failed_critical_cases ?? t("notProvided")} /><Fact label={t("built")} value={candidate?.built_at || candidate?.created_at ? dateTime(candidate?.built_at ?? candidate?.created_at, locale) : t("notProvided")} /><Fact label={t("factoryVersion")} value={candidate?.factory_version ?? t("notProvided")} /><Fact label={t("providerModel")} value={candidate?.provider_model ?? ([candidate?.provider, candidate?.model].filter(Boolean).join(" / ") || t("notProvided"))} /><Fact label={t("reportDigest")} value={candidate?.report_digest ?? candidate?.evaluation_digest ?? t("notProvided")} /></dl></article>
-        <article className="cpv2-card cpv2-panel"><SectionHeading eyebrow={t("decision")} title={criticalFailed ? t("criticalGatesBlockApproval") : t("candidateCanBeApproved")} /><p>{criticalFailed ? t("resolveFailedCriticalCases") : losses.length ? t("acknowledgeKnownLosses") : t("allRequiredGatesPassed")}</p><StatusChip status={criticalFailed ? "failed" : "passed"}>{criticalFailed ? t("blocked") : t("readyForDecision")}</StatusChip></article>
-      </div>
-      <article className="cpv2-card cpv2-panel cpv2-review-report"><SectionHeading eyebrow={t("deterministicGates")} title={t("evaluationReport")} />{gates.length ? <ul className="cpv2-gates">{gates.map((gate, index) => <li key={gate.id ?? index}><StatusChip status={gate.passed === false ? "failed" : "passed"}>{gate.passed === false ? t("failed") : t("passed")}</StatusChip><span><strong>{gate.name ?? gate.label ?? t("gateNumber", index + 1)}</strong><small>{gate.detail ?? gate.message ?? (gate.critical ? t("criticalGate") : t("evaluationGate"))}</small></span></li>)}</ul> : <EmptyInline>{t("noIndividualGateRows")}</EmptyInline>}
-        <h3>{t("blindedComparison")}</h3>{comparisons.length ? <ul className="cpv2-comparisons">{comparisons.map((item, index) => <li key={item?.id ?? index}><strong>{item?.label ?? item?.case ?? t("caseNumber", index + 1)}</strong><span>{t("currentValue", item?.current ?? item?.baseline ?? t("notProvided"))}</span><span>{t("candidateValue", item?.candidate ?? item?.proposed ?? t("notProvided"))}</span><small>{item?.verdict ?? item?.result ?? t("blindedResult")}</small></li>)}</ul> : <EmptyInline>{t("noBlindedComparison")}</EmptyInline>}
-        <h3>{t("materialBehaviorChanges")}</h3>{changes.length ? <ul className="cpv2-bullets">{changes.map((item, index) => <li key={index}>{typeof item === "string" ? item : item.description ?? item.label}</li>)}</ul> : <EmptyInline>{t("noMaterialBehaviorChanges")}</EmptyInline>}
-        <h3>{t("productBoundaries")}</h3>{boundaries.length ? <ul className="cpv2-bullets">{boundaries.map((item, index) => <li key={index}>{typeof item === "string" ? item : item.description ?? item.label}</li>)}</ul> : <EmptyInline>{t("noProductBoundaries")}</EmptyInline>}
-        {losses.length ? <fieldset className="cpv2-losses"><legend>{t("knownNonCriticalLosses")}</legend>{losses.map((loss, index) => { const lossId = loss?.id ?? String(index); return <Checkbox key={lossId} checked={acknowledged.includes(lossId)} onCheckedChange={(checked) => setAcknowledged((current) => checked ? [...current, lossId] : current.filter((id) => id !== lossId))} label={loss?.title ?? loss?.label ?? t("loss", index + 1)} description={loss?.description ?? loss?.detail ?? String(loss)} />; })}</fieldset> : null}
-      </article>
-      <div className="cpv2-action-bar"><div><strong>{t("approvalImmutable")}</strong><small>{t("candidateChangeInvalidates")}</small></div>{confirmReject ? <><span>{t("archiveCandidate")}</span><Button variant="danger" type="button" loading={mutation.state === "reject"} disabled={busy} onClick={() => decide("reject", candidate, expectedVersion)}>{t("yesReject")}</Button><Button variant="secondary" type="button" onClick={() => setConfirmReject(false)}>{t("cancel")}</Button></> : <Button variant="secondary" type="button" disabled={busy || alreadyApproved} onClick={() => setConfirmReject(true)}>{t("rejectCandidate")}</Button>}<Button type="button" loading={mutation.state === "approve"} disabled={busy || criticalFailed || !allAcknowledged || alreadyApproved} onClick={() => decide("approve", candidate, expectedVersion)}>{alreadyApproved ? t("approved") : t("approveCandidate")}</Button></div>
-    </>;
-  }}</PageBoundary>;
-}
+/* ---------- Client page preview ---------- */
 
 function PreviewPage({ token, request, navigate, productId, profile, t }) {
   const resource = useRemote(request, `/v1/creator/products/${encodeURIComponent(productId)}/storefront-preview`, token);
@@ -476,7 +329,7 @@ function PreviewPage({ token, request, navigate, productId, profile, t }) {
 
   async function copy(url) {
     try {
-      await navigator.clipboard.writeText(url);
+      await navigator.clipboard.writeText(new URL(url, window.location.origin).href);
       setCopied(true);
       void request("/v1/analytics/events", {
         method: "POST",
@@ -495,27 +348,33 @@ function PreviewPage({ token, request, navigate, productId, profile, t }) {
     }
   }
 
+  const back = <BackLink onClick={() => navigate(creatorFactoryPath(productId))}>{t("previewBack")}</BackLink>;
+
   if (published) {
     const publicUrl = canonicalPublicUrl(published.canonical_url ?? published.public_url ?? published.product?.canonical_url ?? published.product?.public_url)
       ?? (isUuidV4(productId) ? `/products/${productId}` : undefined);
-    return <section className="cpv2-published" aria-live="polite"><span aria-hidden="true">✓</span><h1>{t("yourProductLive")}</h1><p>{t("publishedBody")}</p><FormField label={t("shareLink")}><Input readOnly value={publicUrl ?? t("publicationCompleted")} onFocus={(event) => event.target.select()} /></FormField><div>{publicUrl ? <Button type="button" onClick={() => copy(publicUrl)}>{copied ? t("copied") : t("copyLink")}</Button> : null}{publicUrl ? <Button asChild variant="secondary"><a href={safePublicUrl(publicUrl)} target="_blank" rel="noreferrer">{t("viewStorefront")}</a></Button> : null}<Button variant="secondary" type="button" onClick={() => navigate(`${ROOT}/products/${encodeURIComponent(productId)}`)}>{t("backToProduct")}</Button></div>{error ? <InlineError>{error}</InlineError> : null}</section>;
+    return <section className="cpv2-published" aria-live="polite">{back}<Hero pill={t("agentLive")} title={t("yourProductLive")} body={t("publishedBody")} /><div className="cpv2-share web-card"><FormField label={t("shareLink")}><Input readOnly value={publicUrl ?? t("publicationCompleted")} onFocus={(event) => event.target.select()} /></FormField><div className="cpv2-actions">{publicUrl ? <Button className="web-btn-yolk" type="button" onClick={() => copy(publicUrl)}>{copied ? t("copied") : t("copyLink")}</Button> : null}{publicUrl ? <Button asChild variant="secondary"><a href={safePublicUrl(publicUrl)} target="_blank" rel="noreferrer">{t("viewStorefront")}</a></Button> : null}</div>{error ? <InlineError>{error}</InlineError> : null}</div></section>;
   }
 
   return <PageBoundary resource={resource} title={t("previewLoadError")} retryLabel={t("retry")} t={t}>{(payload) => {
-    const preview = payload?.preview && typeof payload.preview === "object"
-      ? payload.preview
-      : payload;
+    const preview = payload?.preview && typeof payload.preview === "object" ? payload.preview : payload;
     const product = preview.product ?? preview;
     const candidate = preview.candidate ?? candidateOf(product);
+    const live = isProductLive(product);
+    const publicUrl = live ? canonicalPublicUrl(preview.public_url ?? product.public_url) : undefined;
     const readiness = normalizeReadiness(preview, candidate, t);
     const ready = readiness.every((item) => item.ready);
     return <>
-      <Breadcrumb onClick={() => navigate(`${ROOT}/products/${encodeURIComponent(productId)}`)}>{t("product")}</Breadcrumb>
-      <PageHeader eyebrow={t("storefrontPreview")} title={t("seeExactly")} body={t("previewBody")} />
+      {back}
+      <Hero pill={t("previewPill")} title={t("previewTitle")} body={live ? t("factoryShipLive") : t("previewBody")} />
       {error ? <InlineError>{error}</InlineError> : null}
-      <div className="cpv2-preview-tools"><span className="cpv2-private-badge">{t("notPublic")}</span><div role="group" aria-label={t("previewViewport")}><Button type="button" variant="ghost" size="small" className={viewport === "desktop" ? "is-active" : ""} aria-pressed={viewport === "desktop"} onClick={() => setViewport("desktop")}>{t("desktop")}</Button><Button type="button" variant="ghost" size="small" className={viewport === "mobile" ? "is-active" : ""} aria-pressed={viewport === "mobile"} onClick={() => setViewport("mobile")}>{t("mobile")}</Button></div></div>
-      <div className={`cpv2-storefront-frame is-${viewport}`}><StorefrontDetails product={product} creatorName={preview.creator?.display_name ?? preview.creator_name ?? profile?.display_name} creatorAvatarUrl={preview.creator?.avatar_url ?? profile?.avatar_url} mode="preview" headingLevel={2} desktopRequirement={preview.desktop_requirement ?? product.desktop_requirement} releaseLabel={candidate ? `${t("candidateVersion", candidate.version ?? "—")} · ${candidate.digest ?? t("notProvided")}` : t("notProvided")} action={<Button type="button" disabled>{t("getAccess")}</Button>} /></div>
-      <article className="cpv2-card cpv2-readiness"><SectionHeading eyebrow={t("publishReadiness")} title={t("finalChecks")} /><ul>{readiness.map((item) => <li key={item.label} className={item.ready ? "is-ready" : ""}><span>{item.ready ? "✓" : "!"}</span><strong>{item.label}</strong><small>{item.detail}</small></li>)}</ul>{confirming ? <div className="cpv2-confirm cpv2-confirm-publish"><div><p><strong>{t("publishCandidateConfirm")}</strong><br />{t("publicPointerAfterMaterialization")}</p><dl className="cpv2-confirm-facts"><Fact label={t("product")} value={product.name ?? product.product_name ?? productId} /><Fact label={t("candidate")} value={`v${candidate?.version ?? "—"} · ${candidate?.digest ?? t("notProvided")}`} /><Fact label={t("publicUrl")} value={preview.public_url ?? (isUuidV4(productId) ? `/products/${productId}` : t("assignedAfterPublish"))} /></dl><small>{t("publishingCreates")}</small></div><Button variant="secondary" type="button" onClick={() => setConfirming(false)}>{t("cancel")}</Button><Button type="button" loading={publishing} disabled={!ready} onClick={() => publish({ ...preview, product, candidate })}>{t("confirmPublish")}</Button></div> : <Button type="button" disabled={!ready} onClick={() => setConfirming(true)}>{t("publish")}</Button>}</article>
+      {publicUrl ? <div className="cpv2-share web-card"><FormField label={t("shareLink")}><Input readOnly value={new URL(publicUrl, window.location.origin).href} onFocus={(event) => event.target.select()} /></FormField><div className="cpv2-actions"><Button className="web-btn-yolk" type="button" onClick={() => copy(publicUrl)}>{copied ? t("copied") : t("copyLink")}</Button><Button asChild variant="secondary"><a href={safePublicUrl(publicUrl)} target="_blank" rel="noreferrer">{t("viewStorefront")}</a></Button></div></div> : null}
+      <div className="cpv2-segmented" role="group" aria-label={t("previewViewport")}>
+        <button type="button" className={viewport === "desktop" ? "is-active" : ""} aria-pressed={viewport === "desktop"} onClick={() => setViewport("desktop")}>{t("desktop")}</button>
+        <button type="button" className={viewport === "mobile" ? "is-active" : ""} aria-pressed={viewport === "mobile"} onClick={() => setViewport("mobile")}>{t("mobile")}</button>
+      </div>
+      <div className={`cpv2-storefront-frame web-card is-${viewport}`}><StorefrontDetails product={product} creatorName={preview.creator?.display_name ?? preview.creator_name ?? profile?.display_name} creatorAvatarUrl={preview.creator?.avatar_url ?? profile?.avatar_url} mode="preview" headingLevel={2} desktopRequirement={preview.desktop_requirement ?? product.desktop_requirement} releaseLabel={candidate ? `${t("candidateVersion", candidate.version ?? "—")}` : undefined} action={<Button type="button" disabled>{t("getAccess")}</Button>} /></div>
+      {!live && candidate ? <article className="cpv2-readiness web-card"><SectionHeading title={t("finalChecks")} /><ul>{readiness.map((item) => <li key={item.label} className={item.ready ? "is-ready" : ""}><span aria-hidden="true">{item.ready ? "✓" : "·"}</span><strong>{item.label}</strong><small>{item.detail}</small></li>)}</ul>{confirming ? <div className="cpv2-confirm"><p><strong>{t("publishCandidateConfirm")}</strong><br />{t("publicPointerAfterMaterialization")}</p><div className="cpv2-actions"><Button variant="secondary" type="button" onClick={() => setConfirming(false)}>{t("cancel")}</Button><Button className="web-btn-yolk" type="button" loading={publishing} disabled={!ready} onClick={() => publish({ ...preview, product, candidate })}>{t("confirmPublish")}</Button></div></div> : <Button className="web-btn-yolk" type="button" disabled={!ready} onClick={() => setConfirming(true)}>{t("publish")}</Button>}</article> : null}
     </>;
   }}</PageBoundary>;
 }
@@ -526,7 +385,8 @@ function ReleasePage({ token, request, navigate, productId, releaseId, profile, 
   return <PageBoundary resource={resource} title={t("releaseLoadError")} retryLabel={t("retry")} t={t}>{(payload) => {
     const product = unwrap(payload, "product") ?? payload;
     const release = arrayOf(product.releases).find((item) => idOf(item, "release") === releaseId) ?? (idOf(product.release, "release") === releaseId ? { ...product.release, current: true } : null) ?? product.active_release;
-    if (!release) return <RouteProblem title={t("releaseNotFound")} body={t("releaseHistoryMissing")} action={t("backToVersions")} onAction={() => navigate(`${ROOT}/products/${encodeURIComponent(productId)}/versions`)} />;
+    const back = <BackLink onClick={() => navigate(creatorFactoryPath(productId))}>{product.name ?? t("product")}</BackLink>;
+    if (!release) return <>{back}<RouteProblem title={t("releaseNotFound")} body={t("releaseHistoryMissing")} /></>;
     async function rollback() {
       if (!state.reason.trim()) return;
       setState((current) => ({ ...current, busy: true, error: "", done: false }));
@@ -541,28 +401,32 @@ function ReleasePage({ token, request, navigate, productId, releaseId, profile, 
         resource.retry();
       } catch (error) { setState((current) => ({ ...current, busy: false, error: friendlyError(error, t), done: false })); }
     }
-    return <><Breadcrumb onClick={() => navigate(`${ROOT}/products/${encodeURIComponent(productId)}/versions`)}>{t("versions")}</Breadcrumb><PageHeader eyebrow={t("immutableRelease")} title={release.label ?? `${t("release")} ${release.version ?? ""}`} body={t("existingAccessPinned")} />{state.error ? <InlineError>{state.error}</InlineError> : null}{state.done ? <SuccessNotice>{t("currentReleaseUpdated")}</SuccessNotice> : null}<article className="cpv2-card cpv2-panel"><dl className="cpv2-fact-grid"><Fact label={t("releaseId")} value={idOf(release, "release")} /><Fact label={t("corpusDigest")} value={release.corpus_digest ?? release.digest} /><Fact label={t("publishedAt")} value={dateTime(release.published_at ?? release.created_at, locale)} /><Fact label={t("status")} value={release.current ? t("current") : t("previous")} /><Fact label={t("materialization")} value={release.materialization_status ?? t("notProvided")} /></dl></article>{release.current ? <p className="cpv2-muted">{t("alreadyCurrentRelease")}</p> : <section className="cpv2-rollback"><article className="cpv2-card cpv2-panel"><SectionHeading eyebrow={t("rollback")} title={t("makeExactReleaseCurrent")} /><p>{t("releaseFixedByPage")}</p><FormField label={t("release")}><Input readOnly value={`${release.label ?? releaseId} · ${release.corpus_digest ?? release.digest ?? t("notProvided")}`} /></FormField><FormField label={t("auditReason")} required><Textarea required value={state.reason} onChange={(event) => setState((current) => ({ ...current, reason: event.target.value, confirming: false }))} placeholder={t("whyReleaseCurrent")} /></FormField></article><div className="cpv2-rollback-preview"><span className="cpv2-private-badge">{t("rollbackPreview")}</span><StorefrontDetails product={product} creatorName={product.creator_name ?? profile?.display_name} creatorAvatarUrl={profile?.avatar_url} mode="preview" headingLevel={2} desktopRequirement={product.desktop_requirement} releaseLabel={`${release.label ?? releaseId} · ${release.corpus_digest ?? release.digest ?? t("notProvided")}`} action={<Button type="button" disabled>{t("getAccess")}</Button>} /></div>{state.confirming ? <div className="cpv2-card cpv2-confirm cpv2-confirm-publish" role="alert"><div><strong>{t("exactReleaseConfirm")}</strong><p>{state.reason}</p><small>{t("rollbackAudit")}</small></div><Button variant="secondary" type="button" onClick={() => setState((current) => ({ ...current, confirming: false }))}>{t("cancel")}</Button><Button type="button" loading={state.busy} disabled={!state.reason.trim()} onClick={rollback}>{t("confirmRollback")}</Button></div> : <Button type="button" disabled={!state.reason.trim()} onClick={() => setState((current) => ({ ...current, confirming: true }))}>{t("reviewRollback")}</Button>}</section>}</>;
+    return <>{back}<Hero pill={t("release")} title={release.label ?? `${t("release")} ${release.version ?? ""}`} body={t("existingAccessPinned")} />{state.error ? <InlineError>{state.error}</InlineError> : null}{state.done ? <SuccessNotice>{t("currentReleaseUpdated")}</SuccessNotice> : null}<article className="cpv2-panel web-card"><dl className="cpv2-fact-grid"><Fact label={t("publishedAt")} value={dateTime(release.published_at ?? release.created_at, locale)} /><Fact label={t("status")} value={release.current ? t("current") : t("previous")} /><Fact label={t("materialization")} value={release.materialization_status ? humanStatus(release.materialization_status, t) : t("notProvided")} /></dl></article>{release.current ? <p className="cpv2-quiet">{t("alreadyCurrentRelease")}</p> : <section className="cpv2-panel web-card"><SectionHeading title={t("makeExactReleaseCurrent")} /><p className="cpv2-quiet">{t("releaseFixedByPage")}</p><FormField label={t("auditReason")} required><Textarea required value={state.reason} onChange={(event) => setState((current) => ({ ...current, reason: event.target.value, confirming: false }))} placeholder={t("whyReleaseCurrent")} /></FormField><div className="cpv2-storefront-frame is-desktop"><StorefrontDetails product={product} creatorName={product.creator_name ?? profile?.display_name} creatorAvatarUrl={profile?.avatar_url} mode="preview" headingLevel={2} desktopRequirement={product.desktop_requirement} releaseLabel={release.label ?? releaseId} action={<Button type="button" disabled>{t("getAccess")}</Button>} /></div>{state.confirming ? <div className="cpv2-confirm" role="alert"><p><strong>{t("exactReleaseConfirm")}</strong><br />{t("rollbackAudit")}</p><div className="cpv2-actions"><Button variant="secondary" type="button" onClick={() => setState((current) => ({ ...current, confirming: false }))}>{t("cancel")}</Button><Button className="web-btn-yolk" type="button" loading={state.busy} disabled={!state.reason.trim()} onClick={rollback}>{t("confirmRollback")}</Button></div></div> : <Button type="button" disabled={!state.reason.trim()} onClick={() => setState((current) => ({ ...current, confirming: true }))}>{t("reviewRollback")}</Button>}</section>}</>;
   }}</PageBoundary>;
 }
 
+/* ---------- Orders ---------- */
+
+const EMPTY_ORDER_FILTERS = { order: "", product: "", from: "", to: "", limit: "25" };
+
 function OrdersPage({ token, request, navigate, t, locale }) {
-  const [filters, setFilters] = useState({ order: "", product: "", from: "", to: "", limit: "25" });
+  const [filters, setFilters] = useState(EMPTY_ORDER_FILTERS);
   const query = useMemo(() => creatorOrderQuery(filters), [filters]);
   const resource = useRemote(request, `/v1/creator/orders${query ? `?${query}` : ""}`, token);
-  return <PageBoundary resource={resource} title={t("ordersLoadError")} retryLabel={t("retry")} t={t}>{(payload) => {
-    return <>
-      <PageHeader eyebrow={t("accessRecords")} title={t("accessRecordsTitle")} body={t("accessRecordsBody")} />
-      <form className="cpv2-filters" onSubmit={(event) => event.preventDefault()}>
-        <FormField label={t("orderStatus")}><Select label={t("orderStatus")} value={filters.order || "all"} onValueChange={(value) => setFilters((current) => ({ ...current, order: value === "all" ? "" : value }))} options={[{ value: "all", label: t("all") }, { value: "fulfilled", label: t("fulfilled") }, { value: "refund_pending", label: t("refundPending") }, { value: "refunded", label: t("refunded") }, { value: "failed", label: t("failedOrder") }]} /></FormField>
-        <FormField label={t("productId")}><Input value={filters.product} onChange={(event) => setFilters((current) => ({ ...current, product: event.target.value }))} placeholder={t("allProducts")} /></FormField>
-        <FormField label={t("fromDate")}><Input type="date" value={filters.from} max={filters.to || undefined} onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))} /></FormField>
-        <FormField label={t("toDate")}><Input type="date" value={filters.to} min={filters.from || undefined} onChange={(event) => setFilters((current) => ({ ...current, to: event.target.value }))} /></FormField>
-        <FormField label={t("rowsPerPage")}><Select label={t("rowsPerPage")} value={filters.limit} onValueChange={(value) => setFilters((current) => ({ ...current, limit: value }))} options={[{ value: "12", label: "12" }, { value: "25", label: "25" }, { value: "50", label: "50" }, { value: "100", label: "100" }]} /></FormField>
-        <Button variant="secondary" type="button" onClick={() => setFilters({ order: "", product: "", from: "", to: "", limit: "25" })}>{t("clearFilters")}</Button>
-      </form>
-      <PaginatedOrders initialPayload={payload} query={query} token={token} request={request} navigate={navigate} t={t} locale={locale} />
-    </>;
-  }}</PageBoundary>;
+  const products = useRemote(request, "/v1/creator/products", token);
+  const productOptions = arrayOf(unwrap(products.data, "products")).map((product) => ({ value: idOf(product, "product"), label: product.name ?? product.product_name ?? t("untitledProduct") }));
+  const setFilter = (key) => (value) => setFilters((current) => ({ ...current, [key]: value === "all" ? "" : value }));
+  return <>
+    <Hero pill={t("ordersPill")} title={t("ordersTitle")} body={t("ordersBody")} />
+    <form className="cpv2-filters web-card" onSubmit={(event) => event.preventDefault()}>
+      <FormField label={t("ordersFilterAgent")}><Select label={t("ordersFilterAgent")} value={filters.product || "all"} onValueChange={setFilter("product")} options={[{ value: "all", label: t("ordersAllAgents") }, ...productOptions]} /></FormField>
+      <FormField label={t("orderStatus")}><Select label={t("orderStatus")} value={filters.order || "all"} onValueChange={setFilter("order")} options={[{ value: "all", label: t("all") }, { value: "fulfilled", label: t("fulfilled") }, { value: "refund_pending", label: t("refundPending") }, { value: "refunded", label: t("refunded") }, { value: "failed", label: t("failedOrder") }]} /></FormField>
+      <FormField label={t("fromDate")}><Input type="date" value={filters.from} max={filters.to || undefined} onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))} /></FormField>
+      <FormField label={t("toDate")}><Input type="date" value={filters.to} min={filters.from || undefined} onChange={(event) => setFilters((current) => ({ ...current, to: event.target.value }))} /></FormField>
+      <button className="cpv2-text-link" type="button" onClick={() => setFilters(EMPTY_ORDER_FILTERS)}>{t("clearFilters")}</button>
+    </form>
+    <PageBoundary resource={resource} title={t("ordersLoadError")} retryLabel={t("retry")} t={t}>{(payload) => <PaginatedOrders initialPayload={payload} query={query} token={token} request={request} navigate={navigate} t={t} locale={locale} />}</PageBoundary>
+  </>;
 }
 
 function PaginatedOrders({ initialPayload, query, token, request, navigate, t, locale }) {
@@ -589,31 +453,44 @@ function PaginatedOrders({ initialPayload, query, token, request, navigate, t, l
     finally { setLoadingMore(false); }
   }
 
-  if (!page.orders.length) return <EmptyState title={t("noMatchingOrders")} body={t("noOrdersBody")} />;
-  return <><div className="cpv2-pagination-status" role="status">{t("loadedOrders", page.orders.length, page.orders.length !== 1, page.cursor ? t("moreAvailable") : t("endResults"))}.</div><OrderList orders={page.orders} onOpen={(order) => navigate(`${ROOT}/orders/${encodeURIComponent(order.order_number ?? order.order_reference ?? idOf(order, "order"))}`)} detailed t={t} locale={locale} />{error ? <InlineError>{error}</InlineError> : null}{page.cursor ? <Button className="cpv2-load-more" variant="secondary" type="button" loading={loadingMore} onClick={loadMore}>{t("loadNextPage")}</Button> : null}</>;
+  if (!page.orders.length) return <EmptyState title={t("ordersEmptyTitle")} body={t("ordersEmptyBody")} />;
+  return <><OrderList orders={page.orders} onOpen={(order) => navigate(`${ROOT}/orders/${encodeURIComponent(order.order_number ?? order.order_reference ?? idOf(order, "order"))}`)} t={t} locale={locale} />{error ? <InlineError>{error}</InlineError> : null}{page.cursor ? <Button className="cpv2-load-more" variant="secondary" type="button" loading={loadingMore} onClick={loadMore}>{t("loadNextPage")}</Button> : null}</>;
 }
 
-function OrderList({ orders, onOpen, detailed = false, t, locale }) {
-  return <div className="cpv2-order-list" role="list">{orders.map((order) => { const reference = order.order_number ?? order.order_reference ?? idOf(order, "order"); return <article className="cpv2-order" role="listitem" key={idOf(order, "order")}><div><span className="cpv2-kicker">{reference}</span><h2>{order.product_name ?? order.product?.name ?? t("productAccess")}</h2><p>{order.buyer_display_name ?? t("buyer")} · {dateTime(order.created_at ?? order.placed_at, locale)}</p></div><dl><Fact label={t("access")} value={humanStatus(order.entitlement_status ?? order.status ?? order.order_status, t)} />{detailed ? <Fact label={t("accessStatus")} value={humanStatus(order.access_status ?? order.entitlement_status ?? order.status ?? "active", t)} /> : null}</dl><Button variant="secondary" type="button" onClick={() => onOpen(order)} aria-label={t("viewAccessRecord", reference)}>{t("viewRecord")}</Button></article>; })}</div>;
+function OrderList({ orders, onOpen, t, locale }) {
+  return <ul className="cpv2-order-list">{orders.map((order) => {
+    const reference = order.order_number ?? order.order_reference ?? idOf(order, "order");
+    return <li key={idOf(order, "order")}>
+      <button type="button" className="cpv2-order web-card" onClick={() => onOpen(order)} aria-label={t("viewAccessRecord", reference)}>
+        <span className="cpv2-order__who"><strong>{order.product_name ?? order.product?.name ?? t("productAccess")}</strong><small>{order.buyer_display_name ?? t("buyer")} · {dateTime(order.created_at ?? order.placed_at, locale)}</small></span>
+        <span className="cpv2-state">{humanStatus(order.entitlement_status ?? order.status ?? order.order_status, t)}</span>
+        <span className="cpv2-order__arrow" aria-hidden="true">→</span>
+      </button>
+    </li>;
+  })}</ul>;
 }
 
 function OrderPage({ token, request, navigate, orderId, t, locale }) {
   const resource = useRemote(request, `/v1/creator/orders/${encodeURIComponent(orderId)}`, token);
-  return <PageBoundary resource={resource} title={t("orderLoadError")} retryLabel={t("retry")} t={t}>{(payload) => {
-    const order = unwrap(payload, "order") ?? payload;
-    return <>
-      <Breadcrumb onClick={() => navigate(`${ROOT}/orders`)}>{t("orders")}</Breadcrumb>
-      <PageHeader eyebrow={order.order_reference ?? orderId} title={order.product_name ?? order.product?.name ?? t("orderDetail")} body={`${order.buyer_display_name ?? t("buyer")} · ${dateTime(order.created_at ?? order.placed_at, locale)}`} />
-      <article className="cpv2-card cpv2-panel">
-        <SectionHeading title={t("orderDetail")} />
-        <dl className="cpv2-fact-grid">
-          <Fact label={t("buyer")} value={order.buyer_display_name ?? t("notProvided")} />
-          <Fact label={t("placedAt")} value={dateTime(order.created_at ?? order.placed_at, locale)} />
-        </dl>
-      </article>
-    </>;
-  }}</PageBoundary>;
+  return <>
+    <BackLink onClick={() => navigate(`${ROOT}/orders`)}>{t("navOrders")}</BackLink>
+    <PageBoundary resource={resource} title={t("orderLoadError")} retryLabel={t("retry")} t={t}>{(payload) => {
+      const order = unwrap(payload, "order") ?? payload;
+      return <>
+        <Hero pill={t("orderDetail")} title={order.product_name ?? order.product?.name ?? t("orderDetail")} body={`${order.buyer_display_name ?? t("buyer")} · ${dateTime(order.created_at ?? order.placed_at, locale)}`} />
+        <article className="cpv2-panel web-card">
+          <dl className="cpv2-fact-grid">
+            <Fact label={t("buyer")} value={order.buyer_display_name ?? t("notProvided")} />
+            <Fact label={t("placedAt")} value={dateTime(order.created_at ?? order.placed_at, locale)} />
+            <Fact label={t("access")} value={humanStatus(order.entitlement_status ?? order.status ?? order.order_status, t)} />
+          </dl>
+        </article>
+      </>;
+    }}</PageBoundary>
+  </>;
 }
+
+/* ---------- Shared pieces ---------- */
 
 function PageBoundary({ resource, title, retryLabel, children, t }) {
   if (resource.state === "loading") return <LoadingState t={t} />;
@@ -621,25 +498,28 @@ function PageBoundary({ resource, title, retryLabel, children, t }) {
   return <>{children(resource.data)}</>;
 }
 
-function PageHeader({ title, body, action, onAction }) {
-  const headingRef = useRef(null);
-  useEffect(() => { headingRef.current?.focus({ preventScroll: true }); }, []);
-  return <HatchPageHeader className="cpv2-page-header" title={title} body={body} titleRef={headingRef} actions={action ? <Button type="button" onClick={onAction}>{action}</Button> : null} />;
+function Hero({ pill, title, body, action, onAction }) {
+  return <header className="cpv2-hero">
+    <div>
+      {pill ? <span className="web-pill">{pill}</span> : null}
+      <h1>{title}</h1>
+      {body ? <p>{body}</p> : null}
+    </div>
+    {action ? <Button className="web-btn-yolk" type="button" onClick={onAction}>{action}</Button> : null}
+  </header>;
 }
 
 function SectionHeading({ title, action, onAction }) {
-  return <HatchSectionHeader className="cpv2-section-heading" title={title} actions={action ? <Button variant="link" type="button" onClick={onAction}>{action} →</Button> : null} />;
+  return <div className="cpv2-section-heading"><h2>{title}</h2>{action ? <button className="cpv2-text-link" type="button" onClick={onAction}>{action} →</button> : null}</div>;
 }
 
-function Breadcrumb({ children, onClick }) { return <HatchBreadcrumbs className="cpv2-breadcrumb" items={[{ label: children, href: "#", icon: false, onClick: (event) => { event.preventDefault(); onClick(); } }]} />; }
-function StatusChip({ status, children }) { const tone = statusTone(status); return <HatchStatusTag tone={tone === "danger" ? "error" : tone}>{children}</HatchStatusTag>; }
+function BackLink({ children, onClick }) { return <button className="cpv2-back" type="button" onClick={onClick}><span aria-hidden="true">←</span> {children}</button>; }
 function Fact({ label, value }) { const missing = value === undefined || value === null || value === ""; return <div><dt>{label}</dt><dd title={typeof value === "string" ? value : undefined}>{missing ? "—" : value}</dd></div>; }
 function InlineError({ children }) { return <HatchInlineAlert className="cpv2-alert" tone="error">{children}</HatchInlineAlert>; }
 function SuccessNotice({ children }) { return <HatchInlineAlert className="cpv2-success" tone="success">{children}</HatchInlineAlert>; }
-function EmptyInline({ children }) { return <p className="cpv2-empty-inline">{children}</p>; }
 
 function EmptyState({ title, body, action, onAction }) {
-  return <HatchEmptyState className="cpv2-empty" title={title} body={body} action={action ? { label: action, onClick: onAction } : undefined} />;
+  return <section className="cpv2-empty web-card"><h2>{title}</h2><p>{body}</p>{action ? <Button className="web-btn-yolk" type="button" onClick={onAction}>{action}</Button> : null}</section>;
 }
 
 function RouteProblem({ title, body, action, onAction }) {
@@ -671,44 +551,17 @@ function defaultNavigate(path) {
 
 function localizedRouteTitle(route, t) {
   if (route.kind === "home") return t("creatorHome");
-  if (route.kind === "products") return t("products");
-  if (route.kind === "product-create") return t("createProduct");
-  if (route.kind === "factory-agents" || route.kind === "factory-index") return "Factory";
-  if (route.kind === "factory") return route.runId ? t("factoryRun") : t("creatorFactory");
-  if (route.kind === "candidate") return t("candidateReview");
-  if (route.kind === "preview") return t("storefrontPreview");
+  if (route.kind === "products" || route.kind === "factory-agents" || route.kind === "factory-index") return t("navAgents");
+  if (route.kind === "product-create") return t("newAgent");
+  if (route.kind === "preview") return t("previewPill");
   if (route.kind === "release") return t("release");
-  if (route.kind === "orders") return t("orders");
+  if (route.kind === "orders") return t("navOrders");
   if (route.kind === "order") return t("orderDetail");
-  if (route.kind === "product") return t("product");
-  return t("creatorDashboard");
-}
-
-function nextCreatorAction(products, t) {
-  if (!products.length) return { tone: "draft", title: t("createFocusedProduct"), body: t("createFocusedProductBody"), action: t("createProduct"), href: `${ROOT}/products/new` };
-  for (const product of products) {
-    if (product.status !== "published" && product.status !== "live") return { label: localizedProductStatus(product.status, t), tone: product.status, title: product.name ?? product.product_name ?? t("untitledProduct"), body: product.promise ?? product.description ?? t("continueProductWorkflow"), action: t("continueProduct"), href: `${ROOT}/products/${encodeURIComponent(idOf(product, "product"))}` };
-  }
-  const product = products[0];
-  return { label: t("live"), tone: "published", title: product.name ?? product.product_name ?? t("untitledProduct"), body: t("storefrontLiveBody"), action: t("viewProduct"), href: `${ROOT}/products/${encodeURIComponent(idOf(product, "product"))}` };
-}
-
-function localizedProductStatus(status, t) {
-  const key = `productStatus_${String(status ?? "draft").toLowerCase()}`;
-  const translated = t(key);
-  return translated === key ? t("productStatus_draft") : translated;
-}
-
-function productNextAction(product, candidate, t) {
-  if ((product.status === "published" || product.status === "live") && !candidate) return { action: t("previewStorefront"), href: (id) => `${ROOT}/products/${encodeURIComponent(id)}/preview` };
-  if (!candidate) return { action: t("continueInFactory"), href: (id) => `${ROOT}/products/${encodeURIComponent(id)}/about-you` };
-  if (!isApproved(candidate)) return { action: t("reviewCandidate"), href: (id, value) => `${ROOT}/products/${encodeURIComponent(id)}/candidates/${encodeURIComponent(idOf(value, "candidate"))}` };
-  return { action: t("previewStorefront"), href: (id) => `${ROOT}/products/${encodeURIComponent(id)}/preview` };
+  return t("studio");
 }
 
 function candidateOf(product) { const candidate = product?.candidate ?? product?.current_candidate ?? product?.latest_candidate ?? (product?.candidate_id ? { candidate_id: product.candidate_id, status: product.candidate_status, version: product.candidate_version, digest: product.candidate_digest } : null); return candidate ? { ...candidate, approval_status: product?.approval?.status ?? candidate.approval_status, approved: product?.approval?.status === "approved" || candidate.approved } : null; }
 function isApproved(candidate) { return ["approved", "publish_ready"].includes(candidate?.approval_status) || candidate?.approved === true || candidate?.status === "approved"; }
-function approvalLabel(candidate, t) { if (isApproved(candidate)) return t ? t("approved") : "Approved"; if (["ready", "ready_for_review", "review_ready"].includes(candidate?.status ?? candidate?.run_status)) return t ? t("productStatus_ready_for_review") : "Ready for review"; return humanStatus(candidate?.status ?? candidate?.run_status ?? "preparing", t); }
 
 function normalizeReadiness(preview, candidate, t) {
   const provided = arrayOf(preview?.readiness ?? preview?.checks);
@@ -719,28 +572,15 @@ function normalizeReadiness(preview, candidate, t) {
   ];
   return [
     { label: t("candidateApprovalCurrent"), detail: isApproved(candidate) ? t("boundCandidateDigest") : t("approveCandidateFirst"), ready: isApproved(candidate) },
-    { label: t("publicCopyBoundaries"), detail: preview?.product?.promise || preview?.promise ? t("buyerFacingCopyPresent") : t("addProductPromise"), ready: Boolean(preview?.product?.promise || preview?.promise || preview?.product?.description) },
     { label: t("registryMaterialization"), detail: preview?.materialization_status === "failed" ? t("materializationFailed") : t("readyToMaterialize"), ready: preview?.materialization_status !== "failed" }
   ];
 }
 
-function inferredTimeline(order, t) {
-  const events = [{ label: t("orderCreated"), at: order.created_at ?? order.placed_at }];
-  if (order.created_at || order.placed_at) events.push({ label: t("purchaseRecorded"), at: order.created_at ?? order.placed_at });
-  if (order.entitlement_status) events.push({ label: t("accessEvent", humanStatus(order.entitlement_status, t)), at: order.entitlement_at });
-  if (order.access_mode !== "unmetered" && order.delivery_status && !["not_started", "not_applicable"].includes(order.delivery_status)) events.push({ label: t("accessEvent", humanStatus(order.delivery_status, t)), at: order.delivery_completed_at ?? order.delivery_started_at });
-  if (order.refund_status && order.refund_status !== "none") events.push({ label: t("refundEvent", humanStatus(order.refund_status, t)), at: order.refunded_at });
-  return events;
-}
-
-function productStatus(status, t) { return localizedProductStatus(status, t); }
-function statusTone(status) { if (["published", "live", "passed", "approved", "paid", "completed", "fulfilled", "available"].includes(status)) return "success"; if (["failed", "needs_attention", "candidate_rejected", "refunded", "reversed", "blocked"].includes(status)) return "danger"; if (["candidate_ready", "ready_to_preview", "ready_for_review", "review_ready", "pending", "processing", "reserved", "in_transit"].includes(status)) return "warning"; return "neutral"; }
 const STATUS_MESSAGE_KEYS = {
   active: "statusActive", approved: "statusApproved", available: "statusAvailable", blocked: "statusBlocked", completed: "statusCompleted", failed: "statusFailed", fulfilled: "statusFulfilled", in_transit: "statusInTransit", pending: "statusPending", processing: "statusProcessing", published: "statusPublished", ready: "statusReady", refunded: "statusRefunded", refund_pending: "statusRefundPending", reserved: "statusReserved", reversed: "statusReversed", preparing: "statusPreparing", retired: "statusRetired", none: "statusNone"
 };
-function humanStatus(value, t) { if (!value) return t ? t("notProvided") : "—"; const raw = String(value); const key = STATUS_MESSAGE_KEYS[raw.toLowerCase()]; return t && key ? t(key) : raw.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
+function humanStatus(value, t) { if (!value) return t ? t("notProvided") : "—"; const raw = String(value); const key = STATUS_MESSAGE_KEYS[raw.toLowerCase()]; return t && key ? t(key) : raw.replaceAll("_", " "); }
 function dateTime(value, locale = "en") { if (!value) return "—"; const date = new Date(value); if (Number.isNaN(date.valueOf())) return String(value); const intlLocale = locale === "zh" ? "zh-CN" : locale === "ja" ? "ja-JP" : "en"; return new Intl.DateTimeFormat(intlLocale, { dateStyle: "medium", timeStyle: "short" }).format(date); }
-function shortDigest(value) { if (!value) return "—"; const text = String(value); return text.length > 22 ? `${text.slice(0, 12)}…${text.slice(-7)}` : text; }
 function idOf(value, kind) { return String(value?.[`${kind}_id`] ?? value?.id ?? ""); }
 function arrayOf(value) { if (Array.isArray(value)) return value; return []; }
 function unwrap(payload, key) { return payload && Object.prototype.hasOwnProperty.call(payload, key) ? payload[key] : payload; }
@@ -754,5 +594,4 @@ function canonicalPublicUrl(value) {
   return safePublicUrl(text);
 }
 function isUuidV4(value) { return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value ?? "")); }
-function listCopy(value, fallback) { const items = arrayOf(value); return items.length ? items.map((item) => typeof item === "string" ? item : item.label ?? item.description).filter(Boolean).join(" · ") : fallback; }
 function friendlyError(error, t) { if (!error) return t ? t("unexpectedError") : ""; if (error.status === 401) return t ? t("sessionExpired") : ""; if (error.status === 403) return t ? t("creatorForbidden") : ""; if (error.status === 404) return t ? t("requestedResourceMissing") : ""; if (error.status === 409) return t ? t("pageChanged") : ""; if (error.status === 429) return t ? t("tooManyRequests") : ""; return error.message || (t ? t("serviceUnavailable") : ""); }

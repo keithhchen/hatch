@@ -1,3 +1,5 @@
+import { STUDIO_COPY } from './studioCopy.js';
+
 const MESSAGES = {
   en: {
     research: 'Deep Research', voice: 'Voice Interview', generation: 'Agent Builder', generationShort: 'Builder', caseGeneration: 'Case Builder', caseShort: 'Cases', evaluator: 'Evaluator',
@@ -89,6 +91,8 @@ MESSAGES.ja.startAgentLabel = role => role === 'evaluator' ? 'Agent が更新さ
 delete MESSAGES.en.toolReturned;
 delete MESSAGES.zh.toolReturned;
 delete MESSAGES.ja.toolReturned;
+
+for (const locale of Object.keys(MESSAGES)) Object.assign(MESSAGES[locale], STUDIO_COPY[locale]);
 
 export const FACTORY_AGENT_I18N_KEYS = Object.keys(MESSAGES.en);
 export const FACTORY_AGENT_I18N_KEYS_BY_LOCALE = Object.fromEntries(Object.entries(MESSAGES).map(([locale, messages]) => [locale, Object.keys(messages)]));

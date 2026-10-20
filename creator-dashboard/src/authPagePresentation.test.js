@@ -7,14 +7,14 @@ const presentation = (locale, options) => createAuthPagePresentation((key) => bu
 
 test("Hatch sign-in and signup share the expert product promise in every locale", () => {
   const titles = {
-    en: "Expert agents that deliver.",
-    zh: "能够交付成果的专家 Agent。",
-    ja: "成果を届ける専門家の Agent。"
+    en: "Real experts, on call.",
+    zh: "真正的专家，随时在线。",
+    ja: "本物の専門家に、いつでも。"
   };
   const descriptions = {
-    en: "View the expert products you subscribe to on Hatch.",
-    zh: "查看你在 Hatch 平台上订阅的专家产品。",
-    ja: "Hatch で購読している専門家の製品を確認できます。"
+    en: "Ask the Agents they built about your own situation, any time.",
+    zh: "随时向他们打造的 Agent 说说你的情况。",
+    ja: "専門家が作った Agent に、いつでも自分の状況を相談できます。"
   };
   for (const locale of ["en", "zh", "ja"]) {
     const signIn = presentation(locale, { signingUp: false, studioIntent: false, productIntent: false });
@@ -23,6 +23,7 @@ test("Hatch sign-in and signup share the expert product promise in every locale"
     assert.equal(signUp.heroTitle, titles[locale]);
     assert.equal(signIn.heroDescription, descriptions[locale]);
     assert.equal(signUp.heroDescription, descriptions[locale]);
+    assert.ok(signIn.pill && signUp.pill && signIn.pill !== signUp.pill);
   }
 });
 

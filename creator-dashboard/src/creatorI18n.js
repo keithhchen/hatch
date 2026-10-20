@@ -1,3 +1,5 @@
+import { STUDIO_COPY } from "./studioCopy.js";
+
 const MESSAGES = {
   en: {
     language: "Language",
@@ -1469,8 +1471,10 @@ export function createCreatorTranslator(locale = "en") {
   const messages = {
     ...MESSAGES.en,
     ...PORTAL_MESSAGES.en,
+    ...STUDIO_COPY.en,
     ...(MESSAGES[locale] ?? {}),
-    ...(PORTAL_MESSAGES[locale] ?? {})
+    ...(PORTAL_MESSAGES[locale] ?? {}),
+    ...(STUDIO_COPY[locale] ?? {})
   };
   return (key, ...args) => {
     const value = messages[key] ?? MESSAGES.en[key] ?? key;
