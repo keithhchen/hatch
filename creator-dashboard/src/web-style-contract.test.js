@@ -79,7 +79,7 @@ test("Web home speaks to experts with one try CTA", () => {
   assert.match(page, /id=\"top\"/);
   assert.match(page, /const TRY_HREF = "\/studio"/);
   assert.match(page, /fetch\(\"\/api\/contact\"/);
-  assert.match(page, /heroTitleB: "它在接下一个。"/);
+  assert.match(read("creator-dashboard/src/web/landingCopy.ts"), /heroTitleB: "它在接下一个。"/);
   assert.match(page, /className="cta-arrow"[^>]*>→<\/span>/);
   assert.doesNotMatch(page, /Agent GMV|Marketplace|Skill 太薄/);
 });
