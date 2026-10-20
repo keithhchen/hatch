@@ -179,6 +179,8 @@ button { font: inherit; color: inherit; }
 .contact-inner { padding: 32px; }
 .contact-heading { display: flex; justify-content: space-between; align-items: center; }
 .contact-close { border: 0; background: none; font-size: 28px; cursor: pointer; }
+.apply-body { margin: -8px 0 20px; font-size: 16px; line-height: 1.6; color: var(--body); }
+.contact-heading .pill { margin: 0; }
 .contact-inner h3 { margin: 12px 0 20px; font-size: 32px; font-weight: 900; }
 .contact-form { display: grid; gap: 14px; }
 .contact-form label { display: grid; gap: 6px; font-size: 14px; color: var(--muted); }

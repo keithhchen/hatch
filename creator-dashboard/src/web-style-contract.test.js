@@ -77,7 +77,8 @@ test("Web home speaks to experts with one try CTA", () => {
   const page = read("creator-dashboard/src/web/HatchPage.tsx");
 
   assert.match(page, /id=\"top\"/);
-  assert.match(page, /const TRY_HREF = "\/studio"/);
+  assert.match(page, /fetch\("\/api\/apply"/);
+  assert.doesNotMatch(page, /href="\/explore"/);
   assert.match(page, /fetch\(\"\/api\/contact\"/);
   assert.match(page, /<FieldPicker/);
   assert.match(read("creator-dashboard/src/web/landingCopy.ts"), /scenarios: \[/);

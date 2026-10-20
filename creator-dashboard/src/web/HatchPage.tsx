@@ -4,7 +4,6 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { LOCALES, useLocale } from "../locale.jsx";
 import { landingCopy, type Lang, type LandingCopy, type Scenario } from "./landingCopy";
 
-const TRY_HREF = "/studio";
 const SHOW_PRICING = false;
 const LOCKUP = "/assets/web/hatch-lockup.svg";
 const LANG_NAMES: Record<Lang, string> = { zh: "中文", en: "English", ja: "日本語" };
@@ -657,6 +656,89 @@ function Stories({ t }: { t: LandingCopy }) {
   );
 }
 
+function ApplyDialog({ t, lang, open, onClose }: { t: LandingCopy; lang: Lang; open: boolean; onClose: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
+  const a = t.apply;
+
+  useEffect(() => {
+    const dialog = ref.current;
+    if (!dialog) return;
+    if (open && !dialog.open) {
+      setStatus("idle");
+      dialog.showModal();
+    }
+    if (!open && dialog.open) dialog.close();
+  }, [open]);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    setStatus("submitting");
+    try {
+      const response = await fetch("/api/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: data.get("url"), contact: data.get("contact"), website: data.get("website"), language: lang }),
+      });
+      if (!response.ok) throw new Error("Application submission failed");
+      form.reset();
+      setStatus("success");
+    } catch {
+      setStatus("error");
+    }
+  }
+
+  return (
+    <dialog
+      className="contact-dialog"
+      ref={ref}
+      aria-labelledby="apply-dialog-title"
+      onClose={onClose}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) event.currentTarget.close();
+      }}
+    >
+      <div className="contact-inner">
+        <div className="contact-heading">
+          <span className="pill pill-l">{t.tryNote}</span>
+          <button className="contact-close" type="button" onClick={() => ref.current?.close()} aria-label={t.contactClose}>×</button>
+        </div>
+        <h3 id="apply-dialog-title">{status === "success" ? a.doneTitle : a.title}</h3>
+        {status === "success" ? (
+          <>
+            <p className="apply-body">{a.doneBody}</p>
+            <button className="btn btn-ink" type="button" onClick={() => ref.current?.close()}>{a.close}</button>
+          </>
+        ) : (
+          <>
+            <p className="apply-body">{a.body}</p>
+            <form className="contact-form" onSubmit={submit}>
+              <label>
+                <span>{a.url}</span>
+                <input name="url" required maxLength={500} placeholder={a.urlHint} autoComplete="url" />
+              </label>
+              <label>
+                <span>{a.contact}</span>
+                <input name="contact" required minLength={3} maxLength={200} placeholder={a.contactHint} />
+              </label>
+              <input className="contact-honeypot" name="website" type="text" tabIndex={-1} autoComplete="off" aria-hidden="true" />
+              <div className="contact-actions">
+                <button className="btn btn-yolk" type="submit" disabled={status === "submitting"}>
+                  {status === "submitting" ? a.sending : a.submit}
+                  <span className="cta-arrow" aria-hidden="true">→</span>
+                </button>
+                <p className={`contact-status ${status}`} aria-live="polite">{status === "error" ? a.error : ""}</p>
+              </div>
+            </form>
+          </>
+        )}
+      </div>
+    </dialog>
+  );
+}
+
 export default function HatchPage() {
   const { locale, setLocale } = useLocale();
   const lang = locale as Lang;
@@ -665,6 +747,7 @@ export default function HatchPage() {
   const s = t.scenarios[field];
   const [contactStatus, setContactStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
   const [isContactDialogOpen, setIsContactDialogOpen] = useState(false);
+  const [isApplyOpen, setIsApplyOpen] = useState(false);
   const contactDialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -714,10 +797,10 @@ export default function HatchPage() {
   }
 
   const tryButton = (
-    <a className="btn btn-yolk" href={TRY_HREF}>
+    <button className="btn btn-yolk" type="button" onClick={() => setIsApplyOpen(true)}>
       {t.tryCta}
       <span className="cta-arrow" aria-hidden="true">→</span>
-    </a>
+    </button>
   );
 
   return (
@@ -732,7 +815,7 @@ export default function HatchPage() {
         </nav>
         <div className="nav-right">
           <a className="nav-login" href="/studio">{t.nav.login}</a>
-          <a className="btn btn-ink btn-sm" href={TRY_HREF}>{t.nav.try}</a>
+          <button className="btn btn-ink btn-sm" type="button" onClick={() => setIsApplyOpen(true)}>{t.nav.try}</button>
         </div>
       </header>
 
@@ -812,6 +895,8 @@ export default function HatchPage() {
         <p className="fine">{t.tryNote}</p>
       </section>
 
+      <ApplyDialog t={t} lang={lang} open={isApplyOpen} onClose={() => setIsApplyOpen(false)} />
+
       <dialog
         className="contact-dialog"
         ref={contactDialogRef}
@@ -881,14 +966,12 @@ export default function HatchPage() {
         <div className="footer-cols">
           <div>
             <p className="eyebrow">{t.footer.product}</p>
-            <a href={TRY_HREF}>{t.nav.try}</a>
+            <button type="button" onClick={() => setIsApplyOpen(true)}>{t.nav.try}</button>
             <a href="/studio">{t.footer.login}</a>
-            <a href="/explore">{t.footer.explore}</a>
             <a href="/download">{t.footer.download}</a>
           </div>
           <div>
             <p className="eyebrow">{t.footer.company}</p>
-            <button type="button" onClick={openContactDialog}>{t.footer.partner}</button>
             <button type="button" onClick={openContactDialog}>{t.footer.contact}</button>
           </div>
         </div>

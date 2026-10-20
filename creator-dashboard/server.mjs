@@ -19,7 +19,7 @@ import {
   PostgresCommerceLedger
 } from "../packages/commerce/src/index.js";
 import { PortalStateStore, stateError } from "./portalState.mjs";
-import { submitContact } from "./contactForm.mjs";
+import { submitApplication, submitContact } from "./contactForm.mjs";
 import { createProviderAdapter } from "./providerAdapters.mjs";
 import {
   createDefaultMetadata,
@@ -527,6 +527,12 @@ export async function createDashboardApp(options = {}) {
             }
           });
         }
+      }
+      if (request.method === "POST" && url.pathname === "/api/apply") {
+        const originError = crossSiteMutationError(request);
+        if (originError) return send(response, originError.status, originError.body);
+        const result = await submitApplication(await readJson(request, 16 * 1024), { fetchImpl });
+        return send(response, result.status, result.body);
       }
       if (request.method === "POST" && url.pathname === "/api/contact") {
         const originError = crossSiteMutationError(request);
