@@ -165,7 +165,9 @@ button { font: inherit; color: inherit; }
 .footer { display: flex; align-items: flex-start; justify-content: space-between; gap: 40px; padding: 56px var(--pad) 0; }
 .footer-brand { display: flex; flex-direction: column; gap: 20px; }
 .lang-select { display: inline-flex; align-items: center; gap: 10px; font-size: 14px; color: var(--muted); }
-.lang-select select { padding: 8px 12px; border: 1px solid var(--rule); border-radius: 10px; background: var(--card); font: inherit; color: var(--ink); cursor: pointer; }
+.lang-select select { appearance: none; -webkit-appearance: none; padding: 9px 40px 9px 16px; border: 1px solid var(--rule); border-radius: 999px; background: var(--card) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%235e584b' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 16px center; font: inherit; color: var(--ink); cursor: pointer; transition: border-color 160ms ease; }
+.lang-select select:hover { border-color: var(--muted); }
+.lang-select select:focus-visible { outline: none; border-color: var(--yolk); box-shadow: 0 0 0 3px var(--yolk-soft); }
 .footer-cols { display: flex; gap: 72px; }
 .footer-cols div { display: flex; flex-direction: column; gap: 12px; }
 .footer-cols a, .footer-cols button { border: 0; padding: 0; background: none; text-align: left; font-size: 15px; color: var(--body); cursor: pointer; }
