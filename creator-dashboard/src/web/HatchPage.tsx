@@ -625,8 +625,6 @@ export default function HatchPage() {
           <img src={WORDMARK} alt="Hatch" width={72} height={28} />
         </a>
         <nav className="nav-links" aria-label="Page sections">
-          <a href="#story">{t.nav.story}</a>
-          <a href="#learn">{t.nav.learn}</a>
           <a href="#pricing">{t.nav.pricing}</a>
           <a href="#faq">{t.nav.faq}</a>
         </nav>
