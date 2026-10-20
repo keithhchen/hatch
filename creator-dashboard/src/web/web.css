@@ -43,7 +43,7 @@ button { font: inherit; color: inherit; }
 /* Nav */
 .nav { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; justify-content: space-between; gap: 24px; height: 68px; padding: 0 var(--pad); background: color-mix(in srgb, var(--paper) 88%, transparent); border-bottom: 1px solid var(--rule); backdrop-filter: blur(14px); }
 .nav-brand { display: inline-flex; align-items: center; gap: 10px; }
-.nav-brand img { display: block; height: 28px; width: auto; }
+.nav-brand img { display: block; height: 30px; width: auto; }
 .nav-links { display: flex; gap: 32px; font-size: 15px; color: var(--muted); }
 .nav-links a:hover, .nav-login:hover { color: var(--ink); }
 .nav-right { display: flex; align-items: center; gap: 20px; }

@@ -6,7 +6,7 @@ import { landingCopy, type Lang, type LandingCopy, type Scenario } from "./landi
 
 const TRY_HREF = "/studio";
 const SHOW_PRICING = false;
-const WORDMARK = "/assets/web/hatch-wordmark.svg";
+const LOCKUP = "/assets/web/hatch-lockup.svg";
 const LANG_NAMES: Record<Lang, string> = { zh: "中文", en: "English", ja: "日本語" };
 const PLATFORMS: [string, string, string][] = [
   ["xiaohongshu", "小红书", "Xiaohongshu"],
@@ -724,8 +724,7 @@ export default function HatchPage() {
     <main className={`site is-${lang}`}>
       <header className="nav">
         <a className="nav-brand" href="#top" aria-label="Hatch home">
-          <Egg />
-          <img src={WORDMARK} alt="Hatch" width={72} height={28} />
+          <img src={LOCKUP} alt="Hatch" width={101} height={30} />
         </a>
         <nav className="nav-links" aria-label="Page sections">
           {SHOW_PRICING && <a href="#pricing">{t.nav.pricing}</a>}
@@ -868,8 +867,7 @@ export default function HatchPage() {
       <footer className="footer">
         <div className="footer-brand">
           <a className="nav-brand" href="#top">
-            <Egg />
-            <img src={WORDMARK} alt="Hatch" width={72} height={28} />
+            <img src={LOCKUP} alt="Hatch" width={101} height={30} />
           </a>
           <label className="lang-select">
             <span>{t.footer.language}</span>
