@@ -56,6 +56,24 @@ function Logo({ slug, name }: { slug: string; name: string }) {
   );
 }
 
+function FlipWords({ words }: { words: string[] }) {
+  const [i, setI] = useState(2);
+  useEffect(() => {
+    const id = window.setInterval(() => setI((v) => (v + 1) % words.length), 2200);
+    return () => window.clearInterval(id);
+  }, [words]);
+  const w = words[i % words.length];
+  return (
+    <span className="flip" aria-label={words.join(" / ")}>
+      <span className="flip-w" key={w} aria-hidden="true">
+        {[...w].map((ch, k) => (
+          <span key={k} style={{ animationDelay: `${k * 45}ms` }}>{ch === " " ? "\u00a0" : ch}</span>
+        ))}
+      </span>
+    </span>
+  );
+}
+
 function FieldPicker({ t, value, onChange }: { t: LandingCopy; value: number; onChange: (i: number) => void }) {
   return (
     <div className="picker">
@@ -702,7 +720,7 @@ export default function HatchPage() {
       <section className="hero" id="top">
         <span className="pill">{t.heroEyebrow}</span>
         <h1>
-          <span>{t.heroTitleA}</span>
+          <span>{t.heroTitleA[0]}<FlipWords words={t.heroWords} />{t.heroTitleA[1]}</span>
           <em>{t.heroTitleB}</em>
         </h1>
         <p className="hero-body">{t.heroBody}</p>

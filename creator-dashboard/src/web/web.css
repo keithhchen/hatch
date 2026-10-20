@@ -52,9 +52,14 @@ button { font: inherit; color: inherit; }
 /* Hero */
 .hero { padding: clamp(56px, 8vw, 120px) var(--pad) clamp(40px, 5vw, 64px); text-align: center; }
 .hero h1 { max-width: 1100px; margin: 20px auto 0; font-size: clamp(44px, 6vw, 96px); font-weight: 800; line-height: 1.06; letter-spacing: -0.035em; }
-.hero h1 span { display: block; }
+.hero h1 > span { display: block; }
 .hero h1 em { display: inline; font-style: normal; background: linear-gradient(transparent 62%, var(--yolk) 62%, var(--yolk) 92%, transparent 92%); -webkit-box-decoration-break: clone; box-decoration-break: clone; }
 .is-zh .hero h1, .is-ja .hero h1 { font-size: clamp(40px, 5.2vw, 84px); }
+.flip { display: inline-block; white-space: nowrap; color: #c48f00; }
+.is-zh .hero h1 > span:first-child, .is-ja .hero h1 > span:first-child { white-space: nowrap; }
+.flip-w { display: inline-block; perspective: 600px; }
+.flip-w span { display: inline-block; animation: flipin 520ms cubic-bezier(.2, .9, .3, 1.2) both; transform-origin: 50% 80%; }
+@keyframes flipin { from { opacity: 0; transform: rotateX(-90deg) translateY(0.3em); filter: blur(4px); } to { opacity: 1; transform: none; filter: none; } }
 .hero-body { max-width: 720px; margin: 28px auto 0; font-size: clamp(17px, 1.5vw, 21px); line-height: 1.65; color: var(--muted); }
 
 /* Field picker */

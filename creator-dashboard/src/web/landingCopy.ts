@@ -15,8 +15,9 @@ export type Scenario = {
 
 const zh = {
   nav: { story: "它怎么接客户", learn: "它怎么学会你", pricing: "价格", faq: "常见问题", login: "登录", try: "免费试试" },
-  heroEyebrow: "为销售、顾问、教练和老师而做",
-  heroTitleA: "忙不过来的客户，",
+  heroEyebrow: "为专家而做的 AI",
+  heroTitleA: ["忙不过来的", "，"] as [string, string],
+  heroWords: ["私信", "咨询", "客户", "订单", "交付"],
   heroTitleB: "交给你的 AI 分身。",
   heroBody: "Hatch 替专家回咨询、谈成交、做交付。按你的方法，用你的口吻。",
   pickLabel: "你是做什么的？",
@@ -147,7 +148,7 @@ const zh = {
   contactError: "暂时没有发送成功，请稍后再试。",
   scenarios: [
     { field: "保险", role: 0, source: "来自 小红书主页", client: "孩子刚出生，该先给他买什么保险？", take: "先别急着给孩子挑产品。新生儿先补医疗就够，更要紧的是大人的保障。", ask: "家里谁是主要收入来源？房贷还剩多少年？", offer: { name: "家庭保障规划 1v1", meta: "60 分钟 · 由你本人", price: "¥800" }, delivered: "保障缺口分析 · 已交付 · 你已确认 ✓", notify: "新订单 · 家庭保障规划 ¥800 · 附家庭简介", interviewQ: "你说先补大人、再补孩子。哪一次，你劝客户先别给孩子买？" },
-    { field: "财富管理", role: 0, source: "来自 公众号菜单", client: "手上有 200 万闲钱，放香港还是放国内？", take: "放哪里不是第一个问题，这笔钱拿来干什么才是。", ask: "这笔钱几年内会用到？是给孩子读书，还是养老？", offer: { name: "资产配置诊断", meta: "72 小时出报告", price: "¥1,200" }, delivered: "资产配置诊断报告 · 已交付 · 你已确认 ✓", notify: "新订单 · 资产配置诊断 ¥1,200 · 附客户简介", interviewQ: "客户坚持要高收益的时候，你会在哪一句话上停下来？" },
+    { field: "财富管理", role: 0, source: "来自 公众号菜单", client: "手上有 200 万闲钱，存定期还是买基金？", take: "买什么不是第一个问题，这笔钱拿来干什么才是。", ask: "这笔钱几年内会用到？是给孩子读书，还是养老？", offer: { name: "资产配置诊断", meta: "72 小时出报告", price: "¥1,200" }, delivered: "资产配置诊断报告 · 已交付 · 你已确认 ✓", notify: "新订单 · 资产配置诊断 ¥1,200 · 附客户简介", interviewQ: "客户坚持要高收益的时候，你会在哪一句话上停下来？" },
     { field: "餐饮经营", role: 1, source: "来自 视频号主页", client: "新店开了三个月，翻台率一直上不去。", take: "翻台率低，多半不是上菜慢，是菜单让客人犹豫太久。", ask: "客单价多少？午市和晚市各坐满几成？", offer: { name: "菜单结构诊断", meta: "3 天交付", price: "¥2,000" }, delivered: "菜单结构诊断 · 已交付 · 你已确认 ✓", notify: "新订单 · 菜单结构诊断 ¥2,000 · 附门店简介", interviewQ: "你走进一家新店，第一眼先看哪里？" },
     { field: "法律", role: 1, source: "来自 小红书主页", client: "合伙人要退出，他的股份怎么算？", take: "先看当初签的协议，不是公司现在值多少。", ask: "合伙协议里写了退出条款吗？公司融过资吗？", offer: { name: "股权退出咨询", meta: "45 分钟 · 由你本人", price: "¥1,500" }, delivered: "协议条款梳理 · 已交付 · 你已确认 ✓", notify: "新订单 · 股权退出咨询 ¥1,500 · 附案情简介", interviewQ: "什么情况下，你会劝客户别打这场官司？" },
     { field: "职业发展", role: 2, source: "来自 小红书主页", client: "工作五年了，想转产品经理，还来得及吗？", take: "来得及。转行最难的不是年龄，是讲清楚你为什么要转。", ask: "你现在做什么？最想转的那一刻发生了什么？", offer: { name: "转行简历重写", meta: "48 小时交付", price: "¥600" }, delivered: "简历重写 · 已交付 · 你已抽查 ✓", notify: "新订单 · 转行简历重写 ¥600 · 附背景简介", interviewQ: "看一份简历，你几秒钟就知道这个人能不能转？靠的是什么？" },
@@ -161,8 +162,9 @@ export type LandingCopy = typeof zh;
 
 const en: LandingCopy = {
   nav: { story: "How it takes clients", learn: "How it learns you", pricing: "Pricing", faq: "FAQ", login: "Log in", try: "Try it free" },
-  heroEyebrow: "For salespeople, consultants, coaches and teachers",
-  heroTitleA: "Too many clients?",
+  heroEyebrow: "AI built for experts",
+  heroTitleA: ["Too many ", "?"] as [string, string],
+  heroWords: ["DMs", "inquiries", "clients", "orders", "deliverables"],
   heroTitleB: "Hand them to your AI twin.",
   heroBody: "Hatch answers inquiries, closes sales, and delivers the work for experts. Your method, your voice.",
   pickLabel: "What do you do?",
@@ -305,8 +307,9 @@ const en: LandingCopy = {
 
 const ja: LandingCopy = {
   nav: { story: "お客様の受け方", learn: "あなたの学び方", pricing: "料金", faq: "よくある質問", login: "ログイン", try: "無料で試す" },
-  heroEyebrow: "営業・コンサル・コーチ・先生のために",
-  heroTitleA: "手が回らないお客様は、",
+  heroEyebrow: "専門家のためのAI",
+  heroTitleA: ["手が回らない", "は、"] as [string, string],
+  heroWords: ["DM", "相談", "お客様", "注文", "納品"],
   heroTitleB: "あなたのAI分身に。",
   heroBody: "Hatchは専門家に代わって、相談に答え、成約し、納品まで担います。あなたのやり方、あなたの言葉で。",
   pickLabel: "あなたのお仕事は？",
