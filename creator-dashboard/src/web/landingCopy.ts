@@ -39,6 +39,7 @@ const zh = {
   floatEval: "考试通过 8/8",
   assetLabel: "它会成为你的资产",
   assetTitle: "一份会自己长大的判断。",
+  clock: { you: "你在见", youN: "1 位客户", it: "它同时在接", unit: "位", events: ["02:14 · 回了一条私信", "11:30 · 成交一单 ¥490", "21:05 · 交付一份报告"] },
   growth: { like: "像你", marks: ["第 1 天 · 读完你的内容", "第 30 天 · 记住 23 次纠正", "第 180 天 · 越来越像你"] },
   assets: [
     { title: "只属于你", body: "用你的方法做，只为你工作，不拿去训练别人的模型。" },
@@ -183,6 +184,7 @@ const en: LandingCopy = {
   floatEval: "Passed 8/8",
   assetLabel: "It becomes an asset",
   assetTitle: "Judgment that keeps growing.",
+  clock: { you: "You are seeing", youN: "1 client", it: "It is taking", unit: "", events: ["02:14 · answered a DM", "11:30 · closed a sale", "21:05 · delivered a report"] },
   growth: { like: "Like you", marks: ["Day 1 · read your work", "Day 30 · 23 corrections kept", "Day 180 · more like you"] },
   assets: [
     { title: "Yours alone", body: "Built from your method, working only for you, never used to train anyone else's model." },
@@ -325,6 +327,7 @@ const ja: LandingCopy = {
   floatEval: "テスト合格 8/8",
   assetLabel: "あなたの資産になる",
   assetTitle: "育ち続ける、あなたの判断。",
+  clock: { you: "あなたは", youN: "1人と面談中", it: "AIは同時に", unit: "人", events: ["02:14 · DMに返信", "11:30 · 1件成約", "21:05 · レポートを納品"] },
   growth: { like: "あなたらしさ", marks: ["1日目 · 発信を読了", "30日目 · 修正23件を記憶", "180日目 · もっとあなたらしく"] },
   assets: [
     { title: "あなただけのもの", body: "あなたのやり方でつくり、あなたのためだけに働き、他のモデルの学習には使いません。" },

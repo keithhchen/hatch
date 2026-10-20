@@ -395,26 +395,31 @@ function useInView<T extends HTMLElement>() {
 const ASSET_ART = [
   <div className="art art-lock" key="lock"><i /><i /><i /><span>🔒</span></div>,
   null,
-  <div className="art art-clock" key="clock"><span className="hand" /><span className="sun">☀︎</span><span className="moon">☾</span></div>,
+  null,
 ];
 
-const MARKS = [0.12, 0.55, 1];
-
-function Growth({ t, play }: { t: LandingCopy; play: number }) {
-  const path = useRef<SVGPathElement>(null);
+function useProgress(play: number, ms: number) {
   const [p, setP] = useState(0);
   useEffect(() => {
     if (!play) return;
     let raf = 0;
     const t0 = performance.now();
     const tick = (now: number) => {
-      const k = Math.min((now - t0) / 2600, 1);
+      const k = Math.min((now - t0) / ms, 1);
       setP(1 - Math.pow(1 - k, 3));
       if (k < 1) raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [play]);
+  }, [play, ms]);
+  return p;
+}
+
+const MARKS = [0.12, 0.55, 1];
+
+function Growth({ t, play }: { t: LandingCopy; play: number }) {
+  const path = useRef<SVGPathElement>(null);
+  const p = useProgress(play, 2600);
   const el = path.current;
   const len = el ? el.getTotalLength() : 320;
   const at = (q: number) => (el ? el.getPointAtLength(len * q) : { x: 8, y: 104 });
@@ -449,6 +454,49 @@ function Growth({ t, play }: { t: LandingCopy; play: number }) {
   );
 }
 
+const EVENTS = [0.09, 0.48, 0.88];
+
+function Clock({ t, play }: { t: LandingCopy; play: number }) {
+  const p = useProgress(play, 3200);
+  const c = t.clock;
+  const pos = (q: number, r: number) => {
+    const a = q * Math.PI * 2 - Math.PI / 2;
+    return { x: 100 + r * Math.cos(a), y: 100 + r * Math.sin(a) };
+  };
+  const hand = pos(p, 62);
+  return (
+    <div className="art art-clock2">
+      <div className="ck-stats">
+        <div><small>{c.you}</small><b>{c.youN}</b></div>
+        <div className="ck-it"><small>{c.it}</small><b>{Math.round(100 * p)}{c.unit}</b></div>
+      </div>
+      <div className="ck-dial">
+        <svg viewBox="0 0 200 200" aria-hidden="true">
+          <circle className="ck-face" cx="100" cy="100" r="78" />
+          <path className="ck-night" d="M100 22 A78 78 0 0 1 100 178" transform="rotate(90 100 100)" />
+          {Array.from({ length: 48 }, (_, i) => {
+            const q = i / 48;
+            const d = pos(q, 88 + (i % 3) * 5);
+            return <circle key={i} className={`ck-dot ${p >= q ? "on" : ""}`} cx={d.x} cy={d.y} r={i % 4 === 0 ? 3.2 : 2.2} />;
+          })}
+          <line className="ck-hand" x1="100" y1="100" x2={hand.x} y2={hand.y} />
+          <circle className="ck-hub" cx="100" cy="100" r="6" />
+          <text className="ck-sun" x="100" y="44">☀︎</text>
+          <text className="ck-moon" x="100" y="166">☾</text>
+        </svg>
+        {EVENTS.map((q, i) => {
+          const d = pos(q, 100);
+          return (
+            <span key={q} className={`ck-ev ck-e${i} ${p >= q ? "on" : ""}`} style={{ left: `${d.x / 2}%`, top: `${d.y / 2}%` }}>
+              {c.events[i]}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function Asset({ t }: { t: LandingCopy }) {
   const [ref, inView] = useInView<HTMLElement>();
   const [play, setPlay] = useState(0);
@@ -461,10 +509,10 @@ function Asset({ t }: { t: LandingCopy }) {
       <h2 className="title center">{t.assetTitle}</h2>
       <div className="bento">
         {t.assets.map((a, i) => (
-          <article className={`bento-card tint-${i}`} key={a.title} onClick={i === 1 ? () => setPlay((v) => v + 1) : undefined}>
+          <article className={`bento-card tint-${i}`} key={a.title} onClick={i ? () => setPlay((v) => v + 1) : undefined}>
             <h3>{a.title}</h3>
             <p>{a.body}</p>
-            {i === 1 ? <Growth t={t} play={play} /> : ASSET_ART[i]}
+            {i === 1 ? <Growth t={t} play={play} /> : i === 2 ? <Clock t={t} play={play} /> : ASSET_ART[i]}
           </article>
         ))}
       </div>
