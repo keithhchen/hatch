@@ -2,7 +2,7 @@ name: Hatch Web CI and CD
 
 on:
   push:
-    branches: [master, codex/web-ui-overhaul]
+    branches: [master]
     paths:
       - "creator-dashboard/**"
       - "packages/ui/**"
@@ -15,8 +15,10 @@ on:
 permissions:
   contents: read
 
+# Shares the production lock with deploy.yml so the Web and backend
+# releases never mutate the production host at the same time.
 concurrency:
-  group: hatch-web-production
+  group: hatch-production
   cancel-in-progress: false
 
 jobs:
