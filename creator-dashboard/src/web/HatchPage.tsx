@@ -29,7 +29,6 @@ function Egg({ size = 22 }: { size?: number }) {
   );
 }
 
-const Bar = ({ w, tone }: { w: string; tone?: "dark" | "yolk" }) => <i className={`sk-bar ${tone ?? ""}`} style={{ width: w }} />;
 
 function Typed({ text }: { text: string }) {
   const [n, setN] = useState(0);
@@ -128,20 +127,24 @@ function Phone({ t, s, step }: { t: LandingCopy; s: Scenario; step: number }) {
   );
 }
 
-function Story({ t, s }: { t: LandingCopy; s: Scenario }) {
+function useScrollStep() {
   const [step, setStep] = useState(0);
   const refs = useRef<(HTMLElement | null)[]>([]);
-
   useEffect(() => {
     const io = new IntersectionObserver(
       (entries) => {
         for (const e of entries) if (e.isIntersecting) setStep(Number((e.target as HTMLElement).dataset.i));
       },
-      { rootMargin: "-45% 0px -45% 0px" },
+      { rootMargin: "-62% 0px -33% 0px" },
     );
     refs.current.forEach((el) => el && io.observe(el));
     return () => io.disconnect();
   }, []);
+  return [step, refs] as const;
+}
+
+function Story({ t, s }: { t: LandingCopy; s: Scenario }) {
+  const [step, refs] = useScrollStep();
 
   return (
     <section className="story" id="story">
@@ -172,37 +175,110 @@ function Story({ t, s }: { t: LandingCopy; s: Scenario }) {
   );
 }
 
-function StepArt({ tag }: { tag: string }) {
-  if (tag === "READ") {
-    return (
-      <div className="sk-card" aria-hidden="true">
-        <span className="sk-label">READ</span>
-        <div className="sk-stack">
-          {[0, 1, 2].map((i) => (
-            <div className="sk-sheet" key={i}><Bar w="70%" /><Bar w="50%" /></div>
+function Count({ to }: { to: number }) {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setN((v) => (v >= to ? v : v + 2)), 24);
+    return () => window.clearInterval(id);
+  }, [to]);
+  return <>{Math.min(n, to)}</>;
+}
+
+const LEARN_PHOTOS = ["l_read", "l_voice", "l_eval", "l_live"];
+
+function Learn({ t, s }: { t: LandingCopy; s: Scenario }) {
+  const [step, refs] = useScrollStep();
+  const k = t.learnKit;
+  return (
+    <section className="story learn-story section-panel" id="learn">
+      <div className="story-steps">
+        <p className="eyebrow">{t.learnLabel}</p>
+        <h2 className="title">{t.learnTitle}</h2>
+        <p className="lead">{t.learnBody}</p>
+        {t.learnSteps.map((st, i) => (
+          <article
+            key={st.tag}
+            data-i={i}
+            ref={(el) => {
+              refs.current[i] = el;
+            }}
+            className={`story-step ${i === step ? "on" : ""}`}
+          >
+            <span className="step-n">0{i + 1}</span>
+            <h3>{st.title}</h3>
+            <p>{st.body}</p>
+          </article>
+        ))}
+      </div>
+      <div className="story-phone">
+        <div className="learn-stage">
+          {LEARN_PHOTOS.map((id, i) => (
+            <Photo key={id} id={id} alt="" className={`fill ${i === step ? "on" : ""}`} />
           ))}
+          <div className="glass lc" key={`${step}-${s.field}`}>
+            {step === 0 && (
+              <>
+                <span className="sk-label">READ</span>
+                {k.read.map(([slug, name, n], i) => (
+                  <div className="lc-row" key={name} style={{ animationDelay: `${i * 160}ms` }}>
+                    {slug ? <img src={`https://cdn.simpleicons.org/${slug}`} alt="" width={18} height={18} /> : <span className="lc-doc" />}
+                    <b>{name}</b>
+                    <small>{n}</small>
+                    <span className="sk-pass">✓</span>
+                  </div>
+                ))}
+                <span className="chip chip-green lc-pop">{k.readDone}</span>
+              </>
+            )}
+            {step === 1 && (
+              <>
+                <span className="sk-label">INTERVIEW · {s.field}</span>
+                <p className="bubble ai"><Typed text={s.interviewQ} /></p>
+                <div className="bubble me lc-voice" style={{ animationDelay: "1.6s" }}>
+                  <span className="wave">{Array.from({ length: 18 }, (_, i) => <i key={i} style={{ animationDelay: `${i * 60}ms` }} />)}</span>
+                  {k.voice}
+                </div>
+                <p className="bubble ai" style={{ animationDelay: "2.4s" }}>{k.follow}</p>
+                <div className="lc-note" style={{ animationDelay: "3.2s" }}>
+                  <span className="chip chip-yolk">{k.noted}</span>
+                  <p>{s.take}</p>
+                </div>
+              </>
+            )}
+            {step === 2 && (
+              <>
+                <span className="sk-label">EVAL · {k.evalTitle}</span>
+                {[s.client, ...k.evalCases].map((q, i) => (
+                  <div className="lc-row" key={q} style={{ animationDelay: `${i * 260}ms` }}>
+                    <span className={i === 2 ? "sk-redo" : "sk-pass"}>{i === 2 ? "↻" : "✓"}</span>
+                    <p>{q}</p>
+                    {i === 2 && <em className="soon">{k.evalRedo}</em>}
+                  </div>
+                ))}
+                <div className="lc-score">
+                  <small>{k.score}</small>
+                  <b><Count to={96} />%</b>
+                </div>
+                <div className="lc-meter"><i /></div>
+              </>
+            )}
+            {step === 3 && (
+              <>
+                <div className="lc-head">
+                  <span className="avatar">{s.field.slice(0, 1)}</span>
+                  <div>
+                    <b>{s.field}</b>
+                    <small>{k.liveLink}</small>
+                  </div>
+                </div>
+                <span className="lc-approve">{k.approve} ✓</span>
+                <span className="chip chip-green lc-pop">● {k.liveStatus}</span>
+              </>
+            )}
+          </div>
         </div>
       </div>
-    );
-  }
-  if (tag === "INTERVIEW") {
-    return (
-      <div className="sk-card" aria-hidden="true">
-        <span className="sk-label">INTERVIEW · 3/11</span>
-        <div className="sk-bubble"><Bar w="80%" tone="dark" /><Bar w="55%" tone="dark" /></div>
-        <div className="sk-bubble sk-bubble-me"><Bar w="60%" /></div>
-        <div className="sk-bubble"><Bar w="72%" tone="yolk" /></div>
-      </div>
-    );
-  }
-  return (
-    <div className="sk-card" aria-hidden="true">
-      <span className="sk-label">EVAL · ROUND 2</span>
-      <div className="sk-row"><span className="sk-pass">✓</span><Bar w="64%" /></div>
-      <div className="sk-row"><span className="sk-fail">✗</span><Bar w="56%" /></div>
-      <div className="sk-row"><span className="sk-redo">↻</span><Bar w="48%" tone="yolk" /></div>
-      <div className="sk-row"><span className="sk-pass">✓</span><span className="sk-label">8/8 PASSED</span></div>
-    </div>
+    </section>
   );
 }
 
@@ -444,31 +520,7 @@ export default function HatchPage() {
         <p className="fine">{t.whereNote}</p>
       </section>
 
-      <section className="section section-panel" id="learn">
-        <p className="eyebrow">{t.learnLabel}</p>
-        <div className="learn">
-          <div>
-            <h2 className="title">{t.learnTitle}</h2>
-            <p className="lead">{t.learnBody}</p>
-          </div>
-          <div className="interview">
-            <span className="sk-label">INTERVIEW · {s.field}</span>
-            <p className="iv">
-              <Typed key={s.interviewQ} text={s.interviewQ} />
-            </p>
-          </div>
-        </div>
-        <div className="steps">
-          {t.learnSteps.map((st, i) => (
-            <article className="step" key={st.tag}>
-              <StepArt tag={st.tag} />
-              <span className="step-n">0{i + 1}</span>
-              <h3>{st.title}</h3>
-              <p>{st.body}</p>
-            </article>
-          ))}
-        </div>
-      </section>
+      <Learn t={t} s={s} />
 
       <Stories t={t} />
 
