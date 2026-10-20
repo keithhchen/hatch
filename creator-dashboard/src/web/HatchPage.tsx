@@ -5,6 +5,7 @@ import { LOCALES, useLocale } from "../locale.jsx";
 import { landingCopy, type Lang, type LandingCopy, type Scenario } from "./landingCopy";
 
 const TRY_HREF = "/studio";
+const SHOW_PRICING = false;
 const WORDMARK = "assets/web/hatch-wordmark.svg";
 const LANG_NAMES: Record<Lang, string> = { zh: "中文", en: "English", ja: "日本語" };
 const PLATFORMS: [string, string, string][] = [
@@ -673,7 +674,7 @@ export default function HatchPage() {
           <img src={WORDMARK} alt="Hatch" width={72} height={28} />
         </a>
         <nav className="nav-links" aria-label="Page sections">
-          <a href="#pricing">{t.nav.pricing}</a>
+          {SHOW_PRICING && <a href="#pricing">{t.nav.pricing}</a>}
           <a href="#faq">{t.nav.faq}</a>
         </nav>
         <div className="nav-right">
@@ -720,6 +721,7 @@ export default function HatchPage() {
 
       <Trust t={t} />
 
+      {SHOW_PRICING && (
       <section className="section" id="pricing">
         <span className="pill">{t.pricingLabel}</span>
         <h2 className="title center">{t.pricingTitle}</h2>
@@ -735,6 +737,7 @@ export default function HatchPage() {
         </div>
         <p className="fine">{t.pricingNote}</p>
       </section>
+      )}
 
       <section className="section" id="faq">
         <span className="pill">{t.faqLabel}</span>
