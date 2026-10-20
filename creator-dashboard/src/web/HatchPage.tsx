@@ -1,466 +1,675 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { LanguageSwitcher } from "../LanguageSwitcher.jsx";
-import { useLocale } from "../locale.jsx";
-import { jaCopy } from "./copy.ja";
-import { webMediaUrl } from "./media";
+import { LOCALES, useLocale } from "../locale.jsx";
+import { landingCopy, type Lang, type LandingCopy, type Scenario } from "./landingCopy";
 
-type Lang = "zh" | "en" | "ja";
+const TRY_HREF = "/studio";
+const SHOW_PRICING = false;
+const WORDMARK = "/assets/web/hatch-wordmark.svg";
+const LANG_NAMES: Record<Lang, string> = { zh: "中文", en: "English", ja: "日本語" };
+const PLATFORMS: [string, string, string][] = [
+  ["xiaohongshu", "小红书", "Xiaohongshu"],
+  ["wechat", "微信", "WeChat"],
+  ["tiktok", "抖音", "TikTok"],
+  ["line", "LINE", "LINE"],
+  ["whatsapp", "WhatsApp", "WhatsApp"],
+  ["instagram", "Instagram", "Instagram"],
+  ["youtube", "YouTube", "YouTube"],
+  ["x", "X", "X"],
+  ["stripe", "Stripe", "Stripe"],
+  ["alipay", "支付宝", "Alipay"],
+];
 
-const copy = {
-  zh: {
-    meta: "EXPERT ECONOMY",
-    nav: ["产品缺口", "如何创建", "商业模式", "长期愿景", "合作伙伴", "联系"],
-    exploreCreators: "探索 Expert",
-    buildProduct: "创建你的 Expert 产品",
-    contactLink: "与 Hatch 深度合作",
-    heroTitleA: "把知识付费",
-    heroTitleB: "变成能干活的 Agent。",
-    heroBody:
-      "Hatch 让已经拥有受众的 Expert，把自己的方法做成可收费、能交付成果的 Agent——无需组建软件团队，也不必亲自完成每一次服务。",
-    heroFilmLabel: "Hatch 产品发布影片",
-        heroFilmPoster: "/assets/web/hatch-launch-poster.jpg",
-        heroFilmSrc: webMediaUrl("hatch-launch-zh.mp4"),
-    continuum: [
-      {
-        label: "COURSE",
-        title: "课程",
-        body: "可以规模化，但每个人得到的是同一套内容。",
-      },
-      {
-        label: "HATCH AGENT",
-        title: "Agent 产品",
-        body: "按照 Expert 的标准，针对用户 Context 完成工作。",
-      },
-      {
-        label: "CONSULTING",
-        title: "咨询",
-        body: "可以解决具体问题，但依赖 Expert 本人的时间。",
-      },
-    ],
-    continuumBridge: "两者之间缺失的产品层",
-    gapEyebrow: "01 · THE PRODUCT GAP",
-    gapTitle: "Expert 有了受众之后，\n还能卖什么？",
-    gapBody:
-      "Expert 已经可以通过社交媒体、课程、社群和 Newsletter 建立信任与分发。但他们仍然只能在可规模化的内容，与高价值却无法规模化的本人服务之间选择。",
-    gapBody2:
-      "与此同时，用户已经在把 Expert 的公开视频、文章和方法交给通用 AI，请它修改材料、生成方案或完成工作。需求并没有消失，但由 AI 产生的使用和收入正在绕过 Expert。",
-    gapList: [
-      ["内容与课程", "规模化，但个性化交付很浅。"],
-      ["咨询、批改与陪跑", "更接近结果，但受限于本人时间。"],
-      ["Prompt 与 Skill", "容易复制、安装门槛高，也不是完整消费产品。"],
-    ],
-    productEyebrow: "02 · THE PLATFORM",
-    productTitle: "Expert 自己创建。\nHatch 在背后运行。",
-    productBody:
-      "Hatch 是标准化平台，不是定制 Agent 工作室，也不做以 Hatch 为中心的 Consumer Marketplace。Expert 的身份、风格和产品体验始终在前。",
-    productPrinciple:
-      "Hatch 不先复制一个完整的人，再为分身寻找用途。它先确定用户愿意付费让这位 Expert 完成什么，再提取这项产品所需要的方法、判断、数据、工具和人工介入。",
-    processIntro:
-      "把一套方法做成真正可用、可收费的产品，通常需要产品设计、Agent 工程、质量评估、支付和持续运营。Hatch 将这套工作变成 Expert 可以自行完成的标准流程。",
-    steps: [
-      {
-        n: "01",
-        title: "定义产品",
-        body: "明确谁会购买、交付什么、如何收费、什么算合格，以及什么时候必须由本人介入。",
-      },
-      {
-        n: "02",
-        title: "导入方法",
-        body: "导入课程、案例、历史交付、修改记录和专有数据；Interview Agent 围绕真实案例补齐隐性判断。",
-      },
-      {
-        n: "03",
-        title: "生成并校准",
-        body: "Hatch 组合方法、数据、工具和工作流，并生成 Expert Evals；Expert 通过比较和修改校准自己的标准。",
-      },
-      {
-        n: "04",
-        title: "发布与收费",
-        body: "设定价格，生成产品页面与链接，再放入社交媒体、课程、社群或网站。",
-      },
-      {
-        n: "05",
-        title: "持续交付",
-        body: "Agent 完成主要工作，Expert 处理边界案例；真实纠正继续更新产品的标准与边界。",
-      },
-    ],
-    skillLabel: "A SKILL IS NOT YET A PRODUCT",
-    skillTitle: "一份 Skill 太薄了。",
-    skillBody:
-      "Skill 通常只能装下一套 SOP、instructions 或 taste。真正能工作的专家产品，还可能需要专有数据库、工具、历史案例和 Eval。",
-    fullProduct:
-      "Hatch 把这些能力放进一个低摩擦、可支付、受控运行的完整体验。用户得到成果，却不必安装 Skill，也拿不到 Expert 的底层方法与数据。",
-    workExamples: [
-      "改好的简历",
-      "Growth Audit",
-      "健身计划",
-      "短视频脚本",
-      "模拟面试",
-      "股票分析",
-      "销售话术",
-      "内容日历",
-      "课程作业批改",
-      "品牌 Brief",
-      "Notion 知识库",
-      "写作 Review",
-      "短视频剪辑",
-      "营销诊断",
-      "合同红线稿",
-      "谈判策略",
-      "定价方案",
-      "用户研究报告",
-      "Pitch Deck",
-      "分镜脚本",
-      "饮食计划",
-      "产品体验诊断",
-      "播客粗剪",
-      "品牌命名清单",
-    ],
-    businessEyebrow: "03 · BUSINESS MODEL",
-    businessTitle: "Expert 获得收入，\nHatch 才获得收入。",
-    businessBody:
-      "Expert 自行定义产品、价格和体验，并通过已有受众分发。最终用户按次购买或订阅某一位 Expert 的 Agent；Hatch 不收固定月费，也不运营面向消费者的 Agent Marketplace，而是从交易收入中获得 10%。",
-    businessClosing:
-      "这些平台主要帮助 Expert 销售内容与会员。Hatch 要增加下一类商品：能够读取用户 Context、执行工作并交付成果的 Expert Agent。",
-    scale:
-      "Hatch 的增长不来自软件席位，而来自 Expert 持续产生的 AI Agent GMV。",
-    visionBody:
-      "过去，一位专家要把自己的服务变成可规模化产品，要么亲自交付，要么组建产品、工程、运营和服务团队。Hatch 把这套产品化与履约能力标准化，让 Expert 可以自行创建、发布和经营自己的 AI 产品。",
-    final:
-      "Hatch 是 Expert Economy 的产品、履约与交易基础设施。Expert 无需组建软件团队，也能拥有一个持续创收的 AI 产品。",
-    partnersKicker: "一起 Hatch 点什么。",
-    partnersLabel: "WHO WE WANT TO PARTNER WITH",
-    partnersTitle: "我们希望与谁合作",
-    partnerTypes: [
-      {
-        label: "EXPERTS",
-        title: "已有受众、方法与服务的 Expert",
-        body: "将课程、咨询或内容，延展为自己的 Agent 产品。",
-      },
-      {
-        label: "INSTITUTIONS",
-        title: "内容版权方、媒体/IP 机构或 Expert 渠道方",
-        body: "让成熟内容资产，或一批 Expert 的方法，变成新的 Agent 产品。",
-      },
-    ],
-    contactLabel: "START A CONVERSATION",
-    contactTitle: "一起 Hatch 点什么。",
-    contactBody:
-      "如果你看到了合作的可能、认识我们该见的人，或只是想继续聊聊，欢迎留个联系方式。",
-    contactFields: {
-      name: "姓名",
-      email: "邮箱",
-      partnerType: "你的身份是什么？",
-      message: "想做的产品、已有的内容资产，或任何想告诉我们的事（选填）",
-    },
-    contactOptions: ["Expert", "内容版权方、媒体/IP 机构或 Expert 渠道方", "投资人"],
-    contactLaunch: "联系 Hatch",
-    contactClose: "关闭",
-    contactSubmit: "发送信息",
-    contactSending: "正在发送…",
-    contactSuccess: "收到。我们会尽快联系你。",
-    contactError: "暂时没有发送成功，请稍后再试。",
-  },
-  en: {
-    meta: "EXPERT ECONOMY",
-    nav: ["The gap", "How it works", "Business model", "Vision", "Partners", "Contact"],
-    exploreCreators: "Explore experts",
-    buildProduct: "Build your own expert product",
-    contactLink: "Partner deeply with Hatch",
-    heroTitleA: "Turn knowledge products",
-    heroTitleB: "into agents that do the work.",
-    heroBody:
-      "Hatch lets experts with an audience turn their methods into paid agents that deliver usable work—without a software team or doing every job themselves.",
-    heroFilmLabel: "Hatch product launch film",
-    heroFilmPoster: "/assets/web/hatch-launch-poster.jpg",
-    heroFilmSrc: webMediaUrl("hatch-launch-en.mp4"),
-    continuum: [
-      {
-        label: "COURSE",
-        title: "Courses",
-        body: "They scale, but everyone gets the same material.",
-      },
-      {
-        label: "HATCH AGENT",
-        title: "Agent products",
-        body: "They use each user’s context and follow the expert’s standards.",
-      },
-      {
-        label: "CONSULTING",
-        title: "Consulting",
-        body: "It solves specific problems, but depends on the expert’s time.",
-      },
-    ],
-    continuumBridge: "The missing layer between them",
-    gapEyebrow: "01 · THE PRODUCT GAP",
-    gapTitle: "Experts own the audience.\nWhat can they sell next?",
-    gapBody:
-      "Experts already build trust and reach through social media, courses, communities, and newsletters. Yet they still choose between scalable content and high-value services that depend on their own time.",
-    gapBody2:
-      "Meanwhile, audiences are already feeding experts’ public videos, writing, and methods into general-purpose AI to revise materials, generate plans, and complete work. Demand remains, but the resulting usage and revenue bypass the expert.",
-    gapList: [
-      ["Content and courses", "They scale, but offer little personalization."],
-      ["Consulting, review, and coaching", "More tailored, but constrained by the expert’s time."],
-      ["Prompts and Skills", "Easy to copy, hard to install, and not products on their own."],
-    ],
-    productEyebrow: "02 · THE PLATFORM",
-    productTitle: "Experts build it.\nHatch runs it.",
-    productBody:
-      "Hatch is a platform for experts to own the identity, style, and customer experience of their products.",
-    productPrinciple:
-      "Hatch starts with the job people would pay an expert to do. It then assembles the method, judgment, data, tools, and human oversight needed to deliver it.",
-    processIntro:
-      "Making a method into a product people can use and pay for normally takes product design, agent engineering, evaluation, payments, and operations. Hatch packages that work into a repeatable creation flow for experts.",
-    steps: [
-      {
-        n: "01",
-        title: "Define the product",
-        body: "Specify who buys it, what they receive, how it is priced, what good looks like, and when the expert needs to step in.",
-      },
-      {
-        n: "02",
-        title: "Import the method",
-        body: "Bring in courses, cases, prior deliverables, revisions, and proprietary data. Hatch’s Interview Agent uses real cases to draw out tacit judgment.",
-      },
-      {
-        n: "03",
-        title: "Generate and calibrate",
-        body: "Hatch combines the method, data, tools, and workflow, then builds expert-specific evals. The expert calibrates the agent through testing and correction.",
-      },
-      {
-        n: "04",
-        title: "Publish and charge",
-        body: "Set a price, create a product page and link, then distribute through social, courses, communities, or a website.",
-      },
-      {
-        n: "05",
-        title: "Deliver continuously",
-        body: "The agent does the core work; the expert handles edge cases. Corrections from real use keep refining the product.",
-      },
-    ],
-    skillLabel: "A SKILL IS NOT YET A PRODUCT",
-    skillTitle: "A Skill on its own is too thin.",
-    skillBody:
-      "A Skill can capture an SOP, instructions, or taste. A real expert product often also needs proprietary data, tools, prior cases, and evals.",
-    fullProduct:
-      "Hatch turns them into a paid product that is easy to use and controlled by the expert. Users get the finished work without installing a Skill—or taking the expert’s method or data.",
-    workExamples: [
-      "Rewritten résumé",
-      "Growth audit",
-      "Fitness plan",
-      "Video script",
-      "Interview practice",
-      "Stock analysis",
-      "Sales messaging",
-      "Content calendar",
-      "Homework review",
-      "Brand brief",
-      "Notion workspace setup",
-      "Writing review",
-      "Edited short-form video",
-      "Go-to-market diagnosis",
-      "Contract redline",
-      "Negotiation brief",
-      "Pricing strategy",
-      "Research synthesis",
-      "Pitch deck",
-      "Storyboard",
-      "Meal plan",
-      "Product teardown",
-      "Podcast rough cut",
-      "Brand naming shortlist",
-    ],
-    businessEyebrow: "03 · BUSINESS MODEL",
-    businessTitle: "Hatch earns only\nwhen the expert earns.",
-    businessBody:
-      "Experts set the product, price, and experience, then sell to the audience they have already built. Customers buy a task or subscribe to a particular expert’s agent. Hatch charges no monthly fee and takes 10% of each transaction; it does not run a consumer marketplace.",
-    businessClosing:
-      "Those platforms help experts sell content and memberships. Hatch adds a new category: expert agents that work with a customer’s context and deliver usable outputs.",
-    scale:
-      "Hatch grows with expert-agent GMV, not software seats.",
-    visionBody:
-      "Until now, an expert who wanted to make a service scalable had two choices: deliver it personally or build product, engineering, operations, and service teams. Hatch standardizes the work of productizing and delivering that service, so experts can build, publish, and run their own AI products.",
-    final:
-      "Hatch is the product, fulfillment, and commerce infrastructure for the expert economy. Experts can own a revenue-generating AI product—without a software team.",
-    partnersKicker: "LET’S HATCH SOMETHING.",
-    partnersLabel: "WHO WE WANT TO PARTNER WITH",
-    partnersTitle: "Who we want to partner with",
-    partnerTypes: [
-      {
-        label: "EXPERTS",
-        title: "Experts with an audience, a distinct method, and a service to scale",
-        body: "Turn courses, consulting, or content into agent products.",
-      },
-      {
-        label: "INSTITUTIONS",
-        title: "Content rights holders, media/IP organizations, and expert channels",
-        body: "Turn established content assets—or a roster of experts—into new agent products.",
-      },
-    ],
-    contactLabel: "START A CONVERSATION",
-    contactTitle: "Let’s hatch something.",
-    contactBody:
-      "See a way to work together, know someone we should meet, or want to continue the conversation? Leave us a note.",
-    contactFields: {
-      name: "Name",
-      email: "Email",
-      partnerType: "Which best describes you?",
-      message: "A product, asset, or idea you’d like to explore (optional)",
-    },
-    contactOptions: ["Expert", "Content rights holder, media/IP organization, or expert channel", "Investor"],
-    contactLaunch: "Contact Hatch",
-    contactClose: "Close",
-    contactSubmit: "Send",
-    contactSending: "Sending…",
-    contactSuccess: "Thanks—we’ll be in touch soon.",
-    contactError: "Something went wrong. Please try again.",
-  },
-  ja: jaCopy,
-} as const;
+function Egg({ size = 22 }: { size?: number }) {
+  return (
+    <svg viewBox="0 0 36 44" width={size * 0.82} height={size} aria-hidden="true">
+      <path d="M18 2C9.2 2 2 16 2 26a16 16 0 0 0 32 0C34 16 26.8 2 18 2Z" fill="#F5B700" />
+      <path d="M7 22l6 4 5-5 5 5 6-4" stroke="#17150F" strokeWidth="2.6" fill="none" strokeLinejoin="round" />
+    </svg>
+  );
+}
 
-const sectionLinks = ["gap", "product", "business", "vision", "partners", "contact"];
 
-function StepGraphic({ step, lang }: { step: string; lang: Lang }) {
-  const labels =
-    lang === "ja"
-      ? {
-          buyer: "購入者",
-          output: "成果物",
-          price: "価格",
-          course: "講座",
-          cases: "事例",
-          edits: "修正",
-          data: "データ",
-          result: "成果物",
-        }
-      : {
-          buyer: "BUYER",
-          output: "OUTPUT",
-          price: "PRICE",
-          course: "COURSE",
-          cases: "CASES",
-          edits: "EDITS",
-          data: "DATA",
-          result: "RESULT",
-        };
+function Typed({ text }: { text: string }) {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    setN(0);
+    const id = window.setInterval(() => setN((v) => (v >= text.length ? v : v + 1)), 28);
+    return () => window.clearInterval(id);
+  }, [text]);
+  return (
+    <>
+      {text.slice(0, n)}
+      {n < text.length && <span className="caret" />}
+    </>
+  );
+}
 
-  switch (step) {
-    case "01":
-      return (
-        <div className="step-graphic step-graphic--brief" aria-hidden="true">
-          <div className="mini-topline">
-            <span>PRODUCT BRIEF</span>
-            <i />
+function Logo({ slug, name }: { slug: string; name: string }) {
+  const [ok, setOk] = useState(true);
+  return (
+    <span className="logo">
+      {ok && <img src={`https://cdn.simpleicons.org/${slug}`} alt="" width={22} height={22} loading="lazy" onError={() => setOk(false)} />}
+      {name}
+    </span>
+  );
+}
+
+function FlipWords({ words }: { words: string[] }) {
+  const [i, setI] = useState(2);
+  useEffect(() => {
+    const id = window.setInterval(() => setI((v) => (v + 1) % words.length), 2200);
+    return () => window.clearInterval(id);
+  }, [words]);
+  const w = words[i % words.length];
+  return (
+    <span className="flip" aria-label={words.join(" / ")}>
+      <span className="flip-w" key={w} aria-hidden="true">
+        {[...w].map((ch, k) => (
+          <span key={k} style={{ animationDelay: `${k * 45}ms` }}>{ch === " " ? "\u00a0" : ch}</span>
+        ))}
+      </span>
+    </span>
+  );
+}
+
+function FieldPicker({ t, value, onChange }: { t: LandingCopy; value: number; onChange: (i: number) => void }) {
+  return (
+    <div className="picker">
+      <p className="picker-label">{t.pickLabel}</p>
+      <div className="picker-groups">
+        {t.roles.map((role, r) => (
+          <div className="picker-group" key={role}>
+            <span className="picker-role">{role}</span>
+            {t.scenarios.map((s, i) =>
+              s.role === r ? (
+                <button key={s.field} type="button" className={i === value ? "active" : ""} onClick={() => onChange(i)}>
+                  {s.field}
+                </button>
+              ) : null,
+            )}
           </div>
-          <div className="brief-rows">
-            <div>
-              <span>{labels.buyer}</span>
-              <i />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Phone({ t, s, step }: { t: LandingCopy; s: Scenario; step: number }) {
+  const thread = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = thread.current;
+    if (!el) return;
+    const pin = () => el.scrollTo({ top: el.scrollHeight });
+    const mo = new MutationObserver(pin);
+    mo.observe(el, { childList: true, subtree: true, characterData: true });
+    return () => mo.disconnect();
+  }, []);
+  return (
+    <div className="phone-wrap">
+      <div className="phone">
+        <div className="phone-head">
+          <span className="avatar">{s.field.slice(0, 1)}</span>
+          <div>
+            <b>{s.field}</b>
+            <small>{s.source}</small>
+          </div>
+          <em>{t.exampleTag}</em>
+        </div>
+        <div className="thread" ref={thread}>
+          <p className="bubble me">{s.client}</p>
+          {step >= 1 && <p className="bubble ai"><Typed text={s.take} /></p>}
+          {step >= 2 && <p className="bubble ai"><Typed text={s.ask} /></p>}
+          {step >= 3 && (
+            <div className="offer">
+              <div>
+                <b>{s.offer.name}</b>
+                <small>{s.offer.meta}</small>
+              </div>
+              <span className="offer-price">{s.offer.price}</span>
+              <span className="offer-buy">{t.buy}</span>
             </div>
-            <div>
-              <span>{labels.output}</span>
-              <i />
-            </div>
-            <div>
-              <span>{labels.price}</span>
-              <i />
-            </div>
+          )}
+          {step >= 4 && <p className="delivered">{s.delivered}</p>}
+        </div>
+      </div>
+      {step >= 5 && (
+        <div className="toast">
+          <Egg size={18} />
+          <span>{s.notify}</span>
+        </div>
+      )}
+      {step >= 3 && <span className="float float-b">{t.floatBooked}</span>}
+      <span className="float float-c">✓ {t.floatEval}</span>
+    </div>
+  );
+}
+
+function useScrollStep() {
+  const [step, setStep] = useState(0);
+  const refs = useRef<(HTMLElement | null)[]>([]);
+  useEffect(() => {
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) if (e.isIntersecting) setStep(Number((e.target as HTMLElement).dataset.i));
+      },
+      { rootMargin: "-62% 0px -33% 0px" },
+    );
+    refs.current.forEach((el) => el && io.observe(el));
+    return () => io.disconnect();
+  }, []);
+  return [step, refs] as const;
+}
+
+function Story({ t, s }: { t: LandingCopy; s: Scenario }) {
+  const [step, refs] = useScrollStep();
+
+  return (
+    <section className="story" id="story">
+      <div className="story-steps">
+        <h2 className="title">{t.storyTitle(s.field)}</h2>
+        {t.storySteps.map((st, i) => (
+          <article
+            key={st.title}
+            data-i={i}
+            ref={(el) => {
+              refs.current[i] = el;
+            }}
+            className={`story-step ${i === step ? "on" : ""}`}
+          >
+            <span className="step-n">0{i + 1}</span>
+            <h3>
+              {st.title}
+              {st.soon && <em className="soon">{t.soonTag}</em>}
+            </h3>
+            <p>{st.body}</p>
+          </article>
+        ))}
+      </div>
+      <div className="story-phone">
+        <Phone t={t} s={s} step={step} />
+      </div>
+    </section>
+  );
+}
+
+function Count({ to }: { to: number }) {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setN((v) => (v >= to ? v : v + 2)), 24);
+    return () => window.clearInterval(id);
+  }, [to]);
+  return <>{Math.min(n, to)}</>;
+}
+
+const LEARN_PHOTOS = ["l_read", "l_voice", "l_eval", "l_live"];
+
+function Learn({ t, s }: { t: LandingCopy; s: Scenario }) {
+  const [step, refs] = useScrollStep();
+  const k = t.learnKit;
+  return (
+    <section className="story learn-story" id="learn">
+      <div className="story-steps">
+        <span className="pill pill-l">{t.learnLabel}</span>
+        <h2 className="title">{t.learnTitle}</h2>
+        <p className="lead">{t.learnBody}</p>
+        {t.learnSteps.map((st, i) => (
+          <article
+            key={st.tag}
+            data-i={i}
+            ref={(el) => {
+              refs.current[i] = el;
+            }}
+            className={`story-step ${i === step ? "on" : ""}`}
+          >
+            <span className="step-n">0{i + 1}</span>
+            <h3>{st.title}</h3>
+            <p>{st.body}</p>
+          </article>
+        ))}
+      </div>
+      <div className="story-phone">
+        <div className="learn-stage">
+          {LEARN_PHOTOS.map((id, i) => (
+            <Photo key={id} id={id} alt="" className={`fill ${i === step ? "on" : ""}`} />
+          ))}
+          <div className="glass lc" key={`${step}-${s.field}`}>
+            {step === 0 && (
+              <>
+                <span className="sk-label">{t.learnSteps[0].title}</span>
+                {k.read.map(([slug, name, n], i) => (
+                  <div className="lc-row" key={name} style={{ animationDelay: `${i * 160}ms` }}>
+                    {slug ? <img src={`https://cdn.simpleicons.org/${slug}`} alt="" width={18} height={18} /> : <span className="lc-doc" />}
+                    <b>{name}</b>
+                    <small>{n}</small>
+                    <span className="sk-pass">✓</span>
+                  </div>
+                ))}
+                <span className="chip chip-green lc-pop">{k.readDone}</span>
+              </>
+            )}
+            {step === 1 && (
+              <>
+                <span className="sk-label">{t.learnSteps[1].title} · {s.field}</span>
+                <p className="bubble ai"><Typed text={s.interviewQ} /></p>
+                <div className="bubble me lc-voice" style={{ animationDelay: "1.6s" }}>
+                  <span className="wave">{Array.from({ length: 18 }, (_, i) => <i key={i} style={{ animationDelay: `${i * 60}ms` }} />)}</span>
+                  {k.voice}
+                </div>
+                <p className="bubble ai" style={{ animationDelay: "2.4s" }}>{k.follow}</p>
+                <div className="lc-note" style={{ animationDelay: "3.2s" }}>
+                  <span className="chip chip-yolk">{k.noted}</span>
+                  <p>{s.take}</p>
+                </div>
+              </>
+            )}
+            {step === 2 && (
+              <>
+                <span className="sk-label">{k.evalTitle}</span>
+                {[s.client, ...k.evalCases].map((q, i) => (
+                  <div className="lc-row" key={q} style={{ animationDelay: `${i * 260}ms` }}>
+                    <span className={i === 2 ? "sk-redo" : "sk-pass"}>{i === 2 ? "↻" : "✓"}</span>
+                    <p>{q}</p>
+                    {i === 2 && <em className="soon">{k.evalRedo}</em>}
+                  </div>
+                ))}
+                <div className="lc-score">
+                  <small>{k.score}</small>
+                  <b><Count to={96} />%</b>
+                </div>
+                <div className="lc-meter"><i /></div>
+              </>
+            )}
+            {step === 3 && (
+              <>
+                <div className="lc-head">
+                  <span className="avatar">{s.field.slice(0, 1)}</span>
+                  <div>
+                    <b>{s.field}</b>
+                    <small>{k.liveLink}</small>
+                  </div>
+                </div>
+                <span className="lc-approve">{k.approve} ✓</span>
+                <span className="chip chip-green lc-pop">● {k.liveStatus}</span>
+              </>
+            )}
           </div>
         </div>
-      );
-    case "02":
-      return (
-        <div className="step-graphic step-graphic--inputs" aria-hidden="true">
-          <div className="input-stack">
-            <span>{labels.course}</span>
-            <span>{labels.cases}</span>
-            <span>{labels.edits}</span>
+      </div>
+    </section>
+  );
+}
+
+const PHOTO = (id: string) => `/assets/web/photos/${id}.jpg`;
+
+function Photo({ id, alt, className = "" }: { id: string; alt: string; className?: string }) {
+  return <img className={`ph ${className}`} src={PHOTO(id)} alt={alt} loading="lazy" />;
+}
+
+function Reveal({ segments }: { segments: [string, string | null][] }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const [p, setP] = useState(0);
+  useEffect(() => {
+    const onScroll = () => {
+      const el = ref.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const vh = window.innerHeight;
+      setP(Math.min(1, Math.max(0, (vh * 0.85 - r.top) / (r.height + vh * 0.45))));
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  const chars = segments.flatMap(([text, tone]) => Array.from(text).map((ch) => [ch, tone] as const));
+  const lit = Math.round(p * chars.length);
+  return (
+    <section className="reveal">
+      <p ref={ref}>
+        {chars.map(([ch, tone], i) => (
+          <span key={i} className={`${tone ? `tone-${tone}` : ""} ${i < lit ? "lit" : ""}`}>{ch}</span>
+        ))}
+      </p>
+    </section>
+  );
+}
+
+function Memory({ t }: { t: LandingCopy }) {
+  return (
+    <section className="section mem">
+      <span className="pill">{t.memLabel}</span>
+      <h2 className="title center">{t.memTitle}</h2>
+      <p className="lead center">{t.memBody}</p>
+      <div className="mem-stage">
+        <div className="glass mem-method">
+          {t.memMethod.map((m, i) => (
+            <p key={m}><i className={`dot dot-${i}`} />{m}</p>
+          ))}
+          <span className="chip chip-yolk">{t.memMethodTag}</span>
+        </div>
+        <Photo className="mem-photo" id="mem" alt={t.memPhoto.alt} />
+        <div className="glass mem-clients">
+          <span className="chip chip-green">{t.memClientsTag}</span>
+          {t.memClients.map((c) => (
+            <div className="mem-client" key={c.name}>
+              <span className="mini-avatar">{c.name.slice(0, 1)}</span>
+              <div><b>{c.name}</b><small>{c.meta}</small></div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="people">
+        {t.memPeople.map((pp, i) => (
+          <div className="person" key={pp.name}>
+            <Photo className="ph-avatar" id={`av${i + 1}`} alt={pp.name} />
+            <div><b>{pp.name}</b><small>{pp.role}</small></div>
           </div>
-          <div className="input-plus">+</div>
-          <div className="data-card">
-            <span>{labels.data}</span>
-            <i />
-            <i />
-            <i />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Proactive({ t }: { t: LandingCopy }) {
+  const ref = useRef<HTMLElement>(null);
+  const [p, setP] = useState(0);
+  useEffect(() => {
+    const onScroll = () => {
+      const el = ref.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setP(Math.min(1, Math.max(0, -r.top / Math.max(1, r.height - window.innerHeight))));
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  const k = Math.min(1, Math.max(0, (p - 0.3) / 0.35));
+  return (
+    <section className="pro-scroll" ref={ref}>
+      <div className="pro-sticky">
+        <span className="pill">{t.proLabel}</span>
+        <h2 className="title center">{t.proTitle}</h2>
+        <p className="lead center">{t.proBody}</p>
+        <div className="pro-cards">
+          <div className="pro-card" style={{ transform: `scale(${1 - 0.06 * k})`, opacity: 1 - 0.5 * k }}>
+            <Photo className="fill" id="pro" alt={t.proPhoto.alt} />
+            <div className="pro-bubble">
+              <Egg size={20} />
+              <p>{t.proBubble}</p>
+            </div>
+          </div>
+          <div className="pro-card pro-card-2" style={{ transform: `translateY(${(1 - k) * 110}%)` }}>
+            <Photo className="fill" id="pro2" alt={t.proPhoto2.alt} />
+            <div className="glass pro-tasks">
+              {t.proTasks.map((task, i) => (
+                <p key={task.t} className={p > 0.7 + i * 0.07 ? "done" : ""}>
+                  <i className="ring" />
+                  <span><b>{task.t}</b><small>{task.m}</small></span>
+                </p>
+              ))}
+            </div>
+          </div>
+          <div className="pro-dots"><i className={k < 0.5 ? "on" : ""} /><i className={k >= 0.5 ? "on" : ""} /></div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function useInView<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  const [inView, setInView] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver(([e]) => e.isIntersecting && setInView(true), { threshold: 0.3 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  return [ref, inView] as const;
+}
+
+
+function useProgress(play: number, ms: number, linear = false) {
+  const [p, setP] = useState(0);
+  useEffect(() => {
+    if (!play) return;
+    let raf = 0;
+    const t0 = performance.now();
+    const tick = (now: number) => {
+      const k = Math.min((now - t0) / ms, 1);
+      setP(linear ? k : 1 - Math.pow(1 - k, 3));
+      if (k < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [play, ms, linear]);
+  return p;
+}
+
+const MARKS = [0.12, 0.55, 1];
+
+function Growth({ t, play }: { t: LandingCopy; play: number }) {
+  const path = useRef<SVGPathElement>(null);
+  const p = useProgress(play, 2600);
+  const el = path.current;
+  const len = el ? el.getTotalLength() : 320;
+  const at = (q: number) => (el ? el.getPointAtLength(len * q) : { x: 8, y: 104 });
+  const tip = at(p);
+  return (
+    <div className="art art-growth">
+      <div className="g-like">
+        <small>{t.growth.like}</small>
+        <b>{Math.round(41 + 55 * p)}%</b>
+      </div>
+      <div className="g-plot">
+        <svg viewBox="0 0 240 120" aria-hidden="true">
+          <path className="g-track" d="M8 104 C 50 100, 70 88, 100 76 S 160 40, 232 14" />
+          <path ref={path} className="g-line" d="M8 104 C 50 100, 70 88, 100 76 S 160 40, 232 14" style={{ strokeDasharray: len, strokeDashoffset: len * (1 - p) }} />
+          {MARKS.map((m) => {
+            const pt = at(m);
+            return <circle key={m} className={`g-mark ${p >= m - 0.001 ? "on" : ""}`} cx={pt.x} cy={pt.y} r="4" />;
+          })}
+          <circle className="g-tip" cx={tip.x} cy={tip.y} r="7" />
+          {p >= 1 && <circle className="g-ring" cx={tip.x} cy={tip.y} r="7" />}
+        </svg>
+        {MARKS.map((m, i) => {
+          const pt = at(m);
+          return (
+            <span key={m} className={`g-label g-l${i} ${p >= m - 0.001 ? "on" : ""}`} style={{ left: `${(pt.x / 240) * 100}%`, top: `${(pt.y / 120) * 100}%` }}>
+              {t.growth.marks[i]}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const EVENTS = [0.09, 0.48, 0.88];
+
+function Clock({ t, play }: { t: LandingCopy; play: number }) {
+  const p = useProgress(play, 3200);
+  const c = t.clock;
+  const pos = (q: number, r: number) => {
+    const a = q * Math.PI * 2 - Math.PI / 2;
+    return { x: 100 + r * Math.cos(a), y: 100 + r * Math.sin(a) };
+  };
+  const hand = pos(p, 62);
+  return (
+    <div className="art art-clock2">
+      <div className="ck-stats">
+        <div><small>{c.you}</small><b>{c.youN}</b></div>
+        <div className="ck-it"><small>{c.it}</small><b>{Math.round(100 * p)}{c.unit}</b></div>
+      </div>
+      <div className="ck-dial">
+        <svg viewBox="0 0 200 200" aria-hidden="true">
+          <circle className="ck-face" cx="100" cy="100" r="78" />
+          <path className="ck-night" d="M100 22 A78 78 0 0 1 100 178" transform="rotate(90 100 100)" />
+          <circle className="ck-track" cx="100" cy="100" r="90" />
+          <circle className="ck-arc" cx="100" cy="100" r="90" pathLength={1} style={{ strokeDashoffset: 1 - p }} transform="rotate(-90 100 100)" />
+          <line className="ck-hand" x1="100" y1="100" x2={hand.x} y2={hand.y} />
+          <circle className="ck-hub" cx="100" cy="100" r="6" />
+          <text className="ck-sun" x="100" y="44">☀︎</text>
+          <text className="ck-moon" x="100" y="166">☾</text>
+        </svg>
+        {EVENTS.map((q, i) => {
+          const d = pos(q, 100);
+          return (
+            <span key={q} className={`ck-ev ck-e${i} ${p >= q ? "on" : ""}`} style={{ left: `${d.x / 2}%`, top: `${d.y / 2}%` }}>
+              {c.events[i]}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function Vault({ t, play }: { t: LandingCopy; play: number }) {
+  const p = useProgress(play, 4200, true);
+  const v = t.vault;
+  const stage = p < 0.02 ? 0 : p < 0.42 ? 1 : p < 0.55 ? 2 : p < 0.92 ? 3 : 4;
+  return (
+    <div className={`art art-vault s${stage}`}>
+      {v.items.map((it, i) => (
+        <span key={it} className={`vt-item vt-i${i}`}>{it}</span>
+      ))}
+      <div className="vt-lock">
+        <i className="vt-ring" />
+        <svg viewBox="0 0 64 72" aria-hidden="true">
+          <path className="vt-shackle" d="M18 34 V22 a14 14 0 0 1 28 0 V34" />
+          <rect className="vt-body" x="8" y="32" width="48" height="36" rx="10" />
+          <circle className="vt-key" cx="32" cy="48" r="5" />
+          <rect className="vt-key" x="30" y="50" width="4" height="9" rx="2" />
+        </svg>
+      </div>
+      <span className="vt-other">{v.other} <b>✕</b></span>
+      <span className="vt-done">✓ {v.locked}</span>
+    </div>
+  );
+}
+
+function Asset({ t }: { t: LandingCopy }) {
+  const [ref, inView] = useInView<HTMLElement>();
+  const [play, setPlay] = useState(0);
+  useEffect(() => {
+    if (inView) setPlay(1);
+  }, [inView]);
+  return (
+    <section className={`section asset ${inView ? "in" : ""}`} ref={ref}>
+      <span className="pill">{t.assetLabel}</span>
+      <h2 className="title center">{t.assetTitle}</h2>
+      <div className="bento">
+        {t.assets.map((a, i) => (
+          <article className={`bento-card tint-${i}`} key={a.title} onClick={() => setPlay((v) => v + 1)}>
+            <h3>{a.title}</h3>
+            <p>{a.body}</p>
+            {i === 0 ? <Vault t={t} play={play} /> : i === 1 ? <Growth t={t} play={play} /> : <Clock t={t} play={play} />}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Compare({ t, s }: { t: LandingCopy; s: Scenario }) {
+  const [tab, setTab] = useState(0);
+  const reply = tab === 0 ? null : t.compareReplies[tab - 1];
+  return (
+    <section className="section">
+      <span className="pill">{t.compareLabel}</span>
+      <div className="seg" role="tablist">
+        {t.compareCols.map((c, i) => (
+          <button key={c} role="tab" aria-selected={tab === i} className={tab === i ? "on" : ""} onClick={() => setTab(i)}>
+            {c}
+          </button>
+        ))}
+      </div>
+      <div className="cmp-card">
+        <Photo className="fill" id="compare" alt="" />
+        <div className="cmp-chat glass" key={`${tab}-${s.field}`}>
+          <small>{t.compareAsk}</small>
+          <p className="bubble me">{s.client}</p>
+          {reply ? (
+            <p className="bubble ai dim">{reply}</p>
+          ) : (
+            <>
+              <p className="bubble ai"><Typed text={s.take} /></p>
+              <p className="bubble ai" style={{ animationDelay: "1.4s" }}>{s.ask}</p>
+            </>
+          )}
+          <div className="cmp-checks">
+            {t.compareRows.map((r) => (
+              <span key={r.label} className={r.v[tab] ? "yes" : "no"}>{r.v[tab] ? "✓" : "✕"} {r.label}</span>
+            ))}
           </div>
         </div>
-      );
-    case "03":
-      return (
-        <div className="step-graphic step-graphic--eval" aria-hidden="true">
-          <div className="eval-candidates">
-            <div className="eval-candidate eval-candidate--reject">
-              <i />
-              <i />
-              <b>×</b>
+      </div>
+    </section>
+  );
+}
+
+function Trust({ t }: { t: LandingCopy }) {
+  const [ref, inView] = useInView<HTMLDivElement>();
+  return (
+    <section className="section">
+      <span className="pill">{t.trustLabel}</span>
+      <div className={`trust-stage ${inView ? "in" : ""}`} ref={ref}>
+        <Photo className="fill" id="trust" alt="" />
+        <div className="glass trust-panel">
+          {t.trust.map((col, gi) => (
+            <div className="trust-group" key={col.title}>
+              <b>{col.title}</b>
+              {col.items.map((item, i) => (
+                <div className="trust-row" key={item} style={{ transitionDelay: `${(gi * 2 + i) * 140}ms` }}>
+                  <span>{item}</span>
+                  {gi === 2 ? <em className="trust-act">{i === 0 ? "✎" : "⌫"}</em> : <i className={`switch ${gi === 0 ? "on" : "off"}`} />}
+                </div>
+              ))}
             </div>
-            <div className="eval-candidate eval-candidate--accept">
-              <i />
-              <i />
-              <b>✓</b>
-            </div>
-          </div>
-          <div className="eval-track">
-            <span>EVAL</span>
-            <i />
-            <em />
-          </div>
+          ))}
         </div>
-      );
-    case "04":
-      return (
-        <div className="step-graphic step-graphic--publish" aria-hidden="true">
-          <div className="publish-link">
-            <span>CREATOR.LINK</span>
-            <b>↗</b>
-          </div>
-          <div className="publish-product">
-            <i />
-            <div>
-              <span />
-              <span />
+      </div>
+    </section>
+  );
+}
+
+function Stories({ t }: { t: LandingCopy }) {
+  return (
+    <section className="section stories">
+      <span className="pill">{t.storiesLabel}</span>
+      <h2 className="title center">{t.storiesTitle}</h2>
+      <div className="stories-track">
+        {t.stories.map((s, i) => (
+          <article className="story-card" key={s.who}>
+            <Photo className="fill" id={`s${i + 1}`} alt={s.what} />
+            <div className="story-cap">
+              <p>{t.storyPrefix} <mark>{s.who}</mark></p>
+              <p className="story-what">{s.what}</p>
             </div>
-            <strong>$</strong>
-          </div>
-        </div>
-      );
-    default:
-      return (
-        <div className="step-graphic step-graphic--delivery" aria-hidden="true">
-          <div className="delivery-checks">
-            <div>
-              <i>✓</i>
-              <span />
-            </div>
-            <div>
-              <i>✓</i>
-              <span />
-            </div>
-          </div>
-          <div className="delivery-output">
-            <b>{labels.result}</b>
-            <span />
-            <em>↻</em>
-          </div>
-        </div>
-      );
-  }
+          </article>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 export default function HatchPage() {
-  const { locale: lang } = useLocale();
-  const [contactStatus, setContactStatus] = useState<
-    "idle" | "submitting" | "success" | "error"
-  >("idle");
+  const { locale, setLocale } = useLocale();
+  const lang = locale as Lang;
+  const t = landingCopy[lang];
+  const [field, setField] = useState(6);
+  const s = t.scenarios[field];
+  const [contactStatus, setContactStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
   const [isContactDialogOpen, setIsContactDialogOpen] = useState(false);
   const contactDialogRef = useRef<HTMLDialogElement>(null);
-  const t = copy[lang];
 
   useEffect(() => {
     const previousTitle = document.title;
-    document.title = "Hatch — AI products for expert creators";
+    document.title = "Hatch — Private intelligence for experts";
     return () => {
       document.title = previousTitle;
     };
@@ -469,23 +678,15 @@ export default function HatchPage() {
   useEffect(() => {
     const dialog = contactDialogRef.current;
     if (!dialog) return;
-
-    if (isContactDialogOpen && !dialog.open) {
-      dialog.showModal();
-    }
-
-    if (!isContactDialogOpen && dialog.open) {
-      dialog.close();
-    }
+    if (isContactDialogOpen && !dialog.open) dialog.showModal();
+    if (!isContactDialogOpen && dialog.open) dialog.close();
   }, [isContactDialogOpen]);
 
   async function handleContactSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
-
     setContactStatus("submitting");
-
     try {
       const response = await fetch("/api/contact", {
         method: "POST",
@@ -499,11 +700,7 @@ export default function HatchPage() {
           language: lang,
         }),
       });
-
-      if (!response.ok) {
-        throw new Error("Contact submission failed");
-      }
-
+      if (!response.ok) throw new Error("Contact submission failed");
       form.reset();
       setContactStatus("success");
     } catch {
@@ -516,181 +713,106 @@ export default function HatchPage() {
     setIsContactDialogOpen(true);
   }
 
+  const tryButton = (
+    <a className="btn btn-yolk" href={TRY_HREF}>
+      {t.tryCta}
+      <span className="cta-arrow" aria-hidden="true">→</span>
+    </a>
+  );
+
   return (
     <main className={`site is-${lang}`}>
-      <header className="topbar">
-        <a className="brand" href="#top" aria-label="Hatch home">
-          Hatch<span className="brand-dot">.</span>
+      <header className="nav">
+        <a className="nav-brand" href="#top" aria-label="Hatch home">
+          <Egg />
+          <img src={WORDMARK} alt="Hatch" width={72} height={28} />
         </a>
-        <nav className="desktop-nav" aria-label="Page sections">
-          {t.nav.map((item, index) => (
-            <a href={`#${sectionLinks[index]}`} key={sectionLinks[index]}>
-              {item}
-            </a>
-          ))}
+        <nav className="nav-links" aria-label="Page sections">
+          {SHOW_PRICING && <a href="#pricing">{t.nav.pricing}</a>}
+          <a href="#faq">{t.nav.faq}</a>
         </nav>
-        <LanguageSwitcher className="lang-switch" compact />
+        <div className="nav-right">
+          <a className="nav-login" href="/studio">{t.nav.login}</a>
+          <a className="btn btn-ink btn-sm" href={TRY_HREF}>{t.nav.try}</a>
+        </div>
       </header>
 
       <section className="hero" id="top">
-        <div className="hero-meta eyebrow">{t.meta}</div>
-        <div className="hero-grid">
-          <div className="hero-main">
-            <h1>
-              <span>{t.heroTitleA}</span>
-              <em>{t.heroTitleB}</em>
-            </h1>
-            <p className="hero-body">{t.heroBody}</p>
-            <div className="hero-actions">
-              <a className="hero-cta hero-cta-primary" href="/explore">
-                {t.exploreCreators}
-                <span className="cta-arrow" aria-hidden="true">→</span>
-              </a>
-              <a className="hero-cta hero-cta-secondary" href="/studio">
-                {t.buildProduct}
-                <span className="cta-arrow" aria-hidden="true">→</span>
-              </a>
-              <button className="text-link text-link-contact hero-contact-link" type="button" onClick={openContactDialog}>
-                {t.contactLink}
-                <span className="cta-arrow" aria-hidden="true">→</span>
-              </button>
-            </div>
-          </div>
-          <div className="hero-film">
-            <video
-              aria-label={t.heroFilmLabel}
-              controls
-              key={lang}
-              playsInline
-              poster={t.heroFilmPoster}
-              preload="metadata"
-            >
-              <source src={t.heroFilmSrc} type="video/mp4" />
-            </video>
+        <span className="pill">{t.heroEyebrow}</span>
+        <h1>
+          <span>{t.heroTitleA[0]}<FlipWords words={t.heroWords} />{t.heroTitleA[1]}</span>
+          <em>{t.heroTitleB}</em>
+        </h1>
+        <p className="hero-body">{t.heroBody}</p>
+        <FieldPicker t={t} value={field} onChange={setField} />
+      </section>
+
+      <Story key={`${lang}-${field}`} t={t} s={s} />
+
+      <Reveal key={`reveal-${lang}`} segments={t.revealSegments} />
+      <Memory t={t} />
+      <Proactive t={t} />
+
+      <Asset t={t} />
+
+      <section className="where">
+        <span className="pill">{t.whereLabel}</span>
+        <div className="marquee">
+          <div className="logos">
+            {[...PLATFORMS, ...PLATFORMS].map(([slug, zhName, name], i) => (
+              <Logo key={`${slug}-${i}`} slug={slug} name={lang === "zh" ? zhName : name} />
+            ))}
           </div>
         </div>
+        <p className="fine">{t.whereNote}</p>
+      </section>
 
-        <div className="positioning-map" aria-label="Product positioning">
-          <article className="positioning-pole">
-            <p className="eyebrow">{t.continuum[0].label}</p>
-            <h2>{t.continuum[0].title}</h2>
-            <p>{t.continuum[0].body}</p>
-          </article>
-          <div className="positioning-bridge">
-            <p className="bridge-label eyebrow">{t.continuumBridge}</p>
-            <article className="positioning-focus">
-              <p className="eyebrow">{t.continuum[1].label}</p>
-              <h2>{t.continuum[1].title}</h2>
-              <p>{t.continuum[1].body}</p>
+      <Learn t={t} s={s} />
+
+      <Stories t={t} />
+
+      <Compare key={lang} t={t} s={s} />
+
+      <Trust t={t} />
+
+      {SHOW_PRICING && (
+      <section className="section" id="pricing">
+        <span className="pill">{t.pricingLabel}</span>
+        <h2 className="title center">{t.pricingTitle}</h2>
+        <div className="plans">
+          {t.plans.map((p) => (
+            <article className={`plan ${p.cta ? "plan-main" : ""}`} key={p.name}>
+              <span className="pill pill-l">{p.name}</span>
+              <p className="plan-price">{p.price}</p>
+              <p>{p.body}</p>
+              {p.cta && tryButton}
             </article>
-          </div>
-          <article className="positioning-pole positioning-pole-right">
-            <p className="eyebrow">{t.continuum[2].label}</p>
-            <h2>{t.continuum[2].title}</h2>
-            <p>{t.continuum[2].body}</p>
-          </article>
+          ))}
+        </div>
+        <p className="fine">{t.pricingNote}</p>
+      </section>
+      )}
+
+      <section className="section" id="faq">
+        <span className="pill">{t.faqLabel}</span>
+        <div className="faq">
+          {t.faqs.map((f) => (
+            <details key={f.q}>
+              <summary>{f.q}</summary>
+              <p>{f.a}</p>
+            </details>
+          ))}
         </div>
       </section>
 
-      <section className="editorial-section" id="gap">
-        <div className="section-index eyebrow">{t.gapEyebrow}</div>
-        <div className="section-content gap-content">
-          <h2 className="display-title multiline">{t.gapTitle}</h2>
-          <p className="lead">{t.gapBody}</p>
-          <p className="lead gap-followup">{t.gapBody2}</p>
-          <div className="gap-list">
-            {t.gapList.map(([title, body], index) => (
-              <div className="gap-row" key={title}>
-                <span className="mono-index">0{index + 1}</span>
-                <h3>{title}</h3>
-                <p>{body}</p>
-              </div>
-            ))}
-          </div>
-        </div>
+      <section className="final">
+        <Egg size={56} />
+        <h2>{t.finalTitle}</h2>
+        <p>{t.finalBody}</p>
+        {tryButton}
+        <p className="fine">{t.tryNote}</p>
       </section>
 
-      <section className="editorial-section product-section" id="product">
-        <div className="section-index eyebrow">{t.productEyebrow}</div>
-        <div className="section-content">
-          <div className="section-intro">
-            <h2 className="display-title multiline">{t.productTitle}</h2>
-            <p className="lead">{t.productBody}</p>
-          </div>
-          <blockquote className="product-principle">{t.productPrinciple}</blockquote>
-          <p className="process-intro">{t.processIntro}</p>
-          <div className="steps">
-            {t.steps.map((step) => (
-              <article className="step" key={step.n}>
-                <span className="step-number">{step.n}</span>
-                <h3>{step.title}</h3>
-                <p>{step.body}</p>
-                <StepGraphic step={step.n} lang={lang} />
-              </article>
-            ))}
-          </div>
-
-          <div className="skill-note">
-            <div>
-              <p className="eyebrow">{t.skillLabel}</p>
-              <h3>{t.skillTitle}</h3>
-            </div>
-            <div>
-              <p>{t.skillBody}</p>
-              <p className="skill-answer">{t.fullProduct}</p>
-            </div>
-          </div>
-
-          <div className="artifact-line" aria-label="Example creator products">
-            {t.workExamples.map((example) => (
-              <span key={example}>{example}</span>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="editorial-section business-section" id="business">
-        <div className="section-index eyebrow">{t.businessEyebrow}</div>
-        <div className="section-content">
-          <div className="section-intro">
-            <h2 className="display-title multiline">{t.businessTitle}</h2>
-            <p className="lead">{t.businessBody}</p>
-          </div>
-          <p className="business-closing">{t.businessClosing}</p>
-          <p className="scale-line">{t.scale}</p>
-        </div>
-      </section>
-
-      <section className="vision-section" id="vision">
-        <div className="vision-inner">
-          <div className="vision-copy vision-copy-standalone">
-            <p>{t.visionBody}</p>
-          </div>
-          <p className="final-vision">{t.final}</p>
-        </div>
-      </section>
-
-      <section className="contact-section" id="contact">
-        <div className="contact-note" id="partners">
-          <p className="eyebrow">{t.partnersKicker}</p>
-          <div className="contact-copy">
-            <h3>{t.partnersTitle}</h3>
-            <div className="contact-partner-types">
-              {t.partnerTypes.map((partner) => (
-                <article key={partner.label}>
-                  <p className="eyebrow">{partner.label}</p>
-                  <h4>{partner.title}</h4>
-                  <p>{partner.body}</p>
-                </article>
-              ))}
-            </div>
-            <button className="contact-launch" type="button" onClick={openContactDialog}>
-              {t.contactLaunch}
-              <span aria-hidden="true">→</span>
-            </button>
-          </div>
-        </div>
-      </section>
       <dialog
         className="contact-dialog"
         ref={contactDialogRef}
@@ -700,79 +822,80 @@ export default function HatchPage() {
           if (event.target === event.currentTarget) event.currentTarget.close();
         }}
       >
-        <div className="contact-dialog-inner">
-          <div className="contact-dialog-heading">
+        <div className="contact-inner">
+          <div className="contact-heading">
             <p className="eyebrow">{t.contactLabel}</p>
-            <button
-              className="contact-dialog-close"
-              type="button"
-              onClick={() => contactDialogRef.current?.close()}
-              aria-label={t.contactClose}
-            >
+            <button className="contact-close" type="button" onClick={() => contactDialogRef.current?.close()} aria-label={t.contactClose}>
               ×
             </button>
           </div>
-          <div className="contact-copy">
-            <h3 id="contact-dialog-title">{t.contactTitle}</h3>
-            <form className="contact-form" onSubmit={handleContactSubmit}>
-              <label className="contact-field">
-                <span>{t.contactFields.name}</span>
-                <input name="name" autoComplete="name" required maxLength={100} />
-              </label>
-              <label className="contact-field">
-                <span>{t.contactFields.email}</span>
-                <input name="email" type="email" autoComplete="email" required maxLength={320} />
-              </label>
-              <label className="contact-field">
-                <span>{t.contactFields.partnerType}</span>
-                <select name="partnerType" defaultValue="" required>
-                  <option value="" disabled>
-                    —
-                  </option>
-                  {t.contactOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="contact-field contact-message">
-                <span>{t.contactFields.message}</span>
-                <textarea name="message" rows={4} maxLength={4000} />
-              </label>
-              <input
-                className="contact-honeypot"
-                name="website"
-                type="text"
-                tabIndex={-1}
-                autoComplete="off"
-                aria-hidden="true"
-              />
-              <div className="contact-actions">
-                <button type="submit" disabled={contactStatus === "submitting"}>
-                  {contactStatus === "submitting" ? t.contactSending : t.contactSubmit}
-                  <span aria-hidden="true">→</span>
-                </button>
-                <p className={`contact-status ${contactStatus}`} aria-live="polite">
-                  {contactStatus === "success"
-                    ? t.contactSuccess
-                    : contactStatus === "error"
-                      ? t.contactError
-                      : ""}
-                </p>
-              </div>
-            </form>
-          </div>
+          <h3 id="contact-dialog-title">{t.contactTitle}</h3>
+          <form className="contact-form" onSubmit={handleContactSubmit}>
+            <label>
+              <span>{t.contactFields.name}</span>
+              <input name="name" autoComplete="name" required maxLength={100} />
+            </label>
+            <label>
+              <span>{t.contactFields.email}</span>
+              <input name="email" type="email" autoComplete="email" required maxLength={320} />
+            </label>
+            <label>
+              <span>{t.contactFields.partnerType}</span>
+              <select name="partnerType" defaultValue="" required>
+                <option value="" disabled>—</option>
+                {t.contactOptions.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>{t.contactFields.message}</span>
+              <textarea name="message" rows={4} maxLength={4000} />
+            </label>
+            <input className="contact-honeypot" name="website" type="text" tabIndex={-1} autoComplete="off" aria-hidden="true" />
+            <div className="contact-actions">
+              <button className="btn btn-ink" type="submit" disabled={contactStatus === "submitting"}>
+                {contactStatus === "submitting" ? t.contactSending : t.contactSubmit}
+              </button>
+              <p className={`contact-status ${contactStatus}`} aria-live="polite">
+                {contactStatus === "success" ? t.contactSuccess : contactStatus === "error" ? t.contactError : ""}
+              </p>
+            </div>
+          </form>
         </div>
       </dialog>
 
-      <footer>
-        <div>
-          <a className="brand footer-brand" href="#top">
-            Hatch<span className="brand-dot">.</span>
+      <footer className="footer">
+        <div className="footer-brand">
+          <a className="nav-brand" href="#top">
+            <Egg />
+            <img src={WORDMARK} alt="Hatch" width={72} height={28} />
           </a>
+          <label className="lang-select">
+            <span>{t.footer.language}</span>
+            <select value={lang} onChange={(e) => setLocale(e.target.value)}>
+              {LOCALES.map((l: Lang) => (
+                <option key={l} value={l}>{LANG_NAMES[l]}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="footer-cols">
+          <div>
+            <p className="eyebrow">{t.footer.product}</p>
+            <a href={TRY_HREF}>{t.nav.try}</a>
+            <a href="/studio">{t.footer.login}</a>
+            <a href="/explore">{t.footer.explore}</a>
+            <a href="/download">{t.footer.download}</a>
+          </div>
+          <div>
+            <p className="eyebrow">{t.footer.company}</p>
+            <button type="button" onClick={openContactDialog}>{t.footer.partner}</button>
+            <button type="button" onClick={openContactDialog}>{t.footer.contact}</button>
+          </div>
         </div>
       </footer>
+      <div className="giant" aria-hidden="true">Hatch<span>.</span></div>
     </main>
   );
 }

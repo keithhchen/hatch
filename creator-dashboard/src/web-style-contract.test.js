@@ -73,24 +73,16 @@ test("Auth language switcher lives in the auth navbar", () => {
   assert.match(styles, /grid-template-areas:\s*"navbar navbar"\s*"context form";/);
 });
 
-test("Web home keeps the public narrative sections and real CTAs", () => {
+test("Web home speaks to experts with one try CTA", () => {
   const page = read("creator-dashboard/src/web/HatchPage.tsx");
-  const styles = read("creator-dashboard/src/web/web.css");
 
-  for (const section of ["top", "gap", "product", "business", "vision", "contact"]) {
-    assert.match(page, new RegExp(`id=\\"${section}\\"`));
-  }
-  assert.match(page, /href=\"\/explore\"/);
-  assert.match(page, /href=\"\/studio\"/);
+  assert.match(page, /id=\"top\"/);
+  assert.match(page, /const TRY_HREF = "\/studio"/);
   assert.match(page, /fetch\(\"\/api\/contact\"/);
-  assert.doesNotMatch(page, /继续阅读/);
-  assert.match(page, /contactLink: "与 Hatch 深度合作"/);
-  assert.doesNotMatch(page, /className="cta-arrow"[^>]*>\s*<svg/);
+  assert.match(page, /<FieldPicker/);
+  assert.match(read("creator-dashboard/src/web/landingCopy.ts"), /scenarios: \[/);
   assert.match(page, /className="cta-arrow"[^>]*>→<\/span>/);
-  assert.match(styles, /\.hero-actions\s*\{[\s\S]*?display:\s*grid;/);
-  assert.match(styles, /\.hero-contact-link\s*\{[\s\S]*?grid-column:\s*1\s*\/\s*-1;/);
-  assert.doesNotMatch(page, /interviews|business-facts|founder-note|WHY HATCH/);
-  assert.doesNotMatch(page, /gapQuote|Creator Economy 已经解决了/);
+  assert.doesNotMatch(page, /Agent GMV|Marketplace|Skill 太薄/);
 });
 
 test("creator navigation uses a standard hamburger menu on narrow screens", () => {
