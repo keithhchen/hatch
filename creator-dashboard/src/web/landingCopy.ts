@@ -15,7 +15,7 @@ export type Scenario = {
 
 const zh = {
   nav: { story: "它怎么接客户", learn: "它怎么学会你", pricing: "价格", faq: "常见问题", login: "登录", try: "免费试试" },
-  heroEyebrow: "为专家打造的私人智能",
+  heroEyebrow: "为专家打造的私有智能",
   heroTitleA: ["忙不过来的", "，"] as [string, string],
   heroWords: ["私信", "咨询", "客户", "订单", "交付"],
   heroTitleB: "交给你的 AI 分身。",
