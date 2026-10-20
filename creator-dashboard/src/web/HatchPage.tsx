@@ -6,7 +6,7 @@ import { useLocale } from "../locale.jsx";
 import { landingCopy, type Lang, type LandingCopy } from "./landingCopy";
 
 const TRY_HREF = "/studio";
-const DEMO_HREF = "/chat/product/802f2105-e28e-4ddc-996a-0a97a7fa4bb5";
+const WORDMARK = "/assets/web/hatch-wordmark-inverse.svg";
 
 function Egg({ size = 22 }: { size?: number }) {
   return (
@@ -80,7 +80,6 @@ function DemoChat({ t }: { t: LandingCopy }) {
           ))}
         </div>
       </div>
-      <span className="float float-a">● {t.floatQualified}</span>
       <span className="float float-b">{t.floatBooked}</span>
       <span className="float float-c">✓ {t.floatEval}</span>
     </div>
@@ -214,7 +213,7 @@ export default function HatchPage() {
       <header className="nav">
         <a className="nav-brand" href="#top" aria-label="Hatch home">
           <Egg />
-          Hatch
+          <img src={WORDMARK} alt="Hatch" width={72} height={28} />
         </a>
         <nav className="nav-links" aria-label="Page sections">
           <a href="#what">{t.nav.what}</a>
@@ -334,17 +333,6 @@ export default function HatchPage() {
         </div>
       </section>
 
-      <section className="try">
-        <div>
-          <p className="eyebrow">{t.tryLabel}</p>
-          <h2>{t.tryTitle}</h2>
-          <p>{t.tryBody}</p>
-        </div>
-        <a className="btn btn-ink" href={DEMO_HREF}>
-          {t.tryDemo}
-          <span className="cta-arrow" aria-hidden="true">→</span>
-        </a>
-      </section>
 
       <section className="section">
         <p className="eyebrow">{t.trustLabel}</p>
@@ -451,7 +439,7 @@ export default function HatchPage() {
       <footer className="footer">
         <a className="nav-brand" href="#top">
           <Egg />
-          Hatch
+          <img src={WORDMARK} alt="Hatch" width={72} height={28} />
         </a>
         <div className="footer-cols">
           <div>
