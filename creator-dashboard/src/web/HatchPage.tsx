@@ -1,12 +1,24 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { LanguageSwitcher } from "../LanguageSwitcher.jsx";
-import { useLocale } from "../locale.jsx";
-import { landingCopy, type Lang, type LandingCopy } from "./landingCopy";
+import { LOCALES, useLocale } from "../locale.jsx";
+import { landingCopy, type Lang, type LandingCopy, type Scenario } from "./landingCopy";
 
 const TRY_HREF = "/studio";
-const WORDMARK = "/assets/web/hatch-wordmark-inverse.svg";
+const WORDMARK = "assets/web/hatch-wordmark.svg";
+const LANG_NAMES: Record<Lang, string> = { zh: "中文", en: "English", ja: "日本語" };
+const PLATFORMS: [string, string, string][] = [
+  ["xiaohongshu", "小红书", "Xiaohongshu"],
+  ["wechat", "微信", "WeChat"],
+  ["tiktok", "抖音", "TikTok"],
+  ["line", "LINE", "LINE"],
+  ["whatsapp", "WhatsApp", "WhatsApp"],
+  ["instagram", "Instagram", "Instagram"],
+  ["youtube", "YouTube", "YouTube"],
+  ["x", "X", "X"],
+  ["stripe", "Stripe", "Stripe"],
+  ["alipay", "支付宝", "Alipay"],
+];
 
 function Egg({ size = 22 }: { size?: number }) {
   return (
@@ -19,103 +31,142 @@ function Egg({ size = 22 }: { size?: number }) {
 
 const Bar = ({ w, tone }: { w: string; tone?: "dark" | "yolk" }) => <i className={`sk-bar ${tone ?? ""}`} style={{ width: w }} />;
 
-function DemoChat({ t }: { t: LandingCopy }) {
-  const [role, setRole] = useState(t.roles.length - 1);
-  const [index, setIndex] = useState(0);
-  const [shown, setShown] = useState(0);
-  const examples = t.roles[role].examples;
-  const example = examples[index % examples.length];
-
+function Typed({ text }: { text: string }) {
+  const [n, setN] = useState(0);
   useEffect(() => {
-    setShown(0);
-    const typer = window.setInterval(() => setShown((n) => n + 1), 45);
-    const next = window.setTimeout(() => setIndex((i) => i + 1), 5200);
-    return () => {
-      window.clearInterval(typer);
-      window.clearTimeout(next);
-    };
-  }, [role, index]);
-
-  const done = shown >= example.reply.length;
-
+    setN(0);
+    const id = window.setInterval(() => setN((v) => (v >= text.length ? v : v + 1)), 28);
+    return () => window.clearInterval(id);
+  }, [text]);
   return (
-    <div className="demo">
-      <div className="demo-roles" role="tablist">
-        {t.roles.map((r, i) => (
-          <button
-            key={r.label}
-            type="button"
-            role="tab"
-            aria-selected={i === role}
-            className={i === role ? "active" : ""}
-            onClick={() => {
-              setRole(i);
-              setIndex(0);
-            }}
-          >
-            {r.label}
-          </button>
+    <>
+      {text.slice(0, n)}
+      {n < text.length && <span className="caret" />}
+    </>
+  );
+}
+
+function Logo({ slug, name }: { slug: string; name: string }) {
+  const [ok, setOk] = useState(true);
+  return (
+    <span className="logo">
+      {ok && <img src={`https://cdn.simpleicons.org/${slug}`} alt="" width={22} height={22} loading="lazy" onError={() => setOk(false)} />}
+      {name}
+    </span>
+  );
+}
+
+function FieldPicker({ t, value, onChange }: { t: LandingCopy; value: number; onChange: (i: number) => void }) {
+  return (
+    <div className="picker">
+      <p className="picker-label">{t.pickLabel}</p>
+      <div className="picker-groups">
+        {t.roles.map((role, r) => (
+          <div className="picker-group" key={role}>
+            <span className="picker-role">{role}</span>
+            {t.scenarios.map((s, i) =>
+              s.role === r ? (
+                <button key={s.field} type="button" className={i === value ? "active" : ""} onClick={() => onChange(i)}>
+                  {s.field}
+                </button>
+              ) : null,
+            )}
+          </div>
         ))}
       </div>
-      <div className="demo-phone">
-        <div className="demo-head">
-          <Egg size={18} />
-          <b>{example.field}</b>
-          <em>{t.demoTag}</em>
+    </div>
+  );
+}
+
+function Phone({ t, s, step }: { t: LandingCopy; s: Scenario; step: number }) {
+  return (
+    <div className="phone-wrap">
+      <div className="phone">
+        <div className="phone-head">
+          <span className="avatar">{s.field.slice(0, 1)}</span>
+          <div>
+            <b>{s.field}</b>
+            <small>{s.source}</small>
+          </div>
+          <em>{t.exampleTag}</em>
         </div>
-        <div className="demo-thread" key={`${role}-${index}`}>
-          <p className="bubble bubble-client">{example.client}</p>
-          <p className="bubble bubble-agent">
-            {example.reply.slice(0, shown)}
-            {!done && <span className="caret" />}
-          </p>
-          {!done && <span className="demo-typing">{t.demoTyping}</span>}
-          {done && <p className="demo-booked">✓ {t.demoBooked}</p>}
-        </div>
-        <div className="demo-fields">
-          {examples.map((e, i) => (
-            <button key={e.field} type="button" className={i === index % examples.length ? "active" : ""} onClick={() => setIndex(i)}>
-              {e.field}
-            </button>
-          ))}
+        <div className="thread">
+          <p className="bubble me">{s.client}</p>
+          {step >= 1 && <p className="bubble ai"><Typed text={s.take} /></p>}
+          {step >= 2 && <p className="bubble ai"><Typed text={s.ask} /></p>}
+          {step >= 3 && (
+            <div className="offer">
+              <div>
+                <b>{s.offer.name}</b>
+                <small>{s.offer.meta}</small>
+              </div>
+              <span className="offer-price">{s.offer.price}</span>
+              <span className="offer-buy">{t.buy}</span>
+            </div>
+          )}
+          {step >= 4 && <p className="delivered">{s.delivered}</p>}
         </div>
       </div>
-      <span className="float float-b">{t.floatBooked}</span>
+      {step >= 5 && (
+        <div className="toast">
+          <Egg size={18} />
+          <span>{s.notify}</span>
+        </div>
+      )}
+      {step >= 3 && <span className="float float-b">{t.floatBooked}</span>}
       <span className="float float-c">✓ {t.floatEval}</span>
     </div>
   );
 }
 
-function InboxArt() {
-  return (
-    <div className="sk-card" aria-hidden="true">
-      <div className="sk-top"><span className="sk-label">INBOX</span><span className="sk-label">48</span></div>
-      {["78%", "62%", "70%"].map((w) => (
-        <div className="sk-row" key={w}><i className="sk-dot" /><Bar w={w} /></div>
-      ))}
-      <div className="sk-row sk-row-hot"><i className="sk-dot yolk" /><Bar w="58%" tone="dark" /><span className="sk-pill">QUALIFIED</span></div>
-      <div className="sk-chip">BOOKED · THU 20:00 →</div>
-    </div>
-  );
-}
+function Story({ t, s }: { t: LandingCopy; s: Scenario }) {
+  const [step, setStep] = useState(0);
+  const refs = useRef<(HTMLElement | null)[]>([]);
 
-function DeliveryArt() {
+  useEffect(() => {
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) if (e.isIntersecting) setStep(Number((e.target as HTMLElement).dataset.i));
+      },
+      { rootMargin: "-45% 0px -45% 0px" },
+    );
+    refs.current.forEach((el) => el && io.observe(el));
+    return () => io.disconnect();
+  }, []);
+
   return (
-    <div className="sk-card" aria-hidden="true">
-      <div className="sk-top"><span className="sk-label">ORDER · REVIEW</span><span className="sk-label">x12</span></div>
-      <div className="sk-doc">
-        <Bar w="90%" /><Bar w="76%" /><Bar w="84%" tone="yolk" /><Bar w="52%" />
+    <section className="story" id="story">
+      <div className="story-steps">
+        <h2 className="title">{t.storyTitle(s.field)}</h2>
+        {t.storySteps.map((st, i) => (
+          <article
+            key={st.title}
+            data-i={i}
+            ref={(el) => {
+              refs.current[i] = el;
+            }}
+            className={`story-step ${i === step ? "on" : ""}`}
+          >
+            <span className="step-n">0{i + 1}</span>
+            <h3>
+              {st.title}
+              {st.soon && <em className="soon">{t.soonTag}</em>}
+            </h3>
+            <p>{st.body}</p>
+          </article>
+        ))}
       </div>
-      <div className="sk-row"><span className="sk-label">YOUR STANDARD</span><span className="sk-pass">✓ PASS</span></div>
-      <div className="sk-chip">DELIVERED →</div>
-    </div>
+      <div className="story-phone">
+        <Phone t={t} s={s} step={step} />
+      </div>
+    </section>
   );
 }
 
 function StepArt({ tag }: { tag: string }) {
   if (tag === "READ") {
     return (
-      <div className="sk-card sk-small" aria-hidden="true">
+      <div className="sk-card" aria-hidden="true">
         <span className="sk-label">READ</span>
         <div className="sk-stack">
           {[0, 1, 2].map((i) => (
@@ -127,7 +178,7 @@ function StepArt({ tag }: { tag: string }) {
   }
   if (tag === "INTERVIEW") {
     return (
-      <div className="sk-card sk-small" aria-hidden="true">
+      <div className="sk-card" aria-hidden="true">
         <span className="sk-label">INTERVIEW · 3/11</span>
         <div className="sk-bubble"><Bar w="80%" tone="dark" /><Bar w="55%" tone="dark" /></div>
         <div className="sk-bubble sk-bubble-me"><Bar w="60%" /></div>
@@ -136,7 +187,7 @@ function StepArt({ tag }: { tag: string }) {
     );
   }
   return (
-    <div className="sk-card sk-small" aria-hidden="true">
+    <div className="sk-card" aria-hidden="true">
       <span className="sk-label">EVAL · ROUND 2</span>
       <div className="sk-row"><span className="sk-pass">✓</span><Bar w="64%" /></div>
       <div className="sk-row"><span className="sk-fail">✗</span><Bar w="56%" /></div>
@@ -147,13 +198,14 @@ function StepArt({ tag }: { tag: string }) {
 }
 
 export default function HatchPage() {
-  const { locale } = useLocale();
+  const { locale, setLocale } = useLocale();
   const lang = locale as Lang;
   const t = landingCopy[lang];
+  const [field, setField] = useState(6);
+  const s = t.scenarios[field];
   const [contactStatus, setContactStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
   const [isContactDialogOpen, setIsContactDialogOpen] = useState(false);
   const contactDialogRef = useRef<HTMLDialogElement>(null);
-  const fields = t.roles.flatMap((r) => r.examples.map((e) => e.field));
 
   useEffect(() => {
     const previousTitle = document.title;
@@ -201,8 +253,8 @@ export default function HatchPage() {
     setIsContactDialogOpen(true);
   }
 
-  const tryButton = (dark = false) => (
-    <a className={`btn btn-yolk ${dark ? "on-dark" : ""}`} href={TRY_HREF}>
+  const tryButton = (
+    <a className="btn btn-yolk" href={TRY_HREF}>
       {t.tryCta}
       <span className="cta-arrow" aria-hidden="true">→</span>
     </a>
@@ -216,104 +268,92 @@ export default function HatchPage() {
           <img src={WORDMARK} alt="Hatch" width={72} height={28} />
         </a>
         <nav className="nav-links" aria-label="Page sections">
-          <a href="#what">{t.nav.what}</a>
-          <a href="#how">{t.nav.how}</a>
+          <a href="#story">{t.nav.story}</a>
+          <a href="#learn">{t.nav.learn}</a>
           <a href="#pricing">{t.nav.pricing}</a>
           <a href="#faq">{t.nav.faq}</a>
         </nav>
         <div className="nav-right">
-          <LanguageSwitcher className="lang-switch" compact />
           <a className="nav-login" href="/studio">{t.nav.login}</a>
-          <a className="btn btn-yolk btn-sm" href={TRY_HREF}>{t.nav.try}</a>
+          <a className="btn btn-ink btn-sm" href={TRY_HREF}>{t.nav.try}</a>
         </div>
       </header>
 
       <section className="hero" id="top">
-        <div className="hero-copy">
-          <h1>
-            <span>{t.heroTitleA}</span>
-            <em>{t.heroTitleB}</em>
-          </h1>
-          <p className="hero-body">{t.heroBody}</p>
-          <div className="actions">
-            {tryButton(true)}
-            <a className="btn btn-ghost" href="#demo">{t.seeCta}</a>
-          </div>
-          <p className="hero-note">{t.tryNote}</p>
-        </div>
-        <div id="demo">
-          <DemoChat key={lang} t={t} />
-        </div>
+        <p className="eyebrow">{t.heroEyebrow}</p>
+        <h1>
+          <span>{t.heroTitleA}</span>
+          <em>{t.heroTitleB}</em>
+        </h1>
+        <p className="hero-body">{t.heroBody}</p>
+        <FieldPicker t={t} value={field} onChange={setField} />
       </section>
 
-      <section className="for">
-        <p className="eyebrow">{t.forLabel}</p>
-        <div className="marquee">
-          <div className="marquee-track">
-            {[...fields, ...fields].map((f, i) => (
-              <span key={`${f}-${i}`}>{f}</span>
-            ))}
-          </div>
-        </div>
-      </section>
+      <Story key={`${lang}-${field}`} t={t} s={s} />
 
-      <section className="pain">
-        <p className="eyebrow">{t.painLabel}</p>
-        <div className="pain-grid">
-          {t.pains.map((p) => (
-            <article key={p.title}>
-              <h2>{p.title}</h2>
-              <p>{p.body}</p>
+      <section className="asset">
+        <p className="eyebrow">{t.assetLabel}</p>
+        <h2 className="title">{t.assetTitle}</h2>
+        <div className="asset-grid">
+          {t.assets.map((a) => (
+            <article key={a.title}>
+              <h3>{a.title}</h3>
+              <p>{a.body}</p>
             </article>
           ))}
         </div>
       </section>
 
-      <section className="section" id="what">
-        <p className="eyebrow">{t.whatLabel}</p>
-        <h2 className="title">{t.whatTitle}</h2>
-        <div className="feature-grid">
-          {t.features.map((f, i) => (
-            <article className="feature" key={f.tag}>
-              {i === 0 ? <InboxArt /> : <DeliveryArt />}
-              <span className="tag">{f.tag}</span>
-              <h3>{f.title}</h3>
-              <ul>
-                {f.items.map((item, j) => (
-                  <li key={item}>
-                    {item}
-                    {f.soon[j] && <em className="soon">{t.soonTag}</em>}
-                  </li>
-                ))}
-              </ul>
-            </article>
+      <section className="where">
+        <p className="eyebrow">{t.whereLabel}</p>
+        <div className="logos">
+          {PLATFORMS.map(([slug, zhName, name]) => (
+            <Logo key={slug} slug={slug} name={lang === "zh" ? zhName : name} />
           ))}
         </div>
+        <p className="fine">{t.whereNote}</p>
       </section>
 
-      <section className="section section-panel" id="how">
-        <p className="eyebrow">{t.howLabel}</p>
-        <h2 className="title">{t.howTitle}</h2>
+      <section className="section section-panel" id="learn">
+        <p className="eyebrow">{t.learnLabel}</p>
+        <div className="learn">
+          <div>
+            <h2 className="title">{t.learnTitle}</h2>
+            <p className="lead">{t.learnBody}</p>
+          </div>
+          <div className="interview">
+            <span className="sk-label">INTERVIEW · {s.field}</span>
+            <p className="iv">
+              <Typed key={s.interviewQ} text={s.interviewQ} />
+            </p>
+          </div>
+        </div>
         <div className="steps">
-          {t.howSteps.map((s, i) => (
-            <article className="step" key={s.tag}>
-              <StepArt tag={s.tag} />
+          {t.learnSteps.map((st, i) => (
+            <article className="step" key={st.tag}>
+              <StepArt tag={st.tag} />
               <span className="step-n">0{i + 1}</span>
-              <h3>{s.title}</h3>
-              <p>{s.body}</p>
+              <h3>{st.title}</h3>
+              <p>{st.body}</p>
             </article>
           ))}
-        </div>
-        <p className="how-note">{t.howNote}</p>
-        <div className="interview">
-          <p className="eyebrow">{t.interviewLabel}</p>
-          <p className="iv iv-agent">{t.interviewQ1}</p>
-          <p className="iv iv-me">{t.interviewA}</p>
-          <p className="iv iv-agent iv-deep">{t.interviewQ2}</p>
         </div>
       </section>
 
       <section className="section">
+        <p className="eyebrow">{t.helpedLabel}</p>
+        <div className="helped">
+          {t.helped.map((h) => (
+            <article key={h.who}>
+              <span className="status">{h.status}</span>
+              <h3>{h.who}</h3>
+              <p>{h.what}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="section section-panel">
         <p className="eyebrow">{t.compareLabel}</p>
         <div className="compare" role="table">
           <div className="compare-row compare-head" role="row">
@@ -332,7 +372,6 @@ export default function HatchPage() {
           ))}
         </div>
       </section>
-
 
       <section className="section">
         <p className="eyebrow">{t.trustLabel}</p>
@@ -359,7 +398,7 @@ export default function HatchPage() {
               <span className="tag">{p.name}</span>
               <p className="plan-price">{p.price}</p>
               <p>{p.body}</p>
-              {p.cta && tryButton()}
+              {p.cta && tryButton}
             </article>
           ))}
         </div>
@@ -379,9 +418,11 @@ export default function HatchPage() {
       </section>
 
       <section className="final">
+        <Egg size={56} />
         <h2>{t.finalTitle}</h2>
         <p>{t.finalBody}</p>
-        {tryButton(true)}
+        {tryButton}
+        <p className="fine">{t.tryNote}</p>
       </section>
 
       <dialog
@@ -437,14 +478,24 @@ export default function HatchPage() {
       </dialog>
 
       <footer className="footer">
-        <a className="nav-brand" href="#top">
-          <Egg />
-          <img src={WORDMARK} alt="Hatch" width={72} height={28} />
-        </a>
+        <div className="footer-brand">
+          <a className="nav-brand" href="#top">
+            <Egg />
+            <img src={WORDMARK} alt="Hatch" width={72} height={28} />
+          </a>
+          <label className="lang-select">
+            <span>{t.footer.language}</span>
+            <select value={lang} onChange={(e) => setLocale(e.target.value)}>
+              {LOCALES.map((l: Lang) => (
+                <option key={l} value={l}>{LANG_NAMES[l]}</option>
+              ))}
+            </select>
+          </label>
+        </div>
         <div className="footer-cols">
           <div>
             <p className="eyebrow">{t.footer.product}</p>
-            <a href={TRY_HREF}>{t.tryCta}</a>
+            <a href={TRY_HREF}>{t.nav.try}</a>
             <a href="/studio">{t.footer.login}</a>
             <a href="/explore">{t.footer.explore}</a>
             <a href="/download">{t.footer.download}</a>
@@ -455,7 +506,6 @@ export default function HatchPage() {
             <button type="button" onClick={openContactDialog}>{t.footer.contact}</button>
           </div>
         </div>
-        <LanguageSwitcher className="lang-switch" compact />
       </footer>
     </main>
   );
