@@ -15,7 +15,7 @@ export type Scenario = {
 
 const zh = {
   nav: { story: "它怎么接客户", learn: "它怎么学会你", pricing: "价格", faq: "常见问题", login: "登录", try: "免费试试" },
-  heroEyebrow: "为专家而做的 AI",
+  heroEyebrow: "Private intelligence for experts",
   heroTitleA: ["忙不过来的", "，"] as [string, string],
   heroWords: ["私信", "咨询", "客户", "订单", "交付"],
   heroTitleB: "交给你的 AI 分身。",
@@ -162,7 +162,7 @@ export type LandingCopy = typeof zh;
 
 const en: LandingCopy = {
   nav: { story: "How it takes clients", learn: "How it learns you", pricing: "Pricing", faq: "FAQ", login: "Log in", try: "Try it free" },
-  heroEyebrow: "AI built for experts",
+  heroEyebrow: "Private intelligence for experts",
   heroTitleA: ["Too many ", "?"] as [string, string],
   heroWords: ["DMs", "inquiries", "clients", "orders", "deliverables"],
   heroTitleB: "Hand them to your AI twin.",
@@ -307,7 +307,7 @@ const en: LandingCopy = {
 
 const ja: LandingCopy = {
   nav: { story: "お客様の受け方", learn: "あなたの学び方", pricing: "料金", faq: "よくある質問", login: "ログイン", try: "無料で試す" },
-  heroEyebrow: "専門家のためのAI",
+  heroEyebrow: "Private intelligence for experts",
   heroTitleA: ["手が回らない", "は、"] as [string, string],
   heroWords: ["DM", "相談", "お客様", "注文", "納品"],
   heroTitleB: "あなたのAI分身に。",
