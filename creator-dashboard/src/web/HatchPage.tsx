@@ -3,152 +3,81 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { LanguageSwitcher } from "../LanguageSwitcher.jsx";
 import { useLocale } from "../locale.jsx";
-import { jaCopy } from "./copy.ja";
-import { webMediaUrl } from "./media";
 
 type Lang = "zh" | "en" | "ja";
+type Example = { field: string; client: string; reply: string };
+type Role = { label: string; examples: Example[] };
+
+const TRY_HREF = "/studio";
+const DEMO_HREF = "/chat/product/802f2105-e28e-4ddc-996a-0a97a7fa4bb5";
 
 const copy = {
   zh: {
-    meta: "EXPERT ECONOMY",
-    nav: ["产品缺口", "如何创建", "商业模式", "长期愿景", "合作伙伴", "联系"],
-    exploreCreators: "探索 Expert",
-    buildProduct: "创建你的 Expert 产品",
-    contactLink: "与 Hatch 深度合作",
-    heroTitleA: "把知识付费",
-    heroTitleB: "变成能干活的 Agent。",
-    heroBody:
-      "Hatch 让已经拥有受众的 Expert，把自己的方法做成可收费、能交付成果的 Agent——无需组建软件团队，也不必亲自完成每一次服务。",
-    heroFilmLabel: "Hatch 产品发布影片",
-        heroFilmPoster: "/assets/web/hatch-launch-poster.jpg",
-        heroFilmSrc: webMediaUrl("hatch-launch-zh.mp4"),
-    continuum: [
+    heroTitleA: "你见客户的时候，",
+    heroTitleB: "它在接下一个。",
+    heroBody: "它用你的方式回咨询、筛出真客户；你接不过来的单，它按你的标准来做。",
+    tryCta: "免费试试",
+    tryNote: "不收月费 · 你的内容不给别人用",
+    demoTag: "示例",
+    demoBooked: "已为你约好 · 周四 20:00 · 附需求简介",
+    roles: [
       {
-        label: "COURSE",
-        title: "课程",
-        body: "可以规模化，但每个人得到的是同一套内容。",
+        label: "销售",
+        examples: [
+          { field: "保险", client: "孩子刚出生，该先买什么？", reply: "先别急着挑产品。家里谁是主要收入来源？房贷还有多少年？" },
+          { field: "财富管理", client: "手上有 200 万，放香港还是放国内？", reply: "先说用途：这笔钱几年内会用到吗？是给孩子读书，还是养老？" },
+          { field: "房产", client: "预算 500 万，学区和通勤只能选一个？", reply: "孩子现在几岁？你们两个人每天在哪里上班？" },
+          { field: "医美", client: "法令纹做填充还是线雕？", reply: "能接受多久的恢复期？之前做过什么项目吗？" },
+        ],
       },
       {
-        label: "HATCH AGENT",
-        title: "Agent 产品",
-        body: "按照 Expert 的标准，针对用户 Context 完成工作。",
+        label: "顾问",
+        examples: [
+          { field: "餐饮经营", client: "新店开了三个月，翻台率上不去。", reply: "客单价多少？午市和晚市各坐满几成？" },
+          { field: "法律", client: "合伙人要退出，股份怎么算？", reply: "当初的合伙协议里，写了退出条款吗？" },
+          { field: "财税", client: "个体户转公司，税会高多少？", reply: "去年营收大概多少？成本里能开票的占几成？" },
+          { field: "出海", client: "想在日本开公司，从哪一步开始？", reply: "你做什么业务？需要本人去日本常驻吗？" },
+        ],
       },
       {
-        label: "CONSULTING",
-        title: "咨询",
-        body: "可以解决具体问题，但依赖 Expert 本人的时间。",
+        label: "教练",
+        examples: [
+          { field: "职业发展", client: "工作五年，想转产品经理来得及吗？", reply: "来得及。你现在做什么？最想转的原因是什么？" },
+          { field: "健身", client: "练了三个月，体重一点没变。", reply: "说说你一周练几次，每天大概吃些什么？" },
+          { field: "销售教练", client: "客户总说“我再考虑考虑”。", reply: "把你们最后那几句对话原样发我，我们看卡在哪。" },
+          { field: "情感", client: "吵架后他三天没回消息。", reply: "先说说，这次吵的是什么？" },
+        ],
       },
+      {
+        label: "老师",
+        examples: [
+          { field: "留学文书", client: "高三了，文书一个字没写，还来得及吗？", reply: "来得及，先别急着写。你最投入的那件事是什么？" },
+          { field: "雅思", client: "作文一直 6 分，怎么上 7？", reply: "发一篇你最近写的给我，我先看卡在哪。" },
+          { field: "日本受验", client: "评定不高，还能冲推荐入学吗？", reply: "志望校是哪几所？现在的评定平均是多少？" },
+          { field: "作品集", client: "跨专业申设计，作品集从哪开始？", reply: "本科学什么的？目标学校有哪几所？" },
+        ],
+      },
+    ] as Role[],
+    painLabel: "你是不是这样",
+    pains: ["每天回 3 小时私信，成交没几单。", "批改卖爆了，两个人做不过来，只能停。"],
+    helpLabel: "它能帮你做什么",
+    helps: [
+      { label: "成交前", body: "替你回那些重复的问题，把真想买的约给你。" },
+      { label: "成交后", body: "替你接那些接不过来的单，你定价、你抽查。" },
     ],
-    continuumBridge: "两者之间缺失的产品层",
-    gapEyebrow: "01 · THE PRODUCT GAP",
-    gapTitle: "Expert 有了受众之后，\n还能卖什么？",
-    gapBody:
-      "Expert 已经可以通过社交媒体、课程、社群和 Newsletter 建立信任与分发。但他们仍然只能在可规模化的内容，与高价值却无法规模化的本人服务之间选择。",
-    gapBody2:
-      "与此同时，用户已经在把 Expert 的公开视频、文章和方法交给通用 AI，请它修改材料、生成方案或完成工作。需求并没有消失，但由 AI 产生的使用和收入正在绕过 Expert。",
-    gapList: [
-      ["内容与课程", "规模化，但个性化交付很浅。"],
-      ["咨询、批改与陪跑", "更接近结果，但受限于本人时间。"],
-      ["Prompt 与 Skill", "容易复制、安装门槛高，也不是完整消费产品。"],
-    ],
-    productEyebrow: "02 · THE PLATFORM",
-    productTitle: "Expert 自己创建。\nHatch 在背后运行。",
-    productBody:
-      "Hatch 是标准化平台，不是定制 Agent 工作室，也不做以 Hatch 为中心的 Consumer Marketplace。Expert 的身份、风格和产品体验始终在前。",
-    productPrinciple:
-      "Hatch 不先复制一个完整的人，再为分身寻找用途。它先确定用户愿意付费让这位 Expert 完成什么，再提取这项产品所需要的方法、判断、数据、工具和人工介入。",
-    processIntro:
-      "把一套方法做成真正可用、可收费的产品，通常需要产品设计、Agent 工程、质量评估、支付和持续运营。Hatch 将这套工作变成 Expert 可以自行完成的标准流程。",
-    steps: [
-      {
-        n: "01",
-        title: "定义产品",
-        body: "明确谁会购买、交付什么、如何收费、什么算合格，以及什么时候必须由本人介入。",
-      },
-      {
-        n: "02",
-        title: "导入方法",
-        body: "导入课程、案例、历史交付、修改记录和专有数据；Interview Agent 围绕真实案例补齐隐性判断。",
-      },
-      {
-        n: "03",
-        title: "生成并校准",
-        body: "Hatch 组合方法、数据、工具和工作流，并生成 Expert Evals；Expert 通过比较和修改校准自己的标准。",
-      },
-      {
-        n: "04",
-        title: "发布与收费",
-        body: "设定价格，生成产品页面与链接，再放入社交媒体、课程、社群或网站。",
-      },
-      {
-        n: "05",
-        title: "持续交付",
-        body: "Agent 完成主要工作，Expert 处理边界案例；真实纠正继续更新产品的标准与边界。",
-      },
-    ],
-    skillLabel: "A SKILL IS NOT YET A PRODUCT",
-    skillTitle: "一份 Skill 太薄了。",
-    skillBody:
-      "Skill 通常只能装下一套 SOP、instructions 或 taste。真正能工作的专家产品，还可能需要专有数据库、工具、历史案例和 Eval。",
-    fullProduct:
-      "Hatch 把这些能力放进一个低摩擦、可支付、受控运行的完整体验。用户得到成果，却不必安装 Skill，也拿不到 Expert 的底层方法与数据。",
-    workExamples: [
-      "改好的简历",
-      "Growth Audit",
-      "健身计划",
-      "短视频脚本",
-      "模拟面试",
-      "股票分析",
-      "销售话术",
-      "内容日历",
-      "课程作业批改",
-      "品牌 Brief",
-      "Notion 知识库",
-      "写作 Review",
-      "短视频剪辑",
-      "营销诊断",
-      "合同红线稿",
-      "谈判策略",
-      "定价方案",
-      "用户研究报告",
-      "Pitch Deck",
-      "分镜脚本",
-      "饮食计划",
-      "产品体验诊断",
-      "播客粗剪",
-      "品牌命名清单",
-    ],
-    businessEyebrow: "03 · BUSINESS MODEL",
-    businessTitle: "Expert 获得收入，\nHatch 才获得收入。",
-    businessBody:
-      "Expert 自行定义产品、价格和体验，并通过已有受众分发。最终用户按次购买或订阅某一位 Expert 的 Agent；Hatch 不收固定月费，也不运营面向消费者的 Agent Marketplace，而是从交易收入中获得 10%。",
-    businessClosing:
-      "这些平台主要帮助 Expert 销售内容与会员。Hatch 要增加下一类商品：能够读取用户 Context、执行工作并交付成果的 Expert Agent。",
-    scale:
-      "Hatch 的增长不来自软件席位，而来自 Expert 持续产生的 AI Agent GMV。",
-    visionBody:
-      "过去，一位专家要把自己的服务变成可规模化产品，要么亲自交付，要么组建产品、工程、运营和服务团队。Hatch 把这套产品化与履约能力标准化，让 Expert 可以自行创建、发布和经营自己的 AI 产品。",
-    final:
-      "Hatch 是 Expert Economy 的产品、履约与交易基础设施。Expert 无需组建软件团队，也能拥有一个持续创收的 AI 产品。",
-    partnersKicker: "一起 Hatch 点什么。",
-    partnersLabel: "WHO WE WANT TO PARTNER WITH",
-    partnersTitle: "我们希望与谁合作",
-    partnerTypes: [
-      {
-        label: "EXPERTS",
-        title: "已有受众、方法与服务的 Expert",
-        body: "将课程、咨询或内容，延展为自己的 Agent 产品。",
-      },
-      {
-        label: "INSTITUTIONS",
-        title: "内容版权方、媒体/IP 机构或 Expert 渠道方",
-        body: "让成熟内容资产，或一批 Expert 的方法，变成新的 Agent 产品。",
-      },
-    ],
+    howLabel: "怎么做出来",
+    howTitle: "你跟它聊一小时，它就学会你是怎么判断的。",
+    howSteps: ["先读你发过的内容", "一次只问一个问题，追问你怎么判断", "自己出题考自己，考过了才上线"],
+    howNote: "它不碰你收费的工作，只干你本来就没钱拿的那部分。",
+    demoLabel: "先试一个",
+    demoTitle: "跟一位留学顾问的 AI 聊两句。",
+    demoBody: "看它怎么追问、怎么判断。",
+    demoCta: "去聊聊",
+    finalTitle: "首批 30 位，我们陪你一起做。",
+    finalBody: "不收月费。你赚钱，我们才赚钱。",
+    partnerLink: "机构合作",
     contactLabel: "START A CONVERSATION",
     contactTitle: "一起 Hatch 点什么。",
-    contactBody:
-      "如果你看到了合作的可能、认识我们该见的人，或只是想继续聊聊，欢迎留个联系方式。",
     contactFields: {
       name: "姓名",
       email: "邮箱",
@@ -156,7 +85,6 @@ const copy = {
       message: "想做的产品、已有的内容资产，或任何想告诉我们的事（选填）",
     },
     contactOptions: ["Expert", "内容版权方、媒体/IP 机构或 Expert 渠道方", "投资人"],
-    contactLaunch: "联系 Hatch",
     contactClose: "关闭",
     contactSubmit: "发送信息",
     contactSending: "正在发送…",
@@ -164,299 +92,227 @@ const copy = {
     contactError: "暂时没有发送成功，请稍后再试。",
   },
   en: {
-    meta: "EXPERT ECONOMY",
-    nav: ["The gap", "How it works", "Business model", "Vision", "Partners", "Contact"],
-    exploreCreators: "Explore experts",
-    buildProduct: "Build your own expert product",
-    contactLink: "Partner deeply with Hatch",
-    heroTitleA: "Turn knowledge products",
-    heroTitleB: "into agents that do the work.",
+    heroTitleA: "While you're with a client,",
+    heroTitleB: "it takes the next one.",
     heroBody:
-      "Hatch lets experts with an audience turn their methods into paid agents that deliver usable work—without a software team or doing every job themselves.",
-    heroFilmLabel: "Hatch product launch film",
-    heroFilmPoster: "/assets/web/hatch-launch-poster.jpg",
-    heroFilmSrc: webMediaUrl("hatch-launch-en.mp4"),
-    continuum: [
+      "It answers inquiries your way and finds the real buyers. The work you can't take on, it does to your standard.",
+    tryCta: "Try it free",
+    tryNote: "No monthly fee · Your content is never shared",
+    demoTag: "Example",
+    demoBooked: "Booked for you · Thu 8:00 pm · brief attached",
+    roles: [
       {
-        label: "COURSE",
-        title: "Courses",
-        body: "They scale, but everyone gets the same material.",
+        label: "Sales",
+        examples: [
+          { field: "Insurance", client: "We just had a baby. What should we buy first?", reply: "Before any product: who's the main earner, and how many years are left on the mortgage?" },
+          { field: "Wealth", client: "I have $300k. Hong Kong or keep it at home?", reply: "First, when will you need this money? School fees, or retirement?" },
+          { field: "Real estate", client: "Good schools or a short commute. Can't have both?", reply: "How old is your child, and where do you both work?" },
+          { field: "Aesthetics", client: "Filler or thread lift for smile lines?", reply: "How much downtime can you accept? Any treatments before?" },
+        ],
       },
       {
-        label: "HATCH AGENT",
-        title: "Agent products",
-        body: "They use each user’s context and follow the expert’s standards.",
+        label: "Consulting",
+        examples: [
+          { field: "Restaurants", client: "Three months in, our table turnover is stuck.", reply: "What's your average check? How full are lunch and dinner?" },
+          { field: "Law", client: "My partner wants out. How do we split the shares?", reply: "Does your partnership agreement have an exit clause?" },
+          { field: "Tax", client: "Sole trader to company: how much more tax?", reply: "Roughly what was last year's revenue, and how much of your cost is invoiced?" },
+          { field: "Going global", client: "I want to set up in Japan. Where do I start?", reply: "What's the business, and do you need to live there?" },
+        ],
       },
       {
-        label: "CONSULTING",
-        title: "Consulting",
-        body: "It solves specific problems, but depends on the expert’s time.",
+        label: "Coaching",
+        examples: [
+          { field: "Career", client: "Five years in. Too late to move into product?", reply: "Not too late. What do you do now, and why product?" },
+          { field: "Fitness", client: "Three months of training, zero weight change.", reply: "How often do you train, and what does a normal day of eating look like?" },
+          { field: "Sales coaching", client: "Clients keep saying 'let me think about it.'", reply: "Send me the last few lines of that conversation, word for word." },
+          { field: "Relationships", client: "He hasn't replied for three days since our fight.", reply: "First, what was the fight about?" },
+        ],
       },
+      {
+        label: "Teaching",
+        examples: [
+          { field: "College essays", client: "Senior year, no essay yet. Is it too late?", reply: "It's not. Don't start writing yet. What do you care about most?" },
+          { field: "IELTS", client: "Stuck at 6 in writing. How do I get a 7?", reply: "Send me your latest essay. I'll show you where it's stuck." },
+          { field: "Japan admissions", client: "Low grades. Can I still try for a recommendation?", reply: "Which schools, and what's your current grade average?" },
+          { field: "Portfolios", client: "Switching into design. Where does a portfolio start?", reply: "What did you study, and which schools are you aiming for?" },
+        ],
+      },
+    ] as Role[],
+    painLabel: "Sound familiar?",
+    pains: ["Three hours of DMs a day, hardly any sales.", "Your review service sold out, and you had to shut it down."],
+    helpLabel: "What it does for you",
+    helps: [
+      { label: "Before the sale", body: "Answers the repeat questions and books the real buyers with you." },
+      { label: "After the sale", body: "Takes the work you can't take on. You set the price and spot-check." },
     ],
-    continuumBridge: "The missing layer between them",
-    gapEyebrow: "01 · THE PRODUCT GAP",
-    gapTitle: "Experts own the audience.\nWhat can they sell next?",
-    gapBody:
-      "Experts already build trust and reach through social media, courses, communities, and newsletters. Yet they still choose between scalable content and high-value services that depend on their own time.",
-    gapBody2:
-      "Meanwhile, audiences are already feeding experts’ public videos, writing, and methods into general-purpose AI to revise materials, generate plans, and complete work. Demand remains, but the resulting usage and revenue bypass the expert.",
-    gapList: [
-      ["Content and courses", "They scale, but offer little personalization."],
-      ["Consulting, review, and coaching", "More tailored, but constrained by the expert’s time."],
-      ["Prompts and Skills", "Easy to copy, hard to install, and not products on their own."],
-    ],
-    productEyebrow: "02 · THE PLATFORM",
-    productTitle: "Experts build it.\nHatch runs it.",
-    productBody:
-      "Hatch is a platform for experts to own the identity, style, and customer experience of their products.",
-    productPrinciple:
-      "Hatch starts with the job people would pay an expert to do. It then assembles the method, judgment, data, tools, and human oversight needed to deliver it.",
-    processIntro:
-      "Making a method into a product people can use and pay for normally takes product design, agent engineering, evaluation, payments, and operations. Hatch packages that work into a repeatable creation flow for experts.",
-    steps: [
-      {
-        n: "01",
-        title: "Define the product",
-        body: "Specify who buys it, what they receive, how it is priced, what good looks like, and when the expert needs to step in.",
-      },
-      {
-        n: "02",
-        title: "Import the method",
-        body: "Bring in courses, cases, prior deliverables, revisions, and proprietary data. Hatch’s Interview Agent uses real cases to draw out tacit judgment.",
-      },
-      {
-        n: "03",
-        title: "Generate and calibrate",
-        body: "Hatch combines the method, data, tools, and workflow, then builds expert-specific evals. The expert calibrates the agent through testing and correction.",
-      },
-      {
-        n: "04",
-        title: "Publish and charge",
-        body: "Set a price, create a product page and link, then distribute through social, courses, communities, or a website.",
-      },
-      {
-        n: "05",
-        title: "Deliver continuously",
-        body: "The agent does the core work; the expert handles edge cases. Corrections from real use keep refining the product.",
-      },
-    ],
-    skillLabel: "A SKILL IS NOT YET A PRODUCT",
-    skillTitle: "A Skill on its own is too thin.",
-    skillBody:
-      "A Skill can capture an SOP, instructions, or taste. A real expert product often also needs proprietary data, tools, prior cases, and evals.",
-    fullProduct:
-      "Hatch turns them into a paid product that is easy to use and controlled by the expert. Users get the finished work without installing a Skill—or taking the expert’s method or data.",
-    workExamples: [
-      "Rewritten résumé",
-      "Growth audit",
-      "Fitness plan",
-      "Video script",
-      "Interview practice",
-      "Stock analysis",
-      "Sales messaging",
-      "Content calendar",
-      "Homework review",
-      "Brand brief",
-      "Notion workspace setup",
-      "Writing review",
-      "Edited short-form video",
-      "Go-to-market diagnosis",
-      "Contract redline",
-      "Negotiation brief",
-      "Pricing strategy",
-      "Research synthesis",
-      "Pitch deck",
-      "Storyboard",
-      "Meal plan",
-      "Product teardown",
-      "Podcast rough cut",
-      "Brand naming shortlist",
-    ],
-    businessEyebrow: "03 · BUSINESS MODEL",
-    businessTitle: "Hatch earns only\nwhen the expert earns.",
-    businessBody:
-      "Experts set the product, price, and experience, then sell to the audience they have already built. Customers buy a task or subscribe to a particular expert’s agent. Hatch charges no monthly fee and takes 10% of each transaction; it does not run a consumer marketplace.",
-    businessClosing:
-      "Those platforms help experts sell content and memberships. Hatch adds a new category: expert agents that work with a customer’s context and deliver usable outputs.",
-    scale:
-      "Hatch grows with expert-agent GMV, not software seats.",
-    visionBody:
-      "Until now, an expert who wanted to make a service scalable had two choices: deliver it personally or build product, engineering, operations, and service teams. Hatch standardizes the work of productizing and delivering that service, so experts can build, publish, and run their own AI products.",
-    final:
-      "Hatch is the product, fulfillment, and commerce infrastructure for the expert economy. Experts can own a revenue-generating AI product—without a software team.",
-    partnersKicker: "LET’S HATCH SOMETHING.",
-    partnersLabel: "WHO WE WANT TO PARTNER WITH",
-    partnersTitle: "Who we want to partner with",
-    partnerTypes: [
-      {
-        label: "EXPERTS",
-        title: "Experts with an audience, a distinct method, and a service to scale",
-        body: "Turn courses, consulting, or content into agent products.",
-      },
-      {
-        label: "INSTITUTIONS",
-        title: "Content rights holders, media/IP organizations, and expert channels",
-        body: "Turn established content assets—or a roster of experts—into new agent products.",
-      },
-    ],
+    howLabel: "How it gets made",
+    howTitle: "Talk with it for an hour. It learns how you make calls.",
+    howSteps: ["Reads what you've published", "Asks one question at a time, and digs into your reasoning", "Tests itself, and goes live only when it passes"],
+    howNote: "It never touches your paid work, only the part you were never paid for.",
+    demoLabel: "Try one first",
+    demoTitle: "Chat with an admissions consultant's AI.",
+    demoBody: "See how it asks and how it judges.",
+    demoCta: "Start a chat",
+    finalTitle: "Our first 30 experts get us beside them.",
+    finalBody: "No monthly fee. We earn only when you earn.",
+    partnerLink: "For organizations",
     contactLabel: "START A CONVERSATION",
-    contactTitle: "Let’s hatch something.",
-    contactBody:
-      "See a way to work together, know someone we should meet, or want to continue the conversation? Leave us a note.",
+    contactTitle: "Let's hatch something.",
     contactFields: {
       name: "Name",
       email: "Email",
       partnerType: "Which best describes you?",
-      message: "A product, asset, or idea you’d like to explore (optional)",
+      message: "A product, asset, or idea you'd like to explore (optional)",
     },
     contactOptions: ["Expert", "Content rights holder, media/IP organization, or expert channel", "Investor"],
-    contactLaunch: "Contact Hatch",
     contactClose: "Close",
     contactSubmit: "Send",
     contactSending: "Sending…",
-    contactSuccess: "Thanks—we’ll be in touch soon.",
+    contactSuccess: "Thanks—we'll be in touch soon.",
     contactError: "Something went wrong. Please try again.",
   },
-  ja: jaCopy,
-} as const;
+  ja: {
+    heroTitleA: "あなたが接客している間に、",
+    heroTitleB: "次の一人を受けてくれる。",
+    heroBody: "あなたのやり方で問い合わせに答え、本気のお客様を見極める。手が回らない仕事は、あなたの基準でこなします。",
+    tryCta: "無料で試す",
+    tryNote: "月額費用なし · あなたのコンテンツは他に使いません",
+    demoTag: "例",
+    demoBooked: "予約済み · 木曜 20:00 · 相談内容のメモ付き",
+    roles: [
+      {
+        label: "営業",
+        examples: [
+          { field: "保険", client: "子どもが生まれました。まず何に入るべき？", reply: "商品の前に。家計の柱はどなたで、住宅ローンはあと何年ですか？" },
+          { field: "資産運用", client: "2,000万円、香港と国内どちらに置くべき？", reply: "まず使い道から。何年以内に使う予定のお金ですか？" },
+          { field: "不動産", client: "学区と通勤、どちらかしか選べない？", reply: "お子さんは何歳で、お二人の勤務地はどこですか？" },
+          { field: "美容医療", client: "ほうれい線、ヒアルロン酸と糸リフトどっち？", reply: "ダウンタイムはどのくらいまで大丈夫ですか？" },
+        ],
+      },
+      {
+        label: "コンサル",
+        examples: [
+          { field: "飲食経営", client: "開店3か月、回転率が上がりません。", reply: "客単価は？ランチとディナーはそれぞれ何割埋まっていますか？" },
+          { field: "法律", client: "共同経営者が抜けたい。株はどう分ける？", reply: "最初の契約に、退出時の取り決めはありますか？" },
+          { field: "税務", client: "個人事業から法人化すると税金は増える？", reply: "昨年の売上と、経費の内訳を教えてください。" },
+          { field: "海外進出", client: "中国で事業を始めたい。何から？", reply: "どんな事業で、現地に常駐する予定はありますか？" },
+        ],
+      },
+      {
+        label: "コーチ",
+        examples: [
+          { field: "キャリア", client: "社会人5年目、今からPMに転職できる？", reply: "できます。今のお仕事と、PMを目指す理由は？" },
+          { field: "フィットネス", client: "3か月トレーニングしても体重が変わらない。", reply: "週に何回、普段どんな食事をしていますか？" },
+          { field: "営業コーチ", client: "「検討します」で毎回止まります。", reply: "最後のやりとりを、そのまま送ってください。" },
+          { field: "恋愛", client: "けんかしてから3日返信がない。", reply: "まず、何がきっかけでしたか？" },
+        ],
+      },
+      {
+        label: "先生",
+        examples: [
+          { field: "留学エッセイ", client: "高3でエッセイが一文字も書けていません。", reply: "まだ間に合います。まず、一番打ち込んだことは何ですか？" },
+          { field: "IELTS", client: "ライティングが6から上がりません。", reply: "最近書いたものを一本送ってください。どこで止まっているか見ます。" },
+          { field: "受験", client: "評定が低くても推薦は狙えますか？", reply: "志望校はどこで、今の評定平均はいくつですか？" },
+          { field: "ポートフォリオ", client: "他分野からデザインへ。何から作れば？", reply: "大学での専攻と、志望校を教えてください。" },
+        ],
+      },
+    ] as Role[],
+    painLabel: "こんなことはありませんか",
+    pains: ["毎日3時間DMを返しても、成約はわずか。", "添削サービスが売れすぎて、二人では回らず止めた。"],
+    helpLabel: "できること",
+    helps: [
+      { label: "成約まで", body: "よくある質問に答え、本気のお客様をあなたの予約につなぎます。" },
+      { label: "成約のあと", body: "手が回らない仕事を引き受けます。価格もチェックもあなた次第。" },
+    ],
+    howLabel: "つくり方",
+    howTitle: "1時間話すだけで、あなたの判断の仕方を覚えます。",
+    howSteps: ["あなたの発信を読み込む", "一度に一つずつ質問し、判断の理由を掘り下げる", "自分でテストし、合格してから公開"],
+    howNote: "あなたの有料の仕事には触れません。もともとお金にならなかった部分だけを担います。",
+    demoLabel: "まず試す",
+    demoTitle: "留学コンサルタントのAIと話してみる。",
+    demoBody: "どう質問し、どう判断するかを見てください。",
+    demoCta: "話してみる",
+    finalTitle: "最初の30名と、一緒につくります。",
+    finalBody: "月額費用なし。あなたが稼いだときだけ、私たちも稼ぎます。",
+    partnerLink: "法人の方",
+    contactLabel: "START A CONVERSATION",
+    contactTitle: "一緒に、何かをHatchしよう。",
+    contactFields: {
+      name: "お名前",
+      email: "メールアドレス",
+      partnerType: "あなたについて",
+      message: "つくりたいプロダクトやお持ちのコンテンツなど（任意）",
+    },
+    contactOptions: ["Expert", "コンテンツ権利者・メディア/IP企業・Expertチャネル", "投資家"],
+    contactClose: "閉じる",
+    contactSubmit: "送信する",
+    contactSending: "送信中…",
+    contactSuccess: "ありがとうございます。近日中にご連絡します。",
+    contactError: "送信できませんでした。時間をおいて再度お試しください。",
+  },
+};
 
-const sectionLinks = ["gap", "product", "business", "vision", "partners", "contact"];
+function DemoChat({ t }: { t: (typeof copy)[Lang] }) {
+  const [role, setRole] = useState(t.roles.length - 1);
+  const [index, setIndex] = useState(0);
+  const examples = t.roles[role].examples;
+  const example = examples[index % examples.length];
 
-function StepGraphic({ step, lang }: { step: string; lang: Lang }) {
-  const labels =
-    lang === "ja"
-      ? {
-          buyer: "購入者",
-          output: "成果物",
-          price: "価格",
-          course: "講座",
-          cases: "事例",
-          edits: "修正",
-          data: "データ",
-          result: "成果物",
-        }
-      : {
-          buyer: "BUYER",
-          output: "OUTPUT",
-          price: "PRICE",
-          course: "COURSE",
-          cases: "CASES",
-          edits: "EDITS",
-          data: "DATA",
-          result: "RESULT",
-        };
+  useEffect(() => {
+    const timer = window.setInterval(() => setIndex((i) => i + 1), 4200);
+    return () => window.clearInterval(timer);
+  }, [role]);
 
-  switch (step) {
-    case "01":
-      return (
-        <div className="step-graphic step-graphic--brief" aria-hidden="true">
-          <div className="mini-topline">
-            <span>PRODUCT BRIEF</span>
-            <i />
-          </div>
-          <div className="brief-rows">
-            <div>
-              <span>{labels.buyer}</span>
-              <i />
-            </div>
-            <div>
-              <span>{labels.output}</span>
-              <i />
-            </div>
-            <div>
-              <span>{labels.price}</span>
-              <i />
-            </div>
-          </div>
+  return (
+    <div className="lp-demo">
+      <div className="lp-roles" role="tablist">
+        {t.roles.map((r, i) => (
+          <button
+            key={r.label}
+            type="button"
+            role="tab"
+            aria-selected={i === role}
+            className={i === role ? "active" : ""}
+            onClick={() => {
+              setRole(i);
+              setIndex(0);
+            }}
+          >
+            {r.label}
+          </button>
+        ))}
+      </div>
+      <div className="lp-chat" key={`${role}-${index % examples.length}`}>
+        <div className="lp-chat-head">
+          <span>{example.field}</span>
+          <em>{t.demoTag}</em>
         </div>
-      );
-    case "02":
-      return (
-        <div className="step-graphic step-graphic--inputs" aria-hidden="true">
-          <div className="input-stack">
-            <span>{labels.course}</span>
-            <span>{labels.cases}</span>
-            <span>{labels.edits}</span>
-          </div>
-          <div className="input-plus">+</div>
-          <div className="data-card">
-            <span>{labels.data}</span>
-            <i />
-            <i />
-            <i />
-          </div>
-        </div>
-      );
-    case "03":
-      return (
-        <div className="step-graphic step-graphic--eval" aria-hidden="true">
-          <div className="eval-candidates">
-            <div className="eval-candidate eval-candidate--reject">
-              <i />
-              <i />
-              <b>×</b>
-            </div>
-            <div className="eval-candidate eval-candidate--accept">
-              <i />
-              <i />
-              <b>✓</b>
-            </div>
-          </div>
-          <div className="eval-track">
-            <span>EVAL</span>
-            <i />
-            <em />
-          </div>
-        </div>
-      );
-    case "04":
-      return (
-        <div className="step-graphic step-graphic--publish" aria-hidden="true">
-          <div className="publish-link">
-            <span>CREATOR.LINK</span>
-            <b>↗</b>
-          </div>
-          <div className="publish-product">
-            <i />
-            <div>
-              <span />
-              <span />
-            </div>
-            <strong>$</strong>
-          </div>
-        </div>
-      );
-    default:
-      return (
-        <div className="step-graphic step-graphic--delivery" aria-hidden="true">
-          <div className="delivery-checks">
-            <div>
-              <i>✓</i>
-              <span />
-            </div>
-            <div>
-              <i>✓</i>
-              <span />
-            </div>
-          </div>
-          <div className="delivery-output">
-            <b>{labels.result}</b>
-            <span />
-            <em>↻</em>
-          </div>
-        </div>
-      );
-  }
+        <p className="lp-bubble lp-bubble-client">{example.client}</p>
+        <p className="lp-bubble lp-bubble-agent">{example.reply}</p>
+        <p className="lp-booked">✓ {t.demoBooked}</p>
+      </div>
+      <div className="lp-fields">
+        {examples.map((e, i) => (
+          <button
+            key={e.field}
+            type="button"
+            className={i === index % examples.length ? "active" : ""}
+            onClick={() => setIndex(i)}
+          >
+            {e.field}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export default function HatchPage() {
   const { locale: lang } = useLocale();
-  const [contactStatus, setContactStatus] = useState<
-    "idle" | "submitting" | "success" | "error"
-  >("idle");
+  const [contactStatus, setContactStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
   const [isContactDialogOpen, setIsContactDialogOpen] = useState(false);
   const contactDialogRef = useRef<HTMLDialogElement>(null);
-  const t = copy[lang];
+  const t = copy[lang as Lang];
 
   useEffect(() => {
     const previousTitle = document.title;
@@ -469,23 +325,15 @@ export default function HatchPage() {
   useEffect(() => {
     const dialog = contactDialogRef.current;
     if (!dialog) return;
-
-    if (isContactDialogOpen && !dialog.open) {
-      dialog.showModal();
-    }
-
-    if (!isContactDialogOpen && dialog.open) {
-      dialog.close();
-    }
+    if (isContactDialogOpen && !dialog.open) dialog.showModal();
+    if (!isContactDialogOpen && dialog.open) dialog.close();
   }, [isContactDialogOpen]);
 
   async function handleContactSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
-
     setContactStatus("submitting");
-
     try {
       const response = await fetch("/api/contact", {
         method: "POST",
@@ -499,11 +347,7 @@ export default function HatchPage() {
           language: lang,
         }),
       });
-
-      if (!response.ok) {
-        throw new Error("Contact submission failed");
-      }
-
+      if (!response.ok) throw new Error("Contact submission failed");
       form.reset();
       setContactStatus("success");
     } catch {
@@ -516,181 +360,95 @@ export default function HatchPage() {
     setIsContactDialogOpen(true);
   }
 
+  const tryButton = (
+    <a className="hero-cta hero-cta-primary" href={TRY_HREF}>
+      {t.tryCta}
+      <span className="cta-arrow" aria-hidden="true">→</span>
+    </a>
+  );
+
   return (
     <main className={`site is-${lang}`}>
       <header className="topbar">
         <a className="brand" href="#top" aria-label="Hatch home">
           Hatch<span className="brand-dot">.</span>
         </a>
-        <nav className="desktop-nav" aria-label="Page sections">
-          {t.nav.map((item, index) => (
-            <a href={`#${sectionLinks[index]}`} key={sectionLinks[index]}>
-              {item}
-            </a>
-          ))}
-        </nav>
+        <span />
         <LanguageSwitcher className="lang-switch" compact />
       </header>
 
-      <section className="hero" id="top">
-        <div className="hero-meta eyebrow">{t.meta}</div>
-        <div className="hero-grid">
-          <div className="hero-main">
+      <section className="hero lp-hero" id="top">
+        <div className="lp-hero-grid">
+          <div>
             <h1>
               <span>{t.heroTitleA}</span>
               <em>{t.heroTitleB}</em>
             </h1>
             <p className="hero-body">{t.heroBody}</p>
-            <div className="hero-actions">
-              <a className="hero-cta hero-cta-primary" href="/explore">
-                {t.exploreCreators}
-                <span className="cta-arrow" aria-hidden="true">→</span>
-              </a>
-              <a className="hero-cta hero-cta-secondary" href="/studio">
-                {t.buildProduct}
-                <span className="cta-arrow" aria-hidden="true">→</span>
-              </a>
-              <button className="text-link text-link-contact hero-contact-link" type="button" onClick={openContactDialog}>
-                {t.contactLink}
-                <span className="cta-arrow" aria-hidden="true">→</span>
-              </button>
+            <div className="lp-actions">
+              {tryButton}
+              <p className="lp-note">{t.tryNote}</p>
             </div>
           </div>
-          <div className="hero-film">
-            <video
-              aria-label={t.heroFilmLabel}
-              controls
-              key={lang}
-              playsInline
-              poster={t.heroFilmPoster}
-              preload="metadata"
-            >
-              <source src={t.heroFilmSrc} type="video/mp4" />
-            </video>
-          </div>
-        </div>
-
-        <div className="positioning-map" aria-label="Product positioning">
-          <article className="positioning-pole">
-            <p className="eyebrow">{t.continuum[0].label}</p>
-            <h2>{t.continuum[0].title}</h2>
-            <p>{t.continuum[0].body}</p>
-          </article>
-          <div className="positioning-bridge">
-            <p className="bridge-label eyebrow">{t.continuumBridge}</p>
-            <article className="positioning-focus">
-              <p className="eyebrow">{t.continuum[1].label}</p>
-              <h2>{t.continuum[1].title}</h2>
-              <p>{t.continuum[1].body}</p>
-            </article>
-          </div>
-          <article className="positioning-pole positioning-pole-right">
-            <p className="eyebrow">{t.continuum[2].label}</p>
-            <h2>{t.continuum[2].title}</h2>
-            <p>{t.continuum[2].body}</p>
-          </article>
+          <DemoChat key={lang} t={t} />
         </div>
       </section>
 
-      <section className="editorial-section" id="gap">
-        <div className="section-index eyebrow">{t.gapEyebrow}</div>
-        <div className="section-content gap-content">
-          <h2 className="display-title multiline">{t.gapTitle}</h2>
-          <p className="lead">{t.gapBody}</p>
-          <p className="lead gap-followup">{t.gapBody2}</p>
-          <div className="gap-list">
-            {t.gapList.map(([title, body], index) => (
-              <div className="gap-row" key={title}>
-                <span className="mono-index">0{index + 1}</span>
-                <h3>{title}</h3>
-                <p>{body}</p>
-              </div>
-            ))}
-          </div>
+      <section className="lp-band">
+        <div className="lp-col">
+          <p className="eyebrow">{t.painLabel}</p>
+          {t.pains.map((pain) => (
+            <h2 className="lp-pain" key={pain}>{pain}</h2>
+          ))}
         </div>
-      </section>
-
-      <section className="editorial-section product-section" id="product">
-        <div className="section-index eyebrow">{t.productEyebrow}</div>
-        <div className="section-content">
-          <div className="section-intro">
-            <h2 className="display-title multiline">{t.productTitle}</h2>
-            <p className="lead">{t.productBody}</p>
-          </div>
-          <blockquote className="product-principle">{t.productPrinciple}</blockquote>
-          <p className="process-intro">{t.processIntro}</p>
-          <div className="steps">
-            {t.steps.map((step) => (
-              <article className="step" key={step.n}>
-                <span className="step-number">{step.n}</span>
-                <h3>{step.title}</h3>
-                <p>{step.body}</p>
-                <StepGraphic step={step.n} lang={lang} />
-              </article>
-            ))}
-          </div>
-
-          <div className="skill-note">
-            <div>
-              <p className="eyebrow">{t.skillLabel}</p>
-              <h3>{t.skillTitle}</h3>
+        <div className="lp-col">
+          <p className="eyebrow">{t.helpLabel}</p>
+          {t.helps.map((help) => (
+            <div className="lp-help" key={help.label}>
+              <span>{help.label}</span>
+              <p>{help.body}</p>
             </div>
-            <div>
-              <p>{t.skillBody}</p>
-              <p className="skill-answer">{t.fullProduct}</p>
-            </div>
-          </div>
-
-          <div className="artifact-line" aria-label="Example creator products">
-            {t.workExamples.map((example) => (
-              <span key={example}>{example}</span>
-            ))}
-          </div>
+          ))}
         </div>
       </section>
 
-      <section className="editorial-section business-section" id="business">
-        <div className="section-index eyebrow">{t.businessEyebrow}</div>
-        <div className="section-content">
-          <div className="section-intro">
-            <h2 className="display-title multiline">{t.businessTitle}</h2>
-            <p className="lead">{t.businessBody}</p>
-          </div>
-          <p className="business-closing">{t.businessClosing}</p>
-          <p className="scale-line">{t.scale}</p>
+      <section className="lp-how">
+        <p className="eyebrow">{t.howLabel}</p>
+        <h2 className="display-title">{t.howTitle}</h2>
+        <ol className="lp-steps">
+          {t.howSteps.map((step, i) => (
+            <li key={step}>
+              <span>0{i + 1}</span>
+              {step}
+            </li>
+          ))}
+        </ol>
+        <p className="lp-reassure">{t.howNote}</p>
+      </section>
+
+      <section className="lp-try">
+        <div>
+          <p className="eyebrow">{t.demoLabel}</p>
+          <h2>{t.demoTitle}</h2>
+          <p>{t.demoBody}</p>
+        </div>
+        <a className="hero-cta hero-cta-secondary" href={DEMO_HREF}>
+          {t.demoCta}
+          <span className="cta-arrow" aria-hidden="true">→</span>
+        </a>
+      </section>
+
+      <section className="lp-final">
+        <h2 className="display-title">{t.finalTitle}</h2>
+        <p>{t.finalBody}</p>
+        <div className="lp-actions">
+          {tryButton}
+          <button className="text-link lp-partner" type="button" onClick={openContactDialog}>
+            {t.partnerLink} →
+          </button>
         </div>
       </section>
 
-      <section className="vision-section" id="vision">
-        <div className="vision-inner">
-          <div className="vision-copy vision-copy-standalone">
-            <p>{t.visionBody}</p>
-          </div>
-          <p className="final-vision">{t.final}</p>
-        </div>
-      </section>
-
-      <section className="contact-section" id="contact">
-        <div className="contact-note" id="partners">
-          <p className="eyebrow">{t.partnersKicker}</p>
-          <div className="contact-copy">
-            <h3>{t.partnersTitle}</h3>
-            <div className="contact-partner-types">
-              {t.partnerTypes.map((partner) => (
-                <article key={partner.label}>
-                  <p className="eyebrow">{partner.label}</p>
-                  <h4>{partner.title}</h4>
-                  <p>{partner.body}</p>
-                </article>
-              ))}
-            </div>
-            <button className="contact-launch" type="button" onClick={openContactDialog}>
-              {t.contactLaunch}
-              <span aria-hidden="true">→</span>
-            </button>
-          </div>
-        </div>
-      </section>
       <dialog
         className="contact-dialog"
         ref={contactDialogRef}
@@ -740,25 +498,14 @@ export default function HatchPage() {
                 <span>{t.contactFields.message}</span>
                 <textarea name="message" rows={4} maxLength={4000} />
               </label>
-              <input
-                className="contact-honeypot"
-                name="website"
-                type="text"
-                tabIndex={-1}
-                autoComplete="off"
-                aria-hidden="true"
-              />
+              <input className="contact-honeypot" name="website" type="text" tabIndex={-1} autoComplete="off" aria-hidden="true" />
               <div className="contact-actions">
                 <button type="submit" disabled={contactStatus === "submitting"}>
                   {contactStatus === "submitting" ? t.contactSending : t.contactSubmit}
                   <span aria-hidden="true">→</span>
                 </button>
                 <p className={`contact-status ${contactStatus}`} aria-live="polite">
-                  {contactStatus === "success"
-                    ? t.contactSuccess
-                    : contactStatus === "error"
-                      ? t.contactError
-                      : ""}
+                  {contactStatus === "success" ? t.contactSuccess : contactStatus === "error" ? t.contactError : ""}
                 </p>
               </div>
             </form>
