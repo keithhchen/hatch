@@ -79,6 +79,15 @@ function FieldPicker({ t, value, onChange }: { t: LandingCopy; value: number; on
 }
 
 function Phone({ t, s, step }: { t: LandingCopy; s: Scenario; step: number }) {
+  const thread = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = thread.current;
+    if (!el) return;
+    const pin = () => el.scrollTo({ top: el.scrollHeight });
+    const mo = new MutationObserver(pin);
+    mo.observe(el, { childList: true, subtree: true, characterData: true });
+    return () => mo.disconnect();
+  }, []);
   return (
     <div className="phone-wrap">
       <div className="phone">
@@ -90,7 +99,7 @@ function Phone({ t, s, step }: { t: LandingCopy; s: Scenario; step: number }) {
           </div>
           <em>{t.exampleTag}</em>
         </div>
-        <div className="thread">
+        <div className="thread" ref={thread}>
           <p className="bubble me">{s.client}</p>
           {step >= 1 && <p className="bubble ai"><Typed text={s.take} /></p>}
           {step >= 2 && <p className="bubble ai"><Typed text={s.ask} /></p>}
@@ -197,6 +206,123 @@ function StepArt({ tag }: { tag: string }) {
   );
 }
 
+const PHOTO = (id: string) => `assets/web/photos/${id}.jpg`;
+
+function Photo({ id, alt, className = "" }: { id: string; alt: string; className?: string }) {
+  return <img className={`ph ${className}`} src={PHOTO(id)} alt={alt} loading="lazy" />;
+}
+
+function Reveal({ segments }: { segments: [string, string | null][] }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const [p, setP] = useState(0);
+  useEffect(() => {
+    const onScroll = () => {
+      const el = ref.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const vh = window.innerHeight;
+      setP(Math.min(1, Math.max(0, (vh * 0.85 - r.top) / (r.height + vh * 0.45))));
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  const chars = segments.flatMap(([text, tone]) => Array.from(text).map((ch) => [ch, tone] as const));
+  const lit = Math.round(p * chars.length);
+  return (
+    <section className="reveal">
+      <p ref={ref}>
+        {chars.map(([ch, tone], i) => (
+          <span key={i} className={`${tone ? `tone-${tone}` : ""} ${i < lit ? "lit" : ""}`}>{ch}</span>
+        ))}
+      </p>
+    </section>
+  );
+}
+
+function Memory({ t }: { t: LandingCopy }) {
+  return (
+    <section className="section mem">
+      <span className="pill">{t.memLabel}</span>
+      <h2 className="title center">{t.memTitle}</h2>
+      <p className="lead center">{t.memBody}</p>
+      <div className="mem-stage">
+        <div className="glass mem-method">
+          {t.memMethod.map((m, i) => (
+            <p key={m}><i className={`dot dot-${i}`} />{m}</p>
+          ))}
+          <span className="chip chip-yolk">{t.memMethodTag}</span>
+        </div>
+        <Photo className="mem-photo" id="mem" alt={t.memPhoto.alt} />
+        <div className="glass mem-clients">
+          <span className="chip chip-green">{t.memClientsTag}</span>
+          {t.memClients.map((c) => (
+            <div className="mem-client" key={c.name}>
+              <span className="mini-avatar">{c.name.slice(0, 1)}</span>
+              <div><b>{c.name}</b><small>{c.meta}</small></div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="people">
+        {t.memPeople.map((pp, i) => (
+          <div className="person" key={pp.name}>
+            <Photo className="ph-avatar" id={`av${i + 1}`} alt={pp.name} />
+            <div><b>{pp.name}</b><small>{pp.role}</small></div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Proactive({ t }: { t: LandingCopy }) {
+  return (
+    <section className="section pro">
+      <span className="pill">{t.proLabel}</span>
+      <h2 className="title center">{t.proTitle}</h2>
+      <p className="lead center">{t.proBody}</p>
+      <div className="pro-cards">
+        <div className="pro-card">
+          <Photo className="fill" id="pro" alt={t.proPhoto.alt} />
+          <div className="pro-bubble">
+            <Egg size={20} />
+            <p>{t.proBubble}</p>
+          </div>
+        </div>
+        <div className="pro-card">
+          <Photo className="fill" id="pro2" alt={t.proPhoto2.alt} />
+          <div className="glass pro-tasks">
+            {t.proTasks.map((task) => (
+              <p key={task.t}><i className="ring" /><span><b>{task.t}</b><small>{task.m}</small></span></p>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Stories({ t }: { t: LandingCopy }) {
+  return (
+    <section className="section stories">
+      <span className="pill">{t.storiesLabel}</span>
+      <h2 className="title center">{t.storiesTitle}</h2>
+      <div className="stories-track">
+        {t.stories.map((s, i) => (
+          <article className="story-card" key={s.who}>
+            <Photo className="fill" id={`s${i + 1}`} alt={s.what} />
+            <div className="story-cap">
+              <p>{t.storyPrefix} <mark>{s.who}</mark></p>
+              <p className="story-what">{s.what}</p>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export default function HatchPage() {
   const { locale, setLocale } = useLocale();
   const lang = locale as Lang;
@@ -291,6 +417,10 @@ export default function HatchPage() {
 
       <Story key={`${lang}-${field}`} t={t} s={s} />
 
+      <Reveal key={`reveal-${lang}`} segments={t.revealSegments} />
+      <Memory t={t} />
+      <Proactive t={t} />
+
       <section className="asset">
         <p className="eyebrow">{t.assetLabel}</p>
         <h2 className="title">{t.assetTitle}</h2>
@@ -340,18 +470,7 @@ export default function HatchPage() {
         </div>
       </section>
 
-      <section className="section">
-        <p className="eyebrow">{t.helpedLabel}</p>
-        <div className="helped">
-          {t.helped.map((h) => (
-            <article key={h.who}>
-              <span className="status">{h.status}</span>
-              <h3>{h.who}</h3>
-              <p>{h.what}</p>
-            </article>
-          ))}
-        </div>
-      </section>
+      <Stories t={t} />
 
       <section className="section section-panel">
         <p className="eyebrow">{t.compareLabel}</p>
