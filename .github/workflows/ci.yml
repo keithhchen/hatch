@@ -17,14 +17,23 @@ on:
       - ".github/workflows/ci.yml"
       - ".github/workflows/deploy.yml"
       - ".github/workflows/web.yml"
+  # Master pushes trigger the backend release (deploy.yml). Only paths that
+  # end up in the Runtime/Caddy images or the compose stack belong here;
+  # Web-only changes ship through web.yml, Desktop through desktop-ci.yml.
   push:
     branches: [master]
     paths:
       - "runtime-server/**"
-      - "creator-dashboard/**"
       - "packages/**"
+      - "!packages/ui/**"
+      - "!packages/brand/**"
+      - "local-runner/**"
+      - "desktop-app/package.json"
+      - "desktop-app/src/renderer/conversation-client.js"
+      - "desktop-app/src/renderer/entitlement-client.js"
+      - "desktop-app/src/renderer/i18n.js"
+      - "desktop-app/src/renderer/identity.js"
       - "Dockerfile.runtime"
-      - "Dockerfile.dashboard"
       - "Dockerfile.caddy"
       - "compose*.yml"
       - "Caddyfile"
@@ -32,7 +41,6 @@ on:
       - "scripts/commerce-v2-smoke.mjs"
       - ".github/workflows/ci.yml"
       - ".github/workflows/deploy.yml"
-      - ".github/workflows/web.yml"
   workflow_dispatch:
 
 permissions:
