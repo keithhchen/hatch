@@ -6,7 +6,7 @@ import { landingCopy, type Lang, type LandingCopy, type Scenario } from "./landi
 
 const TRY_HREF = "/studio";
 const SHOW_PRICING = false;
-const WORDMARK = "assets/web/hatch-wordmark.svg";
+const WORDMARK = "/assets/web/hatch-wordmark.svg";
 const LANG_NAMES: Record<Lang, string> = { zh: "中文", en: "English", ja: "日本語" };
 const PLATFORMS: [string, string, string][] = [
   ["xiaohongshu", "小红书", "Xiaohongshu"],
@@ -301,7 +301,7 @@ function Learn({ t, s }: { t: LandingCopy; s: Scenario }) {
   );
 }
 
-const PHOTO = (id: string) => `assets/web/photos/${id}.jpg`;
+const PHOTO = (id: string) => `/assets/web/photos/${id}.jpg`;
 
 function Photo({ id, alt, className = "" }: { id: string; alt: string; className?: string }) {
   return <img className={`ph ${className}`} src={PHOTO(id)} alt={alt} loading="lazy" />;

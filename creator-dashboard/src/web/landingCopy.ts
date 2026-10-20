@@ -165,7 +165,7 @@ const en: LandingCopy = {
   heroEyebrow: "Private intelligence for experts",
   heroTitleA: ["Too many ", "?"] as [string, string],
   heroWords: ["DMs", "inquiries", "clients", "orders", "deliverables"],
-  heroTitleB: "Hand them to your AI twin.",
+  heroTitleB: "Hand them to your AI persona.",
   heroBody: "Hatch answers inquiries, closes sales, and delivers the work for experts. Your method, your voice.",
   pickLabel: "What do you do?",
   roles: ["Sales", "Consulting", "Coaching", "Teaching"],
