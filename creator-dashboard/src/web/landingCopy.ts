@@ -15,7 +15,7 @@ export type Scenario = {
 
 const zh = {
   nav: { story: "它怎么接客户", learn: "它怎么学会你", pricing: "价格", faq: "常见问题", login: "登录", try: "免费试试" },
-  heroEyebrow: "给每一个靠判断吃饭的人",
+  heroEyebrow: "为销售、顾问、教练和老师而做",
   heroTitleA: "忙不过来的客户，",
   heroTitleB: "交给你的 AI 分身。",
   heroBody: "Hatch 替专家回咨询、谈成交、做交付。按你的方法，用你的口吻。",
@@ -39,6 +39,7 @@ const zh = {
   floatEval: "考试通过 8/8",
   assetLabel: "它会成为你的资产",
   assetTitle: "一份会自己长大的判断。",
+  vault: { items: ["你的笔记", "你的案例", "你的录音"], other: "别的模型", locked: "只为你工作" },
   clock: { you: "你在见", youN: "1 位客户", it: "它同时在接", unit: "位", events: ["02:14 · 回了一条私信", "11:30 · 成交一单 ¥490", "21:05 · 交付一份报告"] },
   growth: { like: "像你", marks: ["第 1 天 · 读完你的内容", "第 30 天 · 记住 23 次纠正", "第 180 天 · 越来越像你"] },
   assets: [
@@ -160,7 +161,7 @@ export type LandingCopy = typeof zh;
 
 const en: LandingCopy = {
   nav: { story: "How it takes clients", learn: "How it learns you", pricing: "Pricing", faq: "FAQ", login: "Log in", try: "Try it free" },
-  heroEyebrow: "For everyone who gets paid for their judgment",
+  heroEyebrow: "For salespeople, consultants, coaches and teachers",
   heroTitleA: "Too many clients?",
   heroTitleB: "Hand them to your AI twin.",
   heroBody: "Hatch answers inquiries, closes sales, and delivers the work for experts. Your method, your voice.",
@@ -184,6 +185,7 @@ const en: LandingCopy = {
   floatEval: "Passed 8/8",
   assetLabel: "It becomes an asset",
   assetTitle: "Judgment that keeps growing.",
+  vault: { items: ["Your posts", "Your cases", "Your recordings"], other: "Other models", locked: "Works only for you" },
   clock: { you: "You are seeing", youN: "1 client", it: "It is taking", unit: "", events: ["02:14 · answered a DM", "11:30 · closed a sale", "21:05 · delivered a report"] },
   growth: { like: "Like you", marks: ["Day 1 · read your work", "Day 30 · 23 corrections kept", "Day 180 · more like you"] },
   assets: [
@@ -303,7 +305,7 @@ const en: LandingCopy = {
 
 const ja: LandingCopy = {
   nav: { story: "お客様の受け方", learn: "あなたの学び方", pricing: "料金", faq: "よくある質問", login: "ログイン", try: "無料で試す" },
-  heroEyebrow: "判断で稼ぐ、すべての人へ",
+  heroEyebrow: "営業・コンサル・コーチ・先生のために",
   heroTitleA: "手が回らないお客様は、",
   heroTitleB: "あなたのAI分身に。",
   heroBody: "Hatchは専門家に代わって、相談に答え、成約し、納品まで担います。あなたのやり方、あなたの言葉で。",
@@ -327,6 +329,7 @@ const ja: LandingCopy = {
   floatEval: "テスト合格 8/8",
   assetLabel: "あなたの資産になる",
   assetTitle: "育ち続ける、あなたの判断。",
+  vault: { items: ["あなたの投稿", "あなたの事例", "あなたの録音"], other: "他のモデル", locked: "あなただけのために" },
   clock: { you: "あなたは", youN: "1人と面談中", it: "AIは同時に", unit: "人", events: ["02:14 · DMに返信", "11:30 · 1件成約", "21:05 · レポートを納品"] },
   growth: { like: "あなたらしさ", marks: ["1日目 · 発信を読了", "30日目 · 修正23件を記憶", "180日目 · もっとあなたらしく"] },
   assets: [

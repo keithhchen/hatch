@@ -393,13 +393,8 @@ function useInView<T extends HTMLElement>() {
   return [ref, inView] as const;
 }
 
-const ASSET_ART = [
-  <div className="art art-lock" key="lock"><i /><i /><i /><span>🔒</span></div>,
-  null,
-  null,
-];
 
-function useProgress(play: number, ms: number) {
+function useProgress(play: number, ms: number, linear = false) {
   const [p, setP] = useState(0);
   useEffect(() => {
     if (!play) return;
@@ -407,12 +402,12 @@ function useProgress(play: number, ms: number) {
     const t0 = performance.now();
     const tick = (now: number) => {
       const k = Math.min((now - t0) / ms, 1);
-      setP(1 - Math.pow(1 - k, 3));
+      setP(linear ? k : 1 - Math.pow(1 - k, 3));
       if (k < 1) raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [play, ms]);
+  }, [play, ms, linear]);
   return p;
 }
 
@@ -475,11 +470,8 @@ function Clock({ t, play }: { t: LandingCopy; play: number }) {
         <svg viewBox="0 0 200 200" aria-hidden="true">
           <circle className="ck-face" cx="100" cy="100" r="78" />
           <path className="ck-night" d="M100 22 A78 78 0 0 1 100 178" transform="rotate(90 100 100)" />
-          {Array.from({ length: 48 }, (_, i) => {
-            const q = i / 48;
-            const d = pos(q, 88 + (i % 3) * 5);
-            return <circle key={i} className={`ck-dot ${p >= q ? "on" : ""}`} cx={d.x} cy={d.y} r={i % 4 === 0 ? 3.2 : 2.2} />;
-          })}
+          <circle className="ck-track" cx="100" cy="100" r="90" />
+          <circle className="ck-arc" cx="100" cy="100" r="90" pathLength={1} style={{ strokeDashoffset: 1 - p }} transform="rotate(-90 100 100)" />
           <line className="ck-hand" x1="100" y1="100" x2={hand.x} y2={hand.y} />
           <circle className="ck-hub" cx="100" cy="100" r="6" />
           <text className="ck-sun" x="100" y="44">☀︎</text>
@@ -498,6 +490,30 @@ function Clock({ t, play }: { t: LandingCopy; play: number }) {
   );
 }
 
+function Vault({ t, play }: { t: LandingCopy; play: number }) {
+  const p = useProgress(play, 4200, true);
+  const v = t.vault;
+  const stage = p < 0.02 ? 0 : p < 0.42 ? 1 : p < 0.55 ? 2 : p < 0.92 ? 3 : 4;
+  return (
+    <div className={`art art-vault s${stage}`}>
+      {v.items.map((it, i) => (
+        <span key={it} className={`vt-item vt-i${i}`}>{it}</span>
+      ))}
+      <div className="vt-lock">
+        <i className="vt-ring" />
+        <svg viewBox="0 0 64 72" aria-hidden="true">
+          <path className="vt-shackle" d="M18 34 V22 a14 14 0 0 1 28 0 V34" />
+          <rect className="vt-body" x="8" y="32" width="48" height="36" rx="10" />
+          <circle className="vt-key" cx="32" cy="48" r="5" />
+          <rect className="vt-key" x="30" y="50" width="4" height="9" rx="2" />
+        </svg>
+      </div>
+      <span className="vt-other">{v.other} <b>✕</b></span>
+      <span className="vt-done">✓ {v.locked}</span>
+    </div>
+  );
+}
+
 function Asset({ t }: { t: LandingCopy }) {
   const [ref, inView] = useInView<HTMLElement>();
   const [play, setPlay] = useState(0);
@@ -510,10 +526,10 @@ function Asset({ t }: { t: LandingCopy }) {
       <h2 className="title center">{t.assetTitle}</h2>
       <div className="bento">
         {t.assets.map((a, i) => (
-          <article className={`bento-card tint-${i}`} key={a.title} onClick={i ? () => setPlay((v) => v + 1) : undefined}>
+          <article className={`bento-card tint-${i}`} key={a.title} onClick={() => setPlay((v) => v + 1)}>
             <h3>{a.title}</h3>
             <p>{a.body}</p>
-            {i === 1 ? <Growth t={t} play={play} /> : i === 2 ? <Clock t={t} play={play} /> : ASSET_ART[i]}
+            {i === 0 ? <Vault t={t} play={play} /> : i === 1 ? <Growth t={t} play={play} /> : <Clock t={t} play={play} />}
           </article>
         ))}
       </div>
