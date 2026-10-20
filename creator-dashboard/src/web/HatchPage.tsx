@@ -394,25 +394,77 @@ function useInView<T extends HTMLElement>() {
 
 const ASSET_ART = [
   <div className="art art-lock" key="lock"><i /><i /><i /><span>🔒</span></div>,
-  <svg className="art art-line" viewBox="0 0 240 120" key="line" aria-hidden="true">
-    <path d="M8 104 C 50 100, 70 88, 100 76 S 160 40, 232 14" />
-    <circle cx="232" cy="14" r="6" />
-  </svg>,
+  null,
   <div className="art art-clock" key="clock"><span className="hand" /><span className="sun">☀︎</span><span className="moon">☾</span></div>,
 ];
 
+const MARKS = [0.12, 0.55, 1];
+
+function Growth({ t, play }: { t: LandingCopy; play: number }) {
+  const path = useRef<SVGPathElement>(null);
+  const [p, setP] = useState(0);
+  useEffect(() => {
+    if (!play) return;
+    let raf = 0;
+    const t0 = performance.now();
+    const tick = (now: number) => {
+      const k = Math.min((now - t0) / 2600, 1);
+      setP(1 - Math.pow(1 - k, 3));
+      if (k < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [play]);
+  const el = path.current;
+  const len = el ? el.getTotalLength() : 320;
+  const at = (q: number) => (el ? el.getPointAtLength(len * q) : { x: 8, y: 104 });
+  const tip = at(p);
+  return (
+    <div className="art art-growth">
+      <div className="g-like">
+        <small>{t.growth.like}</small>
+        <b>{Math.round(41 + 55 * p)}%</b>
+      </div>
+      <div className="g-plot">
+        <svg viewBox="0 0 240 120" aria-hidden="true">
+          <path className="g-track" d="M8 104 C 50 100, 70 88, 100 76 S 160 40, 232 14" />
+          <path ref={path} className="g-line" d="M8 104 C 50 100, 70 88, 100 76 S 160 40, 232 14" style={{ strokeDasharray: len, strokeDashoffset: len * (1 - p) }} />
+          {MARKS.map((m) => {
+            const pt = at(m);
+            return <circle key={m} className={`g-mark ${p >= m - 0.001 ? "on" : ""}`} cx={pt.x} cy={pt.y} r="4" />;
+          })}
+          <circle className="g-tip" cx={tip.x} cy={tip.y} r="7" />
+          {p >= 1 && <circle className="g-ring" cx={tip.x} cy={tip.y} r="7" />}
+        </svg>
+        {MARKS.map((m, i) => {
+          const pt = at(m);
+          return (
+            <span key={m} className={`g-label g-l${i} ${p >= m - 0.001 ? "on" : ""}`} style={{ left: `${(pt.x / 240) * 100}%`, top: `${(pt.y / 120) * 100}%` }}>
+              {t.growth.marks[i]}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function Asset({ t }: { t: LandingCopy }) {
   const [ref, inView] = useInView<HTMLElement>();
+  const [play, setPlay] = useState(0);
+  useEffect(() => {
+    if (inView) setPlay(1);
+  }, [inView]);
   return (
     <section className={`section asset ${inView ? "in" : ""}`} ref={ref}>
       <span className="pill">{t.assetLabel}</span>
       <h2 className="title center">{t.assetTitle}</h2>
       <div className="bento">
         {t.assets.map((a, i) => (
-          <article className={`bento-card tint-${i}`} key={a.title}>
+          <article className={`bento-card tint-${i}`} key={a.title} onClick={i === 1 ? () => setPlay((v) => v + 1) : undefined}>
             <h3>{a.title}</h3>
             <p>{a.body}</p>
-            {ASSET_ART[i]}
+            {i === 1 ? <Growth t={t} play={play} /> : ASSET_ART[i]}
           </article>
         ))}
       </div>
