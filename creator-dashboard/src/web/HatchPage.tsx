@@ -669,7 +669,7 @@ export default function HatchPage() {
 
   useEffect(() => {
     const previousTitle = document.title;
-    document.title = "Hatch — Private intelligence for experts";
+    document.title = "Hatch — Private Intelligence for Experts";
     return () => {
       document.title = previousTitle;
     };

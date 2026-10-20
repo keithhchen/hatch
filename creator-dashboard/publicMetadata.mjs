@@ -1,4 +1,4 @@
-const DEFAULT_TITLE = "Hatch — Private intelligence for experts";
+const DEFAULT_TITLE = "Hatch — Private Intelligence for Experts";
 const DEFAULT_DESCRIPTION = "Discover Expert Agents you can use with Hatch Desktop.";
 
 /**
