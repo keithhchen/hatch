@@ -190,9 +190,9 @@ function Learn({ t, s }: { t: LandingCopy; s: Scenario }) {
   const [step, refs] = useScrollStep();
   const k = t.learnKit;
   return (
-    <section className="story learn-story section-panel" id="learn">
+    <section className="story learn-story" id="learn">
       <div className="story-steps">
-        <p className="eyebrow">{t.learnLabel}</p>
+        <span className="pill pill-l">{t.learnLabel}</span>
         <h2 className="title">{t.learnTitle}</h2>
         <p className="lead">{t.learnBody}</p>
         {t.learnSteps.map((st, i) => (
@@ -218,7 +218,7 @@ function Learn({ t, s }: { t: LandingCopy; s: Scenario }) {
           <div className="glass lc" key={`${step}-${s.field}`}>
             {step === 0 && (
               <>
-                <span className="sk-label">READ</span>
+                <span className="sk-label">{t.learnSteps[0].title}</span>
                 {k.read.map(([slug, name, n], i) => (
                   <div className="lc-row" key={name} style={{ animationDelay: `${i * 160}ms` }}>
                     {slug ? <img src={`https://cdn.simpleicons.org/${slug}`} alt="" width={18} height={18} /> : <span className="lc-doc" />}
@@ -232,7 +232,7 @@ function Learn({ t, s }: { t: LandingCopy; s: Scenario }) {
             )}
             {step === 1 && (
               <>
-                <span className="sk-label">INTERVIEW · {s.field}</span>
+                <span className="sk-label">{t.learnSteps[1].title} · {s.field}</span>
                 <p className="bubble ai"><Typed text={s.interviewQ} /></p>
                 <div className="bubble me lc-voice" style={{ animationDelay: "1.6s" }}>
                   <span className="wave">{Array.from({ length: 18 }, (_, i) => <i key={i} style={{ animationDelay: `${i * 60}ms` }} />)}</span>
@@ -247,7 +247,7 @@ function Learn({ t, s }: { t: LandingCopy; s: Scenario }) {
             )}
             {step === 2 && (
               <>
-                <span className="sk-label">EVAL · {k.evalTitle}</span>
+                <span className="sk-label">{k.evalTitle}</span>
                 {[s.client, ...k.evalCases].map((q, i) => (
                   <div className="lc-row" key={q} style={{ animationDelay: `${i * 260}ms` }}>
                     <span className={i === 2 ? "sk-redo" : "sk-pass"}>{i === 2 ? "↻" : "✓"}</span>
@@ -379,6 +379,109 @@ function Proactive({ t }: { t: LandingCopy }) {
   );
 }
 
+function useInView<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  const [inView, setInView] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver(([e]) => e.isIntersecting && setInView(true), { threshold: 0.3 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  return [ref, inView] as const;
+}
+
+const ASSET_ART = [
+  <div className="art art-lock" key="lock"><i /><i /><i /><span>🔒</span></div>,
+  <svg className="art art-line" viewBox="0 0 240 120" key="line" aria-hidden="true">
+    <path d="M8 104 C 50 100, 70 88, 100 76 S 160 40, 232 14" />
+    <circle cx="232" cy="14" r="6" />
+  </svg>,
+  <div className="art art-clock" key="clock"><span className="hand" /><span className="sun">☀︎</span><span className="moon">☾</span></div>,
+];
+
+function Asset({ t }: { t: LandingCopy }) {
+  const [ref, inView] = useInView<HTMLElement>();
+  return (
+    <section className={`section asset ${inView ? "in" : ""}`} ref={ref}>
+      <span className="pill">{t.assetLabel}</span>
+      <h2 className="title center">{t.assetTitle}</h2>
+      <div className="bento">
+        {t.assets.map((a, i) => (
+          <article className={`bento-card tint-${i}`} key={a.title}>
+            <h3>{a.title}</h3>
+            <p>{a.body}</p>
+            {ASSET_ART[i]}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Compare({ t, s }: { t: LandingCopy; s: Scenario }) {
+  const [tab, setTab] = useState(0);
+  const reply = tab === 0 ? null : t.compareReplies[tab - 1];
+  return (
+    <section className="section">
+      <span className="pill">{t.compareLabel}</span>
+      <div className="seg" role="tablist">
+        {t.compareCols.map((c, i) => (
+          <button key={c} role="tab" aria-selected={tab === i} className={tab === i ? "on" : ""} onClick={() => setTab(i)}>
+            {c}
+          </button>
+        ))}
+      </div>
+      <div className="cmp-card">
+        <Photo className="fill" id="compare" alt="" />
+        <div className="cmp-chat glass" key={`${tab}-${s.field}`}>
+          <small>{t.compareAsk}</small>
+          <p className="bubble me">{s.client}</p>
+          {reply ? (
+            <p className="bubble ai dim">{reply}</p>
+          ) : (
+            <>
+              <p className="bubble ai"><Typed text={s.take} /></p>
+              <p className="bubble ai" style={{ animationDelay: "1.4s" }}>{s.ask}</p>
+            </>
+          )}
+          <div className="cmp-checks">
+            {t.compareRows.map((r) => (
+              <span key={r.label} className={r.v[tab] ? "yes" : "no"}>{r.v[tab] ? "✓" : "✕"} {r.label}</span>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Trust({ t }: { t: LandingCopy }) {
+  const [ref, inView] = useInView<HTMLDivElement>();
+  return (
+    <section className="section">
+      <span className="pill">{t.trustLabel}</span>
+      <div className={`trust-stage ${inView ? "in" : ""}`} ref={ref}>
+        <Photo className="fill" id="trust" alt="" />
+        <div className="glass trust-panel">
+          {t.trust.map((col, gi) => (
+            <div className="trust-group" key={col.title}>
+              <b>{col.title}</b>
+              {col.items.map((item, i) => (
+                <div className="trust-row" key={item} style={{ transitionDelay: `${(gi * 2 + i) * 140}ms` }}>
+                  <span>{item}</span>
+                  {gi === 2 ? <em className="trust-act">{i === 0 ? "✎" : "⌫"}</em> : <i className={`switch ${gi === 0 ? "on" : "off"}`} />}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function Stories({ t }: { t: LandingCopy }) {
   return (
     <section className="section stories">
@@ -482,7 +585,7 @@ export default function HatchPage() {
       </header>
 
       <section className="hero" id="top">
-        <p className="eyebrow">{t.heroEyebrow}</p>
+        <span className="pill">{t.heroEyebrow}</span>
         <h1>
           <span>{t.heroTitleA}</span>
           <em>{t.heroTitleB}</em>
@@ -497,25 +600,16 @@ export default function HatchPage() {
       <Memory t={t} />
       <Proactive t={t} />
 
-      <section className="asset">
-        <p className="eyebrow">{t.assetLabel}</p>
-        <h2 className="title">{t.assetTitle}</h2>
-        <div className="asset-grid">
-          {t.assets.map((a) => (
-            <article key={a.title}>
-              <h3>{a.title}</h3>
-              <p>{a.body}</p>
-            </article>
-          ))}
-        </div>
-      </section>
+      <Asset t={t} />
 
       <section className="where">
-        <p className="eyebrow">{t.whereLabel}</p>
-        <div className="logos">
-          {PLATFORMS.map(([slug, zhName, name]) => (
-            <Logo key={slug} slug={slug} name={lang === "zh" ? zhName : name} />
-          ))}
+        <span className="pill">{t.whereLabel}</span>
+        <div className="marquee">
+          <div className="logos">
+            {[...PLATFORMS, ...PLATFORMS].map(([slug, zhName, name], i) => (
+              <Logo key={`${slug}-${i}`} slug={slug} name={lang === "zh" ? zhName : name} />
+            ))}
+          </div>
         </div>
         <p className="fine">{t.whereNote}</p>
       </section>
@@ -524,49 +618,17 @@ export default function HatchPage() {
 
       <Stories t={t} />
 
-      <section className="section section-panel">
-        <p className="eyebrow">{t.compareLabel}</p>
-        <div className="compare" role="table">
-          <div className="compare-row compare-head" role="row">
-            <span role="columnheader" />
-            {t.compareCols.map((c, i) => (
-              <span role="columnheader" key={c} className={i === 0 ? "us" : ""}>{c}</span>
-            ))}
-          </div>
-          {t.compareRows.map((r) => (
-            <div className="compare-row" role="row" key={r.label}>
-              <span role="rowheader">{r.label}</span>
-              {r.v.map((v, i) => (
-                <span role="cell" key={i} className={`${i === 0 ? "us" : ""} ${v ? "yes" : "no"}`}>{v ? "✓" : "—"}</span>
-              ))}
-            </div>
-          ))}
-        </div>
-      </section>
+      <Compare key={lang} t={t} s={s} />
 
-      <section className="section">
-        <p className="eyebrow">{t.trustLabel}</p>
-        <div className="trust">
-          {t.trust.map((col) => (
-            <article key={col.title}>
-              <h3>{col.title}</h3>
-              <ul>
-                {col.items.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </article>
-          ))}
-        </div>
-      </section>
+      <Trust t={t} />
 
-      <section className="section section-panel" id="pricing">
-        <p className="eyebrow">{t.pricingLabel}</p>
-        <h2 className="title">{t.pricingTitle}</h2>
+      <section className="section" id="pricing">
+        <span className="pill">{t.pricingLabel}</span>
+        <h2 className="title center">{t.pricingTitle}</h2>
         <div className="plans">
           {t.plans.map((p) => (
             <article className={`plan ${p.cta ? "plan-main" : ""}`} key={p.name}>
-              <span className="tag">{p.name}</span>
+              <span className="pill pill-l">{p.name}</span>
               <p className="plan-price">{p.price}</p>
               <p>{p.body}</p>
               {p.cta && tryButton}
@@ -577,7 +639,7 @@ export default function HatchPage() {
       </section>
 
       <section className="section" id="faq">
-        <p className="eyebrow">{t.faqLabel}</p>
+        <span className="pill">{t.faqLabel}</span>
         <div className="faq">
           {t.faqs.map((f) => (
             <details key={f.q}>
@@ -678,6 +740,7 @@ export default function HatchPage() {
           </div>
         </div>
       </footer>
+      <div className="giant" aria-hidden="true">Hatch<span>.</span></div>
     </main>
   );
 }

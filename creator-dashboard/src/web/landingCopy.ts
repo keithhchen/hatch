@@ -35,8 +35,8 @@ const zh = {
   soonTag: "即将上线",
   exampleTag: "示例",
   buy: "购买",
-  floatBooked: "BOOKED",
-  floatEval: "EVAL 8/8",
+  floatBooked: "已成交",
+  floatEval: "考试通过 8/8",
   assetLabel: "它会成为你的资产",
   assetTitle: "一份会自己长大的判断。",
   assets: [
@@ -100,6 +100,8 @@ const zh = {
   whereNote: "放一个链接就能用；在 LINE、WhatsApp、Instagram，客户可以直接在原来的 App 里聊。",
   compareLabel: "跟你已经试过的有什么不同",
   compareCols: ["Hatch", "通用 AI", "自动回复", "录课程"],
+  compareReplies: ["这是个很好的问题！以下是一些通用建议：1. 明确目标 2. 了解基本情况 3. 咨询专业人士……", "您好，消息已收到，顾问会尽快回复您～", "这个问题在课程第 3 章有详细讲解，欢迎购买完整课程。"],
+  compareAsk: "同一位客户，同一个问题：",
   compareRows: [
     { label: "像你一样判断", v: [true, false, false, true] },
     { label: "针对每个人的情况", v: [true, true, false, false] },
@@ -176,8 +178,8 @@ const en: LandingCopy = {
   soonTag: "Coming soon",
   exampleTag: "Example",
   buy: "Buy",
-  floatBooked: "BOOKED",
-  floatEval: "EVAL 8/8",
+  floatBooked: "Booked",
+  floatEval: "Passed 8/8",
   assetLabel: "It becomes an asset",
   assetTitle: "Judgment that keeps growing.",
   assets: [
@@ -241,6 +243,8 @@ const en: LandingCopy = {
   whereNote: "Works with one link. On LINE, WhatsApp and Instagram, clients can chat right inside the app.",
   compareLabel: "How it differs from what you've tried",
   compareCols: ["Hatch", "General AI", "Auto-reply", "Courses"],
+  compareReplies: ["Great question! Here are some general tips: 1. Define your goals 2. Assess your situation 3. Consult a professional…", "Hi! We got your message. An advisor will reply soon.", "This is covered in detail in Chapter 3. Get the full course to learn more."],
+  compareAsk: "Same client, same question:",
   compareRows: [
     { label: "Judges like you do", v: [true, false, false, true] },
     { label: "Fits each person's situation", v: [true, true, false, false] },
@@ -315,8 +319,8 @@ const ja: LandingCopy = {
   soonTag: "近日公開",
   exampleTag: "例",
   buy: "購入",
-  floatBooked: "BOOKED",
-  floatEval: "EVAL 8/8",
+  floatBooked: "成約",
+  floatEval: "テスト合格 8/8",
   assetLabel: "あなたの資産になる",
   assetTitle: "育ち続ける、あなたの判断。",
   assets: [
@@ -380,6 +384,8 @@ const ja: LandingCopy = {
   whereNote: "リンク一つで使えます。LINE、WhatsApp、Instagramなら、いつものアプリの中で話せます。",
   compareLabel: "これまで試したものとの違い",
   compareCols: ["Hatch", "汎用AI", "自動返信", "講座"],
+  compareReplies: ["いい質問ですね！一般的なアドバイスです：1. 目標を明確に 2. 状況を整理 3. 専門家に相談……", "メッセージを受け付けました。担当者より順次ご返信します。", "この内容は講座の第3章で詳しく解説しています。ぜひ講座をご購入ください。"],
+  compareAsk: "同じお客様、同じ質問：",
   compareRows: [
     { label: "あなたのように判断する", v: [true, false, false, true] },
     { label: "一人ひとりの状況に合わせる", v: [true, true, false, false] },
