@@ -619,7 +619,7 @@ function Trust({ t }: { t: LandingCopy }) {
       <div className={`trust-stage ${inView ? "in" : ""}`} ref={ref}>
         <Photo className="fill" id="trust" alt="" />
         <div className="glass trust-panel">
-          {t.trust.map((col, gi) => (
+          {t.trust.slice(0, 2).map((col, gi) => (
             <div className="trust-group" key={col.title}>
               <b>{col.title}</b>
               {col.items.map((item, i) => (
