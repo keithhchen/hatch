@@ -2,7 +2,7 @@
 // workspace tabs. Professional SaaS tone; zh / en / ja carry the same meaning.
 export const STUDIO_SHELL_COPY = {
   en: {
-    sxTabPublish: "Publish", sxNameLabel: "Name", sxDetailsEffect: "Saved changes appear on the client page right away.", sxBriefEffect: "Changes take effect after you publish.", sxStatusLive: "Published", sxStatusDraft: "Not published", sxPublishedAt: (date) => `Last published ${date}`, sxPendingChanges: "Some changes are not published yet.", sxBuildIncomplete: "The build is not finished yet.", sxGoToBuild: "Go to Build", sxPublishAction: "Publish", sxUpdateAction: "Update", sxPublishStatusError: "Could not load publish status",
+    sxTabPublish: "Publish", sxSkillInvalid: "Fix or delete these Skills before publishing:", sxNameLabel: "Name", sxDetailsEffect: "Saved changes appear on the client page right away.", sxBriefEffect: "Changes take effect after you publish.", sxStatusLive: "Published", sxStatusDraft: "Not published", sxPublishedAt: (date) => `Last published ${date}`, sxPendingChanges: "Some changes are not published yet.", sxBuildIncomplete: "The build is not finished yet.", sxGoToBuild: "Go to Build", sxPublishAction: "Publish", sxUpdateAction: "Update", sxPublishStatusError: "Could not load publish status",
     sxNavOverview: "Overview", sxNavAgents: "Agents", sxNavOrders: "Orders", sxNavEarnings: "Earnings", sxNavSettings: "Settings",
     sxSearch: "Search", sxCloseMenu: "Close menu", sxPaletteActions: "Actions", sxPaletteGoTo: "Go to", sxPalettePlaceholder: "Search pages and Agents…", sxPaletteEmpty: "No results",
     sxOverviewTitle: "Overview", sxOverviewBody: (name) => `Signed in as ${name}.`,
@@ -21,7 +21,7 @@ export const STUDIO_SHELL_COPY = {
     sxErrNotEditable: "Published Agents cannot be edited here.", sxPublishedNotice: "Published",
   },
   zh: {
-    sxTabPublish: "发布", sxNameLabel: "名称", sxDetailsEffect: "保存后立即在客户页面生效", sxBriefEffect: "发布后生效", sxStatusLive: "已发布", sxStatusDraft: "未发布", sxPublishedAt: (date) => `最近发布于 ${date}`, sxPendingChanges: "有改动还没发布", sxBuildIncomplete: "还没完成构建", sxGoToBuild: "去构建", sxPublishAction: "发布", sxUpdateAction: "更新", sxPublishStatusError: "无法读取发布状态",
+    sxTabPublish: "发布", sxSkillInvalid: "以下 Skill 需要先改名或删除，才能发布：", sxNameLabel: "名称", sxDetailsEffect: "保存后立即在客户页面生效", sxBriefEffect: "发布后生效", sxStatusLive: "已发布", sxStatusDraft: "未发布", sxPublishedAt: (date) => `最近发布于 ${date}`, sxPendingChanges: "有改动还没发布", sxBuildIncomplete: "还没完成构建", sxGoToBuild: "去构建", sxPublishAction: "发布", sxUpdateAction: "更新", sxPublishStatusError: "无法读取发布状态",
     sxNavOverview: "概览", sxNavAgents: "Agent", sxNavOrders: "订单", sxNavEarnings: "收入", sxNavSettings: "设置",
     sxSearch: "搜索", sxCloseMenu: "关闭菜单", sxPaletteActions: "操作", sxPaletteGoTo: "前往", sxPalettePlaceholder: "搜索页面和 Agent…", sxPaletteEmpty: "无结果",
     sxOverviewTitle: "概览", sxOverviewBody: (name) => `当前账户：${name}`,
@@ -40,7 +40,7 @@ export const STUDIO_SHELL_COPY = {
     sxErrNotEditable: "已发布的 Agent 暂不能在此修改。", sxPublishedNotice: "已发布",
   },
   ja: {
-    sxTabPublish: "公開", sxNameLabel: "名前", sxDetailsEffect: "保存するとすぐにクライアントページに反映されます。", sxBriefEffect: "公開後に反映されます。", sxStatusLive: "公開中", sxStatusDraft: "未公開", sxPublishedAt: (date) => `最終公開 ${date}`, sxPendingChanges: "まだ公開していない変更があります。", sxBuildIncomplete: "構築がまだ完了していません。", sxGoToBuild: "構築へ", sxPublishAction: "公開する", sxUpdateAction: "更新する", sxPublishStatusError: "公開状態を読み込めません",
+    sxTabPublish: "公開", sxSkillInvalid: "公開する前に、次の Skill の名前を直すか削除してください：", sxNameLabel: "名前", sxDetailsEffect: "保存するとすぐにクライアントページに反映されます。", sxBriefEffect: "公開後に反映されます。", sxStatusLive: "公開中", sxStatusDraft: "未公開", sxPublishedAt: (date) => `最終公開 ${date}`, sxPendingChanges: "まだ公開していない変更があります。", sxBuildIncomplete: "構築がまだ完了していません。", sxGoToBuild: "構築へ", sxPublishAction: "公開する", sxUpdateAction: "更新する", sxPublishStatusError: "公開状態を読み込めません",
     sxNavOverview: "概要", sxNavAgents: "Agent", sxNavOrders: "注文", sxNavEarnings: "収益", sxNavSettings: "設定",
     sxSearch: "検索", sxCloseMenu: "メニューを閉じる", sxPaletteActions: "操作", sxPaletteGoTo: "移動", sxPalettePlaceholder: "ページと Agent を検索…", sxPaletteEmpty: "結果はありません",
     sxOverviewTitle: "概要", sxOverviewBody: (name) => `${name} としてログイン中`,

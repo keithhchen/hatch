@@ -36,12 +36,17 @@ export class Corpus {
   }
 }
 
-/** What the Agent Builder produced: the System prompt plus Skills. */
+/** What the Agent Builder produced: the System prompt plus Skills, and any Skill files that could not be read. */
 export class AgentDefinition {
-  constructor(readonly system: string, readonly skills: readonly Skill[]) {}
+  constructor(readonly system: string, readonly skills: readonly Skill[], readonly invalidSkills: readonly string[] = []) {}
 
-  static whenPresent(system: string, skills: readonly Skill[]): AgentDefinition | null {
-    return system.trim() ? new AgentDefinition(system, skills) : null;
+  static whenPresent(system: string, skills: readonly Skill[], invalidSkills: readonly string[] = []): AgentDefinition | null {
+    return system.trim() ? new AgentDefinition(system, skills, invalidSkills) : null;
+  }
+
+  /** Publishing never silently drops a Skill. */
+  get publishable(): boolean {
+    return this.invalidSkills.length === 0;
   }
 
   toCorpus(): Corpus {
@@ -55,7 +60,7 @@ export class LiveRelease {
 
   pendingAgainst(product: ExpertProduct, definition: AgentDefinition | null): PendingChange[] {
     const checks: Array<[PendingChange, boolean]> = [
-      ["corpus", definition !== null && !definition.toCorpus().equals(this.corpus)],
+      ["corpus", definition !== null && definition.publishable && !definition.toCorpus().equals(this.corpus)],
       ["brief", canonicalJson(this.briefSpec ?? null) !== canonicalJson(product.briefSpec ?? null)],
     ];
     return checks.filter(([, differs]) => differs).map(([change]) => change);
@@ -65,6 +70,8 @@ export class LiveRelease {
 export type ProductLiveStatus = {
   product_id: string;
   can_publish: boolean;
+  /** Skill files that must be fixed before publishing, e.g. "Essay_Review: name must contain only lowercase…". */
+  invalid_skills: string[];
   is_live: boolean;
   pending_changes: PendingChange[];
   public_url: string | null;
@@ -82,7 +89,8 @@ export class ProductLiveView {
   toJSON(): ProductLiveStatus {
     return {
       product_id: this.product.productId,
-      can_publish: this.definition !== null,
+      can_publish: this.definition?.publishable ?? false,
+      invalid_skills: [...(this.definition?.invalidSkills ?? [])],
       is_live: this.live !== null,
       pending_changes: this.live?.pendingAgainst(this.product, this.definition) ?? [],
       public_url: this.live ? this.product.publicUrl : null,
@@ -98,6 +106,13 @@ export type PublishedProduct = {
   corpus_digest: string;
   public_url: string;
 };
+
+export class InvalidSkills extends Error {
+  readonly code = "skill_invalid";
+  constructor(readonly skills: readonly string[]) {
+    super(`Fix these Skills before publishing: ${skills.join("; ")}`);
+  }
+}
 
 export class SystemMissing extends Error {
   readonly code = "system_missing";
