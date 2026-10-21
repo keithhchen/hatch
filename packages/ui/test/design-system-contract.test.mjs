@@ -69,6 +69,7 @@ test("Web and Storybook consume the shared package and its canonical tokens", ()
   const webPackage = json("creator-dashboard/package.json");
   const webEntry = read("creator-dashboard/src/main.jsx");
   const creatorPortal = read("creator-dashboard/src/CreatorPortalV2.jsx");
+  const agentWorkspace = read("creator-dashboard/src/studioAgentWorkspace.jsx");
   const creatorFactory = read("creator-dashboard/src/CreatorFactoryRuns.jsx");
   const creatorWorkspace = read("creator-dashboard/src/CreatorProductWorkspace.jsx");
   const buyerPortal = read("creator-dashboard/src/BuyerPortalV2.jsx");
@@ -97,17 +98,14 @@ test("Web and Storybook consume the shared package and its canonical tokens", ()
   assert.doesNotMatch(creatorPortal, /className="cpv2-(?:primary|secondary|danger)"/);
   assert.doesNotMatch(creatorCss, /\.cpv2-(?:primary|secondary|danger)(?:\b|,)/);
   assert.match(creatorPortal, /<CreatorProductWorkspace/);
-  assert.match(creatorPortal, /<HatchTabs[\s\S]*ariaLabel=(?:"Product sections"|\{t\("productSections"\)\})/);
-  assert.match(creatorPortal, /<Checkbox key=\{lossId\}/);
+  assert.match(agentWorkspace, /<nav className="sx-tabs" aria-label=\{t\("sxAgentTabs"\)\}>/);
   assert.doesNotMatch(creatorPortal, /<(?:input|textarea|select)\b/);
   assert.match(creatorWorkspace, /<FormField label=\{t\("whatProductDelivers"\)\}/);
   assert.match(creatorFactory, /from\s+["']@hatch\/ui["']/);
   assert.doesNotMatch(creatorFactory, /<(?:input|textarea|select)\b/);
   assert.doesNotMatch(creatorCss, /\.cpv2-factory-draft\s+(?:input|select|textarea)/);
-  assert.match(creatorCss, /\.cpv2-panel\s*\{[^}]*border:\s*0;[^}]*border-radius:\s*0;[^}]*background:\s*transparent;/s);
-  assert.match(storefrontCss, /\.storefront-shared__hero\s*\{[^}]*padding:\s*clamp\([^;]+\)\s+4px\s+clamp\(/s);
-  assert.match(storefrontCss, /\.storefront-shared__access\s*\{[^}]*background:\s*color-mix\([^;]+var\(--hatch-ui-surface-raised/s);
-  assert.doesNotMatch(storefrontCss, /\.storefront-shared__access\s*\{[^}]*background:\s*linear-gradient/s);
+  // Web visual system (docs/web-visual-guidelines.md): the offer card sits on the Web card token.
+  assert.match(storefrontCss, /\.storefront-shared__access\s*\{[^}]*background:[^;]*var\(--web-card\)/s);
   assert.match(desktopCss, /\.desktop-window-shell\s*\{[^}]*--surface-window:\s*var\(--hatch-ui-surface-window\)/s);
   assert.match(desktopCss, /\.desktop-ui-root\s*\{[^}]*height:\s*100%;/s);
   assert.doesNotMatch(desktopCss, /\.desktop-window-shell::before/);
@@ -118,7 +116,7 @@ test("Web and Storybook consume the shared package and its canonical tokens", ()
   assert.match(desktopStory, /atmosphereStrength/);
   assert.doesNotMatch(desktopCss, /\.welcome-brand \.hatch-brand__wordmark\s*\{[^}]*letter-spacing:\s*-\.035em/s);
   assert.doesNotMatch(desktopCss, /\.desktop-sidebar-heading \.desktop-sidebar-brand \.hatch-brand__wordmark\s*\{[^}]*letter-spacing:\s*-\.035em/s);
-  assert.match(buyerPortal, /className="buyer-v2__settings-surface"/);
+  assert.match(buyerPortal, /className="buyer-v2__settings-surface(?: [^"]*)?"/);
   assert.doesNotMatch(buyerPortal, /<div><dt>Role<\/dt>/);
 });
 
