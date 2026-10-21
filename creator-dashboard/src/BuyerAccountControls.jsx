@@ -37,7 +37,7 @@ export function BuyerLanguageMenu({ className = "" }) {
   );
 }
 
-export function BuyerAccountMenu({ user, onSignOut, signingOut = false, showLanguageOptions = false, className = "" }) {
+export function BuyerAccountMenu({ user, onSignOut, signingOut = false, showLanguageOptions = false, showName = false, className = "" }) {
   const { locale, setLocale } = useLocale();
   const t = key => buyerT(locale, key);
   const displayName = user?.display_name || user?.name || user?.email || t("Hatch account");
@@ -47,8 +47,9 @@ export function BuyerAccountMenu({ user, onSignOut, signingOut = false, showLang
     <DropdownMenu
       label={t("Account settings")}
       trigger={(
-        <button type="button" className={`buyer-account-controls__avatar ${className}`.trim()} aria-label={`${t("Account settings")}: ${displayName}`} title={displayName} aria-busy={signingOut || undefined}>
+        <button type="button" className={`buyer-account-controls__avatar ${showName ? "buyer-account-controls__avatar--named" : ""} ${className}`.trim()} aria-label={`${t("Account settings")}: ${displayName}`} title={displayName} aria-busy={signingOut || undefined}>
           <Avatar className="buyer-account-controls__avatar-image" src={user?.avatar_url} name={displayName} size="medium" />
+          {showName ? <span className="buyer-account-controls__name">{displayName}</span> : null}
         </button>
       )}
       items={[

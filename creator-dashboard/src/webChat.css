@@ -191,9 +191,10 @@
 .hui-avatar.web-chat__message-avatar { width: 32px; height: 32px; min-width: 32px; margin-top: 2px; }
 
 .web-chat__bubble { max-width: 100%; padding: 12px 16px; border-radius: 22px; }
-.web-chat__message--user .web-chat__bubble { border-bottom-right-radius: 6px; color: var(--web-paper); background: var(--chat-ink); }
-.web-chat__message--assistant .web-chat__bubble { border-bottom-left-radius: 6px; color: var(--chat-ink); background: var(--chat-panel); }
-.web-chat__message--assistant .web-chat__bubble.web-chat__content { padding: 14px 20px; }
+.web-chat__message--user .web-chat__bubble { padding: 9px 15px; border-radius: 18px; color: var(--web-paper); background: var(--chat-ink); font-size: 15px; line-height: 1.55; }
+.web-chat__message--user .web-chat__bubble p { margin: 0; }
+.web-chat__message--assistant .web-chat__bubble { padding: 4px 0 0; border-radius: 0; color: var(--chat-ink); background: transparent; }
+.web-chat__message--assistant .web-chat__bubble.web-chat__content { padding: 4px 0 0; font-size: 16px; line-height: 1.75; }
 
 /* Markdown content: readable, scannable, no monospace */
 .web-chat__content { min-width: 0; font-size: 16px; line-height: 1.65; overflow-wrap: anywhere; }
@@ -316,7 +317,7 @@
   border: 1px solid var(--chat-border); border-radius: 28px; background: var(--chat-card); box-shadow: var(--web-shadow);
   transition: border-color var(--chat-motion), box-shadow var(--chat-motion);
 }
-.web-chat__composer:focus-within { border-color: var(--web-yolk); box-shadow: 0 0 0 4px var(--web-yolk-soft), var(--web-shadow); }
+.web-chat__composer:focus-within { border-color: #d9d1bf; }
 .web-chat__composer textarea {
   display: block; width: 100%; min-height: 60px; max-height: 220px; overflow-y: hidden; resize: none; padding: 18px 22px 6px;
   border: 0; outline: 0; border-radius: inherit; color: var(--chat-ink); background: transparent; font-size: 16px; line-height: 1.55;
@@ -415,7 +416,7 @@
   .web-chat__message { gap: 0; }
   .hui-avatar.web-chat__message-avatar { display: none; }
   .web-chat__message--user .web-chat__message-body { max-width: 88%; }
-  .web-chat__message--assistant .web-chat__bubble.web-chat__content { padding: 12px 16px; }
+  .web-chat__message--assistant .web-chat__bubble.web-chat__content { padding: 0; }
   .web-chat__content { font-size: 15px; }
   .web-chat__welcome h2 { font-size: 28px; }
   .web-chat__welcome p { font-size: 16px; }

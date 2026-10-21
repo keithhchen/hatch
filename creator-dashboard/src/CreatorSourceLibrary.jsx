@@ -25,18 +25,16 @@ export function CreatorProductFiles({ token, navigate, locale = "en" }) {
   }
 
   return <section className="cpv2-new">
-    <button className="cpv2-back" type="button" onClick={() => navigate("/studio/products")}><span aria-hidden="true">←</span> {t("navAgents")}</button>
     <div className="cpv2-new__grid">
       <div>
-        <header className="cpv2-hero">
-          <div>
-            <span className="web-pill">{t("newPill")}</span>
+        <header className="sx-page-head">
+          <div className="sx-page-head__text">
             <h1>{t("newTitle")}</h1>
             <p>{t("newBody")}</p>
           </div>
         </header>
         {error ? <InlineAlert tone="error" title={t("productCouldNotBeCreated")}>{error}</InlineAlert> : null}
-        <form onSubmit={create} className="cpv2-new__form web-card">
+        <form onSubmit={create} className="cpv2-new__form sx-card">
           <FormField label={t("newNameLabel")}><Input required value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder={t("newNamePlaceholder")} /></FormField>
           <FormField label={t("newPromiseLabel")}><Textarea required rows={4} value={draft.promise} onChange={(event) => setDraft((current) => ({ ...current, promise: event.target.value }))} placeholder={t("newPromisePlaceholder")} /></FormField>
           <Button className="web-btn-yolk" type="submit" loading={busy} trailing={<span aria-hidden="true">→</span>}>{t("newSubmit")}</Button>

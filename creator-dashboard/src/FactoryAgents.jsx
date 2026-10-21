@@ -24,8 +24,8 @@ import { subscribeFactoryEvents } from "./factoryEvents.js";
 import { FactoryVoicePlayer } from "./factoryVoicePlayer.js";
 import { createFactoryAgentTranslator } from "./factoryAgentsI18n.js";
 import { agentDependencyGaps, agentStateKey, changedDependencies, localizeAgentText } from "./factoryAgentState.js";
-import { creatorFactoryPath, factorySectionForAgent } from "./creatorRoutes.js";
-import { isProductLive, STUDIO_PATH, studioNextStep, studioPathStates, studioStepForRoute } from "./studioPath.js";
+import { creatorFactoryPath, creatorProductPath, factorySectionForAgent } from "./creatorRoutes.js";
+import { STUDIO_PATH, studioNextStep, studioPathStates, studioStepForRoute } from "./studioPath.js";
 import "./factoryAgents.css";
 
 const api = (route, options = {}) => dashboardRequest(route, { ...options, body: options.body === undefined ? undefined : JSON.stringify(options.body) });
@@ -56,28 +56,15 @@ function ErrorNotice({ error, onClose }) {
 
 export function FactoryAgents({ productId, section, agent, navigate, locale = "en" }) {
   const t = useMemo(() => createFactoryAgentTranslator(locale), [locale]);
-  const [sessions, setSessions] = useState([]); const [agents, setAgents] = useState([]); const [manualFiles, setManualFiles] = useState([]); const [uploadItems, setUploadItems] = useState([]); const [config, setConfig] = useState(null); const [product, setProduct] = useState(null); const [productName, setProductName] = useState(""); const [productDraft, setProductDraft] = useState({ name: "", promise: "" }); const [productSave, setProductSave] = useState({ busy: false, notice: "" }); const [error, setError] = useState(""); const importPicker = useRef(null);
+  const [sessions, setSessions] = useState([]); const [agents, setAgents] = useState([]); const [manualFiles, setManualFiles] = useState([]); const [uploadItems, setUploadItems] = useState([]); const [config, setConfig] = useState(null); const [product, setProduct] = useState(null); const [error, setError] = useState(""); const importPicker = useRef(null);
   const root = useMemo(() => factoryRoot(productId), [productId]);
   const stage = section ?? null;
   const selected = agent ?? (stage ? FIRST_PAGE[stage] : null);
   const goToFactory = (nextStage, nextAgent) => navigate(creatorFactoryPath(productId, nextStage, nextAgent));
-  const goToStep = step => step.id === "ship" ? navigate(`/studio/products/${encodeURIComponent(productId)}/preview`) : goToFactory(...step.items[0]);
+  const goToStep = step => step.id === "ship" ? navigate(creatorProductPath(productId, "readiness")) : goToFactory(...step.items[0]);
   const applyNavigation = value => { setSessions(value.sessions || []); setAgents(value.agents || []); setManualFiles(value.manualFiles || []); };
   const refreshConfig = () => api(`${root}/config`).then(value => { setConfig(value); if (value.agents) setAgents(value.agents); }).catch(e => setError(e.message));
-  const refreshProduct = () => api(`/v1/creator/products/${encodeURIComponent(productId)}`).then(value => { const next = value.product ?? value; setProduct(next); setProductName(next?.name ?? next?.product_name ?? ""); setProductDraft({ name: next?.name ?? next?.product_name ?? "", promise: next?.promise ?? next?.product_promise ?? "" }); }).catch(e => setError(e.message));
-  const saveProduct = async event => {
-    event?.preventDefault();
-    const name = productDraft.name.trim();
-    const promise = productDraft.promise.trim();
-    if (!product || !name || !promise || productSave.busy) return false;
-    setProductSave({ busy: true, notice: "" }); setError("");
-    try {
-      const response = await api(`/v1/creator/products/${encodeURIComponent(productId)}`, { method: "PATCH", headers: { "idempotency-key": crypto.randomUUID() }, body: { name, promise, expected_updated_at: product.updated_at } });
-      const saved = response.product ?? response;
-      setProduct(current => ({ ...current, ...saved, name, promise })); setProductName(saved?.name ?? name); setProductDraft({ name: saved?.name ?? name, promise: saved?.promise ?? promise }); setProductSave({ busy: false, notice: t("productDetailsSaved") });
-      return true;
-    } catch (nextError) { setProductSave({ busy: false, notice: "" }); setError(nextError.message); return false; }
-  };
+  const refreshProduct = () => api(`/v1/creator/products/${encodeURIComponent(productId)}`).then(value => setProduct(value.product ?? value)).catch(e => setError(e.message));
   useEffect(() => { refreshConfig(); refreshProduct(); return subscribeFactoryEvents({ url: `${root}/events`, onMessage: event => { const value = JSON.parse(event.data); if (value.type === "snapshot") applyNavigation(value); }, onError: () => setError(t("workspaceConnectionLost")), onOpen: () => { setError(""); refreshConfig(); refreshProduct(); } }); }, [productId, root, t]);
   const agentEntry = role => agents.find(item => item.role === role);
   const agentName = role => localizeAgentText(agentEntry(role)?.name, locale);
@@ -89,54 +76,30 @@ export function FactoryAgents({ productId, section, agent, navigate, locale = "e
   const currentStep = studioStepForRoute(stage, selected);
   const step = STUDIO_PATH.find(item => item.id === currentStep);
   const selectedEntry = selected ? agentEntry(selected) : null; const selectedSession = selected ? agentSession(selected) : null;
-  const publicHref = product && (product.status === "published" || product.status === "live") ? `/products/${encodeURIComponent(productId)}` : "";
   const workbench = Boolean(selected && selected !== "uploads" && selectedSession);
   return <ThemeProvider theme={theme}><div className={`factory-app${workbench ? " factory-app--workbench" : ""}`} aria-label={t("factory")}>
-    <header className="factory-top">
-      <div className="factory-top__row">
-        <button type="button" className="factory-back" onClick={() => navigate("/studio/products")}><span aria-hidden="true">←</span> {t("factoryBack")}</button>
-        <span className="factory-top__name">{productName || t("product")}</span>
-        {publicHref && <a className="factory-top__public" href={publicHref} target="_blank" rel="noreferrer">{t("viewPublishedProduct")}</a>}
-      </div>
-      {step ? <FactoryStepper states={states} current={currentStep} onStep={goToStep} t={t} /> : null}
-    </header>
+    <nav className="factory-rail" aria-label={t("factoryStepsLabel")}>
+      <button type="button" className={`factory-rail__overview${step ? "" : " is-current"}`} aria-current={step ? undefined : "page"} onClick={() => goToFactory()}>{t("sxNavOverview")}</button>
+      <FactoryStepper states={states} current={currentStep} onStep={goToStep} t={t} />
+    </nav>
     <ErrorNotice error={error} onClose={() => setError("")} />
     {step ? <div className="factory-step">
       {step.items.length > 1 ? <nav className="factory-tasks" aria-label={t("factoryTasksLabel")}>{step.items.map(([itemSection, page]) => <button key={page} type="button" className={page === selected ? "is-active" : ""} aria-current={page === selected ? "page" : undefined} onClick={() => goToFactory(itemSection, page)}>{page === "uploads" ? t("uploadSources") : agentName(page) || t("loadingAgentState")}{page !== "uploads" && agentEntry(page) ? <span className={`factory-dot is-${agentEntry(page).state}`} aria-hidden="true" /> : null}</button>)}</nav> : null}
       {selected === "uploads" ? <SourceUploadWorkspace manualFiles={manualFiles} uploadItems={uploadItems} importPicker={importPicker} uploadProjectFiles={uploadProjectFiles} deleteManualFile={deleteManualFile} onOpenAgent={openAgent} t={t} /> : selectedSession ? <Workspace key={selectedSession.id} root={root} id={selectedSession.id} entry={selectedEntry} agents={agents} config={config} onChanged={() => undefined} onOpenAgent={openAgent} agentName={agentName} t={t} /> : <AgentIntro entry={selectedEntry} agents={agents} onOpenAgent={openAgent} agentName={agentName} locale={locale} t={t} />}
-    </div> : <FactoryOverview product={product} draft={productDraft} onDraftChange={setProductDraft} saveState={productSave} onSave={saveProduct} states={states} agentEntry={agentEntry} agentName={agentName} goToStep={goToStep} t={t} />}
+    </div> : <FactoryOverview product={product} states={states} agentEntry={agentEntry} agentName={agentName} goToStep={goToStep} t={t} />}
   </div></ThemeProvider>;
 }
 
 function FactoryStepper({ states, current, onStep, t }) {
   const next = studioNextStep(states);
-  return <ol className="factory-stepper" aria-label={t("factoryStepsLabel")}>{states.map(({ step, state }, index) => <li key={step.id}><button type="button" className={`is-${state}${current === step.id ? " is-current" : ""}${next?.step.id === step.id ? " is-next" : ""}`} aria-current={current === step.id ? "step" : undefined} onClick={() => onStep(step)}><span className="factory-stepper__n">{state === "done" ? "✓" : index + 1}</span><span>{t(step.title)}</span></button></li>)}</ol>;
+  return <ol className="factory-stepper" aria-label={t("factoryStepsLabel")}>{states.map(({ step, state }, index) => <li key={step.id}><button type="button" className={`is-${state}${current === step.id ? " is-current" : ""}${next?.step.id === step.id ? " is-next" : ""}`} aria-current={current === step.id ? "step" : undefined} onClick={() => onStep(step)}><span className="factory-stepper__n">{state === "done" ? "✓" : index + 1}</span><span className="factory-stepper__text"><span>{t(step.title)}</span><small>{t(next?.step.id === step.id && state === "todo" ? "stepNow" : STEP_STATE_KEY[state])}</small></span></button></li>)}</ol>;
 }
 
-function FactoryOverview({ product, draft, onDraftChange, saveState, onSave, states, agentEntry, agentName, goToStep, t }) {
-  const [editing, setEditing] = useState(false);
+function FactoryOverview({ product, states, agentEntry, agentName, goToStep, t }) {
   const next = studioNextStep(states);
   const nextIndex = next ? STUDIO_PATH.indexOf(next.step) : -1;
-  if (!product) return <div className="factory-overview"><Skeleton width="30%" height={28} /><Skeleton width="60%" height={64} /><Skeleton variant="rounded" height={280} sx={{ mt: 3, borderRadius: "28px" }} /></div>;
+  if (!product) return <div className="factory-overview"><Skeleton variant="rounded" height={240} sx={{ borderRadius: "20px" }} /></div>;
   return <div className="factory-overview">
-    <section className="factory-intro">
-      <span className="web-pill">{t("factoryPill")}</span>
-      {editing ? <Paper component="form" className="factory-edit web-card" elevation={0} onSubmit={async event => { if (await onSave(event)) setEditing(false); }}>
-        <Stack spacing={2}>
-          <TextField label={t("productName")} value={draft.name} onChange={event => onDraftChange(current => ({ ...current, name: event.target.value }))} disabled={!product || saveState.busy} fullWidth required />
-          <TextField label={t("productPromise")} value={draft.promise} onChange={event => onDraftChange(current => ({ ...current, promise: event.target.value }))} disabled={!product || saveState.busy} fullWidth required multiline minRows={3} />
-          <Stack direction="row" spacing={1} alignItems="center">
-            <Button type="submit" variant="contained" disabled={!product || saveState.busy || !draft.name.trim() || !draft.promise.trim()}>{saveState.busy ? t("saving") : t("save")}</Button>
-            <Button type="button" variant="text" onClick={() => setEditing(false)}>{t("factoryCancelEdit")}</Button>
-          </Stack>
-        </Stack>
-      </Paper> : <>
-        <h1>{product.name ?? product.product_name ?? t("product")}</h1>
-        {product.promise ? <p>{product.promise}</p> : null}
-        <button type="button" className="factory-link" onClick={() => setEditing(true)}>{t("factoryEdit")}</button>
-        {saveState.notice ? <span className="factory-saved" role="status">{saveState.notice}</span> : null}
-      </>}
-    </section>
     {next ? <article className="factory-next web-card">
       <div className="factory-next__body">
         <span className="factory-next__label">{t("factoryNextUp")} · {t("stepNumber", nextIndex + 1)}</span>
@@ -146,13 +109,6 @@ function FactoryOverview({ product, draft, onDraftChange, saveState, onSave, sta
         <Button className="factory-cta" variant="contained" endIcon={<ArrowForward />} onClick={() => goToStep(next.step)}>{t("stepGo")}</Button>
       </div>
     </article> : <p className="factory-all-done web-card">{t("factoryAllDone")}</p>}
-    <h2 className="factory-section-title">{t("factoryPathTitle")}</h2>
-    <ol className="factory-path">{states.map(({ step, state }, index) => <li key={step.id}><button type="button" className={`factory-path__step is-${state}${next?.step.id === step.id ? " is-next" : ""}`} onClick={() => goToStep(step)}>
-      <span className="factory-path__n">0{index + 1}</span>
-      <span className="factory-path__text"><strong>{t(step.title)}</strong><small>{t(step.body)}</small></span>
-      <span className="factory-path__state">{t(next?.step.id === step.id && state === "todo" ? "stepNow" : STEP_STATE_KEY[state])}</span>
-      <ChevronRight fontSize="small" aria-hidden="true" />
-    </button></li>)}</ol>
   </div>;
 }
 

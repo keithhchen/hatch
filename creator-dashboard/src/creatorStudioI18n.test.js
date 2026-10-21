@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { createCreatorTranslator, CREATOR_LOCALES, CREATOR_PORTAL_KEYS } from "./creatorI18n.js";
+import { STUDIO_SHELL_COPY } from "./studioShellCopy.js";
 
 const CREATOR_STUDIO_KEYS = [
   "explore",
@@ -67,14 +68,22 @@ test("Products entry does not read a global Factory run list", async () => {
   assert.doesNotMatch(source, /PendingFactoryRuns|Factory in progress/);
 });
 
-test("Creator shell uses Home, brands the Studio surface, and hides order navigation", async () => {
+test("Creator shell is a sidebar workspace with every Studio section", async () => {
   const source = await readFile(new URL("./CreatorPortalV2.jsx", import.meta.url), "utf8");
   assert.match(source, /<WebBrand className="cpv2-brand" label=\{t\("studio"\)\}/);
   assert.doesNotMatch(source, /HatchBrand/);
-  assert.match(source, /label: t\("home"\)/);
-  assert.doesNotMatch(source, /value: "space-orders"/);
-  assert.doesNotMatch(source, /<SpaceLink href="\/studio\/orders"/);
-  assert.doesNotMatch(source, /action=\{t\("viewAllOrders"\)\}/);
+  for (const key of ["sxNavOverview", "sxNavAgents", "sxNavOrders", "sxNavEarnings", "sxNavSettings"]) assert.match(source, new RegExp(`label: "${key}"`));
+  for (const page of ["StudioOrdersPage", "StudioOrderDetailPage", "StudioEarningsPage", "StudioSettingsPage"]) assert.match(source, new RegExp(`opsPage\\("${page}"\\)`));
+  assert.match(source, /import\("\.\/studioOps\.jsx"\)/);
+  assert.doesNotMatch(source, /function OrdersPage|function OrderPage/);
+});
+
+test("Studio shell copy is complete in every locale", () => {
+  const keys = Object.keys(STUDIO_SHELL_COPY.en);
+  for (const locale of CREATOR_LOCALES) {
+    const t = createCreatorTranslator(locale);
+    for (const key of keys) assert.notEqual(t(key), key, `${locale}.${key}`);
+  }
 });
 
 test("legacy Portal surfaces do not reintroduce hardcoded English labels", async () => {

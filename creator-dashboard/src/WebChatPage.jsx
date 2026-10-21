@@ -106,7 +106,7 @@ function WebChatAccountControls({ profile, navigate, onSignOut, className = "" }
 
   return <>
     <div className={`buyer-account-controls buyer-account-controls--chat ${className}`.trim()}>
-      <BuyerAccountMenu user={profile} onSignOut={() => void signOut()} signingOut={signingOut} showLanguageOptions />
+      <BuyerAccountMenu user={profile} onSignOut={() => void signOut()} signingOut={signingOut} showLanguageOptions showName />
     </div>
     {error ? <p className="web-chat__account-error" role="alert">{webChatErrorText(error, locale)}</p> : null}
   </>;

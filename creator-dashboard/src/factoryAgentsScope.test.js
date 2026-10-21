@@ -9,15 +9,17 @@ test('Factory UI derives every session API from the current Product', async () =
   assert.doesNotMatch(source, /evaluation-targets|method:\s*['"]PUT['"].*target/);
 });
 
-test('Product cards enter the canonical Product overview', async () => {
+test('Agent rows enter the canonical Agent workspace', async () => {
   const source = await readFile(new URL('./CreatorPortalV2.jsx', import.meta.url), 'utf8');
-  assert.match(source, /creatorProductPath\(idOf\(product, "product"\)\)/);
+  assert.match(source, /creatorProductPath\(productId\)/);
   assert.doesNotMatch(source, /href="\/studio\/factory"/);
 });
 
-test('Factory header uses the real Product name and removes the inspector heading', async () => {
+test('Agent workspace header uses the real Product name and the inspector keeps no heading', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
-  assert.match(source, /productName\s*\|\|\s*t\("product"\)/);
+  const workspace = await readFile(new URL('./studioAgentWorkspace.jsx', import.meta.url), 'utf8');
+  assert.match(workspace, /<h1>\{product \? productName\(product, t\) : "…"\}<\/h1>/);
+  assert.match(workspace, /useRemote\(request, productPath\)/);
   assert.doesNotMatch(source, /\{productId\}<\/Typography>/);
   assert.doesNotMatch(source, /<Typography variant="subtitle1" fontWeight=\{750\}>\{t\("nextSteps"\)\}<\/Typography>/);
   assert.doesNotMatch(source, /backToStage/);
@@ -25,12 +27,14 @@ test('Factory header uses the real Product name and removes the inspector headin
   assert.match(source, /entry\?\.state === "complete" \|\| entry\?\.state === "update_available"/);
 });
 
-test('Published Products expose their canonical public link in Factory and Product cards', async () => {
-  const factory = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
+test('Published Products expose their canonical public link in the Agent header and Agent rows', async () => {
+  const kit = await readFile(new URL('./studioShellKit.jsx', import.meta.url), 'utf8');
+  const workspace = await readFile(new URL('./studioAgentWorkspace.jsx', import.meta.url), 'utf8');
   const portal = await readFile(new URL('./CreatorPortalV2.jsx', import.meta.url), 'utf8');
-  assert.match(factory, /product\.status === "published" \|\| product\.status === "live"/);
-  assert.match(factory, /`\/products\/\$\{encodeURIComponent\(productId\)\}`/);
-  assert.match(factory, /href=\{publicHref\} target="_blank" rel="noreferrer"/);
+  const path = await readFile(new URL('./studioPath.js', import.meta.url), 'utf8');
+  assert.match(path, /product\?\.status === "published" \|\| product\?\.status === "live"/);
+  assert.match(kit, /`\/products\/\$\{idOf\(product, "product"\)\}`/);
+  assert.match(workspace, /href=\{safePublicUrl\(publicPath\)\} target="_blank" rel="noreferrer"/);
   assert.match(portal, /published \? `\/products\/\$\{encodeURIComponent\(idOf\(product, "product"\)\)\}` : ""/);
   assert.match(portal, /href=\{publicHref\} target="_blank" rel="noreferrer"/);
 });
@@ -51,19 +55,22 @@ test('Factory overview is a guided path, not an admin tree', async () => {
   assert.doesNotMatch(source, /<SimpleTreeView|<TreeItem/);
   assert.match(source, /studioPathStates\(agents, product\)/);
   assert.match(source, /function FactoryStepper/);
-  assert.match(source, /onClick=\{\(\) => goToStep\(step\)\}/);
+  assert.match(source, /onClick=\{\(\) => onStep\(step\)\}/);
+  assert.match(source, /onClick=\{\(\) => goToStep\(next\.step\)\}/);
   assert.match(source, /onClick=\{\(\) => onOpenAgent\(entry\.role\)\}/);
+  assert.match(source, /step\.id === "ship" \? navigate\(creatorProductPath\(productId, "readiness"\)\)/);
 });
 
-test('Factory overview is the first live Product page and retires the old workflow pages', async () => {
+test('Agent details are edited in the Storefront tab with optimistic concurrency', async () => {
+  const workspace = await readFile(new URL('./studioAgentWorkspace.jsx', import.meta.url), 'utf8');
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
-  const portal = await readFile(new URL('./CreatorPortalV2.jsx', import.meta.url), 'utf8');
   assert.match(source, /function FactoryOverview/);
-  assert.match(source, /expected_updated_at: product\.updated_at/);
-  assert.match(source, /<TextField label=\{t\("productName"\)\}/);
-  assert.match(source, /<TextField label=\{t\("productPromise"\)\}/);
-  assert.match(portal, /FactoryProductRedirect/);
-  assert.doesNotMatch(portal, /CreatorProductOverview/);
+  assert.match(workspace, /method: "PATCH"[^\n]*expected_updated_at: product\.updated_at/);
+  assert.match(workspace, /\/brief-spec`, \{ method: "PUT"[^\n]*contract_version: "1"[^\n]*expected_updated_at: product\.updated_at/);
+  assert.match(workspace, /\/storefront-preview`/);
+  assert.match(workspace, /\/releases\/\$\{encodeURIComponent\(idOf\(target, "release"\)\)\}\/rollback`/);
+  assert.match(workspace, /\/release`, \{ method: "POST"[^\n]*candidate_id/);
+  assert.doesNotMatch(source, /<TextField label=\{t\("productName"\)\}/);
 });
 
 test('Upload sources is a peer Factory page with real file upload', async () => {
@@ -189,7 +196,8 @@ test('Factory chat keeps scrolling inside the workbench pane', async () => {
   const portal = await readFile(new URL('./CreatorPortalV2.jsx', import.meta.url), 'utf8');
   const portalStyles = await readFile(new URL('./creatorPortalV2.css', import.meta.url), 'utf8');
   const factoryStyles = await readFile(new URL('./factoryAgents.css', import.meta.url), 'utf8');
-  assert.match(portal, /cpv2-main\$\{route\.kind === "factory-agents"/);
+  assert.match(portal, /cpv2-main\$\{workbench \? " cpv2-main--workbench" : ""\}/);
+  assert.match(portal, /const workbench = route\.kind === "agent" && route\.tab === "build"/);
   assert.match(source, /className="factory-chat-scroll"/);
   assert.match(source, /overscrollBehavior: "contain"/);
   assert.match(`${portalStyles}\n${factoryStyles}`, /\.cpv2-main--workbench\s*\{[^}]*overflow:\s*hidden/);

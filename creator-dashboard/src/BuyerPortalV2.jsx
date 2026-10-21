@@ -658,8 +658,10 @@ function AuthPage({ mode, search, request, navigate, session }) {
           {submission.error ? <InlineError error={submission.error} /> : null}
           <Button type="submit" className="buyer-v2__button--wide web-btn-yolk" loading={submission.status === "pending"}>{presentation.action}</Button>
         </form>
-        <p className="buyer-v2__auth-switch"><RouterLink to={`${signingUp ? "/sign-in" : "/sign-up"}?returnTo=${encodeURIComponent(returnTo)}`} navigate={navigate}>{presentation.switchAction}</RouterLink></p>
-        {!signingUp ? <p className="buyer-v2__auth-help"><RouterLink to="/account/help" navigate={navigate}>{t("Account help")}</RouterLink></p> : null}
+        <nav className="buyer-v2__auth-links" aria-label={presentation.switchAction}>
+          <RouterLink className="buyer-v2__auth-switch" to={`${signingUp ? "/sign-in" : "/sign-up"}?returnTo=${encodeURIComponent(returnTo)}`} navigate={navigate}>{presentation.switchAction}</RouterLink>
+          {!signingUp ? <RouterLink className="buyer-v2__auth-help" to="/account/help" navigate={navigate}>{t("Account help")}</RouterLink> : null}
+        </nav>
       </section>
     </main>
   );
@@ -897,7 +899,7 @@ function EntitlementCard({ entitlement, navigate, request }) {
       <div className="buyer-v2__card-footer">
         {status === "active" ? (
           <div className="buyer-v2__chat-actions">
-            <LinkButton className="buyer-v2__chat-primary web-btn-yolk" to={`/chat/product/${encodeURIComponent(productId(product))}`} navigate={navigate}>{t('Chat')}</LinkButton>
+            <LinkButton className="buyer-v2__chat-primary" to={`/chat/product/${encodeURIComponent(productId(product))}`} navigate={navigate}>{t('Chat')}</LinkButton>
             <DropdownMenu
               label={t('Open options')}
               trigger={<button type="button" className="buyer-v2__chat-menu-trigger" aria-label={t('Open options')} title={t('Open options')}><ChevronDown aria-hidden="true" /></button>}
@@ -1021,8 +1023,6 @@ function OrderPage({ id, request, navigate, session }) {
   if (resource.status === "error") return <div className="buyer-v2__container buyer-v2__page"><RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} session={session} area="orders" returnTo={`${ORDERS_ROOT}/${id}`} /></div>;
   const order = resource.data;
   const product = order.product_snapshot || order.product || order;
-  const entitlementId = order.entitlement_id || order.entitlement?.entitlement_id || order.entitlement?.id;
-  const entries = orderTimeline(order, t);
   const canRefund = Boolean(order.actions?.can_request_refund || order.can_request_refund);
   const canCancelAccess = order.access_mode !== "unmetered"
     && Boolean(order.actions?.can_cancel_access || order.can_cancel_access);
@@ -1030,28 +1030,35 @@ function OrderPage({ id, request, navigate, session }) {
   const reversalLabel = t(canCancelAccess ? "Cancel order" : "Request refund");
   const reversalSuccess = t(canCancelAccess ? "Order cancelled" : "Refund request received");
   const totalMinor = orderAmount(order);
-  const subtotalMinor = numberOr(order.subtotal_minor, totalMinor);
   const discountMinor = numberOr(order.discount_minor, 0);
   const taxLabel = order.tax_minor == null ? t("Not calculated") : money(numberOr(order.tax_minor, 0), order.currency, t);
+
+  const isPaid = totalMinor > 0;
+  const canChat = accessStatus(order.entitlement || { status: order.entitlement_status }) === "active";
+  const receiptRows = [
+    [t("Expert"), creatorName(order.creator || product, t)],
+    [t("Order number"), orderReference(order)],
+    [t("Total"), isPaid ? money(totalMinor, order.currency, t) : t("Free")],
+    ...(isPaid && discountMinor > 0 ? [[t("Discount"), `−${money(discountMinor, order.currency, t)}`]] : []),
+    ...(isPaid && order.tax_minor != null && numberOr(order.tax_minor, 0) > 0 ? [[t("Tax"), taxLabel]] : []),
+    ...(isPaid ? [[t("Payment"), t(paymentStatusLabel(order.payment_status || order.payment?.status, totalMinor))]] : [])
+  ];
 
   return (
     <div className="buyer-v2__container buyer-v2__page">
       <RouterLink className="buyer-v2__back-link" to={ORDERS_ROOT} navigate={navigate}>{t('← Back to Orders')}</RouterLink>
-      <header className="buyer-v2__detail-heading"><div><span className="web-pill">{t("Order #{reference}", { reference: orderReference(order) })}</span><h1>{productName(product, t)}</h1><p>{t("Created {date}", { date: dateTime(order.created_at || order.occurred_at, t) })}</p></div><StatusChip status={orderStatus(order)} label={t(orderStatusLabel(order))} /></header>
-      <div className="buyer-v2__detail-grid">
-        <section className="buyer-v2__detail-card web-card"><h2>{t('Receipt')}</h2><DefinitionList rows={[
-          [t("Expert"), creatorName(order.creator || product, t)],
-          [t("Subtotal"), subtotalMinor === 0 ? t("Free") : money(subtotalMinor, order.currency, t)],
-          [t("Discount"), discountMinor === 0 ? money(0, order.currency, t) : `−${money(discountMinor, order.currency, t)}`],
-          [t("Tax"), taxLabel],
-          [t("Total"), totalMinor === 0 ? t("Free") : money(totalMinor, order.currency, t)],
-          [t("Payment"), t(paymentStatusLabel(order.payment_status || order.payment?.status, totalMinor))],
-          [t("Access"), t(entitlementStatusLabel(accessStatus(order.entitlement || { status: order.entitlement_status })))],
-          [t("Release"), order.release_snapshot?.label || order.release_snapshot?.release_id || order.release_label || order.release_id || t("Purchase-time release")]
-        ]} />{entitlementId ? <RouterLink className="buyer-v2__text-link" to={`${LIBRARY_ROOT}/${encodeURIComponent(entitlementId)}`} navigate={navigate}>{t('View access details →')}</RouterLink> : null}</section>
-        <aside className="buyer-v2__order-actions web-card"><h2>{t(orderActionTitle(order))}</h2><p>{t(orderActionCopy(order))}</p>{successReady(order, order.entitlement) ? <LinkButton to={`/orders/${encodeURIComponent(orderReference(order))}/success`} navigate={navigate}>{t('View next steps')}</LinkButton> : null}{canReverseOrder ? <Button variant="secondary" type="button" loading={refundState.status === "pending"} onClick={requestRefund}>{reversalLabel}</Button> : null}{refundState.error ? <InlineError error={refundState.error} /> : null}{refundState.status === "succeeded" ? <div className="buyer-v2__inline-notice" role="status">{reversalSuccess}</div> : null}</aside>
-      </div>
-      <section className="buyer-v2__timeline-section"><div><h2>{t('History')}</h2></div><Timeline entries={entries} /></section>
+      <header className="buyer-v2__detail-heading"><div><h1>{productName(product, t)}</h1><p>{t("Created {date}", { date: dateTime(order.created_at || order.occurred_at, t) })}</p></div><StatusChip status={orderStatus(order)} label={t(orderStatusLabel(order))} /></header>
+      <section className="buyer-v2__detail-card buyer-v2__order-receipt web-card">
+        <DefinitionList rows={receiptRows} />
+        {(canChat || canReverseOrder) ? (
+          <div className="buyer-v2__order-receipt-actions">
+            {canChat ? <LinkButton className="web-btn-yolk" to={`/chat/product/${encodeURIComponent(productId(product))}`} navigate={navigate}>{t('Start chat')}</LinkButton> : null}
+            {canReverseOrder ? <Button variant="ghost" type="button" loading={refundState.status === "pending"} onClick={requestRefund}>{reversalLabel}</Button> : null}
+          </div>
+        ) : null}
+        {refundState.error ? <InlineError error={refundState.error} /> : null}
+        {refundState.status === "succeeded" ? <div className="buyer-v2__inline-notice" role="status">{reversalSuccess}</div> : null}
+      </section>
     </div>
   );
 }
@@ -1466,35 +1473,8 @@ function paymentFailed(order) {
   return ["failed", "declined", "cancelled"].includes(order?.payment_status || order?.payment?.status) || orderStatus(order) === "failed";
 }
 
-function orderActionTitle(order) {
-  if (orderStatus(order) === "cancelled") return "Order cancelled";
-  if (orderStatus(order) === "refunded") return "Order refunded";
-  if (paymentFailed(order)) return "Payment not completed";
-  if (successReady(order, order.entitlement)) return "Access available";
-  return "Order processing";
-}
 
-function orderActionCopy(order) {
-  if (orderStatus(order) === "cancelled") return "The receipt and cancellation history are kept for your records.";
-  if (orderStatus(order) === "refunded") return "The receipt and refund history are kept for your records.";
-  if (paymentFailed(order)) return "No access is granted for an unsuccessful payment.";
-  if (successReady(order, order.entitlement)) return "View next steps or the access details.";
-  return "Refresh this page for the latest status. Do not place another order.";
-}
 
-function orderTimeline(order, t = identity) {
-  if (Array.isArray(order.timeline) && order.timeline.length) return order.timeline.map((entry) => ({ id: entry.id || entry.event_id, label: entry.label || sentenceCase(entry.type || entry.event_type), detail: entry.detail || entry.summary, time: entry.occurred_at || entry.created_at, tone: entry.status === "failed" ? "error" : "" }));
-  const entries = [{ label: t("Order created"), time: order.created_at || order.occurred_at }];
-  const paymentStatus = order.payment_status || order.payment?.status;
-  if (orderAmount(order) === 0 || paymentStatus === "not_required") entries.push({ label: t("Payment not required"), time: order.payment?.updated_at || order.created_at });
-  else if (["succeeded", "paid"].includes(paymentStatus)) entries.push({ label: t("Payment succeeded"), time: order.payment?.succeeded_at || order.paid_at });
-  else if (paymentStatus) entries.push({ label: `${t("Payment")}: ${t(paymentStatusLabel(paymentStatus, orderAmount(order)))}`, time: order.payment?.updated_at, tone: paymentFailed(order) ? "error" : "" });
-  if (order.entitlement_id || order.entitlement) entries.push({ label: t("Order fulfilled"), time: order.entitlement?.granted_at || order.fulfilled_at });
-  for (const delivery of arrayValue(order.deliveries, [])) entries.push(deliveryTimelineEntry(delivery, t));
-  const refundStatus = meaningfulReversalStatus(order.refund?.status, order.refund_status, orderStatus(order) === "refunded" ? "refunded" : null);
-  if (refundStatus) entries.push({ label: `${t("Refund")}: ${sentenceCase(refundStatus)}`, time: order.refund?.updated_at || order.refunded_at });
-  return entries;
-}
 
 function deliveryTimelineEntry(delivery, t = identity) {
   const status = delivery.status || delivery.delivery_status || "completed";

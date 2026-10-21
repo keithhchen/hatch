@@ -1,6 +1,8 @@
 // Copy for the Studio shell, home and guided Agent path.
 // Merged into both the Creator and the Factory translators so every Studio
 // surface uses one professional, neutral voice in zh / en / ja.
+import { STUDIO_SHELL_COPY } from "./studioShellCopy.js";
+
 export const STUDIO_COPY = {
   en: {
     navAgents: "My Agents",
@@ -322,3 +324,5 @@ export const STUDIO_COPY = {
     ordersEmptyBody: "Agent の公開後、購入履歴がここに表示されます。"
   }
 };
+
+for (const locale of Object.keys(STUDIO_COPY)) Object.assign(STUDIO_COPY[locale], STUDIO_SHELL_COPY[locale]);

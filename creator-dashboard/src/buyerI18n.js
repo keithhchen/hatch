@@ -212,6 +212,7 @@ const ENTRIES = {
   "No orders match this filter": ["没有符合条件的订单", "該当する注文はありません"],
   "Orders appear here after you add an Agent.": ["添加 Agent 后，订单将显示在此处。", "Agent を追加すると、ここに注文が表示されます。"],
   "Order details": ["订单详情", "注文の詳細"],
+  "Order number": ["订单号", "注文番号"],
   "Not calculated": ["未计算", "未計算"],
   "← Back to Orders": ["← 返回订单", "← 注文に戻る"],
   "Created {date}": ["创建于 {date}", "{date} に作成"],
