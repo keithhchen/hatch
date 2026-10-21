@@ -87,7 +87,7 @@
 .cpv2-alert, .cpv2-success { margin: 0 0 14px; }
 
 /* ---------- Overview ---------- */
-.sx-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin: 0 0 18px; }
+.sx-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 0 0 18px; }
 .sx-kpi { display: flex; min-width: 0; flex-direction: column; gap: 6px; padding: 18px 20px; border: 1px solid var(--web-rule); border-radius: 18px; background: var(--web-card); }
 .sx-kpi dt { order: 1; color: var(--web-muted); font-size: 13px; font-weight: 600; }
 .sx-kpi dd { order: 2; margin: 0; overflow: hidden; font-size: clamp(24px, 2.2vw, 30px); font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
@@ -170,14 +170,12 @@
 .sx-tabs a:hover { color: var(--web-ink); }
 .sx-tabs a.is-active { color: var(--web-ink); }
 .sx-tabs a.is-active::after { position: absolute; right: 8px; bottom: -1px; left: 8px; height: 2px; border-radius: 2px; background: var(--web-ink); content: ""; }
-.sx-tabs b { display: inline-grid; min-width: 20px; height: 20px; place-items: center; padding: 0 6px; border-radius: 999px; background: var(--web-yolk-soft); color: var(--web-gold); font-size: 12px; }
-.sx-tabs b.is-ok { background: var(--web-pass-soft); color: var(--web-pass); }
 .sx-agent__body { padding-top: 24px; }
 
-/* Storefront */
-.sx-storefront { display: grid; gap: 28px; }
-.sx-storefront__edit { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 18px; }
-.sx-storefront__edit > :last-child { grid-column: 1 / -1; }
+/* Publish */
+.sx-publish { display: grid; gap: 24px; }
+.sx-publish__edit { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 18px; }
+.sx-form__note { margin: 0; font-size: 13px; }
 .sx-form { display: grid; gap: 14px; }
 .sx-form .sx-section-head { margin-bottom: 0; }
 .sx-form__foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
@@ -202,35 +200,12 @@
 .cpv2-storefront-frame.is-desktop { max-width: 100%; }
 .cpv2-storefront-frame.is-mobile { max-width: 390px; }
 
-/* Versions */
-.sx-versions { display: grid; margin: 12px 0 0; padding: 0; list-style: none; }
-.sx-version { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 14px 4px; }
-.sx-versions .sx-version + .sx-version { border-top: 1px solid var(--web-rule); }
-.sx-version > div:first-child { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
-.sx-version strong { font-size: 15px; }
-.sx-version small { color: var(--web-muted); font-size: 13px; }
-.sx-version.is-focused { margin: 0 -12px; padding-inline: 16px; border-radius: 14px; background: var(--web-yolk-soft); }
-.sx-version__actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.sx-version.is-candidate { padding: 0; }
-
-/* Readiness */
-.sx-readiness { display: grid; max-width: 880px; gap: 18px; }
-.sx-summary { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 20px 22px; border: 1px solid var(--web-rule); border-radius: 20px; background: var(--web-card); }
-.sx-summary > svg { width: 26px; height: 26px; color: var(--web-gold); }
-.sx-summary.is-ready > svg, .sx-summary.is-live > svg { color: var(--web-pass); }
-.sx-summary.is-ready, .sx-summary.is-live { border-color: color-mix(in srgb, var(--web-pass) 35%, var(--web-rule)); }
+.sx-summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 20px 22px; border: 1px solid var(--web-rule); border-radius: 20px; background: var(--web-card); }
+.sx-summary.is-live { border-color: color-mix(in srgb, var(--web-pass) 35%, var(--web-rule)); }
 .sx-summary h2 { margin: 0; font-size: 18px; }
 .sx-summary p { margin: 4px 0 0; color: var(--web-body); font-size: 14px; line-height: 1.55; }
-.sx-checks { display: grid; margin: 0; padding: 0; list-style: none; }
-.sx-checks li { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px 2px; }
-.sx-checks li + li { border-top: 1px solid var(--web-rule); }
-.sx-checks li > svg { width: 20px; height: 20px; }
-.sx-checks li.is-ready > svg { color: var(--web-pass); }
-.sx-checks li.is-blocked > svg { color: var(--web-gold); }
-.sx-checks li > div { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
-.sx-checks strong { font-size: 15px; }
-.sx-checks small { color: var(--web-muted); font-size: 13px; line-height: 1.5; }
-.sx-check-state { color: var(--web-muted); font-size: 13px; }
+.sx-summary__pending { color: var(--web-gold) !important; font-weight: 600; }
+.sx-summary__note { grid-column: 1 / -1; min-width: 0; overflow-wrap: anywhere; }
 
 /* New Agent */
 .cpv2-new__grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr); gap: clamp(24px, 4vw, 48px); align-items: start; }
@@ -248,8 +223,8 @@
 @media (prefers-reduced-motion: reduce) { .cpv2 *, .cpv2 *::before, .cpv2 *::after { animation: none !important; transition: none !important; } }
 
 @media (max-width: 1180px) {
-  .sx-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .sx-storefront__edit { grid-template-columns: 1fr; }
+  .sx-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .sx-publish__edit { grid-template-columns: 1fr; }
   .cpv2-path-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cpv2-path-cards li:last-child { grid-column: span 2; }
   .cpv2-path-cards--compact { grid-template-columns: 1fr; }
@@ -299,8 +274,8 @@
   .sx-table__actions { width: 100%; }
   .sx-table__actions .hui-icon-button { margin-left: auto; }
   .sx-table__next-label { display: inline !important; margin-right: 6px; color: var(--web-muted); }
-  .sx-summary { grid-template-columns: 28px minmax(0, 1fr); }
-  .sx-summary > .hui-button { grid-column: 1 / -1; justify-self: start; }
+  .sx-summary { grid-template-columns: minmax(0, 1fr); }
+  .sx-summary > .hui-button { justify-self: start; }
   .sx-brief li { grid-template-columns: 20px minmax(0, 1fr) 36px; }
   .sx-brief .sx-check { grid-column: 2; grid-row: 2; }
   .sx-brief .sx-icon-btn { grid-column: 3; grid-row: 1; }

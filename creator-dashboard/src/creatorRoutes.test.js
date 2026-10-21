@@ -62,12 +62,10 @@ test("Agent workspace tabs and the create page have their own URLs", () => {
   assert.deepEqual(parseCreatorRoute("/studio/products/new"), { kind: "product-create", section: "products" });
   assert.equal(creatorRouteTitle(parseCreatorRoute("/studio/products/new")), "New Agent");
   assert.equal(parseCreatorRoute("/studio/tasks/new").kind, "not-found");
-  for (const tab of ["storefront", "versions", "readiness"]) {
-    assert.deepEqual(parseCreatorRoute(`/studio/products/p1/${tab}`), { kind: "agent", section: "products", productId: "p1", tab });
-    assert.equal(creatorProductPath("p1", tab), `/studio/products/p1/${tab}`);
-  }
+  assert.deepEqual(parseCreatorRoute("/studio/products/p1/publish"), { kind: "agent", section: "products", productId: "p1", tab: "publish" });
+  assert.equal(creatorProductPath("p1", "publish"), "/studio/products/p1/publish");
+  for (const tab of ["storefront", "readiness", "versions"]) assert.throws(() => creatorProductPath("p1", tab), RangeError);
   assert.equal(creatorProductPath("p1", "build"), "/studio/factory/p1");
-  assert.deepEqual(parseCreatorRoute("/studio/products/p1/releases/r9"), { kind: "agent", section: "products", productId: "p1", tab: "versions", releaseId: "r9" });
   assert.deepEqual(parseCreatorRoute("/studio/products/p1/candidates/c2"), { kind: "candidate", section: "products", productId: "p1", candidateId: "c2" });
 });
 
@@ -75,7 +73,9 @@ test("old Product URLs redirect to the matching Agent workspace tab", () => {
   for (const tab of ["", "/files", "/brief", "/overview", "/complete", "/about-you", "/corpus"]) {
     assert.deepEqual(parseCreatorRoute(`/studio/products/p1${tab}`), { kind: "redirect", section: "products", to: "/studio/factory/p1" });
   }
-  assert.deepEqual(parseCreatorRoute("/studio/products/p1/preview"), { kind: "redirect", section: "products", to: "/studio/products/p1/storefront" });
+  for (const path of ["/storefront", "/readiness", "/preview", "/versions", "/releases/r9"]) {
+    assert.deepEqual(parseCreatorRoute(`/studio/products/p1${path}`), { kind: "redirect", section: "products", to: "/studio/products/p1/publish" });
+  }
 });
 
 test("orders, earnings and settings are Studio sections", () => {

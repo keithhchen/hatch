@@ -156,7 +156,7 @@ export const STUDIO_OPS_COPY = {
     event: {
       "order.placed": "下单", "payment.created": "发起支付", "payment.status_changed": "支付状态更新",
       "payment.refunded": "支付已退回", "entitlement.granted": "开通使用权限",
-      "entitlement.revoked": "撤销使用权限", "entitlement.version_advanced": "Agent 版本更新",
+      "entitlement.revoked": "撤销使用权限", "entitlement.version_advanced": "Agent 已更新",
       "entitlement.units_reserved": "预留交付次数", "entitlement.units_consumed": "使用交付次数",
       "entitlement.units_released": "释放交付次数", "task.started": "开始任务",
       "artifact.created": "生成交付物", "delivery.completed": "完成交付",
@@ -335,7 +335,7 @@ export const STUDIO_OPS_COPY = {
     event: {
       "order.placed": "Order placed", "payment.created": "Payment started", "payment.status_changed": "Payment updated",
       "payment.refunded": "Payment refunded", "entitlement.granted": "Access granted",
-      "entitlement.revoked": "Access revoked", "entitlement.version_advanced": "Agent version updated",
+      "entitlement.revoked": "Access revoked", "entitlement.version_advanced": "Agent updated",
       "entitlement.units_reserved": "Delivery reserved", "entitlement.units_consumed": "Delivery used",
       "entitlement.units_released": "Delivery released", "task.started": "Task started",
       "artifact.created": "Deliverable created", "delivery.completed": "Delivery completed",
@@ -499,7 +499,7 @@ export const STUDIO_OPS_COPY = {
     event: {
       "order.placed": "注文", "payment.created": "支払い開始", "payment.status_changed": "支払い状況の更新",
       "payment.refunded": "支払いの返金", "entitlement.granted": "利用権の付与",
-      "entitlement.revoked": "利用権の取り消し", "entitlement.version_advanced": "Agent のバージョン更新",
+      "entitlement.revoked": "利用権の取り消し", "entitlement.version_advanced": "Agent の更新",
       "entitlement.units_reserved": "納品枠の確保", "entitlement.units_consumed": "納品枠の使用",
       "entitlement.units_released": "納品枠の解放", "task.started": "タスク開始",
       "artifact.created": "成果物の作成", "delivery.completed": "納品完了",

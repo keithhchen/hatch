@@ -55,6 +55,7 @@ import {
 import type { AboutYouAnswerPair } from "./creatorLearning/aboutYouNode.js";
 import { PostgresDistillationGraphStore } from "./creatorLearning/distillationGraphStore.js";
 import { CorpusPublisher, CorpusPublishError } from "./creatorLearning/corpusPublisher.js";
+import { createProductLive, ExpertProduct, SystemMissing, type ProductLiveService } from "./creatorLearning/productLive/index.js";
 import { CreatorRegistryReleaseStore, type CreatorRegistryRelease } from "./creatorLearning/creatorRegistryRelease.js";
 import { corpusOutputSchema } from "./creatorLearning/corpusNode.js";
 import { QdrantKnowledgeIndexer } from "./qdrantIndexer.js";
@@ -89,6 +90,7 @@ type RegistryContext = {
   productFileStore: ProductFileStore;
   factoryNodeService?: FactoryNodeService;
   corpusPublisher?: CorpusPublisher;
+  productLive?: ProductLiveService;
   nodeObjectStore?: ReturnType<typeof objectStoreFromEnvironment>;
   releaseStore: CreatorRegistryReleaseStore;
   authSecret: string;
@@ -157,6 +159,9 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const corpusPublisher = nodeObjectStore
     ? new CorpusPublisher(factoryNodeService, nodeObjectStore, store, releaseStore, environment.HATCH_RUNTIME_CORPUS_ROOT?.trim() || "runtime-corpora", knowledgeIndexer)
     : undefined;
+  const productLive = corpusPublisher && nodeObjectStore
+    ? createProductLive({ factoryRoot, publisher: corpusPublisher, releases: releaseStore, objectStore: nodeObjectStore })
+    : undefined;
   const graphStore = graphPool ? new PostgresDistillationGraphStore(graphPool) : undefined;
   await graphStore?.initialize();
   // User commands start the Factory directly in the registry process. The
@@ -202,7 +207,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const publishWorkGate = new PublishWorkGate(publishWorkLimitOptionsFromEnvironment(environment));
   const httpLimits = httpRequestLimitOptionsFromEnvironment(environment);
   const httpRequestGate = new HttpRequestGate(httpLimits);
-  const registryContext: RegistryContext = { store, accounts, accountAvatars, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, nodeObjectStore, releaseStore, authSecret };
+  const registryContext: RegistryContext = { store, accounts, accountAvatars, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, productLive, nodeObjectStore, releaseStore, authSecret };
   const server = http.createServer((request, response) => {
     const suppliedBearer = bearer(request);
     const internalRuntime = Boolean(
@@ -438,6 +443,41 @@ async function route(
       status: "published",
       published_at: result.published.published_at
     });
+    return;
+  }
+
+  // Expert publish: GET = live status, POST = publish System + Skills from the
+  // Agent Builder workspace. Only SYSTEM.md is required; Knowledge stays empty.
+  // Legacy /registry (Agent Builder corpus upload) is left unchanged.
+  const productLiveMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/live$/);
+  if (productLiveMatch && (request.method === "GET" || request.method === "POST")) {
+    const account = await authenticate(request, response, context, "creator");
+    if (account === SESSION_QUERY_REJECTED) return;
+    if (!account) { sendJson(response, 401, { detail: "A valid Expert account token is required." }); return; }
+    if (!context.productLive) {
+      sendJson(response, 503, { error: { code: "publish_unavailable", message: "Corpus Publisher is unavailable." } });
+      return;
+    }
+    const productId = decodeURIComponent(productLiveMatch[1]!);
+    const product = await productForCreator(context, account.id, productId);
+    if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
+    const publishable = new ExpertProduct(account.id, productId, product.name, product.promise, product.brief_spec);
+    if (request.method === "GET") {
+      sendJson(response, 200, await context.productLive.status(publishable));
+      return;
+    }
+    try {
+      sendJson(response, 201, await context.productLive.publish(publishable));
+    } catch (error) {
+      if (error instanceof CorpusPublishError) throw error;
+      if (error instanceof SystemMissing) throw new CorpusPublishError(error.code, error.message, 409);
+      throw new CorpusPublishError(
+        "publish_failed",
+        error instanceof Error ? `Registry publish failed: ${error.message}` : `Registry publish failed: ${String(error)}`,
+        422,
+        { cause: error instanceof Error ? error : undefined }
+      );
+    }
     return;
   }
 

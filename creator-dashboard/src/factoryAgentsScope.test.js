@@ -58,18 +58,23 @@ test('Factory overview is a guided path, not an admin tree', async () => {
   assert.match(source, /onClick=\{\(\) => onStep\(step\)\}/);
   assert.match(source, /onClick=\{\(\) => goToStep\(next\.step\)\}/);
   assert.match(source, /onClick=\{\(\) => onOpenAgent\(entry\.role\)\}/);
-  assert.match(source, /step\.id === "ship" \? navigate\(creatorProductPath\(productId, "readiness"\)\)/);
+  assert.match(source, /step\.id === "ship" \? navigate\(creatorProductPath\(productId, "publish"\)\)/);
 });
 
-test('Agent details are edited in the Storefront tab with optimistic concurrency', async () => {
+test('Publish tab edits details and brief and publishes through the publish endpoint', async () => {
   const workspace = await readFile(new URL('./studioAgentWorkspace.jsx', import.meta.url), 'utf8');
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   assert.match(source, /function FactoryOverview/);
   assert.match(workspace, /method: "PATCH"[^\n]*expected_updated_at: product\.updated_at/);
   assert.match(workspace, /\/brief-spec`, \{ method: "PUT"[^\n]*contract_version: "1"[^\n]*expected_updated_at: product\.updated_at/);
   assert.match(workspace, /\/storefront-preview`/);
-  assert.match(workspace, /\/releases\/\$\{encodeURIComponent\(idOf\(target, "release"\)\)\}\/rollback`/);
-  assert.match(workspace, /\/release`, \{ method: "POST"[^\n]*candidate_id/);
+  assert.doesNotMatch(workspace, /\/rollback`/);
+  assert.match(workspace, /useRemote\(request, `\$\{base\}\/live`\)/);
+  assert.match(workspace, /request\(`\$\{base\}\/live`, \{ method: "POST", headers: \{ "Idempotency-Key": mutationKey\(\) \}, body: JSON\.stringify\(\{\}\) \}\)/);
+  assert.match(workspace, /error\.code === "system_missing"/);
+  assert.match(workspace, /disabled=\{!info\.can_publish \|\| \(live && pending\.length === 0\)\}/);
+  assert.match(workspace, /creatorFactoryPath\(productId, "build", "generation"\)/);
+  assert.doesNotMatch(workspace, /\/release`|candidate_id|readinessChecklist|"storefront"|"readiness"/);
   assert.doesNotMatch(source, /<TextField label=\{t\("productName"\)\}/);
 });
 

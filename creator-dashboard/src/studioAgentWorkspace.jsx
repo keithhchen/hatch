@@ -1,23 +1,20 @@
-// One workspace per Agent: header (name, status, public link, primary action)
-// and four tabs — Build (Factory path), Storefront, Versions, Readiness.
+// One workspace per Agent: header (name, status, public link) and two tabs —
+// Build (Factory path) and Publish. Studio shows no version history.
 // Every control calls an existing Creator endpoint; nothing is simulated.
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, CircleAlert, CircleCheck, Copy, ExternalLink, Plus, Trash2 } from "lucide-react";
-import { Button, ConfirmDialog, FormField, Input, Textarea } from "@hatch/ui";
+import { ArrowLeft, Copy, ExternalLink, Plus, Trash2 } from "lucide-react";
+import { Button, FormField, Input, Textarea } from "@hatch/ui";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
 import { creatorFactoryPath, creatorProductPath } from "./creatorRoutes.js";
 import { isProductLive } from "./studioPath.js";
-import { readinessChecklist } from "./studioAgentReadiness.js";
 import {
-  EmptyState, InlineError, LoadingState, PageBoundary, RouteProblem, SectionHead, StatusPill, SuccessNotice, STUDIO_ROOT,
-  absoluteUrl, arrayOf, dateTime, friendlyError, humanStatus, idOf, mutationKey, productName, publicPathOf, safePublicUrl, unwrap, useCopy, useRemote
+  InlineError, LoadingState, PageBoundary, RouteProblem, SectionHead, StatusPill, SuccessNotice, STUDIO_ROOT,
+  absoluteUrl, arrayOf, dateTime, friendlyError, idOf, mutationKey, productName, publicPathOf, safePublicUrl, unwrap, useCopy, useRemote
 } from "./studioShellKit.jsx";
 
 const TABS = [
   { value: "build", label: "sxTabBuild" },
-  { value: "storefront", label: "sxTabStorefront" },
-  { value: "versions", label: "sxTabVersions" },
-  { value: "readiness", label: "sxTabReadiness" }
+  { value: "publish", label: "sxTabPublish" }
 ];
 
 export function StudioAgentWorkspace({ route, request, navigate, locale, t, profile, renderBuild }) {
@@ -29,7 +26,6 @@ export function StudioAgentWorkspace({ route, request, navigate, locale, t, prof
 
   if (resource.state === "error") return <RouteProblem title={t("workspaceLoadError")} body={friendlyError(resource.error, t)} action={t("retry")} onAction={resource.retry} />;
   const live = isProductLive(product);
-  const checklist = readinessChecklist(product?.readiness);
   const ctx = { product, productId, request, navigate, locale, t, profile, reload: resource.retry };
 
   return <div className={`sx-agent${tab === "build" ? " sx-agent--build" : ""}`}>
@@ -40,26 +36,23 @@ export function StudioAgentWorkspace({ route, request, navigate, locale, t, prof
           <h1>{product ? productName(product, t) : "…"}</h1>
           {product ? <StatusPill live={live} t={t} /> : null}
         </div>
-        {product ? <AgentHeaderActions product={product} live={live} checklist={checklist} tab={tab} navigate={navigate} t={t} /> : null}
+        {product ? <AgentHeaderActions product={product} live={live} tab={tab} navigate={navigate} t={t} /> : null}
       </div>
       <nav className="sx-tabs" aria-label={t("sxAgentTabs")}>
         {TABS.map((item) => <a key={item.value} href={creatorProductPath(productId, item.value)} aria-current={tab === item.value ? "page" : undefined} className={tab === item.value ? "is-active" : ""} onClick={(event) => { event.preventDefault(); navigate(creatorProductPath(productId, item.value)); }}>
           {t(item.label)}
-          {item.value === "readiness" && checklist && !live ? <b className={checklist.ready ? "is-ok" : ""}>{checklist.ready ? "✓" : checklist.blocking}</b> : null}
         </a>)}
       </nav>
     </header>
     <div className="sx-agent__body">
       {tab === "build" ? renderBuild(product)
         : !product ? <LoadingState t={t} />
-        : tab === "storefront" ? <StorefrontTab {...ctx} />
-        : tab === "versions" ? <VersionsTab {...ctx} releaseId={route.releaseId} />
-        : <ReadinessTab {...ctx} checklist={checklist} />}
+        : <PublishTab {...ctx} />}
     </div>
   </div>;
 }
 
-function AgentHeaderActions({ product, live, checklist, tab, navigate, t }) {
+function AgentHeaderActions({ product, live, tab, navigate, t }) {
   const productId = idOf(product, "product");
   const publicPath = publicPathOf(product);
   const { copied, copy } = useCopy();
@@ -68,27 +61,66 @@ function AgentHeaderActions({ product, live, checklist, tab, navigate, t }) {
     {publicPath ? <Button variant="secondary" type="button" leading={<Copy aria-hidden="true" />} onClick={() => copy(publicPath).catch(() => setError(t("copyFailed")))}>{copied ? t("copied") : t("copyLink")}</Button> : null}
     {live && safePublicUrl(publicPath)
       ? <Button asChild className="web-btn-yolk" trailing={<ExternalLink aria-hidden="true" />}><a href={safePublicUrl(publicPath)} target="_blank" rel="noreferrer">{t("viewStorefront")}</a></Button>
-      : tab === "readiness" ? null : <Button className={checklist?.ready ? "web-btn-yolk" : undefined} variant={checklist?.ready ? "primary" : "secondary"} type="button" onClick={() => navigate(creatorProductPath(productId, "readiness"))}>{checklist?.ready ? t("publish") : t("sxReviewReadiness")}</Button>}
+      : tab === "publish" ? null : <Button variant="secondary" type="button" onClick={() => navigate(creatorProductPath(productId, "publish"))}>{t("sxTabPublish")}</Button>}
     {error ? <span className="sx-inline-error" role="alert">{error}</span> : null}
   </div>;
 }
 
-/* ---------- Storefront ---------- */
+/* ---------- Publish ---------- */
 
-function StorefrontTab({ product, productId, request, locale, t, profile, reload, navigate }) {
-  const preview = useRemote(request, `/v1/creator/products/${encodeURIComponent(productId)}/storefront-preview`);
-  const live = isProductLive(product);
-  const reloadAll = () => { reload(); preview.retry(); };
-  return <div className="sx-storefront">
-    <div className="sx-storefront__edit">
+function PublishTab({ product, productId, request, navigate, locale, t, profile, reload }) {
+  const base = `/v1/creator/products/${encodeURIComponent(productId)}`;
+  const status = useRemote(request, `${base}/live`);
+  const preview = useRemote(request, `${base}/storefront-preview`);
+  const reloadAll = () => { reload(); status.retry(); preview.retry(); };
+  const publicUrl = (status.state === "ready" || status.state === "refreshing") ? status.data?.public_url ?? null : null;
+  return <div className="sx-publish">
+    <PublishStatus status={status} base={base} productId={productId} request={request} navigate={navigate} locale={locale} t={t} onPublished={reloadAll} />
+    <div className="sx-publish__edit">
       <DetailsForm product={product} productId={productId} request={request} t={t} onSaved={reloadAll} />
       <BriefSpecForm product={product} productId={productId} request={request} t={t} onSaved={reloadAll} />
-      <PublicLinkCard product={product} live={live} navigate={navigate} t={t} />
     </div>
-    <section className="sx-storefront__preview" aria-labelledby="sx-preview-title">
+    <PublicLinkCard url={publicUrl ?? publicPathOf(product)} t={t} />
+    <section className="sx-publish__preview" aria-labelledby="sx-preview-title">
       <PreviewPane resource={preview} profile={profile} t={t} />
     </section>
   </div>;
+}
+
+function PublishStatus({ status, base, productId, request, navigate, locale, t, onPublished }) {
+  const [state, setState] = useState({ busy: false, error: "", result: null });
+  const { copied, copy } = useCopy();
+  if (status.state === "loading" || status.state === "idle") return <LoadingState t={t} />;
+  if (status.state === "error") return <section className="sx-summary is-error" role="alert">
+    <div><h2>{t("sxPublishStatusError")}</h2><p>{friendlyError(status.error, t)}</p></div>
+    <Button variant="secondary" type="button" onClick={status.retry}>{t("retry")}</Button>
+  </section>;
+  const info = status.data ?? {};
+  const live = info.is_live === true;
+  const pending = arrayOf(info.pending_changes);
+  async function publish() {
+    setState({ busy: true, error: "", result: null });
+    try {
+      const result = await request(`${base}/live`, { method: "POST", headers: { "Idempotency-Key": mutationKey() }, body: JSON.stringify({}) });
+      setState({ busy: false, error: "", result });
+      onPublished();
+    } catch (error) {
+      setState({ busy: false, error: error.code === "system_missing" ? t("sxBuildIncomplete") : (error.message || friendlyError(error, t)), result: null });
+    }
+  }
+  const resultUrl = state.result?.public_url ?? null;
+  const goToBuild = () => navigate(creatorFactoryPath(productId, "build", "generation"));
+  return <section className={`sx-summary${live ? " is-live" : ""}`}>
+    <div>
+      <h2>{live ? t("sxStatusLive") : t("sxStatusDraft")}</h2>
+      {live && info.published_at ? <p>{t("sxPublishedAt", dateTime(info.published_at, locale))}</p> : null}
+      {live && pending.length ? <p className="sx-summary__pending">{t("sxPendingChanges")}</p> : null}
+      {!info.can_publish ? <p>{t("sxBuildIncomplete")} <button type="button" className="sx-link" onClick={goToBuild}>{t("sxGoToBuild")}</button></p> : null}
+    </div>
+    <Button className="web-btn-yolk" type="button" loading={state.busy} disabled={!info.can_publish || (live && pending.length === 0)} onClick={publish}>{live ? t("sxUpdateAction") : t("sxPublishAction")}</Button>
+    {state.error ? <div className="sx-summary__note"><InlineError>{state.error}</InlineError></div> : null}
+    {state.result ? <div className="sx-summary__note"><SuccessNotice>{t("sxPublishedNotice")}{resultUrl ? <> · <a className="sx-link" href={safePublicUrl(resultUrl)} target="_blank" rel="noreferrer">{absoluteUrl(resultUrl)}</a> · <button type="button" className="sx-link" onClick={() => void copy(resultUrl)}>{copied ? t("copied") : t("copyLink")}</button></> : null}</SuccessNotice></div> : null}
+  </section>;
 }
 
 function DetailsForm({ product, productId, request, t, onSaved }) {
@@ -110,11 +142,11 @@ function DetailsForm({ product, productId, request, t, onSaved }) {
   }
   return <form className="sx-card sx-form" onSubmit={save}>
     <SectionHead title={t("sxDetailsTitle")} />
-    <p className="sx-quiet">{t("sxDetailsBody")}</p>
     {state.error ? <InlineError>{state.error}</InlineError> : null}
     {state.saved && !dirty ? <SuccessNotice>{t("sxSaved")}</SuccessNotice> : null}
-    <FormField label={t("newNameLabel")} required><Input required maxLength={240} value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} /></FormField>
+    <FormField label={t("sxNameLabel")} required><Input required maxLength={240} value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} /></FormField>
     <FormField label={t("sxPromiseLabel")} hint={t("sxPromiseHint")} required><Textarea required rows={4} value={draft.promise} onChange={(event) => setDraft((current) => ({ ...current, promise: event.target.value }))} /></FormField>
+    <p className="sx-quiet sx-form__note">{t("sxDetailsEffect")}</p>
     <div className="sx-form__foot">
       <Button type="submit" loading={state.busy} disabled={!dirty || !valid}>{t("save")}</Button>
       {dirty ? <button type="button" className="sx-link sx-link--quiet" onClick={() => setDraft(initial)}>{t("sxDiscard")}</button> : null}
@@ -158,6 +190,7 @@ function BriefSpecForm({ product, productId, request, t, onSaved }) {
       <label className="sx-check"><input type="checkbox" checked={field.required} onChange={(event) => update(index, { required: event.target.checked })} /><span>{t("sxBriefRequired")}</span></label>
       <button type="button" className="sx-icon-btn" aria-label={t("sxBriefRemove", index + 1)} disabled={fields.length <= 1} onClick={() => setFields((current) => current.filter((_, position) => position !== index))}><Trash2 aria-hidden="true" /></button>
     </li>)}</ol> : <p className="sx-quiet">{t("sxBriefEmpty")}</p>}
+    <p className="sx-quiet sx-form__note">{t("sxBriefEffect")}</p>
     <div className="sx-form__foot">
       <Button type="submit" loading={state.busy} disabled={!dirty || !valid}>{t("save")}</Button>
       <Button variant="secondary" type="button" leading={<Plus aria-hidden="true" />} disabled={fields.length >= FIELD_LIMIT} onClick={() => setFields((current) => [...current, { id: nextFieldId(current), label: "", required: false }])}>{t("sxBriefAdd")}</Button>
@@ -166,162 +199,30 @@ function BriefSpecForm({ product, productId, request, t, onSaved }) {
   </form>;
 }
 
-function PublicLinkCard({ product, live, navigate, t }) {
-  const publicPath = publicPathOf(product);
+function PublicLinkCard({ url, t }) {
   const { copied, copy } = useCopy();
   const [error, setError] = useState("");
   return <section className="sx-card">
     <SectionHead title={t("shareLink")} />
-    {live && publicPath ? <>
-      <div className="sx-linkbox"><Input readOnly value={absoluteUrl(publicPath)} onFocus={(event) => event.target.select()} aria-label={t("shareLink")} /><Button type="button" leading={<Copy aria-hidden="true" />} onClick={() => copy(publicPath).catch(() => setError(t("copyFailed")))}>{copied ? t("copied") : t("copyLink")}</Button></div>
+    {url ? <>
+      <div className="sx-linkbox"><Input readOnly value={absoluteUrl(url)} onFocus={(event) => event.target.select()} aria-label={t("shareLink")} /><Button type="button" leading={<Copy aria-hidden="true" />} onClick={() => copy(url).catch(() => setError(t("copyFailed")))}>{copied ? t("copied") : t("copyLink")}</Button></div>
       {error ? <InlineError>{error}</InlineError> : null}
-    </> : <p className="sx-quiet">{t("sxLinkAfterPublish")} <button type="button" className="sx-link" onClick={() => navigate(creatorProductPath(idOf(product, "product"), "readiness"))}>{t("sxReviewReadiness")}</button></p>}
+    </> : <p className="sx-quiet">{t("sxLinkAfterPublish")}</p>}
   </section>;
 }
 
 function PreviewPane({ resource, profile, t }) {
-  const [viewport, setViewport] = useState("desktop");
   return <>
     <div className="sx-preview-head">
       <h2 id="sx-preview-title">{t("sxPreviewTitle")}</h2>
-      <div className="cpv2-segmented" role="group" aria-label={t("previewViewport")}>
-        {["desktop", "mobile"].map((value) => <button key={value} type="button" className={viewport === value ? "is-active" : ""} aria-pressed={viewport === value} onClick={() => setViewport(value)}>{t(value)}</button>)}
-      </div>
     </div>
     <PageBoundary resource={resource} title={t("previewLoadError")} t={t}>{(payload) => {
       const preview = payload?.preview && typeof payload.preview === "object" ? payload.preview : payload;
       const product = preview.product ?? preview;
-      const candidate = product.candidate;
-      return <div className={`cpv2-storefront-frame sx-frame is-${viewport}`}>
-        <StorefrontDetails product={product} creatorName={preview.creator?.display_name ?? profile?.display_name} creatorAvatarUrl={preview.creator?.avatar_url ?? profile?.avatar_url} mode="preview" headingLevel={2} desktopRequirement={preview.desktop_requirement ?? product.desktop_requirement} releaseLabel={candidate ? t("candidateVersion", candidate.version ?? "—") : undefined} action={<Button type="button" disabled>{t("getAccess")}</Button>} />
+      return <div className="cpv2-storefront-frame sx-frame">
+        <StorefrontDetails product={product} creatorName={preview.creator?.display_name ?? profile?.display_name} creatorAvatarUrl={preview.creator?.avatar_url ?? profile?.avatar_url} mode="preview" headingLevel={2} desktopRequirement={preview.desktop_requirement ?? product.desktop_requirement} action={<Button type="button" disabled>{t("getAccess")}</Button>} />
       </div>;
     }}</PageBoundary>
     {resource.state === "ready" && !isProductLive(unwrap(resource.data, "product")) ? <p className="sx-quiet sx-preview-note">{t("previewBody")}</p> : null}
   </>;
-}
-
-/* ---------- Versions ---------- */
-
-function VersionsTab({ product, productId, request, navigate, locale, t, reload, releaseId }) {
-  const resource = useRemote(request, `/v1/creator/products/${encodeURIComponent(productId)}/releases`);
-  const [target, setTarget] = useState(null);
-  const [reason, setReason] = useState("");
-  const [state, setState] = useState({ busy: false, error: "", done: false });
-  const candidate = product.candidate;
-  async function rollback() {
-    if (!target || !reason.trim()) return;
-    setState({ busy: true, error: "", done: false });
-    try {
-      await request(`/v1/creator/products/${encodeURIComponent(productId)}/releases/${encodeURIComponent(idOf(target, "release"))}/rollback`, { method: "POST", headers: { "idempotency-key": mutationKey() }, body: JSON.stringify({ expected_version: product.resource_version, reason: reason.trim() }) });
-      setState({ busy: false, error: "", done: true });
-      setTarget(null); setReason("");
-      resource.retry(); reload();
-    } catch (error) { setState({ busy: false, error: friendlyError(error, t), done: false }); setTarget(null); }
-  }
-  return <div className="sx-stack">
-    {state.error ? <InlineError>{state.error}</InlineError> : null}
-    {state.done ? <SuccessNotice>{t("currentReleaseUpdated")}</SuccessNotice> : null}
-    {candidate ? <section className="sx-card">
-      <SectionHead title={t("sxCandidateTitle")} />
-      <div className="sx-version is-candidate">
-        <div><strong>{t("candidateVersion", candidate.version ?? "—")}</strong><small>{humanStatus(candidate.status ?? (candidate.corpus_verified ? "ready" : "pending"), t)}</small></div>
-        <div className="sx-version__actions">
-          {idOf(candidate, "candidate") ? <Button variant="secondary" size="small" type="button" onClick={() => navigate(`${STUDIO_ROOT}/products/${encodeURIComponent(productId)}/candidates/${encodeURIComponent(idOf(candidate, "candidate"))}`)}>{t("sxReviewCandidate")}</Button> : null}
-          <Button size="small" type="button" onClick={() => navigate(creatorProductPath(productId, "readiness"))}>{t("sxReviewReadiness")}</Button>
-        </div>
-      </div>
-    </section> : null}
-    <section className="sx-card">
-      <SectionHead title={t("sxReleasesTitle")} />
-      <p className="sx-quiet">{t("existingAccessPinned")}</p>
-      <PageBoundary resource={resource} title={t("releaseLoadError")} t={t}>{(payload) => {
-        const releases = arrayOf(payload?.releases);
-        const activeId = idOf(payload?.active_release ?? product.release, "release");
-        if (!releases.length) return <EmptyState title={t("sxNoReleasesTitle")} body={t("sxNoReleasesBody")} action={t("sxReviewReadiness")} onAction={() => navigate(creatorProductPath(productId, "readiness"))} />;
-        return <ul className="sx-versions">{releases.map((release, index) => {
-          const id = idOf(release, "release");
-          const current = release.current === true || (activeId && id === activeId);
-          return <li key={id || index} className={`sx-version${current ? " is-current" : ""}${releaseId && id === releaseId ? " is-focused" : ""}`}>
-            <div><strong>{release.label ?? t("sxReleaseN", release.version ?? releases.length - index)}</strong><small>{dateTime(release.published_at ?? release.created_at, locale)}{release.materialization_status ? ` · ${humanStatus(release.materialization_status, t)}` : ""}</small></div>
-            <div className="sx-version__actions">{current ? <span className="sx-pill is-live">{t("current")}</span> : <Button variant="secondary" size="small" type="button" onClick={() => { setTarget(release); setReason(""); }}>{t("sxMakeCurrent")}</Button>}</div>
-          </li>;
-        })}</ul>;
-      }}</PageBoundary>
-    </section>
-    <ConfirmDialog
-      open={Boolean(target)}
-      onOpenChange={(value) => { if (!value) setTarget(null); }}
-      title={t("exactReleaseConfirm")}
-      description={t("rollbackAudit")}
-      confirmLabel={t("confirmRollback")}
-      cancelLabel={t("cancel")}
-      busy={state.busy}
-      confirmDisabled={!reason.trim()}
-      onConfirm={rollback}
-    >
-      <FormField label={t("auditReason")} required><Textarea required rows={3} value={reason} onChange={(event) => setReason(event.target.value)} placeholder={t("whyReleaseCurrent")} /></FormField>
-    </ConfirmDialog>
-  </div>;
-}
-
-/* ---------- Readiness & publish ---------- */
-
-function ReadinessTab({ product, productId, request, navigate, t, reload, checklist }) {
-  const live = isProductLive(product);
-  const candidate = product.candidate;
-  const [confirming, setConfirming] = useState(false);
-  const [state, setState] = useState({ busy: false, error: "", result: null });
-  const { copied, copy } = useCopy();
-  const fixTarget = (fix) => {
-    if (fix === "storefront") return () => navigate(creatorProductPath(productId, "storefront"));
-    if (fix === "evaluate") return () => navigate(creatorFactoryPath(productId, "evaluate", "evaluator"));
-    if (fix === "build") return () => navigate(creatorFactoryPath(productId));
-    return null;
-  };
-  async function publish() {
-    setState({ busy: true, error: "", result: null });
-    try {
-      const result = await request(`/v1/creator/products/${encodeURIComponent(productId)}/release`, { method: "POST", headers: { "idempotency-key": mutationKey() }, body: JSON.stringify({ candidate_id: idOf(candidate, "candidate"), report_digest: candidate?.report_digest ?? candidate?.evaluation_digest, expected_version: product.resource_version ?? product.version }) });
-      setState({ busy: false, error: "", result });
-      setConfirming(false);
-      reload();
-    } catch (error) { setState({ busy: false, error: friendlyError(error, t), result: null }); setConfirming(false); }
-  }
-  const publishedUrl = state.result ? (state.result.canonical_url ?? state.result.public_url) : null;
-
-  return <div className="sx-readiness">
-    <section className={`sx-summary${live ? " is-live" : checklist?.ready ? " is-ready" : ""}`}>
-      {live ? <CircleCheck aria-hidden="true" /> : checklist?.ready ? <CircleCheck aria-hidden="true" /> : <CircleAlert aria-hidden="true" />}
-      <div>
-        <h2>{live ? t("sxSummaryLive") : !checklist ? t("sxSummaryUnknown") : checklist.ready ? t("sxSummaryReady") : t("sxSummaryBlocked", checklist.blocking)}</h2>
-        <p>{live ? t("sxSummaryLiveBody") : checklist?.ready ? t("publicPointerAfterMaterialization") : t("sxSummaryBlockedBody")}</p>
-      </div>
-      {!live ? <Button className="web-btn-yolk" type="button" disabled={!checklist?.ready || !candidate} onClick={() => setConfirming(true)}>{t("publish")}</Button> : null}
-    </section>
-    {state.error ? <InlineError>{state.error}</InlineError> : null}
-    {state.result ? <SuccessNotice>{t("yourProductLive")}{publishedUrl ? <> · <button type="button" className="sx-link" onClick={() => void copy(publishedUrl)}>{copied ? t("copied") : t("copyLink")}</button></> : null}</SuccessNotice> : null}
-    {checklist ? <section className="sx-card">
-      <SectionHead title={t("finalChecks")} />
-      <ul className="sx-checks">{checklist.items.map((item) => {
-        const onFix = item.ready ? null : fixTarget(item.fix);
-        return <li key={item.key} className={item.ready ? "is-ready" : "is-blocked"}>
-          {item.ready ? <CircleCheck aria-hidden="true" /> : <CircleAlert aria-hidden="true" />}
-          <div><strong>{t(`sxCheck_${item.key}`)}</strong><small>{t(item.ready ? `sxCheckOk_${item.key}` : `sxCheckFix_${item.key}`)}</small></div>
-          {onFix ? <button type="button" className="sx-link" onClick={onFix}>{t("sxFix")}</button> : <span className="sx-check-state">{item.ready ? t("statusReady") : t("sxNeedsSupport")}</span>}
-        </li>;
-      })}
-      {checklist.unknownBlockers.map((blocker) => <li key={blocker} className="is-blocked"><CircleAlert aria-hidden="true" /><div><strong>{blocker}</strong></div><span /></li>)}
-      </ul>
-    </section> : <EmptyState title={t("sxSummaryUnknown")} body={t("sxReadinessMissing")} />}
-    <ConfirmDialog
-      open={confirming}
-      onOpenChange={setConfirming}
-      title={t("publishCandidateConfirm")}
-      description={t("publicPointerAfterMaterialization")}
-      confirmLabel={t("confirmPublish")}
-      cancelLabel={t("cancel")}
-      busy={state.busy}
-      onConfirm={publish}
-    />
-  </div>;
 }

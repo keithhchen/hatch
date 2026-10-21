@@ -209,7 +209,6 @@ function CreatorHome({ request, navigate, t, locale, profile }) {
             <Kpi label={t("sxKpiOrders")} value={Number(metrics.orders) || 0} />
             <Kpi label={t("sxKpiDeliveries")} value={Number(metrics.successful_deliveries) || 0} />
             <Kpi label={t("sxKpiGross")} value={money(metrics.gross_minor, currency)} />
-            <Kpi label={t("sxKpiShare")} value={money(metrics.creator_share_minor, currency)} note={t("sxKpiHatchShare", money(metrics.hatch_share_minor, currency))} />
           </dl>
           {next ? <NextAgentCard product={next} request={request} navigate={navigate} t={t} /> : null}
           <div className="sx-overview-grid">
@@ -328,7 +327,7 @@ function AgentRow({ product, request, navigate, onChanged, t, locale }) {
   const nextLabel = published ? t("sxNextLive") : path.next ? t(path.next.step.title) : path.state === "error" ? t("sxNextUnknown") : "…";
   const menu = [
     { value: "open", label: t("agentOpen"), onSelect: open },
-    { value: "storefront", label: t("sxTabStorefront"), onSelect: () => navigate(creatorProductPath(productId, "storefront")) },
+    { value: "publish", label: t("sxTabPublish"), onSelect: () => navigate(creatorProductPath(productId, "publish")) },
     ...(publicHref ? [{ value: "copy", label: t("copyLink"), icon: <Copy aria-hidden="true" />, onSelect: () => void copy(publicPathOf(product) || publicHref).catch(() => setError(t("copyFailed"))) }] : []),
     { type: "separator" },
     published

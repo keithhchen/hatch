@@ -112,7 +112,6 @@ export function friendlyError(error, t) {
   if (error.status === 403) return t("creatorForbidden");
   if (error.status === 404) return t("requestedResourceMissing");
   if (error.code === "product_not_editable") return t("sxErrNotEditable");
-  if (error.code === "publish_not_ready") return t("sxErrNotReady");
   if (error.status === 409) return t("pageChanged");
   if (error.status === 429) return t("tooManyRequests");
   return error.message || t("serviceUnavailable");

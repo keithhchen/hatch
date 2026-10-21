@@ -288,6 +288,7 @@ const ENTRIES = {
   "Loading details": ["正在加载", "読み込み中"],
   "Load more": ["加载更多", "さらに表示"],
   "Expert Agent": ["专家 Agent", "専門家の Agent"],
+  "Untitled Agent": ["未命名 Agent", "名称未設定のAgent"],
   "An Agent built from an expert's method.": ["基于专家方法构建的 Agent。", "専門家の手法をもとに構築された Agent です。"],
   "Hatch Expert": ["Hatch 专家", "Hatch 専門家"],
   "Product detail": ["产品信息", "製品情報"],

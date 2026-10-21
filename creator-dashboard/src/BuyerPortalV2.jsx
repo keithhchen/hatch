@@ -19,6 +19,7 @@ import { buyerT } from "./buyerI18n.js";
 import { createAuthPagePresentation } from "./authPagePresentation.js";
 import { humanizeIdentifier, meaningfulReversalStatus } from "./buyerPresentation.js";
 import { creatorPublicModel } from "./storefrontModel.js";
+import { createPublicProductDirectory, identityIsComplete, recordProductId, resolveProductIdentity } from "./buyerProductIdentity.js";
 import { BuyerAccountControls, BuyerLanguageMenu } from "./BuyerAccountControls.jsx";
 import { AccountAvatarSettings } from "./AccountAvatarSettings.jsx";
 import "./buyerPortalV2.css";
@@ -778,6 +779,7 @@ function SuccessPage({ id, request, navigate, downloadUrl, session }) {
     return { order, entitlement, entitlementError };
   }, endpoint);
   const data = resource.data;
+  const identity = useProductIdentity(request, data?.order);
   const ready = data ? successReady(data.order, data.entitlement) : false;
   const failed = data ? paymentFailed(data.order) : false;
   useUnauthorized(resource.error, session);
@@ -808,7 +810,7 @@ function SuccessPage({ id, request, navigate, downloadUrl, session }) {
 
   return (
     <div className="buyer-v2__container buyer-v2__page buyer-v2__success-page">
-      <Notice headingLevel={1} title={t("{name} added", { name: productName(product, t) })} body={`${t("Order #{reference}", { reference: orderReference(order) })} · ${amount === 0 ? t("Free") : money(amount, order.currency, t)}`}>
+      <Notice headingLevel={1} title={t("{name} added", { name: productTitle(identity, t) })} body={`${t("Order #{reference}", { reference: orderReference(order) })} · ${amount === 0 ? t("Free") : money(amount, order.currency, t)}`}>
         {entitlementError ? <HatchInlineAlert tone="warning" action={<Button size="small" variant="ghost" type="button" onClick={resource.reload}>{t('Retry')}</Button>}>{t('Order completed. Some access details are unavailable.')}</HatchInlineAlert> : null}
         <LinkButton className="web-btn-yolk" to={`/chat/product/${encodeURIComponent(productId(product))}`} navigate={navigate}>{t('Start chat')}</LinkButton>
         <Button asChild variant="secondary"><a href={desktopUrl(entitlement, product)} onClick={() => trackPortalEvent(request, "desktop_open_clicked", productTelemetry(product))}>{t('Open Hatch Desktop')}</a></Button>
@@ -884,6 +886,7 @@ function EntitlementCard({ entitlement, navigate, request }) {
   const status = accessStatus(entitlement);
   const product = entitlement.product || entitlement.product_snapshot || entitlement;
   const creator = entitlement.creator || product.creator || product;
+  const identity = useProductIdentity(request, entitlement);
   const summary = entitlementSummary(entitlement, product, t);
   const orderId = entitlement.order_id || entitlement.order?.order_id || entitlement.order?.id;
   function openDesktop() {
@@ -893,8 +896,8 @@ function EntitlementCard({ entitlement, navigate, request }) {
 
   return (
     <article className="buyer-v2__access-card web-card">
-      <CreatorIdentity value={creator} />
-      <h2>{productName(product, t)}</h2>
+      {identity.creatorName ? <CreatorIdentity value={creator} name={identity.creatorName} /> : null}
+      <h2>{productTitle(identity, t)}</h2>
       {summary ? <p>{summary}</p> : null}
       <div className="buyer-v2__card-footer">
         {status === "active" ? (
@@ -917,7 +920,8 @@ function EntitlementPage({ id, request, navigate, session, downloadUrl }) {
   const t = useBuyerCopy();
   const endpoint = `${BUYER_PORTAL_V2_ENDPOINTS.entitlements}/${encodeURIComponent(id)}`;
   const resource = useRemote(async (signal) => unwrap(await callRequest(request, endpoint, { signal }), ["entitlement"]), endpoint);
-  usePageTitle(resource.data ? productName(resource.data.product || resource.data, t) : t("Access details"));
+  const identity = useProductIdentity(request, resource.data);
+  usePageTitle(resource.data ? productTitle(identity, t) : t("Access details"));
   useUnauthorized(resource.error, session);
   if (resource.status === "loading") return <div className="buyer-v2__container buyer-v2__page"><DetailSkeleton /></div>;
   if (resource.status === "error") return <div className="buyer-v2__container buyer-v2__page"><RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} session={session} area="library" returnTo={`${LIBRARY_ROOT}/${id}`} /></div>;
@@ -933,7 +937,7 @@ function EntitlementPage({ id, request, navigate, session, downloadUrl }) {
   return (
     <div className="buyer-v2__container buyer-v2__page">
       <RouterLink className="buyer-v2__back-link" to={LIBRARY_ROOT} navigate={navigate}>{t('← Back to Library')}</RouterLink>
-      <header className="buyer-v2__detail-heading"><div><span className="web-pill">{t('Access details')}</span><h1>{productName(product, t)}</h1><CreatorIdentity value={creator} /></div><StatusChip status={status} label={t(entitlementStatusLabel(status))} /></header>
+      <header className="buyer-v2__detail-heading"><div><span className="web-pill">{t('Access details')}</span><h1>{productTitle(identity, t)}</h1>{identity.creatorName ? <CreatorIdentity value={creator} name={identity.creatorName} /> : null}</div><StatusChip status={status} label={t(entitlementStatusLabel(status))} /></header>
       <div className="buyer-v2__detail-grid">
         <section className="buyer-v2__detail-card web-card"><h2>{t('Entitlement')}</h2><DefinitionList rows={[
           [t("Status"), t(entitlementStatusLabel(status))],
@@ -978,19 +982,19 @@ function OrdersPage({ search, request, navigate, session }) {
       {resource.status === "error" ? null : <label className="buyer-v2__select-label">{t('Order status')}<Select label={t('Order status')} value={filter} onValueChange={(value) => navigateTo(navigate, value === "all" ? ORDERS_ROOT : `${ORDERS_ROOT}?status=${encodeURIComponent(value)}`)} options={[{ value: "all", label: t("All orders") }, { value: "fulfilled", label: t("Fulfilled") }, { value: "pending", label: t("Pending") }, { value: "refunded", label: t("Refunded") }]} /></label>}
       {resource.status === "loading" ? <ListSkeleton label={t('Loading orders')} /> : null}
       {resource.status === "error" ? <RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} session={session} area="orders" returnTo={ORDERS_ROOT} /> : null}
-      {resource.status === "ready" && resource.items.length ? <section className="buyer-v2__order-list" aria-label={t('Orders')}>{resource.items.map((order) => <OrderRow key={orderIdFor(order)} order={order} navigate={navigate} />)}</section> : null}
+      {resource.status === "ready" && resource.items.length ? <section className="buyer-v2__order-list" aria-label={t('Orders')}>{resource.items.map((order) => <OrderRow key={orderIdFor(order)} order={order} navigate={navigate} request={request} />)}</section> : null}
       {resource.status === "ready" && !resource.items.length ? <EmptyState title={filter === "all" ? t('No orders') : t('No orders match this filter')} body={t('Orders appear here after you add an Agent.')} action={<LinkButton className="web-btn-yolk" to={EXPLORE_ROOT} navigate={navigate}>{t('Browse Agents')}</LinkButton>} /> : null}
       {resource.nextCursor ? <LoadMore resource={resource} /> : null}
     </div>
   );
 }
 
-function OrderRow({ order, navigate }) {
+function OrderRow({ order, navigate, request }) {
   const t = useBuyerCopy();
-  const product = order.product_snapshot || order.product || order;
+  const identity = useProductIdentity(request, order);
   return (
     <RouterLink className="buyer-v2__order-row web-card" to={`/orders/${encodeURIComponent(orderReference(order))}`} navigate={navigate}>
-      <div><span>{dateTime(order.created_at || order.occurred_at, t, true)}</span><h2>{productName(product, t)}</h2><small>{t("Order #{reference}", { reference: orderReference(order) })}</small></div>
+      <div><span>{dateTime(order.created_at || order.occurred_at, t, true)}</span><h2>{productTitle(identity, t)}</h2><small>{t("Order #{reference}", { reference: orderReference(order) })}</small></div>
       <div className="buyer-v2__order-row-status"><strong>{orderAmount(order) === 0 ? t("Free") : money(orderAmount(order), order.currency, t)}</strong><StatusChip status={orderStatus(order)} label={t(orderStatusLabel(order))} /></div>
       <ArrowRight className="buyer-v2__order-go" aria-hidden="true" />
     </RouterLink>
@@ -1003,7 +1007,8 @@ function OrderPage({ id, request, navigate, session }) {
   const resource = useRemote(async (signal) => unwrap(await callRequest(request, endpoint, { signal }), ["order"]), endpoint);
   const [refundState, setRefundState] = useState({ status: "idle", error: null });
   const refundIntentKey = useRef(requestId());
-  usePageTitle(resource.data ? productName(resource.data.product_snapshot || resource.data.product || resource.data, t) : t("Order details"));
+  const identity = useProductIdentity(request, resource.data);
+  usePageTitle(resource.data ? productTitle(identity, t) : t("Order details"));
   useUnauthorized(resource.error, session);
 
   async function requestRefund() {
@@ -1036,7 +1041,7 @@ function OrderPage({ id, request, navigate, session }) {
   const isPaid = totalMinor > 0;
   const canChat = accessStatus(order.entitlement || { status: order.entitlement_status }) === "active";
   const receiptRows = [
-    [t("Expert"), creatorName(order.creator || product, t)],
+    [t("Expert"), identity.creatorName],
     [t("Order number"), orderReference(order)],
     [t("Total"), isPaid ? money(totalMinor, order.currency, t) : t("Free")],
     ...(isPaid && discountMinor > 0 ? [[t("Discount"), `−${money(discountMinor, order.currency, t)}`]] : []),
@@ -1047,7 +1052,7 @@ function OrderPage({ id, request, navigate, session }) {
   return (
     <div className="buyer-v2__container buyer-v2__page">
       <RouterLink className="buyer-v2__back-link" to={ORDERS_ROOT} navigate={navigate}>{t('← Back to Orders')}</RouterLink>
-      <header className="buyer-v2__detail-heading"><div><h1>{productName(product, t)}</h1><p>{t("Created {date}", { date: dateTime(order.created_at || order.occurred_at, t) })}</p></div><StatusChip status={orderStatus(order)} label={t(orderStatusLabel(order))} /></header>
+      <header className="buyer-v2__detail-heading"><div><h1>{productTitle(identity, t)}</h1><p>{t("Created {date}", { date: dateTime(order.created_at || order.occurred_at, t) })}</p></div><StatusChip status={orderStatus(order)} label={t(orderStatusLabel(order))} /></header>
       <section className="buyer-v2__detail-card buyer-v2__order-receipt web-card">
         <DefinitionList rows={receiptRows} />
         {(canChat || canReverseOrder) ? (
@@ -1088,9 +1093,9 @@ function DefinitionList({ rows }) {
   return <dl className="buyer-v2__definition-list">{rows.filter(([, value]) => value !== undefined && value !== null && value !== "").map(([term, value]) => <div key={term}><dt>{term}</dt><dd>{value}</dd></div>)}</dl>;
 }
 
-function CreatorIdentity({ value, className = "" }) {
+function CreatorIdentity({ value, name: knownName, className = "" }) {
   const t = useBuyerCopy();
-  const name = creatorName(value, t);
+  const name = knownName || creatorName(value, t);
   return <span className={`buyer-v2__creator-identity ${className}`.trim()}><AccountAvatar className="buyer-v2__creator-avatar" size="medium" src={creatorAvatarUrl(value)} name={name} /><span>{name}</span></span>;
 }
 
@@ -1230,6 +1235,29 @@ function useCursorCollection(loader, key) {
     }
   }
   return { ...current, reload: () => setAttempt((value) => value + 1), loadMore };
+}
+
+const publicProductDirectories = new WeakMap();
+function publicProductIndex(request) {
+  if (!publicProductDirectories.has(request)) {
+    publicProductDirectories.set(request, createPublicProductDirectory(() => callRequest(request, BUYER_PORTAL_V2_ENDPOINTS.catalog)));
+  }
+  return publicProductDirectories.get(request)();
+}
+
+// Entitlement/order records without a product snapshot are named from the public
+// product record; see buyerProductIdentity.js.
+function useProductIdentity(request, record) {
+  const own = resolveProductIdentity(record);
+  const id = recordProductId(record);
+  const needed = Boolean(record && id && typeof request === "function" && !identityIsComplete(own));
+  const lookup = useRemote(() => publicProductIndex(request), `public-product:${id}`, needed);
+  if (!needed) return { ...own, pending: false };
+  return { ...resolveProductIdentity(record, lookup.data?.get(id) || null), pending: lookup.status === "loading" };
+}
+
+function productTitle(identity, t) {
+  return identity.name || (identity.pending ? t("Loading Agent") : t("Untitled Agent"));
 }
 
 function usePageTitle(subject) {

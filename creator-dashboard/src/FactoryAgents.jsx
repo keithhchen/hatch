@@ -61,7 +61,7 @@ export function FactoryAgents({ productId, section, agent, navigate, locale = "e
   const stage = section ?? null;
   const selected = agent ?? (stage ? FIRST_PAGE[stage] : null);
   const goToFactory = (nextStage, nextAgent) => navigate(creatorFactoryPath(productId, nextStage, nextAgent));
-  const goToStep = step => step.id === "ship" ? navigate(creatorProductPath(productId, "readiness")) : goToFactory(...step.items[0]);
+  const goToStep = step => step.id === "ship" ? navigate(creatorProductPath(productId, "publish")) : goToFactory(...step.items[0]);
   const applyNavigation = value => { setSessions(value.sessions || []); setAgents(value.agents || []); setManualFiles(value.manualFiles || []); };
   const refreshConfig = () => api(`${root}/config`).then(value => { setConfig(value); if (value.agents) setAgents(value.agents); }).catch(e => setError(e.message));
   const refreshProduct = () => api(`/v1/creator/products/${encodeURIComponent(productId)}`).then(value => setProduct(value.product ?? value)).catch(e => setError(e.message));

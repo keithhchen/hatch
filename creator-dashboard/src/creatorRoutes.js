@@ -1,8 +1,10 @@
 const ROOT = "/studio";
 // Agent workspace tabs. Build keeps the Factory namespace (/studio/factory/:id/...);
 // the others live under /studio/products/:id/<tab>.
-export const AGENT_TABS = Object.freeze(["build", "storefront", "versions", "readiness"]);
-const PRODUCT_TABS = new Set(["storefront", "versions", "readiness"]);
+export const AGENT_TABS = Object.freeze(["build", "publish"]);
+const PRODUCT_TABS = new Set(["publish"]);
+// Retired Product tabs whose content now lives in Publish.
+const PUBLISH_ALIASES = new Set(["storefront", "readiness", "preview", "versions"]);
 // Older Product URLs open the Build tab of the same Agent.
 const RETIRED_PRODUCT_TABS = new Set(["overview", "files", "about-you", "corpus", "brief", "complete", "test", "examples", "data-controls"]);
 export const FACTORY_SECTION_AGENTS = Object.freeze({
@@ -64,8 +66,8 @@ export function parseCreatorRoute(pathname) {
     if (segments.length === 2) return redirect(creatorFactoryPath(productId), "products");
     if (segments.length === 3 && PRODUCT_TABS.has(third)) return page("agent", "products", { productId, tab: third });
     if (segments.length === 3 && RETIRED_PRODUCT_TABS.has(third)) return redirect(creatorFactoryPath(productId), "products");
-    if (segments.length === 3 && third === "preview") return redirect(creatorProductPath(productId, "storefront"), "products");
-    if (segments.length === 4 && third === "releases") return page("agent", "products", { productId, tab: "versions", releaseId: fourth });
+    // Studio has no version history; Storefront, readiness, preview and version links open Publish.
+    if ((segments.length === 3 && PUBLISH_ALIASES.has(third)) || (segments.length === 4 && third === "releases")) return redirect(creatorProductPath(productId, "publish"), "products");
     if (segments.length === 4 && third === "candidates") return page("candidate", "products", { productId, candidateId: fourth });
     return page("not-found", "products");
   }
