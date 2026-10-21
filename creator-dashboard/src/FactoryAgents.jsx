@@ -92,17 +92,16 @@ export function FactoryAgents({ productId, section, agent, navigate, locale = "e
 
 function FactoryStepper({ states, current, onStep, t }) {
   const next = studioNextStep(states);
-  return <ol className="factory-stepper" aria-label={t("factoryStepsLabel")}>{states.map(({ step, state }, index) => <li key={step.id}><button type="button" className={`is-${state}${current === step.id ? " is-current" : ""}${next?.step.id === step.id ? " is-next" : ""}`} aria-current={current === step.id ? "step" : undefined} onClick={() => onStep(step)}><span className="factory-stepper__n">{state === "done" ? "✓" : index + 1}</span><span className="factory-stepper__text"><span>{t(step.title)}</span><small>{t(next?.step.id === step.id && state === "todo" ? "stepNow" : STEP_STATE_KEY[state])}</small></span></button></li>)}</ol>;
+  return <ol className="factory-stepper" aria-label={t("factoryStepsLabel")}>{states.map(({ step, state }) => <li key={step.id}><button type="button" className={`is-${state}${current === step.id ? " is-current" : ""}${next?.step.id === step.id ? " is-next" : ""}`} aria-current={current === step.id ? "step" : undefined} onClick={() => onStep(step)}><span className="factory-stepper__n" aria-hidden="true">{state === "done" ? "✓" : ""}</span><span className="factory-stepper__text"><span>{t(step.title)}</span><small>{t(next?.step.id === step.id && state === "todo" ? "stepNow" : STEP_STATE_KEY[state])}</small></span></button></li>)}</ol>;
 }
 
 function FactoryOverview({ product, states, agentEntry, agentName, goToStep, t }) {
   const next = studioNextStep(states);
-  const nextIndex = next ? STUDIO_PATH.indexOf(next.step) : -1;
   if (!product) return <div className="factory-overview"><Skeleton variant="rounded" height={240} sx={{ borderRadius: "20px" }} /></div>;
   return <div className="factory-overview">
     {next ? <article className="factory-next web-card">
       <div className="factory-next__body">
-        <span className="factory-next__label">{t("factoryNextUp")} · {t("stepNumber", nextIndex + 1)}</span>
+        <span className="factory-next__label">{t("factoryNextUp")}</span>
         <h2>{t(next.step.title)}</h2>
         <p>{t(next.step.body)}</p>
         {next.step.items.length ? <ul className="factory-next__tasks">{next.step.items.map(([, page]) => <li key={page}><span>{page === "uploads" ? t("uploadSources") : agentName(page)}</span><small>{page === "uploads" ? "" : t(agentStateKey(agentEntry(page)))}</small></li>)}</ul> : null}

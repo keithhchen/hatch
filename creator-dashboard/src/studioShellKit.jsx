@@ -31,10 +31,13 @@ export function useAgentPath(request, product) {
   return { state: "ready", states, next: studioNextStep(states) };
 }
 
-/** Compact Build progress: each step by name, in the Factory stepper's state colors. */
-export function StepProgress({ states, label, t }) {
+/** Compact Build progress: one segment per step in the Factory stepper's state colors, plus the next step's name. */
+export function StepProgress({ states, label }) {
   const next = studioNextStep(states);
-  return <ol className="sx-steps" aria-label={label}>{states.map(({ step, state }) => <li key={step.id} className={`is-${state}${next?.step.id === step.id ? " is-next" : ""}`} ><span>{state === "done" ? "✓ " : ""}{t(step.title)}</span></li>)}</ol>;
+  return <span className="sx-steps" aria-label={label}>
+    <span className="sx-steps__bar" aria-hidden="true">{states.map(({ step, state }) => <i key={step.id} className={`is-${state}${next?.step.id === step.id ? " is-next" : ""}`} />)}</span>
+    <small>{label}</small>
+  </span>;
 }
 
 export function PageBoundary({ resource, title, t, children }) {

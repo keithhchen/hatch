@@ -342,7 +342,7 @@ function AgentRow({ product, request, navigate, onChanged, t, locale }) {
       {error ? <InlineError>{error}</InlineError> : null}
     </span>
     <span role="cell"><StatusPill live={published} t={t} /></span>
-    <span role="cell" className="sx-table__next">{path.states ? <StepProgress states={path.states} label={nextLabel} t={t} /> : <small>{nextLabel}</small>}</span>
+    <span role="cell" className="sx-table__next">{path.states ? <StepProgress states={path.states} label={nextLabel} /> : <small>{nextLabel}</small>}</span>
     <span role="cell" className="sx-table__date">{dateOnly(product.updated_at ?? product.created_at, locale)}</span>
     <span role="cell" className="sx-table__actions">
       {publicHref ? <a className="sx-link" href={publicHref} target="_blank" rel="noreferrer">{copied ? t("copied") : t("viewProduct")}</a> : null}
