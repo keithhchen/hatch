@@ -15,10 +15,11 @@ on:
 permissions:
   contents: read
 
-# Shares the production lock with deploy.yml so the Web and backend
-# releases never mutate the production host at the same time.
+# Its own queue: a shared group with deploy.yml let a pending backend release
+# cancel a pending Web release. Both deploy jobs run on the single
+# hatch-prod self-hosted runner, which already serializes host mutations.
 concurrency:
-  group: hatch-production
+  group: hatch-web-production
   cancel-in-progress: false
 
 jobs:
