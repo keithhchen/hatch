@@ -151,12 +151,12 @@
 .sx-table__next, .sx-table__date { color: var(--web-body); font-size: 14px; }
 .sx-table__next { display: flex; min-width: 0; flex-direction: column; align-items: flex-start; gap: 6px; }
 .sx-table__next small { color: var(--web-muted); font-size: 12px; }
-/* Same dots as the Factory stepper (factoryAgents.css .factory-stepper__n), compact. */
-.sx-steps { display: flex; align-items: center; margin: 0; padding: 0; list-style: none; }
+/* Same state colors as the Factory stepper (factoryAgents.css .factory-stepper__n). */
+.sx-steps { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 0; margin: 0; padding: 0; list-style: none; }
 .sx-steps li { display: flex; align-items: center; }
-.sx-steps li + li::before { width: 8px; height: 2px; margin: 0 3px; border-radius: 2px; background: var(--web-rule); content: ""; }
-.sx-steps span { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 50%; background: var(--web-panel); color: var(--web-muted); font-family: var(--web-serif); font-size: 13px; font-style: italic; line-height: 1; }
-.sx-steps .is-done span { background: var(--web-pass-soft); color: var(--web-pass); font-family: var(--web-sans); font-size: 11px; font-style: normal; font-weight: 700; }
+.sx-steps li + li::before { width: 6px; height: 2px; margin: 0 2px; border-radius: 2px; background: var(--web-rule); content: ""; }
+.sx-steps span { padding: 3px 8px; border-radius: 999px; background: var(--web-panel); color: var(--web-muted); font-size: 12px; font-weight: 600; line-height: 1.3; white-space: nowrap; }
+.sx-steps .is-done span { background: var(--web-pass-soft); color: var(--web-pass); }
 .sx-steps .is-running span { background: var(--web-yolk-soft); color: var(--web-gold); }
 .sx-steps .is-next span { background: var(--web-yolk); color: var(--web-on-yolk); }
 .sx-table__actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }

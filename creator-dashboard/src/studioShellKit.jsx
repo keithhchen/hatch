@@ -31,10 +31,10 @@ export function useAgentPath(request, product) {
   return { state: "ready", states, next: studioNextStep(states) };
 }
 
-/** Compact Build progress: the Factory stepper's numbered dots, one per step. */
+/** Compact Build progress: each step by name, in the Factory stepper's state colors. */
 export function StepProgress({ states, label, t }) {
   const next = studioNextStep(states);
-  return <ol className="sx-steps" aria-label={label}>{states.map(({ step, state }, index) => <li key={step.id} className={`is-${state}${next?.step.id === step.id ? " is-next" : ""}`} title={t(step.title)}><span>{state === "done" ? "✓" : index + 1}</span></li>)}</ol>;
+  return <ol className="sx-steps" aria-label={label}>{states.map(({ step, state }) => <li key={step.id} className={`is-${state}${next?.step.id === step.id ? " is-next" : ""}`} ><span>{state === "done" ? "✓ " : ""}{t(step.title)}</span></li>)}</ol>;
 }
 
 export function PageBoundary({ resource, title, t, children }) {
