@@ -183,11 +183,13 @@ export function StudioOrdersPage({ request, navigate, locale, profile }) {
     </select>
   </label>;
 
+  // Filters and export only make sense once there is at least one order.
+  const noOrdersYet = !orders.length && !filterCount;
   return <div className="sops-page">
     <PageHead
       title={copy.ordersTitle}
       body={copy.ordersBody}
-      actions={<>
+      actions={noOrdersYet ? null : <>
         <Button className="sops-only-mobile" variant="secondary" size="compact" leading={<SlidersHorizontal aria-hidden="true" />} aria-expanded={showFilters} onClick={() => setShowFilters((value) => !value)}>
           {copy.filters}{filterCount ? ` · ${filterCount}` : ""}
         </Button>
@@ -197,7 +199,7 @@ export function StudioOrdersPage({ request, navigate, locale, profile }) {
       </>}
     />
 
-    <section className={`sops-filters ${showFilters ? "is-open" : ""}`} aria-label={copy.filters}>
+    {noOrdersYet ? null : <section className={`sops-filters ${showFilters ? "is-open" : ""}`} aria-label={copy.filters}>
       {select("product", copy.filterAgent, products.map((product) => product.product_id), (id) => productNames[id] ?? id)}
       {select("order", copy.filterOrder, ORDER_FILTER_OPTIONS.order)}
       {select("payment", copy.filterPayment, ORDER_FILTER_OPTIONS.payment)}
@@ -206,7 +208,7 @@ export function StudioOrdersPage({ request, navigate, locale, profile }) {
       <label className="sops-filter"><span>{copy.filterFrom}</span><input type="date" value={filters.from} max={filters.to || undefined} onChange={setFilter("from")} /></label>
       <label className="sops-filter"><span>{copy.filterTo}</span><input type="date" value={filters.to} min={filters.from || undefined} onChange={setFilter("to")} /></label>
       {filterCount ? <button type="button" className="sops-link sops-filters__clear" onClick={() => setFilters(EMPTY_FILTERS)}>{copy.clearFilters}</button> : null}
-    </section>
+    </section>}
 
     {status === "loading" ? <Loading copy={copy} /> : null}
     {status === "error" ? <ErrorCard error={error} copy={copy} onRetry={reload} /> : null}
@@ -488,7 +490,8 @@ export function StudioEarningsPage({ request, locale, profile }) {
 
     {overview.status === "loading" ? <Loading copy={copy} /> : null}
     {overview.status === "error" ? <ErrorCard error={overview.error} copy={copy} onRetry={loadOverview} /> : null}
-    {metrics ? <>
+    {metrics && !Number(metrics.orders) ? <EmptyCard icon={Wallet} title={copy.earningsEmptyTitle} body={copy.earningsEmptyBody} /> : null}
+    {metrics && Number(metrics.orders) ? <>
       <section className="sops-kpis" aria-label={copy.earningsTitle}>
         {kpis.map((kpi) => <div key={kpi.key} className={`sops-card sops-kpi ${kpi.accent ? "is-accent" : ""}`}>
           <span>{kpi.label}</span><strong>{kpi.value}</strong>
@@ -497,7 +500,7 @@ export function StudioEarningsPage({ request, locale, profile }) {
       <p className="sops-faint sops-note">{copy.kpiNote}</p>
     </> : null}
 
-    <section className="sops-card sops-section sops-payout">
+    {payouts.status === "ready" && setup === "unavailable" ? null : <section className="sops-card sops-section sops-payout">
       <h2>{copy.payoutTitle}</h2>
       {payouts.status === "loading" ? <Loading copy={copy} /> : null}
       {payouts.status === "error" ? <ErrorCard error={payouts.error} copy={copy} onRetry={loadPayouts} /> : null}
@@ -514,7 +517,7 @@ export function StudioEarningsPage({ request, locale, profile }) {
           {connecting ? copy.payoutConnecting : setup === "required" ? copy.payoutConnect : copy.payoutUpdateAccount}
         </Button> : null}
       </div> : null}
-    </section>
+    </section>}
 
     {balances ? <section className="sops-card sops-section">
       <h2>{copy.balancesTitle}</h2>
