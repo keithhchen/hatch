@@ -125,13 +125,13 @@
 .cpv2-path-cards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; margin: 0; padding: 0; list-style: none; }
 .cpv2-path-cards li { display: flex; flex-direction: column; }
 .cpv2-path-cards li > div { padding: 20px 18px 22px; }
-.cpv2-path-cards h3 { margin: 4px 0 0; font-size: 17px; }
+.cpv2-path-cards h3 { margin: 0; font-size: 17px; }
 .cpv2-path-cards p { margin: 8px 0 0; color: var(--web-body); font-size: 14px; line-height: 1.55; }
 .cpv2-step-n { font-family: var(--web-serif); font-size: 28px; font-style: italic; line-height: 1; color: var(--web-gold); }
 .cpv2-path-cards--compact { grid-template-columns: 1fr; gap: 8px; }
 .cpv2-path-cards--compact li > div { padding: 12px 16px; }
 .cpv2-path-cards--compact .cpv2-step-n { font-size: 22px; }
-.cpv2-path-cards--compact h3 { display: inline; margin-left: 8px; font-size: 15px; }
+.cpv2-path-cards--compact h3 { font-size: 15px; }
 .cpv2-path-cards--compact p { margin-top: 4px; font-size: 13px; }
 
 /* ---------- Agents table ---------- */
