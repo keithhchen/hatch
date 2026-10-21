@@ -334,8 +334,12 @@ test('Collect sources lists the real manual-upload files from the research sessi
 test('Factory chat keeps streamed blocks stable through terminal persistence', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   assert.match(source, /const \[activityVisible, setActivityVisible\] = useState\(true\)/);
-  assert.match(source, /if \(value\.type === "message"\) load\(true\)/);
-  assert.match(source, /if \(clearStream\) \{ setStream\(""\); setActivityVisible\(false\); \}/);
+  // A finished reply settles at message_end (in stream order) and stays until the saved history contains it.
+  assert.match(source, /if \(value\.type === "message_end"\) \{ setStream\(previous => \{ if \(previous\) setSettled\(list => \[\.\.\.list, previous\]\); return ""; \}\);/);
+  assert.match(source, /setSettled\(previous => previous\.filter\(text => !saved\.has\(replyKey\(text\)\)\)\)/);
+  // Only the newest history request may update the chat; a reconnect starts from saved history.
+  assert.match(source, /if \(!live \|\| mine !== seq\) return;/);
+  assert.match(source, /onOpen: \(\) => \{ if \(live\) \{ setActivity\(""\); setStream\(""\); setSettled\(\[\]\); load\(\); \} \}/);
   assert.match(source, /\{running && activityVisible && <Stack/);
   assert.match(source, /if \(value\.type === "delta"\) \{ setActivityVisible\(false\);/);
   assert.doesNotMatch(source, /if \(value\.type === "message" \|\| value\.type === "state"\) \{ setStream\(""\); load\(\); \}/);
