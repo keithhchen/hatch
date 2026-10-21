@@ -23,7 +23,7 @@ const zh = {
   pickLabel: "你是做什么的？",
   roles: ["销售", "顾问", "教练", "老师"],
   tryCta: "免费试试",
-  apply: { title: "把你的主页给我们。", body: "留下你发内容的地方，我们会照着你的内容，先替你做一个 AI。", url: "你的主页链接", urlHint: "小红书、公众号、个人网站都行", contact: "怎么联系你", contactHint: "微信号或邮箱", submit: "提交", sending: "提交中…", error: "没有提交成功，请稍后再试。", doneTitle: "收到了。", doneBody: "24 小时内，我们会联系你。", close: "好的" },
+  apply: { title: "把你的主页给我们。", body: "留下你发内容的地方，我们会照着你的内容，先替你做一个 AI。", url: "你的主页链接", urlHint: "小红书、公众号、个人网站都行", contact: "怎么联系你", contactHint: "微信号或邮箱", submit: "提交", sending: "提交中…", error: "没有提交成功，请稍后再试。", doneTitle: "收到了。", doneBody: "Hatch 会照着你公开发的内容，先给你做一个 AI 预览版。做好了，发到你留的微信或邮箱。", close: "好的" },
   storyTitle: (field: string) => `一位${field}客户，从私信到成交。`,
   storySteps: [
     { title: "客户从你的主页点进来", body: "放一个链接就行，不用换平台。", soon: false },
@@ -170,7 +170,7 @@ const en: LandingCopy = {
   pickLabel: "What do you do?",
   roles: ["Sales", "Consulting", "Coaching", "Teaching"],
   tryCta: "Try it free",
-  apply: { title: "Show us where you publish.", body: "Tell us where you publish. We\'ll build a first version of your AI from it.", url: "Your profile link", urlHint: "Instagram, newsletter, personal site…", contact: "How can we reach you?", contactHint: "Email or WhatsApp", submit: "Submit", sending: "Submitting…", error: "That didn't go through. Please try again.", doneTitle: "Got it.", doneBody: "We\'ll be in touch within 24 hours.", close: "OK" },
+  apply: { title: "Show us where you publish.", body: "Tell us where you publish. We\'ll build a first version of your AI from it.", url: "Your profile link", urlHint: "Instagram, newsletter, personal site…", contact: "How can we reach you?", contactHint: "Email or WhatsApp", submit: "Submit", sending: "Submitting…", error: "That didn't go through. Please try again.", doneTitle: "Got it. We're on it.", doneBody: "Hatch is building a preview of your AI from what you've published. We'll send it to the contact you left.", close: "OK" },
   storyTitle: (field: string) => `One ${field.toLowerCase()} client, from DM to sale.`,
   storySteps: [
     { title: "A client taps the link in your bio", body: "One link. No new platform.", soon: false },
@@ -315,7 +315,7 @@ const ja: LandingCopy = {
   pickLabel: "あなたのお仕事は？",
   roles: ["営業", "コンサル", "コーチ", "先生"],
   tryCta: "無料で試す",
-  apply: { title: "発信している場所を教えてください。", body: "あなたの発信をもとに、まずAIの最初の版をつくります。", url: "プロフィールのリンク", urlHint: "X、note、Instagram、個人サイトなど", contact: "ご連絡先", contactHint: "LINE ID またはメール", submit: "送信する", sending: "送信中…", error: "送信できませんでした。もう一度お試しください。", doneTitle: "受け付けました。", doneBody: "24時間以内にご連絡します。", close: "OK" },
+  apply: { title: "発信している場所を教えてください。", body: "あなたの発信をもとに、まずAIの最初の版をつくります。", url: "プロフィールのリンク", urlHint: "X、note、Instagram、個人サイトなど", contact: "ご連絡先", contactHint: "LINE ID またはメール", submit: "送信する", sending: "送信中…", error: "送信できませんでした。もう一度お試しください。", doneTitle: "ありがとうございます。", doneBody: "これまでの発信を拝見して、あなたのAIの試作版をおつくりします。できあがり次第、お送りしますね。", close: "OK" },
   storyTitle: (field: string) => `${field}のお客様、DMから成約まで。`,
   storySteps: [
     { title: "プロフィールのリンクから来る", body: "リンク一つ。新しいサービスは不要。", soon: false },
