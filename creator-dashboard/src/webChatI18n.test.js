@@ -11,13 +11,19 @@ test("Web Chat provides complete English, Chinese, and Japanese copy", () => {
 test("Web Chat translates interpolated copy and known client errors", () => {
   assert.equal(webChatT("en", "agentGenerating", { agent: "Tutor" }), "Tutor is generating a reply");
   assert.equal(webChatT("ja", "removeImage", { name: "plan.png" }), "plan.pngを削除");
-  assert.equal(webChatT("en", "subscribeToExpertProduct", { name: "Maya" }), "Subscribe to Maya's product");
-  assert.equal(webChatT("zh", "subscribeToExpertProduct", { name: "Maya" }), "订阅 Maya 的产品");
-  assert.equal(webChatT("ja", "subscribeToExpertProduct", { name: "Maya" }), "Mayaの製品を購読する");
+  assert.equal(webChatT("en", "subscribeToExpertProduct", { name: "Maya" }), "View product");
+  assert.equal(webChatT("zh", "subscribeToExpertProduct", { name: "Maya" }), "查看产品");
+  assert.equal(webChatT("ja", "subscribeToExpertProduct", { name: "Maya" }), "製品を見る");
   assert.equal(webChatErrorText({ code: "web_local_tool_unavailable" }, "en"), "This browser cannot run local tools.");
   assert.equal(webChatErrorText({ code: "imageCountLimit" }, "zh"), "每条消息最多添加 8 张图片。");
   assert.equal(webChatT("ja", "expertAi", { name: "Maya" }), "MayaのAI");
-  assert.equal(webChatErrorText({ code: "agent_unavailable", message: "The published Agent could not be found." }, "en"), "This expert's AI isn't available right now. It may not be published yet, or it's paused.");
+  assert.equal(webChatErrorText({ code: "agent_unavailable", message: "The published Agent could not be found." }, "en"), "This AI is currently unavailable. It may not be published yet, or it may be paused.");
+});
+
+test("Web Chat UI copy stays neutral: no exclamations, questions, or chatty phrasing", () => {
+  for (const [locale, copy] of Object.entries(webChatCopy)) {
+    for (const [key, text] of Object.entries(copy)) assert.doesNotMatch(text, /[!！?？]|聊|話して|chat with/i, `${locale}.${key}`);
+  }
 });
 
 test("Web Chat preserves server-owned error messages", () => {

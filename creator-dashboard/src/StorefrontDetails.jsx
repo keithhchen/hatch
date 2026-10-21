@@ -43,16 +43,16 @@ export function StorefrontDetails({
 
       {hasDetails ? (
         <div className="storefront-shared__grid">
-          {model.inputs.length ? <StorefrontList title={t("What you bring")} values={model.inputs} /> : null}
-          {model.outputs.length ? <StorefrontList title={t("What you get")} values={model.outputs} /> : null}
-          {model.boundaries.length ? <StorefrontList title={t("What it won't do")} values={model.boundaries} /> : null}
-          {model.privacy ? <section><span className="storefront-shared__eyebrow">{t("Privacy")}</span><h3>{t("Your work stays under your control.")}</h3><p>{model.privacy}</p></section> : null}
+          {model.inputs.length ? <StorefrontList title={t("What to provide")} values={model.inputs} /> : null}
+          {model.outputs.length ? <StorefrontList title={t("What you receive")} values={model.outputs} /> : null}
+          {model.boundaries.length ? <StorefrontList title={t("Out of scope")} values={model.boundaries} /> : null}
+          {model.privacy ? <section><span className="storefront-shared__eyebrow">{t("Privacy")}</span><p>{model.privacy}</p></section> : null}
         </div>
       ) : null}
 
       {model.desktopRequirement ? (
         <footer className="storefront-shared__policies">
-          <section><strong>{t("Where it works")}</strong><p>{model.desktopRequirement}</p></section>
+          <section><strong>{t("Availability")}</strong><p>{model.desktopRequirement}</p></section>
         </footer>
       ) : null}
     </article>

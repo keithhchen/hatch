@@ -38,7 +38,6 @@ export function DownloadPage() {
       </header>
       <main className="download-page__main">
         <section className="download-page__copy">
-          <span className="web-pill">{copy.pill}</span>
           <h1>{copy.title}</h1>
           <p className="download-page__lead">{copy.lead}</p>
           <div className="download-page__card web-card">
@@ -56,9 +55,8 @@ export function DownloadPage() {
             <em>{copy.webAction}<ArrowRight aria-hidden="true" /></em>
           </a>
         </section>
-        <figure className="download-page__visual">
-          <img src="/assets/web/photos/trust.jpg" alt="" />
-          <figcaption>{copy.caption}</figcaption>
+        <figure className="download-page__visual" aria-hidden="true">
+          <img src="/assets/web/photos/v_shelf.jpg" alt="" />
         </figure>
       </main>
     </div>

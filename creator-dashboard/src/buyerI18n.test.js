@@ -27,10 +27,27 @@ test("Japanese copy never reuses the Chinese text", () => {
 
 test("buyer copy provides distinct Chinese and Japanese navigation and task states", () => {
   for (const locale of ["zh", "ja"]) {
-    for (const key of ["Explore", "Library", "Orders", "Sign in", "Ask an expert who has done it before.", "You're signed in as an expert.", "Please sign in again.", "Confirm order", "Page not found", "Loading details"]) {
+    for (const key of ["Explore", "Library", "Orders", "Sign in", "No published Agents", "This page is for client accounts", "Session expired", "Confirm order", "Page not found", "Loading details"]) {
       assert.notEqual(buyerT(locale, key), key, `${locale} must translate ${key}`);
     }
   }
+});
+
+test("product copy stays neutral: no exclamation marks or chatty questions", () => {
+  for (const locale of ["zh", "ja"]) {
+    for (const [key, value] of Object.entries(buyerDictionary(locale))) {
+      assert.doesNotMatch(value, /[!！?？]/, `${locale} copy for "${key}"`);
+    }
+  }
+  for (const key of buyerCopyKeys()) assert.doesNotMatch(key, /[!?]/, key);
+});
+
+test("buyer pages use only people-free still-life photos and no photo captions", () => {
+  const source = readFileSync(new URL("./BuyerPortalV2.jsx", import.meta.url), "utf8");
+  const photos = [...source.matchAll(/"(v_[a-z]+|s\d|l_[a-z]+|mem|pro2?|trust|compare|av\d*)"/g)].map((match) => match[1]);
+  assert.ok(photos.length > 0);
+  for (const id of photos) assert.match(id, /^v_(desk|window|paper|shelf|morning)$/);
+  assert.doesNotMatch(source, /buyer-v2__glass|caption=/);
 });
 
 test("buyer copy falls back to source English and interpolates values", () => {

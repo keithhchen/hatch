@@ -248,8 +248,7 @@ function RouteRedirect({ to, navigate }) {
 }
 
 function AppLoading() {
-  const { locale } = useLocale();
-  return <main className="loading-page" aria-busy="true"><WebBrand as="span" className="loading-brand" /><p>{buyerT(locale, "Expert agents that work.")}</p></main>;
+  return <main className="loading-page" aria-busy="true"><WebBrand as="span" className="loading-brand" /></main>;
 }
 
 function RoleBoundary({ navigate, onCreateCreator }) {

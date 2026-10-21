@@ -22,8 +22,9 @@ Tokens live in `creator-dashboard/src/webTheme.css` (`--web-*`). Desktop is out 
 - Chinese titles should not break mid-phrase; shrink instead.
 
 ## 4. Imagery
-- Real-people lifestyle photos: warm, natural light, shallow depth of field. No stock posing.
-- Overlay real product UI (chat bubbles, task lists, toggles) as frosted cards. No abstract skeleton illustrations.
+- Landing page: real-people lifestyle photos with real product UI overlaid as frosted cards.
+- Inside the product (Studio, Explore, account, auth, download, chat): photos are rare. At most one per page, only where a page would otherwise be empty or is a front door (sign-in, sign-up, download). Never show people — still life and spaces only, for vibe (`/assets/web/photos/v_*.jpg`).
+- Empty and error states inside the product use a plain card with icon or the egg, not a photo.
 - Examples must fit CN / US / JP; avoid single-country examples.
 
 ## 5. Motion
@@ -36,6 +37,8 @@ Tokens live in `creator-dashboard/src/webTheme.css` (`--web-*`). Desktop is out 
 - Small sizes (favicon, avatar): egg only. Don't recolor, outline, or place on dark.
 
 ## 7. Copy
+- Landing page: warm and plain-spoken.
+- Inside the product: professional SaaS tone. Clear, concise, neutral. Not chatty, not "talking like a friend", no jokes, no exclamation marks, no 你/您 over-familiarity beyond what the action needs. Labels are nouns or short verbs ("创建 Agent", "上传资料", "订单"); helper text states what happens, once.
 - Say what a normal person would say. If it sounds odd read aloud, rewrite it.
 - No report feel: no status tags like 已上线/试点中, no checkmark tables.
 - Specific where it should be (real questions, real prices), big where it should be.

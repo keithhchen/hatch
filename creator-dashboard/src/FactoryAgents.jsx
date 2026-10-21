@@ -19,13 +19,13 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { hatchMuiThemeOptions } from "@hatch/ui";
 import { dashboardRequest } from "./data.js";
-import { chatEntries, groupToolEntries } from "./factoryMessages.js";
+import { chatEntries, describeToolCall, groupToolEntries, toolDetailRows, toolResultRows } from "./factoryMessages.js";
 import { subscribeFactoryEvents } from "./factoryEvents.js";
 import { FactoryVoicePlayer } from "./factoryVoicePlayer.js";
 import { createFactoryAgentTranslator } from "./factoryAgentsI18n.js";
 import { agentDependencyGaps, agentStateKey, changedDependencies, localizeAgentText } from "./factoryAgentState.js";
 import { creatorFactoryPath, factorySectionForAgent } from "./creatorRoutes.js";
-import { isProductLive, STUDIO_PATH, studioNextStep, studioPathStates, studioPhoto, studioStepForRoute } from "./studioPath.js";
+import { isProductLive, STUDIO_PATH, studioNextStep, studioPathStates, studioStepForRoute } from "./studioPath.js";
 import "./factoryAgents.css";
 
 const api = (route, options = {}) => dashboardRequest(route, { ...options, body: options.body === undefined ? undefined : JSON.stringify(options.body) });
@@ -103,7 +103,7 @@ export function FactoryAgents({ productId, section, agent, navigate, locale = "e
     <ErrorNotice error={error} onClose={() => setError("")} />
     {step ? <div className="factory-step">
       {step.items.length > 1 ? <nav className="factory-tasks" aria-label={t("factoryTasksLabel")}>{step.items.map(([itemSection, page]) => <button key={page} type="button" className={page === selected ? "is-active" : ""} aria-current={page === selected ? "page" : undefined} onClick={() => goToFactory(itemSection, page)}>{page === "uploads" ? t("uploadSources") : agentName(page) || t("loadingAgentState")}{page !== "uploads" && agentEntry(page) ? <span className={`factory-dot is-${agentEntry(page).state}`} aria-hidden="true" /> : null}</button>)}</nav> : null}
-      {selected === "uploads" ? <SourceUploadWorkspace manualFiles={manualFiles} uploadItems={uploadItems} importPicker={importPicker} uploadProjectFiles={uploadProjectFiles} deleteManualFile={deleteManualFile} onOpenAgent={openAgent} t={t} /> : selectedSession ? <Workspace key={selectedSession.id} root={root} id={selectedSession.id} entry={selectedEntry} agents={agents} config={config} onChanged={() => undefined} onOpenAgent={openAgent} agentName={agentName} t={t} /> : <AgentIntro entry={selectedEntry} step={step} agents={agents} onOpenAgent={openAgent} agentName={agentName} locale={locale} t={t} />}
+      {selected === "uploads" ? <SourceUploadWorkspace manualFiles={manualFiles} uploadItems={uploadItems} importPicker={importPicker} uploadProjectFiles={uploadProjectFiles} deleteManualFile={deleteManualFile} onOpenAgent={openAgent} t={t} /> : selectedSession ? <Workspace key={selectedSession.id} root={root} id={selectedSession.id} entry={selectedEntry} agents={agents} config={config} onChanged={() => undefined} onOpenAgent={openAgent} agentName={agentName} t={t} /> : <AgentIntro entry={selectedEntry} agents={agents} onOpenAgent={openAgent} agentName={agentName} locale={locale} t={t} />}
     </div> : <FactoryOverview product={product} draft={productDraft} onDraftChange={setProductDraft} saveState={productSave} onSave={saveProduct} states={states} agentEntry={agentEntry} agentName={agentName} goToStep={goToStep} t={t} />}
   </div></ThemeProvider>;
 }
@@ -138,7 +138,6 @@ function FactoryOverview({ product, draft, onDraftChange, saveState, onSave, sta
       </>}
     </section>
     {next ? <article className="factory-next web-card">
-      <img className="factory-next__photo" src={studioPhoto(next.step.photo)} alt="" />
       <div className="factory-next__body">
         <span className="factory-next__label">{t("factoryNextUp")} · {t("stepNumber", nextIndex + 1)}</span>
         <h2>{t(next.step.title)}</h2>
@@ -157,12 +156,11 @@ function FactoryOverview({ product, draft, onDraftChange, saveState, onSave, sta
   </div>;
 }
 
-function AgentIntro({ entry, step, agents, onOpenAgent, agentName, locale, t }) {
+function AgentIntro({ entry, agents, onOpenAgent, agentName, locale, t }) {
   if (!entry) return <div className="factory-agent-intro"><div className="factory-agent-intro__card web-card"><Skeleton width="40%" /><Skeleton width="70%" height={48} /><Skeleton width="90%" /></div></div>;
   const gaps = agentDependencyGaps(entry);
   const locked = entry.state === "locked";
   const dependencies = [...gaps.required, ...gaps.alternatives];
-  const index = STUDIO_PATH.indexOf(step);
   return <section className="factory-agent-intro">
     <div className="factory-agent-intro__card web-card">
       <span className={`factory-state is-${entry.state}`}>{t(agentStateKey(entry))}</span>
@@ -172,10 +170,6 @@ function AgentIntro({ entry, step, agents, onOpenAgent, agentName, locale, t }) 
       {locked ? <div className="factory-needs"><strong>{gaps.alternatives.length && !gaps.required.length ? t("finishOneAgentFirst", gaps.alternatives.map(agentName).join(t("roleSeparator"))) : t("factoryNeedsFirst")}</strong><div>{dependencies.map(role => <Button key={role} variant="outlined" size="small" onClick={() => onOpenAgent(role)} endIcon={<ArrowForward />}>{agentName(role)}</Button>)}</div></div>
         : <Button className="factory-cta" variant="contained" startIcon={<PlayArrow />} onClick={() => onOpenAgent(entry.role)}>{t(entry.state === "failed" ? "tryAgain" : "factoryStart")}</Button>}
     </div>
-    <figure className="factory-agent-intro__photo">
-      <img src={studioPhoto(step.photo)} alt="" />
-      <figcaption className="factory-glass"><span>{t("stepNumber", index + 1)}</span><strong>{t(step.title)}</strong><small>{t(step.body)}</small></figcaption>
-    </figure>
   </section>;
 }
 
@@ -314,8 +308,10 @@ function NextSteps({ entry, agents, todos, onOpenAgent, agentName, t }) {
 }
 const toolActionKey = name => { const value = String(name || "").toLowerCase(); if (value.includes("update_todo")) return "toolActionUpdateTodo"; if (value.includes("corpus_upload")) return "toolActionCorpusUpload"; if (value.includes("evaluate")) return "toolActionEvaluate"; if (value.includes("search")) return "toolActionSearch"; if (value.includes("write")) return "toolActionWrite"; if (value.includes("read")) return "toolActionRead"; if (value.includes("list")) return "toolActionList"; return "toolActionUnknown"; };
 const toolWorkKey = items => { const names = items.map(item => item.call?.name || item.result?.toolName || "").join(" ").toLowerCase(); if (names.includes("corpus_upload")) return "toolWorkPublish"; if (names.includes("list") || names.includes("read") || names.includes("search")) return "toolWorkGather"; if (names.includes("write") || names.includes("update_todo")) return "toolWorkBuild"; return "toolWorkMethod"; };
-function ToolGroup({ items, running, t }) { const pending = items.some(item => !item.result); const failed = items.some(item => item.result?.isError); const status = pending ? t(running ? "toolCalling" : "toolMissing") : failed ? t("toolFailed") : ""; return <Accordion disableGutters variant="outlined" sx={{ mb: 1, "&:before": { display: "none" } }}><AccordionSummary expandIcon={<ExpandMore />}><Stack spacing={0.25}><Typography variant="body2" fontWeight={700}>{t(toolWorkKey(items))}</Typography><Typography variant="caption" color="text.secondary">{t("toolActionsCompleted", items.length)}{status ? ` · ${status}` : ""}</Typography></Stack></AccordionSummary><AccordionDetails sx={{ pt: 0 }}><Stack spacing={0.75}>{items.map(item => <ToolMessage key={item.key} call={item.call} result={item.result} running={running && item.isCurrentTurn} t={t} />)}</Stack></AccordionDetails></Accordion>; }
-function ToolMessage({ call, result, running, t }) { const rawName = call?.name || result?.toolName || ""; const status = result?.isError ? t("toolFailed") : result ? "" : t(running ? "toolCalling" : "toolMissing"); const text = typeof result?.content === "string" ? result.content : result?.content?.filter(item => item.type === "text").map(item => item.text).join("\n"); return <Accordion disableGutters variant="outlined" sx={{ "&:before": { display: "none" } }}><AccordionSummary expandIcon={<ExpandMore />}><Stack spacing={0.25}><Typography variant="body2">{t(toolActionKey(rawName))}</Typography>{status && <Typography variant="caption" color="text.secondary">{status}</Typography>}</Stack></AccordionSummary><AccordionDetails sx={{ pt: 0 }}><Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>{t("toolTechnicalDetails")} · {rawName}</Typography>{call && <><Typography variant="caption" fontWeight={700}>{t("toolArguments")}</Typography><Typography component="pre" variant="caption" sx={{ whiteSpace: "pre-wrap", display: "block" }}>{JSON.stringify(call.arguments, null, 2)}</Typography></>}{result && <><Typography variant="caption" fontWeight={700}>{t("toolResult")}</Typography><Typography component="pre" variant="caption" sx={{ whiteSpace: "pre-wrap", display: "block" }}>{text || ""}</Typography></>}</AccordionDetails></Accordion>; }
+function ToolGroup({ items, running, t }) { const pending = items.some(item => !item.result); const failed = items.some(item => item.result?.isError); const status = pending ? t(running ? "toolCalling" : "toolMissing") : failed ? t("toolFailed") : ""; return <Accordion disableGutters variant="outlined" className="factory-tool-group" sx={{ mb: 1, "&:before": { display: "none" } }}><AccordionSummary expandIcon={<ExpandMore />}><Stack spacing={0.25}><Typography variant="body2" fontWeight={700}>{t(toolWorkKey(items))}</Typography><Typography variant="caption" color="text.secondary">{t("toolActionsCompleted", items.length)}{status ? ` · ${status}` : ""}</Typography></Stack></AccordionSummary><AccordionDetails sx={{ pt: 0 }}><ul className="factory-tool-list">{items.map(item => <li key={item.key}><ToolMessage call={item.call} result={item.result} running={running && item.isCurrentTurn} t={t} bare /></li>)}</ul></AccordionDetails></Accordion>; }
+function toolSummary(call, result, t) { const { key, target, count } = describeToolCall(call, result); const head = t(key, target ?? ""); if (count === null || count === undefined || key === "toolSumTodo") return key === "toolSumTodo" && count ? `${head} · ${t("toolItemCount", count)}` : head; return `${head} · ${count ? t("toolFileCount", count) : t("toolNoFiles")}`; }
+function ToolDetailBlock({ title, rows, t }) { return <div className="factory-tool-block"><span className="factory-tool-block__title">{title}</span>{rows.length ? <dl>{rows.map((row, index) => <div key={`${row.key}-${index}`} className={row.key ? "" : "is-plain"}>{row.key ? <dt>{t("toolKeyLabel", row.key)}</dt> : null}<dd>{row.value ?? t("toolNone")}</dd></div>)}</dl> : <p>{t("toolNone")}</p>}</div>; }
+function ToolMessage({ call, result, running, t, bare = false }) { const [open, setOpen] = useState(false); const status = result?.isError ? t("toolFailed") : result ? "" : t(running ? "toolCalling" : "toolMissing"); return <div className={`factory-tool${bare ? "" : " factory-tool--single"}${result?.isError ? " is-failed" : ""}`}><div className="factory-tool__row"><span className="factory-tool__summary">{toolSummary(call, result, t)}{status ? ` · ${status}` : ""}</span><button type="button" className="factory-tool__toggle" aria-expanded={open} onClick={() => setOpen(value => !value)}>{t("toolDetails")}<ExpandMore fontSize="inherit" aria-hidden="true" /></button></div>{open ? <div className="factory-tool__details">{call ? <ToolDetailBlock title={t("toolArguments")} rows={toolDetailRows(call.arguments)} t={t} /> : null}{result ? <ToolDetailBlock title={t("toolResult")} rows={toolResultRows(result)} t={t} /> : null}</div> : null}</div>; }
 function askUserOption(option, index) { return { id: option?.id || `option-${index + 1}`, content: option?.content || "" }; }
 function AskUserBlock({ entry, onSubmit, t }) {
   const questions = Array.isArray(entry?.call?.arguments?.questions) ? entry.call.arguments.questions : [];

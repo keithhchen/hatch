@@ -22,7 +22,7 @@ import { WebBrand } from "./WebBrand.jsx";
 import { creatorOrderQuery } from "./storefrontModel.js";
 import { creatorFactoryPath, creatorProductPath, parseCreatorRoute } from "./creatorRoutes.js";
 import { createCreatorTranslator } from "./creatorI18n.js";
-import { isProductLive, STUDIO_PATH, studioNextStep, studioPathStates, studioPhoto } from "./studioPath.js";
+import { isProductLive, studioNextStep, studioPathStates } from "./studioPath.js";
 import { StudioPathCards } from "./studioPathCards.jsx";
 import { useLocale } from "./locale.jsx";
 import "./creatorPortalV2.css";
@@ -159,7 +159,7 @@ function CreatorRoute({ route, token, request, navigate, locale, t, profile }) {
   }
   if (route.kind === "factory-index") return <FactoryIndexRedirect navigate={navigate} />;
   if (route.kind === "factory-agents") return <Suspense fallback={<LoadingState t={t} />}><FactoryAgents key={route.productId} productId={route.productId} section={route.factorySection} agent={route.factoryAgent} navigate={navigate} locale={locale} /></Suspense>;
-  if (route.kind === "home") return <CreatorHome token={token} request={request} navigate={navigate} t={t} locale={locale} profile={profile} />;
+  if (route.kind === "home") return <CreatorHome token={token} request={request} navigate={navigate} t={t} locale={locale} />;
   if (route.kind === "products") return <ProductsPage token={token} request={request} navigate={navigate} t={t} />;
   if (route.kind === "product-create") return <Suspense fallback={<LoadingState t={t} />}><CreatorProductFiles token={token} navigate={navigate} locale={locale} /></Suspense>;
   if (route.kind === "product") return <FactoryProductRedirect productId={route.productId} navigate={navigate} />;
@@ -173,7 +173,7 @@ function CreatorRoute({ route, token, request, navigate, locale, t, profile }) {
 
 /* ---------- Home ---------- */
 
-function CreatorHome({ token, request, navigate, t, locale, profile }) {
+function CreatorHome({ token, request, navigate, t, locale }) {
   const resource = useRemote(request, "/v1/creator/overview", token);
   return (
     <PageBoundary resource={resource} title={t("workspaceLoadError")} retryLabel={t("retry")} t={t}>
@@ -186,9 +186,8 @@ function CreatorHome({ token, request, navigate, t, locale, profile }) {
         const live = products.filter(isProductLive);
         const next = products.find((product) => !isProductLive(product)) ?? products[0];
         const purchaseCount = Number(metrics.orders ?? metrics.order_count ?? orders.length) || 0;
-        const firstName = profile?.display_name;
         return <>
-          <Hero pill={t("homePill")} title={firstName ? t("homeGreeting", firstName) : t("homeGreetingPlain")} />
+          <Hero pill={t("homePill")} title={t("homeTitle")} />
           <NextAgentCard product={next} request={request} token={token} navigate={navigate} t={t} />
           <dl className="cpv2-stats">
             <div><dt>{t("homeStatOrders")}</dt><dd>{purchaseCount}</dd></div>
@@ -213,11 +212,9 @@ function NextAgentCard({ product, request, token, navigate, t }) {
   const live = isProductLive(product);
   const states = factory.state === "ready" ? studioPathStates(arrayOf(factory.data?.agents), product) : null;
   const next = states ? studioNextStep(states) : null;
-  const photo = (next?.step ?? STUDIO_PATH[live ? 4 : 0]).photo;
   return <article className="cpv2-next web-card">
-    <img className="cpv2-next__photo" src={studioPhoto(photo)} alt="" />
     <div className="cpv2-next__body">
-      <span className="web-pill">{t("homeContinue")}</span>
+      <span className={`cpv2-state${live ? " is-live" : ""}`}>{t(live ? "agentLive" : "agentDraft")}</span>
       <h2>{product.name ?? product.product_name ?? t("untitledProduct")}</h2>
       <p>{live ? t("homeLiveBody") : product.promise ?? product.description ?? ""}</p>
       {states ? <ol className="cpv2-path-dots" aria-label={t("factoryStepsLabel")}>{states.map(({ step, state }) => <li key={step.id} className={`is-${state}${next?.step.id === step.id ? " is-next" : ""}`}><span aria-hidden="true" /><small>{t(step.title)}</small></li>)}</ol> : null}
@@ -227,13 +224,19 @@ function NextAgentCard({ product, request, token, navigate, t }) {
   </article>;
 }
 
+// The only photo in Studio: a people-free still life that fills the otherwise empty first-run home.
+const STUDIO_EMPTY_PHOTO = "/assets/web/photos/v_desk.jpg";
+
 function CreatorZeroProductIntro({ navigate, t }) {
   return <section className="cpv2-welcome" aria-labelledby="creator-zero-product-title">
-    <div className="cpv2-welcome__intro">
-      <span className="web-pill">{t("homeEmptyPill")}</span>
-      <h1 id="creator-zero-product-title">{t("homeEmptyTitle")}</h1>
-      <p>{t("homeEmptyBody")}</p>
-      <Button className="web-btn-yolk" type="button" trailing={<span aria-hidden="true">→</span>} onClick={() => navigate(`${ROOT}/products/new`)}>{t("homeStartFirst")}</Button>
+    <div className="cpv2-welcome__top">
+      <div className="cpv2-welcome__intro">
+        <span className="web-pill">{t("homeEmptyPill")}</span>
+        <h1 id="creator-zero-product-title">{t("homeEmptyTitle")}</h1>
+        <p>{t("homeEmptyBody")}</p>
+        <Button className="web-btn-yolk" type="button" trailing={<span aria-hidden="true">→</span>} onClick={() => navigate(`${ROOT}/products/new`)}>{t("homeStartFirst")}</Button>
+      </div>
+      <img className="cpv2-welcome__photo" src={STUDIO_EMPTY_PHOTO} alt="" />
     </div>
     <h2 className="cpv2-welcome__path-title">{t("homePathTitle")}</h2>
     <StudioPathCards t={t} />

@@ -2,14 +2,12 @@
 // Factory Agents (by role) and pages that already exist in the Factory routes;
 // state is derived only from the live Factory snapshot and the Product status.
 export const STUDIO_PATH = Object.freeze([
-  { id: "read", title: "stepRead", body: "stepReadBody", photo: "l_read", key: "research", items: [["sources", "research"], ["sources", "uploads"]] },
-  { id: "ask", title: "stepAsk", body: "stepAskBody", photo: "l_voice", key: "voice", items: [["sources", "voice"]] },
-  { id: "build", title: "stepBuild", body: "stepBuildBody", photo: "mem", key: "generation", items: [["build", "generation"]] },
-  { id: "test", title: "stepTest", body: "stepTestBody", photo: "l_eval", key: "evaluator", items: [["evaluate", "case-generation"], ["evaluate", "evaluator"]] },
-  { id: "ship", title: "stepShip", body: "stepShipBody", photo: "l_live", key: null, items: [] }
+  { id: "read", title: "stepRead", body: "stepReadBody", key: "research", items: [["sources", "research"], ["sources", "uploads"]] },
+  { id: "ask", title: "stepAsk", body: "stepAskBody", key: "voice", items: [["sources", "voice"]] },
+  { id: "build", title: "stepBuild", body: "stepBuildBody", key: "generation", items: [["build", "generation"]] },
+  { id: "test", title: "stepTest", body: "stepTestBody", key: "evaluator", items: [["evaluate", "case-generation"], ["evaluate", "evaluator"]] },
+  { id: "ship", title: "stepShip", body: "stepShipBody", key: null, items: [] }
 ]);
-
-export const studioPhoto = (id) => `/assets/web/photos/${id}.jpg`;
 
 export function isProductLive(product) {
   return product?.status === "published" || product?.status === "live";
