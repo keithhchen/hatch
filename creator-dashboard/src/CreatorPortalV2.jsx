@@ -1,5 +1,5 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Check, ChevronsUpDown, Copy, Download, Languages, LayoutDashboard, LogOut, Menu, MoreHorizontal, Plus, ReceiptText, Search, Settings, Wallet, X } from "lucide-react";
+import { Bot, Check, ChevronsUpDown, Copy, Download, ExternalLink, Languages, LayoutDashboard, LogOut, Menu, MoreHorizontal, Plus, ReceiptText, Search, Settings, Wallet, X } from "lucide-react";
 import { Button, CommandMenu, ConfirmDialog, DropdownMenu, IconButton } from "@hatch/ui";
 import { ButtonBase, Divider as MuiDivider, ListItemIcon, ListItemText, Menu as MuiMenu, MenuItem as MuiMenuItem, Typography as MuiTypography } from "@mui/material";
 import { createTheme, ThemeProvider } from "@mui/material/styles";
@@ -293,7 +293,6 @@ function ProductsPage({ request, navigate, t, locale }) {
               {["all", "draft", "live"].map((value) => <button key={value} type="button" aria-pressed={filter === value} className={filter === value ? "is-active" : ""} onClick={() => setFilter(value)}>{t(value === "all" ? "all" : value === "live" ? "agentLive" : "agentDraft")}<b>{counts[value]}</b></button>)}
             </div>
             <div className="sx-table" role="table" aria-label={t("sxNavAgents")}>
-              <div className="sx-table__head" role="row"><span role="columnheader">{t("sxColAgent")}</span><span role="columnheader">{t("sxColStatus")}</span><span role="columnheader">{t("sxColNext")}</span><span role="columnheader">{t("sxColUpdated")}</span><span role="columnheader"><span className="sr-only">{t("sxColActions")}</span></span></div>
               {shown.map((product) => <AgentRow key={idOf(product, "product")} product={product} t={t} locale={locale} request={request} navigate={navigate} onChanged={resource.retry} />)}
             </div>
           </> : <EmptyState title={t("agentsEmptyTitle")} body={t("agentsEmptyBody")} action={t("homeStartFirst")} onAction={() => navigate(`${ROOT}/products/new`)} />}
@@ -328,6 +327,7 @@ function AgentRow({ product, request, navigate, onChanged, t, locale }) {
   const nextLabel = published ? t("sxNextLive") : path.next ? t(path.next.step.title) : path.state === "error" ? t("sxNextUnknown") : "…";
   const menu = [
     { value: "open", label: t("agentOpen"), onSelect: open },
+    ...(publicHref ? [{ value: "view", label: t("viewProduct"), icon: <ExternalLink aria-hidden="true" />, onSelect: () => window.open(publicHref, "_blank", "noopener,noreferrer") }] : []),
     { value: "publish", label: t("sxTabPublish"), onSelect: () => navigate(creatorProductPath(productId, "publish")) },
     ...(publicHref ? [{ value: "copy", label: t("copyLink"), icon: <Copy aria-hidden="true" />, onSelect: () => void copy(publicPathOf(product) || publicHref).catch(() => setError(t("copyFailed"))) }] : []),
     { type: "separator" },
@@ -341,12 +341,9 @@ function AgentRow({ product, request, navigate, onChanged, t, locale }) {
       <small>{product.promise ?? product.description ?? t("addProductPromise")}</small>
       {error ? <InlineError>{error}</InlineError> : null}
     </span>
-    <span role="cell"><StatusPill live={published} t={t} /></span>
-    <span role="cell" className="sx-table__next">{path.states ? <StepProgress states={path.states} label={nextLabel} /> : <small>{nextLabel}</small>}</span>
+    <span role="cell" className="sx-table__next">{published ? <span className="sx-live">{copied ? t("copied") : t("agentLive")}</span> : path.states ? <StepProgress states={path.states} label={nextLabel} /> : <small>{nextLabel}</small>}</span>
     <span role="cell" className="sx-table__date">{dateOnly(product.updated_at ?? product.created_at, locale)}</span>
     <span role="cell" className="sx-table__actions">
-      {publicHref ? <a className="sx-link" href={publicHref} target="_blank" rel="noreferrer">{copied ? t("copied") : t("viewProduct")}</a> : null}
-      <Button variant="secondary" size="small" type="button" onClick={open}>{published ? t("agentOpen") : t("agentContinue")}</Button>
       <DropdownMenu label={t("sxColActions")} trigger={<IconButton label={t("sxColActions")} variant="ghost" size="small"><MoreHorizontal aria-hidden="true" /></IconButton>} items={menu} />
     </span>
     <ConfirmDialog
