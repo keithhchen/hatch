@@ -205,11 +205,11 @@ function CreatorHome({ request, navigate, t, locale, profile }) {
         const recent = [...products].sort((a, b) => String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? ""))).slice(0, 5);
         return <>
           <PageHeader title={t("sxOverviewTitle")} body={t("sxOverviewBody", profile?.display_name || t("creator"))} actions={<Button className={next ? undefined : "web-btn-yolk"} variant={next ? "secondary" : "primary"} type="button" leading={<Plus aria-hidden="true" />} onClick={() => navigate(`${ROOT}/products/new`)}>{t("newAgent")}</Button>} />
-          <dl className="sx-kpis">
+          {Number(metrics.orders) > 0 ? <dl className="sx-kpis">
             <Kpi label={t("sxKpiOrders")} value={Number(metrics.orders) || 0} />
             <Kpi label={t("sxKpiDeliveries")} value={Number(metrics.successful_deliveries) || 0} />
             <Kpi label={t("sxKpiGross")} value={money(metrics.gross_minor, currency)} />
-          </dl>
+          </dl> : null}
           {next ? <NextAgentCard product={next} request={request} navigate={navigate} t={t} /> : null}
           <div className="sx-overview-grid">
             <section className="sx-card" aria-labelledby="sx-home-agents">

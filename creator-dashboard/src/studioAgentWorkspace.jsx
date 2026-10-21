@@ -58,7 +58,7 @@ function AgentHeaderActions({ product, live, tab, navigate, t }) {
   const { copied, copy } = useCopy();
   const [error, setError] = useState("");
   return <div className="sx-agent__actions">
-    {publicPath ? <Button variant="secondary" type="button" leading={<Copy aria-hidden="true" />} onClick={() => copy(publicPath).catch(() => setError(t("copyFailed")))}>{copied ? t("copied") : t("copyLink")}</Button> : null}
+    {live && publicPath ? <Button variant="secondary" type="button" leading={<Copy aria-hidden="true" />} onClick={() => copy(publicPath).catch(() => setError(t("copyFailed")))}>{copied ? t("copied") : t("copyLink")}</Button> : null}
     {live && safePublicUrl(publicPath)
       ? <Button asChild className="web-btn-yolk" trailing={<ExternalLink aria-hidden="true" />}><a href={safePublicUrl(publicPath)} target="_blank" rel="noreferrer">{t("viewStorefront")}</a></Button>
       : tab === "publish" ? null : <Button variant="secondary" type="button" onClick={() => navigate(creatorProductPath(productId, "publish"))}>{t("sxTabPublish")}</Button>}

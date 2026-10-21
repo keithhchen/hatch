@@ -627,7 +627,6 @@ export function StudioSettingsPage({ request, navigate, locale, profile }) {
         <h2>{copy.accountTitle}</h2>
         <dl className="sops-dl">
           <div><dt>{copy.accountRole}</dt><dd>{copy.role[user?.role] ?? user?.role}</dd></div>
-          <div><dt>{copy.accountId}</dt><dd className="sops-break">{user?.id}</dd></div>
         </dl>
       </section>
 
