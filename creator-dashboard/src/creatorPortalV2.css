@@ -149,7 +149,16 @@
 .sx-table__name:hover { color: var(--web-gold); }
 .sx-table__agent small { display: -webkit-box; overflow: hidden; color: var(--web-muted); font-size: 13px; line-height: 1.5; -webkit-line-clamp: 1; -webkit-box-orient: vertical; }
 .sx-table__next, .sx-table__date { color: var(--web-body); font-size: 14px; }
-.sx-table__next-label { display: none; }
+.sx-table__next { display: flex; min-width: 0; flex-direction: column; align-items: flex-start; gap: 6px; }
+.sx-table__next small { color: var(--web-muted); font-size: 12px; }
+/* Same dots as the Factory stepper (factoryAgents.css .factory-stepper__n), compact. */
+.sx-steps { display: flex; align-items: center; margin: 0; padding: 0; list-style: none; }
+.sx-steps li { display: flex; align-items: center; }
+.sx-steps li + li::before { width: 8px; height: 2px; margin: 0 3px; border-radius: 2px; background: var(--web-rule); content: ""; }
+.sx-steps span { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 50%; background: var(--web-panel); color: var(--web-muted); font-family: var(--web-serif); font-size: 13px; font-style: italic; line-height: 1; }
+.sx-steps .is-done span { background: var(--web-pass-soft); color: var(--web-pass); font-family: var(--web-sans); font-size: 11px; font-style: normal; font-weight: 700; }
+.sx-steps .is-running span { background: var(--web-yolk-soft); color: var(--web-gold); }
+.sx-steps .is-next span { background: var(--web-yolk); color: var(--web-on-yolk); }
 .sx-table__actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 
 /* ---------- Agent workspace ---------- */
@@ -269,11 +278,10 @@
   .sx-table__agent { grid-column: 1 / -1; }
   .sx-table__next { grid-column: 1; grid-row: 2; justify-self: end; }
   .sx-table__row > [role="cell"]:nth-child(2) { grid-row: 2; grid-column: 1; }
-  .sx-table__next { grid-column: 2; font-size: 13px; color: var(--web-muted); }
+  .sx-table__next { grid-column: 2; align-items: flex-end; }
   .sx-table__actions { grid-column: 1 / -1; justify-content: flex-start; }
   .sx-table__actions { width: 100%; }
   .sx-table__actions .hui-icon-button { margin-left: auto; }
-  .sx-table__next-label { display: inline !important; margin-right: 6px; color: var(--web-muted); }
   .sx-summary { grid-template-columns: minmax(0, 1fr); }
   .sx-summary > .hui-button { justify-self: start; }
   .sx-brief li { grid-template-columns: 20px minmax(0, 1fr) 36px; }

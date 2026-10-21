@@ -13,7 +13,8 @@ import { StudioPathCards } from "./studioPathCards.jsx";
 import { useLocale } from "./locale.jsx";
 import {
   EmptyState, InlineError, LoadingState, PageBoundary, PageHeader, RouteProblem, SectionHead, StatusPill, STUDIO_ROOT as ROOT,
-  arrayOf, dateOnly, dateTime, friendlyError, humanStatus, idOf, money, mutationKey, productName, publicPathOf, unwrap, useAgentPath, useCopy, useRemote
+  arrayOf, dateOnly, dateTime, friendlyError, humanStatus, idOf, money, mutationKey, productName, publicPathOf, unwrap, useAgentPath, useCopy, useRemote,
+  StepProgress,
 } from "./studioShellKit.jsx";
 import "./creatorPortalV2.css";
 
@@ -341,7 +342,7 @@ function AgentRow({ product, request, navigate, onChanged, t, locale }) {
       {error ? <InlineError>{error}</InlineError> : null}
     </span>
     <span role="cell"><StatusPill live={published} t={t} /></span>
-    <span role="cell" className="sx-table__next"><span className="sx-table__next-label">{t("sxColNext")}</span>{nextLabel}</span>
+    <span role="cell" className="sx-table__next">{path.states ? <StepProgress states={path.states} label={nextLabel} t={t} /> : null}<small>{nextLabel}</small></span>
     <span role="cell" className="sx-table__date">{dateOnly(product.updated_at ?? product.created_at, locale)}</span>
     <span role="cell" className="sx-table__actions">
       {publicHref ? <a className="sx-link" href={publicHref} target="_blank" rel="noreferrer">{copied ? t("copied") : t("viewProduct")}</a> : null}
