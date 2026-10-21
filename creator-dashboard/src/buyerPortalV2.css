@@ -139,6 +139,7 @@
 /* ---------- Product page ---------- */
 .buyer-v2__storefront-action { display: grid; gap: 10px; }
 .buyer-v2__storefront-action .hui-button { width: 100%; justify-content: center; }
+.buyer-v2__web-first { margin: 0; color: var(--buyer-muted); font-size: var(--hatch-type-ui); text-align: center; }
 .buyer-v2__secondary-download { justify-self: center; color: var(--buyer-muted); font-size: var(--hatch-type-ui); text-decoration: none; }
 .buyer-v2__secondary-download:hover { color: var(--buyer-gold); }
 .buyer-v2__how { margin-top: clamp(40px, 6vw, 72px); }

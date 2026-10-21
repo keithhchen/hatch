@@ -427,7 +427,7 @@ function ProductPage({ route, request, navigate, session, downloadUrl }) {
         <h2>{t('How it works')}</h2>
         <ol className="buyer-v2__steps">
           <li className="web-card"><span>1</span><strong>{t('Add to your account')}</strong><p>{t('Free. The Agent is saved to your library.')}</p></li>
-          <li className="web-card"><span>2</span><strong>{t('Start a conversation')}</strong><p>{t('Chat in the browser, or use Hatch Desktop to work with local files.')}</p></li>
+          <li className="web-card"><span>2</span><strong>{t('Start a conversation')}</strong><p>{t('Chat right in your browser, no download needed. To work with local files, use Hatch Desktop.')}</p></li>
           <li className="web-card"><span>3</span><strong>{t('Return any time')}</strong><p>{t('Conversations are visible only to your account.')}</p></li>
         </ol>
       </section>
@@ -499,6 +499,7 @@ function ProductAction({ product, currentPath, request, navigate, session, downl
       {body ? <p>{body}</p> : null}
       {mutation.error ? <InlineError error={mutation.error} /> : null}
       {action}
+      {!isOwnerCreator && status !== "active" && status !== "reserved" ? <p className="buyer-v2__web-first">{t("No download needed: chat right in your browser.")}</p> : null}
       <a className="buyer-v2__secondary-download" href={downloadUrl} target="_blank" rel="noreferrer" onClick={() => trackPortalEvent(request, "desktop_download_clicked", productTelemetry(product))}>{t('Download Hatch Desktop')}</a>
     </>
   );
@@ -818,9 +819,8 @@ function SuccessPage({ id, request, navigate, downloadUrl, session }) {
       <section className="buyer-v2__next-steps">
         <h2>{t('Next steps')}</h2>
         <ol className="buyer-v2__steps">
-          <li className="web-card"><span>1</span><strong>{t("Chat in the browser")}</strong></li>
-          <li className="web-card"><span>2</span><strong>{t('Sign in to Hatch Desktop with this account')}</strong><p><a href={downloadUrl} target="_blank" rel="noreferrer" onClick={() => trackPortalEvent(request, "desktop_download_clicked", productTelemetry(product))}>{t('Download Hatch Desktop')}</a></p></li>
-          <li className="web-card"><span>3</span><strong>{t('Review local file permissions in Desktop')}</strong></li>
+          <li className="web-card"><span>1</span><strong>{t("Chat in the browser")}</strong><p>{t("No download needed.")} <RouterLink to={`/chat/product/${encodeURIComponent(productId(product))}`} navigate={navigate}>{t('Start chat')}</RouterLink></p></li>
+          <li className="web-card"><span>2</span><strong>{t("Or use Hatch Desktop for local files")}</strong><p>{t("Download it, sign in with this account, then review local file permissions.")} <a href={downloadUrl} target="_blank" rel="noreferrer" onClick={() => trackPortalEvent(request, "desktop_download_clicked", productTelemetry(product))}>{t('Download Hatch Desktop')}</a></p></li>
         </ol>
         <div className="buyer-v2__detail-links">
           <RouterLink to={`/orders/${encodeURIComponent(orderReference(order))}`} navigate={navigate}>{t('View receipt →')}</RouterLink>
