@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ReferenceDocument, SkillFolderReader } from "./adapters/workbenchDefinitions.js";
-import { AgentDefinition, Corpus, ExpertProduct, LiveRelease, SystemMissing } from "./domain.js";
+import { AgentDefinition, Corpus, ExpertProduct, InvalidSkills, LiveRelease, SystemMissing } from "./domain.js";
 import type { AgentDefinitionRepository, CorpusReleaser, LiveReleaseRepository } from "./ports.js";
 import { ProductLiveService } from "./productLiveService.js";
 
@@ -43,11 +43,11 @@ test("the corpus is System and Skills; Knowledge and Tools stay empty", async ()
 });
 
 test("status reports publishability, live state and pending changes", async () => {
-  assert.deepEqual((await service(null).status(product)).toJSON(), { product_id: "p1", can_publish: false, is_live: false, pending_changes: [], public_url: null, published_at: null });
+  assert.deepEqual((await service(null).status(product)).toJSON(), { product_id: "p1", can_publish: false, invalid_skills: [], is_live: false, pending_changes: [], public_url: null, published_at: null });
   const stale = new LiveRelease(Corpus.parse({ system_instructions: "old", skills: [], knowledge: [], tools: [] }), { questions: [] }, "2026-10-01T00:00:00.000Z");
   assert.deepEqual((await service(definition, stale).status(product)).toJSON().pending_changes, ["corpus", "brief"]);
   const current = new LiveRelease(definition.toCorpus(), product.briefSpec, "2026-10-01T00:00:00.000Z");
-  assert.deepEqual((await service(definition, current).status(product)).toJSON(), { product_id: "p1", can_publish: true, is_live: true, pending_changes: [], public_url: "/products/p1", published_at: "2026-10-01T00:00:00.000Z" });
+  assert.deepEqual((await service(definition, current).status(product)).toJSON(), { product_id: "p1", can_publish: true, invalid_skills: [], is_live: true, pending_changes: [], public_url: "/products/p1", published_at: "2026-10-01T00:00:00.000Z" });
 });
 
 test("Skills come from output/skills with references and declared kinds", async () => {
@@ -61,4 +61,22 @@ test("Skills come from output/skills with references and declared kinds", async 
   assert.deepEqual(skills[0]!.references.map(({ id, kind }) => ({ id, kind })), [{ id: "opening-lines", kind: "example" }, { id: "rubric", kind: "method" }]);
   assert.equal(new ReferenceDocument("x", "---\nkind: few_shots\n---\nx").kind, "few_shots");
   assert.equal(new ReferenceDocument("x", "---\nkind: unknown\n---\nx").kind, "method");
+});
+
+test("an invalid Skill blocks publishing and is reported instead of crashing status", async () => {
+  const files: Record<string, string> = {
+    "output/skills/essay-review/SKILL.md": "---\nname: essay-review\ndescription: Review college essays\n---\nFollow the method.",
+    "output/skills/Bad_Name/SKILL.md": "---\nname: Bad_Name\ndescription: Broken\n---\nx",
+  };
+  const { skills, invalid } = await new SkillFolderReader(Object.keys(files), async (name) => files[name]!).load();
+  assert.deepEqual(skills.map(({ id }) => id), ["essay-review"]);
+  assert.equal(invalid.length, 1);
+  assert.match(invalid[0]!, /^Bad_Name: /);
+  const broken = new AgentDefinition("# SYSTEM", skills, invalid);
+  const view = (await service(broken).status(product)).toJSON();
+  assert.equal(view.can_publish, false);
+  assert.deepEqual(view.invalid_skills, invalid);
+  const releaser = new RecordingReleaser();
+  await assert.rejects(service(broken, undefined, releaser).publish(product), InvalidSkills);
+  assert.equal(releaser.released.length, 0);
 });

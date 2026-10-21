@@ -32,9 +32,21 @@ export class ReferenceDocument {
 export class SkillFolderReader {
   constructor(private readonly paths: readonly string[], private readonly read: ReadFile) {}
 
-  async skills(): Promise<Skill[]> {
+  /** Readable Skills, plus "<folder>: <reason>" for each Skill file that fails validation. */
+  async load(): Promise<{ skills: Skill[]; invalid: string[] }> {
     const folders = this.paths.flatMap((name) => SKILL_PATH.exec(name)?.[1] ?? []).sort();
-    return Promise.all(folders.map((folder) => this.skill(folder)));
+    const results = await Promise.all(folders.map((folder) => this.skill(folder).then(
+      (skill) => ({ skill }),
+      (error: unknown) => ({ invalid: `${folder}: ${error instanceof Error ? error.message : String(error)}` }),
+    )));
+    return {
+      skills: results.flatMap((result) => "skill" in result ? [result.skill] : []),
+      invalid: results.flatMap((result) => "invalid" in result ? [result.invalid] : []),
+    };
+  }
+
+  async skills(): Promise<Skill[]> {
+    return (await this.load()).skills;
   }
 
   private async skill(folder: string): Promise<Skill> {
@@ -63,7 +75,8 @@ export class WorkbenchAgentDefinitionRepository implements AgentDefinitionReposi
     for (const session of builders) {
       const read: ReadFile = async (name) => (await store.read(session.id, name)).bytes.toString("utf8");
       const paths = session.files.map((file) => file.path);
-      const definition = AgentDefinition.whenPresent(await read(SYSTEM_PATH), await new SkillFolderReader(paths, read).skills());
+      const { skills, invalid } = await new SkillFolderReader(paths, read).load();
+      const definition = AgentDefinition.whenPresent(await read(SYSTEM_PATH), skills, invalid);
       if (definition) return definition;
     }
     return null;

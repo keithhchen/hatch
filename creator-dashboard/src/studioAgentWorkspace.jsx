@@ -93,6 +93,7 @@ function PublishStatus({ status, base, productId, request, navigate, locale, t, 
   const info = status.data ?? {};
   const live = info.is_live === true;
   const pending = arrayOf(info.pending_changes);
+  const invalidSkills = arrayOf(info.invalid_skills);
   async function publish() {
     setState({ busy: true, error: "", result: null });
     try {
@@ -110,7 +111,8 @@ function PublishStatus({ status, base, productId, request, navigate, locale, t, 
       <h2>{live ? t("sxStatusLive") : t("sxStatusDraft")}</h2>
       {live && info.published_at ? <p>{t("sxPublishedAt", dateTime(info.published_at, locale))}</p> : null}
       {live && pending.length ? <p className="sx-summary__pending">{t("sxPendingChanges")}</p> : null}
-      {!info.can_publish ? <p>{t("sxBuildIncomplete")} <button type="button" className="sx-link" onClick={goToBuild}>{t("sxGoToBuild")}</button></p> : null}
+      {invalidSkills.length ? <div className="sx-summary__problem"><p>{t("sxSkillInvalid")}</p><ul>{invalidSkills.map((item) => <li key={item}>{item}</li>)}</ul></div>
+        : !info.can_publish ? <p>{t("sxBuildIncomplete")} <button type="button" className="sx-link" onClick={goToBuild}>{t("sxGoToBuild")}</button></p> : null}
       {shareUrl ? <p className="sx-summary__link"><a className="sx-link" href={safePublicUrl(shareUrl)} target="_blank" rel="noreferrer">{absoluteUrl(shareUrl)}</a><button type="button" className="sx-link" onClick={() => void copy(shareUrl)}><Copy aria-hidden="true" />{copied ? t("copied") : t("copyLink")}</button></p> : null}
     </div>
     <Button className="web-btn-yolk" type="button" loading={state.busy} disabled={!info.can_publish || (live && pending.length === 0)} onClick={publish}>{live ? t("sxUpdateAction") : t("sxPublishAction")}</Button>

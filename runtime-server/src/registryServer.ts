@@ -55,7 +55,7 @@ import {
 import type { AboutYouAnswerPair } from "./creatorLearning/aboutYouNode.js";
 import { PostgresDistillationGraphStore } from "./creatorLearning/distillationGraphStore.js";
 import { CorpusPublisher, CorpusPublishError } from "./creatorLearning/corpusPublisher.js";
-import { createProductLive, ExpertProduct, SystemMissing, type ProductLiveService } from "./creatorLearning/productLive/index.js";
+import { createProductLive, ExpertProduct, InvalidSkills, SystemMissing, type ProductLiveService } from "./creatorLearning/productLive/index.js";
 import { CreatorRegistryReleaseStore, type CreatorRegistryRelease } from "./creatorLearning/creatorRegistryRelease.js";
 import { corpusOutputSchema } from "./creatorLearning/corpusNode.js";
 import { QdrantKnowledgeIndexer } from "./qdrantIndexer.js";
@@ -471,6 +471,7 @@ async function route(
     } catch (error) {
       if (error instanceof CorpusPublishError) throw error;
       if (error instanceof SystemMissing) throw new CorpusPublishError(error.code, error.message, 409);
+      if (error instanceof InvalidSkills) throw new CorpusPublishError(error.code, error.message, 409);
       throw new CorpusPublishError(
         "publish_failed",
         error instanceof Error ? `Registry publish failed: ${error.message}` : `Registry publish failed: ${String(error)}`,
@@ -938,11 +939,12 @@ async function route(
         sendJson(response, 409, { error: { code: "product_not_editable", message: "Published Products cannot be deleted from the authoring workspace." } });
         return;
       }
-      const deleteProduct = (context.factoryService as unknown as {
+      // Call on the service itself: a detached method loses `this`.
+      const service = context.factoryService as unknown as {
         deleteProduct?: (creatorId: string, productId: string) => Promise<unknown>;
-      }).deleteProduct;
-      if (!deleteProduct) throw new Error("Product deletion is not configured");
-      await deleteProduct(account.id, product.repositoryId);
+      };
+      if (!service.deleteProduct) throw new Error("Product deletion is not configured");
+      await service.deleteProduct(account.id, product.repositoryId);
       response.writeHead(204, { ...corsHeaders(), "cache-control": "no-store" });
       response.end();
       return;
