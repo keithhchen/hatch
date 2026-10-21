@@ -2146,6 +2146,8 @@ export async function createDashboardApp(options = {}) {
           creatorNames
         )
           .filter((entitlement) => entitlementMatchesStatus(entitlement, status))
+          // The web Library lists only Agents still offered; desktop routes keep every entitlement.
+          .filter((entitlement) => url.pathname !== "/v1/library" || isOfferedProduct(entitlement, catalog, portalState))
           .sort(compareEntitlementsNewestFirst);
         const page = paginate(entitlements, url);
         return send(response, 200, {
@@ -3868,6 +3870,11 @@ function entitlementMatchesStatus(entitlement, status) {
   if (status === "active") return entitlement.status === "active" || entitlement.status === "reserved";
   if (status === "past") return ["consumed", "expired", "revoked"].includes(entitlement.status);
   return entitlement.status === status;
+}
+
+function isOfferedProduct(entitlement, catalog, portalState) {
+  const entry = catalog.find((agent) => agent.product_id === entitlement.product_id);
+  return Boolean(entry) && portalState.getCreatorProduct(entry.creator_id, entry.product_id)?.status !== "withdrawn";
 }
 
 function compareEntitlementsNewestFirst(left, right) {
