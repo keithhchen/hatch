@@ -36,7 +36,7 @@ export function StudioAgentWorkspace({ route, request, navigate, locale, t, prof
           <h1>{product ? productName(product, t) : "…"}</h1>
           {product ? <StatusPill live={live} t={t} /> : null}
         </div>
-        {product ? <AgentHeaderActions product={product} live={live} tab={tab} navigate={navigate} t={t} /> : null}
+        {product ? <AgentHeaderActions product={product} live={live} t={t} /> : null}
       </div>
       <nav className="sx-tabs" aria-label={t("sxAgentTabs")}>
         {TABS.map((item) => <a key={item.value} href={creatorProductPath(productId, item.value)} aria-current={tab === item.value ? "page" : undefined} className={tab === item.value ? "is-active" : ""} onClick={(event) => { event.preventDefault(); navigate(creatorProductPath(productId, item.value)); }}>
@@ -52,18 +52,11 @@ export function StudioAgentWorkspace({ route, request, navigate, locale, t, prof
   </div>;
 }
 
-function AgentHeaderActions({ product, live, tab, navigate, t }) {
-  const productId = idOf(product, "product");
-  const publicPath = publicPathOf(product);
-  const { copied, copy } = useCopy();
-  const [error, setError] = useState("");
-  return <div className="sx-agent__actions">
-    {live && publicPath ? <Button variant="secondary" type="button" leading={<Copy aria-hidden="true" />} onClick={() => copy(publicPath).catch(() => setError(t("copyFailed")))}>{copied ? t("copied") : t("copyLink")}</Button> : null}
-    {live && safePublicUrl(publicPath)
-      ? <Button asChild className="web-btn-yolk" trailing={<ExternalLink aria-hidden="true" />}><a href={safePublicUrl(publicPath)} target="_blank" rel="noreferrer">{t("viewStorefront")}</a></Button>
-      : tab === "publish" ? null : <Button variant="secondary" type="button" onClick={() => navigate(creatorProductPath(productId, "publish"))}>{t("sxTabPublish")}</Button>}
-    {error ? <span className="sx-inline-error" role="alert">{error}</span> : null}
-  </div>;
+function AgentHeaderActions({ product, live, t }) {
+  const href = live ? safePublicUrl(publicPathOf(product)) : null;
+  return href ? <div className="sx-agent__actions">
+    <Button asChild className="web-btn-yolk" trailing={<ExternalLink aria-hidden="true" />}><a href={href} target="_blank" rel="noreferrer">{t("viewStorefront")}</a></Button>
+  </div> : null;
 }
 
 /* ---------- Publish ---------- */
@@ -74,20 +67,22 @@ function PublishTab({ product, productId, request, navigate, locale, t, profile,
   const preview = useRemote(request, `${base}/storefront-preview`);
   const reloadAll = () => { reload(); status.retry(); preview.retry(); };
   const publicUrl = (status.state === "ready" || status.state === "refreshing") ? status.data?.public_url ?? null : null;
+  // One page: a sticky status bar (publish + share link), edits on the left, the client page on the right.
   return <div className="sx-publish">
-    <PublishStatus status={status} base={base} productId={productId} request={request} navigate={navigate} locale={locale} t={t} onPublished={reloadAll} />
-    <div className="sx-publish__edit">
-      <DetailsForm product={product} productId={productId} request={request} t={t} onSaved={reloadAll} />
-      <BriefSpecForm product={product} productId={productId} request={request} t={t} onSaved={reloadAll} />
+    <PublishStatus status={status} base={base} productId={productId} request={request} navigate={navigate} locale={locale} t={t} onPublished={reloadAll} publicUrl={publicUrl ?? publicPathOf(product)} />
+    <div className="sx-publish__grid">
+      <div className="sx-publish__edit">
+        <DetailsForm product={product} productId={productId} request={request} t={t} onSaved={reloadAll} />
+        <BriefSpecForm product={product} productId={productId} request={request} t={t} onSaved={reloadAll} />
+      </div>
+      <section className="sx-publish__preview" aria-labelledby="sx-preview-title">
+        <PreviewPane resource={preview} profile={profile} t={t} />
+      </section>
     </div>
-    <PublicLinkCard url={publicUrl ?? publicPathOf(product)} t={t} />
-    <section className="sx-publish__preview" aria-labelledby="sx-preview-title">
-      <PreviewPane resource={preview} profile={profile} t={t} />
-    </section>
   </div>;
 }
 
-function PublishStatus({ status, base, productId, request, navigate, locale, t, onPublished }) {
+function PublishStatus({ status, base, productId, request, navigate, locale, t, onPublished, publicUrl }) {
   const [state, setState] = useState({ busy: false, error: "", result: null });
   const { copied, copy } = useCopy();
   if (status.state === "loading" || status.state === "idle") return <LoadingState t={t} />;
@@ -108,7 +103,7 @@ function PublishStatus({ status, base, productId, request, navigate, locale, t, 
       setState({ busy: false, error: error.code === "system_missing" ? t("sxBuildIncomplete") : (error.message || friendlyError(error, t)), result: null });
     }
   }
-  const resultUrl = state.result?.public_url ?? null;
+  const shareUrl = live ? (state.result?.public_url ?? publicUrl) : null;
   const goToBuild = () => navigate(creatorFactoryPath(productId, "build", "generation"));
   return <section className={`sx-summary${live ? " is-live" : ""}`}>
     <div>
@@ -116,10 +111,11 @@ function PublishStatus({ status, base, productId, request, navigate, locale, t, 
       {live && info.published_at ? <p>{t("sxPublishedAt", dateTime(info.published_at, locale))}</p> : null}
       {live && pending.length ? <p className="sx-summary__pending">{t("sxPendingChanges")}</p> : null}
       {!info.can_publish ? <p>{t("sxBuildIncomplete")} <button type="button" className="sx-link" onClick={goToBuild}>{t("sxGoToBuild")}</button></p> : null}
+      {shareUrl ? <p className="sx-summary__link"><a className="sx-link" href={safePublicUrl(shareUrl)} target="_blank" rel="noreferrer">{absoluteUrl(shareUrl)}</a><button type="button" className="sx-link" onClick={() => void copy(shareUrl)}><Copy aria-hidden="true" />{copied ? t("copied") : t("copyLink")}</button></p> : null}
     </div>
     <Button className="web-btn-yolk" type="button" loading={state.busy} disabled={!info.can_publish || (live && pending.length === 0)} onClick={publish}>{live ? t("sxUpdateAction") : t("sxPublishAction")}</Button>
     {state.error ? <div className="sx-summary__note"><InlineError>{state.error}</InlineError></div> : null}
-    {state.result ? <div className="sx-summary__note"><SuccessNotice>{t("sxPublishedNotice")}{resultUrl ? <> · <a className="sx-link" href={safePublicUrl(resultUrl)} target="_blank" rel="noreferrer">{absoluteUrl(resultUrl)}</a> · <button type="button" className="sx-link" onClick={() => void copy(resultUrl)}>{copied ? t("copied") : t("copyLink")}</button></> : null}</SuccessNotice></div> : null}
+    {state.result ? <div className="sx-summary__note"><SuccessNotice>{t("sxPublishedNotice")}</SuccessNotice></div> : null}
   </section>;
 }
 
@@ -197,18 +193,6 @@ function BriefSpecForm({ product, productId, request, t, onSaved }) {
       {dirty ? <button type="button" className="sx-link sx-link--quiet" onClick={() => setFields(initial)}>{t("sxDiscard")}</button> : null}
     </div>
   </form>;
-}
-
-function PublicLinkCard({ url, t }) {
-  const { copied, copy } = useCopy();
-  const [error, setError] = useState("");
-  return <section className="sx-card">
-    <SectionHead title={t("shareLink")} />
-    {url ? <>
-      <div className="sx-linkbox"><Input readOnly value={absoluteUrl(url)} onFocus={(event) => event.target.select()} aria-label={t("shareLink")} /><Button type="button" leading={<Copy aria-hidden="true" />} onClick={() => copy(url).catch(() => setError(t("copyFailed")))}>{copied ? t("copied") : t("copyLink")}</Button></div>
-      {error ? <InlineError>{error}</InlineError> : null}
-    </> : <p className="sx-quiet">{t("sxLinkAfterPublish")}</p>}
-  </section>;
 }
 
 function PreviewPane({ resource, profile, t }) {

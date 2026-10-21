@@ -34,7 +34,8 @@ test('Published Products expose their canonical public link in the Agent header 
   const path = await readFile(new URL('./studioPath.js', import.meta.url), 'utf8');
   assert.match(path, /product\?\.status === "published" \|\| product\?\.status === "live"/);
   assert.match(kit, /`\/products\/\$\{idOf\(product, "product"\)\}`/);
-  assert.match(workspace, /href=\{safePublicUrl\(publicPath\)\} target="_blank" rel="noreferrer"/);
+  assert.match(workspace, /const href = live \? safePublicUrl\(publicPathOf\(product\)\) : null;/);
+  assert.match(workspace, /href=\{href\} target="_blank" rel="noreferrer"/);
   assert.match(portal, /published \? `\/products\/\$\{encodeURIComponent\(idOf\(product, "product"\)\)\}` : ""/);
   assert.match(portal, /window\.open\(publicHref, "_blank", "noopener,noreferrer"\)/);
 });
