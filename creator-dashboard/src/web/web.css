@@ -1,4 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700;900&family=Instrument+Serif:ital@0;1&display=swap");
 
 /* Hatch visual identity: paper, ink, one yolk accent. Light throughout. */
 :root {
@@ -16,7 +15,7 @@
   --bar: #e6e0d3;
   --pass: #2f7d4f;
   --fail: #b4442c;
-  --sans: "DM Sans", "PingFang SC", "Noto Sans SC", "Hiragino Sans", sans-serif;
+  --sans: "DM Sans Variable", "DM Sans", "PingFang SC", "Noto Sans SC", "Hiragino Sans", sans-serif;
   --serif: "Instrument Serif", Georgia, serif;
   --pad: clamp(20px, 6vw, 96px);
 }

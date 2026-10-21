@@ -1183,6 +1183,13 @@ test("V2 checkout session persists a free receipt and entitlement detail", async
   assert.equal(canonicalLibrary.entitlements[0].creator.avatar_url, creatorAvatar);
   assert.equal(canonicalLibrary.entitlements[0].creator.name, "Maya Chen");
 
+  // A withdrawn Agent leaves the web Library; desktop entitlement routes keep it.
+  const getCreatorProduct = dashboard.portalState.getCreatorProduct.bind(dashboard.portalState);
+  dashboard.portalState.getCreatorProduct = (creatorId, productId) => ({ ...getCreatorProduct(creatorId, productId), status: "withdrawn" });
+  assert.equal((await (await fetch(`${serverUrl(api)}/v1/library`, { headers })).json()).entitlements.length, 0);
+  assert.equal((await (await fetch(`${serverUrl(api)}/v1/user/entitlements`, { headers })).json()).entitlements.length, 1);
+  dashboard.portalState.getCreatorProduct = getCreatorProduct;
+
   const entitlementResponse = await fetch(`${serverUrl(api)}/v1/user/entitlements/${confirmed.entitlement_id}`, { headers });
   const entitlement = (await entitlementResponse.json()).entitlement;
   assert.equal(entitlementResponse.status, 200);

@@ -45,7 +45,7 @@ test("Generation uploads canonical files through Registry and the existing Runti
     const upload = tools.find(t => t.name === "corpus_upload")!;
     const exposedParameters = JSON.stringify(upload.parameters);
     assert.ok(!exposedParameters.includes("productId") && !exposedParameters.includes("product_id") && !exposedParameters.includes('"name"'));
-    const args = { promise: "Review an argument using its evidence.", skills: [{ path: "output/skills/review/SKILL.md", references: [{ path: "output/skills/review/references/evidence.md", kind: "method" }] }], knowledge: [] };
+    const args = { title: "Argument review", opening_questions: [{ label: "Paste the argument to review.", required: true }, { label: "Who is the audience?", required: false }], promise: "Review an argument using its evidence.", skills: [{ path: "output/skills/review/SKILL.md", references: [{ path: "output/skills/review/references/evidence.md", kind: "method" }] }], knowledge: [] };
     await upload.execute("publish", args);
     const saved = await store.get(session.id); assert.ok(saved.corpus);
     assert.equal(saved.corpus.product_id, productId);
@@ -64,6 +64,9 @@ test("Generation uploads canonical files through Registry and the existing Runti
     assert.equal((await store.get(session.id)).corpus?.release_digest, saved.corpus.release_digest);
     const revisedProduct = await registryRequest(env, `/v1/creator/products/${productId}`) as { product: { promise: string } };
     assert.equal(revisedProduct.product.promise, revisedPromise);
+    const written = revisedProduct.product as unknown as { name: string; brief_spec: { fields: Array<{ id: string; label: string; required: boolean }> } };
+    assert.equal(written.name, "Argument review");
+    assert.deepEqual(written.brief_spec.fields, [{ id: "q1", label: "Paste the argument to review.", required: true }, { id: "q2", label: "Who is the audience?", required: false }]);
     await assert.rejects(store.put(session.id, "output/CORPUS.md", Buffer.from("fake receipt"), { actor: "agent" }), /immutable/);
 
     const bytes = Buffer.from("# Original source\r\n\r\nKeep every line,  spacing and 中文.\r\n");
@@ -76,6 +79,12 @@ test("Generation uploads canonical files through Registry and the existing Runti
       assert.ok(String(error).includes(digest(bytes)));
       return true;
     });
+    // Shared input/manual files are selectable, even when the stored name is NFD.
+    const manualName = "input/manual/プロフィール.md";
+    await store.put(session.id, manualName.normalize("NFD"), Buffer.from("# 手動\n"), { actor: "user", mimeType: "text/markdown" });
+    await assert.rejects(upload.execute("manual-file", { ...args, knowledge: [{ path: manualName.normalize("NFC"), title: "Manual", reason: "Uploaded by the Expert" }] }), /503.*knowledge_index_unavailable/);
+    await rm(path.join(store.root, "manual"), { recursive: true, force: true });
+    await store.update(session.id, state => { state.knowledge = state.knowledge?.filter(k => !k.path.startsWith("input/manual/")); });
     const withKnowledge = await store.get(session.id);
     assert.equal(withKnowledge.knowledge?.length, 1);
     assert.equal(withKnowledge.knowledge?.[0]?.sha256, digest(bytes));

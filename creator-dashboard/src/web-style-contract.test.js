@@ -17,27 +17,20 @@ const webStylesheets = [
   "creator-dashboard/src/downloadPage.css"
 ];
 
-test("Web page CSS consumes the shared Hatch typography scale", () => {
-  const styles = webStylesheets.map(read).join("\n");
+test("Web CSS follows the visual guidelines: no monospace, no uppercase labels", () => {
+  const styles = [...webStylesheets, "creator-dashboard/src/webTheme.css", "creator-dashboard/src/web/web.css", "creator-dashboard/src/webChat.css"].map(read).join("\n").replace(/\/\*[\s\S]*?\*\//g, "");
 
-  assert.doesNotMatch(styles, /font-size:\s*[0-9]+(?:\.[0-9]+)?(?:px|rem)/);
-  assert.doesNotMatch(styles, /font-size:\s*clamp\(\s*[0-9]/);
-  assert.doesNotMatch(styles, /line-height:\s*[0-9]+(?:\.[0-9]+)?px/);
-  assert.match(styles, /var\(--hatch-type-(?:label|control|body|reading|title|display)\)/);
+  assert.doesNotMatch(styles, /monospace|DM Mono|font-family:\s*var\(--mono\)/);
+  assert.doesNotMatch(styles, /text-transform:\s*uppercase/);
 });
 
-test("Web reserves the display serif for primary headings", () => {
-  const baseStyles = read("creator-dashboard/src/styles.css");
-  const creatorStyles = read("creator-dashboard/src/creatorPortalV2.css");
-  const buyerStyles = read("creator-dashboard/src/buyerPortalV2.css");
-  const storefrontStyles = read("creator-dashboard/src/storefrontDetails.css");
+test("Web headings use DM Sans; the serif is reserved for brand moments", () => {
+  const theme = read("creator-dashboard/src/webTheme.css");
+  const entry = read("creator-dashboard/src/main.jsx");
 
-  assert.match(baseStyles, /h1\s*\{[^}]*font-family:\s*var\(--hatch-font-display\)/s);
-  assert.match(baseStyles, /h2\s*\{[^}]*font-family:\s*var\(--hatch-font-ui\)/s);
-  assert.match(creatorStyles, /\.cpv2 h2\s*\{[^}]*font-family:\s*var\(--hatch-font-ui/);
-  assert.match(buyerStyles, /\.buyer-v2 h2\s*\{[^}]*font-family:\s*var\(--hatch-font-ui/);
-  assert.match(storefrontStyles, /\.storefront-shared__hero h2\s*\{[^}]*font-family:\s*var\(--hatch-font-ui/);
-  assert.match(baseStyles, /\.hatch-app-paper h2\s*\{[^}]*font-family:\s*var\(--hatch-font-ui\)/s);
+  assert.match(entry, /import "\.\/webTheme\.css"/);
+  assert.match(theme, /--hatch-font-display:\s*var\(--web-sans\)/);
+  assert.match(theme, /html body h1,[^{]*\{[^}]*font-family:\s*var\(--web-sans\);[^}]*font-weight:\s*700/s);
 });
 
 test("Web entrypoint consumes HUI instead of a second component stylesheet", () => {
@@ -48,15 +41,14 @@ test("Web entrypoint consumes HUI instead of a second component stylesheet", () 
   assert.doesNotMatch(entry, /components\/ui\//);
 });
 
-test("Web surfaces use the egg lockup instead of the Desktop mark", () => {
+test("Sign-in uses the Web lockup", () => {
+  const source = read("creator-dashboard/src/BuyerPortalV2.jsx");
   const brand = read("creator-dashboard/src/WebBrand.jsx");
-  assert.match(brand, /\/assets\/web\/hatch-lockup\.svg/);
-  for (const file of ["BuyerPortalV2.jsx", "CreatorPortalV2.jsx", "DownloadPage.jsx", "WebChatPage.jsx", "main.jsx"]) {
-    const source = read(`creator-dashboard/src/${file}`);
-    assert.doesNotMatch(source, /<HatchBrand\b/, file);
-    assert.match(source, /<WebBrand\b/, file);
-  }
-  assert.match(read("creator-dashboard/src/BuyerPortalV2.jsx"), /<WebBrand as=\{RouterLink\} className=\{authBrandClassName\}/);
+
+  assert.match(source, /const authBrandClassName = "buyer-v2__brand"/);
+  assert.match(source, /<WebBrand as=\{RouterLink\} className=\{authBrandClassName\}/);
+  assert.doesNotMatch(source, /HatchBrand/);
+  assert.match(brand, /hatch-lockup\.svg/);
 });
 
 test("Web eyebrow labels stay visible despite the shared global eyebrow rule", () => {
@@ -87,16 +79,16 @@ test("Web home speaks to experts with one try CTA", () => {
   assert.doesNotMatch(page, /Agent GMV|Marketplace|Skill 太薄/);
 });
 
-test("creator navigation uses a standard hamburger menu on narrow screens", () => {
+test("creator navigation is a sidebar that becomes a drawer on narrow screens", () => {
   const source = read("creator-dashboard/src/CreatorPortalV2.jsx");
   const styles = read("creator-dashboard/src/creatorPortalV2.css");
 
-  assert.match(source, /className="cpv2-mobile-nav"/);
-  assert.match(source, /<DropdownMenu[\s\S]*label=\{t\("creatorNavigation"\)\}/);
-  assert.match(styles, /\.cpv2-mobile-nav\s*\{\s*display:\s*none;\s*\}/);
-  assert.match(styles, /@media\s*\(max-width:\s*720px\)[\s\S]*?\.cpv2-global-nav\s*\{\s*display:\s*none;\s*\}/s);
-  assert.match(styles, /@media\s*\(max-width:\s*720px\)[\s\S]*?\.cpv2-mobile-nav\s*\{[\s\S]*?display:\s*block;/s);
-  assert.match(styles, /\.cpv2-mobile-nav \.hui-icon-button\s*\{[\s\S]*?min-height:\s*40px;[\s\S]*?min-width:\s*40px;/s);
+  assert.match(source, /className=\{`sx-sidebar\$\{drawerOpen \? " is-open" : ""\}`\}/);
+  assert.match(source, /className="sx-mobilebar"/);
+  assert.match(source, /label=\{t\("openNavigation"\)\}/);
+  assert.match(styles, /\.sx-mobilebar\s*\{\s*display:\s*none;\s*\}/);
+  assert.match(styles, /@media\s*\(max-width:\s*900px\)[\s\S]*?\.sx-mobilebar\s*\{[^}]*display:\s*flex;/s);
+  assert.match(styles, /@media\s*\(max-width:\s*900px\)[\s\S]*?\.sx-sidebar\s*\{[^}]*transform:\s*translateX\(-105%\)/s);
   assert.doesNotMatch(source, /Skip to content/);
   assert.doesNotMatch(styles, /cpv2-skip/);
 });

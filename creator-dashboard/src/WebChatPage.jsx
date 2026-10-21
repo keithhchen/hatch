@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowUp, ChevronDown, ChevronUp, CircleAlert, Image, LoaderCircle, Menu, Paperclip, Plus, RotateCw, Square, X } from "lucide-react";
+import { ArrowLeft, ArrowUp, ChevronDown, ChevronRight, ChevronUp, CircleAlert, ImagePlus, Menu, Paperclip, Plus, RotateCw, Square, X } from "lucide-react";
 import { Avatar } from "@hatch/ui";
+import { WebBrand } from "./WebBrand.jsx";
+import { WebChatEgg, WebChatGate } from "./webChatGate.jsx";
 import { WebChatImageViewer } from "./components/WebChatImageViewer.jsx";
 import { Shimmer } from "./components/Shimmer.jsx";
 import { WebChatThinkingTicker } from "./components/WebChatThinkingTicker.jsx";
@@ -13,7 +15,6 @@ import { WebChatSnapshotReconciler } from "./webChatSnapshotReconciler.js";
 import { groupTimelineEntries, PendingWebSubmission, WebChatTimeline } from "./webChatTimeline.js";
 import { WebChatRoute } from "./webChatRoute.js";
 import "./webChat.css";
-import { WebBrand } from "./WebBrand.jsx";
 
 function conversationDate(value, locale) {
   const date = new Date(value);
@@ -105,7 +106,7 @@ function WebChatAccountControls({ profile, navigate, onSignOut, className = "" }
 
   return <>
     <div className={`buyer-account-controls buyer-account-controls--chat ${className}`.trim()}>
-      <BuyerAccountMenu user={profile} onSignOut={() => void signOut()} signingOut={signingOut} showLanguageOptions />
+      <BuyerAccountMenu user={profile} onSignOut={() => void signOut()} signingOut={signingOut} showLanguageOptions showName />
     </div>
     {error ? <p className="web-chat__account-error" role="alert">{webChatErrorText(error, locale)}</p> : null}
   </>;
@@ -113,13 +114,13 @@ function WebChatAccountControls({ profile, navigate, onSignOut, className = "" }
 
 function WebChatTimelineEntry({ entry, client, conversationId, locale, t, isAnimating = false, isLastItem = true }) {
   if (entry.kind === "text") {
-    return <div className="web-chat__content" key={entry.id}><WebChatMessageResponse isAnimating={isAnimating}>{entry.content}</WebChatMessageResponse></div>;
+    return <div className="web-chat__bubble web-chat__content" key={entry.id}><WebChatMessageResponse isAnimating={isAnimating}>{entry.content}</WebChatMessageResponse></div>;
   }
   if (entry.kind === "status") {
     return <div className="web-chat__runtime-status" key={entry.id}><span>{entry.content}</span></div>;
   }
-  if (entry.kind === "activity_group") return <WebChatActivityModal key={entry.id} entries={entry.entries} isLastItem={isLastItem} client={client} conversationId={conversationId} locale={locale} t={t} />;
-  if (entry.kind === "thinking" || entry.kind === "tool") return <WebChatActivityModal key={entry.id} entries={[entry]} isLastItem={isLastItem} client={client} conversationId={conversationId} locale={locale} t={t} />;
+  if (entry.kind === "activity_group") return <WebChatActivityModal key={entry.id} entries={entry.entries} isLastItem={isLastItem && isAnimating} client={client} conversationId={conversationId} locale={locale} t={t} />;
+  if (entry.kind === "thinking" || entry.kind === "tool") return <WebChatActivityModal key={entry.id} entries={[entry]} isLastItem={isLastItem && isAnimating} client={client} conversationId={conversationId} locale={locale} t={t} />;
   return <WebChatActivityBlock key={entry.id} entry={entry} client={client} conversationId={conversationId} locale={locale} t={t} />;
 }
 
@@ -140,10 +141,12 @@ function WebChatActivityModal({ entries, isLastItem, client, conversationId, loc
   }, [open]);
 
   return <>
-    <button type="button" className={`web-chat__activity-trigger${isLastItem ? "" : " web-chat__activity-trigger--processed"}`} aria-haspopup="dialog" onClick={() => { setHasOpened(true); setOpen(true); }}>
+    <button type="button" className={`web-chat__activity-trigger${isLastItem ? " web-chat__activity-trigger--live" : ""}`} aria-haspopup="dialog" onClick={() => { setHasOpened(true); setOpen(true); }}>
+      <span className="web-chat__activity-dot" aria-hidden="true" />
       {isLastItem
         ? <span className="web-chat__activity-trigger-label"><Shimmer as="span" className="web-chat__activity-trigger-title">{triggerTitle}</Shimmer>{thinkingPreview ? <WebChatThinkingTicker content={thinkingPreview} /> : null}</span>
         : <span className="web-chat__activity-trigger-label"><span>{triggerTitle}</span></span>}
+      <ChevronRight aria-hidden="true" />
     </button>
     <dialog ref={dialogRef} className="web-chat__activity-modal" aria-label={t("activityDetails")} onClose={() => setOpen(false)} onClick={event => { if (event.target === event.currentTarget) setOpen(false); }}>
       <header className="web-chat__activity-modal-header">
@@ -179,8 +182,9 @@ function WebChatActivityBlock({ entry, client, conversationId, locale, t, expand
   const present = activityPresentations[entry.kind];
   if (!present) throw new Error(`Unsupported Web Chat activity kind: ${entry.kind}`);
   const presentation = present(entry, { locale, t });
-  if (!expandable) return <div className="web-chat__activity-block">
+  if (!expandable) return <div className="web-chat__activity-block" data-status={entry.status ?? (entry.streaming ? "requested" : "completed")}>
     <div className="web-chat__activity-heading web-chat__activity-heading--static">
+      <span className="web-chat__activity-dot" aria-hidden="true" />
       <strong>{presentation.title}</strong>
     </div>
   </div>;
@@ -223,11 +227,26 @@ function WebChatToolDetails({ content, status, client, conversationId, locale, t
   const resultValue = detail?.result ?? content.result;
   return <>
     {content.error ? <p className="web-chat__tool-error">{webChatErrorText(content.error, locale)}</p> : null}
-    {detailLoading ? <span role="status">{t("loadingToolDetails")}</span> : null}
-    {detailError ? <span role="alert">{detailError}</span> : null}
-    <div>{t("arguments")}: {JSON.stringify(argumentsValue ?? {}, null, 2)}</div>
-    {resultValue !== undefined ? <div>{t("result")}: {JSON.stringify(resultValue, null, 2)}</div> : null}
+    {detailLoading ? <p className="web-chat__tool-note" role="status">{t("loadingToolDetails")}</p> : null}
+    {detailError ? <p className="web-chat__tool-error" role="alert">{detailError}</p> : null}
+    <WebChatToolValue label={t("arguments")} value={argumentsValue ?? {}} t={t} />
+    {resultValue !== undefined ? <WebChatToolValue label={t("result")} value={resultValue} t={t} /> : null}
   </>;
+}
+
+const toolValueText = value => typeof value === "string" ? value : JSON.stringify(value, null, 2);
+
+/** Tool input/output as readable label/value rows instead of raw JSON. */
+function WebChatToolValue({ label, value, t }) {
+  const rows = value && typeof value === "object" && !Array.isArray(value) ? Object.entries(value) : null;
+  return <section className="web-chat__tool-value">
+    <h3>{label}</h3>
+    {rows
+      ? rows.length
+        ? <dl>{rows.map(([key, item]) => <div key={key}><dt>{key.replaceAll("_", " ")}</dt><dd>{toolValueText(item)}</dd></div>)}</dl>
+        : <p>{t("noDetails")}</p>
+      : <p>{toolValueText(value)}</p>}
+  </section>;
 }
 
 export default function WebChatPage({ productId, conversationId: routedConversationId, request, navigate, profile, onSignOut }) {
@@ -569,7 +588,7 @@ export default function WebChatPage({ productId, conversationId: routedConversat
     }
     const viewport = messagesRef.current;
     if (viewport && followOutputRef.current) viewport.scrollTop = viewport.scrollHeight;
-  }, [messages, status, liveTimeline, draft]);
+  }, [messages, status, liveTimeline, draft, error]);
 
   useEffect(() => {
     if (!briefOpen) {
@@ -745,23 +764,57 @@ export default function WebChatPage({ productId, conversationId: routedConversat
     setStatus({ key: "stopping" });
   };
 
+
   const product = access?.product ?? publicProduct;
   const name = product?.name ?? product?.product_name ?? product?.product?.name ?? access?.product_name ?? "Expert Agent";
   const creator = access?.creator ?? product?.creator ?? { name: product?.creator_name ?? "Hatch Expert" };
   const creatorName = creator.name ?? creator.display_name ?? product?.creator_name ?? "Hatch Expert";
   const creatorAvatarUrl = creator.avatar_url ?? access?.creator_avatar_url ?? product?.creator_avatar_url;
+  const agentName = t("expertAi", { name: creatorName });
+  const briefFields = access?.brief_spec?.fields ?? access?.product?.brief_spec?.fields ?? [];
   const selectedConversation = conversations.find(item => item.id === conversationId);
-  return <div className="web-chat" aria-busy={!access && !publicProduct && !error}>
+  const libraryLink = <a href="/library" className="web-chat__button">{t("backToLibrary")}</a>;
+
+  if (!access) {
+    const account = <WebChatAccountControls profile={profile} navigate={navigate} onSignOut={onSignOut} />;
+    if (error) return <div className="web-chat web-chat--gate">
+      <WebChatGate alert account={account} pill={t("unavailablePill")} title={t("unableToOpenChat")} body={errorText} actions={<>
+        {error.code === "agent_unavailable" ? null : <button type="button" className="web-chat__button web-chat__button--ink" onClick={() => location.reload()}><RotateCw aria-hidden="true" />{t("retry")}</button>}
+        {libraryLink}
+      </>} />
+    </div>;
+    if (publicProduct) return <div className="web-chat web-chat--gate">
+      <WebChatGate account={account} pill={t("noAccessPill")} title={t("noAccessTitle", { name: creatorName })}
+        visual={<div className="web-chat__preview">
+          <div className="web-chat__preview-head">
+            <Avatar src={creatorAvatarUrl} name={creatorName} size="medium" />
+            <div><b>{name}</b><small>{agentName}</small></div>
+          </div>
+          {product?.promise ? <p className="web-chat__preview-bubble">{product.promise}</p> : null}
+        </div>}
+        actions={<>
+          <button type="button" className="web-chat__button web-chat__button--yolk" onClick={() => navigate(`/products/${encodeURIComponent(productId)}`)}>{t("subscribeToExpertProduct", { name: creatorName })}</button>
+          {libraryLink}
+        </>} />
+    </div>;
+    return <div className="web-chat web-chat--gate"><WebChatGate busy account={account} body={statusText} /></div>;
+  }
+
+  const timelineEntries = (timeline, live) => groupTimelineEntries(timeline).map((entry, index, entries) => <WebChatTimelineEntry key={entry.id} entry={entry} isLastItem={index === entries.length - 1} client={client} conversationId={conversationId} locale={locale} t={t} isAnimating={live} />);
+  const awaitingFirstConversation = !conversationId && conversations.length > 0;
+
+  return <div className="web-chat">
     {mobileSidebarOpen ? <button type="button" className="web-chat__sidebar-backdrop" aria-label={t("closeMenu")} onClick={() => setMobileSidebarOpen(false)} /> : null}
     <aside id="web-chat-mobile-sidebar" ref={mobileSidebarRef} className={`web-chat__sidebar${mobileSidebarOpen ? " web-chat__sidebar--mobile-open" : ""}`} role={mobileSidebarOpen ? "dialog" : undefined} aria-modal={mobileSidebarOpen || undefined} aria-label={t("conversationHistory")} inert={briefOpen}>
       <div className="web-chat__sidebar-top">
-        <WebBrand className="web-chat__brand" logoVariant="lockup" />
-        <a href="/library" className="web-chat__back" aria-label={t("backToLibrary")}><ArrowLeft aria-hidden="true" /><span>{t("backToLibrary")}</span></a>
+        <WebBrand href="/explore" className="web-chat__brand" />
+        {mobileSidebarOpen ? <button type="button" className="web-chat__icon-button" aria-label={t("closeMenu")} onClick={() => setMobileSidebarOpen(false)}><X aria-hidden="true" /></button> : null}
       </div>
-      <button type="button" className="web-chat__new" aria-label={t("newChat")} onClick={newConversation} disabled={!access}>
+      <a href="/library" className="web-chat__back"><ArrowLeft aria-hidden="true" /><span>{t("backToLibrary")}</span></a>
+      <button type="button" className="web-chat__new" onClick={newConversation}>
         <Plus aria-hidden="true" /><span>{t("newChat")}</span>
       </button>
-      <div className="web-chat__section-heading"><span>{t("recentConversations")}</span></div>
+      <h2 className="web-chat__section-heading">{t("recentConversations")}</h2>
       <nav className="web-chat__conversation-list" aria-label={t("conversationHistory")}>
         {conversations.map(item => (
           <button type="button" key={item.id} className="web-chat__conversation" aria-pressed={item.id === conversationId} onClick={() => { followOutputRef.current = true; selectConversation(item.id); }}>
@@ -769,75 +822,90 @@ export default function WebChatPage({ productId, conversationId: routedConversat
             <time className="web-chat__conversation-date" dateTime={item.created_at}>{conversationDate(item.created_at, locale)}</time>
           </button>
         ))}
-        {conversations.length === 0 && access ? <p className="web-chat__list-empty">{t("conversationsEmpty")}</p> : null}
+        {conversations.length === 0 ? <p className="web-chat__list-empty">{t("conversationsEmpty")}</p> : null}
+        {conversationCursor ? <button type="button" className="web-chat__load-more" onClick={() => void loadConversations().catch(cause => setError(cause))}><span>{t("loadEarlierConversations")}</span><ChevronDown aria-hidden="true" /></button> : null}
       </nav>
-      {conversationCursor ? <button type="button" className="web-chat__load-more" onClick={() => void loadConversations().catch(cause => setError(cause))}><span>{t("loadEarlierConversations")}</span><ChevronDown aria-hidden="true" /></button> : null}
       <WebChatAccountControls profile={profile} navigate={navigate} onSignOut={onSignOut} />
     </aside>
-    <header className="web-chat__mobile-topbar" inert={briefOpen}>
-      <button type="button" ref={mobileSidebarTriggerRef} className="web-chat__mobile-menu" aria-label={t("openMenu")} aria-expanded={mobileSidebarOpen} aria-controls="web-chat-mobile-sidebar" onClick={() => setMobileSidebarOpen(true)}><Menu aria-hidden="true" /></button>
-      <WebBrand className="web-chat__mobile-brand" logoVariant="lockup" />
-    </header>
-    <div className="web-chat__mobile-conversation-bar" inert={briefOpen}>
-      <div className="web-chat__mobile-agent">
-        <Avatar className="web-chat__heading-avatar" src={creatorAvatarUrl} name={creatorName} size="medium" />
-        <h1>{name}</h1>
-      </div>
-      {selectedConversation?.brief_snapshot ? <div className="web-chat__mobile-task-brief"><TaskBriefDropdown key={conversationId} snapshot={selectedConversation.brief_snapshot} t={t} /></div> : null}
-    </div>
-    <main className={`web-chat__main${error && access ? " web-chat__main--error" : ""}`} inert={briefOpen}>
+    <main className="web-chat__main" inert={briefOpen}>
       <header className="web-chat__header">
-        <div className="web-chat__heading-copy"><Avatar className="web-chat__heading-avatar" src={creatorAvatarUrl} name={creatorName} size="medium" /><h1>{name}</h1></div>
-        {selectedConversation?.brief_snapshot ? <div className="web-chat__header-tools"><TaskBriefDropdown key={conversationId} snapshot={selectedConversation.brief_snapshot} t={t} /></div> : null}
-      </header>
-      {error && access ? <div className="web-chat__error" role="alert"><CircleAlert aria-hidden="true" /><span>{errorText}</span><button type="button" onClick={() => { setError(null); if (snapshotPending) setSnapshotRetryVersion(value => value + 1); else setConnectionVersion(value => value + 1); }}><RotateCw aria-hidden="true" /><span>{t("retry")}</span></button></div> : null}
-      <div className="web-chat__messages" ref={messagesRef} onScroll={event => { const element = event.currentTarget; followOutputRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 112; }} aria-label={t("chatMessages")}>
-        {!snapshotPending && historyCursor ? <button type="button" className="web-chat__history" onClick={() => void loadHistory().catch(cause => setError(cause))}><span>{t("viewEarlierMessages")}</span><ChevronUp aria-hidden="true" /></button> : null}
-        {!access && !publicProduct && !error ? <div className="web-chat__gate" role="status"><LoaderCircle aria-hidden="true" /><span>{statusText}</span></div> : null}
-        {!access && error ? <div className="web-chat__gate web-chat__gate--error" role="alert"><CircleAlert aria-hidden="true" /><h2>{t("unableToOpenChat")}</h2><p>{errorText}</p><button type="button" onClick={() => location.reload()}><RotateCw aria-hidden="true" /><span>{t("retry")}</span></button></div> : null}
-        {access && snapshotPending && !error ? <div className="web-chat__gate" role="status"><LoaderCircle aria-hidden="true" /><span>{t("loadingConversation")}</span></div> : null}
-        {(access || publicProduct) && (!access || !conversationId) && messages.length === 0 && !activeRun ? <div className="web-chat__empty">
-          <span className="web-chat__empty-avatar-frame"><Avatar className="web-chat__empty-avatar" src={creatorAvatarUrl} name={creatorName} size="large" /></span>
-          <h2>{name}</h2>
-          {product?.promise ? <p>{product.promise}</p> : null}
-          {access
-            ? <button type="button" className="web-chat__empty-action" onClick={newConversation}><Plus aria-hidden="true" />{t("startConversation")}</button>
-            : <button type="button" className="web-chat__empty-action" onClick={() => navigate(`/products/${encodeURIComponent(productId)}`)}>{t("subscribeToExpertProduct", { name: creatorName })}</button>}
-        </div> : null}
-        {!snapshotPending ? messages.map(message => <article className={`web-chat__message web-chat__message--${message.role}`} key={message.renderKey ?? `${message.run_id}-${message.role}`}>
-          <div className="web-chat__message-body">
-            {message.role === "assistant"
-                ? message.transient
-                  ? message.timeline?.length
-                  ? groupTimelineEntries(message.timeline).map((entry, index, timeline) => <WebChatTimelineEntry key={entry.id} entry={entry} isLastItem={index === timeline.length - 1} client={client} conversationId={conversationId} locale={locale} t={t} isAnimating />)
-                  : <div className="web-chat__working"><LoaderCircle aria-hidden="true" />{statusText}</div>
-                : groupTimelineEntries(WebChatTimeline.fromHistory(message)).map((entry, index, timeline) => <WebChatTimelineEntry key={entry.id} entry={entry} isLastItem={index === timeline.length - 1} client={client} conversationId={conversationId} locale={locale} t={t} />)
-              : <div className="web-chat__content"><WebChatMessageResponse>{message.content || ""}</WebChatMessageResponse></div>}
-            {message.attachments?.some(item => !BrowserImageAttachments.accepts(item.media_type)) ? <div className="web-chat__attachments">{message.attachments.filter(item => !BrowserImageAttachments.accepts(item.media_type)).map(item => <span key={item.attachment_id}><Paperclip aria-hidden="true" />{item.display_name}</span>)}</div> : null}
-            {!message.optimistic && message.attachments?.filter(item => BrowserImageAttachments.accepts(item.media_type) && item.asset_id).map(item => {
-              const src = client.assetUrl(conversationId, item.asset_id);
-              return <WebChatImageViewer key={item.attachment_id} src={src} alt={item.display_name} title={t("imagePreview")} closeLabel={t("close")} viewLabel={t("viewImage")}>
-                <img className="web-chat__attachment-image" alt="" src={src} />
-              </WebChatImageViewer>;
-            })}
-          </div>
-        </article>) : null}
-      </div>
-      {access && conversationId ? <form className="web-chat__composer" aria-busy={snapshotPending} onSubmit={send}>
-        {images.length ? <div className="web-chat__images" aria-label={t("imagesToSend")}>{images.map(file => <span className="web-chat__image-chip" key={`${file.name}-${file.lastModified}`}><Paperclip aria-hidden="true" /><span title={file.name}>{file.name}</span><button type="button" aria-label={t("removeImage", { name: file.name })} onClick={() => { pendingSubmissionRef.current = null; setImages(current => current.filter(entry => entry !== file)); }} disabled={snapshotPending}><X aria-hidden="true" /></button></span>)}</div> : null}
-        <textarea ref={draftRef} aria-label={t("messageAgent", { agent: name })} value={draft} onChange={event => { pendingSubmissionRef.current = null; setDraft(event.target.value); }} placeholder={t("messagePlaceholder")} disabled={snapshotPending || Boolean(activeRun)} onKeyDown={event => { if (event.key !== "Enter" || event.shiftKey || isImeConfirmation(event)) return; event.preventDefault(); void send(event); }} />
-        <div className="web-chat__actions">
-          <div className="web-chat__composer-tools"><label className="web-chat__attach"><Image aria-hidden="true" /><input type="file" accept="image/*" multiple aria-label={t("addImages")} onChange={event => { const selected = [...event.target.files]; if (images.length + selected.length > 8) setError(new WebChatPresentationError("imageCountLimit")); else { pendingSubmissionRef.current = null; setImages(current => [...current, ...selected]); } event.target.value = ""; }} disabled={snapshotPending || Boolean(activeRun)} /></label></div>
-          {activeRun ? <button type="button" className="web-chat__stop" aria-label={t("stopReply")} onClick={cancel}><Square aria-hidden="true" /><span>{t("stopReply")}</span></button> : <button type="submit" className="web-chat__send" aria-label={t("sendMessage")} disabled={snapshotPending || (!draft.trim() && !images.length)}><span>{t("send")}</span><ArrowUp aria-hidden="true" /></button>}
+        <button type="button" ref={mobileSidebarTriggerRef} className="web-chat__icon-button web-chat__mobile-menu" aria-label={t("openMenu")} aria-expanded={mobileSidebarOpen} aria-controls="web-chat-mobile-sidebar" onClick={() => setMobileSidebarOpen(true)}><Menu aria-hidden="true" /></button>
+        <div className="web-chat__heading">
+          <Avatar className="web-chat__heading-avatar" src={creatorAvatarUrl} name={creatorName} size="medium" />
+          <div className="web-chat__heading-copy"><h1>{name}</h1><small>{agentName}</small></div>
         </div>
-      </form> : null}
+        {selectedConversation?.brief_snapshot ? <TaskBriefDropdown key={conversationId} snapshot={selectedConversation.brief_snapshot} t={t} /> : null}
+      </header>
+      <div className="web-chat__messages" ref={messagesRef} onScroll={event => { const element = event.currentTarget; followOutputRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 112; }} aria-label={t("chatMessages")}>
+        <div className="web-chat__thread">
+          {!snapshotPending && historyCursor ? <button type="button" className="web-chat__history" onClick={() => void loadHistory().catch(cause => setError(cause))}><ChevronUp aria-hidden="true" /><span>{t("viewEarlierMessages")}</span></button> : null}
+          {(snapshotPending || awaitingFirstConversation) && !error ? <div className="web-chat__loading" role="status"><WebChatEgg size={34} className="web-chat-egg--bob" /><span>{t("loadingConversation")}</span></div> : null}
+          {!conversationId && !awaitingFirstConversation && !activeRun ? <section className="web-chat__welcome">
+            <Avatar className="web-chat__welcome-avatar" src={creatorAvatarUrl} name={creatorName} size="large" />
+            <span className="web-pill">{t("welcomePill", { name: creatorName })}</span>
+            <h2>{name}</h2>
+            {product?.promise ? <p>{product.promise}</p> : null}
+            <button type="button" className="web-chat__button web-chat__button--yolk" onClick={newConversation}><Plus aria-hidden="true" />{t("startConversation")}</button>
+          </section> : null}
+          {conversationId && !snapshotPending && messages.length === 0 && !activeRun ? <section className="web-chat__welcome web-chat__welcome--quiet">
+            <Avatar className="web-chat__welcome-avatar" src={creatorAvatarUrl} name={creatorName} size="large" />
+            <h2>{t("emptyHeadline")}</h2>
+            <p>{t("emptyConversationBody", { agent: agentName })}</p>
+          </section> : null}
+          {!snapshotPending ? messages.map(message => {
+            const files = message.attachments?.filter(item => !BrowserImageAttachments.accepts(item.media_type)) ?? [];
+            const pictures = message.optimistic ? [] : message.attachments?.filter(item => BrowserImageAttachments.accepts(item.media_type) && item.asset_id) ?? [];
+            return <article className={`web-chat__message web-chat__message--${message.role}`} key={message.renderKey ?? `${message.run_id}-${message.role}`}>
+              {message.role === "assistant" ? <Avatar className="web-chat__message-avatar" src={creatorAvatarUrl} name={creatorName} size="small" /> : null}
+              <div className="web-chat__message-body">
+                {message.role === "assistant"
+                  ? message.transient
+                    ? message.timeline?.length
+                      ? timelineEntries(message.timeline, true)
+                      : <div className="web-chat__bubble web-chat__typing" role="status"><span className="web-chat__typing-dots" aria-hidden="true"><i /><i /><i /></span><span>{statusText}</span></div>
+                    : timelineEntries(WebChatTimeline.fromHistory(message), false)
+                  : message.content ? <div className="web-chat__bubble web-chat__content"><WebChatMessageResponse>{message.content}</WebChatMessageResponse></div> : null}
+                {files.length ? <div className="web-chat__attachments">{files.map(item => <span key={item.attachment_id}><Paperclip aria-hidden="true" />{item.display_name}</span>)}</div> : null}
+                {pictures.length ? <div className="web-chat__pictures">{pictures.map(item => {
+                  const src = client.assetUrl(conversationId, item.asset_id);
+                  return <WebChatImageViewer key={item.attachment_id} src={src} alt={item.display_name} title={t("imagePreview")} closeLabel={t("close")} viewLabel={t("viewImage")}>
+                    <img className="web-chat__attachment-image" alt="" src={src} />
+                  </WebChatImageViewer>;
+                })}</div> : null}
+              </div>
+            </article>;
+          }) : null}
+        </div>
+      </div>
+      <div className="web-chat__dock">
+        {error ? <div className="web-chat__notice" role="alert"><CircleAlert aria-hidden="true" /><span>{errorText}</span><button type="button" onClick={() => { setError(null); if (snapshotPending) setSnapshotRetryVersion(value => value + 1); else setConnectionVersion(value => value + 1); }}><RotateCw aria-hidden="true" /><span>{t("retry")}</span></button></div> : null}
+        {conversationId ? <form className="web-chat__composer" aria-busy={snapshotPending} onSubmit={send}>
+          {images.length ? <div className="web-chat__images" aria-label={t("imagesToSend")}>{images.map(file => <span className="web-chat__image-chip" key={`${file.name}-${file.lastModified}`}><Paperclip aria-hidden="true" /><span title={file.name}>{file.name}</span><button type="button" aria-label={t("removeImage", { name: file.name })} onClick={() => { pendingSubmissionRef.current = null; setImages(current => current.filter(entry => entry !== file)); }} disabled={snapshotPending}><X aria-hidden="true" /></button></span>)}</div> : null}
+          <textarea ref={draftRef} aria-label={t("messageAgent", { agent: agentName })} value={draft} onChange={event => { pendingSubmissionRef.current = null; setDraft(event.target.value); }} placeholder={t("messagePlaceholder")} disabled={snapshotPending || Boolean(activeRun)} onKeyDown={event => { if (event.key !== "Enter" || event.shiftKey || isImeConfirmation(event)) return; event.preventDefault(); void send(event); }} />
+          <div className="web-chat__actions">
+            <label className="web-chat__attach" title={t("addImages")}><ImagePlus aria-hidden="true" /><input type="file" accept="image/*" multiple aria-label={t("addImages")} onChange={event => { const selected = [...event.target.files]; if (images.length + selected.length > 8) setError(new WebChatPresentationError("imageCountLimit")); else { pendingSubmissionRef.current = null; setImages(current => [...current, ...selected]); } event.target.value = ""; }} disabled={snapshotPending || Boolean(activeRun)} /></label>
+            <span className="web-chat__hint">{t("composerHint")}</span>
+            {activeRun
+              ? <button type="button" className="web-chat__stop" aria-label={t("stopReply")} onClick={cancel}><Square aria-hidden="true" /><span>{t("stopReply")}</span></button>
+              : <button type="submit" className="web-chat__send" aria-label={t("sendMessage")} disabled={snapshotPending || (!draft.trim() && !images.length)}><ArrowUp aria-hidden="true" /></button>}
+          </div>
+        </form> : null}
+      </div>
     </main>
     {briefOpen ? <div className="web-chat__brief-backdrop"><form ref={briefDialogRef} className="web-chat__brief" role="dialog" aria-modal="true" aria-labelledby="web-chat-brief-title" onSubmit={submitBrief}>
-      <button type="button" className="web-chat__brief-close" aria-label={t("close")} onClick={() => setBriefOpen(false)}><X aria-hidden="true" /></button>
-      <Avatar className="web-chat__brief-avatar" src={creatorAvatarUrl} name={creatorName} size="large" />
+      <button type="button" className="web-chat__icon-button web-chat__brief-close" aria-label={t("close")} onClick={() => setBriefOpen(false)}><X aria-hidden="true" /></button>
+      <div className="web-chat__brief-head"><Avatar src={creatorAvatarUrl} name={creatorName} size="medium" /><span className="web-pill">{agentName}</span></div>
       <h2 id="web-chat-brief-title">{t("startNewTask")}</h2>
-      {(access?.brief_spec?.fields ?? access?.product?.brief_spec?.fields ?? []).map((field, index) => <label key={field.id}>{field.label}{field.required ? <span aria-hidden="true"> · {t("required")}</span> : null}<textarea autoFocus={index === 0} required={field.required} maxLength={32000} value={briefAnswers[field.id] ?? ""} onChange={event => setBriefAnswers(current => ({ ...current, [field.id]: event.target.value }))} /></label>)}
-      <div className="web-chat__brief-actions"><button type="button" onClick={() => setBriefOpen(false)}>{t("later")}</button><button type="submit"><span>{t("startConversation")}</span><ArrowUp aria-hidden="true" /></button></div>
+      <p className="web-chat__brief-intro">{t("briefIntro", { agent: agentName })}</p>
+      {briefFields.map((field, index) => <label key={field.id}>
+        <span className="web-chat__brief-label">{field.label}{field.required ? <em>{t("required")}</em> : null}</span>
+        <textarea autoFocus={index === 0} required={field.required} maxLength={32000} value={briefAnswers[field.id] ?? ""} onChange={event => setBriefAnswers(current => ({ ...current, [field.id]: event.target.value }))} />
+      </label>)}
+      {error ? <p className="web-chat__brief-error" role="alert">{errorText}</p> : null}
+      <div className="web-chat__brief-actions">
+        <button type="button" className="web-chat__button" onClick={() => setBriefOpen(false)}>{t("later")}</button>
+        <button type="submit" className="web-chat__button web-chat__button--yolk"><span>{t("startConversation")}</span><ArrowUp aria-hidden="true" /></button>
+      </div>
     </form></div> : null}
   </div>;
 }

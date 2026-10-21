@@ -1,11 +1,12 @@
 const ROOT = "/studio";
-const PRODUCT_TABS = new Set(["overview", "files", "about-you", "corpus", "brief", "complete"]);
-const RETIRED_PRODUCT_TABS = new Map([
-  ["test", "about-you"],
-  ["examples", "corpus"],
-  ["versions", "complete"],
-  ["data-controls", "files"]
-]);
+// Agent workspace tabs. Build keeps the Factory namespace (/studio/factory/:id/...);
+// the others live under /studio/products/:id/<tab>.
+export const AGENT_TABS = Object.freeze(["build", "publish"]);
+const PRODUCT_TABS = new Set(["publish"]);
+// Retired Product tabs whose content now lives in Publish.
+const PUBLISH_ALIASES = new Set(["storefront", "readiness", "preview", "versions"]);
+// Older Product URLs open the Build tab of the same Agent.
+const RETIRED_PRODUCT_TABS = new Set(["overview", "files", "about-you", "corpus", "brief", "complete", "test", "examples", "data-controls"]);
 export const FACTORY_SECTION_AGENTS = Object.freeze({
   sources: Object.freeze(["research", "voice"]),
   build: Object.freeze(["generation"]),
@@ -31,58 +32,63 @@ export function creatorFactoryPath(productId, factorySection, factoryAgent) {
   return `${sectionPath}/${factoryAgent}`;
 }
 
+/** The canonical URL of one Agent workspace tab. Build is the Factory path. */
 export function creatorProductPath(productId, tab) {
-  if (tab === undefined || tab === null) return creatorFactoryPath(productId);
-  const root = `${ROOT}/products/${encodeURIComponent(productId)}`;
-  return tab ? `${root}/${tab}` : root;
+  if (tab === undefined || tab === null || tab === "build") return creatorFactoryPath(productId);
+  if (!PRODUCT_TABS.has(tab)) throw new RangeError("Unknown Agent tab");
+  return `${ROOT}/products/${encodeURIComponent(productId)}/${tab}`;
 }
+
+const page = (kind, section, extra = {}) => ({ kind, section, ...extra });
+const redirect = (to, section) => ({ kind: "redirect", section, to });
 
 export function parseCreatorRoute(pathname) {
   const clean = `/${String(pathname ?? "").split(/[?#]/)[0].split("/").filter(Boolean).join("/")}`;
-  const normalized = clean;
-  if (normalized !== ROOT && !normalized.startsWith(`${ROOT}/`)) return { kind: "not-found", section: "" };
-  const segments = normalized.slice(ROOT.length).split("/").filter(Boolean).map(safeDecode);
-  if (!segments.length) return { kind: "home", section: "home" };
-  if (segments[0] === "products" && segments.length === 2 && segments[1] === "new") return { kind: "product-create", section: "products" };
-  if (segments[0] === "factory") {
-    if (segments.length === 1) return { kind: "factory-index", section: "products" };
-    const productId = segments[1];
-    if (segments.length === 2) return { kind: "factory-agents", section: "products", productId };
-    const factorySection = segments[2];
-    if (!Object.hasOwn(FACTORY_SECTION_AGENTS, factorySection)) return { kind: "not-found", section: "products" };
-    if (segments.length === 3) return { kind: "factory-agents", section: "products", productId, factorySection };
-    const factoryAgent = segments[3];
-    if (segments.length === 4 && (FACTORY_SECTION_AGENTS[factorySection].includes(factoryAgent) || FACTORY_SECTION_PAGES[factorySection].includes(factoryAgent))) {
-      return { kind: "factory-agents", section: "products", productId, factorySection, factoryAgent };
+  if (clean !== ROOT && !clean.startsWith(`${ROOT}/`)) return page("not-found", "");
+  const segments = clean.slice(ROOT.length).split("/").filter(Boolean).map(safeDecode);
+  const [head, second, third, fourth] = segments;
+  if (!segments.length) return page("home", "home");
+  if (head === "factory") {
+    if (segments.length === 1) return redirect(`${ROOT}/products`, "products");
+    const productId = second;
+    if (segments.length === 2) return page("agent", "products", { productId, tab: "build" });
+    if (!Object.hasOwn(FACTORY_SECTION_AGENTS, third)) return page("not-found", "products");
+    if (segments.length === 3) return page("agent", "products", { productId, tab: "build", factorySection: third });
+    if (segments.length === 4 && (FACTORY_SECTION_AGENTS[third].includes(fourth) || FACTORY_SECTION_PAGES[third].includes(fourth))) {
+      return page("agent", "products", { productId, tab: "build", factorySection: third, factoryAgent: fourth });
     }
-    return { kind: "not-found", section: "products" };
+    return page("not-found", "products");
   }
-  if (segments[0] === "products") {
-    if (segments.length === 1) return { kind: "products", section: "products" };
-    const productId = segments[1];
-    if (segments.length === 2) return { kind: "product", section: "products", productId, tab: "overview" };
-    if (PRODUCT_TABS.has(segments[2])) return { kind: "product", section: "products", productId, tab: segments[2] };
-    if (RETIRED_PRODUCT_TABS.has(segments[2])) return { kind: "product", section: "products", productId, tab: RETIRED_PRODUCT_TABS.get(segments[2]) };
-    if (segments[2] === "preview") return { kind: "preview", section: "products", productId };
-    if (segments[2] === "candidates" && segments[3]) return { kind: "candidate", section: "products", productId, candidateId: segments[3] };
-    if (segments[2] === "releases" && segments[3]) return { kind: "release", section: "products", productId, releaseId: segments[3] };
+  if (head === "products") {
+    if (segments.length === 1) return page("products", "products");
+    if (second === "new" && segments.length === 2) return page("product-create", "products");
+    const productId = second;
+    if (segments.length === 2) return redirect(creatorFactoryPath(productId), "products");
+    if (segments.length === 3 && PRODUCT_TABS.has(third)) return page("agent", "products", { productId, tab: third });
+    if (segments.length === 3 && RETIRED_PRODUCT_TABS.has(third)) return redirect(creatorFactoryPath(productId), "products");
+    // Studio has no version history; Storefront, readiness, preview and version links open Publish.
+    if ((segments.length === 3 && PUBLISH_ALIASES.has(third)) || (segments.length === 4 && third === "releases")) return redirect(creatorProductPath(productId, "publish"), "products");
+    if (segments.length === 4 && third === "candidates") return page("candidate", "products", { productId, candidateId: fourth });
+    return page("not-found", "products");
   }
-  if (segments[0] === "orders") return segments[1] ? { kind: "order", section: "orders", orderId: segments[1] } : { kind: "orders", section: "orders" };
-  return { kind: "not-found", section: "" };
+  if (head === "orders") {
+    if (segments.length === 1) return page("orders", "orders");
+    if (segments.length === 2) return page("order", "orders", { orderId: second });
+    return page("not-found", "orders");
+  }
+  if (head === "earnings" && segments.length === 1) return page("earnings", "earnings");
+  // The payout onboarding provider returns to /studio/payouts.
+  if (head === "payouts" && segments.length === 1) return redirect(`${ROOT}/earnings`, "earnings");
+  if (head === "settings" && segments.length === 1) return page("settings", "settings");
+  return page("not-found", "");
 }
 
 export function creatorRouteTitle(route) {
-  if (route.kind === "factory-agents" || route.kind === "factory-index") return "Factory";
-  if (route.kind === "home") return "Expert home";
-  if (route.kind === "products") return "Products";
-  if (route.kind === "product-create") return "Create product";
-  if (route.kind === "candidate") return "Candidate review";
-  if (route.kind === "preview") return "Storefront preview";
-  if (route.kind === "release") return "Release";
-  if (route.kind === "orders") return "Expert orders";
-  if (route.kind === "order") return "Expert order";
-  if (route.kind === "product") return "Product";
-  return "Expert dashboard";
+  const titles = {
+    home: "Overview", products: "Agents", "product-create": "New Agent", agent: "Agent", candidate: "Candidate review",
+    orders: "Orders", order: "Order", earnings: "Earnings", settings: "Settings"
+  };
+  return titles[route.kind] ?? "Studio";
 }
 
 function safeDecode(value) {

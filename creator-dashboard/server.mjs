@@ -1432,9 +1432,10 @@ export async function createDashboardApp(options = {}) {
         return send(response, 404, { error: { code: "not_found", message: "Route not found." } });
       }
 
-      const productContractPath = url.pathname.match(/^\/v1\/creator\/products(?:\/[^/]+(?:\/files(?:\/[^/]+)?|\/graph|\/brief-spec|\/registry|\/withdraw|\/nodes\/(?:about-you|corpus)\/executions(?:\/[^/]+(?:\/answers)?)?)?)?$/);
+      const productContractPath = url.pathname.match(/^\/v1\/creator\/products(?:\/[^/]+(?:\/files(?:\/[^/]+)?|\/graph|\/brief-spec|\/registry|\/live|\/withdraw|\/nodes\/(?:about-you|corpus)\/executions(?:\/[^/]+(?:\/answers)?)?)?)?$/);
       const productNodeContract = /\/nodes\/(?:about-you|corpus)\/executions(?:\/[^/]+(?:\/answers)?)?$/.test(url.pathname);
       const productRegistryContract = /\/registry$/.test(url.pathname);
+      const productLiveContract = /\/live$/.test(url.pathname);
       const productContractWrite = productContractPath && (
         request.method === "POST" || request.method === "PATCH" || request.method === "PUT"
       ) && (
@@ -1443,6 +1444,7 @@ export async function createDashboardApp(options = {}) {
         || /\/withdraw$/.test(url.pathname)
         || productNodeContract
         || productRegistryContract
+        || productLiveContract
         || /^\/v1\/creator\/products\/[^/]+$/.test(url.pathname)
       );
       const productContractDelete = productContractPath
@@ -1452,6 +1454,7 @@ export async function createDashboardApp(options = {}) {
         url.pathname === "/v1/creator/products"
         || /\/files(?:\/[^/]+)?$/.test(url.pathname)
         || /\/graph$/.test(url.pathname)
+        || productLiveContract
         || productNodeContract
       );
       if (productContractWrite || productContractRead || productContractDelete) {
@@ -2143,6 +2146,8 @@ export async function createDashboardApp(options = {}) {
           creatorNames
         )
           .filter((entitlement) => entitlementMatchesStatus(entitlement, status))
+          // The web Library lists only Agents still offered; desktop routes keep every entitlement.
+          .filter((entitlement) => url.pathname !== "/v1/library" || isOfferedProduct(entitlement, catalog, portalState))
           .sort(compareEntitlementsNewestFirst);
         const page = paginate(entitlements, url);
         return send(response, 200, {
@@ -3865,6 +3870,11 @@ function entitlementMatchesStatus(entitlement, status) {
   if (status === "active") return entitlement.status === "active" || entitlement.status === "reserved";
   if (status === "past") return ["consumed", "expired", "revoked"].includes(entitlement.status);
   return entitlement.status === status;
+}
+
+function isOfferedProduct(entitlement, catalog, portalState) {
+  const entry = catalog.find((agent) => agent.product_id === entitlement.product_id);
+  return Boolean(entry) && portalState.getCreatorProduct(entry.creator_id, entry.product_id)?.status !== "withdrawn";
 }
 
 function compareEntitlementsNewestFirst(left, right) {

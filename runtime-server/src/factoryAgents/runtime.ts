@@ -188,6 +188,8 @@ export class WorkbenchRuntime {
     const unsubscribe = agent.subscribe(event => {
       if (event.type === "turn_start" && ++turnCount > (this.options.maxTurns ?? 80)) controller.abort(new Error("运行达到工具轮次预算，可检查已有文件后继续"));
       if (event.type === "message_end") {
+        // In stream order with the deltas, so clients settle this reply before the next one streams.
+        if (channel === "visible") this.emit(id, "message_end");
         persistence = persistence.then(async () => {
           await this.store.update(id, s => {
             if (channel === "visible") { s.messages.push(event.message); s.context.push(event.message); }

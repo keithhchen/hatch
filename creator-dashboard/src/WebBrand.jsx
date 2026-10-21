@@ -3,16 +3,14 @@ import React from "react";
 const LOCKUP = "/assets/web/hatch-lockup.svg";
 
 /**
- * Web logo: the combined egg + wordmark lockup. Same props as @hatch/ui
- * HatchBrand (as, className, children) so Web surfaces swap in place;
- * Desktop keeps HatchBrand and its own mark.
+ * The Web logo: the combined egg + wordmark lockup SVG, optionally followed by
+ * a surface label such as "Studio". Desktop keeps @hatch/ui HatchBrand.
  */
-export function WebBrand({ as: Element = "span", className = "", logoVariant: _logoVariant, children, ...props }) {
+export function WebBrand({ as: Element = "a", label, className = "", ...props }) {
   return (
-    <Element className={["hatch-brand", className].filter(Boolean).join(" ")} {...props}>
-      <img className="hatch-brand__lockup" src={LOCKUP} alt="" aria-hidden="true" />
-      <span className="hui-visually-hidden">Hatch.</span>
-      {children}
+    <Element className={["web-brand", className].filter(Boolean).join(" ")} {...props}>
+      <img src={LOCKUP} alt="Hatch" width={101} height={30} />
+      {label ? <small>{label}</small> : null}
     </Element>
   );
 }

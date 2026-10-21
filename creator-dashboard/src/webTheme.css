@@ -1,0 +1,138 @@
+/* Hatch Web visual system (2026-10). Web-only overrides of the shared
+ * @hatch/ui tokens: warm paper, ink, one yolk accent, DM Sans everywhere,
+ * serif only for brand moments, no monospace. Desktop keeps the package
+ * defaults because it does not load this file. See docs/web-visual-guidelines.md. */
+@import "@fontsource-variable/dm-sans/index.css";
+@import "@fontsource/instrument-serif/400.css";
+
+:root {
+  --web-paper: #faf8f2;
+  --web-card: #fffdf8;
+  --web-panel: #f3efe6;
+  --web-ink: #17150f;
+  --web-body: #3e3a31;
+  --web-muted: #6b6455;
+  --web-rule: #e8e2d4;
+  --web-yolk: #f5b700;
+  --web-yolk-soft: #fff3cc;
+  --web-gold: #7a5a00;
+  --web-on-yolk: #2a1f00;
+  --web-pass: #2f7d4f;
+  --web-pass-soft: #d8ecdc;
+  --web-blue: #3f6fa8;
+  --web-blue-soft: #e3eefb;
+  --web-lilac: #a0549a;
+  --web-lilac-soft: #f4e4f1;
+  --web-fail: #b4442c;
+  --web-sans: "DM Sans Variable", "DM Sans", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans", "Noto Sans SC", sans-serif;
+  --web-serif: "Instrument Serif", Georgia, serif;
+  --web-shadow: 0 12px 36px rgba(23, 21, 15, 0.06);
+  --web-shadow-lift: 0 20px 50px rgba(23, 21, 15, 0.1);
+
+  /* Map the shared design tokens onto the Web palette. */
+  --hatch-canvas: var(--web-paper);
+  --hatch-ink: var(--web-ink);
+  --hatch-text-secondary: var(--web-muted);
+  --hatch-accent: var(--web-gold);
+  --hatch-accent-hover: #5e4500;
+  --hatch-border: var(--web-rule);
+  --hatch-border-subtle: color-mix(in srgb, var(--web-rule) 70%, transparent);
+  --hatch-panel: var(--web-card);
+  --hatch-panel-muted: var(--web-panel);
+  --hatch-font-display: var(--web-sans);
+  --hatch-font-ui: var(--web-sans);
+  --hatch-font-pill: var(--web-sans);
+  --hatch-font-mono: var(--web-sans);
+  --hatch-display-tracking: -0.02em;
+  --hatch-display-leading: 1.15;
+
+  --hatch-ui-paper: var(--web-paper);
+  --hatch-ui-paper-deep: var(--web-panel);
+  --hatch-ui-panel: var(--web-card);
+  --hatch-ui-panel-muted: var(--web-panel);
+  --hatch-ui-panel-strong: #ebe5d8;
+  --hatch-ui-ink: var(--web-ink);
+  --hatch-ui-ink-soft: var(--web-body);
+  --hatch-ui-ink-faint: var(--web-muted);
+  --hatch-ui-accent: var(--web-gold);
+  --hatch-ui-accent-hover: #5e4500;
+  --hatch-ui-primary: var(--web-ink);
+  --hatch-ui-on-primary: var(--web-paper);
+  --hatch-ui-moss: var(--web-pass);
+  --hatch-ui-amber: var(--web-gold);
+  --hatch-ui-border: var(--web-rule);
+  --hatch-ui-border-soft: color-mix(in srgb, var(--web-rule) 70%, transparent);
+  --hatch-ui-border-strong: #d9d1bf;
+  --hatch-ui-focus: rgba(245, 183, 0, 0.35);
+  --hatch-ui-surface-quiet: rgba(255, 253, 248, 0.7);
+  --hatch-ui-surface-resting: var(--web-card);
+  --hatch-ui-surface-raised: var(--web-card);
+  --hatch-ui-surface-solid: var(--web-card);
+  --hatch-ui-surface-bright: #ffffff;
+  --hatch-ui-surface-content: transparent;
+  --hatch-ui-surface-sidebar: color-mix(in srgb, var(--web-paper) 92%, transparent);
+  --hatch-ui-surface-toolbar: color-mix(in srgb, var(--web-paper) 88%, transparent);
+  --hatch-ui-selection: var(--web-yolk-soft);
+  --hatch-ui-status-neutral-ink: var(--web-body);
+  --hatch-ui-status-neutral-bg: var(--web-panel);
+  --hatch-ui-status-success-ink: #1f5a37;
+  --hatch-ui-status-success-bg: var(--web-pass-soft);
+  --hatch-ui-status-warning-ink: var(--web-gold);
+  --hatch-ui-status-warning-bg: var(--web-yolk-soft);
+  --hatch-ui-status-progress-ink: var(--web-gold);
+  --hatch-ui-status-progress-bg: var(--web-yolk-soft);
+  --hatch-radius-control: 14px;
+  --hatch-radius-surface: 28px;
+  --hatch-radius-dialog: 28px;
+  --hatch-shadow-surface: var(--web-shadow);
+  --hatch-shadow-control: none;
+  --hatch-shadow-control-hover: 0 8px 20px rgba(23, 21, 15, 0.12);
+
+  /* Calm aura instead of the old clay/moss blur and paper grain. */
+  --hatch-atmosphere-base: var(--web-paper);
+  --hatch-atmosphere-strength: 0.9;
+  --hatch-atmosphere-grain: 0;
+  --hatch-atmosphere-warm-field: radial-gradient(ellipse at 50% 50%, rgba(253, 236, 200, 0.95) 0%, rgba(253, 236, 200, 0) 70%);
+  --hatch-atmosphere-cool-field: radial-gradient(ellipse at 50% 50%, rgba(228, 235, 243, 0.95) 0%, rgba(228, 235, 243, 0) 70%);
+  --hatch-avatar-gradient: linear-gradient(135deg, #f5b700, #e08a3c);
+}
+
+html, body { background: var(--web-paper); color: var(--web-ink); font-family: var(--web-sans); -webkit-font-smoothing: antialiased; }
+::selection { background: var(--web-yolk); color: var(--web-on-yolk); }
+
+/* Headings: medium-heavy sans, never the thin serif display. */
+html body h1,
+html body .hui-heading--display,
+html body .hui-page-header h1,
+html body .hui-section-header h2,
+html body .hui-state h2,
+html body .hui-dialog__header h2,
+html body .hui-dialog > h2,
+html body .hatch-release-card h2,
+html body .hatch-candidate-review h2,
+html body .hatch-order-summary h2,
+html body .hatch-checkout-summary h2 {
+  font-family: var(--web-sans);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.18;
+  text-wrap: balance;
+}
+
+/* Buttons: ink pill by default; yolk only for the one primary action. */
+html body .hui-button { font-family: var(--web-sans); font-weight: 650; }
+.web-btn-yolk { background: var(--web-yolk) !important; color: var(--web-on-yolk) !important; }
+
+/* Inputs: soft white field, yolk focus. */
+html body .hui-input,
+html body .hui-textarea,
+html body .hui-select-trigger { border-color: var(--web-rule); background: var(--web-card); }
+html body .hui-input:focus-visible,
+html body .hui-textarea:focus-visible { border-color: var(--web-yolk); box-shadow: 0 0 0 3px var(--web-yolk-soft); }
+
+/* Small reusable pieces shared by every Web surface. */
+.web-pill { display: inline-block; width: fit-content; padding: 6px 14px; border-radius: 999px; background: var(--web-yolk-soft); color: var(--web-gold); font-size: 13px; font-weight: 600; }
+.web-card { border-radius: var(--hatch-radius-surface); background: var(--web-card); box-shadow: var(--web-shadow); }
+.web-brand { display: inline-flex; align-items: center; color: inherit; text-decoration: none; }
+.web-brand img { display: block; height: 24px; width: auto; }
+.web-brand small { margin-left: 10px; padding: 3px 10px; border-radius: 999px; background: var(--web-panel); color: var(--web-muted); font-size: 12px; font-weight: 600; }

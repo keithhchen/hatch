@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chatEntries, groupToolEntries } from './factoryMessages.js';
+import { chatEntries, describeToolCall, groupToolEntries, toolDetailRows, toolResultRows } from './factoryMessages.js';
+import { createFactoryAgentTranslator } from './factoryAgentsI18n.js';
 
 test('text and calls stay interleaved, including parallel receipts returned out of order', () => {
   const messages = [
@@ -65,4 +66,20 @@ test('askuser is a single pending interaction block until the next user message'
   assert.equal(pending[1].pending, true);
   const answered = chatEntries([{ role: 'user', content: 'Start' }, request, receipt, { role: 'user', content: 'Creator' }]);
   assert.equal(answered[1].pending, false);
+});
+
+test('tool calls read as one plain line derived from the real name, arguments and result', () => {
+  const zh = createFactoryAgentTranslator('zh');
+  const list = describeToolCall({ name: 'list', arguments: { directory: 'output' } }, { content: [{ type: 'text', text: '[]' }] });
+  assert.deepEqual(list, { key: 'toolSumList', target: 'output', count: 0 });
+  assert.equal(zh(list.key, list.target), '查看资料目录：output');
+  assert.deepEqual(describeToolCall({ name: 'read', arguments: { path: 'input/manual/a.md' } }), { key: 'toolSumRead', target: 'a.md' });
+  assert.deepEqual(describeToolCall({ name: 'mystery_tool', arguments: {} }), { key: 'toolSumOther', target: 'mystery_tool' });
+});
+
+test('tool details become key–value rows without JSON braces; empty results have no rows', () => {
+  assert.deepEqual(toolDetailRows({ directory: 'output' }), [{ key: 'directory', value: 'output' }]);
+  assert.deepEqual(toolResultRows({ content: [{ type: 'text', text: '[]' }] }), []);
+  assert.deepEqual(toolResultRows({ content: [{ type: 'text', text: '[{"path":"output/a.md","bytes":3}]' }] }), [{ key: null, value: 'output/a.md' }]);
+  assert.deepEqual(toolResultRows({ content: 'plain text' }), [{ key: null, value: 'plain text' }]);
 });
