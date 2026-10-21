@@ -193,6 +193,12 @@ jobs:
       - name: Materialize GitHub production environment
         env:
           HATCH_PRODUCTION_ENV: ${{ secrets.HATCH_PRODUCTION_ENV }}
+          # Website forms (联系我们 / 官网专家申请) write to the Hatch Leads Feishu base.
+          # Only the app secret is sensitive; it lives in the FEISHU_APP_SECRET secret.
+          FEISHU_APP_ID: ${{ vars.FEISHU_APP_ID || 'cli_a967d25dd4781ceb' }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          FEISHU_BASE_TOKEN: ${{ vars.FEISHU_BASE_TOKEN || 'SGDLbr8j8aG1JesbyjZcaVb4nu6' }}
+          FEISHU_TABLE_ID: ${{ vars.FEISHU_TABLE_ID || 'tblZWqmq0xip085o' }}
           HATCH_GEMINI_API_KEY: ${{ secrets.HATCH_GEMINI_API_KEY }}
           HATCH_CREATOR_NAS_GATEWAY_TOKEN: ${{ secrets.HATCH_CREATOR_NAS_GATEWAY_TOKEN }}
         run: |
@@ -206,9 +212,12 @@ jobs:
           umask 077
           printf '%s\n' "$HATCH_PRODUCTION_ENV" > "$temp_env"
           test -s "$temp_env"
-          grep -Ev '^(GEMINI_API_KEY|HATCH_LLM_PROFILE|HATCH_FACTORY_LLM_PROFILE|HATCH_FACTORY_VOICE_PROVIDER|HATCH_FACTORY_LIVE_MODEL|HATCH_FACTORY_LIVE_VOICE|HATCH_FACTORY_STT_PROVIDER|HATCH_FACTORY_VOICE_PAUSE_MS|HATCH_CREATOR_NAS_GATEWAY_TOKEN)=' "$temp_env" > "$normalized_env"
+          grep -Ev '^(GEMINI_API_KEY|HATCH_LLM_PROFILE|HATCH_FACTORY_LLM_PROFILE|HATCH_FACTORY_VOICE_PROVIDER|HATCH_FACTORY_LIVE_MODEL|HATCH_FACTORY_LIVE_VOICE|HATCH_FACTORY_STT_PROVIDER|HATCH_FACTORY_VOICE_PAUSE_MS|HATCH_CREATOR_NAS_GATEWAY_TOKEN|FEISHU_APP_ID|FEISHU_APP_SECRET|FEISHU_BASE_TOKEN|FEISHU_TABLE_ID)=' "$temp_env" > "$normalized_env"
           printf 'GEMINI_API_KEY=%s\nHATCH_LLM_PROFILE=kimi-k2.6\nHATCH_FACTORY_LLM_PROFILE=gemini-api\nHATCH_FACTORY_VOICE_PROVIDER=legacy\nHATCH_FACTORY_LIVE_MODEL=gemini-3.8-live\nHATCH_FACTORY_LIVE_VOICE=\nHATCH_FACTORY_STT_PROVIDER=qwen\nHATCH_FACTORY_VOICE_PAUSE_MS=2500\n' "$HATCH_GEMINI_API_KEY" >> "$normalized_env"
           printf 'HATCH_CREATOR_NAS_GATEWAY_TOKEN=%s\n' "$HATCH_CREATOR_NAS_GATEWAY_TOKEN" >> "$normalized_env"
+          if test -n "$FEISHU_APP_SECRET"; then
+            printf 'FEISHU_APP_ID=%s\nFEISHU_APP_SECRET=%s\nFEISHU_BASE_TOKEN=%s\nFEISHU_TABLE_ID=%s\n' "$FEISHU_APP_ID" "$FEISHU_APP_SECRET" "$FEISHU_BASE_TOKEN" "$FEISHU_TABLE_ID" >> "$normalized_env"
+          fi
           mv -f "$normalized_env" "$temp_env"
           grep -Eq '^HATCH_DOMAIN=[^[:space:]]+$' "$temp_env"
           chmod 600 "$temp_env"
