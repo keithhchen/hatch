@@ -619,7 +619,7 @@ function Trust({ t }: { t: LandingCopy }) {
       <div className={`trust-stage ${inView ? "in" : ""}`} ref={ref}>
         <Photo className="fill" id="trust" alt="" />
         <div className="glass trust-panel">
-          {t.trust.map((col, gi) => (
+          {t.trust.slice(0, 2).map((col, gi) => (
             <div className="trust-group" key={col.title}>
               <b>{col.title}</b>
               {col.items.map((item, i) => (
@@ -702,7 +702,7 @@ function ApplyDialog({ t, lang, open, onClose }: { t: LandingCopy; lang: Lang; o
     >
       <div className="contact-inner">
         <div className="contact-heading">
-          <span className="pill pill-l">{t.tryNote}</span>
+          <span />
           <button className="contact-close" type="button" onClick={() => ref.current?.close()} aria-label={t.contactClose}>×</button>
         </div>
         <h3 id="apply-dialog-title">{status === "success" ? a.doneTitle : a.title}</h3>
@@ -814,7 +814,6 @@ export default function HatchPage() {
           <a href="#faq">{t.nav.faq}</a>
         </nav>
         <div className="nav-right">
-          <a className="nav-login" href="/studio">{t.nav.login}</a>
           <button className="btn btn-ink btn-sm" type="button" onClick={() => setIsApplyOpen(true)}>{t.nav.try}</button>
         </div>
       </header>
@@ -892,7 +891,6 @@ export default function HatchPage() {
         <h2>{t.finalTitle}</h2>
         <p>{t.finalBody}</p>
         {tryButton}
-        <p className="fine">{t.tryNote}</p>
       </section>
 
       <ApplyDialog t={t} lang={lang} open={isApplyOpen} onClose={() => setIsApplyOpen(false)} />
@@ -951,9 +949,6 @@ export default function HatchPage() {
 
       <footer className="footer">
         <div className="footer-brand">
-          <a className="nav-brand" href="#top">
-            <img src={LOCKUP} alt="Hatch" width={101} height={30} />
-          </a>
           <label className="lang-select">
             <span>{t.footer.language}</span>
             <select value={lang} onChange={(e) => setLocale(e.target.value)}>
