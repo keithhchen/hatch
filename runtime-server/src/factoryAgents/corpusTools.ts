@@ -5,7 +5,7 @@ import { z } from "zod";
 import { corpusOutputSchema, type CorpusOutput } from "../creatorLearning/corpusNode.js";
 import { parseSkillMarkdown } from "../skills.js";
 import { result, digest } from "./files.js";
-import { WorkbenchStore, type FactoryProductScope } from "./store.js";
+import { samePath, WorkbenchStore, type FactoryProductScope } from "./store.js";
 
 const hash = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 export const corpusReceiptSchema = z.object({
@@ -66,10 +66,13 @@ export function corpusTools(store: WorkbenchStore, id: string, changed: () => vo
       const a = raw as { promise: string; skills: Array<{ path: string; references: Array<{ path: string; kind: "method" | "style" | "example" | "few_shots" }> }>; knowledge: Array<{ path: string; title: string; reason: string }> };
       let s = await store.get(id);
       if (s.role !== "generation") throw new Error("Only Agent Generation may upload a Corpus");
+      // Knowledge comes from the same view the agent lists: shared input/manual
+      // files and upstream projections, not only this session's own files.
+      const inputs = await store.contextFiles(id);
       const selections = a.knowledge.map(doc => {
-        const file = s.files.find(f => f.path === doc.path);
+        const file = inputs.find(f => samePath(f.path, doc.path));
         if (!file) throw new Error(`File not found: ${doc.path}`);
-        return doc;
+        return { ...doc, path: file.path };
       });
       const files: string[] = [];
       const read = async (name: string) => {

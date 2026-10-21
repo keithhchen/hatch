@@ -31,6 +31,9 @@ export function filePath(value: string): string {
   return value;
 }
 
+/** Same workspace path regardless of Unicode composition (macOS uploads NFD names). */
+export const samePath = (a: string, b: string) => a.normalize("NFC") === b.normalize("NFC");
+
 /** Each chat owns ordinary files; completed Runtime results retain their own paths. */
 export class WorkbenchStore {
   private queues = new Map<string, Promise<unknown>>();
@@ -110,7 +113,7 @@ export class WorkbenchStore {
   }
   async read(id: string, name: string): Promise<{ record: FileRecord; bytes: Buffer }> {
     filePath(name);
-    const record = (await this.contextFiles(id)).find(f => f.path === name);
+    const record = (await this.contextFiles(id)).find(f => samePath(f.path, name));
     if (!record) throw new Error("File not found");
     if (record.path.startsWith("input/manual/")) return { record, bytes: await readFile(await this.manualPath(record.path)) };
     if (record.origin && record.path.startsWith("input/") && record.readonly) return { record, bytes: await readFile(await this.materializedPath(record.origin.sessionId, record.origin.path)) };
