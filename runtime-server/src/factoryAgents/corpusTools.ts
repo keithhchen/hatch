@@ -56,20 +56,21 @@ export function corpusTools(store: WorkbenchStore, id: string, changed: () => vo
       return entry;
   };
   return [{
-    name: "corpus_upload", label: "上传可执行 Corpus", description: "Read saved output SYSTEM.md and selected skills/references, assemble the existing Corpus schema and publish it to this workspace's Product through the Product Registry API. The host fixes the Product; this tool cannot select or create one. Select whole original input files as Knowledge; the tool uploads unchanged bytes. Skill paths must include output/: output/skills/<name>/SKILL.md and output/skills/<name>/references/<id>.md. Reference kind is exactly method, style, example, or few_shots. Tool declarations come from host configuration. Saves CORPUS.md with the actual publication status. Re-upload after definition edits. No target Agent execution here.",
+    name: "corpus_upload", label: "上传可执行 Corpus", description: "Read saved output SYSTEM.md and selected skills/references, assemble the existing Corpus schema and publish it to this workspace's Product through the Product Registry API. The host fixes the Product; this tool cannot select or create one. Skill paths must include output/: output/skills/<name>/SKILL.md and output/skills/<name>/references/<id>.md. Reference kind is exactly method, style, example, or few_shots. Tool declarations come from host configuration. Saves CORPUS.md with the actual publication status. Re-upload after definition edits. No target Agent execution here.",
     parameters: Type.Object({
       promise: Type.String({ minLength: 1, maxLength: 280, description: "One or two customer-facing sentences stating who this helps, when, and what valuable result it delivers. No methods, evidence, feature lists, boundaries, or disclaimers." }),
       skills: Type.Array(Type.Object({ path: Type.String(), references: Type.Array(Type.Object({ path: Type.String(), kind: Type.Union([Type.Literal("method"), Type.Literal("style"), Type.Literal("example"), Type.Literal("few_shots")], { description: "One of: method (working procedure), style (communication style), example (worked example), few_shots (input/output demonstrations)." }) })) })),
-      knowledge: Type.Array(Type.Object({ path: Type.String(), title: Type.String({ minLength: 1, maxLength: 256 }), reason: Type.String({ minLength: 1, maxLength: 2000 }) })),
     }),
     execute: async (_call, raw, signal) => {
-      const a = raw as { promise: string; skills: Array<{ path: string; references: Array<{ path: string; kind: "method" | "style" | "example" | "few_shots" }> }>; knowledge: Array<{ path: string; title: string; reason: string }> };
+      const a = raw as { promise: string; skills: Array<{ path: string; references: Array<{ path: string; kind: "method" | "style" | "example" | "few_shots" }> }>; knowledge?: Array<{ path: string; title: string; reason: string }> };
       let s = await store.get(id);
       if (s.role !== "generation") throw new Error("Only Agent Generation may upload a Corpus");
       // Knowledge comes from the same view the agent lists: shared input/manual
       // files and upstream projections, not only this session's own files.
       const inputs = await store.contextFiles(id);
-      const selections = a.knowledge.map(doc => {
+      // Knowledge is hidden from the agent until retrieval is rebuilt; the
+      // selection path stays for callers that still pass it explicitly.
+      const selections = (a.knowledge ?? []).map(doc => {
         const file = inputs.find(f => samePath(f.path, doc.path));
         if (!file) throw new Error(`File not found: ${doc.path}`);
         return { ...doc, path: file.path };
@@ -124,7 +125,7 @@ export function corpusTools(store: WorkbenchStore, id: string, changed: () => vo
       const uploadedKnowledge = (await store.get(id)).knowledge ?? [];
       const receipt = { ...reply, creator_id: product.creatorId, files, knowledge: selections.map(doc => ({ ...uploadedKnowledge.find(k => k.path === doc.path && k.productId === product.productId)!, status: "indexed" })) };
       await store.update(id, state => { state.corpus = receipt; });
-      const published = { product_id: reply.product_id, status: reply.status, published_at: reply.published_at, files, knowledge: receipt.knowledge.map(({ path, id, title, status }) => ({ path, id, title, status })) };
+      const published = { product_id: reply.product_id, status: reply.status, published_at: reply.published_at, files };
       await store.put(id, "output/CORPUS.md", Buffer.from(`# Agent 已发布\n\n\`\`\`json\n${JSON.stringify(published, null, 2)}\n\`\`\`\n`), { actor: "host", readonly: true });
       changed(); return result(published);
     },
