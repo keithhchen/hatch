@@ -950,9 +950,6 @@ export default function HatchPage() {
 
       <footer className="footer">
         <div className="footer-brand">
-          <a className="nav-brand" href="#top">
-            <img src={LOCKUP} alt="Hatch" width={101} height={30} />
-          </a>
           <label className="lang-select">
             <span>{t.footer.language}</span>
             <select value={lang} onChange={(e) => setLocale(e.target.value)}>
