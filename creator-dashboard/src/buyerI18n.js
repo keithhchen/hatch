@@ -172,8 +172,6 @@ const ENTRIES = {
   "Order completed. Some access details are unavailable.": ["订单已完成，部分详情暂时无法显示。", "注文は完了しました。一部の詳細は一時的に表示できません。"],
   "Next steps": ["后续步骤", "次のステップ"],
   "Chat in the browser": ["在浏览器中对话", "ブラウザで会話する"],
-  "Sign in to Hatch Desktop with this account": ["使用此账户登录 Hatch Desktop", "このアカウントで Hatch Desktop にログインする"],
-  "Review local file permissions in Desktop": ["在 Desktop 中确认本地文件权限", "Desktop でローカルファイルの権限を確認する"],
   "View receipt →": ["查看收据 →", "領収書を表示 →"],
   "View access details →": ["查看访问详情 →", "アクセスの詳細を表示 →"],
 
