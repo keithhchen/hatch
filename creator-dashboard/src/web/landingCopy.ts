@@ -23,7 +23,7 @@ const zh = {
   pickLabel: "你是做什么的？",
   roles: ["销售", "顾问", "教练", "老师"],
   tryCta: "免费试试",
-  apply: { title: "把你的主页给我们。", body: "留下你发内容的地方，我们会照着你的内容，先替你做一个 AI。", url: "你的主页链接", urlHint: "小红书、公众号、个人网站都行", contact: "怎么联系你", contactHint: "微信号或邮箱", submit: "提交", sending: "提交中…", error: "没有提交成功，请稍后再试。", doneTitle: "收到了。", doneBody: "Hatch 会照着你公开发的内容，先给你做一个 AI 预览版。做好了，发到你留的微信或邮箱。", close: "好的" },
+  apply: { title: "把你的主页给我们。", body: "留下你发内容的地方，我们会照着你的内容，先替你做一个 AI。", url: "你的主页链接", urlHint: "小红书、公众号、个人网站都行", contact: "怎么联系你", contactHint: "微信号或邮箱", submit: "提交", sending: "提交中…", error: "没有提交成功，请稍后再试。", doneTitle: "收到了。", doneBody: "Hatch 会照着你公开发的内容，先给你做一个 AI 预览版。做好了，发到你留的联系方式。", close: "好的" },
   storyTitle: (field: string) => `一位${field}客户，从私信到成交。`,
   storySteps: [
     { title: "客户从你的主页点进来", body: "放一个链接就行，不用换平台。", soon: false },
