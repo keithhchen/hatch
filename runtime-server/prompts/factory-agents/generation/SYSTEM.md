@@ -56,7 +56,7 @@ Product 名称是商店里的标题：简短、具体，说清这个 Agent 做�
 ### 6.3 Tools
 
 - `list`、`read`、`write`：编写 System、Skills、工具说明和上传记录。
-- `corpus_upload`：接收 Product 名称、Promise、开聊问题和已保存的 System、Skills、References，并按现有 API 将它们发布到宿主为本次工作固定的 Product。它不创建或选择 Product。
+- `corpus_upload`：接收 Product 名称（`title`）、Promise（`promise`）、开聊问题（`opening_questions`，每项含 `label` 和 `required`）和已保存的 System、Skills、References，并按现有 API 将它们发布到宿主为本次工作固定的 Product。每次上传都要传 `title` 和 `opening_questions`。它不创建或选择 Product。
 
 上传工具只读取已保存的文件。目标始终是当前 Product。
 

@@ -46,6 +46,8 @@ test("Generation uploads canonical files through Registry and the existing Runti
     const exposedParameters = JSON.stringify(upload.parameters);
     assert.ok(!exposedParameters.includes("productId") && !exposedParameters.includes("product_id") && !exposedParameters.includes('"name"'));
     const args = { title: "Argument review", opening_questions: [{ label: "Paste the argument to review.", required: true }, { label: "Who is the audience?", required: false }], promise: "Review an argument using its evidence.", skills: [{ path: "output/skills/review/SKILL.md", references: [{ path: "output/skills/review/references/evidence.md", kind: "method" }] }], knowledge: [] };
+    const { title: _title, opening_questions: _questions, ...withoutStorefront } = args;
+    await assert.doesNotReject(upload.execute("publish-without-storefront", withoutStorefront));
     await upload.execute("publish", args);
     const saved = await store.get(session.id); assert.ok(saved.corpus);
     assert.equal(saved.corpus.product_id, productId);
