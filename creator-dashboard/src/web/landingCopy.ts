@@ -23,7 +23,6 @@ const zh = {
   pickLabel: "你是做什么的？",
   roles: ["销售", "顾问", "教练", "老师"],
   tryCta: "免费试试",
-  tryNote: "免费 · 24 小时内回复",
   apply: { title: "把你的主页给我们。", body: "留下你发内容的地方，我们会照着你的内容，先替你做一个 AI。", url: "你的主页链接", urlHint: "小红书、公众号、个人网站都行", contact: "怎么联系你", contactHint: "微信号或邮箱", submit: "提交", sending: "提交中…", error: "没有提交成功，请稍后再试。", doneTitle: "收到了。", doneBody: "24 小时内，我们会联系你。", close: "好的" },
   storyTitle: (field: string) => `一位${field}客户，从私信到成交。`,
   storySteps: [
@@ -171,7 +170,6 @@ const en: LandingCopy = {
   pickLabel: "What do you do?",
   roles: ["Sales", "Consulting", "Coaching", "Teaching"],
   tryCta: "Try it free",
-  tryNote: "Free · reply within 24 hours",
   apply: { title: "Show us where you publish.", body: "Tell us where you publish. We\'ll build a first version of your AI from it.", url: "Your profile link", urlHint: "Instagram, newsletter, personal site…", contact: "How can we reach you?", contactHint: "Email or WhatsApp", submit: "Submit", sending: "Submitting…", error: "That didn't go through. Please try again.", doneTitle: "Got it.", doneBody: "We\'ll be in touch within 24 hours.", close: "OK" },
   storyTitle: (field: string) => `One ${field.toLowerCase()} client, from DM to sale.`,
   storySteps: [
@@ -317,7 +315,6 @@ const ja: LandingCopy = {
   pickLabel: "あなたのお仕事は？",
   roles: ["営業", "コンサル", "コーチ", "先生"],
   tryCta: "無料で試す",
-  tryNote: "無料 · 24時間以内にご連絡",
   apply: { title: "発信している場所を教えてください。", body: "あなたの発信をもとに、まずAIの最初の版をつくります。", url: "プロフィールのリンク", urlHint: "X、note、Instagram、個人サイトなど", contact: "ご連絡先", contactHint: "LINE ID またはメール", submit: "送信する", sending: "送信中…", error: "送信できませんでした。もう一度お試しください。", doneTitle: "受け付けました。", doneBody: "24時間以内にご連絡します。", close: "OK" },
   storyTitle: (field: string) => `${field}のお客様、DMから成約まで。`,
   storySteps: [
