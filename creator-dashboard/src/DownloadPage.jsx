@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ArrowDown, RotateCcw } from "lucide-react";
-import { HatchBrand } from "@hatch/ui";
 import { DESKTOP_DOWNLOAD_BASE_URL, DESKTOP_DOWNLOAD_TARGETS, DESKTOP_DOWNLOAD_TARGET_ORDER, desktopDownloadUrl, detectDownloadTargetAsync } from "./downloadPresentation.js";
 import { downloadCopy } from "./downloadI18n.js";
 import { useLocale } from "./locale.jsx";
 import { LanguageSwitcher } from "./LanguageSwitcher.jsx";
 import "./downloadPage.css";
+import { WebBrand } from "./WebBrand.jsx";
 
 export function DownloadPage() {
   const { locale } = useLocale();
@@ -33,7 +33,7 @@ export function DownloadPage() {
   return (
     <div className="download-page">
       <header className="download-page__header">
-        <HatchBrand as="a" className="download-page__brand" href="/explore" aria-label={copy.homeLabel} />
+        <WebBrand as="a" className="download-page__brand" href="/explore" aria-label={copy.homeLabel} />
         <LanguageSwitcher className="download-page__language" />
       </header>
       <main className="download-page__main">

@@ -48,14 +48,15 @@ test("Web entrypoint consumes HUI instead of a second component stylesheet", () 
   assert.doesNotMatch(entry, /components\/ui\//);
 });
 
-test("Sign-in uses the regular Hatch wordmark", () => {
-  const source = read("creator-dashboard/src/BuyerPortalV2.jsx");
-  const brand = read("packages/ui/src/HatchBrand.jsx");
-
-  assert.match(source, /const authBrandClassName = "buyer-v2__brand"/);
-  assert.match(source, /<HatchBrand as=\{RouterLink\} className=\{authBrandClassName\}/);
-  assert.match(brand, /src=\{hatchWordmarkUrl\}/);
-  assert.doesNotMatch(brand, /hatchWordmarkInverseUrl|wordmark-image--inverse/);
+test("Web surfaces use the egg lockup instead of the Desktop mark", () => {
+  const brand = read("creator-dashboard/src/WebBrand.jsx");
+  assert.match(brand, /\/assets\/web\/hatch-lockup\.svg/);
+  for (const file of ["BuyerPortalV2.jsx", "CreatorPortalV2.jsx", "DownloadPage.jsx", "WebChatPage.jsx", "main.jsx"]) {
+    const source = read(`creator-dashboard/src/${file}`);
+    assert.doesNotMatch(source, /<HatchBrand\b/, file);
+    assert.match(source, /<WebBrand\b/, file);
+  }
+  assert.match(read("creator-dashboard/src/BuyerPortalV2.jsx"), /<WebBrand as=\{RouterLink\} className=\{authBrandClassName\}/);
 });
 
 test("Web eyebrow labels stay visible despite the shared global eyebrow rule", () => {
