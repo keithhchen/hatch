@@ -40,6 +40,11 @@ Product Promise 是商店里给客户看的购买承诺，不是 Agent 定义的
 不用编号、分号长链或“基于某人的可查证方法”包装 Promise。遮住 Creator 名字后，
 客户仍应能立即判断它是否适合自己当前的工作。
 
+Product 名称是商店里的标题：简短、具体，说清这个 Agent 做哪项工作，不超过 20 个字，不加 Creator 名字或营销修饰。
+
+开聊问题是客户开始对话前填写的简短表单。写 1 到 5 个问题，只问 Agent 开始工作前必须知道、客户自己能马上回答的事实；
+每个问题一句话，标明是否必填。不要问 Agent 能从对话中自己弄清的内容。
+
 ### 6.2 Context
 
 - 产品范围、客户目标和交付要求。
@@ -51,7 +56,7 @@ Product Promise 是商店里给客户看的购买承诺，不是 Agent 定义的
 ### 6.3 Tools
 
 - `list`、`read`、`write`：编写 System、Skills、工具说明和上传记录。
-- `corpus_upload`：接收已保存的 System、Skills 和 References，并按现有 API 将 Corpus 发布到宿主为本次工作固定的 Product。它不创建或选择 Product。
+- `corpus_upload`：接收 Product 名称、Promise、开聊问题和已保存的 System、Skills、References，并按现有 API 将它们发布到宿主为本次工作固定的 Product。它不创建或选择 Product。
 
 上传工具只读取已保存的文件。目标始终是当前 Product。
 

@@ -14,7 +14,7 @@ export const corpusReceiptSchema = z.object({
 });
 
 /** HTTP adapter only. Auth, file projection, validation, indexing and release stay in Registry. */
-export async function registryRequest(env: NodeJS.ProcessEnv, route: string, body?: unknown, signal?: AbortSignal, idempotencyKey?: string, method?: "POST" | "PATCH"): Promise<unknown> {
+export async function registryRequest(env: NodeJS.ProcessEnv, route: string, body?: unknown, signal?: AbortSignal, idempotencyKey?: string, method?: "POST" | "PATCH" | "PUT"): Promise<unknown> {
   const base = env.HATCH_FACTORY_REGISTRY_URL;
   const token = env.HATCH_FACTORY_CREATOR_TOKEN;
   if (!base || !token) throw new Error("Corpus unavailable: configure HATCH_FACTORY_REGISTRY_URL and HATCH_FACTORY_CREATOR_TOKEN");
@@ -58,11 +58,13 @@ export function corpusTools(store: WorkbenchStore, id: string, changed: () => vo
   return [{
     name: "corpus_upload", label: "上传可执行 Corpus", description: "Read saved output SYSTEM.md and selected skills/references, assemble the existing Corpus schema and publish it to this workspace's Product through the Product Registry API. The host fixes the Product; this tool cannot select or create one. Skill paths must include output/: output/skills/<name>/SKILL.md and output/skills/<name>/references/<id>.md. Reference kind is exactly method, style, example, or few_shots. Tool declarations come from host configuration. Saves CORPUS.md with the actual publication status. Re-upload after definition edits. No target Agent execution here.",
     parameters: Type.Object({
+      title: Type.String({ minLength: 1, maxLength: 240, description: "Short storefront title naming the job this Agent does. No Creator name or marketing filler." }),
+      opening_questions: Type.Array(Type.Object({ label: Type.String({ minLength: 1, maxLength: 500 }), required: Type.Boolean() }), { minItems: 1, maxItems: 16, description: "Questions the client answers before the chat starts: only facts the Agent needs first and the client can answer immediately." }),
       promise: Type.String({ minLength: 1, maxLength: 280, description: "One or two customer-facing sentences stating who this helps, when, and what valuable result it delivers. No methods, evidence, feature lists, boundaries, or disclaimers." }),
       skills: Type.Array(Type.Object({ path: Type.String(), references: Type.Array(Type.Object({ path: Type.String(), kind: Type.Union([Type.Literal("method"), Type.Literal("style"), Type.Literal("example"), Type.Literal("few_shots")], { description: "One of: method (working procedure), style (communication style), example (worked example), few_shots (input/output demonstrations)." }) })) })),
     }),
     execute: async (_call, raw, signal) => {
-      const a = raw as { promise: string; skills: Array<{ path: string; references: Array<{ path: string; kind: "method" | "style" | "example" | "few_shots" }> }>; knowledge?: Array<{ path: string; title: string; reason: string }> };
+      const a = raw as { title?: string; opening_questions?: Array<{ label: string; required: boolean }>; promise: string; skills: Array<{ path: string; references: Array<{ path: string; kind: "method" | "style" | "example" | "few_shots" }> }>; knowledge?: Array<{ path: string; title: string; reason: string }> };
       let s = await store.get(id);
       if (s.role !== "generation") throw new Error("Only Agent Generation may upload a Corpus");
       // Knowledge comes from the same view the agent lists: shared input/manual
@@ -103,8 +105,12 @@ export function corpusTools(store: WorkbenchStore, id: string, changed: () => vo
         if (!doc.path.startsWith("input/")) throw new Error("Knowledge must be original input files");
         await store.read(id, doc.path);
       }
-      const updated = z.object({ product_id: z.string().uuid() }).passthrough().parse(await registryRequest(env, `/v1/creator/products/${encodeURIComponent(product.productId)}`, { promise: a.promise }, signal, `factory-promise-${id}-${digest(a.promise).slice(7)}`, "PATCH"));
+      const updated = z.object({ product_id: z.string().uuid() }).passthrough().parse(await registryRequest(env, `/v1/creator/products/${encodeURIComponent(product.productId)}`, { promise: a.promise, ...(a.title ? { name: a.title } : {}) }, signal, `factory-promise-${id}-${digest(`${a.title ?? ""}\n${a.promise}`).slice(7)}`, "PATCH"));
       if (updated.product_id !== product.productId) throw new Error("Registry updated a different Product");
+      if (a.opening_questions?.length) {
+        const fields = a.opening_questions.map((question, index) => ({ id: `q${index + 1}`, label: question.label, required: question.required }));
+        await registryRequest(env, `/v1/creator/products/${encodeURIComponent(product.productId)}/brief-spec`, { brief_spec: { contract_version: "1", fields } }, signal, `factory-brief-${id}-${digest(JSON.stringify(fields)).slice(7)}`, "PUT");
+      }
       const knowledge: CorpusOutput["knowledge"] = [];
       let corpus: CorpusOutput;
       let reply: z.infer<typeof corpusReceiptSchema>;
