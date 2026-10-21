@@ -702,7 +702,7 @@ function ApplyDialog({ t, lang, open, onClose }: { t: LandingCopy; lang: Lang; o
     >
       <div className="contact-inner">
         <div className="contact-heading">
-          <span className="pill pill-l">{t.tryNote}</span>
+          <span />
           <button className="contact-close" type="button" onClick={() => ref.current?.close()} aria-label={t.contactClose}>×</button>
         </div>
         <h3 id="apply-dialog-title">{status === "success" ? a.doneTitle : a.title}</h3>
@@ -892,7 +892,6 @@ export default function HatchPage() {
         <h2>{t.finalTitle}</h2>
         <p>{t.finalBody}</p>
         {tryButton}
-        <p className="fine">{t.tryNote}</p>
       </section>
 
       <ApplyDialog t={t} lang={lang} open={isApplyOpen} onClose={() => setIsApplyOpen(false)} />
