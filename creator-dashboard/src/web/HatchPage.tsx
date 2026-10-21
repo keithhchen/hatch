@@ -814,7 +814,6 @@ export default function HatchPage() {
           <a href="#faq">{t.nav.faq}</a>
         </nav>
         <div className="nav-right">
-          <a className="nav-login" href="/studio">{t.nav.login}</a>
           <button className="btn btn-ink btn-sm" type="button" onClick={() => setIsApplyOpen(true)}>{t.nav.try}</button>
         </div>
       </header>
