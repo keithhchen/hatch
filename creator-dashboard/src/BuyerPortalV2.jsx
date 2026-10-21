@@ -5,7 +5,6 @@ import {
   DropdownMenu,
   Checkbox as HatchCheckbox,
   EmptyState as HatchEmptyState,
-  HatchBrand,
   IconButton,
   InlineAlert as HatchInlineAlert,
   Input,
@@ -25,6 +24,7 @@ import { creatorPublicModel } from "./storefrontModel.js";
 import { BuyerAccountControls, BuyerLanguageMenu } from "./BuyerAccountControls.jsx";
 import { AccountAvatarSettings } from "./AccountAvatarSettings.jsx";
 import "./buyerPortalV2.css";
+import { WebBrand } from "./WebBrand.jsx";
 
 const DEFAULT_DOWNLOAD_URL = "/download";
 const EXPLORE_ROOT = "/explore";
@@ -194,7 +194,7 @@ function BuyerShell({route, navigate, session, downloadUrl, children }) {
     <div className="buyer-v2">
       <header className="buyer-v2__header">
         <div className="buyer-v2__header-inner">
-          <HatchBrand as={RouterLink} className="buyer-v2__brand" to={EXPLORE_ROOT} navigate={navigate} aria-label="Hatch home" />
+          <WebBrand as={RouterLink} className="buyer-v2__brand" to={EXPLORE_ROOT} navigate={navigate} aria-label="Hatch home" />
           <nav className="buyer-v2__nav" aria-label={t('Buyer navigation')}>
             <RouterLink to={EXPLORE_ROOT} navigate={navigate} aria-current={active === "explore" ? "page" : undefined}>{t('Explore')}</RouterLink>
             {authenticated ? <RouterLink to={LIBRARY_ROOT} navigate={navigate} aria-current={active === "library" ? "page" : undefined}>{t('Library')}</RouterLink> : null}
@@ -516,9 +516,9 @@ function AuthPage({mode, search, request, navigate, session }) {
   return (
     <main className="buyer-v2 buyer-v2__auth-page">
       <header className="buyer-v2__auth-navbar">
-        <HatchBrand as={RouterLink} className={authBrandClassName} to={creatorIntent ? "/studio" : EXPLORE_ROOT} navigate={navigate} aria-label={creatorIntent ? "Hatch Studio" : "Hatch home"}>
+        <WebBrand as={RouterLink} className={authBrandClassName} to={creatorIntent ? "/studio" : EXPLORE_ROOT} navigate={navigate} aria-label={creatorIntent ? "Hatch Studio" : "Hatch home"}>
           {creatorIntent ? <span className="hatch-brand__product">Studio</span> : null}
-        </HatchBrand>
+        </WebBrand>
         <BuyerLanguageMenu className="buyer-v2__auth-language" />
       </header>
       <section className="buyer-v2__auth-context">

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowUp, ChevronDown, ChevronUp, CircleAlert, Image, LoaderCircle, Menu, Paperclip, Plus, RotateCw, Square, X } from "lucide-react";
-import { Avatar, HatchBrand } from "@hatch/ui";
+import { Avatar } from "@hatch/ui";
 import { WebChatImageViewer } from "./components/WebChatImageViewer.jsx";
 import { Shimmer } from "./components/Shimmer.jsx";
 import { WebChatThinkingTicker } from "./components/WebChatThinkingTicker.jsx";
@@ -13,6 +13,7 @@ import { WebChatSnapshotReconciler } from "./webChatSnapshotReconciler.js";
 import { groupTimelineEntries, PendingWebSubmission, WebChatTimeline } from "./webChatTimeline.js";
 import { WebChatRoute } from "./webChatRoute.js";
 import "./webChat.css";
+import { WebBrand } from "./WebBrand.jsx";
 
 function conversationDate(value, locale) {
   const date = new Date(value);
@@ -754,7 +755,7 @@ export default function WebChatPage({ productId, conversationId: routedConversat
     {mobileSidebarOpen ? <button type="button" className="web-chat__sidebar-backdrop" aria-label={t("closeMenu")} onClick={() => setMobileSidebarOpen(false)} /> : null}
     <aside id="web-chat-mobile-sidebar" ref={mobileSidebarRef} className={`web-chat__sidebar${mobileSidebarOpen ? " web-chat__sidebar--mobile-open" : ""}`} role={mobileSidebarOpen ? "dialog" : undefined} aria-modal={mobileSidebarOpen || undefined} aria-label={t("conversationHistory")} inert={briefOpen}>
       <div className="web-chat__sidebar-top">
-        <HatchBrand className="web-chat__brand" logoVariant="lockup" />
+        <WebBrand className="web-chat__brand" logoVariant="lockup" />
         <a href="/library" className="web-chat__back" aria-label={t("backToLibrary")}><ArrowLeft aria-hidden="true" /><span>{t("backToLibrary")}</span></a>
       </div>
       <button type="button" className="web-chat__new" aria-label={t("newChat")} onClick={newConversation} disabled={!access}>
@@ -775,7 +776,7 @@ export default function WebChatPage({ productId, conversationId: routedConversat
     </aside>
     <header className="web-chat__mobile-topbar" inert={briefOpen}>
       <button type="button" ref={mobileSidebarTriggerRef} className="web-chat__mobile-menu" aria-label={t("openMenu")} aria-expanded={mobileSidebarOpen} aria-controls="web-chat-mobile-sidebar" onClick={() => setMobileSidebarOpen(true)}><Menu aria-hidden="true" /></button>
-      <HatchBrand className="web-chat__mobile-brand" logoVariant="lockup" />
+      <WebBrand className="web-chat__mobile-brand" logoVariant="lockup" />
     </header>
     <div className="web-chat__mobile-conversation-bar" inert={briefOpen}>
       <div className="web-chat__mobile-agent">

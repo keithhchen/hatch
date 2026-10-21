@@ -8,7 +8,6 @@ import {
   DropdownMenu,
   EmptyState as HatchEmptyState,
   FormField,
-  HatchBrand,
   IconButton,
   InlineAlert as HatchInlineAlert,
   Input,
@@ -33,6 +32,7 @@ import { creatorFactoryPath, creatorProductPath, parseCreatorRoute } from "./cre
 import { createCreatorTranslator } from "./creatorI18n.js";
 import { useLocale } from "./locale.jsx";
 import "./creatorPortalV2.css";
+import { WebBrand } from "./WebBrand.jsx";
 
 const ROOT = "/studio";
 const FactoryAgents = React.lazy(() => import("./FactoryAgents.jsx").then(({ FactoryAgents: Component }) => ({ default: Component })));
@@ -99,7 +99,7 @@ export function CreatorPortalV2({
     <ThemeProvider theme={creatorMuiTheme}>
       <div className="cpv2">
       <aside className="cpv2-sidebar">
-        <HatchBrand as="button" className="cpv2-brand" type="button" onClick={() => go(ROOT)} aria-label={t("hatchCreatorHome")}><span className="hatch-brand__product">{t("studio")}</span></HatchBrand>
+        <WebBrand as="button" className="cpv2-brand" type="button" onClick={() => go(ROOT)} aria-label={t("hatchCreatorHome")}><span className="hatch-brand__product">{t("studio")}</span></WebBrand>
         <div className="cpv2-mobile-nav">
           <DropdownMenu
             label={t("creatorNavigation")}
@@ -187,7 +187,7 @@ function CreatorRoute({ route, token, request, navigate, locale, t, profile, reg
 }
 
 function CreatorRouteLoading() {
-  return <div className="loading-page" aria-busy="true"><HatchBrand className="loading-brand" /></div>;
+  return <div className="loading-page" aria-busy="true"><WebBrand className="loading-brand" /></div>;
 }
 
 function CreatorHome({ token, request, navigate, t, locale }) {
