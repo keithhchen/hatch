@@ -4,8 +4,13 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { z } from "zod";
 import { corpusOutputSchema, type CorpusOutput } from "../creatorLearning/corpusNode.js";
 import { parseSkillMarkdown } from "../skills.js";
+import { repairSkillSource, runtimeId } from "../creatorLearning/productLive/adapters/workbenchDefinitions.js";
 import { result, digest } from "./files.js";
 import { samePath, WorkbenchStore, type FactoryProductScope } from "./store.js";
+
+const REFERENCE_KINDS = ["method", "style", "example", "few_shots"] as const;
+type ReferenceKind = typeof REFERENCE_KINDS[number];
+const reason = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 const hash = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 export const corpusReceiptSchema = z.object({
@@ -56,15 +61,18 @@ export function corpusTools(store: WorkbenchStore, id: string, changed: () => vo
       return entry;
   };
   return [{
-    name: "corpus_upload", label: "上传可执行 Corpus", description: "Pass title (storefront name), promise and opening_questions (the short form clients fill in before the chat) for the Product, then read saved output SYSTEM.md and selected skills/references, assemble the existing Corpus schema and publish it to this workspace's Product through the Product Registry API. The host fixes the Product; this tool cannot select or create one. Skill paths must include output/: output/skills/<name>/SKILL.md and output/skills/<name>/references/<id>.md. Reference kind is exactly method, style, example, or few_shots. Tool declarations come from host configuration. Saves CORPUS.md with the actual publication status. Re-upload after definition edits. No target Agent execution here.",
+    name: "corpus_upload", label: "上传可执行 Corpus", description: "Pass title (storefront name), promise and opening_questions (the short form clients fill in before the chat) for the Product, then read saved output SYSTEM.md and selected skills/references, assemble the existing Corpus schema and publish it to this workspace's Product through the Product Registry API. The host fixes the Product; this tool cannot select or create one. Skill paths look like output/skills/<name>/SKILL.md with references under output/skills/<name>/references/. Only output/SYSTEM.md is required: names are repaired automatically, and any file that cannot be read is skipped and listed in skipped so you can fix it and upload again; formatting never blocks the upload. Tool declarations come from host configuration. Saves CORPUS.md with the actual publication status. Re-upload after definition edits. No target Agent execution here.",
     parameters: Type.Object({
-      title: Type.Optional(Type.String({ minLength: 1, maxLength: 240, description: "Storefront title: short, names the job this Agent does. No Creator name or marketing filler. Omit only to keep the current title." })),
-      opening_questions: Type.Optional(Type.Array(Type.Object({ label: Type.String({ minLength: 1, maxLength: 500 }), required: Type.Boolean() }), { minItems: 1, maxItems: 16, description: "Questions the client answers before the chat starts: only facts the Agent needs first and the client can answer immediately. Omit only to keep the current questions." })),
-      promise: Type.String({ minLength: 1, maxLength: 280, description: "One or two customer-facing sentences stating who this helps, when, and what valuable result it delivers. No methods, evidence, feature lists, boundaries, or disclaimers." }),
-      skills: Type.Array(Type.Object({ path: Type.String(), references: Type.Array(Type.Object({ path: Type.String(), kind: Type.Union([Type.Literal("method"), Type.Literal("style"), Type.Literal("example"), Type.Literal("few_shots")], { description: "One of: method (working procedure), style (communication style), example (worked example), few_shots (input/output demonstrations)." }) })) })),
+      title: Type.Optional(Type.String({ description: "Storefront title: short, names the job this Agent does. No Creator name or marketing filler. Omit only to keep the current title." })),
+      opening_questions: Type.Optional(Type.Array(Type.Object({ label: Type.String(), required: Type.Optional(Type.Boolean()) }), { description: "1–5 questions the client answers before the chat starts: only facts the Agent needs first and the client can answer immediately. Omit only to keep the current questions." })),
+      promise: Type.Optional(Type.String({ description: "One or two customer-facing sentences stating who this helps, when, and what valuable result it delivers. No methods, evidence, feature lists, boundaries, or disclaimers." })),
+      skills: Type.Optional(Type.Array(Type.Object({ path: Type.String(), references: Type.Optional(Type.Array(Type.Object({ path: Type.String(), kind: Type.Optional(Type.String({ description: "method (working procedure), style (communication style), example (worked example) or few_shots (input/output demonstrations); anything else is treated as method." })) }))) }))),
     }),
     execute: async (_call, raw, signal) => {
-      const a = raw as { title?: string; opening_questions?: Array<{ label: string; required: boolean }>; promise: string; skills: Array<{ path: string; references: Array<{ path: string; kind: "method" | "style" | "example" | "few_shots" }> }>; knowledge?: Array<{ path: string; title: string; reason: string }> };
+      const a = raw as { title?: string; opening_questions?: Array<{ label: string; required?: boolean }>; promise?: string; skills?: Array<{ path: string; references?: Array<{ path: string; kind?: string }> }>; knowledge?: Array<{ path: string; title: string; reason: string }> };
+      // Completion over quality: anything repairable is repaired, anything else is skipped
+      // and reported back to the Builder. Only SYSTEM.md is required.
+      const skipped: string[] = [];
       let s = await store.get(id);
       if (s.role !== "generation") throw new Error("Only Agent Generation may upload a Corpus");
       // Knowledge comes from the same view the agent lists: shared input/manual
@@ -72,11 +80,11 @@ export function corpusTools(store: WorkbenchStore, id: string, changed: () => vo
       const inputs = await store.contextFiles(id);
       // Knowledge is hidden from the agent until retrieval is rebuilt; the
       // selection path stays for callers that still pass it explicitly.
-      const selections = (a.knowledge ?? []).map(doc => {
-        const file = inputs.find(f => samePath(f.path, doc.path));
-        if (!file) throw new Error(`File not found: ${doc.path}`);
-        return { ...doc, path: file.path };
-      });
+      const selections = [...new Map((a.knowledge ?? []).flatMap(doc => {
+        const file = inputs.find(f => samePath(f.path, doc.path) && f.path.startsWith("input/"));
+        if (!file) { skipped.push(`${doc.path}: not an input file`); return []; }
+        return [[file.path, { ...doc, path: file.path }] as const];
+      })).values()];
       const files: string[] = [];
       const read = async (name: string) => {
         if (!name.startsWith("output/") || !name.endsWith(".md")) throw new Error("Definition files must be saved output Markdown");
@@ -86,29 +94,34 @@ export function corpusTools(store: WorkbenchStore, id: string, changed: () => vo
         files.push(name); return bytes.toString("utf8");
       };
       const skills: CorpusOutput["skills"] = [];
-      for (const skill of a.skills) {
-        const parsed = parseSkillMarkdown(await read(skill.path));
-        if (skill.path !== `output/skills/${parsed.manifest.name}/SKILL.md`) throw new Error("Skill name must match output/skills/<name>/SKILL.md");
-        const refs: CorpusOutput["skills"][number]["references"] = [];
-        for (const ref of skill.references) {
-          const refId = path.posix.basename(ref.path, ".md");
-          if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(refId)) throw new Error("Reference filename must use lowercase letters, numbers and hyphens");
-          if (ref.path !== `output/skills/${parsed.manifest.name}/references/${refId}.md`) throw new Error("Store references inside the Skill so relative links survive Runtime loading");
-          refs.push({ id: refId, kind: ref.kind, content: await read(ref.path) });
-        }
-        if (new Set(refs.map(r => r.id)).size !== refs.length) throw new Error("Duplicate Skill reference");
-        skills.push({ id: parsed.manifest.name, title: parsed.manifest.name, when_to_use: parsed.manifest.description, instruction: parsed.instructions, references: refs });
+      for (const skill of a.skills ?? []) {
+        try {
+          const repaired = repairSkillSource(await read(skill.path), path.posix.basename(path.posix.dirname(skill.path)));
+          if (skills.some(existing => existing.id === repaired.id)) continue;
+          const parsed = parseSkillMarkdown(repaired.source);
+          const refs: CorpusOutput["skills"][number]["references"] = [];
+          for (const ref of skill.references ?? []) {
+            try {
+              const refId = runtimeId(path.posix.basename(ref.path, ".md"));
+              if (!refId || refs.some(existing => existing.id === refId)) continue;
+              const content = await read(ref.path);
+              if (!content.trim()) continue;
+              refs.push({ id: refId, kind: REFERENCE_KINDS.includes(ref.kind as ReferenceKind) ? ref.kind as ReferenceKind : "method", content });
+            } catch (error) { skipped.push(`${ref.path}: ${reason(error)}`); }
+          }
+          skills.push({ id: parsed.manifest.name, title: parsed.manifest.name, when_to_use: parsed.manifest.description, instruction: parsed.instructions, references: refs });
+        } catch (error) { skipped.push(`${skill.path}: ${reason(error)}`); }
       }
-      if (new Set(skills.map(k => k.id)).size !== skills.length || new Set(selections.map(k => k.path)).size !== selections.length) throw new Error("Duplicate Skill or Knowledge selection");
-      const system = await read("output/SYSTEM.md");
-      for (const doc of selections) {
-        if (!doc.path.startsWith("input/")) throw new Error("Knowledge must be original input files");
-        await store.read(id, doc.path);
+      const system = await read("output/SYSTEM.md").catch(() => { throw new Error("Write output/SYSTEM.md first; it is the only file the upload requires."); });
+      const title = a.title?.trim().slice(0, 240);
+      const promise = a.promise?.trim() || (title ? (await registryRequest(env, `/v1/creator/products/${encodeURIComponent(product.productId)}`) as { product?: { promise?: string } }).product?.promise : undefined);
+      if (promise) {
+        const updated = z.object({ product_id: z.string().uuid() }).passthrough().parse(await registryRequest(env, `/v1/creator/products/${encodeURIComponent(product.productId)}`, { promise, ...(title ? { name: title } : {}) }, signal, `factory-promise-${id}-${digest(`${title ?? ""}\n${promise}`).slice(7)}`, "PATCH"));
+        if (updated.product_id !== product.productId) throw new Error("Registry updated a different Product");
       }
-      const updated = z.object({ product_id: z.string().uuid() }).passthrough().parse(await registryRequest(env, `/v1/creator/products/${encodeURIComponent(product.productId)}`, { promise: a.promise, ...(a.title ? { name: a.title } : {}) }, signal, `factory-promise-${id}-${digest(`${a.title ?? ""}\n${a.promise}`).slice(7)}`, "PATCH"));
-      if (updated.product_id !== product.productId) throw new Error("Registry updated a different Product");
-      if (a.opening_questions?.length) {
-        const fields = a.opening_questions.map((question, index) => ({ id: `q${index + 1}`, label: question.label, required: question.required }));
+      const questions = (a.opening_questions ?? []).map(question => ({ label: String(question.label ?? "").trim().slice(0, 500), required: question.required !== false })).filter(question => question.label).slice(0, 16);
+      if (questions.length) {
+        const fields = questions.map((question, index) => ({ id: `q${index + 1}`, label: question.label, required: question.required }));
         await registryRequest(env, `/v1/creator/products/${encodeURIComponent(product.productId)}/brief-spec`, { brief_spec: { contract_version: "1", fields } }, signal, `factory-brief-${id}-${digest(JSON.stringify(fields)).slice(7)}`, "PUT");
       }
       const knowledge: CorpusOutput["knowledge"] = [];
@@ -133,7 +146,7 @@ export function corpusTools(store: WorkbenchStore, id: string, changed: () => vo
       await store.update(id, state => { state.corpus = receipt; });
       const published = { product_id: reply.product_id, status: reply.status, published_at: reply.published_at, files };
       await store.put(id, "output/CORPUS.md", Buffer.from(`# Agent 已发布\n\n\`\`\`json\n${JSON.stringify(published, null, 2)}\n\`\`\`\n`), { actor: "host", readonly: true });
-      changed(); return result(published);
+      changed(); return result(skipped.length ? { ...published, skipped } : published);
     },
   }];
 }

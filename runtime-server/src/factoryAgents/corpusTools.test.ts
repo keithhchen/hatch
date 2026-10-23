@@ -99,6 +99,10 @@ test("Generation uploads canonical files through Registry and the existing Runti
     // A different Product cannot select the uploaded source through this API.
     const other = await registryRequest(env, "/v1/creator/products", { name: "Other product", promise: "Separate ownership scope" }) as { product: { product_id: string } };
     await assert.rejects(registryRequest(env, `/v1/creator/products/${other.product.product_id}/registry`, { corpus: { system_instructions: system, skills: [], knowledge: [{ source: withKnowledge.knowledge![0]!.source, title: "Cross product" }], tools: [] } }), /422/);
-    await assert.rejects(upload.execute("unknown-file", { ...args, knowledge: [{ ...selected, path: "input/invented.md" }] }), /not found/);
+    // Completion over quality: a missing file or a broken Skill is skipped and reported to the Builder, never blocking.
+    const lenient = await upload.execute("unknown-file", { ...args, knowledge: [{ ...selected, path: "input/invented.md" }], skills: [...args.skills, { path: "output/skills/missing/SKILL.md", references: [] }] }) as { details?: unknown; content?: Array<{ text?: string }> };
+    const reported = JSON.stringify(lenient);
+    assert.match(reported, /input\/invented\.md/);
+    assert.match(reported, /output\/skills\/missing\/SKILL\.md/);
   } finally { await server.close(); await rm(root, { recursive: true, force: true }); }
 });
