@@ -196,9 +196,6 @@
 .sx-publish__preview .storefront-shared__hero, .sx-publish__preview .storefront-shared__grid { grid-template-columns: 1fr; gap: 20px; padding-top: 8px; }
 .sx-publish__preview .storefront-shared__hero h2 { font-size: 30px; }
 .sx-publish > .sx-summary { position: sticky; top: 12px; z-index: 5; box-shadow: var(--web-shadow); }
-.sx-summary__problem { margin-top: 6px; color: var(--web-fail); font-size: 13px; }
-.sx-summary__problem p { margin: 0; }
-.sx-summary__problem ul { margin: 4px 0 0; padding-left: 18px; overflow-wrap: anywhere; }
 /* The preview shows the client page at a reduced scale so it fits beside the editor. */
 .sx-publish__preview .sx-frame { zoom: 0.72; }
 .sx-summary__link { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 6px 0 0; font-size: 13px; overflow-wrap: anywhere; }

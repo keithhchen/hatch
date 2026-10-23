@@ -55,7 +55,7 @@ import {
 import type { AboutYouAnswerPair } from "./creatorLearning/aboutYouNode.js";
 import { PostgresDistillationGraphStore } from "./creatorLearning/distillationGraphStore.js";
 import { CorpusPublisher, CorpusPublishError } from "./creatorLearning/corpusPublisher.js";
-import { createProductLive, ExpertProduct, InvalidSkills, SystemMissing, type ProductLiveService } from "./creatorLearning/productLive/index.js";
+import { createProductLive, ExpertProduct, SystemMissing, type ProductLiveService } from "./creatorLearning/productLive/index.js";
 import { CreatorRegistryReleaseStore, type CreatorRegistryRelease } from "./creatorLearning/creatorRegistryRelease.js";
 import { corpusOutputSchema } from "./creatorLearning/corpusNode.js";
 import { QdrantKnowledgeIndexer } from "./qdrantIndexer.js";
@@ -471,7 +471,6 @@ async function route(
     } catch (error) {
       if (error instanceof CorpusPublishError) throw error;
       if (error instanceof SystemMissing) throw new CorpusPublishError(error.code, error.message, 409);
-      if (error instanceof InvalidSkills) throw new CorpusPublishError(error.code, error.message, 409);
       throw new CorpusPublishError(
         "publish_failed",
         error instanceof Error ? `Registry publish failed: ${error.message}` : `Registry publish failed: ${String(error)}`,

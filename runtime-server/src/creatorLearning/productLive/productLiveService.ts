@@ -1,4 +1,4 @@
-import { InvalidSkills, ProductLiveView, SystemMissing, type ExpertProduct, type PublishedProduct } from "./domain.js";
+import { ProductLiveView, SystemMissing, type ExpertProduct, type PublishedProduct } from "./domain.js";
 import type { AgentDefinitionRepository, CorpusReleaser, LiveReleaseRepository } from "./ports.js";
 
 /** Application service for `/v1/creator/products/:id/live`. Depends on ports only. */
@@ -17,7 +17,6 @@ export class ProductLiveService {
   async publish(product: ExpertProduct): Promise<PublishedProduct> {
     const definition = await this.definitions.latestFor(product);
     if (!definition) throw new SystemMissing();
-    if (!definition.publishable) throw new InvalidSkills(definition.invalidSkills);
     const released = await this.releaser.release(product, definition.toCorpus());
     return {
       product_id: product.productId,

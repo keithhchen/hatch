@@ -6,7 +6,7 @@ import { CorpusPublisherReleaser, RegistryLiveReleaseRepository } from "./adapte
 import { WorkbenchAgentDefinitionRepository } from "./adapters/workbenchDefinitions.js";
 import { ProductLiveService } from "./productLiveService.js";
 
-export { ExpertProduct, InvalidSkills, SystemMissing } from "./domain.js";
+export { ExpertProduct, SystemMissing } from "./domain.js";
 export { ProductLiveService } from "./productLiveService.js";
 
 /** Composition root: wires the production adapters into the service. */
