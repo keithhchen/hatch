@@ -72,9 +72,11 @@ test("invalid Skill and reference names are repaired; a leftover duplicate yield
     "output/skills/broken/SKILL.md": "no front matter at all",
   };
   const skills = await new SkillFolderReader(Object.keys(files), async (name) => files[name]!).skills();
-  assert.deepEqual(skills.map(({ id }) => id), ["creator-product-distillation", "essay-review"]);
-  assert.equal(skills[0]!.instruction.trim(), "Current method.");
-  assert.deepEqual(skills[1]!.references.map(({ id }) => id), ["opening-lines"]);
+  // A SKILL.md without front matter is repaired too: name from the folder, description from its first line.
+  assert.deepEqual(skills.map(({ id }) => id), ["broken", "creator-product-distillation", "essay-review"]);
+  assert.equal(skills[0]!.when_to_use, "no front matter at all");
+  assert.equal(skills[1]!.instruction.trim(), "Current method.");
+  assert.deepEqual(skills[2]!.references.map(({ id }) => id), ["opening-lines"]);
   assert.equal(runtimeId("  Foo__Bar--baz "), "foo-bar-baz");
   const releaser = new RecordingReleaser();
   await service(new AgentDefinition("# SYSTEM", skills), undefined, releaser).publish(product);

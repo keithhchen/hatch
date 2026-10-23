@@ -18,12 +18,24 @@ export function runtimeId(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64).replace(/-+$/g, "");
 }
 
-/** Rewrites the front matter `name:` so the Skill loads under its repaired id. */
-function withSkillName(source: string, id: string): string {
-  const front = /^---\s*\n([\s\S]*?)\n---/.exec(source);
-  if (!front) return source;
-  const body = /^name:.*$/m.test(front[1]!) ? front[1]!.replace(/^name:.*$/m, `name: ${id}`) : `name: ${id}\n${front[1]}`;
-  return source.replace(front[1]!, body);
+const MAX_DESCRIPTION_CHARS = 1024;
+
+/**
+ * Makes a SKILL.md loadable: front matter exists, `name` is the repaired id,
+ * and `description` exists (first line of the body when missing) within limits.
+ */
+export function repairSkillSource(source: string, folder: string): { id: string; source: string } {
+  const front = /^---\s*\n([\s\S]*?)\n---[ \t]*\n?/.exec(source);
+  const fields = front?.[1] ?? "";
+  const body = front ? source.slice(front[0].length) : source;
+  const declared = /^name:\s*["']?(.+?)["']?\s*$/m.exec(fields)?.[1] ?? folder;
+  const id = runtimeId(declared) || runtimeId(folder) || "skill";
+  const firstLine = body.split("\n").map((line) => line.replace(/^#+\s*/, "").trim()).find(Boolean) ?? id;
+  const declaredDescription = /^description:\s*["']?(.+?)["']?\s*$/m.exec(fields)?.[1]?.trim();
+  const description = (declaredDescription && !/^[>|][+-]?$/.test(declaredDescription) ? declaredDescription : firstLine).slice(0, MAX_DESCRIPTION_CHARS);
+  // Keep other single-line fields; multi-line values cannot be carried over safely.
+  const rest = fields.split("\n").filter((line) => /^[A-Za-z][\w.-]*:\s*\S/.test(line) && !/^(name|description):/.test(line) && !/:\s*[>|][+-]?\s*$/.test(line));
+  return { id, source: ["---", `name: ${id}`, `description: ${JSON.stringify(description)}`, ...rest, "---", body.trim() || description, ""].join("\n") };
 }
 
 /** A reference file; `kind:` in front matter picks its kind, default method. */
@@ -64,10 +76,8 @@ export class SkillFolderReader {
   }
 
   private async skill(folder: string): Promise<Skill> {
-    const source = await this.read(`output/skills/${folder}/SKILL.md`);
-    const declared = /^name:\s*["']?(.+?)["']?\s*$/m.exec(/^---\s*\n([\s\S]*?)\n---/.exec(source)?.[1] ?? "")?.[1] ?? folder;
-    const id = runtimeId(declared) || runtimeId(folder);
-    const { manifest, instructions } = parseSkillMarkdown(withSkillName(source, id));
+    const { source } = repairSkillSource(await this.read(`output/skills/${folder}/SKILL.md`), folder);
+    const { manifest, instructions } = parseSkillMarkdown(source);
     return { id: manifest.name, title: manifest.name, when_to_use: manifest.description, instruction: instructions, references: await this.references(folder) };
   }
 
