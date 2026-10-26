@@ -301,18 +301,20 @@ kbd { font: inherit; }
 @media (max-width: 760px) { .web-chat__hint { visibility: visible; } .hui-avatar.web-chat__message-avatar { display: inline-grid; } }
 
 /* @hatch/ui overlays on desktop: hairline sheets, no blur or paper texture. */
-.desk-root .hui-overlay { background: rgba(0, 0, 0, .16); backdrop-filter: none; }
-.desk-root .hui-dialog, .desk-root .hui-command-dialog { border: 0; color: var(--desk-ink); background: var(--desk-raised); box-shadow: var(--desk-float); font-family: var(--desk-font); }
-.desk-root .hui-command-dialog { top: 18%; transform: translateX(-50%); width: min(560px, calc(100vw - 48px)); border-radius: 12px; }
-.desk-root .hui-command { color: var(--desk-ink); background: transparent; font-family: var(--desk-font); }
-.desk-root .hui-command [cmdk-item] { min-height: 32px; border-radius: var(--desk-radius); font-size: 13px; }
-.desk-root .hui-command [cmdk-item][data-selected="true"] { background: var(--desk-selected); box-shadow: none; }
-.desk-root .hui-command [cmdk-group-heading] { color: var(--desk-muted); font-size: 11px; letter-spacing: 0; text-transform: none; }
-.desk-root .hui-command__search { border-bottom: .5px solid var(--desk-hairline); }
-.desk-root .hui-command__search input { color: var(--desk-ink); font: 14px var(--desk-font); }
-.desk-root .hui-select-trigger { min-width: 160px; min-height: 26px; padding: 0 8px; border: 0; border-radius: var(--desk-radius); color: var(--desk-ink); background: var(--desk-fill); box-shadow: inset 0 0 0 .5px var(--desk-hairline); font-size: 13px; }
-.desk-root .hui-select-content { border-radius: 8px; background: var(--desk-raised); box-shadow: var(--desk-float); }
-.desk-root .hui-select-item[data-highlighted] { background: var(--desk-selected); box-shadow: none; }
+/* Overlays portal to <body>, outside .desk-root. Native palettes never blur what is behind them. */
+.hui-overlay { background: rgba(0, 0, 0, .12); backdrop-filter: none; -webkit-backdrop-filter: none; }
+.hui-dialog, .hui-command-dialog { border: 0; color: var(--desk-ink); background: var(--desk-raised); box-shadow: var(--desk-float); font-family: var(--desk-font); }
+.hui-command-dialog { top: 18%; transform: translateX(-50%); width: min(560px, calc(100vw - 48px)); border-radius: 12px; }
+.hui-command { color: var(--desk-ink); background: transparent; font-family: var(--desk-font); }
+.hui-command [cmdk-item] { min-height: 32px; border-radius: var(--desk-radius); font-size: 13px; }
+.hui-command [cmdk-item][data-selected="true"] { background: var(--desk-selected); box-shadow: none; }
+.hui-command [cmdk-group-heading] { color: var(--desk-muted); font-size: 11px; letter-spacing: 0; text-transform: none; }
+.hui-command__search { border-bottom: .5px solid var(--desk-hairline); }
+.hui-command__search input { color: var(--desk-ink); font: 14px var(--desk-font); }
+.hui-command__search input:focus, .hui-command__search input:focus-visible { outline: none; box-shadow: none; border-color: transparent; }
+.hui-select-trigger { min-width: 160px; min-height: 26px; padding: 0 8px; border: 0; border-radius: var(--desk-radius); color: var(--desk-ink); background: var(--desk-fill); box-shadow: inset 0 0 0 .5px var(--desk-hairline); font-size: 13px; }
+.hui-select-content { border-radius: 8px; background: var(--desk-raised); box-shadow: var(--desk-float); }
+.hui-select-item[data-highlighted] { background: var(--desk-selected); box-shadow: none; }
 
 .desk-settings.hui-dialog { width: min(640px, calc(100vw - 48px)); padding: 0; border-radius: 12px; }
 .desk-settings .hui-dialog__header { padding: 12px 16px; border-bottom: .5px solid var(--desk-hairline); }
