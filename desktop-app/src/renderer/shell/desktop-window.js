@@ -241,7 +241,7 @@ export class DesktopWindow extends Observable {
 
   async select(agent, conversationId, { startTask = false } = {}) {
     const previous = this.currentSession;
-    this.setState({ selection: { agentKey: agent.key, conversationId }, brief: null, openError: null });
+    this.setState({ selection: { agentKey: agent.key, conversationId }, brief: null, openError: null, ...(this.state.narrow ? { sidebarOpen: false } : {}) });
     this.afterSelection();
     try {
       const session = await this.sessions.open(agent, conversationId, { startTask, inheritWorkspace: previous?.workspace.getState().grant ? { workspaceGrant: previous.workspace.getState().grant, permissionMode: previous.workspace.permission } : undefined });

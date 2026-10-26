@@ -113,8 +113,8 @@ kbd { font: inherit; }
 :root[data-platform="windows"] .desk-scrim { background: rgba(0, 0, 0, .2); }
 
 /* Sidebar ---------------------------------------------------------------------- */
-.desk-sidebar__titlebar { height: var(--desk-toolbar-height); flex: 0 0 auto; }
-:root[data-platform="windows"] .desk-sidebar__titlebar { height: 8px; }
+.desk-sidebar__titlebar { display: flex; height: var(--desk-toolbar-height); flex: 0 0 auto; align-items: center; justify-content: flex-end; padding: 0 12px; }
+:root[data-platform="windows"] .desk-sidebar__titlebar { height: 40px; justify-content: flex-start; padding: 0 8px; }
 .desk-sidebar__actions { display: grid; gap: 1px; padding: 0 8px 8px; }
 .desk-sidebar__list { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 0 8px 8px; }
 .desk-sidebar__footer { display: grid; gap: 1px; padding: 8px; border-top: .5px solid var(--desk-hairline); }

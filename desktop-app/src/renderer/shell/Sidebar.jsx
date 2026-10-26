@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { ChevronRight, ChevronsUpDown, Compass, Search, SquarePen } from "lucide-react";
+import { ChevronRight, ChevronsUpDown, Compass, PanelLeft, Search, SquarePen } from "lucide-react";
 import { Avatar } from "@hatch/ui";
 import { SEPARATOR, nativeContextMenu, popupNativeMenu } from "../native/context-menu.js";
 import { useObservable } from "../observable.js";
@@ -93,7 +93,9 @@ export function Sidebar() {
     { label: t("menu.signOut"), action: () => app.signOut() }
   ]);
   return <aside className="desk-sidebar" aria-label={t("sidebar.label")} inert={!ui.sidebarOpen}>
-    <div className="desk-sidebar__titlebar" data-tauri-drag-region />
+    <div className="desk-sidebar__titlebar" data-tauri-drag-region>
+      <button type="button" className="desk-icon-button" aria-label={t("toolbar.toggleSidebar")} title={t("toolbar.toggleSidebar")} onClick={() => app.toggleSidebar()}><PanelLeft aria-hidden="true" /></button>
+    </div>
     <div className="desk-sidebar__actions">
       <SidebarAction icon={<SquarePen aria-hidden="true" />} label={t("sidebar.newConversation")} keys={shortcut("N")} disabled={!app.selectedAgent} onClick={() => app.newConversation()} />
       <SidebarAction icon={<Search aria-hidden="true" />} label={t("sidebar.search")} keys={shortcut("K")} onClick={() => app.openOverlay("search")} />

@@ -26,7 +26,7 @@ export function Toolbar() {
   const session = app.currentSession;
   const title = conversation?.title || (ui.selection?.conversationId ? t("conversation.untitled") : agent?.name ?? "Hatch");
   return <header className="desk-toolbar" data-tauri-drag-region>
-    {!ui.sidebarOpen || ui.narrow ? <ToolbarButton label={t("toolbar.toggleSidebar")} onClick={() => app.toggleSidebar()}><PanelLeft aria-hidden="true" /></ToolbarButton> : null}
+    {!ui.sidebarOpen ? <ToolbarButton label={t("toolbar.toggleSidebar")} onClick={() => app.toggleSidebar()}><PanelLeft aria-hidden="true" /></ToolbarButton> : null}
     <div className="desk-toolbar__title" data-tauri-drag-region>
       <strong data-tauri-drag-region>{title}</strong>
       {agent ? <small data-tauri-drag-region>{t("conversation.byline", { agent: agent.name, creator: agent.creatorName })}</small> : null}

@@ -8,7 +8,6 @@ export class HatchRequestError extends Error {
   }
 }
 
-export const isNetworkError = error => error?.code === "network_error";
 export const isAuthInvalid = error => error?.code === "auth_invalid" || error?.status === 401;
 
 /**
