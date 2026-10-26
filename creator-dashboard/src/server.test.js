@@ -708,6 +708,33 @@ test("non-UUID product paths are rejected without redirects", async (context) =>
   assert.equal(apiResponse.status, 404);
 });
 
+test("retired buyer routes 301 to /explore and /explore/orders at the routing boundary", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-retired-routes-"));
+  const registry = registryFixture({ signedIn: "buyer" });
+  await listen(registry);
+  context.after(() => registry.close());
+  const dashboard = await createDashboardApp({
+    ledgerPath: path.join(directory, "ledger.jsonl"),
+    registryUrl: serverUrl(registry)
+  });
+  const api = createServer(dashboard.handler);
+  await listen(api);
+  context.after(() => api.close());
+
+  for (const [from, to] of [
+    ["/home", "/explore"],
+    ["/library", "/explore"],
+    ["/library/ent-1", "/explore"],
+    ["/orders?status=pending", "/explore/orders?status=pending"],
+    ["/orders/HAT-1", "/explore/orders/HAT-1"],
+    ["/orders/HAT-1/success", "/explore/orders/HAT-1/success"]
+  ]) {
+    const response = await fetch(`${serverUrl(api)}${from}`, { redirect: "manual" });
+    assert.equal(response.status, 301, from);
+    assert.equal(response.headers.get("location"), to, from);
+  }
+});
+
 test("Factory-only first publish does not seed a fake legacy deployment", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-first-publish-"));
   const deploymentCalls = [];

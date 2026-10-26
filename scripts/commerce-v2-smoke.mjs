@@ -118,7 +118,7 @@ export async function runCommerceV2Smoke(options = {}) {
     throw new Error("Entitlement detail did not preserve active release-pinned access.");
   }
 
-  const success = await smokeRequest(fetchImpl, origin, `/orders/${encodeURIComponent(orderId)}/success`, {
+  const success = await smokeRequest(fetchImpl, origin, `/explore/orders/${encodeURIComponent(orderId)}/success`, {
     headers: { cookie }
   });
   assertStatus(success, 200, "durable success route");

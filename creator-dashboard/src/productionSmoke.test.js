@@ -96,7 +96,7 @@ test("production Commerce smoke covers public metadata and an idempotent authent
       }));
       return;
     }
-    if (url.pathname === "/orders/8ce5faf8-0849-413d-8aa0-ac5a371e0a81/success" || url.pathname === "/download") {
+    if (url.pathname === "/explore/orders/8ce5faf8-0849-413d-8aa0-ac5a371e0a81/success" || url.pathname === "/download") {
       response.setHeader("content-type", "text/html");
       response.end("<html>Hatch</html>");
       return;

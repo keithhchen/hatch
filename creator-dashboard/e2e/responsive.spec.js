@@ -87,7 +87,7 @@ test("canonical public product is readable without auth at every acceptance view
 
 test("authenticated mobile navigation keeps account controls reachable", async ({ page }, testInfo) => {
   test.skip(!testInfo.project.name.startsWith("mobile-"), "Mobile account controls are covered at both acceptance widths.");
-  await signIn(page, "buyer", "/library");
+  await signIn(page, "buyer", "/explore");
   await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
   await expectNoHorizontalOverflow(page);
 });

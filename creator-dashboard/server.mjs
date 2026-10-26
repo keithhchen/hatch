@@ -813,6 +813,11 @@ export async function createDashboardApp(options = {}) {
       if (request.method === "GET" && (url.pathname === "/favicon.svg" || url.pathname === "/factory-voice-capture-worklet.js" || url.pathname === "/factory-voice-playback-worklet.js" || url.pathname === "/assets" || url.pathname.startsWith("/assets/"))) {
         return servePortalAsset(url.pathname, response);
       }
+      const retiredRedirect = request.method === "GET" ? retiredPortalRedirect(url.pathname) : null;
+      if (retiredRedirect) {
+        response.writeHead(301, { location: `${retiredRedirect}${url.search}`, "cache-control": "no-cache" });
+        return response.end();
+      }
       if (request.method === "GET" && isPublicPortalRoute(url.pathname)) {
         let metadata = createDefaultMetadata(publicOrigin, "/explore");
         let portalStatus = 200;
@@ -3404,7 +3409,7 @@ function checkoutOutcomeBody(session, order, entitlement, payment) {
     order_id: order?.order_id ?? session.order_id,
     status: order?.status ?? (session.status === "completed" ? "fulfilled" : session.status),
     entitlement_id: entitlementId,
-    redirect_url: order?.order_id ? `/orders/${encodeURIComponent(orderNumberFor(order))}/success` : null,
+    redirect_url: order?.order_id ? `/explore/orders/${encodeURIComponent(orderNumberFor(order))}/success` : null,
     order: order ?? null,
     payment: payment ?? {
       payment_id: null,
@@ -4462,6 +4467,13 @@ function ageMs(value, nowMs) {
   return Number.isFinite(timestamp) ? Math.max(0, nowMs - timestamp) : 0;
 }
 
+// Retired buyer routes. /explore is the one home; orders live under it.
+export function retiredPortalRedirect(pathname) {
+  if (pathname === "/home" || pathname === "/library" || pathname.startsWith("/library/")) return "/explore";
+  if (pathname === "/orders" || pathname.startsWith("/orders/")) return `/explore${pathname}`;
+  return null;
+}
+
 function isPublicPortalRoute(pathname) {
   return pathname === "/"
     || pathname === "/explore"
@@ -4470,12 +4482,7 @@ function isPublicPortalRoute(pathname) {
     || pathname.startsWith("/creators/")
     || pathname === "/products"
     || pathname.startsWith("/products/")
-    || pathname === "/home"
-    || pathname === "/library"
-    || pathname.startsWith("/library/")
     || pathname.startsWith("/chat/product/")
-    || pathname === "/orders"
-    || pathname.startsWith("/orders/")
     || pathname === "/checkout"
     || pathname.startsWith("/checkout/")
     || pathname === "/studio"
