@@ -3541,7 +3541,9 @@ mod tests {
 
     #[test]
     fn studio_entry_points_are_allowed_browse_destinations() {
-        assert!(is_allowed_browse_url("https://hatch.tokenquadrant.cn/studio"));
+        assert!(is_allowed_browse_url(
+            "https://hatch.tokenquadrant.cn/studio"
+        ));
         assert!(is_allowed_browse_url(
             "https://hatch.tokenquadrant.cn/studio/products/new"
         ));
