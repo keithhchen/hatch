@@ -2158,12 +2158,18 @@ fn open_external_url_windows(url: &str) -> Result<(), String> {
         .ok_or_else(|| "The system browser could not be opened".into())
 }
 
+/// The Hatch web origin this build may open in the system browser. A
+/// development build is compiled against its own origin.
+pub(crate) const WEB_ORIGIN: &str = match option_env!("HATCH_DESKTOP_WEB_ORIGIN") {
+    Some(origin) => origin,
+    None => "https://hatch.tokenquadrant.cn",
+};
+
 fn is_allowed_browse_url(url: &str) -> bool {
-    let Ok(parsed) = url::Url::parse(url) else {
+    let (Ok(parsed), Ok(origin)) = (url::Url::parse(url), url::Url::parse(WEB_ORIGIN)) else {
         return false;
     };
-    parsed.scheme() == "https"
-        && parsed.host_str() == Some("hatch.tokenquadrant.cn")
+    parsed.origin() == origin.origin()
         && (parsed.path() == "/explore"
             || parsed.path() == "/account"
             || parsed.path() == "/account/help"
@@ -2184,8 +2190,15 @@ fn is_uuid_route(path: &str, prefix: &str) -> bool {
         && matches!(value.as_bytes().get(19), Some(b'8' | b'9' | b'a' | b'b'))
 }
 
+/// The formal app owns `hatch://`; a separately named development build is
+/// compiled with its own scheme so the two never steal each other's links.
+const DEEP_LINK_SCHEME: &str = match option_env!("HATCH_DESKTOP_DEEP_LINK_SCHEME") {
+    Some(scheme) => scheme,
+    None => "hatch",
+};
+
 fn normalize_product_open_url(url: &url::Url) -> Option<String> {
-    if url.scheme() != "hatch" || url.host_str() != Some("products") || url.path() != "/open" {
+    if url.scheme() != DEEP_LINK_SCHEME || url.host_str() != Some("products") || url.path() != "/open" {
         return None;
     }
     let query = |name: &str| {
@@ -2214,7 +2227,7 @@ const MAX_AUTH_CALLBACK_VALUE_BYTES: usize = 512;
 /// app. The code is single-use and PKCE-bound, so it is not a credential on
 /// its own; the renderer that started the sign-in exchanges it.
 fn normalize_auth_callback_url(url: &url::Url) -> Option<Value> {
-    if url.scheme() != "hatch" || url.host_str() != Some("auth") || url.path() != "/callback" {
+    if url.scheme() != DEEP_LINK_SCHEME || url.host_str() != Some("auth") || url.path() != "/callback" {
         return None;
     }
     let value = |name: &str| {

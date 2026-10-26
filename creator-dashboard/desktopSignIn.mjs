@@ -10,7 +10,9 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
  */
 export const DESKTOP_AUTHORIZE_PATH = "/v1/auth/desktop/authorize";
 export const DESKTOP_TOKEN_PATH = "/v1/auth/desktop/token";
-export const DESKTOP_CALLBACK_URL = "hatch://auth/callback";
+// A separately named development build registers its own scheme so it never
+// receives the formal Hatch.app's callback (and vice versa).
+export const DESKTOP_CALLBACK_URL = `${process.env.HATCH_DESKTOP_DEEP_LINK_SCHEME || "hatch"}://auth/callback`;
 const DESKTOP_CLIENT_ID = "hatch-desktop";
 const CODE_TTL_MS = 60_000;
 

@@ -80,7 +80,7 @@ const SIDEBAR_ACCELERATOR: &str = if cfg!(target_os = "macos") {
 };
 const MENU_WINDOW_FOCUS_PREFIX: &str = "window.focus:";
 const MENU_HELP_OPEN: &str = "help.open";
-const HELP_URL: &str = "https://hatch.tokenquadrant.cn/account/help";
+const HELP_PATH: &str = "/account/help";
 
 const MAX_CONVERSATION_ID_BYTES: usize = 256;
 const CONVERSATION_WINDOW_MANIFEST_SCHEMA_VERSION: u32 = 1;
@@ -957,7 +957,7 @@ impl NativeCommandRouter {
             return self.refresh_native_menu(app);
         }
         if menu_id == MENU_HELP_OPEN {
-            return crate::open_external_url(HELP_URL.into());
+            return crate::open_external_url(format!("{}{HELP_PATH}", crate::WEB_ORIGIN));
         }
         let Some(command_id) = app_menu_command(menu_id) else {
             // Standard Tauri/OS menu items (Undo, Cut, Quit, …) deliberately
