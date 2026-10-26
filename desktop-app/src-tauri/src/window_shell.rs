@@ -10,7 +10,7 @@ use std::{path::PathBuf, time::Duration};
 use tauri::{
     utils::config::{WindowConfig, WindowEffectsConfig},
     webview::PageLoadEvent,
-    window::{Effect, EffectState},
+    window::Effect,
     AppHandle, Manager, Runtime, State, Theme, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
 
@@ -58,7 +58,7 @@ fn window_effects() -> WindowEffectsConfig {
     #[cfg(target_os = "macos")]
     let (effects, state) = (
         vec![Effect::Sidebar],
-        Some(EffectState::FollowsWindowActiveState),
+        Some(tauri::window::EffectState::FollowsWindowActiveState),
     );
     // Mica only: Acrylic is documented to lag while dragging/resizing.
     #[cfg(not(target_os = "macos"))]
@@ -93,7 +93,7 @@ pub fn prepare_window<'a, R: Runtime, M: Manager<R>>(
     #[cfg(target_os = "macos")]
     let builder = builder.allow_link_preview(false);
     #[cfg(target_os = "windows")]
-    let builder = builder.scroll_bar_style(tauri::utils::config::ScrollBarStyle::FluentOverlay);
+    let builder = builder.scroll_bar_style(tauri::webview::ScrollBarStyle::FluentOverlay);
     builder
 }
 
