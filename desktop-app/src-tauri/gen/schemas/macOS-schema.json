@@ -243,16 +243,10 @@
           "markdownDescription": "Enables the import_clipboard_attachment command without any pre-configured scope."
         },
         {
-          "description": "Enables the open_conversation_draft command without any pre-configured scope.",
+          "description": "Enables the open_agent_window command without any pre-configured scope.",
           "type": "string",
-          "const": "allow-open-conversation-draft",
-          "markdownDescription": "Enables the open_conversation_draft command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the open_conversation_window command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-open-conversation-window",
-          "markdownDescription": "Enables the open_conversation_window command without any pre-configured scope."
+          "const": "allow-open-agent-window",
+          "markdownDescription": "Enables the open_agent_window command without any pre-configured scope."
         },
         {
           "description": "Enables the open_external_url command without any pre-configured scope.",
@@ -345,12 +339,6 @@
           "markdownDescription": "Enables the read_window_settings command without any pre-configured scope."
         },
         {
-          "description": "Enables the release_conversation_draft command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-release-conversation-draft",
-          "markdownDescription": "Enables the release_conversation_draft command without any pre-configured scope."
-        },
-        {
           "description": "Enables the release_conversation_session command without any pre-configured scope.",
           "type": "string",
           "const": "allow-release-conversation-session",
@@ -375,12 +363,6 @@
           "markdownDescription": "Enables the revoke_workspace_grant command without any pre-configured scope."
         },
         {
-          "description": "Enables the save_conversation_draft command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-save-conversation-draft",
-          "markdownDescription": "Enables the save_conversation_draft command without any pre-configured scope."
-        },
-        {
           "description": "Enables the save_local_attachment command without any pre-configured scope.",
           "type": "string",
           "const": "allow-save-local-attachment",
@@ -391,6 +373,12 @@
           "type": "string",
           "const": "allow-set-native-command-state",
           "markdownDescription": "Enables the set_native_command_state command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_window_attention command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-window-attention",
+          "markdownDescription": "Enables the set_window_attention command without any pre-configured scope."
         },
         {
           "description": "Enables the set_window_tool_context command without any pre-configured scope.",
@@ -477,16 +465,10 @@
           "markdownDescription": "Denies the import_clipboard_attachment command without any pre-configured scope."
         },
         {
-          "description": "Denies the open_conversation_draft command without any pre-configured scope.",
+          "description": "Denies the open_agent_window command without any pre-configured scope.",
           "type": "string",
-          "const": "deny-open-conversation-draft",
-          "markdownDescription": "Denies the open_conversation_draft command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the open_conversation_window command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-open-conversation-window",
-          "markdownDescription": "Denies the open_conversation_window command without any pre-configured scope."
+          "const": "deny-open-agent-window",
+          "markdownDescription": "Denies the open_agent_window command without any pre-configured scope."
         },
         {
           "description": "Denies the open_external_url command without any pre-configured scope.",
@@ -579,12 +561,6 @@
           "markdownDescription": "Denies the read_window_settings command without any pre-configured scope."
         },
         {
-          "description": "Denies the release_conversation_draft command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-release-conversation-draft",
-          "markdownDescription": "Denies the release_conversation_draft command without any pre-configured scope."
-        },
-        {
           "description": "Denies the release_conversation_session command without any pre-configured scope.",
           "type": "string",
           "const": "deny-release-conversation-session",
@@ -609,12 +585,6 @@
           "markdownDescription": "Denies the revoke_workspace_grant command without any pre-configured scope."
         },
         {
-          "description": "Denies the save_conversation_draft command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-save-conversation-draft",
-          "markdownDescription": "Denies the save_conversation_draft command without any pre-configured scope."
-        },
-        {
           "description": "Denies the save_local_attachment command without any pre-configured scope.",
           "type": "string",
           "const": "deny-save-local-attachment",
@@ -625,6 +595,12 @@
           "type": "string",
           "const": "deny-set-native-command-state",
           "markdownDescription": "Denies the set_native_command_state command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_window_attention command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-window-attention",
+          "markdownDescription": "Denies the set_window_attention command without any pre-configured scope."
         },
         {
           "description": "Denies the set_window_tool_context command without any pre-configured scope.",

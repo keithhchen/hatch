@@ -102,7 +102,10 @@ pub fn reveal_if_still_hidden<R: Runtime>(window: WebviewWindow<R>) {
     std::thread::spawn(move || {
         std::thread::sleep(REVEAL_FALLBACK_DELAY);
         let waiting_for_sign_in = window.label() == MAIN_WINDOW_LABEL
-            && window.app_handle().get_webview_window(WELCOME_WINDOW_LABEL).is_some();
+            && window
+                .app_handle()
+                .get_webview_window(WELCOME_WINDOW_LABEL)
+                .is_some();
         if !waiting_for_sign_in && !window.is_visible().unwrap_or(true) {
             let _ = window.show();
         }

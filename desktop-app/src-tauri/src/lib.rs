@@ -24,7 +24,6 @@ use tauri_plugin_deep_link::DeepLinkExt;
 
 mod attachment_store;
 mod desktop_state;
-mod draft_store;
 mod window_commands;
 mod window_shell;
 
@@ -1228,66 +1227,6 @@ fn read_task_settings(app: AppHandle, task_id: String) -> Result<Option<Value>, 
 }
 
 #[tauri::command]
-async fn open_conversation_draft(
-    app: AppHandle,
-    window: WebviewWindow,
-    account_id: String,
-    conversation_id: String,
-) -> Result<draft_store::OpenDraft, String> {
-    let label = window.label().to_owned();
-    tauri::async_runtime::spawn_blocking(move || {
-        app.state::<draft_store::DraftStore>()
-            .open(&account_id, &conversation_id, &label)
-    })
-    .await
-    .map_err(|error| format!("draft_worker_failed: {error}"))?
-}
-
-#[tauri::command]
-async fn save_conversation_draft(
-    app: AppHandle,
-    window: WebviewWindow,
-    account_id: String,
-    conversation_id: String,
-    lease: String,
-    draft: draft_store::Draft,
-) -> Result<(), String> {
-    let label = window.label().to_owned();
-    tauri::async_runtime::spawn_blocking(move || {
-        app.state::<draft_store::DraftStore>().save(
-            &account_id,
-            &conversation_id,
-            &label,
-            &lease,
-            draft,
-        )
-    })
-    .await
-    .map_err(|error| format!("draft_worker_failed: {error}"))?
-}
-
-#[tauri::command]
-async fn release_conversation_draft(
-    app: AppHandle,
-    window: WebviewWindow,
-    account_id: String,
-    conversation_id: String,
-    lease: String,
-) -> Result<(), String> {
-    let label = window.label().to_owned();
-    tauri::async_runtime::spawn_blocking(move || {
-        app.state::<draft_store::DraftStore>().release(
-            &account_id,
-            &conversation_id,
-            &label,
-            &lease,
-        )
-    })
-    .await
-    .map_err(|error| format!("draft_worker_failed: {error}"))?
-}
-
-#[tauri::command]
 fn import_clipboard_attachment(
     display_name: String,
     media_type: String,
@@ -2011,9 +1950,6 @@ fn read_window_settings(app: AppHandle, window: WebviewWindow) -> Result<Value, 
         "frame": saved_window.frame,
         "layout": {
             "sidebarPreference": if saved_window.layout.sidebar_open { "open" } else { "closed" },
-            "inspectorPreference": if saved_window.layout.inspector_open { "open" } else { "closed" },
-            "sidebarWidth": saved_window.layout.sidebar_width,
-            "inspectorWidth": saved_window.layout.inspector_width,
             "zoom": saved_window.layout.zoom
         }
     }))
@@ -2037,15 +1973,6 @@ fn patch_window_settings(
         if let Some(layout) = patch.get("layout").and_then(Value::as_object) {
             if let Some(value) = layout.get("sidebarPreference").and_then(Value::as_str) {
                 saved_window.layout.sidebar_open = value == "open";
-            }
-            if let Some(value) = layout.get("inspectorPreference").and_then(Value::as_str) {
-                saved_window.layout.inspector_open = value == "open";
-            }
-            if let Some(value) = layout.get("sidebarWidth") {
-                saved_window.layout.sidebar_width = value.as_f64();
-            }
-            if let Some(value) = layout.get("inspectorWidth") {
-                saved_window.layout.inspector_width = value.as_f64();
             }
             if let Some(value) = layout.get("zoom") {
                 saved_window.layout.zoom = value.as_f64();
@@ -2198,7 +2125,10 @@ const DEEP_LINK_SCHEME: &str = match option_env!("HATCH_DESKTOP_DEEP_LINK_SCHEME
 };
 
 fn normalize_product_open_url(url: &url::Url) -> Option<String> {
-    if url.scheme() != DEEP_LINK_SCHEME || url.host_str() != Some("products") || url.path() != "/open" {
+    if url.scheme() != DEEP_LINK_SCHEME
+        || url.host_str() != Some("products")
+        || url.path() != "/open"
+    {
         return None;
     }
     let query = |name: &str| {
@@ -2227,7 +2157,10 @@ const MAX_AUTH_CALLBACK_VALUE_BYTES: usize = 512;
 /// app. The code is single-use and PKCE-bound, so it is not a credential on
 /// its own; the renderer that started the sign-in exchanges it.
 fn normalize_auth_callback_url(url: &url::Url) -> Option<Value> {
-    if url.scheme() != DEEP_LINK_SCHEME || url.host_str() != Some("auth") || url.path() != "/callback" {
+    if url.scheme() != DEEP_LINK_SCHEME
+        || url.host_str() != Some("auth")
+        || url.path() != "/callback"
+    {
         return None;
     }
     let value = |name: &str| {
@@ -2250,7 +2183,8 @@ fn handle_deep_links(app: &AppHandle, urls: &[url::Url]) {
         .filter_map(normalize_product_open_url)
         .collect::<Vec<_>>();
     if !links.is_empty() {
-        let _ = app.emit(PRODUCT_OPEN_EVENT, links);
+        // Only the Library handles product links, so each opens once.
+        let _ = app.emit_to(window_shell::MAIN_WINDOW_LABEL, PRODUCT_OPEN_EVENT, links);
     }
     let mut received_callback = false;
     for callback in urls.iter().filter_map(normalize_auth_callback_url) {
@@ -2632,12 +2566,6 @@ pub fn run() {
         .manage(NativeToolAuthority::default())
         .manage(window_commands::NativeCommandRouter::default())
         .setup(|app| {
-            app.manage(draft_store::DraftStore::new(
-                app.path().app_data_dir()?.join("drafts"),
-                app.state::<window_commands::NativeCommandRouter>()
-                    .inner()
-                    .clone(),
-            ));
             app.manage(NativeDropContextStore::open(
                 app.path().app_data_dir()?.join("attachments"),
             )?);
@@ -2658,11 +2586,10 @@ pub fn run() {
             let router = app.state::<window_commands::NativeCommandRouter>();
             window_commands::install_native_menu(app.handle(), router.inner())
                 .map_err(std::io::Error::other)?;
-            // Conversation windows are native-owned session surfaces. Their
-            // manifest is restored before the main renderer finishes booting;
-            // each restored WebView still revalidates auth, account binding,
-            // workspace grant and conversation snapshot on its own.
-            let _ = window_commands::restore_conversation_windows(app.handle(), router.inner());
+            // Chat windows (one per Agent) left open last time are restored
+            // before the Library renderer finishes booting; each restored
+            // WebView still revalidates auth, account binding and Agent access.
+            let _ = window_commands::restore_agent_windows(app.handle(), router.inner());
             Ok(())
         })
         .on_menu_event(|app, event| {
@@ -2679,9 +2606,6 @@ pub fn run() {
             open_local_attachment,
             save_local_attachment,
             import_clipboard_attachment,
-            open_conversation_draft,
-            save_conversation_draft,
-            release_conversation_draft,
             pick_native_drop_files,
             pick_workspace_folder,
             reveal_workspace_artifact,
@@ -2705,7 +2629,8 @@ pub fn run() {
             open_external_url,
             revoke_workspace_grant,
             read_product_open_links,
-            window_commands::open_conversation_window,
+            window_commands::open_agent_window,
+            window_commands::set_window_attention,
             window_commands::claim_conversation_session,
             window_commands::release_conversation_session,
             window_commands::set_native_command_state,
@@ -2780,7 +2705,7 @@ pub fn run() {
             }
             let window = window.clone();
             tauri::async_runtime::spawn_blocking(move || {
-                // Wait out pre-close context registrations and draft writes before
+                // Wait out pre-close context registrations before
                 // draining tools; retain the Closing owner until cleanup succeeds.
                 window
                     .state::<window_commands::NativeCommandRouter>()
@@ -2818,9 +2743,9 @@ pub fn run() {
                 if let Some(router) = app.try_state::<window_commands::NativeCommandRouter>() {
                     // Tauri destroys every window during a normal quit. Keep
                     // the manifest intact so the next launch can recreate
-                    // the same conversation windows; an individual close
+                    // the same Agent windows; an individual close
                     // outside app-exit still removes only that entry.
-                    router.preserve_conversation_manifest_on_exit();
+                    router.preserve_agent_manifest_on_exit();
                 }
             }
             // Dock click with nothing visible: the main renderer decides
@@ -2831,7 +2756,11 @@ pub fn run() {
                 ..
             } = event
             {
-                let _ = app.emit_to(window_shell::MAIN_WINDOW_LABEL, "hatch://reopen", ());
+                let _ = app.emit_to(
+                    window_shell::MAIN_WINDOW_LABEL,
+                    window_commands::REOPEN_EVENT,
+                    (),
+                );
             }
         });
 }
