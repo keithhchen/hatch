@@ -88,8 +88,8 @@ function NewConversation({ agent, composing }) {
   }
   return <form className="desk-brief" onSubmit={submit} onKeyDown={event => { if (event.key === "Escape") app.cancelComposing(); }}>
     <header className="desk-brief__header">
-      <Avatar className="desk-row__avatar" src={agent.identity.creatorAvatarUrl} name={agent.creatorName} size="small" />
-      <div><h2>{t("brief.title")}</h2><p>{t("brief.intro", { agent: agent.name })}</p></div>
+      <Avatar className="desk-brief__avatar" src={agent.identity.creatorAvatarUrl} name={agent.creatorName} size="medium" />
+      <div><small className="desk-brief__creator">{agent.creatorName}</small><h2>{t("brief.title")}</h2><p>{t("brief.intro", { agent: agent.name })}</p></div>
     </header>
     {folder}
     {fields.map((field, index) => <label key={field.id} className="desk-field">

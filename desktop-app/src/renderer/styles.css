@@ -266,8 +266,9 @@ kbd { font: inherit; }
 .desk-brief__reason { margin-right: auto; align-self: center; color: var(--desk-muted); font-size: 12px; }
 
 .desk-brief { display: flex; width: min(560px, calc(100% - 48px)); flex-direction: column; gap: 16px; margin: 32px auto; overflow-y: auto; }
-.desk-brief__header { display: flex; align-items: flex-start; gap: 10px; }
-.desk-brief__header .hui-avatar { margin-top: 3px; }
+.desk-brief__header { display: flex; align-items: flex-start; gap: 12px; }
+.hui-avatar.desk-brief__avatar { width: 40px; height: 40px; min-width: 40px; font-size: 14px; }
+.desk-brief__creator { display: block; margin-bottom: 2px; color: var(--desk-muted); font-size: 12px; }
 .desk-brief__header h2 { margin: 0; font-size: 17px; font-weight: 600; }
 .desk-brief__header p { margin: 4px 0 0; color: var(--desk-body); line-height: 1.5; }
 .desk-field { display: grid; gap: 6px; }
