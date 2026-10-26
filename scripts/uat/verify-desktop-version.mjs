@@ -8,13 +8,14 @@ export async function verifyDesktopVersion({ repositoryRoot, expectedTag = null 
   if (!repositoryRoot) throw new Error("repositoryRoot is required.");
 
   const desktopRoot = path.join(repositoryRoot, "desktop-app");
-  const [packageJson, packageLock, tauriConfig, cargoToml, cargoLock, renderer] = await Promise.all([
+  const [packageJson, packageLock, tauriConfig, cargoToml, cargoLock, renderer, nativeMenu] = await Promise.all([
     readJson(path.join(desktopRoot, "package.json")),
     readJson(path.join(desktopRoot, "package-lock.json")),
     readJson(path.join(desktopRoot, "src-tauri", "tauri.conf.json")),
     readFile(path.join(desktopRoot, "src-tauri", "Cargo.toml"), "utf8"),
     readFile(path.join(desktopRoot, "src-tauri", "Cargo.lock"), "utf8"),
-    readFile(path.join(desktopRoot, "src", "renderer", "main.jsx"), "utf8")
+    readFile(path.join(desktopRoot, "src", "renderer", "shell", "desktop-window.js"), "utf8"),
+    readFile(path.join(desktopRoot, "src-tauri", "src", "window_commands.rs"), "utf8")
   ]);
 
   const versions = new Map([
@@ -34,11 +35,13 @@ export async function verifyDesktopVersion({ repositoryRoot, expectedTag = null 
   if (typeof version !== "string" || !/^\d+\.\d+\.\d+$/.test(version)) {
     throw new Error(`Desktop version ${JSON.stringify(version)} is not strict SemVer X.Y.Z.`);
   }
-  if (!renderer.includes(`<div><dt>Version</dt><dd>${version}</dd></div>`)) {
-    throw new Error(`Desktop About UI does not report version ${version}.`);
+  // About and the Runtime hello read the packaged version at runtime, so they
+  // equal tauri.conf.json by construction; refuse any hardcoded copy.
+  if (!/\.version\(Some\(app\.package_info\(\)\.version\.to_string\(\)\)\)/.test(nativeMenu)) {
+    throw new Error("Desktop About panel must report the packaged version at runtime.");
   }
-  if (!renderer.includes(`client_version: "${version}"`)) {
-    throw new Error(`Desktop Runtime hello does not report client_version ${version}.`);
+  if (!/await getVersion\(\)/.test(renderer) || !/clientVersion = version/.test(renderer)) {
+    throw new Error("Desktop Runtime hello must report the packaged version as client_version at runtime.");
   }
   if (expectedTag && expectedTag !== `v${version}`) {
     throw new Error(`Release tag ${expectedTag} does not match Desktop version v${version}.`);

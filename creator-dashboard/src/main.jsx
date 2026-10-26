@@ -15,6 +15,7 @@ const CreatorPortalV2 = React.lazy(() => import("./CreatorPortalV2.jsx").then(({
 const DownloadPage = React.lazy(() => import("./DownloadPage.jsx").then(({ DownloadPage: Component }) => ({ default: Component })));
 const WebPage = React.lazy(() => import("./web/WebPage.jsx"));
 const WebChatPage = React.lazy(() => import("./WebChatPage.jsx"));
+const DesktopSignInPage = React.lazy(() => import("./DesktopSignInPage.jsx"));
 
 class AppErrorBoundary extends React.Component {
   constructor(props) {
@@ -146,6 +147,14 @@ function App() {
         <WebPage />
       </Suspense>
     );
+  }
+
+  if (location.pathname === "/desktop/sign-in") {
+    if (sessionStatus === "loading") return <AppLoading />;
+    if (sessionStatus !== "authenticated") {
+      return <RouteRedirect to={`/sign-in?returnTo=${encodeURIComponent(location.href)}`} navigate={location.navigate} />;
+    }
+    return <Suspense fallback={<AppLoading />}><DesktopSignInPage search={location.search} profile={profile} request={dashboardRequest} /></Suspense>;
   }
 
   const chatRoute = WebChatRoute.parse(location.pathname);

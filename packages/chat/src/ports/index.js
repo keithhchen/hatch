@@ -28,6 +28,12 @@ export class ConversationTransport {
   /** A URL the view can load for a durable asset. @returns {string} */
   assetUrl(_conversationId, _assetId) { return unimplemented("ConversationTransport", "assetUrl"); }
   /**
+   * A source an <img> can display. Hosts whose asset requests need headers
+   * (bearer tokens) resolve to an object URL; the default is `assetUrl`.
+   * @returns {Promise<string>}
+   */
+  assetSource(conversationId, assetId) { return Promise.resolve(this.assetUrl(conversationId, assetId)); }
+  /**
    * Open the live Runtime session for one Conversation.
    * @param {string} conversationId
    * @param {{ onOpen(): void, onEvent(event: object): void, onClose(): void }} handlers
@@ -75,11 +81,23 @@ export class AttachmentSource {
 export class ToolExecutor {
   /** @returns {string[]} */
   get localTools() { return []; }
+  /**
+   * Prepare client-side authority for a run before its message is sent
+   * (e.g. a native tool context). Rejecting aborts the submission.
+   * @param {{conversationId: string, runId: string}} _run
+   */
+  prepareRun(_run) { return Promise.resolve(); }
   /** @param {object} request tool_call.request @returns {Promise<{status: string, result?: any, error?: object}>} */
   execute(_request) { return unimplemented("ToolExecutor", "execute"); }
   /** Stop local work for a run. */
   cancel(_runId) { return unimplemented("ToolExecutor", "cancel"); }
-  /** @param {object} request approval.request @returns {Promise<{approved: boolean, error?: object}>} */
+  /**
+   * Answer a Runtime approval.request. The tool itself still arrives as a
+   * tool_call.request and goes through `execute`; a denial is reported for
+   * the call immediately. Hosts that gate tools at execution time approve
+   * here and ask the user inside `execute`.
+   * @param {object} request approval.request @returns {Promise<{approved: boolean, error?: object}>}
+   */
   requestApproval(_request) { return unimplemented("ToolExecutor", "requestApproval"); }
 }
 

@@ -19,6 +19,7 @@ import {
   PostgresCommerceLedger
 } from "../packages/commerce/src/index.js";
 import { PortalStateStore, stateError } from "./portalState.mjs";
+import { createDesktopSignIn, DESKTOP_TOKEN_PATH } from "./desktopSignIn.mjs";
 import { submitApplication, submitContact } from "./contactForm.mjs";
 import { createProviderAdapter } from "./providerAdapters.mjs";
 import {
@@ -112,6 +113,15 @@ export async function createDashboardApp(options = {}) {
     options.oauthStateKey ?? process.env.HATCH_OAUTH_STATE_KEY ?? process.env.HATCH_SESSION_SECRET,
     portalStatePath
   );
+  const desktopSignIn = createDesktopSignIn({
+    authenticate: (request) => authenticate(request, registryUrl, undefined, fetchImpl, portalState),
+    mintSession: (token) => registryRequest(registryUrl, "/v1/auth/sessions", { method: "POST", fetchImpl, headers: { authorization: `Bearer ${token}` } }),
+    codes: portalState,
+    seal: (value) => encryptOAuthSecret(value, oauthStateKey),
+    open: (value) => decryptOAuthSecret(value, oauthStateKey),
+    readJson,
+    send
+  });
   const telemetry = options.telemetry ?? await PortalTelemetryStore.open(commerceDatabaseUrl
     ? {
         Pool: PostgresPool,
@@ -468,7 +478,7 @@ export async function createDashboardApp(options = {}) {
   const handler = async (request, response) => {
     const url = new URL(request.url ?? "/", "http://dashboard.local");
     const requestId = normalizedRequestId(request.headers["x-request-id"]);
-    if (url.pathname === "/v1/user/product-access") {
+    if (url.pathname === "/v1/user/product-access" || url.pathname === DESKTOP_TOKEN_PATH) {
       response.__hatchCorsOrigin = "*";
     }
     try {
@@ -953,6 +963,8 @@ export async function createDashboardApp(options = {}) {
         const payload = upstream.status === 204 ? undefined : await upstream.json();
         return send(response, upstream.status, payload);
       }
+
+      if (await desktopSignIn(request, response, url)) return;
 
       // Browser OAuth is an authorization-code + PKCE bridge to the existing
       // Hatch web session. External Creator tools can request access, but only
@@ -4471,6 +4483,7 @@ function isPublicPortalRoute(pathname) {
     || pathname.startsWith("/account/")
     || pathname === "/sign-in"
     || pathname === "/sign-up"
+    || pathname === "/desktop/sign-in"
     || pathname === "/download";
 }
 

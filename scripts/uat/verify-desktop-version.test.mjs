@@ -29,15 +29,20 @@ async function fixture(version, { tauriVersion = version } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-desktop-version-"));
   const desktopRoot = path.join(root, "desktop-app");
   await mkdir(path.join(desktopRoot, "src-tauri"), { recursive: true });
-  await mkdir(path.join(desktopRoot, "src", "renderer"), { recursive: true });
+  await mkdir(path.join(desktopRoot, "src", "renderer", "shell"), { recursive: true });
+  await mkdir(path.join(desktopRoot, "src-tauri", "src"), { recursive: true });
   await writeFile(path.join(desktopRoot, "package.json"), JSON.stringify({ version }));
   await writeFile(path.join(desktopRoot, "package-lock.json"), JSON.stringify({ version, packages: { "": { version } } }));
   await writeFile(path.join(desktopRoot, "src-tauri", "tauri.conf.json"), JSON.stringify({ version: tauriVersion }));
   await writeFile(path.join(desktopRoot, "src-tauri", "Cargo.toml"), `[package]\nname = "hatch-desktop-app"\nversion = "${version}"\n`);
   await writeFile(path.join(desktopRoot, "src-tauri", "Cargo.lock"), `[[package]]\nname = "hatch-desktop-app"\nversion = "${version}"\n`);
-  await writeFile(
-    path.join(desktopRoot, "src", "renderer", "main.jsx"),
-    `<div><dt>Version</dt><dd>${version}</dd></div>\nclient_version: "${version}"\n`
-  );
+  await writeFile(path.join(desktopRoot, "src", "renderer", "shell", "desktop-window.js"), "const version = await getVersion();\nthis.sessions.clientVersion = version;\n");
+  await writeFile(path.join(desktopRoot, "src-tauri", "src", "window_commands.rs"), ".version(Some(app.package_info().version.to_string()))\n");
   return root;
 }
+
+test("rejects a renderer that does not report the packaged version at runtime", async () => {
+  const root = await fixture("1.2.3");
+  await writeFile(path.join(root, "desktop-app", "src", "renderer", "shell", "desktop-window.js"), 'clientVersion: "1.2.3"\n');
+  await assert.rejects(verifyDesktopVersion({ repositoryRoot: root }), /client_version at runtime/);
+});

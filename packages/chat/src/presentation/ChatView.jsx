@@ -90,7 +90,21 @@ function TimelineEntries({ timeline, live, activityKinds, t, errorText, loadTool
   });
 }
 
-function ChatMessage({ message, identity, statusText, attachments, Viewer, assetUrl, activityKinds, t, errorText, loadToolDetail }) {
+/** A durable picture; its source is resolved by the transport (URL or object URL). */
+function AssetPicture({ assetId, name, Viewer, assetSource, t }) {
+  const [src, setSrc] = useState(null);
+  useEffect(() => {
+    let live = true;
+    assetSource(assetId).then(value => { if (live) setSrc(value); }, () => {});
+    return () => { live = false; };
+  }, [assetId, assetSource]);
+  if (!src) return <span className="web-chat__attachment-image web-chat__attachment-image--pending" aria-label={name} />;
+  return <Viewer src={src} alt={name} title={t("imagePreview")} closeLabel={t("close")} viewLabel={t("viewImage")}>
+    <img className="web-chat__attachment-image" alt="" src={src} draggable={false} />
+  </Viewer>;
+}
+
+function ChatMessage({ message, identity, statusText, attachments, Viewer, assetSource, activityKinds, t, errorText, loadToolDetail }) {
   const { files, pictures } = partitionAttachments(message, mediaType => attachments.accepts(mediaType));
   const live = message.transient && message.timeline?.filter(entry => !ACTIVITY_KINDS.includes(entry.kind) || activityKinds.includes(entry.kind)).length;
   const timelineProps = { activityKinds, t, errorText, loadToolDetail };
@@ -105,17 +119,14 @@ function ChatMessage({ message, identity, statusText, attachments, Viewer, asset
           : <TimelineEntries timeline={ChatTimeline.fromHistory(message)} live={false} {...timelineProps} />
         : message.content ? <div className="web-chat__bubble web-chat__content"><MessageResponse>{message.content}</MessageResponse></div> : null}
       {files.length ? <div className="web-chat__attachments">{files.map(item => <span key={item.attachment_id}><Paperclip aria-hidden="true" />{item.display_name}</span>)}</div> : null}
-      {pictures.length ? <div className="web-chat__pictures">{pictures.map(item => {
-        const src = assetUrl(item.asset_id);
-        return <Viewer key={item.attachment_id} src={src} alt={item.display_name} title={t("imagePreview")} closeLabel={t("close")} viewLabel={t("viewImage")}>
-          <img className="web-chat__attachment-image" alt="" src={src} />
-        </Viewer>;
-      })}</div> : null}
+      {pictures.length ? <div className="web-chat__pictures">{pictures.map(item => <AssetPicture key={item.attachment_id} assetId={item.asset_id} name={item.display_name} Viewer={Viewer} assetSource={assetSource} t={t} />)}</div> : null}
     </div>
   </article>;
 }
 
-function Composer({ controller, state, snapshotPending, agentName, t, onSend }) {
+const fileKey = file => file.id ?? `${file.name}-${file.lastModified}`;
+
+function Composer({ controller, state, snapshotPending, agentName, t, onSend, attachControl, accessory, onPaste }) {
   const draftRef = useRef(null);
   const { draft, images, activeRun } = state;
   const busy = snapshotPending || Boolean(activeRun);
@@ -136,10 +147,11 @@ function Composer({ controller, state, snapshotPending, agentName, t, onSend }) 
   };
 
   return <form className="web-chat__composer" aria-busy={snapshotPending} onSubmit={submit}>
-    {images.length ? <div className="web-chat__images" aria-label={t("imagesToSend")}>{images.map(file => <span className="web-chat__image-chip" key={`${file.name}-${file.lastModified}`}><Paperclip aria-hidden="true" /><span title={file.name}>{file.name}</span><button type="button" aria-label={t("removeImage", { name: file.name })} onClick={() => controller.removeImage(file)} disabled={snapshotPending}><X aria-hidden="true" /></button></span>)}</div> : null}
-    <textarea ref={draftRef} aria-label={t("messageAgent", { agent: agentName })} value={draft} onChange={event => controller.setDraft(event.target.value)} placeholder={t("messagePlaceholder")} disabled={busy} onKeyDown={event => { if (event.key !== "Enter" || event.shiftKey || isImeConfirmation(event)) return; submit(event); }} />
+    {images.length ? <div className="web-chat__images" aria-label={t("imagesToSend")}>{images.map(file => <span className="web-chat__image-chip" key={fileKey(file)}><Paperclip aria-hidden="true" /><span title={file.name}>{file.name}</span><button type="button" aria-label={t("removeImage", { name: file.name })} onClick={() => controller.removeImage(file)} disabled={snapshotPending}><X aria-hidden="true" /></button></span>)}</div> : null}
+    <textarea ref={draftRef} aria-label={t("messageAgent", { agent: agentName })} value={draft} onChange={event => controller.setDraft(event.target.value)} placeholder={t("messagePlaceholder")} disabled={busy} onPaste={onPaste} onKeyDown={event => { if (event.key !== "Enter" || event.shiftKey || isImeConfirmation(event)) return; submit(event); }} />
     <div className="web-chat__actions">
-      <label className="web-chat__attach" title={t("addImages")}><ImagePlus aria-hidden="true" /><input type="file" accept="image/*" multiple aria-label={t("addImages")} onChange={event => { controller.addImages([...event.target.files]); event.target.value = ""; }} disabled={busy} /></label>
+      {attachControl ?? <label className="web-chat__attach" title={t("addImages")}><ImagePlus aria-hidden="true" /><input type="file" accept="image/*" multiple aria-label={t("addImages")} onChange={event => { controller.addImages([...event.target.files]); event.target.value = ""; }} disabled={busy} /></label>}
+      {accessory}
       <span className="web-chat__hint">{t("composerHint")}</span>
       {activeRun
         ? <button type="button" className="web-chat__stop" aria-label={t("stopReply")} onClick={() => controller.cancel()}><Square aria-hidden="true" /><span>{t("stopReply")}</span></button>
@@ -164,8 +176,12 @@ function Composer({ controller, state, snapshotPending, agentName, t, onSend }) 
  * @param {React.ReactNode} [props.loadingIndicator] slot for the loading state
  * @param {(event) => void} props.onNewConversation
  * @param {string[]} [props.activityKinds] activity kinds this host shows
+ * @param {React.ReactNode} [props.dockAccessory] slot above the composer (e.g. pending approvals)
+ * @param {React.ReactNode} [props.attachControl] replaces the default image picker
+ * @param {React.ReactNode} [props.composerAccessory] extra composer controls
+ * @param {(event) => void} [props.onComposerPaste]
  */
-export function ChatView({ controller, identity, agentName, t, errorText, attachments, AttachmentViewer = ImageViewer, header, loadingIndicator, onNewConversation, activityKinds = ACTIVITY_KINDS, inert }) {
+export function ChatView({ controller, identity, agentName, t, errorText, attachments, AttachmentViewer = ImageViewer, header, loadingIndicator, onNewConversation, activityKinds = ACTIVITY_KINDS, inert, dockAccessory, attachControl, composerAccessory, onComposerPaste }) {
   const state = useChatState(controller);
   const { conversationId, messages, historyCursor, activeRun, error, status } = state;
   const snapshotPending = controller.snapshotPending;
@@ -174,7 +190,7 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
   const followOutputRef = useRef(true);
   const statusText = status.text ?? t(status.key);
   const loadToolDetail = useCallback(detailRef => controller.transport.toolDetail(conversationId, detailRef), [controller, conversationId]);
-  const assetUrl = useCallback(assetId => controller.transport.assetUrl(conversationId, assetId), [controller, conversationId]);
+  const assetSource = useCallback(assetId => controller.transport.assetSource(conversationId, assetId), [controller, conversationId]);
 
   useEffect(() => { followOutputRef.current = true; }, [conversationId]);
   useEffect(() => {
@@ -190,7 +206,7 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
     followOutputRef.current = true;
     void controller.send();
   };
-  const messageProps = { identity, statusText, attachments, Viewer: AttachmentViewer, assetUrl, activityKinds, t, errorText, loadToolDetail };
+  const messageProps = { identity, statusText, attachments, Viewer: AttachmentViewer, assetSource, activityKinds, t, errorText, loadToolDetail };
 
   return <main className="web-chat__main" inert={inert}>
     {header}
@@ -215,7 +231,8 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
     </div>
     <div className="web-chat__dock">
       {error ? <div className="web-chat__notice" role="alert"><CircleAlert aria-hidden="true" /><span>{errorText(error)}</span><button type="button" onClick={() => controller.retry()}><RotateCw aria-hidden="true" /><span>{t("retry")}</span></button></div> : null}
-      {conversationId ? <Composer controller={controller} state={state} snapshotPending={snapshotPending} agentName={agentName} t={t} onSend={send} /> : null}
+      {dockAccessory}
+      {conversationId ? <Composer controller={controller} state={state} snapshotPending={snapshotPending} agentName={agentName} t={t} onSend={send} attachControl={attachControl} accessory={composerAccessory} onPaste={onComposerPaste} /> : null}
     </div>
   </main>;
 }

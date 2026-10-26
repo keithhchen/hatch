@@ -138,3 +138,60 @@ test("later refreshes drain the journal from the committed cursor", async () => 
   assert.deepEqual(reads, [{ afterCursor: 1, throughCursor: undefined }]);
   controller.dispose();
 });
+
+class GatingTools extends ToolExecutor {
+  constructor(prepare) { super(); this.prepare = prepare; this.executed = []; this.prepared = []; }
+  get localTools() { return ["file_write"]; }
+  prepareRun(run) { this.prepared.push(run); return this.prepare(run); }
+  execute(request) { this.executed.push(request.tool_call_id); return Promise.resolve({ status: "ok", result: { ok: true } }); }
+  cancel() {}
+  requestApproval() { return Promise.resolve({ approved: true }); }
+}
+
+function gatedSetup(prepare = () => Promise.resolve()) {
+  const transport = new ScriptedTransport();
+  transport.page = page();
+  const tools = new GatingTools(prepare);
+  const controller = new ConversationController({ transport, attachments: new NoAttachments(), tools, pollMs: 60_000 });
+  return { transport, controller, tools };
+}
+
+test("an approved approval.request waits for its tool_call.request instead of executing twice", async () => {
+  const { transport, controller, tools } = gatedSetup();
+  transport.page = page([], [{ id: "run_live", status: "running" }]);
+  controller.open("conv");
+  await flush();
+  const connection = transport.connections[0];
+  connection.emit({ type: "approval.request", run_id: "run_live", tool_call_id: "t1", name: "file_write" });
+  await flush();
+  assert.deepEqual(tools.executed, []);
+  connection.emit({ type: "tool_call.request", run_id: "run_live", tool_call_id: "t1", name: "file_write" });
+  await flush();
+  assert.deepEqual(tools.executed, ["t1"]);
+  assert.equal(connection.sent.filter(frame => frame.type === "tool_call.result").length, 1);
+  controller.dispose();
+});
+
+test("client authority is prepared before a message is sent; a failed preparation restores the draft", async () => {
+  let refuse = false;
+  const { transport, controller, tools } = gatedSetup(() => refuse ? Promise.reject(new Error("no workspace")) : Promise.resolve());
+  controller.open("conv");
+  await flush();
+  const connection = transport.connections[0];
+  connection.emit({ type: "session.ready", conversation_id: "conv" });
+  controller.setDraft("hello");
+  await controller.send();
+  const sent = connection.sent.find(frame => frame.type === "client.message");
+  assert.deepEqual(tools.prepared, [{ conversationId: "conv", runId: sent.runId }]);
+  connection.emit({ type: "message.accepted", run_id: sent.runId });
+  connection.emit({ type: "turn.failed", run_id: sent.runId, error: { code: "x" } });
+  await flush();
+  refuse = true;
+  controller.setDraft("again");
+  await controller.send();
+  assert.equal(connection.sent.filter(frame => frame.type === "client.message").length, 1);
+  assert.equal(controller.getState().draft, "again");
+  assert.equal(controller.getState().error.message, "no workspace");
+  assert.equal(controller.getState().activeRun, null);
+  controller.dispose();
+});
