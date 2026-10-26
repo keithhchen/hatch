@@ -21,8 +21,20 @@ export const INITIAL_CHAT_STATE = Object.freeze({
   error: null,
   activeRun: null,
   runState: null,
-  session: null
+  session: null,
+  connection: "idle",
+  approvals: Object.freeze({}),
+  compactions: Object.freeze([])
 });
+
+/**
+ * `state.connection`: "connecting" while a live session is being opened or
+ * retried, "open" once session.ready arrived, "idle" when there is no live
+ * session — no Conversation, or the automatic retries ran out. Idle is not an
+ * error: the next send reconnects.
+ */
+export const CONNECTION_STATES = Object.freeze(["idle", "connecting", "open"]);
+export const APPROVAL_DECISIONS = Object.freeze(["pending", "allowed", "denied"]);
 
 /**
  * Application service for one Agent's conversations: library, durable
@@ -142,7 +154,7 @@ export class ConversationController {
     this.sync.reset();
     this.reveal.discard();
     this.resetTimeline();
-    this.setState({ conversationId: id, historyCursor: null, snapshotConversationId: null, messages: [], activeRun: null, runState: null, session: null, error: null, ...(id ? { status: { key: "loadingConversation" } } : {}) });
+    this.setState({ conversationId: id, historyCursor: null, snapshotConversationId: null, messages: [], activeRun: null, runState: null, session: null, connection: "idle", error: null, ...(id ? { status: { key: "loadingConversation" } } : {}) });
     if (!id) return;
     void this.refresh(id).catch(cause => {
       if (generation === this.generation) this.fail(cause);
@@ -235,6 +247,7 @@ export class ConversationController {
     });
     this.connection = connection;
     this.link = link;
+    this.setState({ connection: "connecting" });
   }
 
   reconnect() {
@@ -256,8 +269,12 @@ export class ConversationController {
     if (!link.live) return;
     if (this.pending?.conversationId === conversationId) this.restoreSubmission(this.pending, true);
     if (this.connection === connection) this.connection = null;
-    if (this.attempts >= this.reconnectAttempts) return;
+    if (this.attempts >= this.reconnectAttempts) {
+      this.setState({ connection: "idle" });
+      return;
+    }
     const attempt = ++this.attempts;
+    this.setState({ connection: "connecting" });
     const delay = Math.round(400 * (2 ** (attempt - 1)) * (0.75 + Math.random() * 0.5));
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
@@ -304,6 +321,12 @@ export class ConversationController {
     turn_state(outcome) {
       this.setState({ runState: outcome.state });
     },
+    compacted(outcome, { conversationId }) {
+      const { run_id: runId, window_id: windowId } = outcome.compaction;
+      const id = `compaction-${runId}-${windowId}`;
+      this.setState(state => state.compactions.some(entry => entry.id === id) ? {}
+        : { compactions: [...state.compactions, { id, conversationId, runId }] });
+    },
     ready(outcome, { connection, conversationId }) {
       const session = outcome.session;
       if (session.conversation_id !== conversationId) {
@@ -312,7 +335,7 @@ export class ConversationController {
         return;
       }
       this.attempts = 0;
-      this.setState({ session });
+      this.setState({ session, connection: "open" });
       const pending = this.pending;
       if (pending?.conversationId === conversationId) {
         this.updateMessages(current => {
@@ -354,6 +377,7 @@ export class ConversationController {
       if (pending?.runId === event.run_id) this.restoreSubmission(pending);
       else this.terminalRun = { id: event.run_id, failed: outcome.failed };
       this.run = null;
+      this.setState({ runState: null });
       if (outcome.failed) this.fail(outcome.error ?? new ChatError("replyFailed"));
       if (!pending) this.setState({ activeRun: event.run_id, status: { key: "syncingReply" } });
       await this.refresh(conversationId);
@@ -364,6 +388,17 @@ export class ConversationController {
       this.fail(outcome.error ?? new ChatError("connectionFailed"));
     }
   };
+
+  /**
+   * Record the user's approval state for a tool call so its row shows the
+   * controls ("pending") or the outcome ("allowed" / "denied"). The host's
+   * gate owns the actual decision; this is its projection into the thread.
+   */
+  markApproval(toolCallId, decision) {
+    if (!APPROVAL_DECISIONS.includes(decision)) throw new RangeError(`Unknown approval decision: ${decision}`);
+    if (this.state.approvals[toolCallId] === decision) return;
+    this.setState(state => ({ approvals: { ...state.approvals, [toolCallId]: decision } }));
+  }
 
   async reportToolResult(request, connection, result, base = request) {
     const failed = result.status === "error";

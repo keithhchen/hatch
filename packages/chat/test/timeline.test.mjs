@@ -118,6 +118,11 @@ test("Web Chat puts every thinking or tool block in its own activity modal group
     text,
     { kind: "activity_group", id: "activity-group-thinking-2", entries: [laterThinking] }
   ]);
+  assert.deepEqual(groupTimelineEntries([thinking, tool, laterThinking], entry => entry === tool), [
+    { kind: "activity_group", id: "activity-group-thinking-1", entries: [thinking] },
+    tool,
+    { kind: "activity_group", id: "activity-group-thinking-2", entries: [laterThinking] }
+  ]);
 });
 
 test("Web Chat keeps a streamed tool card key when the final snapshot rebuilds its timeline", () => {

@@ -154,6 +154,21 @@
 .web-chat__tool-note { margin: 0; color: var(--chat-muted); font-size: 13px; }
 .web-chat__tool-error { margin: 0; color: var(--web-fail); font-size: 14px; }
 
+/* Approval: inside the tool's row; afterwards a quiet outcome label */
+.web-chat__approval { display: flex; min-width: 0; flex-direction: column; gap: 8px; padding: 4px 14px 12px; border: 1px solid var(--chat-border); border-radius: 18px; background: var(--chat-card); }
+.web-chat__approval[data-decision="pending"] { border-color: color-mix(in srgb, var(--web-yolk) 55%, var(--chat-border)); }
+.web-chat__approval .web-chat__activity-block { padding-bottom: 0; }
+.web-chat__approval-subject { max-height: 240px; margin: 0; overflow: auto; padding: 10px 12px; border-radius: 12px; color: var(--chat-ink); background: var(--chat-panel); font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.web-chat__approval-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.web-chat button.web-chat__approval-button { min-height: 32px; padding: 0 14px; border: 1px solid var(--chat-border); border-radius: 999px; color: var(--chat-ink); background: var(--chat-card); cursor: pointer; font-size: 13px; font-weight: 600; }
+.web-chat button.web-chat__approval-button--allow { border-color: var(--chat-ink); color: var(--web-paper); background: var(--chat-ink); }
+.web-chat__approval-label { color: var(--chat-muted); font-size: 13px; }
+.web-chat__approval[data-decision="denied"] .web-chat__approval-label { color: var(--web-fail); }
+
+/* Compaction divider */
+.web-chat__divider { display: flex; align-items: center; gap: 12px; color: var(--chat-muted); font-size: 13px; }
+.web-chat__divider::before, .web-chat__divider::after { content: ""; height: 1px; flex: 1; background: var(--chat-border); }
+
 /* Attachments */
 .web-chat__attachments { display: flex; flex-wrap: wrap; gap: 6px; }
 .web-chat__attachments > span { display: inline-flex; max-width: 100%; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--chat-border); border-radius: 999px; color: var(--chat-body); background: var(--chat-card); font-size: 13px; overflow-wrap: anywhere; }

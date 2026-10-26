@@ -17,3 +17,13 @@ export function partitionAttachments(message, accepts) {
     pictures: message.optimistic ? [] : attachments.filter(item => accepts(item.media_type) && item.asset_id)
   };
 }
+
+/**
+ * The approval state of a tool row: a decision made in this client
+ * ("pending" | "allowed" | "denied", keyed by tool_call_id) or, for durable
+ * history, a denial recorded on the call. Anything else has no approval row.
+ */
+export function approvalDecision(entry, decisions = {}) {
+  if (entry.kind !== "tool") return null;
+  return decisions[entry.content.toolCallId] ?? (entry.content.error?.code === "approval_denied" ? "denied" : null);
+}

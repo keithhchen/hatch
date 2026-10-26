@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ArrowUp, ChevronDown, ChevronUp, CircleAlert, ImagePlus, Paperclip, Plus, RotateCw, Square, X } from "lucide-react";
 import { Avatar } from "@hatch/ui";
-import { partitionAttachments } from "../domain/activity.js";
+import { approvalDecision, partitionAttachments } from "../domain/activity.js";
 import { ACTIVITY_KINDS, ChatTimeline, groupTimelineEntries } from "../domain/timeline.js";
-import { ActivityBlock, ActivityModal } from "./Activity.jsx";
+import { ActivityBlock, ActivityModal, ApprovalActivity } from "./Activity.jsx";
 import { ImageViewer } from "./ImageViewer.jsx";
 import { MessageResponse } from "./MessageResponse.jsx";
+import { Shimmer } from "./Shimmer.jsx";
 import "./chat.css";
 
 /** Subscribe a React tree to a ConversationController. */
@@ -79,12 +80,14 @@ export function TaskBriefDropdown({ snapshot, t }) {
   </details>;
 }
 
-function TimelineEntries({ timeline, live, activityKinds, t, errorText, loadToolDetail }) {
+function TimelineEntries({ timeline, live, activityKinds, t, errorText, loadToolDetail, approvals }) {
   const visible = timeline.filter(entry => !ACTIVITY_KINDS.includes(entry.kind) || activityKinds.includes(entry.kind));
-  return groupTimelineEntries(visible).map((entry, index, entries) => {
+  return groupTimelineEntries(visible, entry => approvalDecision(entry, approvals.decisions) !== null).map((entry, index, entries) => {
     const isLastItem = index === entries.length - 1;
     if (entry.kind === "text") return <div className="web-chat__bubble web-chat__content" key={entry.id}><MessageResponse isAnimating={live}>{entry.content}</MessageResponse></div>;
     if (entry.kind === "status") return <div className="web-chat__runtime-status" key={entry.id}><span>{entry.content}</span></div>;
+    const decision = approvalDecision(entry, approvals.decisions);
+    if (decision) return <ApprovalActivity key={entry.id} entry={entry} decision={decision} onDecision={approvals.decide} t={t} errorText={errorText} loadToolDetail={loadToolDetail} />;
     if (entry.kind === "activity_group") return <ActivityModal key={entry.id} entries={entry.entries} isLastItem={isLastItem && live} t={t} errorText={errorText} loadToolDetail={loadToolDetail} />;
     return <ActivityBlock key={entry.id} entry={entry} t={t} errorText={errorText} loadToolDetail={loadToolDetail} />;
   });
@@ -104,18 +107,23 @@ function AssetPicture({ assetId, name, Viewer, assetSource, t }) {
   </Viewer>;
 }
 
-function ChatMessage({ message, identity, statusText, attachments, Viewer, assetSource, activityKinds, t, errorText, loadToolDetail }) {
+const RuntimeStatus = ({ children }) => <div className="web-chat__runtime-status" role="status"><Shimmer as="span">{children}</Shimmer></div>;
+
+/** Where the Runtime compacted the conversation's context. */
+const CompactionDivider = ({ t }) => <div className="web-chat__divider" role="separator"><span>{t("compaction.done")}</span></div>;
+
+function ChatMessage({ message, identity, statusText, compacting, attachments, Viewer, assetSource, activityKinds, t, errorText, loadToolDetail, approvals }) {
   const { files, pictures } = partitionAttachments(message, mediaType => attachments.accepts(mediaType));
   const live = message.transient && message.timeline?.filter(entry => !ACTIVITY_KINDS.includes(entry.kind) || activityKinds.includes(entry.kind)).length;
-  const timelineProps = { activityKinds, t, errorText, loadToolDetail };
+  const timelineProps = { activityKinds, t, errorText, loadToolDetail, approvals };
   return <article className={`web-chat__message web-chat__message--${message.role}`}>
     {message.role === "assistant" ? <Avatar className="web-chat__message-avatar" src={identity.creatorAvatarUrl} name={identity.creatorName} size="small" /> : null}
     <div className="web-chat__message-body">
       {message.role === "assistant"
         ? message.transient
           ? live
-            ? <TimelineEntries timeline={message.timeline} live {...timelineProps} />
-            : <div className="web-chat__bubble web-chat__typing" role="status"><span className="web-chat__typing-dots" aria-hidden="true"><i /><i /><i /></span><span>{statusText}</span></div>
+            ? <><TimelineEntries timeline={message.timeline} live {...timelineProps} />{compacting ? <RuntimeStatus>{t("compaction.running")}</RuntimeStatus> : null}</>
+            : compacting ? <RuntimeStatus>{t("compaction.running")}</RuntimeStatus> : <div className="web-chat__bubble web-chat__typing" role="status"><span className="web-chat__typing-dots" aria-hidden="true"><i /><i /><i /></span><span>{statusText}</span></div>
           : <TimelineEntries timeline={ChatTimeline.fromHistory(message)} live={false} {...timelineProps} />
         : message.content ? <div className="web-chat__bubble web-chat__content"><MessageResponse>{message.content}</MessageResponse></div> : null}
       {files.length ? <div className="web-chat__attachments">{files.map(item => <span key={item.attachment_id}><Paperclip aria-hidden="true" />{item.display_name}</span>)}</div> : null}
@@ -180,10 +188,14 @@ function Composer({ controller, state, snapshotPending, agentName, t, onSend, at
  * @param {React.ReactNode} [props.attachControl] replaces the default image picker
  * @param {React.ReactNode} [props.composerAccessory] extra composer controls
  * @param {(event) => void} [props.onComposerPaste]
+ * @param {(toolCallId: string, decision: "allow"|"deny") => void} [props.onApprovalDecision]
+ *   the host's approval gate. A tool row the host marked "pending" with
+ *   `controller.markApproval` shows Allow / Deny only when this is supplied;
+ *   the row is marked "allowed" / "denied" as soon as the user answers.
  */
-export function ChatView({ controller, identity, agentName, t, errorText, attachments, AttachmentViewer = ImageViewer, header, loadingIndicator, onNewConversation, activityKinds = ACTIVITY_KINDS, inert, dockAccessory, attachControl, composerAccessory, onComposerPaste }) {
+export function ChatView({ controller, identity, agentName, t, errorText, attachments, AttachmentViewer = ImageViewer, header, loadingIndicator, onNewConversation, activityKinds = ACTIVITY_KINDS, inert, dockAccessory, attachControl, composerAccessory, onComposerPaste, onApprovalDecision }) {
   const state = useChatState(controller);
-  const { conversationId, messages, historyCursor, activeRun, error, status } = state;
+  const { conversationId, messages, historyCursor, activeRun, error, status, approvals: decisions, compactions } = state;
   const snapshotPending = controller.snapshotPending;
   const awaitingConversation = !conversationId && state.conversations.length > 0;
   const messagesRef = useRef(null);
@@ -206,7 +218,13 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
     followOutputRef.current = true;
     void controller.send();
   };
-  const messageProps = { identity, statusText, attachments, Viewer: AttachmentViewer, assetSource, activityKinds, t, errorText, loadToolDetail };
+  const decide = useCallback((toolCallId, decision) => {
+    controller.markApproval(toolCallId, decision === "allow" ? "allowed" : "denied");
+    onApprovalDecision(toolCallId, decision);
+  }, [controller, onApprovalDecision]);
+  const approvals = { decisions, decide: onApprovalDecision ? decide : null };
+  const compactedRuns = new Set(compactions.filter(entry => entry.conversationId === conversationId).map(entry => entry.runId));
+  const messageProps = { identity, statusText, attachments, Viewer: AttachmentViewer, assetSource, activityKinds, t, errorText, loadToolDetail, approvals };
 
   return <main className="web-chat__main" inert={inert}>
     {header}
@@ -226,7 +244,14 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
           <h2>{t("emptyHeadline")}</h2>
           <p>{t("emptyConversationBody", { agent: agentName })}</p>
         </section> : null}
-        {!snapshotPending ? messages.map(message => <ChatMessage key={message.renderKey ?? `${message.run_id}-${message.role}`} message={message} {...messageProps} />) : null}
+        {!snapshotPending ? messages.map(message => {
+          const key = message.renderKey ?? `${message.run_id}-${message.role}`;
+          const compacting = Boolean(message.transient && activeRun && message.run_id === activeRun && state.runState === "compacting");
+          return <React.Fragment key={key}>
+            {message.role === "assistant" && compactedRuns.has(message.run_id) ? <CompactionDivider t={t} /> : null}
+            <ChatMessage message={message} compacting={compacting} {...messageProps} />
+          </React.Fragment>;
+        }) : null}
       </div>
     </div>
     <div className="web-chat__dock">

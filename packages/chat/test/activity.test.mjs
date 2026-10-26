@@ -15,3 +15,12 @@ test("thinking preview does not split grapheme characters and normalizes whitesp
 test("thinking preview rejects invalid character limits", () => {
   assert.throws(() => latestThinkingText("thinking", 1), RangeError);
 });
+
+test("approval state comes from this client's decision, else a recorded denial", async () => {
+  const { approvalDecision } = await import("../src/domain/activity.js");
+  const tool = (toolCallId, error) => ({ kind: "tool", content: { toolCallId, error } });
+  assert.equal(approvalDecision(tool("a"), { a: "pending" }), "pending");
+  assert.equal(approvalDecision(tool("b", { code: "approval_denied" })), "denied");
+  assert.equal(approvalDecision(tool("c", { code: "browser_approval_unavailable" })), null);
+  assert.equal(approvalDecision({ kind: "thinking", content: "x" }, { a: "allowed" }), null);
+});

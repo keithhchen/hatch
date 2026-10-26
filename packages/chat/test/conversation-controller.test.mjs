@@ -195,3 +195,56 @@ test("client authority is prepared before a message is sent; a failed preparatio
   assert.equal(controller.getState().activeRun, null);
   controller.dispose();
 });
+
+test("a dropped session retries three times, then goes idle without an error; the next send reconnects", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { transport, controller } = setup();
+  controller.open("conv");
+  await flush();
+  assert.equal(controller.getState().connection, "connecting");
+  transport.connections[0].emit({ type: "session.ready", conversation_id: "conv" });
+  assert.equal(controller.getState().connection, "open");
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    transport.connections.at(-1).handlers.onClose();
+    assert.equal(controller.getState().connection, "connecting");
+    t.mock.timers.tick(5_000);
+  }
+  assert.equal(transport.connections.length, 4);
+  transport.connections.at(-1).handlers.onClose();
+  t.mock.timers.tick(60_000);
+  assert.equal(transport.connections.length, 4);
+  assert.equal(controller.getState().connection, "idle");
+  assert.equal(controller.getState().error, null);
+  controller.setDraft("hello");
+  await controller.send();
+  assert.equal(transport.connections.length, 5);
+  assert.equal(controller.getState().connection, "connecting");
+  assert.equal(controller.attempts, 0);
+  controller.dispose();
+});
+
+test("compaction shows as run state while running and is recorded once for the thread", async () => {
+  const { transport, controller } = setup();
+  transport.page = page([], [{ id: "run_live", status: "running" }]);
+  controller.open("conv");
+  await flush();
+  const connection = transport.connections[0];
+  connection.emit({ type: "turn.state", run_id: "run_live", status: "compacting" });
+  assert.equal(controller.getState().runState, "compacting");
+  const compacted = { type: "session.compacted", run_id: "run_live", window_id: "w2", trigger: "auto", phase: "pre_turn", reason: "context_limit" };
+  connection.emit(compacted);
+  connection.emit(compacted);
+  assert.deepEqual(controller.getState().compactions, [{ id: "compaction-run_live-w2", conversationId: "conv", runId: "run_live" }]);
+  connection.emit({ type: "turn.state", run_id: "run_live", status: "running" });
+  assert.equal(controller.getState().runState, "running");
+  controller.dispose();
+});
+
+test("approval decisions are recorded per tool call and validated", () => {
+  const { controller } = setup();
+  controller.markApproval("t1", "pending");
+  controller.markApproval("t1", "allowed");
+  assert.deepEqual(controller.getState().approvals, { t1: "allowed" });
+  assert.throws(() => controller.markApproval("t1", "maybe"), RangeError);
+  controller.dispose();
+});

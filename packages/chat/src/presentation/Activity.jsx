@@ -86,6 +86,35 @@ export function ActivityBlock({ entry, t, errorText, loadToolDetail, expandable 
   </details>;
 }
 
+/** What the user is approving: the full shell command, else the target path, else the input. */
+export function approvalSubject(content) {
+  const args = content.arguments ?? {};
+  if (content.name === "shell_exec" && typeof args.command === "string") return args.command;
+  const path = args.path ?? args.file_path;
+  if (typeof path === "string") return path;
+  return Object.keys(args).length ? JSON.stringify(args, null, 2) : "";
+}
+
+/**
+ * A tool row that needs, or received, the user's approval. Allow / Deny show
+ * only while the call is still requested and the host can decide; afterwards
+ * the row keeps "Allowed" / "Not allowed".
+ */
+export function ApprovalActivity({ entry, decision, onDecision, t, errorText, loadToolDetail }) {
+  const actionable = decision === "pending" && entry.status === "requested" && onDecision;
+  const subject = decision === "pending" ? approvalSubject(entry.content) : "";
+  return <div className="web-chat__approval" data-decision={decision}>
+    <ActivityBlock entry={entry} t={t} errorText={errorText} loadToolDetail={loadToolDetail} />
+    {subject ? <pre className="web-chat__approval-subject selectable">{subject}</pre> : null}
+    {actionable
+      ? <div className="web-chat__approval-actions">
+        <button type="button" className="web-chat__approval-button" onClick={() => onDecision(entry.content.toolCallId, "deny")}>{t("approval.deny")}</button>
+        <button type="button" className="web-chat__approval-button web-chat__approval-button--allow" onClick={() => onDecision(entry.content.toolCallId, "allow")}>{t("approval.allow")}</button>
+      </div>
+      : decision !== "pending" ? <span className="web-chat__approval-label">{t(decision === "allowed" ? "approval.allowed" : "approval.denied")}</span> : null}
+  </div>;
+}
+
 /** Tool input/output; full detail is fetched once when only a reference is stored. */
 export function ToolDetails({ content, status, t, errorText, loadToolDetail }) {
   const [detail, setDetail] = useState(null);

@@ -209,16 +209,21 @@ export class ChatTimeline {
   }
 }
 
-/** Consecutive activity entries collapse into one activity group. */
-export function groupTimelineEntries(entries) {
+/**
+ * Consecutive activity entries collapse into one activity group. Entries the
+ * `standalone` predicate selects (e.g. a tool awaiting approval) stay their
+ * own row so their controls are never hidden behind the group.
+ */
+export function groupTimelineEntries(entries, standalone = () => false) {
+  const groupable = entry => activityKinds.has(entry.kind) && !standalone(entry);
   const grouped = [];
   for (let index = 0; index < entries.length;) {
-    if (!activityKinds.has(entries[index].kind)) {
+    if (!groupable(entries[index])) {
       grouped.push(entries[index++]);
       continue;
     }
     const activities = [];
-    while (index < entries.length && activityKinds.has(entries[index].kind)) activities.push(entries[index++]);
+    while (index < entries.length && groupable(entries[index])) activities.push(entries[index++]);
     grouped.push({ kind: "activity_group", id: "activity-group-" + activities[0].id, entries: activities });
   }
   return grouped;

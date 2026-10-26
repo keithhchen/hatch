@@ -56,7 +56,7 @@ const runHandlers = Object.freeze({
 const sessionHandlers = Object.freeze({
   "session.ready": (_timeline, event) => outcome("ready", { session: event }),
   "session.error": (_timeline, event) => outcome("session_error", { error: event.error }),
-  "session.compacted": () => outcome("compacted")
+  "session.compacted": (_timeline, event) => outcome("compacted", { compaction: event })
 });
 
 export class RuntimeEventReducer {
