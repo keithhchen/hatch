@@ -12,7 +12,6 @@ import { Delayed, EmptyAgents, OfflineBanner } from "./states.jsx";
 /** One Agent, drawn like a Web Explore catalog card. */
 function AgentCard({ agent }) {
   const { app, t } = useDesktop();
-  const owned = agent.kind === "owned";
   const [opening, setOpening] = useState(false);
   const open = () => {
     if (opening) return;
@@ -31,7 +30,6 @@ function AgentCard({ agent }) {
     <strong className="desk-library__name">{agent.name}</strong>
     {agent.description ? <p className="desk-library__description">{agent.description}</p> : null}
     <span className="desk-library__card-footer">
-      <span className="desk-library__badge">{t(owned ? "library.badge.owned" : "library.badge.acquired")}</span>
       <span className="desk-library__go">{opening ? <><span className="desk-library__spinner" aria-hidden="true" />{t("library.opening")}</> : <>{t("library.chat")}<ArrowRight aria-hidden="true" /></>}</span>
     </span>
   </button>;

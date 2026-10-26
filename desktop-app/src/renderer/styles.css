@@ -203,8 +203,7 @@ kbd { font: inherit; }
 .hui-avatar.desk-library__avatar { width: 28px; height: 28px; min-width: 28px; font-size: 11px; }
 .desk-library__name { display: -webkit-box; margin: 18px 0 8px; overflow: hidden; font-size: 21px; font-weight: 700; letter-spacing: -.01em; line-height: 1.25; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .desk-library__description { display: -webkit-box; margin: 0; overflow: hidden; color: var(--lib-body); font-size: 14.5px; line-height: 1.6; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
-.desk-library__card-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: auto; padding-top: 24px; }
-.desk-library__badge { padding: 5px 12px; border-radius: 999px; color: var(--lib-body); background: var(--lib-badge); font-size: 12px; font-weight: 600; }
+.desk-library__card-footer { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: auto; padding-top: 24px; }
 .desk-library__go { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 700; }
 .desk-library__go svg, .desk-library__link svg { width: 16px; height: 16px; transition: transform 160ms ease; }
 .desk-library__agent:hover .desk-library__go svg, .desk-library__link:hover svg { transform: translateX(3px); }
