@@ -71,3 +71,35 @@ export function clampWindowFrame(value, monitors = [], constraints = DESKTOP_WIN
     y: Math.min(area.y + area.height - height, Math.max(area.y, normalized.y))
   };
 }
+
+/**
+ * Restore the saved outer frame (clamped to a connected monitor) while the
+ * window is still hidden, then persist moves/resizes, debounced so a live
+ * resize runs no per-frame work. Returns a dispose function.
+ */
+export async function restoreAndTrackFrame({ invoke, savedFrame, appWindow, availableMonitors, PhysicalPosition, PhysicalSize }) {
+  const frame = normalizeWindowFrame(savedFrame);
+  if (frame) {
+    try {
+      const clamped = clampWindowFrame(frame, await availableMonitors());
+      await appWindow.setSize(new PhysicalSize(clamped.width, clamped.height));
+      await appWindow.setPosition(new PhysicalPosition(clamped.x, clamped.y));
+    } catch {
+      // A first launch or an unavailable monitor API keeps the config default.
+    }
+  }
+  let timer = null;
+  const persist = () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      try {
+        const [position, size] = await Promise.all([appWindow.outerPosition(), appWindow.outerSize()]);
+        await invoke("patch_window_settings", { patch: { frame: { x: position.x, y: position.y, width: size.width, height: size.height } } });
+      } catch {
+        // Geometry persistence is best effort; the OS owns the live frame.
+      }
+    }, 300);
+  };
+  const stops = await Promise.all([appWindow.onResized(persist), appWindow.onMoved(persist)]);
+  return () => { clearTimeout(timer); for (const stop of stops) stop(); };
+}

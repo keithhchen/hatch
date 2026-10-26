@@ -1,126 +1,79 @@
-// Native files are the durable draft authority. This session only queues edits
-// for its single account/conversation and holds them until a save succeeds.
+import { DraftStore } from "@hatch/chat";
+
+const REFERENCE_KEYS = ["contextId", "assetId", "displayName", "mediaType", "size", "sha256", "isImage", "localPath", "hostId"];
+
+/** The durable part of a composer file: a native managed-copy reference. */
+export function draftAttachmentReference(file) {
+  return Object.fromEntries(REFERENCE_KEYS.filter(key => file[key] !== undefined).map(key => [key, file[key]]));
+}
+
+/** A composer file as the chat view renders it (`id` + `name`). */
+export const composerFile = reference => Object.freeze({ ...reference, id: reference.contextId, name: reference.displayName });
+
+/**
+ * Native files are the durable draft authority. The window holds the draft's
+ * lease while it owns the conversation; edits are queued and written in
+ * order, and a failed save is retried on the next edit, never dropped.
+ */
 export async function openDraftSession(invoke, scope, onStatus = () => {}) {
   const opened = await invoke("open_conversation_draft", scope);
   if (!opened?.lease || typeof opened.draft?.text !== "string" || !Array.isArray(opened.draft.attachments)) {
     throw new Error("draft_invalid: Native draft response was invalid");
   }
-  let draft = { textRevision: 0, pending: null, ...structuredClone(opened.draft) };
+  let draft = { text: opened.draft.text, attachments: structuredClone(opened.draft.attachments), textRevision: opened.draft.textRevision ?? 0, pending: null };
   let revision = 0;
   let saved = 0;
   let writing = null;
-  let closed = false;
   let closing = null;
-  const preparing = new Set();
   const args = { ...scope, lease: opened.lease };
-  const snapshot = () => structuredClone(draft);
-  const applyUpdate = (patch) => {
-    if (closed) throw new Error("draft_closed: Draft editor has closed");
-    const textChanged = Object.hasOwn(patch, "text") && patch.text !== draft.text;
-    draft = { ...draft, ...structuredClone(patch) };
-    if (textChanged) draft.textRevision += 1;
-    revision += 1;
-    void drain().catch(() => {});
-  };
   const drain = () => {
     if (writing) return writing;
     if (saved === revision) return Promise.resolve();
     onStatus("saving");
-    let failed = false;
     writing = (async () => {
       while (saved !== revision) {
         const target = revision;
-        await invoke("save_conversation_draft", { ...args, draft: snapshot() });
+        await invoke("save_conversation_draft", { ...args, draft: structuredClone(draft) });
         saved = target;
       }
-    })().then(() => onStatus("ready"), (error) => {
-      failed = true;
-      onStatus("error", error);
-      throw error;
-    }).finally(() => {
-      writing = null;
-      if (!failed && saved !== revision) void drain().catch(() => {});
-    });
+    })().then(() => onStatus("ready"), error => { onStatus("error", error); throw error; })
+      .finally(() => { writing = null; });
     return writing;
   };
-  const flush = async () => {
-    await Promise.allSettled([...preparing]);
-    do { await drain(); } while (saved !== revision);
-  };
-  const session = {
-    scope,
-    snapshot,
-    textVersion: () => draft.textRevision,
+  return {
+    snapshot: () => structuredClone(draft),
     update(patch) {
       if (closing) throw new Error("draft_closed: Draft editor is closing");
-      applyUpdate(patch);
+      const textChanged = Object.hasOwn(patch, "text") && patch.text !== draft.text;
+      draft = { ...draft, ...structuredClone(patch), textRevision: draft.textRevision + (textChanged ? 1 : 0) };
+      revision += 1;
+      void drain().catch(() => {});
     },
-    prepareAttachments(load) {
-      if (closed || closing) return Promise.reject(new Error("draft_closed: Draft editor has closed"));
-      const task = Promise.resolve().then(load).then((files) => {
-        const byId = new Map(draft.attachments.map((file) => [file.contextId, file]));
-        for (const file of files) byId.set(file.contextId, draftAttachmentReference(file));
-        if (byId.size > 8) throw new Error("A message can contain at most 8 attachments. Remove a file first.");
-        // Imports already accepted before close must still be saved.
-        applyUpdate({ attachments: [...byId.values()] });
-        return snapshot();
-      });
-      preparing.add(task);
-      void task.finally(() => preparing.delete(task)).catch(() => {});
-      return task;
-    },
-    async stageSubmission(input) {
-      if (draft.pending) throw new Error("A previous message is awaiting confirmation.");
-      session.update({ pending: { ...structuredClone(input), attachments: input.attachments.map(draftAttachmentReference), status: "prepared" } });
-      await flush();
-      return structuredClone(draft.pending);
-    },
-    async markSubmissionUnknown() {
-      if (!draft.pending) throw new Error("No prepared submission");
-      session.update({ pending: { ...draft.pending, status: "unknown" } });
-      await flush(); // Persist uncertainty before handing bytes to the socket.
-    },
-    async acceptSubmission(receipt) {
-      const pending = draft.pending;
-      if (!pending || receipt?.client_message_id !== pending.clientMessageId || receipt?.run_id !== pending.runId) return false;
-      const submittedIds = new Set(pending.attachments.map((file) => file.contextId));
-      session.update({
-        pending: null,
-        attachments: draft.attachments.filter((file) => !submittedIds.has(file.contextId)),
-        ...(draft.textRevision === pending.textRevision ? { text: "" } : {})
-      });
-      await flush();
-      return true;
-    },
-    async restoreRejectedSubmission() {
-      const pending = draft.pending;
-      if (!pending || pending.status !== "failed") return;
-      const files = new Map(pending.attachments.map((file) => [file.contextId, file]));
-      for (const file of draft.attachments) files.set(file.contextId, file);
-      if (files.size > 8) throw new Error("Remove an attachment before restoring the rejected message.");
-      session.update({
-        pending: null, attachments: [...files.values()],
-        text: draft.textRevision === pending.textRevision || draft.text === pending.text
-          ? pending.text : [pending.text, draft.text].filter(Boolean).join("\n\n")
-      });
-      await flush();
-    },
-    flush,
+    flush: drain,
     close() {
-      if (closed) return Promise.resolve();
-      if (closing) return closing;
-      closing = Promise.resolve().then(async () => {
-        await flush(); // A failed save must not silently discard an edit.
-        await invoke("release_conversation_draft", args);
-        closed = true;
-      }).finally(() => { closing = null; });
+      closing ??= drain().finally(() => invoke("release_conversation_draft", args));
       return closing;
     }
   };
-  return session;
 }
 
-export function draftAttachmentReference(file) {
-  return Object.fromEntries(["contextId", "assetId", "displayName", "mediaType", "size",
-    "sha256", "isImage", "localPath", "hostId"].map((key) => [key, file[key]]));
+/** DraftStore port over an opened native draft session (one conversation). */
+export class NativeDraftStore extends DraftStore {
+  constructor(session) {
+    super();
+    this.session = session;
+  }
+
+  read() {
+    const { text, attachments } = this.session.snapshot();
+    return { text, files: attachments.map(composerFile) };
+  }
+
+  write(_scope, { text, files }) {
+    this.session.update({ text, attachments: files.map(draftAttachmentReference) });
+  }
+
+  close() {
+    return this.session.close();
+  }
 }

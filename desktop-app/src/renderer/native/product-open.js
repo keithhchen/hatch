@@ -1,11 +1,11 @@
-import { UUID_V4_RE } from "./identity.js";
+import { UUID_V4_RE } from "../identity.js";
 
 export const PRODUCT_OPEN_EVENT = "hatch://product-open";
 
 /**
- * Deep links are routing hints, never authorization. The Desktop must match
- * the entitlement against the signed-in Registry projection before selecting
- * it or opening Runtime.
+ * `hatch://products/open?product_id=…[&entitlement_id=…]` is a routing hint,
+ * never authorization: Desktop selects the Agent only if the signed-in
+ * account's Agent list contains that product.
  */
 export function normalizeProductOpenLink(value) {
   if (typeof value !== "string" || !value.trim()) return null;
@@ -16,19 +16,13 @@ export function normalizeProductOpenLink(value) {
     return null;
   }
   if (url.protocol !== "hatch:" || url.hostname !== "products" || url.pathname !== "/open") return null;
-  const entitlementId = url.searchParams.get("entitlement_id") || "";
   const productId = url.searchParams.get("product_id") || "";
-  const creatorId = url.searchParams.get("creator_id") || "";
-  if (!UUID_V4_RE.test(entitlementId) || !UUID_V4_RE.test(productId)) return null;
-  if (creatorId && !UUID_V4_RE.test(creatorId)) return null;
-  return Object.freeze({ entitlementId, productId, creatorId });
+  const entitlementId = url.searchParams.get("entitlement_id") || "";
+  if (!UUID_V4_RE.test(productId) || (entitlementId && !UUID_V4_RE.test(entitlementId))) return null;
+  return Object.freeze({ productId, ...(entitlementId ? { entitlementId } : {}) });
 }
 
 export function normalizeProductOpenPayload(payload) {
-  const values = Array.isArray(payload)
-    ? payload
-    : Array.isArray(payload?.urls)
-      ? payload.urls
-      : [payload];
+  const values = Array.isArray(payload) ? payload : Array.isArray(payload?.urls) ? payload.urls : [payload];
   return values.map(normalizeProductOpenLink).filter(Boolean);
 }

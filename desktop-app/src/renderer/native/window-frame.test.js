@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampWindowFrame, normalizeWindowFrame } from "./desktop-window-frame.js";
+import { clampWindowFrame, normalizeWindowFrame } from "./window-frame.js";
 
 const monitor = {
   workArea: {

@@ -1,16 +1,17 @@
-// Native registry is the sole ownership authority. This object only retains the
-// acquired lease and routes activation intents; it never copies message state.
+// Native registry is the sole ownership authority: one window owns a
+// Conversation (its draft lease and local tool contexts). This object only
+// retains the acquired lease and routes activation intents to `onActivate`.
 export function createConversationOwner({ invoke, listen, onActivate, onError }) {
   let ready;
   let disposed = false;
   let unlisten;
-  const pending = new WeakMap();
+  const pending = new Map();
   const start = () => {
     if (disposed) return Promise.reject(new Error("Conversation owner listener is disposed"));
     return ready ??= listen("hatch://conversation-activate", (event) => {
       if (disposed) return;
       const payload = event?.payload;
-      if (!payload || ![payload.accountId, payload.entitlementId, payload.conversationId]
+      if (!payload || ![payload.accountId, payload.accessKey, payload.conversationId]
         .every((value) => typeof value === "string" && value.length > 0)) return;
       void Promise.resolve().then(() => !disposed && onActivate(payload)).catch(onError);
     }).then((stop) => {
@@ -25,28 +26,27 @@ export function createConversationOwner({ invoke, listen, onActivate, onError })
       unlisten?.();
       unlisten = undefined;
     },
-    claim(session) {
-      if (session.disposed || disposed) return Promise.resolve(false);
-      if (pending.has(session)) return pending.get(session);
+    /**
+     * Claim `{ accountId, conversationId, accessKey }` for this window.
+     * Resolves to a release function, or null when another window owns it
+     * (native has already focused that window).
+     */
+    claim(scope) {
+      const key = JSON.stringify([scope.accountId, scope.conversationId]);
+      if (disposed) return Promise.resolve(null);
+      if (pending.has(key)) return pending.get(key);
       const operation = (async () => {
         await start(); // Register before native can route another window here.
-        if (session.disposed || disposed) return false;
-        const result = await invoke("claim_conversation_session", session.scope);
+        const result = await invoke("claim_conversation_session", scope);
         if (!result || typeof result.owned !== "boolean" || typeof result.windowLabel !== "string") {
           throw new Error("Native conversation owner response was invalid");
         }
-        if (!result.owned) {
-          return false;
-        }
+        if (!result.owned) return null;
         if (!result.lease) throw new Error("Native conversation owner lease is missing");
-        const args = { accountId: session.scope.accountId, conversationId: session.scope.conversationId, lease: result.lease };
-        session.releaseOwnership = async () => { await invoke("release_conversation_session", args); };
-        // close() awaits this claim and releases only after all tools drain.
-        if (session.disposed || disposed) return false;
-        return true;
-      })().finally(() => pending.delete(session));
-      pending.set(session, operation);
-      session.ownershipOpening = operation;
+        const args = { accountId: scope.accountId, conversationId: scope.conversationId, lease: result.lease };
+        return () => invoke("release_conversation_session", args);
+      })().finally(() => pending.delete(key));
+      pending.set(key, operation);
       return operation;
     }
   };

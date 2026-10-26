@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { invokeDesktopCommand } from "./native-invoke-boundary.js";
+import { invokeDesktopCommand } from "./invoke-boundary.js";
 
 describe("native invoke boundary", () => {
   it("returns real native results unchanged", async () => {

@@ -945,6 +945,7 @@ async function handleHttpRequest(
               id: resolved.corpus.product.id,
               name: resolved.corpus.product.name,
               description: resolved.corpus.product.description ?? "",
+              ...(resolved.corpus.product.brief_spec ? { brief_spec: resolved.corpus.product.brief_spec } : {}),
               ...(resolved.corpus.product.promise ? { promise: resolved.corpus.product.promise } : {}),
               ...(resolved.corpus.product.boundaries.length ? { boundaries: resolved.corpus.product.boundaries } : {})
             },

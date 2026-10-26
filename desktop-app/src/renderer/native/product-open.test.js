@@ -1,27 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { normalizeProductOpenLink, normalizeProductOpenPayload } from "./product-open.js";
 
-const entitlementId = "7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001";
-const creatorId = "8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002";
 const productId = "9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003";
+const entitlementId = "7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001";
 
 describe("Desktop product deep link", () => {
-  it("accepts the canonical product-open URL", () => {
-    const link = "hatch://products/open?entitlement_id=" + entitlementId
-      + "&product_id=" + productId + "&creator_id=" + creatorId;
-    expect(normalizeProductOpenLink(link)).toEqual({ entitlementId, productId, creatorId });
+  it("accepts an owned product link and an acquired one", () => {
+    expect(normalizeProductOpenLink(`hatch://products/open?product_id=${productId}`)).toEqual({ productId });
+    expect(normalizeProductOpenLink(`hatch://products/open?product_id=${productId}&entitlement_id=${entitlementId}`)).toEqual({ productId, entitlementId });
   });
 
-  it("rejects web, legacy, malformed, and non-v4 links", () => {
-    expect(normalizeProductOpenLink("https://hatch.tokenquadrant.cn/products/" + productId)).toBeNull();
-    expect(normalizeProductOpenLink("hatch://agents/open?entitlement_id=" + entitlementId + "&product_id=" + productId)).toBeNull();
-    expect(normalizeProductOpenLink("hatch://products/open?entitlement_id=ent_old&product_id=" + productId)).toBeNull();
-    expect(normalizeProductOpenLink("hatch://products/open?entitlement_id=" + entitlementId.toUpperCase() + "&product_id=" + productId)).toBeNull();
+  it("rejects other hosts and malformed identifiers", () => {
+    expect(normalizeProductOpenLink(`hatch://agents/open?product_id=${productId}`)).toBeNull();
+    expect(normalizeProductOpenLink(`hatch://products/open?entitlement_id=${entitlementId}`)).toBeNull();
+    expect(normalizeProductOpenLink(`hatch://products/open?product_id=${productId}&entitlement_id=ent_old`)).toBeNull();
+    expect(normalizeProductOpenLink(`hatch://products/open?product_id=${productId.toUpperCase()}`)).toBeNull();
   });
 
-  it("normalizes startup/event payloads and drops hostile entries", () => {
-    const link = "hatch://products/open?entitlement_id=" + entitlementId + "&product_id=" + productId;
-    expect(normalizeProductOpenPayload([link, "file:///tmp/evil"]))
-      .toEqual([{ entitlementId, productId, creatorId: "" }]);
+  it("normalizes the native payload list", () => {
+    expect(normalizeProductOpenPayload([`hatch://products/open?product_id=${productId}`, "nope"])).toEqual([{ productId }]);
   });
 });
