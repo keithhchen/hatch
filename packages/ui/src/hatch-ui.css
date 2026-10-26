@@ -218,8 +218,9 @@
 .hui-dropzone > span { max-width: 360px; font-size: var(--hatch-type-meta); line-height: 1.5; }
 .hui-date-input { min-width: 170px; width: auto; color-scheme: light; }
 
+/* Floating layers open above dialogs (z 80/81), e.g. a Select inside Settings. */
 .hui-popover, .hui-menu, .hui-select-content, .hui-command-dialog {
-  z-index: 50;
+  z-index: 90;
   border: 1px solid var(--hui-border);
   background: var(--hui-panel);
   box-shadow: var(--hui-shadow-menu);
