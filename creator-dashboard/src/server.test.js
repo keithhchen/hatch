@@ -55,7 +55,7 @@ const readyFactoryRun = {
 
 test("Dashboard readiness fails closed when Registry is unavailable", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-health-"));
-  const registry = registryFixture({ role: "user" });
+  const registry = registryFixture({ signedIn: "buyer" });
   await listen(registry);
   const dashboard = await createDashboardApp({
     ledgerPath: path.join(directory, "ledger.jsonl"),
@@ -77,10 +77,9 @@ test("Dashboard readiness fails closed when Registry is unavailable", async (con
   assert.equal(live.status, 200);
 });
 
-test("consumer avatar changes proxy through the authenticated Registry session", async (context) => {
+test("consumer avatar and display name changes proxy through the authenticated Registry session", async (context) => {
   const account = {
     id: "buyer-avatar-test",
-    role: "user",
     email: "buyer@example.test",
     display_name: "Buyer"
   };
@@ -95,6 +94,15 @@ test("consumer avatar changes proxy through the authenticated Registry session",
     if (requestUrl.pathname === "/v1/auth/signin") {
       response.end(JSON.stringify({ token: "signed-user-token", account }));
       return;
+    }
+    if (requestUrl.pathname === "/v1/auth/me" && request.method === "PATCH") {
+      const name = String(JSON.parse(payload.toString()).display_name ?? "").trim();
+      if (!name) {
+        response.statusCode = 400;
+        response.end(JSON.stringify({ detail: "Display name is required." }));
+        return;
+      }
+      account.display_name = name;
     }
     if (requestUrl.pathname === "/v1/auth/me") {
       response.end(JSON.stringify({ ...account, avatar_url: avatarUrl }));
@@ -156,13 +164,82 @@ test("consumer avatar changes proxy through the authenticated Registry session",
   assert.equal(remove.status, 200);
   assert.equal((await remove.json()).avatar_url, null);
   assert.deepEqual(avatarRequests.map(({ method }) => method), ["PUT", "DELETE"]);
+
+  const rename = (headers, displayName = " Renamed Buyer ") => fetch(`${serverUrl(api)}/v1/auth/me`, {
+    method: "PATCH",
+    headers: { cookie, "content-type": "application/json", ...headers },
+    body: JSON.stringify({ display_name: displayName })
+  });
+  assert.equal((await rename({})).status, 403);
+  const renamed = await rename({ "x-csrf-token": csrf });
+  assert.equal(renamed.status, 200);
+  assert.equal((await renamed.json()).display_name, "Renamed Buyer");
+  assert.equal((await (await fetch(`${serverUrl(api)}/v1/auth/me`, { headers: { cookie } })).json()).display_name, "Renamed Buyer");
+  const rejected = await rename({ "x-csrf-token": csrf }, "  ");
+  assert.equal(rejected.status, 400);
+  assert.equal((await rejected.json()).error.message, "Display name is required.");
+});
+
+test("a signed-in browser hands Desktop its own session through a PKCE code", async (context) => {
+  const account = { id: "desktop-handoff-test", email: "buyer@example.test", display_name: "Buyer" };
+  const mintedFor = [];
+  const registry = createServer(async (request, response) => {
+    const requestUrl = new URL(request.url ?? "/", "http://registry.test");
+    for await (const _chunk of request) { /* drain */ }
+    response.setHeader("content-type", "application/json");
+    if (requestUrl.pathname === "/v1/auth/signin") return response.end(JSON.stringify({ token: "browser-token", account }));
+    if (requestUrl.pathname === "/v1/auth/me") return response.end(JSON.stringify(account));
+    if (requestUrl.pathname === "/v1/auth/sessions" && request.method === "POST") {
+      mintedFor.push(request.headers.authorization);
+      response.statusCode = 201;
+      return response.end(JSON.stringify({ token: "desktop-token", session: { token: "desktop-token", expires_at: "2099-01-01T00:00:00.000Z" }, account }));
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: { code: "not_found", message: "Not found." } }));
+  });
+  await listen(registry);
+  context.after(() => registry.close());
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-desktop-handoff-"));
+  const dashboard = await createDashboardApp({ ledgerPath: path.join(directory, "ledger.jsonl"), registryUrl: serverUrl(registry) });
+  const api = createServer(dashboard.handler);
+  await listen(api);
+  context.after(() => api.close());
+
+  const login = await fetch(`${serverUrl(api)}/v1/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: account.email, password: "test-only" })
+  });
+  const cookies = login.headers.getSetCookie();
+  const cookie = cookies.map((value) => value.split(";", 1)[0]).join("; ");
+  const csrf = decodeURIComponent(cookies.find((value) => value.startsWith("hatch_web_csrf=")).split(";", 1)[0].slice("hatch_web_csrf=".length));
+
+  const verifier = "v".repeat(43);
+  const challenge = createHash("sha256").update(verifier).digest("base64url");
+  const authorize = await fetch(`${serverUrl(api)}/v1/auth/desktop/authorize`, {
+    method: "POST",
+    headers: { cookie, "x-csrf-token": csrf, "content-type": "application/json" },
+    body: JSON.stringify({ state: "desktop-state-0123456789", code_challenge: challenge })
+  });
+  assert.equal(authorize.status, 200);
+  const redirect = new URL((await authorize.json()).redirect_uri);
+  assert.equal(`${redirect.protocol}//${redirect.host}${redirect.pathname}`, "hatch://auth/callback");
+  assert.equal(redirect.searchParams.get("state"), "desktop-state-0123456789");
+  assert.deepEqual(mintedFor, ["Bearer browser-token"]);
+
+  const redeem = await fetch(`${serverUrl(api)}/v1/auth/desktop/token`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ code: redirect.searchParams.get("code"), code_verifier: verifier })
+  });
+  assert.equal(redeem.status, 200);
+  assert.equal((await redeem.json()).token, "desktop-token");
 });
 
 test("browser authentication keeps its session through a transient Registry failure", async (context) => {
   let failVerification = false;
   const account = {
     id: catalogAgent.creator_id,
-    role: "creator",
     email: "creator@example.test",
     display_name: "Maya Chen"
   };
@@ -224,7 +301,7 @@ test("browser authentication keeps its session through a transient Registry fail
 test("Creator browser session proxies Product BriefSpec writes to Registry", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-brief-spec-"));
   const briefCalls = [];
-  const registry = registryFixture({ role: "creator", briefCalls });
+  const registry = registryFixture({ signedIn: "owner", briefCalls });
   await listen(registry);
   context.after(() => registry.close());
   const dashboard = await createDashboardApp({
@@ -272,7 +349,6 @@ test("Creator browser session proxies Product BriefSpec writes to Registry", asy
 test("browser OAuth PKCE keeps state and authorizes Product Files without Version scope", async (context) => {
   const account = {
     id: catalogAgent.creator_id,
-    role: "creator",
     email: "creator@example.test",
     display_name: "Maya Chen"
   };
@@ -473,7 +549,7 @@ test("browser OAuth PKCE keeps state and authorizes Product Files without Versio
 
 test("creator products are projected directly from the Agent Corpus Registry", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-creator-"));
-  const registry = registryFixture({ role: "creator" });
+  const registry = registryFixture({ signedIn: "owner" });
   await listen(registry);
   context.after(() => registry.close());
   const dashboard = await createDashboardApp({
@@ -505,7 +581,7 @@ test("creator products are projected directly from the Agent Corpus Registry", a
 test("Creator can approve a verified candidate, preview, publish, and receive a share URL", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-publish-"));
   const publishCalls = [];
-  const registry = registryFixture({ role: "creator", factoryRun: readyFactoryRun, publishCalls });
+  const registry = registryFixture({ signedIn: "owner", factoryRun: readyFactoryRun, publishCalls });
   await listen(registry);
   context.after(() => registry.close());
   const dashboard = await createDashboardApp({
@@ -600,7 +676,7 @@ test("Creator release does not dead-end when optional Product boundaries are emp
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-publish-no-boundaries-"));
   const publishCalls = [];
   const registry = registryFixture({
-    role: "creator",
+    signedIn: "owner",
     factoryRun: {
       ...readyFactoryRun,
       product: { ...readyFactoryRun.product, boundaries: [] }
@@ -651,7 +727,7 @@ test("Creator release does not dead-end when optional Product boundaries are emp
 test("unified Release approves the current Factory candidate and publishes once", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-release-command-"));
   const publishCalls = [];
-  const registry = registryFixture({ role: "creator", factoryRun: readyFactoryRun, publishCalls });
+  const registry = registryFixture({ signedIn: "owner", factoryRun: readyFactoryRun, publishCalls });
   await listen(registry);
   context.after(() => registry.close());
   const dashboard = await createDashboardApp({
@@ -693,7 +769,7 @@ test("non-UUID product paths are rejected without redirects", async (context) =>
     creator_slug_aliases: ["maya-old"],
     product_slug_aliases: ["resume-review-old"]
   };
-  const registry = registryFixture({ role: "user", catalogAgents: [aliasedAgent] });
+  const registry = registryFixture({ signedIn: "buyer", catalogAgents: [aliasedAgent] });
   await listen(registry);
   context.after(() => registry.close());
   const dashboard = await createDashboardApp({
@@ -711,11 +787,39 @@ test("non-UUID product paths are rejected without redirects", async (context) =>
   assert.equal(apiResponse.status, 404);
 });
 
+test("retired buyer routes 301 to /explore and /explore/orders at the routing boundary", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-retired-routes-"));
+  const registry = registryFixture({ signedIn: "buyer" });
+  await listen(registry);
+  context.after(() => registry.close());
+  const dashboard = await createDashboardApp({
+    ledgerPath: path.join(directory, "ledger.jsonl"),
+    registryUrl: serverUrl(registry)
+  });
+  const api = createServer(dashboard.handler);
+  await listen(api);
+  context.after(() => api.close());
+
+  for (const [from, to] of [
+    ["/home", "/explore"],
+    ["/library", "/explore"],
+    ["/library/ent-1", "/explore"],
+    ["/orders?status=pending", "/explore/orders?status=pending"],
+    ["/orders/HAT-1", "/explore/orders/HAT-1"],
+    ["/orders/HAT-1/success", "/explore/orders/HAT-1/success"],
+    ["/studio/settings", "/account"]
+  ]) {
+    const response = await fetch(`${serverUrl(api)}${from}`, { redirect: "manual" });
+    assert.equal(response.status, 301, from);
+    assert.equal(response.headers.get("location"), to, from);
+  }
+});
+
 test("Factory-only first publish does not seed a fake legacy deployment", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-first-publish-"));
   const deploymentCalls = [];
   const registry = registryFixture({
-    role: "creator",
+    signedIn: "owner",
     factoryRun: readyFactoryRun,
     creatorAgents: [],
     catalogAgents: [],
@@ -793,7 +897,7 @@ test("legacy live storefront remains stable until its replacement deployment com
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-legacy-migration-"));
   const deploymentCalls = [];
   const registry = registryFixture({
-    role: "creator",
+    signedIn: "owner",
     factoryRun: readyFactoryRun,
     deploymentCalls,
     activationFailures: 1
@@ -873,7 +977,7 @@ test("deployment reconciler resumes after Registry activation failure without ex
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-deployment-reconcile-"));
   const deploymentCalls = [];
   const registry = registryFixture({
-    role: "creator",
+    signedIn: "owner",
     factoryRun: readyFactoryRun,
     deploymentCalls,
     activationFailures: 1
@@ -940,10 +1044,55 @@ test("deployment reconciler resumes after Registry activation failure without ex
   assert.equal(recoveredProduct.available, true);
 });
 
+test("an owner reaches their published Agent by product_id and cannot acquire it", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-owner-access-"));
+  const registry = registryFixture({ signedIn: "owner" });
+  await listen(registry);
+  context.after(() => registry.close());
+  const dashboard = await createDashboardApp({
+    ledgerPath: path.join(directory, "ledger.jsonl"),
+    portalStatePath: path.join(directory, "portal-state.json"),
+    registryAccessServiceToken: "test-access-service",
+    registryDeploymentServiceToken: "test-deployment-service",
+    registryUrl: serverUrl(registry),
+    exposeBearerTokens: true
+  });
+  const api = createServer(dashboard.handler);
+  await listen(api);
+  context.after(() => api.close());
+  const token = await login(api);
+  const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+
+  const access = await fetch(`${serverUrl(api)}/v1/user/product-access`, { headers });
+  const { creator_agents: agents } = await access.json();
+  assert.equal(access.status, 200);
+  assert.equal(agents.length, 1);
+  assert.equal(agents[0].product_id, catalogAgent.product_id);
+  assert.equal(agents[0].creator_id, catalogAgent.creator_id);
+  assert.equal("entitlement_id" in agents[0], false);
+  // An owner starts tasks with the same brief an acquirer answers.
+  assert.deepEqual(agents[0].brief_spec, catalogAgent.brief_spec);
+  assert.deepEqual(agents[0].product.brief_spec, catalogAgent.brief_spec);
+
+  for (const [pathname, body] of [
+    ["/v1/checkout-sessions", { product_id: catalogAgent.product_id }],
+    ["/v1/user/checkout", { creator_id: catalogAgent.creator_id, product_id: catalogAgent.product_id }]
+  ]) {
+    const response = await fetch(`${serverUrl(api)}${pathname}`, {
+      method: "POST",
+      headers: { ...headers, "idempotency-key": `self-${pathname}` },
+      body: JSON.stringify(body)
+    });
+    assert.equal(response.status, 409, pathname);
+    assert.equal((await response.json()).error.code, "self_purchase_not_allowed");
+  }
+  assert.equal(dashboard.ledger.listEvents().length, 0);
+});
+
 test("zero-value checkout creates an idempotent Agent Corpus order and entitlement", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-checkout-"));
   const accessBodies = [];
-  const registry = registryFixture({ role: "user", accessBodies });
+  const registry = registryFixture({ signedIn: "buyer", accessBodies });
   await listen(registry);
   context.after(() => registry.close());
   const dashboard = await createDashboardApp({
@@ -1020,7 +1169,7 @@ test("buyer list APIs omit records whose Creator account is missing and return t
   };
   const missingCreatorAccountIds = new Set();
   const registry = registryFixture({
-    role: "user",
+    signedIn: "buyer",
     catalogAgents: [catalogAgent, missingCreatorAgent],
     missingCreatorAccountIds
   });
@@ -1084,7 +1233,7 @@ test("V2 checkout session persists a free receipt and entitlement detail", async
   const accessBodies = [];
   const revokedEntitlements = [];
   const creatorAvatar = "https://media.example/creator-avatar.webp";
-  const registry = registryFixture({ role: "user", agent: { ...catalogAgent, creator_name: "Old Corpus Name", creator_avatar_url: creatorAvatar }, accessBodies, revokedEntitlements });
+  const registry = registryFixture({ signedIn: "buyer", agent: { ...catalogAgent, creator_name: "Old Corpus Name", creator_avatar_url: creatorAvatar }, accessBodies, revokedEntitlements });
   await listen(registry);
   context.after(() => registry.close());
   const dashboard = await createDashboardApp({
@@ -1229,7 +1378,7 @@ test("V2 checkout session persists a free receipt and entitlement detail", async
 test("public Creator and Product profiles expose the Registry account avatar", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-public-avatar-"));
   const avatar = "https://media.example/creator-avatar.webp";
-  const registry = registryFixture({ role: "user", agent: { ...catalogAgent, creator_avatar_url: avatar } });
+  const registry = registryFixture({ signedIn: "buyer", agent: { ...catalogAgent, creator_avatar_url: avatar } });
   await listen(registry);
   context.after(() => registry.close());
   const dashboard = await createDashboardApp({
@@ -1258,7 +1407,7 @@ test("public Creator and Product profiles expose the Registry account avatar", a
 test("a zero-price purchase is permanent and has no buyer cancellation action", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-free-cancel-"));
   const revokedEntitlements = [];
-  const registry = registryFixture({ role: "user", revokedEntitlements });
+  const registry = registryFixture({ signedIn: "buyer", revokedEntitlements });
   await listen(registry);
   context.after(() => registry.close());
   const dashboard = await createDashboardApp({
@@ -1316,7 +1465,7 @@ test("a zero-price purchase is permanent and has no buyer cancellation action", 
 
 test("Creator fulfilled filter includes delivered orders and disconnected payouts do not invent balances", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-creator-delivery-"));
-  const registry = registryFixture({ role: "creator" });
+  const registry = registryFixture({ signedIn: "owner" });
   await listen(registry);
   context.after(() => registry.close());
   const dashboard = await createDashboardApp({
@@ -1435,7 +1584,7 @@ async function recordDelivery(app, checkout, { prefix, artifactType }) {
 }
 
 function registryFixture({
-  role,
+  signedIn,
   accessBodies = [],
   revokedEntitlements = [],
   agent = catalogAgent,
@@ -1456,15 +1605,15 @@ function registryFixture({
     let content = "";
     for await (const chunk of request) content += chunk;
     response.setHeader("content-type", "application/json");
-    const account = role === "creator"
-      ? { id: catalogAgent.creator_id, role: "creator", email: "creator@example.test", display_name: "Maya Chen" }
-      : { id: "buyer-zero", role: "user", email: "buyer@example.test", display_name: "Zero Buyer" };
+    const account = signedIn === "owner"
+      ? { id: catalogAgent.creator_id, email: "creator@example.test", display_name: "Maya Chen" }
+      : { id: "buyer-zero", email: "buyer@example.test", display_name: "Zero Buyer" };
     if (requestUrl.pathname === "/health" || requestUrl.pathname === "/readyz") {
       response.end(JSON.stringify({ ok: true }));
       return;
     }
     if (requestUrl.pathname === "/v1/auth/signin") {
-      response.end(JSON.stringify({ token: `signed-${role}-token`, account }));
+      response.end(JSON.stringify({ token: `signed-${signedIn}-token`, account }));
       return;
     }
     if (requestUrl.pathname === "/v1/auth/me") {

@@ -25,6 +25,9 @@
 /* ---------- Shell ---------- */
 .sx-shell { display: grid; grid-template-columns: var(--sx-sidebar) minmax(0, 1fr); }
 .sx-sidebar { position: sticky; top: 0; z-index: 40; display: flex; height: 100dvh; flex-direction: column; gap: 6px; padding: 18px 14px 14px; border-right: 1px solid var(--web-rule); background: color-mix(in srgb, var(--web-card) 60%, var(--web-paper)); }
+.sx-back { display: inline-flex; align-self: flex-start; min-height: 30px; align-items: center; gap: 6px; margin: 0 0 6px; padding: 0 8px; border-radius: 8px; color: var(--web-muted); font-size: 13px; text-decoration: none; }
+.sx-back:hover { color: var(--web-ink); background: var(--web-card); }
+.sx-back svg { width: 15px; height: 15px; }
 .sx-sidebar__top { display: flex; align-items: center; justify-content: space-between; padding: 2px 6px 14px; }
 .sx-sidebar__close { display: none !important; }
 .cpv2-brand { flex: 0 0 auto; }
@@ -48,7 +51,6 @@
 .cpv2-avatar { display: grid; width: 32px; height: 32px; flex: 0 0 32px; place-items: center; border-radius: 50%; font-size: 13px; font-weight: 700; }
 .hui-avatar.cpv2-avatar { border-radius: 50%; }
 .cpv2-account-menu { border: 1px solid var(--web-rule); border-radius: 18px !important; background: var(--web-card) !important; box-shadow: var(--web-shadow-lift) !important; }
-.cpv2-account-menu-header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; }
 .cpv2-account-menu-label { display: flex; align-items: center; gap: 8px; padding: 10px 16px 4px; color: var(--web-muted); font-size: 13px; font-weight: 600; }
 .cpv2-menu-icon-placeholder { display: block; width: 18px; height: 18px; }
 .sx-mobilebar { display: none; }
@@ -87,11 +89,10 @@
 .cpv2-alert, .cpv2-success { margin: 0 0 14px; }
 
 /* ---------- Overview ---------- */
-.sx-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 0 0 18px; }
+.sx-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; margin: 0 0 18px; }
 .sx-kpi { display: flex; min-width: 0; flex-direction: column; gap: 6px; padding: 18px 20px; border: 1px solid var(--web-rule); border-radius: 18px; background: var(--web-card); }
 .sx-kpi dt { order: 1; color: var(--web-muted); font-size: 13px; font-weight: 600; }
 .sx-kpi dd { order: 2; margin: 0; overflow: hidden; font-size: clamp(24px, 2.2vw, 30px); font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
-.sx-kpi small { order: 3; color: var(--web-muted); font-size: 12px; }
 .sx-continue { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 16px 28px; margin-bottom: 18px; padding: clamp(20px, 3vw, 28px); border: 1px solid color-mix(in srgb, var(--web-yolk) 45%, var(--web-rule)); border-radius: 20px; background: linear-gradient(120deg, var(--web-card), color-mix(in srgb, var(--web-yolk-soft) 55%, var(--web-card))); }
 .sx-continue__text h2 { margin: 6px 0 0; font-size: clamp(20px, 2vw, 24px); }
 .sx-continue__text p { margin: 6px 0 0; color: var(--web-body); font-size: 14px; line-height: 1.6; }
@@ -249,7 +250,6 @@
 @media (prefers-reduced-motion: reduce) { .cpv2 *, .cpv2 *::before, .cpv2 *::after { animation: none !important; transition: none !important; } }
 
 @media (max-width: 1180px) {
-  .sx-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .sx-publish__grid { grid-template-columns: 1fr; }
   .sx-publish__preview { position: static; }
   .cpv2-path-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -266,7 +266,8 @@
   .cpv2 { --cpv2-topbar: 56px; }
   .sx-mobilebar { position: sticky; top: 0; z-index: 30; display: flex; height: 56px; align-items: center; gap: 10px; padding: 0 12px; border-bottom: 1px solid var(--web-rule); background: color-mix(in srgb, var(--web-paper) 92%, transparent); backdrop-filter: blur(14px); }
   .sx-mobilebar .cpv2-brand { margin-right: auto; }
-  .sx-mobilebar .hui-icon-button { min-width: 40px; min-height: 40px; }
+  /* Small IconButtons are 30px wide; grown to 40px they must re-centre the icon. */
+  .sx-mobilebar .hui-icon-button { display: grid; width: 40px; min-width: 40px; height: 40px; min-height: 40px; padding: 0; place-items: center; line-height: 0; }
   .sx-sidebar { position: fixed; top: 0; bottom: 0; left: 0; width: min(300px, 86vw); height: 100dvh; box-shadow: var(--web-shadow-lift); transform: translateX(-105%); transition: transform 200ms ease; }
   .sx-sidebar.is-open { transform: none; }
   .sx-sidebar__close { display: inline-flex !important; }
@@ -277,8 +278,6 @@
   .sx-agent--build .sx-agent__head { padding: 16px 16px 0; }
   .sx-agent--build .sx-agent__body { padding: 14px 16px 24px; }
   .sx-agent__title h1 { white-space: normal; }
-  .sx-agent__actions { width: 100%; }
-  .sx-agent__actions > .hui-button { flex: 1; justify-content: center; }
   .sx-overview-grid { grid-template-columns: 1fr; }
   .sx-continue { grid-template-columns: 1fr; }
   .sx-continue > .hui-button { grid-column: 1; grid-row: auto; justify-self: start; }

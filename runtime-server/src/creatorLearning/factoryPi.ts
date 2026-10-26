@@ -292,10 +292,13 @@ function structuredOutputPayload(
   };
 }
 
+/** Every Gemini profile speaks the Google Generative AI payload. */
+const isGeminiProfile = (profileName: FactoryLlmProfileName) => profileName.startsWith("gemini");
+
 /** Factory provider payload rules live here, next to the Factory adapter. */
 export function normalizeFactoryLlmPayload(payload: unknown, profileName: FactoryLlmProfileName): unknown {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
-  if (profileName === "gemini-api") return payload;
+  if (isGeminiProfile(profileName)) return payload;
   if (profileName !== "kimi-k2.6") {
     return {
       ...(payload as Record<string, unknown>),
@@ -320,7 +323,7 @@ export function requireFactoryToolChoice(payload: unknown, profileName: FactoryL
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return payload;
   }
-  if (profileName === "gemini-api") {
+  if (isGeminiProfile(profileName)) {
     const params = payload as Record<string, unknown>;
     const config = params.config && typeof params.config === "object" && !Array.isArray(params.config)
       ? params.config as Record<string, unknown>

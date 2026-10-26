@@ -24,8 +24,8 @@ use tauri_plugin_deep_link::DeepLinkExt;
 
 mod attachment_store;
 mod desktop_state;
-mod draft_store;
 mod window_commands;
+mod window_shell;
 
 #[cfg(target_os = "windows")]
 mod workspace_grants;
@@ -1227,66 +1227,6 @@ fn read_task_settings(app: AppHandle, task_id: String) -> Result<Option<Value>, 
 }
 
 #[tauri::command]
-async fn open_conversation_draft(
-    app: AppHandle,
-    window: WebviewWindow,
-    account_id: String,
-    conversation_id: String,
-) -> Result<draft_store::OpenDraft, String> {
-    let label = window.label().to_owned();
-    tauri::async_runtime::spawn_blocking(move || {
-        app.state::<draft_store::DraftStore>()
-            .open(&account_id, &conversation_id, &label)
-    })
-    .await
-    .map_err(|error| format!("draft_worker_failed: {error}"))?
-}
-
-#[tauri::command]
-async fn save_conversation_draft(
-    app: AppHandle,
-    window: WebviewWindow,
-    account_id: String,
-    conversation_id: String,
-    lease: String,
-    draft: draft_store::Draft,
-) -> Result<(), String> {
-    let label = window.label().to_owned();
-    tauri::async_runtime::spawn_blocking(move || {
-        app.state::<draft_store::DraftStore>().save(
-            &account_id,
-            &conversation_id,
-            &label,
-            &lease,
-            draft,
-        )
-    })
-    .await
-    .map_err(|error| format!("draft_worker_failed: {error}"))?
-}
-
-#[tauri::command]
-async fn release_conversation_draft(
-    app: AppHandle,
-    window: WebviewWindow,
-    account_id: String,
-    conversation_id: String,
-    lease: String,
-) -> Result<(), String> {
-    let label = window.label().to_owned();
-    tauri::async_runtime::spawn_blocking(move || {
-        app.state::<draft_store::DraftStore>().release(
-            &account_id,
-            &conversation_id,
-            &label,
-            &lease,
-        )
-    })
-    .await
-    .map_err(|error| format!("draft_worker_failed: {error}"))?
-}
-
-#[tauri::command]
 fn import_clipboard_attachment(
     display_name: String,
     media_type: String,
@@ -1888,7 +1828,10 @@ fn read_app_settings(app: AppHandle) -> Result<String, String> {
     let state = desktop_state::read(&app)?;
     serde_json::to_string(&serde_json::json!({
         "schema_version": 1,
-        "app": { "language": state.preferences.language },
+        "app": {
+            "language": state.preferences.language,
+            "theme": window_shell::normalize_theme(&state.preferences.theme)
+        },
         "accounts": {}
     }))
     .map_err(to_string)
@@ -1905,8 +1848,15 @@ fn write_app_settings(app: AppHandle, settings: String) -> Result<(), String> {
         .and_then(Value::as_str)
         .unwrap_or("system")
         .to_string();
+    let theme = window_shell::normalize_theme(
+        parsed
+            .pointer("/app/theme")
+            .and_then(Value::as_str)
+            .unwrap_or("system"),
+    );
     desktop_state::update(&app, |state| {
         state.preferences.language = language;
+        state.preferences.theme = theme.into();
         Ok(())
     })
 }
@@ -1922,23 +1872,32 @@ fn patch_app_settings(app: AppHandle, patch: Value) -> Result<(), String> {
         .as_object()
         .ok_or_else(|| "Desktop settings patch must be a JSON object".to_string())?;
     if let Some(app_patch) = object.get("app").and_then(Value::as_object) {
-        let language = app_patch
-            .get("set")
-            .and_then(Value::as_object)
-            .and_then(|set| set.get("language"))
-            .and_then(Value::as_str)
-            .map(str::to_string);
-        let remove_language = app_patch
-            .get("remove")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .any(|value| value.as_str() == Some("language"));
+        let set = |key: &str| {
+            app_patch
+                .get("set")
+                .and_then(Value::as_object)
+                .and_then(|set| set.get(key))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        };
+        let removed = |key: &str| {
+            app_patch
+                .get("remove")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .any(|value| value.as_str() == Some(key))
+        };
+        let language = set("language").or_else(|| removed("language").then(|| "system".into()));
+        let theme = set("theme")
+            .map(|theme| window_shell::normalize_theme(&theme).to_string())
+            .or_else(|| removed("theme").then(|| "system".into()));
         desktop_state::update(&app, |state| {
             if let Some(language) = language {
                 state.preferences.language = language;
-            } else if remove_language {
-                state.preferences.language = "system".into();
+            }
+            if let Some(theme) = theme {
+                state.preferences.theme = theme;
             }
             Ok(())
         })?;
@@ -1991,10 +1950,8 @@ fn read_window_settings(app: AppHandle, window: WebviewWindow) -> Result<Value, 
         "frame": saved_window.frame,
         "layout": {
             "sidebarPreference": if saved_window.layout.sidebar_open { "open" } else { "closed" },
-            "inspectorPreference": if saved_window.layout.inspector_open { "open" } else { "closed" },
-            "sidebarWidth": saved_window.layout.sidebar_width,
-            "inspectorWidth": saved_window.layout.inspector_width,
-            "zoom": saved_window.layout.zoom
+            "zoom": saved_window.layout.zoom,
+            "scrollPositions": saved_window.layout.scroll_positions
         }
     }))
 }
@@ -2018,17 +1975,12 @@ fn patch_window_settings(
             if let Some(value) = layout.get("sidebarPreference").and_then(Value::as_str) {
                 saved_window.layout.sidebar_open = value == "open";
             }
-            if let Some(value) = layout.get("inspectorPreference").and_then(Value::as_str) {
-                saved_window.layout.inspector_open = value == "open";
-            }
-            if let Some(value) = layout.get("sidebarWidth") {
-                saved_window.layout.sidebar_width = value.as_f64();
-            }
-            if let Some(value) = layout.get("inspectorWidth") {
-                saved_window.layout.inspector_width = value.as_f64();
-            }
             if let Some(value) = layout.get("zoom") {
                 saved_window.layout.zoom = value.as_f64();
+            }
+            if let Some(value) = layout.get("scrollPositions") {
+                saved_window.layout.scroll_positions =
+                    desktop_state::bounded_scroll_positions(value);
             }
         }
         if let Some(context) = patch.get("context").and_then(Value::as_object) {
@@ -2089,7 +2041,7 @@ fn patch_window_settings(
 #[tauri::command]
 fn open_external_url(url: String) -> Result<(), String> {
     if !is_allowed_browse_url(&url) {
-        return Err("Only the Hatch Expert Agent catalog can be opened from this action".into());
+        return Err("browse_url_not_allowed".into());
     }
     #[cfg(target_os = "macos")]
     let status = Command::new("/usr/bin/open").arg(&url).status();
@@ -2138,13 +2090,24 @@ fn open_external_url_windows(url: &str) -> Result<(), String> {
         .ok_or_else(|| "The system browser could not be opened".into())
 }
 
+/// The Hatch web origin this build may open in the system browser. A
+/// development build is compiled against its own origin.
+pub(crate) const WEB_ORIGIN: &str = match option_env!("HATCH_DESKTOP_WEB_ORIGIN") {
+    Some(origin) => origin,
+    None => "https://hatch.tokenquadrant.cn",
+};
+
 fn is_allowed_browse_url(url: &str) -> bool {
-    let Ok(parsed) = url::Url::parse(url) else {
+    let (Ok(parsed), Ok(origin)) = (url::Url::parse(url), url::Url::parse(WEB_ORIGIN)) else {
         return false;
     };
-    parsed.scheme() == "https"
-        && parsed.host_str() == Some("hatch.tokenquadrant.cn")
+    parsed.origin() == origin.origin()
         && (parsed.path() == "/explore"
+            || parsed.path() == "/account"
+            || parsed.path() == "/account/help"
+            || parsed.path() == "/desktop/sign-in"
+            || parsed.path() == "/studio"
+            || parsed.path() == "/studio/products/new"
             || is_uuid_route(parsed.path(), "/products/")
             || is_uuid_route(parsed.path(), "/creators/"))
 }
@@ -2161,33 +2124,86 @@ fn is_uuid_route(path: &str, prefix: &str) -> bool {
         && matches!(value.as_bytes().get(19), Some(b'8' | b'9' | b'a' | b'b'))
 }
 
+/// The formal app owns `hatch://`; a separately named development build is
+/// compiled with its own scheme so the two never steal each other's links.
+const DEEP_LINK_SCHEME: &str = match option_env!("HATCH_DESKTOP_DEEP_LINK_SCHEME") {
+    Some(scheme) => scheme,
+    None => "hatch",
+};
+
 fn normalize_product_open_url(url: &url::Url) -> Option<String> {
-    if url.scheme() != "hatch" || url.host_str() != Some("products") || url.path() != "/open" {
-        return None;
-    }
-    let entitlement_id = url
-        .query_pairs()
-        .find(|(key, _)| key == "entitlement_id")
-        .map(|(_, value)| value.into_owned())?;
-    let product_id = url
-        .query_pairs()
-        .find(|(key, _)| key == "product_id")
-        .map(|(_, value)| value.into_owned())?;
-    if !is_uuid_route(&format!("/{entitlement_id}"), "/")
-        || !is_uuid_route(&format!("/{product_id}"), "/")
+    if url.scheme() != DEEP_LINK_SCHEME
+        || url.host_str() != Some("products")
+        || url.path() != "/open"
     {
         return None;
     }
-    if let Some(creator_id) = url
-        .query_pairs()
-        .find(|(key, _)| key == "creator_id")
-        .map(|(_, value)| value.into_owned())
-    {
-        if !is_uuid_route(&format!("/{creator_id}"), "/") {
+    let query = |name: &str| {
+        url.query_pairs()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.into_owned())
+    };
+    let is_uuid = |value: &str| is_uuid_route(&format!("/{value}"), "/");
+    // product_id names the Agent; entitlement_id is present only for an
+    // acquired Agent. Either is a routing hint, never authorization.
+    if !is_uuid(&query("product_id")?) {
+        return None;
+    }
+    for optional in ["entitlement_id", "creator_id"] {
+        if query(optional).is_some_and(|value| !is_uuid(&value)) {
             return None;
         }
     }
     Some(url.to_string())
+}
+
+const AUTH_CALLBACK_EVENT: &str = "hatch://auth-callback";
+const MAX_AUTH_CALLBACK_VALUE_BYTES: usize = 512;
+
+/// `hatch://auth/callback?code=…&state=…` returns the browser sign-in to the
+/// app. The code is single-use and PKCE-bound, so it is not a credential on
+/// its own; the renderer that started the sign-in exchanges it.
+fn normalize_auth_callback_url(url: &url::Url) -> Option<Value> {
+    if url.scheme() != DEEP_LINK_SCHEME
+        || url.host_str() != Some("auth")
+        || url.path() != "/callback"
+    {
+        return None;
+    }
+    let value = |name: &str| {
+        url.query_pairs()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.into_owned())
+            .filter(|value| {
+                !value.is_empty()
+                    && value.len() <= MAX_AUTH_CALLBACK_VALUE_BYTES
+                    && !value.chars().any(char::is_control)
+            })
+    };
+    Some(serde_json::json!({ "code": value("code")?, "state": value("state")? }))
+}
+
+/// Route deep links from either the deep-link plugin or a second launch.
+fn handle_deep_links(app: &AppHandle, urls: &[url::Url]) {
+    let links = urls
+        .iter()
+        .filter_map(normalize_product_open_url)
+        .collect::<Vec<_>>();
+    if !links.is_empty() {
+        // Only the Library handles product links, so each opens once.
+        let _ = app.emit_to(window_shell::MAIN_WINDOW_LABEL, PRODUCT_OPEN_EVENT, links);
+    }
+    let mut received_callback = false;
+    for callback in urls.iter().filter_map(normalize_auth_callback_url) {
+        received_callback = true;
+        let _ = app.emit(AUTH_CALLBACK_EVENT, callback);
+    }
+    if received_callback {
+        if let Some(welcome) = app.get_webview_window(window_shell::WELCOME_WINDOW_LABEL) {
+            let _ = welcome.show();
+            let _ = welcome.set_focus();
+        }
+    }
 }
 
 #[tauri::command]
@@ -2537,51 +2553,50 @@ fn bundled_runtime_root(app: &AppHandle) -> Result<PathBuf, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            let links = argv
+            let urls = argv
                 .iter()
                 .filter_map(|argument| url::Url::parse(argument).ok())
-                .filter_map(|url| normalize_product_open_url(&url))
                 .collect::<Vec<_>>();
-            if !links.is_empty() {
-                let _ = app.emit(PRODUCT_OPEN_EVENT, links);
-            }
-            if let Some(window) = app.get_webview_window("main") {
+            handle_deep_links(app, &urls);
+            // Bring Hatch forward without revealing a main window that is
+            // still hidden behind the sign-in window.
+            let target = app
+                .get_webview_window(window_shell::WELCOME_WINDOW_LABEL)
+                .or_else(|| app.get_webview_window(window_shell::MAIN_WINDOW_LABEL));
+            if let Some(window) = target {
                 let _ = window.show();
                 let _ = window.set_focus();
             }
         }))
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(NativeToolAuthority::default())
         .manage(window_commands::NativeCommandRouter::default())
         .setup(|app| {
-            app.manage(draft_store::DraftStore::new(
-                app.path().app_data_dir()?.join("drafts"),
-                app.state::<window_commands::NativeCommandRouter>()
-                    .inner()
-                    .clone(),
-            ));
             app.manage(NativeDropContextStore::open(
                 app.path().app_data_dir()?.join("attachments"),
             )?);
             let deep_link_app = app.handle().clone();
             app.deep_link().on_open_url(move |event| {
-                let links = event
-                    .urls()
-                    .iter()
-                    .filter_map(normalize_product_open_url)
-                    .collect::<Vec<_>>();
-                if !links.is_empty() {
-                    let _ = deep_link_app.emit(PRODUCT_OPEN_EVENT, links);
-                }
+                handle_deep_links(&deep_link_app, &event.urls());
             });
+            let main_config = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|window| window.label == window_shell::MAIN_WINDOW_LABEL)
+                .cloned()
+                .ok_or_else(|| std::io::Error::other("tauri.conf.json has no main window"))?;
+            window_shell::build_main_window(app.handle(), &main_config)
+                .map_err(std::io::Error::other)?;
             let router = app.state::<window_commands::NativeCommandRouter>();
             window_commands::install_native_menu(app.handle(), router.inner())
                 .map_err(std::io::Error::other)?;
-            // Conversation windows are native-owned session surfaces. Their
-            // manifest is restored before the main renderer finishes booting;
-            // each restored WebView still revalidates auth, account binding,
-            // workspace grant and conversation snapshot on its own.
-            let _ = window_commands::restore_conversation_windows(app.handle(), router.inner());
+            // Chat windows (one per Agent) left open last time are restored
+            // before the Library renderer finishes booting; each restored
+            // WebView still revalidates auth, account binding and Agent access.
+            let _ = window_commands::restore_agent_windows(app.handle(), router.inner());
             Ok(())
         })
         .on_menu_event(|app, event| {
@@ -2598,9 +2613,6 @@ pub fn run() {
             open_local_attachment,
             save_local_attachment,
             import_clipboard_attachment,
-            open_conversation_draft,
-            save_conversation_draft,
-            release_conversation_draft,
             pick_native_drop_files,
             pick_workspace_folder,
             reveal_workspace_artifact,
@@ -2624,16 +2636,28 @@ pub fn run() {
             open_external_url,
             revoke_workspace_grant,
             read_product_open_links,
-            window_commands::open_conversation_window,
+            window_commands::open_agent_window,
+            window_commands::set_window_attention,
             window_commands::claim_conversation_session,
             window_commands::release_conversation_session,
-            window_commands::open_settings_window,
-            window_commands::open_about_window,
             window_commands::set_native_command_state,
-            window_commands::show_native_command_menu,
-            window_commands::show_native_context_menu
+            window_shell::app_ready,
+            window_shell::open_welcome_window
         ])
         .on_window_event(|window, event| {
+            // Closing the sign-in window while the main window is still hidden
+            // (signed out) quits; a signed-in main window keeps the app alive.
+            if matches!(event, WindowEvent::Destroyed)
+                && window.label() == window_shell::WELCOME_WINDOW_LABEL
+            {
+                let app = window.app_handle();
+                let main_hidden = app
+                    .get_webview_window(window_shell::MAIN_WINDOW_LABEL)
+                    .is_some_and(|main| !main.is_visible().unwrap_or(false));
+                if main_hidden {
+                    app.exit(0);
+                }
+            }
             if let Some(router) = window.try_state::<window_commands::NativeCommandRouter>() {
                 if matches!(event, WindowEvent::Destroyed) {
                     router.begin_close_window(window.label());
@@ -2688,7 +2712,7 @@ pub fn run() {
             }
             let window = window.clone();
             tauri::async_runtime::spawn_blocking(move || {
-                // Wait out pre-close context registrations and draft writes before
+                // Wait out pre-close context registrations before
                 // draining tools; retain the Closing owner until cleanup succeeds.
                 window
                     .state::<window_commands::NativeCommandRouter>()
@@ -2726,10 +2750,24 @@ pub fn run() {
                 if let Some(router) = app.try_state::<window_commands::NativeCommandRouter>() {
                     // Tauri destroys every window during a normal quit. Keep
                     // the manifest intact so the next launch can recreate
-                    // the same conversation windows; an individual close
+                    // the same Agent windows; an individual close
                     // outside app-exit still removes only that entry.
-                    router.preserve_conversation_manifest_on_exit();
+                    router.preserve_agent_manifest_on_exit();
                 }
+            }
+            // Dock click with nothing visible: the main renderer decides
+            // whether to show itself or reopen the sign-in window.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen {
+                has_visible_windows: false,
+                ..
+            } = event
+            {
+                let _ = app.emit_to(
+                    window_shell::MAIN_WINDOW_LABEL,
+                    window_commands::REOPEN_EVENT,
+                    (),
+                );
             }
         });
 }
@@ -3445,6 +3483,18 @@ mod tests {
         .unwrap();
         assert!(super::normalize_product_open_url(&valid).is_some());
 
+        let owned = url::Url::parse(
+            "hatch://products/open?product_id=9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003",
+        )
+        .unwrap();
+        assert!(super::normalize_product_open_url(&owned).is_some());
+
+        let missing_product = url::Url::parse(
+            "hatch://products/open?entitlement_id=7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001",
+        )
+        .unwrap();
+        assert!(super::normalize_product_open_url(&missing_product).is_none());
+
         let legacy = url::Url::parse(
             "hatch://agents/open?entitlement_id=7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001&product_id=9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003",
         )
@@ -3456,6 +3506,51 @@ mod tests {
         )
         .unwrap();
         assert!(super::normalize_product_open_url(&malformed).is_none());
+    }
+
+    #[test]
+    fn auth_callback_deep_link_is_bounded_and_complete() {
+        let parse =
+            |value: &str| super::normalize_auth_callback_url(&url::Url::parse(value).unwrap());
+        let callback = parse("hatch://auth/callback?code=desktop_code_1&state=s1").unwrap();
+        assert_eq!(callback["code"], "desktop_code_1");
+        assert_eq!(callback["state"], "s1");
+        assert!(parse("hatch://auth/callback?code=desktop_code_1").is_none());
+        assert!(parse("hatch://auth/other?code=c&state=s").is_none());
+        assert!(parse("hatch://products/callback?code=c&state=s").is_none());
+        assert!(parse("hatch://auth/callback?code=c%0A&state=s").is_none());
+        let oversized = format!("hatch://auth/callback?code={}&state=s", "c".repeat(513));
+        assert!(parse(&oversized).is_none());
+    }
+
+    #[test]
+    fn help_is_an_allowed_browse_destination() {
+        assert!(is_allowed_browse_url(
+            "https://hatch.tokenquadrant.cn/account/help"
+        ));
+        assert!(is_allowed_browse_url(
+            "https://hatch.tokenquadrant.cn/account"
+        ));
+        assert!(is_allowed_browse_url(
+            "https://hatch.tokenquadrant.cn/desktop/sign-in?state=abc&code_challenge=def"
+        ));
+        assert!(!is_allowed_browse_url(
+            "https://hatch.tokenquadrant.cn/account/orders"
+        ));
+    }
+
+    #[test]
+    fn studio_entry_points_are_allowed_browse_destinations() {
+        assert!(is_allowed_browse_url(
+            "https://hatch.tokenquadrant.cn/studio"
+        ));
+        assert!(is_allowed_browse_url(
+            "https://hatch.tokenquadrant.cn/studio/products/new"
+        ));
+        assert!(!is_allowed_browse_url(
+            "https://hatch.tokenquadrant.cn/studio/factory/product-a"
+        ));
+        assert!(!is_allowed_browse_url("https://evil.example/studio"));
     }
 
     #[test]

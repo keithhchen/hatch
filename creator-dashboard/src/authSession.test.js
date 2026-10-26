@@ -12,12 +12,12 @@ test("Browser auth uses an HttpOnly session cookie and rejects missing CSRF", as
     if (request.url === "/v1/auth/signin") {
       response.end(JSON.stringify({
         token: "opaque-registry-session",
-        account: { id: "buyer-cookie", role: "user", display_name: "Cookie Buyer" }
+        account: { id: "buyer-cookie", display_name: "Cookie Buyer" }
       }));
       return;
     }
     if (request.url === "/v1/auth/me" && request.headers.authorization === "Bearer opaque-registry-session") {
-      response.end(JSON.stringify({ id: "buyer-cookie", role: "user", display_name: "Cookie Buyer" }));
+      response.end(JSON.stringify({ id: "buyer-cookie", display_name: "Cookie Buyer" }));
       return;
     }
     response.statusCode = 401;

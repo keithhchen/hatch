@@ -28,12 +28,12 @@ test("confirmed checkout commits access without a Registry ownership projection"
     if (request.url === "/v1/auth/signin") {
       response.end(JSON.stringify({
         token: "buyer-recovery-token",
-        account: { id: "buyer-recovery", role: "user", display_name: "Recovery Buyer" }
+        account: { id: "buyer-recovery", display_name: "Recovery Buyer" }
       }));
       return;
     }
     if (request.url === "/v1/auth/me") {
-      response.end(JSON.stringify({ id: "buyer-recovery", role: "user", display_name: "Recovery Buyer" }));
+      response.end(JSON.stringify({ id: "buyer-recovery", display_name: "Recovery Buyer" }));
       return;
     }
     if (request.url === "/v1/public/products") {

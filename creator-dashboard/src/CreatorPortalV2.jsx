@@ -1,7 +1,7 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Check, ChevronsUpDown, Copy, Download, ExternalLink, Languages, LayoutDashboard, LogOut, Menu, MoreHorizontal, Plus, ReceiptText, Search, Settings, Wallet, X } from "lucide-react";
+import { ArrowLeft, Bot, Check, ChevronsUpDown, Copy, Download, ExternalLink, Languages, LayoutDashboard, LogOut, Menu, MoreHorizontal, Plus, ReceiptText, Search, Settings, X } from "lucide-react";
 import { Button, CommandMenu, ConfirmDialog, DropdownMenu, IconButton } from "@hatch/ui";
-import { ButtonBase, Divider as MuiDivider, ListItemIcon, ListItemText, Menu as MuiMenu, MenuItem as MuiMenuItem, Typography as MuiTypography } from "@mui/material";
+import { ButtonBase, Divider as MuiDivider, ListItemIcon, ListItemText, Menu as MuiMenu, MenuItem as MuiMenuItem } from "@mui/material";
 import { createTheme, ThemeProvider } from "@mui/material/styles";
 import { hatchMuiThemeOptions } from "@hatch/ui";
 import { AccountAvatar } from "./AccountAvatar.jsx";
@@ -26,16 +26,13 @@ const opsPage = (name) => React.lazy(() => import("./studioOps.jsx").then((modul
 const StudioOrdersPage = opsPage("StudioOrdersPage");
 const StudioOrderDetailPage = opsPage("StudioOrderDetailPage");
 const StudioEarningsPage = opsPage("StudioEarningsPage");
-const StudioSettingsPage = opsPage("StudioSettingsPage");
 
 const creatorMuiTheme = createTheme(hatchMuiThemeOptions);
 
 const NAV_ITEMS = [
   { section: "home", href: ROOT, label: "sxNavOverview", Icon: LayoutDashboard },
   { section: "products", href: `${ROOT}/products`, label: "sxNavAgents", Icon: Bot },
-  { section: "orders", href: `${ROOT}/orders`, label: "sxNavOrders", Icon: ReceiptText },
-  { section: "earnings", href: `${ROOT}/earnings`, label: "sxNavEarnings", Icon: Wallet },
-  { section: "settings", href: `${ROOT}/settings`, label: "sxNavSettings", Icon: Settings }
+  { section: "orders", href: `${ROOT}/orders`, label: "sxNavOrders", Icon: ReceiptText }
 ];
 
 export function CreatorPortalV2({
@@ -80,6 +77,7 @@ export function CreatorPortalV2({
   const workbench = route.kind === "agent" && route.tab === "build";
 
   const sidebar = <aside className={`sx-sidebar${drawerOpen ? " is-open" : ""}`} aria-label={t("hatchNavigation")}>
+    <a className="sx-back" href="/explore" onClick={(event) => { event.preventDefault(); go("/explore"); }}><ArrowLeft aria-hidden="true" /><span>{t("sxBackToHatch")}</span></a>
     <div className="sx-sidebar__top">
       <WebBrand className="cpv2-brand" label={t("studio")} href={ROOT} aria-label={t("hatchCreatorHome")} onClick={(event) => { event.preventDefault(); go(ROOT); }} />
       <IconButton className="sx-sidebar__close" label={t("sxCloseMenu")} variant="ghost" size="small" onClick={() => setDrawerOpen(false)}><X aria-hidden="true" /></IconButton>
@@ -122,12 +120,7 @@ export function CreatorPortalV2({
           transformOrigin={{ vertical: "bottom", horizontal: "left" }}
           slotProps={{ paper: { className: "cpv2-account-menu", sx: { minWidth: 248, mb: 1 } }, list: { dense: true, "aria-label": t("account") } }}
         >
-          <div className="cpv2-account-menu-header">
-            <AccountAvatar className="cpv2-avatar" src={profile?.avatar_url} name={displayName} size="small" />
-            <MuiTypography variant="subtitle2" fontWeight={700}>{displayName}</MuiTypography>
-          </div>
-          <MuiDivider />
-          <MuiMenuItem onClick={() => { closeAccountMenu(); go(`${ROOT}/settings`); }}><ListItemIcon><Settings size={18} /></ListItemIcon><ListItemText primary={t("sxNavSettings")} /></MuiMenuItem>
+          <MuiMenuItem onClick={() => { closeAccountMenu(); go("/account"); }}><ListItemIcon><Settings size={18} /></ListItemIcon><ListItemText primary={t("sxNavSettings")} /></MuiMenuItem>
           <MuiMenuItem onClick={() => { closeAccountMenu(); go("/download"); }}><ListItemIcon><Download size={18} /></ListItemIcon><ListItemText primary={t("download")} /></MuiMenuItem>
           <MuiDivider />
           <div className="cpv2-account-menu-label"><Languages size={16} /><span>{t("language")}</span></div>
@@ -171,7 +164,7 @@ function CreatorRoute({ route, request, navigate, locale, t, profile }) {
   const ops = { request, navigate, locale, profile };
   const lazy = (node) => <Suspense fallback={<LoadingState t={t} />}>{node}</Suspense>;
   if (route.kind === "redirect") return <Redirect to={route.to} navigate={navigate} />;
-  if (route.kind === "home") return <CreatorHome request={request} navigate={navigate} t={t} locale={locale} profile={profile} />;
+  if (route.kind === "home") return <CreatorHome request={request} navigate={navigate} t={t} locale={locale} />;
   if (route.kind === "products") return <ProductsPage request={request} navigate={navigate} t={t} locale={locale} />;
   if (route.kind === "product-create") return lazy(<CreatorProductFiles navigate={navigate} locale={locale} />);
   if (route.kind === "agent") return lazy(<StudioAgentWorkspace key={route.productId} route={route} request={request} navigate={navigate} locale={locale} t={t} profile={profile} renderBuild={(product) => <FactoryAgents productId={route.productId} section={route.factorySection} agent={route.factoryAgent} navigate={navigate} locale={locale} />} />);
@@ -179,7 +172,6 @@ function CreatorRoute({ route, request, navigate, locale, t, profile }) {
   if (route.kind === "orders") return lazy(<StudioOrdersPage {...ops} />);
   if (route.kind === "order") return lazy(<StudioOrderDetailPage {...ops} orderId={route.orderId} />);
   if (route.kind === "earnings") return lazy(<StudioEarningsPage {...ops} />);
-  if (route.kind === "settings") return lazy(<StudioSettingsPage {...ops} />);
   return <RouteProblem title={t("pageNotFound")} body={t("pageNotFoundBody")} action={t("backToProducts")} onAction={() => navigate(`${ROOT}/products`)} />;
 }
 
@@ -190,7 +182,7 @@ function Redirect({ to, navigate }) {
 
 /* ---------- Overview ---------- */
 
-function CreatorHome({ request, navigate, t, locale, profile }) {
+function CreatorHome({ request, navigate, t, locale }) {
   const resource = useRemote(request, "/v1/creator/overview");
   return (
     <PageBoundary resource={resource} title={t("workspaceLoadError")} t={t}>
@@ -200,16 +192,13 @@ function CreatorHome({ request, navigate, t, locale, profile }) {
         const orders = arrayOf(overview?.recent_orders);
         if (products.length === 0) return <CreatorZeroProductIntro navigate={navigate} t={t} />;
         const metrics = overview?.metrics ?? {};
-        const currency = orders.find((order) => order.currency)?.currency;
         const live = products.filter(isProductLive);
         const next = products.find((product) => !isProductLive(product));
         const recent = [...products].sort((a, b) => String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? ""))).slice(0, 5);
         return <>
-          <PageHeader title={t("sxOverviewTitle")} body={t("sxOverviewBody", profile?.display_name || t("creator"))} actions={<Button className={next ? undefined : "web-btn-yolk"} variant={next ? "secondary" : "primary"} type="button" leading={<Plus aria-hidden="true" />} onClick={() => navigate(`${ROOT}/products/new`)}>{t("newAgent")}</Button>} />
+          <PageHeader title={t("sxOverviewTitle")} actions={<Button className={next ? undefined : "web-btn-yolk"} variant={next ? "secondary" : "primary"} type="button" leading={<Plus aria-hidden="true" />} onClick={() => navigate(`${ROOT}/products/new`)}>{t("newAgent")}</Button>} />
           {Number(metrics.orders) > 0 ? <dl className="sx-kpis">
             <Kpi label={t("sxKpiOrders")} value={Number(metrics.orders) || 0} />
-            <Kpi label={t("sxKpiDeliveries")} value={Number(metrics.successful_deliveries) || 0} />
-            <Kpi label={t("sxKpiGross")} value={money(metrics.gross_minor, currency)} />
           </dl> : null}
           {next ? <NextAgentCard product={next} request={request} navigate={navigate} t={t} /> : null}
           <div className="sx-overview-grid">
@@ -238,8 +227,8 @@ function CreatorHome({ request, navigate, t, locale, profile }) {
   );
 }
 
-function Kpi({ label, value, note }) {
-  return <div className="sx-kpi"><dt>{label}</dt><dd>{value}</dd>{note ? <small>{note}</small> : null}</div>;
+function Kpi({ label, value }) {
+  return <div className="sx-kpi"><dt>{label}</dt><dd>{value}</dd></div>;
 }
 
 function NextAgentCard({ product, request, navigate, t }) {
@@ -367,6 +356,6 @@ function defaultNavigate(path) {
 }
 
 function localizedRouteTitle(route, t) {
-  const keys = { home: "sxNavOverview", products: "sxNavAgents", agent: "sxNavAgents", "product-create": "newAgent", orders: "sxNavOrders", order: "orderDetail", earnings: "sxNavEarnings", settings: "sxNavSettings" };
+  const keys = { home: "sxNavOverview", products: "sxNavAgents", agent: "sxNavAgents", "product-create": "newAgent", orders: "sxNavOrders", order: "orderDetail", earnings: "sxNavEarnings" };
   return keys[route.kind] ? t(keys[route.kind]) : t("studio");
 }

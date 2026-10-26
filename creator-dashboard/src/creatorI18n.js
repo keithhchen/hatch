@@ -170,7 +170,6 @@ const MESSAGES = {
     ,openNavigation: "Open navigation"
     ,hatchNavigation: "Hatch navigation"
     ,creator: "Expert"
-    ,creatorAccount: "Expert account"
     ,signOut: "Sign out"
     ,creatorPortalUnavailable: "Hatch Studio is unavailable"
     ,creatorPortalUnavailableBody: "We couldn't load this workspace."
@@ -402,7 +401,6 @@ const MESSAGES = {
     ,openNavigation: "打开导航"
     ,hatchNavigation: "Hatch 导航"
     ,creator: "Expert"
-    ,creatorAccount: "Expert 账户"
     ,signOut: "退出登录"
     ,creatorPortalUnavailable: "Hatch Studio 暂不可用"
     ,creatorPortalUnavailableBody: "暂时无法加载这个工作区。"
@@ -634,7 +632,6 @@ const MESSAGES = {
     ,openNavigation: "ナビゲーションを開く"
     ,hatchNavigation: "Hatch ナビゲーション"
     ,creator: "Expert"
-    ,creatorAccount: "Expert アカウント"
     ,signOut: "サインアウト"
     ,creatorPortalUnavailable: "Hatch Studio を利用できません"
     ,creatorPortalUnavailableBody: "このワークスペースを読み込めませんでした。"
@@ -731,7 +728,6 @@ const PORTAL_MESSAGES = {
     candidateApproval: "Candidate approval",
     storefrontPreview: "Storefront preview",
     preview: "Preview",
-    viewStorefront: "View storefront",
     completePreviousStep: "Complete the previous step",
     cancel: "Cancel",
     gateNumber: (number) => `Gate ${number}`,
@@ -940,7 +936,7 @@ const PORTAL_MESSAGES = {
     loadingCreatorPage: "Loading Expert page",
     unexpectedError: "An unexpected error occurred.",
     sessionExpired: "Your session expired. Sign in again to continue.",
-    creatorForbidden: "This Expert account cannot access that resource.",
+    creatorForbidden: "This account cannot access that resource.",
     requestedResourceMissing: "The requested resource no longer exists.",
     pageChanged: "This page changed in another tab. Refresh the latest version before trying again.",
     tooManyRequests: "Too many requests. Your work is preserved; try again shortly.",
@@ -982,7 +978,6 @@ const PORTAL_MESSAGES = {
     candidateApproval: "候选版本批准",
     storefrontPreview: "Storefront 预览",
     preview: "预览",
-    viewStorefront: "查看 storefront",
     completePreviousStep: "请先完成上一步",
     cancel: "取消",
     gateNumber: (number) => `关卡 ${number}`,
@@ -1191,7 +1186,7 @@ const PORTAL_MESSAGES = {
     loadingCreatorPage: "正在加载 Expert 页面",
     unexpectedError: "发生意外错误。",
     sessionExpired: "登录状态已过期，请重新登录后继续。",
-    creatorForbidden: "这个 Expert 账户无权访问该资源。",
+    creatorForbidden: "当前账户无权访问该资源。",
     requestedResourceMissing: "请求的资源已不存在。",
     pageChanged: "此页面已在另一个标签页中变化，请刷新最新版本后再试。",
     tooManyRequests: "请求过于频繁。你的工作已保留，请稍后再试。",
@@ -1233,7 +1228,6 @@ const PORTAL_MESSAGES = {
     candidateApproval: "候補の承認",
     storefrontPreview: "ストアフロントのプレビュー",
     preview: "プレビュー",
-    viewStorefront: "ストアフロントを見る",
     completePreviousStep: "前のステップを完了してください",
     cancel: "キャンセル",
     gateNumber: (number) => `ゲート ${number}`,
@@ -1442,7 +1436,7 @@ const PORTAL_MESSAGES = {
     loadingCreatorPage: "Expert ページを読み込み中",
     unexpectedError: "予期しないエラーが発生しました。",
     sessionExpired: "セッションの有効期限が切れました。再度サインインしてください。",
-    creatorForbidden: "この Expert アカウントはそのリソースにアクセスできません。",
+    creatorForbidden: "このアカウントはそのリソースにアクセスできません。",
     requestedResourceMissing: "要求されたリソースは存在しません。",
     pageChanged: "別のタブでページが変更されました。最新バージョンを更新してから再試行してください。",
     tooManyRequests: "リクエストが多すぎます。作業は保存されています。しばらくしてから再試行してください。",

@@ -79,7 +79,7 @@ import {
   type AgentCorpus,
   type AgentCorpusResolverLike
 } from "./agentCorpus.js";
-import { RuntimeReleaseAgentCorpusResolver } from "./runtimeCorpusResolver.js";
+import { AgentReleaseUnavailableError, RuntimeReleaseAgentCorpusResolver } from "./runtimeCorpusResolver.js";
 import {
   discoverSkills,
   includeSkillInstructions,
@@ -895,13 +895,15 @@ async function handleHttpRequest(
       return;
     }
     try {
-      let creatorAgents: Array<Record<string, unknown>>;
-      if (claims?.role === "creator" && agentCorpusResolver) {
-        creatorAgents = (await agentCorpusResolver.list(claims.sub, signal)).map(({ corpus, digest }) => ({
-          entitlement_id: `creator:${claims.sub}:${corpus.agent_id}`,
+      // Access is relational: owned rows are the account's own published
+      // Products (addressed by product_id, no entitlement_id); every other
+      // row is an entitlement grant.
+      const creatorAgents: Array<Record<string, unknown>> = claims && agentCorpusResolver
+        ? (await agentCorpusResolver.list(claims.sub, signal)).map(({ corpus, digest }) => ({
           creator_id: corpus.creator.id,
-          agent_id: corpus.agent_id,
+          product_id: corpus.product.id,
           corpus_digest: digest,
+          effective_corpus_digest: digest,
           creator: corpus.creator,
           product: {
             id: corpus.product.id,
@@ -912,14 +914,14 @@ async function handleHttpRequest(
             ...(corpus.product.boundaries.length ? { boundaries: corpus.product.boundaries } : {})
           },
           presentation: corpus.product.presentation
-        }));
-      } else {
-        const entitlements = await entitlementResolver!.list({
+        }))
+        : [];
+      if (entitlementResolver) {
+        const entitlements = await entitlementResolver.list({
           authToken,
           licenseToken: authToken,
           signal
         });
-        creatorAgents = [];
         // Resolve Corpus digests sequentially. A buyer can own many grants and
         // each digest walks bounded assets; unbounded Promise.all multiplies
         // transient memory by the full grant count.
@@ -927,7 +929,15 @@ async function handleHttpRequest(
           signal?.throwIfAborted();
           assertEntitlementMatchesIdentity(claims, entitlement);
           if (!agentCorpusResolver) throw new Error("Current Agent Corpus resolver is unavailable");
-          const resolved = await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.product_id, signal);
+          let resolved: Awaited<ReturnType<AgentCorpusResolver["resolve"]>>;
+          try {
+            resolved = await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.product_id, signal);
+          } catch (error) {
+            // A withdrawn Agent is not chat-able; it leaves the list like it
+            // leaves the Web library. Every other failure still fails the call.
+            if (error instanceof AgentReleaseUnavailableError) continue;
+            throw error;
+          }
           if (resolved.corpus.product.id !== entitlement.product_id || resolved.corpus.creator.id !== entitlement.creator_id) {
             throw new Error(`Entitlement ${entitlement.entitlement_id} does not match its current Agent Corpus`);
           }
@@ -943,6 +953,7 @@ async function handleHttpRequest(
               id: resolved.corpus.product.id,
               name: resolved.corpus.product.name,
               description: resolved.corpus.product.description ?? "",
+              ...(resolved.corpus.product.brief_spec ? { brief_spec: resolved.corpus.product.brief_spec } : {}),
               ...(resolved.corpus.product.promise ? { promise: resolved.corpus.product.promise } : {}),
               ...(resolved.corpus.product.boundaries.length ? { boundaries: resolved.corpus.product.boundaries } : {})
             },
@@ -3143,8 +3154,9 @@ async function resolveSessionBinding(
   if (authIdentityResolver && !authClaims) {
     throw new EntitlementError("authentication_required", "A valid Hatch session is required.");
   }
-  // A product-selected hello is only for local/creator sessions. Buyer
-  // sessions must carry entitlement_id alone so the server owns the binding.
+  // Owner path: product_id without entitlement_id. The owner is the live
+  // release's creator_id as reported by the server; hello.creator_id is never
+  // trusted. Everyone else must use the entitlement path below.
   if (hello.product_id && !hello.entitlement_id) {
     if (!agentCorpusResolver) {
       throw new EntitlementError(
@@ -3152,67 +3164,24 @@ async function resolveSessionBinding(
         "The requested Expert Agent is not available on this Runtime."
       );
     }
-    const selectedCreatorId = authClaims?.role === "creator"
-      ? authClaims.sub
-      : hello.creator_id;
-    if (!selectedCreatorId) {
-      throw new EntitlementError("creator_required", "creator_id is required when selecting an Expert Agent.");
+    if (!authClaims) {
+      throw new EntitlementError("authentication_required", "A valid Hatch session is required.");
     }
-    const resolved = await agentCorpusResolver.resolve(selectedCreatorId, hello.product_id, signal);
-    let corpusEntitlement: Awaited<ReturnType<EntitlementResolver["resolve"]>> | undefined;
-    if (authClaims?.role !== "creator" && !entitlementResolver) {
-      throw new EntitlementError(
-        "entitlement_configuration_incomplete",
-        "Expert Agent access is unavailable because entitlement verification is not fully configured."
-      );
-    }
-    if (authClaims?.role !== "creator" && entitlementResolver) {
-      if (!hello.entitlement_id) {
-        throw new EntitlementError("entitlement_required", "A valid Expert Agent entitlement is required.");
-      }
-      const entitlement = await entitlementResolver.resolve({
-        authToken,
-        licenseToken: authToken,
-        entitlementId: hello.entitlement_id,
-        signal
-      });
-      assertEntitlementMatchesIdentity(authClaims, entitlement);
-      if (entitlement.product_id !== hello.product_id
-        || entitlement.creator_id !== resolved.corpus.creator.id
-        || entitlement.product_id !== resolved.corpus.product.id) {
-        throw new EntitlementError("agent_entitlement_mismatch", "This Expert Agent is not available for the signed-in account.");
-      }
-      corpusEntitlement = entitlement;
-    }
-    if (hello.product_id !== resolved.corpus.product.id) {
-      throw new Error("Agent Corpus product binding mismatch");
+    const resolved = await agentCorpusResolver.resolveByProduct(hello.product_id, signal);
+    if (resolved.corpus.product.id !== hello.product_id || resolved.corpus.creator.id !== authClaims.sub) {
+      throw new EntitlementError("entitlement_required", "A valid Expert Agent entitlement is required.");
     }
     return {
-      creatorId: resolved.corpus.creator.id,
-      userId: authClaims?.sub
-        ?? corpusEntitlement?.user_id
-        ?? hello.user_id
-        ?? `local-${shortHash(authToken ?? "local-user")}`,
+      creatorId: authClaims.sub,
+      userId: authClaims.sub,
       productId: resolved.corpus.product.id,
       corpusDigest: resolved.digest,
       ...(resolved.runtimeDigest ? { runtimeDigest: resolved.runtimeDigest } : {}),
       ...(resolved.corpus.product.brief_spec
         ? { briefSpec: resolved.corpus.product.brief_spec as BriefSpec }
         : {}),
-      ...(corpusEntitlement?.purchased_corpus_digest
-        ? {
-            purchasedCorpusDigest: corpusEntitlement.purchased_corpus_digest,
-            versionPolicy: corpusEntitlement.version_policy ?? "pinned",
-            versionHistory: corpusEntitlement.version_history ?? []
-          }
-        : {}),
       agentCorpus: resolved.corpus,
       agentCorpusRoot: resolved.root,
-      ...(corpusEntitlement ? {
-        entitlementId: corpusEntitlement.entitlement_id,
-        orderId: corpusEntitlement.order_id,
-        accessMode: corpusEntitlement.access_mode ?? "unmetered"
-      } : {}),
       explicit: true
     };
   }
@@ -3315,7 +3284,7 @@ function assertEntitlementMatchesIdentity(
   identity: AuthIdentity | undefined,
   entitlement: { user_id: string }
 ): void {
-  if (identity && (identity.role !== "user" || entitlement.user_id !== identity.sub)) {
+  if (identity && entitlement.user_id !== identity.sub) {
     throw new EntitlementError("agent_entitlement_mismatch", "This Expert Agent is not available for the signed-in account.");
   }
 }
@@ -3339,15 +3308,15 @@ async function revalidateTurnAuthorization(
   }
 
   if (!binding.entitlementId) {
-    // A Creator operates their own Agent Corpus without a buyer entitlement,
-    // but their opaque session is still re-introspected on every turn.
+    // An owner operates their own Agent without an entitlement, but their
+    // opaque session is still re-introspected on every turn.
     if (authIdentityResolver
       && binding.agentCorpus
-      && (identity?.role !== "creator" || identity.sub !== binding.creatorId)) {
+      && identity?.sub !== binding.creatorId) {
       throw new EntitlementError("authentication_required", "The Hatch session binding is no longer valid.");
     }
   } else {
-    if ((authIdentityResolver && identity?.role !== "user") || !entitlementResolver) {
+    if ((authIdentityResolver && !identity) || !entitlementResolver) {
       throw new EntitlementError("entitlement_required", "The Expert Agent access binding is no longer valid.");
     }
     const entitlement = await entitlementResolver.resolve({
@@ -3448,15 +3417,16 @@ async function bindingFromHistoryRequest(
   const entitlementId = url.searchParams.get("entitlement_id") ?? undefined;
   const authToken = bearerToken(req);
   const authIdentity = await resolveAuthIdentity(authToken, authIdentityResolver, signal);
-  // Creator REST requests use the same owned-Product authorization as client.hello.
+  // Owner REST requests use the same owned-Product authorization as client.hello.
   const selectedProduct = url.searchParams.get("product_id");
-  if (authIdentity?.role === "creator" && selectedProduct && !entitlementId) {
+  const productMode = Boolean(entitlementResolver || agentCorpusResolver);
+  if (productMode && selectedProduct && !entitlementId) {
     return resolveSessionBinding({
       auth_token: authToken,
       product_id: selectedProduct
-    }, entitlementResolver, agentCorpusResolver, authIdentityResolver, authIdentity, signal);
+    }, entitlementResolver, agentCorpusResolver, authIdentityResolver,
+    authIdentity ?? legacyAuthClaims(authToken, authIdentityResolver, legacyHmacAuth), signal);
   }
-  const productMode = Boolean(entitlementResolver || agentCorpusResolver);
   if (productMode) {
     if (!entitlementResolver || !agentCorpusResolver) {
       throw new EntitlementError(

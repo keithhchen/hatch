@@ -48,7 +48,7 @@ export async function runCommerceV2Smoke(options = {}) {
 
   const me = await smokeRequest(fetchImpl, origin, "/v1/auth/me", { headers: { cookie } });
   assertStatus(me, 200, "authenticated profile");
-  if (me.json?.role !== "user") throw new Error("Commerce smoke account must have the Buyer user role.");
+  if (!me.json?.id || me.json.id === creatorId) throw new Error("Commerce smoke account must be signed in and must not own the smoke Product.");
 
   // Application redeploys must replay the same smoke purchase. A new order is
   // justified only when the immutable Product release changes.
@@ -118,7 +118,7 @@ export async function runCommerceV2Smoke(options = {}) {
     throw new Error("Entitlement detail did not preserve active release-pinned access.");
   }
 
-  const success = await smokeRequest(fetchImpl, origin, `/orders/${encodeURIComponent(orderId)}/success`, {
+  const success = await smokeRequest(fetchImpl, origin, `/explore/orders/${encodeURIComponent(orderId)}/success`, {
     headers: { cookie }
   });
   assertStatus(success, 200, "durable success route");

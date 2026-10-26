@@ -1,7 +1,7 @@
 export const webChatCopy = Object.freeze({
   en: Object.freeze({
     loading: "Loading…",
-    backToLibrary: "My subscriptions",
+    backToMyAgents: "My Agents",
     taskBrief: "Task brief",
     notProvided: "Not provided",
     openMenu: "Open navigation menu",
@@ -46,6 +46,7 @@ export const webChatCopy = Object.freeze({
     retry: "Retry",
     conversationIdentityMismatch: "Conversation data does not match. Retry.",
     historyIdentityMismatch: "Conversation history does not match. Retry.",
+    snapshot_invalid: "Conversation history does not match. Retry.",
     replyFailed: "Reply failed.",
     connectionFailed: "Connection failed.",
     browserLocalToolUnavailable: "This browser cannot run local tools.",
@@ -74,6 +75,10 @@ export const webChatCopy = Object.freeze({
     imageTotalSizeLimit: "Total image size must not exceed 100 MB.",
     imageFormatInvalid: "Choose a PNG, JPEG, GIF, WebP, or AVIF image no larger than 100 MB.",
     approvalDenied: "Tool call was not approved.",
+    "compaction.running": "Tidying up the conversation…",
+    "compaction.done": "Conversation tidied",
+    "approval.allowed": "Allowed",
+    "approval.denied": "Not allowed",
     expertAi: "{name}'s AI",
     welcomePill: "{name}'s AI",
     noAccessPill: "Subscription required",
@@ -83,15 +88,10 @@ export const webChatCopy = Object.freeze({
     composerHint: "Enter to send, Shift + Enter for a new line",
     briefIntro: "This information is shared with {agent} when the conversation starts. Optional fields can be left blank.",
     noDetails: "No details",
-    roleGatePill: "Client access",
-    roleGateTitle: "This page is for client accounts",
-    roleGateBody: "You are signed in with an expert account. To preview your own AI, use Studio, or sign in with a client account.",
-    goToStudio: "Open Studio",
-    switchAccount: "Sign in with another account"
   }),
   zh: Object.freeze({
     loading: "正在加载…",
-    backToLibrary: "我的订阅",
+    backToMyAgents: "我的 Agent",
     taskBrief: "任务背景",
     notProvided: "未填写",
     openMenu: "打开导航菜单",
@@ -136,6 +136,7 @@ export const webChatCopy = Object.freeze({
     retry: "重试",
     conversationIdentityMismatch: "对话数据不一致，请重试。",
     historyIdentityMismatch: "对话记录不一致，请重试。",
+    snapshot_invalid: "对话记录不一致，请重试。",
     replyFailed: "回复失败。",
     connectionFailed: "连接失败。",
     browserLocalToolUnavailable: "此浏览器不能运行本地工具。",
@@ -164,6 +165,10 @@ export const webChatCopy = Object.freeze({
     imageTotalSizeLimit: "图片总大小不能超过 100 MB。",
     imageFormatInvalid: "请选择不超过 100 MB 的 PNG、JPEG、GIF、WebP 或 AVIF 图片。",
     approvalDenied: "工具调用未获批准。",
+    "compaction.running": "正在整理对话…",
+    "compaction.done": "对话已整理",
+    "approval.allowed": "已允许",
+    "approval.denied": "未允许",
     expertAi: "{name} 的 AI",
     welcomePill: "{name} 的 AI",
     noAccessPill: "需要订阅",
@@ -173,15 +178,10 @@ export const webChatCopy = Object.freeze({
     composerHint: "Enter 发送，Shift + Enter 换行",
     briefIntro: "以下信息将在对话开始时提供给 {agent}。选填项可留空。",
     noDetails: "无详细信息",
-    roleGatePill: "客户专用",
-    roleGateTitle: "此页面供客户账户使用",
-    roleGateBody: "当前登录的是专家账户。如需预览自己的 AI，请前往 Studio，或使用客户账户登录。",
-    goToStudio: "打开 Studio",
-    switchAccount: "使用其他账户登录"
   }),
   ja: Object.freeze({
     loading: "読み込み中…",
-    backToLibrary: "購読中の製品",
+    backToMyAgents: "マイ Agent",
     taskBrief: "タスク概要",
     notProvided: "未入力",
     openMenu: "ナビゲーションメニューを開く",
@@ -226,6 +226,7 @@ export const webChatCopy = Object.freeze({
     retry: "再試行",
     conversationIdentityMismatch: "会話データが一致しません。再試行してください。",
     historyIdentityMismatch: "会話履歴が一致しません。再試行してください。",
+    snapshot_invalid: "会話履歴が一致しません。再試行してください。",
     replyFailed: "返信に失敗しました。",
     connectionFailed: "接続に失敗しました。",
     browserLocalToolUnavailable: "このブラウザーではローカルツールを実行できません。",
@@ -254,6 +255,10 @@ export const webChatCopy = Object.freeze({
     imageTotalSizeLimit: "画像の合計サイズは 100 MB 以下にしてください。",
     imageFormatInvalid: "100 MB 以下の PNG、JPEG、GIF、WebP、AVIF 画像を選択してください。",
     approvalDenied: "ツール呼び出しは承認されませんでした。",
+    "compaction.running": "会話を整理しています…",
+    "compaction.done": "会話を整理しました",
+    "approval.allowed": "許可しました",
+    "approval.denied": "許可しませんでした",
     expertAi: "{name}のAI",
     welcomePill: "{name}のAI",
     noAccessPill: "購読が必要です",
@@ -263,23 +268,8 @@ export const webChatCopy = Object.freeze({
     composerHint: "Enter で送信、Shift + Enter で改行",
     briefIntro: "以下の情報は会話の開始時に{agent}へ共有されます。任意項目は空欄のままでも構いません。",
     noDetails: "詳細はありません",
-    roleGatePill: "お客様専用",
-    roleGateTitle: "このページはお客様アカウント専用です",
-    roleGateBody: "現在、専門家アカウントでログインしています。ご自身のAIをプレビューするには Studio をご利用いただくか、お客様アカウントでログインしてください。",
-    goToStudio: "Studio を開く",
-    switchAccount: "別のアカウントでログイン"
   })
 });
-
-
-export class WebChatPresentationError extends Error {
-  constructor(key, values = {}) {
-    super(key);
-    this.name = "WebChatPresentationError";
-    this.key = key;
-    this.values = values;
-  }
-}
 
 export function webChatT(locale, key, values = {}) {
   const template = webChatCopy[locale]?.[key] ?? webChatCopy.en[key] ?? key;

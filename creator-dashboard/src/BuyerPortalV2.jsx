@@ -1,12 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, ArrowRight, ChevronDown, Inbox, Info, Menu, Monitor, SearchX } from "lucide-react";
+import { AlertCircle, ArrowRight, Check, ChevronDown, Inbox, Pencil, SearchX } from "lucide-react";
 import {
   Button,
   DropdownMenu,
-  Checkbox as HatchCheckbox,
-  IconButton,
   InlineAlert as HatchInlineAlert,
   Input,
+  SegmentedControl,
   Select,
   StatusTag
 } from "@hatch/ui";
@@ -17,8 +16,9 @@ import { AccountAvatar } from "./AccountAvatar.jsx";
 import { useLocale } from "./locale.jsx";
 import { buyerT } from "./buyerI18n.js";
 import { createAuthPagePresentation } from "./authPagePresentation.js";
-import { humanizeIdentifier, meaningfulReversalStatus } from "./buyerPresentation.js";
+import { humanizeIdentifier } from "./buyerPresentation.js";
 import { creatorPublicModel } from "./storefrontModel.js";
+import { exploreModel } from "./exploreModel.js";
 import { createPublicProductDirectory, identityIsComplete, recordProductId, resolveProductIdentity } from "./buyerProductIdentity.js";
 import { BuyerAccountControls, BuyerLanguageMenu } from "./BuyerAccountControls.jsx";
 import { AccountAvatarSettings } from "./AccountAvatarSettings.jsx";
@@ -26,8 +26,7 @@ import "./buyerPortalV2.css";
 
 const DEFAULT_DOWNLOAD_URL = "/download";
 const EXPLORE_ROOT = "/explore";
-const LIBRARY_ROOT = "/library";
-const ORDERS_ROOT = "/orders";
+const ORDERS_ROOT = "/explore/orders";
 const CHECKOUT_ROOT = "/checkout";
 const ACCOUNT_ROOT = "/account";
 const STUDIO_ROOT = "/studio";
@@ -49,10 +48,9 @@ const PHOTO = (id) => `/assets/web/photos/${id}.jpg`;
  * session:
  *   {
  *     status: "loading" | "anonymous" | "authenticated",
- *     user?: { display_name?, email?, initials?, role? },
+ *     user?: { id?, display_name?, email?, initials? },
  *     signIn?(credentials): Promise<unknown>,
  *     signUp?(profile): Promise<unknown>,
- *     creatorSignUp?(profile): Promise<unknown>,
  *     onAuthenticated?(authResponse): void | Promise<void>,
  *     signOut?(): void | Promise<void>,
  *     invalidate?(error): void
@@ -70,9 +68,9 @@ const PHOTO = (id) => `/assets/web/photos/${id}.jpg`;
  *   GET  /v1/library -> { entitlements: Entitlement[], next_cursor? }
  *   GET  /v1/library/:id -> Entitlement | { entitlement: Entitlement }
  *
- * Library and order endpoints are client-only: an Expert (creator) session
- * receives 403 `user_only`. The portal explains that rule and points the
- * Expert to Studio instead of hiding it.
+ * There is one kind of account. Anyone can acquire other people's Agents and
+ * build their own in Studio; an owner chats with their own published Agents
+ * without acquiring them.
  */
 export const BUYER_PORTAL_V2_ENDPOINTS = Object.freeze({
   catalog: "/v1/public/products",
@@ -97,7 +95,7 @@ export function BuyerPortalV2({
   const returnTo = `${location.pathname}${location.search}`;
 
   if (!PUBLIC_ROUTE_NAMES.has(route.name) && session.status === "loading") {
-    return <BuyerShell route={route} navigate={navigate} session={session} downloadUrl={downloadUrl}><PageSkeleton label={t("Loading account")} /></BuyerShell>;
+    return <BuyerShell route={route} navigate={navigate} session={session}><PageSkeleton label={t("Loading account")} /></BuyerShell>;
   }
 
   if (!PUBLIC_ROUTE_NAMES.has(route.name) && session.status !== "authenticated") {
@@ -107,17 +105,13 @@ export function BuyerPortalV2({
 
   let page;
   if (route.name === "catalog") {
-    page = <CatalogPage request={request} navigate={navigate} session={session} />;
+    page = <ExplorePage request={request} navigate={navigate} session={session} />;
   } else if (route.name === "creator") {
     page = <CreatorPublicPage creatorId={route.params.creatorId} request={request} navigate={navigate} session={session} />;
   } else if (route.name === "product") {
-    page = <ProductPage route={route} request={request} navigate={navigate} session={session} downloadUrl={downloadUrl} />;
+    page = <ProductPage route={route} request={request} navigate={navigate} session={session} />;
   } else if (route.name === "sign-in" || route.name === "sign-up") {
     return <AuthPage mode={route.name} search={location.search} request={request} navigate={navigate} session={session} />;
-  } else if (route.name === "library") {
-    page = <LibraryPage search={location.search} request={request} navigate={navigate} session={session} />;
-  } else if (route.name === "entitlement") {
-    page = <EntitlementPage id={route.params.entitlementId} request={request} navigate={navigate} session={session} downloadUrl={downloadUrl} />;
   } else if (route.name === "checkout") {
     page = <CheckoutPage id={route.params.checkoutSessionId} request={request} navigate={navigate} session={session} openPayment={openPayment} />;
   } else if (route.name === "orders") {
@@ -127,7 +121,7 @@ export function BuyerPortalV2({
   } else if (route.name === "success") {
     page = <SuccessPage id={route.params.orderId} request={request} navigate={navigate} downloadUrl={downloadUrl} session={session} />;
   } else if (route.name === "settings") {
-    page = <SettingsPage session={session} navigate={navigate} />;
+    page = <SettingsPage session={session} request={request} navigate={navigate} />;
   } else if (route.name === "account-help") {
     page = <AccountHelpPage session={session} navigate={navigate} />;
   } else if (route.name === "subscriptions") {
@@ -136,7 +130,7 @@ export function BuyerPortalV2({
     page = <NotFoundPage navigate={navigate} />;
   }
 
-  return <BuyerShell route={route} navigate={navigate} session={session} downloadUrl={downloadUrl}>{page}</BuyerShell>;
+  return <BuyerShell route={route} navigate={navigate} session={session}>{page}</BuyerShell>;
 }
 
 export function matchBuyerRoute(inputPathname) {
@@ -151,31 +145,22 @@ export function matchBuyerRoute(inputPathname) {
   if (segments.length === 1 && segments[0] === "sign-in") return { name: "sign-in", params: {} };
   if (segments.length === 1 && segments[0] === "sign-up") return { name: "sign-up", params: {} };
   if (segments.length === 2 && segments[0] === "account" && segments[1] === "help") return { name: "account-help", params: {} };
-  if (segments.length === 1 && segments[0] === "library") return { name: "library", params: {} };
-  if (segments.length === 2 && segments[0] === "library") return { name: "entitlement", params: { entitlementId: segments[1] } };
-  if (segments.length === 1 && segments[0] === "orders") return { name: "orders", params: {} };
-  if (segments.length === 3 && segments[0] === "orders" && segments[2] === "success") return { name: "success", params: { orderId: segments[1], orderNumber: segments[1] } };
-  if (segments.length === 2 && segments[0] === "orders") return { name: "order", params: { orderId: segments[1], orderNumber: segments[1] } };
+  if (segments[0] === "explore" && segments[1] === "orders") {
+    if (segments.length === 2) return { name: "orders", params: {} };
+    if (segments.length === 3) return { name: "order", params: { orderId: segments[2], orderNumber: segments[2] } };
+    if (segments.length === 4 && segments[3] === "success") return { name: "success", params: { orderId: segments[2], orderNumber: segments[2] } };
+  }
   if (segments.length === 2 && segments[0] === "checkout") return { name: "checkout", params: { checkoutSessionId: segments[1] } };
   if (segments.length === 1 && segments[0] === "account") return { name: "settings", params: {} };
   return { name: "not-found", params: {} };
 }
 
-function BuyerShell({ route, navigate, session, downloadUrl, children }) {
+function BuyerShell({ route, navigate, session, children }) {
   const t = useBuyerCopy();
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState(null);
   const authenticated = session.status === "authenticated";
-  const isExpert = isExpertSession(session);
-  const active = route.name === "catalog" || route.name === "creator" || route.name === "product"
-    ? "explore"
-    : route.name === "library" || route.name === "entitlement"
-      ? "library"
-      : route.name === "orders" || route.name === "order" || route.name === "success"
-        ? "orders"
-        : route.name === "settings"
-          ? "settings"
-        : "";
+  const exploring = ["catalog", "creator", "product", "orders", "order", "success"].includes(route.name);
 
   async function signOut() {
     if (!session.signOut || signingOut) return;
@@ -196,34 +181,17 @@ function BuyerShell({ route, navigate, session, downloadUrl, children }) {
       <header className="buyer-v2__header">
         <div className="buyer-v2__header-inner">
           <WebBrand as={RouterLink} className="buyer-v2__brand" to={EXPLORE_ROOT} navigate={navigate} aria-label={t("Hatch home")} />
-          <nav className="buyer-v2__nav" aria-label={t('Buyer navigation')}>
-            <RouterLink to={EXPLORE_ROOT} navigate={navigate} aria-current={active === "explore" ? "page" : undefined}>{t('Explore')}</RouterLink>
-            {authenticated ? <RouterLink to={LIBRARY_ROOT} navigate={navigate} aria-current={active === "library" ? "page" : undefined}>{t('Library')}</RouterLink> : null}
-            {authenticated ? <RouterLink to={ORDERS_ROOT} navigate={navigate} aria-current={active === "orders" ? "page" : undefined}>{t('Orders')}</RouterLink> : null}
-            <a href={downloadUrl} target="_blank" rel="noreferrer">{t('Download')}</a>
+          <nav className="buyer-v2__nav" aria-label={t("Buyer navigation")}>
+            <RouterLink to={EXPLORE_ROOT} navigate={navigate} aria-current={exploring ? "page" : undefined}>{t("Explore")}</RouterLink>
+            <RouterLink to={STUDIO_ROOT} navigate={navigate}>{t("Studio")}</RouterLink>
           </nav>
-          <div className="buyer-v2__mobile-nav">
-            <DropdownMenu
-              label={t('Buyer navigation')}
-              trigger={<IconButton label={t('Open navigation')} variant="secondary" size="small"><Menu aria-hidden="true" /></IconButton>}
-              items={[
-                { value: "explore", label: t("Explore"), active: active === "explore", onSelect: () => navigateTo(navigate, EXPLORE_ROOT) },
-                ...(authenticated ? [{ value: "library", label: t("Library"), active: active === "library", onSelect: () => navigateTo(navigate, LIBRARY_ROOT) }] : []),
-                ...(authenticated ? [{ value: "orders", label: t("Orders"), active: active === "orders", onSelect: () => navigateTo(navigate, ORDERS_ROOT) }] : []),
-                ...(authenticated ? [{ value: "account", label: t("Account"), active: active === "settings", onSelect: () => navigateTo(navigate, ACCOUNT_ROOT) }] : []),
-                ...(isExpert ? [{ value: "studio", label: t("Studio"), onSelect: () => navigateTo(navigate, STUDIO_ROOT) }] : []),
-                { value: "download", label: t("Download"), onSelect: () => window.open(downloadUrl, "_blank", "noopener,noreferrer") }
-              ]}
-            />
-          </div>
           <div className="buyer-v2__account">
-            {isExpert ? <RouterLink className="buyer-v2__studio-link" to={STUDIO_ROOT} navigate={navigate}>{t("Studio")}</RouterLink> : null}
             {authenticated ? (
-              <BuyerAccountControls user={session.user} onSignOut={signOut} signingOut={signingOut} className="buyer-account-controls--header" />
+              <BuyerAccountControls user={session.user} navigate={navigate} onSignOut={signOut} signingOut={signingOut} className="buyer-account-controls--header" />
             ) : (
               <>
                 <BuyerLanguageMenu />
-                <LinkButton size="small" to={`/sign-in?returnTo=${encodeURIComponent(EXPLORE_ROOT)}`} navigate={navigate}>{t('Sign in')}</LinkButton>
+                <LinkButton size="small" to={`/sign-in?returnTo=${encodeURIComponent(EXPLORE_ROOT)}`} navigate={navigate}>{t("Sign in")}</LinkButton>
               </>
             )}
           </div>
@@ -255,10 +223,11 @@ function Photo({ id, alt = "", className = "" }) {
  * The one shape every empty, error and notice state uses: a plain white card
  * with an optional icon, a title, one line, and at most two next steps.
  */
-function Notice({ icon: Icon, title, body, children, tone = "neutral", headingLevel = 2 }) {
+function Notice({ icon: Icon, media, title, body, children, tone = "neutral", headingLevel = 2 }) {
   const Heading = headingLevel === 1 ? "h1" : "h2";
   return (
     <section className={`buyer-v2__notice web-card is-${tone}`}>
+      {media}
       {Icon ? <span className="buyer-v2__notice-icon" aria-hidden="true"><Icon /></span> : null}
       <Heading>{title}</Heading>
       {body ? <p>{body}</p> : null}
@@ -276,55 +245,133 @@ function EmptyState({ title, body, action, compact = false }) {
   return <Notice icon={Inbox} title={title} body={body}>{action}</Notice>;
 }
 
-/** An Expert account reached a client-only page. Explain the rule and point to Studio. */
-function ExpertAccountNotice({ navigate, area, headingLevel = 1 }) {
+/* ---------- Explore ---------- */
+
+const EXPLORE_TAB_KEY = "hatch.explore.tab";
+const EXPLORE_TABS = ["discover", "mine"];
+
+/** The last mobile tab this browser chose; Discover when unknown or unreadable. */
+function useExploreTab() {
+  const [tab, setTab] = useState(() => {
+    try {
+      const stored = window.localStorage.getItem(EXPLORE_TAB_KEY);
+      return EXPLORE_TABS.includes(stored) ? stored : "discover";
+    } catch {
+      return "discover";
+    }
+  });
+  function choose(value) {
+    setTab(value);
+    try { window.localStorage.setItem(EXPLORE_TAB_KEY, value); } catch { /* per-browser convenience only */ }
+  }
+  return [tab, choose];
+}
+
+function ExplorePage({ request, navigate, session }) {
   const t = useBuyerCopy();
+  usePageTitle(t("Explore"));
+  const [tab, setTab] = useExploreTab();
+  const authenticated = session.status === "authenticated";
+  const accountId = authenticated ? session.user?.id : null;
+  const resource = useRemote(async (signal) => {
+    const [catalog, owned, acquired] = await Promise.all([
+      callRequest(request, BUYER_PORTAL_V2_ENDPOINTS.catalog, { signal }),
+      authenticated ? callRequest(request, "/v1/creator/products", { signal }) : null,
+      authenticated ? loadSubscribedProducts(request, signal) : { items: [] }
+    ]);
+    return exploreModel({
+      accountId,
+      ownedProducts: collectionFrom(owned, ["products"]),
+      acquired: acquired.items,
+      catalog: collectionFrom(catalog, ["agents", "items"])
+    });
+  }, `explore:${session.status}:${accountId ?? ""}`, session.status !== "loading");
+  const model = resource.data;
+
+  let discover;
+  if (resource.status === "error") discover = <RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} session={session} returnTo={EXPLORE_ROOT} />;
+  else if (!model) discover = <CardSkeleton count={3} label={t("Loading Agents")} />;
+  else if (model.discover.length) discover = <section className="buyer-v2__catalog-grid" aria-label={t("Published Agents")}>{model.discover.map((product) => <CatalogCard key={productKey(product)} product={product} navigate={navigate} />)}</section>;
+  else discover = <EmptyState title={t("No published Agents")} body={t("Agents appear here once experts publish them.")} action={<LinkButton variant="secondary" to={STUDIO_ROOT} navigate={navigate}>{t("Publish an Agent")}</LinkButton>} />;
+
   return (
-    <Notice
-      headingLevel={headingLevel}
-      icon={Info}
-      title={t("This page is for client accounts")}
-      body={area === "orders"
-        ? t("You are signed in with an expert account. Client orders for your products are in Studio.")
-        : t("You are signed in with an expert account. Manage your products in Studio.")}
-    >
-      <LinkButton className="web-btn-yolk" to={area === "orders" ? `${STUDIO_ROOT}/orders` : STUDIO_ROOT} navigate={navigate}>{area === "orders" ? t("View orders in Studio") : t("Open Studio")}</LinkButton>
-      <LinkButton variant="secondary" to={EXPLORE_ROOT} navigate={navigate}>{t("Browse Agents")}</LinkButton>
-    </Notice>
+    <div className="buyer-v2__container buyer-v2__page buyer-v2__explore-page">
+      {authenticated ? (
+        <SegmentedControl
+          className="buyer-v2__explore-tabs"
+          ariaLabel={t("Explore")}
+          value={tab}
+          onValueChange={setTab}
+          items={[{ value: "discover", label: t("Discover") }, { value: "mine", label: t("My Agents") }]}
+        />
+      ) : null}
+      <div className={`buyer-v2__explore is-${authenticated ? tab : "signed-out"}`}>
+        <div className="buyer-v2__explore-main">
+          <PageIntro title={t("Discover")} lead={t("Agents published by experts.")} />
+          {discover}
+        </div>
+        {authenticated ? (
+          <aside className="buyer-v2__explore-side" aria-labelledby="explore-mine">
+            <MyAgentsPanel model={model} navigate={navigate} />
+          </aside>
+        ) : session.status === "anonymous" ? (
+          <aside className="buyer-v2__explore-side">
+            <section className="buyer-v2__side-card web-card">
+              <h2>{t("Make Hatch yours")}</h2>
+              <p>{t("Sign up to keep the Agents you use in one place, or build your own in Studio.")}</p>
+              <LinkButton className="web-btn-yolk" to={`/sign-up?returnTo=${encodeURIComponent(EXPLORE_ROOT)}`} navigate={navigate}>{t("Sign up")}</LinkButton>
+            </section>
+          </aside>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
-/* ---------- Catalog ---------- */
-
-function CatalogPage({ request, navigate, session }) {
+function MyAgentsPanel({ model, navigate }) {
   const t = useBuyerCopy();
-  usePageTitle(t("Explore"));
-  const resource = useRemote(async (signal) => {
-    const response = await callRequest(request, BUYER_PORTAL_V2_ENDPOINTS.catalog, { signal });
-    return collectionFrom(response, ["agents", "items"]);
-  }, "catalog");
-  const isExpert = isExpertSession(session);
-
+  const draftsLink = model?.draftCount ? <RouterLink to={STUDIO_ROOT} navigate={navigate}>{t("{count} in progress in Studio →", { count: model.draftCount })}</RouterLink> : null;
+  const ordersLink = <RouterLink to={ORDERS_ROOT} navigate={navigate}>{t("Order history →")}</RouterLink>;
+  let body;
+  if (!model) body = <ListSkeleton label={t("Loading Agents")} />;
+  else if (!model.acquired.length && !model.published.length) body = <>
+    <section className="buyer-v2__side-card web-card">
+      <p>{t("No Agents yet. Pick one to try, or build one in Studio.")}</p>
+      <LinkButton variant="secondary" size="small" to={STUDIO_ROOT} navigate={navigate}>{t("Open Studio")}</LinkButton>
+    </section>
+    <nav className="buyer-v2__side-links" aria-label={t("My Agents")}>{draftsLink}{ordersLink}</nav>
+  </>;
+  else body = <>
+    {model.acquired.length ? <MyAgentsGroup id="explore-acquired" title={t("Acquired")} rows={model.acquired} navigate={navigate} links={ordersLink} /> : null}
+    <MyAgentsGroup id="explore-published" title={t("Published by me")} rows={model.published} navigate={navigate}
+      links={model.published.length ? draftsLink : <>{draftsLink}<RouterLink to={`${STUDIO_ROOT}/products/new`} navigate={navigate}>{t("Publish your first Agent in Studio →")}</RouterLink></>} />
+  </>;
   return (
-    <div className="buyer-v2__container buyer-v2__page">
-      <PageIntro title={t("Explore")} lead={t("Agents published by experts.")} />
-      {resource.status === "loading" ? <CardSkeleton count={3} label={t('Loading Agents')} /> : null}
-      {resource.status === "error" ? <RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} session={session} returnTo={EXPLORE_ROOT} /> : null}
-      {resource.status === "ready" && resource.data.length ? (
-        <section className="buyer-v2__catalog-grid" aria-label={t('Published Agents')}>
-          {resource.data.map((product) => <CatalogCard key={productKey(product)} product={product} navigate={navigate} />)}
-        </section>
-      ) : null}
-      {resource.status === "ready" && resource.data.length === 0 ? (
-        <EmptyState
-          title={t("No published Agents")}
-          body={t("Agents appear here once experts publish them.")}
-          action={isExpert
-            ? <LinkButton className="web-btn-yolk" to={STUDIO_ROOT} navigate={navigate}>{t("Open Studio")}</LinkButton>
-            : <LinkButton variant="secondary" to={STUDIO_ROOT} navigate={navigate}>{t("Publish an Agent")}</LinkButton>}
-        />
-      ) : null}
-    </div>
+    <>
+      <h2 id="explore-mine" className="buyer-v2__side-title">{t("My Agents")}</h2>
+      {body}
+    </>
+  );
+}
+
+function MyAgentsGroup({ id, title, rows, navigate, links }) {
+  const t = useBuyerCopy();
+  return (
+    <section className="buyer-v2__my-group" aria-labelledby={id}>
+      <h3 id={id} className="buyer-v2__my-group-title">{title}</h3>
+      {rows.length ? <ul className="buyer-v2__my-agents">
+        {rows.map((row) => (
+          <li key={row.key}>
+            <RouterLink className="buyer-v2__my-agent" to={row.href} navigate={navigate}>
+              <AccountAvatar className="buyer-v2__creator-avatar" size="medium" src={creatorAvatarUrl(row.creator)} name={row.name || t("Untitled Agent")} />
+              <span><strong>{row.name || t("Untitled Agent")}</strong><small>{row.kind === "owned" ? t("Your Agent") : creatorName(row.creator, t)}</small></span>
+              <ArrowRight aria-hidden="true" />
+            </RouterLink>
+          </li>
+        ))}
+      </ul> : null}
+      {links ? <nav className="buyer-v2__side-links" aria-label={title}>{links}</nav> : null}
+    </section>
   );
 }
 
@@ -371,7 +418,7 @@ function CatalogCard({ product, navigate }) {
       <h2>{productName(product, t)}</h2>
       <p>{productPromise(product, t)}</p>
       <div className="buyer-v2__card-footer">
-        <span className={owned ? "buyer-v2__owned" : "buyer-v2__price-tag"}>{owned ? t("In library") : product.availability === "published" ? t("Free") : t("Unavailable")}</span>
+        <span className={owned ? "buyer-v2__owned" : "buyer-v2__price-tag"}>{owned ? t("In My Agents") : product.availability === "published" ? t("Free") : t("Unavailable")}</span>
         <span className="buyer-v2__card-go">{t('Details')}<ArrowRight aria-hidden="true" /></span>
       </div>
     </RouterLink>
@@ -380,7 +427,7 @@ function CatalogCard({ product, navigate }) {
 
 /* ---------- Product ---------- */
 
-function ProductPage({ route, request, navigate, session, downloadUrl }) {
+function ProductPage({ route, request, navigate, session }) {
   const t = useBuyerCopy();
   const { productId } = route.params;
   const path = `/products/${encodeURIComponent(productId)}`;
@@ -390,16 +437,6 @@ function ProductPage({ route, request, navigate, session, downloadUrl }) {
   usePageTitle(product ? productName(product, t) : t("Agent details"));
 
   if (resource.status === "loading") return <div className="buyer-v2__container buyer-v2__page"><DetailSkeleton /></div>;
-  if (resource.status === "error" && resource.error?.status === 404 && isExpertSession(session)) {
-    return (
-      <div className="buyer-v2__container buyer-v2__page">
-        <StatePanel icon={Info} title={t("This product is not published")} body={t("Clients can open this page after you publish it in Studio.")}>
-          <LinkButton className="web-btn-yolk" to={`${STUDIO_ROOT}/products/${encodeURIComponent(productId)}`} navigate={navigate}>{t("Open in Studio")}</LinkButton>
-          <LinkButton variant="secondary" to={EXPLORE_ROOT} navigate={navigate}>{t("Browse Agents")}</LinkButton>
-        </StatePanel>
-      </div>
-    );
-  }
   if (resource.status === "error") return <div className="buyer-v2__container buyer-v2__page"><RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} session={session} returnTo={path} /></div>;
 
   const examples = arrayValue(product.examples || product.proof, []);
@@ -420,15 +457,15 @@ function ProductPage({ route, request, navigate, session, downloadUrl }) {
         creatorAvatarUrl={product.creator_avatar_url || product.creator?.avatar_url || product.creator?.image_url}
         desktopRequirement={desktopRequirement}
         releaseLabel={product.release_label || product.release?.label}
-        action={<ProductAction embedded product={product} currentPath={path} request={request} navigate={navigate} session={session} downloadUrl={downloadUrl} />}
+        action={<ProductAction embedded product={product} currentPath={path} request={request} navigate={navigate} session={session} />}
       />
 
       <section className="buyer-v2__how">
         <h2>{t('How it works')}</h2>
         <ol className="buyer-v2__steps">
-          <li className="web-card"><span>1</span><strong>{t('Add to your account')}</strong><p>{t('Free. The Agent is saved to your library.')}</p></li>
+          <li className="web-card"><span>1</span><strong>{t('Add to your account')}</strong><p>{t('Free. The Agent is saved to My Agents.')}</p></li>
           <li className="web-card"><span>2</span><strong>{t('Start a conversation')}</strong><p>{t('Chat right in your browser, no download needed. To work with local files, use Hatch Desktop.')}</p></li>
-          <li className="web-card"><span>3</span><strong>{t('Return any time')}</strong><p>{t('Conversations are visible only to your account.')}</p></li>
+          <li className="web-card"><span>3</span><strong>{t("The expert's own judgment")}</strong><p>{t("Answers draw on this expert's methods and experience, in their own style — not a generic AI answer.")}</p></li>
         </ol>
       </section>
 
@@ -437,7 +474,7 @@ function ProductPage({ route, request, navigate, session, downloadUrl }) {
   );
 }
 
-function ProductAction({ product, currentPath, request, navigate, session, downloadUrl, embedded = false }) {
+function ProductAction({ product, currentPath, request, navigate, session, embedded = false }) {
   const t = useBuyerCopy();
   const access = accessFor(product);
   const status = accessStatus(access);
@@ -448,8 +485,7 @@ function ProductAction({ product, currentPath, request, navigate, session, downl
     && product.available !== false
     && product.status !== "withdrawn";
   const isAnonymous = session.status !== "authenticated";
-  const isOwnerCreator = session.user?.role === "creator"
-    && String(session.user?.id ?? "") === String(product.creator_id ?? product.creator?.id ?? "");
+  const isOwner = isOwnProduct(session, product);
 
   async function startCheckout() {
     if (!purchasable || mutation.status === "pending") return;
@@ -471,14 +507,14 @@ function ProductAction({ product, currentPath, request, navigate, session, downl
   let body = "";
   let action = null;
 
-  if (isOwnerCreator) {
-    title = t("Your product");
-    body = t("Clients see this page as shown.");
-    action = <LinkButton variant="secondary" to={`${STUDIO_ROOT}/products/${encodeURIComponent(productId(product))}`} navigate={navigate}>{t('Manage product')}</LinkButton>;
+  if (isOwner) {
+    title = t("Your Agent");
+    body = t("You can chat with it without adding it.");
+    action = <><LinkButton className="web-btn-yolk" to={`/chat/product/${encodeURIComponent(productId(product))}`} navigate={navigate}>{t('Go to chat')}</LinkButton><LinkButton variant="secondary" to={`${STUDIO_ROOT}/products/${encodeURIComponent(productId(product))}`} navigate={navigate}>{t('Manage product')}</LinkButton></>;
   } else if (status === "active" || status === "reserved") {
-    title = status === "reserved" ? t("Setting up access") : t("Added to your library");
+    title = status === "reserved" ? t("Setting up access") : t("Added to My Agents");
     body = status === "reserved" ? t("No need to add it again.") : t("Chat in the browser or open it in Hatch Desktop.");
-    action = <><LinkButton className="web-btn-yolk" to={`/chat/product/${encodeURIComponent(productId(product))}`} navigate={navigate}>{t('Start chat')}</LinkButton><LinkButton variant="secondary" to={libraryPathFor(product, access)} navigate={navigate}>{t('View in Library')}</LinkButton></>;
+    action = <><LinkButton className="web-btn-yolk" to={`/chat/product/${encodeURIComponent(productId(product))}`} navigate={navigate}>{t('Start chat')}</LinkButton></>;
   } else if (status === "pending") {
     title = t("Setting up access…");
     body = t("Order confirmed. Access appears here when ready.");
@@ -499,8 +535,6 @@ function ProductAction({ product, currentPath, request, navigate, session, downl
       {body ? <p>{body}</p> : null}
       {mutation.error ? <InlineError error={mutation.error} /> : null}
       {action}
-      {!isOwnerCreator && status !== "active" && status !== "reserved" ? <p className="buyer-v2__web-first">{t("No download needed: chat right in your browser.")}</p> : null}
-      <a className="buyer-v2__secondary-download" href={downloadUrl} target="_blank" rel="noreferrer" onClick={() => trackPortalEvent(request, "desktop_download_clicked", productTelemetry(product))}>{t('Download Hatch Desktop')}</a>
     </>
   );
   if (embedded) return <div className="buyer-v2__storefront-action">{contents}</div>;
@@ -514,11 +548,10 @@ function ProductAction({ product, currentPath, request, navigate, session, downl
 
 /* ---------- Account ---------- */
 
-function SettingsPage({ session, navigate }) {
+function SettingsPage({ session, request, navigate }) {
   const t = useBuyerCopy();
   const [status, setStatus] = useState("idle");
   const [error, setError] = useState(null);
-  const isExpert = isExpertSession(session);
   usePageTitle(t("Account settings"));
   async function signOut() {
     if (!session.signOut || status === "pending") return;
@@ -533,37 +566,75 @@ function SettingsPage({ session, navigate }) {
     }
   }
   const name = session.user?.display_name || t("Hatch account");
+  const updateUser = session.updateUser ?? (() => {});
   return <div className="buyer-v2__container buyer-v2__page buyer-v2__narrow">
-    <PageIntro title={t('Account')} lead={t('Use the same account on the web and in Hatch Desktop.')} />
+    <PageIntro title={t('Account')} />
     <section className="buyer-v2__settings-surface web-card" aria-label={t('Signed-in account')}>
       <div className="buyer-v2__settings-identity">
         <AccountAvatar className="buyer-v2__settings-avatar" size="large" src={session.user?.avatar_url} name={name} />
         <div>
-          <h2>{name}</h2>
+          <DisplayNameEditor name={name} request={request} onUserUpdated={updateUser} />
           {session.user?.email ? <p>{session.user.email}</p> : null}
-          <span className="buyer-v2__role">{isExpert ? t("Expert account") : t("Client account")}</span>
         </div>
       </div>
-      <AccountAvatarSettings user={session.user} onUserUpdated={session.updateUser ?? (() => {})} t={t} />
+      <AccountAvatarSettings user={session.user} onUserUpdated={updateUser} t={t} />
       {error ? <InlineError error={error} /> : null}
       <div className="buyer-v2__settings-actions">
-        <LinkButton variant="ghost" to="/account/help" navigate={navigate}>{t("Account help")}</LinkButton>
         <Button type="button" variant="secondary" loading={status === "pending"} onClick={signOut}>{t('Sign out')}</Button>
       </div>
     </section>
-    {isExpert ? (
-      <section className="buyer-v2__settings-studio web-card">
-        <div><h2>{t("Studio")}</h2><p>{t("Manage products and client orders in Studio.")}</p></div>
-        <LinkButton variant="secondary" to={STUDIO_ROOT} navigate={navigate}>{t("Open Studio")}</LinkButton>
-      </section>
-    ) : null}
   </div>;
+}
+
+// Registry is the authority for the limit; the input only stops obvious overruns.
+const MAX_DISPLAY_NAME_LENGTH = 128;
+
+function DisplayNameEditor({ name, request, onUserUpdated }) {
+  const t = useBuyerCopy();
+  const [draft, setDraft] = useState(null);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState(null);
+  const cancel = () => { setDraft(null); setError(null); };
+  async function save() {
+    const value = draft.trim().replace(/\s+/g, " ");
+    if (!value) { setError(new Error(t("Enter a name."))); return; }
+    if (value === name) { cancel(); return; }
+    setPending(true);
+    setError(null);
+    try {
+      onUserUpdated(await callRequest(request, "/v1/auth/me", jsonMutation("PATCH", { display_name: value })));
+      setDraft(null);
+    } catch (caught) {
+      setError(caught);
+    } finally {
+      setPending(false);
+    }
+  }
+  if (draft === null) return <div className="buyer-v2__settings-name">
+    <h2>{name}</h2>
+    <Button type="button" variant="ghost" size="small" leading={<Pencil aria-hidden="true" />} onClick={() => setDraft(name)}>{t("Edit name")}</Button>
+  </div>;
+  return <form className="buyer-v2__settings-name-form" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+    <Input
+      autoFocus
+      required
+      aria-label={t("Name")}
+      autoComplete="name"
+      maxLength={MAX_DISPLAY_NAME_LENGTH}
+      value={draft}
+      disabled={pending}
+      onChange={(event) => setDraft(event.target.value)}
+      onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); cancel(); } }}
+    />
+    <Button type="submit" size="small" loading={pending}>{t("Save")}</Button>
+    <Button type="button" variant="ghost" size="small" disabled={pending} onClick={cancel}>{t("Cancel")}</Button>
+    {error ? <InlineError error={error} /> : null}
+  </form>;
 }
 
 function AccountHelpPage({ session, navigate }) {
   const t = useBuyerCopy();
   const authenticated = session.status === "authenticated";
-  const isExpert = isExpertSession(session);
   usePageTitle(t("Account help"));
   return <div className="buyer-v2__container buyer-v2__page">
     <PageIntro title={t('Account help')} lead={t("Agents and orders belong to the account used to add them. Use the same account on the web and in Desktop.")} />
@@ -571,17 +642,15 @@ function AccountHelpPage({ session, navigate }) {
       <article className="buyer-v2__info-card web-card">
         <h2>{authenticated ? t("Check your account") : t("Sign in")}</h2>
         {authenticated ? <small className="buyer-v2__help-account">{t("Signed in as {name}", { name: session.user?.email || session.user?.display_name || t("Hatch account") })}</small> : null}
-        <p>{authenticated ? t("If your library is empty, the Agent may have been added with a different email. Sign out and sign in with that email.") : t("Sign in with the email used to add the Agent.")}</p>
+        <p>{authenticated ? t("If My Agents is empty, the Agent may have been added with a different email. Sign out and sign in with that email.") : t("Sign in with the email used to add the Agent.")}</p>
         {authenticated
           ? <LinkButton variant="secondary" to={ACCOUNT_ROOT} navigate={navigate}>{t('Account settings')}</LinkButton>
           : <LinkButton className="web-btn-yolk" to="/sign-in?returnTo=%2Faccount%2Fhelp" navigate={navigate}>{t('Sign in')}</LinkButton>}
       </article>
       <article className="buyer-v2__info-card web-card">
-        <h2>{isExpert ? t("Client orders") : t("Payments and refunds")}</h2>
-        <p>{isExpert ? t("Client orders and published products are managed in Studio.") : t("Include the order number when contacting support.")}</p>
-        {isExpert
-          ? <LinkButton variant="secondary" to={`${STUDIO_ROOT}/orders`} navigate={navigate}>{t("Open Studio")}</LinkButton>
-          : <LinkButton variant="secondary" to={authenticated ? ORDERS_ROOT : `/sign-in?returnTo=${encodeURIComponent(ORDERS_ROOT)}`} navigate={navigate}>{t("View orders")}</LinkButton>}
+        <h2>{t("Payments and refunds")}</h2>
+        <p>{t("Include the order number when contacting support.")}</p>
+        <LinkButton variant="secondary" to={authenticated ? ORDERS_ROOT : `/sign-in?returnTo=${encodeURIComponent(ORDERS_ROOT)}`} navigate={navigate}>{t("View orders")}</LinkButton>
       </article>
     </div>
   </div>;
@@ -599,24 +668,21 @@ function AuthPage({ mode, search, request, navigate, session }) {
   const t = useBuyerCopy();
   const signingUp = mode === "sign-up";
   const params = new URLSearchParams(search);
-  const returnTo = safeReturnTo(params.get("returnTo") || LIBRARY_ROOT);
-  const returnPath = new URL(returnTo, "https://hatch.invalid").pathname;
-  const creatorIntent = returnPath === "/studio" || returnPath.startsWith("/studio/");
+  const returnTo = safeReturnTo(params.get("returnTo") || EXPLORE_ROOT);
   const intentRoute = matchBuyerRoute(returnTo.split("?")[0]);
   const productIntent = intentRoute.name === "product";
-  const presentation = createAuthPagePresentation(t)({ signingUp, studioIntent: creatorIntent, productIntent });
+  const presentation = createAuthPagePresentation(t)({ signingUp, productIntent });
   const intentEndpoint = productIntent ? `${BUYER_PORTAL_V2_ENDPOINTS.catalog}/${encodeURIComponent(intentRoute.params.productId)}` : "";
   const intent = useRemote(async (signal) => unwrap(await callRequest(request, intentEndpoint, { signal }), ["agent", "product"]), intentEndpoint || "no-intent", productIntent);
   const [form, setForm] = useState({ display_name: "", email: "", password: "" });
   const [submission, setSubmission] = useState({ status: "idle", error: null });
   const authBrandClassName = "buyer-v2__brand";
-  const photo = creatorIntent ? "v_desk" : signingUp ? "v_morning" : "v_window";
+  const photo = signingUp ? "v_morning" : "v_window";
   usePageTitle(presentation.title);
 
   useEffect(() => {
-    const canSwitchIntoCreatorSignup = signingUp && creatorIntent && session.user?.role !== "creator";
-    if (session.status === "authenticated" && !canSwitchIntoCreatorSignup) navigateTo(navigate, returnTo, { replace: true });
-  }, [creatorIntent, navigate, returnTo, session.status, session.user?.role, signingUp]);
+    if (session.status === "authenticated") navigateTo(navigate, returnTo, { replace: true });
+  }, [navigate, returnTo, session.status]);
 
   async function submit(event) {
     event.preventDefault();
@@ -624,11 +690,10 @@ function AuthPage({ mode, search, request, navigate, session }) {
     setSubmission({ status: "pending", error: null });
     try {
       let response;
-      if (signingUp && creatorIntent && session.creatorSignUp) response = await session.creatorSignUp(form);
-      else if (signingUp && session.signUp) response = await session.signUp(form);
+      if (signingUp && session.signUp) response = await session.signUp(form);
       else if (!signingUp && session.signIn) response = await session.signIn({ email: form.email, password: form.password });
       else response = await callRequest(request, signingUp
-        ? (creatorIntent ? "/v1/auth/creator-signup" : "/v1/auth/signup")
+        ? "/v1/auth/signup"
         : "/v1/auth/login", jsonMutation("POST", signingUp ? form : { email: form.email, password: form.password }));
       await session.onAuthenticated?.(response);
       navigateTo(navigate, returnTo, { replace: true });
@@ -640,7 +705,7 @@ function AuthPage({ mode, search, request, navigate, session }) {
   return (
     <main className="buyer-v2 buyer-v2__auth-page">
       <header className="buyer-v2__auth-navbar">
-        <WebBrand as={RouterLink} className={authBrandClassName} to={creatorIntent ? STUDIO_ROOT : EXPLORE_ROOT} navigate={navigate} label={creatorIntent ? "Studio" : undefined} aria-label={creatorIntent ? "Hatch Studio" : t("Hatch home")} />
+        <WebBrand as={RouterLink} className={authBrandClassName} to={EXPLORE_ROOT} navigate={navigate} aria-label={t("Hatch home")} />
         <BuyerLanguageMenu className="buyer-v2__auth-language" />
       </header>
       <section className="buyer-v2__auth-context" aria-hidden="true">
@@ -675,7 +740,6 @@ function CheckoutPage({ id, request, navigate, session }) {
   const t = useBuyerCopy();
   const endpoint = `${BUYER_PORTAL_V2_ENDPOINTS.checkoutSessions}/${encodeURIComponent(id)}`;
   const resource = useRemote(async (signal) => unwrap(await callRequest(request, endpoint, { signal }), ["checkout_session", "checkout"]), endpoint);
-  const [accepted, setAccepted] = useState(false);
   const [mutation, setMutation] = useState({ status: "idle", error: null });
   const confirmationIntentKey = useRef(requestId());
   const checkout = resource.data;
@@ -690,7 +754,7 @@ function CheckoutPage({ id, request, navigate, session }) {
   }, [fulfillmentPending, mutation.status, resource.reload]);
 
   async function confirm() {
-    if ((!accepted && !fulfillmentPending) || mutation.status === "pending") return;
+    if (mutation.status === "pending") return;
     setMutation({ status: "pending", error: null });
     try {
       const response = await callRequest(request, `${endpoint}/confirm`, jsonMutation("POST", {}, confirmationIntentKey.current));
@@ -703,7 +767,7 @@ function CheckoutPage({ id, request, navigate, session }) {
       }
       const orderId = result.order_id || result.id || response.order_id;
       if (!orderId) throw clientContractError("Checkout confirmation did not include order_id.");
-      navigateTo(navigate, result.redirect_url || response.redirect_url || `/orders/${encodeURIComponent(orderId)}/success`, { replace: true });
+      navigateTo(navigate, result.redirect_url || response.redirect_url || `${ORDERS_ROOT}/${encodeURIComponent(orderId)}/success`, { replace: true });
     } catch (error) {
       setMutation({ status: "error", error });
       if (error.status === 409 || error.status === 502 || error.code === "fulfillment_pending") resource.reload();
@@ -715,7 +779,6 @@ function CheckoutPage({ id, request, navigate, session }) {
 
   const product = checkout.product_snapshot || checkout.product || checkout;
   const expired = ["expired", "release_changed", "cancelled"].includes(checkout.status) || (checkout.status === "open" && checkout.expires_at && Date.parse(checkout.expires_at) <= Date.now());
-  const release = checkout.release_label || checkout.release_snapshot?.label || product.release_label || t("Current approved release");
 
   if (fulfillmentPending) {
     const orderId = checkout.order_id || checkout.order?.order_id;
@@ -734,27 +797,21 @@ function CheckoutPage({ id, request, navigate, session }) {
   return (
     <div className="buyer-v2__container buyer-v2__page buyer-v2__checkout-page">
       <RouterLink className="buyer-v2__back-link" to={productPath(product)} navigate={navigate}>{t('← Back to product')}</RouterLink>
-      <PageIntro title={t('Add Agent')} lead={t("This Agent is free and available immediately after you add it.")} />
+      <PageIntro title={t('Add Agent')} />
       <div className="buyer-v2__checkout-grid">
         <section className="buyer-v2__receipt-card web-card">
           <CreatorIdentity value={checkout.creator || product} />
           <h2>{productName(product, t)}</h2>
           <p>{productPromise(product, t)}</p>
-          <DefinitionList rows={[
-            [t("Release"), release],
-            [t("Payment"), t("Not required")]
-          ]} />
         </section>
         <CheckoutSummary
           product={{ ...product, name: productName(product, t), currency: "USD" }}
-          lineItems={[{ label: productName(product, t), detail: release, amount_minor: 0 }]}
-          totals={{ subtotal_minor: 0, total_minor: 0, subtotal_label: t("Free"), total_label: t("Free"), currency: "USD" }}
+          lineItems={[{ label: productName(product, t), amount_minor: 0 }]}
+          totals={{ total_minor: 0, total_label: t("Free"), currency: "USD" }}
           busy={mutation.status === "pending"}
           error={mutation.error ? friendlyError(mutation.error, t) : undefined}
-          action={{ label: mutation.status === "pending" ? t("Adding…") : t("Add to account"), disabled: !accepted || expired, onClick: confirm }}
-          legal={t('The version in effect at the time of the order applies.')}
+          action={{ label: mutation.status === "pending" ? t("Adding…") : t("Add to account"), disabled: expired, onClick: confirm }}
         >
-          <HatchCheckbox checked={accepted} onCheckedChange={(checked) => setAccepted(checked === true)} disabled={expired} label={t('Add this Agent to my account')} />
           {expired ? <HatchInlineAlert tone="warning">{t('This request has expired. Return to the product page and try again.')}</HatchInlineAlert> : null}
         </CheckoutSummary>
       </div>
@@ -782,6 +839,10 @@ function SuccessPage({ id, request, navigate, downloadUrl, session }) {
   const data = resource.data;
   const identity = useProductIdentity(request, data?.order);
   const ready = data ? successReady(data.order, data.entitlement) : false;
+  // The creator shown is the current public one, as on the product page.
+  const orderedProductId = data ? productId(data.order.product_snapshot || data.order.product || data.order) : "";
+  const publicEndpoint = orderedProductId ? `${BUYER_PORTAL_V2_ENDPOINTS.catalog}/${encodeURIComponent(orderedProductId)}` : "";
+  const publicProduct = useRemote(async (signal) => unwrap(await callRequest(request, publicEndpoint, { signal }), ["agent", "product"]), publicEndpoint || "no-product", Boolean(publicEndpoint && ready));
   const failed = data ? paymentFailed(data.order) : false;
   useUnauthorized(resource.error, session);
   usePageTitle(ready ? t("Agent added") : t("Confirming order"));
@@ -799,7 +860,8 @@ function SuccessPage({ id, request, navigate, downloadUrl, session }) {
   const { order, entitlement, entitlementError } = data;
   const product = order.product_snapshot || order.product || order;
   const amount = orderAmount(order);
-  const entitlementId = order.entitlement_id || entitlement?.entitlement_id || entitlement?.id;
+  const creator = publicProduct.data || product;
+  const creatorLabel = publicProduct.data ? creatorName(creator, t) : identity.creatorName || creatorName(creator, t);
 
   if (failed) {
     return <div className="buyer-v2__container buyer-v2__page"><StatePanel tone="error" title={t('Payment not completed')} body={t('No access was granted. See the order for payment status.')}><LinkButton to={`${ORDERS_ROOT}/${encodeURIComponent(id)}`} navigate={navigate}>{t('View order')}</LinkButton></StatePanel></div>;
@@ -811,10 +873,24 @@ function SuccessPage({ id, request, navigate, downloadUrl, session }) {
 
   return (
     <div className="buyer-v2__container buyer-v2__page buyer-v2__success-page">
-      <Notice headingLevel={1} title={t("{name} added", { name: productTitle(identity, t) })} body={`${t("Order #{reference}", { reference: orderReference(order) })} · ${amount === 0 ? t("Free") : money(amount, order.currency, t)}`}>
+      <Notice headingLevel={1} media={<div className="buyer-v2__notice-creator">
+        <span className="buyer-v2__notice-avatar" aria-hidden="true">
+          <AccountAvatar size="large" src={creatorAvatarUrl(creator)} name={creatorLabel} />
+          <span className="buyer-v2__notice-check"><Check /></span>
+        </span>
+        <small>{creatorLabel}</small>
+      </div>} title={t("{name} added", { name: productTitle(identity, t) })} body={`${t("Order #{reference}", { reference: orderReference(order) })} · ${amount === 0 ? t("Free") : money(amount, order.currency, t)}`}>
         {entitlementError ? <HatchInlineAlert tone="warning" action={<Button size="small" variant="ghost" type="button" onClick={resource.reload}>{t('Retry')}</Button>}>{t('Order completed. Some access details are unavailable.')}</HatchInlineAlert> : null}
         <LinkButton className="web-btn-yolk" to={`/chat/product/${encodeURIComponent(productId(product))}`} navigate={navigate}>{t('Start chat')}</LinkButton>
-        <Button asChild variant="secondary"><a href={desktopUrl(entitlement, product)} onClick={() => trackPortalEvent(request, "desktop_open_clicked", productTelemetry(product))}>{t('Open Hatch Desktop')}</a></Button>
+        <DropdownMenu
+          align="center"
+          label={t("Hatch Desktop")}
+          trigger={<Button variant="secondary" type="button" trailing={<ChevronDown aria-hidden="true" />}>{t("Hatch Desktop")}</Button>}
+          items={[
+            { value: "download", label: t("Download"), onSelect: () => { trackPortalEvent(request, "desktop_download_clicked", productTelemetry(product)); window.open(downloadUrl, "_blank", "noopener,noreferrer"); } },
+            { value: "open", label: t("Open"), onSelect: () => { trackPortalEvent(request, "desktop_open_clicked", productTelemetry(product)); window.location.assign(desktopUrl(entitlement, product)); } }
+          ]}
+        />
       </Notice>
       <section className="buyer-v2__next-steps">
         <h2>{t('Next steps')}</h2>
@@ -823,37 +899,14 @@ function SuccessPage({ id, request, navigate, downloadUrl, session }) {
           <li className="web-card"><span>2</span><strong>{t("Or use Hatch Desktop for local files")}</strong><p>{t("Download it, sign in with this account, then review local file permissions.")} <a href={downloadUrl} target="_blank" rel="noreferrer" onClick={() => trackPortalEvent(request, "desktop_download_clicked", productTelemetry(product))}>{t('Download Hatch Desktop')}</a></p></li>
         </ol>
         <div className="buyer-v2__detail-links">
-          <RouterLink to={`/orders/${encodeURIComponent(orderReference(order))}`} navigate={navigate}>{t('View receipt →')}</RouterLink>
-          {entitlementId ? <RouterLink to={libraryPathFor(product, entitlement)} navigate={navigate}>{t('View access details →')}</RouterLink> : null}
+          <RouterLink to={`${ORDERS_ROOT}/${encodeURIComponent(orderReference(order))}`} navigate={navigate}>{t('View receipt →')}</RouterLink>
         </div>
       </section>
     </div>
   );
 }
 
-/* ---------- Library ---------- */
-
-function LibraryPage({ request, navigate, session }) {
-  const t = useBuyerCopy();
-  const resource = useCursorCollection((_cursor, signal) => loadSubscribedProducts(request, signal), "entitlements");
-  usePageTitle(t("Library"));
-  useUnauthorized(resource.error, session);
-
-  if (resource.status === "error" && isExpertBlocked(resource.error, session)) {
-    return <div className="buyer-v2__container buyer-v2__page"><ExpertAccountNotice navigate={navigate} area="library" /></div>;
-  }
-
-  return (
-    <div className="buyer-v2__container buyer-v2__page">
-      <PageIntro title={t('Library')} lead={t('Agents you have added.')} />
-      {resource.status === "loading" ? <CardSkeleton count={2} label={t('Loading library')} /> : null}
-      {resource.status === "error" ? <RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} session={session} area="library" returnTo={LIBRARY_ROOT} /> : null}
-      {resource.status === "ready" && resource.items.length ? <section className="buyer-v2__list-grid" aria-label={t('Library')}>{resource.items.map((item) => <EntitlementCard key={entitlementIdFor(item)} entitlement={item} navigate={navigate} request={request} />)}</section> : null}
-      {resource.status === "ready" && !resource.items.length ? <EmptyState title={t('No Agents added')} body={t('Agents you add appear here.')} action={<LinkButton className="web-btn-yolk" to={EXPLORE_ROOT} navigate={navigate}>{t('Browse Agents')}</LinkButton>} /> : null}
-      {resource.nextCursor ? <LoadMore resource={resource} /> : null}
-    </div>
-  );
-}
+/* ---------- My Agents ---------- */
 
 async function loadSubscribedProducts(request, signal) {
   const items = [];
@@ -881,82 +934,6 @@ function compareEntitlementsNewestFirst(left, right) {
     || String(right.entitlement_id ?? "").localeCompare(String(left.entitlement_id ?? ""));
 }
 
-function EntitlementCard({ entitlement, navigate, request }) {
-  const t = useBuyerCopy();
-  const status = accessStatus(entitlement);
-  const product = entitlement.product || entitlement.product_snapshot || entitlement;
-  const creator = entitlement.creator || product.creator || product;
-  const identity = useProductIdentity(request, entitlement);
-  const summary = entitlementSummary(entitlement, product, t);
-  const orderId = entitlement.order_id || entitlement.order?.order_id || entitlement.order?.id;
-  function openDesktop() {
-    trackPortalEvent(request, "desktop_open_clicked", productTelemetry(product));
-    window.location.assign(desktopUrl(entitlement, product));
-  }
-
-  return (
-    <article className="buyer-v2__access-card web-card">
-      {identity.creatorName ? <CreatorIdentity value={creator} name={identity.creatorName} /> : null}
-      <h2>{productTitle(identity, t)}</h2>
-      {summary ? <p>{summary}</p> : null}
-      <div className="buyer-v2__card-footer">
-        {status === "active" ? (
-          <div className="buyer-v2__chat-actions">
-            <LinkButton className="buyer-v2__chat-primary" to={`/chat/product/${encodeURIComponent(productId(product))}`} navigate={navigate}>{t('Chat')}</LinkButton>
-            <DropdownMenu
-              label={t('Open options')}
-              trigger={<button type="button" className="buyer-v2__chat-menu-trigger" aria-label={t('Open options')} title={t('Open options')}><ChevronDown aria-hidden="true" /></button>}
-              items={[{ value: "open-desktop", label: t("Open Hatch Desktop"), icon: <Monitor aria-hidden="true" />, onSelect: openDesktop }]}
-            />
-          </div>
-        ) : null}
-        {orderId ? <LinkButton variant="ghost" to={`${ORDERS_ROOT}/${encodeURIComponent(orderId)}`} navigate={navigate}>{t('View order')}</LinkButton> : null}
-      </div>
-    </article>
-  );
-}
-
-function EntitlementPage({ id, request, navigate, session, downloadUrl }) {
-  const t = useBuyerCopy();
-  const endpoint = `${BUYER_PORTAL_V2_ENDPOINTS.entitlements}/${encodeURIComponent(id)}`;
-  const resource = useRemote(async (signal) => unwrap(await callRequest(request, endpoint, { signal }), ["entitlement"]), endpoint);
-  const identity = useProductIdentity(request, resource.data);
-  usePageTitle(resource.data ? productTitle(identity, t) : t("Access details"));
-  useUnauthorized(resource.error, session);
-  if (resource.status === "loading") return <div className="buyer-v2__container buyer-v2__page"><DetailSkeleton /></div>;
-  if (resource.status === "error") return <div className="buyer-v2__container buyer-v2__page"><RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} session={session} area="library" returnTo={`${LIBRARY_ROOT}/${id}`} /></div>;
-
-  const entitlement = resource.data;
-  const product = entitlement.product || entitlement.product_snapshot || entitlement;
-  const status = accessStatus(entitlement);
-  const deliveries = arrayValue(entitlement.deliveries || entitlement.delivery_history, []);
-  const orderId = entitlement.order_id || entitlement.order?.order_id || entitlement.order?.id;
-  const canOpen = ["active", "reserved"].includes(status);
-  const creator = entitlement.creator || product;
-  const reversalStatus = meaningfulReversalStatus(entitlement.refund_status, entitlement.cancellation_status);
-  return (
-    <div className="buyer-v2__container buyer-v2__page">
-      <RouterLink className="buyer-v2__back-link" to={LIBRARY_ROOT} navigate={navigate}>{t('← Back to Library')}</RouterLink>
-      <header className="buyer-v2__detail-heading"><div><span className="web-pill">{t('Access details')}</span><h1>{productTitle(identity, t)}</h1>{identity.creatorName ? <CreatorIdentity value={creator} name={identity.creatorName} /> : null}</div><StatusChip status={status} label={t(entitlementStatusLabel(status))} /></header>
-      <div className="buyer-v2__detail-grid">
-        <section className="buyer-v2__detail-card web-card"><h2>{t('Entitlement')}</h2><DefinitionList rows={[
-          [t("Status"), t(entitlementStatusLabel(status))],
-          [t("Release"), entitlement.release_label || entitlement.release?.label || entitlement.release_id || t("Pinned purchase release")],
-          [t("Purchased version"), entitlement.purchased_corpus_digest || entitlement.corpus_digest || "—"],
-          [t("Effective version"), entitlement.effective_corpus_digest || entitlement.purchased_corpus_digest || entitlement.corpus_digest || "—"],
-          [t("Version policy"), t(versionPolicyLabel(entitlement.version_policy))],
-          [t("Valid from"), dateTime(entitlement.valid_from || entitlement.granted_at || entitlement.created_at, t)],
-          [t("Expires"), entitlement.expires_at ? dateTime(entitlement.expires_at, t) : t("No scheduled expiry")],
-          [t("Refund / cancellation"), reversalStatus ? sentenceCase(reversalStatus) : (status === "revoked" ? t("Access ended") : null)],
-          [t("Support reference"), entitlement.entitlement_id || entitlement.id]
-        ]} />{orderId ? <RouterLink className="buyer-v2__text-link" to={`${ORDERS_ROOT}/${encodeURIComponent(orderId)}`} navigate={navigate}>{t('View order →')}</RouterLink> : null}</section>
-        <aside className="buyer-v2__activation-card web-card"><h2>{canOpen ? t("Use this Agent") : t(entitlementRecoveryTitle(status))}</h2><p>{t(entitlementRecoveryCopy(status))}</p>{canOpen ? <LinkButton className="web-btn-yolk" to={`/chat/product/${encodeURIComponent(productId(product))}`} navigate={navigate}>{t('Chat in browser')}</LinkButton> : null}{canOpen ? <Button asChild variant="secondary"><a href={desktopUrl(entitlement, product)} onClick={() => trackPortalEvent(request, "desktop_open_clicked", productTelemetry(product))}>{t('Open Hatch Desktop')}</a></Button> : null}<a className="buyer-v2__secondary-download" href={downloadUrl} target="_blank" rel="noreferrer" onClick={() => trackPortalEvent(request, "desktop_download_clicked", productTelemetry(product))}>{t('Download Hatch Desktop')}</a></aside>
-      </div>
-      <section className="buyer-v2__timeline-section"><div><h2>{t('Activity')}</h2><p>{t('Only order and access events are shown. Files, paths and conversations are not shown here.')}</p></div>{deliveries.length ? <Timeline entries={deliveries.map((delivery) => deliveryTimelineEntry(delivery, t))} /> : <EmptyState compact title={t('No activity')} body={t("Activity appears after the first conversation.")} />}</section>
-    </div>
-  );
-}
-
 /* ---------- Orders ---------- */
 
 function OrdersPage({ search, request, navigate, session }) {
@@ -972,16 +949,14 @@ function OrdersPage({ search, request, navigate, session }) {
   }, `orders:${filter}`);
   usePageTitle(t("Orders"));
   useUnauthorized(resource.error, session);
-  if (resource.status === "error" && isExpertBlocked(resource.error, session)) {
-    return <div className="buyer-v2__container buyer-v2__page"><ExpertAccountNotice navigate={navigate} area="orders" /></div>;
-  }
 
   return (
     <div className="buyer-v2__container buyer-v2__page">
+      <RouterLink className="buyer-v2__back-link" to={EXPLORE_ROOT} navigate={navigate}>{t("← My Agents")}</RouterLink>
       <PageIntro title={t('Orders')} lead={t('Receipt, payment and access status for each order.')} />
       {resource.status === "error" ? null : <label className="buyer-v2__select-label">{t('Order status')}<Select label={t('Order status')} value={filter} onValueChange={(value) => navigateTo(navigate, value === "all" ? ORDERS_ROOT : `${ORDERS_ROOT}?status=${encodeURIComponent(value)}`)} options={[{ value: "all", label: t("All orders") }, { value: "fulfilled", label: t("Fulfilled") }, { value: "pending", label: t("Pending") }, { value: "refunded", label: t("Refunded") }]} /></label>}
       {resource.status === "loading" ? <ListSkeleton label={t('Loading orders')} /> : null}
-      {resource.status === "error" ? <RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} session={session} area="orders" returnTo={ORDERS_ROOT} /> : null}
+      {resource.status === "error" ? <RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} session={session} returnTo={ORDERS_ROOT} /> : null}
       {resource.status === "ready" && resource.items.length ? <section className="buyer-v2__order-list" aria-label={t('Orders')}>{resource.items.map((order) => <OrderRow key={orderIdFor(order)} order={order} navigate={navigate} request={request} />)}</section> : null}
       {resource.status === "ready" && !resource.items.length ? <EmptyState title={filter === "all" ? t('No orders') : t('No orders match this filter')} body={t('Orders appear here after you add an Agent.')} action={<LinkButton className="web-btn-yolk" to={EXPLORE_ROOT} navigate={navigate}>{t('Browse Agents')}</LinkButton>} /> : null}
       {resource.nextCursor ? <LoadMore resource={resource} /> : null}
@@ -993,7 +968,7 @@ function OrderRow({ order, navigate, request }) {
   const t = useBuyerCopy();
   const identity = useProductIdentity(request, order);
   return (
-    <RouterLink className="buyer-v2__order-row web-card" to={`/orders/${encodeURIComponent(orderReference(order))}`} navigate={navigate}>
+    <RouterLink className="buyer-v2__order-row web-card" to={`${ORDERS_ROOT}/${encodeURIComponent(orderReference(order))}`} navigate={navigate}>
       <div><span>{dateTime(order.created_at || order.occurred_at, t, true)}</span><h2>{productTitle(identity, t)}</h2><small>{t("Order #{reference}", { reference: orderReference(order) })}</small></div>
       <div className="buyer-v2__order-row-status"><strong>{orderAmount(order) === 0 ? t("Free") : money(orderAmount(order), order.currency, t)}</strong><StatusChip status={orderStatus(order)} label={t(orderStatusLabel(order))} /></div>
       <ArrowRight className="buyer-v2__order-go" aria-hidden="true" />
@@ -1025,7 +1000,7 @@ function OrderPage({ id, request, navigate, session }) {
   }
 
   if (resource.status === "loading") return <div className="buyer-v2__container buyer-v2__page"><DetailSkeleton /></div>;
-  if (resource.status === "error") return <div className="buyer-v2__container buyer-v2__page"><RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} session={session} area="orders" returnTo={`${ORDERS_ROOT}/${id}`} /></div>;
+  if (resource.status === "error") return <div className="buyer-v2__container buyer-v2__page"><RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} session={session} returnTo={`${ORDERS_ROOT}/${id}`} /></div>;
   const order = resource.data;
   const product = order.product_snapshot || order.product || order;
   const canRefund = Boolean(order.actions?.can_request_refund || order.can_request_refund);
@@ -1099,20 +1074,10 @@ function CreatorIdentity({ value, name: knownName, className = "" }) {
   return <span className={`buyer-v2__creator-identity ${className}`.trim()}><AccountAvatar className="buyer-v2__creator-avatar" size="medium" src={creatorAvatarUrl(value)} name={name} /><span>{name}</span></span>;
 }
 
-function Timeline({ entries }) {
-  const t = useBuyerCopy();
-  return <ol className="buyer-v2__timeline">{entries.map((entry, index) => <li key={entry.id || `${entry.label}:${index}`} className={entry.tone ? `is-${entry.tone}` : ""}><span aria-hidden="true" /><div><strong>{entry.label}</strong>{entry.detail ? <p>{entry.detail}</p> : null}{entry.time ? <time>{dateTime(entry.time, t)}</time> : null}</div></li>)}</ol>;
-}
-
-function isExpertBlocked(error, session) {
-  return error?.status === 403 && (error?.code === "user_only" || isExpertSession(session));
-}
-
-function RouteError({ error, onRetry, navigate, session, area, returnTo }) {
+function RouteError({ error, onRetry, navigate, session, returnTo }) {
   const t = useBuyerCopy();
   const status = error?.status;
   if (status === 401) return <StatePanel title={t('Session expired')} body={t('Sign in again to continue. You will return to this page.')}><LinkButton className="web-btn-yolk" to={`/sign-in?returnTo=${encodeURIComponent(safeReturnTo(returnTo))}`} navigate={navigate}>{t('Sign in')}</LinkButton></StatePanel>;
-  if (isExpertBlocked(error, session)) return <ExpertAccountNotice navigate={navigate} area={area} />;
   if (status === 403) return <StatePanel icon={AlertCircle} title={t("No access to this page")} body={t("This page may belong to another account. Check the email you are signed in with.")}><LinkButton to="/account/help" navigate={navigate}>{t('Account help')}</LinkButton><LinkButton variant="secondary" to={EXPLORE_ROOT} navigate={navigate}>{t('Browse Agents')}</LinkButton></StatePanel>;
   if (status === 404) return <StatePanel icon={SearchX} title={t('Not found')} body={session?.status === "authenticated" ? t("It may have been removed. Past receipts remain in Orders.") : t("It may have been removed, or the link is incomplete.")}>{session?.status === "authenticated" ? <LinkButton variant="secondary" to={ORDERS_ROOT} navigate={navigate}>{t('View orders')}</LinkButton> : null}<LinkButton to={EXPLORE_ROOT} navigate={navigate}>{t('Browse Agents')}</LinkButton></StatePanel>;
   if (status === 409) return <StatePanel tone="warning" title={t('Details changed')} body={friendlyError(error, t)}><Button type="button" onClick={onRetry}>{t('Refresh')}</Button></StatePanel>;
@@ -1181,8 +1146,10 @@ function useBuyerCopy() {
   return t;
 }
 
-function isExpertSession(session) {
-  return session?.status === "authenticated" && session.user?.role === "creator";
+function isOwnProduct(session, product) {
+  return session?.status === "authenticated"
+    && Boolean(session.user?.id)
+    && String(session.user.id) === String(product?.creator_id ?? product?.creator?.id ?? "");
 }
 
 function useRemote(loader, key, enabled = true) {
@@ -1414,17 +1381,11 @@ function productPromise(value, t = identity) { return value?.promise || value?.p
 function creatorName(value, t = identity) { return value?.creator_name || value?.creator_display_name || value?.display_name || value?.name || value?.creator?.display_name || value?.creator?.name || value?.creator?.handle || t("Hatch Expert"); }
 function creatorAvatarUrl(value) { return value?.creator_avatar_url || value?.avatar_url || value?.image_url || value?.creator?.avatar_url || value?.creator?.image_url; }
 function creatorId(value) { return value?.creator_id || value?.creator?.id || ""; }
-function entitlementIdFor(value) { return value?.entitlement_id || value?.id || ""; }
 function orderIdFor(value) { return value?.order_id || value?.id; }
 
 function productPath(value) {
   const product = productId(value);
   return product ? `/products/${encodeURIComponent(product)}` : EXPLORE_ROOT;
-}
-
-function libraryPathFor(product, entitlement) {
-  const id = entitlement?.entitlement_id || entitlement?.id;
-  return id ? `/library/${encodeURIComponent(id)}` : LIBRARY_ROOT;
 }
 
 function productKey(value) { return productId(value) || "product"; }
@@ -1445,28 +1406,6 @@ function accessStatus(value) {
   if (["granted", "available"].includes(status)) return "active";
   if (["fulfillment_pending", "provisioning"].includes(status)) return "pending";
   return status;
-}
-
-function entitlementStatusLabel(status) {
-  return ({ active: "Available", reserved: "In progress", pending: "Setting up", consumed: "Used", expired: "Expired", suspended: "Paused", revoked: "Access ended", none: "No access" })[status] || sentenceCase(status);
-}
-
-function entitlementSummary(value, product, t = identity) {
-  const status = accessStatus(value);
-  const summary = product?.promise
-    || product?.product_promise
-    || product?.product_description
-    || product?.description
-    || product?.summary
-    || value?.product_promise
-    || value?.product_description
-    || value?.summary;
-  const desktopWorkspaceSummary = "Open Hatch Desktop with this account and choose a Workspace.";
-  if (status === "reserved") return t("Access setup is in progress.");
-  if (status === "consumed") return t("This access is no longer active.");
-  if (status === "expired") return t("Access expired. Add it again from the product page.");
-  if (["suspended", "revoked"].includes(status)) return value.status_reason_label || t("Access unavailable. See details.");
-  return summary && summary !== desktopWorkspaceSummary ? summary : null;
 }
 
 function orderAmount(order) { return numberOr(order?.total_minor, numberOr(order?.amount_minor, numberOr(order?.gross_minor, 0))); }
@@ -1499,34 +1438,6 @@ function successReady(order, entitlement) {
 
 function paymentFailed(order) {
   return ["failed", "declined", "cancelled"].includes(order?.payment_status || order?.payment?.status) || orderStatus(order) === "failed";
-}
-
-
-
-
-function deliveryTimelineEntry(delivery, t = identity) {
-  const status = delivery.status || delivery.delivery_status || "completed";
-  return { id: delivery.delivery_id || delivery.id, label: `${t("Activity")}: ${sentenceCase(status)}`, detail: delivery.artifact_type ? sentenceCase(delivery.artifact_type) : delivery.summary, time: delivery.completed_at || delivery.started_at || delivery.created_at, tone: status === "failed" ? "error" : "" };
-}
-
-function versionPolicyLabel(value) {
-  if (!value || value === "pinned") return "Pinned to purchased release";
-  if (value === "compatible_tracking") return "Compatible release updates allowed";
-  return sentenceCase(value);
-}
-
-function entitlementRecoveryTitle(status) {
-  if (status === "consumed") return "Access used";
-  if (status === "expired") return "Access expired";
-  if (status === "pending") return "Setting up access";
-  return "Access unavailable";
-}
-
-function entitlementRecoveryCopy(status) {
-  if (["active", "reserved"].includes(status)) return "Chat in the browser, or use Hatch Desktop to work with local files.";
-  if (["consumed", "expired"].includes(status)) return "Return to the product page to get access again.";
-  if (status === "pending") return "This page updates when access is ready. Do not place another order.";
-  return "See the order for the reason and support options.";
 }
 
 function desktopUrl(entitlement, product) {

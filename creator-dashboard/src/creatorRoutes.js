@@ -79,14 +79,15 @@ export function parseCreatorRoute(pathname) {
   if (head === "earnings" && segments.length === 1) return page("earnings", "earnings");
   // The payout onboarding provider returns to /studio/payouts.
   if (head === "payouts" && segments.length === 1) return redirect(`${ROOT}/earnings`, "earnings");
-  if (head === "settings" && segments.length === 1) return page("settings", "settings");
+  // Account settings live on the one account page.
+  if (head === "settings" && segments.length === 1) return redirect("/account", "");
   return page("not-found", "");
 }
 
 export function creatorRouteTitle(route) {
   const titles = {
     home: "Overview", products: "Agents", "product-create": "New Agent", agent: "Agent", candidate: "Candidate review",
-    orders: "Orders", order: "Order", earnings: "Earnings", settings: "Settings"
+    orders: "Orders", order: "Order", earnings: "Earnings"
   };
   return titles[route.kind] ?? "Studio";
 }

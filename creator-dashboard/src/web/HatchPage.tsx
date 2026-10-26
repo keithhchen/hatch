@@ -962,7 +962,7 @@ export default function HatchPage() {
           <div>
             <p className="eyebrow">{t.footer.product}</p>
             <button type="button" onClick={() => setIsApplyOpen(true)}>{t.nav.try}</button>
-            <a href="/studio">{t.footer.login}</a>
+            <a href="/sign-up">{t.footer.login}</a>
             <a href="/download">{t.footer.download}</a>
           </div>
           <div>

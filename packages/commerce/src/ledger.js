@@ -951,6 +951,7 @@ function validateEvent(event, events) {
   }
   if (event.event_type === "order.placed") {
     requireFields(event, ["order_id", "buyer_id", "creator_id", "agent_id", "product_id", "corpus_digest", "currency"]);
+    requireNotSelfPurchase(event);
     requireNonNegativeInteger(event.gross_minor, "gross_minor");
     requireNonNegativeInteger(event.subtotal_minor, "subtotal_minor");
     requireNonNegativeInteger(event.discount_minor, "discount_minor");
@@ -1338,6 +1339,13 @@ function validateEvent(event, events) {
     if (balance.available_minor < payout.amount_minor) {
       throw new CommerceInvariantError("insufficient_payout_balance", "Available balance is lower than retry amount");
     }
+  }
+}
+
+/** Owners use their own Agents without acquiring them. */
+export function requireNotSelfPurchase(input) {
+  if (input.buyer_id === input.creator_id) {
+    throw new CommerceInvariantError("self_purchase_not_allowed", "An account cannot acquire its own Agent");
   }
 }
 

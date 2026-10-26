@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- The Hatch egg on a transparent canvas. It fills only the 824px macOS icon body
+       (100px clear top and bottom), so it matches other apps' size in the Dock and app switcher. -->
+  <defs>
+    <linearGradient id="egg" x1="380" y1="120" x2="660" y2="920" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFC81F"/>
+      <stop offset="1" stop-color="#EEA800"/>
+    </linearGradient>
+  </defs>
+  <!-- Web egg mark (viewBox 36×44, shape spans y 2–42), scaled ×20.6 and centred. -->
+  <g transform="translate(141.2 58.8) scale(20.6)">
+    <path d="M18 2C9.2 2 2 16 2 26a16 16 0 0 0 32 0C34 16 26.8 2 18 2Z" fill="url(#egg)"/>
+    <path d="M7 22l6 4 5-5 5 5 6-4" stroke="#17150F" stroke-width="2.6" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+  </g>
+</svg>

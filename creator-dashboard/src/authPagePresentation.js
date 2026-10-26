@@ -9,16 +9,6 @@ const SURFACES = Object.freeze({
     signInSwitch: "Create account",
     signUpSwitch: "Sign in to an existing account"
   },
-  studio: {
-    signInTitle: "Sign in to Hatch Studio",
-    signUpTitle: "Create a Hatch Expert account",
-    signInDescription: "Manage your Agent products in Studio.",
-    signUpDescription: "Build, test and publish Agent products in Studio.",
-    signInAction: "Sign in",
-    signUpAction: "Create Hatch Expert account",
-    signInSwitch: "Create a Hatch Expert account",
-    signUpSwitch: "Sign in to an existing account"
-  },
   product: {
     signInTitle: "Sign in",
     signUpTitle: "Create account",
@@ -32,8 +22,8 @@ const SURFACES = Object.freeze({
 });
 
 export function createAuthPagePresentation(t) {
-  return ({ signingUp, studioIntent, productIntent }) => {
-    const shared = SURFACES[studioIntent ? "studio" : productIntent ? "product" : "hatch"];
+  return ({ signingUp, productIntent }) => {
+    const shared = SURFACES[productIntent ? "product" : "hatch"];
     return {
       title: t(signingUp ? shared.signUpTitle : shared.signInTitle),
       description: t(signingUp ? shared.signUpDescription : shared.signInDescription),

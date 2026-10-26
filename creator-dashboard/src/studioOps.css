@@ -175,27 +175,12 @@
 .sops-field textarea { resize: vertical; min-height: 84px; font-weight: 400; }
 .sops-field small { font-size: 12.5px; color: var(--web-muted); font-weight: 400; }
 
-/* Settings */
-.sops-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
-.sops-settings > section:first-child { grid-row: span 2; }
-.sops-settings .account-avatar-settings { margin: 0; }
-.sops-row-card { flex-direction: row; align-items: center; gap: 16px; }
-.sops-row-card > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.sops-row-card p { margin: 0; font-size: 14px; }
-.sops-segment { display: inline-flex; padding: 4px; gap: 4px; border-radius: 12px; background: var(--web-panel); align-self: flex-start; flex-wrap: wrap; }
-.sops-segment button {
-  border: 0; background: transparent; font: inherit; font-size: 14px; color: var(--web-body);
-  padding: 7px 16px; border-radius: 9px; cursor: pointer;
-}
-.sops-segment button.is-active { background: var(--web-card); color: var(--web-ink); font-weight: 600; box-shadow: 0 1px 3px rgba(23, 21, 15, 0.1); }
-
 @media (max-width: 1100px) {
   .sops-filters { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .sops-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (max-width: 860px) {
-  .sops-split, .sops-settings { grid-template-columns: minmax(0, 1fr); }
-  .sops-settings > section:first-child { grid-row: auto; }
+  .sops-split { grid-template-columns: minmax(0, 1fr); }
   .sops-balances { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 720px) {
@@ -213,6 +198,6 @@
   .sops-amount strong, .sops-kpi strong { font-size: 22px; }
   .sops-section { padding: 18px; }
   .sops-dl > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
-  .sops-payout__state, .sops-row-card { flex-direction: column; align-items: flex-start; }
+  .sops-payout__state { flex-direction: column; align-items: flex-start; }
   .sops-state { padding: 40px 18px; }
 }

@@ -72,8 +72,13 @@ test("Creator shell is a sidebar workspace with every Studio section", async () 
   const source = await readFile(new URL("./CreatorPortalV2.jsx", import.meta.url), "utf8");
   assert.match(source, /<WebBrand className="cpv2-brand" label=\{t\("studio"\)\}/);
   assert.doesNotMatch(source, /HatchBrand/);
-  for (const key of ["sxNavOverview", "sxNavAgents", "sxNavOrders", "sxNavEarnings", "sxNavSettings"]) assert.match(source, new RegExp(`label: "${key}"`));
-  for (const page of ["StudioOrdersPage", "StudioOrderDetailPage", "StudioEarningsPage", "StudioSettingsPage"]) assert.match(source, new RegExp(`opsPage\\("${page}"\\)`));
+  for (const key of ["sxNavOverview", "sxNavAgents", "sxNavOrders"]) assert.match(source, new RegExp(`label: "${key}"`));
+  // Earnings stays routable but is hidden from navigation while Agents are free.
+  assert.doesNotMatch(source, /label: "sxNavEarnings"/);
+  // Settings is the one account page, reached from the account menu.
+  assert.doesNotMatch(source, /label: "sxNavSettings"|StudioSettingsPage/);
+  assert.match(source, /go\("\/account"\)/);
+  for (const page of ["StudioOrdersPage", "StudioOrderDetailPage", "StudioEarningsPage"]) assert.match(source, new RegExp(`opsPage\\("${page}"\\)`));
   assert.match(source, /import\("\.\/studioOps\.jsx"\)/);
   assert.doesNotMatch(source, /function OrdersPage|function OrderPage/);
 });

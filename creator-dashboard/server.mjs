@@ -19,6 +19,7 @@ import {
   PostgresCommerceLedger
 } from "../packages/commerce/src/index.js";
 import { PortalStateStore, stateError } from "./portalState.mjs";
+import { createDesktopSignIn, DESKTOP_TOKEN_PATH } from "./desktopSignIn.mjs";
 import { submitApplication, submitContact } from "./contactForm.mjs";
 import { createProviderAdapter } from "./providerAdapters.mjs";
 import {
@@ -36,6 +37,9 @@ const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_JSON_BODY_MAX_BYTES = 1024 * 1024;
 const ACCOUNT_AVATAR_BODY_MAX_BYTES = 5 * 1024 * 1024;
 const CORPUS_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/;
+const SELF_PURCHASE_ERROR = Object.freeze({
+  error: { code: "self_purchase_not_allowed", message: "You own this Agent. Open it to chat; there is nothing to acquire." }
+});
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export const CREATOR_FACTORY_JSON_BODY_MAX_BYTES = 32 * 1024 * 1024;
 
@@ -109,6 +113,15 @@ export async function createDashboardApp(options = {}) {
     options.oauthStateKey ?? process.env.HATCH_OAUTH_STATE_KEY ?? process.env.HATCH_SESSION_SECRET,
     portalStatePath
   );
+  const desktopSignIn = createDesktopSignIn({
+    authenticate: (request) => authenticate(request, registryUrl, fetchImpl, portalState),
+    mintSession: (token) => registryRequest(registryUrl, "/v1/auth/sessions", { method: "POST", fetchImpl, headers: { authorization: `Bearer ${token}` } }),
+    codes: portalState,
+    seal: (value) => encryptOAuthSecret(value, oauthStateKey),
+    open: (value) => decryptOAuthSecret(value, oauthStateKey),
+    readJson,
+    send
+  });
   const telemetry = options.telemetry ?? await PortalTelemetryStore.open(commerceDatabaseUrl
     ? {
         Pool: PostgresPool,
@@ -183,7 +196,7 @@ export async function createDashboardApp(options = {}) {
     const ids = [...new Set(creatorIds.map((id) => String(id ?? "")).filter(Boolean))];
     if (!ids.length) return new Map();
     if (!registryDeploymentServiceToken) {
-      throw stateError("creator_account_authority_unavailable", "Expert account names require Registry service authorization.", 503);
+      throw stateError("creator_account_authority_unavailable", "Account names require Registry service authorization.", 503);
     }
     const batches = [];
     for (let index = 0; index < ids.length; index += 100) batches.push(ids.slice(index, index + 100));
@@ -193,12 +206,12 @@ export async function createDashboardApp(options = {}) {
       { fetchImpl, headers: { authorization: `Bearer ${registryDeploymentServiceToken}` } }
     )));
     const accounts = responses.flatMap((payload) => {
-      if (!Array.isArray(payload?.accounts)) throw new Error("Registry Expert account response is malformed.");
+      if (!Array.isArray(payload?.accounts)) throw new Error("Registry account response is malformed.");
       return payload.accounts;
     });
     const names = new Map(accounts.map((account) => {
       if (typeof account?.id !== "string" || typeof account.display_name !== "string" || !account.display_name.trim()) {
-        throw new Error("Registry returned an invalid Expert account name.");
+        throw new Error("Registry returned an invalid account name.");
       }
       return [account.id, account.display_name];
     }));
@@ -465,7 +478,7 @@ export async function createDashboardApp(options = {}) {
   const handler = async (request, response) => {
     const url = new URL(request.url ?? "/", "http://dashboard.local");
     const requestId = normalizedRequestId(request.headers["x-request-id"]);
-    if (url.pathname === "/v1/user/product-access") {
+    if (url.pathname === "/v1/user/product-access" || url.pathname === DESKTOP_TOKEN_PATH) {
       response.__hatchCorsOrigin = "*";
     }
     try {
@@ -481,7 +494,7 @@ export async function createDashboardApp(options = {}) {
         if (!["GET", "POST", "PATCH"].includes(request.method)) {
           return send(response, 405, { error: { code: "method_not_allowed", message: "Method not allowed." } });
         }
-        const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         if (request.method !== "GET") {
           const csrfError = cookieCsrfError(request);
@@ -800,6 +813,11 @@ export async function createDashboardApp(options = {}) {
       if (request.method === "GET" && (url.pathname === "/favicon.svg" || url.pathname === "/factory-voice-capture-worklet.js" || url.pathname === "/factory-voice-playback-worklet.js" || url.pathname === "/assets" || url.pathname.startsWith("/assets/"))) {
         return servePortalAsset(url.pathname, response);
       }
+      const retiredRedirect = request.method === "GET" ? retiredPortalRedirect(url.pathname) : null;
+      if (retiredRedirect) {
+        response.writeHead(301, { location: `${retiredRedirect}${url.search}`, "cache-control": "no-cache" });
+        return response.end();
+      }
       if (request.method === "GET" && isPublicPortalRoute(url.pathname)) {
         let metadata = createDefaultMetadata(publicOrigin, "/explore");
         let portalStatus = 200;
@@ -877,8 +895,7 @@ export async function createDashboardApp(options = {}) {
           profile
         });
       }
-      const creatorSignup = ["/v1/auth/creator-signup", "/v1/auth/creator-sign-up"].includes(url.pathname);
-      if (request.method === "POST" && (creatorSignup || ["/v1/auth/signup", "/v1/auth/sign-up"].includes(url.pathname))) {
+      if (request.method === "POST" && ["/v1/auth/signup", "/v1/auth/sign-up"].includes(url.pathname)) {
         const originError = crossSiteMutationError(request);
         if (originError) return send(response, originError.status, originError.body);
         const body = await readJson(request);
@@ -888,8 +905,7 @@ export async function createDashboardApp(options = {}) {
           body: JSON.stringify({
             email: body.email,
             password: body.password,
-            display_name: body.display_name,
-            role: creatorSignup ? "creator" : "user"
+            display_name: body.display_name
           }),
           fetchImpl
         });
@@ -913,7 +929,7 @@ export async function createDashboardApp(options = {}) {
         return send(response, 204, undefined);
       }
       if (url.pathname === "/v1/auth/me/avatar" && ["PUT", "DELETE"].includes(request.method)) {
-        const authentication = await authenticate(request, registryUrl, undefined, fetchImpl, portalState);
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const csrfError = cookieCsrfError(request);
         if (csrfError) return send(response, csrfError.status, csrfError.body);
@@ -928,13 +944,27 @@ export async function createDashboardApp(options = {}) {
         const payload = upstream.status === 204 ? undefined : await upstream.json();
         return send(response, upstream.status, upstream.ok ? publicProfile(payload) : payload);
       }
+      if (request.method === "PATCH" && url.pathname === "/v1/auth/me") {
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
+        const csrfError = cookieCsrfError(request);
+        if (csrfError) return send(response, csrfError.status, csrfError.body);
+        const body = await readJson(request);
+        const account = await registryRequest(registryUrl, "/v1/auth/me", {
+          method: "PATCH",
+          fetchImpl,
+          headers: { authorization: `Bearer ${authentication.token}` },
+          body: JSON.stringify({ display_name: body.display_name })
+        });
+        return send(response, 200, publicProfile(account));
+      }
       if (request.method === "GET" && url.pathname === "/v1/auth/me") {
-        const authentication = await authenticate(request, registryUrl, undefined, fetchImpl, portalState);
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         return send(response, 200, authentication.profile);
       }
       if (url.pathname === "/v1/auth/me/avatar" && ["PUT", "DELETE"].includes(request.method)) {
-        const authentication = await authenticateAccount(request, registryUrl, fetchImpl, portalState);
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const csrfError = cookieCsrfError(request);
         if (csrfError) return send(response, csrfError.status, csrfError.body);
@@ -953,6 +983,8 @@ export async function createDashboardApp(options = {}) {
         return send(response, upstream.status, payload);
       }
 
+      if (await desktopSignIn(request, response, url)) return;
+
       // Browser OAuth is an authorization-code + PKCE bridge to the existing
       // Hatch web session. External Creator tools can request access, but only
       // a Creator already signed in to Hatch can approve it in this browser.
@@ -965,7 +997,7 @@ export async function createDashboardApp(options = {}) {
         const state = String(url.searchParams.get("state") ?? "").trim();
         const requestedScopes = parseOAuthScopes(url.searchParams.get("scope"));
         validateOAuthAuthorizationRequest({ clientId, redirectUri, responseType, codeChallenge, challengeMethod, state, scopes: requestedScopes });
-        const authentication = await authenticate(request, registryUrl, "creator", fetchImpl, portalState);
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const transactionId = `oauth_tx_${randomId()}`;
         const csrfToken = requestCookies(request).hatch_web_csrf ?? "";
@@ -1073,7 +1105,7 @@ export async function createDashboardApp(options = {}) {
 
       if (request.method === "GET" && url.pathname === "/v1/public/products") {
         const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
-        const buyer = await optionalBuyer(request, registryUrl, fetchImpl, portalState);
+        const buyer = await optionalAccount(request, registryUrl, fetchImpl, portalState);
         const sourceEntitlements = buyer ? commerce.listBuyerEntitlements(buyer.id) : [];
         const creatorNames = await resolveCreatorNames(sourceEntitlements.map((entry) => entry.creator_id));
         const entitlements = buyer ? enrichEntitlements(sourceEntitlements, catalog, [], creatorNames) : [];
@@ -1128,7 +1160,7 @@ export async function createDashboardApp(options = {}) {
         const agent = findCatalogAgent(catalog, undefined, decodeURIComponent(detailSelectors[0]));
         const creatorState = agent ? portalState.getCreatorProduct(agent.creator_id, agent.product_id) : undefined;
         if (!agent || creatorState?.status === "withdrawn") return send(response, 404, { error: { code: "agent_unavailable", message: "The published Agent could not be found." } });
-        const buyer = await optionalBuyer(request, registryUrl, fetchImpl, portalState);
+        const buyer = await optionalAccount(request, registryUrl, fetchImpl, portalState);
         const sourceEntitlements = buyer ? commerce.listBuyerEntitlements(buyer.id) : [];
         const creatorNames = await resolveCreatorNames(sourceEntitlements.map((entry) => entry.creator_id));
         const entitlements = buyer ? enrichEntitlements(sourceEntitlements, catalog, [], creatorNames) : [];
@@ -1147,7 +1179,7 @@ export async function createDashboardApp(options = {}) {
       }
 
       if (request.method === "POST" && url.pathname === "/v1/checkout-sessions") {
-        const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const body = await readJson(request);
         const commandKey = requireCommandKey(request, body);
@@ -1167,6 +1199,7 @@ export async function createDashboardApp(options = {}) {
         if (product.availability !== "published") {
           return send(response, 409, { error: { code: "product_unavailable", message: "This Product is not available." } });
         }
+        if (product.creator_id === authentication.profile.id) return send(response, 409, SELF_PURCHASE_ERROR);
         const requestKey = commandKey;
         const existing = portalState.findCheckoutSessionByRequest(authentication.profile.id, requestKey);
         const sessionCreatorId = existing?.product.creator_id ?? product.creator_id;
@@ -1205,7 +1238,7 @@ export async function createDashboardApp(options = {}) {
 
       const checkoutSessionMatch = url.pathname.match(/^\/v1\/checkout-sessions\/([^/]+)$/);
       if (request.method === "GET" && checkoutSessionMatch) {
-        const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const session = portalState.getCheckoutSession(decodeURIComponent(checkoutSessionMatch[1]));
         if (!session || session.buyer_id !== authentication.profile.id) {
@@ -1218,7 +1251,7 @@ export async function createDashboardApp(options = {}) {
 
       const checkoutConfirmMatch = url.pathname.match(/^\/v1\/checkout-sessions\/([^/]+)\/confirm$/);
       if (request.method === "POST" && checkoutConfirmMatch) {
-        const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const body = await readJson(request);
         const commandKey = requireCommandKey(request, body);
@@ -1246,13 +1279,16 @@ export async function createDashboardApp(options = {}) {
       }
 
       if (request.method === "GET" && url.pathname === "/v1/user/product-access") {
-        const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
         const activeEntitlements = commerce.listBuyerEntitlements(authentication.profile.id).filter((entry) => entry.status === "active");
         const creatorNames = await resolveCreatorNames(activeEntitlements.map((entry) => entry.creator_id));
         const entitlements = enrichEntitlements(activeEntitlements, catalog, [], creatorNames);
-        const creatorAgents = entitlements.map((entry) => ({
+        // A withdrawn Agent is not chat-able: it leaves this list like it leaves the library.
+        const creatorAgents = entitlements.filter((entry) => catalog.some((product) => (
+          product.creator_id === entry.creator_id && product.product_id === entry.product_id
+        ))).map((entry) => ({
           ...entry,
           user_id: entry.buyer_id,
           agent_id: entry.product_id,
@@ -1262,11 +1298,41 @@ export async function createDashboardApp(options = {}) {
             product.creator_id === entry.creator_id && product.product_id === entry.product_id
           ))?.presentation ?? {}
         }));
-        return send(response, 200, { creator_agents: creatorAgents });
+        // Owned published Products come first and carry no entitlement_id: the
+        // owner chats by product_id. Acquired Agents follow as entitlements.
+        const ownedAgents = catalog
+          .filter((product) => (
+            product.creator_id === authentication.profile.id
+            && portalState.getCreatorProduct(product.creator_id, product.product_id)?.status !== "withdrawn"
+          ))
+          .map((product) => ({
+            creator_id: product.creator_id,
+            product_id: product.product_id,
+            agent_id: product.product_id,
+            corpus_digest: product.corpus_digest,
+            effective_corpus_digest: product.corpus_digest,
+            creator: {
+              id: product.creator_id,
+              name: authentication.profile.display_name,
+              avatar_url: authentication.profile.avatar_url
+            },
+            product: {
+              id: product.product_id,
+              product_id: product.product_id,
+              name: product.product_name,
+              description: product.product_description,
+              promise: product.product_promise,
+              ...(product.brief_spec ? { brief_spec: structuredClone(product.brief_spec) } : {})
+            },
+            // Same task brief as an acquired row: the Runtime requires its answers.
+            ...(product.brief_spec ? { brief_spec: structuredClone(product.brief_spec) } : {}),
+            presentation: product.presentation ?? {}
+          }));
+        return send(response, 200, { creator_agents: [...ownedAgents, ...creatorAgents] });
       }
 
       if (request.method === "GET" && ["/v1/user/orders", "/v1/orders"].includes(url.pathname)) {
-        const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const status = url.searchParams.get("status");
         const sourceOrders = commerce.listBuyerOrders(authentication.profile.id);
@@ -1281,7 +1347,7 @@ export async function createDashboardApp(options = {}) {
 
       const buyerOrderMatch = url.pathname.match(/^\/v1\/(?:user\/orders|orders)\/([^/]+)$/);
       if (request.method === "GET" && buyerOrderMatch) {
-        const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const order = resolveOrderIdentifier(commerce, decodeURIComponent(buyerOrderMatch[1]), authentication.profile.id);
         if (order && order.buyer_id && order.buyer_id !== authentication.profile.id) {
@@ -1295,7 +1361,7 @@ export async function createDashboardApp(options = {}) {
 
       const buyerRefundMatch = url.pathname.match(/^\/v1\/(?:user\/orders|orders)\/([^/]+)\/(refund-requests|cancel)$/);
       if (request.method === "POST" && buyerRefundMatch) {
-        const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const requestedOrder = decodeURIComponent(buyerRefundMatch[1]);
         const current = resolveOrderIdentifier(commerce, requestedOrder, authentication.profile.id);
@@ -1341,7 +1407,7 @@ export async function createDashboardApp(options = {}) {
       }
 
       if (request.method === "POST" && url.pathname === "/v1/user/checkout") {
-        const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const body = await readJson(request);
         const commandKey = requireCommandKey(request, body);
@@ -1386,6 +1452,7 @@ export async function createDashboardApp(options = {}) {
         if (product.availability !== "published") {
           return send(response, 409, { error: { code: "product_unavailable", message: "This Product is not available." } });
         }
+        if (product.creator_id === authentication.profile.id) return send(response, 409, SELF_PURCHASE_ERROR);
         const creatorName = (await resolveCreatorNames([product.creator_id])).get(product.creator_id);
         if (!creatorName) return send(response, 404, { error: { code: "agent_unavailable", message: "The published Agent could not be found." } });
         // The key identifies one Buyer intent, not a permanent
@@ -1458,7 +1525,7 @@ export async function createDashboardApp(options = {}) {
         || productNodeContract
       );
       if (productContractWrite || productContractRead || productContractDelete) {
-        const authentication = await authenticate(request, registryUrl, "creator", fetchImpl, portalState);
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const isProductRoot = url.pathname === "/v1/creator/products" || /^\/v1\/creator\/products\/[^/]+$/.test(url.pathname);
         const requiredScope = isProductRoot
@@ -1467,7 +1534,6 @@ export async function createDashboardApp(options = {}) {
             ? (request.method === "GET" ? "creator:files:read" : "creator:files:write")
             : (request.method === "GET" ? "creator:products:read" : "creator:products:write"));
         requireOAuthScope(request, requiredScope, url.pathname);
-        requireCapability(authentication.profile, request.method === "GET" ? "product:read" : "product:edit");
         const body = request.method === "GET" || request.method === "DELETE"
           ? undefined
           : JSON.stringify(await readJson(request, factoryRequestMaxBytes));
@@ -1489,10 +1555,9 @@ export async function createDashboardApp(options = {}) {
       }
 
       if (request.method === "GET" && url.pathname === "/v1/creator/products") {
-        const authentication = await authenticate(request, registryUrl, "creator", fetchImpl, portalState);
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         requireOAuthScope(request, "creator:products:read", url.pathname);
-        requireCapability(authentication.profile, "product:read");
         return send(response, 200, await registryRequest(registryUrl, "/v1/creator/products", {
           fetchImpl,
           headers: { authorization: `Bearer ${bearerToken(request)}` }
@@ -1500,9 +1565,8 @@ export async function createDashboardApp(options = {}) {
       }
 
       if (request.method === "POST" && url.pathname === "/v1/creator/factory-drafts") {
-        const authentication = await authenticate(request, registryUrl, "creator", fetchImpl, portalState);
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
-        requireCapability(authentication.profile, "product:edit");
         const body = await readJson(request, factoryRequestMaxBytes);
         const commandKey = requireCommandKey(request, body);
         const draftId = stableFactoryDraftId(authentication.profile.id, commandKey);
@@ -1518,9 +1582,8 @@ export async function createDashboardApp(options = {}) {
 
       const factoryDraftStartMatch = url.pathname.match(/^\/v1\/creator\/factory-drafts\/([^/]+)\/start$/);
       if (request.method === "POST" && factoryDraftStartMatch) {
-        const authentication = await authenticate(request, registryUrl, "creator", fetchImpl, portalState);
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
-        requireCapability(authentication.profile, "product:edit");
         const body = await readJson(request, factoryRequestMaxBytes);
         const commandKey = requireCommandKey(request, body);
         const draftId = decodeURIComponent(factoryDraftStartMatch[1]);
@@ -1557,15 +1620,13 @@ export async function createDashboardApp(options = {}) {
 
       const factoryDraftMatch = url.pathname.match(/^\/v1\/creator\/factory-drafts\/([^/]+)$/);
       if (factoryDraftMatch) {
-        const authentication = await authenticate(request, registryUrl, "creator", fetchImpl, portalState);
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const draftId = decodeURIComponent(factoryDraftMatch[1]);
         if (request.method === "GET") {
-          requireCapability(authentication.profile, "product:read");
           return send(response, 200, { draft: portalState.getFactoryDraft(authentication.profile.id, draftId) });
         }
         if (request.method === "PUT" || request.method === "PATCH") {
-          requireCapability(authentication.profile, "product:edit");
           const body = await readJson(request, factoryRequestMaxBytes);
           const draft = await portalState.saveFactoryDraft(
             authentication.profile.id,
@@ -1583,9 +1644,8 @@ export async function createDashboardApp(options = {}) {
       }
 
       if (/^\/v1\/creator\/products\/[^/]+\/factory-agents(?:\/|$)/.test(url.pathname)) {
-        const authentication = await authenticate(request, registryUrl, "creator", fetchImpl, portalState);
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
-        requireCapability(authentication.profile, request.method === "GET" || request.method === "HEAD" ? "product:read" : "product:edit");
         const abort = new AbortController();
         response.once("close", () => abort.abort());
         try {
@@ -1625,7 +1685,7 @@ export async function createDashboardApp(options = {}) {
       }
 
       if (url.pathname.startsWith("/v1/creator/")) {
-        const authentication = await authenticate(request, registryUrl, "creator", fetchImpl, portalState);
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const profile = authentication.profile;
         const projection = commerce.getCreatorDashboard(profile.id);
@@ -1669,8 +1729,6 @@ export async function createDashboardApp(options = {}) {
           return send(response, 200, publicProfile(profile));
         }
         if (request.method === "GET" && url.pathname === "/v1/creator/overview") {
-          requireCapability(profile, "product:read");
-          requireCapability(profile, "commerce:read");
           return send(response, 200, {
             metrics: projection.metrics,
             products: await creatorProducts(),
@@ -1678,13 +1736,11 @@ export async function createDashboardApp(options = {}) {
           });
         }
         if (request.method === "GET" && url.pathname === "/v1/creator/products") {
-          requireCapability(profile, "product:read");
           return send(response, 200, { products: await creatorProducts() });
         }
 
         const creatorProductMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)$/);
         if (request.method === "GET" && creatorProductMatch) {
-          requireCapability(profile, "product:read");
           const product = (await creatorProducts()).find((entry) => entry.product_id === decodeURIComponent(creatorProductMatch[1]));
           if (!product) return send(response, 404, { error: { code: "product_not_found", message: "Product was not found." } });
           return send(response, 200, { product });
@@ -1692,7 +1748,6 @@ export async function createDashboardApp(options = {}) {
 
         const creatorReleasesMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/releases$/);
         if (request.method === "GET" && creatorReleasesMatch) {
-          requireCapability(profile, "product:read");
           const productId = decodeURIComponent(creatorReleasesMatch[1]);
           const product = (await creatorProducts()).find((entry) => entry.product_id === productId);
           if (!product) return send(response, 404, { error: { code: "product_not_found", message: "Product was not found." } });
@@ -1703,7 +1758,6 @@ export async function createDashboardApp(options = {}) {
         const withdrawMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/withdraw$/);
         if (request.method === "POST" && withdrawMatch) {
           const body = await readJson(request);
-          requireCapability(profile, "release:publish");
           const commandKey = requireCommandKey(request, body);
           const productId = decodeURIComponent(withdrawMatch[1]);
           const state = await portalState.withdrawProduct(profile.id, productId, body.expected_version, {
@@ -1716,7 +1770,6 @@ export async function createDashboardApp(options = {}) {
 
         const candidateMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/candidates\/([^/]+)$/);
         if (request.method === "GET" && candidateMatch) {
-          requireCapability(profile, "product:read");
           const productId = decodeURIComponent(candidateMatch[1]);
           const candidateId = decodeURIComponent(candidateMatch[2]);
           const run = await registryRequest(registryUrl, `/v1/creator/factory-runs/${encodeURIComponent(candidateId)}`, {
@@ -1736,7 +1789,6 @@ export async function createDashboardApp(options = {}) {
         const candidateActionMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/candidates\/([^/]+)\/(approve|reject)$/);
         if (request.method === "POST" && candidateActionMatch) {
           const body = await readJson(request);
-          requireCapability(profile, "release:approve");
           const commandKey = requireCommandKey(request, body);
           const productId = decodeURIComponent(candidateActionMatch[1]);
           const candidateId = decodeURIComponent(candidateActionMatch[2]);
@@ -1805,7 +1857,6 @@ export async function createDashboardApp(options = {}) {
 
         const previewMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/storefront-preview$/);
         if (request.method === "GET" && previewMatch) {
-          requireCapability(profile, "product:read");
           const productId = decodeURIComponent(previewMatch[1]);
           const product = (await creatorProducts()).find((entry) => entry.product_id === productId);
           if (!product) return send(response, 404, { error: { code: "product_not_found", message: "Product was not found." } });
@@ -1823,8 +1874,6 @@ export async function createDashboardApp(options = {}) {
         if (request.method === "POST" && publishMatch) {
           const body = await readJson(request);
           const unifiedRelease = publishMatch[2] === "release";
-          requireCapability(profile, "release:publish");
-          if (unifiedRelease) requireCapability(profile, "release:approve");
           const commandKey = requireCommandKey(request, body);
           const productId = decodeURIComponent(publishMatch[1]);
           let current = portalState.getCreatorProduct(profile.id, productId);
@@ -1963,7 +2012,6 @@ export async function createDashboardApp(options = {}) {
         const rollbackMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/releases\/([^/]+)\/rollback$/);
         if (request.method === "POST" && rollbackMatch) {
           const body = await readJson(request);
-          requireCapability(profile, "release:rollback");
           const commandKey = requireCommandKey(request, body);
           const productId = decodeURIComponent(rollbackMatch[1]);
           const releaseId = decodeURIComponent(rollbackMatch[2]);
@@ -2020,19 +2068,16 @@ export async function createDashboardApp(options = {}) {
         }
 
         if (request.method === "GET" && url.pathname === "/v1/creator/orders") {
-          requireCapability(profile, "commerce:read");
           const filtered = filterCreatorOrders(creatorOrders, url);
           const page = paginate(filtered, url);
           return send(response, 200, { orders: page.items, next_cursor: page.next_cursor });
         }
         if (request.method === "GET" && url.pathname === "/v1/creator/orders/export") {
-          requireCapability(profile, "commerce:export");
           const rows = filterCreatorOrders(creatorOrders, url).map(creatorOrderExportRow);
           return sendCsv(response, "hatch-creator-orders.csv", rows);
         }
         const creatorOrderMatch = url.pathname.match(/^\/v1\/creator\/orders\/([^/]+)$/);
         if (request.method === "GET" && creatorOrderMatch) {
-          requireCapability(profile, "commerce:read");
           const identifier = decodeURIComponent(creatorOrderMatch[1]);
           const order = creatorOrders.find((entry) => entry.order_id === identifier || entry.order_number === identifier);
           if (!order) return send(response, 404, { error: { code: "order_not_found", message: "Order was not found." } });
@@ -2041,7 +2086,6 @@ export async function createDashboardApp(options = {}) {
         const creatorRefundMatch = url.pathname.match(/^\/v1\/creator\/orders\/([^/]+)\/(?:refund-requests|refund)$/);
         if (request.method === "POST" && creatorRefundMatch) {
           const body = await readJson(request);
-          requireCapability(profile, "refund:create");
           const commandKey = requireCommandKey(request, body);
           const identifier = decodeURIComponent(creatorRefundMatch[1]);
           const current = creatorOrders.find((entry) => entry.order_id === identifier || entry.order_number === identifier);
@@ -2066,13 +2110,11 @@ export async function createDashboardApp(options = {}) {
           return send(response, 201, { refund: order.refunds.at(-1), order: orderDetail(order, [], profile.display_name), access_status: "syncing" });
         }
         if (request.method === "GET" && url.pathname === "/v1/creator/payouts") {
-          requireCapability(profile, "payout:read");
           const currency = normalizedCurrency(url.searchParams.get("currency") ?? "USD");
           return send(response, 200, creatorPayoutView(commerce, profile.id, currency, paymentProvider, payoutSchedule));
         }
         const payoutDetailMatch = url.pathname.match(/^\/v1\/creator\/payouts\/([^/]+)$/);
         if (request.method === "GET" && payoutDetailMatch) {
-          requireCapability(profile, "payout:read");
           const payout = commerce.getPayout(decodeURIComponent(payoutDetailMatch[1]));
           if (!payout || payout.creator_id !== profile.id) {
             return send(response, 404, { error: { code: "payout_not_found", message: "Payout was not found." } });
@@ -2081,7 +2123,6 @@ export async function createDashboardApp(options = {}) {
         }
         if (request.method === "POST" && url.pathname === "/v1/creator/payout-account-sessions") {
           const body = await readJson(request);
-          requireCapability(profile, "payout:manage");
           const commandKey = requireCommandKey(request, body);
           const currency = normalizedCurrency(body.currency ?? "USD");
           const providerSession = await paymentProvider.createPayoutAccountSession({
@@ -2112,7 +2153,6 @@ export async function createDashboardApp(options = {}) {
         const payoutRetryMatch = url.pathname.match(/^\/v1\/creator\/payouts\/([^/]+)\/retry$/);
         if (request.method === "POST" && payoutRetryMatch) {
           const body = await readJson(request);
-          requireCapability(profile, "payout:manage");
           const commandKey = requireCommandKey(request, body);
           const payoutId = decodeURIComponent(payoutRetryMatch[1]);
           const current = commerce.getPayout(payoutId);
@@ -2133,7 +2173,7 @@ export async function createDashboardApp(options = {}) {
       }
 
       if (request.method === "GET" && ["/v1/buyer/entitlements", "/v1/user/entitlements", "/v1/library"].includes(url.pathname)) {
-        const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
         const status = url.searchParams.get("status");
@@ -2159,7 +2199,7 @@ export async function createDashboardApp(options = {}) {
 
       const libraryIdMatch = url.pathname.match(/^\/v1\/library\/([^/]+)$/);
       if (request.method === "GET" && libraryIdMatch) {
-        const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
         const sourceEntitlements = commerce.listBuyerEntitlements(authentication.profile.id);
@@ -2176,7 +2216,7 @@ export async function createDashboardApp(options = {}) {
 
       const buyerEntitlementMatch = url.pathname.match(/^\/v1\/(?:buyer|user)\/entitlements\/([^/]+)$/);
       if (request.method === "GET" && buyerEntitlementMatch) {
-        const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
         const sourceEntitlements = commerce.listBuyerEntitlements(authentication.profile.id);
@@ -2215,7 +2255,7 @@ export async function createDashboardApp(options = {}) {
       if (!allowedPublicOrigins.has(origin)) {
         throw Object.assign(new Error("Cross-origin WebSocket request rejected"), { status: 403 });
       }
-      const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
+      const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
       if (authentication.error) throw Object.assign(new Error("Sign in to continue."), { status: authentication.error.status });
       chatWss.handleUpgrade(request, socket, head, browser => {
         new WebChatRuntimeBridge({ browser, runtimeUrl, token: authentication.token }).connect();
@@ -2230,9 +2270,8 @@ export async function createDashboardApp(options = {}) {
     if (!requestOrigin || !allowedPublicOrigins.has(requestOrigin)) {
       throw Object.assign(new Error("Cross-origin WebSocket request rejected"), { status: 403 });
     }
-    const authentication = await authenticate(request, registryUrl, "creator", fetchImpl, portalState);
+    const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
     if (authentication.error) throw Object.assign(new Error(authentication.error.body?.error?.message || "Sign in to continue."), { status: authentication.error.status });
-    requireCapability(authentication.profile, "product:edit");
     voiceWss.handleUpgrade(request, socket, head, browser => {
       browser.on("error", () => undefined);
       const upstreamUrl = new URL(url.pathname + url.search, registryUrl);
@@ -2676,7 +2715,7 @@ function oauthEndpointScope(request) {
 }
 
 function oauthConsentPage({ transactionId, csrfToken, profile, clientId, scopes }) {
-  const displayName = escapeHtml(profile?.display_name ?? "your Expert account");
+  const displayName = escapeHtml(profile?.display_name ?? "your Hatch account");
   const scopeText = scopes.map((scope) => `<li>${escapeHtml(oauthScopeLabel(scope))}</li>`).join("");
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect Hatch</title><style>body{font-family:system-ui,-apple-system,sans-serif;background:#f5f1e9;color:#171513;display:grid;place-items:center;min-height:100vh;margin:0}.card{background:#fffdf8;border:1px solid #ded6c8;border-radius:20px;max-width:520px;padding:32px;box-shadow:0 20px 60px #2a241610}h1{font-size:28px;margin:0 0 10px}p{line-height:1.5;color:#5e584f}ul{padding-left:22px;line-height:1.8}.actions{display:flex;gap:12px;margin-top:26px}button{border:0;border-radius:999px;padding:12px 18px;font-weight:650;cursor:pointer}button[name=decision][value=approve]{background:#1d1b19;color:white}button[value=deny]{background:#eee9df;color:#292621}</style></head><body><main class="card"><h1>Connect ${escapeHtml(clientId)} to Hatch</h1><p>You are signed in as <strong>${displayName}</strong>. Allow this tool to work with your Expert Products?</p><ul>${scopeText}</ul><form method="post" action="/v1/auth/authorize/consent"><input type="hidden" name="transaction_id" value="${escapeHtml(transactionId)}"><input type="hidden" name="csrf_token" value="${escapeHtml(csrfToken)}"><div class="actions"><button type="submit" name="decision" value="deny">Cancel</button><button type="submit" name="decision" value="approve">Allow access</button></div></form></main></body></html>`;
 }
@@ -2694,7 +2733,7 @@ function escapeHtml(value) {
   return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }
 
-async function authenticate(request, registryUrl, expectedRole, fetchImpl, portalState) {
+async function authenticate(request, registryUrl, fetchImpl, portalState) {
   const explicitToken = bearerTokenFromAuthorization(request);
   const oauthToken = explicitToken
     ? await activeOAuthAccessToken(explicitToken, portalState, request.__oauthStateKey)
@@ -2760,9 +2799,6 @@ async function authenticate(request, registryUrl, expectedRole, fetchImpl, porta
       headers: { authorization: `Bearer ${token}` }
     });
     const profile = publicProfile(account);
-    if (expectedRole && profile.role !== expectedRole) {
-      return { error: { status: 403, body: { error: { code: `${expectedRole}_only`, message: `This area is for ${expectedRole}s.` } } } };
-    }
     request.__registryToken = token;
     request.__oauthScopes = oauthToken?.scopes;
     return { profile, token };
@@ -2784,14 +2820,10 @@ async function authenticate(request, registryUrl, expectedRole, fetchImpl, porta
   }
 }
 
-async function optionalBuyer(request, registryUrl, fetchImpl, portalState) {
+async function optionalAccount(request, registryUrl, fetchImpl, portalState) {
   if (!bearerTokenFromAuthorization(request) && !requestCookies(request).hatch_web_session) return undefined;
-  const authentication = await authenticate(request, registryUrl, undefined, fetchImpl, portalState);
-  return authentication.profile?.role === "user" ? authentication.profile : undefined;
-}
-
-async function authenticateAccount(request, registryUrl, fetchImpl, portalState) {
-  return authenticate(request, registryUrl, undefined, fetchImpl, portalState);
+  const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+  return authentication.profile;
 }
 
 function publicProfile(profile) {
@@ -2799,35 +2831,11 @@ function publicProfile(profile) {
   const initials = displayName.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "U";
   return {
     id: profile.id,
-    role: profile.role,
     display_name: displayName,
     avatar_url: profile.avatar_url ?? null,
     handle: profile.handle ?? `@${profile.id}`,
-    initials,
-    capabilities: Array.isArray(profile.capabilities) ? profile.capabilities.map(String) : []
+    initials
   };
-}
-
-const ROLE_CAPABILITIES = Object.freeze({
-  creator: new Set([
-    "product:read",
-    "product:edit",
-    "release:approve",
-    "release:publish",
-    "release:rollback",
-    "commerce:read",
-    "commerce:export",
-    "refund:create",
-    "payout:read",
-    "payout:manage"
-  ]),
-  user: new Set(["catalog:read", "checkout:create", "order:read", "entitlement:read"])
-});
-
-function requireCapability(profile, capability) {
-  const explicit = Array.isArray(profile?.capabilities) ? profile.capabilities : [];
-  const allowed = explicit.length ? explicit.includes(capability) : ROLE_CAPABILITIES[profile?.role]?.has(capability);
-  if (!allowed) throw stateError("capability_required", `The ${capability} capability is required.`, 403);
 }
 
 function requireOAuthScope(request, scope, path) {
@@ -3421,7 +3429,7 @@ function checkoutOutcomeBody(session, order, entitlement, payment) {
     order_id: order?.order_id ?? session.order_id,
     status: order?.status ?? (session.status === "completed" ? "fulfilled" : session.status),
     entitlement_id: entitlementId,
-    redirect_url: order?.order_id ? `/orders/${encodeURIComponent(orderNumberFor(order))}/success` : null,
+    redirect_url: order?.order_id ? `/explore/orders/${encodeURIComponent(orderNumberFor(order))}/success` : null,
     order: order ?? null,
     payment: payment ?? {
       payment_id: null,
@@ -3434,7 +3442,7 @@ function checkoutOutcomeBody(session, order, entitlement, payment) {
 }
 
 function checkoutSessionPublic(session, creatorDisplayName) {
-  if (!creatorDisplayName) throw new Error(`Current Expert account name is required for checkout session ${String(session.checkout_session_id)}.`);
+  if (!creatorDisplayName) throw new Error(`Current creator account name is required for checkout session ${String(session.checkout_session_id)}.`);
   return {
     ...session,
     ...currentCreatorNameProjection(session, creatorDisplayName),
@@ -3443,7 +3451,7 @@ function checkoutSessionPublic(session, creatorDisplayName) {
 }
 
 function checkoutOutcomePublic(outcome, session, creatorDisplayName) {
-  if (!creatorDisplayName) throw new Error(`Current Expert account name is required for checkout session ${String(session.checkout_session_id)}.`);
+  if (!creatorDisplayName) throw new Error(`Current creator account name is required for checkout session ${String(session.checkout_session_id)}.`);
   return {
     ...outcome,
     ...(outcome.order ? { order: currentCreatorNameProjection(outcome.order, creatorDisplayName) } : {}),
@@ -3888,7 +3896,7 @@ function compareEntitlementsNewestFirst(left, right) {
 
 function orderDetail(order, events = [], creatorDisplayName) {
   if (typeof creatorDisplayName !== "string" || !creatorDisplayName) {
-    throw new Error(`Current Expert account name is required for order ${String(order.order_id ?? order.id ?? "unknown")}.`);
+    throw new Error(`Current creator account name is required for order ${String(order.order_id ?? order.id ?? "unknown")}.`);
   }
   const paymentStatus = order.payment_status ?? (order.gross_minor === 0 ? "not_required" : "paid");
   const unmetered = order.access_mode === "unmetered" || Number(order.gross_minor ?? 0) === 0;
@@ -4479,6 +4487,14 @@ function ageMs(value, nowMs) {
   return Number.isFinite(timestamp) ? Math.max(0, nowMs - timestamp) : 0;
 }
 
+// Retired buyer routes. /explore is the one home; orders live under it.
+export function retiredPortalRedirect(pathname) {
+  if (pathname === "/home" || pathname === "/library" || pathname.startsWith("/library/")) return "/explore";
+  if (pathname === "/orders" || pathname.startsWith("/orders/")) return `/explore${pathname}`;
+  if (pathname === "/studio/settings") return "/account";
+  return null;
+}
+
 function isPublicPortalRoute(pathname) {
   return pathname === "/"
     || pathname === "/explore"
@@ -4487,11 +4503,7 @@ function isPublicPortalRoute(pathname) {
     || pathname.startsWith("/creators/")
     || pathname === "/products"
     || pathname.startsWith("/products/")
-    || pathname === "/library"
-    || pathname.startsWith("/library/")
     || pathname.startsWith("/chat/product/")
-    || pathname === "/orders"
-    || pathname.startsWith("/orders/")
     || pathname === "/checkout"
     || pathname.startsWith("/checkout/")
     || pathname === "/studio"
@@ -4500,6 +4512,7 @@ function isPublicPortalRoute(pathname) {
     || pathname.startsWith("/account/")
     || pathname === "/sign-in"
     || pathname === "/sign-up"
+    || pathname === "/desktop/sign-in"
     || pathname === "/download";
 }
 

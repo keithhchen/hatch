@@ -113,7 +113,6 @@ export class PortalStateStore {
         ? { registry_token_ciphertext: String(options.registryTokenCiphertext) }
         : { registry_token: String(registryToken) }),
       account_id: String(profile?.id ?? ""),
-      role: profile?.role ?? null,
       created_at: now.toISOString(),
       last_seen_at: now.toISOString(),
       expires_at: new Date(now.getTime() + Number(options.ttl_ms ?? 12 * 60 * 60_000)).toISOString()

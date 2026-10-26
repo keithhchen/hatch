@@ -1,4 +1,4 @@
-// Copy for Studio orders, earnings and settings. Professional, neutral SaaS
+// Copy for Studio orders and earnings. Professional, neutral SaaS
 // tone; zh / en / ja carry the same meaning. No exclamation or question marks.
 
 export const STUDIO_OPS_COPY = {
@@ -13,7 +13,6 @@ export const STUDIO_OPS_COPY = {
     ordersTitle: "订单",
     ordersBody: "客户购买你的 Agent 后产生的所有订单。",
     exportCsv: "导出 CSV",
-    exportUnavailable: "当前账户没有导出权限",
     filterAgent: "Agent",
     filterOrder: "订单状态",
     filterPayment: "支付状态",
@@ -124,26 +123,7 @@ export const STUDIO_OPS_COPY = {
     payoutRetrySubmit: "确认重新发起",
     payoutRetryDone: "已重新提交提现。",
 
-    settingsTitle: "设置",
-    settingsBody: "个人资料、语言与账户。",
-    profileTitle: "个人资料",
-    profileName: "显示名称",
-    profileHandle: "用户名",
-    profileReadonly: "显示名称与用户名暂不支持在网页端修改。",
-    languageTitle: "语言",
-    languageBody: "界面语言会保存在当前浏览器中。",
-    accountTitle: "账户",
-    accountRole: "账户类型",
-    accountId: "账户 ID",
-    desktopTitle: "Hatch 桌面端",
-    desktopBody: "在电脑上运行客户购买的 Agent，并管理本地文件。",
-    desktopAction: "前往下载",
-    signOutTitle: "退出登录",
-    signOutBody: "退出后需要重新登录才能进入 Studio。",
-    signOut: "退出登录",
-    signingOut: "正在退出",
 
-    role: { creator: "专家", user: "客户" },
     mode: { metered: "按次交付", unmetered: "不限次数" },
     status: {
       paid: "已支付", succeeded: "已支付", fulfilled: "已开通", delivered: "已交付",
@@ -164,22 +144,6 @@ export const STUDIO_OPS_COPY = {
       "artifact.created": "生成交付物", "delivery.completed": "完成交付",
       "revenue.recognized": "确认收入", "revenue.reversed": "冲回收入",
       "order.refunded": "订单退款", "payout.adjustment": "结算调整"
-    },
-    adapter: {
-      "Profile photo": "头像",
-      "Your photo appears beside your account and Agent identity.": "头像会显示在你的账户和 Agent 署名旁。",
-      "Choose a profile photo": "选择头像",
-      "Upload photo": "上传头像",
-      "Remove photo": "移除头像",
-      "Profile photo updated.": "头像已更新。",
-      "Profile photo removed.": "头像已移除。",
-      "Crop your photo": "裁剪头像",
-      "Move and zoom the image to choose a square crop.": "拖动和缩放图片，选择方形区域。",
-      "Cancel": "取消",
-      "Crop and upload": "裁剪并上传",
-      "Uploading…": "正在上传…",
-      "This image could not be opened.": "无法打开这张图片。",
-      "Zoom": "缩放"
     }
   },
 
@@ -194,7 +158,6 @@ export const STUDIO_OPS_COPY = {
     ordersTitle: "Orders",
     ordersBody: "Every order clients place for your Agents.",
     exportCsv: "Export CSV",
-    exportUnavailable: "This account cannot export orders",
     filterAgent: "Agent",
     filterOrder: "Order status",
     filterPayment: "Payment",
@@ -305,26 +268,7 @@ export const STUDIO_OPS_COPY = {
     payoutRetrySubmit: "Confirm retry",
     payoutRetryDone: "Payout resubmitted.",
 
-    settingsTitle: "Settings",
-    settingsBody: "Profile, language and account.",
-    profileTitle: "Profile",
-    profileName: "Display name",
-    profileHandle: "Username",
-    profileReadonly: "Display name and username cannot be changed on the web yet.",
-    languageTitle: "Language",
-    languageBody: "Your interface language is saved in this browser.",
-    accountTitle: "Account",
-    accountRole: "Account type",
-    accountId: "Account ID",
-    desktopTitle: "Hatch desktop app",
-    desktopBody: "Run purchased Agents on a computer and work with local files.",
-    desktopAction: "Go to download",
-    signOutTitle: "Sign out",
-    signOutBody: "You will need to sign in again to open Studio.",
-    signOut: "Sign out",
-    signingOut: "Signing out",
 
-    role: { creator: "Expert", user: "Client" },
     mode: { metered: "Per delivery", unmetered: "Unlimited" },
     status: {
       paid: "Paid", succeeded: "Paid", fulfilled: "Active", delivered: "Delivered",
@@ -345,8 +289,7 @@ export const STUDIO_OPS_COPY = {
       "artifact.created": "Deliverable created", "delivery.completed": "Delivery completed",
       "revenue.recognized": "Revenue recognized", "revenue.reversed": "Revenue reversed",
       "order.refunded": "Order refunded", "payout.adjustment": "Payout adjustment"
-    },
-    adapter: {}
+    }
   },
 
   ja: {
@@ -360,7 +303,6 @@ export const STUDIO_OPS_COPY = {
     ordersTitle: "注文",
     ordersBody: "お客様があなたの Agent を購入した注文の一覧です。",
     exportCsv: "CSV を書き出す",
-    exportUnavailable: "このアカウントには書き出し権限がありません",
     filterAgent: "Agent",
     filterOrder: "注文ステータス",
     filterPayment: "支払い",
@@ -471,26 +413,7 @@ export const STUDIO_OPS_COPY = {
     payoutRetrySubmit: "再送信を確定",
     payoutRetryDone: "出金を再送信しました。",
 
-    settingsTitle: "設定",
-    settingsBody: "プロフィール、言語、アカウントの設定です。",
-    profileTitle: "プロフィール",
-    profileName: "表示名",
-    profileHandle: "ユーザー名",
-    profileReadonly: "表示名とユーザー名は現在 Web から変更できません。",
-    languageTitle: "言語",
-    languageBody: "表示言語はこのブラウザに保存されます。",
-    accountTitle: "アカウント",
-    accountRole: "アカウント種別",
-    accountId: "アカウント ID",
-    desktopTitle: "Hatch デスクトップアプリ",
-    desktopBody: "購入された Agent をパソコンで実行し、ローカルのファイルを扱えます。",
-    desktopAction: "ダウンロードページへ",
-    signOutTitle: "ログアウト",
-    signOutBody: "Studio を開くには再度ログインが必要です。",
-    signOut: "ログアウト",
-    signingOut: "ログアウトしています",
 
-    role: { creator: "エキスパート", user: "お客様" },
     mode: { metered: "納品ごと", unmetered: "無制限" },
     status: {
       paid: "支払い済み", succeeded: "支払い済み", fulfilled: "利用可能", delivered: "納品済み",
@@ -511,51 +434,12 @@ export const STUDIO_OPS_COPY = {
       "artifact.created": "成果物の作成", "delivery.completed": "納品完了",
       "revenue.recognized": "収益の確定", "revenue.reversed": "収益の取り消し",
       "order.refunded": "注文の返金", "payout.adjustment": "出金の調整"
-    },
-    adapter: {
-      "Profile photo": "プロフィール写真",
-      "Your photo appears beside your account and Agent identity.": "写真はアカウント名と Agent の作成者名の横に表示されます。",
-      "Choose a profile photo": "プロフィール写真を選択",
-      "Upload photo": "写真をアップロード",
-      "Remove photo": "写真を削除",
-      "Profile photo updated.": "プロフィール写真を更新しました。",
-      "Profile photo removed.": "プロフィール写真を削除しました。",
-      "Crop your photo": "写真の切り抜き",
-      "Move and zoom the image to choose a square crop.": "画像を移動・拡大して、正方形の範囲を選択してください。",
-      "Cancel": "キャンセル",
-      "Crop and upload": "切り抜いてアップロード",
-      "Uploading…": "アップロード中…",
-      "This image could not be opened.": "この画像を開けませんでした。",
-      "Zoom": "拡大"
     }
   }
 };
 
-export const AVATAR_SETTINGS_KEYS = [
-  "Profile photo",
-  "Your photo appears beside your account and Agent identity.",
-  "Choose a profile photo",
-  "Upload photo",
-  "Remove photo",
-  "Profile photo updated.",
-  "Profile photo removed.",
-  "Crop your photo",
-  "Move and zoom the image to choose a square crop.",
-  "Cancel",
-  "Crop and upload",
-  "Uploading…",
-  "This image could not be opened.",
-  "Zoom"
-];
-
 export function studioOpsCopy(locale) {
   return STUDIO_OPS_COPY[locale] ?? STUDIO_OPS_COPY.en;
-}
-
-/** Translator for AccountAvatarSettings, which is keyed by English strings. */
-export function avatarSettingsT(locale) {
-  const table = studioOpsCopy(locale).adapter ?? {};
-  return (key) => table[key] ?? key;
 }
 
 export function statusLabel(copy, value) {

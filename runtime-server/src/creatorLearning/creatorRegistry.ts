@@ -421,22 +421,6 @@ export class CreatorRegistry {
     return row ? releaseFromRow(row) : undefined;
   }
 
-  async listCurrent(creatorId: string): Promise<CreatorRegistryRelease[]> {
-    await this.initialize();
-    const result = await this.pool.query<RegistryReleaseRow>(`
-      SELECT release.product_id, release.creator_id, release.release_digest,
-             release.corpus_digest, release.corpus_ref, release.release_ref,
-             release.brief_spec, release.status, release.published_at
-      FROM hatch_creator_registry_live AS live
-      JOIN hatch_creator_registry_releases AS release
-        ON release.product_id = live.product_id
-       AND release.release_digest = live.release_digest
-      WHERE live.creator_id = $1 AND release.status = 'live'
-      ORDER BY release.published_at DESC, release.product_id ASC
-    `, [creatorId]);
-    return result.rows.map(releaseFromRow);
-  }
-
   private validateCorpusRef(productId: string, value: string): string {
     let reference: string;
     try {
