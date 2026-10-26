@@ -95,11 +95,15 @@ pub fn prepare_window<'a, R: Runtime, M: Manager<R>>(
 }
 
 /// A renderer reveals its window with `app_ready`. If it never does (a crash
-/// during startup), show the window anyway so Hatch is never invisible.
+/// during startup), show the window anyway so Hatch is never invisible. A
+/// signed-out main window stays hidden on purpose while the welcome window
+/// is up, so it is not forced on screen behind it.
 pub fn reveal_if_still_hidden<R: Runtime>(window: WebviewWindow<R>) {
     std::thread::spawn(move || {
         std::thread::sleep(REVEAL_FALLBACK_DELAY);
-        if !window.is_visible().unwrap_or(true) {
+        let waiting_for_sign_in = window.label() == MAIN_WINDOW_LABEL
+            && window.app_handle().get_webview_window(WELCOME_WINDOW_LABEL).is_some();
+        if !waiting_for_sign_in && !window.is_visible().unwrap_or(true) {
             let _ = window.show();
         }
     });
