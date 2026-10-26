@@ -19,7 +19,8 @@ export class AgentAccess {
     this.binding = Object.freeze(owned ? { productId: row.product_id } : { entitlementId: row.entitlement_id });
     this.identity = resolveCreatorIdentity({ access: row });
     this.briefFields = this.identity.briefSpec?.fields ?? [];
-    this.description = typeof row.product?.description === "string" ? row.product.description.trim() : "";
+    // Acquired rows describe the Agent by its promise, like the Web catalog cards.
+    this.description = [row.product?.description, row.product?.promise].find(text => typeof text === "string" && text.trim())?.trim() ?? "";
     Object.freeze(this);
   }
 
