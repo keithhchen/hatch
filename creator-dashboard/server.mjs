@@ -114,7 +114,7 @@ export async function createDashboardApp(options = {}) {
     portalStatePath
   );
   const desktopSignIn = createDesktopSignIn({
-    authenticate: (request) => authenticate(request, registryUrl, undefined, fetchImpl, portalState),
+    authenticate: (request) => authenticate(request, registryUrl, fetchImpl, portalState),
     mintSession: (token) => registryRequest(registryUrl, "/v1/auth/sessions", { method: "POST", fetchImpl, headers: { authorization: `Bearer ${token}` } }),
     codes: portalState,
     seal: (value) => encryptOAuthSecret(value, oauthStateKey),

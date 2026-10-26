@@ -157,6 +157,62 @@ test("consumer avatar changes proxy through the authenticated Registry session",
   assert.deepEqual(avatarRequests.map(({ method }) => method), ["PUT", "DELETE"]);
 });
 
+test("a signed-in browser hands Desktop its own session through a PKCE code", async (context) => {
+  const account = { id: "desktop-handoff-test", email: "buyer@example.test", display_name: "Buyer" };
+  const mintedFor = [];
+  const registry = createServer(async (request, response) => {
+    const requestUrl = new URL(request.url ?? "/", "http://registry.test");
+    for await (const _chunk of request) { /* drain */ }
+    response.setHeader("content-type", "application/json");
+    if (requestUrl.pathname === "/v1/auth/signin") return response.end(JSON.stringify({ token: "browser-token", account }));
+    if (requestUrl.pathname === "/v1/auth/me") return response.end(JSON.stringify(account));
+    if (requestUrl.pathname === "/v1/auth/sessions" && request.method === "POST") {
+      mintedFor.push(request.headers.authorization);
+      response.statusCode = 201;
+      return response.end(JSON.stringify({ token: "desktop-token", session: { token: "desktop-token", expires_at: "2099-01-01T00:00:00.000Z" }, account }));
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: { code: "not_found", message: "Not found." } }));
+  });
+  await listen(registry);
+  context.after(() => registry.close());
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-desktop-handoff-"));
+  const dashboard = await createDashboardApp({ ledgerPath: path.join(directory, "ledger.jsonl"), registryUrl: serverUrl(registry) });
+  const api = createServer(dashboard.handler);
+  await listen(api);
+  context.after(() => api.close());
+
+  const login = await fetch(`${serverUrl(api)}/v1/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: account.email, password: "test-only" })
+  });
+  const cookies = login.headers.getSetCookie();
+  const cookie = cookies.map((value) => value.split(";", 1)[0]).join("; ");
+  const csrf = decodeURIComponent(cookies.find((value) => value.startsWith("hatch_web_csrf=")).split(";", 1)[0].slice("hatch_web_csrf=".length));
+
+  const verifier = "v".repeat(43);
+  const challenge = createHash("sha256").update(verifier).digest("base64url");
+  const authorize = await fetch(`${serverUrl(api)}/v1/auth/desktop/authorize`, {
+    method: "POST",
+    headers: { cookie, "x-csrf-token": csrf, "content-type": "application/json" },
+    body: JSON.stringify({ state: "desktop-state-0123456789", code_challenge: challenge })
+  });
+  assert.equal(authorize.status, 200);
+  const redirect = new URL((await authorize.json()).redirect_uri);
+  assert.equal(`${redirect.protocol}//${redirect.host}${redirect.pathname}`, "hatch://auth/callback");
+  assert.equal(redirect.searchParams.get("state"), "desktop-state-0123456789");
+  assert.deepEqual(mintedFor, ["Bearer browser-token"]);
+
+  const redeem = await fetch(`${serverUrl(api)}/v1/auth/desktop/token`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ code: redirect.searchParams.get("code"), code_verifier: verifier })
+  });
+  assert.equal(redeem.status, 200);
+  assert.equal((await redeem.json()).token, "desktop-token");
+});
+
 test("browser authentication keeps its session through a transient Registry failure", async (context) => {
   let failVerification = false;
   const account = {
