@@ -51,11 +51,11 @@ function WorkspaceControls({ session }) {
       {workspace.status === "stale" ? <FolderX aria-hidden="true" /> : <Folder aria-hidden="true" />}
       <span>{granted ? folderName(workspace.grant.display_path) : workspace.status === "stale" ? t("composer.folderStale") : t("composer.chooseFolder")}</span>
     </button>
-    {granted ? <button type="button" className="desk-chip" onClick={() => void popupNativeMenu(Object.values(PERMISSION_POLICIES).map(policy => ({
+    <button type="button" className="desk-chip" onClick={() => void popupNativeMenu(Object.values(PERMISSION_POLICIES).map(policy => ({
       label: t(`permission.${policy}`), checked: workspace.permission === policy, action: () => session.workspace.setPermission(policy)
     })))}>
       <ShieldCheck aria-hidden="true" /><span>{t(`permission.${workspace.permission}`)}</span>
-    </button> : null}
+    </button>
   </div>;
 }
 
