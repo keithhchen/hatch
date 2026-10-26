@@ -194,7 +194,6 @@
 .buyer-v2__settings-identity h2 { margin: 0; font-size: var(--hatch-type-heading); }
 .buyer-v2__settings-identity p { margin: 4px 0 0; color: var(--buyer-muted); font-size: var(--hatch-type-ui); overflow-wrap: anywhere; }
 .hui-avatar.buyer-v2__settings-avatar { width: 72px; height: 72px; min-width: 72px; border-radius: 50%; font-size: var(--hatch-type-heading); }
-.buyer-v2__role { display: inline-block; margin-top: 8px; padding: 4px 12px; border-radius: 999px; background: var(--web-blue-soft); color: var(--web-blue); font-size: var(--hatch-type-meta); font-weight: var(--hatch-weight-strong); }
 .buyer-v2__settings-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; padding-top: 20px; border-top: 1px solid var(--buyer-rule); }
 .buyer-v2__settings-surface .account-avatar-settings { padding: 0; }
 .buyer-v2__settings-surface .account-avatar-settings__image { display: none; }
@@ -279,6 +278,26 @@
 .buyer-v2__page-skeleton { display: grid; min-height: 60vh; place-content: center; place-items: center; gap: 12px; color: var(--buyer-muted); }
 .buyer-v2__spinner { display: inline-block; width: 26px; height: 26px; border: 2px solid var(--buyer-rule); border-top-color: var(--web-yolk); border-radius: 50%; animation: buyer-spin 800ms linear infinite; }
 
+/* Signed-in home: pick an Agent first; its conversations live inside it. */
+.buyer-v2__home-start { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.buyer-v2__home-start-card { display: flex; min-height: 280px; flex-direction: column; padding: clamp(26px, 3vw, 36px); color: inherit; text-decoration: none; transition: transform 160ms ease, box-shadow 160ms ease; }
+.buyer-v2__home-start-card:hover { transform: translateY(-3px); box-shadow: var(--web-shadow-lift); }
+.buyer-v2__home-start-card h2 { margin: 22px 0 8px; font-size: var(--hatch-type-title); line-height: 1.2; }
+.buyer-v2__home-start-card p { margin: 0; color: var(--buyer-body); font-size: var(--hatch-type-body); line-height: 1.6; }
+.buyer-v2__home-start-card .buyer-v2__card-go { margin-top: auto; padding-top: 24px; }
+.buyer-v2__home-start-icon { display: inline-flex; width: 44px; height: 44px; align-items: center; justify-content: center; border-radius: 14px; }
+.buyer-v2__home-start-icon svg { width: 22px; height: 22px; }
+.buyer-v2__home-start-card.is-blue .buyer-v2__home-start-icon { background: var(--web-blue-soft); color: var(--web-blue); }
+.buyer-v2__home-start-card.is-yolk .buyer-v2__home-start-icon { background: var(--web-yolk-soft); color: var(--web-gold); }
+.buyer-v2__home-section + .buyer-v2__home-section { margin-top: clamp(40px, 5vw, 64px); }
+.buyer-v2__home-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.buyer-v2__home-heading h2 { margin: 0; font-size: var(--hatch-type-heading); }
+.buyer-v2__home-heading .buyer-v2__card-go { text-decoration: none; }
+.buyer-v2__home-tag { padding: 4px 12px; border-radius: 999px; background: var(--web-yolk-soft); color: var(--web-gold); font-size: var(--hatch-type-meta); font-weight: var(--hatch-weight-strong); }
+.buyer-v2__home-new { display: flex; min-height: 260px; flex-direction: column; align-items: center; justify-content: center; gap: 10px; border: 1.5px dashed var(--web-rule); background: transparent; box-shadow: none; color: var(--buyer-muted); text-decoration: none; transition: color 160ms ease, border-color 160ms ease; }
+.buyer-v2__home-new:hover { border-color: var(--web-yolk); color: var(--buyer-ink); }
+.buyer-v2__home-new svg { width: 24px; height: 24px; }
+
 @keyframes buyer-shimmer { to { background-position: -200% 0; } }
 @keyframes buyer-spin { to { transform: rotate(360deg); } }
 
@@ -302,7 +321,7 @@
     border-radius: 999px;
   }
   .buyer-v2__mobile-nav .hui-icon-button svg { width: 18px; height: 18px; }
-  .buyer-v2__steps, .buyer-v2__examples, .buyer-v2__help-cards, .buyer-v2__timeline-section { grid-template-columns: 1fr; }
+  .buyer-v2__steps, .buyer-v2__examples, .buyer-v2__help-cards, .buyer-v2__timeline-section, .buyer-v2__home-start { grid-template-columns: 1fr; }
   .buyer-v2__timeline-section { gap: 20px; }
   .buyer-v2__auth-page { grid-template-columns: 1fr; grid-template-areas: "navbar" "form" "context"; padding: 0 16px 24px; }
   .buyer-v2__auth-navbar { min-height: 64px; }

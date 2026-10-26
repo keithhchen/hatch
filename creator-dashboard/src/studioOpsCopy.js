@@ -13,7 +13,6 @@ export const STUDIO_OPS_COPY = {
     ordersTitle: "订单",
     ordersBody: "客户购买你的 Agent 后产生的所有订单。",
     exportCsv: "导出 CSV",
-    exportUnavailable: "当前账户没有导出权限",
     filterAgent: "Agent",
     filterOrder: "订单状态",
     filterPayment: "支付状态",
@@ -132,8 +131,6 @@ export const STUDIO_OPS_COPY = {
     profileReadonly: "显示名称与用户名暂不支持在网页端修改。",
     languageTitle: "语言",
     languageBody: "界面语言会保存在当前浏览器中。",
-    accountTitle: "账户",
-    accountRole: "账户类型",
     accountId: "账户 ID",
     desktopTitle: "Hatch 桌面端",
     desktopBody: "在电脑上运行客户购买的 Agent，并管理本地文件。",
@@ -143,7 +140,6 @@ export const STUDIO_OPS_COPY = {
     signOut: "退出登录",
     signingOut: "正在退出",
 
-    role: { creator: "专家", user: "客户" },
     mode: { metered: "按次交付", unmetered: "不限次数" },
     status: {
       paid: "已支付", succeeded: "已支付", fulfilled: "已开通", delivered: "已交付",
@@ -194,7 +190,6 @@ export const STUDIO_OPS_COPY = {
     ordersTitle: "Orders",
     ordersBody: "Every order clients place for your Agents.",
     exportCsv: "Export CSV",
-    exportUnavailable: "This account cannot export orders",
     filterAgent: "Agent",
     filterOrder: "Order status",
     filterPayment: "Payment",
@@ -313,8 +308,6 @@ export const STUDIO_OPS_COPY = {
     profileReadonly: "Display name and username cannot be changed on the web yet.",
     languageTitle: "Language",
     languageBody: "Your interface language is saved in this browser.",
-    accountTitle: "Account",
-    accountRole: "Account type",
     accountId: "Account ID",
     desktopTitle: "Hatch desktop app",
     desktopBody: "Run purchased Agents on a computer and work with local files.",
@@ -324,7 +317,6 @@ export const STUDIO_OPS_COPY = {
     signOut: "Sign out",
     signingOut: "Signing out",
 
-    role: { creator: "Expert", user: "Client" },
     mode: { metered: "Per delivery", unmetered: "Unlimited" },
     status: {
       paid: "Paid", succeeded: "Paid", fulfilled: "Active", delivered: "Delivered",
@@ -360,7 +352,6 @@ export const STUDIO_OPS_COPY = {
     ordersTitle: "注文",
     ordersBody: "お客様があなたの Agent を購入した注文の一覧です。",
     exportCsv: "CSV を書き出す",
-    exportUnavailable: "このアカウントには書き出し権限がありません",
     filterAgent: "Agent",
     filterOrder: "注文ステータス",
     filterPayment: "支払い",
@@ -479,8 +470,6 @@ export const STUDIO_OPS_COPY = {
     profileReadonly: "表示名とユーザー名は現在 Web から変更できません。",
     languageTitle: "言語",
     languageBody: "表示言語はこのブラウザに保存されます。",
-    accountTitle: "アカウント",
-    accountRole: "アカウント種別",
     accountId: "アカウント ID",
     desktopTitle: "Hatch デスクトップアプリ",
     desktopBody: "購入された Agent をパソコンで実行し、ローカルのファイルを扱えます。",
@@ -490,7 +479,6 @@ export const STUDIO_OPS_COPY = {
     signOut: "ログアウト",
     signingOut: "ログアウトしています",
 
-    role: { creator: "エキスパート", user: "お客様" },
     mode: { metered: "納品ごと", unmetered: "無制限" },
     status: {
       paid: "支払い済み", succeeded: "支払い済み", fulfilled: "利用可能", delivered: "納品済み",

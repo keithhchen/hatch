@@ -28,13 +28,11 @@ test("account avatars share a gradient circular single-letter fallback", () => {
   assert.match(sharedUiStyles, /\.hui-avatar__fallback\s*\{[^}]*font-family:\s*var\(--hatch-font-ui\);[^}]*font-weight:\s*var\(--hatch-weight-bold\);/);
 });
 
-test("a non-Creator account is sent to the real Creator signup intent", () => {
-  assert.match(appSource, /profile\?\.role !== "creator"/);
-  assert.match(appSource, /Create your Hatch Expert account/);
+test("Studio opens for any signed-in account; signed-out visitors go to the one sign-up flow", () => {
+  assert.doesNotMatch(appSource, /\brole\b|RoleBoundary|WebChatRoleGate|creator-signup/);
   assert.match(appSource, /if \(sessionStatus !== "authenticated"\) \{\s+return <RouteRedirect to=\{`\/sign-up\?returnTo=/);
-  assert.match(appSource, /location\.navigate\(`\/sign-up\?returnTo=/);
-  assert.match(source, /const creatorIntent = returnPath === "\/studio" \|\| returnPath\.startsWith\("\/studio\/"\)/);
-  assert.match(source, /creatorIntent \? "\/v1\/auth\/creator-signup" : "\/v1\/auth\/signup"/);
+  assert.doesNotMatch(source, /creatorIntent|creator-signup|isExpert|\.role\b/);
+  assert.match(source, /params\.get\("returnTo"\) \|\| HOME_ROOT/);
 });
 
 test("buyer navigation uses a standard hamburger menu on narrow screens", () => {

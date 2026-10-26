@@ -6,7 +6,6 @@ import {
   activeFilterCount,
   dayBoundary,
   formatMinor,
-  hasCapability,
   orderShares,
   ordersQuery,
   payoutSetupState
@@ -47,12 +46,10 @@ test("orderShares sums recognized revenue and ignores reversed entries", () => {
   assert.deepEqual(orderShares({ revenue: [] }), { recognized: false, creator: null, hatch: null });
 });
 
-test("payout setup state and capability defaults follow the API contract", () => {
+test("payout setup state follows the API contract", () => {
   assert.equal(payoutSetupState({ setup_status: "unavailable", setup_available: false }), "unavailable");
   assert.equal(payoutSetupState({ setup_status: "required", setup_available: true }), "required");
   assert.equal(payoutSetupState({ setup_status: "complete", setup_available: true }), "complete");
-  assert.equal(hasCapability({ role: "creator", capabilities: [] }, "commerce:export", "creator"), true);
-  assert.equal(hasCapability({ role: "creator", capabilities: ["commerce:read"] }, "commerce:export", "creator"), false);
 });
 
 test("copy is complete and consistent across zh, en and ja", () => {

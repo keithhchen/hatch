@@ -10,7 +10,6 @@ import {
   formatDate,
   formatDateTime,
   formatMinor,
-  hasCapability,
   newIdempotencyKey,
   orderProductName,
   orderShares,
@@ -112,7 +111,7 @@ function ReasonDialog({ open, onOpenChange, title, body, label, hint, placeholde
 
 const EMPTY_FILTERS = { product: "", order: "", payment: "", delivery: "", refund: "", from: "", to: "" };
 
-export function StudioOrdersPage({ request, navigate, locale, profile }) {
+export function StudioOrdersPage({ request, navigate, locale }) {
   const copy = studioOpsCopy(locale);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [products, setProducts] = useState([]);
@@ -123,7 +122,6 @@ export function StudioOrdersPage({ request, navigate, locale, profile }) {
   const [moreBusy, setMoreBusy] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const filterCount = activeFilterCount(filters);
-  const canExport = hasCapability(profile, "commerce:export", "creator");
 
   useEffect(() => {
     let live = true;
@@ -193,9 +191,9 @@ export function StudioOrdersPage({ request, navigate, locale, profile }) {
         <Button className="sops-only-mobile" variant="secondary" size="compact" leading={<SlidersHorizontal aria-hidden="true" />} aria-expanded={showFilters} onClick={() => setShowFilters((value) => !value)}>
           {copy.filters}{filterCount ? ` · ${filterCount}` : ""}
         </Button>
-        {canExport && orders.length
+        {orders.length
           ? <Button asChild variant="secondary" size="compact" leading={<Download aria-hidden="true" />}><a href={exportHref} download>{copy.exportCsv}</a></Button>
-          : <Button variant="secondary" size="compact" leading={<Download aria-hidden="true" />} disabled title={canExport ? undefined : copy.exportUnavailable}>{copy.exportCsv}</Button>}
+          : <Button variant="secondary" size="compact" leading={<Download aria-hidden="true" />} disabled>{copy.exportCsv}</Button>}
       </>}
     />
 
@@ -267,14 +265,13 @@ export function StudioOrdersPage({ request, navigate, locale, profile }) {
 
 /* ---------- Order detail ---------- */
 
-export function StudioOrderDetailPage({ request, navigate, locale, profile, orderId }) {
+export function StudioOrderDetailPage({ request, navigate, locale, orderId }) {
   const copy = studioOpsCopy(locale);
   const [order, setOrder] = useState(null);
   const [status, setStatus] = useState("loading");
   const [error, setError] = useState(null);
   const [refundOpen, setRefundOpen] = useState(false);
   const [notice, setNotice] = useState("");
-  const canRefund = hasCapability(profile, "refund:create", "creator");
 
   const reload = useCallback(() => {
     let live = true;
@@ -335,7 +332,7 @@ export function StudioOrderDetailPage({ request, navigate, locale, profile, orde
       back={back}
       title={order.order_number}
       body={<span className="sops-head__meta"><Pill value={order.status} copy={copy} />{copy.orderPlaced(formatDateTime(placed, locale))}</span>}
-      actions={canRefund && order.actions?.can_request_refund
+      actions={order.actions?.can_request_refund
         ? <Button variant="secondary" size="compact" onClick={() => setRefundOpen(true)}>{copy.requestRefund}</Button>
         : null}
     />
@@ -404,7 +401,7 @@ export function StudioOrderDetailPage({ request, navigate, locale, profile, orde
 
 /* ---------- Earnings ---------- */
 
-export function StudioEarningsPage({ request, locale, profile }) {
+export function StudioEarningsPage({ request, locale }) {
   const copy = studioOpsCopy(locale);
   const [overview, setOverview] = useState({ status: "loading" });
   const [payouts, setPayouts] = useState({ status: "loading" });
@@ -413,7 +410,6 @@ export function StudioEarningsPage({ request, locale, profile }) {
   const [detail, setDetail] = useState(null);
   const [retryTarget, setRetryTarget] = useState(null);
   const [notice, setNotice] = useState("");
-  const canManage = hasCapability(profile, "payout:manage", "creator");
 
   const loadOverview = useCallback(() => {
     setOverview({ status: "loading" });
@@ -513,7 +509,7 @@ export function StudioEarningsPage({ request, locale, profile }) {
           {payoutData.account_status && setup !== "unavailable" ? <p className="sops-faint">{copy.payoutAccountStatus}: {statusLabel(copy, payoutData.account_status)}</p> : null}
           {connectError ? <p className="sops-inline-error" role="alert">{connectError.message}{connectError.request_id ? ` · ${copy.requestId(connectError.request_id)}` : ""}</p> : null}
         </div>
-        {setup !== "unavailable" && canManage ? <Button variant={setup === "required" ? "primary" : "secondary"} size="compact" loading={connecting} onClick={() => void connect()}>
+        {setup !== "unavailable" ? <Button variant={setup === "required" ? "primary" : "secondary"} size="compact" loading={connecting} onClick={() => void connect()}>
           {connecting ? copy.payoutConnecting : setup === "required" ? copy.payoutConnect : copy.payoutUpdateAccount}
         </Button> : null}
       </div> : null}
@@ -537,7 +533,7 @@ export function StudioEarningsPage({ request, locale, profile }) {
           <div className="sops-rows__meta">
             <Pill value={payout.status} copy={copy} />
             <button type="button" className="sops-link" onClick={() => void openDetail(payout)}>{copy.payoutDetail}</button>
-            {payout.status === "failed" && canManage ? <button type="button" className="sops-link" onClick={() => setRetryTarget(payout)}>{copy.payoutRetry}</button> : null}
+            {payout.status === "failed" ? <button type="button" className="sops-link" onClick={() => setRetryTarget(payout)}>{copy.payoutRetry}</button> : null}
           </div>
         </li>)}
       </ul> : <p className="sops-faint">{copy.payoutsEmpty}</p>}
@@ -557,7 +553,7 @@ export function StudioEarningsPage({ request, locale, profile }) {
           {detail.payout.failure ? <div><dt>{copy.payoutFailure}</dt><dd>{detail.payout.failure.message ?? detail.payout.failure.code}</dd></div> : null}
           <div><dt>{copy.payoutId}</dt><dd className="sops-break">{detail.payout.payout_id}</dd></div>
         </dl> : null}
-        {detail.status === "ready" && detail.payout.status === "failed" && canManage
+        {detail.status === "ready" && detail.payout.status === "failed"
           ? <div className="sops-form__actions"><Button size="compact" onClick={() => setRetryTarget(detail.payout)}>{copy.payoutRetry}</Button></div>
           : null}
       </DialogContent> : null}
@@ -624,13 +620,6 @@ export function StudioSettingsPage({ request, navigate, locale, profile }) {
         <div className="sops-segment" role="group" aria-label={copy.languageTitle}>
           {LOCALES.map((value) => <button key={value} type="button" lang={value} aria-pressed={locale === value} className={locale === value ? "is-active" : ""} onClick={() => setLocale(value)}>{LANGUAGE_NAMES[value]}</button>)}
         </div>
-      </section>
-
-      <section className="sops-card sops-section">
-        <h2>{copy.accountTitle}</h2>
-        <dl className="sops-dl">
-          <div><dt>{copy.accountRole}</dt><dd>{copy.role[user?.role] ?? user?.role}</dd></div>
-        </dl>
       </section>
 
       <section className="sops-card sops-section sops-row-card">
