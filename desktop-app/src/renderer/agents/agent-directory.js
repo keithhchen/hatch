@@ -19,6 +19,7 @@ export class AgentAccess {
     this.binding = Object.freeze(owned ? { productId: row.product_id } : { entitlementId: row.entitlement_id });
     this.identity = resolveCreatorIdentity({ access: row });
     this.briefFields = this.identity.briefSpec?.fields ?? [];
+    this.description = typeof row.product?.description === "string" ? row.product.description.trim() : "";
     Object.freeze(this);
   }
 

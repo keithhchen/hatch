@@ -151,15 +151,20 @@ describe("Desktop Library window", () => {
   let mounted;
   afterEach(() => act(() => mounted?.root.unmount()));
 
-  it("lists my Agents with their creators and offers more on the web", () => {
+  it("groups my Agents as acquired and published cards and offers more on the web", () => {
+    const acquired = new AgentAccess({ creator_id: creator.id, product_id: otherId, entitlement_id: "1aa7b10c-4db0-4d8a-8c2f-2e2c8cba1009", creator, product: { id: otherId, name: "Tax Helper", description: "Files your taxes." } });
     const app = new LibraryWindow();
-    app.session.setState({ phase: "signed-in", token: "tok", account: { id: "a", name: "Ada" }, agents: [agent, other], agentsStatus: "ready" });
+    app.session.setState({ phase: "signed-in", token: "tok", account: { id: "a", name: "Ada" }, agents: [agent, acquired], agentsStatus: "ready" });
     mounted = mount(app, Library);
-    const rows = [...mounted.container.querySelectorAll(".desk-library__agent")].map(row => row.textContent);
-    expect(rows).toHaveLength(2);
-    expect(rows[0]).toContain("Essay Coach");
-    expect(rows[0]).toContain("Ada");
+    const groups = [...mounted.container.querySelectorAll(".desk-library__group")];
+    expect(groups.map(group => group.querySelector("h2").textContent)).toEqual(["Acquired", "Published by Me"]);
+    expect(groups[0].textContent).toContain("Tax Helper");
+    expect(groups[0].querySelector(".desk-library__description").textContent).toBe("Files your taxes.");
+    expect(groups[1].textContent).toContain("Essay Coach");
+    expect(groups[1].textContent).toContain(creator.name);
     expect(mounted.container.textContent).toContain("Browse More Agents…");
+    act(() => app.session.setState({ agents: [acquired] }));
+    expect(mounted.container.textContent).toContain("Publish your first Agent in Studio");
     act(() => app.session.setState({ agents: [] }));
     expect(mounted.container.textContent).toContain("No Agents yet");
   });
