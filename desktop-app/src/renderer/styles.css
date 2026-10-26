@@ -21,7 +21,12 @@
   --desk-on-accent: #2a1f00;
   --desk-danger: #c4412b;
   --desk-pass: #2f7d4f;
-  --desk-focus: 0 0 0 3px rgba(245, 183, 0, .35);
+  /* Focus is neutral and thin, like AppKit: an outline for keyboard focus, a
+   * slightly darker 1px edge for a focused text field. Never a coloured glow. */
+  --desk-focus-ring: rgba(0, 0, 0, .42);
+  --desk-focus: 1.5px solid var(--desk-focus-ring);
+  --desk-field-focus: inset 0 0 0 1px rgba(0, 0, 0, .28);
+  --hui-focus: transparent;
   --desk-float: 0 0 0 .5px rgba(0, 0, 0, .12), 0 12px 32px rgba(0, 0, 0, .14);
   --desk-radius: 6px;
   --desk-radius-lg: 10px;
@@ -67,6 +72,8 @@
   --desk-hover: rgba(255, 255, 255, .07);
   --desk-selected: rgba(255, 255, 255, .1);
   --desk-accent-soft: rgba(245, 183, 0, .22);
+  --desk-focus-ring: rgba(255, 255, 255, .5);
+  --desk-field-focus: inset 0 0 0 1px rgba(255, 255, 255, .32);
   --desk-float: 0 0 0 .5px rgba(255, 255, 255, .14), 0 12px 32px rgba(0, 0, 0, .5);
 }
 
@@ -87,7 +94,8 @@ body { color: var(--desk-ink); background: var(--desk-sidebar); font: 13px/1.4 v
 img { -webkit-user-drag: none; }
 button, a { cursor: default; font: inherit; color: inherit; }
 :focus { outline: none; }
-:focus-visible { outline: none; box-shadow: var(--desk-focus); border-radius: var(--desk-radius); }
+:focus-visible { outline: var(--desk-focus); outline-offset: 1px; }
+input:focus-visible, textarea:focus-visible, select:focus-visible, [contenteditable]:focus-visible { outline: none; }
 svg { flex: 0 0 auto; }
 kbd { font: inherit; }
 .desk-root { height: 100%; }
@@ -269,7 +277,7 @@ kbd { font: inherit; }
   width: 100%; box-sizing: border-box; padding: 8px 10px; border: 0; border-radius: var(--desk-radius); color: var(--desk-ink);
   background: var(--desk-bg); box-shadow: inset 0 0 0 1px var(--desk-hairline); font: 13px/1.5 var(--desk-font); resize: vertical;
 }
-.desk-field textarea:focus, .desk-find input:focus { box-shadow: inset 0 0 0 1px var(--desk-accent), var(--desk-focus); }
+.desk-field textarea:focus, .desk-find input:focus { box-shadow: var(--desk-field-focus); }
 .desk-brief__actions { display: flex; justify-content: flex-end; gap: 8px; }
 .desk-form-error { margin: 0; color: var(--desk-danger); font-size: 12px; }
 .desk-find {
@@ -316,7 +324,8 @@ kbd { font: inherit; }
 .web-chat__notice { padding: 6px 6px 6px 12px; border-radius: var(--desk-radius-lg); background: var(--desk-raised); box-shadow: inset 0 0 0 1px var(--desk-hairline); font-size: 12px; font-weight: 500; }
 .web-chat__notice button { min-height: 24px; padding: 0 10px; color: var(--desk-ink) !important; background: var(--desk-fill); font-size: 12px; }
 .web-chat__composer { border: 0; border-radius: 12px; background: var(--desk-raised); box-shadow: inset 0 0 0 1px var(--desk-hairline); }
-.web-chat__composer:focus-within { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--desk-ink) 22%, transparent); }
+.web-chat__composer:focus-within { box-shadow: var(--desk-field-focus); }
+.web-chat__attach:focus-within { outline: none; }
 .web-chat__composer textarea { min-height: 40px; max-height: 200px; padding: 12px 14px 4px; font-size: 14px; line-height: 1.5; }
 .web-chat__images { padding: 10px 10px 0; }
 .web-chat__image-chip { min-height: 24px; padding-left: 8px; font-size: 12px; }
@@ -338,6 +347,10 @@ kbd { font: inherit; }
 .hui-theme-origin .hui-overlay { background: rgba(0, 0, 0, .12); backdrop-filter: none; -webkit-backdrop-filter: none; }
 .hui-theme-origin .hui-select-trigger { min-width: 160px; min-height: 26px; padding: 0 8px; border: 0; border-radius: var(--desk-radius); color: var(--desk-ink); background: var(--desk-fill); box-shadow: inset 0 0 0 .5px var(--desk-hairline); font-size: 13px; }
 .hui-theme-origin .hui-select-content { border-radius: 8px; background: var(--desk-raised); box-shadow: var(--desk-float); }
+/* No library glow rings: keyboard focus is the shared thin outline; fields darken their edge. */
+.hui-theme-origin :is(.hui-button, .hui-icon-button, .hui-checkbox, .hui-radio, .hui-switch, .hui-navigation-item, .hui-control--raised, [role="tab"]):focus-visible { box-shadow: none; outline: var(--desk-focus); outline-offset: 1px; }
+.hui-theme-origin .hui-select-trigger:not(.hui-control--raised):focus-visible { box-shadow: inset 0 0 0 .5px var(--desk-hairline); outline: var(--desk-focus); outline-offset: 1px; }
+.hui-theme-origin :is(.hui-input:focus, .hui-search:focus-within) { border-color: transparent; box-shadow: var(--desk-field-focus); outline: none; }
 .hui-theme-origin .hui-select-item[data-highlighted] { background: var(--desk-selected); box-shadow: none; }
 
 .desk-settings.hui-dialog { width: min(640px, calc(100vw - 48px)); padding: 0; border-radius: 12px; }
