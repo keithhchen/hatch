@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { AVATAR_SETTINGS_KEYS, STUDIO_OPS_COPY, avatarSettingsT, eventLabel, statusLabel } from "./studioOpsCopy.js";
+import { STUDIO_OPS_COPY, eventLabel, statusLabel } from "./studioOpsCopy.js";
 import {
   ORDER_FILTER_OPTIONS,
   activeFilterCount,
@@ -59,7 +59,6 @@ test("copy is complete and consistent across zh, en and ja", () => {
   const en = shape(STUDIO_OPS_COPY.en);
   for (const locale of ["zh", "ja"]) {
     assert.deepEqual(shape(STUDIO_OPS_COPY[locale]), en, `${locale} copy keys match en`);
-    for (const key of AVATAR_SETTINGS_KEYS) assert.ok(STUDIO_OPS_COPY[locale].adapter[key], `${locale} avatar key ${key}`);
   }
   for (const [locale, copy] of Object.entries(STUDIO_OPS_COPY)) {
     const strings = JSON.stringify(copy, (key, value) => typeof value === "function" ? value(1) : value);
@@ -68,8 +67,6 @@ test("copy is complete and consistent across zh, en and ja", () => {
   for (const value of Object.values(ORDER_FILTER_OPTIONS).flat()) {
     for (const locale of ["zh", "en", "ja"]) assert.ok(STUDIO_OPS_COPY[locale].status[value], `${locale} status ${value}`);
   }
-  assert.equal(avatarSettingsT("zh")("Upload photo"), "上传头像");
-  assert.equal(avatarSettingsT("en")("Upload photo"), "Upload photo");
   assert.equal(statusLabel(STUDIO_OPS_COPY.ja, "refunded"), "返金済み");
   assert.equal(eventLabel(STUDIO_OPS_COPY.en, "custom.event"), "custom.event");
 });

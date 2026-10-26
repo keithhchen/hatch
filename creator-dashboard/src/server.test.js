@@ -806,7 +806,8 @@ test("retired buyer routes 301 to /explore and /explore/orders at the routing bo
     ["/library/ent-1", "/explore"],
     ["/orders?status=pending", "/explore/orders?status=pending"],
     ["/orders/HAT-1", "/explore/orders/HAT-1"],
-    ["/orders/HAT-1/success", "/explore/orders/HAT-1/success"]
+    ["/orders/HAT-1/success", "/explore/orders/HAT-1/success"],
+    ["/studio/settings", "/account"]
   ]) {
     const response = await fetch(`${serverUrl(api)}${from}`, { redirect: "manual" });
     assert.equal(response.status, 301, from);

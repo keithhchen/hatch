@@ -4488,6 +4488,7 @@ function ageMs(value, nowMs) {
 export function retiredPortalRedirect(pathname) {
   if (pathname === "/home" || pathname === "/library" || pathname.startsWith("/library/")) return "/explore";
   if (pathname === "/orders" || pathname.startsWith("/orders/")) return `/explore${pathname}`;
+  if (pathname === "/studio/settings") return "/account";
   return null;
 }
 

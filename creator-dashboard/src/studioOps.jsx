@@ -1,9 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Dialog, DialogContent } from "@hatch/ui";
-import { ArrowLeft, ChevronRight, Download, Landmark, LogOut, MonitorDown, ReceiptText, SlidersHorizontal, Wallet } from "lucide-react";
-import { AccountAvatarSettings } from "./AccountAvatarSettings.jsx";
-import { LOCALES, useLocale } from "./locale.jsx";
-import { avatarSettingsT, eventLabel, statusLabel, studioOpsCopy } from "./studioOpsCopy.js";
+import { ArrowLeft, ChevronRight, Download, Landmark,  ReceiptText, SlidersHorizontal, Wallet } from "lucide-react";
+import { eventLabel, statusLabel, studioOpsCopy } from "./studioOpsCopy.js";
 import {
   ORDER_FILTER_OPTIONS,
   activeFilterCount,
@@ -20,7 +18,6 @@ import {
 import "./studioOps.css";
 
 const PAGE_SIZE = 25;
-const LANGUAGE_NAMES = { zh: "中文", en: "English", ja: "日本語" };
 
 /* ---------- shared pieces ---------- */
 
@@ -573,69 +570,3 @@ export function StudioEarningsPage({ request, locale }) {
   </div>;
 }
 
-/* ---------- Settings ---------- */
-
-export function StudioSettingsPage({ request, navigate, locale, profile }) {
-  const copy = studioOpsCopy(locale);
-  const { setLocale } = useLocale();
-  const [user, setUser] = useState(profile ?? null);
-  const [signingOut, setSigningOut] = useState(false);
-  const [signOutError, setSignOutError] = useState(null);
-  const avatarT = useMemo(() => avatarSettingsT(locale), [locale]);
-
-  useEffect(() => {
-    let live = true;
-    request("/v1/creator/me").then((payload) => { if (live) setUser(payload); }).catch(() => undefined);
-    return () => { live = false; };
-  }, [request]);
-
-  async function signOut() {
-    setSigningOut(true);
-    setSignOutError(null);
-    try {
-      await request("/v1/auth/logout", { method: "POST" });
-      window.location.assign("/sign-in");
-    } catch (cause) {
-      setSignOutError(cause);
-      setSigningOut(false);
-    }
-  }
-
-  return <div className="sops-page">
-    <PageHead title={copy.settingsTitle} body={copy.settingsBody} />
-    <div className="sops-settings">
-      <section className="sops-card sops-section">
-        <h2>{copy.profileTitle}</h2>
-        <AccountAvatarSettings user={user} onUserUpdated={setUser} t={avatarT} />
-        <dl className="sops-dl">
-          <div><dt>{copy.profileName}</dt><dd>{user?.display_name}</dd></div>
-          {user?.handle && !/^@?[0-9a-f]{8}-[0-9a-f]{4}-/i.test(user.handle) ? <div><dt>{copy.profileHandle}</dt><dd className="sops-break">{user.handle}</dd></div> : null}
-        </dl>
-        <p className="sops-faint sops-note">{copy.profileReadonly}</p>
-      </section>
-
-      <section className="sops-card sops-section">
-        <h2>{copy.languageTitle}</h2>
-        <p className="sops-faint">{copy.languageBody}</p>
-        <div className="sops-segment" role="group" aria-label={copy.languageTitle}>
-          {LOCALES.map((value) => <button key={value} type="button" lang={value} aria-pressed={locale === value} className={locale === value ? "is-active" : ""} onClick={() => setLocale(value)}>{LANGUAGE_NAMES[value]}</button>)}
-        </div>
-      </section>
-
-      <section className="sops-card sops-section sops-row-card">
-        <span className="sops-state__icon" aria-hidden="true"><MonitorDown /></span>
-        <div><h2>{copy.desktopTitle}</h2><p className="sops-faint">{copy.desktopBody}</p></div>
-        <Button asChild variant="secondary" size="compact"><a href="/download">{copy.desktopAction}</a></Button>
-      </section>
-
-      <section className="sops-card sops-section sops-row-card">
-        <span className="sops-state__icon" aria-hidden="true"><LogOut /></span>
-        <div>
-          <h2>{copy.signOutTitle}</h2><p className="sops-faint">{copy.signOutBody}</p>
-          {signOutError ? <p className="sops-inline-error" role="alert">{signOutError.message}</p> : null}
-        </div>
-        <Button variant="secondary" size="compact" loading={signingOut} onClick={() => void signOut()}>{signingOut ? copy.signingOut : copy.signOut}</Button>
-      </section>
-    </div>
-  </div>;
-}
