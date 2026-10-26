@@ -84,11 +84,6 @@ export const webChatCopy = Object.freeze({
     composerHint: "Enter to send, Shift + Enter for a new line",
     briefIntro: "This information is shared with {agent} when the conversation starts. Optional fields can be left blank.",
     noDetails: "No details",
-    roleGatePill: "Client access",
-    roleGateTitle: "This page is for client accounts",
-    roleGateBody: "You are signed in with an expert account. To preview your own AI, use Studio, or sign in with a client account.",
-    goToStudio: "Open Studio",
-    switchAccount: "Sign in with another account"
   }),
   zh: Object.freeze({
     loading: "正在加载…",
@@ -175,11 +170,6 @@ export const webChatCopy = Object.freeze({
     composerHint: "Enter 发送，Shift + Enter 换行",
     briefIntro: "以下信息将在对话开始时提供给 {agent}。选填项可留空。",
     noDetails: "无详细信息",
-    roleGatePill: "客户专用",
-    roleGateTitle: "此页面供客户账户使用",
-    roleGateBody: "当前登录的是专家账户。如需预览自己的 AI，请前往 Studio，或使用客户账户登录。",
-    goToStudio: "打开 Studio",
-    switchAccount: "使用其他账户登录"
   }),
   ja: Object.freeze({
     loading: "読み込み中…",
@@ -266,11 +256,6 @@ export const webChatCopy = Object.freeze({
     composerHint: "Enter で送信、Shift + Enter で改行",
     briefIntro: "以下の情報は会話の開始時に{agent}へ共有されます。任意項目は空欄のままでも構いません。",
     noDetails: "詳細はありません",
-    roleGatePill: "お客様専用",
-    roleGateTitle: "このページはお客様アカウント専用です",
-    roleGateBody: "現在、専門家アカウントでログインしています。ご自身のAIをプレビューするには Studio をご利用いただくか、お客様アカウントでログインしてください。",
-    goToStudio: "Studio を開く",
-    switchAccount: "別のアカウントでログイン"
   })
 });
 

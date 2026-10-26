@@ -223,15 +223,16 @@ export default function WebChatPage({ productId, conversationId: routedConversat
     setError(null);
     setStatus("checkingSubscription");
     request("/v1/user/product-access").then(async payload => {
-      const entitlement = payload.creator_agents?.find(entry => entry.product_id === productId);
-      if (!entitlement) {
+      const access = payload.creator_agents?.find(entry => entry.product_id === productId);
+      if (!access) {
         const detail = await request(`/v1/public/products/${encodeURIComponent(productId)}`);
         if (!detail.product) throw new Error("Public product detail is missing");
         if (live) setPublicProduct(detail.product);
         return;
       }
       controller = new ConversationController({
-        transport: new WebConversationTransport(request, { entitlement_id: entitlement.entitlement_id }),
+        // Owned Agents have no entitlement: the Runtime authorizes the owner by product_id.
+        transport: new WebConversationTransport(request, access.entitlement_id ? { entitlement_id: access.entitlement_id } : { product_id: productId }),
         attachments,
         tools: new UnavailableToolExecutor(),
         draftScope: productId,
@@ -239,7 +240,7 @@ export default function WebChatPage({ productId, conversationId: routedConversat
       });
       controller.open(routedConversationRef.current ?? "");
       await controller.loadLibrary();
-      if (live) setWorkspace({ controller, access: entitlement });
+      if (live) setWorkspace({ controller, access });
     }).catch(cause => { if (live) { setError(cause); setStatus("unableToOpenChat"); } });
     return () => {
       live = false;
