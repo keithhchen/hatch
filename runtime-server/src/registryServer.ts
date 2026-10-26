@@ -654,6 +654,21 @@ async function route(
     sendAuthJson(response, 200, accountPublic(updated));
     return;
   }
+  // A signed-in client mints an independent session for another device
+  // (the Dashboard hands one to Desktop after browser sign-in). Revoking
+  // either session never ends the other. Only a live session can do this.
+  if (url.pathname === "/v1/auth/sessions" && request.method === "POST") {
+    const lease = beginSessionQuery(request, response, context);
+    if (!lease) return;
+    try {
+      const current = await context.accounts.resolveSession(bearer(request));
+      if (!current) { sendAuthJson(response, 401, { detail: "A valid account session is required." }); return; }
+      sendAuthJson(response, 201, sessionResponse(current.account, await context.accounts.createSession(current.account)));
+    } finally {
+      lease.release();
+    }
+    return;
+  }
   if (url.pathname === "/v1/auth/logout" && request.method === "POST") {
     const lease = beginSessionQuery(request, response, context);
     if (!lease) return;

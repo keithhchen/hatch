@@ -170,6 +170,13 @@ test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () =
     assert.equal(oversizedPassword.status, 400);
     assert.equal(oversizedPassword.headers.get("cache-control"), "no-store");
 
+    const minted = await fetch(`${base}/v1/auth/sessions`, { method: "POST", headers: { authorization: `Bearer ${auth.session.token}` } });
+    assert.equal(minted.status, 201);
+    const device = await minted.json() as { session: { token: string }; account: { id: string } };
+    assert.notEqual(device.session.token, auth.session.token);
+    assert.equal(device.account.id, auth.account.id);
+    assert.equal((await fetch(`${base}/v1/auth/sessions`, { method: "POST" })).status, 401);
+    assert.equal((await fetch(`${base}/v1/auth/sessions`, { method: "POST", headers: { authorization: `Bearer ${legacy}` } })).status, 401);
     const logout = await fetch(`${base}/v1/auth/logout`, {
       method: "POST",
       headers: { authorization: `Bearer ${auth.session.token}` }
@@ -177,6 +184,8 @@ test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () =
     assert.equal(logout.status, 204);
     const revoked = await fetch(`${base}/v1/auth/me`, { headers: { authorization: `Bearer ${auth.session.token}` } });
     assert.equal(revoked.status, 401);
+    const deviceMe = await fetch(`${base}/v1/auth/me`, { headers: { authorization: `Bearer ${device.session.token}` } });
+    assert.equal(deviceMe.status, 200);
   } finally {
     await registry.close();
   }

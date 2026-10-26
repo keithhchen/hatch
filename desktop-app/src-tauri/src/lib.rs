@@ -2165,7 +2165,9 @@ fn is_allowed_browse_url(url: &str) -> bool {
     parsed.scheme() == "https"
         && parsed.host_str() == Some("hatch.tokenquadrant.cn")
         && (parsed.path() == "/explore"
+            || parsed.path() == "/account"
             || parsed.path() == "/account/help"
+            || parsed.path() == "/desktop/sign-in"
             || is_uuid_route(parsed.path(), "/products/")
             || is_uuid_route(parsed.path(), "/creators/"))
 }
@@ -3576,6 +3578,12 @@ mod tests {
     fn help_is_an_allowed_browse_destination() {
         assert!(is_allowed_browse_url(
             "https://hatch.tokenquadrant.cn/account/help"
+        ));
+        assert!(is_allowed_browse_url(
+            "https://hatch.tokenquadrant.cn/account"
+        ));
+        assert!(is_allowed_browse_url(
+            "https://hatch.tokenquadrant.cn/desktop/sign-in?state=abc&code_challenge=def"
         ));
         assert!(!is_allowed_browse_url(
             "https://hatch.tokenquadrant.cn/account/orders"
