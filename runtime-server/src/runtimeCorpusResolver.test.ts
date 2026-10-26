@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { materializeAgentCorpus } from "./agentCorpusMaterialization.js";
-import { RuntimeReleaseAgentCorpusResolver } from "./runtimeCorpusResolver.js";
+import { AgentReleaseUnavailableError, RuntimeReleaseAgentCorpusResolver } from "./runtimeCorpusResolver.js";
 
 const CREATOR_ID = "11111111-1111-4111-8111-111111111111";
 const PRODUCT_ID = "22222222-2222-4222-8222-222222222222";
@@ -95,3 +95,13 @@ test("Runtime resolves the installed agent.json as the same corpus used for turn
 function digest(value: string): string {
   return `sha256:${createHash("sha256").update(value, "utf8").digest("hex")}`;
 }
+
+test("a Product without a live release is reported as unavailable, not as a Registry failure", async () => {
+  const resolver = new RuntimeReleaseAgentCorpusResolver({
+    registryUrl: "http://registry.test",
+    serviceToken: "runtime-service-token",
+    corpusRoot: os.tmpdir(),
+    fetchImpl: async () => new Response(JSON.stringify({ detail: "No live release exists for this Product." }), { status: 404 })
+  });
+  await assert.rejects(resolver.resolve(CREATOR_ID, PRODUCT_ID), AgentReleaseUnavailableError);
+});

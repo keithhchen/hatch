@@ -79,7 +79,7 @@ import {
   type AgentCorpus,
   type AgentCorpusResolverLike
 } from "./agentCorpus.js";
-import { RuntimeReleaseAgentCorpusResolver } from "./runtimeCorpusResolver.js";
+import { AgentReleaseUnavailableError, RuntimeReleaseAgentCorpusResolver } from "./runtimeCorpusResolver.js";
 import {
   discoverSkills,
   includeSkillInstructions,
@@ -929,7 +929,15 @@ async function handleHttpRequest(
           signal?.throwIfAborted();
           assertEntitlementMatchesIdentity(claims, entitlement);
           if (!agentCorpusResolver) throw new Error("Current Agent Corpus resolver is unavailable");
-          const resolved = await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.product_id, signal);
+          let resolved: Awaited<ReturnType<AgentCorpusResolver["resolve"]>>;
+          try {
+            resolved = await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.product_id, signal);
+          } catch (error) {
+            // A withdrawn Agent is not chat-able; it leaves the list like it
+            // leaves the Web library. Every other failure still fails the call.
+            if (error instanceof AgentReleaseUnavailableError) continue;
+            throw error;
+          }
           if (resolved.corpus.product.id !== entitlement.product_id || resolved.corpus.creator.id !== entitlement.creator_id) {
             throw new Error(`Entitlement ${entitlement.entitlement_id} does not match its current Agent Corpus`);
           }

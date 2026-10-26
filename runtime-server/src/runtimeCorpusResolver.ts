@@ -52,6 +52,14 @@ export type RuntimeReleaseAgentCorpusResolverOptions = {
  * Postgres live pointer. Runtime never downloads Corpus assets or creates a
  * Knowledge index while serving a request.
  */
+/** The Product has no live published release (withdrawn or never published). */
+export class AgentReleaseUnavailableError extends Error {
+  constructor(pathname: string) {
+    super(`No live release exists for ${pathname}`);
+    this.name = "AgentReleaseUnavailableError";
+  }
+}
+
 export class RuntimeReleaseAgentCorpusResolver implements AgentCorpusResolverLike {
   private readonly fetchImpl: typeof fetch;
   private readonly registryUrl: string;
@@ -178,6 +186,7 @@ export class RuntimeReleaseAgentCorpusResolver implements AgentCorpusResolverLik
       }
     );
     const payload = await readBoundedJsonObject(response);
+    if (response.status === 404) throw new AgentReleaseUnavailableError(pathname);
     if (!response.ok) {
       const detail = typeof payload.detail === "string" ? payload.detail : `HTTP ${response.status}`;
       throw new Error(`Registry runtime release lookup failed: ${detail}`);
