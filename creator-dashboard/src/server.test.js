@@ -1070,6 +1070,9 @@ test("an owner reaches their published Agent by product_id and cannot acquire it
   assert.equal(agents[0].product_id, catalogAgent.product_id);
   assert.equal(agents[0].creator_id, catalogAgent.creator_id);
   assert.equal("entitlement_id" in agents[0], false);
+  // An owner starts tasks with the same brief an acquirer answers.
+  assert.deepEqual(agents[0].brief_spec, catalogAgent.brief_spec);
+  assert.deepEqual(agents[0].product.brief_spec, catalogAgent.brief_spec);
 
   for (const [pathname, body] of [
     ["/v1/checkout-sessions", { product_id: catalogAgent.product_id }],

@@ -1321,8 +1321,11 @@ export async function createDashboardApp(options = {}) {
               product_id: product.product_id,
               name: product.product_name,
               description: product.product_description,
-              promise: product.product_promise
+              promise: product.product_promise,
+              ...(product.brief_spec ? { brief_spec: structuredClone(product.brief_spec) } : {})
             },
+            // Same task brief as an acquired row: the Runtime requires its answers.
+            ...(product.brief_spec ? { brief_spec: structuredClone(product.brief_spec) } : {}),
             presentation: product.presentation ?? {}
           }));
         return send(response, 200, { creator_agents: [...ownedAgents, ...creatorAgents] });
