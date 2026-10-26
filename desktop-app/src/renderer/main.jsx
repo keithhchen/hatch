@@ -5,7 +5,7 @@ import { HatchUIProvider } from "@hatch/ui";
 import { PLATFORM } from "./config.js";
 import { isNative } from "./native/bridge.js";
 import { installNativeContextMenus } from "./native/context-menu.js";
-import { App } from "./shell/App.jsx";
+import { ChatApp, LibraryApp } from "./shell/App.jsx";
 import { WelcomeWindow } from "./shell/WelcomeWindow.jsx";
 import "./styles.css";
 
@@ -35,11 +35,13 @@ root.dataset.platform = PLATFORM;
 if (isNative()) root.dataset.native = "";
 installNativeContextMenus();
 
-const welcome = new URLSearchParams(location.search).get("window") === "welcome";
+/** Window kinds: the sign-in window, an Agent's Chat window, else the Library (`main`). */
+const WINDOWS = { welcome: WelcomeWindow, chat: ChatApp };
+const Window = WINDOWS[new URLSearchParams(location.search).get("window")] ?? LibraryApp;
 createRoot(document.getElementById("root")).render(
   <RendererErrorBoundary>
     <HatchUIProvider className="desk-root">
-      {welcome ? <WelcomeWindow /> : <App />}
+      <Window />
     </HatchUIProvider>
   </RendererErrorBoundary>
 );

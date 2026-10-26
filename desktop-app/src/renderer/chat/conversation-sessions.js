@@ -1,16 +1,49 @@
 import { ConversationController, createTextRevealController } from "@hatch/chat";
 import { DesktopConversationTransport } from "./desktop-transport.js";
 import { NativeAttachmentSource } from "./native-attachments.js";
-import { NativeDraftStore, openDraftSession } from "./native-drafts.js";
 import { NativeToolExecutor } from "./native-tools.js";
 import { WorkspaceAccess } from "./workspace.js";
 
 const MAX_IDLE_SESSIONS = 6;
 
+/**
+ * The Desktop folder gate on the shared controller: a conversation sends
+ * (and starts its brief task) only while it has a granted folder. Unsent
+ * text and files stay in the controller's memory until then.
+ */
+export class FolderGatedController extends ConversationController {
+  constructor({ workspace, ...options }) {
+    super(options);
+    this.workspace = workspace;
+  }
+
+  get canSend() {
+    return Boolean(this.workspace.grant);
+  }
+
+  send() {
+    return this.canSend ? super.send() : Promise.resolve();
+  }
+
+  /** Start the brief's first turn once a folder is granted (now or later). */
+  startTaskWhenGranted(conversationId) {
+    const start = () => {
+      this.taskStart = conversationId;
+      if (this.connection?.ready) this.reconnect();
+    };
+    if (this.canSend) return start();
+    const stop = this.workspace.subscribe(() => {
+      if (!this.canSend) return;
+      stop();
+      start();
+    });
+  }
+}
+
 /** One live conversation in this window: its controller and native resources. */
 export class ConversationSession {
-  constructor({ agent, conversationId, controller, tools, workspace, drafts, release }) {
-    Object.assign(this, { agent, conversationId, controller, tools, workspace, drafts, release });
+  constructor({ agent, conversationId, controller, tools, workspace, release }) {
+    Object.assign(this, { agent, conversationId, controller, tools, workspace, release });
     this.key = ConversationSessions.key(agent, conversationId);
     this.lastUsed = Date.now();
   }
@@ -22,7 +55,6 @@ export class ConversationSession {
   async dispose() {
     this.controller.dispose();
     await this.tools.dispose();
-    await this.drafts.close().catch(() => {});
     await this.release().catch(() => {});
   }
 }
@@ -92,24 +124,16 @@ export class ConversationSessions {
     const accountId = this.account.id;
     const release = await this.owner.claim({ accountId, conversationId, accessKey: agent.key });
     if (!release) return null;
-    let draftSession;
-    try {
-      draftSession = await openDraftSession(this.invoke, { accountId, conversationId });
-    } catch (error) {
-      await release().catch(() => {});
-      throw error;
-    }
     const workspace = new WorkspaceAccess(this.invoke, conversationId);
-    void workspace.restore(inheritWorkspace ?? {});
+    // The folder is known before the live session says hello.
+    await workspace.restore(inheritWorkspace ?? {});
     const tools = new NativeToolExecutor({ invoke: this.invoke, conversationId, workspace, approvals: this.approvals, agentKey: agent.key });
-    const drafts = new NativeDraftStore(draftSession);
     const visible = () => this.isVisible(agent, conversationId);
-    const controller = new ConversationController({
+    const controller = new FolderGatedController({
+      workspace,
       transport: this.transportFor(agent),
       attachments: this.attachments,
       tools,
-      drafts,
-      draftScope: conversationId,
       describeError: this.describeError,
       textReveal: ({ onReveal }) => createTextRevealController({
         onReveal,
@@ -117,9 +141,10 @@ export class ConversationSessions {
           || Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches)
       })
     });
-    const session = new ConversationSession({ agent, conversationId, controller, tools, workspace, drafts, release });
+    tools.projectApproval = (toolCallId, decision) => controller.markApproval(toolCallId, decision);
+    const session = new ConversationSession({ agent, conversationId, controller, tools, workspace, release });
     this.sessions.set(session.key, session);
-    if (startTask) controller.taskStart = conversationId;
+    if (startTask) controller.startTaskWhenGranted(conversationId);
     controller.open(conversationId);
     this.evictIdle(session.key);
     return session;

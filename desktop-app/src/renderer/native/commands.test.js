@@ -3,7 +3,9 @@ import { COMMAND, parseNativeCommand, routeNativeCommand } from "./commands.js";
 
 describe("native menu commands", () => {
   it("accepts only known command ids and Agent 1–9", () => {
-    expect(parseNativeCommand({ id: COMMAND.SEARCH, source: "menu" })).toEqual({ id: "conversation.search" });
+    expect(parseNativeCommand({ id: COMMAND.FIND, source: "menu" })).toEqual({ id: "edit.find" });
+    expect(parseNativeCommand({ id: "conversation.search" })).toBeNull();
+    expect(parseNativeCommand({ id: "conversation.openWindow" })).toBeNull();
     expect(parseNativeCommand({ id: "agent.select.3" })).toEqual({ id: "agent.select", agentIndex: 2 });
     expect(parseNativeCommand({ id: "agent.select.0" })).toBeNull();
     expect(parseNativeCommand({ id: "inspector.toggle" })).toBeNull();

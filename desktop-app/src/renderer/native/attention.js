@@ -1,10 +1,11 @@
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
-import { isNative, nativeInvoke, nativeWindow } from "./bridge.js";
+import { isNative, nativeInvoke } from "./bridge.js";
 
 /**
  * OS attention for pending approvals: the Dock/taskbar badge carries the
- * count, and an approval in a conversation the user is not looking at posts
- * a system notification and asks for window attention.
+ * count (native sums every Chat window's count), and an approval in a
+ * conversation the user is not looking at posts a system notification and
+ * asks for window attention.
  */
 export class ApprovalAttention {
   constructor() {
@@ -12,7 +13,7 @@ export class ApprovalAttention {
   }
 
   setPendingCount(count) {
-    void nativeWindow.setBadgeCount(count);
+    if (isNative()) void nativeInvoke("set_window_attention", { count }).catch(() => {});
   }
 
   async announce({ title, body }) {

@@ -1,4 +1,4 @@
-import { CheckMenuItem, Menu, MenuItem, PredefinedMenuItem } from "@tauri-apps/api/menu";
+import { CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu } from "@tauri-apps/api/menu";
 import { isNative } from "./bridge.js";
 
 const EDITABLE = "input, textarea, select, [contenteditable=''], [contenteditable='true'], [role='textbox']";
@@ -13,13 +13,14 @@ const SEPARATOR = "separator";
 async function buildItem(item) {
   if (item === SEPARATOR) return PredefinedMenuItem.new({ item: "Separator" });
   if (item.predefined) return PredefinedMenuItem.new({ item: item.predefined });
+  if (item.items) return Submenu.new({ text: item.label, items: await Promise.all(item.items.map(buildItem)) });
   if (item.checked !== undefined) return CheckMenuItem.new({ text: item.label, checked: item.checked, enabled: item.enabled ?? true, action: () => void item.action?.() });
   return MenuItem.new({ text: item.label, enabled: item.enabled ?? true, action: () => void item.action?.() });
 }
 
 /**
  * Pop up a native menu at the pointer. Items are `{ label, action, enabled, checked? }`,
- * `{ predefined: "Copy" }` or the string "separator".
+ * `{ label, items }` (a submenu), `{ predefined: "Copy" }` or the string "separator".
  */
 export async function popupNativeMenu(items) {
   if (!isNative()) return;

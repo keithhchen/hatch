@@ -5,7 +5,7 @@ import { BrowserSignIn } from "../auth/browser-sign-in.js";
 import { errorText } from "../i18n.js";
 import { emitNativeEvent, nativeInvoke, onNativeEvent, openInBrowser, revealWhenPainted } from "../native/bridge.js";
 import { useObservable } from "../observable.js";
-import { AUTH_SESSION_EVENT } from "./desktop-window.js";
+import { AUTH_SESSION_EVENT } from "./window-controller.js";
 import { AppPreferences } from "./preferences.js";
 
 /**

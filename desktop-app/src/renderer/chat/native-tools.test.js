@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ApprovalCenter } from "./approvals.js";
+import { LOCAL_TOOLS } from "./local-tools.js";
 import { NativeToolExecutor, localToolDeadlineMs } from "./native-tools.js";
 import { WorkspaceAccess } from "./workspace.js";
 
@@ -30,11 +31,11 @@ async function executor(options) {
 }
 
 describe("native tool executor", () => {
-  it("advertises local tools only with a verified folder grant", async () => {
+  it("always declares every local tool (sending already requires a folder)", async () => {
     const { tools, workspace } = await executor();
-    expect(tools.localTools).toContain("file_read");
+    expect(tools.localTools).toEqual([...LOCAL_TOOLS]);
     await workspace.revoke();
-    expect(tools.localTools).toEqual([]);
+    expect(tools.localTools).toEqual([...LOCAL_TOOLS]);
   });
 
   it("registers the run's native context before the message and executes inside it", async () => {
@@ -46,8 +47,10 @@ describe("native tool executor", () => {
     expect(calls.find(([command]) => command === "execute_tool_call")[1]).toMatchObject({ contextId: "ctx_run_1", runId: "run_1" });
   });
 
-  it("relays the user's decision for a call the native gate holds", async () => {
+  it("relays the user's decision for a call the native gate holds and shows it on the tool row", async () => {
     const { tools, approvals, calls } = await executor({ approval: true });
+    const projected = [];
+    tools.projectApproval = (toolCallId, decision) => projected.push([toolCallId, decision]);
     await tools.prepareRun({ conversationId: "conv_1", runId: "run_1" });
     const running = tools.execute({ run_id: "run_1", tool_call_id: "t2", name: "file_write", arguments: { path: "a.md" } });
     await vi.waitFor(() => expect(approvals.getState().pending).toHaveLength(1));
@@ -55,6 +58,7 @@ describe("native tool executor", () => {
     approvals.getState().pending[0].decide(false);
     await running;
     expect(calls.some(([command, args]) => command === "deny_pending_tool_call" && args.toolCallId === "t2")).toBe(true);
+    expect(projected).toEqual([["t2", "pending"], ["t2", "denied"]]);
     expect(approvals.getState().pending).toEqual([]);
   });
 

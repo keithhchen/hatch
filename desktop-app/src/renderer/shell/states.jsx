@@ -1,5 +1,5 @@
 import React from "react";
-import { Compass, Plus, RotateCw, WifiOff } from "lucide-react";
+import { Compass, Library, Plus, RotateCw, WifiOff } from "lucide-react";
 import { Avatar } from "@hatch/ui";
 import { errorText } from "../i18n.js";
 import { useDesktop } from "./context.js";
@@ -53,7 +53,17 @@ export function AgentWelcome({ agent }) {
     <h2>{identity.productName}</h2>
     <p className="desk-empty__byline">{identity.creatorName}</p>
     {identity.promise || identity.description ? <p className="selectable">{identity.promise || identity.description}</p> : null}
-    <button type="button" className="desk-button desk-button--primary" onClick={() => app.newConversation(agent)}><Plus aria-hidden="true" />{t("startConversation")}</button>
+    <button type="button" className="desk-button desk-button--primary" onClick={() => app.newConversation()}><Plus aria-hidden="true" />{t("startConversation")}</button>
+  </div>;
+}
+
+/** The window's Agent is no longer in this account's Library (withdrawn or access ended). */
+export function AgentUnavailable() {
+  const { app, t } = useDesktop();
+  return <div className="desk-empty">
+    <h2>{t("empty.agentUnavailable.title")}</h2>
+    <p>{t("empty.agentUnavailable.body")}</p>
+    <button type="button" className="desk-button" onClick={() => app.showLibrary()}><Library aria-hidden="true" />{t("library.show")}</button>
   </div>;
 }
 

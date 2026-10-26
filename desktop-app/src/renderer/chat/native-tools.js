@@ -28,13 +28,20 @@ export class NativeToolExecutor extends ToolExecutor {
   constructor({ invoke, conversationId, workspace, approvals, agentKey }) {
     super();
     Object.assign(this, { invoke, conversationId, workspace, approvals, agentKey });
+    /** Shows the gate's state on the tool's row (the controller's markApproval). */
+    this.projectApproval = () => {};
     this.contexts = new Map();
     this.running = new Map();
   }
 
-  /** Without a folder grant the conversation offers no local tools. */
+  /**
+   * Desktop always declares every local tool, in hello and in each message:
+   * a conversation cannot send without a granted folder (the folder gate), so
+   * the Runtime always knows this client has local tools — also when a
+   * conversation continues here after the Web (which declares none).
+   */
   get localTools() {
-    return this.workspace.grant ? [...LOCAL_TOOLS] : [];
+    return [...LOCAL_TOOLS];
   }
 
   async prepareRun({ conversationId, runId }) {
@@ -95,7 +102,9 @@ export class NativeToolExecutor extends ToolExecutor {
       this.running.set(request.tool_call_id, { runId: request.run_id, cancel });
       this.invoke("execute_tool_call", { ...context, request }).then(async submission => {
         if (submission?.status === "approval_required") {
+          this.projectApproval(request.tool_call_id, "pending");
           const approved = await this.approvals.ask({ conversationId: this.conversationId, agentKey: this.agentKey, request });
+          this.projectApproval(request.tool_call_id, approved ? "allowed" : "denied");
           if (settled) return;
           await call(approved ? "approve_pending_tool_call" : "deny_pending_tool_call");
         }

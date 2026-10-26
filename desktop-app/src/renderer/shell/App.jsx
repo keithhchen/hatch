@@ -4,9 +4,10 @@ import { subscribeNativeCommands } from "../native/commands.js";
 import { useObservable } from "../observable.js";
 import { DesktopContext } from "./context.js";
 import { ConversationPane } from "./ConversationPane.jsx";
-import { DesktopWindow } from "./desktop-window.js";
+import { ChatWindow } from "./chat-window.js";
 import { FindBar } from "./FindBar.jsx";
-import { SearchPalette } from "./SearchPalette.jsx";
+import { Library } from "./Library.jsx";
+import { LibraryWindow } from "./library-window.js";
 import { SettingsPanel } from "./SettingsPanel.jsx";
 import { Sidebar } from "./Sidebar.jsx";
 import { Toolbar } from "./Toolbar.jsx";
@@ -31,6 +32,7 @@ function useSidebarSlide(contentRef, sidebarOpen, narrow) {
   }, [contentRef, sidebarOpen, narrow]);
 }
 
+/** A Chat window: one Agent's conversations. */
 export function Shell() {
   const { app } = React.useContext(DesktopContext);
   const ui = useObservable(app);
@@ -45,13 +47,15 @@ export function Shell() {
       <ConversationPane />
     </div>
     <SettingsPanel />
-    <SearchPalette />
   </div>;
 }
 
-/** Main and conversation windows. Hidden until signed in and first painted. */
-export function App() {
-  const app = useMemo(() => new DesktopWindow(), []);
+/**
+ * One native window: its controller (Library or Chat), hidden until signed
+ * in and first painted. Native menu commands go to the focused window.
+ */
+function WindowApp({ create, View }) {
+  const app = useMemo(create, []);
   const preferences = useObservable(app.preferences);
   const session = useObservable(app.session);
   const t = useMemo(() => app.preferences.t, [app, preferences.language]);
@@ -64,5 +68,8 @@ export function App() {
   useEffect(() => { if (preferences.ready) void nativeWindow.setTheme(preferences.theme); }, [preferences.ready, preferences.theme]);
   const context = useMemo(() => ({ app, t }), [app, t]);
   if (session.phase !== "signed-in") return null;
-  return <DesktopContext.Provider value={context}><Shell /></DesktopContext.Provider>;
+  return <DesktopContext.Provider value={context}><View /></DesktopContext.Provider>;
 }
+
+export const LibraryApp = () => <WindowApp create={() => new LibraryWindow()} View={Library} />;
+export const ChatApp = () => <WindowApp create={() => new ChatWindow()} View={Shell} />;

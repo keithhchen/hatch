@@ -1,3 +1,7 @@
+/** The Library window (`main`): a compact list of Agents. */
+export const LIBRARY_WINDOW_FRAME = Object.freeze({ minWidth: 520, minHeight: 420, defaultWidth: 760, defaultHeight: 600 });
+
+/** A Chat window (one per Agent). */
 export const DESKTOP_WINDOW_FRAME = Object.freeze({
   minWidth: 640,
   minHeight: 600,
@@ -77,11 +81,11 @@ export function clampWindowFrame(value, monitors = [], constraints = DESKTOP_WIN
  * window is still hidden, then persist moves/resizes, debounced so a live
  * resize runs no per-frame work. Returns a dispose function.
  */
-export async function restoreAndTrackFrame({ invoke, savedFrame, appWindow, availableMonitors, PhysicalPosition, PhysicalSize }) {
-  const frame = normalizeWindowFrame(savedFrame);
+export async function restoreAndTrackFrame({ invoke, savedFrame, constraints = DESKTOP_WINDOW_FRAME, appWindow, availableMonitors, PhysicalPosition, PhysicalSize }) {
+  const frame = normalizeWindowFrame(savedFrame, constraints);
   if (frame) {
     try {
-      const clamped = clampWindowFrame(frame, await availableMonitors());
+      const clamped = clampWindowFrame(frame, await availableMonitors(), constraints);
       await appWindow.setSize(new PhysicalSize(clamped.width, clamped.height));
       await appWindow.setPosition(new PhysicalPosition(clamped.x, clamped.y));
     } catch {

@@ -45,7 +45,7 @@ export function FindBar() {
     setMatches(ranges);
     setIndex(0);
     if (highlights && globalThis.Highlight) highlights.set("hatch-find", new Highlight(...ranges));
-  }, [open, query, ui.selection?.conversationId]);
+  }, [open, query, ui.conversationId]);
   useEffect(() => {
     const current = matches[index];
     if (!current) { highlights?.delete("hatch-find-current"); return; }

@@ -1,10 +1,12 @@
 import { AttachmentSource } from "@hatch/chat";
 import { MAX_ATTACHMENTS } from "../config.js";
 import { HatchRequestError } from "../http.js";
-import { composerFile } from "./native-drafts.js";
 import { MAX_NATIVE_DROP_SOURCE_BYTES, normalizeNativeDropAttachment, normalizeNativeDropFile } from "./native-drop-context.js";
 
 const IMAGE = /^image\//;
+
+/** A native managed copy as the composer renders it (`id` + `name`). */
+export const composerFile = reference => Object.freeze({ ...reference, id: reference.contextId, name: reference.displayName });
 
 function bytesToBase64(bytes) {
   let binary = "";

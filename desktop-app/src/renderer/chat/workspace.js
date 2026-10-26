@@ -13,7 +13,7 @@ export function normalizeWorkspaceGrant(value) {
  * (native task settings, keyed by conversation). A grant is an opaque native
  * handle (security-scoped bookmark on macOS); a saved one is never trusted
  * until `ensure_workspace` re-validates it. Without a grant the conversation
- * advertises no local tools, so chat still works.
+ * cannot send (the Desktop folder gate).
  *
  * status: "restoring" | "none" | "granted" | "stale"
  */
@@ -33,13 +33,14 @@ export class WorkspaceAccess extends Observable {
   }
 
   /**
-   * Restore this conversation's saved settings; a conversation without any
-   * starts from `inherited` (the folder of the conversation it was opened from).
+   * Restore this conversation's saved settings. A conversation that has no
+   * folder yet takes `inherited` (the folder it was started with) and keeps it.
    */
   async restore(inherited = {}) {
-    const context = (await this.invoke("read_task_settings", { taskId: this.conversationId }).catch(() => null)) ?? inherited;
-    const saved = normalizeWorkspaceGrant(context.workspaceGrant);
-    const permission = normalizePermissionPolicy(context.permissionMode);
+    const stored = await this.invoke("read_task_settings", { taskId: this.conversationId }).catch(() => null);
+    const own = normalizeWorkspaceGrant(stored?.workspaceGrant);
+    const saved = own ?? normalizeWorkspaceGrant(inherited.workspaceGrant);
+    const permission = normalizePermissionPolicy(own ? stored.permissionMode : inherited.permissionMode ?? stored?.permissionMode);
     if (!saved) {
       this.setState({ status: "none", grant: null, permission });
       return;
@@ -47,6 +48,7 @@ export class WorkspaceAccess extends Observable {
     try {
       const grant = await this.validate(saved.grant_id);
       this.setState({ status: "granted", grant, permission, error: null });
+      if (!own) this.persist();
     } catch (error) {
       this.setState({ status: "stale", grant: saved, permission, error });
     }

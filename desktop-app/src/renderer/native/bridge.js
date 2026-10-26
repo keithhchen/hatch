@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { emit, listen } from "@tauri-apps/api/event";
+import { emit, emitTo, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invokeDesktopCommand } from "./invoke-boundary.js";
 
@@ -23,6 +23,7 @@ export function onNativeEvent(event, handler) {
 }
 
 export const emitNativeEvent = (event, payload) => isNative() ? emit(event, payload).catch(() => {}) : Promise.resolve();
+export const emitNativeEventTo = (label, event, payload) => isNative() ? emitTo(label, event, payload).catch(() => {}) : Promise.resolve();
 
 /** Reveal the (hidden) native window once React has painted its first frame. */
 export function revealWhenPainted() {
@@ -35,7 +36,6 @@ export function revealWhenPainted() {
 export const nativeWindow = {
   setTitle: title => { document.title = title; if (isNative()) void getCurrentWindow().setTitle(title).catch(() => {}); },
   setTheme: theme => isNative() ? getCurrentWindow().setTheme(theme === "system" ? null : theme).catch(() => {}) : Promise.resolve(),
-  setBadgeCount: count => isNative() ? getCurrentWindow().setBadgeCount(count > 0 ? count : undefined).catch(() => {}) : Promise.resolve(),
   hide: () => isNative() ? getCurrentWindow().hide() : Promise.resolve(),
   close: () => isNative() ? getCurrentWindow().close() : Promise.resolve(),
   isFocused: () => isNative() ? getCurrentWindow().isFocused() : Promise.resolve(document.hasFocus()),
