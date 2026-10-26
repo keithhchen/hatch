@@ -110,8 +110,8 @@ kbd { font: inherit; }
 /* Native macOS: the sidebar is the window's behind-window material
  * (UnderWindowBackground, see window_shell.rs) seen through a faint yolk tint —
  * tinted glass, not a yellow panel. Nothing opaque sits beneath it. */
-:root[data-native][data-platform="macos"] { --desk-glass-tint: color-mix(in srgb, #f5b700 4%, transparent); --desk-glass-selected: rgba(0, 0, 0, .09); }
-:root[data-native][data-platform="macos"][data-theme="dark"] { --desk-glass-tint: color-mix(in srgb, #f5b700 3%, transparent); --desk-glass-selected: rgba(255, 255, 255, .12); }
+:root[data-native][data-platform="macos"] { --desk-glass-tint: color-mix(in srgb, #f5b700 7%, transparent); --desk-glass-selected: rgba(0, 0, 0, .09); }
+:root[data-native][data-platform="macos"][data-theme="dark"] { --desk-glass-tint: color-mix(in srgb, #f5b700 4.5%, transparent); --desk-glass-selected: rgba(255, 255, 255, .12); }
 :root[data-native][data-platform="macos"] .desk:not([data-narrow]) .desk-sidebar { background: var(--desk-glass-tint); }
 /* The glass is thin (alpha 0.3), so sidebar text is a step stronger to stay legible over busy wallpapers. */
 :root[data-native][data-platform="macos"] .desk:not([data-narrow]) .desk-sidebar { --desk-ink: #000; --desk-body: #1d1d1f; --desk-muted: #4a4a4f; }
@@ -192,7 +192,7 @@ kbd { font: inherit; }
 .desk-library__heading { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -.01em; line-height: 1.25; }
 .desk-library__grid { display: grid; gap: 20px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
 .desk-library__agent {
-  display: flex; min-width: 0; min-height: 236px; flex-direction: column; padding: 26px; border: 0; border-radius: 26px;
+  position: relative; display: flex; min-width: 0; min-height: 236px; flex-direction: column; padding: 26px; border: 0; border-radius: 26px;
   color: var(--lib-ink); background: var(--lib-card); box-shadow: var(--lib-shadow); text-align: left;
   transition: transform 160ms ease, box-shadow 160ms ease;
 }
@@ -208,6 +208,13 @@ kbd { font: inherit; }
 .desk-library__go { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 700; }
 .desk-library__go svg, .desk-library__link svg { width: 16px; height: 16px; transition: transform 160ms ease; }
 .desk-library__agent:hover .desk-library__go svg, .desk-library__link:hover svg { transform: translateX(3px); }
+.desk-library__agent.is-opening { cursor: progress; }
+.desk-library__agent.is-opening .desk-library__go { color: var(--desk-muted); }
+.desk-library__agent.is-opening::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, .55) 50%, transparent 70%); background-size: 220% 100%; animation: desk-card-opening 1.2s ease-in-out infinite; }
+.desk-library__spinner { width: 13px; height: 13px; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: desk-spin .7s linear infinite; }
+@keyframes desk-card-opening { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+@keyframes desk-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .desk-library__agent.is-opening::after, .desk-library__spinner { animation: none; } }
 .desk-library__agent--skeleton { gap: 15px; }
 .desk-library__agent--skeleton i { display: block; height: 13px; border-radius: 99px; background: var(--lib-badge); }
 .desk-library__agent--skeleton i:nth-child(1) { width: 40%; }

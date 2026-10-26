@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { nativeWindow, revealWhenPainted } from "../native/bridge.js";
+import { emitNativeEvent, nativeWindow, revealWhenPainted } from "../native/bridge.js";
 import { subscribeNativeCommands } from "../native/commands.js";
 import { useObservable } from "../observable.js";
 import { DesktopContext } from "./context.js";
@@ -12,6 +12,7 @@ import { SettingsPanel } from "./SettingsPanel.jsx";
 import { Sidebar } from "./Sidebar.jsx";
 import { BrowseErrorNotice } from "./states.jsx";
 import { Toolbar } from "./Toolbar.jsx";
+import { AGENT_WINDOW_READY_EVENT } from "./window-controller.js";
 
 /**
  * Sidebar toggles animate with transforms only: the content box changes its
@@ -65,7 +66,12 @@ function WindowApp({ create, View }) {
     const stopCommands = subscribeNativeCommands(() => app.commandHandlers());
     return () => { stopCommands(); app.dispose(); };
   }, [app]);
-  useEffect(() => { if (session.phase === "signed-in") revealWhenPainted(); }, [session.phase]);
+  useEffect(() => {
+    if (session.phase !== "signed-in") return;
+    revealWhenPainted();
+    // Tell the Library this Agent's window is on screen (ends its card's loading state).
+    if (app.agentKey) requestAnimationFrame(() => void emitNativeEvent(AGENT_WINDOW_READY_EVENT, { key: app.agentKey }));
+  }, [app, session.phase]);
   useEffect(() => { if (preferences.ready) void nativeWindow.setTheme(preferences.theme); }, [preferences.ready, preferences.theme]);
   const context = useMemo(() => ({ app, t }), [app, t]);
   if (session.phase !== "signed-in") return null;

@@ -12,6 +12,9 @@ import { DESKTOP_ZOOM, nextZoom, normalizeZoom } from "./layout.js";
 import { AppPreferences } from "./preferences.js";
 
 export const AUTH_SESSION_EVENT = "hatch://auth-session";
+/** A Chat window painted its first frame: `{ key }` is its Agent's access key. */
+export const AGENT_WINDOW_READY_EVENT = "hatch://agent-window-ready";
+const AGENT_WINDOW_READY_TIMEOUT_MS = 10_000;
 
 /** The native window that shows an Agent's conversations (one per Agent). */
 export function openAgentWindow(agent, invoke = nativeInvoke) {
@@ -125,6 +128,25 @@ export class WindowController extends Observable {
   /** Open (or focus) an Agent's Chat window. */
   openAgent(agent) {
     if (agent) void openAgentWindow(agent).catch(() => {});
+  }
+
+  /**
+   * Open an Agent's Chat window and resolve once it is on screen: at once for
+   * a window that was already open, otherwise when the new window paints.
+   */
+  async openAgentUntilShown(agent) {
+    let stop = () => {};
+    const painted = new Promise(resolve => {
+      const timer = setTimeout(resolve, AGENT_WINDOW_READY_TIMEOUT_MS);
+      const unlisten = onNativeEvent(AGENT_WINDOW_READY_EVENT, payload => { if (payload?.key === agent.key) resolve(); });
+      stop = () => { clearTimeout(timer); unlisten(); };
+    });
+    try {
+      const opened = await openAgentWindow(agent);
+      if (!opened?.reused) await painted;
+    } finally {
+      stop();
+    }
   }
 
   /** Sign out here and tell every other Hatch window. */

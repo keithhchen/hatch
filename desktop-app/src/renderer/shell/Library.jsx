@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { ArrowRight, Compass } from "lucide-react";
 import { Avatar, HatchBrand } from "@hatch/ui";
 import { nativeContextMenu } from "../native/context-menu.js";
@@ -13,9 +13,15 @@ import { Delayed, EmptyAgents, OfflineBanner } from "./states.jsx";
 function AgentCard({ agent }) {
   const { app, t } = useDesktop();
   const owned = agent.kind === "owned";
-  return <button type="button" className="desk-library__agent" onClick={() => app.openAgent(agent)}
+  const [opening, setOpening] = useState(false);
+  const open = () => {
+    if (opening) return;
+    setOpening(true);
+    void app.openAgentUntilShown(agent).catch(() => {}).finally(() => setOpening(false));
+  };
+  return <button type="button" className={`desk-library__agent${opening ? " is-opening" : ""}`} aria-busy={opening || undefined} onClick={open}
     onContextMenu={nativeContextMenu(() => [
-      { label: t("library.open"), action: () => app.openAgent(agent) },
+      { label: t("library.open"), action: open },
       { label: t("menu.viewOnWeb"), action: () => void app.openWeb(`${HATCH_ORIGIN}/products/${agent.productId}`) }
     ])}>
     <span className="desk-library__creator">
@@ -26,7 +32,7 @@ function AgentCard({ agent }) {
     {agent.description ? <p className="desk-library__description">{agent.description}</p> : null}
     <span className="desk-library__card-footer">
       <span className="desk-library__badge">{t(owned ? "library.badge.owned" : "library.badge.acquired")}</span>
-      <span className="desk-library__go">{t("library.chat")}<ArrowRight aria-hidden="true" /></span>
+      <span className="desk-library__go">{opening ? <><span className="desk-library__spinner" aria-hidden="true" />{t("library.opening")}</> : <>{t("library.chat")}<ArrowRight aria-hidden="true" /></>}</span>
     </span>
   </button>;
 }
