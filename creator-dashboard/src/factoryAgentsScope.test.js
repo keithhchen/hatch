@@ -192,9 +192,9 @@ test('Factory start and dependency-update prompts follow the evaluator calibrati
   const i18n = await readFile(new URL('./factoryAgentsI18n.js', import.meta.url), 'utf8');
   assert.match(source, /t\("useLatestMessage", session\.role\)/);
   assert.match(i18n, /useLatestMessage = role => role === 'evaluator'/);
-  assert.match(i18n, /1–3 个最影响结果的核心矛盾、改进点或疑问点/);
-  assert.match(i18n, /一次 askuser 让我评估/);
-  assert.match(i18n, /记录校准结果并停止/);
+  assert.match(i18n, /挑出一到三处最影响客户结果、需要我来判断的地方问我/);
+  assert.match(i18n, /把我的判断记下来就可以停了/);
+  assert.doesNotMatch(i18n, /askuser|案例调用|ask me to assess them in one askuser batch/);
 });
 
 test('Factory chat keeps scrolling inside the workbench pane', async () => {
