@@ -1,0 +1,30 @@
+{
+  "name": "@hatch/chat",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "sideEffects": [
+    "./src/presentation/chat.css",
+    "./src/presentation/ChatView.jsx",
+    "./src/presentation/MessageResponse.jsx"
+  ],
+  "exports": {
+    ".": "./src/index.js",
+    "./react": "./src/presentation/index.js"
+  },
+  "dependencies": {
+    "@hatch/ui": "file:../ui",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.31.0",
+    "motion": "^14.0.0",
+    "streamdown": "^2.7.0",
+    "tailwind-merge": "^3.7.0"
+  },
+  "peerDependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  }
+}
