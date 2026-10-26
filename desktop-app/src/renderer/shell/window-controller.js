@@ -121,19 +121,13 @@ export class WindowController extends Observable {
     void emitNativeEvent(AUTH_SESSION_EVENT, { kind: "cleared", sourceWindow: this.label });
   }
 
-  /** Commands every window answers: settings, zoom, and Agent 1–9 (Library order). */
+  /** Commands every window answers: settings and zoom. */
   commandHandlers() {
     return {
       [COMMAND.SETTINGS]: () => this.openOverlay("settings"),
       [COMMAND.ZOOM_IN]: () => this.setZoom(nextZoom(this.state.zoom, "increase")),
       [COMMAND.ZOOM_OUT]: () => this.setZoom(nextZoom(this.state.zoom, "decrease")),
-      [COMMAND.ZOOM_RESET]: () => this.setZoom(DESKTOP_ZOOM.default),
-      "agent.select": index => this.openAgent(this.agents[index])
+      [COMMAND.ZOOM_RESET]: () => this.setZoom(DESKTOP_ZOOM.default)
     };
-  }
-
-  /** Agent names for the ⌘1–9 items in the Window menu. */
-  menuAgents() {
-    return this.agents.slice(0, 9).map(agent => agent.name.slice(0, 120)).filter(Boolean);
   }
 }

@@ -66,8 +66,7 @@ export class LibraryWindow extends WindowController {
       workspaceEnabled: false,
       runStopEnabled: false,
       sidebarVisible: false,
-      conversationEnabled: false,
-      agents: this.menuAgents()
+      conversationEnabled: false
     });
   }
 }

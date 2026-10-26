@@ -4,8 +4,7 @@ import { isNative, nativeInvoke, onNativeEvent } from "./bridge.js";
  * Renderer half of the native menu bar. Rust owns menus and accelerators and
  * sends only semantic command ids to the focused window; this module maps
  * them onto the window's handlers and projects the window's command state
- * (enablement, sidebar check, Agent names) back into the menu. ⌘1–9 open or
- * focus the N-th Agent's Chat window, in Library order, from any window.
+ * (enablement, sidebar check) back into the menu.
  */
 export const NATIVE_COMMAND_EVENT = "hatch://command";
 
@@ -26,13 +25,10 @@ export const COMMAND = Object.freeze({
 });
 
 const KNOWN = new Set(Object.values(COMMAND));
-const AGENT_COMMAND = /^agent\.select\.([1-9])$/;
 
-/** @returns {{ id: string, agentIndex?: number } | null} */
+/** @returns {{ id: string } | null} */
 export function parseNativeCommand(payload) {
   const id = typeof payload?.id === "string" ? payload.id : "";
-  const agent = id.match(AGENT_COMMAND);
-  if (agent) return { id: "agent.select", agentIndex: Number(agent[1]) - 1 };
   return KNOWN.has(id) ? { id } : null;
 }
 
@@ -41,7 +37,7 @@ export function routeNativeCommand(payload, handlers) {
   const command = parseNativeCommand(payload);
   const handler = command && handlers[command.id];
   if (typeof handler !== "function") return false;
-  handler(command.agentIndex);
+  handler();
   return true;
 }
 

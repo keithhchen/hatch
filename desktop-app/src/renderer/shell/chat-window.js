@@ -348,7 +348,7 @@ export class ChatWindow extends WindowController {
     await super.signOut();
   }
 
-  /** Project enablement and Agent names into the native menu bar. */
+  /** Project enablement into the native menu bar. */
   publishCommands() {
     const signedIn = this.session.getState().phase === "signed-in";
     const session = this.currentSession;
@@ -357,8 +357,7 @@ export class ChatWindow extends WindowController {
       workspaceEnabled: Boolean(session || this.state.composing),
       runStopEnabled: Boolean(session?.busy),
       sidebarVisible: this.state.sidebarOpen,
-      conversationEnabled: Boolean(session),
-      agents: this.menuAgents()
+      conversationEnabled: Boolean(session)
     });
   }
 

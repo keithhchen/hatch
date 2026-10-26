@@ -48,32 +48,6 @@ pub const COMMAND_VIEW_ZOOM_IN: &str = "view.zoomIn";
 pub const COMMAND_VIEW_ZOOM_OUT: &str = "view.zoomOut";
 pub const COMMAND_VIEW_ZOOM_RESET: &str = "view.zoomReset";
 
-const MAX_MENU_AGENTS: usize = 9;
-const MAX_MENU_AGENT_NAME_CHARS: usize = 120;
-/// `agent.select.N` opens or focuses the Chat window of the N-th Agent in
-/// Library order (the renderer performs it).
-const COMMAND_AGENT_SELECT: [&str; MAX_MENU_AGENTS] = [
-    "agent.select.1",
-    "agent.select.2",
-    "agent.select.3",
-    "agent.select.4",
-    "agent.select.5",
-    "agent.select.6",
-    "agent.select.7",
-    "agent.select.8",
-    "agent.select.9",
-];
-const AGENT_SELECT_ACCELERATORS: [&str; MAX_MENU_AGENTS] = [
-    "CmdOrCtrl+1",
-    "CmdOrCtrl+2",
-    "CmdOrCtrl+3",
-    "CmdOrCtrl+4",
-    "CmdOrCtrl+5",
-    "CmdOrCtrl+6",
-    "CmdOrCtrl+7",
-    "CmdOrCtrl+8",
-    "CmdOrCtrl+9",
-];
 const SIDEBAR_ACCELERATOR: &str = if cfg!(target_os = "macos") {
     "Cmd+Ctrl+S"
 } else {
@@ -111,7 +85,7 @@ fn normalize_agent_window_manifest(entries: impl IntoIterator<Item = String>) ->
 /// The renderer projects only presentational command state into this value.
 /// It is deliberately window-scoped and never grants access to a workspace,
 /// tool, account, or conversation. The native menu uses it only for disabled
-/// items, checkmarks and the Agent shortcut labels; the renderer remains
+/// items and checkmarks; the renderer remains
 /// responsible for every action.
 ///
 /// `set_native_command_state` accepts a complete snapshot instead of partial
@@ -125,7 +99,6 @@ pub struct NativeCommandState {
     pub run_stop_enabled: bool,
     pub sidebar_visible: bool,
     pub conversation_enabled: bool,
-    pub agents: Vec<String>,
 }
 
 impl Default for NativeCommandState {
@@ -141,26 +114,6 @@ impl Default for NativeCommandState {
             run_stop_enabled: false,
             sidebar_visible: true,
             conversation_enabled: false,
-            agents: Vec::new(),
-        }
-    }
-}
-
-impl NativeCommandState {
-    fn validate(&self) -> Result<(), String> {
-        let valid_agents = self.agents.len() <= MAX_MENU_AGENTS
-            && self.agents.iter().all(|name| {
-                let count = name.chars().count();
-                count > 0
-                    && count <= MAX_MENU_AGENT_NAME_CHARS
-                    && !name.chars().any(char::is_control)
-            });
-        if valid_agents {
-            Ok(())
-        } else {
-            Err(format!(
-                "native_command_state_invalid: at most {MAX_MENU_AGENTS} bounded Agent names are allowed"
-            ))
         }
     }
 }
@@ -176,9 +129,6 @@ impl NativeMenuSnapshot {
     fn command_enabled(&self, command_id: &str) -> bool {
         if !self.has_focused_window {
             return false;
-        }
-        if let Some(index) = COMMAND_AGENT_SELECT.iter().position(|id| *id == command_id) {
-            return index < self.state.agents.len();
         }
         match command_id {
             COMMAND_CONVERSATION_NEW => self.state.new_conversation_enabled,
@@ -222,8 +172,7 @@ const fn command(
     }
 }
 
-/// Static application commands. The sidebar toggle is the single check item;
-/// Agent shortcuts are built from the focused window's Agent names.
+/// Static application commands. The sidebar toggle is the single check item.
 const APPLICATION_COMMANDS: &[CommandDefinition] = &[
     command(
         COMMAND_CONVERSATION_NEW,
@@ -269,14 +218,7 @@ fn application_command_definition(command_id: &str) -> Option<&'static CommandDe
 }
 
 fn app_menu_command(menu_id: &str) -> Option<&'static str> {
-    application_command_definition(menu_id)
-        .map(|definition| definition.id)
-        .or_else(|| {
-            COMMAND_AGENT_SELECT
-                .iter()
-                .copied()
-                .find(|id| *id == menu_id)
-        })
+    application_command_definition(menu_id).map(|definition| definition.id)
 }
 
 #[derive(Clone, Default)]
@@ -946,7 +888,6 @@ pub fn set_native_command_state(
     state: NativeCommandState,
     router: State<'_, NativeCommandRouter>,
 ) -> Result<NativeCommandState, String> {
-    state.validate()?;
     router
         .inner()
         .set_window_command_state(&app, window.label(), state.clone())?;
@@ -1221,8 +1162,7 @@ fn build_application_menu<R: Runtime>(
         .build()
         .map_err(menu_error)?;
 
-    // Library, then one item per Agent (⌘1–⌘9 opens or focuses its Chat
-    // window), then every open window.
+    // Library, then every open window.
     let library = MenuItemBuilder::with_id(MENU_WINDOW_LIBRARY, "Library")
         .accelerator(MENU_WINDOW_LIBRARY_ACCELERATOR)
         .build(app)
@@ -1232,14 +1172,6 @@ fn build_application_menu<R: Runtime>(
         .maximize()
         .separator()
         .item(&library);
-    for (index, name) in snapshot.state.agents.iter().enumerate() {
-        let agent = MenuItemBuilder::with_id(COMMAND_AGENT_SELECT[index], name)
-            .accelerator(AGENT_SELECT_ACCELERATORS[index])
-            .enabled(snapshot.command_enabled(COMMAND_AGENT_SELECT[index]))
-            .build(app)
-            .map_err(menu_error)?;
-        window = window.item(&agent);
-    }
     window = window.separator();
     for entry in open_window_entries(app) {
         let checked = snapshot.active_window_label.as_deref() == Some(entry.label.as_str());
@@ -1350,7 +1282,7 @@ mod tests {
     use super::{
         app_menu_command, application_command_definition, normalize_agent_window_manifest,
         sidebar_label, validate_conversation_id, AgentBinding, NativeCommandRouter,
-        NativeCommandState, NativeMenuSnapshot, COMMAND_AGENT_SELECT, COMMAND_CONVERSATION_ARCHIVE,
+        NativeCommandState, NativeMenuSnapshot, COMMAND_CONVERSATION_ARCHIVE,
         COMMAND_CONVERSATION_NEW, COMMAND_CONVERSATION_NEXT, COMMAND_CONVERSATION_PREVIOUS,
         COMMAND_CONVERSATION_RENAME, COMMAND_EDIT_FIND, COMMAND_RUN_STOP, COMMAND_SETTINGS_OPEN,
         COMMAND_SIDEBAR_TOGGLE, COMMAND_VIEW_ZOOM_IN, COMMAND_VIEW_ZOOM_OUT,
@@ -1599,8 +1531,7 @@ mod tests {
         ] {
             assert_eq!(app_menu_command(removed), None);
         }
-        assert_eq!(app_menu_command("agent.select.1"), Some("agent.select.1"));
-        assert_eq!(app_menu_command("agent.select.9"), Some("agent.select.9"));
+        assert_eq!(app_menu_command("agent.select.1"), None);
         // Handled natively before command routing; never forwarded to React.
         assert_eq!(app_menu_command(MENU_WINDOW_LIBRARY), None);
         assert_eq!(app_menu_command("window.focus:main"), None);
@@ -1614,20 +1545,16 @@ mod tests {
         assert!(idle.command_enabled(COMMAND_SETTINGS_OPEN));
         assert!(!idle.command_enabled(COMMAND_RUN_STOP));
         assert!(!idle.command_enabled(COMMAND_CONVERSATION_RENAME));
-        assert!(!idle.command_enabled(COMMAND_AGENT_SELECT[0]));
         assert_eq!(sidebar_label(&idle), "Hide Sidebar");
 
         let active = snapshot(NativeCommandState {
             conversation_enabled: true,
             run_stop_enabled: true,
             sidebar_visible: false,
-            agents: vec!["Writing Coach".into(), "Tax Helper".into()],
             ..NativeCommandState::default()
         });
         assert!(active.command_enabled(COMMAND_CONVERSATION_PREVIOUS));
         assert!(active.command_enabled(COMMAND_RUN_STOP));
-        assert!(active.command_enabled(COMMAND_AGENT_SELECT[1]));
-        assert!(!active.command_enabled(COMMAND_AGENT_SELECT[2]));
         assert_eq!(sidebar_label(&active), "Show Sidebar");
 
         let unfocused = NativeMenuSnapshot {
@@ -1684,39 +1611,24 @@ mod tests {
     }
 
     #[test]
-    fn command_state_is_a_complete_bounded_non_authority_snapshot() {
+    fn command_state_is_a_complete_non_authority_snapshot() {
         let payload = serde_json::json!({
             "newConversationEnabled": true,
             "workspaceEnabled": true,
             "runStopEnabled": false,
             "sidebarVisible": false,
-            "conversationEnabled": true,
-            "agents": ["Writing Coach"]
+            "conversationEnabled": true
         });
-        let state: NativeCommandState = serde_json::from_value(payload.clone())
+        serde_json::from_value::<NativeCommandState>(payload.clone())
             .expect("the documented renderer payload must deserialize");
-        assert!(state.validate().is_ok());
         let mut extra = payload.clone();
         extra["workspaceGrantId"] = "must-not-be-accepted-here".into();
         assert!(serde_json::from_value::<NativeCommandState>(extra).is_err());
-        let mut legacy = payload;
-        legacy["newWindowEnabled"] = true.into();
-        assert!(serde_json::from_value::<NativeCommandState>(legacy).is_err());
-        let too_many = NativeCommandState {
-            agents: (0..10).map(|index| format!("Agent {index}")).collect(),
-            ..NativeCommandState::default()
-        };
-        assert!(too_many.validate().is_err());
-        let too_long = NativeCommandState {
-            agents: vec!["x".repeat(121)],
-            ..NativeCommandState::default()
-        };
-        assert!(too_long.validate().is_err());
-        let controlled = NativeCommandState {
-            agents: vec!["bad\nname".into()],
-            ..NativeCommandState::default()
-        };
-        assert!(controlled.validate().is_err());
+        for legacy in ["newWindowEnabled", "agents"] {
+            let mut stale = payload.clone();
+            stale[legacy] = serde_json::json!([]);
+            assert!(serde_json::from_value::<NativeCommandState>(stale).is_err());
+        }
     }
 
     #[test]
