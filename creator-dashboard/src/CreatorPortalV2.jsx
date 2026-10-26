@@ -1,7 +1,7 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Bot, Check, ChevronsUpDown, Copy, Download, ExternalLink, Languages, LayoutDashboard, LogOut, Menu, MoreHorizontal, Plus, ReceiptText, Search, Settings, X } from "lucide-react";
 import { Button, CommandMenu, ConfirmDialog, DropdownMenu, IconButton } from "@hatch/ui";
-import { ButtonBase, Divider as MuiDivider, ListItemIcon, ListItemText, Menu as MuiMenu, MenuItem as MuiMenuItem, Typography as MuiTypography } from "@mui/material";
+import { ButtonBase, Divider as MuiDivider, ListItemIcon, ListItemText, Menu as MuiMenu, MenuItem as MuiMenuItem } from "@mui/material";
 import { createTheme, ThemeProvider } from "@mui/material/styles";
 import { hatchMuiThemeOptions } from "@hatch/ui";
 import { AccountAvatar } from "./AccountAvatar.jsx";
@@ -120,11 +120,6 @@ export function CreatorPortalV2({
           transformOrigin={{ vertical: "bottom", horizontal: "left" }}
           slotProps={{ paper: { className: "cpv2-account-menu", sx: { minWidth: 248, mb: 1 } }, list: { dense: true, "aria-label": t("account") } }}
         >
-          <div className="cpv2-account-menu-header">
-            <AccountAvatar className="cpv2-avatar" src={profile?.avatar_url} name={displayName} size="small" />
-            <MuiTypography variant="subtitle2" fontWeight={700}>{displayName}</MuiTypography>
-          </div>
-          <MuiDivider />
           <MuiMenuItem onClick={() => { closeAccountMenu(); go("/account"); }}><ListItemIcon><Settings size={18} /></ListItemIcon><ListItemText primary={t("sxNavSettings")} /></MuiMenuItem>
           <MuiMenuItem onClick={() => { closeAccountMenu(); go("/download"); }}><ListItemIcon><Download size={18} /></ListItemIcon><ListItemText primary={t("download")} /></MuiMenuItem>
           <MuiDivider />

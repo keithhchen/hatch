@@ -53,9 +53,11 @@ export function StudioAgentWorkspace({ route, request, navigate, locale, t, prof
 }
 
 function AgentHeaderActions({ product, live, t }) {
+  const { copied, copy } = useCopy();
   const href = live ? safePublicUrl(publicPathOf(product)) : null;
   return href ? <div className="sx-agent__actions">
-    <Button asChild className="web-btn-yolk" trailing={<ExternalLink aria-hidden="true" />}><a href={href} target="_blank" rel="noreferrer">{t("viewStorefront")}</a></Button>
+    <Button variant="secondary" type="button" leading={<Copy aria-hidden="true" />} onClick={() => void copy(href)}>{copied ? t("copied") : t("copyLink")}</Button>
+    <Button asChild variant="secondary" trailing={<ExternalLink aria-hidden="true" />}><a href={href} target="_blank" rel="noreferrer">{t("sxOpenPublic")}</a></Button>
   </div> : null;
 }
 
