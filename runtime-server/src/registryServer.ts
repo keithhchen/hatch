@@ -618,6 +618,21 @@ async function route(
     sendAuthJson(response, 200, accountPublic(updated));
     return;
   }
+  if (url.pathname === "/v1/auth/me" && request.method === "PATCH") {
+    const account = await authenticate(request, response, context);
+    if (account === SESSION_QUERY_REJECTED) return;
+    if (!account) { sendAuthJson(response, 401, { detail: "A valid account token is required." }); return; }
+    const body = await readJson(request);
+    let updated: Account;
+    try {
+      updated = await context.accounts.setDisplayName(account.id, String(body.display_name ?? ""));
+    } catch (error) {
+      sendAuthInputError(response, error);
+      return;
+    }
+    sendAuthJson(response, 200, accountPublic(updated));
+    return;
+  }
   if (url.pathname === "/v1/auth/me" && request.method === "GET") {
     const lease = beginSessionQuery(request, response, context);
     if (!lease) return;

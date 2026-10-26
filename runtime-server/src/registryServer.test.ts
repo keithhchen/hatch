@@ -108,6 +108,14 @@ test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () =
     assert.match(mePayload.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     assert.match(mePayload.session_expires_at, /^20/);
     assert.equal(Object.hasOwn(mePayload, "role"), false);
+    const rename = (body: unknown, token = auth.session.token) => fetch(`${base}/v1/auth/me`, { method: "PATCH", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body) });
+    const renamed = await rename({ display_name: "  New   Name " });
+    assert.equal(renamed.status, 200);
+    assert.deepEqual(await renamed.json(), { id: mePayload.id, email: "user@example.com", display_name: "New Name", avatar_url: null });
+    assert.equal(((await (await fetch(`${base}/v1/auth/me`, { headers: { authorization: `Bearer ${auth.session.token}` } })).json()) as { display_name: string }).display_name, "New Name");
+    assert.equal((await rename({ display_name: "   " })).status, 400);
+    assert.equal((await rename({ display_name: "x".repeat(129) })).status, 400);
+    assert.equal((await rename({ display_name: "Intruder" }, "not-a-session")).status, 401);
     // One kind of account: any signed-in account can author in Studio.
     const ownProducts = await fetch(`${base}/v1/creator/products`, { headers: { authorization: `Bearer ${auth.session.token}` } });
     assert.equal(ownProducts.status, 200);

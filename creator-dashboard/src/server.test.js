@@ -77,7 +77,7 @@ test("Dashboard readiness fails closed when Registry is unavailable", async (con
   assert.equal(live.status, 200);
 });
 
-test("consumer avatar changes proxy through the authenticated Registry session", async (context) => {
+test("consumer avatar and display name changes proxy through the authenticated Registry session", async (context) => {
   const account = {
     id: "buyer-avatar-test",
     email: "buyer@example.test",
@@ -94,6 +94,15 @@ test("consumer avatar changes proxy through the authenticated Registry session",
     if (requestUrl.pathname === "/v1/auth/signin") {
       response.end(JSON.stringify({ token: "signed-user-token", account }));
       return;
+    }
+    if (requestUrl.pathname === "/v1/auth/me" && request.method === "PATCH") {
+      const name = String(JSON.parse(payload.toString()).display_name ?? "").trim();
+      if (!name) {
+        response.statusCode = 400;
+        response.end(JSON.stringify({ detail: "Display name is required." }));
+        return;
+      }
+      account.display_name = name;
     }
     if (requestUrl.pathname === "/v1/auth/me") {
       response.end(JSON.stringify({ ...account, avatar_url: avatarUrl }));
@@ -155,6 +164,20 @@ test("consumer avatar changes proxy through the authenticated Registry session",
   assert.equal(remove.status, 200);
   assert.equal((await remove.json()).avatar_url, null);
   assert.deepEqual(avatarRequests.map(({ method }) => method), ["PUT", "DELETE"]);
+
+  const rename = (headers, displayName = " Renamed Buyer ") => fetch(`${serverUrl(api)}/v1/auth/me`, {
+    method: "PATCH",
+    headers: { cookie, "content-type": "application/json", ...headers },
+    body: JSON.stringify({ display_name: displayName })
+  });
+  assert.equal((await rename({})).status, 403);
+  const renamed = await rename({ "x-csrf-token": csrf });
+  assert.equal(renamed.status, 200);
+  assert.equal((await renamed.json()).display_name, "Renamed Buyer");
+  assert.equal((await (await fetch(`${serverUrl(api)}/v1/auth/me`, { headers: { cookie } })).json()).display_name, "Renamed Buyer");
+  const rejected = await rename({ "x-csrf-token": csrf }, "  ");
+  assert.equal(rejected.status, 400);
+  assert.equal((await rejected.json()).error.message, "Display name is required.");
 });
 
 test("a signed-in browser hands Desktop its own session through a PKCE code", async (context) => {

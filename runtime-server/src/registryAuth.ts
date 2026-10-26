@@ -308,16 +308,24 @@ export class AccountStoreTs {
   }
 
   async setAvatarUrl(id: string, avatarUrl: string | null): Promise<Account> {
+    return this.updateProfileField(id, "avatar_url", avatarUrl);
+  }
+
+  async setDisplayName(id: string, displayName: string): Promise<Account> {
+    return this.updateProfileField(id, "display_name", normalizeDisplayName(displayName));
+  }
+
+  private async updateProfileField(id: string, field: "avatar_url" | "display_name", value: string | null): Promise<Account> {
     const account = await this.getById(id);
     if (!account) throw new Error("account_not_found");
     if (!this.pool) {
-      const updated = { ...account, avatar_url: avatarUrl };
+      const updated = { ...account, [field]: value };
       this.accounts.set(id, updated);
       return updated;
     }
     const result = await this.pool.query(
-      "UPDATE accounts SET avatar_url=$2 WHERE id=$1 RETURNING id, email, display_name, avatar_url, password_salt, password_hash, created_at",
-      [id, avatarUrl]
+      `UPDATE accounts SET ${field}=$2 WHERE id=$1 RETURNING id, email, display_name, avatar_url, password_salt, password_hash, created_at`,
+      [id, value]
     );
     if (!result.rows[0]) throw new Error("account_not_found");
     return rowToAccount(result.rows[0]);
@@ -405,11 +413,15 @@ function refreshedSession(session: AccountSession, now: number): AccountSession 
 
 export function validateSignupCredentials(email: string, password: string, displayName: string): { email: string; displayName: string } {
   const normalizedEmail = validateSigninCredentials(email, password);
-  const normalizedName = displayName.trim().replace(/\s+/g, " ");
   if (password.length < 8) throw new Error("password_too_short");
+  return { email: normalizedEmail, displayName: normalizeDisplayName(displayName) };
+}
+
+export function normalizeDisplayName(displayName: string): string {
+  const normalizedName = displayName.trim().replace(/\s+/g, " ");
   if (!normalizedName) throw new Error("display_name_required");
   if (normalizedName.length > MAX_DISPLAY_NAME_LENGTH) throw new Error("display_name_too_long");
-  return { email: normalizedEmail, displayName: normalizedName };
+  return normalizedName;
 }
 
 function derivePasswordAsync(password: string, salt: Buffer): Promise<string> {

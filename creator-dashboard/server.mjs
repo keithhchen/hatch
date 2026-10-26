@@ -944,6 +944,20 @@ export async function createDashboardApp(options = {}) {
         const payload = upstream.status === 204 ? undefined : await upstream.json();
         return send(response, upstream.status, upstream.ok ? publicProfile(payload) : payload);
       }
+      if (request.method === "PATCH" && url.pathname === "/v1/auth/me") {
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
+        const csrfError = cookieCsrfError(request);
+        if (csrfError) return send(response, csrfError.status, csrfError.body);
+        const body = await readJson(request);
+        const account = await registryRequest(registryUrl, "/v1/auth/me", {
+          method: "PATCH",
+          fetchImpl,
+          headers: { authorization: `Bearer ${authentication.token}` },
+          body: JSON.stringify({ display_name: body.display_name })
+        });
+        return send(response, 200, publicProfile(account));
+      }
       if (request.method === "GET" && url.pathname === "/v1/auth/me") {
         const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
