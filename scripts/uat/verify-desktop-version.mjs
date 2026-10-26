@@ -14,7 +14,7 @@ export async function verifyDesktopVersion({ repositoryRoot, expectedTag = null 
     readJson(path.join(desktopRoot, "src-tauri", "tauri.conf.json")),
     readFile(path.join(desktopRoot, "src-tauri", "Cargo.toml"), "utf8"),
     readFile(path.join(desktopRoot, "src-tauri", "Cargo.lock"), "utf8"),
-    readFile(path.join(desktopRoot, "src", "renderer", "shell", "desktop-window.js"), "utf8"),
+    Promise.all(["window-controller.js", "chat-window.js"].map(name => readFile(path.join(desktopRoot, "src", "renderer", "shell", name), "utf8"))).then(files => files.join("\n")),
     readFile(path.join(desktopRoot, "src-tauri", "src", "window_commands.rs"), "utf8")
   ]);
 
@@ -40,7 +40,7 @@ export async function verifyDesktopVersion({ repositoryRoot, expectedTag = null 
   if (!/\.version\(Some\(app\.package_info\(\)\.version\.to_string\(\)\)\)/.test(nativeMenu)) {
     throw new Error("Desktop About panel must report the packaged version at runtime.");
   }
-  if (!/await getVersion\(\)/.test(renderer) || !/clientVersion = version/.test(renderer)) {
+  if (!/await getVersion\(\)/.test(renderer) || !/clientVersion = (this\.state\.)?version/.test(renderer)) {
     throw new Error("Desktop Runtime hello must report the packaged version as client_version at runtime.");
   }
   if (expectedTag && expectedTag !== `v${version}`) {
