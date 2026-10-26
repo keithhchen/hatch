@@ -162,6 +162,7 @@
 .web-chat__message--user .web-chat__pictures { justify-content: flex-end; }
 .web-chat__image-trigger { display: block; max-width: 100%; padding: 0; border: 0; border-radius: 18px; background: transparent; cursor: zoom-in; }
 .web-chat__attachment-image { display: block; max-width: min(100%, 260px); max-height: 220px; border-radius: 18px; object-fit: cover; box-shadow: var(--web-shadow); }
+.web-chat__attachment-image--pending { width: 160px; height: 120px; background: var(--chat-panel); box-shadow: none; }
 .web-chat-image-viewer { position: fixed; width: fit-content; max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); overflow: visible; padding: 18px; border-radius: 28px; }
 .web-chat-image-viewer .hui-dialog__header { padding-right: 44px; }
 .web-chat-image-viewer .hui-dialog__header h2 { font-family: var(--web-sans); font-size: 15px; font-weight: 700; letter-spacing: 0; }

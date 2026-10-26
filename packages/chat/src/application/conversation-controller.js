@@ -265,7 +265,9 @@ export class ConversationController {
     }, delay);
   }
 
-  sendMessage(connection, message) {
+  /** Prepare client authority for the run, then hand the frame to the Runtime. */
+  async dispatch(connection, message) {
+    await this.tools.prepareRun({ conversationId: this.state.conversationId, runId: message.runId });
     connection.send({ ...message, localTools: this.tools.localTools });
   }
 
@@ -297,8 +299,7 @@ export class ConversationController {
       const request = outcome.request;
       this.publishTimeline(timeline => timeline.snapshot());
       const decision = await this.tools.requestApproval(request);
-      const result = decision.approved ? await this.tools.execute(request) : { status: "error", error: decision.error ?? { code: "approval_denied" } };
-      await this.reportToolResult(request, connection, result, toolEventFromApproval(request));
+      if (!decision.approved) await this.reportToolResult(request, connection, { status: "error", error: decision.error ?? { code: "approval_denied" } }, toolEventFromApproval(request));
     },
     turn_state(outcome) {
       this.setState({ runState: outcome.state });
@@ -320,8 +321,9 @@ export class ConversationController {
             ? withUser : [...withUser, ChatTimeline.streamingAssistantMessage(pending.runId)];
         });
         this.run = { id: pending.runId };
-        this.sendMessage(connection, { runId: pending.runId, clientMessageId: pending.clientMessageId, content: pending.content, attachments: pending.attachments });
         this.setState({ activeRun: pending.runId, status: { key: "sending" } });
+        void this.dispatch(connection, { runId: pending.runId, clientMessageId: pending.clientMessageId, content: pending.content, attachments: pending.attachments })
+          .catch(cause => { this.restoreSubmission(pending); this.fail(cause); });
       }
       if (this.taskStart === conversationId) {
         this.taskStart = null;
@@ -330,7 +332,13 @@ export class ConversationController {
         this.resetTimeline();
         this.updateMessages(current => [...current, ChatTimeline.streamingAssistantMessage(runId)]);
         this.setState({ activeRun: runId, status: { key: "sending" } });
-        this.sendMessage(connection, { runId, clientMessageId: newId("message"), taskStart: true });
+        void this.dispatch(connection, { runId, clientMessageId: newId("message"), taskStart: true }).catch(cause => {
+          this.run = null;
+          this.taskStart = conversationId;
+          this.updateMessages(current => current.filter(message => !(message.transient && message.run_id === runId)));
+          this.setState({ activeRun: null });
+          this.fail(cause);
+        });
       }
     },
     accepted() {
@@ -426,13 +434,13 @@ export class ConversationController {
       });
       this.resetTimeline();
       this.writeDraft({ draft: "", images: [] });
+      this.setState({ activeRun: runId, status: { key: "sending" } });
       if (connection?.ready) {
-        this.sendMessage(connection, { runId, clientMessageId, content, attachments });
+        await this.dispatch(connection, { runId, clientMessageId, content, attachments });
       } else {
         this.attempts = 0;
         this.reconnect();
       }
-      this.setState({ activeRun: runId, status: { key: "sending" } });
     } catch (cause) {
       if (this.pending?.conversationId === conversationId) this.restoreSubmission(this.pending);
       this.fail(cause);
