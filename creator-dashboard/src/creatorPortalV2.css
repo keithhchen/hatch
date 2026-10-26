@@ -25,6 +25,9 @@
 /* ---------- Shell ---------- */
 .sx-shell { display: grid; grid-template-columns: var(--sx-sidebar) minmax(0, 1fr); }
 .sx-sidebar { position: sticky; top: 0; z-index: 40; display: flex; height: 100dvh; flex-direction: column; gap: 6px; padding: 18px 14px 14px; border-right: 1px solid var(--web-rule); background: color-mix(in srgb, var(--web-card) 60%, var(--web-paper)); }
+.sx-back { display: inline-flex; align-self: flex-start; min-height: 30px; align-items: center; gap: 6px; margin: 0 0 6px; padding: 0 8px; border-radius: 8px; color: var(--web-muted); font-size: 13px; text-decoration: none; }
+.sx-back:hover { color: var(--web-ink); background: var(--web-card); }
+.sx-back svg { width: 15px; height: 15px; }
 .sx-sidebar__top { display: flex; align-items: center; justify-content: space-between; padding: 2px 6px 14px; }
 .sx-sidebar__close { display: none !important; }
 .cpv2-brand { flex: 0 0 auto; }
