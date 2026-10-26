@@ -22,6 +22,8 @@ export const hatchMuiThemeOptions = {
     button: { textTransform: "none", fontWeight: 600 }
   },
   components: {
+    // No Material ink ripple anywhere: hover/selected fills are the only press feedback.
+    MuiButtonBase: { defaultProps: { disableRipple: true, disableTouchRipple: true } },
     MuiButton: {
       defaultProps: { disableElevation: true },
       styleOverrides: {
