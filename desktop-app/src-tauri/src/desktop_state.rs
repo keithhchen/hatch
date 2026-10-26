@@ -40,12 +40,19 @@ pub(crate) struct DesktopWorkspaceState {
 #[serde(deny_unknown_fields)]
 pub(crate) struct DesktopPreferencesState {
     pub(crate) language: String,
+    #[serde(default = "system_theme")]
+    pub(crate) theme: String,
+}
+
+fn system_theme() -> String {
+    "system".into()
 }
 
 impl Default for DesktopPreferencesState {
     fn default() -> Self {
         Self {
             language: "system".into(),
+            theme: system_theme(),
         }
     }
 }

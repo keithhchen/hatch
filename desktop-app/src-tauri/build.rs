@@ -34,14 +34,12 @@ fn main() {
             "open_conversation_window",
             "claim_conversation_session",
             "release_conversation_session",
-            "open_settings_window",
-            "open_about_window",
             "set_native_command_state",
-            "show_native_command_menu",
-            "show_native_context_menu",
             "open_external_url",
             "revoke_workspace_grant",
             "read_product_open_links",
+            "app_ready",
+            "open_welcome_window",
         ]),
     ))
     .expect("failed to build Hatch Tauri permissions");
