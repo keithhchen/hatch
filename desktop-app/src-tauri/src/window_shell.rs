@@ -55,7 +55,7 @@ fn window_theme(theme: &str) -> Option<Theme> {
 /// close to opaque in light mode; at this alpha the blurred desktop reads
 /// through while sidebar text keeps its contrast.
 #[cfg(target_os = "macos")]
-const GLASS_ALPHA: f64 = 0.55;
+const GLASS_ALPHA: f64 = 0.3;
 
 fn window_effects() -> WindowEffectsConfig {
     // UnderWindowBackground is the most see-through behind-window material
@@ -107,9 +107,15 @@ pub fn prepare_window<'a, R: Runtime, M: Manager<R>>(
 
 /// Make the material Tauri inserted (an NSVisualEffectView under the window's
 /// content view) more see-through by lowering its alpha; the blur stays.
+/// Only Chat windows show glass (their sidebar); the Library and the sign-in
+/// window paint their own opaque canvas.
 #[cfg(target_os = "macos")]
 pub fn soften_window_glass<R: Runtime>(window: &WebviewWindow<R>) {
     use objc2_app_kit::{NSView, NSVisualEffectView, NSWindow};
+
+    if matches!(window.label(), MAIN_WINDOW_LABEL | WELCOME_WINDOW_LABEL) {
+        return;
+    }
 
     fn soften(view: &NSView) {
         for child in view.subviews().iter() {

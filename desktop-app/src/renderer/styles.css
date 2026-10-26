@@ -110,9 +110,12 @@ kbd { font: inherit; }
 /* Native macOS: the sidebar is the window's behind-window material
  * (UnderWindowBackground, see window_shell.rs) seen through a faint yolk tint —
  * tinted glass, not a yellow panel. Nothing opaque sits beneath it. */
-:root[data-native][data-platform="macos"] { --desk-glass-tint: color-mix(in srgb, #f5b700 7%, transparent); --desk-glass-selected: rgba(0, 0, 0, .09); }
-:root[data-native][data-platform="macos"][data-theme="dark"] { --desk-glass-tint: color-mix(in srgb, #f5b700 4.5%, transparent); --desk-glass-selected: rgba(255, 255, 255, .12); }
+:root[data-native][data-platform="macos"] { --desk-glass-tint: color-mix(in srgb, #f5b700 4%, transparent); --desk-glass-selected: rgba(0, 0, 0, .09); }
+:root[data-native][data-platform="macos"][data-theme="dark"] { --desk-glass-tint: color-mix(in srgb, #f5b700 3%, transparent); --desk-glass-selected: rgba(255, 255, 255, .12); }
 :root[data-native][data-platform="macos"] .desk:not([data-narrow]) .desk-sidebar { background: var(--desk-glass-tint); }
+/* The glass is thin (alpha 0.3), so sidebar text is a step stronger to stay legible over busy wallpapers. */
+:root[data-native][data-platform="macos"] .desk:not([data-narrow]) .desk-sidebar { --desk-ink: #000; --desk-body: #1d1d1f; --desk-muted: #4a4a4f; }
+:root[data-native][data-platform="macos"][data-theme="dark"] .desk:not([data-narrow]) .desk-sidebar { --desk-ink: #fff; --desk-body: #f5f5f7; --desk-muted: #c7c7cc; }
 :root[data-native][data-platform="macos"] .desk:not([data-narrow]) .desk-sidebar .desk-row[aria-current="page"] { background: var(--desk-glass-selected); }
 .desk[data-sidebar="closed"] .desk-sidebar { transform: translateX(-100%); }
 .desk-content {
@@ -178,9 +181,6 @@ kbd { font: inherit; }
   --lib-warm: rgba(245, 183, 0, .14); --lib-cool: rgba(120, 145, 180, .14); --lib-badge: rgba(255, 255, 255, .07);
   --lib-shadow: 0 12px 36px rgba(0, 0, 0, .35); --lib-shadow-lift: 0 20px 50px rgba(0, 0, 0, .5);
 }
-/* Native macOS: the paper is a little see-through so the window glass shows at its edges. */
-:root[data-native][data-platform="macos"] .desk-library { --lib-paper: rgba(250, 248, 242, .82); }
-:root[data-native][data-platform="macos"][data-theme="dark"] .desk-library { --lib-paper: rgba(27, 25, 21, .84); }
 .desk-library__titlebar { display: flex; height: var(--desk-toolbar-height); flex: 0 0 auto; align-items: center; padding: 0 20px 0 calc(var(--desk-traffic-lights) + 12px); }
 .desk-library__brand { display: inline-flex; pointer-events: none; }
 .desk-library__brand .hatch-brand__lockup { display: block; height: 22px; width: auto; }
