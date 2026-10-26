@@ -88,9 +88,9 @@ export function CheckoutSummary({ product, lineItems = [], totals, action, legal
   const total = totals?.total_minor ?? subtotal;
   return (
     <aside className={cn("hatch-checkout-summary", className)}>
-      <header><PackageCheck aria-hidden="true" /><div><span className="hui-semantic-label">CHECKOUT</span><h2>{product.name ?? "Your order"}</h2></div></header>
+      <header><PackageCheck aria-hidden="true" /><span className="hui-semantic-label">CHECKOUT</span></header>
       <ul>{lineItems.map((item, index) => <li key={item.id ?? index}><span><strong>{item.label ?? item.name}</strong>{item.detail ? <small>{item.detail}</small> : null}</span><b>{money(item.amount_minor, item.currency ?? currency)}</b></li>)}</ul>
-      <dl>{totals?.discount_minor ? <div><dt>Discount</dt><dd>−{money(totals.discount_minor, currency)}</dd></div> : null}<div><dt>Subtotal</dt><dd>{totals?.subtotal_label ?? money(subtotal, currency)}</dd></div>{totals?.tax_minor !== undefined ? <div><dt>Tax</dt><dd>{money(totals.tax_minor, currency)}</dd></div> : null}<div className="is-total"><dt>Total</dt><dd>{totals?.total_label ?? money(total, currency)}</dd></div></dl>
+      <dl>{totals?.discount_minor ? <div><dt>Discount</dt><dd>−{money(totals.discount_minor, currency)}</dd></div> : null}{totals?.discount_minor || totals?.tax_minor !== undefined ? <div><dt>Subtotal</dt><dd>{totals?.subtotal_label ?? money(subtotal, currency)}</dd></div> : null}{totals?.tax_minor !== undefined ? <div><dt>Tax</dt><dd>{money(totals.tax_minor, currency)}</dd></div> : null}<div className="is-total"><dt>Total</dt><dd>{totals?.total_label ?? money(total, currency)}</dd></div></dl>
       {children}
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
       <Button loading={busy} onClick={action?.onClick} disabled={!action || action.disabled}>{action?.label ?? "Complete order"}</Button>

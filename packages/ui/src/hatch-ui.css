@@ -477,7 +477,7 @@
 .hatch-candidate-review > footer div { display: flex; gap: 7px; }
 .hatch-order-summary { padding: 23px; }
 .hatch-order-summary > header { display: flex; align-items: start; justify-content: space-between; gap: 18px; }
-.hatch-order-summary h2, .hatch-checkout-summary h2 { margin: 7px 0 0; font-family: var(--hui-font-display); font-size: var(--hatch-type-title); font-weight: var(--hui-weight-regular); letter-spacing: var(--hatch-display-tracking); line-height: var(--hatch-display-leading); }
+.hatch-order-summary h2 { margin: 7px 0 0; font-family: var(--hui-font-display); font-size: var(--hatch-type-title); font-weight: var(--hui-weight-regular); letter-spacing: var(--hatch-display-tracking); line-height: var(--hatch-display-leading); }
 .hatch-order-summary dl { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 15px; margin: 23px 0; padding: 19px 0; border-block: 1px solid var(--hui-border-soft); }
 .hatch-order-summary dl div { min-width: 0; }
 .hatch-order-summary dt, .hatch-checkout-summary dt { color: var(--hui-ink-faint); font-size: var(--hatch-type-meta); }
@@ -504,9 +504,10 @@
 .hatch-checkout-summary > dl div { display: flex; justify-content: space-between; }
 .hatch-checkout-summary > dl dd { margin: 0; font-size: var(--hatch-type-ui); font-variant-numeric: tabular-nums; }
 .hatch-checkout-summary > dl .is-total { margin-top: 5px; padding-top: 12px; border-top: 1px solid var(--hui-border); }
+.hatch-checkout-summary > dl .is-total:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
 .hatch-checkout-summary > dl .is-total dt, .hatch-checkout-summary > dl .is-total dd { color: var(--hui-ink); font-family: var(--hui-font-display); font-size: var(--hatch-type-subheading); letter-spacing: var(--hatch-display-tracking); line-height: var(--hatch-display-leading); }
 .hatch-checkout-summary > .hui-button { width: 100%; margin-top: 8px; }
-.hatch-checkout-summary > .hui-choice, .hatch-checkout-summary > .hui-alert { margin-top: 13px; }
+.hatch-checkout-summary > .hui-alert { margin-top: 13px; }
 .hatch-checkout-summary__legal { margin: 11px 0 0; color: var(--hui-ink-faint); text-align: center; font-size: var(--hatch-type-meta); line-height: 1.45; }
 .hatch-publish-confirmation dl { display: grid; gap: 9px; margin: 0 0 18px; }
 .hatch-publish-confirmation dl div { display: grid; grid-template-columns: 90px minmax(0,1fr); gap: 12px; font-size: var(--hatch-type-meta); }
