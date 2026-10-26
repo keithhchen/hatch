@@ -1271,7 +1271,10 @@ export async function createDashboardApp(options = {}) {
         const activeEntitlements = commerce.listBuyerEntitlements(authentication.profile.id).filter((entry) => entry.status === "active");
         const creatorNames = await resolveCreatorNames(activeEntitlements.map((entry) => entry.creator_id));
         const entitlements = enrichEntitlements(activeEntitlements, catalog, [], creatorNames);
-        const creatorAgents = entitlements.map((entry) => ({
+        // A withdrawn Agent is not chat-able: it leaves this list like it leaves the library.
+        const creatorAgents = entitlements.filter((entry) => catalog.some((product) => (
+          product.creator_id === entry.creator_id && product.product_id === entry.product_id
+        ))).map((entry) => ({
           ...entry,
           user_id: entry.buyer_id,
           agent_id: entry.product_id,

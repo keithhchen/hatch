@@ -1,5 +1,5 @@
 import { resolveCreatorIdentity } from "@hatch/chat";
-import { runtimeHttpUrl } from "../config.js";
+import { HATCH_ORIGIN } from "../config.js";
 import { HatchRequestError, requestJson } from "../http.js";
 import { isUuidV4 } from "../identity.js";
 
@@ -38,13 +38,14 @@ export class AgentAccess {
 }
 
 /**
- * The account's Agents, read from Runtime `GET /v1/me/creator-agents`: owned
- * rows first (published Products, no entitlement), then acquired rows. This
- * is the single Agent source for Desktop; Runtime re-authorizes every
- * conversation request regardless of what this list says.
+ * The account's Agents, read from the shared Web/Desktop access view
+ * `GET /v1/user/product-access`: owned rows first (published Products, no
+ * entitlement), then acquired rows, each with the creator's current name and
+ * avatar. Runtime re-authorizes every conversation request regardless of
+ * what this list says.
  */
 export async function fetchAgents(token, { fetchImpl = fetch } = {}) {
-  const payload = await requestJson(runtimeHttpUrl("/v1/me/creator-agents"), { token, fetchImpl });
+  const payload = await requestJson(new URL("/v1/user/product-access", HATCH_ORIGIN), { token, fetchImpl });
   if (!Array.isArray(payload?.creator_agents)) throw new HatchRequestError("agents_invalid", "The Agent list is invalid.");
   const seen = new Set();
   return payload.creator_agents.filter(AgentAccess.isValidRow).map(row => new AgentAccess(row)).filter(agent => {
