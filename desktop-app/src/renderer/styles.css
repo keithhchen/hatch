@@ -382,14 +382,14 @@ kbd { font: inherit; }
 .web-chat__dock { width: min(720px, 100%); box-sizing: border-box; gap: 8px; padding: 0 24px 16px; }
 .web-chat__notice { padding: 6px 6px 6px 12px; border-radius: var(--desk-radius-lg); background: var(--desk-raised); box-shadow: inset 0 0 0 1px var(--desk-hairline); font-size: 12px; font-weight: 500; }
 .web-chat__notice button { min-height: 24px; padding: 0 10px; color: var(--desk-ink) !important; background: var(--desk-fill); font-size: 12px; }
-.web-chat__composer { border: 0; border-radius: 12px; background: var(--desk-raised); box-shadow: inset 0 0 0 1px var(--desk-hairline); }
+.web-chat__composer { border: 0; border-radius: 24px; background: var(--desk-raised); box-shadow: inset 0 0 0 1px var(--desk-hairline); }
 .web-chat__composer:focus-within { box-shadow: var(--desk-field-focus); }
 .web-chat__attach:focus-within { outline: none; }
-.web-chat__composer textarea { min-height: 40px; max-height: 200px; padding: 12px 14px 4px; font-size: 14px; line-height: 1.5; }
-.web-chat__images { padding: 10px 10px 0; }
+.web-chat__composer textarea { min-height: 40px; max-height: 200px; padding: 14px 20px 4px; font-size: 14px; line-height: 1.5; }
+.web-chat__images { padding: 12px 16px 0; }
 .web-chat__image-chip { min-height: 24px; padding-left: 8px; font-size: 12px; }
 .web-chat__image-chip button { width: 20px; height: 20px; }
-.web-chat__actions { min-height: 40px; gap: 4px; padding: 0 8px 8px; }
+.web-chat__actions { min-height: 40px; gap: 4px; padding: 0 12px 10px; }
 .web-chat__hint { padding-left: 4px; font-size: 11px; }
 .web-chat__send { width: 28px; height: 28px; border-radius: 8px; }
 .web-chat__send:not(:disabled):hover { transform: none; box-shadow: none; background: #ffc21a; }
