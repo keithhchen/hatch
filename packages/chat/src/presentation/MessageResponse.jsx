@@ -1,11 +1,11 @@
 import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
 
-function WebChatMarkdownTable({ children, node, ...attributes }) {
+function MarkdownTable({ children, node, ...attributes }) {
   return <div className="web-chat__table-scroll"><table {...attributes}>{children}</table></div>;
 }
 
-const markdownComponents = Object.freeze({ table: WebChatMarkdownTable });
+const markdownComponents = Object.freeze({ table: MarkdownTable });
 const streamingAnimation = Object.freeze({
   animation: "fadeIn",
   duration: 160,
@@ -13,6 +13,6 @@ const streamingAnimation = Object.freeze({
   sep: "char"
 });
 
-export function WebChatMessageResponse({ children, isAnimating = false }) {
+export function MessageResponse({ children, isAnimating = false }) {
   return <Streamdown animated={streamingAnimation} components={markdownComponents} controls={{ code: false }} isAnimating={isAnimating}>{children}</Streamdown>;
 }

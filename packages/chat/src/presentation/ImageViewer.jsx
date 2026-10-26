@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Dialog, DialogContent } from "@hatch/ui";
 import { X } from "lucide-react";
 
-export function WebChatImageViewer({ src, alt, title, closeLabel, viewLabel, children }) {
+export function ImageViewer({ src, alt, title, closeLabel, viewLabel, children }) {
   const [open, setOpen] = useState(false);
 
   return <>

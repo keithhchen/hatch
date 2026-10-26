@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { groupTimelineEntries, PendingWebSubmission, WebChatTimeline } from "./webChatTimeline.js";
+import { ChatTimeline, groupTimelineEntries, PendingSubmission } from "../src/domain/timeline.js";
 
 test("Web Chat timeline keeps text, thinking, and tool activity in event order", () => {
-  const timeline = new WebChatTimeline();
+  const timeline = new ChatTimeline();
   timeline.appendText("A");
   timeline.appendText("B");
   timeline.updateThinking("正在查找资料");
@@ -25,7 +25,7 @@ test("Web Chat timeline keeps text, thinking, and tool activity in event order",
 });
 
 test("Web Chat creates a stable assistant projection before either run type streams", () => {
-  assert.deepEqual(WebChatTimeline.streamingAssistantMessage("run-1", "2026-10-03T00:00:00.000Z"), {
+  assert.deepEqual(ChatTimeline.streamingAssistantMessage("run-1", "2026-10-03T00:00:00.000Z"), {
     id: "stream-run-1",
     renderKey: "run-1-assistant",
     run_id: "run-1",
@@ -38,7 +38,7 @@ test("Web Chat creates a stable assistant projection before either run type stre
 });
 
 test("Web Chat tool updates replace the existing timeline item in place", () => {
-  const timeline = new WebChatTimeline();
+  const timeline = new ChatTimeline();
   timeline.updateThinking("准备调用");
   timeline.upsertTool({ type: "tool_call.delta", run_id: "run", tool_call_id: "call", name: "file_search", status: "requested", arguments: { query: "docs" } });
   timeline.updateThinking("等待结果");
@@ -51,7 +51,7 @@ test("Web Chat tool updates replace the existing timeline item in place", () => 
 });
 
 test("Web Chat does not duplicate terminal tool events as thinking entries", () => {
-  const timeline = new WebChatTimeline();
+  const timeline = new ChatTimeline();
   timeline.upsertTool({ run_id: "run", tool_call_id: "call", name: "web.search", status: "completed" });
   timeline.updateRuntimeStatus("Tool web.search completed.");
 
@@ -59,7 +59,7 @@ test("Web Chat does not duplicate terminal tool events as thinking entries", () 
 });
 
 test("Web Chat does not duplicate tool-start events as thinking entries", () => {
-  const timeline = new WebChatTimeline();
+  const timeline = new ChatTimeline();
   timeline.upsertTool({ run_id: "run", tool_call_id: "call", name: "web.search", status: "requested" });
   timeline.updateRuntimeStatus("Calling tool web.search.");
 
@@ -67,7 +67,7 @@ test("Web Chat does not duplicate tool-start events as thinking entries", () => 
 });
 
 test("Web Chat suppresses the compatibility thinking status when typed thinking events are available", () => {
-  const timeline = new WebChatTimeline();
+  const timeline = new ChatTimeline();
   timeline.upsertTool({ run_id: "run", tool_call_id: "call", name: "web.search", status: "completed" });
   timeline.updateRuntimeStatus("Thinking through the product.");
 
@@ -75,7 +75,7 @@ test("Web Chat suppresses the compatibility thinking status when typed thinking 
 });
 
 test("Web Chat thinking deltas update one indexed block and history restores its final content", () => {
-  const timeline = new WebChatTimeline();
+  const timeline = new ChatTimeline();
   timeline.startThinking(4);
   const thinkingId = timeline.snapshot()[0].id;
   timeline.appendThinking(4, "first ");
@@ -90,7 +90,7 @@ test("Web Chat thinking deltas update one indexed block and history restores its
     content: "first second",
     streaming: false
   }]);
-  assert.deepEqual(WebChatTimeline.fromHistory({
+  assert.deepEqual(ChatTimeline.fromHistory({
     run_id: "run",
     role: "assistant",
     content: "Done",
@@ -121,13 +121,13 @@ test("Web Chat puts every thinking or tool block in its own activity modal group
 });
 
 test("Web Chat keeps a streamed tool card key when the final snapshot rebuilds its timeline", () => {
-  const timeline = new WebChatTimeline();
+  const timeline = new ChatTimeline();
   timeline.upsertTool({ run_id: "run", tool_call_id: "call", name: "web.search", status: "requested" });
   const streamedToolKey = timeline.snapshot()[0].id;
   timeline.upsertTool({ run_id: "run", tool_call_id: "call", name: "web.search", status: "completed" });
   timeline.updateRuntimeStatus("Tool web.search completed.");
 
-  const canonical = WebChatTimeline.fromHistory({
+  const canonical = ChatTimeline.fromHistory({
     run_id: "run",
     role: "assistant",
     content: "Done.",
@@ -140,13 +140,13 @@ test("Web Chat keeps a streamed tool card key when the final snapshot rebuilds i
 });
 
 test("Web Chat restores an optimistic submission payload from its submission record", () => {
-  const submission = new PendingWebSubmission({
+  const submission = new PendingSubmission({
     conversationId: "conversation",
     runId: "run",
     clientMessageId: "message",
     content: "hello",
     attachments: [],
-    imageFiles: []
+    files: []
   });
 
   assert.equal(submission.optimisticMessage().content, "hello");
@@ -155,7 +155,7 @@ test("Web Chat restores an optimistic submission payload from its submission rec
 });
 
 test("Web Chat history preserves the stored text and tool-call order", () => {
-  const timeline = WebChatTimeline.fromHistory({
+  const timeline = ChatTimeline.fromHistory({
     run_id: "run",
     role: "assistant",
     content: "beforeafter",

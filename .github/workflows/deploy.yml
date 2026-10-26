@@ -52,6 +52,9 @@ jobs:
       - name: Install shared UI dependencies
         working-directory: packages/ui
         run: npm ci
+      - name: Install shared chat dependencies
+        working-directory: packages/chat
+        run: npm ci
       - name: Verify Creator Dashboard
         working-directory: creator-dashboard
         run: |

@@ -1,3 +1,5 @@
+import { AttachmentSource, ConversationTransport, RuntimeConnection, ToolExecutor } from "@hatch/chat";
+
 const API = "/v1/web-chat/conversations";
 const MAX_IMAGE_BYTES = 100 * 1024 * 1024;
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
@@ -9,102 +11,119 @@ export class WebChatClientError extends Error {
     this.code = code;
   }
 }
-export class WebChatClient {
-  constructor(request, entitlementId) {
+
+/**
+ * Web ConversationTransport: cookie-authenticated requests through the
+ * Dashboard proxy (/v1/web-chat/*). `scope` is the access binding sent with
+ * every request and the hello frame (e.g. { entitlement_id }); its shape is
+ * owned by the caller, not by this adapter.
+ */
+export class WebConversationTransport extends ConversationTransport {
+  constructor(request, scope) {
+    super();
     this.request = request;
-    this.entitlementId = entitlementId;
+    this.scope = scope;
   }
 
   url(path = "", parameters = {}) {
-    const query = new URLSearchParams({ entitlement_id: this.entitlementId, ...parameters });
-    return `${API}${path}?${query}`;
+    return `${API}${path}?${new URLSearchParams({ ...this.scope, ...parameters })}`;
+  }
+
+  conversationUrl(conversationId, path = "", parameters) {
+    return this.url(`/${encodeURIComponent(conversationId)}${path}`, parameters);
   }
 
   list(cursor) {
     return this.request(this.url("", cursor ? { cursor } : {}));
   }
 
-  create(briefAnswers) {
+  create({ briefAnswers } = {}) {
     return this.request(this.url(), {
       method: "POST",
-      body: JSON.stringify({
-        client_request_id: crypto.randomUUID(),
-        ...(briefAnswers ? { brief_answers: briefAnswers } : {})
-      })
+      body: JSON.stringify({ client_request_id: crypto.randomUUID(), ...(briefAnswers ? { brief_answers: briefAnswers } : {}) })
     });
   }
 
   snapshot(conversationId) {
-    return this.request(this.url(`/${encodeURIComponent(conversationId)}/snapshot`, { view: "page" }));
+    return this.request(this.conversationUrl(conversationId, "/snapshot", { view: "page" }));
   }
 
-  history(conversationId, cursor) {
-    return this.request(this.url(`/${encodeURIComponent(conversationId)}/history`, { before_cursor: cursor }));
+  history(conversationId, { beforeCursor }) {
+    return this.request(this.conversationUrl(conversationId, "/history", { before_cursor: beforeCursor }));
   }
 
-  toolDetail(conversationId, runId, toolCallId) {
-    const path = [conversationId, "tools", runId, toolCallId].map(encodeURIComponent).join("/");
-    return this.request(this.url(`/${path}`));
+  events(conversationId, { afterCursor, throughCursor }) {
+    return this.request(this.conversationUrl(conversationId, "/events", {
+      view: "page", after_cursor: String(afterCursor ?? 0), limit: "100",
+      ...(throughCursor != null ? { through_cursor: String(throughCursor) } : {})
+    }));
   }
+
+  async run(conversationId, runId) {
+    const payload = await this.request(this.conversationUrl(conversationId, `/runs/${encodeURIComponent(runId)}`));
+    return payload.run;
+  }
+
+  toolDetail(conversationId, { run_id: runId, tool_call_id: toolCallId }) {
+    return this.request(this.conversationUrl(conversationId, `/tools/${encodeURIComponent(runId)}/${encodeURIComponent(toolCallId)}`));
+  }
+
   assetUrl(conversationId, assetId) {
-    return this.url(`/${encodeURIComponent(conversationId)}/assets/${encodeURIComponent(assetId)}`);
+    return this.conversationUrl(conversationId, `/assets/${encodeURIComponent(assetId)}`);
   }
 
-  openRuntime(conversationId) {
-    return new BrowserRuntimeConnection(conversationId, this.entitlementId);
+  connect(conversationId, handlers) {
+    return new BrowserRuntimeConnection(conversationId, this.scope, handlers);
   }
 }
 
-export class BrowserRuntimeConnection {
-  constructor(conversationId, entitlementId) {
+export class BrowserRuntimeConnection extends RuntimeConnection {
+  constructor(conversationId, scope, { onOpen, onEvent, onClose }) {
+    super();
     this.conversationId = conversationId;
-    this.entitlementId = entitlementId;
+    this.scope = scope;
     this.socket = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/v1/web-chat/runtime`);
+    this.socket.onopen = onOpen;
+    this.socket.onmessage = event => onEvent(JSON.parse(event.data));
+    this.socket.onclose = onClose;
   }
 
-  hello() {
-    this.send({
-      type: "client.hello", protocol_version: "0.8", conversation_id: this.conversationId,
-      entitlement_id: this.entitlementId, client_version: "hatch-web", local_tools: []
-    });
+  hello(localTools) {
+    this.frame({ type: "client.hello", protocol_version: "0.8", conversation_id: this.conversationId, ...this.scope, client_version: "hatch-web", local_tools: localTools });
   }
 
-  message({ runId, clientMessageId, content = "", attachments = [], taskStart = false }) {
-    this.send({
+  send({ runId, clientMessageId, content = "", attachments = [], taskStart = false, localTools }) {
+    this.frame({
       type: "client.message", run_id: runId, client_message_id: clientMessageId,
-      conversation_id: this.conversationId, local_tools: [],
+      conversation_id: this.conversationId, local_tools: localTools,
       ...(taskStart ? { task_start: true } : {}),
       message: { role: "user", content, ...(attachments.length ? { attachments } : {}) }
     });
   }
 
-  toolResult(runId, toolCallId, error) {
-    this.send({
-      type: "tool_call.result",
-      run_id: runId,
-      tool_call_id: toolCallId,
-      status: "error",
-      error
-    });
+  toolResult(runId, toolCallId, result) {
+    this.frame({ type: "tool_call.result", run_id: runId, tool_call_id: toolCallId, ...result });
   }
-  cancel(runId) { this.send({ type: "turn.cancel", run_id: runId }); }
-  send(message) { this.socket.send(JSON.stringify(message)); }
+
+  cancel(runId) { this.frame({ type: "turn.cancel", run_id: runId }); }
+  frame(message) { this.socket.send(JSON.stringify(message)); }
   get ready() { return this.socket.readyState === WebSocket.OPEN; }
   close() { this.socket.close(); }
 }
 
-export class BrowserImageAttachments {
-  static accepts(mediaType) { return IMAGE_TYPES.has(mediaType); }
+/** Browsers attach images only, uploaded inline as content-addressed assets. */
+export class BrowserImageAttachments extends AttachmentSource {
+  accepts(mediaType) { return IMAGE_TYPES.has(mediaType); }
 
-  static async prepareAll(files) {
-    if (files.length > 8) throw new WebChatClientError("imageCountLimit");
+  async prepareAll(files) {
+    if (files.length > this.limit) throw new WebChatClientError("imageCountLimit");
     if (files.reduce((total, file) => total + file.size, 0) > MAX_IMAGE_BYTES) {
       throw new WebChatClientError("imageTotalSizeLimit");
     }
     return Promise.all(files.map(file => this.prepare(file)));
   }
 
-  static async prepare(file) {
+  async prepare(file) {
     if (!this.accepts(file.type) || file.size < 1 || file.size > MAX_IMAGE_BYTES) {
       throw new WebChatClientError("imageFormatInvalid");
     }
@@ -120,4 +139,11 @@ export class BrowserImageAttachments {
     const id = `asset_${crypto.randomUUID().replaceAll("-", "")}`;
     return { kind: "asset", attachment_id: id, asset_id: id, display_name: file.name, media_type: file.type, source_bytes: file.size, sha256, data_base64: dataBase64 };
   }
+}
+
+/** A browser cannot run local tools or grant approvals; it says so to the Runtime. */
+export class UnavailableToolExecutor extends ToolExecutor {
+  execute() { return Promise.resolve({ status: "error", error: { code: "web_local_tool_unavailable" } }); }
+  cancel() {}
+  requestApproval() { return Promise.resolve({ approved: false, error: { code: "browser_approval_unavailable" } }); }
 }

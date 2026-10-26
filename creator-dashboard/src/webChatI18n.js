@@ -46,6 +46,7 @@ export const webChatCopy = Object.freeze({
     retry: "Retry",
     conversationIdentityMismatch: "Conversation data does not match. Retry.",
     historyIdentityMismatch: "Conversation history does not match. Retry.",
+    snapshot_invalid: "Conversation history does not match. Retry.",
     replyFailed: "Reply failed.",
     connectionFailed: "Connection failed.",
     browserLocalToolUnavailable: "This browser cannot run local tools.",
@@ -136,6 +137,7 @@ export const webChatCopy = Object.freeze({
     retry: "重试",
     conversationIdentityMismatch: "对话数据不一致，请重试。",
     historyIdentityMismatch: "对话记录不一致，请重试。",
+    snapshot_invalid: "对话记录不一致，请重试。",
     replyFailed: "回复失败。",
     connectionFailed: "连接失败。",
     browserLocalToolUnavailable: "此浏览器不能运行本地工具。",
@@ -226,6 +228,7 @@ export const webChatCopy = Object.freeze({
     retry: "再試行",
     conversationIdentityMismatch: "会話データが一致しません。再試行してください。",
     historyIdentityMismatch: "会話履歴が一致しません。再試行してください。",
+    snapshot_invalid: "会話履歴が一致しません。再試行してください。",
     replyFailed: "返信に失敗しました。",
     connectionFailed: "接続に失敗しました。",
     browserLocalToolUnavailable: "このブラウザーではローカルツールを実行できません。",
@@ -270,16 +273,6 @@ export const webChatCopy = Object.freeze({
     switchAccount: "別のアカウントでログイン"
   })
 });
-
-
-export class WebChatPresentationError extends Error {
-  constructor(key, values = {}) {
-    super(key);
-    this.name = "WebChatPresentationError";
-    this.key = key;
-    this.values = values;
-  }
-}
 
 export function webChatT(locale, key, values = {}) {
   const template = webChatCopy[locale]?.[key] ?? webChatCopy.en[key] ?? key;
