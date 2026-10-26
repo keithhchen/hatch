@@ -29,12 +29,12 @@ test("production Commerce smoke covers public metadata and an idempotent authent
         "hatch_web_session=session-smoke; Path=/; HttpOnly; SameSite=Lax",
         "hatch_web_csrf=csrf-smoke; Path=/; SameSite=Lax"
       ]);
-      response.end(JSON.stringify({ profile: { id: "buyer-smoke", role: "user" } }));
+      response.end(JSON.stringify({ profile: { id: "buyer-smoke" } }));
       return;
     }
     if (url.pathname === "/v1/auth/me") {
       assert.match(String(request.headers.cookie), /hatch_web_session=session-smoke/);
-      response.end(JSON.stringify({ id: "buyer-smoke", role: "user" }));
+      response.end(JSON.stringify({ id: "buyer-smoke" }));
       return;
     }
     if (url.pathname === "/v1/checkout-sessions" && request.method === "POST") {

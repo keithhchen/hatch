@@ -55,7 +55,7 @@ const readyFactoryRun = {
 
 test("Dashboard readiness fails closed when Registry is unavailable", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-health-"));
-  const registry = registryFixture({ role: "user" });
+  const registry = registryFixture({ signedIn: "buyer" });
   await listen(registry);
   const dashboard = await createDashboardApp({
     ledgerPath: path.join(directory, "ledger.jsonl"),
@@ -80,7 +80,6 @@ test("Dashboard readiness fails closed when Registry is unavailable", async (con
 test("consumer avatar changes proxy through the authenticated Registry session", async (context) => {
   const account = {
     id: "buyer-avatar-test",
-    role: "user",
     email: "buyer@example.test",
     display_name: "Buyer"
   };
@@ -162,7 +161,6 @@ test("browser authentication keeps its session through a transient Registry fail
   let failVerification = false;
   const account = {
     id: catalogAgent.creator_id,
-    role: "creator",
     email: "creator@example.test",
     display_name: "Maya Chen"
   };
@@ -224,7 +222,7 @@ test("browser authentication keeps its session through a transient Registry fail
 test("Creator browser session proxies Product BriefSpec writes to Registry", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-brief-spec-"));
   const briefCalls = [];
-  const registry = registryFixture({ role: "creator", briefCalls });
+  const registry = registryFixture({ signedIn: "owner", briefCalls });
   await listen(registry);
   context.after(() => registry.close());
   const dashboard = await createDashboardApp({
@@ -272,7 +270,6 @@ test("Creator browser session proxies Product BriefSpec writes to Registry", asy
 test("browser OAuth PKCE keeps state and authorizes Product Files without Version scope", async (context) => {
   const account = {
     id: catalogAgent.creator_id,
-    role: "creator",
     email: "creator@example.test",
     display_name: "Maya Chen"
   };
@@ -473,7 +470,7 @@ test("browser OAuth PKCE keeps state and authorizes Product Files without Versio
 
 test("creator products are projected directly from the Agent Corpus Registry", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-creator-"));
-  const registry = registryFixture({ role: "creator" });
+  const registry = registryFixture({ signedIn: "owner" });
   await listen(registry);
   context.after(() => registry.close());
   const dashboard = await createDashboardApp({
@@ -505,7 +502,7 @@ test("creator products are projected directly from the Agent Corpus Registry", a
 test("Creator can approve a verified candidate, preview, publish, and receive a share URL", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-publish-"));
   const publishCalls = [];
-  const registry = registryFixture({ role: "creator", factoryRun: readyFactoryRun, publishCalls });
+  const registry = registryFixture({ signedIn: "owner", factoryRun: readyFactoryRun, publishCalls });
   await listen(registry);
   context.after(() => registry.close());
   const dashboard = await createDashboardApp({
@@ -600,7 +597,7 @@ test("Creator release does not dead-end when optional Product boundaries are emp
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-publish-no-boundaries-"));
   const publishCalls = [];
   const registry = registryFixture({
-    role: "creator",
+    signedIn: "owner",
     factoryRun: {
       ...readyFactoryRun,
       product: { ...readyFactoryRun.product, boundaries: [] }
@@ -651,7 +648,7 @@ test("Creator release does not dead-end when optional Product boundaries are emp
 test("unified Release approves the current Factory candidate and publishes once", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-release-command-"));
   const publishCalls = [];
-  const registry = registryFixture({ role: "creator", factoryRun: readyFactoryRun, publishCalls });
+  const registry = registryFixture({ signedIn: "owner", factoryRun: readyFactoryRun, publishCalls });
   await listen(registry);
   context.after(() => registry.close());
   const dashboard = await createDashboardApp({
@@ -693,7 +690,7 @@ test("non-UUID product paths are rejected without redirects", async (context) =>
     creator_slug_aliases: ["maya-old"],
     product_slug_aliases: ["resume-review-old"]
   };
-  const registry = registryFixture({ role: "user", catalogAgents: [aliasedAgent] });
+  const registry = registryFixture({ signedIn: "buyer", catalogAgents: [aliasedAgent] });
   await listen(registry);
   context.after(() => registry.close());
   const dashboard = await createDashboardApp({
@@ -715,7 +712,7 @@ test("Factory-only first publish does not seed a fake legacy deployment", async 
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-first-publish-"));
   const deploymentCalls = [];
   const registry = registryFixture({
-    role: "creator",
+    signedIn: "owner",
     factoryRun: readyFactoryRun,
     creatorAgents: [],
     catalogAgents: [],
@@ -793,7 +790,7 @@ test("legacy live storefront remains stable until its replacement deployment com
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-legacy-migration-"));
   const deploymentCalls = [];
   const registry = registryFixture({
-    role: "creator",
+    signedIn: "owner",
     factoryRun: readyFactoryRun,
     deploymentCalls,
     activationFailures: 1
@@ -873,7 +870,7 @@ test("deployment reconciler resumes after Registry activation failure without ex
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-deployment-reconcile-"));
   const deploymentCalls = [];
   const registry = registryFixture({
-    role: "creator",
+    signedIn: "owner",
     factoryRun: readyFactoryRun,
     deploymentCalls,
     activationFailures: 1
@@ -940,10 +937,52 @@ test("deployment reconciler resumes after Registry activation failure without ex
   assert.equal(recoveredProduct.available, true);
 });
 
+test("an owner reaches their published Agent by product_id and cannot acquire it", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-owner-access-"));
+  const registry = registryFixture({ signedIn: "owner" });
+  await listen(registry);
+  context.after(() => registry.close());
+  const dashboard = await createDashboardApp({
+    ledgerPath: path.join(directory, "ledger.jsonl"),
+    portalStatePath: path.join(directory, "portal-state.json"),
+    registryAccessServiceToken: "test-access-service",
+    registryDeploymentServiceToken: "test-deployment-service",
+    registryUrl: serverUrl(registry),
+    exposeBearerTokens: true
+  });
+  const api = createServer(dashboard.handler);
+  await listen(api);
+  context.after(() => api.close());
+  const token = await login(api);
+  const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+
+  const access = await fetch(`${serverUrl(api)}/v1/user/product-access`, { headers });
+  const { creator_agents: agents } = await access.json();
+  assert.equal(access.status, 200);
+  assert.equal(agents.length, 1);
+  assert.equal(agents[0].product_id, catalogAgent.product_id);
+  assert.equal(agents[0].creator_id, catalogAgent.creator_id);
+  assert.equal("entitlement_id" in agents[0], false);
+
+  for (const [pathname, body] of [
+    ["/v1/checkout-sessions", { product_id: catalogAgent.product_id }],
+    ["/v1/user/checkout", { creator_id: catalogAgent.creator_id, product_id: catalogAgent.product_id }]
+  ]) {
+    const response = await fetch(`${serverUrl(api)}${pathname}`, {
+      method: "POST",
+      headers: { ...headers, "idempotency-key": `self-${pathname}` },
+      body: JSON.stringify(body)
+    });
+    assert.equal(response.status, 409, pathname);
+    assert.equal((await response.json()).error.code, "self_purchase_not_allowed");
+  }
+  assert.equal(dashboard.ledger.listEvents().length, 0);
+});
+
 test("zero-value checkout creates an idempotent Agent Corpus order and entitlement", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-checkout-"));
   const accessBodies = [];
-  const registry = registryFixture({ role: "user", accessBodies });
+  const registry = registryFixture({ signedIn: "buyer", accessBodies });
   await listen(registry);
   context.after(() => registry.close());
   const dashboard = await createDashboardApp({
@@ -1020,7 +1059,7 @@ test("buyer list APIs omit records whose Creator account is missing and return t
   };
   const missingCreatorAccountIds = new Set();
   const registry = registryFixture({
-    role: "user",
+    signedIn: "buyer",
     catalogAgents: [catalogAgent, missingCreatorAgent],
     missingCreatorAccountIds
   });
@@ -1084,7 +1123,7 @@ test("V2 checkout session persists a free receipt and entitlement detail", async
   const accessBodies = [];
   const revokedEntitlements = [];
   const creatorAvatar = "https://media.example/creator-avatar.webp";
-  const registry = registryFixture({ role: "user", agent: { ...catalogAgent, creator_name: "Old Corpus Name", creator_avatar_url: creatorAvatar }, accessBodies, revokedEntitlements });
+  const registry = registryFixture({ signedIn: "buyer", agent: { ...catalogAgent, creator_name: "Old Corpus Name", creator_avatar_url: creatorAvatar }, accessBodies, revokedEntitlements });
   await listen(registry);
   context.after(() => registry.close());
   const dashboard = await createDashboardApp({
@@ -1229,7 +1268,7 @@ test("V2 checkout session persists a free receipt and entitlement detail", async
 test("public Creator and Product profiles expose the Registry account avatar", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-public-avatar-"));
   const avatar = "https://media.example/creator-avatar.webp";
-  const registry = registryFixture({ role: "user", agent: { ...catalogAgent, creator_avatar_url: avatar } });
+  const registry = registryFixture({ signedIn: "buyer", agent: { ...catalogAgent, creator_avatar_url: avatar } });
   await listen(registry);
   context.after(() => registry.close());
   const dashboard = await createDashboardApp({
@@ -1258,7 +1297,7 @@ test("public Creator and Product profiles expose the Registry account avatar", a
 test("a zero-price purchase is permanent and has no buyer cancellation action", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-free-cancel-"));
   const revokedEntitlements = [];
-  const registry = registryFixture({ role: "user", revokedEntitlements });
+  const registry = registryFixture({ signedIn: "buyer", revokedEntitlements });
   await listen(registry);
   context.after(() => registry.close());
   const dashboard = await createDashboardApp({
@@ -1316,7 +1355,7 @@ test("a zero-price purchase is permanent and has no buyer cancellation action", 
 
 test("Creator fulfilled filter includes delivered orders and disconnected payouts do not invent balances", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-creator-delivery-"));
-  const registry = registryFixture({ role: "creator" });
+  const registry = registryFixture({ signedIn: "owner" });
   await listen(registry);
   context.after(() => registry.close());
   const dashboard = await createDashboardApp({
@@ -1435,7 +1474,7 @@ async function recordDelivery(app, checkout, { prefix, artifactType }) {
 }
 
 function registryFixture({
-  role,
+  signedIn,
   accessBodies = [],
   revokedEntitlements = [],
   agent = catalogAgent,
@@ -1456,15 +1495,15 @@ function registryFixture({
     let content = "";
     for await (const chunk of request) content += chunk;
     response.setHeader("content-type", "application/json");
-    const account = role === "creator"
-      ? { id: catalogAgent.creator_id, role: "creator", email: "creator@example.test", display_name: "Maya Chen" }
-      : { id: "buyer-zero", role: "user", email: "buyer@example.test", display_name: "Zero Buyer" };
+    const account = signedIn === "owner"
+      ? { id: catalogAgent.creator_id, email: "creator@example.test", display_name: "Maya Chen" }
+      : { id: "buyer-zero", email: "buyer@example.test", display_name: "Zero Buyer" };
     if (requestUrl.pathname === "/health" || requestUrl.pathname === "/readyz") {
       response.end(JSON.stringify({ ok: true }));
       return;
     }
     if (requestUrl.pathname === "/v1/auth/signin") {
-      response.end(JSON.stringify({ token: `signed-${role}-token`, account }));
+      response.end(JSON.stringify({ token: `signed-${signedIn}-token`, account }));
       return;
     }
     if (requestUrl.pathname === "/v1/auth/me") {
