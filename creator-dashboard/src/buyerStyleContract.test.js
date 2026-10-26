@@ -26,6 +26,9 @@ test("account avatars share a gradient circular single-letter fallback", () => {
   assert.match(avatarStyles, /aspect-ratio:\s*1;/);
   assert.match(avatarStyles, /border-radius:\s*50%;/);
   assert.match(sharedUiStyles, /\.hui-avatar__fallback\s*\{[^}]*background:\s*var\(--hatch-avatar-gradient\);/);
+  const brandTokens = readFileSync(new URL("../../packages/brand/tokens.css", import.meta.url), "utf8");
+  assert.match(brandTokens, /^:root\s*\{[^}]*--hatch-avatar-gradient:\s*linear-gradient\(135deg, #f5b700, #e08a3c\);/m);
+  assert.doesNotMatch(readFileSync(new URL("./webTheme.css", import.meta.url), "utf8"), /--hatch-avatar-gradient/);
   assert.match(sharedUiStyles, /\.hui-avatar__fallback\s*\{[^}]*font-family:\s*var\(--hatch-font-ui\);[^}]*font-weight:\s*var\(--hatch-weight-bold\);/);
 });
 

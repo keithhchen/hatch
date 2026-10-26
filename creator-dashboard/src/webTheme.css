@@ -94,7 +94,6 @@
   --hatch-atmosphere-grain: 0;
   --hatch-atmosphere-warm-field: radial-gradient(ellipse at 50% 50%, rgba(253, 236, 200, 0.95) 0%, rgba(253, 236, 200, 0) 70%);
   --hatch-atmosphere-cool-field: radial-gradient(ellipse at 50% 50%, rgba(228, 235, 243, 0.95) 0%, rgba(228, 235, 243, 0) 70%);
-  --hatch-avatar-gradient: linear-gradient(135deg, #f5b700, #e08a3c);
 }
 
 html, body { background: var(--web-paper); color: var(--web-ink); font-family: var(--web-sans); -webkit-font-smoothing: antialiased; }
