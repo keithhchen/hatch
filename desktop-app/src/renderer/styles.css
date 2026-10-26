@@ -107,6 +107,13 @@ kbd { font: inherit; }
   contain: layout paint; transition: transform var(--desk-medium) var(--desk-ease);
 }
 :root:not([data-native]) .desk-sidebar, :root[data-platform="windows"] .desk-sidebar { background: var(--desk-sidebar); }
+/* Native macOS: the sidebar is the window's behind-window material
+ * (UnderWindowBackground, see window_shell.rs) seen through a faint yolk tint —
+ * tinted glass, not a yellow panel. Nothing opaque sits beneath it. */
+:root[data-native][data-platform="macos"] { --desk-glass-tint: color-mix(in srgb, #f5b700 7%, transparent); --desk-glass-selected: rgba(0, 0, 0, .09); }
+:root[data-native][data-platform="macos"][data-theme="dark"] { --desk-glass-tint: color-mix(in srgb, #f5b700 4.5%, transparent); --desk-glass-selected: rgba(255, 255, 255, .12); }
+:root[data-native][data-platform="macos"] .desk:not([data-narrow]) .desk-sidebar { background: var(--desk-glass-tint); }
+:root[data-native][data-platform="macos"] .desk:not([data-narrow]) .desk-sidebar .desk-row[aria-current="page"] { background: var(--desk-glass-selected); }
 .desk[data-sidebar="closed"] .desk-sidebar { transform: translateX(-100%); }
 .desk-content {
   position: absolute; inset: 0 0 0 var(--desk-sidebar-width); z-index: 1; display: flex; flex-direction: column; min-width: 0;
@@ -178,6 +185,11 @@ kbd { font: inherit; }
 .desk-library__link { justify-self: start; padding: 0; border: 0; color: var(--desk-muted); background: none; font-size: 13px; }
 .desk-library__link:hover { color: var(--desk-ink); text-decoration: underline; text-underline-offset: 2px; }
 .desk-library__footer { display: flex; gap: 8px; padding: 8px 12px; border-top: .5px solid var(--desk-hairline); background: var(--desk-sidebar); }
+/* Native macOS: the Library shows the window material through the same tinted
+ * glass as the sidebar; cards stay opaque with hairline edges for legibility. */
+:root[data-native][data-platform="macos"] .desk-library { background: var(--desk-glass-tint); }
+:root[data-native][data-platform="macos"] .desk-library__footer { background: transparent; }
+:root[data-native][data-platform="macos"] .desk-library__agent { box-shadow: 0 .5px 1px rgba(0, 0, 0, .04); }
 .desk-library__footer .desk-row { width: auto; flex: 1; }
 .desk-library__footer .desk-row--account { flex: 0 1 220px; }
 

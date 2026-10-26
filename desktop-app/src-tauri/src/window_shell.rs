@@ -52,9 +52,13 @@ fn window_theme(theme: &str) -> Option<Theme> {
 }
 
 fn window_effects() -> WindowEffectsConfig {
+    // UnderWindowBackground is the most see-through behind-window material
+    // that still adapts to light/dark text contrast; `Sidebar` reads nearly
+    // opaque. The renderer adds a faint yolk tint and keeps the content pane
+    // opaque, so only the sidebar and the Library show the material.
     #[cfg(target_os = "macos")]
     let (effects, state) = (
-        vec![Effect::Sidebar],
+        vec![Effect::UnderWindowBackground],
         Some(EffectState::FollowsWindowActiveState),
     );
     // Mica only: Acrylic is documented to lag while dragging/resizing.
