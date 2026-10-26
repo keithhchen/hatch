@@ -1,5 +1,5 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Bot, Check, ChevronsUpDown, Copy, Download, ExternalLink, Languages, LayoutDashboard, LogOut, Menu, MoreHorizontal, Plus, ReceiptText, Search, Settings, Wallet, X } from "lucide-react";
+import { ArrowLeft, Bot, Check, ChevronsUpDown, Copy, Download, ExternalLink, Languages, LayoutDashboard, LogOut, Menu, MoreHorizontal, Plus, ReceiptText, Search, Settings, X } from "lucide-react";
 import { Button, CommandMenu, ConfirmDialog, DropdownMenu, IconButton } from "@hatch/ui";
 import { ButtonBase, Divider as MuiDivider, ListItemIcon, ListItemText, Menu as MuiMenu, MenuItem as MuiMenuItem, Typography as MuiTypography } from "@mui/material";
 import { createTheme, ThemeProvider } from "@mui/material/styles";
@@ -34,7 +34,6 @@ const NAV_ITEMS = [
   { section: "home", href: ROOT, label: "sxNavOverview", Icon: LayoutDashboard },
   { section: "products", href: `${ROOT}/products`, label: "sxNavAgents", Icon: Bot },
   { section: "orders", href: `${ROOT}/orders`, label: "sxNavOrders", Icon: ReceiptText },
-  { section: "earnings", href: `${ROOT}/earnings`, label: "sxNavEarnings", Icon: Wallet },
   { section: "settings", href: `${ROOT}/settings`, label: "sxNavSettings", Icon: Settings }
 ];
 
