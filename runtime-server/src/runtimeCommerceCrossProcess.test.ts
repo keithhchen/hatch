@@ -324,7 +324,7 @@ async function startRegistryFixture(corpus: CorpusReleases): Promise<RegistryFix
       }
       if (request.method === "GET" && url.pathname === "/v1/auth/me") {
         return bearer(request.headers.authorization) === BUYER_TOKEN
-          ? json(response, 200, { id: BUYER_ID, role: "user", display_name: "Cross Process Buyer" })
+          ? json(response, 200, { id: BUYER_ID, display_name: "Cross Process Buyer" })
           : json(response, 401, { detail: "A valid account token is required." });
       }
       if (request.method === "GET" && url.pathname === "/v1/internal/creator-accounts") {

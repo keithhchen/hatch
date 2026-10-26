@@ -139,6 +139,27 @@ export class CreatorRegistryReleaseStore {
     return row ? rowToRelease(row) : undefined;
   }
 
+  /** An account's own Products whose live pointer is a published release. */
+  async listLiveByCreator(creatorId: string): Promise<CreatorRegistryRelease[]> {
+    requireUuidV4(creatorId, "creator_id");
+    if (!this.pool) {
+      return [...this.memory.values()]
+        .filter((release) => release.creator_id === creatorId)
+        .sort((a, b) => Date.parse(b.published_at) - Date.parse(a.published_at));
+    }
+    const result = await this.pool.query(`
+      SELECT r.product_id, r.creator_id, r.release_digest, r.corpus_digest,
+             r.corpus_ref, r.release_ref, r.runtime_manifest_ref,
+             r.brief_spec, r.status, r.published_at
+      FROM hatch_creator_registry_live AS l
+      JOIN hatch_creator_registry_releases AS r
+        ON r.product_id=l.product_id AND r.release_digest=l.release_digest
+      WHERE r.creator_id=$1 AND r.status='published'
+      ORDER BY r.published_at DESC, r.product_id ASC
+    `, [creatorId]);
+    return result.rows.map((row) => rowToRelease(row as Record<string, unknown>));
+  }
+
   async withdraw(creatorId: string, productId: string): Promise<void> {
     requireUuidV4(productId, "product_id");
     requireUuidV4(creatorId, "creator_id");
@@ -182,7 +203,7 @@ export class CreatorRegistryReleaseStore {
         ON r.product_id=l.product_id AND r.release_digest=l.release_digest
       LEFT JOIN hatch_creator_products AS p
         ON p.id=r.product_id::text AND p.status='active'
-      JOIN accounts AS a ON a.id=r.creator_id AND a.role='creator'
+      JOIN accounts AS a ON a.id=r.creator_id
       WHERE r.status='published'
       ORDER BY r.published_at DESC, r.product_id ASC
       LIMIT $1 OFFSET $2

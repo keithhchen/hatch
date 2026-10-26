@@ -258,7 +258,7 @@ test("one account can resolve multiple sessions concurrently", async () => {
     }
   } as unknown as AgentCorpusResolver;
   const identityResolver: AuthIdentityResolver = {
-    resolveIdentity: async () => ({ sub: entitlement.user_id, role: "user" })
+    resolveIdentity: async () => ({ sub: entitlement.user_id })
   };
   const conversationRepository = await authBoundaryConversations(entitlement, [
     "same-user-install-one",
@@ -321,7 +321,7 @@ test("concurrent hello setup aborts Creator tool resolution when its socket clos
   const runtime = createRuntimeServer({
     conversationStore: new RuntimeStore(conversationRepository.localAuthority),
     conversationRepository,
-    authIdentityResolver: { resolveIdentity: async () => ({ sub: entitlement.user_id, role: "user" }) },
+    authIdentityResolver: { resolveIdentity: async () => ({ sub: entitlement.user_id }) },
     entitlementResolver: fixtureEntitlementResolver(entitlement),
     agentCorpusResolver: {
       resolve: async () => ({ root: "/fixture-corpus", corpus, digest: `sha256:${"1".repeat(64)}` })
@@ -386,7 +386,7 @@ test("an existing session re-resolves Creator tool bindings and blocks a disable
   const runtime = createRuntimeServer({
     createRuntime: () => completingRuntime(() => { runCalls += 1; }),
     conversationStore: new RuntimeStore(conversationRepository.localAuthority),
-    authIdentityResolver: { resolveIdentity: async () => ({ sub: entitlement.user_id, role: "user" }) },
+    authIdentityResolver: { resolveIdentity: async () => ({ sub: entitlement.user_id }) },
     entitlementResolver: fixtureEntitlementResolver(entitlement),
     agentCorpusResolver: {
       resolve: async () => ({ root: "/fixture-corpus", corpus, digest: `sha256:${"1".repeat(64)}` })
@@ -445,7 +445,7 @@ test("an existing session uses a rotated Creator tool binding on its next turn",
   const runtime = createRuntimeServer({
     createRuntime: () => agentRuntime,
     conversationStore: new RuntimeStore(conversationRepository.localAuthority),
-    authIdentityResolver: { resolveIdentity: async () => ({ sub: entitlement.user_id, role: "user" }) },
+    authIdentityResolver: { resolveIdentity: async () => ({ sub: entitlement.user_id }) },
     entitlementResolver: fixtureEntitlementResolver(entitlement),
     agentCorpusResolver: new AgentCorpusResolver(fixture.baseRoot),
     creatorToolControlPlane: controlPlane,
@@ -469,13 +469,13 @@ test("an existing session uses a rotated Creator tool binding on its next turn",
 test("global per-turn authorization capacity rejects N+1 without another Registry call", async () => {
   const entitlement = fixtureEntitlement();
   const tokenCalls = new Map<string, number>();
-  const pendingReleases: Array<(identity: { sub: string; role: "user" }) => void> = [];
+  const pendingReleases: Array<(identity: { sub: string }) => void> = [];
   const identityResolver: AuthIdentityResolver = {
     resolveIdentity: async (token) => {
       const calls = (tokenCalls.get(token ?? "") ?? 0) + 1;
       tokenCalls.set(token ?? "", calls);
-      if (calls === 1) return { sub: entitlement.user_id, role: "user" };
-      return new Promise<{ sub: string; role: "user" }>((resolve) => pendingReleases.push(resolve));
+      if (calls === 1) return { sub: entitlement.user_id };
+      return new Promise<{ sub: string }>((resolve) => pendingReleases.push(resolve));
     }
   };
   let runCalls = 0;
@@ -514,14 +514,14 @@ test("global per-turn authorization capacity rejects N+1 without another Registr
     assert.equal(runCalls, 0);
 
     const firstCompleted = waitForMessage(sockets[0]!, (message) => message.type === "turn.completed" && message.run_id === "turn-capacity-one");
-    pendingReleases[0]?.({ sub: entitlement.user_id, role: "user" });
+    pendingReleases[0]?.({ sub: entitlement.user_id });
     await firstCompleted;
 
     sockets[2]!.send(JSON.stringify(clientMessage("turn-capacity-admitted", "turn-conversation-three")));
     await waitUntil(() => pendingReleases.length === 3);
     assert.equal(tokenCalls.get("turn-session-3"), 2);
   } finally {
-    for (const release of pendingReleases) release({ sub: entitlement.user_id, role: "user" });
+    for (const release of pendingReleases) release({ sub: entitlement.user_id });
     for (const socket of sockets) socket.close();
     await runtime.close();
   }
@@ -532,8 +532,8 @@ test("per-user turn authorization capacity prevents one account from occupying t
   const tokenCalls = new Map<string, number>();
   let markPendingStarted!: () => void;
   const pendingStarted = new Promise<void>((resolve) => { markPendingStarted = resolve; });
-  let releasePending!: (identity: { sub: string; role: "user" }) => void;
-  const pendingIdentity = new Promise<{ sub: string; role: "user" }>((resolve) => { releasePending = resolve; });
+  let releasePending!: (identity: { sub: string }) => void;
+  const pendingIdentity = new Promise<{ sub: string }>((resolve) => { releasePending = resolve; });
   const identityResolver: AuthIdentityResolver = {
     resolveIdentity: async (token) => {
       const calls = (tokenCalls.get(token ?? "") ?? 0) + 1;
@@ -542,7 +542,7 @@ test("per-user turn authorization capacity prevents one account from occupying t
         markPendingStarted();
         return pendingIdentity;
       }
-      return { sub: entitlement.user_id, role: "user" };
+      return { sub: entitlement.user_id };
     }
   };
   let runCalls = 0;
@@ -575,14 +575,14 @@ test("per-user turn authorization capacity prevents one account from occupying t
     assert.equal(runCalls, 0);
 
     const firstCompleted = waitForMessage(first, (message) => message.type === "turn.completed" && message.run_id === "fair-auth-first");
-    releasePending({ sub: entitlement.user_id, role: "user" });
+    releasePending({ sub: entitlement.user_id });
     await firstCompleted;
     const secondCompleted = waitForMessage(second, (message) => message.type === "turn.completed" && message.run_id === "fair-auth-admitted");
     second.send(JSON.stringify(clientMessage("fair-auth-admitted", "fair-auth-conversation-overflow")));
     await secondCompleted;
     assert.equal(tokenCalls.get("fair-user-two"), 2);
   } finally {
-    releasePending({ sub: entitlement.user_id, role: "user" });
+    releasePending({ sub: entitlement.user_id });
     first?.close();
     second?.close();
     await runtime.close();
@@ -666,7 +666,6 @@ test("per-user active-run capacity preserves room for another account", async ()
     authIdentityResolver: {
       resolveIdentity: async (token) => ({
         sub: token === "fair-run-token-three" ? "fair-run-other-account" : "fair-run-shared-account",
-        role: "user"
       })
     },
     maxActiveRunsGlobal: 3,
@@ -915,7 +914,7 @@ test("one account can keep more than eight ready connections", async () => {
     conversationStore: store,
     conversationRepository: await seedLocalConversations(store, conversationIds),
     authIdentityResolver: {
-      resolveIdentity: async () => ({ sub: "connection-account-one", role: "user" })
+      resolveIdentity: async () => ({ sub: "connection-account-one" })
     }
   });
   const port = await listen(runtime);
@@ -965,8 +964,8 @@ test("turn.cancel tombstones pending authorization and an abort-ignoring resolve
   const tokenCalls = new Map<string, number>();
   let markPendingStarted!: () => void;
   const pendingStarted = new Promise<void>((resolve) => { markPendingStarted = resolve; });
-  let releaseIgnoredAuthorization!: (identity: { sub: string; role: "user" }) => void;
-  const ignoredAuthorization = new Promise<{ sub: string; role: "user" }>((resolve) => {
+  let releaseIgnoredAuthorization!: (identity: { sub: string }) => void;
+  const ignoredAuthorization = new Promise<{ sub: string }>((resolve) => {
     releaseIgnoredAuthorization = resolve;
   });
   const identityResolver: AuthIdentityResolver = {
@@ -979,7 +978,7 @@ test("turn.cancel tombstones pending authorization and an abort-ignoring resolve
         // authoritative even with a buggy or stale resolver implementation.
         return ignoredAuthorization;
       }
-      return { sub: entitlement.user_id, role: "user" };
+      return { sub: entitlement.user_id };
     }
   };
   let runCalls = 0;
@@ -1026,7 +1025,7 @@ test("turn.cancel tombstones pending authorization and an abort-ignoring resolve
     await secondCompleted;
     assert.equal(runCalls, 1);
 
-    releaseIgnoredAuthorization({ sub: entitlement.user_id, role: "user" });
+    releaseIgnoredAuthorization({ sub: entitlement.user_id });
     await new Promise<void>((resolve) => setImmediate(resolve));
     await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(runCalls, 1);
@@ -1046,7 +1045,7 @@ test("turn.cancel tombstones pending authorization and an abort-ignoring resolve
     assert.equal(afterLateReturn?.type, "turn.completed");
     assert.equal(runCalls, 2);
   } finally {
-    releaseIgnoredAuthorization({ sub: entitlement.user_id, role: "user" });
+    releaseIgnoredAuthorization({ sub: entitlement.user_id });
     first?.close();
     second?.close();
     await runtime.close();
@@ -1274,7 +1273,7 @@ test("HTTP history responses are rejected before writing beyond the configured b
 test("HTTP Registry authorization failures return controlled 503 responses", async () => {
   const entitlement = fixtureEntitlement();
   const identityResolver: AuthIdentityResolver = {
-    resolveIdentity: async () => ({ sub: entitlement.user_id, role: "user" })
+    resolveIdentity: async () => ({ sub: entitlement.user_id })
   };
   const unavailableEntitlements: EntitlementResolver = {
     list: async () => { throw new EntitlementError("entitlement_registry_unavailable", "upstream detail"); },
@@ -1313,7 +1312,7 @@ test("HTTP Registry authorization failures return controlled 503 responses", asy
 
 test("a disconnected HTTP request does not block another request from the same source", async () => {
   const signals: AbortSignal[] = [];
-  const releases: Array<(identity: { sub: string; role: "user" } | undefined) => void> = [];
+  const releases: Array<(identity: { sub: string } | undefined) => void> = [];
   const identityResolver: AuthIdentityResolver = {
     resolveIdentity: async (_token, options) => {
       if (options?.signal) signals.push(options.signal);
@@ -1347,7 +1346,7 @@ test("a disconnected HTTP request does not block another request from the same s
       headers: { authorization: "Bearer same-source" }
     });
     await waitUntil(() => releases.length === 2);
-    releases[1]?.({ sub: "http-user", role: "user" });
+    releases[1]?.({ sub: "http-user" });
     assert.equal((await admitted).status, 200);
     releases[0]?.(undefined);
   } finally {
@@ -1457,37 +1456,37 @@ test("disconnect cleanup finishes when cancellation persistence fails", async ()
   }
 });
 
-test("entitlement-backed turns reject a creator identity even with a permissive resolver", async () => {
+test("entitlement-backed turns reject a grant for another account even with a permissive resolver", async () => {
   const entitlement = fixtureEntitlement();
-  let role: "user" | "creator" = "user";
+  let grant = entitlement;
   let runCalls = 0;
   const identityResolver: AuthIdentityResolver = {
-    resolveIdentity: async () => ({ sub: entitlement.user_id, role })
+    resolveIdentity: async () => ({ sub: entitlement.user_id })
   };
-  const conversationRepository = await authBoundaryConversations(entitlement, ["role-changing-install"]);
+  const conversationRepository = await authBoundaryConversations(entitlement, ["grant-changing-install"]);
   const runtime = createRuntimeServer({
     createRuntime: () => completingRuntime(() => { runCalls += 1; }),
     conversationStore: new RuntimeStore(conversationRepository.localAuthority),
     conversationRepository,
     authIdentityResolver: identityResolver,
-    entitlementResolver: fixtureEntitlementResolver(entitlement),
+    entitlementResolver: { list: async () => [grant], resolve: async () => grant },
     agentCorpusResolver: fixtureCorpusResolver(entitlement)
   });
   const port = await listen(runtime);
-  const socket = await connectEntitledSocket(port, entitlement, "role-changing-session", "role-changing-install");
+  const socket = await connectEntitledSocket(port, entitlement, "grant-changing-session", "grant-changing-install");
   try {
-    role = "creator";
-    const rejected = waitForMessage(socket, (message) => message.run_id === "run-role-changed"
+    grant = { ...entitlement, user_id: "77777777-7777-4777-8777-777777777777" };
+    const rejected = waitForMessage(socket, (message) => message.run_id === "run-grant-changed"
       && (message.error as { code?: string } | undefined)?.code === "entitlement_required");
-    socket.send(JSON.stringify(clientMessage("run-role-changed", "role-changing-install")));
+    socket.send(JSON.stringify(clientMessage("run-grant-changed", "grant-changing-install")));
     assert.equal(((await rejected).error as { code?: string }).code, "entitlement_required");
     assert.equal(runCalls, 0);
 
-    const history = new URL(`http://127.0.0.1:${port}/conversations/role-change-conversation/messages`);
+    const history = new URL(`http://127.0.0.1:${port}/conversations/grant-change-conversation/messages`);
     history.searchParams.set("entitlement_id", entitlement.entitlement_id);
     history.searchParams.set("creator_id", entitlement.creator_id);
     history.searchParams.set("agent_id", entitlement.agent_id);
-    const response = await fetch(history, { headers: { authorization: "Bearer role-changing-session" } });
+    const response = await fetch(history, { headers: { authorization: "Bearer grant-changing-session" } });
     assert.equal(response.status, 403);
   } finally {
     socket.close();
@@ -1505,7 +1504,7 @@ test("an existing session runs the latest Agent Corpus on its next turn", async 
     )
   } as unknown as AgentCorpusResolver;
   const identityResolver: AuthIdentityResolver = {
-    resolveIdentity: async () => ({ sub: entitlement.user_id, role: "user" })
+    resolveIdentity: async () => ({ sub: entitlement.user_id })
   };
   let runCalls = 0;
   let observedPrompt = "";
@@ -1556,7 +1555,6 @@ function signLegacyToken(secret: string, subject: string): string {
   const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
   const payload = Buffer.from(JSON.stringify({
     sub: subject,
-    role: "user",
     exp: Math.floor(Date.now() / 1000) + 3600
   })).toString("base64url");
   const signature = createHmac("sha256", secret).update(`${header}.${payload}`).digest("base64url");
@@ -1615,8 +1613,11 @@ function fixtureCorpusResolver(entitlement: EntitlementBinding): AgentCorpusReso
     knowledge: { documents: [] },
     tools: []
   } as unknown as AgentCorpus;
+  const resolved = { root: "", corpus, digest: `sha256:${"1".repeat(64)}` };
   return {
-    resolve: async () => ({ root: "", corpus, digest: `sha256:${"1".repeat(64)}` })
+    resolve: async () => resolved,
+    resolveByProduct: async () => resolved,
+    list: async () => []
   } as unknown as AgentCorpusResolver;
 }
 

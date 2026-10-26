@@ -112,7 +112,7 @@ test("Runtime reads the same authoritative entitlement boundary as Web and never
     const url = new URL(String(input));
     requested.push(url.toString());
     if (url.origin === "https://registry.example.test" && url.pathname === "/v1/auth/me") {
-      return new Response(JSON.stringify({ id: USER_ID, role: "user" }), { status: 200 });
+      return new Response(JSON.stringify({ id: USER_ID }), { status: 200 });
     }
     assert.equal(new Headers(init?.headers).get("authorization"), "Bearer access-service-token");
     if (url.pathname === `/v1/internal/access/users/${USER_ID}/entitlements`) {
@@ -169,7 +169,6 @@ test("Registry identity resolver treats 401 as signed-out and returns server exp
     serviceHeader = new Headers(init?.headers).get("x-hatch-runtime-service-token");
     return new Response(JSON.stringify({
     id: USER_ID,
-    role: "user",
     display_name: "Jordan Lee",
     session_expires_at: "2026-11-08T00:00:00.000Z"
     }), { status: 200 });
@@ -179,7 +178,6 @@ test("Registry identity resolver treats 401 as signed-out and returns server exp
   });
   assert.deepEqual(await resolver.resolveIdentity("opaque-token"), {
     sub: USER_ID,
-    role: "user",
     exp: Math.floor(Date.parse("2026-11-08T00:00:00.000Z") / 1000)
   });
   assert.equal(serviceHeader, "runtime-service-token");
@@ -244,7 +242,6 @@ function legacyToken(secret: string, subject: string): string {
   const header = Buffer.from(JSON.stringify({ alg: "HS256" })).toString("base64url");
   const payload = Buffer.from(JSON.stringify({
     sub: subject,
-    role: "user",
     exp: Math.floor(Date.now() / 1000) + 3600
   })).toString("base64url");
   const signature = createHmac("sha256", secret).update(`${header}.${payload}`).digest("base64url");

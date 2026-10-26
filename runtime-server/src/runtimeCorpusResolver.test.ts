@@ -48,7 +48,11 @@ test("Runtime resolves the installed agent.json as the same corpus used for turn
       registryUrl: "https://registry.example.test",
       serviceToken: "runtime-token",
       corpusRoot: root,
-      fetchImpl: async () => new Response(JSON.stringify({
+      fetchImpl: async (input) => new Response(JSON.stringify(String(input).endsWith(`/v1/runtime/creators/${CREATOR_ID}/releases`)
+        ? { releases: [liveRelease] }
+        : liveRelease), { status: 200, headers: { "content-type": "application/json" } })
+    });
+    const liveRelease = {
         release: {
           product_id: PRODUCT_ID,
           creator_id: CREATOR_ID,
@@ -61,8 +65,7 @@ test("Runtime resolves the installed agent.json as the same corpus used for turn
           published_at: "2026-08-22T00:00:00.000Z"
         },
         runtime_manifest_ref: `registry/${PRODUCT_ID}/releases/${RELEASE_DIGEST.slice("sha256:".length)}/runtime/manifest.json`
-      }), { status: 200, headers: { "content-type": "application/json" } })
-    });
+    };
 
     const resolved = await resolver.resolve(CREATOR_ID, PRODUCT_ID);
     assert.equal(resolved.corpus.product.id, PRODUCT_ID);
@@ -79,6 +82,9 @@ test("Runtime resolves the installed agent.json as the same corpus used for turn
       resolver.resolve("33333333-3333-4333-8333-333333333333", PRODUCT_ID, SOURCE_DIGEST),
       /binding does not match/
     );
+    // The owner comes from the live release, and an account lists its own releases.
+    assert.equal((await resolver.resolveByProduct(PRODUCT_ID)).corpus.creator.id, CREATOR_ID);
+    assert.deepEqual((await resolver.list(CREATOR_ID)).map((owned) => owned.corpus.product.id), [PRODUCT_ID]);
     const aborted = AbortSignal.abort();
     await assert.rejects(resolver.resolve(CREATOR_ID, PRODUCT_ID, SOURCE_DIGEST, aborted), { name: "AbortError" });
   } finally {
