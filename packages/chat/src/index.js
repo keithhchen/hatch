@@ -8,3 +8,4 @@ export * from "./ports/index.js";
 export * from "./application/errors.js";
 export * from "./application/conversation-sync.js";
 export * from "./application/conversation-controller.js";
+export * from "./domain/scroll-positions.js";

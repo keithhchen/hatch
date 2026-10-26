@@ -1950,7 +1950,8 @@ fn read_window_settings(app: AppHandle, window: WebviewWindow) -> Result<Value, 
         "frame": saved_window.frame,
         "layout": {
             "sidebarPreference": if saved_window.layout.sidebar_open { "open" } else { "closed" },
-            "zoom": saved_window.layout.zoom
+            "zoom": saved_window.layout.zoom,
+            "scrollPositions": saved_window.layout.scroll_positions
         }
     }))
 }
@@ -1976,6 +1977,10 @@ fn patch_window_settings(
             }
             if let Some(value) = layout.get("zoom") {
                 saved_window.layout.zoom = value.as_f64();
+            }
+            if let Some(value) = layout.get("scrollPositions") {
+                saved_window.layout.scroll_positions =
+                    desktop_state::bounded_scroll_positions(value);
             }
         }
         if let Some(context) = patch.get("context").and_then(Value::as_object) {

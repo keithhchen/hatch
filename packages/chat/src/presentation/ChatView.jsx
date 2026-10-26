@@ -3,6 +3,7 @@ import { ArrowUp, ChevronDown, ChevronUp, CircleAlert, ImagePlus, Paperclip, Plu
 import { Avatar } from "@hatch/ui";
 import { approvalDecision, partitionAttachments } from "../domain/activity.js";
 import { ACTIVITY_KINDS, ChatTimeline, groupTimelineEntries } from "../domain/timeline.js";
+import { sharedScrollPositions } from "../domain/scroll-positions.js";
 import { ActivityBlock, ActivityModal, ApprovalActivity } from "./Activity.jsx";
 import { ImageViewer } from "./ImageViewer.jsx";
 import { MessageResponse } from "./MessageResponse.jsx";
@@ -192,8 +193,10 @@ function Composer({ controller, state, snapshotPending, agentName, t, onSend, at
  *   the host's approval gate. A tool row the host marked "pending" with
  *   `controller.markApproval` shows Allow / Deny only when this is supplied;
  *   the row is marked "allowed" / "denied" as soon as the user answers.
+ * @param {import("../domain/scroll-positions.js").ScrollPositions} [props.scrollPositions]
+ *   where each conversation was left; defaults to one in-memory store per page.
  */
-export function ChatView({ controller, identity, agentName, t, errorText, attachments, AttachmentViewer = ImageViewer, header, loadingIndicator, onNewConversation, activityKinds = ACTIVITY_KINDS, inert, dockAccessory, attachControl, composerAccessory, onComposerPaste, onApprovalDecision }) {
+export function ChatView({ controller, identity, agentName, t, errorText, attachments, AttachmentViewer = ImageViewer, header, loadingIndicator, onNewConversation, activityKinds = ACTIVITY_KINDS, inert, dockAccessory, attachControl, composerAccessory, onComposerPaste, onApprovalDecision, scrollPositions = sharedScrollPositions }) {
   const state = useChatState(controller);
   const { conversationId, messages, historyCursor, activeRun, error, status, approvals: decisions, compactions } = state;
   const snapshotPending = controller.snapshotPending;
@@ -204,11 +207,47 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
   const loadToolDetail = useCallback(detailRef => controller.transport.toolDetail(conversationId, detailRef), [controller, conversationId]);
   const assetSource = useCallback(assetId => controller.transport.assetSource(conversationId, assetId), [controller, conversationId]);
 
-  useEffect(() => { followOutputRef.current = true; }, [conversationId]);
+  // Each conversation returns to where it was left. Positions are recorded
+  // only after this conversation's messages rendered and were restored, so a
+  // loading placeholder never overwrites the saved place.
+  const restoredRef = useRef("");
+  const pendingScrollRef = useRef(null);
+  const scrollFrameRef = useRef(0);
+  const flushScroll = useCallback(() => {
+    cancelAnimationFrame(scrollFrameRef.current);
+    scrollFrameRef.current = 0;
+    const pending = pendingScrollRef.current;
+    pendingScrollRef.current = null;
+    if (pending) scrollPositions.save(pending.id, pending.position);
+  }, [scrollPositions]);
+  useEffect(() => {
+    followOutputRef.current = true;
+    restoredRef.current = "";
+    return flushScroll;
+  }, [conversationId, flushScroll]);
+  const ready = Boolean(conversationId) && !snapshotPending && messages.length > 0;
   useEffect(() => {
     const viewport = messagesRef.current;
-    if (viewport && followOutputRef.current) viewport.scrollTop = viewport.scrollHeight;
-  }, [messages, status, state.draft, error]);
+    if (!viewport) return;
+    if (ready && restoredRef.current !== conversationId) {
+      restoredRef.current = conversationId;
+      const saved = scrollPositions.get(conversationId);
+      if (saved && !saved.atBottom) {
+        followOutputRef.current = false;
+        viewport.scrollTop = saved.top;
+        return;
+      }
+    }
+    if (followOutputRef.current) viewport.scrollTop = viewport.scrollHeight;
+  }, [messages, status, state.draft, error, ready, conversationId, scrollPositions]);
+  const onScroll = event => {
+    const element = event.currentTarget;
+    const atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 112;
+    followOutputRef.current = atBottom;
+    if (!conversationId || restoredRef.current !== conversationId) return;
+    pendingScrollRef.current = { id: conversationId, position: { top: element.scrollTop, atBottom } };
+    if (!scrollFrameRef.current) scrollFrameRef.current = requestAnimationFrame(flushScroll);
+  };
 
   const loadHistory = () => {
     followOutputRef.current = false;
@@ -228,7 +267,7 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
 
   return <main className="web-chat__main" inert={inert}>
     {header}
-    <div className="web-chat__messages" ref={messagesRef} onScroll={event => { const element = event.currentTarget; followOutputRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 112; }} aria-label={t("chatMessages")}>
+    <div className="web-chat__messages" ref={messagesRef} onScroll={onScroll} aria-label={t("chatMessages")}>
       <div className="web-chat__thread">
         {!snapshotPending && historyCursor ? <button type="button" className="web-chat__history" onClick={loadHistory}><ChevronUp aria-hidden="true" /><span>{t("viewEarlierMessages")}</span></button> : null}
         {(snapshotPending || awaitingConversation) && !error ? <div className="web-chat__loading" role="status">{loadingIndicator}<span>{t("loadingConversation")}</span></div> : null}

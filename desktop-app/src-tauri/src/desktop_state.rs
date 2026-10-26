@@ -7,7 +7,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use tauri::{AppHandle, Manager, Runtime};
 
 const STATE_FILE: &str = "state.json";
@@ -63,6 +63,9 @@ impl Default for DesktopPreferencesState {
 pub(crate) struct DesktopWindowLayoutState {
     pub(crate) sidebar_open: bool,
     pub(crate) zoom: Option<f64>,
+    /// Conversation id → `{ top, atBottom }`, at most `MAX_SCROLL_POSITIONS`.
+    #[serde(default)]
+    pub(crate) scroll_positions: Map<String, Value>,
 }
 
 impl Default for DesktopWindowLayoutState {
@@ -70,8 +73,40 @@ impl Default for DesktopWindowLayoutState {
         Self {
             sidebar_open: true,
             zoom: None,
+            scroll_positions: Map::new(),
         }
     }
+}
+
+pub(crate) const MAX_SCROLL_POSITIONS: usize = 50;
+const MAX_SCROLL_KEY_BYTES: usize = 256;
+
+/// Keep only well-formed `{ top: finite >= 0, atBottom: bool }` entries under
+/// bounded conversation ids; the renderer sends the most recent first.
+pub(crate) fn bounded_scroll_positions(value: &Value) -> Map<String, Value> {
+    let Some(entries) = value.as_object() else {
+        return Map::new();
+    };
+    entries
+        .iter()
+        .filter(|(key, _)| {
+            !key.is_empty()
+                && key.len() <= MAX_SCROLL_KEY_BYTES
+                && !key.chars().any(char::is_control)
+        })
+        .filter_map(|(key, entry)| {
+            let top = entry
+                .get("top")?
+                .as_f64()
+                .filter(|top| top.is_finite() && *top >= 0.0)?;
+            let at_bottom = entry.get("atBottom")?.as_bool()?;
+            Some((
+                key.clone(),
+                serde_json::json!({ "top": top, "atBottom": at_bottom }),
+            ))
+        })
+        .take(MAX_SCROLL_POSITIONS)
+        .collect()
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -505,6 +540,32 @@ mod tests {
         let layout = serde_json::to_value(DesktopWindowLayoutState::default()).unwrap();
         assert_eq!(layout["sidebar_open"], true);
         assert!(layout.get("inspector_open").is_none());
+    }
+
+    #[test]
+    fn scroll_positions_are_bounded_and_well_formed() {
+        let mut input = serde_json::Map::new();
+        for index in 0..60 {
+            input.insert(
+                format!("conv_{index}"),
+                serde_json::json!({ "top": index as f64, "atBottom": false }),
+            );
+        }
+        input.insert(
+            "bad".into(),
+            serde_json::json!({ "top": -1.0, "atBottom": true }),
+        );
+        input.insert(
+            "bad\nkey".into(),
+            serde_json::json!({ "top": 1.0, "atBottom": true }),
+        );
+        let kept = super::bounded_scroll_positions(&Value::Object(input));
+        assert_eq!(kept.len(), super::MAX_SCROLL_POSITIONS);
+        assert!(kept
+            .values()
+            .all(|entry| entry["top"].as_f64().unwrap() >= 0.0));
+        assert!(!kept.contains_key("bad\nkey"));
+        assert!(super::bounded_scroll_positions(&serde_json::json!([1])).is_empty());
     }
 
     #[test]

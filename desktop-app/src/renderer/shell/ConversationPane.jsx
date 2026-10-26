@@ -131,6 +131,7 @@ function LiveConversation({ session }) {
       t={t} errorText={describe} attachments={app.attachments} loadingIndicator={<ThreadSkeleton />}
       onNewConversation={() => app.newConversation()}
       onApprovalDecision={decide}
+      scrollPositions={app.scrollPositions}
       dockAccessory={<FolderRequired session={session} />}
       attachControl={<button type="button" className="desk-icon-button" aria-label={t("composer.attach")} title={t("composer.attach")} onClick={attach}><Paperclip aria-hidden="true" /></button>}
       composerAccessory={<WorkspaceControls session={session} />}

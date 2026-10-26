@@ -1,4 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
+import { ScrollPositions } from "@hatch/chat";
 import { ConversationLibrary } from "../agents/conversation-library.js";
 import { ApprovalCenter } from "../chat/approvals.js";
 import { ConversationSessions } from "../chat/conversation-sessions.js";
@@ -71,6 +72,16 @@ export class ChatWindow extends WindowController {
     this.attachments = this.sessions.attachments;
     this.library = null;
     this.restored = false;
+    // Where each conversation was left, persisted per window across relaunch.
+    this.scrollPositions = new ScrollPositions({ onChange: positions => this.persistScrollPositions(positions) });
+  }
+
+  persistScrollPositions(positions) {
+    if (!isNative()) return;
+    clearTimeout(this.scrollPersistTimer);
+    this.scrollPersistTimer = setTimeout(() => {
+      void nativeInvoke("patch_window_settings", { patch: { layout: { scrollPositions: positions } } }).catch(() => {});
+    }, 500);
   }
 
   // Lifecycle ------------------------------------------------------------------
@@ -100,6 +111,7 @@ export class ChatWindow extends WindowController {
   }
 
   restoredLayout(layout) {
+    this.scrollPositions.restore(layout.scrollPositions);
     this.setState({ sidebarOpen: !this.state.narrow && layout.sidebarPreference !== "closed" });
   }
 
