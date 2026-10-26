@@ -3,7 +3,9 @@ FROM node:22-slim AS build
 WORKDIR /workspace/creator-dashboard
 COPY packages/ui /workspace/packages/ui
 COPY packages/brand /workspace/packages/brand
+COPY packages/chat /workspace/packages/chat
 RUN cd /workspace/packages/ui && npm ci
+RUN cd /workspace/packages/chat && npm ci
 COPY creator-dashboard/package.json creator-dashboard/package-lock.json ./
 RUN npm ci
 COPY creator-dashboard ./
@@ -24,6 +26,7 @@ WORKDIR /app/creator-dashboard
 
 COPY packages/ui /app/packages/ui
 COPY packages/brand /app/packages/brand
+COPY packages/chat /app/packages/chat
 COPY creator-dashboard/package.json creator-dashboard/package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=build /workspace/creator-dashboard/server.mjs ./server.mjs

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { latestThinkingText } from "./webChatActivityPresentation.js";
+import { latestThinkingText } from "../src/domain/activity.js";
 
 test("thinking preview follows the latest text and stays within fifty grapheme characters", () => {
   assert.equal(latestThinkingText("前面的 thinking 文本 abcdefghijklmnopqrstu"), "前面的 thinking 文本 abcdefghijklmnopqrstu");

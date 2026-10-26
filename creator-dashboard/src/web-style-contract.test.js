@@ -18,7 +18,7 @@ const webStylesheets = [
 ];
 
 test("Web CSS follows the visual guidelines: no monospace, no uppercase labels", () => {
-  const styles = [...webStylesheets, "creator-dashboard/src/webTheme.css", "creator-dashboard/src/web/web.css", "creator-dashboard/src/webChat.css"].map(read).join("\n").replace(/\/\*[\s\S]*?\*\//g, "");
+  const styles = [...webStylesheets, "creator-dashboard/src/webTheme.css", "creator-dashboard/src/web/web.css", "creator-dashboard/src/webChat.css", "packages/chat/src/presentation/chat.css"].map(read).join("\n").replace(/\/\*[\s\S]*?\*\//g, "");
 
   assert.doesNotMatch(styles, /monospace|DM Mono|font-family:\s*var\(--mono\)/);
   assert.doesNotMatch(styles, /text-transform:\s*uppercase/);
