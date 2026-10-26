@@ -105,8 +105,21 @@ export class WindowController extends Observable {
     this.setState({ overlay: null });
   }
 
+  /** Open an allowlisted Hatch web page; a refusal or failure shows a dismissible notice. */
+  openWeb(url) {
+    this.setState({ browseError: false });
+    return Promise.resolve().then(() => openInBrowser(url)).catch(error => {
+      console.error("[hatch:open-web]", url, error);
+      this.setState({ browseError: true });
+    });
+  }
+
+  dismissBrowseError() {
+    this.setState({ browseError: false });
+  }
+
   browseAgents() {
-    void openInBrowser(EXPLORE_URL);
+    void this.openWeb(EXPLORE_URL);
   }
 
   /** Open (or focus) an Agent's Chat window. */

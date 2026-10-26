@@ -163,35 +163,66 @@ kbd { font: inherit; }
 .desk-sidebar__agent-copy small { color: var(--desk-muted); font-size: 11px; }
 
 /* Library window ---------------------------------------------------------------- */
-.desk-library { display: flex; height: 100%; flex-direction: column; background: var(--desk-bg); }
-.desk-library__titlebar { display: flex; height: var(--desk-toolbar-height); flex: 0 0 auto; align-items: center; padding: 0 20px 0 calc(var(--desk-traffic-lights) + 12px); border-bottom: .5px solid var(--desk-hairline); }
-.desk-library__titlebar strong { font-size: 13px; font-weight: 600; }
-.desk-library__list { display: grid; min-height: 0; flex: 1; align-content: start; gap: 24px; overflow-y: auto; overscroll-behavior: contain; padding: 20px; }
-.desk-library__group { display: grid; gap: 10px; }
-.desk-library__heading { margin: 0; color: var(--desk-muted); font-size: 12px; font-weight: 600; }
-.desk-library__grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
-.desk-library__agent {
-  display: grid; align-content: start; gap: 6px; min-width: 0; padding: 14px 16px; border: .5px solid var(--desk-hairline); border-radius: 10px;
-  color: var(--desk-ink); background: var(--desk-raised); text-align: left; transition: background var(--desk-fast) var(--desk-ease), border-color var(--desk-fast) var(--desk-ease);
+/* Library: the Web Explore page in a window — warm paper with a soft aura,
+ * a bold page heading, big white cards with a warm shadow and a footer row. */
+.desk-library {
+  --lib-paper: #faf8f2; --lib-card: #fffdf8; --lib-ink: #17150f; --lib-body: #3e3a31; --lib-muted: #6b6455; --lib-rule: #e8e2d4;
+  --lib-warm: #fdecc8; --lib-cool: #e4ebf3; --lib-badge: #f3efe6;
+  --lib-shadow: 0 12px 36px rgba(23, 21, 15, .06); --lib-shadow-lift: 0 20px 50px rgba(23, 21, 15, .1);
+  display: flex; height: 100%; flex-direction: column; color: var(--lib-ink);
+  background: radial-gradient(45% 40% at 10% 0%, var(--lib-warm) 0%, transparent 70%), radial-gradient(40% 40% at 92% 6%, var(--lib-cool) 0%, transparent 70%), var(--lib-paper);
+  background-repeat: no-repeat;
 }
-.desk-library__agent:hover { border-color: color-mix(in srgb, var(--desk-ink) 16%, transparent); background: color-mix(in srgb, var(--desk-raised), var(--desk-ink) 2.5%); }
-.desk-library__agent--skeleton { min-height: 84px; }
-.desk-library__agent--skeleton .desk-skeleton__bar { display: block; }
-.desk-library__creator { display: flex; min-width: 0; align-items: center; gap: 8px; color: var(--desk-muted); font-size: 12px; }
+:root[data-theme="dark"] .desk-library {
+  --lib-paper: #1b1915; --lib-card: #26231d; --lib-ink: #f5f1e6; --lib-body: #d6d0c2; --lib-muted: #9d968a; --lib-rule: rgba(255, 255, 255, .1);
+  --lib-warm: rgba(245, 183, 0, .14); --lib-cool: rgba(120, 145, 180, .14); --lib-badge: rgba(255, 255, 255, .07);
+  --lib-shadow: 0 12px 36px rgba(0, 0, 0, .35); --lib-shadow-lift: 0 20px 50px rgba(0, 0, 0, .5);
+}
+/* Native macOS: the paper is a little see-through so the window glass shows at its edges. */
+:root[data-native][data-platform="macos"] .desk-library { --lib-paper: rgba(250, 248, 242, .82); }
+:root[data-native][data-platform="macos"][data-theme="dark"] .desk-library { --lib-paper: rgba(27, 25, 21, .84); }
+.desk-library__titlebar { display: flex; height: var(--desk-toolbar-height); flex: 0 0 auto; align-items: center; padding: 0 20px 0 calc(var(--desk-traffic-lights) + 12px); }
+.desk-library__brand { display: inline-flex; pointer-events: none; }
+.desk-library__brand .hatch-brand__lockup { display: block; height: 22px; width: auto; }
+:root[data-theme="dark"] .desk-library__brand .hatch-brand__lockup { content: url("../../../packages/brand/hatch-logo-lockup-inverse.svg"); }
+.desk-library__list { display: grid; min-height: 0; flex: 1; align-content: start; gap: 36px; overflow-y: auto; overscroll-behavior: contain; padding: 20px 40px 40px; }
+.desk-library__intro h1 { margin: 0; font-size: 32px; font-weight: 700; letter-spacing: -.02em; line-height: 1.15; }
+.desk-library__intro p { margin: 10px 0 0; color: var(--lib-muted); font-size: 15px; line-height: 1.6; }
+.desk-library__group { display: grid; gap: 16px; }
+.desk-library__heading { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -.01em; line-height: 1.25; }
+.desk-library__grid { display: grid; gap: 20px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.desk-library__agent {
+  display: flex; min-width: 0; min-height: 236px; flex-direction: column; padding: 26px; border: 0; border-radius: 26px;
+  color: var(--lib-ink); background: var(--lib-card); box-shadow: var(--lib-shadow); text-align: left;
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+.desk-library__agent:not(.desk-library__agent--skeleton):hover { transform: translateY(-3px); box-shadow: var(--lib-shadow-lift); }
+.desk-library__agent:focus-visible { outline-offset: 3px; }
+.desk-library__creator { display: flex; min-width: 0; min-height: 30px; align-items: center; gap: 9px; color: var(--lib-body); font-size: 13px; font-weight: 600; }
 .desk-library__creator > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hui-avatar.desk-library__avatar, .desk-library__creator .desk-skeleton__dot { width: 28px; height: 28px; min-width: 28px; font-size: 11px; }
-.desk-library__name { overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.desk-library__description { display: -webkit-box; margin: 0; overflow: hidden; color: var(--desk-body); font-size: 12.5px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.desk-library__link { justify-self: start; padding: 0; border: 0; color: var(--desk-muted); background: none; font-size: 13px; }
-.desk-library__link:hover { color: var(--desk-ink); text-decoration: underline; text-underline-offset: 2px; }
-.desk-library__footer { display: flex; gap: 8px; padding: 8px 12px; border-top: .5px solid var(--desk-hairline); background: var(--desk-sidebar); }
-/* Native macOS: the Library shows the window material through the same tinted
- * glass as the sidebar; cards stay opaque with hairline edges for legibility. */
-:root[data-native][data-platform="macos"] .desk-library { background: var(--desk-glass-tint); }
-:root[data-native][data-platform="macos"] .desk-library__footer { background: transparent; }
-:root[data-native][data-platform="macos"] .desk-library__agent { box-shadow: 0 .5px 1px rgba(0, 0, 0, .04); }
-.desk-library__footer .desk-row { width: auto; flex: 1; }
+.hui-avatar.desk-library__avatar { width: 28px; height: 28px; min-width: 28px; font-size: 11px; }
+.desk-library__name { display: -webkit-box; margin: 18px 0 8px; overflow: hidden; font-size: 21px; font-weight: 700; letter-spacing: -.01em; line-height: 1.25; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.desk-library__description { display: -webkit-box; margin: 0; overflow: hidden; color: var(--lib-body); font-size: 14.5px; line-height: 1.6; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.desk-library__card-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: auto; padding-top: 24px; }
+.desk-library__badge { padding: 5px 12px; border-radius: 999px; color: var(--lib-body); background: var(--lib-badge); font-size: 12px; font-weight: 600; }
+.desk-library__go { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 700; }
+.desk-library__go svg, .desk-library__link svg { width: 16px; height: 16px; transition: transform 160ms ease; }
+.desk-library__agent:hover .desk-library__go svg, .desk-library__link:hover svg { transform: translateX(3px); }
+.desk-library__agent--skeleton { gap: 15px; }
+.desk-library__agent--skeleton i { display: block; height: 13px; border-radius: 99px; background: var(--lib-badge); }
+.desk-library__agent--skeleton i:nth-child(1) { width: 40%; }
+.desk-library__agent--skeleton i:nth-child(2) { width: 70%; height: 28px; margin-top: 16px; }
+.desk-library__agent--skeleton i:nth-child(3) { width: 92%; }
+.desk-library__agent--skeleton i:nth-child(4) { width: 30%; margin-top: auto; }
+.desk-library__link { display: inline-flex; align-items: center; gap: 6px; justify-self: start; padding: 0; border: 0; color: var(--lib-muted); background: none; font-size: 14px; font-weight: 600; }
+.desk-library__link:hover { color: var(--lib-ink); }
+.desk-library .desk-empty { color: var(--lib-ink); }
+.desk-library .desk-empty p { color: var(--lib-body); }
+.desk-library__footer { display: flex; gap: 8px; padding: 8px 12px; border-top: .5px solid var(--lib-rule); background: transparent; }
+.desk-library__footer .desk-row { width: auto; flex: 1; color: var(--lib-ink); }
 .desk-library__footer .desk-row--account { flex: 0 1 220px; }
+.desk-banner--toast { position: fixed; z-index: 50; right: 16px; bottom: 16px; left: 16px; max-width: 420px; margin: 0 auto; background: var(--desk-raised); box-shadow: var(--desk-float); }
+.desk-banner--toast > svg { color: var(--desk-danger); }
 
 /* Toolbar ---------------------------------------------------------------------- */
 .desk-toolbar {

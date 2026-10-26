@@ -11,6 +11,7 @@ import { Shell } from "./App.jsx";
 import { ChatWindow } from "./chat-window.js";
 import { DesktopContext } from "./context.js";
 import { Library } from "./Library.jsx";
+import { BrowseErrorNotice } from "./states.jsx";
 import { LibraryWindow } from "./library-window.js";
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -151,11 +152,11 @@ describe("Desktop Library window", () => {
   let mounted;
   afterEach(() => act(() => mounted?.root.unmount()));
 
-  it("groups my Agents as acquired and published cards and offers more on the web", () => {
+  it("groups my Agents as acquired and published cards and offers more on the web", async () => {
     const acquired = new AgentAccess({ creator_id: creator.id, product_id: otherId, entitlement_id: "1aa7b10c-4db0-4d8a-8c2f-2e2c8cba1009", creator, product: { id: otherId, name: "Tax Helper", description: "Files your taxes." } });
     const app = new LibraryWindow();
     app.session.setState({ phase: "signed-in", token: "tok", account: { id: "a", name: "Ada" }, agents: [agent, acquired], agentsStatus: "ready" });
-    mounted = mount(app, Library);
+    mounted = mount(app, () => <><Library /><BrowseErrorNotice /></>);
     const groups = [...mounted.container.querySelectorAll(".desk-library__group")];
     expect(groups.map(group => group.querySelector("h2").textContent)).toEqual(["Acquired", "Published by Me"]);
     expect(groups[0].textContent).toContain("Tax Helper");
@@ -165,6 +166,13 @@ describe("Desktop Library window", () => {
     expect(mounted.container.textContent).toContain("Browse More Agents…");
     act(() => app.session.setState({ agents: [acquired] }));
     expect(mounted.container.textContent).toContain("Publish your first Agent in Studio");
+    const open = vi.spyOn(window, "open").mockImplementation(() => { throw new Error("refused"); });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    act(() => mounted.container.querySelector(".desk-library__link").click());
+    await settle();
+    expect(open).toHaveBeenCalledWith(expect.stringMatching(/\/studio\/products\/new$/), "_blank", "noopener,noreferrer");
+    expect(mounted.container.querySelector("[role=alert]").textContent).toContain("couldn't open this page");
+    vi.restoreAllMocks();
     act(() => app.session.setState({ agents: [] }));
     expect(mounted.container.textContent).toContain("No Agents yet");
   });

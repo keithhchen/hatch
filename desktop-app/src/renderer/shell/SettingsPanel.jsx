@@ -4,7 +4,6 @@ import { Avatar, Dialog, DialogContent, Select } from "@hatch/ui";
 import { ACCOUNT_URL } from "../config.js";
 import { folderName } from "../chat/local-tools.js";
 import { LANGUAGE_OPTIONS, SYSTEM_LANGUAGE, resolveLanguage, systemLocales } from "../i18n.js";
-import { openInBrowser } from "../native/bridge.js";
 import { useObservable } from "../observable.js";
 import { useDesktop } from "./context.js";
 import { ZOOM_OPTIONS } from "./layout.js";
@@ -47,7 +46,7 @@ function Account() {
       <div><small>{t("settings.signedInAs")}</small><strong className="selectable">{account?.name}</strong>{account?.email ? <span className="selectable">{account.email}</span> : null}</div>
     </div>
     <div className="desk-settings__actions">
-      <button type="button" className="desk-button" onClick={() => void openInBrowser(ACCOUNT_URL)}><ExternalLink aria-hidden="true" />{t("settings.manageAccount")}</button>
+      <button type="button" className="desk-button" onClick={() => void app.openWeb(ACCOUNT_URL)}><ExternalLink aria-hidden="true" />{t("settings.manageAccount")}</button>
       <button type="button" className="desk-button desk-button--danger" onClick={() => void app.signOut()}><LogOut aria-hidden="true" />{t("settings.signOut")}</button>
     </div>
   </>;

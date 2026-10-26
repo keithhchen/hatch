@@ -8,7 +8,7 @@ import { HATCH_ORIGIN } from "../config.js";
 import { errorText } from "../i18n.js";
 import { isUuidV4 } from "../identity.js";
 import { ApprovalAttention } from "../native/attention.js";
-import { emitNativeEventTo, isNative, nativeInvoke, nativeWindow, onNativeEvent, openInBrowser } from "../native/bridge.js";
+import { emitNativeEventTo, isNative, nativeInvoke, nativeWindow, onNativeEvent } from "../native/bridge.js";
 import { COMMAND, publishCommandState } from "../native/commands.js";
 import { createConversationOwner } from "../native/conversation-owner.js";
 import { normalizeWorkspaceGrant } from "../chat/workspace.js";
@@ -352,7 +352,7 @@ export class ChatWindow extends WindowController {
   }
 
   viewOnWeb() {
-    if (this.agent) void openInBrowser(`${HATCH_ORIGIN}/products/${this.agent.productId}`);
+    if (this.agent) void this.openWeb(`${HATCH_ORIGIN}/products/${this.agent.productId}`);
   }
 
   async signOut() {

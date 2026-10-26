@@ -1,5 +1,6 @@
 import React from "react";
-import { Compass, Library, Plus, RotateCw, WifiOff } from "lucide-react";
+import { CircleAlert, Compass, Library, Plus, RotateCw, WifiOff, X } from "lucide-react";
+import { useObservable } from "../observable.js";
 import { Avatar } from "@hatch/ui";
 import { errorText } from "../i18n.js";
 import { useDesktop } from "./context.js";
@@ -32,6 +33,18 @@ export function OfflineBanner({ error, onRetry, actionLabel }) {
     <WifiOff aria-hidden="true" />
     <span>{error?.code === "network_error" ? t("banner.offline") : errorText(t, error)}</span>
     <button type="button" className="desk-button desk-button--quiet" onClick={onRetry}>{actionLabel ? null : <RotateCw aria-hidden="true" />}{actionLabel ?? t("banner.retry")}</button>
+  </div>;
+}
+
+/** A Hatch web page could not be opened in the system browser (refused or failed). */
+export function BrowseErrorNotice() {
+  const { app, t } = useDesktop();
+  const { browseError } = useObservable(app);
+  if (!browseError) return null;
+  return <div className="desk-banner desk-banner--toast" role="alert">
+    <CircleAlert aria-hidden="true" />
+    <span>{t("browse.failed")}</span>
+    <button type="button" className="desk-button desk-button--quiet" aria-label={t("browse.dismiss")} onClick={() => app.dismissBrowseError()}><X aria-hidden="true" /></button>
   </div>;
 }
 

@@ -2041,7 +2041,7 @@ fn patch_window_settings(
 #[tauri::command]
 fn open_external_url(url: String) -> Result<(), String> {
     if !is_allowed_browse_url(&url) {
-        return Err("Only the Hatch Expert Agent catalog can be opened from this action".into());
+        return Err("browse_url_not_allowed".into());
     }
     #[cfg(target_os = "macos")]
     let status = Command::new("/usr/bin/open").arg(&url).status();
@@ -2106,6 +2106,8 @@ fn is_allowed_browse_url(url: &str) -> bool {
             || parsed.path() == "/account"
             || parsed.path() == "/account/help"
             || parsed.path() == "/desktop/sign-in"
+            || parsed.path() == "/studio"
+            || parsed.path() == "/studio/products/new"
             || is_uuid_route(parsed.path(), "/products/")
             || is_uuid_route(parsed.path(), "/creators/"))
 }
@@ -3535,6 +3537,18 @@ mod tests {
         assert!(!is_allowed_browse_url(
             "https://hatch.tokenquadrant.cn/account/orders"
         ));
+    }
+
+    #[test]
+    fn studio_entry_points_are_allowed_browse_destinations() {
+        assert!(is_allowed_browse_url("https://hatch.tokenquadrant.cn/studio"));
+        assert!(is_allowed_browse_url(
+            "https://hatch.tokenquadrant.cn/studio/products/new"
+        ));
+        assert!(!is_allowed_browse_url(
+            "https://hatch.tokenquadrant.cn/studio/factory/product-a"
+        ));
+        assert!(!is_allowed_browse_url("https://evil.example/studio"));
     }
 
     #[test]

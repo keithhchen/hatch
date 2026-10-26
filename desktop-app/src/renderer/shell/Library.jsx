@@ -1,21 +1,22 @@
 import React from "react";
-import { Compass } from "lucide-react";
-import { Avatar } from "@hatch/ui";
+import { ArrowRight, Compass } from "lucide-react";
+import { Avatar, HatchBrand } from "@hatch/ui";
 import { nativeContextMenu } from "../native/context-menu.js";
 import { useObservable } from "../observable.js";
 import { HATCH_ORIGIN } from "../config.js";
-import { openInBrowser } from "../native/bridge.js";
 import { useDesktop } from "./context.js";
 import { SettingsPanel } from "./SettingsPanel.jsx";
 import { AccountButton } from "./Sidebar.jsx";
 import { Delayed, EmptyAgents, OfflineBanner } from "./states.jsx";
 
+/** One Agent, drawn like a Web Explore catalog card. */
 function AgentCard({ agent }) {
   const { app, t } = useDesktop();
+  const owned = agent.kind === "owned";
   return <button type="button" className="desk-library__agent" onClick={() => app.openAgent(agent)}
     onContextMenu={nativeContextMenu(() => [
       { label: t("library.open"), action: () => app.openAgent(agent) },
-      { label: t("menu.viewOnWeb"), action: () => void openInBrowser(`${HATCH_ORIGIN}/products/${agent.productId}`) }
+      { label: t("menu.viewOnWeb"), action: () => void app.openWeb(`${HATCH_ORIGIN}/products/${agent.productId}`) }
     ])}>
     <span className="desk-library__creator">
       <Avatar className="desk-library__avatar" src={agent.identity.creatorAvatarUrl} name={agent.creatorName} size="small" />
@@ -23,6 +24,10 @@ function AgentCard({ agent }) {
     </span>
     <strong className="desk-library__name">{agent.name}</strong>
     {agent.description ? <p className="desk-library__description">{agent.description}</p> : null}
+    <span className="desk-library__card-footer">
+      <span className="desk-library__badge">{t(owned ? "library.badge.owned" : "library.badge.acquired")}</span>
+      <span className="desk-library__go">{t("library.chat")}<ArrowRight aria-hidden="true" /></span>
+    </span>
   </button>;
 }
 
@@ -35,11 +40,7 @@ function AgentGroup({ title, agents, empty = null }) {
 }
 
 const LibrarySkeleton = () => <div className="desk-library__grid" aria-hidden="true">
-  {[0, 1, 2].map(index => <div key={index} className="desk-library__agent desk-library__agent--skeleton">
-    <span className="desk-library__creator"><span className="desk-skeleton__dot" /><span className="desk-skeleton__bar" style={{ width: 80 }} /></span>
-    <span className="desk-skeleton__bar" style={{ width: "60%" }} />
-    <span className="desk-skeleton__bar" style={{ width: "90%" }} />
-  </div>)}
+  {[0, 1, 2].map(index => <div key={index} className="desk-library__agent desk-library__agent--skeleton"><i /><i /><i /><i /></div>)}
 </div>;
 
 /** The Library window: my Agents, grouped as acquired and published, and "Browse More Agents…". */
@@ -49,11 +50,15 @@ export function Library() {
   const { agents, agentsStatus } = session;
   const acquired = agents.filter(agent => agent.kind !== "owned");
   const owned = agents.filter(agent => agent.kind === "owned");
-  const publishFirst = <button type="button" className="desk-library__link" onClick={() => void openInBrowser(`${HATCH_ORIGIN}/studio`)}>{t("library.publishFirst")}</button>;
+  const publishFirst = <button type="button" className="desk-library__link" onClick={() => void app.openWeb(`${HATCH_ORIGIN}/studio/products/new`)}>{t("library.publishFirst")}<ArrowRight aria-hidden="true" /></button>;
   return <div className="desk-library">
-    <header className="desk-library__titlebar" data-tauri-drag-region><strong data-tauri-drag-region>{t("library.title")}</strong></header>
+    <header className="desk-library__titlebar" data-tauri-drag-region><HatchBrand className="desk-library__brand" /></header>
     {agentsStatus === "error" ? <OfflineBanner error={session.error} onRetry={() => void app.session.refresh()} /> : null}
     <nav className="desk-library__list" aria-label={t("library.title")}>
+      <header className="desk-library__intro" data-tauri-drag-region>
+        <h1>{t("library.title")}</h1>
+        <p>{t("library.subtitle")}</p>
+      </header>
       {!agents.length && agentsStatus === "loading" ? <Delayed><LibrarySkeleton /></Delayed> : null}
       {agentsStatus === "ready" && !agents.length ? <EmptyAgents /> : null}
       {agents.length ? <>

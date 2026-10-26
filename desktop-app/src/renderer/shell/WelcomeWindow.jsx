@@ -9,7 +9,7 @@ import { AUTH_SESSION_EVENT } from "./window-controller.js";
 import { AppPreferences } from "./preferences.js";
 
 /**
- * The small fixed sign-in window: one action, "Continue in Browser". The
+ * The small fixed sign-in window: one action, "Login with Browser". The
  * system browser signs the user in and returns through hatch://auth/callback;
  * this window stores the new session and tells the main window.
  */
@@ -51,7 +51,6 @@ export function WelcomeWindow() {
   return <main className="desk-welcome" data-tauri-drag-region>
     <HatchBrand className="desk-welcome__brand" aria-label="Hatch" />
     <h1 data-tauri-drag-region>{t("welcome.title")}</h1>
-    <p data-tauri-drag-region>{status === "waiting" ? t("welcome.waiting") : t("welcome.body")}</p>
     {error ? <p className="desk-form-error" role="alert">{errorText(t, error)}</p> : null}
     <button type="button" className="desk-button desk-button--primary desk-button--large" disabled={status === "signing"} onClick={() => void start()}>
       {status === "signing" ? t("welcome.signingIn") : status === "waiting" ? t("welcome.again") : t("welcome.continue")}

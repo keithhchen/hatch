@@ -10,6 +10,7 @@ import { Library } from "./Library.jsx";
 import { LibraryWindow } from "./library-window.js";
 import { SettingsPanel } from "./SettingsPanel.jsx";
 import { Sidebar } from "./Sidebar.jsx";
+import { BrowseErrorNotice } from "./states.jsx";
 import { Toolbar } from "./Toolbar.jsx";
 
 /**
@@ -68,7 +69,7 @@ function WindowApp({ create, View }) {
   useEffect(() => { if (preferences.ready) void nativeWindow.setTheme(preferences.theme); }, [preferences.ready, preferences.theme]);
   const context = useMemo(() => ({ app, t }), [app, t]);
   if (session.phase !== "signed-in") return null;
-  return <DesktopContext.Provider value={context}><View /></DesktopContext.Provider>;
+  return <DesktopContext.Provider value={context}><View /><BrowseErrorNotice /></DesktopContext.Provider>;
 }
 
 export const LibraryApp = () => <WindowApp create={() => new LibraryWindow()} View={Library} />;

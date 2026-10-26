@@ -51,15 +51,22 @@ fn window_theme(theme: &str) -> Option<Theme> {
     }
 }
 
+/// How much of the behind-window material is painted. AppKit materials are
+/// close to opaque in light mode; at this alpha the blurred desktop reads
+/// through while sidebar text keeps its contrast.
+#[cfg(target_os = "macos")]
+const GLASS_ALPHA: f64 = 0.55;
+
 fn window_effects() -> WindowEffectsConfig {
     // UnderWindowBackground is the most see-through behind-window material
     // that still adapts to light/dark text contrast; `Sidebar` reads nearly
-    // opaque. The renderer adds a faint yolk tint and keeps the content pane
-    // opaque, so only the sidebar and the Library show the material.
+    // opaque. It stays active so an unfocused window keeps its glass, and
+    // `soften_window_glass` lowers its alpha further. The renderer adds a faint
+    // yolk tint and keeps the content pane opaque.
     #[cfg(target_os = "macos")]
     let (effects, state) = (
         vec![Effect::UnderWindowBackground],
-        Some(EffectState::FollowsWindowActiveState),
+        Some(EffectState::Active),
     );
     // Mica only: Acrylic is documented to lag while dragging/resizing.
     #[cfg(not(target_os = "macos"))]
@@ -98,6 +105,37 @@ pub fn prepare_window<'a, R: Runtime, M: Manager<R>>(
     builder
 }
 
+/// Make the material Tauri inserted (an NSVisualEffectView under the window's
+/// content view) more see-through by lowering its alpha; the blur stays.
+#[cfg(target_os = "macos")]
+pub fn soften_window_glass<R: Runtime>(window: &WebviewWindow<R>) {
+    use objc2_app_kit::{NSView, NSVisualEffectView, NSWindow};
+
+    fn soften(view: &NSView) {
+        for child in view.subviews().iter() {
+            match child.downcast_ref::<NSVisualEffectView>() {
+                Some(effect) => effect.setAlphaValue(GLASS_ALPHA),
+                None => soften(&child),
+            }
+        }
+    }
+
+    let Ok(ns_window) = window.ns_window() else {
+        return;
+    };
+    let ns_window = ns_window as usize;
+    let _ = window.run_on_main_thread(move || {
+        // SAFETY: the pointer is the live NSWindow of this Tauri window, used on the main thread.
+        let ns_window = unsafe { &*(ns_window as *const NSWindow) };
+        if let Some(content) = ns_window.contentView() {
+            soften(&content);
+        }
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn soften_window_glass<R: Runtime>(_window: &WebviewWindow<R>) {}
+
 /// A renderer reveals its window with `app_ready`. If it never does (a crash
 /// during startup), show the window anyway so Hatch is never invisible. A
 /// signed-out main window stays hidden on purpose while the welcome window
@@ -111,6 +149,7 @@ pub fn reveal_if_still_hidden<R: Runtime>(window: WebviewWindow<R>) {
                 .get_webview_window(WELCOME_WINDOW_LABEL)
                 .is_some();
         if !waiting_for_sign_in && !window.is_visible().unwrap_or(true) {
+            soften_window_glass(&window);
             let _ = window.show();
         }
     });
@@ -142,6 +181,7 @@ pub fn app_ready(
     window: WebviewWindow,
     router: State<'_, NativeCommandRouter>,
 ) -> Result<(), String> {
+    soften_window_glass(&window);
     window
         .show()
         .and_then(|_| window.set_focus())
