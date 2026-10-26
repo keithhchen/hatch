@@ -165,7 +165,7 @@ function WebChatWorkspace({ controller, access, productId, navigate, profile, on
         <WebBrand href="/explore" className="web-chat__brand" />
         {mobileSidebarOpen ? <button type="button" className="web-chat__icon-button" aria-label={t("closeMenu")} onClick={closeSidebar}><X aria-hidden="true" /></button> : null}
       </div>
-      <a href="/library" className="web-chat__back"><ArrowLeft aria-hidden="true" /><span>{t("backToLibrary")}</span></a>
+      <a href="/explore" className="web-chat__back"><ArrowLeft aria-hidden="true" /><span>{t("backToMyAgents")}</span></a>
       <button type="button" className="web-chat__new" onClick={newConversation}>
         <Plus aria-hidden="true" /><span>{t("newChat")}</span>
       </button>
@@ -255,12 +255,12 @@ export default function WebChatPage({ productId, conversationId: routedConversat
   if (workspace) return <WebChatWorkspace {...workspace} productId={productId} navigate={navigate} profile={profile} onSignOut={onSignOut} t={t} locale={locale} />;
 
   const identity = resolveCreatorIdentity({ product: publicProduct });
-  const libraryLink = <a href="/library" className="web-chat__button">{t("backToLibrary")}</a>;
+  const myAgentsLink = <a href="/explore" className="web-chat__button">{t("backToMyAgents")}</a>;
   const account = <WebChatAccountControls profile={profile} onSignOut={onSignOut} />;
   if (error) return <div className="web-chat web-chat--gate">
     <WebChatGate alert account={account} pill={t("unavailablePill")} title={t("unableToOpenChat")} body={webChatErrorText(error, locale)} actions={<>
       {error.code === "agent_unavailable" ? null : <button type="button" className="web-chat__button web-chat__button--ink" onClick={() => location.reload()}><RotateCw aria-hidden="true" />{t("retry")}</button>}
-      {libraryLink}
+      {myAgentsLink}
     </>} />
   </div>;
   if (publicProduct) return <div className="web-chat web-chat--gate">
@@ -274,7 +274,7 @@ export default function WebChatPage({ productId, conversationId: routedConversat
       </div>}
       actions={<>
         <button type="button" className="web-chat__button web-chat__button--yolk" onClick={() => navigate(`/products/${encodeURIComponent(productId)}`)}>{t("subscribeToExpertProduct", { name: identity.creatorName })}</button>
-        {libraryLink}
+        {myAgentsLink}
       </>} />
   </div>;
   return <div className="web-chat web-chat--gate"><WebChatGate busy account={account} body={t(status)} /></div>;

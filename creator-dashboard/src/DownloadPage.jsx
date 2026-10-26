@@ -50,7 +50,7 @@ export function DownloadPage() {
               </div>
             )}
           </div>
-          <a className="download-page__web" href="/library">
+          <a className="download-page__web" href="/explore">
             <span><strong>{copy.webTitle}</strong><small>{copy.webBody}</small></span>
             <em>{copy.webAction}<ArrowRight aria-hidden="true" /></em>
           </a>

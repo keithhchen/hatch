@@ -1,29 +1,36 @@
 import { isProductLive } from "./studioPath.js";
-import { creatorProductPath } from "./creatorRoutes.js";
 import { WebChatRoute } from "./webChatRoute.js";
 
-// The signed-in home is a projection of three real sources: the account's own
-// Products (Studio), the Agents it acquired (entitlements) and the public
-// catalog. Every card opens one Agent; conversations live inside that Agent.
+// /explore is a projection of three real sources: the public catalog, the
+// account's own Products (Studio) and the Agents it acquired (entitlements).
+// "My Agents" lists only what can be chatted with now; Products still being
+// built are only counted, and live in Studio.
 
 const idOf = (value) => String(value ?? "");
+const timeOf = (...values) => {
+  for (const value of values) {
+    const time = Date.parse(value ?? "");
+    if (Number.isFinite(time)) return time;
+  }
+  return 0;
+};
 
-/** One of my Products: live opens chat (owner access), anything else opens Studio. */
-export function ownedAgentCard(product) {
+/** One of my published Products: the owner chats without acquiring it. */
+export function ownedAgentRow(product) {
   const productId = idOf(product.product_id ?? product.id);
-  const live = isProductLive(product);
   return {
     key: `owned:${productId}`,
-    kind: live ? "owned_live" : "owned_draft",
+    kind: "owned",
     productId,
     name: product.name ?? product.product_name ?? "",
-    summary: product.promise ?? product.product_promise ?? product.description ?? product.product_description ?? "",
-    href: live ? WebChatRoute.productPath(productId) : creatorProductPath(productId)
+    creator: null,
+    at: timeOf(product.published_at, product.updated_at, product.created_at),
+    href: WebChatRoute.productPath(productId)
   };
 }
 
-/** An Agent this account acquired from someone else: always chat. */
-export function acquiredAgentCard(entitlement) {
+/** An Agent this account acquired from someone else. */
+export function acquiredAgentRow(entitlement) {
   const product = entitlement.product ?? {};
   const productId = idOf(entitlement.product_id ?? product.product_id ?? product.id);
   return {
@@ -31,23 +38,31 @@ export function acquiredAgentCard(entitlement) {
     kind: "acquired",
     productId,
     name: product.name ?? entitlement.product_name ?? "",
-    summary: product.promise ?? product.description ?? "",
     creator: entitlement.creator ?? null,
+    at: timeOf(entitlement.granted_at, entitlement.valid_from, entitlement.created_at),
     href: WebChatRoute.productPath(productId)
   };
 }
 
-export function homeModel({ accountId, ownedProducts = [], acquired = [], catalog = [] }) {
+export function exploreModel({ accountId, ownedProducts = [], acquired = [], catalog = [] }) {
   const me = idOf(accountId);
-  const mine = ownedProducts.map(ownedAgentCard);
-  const acquiredCards = acquired
-    .filter((entry) => entry.entitlement_id && idOf(entry.creator_id) !== me)
-    .map(acquiredAgentCard);
-  const discover = catalog.filter((product) => idOf(product.creator_id ?? product.creator?.id) !== me);
+  const live = ownedProducts.filter(isProductLive);
+  const seen = new Set();
+  const myAgents = [
+    ...live.map(ownedAgentRow),
+    ...acquired
+      .filter((entry) => entry.entitlement_id && idOf(entry.creator_id) !== me)
+      .map(acquiredAgentRow)
+  ]
+    .sort((left, right) => right.at - left.at)
+    .filter((row) => row.productId && !seen.has(row.productId) && seen.add(row.productId));
+  const discover = catalog.filter((product) => {
+    const productId = idOf(product.product_id ?? product.id);
+    return (!me || idOf(product.creator_id ?? product.creator?.id) !== me) && !seen.has(productId);
+  });
   return {
-    empty: mine.length === 0 && acquiredCards.length === 0,
-    mine,
-    acquired: acquiredCards,
+    myAgents,
+    draftCount: ownedProducts.filter((product) => !isProductLive(product) && product.status !== "withdrawn").length,
     discover
   };
 }

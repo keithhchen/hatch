@@ -1,7 +1,7 @@
 export const webChatCopy = Object.freeze({
   en: Object.freeze({
     loading: "Loading…",
-    backToLibrary: "My subscriptions",
+    backToMyAgents: "My Agents",
     taskBrief: "Task brief",
     notProvided: "Not provided",
     openMenu: "Open navigation menu",
@@ -87,7 +87,7 @@ export const webChatCopy = Object.freeze({
   }),
   zh: Object.freeze({
     loading: "正在加载…",
-    backToLibrary: "我的订阅",
+    backToMyAgents: "我的 Agent",
     taskBrief: "任务背景",
     notProvided: "未填写",
     openMenu: "打开导航菜单",
@@ -173,7 +173,7 @@ export const webChatCopy = Object.freeze({
   }),
   ja: Object.freeze({
     loading: "読み込み中…",
-    backToLibrary: "購読中の製品",
+    backToMyAgents: "マイ Agent",
     taskBrief: "タスク概要",
     notProvided: "未入力",
     openMenu: "ナビゲーションメニューを開く",
