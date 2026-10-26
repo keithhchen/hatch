@@ -4470,6 +4470,7 @@ function isPublicPortalRoute(pathname) {
     || pathname.startsWith("/creators/")
     || pathname === "/products"
     || pathname.startsWith("/products/")
+    || pathname === "/home"
     || pathname === "/library"
     || pathname.startsWith("/library/")
     || pathname.startsWith("/chat/product/")
