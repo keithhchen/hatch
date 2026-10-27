@@ -2561,7 +2561,8 @@ async function handleRuntimeSocket(
           const boundMessage: BoundRunStart = {
             ...message,
             conversation_id: storageConversationId,
-            local_tools: new ClientToolCapabilityPolicy(hello.local_tools).forRun(message.local_tools)
+            local_tools: new ClientToolCapabilityPolicy(hello.local_tools).forRun(message.local_tools),
+            ...(message.time_zone ?? hello.time_zone ? { time_zone: message.time_zone ?? hello.time_zone } : {})
           };
           const runAbortController = new AbortController();
           activeRunAbortControllers.set(message.run_id, runAbortController);

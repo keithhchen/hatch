@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRuntimeSystemPrompt, chatToolsForRun } from "./agentRuntime.js";
+import { buildRuntimeSystemPrompt, chatToolsForRun, runtimeReplyReminder } from "./agentRuntime.js";
 import { ClientToolCapabilityPolicy, parseInboundMessage, PROTOCOL_VERSION } from "./protocol.js";
 
 test("Desktop inherits hello tools and Web message explicitly declares an empty list", () => {
@@ -34,4 +34,18 @@ test("Web turns expose server tools without client workspace tools", () => {
   assert.ok(desktopNames.includes("file_write"));
   assert.ok(desktopNames.includes("shell_exec"));
   assert.match(buildRuntimeSystemPrompt(undefined, undefined, undefined, []), /no local workspace/);
+});
+
+test("Clients send their browser time zone and the reply reminder uses it", () => {
+  const base = {
+    type: "client.message", conversation_id: "conv_123", run_id: "run_123",
+    message: { role: "user", content: "Hello" }
+  };
+  const parsed = parseInboundMessage({ ...base, time_zone: "Asia/Tokyo" });
+  assert.equal(parsed.type === "client.message" ? parsed.time_zone : undefined, "Asia/Tokyo");
+  assert.throws(() => parseInboundMessage({ ...base, time_zone: "Mars/Olympus" }));
+
+  const now = new Date("2026-10-27T07:40:00Z");
+  assert.match(runtimeReplyReminder(now, "Asia/Tokyo"), /当前时间：2026-10-27 16:40 星期二（Asia\/Tokyo，GMT\+09:00）/);
+  assert.match(runtimeReplyReminder(now), /当前时间：2026-10-27 07:40 星期二（UTC，GMT(\+00:00)?）/);
 });
