@@ -168,7 +168,7 @@ test("task_start keeps its marked history turn while omitting the marker from th
     assert.equal(userMessages.at(-2)?.content, TASK_START_MESSAGE_CONTENT);
     assert.ok(userMessages.every((message) => !("kind" in message)));
     // The reply reminder is the last request message, and only a request message.
-    assert.match(String(userMessages.at(-1)?.content), /^<system-reminder>\n当前时间：.*\n这是聊天，不是交报告。/);
+    assert.match(String(userMessages.at(-1)?.content), /^<system-reminder>\n当前时间：.*\n这是聊天，不是交报告，[\s\S]*整条消息最多一个问号/);
     assert.ok(!JSON.stringify(events).includes("当前时间："));
     // The Skill catalog lives in the system prompt, not in a user-role context message.
     const system = messages.find((message) => message && typeof message === "object" && message.role === "system");
