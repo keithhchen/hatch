@@ -25,11 +25,20 @@ export function onNativeEvent(event, handler) {
 export const emitNativeEvent = (event, payload) => isNative() ? emit(event, payload).catch(() => {}) : Promise.resolve();
 export const emitNativeEventTo = (label, event, payload) => isNative() ? emitTo(label, event, payload).catch(() => {}) : Promise.resolve();
 
-/** Reveal the (hidden) native window once React has painted its first frame. */
+/**
+ * Reveal the (hidden) native window once React has painted its first frame.
+ * A hidden WebView pauses animation frames, so a timer also reveals it —
+ * otherwise a window hidden at sign-in would wait forever.
+ */
 export function revealWhenPainted() {
-  requestAnimationFrame(() => requestAnimationFrame(() => {
+  let done = false;
+  const reveal = () => {
+    if (done) return;
+    done = true;
     if (isNative()) void nativeInvoke("app_ready").catch(() => {});
-  }));
+  };
+  requestAnimationFrame(() => requestAnimationFrame(reveal));
+  setTimeout(reveal, 150);
 }
 
 /** Window-level native affordances; each is a no-op in the Vite preview. */
