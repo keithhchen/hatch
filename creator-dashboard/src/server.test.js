@@ -1640,6 +1640,10 @@ function registryFixture({
       response.end(JSON.stringify(creators));
       return;
     }
+    if (requestUrl.pathname === `/v1/creator/products/${agent.product_id}/listing` && request.method === "PUT") {
+      response.end(JSON.stringify({ product_id: agent.product_id, ...JSON.parse(content) }));
+      return;
+    }
     if (requestUrl.pathname === "/v1/creator/products") {
       response.end(JSON.stringify(publishedCreatorAgents));
       return;
@@ -1771,4 +1775,27 @@ test("an unlisted Agent leaves public listings but its detail page still resolve
   assert.equal(creator.status, 404);
   const detail = await fetch(`${serverUrl(api)}/v1/public/products/${unlisted.product_id}`);
   assert.equal(detail.status, 200);
+});
+
+test("Studio's unlisted toggle reaches the Registry listing route", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-listing-"));
+  const registry = registryFixture({ signedIn: "owner" });
+  await listen(registry);
+  context.after(() => registry.close());
+  const dashboard = await createDashboardApp({
+    ledgerPath: path.join(directory, "ledger.jsonl"),
+    registryUrl: serverUrl(registry),
+    exposeBearerTokens: true
+  });
+  const api = createServer(dashboard.handler);
+  await listen(api);
+  context.after(() => api.close());
+  const token = await login(api);
+  const response = await fetch(`${serverUrl(api)}/v1/creator/products/${catalogAgent.product_id}/listing`, {
+    method: "PUT",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json", "idempotency-key": "listing-1" },
+    body: JSON.stringify({ listed: false })
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).listed, false);
 });
