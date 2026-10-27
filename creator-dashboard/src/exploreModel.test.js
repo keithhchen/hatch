@@ -36,7 +36,7 @@ test("My Agents groups acquisitions and my published Products, newest first; dra
   assert.equal(model.draftCount, 1);
 });
 
-test("Discover never lists my own Products or Agents already in My Agents", () => {
+test("Discover lists the whole catalog, including my own and acquired Agents", () => {
   const model = exploreModel({
     accountId: ME,
     acquired: [{ entitlement_id: "ent-1", creator_id: OTHER, product_id: ACQUIRED }],
@@ -46,7 +46,7 @@ test("Discover never lists my own Products or Agents already in My Agents", () =
       { creator_id: OTHER, product_id: FRESH }
     ]
   });
-  assert.deepEqual(model.discover.map((product) => product.product_id), [FRESH]);
+  assert.deepEqual(model.discover.map((product) => product.product_id), [LIVE, ACQUIRED, FRESH]);
 });
 
 test("an Agent I publish and also hold an entitlement for is listed once, as mine", () => {

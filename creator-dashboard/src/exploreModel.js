@@ -5,7 +5,8 @@ import { WebChatRoute } from "./webChatRoute.js";
 // account's own Products (Studio) and the Agents it acquired (entitlements).
 // "My Agents" lists only what can be chatted with now, in two groups: Agents
 // acquired from others and my own published Agents. Products still being
-// built are only counted, and live in Studio.
+// built are only counted, and live in Studio. Discover shows the whole
+// catalog, including my own and acquired Agents.
 
 const idOf = (value) => String(value ?? "");
 const timeOf = (...values) => {
@@ -55,14 +56,10 @@ export function exploreModel({ accountId, ownedProducts = [], acquired = [], cat
   const acquiredRows = unique(acquired
     .filter((entry) => entry.entitlement_id && idOf(entry.creator_id) !== me)
     .map(acquiredAgentRow));
-  const discover = catalog.filter((product) => {
-    const productId = idOf(product.product_id ?? product.id);
-    return (!me || idOf(product.creator_id ?? product.creator?.id) !== me) && !seen.has(productId);
-  });
   return {
     acquired: acquiredRows,
     published,
     draftCount: ownedProducts.filter((product) => !isProductLive(product) && product.status !== "withdrawn").length,
-    discover
+    discover: catalog
   };
 }
