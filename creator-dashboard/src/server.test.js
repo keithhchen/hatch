@@ -1750,3 +1750,25 @@ function serverUrl(server) {
   const address = server.address();
   return `http://127.0.0.1:${address.port}`;
 }
+
+test("an unlisted Agent leaves public listings but its detail page still resolves", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-unlisted-"));
+  const unlisted = { ...catalogAgent, listed: false };
+  const registry = registryFixture({ signedIn: "buyer", catalogAgents: [unlisted] });
+  await listen(registry);
+  context.after(() => registry.close());
+  const dashboard = await createDashboardApp({
+    ledgerPath: path.join(directory, "ledger.jsonl"),
+    registryUrl: serverUrl(registry)
+  });
+  const api = createServer(dashboard.handler);
+  await listen(api);
+  context.after(() => api.close());
+
+  const listing = await fetch(`${serverUrl(api)}/v1/public/products`);
+  assert.deepEqual(await listing.json(), []);
+  const creator = await fetch(`${serverUrl(api)}/v1/public/creators/${unlisted.creator_id}`);
+  assert.equal(creator.status, 404);
+  const detail = await fetch(`${serverUrl(api)}/v1/public/products/${unlisted.product_id}`);
+  assert.equal(detail.status, 200);
+});

@@ -20,11 +20,14 @@ export type PublicReleaseListing = CreatorRegistryRelease & {
   product_name: string;
   product_promise: string;
   creator_name: string;
+  /** false = unlisted: reachable by link, absent from public listings. */
+  listed: boolean;
 };
 
 /** New Registry authority for Distill Factory releases. */
 export class CreatorRegistryReleaseStore {
   private readonly memory = new Map<string, CreatorRegistryRelease>();
+  private readonly unlisted = new Set<string>();
 
   constructor(private readonly pool?: Pool) {}
 
@@ -58,6 +61,12 @@ export class CreatorRegistryReleaseStore {
         updated_at TIMESTAMPTZ NOT NULL,
         FOREIGN KEY (product_id, release_digest)
           REFERENCES hatch_creator_registry_releases(product_id, release_digest)
+      );
+      CREATE TABLE IF NOT EXISTS hatch_creator_product_listing (
+        product_id UUID PRIMARY KEY,
+        creator_id UUID NOT NULL,
+        listed BOOLEAN NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL
       );
     `);
   }
@@ -174,6 +183,28 @@ export class CreatorRegistryReleaseStore {
     );
   }
 
+  /** Product-level setting: survives withdraw and republish. */
+  async setListed(creatorId: string, productId: string, listed: boolean): Promise<void> {
+    requireUuidV4(productId, "product_id");
+    requireUuidV4(creatorId, "creator_id");
+    if (!this.pool) {
+      if (listed) this.unlisted.delete(productId); else this.unlisted.add(productId);
+      return;
+    }
+    await this.pool.query(`
+      INSERT INTO hatch_creator_product_listing(product_id, creator_id, listed, updated_at)
+      VALUES ($1,$2,$3,now())
+      ON CONFLICT (product_id) DO UPDATE SET listed=EXCLUDED.listed, updated_at=EXCLUDED.updated_at
+    `, [productId, creatorId, listed]);
+  }
+
+  async isListed(productId: string): Promise<boolean> {
+    requireUuidV4(productId, "product_id");
+    if (!this.pool) return !this.unlisted.has(productId);
+    const result = await this.pool.query(`SELECT listed FROM hatch_creator_product_listing WHERE product_id=$1`, [productId]);
+    return result.rows[0]?.listed !== false;
+  }
+
   /** Public catalog authority: only the current release pointer is visible. */
   async listPublic(options: { limit?: number; offset?: number } = {}): Promise<PublicReleaseListing[]> {
     const limit = options.limit ?? 20;
@@ -188,7 +219,8 @@ export class CreatorRegistryReleaseStore {
           ...release,
           product_name: release.product_id,
           product_promise: "",
-          creator_name: release.creator_id
+          creator_name: release.creator_id,
+          listed: !this.unlisted.has(release.product_id)
         }));
     }
     const result = await this.pool.query(`
@@ -197,13 +229,15 @@ export class CreatorRegistryReleaseStore {
              r.brief_spec, r.status, r.published_at,
              COALESCE(p.name, r.product_id::text) AS product_name,
              COALESCE(p.promise, '') AS product_promise,
-             a.display_name AS creator_name
+             a.display_name AS creator_name,
+             COALESCE(v.listed, true) AS listed
       FROM hatch_creator_registry_live AS l
       JOIN hatch_creator_registry_releases AS r
         ON r.product_id=l.product_id AND r.release_digest=l.release_digest
       LEFT JOIN hatch_creator_products AS p
         ON p.id=r.product_id::text AND p.status='active'
       JOIN accounts AS a ON a.id=r.creator_id
+      LEFT JOIN hatch_creator_product_listing AS v ON v.product_id=r.product_id
       WHERE r.status='published'
       ORDER BY r.published_at DESC, r.product_id ASC
       LIMIT $1 OFFSET $2
@@ -212,7 +246,8 @@ export class CreatorRegistryReleaseStore {
       ...rowToRelease(row as Record<string, unknown>),
       product_name: String(row.product_name),
       product_promise: String(row.product_promise ?? ""),
-      creator_name: String(row.creator_name)
+      creator_name: String(row.creator_name),
+      listed: row.listed !== false
     }));
   }
 

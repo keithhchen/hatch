@@ -423,7 +423,7 @@ async function route(
     if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
     const publishable = new ExpertProduct(account.id, productId, product.name, product.promise, product.brief_spec);
     if (request.method === "GET") {
-      sendJson(response, 200, await context.productLive.status(publishable));
+      sendJson(response, 200, { ...(await context.productLive.status(publishable)), listed: await context.releaseStore.isListed(productId) });
       return;
     }
     try {
@@ -922,6 +922,20 @@ async function route(
     return;
   }
 
+  const productListingMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/listing$/);
+  if (productListingMatch && request.method === "PUT") {
+    const account = await authenticate(request, response, context);
+    if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
+    const productId = decodeURIComponent(productListingMatch[1]!);
+    const product = await productForCreator(context, account.id, productId);
+    if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
+    const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
+    if (typeof body.listed !== "boolean") { sendJson(response, 422, { error: { code: "listed_required", message: "listed must be a boolean." } }); return; }
+    await context.releaseStore.setListed(account.id, productId, body.listed);
+    sendJson(response, 200, { product_id: productId, listed: body.listed });
+    return;
+  }
+
   const productWithdrawMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/withdraw$/);
   if (productWithdrawMatch && request.method === "POST") {
     const account = await authenticate(request, response, context);
@@ -1032,7 +1046,7 @@ async function route(
   if (url.pathname === "/v1/public/creators" && request.method === "GET") {
     const limit = boundedQueryInteger(url, "limit", 20, 1, 20);
     const offset = boundedQueryInteger(url, "offset", 0, 0, 100_000);
-    const rows = (await publicCatalogRows(context)).slice(0, Math.min(20_001, offset + limit + 1));
+    const rows = (await publicCatalogRows(context)).filter((row) => row.listed !== false).slice(0, Math.min(20_001, offset + limit + 1));
     const creators = new Map<string, { id: string; name: string; avatar_url: string | null; product_count: number }>();
     for (const row of rows) {
       const creatorId = String(row.creator_id ?? "");

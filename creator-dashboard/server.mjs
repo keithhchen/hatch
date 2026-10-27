@@ -1095,7 +1095,8 @@ export async function createDashboardApp(options = {}) {
         const creatorNames = await resolveCreatorNames(sourceEntitlements.map((entry) => entry.creator_id));
         const entitlements = buyer ? enrichEntitlements(sourceEntitlements, catalog, [], creatorNames) : [];
         await recordTelemetry("catalog_viewed", { request_id: requestId }, `catalog-viewed:${requestId}`);
-        const visible = catalog.filter((agent) => portalState.getCreatorProduct(agent.creator_id, agent.product_id)?.status !== "withdrawn");
+        // Unlisted Agents stay reachable by link but leave every listing.
+        const visible = catalog.filter((agent) => agent.listed !== false && portalState.getCreatorProduct(agent.creator_id, agent.product_id)?.status !== "withdrawn");
         const products = await Promise.all(visible.map(async (agent) => {
           const state = portalState.getCreatorProduct(agent.creator_id, agent.product_id);
           return withBuyerAccess(
@@ -1118,6 +1119,7 @@ export async function createDashboardApp(options = {}) {
         if (!UUID_V4_PATTERN.test(creatorSelector)) return send(response, 404, { error: { code: "creator_not_found", message: "Expert was not found." } });
         const creatorProducts = catalog.filter((entry) => (
           String(entry.creator_id) === String(creatorSelector)
+          && entry.listed !== false
           && portalState.getCreatorProduct(entry.creator_id, entry.product_id)?.status !== "withdrawn"
         ));
         if (!creatorProducts.length) return send(response, 404, { error: { code: "creator_not_found", message: "Expert was not found." } });
@@ -1494,6 +1496,7 @@ export async function createDashboardApp(options = {}) {
         url.pathname === "/v1/creator/products"
         || /\/(files|brief-spec)$/.test(url.pathname)
         || /\/withdraw$/.test(url.pathname)
+        || /\/listing$/.test(url.pathname)
         || productNodeContract
         || productRegistryContract
         || productLiveContract
