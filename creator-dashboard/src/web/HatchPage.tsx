@@ -811,9 +811,12 @@ export default function HatchPage() {
         </a>
         <nav className="nav-links" aria-label="Page sections">
           {SHOW_PRICING && <a href="#pricing">{t.nav.pricing}</a>}
-          <a href="#faq">{t.nav.faq}</a>
         </nav>
         <div className="nav-right">
+          <label className="lang-select nav-lang"><select aria-label={t.footer.language} value={lang} onChange={(e) => setLocale(e.target.value)}>
+            {LOCALES.map((l: Lang) => <option key={l} value={l}>{LANG_NAMES[l]}</option>)}
+          </select></label>
+          <a className="nav-login" href="/studio">{t.footer.studio}</a>
           <button className="btn btn-ink btn-sm" type="button" onClick={() => setIsApplyOpen(true)}>{t.nav.try}</button>
         </div>
       </header>
@@ -961,8 +964,8 @@ export default function HatchPage() {
         <div className="footer-cols">
           <div>
             <p className="eyebrow">{t.footer.product}</p>
-            <button type="button" onClick={() => setIsApplyOpen(true)}>{t.nav.try}</button>
-            <a href="/sign-up">{t.footer.login}</a>
+            <a href="/explore">{t.footer.explore}</a>
+            <a href="/studio">{t.footer.login}</a>
             <a href="/download">{t.footer.download}</a>
           </div>
           <div>
