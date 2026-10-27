@@ -211,6 +211,10 @@
 .sx-brief__n { color: var(--web-muted); font-size: 13px; font-weight: 700; text-align: center; }
 .sx-check { display: inline-flex; align-items: center; gap: 6px; color: var(--web-body); font-size: 13px; white-space: nowrap; cursor: pointer; }
 .sx-check input { width: 16px; height: 16px; accent-color: var(--web-ink); }
+.sx-summary .sx-check { position: relative; z-index: 1; margin-top: 8px; }
+.sx-check.is-saving span { background: linear-gradient(90deg, var(--web-body) 30%, var(--web-rule) 50%, var(--web-body) 70%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: sx-glimmer 1.2s linear infinite; }
+@keyframes sx-glimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .sx-check.is-saving span { animation: none; } }
 .sx-icon-btn { display: grid; width: 36px; height: 36px; place-items: center; border: 0; border-radius: 10px; background: none; color: var(--web-muted); cursor: pointer; }
 .sx-icon-btn:hover:not(:disabled) { background: var(--web-panel); color: var(--web-fail); }
 .sx-icon-btn svg { width: 16px; height: 16px; }

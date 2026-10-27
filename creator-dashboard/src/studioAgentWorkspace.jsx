@@ -86,6 +86,7 @@ function PublishTab({ product, productId, request, navigate, locale, t, profile,
 
 function PublishStatus({ status, base, productId, request, navigate, locale, t, onPublished, publicUrl }) {
   const [state, setState] = useState({ busy: false, error: "", result: null });
+  const [listing, setListing] = useState({ unlisted: null, saving: false });
   const { copied, copy } = useCopy();
   if (status.state === "loading" || status.state === "idle") return <LoadingState t={t} />;
   if (status.state === "error") return <section className="sx-summary is-error" role="alert">
@@ -105,12 +106,17 @@ function PublishStatus({ status, base, productId, request, navigate, locale, t, 
       setState({ busy: false, error: error.code === "system_missing" ? t("sxBuildIncomplete") : (error.message || friendlyError(error, t)), result: null });
     }
   }
-  async function setUnlisted(unlisted) {
+  const unlisted = listing.unlisted ?? info.listed === false;
+  async function setUnlisted(next) {
     setState({ busy: false, error: "", result: null });
+    setListing({ unlisted: next, saving: true });
     try {
-      await request(`${base}/listing`, { method: "PUT", headers: { "Idempotency-Key": mutationKey() }, body: JSON.stringify({ listed: !unlisted }) });
-      status.retry();
-    } catch (error) { setState({ busy: false, error: friendlyError(error, t), result: null }); }
+      await request(`${base}/listing`, { method: "PUT", headers: { "Idempotency-Key": mutationKey() }, body: JSON.stringify({ listed: !next }) });
+      setListing({ unlisted: next, saving: false });
+    } catch (error) {
+      setListing({ unlisted: !next, saving: false });
+      setState({ busy: false, error: friendlyError(error, t), result: null });
+    }
   }
   const shareUrl = live ? (state.result?.public_url ?? publicUrl) : null;
   const goToBuild = () => navigate(creatorFactoryPath(productId, "build", "generation"));
@@ -120,7 +126,7 @@ function PublishStatus({ status, base, productId, request, navigate, locale, t, 
       {live && info.published_at ? <p>{t("sxPublishedAt", dateTime(info.published_at, locale))}</p> : null}
       {live && pending.length ? <p className="sx-summary__pending">{t("sxPendingChanges")}</p> : null}
       {!info.can_publish ? <p>{t("sxBuildIncomplete")} <button type="button" className="sx-link" onClick={goToBuild}>{t("sxGoToBuild")}</button></p> : null}
-      <label className="sx-check"><input type="checkbox" checked={info.listed === false} onChange={(event) => void setUnlisted(event.target.checked)} /><span>{t("sxUnlisted")}</span></label>
+      <label className={`sx-check${listing.saving ? " is-saving" : ""}`}><input type="checkbox" checked={unlisted} disabled={listing.saving} onChange={(event) => void setUnlisted(event.target.checked)} /><span>{t("sxUnlisted")}</span></label>
       {shareUrl ? <p className="sx-summary__link"><a className="sx-link" href={safePublicUrl(shareUrl)} target="_blank" rel="noreferrer">{absoluteUrl(shareUrl)}</a><button type="button" className="sx-link" onClick={() => void copy(shareUrl)}><Copy aria-hidden="true" />{copied ? t("copied") : t("copyLink")}</button></p> : null}
     </div>
     <Button className="web-btn-yolk" type="button" loading={state.busy} disabled={!info.can_publish || (live && pending.length === 0)} onClick={publish}>{live ? t("sxUpdateAction") : t("sxPublishAction")}</Button>
