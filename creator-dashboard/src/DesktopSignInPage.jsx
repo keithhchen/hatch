@@ -21,6 +21,15 @@ const copy = {
     done: "请回到 Hatch。现在可以关闭此标签页。",
     invalid: "登录链接不完整，请回到 Hatch 桌面版重新开始。",
     failed: "无法完成登录，请重试。"
+  },
+  ja: {
+    title: "Hatch デスクトップ版にログイン",
+    body: "このコンピューターの Hatch で {name} として続けます。",
+    continue: "Hatch デスクトップ版を開く",
+    working: "Hatch を開いています…",
+    done: "Hatch に戻ってください。このタブは閉じてかまいません。",
+    invalid: "ログインリンクが不完全です。Hatch デスクトップ版からやり直してください。",
+    failed: "ログインを完了できませんでした。もう一度お試しください。"
   }
 };
 
@@ -31,7 +40,7 @@ const copy = {
  */
 export default function DesktopSignInPage({ search, profile, request }) {
   const { locale } = useLocale();
-  const t = copy[String(locale).startsWith("zh") ? "zh" : "en"];
+  const t = copy[String(locale).slice(0, 2)] ?? copy.en;
   const params = new URLSearchParams(search);
   const state = params.get("state") ?? "";
   const codeChallenge = params.get("code_challenge") ?? "";

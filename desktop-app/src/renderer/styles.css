@@ -132,6 +132,7 @@ kbd { font: inherit; }
 /* Narrow windows: the sidebar floats over the content. macOS hides panes
  * without a scrim; Windows keeps NavigationView-minimal light dismiss. */
 .desk[data-narrow] .desk-sidebar { z-index: 4; background: var(--desk-sidebar); box-shadow: var(--desk-float); }
+.desk[data-narrow][data-sidebar="closed"] .desk-sidebar { box-shadow: none; }
 .desk-scrim { position: absolute; inset: 0; z-index: 3; border: 0; padding: 0; background: transparent; }
 :root[data-platform="windows"] .desk-scrim { background: rgba(0, 0, 0, .2); }
 
@@ -261,7 +262,7 @@ kbd { font: inherit; }
 .desk-connection--idle .desk-connection__dot { background: var(--desk-muted); animation: none; opacity: .6; }
 
 /* Content ---------------------------------------------------------------------- */
-.desk-pane { position: relative; display: flex; min-height: 0; flex: 1; flex-direction: column; }
+.desk-pane { position: relative; display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; }
 .desk-banner {
   display: flex; align-items: center; gap: 8px; margin: 8px 16px 0; padding: 6px 6px 6px 12px; border-radius: var(--desk-radius-lg);
   color: var(--desk-body); background: var(--desk-fill); font-size: 12px;
@@ -311,7 +312,7 @@ kbd { font: inherit; }
 .desk-chip[data-missing] { color: var(--desk-ink); background: var(--desk-accent-soft); }
 
 /* Folder gate: no folder, no sending. The controller refuses the send; this shows why. */
-.desk-thread { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+.desk-thread { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; }
 .desk-thread[data-folder="missing"] .web-chat__send { opacity: .35; pointer-events: none; }
 .desk-folder-gate { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 12px; border-radius: var(--desk-radius-lg); color: var(--desk-body); background: var(--desk-accent-soft); font-size: 12px; }
 .desk-folder-gate > svg { width: 14px; height: 14px; color: var(--desk-ink); }
@@ -349,11 +350,12 @@ kbd { font: inherit; }
 ::highlight(hatch-find-current) { color: var(--desk-on-accent); background: var(--desk-accent); }
 
 /* Shared chat surface, tuned for a compact desktop window ---------------------- */
-.desk-pane .web-chat__main { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+.desk-pane .web-chat__main { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; }
 .desk-pane .web-chat__messages { flex: 1; }
 .web-chat__thread { width: min(720px, 100%); gap: 20px; padding: 24px 24px 16px; }
 .web-chat__message { content-visibility: auto; contain-intrinsic-size: auto 96px; animation: none; }
 .hui-avatar.web-chat__message-avatar { width: 24px; height: 24px; min-width: 24px; font-size: 10px; }
+.desk-pane .web-chat__message--assistant .web-chat__bubble.web-chat__content { padding-top: 0; }
 .web-chat__message--user .web-chat__bubble { padding: 8px 12px; border-radius: 14px; color: var(--desk-ink); background: var(--desk-fill); font-size: 14px; line-height: 1.5; }
 .web-chat__message--assistant .web-chat__bubble.web-chat__content, .web-chat__content { font-size: 14px; line-height: 1.65; }
 .web-chat__content li::marker { color: var(--desk-muted); }
@@ -399,7 +401,7 @@ kbd { font: inherit; }
 .web-chat__task-brief-panel { border-radius: 12px; box-shadow: var(--desk-float); }
 .web-chat__typing { font-size: 13px; }
 .web-chat__loading { padding-top: 0; }
-@media (max-width: 760px) { .web-chat__hint { visibility: visible; } .hui-avatar.web-chat__message-avatar { display: inline-grid; } }
+@media (max-width: 760px) { .web-chat__hint { visibility: visible; } .hui-avatar.web-chat__message-avatar { display: inline-grid; } .web-chat__message { gap: 12px; } }
 
 /* @hatch/ui overlays on desktop: hairline sheets, no blur or paper texture. */
 /* Overlays portal to <body>, outside .desk-root. Native palettes never blur what is behind them. */
