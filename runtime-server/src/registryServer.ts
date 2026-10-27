@@ -202,16 +202,9 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const httpRequestGate = new HttpRequestGate(httpLimits);
   const registryContext: RegistryContext = { store, accounts, accountAvatars, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, productLive, nodeObjectStore, releaseStore, authSecret };
   const server = http.createServer((request, response) => {
-    const suppliedBearer = bearer(request);
-    const internalRuntime = Boolean(
-      (runtimeServiceToken && request.headers["x-hatch-runtime-service-token"] === runtimeServiceToken)
-      || (runtimeServiceToken && suppliedBearer === runtimeServiceToken)
-      || (publishToken && suppliedBearer === publishToken)
-    );
-    const admission = httpRequestGate.begin(
-      authRequestSourceIp(request, trustedProxies),
-      !internalRuntime,
-    );
+    // Browser traffic arrives via the Dashboard BFF, so a per-source cap
+    // would be shared site-wide. Only the global cap applies.
+    const admission = httpRequestGate.begin(authRequestSourceIp(request, trustedProxies), false);
     if (!admission.allowed) {
       request.resume();
       response.once("finish", () => request.destroy());
@@ -1665,12 +1658,7 @@ function beginSessionQuery(
   response: http.ServerResponse,
   context: RegistryContext,
 ): GateLease | undefined {
-  const internalRuntime = context.runtimeServiceToken
-    && request.headers["x-hatch-runtime-service-token"] === context.runtimeServiceToken;
-  const decision = context.sessionQueryGate.begin(
-    authRequestSourceIp(request, context.trustedProxies),
-    !internalRuntime,
-  );
+  const decision = context.sessionQueryGate.begin(authRequestSourceIp(request, context.trustedProxies), false);
   if (decision.allowed) return decision;
   if (decision.reason === "global_capacity") {
     sendAuthJson(response, 503, { detail: "Authentication is temporarily busy. Try again shortly." }, {

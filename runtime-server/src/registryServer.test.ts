@@ -236,38 +236,6 @@ test("TypeScript Registry enables legacy HMAC only for explicit migration mode",
   }
 });
 
-test("Registry bounds public opaque-session lookups before they reach account storage", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-ts-registry-session-limit-"));
-  const registry = await createRegistryServerFromEnvironment({
-    REGISTRY_HOST: "127.0.0.1",
-    REGISTRY_PORT: "0",
-    HATCH_AGENT_CORPUS_ROOT: path.join(root, "corpora"),
-    HATCH_REGISTRY_STATE_PATH: path.join(root, "state.json"),
-    HATCH_QDRANT_URL: "",
-    DASHSCOPE_API_KEY: "",
-    HATCH_AUTH_SESSION_RATE_LIMIT_WINDOW_MS: "60000",
-    HATCH_AUTH_SESSION_RATE_LIMIT_MAX_ATTEMPTS: "2",
-    HATCH_AUTH_SESSION_RATE_LIMIT_MAX_SOURCES: "100",
-    HATCH_AUTH_SESSION_MAX_CONCURRENT: "1",
-  });
-  try {
-    const address = registry.server.address();
-    assert.ok(address && typeof address !== "string");
-    const base = `http://127.0.0.1:${address.port}`;
-    const query = () => fetch(`${base}/v1/auth/me`, {
-      headers: { authorization: "Bearer random-opaque-token" },
-    });
-    assert.equal((await query()).status, 401);
-    assert.equal((await query()).status, 401);
-    const limited = await query();
-    assert.equal(limited.status, 429);
-    assert.match(limited.headers.get("retry-after") ?? "", /^\d+$/);
-    assert.deepEqual(await limited.json(), { detail: "Too many session checks. Try again later." });
-  } finally {
-    await registry.close();
-  }
-});
-
 function legacyAuthToken(sub: string, secret: string): string {
   const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "HATCH" })).toString("base64url");
   const payload = Buffer.from(JSON.stringify({
