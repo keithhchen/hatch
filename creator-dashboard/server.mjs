@@ -136,11 +136,6 @@ export async function createDashboardApp(options = {}) {
   const recordTelemetry = (eventName, attributes, idempotencyKey) => telemetry
     .record(eventName, attributes, { idempotencyKey })
     .catch(() => undefined);
-  const analyticsRateLimit = Math.max(1, Number(options.analyticsRateLimit
-    ?? process.env.HATCH_ANALYTICS_RATE_LIMIT_PER_MINUTE
-    ?? 120));
-  const analyticsRateWindowMs = Math.max(1_000, Number(options.analyticsRateWindowMs ?? 60_000));
-  const analyticsRateWindows = new Map();
   const fetchImpl = options.fetchImpl ?? fetch;
   const factoryRequestMaxBytes = options.factoryRequestMaxBytes ?? CREATOR_FACTORY_JSON_BODY_MAX_BYTES;
   const configuredPaymentMode = options.paymentMode ?? process.env.HATCH_COMMERCE_PAYMENT_MODE ?? "disabled";
@@ -557,16 +552,6 @@ export async function createDashboardApp(options = {}) {
       if (request.method === "POST" && url.pathname === "/v1/analytics/events") {
         const originError = crossSiteMutationError(request);
         if (originError) return send(response, originError.status, originError.body);
-        const rate = consumeFixedWindowRateLimit(
-          analyticsRateWindows,
-          request.socket?.remoteAddress ?? "unknown",
-          analyticsRateLimit,
-          analyticsRateWindowMs
-        );
-        if (!rate.allowed) {
-          response.setHeader("retry-after", String(Math.max(1, Math.ceil(rate.retryAfterMs / 1_000))));
-          return send(response, 429, { error: { code: "analytics_rate_limited", message: "Too many analytics events." } });
-        }
         const body = await readJson(request);
         // The HTTP request id is response metadata, not part of the durable
         // analytics intent. Omitting a generated id here lets a browser retry
@@ -4334,24 +4319,6 @@ function csvCell(value) {
 function normalizedRequestId(value) {
   const candidate = String(Array.isArray(value) ? value[0] : value ?? "").trim();
   return /^[A-Za-z0-9_.:-]{1,128}$/.test(candidate) ? candidate : `req_${randomId()}`;
-}
-
-function consumeFixedWindowRateLimit(windows, key, limit, windowMs, now = Date.now()) {
-  const current = windows.get(key);
-  if (!current || current.resetAt <= now) {
-    windows.set(key, { count: 1, resetAt: now + windowMs });
-    return { allowed: true, retryAfterMs: 0 };
-  }
-  if (current.count >= limit) {
-    return { allowed: false, retryAfterMs: current.resetAt - now };
-  }
-  current.count += 1;
-  if (windows.size > 10_000) {
-    for (const [candidate, entry] of windows) {
-      if (entry.resetAt <= now) windows.delete(candidate);
-    }
-  }
-  return { allowed: true, retryAfterMs: 0 };
 }
 
 async function commerceOperationsSnapshot({ ledger, commerce, portalState, telemetry, now = new Date() }) {

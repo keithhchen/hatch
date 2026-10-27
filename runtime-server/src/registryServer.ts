@@ -58,13 +58,7 @@ import { QdrantKnowledgeIndexer } from "./qdrantIndexer.js";
 import { flushLangfuseObservability, initializeLangfuseObservability } from "./langfuse.js";
 import { accountAvatarApplicationServiceFromEnvironment, MAX_ACCOUNT_AVATAR_BYTES } from "./accountAvatar.js";
 import {
-  HttpRequestGate,
-  PublishWorkGate,
-  SessionQueryGate,
   httpRequestLimitOptionsFromEnvironment,
-  publishWorkLimitOptionsFromEnvironment,
-  sessionQueryLimitOptionsFromEnvironment,
-  type GateLease,
 } from "./registryRequestLimits.js";
 
 export type RegistryServer = { server: http.Server; close: () => Promise<void> };
@@ -73,8 +67,6 @@ type RegistryContext = {
   store: RegistryStoreTs;
   accounts: AccountStoreTs;
   accountAvatars?: ReturnType<typeof accountAvatarApplicationServiceFromEnvironment>;
-  sessionQueryGate: SessionQueryGate;
-  publishWorkGate: PublishWorkGate;
   trustedProxies: TrustedProxyPolicy;
   publishToken: string;
   runtimeServiceToken: string;
@@ -196,24 +188,10 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const deploymentServiceToken = environment.HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN?.trim() || "";
   const legacyHmacEnabled = environment.HATCH_ENABLE_LEGACY_HMAC_AUTH?.trim().toLowerCase() === "true";
   const authSecret = legacyHmacEnabled ? environment.HATCH_AUTH_SIGNING_SECRET?.trim() || "" : "";
-  const sessionQueryGate = new SessionQueryGate(sessionQueryLimitOptionsFromEnvironment(environment));
-  const publishWorkGate = new PublishWorkGate(publishWorkLimitOptionsFromEnvironment(environment));
   const httpLimits = httpRequestLimitOptionsFromEnvironment(environment);
-  const httpRequestGate = new HttpRequestGate(httpLimits);
-  const registryContext: RegistryContext = { store, accounts, accountAvatars, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, productLive, nodeObjectStore, releaseStore, authSecret };
+  const registryContext: RegistryContext = { store, accounts, accountAvatars, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, productLive, nodeObjectStore, releaseStore, authSecret };
   const server = http.createServer((request, response) => {
-    // Browser traffic arrives via the Dashboard BFF, so a per-source cap
-    // would be shared site-wide. Only the global cap applies.
-    const admission = httpRequestGate.begin(authRequestSourceIp(request, trustedProxies), false);
-    if (!admission.allowed) {
-      request.resume();
-      response.once("finish", () => request.destroy());
-      sendJson(response, admission.reason === "source_capacity" ? 429 : 503, {
-        detail: "Registry is temporarily busy. Try again shortly.",
-      }, { "retry-after": String(admission.retryAfterSeconds), connection: "close" });
-      return;
-    }
-    const routePromise = route(request, response, registryContext)
+    void route(request, response, registryContext)
       .catch((error) => {
         const status = errorStatus(error);
         if (status >= 500) console.error("Registry request failed", error);
@@ -266,7 +244,6 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
               : error instanceof Error ? error.message : String(error)
         });
       });
-    holdAdmissionUntilRequestAndRouteSettle(request, response, routePromise, admission);
   });
   server.headersTimeout = httpLimits.headersTimeoutMs;
   server.requestTimeout = httpLimits.requestTimeoutMs;
@@ -369,7 +346,6 @@ async function route(
   const factoryAgentsMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/factory-agents(?:\/|$)/);
   if (factoryAgentsMatch) {
     const account = await authenticate(request, response, context);
-    if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
     const productId = decodeURIComponent(factoryAgentsMatch[1]!);
     const product = await productForCreator(context, account.id, productId);
@@ -381,7 +357,6 @@ async function route(
   const registryPublishMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/registry$/);
   if (registryPublishMatch && request.method === "POST") {
     const account = await authenticate(request, response, context);
-    if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
     if (!context.corpusPublisher) {
       sendJson(response, 503, { error: { code: "publish_unavailable", message: "Corpus Publisher is unavailable." } });
@@ -438,7 +413,6 @@ async function route(
   const productLiveMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/live$/);
   if (productLiveMatch && (request.method === "GET" || request.method === "POST")) {
     const account = await authenticate(request, response, context);
-    if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
     if (!context.productLive) {
       sendJson(response, 503, { error: { code: "publish_unavailable", message: "Corpus Publisher is unavailable." } });
@@ -570,7 +544,6 @@ async function route(
   }
   if (url.pathname === "/v1/auth/me/avatar" && (request.method === "PUT" || request.method === "DELETE")) {
     const account = await authenticate(request, response, context);
-    if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendAuthJson(response, 401, { detail: "A valid account token is required." }); return; }
     if (!context.accountAvatars) {
       sendAuthJson(response, 503, { error: { code: "avatar_storage_unavailable", message: "Avatar storage is not configured." } });
@@ -588,7 +561,6 @@ async function route(
   }
   if (url.pathname === "/v1/auth/me" && request.method === "PATCH") {
     const account = await authenticate(request, response, context);
-    if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendAuthJson(response, 401, { detail: "A valid account token is required." }); return; }
     const body = await readJson(request);
     let updated: Account;
@@ -602,26 +574,19 @@ async function route(
     return;
   }
   if (url.pathname === "/v1/auth/me" && request.method === "GET") {
-    const lease = beginSessionQuery(request, response, context);
-    if (!lease) return;
-    try {
-      const token = bearer(request);
-      const session = await context.accounts.resolveSession(token);
-      if (session) {
-        sendAuthJson(response, 200, { ...accountPublic(session.account), session_expires_at: session.session.absolute_expires_at });
-        return;
-      }
-      const account = await authenticateLegacy(token, context.accounts, context.authSecret);
-      if (!account) { sendAuthJson(response, 401, { detail: "A valid account token is required." }); return; }
-      sendAuthJson(response, 200, accountPublic(account));
-    } finally {
-      lease.release();
+    const token = bearer(request);
+    const session = await context.accounts.resolveSession(token);
+    if (session) {
+      sendAuthJson(response, 200, { ...accountPublic(session.account), session_expires_at: session.session.absolute_expires_at });
+      return;
     }
+    const account = await authenticateLegacy(token, context.accounts, context.authSecret);
+    if (!account) { sendAuthJson(response, 401, { detail: "A valid account token is required." }); return; }
+    sendAuthJson(response, 200, accountPublic(account));
     return;
   }
   if (url.pathname === "/v1/auth/me/avatar" && (request.method === "PUT" || request.method === "DELETE")) {
     const account = await authenticate(request, response, context);
-    if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendAuthJson(response, 401, { detail: "A valid account token is required." }); return; }
     if (!context.accountAvatars) {
       sendAuthJson(response, 503, { error: { code: "avatar_storage_unavailable", message: "Avatar storage is not configured." } });
@@ -641,27 +606,15 @@ async function route(
   // (the Dashboard hands one to Desktop after browser sign-in). Revoking
   // either session never ends the other. Only a live session can do this.
   if (url.pathname === "/v1/auth/sessions" && request.method === "POST") {
-    const lease = beginSessionQuery(request, response, context);
-    if (!lease) return;
-    try {
-      const current = await context.accounts.resolveSession(bearer(request));
-      if (!current) { sendAuthJson(response, 401, { detail: "A valid account session is required." }); return; }
-      sendAuthJson(response, 201, sessionResponse(current.account, await context.accounts.createSession(current.account)));
-    } finally {
-      lease.release();
-    }
+    const current = await context.accounts.resolveSession(bearer(request));
+    if (!current) { sendAuthJson(response, 401, { detail: "A valid account session is required." }); return; }
+    sendAuthJson(response, 201, sessionResponse(current.account, await context.accounts.createSession(current.account)));
     return;
   }
   if (url.pathname === "/v1/auth/logout" && request.method === "POST") {
-    const lease = beginSessionQuery(request, response, context);
-    if (!lease) return;
-    try {
-      await context.accounts.revokeSession(bearer(request));
-      response.writeHead(204, { ...corsHeaders(), "cache-control": "no-store" });
-      response.end();
-    } finally {
-      lease.release();
-    }
+    await context.accounts.revokeSession(bearer(request));
+    response.writeHead(204, { ...corsHeaders(), "cache-control": "no-store" });
+    response.end();
     return;
   }
 
@@ -757,7 +710,6 @@ async function route(
   );
   if (factoryNodeMatch) {
     const account = await authenticate(request, response, context);
-    if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
     if (!context.factoryNodeService) {
       sendJson(response, 503, { error: { code: "node_unavailable", message: "Factory Node runtime is unavailable." } });
@@ -847,7 +799,6 @@ async function route(
     // Product/File/Snapshot compatibility handlers below.
     || /^\/v1\/creator\/products\/[^/]+\/graph$/.test(url.pathname)) {
     const account = await authenticate(request, response, context);
-    if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
     const result = await handleCreatorFactoryHttp({
       method: request.method ?? "GET",
@@ -866,7 +817,6 @@ async function route(
   // boundary for existing Factory rows and is never returned by these routes.
   if (url.pathname === "/v1/creator/products" && (request.method === "GET" || request.method === "POST")) {
     const account = await authenticate(request, response, context);
-    if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
     if (request.method === "GET") {
       const products = mergeCreatorProductListings(
@@ -919,7 +869,6 @@ async function route(
   const productRootMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)$/);
   if (productRootMatch && (request.method === "GET" || request.method === "PATCH" || request.method === "DELETE")) {
     const account = await authenticate(request, response, context);
-    if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
     const productId = decodeURIComponent(productRootMatch[1]!);
     const product = await productForCreator(context, account.id, productId);
@@ -976,7 +925,6 @@ async function route(
   const productWithdrawMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/withdraw$/);
   if (productWithdrawMatch && request.method === "POST") {
     const account = await authenticate(request, response, context);
-    if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
     const productId = decodeURIComponent(productWithdrawMatch[1]!);
     const product = await productForCreator(context, account.id, productId);
@@ -990,7 +938,6 @@ async function route(
   const productBriefSpecMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/brief-spec$/);
   if (productBriefSpecMatch && request.method === "PUT") {
     const account = await authenticate(request, response, context);
-    if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
     const productId = decodeURIComponent(productBriefSpecMatch[1]!);
     const product = await productForCreator(context, account.id, productId);
@@ -1012,7 +959,6 @@ async function route(
   const productFilesMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/files(?:\/([^/]+))?$/);
   if (productFilesMatch) {
     const account = await authenticate(request, response, context);
-    if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
     const productId = decodeURIComponent(productFilesMatch[1]!);
     const product = await productForCreator(context, account.id, productId);
@@ -1227,24 +1173,16 @@ async function resolvePublishedCreatorToolConnection(
   });
 }
 
-const SESSION_QUERY_REJECTED = Symbol("session-query-rejected");
-
 async function authenticate(
   request: http.IncomingMessage,
   response: http.ServerResponse,
   context: RegistryContext,
-): Promise<Account | undefined | typeof SESSION_QUERY_REJECTED> {
-  const lease = beginSessionQuery(request, response, context);
-  if (!lease) return SESSION_QUERY_REJECTED;
-  try {
-    const session = await context.accounts.resolveSession(bearer(request));
-    if (session) return session.account;
-    const claims = verifyAuthToken(bearer(request), context.authSecret);
-    if (!claims) return undefined;
-    return context.accounts.getById(claims.sub);
-  } finally {
-    lease.release();
-  }
+): Promise<Account | undefined> {
+  const session = await context.accounts.resolveSession(bearer(request));
+  if (session) return session.account;
+  const claims = verifyAuthToken(bearer(request), context.authSecret);
+  if (!claims) return undefined;
+  return context.accounts.getById(claims.sub);
 }
 
 async function authenticateLegacy(token: string | undefined, accounts: AccountStoreTs, secret: string): Promise<Account | undefined> {
@@ -1618,76 +1556,6 @@ function boundedQueryInteger(
     throw error;
   }
   return value;
-}
-
-function holdAdmissionUntilRequestAndRouteSettle(
-  request: http.IncomingMessage,
-  response: http.ServerResponse,
-  routePromise: Promise<void>,
-  lease: GateLease,
-): void {
-  let routeSettled = false;
-  let requestSettled = request.complete || request.readableEnded || request.destroyed;
-  let released = false;
-  const releaseIfDone = () => {
-    if (released || !routeSettled || !requestSettled) return;
-    released = true;
-    lease.release();
-  };
-  const settleRequest = () => {
-    requestSettled = true;
-    releaseIfDone();
-  };
-  request.once("end", settleRequest);
-  request.once("aborted", settleRequest);
-  request.once("close", settleRequest);
-  response.once("finish", () => {
-    // If a route rejected before consuming a POST body, close that connection
-    // after the response instead of letting an untracked slow upload linger.
-    if (!request.complete && !request.destroyed) request.destroy();
-  });
-  const settleRoute = () => {
-    routeSettled = true;
-    releaseIfDone();
-  };
-  void routePromise.then(settleRoute, settleRoute);
-}
-
-function beginSessionQuery(
-  request: http.IncomingMessage,
-  response: http.ServerResponse,
-  context: RegistryContext,
-): GateLease | undefined {
-  const decision = context.sessionQueryGate.begin(authRequestSourceIp(request, context.trustedProxies), false);
-  if (decision.allowed) return decision;
-  if (decision.reason === "global_capacity") {
-    sendAuthJson(response, 503, { detail: "Authentication is temporarily busy. Try again shortly." }, {
-      "retry-after": String(decision.retryAfterSeconds),
-    });
-  } else {
-    sendAuthJson(response, 429, { detail: "Too many session checks. Try again later." }, {
-      "retry-after": String(decision.retryAfterSeconds),
-    });
-  }
-  return undefined;
-}
-
-function beginPublishWork(
-  response: http.ServerResponse,
-  context: RegistryContext,
-  publisher: string,
-  enforceRate = true,
-): GateLease | undefined {
-  const decision = context.publishWorkGate.begin(publisher, enforceRate);
-  if (decision.allowed) return decision;
-  const publisherLimited = decision.reason === "publisher_capacity" || decision.reason === "publisher_rate";
-  sendJson(
-    response,
-    publisherLimited ? 429 : 503,
-    { detail: "Agent Corpus publishing is temporarily busy. Try again shortly." },
-    { "retry-after": String(decision.retryAfterSeconds) },
-  );
-  return undefined;
 }
 
 function errorStatus(error: unknown): number {
