@@ -6,18 +6,15 @@ import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { URL } from "node:url";
 import {
-  AuthRateLimiter,
   TrustedProxyPolicy,
-  authRateLimitOptionsFromEnvironment,
   authRequestSourceIp,
   authTrustedProxyPolicyFromEnvironment
-} from "./authRateLimit.js";
+} from "./trustedProxy.js";
 import {
   AccountStoreTs,
   PasswordHasher,
   PasswordWorkCapacityError,
   accountPublic,
-  normalizeAccountIdentity,
   passwordWorkOptionsFromEnvironment,
   validateSigninCredentials,
   validateSignupCredentials,
@@ -76,7 +73,6 @@ type RegistryContext = {
   store: RegistryStoreTs;
   accounts: AccountStoreTs;
   accountAvatars?: ReturnType<typeof accountAvatarApplicationServiceFromEnvironment>;
-  authRateLimiter: AuthRateLimiter;
   sessionQueryGate: SessionQueryGate;
   publishWorkGate: PublishWorkGate;
   trustedProxies: TrustedProxyPolicy;
@@ -97,7 +93,6 @@ type RegistryContext = {
 
 export async function createRegistryServerFromEnvironment(environment: NodeJS.ProcessEnv = process.env): Promise<RegistryServer> {
   initializeLangfuseObservability(environment);
-  const authRateLimitOptions = authRateLimitOptionsFromEnvironment(environment);
   const passwordWorkOptions = passwordWorkOptionsFromEnvironment(environment);
   const trustedProxies = authTrustedProxyPolicyFromEnvironment(environment);
   const store = await RegistryStoreTs.open({ environment });
@@ -201,12 +196,11 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const deploymentServiceToken = environment.HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN?.trim() || "";
   const legacyHmacEnabled = environment.HATCH_ENABLE_LEGACY_HMAC_AUTH?.trim().toLowerCase() === "true";
   const authSecret = legacyHmacEnabled ? environment.HATCH_AUTH_SIGNING_SECRET?.trim() || "" : "";
-  const authRateLimiter = new AuthRateLimiter(authRateLimitOptions);
   const sessionQueryGate = new SessionQueryGate(sessionQueryLimitOptionsFromEnvironment(environment));
   const publishWorkGate = new PublishWorkGate(publishWorkLimitOptionsFromEnvironment(environment));
   const httpLimits = httpRequestLimitOptionsFromEnvironment(environment);
   const httpRequestGate = new HttpRequestGate(httpLimits);
-  const registryContext: RegistryContext = { store, accounts, accountAvatars, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, productLive, nodeObjectStore, releaseStore, authSecret };
+  const registryContext: RegistryContext = { store, accounts, accountAvatars, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, productLive, nodeObjectStore, releaseStore, authSecret };
   const server = http.createServer((request, response) => {
     const suppliedBearer = bearer(request);
     const internalRuntime = Boolean(
@@ -528,20 +522,14 @@ async function route(
   }
 
   if (url.pathname === "/v1/auth/signup" && request.method === "POST") {
-    if (!beginAuthSourceAttempt(request, response, context)) return;
     const body = await readJson(request);
     const email = String(body.email ?? "");
     const password = String(body.password ?? "");
     const displayName = String(body.display_name ?? "");
-    let identity = normalizeAccountIdentity(email);
-    const attempt = context.authRateLimiter.checkIdentity("signup", identity);
     try {
-      identity = validateSignupCredentials(email, password, displayName).email;
+      validateSignupCredentials(email, password, displayName);
     } catch (error) {
-      const failure = context.authRateLimiter.recordFailure("signup", identity);
-      if (attempt.identityLimited) sendRateLimited(response, attempt.retryAfterSeconds);
-      else if (failure.limited) sendRateLimited(response, failure.retryAfterSeconds);
-      else sendAuthInputError(response, error);
+      sendAuthInputError(response, error);
       return;
     }
     let account: Account;
@@ -552,30 +540,21 @@ async function route(
         sendAuthBusy(response);
         return;
       }
-      const failure = context.authRateLimiter.recordFailure("signup", identity);
-      if (attempt.identityLimited) sendRateLimited(response, attempt.retryAfterSeconds);
-      else if (failure.limited) sendRateLimited(response, failure.retryAfterSeconds);
-      else sendError(response, error, { email_already_registered: [409, "Email is already registered."] });
+      sendError(response, error, { email_already_registered: [409, "Email is already registered."] });
       return;
     }
-    context.authRateLimiter.recordSuccess("signup", identity);
     sendAuthJson(response, 201, sessionResponse(account, await context.accounts.createSession(account)));
     return;
   }
   if (url.pathname === "/v1/auth/signin" && request.method === "POST") {
-    if (!beginAuthSourceAttempt(request, response, context)) return;
     const body = await readJson(request);
     const email = String(body.email ?? "");
     const password = String(body.password ?? "");
-    let identity = normalizeAccountIdentity(email);
-    const attempt = context.authRateLimiter.checkIdentity("signin", identity);
+    let identity: string;
     try {
       identity = validateSigninCredentials(email, password);
     } catch (error) {
-      const failure = context.authRateLimiter.recordFailure("signin", identity);
-      if (attempt.identityLimited) sendRateLimited(response, attempt.retryAfterSeconds);
-      else if (failure.limited) sendRateLimited(response, failure.retryAfterSeconds);
-      else sendAuthInputError(response, error);
+      sendAuthInputError(response, error);
       return;
     }
     const account = await context.accounts.getByEmail(identity);
@@ -590,13 +569,9 @@ async function route(
       throw error;
     }
     if (!passwordMatches || !account) {
-      const failure = context.authRateLimiter.recordFailure("signin", identity);
-      if (attempt.identityLimited) sendRateLimited(response, attempt.retryAfterSeconds);
-      else if (failure.limited) sendRateLimited(response, failure.retryAfterSeconds);
-      else sendAuthJson(response, 401, { detail: "Email or password is incorrect." });
+      sendAuthJson(response, 401, { detail: "Email or password is incorrect." });
       return;
     }
-    context.authRateLimiter.recordSuccess("signin", identity);
     sendAuthJson(response, 200, sessionResponse(account, await context.accounts.createSession(account)));
     return;
   }
@@ -1769,25 +1744,6 @@ async function readJson(request: http.IncomingMessage, maxBytes = 1024 * 1024): 
   const payload = JSON.parse(Buffer.from(await readBytes(request, maxBytes)).toString("utf8")) as unknown;
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("JSON body must be an object");
   return payload as Record<string, unknown>;
-}
-
-function beginAuthSourceAttempt(
-  request: http.IncomingMessage,
-  response: http.ServerResponse,
-  context: RegistryContext,
-): boolean {
-  const decision = context.authRateLimiter.beginSourceAttempt(
-    authRequestSourceIp(request, context.trustedProxies),
-  );
-  if (decision.allowed) return true;
-  sendRateLimited(response, decision.retryAfterSeconds);
-  return false;
-}
-
-function sendRateLimited(response: http.ServerResponse, retryAfterSeconds: number): void {
-  sendAuthJson(response, 429, { detail: "Too many authentication attempts. Try again later." }, {
-    "retry-after": String(retryAfterSeconds)
-  });
 }
 
 function sendAuthBusy(response: http.ServerResponse): void {
