@@ -4,10 +4,12 @@ import { Avatar } from "@hatch/ui";
 import { approvalDecision, partitionAttachments } from "../domain/activity.js";
 import { ACTIVITY_KINDS, ChatTimeline, groupTimelineEntries } from "../domain/timeline.js";
 import { sharedScrollPositions } from "../domain/scroll-positions.js";
+import { OPEN_FREE_CHAT } from "../domain/free-chat.js";
 import { ActivityBlock, ActivityModal, ApprovalActivity } from "./Activity.jsx";
 import { ImageViewer } from "./ImageViewer.jsx";
 import { MessageResponse } from "./MessageResponse.jsx";
 import { Shimmer } from "./Shimmer.jsx";
+import { FreeChatPaywall } from "./FreeChatPaywall.jsx";
 import "./chat.css";
 
 /** Subscribe a React tree to a ConversationController. */
@@ -198,6 +200,8 @@ function Composer({ controller, state, snapshotPending, agentName, t, onSend, at
  */
 export function ChatView({ controller, identity, agentName, t, errorText, attachments, AttachmentViewer = ImageViewer, header, loadingIndicator, onNewConversation, activityKinds = ACTIVITY_KINDS, inert, dockAccessory, attachControl, composerAccessory, onComposerPaste, onApprovalDecision, scrollPositions = sharedScrollPositions }) {
   const state = useChatState(controller);
+  const meter = controller.freeChat ?? OPEN_FREE_CHAT;
+  const freeChat = useSyncExternalStore(meter.subscribe, meter.getSnapshot);
   const { conversationId, messages, historyCursor, activeRun, error, status, approvals: decisions, compactions } = state;
   const snapshotPending = controller.snapshotPending;
   const awaitingConversation = !conversationId && state.conversations.length > 0;
@@ -276,7 +280,7 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
           <span className="web-pill">{t("welcomePill", { name: identity.creatorName })}</span>
           <h2>{identity.productName}</h2>
           {identity.promise ? <p>{identity.promise}</p> : null}
-          <button type="button" className="web-chat__button web-chat__button--yolk" onClick={onNewConversation}><Plus aria-hidden="true" />{t("startConversation")}</button>
+          {freeChat.locked ? null : <button type="button" className="web-chat__button web-chat__button--yolk" onClick={onNewConversation}><Plus aria-hidden="true" />{t("startConversation")}</button>}
         </section> : null}
         {conversationId && !snapshotPending && messages.length === 0 && !activeRun ? <section className="web-chat__welcome web-chat__welcome--quiet">
           <Avatar className="web-chat__welcome-avatar" src={identity.creatorAvatarUrl} name={identity.creatorName} size="large" />
@@ -296,7 +300,8 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
     <div className="web-chat__dock">
       {error ? <div className="web-chat__notice" role="alert"><CircleAlert aria-hidden="true" /><span>{errorText(error)}</span><button type="button" onClick={() => controller.retry()}><RotateCw aria-hidden="true" /><span>{t("retry")}</span></button></div> : null}
       {dockAccessory}
-      {conversationId ? <Composer controller={controller} state={state} snapshotPending={snapshotPending} agentName={agentName} t={t} onSend={send} attachControl={attachControl} accessory={composerAccessory} onPaste={onComposerPaste} /> : null}
+      {freeChat.locked && !activeRun ? <FreeChatPaywall access={freeChat} creatorName={identity.creatorName} t={t} />
+        : conversationId ? <Composer controller={controller} state={state} snapshotPending={snapshotPending} agentName={agentName} t={t} onSend={send} attachControl={attachControl} accessory={composerAccessory} onPaste={onComposerPaste} /> : null}
     </div>
   </main>;
 }

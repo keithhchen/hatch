@@ -222,3 +222,11 @@ Creator Orders 页面展示 Access record 与购买状态，不展示价格、Of
 - Registry ownership projection；
 - 为缺失 release/digest/UUID 猜值；
 - 用 fixture 或 mock 代替生产 UAT。
+
+## 13. 免费聊与展示价格
+
+- Expert 在 Studio Publish 页可选填三项，存于 `hatch_creator_products.pricing`（USD，金额为 minor units）：`free_messages`、`human_hourly_minor`、`agent_monthly_minor`。设置了 `free_messages` 时至少要有一个价格。
+- 这些是展示条款，不是订单：Product 仍按第 12 节免费领取，不生成 offer、payment 或 entitlement 变化。
+- `pricing` 是实时 Product 设置，不进 release snapshot；随公开 Product、`/v1/user/product-access` 的 `product` 和 Creator Product 视图返回。
+- Runtime `GET /v1/conversations` 返回 `sent_message_count`（该账户对该 Product 的非 failed run 数）。`@hatch/chat` 的 `FreeChatMeter`（每个 Agent 一个，owner 不计量）同步该计数并在 accepted 时加一，共享 `ChatView` 在用完后用 `FreeChatPaywall` 替换输入框，Web 与 Desktop 同时阻止新对话；客户可选择一个选项，界面如实显示在线支付暂未开通。
+- 当前只做前端拦截，Runtime 不拒绝超额消息。

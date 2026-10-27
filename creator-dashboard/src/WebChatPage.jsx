@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowUp, ChevronDown, Menu, Plus, RotateCw, X } from "lucide-react";
 import { Avatar } from "@hatch/ui";
-import { ChatError, ConversationController, resolveCreatorIdentity } from "@hatch/chat";
+import { ChatError, ConversationController, FreeChatMeter, resolveCreatorIdentity } from "@hatch/chat";
 import { ChatView, CreatorHeading, TaskBriefDropdown, useChatState } from "@hatch/chat/react";
 import { WebBrand } from "./WebBrand.jsx";
 import { WebChatEgg, WebChatGate } from "./webChatGate.jsx";
@@ -136,6 +136,8 @@ function WebChatWorkspace({ controller, access, productId, navigate, profile, on
 
   const newConversation = event => {
     setMobileSidebarOpen(false);
+    // Once free messages are used up the dock shows the paywall instead.
+    if (controller.freeChat.getSnapshot().locked) return;
     if (briefFields.length) {
       briefTriggerRef.current = mobileSidebarWasOpenRef.current && isMobileLayout() ? mobileSidebarTriggerRef.current : event?.currentTarget ?? null;
       setBriefAnswers({});
@@ -236,6 +238,8 @@ export default function WebChatPage({ productId, conversationId: routedConversat
         attachments,
         tools: new UnavailableToolExecutor(),
         draftScope: productId,
+        // Owners chat with their own Agent freely; customers meet the expert's free-chat limit.
+        freeChat: new FreeChatMeter(access.entitlement_id ? access.product?.pricing ?? null : null),
         describeError: cause => webChatErrorText(cause, localeRef.current)
       });
       controller.open(routedConversationRef.current ?? "");

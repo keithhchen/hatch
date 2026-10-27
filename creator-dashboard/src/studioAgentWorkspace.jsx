@@ -76,6 +76,7 @@ function PublishTab({ product, productId, request, navigate, locale, t, profile,
       <div className="sx-publish__edit">
         <DetailsForm product={product} productId={productId} request={request} t={t} onSaved={reloadAll} />
         <BriefSpecForm product={product} productId={productId} request={request} t={t} onSaved={reloadAll} />
+        <PricingForm product={product} productId={productId} request={request} t={t} onSaved={reloadAll} />
       </div>
       <section className="sx-publish__preview" aria-labelledby="sx-preview-title">
         <PreviewPane resource={preview} profile={profile} t={t} />
@@ -153,6 +154,53 @@ function DetailsForm({ product, productId, request, t, onSaved }) {
     <FormField label={t("sxNameLabel")} required><Input required maxLength={240} value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} /></FormField>
     <FormField label={t("sxPromiseLabel")} hint={t("sxPromiseHint")} required><Textarea required rows={4} value={draft.promise} onChange={(event) => setDraft((current) => ({ ...current, promise: event.target.value }))} /></FormField>
     <p className="sx-quiet sx-form__note">{t("sxDetailsEffect")}</p>
+    <div className="sx-form__foot">
+      <Button type="submit" loading={state.busy} disabled={!dirty || !valid}>{t("save")}</Button>
+      {dirty ? <button type="button" className="sx-link sx-link--quiet" onClick={() => setDraft(initial)}>{t("sxDiscard")}</button> : null}
+    </div>
+  </form>;
+}
+
+// Prices are entered in dollars and stored in cents; empty turns an option off.
+const pricingDraft = (pricing) => ({
+  free_messages: pricing?.free_messages == null ? "" : String(pricing.free_messages),
+  human_hourly: pricing?.human_hourly_minor == null ? "" : String(pricing.human_hourly_minor / 100),
+  agent_monthly: pricing?.agent_monthly_minor == null ? "" : String(pricing.agent_monthly_minor / 100)
+});
+const wholeOrNull = (text) => text.trim() === "" ? null : Number(text);
+const centsOrNull = (text) => text.trim() === "" ? null : Math.round(Number(text) * 100);
+
+function PricingForm({ product, productId, request, t, onSaved }) {
+  const initial = useMemo(() => pricingDraft(product.pricing), [product.pricing]);
+  const [draft, setDraft] = useState(initial);
+  const [state, setState] = useState({ busy: false, error: "", saved: false });
+  useEffect(() => { setDraft(initial); }, [initial]);
+  const pricing = { free_messages: wholeOrNull(draft.free_messages), human_hourly_minor: centsOrNull(draft.human_hourly), agent_monthly_minor: centsOrNull(draft.agent_monthly), currency: "USD" };
+  const dirty = JSON.stringify(draft) !== JSON.stringify(initial);
+  const numbersValid = [pricing.free_messages, pricing.human_hourly_minor, pricing.agent_monthly_minor].every((value) => value === null || (Number.isSafeInteger(value) && value > 0));
+  const needsOption = pricing.free_messages !== null && pricing.human_hourly_minor === null && pricing.agent_monthly_minor === null;
+  const valid = numbersValid && !needsOption;
+  const field = (key) => ({ value: draft[key], onChange: (event) => setDraft((current) => ({ ...current, [key]: event.target.value })) });
+  async function save(event) {
+    event.preventDefault();
+    if (!dirty || !valid) return;
+    setState({ busy: true, error: "", saved: false });
+    try {
+      await request(`/v1/creator/products/${encodeURIComponent(productId)}/pricing`, { method: "PUT", headers: { "idempotency-key": mutationKey() }, body: JSON.stringify({ pricing, expected_updated_at: product.updated_at }) });
+      setState({ busy: false, error: "", saved: true });
+      onSaved();
+    } catch (error) { setState({ busy: false, error: friendlyError(error, t), saved: false }); }
+  }
+  return <form className="sx-card sx-form" onSubmit={save}>
+    <SectionHead title={t("sxPricingTitle")} />
+    <p className="sx-quiet">{t("sxPricingBody")}</p>
+    {state.error ? <InlineError>{state.error}</InlineError> : null}
+    {state.saved && !dirty ? <SuccessNotice>{t("sxSaved")}</SuccessNotice> : null}
+    <FormField label={t("sxFreeMessagesLabel")} hint={t("sxFreeMessagesHint")}><Input type="number" min={1} max={1000} step={1} inputMode="numeric" {...field("free_messages")} /></FormField>
+    <FormField label={t("sxHumanHourlyLabel")}><Input type="number" min={1} step="0.01" inputMode="decimal" {...field("human_hourly")} /></FormField>
+    <FormField label={t("sxAgentMonthlyLabel")}><Input type="number" min={1} step="0.01" inputMode="decimal" {...field("agent_monthly")} /></FormField>
+    {needsOption ? <InlineError>{t("sxPricingNeedsOption")}</InlineError> : null}
+    <p className="sx-quiet sx-form__note">{t("sxPricingEffect")}</p>
     <div className="sx-form__foot">
       <Button type="submit" loading={state.busy} disabled={!dirty || !valid}>{t("save")}</Button>
       {dirty ? <button type="button" className="sx-link sx-link--quiet" onClick={() => setDraft(initial)}>{t("sxDiscard")}</button> : null}

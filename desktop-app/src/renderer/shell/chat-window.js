@@ -224,7 +224,8 @@ export class ChatWindow extends WindowController {
    */
   newConversation() {
     const agent = this.agent;
-    if (!agent) return;
+    // Once free messages are used up the dock shows the paywall instead.
+    if (!agent || agent.freeChat.getSnapshot().locked) return;
     const grant = this.lastGrant;
     if (grant && !agent.briefFields.length) {
       void this.createConversation({ grant });

@@ -1,4 +1,4 @@
-import { resolveCreatorIdentity } from "@hatch/chat";
+import { FreeChatMeter, resolveCreatorIdentity } from "@hatch/chat";
 import { HATCH_ORIGIN } from "../config.js";
 import { HatchRequestError, requestJson } from "../http.js";
 import { isUuidV4 } from "../identity.js";
@@ -19,6 +19,8 @@ export class AgentAccess {
     this.binding = Object.freeze(owned ? { productId: row.product_id } : { entitlementId: row.entitlement_id });
     this.identity = resolveCreatorIdentity({ access: row });
     this.briefFields = this.identity.briefSpec?.fields ?? [];
+    // Mutable meter on a frozen Agent: owners chat freely, customers meet the expert's limit.
+    this.freeChat = new FreeChatMeter(owned ? null : row.product?.pricing ?? null);
     // Acquired rows describe the Agent by its promise, like the Web catalog cards.
     this.description = [row.product?.description, row.product?.promise].find(text => typeof text === "string" && text.trim())?.trim() ?? "";
     Object.freeze(this);

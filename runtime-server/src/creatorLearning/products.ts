@@ -1,4 +1,5 @@
 import type { BriefSpec } from "../brief.js";
+import type { ProductPricing } from "./pricing.js";
 
 export type CreatorProductStatus = "active" | "deleted";
 
@@ -13,6 +14,8 @@ export type CreatorProductRecord = {
   brief: string;
   /** Creator-confirmed buyer intake contract. Every Product has one. */
   briefSpec: BriefSpec;
+  /** Expert-set free-chat offer; display terms only. */
+  pricing: ProductPricing;
   status: CreatorProductStatus;
   /** Stable DistillationRun lineage. A Product has one; revisions live below it. */
   runId?: string;
@@ -39,6 +42,7 @@ export type CreatorProductRepository = {
   listProducts(creatorId: string): Promise<CreatorProductRecord[]>;
   updateProductPromise(creatorId: string, productId: string, input: { name?: string; promise: string; expectedUpdatedAt?: string }): Promise<CreatorProductRecord>;
   saveBriefSpec(creatorId: string, productId: string, input: { briefSpec: BriefSpec; expectedUpdatedAt?: string }): Promise<CreatorProductRecord>;
+  savePricing(creatorId: string, productId: string, input: { pricing: ProductPricing; expectedUpdatedAt?: string }): Promise<CreatorProductRecord>;
   softDeleteProduct(creatorId: string, productId: string): Promise<CreatorProductRecord>;
   setProductRevision(creatorId: string, productId: string, input: { runId: string; revisionId: string }): Promise<CreatorProductRecord>;
 };
@@ -50,6 +54,7 @@ export function isCreatorProductRepository(value: unknown): value is CreatorProd
     && typeof (value as { listProducts?: unknown }).listProducts === "function"
     && typeof (value as { updateProductPromise?: unknown }).updateProductPromise === "function"
     && typeof (value as { saveBriefSpec?: unknown }).saveBriefSpec === "function"
+    && typeof (value as { savePricing?: unknown }).savePricing === "function"
     && typeof (value as { softDeleteProduct?: unknown }).softDeleteProduct === "function"
     && typeof (value as { setProductRevision?: unknown }).setProductRevision === "function");
 }

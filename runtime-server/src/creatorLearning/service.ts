@@ -16,6 +16,7 @@ import {
 } from "./repository.js";
 import type { ArtifactRef, CreatorQuestion, FactoryAgentProduct, FactoryAgentTool, FactoryStage, FactoryStartInput, MaterializedAgentCorpus } from "./types.js";
 import { draftBriefSpecForProduct, normalizeBriefSpec, type BriefSpec } from "../brief.js";
+import { normalizeProductPricing } from "./pricing.js";
 
 export type CreatorCorpusAssetLayer = "manifest" | "system" | "skill" | "reference" | "knowledge";
 
@@ -393,6 +394,15 @@ export class CreatorFactoryService {
     if (product.status !== "active") throw new CreatorFactoryRepositoryError("invalid_status", `Distillation Product ${productId} is deleted`);
     return this.productRepository().saveBriefSpec(creatorId, productId, {
       briefSpec: normalizeBriefSpec(briefSpec),
+      ...(expectedUpdatedAt ? { expectedUpdatedAt } : {})
+    });
+  }
+
+  async saveProductPricing(creatorId: string, productId: string, pricing: unknown, expectedUpdatedAt?: string): Promise<CreatorProductRecord> {
+    const product = await this.getProduct(creatorId, productId);
+    if (product.status !== "active") throw new CreatorFactoryRepositoryError("invalid_status", `Distillation Product ${productId} is deleted`);
+    return this.productRepository().savePricing(creatorId, productId, {
+      pricing: normalizeProductPricing(pricing),
       ...(expectedUpdatedAt ? { expectedUpdatedAt } : {})
     });
   }

@@ -5,6 +5,7 @@ import { createImmediateTextReveal, textRevealBoundary } from "../domain/text-re
 import { MemoryDraftStore } from "../ports/index.js";
 import { ConversationSync } from "./conversation-sync.js";
 import { ChatError } from "./errors.js";
+import { OPEN_FREE_CHAT } from "../domain/free-chat.js";
 
 const newId = prefix => `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`;
 
@@ -53,8 +54,8 @@ export class ConversationController {
    * @param {(error: object) => string} [options.describeError] localized text sent back with tool errors
    * @param {(options: {onReveal: Function}) => object} [options.textReveal] text pacing policy factory
    */
-  constructor({ transport, attachments, tools, drafts = new MemoryDraftStore(), draftScope = "default", describeError = error => error?.message ?? String(error), textReveal = createImmediateTextReveal, reconnectAttempts = 3, pollMs = 2000 }) {
-    Object.assign(this, { transport, attachments, tools, drafts, draftScope, describeError, reconnectAttempts, pollMs });
+  constructor({ transport, attachments, tools, drafts = new MemoryDraftStore(), draftScope = "default", describeError = error => error?.message ?? String(error), textReveal = createImmediateTextReveal, reconnectAttempts = 3, pollMs = 2000, freeChat = OPEN_FREE_CHAT }) {
+    Object.assign(this, { transport, attachments, tools, drafts, draftScope, describeError, reconnectAttempts, pollMs, freeChat });
     const draft = drafts.read(draftScope);
     this.state = { ...INITIAL_CHAT_STATE, draft: draft.text, images: draft.files };
     this.listeners = new Set();
@@ -115,6 +116,7 @@ export class ConversationController {
   async loadLibrary() {
     const page = await this.transport.list(null);
     const conversations = page.conversations ?? [];
+    this.freeChat.sync(page.sent_message_count);
     this.setState({
       conversations,
       conversationCursor: page.next_cursor ?? null,
@@ -365,6 +367,7 @@ export class ConversationController {
       }
     },
     accepted() {
+      this.freeChat.record();
       const submission = this.pending;
       this.pending = null;
       if (submission) this.updateMessages(current => current.map(entry => entry.id === submission.optimisticMessageId ? { ...entry, optimistic: false, provisional: true } : entry));

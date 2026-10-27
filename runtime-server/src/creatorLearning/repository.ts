@@ -6,6 +6,7 @@ import type { FactoryRunState, FactoryStage, FactoryStartInput } from "./types.j
 import type { CreateCreatorProductInput, CreatorProductRecord, CreatorProductRepository } from "./products.js";
 import { validateProductText } from "./products.js";
 import { draftBriefSpecForProduct, normalizeBriefSpec, type BriefSpec } from "../brief.js";
+import { EMPTY_PRODUCT_PRICING, normalizeProductPricing, type ProductPricing } from "./pricing.js";
 
 /**
  * Durable control-plane state for Creator Factory work.
@@ -198,6 +199,7 @@ export class InMemoryCreatorFactoryRepository implements CreatorFactoryRepositor
         promise: validateProductText(input.promise, "product.promise"),
         brief: validateProductText(input.promise, "product.promise"),
         briefSpec: normalizeBriefSpec(input.briefSpec),
+        pricing: EMPTY_PRODUCT_PRICING,
         status: "active",
         ...(input.runId ? { runId: requireNonEmpty(input.runId, "product.runId") } : {}),
         createdAt: now,
@@ -249,6 +251,20 @@ export class InMemoryCreatorFactoryRepository implements CreatorFactoryRepositor
         throw new CreatorFactoryRepositoryError("version_conflict", `Distillation Product ${productId} changed; refresh before saving`);
       }
       product.briefSpec = normalizeBriefSpec(input.briefSpec);
+      product.updatedAt = new Date().toISOString();
+      return cloneJson(product);
+    });
+  }
+
+  async savePricing(creatorId: string, productId: string, input: { pricing: ProductPricing; expectedUpdatedAt?: string }): Promise<CreatorProductRecord> {
+    return this.write(async () => {
+      const product = this.products.get(productId);
+      if (!product || product.creatorId !== creatorId) throw new CreatorFactoryRepositoryError("run_not_found", `Product ${productId} was not found`);
+      if (product.status !== "active") throw new CreatorFactoryRepositoryError("invalid_status", `Distillation Product ${productId} is deleted`);
+      if (input.expectedUpdatedAt && product.updatedAt !== input.expectedUpdatedAt) {
+        throw new CreatorFactoryRepositoryError("version_conflict", `Distillation Product ${productId} changed; refresh before saving`);
+      }
+      product.pricing = normalizeProductPricing(input.pricing);
       product.updatedAt = new Date().toISOString();
       return cloneJson(product);
     });
@@ -640,6 +656,8 @@ ALTER TABLE hatch_creator_products
   ALTER COLUMN brief DROP NOT NULL;
 ALTER TABLE hatch_creator_products
   ADD COLUMN IF NOT EXISTS brief_spec JSONB;
+ALTER TABLE hatch_creator_products
+  ADD COLUMN IF NOT EXISTS pricing JSONB;
 CREATE INDEX IF NOT EXISTS hatch_creator_factory_claim_idx
   ON hatch_creator_factory_runs (next_attempt_at, created_at, id)
   WHERE status IN ('queued', 'running');
@@ -782,6 +800,24 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
         AND ($4::timestamptz IS NULL OR date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', $4::timestamptz))
       RETURNING *
     `, [productId, creatorId, JSON.stringify(briefSpec), input.expectedUpdatedAt ?? null]);
+    if (!result.rows[0]) {
+      const current = await this.getProduct(creatorId, productId);
+      if (!current) throw new CreatorFactoryRepositoryError("run_not_found", `Distillation Product ${productId} was not found`);
+      throw new CreatorFactoryRepositoryError("version_conflict", `Distillation Product ${productId} changed; refresh before saving`);
+    }
+    return productFromRow(result.rows[0]);
+  }
+
+  async savePricing(creatorId: string, productId: string, input: { pricing: ProductPricing; expectedUpdatedAt?: string }): Promise<CreatorProductRecord> {
+    await this.initialize();
+    const pricing = normalizeProductPricing(input.pricing);
+    const result = await this.pool.query<ProductRow>(`
+      UPDATE hatch_creator_products
+      SET pricing = $3::jsonb, updated_at = clock_timestamp()
+      WHERE id = $1 AND creator_id = $2 AND status = 'active'
+        AND ($4::timestamptz IS NULL OR date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', $4::timestamptz))
+      RETURNING *
+    `, [productId, creatorId, JSON.stringify(pricing), input.expectedUpdatedAt ?? null]);
     if (!result.rows[0]) {
       const current = await this.getProduct(creatorId, productId);
       if (!current) throw new CreatorFactoryRepositoryError("run_not_found", `Distillation Product ${productId} was not found`);
@@ -1238,6 +1274,7 @@ type ProductRow = QueryResultRow & {
   promise: string | null;
   brief: string | null;
   brief_spec: BriefSpec | string | null;
+  pricing?: ProductPricing | string | null;
   status: "active" | "deleted";
   run_id: string | null;
   latest_revision_id: string | null;
@@ -1263,6 +1300,9 @@ function productFromRow(row: ProductRow): CreatorProductRecord {
     // Keep legacy workers readable while Product.id remains the only identity.
     brief: promise,
     briefSpec,
+    pricing: row.pricing
+      ? normalizeProductPricing(typeof row.pricing === "string" ? JSON.parse(row.pricing) : row.pricing)
+      : EMPTY_PRODUCT_PRICING,
     status: row.status,
     ...(row.run_id ? { runId: row.run_id } : {}),
     ...(row.latest_revision_id ? { latestRevisionId: row.latest_revision_id } : {}),
