@@ -135,6 +135,7 @@ export class ConversationSessions {
       attachments: this.attachments,
       tools,
       describeError: this.describeError,
+      freeChat: agent.freeChat,
       textReveal: ({ onReveal }) => createTextRevealController({
         onReveal,
         shouldRevealImmediately: () => !visible() || document.visibilityState !== "visible"

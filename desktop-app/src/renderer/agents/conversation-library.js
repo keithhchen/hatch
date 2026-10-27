@@ -22,6 +22,7 @@ export class ConversationLibrary extends Observable {
       this.setState({ status: this.state.status === "ready" ? "ready" : "loading", error: null });
       try {
         const page = await this.transport.list(null);
+        this.agent.freeChat.sync(page.sent_message_count);
         this.setState({ status: "ready", conversations: (page.conversations ?? []).filter(isServerConversation), cursor: page.next_cursor ?? null });
       } catch (error) {
         this.setState({ status: this.state.conversations.length ? "ready" : "error", error });

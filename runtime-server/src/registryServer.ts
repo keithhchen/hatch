@@ -24,6 +24,7 @@ import {
 import { RegistryStoreTs } from "./registryStore.js";
 import { RegistryDeploymentConflictError } from "./registryStore.js";
 import { BriefValidationError, normalizeBriefSpec, type BriefSpec } from "./brief.js";
+import { ProductPricingError, type ProductPricing } from "./creatorLearning/pricing.js";
 import { handleCreatorFactoryHttp } from "./creatorLearning/httpApi.js";
 import { isUuidV4 } from "./identity.js";
 import {
@@ -914,6 +915,7 @@ async function route(
         promise: product.promise,
         status: product.status,
         ...(product.brief_spec ? { brief_spec: product.brief_spec } : {}),
+        ...(product.pricing ? { pricing: product.pricing } : {}),
         ...(product.release ? { release: product.release } : {}),
         ...(product.createdAt ? { created_at: product.createdAt } : {}),
         ...(product.updatedAt ? { updated_at: product.updatedAt } : {})
@@ -964,6 +966,27 @@ async function route(
       account.id,
       product.repositoryId,
       normalizeBriefSpec(body.brief_spec as BriefSpec),
+      typeof body.expected_updated_at === "string" ? body.expected_updated_at : undefined
+    );
+    sendJson(response, 200, publicCreatorProduct(updated));
+    return;
+  }
+
+  const productPricingMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/pricing$/);
+  if (productPricingMatch && request.method === "PUT") {
+    const account = await authenticate(request, response, context);
+    if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
+    const productId = decodeURIComponent(productPricingMatch[1]!);
+    const product = await productForCreator(context, account.id, productId);
+    if (!product?.repositoryId) {
+      sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } });
+      return;
+    }
+    const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
+    const updated = await context.factoryService.saveProductPricing(
+      account.id,
+      product.repositoryId,
+      body.pricing,
       typeof body.expected_updated_at === "string" ? body.expected_updated_at : undefined
     );
     sendJson(response, 200, publicCreatorProduct(updated));
@@ -1309,6 +1332,7 @@ type CreatorProductBoundary = {
   promise: string;
   status: string;
   brief_spec?: import("./brief.js").BriefSpec;
+  pricing?: ProductPricing;
   createdAt?: string;
   updatedAt?: string;
   /** The new Registry release projection, when this Product is live. */
@@ -1371,6 +1395,7 @@ export function mergeCreatorProductListings(
       updated_at: product.updatedAt
     };
     if (product.briefSpec) authoringProduct.brief_spec = product.briefSpec;
+    if (product.pricing) authoringProduct.pricing = product.pricing;
     const publishedProduct = products.get(productId);
     if (!publishedProduct) {
       products.set(productId, authoringProduct);
@@ -1404,6 +1429,7 @@ async function productForCreator(
       promise: publicProductPromise(product),
       status: release ? "published" : product.runId ? "working" : "draft",
       ...(product.briefSpec ? { brief_spec: product.briefSpec } : {}),
+      ...(product.pricing ? { pricing: product.pricing } : {}),
       createdAt: product.createdAt,
       updatedAt: product.updatedAt,
       ...(release ? { release } : {}),
@@ -1423,6 +1449,7 @@ function publicCreatorProduct(product: {
   createdAt?: string;
   updatedAt?: string;
   briefSpec?: import("./brief.js").BriefSpec;
+  pricing?: ProductPricing;
 }): Record<string, unknown> {
   return {
     product_id: publicProductId(product),
@@ -1430,6 +1457,7 @@ function publicCreatorProduct(product: {
     promise: publicProductPromise(product),
     status: product.status === "active" ? "draft" : product.status ?? "draft",
     ...(product.briefSpec ? { brief_spec: product.briefSpec } : {}),
+    ...(product.pricing ? { pricing: product.pricing } : {}),
     ...(product.createdAt ? { created_at: product.createdAt } : {}),
     ...(product.updatedAt ? { updated_at: product.updatedAt } : {})
   };
@@ -1579,6 +1607,7 @@ function errorStatus(error: unknown): number {
   if (error instanceof SyntaxError) return 400;
   if (error instanceof Error && error.message === "Request body is too large") return 413;
   if (error instanceof BriefValidationError) return 422;
+  if (error instanceof ProductPricingError) return 422;
   if (error instanceof ProductFilesError) {
     if (error.code === "idempotency_conflict") return 409;
     return error.code === "product_file_not_found" || error.code === "product_snapshot_not_found" || error.code === "product_mismatch" ? 404 : 422;

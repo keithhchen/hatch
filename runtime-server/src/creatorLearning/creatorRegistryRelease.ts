@@ -1,3 +1,4 @@
+import { EMPTY_PRODUCT_PRICING, normalizeProductPricing, type ProductPricing } from "./pricing.js";
 import type { Pool } from "pg";
 import { isUuidV4, requireUuidV4 } from "../identity.js";
 
@@ -22,6 +23,7 @@ export type PublicReleaseListing = CreatorRegistryRelease & {
   creator_name: string;
   /** false = unlisted: reachable by link, absent from public listings. */
   listed: boolean;
+  pricing: ProductPricing;
 };
 
 /** New Registry authority for Distill Factory releases. */
@@ -220,7 +222,8 @@ export class CreatorRegistryReleaseStore {
           product_name: release.product_id,
           product_promise: "",
           creator_name: release.creator_id,
-          listed: !this.unlisted.has(release.product_id)
+          listed: !this.unlisted.has(release.product_id),
+          pricing: EMPTY_PRODUCT_PRICING
         }));
     }
     const result = await this.pool.query(`
@@ -229,6 +232,7 @@ export class CreatorRegistryReleaseStore {
              r.brief_spec, r.status, r.published_at,
              COALESCE(p.name, r.product_id::text) AS product_name,
              COALESCE(p.promise, '') AS product_promise,
+             p.pricing AS product_pricing,
              a.display_name AS creator_name,
              COALESCE(v.listed, true) AS listed
       FROM hatch_creator_registry_live AS l
@@ -247,7 +251,8 @@ export class CreatorRegistryReleaseStore {
       product_name: String(row.product_name),
       product_promise: String(row.product_promise ?? ""),
       creator_name: String(row.creator_name),
-      listed: row.listed !== false
+      listed: row.listed !== false,
+      pricing: row.product_pricing ? normalizeProductPricing(row.product_pricing) : EMPTY_PRODUCT_PRICING
     }));
   }
 

@@ -1209,7 +1209,8 @@ async function handleConversationHttpRequest(
       });
       writeResponse(200, {
         conversations: page.conversations.map(publicConversation),
-        ...(page.nextCursor ? { next_cursor: page.nextCursor } : {})
+        ...(page.nextCursor ? { next_cursor: page.nextCursor } : {}),
+        sent_message_count: await repository.countSentMessages(repoBinding)
       });
       return;
     }
