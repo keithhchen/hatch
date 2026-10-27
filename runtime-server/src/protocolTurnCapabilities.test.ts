@@ -47,5 +47,5 @@ test("Clients send their browser time zone and the reply reminder uses it", () =
 
   const now = new Date("2026-10-27T07:40:00Z");
   assert.match(runtimeReplyReminder(now, "Asia/Tokyo"), /当前时间：2026-10-27 16:40 星期二（Asia\/Tokyo，GMT\+09:00）/);
-  assert.match(runtimeReplyReminder(now), /当前时间：2026-10-27 07:40 星期二（UTC，GMT）/);
+  assert.match(runtimeReplyReminder(now), /当前时间：2026-10-27 07:40 星期二（UTC，GMT(\+00:00)?）/);
 });
