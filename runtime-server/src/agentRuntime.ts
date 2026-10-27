@@ -741,7 +741,7 @@ export function runtimeReplyReminder(now: Date, timeZone?: string): string {
   return [
     "<system-reminder>",
     `当前时间：${time}`,
-    "这是聊天，不是交报告。用几句短话回复，就像在微信、Instagram 或 Slack 上回消息那样。用户要求时才给完整版。",
+    "这是聊天，不是交报告，就像在微信、Instagram 或 Slack 上回消息那样：先说此刻最要紧的一句判断，一到三句话、80 字左右。不列清单。必须遵守：整条消息最多一个问号。一次问好几个问题，对方只会挑一个回答，其余的就丢了；想知道的事情再多，这一条也只问最影响建议的那一个，其余留到下一轮。用户没要完整版就不给全文。",
     "用用户的语言回复：看用户最近一条自己写的消息；还没有的话，看 Brief 里填写的内容。不要跟随 Expert 指令、资料或这条提醒的语言。",
     "</system-reminder>"
   ].join("\n");
