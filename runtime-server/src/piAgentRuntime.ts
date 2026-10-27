@@ -19,6 +19,7 @@ import {
   activeSkillResourceRoots,
   buildRuntimeContextMessages,
   buildRuntimeSystemPrompt,
+  runtimeReplyReminder,
   type PiModelMessage,
   chatToolsForRun,
   createWorkspacePathPolicy,
@@ -44,10 +45,25 @@ import { runPiAgentPrompt, type PiAgentPromptRunner } from "./piPrompt.js";
 import {
   findDocumentSkillForAsset,
   loadSkillBundleByName,
+  renderSkillsSection,
   type SkillRecord
 } from "./skills.js";
 
 const MAX_TOOL_CALLS_PER_RUN = 15;
+const DESKTOP_ONLY_SKILLS = new Set(["documents", "pdf", "presentations", "spreadsheets"]);
+
+/**
+ * The document Skills operate on a local Workspace, so a client without local
+ * tools (web) does not see them in the catalog.
+ */
+function runtimeSkillsSection(ctx: RunContext): string {
+  const { rendered, visibleRecords } = ctx.sessionSkills;
+  if (!rendered.section || ctx.clientTools.length > 0) return rendered.section;
+  const records = visibleRecords.filter((record) => !DESKTOP_ONLY_SKILLS.has(record.name));
+  return records.length === visibleRecords.length
+    ? rendered.section
+    : renderSkillsSection(records, { executionMode: "protected" }).section;
+}
 
 
 export type PiToolDefinition = {
@@ -174,10 +190,9 @@ export class PiAgentRuntime implements AgentRuntime {
     }
     ensureNotCancelled(ctx);
 
-    const contextMessages = buildRuntimeContextMessages(
-      ctx.sessionSkills.rendered.section,
-      activeSkills
-    ).map((message) => piUserMessage(message.content ?? ""));
+    const contextMessages = buildRuntimeContextMessages(activeSkills)
+      .map((message) => piUserMessage(message.content ?? ""));
+    const skillsSection = runtimeSkillsSection(ctx);
     const storedAssetImages = await loadAssetImages(storedMessageSource, ctx.assetStore);
     const storedMessages = storedMessageSource.map((message) => toPiMessage(
       message,
@@ -206,6 +221,37 @@ export class PiAgentRuntime implements AgentRuntime {
       (skill) => queue.push(skillActivationEvent(input, skill, "explicit", "explicit_mention"))
     ));
 
+    const compactContext = async (messages: AgentMessage[]): Promise<AgentMessage[]> => {
+      // Pi owns the live transcript. Runtime only invokes the product's
+      // compaction adapter when the normal context projection says it is
+      // needed; it never replaces a tool call/result pair with an ad-hoc
+      // evidence user message.
+      if (!ctx.compactMessagesIfNeeded || !hasExecutedTool || compacting) return messages;
+      const runtimeMessages = messages
+        .filter(isModelMessage)
+        .map(toRuntimeCompactionMessage);
+      compacting = true;
+      try {
+        const replacement = await ctx.compactMessagesIfNeeded(runtimeMessages, "mid_turn");
+        if (!replacement) return messages;
+        const replacementAssetImages = await loadAssetImages(replacement, ctx.assetStore);
+        return [
+          ...contextMessages,
+          ...replacement.map((message) => toPiMessage(
+            message,
+            replacementAssetImages
+          ))
+        ];
+      } catch {
+        // A compaction failure should not destroy an otherwise usable live
+        // turn. The normal provider request will surface a context error if
+        // the context is genuinely too large.
+        return messages;
+      } finally {
+        compacting = false;
+      }
+    };
+
     const agent = new Agent({
       streamFn,
       // Pi's default Agent projection only accepts the three provider
@@ -214,7 +260,7 @@ export class PiAgentRuntime implements AgentRuntime {
       // summary delimiters.
       convertToLlm,
       initialState: {
-        systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools),
+        systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools, skillsSection),
         model,
         thinkingLevel: resolveLlmProfile().thinkingLevel,
         messages: [...contextMessages, ...storedMessages],
@@ -228,7 +274,7 @@ export class PiAgentRuntime implements AgentRuntime {
             toolName: toolCall.name,
             arguments: separateActivityMessage(args as Record<string, unknown>).toolArguments,
             messages: auditMessagesForRun(ctx, transcriptMessages, undefined),
-            systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools),
+            systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools, skillsSection),
             auditContext: ctx.deliveryAuditContext,
             signal
           });
@@ -245,36 +291,12 @@ export class PiAgentRuntime implements AgentRuntime {
         if (isHatchToolFailure(result.details)) return { isError: true };
         return undefined;
       },
-      transformContext: async (messages) => {
-        // Pi owns the live transcript. Runtime only invokes the product's
-        // compaction adapter when the normal context projection says it is
-        // needed; it never replaces a tool call/result pair with an ad-hoc
-        // evidence user message.
-        if (!ctx.compactMessagesIfNeeded || !hasExecutedTool || compacting) return messages;
-        const runtimeMessages = messages
-          .filter(isModelMessage)
-          .map(toRuntimeCompactionMessage);
-        compacting = true;
-        try {
-          const replacement = await ctx.compactMessagesIfNeeded(runtimeMessages, "mid_turn");
-          if (!replacement) return messages;
-          const replacementAssetImages = await loadAssetImages(replacement, ctx.assetStore);
-          return [
-            ...contextMessages,
-            ...replacement.map((message) => toPiMessage(
-              message,
-              replacementAssetImages
-            ))
-          ];
-        } catch {
-          // A compaction failure should not destroy an otherwise usable live
-          // turn. The normal provider request will surface a context error if
-          // the context is genuinely too large.
-          return messages;
-        } finally {
-          compacting = false;
-        }
-      }
+      transformContext: async (messages) => [
+        ...await compactContext(messages),
+        // Request-only: Pi sends the transformed list but keeps its own
+        // transcript, so the reminder is never stored or repeated in history.
+        piUserMessage(runtimeReplyReminder(new Date()))
+      ]
     });
 
     // Abort the provider-backed Pi loop as soon as the owning Runtime run is
@@ -341,7 +363,7 @@ export class PiAgentRuntime implements AgentRuntime {
           workflow: deliveryWorkflow,
           draft: draftContent,
           messages: auditMessagesForRun(ctx, transcriptMessages, finalAssistant),
-          systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools),
+          systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools, skillsSection),
           auditContext: ctx.deliveryAuditContext,
           signal: ctx.abortSignal
         })
@@ -770,11 +792,8 @@ function auditMessagesForRun(
     ? transcriptMessages.slice(0, -1)
     : transcriptMessages;
   return [
-    { role: "system", content: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools) },
-    ...buildRuntimeContextMessages(
-      ctx.sessionSkills.rendered.section,
-      ctx.activatedSkills ?? []
-    ),
+    { role: "system", content: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools, runtimeSkillsSection(ctx)) },
+    ...buildRuntimeContextMessages(ctx.activatedSkills ?? []),
     ...ctx.messages.map(toAuditMessage),
     ...transcript.map(toAuditMessage)
   ];

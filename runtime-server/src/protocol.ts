@@ -35,7 +35,7 @@ export const MAX_CONTEXT_ASSET_TOTAL_BYTES = 100 * 1024 * 1024;
 export const MAX_CONTEXT_ASSET_BASE64_CHARS = Math.ceil(MAX_CONTEXT_ASSET_BYTES / 3) * 4;
 export const MAX_ERROR_MESSAGE_CHARS = 16 * 1024;
 /** Canonical model-visible content for the internal task-start user turn. */
-export const TASK_START_MESSAGE_CONTENT = "Start the task described in the Brief.";
+export const TASK_START_MESSAGE_CONTENT = "<system-reminder>\n这条消息由系统发出，不是用户写的。\n开始 Brief 里描述的任务。\n</system-reminder>";
 const ProtocolIdSchema = z.string().min(1).max(MAX_PROTOCOL_ID_CHARS);
 const AuthorityIdSchema = z.string().regex(UUID_V4_RE);
 export const ClientToolNameSchema = z.enum([
