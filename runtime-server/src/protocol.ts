@@ -37,6 +37,15 @@ export const MAX_ERROR_MESSAGE_CHARS = 16 * 1024;
 /** Canonical model-visible content for the internal task-start user turn. */
 export const TASK_START_MESSAGE_CONTENT = "<system-reminder>\n这条消息由系统发出，不是用户写的。\n开始 Brief 里描述的任务。\n</system-reminder>";
 const ProtocolIdSchema = z.string().min(1).max(MAX_PROTOCOL_ID_CHARS);
+/** The client's IANA time zone (browser `Intl` resolved zone), e.g. "Asia/Tokyo". */
+const TimeZoneSchema = z.string().min(1).max(64).refine((zone) => {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: zone });
+    return true;
+  } catch {
+    return false;
+  }
+}, "time_zone must be an IANA time zone");
 const AuthorityIdSchema = z.string().regex(UUID_V4_RE);
 export const ClientToolNameSchema = z.enum([
   "file_list",
@@ -73,7 +82,8 @@ export const ClientHelloSchema = z.object({
   user_id: AuthorityIdSchema.optional(),
   product_id: AuthorityIdSchema.optional(),
   client_version: z.string().max(MAX_PROTOCOL_ID_CHARS).optional(),
-  local_tools: z.array(ClientToolNameSchema).max(ClientToolNameSchema.options.length)
+  local_tools: z.array(ClientToolNameSchema).max(ClientToolNameSchema.options.length),
+  time_zone: TimeZoneSchema.optional()
 }).strict().superRefine((message, ctx) => {
   if (!message.auth_token && !message.license_token) {
     ctx.addIssue({ code: "custom", path: ["auth_token"], message: "auth_token is required" });
@@ -256,6 +266,8 @@ export const ClientMessageSchema = z.object({
   client_message_id: ProtocolIdSchema.optional(),
   conversation_id: ProtocolIdSchema,
   local_tools: z.array(ClientToolNameSchema).max(ClientToolNameSchema.options.length).optional(),
+  /** Overrides the session's client.hello time_zone for this turn. */
+  time_zone: TimeZoneSchema.optional(),
   message: UserMessageSchema,
   /** Requests the first Agent run; Runtime materializes its internal marked user turn. */
   task_start: z.literal(true).optional()

@@ -2,6 +2,15 @@ import { ConversationTransport, RuntimeConnection } from "@hatch/chat";
 import { PROTOCOL_VERSION, RUNTIME_SOCKET_URL } from "../config.js";
 import * as rest from "../conversation-client.js";
 
+/** The browser's IANA time zone, so the Agent knows the user's local time. */
+function browserTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Desktop ConversationTransport: the bearer-token Runtime REST client plus
  * a direct Runtime WebSocket. `agent` supplies the access binding — an owner
@@ -81,14 +90,15 @@ export class DesktopRuntimeConnection extends RuntimeConnection {
       conversation_id: this.conversationId,
       ...this.transport.scope,
       client_version: this.transport.clientVersion,
-      local_tools: localTools
+      local_tools: localTools,
+      time_zone: browserTimeZone()
     });
   }
 
   send({ runId, clientMessageId, content = "", attachments = [], taskStart = false, localTools }) {
     this.frame({
       type: "client.message", run_id: runId, client_message_id: clientMessageId,
-      conversation_id: this.conversationId, local_tools: localTools,
+      conversation_id: this.conversationId, local_tools: localTools, time_zone: browserTimeZone(),
       ...(taskStart ? { task_start: true } : {}),
       message: { role: "user", content, ...(attachments.length ? { attachments } : {}) }
     });

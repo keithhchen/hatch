@@ -39,9 +39,9 @@ describe("Desktop conversation transport", () => {
     connection.hello(["file_read"]);
     connection.send({ runId: "run_1", clientMessageId: "m1", content: "hi", localTools: ["file_read"] });
     const [hello, message] = connection.socket.sent;
-    expect(hello).toEqual({ type: "client.hello", protocol_version: "0.8", auth_token: "tok", conversation_id: "conv_1", entitlement_id: "e1", client_version: "1.2.3", local_tools: ["file_read"] });
+    expect(hello).toEqual({ type: "client.hello", protocol_version: "0.8", auth_token: "tok", conversation_id: "conv_1", entitlement_id: "e1", client_version: "1.2.3", local_tools: ["file_read"], time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone });
     expect(hello.product_id).toBeUndefined();
-    expect(message).toMatchObject({ type: "client.message", run_id: "run_1", conversation_id: "conv_1", message: { role: "user", content: "hi" } });
+    expect(message).toMatchObject({ type: "client.message", run_id: "run_1", conversation_id: "conv_1", time_zone: hello.time_zone, message: { role: "user", content: "hi" } });
   });
 
   it("wraps tool detail and serves bearer-protected assets as object URLs", async () => {

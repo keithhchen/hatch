@@ -295,7 +295,7 @@ export class PiAgentRuntime implements AgentRuntime {
         ...await compactContext(messages),
         // Request-only: Pi sends the transformed list but keeps its own
         // transcript, so the reminder is never stored or repeated in history.
-        piUserMessage(runtimeReplyReminder(new Date()))
+        piUserMessage(runtimeReplyReminder(new Date(), input.time_zone))
       ]
     });
 

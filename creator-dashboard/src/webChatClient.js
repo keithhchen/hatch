@@ -4,6 +4,15 @@ const API = "/v1/web-chat/conversations";
 const MAX_IMAGE_BYTES = 100 * 1024 * 1024;
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
 
+/** The browser's IANA time zone, so the Agent knows the user's local time. */
+function browserTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export class WebChatClientError extends Error {
   constructor(code) {
     super(code);
@@ -89,13 +98,13 @@ export class BrowserRuntimeConnection extends RuntimeConnection {
   }
 
   hello(localTools) {
-    this.frame({ type: "client.hello", protocol_version: "0.8", conversation_id: this.conversationId, ...this.scope, client_version: "hatch-web", local_tools: localTools });
+    this.frame({ type: "client.hello", protocol_version: "0.8", conversation_id: this.conversationId, ...this.scope, client_version: "hatch-web", local_tools: localTools, time_zone: browserTimeZone() });
   }
 
   send({ runId, clientMessageId, content = "", attachments = [], taskStart = false, localTools }) {
     this.frame({
       type: "client.message", run_id: runId, client_message_id: clientMessageId,
-      conversation_id: this.conversationId, local_tools: localTools,
+      conversation_id: this.conversationId, local_tools: localTools, time_zone: browserTimeZone(),
       ...(taskStart ? { task_start: true } : {}),
       message: { role: "user", content, ...(attachments.length ? { attachments } : {}) }
     });

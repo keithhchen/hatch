@@ -720,16 +720,24 @@ const REPLY_STYLE_PROMPT = [
   "回复：多半是开头没让人一眼看到你能干什么，把最相关的一段经历挪到最上面。你投的岗位方向一致吗？"
 ].join("\n");
 
-const WEEKDAYS_ZH = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
+/** Wall-clock time in the client's time zone; UTC when the client did not send one. */
+export function clientLocalTime(now: Date, timeZone = "UTC"): string {
+  const part = (options: Intl.DateTimeFormatOptions, type: Intl.DateTimeFormatPartTypes, locale = "en-CA") =>
+    new Intl.DateTimeFormat(locale, { timeZone, ...options }).formatToParts(now).find((p) => p.type === type)?.value ?? "";
+  const date = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+  const clock = new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(now);
+  const weekday = part({ weekday: "long" }, "weekday", "zh-CN");
+  const offset = part({ timeZoneName: "longOffset" }, "timeZoneName");
+  return `${date} ${clock} ${weekday}（${timeZone}，${offset}）`;
+}
 
 /**
  * Appended as the last model-visible message on every model call and never
  * stored. Tested on production conversations: only a single reminder at the
  * very end keeps Kimi replies short; copies stored in history get ignored.
  */
-export function runtimeReplyReminder(now: Date): string {
-  const beijing = new Date(now.getTime() + 8 * 60 * 60 * 1000);
-  const time = `${beijing.toISOString().slice(0, 16).replace("T", " ")} ${WEEKDAYS_ZH[beijing.getUTCDay()]}（北京时间 UTC+08:00）`;
+export function runtimeReplyReminder(now: Date, timeZone?: string): string {
+  const time = clientLocalTime(now, timeZone);
   return [
     "<system-reminder>",
     `当前时间：${time}`,
