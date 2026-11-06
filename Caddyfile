@@ -91,8 +91,10 @@
     handle @context_oauth_me {
         reverse_proxy dashboard:8500
     }
+    # API keys are Registry-owned; a CLI bearer reaches Registry directly, the
+    # browser (cookie, no bearer) falls through to the Dashboard proxy.
     @desktop_registry_bearer {
-        path /v1/auth/me /v1/auth/logout
+        path /v1/auth/me /v1/auth/logout /v1/auth/api-keys /v1/auth/api-keys/*
         header Authorization *
     }
     handle @desktop_registry_bearer {

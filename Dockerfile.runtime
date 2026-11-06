@@ -58,6 +58,8 @@ COPY runtime-server/scripts/transfer-creator-product.mjs ./scripts/transfer-crea
 COPY desktop-app/package.json /app/desktop-app/package.json
 COPY desktop-app/src/renderer/conversation-client.js /app/desktop-app/src/renderer/
 COPY runtime-server/skills ./skills
+# Hosted ingest uploads this skill to the hosted agent; ingestAgent.ts resolves it next to dist.
+COPY runtime-server/hosted-skills ./hosted-skills
 COPY scripts/create-agent-zip.mjs ./scripts/create-agent-zip.mjs
 
 # Runtime and Registry use the append-only commerce module without making it a

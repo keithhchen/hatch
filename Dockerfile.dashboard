@@ -19,6 +19,13 @@ RUN npm run build \
     rm -f dist/assets/web/*.mp4 public/assets/web/*.mp4; \
   fi
 
+# The CLI ships as a tarball served at /downloads/hatch-cli.tgz (no npm registry).
+COPY packages/hatch-cli /workspace/packages/hatch-cli
+RUN mkdir -p dist/downloads \
+  && cd /workspace/packages/hatch-cli \
+  && npm pack --silent --pack-destination /workspace/creator-dashboard/dist/downloads \
+  && mv /workspace/creator-dashboard/dist/downloads/*.tgz /workspace/creator-dashboard/dist/downloads/hatch-cli.tgz
+
 FROM node:22-slim AS production
 
 ENV NODE_ENV=production

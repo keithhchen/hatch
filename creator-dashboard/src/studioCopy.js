@@ -2,6 +2,7 @@
 // Merged into both the Creator and the Factory translators so every Studio
 // surface uses one professional, neutral voice in zh / en / ja.
 import { STUDIO_SHELL_COPY } from "./studioShellCopy.js";
+import { API_KEYS_COPY } from "./apiKeysCopy.js";
 
 export const STUDIO_COPY = {
   en: {
@@ -325,4 +326,4 @@ export const STUDIO_COPY = {
   }
 };
 
-for (const locale of Object.keys(STUDIO_COPY)) Object.assign(STUDIO_COPY[locale], STUDIO_SHELL_COPY[locale]);
+for (const locale of Object.keys(STUDIO_COPY)) Object.assign(STUDIO_COPY[locale], STUDIO_SHELL_COPY[locale], API_KEYS_COPY[locale]);

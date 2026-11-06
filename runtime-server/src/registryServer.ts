@@ -2,6 +2,9 @@ import { FactoryAgentsService } from "./factoryAgents/service.js";
 import { PostgresAgentDefinitionRepository } from "./factoryAgents/definitions.js";
 import { PostgresWorkbenchBackend } from "./factoryAgents/store.js";
 import { AssistantService } from "./assistant/assistant.js";
+import { createIngestService } from "./ingest/boot.js";
+import { IngestError, IngestService } from "./ingest/service.js";
+import { publicJob } from "./ingest/job.js";
 import { AccountReach, CHANNEL_KINDS, ChannelHub, PostgresChannelLinks, type ChannelKind, type ChannelLinks } from "./assistant/channels.js";
 import { safeError } from "./factoryAgents/runtime.js";
 import { CredentialSeal } from "./assistant/channelCredentials.js";
@@ -30,7 +33,8 @@ import {
   validateSigninCredentials,
   validateSignupCredentials,
   verifyAuthToken,
-  type Account
+  type Account,
+  type AuthenticatedSession
 } from "./registryAuth.js";
 import { RegistryStoreTs } from "./registryStore.js";
 import { RegistryDeploymentConflictError } from "./registryStore.js";
@@ -78,6 +82,7 @@ export type RegistryServer = { server: http.Server; close: () => Promise<void> }
 export const CREATOR_FACTORY_JSON_BODY_MAX_BYTES = 32 * 1024 * 1024;
 type RegistryContext = {
   assistant?: AssistantService;
+  ingest?: IngestService;
   channels?: ChannelHub;
   credentialSeal?: CredentialSeal;
   publicOrigin?: string;
@@ -236,7 +241,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       address: environment.HATCH_IMESSAGE_ADDRESS?.trim() || undefined,
     });
     // Lark has no shared bot: a custom app works in one enterprise, so each Expert brings theirs.
-    const sealKey = environment.HATCH_CHANNEL_CREDENTIALS_KEY?.trim();
+    const sealKey = environment.HATCH_CREDENTIALS_KEY?.trim();
     const seal = sealKey ? new CredentialSeal(sealKey) : undefined;
     const larkApps = new Map<string, { sealed: string; adapter: LarkChannel }>();
     const channels = new ChannelHub([telegram, line, imessage], async (kind, accountId) => {
@@ -249,15 +254,25 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       larkApps.set(accountId, { sealed, adapter });
       return adapter;
     });
+    const catalog = registryAgentCatalog(registryContext);
     const assistant = new AssistantService({
       tasks, reach, channels, links,
       products: factoryAgents,
-      catalog: registryAgentCatalog(registryContext),
+      catalog,
       backend: accountId => new PostgresWorkbenchBackend(registryPool, `assistant:${accountId}`),
       exclusive: postgresExclusive(registryPool),
       env: environment,
     });
-    Object.assign(registryContext, { assistant, channels, links, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin });
+    const productsPrefix = environment.HATCH_CREATOR_PRODUCT_FILES_PREFIX?.trim() || "creator-products";
+    const ingest = await createIngestService({
+      environment, pool: registryPool, seal, objects: productObjectStore,
+      manual: async (accountId, productId) => {
+        const { backend } = (await factoryAgents.workspace({ creatorId: accountId, productId }, await catalog.token(accountId))).store;
+        return { list: async () => (await backend.listManual()).map(file => file.path), read: name => backend.readManual(name), write: (name, bytes) => backend.writeManual(name, bytes) };
+      },
+      productPrefix: (accountId, productId) => `${productsPrefix}/${accountId}/${productId}`,
+    });
+    Object.assign(registryContext, { assistant, ingest, channels, links, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin });
     // A platform that pushes over its own connection runs here, in one process at a time. A dropped connection comes back.
     for (const adapter of channels.listeners()) void (async () => {
       while (!channelListeners.signal.aborted) {
@@ -693,9 +708,36 @@ async function route(
   // (the Dashboard hands one to Desktop after browser sign-in). Revoking
   // either session never ends the other. Only a live session can do this.
   if (url.pathname === "/v1/auth/sessions" && request.method === "POST") {
+    await requireInteractive(context, async (current) => {
+      const requested = (await optionalJson(request)).client_type ?? "desktop";
+      if (requested !== "desktop" && requested !== "cli") { sendAuthJson(response, 400, { detail: "client_type must be desktop or cli." }); return; }
+      sendAuthJson(response, 201, sessionResponse(current.account, await context.accounts.createSession(current.account, Date.now(), { clientType: requested })));
+    })(request, response);
+    return;
+  }
+  // API keys are minted and listed only from an interactive session; a key can revoke itself or others but never mint.
+  if (url.pathname === "/v1/auth/api-keys" && request.method === "POST") {
+    await requireInteractive(context, async (current) => {
+      const name = String((await optionalJson(request)).name ?? "").trim();
+      if (!name || name.length > 80) { sendAuthJson(response, 400, { detail: "name is required (1-80 characters)." }); return; }
+      const issued = await context.accounts.createSession(current.account, Date.now(), { clientType: "api_key", name });
+      sendAuthJson(response, 201, { id: issued.session.id, name, token: issued.token, created_at: issued.session.created_at, expires_at: issued.session.absolute_expires_at });
+    })(request, response);
+    return;
+  }
+  if (url.pathname === "/v1/auth/api-keys" && request.method === "GET") {
+    await requireInteractive(context, async (current) => {
+      sendAuthJson(response, 200, { api_keys: await context.accounts.listApiKeys(current.account.id) });
+    })(request, response);
+    return;
+  }
+  const apiKeyMatch = url.pathname.match(/^\/v1\/auth\/api-keys\/([^/]+)$/);
+  if (apiKeyMatch && request.method === "DELETE") {
     const current = await context.accounts.resolveSession(bearer(request));
     if (!current) { sendAuthJson(response, 401, { detail: "A valid account session is required." }); return; }
-    sendAuthJson(response, 201, sessionResponse(current.account, await context.accounts.createSession(current.account)));
+    if (!await context.accounts.revokeApiKey(current.account.id, decodeURIComponent(apiKeyMatch[1]!))) { sendAuthJson(response, 404, { detail: "API key not found." }); return; }
+    response.writeHead(204, { ...corsHeaders(), "cache-control": "no-store" });
+    response.end();
     return;
   }
   if (url.pathname === "/v1/auth/logout" && request.method === "POST") {
@@ -1076,6 +1118,38 @@ async function route(
       typeof body.expected_updated_at === "string" ? body.expected_updated_at : undefined
     );
     sendJson(response, 200, publicCreatorProduct(updated));
+    return;
+  }
+
+  const ingestMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/ingest(?:\/([^/]+))?$/);
+  if (ingestMatch) {
+    const account = await authenticate(request, response, context);
+    if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
+    const productId = decodeURIComponent(ingestMatch[1]!);
+    const jobId = ingestMatch[2] ? decodeURIComponent(ingestMatch[2]) : undefined;
+    if (!await productForCreator(context, account.id, productId)) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
+    if (!context.ingest) { sendJson(response, 503, { error: { code: "ingest_unavailable", message: "Ingest requires the Registry database." } }); return; }
+    if (request.method === "POST" && !jobId) {
+      const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
+      await context.ingest.submit(account.id, productId, body.items, body.context).then(
+        job => sendJson(response, 202, { job: publicJob(job) }),
+        error => {
+          if (!(error instanceof IngestError)) throw error;
+          sendJson(response, error.status, { error: { code: error.code, message: error.message }, detail: error.message });
+        });
+      return;
+    }
+    if (request.method === "GET" && !jobId) {
+      sendJson(response, 200, { jobs: (await context.ingest.recent(account.id, productId)).map(publicJob) });
+      return;
+    }
+    if (request.method === "GET" && jobId) {
+      const job = await context.ingest.get(account.id, productId, jobId);
+      if (!job) { sendJson(response, 404, { error: { code: "ingest_job_not_found", message: "Ingest job was not found." } }); return; }
+      sendJson(response, 200, { job: publicJob(job) });
+      return;
+    }
+    sendJson(response, 405, { error: { code: "method_not_allowed", message: "Method not allowed." } });
     return;
   }
 
@@ -1737,9 +1811,28 @@ async function readRawBody(request: http.IncomingMessage, maxBytes: number): Pro
 }
 
 async function readJson(request: http.IncomingMessage, maxBytes = 1024 * 1024): Promise<Record<string, unknown>> {
-  const payload = JSON.parse(Buffer.from(await readBytes(request, maxBytes)).toString("utf8")) as unknown;
+  return readJsonBytes(await readBytes(request, maxBytes));
+}
+
+function readJsonBytes(bytes: Uint8Array): Record<string, unknown> {
+  const payload = JSON.parse(Buffer.from(bytes).toString("utf8")) as unknown;
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("JSON body must be an object");
   return payload as Record<string, unknown>;
+}
+
+/** Wraps a handler so it runs only for a live interactive (non API-key) session. */
+function requireInteractive(context: RegistryContext, handler: (session: AuthenticatedSession) => Promise<void>) {
+  return async (request: http.IncomingMessage, response: http.ServerResponse): Promise<void> => {
+    const current = await context.accounts.resolveSession(bearer(request));
+    if (!current) { sendAuthJson(response, 401, { detail: "A valid account session is required." }); return; }
+    if (current.session.client_type === "api_key") { sendAuthJson(response, 403, { detail: "An API key cannot manage API keys or mint sessions." }); return; }
+    await handler(current);
+  };
+}
+
+async function optionalJson(request: http.IncomingMessage): Promise<Record<string, unknown>> {
+  const bytes = await readBytes(request, 64 * 1024);
+  return bytes.length ? readJsonBytes(bytes) : {};
 }
 
 function sendAuthBusy(response: http.ServerResponse): void {

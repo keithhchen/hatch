@@ -4,11 +4,14 @@ import { Pool } from "pg";
 export type Account = { id: string; email: string; display_name: string; avatar_url: string | null; password_salt: string; password_hash: string; created_at: string };
 export type AccountPublic = Pick<Account, "id" | "email" | "display_name" | "avatar_url">;
 export type CreatorAccountPublic = Pick<Account, "id" | "display_name">;
+export type ClientType = "desktop" | "cli" | "api_key";
+export const CLIENT_TYPES: readonly ClientType[] = ["desktop", "cli", "api_key"];
 export type AccountSession = {
   id: string;
   account_id: string;
   token_hash: string;
-  client_type: "desktop";
+  client_type: ClientType;
+  name: string | null;
   created_at: string;
   last_seen_at: string;
   idle_expires_at: string;
@@ -17,8 +20,17 @@ export type AccountSession = {
 };
 export type AuthenticatedSession = { account: Account; session: AccountSession };
 
-const SESSION_IDLE_MS = 30 * 24 * 60 * 60 * 1000;
-const SESSION_ABSOLUTE_MS = 90 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const SESSION_IDLE_MS = 30 * DAY_MS;
+/** Lifetime per client type. An API key has one absolute expiry and never slides. */
+const SESSION_POLICIES: Record<ClientType, { absoluteMs: number; sliding: boolean }> = {
+  desktop: { absoluteMs: 90 * DAY_MS, sliding: true },
+  cli: { absoluteMs: 90 * DAY_MS, sliding: true },
+  api_key: { absoluteMs: 365 * DAY_MS, sliding: false }
+};
+export type SessionOptions = { clientType?: ClientType; name?: string };
+/** `last_seen_at` is null until the key is first used: a session row starts with last_seen_at = created_at. */
+export type ApiKeySummary = Pick<AccountSession, "id" | "name" | "created_at"> & { last_seen_at: string | null; expires_at: string };
 const MAX_EMAIL_LENGTH = 254;
 const MAX_DISPLAY_NAME_LENGTH = 128;
 const MAX_PASSWORD_BYTES = 1024;
@@ -127,13 +139,17 @@ export class AccountStoreTs {
       id UUID PRIMARY KEY,
       account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
       token_hash TEXT NOT NULL UNIQUE,
-      client_type TEXT NOT NULL DEFAULT 'desktop' CHECK (client_type = 'desktop'),
+      client_type TEXT NOT NULL DEFAULT 'desktop',
       created_at TIMESTAMPTZ NOT NULL,
       last_seen_at TIMESTAMPTZ NOT NULL,
       idle_expires_at TIMESTAMPTZ NOT NULL,
       absolute_expires_at TIMESTAMPTZ NOT NULL,
       revoked_at TIMESTAMPTZ
     );
+    ALTER TABLE account_sessions ADD COLUMN IF NOT EXISTS name TEXT;
+    ALTER TABLE account_sessions DROP CONSTRAINT IF EXISTS account_sessions_client_type_check;
+    ALTER TABLE account_sessions ADD CONSTRAINT account_sessions_client_type_check
+      CHECK (client_type IN ('desktop','cli','api_key'));
     CREATE INDEX IF NOT EXISTS account_sessions_account_active_idx
       ON account_sessions(account_id)
       WHERE revoked_at IS NULL`);
@@ -211,23 +227,27 @@ export class AccountStoreTs {
     return account;
   }
 
-  async createSession(account: Account, now = Date.now()): Promise<{ token: string; session: AccountSession }> {
+  async createSession(account: Account, now = Date.now(), options: SessionOptions = {}): Promise<{ token: string; session: AccountSession }> {
     const token = randomBytes(32).toString("base64url");
     const createdAt = new Date(now).toISOString();
+    const clientType = options.clientType ?? "desktop";
+    const policy = SESSION_POLICIES[clientType];
+    const absoluteExpiry = new Date(now + policy.absoluteMs).toISOString();
     const session: AccountSession = {
       id: randomUUID(),
       account_id: account.id,
       token_hash: hashSessionToken(token),
-      client_type: "desktop",
+      client_type: clientType,
+      name: options.name ?? null,
       created_at: createdAt,
       last_seen_at: createdAt,
-      idle_expires_at: new Date(now + SESSION_IDLE_MS).toISOString(),
-      absolute_expires_at: new Date(now + SESSION_ABSOLUTE_MS).toISOString()
+      idle_expires_at: policy.sliding ? new Date(now + SESSION_IDLE_MS).toISOString() : absoluteExpiry,
+      absolute_expires_at: absoluteExpiry
     };
     if (this.pool) {
       await this.pool.query(`INSERT INTO account_sessions
-        (id, account_id, token_hash, client_type, created_at, last_seen_at, idle_expires_at, absolute_expires_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [
+        (id, account_id, token_hash, client_type, name, created_at, last_seen_at, idle_expires_at, absolute_expires_at)
+        VALUES ($1,$2,$3,$4,$9,$5,$6,$7,$8)`, [
         session.id,
         session.account_id,
         session.token_hash,
@@ -235,7 +255,8 @@ export class AccountStoreTs {
         session.created_at,
         session.last_seen_at,
         session.idle_expires_at,
-        session.absolute_expires_at
+        session.absolute_expires_at,
+        session.name
       ]);
     } else {
       this.sessions.set(session.token_hash, session);
@@ -266,7 +287,8 @@ export class AccountStoreTs {
     // until an earlier refresh holding the same row lock has completed.
     const result = await this.pool.query(`UPDATE account_sessions AS s
       SET last_seen_at=$2::timestamptz,
-          idle_expires_at=LEAST($3::timestamptz, s.absolute_expires_at)
+          idle_expires_at=CASE WHEN s.client_type='api_key' THEN s.idle_expires_at
+                               ELSE LEAST($3::timestamptz, s.absolute_expires_at) END
       FROM accounts AS a
       WHERE s.token_hash=$1
         AND a.id=s.account_id
@@ -274,7 +296,7 @@ export class AccountStoreTs {
         AND s.idle_expires_at > $2::timestamptz
         AND s.absolute_expires_at > $2::timestamptz
       RETURNING
-        s.id, s.account_id, s.token_hash, s.client_type, s.created_at, s.last_seen_at,
+        s.id, s.account_id, s.token_hash, s.client_type, s.name, s.created_at, s.last_seen_at,
         s.idle_expires_at, s.absolute_expires_at, s.revoked_at,
         a.id AS account_id_value, a.email, a.display_name, a.avatar_url,
         a.password_salt, a.password_hash, a.created_at AS account_created_at`, [
@@ -305,6 +327,35 @@ export class AccountStoreTs {
       return;
     }
     this.sessions.delete(tokenHash);
+  }
+
+  /** The caller's live API keys, newest first. Never exposes the token or its hash. */
+  async listApiKeys(accountId: string, now = Date.now()): Promise<ApiKeySummary[]> {
+    const rows = this.pool
+      ? (await this.pool.query(`SELECT id, name, created_at, last_seen_at, absolute_expires_at FROM account_sessions
+          WHERE account_id=$1 AND client_type='api_key' AND revoked_at IS NULL AND absolute_expires_at > $2
+          ORDER BY created_at DESC`, [accountId, new Date(now).toISOString()])).rows
+      : [...this.sessions.values()].filter((s) => s.account_id === accountId && s.client_type === "api_key" && sessionIsActive(s, now));
+    return rows.map((row) => ({
+      id: String(row.id),
+      name: row.name == null ? null : String(row.name),
+      created_at: new Date(row.created_at).toISOString(),
+      last_seen_at: new Date(row.last_seen_at).getTime() > new Date(row.created_at).getTime() ? new Date(row.last_seen_at).toISOString() : null,
+      expires_at: new Date(row.absolute_expires_at).toISOString()
+    })).sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }
+
+  /** Revokes one of the account's own API keys; false when it is not theirs, not a key, or already revoked. */
+  async revokeApiKey(accountId: string, id: string): Promise<boolean> {
+    if (this.pool) {
+      const result = await this.pool.query(
+        "UPDATE account_sessions SET revoked_at=$3 WHERE id=$2 AND account_id=$1 AND client_type='api_key' AND revoked_at IS NULL",
+        [accountId, id, new Date().toISOString()]
+      );
+      return result.rowCount === 1;
+    }
+    const entry = [...this.sessions.entries()].find(([, s]) => s.id === id && s.account_id === accountId && s.client_type === "api_key");
+    return entry ? this.sessions.delete(entry[0]) : false;
   }
 
   async setAvatarUrl(id: string, avatarUrl: string | null): Promise<Account> {
@@ -402,6 +453,7 @@ function sessionIsActive(session: AccountSession, now: number): boolean {
 }
 
 function refreshedSession(session: AccountSession, now: number): AccountSession {
+  if (!SESSION_POLICIES[session.client_type].sliding) return { ...session, last_seen_at: new Date(now).toISOString() };
   const absoluteExpiry = Date.parse(session.absolute_expires_at);
   const idleExpiry = Math.min(now + SESSION_IDLE_MS, absoluteExpiry);
   return {
@@ -460,7 +512,8 @@ function rowToSession(row: Record<string, any>): AccountSession {
     id: String(row.id),
     account_id: String(row.account_id),
     token_hash: String(row.token_hash),
-    client_type: "desktop",
+    client_type: row.client_type as ClientType,
+    name: row.name == null ? null : String(row.name),
     created_at: new Date(row.created_at).toISOString(),
     last_seen_at: new Date(row.last_seen_at).toISOString(),
     idle_expires_at: new Date(row.idle_expires_at).toISOString(),

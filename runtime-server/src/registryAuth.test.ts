@@ -127,3 +127,44 @@ test("Postgres session resolution atomically refreshes only an active row", asyn
   assert.match(queries[0]!.sql, /s\.revoked_at IS NULL/);
   assert.match(queries[0]!.sql, /RETURNING/);
 });
+
+test("API keys live 365 days with no idle slide, list without secrets, and revoke only for their owner", async () => {
+  const accounts = new AccountStoreTs();
+  const account = await accounts.create("keys@example.com", "password123", "Key Owner");
+  const other = await accounts.create("other@example.com", "password123", "Other");
+  const t0 = Date.parse(account.created_at);
+  const day = 24 * 60 * 60 * 1000;
+  const key = await accounts.createSession(account, t0, { clientType: "api_key", name: "ci" });
+  assert.equal((await accounts.listApiKeys(account.id, t0))[0]?.last_seen_at, null, "a key nobody has used yet was never seen");
+  assert.equal(key.session.client_type, "api_key");
+  assert.equal(key.session.idle_expires_at, key.session.absolute_expires_at);
+  assert.equal(Date.parse(key.session.absolute_expires_at) - t0, 365 * day);
+
+  const seen = await accounts.resolveSession(key.token, t0 + 100 * day);
+  assert.equal(seen?.session.idle_expires_at, key.session.absolute_expires_at, "use never shortens or extends the key's expiry");
+  assert.ok(await accounts.resolveSession(key.token, t0 + 364 * day), "no idle expiry");
+
+  const listed = await accounts.listApiKeys(account.id, t0 + 200 * day);
+  assert.deepEqual(listed.map((k) => [k.id, k.name, k.expires_at]), [[key.session.id, "ci", key.session.absolute_expires_at]]);
+  assert.equal(JSON.stringify(listed).includes(key.token), false);
+  assert.deepEqual(await accounts.listApiKeys(other.id, t0), []);
+
+  assert.equal(await accounts.revokeApiKey(other.id, key.session.id), false);
+  assert.equal(await accounts.revokeApiKey(account.id, key.session.id), true);
+  assert.equal(await accounts.resolveSession(key.token, t0 + 1), undefined);
+  assert.deepEqual(await accounts.listApiKeys(account.id, t0), []);
+
+  const expiring = await accounts.createSession(account, t0, { clientType: "api_key", name: "old" });
+  assert.equal(await accounts.resolveSession(expiring.token, t0 + 365 * day + 1), undefined);
+});
+
+test("Postgres keeps an API key's expiry fixed and migrates the client_type constraint in place", async () => {
+  const queries: string[] = [];
+  const pool = { query: async (sql: string) => { queries.push(sql); return { rows: [], rowCount: 0 }; } };
+  const accounts = new AccountStoreTs(pool as never);
+  await accounts.ensureSchema();
+  await accounts.resolveSession("token", Date.now());
+  assert.match(queries[0]!, /DROP CONSTRAINT IF EXISTS account_sessions_client_type_check[\s\S]*ADD CONSTRAINT account_sessions_client_type_check[\s\S]*'desktop','cli','api_key'/);
+  assert.match(queries[0]!, /ADD COLUMN IF NOT EXISTS name TEXT/);
+  assert.match(queries[1]!, /CASE WHEN s\.client_type='api_key' THEN s\.idle_expires_at/);
+});

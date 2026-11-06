@@ -1,0 +1,12 @@
+{
+  "name": "@hatch/cli",
+  "version": "0.1.0",
+  "description": "Hatch command line, coding-agent skill and MCP server for the unified Hatch API",
+  "type": "module",
+  "bin": { "hatch": "bin/hatch.js" },
+  "files": ["bin", "src", "skill", "README.md"],
+  "engines": { "node": ">=20" },
+  "scripts": { "test": "node --test" },
+  "license": "UNLICENSED",
+  "private": true
+}

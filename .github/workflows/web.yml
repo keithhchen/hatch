@@ -9,6 +9,7 @@ on:
       - "packages/chat/**"
       - "packages/brand/**"
       - "packages/commerce/**"
+      - "packages/hatch-cli/**"
       - "Dockerfile.dashboard"
       - ".github/workflows/web.yml"
   workflow_dispatch:

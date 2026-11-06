@@ -14,6 +14,7 @@ export const DESKTOP_TOKEN_PATH = "/v1/auth/desktop/token";
 // receives the formal Hatch.app's callback (and vice versa).
 export const DESKTOP_CALLBACK_URL = `${process.env.HATCH_DESKTOP_DEEP_LINK_SCHEME || "hatch"}://auth/callback`;
 const DESKTOP_CLIENT_ID = "hatch-desktop";
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost"]);
 const CODE_TTL_MS = 60_000;
 
 const digest = (value) => createHash("sha256").update(String(value)).digest("hex");
@@ -21,6 +22,32 @@ const challengeOf = (verifier) => createHash("sha256").update(verifier).digest("
 const validChallenge = (value) => /^[A-Za-z0-9_-]{43,128}$/.test(String(value ?? ""));
 const validVerifier = (value) => /^[A-Za-z0-9._~-]{43,128}$/.test(String(value ?? ""));
 const validState = (value) => /^[A-Za-z0-9_-]{16,128}$/.test(String(value ?? ""));
+
+/**
+ * Pluggable allowed-redirect rules. A rule maps a redirect URI to the client
+ * kind it serves, or undefined when it does not allow that URI.
+ */
+export const desktopDeepLinkRule = (uri) => (uri === DESKTOP_CALLBACK_URL ? "desktop" : undefined);
+/** RFC 8252 loopback redirect: http://127.0.0.1|localhost:<1024-65535>/callback, nothing else. */
+export function loopbackRule(uri) {
+  let url;
+  try { url = new URL(uri); } catch { return undefined; }
+  const port = Number(url.port);
+  const exact = `http://${url.hostname}:${url.port}/callback`;
+  return url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname) && /^\d+$/.test(url.port) && port >= 1024 && port <= 65535 && uri === exact ? "cli" : undefined;
+}
+export class RedirectPolicy {
+  constructor(rules = [desktopDeepLinkRule, loopbackRule]) { this.rules = rules; }
+  /** @returns {{redirectUri: string, client: string}|undefined} absent URI means the Desktop deep link */
+  resolve(uri) {
+    const redirectUri = uri == null || uri === "" ? DESKTOP_CALLBACK_URL : String(uri);
+    for (const rule of this.rules) {
+      const client = rule(redirectUri);
+      if (client) return { redirectUri, client };
+    }
+    return undefined;
+  }
+}
 
 function same(left, right) {
   const a = Buffer.from(String(left));
@@ -31,11 +58,11 @@ function same(left, right) {
 /**
  * @param {object} deps
  * @param {(request) => Promise<{profile?: object, token?: string, error?: {status, body}}>} deps.authenticate cookie session + CSRF
- * @param {(token: string) => Promise<{session: {token: string, expires_at: string}}>} deps.mintSession Registry POST /v1/auth/sessions
+ * @param {(token: string, clientType: "desktop"|"cli") => Promise<{session: {token: string, expires_at: string}}>} deps.mintSession Registry POST /v1/auth/sessions
  * @param {{ saveOAuthAuthorizationCode, consumeOAuthAuthorizationCode }} deps.codes one-time code store
  * @param {(value: string) => string} deps.seal / deps.open encrypt the Registry token at rest
  */
-export function createDesktopSignIn({ authenticate, mintSession, codes, seal, open, readJson, send, clock = Date.now }) {
+export function createDesktopSignIn({ authenticate, mintSession, codes, seal, open, readJson, send, clock = Date.now, redirects = new RedirectPolicy() }) {
   async function authorize(request, response) {
     const authentication = await authenticate(request);
     if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
@@ -45,16 +72,19 @@ export function createDesktopSignIn({ authenticate, mintSession, codes, seal, op
     if (!validState(state) || !validChallenge(codeChallenge)) {
       return send(response, 400, { error: { code: "desktop_sign_in_invalid", message: "Start signing in again from Hatch Desktop." } });
     }
-    const issued = await mintSession(authentication.token);
+    const target = redirects.resolve(body.redirect_uri);
+    if (!target) return send(response, 400, { error: { code: "desktop_sign_in_invalid", message: "That sign-in redirect is not allowed." } });
+    const issued = await mintSession(authentication.token, target.client);
     const code = `hatch_dc_${randomBytes(32).toString("base64url")}`;
     await codes.saveOAuthAuthorizationCode(digest(code), {
       clientId: DESKTOP_CLIENT_ID,
       codeChallenge,
+      redirectUri: target.redirectUri,
       registryTokenCiphertext: seal(issued.session.token),
       sessionExpiresAt: issued.session.expires_at,
       expiresAt: clock() + CODE_TTL_MS
     });
-    const redirect = new URL(DESKTOP_CALLBACK_URL);
+    const redirect = new URL(target.redirectUri);
     redirect.searchParams.set("code", code);
     redirect.searchParams.set("state", state);
     return send(response, 200, { redirect_uri: redirect.toString() });
@@ -65,7 +95,7 @@ export function createDesktopSignIn({ authenticate, mintSession, codes, seal, op
     const code = String(body.code ?? "");
     const verifier = String(body.code_verifier ?? "");
     const record = code && validVerifier(verifier) ? await codes.consumeOAuthAuthorizationCode(digest(code)) : undefined;
-    if (!record || record.clientId !== DESKTOP_CLIENT_ID || record.expiresAt <= clock() || !same(challengeOf(verifier), record.codeChallenge)) {
+    if (!record || record.clientId !== DESKTOP_CLIENT_ID || record.expiresAt <= clock() || (record.redirectUri ?? DESKTOP_CALLBACK_URL) !== redirects.resolve(body.redirect_uri)?.redirectUri || !same(challengeOf(verifier), record.codeChallenge)) {
       return send(response, 400, { error: { code: "desktop_sign_in_expired", message: "This sign-in link expired. Start again from Hatch Desktop." } });
     }
     response.setHeader("cache-control", "no-store");
