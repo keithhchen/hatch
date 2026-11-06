@@ -312,3 +312,41 @@
 .sx-card .sx-empty { margin-top: 8px; padding: 16px 0 0; border: 0; background: none; }
 /* Command palette group headings stay in the page language, never uppercased. */
 .hui-command [cmdk-group-heading] { text-transform: none; letter-spacing: 0; }
+
+/* Assistant: one conversation and what needs the Expert. */
+.sxa { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 28px; align-items: start; }
+.sxa-chat { display: flex; min-height: calc(100dvh - 136px); flex-direction: column; gap: 14px; }
+.sxa-title { margin: 0; font-size: 24px; font-weight: 700; color: var(--web-ink); }
+.sxa-log { display: flex; flex: 1; flex-direction: column; gap: 12px; }
+.sxa-empty { color: var(--web-muted); }
+.sxa-line { max-width: 86%; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--web-ink); line-height: 1.6; }
+.sxa-line p { margin: 0; }
+.sxa-image { display: block; max-width: min(100%, 280px); max-height: 280px; margin-bottom: 6px; border-radius: 10px; object-fit: cover; }
+.sxa-line--assistant { align-self: flex-start; }
+.sxa-line--expert { align-self: flex-end; padding: 10px 14px; border: 1px solid var(--web-rule); border-radius: 14px 14px 4px 14px; background: var(--web-card); }
+.sxa-input { position: sticky; bottom: 16px; display: flex; align-items: flex-end; gap: 10px; padding: 10px; border: 1px solid var(--web-rule); border-radius: 14px; background: var(--web-card); }
+.sxa-input textarea { flex: 1; min-width: 0; border: 0; outline: 0; resize: none; background: transparent; color: var(--web-ink); font: inherit; }
+.sxa-side { position: sticky; top: 24px; display: flex; flex-direction: column; gap: 12px; }
+.sxa-side h2 { margin: 0; font-size: 15px; font-weight: 700; color: var(--web-ink); }
+.sxa-side p { margin: 0; }
+.sxa-needs { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.sxa-need { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--web-rule); border-radius: 12px; background: var(--web-card); }
+.sxa-need__label { font-size: 13px; font-weight: 600; color: var(--web-muted); }
+.sxa-need__error { font-size: 13px; color: var(--web-muted); overflow-wrap: anywhere; }
+.sxa-need__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.sxa-channels { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 12px; color: var(--web-body); }
+@media (max-width: 900px) {
+  .sxa { grid-template-columns: minmax(0, 1fr); }
+  .sxa-side { position: static; order: -1; }
+  .sxa-chat { min-height: 60dvh; }
+}
+.sxa-channel { padding: 10px 0; border-top: 1px solid var(--web-rule); }
+.sxa-channel__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.sxa-channel__status { margin: 6px 0 0; color: var(--web-ink-soft, inherit); }
+.sxa-channel__code { display: grid; gap: 6px; margin-top: 8px; }
+.sxa-channel__code p { margin: 0; }
+.sxa-channel__code code { font-size: 15px; letter-spacing: 0.04em; user-select: all; }
+.sxa-channel__code code { overflow-wrap: anywhere; }
+.sxa-channel__form { display: grid; gap: 8px; }
+.sxa-channel__form label { display: grid; gap: 4px; font-size: 13px; }
+.sxa-channel__form input, .sxa-channel__form select { padding: 6px 8px; border: 1px solid var(--web-rule); border-radius: 8px; font: inherit; }

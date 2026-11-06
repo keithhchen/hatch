@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "hatch-ingest output (flat /mnt/agents/output/ layout)",
+  "description": "Files: <id>.original.<ext>, <id>.content.md, result.json, profile.<profile-id>.json. Basenames are unique because the artifact store keys by basename.",
+  "type": "object",
+  "required": ["items", "profiles"],
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "status"],
+        "properties": {
+          "id": { "type": "string" },
+          "status": { "enum": ["ok", "partial", "failed"] },
+          "original": { "type": "string", "description": "Basename, e.g. i1.original.mp4" },
+          "markdown": { "type": "string", "description": "Basename, e.g. i1.content.md" },
+          "error": { "type": "string" }
+        }
+      }
+    },
+    "profiles": {
+      "type": "array",
+      "description": "Only profiles used in this run.",
+      "items": {
+        "type": "object",
+        "required": ["id", "status"],
+        "properties": {
+          "id": { "type": "string" },
+          "status": { "enum": ["ready", "needs_login"] },
+          "note": { "type": "string" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "profileCookiesFile": {
+      "description": "Shape of profile.<profile-id>.json: Playwright context.cookies(), filtered to the profile's hosts, vault placeholders excluded.",
+      "type": "object",
+      "required": ["cookies"],
+      "properties": {
+        "cookies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "value", "domain", "path"],
+            "properties": {
+              "name": { "type": "string" }, "value": { "type": "string" },
+              "domain": { "type": "string" }, "path": { "type": "string" },
+              "expires": { "type": "number" }, "httpOnly": { "type": "boolean" },
+              "secure": { "type": "boolean" },
+              "sameSite": { "enum": ["Strict", "Lax", "None"] }
+            }
+          }
+        }
+      }
+    }
+  }
+}

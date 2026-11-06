@@ -90,7 +90,7 @@ function bind(w, id, entitlementId = "agent-a") {
     viewportRef: { current: w.viewport }, invokeTauri: w.native, errorMessage: (error) => error.message,
     conversationOwnerRef: { current: null },
     stableRandomId: () => `identity_${++w.sequence}`,
-    setBriefTask: vi.fn(), setConversationId: (value) => { w.selectedId = value; },
+    setBriefTask: vi.fn(), setSentMessageCount: vi.fn(), setConversationId: (value) => { w.selectedId = value; },
     settingsStoreRef: { current: { clearProfileKey: vi.fn() } },
     getConversationSnapshot: vi.fn(async () => ({ messages: [], runs: [], events: [], cursor: 0, has_more: false })),
     getConversationJournalPage: vi.fn(async () => ({ events: [], runs: [], cursor: 0, through_cursor: 0, has_more: false })),

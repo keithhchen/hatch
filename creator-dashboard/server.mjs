@@ -1432,7 +1432,7 @@ export async function createDashboardApp(options = {}) {
         return send(response, 404, { error: { code: "not_found", message: "Route not found." } });
       }
 
-      const productContractPath = url.pathname.match(/^\/v1\/creator\/products(?:\/[^/]+(?:\/files(?:\/[^/]+)?|\/graph|\/brief-spec|\/registry|\/live|\/withdraw|\/nodes\/(?:about-you|corpus)\/executions(?:\/[^/]+(?:\/answers)?)?)?)?$/);
+      const productContractPath = url.pathname.match(/^\/v1\/creator\/products(?:\/[^/]+(?:\/files(?:\/[^/]+)?|\/graph|\/brief-spec|\/pricing|\/registry|\/live|\/withdraw|\/nodes\/(?:about-you|corpus)\/executions(?:\/[^/]+(?:\/answers)?)?)?)?$/);
       const productNodeContract = /\/nodes\/(?:about-you|corpus)\/executions(?:\/[^/]+(?:\/answers)?)?$/.test(url.pathname);
       const productRegistryContract = /\/registry$/.test(url.pathname);
       const productLiveContract = /\/live$/.test(url.pathname);
@@ -1440,7 +1440,7 @@ export async function createDashboardApp(options = {}) {
         request.method === "POST" || request.method === "PATCH" || request.method === "PUT"
       ) && (
         url.pathname === "/v1/creator/products"
-        || /\/(files|brief-spec)$/.test(url.pathname)
+        || /\/(files|brief-spec|pricing)$/.test(url.pathname)
         || /\/withdraw$/.test(url.pathname)
         || productNodeContract
         || productRegistryContract
@@ -1582,7 +1582,7 @@ export async function createDashboardApp(options = {}) {
         }
       }
 
-      if (/^\/v1\/creator\/products\/[^/]+\/factory-agents(?:\/|$)/.test(url.pathname)) {
+      if (/^\/v1\/creator\/products\/[^/]+\/factory-agents(?:\/|$)/.test(url.pathname) || /^\/v1\/creator\/assistant(?:\/|$)/.test(url.pathname)) {
         const authentication = await authenticate(request, registryUrl, "creator", fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         requireCapability(authentication.profile, request.method === "GET" || request.method === "HEAD" ? "product:read" : "product:edit");
@@ -3525,6 +3525,8 @@ function publicCatalogAgent(agent, creatorState) {
     description: deployedAgent.product_description ?? "",
     boundaries: deployedAgent.product_boundaries ?? [],
     ...(deployedAgent.brief_spec ? { brief_spec: structuredClone(deployedAgent.brief_spec) } : {}),
+    // Pricing is a live Product setting, never part of a release snapshot.
+    ...(agent.pricing ? { pricing: structuredClone(agent.pricing) } : {}),
     availability: withdrawn ? "withdrawn" : "published",
     available: !withdrawn,
     release_id: creatorState?.release?.release_id ?? deployedAgent.corpus_digest,
@@ -3848,7 +3850,8 @@ function enrichEntitlements(entitlements, catalog, deliveries = [], creatorNames
         name: agent.product_name,
         description: agent.product_description,
         promise: agent.product_promise,
-        ...(agent.brief_spec ? { brief_spec: structuredClone(agent.brief_spec) } : {})
+        ...(agent.brief_spec ? { brief_spec: structuredClone(agent.brief_spec) } : {}),
+        ...(agent.pricing ? { pricing: structuredClone(agent.pricing) } : {})
       } : { id: currentEntitlement.product_id, product_id: currentEntitlement.product_id, name: currentEntitlement.product_id },
       creator: agent ? {
         id: agent.creator_id,
@@ -4003,6 +4006,7 @@ function catalogAgentToProduct(agent) {
     promise: agent.product_promise ?? agent.product_description ?? "",
     boundaries: agent.product_boundaries ?? [],
     ...(agent.brief_spec ? { brief_spec: structuredClone(agent.brief_spec) } : {}),
+    ...(agent.pricing ? { pricing: structuredClone(agent.pricing) } : {}),
     status: agent.status ?? "published",
     published_at: agent.published_at ?? null,
     ...(agent.created_at ? { created_at: agent.created_at } : {}),

@@ -1,3 +1,4 @@
+import { EMPTY_PRODUCT_PRICING } from "./creatorLearning/pricing.js";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { mkdtemp } from "node:fs/promises";
@@ -29,6 +30,7 @@ test("Creator product listing keeps authoring fields when a published corpus has
       promise: "Current promise",
       brief: "Current promise",
       briefSpec: { contract_version: "1", fields: [{ id: "goal", label: "Goal", required: true }] },
+      pricing: EMPTY_PRODUCT_PRICING,
       status: "active",
       createdAt: "2026-08-15T00:00:00.000Z",
       updatedAt: "2026-08-16T01:00:00.000Z"
@@ -47,7 +49,8 @@ test("Creator product listing keeps authoring fields when a published corpus has
     published_at: "2026-08-16T00:00:00.000Z",
     created_at: "2026-08-15T00:00:00.000Z",
     updated_at: "2026-08-16T01:00:00.000Z",
-    brief_spec: { contract_version: "1", fields: [{ id: "goal", label: "Goal", required: true }] }
+    brief_spec: { contract_version: "1", fields: [{ id: "goal", label: "Goal", required: true }] },
+    pricing: EMPTY_PRODUCT_PRICING
   });
 });
 

@@ -1097,3 +1097,14 @@
 @media (prefers-reduced-motion: reduce) {
   .hui-atmospheric-paper::before, .hui-atmospheric-paper::after, .hui-origin-studio::before, .hui-origin-studio::after, .hui-spin, .hui-skeleton { animation: none !important; }
 }
+
+/* Free-chat paywall: replaces the chat composer once free messages are used. */
+.hatch-free-chat-paywall { display: grid; gap: 12px; padding: 20px; border: 1px solid var(--hui-border-soft); border-radius: var(--hatch-radius-surface); background: rgba(251,247,240,.92); box-shadow: 0 9px 28px rgba(55,40,26,.06), 0 1px 2px rgba(55,40,26,.05); }
+.hatch-free-chat-paywall h2 { margin: 0; font-family: var(--hui-font-display); font-size: var(--hatch-type-title); font-weight: var(--hui-weight-regular); letter-spacing: var(--hatch-display-tracking); line-height: var(--hatch-display-leading); }
+.hatch-free-chat-paywall > p { margin: 0; color: var(--hui-ink-faint); font-size: var(--hatch-type-ui); }
+.hatch-free-chat-paywall__options { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.hatch-free-chat-paywall__option { display: grid; grid-template-columns: 20px minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 14px; border: 1px solid var(--hui-border-soft); border-radius: 12px; background: transparent; color: inherit; font: inherit; font-size: var(--hatch-type-ui); text-align: left; cursor: pointer; }
+.hatch-free-chat-paywall__option svg { width: 20px; height: 20px; color: var(--hui-accent); }
+.hatch-free-chat-paywall__option b { font-weight: var(--hui-weight-medium); white-space: nowrap; }
+.hatch-free-chat-paywall__option:hover { border-color: var(--hui-accent); }
+.hatch-free-chat-paywall__option.is-selected { border-color: var(--hui-accent); box-shadow: inset 0 0 0 1px var(--hui-accent); }

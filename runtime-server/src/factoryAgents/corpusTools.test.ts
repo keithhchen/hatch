@@ -85,7 +85,7 @@ test("Generation uploads canonical files through Registry and the existing Runti
     const manualName = "input/manual/プロフィール.md";
     await store.put(session.id, manualName.normalize("NFD"), Buffer.from("# 手動\n"), { actor: "user", mimeType: "text/markdown" });
     await assert.rejects(upload.execute("manual-file", { ...args, knowledge: [{ path: manualName.normalize("NFC"), title: "Manual", reason: "Uploaded by the Expert" }] }), /503.*knowledge_index_unavailable/);
-    await rm(path.join(store.root, "manual"), { recursive: true, force: true });
+    await rm(path.join(store.root!, "manual"), { recursive: true, force: true });
     await store.update(session.id, state => { state.knowledge = state.knowledge?.filter(k => !k.path.startsWith("input/manual/")); });
     const withKnowledge = await store.get(session.id);
     assert.equal(withKnowledge.knowledge?.length, 1);

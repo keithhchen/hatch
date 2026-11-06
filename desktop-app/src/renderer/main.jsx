@@ -6,6 +6,7 @@ import { DesktopComposerInput } from "./desktop-composer-input.jsx";
 import { ConversationRuntimeProvider } from "./conversation-runtime-provider.jsx";
 import { createRoot } from "react-dom/client";
 import "@hatch/ui/fonts";
+import { FreeChatPaywall, freeChatAccess } from "@hatch/ui/product";
 import "@hatch/ui/theme.css";
 import {
   Button,
@@ -535,9 +536,12 @@ function App() {
   const [composerDraft, setComposerDraft] = sessionStateField("composerDraft");
   const [composerRestoreRequest, setComposerRestoreRequest] = sessionStateField("composerRestoreRequest");
   const [approvalRequests, setApprovalRequests] = sessionStateField("approvalRequests");
-  const creatorAgent = sessionState.creatorAgent ?? creatorAgentFromEntitlement(
-    creatorAgentEntitlements.find((item) => item.entitlement_id === selectedEntitlementId)
-  );
+  const selectedEntitlement = creatorAgentEntitlements.find((item) => item.entitlement_id === selectedEntitlementId);
+  const creatorAgent = sessionState.creatorAgent ?? creatorAgentFromEntitlement(selectedEntitlement);
+  const [sentMessageCount, setSentMessageCount] = useState(0);
+  const freeChat = freeChatAccess(selectedEntitlement?.product?.pricing, sentMessageCount);
+  const freeChatLockedRef = useRef(false);
+  freeChatLockedRef.current = freeChat.locked;
   const [sidebarPreference, setSidebarPreference] = useState("open");
   const [sidebarWidth, setSidebarWidth] = useState(DESKTOP_LAYOUT.sidebar.default);
   const [inspectorPreference, setInspectorPreference] = useState("open");
@@ -1351,6 +1355,7 @@ function App() {
         limit: 100
       });
       if (requestId !== conversationLibraryRequestRef.current) return;
+      setSentMessageCount(payload?.sent_message_count ?? 0);
       let nextConversations = Array.isArray(payload?.conversations)
         ? payload.conversations.filter((item) => isServerConversationId(item?.id) && item.status !== "archived")
         : [];
@@ -2485,6 +2490,7 @@ function App() {
       assertConversationIdentity(message.conversation_id, conversationSession.scope.conversationId, "protocol_error");
     }
     if (message.type === "message.accepted") {
+      setSentMessageCount((count) => count + 1);
       try { await conversationSession.acceptSubmission(message); }
       catch (error) { setStatus(errorMessage(error)); }
       return;
@@ -2950,6 +2956,8 @@ function App() {
   }
 
   async function createLibraryConversation({ briefAnswers = undefined, purpose = "create" } = {}) {
+    // Once free messages are used up the footer shows the paywall instead.
+    if (freeChatLockedRef.current) return "";
     const binding = conversationBindingFor();
     if (!binding || !buyerSession?.accessToken) {
       setStatus("Choose an Expert Agent before starting a conversation.");
@@ -3882,7 +3890,15 @@ function App() {
                       <Button type="button" onClick={() => setDraftRetry((value) => value + 1)}>{t("common.retry")}</Button>
                     </div>
                   ) : null}
-                  <ComposerPrimitive.Root className="composer">
+                  {freeChat.locked && !running ? <FreeChatPaywall access={freeChat} copy={{
+                    title: t("paywall.title", { count: freeChat.limit }),
+                    body: t("paywall.body", { name: creatorAgent.creator }),
+                    human: t("paywall.human", { name: creatorAgent.creator }),
+                    humanPrice: t("paywall.humanPrice"),
+                    agent: t("paywall.agent"),
+                    agentPrice: t("paywall.agentPrice"),
+                    unavailable: t("paywall.unavailable")
+                  }} /> : <ComposerPrimitive.Root className="composer">
                     <DesktopComposerInput
                       key={draftKey}
                       className="composer-input"
@@ -3947,7 +3963,7 @@ function App() {
                         </ComposerPrimitive.Send>
                       )}
                     </div>
-                  </ComposerPrimitive.Root>
+                  </ComposerPrimitive.Root>}
                 </ThreadPrimitive.ViewportFooter>
                 </ThreadPrimitive.Root>
               </ConversationRuntimeProvider>

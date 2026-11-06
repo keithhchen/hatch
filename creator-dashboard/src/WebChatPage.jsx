@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowUp, ChevronDown, ChevronRight, ChevronUp, CircleAlert, ImagePlus, Menu, Paperclip, Plus, RotateCw, Square, X } from "lucide-react";
 import { Avatar } from "@hatch/ui";
+import { FreeChatPaywall, freeChatAccess } from "@hatch/ui/product";
 import { WebBrand } from "./WebBrand.jsx";
 import { WebChatEgg, WebChatGate } from "./webChatGate.jsx";
 import { WebChatImageViewer } from "./components/WebChatImageViewer.jsx";
@@ -281,6 +282,7 @@ export default function WebChatPage({ productId, conversationId: routedConversat
   const runRef = useRef(null);
   const pendingSubmissionRef = useRef(null);
   const taskStartRef = useRef(null);
+  const [sentMessageCount, setSentMessageCount] = useState(0);
   const liveTimelineRef = useRef(new WebChatTimeline());
   const visibleMessagesRef = useRef([]);
   const snapshotReconcilerRef = useRef(new WebChatSnapshotReconciler());
@@ -401,6 +403,7 @@ export default function WebChatPage({ productId, conversationId: routedConversat
       const page = await new WebChatClient(request, entitlement.entitlement_id).list();
       if (!live) return;
       setAccess(entitlement);
+      setSentMessageCount(page.sent_message_count ?? 0);
       setConversations(page.conversations ?? []);
       setConversationCursor(page.next_cursor ?? null);
       setStatus({ key: conversationRef.current || page.conversations?.length ? "loadingConversation" : "startChatToBegin" });
@@ -491,6 +494,7 @@ export default function WebChatPage({ productId, conversationId: routedConversat
         return;
       }
       if (message.type === "message.accepted" && message.run_id === runRef.current?.id) {
+        setSentMessageCount(count => count + 1);
         const submission = pendingSubmissionRef.current;
         pendingSubmissionRef.current = null;
         if (submission) updateMessages(current => current.map(entry => entry.id === submission.optimisticMessageId ? { ...entry, optimistic: false, provisional: true } : entry));
@@ -676,6 +680,8 @@ export default function WebChatPage({ productId, conversationId: routedConversat
 
   const newConversation = event => {
     setMobileSidebarOpen(false);
+    // Once free messages are used up the dock shows the paywall instead.
+    if (freeChat.locked) return;
     const fields = access?.brief_spec?.fields ?? access?.product?.brief_spec?.fields;
     if (fields?.length) {
       briefTriggerRef.current = mobileSidebarWasOpenRef.current && window.matchMedia("(max-width: 760px)").matches
@@ -774,6 +780,7 @@ export default function WebChatPage({ productId, conversationId: routedConversat
   const briefFields = access?.brief_spec?.fields ?? access?.product?.brief_spec?.fields ?? [];
   const selectedConversation = conversations.find(item => item.id === conversationId);
   const libraryLink = <a href="/library" className="web-chat__button">{t("backToLibrary")}</a>;
+  const freeChat = freeChatAccess(access?.product?.pricing, sentMessageCount);
 
   if (!access) {
     const account = <WebChatAccountControls profile={profile} navigate={navigate} onSignOut={onSignOut} />;
@@ -879,7 +886,15 @@ export default function WebChatPage({ productId, conversationId: routedConversat
       </div>
       <div className="web-chat__dock">
         {error ? <div className="web-chat__notice" role="alert"><CircleAlert aria-hidden="true" /><span>{errorText}</span><button type="button" onClick={() => { setError(null); if (snapshotPending) setSnapshotRetryVersion(value => value + 1); else setConnectionVersion(value => value + 1); }}><RotateCw aria-hidden="true" /><span>{t("retry")}</span></button></div> : null}
-        {conversationId ? <form className="web-chat__composer" aria-busy={snapshotPending} onSubmit={send}>
+        {freeChat.locked && !activeRun ? <FreeChatPaywall access={freeChat} locale={locale} copy={{
+          title: t("paywallTitle", { count: freeChat.limit }),
+          body: t("paywallBody", { name: creatorName }),
+          human: t("paywallHuman", { name: creatorName }),
+          humanPrice: t("paywallHumanPrice"),
+          agent: t("paywallAgent"),
+          agentPrice: t("paywallAgentPrice"),
+          unavailable: t("paywallUnavailable")
+        }} /> : conversationId ? <form className="web-chat__composer" aria-busy={snapshotPending} onSubmit={send}>
           {images.length ? <div className="web-chat__images" aria-label={t("imagesToSend")}>{images.map(file => <span className="web-chat__image-chip" key={`${file.name}-${file.lastModified}`}><Paperclip aria-hidden="true" /><span title={file.name}>{file.name}</span><button type="button" aria-label={t("removeImage", { name: file.name })} onClick={() => { pendingSubmissionRef.current = null; setImages(current => current.filter(entry => entry !== file)); }} disabled={snapshotPending}><X aria-hidden="true" /></button></span>)}</div> : null}
           <textarea ref={draftRef} aria-label={t("messageAgent", { agent: agentName })} value={draft} onChange={event => { pendingSubmissionRef.current = null; setDraft(event.target.value); }} placeholder={t("messagePlaceholder")} disabled={snapshotPending || Boolean(activeRun)} onKeyDown={event => { if (event.key !== "Enter" || event.shiftKey || isImeConfirmation(event)) return; event.preventDefault(); void send(event); }} />
           <div className="web-chat__actions">

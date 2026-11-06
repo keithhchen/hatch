@@ -3,7 +3,7 @@ import type { Duplex } from "node:stream";
 import path from "node:path";
 import { z } from "zod";
 import { WebSocket, WebSocketServer } from "ws";
-import { WorkbenchStore, ROLES, type Comment, type FactoryProductScope, type Session } from "./store.js";
+import { WorkbenchStore, ROLES, isAssistantRole, type Comment, type FactoryProductScope, type Session } from "./store.js";
 import { WorkbenchRuntime, safeError, type WorkbenchRuntimeOptions } from "./runtime.js";
 import { hatchTool } from "./hatchTool.js";
 import { corpusTools } from "./corpusTools.js";
@@ -13,15 +13,15 @@ import { VoiceSession, type VoiceServerEvent } from "./voice.js";
 import { GeminiVoiceSession } from "./geminiVoice.js";
 import { factoryAgentTools } from "./factoryTools.js";
 import { convertUpload } from "./markdownConverter.js";
-import type { AgentMessage, AgentToolResult } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 
 export function publicSession(s: Session) { const { context, ...publicData } = s; return publicData; }
 
-export async function createFactoryHandler(options: { root: string; scope: FactoryProductScope; definitions: AgentDefinitionRepository; env?: NodeJS.ProcessEnv; runtime?: WorkbenchRuntimeOptions }) {
-  const env: NodeJS.ProcessEnv = { HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash", ...(options.env ?? process.env) };
+export async function createFactoryHandler(options: { root: string; scope: FactoryProductScope; definitions: AgentDefinitionRepository; env?: NodeJS.ProcessEnv; runtime?: WorkbenchRuntimeOptions; withheldTools?: (session: Session) => Promise<string[]>; grantedTools?: (session: Session) => AgentTool[] }) {
+  const env: NodeJS.ProcessEnv = { HATCH_FACTORY_LLM_PROFILE: "kimi-k2.6", ...(options.env ?? process.env) };
   const store = new WorkbenchStore(options.root, options.scope, options.definitions);
   await store.recover();
-  const runtime = new WorkbenchRuntime(store, { env, ...options.runtime, extraTools: options.runtime?.extraTools ?? (async (s, _signal, changed) => [...corpusTools(store, s.id, changed, options.scope, env), hatchTool(store, s.id, changed, options.scope, env)]) });
+  const runtime = new WorkbenchRuntime(store, { env, ...options.runtime, grantedTools: options.runtime?.grantedTools ?? (session => options.grantedTools?.(session) ?? []), withheldTools: options.runtime?.withheldTools ?? options.withheldTools, extraTools: options.runtime?.extraTools ?? (async (s, _signal, changed) => [...corpusTools(store, s.id, changed, options.scope, env), hatchTool(store, s.id, changed, options.scope, env)]) });
   const streams = new Set<ServerResponse>();
   const chatStreams = new Set<ServerResponse>();
   const liveSockets = new Map<string, Set<WebSocket>>();
@@ -35,7 +35,7 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
   const voices = new Map<string, VoiceConnection>();
   const liveStartCounts = new Map<string, number>();
   const entries = async () => agentEntries(await options.definitions.list(), await store.list());
-  const assertRoleAvailable = async (role: Session["role"]) => assertAgentAvailable(await entries(), role);
+  const assertRoleAvailable = async (role: Session["role"]) => { if (isAssistantRole(role)) throw new Error("Assistant sessions are not part of a Product workspace"); return assertAgentAvailable(await entries(), role); };
   const factorySnapshot = async () => {
     const sessions = await store.list();
     return {

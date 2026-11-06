@@ -1,5 +1,16 @@
 import { FactoryAgentsService } from "./factoryAgents/service.js";
 import { PostgresAgentDefinitionRepository } from "./factoryAgents/definitions.js";
+import { PostgresWorkbenchBackend } from "./factoryAgents/store.js";
+import { AssistantService } from "./assistant/assistant.js";
+import { AccountReach, CHANNEL_KINDS, ChannelHub, PostgresChannelLinks, type ChannelKind, type ChannelLinks } from "./assistant/channels.js";
+import { safeError } from "./factoryAgents/runtime.js";
+import { CredentialSeal } from "./assistant/channelCredentials.js";
+import { IMessageChannel } from "./assistant/imessageChannel.js";
+import { LarkChannel, type LarkCredentials } from "./assistant/larkChannel.js";
+import { LineChannel } from "./assistant/lineChannel.js";
+import { TelegramChannel } from "./assistant/telegramChannel.js";
+import { PostgresTaskRepository } from "./assistant/tasks.js";
+import type { AgentCatalog, AgentChange, CatalogAgent } from "./assistant/catalog.js";
 import "dotenv/config";
 import http from "node:http";
 import { createHash, randomUUID } from "node:crypto";
@@ -28,6 +39,7 @@ import {
 import { RegistryStoreTs } from "./registryStore.js";
 import { RegistryDeploymentConflictError } from "./registryStore.js";
 import { BriefValidationError, normalizeBriefSpec, type BriefSpec } from "./brief.js";
+import { ProductPricingError, type ProductPricing } from "./creatorLearning/pricing.js";
 import { handleCreatorFactoryHttp } from "./creatorLearning/httpApi.js";
 import { isUuidV4 } from "./identity.js";
 import {
@@ -55,6 +67,7 @@ import {
 import type { AboutYouAnswerPair } from "./creatorLearning/aboutYouNode.js";
 import { PostgresDistillationGraphStore } from "./creatorLearning/distillationGraphStore.js";
 import { CorpusPublisher, CorpusPublishError } from "./creatorLearning/corpusPublisher.js";
+import { imageMime } from "./factoryAgents/imageRefs.js";
 import { createProductLive, ExpertProduct, SystemMissing, type ProductLiveService } from "./creatorLearning/productLive/index.js";
 import { CreatorRegistryReleaseStore, type CreatorRegistryRelease } from "./creatorLearning/creatorRegistryRelease.js";
 import { corpusOutputSchema } from "./creatorLearning/corpusNode.js";
@@ -74,6 +87,12 @@ import {
 export type RegistryServer = { server: http.Server; close: () => Promise<void> };
 export const CREATOR_FACTORY_JSON_BODY_MAX_BYTES = 32 * 1024 * 1024;
 type RegistryContext = {
+  assistant?: AssistantService;
+  channels?: ChannelHub;
+  credentialSeal?: CredentialSeal;
+  publicOrigin?: string;
+  links?: ChannelLinks;
+  reach?: AccountReach;
   store: RegistryStoreTs;
   accounts: AccountStoreTs;
   accountAvatars?: ReturnType<typeof accountAvatarApplicationServiceFromEnvironment>;
@@ -208,6 +227,66 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const httpLimits = httpRequestLimitOptionsFromEnvironment(environment);
   const httpRequestGate = new HttpRequestGate(httpLimits);
   const registryContext: RegistryContext = { store, accounts, accountAvatars, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, productLive, nodeObjectStore, releaseStore, authSecret };
+  let assistantTick: NodeJS.Timeout | undefined;
+  const channelListeners = new AbortController();
+  if (registryPool) {
+    const reach = new AccountReach(registryPool);
+    await reach.ensureSchema();
+    await PostgresWorkbenchBackend.ensureSchema(registryPool);
+    const tasks = await PostgresTaskRepository.open(registryPool);
+    const links = await PostgresChannelLinks.open(registryPool, (accountId, kind) => kind === "lark" ? accountId : "");
+    const studioUrl = environment.HATCH_STUDIO_ASSISTANT_URL?.trim() || "https://gethatchapp.com/studio/assistant";
+    const telegram = new TelegramChannel({
+      token: environment.HATCH_TELEGRAM_BOT_TOKEN?.trim() || undefined,
+      username: environment.HATCH_TELEGRAM_BOT_USERNAME?.trim() || undefined,
+      webhookSecret: environment.HATCH_TELEGRAM_WEBHOOK_SECRET?.trim() || undefined,
+      studioUrl,
+    });
+    const line = new LineChannel({
+      channelSecret: environment.HATCH_LINE_CHANNEL_SECRET?.trim() || undefined,
+      accessToken: environment.HATCH_LINE_CHANNEL_ACCESS_TOKEN?.trim() || undefined,
+      basicId: environment.HATCH_LINE_BASIC_ID?.trim() || undefined,
+      studioUrl,
+    });
+    const imessage = new IMessageChannel({
+      projectId: environment.HATCH_PHOTON_PROJECT_ID?.trim() || undefined,
+      projectSecret: environment.HATCH_PHOTON_PROJECT_SECRET?.trim() || undefined,
+      address: environment.HATCH_IMESSAGE_ADDRESS?.trim() || undefined,
+    });
+    // Lark has no shared bot: a custom app works in one enterprise, so each Expert brings theirs.
+    const sealKey = environment.HATCH_CHANNEL_CREDENTIALS_KEY?.trim();
+    const seal = sealKey ? new CredentialSeal(sealKey) : undefined;
+    const larkApps = new Map<string, { sealed: string; adapter: LarkChannel }>();
+    const channels = new ChannelHub([telegram, line, imessage], async (kind, accountId) => {
+      if (kind !== "lark" || !seal) return undefined;
+      const sealed = await links.credentials(accountId, "lark");
+      if (!sealed) return undefined;
+      const cached = larkApps.get(accountId);
+      if (cached?.sealed === sealed) return cached.adapter;
+      const adapter = new LarkChannel(seal.open<LarkCredentials>(sealed), accountId);
+      larkApps.set(accountId, { sealed, adapter });
+      return adapter;
+    });
+    const assistant = new AssistantService({
+      tasks, reach, channels, links,
+      products: factoryAgents,
+      catalog: registryAgentCatalog(registryContext),
+      backend: accountId => new PostgresWorkbenchBackend(registryPool, `assistant:${accountId}`),
+      exclusive: postgresExclusive(registryPool),
+      env: environment,
+    });
+    Object.assign(registryContext, { assistant, channels, links, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin });
+    // A platform that pushes over its own connection runs here, in one process at a time. A dropped connection comes back.
+    for (const adapter of channels.listeners()) void (async () => {
+      while (!channelListeners.signal.aborted) {
+        await postgresExclusive(registryPool)(`assistant-channel:${adapter.kind}`, () => adapter.listen!(events => assistant.channelEvents(adapter, events), channelListeners.signal))
+          .catch(error => console.error(`[channel ${adapter.kind}]`, safeError(error)));
+        await new Promise(resolve => setTimeout(resolve, 30_000).unref());
+      }
+    })();
+    assistantTick = setInterval(() => void assistant.tick().catch(error => console.error("[assistant tick]", error)), 60_000);
+    assistantTick.unref();
+  }
   const server = http.createServer((request, response) => {
     const suppliedBearer = bearer(request);
     const internalRuntime = Boolean(
@@ -316,6 +395,9 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const host = environment.REGISTRY_HOST ?? "127.0.0.1";
   await new Promise<void>((resolve) => server.listen(port, host, resolve));
   return { server, close: async () => {
+    if (assistantTick) clearInterval(assistantTick);
+    channelListeners.abort();
+    await registryContext.assistant?.close();
     immediateFactoryStop.abort();
     await factoryAgents.close();
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
@@ -377,6 +459,11 @@ async function route(
     if (request.method === "GET") { sendJson(response, 200, { agents: await context.factoryAgentDefinitions.list() }); return; }
     const payload = await readJson(request);
     sendJson(response, 200, { agents: await context.factoryAgentDefinitions.replace(payload.agents) });
+    return;
+  }
+
+  if (url.pathname.startsWith("/v1/channels/") || url.pathname.startsWith("/v1/creator/assistant")) {
+    await assistantRoute(request, response, url, context);
     return;
   }
 
@@ -955,6 +1042,7 @@ async function route(
         promise: product.promise,
         status: product.status,
         ...(product.brief_spec ? { brief_spec: product.brief_spec } : {}),
+        ...(product.pricing ? { pricing: product.pricing } : {}),
         ...(product.release ? { release: product.release } : {}),
         ...(product.createdAt ? { created_at: product.createdAt } : {}),
         ...(product.updatedAt ? { updated_at: product.updatedAt } : {})
@@ -993,6 +1081,28 @@ async function route(
       account.id,
       product.repositoryId,
       normalizeBriefSpec(body.brief_spec as BriefSpec),
+      typeof body.expected_updated_at === "string" ? body.expected_updated_at : undefined
+    );
+    sendJson(response, 200, publicCreatorProduct(updated));
+    return;
+  }
+
+  const productPricingMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/pricing$/);
+  if (productPricingMatch && request.method === "PUT") {
+    const account = await authenticate(request, response, context, "creator");
+    if (account === SESSION_QUERY_REJECTED) return;
+    if (!account) { sendJson(response, 401, { detail: "A valid Expert account token is required." }); return; }
+    const productId = decodeURIComponent(productPricingMatch[1]!);
+    const product = await productForCreator(context, account.id, productId);
+    if (!product?.repositoryId) {
+      sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } });
+      return;
+    }
+    const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
+    const updated = await context.factoryService.saveProductPricing(
+      account.id,
+      product.repositoryId,
+      body.pricing,
       typeof body.expected_updated_at === "string" ? body.expected_updated_at : undefined
     );
     sendJson(response, 200, publicCreatorProduct(updated));
@@ -1352,6 +1462,7 @@ type CreatorProductBoundary = {
   promise: string;
   status: string;
   brief_spec?: import("./brief.js").BriefSpec;
+  pricing?: ProductPricing;
   createdAt?: string;
   updatedAt?: string;
   /** The new Registry release projection, when this Product is live. */
@@ -1414,6 +1525,7 @@ export function mergeCreatorProductListings(
       updated_at: product.updatedAt
     };
     if (product.briefSpec) authoringProduct.brief_spec = product.briefSpec;
+    if (product.pricing) authoringProduct.pricing = product.pricing;
     const publishedProduct = products.get(productId);
     if (!publishedProduct) {
       products.set(productId, authoringProduct);
@@ -1447,6 +1559,7 @@ async function productForCreator(
       promise: publicProductPromise(product),
       status: release ? "published" : product.runId ? "working" : "draft",
       ...(product.briefSpec ? { brief_spec: product.briefSpec } : {}),
+      ...(product.pricing ? { pricing: product.pricing } : {}),
       createdAt: product.createdAt,
       updatedAt: product.updatedAt,
       ...(release ? { release } : {}),
@@ -1466,6 +1579,7 @@ function publicCreatorProduct(product: {
   createdAt?: string;
   updatedAt?: string;
   briefSpec?: import("./brief.js").BriefSpec;
+  pricing?: ProductPricing;
 }): Record<string, unknown> {
   return {
     product_id: publicProductId(product),
@@ -1473,6 +1587,7 @@ function publicCreatorProduct(product: {
     promise: publicProductPromise(product),
     status: product.status === "active" ? "draft" : product.status ?? "draft",
     ...(product.briefSpec ? { brief_spec: product.briefSpec } : {}),
+    ...(product.pricing ? { pricing: product.pricing } : {}),
     ...(product.createdAt ? { created_at: product.createdAt } : {}),
     ...(product.updatedAt ? { updated_at: product.updatedAt } : {})
   };
@@ -1697,6 +1812,7 @@ function errorStatus(error: unknown): number {
   if (error instanceof SyntaxError) return 400;
   if (error instanceof Error && error.message === "Request body is too large") return 413;
   if (error instanceof BriefValidationError) return 422;
+  if (error instanceof ProductPricingError) return 422;
   if (error instanceof ProductFilesError) {
     if (error.code === "idempotency_conflict") return 409;
     return error.code === "product_file_not_found" || error.code === "product_snapshot_not_found" || error.code === "product_mismatch" ? 404 : 422;
@@ -1726,6 +1842,17 @@ async function readBytes(request: http.IncomingMessage, max = 64 * 1024 * 1024):
     chunks.push(value);
   }
   return Buffer.concat(chunks, size);
+}
+
+async function readRawBody(request: http.IncomingMessage, maxBytes: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of request) {
+    total += (chunk as Buffer).length;
+    if (total > maxBytes) throw Object.assign(new Error("Request body is too large"), { status: 413 });
+    chunks.push(chunk as Buffer);
+  }
+  return Buffer.concat(chunks);
 }
 
 async function readJson(request: http.IncomingMessage, maxBytes = 1024 * 1024): Promise<Record<string, unknown>> {
@@ -1810,4 +1937,180 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   createRegistryServerFromEnvironment().then(({ server }) => {
     console.log(`Hatch TypeScript Registry listening on ${JSON.stringify(server.address())}`);
   }).catch((error) => { console.error(error); process.exitCode = 1; });
+}
+
+
+/** The Expert's Agents as seen by the Assistant: the same authority and rules as the Studio product routes. */
+function registryAgentCatalog(context: RegistryContext): AgentCatalog {
+  const tokens = new Map<string, { token: string; expiresAt: number }>();
+  const view = (product: CreatorProductBoundary): CatalogAgent => ({
+    productId: product.productId, name: product.name, promise: product.promise,
+    status: product.status === "published" ? "published" : product.status === "working" ? "working" : "draft",
+    ...(product.pricing ? { pricing: product.pricing } : {}),
+    ...(product.brief_spec ? { briefSpec: product.brief_spec } : {}),
+  });
+  const get = async (accountId: string, productId: string) => {
+    const product = await productForCreator(context, accountId, productId);
+    return product ? view(product) : undefined;
+  };
+  return {
+    list: async accountId => {
+      const products = await context.factoryService.listProducts(accountId);
+      const views = await Promise.all(products.map(product => get(accountId, publicProductId(product))));
+      return views.filter((agent): agent is CatalogAgent => Boolean(agent));
+    },
+    get,
+    create: async (accountId, name, promise) => {
+      const product = await context.factoryService.createProduct(accountId, { name: requiredProductText(name, "name", 240), brief: requiredProductText(promise, "promise", 100_000) });
+      return (await get(accountId, publicProductId(product)))!;
+    },
+    apply: async (accountId, productId, change: AgentChange) => {
+      const product = await productForCreator(context, accountId, productId);
+      if (!product?.repositoryId) throw new Error("这个 Agent 现在不能修改");
+      if (change.name !== undefined || change.promise !== undefined) {
+        await context.factoryService.updateProductPromise(accountId, product.repositoryId, {
+          ...(change.name !== undefined ? { name: requiredProductText(change.name, "name", 240) } : {}),
+          promise: requiredProductText(change.promise ?? product.promise, "promise", 100_000),
+        });
+      }
+      if (change.pricing !== undefined) await context.factoryService.saveProductPricing(accountId, product.repositoryId, change.pricing);
+      if (change.briefSpec !== undefined) await context.factoryService.saveProductBriefSpec(accountId, product.repositoryId, normalizeBriefSpec(change.briefSpec as BriefSpec));
+      if (change.release === "withdraw") await context.releaseStore.withdraw(accountId, productId);
+      if (change.release === "publish") {
+        if (!context.productLive) throw new Error("发布服务暂时不可用");
+        const latest = (await productForCreator(context, accountId, productId))!;
+        await context.productLive.publish(new ExpertProduct(accountId, productId, latest.name, latest.promise, latest.brief_spec));
+      }
+    },
+    live: async (accountId, productId) => {
+      const product = await productForCreator(context, accountId, productId);
+      if (!product || !context.productLive) return null;
+      return context.productLive.status(new ExpertProduct(accountId, productId, product.name, product.promise, product.brief_spec));
+    },
+    token: async accountId => {
+      const cached = tokens.get(accountId);
+      if (cached && cached.expiresAt - Date.now() > 3_600_000) return cached.token;
+      const account = await context.accounts.getById(accountId);
+      if (!account) throw new Error("Account was not found");
+      const issued = await context.accounts.createSession(account);
+      tokens.set(accountId, { token: issued.token, expiresAt: Math.min(Date.parse(issued.session.absolute_expires_at), Date.parse(issued.session.idle_expires_at)) });
+      return issued.token;
+    },
+  };
+}
+
+/** Runs fn only in the process that holds the named Postgres advisory lock. */
+function postgresExclusive(pool: NonNullable<ReturnType<RegistryStoreTs["databasePool"]>>) {
+  return async (name: string, fn: () => Promise<void>) => {
+    const client = await pool.connect();
+    try {
+      const locked = (await client.query("SELECT pg_try_advisory_lock(hashtext($1)) AS locked", [name])).rows[0]?.locked;
+      if (!locked) return;
+      try { await fn(); } finally { await client.query("SELECT pg_advisory_unlock(hashtext($1))", [name]); }
+    } finally { client.release(); }
+  };
+}
+
+async function assistantRoute(request: http.IncomingMessage, response: http.ServerResponse, url: URL, context: RegistryContext): Promise<void> {
+  const assistant = context.assistant;
+  if (!assistant || !context.reach) { sendJson(response, 503, { error: { code: "assistant_unavailable", message: "The Assistant requires the Registry database." } }); return; }
+  const webhook = url.pathname.match(/^\/v1\/channels\/([a-z]+)(?:\/([0-9a-f-]{36}))?\/webhook$/);
+  if (webhook && request.method === "POST") {
+    const kind = webhook[1] as ChannelKind;
+    const adapter = (CHANNEL_KINDS as readonly string[]).includes(kind) ? await context.channels!.get(kind, webhook[2]) : undefined;
+    if (!adapter?.parse) { sendJson(response, 404, { ok: false }); return; }
+    const raw = await readRawBody(request, 2 * 1024 * 1024);
+    if (!adapter.verify?.(raw, request.headers)) { sendJson(response, 401, { ok: false }); return; }
+    const { events, respond } = adapter.parse(raw);
+    // Platforms retry a slow webhook. Quick work is durable before we answer; a slow download finishes after.
+    const work = assistant.channelEvents(adapter, events);
+    await Promise.race([work, new Promise(resolve => setTimeout(resolve, 1500))]);
+    sendJson(response, 200, respond ?? { ok: true });
+    return;
+  }
+  const account = await authenticate(request, response, context, "creator");
+  if (account === SESSION_QUERY_REJECTED) return;
+  if (!account) { sendJson(response, 401, { detail: "A valid Expert account token is required." }); return; }
+  const channelsView = async () => {
+    const links = await context.links!.list(account.id);
+    return Promise.all(CHANNEL_KINDS.map(async kind => {
+      const link = links.find(candidate => candidate.kind === kind);
+      const ownApp = kind === "lark" && Boolean(context.credentialSeal);
+      return {
+        kind, available: Boolean(await context.channels!.get(kind, account.id)), linked: Boolean(link?.peerId),
+        ...(ownApp ? { own_app: true, webhook_url: `${context.publicOrigin}/v1/channels/lark/${account.id}/webhook` } : {}),
+        ...(link?.lastEventAt ? { last_event_at: link.lastEventAt } : {}),
+      };
+    }));
+  };
+  if (url.pathname === "/v1/creator/assistant" && request.method === "GET") {
+    const timezone = url.searchParams.get("tz");
+    if (timezone) await context.reach.setTimezone(account.id, timezone);
+    sendJson(response, 200, { ...await assistant.view(account.id), channels: await channelsView() }, { "cache-control": "no-store" });
+    return;
+  }
+  if (url.pathname === "/v1/creator/assistant/messages" && request.method === "POST") {
+    const body = await readJson(request);
+    const content = typeof body.content === "string" ? body.content.trim() : "";
+    if (!content || content.length > 20_000) { sendJson(response, 400, { error: { code: "invalid_message", message: "Message must contain 1–20000 characters." } }); return; }
+    await assistant.ingest(account.id, { source: "web", text: content });
+    sendJson(response, 202, { accepted: true });
+    return;
+  }
+  if (url.pathname === "/v1/creator/assistant/files" && request.method === "POST") {
+    const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
+    const name = typeof body.name === "string" ? body.name : ""; const bytes = Buffer.from(typeof body.base64 === "string" ? body.base64 : "", "base64");
+    if (!name || !bytes.length || bytes.length > 20 * 1024 * 1024) { sendJson(response, 400, { error: { code: "invalid_file", message: "A file of 1 byte to 20 MiB is required." } }); return; }
+    sendJson(response, 201, await assistant.receiveFile(account.id, name, bytes, "web"));
+    return;
+  }
+  const imageMatch = url.pathname.match(/^\/v1\/creator\/assistant\/images\/([0-9a-f-]{36}\.(?:jpg|jpeg|png|webp|gif))$/);
+  if (imageMatch && request.method === "GET") {
+    const bytes = await assistant.image(account.id, imageMatch[1]!).catch(() => undefined);
+    if (!bytes) { sendJson(response, 404, { error: { code: "image_not_found", message: "Image was not found." } }); return; }
+    response.writeHead(200, { "content-type": imageMime(imageMatch[1]!)!, "content-length": bytes.length, "cache-control": "private, max-age=86400" });
+    response.end(bytes);
+    return;
+  }
+  if (url.pathname === "/v1/creator/assistant/events" && request.method === "GET") {
+    response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
+    response.write(": connected\n\n");
+    const listener = (event: { accountId?: string }) => { if (event.accountId === account.id && !response.writableEnded) response.write(`data: ${JSON.stringify({ ...event, accountId: undefined })}\n\n`); };
+    assistant.events.on("event", listener);
+    const heartbeat = setInterval(() => { if (!response.writableEnded) response.write(": heartbeat\n\n"); }, 15_000);
+    await new Promise<void>(resolve => response.once("close", () => resolve()));
+    clearInterval(heartbeat);
+    assistant.events.off("event", listener);
+    return;
+  }
+  const taskAction = url.pathname.match(/^\/v1\/creator\/assistant\/tasks\/([0-9a-f-]{36})\/(approve|decline|answer)$/);
+  if (taskAction && request.method === "POST") {
+    const [, taskId, action] = taskAction;
+    const body = await readJson(request);
+    const task = action === "approve" ? await assistant.approve(account.id, taskId!)
+      : action === "decline" ? await assistant.decline(account.id, taskId!)
+        : await assistant.answer(account.id, taskId!, String(body.answer ?? "").trim() || (() => { throw Object.assign(new Error("answer is required"), { status: 400 }); })());
+    await assistant.ingest(account.id, { source: "task", taskId: task.id, text: `专家在 Studio 里${action === "approve" ? "确认了" : action === "decline" ? "取消了" : "回答了"}这件事。` });
+    sendJson(response, 200, { task });
+    return;
+  }
+  if (url.pathname === "/v1/creator/assistant/channels/lark/credentials" && request.method === "POST") {
+    if (!context.credentialSeal) { sendJson(response, 503, { error: { code: "channel_unavailable", message: "Lark is not available." } }); return; }
+    const body = await readJson(request);
+    const text = (name: string) => typeof body[name] === "string" ? (body[name] as string).trim() : "";
+    const credentials: LarkCredentials = { domain: body.domain === "feishu" ? "feishu" : "lark", appId: text("app_id"), appSecret: text("app_secret"), verificationToken: text("verification_token"), ...(text("encrypt_key") ? { encryptKey: text("encrypt_key") } : {}) };
+    if (!credentials.appId || !credentials.appSecret || !credentials.verificationToken) { sendJson(response, 400, { error: { code: "invalid_credentials", message: "App ID, App Secret and Verification Token are required." } }); return; }
+    try { await new LarkChannel(credentials, account.id).probe(); }
+    catch (cause) { sendJson(response, 422, { error: { code: "lark_probe_failed", message: cause instanceof Error ? cause.message : String(cause) } }); return; }
+    await context.links!.saveCredentials(account.id, "lark", context.credentialSeal.seal(credentials));
+    sendJson(response, 200, { channels: await channelsView() });
+    return;
+  }
+  const channelRoute = url.pathname.match(/^\/v1\/creator\/assistant\/channels\/([a-z]+)(\/connect)?$/);
+  if (channelRoute && (CHANNEL_KINDS as readonly string[]).includes(channelRoute[1]!)) {
+    const kind = channelRoute[1] as ChannelKind;
+    if (channelRoute[2] && request.method === "POST") { sendJson(response, 200, await assistant.connectChannel(account.id, kind)); return; }
+    if (!channelRoute[2] && request.method === "DELETE") { await context.links!.unlink(account.id, kind); sendJson(response, 200, { channels: await channelsView() }); return; }
+  }
+  sendJson(response, 404, { error: { code: "not_found", message: "Route not found." } });
 }

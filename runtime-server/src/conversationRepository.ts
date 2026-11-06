@@ -166,6 +166,8 @@ export interface ConversationRepository {
   /** Lookup used to acknowledge a transport retry without starting tools again. */
   getRunByClientMessageId(conversationId: string, clientMessageId: string): Promise<ConversationRunRecord | undefined>;
   listRuns(conversationId: string): Promise<ConversationRunRecord[]>;
+  /** Messages the owner has sent to this Agent across all conversations; failed runs are not counted. */
+  countSentMessages(binding: Pick<ConversationBinding, "ownerAccountId" | "creatorId" | "agentId">): Promise<number>;
   transitionRun(runId: string, status: DurableRunStatus, reason?: string): Promise<ConversationRunRecord>;
   appendEvent(input: Omit<ConversationJournalEvent, "cursor" | "createdAt"> & { createdAt?: string }): Promise<ConversationJournalEvent>;
   snapshot(conversationId: string, afterCursor?: number): Promise<ConversationSnapshot>;
@@ -476,6 +478,17 @@ export class InMemoryConversationRepository implements ConversationRepository {
       candidate.conversationId === conversationId && candidate.clientMessageId === clientMessageId
     ));
     return run ? cloneRun(run) : undefined;
+  }
+
+  async countSentMessages(binding: Pick<ConversationBinding, "ownerAccountId" | "creatorId" | "agentId">): Promise<number> {
+    await this.readReady();
+    return [...this.runs.values()].filter((run) => {
+      const conversation = this.conversations.get(run.conversationId);
+      return run.status !== "failed"
+        && conversation?.ownerAccountId === binding.ownerAccountId
+        && conversation.creatorId === binding.creatorId
+        && conversation.agentId === binding.agentId;
+    }).length;
   }
 
   async listRuns(conversationId: string): Promise<ConversationRunRecord[]> {
@@ -1012,6 +1025,17 @@ export class PostgresConversationRepository implements ConversationRepository {
       WHERE conversation_id = $1 AND client_message_id = $2
     `, [conversationId, clientMessageId]);
     return result.rows[0] ? runFromRow(result.rows[0]) : undefined;
+  }
+
+  async countSentMessages(binding: Pick<ConversationBinding, "ownerAccountId" | "creatorId" | "agentId">): Promise<number> {
+    await this.initialize();
+    const result = await this.pool.query<{ count: string }>(`
+      SELECT count(*) AS count
+      FROM hatch_conversation_runs AS r
+      JOIN hatch_conversations AS c ON c.id = r.conversation_id
+      WHERE c.owner_account_id = $1 AND c.creator_id = $2 AND c.agent_id = $3 AND r.status <> 'failed'
+    `, [binding.ownerAccountId, binding.creatorId, binding.agentId]);
+    return Number(result.rows[0]?.count ?? 0);
   }
 
   async listRuns(conversationId: string): Promise<ConversationRunRecord[]> {

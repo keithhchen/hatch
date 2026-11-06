@@ -48,6 +48,7 @@ export function parseCreatorRoute(pathname) {
   const segments = clean.slice(ROOT.length).split("/").filter(Boolean).map(safeDecode);
   const [head, second, third, fourth] = segments;
   if (!segments.length) return page("home", "home");
+  if (head === "assistant" && segments.length === 1) return page("assistant", "assistant");
   if (head === "factory") {
     if (segments.length === 1) return redirect(`${ROOT}/products`, "products");
     const productId = second;
@@ -85,7 +86,7 @@ export function parseCreatorRoute(pathname) {
 
 export function creatorRouteTitle(route) {
   const titles = {
-    home: "Overview", products: "Agents", "product-create": "New Agent", agent: "Agent", candidate: "Candidate review",
+    assistant: "Assistant", home: "Overview", products: "Agents", "product-create": "New Agent", agent: "Agent", candidate: "Candidate review",
     orders: "Orders", order: "Order", earnings: "Earnings", settings: "Settings"
   };
   return titles[route.kind] ?? "Studio";
