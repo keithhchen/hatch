@@ -26,7 +26,7 @@ const ORDER_ID = "66666666-6666-4666-8666-666666666666";
 test("Runtime delegates opaque session identity to the configured Registry verifier", async () => {
   const identityResolver = {
     resolveIdentity: async (token?: string) => token === "opaque-user"
-      ? { sub: USER_ID, role: "user" as const, exp: Math.floor(Date.now() / 1000) + 3600 }
+      ? { sub: USER_ID, exp: Math.floor(Date.now() / 1000) + 3600 }
       : undefined
   };
   const entitlementResolver = {
@@ -65,7 +65,7 @@ test("Runtime rejects another user's entitlement for an introspected session", a
   };
   const identityResolver = {
     resolveIdentity: async (token?: string) => token === "opaque-mallory"
-      ? { sub: OTHER_USER_ID, role: "user" as const, exp: Math.floor(Date.now() / 1000) + 3600 }
+      ? { sub: OTHER_USER_ID, exp: Math.floor(Date.now() / 1000) + 3600 }
       : undefined
   };
   // Simulate a Registry authorization regression: both lookups return an
@@ -90,6 +90,7 @@ test("Runtime rejects another user's entitlement for an introspected session", a
     tools: [{ id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }]
   };
   const agentCorpusResolver = {
+    list: async () => [],
     resolve: async () => ({
       root: "/tmp/hatch-runtime-auth-boundary",
       corpus,
@@ -240,7 +241,7 @@ test("existing buyer uses the current Product in an open session after republica
   }
 });
 
-test("Runtime re-introspects a Creator session per turn without requiring a buyer entitlement", async () => {
+test("Runtime re-introspects an owner session per turn without requiring an entitlement", async () => {
   const runId = `run-creator-authorized-${randomUUID()}`;
   let identityCalls = 0;
   let runCalls = 0;
@@ -248,7 +249,7 @@ test("Runtime re-introspects a Creator session per turn without requiring a buye
     resolveIdentity: async (token?: string) => {
       identityCalls += 1;
       return token === "opaque-creator-session"
-        ? { sub: CREATOR_ID, role: "creator" as const, exp: Math.floor(Date.now() / 1000) + 3_600 }
+        ? { sub: CREATOR_ID, exp: Math.floor(Date.now() / 1000) + 3_600 }
         : undefined;
     }
   };
@@ -265,7 +266,8 @@ test("Runtime re-introspects a Creator session per turn without requiring a buye
   await seedAuthConversation(repository, entitlement, "conversation-revocable-access", digest);
   const corpus = revocableTestCorpus(entitlement);
   const agentCorpusResolver = {
-    resolve: async () => ({ root: "", corpus, digest })
+    resolve: async () => ({ root: "", corpus, digest }),
+    resolveByProduct: async () => ({ root: "", corpus, digest })
   } as unknown as AgentCorpusResolver;
   const agentRuntime: AgentRuntime = {
     async *run(input) {
@@ -356,9 +358,9 @@ test("Runtime admits only one client hello while Registry authorization is pendi
   const entitlement = testEntitlement();
   let identityCalls = 0;
   let markIdentityStarted: (() => void) | undefined;
-  let releaseIdentity: ((identity: { sub: string; role: "user" }) => void) | undefined;
+  let releaseIdentity: ((identity: { sub: string }) => void) | undefined;
   const identityStarted = new Promise<void>((resolve) => { markIdentityStarted = resolve; });
-  const pendingIdentity = new Promise<{ sub: string; role: "user" }>((resolve) => {
+  const pendingIdentity = new Promise<{ sub: string }>((resolve) => {
     releaseIdentity = resolve;
   });
   const identityResolver: AuthIdentityResolver = {
@@ -402,11 +404,11 @@ test("Runtime admits only one client hello while Registry authorization is pendi
     assert.equal(identityCalls, 1);
 
     const readyResponse = waitForSocketMessage(socket, (message) => message.type === "session.ready");
-    releaseIdentity?.({ sub: entitlement.user_id, role: "user" });
+    releaseIdentity?.({ sub: entitlement.user_id });
     assert.equal((await readyResponse).type, "session.ready");
     assert.equal(identityCalls, 1);
   } finally {
-    releaseIdentity?.({ sub: entitlement.user_id, role: "user" });
+    releaseIdentity?.({ sub: entitlement.user_id });
     socket.close();
     await boundary.runtime.close();
   }
@@ -415,16 +417,16 @@ test("Runtime admits only one client hello while Registry authorization is pendi
 test("Runtime reserves the bound conversation slot before Registry awaits", async () => {
   const entitlement = testEntitlement();
   let identityCalls = 0;
-  let releasePendingIdentity: ((identity: { sub: string; role: "user" } | undefined) => void) | undefined;
+  let releasePendingIdentity: ((identity: { sub: string } | undefined) => void) | undefined;
   let markPendingStarted: (() => void) | undefined;
   const pendingStarted = new Promise<void>((resolve) => { markPendingStarted = resolve; });
-  const pendingIdentity = new Promise<{ sub: string; role: "user" } | undefined>((resolve) => {
+  const pendingIdentity = new Promise<{ sub: string } | undefined>((resolve) => {
     releasePendingIdentity = resolve;
   });
   const identityResolver: AuthIdentityResolver = {
     resolveIdentity: async () => {
       identityCalls += 1;
-      if (identityCalls <= 2) return { sub: entitlement.user_id, role: "user" };
+      if (identityCalls <= 2) return { sub: entitlement.user_id };
       if (identityCalls === 3) {
         markPendingStarted?.();
         return pendingIdentity;
@@ -475,7 +477,7 @@ test("Runtime turns a Registry authorization timeout into a controlled unavailab
     if (pathname === "/v1/auth/me") {
       identityCalls += 1;
       if (identityCalls === 1) {
-        return new Response(JSON.stringify({ id: entitlement.user_id, role: "user" }), { status: 200 });
+        return new Response(JSON.stringify({ id: entitlement.user_id }), { status: 200 });
       }
       return new Promise<Response>((_resolve, reject) => {
         const signal = init?.signal;
@@ -525,7 +527,7 @@ test("closing a Runtime socket aborts its pending Registry authorization request
   const identityResolver: AuthIdentityResolver = {
     resolveIdentity: async (_token, options) => {
       identityCalls += 1;
-      if (identityCalls === 1) return { sub: entitlement.user_id, role: "user" };
+      if (identityCalls === 1) return { sub: entitlement.user_id };
       markPendingStarted?.();
       return new Promise((_resolve, reject) => {
         const signal = options?.signal;
@@ -649,7 +651,6 @@ async function createRevocableRuntimeScenario(): Promise<{
       }
       response.end(JSON.stringify({
         id: entitlement.user_id,
-        role: "user",
         session_expires_at: new Date(Date.now() + 3_600_000).toISOString()
       }));
       return;
@@ -677,6 +678,7 @@ async function createRevocableRuntimeScenario(): Promise<{
   await seedAuthConversation(repository, entitlement, "conversation-revocable-access", digest);
   const corpus = revocableTestCorpus(entitlement);
   const agentCorpusResolver = {
+    list: async () => [],
     resolve: async (_creatorId: string, _productId: string, selection?: string | AbortSignal) => {
       assert.notEqual(typeof selection, "string", "Runtime must not use purchase history to select instructions");
       return { root: "", corpus, digest: registryState.corpusDigest };
@@ -852,12 +854,19 @@ test("Creator conversation REST uses owned Product authorization without a buyer
   };
   const runtime = createRuntimeServer({
     authIdentityResolver: { resolveIdentity: async token => token === "owner-session"
-      ? { sub: CREATOR_ID, role: "creator", exp: Math.floor(Date.now() / 1000) + 3600 }
-      : token === "buyer-session" ? { sub: USER_ID, role: "user", exp: Math.floor(Date.now() / 1000) + 3600 } : undefined },
-    agentCorpusResolver: { resolve: async (creatorId: string, productId: string) => {
-      if (creatorId !== CREATOR_ID || productId !== PRODUCT_ID) throw new EntitlementError("agent_not_found", "Not owned");
-      return { root: "", corpus, digest: `sha256:${"2".repeat(64)}` };
-    } } as unknown as AgentCorpusResolver,
+      ? { sub: CREATOR_ID, exp: Math.floor(Date.now() / 1000) + 3600 }
+      : token === "buyer-session" ? { sub: USER_ID, exp: Math.floor(Date.now() / 1000) + 3600 } : undefined },
+    agentCorpusResolver: {
+      resolve: async (creatorId: string, productId: string) => {
+        if (creatorId !== CREATOR_ID || productId !== PRODUCT_ID) throw new EntitlementError("agent_not_found", "Not owned");
+        return { root: "", corpus, digest: `sha256:${"2".repeat(64)}` };
+      },
+      // The owner is whatever the live release says, not what the client claims.
+      resolveByProduct: async (productId: string) => {
+        if (productId !== PRODUCT_ID) throw new EntitlementError("agent_not_found", "No live release");
+        return { root: "", corpus, digest: `sha256:${"2".repeat(64)}` };
+      }
+    } as unknown as AgentCorpusResolver,
     conversationRepository: new InMemoryConversationRepository()
   });
   await new Promise<void>(resolve => runtime.server.listen(0, "127.0.0.1", resolve));
@@ -875,4 +884,64 @@ test("Creator conversation REST uses owned Product authorization without a buyer
     assert.notEqual((await create("buyer-session", PRODUCT_ID)).status, 201);
     assert.notEqual((await create("invalid-session", PRODUCT_ID)).status, 201);
   } finally { await runtime.close(); }
+});
+
+test("Expert Agent list returns owned published Products by product_id beside entitlement grants", async () => {
+  const OTHER_PRODUCT_ID = "77777777-7777-4777-8777-777777777777";
+  const owned = revocableTestCorpus({ ...testEntitlement(), creator_id: USER_ID, product_id: OTHER_PRODUCT_ID, agent_id: OTHER_PRODUCT_ID });
+  const acquired = revocableTestCorpus(testEntitlement());
+  const digest = `sha256:${"4".repeat(64)}`;
+  const runtime = createRuntimeServer({
+    authIdentityResolver: { resolveIdentity: async (token) => token === "account-session" ? { sub: USER_ID } : undefined },
+    entitlementResolver: { list: async () => [testEntitlement()], resolve: async () => testEntitlement() },
+    agentCorpusResolver: {
+      list: async (creatorId: string) => creatorId === USER_ID ? [{ root: "", corpus: owned, digest }] : [],
+      resolve: async () => ({ root: "", corpus: acquired, digest })
+    } as unknown as AgentCorpusResolver
+  });
+  await new Promise<void>((resolve) => runtime.server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = runtime.server.address(); assert.ok(address && typeof address !== "string");
+    const response = await fetch(`http://127.0.0.1:${address.port}/v1/me/creator-agents`, { headers: { authorization: "Bearer account-session" } });
+    assert.equal(response.status, 200);
+    const { creator_agents: rows } = await response.json() as { creator_agents: Array<Record<string, unknown>> };
+    assert.deepEqual(rows.map((row) => [row.product_id, row.creator_id, row.entitlement_id]), [
+      [OTHER_PRODUCT_ID, USER_ID, undefined],
+      [PRODUCT_ID, CREATOR_ID, ENTITLEMENT_ID]
+    ]);
+  } finally { await runtime.close(); }
+});
+
+test("product_id hello from a non-owner is rejected even when hello.creator_id claims ownership", async () => {
+  const corpus = revocableTestCorpus(testEntitlement());
+  const runtime = createRuntimeServer({
+    authIdentityResolver: { resolveIdentity: async (token) => token === "buyer-session" ? { sub: USER_ID } : undefined },
+    agentCorpusResolver: {
+      resolveByProduct: async () => ({ root: "", corpus, digest: `sha256:${"5".repeat(64)}` })
+    } as unknown as AgentCorpusResolver,
+    conversationRepository: new InMemoryConversationRepository()
+  });
+  await new Promise<void>((resolve) => runtime.server.listen(0, "127.0.0.1", resolve));
+  let socket: WebSocket | undefined;
+  try {
+    const address = runtime.server.address(); assert.ok(address && typeof address !== "string");
+    socket = new WebSocket(`ws://127.0.0.1:${address.port}/runtime`);
+    await new Promise<void>((resolve, reject) => { socket!.once("open", resolve); socket!.once("error", reject); });
+    const response = nextSocketMessage(socket);
+    socket.send(JSON.stringify({
+      type: "client.hello",
+      protocol_version: PROTOCOL_VERSION,
+      conversation_id: "conversation-not-owned",
+      auth_token: "buyer-session",
+      creator_id: USER_ID,
+      product_id: PRODUCT_ID,
+      local_tools: []
+    }));
+    const failed = await response;
+    assert.equal(failed.type, "turn.failed");
+    assert.equal((failed.error as { code?: string }).code, "entitlement_required");
+  } finally {
+    socket?.close();
+    await runtime.close();
+  }
 });

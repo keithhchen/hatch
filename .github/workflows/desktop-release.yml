@@ -60,6 +60,10 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
           rustup show active-toolchain
+      - name: Install shared UI and chat dependencies
+        run: |
+          npm ci --prefix packages/ui
+          npm ci --prefix packages/chat
       - name: Install frontend dependencies
         working-directory: desktop-app
         run: npm ci

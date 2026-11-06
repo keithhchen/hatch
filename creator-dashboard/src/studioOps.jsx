@@ -1,16 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Dialog, DialogContent } from "@hatch/ui";
-import { ArrowLeft, ChevronRight, Download, Landmark, LogOut, MonitorDown, ReceiptText, SlidersHorizontal, Wallet } from "lucide-react";
-import { AccountAvatarSettings } from "./AccountAvatarSettings.jsx";
-import { LOCALES, useLocale } from "./locale.jsx";
-import { avatarSettingsT, eventLabel, statusLabel, studioOpsCopy } from "./studioOpsCopy.js";
+import { ArrowLeft, ChevronRight, Download, Landmark,  ReceiptText, SlidersHorizontal, Wallet } from "lucide-react";
+import { eventLabel, statusLabel, studioOpsCopy } from "./studioOpsCopy.js";
 import {
   ORDER_FILTER_OPTIONS,
   activeFilterCount,
   formatDate,
   formatDateTime,
   formatMinor,
-  hasCapability,
   newIdempotencyKey,
   orderProductName,
   orderShares,
@@ -21,7 +18,6 @@ import {
 import "./studioOps.css";
 
 const PAGE_SIZE = 25;
-const LANGUAGE_NAMES = { zh: "中文", en: "English", ja: "日本語" };
 
 /* ---------- shared pieces ---------- */
 
@@ -112,7 +108,7 @@ function ReasonDialog({ open, onOpenChange, title, body, label, hint, placeholde
 
 const EMPTY_FILTERS = { product: "", order: "", payment: "", delivery: "", refund: "", from: "", to: "" };
 
-export function StudioOrdersPage({ request, navigate, locale, profile }) {
+export function StudioOrdersPage({ request, navigate, locale }) {
   const copy = studioOpsCopy(locale);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [products, setProducts] = useState([]);
@@ -123,7 +119,6 @@ export function StudioOrdersPage({ request, navigate, locale, profile }) {
   const [moreBusy, setMoreBusy] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const filterCount = activeFilterCount(filters);
-  const canExport = hasCapability(profile, "commerce:export", "creator");
 
   useEffect(() => {
     let live = true;
@@ -193,9 +188,9 @@ export function StudioOrdersPage({ request, navigate, locale, profile }) {
         <Button className="sops-only-mobile" variant="secondary" size="compact" leading={<SlidersHorizontal aria-hidden="true" />} aria-expanded={showFilters} onClick={() => setShowFilters((value) => !value)}>
           {copy.filters}{filterCount ? ` · ${filterCount}` : ""}
         </Button>
-        {canExport && orders.length
+        {orders.length
           ? <Button asChild variant="secondary" size="compact" leading={<Download aria-hidden="true" />}><a href={exportHref} download>{copy.exportCsv}</a></Button>
-          : <Button variant="secondary" size="compact" leading={<Download aria-hidden="true" />} disabled title={canExport ? undefined : copy.exportUnavailable}>{copy.exportCsv}</Button>}
+          : <Button variant="secondary" size="compact" leading={<Download aria-hidden="true" />} disabled>{copy.exportCsv}</Button>}
       </>}
     />
 
@@ -267,14 +262,13 @@ export function StudioOrdersPage({ request, navigate, locale, profile }) {
 
 /* ---------- Order detail ---------- */
 
-export function StudioOrderDetailPage({ request, navigate, locale, profile, orderId }) {
+export function StudioOrderDetailPage({ request, navigate, locale, orderId }) {
   const copy = studioOpsCopy(locale);
   const [order, setOrder] = useState(null);
   const [status, setStatus] = useState("loading");
   const [error, setError] = useState(null);
   const [refundOpen, setRefundOpen] = useState(false);
   const [notice, setNotice] = useState("");
-  const canRefund = hasCapability(profile, "refund:create", "creator");
 
   const reload = useCallback(() => {
     let live = true;
@@ -335,7 +329,7 @@ export function StudioOrderDetailPage({ request, navigate, locale, profile, orde
       back={back}
       title={order.order_number}
       body={<span className="sops-head__meta"><Pill value={order.status} copy={copy} />{copy.orderPlaced(formatDateTime(placed, locale))}</span>}
-      actions={canRefund && order.actions?.can_request_refund
+      actions={order.actions?.can_request_refund
         ? <Button variant="secondary" size="compact" onClick={() => setRefundOpen(true)}>{copy.requestRefund}</Button>
         : null}
     />
@@ -404,7 +398,7 @@ export function StudioOrderDetailPage({ request, navigate, locale, profile, orde
 
 /* ---------- Earnings ---------- */
 
-export function StudioEarningsPage({ request, locale, profile }) {
+export function StudioEarningsPage({ request, locale }) {
   const copy = studioOpsCopy(locale);
   const [overview, setOverview] = useState({ status: "loading" });
   const [payouts, setPayouts] = useState({ status: "loading" });
@@ -413,7 +407,6 @@ export function StudioEarningsPage({ request, locale, profile }) {
   const [detail, setDetail] = useState(null);
   const [retryTarget, setRetryTarget] = useState(null);
   const [notice, setNotice] = useState("");
-  const canManage = hasCapability(profile, "payout:manage", "creator");
 
   const loadOverview = useCallback(() => {
     setOverview({ status: "loading" });
@@ -513,7 +506,7 @@ export function StudioEarningsPage({ request, locale, profile }) {
           {payoutData.account_status && setup !== "unavailable" ? <p className="sops-faint">{copy.payoutAccountStatus}: {statusLabel(copy, payoutData.account_status)}</p> : null}
           {connectError ? <p className="sops-inline-error" role="alert">{connectError.message}{connectError.request_id ? ` · ${copy.requestId(connectError.request_id)}` : ""}</p> : null}
         </div>
-        {setup !== "unavailable" && canManage ? <Button variant={setup === "required" ? "primary" : "secondary"} size="compact" loading={connecting} onClick={() => void connect()}>
+        {setup !== "unavailable" ? <Button variant={setup === "required" ? "primary" : "secondary"} size="compact" loading={connecting} onClick={() => void connect()}>
           {connecting ? copy.payoutConnecting : setup === "required" ? copy.payoutConnect : copy.payoutUpdateAccount}
         </Button> : null}
       </div> : null}
@@ -537,7 +530,7 @@ export function StudioEarningsPage({ request, locale, profile }) {
           <div className="sops-rows__meta">
             <Pill value={payout.status} copy={copy} />
             <button type="button" className="sops-link" onClick={() => void openDetail(payout)}>{copy.payoutDetail}</button>
-            {payout.status === "failed" && canManage ? <button type="button" className="sops-link" onClick={() => setRetryTarget(payout)}>{copy.payoutRetry}</button> : null}
+            {payout.status === "failed" ? <button type="button" className="sops-link" onClick={() => setRetryTarget(payout)}>{copy.payoutRetry}</button> : null}
           </div>
         </li>)}
       </ul> : <p className="sops-faint">{copy.payoutsEmpty}</p>}
@@ -557,7 +550,7 @@ export function StudioEarningsPage({ request, locale, profile }) {
           {detail.payout.failure ? <div><dt>{copy.payoutFailure}</dt><dd>{detail.payout.failure.message ?? detail.payout.failure.code}</dd></div> : null}
           <div><dt>{copy.payoutId}</dt><dd className="sops-break">{detail.payout.payout_id}</dd></div>
         </dl> : null}
-        {detail.status === "ready" && detail.payout.status === "failed" && canManage
+        {detail.status === "ready" && detail.payout.status === "failed"
           ? <div className="sops-form__actions"><Button size="compact" onClick={() => setRetryTarget(detail.payout)}>{copy.payoutRetry}</Button></div>
           : null}
       </DialogContent> : null}
@@ -577,76 +570,3 @@ export function StudioEarningsPage({ request, locale, profile }) {
   </div>;
 }
 
-/* ---------- Settings ---------- */
-
-export function StudioSettingsPage({ request, navigate, locale, profile }) {
-  const copy = studioOpsCopy(locale);
-  const { setLocale } = useLocale();
-  const [user, setUser] = useState(profile ?? null);
-  const [signingOut, setSigningOut] = useState(false);
-  const [signOutError, setSignOutError] = useState(null);
-  const avatarT = useMemo(() => avatarSettingsT(locale), [locale]);
-
-  useEffect(() => {
-    let live = true;
-    request("/v1/creator/me").then((payload) => { if (live) setUser(payload); }).catch(() => undefined);
-    return () => { live = false; };
-  }, [request]);
-
-  async function signOut() {
-    setSigningOut(true);
-    setSignOutError(null);
-    try {
-      await request("/v1/auth/logout", { method: "POST" });
-      window.location.assign("/sign-in");
-    } catch (cause) {
-      setSignOutError(cause);
-      setSigningOut(false);
-    }
-  }
-
-  return <div className="sops-page">
-    <PageHead title={copy.settingsTitle} body={copy.settingsBody} />
-    <div className="sops-settings">
-      <section className="sops-card sops-section">
-        <h2>{copy.profileTitle}</h2>
-        <AccountAvatarSettings user={user} onUserUpdated={setUser} t={avatarT} />
-        <dl className="sops-dl">
-          <div><dt>{copy.profileName}</dt><dd>{user?.display_name}</dd></div>
-          {user?.handle && !/^@?[0-9a-f]{8}-[0-9a-f]{4}-/i.test(user.handle) ? <div><dt>{copy.profileHandle}</dt><dd className="sops-break">{user.handle}</dd></div> : null}
-        </dl>
-        <p className="sops-faint sops-note">{copy.profileReadonly}</p>
-      </section>
-
-      <section className="sops-card sops-section">
-        <h2>{copy.languageTitle}</h2>
-        <p className="sops-faint">{copy.languageBody}</p>
-        <div className="sops-segment" role="group" aria-label={copy.languageTitle}>
-          {LOCALES.map((value) => <button key={value} type="button" lang={value} aria-pressed={locale === value} className={locale === value ? "is-active" : ""} onClick={() => setLocale(value)}>{LANGUAGE_NAMES[value]}</button>)}
-        </div>
-      </section>
-
-      <section className="sops-card sops-section">
-        <h2>{copy.accountTitle}</h2>
-        <dl className="sops-dl">
-          <div><dt>{copy.accountRole}</dt><dd>{copy.role[user?.role] ?? user?.role}</dd></div>
-        </dl>
-      </section>
-
-      <section className="sops-card sops-section sops-row-card">
-        <span className="sops-state__icon" aria-hidden="true"><MonitorDown /></span>
-        <div><h2>{copy.desktopTitle}</h2><p className="sops-faint">{copy.desktopBody}</p></div>
-        <Button asChild variant="secondary" size="compact"><a href="/download">{copy.desktopAction}</a></Button>
-      </section>
-
-      <section className="sops-card sops-section sops-row-card">
-        <span className="sops-state__icon" aria-hidden="true"><LogOut /></span>
-        <div>
-          <h2>{copy.signOutTitle}</h2><p className="sops-faint">{copy.signOutBody}</p>
-          {signOutError ? <p className="sops-inline-error" role="alert">{signOutError.message}</p> : null}
-        </div>
-        <Button variant="secondary" size="compact" loading={signingOut} onClick={() => void signOut()}>{signingOut ? copy.signingOut : copy.signOut}</Button>
-      </section>
-    </div>
-  </div>;
-}

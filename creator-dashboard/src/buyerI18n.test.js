@@ -27,7 +27,7 @@ test("Japanese copy never reuses the Chinese text", () => {
 
 test("buyer copy provides distinct Chinese and Japanese navigation and task states", () => {
   for (const locale of ["zh", "ja"]) {
-    for (const key of ["Explore", "Library", "Orders", "Sign in", "No published Agents", "This page is for client accounts", "Session expired", "Confirm order", "Page not found", "Loading details"]) {
+    for (const key of ["Explore", "Discover", "Orders and receipts", "Orders", "Sign in", "No published Agents", "My Agents", "Session expired", "Confirm order", "Page not found", "Loading details"]) {
       assert.notEqual(buyerT(locale, key), key, `${locale} must translate ${key}`);
     }
   }

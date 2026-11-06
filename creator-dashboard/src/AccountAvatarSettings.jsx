@@ -98,8 +98,6 @@ export function AccountAvatarSettings({ user, onUserUpdated, t, cropper = avatar
   return <section className="account-avatar-settings" aria-label={t("Profile photo")}>
     <Avatar className="account-avatar-settings__image" src={user?.avatar_url} name={user?.display_name} size="large" />
     <div className="account-avatar-settings__content">
-      <h3>{t("Profile photo")}</h3>
-      <p>{t("Your photo appears beside your account and Agent identity.")}</p>
       <div className="account-avatar-settings__actions">
         <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp" aria-label={t("Choose a profile photo")} onChange={selectImage} />
         <Button type="button" variant="secondary" loading={status === "pending"} disabled={status === "pending"} onClick={() => inputRef.current?.click()}>{t("Upload photo")}</Button>

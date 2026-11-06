@@ -38,14 +38,13 @@ test("portal telemetry is allowlisted, privacy-safe, and durably idempotent", as
   );
 });
 
-test("analytics HTTP ingestion is same-origin, retry-safe, private-field safe, and rate limited", async (context) => {
+test("analytics HTTP ingestion is same-origin, retry-safe, private-field safe", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-telemetry-http-"));
   const dashboard = await createDashboardApp({
     ledgerPath: path.join(directory, "ledger.jsonl"),
     portalStatePath: path.join(directory, "portal.json"),
     telemetryPath: path.join(directory, "telemetry.jsonl"),
     registryUrl: "http://127.0.0.1:1",
-    analyticsRateLimit: 4
   });
   const api = createServer(dashboard.handler);
   await new Promise((resolve) => api.listen(0, "127.0.0.1", resolve));
@@ -84,9 +83,5 @@ test("analytics HTTP ingestion is same-origin, retry-safe, private-field safe, a
   const conflict = await ingest("view-retry", "product_viewed", { product_id: "changed-product" });
   assert.equal(conflict.status, 409);
   assert.equal((await conflict.json()).error.code, "idempotency_conflict");
-
-  const limited = await ingest("rate-limited", "catalog_viewed", {});
-  assert.equal(limited.status, 429);
-  assert.equal(limited.headers.get("retry-after"), "60");
   assert.deepEqual(await dashboard.telemetry.summary(), { product_viewed: 1 });
 });

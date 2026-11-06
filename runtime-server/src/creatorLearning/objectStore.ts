@@ -276,6 +276,9 @@ export class AliyunArtifactObjectStore implements ArtifactObjectStore {
       region: this.options.region ?? "oss-cn-shanghai",
       ...(!publicEndpoint && this.options.endpoint ? { endpoint: this.options.endpoint } : {}),
       ...(publicEndpoint ? { internal: false } : this.options.internal === undefined ? {} : { internal: this.options.internal }),
+      // HTTPS for every request and every generated URL: Desktop's WebView
+      // refuses plaintext images, and public avatar URLs are stored as-is.
+      secure: true,
       accessKeyId: requireCredential(initial.accessKeyId, "accessKeyId"),
       accessKeySecret: requireCredential(initial.accessKeySecret, "accessKeySecret"),
       ...(initial.securityToken ? { stsToken: initial.securityToken } : {}),

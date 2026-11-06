@@ -106,16 +106,15 @@ test("Web and Storybook consume the shared package and its canonical tokens", ()
   assert.doesNotMatch(creatorCss, /\.cpv2-factory-draft\s+(?:input|select|textarea)/);
   // Web visual system (docs/web-visual-guidelines.md): the offer card sits on the Web card token.
   assert.match(storefrontCss, /\.storefront-shared__access\s*\{[^}]*background:[^;]*var\(--web-card\)/s);
-  assert.match(desktopCss, /\.desktop-window-shell\s*\{[^}]*--surface-window:\s*var\(--hatch-ui-surface-window\)/s);
-  assert.match(desktopCss, /\.desktop-ui-root\s*\{[^}]*height:\s*100%;/s);
-  assert.doesNotMatch(desktopCss, /\.desktop-window-shell::before/);
-  assert.doesNotMatch(desktopCss, /\.desktop-sidebar-heading \.desktop-sidebar-brand \.hatch-brand__wordmark/);
+  // Desktop feeds the shared @hatch/chat surface from its own native tokens.
+  assert.match(desktopCss, /--chat-ink:\s*var\(--desk-ink\)/);
+  assert.match(desktopCss, /--web-sans:\s*var\(--desk-font\)/);
+  assert.match(desktopCss, /\.desk-root\s*\{[^}]*height:\s*100%;/s);
+  assert.doesNotMatch(desktopCss, /backdrop-filter:\s*blur/);
   assert.match(sharedCss, /\.hatch-brand__wordmark\s*\{[^}]*font-size:\s*var\(--hatch-type-title\);/s);
   assert.match(desktopStory, /title:\s*["']Hatch\/Desktop visual system["']/);
   assert.match(desktopStory, /<SelectControl/);
   assert.match(desktopStory, /atmosphereStrength/);
-  assert.doesNotMatch(desktopCss, /\.welcome-brand \.hatch-brand__wordmark\s*\{[^}]*letter-spacing:\s*-\.035em/s);
-  assert.doesNotMatch(desktopCss, /\.desktop-sidebar-heading \.desktop-sidebar-brand \.hatch-brand__wordmark\s*\{[^}]*letter-spacing:\s*-\.035em/s);
   assert.match(buyerPortal, /className="buyer-v2__settings-surface(?: [^"]*)?"/);
   assert.doesNotMatch(buyerPortal, /<div><dt>Role<\/dt>/);
 });

@@ -1,10 +1,10 @@
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 
 export const RUNTIME_LLM_PROFILE_NAMES = ["kimi-k2.6", "kimi-k2.6-no-thinking", "deepseek-v4-flash", "gemini-api"] as const;
-export const FACTORY_LLM_PROFILE_NAMES = ["kimi-k2.6", "deepseek-v4-flash", "gemini-api"] as const;
+export const FACTORY_LLM_PROFILE_NAMES = ["kimi-k2.6", "deepseek-v4-flash", "gemini-api", "gemini-3.1-pro"] as const;
 export type FactoryLlmProfileName = (typeof FACTORY_LLM_PROFILE_NAMES)[number];
 export const LLM_PROFILE_NAMES = RUNTIME_LLM_PROFILE_NAMES;
-export type LlmProfileName = (typeof LLM_PROFILE_NAMES)[number];
+export type LlmProfileName = RuntimeLlmProfileName | FactoryLlmProfileName;
 export type RuntimeLlmProfileName = (typeof RUNTIME_LLM_PROFILE_NAMES)[number];
 
 export type LlmProfile = {
@@ -76,6 +76,20 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     providerName: "Google Gemini API",
     api: "google-generative-ai",
     model: "gemini-3.8-flash",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+    apiKeyEnv: "GEMINI_API_KEY",
+    contextWindow: 1_048_576,
+    maxTokens: 65_536,
+    reasoning: true,
+    thinkingLevel: "low",
+    normalizeEmptyToolCallContent: false
+  },
+  "gemini-3.1-pro": {
+    name: "gemini-3.1-pro",
+    provider: "google",
+    providerName: "Google Gemini API",
+    api: "google-generative-ai",
+    model: "gemini-3.1-pro-preview",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta",
     apiKeyEnv: "GEMINI_API_KEY",
     contextWindow: 1_048_576,

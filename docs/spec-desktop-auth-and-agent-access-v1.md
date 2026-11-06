@@ -1,6 +1,6 @@
 # Hatch Desktop Auth & Agent Access v1
 
-状态：设计已确认，已在独立 worktree 实现并完成 client/native UAT
+状态：已被取代。Desktop 登录改为系统浏览器 + PKCE + `hatch://auth/callback`（`/desktop/sign-in` → `POST /v1/auth/desktop/authorize` → `POST /v1/auth/desktop/token`，Registry `POST /v1/auth/sessions` 为设备签发独立 session），Desktop 内不再有邮箱密码表单与角色限制；Agent 列表改读 Runtime `GET /v1/me/creator-agents`（自有 Agent 以 `product_id` 访问，获取的 Agent 以 `entitlement_id` 访问）。见《统一账户与原生 Desktop v1》§7。下文仅作历史记录。
 
 日期：2026-08-10
 

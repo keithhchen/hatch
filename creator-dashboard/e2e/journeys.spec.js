@@ -42,7 +42,7 @@ test("anonymous Buyer completes free checkout and can recover every durable rout
   await page.getByLabel("Add this Product to my account.").check();
   await page.getByRole("button", { name: "Add to my account" }).click();
 
-  await expect(page).toHaveURL(/\/orders\/[^/]+\/success$/);
+  await expect(page).toHaveURL(/\/explore\/orders\/[^/]+\/success$/);
   const successUrl = page.url();
   await expect(page.getByRole("heading", { level: 1, name: "Signal Resume Review is ready." })).toBeVisible();
   await expect(page.getByText(/Free · Access granted/)).toBeVisible();
@@ -55,24 +55,11 @@ test("anonymous Buyer completes free checkout and can recover every durable rout
   await page.reload();
   await expect(page.getByRole("heading", { level: 1, name: "Signal Resume Review is ready." })).toBeVisible();
   await page.getByRole("link", { name: "View order receipt" }).click();
-  await expect(page).toHaveURL(/\/orders\/[^/]+$/);
+  await expect(page).toHaveURL(/\/explore\/orders\/[^/]+$/);
   await expect(page.getByRole("heading", { level: 1, name: "Signal Resume Review" })).toBeVisible();
   await expect(page.getByRole("definition").filter({ hasText: /^Not required$/ })).toBeVisible();
   await page.reload();
   await expect(page.getByText("Access granted", { exact: true }).first()).toBeVisible();
-
-  await page.goto(successUrl);
-  await page.getByRole("link", { name: "View access details" }).click();
-  await expect(page).toHaveURL(/\/library\/[^/]+$/);
-  await expect(page.getByRole("link", { name: "Back to Library" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Back to Explore" })).toHaveCount(0);
-  await page.reload();
-  await expect(page.getByRole("heading", { level: 1, name: "Signal Resume Review" })).toBeVisible();
-  await page.getByRole("link", { name: "Back to Library" }).click();
-  await expect(page).toHaveURL(/\/library$/);
-  await expect(page.getByRole("heading", { level: 1, name: "Agents linked to your account." })).toBeVisible();
-  await page.reload();
-  await expect(page.getByRole("heading", { level: 1, name: "Agents linked to your account." })).toBeVisible();
 
   await context.clearCookies();
   const protectedPath = new URL(successUrl).pathname;

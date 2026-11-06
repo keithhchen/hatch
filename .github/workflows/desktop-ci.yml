@@ -15,6 +15,7 @@ on:
       - "runtime-server/src/index.ts"
       - "desktop-app/runtime/**"
       - "packages/ui/**"
+      - "packages/chat/**"
       - "packages/protocol/**"
       - "scripts/uat/**"
       - "scripts/release/**"
@@ -39,6 +40,7 @@ on:
       - "runtime-server/src/index.ts"
       - "desktop-app/runtime/**"
       - "packages/ui/**"
+      - "packages/chat/**"
       - "packages/protocol/**"
       - "scripts/uat/**"
       - "scripts/release/**"
@@ -71,12 +73,18 @@ jobs:
           cache-dependency-path: |
             desktop-app/package-lock.json
             packages/ui/package-lock.json
+            packages/chat/package-lock.json
       - name: Verify Desktop version and release tag
         working-directory: .
         run: node scripts/uat/verify-desktop-version.mjs
       - name: Install shared UI dependencies
         working-directory: packages/ui
         run: npm ci
+      - name: Install and test shared chat
+        working-directory: packages/chat
+        run: |
+          npm ci
+          npm test
       - name: Install dependencies
         run: npm ci
       - name: Test renderer
@@ -85,7 +93,7 @@ jobs:
         run: npm run build:web
       - name: Test desktop UAT evidence helpers
         working-directory: .
-        run: node --test scripts/uat/*.test.mjs scripts/release/*.test.mjs desktop-app/scripts/node-cli-entrypoints.test.mjs desktop-app/scripts/native-runtime.test.mjs desktop-app/src/renderer/conversation-owner.node-test.mjs
+        run: node --test scripts/uat/*.test.mjs scripts/release/*.test.mjs desktop-app/scripts/node-cli-entrypoints.test.mjs desktop-app/scripts/native-runtime.test.mjs desktop-app/src/renderer/native/conversation-owner.node-test.mjs
 
   desktop-native:
     name: Desktop native, LocalRunner, and macOS ${{ matrix.architecture }} UAT package
@@ -111,6 +119,7 @@ jobs:
           cache-dependency-path: |
             desktop-app/package-lock.json
             packages/ui/package-lock.json
+            packages/chat/package-lock.json
       - name: Verify native build runner architecture
         run: |
           set -euo pipefail
@@ -131,6 +140,11 @@ jobs:
       - name: Install shared UI dependencies
         working-directory: packages/ui
         run: npm ci
+      - name: Install and test shared chat
+        working-directory: packages/chat
+        run: |
+          npm ci
+          npm test
       - name: Install renderer dependencies
         working-directory: desktop-app
         run: npm ci
@@ -209,6 +223,7 @@ jobs:
           cache-dependency-path: |
             desktop-app/package-lock.json
             packages/ui/package-lock.json
+            packages/chat/package-lock.json
       - name: Verify Desktop version and release tag
         run: node scripts/uat/verify-desktop-version.mjs
       - name: Select stable Rust toolchain
@@ -218,6 +233,11 @@ jobs:
       - name: Install shared UI dependencies
         working-directory: packages/ui
         run: npm ci
+      - name: Install and test shared chat
+        working-directory: packages/chat
+        run: |
+          npm ci
+          npm test
       - name: Install renderer dependencies
         working-directory: desktop-app
         run: npm ci

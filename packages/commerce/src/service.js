@@ -6,7 +6,8 @@ import {
   projectDeliveries,
   projectEntitlement,
   projectOrder,
-  projectRefunds
+  projectRefunds,
+  requireNotSelfPurchase
 } from "./ledger.js";
 import {
   PAYMENT_STATUSES,
@@ -40,6 +41,7 @@ export class CommerceService {
   async createPayment(input, options = {}) {
     const idempotencyKey = requireIdempotencyKey(input, options);
     requireFields(input, ["payment_id", "buyer_id", "creator_id", "product_id", "currency", "provider"]);
+    requireNotSelfPurchase(input);
     const amountMinor = input.amount_minor ?? input.gross_minor;
     requirePositiveInteger(amountMinor, "amount_minor");
     await this.ledger.append("payment.created", compact({
@@ -129,6 +131,7 @@ export class CommerceService {
     requireFields(checkoutInput, [
       "buyer_id", "creator_id", "agent_id", "product_id", "corpus_digest", "currency", "payment_id"
     ]);
+    requireNotSelfPurchase(checkoutInput);
     if (checkoutInput.payment_id !== providerInput.payment_id) {
       throw new CommerceInvariantError("payment_identity_mismatch", "Provider event payment must match checkout");
     }
@@ -249,6 +252,7 @@ export class CommerceService {
     requireNonNegativeInteger(grossMinor, "gross_minor");
     const quote = normalizedCheckoutQuote(input, grossMinor);
     requireFields(input, ["buyer_id", "creator_id", "agent_id", "product_id", "corpus_digest", "currency"]);
+    requireNotSelfPurchase(input);
 
     const isFree = grossMinor === 0;
     const includedUnits = isFree ? undefined : input.included_units ?? 1;

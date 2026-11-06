@@ -78,11 +78,11 @@ test("old Product URLs redirect to the matching Agent workspace tab", () => {
   }
 });
 
-test("orders, earnings and settings are Studio sections", () => {
+test("orders and earnings are Studio sections; settings is the account page", () => {
   assert.deepEqual(parseCreatorRoute("/studio/orders"), { kind: "orders", section: "orders" });
   assert.deepEqual(parseCreatorRoute("/studio/orders/HAT-1"), { kind: "order", section: "orders", orderId: "HAT-1" });
   assert.deepEqual(parseCreatorRoute("/studio/earnings"), { kind: "earnings", section: "earnings" });
-  assert.deepEqual(parseCreatorRoute("/studio/settings"), { kind: "settings", section: "settings" });
+  assert.deepEqual(parseCreatorRoute("/studio/settings"), { kind: "redirect", section: "", to: "/account" });
   // The payout provider returns to /studio/payouts after onboarding.
   assert.deepEqual(parseCreatorRoute("/studio/payouts"), { kind: "redirect", section: "earnings", to: "/studio/earnings" });
 });

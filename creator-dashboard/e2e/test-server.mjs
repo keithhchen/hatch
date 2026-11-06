@@ -22,8 +22,8 @@ const BROWSER_PRODUCT_IDS = [
 const corpusDigest = `sha256:${"a".repeat(64)}`;
 const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-e2e-"));
 const accounts = new Map([
-  ["buyer@example.test", { id: "a4f1c2d3-5678-4a90-bcde-1234567890ab", role: "user", display_name: "Jordan Buyer", password: "buyer-password", token: "buyer-e2e-token" }],
-  ["creator@example.test", { id: CREATOR_ID, role: "creator", display_name: "Maya Creator", password: "creator-password", token: "creator-e2e-token" }]
+  ["buyer@example.test", { id: "a4f1c2d3-5678-4a90-bcde-1234567890ab", display_name: "Jordan Buyer", password: "buyer-password", token: "buyer-e2e-token" }],
+  ["creator@example.test", { id: CREATOR_ID, display_name: "Maya Creator", password: "creator-password", token: "creator-e2e-token" }]
 ]);
 const accountsByToken = new Map([...accounts.values()].map((account) => [account.token, account]));
 const factoryAnswerSubmissions = [];
@@ -156,7 +156,6 @@ const registry = createServer(async (request, response) => {
       if (accounts.has(email)) return json(response, 409, { detail: "Email is already registered." });
       const account = {
         id: randomUUID(),
-        role: "user",
         display_name: String(body.display_name ?? "New Buyer"),
         password: String(body.password ?? ""),
         token: `buyer-e2e-token-${accounts.size + 1}`
@@ -186,15 +185,15 @@ const registry = createServer(async (request, response) => {
     }
     if (request.method === "GET" && url.pathname === "/v1/creator/products") {
       const account = authenticatedAccount(request);
-      return account?.role === "creator" ? json(response, 200, [...agents.values()]) : json(response, 401, { detail: "Creator token required." });
+      return account ? json(response, 200, [...agents.values()].filter((entry) => entry.creator_id === account.id)) : json(response, 401, { detail: "A valid account token is required." });
     }
     if (request.method === "GET" && url.pathname === "/v1/creator/factory-runs") {
       const account = authenticatedAccount(request);
-      return account?.role === "creator" ? json(response, 200, { runs: [...factoryRuns.values()] }) : json(response, 401, { detail: "Creator token required." });
+      return account ? json(response, 200, { runs: [...factoryRuns.values()] }) : json(response, 401, { detail: "A valid account token is required." });
     }
     if (request.method === "POST" && url.pathname === "/v1/creator/factory-runs") {
       const account = authenticatedAccount(request);
-      if (account?.role !== "creator") return json(response, 401, { detail: "Creator token required." });
+      if (!account) return json(response, 401, { detail: "A valid account token is required." });
       const body = await readJson(request);
       const productId = String(body.task_name ?? "").trim();
       if (!productId) return json(response, 422, { detail: "task_name is required." });
@@ -209,14 +208,14 @@ const registry = createServer(async (request, response) => {
     const factoryRunMatch = url.pathname.match(/^\/v1\/creator\/factory-runs\/([^/]+)$/);
     if (request.method === "GET" && factoryRunMatch) {
       const account = authenticatedAccount(request);
-      if (account?.role !== "creator") return json(response, 401, { detail: "Creator token required." });
+      if (!account) return json(response, 401, { detail: "A valid account token is required." });
       const run = factoryRuns.get(decodeURIComponent(factoryRunMatch[1]));
       return run ? json(response, 200, run) : json(response, 404, { detail: "Factory run not found." });
     }
     const factoryAnswersMatch = url.pathname.match(/^\/v1\/creator\/factory-runs\/([^/]+)\/answers$/);
     if (request.method === "PUT" && factoryAnswersMatch) {
       const account = authenticatedAccount(request);
-      if (account?.role !== "creator") return json(response, 401, { detail: "Creator token required." });
+      if (!account) return json(response, 401, { detail: "A valid account token is required." });
       const runId = decodeURIComponent(factoryAnswersMatch[1]);
       const run = factoryRuns.get(runId);
       if (!run) return json(response, 404, { detail: "Factory run not found." });
@@ -254,7 +253,7 @@ const registry = createServer(async (request, response) => {
     const factoryPublishMatch = url.pathname.match(/^\/v1\/creator\/factory-runs\/([^/]+)\/publish$/);
     if (request.method === "POST" && factoryPublishMatch) {
       const account = authenticatedAccount(request);
-      if (account?.role !== "creator") return json(response, 401, { detail: "Creator token required." });
+      if (!account) return json(response, 401, { detail: "A valid account token is required." });
       const run = factoryRuns.get(decodeURIComponent(factoryPublishMatch[1]));
       if (!run) return json(response, 404, { detail: "Factory run not found." });
       const body = await readJson(request);
@@ -266,7 +265,7 @@ const registry = createServer(async (request, response) => {
     const activateReleaseMatch = url.pathname.match(/^\/v1\/creator\/agent-corpora\/([^/]+)\/releases\/([^/]+)\/activate$/);
     if (request.method === "POST" && activateReleaseMatch) {
       const account = authenticatedAccount(request);
-      if (account?.role !== "creator") return json(response, 401, { detail: "Creator token required." });
+      if (!account) return json(response, 401, { detail: "A valid account token is required." });
       if (failNextReleaseActivation) {
         failNextReleaseActivation = false;
         return json(response, 503, { detail: "Injected Registry activation outage." });
@@ -337,7 +336,7 @@ function bearer(request) {
 }
 
 function publicAccount(account) {
-  return { id: account.id, role: account.role, display_name: account.display_name };
+  return { id: account.id, display_name: account.display_name };
 }
 
 async function readJson(request) {

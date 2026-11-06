@@ -31,6 +31,8 @@ const runtimeReleaseResponseSchema = z.object({
   runtime_manifest_ref: z.string().min(1)
 }).strict();
 
+const runtimeReleaseListSchema = z.object({ releases: z.array(runtimeReleaseResponseSchema).max(200) }).strict();
+
 export type RuntimeReleaseResponse = z.infer<typeof runtimeReleaseResponseSchema>;
 
 export type RuntimeReleaseAgentCorpusResolverOptions = {
@@ -50,6 +52,14 @@ export type RuntimeReleaseAgentCorpusResolverOptions = {
  * Postgres live pointer. Runtime never downloads Corpus assets or creates a
  * Knowledge index while serving a request.
  */
+/** The Product has no live published release (withdrawn or never published). */
+export class AgentReleaseUnavailableError extends Error {
+  constructor(pathname: string) {
+    super(`No live release exists for ${pathname}`);
+    this.name = "AgentReleaseUnavailableError";
+  }
+}
+
 export class RuntimeReleaseAgentCorpusResolver implements AgentCorpusResolverLike {
   private readonly fetchImpl: typeof fetch;
   private readonly registryUrl: string;
@@ -83,8 +93,37 @@ export class RuntimeReleaseAgentCorpusResolver implements AgentCorpusResolverLik
     // current Product definition for HTTP, hello, and turn authorization alike.
     const signal = typeof digestOrSignal === "string" ? explicitSignal : digestOrSignal;
     signal?.throwIfAborted();
+    return this.installed(await this.readLiveRelease(agentId, signal), creatorId, agentId, signal);
+  }
 
-    const response = await this.readLiveRelease(agentId, signal);
+  async resolveByProduct(productId: string, signal?: AbortSignal): Promise<ResolvedAgentCorpus> {
+    requireUuidV4(productId, "product_id");
+    signal?.throwIfAborted();
+    const response = await this.readLiveRelease(productId, signal);
+    return this.installed(response, response.release.creator_id, productId, signal);
+  }
+
+  /** Registry owns Product listing; Runtime reads the account's live releases from it. */
+  async list(creatorId: string, signal?: AbortSignal): Promise<ResolvedAgentCorpus[]> {
+    requireUuidV4(creatorId, "creator_id");
+    signal?.throwIfAborted();
+    const payload = await this.readRegistry(`/v1/runtime/creators/${encodeURIComponent(creatorId)}/releases`, signal);
+    const parsed = runtimeReleaseListSchema.safeParse(payload);
+    if (!parsed.success) throw new Error(`Registry runtime release list is invalid: ${parsed.error.message}`);
+    const owned: ResolvedAgentCorpus[] = [];
+    // Sequential: each release verifies bounded on-disk assets.
+    for (const response of parsed.data.releases) {
+      owned.push(await this.installed(response, creatorId, response.release.product_id, signal));
+    }
+    return owned;
+  }
+
+  private async installed(
+    response: RuntimeReleaseResponse,
+    creatorId: string,
+    agentId: string,
+    signal?: AbortSignal
+  ): Promise<ResolvedAgentCorpus> {
     const release = response.release;
     if (response.runtime_manifest_ref !== `${release.release_ref}/runtime/manifest.json`) {
       throw new Error("Registry runtime manifest reference is not canonical");
@@ -127,15 +166,16 @@ export class RuntimeReleaseAgentCorpusResolver implements AgentCorpusResolverLik
     return { root, corpus, digest: release.corpus_digest, runtimeDigest: digest };
   }
 
-  /** Runtime has no catalog authority; Registry owns Product listing. */
-  async list(_creatorId: string, signal?: AbortSignal): Promise<ResolvedAgentCorpus[]> {
-    signal?.throwIfAborted();
-    return [];
+  private async readLiveRelease(productId: string, signal?: AbortSignal): Promise<RuntimeReleaseResponse> {
+    const payload = await this.readRegistry(`/v1/runtime/products/${encodeURIComponent(productId)}/release`, signal);
+    const parsed = runtimeReleaseResponseSchema.safeParse(payload);
+    if (!parsed.success) throw new Error(`Registry runtime release response is invalid: ${parsed.error.message}`);
+    return parsed.data;
   }
 
-  private async readLiveRelease(productId: string, signal?: AbortSignal): Promise<RuntimeReleaseResponse> {
+  private async readRegistry(pathname: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
     const response = await this.fetchImpl(
-      `${this.registryUrl}/v1/runtime/products/${encodeURIComponent(productId)}/release`,
+      `${this.registryUrl}${pathname}`,
       {
         method: "GET",
         headers: {
@@ -146,13 +186,12 @@ export class RuntimeReleaseAgentCorpusResolver implements AgentCorpusResolverLik
       }
     );
     const payload = await readBoundedJsonObject(response);
+    if (response.status === 404) throw new AgentReleaseUnavailableError(pathname);
     if (!response.ok) {
       const detail = typeof payload.detail === "string" ? payload.detail : `HTTP ${response.status}`;
       throw new Error(`Registry runtime release lookup failed: ${detail}`);
     }
-    const parsed = runtimeReleaseResponseSchema.safeParse(payload);
-    if (!parsed.success) throw new Error(`Registry runtime release response is invalid: ${parsed.error.message}`);
-    return parsed.data;
+    return payload;
   }
 }
 

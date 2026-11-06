@@ -26,13 +26,11 @@ on:
       - "runtime-server/**"
       - "packages/**"
       - "!packages/ui/**"
+      - "!packages/chat/**"
       - "!packages/brand/**"
       - "local-runner/**"
       - "desktop-app/package.json"
       - "desktop-app/src/renderer/conversation-client.js"
-      - "desktop-app/src/renderer/entitlement-client.js"
-      - "desktop-app/src/renderer/i18n.js"
-      - "desktop-app/src/renderer/identity.js"
       - "Dockerfile.runtime"
       - "Dockerfile.caddy"
       - "compose*.yml"
@@ -111,9 +109,15 @@ jobs:
           cache-dependency-path: |
             creator-dashboard/package-lock.json
             packages/ui/package-lock.json
+            packages/chat/package-lock.json
       - name: Install shared UI dependencies
         working-directory: packages/ui
         run: npm ci
+      - name: Install and test shared chat
+        working-directory: packages/chat
+        run: |
+          npm ci
+          npm test
       - name: Install dependencies
         run: npm ci
       - name: Test

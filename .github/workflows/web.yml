@@ -6,6 +6,7 @@ on:
     paths:
       - "creator-dashboard/**"
       - "packages/ui/**"
+      - "packages/chat/**"
       - "packages/brand/**"
       - "packages/commerce/**"
       - "Dockerfile.dashboard"
@@ -35,8 +36,14 @@ jobs:
           cache-dependency-path: |
             creator-dashboard/package-lock.json
             packages/ui/package-lock.json
+            packages/chat/package-lock.json
       - name: Install and test shared UI
         working-directory: packages/ui
+        run: |
+          npm ci
+          npm test
+      - name: Install and test shared chat
+        working-directory: packages/chat
         run: |
           npm ci
           npm test

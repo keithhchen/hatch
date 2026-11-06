@@ -25,7 +25,7 @@ test("password hashing is asynchronous and rejects work beyond its bounded queue
 
 test("password verification uses the same generic failure path for an unknown account", async () => {
   const accounts = new AccountStoreTs();
-  const account = await accounts.create("signin@example.com", "password123", "user", "Signin User");
+  const account = await accounts.create("signin@example.com", "password123", "Signin User");
 
   assert.equal(await verifyPassword("password123", account), true);
   assert.equal(await verifyPassword("wrong-password", account), false);
@@ -43,13 +43,12 @@ test("authentication fields are bounded before password work", async () => {
     /password_too_long/
   );
   await assert.rejects(
-    accounts.create("user@example.com", "password123", "user", "x".repeat(129)),
+    accounts.create("user@example.com", "password123", "x".repeat(129)),
     /display_name_too_long/
   );
   const longestValid = await accounts.create(
     "long-name@example.com",
     "password123",
-    "creator",
     "a".repeat(128),
   );
   assert.ok(longestValid.id.length <= 128);
@@ -58,8 +57,8 @@ test("authentication fields are bounded before password work", async () => {
 test("concurrent duplicate signup has one canonical winner", async () => {
   const accounts = new AccountStoreTs();
   const results = await Promise.allSettled([
-    accounts.create("same@example.com", "password123", "user", "First Name"),
-    accounts.create(" SAME@example.com ", "password456", "user", "Second Name"),
+    accounts.create("same@example.com", "password123", "First Name"),
+    accounts.create(" SAME@example.com ", "password456", "Second Name"),
   ]);
   assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
   const rejected = results.find((result) => result.status === "rejected");
@@ -70,7 +69,7 @@ test("concurrent duplicate signup has one canonical winner", async () => {
 
 test("opaque desktop sessions expire, refresh idle activity, and revoke server-side", async () => {
   const accounts = new AccountStoreTs();
-  const account = await accounts.create("jordan@example.com", "password123", "user", "Jordan Lee");
+  const account = await accounts.create("jordan@example.com", "password123", "Jordan Lee");
   const issuedAt = Date.parse(account.created_at);
   const issued = await accounts.createSession(account, issuedAt);
 
@@ -111,7 +110,6 @@ test("Postgres session resolution atomically refreshes only an active row", asyn
           absolute_expires_at: "2026-10-30T00:00:00.000Z",
           revoked_at: null,
           account_id_value: "jordan",
-          role: "user",
           email: "jordan@example.com",
           display_name: "Jordan",
           password_salt: "salt",

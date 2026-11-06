@@ -3,7 +3,7 @@
 // Every control calls an existing Creator endpoint; nothing is simulated.
 import React, { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Copy, ExternalLink, Plus, Trash2 } from "lucide-react";
-import { Button, FormField, Input, Textarea } from "@hatch/ui";
+import { Button, Checkbox, FormField, Input, Textarea } from "@hatch/ui";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
 import { creatorFactoryPath, creatorProductPath } from "./creatorRoutes.js";
 import { isProductLive } from "./studioPath.js";
@@ -53,9 +53,11 @@ export function StudioAgentWorkspace({ route, request, navigate, locale, t, prof
 }
 
 function AgentHeaderActions({ product, live, t }) {
+  const { copied, copy } = useCopy();
   const href = live ? safePublicUrl(publicPathOf(product)) : null;
   return href ? <div className="sx-agent__actions">
-    <Button asChild className="web-btn-yolk" trailing={<ExternalLink aria-hidden="true" />}><a href={href} target="_blank" rel="noreferrer">{t("viewStorefront")}</a></Button>
+    <Button variant="secondary" type="button" leading={<Copy aria-hidden="true" />} onClick={() => void copy(href)}>{copied ? t("copied") : t("copyLink")}</Button>
+    <Button asChild variant="secondary" trailing={<ExternalLink aria-hidden="true" />}><a href={href} target="_blank" rel="noreferrer">{t("sxOpenPublic")}</a></Button>
   </div> : null;
 }
 
@@ -85,6 +87,7 @@ function PublishTab({ product, productId, request, navigate, locale, t, profile,
 
 function PublishStatus({ status, base, productId, request, navigate, locale, t, onPublished, publicUrl }) {
   const [state, setState] = useState({ busy: false, error: "", result: null });
+  const [listing, setListing] = useState({ unlisted: null, saving: false });
   const { copied, copy } = useCopy();
   if (status.state === "loading" || status.state === "idle") return <LoadingState t={t} />;
   if (status.state === "error") return <section className="sx-summary is-error" role="alert">
@@ -104,6 +107,18 @@ function PublishStatus({ status, base, productId, request, navigate, locale, t, 
       setState({ busy: false, error: error.code === "system_missing" ? t("sxBuildIncomplete") : (error.message || friendlyError(error, t)), result: null });
     }
   }
+  const unlisted = listing.unlisted ?? info.listed === false;
+  async function setUnlisted(next) {
+    setState({ busy: false, error: "", result: null });
+    setListing({ unlisted, saving: true });
+    try {
+      await request(`${base}/listing`, { method: "PUT", headers: { "Idempotency-Key": mutationKey() }, body: JSON.stringify({ listed: !next }) });
+      setListing({ unlisted: next, saving: false });
+    } catch (error) {
+      setListing({ unlisted, saving: false });
+      setState({ busy: false, error: friendlyError(error, t), result: null });
+    }
+  }
   const shareUrl = live ? (state.result?.public_url ?? publicUrl) : null;
   const goToBuild = () => navigate(creatorFactoryPath(productId, "build", "generation"));
   return <section className={`sx-summary${live ? " is-live" : ""}`}>
@@ -112,6 +127,7 @@ function PublishStatus({ status, base, productId, request, navigate, locale, t, 
       {live && info.published_at ? <p>{t("sxPublishedAt", dateTime(info.published_at, locale))}</p> : null}
       {live && pending.length ? <p className="sx-summary__pending">{t("sxPendingChanges")}</p> : null}
       {!info.can_publish ? <p>{t("sxBuildIncomplete")} <button type="button" className="sx-link" onClick={goToBuild}>{t("sxGoToBuild")}</button></p> : null}
+      <Checkbox className={`sx-listing${listing.saving ? " is-saving" : ""}`} checked={unlisted} disabled={listing.saving} onCheckedChange={(checked) => void setUnlisted(checked === true)} label={t("sxUnlisted")} />
       {shareUrl ? <p className="sx-summary__link"><a className="sx-link" href={safePublicUrl(shareUrl)} target="_blank" rel="noreferrer">{absoluteUrl(shareUrl)}</a><button type="button" className="sx-link" onClick={() => void copy(shareUrl)}><Copy aria-hidden="true" />{copied ? t("copied") : t("copyLink")}</button></p> : null}
     </div>
     <Button className="web-btn-yolk" type="button" loading={state.busy} disabled={!info.can_publish || (live && pending.length === 0)} onClick={publish}>{live ? t("sxUpdateAction") : t("sxPublishAction")}</Button>

@@ -3,12 +3,18 @@
   "app": {
     "windows": [
       {
+        "label": "main",
+        "create": false,
         "title": "Hatch",
-        "width": 1180,
-        "height": 780,
-        "minWidth": 640,
-        "minHeight": 600,
+        "width": 760,
+        "height": 600,
+        "minWidth": 520,
+        "minHeight": 420,
         "resizable": true,
+        "visible": false,
+        "transparent": true,
+        "acceptFirstMouse": true,
+        "allowLinkPreview": false,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "zoomHotkeysEnabled": false,

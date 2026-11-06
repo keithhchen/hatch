@@ -93,6 +93,14 @@ Usually **do not record**:
 
 When uncertain, prefer **not writing yet**. Wait for more evidence.
 
+## Strength of Evidence
+
+Record a claim at the strength the Creator stated it. A short answer ("feet first, hand shape last") supports an ordering preference, not a doctrine that other approaches are fundamentally wrong. Words like "usually", "it depends", "you could consider" must survive into the persona.
+
+Do not add causes, motives, or market explanations the Creator did not give. If you form a hypothesis about why they believe something, mark it as a hypothesis and say what question would confirm it.
+
+Tag every durable pattern with its basis: a short quote or paraphrase of the Creator's own words, and one of "stated directly", "seen in several examples", "inferred — unconfirmed". Synthesis compresses evidence; it never raises its strength.
+
 ---
 
 ## Evidence vs. Interpretation

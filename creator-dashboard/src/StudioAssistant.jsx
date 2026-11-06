@@ -3,7 +3,7 @@ import { Button, InlineAlert } from "@hatch/ui";
 import { friendlyError, LoadingState, mutationKey } from "./studioShellKit.jsx";
 import { subscribeFactoryEvents } from "./factoryEvents.js";
 import { BrowserImageAttachments } from "./webChatClient.js";
-import { WebChatImageViewer } from "./components/WebChatImageViewer.jsx";
+import { ImageViewer } from "@hatch/chat/react";
 
 const ROOT = "/v1/creator/assistant";
 const CHANNEL_NAMES = { telegram: "Telegram", line: "LINE", lark: "Lark", imessage: "iMessage" };
@@ -94,9 +94,9 @@ export function StudioAssistant({ request, t }) {
       <div className="sxa-log" aria-live="polite">
         {!lines.length && !pendingLines.length && !streaming ? <p className="sxa-empty">{t("sxaEmpty")}</p> : null}
         {lines.map((line, index) => <div key={`${line.at}-${index}`} className={`sxa-line sxa-line--${line.role}`}>
-          {line.images?.map(file => <WebChatImageViewer key={file} src={`${ROOT}/images/${file}`} alt="" title={t("sxaImage")} closeLabel={t("sxaImageClose")} viewLabel={t("sxaImageView")}>
+          {line.images?.map(file => <ImageViewer key={file} src={`${ROOT}/images/${file}`} alt="" title={t("sxaImage")} closeLabel={t("sxaImageClose")} viewLabel={t("sxaImageView")}>
             <img className="sxa-image" alt="" src={`${ROOT}/images/${file}`} />
-          </WebChatImageViewer>)}
+          </ImageViewer>)}
           {line.text ? <p>{line.text}</p> : null}
         </div>)}
         {pendingLines.map((line, index) => <p key={`pending-${index}`} className="sxa-line sxa-line--expert">{line}</p>)}

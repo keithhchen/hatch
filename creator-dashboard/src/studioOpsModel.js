@@ -101,11 +101,6 @@ export function payoutSetupState(payouts) {
   return payouts.setup_status === "complete" ? "complete" : "required";
 }
 
-export function hasCapability(profile, capability, roleDefault) {
-  const explicit = Array.isArray(profile?.capabilities) ? profile.capabilities : [];
-  return explicit.length ? explicit.includes(capability) : profile?.role === roleDefault;
-}
-
 export function newIdempotencyKey() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;

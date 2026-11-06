@@ -12,8 +12,8 @@ test("Hatch sign-in and sign-up use plain product titles in every locale", () =>
     ja: ["ログイン", "アカウントを作成"]
   };
   for (const locale of ["en", "zh", "ja"]) {
-    const signIn = presentation(locale, { signingUp: false, studioIntent: false, productIntent: false });
-    const signUp = presentation(locale, { signingUp: true, studioIntent: false, productIntent: false });
+    const signIn = presentation(locale, { signingUp: false, productIntent: false });
+    const signUp = presentation(locale, { signingUp: true, productIntent: false });
     assert.deepEqual([signIn.title, signUp.title], titles[locale]);
     assert.ok(signIn.description && signUp.description && signIn.description !== signUp.description);
     for (const copy of [signIn, signUp]) {
@@ -22,21 +22,10 @@ test("Hatch sign-in and sign-up use plain product titles in every locale", () =>
   }
 });
 
-test("Studio sign-in and sign-up use Hatch Expert", () => {
-  for (const locale of ["en", "zh", "ja"]) {
-    const signIn = presentation(locale, { signingUp: false, studioIntent: true, productIntent: false });
-    const signUp = presentation(locale, { signingUp: true, studioIntent: true, productIntent: false });
-    assert.match(signUp.title, /Hatch Expert/);
-    assert.match(signUp.action, /Hatch Expert/);
-    assert.notEqual(signIn.title, signUp.title);
-    assert.notEqual(signIn.description, signUp.description);
-  }
-});
-
 test("product return path keeps product-specific descriptions", () => {
   for (const locale of ["en", "zh", "ja"]) {
-    const signIn = presentation(locale, { signingUp: false, studioIntent: false, productIntent: true });
-    const signUp = presentation(locale, { signingUp: true, studioIntent: false, productIntent: true });
+    const signIn = presentation(locale, { signingUp: false, productIntent: true });
+    const signUp = presentation(locale, { signingUp: true, productIntent: true });
     assert.notEqual(signIn.action, signUp.action);
     assert.notEqual(signIn.description, signUp.description);
     assert.equal(signIn.description, buyerT(locale, "Sign in to continue to this Agent."));

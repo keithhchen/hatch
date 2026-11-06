@@ -31,7 +31,6 @@ const BriefSpecSchema = z.object({
 
 export type AuthIdentity = {
   sub: string;
-  role: "user" | "creator";
   exp?: number;
 };
 
@@ -172,7 +171,7 @@ export class FileEntitlementResolver implements EntitlementResolver {
     const claims = verifyHatchAuthToken(input.authToken, this.hmacSecret);
     if (claims) {
       return registry
-        .filter((entry) => claims.role === "user" && entry.user_id === claims.sub)
+        .filter((entry) => entry.user_id === claims.sub)
         .map(({ license_token: _licenseToken, ...binding }) => binding);
     }
     if (!input.licenseToken) return [];
@@ -227,7 +226,7 @@ export class RegistryEntitlementResolver implements EntitlementResolver, AuthIde
     if (!input.authToken) return [];
     if (this.commerceUrl && this.commerceServiceToken) {
       const identity = await this.resolveIdentity(input.authToken, { signal: input.signal });
-      if (!identity || identity.role !== "user") return [];
+      if (!identity) return [];
       const { response, body } = await this.requestCommerce(
         `/v1/internal/access/users/${encodeURIComponent(identity.sub)}/entitlements`,
         input.signal
@@ -262,7 +261,7 @@ export class RegistryEntitlementResolver implements EntitlementResolver, AuthIde
     if (!input.authToken) throw new EntitlementError("auth_invalid", "Your Hatch session is no longer valid.");
     if (this.commerceUrl && this.commerceServiceToken) {
       const identity = await this.resolveIdentity(input.authToken, { signal: input.signal });
-      if (!identity || identity.role !== "user") {
+      if (!identity) {
         throw new EntitlementError("auth_invalid", "Your Hatch session is no longer valid.");
       }
       const { response, body } = await this.requestCommerce(
@@ -320,13 +319,12 @@ export class RegistryEntitlementResolver implements EntitlementResolver, AuthIde
     } catch {
       payload = {};
     }
-    if (typeof payload.id !== "string" || !isUuidV4(payload.id) || (payload.role !== "user" && payload.role !== "creator")) {
+    if (typeof payload.id !== "string" || !isUuidV4(payload.id)) {
       throw new EntitlementError("auth_registry_invalid", "The Registry returned an invalid account identity.");
     }
     const expiresAt = typeof payload.session_expires_at === "string" ? Date.parse(payload.session_expires_at) : Number.NaN;
     return {
       sub: payload.id,
-      role: payload.role,
       ...(Number.isFinite(expiresAt) ? { exp: Math.floor(expiresAt / 1000) } : {})
     };
   }

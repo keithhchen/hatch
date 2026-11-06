@@ -1,12 +1,10 @@
 import React, { Suspense, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "@hatch/ui/theme.css";
-import { Button, HatchUIProvider, UnavailableState } from "@hatch/ui";
-import { LocaleProvider, useLocale } from "./locale.jsx";
-import { buyerT } from "./buyerI18n.js";
+import { HatchUIProvider, UnavailableState } from "@hatch/ui";
+import { LocaleProvider } from "./locale.jsx";
 import { dashboardRequest } from "./data.js";
 import { WebChatRoute } from "./webChatRoute.js";
-import { WebChatRoleGate } from "./webChatGate.jsx";
 import { WebBrand } from "./WebBrand.jsx";
 import "./styles.css";
 import "./webTheme.css";
@@ -17,6 +15,7 @@ const CreatorPortalV2 = React.lazy(() => import("./CreatorPortalV2.jsx").then(({
 const DownloadPage = React.lazy(() => import("./DownloadPage.jsx").then(({ DownloadPage: Component }) => ({ default: Component })));
 const WebPage = React.lazy(() => import("./web/WebPage.jsx"));
 const WebChatPage = React.lazy(() => import("./WebChatPage.jsx"));
+const DesktopSignInPage = React.lazy(() => import("./DesktopSignInPage.jsx"));
 
 class AppErrorBoundary extends React.Component {
   constructor(props) {
@@ -107,18 +106,6 @@ function App() {
     return acceptSession(result);
   }, [acceptSession]);
 
-  const creatorSignUp = useCallback(async (details) => {
-    const result = await dashboardRequest("/v1/auth/creator-signup", {
-      method: "POST",
-      body: JSON.stringify({
-        email: details.email,
-        password: details.password,
-        display_name: details.display_name
-      })
-    });
-    return acceptSession(result);
-  }, [acceptSession]);
-
   const signOut = useCallback(async () => {
     try {
       await dashboardRequest("/v1/auth/logout", { method: "POST" });
@@ -142,7 +129,6 @@ function App() {
     updateUser: setProfile,
     signIn,
     signUp,
-    creatorSignUp,
     signOut,
     invalidate
   };
@@ -163,13 +149,20 @@ function App() {
     );
   }
 
+  if (location.pathname === "/desktop/sign-in") {
+    if (sessionStatus === "loading") return <AppLoading />;
+    if (sessionStatus !== "authenticated") {
+      return <RouteRedirect to={`/sign-in?returnTo=${encodeURIComponent(location.href)}`} navigate={location.navigate} />;
+    }
+    return <Suspense fallback={<AppLoading />}><DesktopSignInPage search={location.search} profile={profile} request={dashboardRequest} /></Suspense>;
+  }
+
   const chatRoute = WebChatRoute.parse(location.pathname);
   if (chatRoute) {
     if (sessionStatus === "loading") return <AppLoading />;
     if (sessionStatus !== "authenticated") {
       return <RouteRedirect to={`/sign-in?returnTo=${encodeURIComponent(location.href)}`} navigate={location.navigate} />;
     }
-    if (profile?.role !== "user") return <WebChatRoleGate navigate={location.navigate} onSignOut={signOutFromChat} />;
     return <Suspense fallback={<AppLoading />}><WebChatPage productId={chatRoute.productId} conversationId={chatRoute.conversationId} request={dashboardRequest} navigate={location.navigate} profile={profile} onSignOut={signOutFromChat} /></Suspense>;
   }
 
@@ -178,12 +171,6 @@ function App() {
     if (sessionStatus === "loading") return <AppLoading />;
     if (sessionStatus !== "authenticated") {
       return <RouteRedirect to={`/sign-up?returnTo=${encodeURIComponent(location.href)}`} navigate={location.navigate} />;
-    }
-    if (profile?.role !== "creator") {
-      return <RoleBoundary navigate={location.navigate} onCreateCreator={async () => {
-        await signOut();
-        location.navigate(`/sign-up?returnTo=${encodeURIComponent(location.href)}`, { replace: true });
-      }} />;
     }
     return (
       <Suspense fallback={<AppLoading />}>
@@ -249,20 +236,6 @@ function RouteRedirect({ to, navigate }) {
 
 function AppLoading() {
   return <main className="loading-page" aria-busy="true"><WebBrand as="span" className="loading-brand" /></main>;
-}
-
-function RoleBoundary({ navigate, onCreateCreator }) {
-  const { locale } = useLocale();
-  const t = (key) => buyerT(locale, key);
-  return (
-    <main className="loading-page">
-      <WebBrand as="span" className="loading-brand" />
-      <h1>{t(onCreateCreator ? "Hatch Expert access is required." : "A Hatch account is required.")}</h1>
-      <p>{t(onCreateCreator ? "Create a Hatch Expert account to work on your products in Studio." : "Use a Hatch account to open this Agent conversation.")}</p>
-      {onCreateCreator ? <Button type="button" onClick={() => void onCreateCreator()}>{t("Create your Hatch Expert account")}</Button> : null}
-      <Button type="button" onClick={() => navigate("/library", { replace: true })}>{t("Open your library")}</Button>
-    </main>
-  );
 }
 
 createRoot(document.getElementById("root")).render(

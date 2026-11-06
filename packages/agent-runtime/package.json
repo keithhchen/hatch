@@ -1,0 +1,37 @@
+{
+  "name": "@hatch/agent-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./adapters/models": {
+      "types": "./dist/adapters/models/index.d.ts",
+      "import": "./dist/adapters/models/index.js"
+    },
+    "./adapters/persistence": {
+      "types": "./dist/adapters/persistence/index.d.ts",
+      "import": "./dist/adapters/persistence/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "verify:providers": "npm run build && node scripts/verify-provider-runtime.mjs"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.1",
+    "@types/pg": "^8.23.1",
+    "typescript": "^5.9.0"
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "1.0.0",
+    "pg": "^8.23.1"
+  }
+}

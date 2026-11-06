@@ -17,12 +17,12 @@ test("Dashboard BFF removes the legacy Factory API and forwards Product Node req
     if (url.pathname === "/v1/auth/signin") {
       response.end(JSON.stringify({
         token: "signed-creator-token",
-        account: { id: "creator-factory", role: "creator", email: "creator@example.test", display_name: "Factory Creator" }
+        account: { id: "creator-factory", email: "creator@example.test", display_name: "Factory Creator" }
       }));
       return;
     }
     if (url.pathname === "/v1/auth/me") {
-      response.end(JSON.stringify({ id: "creator-factory", role: "creator", email: "creator@example.test", display_name: "Factory Creator" }));
+      response.end(JSON.stringify({ id: "creator-factory", email: "creator@example.test", display_name: "Factory Creator" }));
       return;
     }
     if (url.pathname === "/v1/creator/products/product-1/nodes/about-you/executions") {

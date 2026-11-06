@@ -29,12 +29,12 @@ test("production Commerce smoke covers public metadata and an idempotent authent
         "hatch_web_session=session-smoke; Path=/; HttpOnly; SameSite=Lax",
         "hatch_web_csrf=csrf-smoke; Path=/; SameSite=Lax"
       ]);
-      response.end(JSON.stringify({ profile: { id: "buyer-smoke", role: "user" } }));
+      response.end(JSON.stringify({ profile: { id: "buyer-smoke" } }));
       return;
     }
     if (url.pathname === "/v1/auth/me") {
       assert.match(String(request.headers.cookie), /hatch_web_session=session-smoke/);
-      response.end(JSON.stringify({ id: "buyer-smoke", role: "user" }));
+      response.end(JSON.stringify({ id: "buyer-smoke" }));
       return;
     }
     if (url.pathname === "/v1/checkout-sessions" && request.method === "POST") {
@@ -96,7 +96,7 @@ test("production Commerce smoke covers public metadata and an idempotent authent
       }));
       return;
     }
-    if (url.pathname === "/orders/8ce5faf8-0849-413d-8aa0-ac5a371e0a81/success" || url.pathname === "/download") {
+    if (url.pathname === "/explore/orders/8ce5faf8-0849-413d-8aa0-ac5a371e0a81/success" || url.pathname === "/download") {
       response.setHeader("content-type", "text/html");
       response.end("<html>Hatch</html>");
       return;

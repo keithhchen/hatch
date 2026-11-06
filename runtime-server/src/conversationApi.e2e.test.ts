@@ -245,7 +245,7 @@ test("Conversation HTTP creation carries the published corpus BriefSpec into an 
     resolve: async () => entitlement
   };
   const authIdentityResolver: AuthIdentityResolver = {
-    resolveIdentity: async () => ({ sub: entitlement.user_id, role: "user" })
+    resolveIdentity: async () => ({ sub: entitlement.user_id })
   };
   const agentCorpusResolver = {
     resolve: async () => ({

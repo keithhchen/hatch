@@ -122,6 +122,9 @@ export interface AgentCorpusResolverLike {
     digestOrSignal?: string | AbortSignal,
     explicitSignal?: AbortSignal
   ): Promise<ResolvedAgentCorpus>;
+  /** Resolves a Product's live release; its owner comes from the server, never the client. */
+  resolveByProduct(productId: string, signal?: AbortSignal): Promise<ResolvedAgentCorpus>;
+  /** An account's own published Products. */
   list(creatorId: string, signal?: AbortSignal): Promise<ResolvedAgentCorpus[]>;
 }
 
@@ -173,6 +176,22 @@ export class AgentCorpusResolver implements AgentCorpusResolverLike {
     }
     signal?.throwIfAborted();
     return { root: corpusRoot, corpus, digest };
+  }
+
+  async resolveByProduct(productId: string, signal?: AbortSignal): Promise<ResolvedAgentCorpus> {
+    requireUuidV4(productId, "product_id");
+    const creatorIds = new Set<string>();
+    for (const directory of [this.root, path.join(this.root, CURRENT_CORPORA_DIRECTORY)]) {
+      for (const entry of await readdir(directory, { withFileTypes: true }).catch(() => [])) {
+        if (entry.isDirectory() && UUID_V4_RE.test(entry.name)) creatorIds.add(entry.name);
+      }
+    }
+    for (const creatorId of [...creatorIds].sort()) {
+      signal?.throwIfAborted();
+      const resolved = await this.resolve(creatorId, productId, signal).catch(() => undefined);
+      if (resolved) return resolved;
+    }
+    throw new Error(`No current Agent Corpus exists for Product ${productId}`);
   }
 
   async list(creatorId: string, signal?: AbortSignal): Promise<ResolvedAgentCorpus[]> {

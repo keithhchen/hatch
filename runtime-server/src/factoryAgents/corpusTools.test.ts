@@ -26,7 +26,7 @@ test("Generation uploads canonical files through Registry and the existing Runti
   try {
     const address = server.server.address(); assert.ok(address && typeof address !== "string");
     const base = `http://127.0.0.1:${address.port}`;
-    const signup = await fetch(`${base}/v1/auth/signup`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "factory-test@example.test", password: "password-123", role: "creator", display_name: "Factory Test" }) });
+    const signup = await fetch(`${base}/v1/auth/signup`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "factory-test@example.test", password: "password-123", display_name: "Factory Test" }) });
     assert.equal(signup.status, 201);
     const auth = await signup.json() as { token: string; account: { id: string } };
     const env = { HATCH_FACTORY_REGISTRY_URL: base, HATCH_FACTORY_CREATOR_TOKEN: auth.token };

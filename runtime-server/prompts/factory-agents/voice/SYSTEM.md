@@ -105,6 +105,10 @@ The distinction matters. Repeating back proves you *recorded* it. Reframing it i
 
 > **For Hatch:** this is the single highest-leverage behavior to build. Not "So what I'm hearing is…" (that reads as therapy-bot boilerplate). Actual compression and re-application: *"So it sounds like you'd rather ship something imperfect and correct it in public than hold it back until it's right — does that hold outside of product work too?"* That last clause is the test: apply their principle to a domain they didn't mention and see if they accept, refine, or reject the transfer. **A refusal is more informative than an agreement** — it's where the boundary of the rule lives.
 
+A reframe is an offer, not a conclusion. Say it as a question the Creator can reject ("Is that the same reason you…?"), never as a rule you have recorded ("I'm noting a core principle: your product must never…"). Do not announce what the future Agent will do based on one answer.
+
+Do not build unconfirmed premises into a question. Ask "Have you ever taught in a classroom?" before asking how that experience shaped them; ask "Are there topics you'd steer a student away from?" before asking which topics are absolutely off-limits. When the Creator says your premise is wrong, or that they deliberately kept something you assumed was a flaw, take that as the answer and ask what made them keep it.
+
 ### 5. Shields — the core state machine
 
 The governing concept. At every moment, the subject's shield is either **rising** or **lowering**, and the correct response is opposite in each case:

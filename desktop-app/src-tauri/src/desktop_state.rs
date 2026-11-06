@@ -7,7 +7,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use tauri::{AppHandle, Manager, Runtime};
 
 const STATE_FILE: &str = "state.json";
@@ -40,36 +40,73 @@ pub(crate) struct DesktopWorkspaceState {
 #[serde(deny_unknown_fields)]
 pub(crate) struct DesktopPreferencesState {
     pub(crate) language: String,
+    #[serde(default = "system_theme")]
+    pub(crate) theme: String,
+}
+
+fn system_theme() -> String {
+    "system".into()
 }
 
 impl Default for DesktopPreferencesState {
     fn default() -> Self {
         Self {
             language: "system".into(),
+            theme: system_theme(),
         }
     }
 }
 
+// Read-time migration boundary: keys from earlier layouts (inspector, sidebar
+// width) are ignored and dropped on the next write.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
 pub(crate) struct DesktopWindowLayoutState {
     pub(crate) sidebar_open: bool,
-    pub(crate) inspector_open: bool,
-    pub(crate) sidebar_width: Option<f64>,
-    pub(crate) inspector_width: Option<f64>,
     pub(crate) zoom: Option<f64>,
+    /// Conversation id → `{ top, atBottom }`, at most `MAX_SCROLL_POSITIONS`.
+    #[serde(default)]
+    pub(crate) scroll_positions: Map<String, Value>,
 }
 
 impl Default for DesktopWindowLayoutState {
     fn default() -> Self {
         Self {
             sidebar_open: true,
-            inspector_open: true,
-            sidebar_width: None,
-            inspector_width: None,
             zoom: None,
+            scroll_positions: Map::new(),
         }
     }
+}
+
+pub(crate) const MAX_SCROLL_POSITIONS: usize = 50;
+const MAX_SCROLL_KEY_BYTES: usize = 256;
+
+/// Keep only well-formed `{ top: finite >= 0, atBottom: bool }` entries under
+/// bounded conversation ids; the renderer sends the most recent first.
+pub(crate) fn bounded_scroll_positions(value: &Value) -> Map<String, Value> {
+    let Some(entries) = value.as_object() else {
+        return Map::new();
+    };
+    entries
+        .iter()
+        .filter(|(key, _)| {
+            !key.is_empty()
+                && key.len() <= MAX_SCROLL_KEY_BYTES
+                && !key.chars().any(char::is_control)
+        })
+        .filter_map(|(key, entry)| {
+            let top = entry
+                .get("top")?
+                .as_f64()
+                .filter(|top| top.is_finite() && *top >= 0.0)?;
+            let at_bottom = entry.get("atBottom")?.as_bool()?;
+            Some((
+                key.clone(),
+                serde_json::json!({ "top": top, "atBottom": at_bottom }),
+            ))
+        })
+        .take(MAX_SCROLL_POSITIONS)
+        .collect()
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -102,14 +139,17 @@ pub(crate) struct DesktopTaskState {
     pub(crate) permission_mode: String,
 }
 
+// Read-time migration boundary: keys from earlier versions (the
+// conversation-window manifest) are ignored and dropped on the next write.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
 pub(crate) struct DesktopState {
     pub(crate) schema_version: u32,
     pub(crate) session: Option<DesktopSessionState>,
     pub(crate) preferences: DesktopPreferencesState,
     pub(crate) windows: HashMap<String, DesktopWindowState>,
-    pub(crate) open_conversation_ids: Vec<String>,
+    /// Chat windows to reopen: `product_id:<uuid>` / `entitlement_id:<uuid>`.
+    #[serde(default)]
+    pub(crate) open_agent_windows: Vec<String>,
     pub(crate) workspace_grants: Vec<DesktopWorkspaceState>,
     pub(crate) tasks: HashMap<String, DesktopTaskState>,
 }
@@ -121,7 +161,7 @@ impl Default for DesktopState {
             session: None,
             preferences: DesktopPreferencesState::default(),
             windows: HashMap::new(),
-            open_conversation_ids: Vec::new(),
+            open_agent_windows: Vec::new(),
             workspace_grants: Vec::new(),
             tasks: HashMap::new(),
         }
@@ -194,7 +234,6 @@ fn migrate_legacy_state<R: Runtime>(app: &AppHandle<R>) -> Result<DesktopState, 
         .map_err(|error| error.to_string())?;
     let settings = read_json_if_present(&data_dir.join("settings.json"))?;
     let grants = read_json_if_present(&data_dir.join("workspace-grants.json"))?;
-    let windows = read_json_if_present(&data_dir.join("conversation-windows.json"))?;
     let mut state = DesktopState::default();
 
     if let Some(language) = settings.pointer("/app/language").and_then(Value::as_str) {
@@ -223,13 +262,6 @@ fn migrate_legacy_state<R: Runtime>(app: &AppHandle<R>) -> Result<DesktopState, 
             .and_then(Value::as_str)
             .map(|value| value == "open")
             .unwrap_or(true);
-        main_window.layout.inspector_open = layout
-            .get("inspectorPreference")
-            .and_then(Value::as_str)
-            .map(|value| value == "open")
-            .unwrap_or(true);
-        main_window.layout.sidebar_width = layout.get("sidebarWidth").and_then(Value::as_f64);
-        main_window.layout.inspector_width = layout.get("inspectorWidth").and_then(Value::as_f64);
         main_window.layout.zoom = layout.get("zoom").and_then(Value::as_f64);
     }
     main_window.entitlement_id = context
@@ -304,15 +336,6 @@ fn migrate_legacy_state<R: Runtime>(app: &AppHandle<R>) -> Result<DesktopState, 
         );
     }
     state.windows.insert("main".into(), main_window);
-    state.open_conversation_ids = windows
-        .get("conversationIds")
-        .or_else(|| windows.get("conversation_ids"))
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .map(str::to_string)
-        .collect();
     Ok(state)
 }
 
@@ -516,7 +539,54 @@ mod tests {
 
         let layout = serde_json::to_value(DesktopWindowLayoutState::default()).unwrap();
         assert_eq!(layout["sidebar_open"], true);
-        assert_eq!(layout["inspector_open"], true);
+        assert!(layout.get("inspector_open").is_none());
+    }
+
+    #[test]
+    fn scroll_positions_are_bounded_and_well_formed() {
+        let mut input = serde_json::Map::new();
+        for index in 0..60 {
+            input.insert(
+                format!("conv_{index}"),
+                serde_json::json!({ "top": index as f64, "atBottom": false }),
+            );
+        }
+        input.insert(
+            "bad".into(),
+            serde_json::json!({ "top": -1.0, "atBottom": true }),
+        );
+        input.insert(
+            "bad\nkey".into(),
+            serde_json::json!({ "top": 1.0, "atBottom": true }),
+        );
+        let kept = super::bounded_scroll_positions(&Value::Object(input));
+        assert_eq!(kept.len(), super::MAX_SCROLL_POSITIONS);
+        assert!(kept
+            .values()
+            .all(|entry| entry["top"].as_f64().unwrap() >= 0.0));
+        assert!(!kept.contains_key("bad\nkey"));
+        assert!(super::bounded_scroll_positions(&serde_json::json!([1])).is_empty());
+    }
+
+    #[test]
+    fn state_from_an_earlier_layout_still_loads_and_drops_stale_keys() {
+        let legacy = serde_json::json!({
+            "schema_version": 1,
+            "session": { "token": "tok", "expires_at": null },
+            "preferences": { "language": "en", "theme": "dark" },
+            "windows": { "main": { "conversation_id": "conv_a", "entitlement_id": null, "frame": null,
+                "layout": { "sidebar_open": false, "inspector_open": true, "sidebar_width": 280.0, "inspector_width": 320.0, "zoom": 1.1 } } },
+            "open_conversation_ids": ["conv_a"],
+            "workspace_grants": [],
+            "tasks": {}
+        });
+        let state: DesktopState = serde_json::from_value(legacy).unwrap();
+        assert_eq!(state.session.as_ref().unwrap().token, "tok");
+        assert!(!state.windows["main"].layout.sidebar_open);
+        assert!(state.open_agent_windows.is_empty());
+        let text = serde_json::to_string(&state).unwrap();
+        assert!(!text.contains("inspector"));
+        assert!(!text.contains("open_conversation_ids"));
     }
 
     #[test]

@@ -1,7 +1,5 @@
 import React from "react";
 import { WebBrand } from "./WebBrand.jsx";
-import { useLocale } from "./locale.jsx";
-import { webChatT } from "./webChatI18n.js";
 import "./webChat.css";
 
 /** The brand egg (same mark as the lockup), used where only a small mark fits. */
@@ -29,25 +27,5 @@ export function WebChatGate({ pill, title, body, visual, actions, account, busy 
       {body ? <p>{body}</p> : null}
       {actions ? <div className="web-chat-gate__actions">{actions}</div> : null}
     </section>
-  </div>;
-}
-
-/**
- * Shown when a signed-in account that is not a client opens a chat link.
- * Ready for main.jsx's chat route in place of the generic RoleBoundary.
- */
-export function WebChatRoleGate({ navigate, onSignOut }) {
-  const { locale } = useLocale();
-  const t = key => webChatT(locale, key);
-  return <div className="web-chat web-chat--gate">
-    <WebChatGate
-      pill={t("roleGatePill")}
-      title={t("roleGateTitle")}
-      body={t("roleGateBody")}
-      actions={<>
-        <button type="button" className="web-chat__button web-chat__button--yolk" onClick={() => navigate("/studio")}>{t("goToStudio")}</button>
-        <button type="button" className="web-chat__button" onClick={() => void onSignOut()}>{t("switchAccount")}</button>
-      </>}
-    />
   </div>;
 }

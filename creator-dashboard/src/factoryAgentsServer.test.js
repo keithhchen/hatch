@@ -12,10 +12,10 @@ test('Factory reuses Dashboard Creator cookie, CSRF and streams authenticated Re
   const root = await mkdtemp(path.join(os.tmpdir(), 'dashboard-factory-test-'));
   const productId = '22222222-2222-4222-8222-222222222222';
   const factoryRoot = `/v1/creator/products/${productId}/factory-agents`;
-  let role = 'creator'; let capabilities = []; let calls = 0; let upgradeCalls = 0; let dashboardUpgradeError;
+  let calls = 0; let upgradeCalls = 0; let dashboardUpgradeError;
   let streamClosed; const closed = new Promise(resolve => { streamClosed = resolve; });
   const registry = createServer((req, res) => {
-    const account = { id: '11111111-1111-4111-8111-111111111111', email: 'fixture@example.test', display_name: 'Fixture', role, capabilities };
+    const account = { id: '11111111-1111-4111-8111-111111111111', email: 'fixture@example.test', display_name: 'Fixture' };
     if (req.url === '/v1/auth/signin') { res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify({ account, token: 'fixture-registry-token' })); }
     if (req.url === '/v1/auth/me') { res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify(account)); }
     assert.equal(req.headers.authorization, 'Bearer fixture-registry-token'); calls++;
@@ -84,12 +84,8 @@ test('Factory reuses Dashboard Creator cookie, CSRF and streams authenticated Re
     assert.equal(download.headers.get('content-disposition'), 'attachment; filename="RESULT.md"');
     assert.equal(await download.text(), '# Real bytes\n');
     assert.equal((await fetch(route, { headers: { cookie } })).status, 200);
-    capabilities = ['product:read'];
-    assert.equal((await fetch(route, { method: 'POST', headers: { ...headers, 'x-csrf-token': csrf }, body: JSON.stringify({ role: 'voice' }) })).status, 403);
     assert.equal(calls, 5);
     assert.equal((await fetch(route, { headers: { cookie } })).status, 200);
-    capabilities = ['product:edit'];
-    assert.equal((await fetch(route, { headers: { cookie } })).status, 403);
     assert.equal(calls, 6);
     assert.equal((await fetch(route, { method: 'POST', headers: { ...headers, 'x-csrf-token': csrf }, body: JSON.stringify({ role: 'voice' }) })).status, 201);
     const voiceId = '33333333-3333-4333-8333-333333333333';
@@ -103,10 +99,10 @@ test('Factory reuses Dashboard Creator cookie, CSRF and streams authenticated Re
     assert.deepEqual(await echoed, Buffer.from([1, 2, 3]));
     assert.equal(upgradeCalls, 1);
     voice.close(1000, 'done');
-    role = 'user';
-    capabilities = [];
-    assert.equal((await fetch(route, { headers: { cookie } })).status, 403);
-    assert.equal(calls, 7);
+    // One kind of account: the Dashboard never gates Studio by role; the
+    // Registry scopes every Product route to its owner.
+    assert.equal((await fetch(route, { headers: { cookie } })).status, 200);
+    assert.equal(calls, 8);
   } finally {
     for (const client of registryVoice.clients) client.terminate();
     registryVoice.close(); api.closeAllConnections(); registry.closeAllConnections();

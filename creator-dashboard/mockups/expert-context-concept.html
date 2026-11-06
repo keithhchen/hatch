@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f3ede3" />
+    <title>Hatch 专家工作台 · 概念稿</title>
+    <link rel="stylesheet" href="../../packages/brand/tokens.css" />
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: var(--hatch-font-sans, Inter, ui-sans-serif, system-ui, sans-serif);
+        color: var(--hatch-ink, #302b26);
+        background: var(--hatch-canvas, #f3ede3);
+        font-synthesis: none;
+      }
+
+      * { box-sizing: border-box; }
+      [hidden] { display: none !important; }
+      body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--hatch-canvas, #f3ede3); }
+      button, input, textarea, select { font: inherit; }
+      button { color: inherit; }
+      button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+        outline: 3px solid color-mix(in srgb, var(--hatch-accent, #a64e35) 42%, transparent);
+        outline-offset: 2px;
+      }
+      .prototype-banner { display: flex; justify-content: center; align-items: center; gap: 9px; min-height: 34px; padding: 6px 16px; background: #342f2a; color: #fff9f0; font-size: 12px; letter-spacing: .02em; }
+      .prototype-banner strong { color: #f2c47b; font-weight: 650; }
+      .banner-dot { width: 7px; height: 7px; border-radius: 50%; background: #f2c47b; }
+      .app-shell { display: grid; grid-template-columns: 236px minmax(0, 1fr); min-height: calc(100vh - 34px); }
+      .sidebar { display: flex; flex-direction: column; gap: 28px; padding: 24px 16px 18px; border-right: 1px solid var(--hatch-line, #ded5c9); background: color-mix(in srgb, var(--hatch-canvas, #f3ede3) 78%, white); }
+      .brand { display: flex; align-items: center; gap: 10px; padding: 0 8px; }
+      .brand-mark { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 10px; background: var(--hatch-accent, #a64e35); color: #fff8ee; font-family: Georgia, serif; font-size: 21px; }
+      .brand-name { font-family: var(--hatch-font-display, Georgia, serif); font-size: 24px; letter-spacing: -.04em; }
+      .workspace-card { padding: 13px; border: 1px solid var(--hatch-line, #ded5c9); border-radius: 13px; background: rgba(255,255,255,.54); }
+      .workspace-caption, .eyebrow { color: var(--hatch-muted, #81786d); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+      .workspace-name { display: flex; align-items: center; justify-content: space-between; margin-top: 7px; font-size: 13px; font-weight: 650; }
+      .avatar { display: grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; border-radius: 50%; background: #dfc9ac; color: #554536; font-family: Georgia, serif; }
+      .nav-group { display: grid; gap: 4px; }
+      .nav-label { padding: 0 10px 6px; color: var(--hatch-muted, #81786d); font-size: 11px; }
+      .nav-button { display: flex; align-items: center; gap: 11px; width: 100%; padding: 10px 11px; border: 0; border-radius: 10px; background: transparent; color: #625b52; text-align: left; cursor: pointer; transition: background .16s ease, color .16s ease; }
+      .nav-button:hover { background: rgba(166,78,53,.07); }
+      .nav-button[aria-current="page"] { background: color-mix(in srgb, var(--hatch-accent, #a64e35) 12%, white); color: var(--hatch-accent, #a64e35); font-weight: 650; }
+      .nav-icon { display: grid; width: 20px; place-items: center; font-size: 16px; }
+      .sidebar-bottom { margin-top: auto; }
+      .profile-row { display: flex; align-items: center; gap: 10px; padding: 12px 8px 0; border-top: 1px solid var(--hatch-line, #ded5c9); }
+      .profile-copy { min-width: 0; flex: 1; }
+      .profile-copy strong, .profile-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .profile-copy strong { font-size: 12px; }
+      .profile-copy small { margin-top: 3px; color: var(--hatch-muted, #81786d); font-size: 11px; }
+      .main { min-width: 0; }
+      .topbar { display: flex; align-items: center; justify-content: space-between; min-height: 67px; padding: 0 34px; border-bottom: 1px solid var(--hatch-line, #ded5c9); background: rgba(255,255,255,.34); }
+      .breadcrumb { color: var(--hatch-muted, #81786d); font-size: 12px; }
+      .top-actions { display: flex; align-items: center; gap: 10px; }
+      .connection-status { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; border: 1px solid var(--hatch-line, #ded5c9); border-radius: 99px; background: rgba(255,255,255,.42); color: #675f55; font-size: 11px; }
+      .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #74886c; }
+      .icon-button, .quiet-button, .secondary-button, .primary-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 38px; padding: 0 13px; border: 1px solid var(--hatch-line, #ded5c9); border-radius: 10px; background: rgba(255,255,255,.58); cursor: pointer; transition: transform .16s ease, background .16s ease, border-color .16s ease; }
+      .icon-button { width: 38px; padding: 0; font-size: 16px; }
+      .quiet-button:hover, .secondary-button:hover, .icon-button:hover { background: white; border-color: #cfc2b3; }
+      .primary-button { border-color: var(--hatch-accent, #a64e35); background: var(--hatch-accent, #a64e35); color: #fff9f1; font-weight: 650; }
+      .primary-button:hover { background: #8f412d; transform: translateY(-1px); }
+      .content { max-width: 1320px; margin: 0 auto; padding: 38px 42px 60px; }
+      .page-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 26px; }
+      .page-heading h1 { margin: 7px 0 0; font-family: var(--hatch-font-display, Georgia, serif); font-size: clamp(32px, 4vw, 43px); font-weight: 400; letter-spacing: -.045em; line-height: 1.04; }
+      .page-heading p { max-width: 650px; margin: 10px 0 0; color: #756d63; font-size: 13px; line-height: 1.6; }
+      .heading-actions { display: flex; flex: 0 0 auto; gap: 9px; }
+      .welcome-strip { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 23px; padding: 16px 19px; border: 1px solid #ddcdb7; border-radius: 14px; background: linear-gradient(115deg, rgba(233,215,190,.7), rgba(255,255,255,.62)); }
+      .welcome-strip strong { display: block; font-family: var(--hatch-font-display, Georgia, serif); font-size: 19px; font-weight: 400; }
+      .welcome-strip span { display: block; margin-top: 5px; color: #766a5b; font-size: 12px; }
+      .welcome-mark { color: #8f6042; font-family: Georgia, serif; font-size: 27px; }
+      .overview-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(270px, .8fr); gap: 18px; }
+      .panel { border: 1px solid var(--hatch-line, #ded5c9); border-radius: 15px; background: rgba(255,255,255,.6); box-shadow: 0 5px 22px rgba(71,55,38,.025); }
+      .panel-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 18px 20px 13px; }
+      .panel-header h2 { margin: 0; font-family: var(--hatch-font-display, Georgia, serif); font-size: 21px; font-weight: 400; }
+      .text-button { border: 0; background: transparent; color: var(--hatch-accent, #a64e35); font-size: 12px; cursor: pointer; }
+      .filter-row { display: flex; flex-wrap: wrap; gap: 7px; padding: 0 20px 15px; }
+      .filter-chip, .tag { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid #e0d8ce; border-radius: 99px; background: rgba(255,255,255,.65); color: #6f675d; font-size: 11px; }
+      .filter-chip { cursor: pointer; }
+      .filter-chip[aria-pressed="true"] { border-color: #c98f76; background: #f7e9df; color: #8b422f; }
+      .contribution-list { display: grid; padding: 0 10px 11px; }
+      .contribution-row { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px 10px; border-top: 1px solid rgba(222,213,201,.72); border-radius: 9px; cursor: pointer; }
+      .contribution-row:hover, .contribution-row[aria-selected="true"] { background: rgba(235,225,212,.48); }
+      .source-icon { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 11px; background: #eee4d7; color: #705c49; font-size: 16px; }
+      .item-copy { min-width: 0; }
+      .item-copy strong { display: block; overflow: hidden; font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+      .item-copy small { display: block; margin-top: 5px; color: var(--hatch-muted, #81786d); font-size: 11px; }
+      .item-meta { display: grid; justify-items: end; gap: 7px; }
+      .audience { display: inline-flex; align-items: center; gap: 5px; color: #6e665c; font-size: 10px; }
+      .audience-mark { width: 6px; height: 6px; border-radius: 50%; background: #74886c; }
+      .audience.private .audience-mark { background: #9c8d78; }
+      .audience.review .audience-mark { background: #c68b42; }
+      .date-label { color: #938a7f; font-size: 10px; }
+      .side-column { display: grid; align-content: start; gap: 18px; }
+      .detail-panel { padding-bottom: 16px; }
+      .detail-empty { padding: 11px 20px 20px; color: #766e64; font-size: 12px; line-height: 1.7; }
+      .detail-body { padding: 0 20px; }
+      .detail-source { display: flex; align-items: center; gap: 10px; margin: 4px 0 15px; }
+      .detail-source strong { display: block; font-size: 12px; }
+      .detail-source small { display: block; margin-top: 4px; color: var(--hatch-muted, #81786d); font-size: 11px; }
+      .detail-excerpt { margin: 0 0 17px; padding: 12px 13px; border-left: 2px solid #c58b70; background: rgba(239,230,218,.55); color: #61594f; font-family: var(--hatch-font-display, Georgia, serif); font-size: 15px; line-height: 1.55; }
+      .field-label { display: block; margin-bottom: 8px; color: #746c62; font-size: 11px; }
+      .audience-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 14px; }
+      .audience-option { min-height: 34px; padding: 5px 4px; border: 1px solid #ded5c9; border-radius: 8px; background: rgba(255,255,255,.64); color: #6c645a; font-size: 10px; cursor: pointer; }
+      .audience-option[aria-pressed="true"] { border-color: #b66a50; background: #f7e8df; color: #88432f; }
+      .detail-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+      .detail-footer .secondary-button { min-height: 33px; padding: 0 10px; font-size: 11px; }
+      .detail-footer small { color: var(--hatch-muted, #81786d); font-size: 10px; }
+      .quick-actions { padding-bottom: 17px; }
+      .quick-action-list { display: grid; gap: 8px; padding: 0 16px; }
+      .quick-action { display: flex; align-items: center; gap: 11px; width: 100%; padding: 10px; border: 1px solid transparent; border-radius: 10px; background: rgba(244,238,229,.65); text-align: left; cursor: pointer; }
+      .quick-action:hover { border-color: #dfd2c2; background: #fbf8f2; }
+      .quick-action .source-icon { width: 31px; height: 31px; flex-basis: 31px; border-radius: 9px; font-size: 14px; }
+      .quick-action strong { display: block; font-size: 11px; }
+      .quick-action small { display: block; margin-top: 4px; color: var(--hatch-muted, #81786d); font-size: 10px; }
+      .status-note { margin: 12px 18px 0; padding: 11px 12px; border: 1px solid #e4d8c7; border-radius: 10px; background: #faf6ef; color: #70675c; font-size: 11px; line-height: 1.6; }
+      .screen { display: none; }
+      .screen.is-active { display: block; animation: appear .2s ease both; }
+      @keyframes appear { from { opacity: .5; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+      .cards-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+      .feature-card { padding: 18px; border: 1px solid var(--hatch-line, #ded5c9); border-radius: 14px; background: rgba(255,255,255,.62); }
+      .feature-card .source-icon { margin-bottom: 16px; }
+      .feature-card h2, .feature-card h3 { margin: 0; font-family: var(--hatch-font-display, Georgia, serif); font-size: 21px; font-weight: 400; }
+      .feature-card p { min-height: 43px; margin: 8px 0 15px; color: #756d63; font-size: 12px; line-height: 1.6; }
+      .feature-card .quiet-button, .feature-card .secondary-button { min-height: 34px; font-size: 11px; }
+      .stat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+      .stat-card { padding: 16px 18px; border: 1px solid var(--hatch-line, #ded5c9); border-radius: 13px; background: rgba(255,255,255,.6); }
+      .stat-card small { color: var(--hatch-muted, #81786d); font-size: 11px; }
+      .stat-card strong { display: block; margin-top: 9px; font-family: var(--hatch-font-display, Georgia, serif); font-size: 29px; font-weight: 400; }
+      .stat-card span { display: block; margin-top: 4px; color: #77816e; font-size: 10px; }
+      .conversation-list { display: grid; gap: 9px; padding: 0 18px 17px; }
+      .conversation-row { display: grid; grid-template-columns: 35px minmax(0,1fr) auto; align-items: center; gap: 11px; padding: 11px; border: 1px solid #e7dfd4; border-radius: 11px; background: rgba(255,255,255,.42); }
+      .conversation-row strong { display: block; font-size: 12px; }
+      .conversation-row small { display: block; margin-top: 5px; color: #81786d; font-size: 11px; }
+      .table-like { display: grid; gap: 0; padding: 0 18px 18px; }
+      .table-row { display: grid; grid-template-columns: minmax(0, 1fr) 130px 100px auto; align-items: center; gap: 12px; padding: 13px 10px; border-top: 1px solid #e7dfd4; font-size: 12px; }
+      .table-row.header { color: #81786d; font-size: 10px; }
+      .table-row .quiet-button { min-height: 30px; padding: 0 10px; font-size: 10px; }
+      .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 15px 19px; border-top: 1px solid #e7dfd4; }
+      .setting-row strong { display: block; font-size: 12px; }
+      .setting-row small { display: block; margin-top: 5px; color: #81786d; font-size: 11px; }
+      .concept-tag { display: inline-flex; padding: 5px 8px; border-radius: 99px; background: #efe6d8; color: #75624c; font-size: 10px; white-space: nowrap; }
+      .switch-label { display: inline-flex; align-items: center; gap: 6px; color: #71695f; font-size: 10px; white-space: nowrap; cursor: pointer; }
+      .switch-label input { width: 15px; height: 15px; accent-color: var(--hatch-accent, #a64e35); }
+      .toast { position: fixed; right: 24px; bottom: 24px; z-index: 20; max-width: min(390px, calc(100vw - 32px)); padding: 12px 16px; border: 1px solid #d7c4ae; border-radius: 11px; background: #342f2a; color: #fff8ed; box-shadow: 0 12px 40px rgba(44,34,24,.18); font-size: 12px; opacity: 0; pointer-events: none; transform: translateY(8px); transition: opacity .18s ease, transform .18s ease; }
+      .toast.is-visible { opacity: 1; transform: translateY(0); }
+      dialog { width: min(520px, calc(100vw - 28px)); padding: 0; border: 1px solid #d9cfc2; border-radius: 17px; background: #faf7f1; color: var(--hatch-ink, #302b26); box-shadow: 0 24px 90px rgba(47,37,27,.25); }
+      dialog::backdrop { background: rgba(40,34,28,.42); backdrop-filter: blur(3px); }
+      .dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 22px 23px 15px; border-bottom: 1px solid #e7dfd4; }
+      .dialog-header h2 { margin: 0; font-family: var(--hatch-font-display, Georgia, serif); font-size: 25px; font-weight: 400; }
+      .dialog-header p { margin: 7px 0 0; color: #756d63; font-size: 12px; }
+      .dialog-content { display: grid; gap: 15px; padding: 18px 23px 23px; }
+      .channel-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+      .channel-choice { display: grid; justify-items: start; gap: 8px; min-height: 74px; padding: 11px; border: 1px solid #e0d8ce; border-radius: 11px; background: rgba(255,255,255,.65); text-align: left; cursor: pointer; }
+      .channel-choice[aria-pressed="true"] { border-color: #b66a50; background: #f7e8df; color: #88432f; }
+      .channel-choice span { font-size: 17px; }
+      .channel-choice strong { font-size: 11px; }
+      .input-label { display: grid; gap: 7px; color: #71695f; font-size: 11px; }
+      .input-label input, .input-label textarea { width: 100%; padding: 10px 11px; border: 1px solid #ddd4c8; border-radius: 9px; background: white; color: #302b26; font-size: 12px; }
+      .input-label textarea { min-height: 78px; resize: vertical; }
+      .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px; }
+      .dialog-footnote { color: #857b6f; font-size: 10px; line-height: 1.5; }
+      .mobile-nav { display: none; }
+      @media (max-width: 1050px) {
+        .app-shell { grid-template-columns: 205px minmax(0,1fr); }
+        .content { padding-right: 26px; padding-left: 26px; }
+        .overview-grid { grid-template-columns: minmax(0,1.25fr) minmax(255px,.8fr); }
+      }
+      @media (max-width: 800px) {
+        .app-shell { display: block; padding-bottom: 64px; }
+        .sidebar { display: none; }
+        .topbar { min-height: 57px; padding: 0 17px; }
+        .content { padding: 27px 17px 42px; }
+        .overview-grid { grid-template-columns: 1fr; }
+        .side-column { grid-template-columns: repeat(2, minmax(0,1fr)); }
+        .mobile-nav { position: fixed; right: 0; bottom: 0; left: 0; z-index: 10; display: flex; justify-content: space-around; padding: 7px 5px calc(7px + env(safe-area-inset-bottom)); border-top: 1px solid #ded5c9; background: rgba(249,246,239,.96); backdrop-filter: blur(12px); }
+        .mobile-nav .nav-button { display: grid; justify-items: center; gap: 2px; width: auto; min-width: 54px; padding: 5px 6px; font-size: 9px; }
+        .mobile-nav .nav-icon { font-size: 15px; }
+      }
+      @media (max-width: 580px) {
+        .prototype-banner { font-size: 10px; }
+        .page-heading { align-items: flex-start; flex-direction: column; gap: 14px; }
+        .heading-actions { width: 100%; }
+        .heading-actions > * { flex: 1; }
+        .welcome-strip { padding: 14px; }
+        .side-column { grid-template-columns: 1fr; }
+        .cards-grid, .stat-grid { grid-template-columns: 1fr; }
+        .stat-grid { gap: 8px; }
+        .stat-card { display: grid; grid-template-columns: 1fr auto; align-items: center; }
+        .stat-card strong { grid-column: 2; grid-row: 1 / span 2; margin: 0; }
+        .stat-card span { grid-column: 1; }
+        .table-row { grid-template-columns: minmax(0,1fr) auto; }
+        .table-row > :nth-child(2), .table-row > :nth-child(3) { display: none; }
+        .table-row.header { display: none; }
+        .connection-status { display: none; }
+        .channel-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="prototype-banner"><span class="banner-dot" aria-hidden="true"></span><strong>概念稿 · 非正式产品</strong><span>以下内容与操作均为示例，不会连接或修改真实数据</span></div>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="主导航">
+        <div class="brand"><span class="brand-mark" aria-hidden="true">h</span><span class="brand-name">hatch</span></div>
+        <div class="workspace-card"><div class="workspace-caption">专家空间</div><div class="workspace-name">林岚的工作室 <span aria-hidden="true">⌄</span></div></div>
+        <nav class="nav-group" aria-label="专家工作台">
+          <span class="nav-label">工作空间</span>
+          <button class="nav-button" data-screen="home"><span class="nav-icon" aria-hidden="true">⌂</span>概览</button>
+          <button class="nav-button" data-screen="context" aria-current="page"><span class="nav-icon" aria-hidden="true">▤</span>上下文 <span class="nav-count">12</span></button>
+          <button class="nav-button" data-screen="workbench"><span class="nav-icon" aria-hidden="true">✳</span>工作台</button>
+          <button class="nav-button" data-screen="offers"><span class="nav-icon" aria-hidden="true">◇</span>输出形态</button>
+          <button class="nav-button" data-screen="interactions"><span class="nav-icon" aria-hidden="true">◌</span>互动</button>
+          <button class="nav-button" data-screen="business"><span class="nav-icon" aria-hidden="true">⌁</span>经营</button>
+        </nav>
+        <div class="sidebar-bottom">
+          <button class="nav-button" data-screen="settings"><span class="nav-icon" aria-hidden="true">⚙</span>设置与连接</button>
+          <div class="profile-row"><span class="avatar" aria-hidden="true">林</span><span class="profile-copy"><strong>林岚</strong><small>专家空间所有者</small></span><button class="icon-button" aria-label="打开个人菜单">···</button></div>
+        </div>
+      </aside>
+      <main class="main">
+        <header class="topbar"><div class="breadcrumb" id="breadcrumb">专家空间 / 上下文</div><div class="top-actions"><span class="connection-status"><span class="status-dot"></span>工作空间已就绪（示例）</span><button class="icon-button" id="helpButton" aria-label="帮助">?</button><span class="avatar" aria-hidden="true">林</span></div></header>
+        <div class="content">
+          <section class="screen is-active" id="screen-context" aria-labelledby="context-title">
+            <div class="page-heading"><div><div class="eyebrow">材料支撑你的 Ideas</div><h1 id="context-title">材料库</h1><p>汇集随手记录、语音采访、文件、链接、工作台内容和用户互动，再把有用的材料关联到你的 Ideas。</p></div><div class="heading-actions"><button class="secondary-button" data-action="capture">✦ 语音 Agent 采访</button><button class="primary-button" data-action="add">＋ 添加材料</button></div></div>
+            <div class="welcome-strip"><div><strong>先把材料带进来，再决定它如何被使用</strong><span>Creator Factory 的语音 Agent 采访你本人；新材料默认仅自己可见，对外范围由你选择。</span></div><span class="welcome-mark" aria-hidden="true">✳</span></div>
+            <div class="overview-grid">
+              <section class="panel" aria-labelledby="contribution-heading"><div class="panel-header"><h2 id="contribution-heading">材料 <span class="eyebrow">· 24 份</span></h2><button class="text-button" data-action="all-context">查看全部　→</button></div><div class="filter-row" role="group" aria-label="筛选材料"><button class="filter-chip" data-filter="all" aria-pressed="true">全部 <span>24</span></button><button class="filter-chip" data-filter="review" aria-pressed="false">待整理 <span>4</span></button><button class="filter-chip" data-filter="private" aria-pressed="false">仅自己 <span>11</span></button><button class="filter-chip" data-filter="subscriber" aria-pressed="false">订阅者 <span>6</span></button><button class="filter-chip" data-filter="public" aria-pressed="false">公开 <span>3</span></button></div>
+                <div class="contribution-list" id="contributionList">
+                  <article class="contribution-row" data-kind="private" data-id="1" aria-selected="true" tabindex="0"><span class="source-icon" aria-hidden="true">♫</span><span class="item-copy"><strong>关于长期主义的一段语音</strong><small>语音记录 · 已整理为文字</small></span><span class="item-meta"><span class="audience private"><i class="audience-mark"></i>仅自己</span><span class="date-label">今天</span></span></article>
+                  <article class="contribution-row" data-kind="subscriber" data-id="2" aria-selected="false" tabindex="0"><span class="source-icon" aria-hidden="true">◉</span><span class="item-copy"><strong>采访：如何做出真正有用的产品</strong><small>Hatch 采访 · 6 个主题</small></span><span class="item-meta"><span class="audience"><i class="audience-mark"></i>订阅者</span><span class="date-label">昨天</span></span></article>
+                  <article class="contribution-row" data-kind="review" data-id="3" aria-selected="false" tabindex="0"><span class="source-icon" aria-hidden="true">▧</span><span class="item-copy"><strong>工作坊现场照片</strong><small>图片 · 等待添加说明</small></span><span class="item-meta"><span class="audience review"><i class="audience-mark"></i>待整理</span><span class="date-label">6 月 12 日</span></span></article>
+                  <article class="contribution-row" data-kind="public" data-id="4" aria-selected="false" tabindex="0"><span class="source-icon" aria-hidden="true">↗</span><span class="item-copy"><strong>我对团队协作的三个观察</strong><small>文章链接 · 已提取重点</small></span><span class="item-meta"><span class="audience"><i class="audience-mark"></i>公开</span><span class="date-label">6 月 10 日</span></span></article>
+                  <article class="contribution-row" data-kind="private" data-id="5" aria-selected="false" tabindex="0"><span class="source-icon" aria-hidden="true">✎</span><span class="item-copy"><strong>产品决策备忘：先把问题说清楚</strong><small>随笔 · 约 480 字</small></span><span class="item-meta"><span class="audience private"><i class="audience-mark"></i>仅自己</span><span class="date-label">6 月 8 日</span></span></article>
+                </div>
+              </section>
+              <div class="side-column">
+                <section class="panel detail-panel" aria-labelledby="detail-heading"><div class="panel-header"><h2 id="detail-heading">材料详情</h2><button class="icon-button" id="moreDetail" aria-label="更多材料操作">···</button></div><div class="detail-body" id="detailBody"><div class="detail-source"><span class="source-icon" aria-hidden="true">♫</span><span><strong>关于长期主义的一段语音</strong><small>语音记录 · 今天 09:42</small></span></div><blockquote class="detail-excerpt">“做长期的事，先想清楚什么值得持续，然后给它留出空间。”</blockquote><label class="field-label">这份材料可以用于</label><div class="audience-options" role="group" aria-label="材料使用范围"><button class="audience-option" data-audience="private" aria-pressed="true">仅自己</button><button class="audience-option" data-audience="subscriber" aria-pressed="false">订阅者</button><button class="audience-option" data-audience="public" aria-pressed="false">公开</button></div><div class="detail-footer"><small id="detailStatus">当前仅用于你的工作台</small><button class="secondary-button" id="saveAudience">保存范围</button></div></div></section>
+                <section class="panel quick-actions"><div class="panel-header"><h2>材料入口</h2></div><div class="quick-action-list"><button class="quick-action" data-action="add-channel" data-channel="note"><span class="source-icon" aria-hidden="true">✎</span><span><strong>随手记录</strong><small>文字、照片、文件或链接</small></span></button><button class="quick-action" data-action="capture"><span class="source-icon" aria-hidden="true">♫</span><span><strong>Creator Factory 语音 Agent 采访</strong><small>语音 Agent 采访你本人</small></span></button><button class="quick-action" data-action="workstation"><span class="source-icon" aria-hidden="true">⌘</span><span><strong>从日常工作台带回</strong><small>Codex、Claude Code 等</small></span></button><button class="quick-action" data-action="add-channel" data-channel="interaction"><span class="source-icon" aria-hidden="true">◌</span><span><strong>售前或订阅互动</strong><small>选择有价值的问题与交流</small></span></button></div><div class="status-note">也可以通过 API 或 MCP 提交材料。每种入口汇入同一材料库，再由你决定如何关联和使用。</div></section>
+              </div>
+            </div>
+          </section>
+
+          <section class="screen" id="screen-home" aria-labelledby="home-title"><div class="page-heading"><div><div class="eyebrow">欢迎回来，林岚</div><h1 id="home-title">你的工作空间</h1><p>继续积累经验，也可以把已有上下文用于写作、协作和服务。</p></div><div class="heading-actions"><button class="primary-button" data-action="add">＋ 添加上下文</button></div></div><div class="stat-grid"><div class="stat-card"><small>上下文材料</small><strong>24</strong><span>4 份等待整理</span></div><div class="stat-card"><small>本月工作会话</small><strong>18</strong><span>覆盖 5 个主题</span></div><div class="stat-card"><small>对外服务</small><strong>2</strong><span>1 个公开 · 1 个付费</span></div></div><div class="cards-grid"><article class="feature-card"><span class="source-icon">▤</span><h2>继续积累</h2><p>把随手记录、语音、采访和已有文章放进你的上下文。</p><button class="secondary-button" data-screen-link="context">打开上下文 →</button></article><article class="feature-card"><span class="source-icon">✳</span><h2>开始一项工作</h2><p>用你自己的经验起草内容，或和 Agent 一起完成具体任务。</p><button class="secondary-button" data-screen-link="workbench">打开工作台 →</button></article><article class="feature-card"><span class="source-icon">◇</span><h2>查看对外服务</h2><p>检查公开答疑与付费交付各自使用的上下文范围。</p><button class="secondary-button" data-screen-link="offers">管理服务 →</button></article></div></section>
+
+          <section class="screen" id="screen-workbench" aria-labelledby="workbench-title"><div class="page-heading"><div><div class="eyebrow">你的经验，帮助你完成工作</div><h1 id="workbench-title">工作台</h1><p>选择一个 Idea 或工作方式，查看它如何处理当前问题；结果可以继续编辑。</p></div></div><div class="cards-grid"><article class="feature-card"><span class="source-icon">✧</span><h2>运行一个 Idea</h2><p>用“先把问题说清楚”分析当前工作，查看方法运行后的结果。</p><button class="primary-button" data-action="run-idea" data-idea-name="先把问题说清楚">选择并运行 Idea</button></article><article class="feature-card"><span class="source-icon">✎</span><h2>写一篇社媒文章</h2><p>从一个想法开始，生成草稿，再由你编辑和定稿。</p><button class="secondary-button" data-action="start-writing">开始写作</button></article><article class="feature-card"><span class="source-icon">⇄</span><h2>一起完成一项工作</h2><p>你与 Agent 分工协作，例如先出思路、由你判断和完善。</p><button class="secondary-button" data-action="start-cowork">开始协作</button></article></div><div class="panel" id="ideaRunResult" hidden style="margin-top:18px"><div class="panel-header"><h2>运行结果 <span class="eyebrow">· 示例输出</span></h2><span class="concept-tag">先把问题说清楚</span></div><div class="detail-body" style="padding-bottom:18px"><blockquote class="detail-excerpt">当前问题可能混合了“目标不清”和“执行方式不确定”。先分别写出希望改变的结果、已知限制和最小验证动作，再决定投入。</blockquote><button class="secondary-button" data-action="show-toast" data-message="结果编辑器属于概念稿中的交互示例。">继续编辑结果</button></div></div><div class="panel" style="margin-top:18px"><div class="panel-header"><h2>本次工作可使用的材料</h2><span class="concept-tag">仅限你的工作空间</span></div><div class="status-note" style="margin-top:0;margin-bottom:17px">选择 Idea 时，可以查看它关联的支撑材料，并确认本次允许使用的材料。</div><div class="filter-row"><span class="tag">长期主义语音</span><span class="tag">产品决策备忘</span><button class="filter-chip" data-action="show-toast" data-message="材料选择器会在正式产品中根据授权范围提供内容。">＋ 选择材料</button></div></div></section>
+
+          <section class="screen" id="screen-offers" aria-labelledby="offers-title"><div class="page-heading"><div><div class="eyebrow">同一组 Ideas，可以组合成不同输出</div><h1 id="offers-title">输出形态</h1><p>选择你要做什么：写内容、自己使用、获客答疑，或提供完整 Agent。每种形态独立选择 Ideas 与可用材料。</p></div><div class="heading-actions"><button class="primary-button" data-action="show-toast" data-message="新建输出的配置属于概念稿交互。">＋ 创建输出</button></div></div><div class="cards-grid output-cards"><article class="feature-card"><span class="concept-tag">内容创作</span><h2 style="margin-top:14px">写一篇社媒文章</h2><p>选择 Ideas 与支撑材料，生成可由你继续编辑的文章草稿。</p><div class="tag" style="margin-bottom:14px">输出：文章、帖子、提纲</div><button class="secondary-button" data-action="select-output" data-output="内容创作">配置 Ideas</button></article><article class="feature-card"><span class="concept-tag">专家自用</span><h2 style="margin-top:14px">我的工作 Agent</h2><p>在私人工作空间里运行方法，与你协作完成日常任务。</p><div class="tag" style="margin-bottom:14px">范围：私人材料</div><button class="secondary-button" data-action="select-output" data-output="专家自用">配置 Ideas</button></article><article class="feature-card"><span class="concept-tag">公开 · 获客</span><h2 style="margin-top:14px">先聊聊你的问题</h2><p>用精选方法回答潜在客户的问题，介绍你的专业服务。</p><div class="tag" style="margin-bottom:14px">范围：公开材料</div><button class="secondary-button" data-action="select-output" data-output="获客机器人">配置 Ideas</button></article><article class="feature-card"><span class="concept-tag">订阅 · 完整 Agent</span><h2 style="margin-top:14px">林岚的产品思考</h2><p>组合多种 Ideas、工具与交互方式，提供持续的专业服务。</p><div class="tag" style="margin-bottom:14px">范围：授权材料与工具</div><button class="secondary-button" data-action="select-output" data-output="完整 Agent">配置 Ideas</button></article></div><section class="panel" style="margin-top:18px"><div class="panel-header"><h2>当前输出使用的 Ideas</h2><span class="concept-tag" id="selectedOutputName">专家自用</span></div><div id="outputIdeaToggle"><div class="setting-row"><span><strong>先把问题说清楚</strong><small>支撑当前输出的判断方式</small></span><label class="switch-label"><input type="checkbox" checked data-output-idea="clear-problem"><span>包含此 Idea</span></label></div><div class="setting-row"><span><strong>长期主义的取舍</strong><small>支撑当前输出的判断方式</small></span><label class="switch-label"><input type="checkbox" checked data-output-idea="long-term"><span>包含此 Idea</span></label></div></div><div class="status-note" style="margin-top:0;margin-bottom:17px">开关只改变当前输出的组合。Idea 本身及其材料仍由你单独管理；各输出使用的范围彼此独立。</div></section></section>
+
+          <section class="screen" id="screen-interactions" aria-labelledby="interactions-title"><div class="page-heading"><div><div class="eyebrow">交流也能帮助你发现新的主题</div><h1 id="interactions-title">互动</h1><p>查看别人向你的服务提出的问题。你可以选择有价值的问题，整理成新的上下文材料。</p></div></div><section class="panel"><div class="panel-header"><h2>近期问题 <span class="eyebrow">· 示例内容</span></h2><button class="text-button" data-action="show-toast" data-message="筛选与搜索操作在此概念稿中仅作界面示例。">筛选</button></div><div class="conversation-list"><article class="conversation-row"><span class="avatar">周</span><span><strong>周先生 · 公开答疑</strong><small>“团队增长后，怎样保留最初的产品判断？”</small></span><button class="secondary-button" data-action="promote" data-question="团队增长后，怎样保留最初的产品判断？">整理为材料</button></article><article class="conversation-row"><span class="avatar">许</span><span><strong>许女士 · 订阅交流</strong><small>“你如何判断一个需求值得长期投入？”</small></span><button class="secondary-button" data-action="promote" data-question="你如何判断一个需求值得长期投入？">整理为材料</button></article><article class="conversation-row"><span class="avatar">陈</span><span><strong>陈先生 · 公开答疑</strong><small>“从顾问工作转为产品化服务，第一步怎么做？”</small></span><button class="secondary-button" data-action="promote" data-question="从顾问工作转为产品化服务，第一步怎么做？">整理为材料</button></article></div><div class="status-note" style="margin-bottom:17px">互动记录与已确认的上下文材料分开管理。选择“整理为材料”会在概念稿中创建待编辑候选，不会自动公开。</div></section></section>
+
+          <section class="screen" id="screen-business" aria-labelledby="business-title"><div class="page-heading"><div><div class="eyebrow">了解你的服务如何运转</div><h1 id="business-title">经营</h1><p>查看服务使用与订阅概况。这里的数字仅用于展示界面示例。</p></div><span class="concept-tag">示例数据 · 非真实经营信息</span></div><div class="stat-grid"><div class="stat-card"><small>本月服务对话</small><strong>86</strong><span>示例统计</span></div><div class="stat-card"><small>当前订阅人数</small><strong>32</strong><span>示例统计</span></div><div class="stat-card"><small>待处理事项</small><strong>3</strong><span>示例统计</span></div></div><section class="panel"><div class="panel-header"><h2>服务概况</h2><span class="eyebrow">演示内容</span></div><div class="table-like"><div class="table-row header"><span>服务</span><span>状态</span><span>本月使用</span><span></span></div><div class="table-row"><strong>先聊聊你的问题</strong><span>公开答疑</span><span>54 次对话</span><button class="quiet-button" data-action="screen-link" data-target="offers">查看</button></div><div class="table-row"><strong>林岚的产品思考</strong><span>订阅服务</span><span>32 位订阅者</span><button class="quiet-button" data-action="screen-link" data-target="offers">查看</button></div></div></section></section>
+
+          <section class="screen" id="screen-settings" aria-labelledby="settings-title"><div class="page-heading"><div><div class="eyebrow">你的空间由你掌握</div><h1 id="settings-title">设置与连接</h1><p>管理材料的进入方式、外部连接和专家空间信息。</p></div></div><section class="panel"><div class="panel-header"><h2>材料来源</h2><span class="concept-tag">概念界面</span></div><div class="setting-row"><span><strong>手动添加</strong><small>随笔、照片、文章链接与文件</small></span><span class="concept-tag">可用方式</span></div><div class="setting-row"><span><strong>语音记录与采访</strong><small>将口述内容整理为待确认材料</small></span><span class="concept-tag">可用方式</span></div><div class="setting-row"><span><strong>API 与 MCP</strong><small>从你授权的外部工具提交材料</small></span><button class="quiet-button" data-action="show-toast" data-message="API 与 MCP 的连接配置将在正式产品中管理。">管理连接</button></div></section><section class="panel" style="margin-top:17px"><div class="panel-header"><h2>专家空间</h2></div><div class="setting-row"><span><strong>林岚的工作室</strong><small>空间名称与基本资料</small></span><button class="quiet-button" data-action="show-toast" data-message="空间资料编辑属于概念稿交互。">编辑</button></div><div class="setting-row"><span><strong>材料使用范围</strong><small>新材料默认由你管理，公开前由你选择</small></span><span class="concept-tag">专家控制</span></div></section></section>
+        </div>
+      </main>
+    </div>
+
+    <nav class="mobile-nav" aria-label="移动端主导航">
+      <button class="nav-button" data-screen="home"><span class="nav-icon" aria-hidden="true">⌂</span>概览</button>
+      <button class="nav-button" data-screen="context" aria-current="page"><span class="nav-icon" aria-hidden="true">▤</span>上下文</button>
+      <button class="nav-button" data-screen="ideas"><span class="nav-icon" aria-hidden="true">✧</span>Ideas</button>
+      <button class="nav-button" data-screen="workbench"><span class="nav-icon" aria-hidden="true">✳</span>工作台</button>
+      <button class="nav-button" data-screen="offers"><span class="nav-icon" aria-hidden="true">◇</span>输出</button>
+      <button class="nav-button" data-screen="interactions"><span class="nav-icon" aria-hidden="true">◌</span>互动</button>
+    </nav>
+
+    <dialog id="addDialog" aria-labelledby="dialogTitle">
+      <form id="addForm">
+        <div class="dialog-header"><div><h2 id="dialogTitle">添加上下文</h2><p>先收进来，整理和共享范围都可以稍后决定。</p></div><button class="icon-button" type="button" data-action="close-dialog" aria-label="关闭">×</button></div>
+        <div class="dialog-content"><div class="channel-grid" role="group" aria-label="选择添加方式"><button class="channel-choice" type="button" data-channel-choice="note" aria-pressed="true"><span>✎</span><strong>随手记录</strong></button><button class="channel-choice" type="button" data-channel-choice="voice" aria-pressed="false"><span>♫</span><strong>语音 Agent 采访</strong></button><button class="channel-choice" type="button" data-channel-choice="upload" aria-pressed="false"><span>▧</span><strong>照片 / 文件</strong></button><button class="channel-choice" type="button" data-channel-choice="link" aria-pressed="false"><span>↗</span><strong>文章链接</strong></button><button class="channel-choice" type="button" data-channel-choice="workstation" aria-pressed="false"><span>⌘</span><strong>Codex / Claude</strong></button><button class="channel-choice" type="button" data-channel-choice="interaction" aria-pressed="false"><span>◌</span><strong>用户互动</strong></button><button class="channel-choice" type="button" data-channel-choice="api" aria-pressed="false"><span>⌁</span><strong>API / MCP</strong></button></div><div class="status-note" id="workstationHelp" hidden style="margin:0">在这里复制提示词到 Codex、Claude Code 等日常工作台。完成后，将工作台生成的内容复制回来，作为一份待确认材料。</div><label class="input-label">材料标题<input id="entryTitle" name="title" required maxlength="80" placeholder="例如：我对带团队的一点观察" /></label><label class="input-label">内容或说明<textarea id="entryBody" name="body" placeholder="写下一段想法，或说明这份材料是什么。"></textarea></label><button class="quiet-button" id="copyPrompt" type="button" hidden>复制给日常工作台的提示词</button><div class="dialog-footnote">本页面不会上传文件或保存到服务器。提交只会在当前页面添加一条示例材料。</div><div class="dialog-actions"><button class="secondary-button" type="button" data-action="close-dialog">取消</button><button class="primary-button" type="submit">加入示例列表</button></div></div>
+      </form>
+    </dialog>
+    <dialog id="ideaDialog" aria-labelledby="ideaDialogTitle"><form id="ideaForm"><div class="dialog-header"><div><h2 id="ideaDialogTitle">创建一个 Idea</h2><p>用自己的话描述一种方法、判断或做事方式。</p></div><button class="icon-button" type="button" data-action="close-idea-dialog" aria-label="关闭">×</button></div><div class="dialog-content"><label class="input-label">Idea 名称<input id="ideaTitle" required maxlength="80" placeholder="例如：先把问题说清楚" /></label><label class="input-label">方法说明<textarea id="ideaDescription" placeholder="描述你通常如何思考、判断或行动。"></textarea></label><div class="dialog-footnote">创建后可以关联支撑材料、运行查看结果，并单独设置哪些对外服务可以使用。</div><div class="dialog-actions"><button class="secondary-button" type="button" data-action="close-idea-dialog">取消</button><button class="primary-button" type="submit">创建示例 Idea</button></div></div></form></dialog>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="./expert-context-concept.js" defer></script>
+  </body>
+</html>

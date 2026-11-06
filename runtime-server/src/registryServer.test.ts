@@ -69,7 +69,7 @@ test("published catalog rows omit products whose Creator account is missing", as
       { creator_id: "missing-creator", creator_name: "Orphaned Corpus name", product_id: "orphaned-product" }
     ],
     async creatorId => creatorId === CREATOR_ID
-      ? { display_name: "Current account name", avatar_url: null, role: "creator" }
+      ? { display_name: "Current account name", avatar_url: null }
       : undefined
   );
   assert.deepEqual(rows, [{ creator_id: CREATOR_ID, creator_name: "Current account name", product_id: PRODUCT_ID, creator_avatar_url: null }]);
@@ -84,6 +84,7 @@ test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () =
     HATCH_REGISTRY_STATE_PATH: path.join(root, "state.json"),
     HATCH_AUTH_SIGNING_SECRET: "test-secret",
     HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN: "deployment-test-token",
+    HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN: "runtime-test-token",
     HATCH_QDRANT_URL: "",
     DASHSCOPE_API_KEY: ""
   });
@@ -96,11 +97,11 @@ test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () =
       status: "ok",
       checks: { registry_store: "ready", release_store: "memory" }
     });
-    const signup = await fetch(`${base}/v1/auth/signup`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "user@example.com", password: "password-123", role: "user", display_name: "Test User" }) });
+    const signup = await fetch(`${base}/v1/auth/signup`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "user@example.com", password: "password-123", display_name: "Test User" }) });
     assert.equal(signup.status, 201);
     assert.equal(signup.headers.get("cache-control"), "no-store");
-    const auth = await signup.json() as { token: string; session: { token: string; expires_at: string }; account: { id: string; role: string } };
-    assert.equal(auth.account.role, "user");
+    const auth = await signup.json() as { token: string; session: { token: string; expires_at: string }; account: Record<string, unknown> & { id: string } };
+    assert.equal(Object.hasOwn(auth.account, "role"), false);
     assert.equal(auth.session.token, auth.token);
     assert.match(auth.session.expires_at, /^20/);
     const me = await fetch(`${base}/v1/auth/me`, { headers: { authorization: `Bearer ${auth.session.token}` } });
@@ -109,7 +110,22 @@ test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () =
     const mePayload = await me.json() as { id: string; session_expires_at: string };
     assert.match(mePayload.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     assert.match(mePayload.session_expires_at, /^20/);
-    const creatorSignup = await fetch(`${base}/v1/auth/signup`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "creator@example.com", password: "password-123", role: "creator", display_name: "Account Creator Name" }) });
+    assert.equal(Object.hasOwn(mePayload, "role"), false);
+    const rename = (body: unknown, token = auth.session.token) => fetch(`${base}/v1/auth/me`, { method: "PATCH", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body) });
+    const renamed = await rename({ display_name: "  New   Name " });
+    assert.equal(renamed.status, 200);
+    assert.deepEqual(await renamed.json(), { id: mePayload.id, email: "user@example.com", display_name: "New Name", avatar_url: null });
+    assert.equal(((await (await fetch(`${base}/v1/auth/me`, { headers: { authorization: `Bearer ${auth.session.token}` } })).json()) as { display_name: string }).display_name, "New Name");
+    assert.equal((await rename({ display_name: "   " })).status, 400);
+    assert.equal((await rename({ display_name: "x".repeat(129) })).status, 400);
+    assert.equal((await rename({ display_name: "Intruder" }, "not-a-session")).status, 401);
+    // One kind of account: any signed-in account can author in Studio.
+    const ownProducts = await fetch(`${base}/v1/creator/products`, { headers: { authorization: `Bearer ${auth.session.token}` } });
+    assert.equal(ownProducts.status, 200);
+    const ownReleases = await fetch(`${base}/v1/runtime/creators/${mePayload.id}/releases`, { headers: { authorization: "Bearer runtime-test-token" } });
+    assert.deepEqual(await ownReleases.json(), { releases: [] });
+    assert.equal((await fetch(`${base}/v1/runtime/creators/${mePayload.id}/releases`)).status, 401);
+    const creatorSignup = await fetch(`${base}/v1/auth/signup`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "creator@example.com", password: "password-123", display_name: "Account Creator Name" }) });
     assert.equal(creatorSignup.status, 201);
     const creatorAuth = await creatorSignup.json() as { account: { id: string } };
     const creatorAccounts = await fetch(`${base}/v1/internal/creator-accounts?ids=${creatorAuth.account.id}`, { headers: { authorization: "Bearer deployment-test-token" } });
@@ -118,7 +134,7 @@ test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () =
     const unauthorizedCreatorAccounts = await fetch(`${base}/v1/internal/creator-accounts?ids=${creatorAuth.account.id}`);
     assert.equal(unauthorizedCreatorAccounts.status, 401);
 
-    const legacy = legacyAuthToken(auth.account.id, "user", "test-secret");
+    const legacy = legacyAuthToken(auth.account.id, "test-secret");
     const rejectedLegacy = await fetch(`${base}/v1/auth/me`, {
       headers: { authorization: `Bearer ${legacy}` }
     });
@@ -165,6 +181,13 @@ test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () =
     assert.equal(oversizedPassword.status, 400);
     assert.equal(oversizedPassword.headers.get("cache-control"), "no-store");
 
+    const minted = await fetch(`${base}/v1/auth/sessions`, { method: "POST", headers: { authorization: `Bearer ${auth.session.token}` } });
+    assert.equal(minted.status, 201);
+    const device = await minted.json() as { session: { token: string }; account: { id: string } };
+    assert.notEqual(device.session.token, auth.session.token);
+    assert.equal(device.account.id, auth.account.id);
+    assert.equal((await fetch(`${base}/v1/auth/sessions`, { method: "POST" })).status, 401);
+    assert.equal((await fetch(`${base}/v1/auth/sessions`, { method: "POST", headers: { authorization: `Bearer ${legacy}` } })).status, 401);
     const logout = await fetch(`${base}/v1/auth/logout`, {
       method: "POST",
       headers: { authorization: `Bearer ${auth.session.token}` }
@@ -172,6 +195,8 @@ test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () =
     assert.equal(logout.status, 204);
     const revoked = await fetch(`${base}/v1/auth/me`, { headers: { authorization: `Bearer ${auth.session.token}` } });
     assert.equal(revoked.status, 401);
+    const deviceMe = await fetch(`${base}/v1/auth/me`, { headers: { authorization: `Bearer ${device.session.token}` } });
+    assert.equal(deviceMe.status, 200);
   } finally {
     await registry.close();
   }
@@ -199,13 +224,12 @@ test("TypeScript Registry enables legacy HMAC only for explicit migration mode",
       body: JSON.stringify({
         email: "legacy@example.com",
         password: "password-123",
-        role: "user",
         display_name: "Legacy User"
       })
     });
     assert.equal(signup.status, 201);
     const auth = await signup.json() as { account: { id: string } };
-    const token = legacyAuthToken(auth.account.id, "user", "migration-secret");
+    const token = legacyAuthToken(auth.account.id, "migration-secret");
     const me = await fetch(`${base}/v1/auth/me`, {
       headers: { authorization: `Bearer ${token}` }
     });
@@ -215,147 +239,10 @@ test("TypeScript Registry enables legacy HMAC only for explicit migration mode",
   }
 });
 
-test("Registry bounds public opaque-session lookups before they reach account storage", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-ts-registry-session-limit-"));
-  const registry = await createRegistryServerFromEnvironment({
-    REGISTRY_HOST: "127.0.0.1",
-    REGISTRY_PORT: "0",
-    HATCH_AGENT_CORPUS_ROOT: path.join(root, "corpora"),
-    HATCH_REGISTRY_STATE_PATH: path.join(root, "state.json"),
-    HATCH_QDRANT_URL: "",
-    DASHSCOPE_API_KEY: "",
-    HATCH_AUTH_SESSION_RATE_LIMIT_WINDOW_MS: "60000",
-    HATCH_AUTH_SESSION_RATE_LIMIT_MAX_ATTEMPTS: "2",
-    HATCH_AUTH_SESSION_RATE_LIMIT_MAX_SOURCES: "100",
-    HATCH_AUTH_SESSION_MAX_CONCURRENT: "1",
-  });
-  try {
-    const address = registry.server.address();
-    assert.ok(address && typeof address !== "string");
-    const base = `http://127.0.0.1:${address.port}`;
-    const query = () => fetch(`${base}/v1/auth/me`, {
-      headers: { authorization: "Bearer random-opaque-token" },
-    });
-    assert.equal((await query()).status, 401);
-    assert.equal((await query()).status, 401);
-    const limited = await query();
-    assert.equal(limited.status, 429);
-    assert.match(limited.headers.get("retry-after") ?? "", /^\d+$/);
-    assert.deepEqual(await limited.json(), { detail: "Too many session checks. Try again later." });
-  } finally {
-    await registry.close();
-  }
-});
-
-test("Registry rate limits successful and failed auth attempts without exposing account existence", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-ts-registry-rate-limit-"));
-  const registry = await createRegistryServerFromEnvironment({
-    REGISTRY_HOST: "127.0.0.1",
-    REGISTRY_PORT: "0",
-    HATCH_AGENT_CORPUS_ROOT: path.join(root, "corpora"),
-    HATCH_REGISTRY_STATE_PATH: path.join(root, "state.json"),
-    HATCH_QDRANT_URL: "",
-    DASHSCOPE_API_KEY: "",
-    HATCH_AUTH_RATE_LIMIT_WINDOW_MS: "60000",
-    HATCH_AUTH_RATE_LIMIT_IP_MAX_ATTEMPTS: "3",
-    HATCH_AUTH_RATE_LIMIT_IDENTITY_MAX_FAILURES: "100",
-    HATCH_AUTH_RATE_LIMIT_MAX_ENTRIES: "100"
-  });
-  try {
-    const address = registry.server.address();
-    assert.ok(address && typeof address !== "string");
-    const base = `http://127.0.0.1:${address.port}`;
-    const authRequest = (route: "signup" | "signin", email: string, password: string) => fetch(
-      `${base}/v1/auth/${route}`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(route === "signup"
-          ? { email, password, role: "user", display_name: "Rate Limit User" }
-          : { email, password })
-      }
-    );
-
-    assert.equal((await authRequest("signup", "Rate.User@Example.COM", "password-123")).status, 201);
-    assert.equal((await authRequest("signin", "rate.user@example.com", "wrong-password")).status, 401);
-    assert.equal((await authRequest("signin", " RATE.USER@example.com ", "password-123")).status, 200);
-
-    const knownAccount = await authRequest("signin", "rate.user@example.com", "wrong-password");
-    const unknownAccount = await authRequest("signin", "unknown@example.com", "wrong-password");
-    assert.equal(knownAccount.status, 429);
-    assert.equal(unknownAccount.status, 429);
-    assert.match(knownAccount.headers.get("retry-after") ?? "", /^\d+$/);
-    assert.deepEqual(await knownAccount.json(), {
-      detail: "Too many authentication attempts. Try again later."
-    });
-    assert.deepEqual(await unknownAccount.json(), {
-      detail: "Too many authentication attempts. Try again later."
-    });
-  } finally {
-    await registry.close();
-  }
-});
-
-test("duplicate signup cannot lock signin and correct credentials clear a signin failure lock", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-ts-registry-identity-lock-"));
-  const registry = await createRegistryServerFromEnvironment({
-    REGISTRY_HOST: "127.0.0.1",
-    REGISTRY_PORT: "0",
-    HATCH_AGENT_CORPUS_ROOT: path.join(root, "corpora"),
-    HATCH_REGISTRY_STATE_PATH: path.join(root, "state.json"),
-    HATCH_QDRANT_URL: "",
-    DASHSCOPE_API_KEY: "",
-    HATCH_AUTH_RATE_LIMIT_WINDOW_MS: "60000",
-    HATCH_AUTH_RATE_LIMIT_IP_MAX_ATTEMPTS: "100",
-    HATCH_AUTH_RATE_LIMIT_IDENTITY_MAX_FAILURES: "2",
-    HATCH_AUTH_RATE_LIMIT_MAX_ENTRIES: "100"
-  });
-  try {
-    const address = registry.server.address();
-    assert.ok(address && typeof address !== "string");
-    const base = `http://127.0.0.1:${address.port}`;
-    const signup = (email: string, password = "password-123") => fetch(`${base}/v1/auth/signup`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email, password, role: "user", display_name: "Lock Test" })
-    });
-    const signin = (email: string, password: string) => fetch(`${base}/v1/auth/signin`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email, password })
-    });
-
-    assert.equal((await signup("Target@Example.COM")).status, 201);
-    assert.equal((await signup("target@example.com")).status, 409);
-    assert.equal((await signup(" TARGET@example.com ")).status, 409);
-    assert.equal((await signup("target@example.com")).status, 429);
-
-    // Signup and signin failure budgets are independent.
-    assert.equal((await signin("target@example.com", "password-123")).status, 200);
-    assert.equal((await signin("target@example.com", "wrong-password")).status, 401);
-    assert.equal((await signin(" TARGET@example.com ", "wrong-password")).status, 401);
-    assert.equal((await signin("target@example.com", "wrong-password")).status, 429);
-
-    // The locked identity is still verified; a correct password clears only
-    // the signin failure bucket while the source-IP hard budget remains.
-    assert.equal((await signin("target@example.com", "password-123")).status, 200);
-    assert.equal((await signin("target@example.com", "wrong-password")).status, 401);
-
-    // Signup also evaluates a potentially successful request while its
-    // failure bucket is locked, so corrected input can recover immediately.
-    assert.equal((await signup("recover@example.com", "short")).status, 400);
-    assert.equal((await signup(" RECOVER@example.com ", "short")).status, 400);
-    assert.equal((await signup("recover@example.com", "password-123")).status, 201);
-  } finally {
-    await registry.close();
-  }
-});
-
-function legacyAuthToken(sub: string, role: "user" | "creator", secret: string): string {
+function legacyAuthToken(sub: string, secret: string): string {
   const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "HATCH" })).toString("base64url");
   const payload = Buffer.from(JSON.stringify({
     sub,
-    role,
     exp: Math.floor(Date.now() / 1000) + 3_600
   })).toString("base64url");
   const unsigned = `${header}.${payload}`;

@@ -5,7 +5,10 @@ const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp
 export class WebChatCapabilityPolicy {
   prepare(message, helloSent, token) {
     if (!helloSent) {
-      if (message?.type !== "client.hello" || message.auth_token || message.license_token || message.local_tools?.length) {
+      // Access is relational: an owner opens by product_id, anyone else by
+      // entitlement_id. Runtime decides which holds; a hello never names both.
+      if (message?.type !== "client.hello" || message.auth_token || message.license_token || message.local_tools?.length
+        || Boolean(message.product_id) === Boolean(message.entitlement_id)) {
         throw new Error("Invalid session start");
       }
       return { ...message, auth_token: token, local_tools: [] };

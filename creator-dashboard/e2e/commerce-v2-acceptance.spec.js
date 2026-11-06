@@ -88,7 +88,7 @@ test("R03 duplicate submit plus a lost response retries to one free order and en
   const retryResponse = page.waitForResponse((response) => response.url().endsWith(confirmUrl) && response.request().method() === "POST");
   await page.getByRole("button", { name: "Add to my account" }).click();
   expect((await retryResponse).status()).toBe(200);
-  await expect(page).toHaveURL(/\/orders\/[^/]+\/success$/);
+  await expect(page).toHaveURL(/\/explore\/orders\/[^/]+\/success$/);
   await expect(page.getByText(/Free · Access granted/)).toBeVisible();
 
   const [orders, entitlements, commerceState] = await Promise.all([
@@ -138,7 +138,7 @@ test("R04 changed release has zero Access side effects and requires a fresh conf
     await page.getByRole("button", { name: "Get access" }).click();
     await page.getByLabel("Add this Product to my account.").check();
     await page.getByRole("button", { name: "Add to my account" }).click();
-    await expect(page).toHaveURL(/\/orders\/[^/]+\/success$/);
+    await expect(page).toHaveURL(/\/explore\/orders\/[^/]+\/success$/);
 
     const afterFreshConfirmation = await e2eControl(request, `/__e2e/commerce?buyer_id=${encodeURIComponent(profile.id)}`);
     expect(afterFreshConfirmation.events.filter((event) => event.event_type === "order.placed")).toHaveLength(1);
@@ -198,7 +198,7 @@ test("R30 keyboard-only Buyer flow completes free checkout with stable focus and
   await keyboardTabTo(page, confirmOrder);
   await page.keyboard.press("Enter");
 
-  await expect(page).toHaveURL(/\/orders\/[^/]+\/success$/);
+  await expect(page).toHaveURL(/\/explore\/orders\/[^/]+\/success$/);
   const successHeading = page.getByRole("heading", { level: 1, name: "Signal Resume Review is ready." });
   await expect(successHeading).toBeFocused();
   await expect(page.getByText(/Free · Access granted/)).toBeVisible();

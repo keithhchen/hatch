@@ -2,7 +2,6 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 export type HatchAuthClaims = {
   sub: string;
-  role: "user" | "creator";
   exp: number;
 };
 
@@ -20,9 +19,9 @@ export function verifyHatchAuthToken(
   if (supplied.length !== expectedBytes.length || !timingSafeEqual(supplied, expectedBytes)) return undefined;
   try {
     const payload = JSON.parse(Buffer.from(parts[1]!, "base64url").toString("utf8")) as Record<string, unknown>;
-    if (typeof payload.sub !== "string" || !payload.sub || (payload.role !== "user" && payload.role !== "creator")) return undefined;
+    if (typeof payload.sub !== "string" || !payload.sub) return undefined;
     if (typeof payload.exp !== "number" || payload.exp <= Math.floor(Date.now() / 1000)) return undefined;
-    return { sub: payload.sub, role: payload.role, exp: payload.exp };
+    return { sub: payload.sub, exp: payload.exp };
   } catch {
     return undefined;
   }

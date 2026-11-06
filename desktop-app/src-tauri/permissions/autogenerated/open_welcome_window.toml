@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-open-welcome-window"
+description = "Enables the open_welcome_window command without any pre-configured scope."
+commands.allow = ["open_welcome_window"]
+
+[[permission]]
+identifier = "deny-open-welcome-window"
+description = "Denies the open_welcome_window command without any pre-configured scope."
+commands.deny = ["open_welcome_window"]

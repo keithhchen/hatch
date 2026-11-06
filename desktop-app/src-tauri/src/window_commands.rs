@@ -2,10 +2,12 @@
 //!
 //! The renderer owns the product action behind a command; this module owns
 //! the native entry points that make those actions feel like desktop actions:
-//! application menus, native context menus, and the lifecycle of a secondary
-//! conversation window. Keeping the wire format deliberately semantic means
-//! the same command can originate from a menu, a keyboard accelerator, or a
-//! context menu without teaching Rust about React component state.
+//! the application menu bar, one Chat window per Agent (the `main` window is
+//! the Library), conversation ownership for native tool contexts, and the
+//! app-wide Dock badge. Keeping the wire format deliberately semantic means
+//! the same command can originate from a menu or a keyboard accelerator
+//! without teaching Rust about React component state. Context menus are
+//! built by the renderer with `@tauri-apps/api/menu`.
 
 use std::{
     collections::HashMap,
@@ -16,122 +18,87 @@ use std::{
 use serde::{Deserialize, Serialize};
 use tauri::{
     menu::{
-        CheckMenuItem, CheckMenuItemBuilder, ContextMenu, Menu, MenuBuilder, MenuItem,
+        AboutMetadataBuilder, CheckMenuItem, CheckMenuItemBuilder, Menu, MenuBuilder, MenuItem,
         MenuItemBuilder, SubmenuBuilder,
     },
     webview::PageLoadEvent,
-    AppHandle, Emitter, LogicalPosition, Manager, Runtime, State, WebviewUrl, WebviewWindow,
-    WebviewWindowBuilder, Window, WindowEvent,
+    AppHandle, Emitter, Manager, Runtime, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    Window, WindowEvent,
 };
+
+use crate::window_shell::{prepare_window, reveal_if_still_hidden, MAIN_WINDOW_LABEL};
 
 /// Renderer-side listeners subscribe to exactly one event regardless of where
 /// a command originated. Tauri permits `:` and `/` in event names.
 pub const NATIVE_COMMAND_EVENT: &str = "hatch://command";
+/// The main renderer shows the Library when signed in, else the welcome window.
+pub const REOPEN_EVENT: &str = "hatch://reopen";
 
 pub const COMMAND_CONVERSATION_NEW: &str = "conversation.new";
-pub const COMMAND_CONVERSATION_NEW_WINDOW: &str = "conversation.newWindow";
+pub const COMMAND_EDIT_FIND: &str = "edit.find";
 pub const COMMAND_CONVERSATION_RENAME: &str = "conversation.rename";
-pub const COMMAND_CONVERSATION_OPEN_WINDOW: &str = "conversation.openWindow";
 pub const COMMAND_CONVERSATION_ARCHIVE: &str = "conversation.archive";
+pub const COMMAND_CONVERSATION_PREVIOUS: &str = "conversation.previous";
+pub const COMMAND_CONVERSATION_NEXT: &str = "conversation.next";
 pub const COMMAND_SIDEBAR_TOGGLE: &str = "sidebar.toggle";
-pub const COMMAND_INSPECTOR_TOGGLE: &str = "inspector.toggle";
 pub const COMMAND_RUN_STOP: &str = "run.stop";
 pub const COMMAND_WORKSPACE_CHOOSE: &str = "workspace.choose";
 pub const COMMAND_SETTINGS_OPEN: &str = "settings.open";
-pub const COMMAND_ABOUT_OPEN: &str = "about.open";
 pub const COMMAND_VIEW_ZOOM_IN: &str = "view.zoomIn";
 pub const COMMAND_VIEW_ZOOM_OUT: &str = "view.zoomOut";
 pub const COMMAND_VIEW_ZOOM_RESET: &str = "view.zoomReset";
-pub const COMMAND_ARTIFACT_REVEAL: &str = "artifact.reveal";
-pub const COMMAND_ARTIFACT_QUICK_LOOK: &str = "artifact.quickLook";
-pub const COMMAND_ARTIFACT_COPY_PATH: &str = "artifact.copyPath";
-pub const COMMAND_TOOL_COPY_OUTPUT: &str = "tool.copyOutput";
 
-const CONTEXT_CONVERSATION_RENAME: &str = "hatch.context.conversation.rename";
-const CONTEXT_CONVERSATION_OPEN_WINDOW: &str = "hatch.context.conversation.open-window";
-const CONTEXT_CONVERSATION_ARCHIVE: &str = "hatch.context.conversation.archive";
-const CONTEXT_ARTIFACT_REVEAL: &str = "hatch.context.artifact.reveal";
-const CONTEXT_ARTIFACT_QUICK_LOOK: &str = "hatch.context.artifact.quick-look";
-const CONTEXT_ARTIFACT_COPY_PATH: &str = "hatch.context.artifact.copy-path";
-const CONTEXT_TOOL_COPY_OUTPUT: &str = "hatch.context.tool.copy-output";
+const SIDEBAR_ACCELERATOR: &str = if cfg!(target_os = "macos") {
+    "Cmd+Ctrl+S"
+} else {
+    "Ctrl+Shift+S"
+};
+const MENU_WINDOW_FOCUS_PREFIX: &str = "window.focus:";
+const MENU_WINDOW_LIBRARY: &str = "window.library";
+const MENU_WINDOW_LIBRARY_ACCELERATOR: &str = "CmdOrCtrl+Shift+L";
+const MENU_HELP_OPEN: &str = "help.open";
+const HELP_PATH: &str = "/account/help";
 
 const MAX_CONVERSATION_ID_BYTES: usize = 256;
-const MAX_CONTEXT_TARGET_BYTES: usize = 1_024;
-const CONVERSATION_WINDOW_MANIFEST_SCHEMA_VERSION: u32 = 1;
-const MAX_RESTORED_CONVERSATION_WINDOWS: usize = 16;
+const MAX_RESTORED_AGENT_WINDOWS: usize = 16;
+const AGENT_WINDOW_PREFIX: &str = "agent-";
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ConversationWindowManifest {
-    schema_version: u32,
-    conversation_ids: Vec<String>,
-}
-
-impl Default for ConversationWindowManifest {
-    fn default() -> Self {
-        Self {
-            schema_version: CONVERSATION_WINDOW_MANIFEST_SCHEMA_VERSION,
-            conversation_ids: Vec::new(),
-        }
-    }
-}
-
-fn conversation_window_manifest_lock() -> &'static Mutex<()> {
+fn agent_window_manifest_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
 }
 
-fn normalize_manifest_conversation_ids(ids: impl IntoIterator<Item = String>) -> Vec<String> {
-    let mut normalized = ids
+/// Valid, sorted, deduplicated and bounded `product_id:<uuid>` /
+/// `entitlement_id:<uuid>` entries.
+fn normalize_agent_window_manifest(entries: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut normalized = entries
         .into_iter()
-        .filter_map(|id| validate_conversation_id(&id).ok())
+        .filter_map(|entry| AgentBinding::parse(&entry).ok())
+        .map(|binding| binding.manifest_key())
         .collect::<Vec<_>>();
     normalized.sort();
     normalized.dedup();
-    normalized.truncate(MAX_RESTORED_CONVERSATION_WINDOWS);
+    normalized.truncate(MAX_RESTORED_AGENT_WINDOWS);
     normalized
-}
-
-fn read_conversation_window_manifest<R: Runtime>(
-    app: &AppHandle<R>,
-) -> Result<ConversationWindowManifest, String> {
-    let state = crate::desktop_state::read(app)?;
-    Ok(ConversationWindowManifest {
-        schema_version: CONVERSATION_WINDOW_MANIFEST_SCHEMA_VERSION,
-        conversation_ids: normalize_manifest_conversation_ids(state.open_conversation_ids),
-    })
-}
-
-fn write_conversation_window_manifest<R: Runtime>(
-    app: &AppHandle<R>,
-    manifest: &ConversationWindowManifest,
-) -> Result<(), String> {
-    let conversation_ids = normalize_manifest_conversation_ids(manifest.conversation_ids.clone());
-    crate::desktop_state::update(app, |state| {
-        state.open_conversation_ids = conversation_ids;
-        Ok(())
-    })
 }
 
 /// The renderer projects only presentational command state into this value.
 /// It is deliberately window-scoped and never grants access to a workspace,
 /// tool, account, or conversation. The native menu uses it only for disabled
-/// items and checkmarks; the renderer remains responsible for the action.
+/// items and checkmarks; the renderer remains
+/// responsible for every action.
 ///
 /// `set_native_command_state` accepts a complete snapshot instead of partial
-/// patches. That avoids stale enablement when a renderer reloads halfway
-/// through a transition: the next successful projection completely replaces
-/// the previous one for that WebviewWindow.
+/// patches, so a renderer that reloads mid-transition cannot leave stale
+/// enablement behind.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NativeCommandState {
     pub new_conversation_enabled: bool,
-    pub new_window_enabled: bool,
     pub workspace_enabled: bool,
-    pub settings_enabled: bool,
     pub run_stop_enabled: bool,
     pub sidebar_visible: bool,
-    pub inspector_visible: bool,
+    pub conversation_enabled: bool,
 }
 
 impl Default for NativeCommandState {
@@ -141,14 +108,12 @@ impl Default for NativeCommandState {
             // enabled so the first focused window has a usable standard menu
             // before its first React projection arrives.
             new_conversation_enabled: true,
-            new_window_enabled: true,
             workspace_enabled: true,
-            settings_enabled: true,
-            // Stop must never look actionable until the renderer reports a
-            // live run for this specific window.
+            // Stop and conversation actions must never look actionable until
+            // the renderer reports them for this specific window.
             run_stop_enabled: false,
             sidebar_visible: true,
-            inspector_visible: true,
+            conversation_enabled: false,
         }
     }
 }
@@ -156,6 +121,7 @@ impl Default for NativeCommandState {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct NativeMenuSnapshot {
     has_focused_window: bool,
+    active_window_label: Option<String>,
     state: NativeCommandState,
 }
 
@@ -166,12 +132,15 @@ impl NativeMenuSnapshot {
         }
         match command_id {
             COMMAND_CONVERSATION_NEW => self.state.new_conversation_enabled,
-            COMMAND_CONVERSATION_NEW_WINDOW => self.state.new_window_enabled,
             COMMAND_WORKSPACE_CHOOSE => self.state.workspace_enabled,
-            COMMAND_SETTINGS_OPEN | COMMAND_ABOUT_OPEN => self.state.settings_enabled,
             COMMAND_RUN_STOP => self.state.run_stop_enabled,
-            COMMAND_SIDEBAR_TOGGLE
-            | COMMAND_INSPECTOR_TOGGLE
+            COMMAND_CONVERSATION_RENAME
+            | COMMAND_CONVERSATION_ARCHIVE
+            | COMMAND_CONVERSATION_PREVIOUS
+            | COMMAND_CONVERSATION_NEXT => self.state.conversation_enabled,
+            COMMAND_EDIT_FIND
+            | COMMAND_SETTINGS_OPEN
+            | COMMAND_SIDEBAR_TOGGLE
             | COMMAND_VIEW_ZOOM_IN
             | COMMAND_VIEW_ZOOM_OUT
             | COMMAND_VIEW_ZOOM_RESET => true,
@@ -180,11 +149,7 @@ impl NativeMenuSnapshot {
     }
 
     fn command_checked(&self, command_id: &str) -> Option<bool> {
-        match command_id {
-            COMMAND_SIDEBAR_TOGGLE => Some(self.state.sidebar_visible),
-            COMMAND_INSPECTOR_TOGGLE => Some(self.state.inspector_visible),
-            _ => None,
-        }
+        (command_id == COMMAND_SIDEBAR_TOGGLE).then_some(self.state.sidebar_visible)
     }
 }
 
@@ -193,84 +158,67 @@ struct CommandDefinition {
     id: &'static str,
     label: &'static str,
     accelerator: Option<&'static str>,
-    checkable: bool,
 }
 
+const fn command(
+    id: &'static str,
+    label: &'static str,
+    accelerator: Option<&'static str>,
+) -> CommandDefinition {
+    CommandDefinition {
+        id,
+        label,
+        accelerator,
+    }
+}
+
+/// Static application commands. The sidebar toggle is the single check item.
 const APPLICATION_COMMANDS: &[CommandDefinition] = &[
-    CommandDefinition {
-        id: COMMAND_CONVERSATION_NEW,
-        label: "New Conversation",
-        accelerator: Some("CmdOrCtrl+N"),
-        checkable: false,
-    },
-    CommandDefinition {
-        id: COMMAND_CONVERSATION_NEW_WINDOW,
-        label: "New Conversation Window",
-        accelerator: Some("CmdOrCtrl+Shift+N"),
-        checkable: false,
-    },
-    CommandDefinition {
-        id: COMMAND_WORKSPACE_CHOOSE,
-        label: "Open Workspace…",
-        accelerator: Some("CmdOrCtrl+O"),
-        checkable: false,
-    },
-    CommandDefinition {
-        id: COMMAND_SETTINGS_OPEN,
-        label: "Settings…",
-        accelerator: Some("CmdOrCtrl+,"),
-        checkable: false,
-    },
-    CommandDefinition {
-        id: COMMAND_ABOUT_OPEN,
-        label: "About Hatch",
-        accelerator: None,
-        checkable: false,
-    },
-    CommandDefinition {
-        id: COMMAND_SIDEBAR_TOGGLE,
-        label: "Show Sidebar",
-        accelerator: Some("CmdOrCtrl+Shift+S"),
-        checkable: true,
-    },
-    CommandDefinition {
-        id: COMMAND_INSPECTOR_TOGGLE,
-        label: "Show Inspector",
-        accelerator: None,
-        checkable: true,
-    },
-    CommandDefinition {
-        id: COMMAND_VIEW_ZOOM_IN,
-        label: "Zoom In",
-        // `=` is the portable physical key spelling accepted by Tauri/muda;
-        // macOS displays it as the familiar Command-Plus shortcut.
-        accelerator: Some("CmdOrCtrl+="),
-        checkable: false,
-    },
-    CommandDefinition {
-        id: COMMAND_VIEW_ZOOM_OUT,
-        label: "Zoom Out",
-        accelerator: Some("CmdOrCtrl+-"),
-        checkable: false,
-    },
-    CommandDefinition {
-        id: COMMAND_VIEW_ZOOM_RESET,
-        label: "Actual Size",
-        accelerator: Some("CmdOrCtrl+0"),
-        checkable: false,
-    },
-    CommandDefinition {
-        id: COMMAND_RUN_STOP,
-        label: "Stop Run",
-        accelerator: Some("CmdOrCtrl+."),
-        checkable: false,
-    },
+    command(
+        COMMAND_CONVERSATION_NEW,
+        "New Conversation",
+        Some("CmdOrCtrl+N"),
+    ),
+    command(COMMAND_EDIT_FIND, "Find…", Some("CmdOrCtrl+F")),
+    command(COMMAND_CONVERSATION_RENAME, "Rename…", None),
+    command(COMMAND_CONVERSATION_ARCHIVE, "Archive", None),
+    command(
+        COMMAND_CONVERSATION_PREVIOUS,
+        "Previous Conversation",
+        Some("CmdOrCtrl+Shift+["),
+    ),
+    command(
+        COMMAND_CONVERSATION_NEXT,
+        "Next Conversation",
+        Some("CmdOrCtrl+Shift+]"),
+    ),
+    command(
+        COMMAND_SIDEBAR_TOGGLE,
+        "Show Sidebar",
+        Some(SIDEBAR_ACCELERATOR),
+    ),
+    command(COMMAND_RUN_STOP, "Stop", Some("CmdOrCtrl+.")),
+    command(
+        COMMAND_WORKSPACE_CHOOSE,
+        "Open Workspace…",
+        Some("CmdOrCtrl+O"),
+    ),
+    command(COMMAND_SETTINGS_OPEN, "Settings…", Some("CmdOrCtrl+,")),
+    // `=` is the portable physical key spelling accepted by Tauri/muda;
+    // macOS displays it as the familiar Command-Plus shortcut.
+    command(COMMAND_VIEW_ZOOM_IN, "Zoom In", Some("CmdOrCtrl+=")),
+    command(COMMAND_VIEW_ZOOM_OUT, "Zoom Out", Some("CmdOrCtrl+-")),
+    command(COMMAND_VIEW_ZOOM_RESET, "Actual Size", Some("CmdOrCtrl+0")),
 ];
 
 fn application_command_definition(command_id: &str) -> Option<&'static CommandDefinition> {
     APPLICATION_COMMANDS
         .iter()
         .find(|definition| definition.id == command_id)
+}
+
+fn app_menu_command(menu_id: &str) -> Option<&'static str> {
+    application_command_definition(menu_id).map(|definition| definition.id)
 }
 
 #[derive(Clone, Default)]
@@ -281,27 +229,30 @@ pub struct NativeCommandRouter {
 #[derive(Default)]
 struct NativeCommandRouterState {
     active_window_label: Option<String>,
-    preserve_conversation_manifest_on_exit: bool,
+    preserve_agent_manifest_on_exit: bool,
     command_state_by_window: HashMap<String, NativeCommandState>,
-    conversations_by_id: HashMap<String, ConversationWindowEntry>,
-    conversation_by_label: HashMap<String, String>,
-    pending_context_by_window: HashMap<String, PendingContextMenu>,
+    conversations_by_id: HashMap<String, ConversationOwnerEntry>,
+    /// Chat window label → its Agent binding manifest key.
+    agent_windows: HashMap<String, String>,
+    /// Pending approvals per window; the Dock badge shows the sum.
+    attention_by_window: HashMap<String, u32>,
 }
 
+/// The window that owns one Conversation's native session (tool contexts).
 #[derive(Clone, Debug)]
-struct ConversationWindowEntry {
+struct ConversationOwnerEntry {
     label: String,
-    phase: ConversationWindowPhase,
-    session: Option<ConversationSessionLease>,
+    phase: ConversationOwnerPhase,
+    session: ConversationSessionLease,
 }
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ConversationSessionLease {
     account_id: String,
-    entitlement_id: String,
+    access_key: String,
     lease: String,
-    // An entry-local I/O/revocation gate, not another owner registry.
+    // An entry-local revocation gate, not another owner registry.
     #[serde(skip)]
     live: Arc<Mutex<bool>>,
 }
@@ -315,130 +266,77 @@ pub struct ConversationSessionClaim {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ConversationWindowPhase {
-    Creating,
+enum ConversationOwnerPhase {
     Ready,
     Closing,
 }
 
+/// Non-secret routing hint for an Agent's Chat window: exactly one access
+/// scope (an owned Product or an acquired entitlement). Runtime still
+/// re-checks the signed-in account on every request.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum ConversationReservation {
-    New {
-        label: String,
-    },
-    Existing {
-        label: String,
-        phase: ConversationWindowPhase,
-    },
+struct AgentBinding {
+    key: &'static str,
+    id: String,
 }
 
-#[derive(Clone, Debug)]
-struct PendingContextMenu {
-    kind: NativeContextMenuKind,
-    target: Option<String>,
-}
+impl AgentBinding {
+    fn new(product_id: Option<&str>, entitlement_id: Option<&str>) -> Result<Self, String> {
+        match (product_id, entitlement_id) {
+            (Some(product_id), None) => Ok(Self {
+                key: "product_id",
+                id: validate_uuid_v4(product_id, "product_id")?,
+            }),
+            (None, Some(entitlement_id)) => Ok(Self {
+                key: "entitlement_id",
+                id: validate_uuid_v4(entitlement_id, "entitlement_id")?,
+            }),
+            _ => Err(
+                "agent_window_binding_invalid: Provide exactly one of product_id or entitlement_id"
+                    .into(),
+            ),
+        }
+    }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum NativeContextMenuKind {
-    Conversation,
-    Artifact,
-    ToolResult,
-}
-
-impl NativeContextMenuKind {
     fn parse(value: &str) -> Result<Self, String> {
-        match value {
-            "conversation" => Ok(Self::Conversation),
-            "artifact" => Ok(Self::Artifact),
-            "tool-result" => Ok(Self::ToolResult),
-            _ => Err("native_context_menu_invalid: Unsupported context menu kind".into()),
+        match value.split_once(':') {
+            Some(("product_id", id)) => Self::new(Some(id), None),
+            Some(("entitlement_id", id)) => Self::new(None, Some(id)),
+            _ => Err("agent_window_binding_invalid: Unknown manifest entry".into()),
         }
     }
 
-    fn requires_target(self) -> bool {
-        matches!(self, Self::Conversation | Self::Artifact)
+    fn manifest_key(&self) -> String {
+        format!("{}:{}", self.key, self.id)
     }
 
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Conversation => "conversation",
-            Self::Artifact => "artifact",
-            Self::ToolResult => "tool-result",
-        }
+    /// Stable, portable, distinct per binding: a short readable slug plus a
+    /// deterministic hash of the full binding.
+    fn window_label(&self) -> String {
+        let scope = if self.key == "product_id" {
+            "product"
+        } else {
+            "entitlement"
+        };
+        format!(
+            "{AGENT_WINDOW_PREFIX}{scope}-{}-{:016x}",
+            &self.id[..8],
+            stable_hash64(self.manifest_key().as_bytes())
+        )
     }
-}
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeContextMenuRequest {
-    /// One of `conversation`, `artifact`, or `tool-result`.
-    pub kind: String,
-    /// Opaque renderer presentation data. It is returned to the same renderer
-    /// with the semantic command and is never used as native authority.
-    pub target: Option<String>,
-    pub position: Option<NativeContextMenuPosition>,
-    /// Editable fields should retain WebView's standard Cut/Copy/Paste menu.
-    /// The renderer passes this from the DOM target rather than globally
-    /// suppressing browser context menus or DevTools.
-    #[serde(default)]
-    pub editable: bool,
-}
-
-#[derive(Clone, Copy, Deserialize)]
-pub struct NativeContextMenuPosition {
-    pub x: f64,
-    pub y: f64,
-}
-
-/// Placement for the toolbar's single native overflow button. The menu items
-/// themselves come from the same registry as the application menu; renderer
-/// code supplies only where the user clicked, never a list of capabilities.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct NativeCommandMenuRequest {
-    pub position: Option<NativeContextMenuPosition>,
-}
-
-/// Non-secret routing hints for a secondary Conversation window. The
-/// renderer receives these only as a URL/context hint; Runtime requests still
-/// re-check the signed-in account and entitlement binding.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct OpenConversationWindowRequest {
-    pub conversation_id: String,
-    #[serde(default)]
-    pub entitlement_id: Option<String>,
-    #[serde(default)]
-    pub creator_id: Option<String>,
-    #[serde(default)]
-    pub product_id: Option<String>,
-    #[serde(default)]
-    pub start_task: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ConversationWindowBinding {
-    entitlement_id: String,
-    creator_id: String,
-    product_id: String,
+    fn window_path(&self) -> PathBuf {
+        let mut query = url::form_urlencoded::Serializer::new(String::new());
+        query.append_pair("window", "chat");
+        query.append_pair(self.key, &self.id);
+        PathBuf::from(format!("index.html?{}", query.finish()))
+    }
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OpenConversationWindowResult {
-    pub conversation_id: String,
+pub struct OpenAgentWindowResult {
     pub window_label: String,
-    /// `opened` means a live window was focused or created. `opening` means a
-    /// duplicate request arrived while the original hidden window is loading.
-    pub status: &'static str,
-    pub reused: bool,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OpenAuxiliaryWindowResult {
-    pub window_label: String,
-    pub status: &'static str,
     pub reused: bool,
 }
 
@@ -447,10 +345,6 @@ pub struct OpenAuxiliaryWindowResult {
 struct NativeCommandEvent {
     id: String,
     source: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    context: Option<&'static str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    target: Option<String>,
 }
 
 impl NativeCommandRouter {
@@ -458,10 +352,10 @@ impl NativeCommandRouter {
         &self,
         account: &str,
         conversation: &str,
-        entitlement: &str,
+        access_key: &str,
         window: &str,
     ) -> Result<ConversationSessionClaim, String> {
-        if [account, conversation, entitlement, window]
+        if [account, conversation, access_key, window]
             .iter()
             .any(|value| {
                 value.is_empty() || value.len() > 256 || value.chars().any(char::is_control)
@@ -473,51 +367,34 @@ impl NativeCommandRouter {
             .state
             .lock()
             .map_err(|_| "Native window registry is unavailable")?;
-        if let Some(entry) = state.conversations_by_id.get_mut(conversation) {
-            if entry.phase == ConversationWindowPhase::Closing {
+        if let Some(entry) = state.conversations_by_id.get(conversation) {
+            if entry.phase == ConversationOwnerPhase::Closing {
                 return Err("conversation_owner_closing: Owner session is draining".into());
             }
-            if let Some(session) = &entry.session {
-                if session.account_id != account || session.entitlement_id != entitlement {
-                    return Err(
-                        "conversation_owner_binding_mismatch: Session belongs to another binding"
-                            .into(),
-                    );
-                }
+            if entry.session.account_id != account || entry.session.access_key != access_key {
+                return Err(
+                    "conversation_owner_binding_mismatch: Session belongs to another binding"
+                        .into(),
+                );
             }
-            if entry.label != window {
-                return Ok(ConversationSessionClaim {
-                    owned: false,
-                    window_label: entry.label.clone(),
-                    lease: None,
-                });
-            }
-            let session = entry
-                .session
-                .get_or_insert_with(|| ConversationSessionLease {
-                    account_id: account.into(),
-                    entitlement_id: entitlement.into(),
-                    lease: uuid::Uuid::new_v4().to_string(),
-                    live: Arc::new(Mutex::new(true)),
-                });
             return Ok(ConversationSessionClaim {
-                owned: true,
-                window_label: window.into(),
-                lease: Some(session.lease.clone()),
+                owned: entry.label == window,
+                window_label: entry.label.clone(),
+                lease: (entry.label == window).then(|| entry.session.lease.clone()),
             });
         }
         let lease = uuid::Uuid::new_v4().to_string();
         state.conversations_by_id.insert(
             conversation.into(),
-            ConversationWindowEntry {
+            ConversationOwnerEntry {
                 label: window.into(),
-                phase: ConversationWindowPhase::Ready,
-                session: Some(ConversationSessionLease {
+                phase: ConversationOwnerPhase::Ready,
+                session: ConversationSessionLease {
                     account_id: account.into(),
-                    entitlement_id: entitlement.into(),
+                    access_key: access_key.into(),
                     lease: lease.clone(),
                     live: Arc::new(Mutex::new(true)),
-                }),
+                },
             },
         );
         Ok(ConversationSessionClaim {
@@ -541,10 +418,8 @@ impl NativeCommandRouter {
         let session = state
             .conversations_by_id
             .get(conversation)
-            .filter(|entry| {
-                entry.label == window && entry.phase != ConversationWindowPhase::Closing
-            })
-            .and_then(|entry| entry.session.clone())
+            .filter(|entry| entry.label == window && entry.phase != ConversationOwnerPhase::Closing)
+            .map(|entry| entry.session.clone())
             .ok_or("conversation_owner_required: This window does not own the session")?;
         drop(state);
         let live = session
@@ -555,46 +430,6 @@ impl NativeCommandRouter {
             return Err("conversation_owner_required: Session was released".into());
         }
         operation()
-    }
-
-    pub fn with_session_lease<T>(
-        &self,
-        account: &str,
-        conversation: &str,
-        window: &str,
-        lease: Option<&str>,
-        operation: impl FnOnce(&str) -> Result<T, String>,
-    ) -> Result<T, String> {
-        let state = self
-            .state
-            .lock()
-            .map_err(|_| "Native window registry is unavailable")?;
-        let entry = state
-            .conversations_by_id
-            .get(conversation)
-            .ok_or("conversation_owner_required: Claim the session first")?;
-        let session = entry
-            .session
-            .as_ref()
-            .ok_or("conversation_owner_required: Session is not attached")?;
-        if entry.phase == ConversationWindowPhase::Closing
-            || entry.label != window
-            || session.account_id != account
-            || lease.is_some_and(|value| value != session.lease)
-        {
-            return Err("draft_lease_lost: This window is not the conversation owner".into());
-        }
-        let session = session.clone();
-        drop(state);
-        // Never hold the global routing lock across filesystem I/O.
-        let live = session
-            .live
-            .lock()
-            .map_err(|_| "Session lease lock unavailable")?;
-        if !*live {
-            return Err("draft_lease_lost: Session was released".into());
-        }
-        operation(&session.lease)
     }
 
     pub fn release_session(
@@ -612,10 +447,12 @@ impl NativeCommandRouter {
             state
                 .conversations_by_id
                 .get(conversation)
-                .filter(|entry| entry.label == window)
-                .and_then(|entry| entry.session.as_ref())
-                .filter(|session| session.account_id == account && session.lease == lease)
-                .map(|session| session.live.clone())
+                .filter(|entry| {
+                    entry.label == window
+                        && entry.session.account_id == account
+                        && entry.session.lease == lease
+                })
+                .map(|entry| entry.session.live.clone())
         };
         let Some(live) = live else {
             return Ok(());
@@ -629,21 +466,13 @@ impl NativeCommandRouter {
             .conversations_by_id
             .get(conversation)
             .is_some_and(|entry| {
-                entry.phase != ConversationWindowPhase::Closing
+                entry.phase != ConversationOwnerPhase::Closing
                     && entry.label == window
-                    && entry.session.as_ref().is_some_and(|session| {
-                        session.account_id == account && session.lease == lease
-                    })
+                    && entry.session.account_id == account
+                    && entry.session.lease == lease
             });
         if matches {
             state.conversations_by_id.remove(conversation);
-            if state
-                .conversation_by_label
-                .get(window)
-                .is_some_and(|id| id == conversation)
-            {
-                state.conversation_by_label.remove(window);
-            }
         }
         Ok(())
     }
@@ -653,9 +482,10 @@ impl NativeCommandRouter {
             .state
             .lock()
             .map_err(|_| "Native window registry is unavailable")?;
-        Ok(state.conversations_by_id.get(conversation).and_then(|entry| entry.session.as_ref()).map(|session|
-            serde_json::json!({ "conversationId": conversation, "accountId": session.account_id, "entitlementId": session.entitlement_id })))
+        Ok(state.conversations_by_id.get(conversation).map(|entry|
+            serde_json::json!({ "conversationId": conversation, "accountId": entry.session.account_id, "accessKey": entry.session.access_key })))
     }
+
     /// The `Focused` event is the authoritative routing signal for the
     /// app-wide macOS menu. On Windows it gives the same menu the expected
     /// focused-window behavior instead of accidentally broadcasting commands.
@@ -674,8 +504,9 @@ impl NativeCommandRouter {
             WindowEvent::Focused(false) => {}
             WindowEvent::Destroyed => {
                 self.clear_window(window.label());
-                if !self.should_preserve_conversation_manifest() {
-                    let _ = persist_conversation_window_manifest(window.app_handle(), self);
+                apply_badge(window.app_handle(), self.attention_total());
+                if !self.should_preserve_agent_manifest() {
+                    let _ = persist_agent_window_manifest(window.app_handle(), self);
                 }
                 let _ = self.refresh_native_menu(window.app_handle());
             }
@@ -694,19 +525,18 @@ impl NativeCommandRouter {
     }
 
     /// Keep the manifest intact while Tauri tears down windows for a normal
-    /// application quit/restart. A user closing one conversation window does
-    /// not set this flag, so that individual window is removed from the next
-    /// manifest snapshot.
-    pub fn preserve_conversation_manifest_on_exit(&self) {
+    /// application quit/restart. A user closing one Chat window does not set
+    /// this flag, so that window is removed from the next manifest snapshot.
+    pub fn preserve_agent_manifest_on_exit(&self) {
         if let Ok(mut state) = self.state.lock() {
-            state.preserve_conversation_manifest_on_exit = true;
+            state.preserve_agent_manifest_on_exit = true;
         }
     }
 
-    fn should_preserve_conversation_manifest(&self) -> bool {
+    fn should_preserve_agent_manifest(&self) -> bool {
         self.state
             .lock()
-            .map(|state| state.preserve_conversation_manifest_on_exit)
+            .map(|state| state.preserve_agent_manifest_on_exit)
             .unwrap_or(false)
     }
 
@@ -760,6 +590,7 @@ impl NativeCommandRouter {
             .unwrap_or_default();
         Ok(NativeMenuSnapshot {
             has_focused_window: state.active_window_label.is_some(),
+            active_window_label: state.active_window_label.clone(),
             state: command_state,
         })
     }
@@ -789,11 +620,6 @@ impl NativeCommandRouter {
                 command_state.sidebar_visible = !previous;
                 Ok(Some(previous))
             }
-            COMMAND_INSPECTOR_TOGGLE => {
-                let previous = command_state.inspector_visible;
-                command_state.inspector_visible = !previous;
-                Ok(Some(previous))
-            }
             _ => Ok(None),
         }
     }
@@ -810,38 +636,62 @@ impl NativeCommandRouter {
                 .command_state_by_window
                 .entry(label)
                 .or_insert_with(NativeCommandState::default);
-            match command_id {
-                COMMAND_SIDEBAR_TOGGLE => command_state.sidebar_visible = previous,
-                COMMAND_INSPECTOR_TOGGLE => command_state.inspector_visible = previous,
-                _ => {}
+            if command_id == COMMAND_SIDEBAR_TOGGLE {
+                command_state.sidebar_visible = previous;
             }
         }
     }
 
-    fn refresh_native_menu<R: Runtime>(&self, app: &AppHandle<R>) -> Result<(), String> {
+    pub(crate) fn refresh_native_menu<R: Runtime>(&self, app: &AppHandle<R>) -> Result<(), String> {
         let menu = build_application_menu(app, &self.menu_snapshot()?)?;
         app.set_menu(menu)
             .map(|_| ())
             .map_err(|error| format!("native_menu_install_failed: {error}"))
     }
 
-    fn conversation_ids(&self) -> Result<Vec<String>, String> {
+    fn register_agent_window(&self, label: &str, binding: &AgentBinding) {
+        if let Ok(mut state) = self.state.lock() {
+            state
+                .agent_windows
+                .insert(label.to_string(), binding.manifest_key());
+        }
+    }
+
+    fn agent_window_manifest(&self) -> Result<Vec<String>, String> {
         let state = self
             .state
             .lock()
             .map_err(|_| "Native command router is unavailable")?;
-        Ok(normalize_manifest_conversation_ids(
-            state
-                .conversations_by_id
-                .iter()
-                .filter(|(id, entry)| entry.label == conversation_window_label(id))
-                .map(|(id, _)| id.clone()),
+        Ok(normalize_agent_window_manifest(
+            state.agent_windows.values().cloned(),
         ))
     }
 
-    /// Remove transient context state and any reverse conversation lookup as
-    /// soon as a Tauri webview is destroyed. This is intentionally separate
-    /// from renderer cleanup, which might not run on a forced window close.
+    /// Record one window's pending-approval count; returns the app-wide sum.
+    fn set_attention(&self, label: &str, count: u32) -> u32 {
+        if let Ok(mut state) = self.state.lock() {
+            if count == 0 {
+                state.attention_by_window.remove(label);
+            } else {
+                state.attention_by_window.insert(label.to_string(), count);
+            }
+        }
+        self.attention_total()
+    }
+
+    fn attention_total(&self) -> u32 {
+        self.state
+            .lock()
+            .map(|state| {
+                state
+                    .attention_by_window
+                    .values()
+                    .fold(0u32, |sum, count| sum.saturating_add(*count))
+            })
+            .unwrap_or(0)
+    }
+
+    /// Fence every conversation a closing window owns until cleanup finishes.
     pub fn begin_close_window(&self, label: &str) {
         if let Ok(mut state) = self.state.lock() {
             for entry in state
@@ -849,7 +699,7 @@ impl NativeCommandRouter {
                 .values_mut()
                 .filter(|entry| entry.label == label)
             {
-                entry.phase = ConversationWindowPhase::Closing;
+                entry.phase = ConversationOwnerPhase::Closing;
             }
         }
     }
@@ -860,7 +710,7 @@ impl NativeCommandRouter {
                 .conversations_by_id
                 .values()
                 .filter(|entry| entry.label == label)
-                .filter_map(|entry| entry.session.as_ref().map(|session| session.live.clone()))
+                .map(|entry| entry.session.live.clone())
                 .collect(),
             Err(_) => return,
         };
@@ -877,72 +727,12 @@ impl NativeCommandRouter {
             if state.active_window_label.as_deref() == Some(label) {
                 state.active_window_label = None;
             }
-            state.pending_context_by_window.remove(label);
             state.command_state_by_window.remove(label);
-            state.conversation_by_label.remove(label);
+            state.agent_windows.remove(label);
+            state.attention_by_window.remove(label);
             state
                 .conversations_by_id
                 .retain(|_, entry| entry.label != label);
-        }
-    }
-
-    fn reserve_conversation(
-        &self,
-        conversation_id: &str,
-    ) -> Result<ConversationReservation, String> {
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| "Native window registry is unavailable")?;
-
-        if let Some(entry) = state.conversations_by_id.get(conversation_id) {
-            return Ok(ConversationReservation::Existing {
-                label: entry.label.clone(),
-                phase: entry.phase,
-            });
-        }
-
-        let label = conversation_window_label(conversation_id);
-        if let Some(existing_conversation_id) = state.conversation_by_label.get(&label) {
-            return Err(format!(
-                "native_window_label_collision: Conversation window label is already reserved for {existing_conversation_id}"
-            ));
-        }
-        state
-            .conversation_by_label
-            .insert(label.clone(), conversation_id.to_string());
-        state.conversations_by_id.insert(
-            conversation_id.to_string(),
-            ConversationWindowEntry {
-                label: label.clone(),
-                phase: ConversationWindowPhase::Creating,
-                session: None,
-            },
-        );
-        Ok(ConversationReservation::New { label })
-    }
-
-    fn mark_conversation_ready(&self, conversation_id: &str, label: &str) {
-        if let Ok(mut state) = self.state.lock() {
-            if let Some(entry) = state.conversations_by_id.get_mut(conversation_id) {
-                if entry.label == label {
-                    entry.phase = ConversationWindowPhase::Ready;
-                }
-            }
-        }
-    }
-
-    fn forget_conversation_if(&self, conversation_id: &str, label: &str) {
-        if let Ok(mut state) = self.state.lock() {
-            let is_same_entry = state
-                .conversations_by_id
-                .get(conversation_id)
-                .map(|entry| entry.label == label)
-                .unwrap_or(false);
-            if is_same_entry {
-                state.conversations_by_id.remove(conversation_id);
-                state.conversation_by_label.remove(label);
-            }
         }
     }
 
@@ -966,26 +756,12 @@ impl NativeCommandRouter {
             self.clear_active_window_if(&label);
             return Err("The focused Hatch window is no longer available".into());
         }
-        self.dispatch_to_window(app, &label, command_id, source, None, None)
-    }
-
-    fn dispatch_to_window<R: Runtime>(
-        &self,
-        app: &AppHandle<R>,
-        window_label: &str,
-        command_id: &str,
-        source: &'static str,
-        context: Option<&'static str>,
-        target: Option<String>,
-    ) -> Result<(), String> {
         app.emit_to(
-            window_label,
+            label.as_str(),
             NATIVE_COMMAND_EVENT,
             NativeCommandEvent {
                 id: command_id.to_string(),
                 source,
-                context,
-                target,
             },
         )
         .map_err(|error| format!("native_command_dispatch_failed: {error}"))
@@ -996,142 +772,91 @@ impl NativeCommandRouter {
         app: &AppHandle<R>,
         menu_id: &str,
     ) -> Result<(), String> {
-        if let Some(command_id) = app_menu_command(menu_id) {
-            // Disabled native items normally cannot emit events, but this
-            // guard also covers automation or an event arriving immediately
-            // after the focus changes.
-            if !self.command_enabled_for_active_window(command_id)? {
-                return Ok(());
-            }
-            // Sidebar/Inspector are native check items. Flip the visual state
-            // before sending the semantic command, then restore it if Tauri
-            // cannot deliver the event to the focused renderer.
-            let previous_check = self.flip_checked_command_for_active_window(command_id)?;
-            let dispatch = self.dispatch_to_active_window(app, command_id, "menu");
-            if dispatch.is_err() {
-                self.restore_checked_command_for_active_window(command_id, previous_check);
-            }
-            let refresh = self.refresh_native_menu(app);
-            dispatch?;
-            return refresh;
+        if let Some(label) = menu_id.strip_prefix(MENU_WINDOW_FOCUS_PREFIX) {
+            // Window menu entries are handled natively; they never reach React.
+            let window = app
+                .get_webview_window(label)
+                .ok_or("The selected Hatch window is no longer available")?;
+            window
+                .unminimize()
+                .and_then(|_| window.show())
+                .and_then(|_| window.set_focus())
+                .map_err(|error| format!("native_window_focus_failed: {error}"))?;
+            self.set_active_window(label);
+            return self.refresh_native_menu(app);
         }
-
-        let Some((command_id, expected_kind)) = context_menu_command(menu_id) else {
+        if menu_id == MENU_WINDOW_LIBRARY {
+            return app
+                .emit_to(MAIN_WINDOW_LABEL, REOPEN_EVENT, ())
+                .map_err(|error| format!("native_command_dispatch_failed: {error}"));
+        }
+        if menu_id == MENU_HELP_OPEN {
+            return crate::open_external_url(format!("{}{HELP_PATH}", crate::WEB_ORIGIN));
+        }
+        let Some(command_id) = app_menu_command(menu_id) else {
             // Standard Tauri/OS menu items (Undo, Cut, Quit, …) deliberately
             // retain their native behavior and are not forwarded to React.
             return Ok(());
         };
-        let Some(window_label) = self.active_window_label()? else {
+        // Disabled native items normally cannot emit events, but this guard
+        // also covers automation or an event arriving right after focus moves.
+        if !self.command_enabled_for_active_window(command_id)? {
             return Ok(());
-        };
-        let pending = self.take_pending_context(&window_label, expected_kind);
-        let Some(pending) = pending else {
-            return Ok(());
-        };
-        self.dispatch_to_window(
-            app,
-            &window_label,
-            command_id,
-            "context-menu",
-            Some(pending.kind.as_str()),
-            pending.target,
-        )
-    }
-
-    fn set_pending_context(
-        &self,
-        window_label: &str,
-        kind: NativeContextMenuKind,
-        target: Option<String>,
-    ) -> Result<(), String> {
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| "Native command router is unavailable")?;
-        state.pending_context_by_window.insert(
-            window_label.to_string(),
-            PendingContextMenu { kind, target },
-        );
-        Ok(())
-    }
-
-    fn take_pending_context(
-        &self,
-        window_label: &str,
-        expected_kind: NativeContextMenuKind,
-    ) -> Option<PendingContextMenu> {
-        let Ok(mut state) = self.state.lock() else {
-            return None;
-        };
-        let kind_matches = state
-            .pending_context_by_window
-            .get(window_label)
-            .map(|pending| pending.kind == expected_kind)
-            .unwrap_or(false);
-        kind_matches
-            .then(|| state.pending_context_by_window.remove(window_label))
-            .flatten()
-    }
-
-    #[cfg(test)]
-    fn clear_pending_context_if(
-        &self,
-        window_label: &str,
-        expected_kind: NativeContextMenuKind,
-        expected_target: &Option<String>,
-    ) {
-        let Ok(mut state) = self.state.lock() else {
-            return;
-        };
-        let matches = state
-            .pending_context_by_window
-            .get(window_label)
-            .map(|pending| pending.kind == expected_kind && pending.target == *expected_target)
-            .unwrap_or(false);
-        if matches {
-            state.pending_context_by_window.remove(window_label);
         }
+        // Sidebar is a native check item. Flip the visual state before sending
+        // the semantic command, then restore it if Tauri cannot deliver it.
+        let previous_check = self.flip_checked_command_for_active_window(command_id)?;
+        let dispatch = self.dispatch_to_active_window(app, command_id, "menu");
+        if dispatch.is_err() {
+            self.restore_checked_command_for_active_window(command_id, previous_check);
+        }
+        let refresh = self.refresh_native_menu(app);
+        dispatch?;
+        refresh
     }
 }
 
-fn persist_conversation_window_manifest<R: Runtime>(
+/// The Dock/taskbar badge is app-wide; any window applies it.
+fn apply_badge<R: Runtime>(app: &AppHandle<R>, total: u32) {
+    if let Some(window) = app.webview_windows().into_values().next() {
+        let _ = window.set_badge_count((total > 0).then_some(i64::from(total)));
+    }
+}
+
+fn persist_agent_window_manifest<R: Runtime>(
     app: &AppHandle<R>,
     router: &NativeCommandRouter,
 ) -> Result<(), String> {
-    let _guard = conversation_window_manifest_lock()
+    let _guard = agent_window_manifest_lock()
         .lock()
-        .map_err(|_| "Conversation window manifest lock is unavailable")?;
-    let manifest = ConversationWindowManifest {
-        schema_version: CONVERSATION_WINDOW_MANIFEST_SCHEMA_VERSION,
-        conversation_ids: router.conversation_ids()?,
-    };
-    write_conversation_window_manifest(app, &manifest)
+        .map_err(|_| "Agent window manifest lock is unavailable")?;
+    let entries = router.agent_window_manifest()?;
+    crate::desktop_state::update(app, |state| {
+        state.open_agent_windows = entries;
+        Ok(())
+    })
 }
 
-/// Recreate the native conversation windows left in app-data by a previous
-/// process. The manifest contains only server-issued conversation IDs; each
-/// restored WebView still performs normal auth, account binding, workspace
-/// revalidation and snapshot hydration before it can run anything.
-pub fn restore_conversation_windows<R: Runtime>(
+/// Recreate the Chat windows left open by a previous process. The manifest
+/// holds only access bindings; each restored WebView still performs normal
+/// auth, account binding and Agent-list checks before it can run anything.
+pub fn restore_agent_windows<R: Runtime>(
     app: &AppHandle<R>,
     router: &NativeCommandRouter,
 ) -> Result<usize, String> {
-    let _guard = conversation_window_manifest_lock()
-        .lock()
-        .map_err(|_| "Conversation window manifest lock is unavailable")?;
-    let manifest = read_conversation_window_manifest(app)?;
-    drop(_guard);
-
+    let entries =
+        normalize_agent_window_manifest(crate::desktop_state::read(app)?.open_agent_windows);
     let mut restored = 0;
-    for conversation_id in manifest.conversation_ids {
-        if open_conversation_window_impl(app, conversation_id, None, router, false, false).is_ok() {
-            restored += 1;
+    for entry in entries {
+        if let Ok(binding) = AgentBinding::parse(&entry) {
+            if open_agent_window_impl(app, &binding, router).is_ok() {
+                restored += 1;
+            }
         }
     }
-    // Rewrite after filtering invalid/stale IDs and after all builders have
-    // reserved their labels. A corrupted or over-sized manifest therefore
-    // cannot make every subsequent launch retry the same bad entries.
-    persist_conversation_window_manifest(app, router)?;
+    // Rewrite after filtering invalid entries so a corrupted manifest cannot
+    // make every subsequent launch retry them.
+    persist_agent_window_manifest(app, router)?;
     Ok(restored)
 }
 
@@ -1146,8 +871,8 @@ pub fn install_native_menu<R: Runtime>(
     // The initial window may have received focus before the app-wide menu was
     // installed. It is the only eligible fallback; subsequent routing is
     // replaced by the latest focused Hatch window.
-    if app.get_webview_window("main").is_some() {
-        router.set_active_window("main");
+    if app.get_webview_window(MAIN_WINDOW_LABEL).is_some() {
+        router.set_active_window(MAIN_WINDOW_LABEL);
     }
     router.refresh_native_menu(app)
 }
@@ -1169,95 +894,18 @@ pub fn set_native_command_state(
     Ok(state)
 }
 
-/// Show the toolbar overflow as a real native menu. The renderer cannot
-/// inject arbitrary entries: this function always builds the menu from the
-/// semantic command registry and applies the focused window's current
-/// enablement/check state.
+/// This window's pending-approval count; the Dock badge shows the sum over
+/// every Hatch window.
 #[tauri::command]
-pub fn show_native_command_menu(
+pub fn set_window_attention(
     app: AppHandle,
     window: WebviewWindow,
-    request: NativeCommandMenuRequest,
+    count: u32,
     router: State<'_, NativeCommandRouter>,
-) -> Result<bool, String> {
-    let position = request
-        .position
-        .map(validate_context_position)
-        .transpose()?;
-    let router = router.inner().clone();
-    router.set_active_window(window.label());
-    let snapshot = router.menu_snapshot()?;
-    router.refresh_native_menu(&app)?;
-    let menu = build_command_overflow_menu(&app, &snapshot)?;
-    let native_window = window.as_ref().window();
-    let result = match position {
-        Some(position) => menu.popup_at(native_window, position),
-        None => menu.popup(native_window),
-    };
-    result
-        .map(|_| true)
-        .map_err(|error| format!("native_command_menu_show_failed: {error}"))
-}
-
-fn open_auxiliary_window(
-    app: &AppHandle,
-    label: &'static str,
-    title: &'static str,
-    query: &'static str,
-) -> Result<OpenAuxiliaryWindowResult, String> {
-    if let Some(window) = app.get_webview_window(label) {
-        window
-            .show()
-            .map_err(|error| format!("native_window_show_failed: {error}"))?;
-        window
-            .set_focus()
-            .map_err(|error| format!("native_window_focus_failed: {error}"))?;
-        return Ok(OpenAuxiliaryWindowResult {
-            window_label: label.to_string(),
-            status: "opened",
-            reused: true,
-        });
-    }
-    let builder = WebviewWindowBuilder::new(
-        app,
-        label,
-        WebviewUrl::App(PathBuf::from(format!("index.html?{query}"))),
-    )
-    .title(title)
-    .inner_size(720.0, 560.0)
-    .min_inner_size(520.0, 420.0)
-    .resizable(true)
-    .visible(false)
-    .focused(false)
-    // Product windows must not expose WebKit's browser/devtools context menu.
-    // The browser/Vite preview remains the development inspection surface.
-    .devtools(false)
-    .on_page_load(move |window, payload| {
-        if payload.event() == PageLoadEvent::Finished {
-            let _ = window.show();
-            let _ = window.set_focus();
-        }
-    });
-    #[cfg(target_os = "macos")]
-    let builder = builder.title_bar_style(tauri::TitleBarStyle::Visible);
-    builder
-        .build()
-        .map_err(|error| format!("native_window_create_failed: {error}"))?;
-    Ok(OpenAuxiliaryWindowResult {
-        window_label: label.to_string(),
-        status: "opening",
-        reused: false,
-    })
-}
-
-#[tauri::command]
-pub fn open_settings_window(app: AppHandle) -> Result<OpenAuxiliaryWindowResult, String> {
-    open_auxiliary_window(&app, "settings", "Hatch Settings", "settings=1")
-}
-
-#[tauri::command]
-pub fn open_about_window(app: AppHandle) -> Result<OpenAuxiliaryWindowResult, String> {
-    open_auxiliary_window(&app, "about", "About Hatch", "about=1")
+) -> Result<u32, String> {
+    let total = router.set_attention(window.label(), count);
+    apply_badge(&app, total);
+    Ok(total)
 }
 
 #[tauri::command]
@@ -1265,17 +913,13 @@ pub async fn claim_conversation_session(
     window: WebviewWindow,
     account_id: String,
     conversation_id: String,
-    entitlement_id: String,
+    access_key: String,
     router: State<'_, NativeCommandRouter>,
 ) -> Result<ConversationSessionClaim, String> {
     let conversation_id = validate_conversation_id(&conversation_id)?;
     for _ in 0..2 {
-        let claim = router.claim_session(
-            &account_id,
-            &conversation_id,
-            &entitlement_id,
-            window.label(),
-        )?;
+        let claim =
+            router.claim_session(&account_id, &conversation_id, &access_key, window.label())?;
         if claim.owned {
             return Ok(claim);
         }
@@ -1287,25 +931,9 @@ pub async fn claim_conversation_session(
                 owner.show().map_err(|error| error.to_string())?;
                 owner.set_focus().map_err(|error| error.to_string())?;
             }
-            // A reserved, loading window gets the conversation from its URL.
             return Ok(claim);
         }
-        // A Creating entry must not be reclaimed before its builder publishes it.
-        let creating = router
-            .state
-            .lock()
-            .map_err(|_| "Native window registry is unavailable")?
-            .conversations_by_id
-            .get(&conversation_id)
-            .is_some_and(|entry| entry.phase == ConversationWindowPhase::Creating);
-        if creating {
-            return Ok(claim);
-        }
-        // Attached sessions may still be draining after native destruction.
-        // Only Destroyed cleanup may release them, never a competing claimant.
-        if router.session_activation(&conversation_id)?.is_some() {
-            return Err("conversation_owner_unavailable: Owner cleanup is pending".into());
-        }
+        // The owner window vanished without its Destroyed cleanup; reclaim.
         router.clear_window(&claim.window_label);
     }
     Err("conversation_owner_unavailable: Owner window disappeared".into())
@@ -1322,509 +950,85 @@ pub async fn release_conversation_session(
     router.release_session(&account_id, &conversation_id, window.label(), &lease)
 }
 
-/// Opens a conversation in a distinct Tauri window. The command is async even
-/// though construction is synchronous because Tauri documents async commands
-/// as the safe cross-platform path for Webview2 window creation.
+/// Open — or focus, when it already exists — the Chat window of one Agent.
+/// The command is async because Tauri documents async commands as the safe
+/// cross-platform path for WebView2 window creation.
 #[tauri::command]
-pub async fn open_conversation_window(
+pub async fn open_agent_window(
     app: AppHandle,
-    conversation_id: String,
-    entitlement_id: Option<String>,
-    creator_id: Option<String>,
     product_id: Option<String>,
-    start_task: Option<bool>,
+    entitlement_id: Option<String>,
     router: State<'_, NativeCommandRouter>,
-) -> Result<OpenConversationWindowResult, String> {
-    let request = OpenConversationWindowRequest {
-        conversation_id,
-        entitlement_id,
-        creator_id,
-        product_id,
-        start_task: start_task.unwrap_or(false),
-    };
-    let conversation_id = validate_conversation_id(&request.conversation_id)?;
-    let binding = validate_conversation_window_binding(&request)?;
-    open_conversation_window_impl(
-        &app,
-        conversation_id,
-        binding,
-        router.inner(),
-        true,
-        request.start_task,
-    )
+) -> Result<OpenAgentWindowResult, String> {
+    let binding = AgentBinding::new(product_id.as_deref(), entitlement_id.as_deref())?;
+    let result = open_agent_window_impl(&app, &binding, router.inner())?;
+    if !result.reused {
+        // Best effort: a manifest failure must not make the window unusable.
+        let _ = persist_agent_window_manifest(&app, router.inner());
+    }
+    Ok(result)
 }
 
-fn open_conversation_window_impl<R: Runtime>(
-    app: &AppHandle<R>,
-    conversation_id: String,
-    binding: Option<ConversationWindowBinding>,
+fn focus_agent_window<R: Runtime>(
+    window: &WebviewWindow<R>,
     router: &NativeCommandRouter,
-    persist_manifest: bool,
-    start_task: bool,
-) -> Result<OpenConversationWindowResult, String> {
-    // A previous ready entry can become stale if a platform destroys a window
-    // before its Destroyed event reaches our registry. Recover once instead of
-    // returning a dead label; a Creating entry remains reserved to prevent two
-    // simultaneous commands from building the same native window.
-    for _ in 0..2 {
-        match router.reserve_conversation(&conversation_id)? {
-            ConversationReservation::Existing { label, phase } => {
-                if phase == ConversationWindowPhase::Closing {
-                    return Err("conversation_owner_closing: Owner session is draining".into());
-                }
-                if let Some(window) = app.get_webview_window(&label) {
-                    if phase == ConversationWindowPhase::Ready {
-                        if let Some(payload) = router.session_activation(&conversation_id)? {
-                            window
-                                .emit("hatch://conversation-activate", payload)
-                                .map_err(|error| error.to_string())?;
-                        }
-                        window
-                            .show()
-                            .map_err(|error| format!("native_window_show_failed: {error}"))?;
-                        window
-                            .set_focus()
-                            .map_err(|error| format!("native_window_focus_failed: {error}"))?;
-                        router.set_active_window(&label);
-                        return Ok(OpenConversationWindowResult {
-                            conversation_id,
-                            window_label: label,
-                            status: "opened",
-                            reused: true,
-                        });
-                    }
-
-                    // The original hidden window has not finished loading.
-                    // Do not reveal a blank view simply because a duplicate
-                    // request arrived; PageLoadEvent::Finished owns showing it.
-                    return Ok(OpenConversationWindowResult {
-                        conversation_id,
-                        window_label: label,
-                        status: "opening",
-                        reused: true,
-                    });
-                }
-
-                if phase == ConversationWindowPhase::Creating {
-                    return Ok(OpenConversationWindowResult {
-                        conversation_id,
-                        window_label: label,
-                        status: "opening",
-                        reused: true,
-                    });
-                }
-                if router.session_activation(&conversation_id)?.is_some() {
-                    return Err("conversation_owner_unavailable: Owner cleanup is pending".into());
-                }
-                router.forget_conversation_if(&conversation_id, &label);
-            }
-            ConversationReservation::New { label } => {
-                let page_router = router.clone();
-                let page_conversation_id = conversation_id.clone();
-                let page_label = label.clone();
-                let builder = WebviewWindowBuilder::new(
-                    app,
-                    label.clone(),
-                    WebviewUrl::App(conversation_window_path(
-                        &conversation_id,
-                        binding.as_ref(),
-                        start_task,
-                    )),
-                )
-                .title("Hatch — Conversation")
-                .inner_size(1180.0, 780.0)
-                .min_inner_size(640.0, 600.0)
-                .resizable(true)
-                .visible(false)
-                .focused(false)
-                // Keep secondary product windows aligned with the main window:
-                // no browser Inspect Element affordance in ad-hoc/debug UAT.
-                .devtools(false)
-                .on_page_load(move |window, payload| {
-                    if payload.event() != PageLoadEvent::Finished {
-                        return;
-                    }
-                    page_router.mark_conversation_ready(&page_conversation_id, &page_label);
-                    // The window begins hidden so callers never see a blank
-                    // webview. A page-load completion is the visibility gate.
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                    page_router.set_active_window(&page_label);
-                });
-                #[cfg(target_os = "macos")]
-                let builder = builder
-                    .title_bar_style(tauri::TitleBarStyle::Overlay)
-                    .hidden_title(true);
-
-                if let Err(error) = builder.build() {
-                    router.forget_conversation_if(&conversation_id, &label);
-                    return Err(format!("native_window_create_failed: {error}"));
-                }
-
-                if persist_manifest {
-                    // A manifest write failure must not make an already
-                    // visible conversation window unusable. The frame/context
-                    // settings path is likewise best effort; a later launch
-                    // simply starts with the durable main window.
-                    let _ = persist_conversation_window_manifest(app, router);
-                }
-
-                return Ok(OpenConversationWindowResult {
-                    conversation_id,
-                    window_label: label,
-                    status: "opened",
-                    reused: false,
-                });
-            }
-        }
+) -> Result<OpenAgentWindowResult, String> {
+    // A still-loading hidden window is revealed by its renderer (app_ready)
+    // or the reveal fallback; showing it here would flash a blank view.
+    let shown = window.is_visible().unwrap_or(false) || window.is_minimized().unwrap_or(false);
+    let _ = window.unminimize();
+    if shown {
+        window
+            .show()
+            .and_then(|_| window.set_focus())
+            .map_err(|error| format!("native_window_focus_failed: {error}"))?;
+        router.set_active_window(window.label());
     }
-
-    Err("native_window_registry_unavailable: Could not reserve a conversation window".into())
+    Ok(OpenAgentWindowResult {
+        window_label: window.label().to_string(),
+        reused: true,
+    })
 }
 
-/// Opt-in context-menu bridge for non-editable product surfaces. Text inputs
-/// preserve the standard operating-system editing menu; product windows have
-/// WebKit devtools disabled, while the browser/Vite preview remains the
-/// development inspection surface.
-#[tauri::command]
-pub fn show_native_context_menu(
-    app: AppHandle,
-    window: WebviewWindow,
-    request: NativeContextMenuRequest,
-    router: State<'_, NativeCommandRouter>,
-) -> Result<bool, String> {
-    if request.editable {
-        return Ok(false);
-    }
-    let kind = NativeContextMenuKind::parse(&request.kind)?;
-    let target = request
-        .target
-        .as_deref()
-        .map(validate_context_target)
-        .transpose()?;
-    if kind.requires_target() && target.is_none() {
-        return Err("native_context_menu_invalid: This context menu requires a target".into());
-    }
-    let position = request
-        .position
-        .map(validate_context_position)
-        .transpose()?;
-    let router = router.inner().clone();
-    // The popup belongs to this WebviewWindow even when a platform does not
-    // synchronously emit a Focused event for a right click. That prevents a
-    // context action from being delivered to a different Hatch conversation.
-    router.set_active_window(window.label());
-    router.refresh_native_menu(&app)?;
-    router.set_pending_context(window.label(), kind, target.clone())?;
-    let menu = build_context_menu(&app, kind)?;
-    let native_window = window.as_ref().window();
-    let result = match position {
-        Some(position) => menu.popup_at(native_window, position),
-        None => menu.popup(native_window),
-    };
-    // Do not clear the pending record here. On macOS the native popup returns
-    // before the user chooses an item; `route_menu_event` consumes the record
-    // later. A canceled popup is harmless because the next popup for this
-    // window replaces it, and window destruction clears it unconditionally.
-    result
-        .map(|_| true)
-        .map_err(|error| format!("native_context_menu_show_failed: {error}"))
-}
-
-fn build_application_menu<R: Runtime>(
+fn open_agent_window_impl<R: Runtime>(
     app: &AppHandle<R>,
-    snapshot: &NativeMenuSnapshot,
-) -> Result<Menu<R>, String> {
-    let new_conversation = command_menu_item(app, snapshot, COMMAND_CONVERSATION_NEW)?;
-    let new_conversation_window =
-        command_menu_item(app, snapshot, COMMAND_CONVERSATION_NEW_WINDOW)?;
-    let choose_workspace = command_menu_item(app, snapshot, COMMAND_WORKSPACE_CHOOSE)?;
-    let settings = command_menu_item(app, snapshot, COMMAND_SETTINGS_OPEN)?;
-    let about = command_menu_item(app, snapshot, COMMAND_ABOUT_OPEN)?;
-    let toggle_sidebar = checked_command_menu_item(app, snapshot, COMMAND_SIDEBAR_TOGGLE)?;
-    let toggle_inspector = checked_command_menu_item(app, snapshot, COMMAND_INSPECTOR_TOGGLE)?;
-    let zoom_in = command_menu_item(app, snapshot, COMMAND_VIEW_ZOOM_IN)?;
-    let zoom_out = command_menu_item(app, snapshot, COMMAND_VIEW_ZOOM_OUT)?;
-    let zoom_reset = command_menu_item(app, snapshot, COMMAND_VIEW_ZOOM_RESET)?;
-    let stop_run = command_menu_item(app, snapshot, COMMAND_RUN_STOP)?;
-
+    binding: &AgentBinding,
+    router: &NativeCommandRouter,
+) -> Result<OpenAgentWindowResult, String> {
+    let label = binding.window_label();
+    if let Some(window) = app.get_webview_window(&label) {
+        return focus_agent_window(&window, router);
+    }
+    let builder = prepare_window(
+        app,
+        WebviewWindowBuilder::new(app, label.clone(), WebviewUrl::App(binding.window_path())),
+    )
+    .title("Hatch")
+    .inner_size(1180.0, 780.0)
+    .min_inner_size(640.0, 600.0)
+    .resizable(true)
+    .on_page_load(|window, payload| {
+        if payload.event() == PageLoadEvent::Finished {
+            reveal_if_still_hidden(window);
+        }
+    });
     #[cfg(target_os = "macos")]
-    let application = SubmenuBuilder::new(app, "Hatch")
-        .item(&about)
-        .separator()
-        .services()
-        .separator()
-        .item(&settings)
-        .separator()
-        .hide()
-        .hide_others()
-        .show_all()
-        .separator()
-        .quit()
-        .build()
-        .map_err(|error| format!("native_menu_build_failed: {error}"))?;
-    #[cfg(not(target_os = "macos"))]
-    let application = SubmenuBuilder::new(app, "Hatch")
-        .item(&about)
-        .separator()
-        .item(&settings)
-        .separator()
-        .quit()
-        .build()
-        .map_err(|error| format!("native_menu_build_failed: {error}"))?;
-
-    let file = SubmenuBuilder::new(app, "File")
-        .item(&new_conversation)
-        .item(&new_conversation_window)
-        .separator()
-        .item(&choose_workspace)
-        .build()
-        .map_err(|error| format!("native_menu_build_failed: {error}"))?;
-    let edit = SubmenuBuilder::new(app, "Edit")
-        .undo()
-        .redo()
-        .separator()
-        .cut()
-        .copy()
-        .paste()
-        .select_all()
-        .build()
-        .map_err(|error| format!("native_menu_build_failed: {error}"))?;
-    let view = SubmenuBuilder::new(app, "View")
-        .item(&toggle_sidebar)
-        .item(&toggle_inspector)
-        .separator()
-        .item(&zoom_in)
-        .item(&zoom_out)
-        .item(&zoom_reset)
-        .build()
-        .map_err(|error| format!("native_menu_build_failed: {error}"))?;
-    let run = SubmenuBuilder::new(app, "Run")
-        .item(&stop_run)
-        .build()
-        .map_err(|error| format!("native_menu_build_failed: {error}"))?;
-    let window = SubmenuBuilder::new(app, "Window")
-        .minimize()
-        .maximize()
-        .separator()
-        .close_window()
-        .build()
-        .map_err(|error| format!("native_menu_build_failed: {error}"))?;
-
-    MenuBuilder::new(app)
-        .item(&application)
-        .item(&file)
-        .item(&edit)
-        .item(&view)
-        .item(&run)
-        .item(&window)
-        .build()
-        .map_err(|error| format!("native_menu_build_failed: {error}"))
-}
-
-fn command_menu_item<R: Runtime>(
-    app: &AppHandle<R>,
-    snapshot: &NativeMenuSnapshot,
-    command_id: &str,
-) -> Result<MenuItem<R>, String> {
-    let definition = application_command_definition(command_id)
-        .ok_or_else(|| format!("native_menu_registry_invalid: Unknown command {command_id}"))?;
-    if definition.checkable {
-        return Err(format!(
-            "native_menu_registry_invalid: {} requires a check menu item",
-            definition.id
-        ));
-    }
-    let mut builder = MenuItemBuilder::with_id(definition.id, definition.label)
-        .enabled(snapshot.command_enabled(definition.id));
-    if let Some(accelerator) = definition.accelerator {
-        builder = builder.accelerator(accelerator);
-    }
-    builder
-        .build(app)
-        .map_err(|error| format!("native_menu_item_build_failed: {error}"))
-}
-
-fn checked_command_menu_item<R: Runtime>(
-    app: &AppHandle<R>,
-    snapshot: &NativeMenuSnapshot,
-    command_id: &str,
-) -> Result<CheckMenuItem<R>, String> {
-    let definition = application_command_definition(command_id)
-        .ok_or_else(|| format!("native_menu_registry_invalid: Unknown command {command_id}"))?;
-    if !definition.checkable {
-        return Err(format!(
-            "native_menu_registry_invalid: {} requires a normal menu item",
-            definition.id
-        ));
-    }
-    let mut builder =
-        CheckMenuItemBuilder::with_id(definition.id, checked_command_label(definition, snapshot))
-            .enabled(snapshot.command_enabled(definition.id))
-            .checked(snapshot.command_checked(definition.id).unwrap_or(false));
-    if let Some(accelerator) = definition.accelerator {
-        builder = builder.accelerator(accelerator);
-    }
-    builder
-        .build(app)
-        .map_err(|error| format!("native_menu_item_build_failed: {error}"))
-}
-
-fn checked_command_label<'a>(
-    definition: &'a CommandDefinition,
-    snapshot: &NativeMenuSnapshot,
-) -> &'a str {
-    match definition.id {
-        COMMAND_SIDEBAR_TOGGLE => {
-            if snapshot
-                .command_checked(COMMAND_SIDEBAR_TOGGLE)
-                .unwrap_or(false)
-            {
-                "Hide Sidebar"
-            } else {
-                "Show Sidebar"
-            }
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true);
+    match builder.build() {
+        Ok(_) => {
+            router.register_agent_window(&label, binding);
+            Ok(OpenAgentWindowResult {
+                window_label: label,
+                reused: false,
+            })
         }
-        COMMAND_INSPECTOR_TOGGLE => {
-            if snapshot
-                .command_checked(COMMAND_INSPECTOR_TOGGLE)
-                .unwrap_or(false)
-            {
-                "Hide Inspector"
-            } else {
-                "Show Inspector"
-            }
-        }
-        _ => definition.label,
-    }
-}
-
-fn build_command_overflow_menu<R: Runtime>(
-    app: &AppHandle<R>,
-    snapshot: &NativeMenuSnapshot,
-) -> Result<Menu<R>, String> {
-    // This is deliberately a compact projection, not a second toolbar model.
-    // Every actionable item is constructed from APPLICATION_COMMANDS above,
-    // so app-menu labels, accelerators, enablement and check state cannot
-    // silently diverge from the toolbar overflow.
-    let new_conversation = command_menu_item(app, snapshot, COMMAND_CONVERSATION_NEW)?;
-    let new_window = command_menu_item(app, snapshot, COMMAND_CONVERSATION_NEW_WINDOW)?;
-    let choose_workspace = command_menu_item(app, snapshot, COMMAND_WORKSPACE_CHOOSE)?;
-    let toggle_sidebar = checked_command_menu_item(app, snapshot, COMMAND_SIDEBAR_TOGGLE)?;
-    let toggle_inspector = checked_command_menu_item(app, snapshot, COMMAND_INSPECTOR_TOGGLE)?;
-    let zoom_in = command_menu_item(app, snapshot, COMMAND_VIEW_ZOOM_IN)?;
-    let zoom_out = command_menu_item(app, snapshot, COMMAND_VIEW_ZOOM_OUT)?;
-    let zoom_reset = command_menu_item(app, snapshot, COMMAND_VIEW_ZOOM_RESET)?;
-    let stop_run = command_menu_item(app, snapshot, COMMAND_RUN_STOP)?;
-    let settings = command_menu_item(app, snapshot, COMMAND_SETTINGS_OPEN)?;
-
-    MenuBuilder::new(app)
-        .item(&new_conversation)
-        .item(&new_window)
-        .item(&choose_workspace)
-        .separator()
-        .item(&toggle_sidebar)
-        .item(&toggle_inspector)
-        .separator()
-        .item(&zoom_in)
-        .item(&zoom_out)
-        .item(&zoom_reset)
-        .separator()
-        .item(&stop_run)
-        .separator()
-        .item(&settings)
-        .build()
-        .map_err(|error| format!("native_command_menu_build_failed: {error}"))
-}
-
-fn build_context_menu<R: Runtime>(
-    app: &AppHandle<R>,
-    kind: NativeContextMenuKind,
-) -> Result<Menu<R>, String> {
-    let items: &[(&str, &str)] = match kind {
-        NativeContextMenuKind::Conversation => &[
-            (CONTEXT_CONVERSATION_RENAME, "Rename Conversation"),
-            (CONTEXT_CONVERSATION_OPEN_WINDOW, "Open in New Window"),
-            (CONTEXT_CONVERSATION_ARCHIVE, "Archive Conversation"),
-        ],
-        NativeContextMenuKind::Artifact => &[
-            (CONTEXT_ARTIFACT_REVEAL, artifact_reveal_menu_label()),
-            (CONTEXT_ARTIFACT_QUICK_LOOK, artifact_open_menu_label()),
-            (CONTEXT_ARTIFACT_COPY_PATH, "Copy Path"),
-        ],
-        NativeContextMenuKind::ToolResult => &[(CONTEXT_TOOL_COPY_OUTPUT, "Copy Output")],
-    };
-    let mut builder = MenuBuilder::new(app);
-    for (id, title) in items {
-        let item = MenuItemBuilder::with_id(*id, *title)
-            .build(app)
-            .map_err(|error| format!("native_context_menu_build_failed: {error}"))?;
-        builder = builder.item(&item);
-    }
-    builder
-        .build()
-        .map_err(|error| format!("native_context_menu_build_failed: {error}"))
-}
-
-fn artifact_reveal_menu_label() -> &'static str {
-    #[cfg(target_os = "macos")]
-    {
-        "Reveal in Finder"
-    }
-    #[cfg(target_os = "windows")]
-    {
-        "Reveal in Explorer"
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        "Reveal in File Manager"
-    }
-}
-
-fn artifact_open_menu_label() -> &'static str {
-    #[cfg(target_os = "macos")]
-    {
-        "Quick Look"
-    }
-    #[cfg(target_os = "windows")]
-    {
-        "Open"
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        "Open"
-    }
-}
-
-fn app_menu_command(menu_id: &str) -> Option<&'static str> {
-    application_command_definition(menu_id).map(|definition| definition.id)
-}
-
-fn context_menu_command(menu_id: &str) -> Option<(&'static str, NativeContextMenuKind)> {
-    match menu_id {
-        CONTEXT_CONVERSATION_RENAME => Some((
-            COMMAND_CONVERSATION_RENAME,
-            NativeContextMenuKind::Conversation,
-        )),
-        CONTEXT_CONVERSATION_OPEN_WINDOW => Some((
-            COMMAND_CONVERSATION_OPEN_WINDOW,
-            NativeContextMenuKind::Conversation,
-        )),
-        CONTEXT_CONVERSATION_ARCHIVE => Some((
-            COMMAND_CONVERSATION_ARCHIVE,
-            NativeContextMenuKind::Conversation,
-        )),
-        CONTEXT_ARTIFACT_REVEAL => Some((COMMAND_ARTIFACT_REVEAL, NativeContextMenuKind::Artifact)),
-        CONTEXT_ARTIFACT_QUICK_LOOK => {
-            Some((COMMAND_ARTIFACT_QUICK_LOOK, NativeContextMenuKind::Artifact))
-        }
-        CONTEXT_ARTIFACT_COPY_PATH => {
-            Some((COMMAND_ARTIFACT_COPY_PATH, NativeContextMenuKind::Artifact))
-        }
-        CONTEXT_TOOL_COPY_OUTPUT => {
-            Some((COMMAND_TOOL_COPY_OUTPUT, NativeContextMenuKind::ToolResult))
-        }
-        _ => None,
+        // Two requests raced to create the same Agent window.
+        Err(error) => match app.get_webview_window(&label) {
+            Some(window) => focus_agent_window(&window, router),
+            None => Err(format!("native_window_create_failed: {error}")),
+        },
     }
 }
 
@@ -1854,131 +1058,15 @@ fn validate_uuid_v4(value: &str, field: &str) -> Result<String, String> {
         && matches!(bytes[19], b'8' | b'9' | b'a' | b'b');
     if !valid {
         return Err(format!(
-            "conversation_window_binding_invalid: {field} must be a UUID v4"
+            "agent_window_binding_invalid: {field} must be a UUID v4"
         ));
     }
     Ok(value)
 }
 
-fn validate_conversation_window_binding(
-    request: &OpenConversationWindowRequest,
-) -> Result<Option<ConversationWindowBinding>, String> {
-    let provided = request.entitlement_id.is_some()
-        || request.creator_id.is_some()
-        || request.product_id.is_some();
-    if !provided {
-        return Ok(None);
-    }
-    let entitlement_id = validate_uuid_v4(
-        request.entitlement_id.as_deref().unwrap_or_default(),
-        "entitlement_id",
-    )?;
-    let creator_id = validate_uuid_v4(
-        request.creator_id.as_deref().unwrap_or_default(),
-        "creator_id",
-    )?;
-    let product_id = validate_uuid_v4(
-        request.product_id.as_deref().unwrap_or_default(),
-        "product_id",
-    )?;
-    Ok(Some(ConversationWindowBinding {
-        entitlement_id,
-        creator_id,
-        product_id,
-    }))
-}
-
-fn validate_context_target(value: &str) -> Result<String, String> {
-    let value = value.trim();
-    if value.is_empty()
-        || value.len() > MAX_CONTEXT_TARGET_BYTES
-        || value.chars().any(char::is_control)
-    {
-        return Err(
-            "native_context_menu_invalid: Context target must be bounded non-control text".into(),
-        );
-    }
-    Ok(value.to_string())
-}
-
-fn validate_context_position(
-    position: NativeContextMenuPosition,
-) -> Result<LogicalPosition<f64>, String> {
-    let coordinates_are_sane = position.x.is_finite()
-        && position.y.is_finite()
-        && position.x.abs() <= 100_000.0
-        && position.y.abs() <= 100_000.0;
-    if !coordinates_are_sane {
-        return Err("native_context_menu_invalid: Context menu position is invalid".into());
-    }
-    Ok(LogicalPosition::new(position.x, position.y))
-}
-
-fn conversation_window_path(
-    conversation_id: &str,
-    binding: Option<&ConversationWindowBinding>,
-    start_task: bool,
-) -> PathBuf {
-    let encoded =
-        url::form_urlencoded::byte_serialize(conversation_id.as_bytes()).collect::<String>();
-    let mut path = format!("index.html?conversation_id={encoded}");
-    if let Some(binding) = binding {
-        for (name, value) in [
-            ("entitlement_id", binding.entitlement_id.as_str()),
-            ("creator_id", binding.creator_id.as_str()),
-            ("product_id", binding.product_id.as_str()),
-        ] {
-            let encoded =
-                url::form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>();
-            path.push('&');
-            path.push_str(name);
-            path.push('=');
-            path.push_str(&encoded);
-        }
-    }
-    if start_task {
-        path.push_str("&task_start=1");
-    }
-    PathBuf::from(path)
-}
-
-/// Tauri labels must be portable across macOS and Windows. Keep a short,
-/// human-inspectable slug and append a deterministic hash so punctuation,
-/// Unicode, and long server IDs cannot make a dangerous or colliding label.
-fn conversation_window_label(conversation_id: &str) -> String {
-    let mut slug = String::with_capacity(32);
-    let mut previous_dash = false;
-    for character in conversation_id.chars() {
-        if slug.len() >= 32 {
-            break;
-        }
-        let mapped = if character.is_ascii_alphanumeric() {
-            previous_dash = false;
-            character.to_ascii_lowercase()
-        } else if !previous_dash {
-            previous_dash = true;
-            '-'
-        } else {
-            continue;
-        };
-        slug.push(mapped);
-    }
-    let slug = slug.trim_matches('-');
-    let slug = if slug.is_empty() {
-        "conversation"
-    } else {
-        slug
-    };
-    format!(
-        "conversation-{slug}-{:016x}",
-        stable_hash64(conversation_id.as_bytes())
-    )
-}
-
 fn stable_hash64(bytes: &[u8]) -> u64 {
     // FNV-1a is used only for a stable, readable label suffix. It is not a
-    // security boundary; the registry retains the full conversation id and
-    // fails visibly should an astronomically unlikely collision occur.
+    // security boundary.
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
     for byte in bytes {
         hash ^= u64::from(*byte);
@@ -1987,267 +1075,409 @@ fn stable_hash64(bytes: &[u8]) -> u64 {
     hash
 }
 
+// ---------------------------------------------------------------------------
+// Application menu
+
+fn menu_error(error: impl std::fmt::Display) -> String {
+    format!("native_menu_build_failed: {error}")
+}
+
+fn build_application_menu<R: Runtime>(
+    app: &AppHandle<R>,
+    snapshot: &NativeMenuSnapshot,
+) -> Result<Menu<R>, String> {
+    let item = |id: &str| command_menu_item(app, snapshot, id);
+    let settings = item(COMMAND_SETTINGS_OPEN)?;
+    let about = AboutMetadataBuilder::new()
+        .name(Some("Hatch"))
+        .version(Some(app.package_info().version.to_string()))
+        .copyright(Some("© Hatch"))
+        .build();
+
+    #[cfg(target_os = "macos")]
+    let application = SubmenuBuilder::new(app, "Hatch")
+        .about(Some(about))
+        .separator()
+        .item(&settings)
+        .separator()
+        .services()
+        .separator()
+        .hide()
+        .hide_others()
+        .show_all()
+        .separator()
+        .quit()
+        .build()
+        .map_err(menu_error)?;
+    #[cfg(not(target_os = "macos"))]
+    let application = SubmenuBuilder::new(app, "Hatch")
+        .about(Some(about))
+        .separator()
+        .item(&settings)
+        .separator()
+        .quit()
+        .build()
+        .map_err(menu_error)?;
+
+    let file = SubmenuBuilder::new(app, "File")
+        .item(&item(COMMAND_CONVERSATION_NEW)?)
+        .item(&item(COMMAND_WORKSPACE_CHOOSE)?)
+        .separator()
+        .close_window()
+        .build()
+        .map_err(menu_error)?;
+    let edit = SubmenuBuilder::new(app, "Edit")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .separator()
+        .item(&item(COMMAND_EDIT_FIND)?)
+        .build()
+        .map_err(menu_error)?;
+    let view = SubmenuBuilder::new(app, "View")
+        .item(&sidebar_menu_item(app, snapshot)?)
+        .separator()
+        .item(&item(COMMAND_VIEW_ZOOM_IN)?)
+        .item(&item(COMMAND_VIEW_ZOOM_OUT)?)
+        .item(&item(COMMAND_VIEW_ZOOM_RESET)?);
+    #[cfg(target_os = "macos")]
+    let view = view.separator().fullscreen();
+    let view = view.build().map_err(menu_error)?;
+
+    let conversation = SubmenuBuilder::new(app, "Conversation")
+        .item(&item(COMMAND_CONVERSATION_RENAME)?)
+        .item(&item(COMMAND_CONVERSATION_ARCHIVE)?)
+        .separator()
+        .item(&item(COMMAND_CONVERSATION_PREVIOUS)?)
+        .item(&item(COMMAND_CONVERSATION_NEXT)?)
+        .build()
+        .map_err(menu_error)?;
+
+    let run = SubmenuBuilder::new(app, "Run")
+        .item(&item(COMMAND_RUN_STOP)?)
+        .build()
+        .map_err(menu_error)?;
+
+    // Library, then every open window.
+    let library = MenuItemBuilder::with_id(MENU_WINDOW_LIBRARY, "Library")
+        .accelerator(MENU_WINDOW_LIBRARY_ACCELERATOR)
+        .build(app)
+        .map_err(menu_error)?;
+    let mut window = SubmenuBuilder::new(app, "Window")
+        .minimize()
+        .maximize()
+        .separator()
+        .item(&library);
+    window = window.separator();
+    for entry in open_window_entries(app) {
+        let checked = snapshot.active_window_label.as_deref() == Some(entry.label.as_str());
+        let item: CheckMenuItem<R> = CheckMenuItemBuilder::with_id(
+            format!("{MENU_WINDOW_FOCUS_PREFIX}{}", entry.label),
+            entry.title,
+        )
+        .checked(checked)
+        .build(app)
+        .map_err(menu_error)?;
+        window = window.item(&item);
+    }
+    let window = window.build().map_err(menu_error)?;
+
+    let help_item = MenuItemBuilder::with_id(MENU_HELP_OPEN, "Hatch Help")
+        .build(app)
+        .map_err(menu_error)?;
+    let help = SubmenuBuilder::new(app, "Help")
+        .item(&help_item)
+        .build()
+        .map_err(menu_error)?;
+
+    MenuBuilder::new(app)
+        .item(&application)
+        .item(&file)
+        .item(&edit)
+        .item(&view)
+        .item(&conversation)
+        .item(&run)
+        .item(&window)
+        .item(&help)
+        .build()
+        .map_err(menu_error)
+}
+
+struct OpenWindowEntry {
+    label: String,
+    title: String,
+}
+
+/// Visible Hatch windows in a stable order (main first), titled as the
+/// renderer titled them — the conversation name.
+fn open_window_entries<R: Runtime>(app: &AppHandle<R>) -> Vec<OpenWindowEntry> {
+    let mut entries = app
+        .webview_windows()
+        .into_iter()
+        .filter(|(_, window)| window.is_visible().unwrap_or(false))
+        .map(|(label, window)| OpenWindowEntry {
+            title: window
+                .title()
+                .ok()
+                .filter(|title| !title.trim().is_empty())
+                .unwrap_or_else(|| "Hatch".into()),
+            label,
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| {
+        (left.label != MAIN_WINDOW_LABEL, &left.label)
+            .cmp(&(right.label != MAIN_WINDOW_LABEL, &right.label))
+    });
+    entries
+}
+
+fn command_menu_item<R: Runtime>(
+    app: &AppHandle<R>,
+    snapshot: &NativeMenuSnapshot,
+    command_id: &str,
+) -> Result<MenuItem<R>, String> {
+    let definition = application_command_definition(command_id)
+        .ok_or_else(|| format!("native_menu_registry_invalid: Unknown command {command_id}"))?;
+    let mut builder = MenuItemBuilder::with_id(definition.id, definition.label)
+        .enabled(snapshot.command_enabled(definition.id));
+    if let Some(accelerator) = definition.accelerator {
+        builder = builder.accelerator(accelerator);
+    }
+    builder.build(app).map_err(menu_error)
+}
+
+fn sidebar_menu_item<R: Runtime>(
+    app: &AppHandle<R>,
+    snapshot: &NativeMenuSnapshot,
+) -> Result<CheckMenuItem<R>, String> {
+    CheckMenuItemBuilder::with_id(COMMAND_SIDEBAR_TOGGLE, sidebar_label(snapshot))
+        .enabled(snapshot.command_enabled(COMMAND_SIDEBAR_TOGGLE))
+        .checked(
+            snapshot
+                .command_checked(COMMAND_SIDEBAR_TOGGLE)
+                .unwrap_or(false),
+        )
+        .accelerator(SIDEBAR_ACCELERATOR)
+        .build(app)
+        .map_err(menu_error)
+}
+
+fn sidebar_label(snapshot: &NativeMenuSnapshot) -> &'static str {
+    if snapshot
+        .command_checked(COMMAND_SIDEBAR_TOGGLE)
+        .unwrap_or(false)
+    {
+        "Hide Sidebar"
+    } else {
+        "Show Sidebar"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        app_menu_command, application_command_definition, artifact_open_menu_label,
-        artifact_reveal_menu_label, checked_command_label, context_menu_command,
-        conversation_window_label, conversation_window_path, normalize_manifest_conversation_ids,
-        validate_context_position, validate_context_target, validate_conversation_id,
-        validate_conversation_window_binding, ConversationReservation, ConversationWindowPhase,
-        NativeCommandRouter, NativeCommandState, NativeContextMenuKind, NativeContextMenuPosition,
-        NativeMenuSnapshot, OpenConversationWindowRequest, COMMAND_ABOUT_OPEN,
-        COMMAND_CONVERSATION_NEW, COMMAND_CONVERSATION_NEW_WINDOW, COMMAND_INSPECTOR_TOGGLE,
-        COMMAND_RUN_STOP, COMMAND_SETTINGS_OPEN, COMMAND_SIDEBAR_TOGGLE, COMMAND_VIEW_ZOOM_IN,
-        COMMAND_VIEW_ZOOM_OUT, COMMAND_VIEW_ZOOM_RESET, COMMAND_WORKSPACE_CHOOSE,
-        MAX_RESTORED_CONVERSATION_WINDOWS,
+        app_menu_command, application_command_definition, normalize_agent_window_manifest,
+        sidebar_label, validate_conversation_id, AgentBinding, NativeCommandRouter,
+        NativeCommandState, NativeMenuSnapshot, COMMAND_CONVERSATION_ARCHIVE,
+        COMMAND_CONVERSATION_NEW, COMMAND_CONVERSATION_NEXT, COMMAND_CONVERSATION_PREVIOUS,
+        COMMAND_CONVERSATION_RENAME, COMMAND_EDIT_FIND, COMMAND_RUN_STOP, COMMAND_SETTINGS_OPEN,
+        COMMAND_SIDEBAR_TOGGLE, COMMAND_VIEW_ZOOM_IN, COMMAND_VIEW_ZOOM_OUT,
+        COMMAND_VIEW_ZOOM_RESET, COMMAND_WORKSPACE_CHOOSE, MAX_RESTORED_AGENT_WINDOWS,
+        MENU_WINDOW_LIBRARY,
     };
 
+    const PRODUCT: &str = "550e8400-e29b-41d4-a716-446655440000";
+    const ENTITLEMENT: &str = "7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001";
+
+    fn snapshot(state: NativeCommandState) -> NativeMenuSnapshot {
+        NativeMenuSnapshot {
+            has_focused_window: true,
+            active_window_label: Some("main".into()),
+            state,
+        }
+    }
+
+    fn uuid(index: usize) -> String {
+        format!("{index:08x}-e29b-41d4-a716-446655440000")
+    }
+
     #[test]
-    fn conversation_window_labels_are_stable_portable_and_distinct() {
-        let first = conversation_window_label("Creator Agent / 数据库: 2026-08-11");
-        let second = conversation_window_label("Creator Agent / 数据库: 2026-08-11");
-        let other = conversation_window_label("Creator Agent / 数据库: 2026-08-12");
-        assert_eq!(first, second);
-        assert_ne!(first, other);
-        assert!(first.starts_with("conversation-"));
-        assert!(first.chars().all(|character| character.is_ascii_lowercase()
+    fn agent_window_labels_are_stable_portable_and_distinct_per_binding() {
+        let owned = AgentBinding::new(Some(PRODUCT), None).unwrap();
+        let again = AgentBinding::new(Some(&PRODUCT.to_uppercase()), None).unwrap();
+        let acquired = AgentBinding::new(None, Some(ENTITLEMENT)).unwrap();
+        let same_id_other_scope = AgentBinding::new(None, Some(PRODUCT)).unwrap();
+        let label = owned.window_label();
+        assert_eq!(label, again.window_label());
+        assert_ne!(label, acquired.window_label());
+        assert_ne!(label, same_id_other_scope.window_label());
+        assert!(label.starts_with("agent-product-550e8400-"));
+        assert!(label.chars().all(|character| character.is_ascii_lowercase()
             || character.is_ascii_digit()
             || character == '-'));
-        assert!(first.len() <= 64);
+        assert!(label.len() <= 64);
     }
 
     #[test]
-    fn conversation_window_route_carries_optional_product_binding() {
-        let request = OpenConversationWindowRequest {
-            conversation_id: "conv_123".into(),
-            entitlement_id: Some("7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001".into()),
-            creator_id: Some("8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002".into()),
-            product_id: Some("550e8400-e29b-41d4-a716-446655440000".into()),
-            start_task: false,
-        };
-        let binding = validate_conversation_window_binding(&request).unwrap();
-        let binding = binding.as_ref().unwrap();
-        let path = conversation_window_path("conv_123", Some(binding), false);
-        let path = path.to_string_lossy();
-        assert!(path.contains("conversation_id=conv_123"));
-        assert!(path.contains("entitlement_id=7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001"));
-        assert!(path.contains("creator_id=8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002"));
-        assert!(path.contains("product_id=550e8400-e29b-41d4-a716-446655440000"));
-    }
-
-    #[test]
-    fn conversation_window_binding_rejects_partial_or_controlled_input() {
-        let partial = OpenConversationWindowRequest {
-            conversation_id: "conv_123".into(),
-            entitlement_id: Some("7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001".into()),
-            creator_id: None,
-            product_id: Some("550e8400-e29b-41d4-a716-446655440000".into()),
-            start_task: false,
-        };
-        assert!(validate_conversation_window_binding(&partial).is_err());
-
-        let controlled = OpenConversationWindowRequest {
-            conversation_id: "conv_123".into(),
-            entitlement_id: Some("7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001\nx".into()),
-            creator_id: Some("8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002".into()),
-            product_id: Some("550e8400-e29b-41d4-a716-446655440000".into()),
-            start_task: false,
-        };
-        assert!(validate_conversation_window_binding(&controlled).is_err());
-    }
-
-    #[test]
-    fn conversation_window_manifest_normalizes_ids_and_bounds_restore_count() {
-        let mut ids = vec![
-            "conv-b".to_string(),
-            "conv-a".to_string(),
-            "conv-a".to_string(),
-            "bad\nvalue".to_string(),
-            "".to_string(),
-        ];
-        ids.extend(
-            (0..(MAX_RESTORED_CONVERSATION_WINDOWS + 4)).map(|index| format!("conv-{index:02}")),
-        );
-
-        let normalized_duplicates = normalize_manifest_conversation_ids(vec![
-            "conv-a".to_string(),
-            "conv-a".to_string(),
-            "conv-b".to_string(),
-        ]);
-        let normalized = normalize_manifest_conversation_ids(ids);
-        assert!(normalized.len() <= MAX_RESTORED_CONVERSATION_WINDOWS);
-        assert!(normalized.windows(2).all(|pair| pair[0] < pair[1]));
+    fn agent_window_route_carries_window_kind_and_exactly_one_access_scope() {
+        let owned = AgentBinding::new(Some(PRODUCT), None).unwrap();
         assert_eq!(
-            normalized_duplicates
-                .iter()
-                .filter(|id| *id == "conv-a")
-                .count(),
-            1
+            owned.window_path().to_string_lossy(),
+            format!("index.html?window=chat&product_id={PRODUCT}")
         );
-        assert!(!normalized.iter().any(|id| id.contains('\n')));
-        assert!(!normalized.iter().any(String::is_empty));
+        let acquired = AgentBinding::new(None, Some(ENTITLEMENT)).unwrap();
+        assert_eq!(
+            acquired.window_path().to_string_lossy(),
+            format!("index.html?window=chat&entitlement_id={ENTITLEMENT}")
+        );
+        assert_eq!(
+            AgentBinding::parse(&acquired.manifest_key()).unwrap(),
+            acquired
+        );
     }
 
     #[test]
-    fn conversation_registry_slow_draft_io_does_not_lock_other_conversation_routes() {
-        use std::sync::mpsc;
-        use std::time::Duration;
-        let router = NativeCommandRouter::default();
-        router
-            .claim_session("account", "a", "agent", "main")
-            .unwrap();
-        let (entered_tx, entered_rx) = mpsc::channel();
-        let (finish_tx, finish_rx) = mpsc::channel();
-        let writer = router.clone();
-        let writing = std::thread::spawn(move || {
-            writer.with_session_lease("account", "a", "main", None, |_| {
-                entered_tx.send(()).unwrap();
-                finish_rx.recv_timeout(Duration::from_secs(3)).unwrap();
-                Ok(())
-            })
-        });
-        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-        let other = router.clone();
-        let (routed_tx, routed_rx) = mpsc::channel();
-        let routing = std::thread::spawn(move || {
-            routed_tx
-                .send(
-                    other
-                        .claim_session("account", "b", "agent", "other")
-                        .unwrap()
-                        .owned,
-                )
-                .unwrap();
-        });
-        let result = routed_rx.recv_timeout(Duration::from_secs(1));
-        finish_tx.send(()).unwrap();
-        writing.join().unwrap().unwrap();
-        routing.join().unwrap();
-        assert_eq!(result.unwrap(), true);
+    fn agent_binding_rejects_both_neither_and_controlled_input() {
+        assert!(AgentBinding::new(Some(PRODUCT), Some(ENTITLEMENT)).is_err());
+        assert!(AgentBinding::new(None, None).is_err());
+        assert!(AgentBinding::new(Some("not-a-uuid"), None).is_err());
+        assert!(AgentBinding::new(None, Some(&format!("{ENTITLEMENT}\nx"))).is_err());
+        assert!(AgentBinding::parse(&format!("creator_id:{PRODUCT}")).is_err());
     }
 
     #[test]
-    fn conversation_registry_closing_fences_claims_contexts_and_drafts_until_cleanup() {
+    fn agent_window_manifest_normalizes_entries_and_bounds_restore_count() {
+        let mut entries = vec![
+            format!("product_id:{PRODUCT}"),
+            format!("product_id:{PRODUCT}"),
+            format!("entitlement_id:{ENTITLEMENT}"),
+            "product_id:bad\nvalue".to_string(),
+            "conv_legacy".to_string(),
+            String::new(),
+        ];
+        entries.extend(
+            (0..(MAX_RESTORED_AGENT_WINDOWS + 4))
+                .map(|index| format!("product_id:{}", uuid(index))),
+        );
+        let normalized = normalize_agent_window_manifest(entries);
+        assert_eq!(normalized.len(), MAX_RESTORED_AGENT_WINDOWS);
+        assert!(normalized.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(normalized
+            .iter()
+            .all(|entry| AgentBinding::parse(entry).is_ok()));
+    }
+
+    #[test]
+    fn router_tracks_agent_windows_and_attention_per_window() {
         let router = NativeCommandRouter::default();
-        router
-            .claim_session("account", "a", "agent", "main")
+        let owned = AgentBinding::new(Some(PRODUCT), None).unwrap();
+        let acquired = AgentBinding::new(None, Some(ENTITLEMENT)).unwrap();
+        router.register_agent_window(&owned.window_label(), &owned);
+        router.register_agent_window(&acquired.window_label(), &acquired);
+        assert_eq!(router.agent_window_manifest().unwrap().len(), 2);
+        assert_eq!(router.set_attention(&owned.window_label(), 2), 2);
+        assert_eq!(router.set_attention(&acquired.window_label(), 3), 5);
+        assert_eq!(router.set_attention(&owned.window_label(), 1), 4);
+        router.clear_window(&acquired.window_label());
+        assert_eq!(router.attention_total(), 1);
+        assert_eq!(
+            router.agent_window_manifest().unwrap(),
+            vec![owned.manifest_key()]
+        );
+        assert_eq!(router.set_attention(&owned.window_label(), 0), 0);
+    }
+
+    #[test]
+    fn conversation_registry_closing_fences_claims_and_contexts_until_cleanup() {
+        let router = NativeCommandRouter::default();
+        let claim = router
+            .claim_session("account", "a", "product:a", "main")
             .unwrap();
+        assert!(router.with_window_session("a", "main", || Ok(())).is_ok());
+        assert!(router.with_window_session("a", "other", || Ok(())).is_err());
         router.begin_close_window("main");
-        let lease = router.state.lock().unwrap().conversations_by_id["a"]
-            .session
-            .as_ref()
-            .unwrap()
-            .lease
-            .clone();
         router
-            .release_session("account", "a", "main", &lease)
+            .release_session("account", "a", "main", claim.lease.as_deref().unwrap())
             .unwrap();
         assert!(router
-            .claim_session("account", "a", "agent", "other")
-            .is_err());
-        assert!(router
-            .claim_session("account", "a", "agent", "main")
+            .claim_session("account", "a", "product:a", "other")
             .is_err());
         assert!(router.with_window_session("a", "main", || Ok(())).is_err());
-        assert!(router
-            .with_session_lease("account", "a", "main", None, |_| Ok(()))
-            .is_err());
-        router.revoke_window_sessions("main");
-        assert!(router
-            .claim_session("account", "a", "agent", "other")
-            .is_err());
         assert!(
             router
-                .claim_session("account", "b", "agent", "other")
+                .claim_session("account", "b", "product:a", "other")
                 .unwrap()
                 .owned
         );
         router.clear_window("main");
         assert!(
             router
-                .claim_session("account", "a", "agent", "other")
+                .claim_session("account", "a", "product:a", "other")
                 .unwrap()
                 .owned
         );
     }
 
     #[test]
-    fn conversation_registry_main_owns_background_sessions_and_releases_only_after_matching_lease()
-    {
+    fn released_session_no_longer_authorizes_tool_contexts() {
+        let router = NativeCommandRouter::default();
+        let claim = router
+            .claim_session("account", "a", "product:a", "main")
+            .unwrap();
+        router
+            .release_session("account", "a", "main", claim.lease.as_deref().unwrap())
+            .unwrap();
+        assert!(router.with_window_session("a", "main", || Ok(())).is_err());
+    }
+
+    #[test]
+    fn conversation_registry_binds_owner_to_account_and_access_key() {
         let router = NativeCommandRouter::default();
         let a = router
-            .claim_session("account", "a", "agent", "main")
+            .claim_session("account", "a", "entitlement:x", "main")
             .unwrap();
-        let b = router
-            .claim_session("account", "b", "agent", "main")
-            .unwrap();
-        assert!(a.owned && b.owned);
-        assert_eq!(
-            router
-                .claim_session("account", "a", "agent", "main")
-                .unwrap()
-                .lease,
-            a.lease
-        );
+        assert!(a.owned);
         let redirect = router
-            .claim_session("account", "a", "agent", "other")
+            .claim_session("account", "a", "entitlement:x", "other")
             .unwrap();
         assert!(!redirect.owned);
         assert_eq!(redirect.window_label, "main");
-        assert!(redirect.lease.is_none());
         let target = router.session_activation("a").unwrap().unwrap();
         assert_eq!(target["conversationId"], "a");
         assert_eq!(target["accountId"], "account");
+        assert_eq!(target["accessKey"], "entitlement:x");
         assert!(router
-            .claim_session("foreign", "a", "agent", "other")
+            .claim_session("foreign", "a", "entitlement:x", "other")
             .is_err());
         assert!(router
-            .claim_session("account", "a", "other-agent", "other")
+            .claim_session("account", "a", "product:y", "other")
             .is_err());
         router
             .release_session("account", "a", "main", "stale")
             .unwrap();
         assert!(
             !router
-                .claim_session("account", "a", "agent", "other")
+                .claim_session("account", "a", "entitlement:x", "other")
                 .unwrap()
                 .owned
         );
         router
             .release_session("account", "a", "main", a.lease.as_deref().unwrap())
             .unwrap();
-        let next = router
-            .claim_session("account", "a", "agent", "other")
-            .unwrap();
-        assert!(next.owned);
-        router
-            .release_session("account", "a", "main", a.lease.as_deref().unwrap())
-            .unwrap();
-        assert_eq!(
-            router
-                .claim_session("account", "a", "agent", "other")
-                .unwrap()
-                .lease,
-            next.lease
-        );
-        router.clear_window("main");
         assert!(
             router
-                .claim_session("account", "b", "agent", "third")
-                .unwrap()
-                .owned
-        );
-        assert!(
-            !router
-                .claim_session("account", "a", "agent", "third")
+                .claim_session("account", "a", "entitlement:x", "other")
                 .unwrap()
                 .owned
         );
     }
 
     #[test]
-    fn conversation_registry_concurrent_claim_and_restore_have_one_owner() {
+    fn conversation_registry_concurrent_claim_has_one_owner() {
         let router = NativeCommandRouter::default();
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
         let handles: Vec<_> = (0..8)
@@ -2257,7 +1487,12 @@ mod tests {
                 std::thread::spawn(move || {
                     barrier.wait();
                     router
-                        .claim_session("account", "concurrent", "agent", &format!("window-{index}"))
+                        .claim_session(
+                            "account",
+                            "concurrent",
+                            "product:a",
+                            &format!("window-{index}"),
+                        )
                         .unwrap()
                 })
             })
@@ -2267,117 +1502,20 @@ mod tests {
             .map(|handle| handle.join().unwrap())
             .collect();
         assert_eq!(claims.iter().filter(|claim| claim.owned).count(), 1);
-        assert!(claims
-            .iter()
-            .all(|claim| claim.window_label == claims[0].window_label));
-        let reserved = match router.reserve_conversation("restored").unwrap() {
-            ConversationReservation::New { label } => label,
-            _ => panic!("expected restore reservation"),
-        };
-        assert!(
-            !router
-                .claim_session("account", "restored", "agent", "main")
-                .unwrap()
-                .owned
-        );
-        assert!(
-            router
-                .claim_session("account", "restored", "agent", &reserved)
-                .unwrap()
-                .owned
-        );
-        assert!(!router
-            .conversation_ids()
-            .unwrap()
-            .contains(&"concurrent".to_string()));
-        assert!(router
-            .conversation_ids()
-            .unwrap()
-            .contains(&"restored".to_string()));
-        router.clear_window(&reserved);
-        assert!(
-            router
-                .claim_session("account", "restored", "agent", "main")
-                .unwrap()
-                .owned
-        );
     }
 
     #[test]
-    fn conversation_registry_reserves_once_and_releases_on_window_close() {
-        let router = NativeCommandRouter::default();
-        let label = match router.reserve_conversation("conversation-1").unwrap() {
-            ConversationReservation::New { label } => label,
-            reservation => panic!("expected a new reservation, got {reservation:?}"),
-        };
-        assert!(matches!(
-            router.reserve_conversation("conversation-1").unwrap(),
-            ConversationReservation::Existing { .. }
-        ));
-        router.clear_window(&label);
-        assert!(matches!(
-            router.reserve_conversation("conversation-1").unwrap(),
-            ConversationReservation::New { .. }
-        ));
-    }
-
-    #[test]
-    fn conversation_registry_keeps_three_parallel_windows_independent() {
-        let router = NativeCommandRouter::default();
-        let mut labels = Vec::new();
-        for conversation_id in ["conversation-a", "conversation-b", "conversation-c"] {
-            let label = match router.reserve_conversation(conversation_id).unwrap() {
-                ConversationReservation::New { label } => label,
-                reservation => panic!("expected a new reservation, got {reservation:?}"),
-            };
-            router.mark_conversation_ready(conversation_id, &label);
-            labels.push(label);
-        }
-        assert_eq!(
-            labels
-                .iter()
-                .collect::<std::collections::HashSet<_>>()
-                .len(),
-            3
-        );
-
-        for conversation_id in ["conversation-a", "conversation-b", "conversation-c"] {
-            assert!(matches!(
-                router.reserve_conversation(conversation_id).unwrap(),
-                ConversationReservation::Existing {
-                    phase: ConversationWindowPhase::Ready,
-                    ..
-                }
-            ));
-        }
-
-        // Closing the middle window releases only its own reverse lookup;
-        // the other two remain reusable and keep their stable labels.
-        router.clear_window(&labels[1]);
-        assert!(matches!(
-            router.reserve_conversation("conversation-a").unwrap(),
-            ConversationReservation::Existing { .. }
-        ));
-        assert!(matches!(
-            router.reserve_conversation("conversation-c").unwrap(),
-            ConversationReservation::Existing { .. }
-        ));
-        assert!(matches!(
-            router.reserve_conversation("conversation-b").unwrap(),
-            ConversationReservation::New { .. }
-        ));
-    }
-
-    #[test]
-    fn command_ids_stay_semantic_and_context_bound() {
+    fn menu_commands_are_semantic_and_include_agent_shortcuts() {
         for command_id in [
             COMMAND_CONVERSATION_NEW,
-            COMMAND_CONVERSATION_NEW_WINDOW,
+            COMMAND_EDIT_FIND,
+            COMMAND_CONVERSATION_RENAME,
+            COMMAND_CONVERSATION_ARCHIVE,
+            COMMAND_CONVERSATION_PREVIOUS,
+            COMMAND_CONVERSATION_NEXT,
             COMMAND_WORKSPACE_CHOOSE,
             COMMAND_SETTINGS_OPEN,
-            COMMAND_ABOUT_OPEN,
             COMMAND_SIDEBAR_TOGGLE,
-            COMMAND_INSPECTOR_TOGGLE,
             COMMAND_VIEW_ZOOM_IN,
             COMMAND_VIEW_ZOOM_OUT,
             COMMAND_VIEW_ZOOM_RESET,
@@ -2386,102 +1524,67 @@ mod tests {
             assert_eq!(app_menu_command(command_id), Some(command_id));
             assert!(application_command_definition(command_id).is_some());
         }
-        assert_eq!(
-            context_menu_command("hatch.context.conversation.open-window"),
-            Some((
-                "conversation.openWindow",
-                NativeContextMenuKind::Conversation
-            ))
-        );
-        assert_eq!(
-            context_menu_command("hatch.context.artifact.reveal"),
-            Some(("artifact.reveal", NativeContextMenuKind::Artifact))
-        );
-        assert_eq!(
-            context_menu_command("hatch.context.artifact.quick-look"),
-            Some(("artifact.quickLook", NativeContextMenuKind::Artifact))
-        );
-        assert_eq!(context_menu_command("unexpected"), None);
+        for removed in [
+            "conversation.search",
+            "conversation.newWindow",
+            "conversation.openWindow",
+        ] {
+            assert_eq!(app_menu_command(removed), None);
+        }
+        assert_eq!(app_menu_command("agent.select.1"), None);
+        // Handled natively before command routing; never forwarded to React.
+        assert_eq!(app_menu_command(MENU_WINDOW_LIBRARY), None);
+        assert_eq!(app_menu_command("window.focus:main"), None);
+        assert_eq!(app_menu_command("inspector.toggle"), None);
     }
 
     #[test]
-    fn pane_menu_labels_follow_the_native_show_hide_convention() {
-        let definition = application_command_definition(COMMAND_SIDEBAR_TOGGLE).unwrap();
-        let open = NativeMenuSnapshot {
-            has_focused_window: true,
-            state: NativeCommandState::default(),
+    fn menu_enablement_follows_the_focused_window_projection() {
+        let idle = snapshot(NativeCommandState::default());
+        assert!(idle.command_enabled(COMMAND_EDIT_FIND));
+        assert!(idle.command_enabled(COMMAND_SETTINGS_OPEN));
+        assert!(!idle.command_enabled(COMMAND_RUN_STOP));
+        assert!(!idle.command_enabled(COMMAND_CONVERSATION_RENAME));
+        assert_eq!(sidebar_label(&idle), "Hide Sidebar");
+
+        let active = snapshot(NativeCommandState {
+            conversation_enabled: true,
+            run_stop_enabled: true,
+            sidebar_visible: false,
+            ..NativeCommandState::default()
+        });
+        assert!(active.command_enabled(COMMAND_CONVERSATION_PREVIOUS));
+        assert!(active.command_enabled(COMMAND_RUN_STOP));
+        assert_eq!(sidebar_label(&active), "Show Sidebar");
+
+        let unfocused = NativeMenuSnapshot {
+            has_focused_window: false,
+            ..active
         };
-        assert_eq!(checked_command_label(definition, &open), "Hide Sidebar");
-
-        let closed = NativeMenuSnapshot {
-            has_focused_window: true,
-            state: NativeCommandState {
-                sidebar_visible: false,
-                inspector_visible: false,
-                ..NativeCommandState::default()
-            },
-        };
-        assert_eq!(checked_command_label(definition, &closed), "Show Sidebar");
-        let inspector = application_command_definition(COMMAND_INSPECTOR_TOGGLE).unwrap();
-        assert_eq!(checked_command_label(inspector, &closed), "Show Inspector");
+        assert!(!unfocused.command_enabled(COMMAND_EDIT_FIND));
     }
 
     #[test]
-    fn artifact_reveal_uses_the_platform_file_browser_name() {
-        #[cfg(target_os = "macos")]
-        assert_eq!(artifact_reveal_menu_label(), "Reveal in Finder");
-        #[cfg(target_os = "windows")]
-        assert_eq!(artifact_reveal_menu_label(), "Reveal in Explorer");
-        #[cfg(all(unix, not(target_os = "macos")))]
-        assert_eq!(artifact_reveal_menu_label(), "Reveal in File Manager");
-    }
-
-    #[test]
-    fn artifact_open_uses_the_platform_preview_name() {
-        #[cfg(target_os = "macos")]
-        assert_eq!(artifact_open_menu_label(), "Quick Look");
-        #[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
-        assert_eq!(artifact_open_menu_label(), "Open");
-    }
-
-    #[test]
-    fn focused_window_menu_state_is_scoped_and_checked_items_flip() {
+    fn focused_window_menu_state_is_scoped_and_sidebar_check_flips() {
         let router = NativeCommandRouter::default();
         assert!(!router
             .menu_snapshot()
             .unwrap()
             .command_enabled(COMMAND_CONVERSATION_NEW));
-
-        router.set_active_window("conversation-a");
+        router.set_active_window("agent-a");
         router
             .replace_window_command_state(
-                "conversation-a",
+                "agent-a",
                 NativeCommandState {
                     new_conversation_enabled: false,
-                    new_window_enabled: true,
-                    workspace_enabled: false,
-                    settings_enabled: true,
-                    run_stop_enabled: true,
-                    sidebar_visible: true,
-                    inspector_visible: false,
+                    ..NativeCommandState::default()
                 },
             )
             .unwrap();
-        let snapshot = router.menu_snapshot().unwrap();
-        assert!(!snapshot.command_enabled(COMMAND_CONVERSATION_NEW));
-        assert!(snapshot.command_enabled(COMMAND_CONVERSATION_NEW_WINDOW));
-        assert!(!snapshot.command_enabled(COMMAND_WORKSPACE_CHOOSE));
-        assert!(snapshot.command_enabled(COMMAND_SETTINGS_OPEN));
-        assert!(snapshot.command_enabled(COMMAND_RUN_STOP));
-        assert!(snapshot.command_enabled(COMMAND_VIEW_ZOOM_IN));
-        assert!(snapshot.command_enabled(COMMAND_VIEW_ZOOM_OUT));
-        assert!(snapshot.command_enabled(COMMAND_VIEW_ZOOM_RESET));
-        assert_eq!(snapshot.command_checked(COMMAND_SIDEBAR_TOGGLE), Some(true));
-        assert_eq!(
-            snapshot.command_checked(COMMAND_INSPECTOR_TOGGLE),
-            Some(false)
-        );
-
+        assert!(!router
+            .menu_snapshot()
+            .unwrap()
+            .command_enabled(COMMAND_CONVERSATION_NEW));
         assert_eq!(
             router
                 .flip_checked_command_for_active_window(COMMAND_SIDEBAR_TOGGLE)
@@ -2495,19 +1598,12 @@ mod tests {
                 .command_checked(COMMAND_SIDEBAR_TOGGLE),
             Some(false)
         );
-
-        router.set_active_window("conversation-b");
+        router.set_active_window("agent-b");
         assert!(router
             .menu_snapshot()
             .unwrap()
             .command_enabled(COMMAND_CONVERSATION_NEW));
-        // Closing a background window must not erase foreground enablement.
-        router.clear_window("conversation-a");
-        assert!(router
-            .menu_snapshot()
-            .unwrap()
-            .command_enabled(COMMAND_CONVERSATION_NEW));
-        router.clear_window("conversation-b");
+        router.clear_window("agent-b");
         assert!(!router
             .menu_snapshot()
             .unwrap()
@@ -2516,82 +1612,28 @@ mod tests {
 
     #[test]
     fn command_state_is_a_complete_non_authority_snapshot() {
-        let state: NativeCommandState = serde_json::from_value(serde_json::json!({
+        let payload = serde_json::json!({
             "newConversationEnabled": true,
-            "newWindowEnabled": false,
             "workspaceEnabled": true,
-            "settingsEnabled": true,
             "runStopEnabled": false,
             "sidebarVisible": false,
-            "inspectorVisible": true
-        }))
-        .expect("the documented renderer payload must deserialize");
-        assert!(!state.new_window_enabled);
-        assert!(!state.sidebar_visible);
-        assert!(
-            serde_json::from_value::<NativeCommandState>(serde_json::json!({
-                "newConversationEnabled": true,
-                "newWindowEnabled": true,
-                "workspaceEnabled": true,
-                "settingsEnabled": true,
-                "runStopEnabled": false,
-                "sidebarVisible": true,
-                "inspectorVisible": true,
-                "workspaceGrantId": "must-not-be-accepted-here"
-            }))
-            .is_err()
-        );
+            "conversationEnabled": true
+        });
+        serde_json::from_value::<NativeCommandState>(payload.clone())
+            .expect("the documented renderer payload must deserialize");
+        let mut extra = payload.clone();
+        extra["workspaceGrantId"] = "must-not-be-accepted-here".into();
+        assert!(serde_json::from_value::<NativeCommandState>(extra).is_err());
+        for legacy in ["newWindowEnabled", "agents"] {
+            let mut stale = payload.clone();
+            stale[legacy] = serde_json::json!([]);
+            assert!(serde_json::from_value::<NativeCommandState>(stale).is_err());
+        }
     }
 
     #[test]
-    fn pending_context_menus_never_cross_window_or_kind_boundaries() {
-        let router = NativeCommandRouter::default();
-        router
-            .set_pending_context(
-                "conversation-a",
-                NativeContextMenuKind::Conversation,
-                Some("opaque-conversation-token".into()),
-            )
-            .unwrap();
-        assert!(router
-            .take_pending_context("conversation-b", NativeContextMenuKind::Conversation)
-            .is_none());
-        assert!(router
-            .take_pending_context("conversation-a", NativeContextMenuKind::Artifact)
-            .is_none());
-        let pending = router
-            .take_pending_context("conversation-a", NativeContextMenuKind::Conversation)
-            .expect("matching popup selection must receive its own pending target");
-        assert_eq!(pending.target.as_deref(), Some("opaque-conversation-token"));
-
-        router
-            .set_pending_context(
-                "conversation-a",
-                NativeContextMenuKind::Artifact,
-                Some("opaque-artifact-token".into()),
-            )
-            .unwrap();
-        router.clear_pending_context_if(
-            "conversation-a",
-            NativeContextMenuKind::Artifact,
-            &Some("different-token".into()),
-        );
-        assert!(router
-            .take_pending_context("conversation-a", NativeContextMenuKind::Artifact)
-            .is_some());
-    }
-
-    #[test]
-    fn input_validation_rejects_control_text_and_invalid_positions() {
+    fn conversation_ids_reject_control_text() {
         assert!(validate_conversation_id(" conversation-1 ").is_ok());
         assert!(validate_conversation_id("bad\nconversation").is_err());
-        assert!(validate_context_target("artifact-token").is_ok());
-        assert!(validate_context_target("artifact\u{0000}token").is_err());
-        assert!(validate_context_position(NativeContextMenuPosition { x: 12.0, y: 48.0 }).is_ok());
-        assert!(validate_context_position(NativeContextMenuPosition {
-            x: f64::NAN,
-            y: 0.0
-        })
-        .is_err());
     }
 }

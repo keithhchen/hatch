@@ -179,6 +179,7 @@
         "user_id": { "type": "string", "minLength": 1, "maxLength": 256 },
         "product_id": { "type": "string", "minLength": 1, "maxLength": 256 },
         "client_version": { "type": "string", "maxLength": 256 },
+        "time_zone": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Client IANA time zone, e.g. Asia/Tokyo." },
         "local_tools": {
           "type": "array",
           "maxItems": 7,
@@ -200,6 +201,7 @@
           "description": "Stable idempotency key for a user message. Clients that predate this field use run_id as the fallback key."
         },
         "conversation_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "time_zone": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Client IANA time zone, e.g. Asia/Tokyo." },
         "local_tools": {
           "type": "array",
           "maxItems": 7,

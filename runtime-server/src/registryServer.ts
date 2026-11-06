@@ -17,24 +17,20 @@ import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { URL } from "node:url";
 import {
-  AuthRateLimiter,
   TrustedProxyPolicy,
-  authRateLimitOptionsFromEnvironment,
   authRequestSourceIp,
   authTrustedProxyPolicyFromEnvironment
-} from "./authRateLimit.js";
+} from "./trustedProxy.js";
 import {
   AccountStoreTs,
   PasswordHasher,
   PasswordWorkCapacityError,
   accountPublic,
-  normalizeAccountIdentity,
   passwordWorkOptionsFromEnvironment,
   validateSigninCredentials,
   validateSignupCredentials,
   verifyAuthToken,
-  type Account,
-  type AccountRole
+  type Account
 } from "./registryAuth.js";
 import { RegistryStoreTs } from "./registryStore.js";
 import { RegistryDeploymentConflictError } from "./registryStore.js";
@@ -75,13 +71,7 @@ import { QdrantKnowledgeIndexer } from "./qdrantIndexer.js";
 import { flushLangfuseObservability, initializeLangfuseObservability } from "./langfuse.js";
 import { accountAvatarApplicationServiceFromEnvironment, MAX_ACCOUNT_AVATAR_BYTES } from "./accountAvatar.js";
 import {
-  HttpRequestGate,
-  PublishWorkGate,
-  SessionQueryGate,
   httpRequestLimitOptionsFromEnvironment,
-  publishWorkLimitOptionsFromEnvironment,
-  sessionQueryLimitOptionsFromEnvironment,
-  type GateLease,
 } from "./registryRequestLimits.js";
 
 export type RegistryServer = { server: http.Server; close: () => Promise<void> };
@@ -96,9 +86,6 @@ type RegistryContext = {
   store: RegistryStoreTs;
   accounts: AccountStoreTs;
   accountAvatars?: ReturnType<typeof accountAvatarApplicationServiceFromEnvironment>;
-  authRateLimiter: AuthRateLimiter;
-  sessionQueryGate: SessionQueryGate;
-  publishWorkGate: PublishWorkGate;
   trustedProxies: TrustedProxyPolicy;
   publishToken: string;
   runtimeServiceToken: string;
@@ -117,7 +104,6 @@ type RegistryContext = {
 
 export async function createRegistryServerFromEnvironment(environment: NodeJS.ProcessEnv = process.env): Promise<RegistryServer> {
   initializeLangfuseObservability(environment);
-  const authRateLimitOptions = authRateLimitOptionsFromEnvironment(environment);
   const passwordWorkOptions = passwordWorkOptionsFromEnvironment(environment);
   const trustedProxies = authTrustedProxyPolicyFromEnvironment(environment);
   const store = await RegistryStoreTs.open({ environment });
@@ -221,12 +207,8 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const deploymentServiceToken = environment.HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN?.trim() || "";
   const legacyHmacEnabled = environment.HATCH_ENABLE_LEGACY_HMAC_AUTH?.trim().toLowerCase() === "true";
   const authSecret = legacyHmacEnabled ? environment.HATCH_AUTH_SIGNING_SECRET?.trim() || "" : "";
-  const authRateLimiter = new AuthRateLimiter(authRateLimitOptions);
-  const sessionQueryGate = new SessionQueryGate(sessionQueryLimitOptionsFromEnvironment(environment));
-  const publishWorkGate = new PublishWorkGate(publishWorkLimitOptionsFromEnvironment(environment));
   const httpLimits = httpRequestLimitOptionsFromEnvironment(environment);
-  const httpRequestGate = new HttpRequestGate(httpLimits);
-  const registryContext: RegistryContext = { store, accounts, accountAvatars, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, productLive, nodeObjectStore, releaseStore, authSecret };
+  const registryContext: RegistryContext = { store, accounts, accountAvatars, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, productLive, nodeObjectStore, releaseStore, authSecret };
   let assistantTick: NodeJS.Timeout | undefined;
   const channelListeners = new AbortController();
   if (registryPool) {
@@ -288,25 +270,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     assistantTick.unref();
   }
   const server = http.createServer((request, response) => {
-    const suppliedBearer = bearer(request);
-    const internalRuntime = Boolean(
-      (runtimeServiceToken && request.headers["x-hatch-runtime-service-token"] === runtimeServiceToken)
-      || (runtimeServiceToken && suppliedBearer === runtimeServiceToken)
-      || (publishToken && suppliedBearer === publishToken)
-    );
-    const admission = httpRequestGate.begin(
-      authRequestSourceIp(request, trustedProxies),
-      !internalRuntime,
-    );
-    if (!admission.allowed) {
-      request.resume();
-      response.once("finish", () => request.destroy());
-      sendJson(response, admission.reason === "source_capacity" ? 429 : 503, {
-        detail: "Registry is temporarily busy. Try again shortly.",
-      }, { "retry-after": String(admission.retryAfterSeconds), connection: "close" });
-      return;
-    }
-    const routePromise = route(request, response, registryContext)
+    void route(request, response, registryContext)
       .catch((error) => {
         const status = errorStatus(error);
         if (status >= 500) console.error("Registry request failed", error);
@@ -359,7 +323,6 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
               : error instanceof Error ? error.message : String(error)
         });
       });
-    holdAdmissionUntilRequestAndRouteSettle(request, response, routePromise, admission);
   });
   server.headersTimeout = httpLimits.headersTimeoutMs;
   server.requestTimeout = httpLimits.requestTimeoutMs;
@@ -378,7 +341,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
         const claims = verifyAuthToken(token, authSecret);
         account = claims ? await accounts.getById(claims.sub) : undefined;
       }
-      if (!account || account.role !== "creator") throw Object.assign(new Error("A valid Expert account token is required."), { status: 401 });
+      if (!account) throw Object.assign(new Error("A valid account token is required."), { status: 401 });
       const productId = decodeURIComponent(match[1]!);
       const product = await productForCreator(registryContext, account.id, productId);
       if (!product) throw Object.assign(new Error("Product was not found."), { status: 404 });
@@ -469,9 +432,8 @@ async function route(
 
   const factoryAgentsMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/factory-agents(?:\/|$)/);
   if (factoryAgentsMatch) {
-    const account = await authenticate(request, response, context, "creator");
-    if (account === SESSION_QUERY_REJECTED) return;
-    if (!account) { sendJson(response, 401, { detail: "A valid Expert account token is required." }); return; }
+    const account = await authenticate(request, response, context);
+    if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
     const productId = decodeURIComponent(factoryAgentsMatch[1]!);
     const product = await productForCreator(context, account.id, productId);
     if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
@@ -481,9 +443,8 @@ async function route(
 
   const registryPublishMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/registry$/);
   if (registryPublishMatch && request.method === "POST") {
-    const account = await authenticate(request, response, context, "creator");
-    if (account === SESSION_QUERY_REJECTED) return;
-    if (!account) { sendJson(response, 401, { detail: "A valid Expert account token is required." }); return; }
+    const account = await authenticate(request, response, context);
+    if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
     if (!context.corpusPublisher) {
       sendJson(response, 503, { error: { code: "publish_unavailable", message: "Corpus Publisher is unavailable." } });
       return;
@@ -538,9 +499,8 @@ async function route(
   // Legacy /registry (Agent Builder corpus upload) is left unchanged.
   const productLiveMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/live$/);
   if (productLiveMatch && (request.method === "GET" || request.method === "POST")) {
-    const account = await authenticate(request, response, context, "creator");
-    if (account === SESSION_QUERY_REJECTED) return;
-    if (!account) { sendJson(response, 401, { detail: "A valid Expert account token is required." }); return; }
+    const account = await authenticate(request, response, context);
+    if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
     if (!context.productLive) {
       sendJson(response, 503, { error: { code: "publish_unavailable", message: "Corpus Publisher is unavailable." } });
       return;
@@ -550,7 +510,7 @@ async function route(
     if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
     const publishable = new ExpertProduct(account.id, productId, product.name, product.promise, product.brief_spec);
     if (request.method === "GET") {
-      sendJson(response, 200, await context.productLive.status(publishable));
+      sendJson(response, 200, { ...(await context.productLive.status(publishable)), listed: await context.releaseStore.isListed(productId) });
       return;
     }
     try {
@@ -585,6 +545,20 @@ async function route(
     });
     return;
   }
+  const runtimeCreatorReleasesMatch = url.pathname.match(/^\/v1\/runtime\/creators\/([^/]+)\/releases$/);
+  if (runtimeCreatorReleasesMatch && request.method === "GET") {
+    requireRuntimeServiceAuth(request, context.runtimeServiceToken);
+    const creatorId = decodeURIComponent(runtimeCreatorReleasesMatch[1]!);
+    if (!isUuidV4(creatorId)) { sendJson(response, 400, { detail: "creator_id must be an account UUID." }); return; }
+    const releases = await context.releaseStore.listLiveByCreator(creatorId);
+    sendJson(response, 200, {
+      releases: releases.map(({ runtime_manifest_ref: runtimeManifestRef, ...release }) => ({
+        release,
+        runtime_manifest_ref: runtimeManifestRef
+      }))
+    });
+    return;
+  }
   if (request.method === "GET" && (url.pathname === "/readyz" || url.pathname === "/health")) {
     try {
       await context.store.checkReady();
@@ -602,55 +576,39 @@ async function route(
   }
 
   if (url.pathname === "/v1/auth/signup" && request.method === "POST") {
-    if (!beginAuthSourceAttempt(request, response, context)) return;
     const body = await readJson(request);
     const email = String(body.email ?? "");
     const password = String(body.password ?? "");
-    const role = body.role as AccountRole;
     const displayName = String(body.display_name ?? "");
-    let identity = normalizeAccountIdentity(email);
-    const attempt = context.authRateLimiter.checkIdentity("signup", identity);
     try {
-      identity = validateSignupCredentials(email, password, role, displayName).email;
+      validateSignupCredentials(email, password, displayName);
     } catch (error) {
-      const failure = context.authRateLimiter.recordFailure("signup", identity);
-      if (attempt.identityLimited) sendRateLimited(response, attempt.retryAfterSeconds);
-      else if (failure.limited) sendRateLimited(response, failure.retryAfterSeconds);
-      else sendAuthInputError(response, error);
+      sendAuthInputError(response, error);
       return;
     }
     let account: Account;
     try {
-      account = await context.accounts.create(email, password, role, displayName);
+      account = await context.accounts.create(email, password, displayName);
     } catch (error) {
       if (error instanceof PasswordWorkCapacityError) {
         sendAuthBusy(response);
         return;
       }
-      const failure = context.authRateLimiter.recordFailure("signup", identity);
-      if (attempt.identityLimited) sendRateLimited(response, attempt.retryAfterSeconds);
-      else if (failure.limited) sendRateLimited(response, failure.retryAfterSeconds);
-      else sendError(response, error, { email_already_registered: [409, "Email is already registered."] });
+      sendError(response, error, { email_already_registered: [409, "Email is already registered."] });
       return;
     }
-    context.authRateLimiter.recordSuccess("signup", identity);
     sendAuthJson(response, 201, sessionResponse(account, await context.accounts.createSession(account)));
     return;
   }
   if (url.pathname === "/v1/auth/signin" && request.method === "POST") {
-    if (!beginAuthSourceAttempt(request, response, context)) return;
     const body = await readJson(request);
     const email = String(body.email ?? "");
     const password = String(body.password ?? "");
-    let identity = normalizeAccountIdentity(email);
-    const attempt = context.authRateLimiter.checkIdentity("signin", identity);
+    let identity: string;
     try {
       identity = validateSigninCredentials(email, password);
     } catch (error) {
-      const failure = context.authRateLimiter.recordFailure("signin", identity);
-      if (attempt.identityLimited) sendRateLimited(response, attempt.retryAfterSeconds);
-      else if (failure.limited) sendRateLimited(response, failure.retryAfterSeconds);
-      else sendAuthInputError(response, error);
+      sendAuthInputError(response, error);
       return;
     }
     const account = await context.accounts.getByEmail(identity);
@@ -665,19 +623,14 @@ async function route(
       throw error;
     }
     if (!passwordMatches || !account) {
-      const failure = context.authRateLimiter.recordFailure("signin", identity);
-      if (attempt.identityLimited) sendRateLimited(response, attempt.retryAfterSeconds);
-      else if (failure.limited) sendRateLimited(response, failure.retryAfterSeconds);
-      else sendAuthJson(response, 401, { detail: "Email or password is incorrect." });
+      sendAuthJson(response, 401, { detail: "Email or password is incorrect." });
       return;
     }
-    context.authRateLimiter.recordSuccess("signin", identity);
     sendAuthJson(response, 200, sessionResponse(account, await context.accounts.createSession(account)));
     return;
   }
   if (url.pathname === "/v1/auth/me/avatar" && (request.method === "PUT" || request.method === "DELETE")) {
     const account = await authenticate(request, response, context);
-    if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendAuthJson(response, 401, { detail: "A valid account token is required." }); return; }
     if (!context.accountAvatars) {
       sendAuthJson(response, 503, { error: { code: "avatar_storage_unavailable", message: "Avatar storage is not configured." } });
@@ -690,30 +643,37 @@ async function route(
         Buffer.from(await readBytes(request, MAX_ACCOUNT_AVATAR_BYTES)),
         String(request.headers["content-type"] ?? "").split(";", 1)[0]!.trim().toLowerCase()
       );
+    sendAuthJson(response, 200, accountPublic(updated));
+    return;
+  }
+  if (url.pathname === "/v1/auth/me" && request.method === "PATCH") {
+    const account = await authenticate(request, response, context);
+    if (!account) { sendAuthJson(response, 401, { detail: "A valid account token is required." }); return; }
+    const body = await readJson(request);
+    let updated: Account;
+    try {
+      updated = await context.accounts.setDisplayName(account.id, String(body.display_name ?? ""));
+    } catch (error) {
+      sendAuthInputError(response, error);
+      return;
+    }
     sendAuthJson(response, 200, accountPublic(updated));
     return;
   }
   if (url.pathname === "/v1/auth/me" && request.method === "GET") {
-    const lease = beginSessionQuery(request, response, context);
-    if (!lease) return;
-    try {
-      const token = bearer(request);
-      const session = await context.accounts.resolveSession(token);
-      if (session) {
-        sendAuthJson(response, 200, { ...accountPublic(session.account), session_expires_at: session.session.absolute_expires_at });
-        return;
-      }
-      const account = await authenticateLegacy(token, context.accounts, context.authSecret);
-      if (!account) { sendAuthJson(response, 401, { detail: "A valid account token is required." }); return; }
-      sendAuthJson(response, 200, accountPublic(account));
-    } finally {
-      lease.release();
+    const token = bearer(request);
+    const session = await context.accounts.resolveSession(token);
+    if (session) {
+      sendAuthJson(response, 200, { ...accountPublic(session.account), session_expires_at: session.session.absolute_expires_at });
+      return;
     }
+    const account = await authenticateLegacy(token, context.accounts, context.authSecret);
+    if (!account) { sendAuthJson(response, 401, { detail: "A valid account token is required." }); return; }
+    sendAuthJson(response, 200, accountPublic(account));
     return;
   }
   if (url.pathname === "/v1/auth/me/avatar" && (request.method === "PUT" || request.method === "DELETE")) {
     const account = await authenticate(request, response, context);
-    if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendAuthJson(response, 401, { detail: "A valid account token is required." }); return; }
     if (!context.accountAvatars) {
       sendAuthJson(response, 503, { error: { code: "avatar_storage_unavailable", message: "Avatar storage is not configured." } });
@@ -729,16 +689,19 @@ async function route(
     sendAuthJson(response, 200, accountPublic(updated));
     return;
   }
+  // A signed-in client mints an independent session for another device
+  // (the Dashboard hands one to Desktop after browser sign-in). Revoking
+  // either session never ends the other. Only a live session can do this.
+  if (url.pathname === "/v1/auth/sessions" && request.method === "POST") {
+    const current = await context.accounts.resolveSession(bearer(request));
+    if (!current) { sendAuthJson(response, 401, { detail: "A valid account session is required." }); return; }
+    sendAuthJson(response, 201, sessionResponse(current.account, await context.accounts.createSession(current.account)));
+    return;
+  }
   if (url.pathname === "/v1/auth/logout" && request.method === "POST") {
-    const lease = beginSessionQuery(request, response, context);
-    if (!lease) return;
-    try {
-      await context.accounts.revokeSession(bearer(request));
-      response.writeHead(204, { ...corsHeaders(), "cache-control": "no-store" });
-      response.end();
-    } finally {
-      lease.release();
-    }
+    await context.accounts.revokeSession(bearer(request));
+    response.writeHead(204, { ...corsHeaders(), "cache-control": "no-store" });
+    response.end();
     return;
   }
 
@@ -833,9 +796,8 @@ async function route(
     /^\/v1\/creator\/products\/([^/]+)\/nodes\/(about-you|corpus)\/executions(?:\/([^/]+))?(\/answers)?$/
   );
   if (factoryNodeMatch) {
-    const account = await authenticate(request, response, context, "creator");
-    if (account === SESSION_QUERY_REJECTED) return;
-    if (!account) { sendJson(response, 401, { detail: "A valid Expert account token is required." }); return; }
+    const account = await authenticate(request, response, context);
+    if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
     if (!context.factoryNodeService) {
       sendJson(response, 503, { error: { code: "node_unavailable", message: "Factory Node runtime is unavailable." } });
       return;
@@ -923,9 +885,8 @@ async function route(
     // Keep the route explicit here so it is not swallowed by the Registry's
     // Product/File/Snapshot compatibility handlers below.
     || /^\/v1\/creator\/products\/[^/]+\/graph$/.test(url.pathname)) {
-    const account = await authenticate(request, response, context, "creator");
-    if (account === SESSION_QUERY_REJECTED) return;
-    if (!account) { sendJson(response, 401, { detail: "A valid Expert account token is required." }); return; }
+    const account = await authenticate(request, response, context);
+    if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
     const result = await handleCreatorFactoryHttp({
       method: request.method ?? "GET",
       pathname: url.pathname,
@@ -942,9 +903,8 @@ async function route(
   // used. The legacy product repository remains an internal read-time migration
   // boundary for existing Factory rows and is never returned by these routes.
   if (url.pathname === "/v1/creator/products" && (request.method === "GET" || request.method === "POST")) {
-    const account = await authenticate(request, response, context, "creator");
-    if (account === SESSION_QUERY_REJECTED) return;
-    if (!account) { sendJson(response, 401, { detail: "A valid Expert account token is required." }); return; }
+    const account = await authenticate(request, response, context);
+    if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
     if (request.method === "GET") {
       const products = mergeCreatorProductListings(
         await context.store.listAgentCorpora(account.id),
@@ -995,9 +955,8 @@ async function route(
 
   const productRootMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)$/);
   if (productRootMatch && (request.method === "GET" || request.method === "PATCH" || request.method === "DELETE")) {
-    const account = await authenticate(request, response, context, "creator");
-    if (account === SESSION_QUERY_REJECTED) return;
-    if (!account) { sendJson(response, 401, { detail: "A valid Expert account token is required." }); return; }
+    const account = await authenticate(request, response, context);
+    if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
     const productId = decodeURIComponent(productRootMatch[1]!);
     const product = await productForCreator(context, account.id, productId);
     if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
@@ -1051,11 +1010,24 @@ async function route(
     return;
   }
 
+  const productListingMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/listing$/);
+  if (productListingMatch && request.method === "PUT") {
+    const account = await authenticate(request, response, context);
+    if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
+    const productId = decodeURIComponent(productListingMatch[1]!);
+    const product = await productForCreator(context, account.id, productId);
+    if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
+    const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
+    if (typeof body.listed !== "boolean") { sendJson(response, 422, { error: { code: "listed_required", message: "listed must be a boolean." } }); return; }
+    await context.releaseStore.setListed(account.id, productId, body.listed);
+    sendJson(response, 200, { product_id: productId, listed: body.listed });
+    return;
+  }
+
   const productWithdrawMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/withdraw$/);
   if (productWithdrawMatch && request.method === "POST") {
-    const account = await authenticate(request, response, context, "creator");
-    if (account === SESSION_QUERY_REJECTED) return;
-    if (!account) { sendJson(response, 401, { detail: "A valid Expert account token is required." }); return; }
+    const account = await authenticate(request, response, context);
+    if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
     const productId = decodeURIComponent(productWithdrawMatch[1]!);
     const product = await productForCreator(context, account.id, productId);
     if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
@@ -1067,9 +1039,8 @@ async function route(
 
   const productBriefSpecMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/brief-spec$/);
   if (productBriefSpecMatch && request.method === "PUT") {
-    const account = await authenticate(request, response, context, "creator");
-    if (account === SESSION_QUERY_REJECTED) return;
-    if (!account) { sendJson(response, 401, { detail: "A valid Expert account token is required." }); return; }
+    const account = await authenticate(request, response, context);
+    if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
     const productId = decodeURIComponent(productBriefSpecMatch[1]!);
     const product = await productForCreator(context, account.id, productId);
     if (!product?.repositoryId) {
@@ -1089,9 +1060,8 @@ async function route(
 
   const productPricingMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/pricing$/);
   if (productPricingMatch && request.method === "PUT") {
-    const account = await authenticate(request, response, context, "creator");
-    if (account === SESSION_QUERY_REJECTED) return;
-    if (!account) { sendJson(response, 401, { detail: "A valid Expert account token is required." }); return; }
+    const account = await authenticate(request, response, context);
+    if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
     const productId = decodeURIComponent(productPricingMatch[1]!);
     const product = await productForCreator(context, account.id, productId);
     if (!product?.repositoryId) {
@@ -1111,9 +1081,8 @@ async function route(
 
   const productFilesMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/files(?:\/([^/]+))?$/);
   if (productFilesMatch) {
-    const account = await authenticate(request, response, context, "creator");
-    if (account === SESSION_QUERY_REJECTED) return;
-    if (!account) { sendJson(response, 401, { detail: "A valid Expert account token is required." }); return; }
+    const account = await authenticate(request, response, context);
+    if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
     const productId = decodeURIComponent(productFilesMatch[1]!);
     const product = await productForCreator(context, account.id, productId);
     if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
@@ -1186,7 +1155,7 @@ async function route(
   if (url.pathname === "/v1/public/creators" && request.method === "GET") {
     const limit = boundedQueryInteger(url, "limit", 20, 1, 20);
     const offset = boundedQueryInteger(url, "offset", 0, 0, 100_000);
-    const rows = (await publicCatalogRows(context)).slice(0, Math.min(20_001, offset + limit + 1));
+    const rows = (await publicCatalogRows(context)).filter((row) => row.listed !== false).slice(0, Math.min(20_001, offset + limit + 1));
     const creators = new Map<string, { id: string; name: string; avatar_url: string | null; product_count: number }>();
     for (const row of rows) {
       const creatorId = String(row.creator_id ?? "");
@@ -1327,25 +1296,16 @@ async function resolvePublishedCreatorToolConnection(
   });
 }
 
-const SESSION_QUERY_REJECTED = Symbol("session-query-rejected");
-
 async function authenticate(
   request: http.IncomingMessage,
   response: http.ServerResponse,
   context: RegistryContext,
-  role?: AccountRole,
-): Promise<Account | undefined | typeof SESSION_QUERY_REJECTED> {
-  const lease = beginSessionQuery(request, response, context);
-  if (!lease) return SESSION_QUERY_REJECTED;
-  try {
-    const session = await context.accounts.resolveSession(bearer(request));
-    if (session && (!role || session.account.role === role)) return session.account;
-    const claims = verifyAuthToken(bearer(request), context.authSecret);
-    if (!claims || (role && claims.role !== role)) return undefined;
-    return context.accounts.getById(claims.sub);
-  } finally {
-    lease.release();
-  }
+): Promise<Account | undefined> {
+  const session = await context.accounts.resolveSession(bearer(request));
+  if (session) return session.account;
+  const claims = verifyAuthToken(bearer(request), context.authSecret);
+  if (!claims) return undefined;
+  return context.accounts.getById(claims.sub);
 }
 
 async function authenticateLegacy(token: string | undefined, accounts: AccountStoreTs, secret: string): Promise<Account | undefined> {
@@ -1421,15 +1381,11 @@ async function publicCatalogRows(context: RegistryContext): Promise<Record<strin
 
 export async function attachCreatorAvatars<T extends Record<string, unknown>>(
   rows: T[],
-  readAccount: (creatorId: string) => Promise<{ display_name: string; avatar_url: string | null; role?: string } | undefined>
+  readAccount: (creatorId: string) => Promise<{ display_name: string; avatar_url: string | null } | undefined>
 ): Promise<Array<T & { creator_name: string; creator_avatar_url: string | null }>> {
   const creatorIds = [...new Set(rows.map(row => String(row.creator_id ?? "")).filter(Boolean))];
   const accounts = await Promise.all(creatorIds.map(readAccount));
-  const creators = new Map(creatorIds.map((creatorId, index) => {
-    const account = accounts[index];
-    if (!account || account.role && account.role !== "creator") return [creatorId, undefined];
-    return [creatorId, account];
-  }));
+  const creators = new Map(creatorIds.map((creatorId, index) => [creatorId, accounts[index]]));
   return rows.flatMap(row => {
     const account = creators.get(String(row.creator_id ?? ""));
     return account ? [{ ...row, creator_name: account.display_name, creator_avatar_url: account.avatar_url }] : [];
@@ -1730,81 +1686,6 @@ function boundedQueryInteger(
   return value;
 }
 
-function holdAdmissionUntilRequestAndRouteSettle(
-  request: http.IncomingMessage,
-  response: http.ServerResponse,
-  routePromise: Promise<void>,
-  lease: GateLease,
-): void {
-  let routeSettled = false;
-  let requestSettled = request.complete || request.readableEnded || request.destroyed;
-  let released = false;
-  const releaseIfDone = () => {
-    if (released || !routeSettled || !requestSettled) return;
-    released = true;
-    lease.release();
-  };
-  const settleRequest = () => {
-    requestSettled = true;
-    releaseIfDone();
-  };
-  request.once("end", settleRequest);
-  request.once("aborted", settleRequest);
-  request.once("close", settleRequest);
-  response.once("finish", () => {
-    // If a route rejected before consuming a POST body, close that connection
-    // after the response instead of letting an untracked slow upload linger.
-    if (!request.complete && !request.destroyed) request.destroy();
-  });
-  const settleRoute = () => {
-    routeSettled = true;
-    releaseIfDone();
-  };
-  void routePromise.then(settleRoute, settleRoute);
-}
-
-function beginSessionQuery(
-  request: http.IncomingMessage,
-  response: http.ServerResponse,
-  context: RegistryContext,
-): GateLease | undefined {
-  const internalRuntime = context.runtimeServiceToken
-    && request.headers["x-hatch-runtime-service-token"] === context.runtimeServiceToken;
-  const decision = context.sessionQueryGate.begin(
-    authRequestSourceIp(request, context.trustedProxies),
-    !internalRuntime,
-  );
-  if (decision.allowed) return decision;
-  if (decision.reason === "global_capacity") {
-    sendAuthJson(response, 503, { detail: "Authentication is temporarily busy. Try again shortly." }, {
-      "retry-after": String(decision.retryAfterSeconds),
-    });
-  } else {
-    sendAuthJson(response, 429, { detail: "Too many session checks. Try again later." }, {
-      "retry-after": String(decision.retryAfterSeconds),
-    });
-  }
-  return undefined;
-}
-
-function beginPublishWork(
-  response: http.ServerResponse,
-  context: RegistryContext,
-  publisher: string,
-  enforceRate = true,
-): GateLease | undefined {
-  const decision = context.publishWorkGate.begin(publisher, enforceRate);
-  if (decision.allowed) return decision;
-  const publisherLimited = decision.reason === "publisher_capacity" || decision.reason === "publisher_rate";
-  sendJson(
-    response,
-    publisherLimited ? 429 : 503,
-    { detail: "Agent Corpus publishing is temporarily busy. Try again shortly." },
-    { "retry-after": String(decision.retryAfterSeconds) },
-  );
-  return undefined;
-}
-
 function errorStatus(error: unknown): number {
   if (error && typeof error === "object" && typeof (error as { status?: unknown }).status === "number") {
     return (error as { status: number }).status;
@@ -1861,25 +1742,6 @@ async function readJson(request: http.IncomingMessage, maxBytes = 1024 * 1024): 
   return payload as Record<string, unknown>;
 }
 
-function beginAuthSourceAttempt(
-  request: http.IncomingMessage,
-  response: http.ServerResponse,
-  context: RegistryContext,
-): boolean {
-  const decision = context.authRateLimiter.beginSourceAttempt(
-    authRequestSourceIp(request, context.trustedProxies),
-  );
-  if (decision.allowed) return true;
-  sendRateLimited(response, decision.retryAfterSeconds);
-  return false;
-}
-
-function sendRateLimited(response: http.ServerResponse, retryAfterSeconds: number): void {
-  sendAuthJson(response, 429, { detail: "Too many authentication attempts. Try again later." }, {
-    "retry-after": String(retryAfterSeconds)
-  });
-}
-
 function sendAuthBusy(response: http.ServerResponse): void {
   sendAuthJson(response, 503, { detail: "Authentication is temporarily busy. Try again shortly." }, {
     "retry-after": "1"
@@ -1892,7 +1754,6 @@ function sendAuthInputError(response: http.ServerResponse, error: unknown): void
     password_required: "Enter a password.",
     password_too_short: "Password must contain at least 8 characters.",
     password_too_long: "Password must not exceed 1024 UTF-8 bytes.",
-    role_invalid: "Account role must be user or creator.",
     display_name_required: "Display name is required.",
     display_name_too_long: "Display name must not exceed 128 characters."
   };
@@ -2028,9 +1889,8 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
     sendJson(response, 200, respond ?? { ok: true });
     return;
   }
-  const account = await authenticate(request, response, context, "creator");
-  if (account === SESSION_QUERY_REJECTED) return;
-  if (!account) { sendJson(response, 401, { detail: "A valid Expert account token is required." }); return; }
+  const account = await authenticate(request, response, context);
+  if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
   const channelsView = async () => {
     const links = await context.links!.list(account.id);
     return Promise.all(CHANNEL_KINDS.map(async kind => {

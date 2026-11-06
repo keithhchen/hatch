@@ -56,7 +56,7 @@ COPY --from=local-runner-build /workspace/local-runner/target/release/hatch-loca
 COPY runtime-server/prompts ./prompts
 COPY runtime-server/scripts/transfer-creator-product.mjs ./scripts/transfer-creator-product.mjs
 COPY desktop-app/package.json /app/desktop-app/package.json
-COPY desktop-app/src/renderer/conversation-client.js desktop-app/src/renderer/entitlement-client.js desktop-app/src/renderer/i18n.js desktop-app/src/renderer/identity.js /app/desktop-app/src/renderer/
+COPY desktop-app/src/renderer/conversation-client.js /app/desktop-app/src/renderer/
 COPY runtime-server/skills ./skills
 COPY scripts/create-agent-zip.mjs ./scripts/create-agent-zip.mjs
 

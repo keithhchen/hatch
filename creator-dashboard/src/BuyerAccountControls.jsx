@@ -1,5 +1,5 @@
 import React from "react";
-import { Check, ChevronDown, Globe2, LogOut } from "lucide-react";
+import { Check, ChevronDown, Download, Globe2, LogOut, ReceiptText, Settings } from "lucide-react";
 import { Avatar, DropdownMenu } from "@hatch/ui";
 import { buyerT } from "./buyerI18n.js";
 import { LOCALES, useLocale } from "./locale.jsx";
@@ -37,7 +37,15 @@ export function BuyerLanguageMenu({ className = "" }) {
   );
 }
 
-export function BuyerAccountMenu({ user, onSignOut, signingOut = false, showLanguageOptions = false, showName = false, className = "" }) {
+const ACCOUNT_LINKS = Object.freeze([
+  { value: "orders", href: "/explore/orders", label: "Orders and receipts", Icon: ReceiptText },
+  { value: "download", href: "/download", label: "Download Desktop", Icon: Download },
+  { value: "settings", href: "/account", label: "Settings", Icon: Settings }
+]);
+
+const assignLocation = (href) => window.location.assign(href);
+
+export function BuyerAccountMenu({ user, onSignOut, navigate = assignLocation, signingOut = false, showLanguageOptions = false, showName = false, className = "" }) {
   const { locale, setLocale } = useLocale();
   const t = key => buyerT(locale, key);
   const displayName = user?.display_name || user?.name || user?.email || t("Hatch account");
@@ -63,6 +71,8 @@ export function BuyerAccountMenu({ user, onSignOut, signingOut = false, showLang
           )
         },
         { type: "separator" },
+        ...ACCOUNT_LINKS.map(({ value, href, label, Icon }) => ({ value, label: t(label), icon: <Icon aria-hidden="true" />, onSelect: () => navigate(href) })),
+        { type: "separator" },
         ...(showLanguageOptions ? [
           { type: "label", label: t("Language") },
           ...LOCALES.map(value => ({
@@ -80,11 +90,11 @@ export function BuyerAccountMenu({ user, onSignOut, signingOut = false, showLang
   );
 }
 
-export function BuyerAccountControls({ user, onSignOut, signingOut = false, children, className = "" }) {
+export function BuyerAccountControls({ user, navigate, onSignOut, signingOut = false, children, className = "" }) {
   return (
     <div className={`buyer-account-controls ${className}`.trim()}>
       {children}
-      <BuyerAccountMenu user={user} onSignOut={onSignOut} signingOut={signingOut} showLanguageOptions />
+      <BuyerAccountMenu user={user} navigate={navigate} onSignOut={onSignOut} signingOut={signingOut} showLanguageOptions />
     </div>
   );
 }

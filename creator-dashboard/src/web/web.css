@@ -467,3 +467,4 @@ button { font: inherit; color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+.nav-lang select { padding: 6px 32px 6px 12px; background-position: right 12px center; font-size: 14px; }

@@ -18,7 +18,7 @@ const COPY = Object.freeze({
     tryAgain: "Try again",
     webTitle: "Hatch on the web",
     webBody: "Added Agents are also available in the browser.",
-    webAction: "Open library"
+    webAction: "Go to Explore"
   }),
   zh: Object.freeze({
     documentTitle: "下载 Hatch · Hatch",
@@ -39,7 +39,7 @@ const COPY = Object.freeze({
     tryAgain: "重试",
     webTitle: "网页版 Hatch",
     webBody: "已添加的 Agent 也可在浏览器中使用。",
-    webAction: "打开资料库"
+    webAction: "前往探索"
   }),
   ja: Object.freeze({
     documentTitle: "Hatch をダウンロード · Hatch",
@@ -60,7 +60,7 @@ const COPY = Object.freeze({
     tryAgain: "再試行",
     webTitle: "Web 版 Hatch",
     webBody: "追加した Agent はブラウザでも利用できます。",
-    webAction: "ライブラリを開く"
+    webAction: "「探す」へ"
   })
 });
 

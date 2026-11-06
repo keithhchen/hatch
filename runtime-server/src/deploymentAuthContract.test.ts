@@ -14,8 +14,8 @@ test("production keeps browser APIs on the Dashboard BFF and disables legacy HMA
   const registryHealthBlock = caddyfile.match(/handle @registry_health \{([\s\S]*?)\n    \}/)?.[1] ?? "";
   assert.doesNotMatch(registryHealthBlock, /\/v1\//,
     "public routing must not expose Registry command routes");
-  assert.match(caddyfile, /@desktop_registry_signin path \/v1\/auth\/signin[\s\S]*?handle @desktop_registry_signin \{[\s\S]*?reverse_proxy registry:8100/,
-    "Desktop sign-in must reach the Registry session endpoint");
+  assert.doesNotMatch(caddyfile, /@desktop_registry_signin\b/,
+    "Desktop signs in through the browser handoff on the Dashboard, not a Registry password route");
   const desktopPreflightBlock = caddyfile.match(/@desktop_registry_preflight \{([\s\S]*?)\n    \}/)?.[1] ?? "";
   assert.match(desktopPreflightBlock, /method OPTIONS/,
     "Desktop Registry routes must handle the bearer-free WebView CORS preflight");

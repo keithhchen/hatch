@@ -126,7 +126,7 @@ async function signup(base: string, email: string, displayName: string): Promise
   const response = await fetch(`${base}/v1/auth/signup`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email, password: "password-123", role: "creator", display_name: displayName })
+    body: JSON.stringify({ email, password: "password-123", display_name: displayName })
   });
   assert.equal(response.status, 201);
   return (await response.json() as { token: string }).token;

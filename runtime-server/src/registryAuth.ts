@@ -1,9 +1,8 @@
 import { createHash, createHmac, randomBytes, randomUUID, scrypt, timingSafeEqual } from "node:crypto";
 import { Pool } from "pg";
 
-export type AccountRole = "user" | "creator";
-export type Account = { id: string; role: AccountRole; email: string; display_name: string; avatar_url: string | null; password_salt: string; password_hash: string; created_at: string };
-export type AccountPublic = Pick<Account, "id" | "role" | "email" | "display_name" | "avatar_url">;
+export type Account = { id: string; email: string; display_name: string; avatar_url: string | null; password_salt: string; password_hash: string; created_at: string };
+export type AccountPublic = Pick<Account, "id" | "email" | "display_name" | "avatar_url">;
 export type CreatorAccountPublic = Pick<Account, "id" | "display_name">;
 export type AccountSession = {
   id: string;
@@ -112,7 +111,7 @@ export class AccountStoreTs {
     if (!this.pool) return;
     await this.pool.query(`CREATE TABLE IF NOT EXISTS accounts (
       id UUID PRIMARY KEY,
-      role TEXT NOT NULL CHECK (role IN ('user', 'creator')),
+      role TEXT,
       email TEXT NOT NULL UNIQUE,
       display_name TEXT NOT NULL,
       avatar_url TEXT,
@@ -121,6 +120,9 @@ export class AccountStoreTs {
       created_at TIMESTAMPTZ NOT NULL
     );
     ALTER TABLE accounts ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+    -- role is historical only: never written or read by any decision.
+    ALTER TABLE accounts ALTER COLUMN role DROP NOT NULL;
+    ALTER TABLE accounts DROP CONSTRAINT IF EXISTS accounts_role_check;
     CREATE TABLE IF NOT EXISTS account_sessions (
       id UUID PRIMARY KEY,
       account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -140,13 +142,13 @@ export class AccountStoreTs {
   async getByEmail(email: string): Promise<Account | undefined> {
     const normalized = normalizeAccountIdentity(email);
     if (!this.pool) return [...this.accounts.values()].find((account) => account.email === normalized);
-    const result = await this.pool.query("SELECT id, role, email, display_name, avatar_url, password_salt, password_hash, created_at FROM accounts WHERE email=$1", [normalized]);
+    const result = await this.pool.query("SELECT id, email, display_name, avatar_url, password_salt, password_hash, created_at FROM accounts WHERE email=$1", [normalized]);
     return result.rows[0] ? rowToAccount(result.rows[0]) : undefined;
   }
 
   async getById(id: string): Promise<Account | undefined> {
     if (!this.pool) return this.accounts.get(id);
-    const result = await this.pool.query("SELECT id, role, email, display_name, avatar_url, password_salt, password_hash, created_at FROM accounts WHERE id=$1", [id]);
+    const result = await this.pool.query("SELECT id, email, display_name, avatar_url, password_salt, password_hash, created_at FROM accounts WHERE id=$1", [id]);
     return result.rows[0] ? rowToAccount(result.rows[0]) : undefined;
   }
 
@@ -154,23 +156,21 @@ export class AccountStoreTs {
     if (!this.pool) {
       return ids.flatMap((id) => {
         const account = this.accounts.get(id);
-        return account?.role === "creator"
-          ? [{ id: account.id, display_name: account.display_name }]
-          : [];
+        return account ? [{ id: account.id, display_name: account.display_name }] : [];
       });
     }
     const result = await this.pool.query(
-      "SELECT id, display_name FROM accounts WHERE role='creator' AND id = ANY($1::uuid[])",
+      "SELECT id, display_name FROM accounts WHERE id = ANY($1::uuid[])",
       [ids]
     );
     return result.rows.map((row) => ({ id: String(row.id), display_name: String(row.display_name) }));
   }
 
-  async create(email: string, password: string, role: AccountRole, displayName: string): Promise<Account> {
-    const normalized = validateSignupCredentials(email, password, role, displayName);
+  async create(email: string, password: string, displayName: string): Promise<Account> {
+    const normalized = validateSignupCredentials(email, password, displayName);
     const previous = this.accountCreations.get(normalized.email);
     const creation = (previous ? previous.catch(() => undefined) : Promise.resolve(undefined))
-      .then(() => this.createOnce(normalized.email, password, role, normalized.displayName));
+      .then(() => this.createOnce(normalized.email, password, normalized.displayName));
     this.accountCreations.set(normalized.email, creation);
     try {
       return await creation;
@@ -184,14 +184,13 @@ export class AccountStoreTs {
   private async createOnce(
     normalizedEmail: string,
     password: string,
-    role: AccountRole,
     normalizedDisplayName: string,
   ): Promise<Account> {
     if (await this.getByEmail(normalizedEmail)) throw new Error("email_already_registered");
     const salt = randomBytes(16);
     const account: Account = {
-      id: accountId(role, normalizedDisplayName),
-      role,
+      // Account identity is an authority key, not a display-name handle.
+      id: randomUUID(),
       email: normalizedEmail,
       display_name: normalizedDisplayName,
       avatar_url: null,
@@ -201,11 +200,11 @@ export class AccountStoreTs {
     };
     if (this.pool) {
       const result = await this.pool.query(
-        `INSERT INTO accounts (id, role, email, display_name, avatar_url, password_salt, password_hash, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        `INSERT INTO accounts (id, email, display_name, avatar_url, password_salt, password_hash, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
          ON CONFLICT (email) DO NOTHING
          RETURNING id`,
-        [account.id, account.role, account.email, account.display_name, account.avatar_url, account.password_salt, account.password_hash, account.created_at],
+        [account.id, account.email, account.display_name, account.avatar_url, account.password_salt, account.password_hash, account.created_at],
       );
       if (result.rowCount !== 1) throw new Error("email_already_registered");
     } else this.accounts.set(account.id, account);
@@ -277,7 +276,7 @@ export class AccountStoreTs {
       RETURNING
         s.id, s.account_id, s.token_hash, s.client_type, s.created_at, s.last_seen_at,
         s.idle_expires_at, s.absolute_expires_at, s.revoked_at,
-        a.id AS account_id_value, a.role, a.email, a.display_name, a.avatar_url,
+        a.id AS account_id_value, a.email, a.display_name, a.avatar_url,
         a.password_salt, a.password_hash, a.created_at AS account_created_at`, [
       tokenHash,
       nowIso,
@@ -288,7 +287,6 @@ export class AccountStoreTs {
     const refreshed = rowToSession(row);
     const account: Account = {
       id: String(row.account_id_value),
-      role: row.role as AccountRole,
       email: String(row.email),
       display_name: String(row.display_name),
       avatar_url: row.avatar_url == null ? null : String(row.avatar_url),
@@ -310,16 +308,24 @@ export class AccountStoreTs {
   }
 
   async setAvatarUrl(id: string, avatarUrl: string | null): Promise<Account> {
+    return this.updateProfileField(id, "avatar_url", avatarUrl);
+  }
+
+  async setDisplayName(id: string, displayName: string): Promise<Account> {
+    return this.updateProfileField(id, "display_name", normalizeDisplayName(displayName));
+  }
+
+  private async updateProfileField(id: string, field: "avatar_url" | "display_name", value: string | null): Promise<Account> {
     const account = await this.getById(id);
     if (!account) throw new Error("account_not_found");
     if (!this.pool) {
-      const updated = { ...account, avatar_url: avatarUrl };
+      const updated = { ...account, [field]: value };
       this.accounts.set(id, updated);
       return updated;
     }
     const result = await this.pool.query(
-      "UPDATE accounts SET avatar_url=$2 WHERE id=$1 RETURNING id, role, email, display_name, avatar_url, password_salt, password_hash, created_at",
-      [id, avatarUrl]
+      `UPDATE accounts SET ${field}=$2 WHERE id=$1 RETURNING id, email, display_name, avatar_url, password_salt, password_hash, created_at`,
+      [id, value]
     );
     if (!result.rows[0]) throw new Error("account_not_found");
     return rowToAccount(result.rows[0]);
@@ -332,7 +338,7 @@ export class AccountStoreTs {
 }
 
 export function accountPublic(account: Account): AccountPublic {
-  return { id: account.id, role: account.role, email: account.email, display_name: account.display_name, avatar_url: account.avatar_url };
+  return { id: account.id, email: account.email, display_name: account.display_name, avatar_url: account.avatar_url };
 }
 
 export function normalizeAccountIdentity(email: string): string {
@@ -367,11 +373,11 @@ export async function verifyPassword(
 
 export function createAuthToken(account: Account, secret: string, now = Date.now()): string {
   const header = encodeJson({ alg: "HS256", typ: "HATCH" });
-  const payload = encodeJson({ sub: account.id, role: account.role, exp: Math.floor(now / 1000) + 7 * 24 * 60 * 60 });
+  const payload = encodeJson({ sub: account.id, exp: Math.floor(now / 1000) + 7 * 24 * 60 * 60 });
   return `${header}.${payload}.${sign(`${header}.${payload}`, secret)}`;
 }
 
-export function verifyAuthToken(token: string | undefined, secret: string | undefined): { sub: string; role: AccountRole; exp: number } | undefined {
+export function verifyAuthToken(token: string | undefined, secret: string | undefined): { sub: string; exp: number } | undefined {
   if (!token || !secret) return undefined;
   const parts = token.split(".");
   if (parts.length !== 3) return undefined;
@@ -381,8 +387,8 @@ export function verifyAuthToken(token: string | undefined, secret: string | unde
   if (supplied.length !== expectedBytes.length || !timingSafeEqual(supplied, expectedBytes)) return undefined;
   try {
     const payload = JSON.parse(Buffer.from(parts[1]!, "base64url").toString("utf8")) as Record<string, unknown>;
-    if (typeof payload.sub !== "string" || (payload.role !== "user" && payload.role !== "creator") || typeof payload.exp !== "number" || payload.exp <= Math.floor(Date.now() / 1000)) return undefined;
-    return { sub: payload.sub, role: payload.role, exp: payload.exp };
+    if (typeof payload.sub !== "string" || typeof payload.exp !== "number" || payload.exp <= Math.floor(Date.now() / 1000)) return undefined;
+    return { sub: payload.sub, exp: payload.exp };
   } catch { return undefined; }
 }
 
@@ -405,23 +411,19 @@ function refreshedSession(session: AccountSession, now: number): AccountSession 
   };
 }
 
-export function validateSignupCredentials(email: string, password: string, role: AccountRole, displayName: string): { email: string; displayName: string } {
+export function validateSignupCredentials(email: string, password: string, displayName: string): { email: string; displayName: string } {
   const normalizedEmail = validateSigninCredentials(email, password);
-  const normalizedName = displayName.trim().replace(/\s+/g, " ");
   if (password.length < 8) throw new Error("password_too_short");
-  if (role !== "user" && role !== "creator") throw new Error("role_invalid");
-  if (!normalizedName) throw new Error("display_name_required");
-  if (normalizedName.length > MAX_DISPLAY_NAME_LENGTH) throw new Error("display_name_too_long");
-  return { email: normalizedEmail, displayName: normalizedName };
+  return { email: normalizedEmail, displayName: normalizeDisplayName(displayName) };
 }
 
-function accountId(role: AccountRole, displayName: string): string {
-  // Account identity is an authority key, not a display-name handle. Names
-  // remain presentation data and may change without changing creator URLs.
-  void role;
-  void displayName;
-  return randomUUID();
+export function normalizeDisplayName(displayName: string): string {
+  const normalizedName = displayName.trim().replace(/\s+/g, " ");
+  if (!normalizedName) throw new Error("display_name_required");
+  if (normalizedName.length > MAX_DISPLAY_NAME_LENGTH) throw new Error("display_name_too_long");
+  return normalizedName;
 }
+
 function derivePasswordAsync(password: string, salt: Buffer): Promise<string> {
   return new Promise((resolve, reject) => {
     scrypt(password, salt, 64, { N: 2 ** 14, r: 8, p: 1 }, (error, derivedKey) => {
@@ -444,7 +446,6 @@ function sign(value: string, secret: string): string { return createHmac("sha256
 function rowToAccount(row: Record<string, any>): Account {
   return {
     id: String(row.id),
-    role: row.role as AccountRole,
     email: String(row.email),
     display_name: String(row.display_name),
     avatar_url: row.avatar_url == null ? null : String(row.avatar_url),
