@@ -42,6 +42,31 @@ Per product. Anything goes in: links and files of any type.
 - Plain text (`.md`, `.txt`) is stored as is. Everything else runs on the thick hosted agent (Kimi Hosted Agents, `runtime-server/src/hostedAgents/`): links are crawled with the account's browser profiles, files are converted, media is compressed and transcribed.
 - Results: the Markdown goes to the product's shared `input/manual/` files (disk); the original goes to the object store (OSS) under the product's prefix and the item records its ref.
 
+## Conversations
+
+Workers and the Assistant are conversations. Outside agents (CLI, MCP, scripts) talk to them through one message shape and the same verbs. Registry, owner-only; not found for another account's product. Implemented in `runtime-server/src/conversations/` (`Conversation` port; `WorkerConversation` over a Product workspace session, `AssistantConversation` over the Assistant; `WORKERS` maps public ids to roles; `awaitTurn` is the shared wait).
+
+Workers (public id → role): `research` → research, `interview` → voice (text messages only), `builder` → generation, `cases` → case-generation, `evaluator` → evaluator. One conversation per worker per product, created by its first message.
+
+```
+message = { id, role: "user"|"assistant", text, created_at, attachments?: [{type:"image", name}] }
+status  = "idle" | "running" | "failed"        (failed carries `error`)
+```
+
+| Route | Answer |
+|---|---|
+| `GET /v1/creator/products/:id/workers` | `{workers:[{id, name, availability: "available"\|"locked", blocked_by?:{missing_required[], needs_one_of[]}, status: "idle"\|"running", conversation_id?, updated_at?}]}` |
+| `GET .../workers/:worker/messages?after=<id>&limit=` | `{status, error?, messages}`. Oldest first. Without `after`: the latest `limit` (default 100, max 500). With it: the first `limit` after that id; an unknown id is `400 unknown_cursor`. |
+| `POST .../workers/:worker/messages {content}` | `202 {conversation_id, message, queued, status:"running"}`. `queued: true` when the worker was running: the message joins the running turn (steer). |
+| `POST .../workers/:worker/messages?wait=<s>` | Holds up to `s` seconds (max 120) until the turn that took the message ends. `200 {conversation_id, message, queued, status, reply?, error?}`; `202` with `status:"running"` when the time ran out. |
+| `GET .../workers/:worker/events` | SSE of the session's events (`state`, `delta`, `message`, `tool`, `tool_end`, ...). `404 conversation_not_started` before the first message. |
+| `POST .../workers/:worker/stop {}` | `202 {requested:true}` |
+| `GET /v1/creator/assistant/conversation/messages`, `POST` (with `wait`), `GET .../events`, `POST .../stop` | Same shapes over the account's Assistant. `conversation_id` is the account id. |
+
+- History is a projection: the user's text and, per turn, the worker's final reply. Tool calls, thinking, intermediate remarks, system prompts and host context never appear. Questions the worker asked (`askuser`) are part of its reply. A reply appears when its model loop ends, so a shown message never changes. Ids: messages sent through this API carry the id returned by the send; others are `m<position>`.
+- A worker whose dependencies have no output yet answers `409 worker_unavailable` with `details:{worker, missing_required, needs_one_of}`; nothing starts. Unknown worker: `404 worker_not_found`. Empty or oversized `content`: `400 invalid_message`.
+- Through Dashboard: `/v1/creator/products/:id/workers/**` and `/v1/creator/assistant/conversation/**` are streamed to Registry for bearer and cookie callers; OAuth tokens need `creator:products:read` (GET) or `creator:products:write` (POST).
+
 ## CLI and MCP
 
-`hatch` (`packages/hatch-cli`) wraps the HTTP API: `login [--api-key-stdin]`, `logout`, `whoami`, `keys create|list|revoke`, `products list|show|create|update|unlist|withdraw`, `ingest <product> <url-or-file>... [--wait]`, `ingest status <product> <job>`. Credentials live in `~/.config/hatch/credentials.json` (mode 0600), with `--profile`. `HATCH_API_KEY` overrides. `hatch mcp` serves the same operations as MCP tools over stdio. A bundled skill teaches coding agents to use the CLI.
+`hatch` (`packages/hatch-cli`) wraps the HTTP API: `login [--api-key-stdin]`, `logout`, `whoami`, `keys create|list|revoke`, `products list|show|create|update|unlist|withdraw`, `ingest <product> <url-or-file>... [--wait]`, `ingest status <product> <job>`, `workers <product>`, `chat <product> <worker> <message...> [--wait]`, `history <product> <worker> [--after id]`, `stop <product> <worker>`, `assistant <message...> [--wait]`, `assistant history`. Credentials live in `~/.config/hatch/credentials.json` (mode 0600), with `--profile`. `HATCH_API_KEY` overrides. `hatch mcp` serves the same operations as MCP tools over stdio. A bundled skill teaches coding agents to use the CLI.

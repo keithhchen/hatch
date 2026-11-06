@@ -45,7 +45,7 @@ test("code is shared across locales and an unknown locale or tab falls back", ()
 test("snippets target production and the documented endpoints", () => {
   const all = DevelopersGuide.forLocale("en").tabs.flatMap((tab) => tab.steps.flatMap((step) => step.code.map((block) => block.text))).join("\n");
   assert.ok(all.includes(`npm install -g ${ORIGIN}/downloads/hatch-cli.tgz`));
-  for (const fragment of ["/v1/auth/me", "/v1/creator/products", "/listing", "/ingest", "expected_updated_at", "content_base64", "base64 -i notes.pdf | tr -d '\\n'", "hatch login --api-key-stdin", "claude mcp add hatch -- hatch mcp", "[mcp_servers.hatch]"]) {
+  for (const fragment of ["/v1/auth/me", "/v1/creator/products", "/listing", "/ingest", "expected_updated_at", "content_base64", "base64 -i notes.pdf | tr -d '\\n'", "/workers/research/messages?wait=60", "/workers/research/events", "/v1/creator/assistant/conversation/messages", "hatch chat <product-id> research", "worker_send", "hatch login --api-key-stdin", "claude mcp add hatch -- hatch mcp", "[mcp_servers.hatch]"]) {
     assert.ok(all.includes(fragment), `missing ${fragment}`);
   }
   assert.doesNotMatch(all, /localhost|127\.0\.0\.1/);

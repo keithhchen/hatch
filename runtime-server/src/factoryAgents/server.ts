@@ -300,7 +300,7 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
       });
     });
   };
-  return { handle, handleUpgrade, store, runtime, setScope: (scope: FactoryProductScope) => { if (scope.creatorId !== options.scope.creatorId || scope.productId !== options.scope.productId) throw new Error("Cannot retarget a Product workspace"); options.scope.briefSpec = scope.briefSpec; }, setCreatorToken: (token: string) => { env.HATCH_FACTORY_CREATOR_TOKEN = token; }, close: async () => { for (const response of streams) response.end(); for (const response of chatStreams) response.end(); for (const sockets of liveSockets.values()) for (const socket of sockets) socket.terminate(); liveWss.close(); await Promise.allSettled([...voices.values()].map(voice => voice.stop())); await runtime.close(); } };
+  return { handle, handleUpgrade, store, runtime, entries, assertRoleAvailable, setScope: (scope: FactoryProductScope) => { if (scope.creatorId !== options.scope.creatorId || scope.productId !== options.scope.productId) throw new Error("Cannot retarget a Product workspace"); options.scope.briefSpec = scope.briefSpec; }, setCreatorToken: (token: string) => { env.HATCH_FACTORY_CREATOR_TOKEN = token; }, close: async () => { for (const response of streams) response.end(); for (const response of chatStreams) response.end(); for (const sockets of liveSockets.values()) for (const socket of sockets) socket.terminate(); liveWss.close(); await Promise.allSettled([...voices.values()].map(voice => voice.stop())); await runtime.close(); } };
 }
 
 const ZERO_USAGE = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } as const;

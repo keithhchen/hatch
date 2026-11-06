@@ -286,6 +286,107 @@ const ingestList = {
   }
 };
 
+// Conversations: a product's workers and the account's Assistant share one message shape.
+const WAIT_SECONDS = 60;
+const workerPath = (id, worker, tail) => productPath(id, `/workers/${encodeURIComponent(worker)}${tail}`);
+const ASSISTANT_PATH = "/v1/creator/assistant/conversation";
+const afterQuery = (after) => after ? `?after=${encodeURIComponent(after)}` : "";
+// --wait alone waits 60 s; MCP passes the seconds.
+const waitSeconds = (flag) => flag === true ? WAIT_SECONDS : Number(flag) > 0 ? Number(flag) : 0;
+const sentQuery = (flag) => waitSeconds(flag) ? `?wait=${waitSeconds(flag)}` : "";
+const formatMessages = (r) => r.messages.length
+  ? r.messages.map((m) => `[${m.id}] ${m.role === "user" ? "you" : "assistant"} (${m.created_at})\n${m.text}`).join("\n\n")
+  : "No messages.";
+const formatSent = (r) => r.reply ? r.reply.text : r.message.id;
+// The turn's end is a result, not an error, unless it failed.
+function finishSend(ctx, r, { waited, where }) {
+  if (r.status === "failed") ctx.exitCode = 1;
+  if (waited && r.status === "running") ctx.log(`Still running. Read the reply later with \`${where}\`.`);
+  return r;
+}
+const sendTools = (name, description, extra, required, toArgs) => ({
+  name, description: `${description} wait is seconds to hold for the reply (max 120); without it the message is only accepted.`,
+  inputSchema: object({ ...extra, content: { type: "string", description: "The message" }, wait: { type: "number", description: "Seconds to wait for the reply, 0 to 120" } }, [...required, "content"]), toArgs
+});
+const historyTool = (name, description, extra, required, toArgs) => ({
+  name, description, inputSchema: object({ ...extra, after: { type: "string", description: "Only messages after this message id" } }, required), toArgs
+});
+const workerIdSchema = { worker: { type: "string", description: "Worker id: research, interview, builder, cases or evaluator" } };
+
+const workersList = {
+  name: "workers",
+  describe: "List a product's workers and whether they are idle or running",
+  usage: "workers <product-id>",
+  options: {},
+  async run(ctx, args) {
+    const [id] = need(this, args, 1);
+    return (await (await ctx.client()).get(productPath(id, "/workers"))).workers;
+  },
+  format: (r) => r.map((w) => `${w.id.padEnd(10)} ${(w.availability === "locked" ? "locked" : w.status).padEnd(8)} ${w.name}${w.blocked_by ? `  (needs ${[...w.blocked_by.missing_required, ...w.blocked_by.needs_one_of].join(", ")})` : ""}`).join("\n"),
+  mcp: { name: "workers_list", description: "List a Hatch product's workers (research, interview, builder, cases, evaluator): availability and idle/running.", inputSchema: object(productIdSchema, ["product_id"]), toArgs: (i) => ({ _: [i.product_id], flags: {} }) }
+};
+const chat = {
+  name: "chat",
+  describe: "Send a message to a worker; --wait prints its reply",
+  usage: "chat <product-id> <worker> <message...> [--wait]",
+  options: { wait: { type: "boolean", describe: "Hold up to 60 s for the reply" } },
+  async run(ctx, args) {
+    const [id, worker, ...words] = need(this, args, 3);
+    const r = await (await ctx.client()).post(workerPath(id, worker, `/messages${sentQuery(args.flags.wait)}`), { content: words.join(" ") });
+    return finishSend(ctx, r, { waited: waitSeconds(args.flags.wait) > 0, where: `hatch history ${id} ${worker}` });
+  },
+  format: formatSent,
+  mcp: sendTools("worker_send", "Send a message to one of a Hatch product's workers (steers it if it is running).", { ...productIdSchema, ...workerIdSchema }, ["product_id", "worker"],
+    (i) => ({ _: [i.product_id, i.worker, i.content], flags: { wait: i.wait } }))
+};
+const history = {
+  name: "history",
+  describe: "Read a worker's conversation",
+  usage: "history <product-id> <worker> [--after <message-id>]",
+  options: { after: { type: "string", describe: "Only messages after this id" } },
+  async run(ctx, args) {
+    const [id, worker] = need(this, args, 2);
+    return (await ctx.client()).get(workerPath(id, worker, `/messages${afterQuery(args.flags.after)}`));
+  },
+  format: formatMessages,
+  mcp: historyTool("worker_history", "Read a Hatch worker's conversation: status and messages, oldest first.", { ...productIdSchema, ...workerIdSchema }, ["product_id", "worker"],
+    (i) => ({ _: [i.product_id, i.worker], flags: { after: i.after } }))
+};
+const stop = {
+  name: "stop",
+  describe: "Stop a worker's running turn",
+  usage: "stop <product-id> <worker>",
+  options: {},
+  async run(ctx, args) {
+    const [id, worker] = need(this, args, 2);
+    return (await ctx.client()).post(workerPath(id, worker, "/stop"), {});
+  },
+  format: () => "Stop requested.",
+  mcp: { name: "worker_stop", description: "Stop a Hatch worker's running turn.", inputSchema: object({ ...productIdSchema, ...workerIdSchema }, ["product_id", "worker"]), toArgs: (i) => ({ _: [i.product_id, i.worker], flags: {} }) }
+};
+const assistantHistory = {
+  name: "assistant history",
+  describe: "Read the Assistant conversation",
+  usage: "assistant history [--after <message-id>]",
+  options: { after: { type: "string", describe: "Only messages after this id" } },
+  async run(ctx, args) { return (await ctx.client()).get(`${ASSISTANT_PATH}/messages${afterQuery(args.flags.after)}`); },
+  format: formatMessages,
+  mcp: historyTool("assistant_history", "Read the account's Hatch Assistant conversation: status and messages, oldest first.", {}, [], (i) => ({ _: [], flags: { after: i.after } }))
+};
+const assistant = {
+  name: "assistant",
+  describe: "Send a message to the Assistant; --wait prints its reply",
+  usage: "assistant <message...> [--wait]",
+  options: { wait: { type: "boolean", describe: "Hold up to 60 s for the reply" } },
+  async run(ctx, args) {
+    const words = need(this, args, 1);
+    const r = await (await ctx.client()).post(`${ASSISTANT_PATH}/messages${sentQuery(args.flags.wait)}`, { content: words.join(" ") });
+    return finishSend(ctx, r, { waited: waitSeconds(args.flags.wait) > 0, where: "hatch assistant history" });
+  },
+  format: formatSent,
+  mcp: sendTools("assistant_send", "Send a message to the account's Hatch Assistant.", {}, [], (i) => ({ _: [i.content], flags: { wait: i.wait } }))
+};
+
 const SKILL_SOURCE = fileURLToPath(new URL("../skill/hatch", import.meta.url));
 const installSkill = {
   name: "install-skill",
@@ -305,5 +406,6 @@ const installSkill = {
 export const COMMANDS = [
   login, logout, whoami, keysCreate, keysList, keysRevoke,
   productsList, productsShow, productsCreate, productsUpdate, productsUnlist, productsWithdraw,
-  ingestSubmit, ingestStatus, ingestList, installSkill
+  ingestSubmit, ingestStatus, ingestList,
+  workersList, chat, history, stop, assistantHistory, assistant, installSkill
 ];

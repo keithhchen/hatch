@@ -188,3 +188,100 @@ test("waiting on a job rides out transient server errors but not real ones", asy
   assert.equal(job.status, "done");
   await assert.rejects(waitForJob(async () => { throw new HatchError("gone", { status: 404 }); }, { sleep: async () => {}, intervalMs: 0 }), /gone/);
 });
+
+const run = (ctx, name, args) => COMMANDS.find((c) => c.name === name).run(ctx, args);
+const reply = { id: "m4", role: "assistant", text: "Here is the summary.", created_at: "t2" };
+const sent = { conversation_id: "s1", message: { id: "u1", role: "user", text: "Summarize", created_at: "t1" }, queued: false };
+
+test("workers lists a product's workers", async () => {
+  const workers = [{ id: "research", name: "Deep Research", availability: "available", status: "running" }, { id: "cases", name: "Case Builder", availability: "locked", status: "idle", blocked_by: { missing_required: ["builder"], needs_one_of: [] } }];
+  const { ctx, fetch } = await makeContext({ env: { HATCH_API_KEY: "k" }, routes: { "GET /v1/creator/products/p1/workers": { workers } } });
+  const result = await run(ctx, "workers", { _: ["p1"], flags: {} });
+  assert.deepEqual(result, workers);
+  assert.equal(fetch.calls[0].headers.authorization, "Bearer k");
+  const text = COMMANDS.find((c) => c.name === "workers").format(result);
+  assert.match(text, /research\s+running\s+Deep Research/);
+  assert.match(text, /cases\s+locked\s+Case Builder\s+\(needs builder\)/);
+});
+
+test("chat without --wait prints the accepted message id; --wait holds 60 s and prints the reply", async () => {
+  const { ctx, fetch } = await makeContext({
+    env: { HATCH_API_KEY: "k" },
+    routes: {
+      "POST /v1/creator/products/p1/workers/research/messages": (c) => c.url.includes("wait=60") ? { ...sent, status: "idle", reply } : { ...sent, status: "running" }
+    }
+  });
+  const chat = COMMANDS.find((c) => c.name === "chat");
+  const plain = await chat.run(ctx, { _: ["p1", "research", "Summarize", "this"], flags: {} });
+  assert.deepEqual(fetch.calls[0].body, { content: "Summarize this" });
+  assert.ok(!fetch.calls[0].url.includes("wait"));
+  assert.equal(chat.format(plain), "u1");
+  const waited = await chat.run(ctx, { _: ["p1", "research", "Summarize"], flags: { wait: true } });
+  assert.ok(fetch.calls[1].url.endsWith("/messages?wait=60"));
+  assert.equal(chat.format(waited), "Here is the summary.");
+  await assert.rejects(chat.run(ctx, { _: ["p1", "research"], flags: {} }), (e) => e.code === "usage");
+});
+
+test("chat reports a worker that is still running or failed", async () => {
+  const { ctx } = await makeContext({
+    env: { HATCH_API_KEY: "k" },
+    routes: { "POST /v1/creator/products/p1/workers/research/messages": { ...sent, status: "running" }, "POST /v1/creator/products/p1/workers/builder/messages": { ...sent, status: "failed", error: "model down" } }
+  });
+  await run(ctx, "chat", { _: ["p1", "research", "x"], flags: { wait: true } });
+  assert.match(ctx.stderr.text(), /Still running.*hatch history p1 research/);
+  assert.equal(ctx.exitCode, 0);
+  await run(ctx, "chat", { _: ["p1", "builder", "x"], flags: {} });
+  assert.equal(ctx.exitCode, 1);
+});
+
+test("chat surfaces a locked worker as the server's reason", async () => {
+  const { ctx } = await makeContext({
+    env: { HATCH_API_KEY: "k" },
+    routes: { "POST /v1/creator/products/p1/workers/cases/messages": () => json({ error: { code: "worker_unavailable", message: "cases cannot start yet: builder must produce output first." } }, 409) }
+  });
+  await assert.rejects(run(ctx, "chat", { _: ["p1", "cases", "go"], flags: {} }), (e) => e.status === 409 && e.code === "worker_unavailable" && /builder must produce output/.test(e.message));
+});
+
+test("history passes --after and renders the lines; stop posts to the worker", async () => {
+  const { ctx, fetch } = await makeContext({
+    env: { HATCH_API_KEY: "k" },
+    routes: {
+      "GET /v1/creator/products/p1/workers/research/messages": { status: "idle", messages: [sent.message, reply] },
+      "POST /v1/creator/products/p1/workers/research/stop": { requested: true }
+    }
+  });
+  const history = COMMANDS.find((c) => c.name === "history");
+  const result = await history.run(ctx, { _: ["p1", "research"], flags: { after: "m 0" } });
+  assert.ok(fetch.calls[0].url.endsWith("/messages?after=m%200"));
+  assert.match(history.format(result), /\[u1\] you[\s\S]*Summarize[\s\S]*\[m4\] assistant[\s\S]*Here is the summary\./);
+  assert.equal(history.format({ messages: [] }), "No messages.");
+  await run(ctx, "stop", { _: ["p1", "research"], flags: {} });
+  assert.equal(fetch.calls[1].key, "POST /v1/creator/products/p1/workers/research/stop");
+  assert.deepEqual(fetch.calls[1].body, {});
+});
+
+test("assistant sends to the account conversation and reads its history", async () => {
+  const { ctx, fetch } = await makeContext({
+    env: { HATCH_API_KEY: "k" },
+    routes: {
+      "POST /v1/creator/assistant/conversation/messages": { ...sent, status: "idle", reply },
+      "GET /v1/creator/assistant/conversation/messages": { status: "idle", messages: [reply] }
+    }
+  });
+  const result = await run(ctx, "assistant", { _: ["What", "needs", "me?"], flags: { wait: true } });
+  assert.deepEqual(fetch.calls[0].body, { content: "What needs me?" });
+  assert.ok(fetch.calls[0].url.endsWith("/messages?wait=60"));
+  assert.equal(result.reply.text, "Here is the summary.");
+  await run(ctx, "assistant history", { _: [], flags: { after: "m1" } });
+  assert.ok(fetch.calls[1].url.endsWith("/messages?after=m1"));
+});
+
+test("MCP wait is in seconds", async () => {
+  const send = COMMANDS.find((c) => c.name === "chat").mcp;
+  assert.deepEqual(send.toArgs({ product_id: "p1", worker: "research", content: "hi", wait: 90 }), { _: ["p1", "research", "hi"], flags: { wait: 90 } });
+  const { ctx, fetch } = await makeContext({ env: { HATCH_API_KEY: "k" }, routes: { "POST /v1/creator/products/p1/workers/research/messages": { ...sent, status: "running" } } });
+  await run(ctx, "chat", { _: ["p1", "research", "hi"], flags: { wait: 90 } });
+  assert.ok(fetch.calls[0].url.endsWith("?wait=90"));
+  await run(ctx, "chat", { _: ["p1", "research", "hi"], flags: { wait: 0 } });
+  assert.ok(!fetch.calls[1].url.includes("wait"));
+});

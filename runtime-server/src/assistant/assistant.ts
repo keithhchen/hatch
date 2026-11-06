@@ -142,8 +142,11 @@ export class AssistantService {
 
   // ── Ingress ────────────────────────────────────────────────────────────
 
-  /** Durably accept one inbound item. Returns false for a platform event already seen. */
-  async ingest(accountId: string, item: Omit<IngressItem, "id" | "at">): Promise<boolean> {
+  /** Stop the Assistant's running turn. */
+  async stop(accountId: string): Promise<void> { const desk = await this.desk(accountId); desk.runtime.stop(desk.sessionId); }
+
+  /** Durably accept one inbound item. Returns false for a platform event already seen. A caller may name the item, to find its message later. */
+  async ingest(accountId: string, item: Omit<IngressItem, "id" | "at"> & { id?: string }): Promise<boolean> {
     const desk = await this.desk(accountId);
     const accepted = await desk.store.update(desk.sessionId, session => {
       const state = deskState(session);
@@ -566,16 +569,16 @@ export class AssistantService {
   // ── Studio and channel surfaces ───────────────────────────────────────
 
   /** What the chat shows: what the Expert said and what the Assistant said. System messages stay out. */
-  async view(accountId: string): Promise<{ messages: Array<{ role: "expert" | "assistant"; text: string; at: string; images?: string[] }>; tasks: AssistantTask[]; running: boolean; interviewing: boolean }> {
+  async view(accountId: string): Promise<{ messages: Array<{ id: string; role: "expert" | "assistant"; text: string; at: string; images?: string[] }>; tasks: AssistantTask[]; running: boolean; interviewing: boolean }> {
     const desk = await this.desk(accountId);
     const session = await desk.store.get(desk.sessionId);
-    type Line = { role: "expert" | "assistant"; text: string; at: string; images?: string[] };
-    const messages = session.messages.flatMap((message): Line[] => {
+    type Line = { id: string; role: "expert" | "assistant"; text: string; at: string; images?: string[] };
+    const messages = session.messages.flatMap((message, index): Line[] => {
       const at = new Date(message.timestamp ?? Date.now()).toISOString();
-      if (message.role === "assistant") { const text = textOf(message).trim(); return text ? [{ role: "assistant", text, at }] : []; }
+      if (message.role === "assistant") { const text = textOf(message).trim(); return text ? [{ id: `m${index + 1}`, role: "assistant", text, at }] : []; }
       const origin = originOf(message);
       if (origin?.kind !== "expert") return [];
-      return [{ role: "expert", text: origin.text ?? "", at, ...(origin.images?.length ? { images: origin.images.map(file => path.basename(file)) } : {}) }];
+      return [{ id: origin.itemId, role: "expert", text: origin.text ?? "", at, ...(origin.images?.length ? { images: origin.images.map(file => path.basename(file)) } : {}) }];
     });
     return { messages, tasks: await this.deps.tasks.open(accountId), running: desk.runtime.isRunning(desk.sessionId), interviewing: Boolean(deskState(session).interview) };
   }
