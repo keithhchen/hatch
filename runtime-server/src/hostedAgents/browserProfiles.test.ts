@@ -192,3 +192,14 @@ test("hostsForCookies returns root and wildcard of registrable hosts", () => {
   assert.deepEqual(hostsForCookies([cookie("a", "1", { domain: ".example.com.cn" })]), ["example.com.cn", "*.example.com.cn"]);
   assert.deepEqual(hostsForCookies([]), []);
 });
+
+test("profiles leased together get distinct lease ids, so releasing one leaves the other leased", async () => {
+  const store = new MemoryBrowserProfiles();
+  const account = randomUUID();
+  await seed(store, account);
+  await seed(store, account, "douyin");
+  const leases = await store.lease(account, ["xiaohongshu", "douyin"], "run", 60_000);
+  assert.equal(new Set(leases.map(l => l.leaseId)).size, 2);
+  await store.release(leases.find(l => l.profile.platform === "douyin")!.leaseId, { status: "ready" });
+  assert.deepEqual(await store.lease(account, ["xiaohongshu"], "other", 60_000), [], "xiaohongshu is still leased");
+});

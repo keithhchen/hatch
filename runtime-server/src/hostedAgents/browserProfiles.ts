@@ -31,8 +31,9 @@ export function chooseLeases(profiles: HeldProfile[], platforms: string[], nowMs
     free.filter(profile => profile.platform === platform).reduce((best, next) => ((next.lastUsedAt ?? "") < (best.lastUsedAt ?? "") ? next : best)));
 }
 
-export const grant = (holder: string, ttlMs: number, nowMs: number, leaseId = randomUUID()) => (profile: HeldProfile): HeldProfile =>
-  ({ ...profile, lease: { id: leaseId, holder, expiresAt: nowMs + ttlMs }, lastUsedAt: new Date(nowMs).toISOString() });
+/** Each granted profile gets its own lease id: releasing one profile must never settle another leased in the same call. */
+export const grant = (holder: string, ttlMs: number, nowMs: number, newLeaseId: () => string = randomUUID) => (profile: HeldProfile): HeldProfile =>
+  ({ ...profile, lease: { id: newLeaseId(), holder, expiresAt: nowMs + ttlMs }, lastUsedAt: new Date(nowMs).toISOString() });
 
 /** Ends a live lease. A missing, mismatched or expired lease settles nothing, so a late run can never clobber a newer holder. */
 export function settle(profile: HeldProfile, leaseId: string, outcome: Outcome, nowMs: number): HeldProfile | undefined {
