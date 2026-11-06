@@ -67,16 +67,18 @@ function storeTests(name: string, open: () => Promise<{ store: BrowserProfileSto
       const account = randomUUID();
       const a = await seed(store, account, "xiaohongshu", "a");
       const b = await seed(store, account, "xiaohongshu", "b");
+      // Between two never-used profiles either may go first; after that, the least recently used one always does.
       const one = (await store.lease(account, ["xiaohongshu"], "r1", 60_000))[0]!;
-      assert.equal(one.profile.id, a.id);
+      assert.ok([a.id, b.id].includes(one.profile.id));
+      const other = one.profile.id === a.id ? b.id : a.id;
       await store.release(one.leaseId, { status: "ready" });
       await sleep(5);
       const two = await store.lease(account, ["xiaohongshu"], "r2", 60_000);
       assert.equal(two.length, 1);
-      assert.equal(two[0]!.profile.id, b.id);
+      assert.equal(two[0]!.profile.id, other);
       await store.release(two[0]!.leaseId, { status: "ready" });
       await sleep(5);
-      assert.equal((await store.lease(account, ["xiaohongshu"], "r3", 60_000))[0]!.profile.id, a.id);
+      assert.equal((await store.lease(account, ["xiaohongshu"], "r3", 60_000))[0]!.profile.id, one.profile.id);
     } finally { await cleanup?.(); }
   });
 
