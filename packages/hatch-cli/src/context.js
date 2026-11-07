@@ -4,17 +4,18 @@ import { SystemBrowser } from "./browser.js";
 import { HatchClient } from "./client.js";
 import { FileCredentialStore } from "./credentialStore.js";
 import { LoopbackReceiver } from "./loopback.js";
+import { NON_INTERACTIVE, TerminalPrompter } from "./prompt.js";
 
 export const DEFAULT_URL = "https://gethatchapp.com";
 
 // Everything a command may touch, injected so commands stay pure of process globals.
 export class HatchContext {
   constructor({
-    env = {}, fetch = globalThis.fetch, store, browser, stdin, stdout, stderr, cwd = process.cwd(), home,
+    env = {}, fetch = globalThis.fetch, store, browser, prompter = NON_INTERACTIVE, stdin, stdout, stderr, cwd = process.cwd(), home,
     sleep = (ms) => delay(ms), receiverFactory = (opts) => new LoopbackReceiver(opts),
     json = false, profile = "default", pollMs = 5000
   }) {
-    Object.assign(this, { env, fetch, store, browser, stdin, stdout, stderr, cwd, home, sleep, receiverFactory, json, profile, pollMs });
+    Object.assign(this, { env, fetch, store, browser, prompter, stdin, stdout, stderr, cwd, home, sleep, receiverFactory, json, profile, pollMs });
     this.exitCode = 0;
   }
 
@@ -46,6 +47,7 @@ export function realDeps() {
   return {
     env: process.env, fetch: globalThis.fetch, home, cwd: process.cwd(),
     stdin: process.stdin, stdout: process.stdout, stderr: process.stderr,
-    store: FileCredentialStore.atHome(home), browser: new SystemBrowser()
+    store: FileCredentialStore.atHome(home), browser: new SystemBrowser(),
+    prompter: new TerminalPrompter({ stdin: process.stdin, stderr: process.stderr })
   };
 }

@@ -12,7 +12,7 @@ hatch --help
 ## Sign in
 
 ```sh
-hatch login                         # browser sign-in (PKCE, loopback redirect)
+hatch login                         # asks: browser sign-in or paste an API key
 echo "$KEY" | hatch login --api-key-stdin   # store an API key instead
 hatch whoami
 hatch logout
@@ -23,7 +23,7 @@ Credentials: `~/.config/hatch/credentials.json` (0600), per `--profile`. `HATCH_
 ## Commands
 
 ```
-login [--api-key-stdin]     logout     whoami
+login [--browser|--api-key-stdin]     logout     whoami
 keys create <name> | list | revoke <id>
 products list | show <id> | create --name <n> [--promise <p>] | update <id> [--name] [--promise]
          | unlist <id> [--off] | withdraw <id>

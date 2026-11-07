@@ -116,6 +116,33 @@ test("login --api-key-stdin verifies with /me and stores an api_key", async () =
   assert.ok(!JSON.stringify(result).includes("key-123"));
 });
 
+test("interactive login asks which method; choosing API key reads it as a secret", async () => {
+  const asked = [];
+  const prompter = {
+    interactive: true,
+    choose: async (question, options) => { asked.push(options.map(([v]) => v)); return "api_key"; },
+    secret: async (question) => { asked.push(question); return " key-456 \n"; }
+  };
+  const { ctx, fetch } = await makeContext({ routes: { "GET /v1/auth/me": ME }, env: { HATCH_WEB_URL: "http://web.test" }, prompter });
+  const result = await COMMANDS.find((c) => c.name === "login").run(ctx, { _: [], flags: {} });
+  assert.deepEqual(asked[0], ["browser", "api_key"]);
+  assert.match(asked[1], /http:\/\/web\.test\/studio\/api-keys/);
+  assert.equal(fetch.calls[0].headers.authorization, "Bearer key-456");
+  assert.equal(result.kind, "api_key");
+});
+
+test("--browser skips the question even in a terminal", async () => {
+  const prompter = { interactive: true, choose: async () => { throw new Error("asked"); } };
+  let opened = false;
+  const { ctx } = await makeContext({
+    routes: { "POST /v1/auth/desktop/token": { token: "sess" }, "GET /v1/auth/me": ME }, prompter,
+    browser: { open(url) { opened = true; const q = new URL(url).searchParams; fetch(`${q.get("redirect_uri")}?code=C&state=${q.get("state")}`); } }
+  });
+  const result = await COMMANDS.find((c) => c.name === "login").run(ctx, { _: [], flags: { browser: true } });
+  assert.ok(opened);
+  assert.equal(result.kind, "session");
+});
+
 test("browser login: PKCE url, state check, token exchange, save", async () => {
   let opened;
   const routes = {

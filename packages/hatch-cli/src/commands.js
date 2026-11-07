@@ -42,28 +42,47 @@ async function saveLogin(ctx, apiUrl, token, kind) {
   return { signed_in: true, profile: ctx.profile, kind, api_url: apiUrl, account };
 }
 
+async function browserLogin(ctx) {
+  const pkce = createPkce();
+  const state = randomState();
+  const receiver = ctx.receiverFactory({ state });
+  const redirectUri = await receiver.start();
+  const url = new URL("/desktop/sign-in", ctx.webUrl);
+  for (const [k, v] of Object.entries({ state, code_challenge: pkce.challenge, redirect_uri: redirectUri, client: "cli" })) url.searchParams.set(k, v);
+  ctx.log(`Open this URL to sign in to Hatch:\n${url}`);
+  ctx.browser.open(url.toString());
+  const code = await receiver.wait();
+  const { token } = await ctx.anonymousClient().post("/v1/auth/desktop/token", { code, code_verifier: pkce.verifier, redirect_uri: redirectUri });
+  return saveLogin(ctx, ctx.apiUrl, token, "session");
+}
+
+const apiKeyLogin = (readKey) => async (ctx) => {
+  const key = (await readKey(ctx)).trim();
+  if (!key) throw new HatchError("No API key given.", { code: "usage" });
+  return saveLogin(ctx, ctx.apiUrl, key, "api_key");
+};
+
+const LOGIN_METHODS = {
+  browser: browserLogin,
+  api_key: apiKeyLogin((ctx) => ctx.prompter.secret(`Paste an API key (create one at ${new URL("/studio/api-keys", ctx.webUrl)}): `)),
+  api_key_stdin: apiKeyLogin((ctx) => readAll(ctx.stdin))
+};
+
+const pickLoginMethod = (ctx, flags) =>
+  flags["api-key-stdin"] ? "api_key_stdin"
+    : flags.browser || !ctx.prompter.interactive ? "browser"
+      : ctx.prompter.choose("How do you want to sign in to Hatch?", [["browser", "Browser"], ["api_key", "API key"]]);
+
 const login = {
   name: "login",
-  describe: "Sign in through the browser (or --api-key-stdin to store an API key)",
-  usage: "login [--api-key-stdin]",
-  options: { "api-key-stdin": { type: "boolean", describe: "Read an API key from stdin instead of opening the browser" } },
+  describe: "Sign in with the browser or an API key (asks which in a terminal)",
+  usage: "login [--browser | --api-key-stdin]",
+  options: {
+    browser: { type: "boolean", describe: "Sign in through the browser without asking" },
+    "api-key-stdin": { type: "boolean", describe: "Read an API key from stdin" }
+  },
   async run(ctx, args) {
-    if (args.flags["api-key-stdin"]) {
-      const key = (await readAll(ctx.stdin)).trim();
-      if (!key) throw new HatchError("No API key on stdin.", { code: "usage" });
-      return saveLogin(ctx, ctx.apiUrl, key, "api_key");
-    }
-    const pkce = createPkce();
-    const state = randomState();
-    const receiver = ctx.receiverFactory({ state });
-    const redirectUri = await receiver.start();
-    const url = new URL("/desktop/sign-in", ctx.webUrl);
-    for (const [k, v] of Object.entries({ state, code_challenge: pkce.challenge, redirect_uri: redirectUri, client: "cli" })) url.searchParams.set(k, v);
-    ctx.log(`Open this URL to sign in to Hatch:\n${url}`);
-    ctx.browser.open(url.toString());
-    const code = await receiver.wait();
-    const { token } = await ctx.anonymousClient().post("/v1/auth/desktop/token", { code, code_verifier: pkce.verifier, redirect_uri: redirectUri });
-    return saveLogin(ctx, ctx.apiUrl, token, "session");
+    return LOGIN_METHODS[await pickLoginMethod(ctx, args.flags)](ctx);
   },
   format: (r) => `Signed in as ${r.account.email ?? r.account.id} (profile ${r.profile}, ${r.kind}).`
 };

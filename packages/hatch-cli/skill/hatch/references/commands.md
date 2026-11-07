@@ -22,7 +22,7 @@ Global: `--json` raw JSON, `--profile <name>` (default `default`), `--help`. Env
 | `assistant history [--after <message-id>]` | Same as `history`, for the Assistant. |
 | `install-skill [-g] [--dir <skills-dir>]` | Installs this skill. |
 
-Human-only: `login [--api-key-stdin]`, `logout`, `keys create|list|revoke`.
+Human-only: `login [--browser | --api-key-stdin]`, `logout`, `keys create|list|revoke`.
 
 ## Job shape
 

@@ -93,7 +93,7 @@ const COPY = Object.freeze({
     steps: {
       cli: STEPS([
         ["install", "Install the CLI", "Node 20 or newer."],
-        ["login", "Sign in", "`hatch login` opens the browser. Or create an API key and pipe it in; the key is shown once."],
+        ["login", "Sign in", "`hatch login` asks whether to sign in with the browser or paste an API key. Scripts pipe a key in; the key is shown once."],
         ["list", "List your products"],
         ["create", "Create a product"],
         ["ingest", "Ingest links and files", "Up to 50 items and 30 MB of files per call. `--wait` polls every 5 seconds."],
@@ -140,7 +140,7 @@ const COPY = Object.freeze({
     steps: {
       cli: STEPS([
         ["install", "安装 CLI", "需要 Node 20 或更高版本。"],
-        ["login", "登录", "`hatch login` 会打开浏览器。也可以创建 API 密钥后通过管道传入；密钥只显示一次。"],
+        ["login", "登录", "`hatch login` 会让你选择浏览器登录或粘贴 API 密钥。脚本可通过管道传入密钥；密钥只显示一次。"],
         ["list", "列出你的产品"],
         ["create", "创建产品"],
         ["ingest", "导入链接和文件", "每次最多 50 项、文件合计 30 MB。`--wait` 每 5 秒轮询一次。"],
@@ -187,7 +187,7 @@ const COPY = Object.freeze({
     steps: {
       cli: STEPS([
         ["install", "CLI をインストール", "Node 20 以上が必要です。"],
-        ["login", "ログイン", "`hatch login` でブラウザが開きます。API キーを作成してパイプで渡すこともできます。キーは一度だけ表示されます。"],
+        ["login", "ログイン", "`hatch login` でブラウザか API キーの貼り付けかを選べます。スクリプトはキーをパイプで渡せます。キーは一度だけ表示されます。"],
         ["list", "プロダクトを一覧表示"],
         ["create", "プロダクトを作成"],
         ["ingest", "リンクとファイルを取り込む", "1 回あたり最大 50 件、ファイルは合計 30 MB までです。`--wait` は 5 秒ごとに確認します。"],
