@@ -130,6 +130,13 @@ test("HostedEngine maps the hosted outcome onto results", async () => {
   assert.equal(tasks.length, 1);
   assert.deepEqual(results.map(r => [r.id, r.status, r.markdown, r.original?.name, r.error]), [["i1", "ok", "# x", "page.html", undefined], ["i2", "failed", undefined, undefined, "login wall"]]);
   assert.equal(results[0]!.original!.mediaType, "text/html");
+  assert.deepEqual(results.map(r => r.session), [{ provider: "kimi_hosted_agents", id: "sesn_1" }, { provider: "kimi_hosted_agents", id: "sesn_1" }]);
+});
+
+test("A hosted run that produced no result.json still reports its session", async () => {
+  const provider: HostedAgentProvider = { run: async () => ({ sessionId: "sesn_9", status: "failed", text: "", artifacts: [], error: "sandbox died" }) };
+  const results = await new HostedEngine(new HostedIngest(provider, new MemoryBrowserProfiles())).ingest(ACCOUNT, [{ id: "i1", kind: "link", url: "https://x.test/" }], "");
+  assert.deepEqual(results.map(r => [r.status, r.error, r.session?.id]), [["failed", "sandbox died", "sesn_9"]]);
 });
 
 // ---- sink ----
@@ -212,6 +219,8 @@ test("A hosted run lands its Markdown and original; a sink failure fails only th
   const done = (await service.get(ACCOUNT, PRODUCT, job.id))!;
   assert.deepEqual(done.items.map(item => [item.status, item.markdown_path, item.error]), [["ok", "input/manual/r.md", undefined], ["partial", "input/manual/x.test-video.md", "no audio"]]);
   assert.match(done.items[0]!.original_ref!, /\/ingest\/.+\/i1\/r\.pdf$/);
+  assert.deepEqual(done.items.map(item => item.session?.id), ["sesn_1", "sesn_1"]);
+  assert.deepEqual(publicJob(done).items.map(item => item.session?.provider), ["kimi_hosted_agents", "kimi_hosted_agents"]);
   assert.equal(manual.files.size, 2);
 
   const broken = new ProductWorkspaceSink(async () => { throw new Error("workspace gone"); }, new LocalArtifactObjectStore(await mkdtemp(path.join(os.tmpdir(), "hatch-ingest-"))), () => "p");

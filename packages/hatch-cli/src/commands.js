@@ -24,7 +24,7 @@ const inputLabel = (input) => typeof input === "string" ? input : input?.url ?? 
 const formatJob = (job) => [
   `job ${job.id}  ${job.status}  (product ${job.product_id})`,
   ...(job.error ? [`  error: ${job.error}`] : []),
-  ...(job.items ?? []).map((i) => `  [${i.status}] ${inputLabel(i.input)}${i.markdown_path ? `  -> ${i.markdown_path}` : ""}${i.error ? `  (${i.error})` : ""}`)
+  ...(job.items ?? []).map((i) => `  [${i.status}] ${inputLabel(i.input)}${i.markdown_path ? `  -> ${i.markdown_path}` : ""}${i.error ? `  (${i.error})` : ""}${i.session ? `\n      ${i.session.provider} session ${i.session.id}` : ""}`)
 ].join("\n");
 const jobProgress = (job) => {
   const items = job.items ?? [];

@@ -1,9 +1,9 @@
-import type { IngestJob } from "./job.js";
+import type { IngestJob, ProviderSession } from "./job.js";
 
 /** One thing to ingest, with the bytes in hand. */
 export type Source = { id: string } & ({ kind: "link"; url: string } | { kind: "file"; name: string; bytes: Buffer; mimeType?: string });
 export type Original = { name: string; bytes: Buffer; mediaType?: string };
-export type Result = { id: string; status: "ok" | "partial" | "failed"; original?: Original; markdown?: string; error?: string };
+export type Result = { id: string; status: "ok" | "partial" | "failed"; original?: Original; markdown?: string; session?: ProviderSession; error?: string };
 
 /** Turns sources into originals plus Markdown. A new way of ingesting is one class. */
 export interface IngestEngine {
