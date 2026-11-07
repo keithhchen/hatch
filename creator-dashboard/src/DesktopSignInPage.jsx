@@ -3,7 +3,7 @@ import { Button } from "@hatch/ui";
 import { WebBrand } from "./WebBrand.jsx";
 import { useLocale } from "./locale.jsx";
 
-const copy = {
+const desktopCopy = {
   en: {
     title: "Sign in to Hatch Desktop",
     body: "Continue as {name} in the Hatch app on this computer.",
@@ -33,6 +33,42 @@ const copy = {
   }
 };
 
+// The same page signs in each native client; each brings its own copy.
+const cliCopy = {
+  en: {
+    title: "Sign in to the Hatch CLI",
+    body: "Continue as {name}.",
+    continue: "Sign in",
+    working: "Signing in…",
+    done: "Signed in. Return to your terminal.",
+    invalid: "This sign-in link is incomplete. Run hatch login again.",
+    failed: "Hatch couldn't finish signing in. Try again."
+  },
+  zh: {
+    title: "登录 Hatch 命令行",
+    body: "以 {name} 的身份继续。",
+    continue: "登录",
+    working: "正在登录…",
+    done: "已登录，请回到终端。",
+    invalid: "登录链接不完整，请重新运行 hatch login。",
+    failed: "无法完成登录，请重试。"
+  },
+  ja: {
+    title: "Hatch CLI にログイン",
+    body: "{name} として続けます。",
+    continue: "ログイン",
+    working: "ログインしています…",
+    done: "ログインしました。ターミナルに戻ってください。",
+    invalid: "ログインリンクが不完全です。hatch login をもう一度実行してください。",
+    failed: "ログインを完了できませんでした。もう一度お試しください。"
+  }
+};
+const CLIENT_COPY = { desktop: desktopCopy, cli: cliCopy };
+const copyFor = (locale, client) => {
+  const copy = CLIENT_COPY[client] ?? desktopCopy;
+  return copy[locale] ?? copy.en;
+};
+
 /**
  * The browser half of Desktop sign-in. The user is already signed in on the
  * web; an explicit click asks the Dashboard for a one-time code that only the
@@ -40,8 +76,9 @@ const copy = {
  */
 export default function DesktopSignInPage({ search, profile, request }) {
   const { locale } = useLocale();
-  const t = copy[String(locale).slice(0, 2)] ?? copy.en;
   const params = new URLSearchParams(search);
+  const t = copyFor(String(locale).slice(0, 2), params.get("client"));
+  const redirectUri = params.get("redirect_uri");
   const state = params.get("state") ?? "";
   const codeChallenge = params.get("code_challenge") ?? "";
   const [status, setStatus] = useState(state && codeChallenge ? "ready" : "invalid");
@@ -51,7 +88,7 @@ export default function DesktopSignInPage({ search, profile, request }) {
     try {
       const { redirect_uri: redirect } = await request("/v1/auth/desktop/authorize", {
         method: "POST",
-        body: JSON.stringify({ state, code_challenge: codeChallenge })
+        body: JSON.stringify({ state, code_challenge: codeChallenge, ...(redirectUri ? { redirect_uri: redirectUri } : {}) })
       });
       window.location.assign(redirect);
       setStatus("done");

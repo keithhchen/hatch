@@ -17,6 +17,9 @@ export async function factoryAgentTools(options: {
   todosChanged?: () => void;
   env?: NodeJS.ProcessEnv;
   extraTools?: AgentTool[] | Promise<AgentTool[]>;
+  /** Host capabilities granted to this session regardless of its definition, e.g. the Assistant's hand-off while it drives the session. */
+  grantedTools?: AgentTool[];
+  withheldTools?: string[];
 }): Promise<AgentTool[]> {
   const candidates = [
     ...(options.definition.role === "voice" ? [] : [createAskUserTool()]),
@@ -28,8 +31,8 @@ export async function factoryAgentTools(options: {
   // askuser is a host capability for text Factory Agents only. Voice uses a
   // continuous conversation and must not receive a blocking structured prompt.
   // The definition-specific list still controls the business tools.
-  return candidates.filter(tool => tool.name !== "youtube_transcript"
-    && (options.definition.tools.includes(tool.name) || (tool.name === "askuser" && options.definition.role !== "voice")));
+  return [...candidates.filter(tool => tool.name !== "youtube_transcript" && !options.withheldTools?.includes(tool.name)
+    && (options.definition.tools.includes(tool.name) || (tool.name === "askuser" && options.definition.role !== "voice"))), ...(options.grantedTools ?? [])];
 }
 
 const askUserOption = Type.Object({

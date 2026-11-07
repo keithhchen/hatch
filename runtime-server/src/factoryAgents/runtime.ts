@@ -1,10 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { EventEmitter } from "node:events";
+import { hydrateImages, imagesAsText, messageText, userMessage } from "./imageRefs.js";
 import { createCompactionSummaryMessage, estimateContextTokens, estimateTokens, generateSummaryWithUsage, type Agent, type AgentMessage, type AgentTool } from "@earendil-works/pi-agent-core";
 import { createFactoryPiAgent, createFactoryPiModels, type FactoryPiAgentOptions } from "../creatorLearning/factoryPi.js";
 import { classifyFactoryProviderFailure } from "../creatorLearning/factoryLlm.js";
-import { WorkbenchStore, type AgentDefinitionSource, type Role, type Session } from "./store.js";
+import { WorkbenchStore, isAssistantRole, type AgentDefinitionSource, type AnyRole, type Session } from "./store.js";
 import { factoryAgentTools } from "./factoryTools.js";
 import { fileTools } from "./tools.js";
 import { traceAgentTools, withLangfuseTurn, type LangfuseTurnIdentifiers } from "../langfuse.js";
@@ -13,6 +14,10 @@ export type WorkbenchRuntimeOptions = {
   env?: NodeJS.ProcessEnv;
   agentFactory?: (options: FactoryPiAgentOptions) => Agent;
   extraTools?: (session: Session, signal: AbortSignal, changed: () => void) => Promise<AgentTool[]>;
+  grantedTools?: (session: Session) => AgentTool[];
+  withheldTools?: (session: Session) => Promise<string[]>;
+  /** Current state for the model, rebuilt for every model call. It never enters history, so clients never see it. */
+  liveState?: (sessionId: string) => Promise<string | undefined>;
   deadlineMs?: number;
   maxTurns?: number;
 };
@@ -24,26 +29,29 @@ export class WorkbenchRuntime {
   private scribeRuns = new Map<string, Promise<void>>();
   private scribeControllers = new Set<AbortController>();
   private runIds = new Map<string, string>();
+  private liveAgents = new Map<string, Agent>();
   private closing = false;
   private readonly env: NodeJS.ProcessEnv;
   constructor(readonly store: WorkbenchStore, private options: WorkbenchRuntimeOptions = {}) {
-    this.env = { HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash", ...(options.env ?? process.env) };
+    this.env = { HATCH_FACTORY_LLM_PROFILE: "kimi-k2.6", ...(options.env ?? process.env) };
   }
   private traceIdentifiers(): LangfuseTurnIdentifiers | undefined {
     const scope = this.store.scope;
     return scope ? { productId: scope.productId, userId: scope.creatorId } : undefined;
   }
   emit(id: string, type: string, data: Record<string, unknown> = {}): void { this.events.emit("event", { sessionId: id, type, ...data }); }
-  async prompt(role: Role, snapshot?: Awaited<ReturnType<AgentDefinitionSource["list"]>>[number]): Promise<string> {
+  async prompt(role: AnyRole, snapshot?: Awaited<ReturnType<AgentDefinitionSource["list"]>>[number]): Promise<string> {
     const definition = snapshot ?? await this.store.definition(role);
     const dependencies = definition.dependencies;
     const folders = ["input/manual", ...[...dependencies.required, ...dependencies.normal, ...dependencies.updates].map(source => `input/${source}`)];
+    if (isAssistantRole(role)) return `${definition.systemPrompt}\n\n# 本会话的 Input\n\n宿主为当前任务放入的材料在 \`input/\` 下，只读。使用 list 查看，使用 read 读取。`;
     const interaction = role === "voice"
       ? "# 对话方式\n\n这是连续的语音访谈。通过自然的语音对话逐步追问缺失事实、具体故事和判断依据，不暂停等待结构化问答。"
       : `# 向用户提问\n\n你可以使用 askuser，但通常只在缺少的信息或选择会实质改变当前工作、且无法从已有输入得到时使用。${role === "evaluator" ? "完成一轮真实模拟后，按照 Evaluator 的角色指令用一次 askuser，请 Creator 一起看几处真正需要他拿捏的细节；这不是例行确认。" : ""}一次只调用一个 askuser，把相关问题合并到 questions 数组；如果提供 options，每个 option 必须是只有一个单行 \`content\` 字段的对象；选项之外用户界面总会提供自由回答框。调用后本轮立即结束，不要继续调用工具或写成果；用户下一条普通消息就是回答。不要用它做进度汇报或把内部标准交给用户决定。`;
     return `${definition.systemPrompt}\n\n# 本 Agent 的 Input\n\n你有且只有这些输入文件夹：${folders.map(folder => `\`${folder}/\``).join("、")}。\n\`input/manual/\` 是用户为当前 Product 上传的公共文件；其余目录是上游 Agent 的实时只读 output projection。使用 list 查看，使用 read 读取。不要要求用户复制或转发上游文件，也不要尝试修改上游目录。\n\n${interaction}`;
   }
-  async start(id: string, message: string): Promise<void> {
+  async start(id: string, input: string | AgentMessage[], images: string[] = []): Promise<void> {
+    const message = typeof input === "string" ? input : input.map(messageText).join("\n\n");
     if (!message.trim() || message.length > 100000) throw new Error("Provide a message of 1–100000 characters");
     if (this.active.has(id)) throw new Error("This conversation is already running");
     const controller = new AbortController();
@@ -55,13 +63,25 @@ export class WorkbenchRuntime {
     } catch (error) { this.active.delete(id); throw error; }
     this.emit(id, "state");
     this.emit(id, "voice.run_started", { runId });
-    const run = withLangfuseTurn("studio.turn", message, () => this.main(id, message, controller), this.traceIdentifiers()).catch(error => {
+    const run = withLangfuseTurn("studio.turn", message, () => this.main(id, input, controller, images), this.traceIdentifiers()).catch(error => {
       if (!controller.signal.aborted) this.emit(id, "error", { message: safeError(error) });
     });
     this.runs.set(id, run);
     void run.finally(() => { if (this.runs.get(id) === run) this.runs.delete(id); });
   }
   stop(id: string): void { this.active.get(id)?.abort(); }
+  isRunning(id: string): boolean { return this.active.has(id); }
+  /**
+   * Steer a running turn: the message joins the context before the next model
+   * call and the turn goes on. Returns false when no turn is running, or when
+   * it has not reached its model loop yet; the caller then starts a new turn.
+   */
+  steer(id: string, input: string | AgentMessage, images: string[] = []): boolean {
+    const agent = this.liveAgents.get(id);
+    if (!agent || (typeof input === "string" && !input.trim())) return false;
+    agent.steer(typeof input !== "string" ? input : images.length ? userMessage(input, images) : { role: "user", content: input, timestamp: Date.now() });
+    return true;
+  }
   triggerScribeVoiceEvidence(id: string, evidence: AgentMessage[]): void {
     if (!evidence.length) return;
     const previous = this.scribeRuns.get(id) ?? Promise.resolve();
@@ -101,13 +121,14 @@ export class WorkbenchRuntime {
       this.scribeControllers.delete(controller);
     }
   }
-  private async main(id: string, message: string, controller: AbortController): Promise<void> {
+  private async main(id: string, message: string | AgentMessage[], controller: AbortController, images: string[] = []): Promise<void> {
     let system = "";
     try {
       const s = await this.store.get(id);
       const definition = await this.store.definition(s.role);
       system = await this.prompt(s.role, definition);
       if (s.role === "generation") system += `\n宿主提供的目标 Runtime 工具：内建 hatch.web_search；有 Knowledge 时启用 hatch.file_search。额外声明：${this.env.HATCH_FACTORY_TARGET_TOOLS_JSON ?? "[]"}。外部连接的实际可用性由现有 Registry/Runtime 验证。当前 Product 已由宿主固定；corpus_upload 会发布到它，不要查找、选择或创建 Product。`;
+      if (s.role === "voice" && s.assistantTaskId) system += `\n\n# 本次访谈由 Hatch 助理发起\n\n这是文字对话，不是语音。专家在手机或 Studio 里打字回复，你的每条回复都会原样发给他。专家只知道自己在和 Hatch 助理说话：不要自我介绍，不要提"访谈 Agent"或任何内部角色，也不要提工具、文件路径或目录，直接接着聊。搜索失败不等于没搜到：失败了就说没搜成，不要说"搜了没找到"。input/manual/ 里是专家的资料：资料里有的绝不再问，最值得问的是资料和他本人之间的落差。专家说不算数的来源不要采用。开始时先用 update_todo 读已有大纲：还有没聊完的就接着聊，不重列，也不再打招呼和介绍，一句话说还剩哪几件，直接问；没有或助理交代了新目标，就列出这次的大纲：三到五件要聊清楚的事，围绕助理交代的目标和这位专家本人。第一条回复用一句话告诉专家这次要聊哪几件事、聊完他能得到什么，再问第一个问题。之后按大纲推进，一件聊透就在 update_todo 里标完成，并自然地转到下一件，让专家知道走到哪了。一次只问一个问题，一到两句话；先接住他说的，再追问具体的故事、数字和判断依据。大纲都聊完了就调用 handoff_to_assistant 交回助理。你只负责访谈，后面还有助理在：专家要你查资料、搜索、写东西、派谁去做事，问系统或工具的问题，或想停，都不要自己回答，也不要说做不了，直接调用 handoff_to_assistant。专家反复绕开你的问题，也交回，不要换个角度再问。不用 Markdown，发的是纯文字。专家发的图片你能直接看到。`;
       if (s.role === "evaluator") system += `\n当前 Product 已由宿主固定；hatch_tool 只会运行它，不要查找或选择 Product。启动时如需 brief_answers，从案例中选择客户可见的信息作答；不能泄露评分标准。当前 Brief 字段：${JSON.stringify(this.store.scope?.briefSpec ?? null)}。`;
       const changed = () => this.emit(id, "files");
       const todosChanged = () => this.emit(id, "todos");
@@ -120,9 +141,11 @@ export class WorkbenchRuntime {
         todosChanged,
         env: this.env,
         extraTools: await this.options.extraTools?.(s, controller.signal, changed),
+        grantedTools: this.options.grantedTools?.(s),
+        withheldTools: await this.options.withheldTools?.(s),
       });
       const messageCount = s.messages.length;
-      const visibleMessages = await this.run(id, system, s.context, message, tools, controller);
+      const visibleMessages = await this.run(id, system, s.context, message, tools, controller, "visible", images);
       if (s.role === "voice" && !controller.signal.aborted && !hasTrailingAskUser(visibleMessages)) {
         const latest = await this.store.get(id);
         const evidence = latest.messages.slice(messageCount);
@@ -149,7 +172,7 @@ export class WorkbenchRuntime {
       this.emit(id, "state");
     }
   }
-  private async run(id: string, systemPrompt: string, history: AgentMessage[], userText: string, tools: AgentTool[], controller: AbortController, channel: "visible" | "scribe" = "visible"): Promise<AgentMessage[]> {
+  private async run(id: string, systemPrompt: string, history: AgentMessage[], userText: string | AgentMessage[], tools: AgentTool[], controller: AbortController, channel: "visible" | "scribe" = "visible", images: string[] = []): Promise<AgentMessage[]> {
     const factory = this.options.agentFactory ?? createFactoryPiAgent;
     let turnCount = 0;
     let persistence = Promise.resolve();
@@ -164,7 +187,12 @@ export class WorkbenchRuntime {
       transformContext: async (messages, signal) => {
         const effective = summaryMessage ? [summaryMessage, ...messages.slice(summarizedCount)] : messages;
         const tokens = effective.reduce((sum, entry) => sum + estimateTokens(entry), 0);
-        if (tokens < 165000) return effective;
+        const forModel = async (current: AgentMessage[]) => {
+          const hydrated = await hydrateImages(current, async file => (await this.store.read(id, file)).bytes);
+          const state = channel === "visible" ? await this.options.liveState?.(id) : undefined;
+          return state ? [...hydrated, { role: "user" as const, content: state, timestamp: Date.now() }] : hydrated;
+        };
+        if (tokens < 165000) return forModel(effective);
         this.emit(id, "compacting");
         // Retain recent messages, cutting before an assistant/tool-call group.
         let cut = Math.max(summarizedCount, messages.length - 12);
@@ -172,16 +200,17 @@ export class WorkbenchRuntime {
         if (cut <= summarizedCount) throw new Error("当前上下文过大；请缩小单份工具输出或输入后继续");
         const prefix = [...(summaryMessage ? [summaryMessage] : []), ...messages.slice(summarizedCount, cut)];
         const { models, model } = createFactoryPiModels({ env: this.env, maxTokens: 8000 });
-        const summary = await generateSummaryWithUsage(prefix, models, model, 10000, signal, "Preserve current user requirements, decisions, unresolved work, exact file paths and real upload/run receipts. Source files remain readable; never invent successful operations.");
+        const summary = await generateSummaryWithUsage(imagesAsText(prefix), models, model, 10000, signal, "Preserve current user requirements, decisions, unresolved work, exact file paths and real upload/run receipts. Source files remain readable; never invent successful operations.");
         if (!summary.ok) throw summary.error;
         summaryMessage = createCompactionSummaryMessage(summary.value.text, tokens, new Date().toISOString());
         summarizedCount = cut;
         const compacted = [summaryMessage, ...messages.slice(cut)];
         await persistence;
         await this.store.update(id, state => { state.context = compacted; });
-        return compacted;
+        return forModel(compacted);
       }
     } });
+    if (channel === "visible") this.liveAgents.set(id, agent);
     const abort = () => agent.abort();
     controller.signal.addEventListener("abort", abort, { once: true });
     const timer = setTimeout(() => controller.abort(new Error("运行达到时间预算，可检查已有文件后继续")), this.options.deadlineMs ?? 1800000);
@@ -211,14 +240,14 @@ export class WorkbenchRuntime {
     });
     try {
       controller.signal.throwIfAborted();
-      await agent.prompt(userText);
+      await (typeof userText !== "string" ? agent.prompt(userText) : images.length ? agent.prompt(userMessage(userText, images)) : agent.prompt(userText));
       await persistence;
       if (persistenceError) throw persistenceError;
       controller.signal.throwIfAborted();
       const last = agent.state.messages.at(-1);
       if (last?.role === "assistant" && ["error", "aborted", "length"].includes(last.stopReason)) throw new Error(last.errorMessage || `Model stopped: ${last.stopReason}`);
       return agent.state.messages;
-    } finally { clearTimeout(timer); unsubscribe(); controller.signal.removeEventListener("abort", abort); await persistence; }
+    } finally { if (this.liveAgents.get(id) === agent) this.liveAgents.delete(id); clearTimeout(timer); unsubscribe(); controller.signal.removeEventListener("abort", abort); await persistence; }
   }
 }
 

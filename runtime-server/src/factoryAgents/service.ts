@@ -3,10 +3,25 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { createFactoryHandler } from "./server.js";
 import type { AgentDefinitionRepository } from "./definitions.js";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
+import type { Session } from "./store.js";
+
+export type FactoryWorkspace = Awaited<ReturnType<typeof createFactoryHandler>>;
 
 export class FactoryAgentsService {
   private products = new Map<string, ReturnType<typeof createFactoryHandler>>();
+  private grantedTools?: (scope: { creatorId: string; productId: string }, session: Session) => AgentTool[];
+  private withheldTools?: (scope: { creatorId: string; productId: string }, session: Session) => Promise<string[]>;
+  private opened = new Set<(scope: { creatorId: string; productId: string }, workspace: FactoryWorkspace) => void>();
   constructor(private root: string, private env: NodeJS.ProcessEnv, private definitions?: AgentDefinitionRepository) {}
+  /** The Assistant grants its hand-off tool to sessions it drives and observes every Product workspace it opens. */
+  attachAssistant(hooks: { grantedTools: (scope: { creatorId: string; productId: string }, session: Session) => AgentTool[]; withheldTools: (scope: { creatorId: string; productId: string }, session: Session) => Promise<string[]>; opened: (scope: { creatorId: string; productId: string }, workspace: FactoryWorkspace) => void }): void {
+    this.grantedTools = hooks.grantedTools;
+    this.withheldTools = hooks.withheldTools;
+    this.opened.add(hooks.opened);
+  }
+  /** The same Product workspace Studio uses; the token authorizes its Registry and Runtime calls. */
+  async workspace(scope: { creatorId: string; productId: string; briefSpec?: unknown }, token: string): Promise<FactoryWorkspace> { return this.app(scope, token); }
   private async app(scope: { creatorId: string; productId: string; briefSpec?: unknown }, token: string) {
     const { creatorId, productId } = scope;
     if (!this.definitions) throw Object.assign(new Error("Factory Agent definitions require Registry database configuration"), { code: "agent_definitions_unavailable", status: 503 });
@@ -15,7 +30,7 @@ export class FactoryAgentsService {
     const key = `${creatorId}/${productId}`;
     let pending = this.products.get(key);
     if (!pending) {
-      pending = createFactoryHandler({ root: path.join(this.root, creatorId, productId), scope, definitions: this.definitions, env: {
+      pending = createFactoryHandler({ root: path.join(this.root, creatorId, productId), scope, definitions: this.definitions, grantedTools: session => this.grantedTools?.({ creatorId, productId }, session) ?? [], withheldTools: async session => await this.withheldTools?.({ creatorId, productId }, session) ?? [], env: {
         ...this.env,
         HATCH_FACTORY_AUTH_TOKEN: undefined,
         HATCH_FACTORY_CREATOR_TOKEN: token,
@@ -26,6 +41,7 @@ export class FactoryAgentsService {
       } });
       this.products.set(key, pending);
       pending.catch(() => this.products.delete(key));
+      void pending.then(app => { for (const opened of this.opened) opened({ creatorId, productId }, app); }, () => undefined);
     }
     const app = await pending;
     app.setScope(scope);

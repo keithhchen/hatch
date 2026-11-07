@@ -202,6 +202,70 @@ test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () =
   }
 });
 
+test("TypeScript Registry mints typed sessions and API keys only from interactive sessions", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-ts-registry-keys-"));
+  const registry = await createRegistryServerFromEnvironment({
+    REGISTRY_HOST: "127.0.0.1",
+    REGISTRY_PORT: "0",
+    HATCH_AGENT_CORPUS_ROOT: path.join(root, "corpora"),
+    HATCH_REGISTRY_STATE_PATH: path.join(root, "state.json"),
+    HATCH_AUTH_SIGNING_SECRET: "test-secret",
+    HATCH_QDRANT_URL: "",
+    DASHSCOPE_API_KEY: ""
+  });
+  try {
+    const address = registry.server.address();
+    assert.ok(address && typeof address !== "string");
+    const base = `http://127.0.0.1:${address.port}`;
+    const post = (route: string, token: string | undefined, body?: unknown) => fetch(`${base}${route}`, {
+      method: "POST",
+      headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), "content-type": "application/json" },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) })
+    });
+    const signup = await post("/v1/auth/signup", undefined, { email: "keys@example.com", password: "password123", display_name: "Keys" });
+    const web = (await signup.json() as { session: { token: string } }).session.token;
+
+    const cli = await post("/v1/auth/sessions", web, { client_type: "cli" });
+    assert.equal(cli.status, 201);
+    const cliToken = (await cli.json() as { session: { token: string } }).session.token;
+    assert.equal((await post("/v1/auth/sessions", web, { client_type: "api_key" })).status, 400);
+
+    assert.equal((await post("/v1/auth/api-keys", web, { name: "" })).status, 400);
+    assert.equal((await post("/v1/auth/api-keys", web, { name: "x".repeat(81) })).status, 400);
+    assert.equal((await post("/v1/auth/api-keys", undefined, { name: "ci" })).status, 401);
+    const created = await post("/v1/auth/api-keys", web, { name: "ci" });
+    assert.equal(created.status, 201);
+    const key = await created.json() as { id: string; name: string; token: string; created_at: string; expires_at: string };
+    assert.equal(key.name, "ci");
+    assert.equal(Date.parse(key.expires_at) - Date.parse(key.created_at), 365 * 24 * 60 * 60 * 1000);
+    assert.equal((await fetch(`${base}/v1/auth/me`, { headers: { authorization: `Bearer ${key.token}` } })).status, 200);
+
+    // A key cannot mint keys or sessions, nor list keys.
+    assert.equal((await post("/v1/auth/api-keys", key.token, { name: "child" })).status, 403);
+    assert.equal((await post("/v1/auth/sessions", key.token)).status, 403);
+    assert.equal((await fetch(`${base}/v1/auth/api-keys`, { headers: { authorization: `Bearer ${key.token}` } })).status, 403);
+
+    const listed = await fetch(`${base}/v1/auth/api-keys`, { headers: { authorization: `Bearer ${cliToken}` } });
+    const body = await listed.json() as { api_keys: Array<Record<string, unknown>> };
+    assert.deepEqual(body.api_keys.map((k) => k.id), [key.id]);
+    assert.deepEqual(Object.keys(body.api_keys[0]!).sort(), ["created_at", "expires_at", "id", "last_seen_at", "name"]);
+
+    // Logout revokes exactly the calling token.
+    assert.equal((await post("/v1/auth/logout", cliToken)).status, 204);
+    assert.equal((await fetch(`${base}/v1/auth/me`, { headers: { authorization: `Bearer ${cliToken}` } })).status, 401);
+    assert.equal((await fetch(`${base}/v1/auth/me`, { headers: { authorization: `Bearer ${web}` } })).status, 200);
+    assert.equal((await fetch(`${base}/v1/auth/me`, { headers: { authorization: `Bearer ${key.token}` } })).status, 200);
+
+    const del = (id: string, token: string) => fetch(`${base}/v1/auth/api-keys/${id}`, { method: "DELETE", headers: { authorization: `Bearer ${token}` } });
+    assert.equal((await del("00000000-0000-4000-8000-000000000000", web)).status, 404);
+    assert.equal((await del(key.id, web)).status, 204);
+    assert.equal((await del(key.id, web)).status, 404);
+    assert.equal((await fetch(`${base}/v1/auth/me`, { headers: { authorization: `Bearer ${key.token}` } })).status, 401);
+  } finally {
+    await registry.close();
+  }
+});
+
 test("TypeScript Registry enables legacy HMAC only for explicit migration mode", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-ts-registry-legacy-"));
   const registry = await createRegistryServerFromEnvironment({

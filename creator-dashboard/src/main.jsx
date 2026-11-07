@@ -4,6 +4,7 @@ import "@hatch/ui/theme.css";
 import { HatchUIProvider, UnavailableState } from "@hatch/ui";
 import { LocaleProvider } from "./locale.jsx";
 import { dashboardRequest } from "./data.js";
+import { parseDevelopersRoute } from "./developersGuide.js";
 import { WebChatRoute } from "./webChatRoute.js";
 import { WebBrand } from "./WebBrand.jsx";
 import "./styles.css";
@@ -13,6 +14,7 @@ const CREATOR_ROOT = "/studio";
 const BuyerPortalV2 = React.lazy(() => import("./BuyerPortalV2.jsx").then(({ BuyerPortalV2: Component }) => ({ default: Component })));
 const CreatorPortalV2 = React.lazy(() => import("./CreatorPortalV2.jsx").then(({ CreatorPortalV2: Component }) => ({ default: Component })));
 const DownloadPage = React.lazy(() => import("./DownloadPage.jsx").then(({ DownloadPage: Component }) => ({ default: Component })));
+const DevelopersPage = React.lazy(() => import("./DevelopersPage.jsx"));
 const WebPage = React.lazy(() => import("./web/WebPage.jsx"));
 const WebChatPage = React.lazy(() => import("./WebChatPage.jsx"));
 const DesktopSignInPage = React.lazy(() => import("./DesktopSignInPage.jsx"));
@@ -49,6 +51,7 @@ function App() {
   const location = useBrowserLocation();
   const isDownloadRoute = location.pathname === "/download";
   const isWebRoute = location.pathname === "/";
+  const developersRoute = parseDevelopersRoute(location.pathname);
   const [profile, setProfile] = useState(null);
   const [sessionStatus, setSessionStatus] = useState("loading");
 
@@ -66,7 +69,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (isDownloadRoute || isWebRoute) {
+    if (isDownloadRoute || isWebRoute || developersRoute) {
       setSessionStatus("anonymous");
       return undefined;
     }
@@ -84,7 +87,7 @@ function App() {
         else setSessionStatus(profile ? "authenticated" : "anonymous");
     });
     return () => { active = false; };
-  }, [clearSession, isDownloadRoute, isWebRoute]);
+  }, [clearSession, isDownloadRoute, isWebRoute, Boolean(developersRoute)]);
 
   const signIn = useCallback(async (credentials) => {
     const result = await dashboardRequest("/v1/auth/login", {
@@ -139,6 +142,10 @@ function App() {
 
   if (isDownloadRoute) {
     return <Suspense fallback={<AppLoading />}><DownloadPage /></Suspense>;
+  }
+
+  if (developersRoute) {
+    return <Suspense fallback={<AppLoading />}><DevelopersPage tab={developersRoute.tab} navigate={location.navigate} /></Suspense>;
   }
 
   if (isWebRoute) {

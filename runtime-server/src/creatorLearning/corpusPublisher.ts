@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { zipSync } from "fflate";
@@ -7,7 +7,13 @@ import type { ArtifactObjectStore } from "./objectStore.js";
 import type { FactoryNodeService } from "./nodeService.js";
 import { corpusInputSchema, corpusOutputSchema, type CorpusInput, type CorpusOutput } from "./corpusNode.js";
 import type { RegistryStoreTs, PublishedAgentCorpus } from "../registryStore.js";
-import { AgentCorpusVerificationError, extractAgentCorpusBundle, immutableReleasePath } from "../registryCorpus.js";
+import {
+  AgentCorpusVerificationError,
+  extractAgentCorpusBundle,
+  immutableReleasePath,
+  materializeAgentCorpusRelease,
+  verifyAgentCorpus
+} from "../registryCorpus.js";
 import { CreatorRegistryReleaseStore, type CreatorRegistryRelease } from "./creatorRegistryRelease.js";
 import type { AgentKnowledgeIndexer, KnowledgeDocument } from "../qdrantIndexer.js";
 
@@ -249,6 +255,116 @@ export class CorpusPublisher {
   }
 }
 
+/**
+ * Prepare a new immutable Registry release when a published Product changes
+ * Creator ownership. The existing release stays intact and the caller controls
+ * activation inside the ownership-transfer transaction.
+ */
+export async function prepareProductCreatorTransferRelease(input: {
+  creatorId: string;
+  creatorName: string;
+  productId: string;
+  productName: string;
+  productPromise: string;
+  currentRelease: CreatorRegistryRelease;
+  objectStore: ArtifactObjectStore;
+  corpusRoot: string;
+  runtimeRoot: string;
+}): Promise<CreatorRegistryRelease> {
+  if (input.currentRelease.product_id !== input.productId) {
+    throw new Error("Current Registry release belongs to another Product");
+  }
+  if (!input.currentRelease.release_ref.startsWith(`registry/${input.productId}/releases/`)) {
+    throw new Error("Current Registry release reference is not canonical");
+  }
+
+  const sourceBytes = await input.objectStore.get(input.currentRelease.corpus_ref);
+  const sourceDigest = digestBytes(sourceBytes);
+  if (sourceDigest !== input.currentRelease.corpus_digest) {
+    throw new Error("Current Registry Corpus digest does not match its immutable object");
+  }
+  const corpus = parseCorpusOutput(sourceBytes);
+  if (corpus.knowledge.length > 0) {
+    throw new Error("Product File knowledge must be rehomed before preparing a Creator transfer release");
+  }
+
+  const bundle = await makeRuntimeBundle({
+    objectStore: input.objectStore,
+    creatorId: input.creatorId,
+    creatorName: input.creatorName,
+    productId: input.productId,
+    productName: input.productName,
+    productPromise: input.productPromise,
+    corpus,
+    briefSpec: input.currentRelease.brief_spec ?? undefined
+  });
+  const staging = path.resolve(input.runtimeRoot, `.creator-transfer-${randomUUID()}`);
+  try {
+    await extractAgentCorpusBundle(bundle, staging);
+    const verified = await verifyAgentCorpus(staging, input.creatorId, input.productId);
+    const immutableRoot = await materializeAgentCorpusRelease(verified, input.corpusRoot);
+    const releaseRoot = path.resolve(
+      input.runtimeRoot,
+      input.productId,
+      verified.digest.slice("sha256:".length)
+    );
+    const releaseExists = await access(releaseRoot).then(
+      () => true,
+      (error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+        throw error;
+      }
+    );
+    if (releaseExists) {
+      const existing = await verifyAgentCorpus(releaseRoot, input.creatorId, input.productId);
+      if (existing.digest !== verified.digest) throw new Error("Prepared Runtime release path contains different content");
+    } else {
+      await mkdir(path.dirname(releaseRoot), { recursive: true });
+      await cp(immutableRoot, releaseRoot, { recursive: true, force: false, errorOnExist: true });
+    }
+    await writeImmutableLocalFile(path.join(releaseRoot, "source-corpus.json"), sourceBytes);
+    await writeRuntimeReleaseAssets({
+      objectStore: input.objectStore,
+      releaseRoot,
+      creatorId: input.creatorId,
+      productId: input.productId,
+      productName: input.productName,
+      productPromise: input.productPromise,
+      corpus,
+      sourceDigest,
+      releaseDigest: verified.digest,
+      briefSpec: input.currentRelease.brief_spec ?? undefined
+    });
+
+    const releaseRef = `registry/${input.productId}/releases/${verified.digest.slice("sha256:".length)}`;
+    const publishedAt = new Date().toISOString();
+    const release: CreatorRegistryRelease = {
+      product_id: input.productId,
+      creator_id: input.creatorId,
+      release_digest: verified.digest,
+      corpus_digest: sourceDigest,
+      corpus_ref: `${releaseRef}/corpus.json`,
+      release_ref: releaseRef,
+      runtime_manifest_ref: `${releaseRef}/runtime/manifest.json`,
+      brief_spec: input.currentRelease.brief_spec ?? null,
+      status: "published",
+      published_at: publishedAt
+    };
+    await input.objectStore.put(release.corpus_ref, sourceBytes, {
+      immutable: true,
+      contentType: "application/json"
+    });
+    await putImmutableReleaseAsset(
+      input.objectStore,
+      `${releaseRef}/release.json`,
+      Buffer.from(JSON.stringify(release, null, 2), "utf8")
+    );
+    return release;
+  } finally {
+    await rm(staging, { recursive: true, force: true });
+  }
+}
+
 async function writeRuntimeReleaseAssets(input: {
   objectStore: ArtifactObjectStore; releaseRoot: string; creatorId: string; productId: string;
   productName: string; productPromise: string; corpus: CorpusOutput; sourceDigest: string;
@@ -309,7 +425,7 @@ function parseCorpusOutput(bytes: Buffer): CorpusOutput {
 
 async function makeRuntimeBundle(input: {
   objectStore: ArtifactObjectStore;
-  creatorId: string; productId: string; productName: string; productPromise: string;
+  creatorId: string; creatorName?: string; productId: string; productName: string; productPromise: string;
   corpus: CorpusOutput; briefSpec?: unknown;
 }): Promise<Buffer> {
   const files: Record<string, Uint8Array> = {};
@@ -344,7 +460,7 @@ async function makeRuntimeBundle(input: {
   }
   const manifest = {
     contract_version: "1",
-    creator: { id: input.creatorId, name: "Creator" },
+    creator: { id: input.creatorId, name: input.creatorName ?? "Creator" },
     product: { id: input.productId, name: input.productName, promise: input.productPromise, boundaries: [], ...(input.briefSpec !== undefined ? { brief_spec: input.briefSpec } : {}), presentation: {} },
     instructions: { system: assets.system! },
     skills,
@@ -422,6 +538,15 @@ async function putImmutableReleaseAsset(
     if (normalize(existing) === normalize(bytes)) return;
     throw error;
   }
+}
+
+async function writeImmutableLocalFile(filePath: string, bytes: Buffer): Promise<void> {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, bytes, { flag: "wx" }).catch(async (error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    const existing = await readFile(filePath);
+    if (!existing.equals(bytes)) throw new Error(`Immutable Runtime file already contains different bytes: ${filePath}`);
+  });
 }
 
 function stableJson(value: unknown): string {

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "hatch-ingest task.json",
+  "type": "object",
+  "required": ["items"],
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["id", "kind", "url"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" },
+              "kind": { "const": "link" },
+              "url": { "type": "string", "format": "uri" }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["id", "kind", "upload_name"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" },
+              "kind": { "const": "file" },
+              "name": { "type": "string", "description": "Display name; its extension decides the converter." },
+              "upload_name": { "type": "string", "description": "Name to look up under /mnt/agents/upload/ (file name or sibling metadata title)." }
+            }
+          }
+        ]
+      }
+    },
+    "context": { "type": "string", "description": "Free text: whose content, which product." }
+  }
+}

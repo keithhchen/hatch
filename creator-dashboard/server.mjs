@@ -115,7 +115,7 @@ export async function createDashboardApp(options = {}) {
   );
   const desktopSignIn = createDesktopSignIn({
     authenticate: (request) => authenticate(request, registryUrl, fetchImpl, portalState),
-    mintSession: (token) => registryRequest(registryUrl, "/v1/auth/sessions", { method: "POST", fetchImpl, headers: { authorization: `Bearer ${token}` } }),
+    mintSession: (token, clientType) => registryRequest(registryUrl, "/v1/auth/sessions", { method: "POST", fetchImpl, headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ client_type: clientType }) }),
     codes: portalState,
     seal: (value) => encryptOAuthSecret(value, oauthStateKey),
     open: (value) => decryptOAuthSecret(value, oauthStateKey),
@@ -795,7 +795,7 @@ export async function createDashboardApp(options = {}) {
       if (url.pathname === "/portal" || url.pathname.startsWith("/portal/") || url.pathname === "/agents" || url.pathname.startsWith("/agents/")) {
         return send(response, 404, { error: { code: "route_not_found", message: "That route is no longer available." } });
       }
-      if (request.method === "GET" && (url.pathname === "/favicon.svg" || url.pathname === "/factory-voice-capture-worklet.js" || url.pathname === "/factory-voice-playback-worklet.js" || url.pathname === "/assets" || url.pathname.startsWith("/assets/"))) {
+      if (request.method === "GET" && (url.pathname === "/favicon.svg" || url.pathname === "/factory-voice-capture-worklet.js" || url.pathname === "/factory-voice-playback-worklet.js" || url.pathname === "/assets" || url.pathname.startsWith("/assets/") || url.pathname === HATCH_CLI_DOWNLOAD)) {
         return servePortalAsset(url.pathname, response);
       }
       const retiredRedirect = request.method === "GET" ? retiredPortalRedirect(url.pathname) : null;
@@ -946,7 +946,8 @@ export async function createDashboardApp(options = {}) {
       if (request.method === "GET" && url.pathname === "/v1/auth/me") {
         const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
-        return send(response, 200, authentication.profile);
+        // One account shape for every client: Registry's account, plus the presentation fields the web adds.
+        return send(response, 200, { ...authentication.account, ...authentication.profile });
       }
       if (url.pathname === "/v1/auth/me/avatar" && ["PUT", "DELETE"].includes(request.method)) {
         const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
@@ -966,6 +967,20 @@ export async function createDashboardApp(options = {}) {
         });
         const payload = upstream.status === 204 ? undefined : await upstream.json();
         return send(response, upstream.status, payload);
+      }
+
+      // API keys live in Registry; the cookie session reaches them through this proxy (CSRF checked by authenticate).
+      if (/^\/v1\/auth\/api-keys(?:\/[^/]+)?$/.test(url.pathname) && ["GET", "POST", "DELETE"].includes(request.method)) {
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
+        const body = request.method === "POST" ? await readJson(request) : undefined;
+        const upstream = await fetchImpl(new URL(url.pathname, registryUrl), {
+          method: request.method,
+          headers: { authorization: `Bearer ${authentication.token}`, "content-type": "application/json" },
+          ...(body ? { body: JSON.stringify(body) } : {})
+        });
+        response.setHeader("cache-control", "no-store");
+        return send(response, upstream.status, upstream.status === 204 ? undefined : await upstream.json());
       }
 
       if (await desktopSignIn(request, response, url)) return;
@@ -1486,7 +1501,7 @@ export async function createDashboardApp(options = {}) {
         return send(response, 404, { error: { code: "not_found", message: "Route not found." } });
       }
 
-      const productContractPath = url.pathname.match(/^\/v1\/creator\/products(?:\/[^/]+(?:\/files(?:\/[^/]+)?|\/graph|\/brief-spec|\/registry|\/live|\/withdraw|\/listing|\/pricing|\/nodes\/(?:about-you|corpus)\/executions(?:\/[^/]+(?:\/answers)?)?)?)?$/);
+      const productContractPath = url.pathname.match(/^\/v1\/creator\/products(?:\/[^/]+(?:\/files(?:\/[^/]+)?|\/ingest(?:\/[^/]+)?|\/graph|\/brief-spec|\/registry|\/live|\/withdraw|\/listing|\/pricing|\/nodes\/(?:about-you|corpus)\/executions(?:\/[^/]+(?:\/answers)?)?)?)?$/);
       const productNodeContract = /\/nodes\/(?:about-you|corpus)\/executions(?:\/[^/]+(?:\/answers)?)?$/.test(url.pathname);
       const productRegistryContract = /\/registry$/.test(url.pathname);
       const productLiveContract = /\/live$/.test(url.pathname);
@@ -1494,7 +1509,7 @@ export async function createDashboardApp(options = {}) {
         request.method === "POST" || request.method === "PATCH" || request.method === "PUT"
       ) && (
         url.pathname === "/v1/creator/products"
-        || /\/(files|brief-spec|pricing)$/.test(url.pathname)
+        || /\/(files|brief-spec|pricing|ingest)$/.test(url.pathname)
         || /\/withdraw$/.test(url.pathname)
         || /\/listing$/.test(url.pathname)
         || productNodeContract
@@ -1507,7 +1522,9 @@ export async function createDashboardApp(options = {}) {
         && (/\/files\/[^/]+$/.test(url.pathname) || /^\/v1\/creator\/products\/[^/]+$/.test(url.pathname));
       const productContractRead = productContractPath && request.method === "GET" && (
         url.pathname === "/v1/creator/products"
+        || /^\/v1\/creator\/products\/[^/]+$/.test(url.pathname)
         || /\/files(?:\/[^/]+)?$/.test(url.pathname)
+        || /\/ingest(?:\/[^/]+)?$/.test(url.pathname)
         || /\/graph$/.test(url.pathname)
         || productLiveContract
         || productNodeContract
@@ -1518,7 +1535,7 @@ export async function createDashboardApp(options = {}) {
         const isProductRoot = url.pathname === "/v1/creator/products" || /^\/v1\/creator\/products\/[^/]+$/.test(url.pathname);
         const requiredScope = isProductRoot
           ? (request.method === "GET" ? "creator:products:read" : "creator:products:write")
-          : (url.pathname.includes("/files")
+          : (url.pathname.includes("/files") || url.pathname.includes("/ingest")
             ? (request.method === "GET" ? "creator:files:read" : "creator:files:write")
             : (request.method === "GET" ? "creator:products:read" : "creator:products:write"));
         requireOAuthScope(request, requiredScope, url.pathname);
@@ -1537,7 +1554,7 @@ export async function createDashboardApp(options = {}) {
         const status = request.method === "DELETE"
           ? 204
           : request.method === "POST"
-            ? (productNodeContract && url.pathname.endsWith("/executions") ? 202 : 201)
+            ? ((productNodeContract && url.pathname.endsWith("/executions")) || url.pathname.endsWith("/ingest") ? 202 : 201)
             : 200;
         return send(response, status, payload);
       }
@@ -1631,7 +1648,7 @@ export async function createDashboardApp(options = {}) {
         }
       }
 
-      if (/^\/v1\/creator\/products\/[^/]+\/factory-agents(?:\/|$)/.test(url.pathname)) {
+      if (/^\/v1\/creator\/products\/[^/]+\/factory-agents(?:\/|$)/.test(url.pathname) || /^\/v1\/creator\/assistant(?:\/|$)/.test(url.pathname)) {
         const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const abort = new AbortController();
@@ -2789,7 +2806,7 @@ async function authenticate(request, registryUrl, fetchImpl, portalState) {
     const profile = publicProfile(account);
     request.__registryToken = token;
     request.__oauthScopes = oauthToken?.scopes;
-    return { profile, token };
+    return { profile, account, token };
   } catch (error) {
     if (error?.status === 401) {
       return { error: { status: 401, body: { error: { code: "unauthorized", message: "Sign in to continue." } } } };
@@ -4469,6 +4486,9 @@ export function retiredPortalRedirect(pathname) {
   return null;
 }
 
+// Packed by Dockerfile.dashboard into dist/downloads; unhashed, so never cached immutably.
+const HATCH_CLI_DOWNLOAD = "/downloads/hatch-cli.tgz";
+
 function isPublicPortalRoute(pathname) {
   return pathname === "/"
     || pathname === "/explore"
@@ -4487,6 +4507,8 @@ function isPublicPortalRoute(pathname) {
     || pathname === "/sign-in"
     || pathname === "/sign-up"
     || pathname === "/desktop/sign-in"
+    || pathname === "/developers"
+    || pathname.startsWith("/developers/")
     || pathname === "/download";
 }
 
@@ -4518,6 +4540,8 @@ async function servePortalAsset(requestPath, response) {
       relativePath = requestPath.slice(1);
     } else if (requestPath === "/assets" || !path.extname(requestPath)) {
       relativePath = "index.html";
+    } else if (requestPath === HATCH_CLI_DOWNLOAD) {
+      relativePath = requestPath.slice(1);
     } else if (requestPath.startsWith("/assets/")) {
       relativePath = decodeURIComponent(requestPath.slice("/".length));
     } else {
@@ -4535,7 +4559,7 @@ async function servePortalAsset(requestPath, response) {
     const body = await readFile(assetPath);
     response.writeHead(200, {
       "content-type": contentType(assetPath),
-      "cache-control": relativePath === "index.html" ? "no-cache" : "public, max-age=31536000, immutable"
+      "cache-control": relativePath === "index.html" || requestPath === HATCH_CLI_DOWNLOAD ? "no-cache" : "public, max-age=31536000, immutable"
     });
     response.end(body);
     return;
@@ -4569,6 +4593,7 @@ function contentType(filePath) {
     ".js": "text/javascript; charset=utf-8",
     ".json": "application/json; charset=utf-8",
     ".svg": "image/svg+xml",
+    ".tgz": "application/gzip",
     ".woff": "font/woff",
     ".woff2": "font/woff2",
     ".png": "image/png",

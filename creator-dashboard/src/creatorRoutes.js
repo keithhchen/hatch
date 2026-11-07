@@ -48,6 +48,7 @@ export function parseCreatorRoute(pathname) {
   const segments = clean.slice(ROOT.length).split("/").filter(Boolean).map(safeDecode);
   const [head, second, third, fourth] = segments;
   if (!segments.length) return page("home", "home");
+  if (head === "assistant" && segments.length === 1) return page("assistant", "assistant");
   if (head === "factory") {
     if (segments.length === 1) return redirect(`${ROOT}/products`, "products");
     const productId = second;
@@ -76,6 +77,7 @@ export function parseCreatorRoute(pathname) {
     if (segments.length === 2) return page("order", "orders", { orderId: second });
     return page("not-found", "orders");
   }
+  if (head === "api-keys" && segments.length === 1) return page("api-keys", "api-keys");
   if (head === "earnings" && segments.length === 1) return page("earnings", "earnings");
   // The payout onboarding provider returns to /studio/payouts.
   if (head === "payouts" && segments.length === 1) return redirect(`${ROOT}/earnings`, "earnings");
@@ -86,8 +88,8 @@ export function parseCreatorRoute(pathname) {
 
 export function creatorRouteTitle(route) {
   const titles = {
-    home: "Overview", products: "Agents", "product-create": "New Agent", agent: "Agent", candidate: "Candidate review",
-    orders: "Orders", order: "Order", earnings: "Earnings"
+    assistant: "Assistant", home: "Overview", products: "Agents", "product-create": "New Agent", agent: "Agent", candidate: "Candidate review",
+    orders: "Orders", order: "Order", earnings: "Earnings", "api-keys": "API keys"
   };
   return titles[route.kind] ?? "Studio";
 }

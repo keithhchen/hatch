@@ -8,9 +8,10 @@
     "serve:registry": "npm run build && node dist/registryServer.js",
     "dev": "node dist/index.js",
     "start": "node dist/index.js",
+    "transfer:creator-product": "node scripts/transfer-creator-product.mjs",
     "build": "rm -rf dist && tsc -p tsconfig.json",
     "eval:output-guard": "npm run build && node scripts/eval-output-guard.mjs",
-    "test": "npm run build && node --test --test-concurrency=1 dist/*.test.js dist/factoryAgents/*.test.js"
+    "test": "npm run build && node --test --test-concurrency=1 dist/*.test.js dist/factoryAgents/*.test.js dist/assistant/*.test.js dist/ingest/*.test.js dist/hostedAgents/*.test.js"
   },
   "dependencies": {
     "@alicloud/credentials": "^2.4.5",
@@ -23,6 +24,8 @@
     "@langfuse/otel": "^5.13.1",
     "@langfuse/tracing": "^5.13.1",
     "@opentelemetry/sdk-node": "^0.223.0",
+    "@spectrum-ts/core": "12.14.0",
+    "@spectrum-ts/imessage": "12.14.0",
     "ali-oss": "^6.23.0",
     "dotenv": "^17.2.0",
     "fflate": "^0.8.3",

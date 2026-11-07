@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "hatch-ingest browser-profiles.json",
+  "type": "object",
+  "required": ["profiles"],
+  "properties": {
+    "profiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "hosts"],
+        "properties": {
+          "id": { "type": "string" },
+          "platform": { "type": "string" },
+          "hosts": { "type": "array", "items": { "type": "string" } },
+          "fingerprint": {
+            "type": "object",
+            "properties": {
+              "userAgent": { "type": "string" },
+              "locale": { "type": "string" },
+              "timezone": { "type": "string" },
+              "viewport": {
+                "type": "object",
+                "properties": { "width": { "type": "integer" }, "height": { "type": "integer" } }
+              }
+            }
+          },
+          "cookies": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name", "domain", "value_env"],
+              "properties": {
+                "name": { "type": "string" },
+                "domain": { "type": "string" },
+                "path": { "type": "string" },
+                "expires": { "type": "number" },
+                "httpOnly": { "type": "boolean" },
+                "secure": { "type": "boolean" },
+                "sameSite": { "enum": ["Strict", "Lax", "None"] },
+                "value_env": { "type": "string", "description": "Env var holding the value (a vault placeholder)." }
+              }
+            }
+          },
+          "proxy_env": { "type": ["string", "null"], "description": "Env var holding a proxy URL. Wired but untested." }
+        }
+      }
+    }
+  }
+}

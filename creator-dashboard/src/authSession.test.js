@@ -17,7 +17,7 @@ test("Browser auth uses an HttpOnly session cookie and rejects missing CSRF", as
       return;
     }
     if (request.url === "/v1/auth/me" && request.headers.authorization === "Bearer opaque-registry-session") {
-      response.end(JSON.stringify({ id: "buyer-cookie", display_name: "Cookie Buyer" }));
+      response.end(JSON.stringify({ id: "buyer-cookie", email: "buyer@example.com", display_name: "Cookie Buyer", avatar_url: null, session_expires_at: "2030-01-01T00:00:00.000Z" }));
       return;
     }
     response.statusCode = 401;
@@ -55,7 +55,10 @@ test("Browser auth uses an HttpOnly session cookie and rejects missing CSRF", as
 
   const me = await fetch(`${serverUrl(api)}/v1/auth/me`, { headers: { cookie } });
   assert.equal(me.status, 200);
-  assert.equal((await me.json()).id, "buyer-cookie");
+  const account = await me.json();
+  assert.equal(account.id, "buyer-cookie");
+  assert.equal(account.email, "buyer@example.com", "the web answers /me with the same account shape as Registry");
+  assert.equal(account.initials, "CB");
 
   dashboard.portalState.clock = () => new Date(Date.now() + 13 * 60 * 60_000);
   const expired = await fetch(`${serverUrl(api)}/v1/auth/me`, { headers: { cookie } });

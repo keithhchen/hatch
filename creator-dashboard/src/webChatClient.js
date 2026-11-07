@@ -2,6 +2,8 @@ import { AttachmentSource, ConversationTransport, RuntimeConnection, ToolExecuto
 
 const API = "/v1/web-chat/conversations";
 const MAX_IMAGE_BYTES = 100 * 1024 * 1024;
+const MAX_IMAGE_EDGE = 2048;
+const COMPRESS_ABOVE_BYTES = 1024 * 1024;
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
 
 /** The browser's IANA time zone, so the Agent knows the user's local time. */
@@ -132,10 +134,30 @@ export class BrowserImageAttachments extends AttachmentSource {
     return Promise.all(files.map(file => this.prepare(file)));
   }
 
-  async prepare(file) {
-    if (!this.accepts(file.type) || file.size < 1 || file.size > MAX_IMAGE_BYTES) {
+  /** Shrink a photo before upload: long edge at most 2048 px, JPEG. GIFs stay as they are, they may be animated. */
+  static async compress(file) {
+    if (file.type === "image/gif") return file;
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(bitmap.width, bitmap.height));
+    if (scale === 1 && file.size <= COMPRESS_ABOVE_BYTES) { bitmap.close(); return file; }
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    const context = canvas.getContext("2d");
+    context.fillStyle = "#fff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.85));
+    if (!blob) throw new WebChatClientError("imageFormatInvalid");
+    return new File([blob], `${file.name.replace(/\.[^.]+$/, "")}.jpg`, { type: "image/jpeg" });
+  }
+
+  async prepare(original) {
+    if (!this.accepts(original.type) || original.size < 1 || original.size > MAX_IMAGE_BYTES) {
       throw new WebChatClientError("imageFormatInvalid");
     }
+    const file = await BrowserImageAttachments.compress(original);
     const bytes = new Uint8Array(await file.arrayBuffer());
     const digest = await crypto.subtle.digest("SHA-256", bytes);
     const sha256 = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
