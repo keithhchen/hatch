@@ -58,6 +58,37 @@ hatch ingest status <product-id> <job-id>
 hatch ingest list <product-id>
 ```
 
+### 7. Talk to workers
+
+```sh
+hatch workers <product-id>
+```
+
+### 8. Send a message
+
+```sh
+hatch chat <product-id> research "Summarize what we know about the expert" --wait
+```
+
+### 9. Read the history
+
+```sh
+hatch history <product-id> research --after <message-id>
+```
+
+### 10. Stop a worker
+
+```sh
+hatch stop <product-id> research
+```
+
+### 11. Talk to the Assistant
+
+```sh
+hatch assistant "What needs my attention?" --wait
+hatch assistant history
+```
+
 ## HTTP API
 
 ### 1. Create an API key
@@ -152,6 +183,55 @@ curl -s https://gethatchapp.com/v1/creator/products/$PRODUCT_ID/ingest -H "Autho
 }
 ```
 
+### 9. Talk to workers
+
+```sh
+curl -s https://gethatchapp.com/v1/creator/products/$PRODUCT_ID/workers -H "Authorization: Bearer $HATCH_API_KEY" \
+  | jq '.workers[] | {id, availability, status}'
+```
+
+### 10. Send a message
+
+```sh
+curl -s -X POST "https://gethatchapp.com/v1/creator/products/$PRODUCT_ID/workers/research/messages?wait=60" -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" \
+  -d '{"content":"Summarize what we know about the expert"}' \
+  | jq '{status, reply}'
+```
+
+### 11. Read the history
+
+```sh
+curl -s "https://gethatchapp.com/v1/creator/products/$PRODUCT_ID/workers/research/messages?after=$MESSAGE_ID" -H "Authorization: Bearer $HATCH_API_KEY"
+```
+
+```json
+{
+  "status": "idle | running | failed",
+  "messages": [
+    { "id": "…", "role": "user | assistant", "text": "…", "created_at": "…" }
+  ]
+}
+```
+
+### 12. Watch events
+
+```sh
+curl -N https://gethatchapp.com/v1/creator/products/$PRODUCT_ID/workers/research/events -H "Authorization: Bearer $HATCH_API_KEY"
+```
+
+### 13. Stop a worker
+
+```sh
+curl -s -X POST https://gethatchapp.com/v1/creator/products/$PRODUCT_ID/workers/research/stop -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" -d '{}'
+```
+
+### 14. Talk to the Assistant
+
+```sh
+curl -s -X POST "https://gethatchapp.com/v1/creator/assistant/conversation/messages?wait=60" -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" \
+  -d '{"content":"What needs my attention?"}'
+```
+
 ## MCP
 
 ### 1. Install the CLI and sign in
@@ -191,7 +271,14 @@ products_list  products_show  products_create  products_update  products_unlist
 ingest_submit  ingest_status  ingest_list
 ```
 
-### 5. Agent skill
+### 5. Talk to workers
+
+```sh
+workers_list  worker_send  worker_history  worker_stop
+assistant_send  assistant_history
+```
+
+### 6. Agent skill
 
 Teaches coding agents to use the CLI.
 

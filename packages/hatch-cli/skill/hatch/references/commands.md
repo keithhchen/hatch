@@ -14,9 +14,15 @@ Global: `--json` raw JSON, `--profile <name>` (default `default`), `--help`. Env
 | `ingest <product-id> <url-or-file>... [--context <text>] [--wait]` | Submits links (http/https) and files (any type, 30 MB total). Returns the job. |
 | `ingest status <product-id> <job-id>` | Current job. |
 | `ingest list <product-id>` | Recent jobs. |
+| `workers <product-id>` | `[{id, name, availability, status, blocked_by?}]`. Ids: research, interview, builder, cases, evaluator. |
+| `chat <product-id> <worker> <message...> [--wait]` | Sends a message. Prints the accepted message id; with `--wait` holds up to 60 s and prints the reply. `--json`: `{conversation_id, message, queued, status, reply?}`. |
+| `history <product-id> <worker> [--after <message-id>]` | `{status, messages:[{id, role, text, created_at}]}`, oldest first. Without `--after`: the latest 100. |
+| `stop <product-id> <worker>` | Stops the running turn. |
+| `assistant <message...> [--wait]` | Same as `chat`, for the account's Assistant. |
+| `assistant history [--after <message-id>]` | Same as `history`, for the Assistant. |
 | `install-skill [-g] [--dir <skills-dir>]` | Installs this skill. |
 
-Human-only: `login [--api-key-stdin]`, `logout`, `keys create|list|revoke`.
+Human-only: `login [--browser | --api-key-stdin]`, `logout`, `keys create|list|revoke`.
 
 ## Job shape
 

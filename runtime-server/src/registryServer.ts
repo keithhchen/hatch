@@ -2,6 +2,7 @@ import { FactoryAgentsService } from "./factoryAgents/service.js";
 import { PostgresAgentDefinitionRepository } from "./factoryAgents/definitions.js";
 import { PostgresWorkbenchBackend } from "./factoryAgents/store.js";
 import { AssistantService } from "./assistant/assistant.js";
+import { ConversationRoutes, type ConversationRouteDeps } from "./conversations/routes.js";
 import { createIngestService } from "./ingest/boot.js";
 import { IngestError, IngestService } from "./ingest/service.js";
 import { publicJob } from "./ingest/job.js";
@@ -439,6 +440,9 @@ async function route(
     sendJson(response, 200, { agents: await context.factoryAgentDefinitions.replace(payload.agents) });
     return;
   }
+
+  // Conversation API: Product workers and the Assistant, one message shape.
+  if (await new ConversationRoutes(conversationDeps(response, context)).handle(request, response, url)) return;
 
   if (url.pathname.startsWith("/v1/channels/") || url.pathname.startsWith("/v1/creator/assistant")) {
     await assistantRoute(request, response, url, context);
@@ -1962,6 +1966,18 @@ function postgresExclusive(pool: NonNullable<ReturnType<RegistryStoreTs["databas
       if (!locked) return;
       try { await fn(); } finally { await client.query("SELECT pg_advisory_unlock(hashtext($1))", [name]); }
     } finally { client.release(); }
+  };
+}
+
+function conversationDeps(response: http.ServerResponse, context: RegistryContext): ConversationRouteDeps {
+  return {
+    authenticate: request => authenticate(request, response, context),
+    token: bearer,
+    product: async (accountId, productId) => productForCreator(context, accountId, productId),
+    workspace: (scope, token) => context.factoryAgents.workspace(scope, token),
+    assistant: () => context.assistant,
+    json: sendJson,
+    readJson: request => readJson(request),
   };
 }
 

@@ -80,10 +80,41 @@ test("MCP: initialize, tools/list, tools/call over in-memory streams", async () 
   assert.equal(replies.length, 6); // the notification gets no reply
   assert.equal(byId[1].result.protocolVersion, "2025-06-18");
   assert.deepEqual(byId[2].result.tools.map((t) => t.name).sort(), [
-    "ingest_list", "ingest_status", "ingest_submit", "products_create", "products_list", "products_show", "products_unlist", "products_update", "whoami"
+    "assistant_history", "assistant_send", "ingest_list", "ingest_status", "ingest_submit", "products_create", "products_list", "products_show", "products_unlist", "products_update",
+    "whoami", "worker_history", "worker_send", "worker_stop", "workers_list"
   ]);
+  const tool = (name) => byId[2].result.tools.find((t) => t.name === name);
+  assert.deepEqual(tool("worker_send").inputSchema.required, ["product_id", "worker", "content"]);
+  assert.equal(tool("worker_send").inputSchema.properties.wait.type, "number");
+  assert.deepEqual(tool("assistant_send").inputSchema.required, ["content"]);
   assert.equal(JSON.parse(byId[3].result.content[0].text).account.email, "k@example.com");
   assert.equal(byId[4].result.isError, true); // 404 from fake server
   assert.equal(byId[5].error.code, -32602);
   assert.equal(byId[6].error.code, -32601);
+});
+
+test("MCP: worker_send posts with the wait seconds and returns the reply", async () => {
+  let url;
+  const replies = await rpc([
+    { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "worker_send", arguments: { product_id: "p1", worker: "research", content: "hi", wait: 30 } } },
+    { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "workers_list", arguments: { product_id: "p1" } } }
+  ], {
+    "POST /v1/creator/products/p1/workers/research/messages": (call) => { url = call.url; return { message: { id: "u1" }, status: "idle", reply: { id: "m2", role: "assistant", text: "Hello." } }; },
+    "GET /v1/creator/products/p1/workers": { workers: [{ id: "research" }] }
+  });
+  assert.ok(url.endsWith("/messages?wait=30"));
+  assert.equal(JSON.parse(replies[0].result.content[0].text).reply.text, "Hello.");
+  assert.deepEqual(JSON.parse(replies[1].result.content[0].text), [{ id: "research" }]);
+});
+
+test("CLI: chat --wait prints the reply, history --json prints the messages", async () => {
+  const routes = {
+    "POST /v1/creator/products/p1/workers/research/messages": { message: { id: "u1" }, status: "idle", reply: { id: "m2", role: "assistant", text: "Hello." } },
+    "GET /v1/creator/products/p1/workers/research/messages": { status: "idle", messages: [{ id: "m2", role: "assistant", text: "Hello.", created_at: "t" }] }
+  };
+  const chat = await runCli(["chat", "p1", "research", "hi", "there", "--wait"], { routes, env: { HATCH_API_KEY: "k" } });
+  assert.equal(chat.out.trim(), "Hello.");
+  const history = await runCli(["history", "p1", "research", "--json"], { routes, env: { HATCH_API_KEY: "k" } });
+  assert.equal(JSON.parse(history.out).messages[0].id, "m2");
+  assert.equal((await runCli(["chat", "p1", "research"], { routes, env: { HATCH_API_KEY: "k" } })).code, 2);
 });

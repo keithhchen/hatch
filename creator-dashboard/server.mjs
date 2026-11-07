@@ -1648,7 +1648,7 @@ export async function createDashboardApp(options = {}) {
         }
       }
 
-      if (/^\/v1\/creator\/products\/[^/]+\/factory-agents(?:\/|$)/.test(url.pathname) || /^\/v1\/creator\/assistant(?:\/|$)/.test(url.pathname)) {
+      if (/^\/v1\/creator\/products\/[^/]+\/factory-agents(?:\/|$)/.test(url.pathname) || /^\/v1\/creator\/assistant(?:\/|$)/.test(url.pathname) || CONVERSATION_PATH.test(url.pathname)) {
         const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const abort = new AbortController();
@@ -2693,6 +2693,9 @@ function decryptOAuthSecret(value, key) {
   ]).toString("utf8");
 }
 
+/** Conversation API: a Product's workers and the Assistant's conversation. Streamed through to Registry as is. */
+const CONVERSATION_PATH = /^\/v1\/creator\/(?:products\/[^/]+\/workers(?:\/[^/]+\/(?:messages|events|stop))?|assistant\/conversation\/(?:messages|events|stop))$/;
+
 function oauthEndpointScope(request) {
   const method = String(request.method ?? "GET").toUpperCase();
   const pathname = new URL(request.url ?? "/", "http://dashboard.local").pathname;
@@ -2708,6 +2711,7 @@ function oauthEndpointScope(request) {
     if (method === "PATCH") return "creator:products:write";
     return undefined;
   }
+  if (CONVERSATION_PATH.test(pathname)) return method === "GET" ? "creator:products:read" : method === "POST" ? "creator:products:write" : undefined;
   const fileMatch = pathname.match(/^\/v1\/creator\/products\/[^/]+\/files(?:\/[^/]+)?$/);
   if (fileMatch) {
     if (method === "GET") return "creator:files:read";
