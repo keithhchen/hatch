@@ -651,8 +651,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       : undefined);
   // A restart never silently resumes a tool-effecting run. The durable status
   // becomes Interrupted before a new socket can create a replacement run.
-  const repositoryReady = conversationRepository.initialize()
-    .then(() => conversationRepository.interruptActiveRuns("Runtime restarted; the executor connection was lost."));
+  const repositoryReady = conversationRepository.initialize();
   const readiness: RuntimeReadiness = {
     repository: "starting",
     deliveryAccounting: commerceEventSink ? "starting" : "disabled"
