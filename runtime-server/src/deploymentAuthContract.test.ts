@@ -54,6 +54,7 @@ test("production keeps browser APIs on the Dashboard BFF and disables legacy HMA
   assert.ok(requiredKeys, "deploy workflow must validate production secrets");
   assert.doesNotMatch(requiredKeys, /HATCH_AUTH_SIGNING_SECRET/);
   assert.match(requiredKeys, /HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN/);
+  assert.match(requiredKeys, /HATCH_RUNTIME_CHAT_SERVICE_TOKEN/);
   assert.doesNotMatch(requiredKeys, /HATCH_RUNTIME_DB_PASSWORD/);
   assert.match(deployWorkflow, /^  verify-server:\n/m);
   assert.match(
@@ -110,6 +111,10 @@ test("production Compose gives every service only its required secrets", async (
   assert.match(registry, /HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN:/);
   assert.match(registry, /HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN:/);
   assert.doesNotMatch(registry, /HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN:/);
+  // The channel layer (Registry) reaches Chat (Runtime) over the private network with one shared, required token.
+  assert.match(registry, /HATCH_RUNTIME_CHAT_URL: http:\/\/runtime:8400/);
+  for (const side of [registry, runtime]) assert.match(side, /HATCH_RUNTIME_CHAT_SERVICE_TOKEN: \$\{HATCH_RUNTIME_CHAT_SERVICE_TOKEN:\?/);
+  assert.doesNotMatch(dashboard, /HATCH_RUNTIME_CHAT_SERVICE_TOKEN/);
 
   assert.match(runtime, /HATCH_RUNTIME_DATABASE_URL:/);
   assert.match(runtime, /HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN:/);

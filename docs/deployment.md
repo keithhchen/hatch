@@ -31,7 +31,9 @@ or separate production Runtime exists. The server uses two Compose projects:
    `DEEPSEEK_API_KEY`; there is no automatic fallback.
    This simple deployment uses one database login for all four services.
    It must also contain `HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN` and
-   `HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN`.
+   `HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN`, and `HATCH_RUNTIME_CHAT_SERVICE_TOKEN`
+   (the token the Registry's channel layer presents to the Runtime's Chat
+   service API; Compose refuses to start without it).
    CD creates `HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN` once when it is
    missing, stores it in the server-only `.env` with mode 600, and never
    prints it. Later deploys reuse the same value.
