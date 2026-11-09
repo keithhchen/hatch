@@ -128,7 +128,7 @@ test("ConversationRepository enforces idempotent client messages and one active 
   assert.equal(replaySnapshot.cursor, 5);
 });
 
-test("FileConversationRepository survives restart and interrupts rather than replays an active run", async () => {
+test("FileConversationRepository survives restart and keeps an interrupted run interrupted", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-repository-"));
   const first = new FileConversationRepository(root);
   const conversation = (await first.createConversation(conversationInput("conversation_file"))).conversation;
@@ -142,11 +142,9 @@ test("FileConversationRepository survives restart and interrupts rather than rep
   await first.close();
 
   const restarted = new FileConversationRepository(root);
-  const interrupted = await restarted.interruptActiveRuns("Runtime restarted");
-  assert.equal(interrupted.length, 1);
-  assert.equal(interrupted[0]?.status, "interrupted");
-  assert.equal(interrupted[0]?.interruptedReason, "Runtime restarted");
-  assert.equal((await restarted.interruptActiveRuns("again")).length, 0);
+  const interrupted = await restarted.transitionRun("run_pending", "interrupted", "Runtime restarted");
+  assert.equal(interrupted.status, "interrupted");
+  assert.equal(interrupted.interruptedReason, "Runtime restarted");
   const snapshot = await restarted.snapshot(conversation.id);
   assert.equal(snapshot.runs[0]?.status, "interrupted");
   assert.ok(snapshot.events.some((event) => event.type === "run.state" && event.payload.reason === "Runtime restarted"));

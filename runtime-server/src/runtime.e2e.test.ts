@@ -2369,7 +2369,27 @@ test("server requires client hello before tool results", async () => {
   assert.ok(!events.some((event) => event.type === "tool.call"));
 });
 
-test("server rejects concurrent runs for the same conversation across WebSocket sessions", async () => {
+async function openConversationSocket(serverUrl: string, conversationId: string, messages: OutboundMessage[]): Promise<WebSocket> {
+  const socket = new WebSocket(serverUrl);
+  socket.on("message", (data) => {
+    messages.push(JSON.parse(String(data)) as OutboundMessage);
+  });
+  await new Promise<void>((resolve, reject) => {
+    socket.once("open", resolve);
+    socket.once("error", reject);
+  });
+  socket.send(JSON.stringify({
+    type: "client.hello",
+    protocol_version: PROTOCOL_VERSION,
+    conversation_id: conversationId,
+    license_token: `license_${conversationId}`,
+    local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"]
+  }));
+  await waitForSocketMessage(messages, (message) => message.type === "session.ready");
+  return socket;
+}
+
+test("a second window's message joins the active run in the same conversation instead of being rejected", async () => {
   const workspace = await tempWorkspace();
   const dataDir = await tempWorkspace();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
@@ -2382,26 +2402,8 @@ test("server rejects concurrent runs for the same conversation across WebSocket 
     createRuntime: () => new DeterministicAgentRuntime()
   });
   const serverUrl = await listen(runtimeServer);
-  const firstSocket = new WebSocket(serverUrl);
   const firstMessages: OutboundMessage[] = [];
-  firstSocket.on("message", (data) => {
-    firstMessages.push(JSON.parse(String(data)) as OutboundMessage);
-  });
-
-  await new Promise<void>((resolve, reject) => {
-    firstSocket.once("open", resolve);
-    firstSocket.once("error", reject);
-  });
-
-  firstSocket.send(JSON.stringify({
-    type: "client.hello",
-    protocol_version: PROTOCOL_VERSION,
-    conversation_id: "conv_busy",
-    license_token: "license_busy",
-    local_tools: []
-  }));
-  await waitForSocketMessage(firstMessages, (message) => message.type === "session.ready");
-
+  const firstSocket = await openConversationSocket(serverUrl, "conv_busy", firstMessages);
   firstSocket.send(JSON.stringify({
     type: "client.message",
     run_id: "run_busy_1",
@@ -2411,49 +2413,32 @@ test("server rejects concurrent runs for the same conversation across WebSocket 
   }));
   await waitForSocketMessage(firstMessages, (message) => message.type === "tool_call.request" && message.run_id === "run_busy_1");
 
-  const secondSocket = new WebSocket(serverUrl);
   const secondMessages: OutboundMessage[] = [];
-  secondSocket.on("message", (data) => {
-    secondMessages.push(JSON.parse(String(data)) as OutboundMessage);
-  });
-  await new Promise<void>((resolve, reject) => {
-    secondSocket.once("open", resolve);
-    secondSocket.once("error", reject);
-  });
-  secondSocket.send(JSON.stringify({
-    type: "client.hello",
-    protocol_version: PROTOCOL_VERSION,
-    conversation_id: "conv_busy",
-    license_token: "license_busy",
-    local_tools: []
-  }));
-  await waitForSocketMessage(secondMessages, (message) => message.type === "session.ready");
-
+  const secondSocket = await openConversationSocket(serverUrl, "conv_busy", secondMessages);
   secondSocket.send(JSON.stringify({
     type: "client.message",
     run_id: "run_busy_2",
     conversation_id: "conv_busy",
     local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"],
-    message: { role: "user", content: "This should be rejected." }
+    message: { role: "user", content: "And this too." }
   }));
-  const busy = await waitForSocketMessage(secondMessages, (message) => message.type === "turn.failed" && message.run_id === "run_busy_2");
-  assert.equal(busy.type, "turn.failed");
-  assert.equal(busy.error.code, "conversation_busy");
+  const joined = await waitForSocketMessage(secondMessages, (message) => message.type === "message.accepted" && message.client_message_id === "run_busy_2");
+  assert.equal(joined.type === "message.accepted" && joined.run_id, "run_busy_1");
+  assert.ok(!secondMessages.some((message) => message.type === "turn.failed"));
+  // Its text enters the conversation when the Run claims it, after the tool results of the turn in progress.
+  assert.deepEqual((await new RuntimeStore(dataDir).readConversation("conv_busy")).map((message) => message.content), ["Find Hatch."]);
 
   firstSocket.close();
   secondSocket.close();
-
-  const storedMessages = await new RuntimeStore(dataDir).readConversation("conv_busy");
-  assert.deepEqual(storedMessages.map((message) => message.content), ["Find Hatch."]);
   const events = await new RuntimeStore(dataDir).readEvents();
   assert.ok(!events.some((event) => event.type === "runtime.event"));
 });
 
-test("server releases a conversation lock when the client disconnects mid-run", async () => {
+test("a client that disconnects mid-run leaves the run waiting for its tool, and a window that reconnects finishes it", async () => {
   const workspace = await tempWorkspace();
   const dataDir = await tempWorkspace();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  await writeFile(path.join(workspace, "notes.txt"), "Hatch reconnect lock release test.\n", "utf8");
+  await writeFile(path.join(workspace, "notes.txt"), "Hatch reconnect test.\n", "utf8");
 
   const store = new RuntimeStore(dataDir);
   runtimeServer = createRuntimeServer({
@@ -2462,26 +2447,8 @@ test("server releases a conversation lock when the client disconnects mid-run", 
     createRuntime: () => new DeterministicAgentRuntime()
   });
   const serverUrl = await listen(runtimeServer);
-  const firstSocket = new WebSocket(serverUrl);
   const firstMessages: OutboundMessage[] = [];
-  firstSocket.on("message", (data) => {
-    firstMessages.push(JSON.parse(String(data)) as OutboundMessage);
-  });
-
-  await new Promise<void>((resolve, reject) => {
-    firstSocket.once("open", resolve);
-    firstSocket.once("error", reject);
-  });
-
-  firstSocket.send(JSON.stringify({
-    type: "client.hello",
-    protocol_version: PROTOCOL_VERSION,
-    conversation_id: "conv_disconnect_lock",
-    license_token: "license_disconnect_lock",
-    local_tools: []
-  }));
-  await waitForSocketMessage(firstMessages, (message) => message.type === "session.ready");
-
+  const firstSocket = await openConversationSocket(serverUrl, "conv_disconnect_lock", firstMessages);
   firstSocket.send(JSON.stringify({
     type: "client.message",
     run_id: "run_disconnect_lock_1",
@@ -2493,64 +2460,19 @@ test("server releases a conversation lock when the client disconnects mid-run", 
     message.type === "tool_call.request" && message.run_id === "run_disconnect_lock_1"
   ));
   assert.equal(firstToolRequest.type, "tool_call.request");
-
   firstSocket.close();
-  await waitUntil(async () => {
-    const events = await new RuntimeStore(dataDir).readEvents();
-    return events.some((event) => (
-      event.type === "turn.state"
-      && event.run_id === "run_disconnect_lock_1"
-      && event.to === "interrupted"
-    ));
-  });
+  await new Promise((resolve) => setTimeout(resolve, 200));
 
-  const secondSocket = new WebSocket(serverUrl);
-  const secondMessages: OutboundMessage[] = [];
-  secondSocket.on("message", (data) => {
-    secondMessages.push(JSON.parse(String(data)) as OutboundMessage);
-  });
-  await new Promise<void>((resolve, reject) => {
-    secondSocket.once("open", resolve);
-    secondSocket.once("error", reject);
-  });
-  secondSocket.send(JSON.stringify({
-    type: "client.hello",
-    protocol_version: PROTOCOL_VERSION,
-    conversation_id: "conv_disconnect_lock",
-    license_token: "license_disconnect_lock",
-    local_tools: []
-  }));
-  await waitForSocketMessage(secondMessages, (message) => message.type === "session.ready");
-
-  secondSocket.send(JSON.stringify({
-    type: "client.message",
-    run_id: "run_disconnect_lock_2",
-    conversation_id: "conv_disconnect_lock",
-    local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"],
-    message: { role: "user", content: "Find Hatch after reconnect." }
-  }));
-  const accepted = await waitForSocketMessage(secondMessages, (message) => (
-    (message.type === "tool_call.request" && message.run_id === "run_disconnect_lock_2")
-    || (message.type === "turn.failed" && message.run_id === "run_disconnect_lock_2")
-  ));
-  assert.equal(accepted.type, "tool_call.request");
-  secondSocket.close();
-
+  // Nothing was interrupted or cancelled: the Run still waits for the tool it asked for.
   const events = await new RuntimeStore(dataDir).readEvents();
-  assert.ok(events.some((event) => (
-    event.type === "tool.call"
-    && event.run_id === "run_disconnect_lock_1"
-    && event.tool_call_id === firstToolRequest.tool_call_id
-    && event.status === "cancelled"
-  )));
-  assert.ok(!events.some((event) => (
-    event.type === "runtime.event"
-    && event.run_id === "run_disconnect_lock_2"
-    && typeof event.event === "object"
-    && event.event !== null
-    && (event.event as Record<string, unknown>).type === "turn.failed"
-    && ((event.event as Record<string, unknown>).error as Record<string, unknown> | undefined)?.code === "conversation_busy"
-  )));
+  assert.ok(!events.some((event) => event.type === "turn.state" && event.run_id === "run_disconnect_lock_1" && (event.to === "interrupted" || event.to === "cancelled")));
+  assert.ok(!events.some((event) => event.type === "tool.call" && event.run_id === "run_disconnect_lock_1" && event.status === "cancelled"));
+
+  const secondMessages: OutboundMessage[] = [];
+  const secondSocket = await openConversationSocket(serverUrl, "conv_disconnect_lock", secondMessages);
+  const replayed = await waitForSocketMessage(secondMessages, (message) => message.type === "tool_call.request" && message.run_id === "run_disconnect_lock_1");
+  assert.equal(replayed.type === "tool_call.request" && replayed.tool_call_id, firstToolRequest.type === "tool_call.request" && firstToolRequest.tool_call_id);
+  secondSocket.close();
 });
 
 test("run cancel for an unknown run does not cancel the active run", async () => {

@@ -1,10 +1,13 @@
 import path from "node:path";
 import { Pool, type QueryResultRow } from "pg";
 import type { PostgresQueryExecutor } from "./postgresStore.js";
-import type { PostgresStore } from "./postgresStore.js";
+import type { PostgresStore, PostgresTransactionClient } from "./postgresStore.js";
 import { LocalRuntimeAuthority, localRuntimeAuthority, type RunStatus, type StoreEvent, type SubmissionReceipt } from "./store.js";
 import type { ConversationMessage } from "./protocol.js";
 import { normalizeBriefSnapshot, type BriefSnapshot } from "./brief.js";
+import { ledgerEntry, steeredPayload, type ClaimedMessage, type LedgerEntry } from "./chat/messageLedger.js";
+
+export const DEFAULT_RUN_LEASE_MS = 30_000;
 
 /**
  * This control-plane view shares its commit authority with RuntimeStore:
@@ -58,8 +61,13 @@ export type ConversationRunRecord = {
   interruptedReason?: string;
   /** Opaque, Runtime-generated connection owner. Never supplied by Desktop. */
   executorId?: string;
-  /** Reserved for a future renewable cross-process lease protocol; unused in V1. */
+  /** Renewed by the owning instance; another instance takes the Run over once it lapses. */
   executorLeaseExpiresAt?: string;
+  /** User messages that joined this Run, and how many of them the Run has claimed. */
+  steeredCount: number;
+  consumedCount: number;
+  /** Assistant text produced so far, saved periodically so a snapshot is never blank. */
+  partialOutput?: string;
 };
 
 export type ConversationJournalEvent = {
@@ -67,7 +75,7 @@ export type ConversationJournalEvent = {
   cursor: number;
   conversationId: string;
   runId?: string;
-  type: "conversation.created" | "conversation.updated" | "run.created" | "run.state" | "message.created";
+  type: "conversation.created" | "conversation.updated" | "run.created" | "run.state" | "message.created" | "message.consumed";
   payload: Record<string, unknown>;
   createdAt: string;
 };
@@ -116,7 +124,8 @@ export type AcceptSubmissionInput = {
   run: CreateRunInput;
   canonicalUser: ConversationMessage;
 };
-export type AcceptedSubmission = { created: boolean; run: ConversationRunRecord; receipt: SubmissionReceipt };
+/** `created`: a new Run started. `steered`: the message joined the active Run. Neither: an idempotent replay. */
+export type AcceptedSubmission = { created: boolean; steered?: boolean; run: ConversationRunRecord; receipt: SubmissionReceipt };
 
 export function submissionEvents(input: AcceptSubmissionInput, timestamp: string): StoreEvent[] {
   if (input.canonicalUser.role !== "user") throw new Error("Submission must contain a canonical user message");
@@ -139,7 +148,7 @@ export type UpdateConversationInput = {
 
 export class ConversationRepositoryError extends Error {
   constructor(
-    readonly code: "conversation_not_found" | "conversation_binding_mismatch" | "conversation_archived" | "conversation_busy" | "version_conflict" | "run_not_found" | "run_id_conflict" | "client_message_conflict" | "submission_not_accepted",
+    readonly code: "conversation_not_found" | "conversation_binding_mismatch" | "conversation_archived" | "conversation_busy" | "version_conflict" | "run_not_found" | "run_id_conflict" | "client_message_conflict" | "submission_not_accepted" | "steer_pending",
     message: string,
     readonly existingRun?: ConversationRunRecord
   ) {
@@ -181,12 +190,17 @@ export interface ConversationRepository {
    * Throw RangeError unless afterCursor <= throughCursor <= current high water.
    */
   journalPage(conversationId: string, afterCursor: number, throughCursor?: number, limit?: number): Promise<ConversationJournalPage>;
-  /**
-   * V1 recovery never resurrects work from a lost executor. Pending tool calls
-   * become Interrupted; a future attach/reclaim protocol must mint a new lease
-   * and must not replay effects from this Run.
-   */
-  interruptActiveRuns(reason: string): Promise<ConversationRunRecord[]>;
+  /** Whether this client key was already accepted, so a retry needs no asset work. */
+  hasAcceptedMessage(conversationId: string, clientMessageId: string): Promise<boolean>;
+  /** The conversation's one active Run, if any. */
+  getActiveRun(conversationId: string): Promise<ConversationRunRecord | undefined>;
+  /** Hands the Run its steered messages exactly once, in arrival order. */
+  claimSteeredMessages(runId: string): Promise<ClaimedMessage[]>;
+  savePartialOutput(runId: string, text: string): Promise<void>;
+  /** Atomically takes over active Runs whose owner's lease lapsed. */
+  claimOrphanedRuns(executorId: string, leaseMs: number): Promise<ConversationRunRecord[]>;
+  /** False when the lease is no longer this executor's. */
+  renewLease(runId: string, executorId: string, leaseMs: number): Promise<boolean>;
 }
 
 const ACTIVE_RUN_STATUSES = new Set<DurableRunStatus>([
@@ -399,6 +413,9 @@ export class InMemoryConversationRepository implements ConversationRepository {
       const conversation = this.conversations.get(input.run.conversationId);
       if (!conversation) throw new ConversationRepositoryError("conversation_not_found", "Conversation was not found");
       assertSameConversationBinding(conversation, input.binding);
+      const key = input.run.clientMessageId;
+      const steeredBefore = this.ledger(input.run.conversationId).find((entry) => entry.clientMessageId === key && entry.steered);
+      if (steeredBefore) return this.replaySteered(steeredBefore, input);
       const existing = [...this.runs.values()].find((row) => row.conversationId === input.run.conversationId && row.clientMessageId === input.run.clientMessageId);
       if (existing) {
         assertSameRunInput(existing, input.run);
@@ -406,13 +423,91 @@ export class InMemoryConversationRepository implements ConversationRepository {
           && event.conversation_id === existing.conversationId && event.run_id === existing.id
           && event.client_message_id === existing.clientMessageId && event.message.role === "user");
         if (!user) throw new ConversationRepositoryError("submission_not_accepted", "Historical run has no accepted submission; submit explicitly with a new client_message_id", existing);
-        return { created: false, run: cloneRun(existing), receipt: { run_id: existing.id, client_message_id: existing.clientMessageId, accepted_at: user.timestamp } };
+        return { created: false, steered: false, run: cloneRun(existing), receipt: { run_id: existing.id, client_message_id: existing.clientMessageId, accepted_at: user.timestamp } };
+      }
+      const active = [...this.runs.values()].find((row) => row.conversationId === input.run.conversationId && isActiveRun(row.status));
+      if (active) {
+        const run = { ...active, steeredCount: active.steeredCount + 1 };
+        this.runs.set(run.id, run);
+        const event = this.appendEventUnsafe({ conversationId: run.conversationId, runId: run.id, type: "message.created",
+          payload: steeredPayload(key, input.run.inputDigest, input.canonicalUser) });
+        return { created: false, steered: true, run: cloneRun(run), receipt: { run_id: run.id, client_message_id: key, accepted_at: event.createdAt } };
       }
       const { run } = await this.createRunUnsafe(input.run);
       this.pendingStoreEvents = submissionEvents(input, run.createdAt);
       this.appendEventUnsafe({ conversationId: run.conversationId, runId: run.id, type: "message.created",
-        payload: { role: "user", client_message_id: run.clientMessageId }, createdAt: run.createdAt });
-      return { created: true, run, receipt: { run_id: run.id, client_message_id: run.clientMessageId, accepted_at: run.createdAt } };
+        payload: { role: "user", client_message_id: run.clientMessageId, input_digest: input.run.inputDigest }, createdAt: run.createdAt });
+      return { created: true, steered: false, run, receipt: { run_id: run.id, client_message_id: run.clientMessageId, accepted_at: run.createdAt } };
+    });
+  }
+
+  private ledger(conversationId: string): LedgerEntry[] {
+    return [...this.localAuthority.journal, ...this.events]
+      .filter((event) => event.conversationId === conversationId)
+      .flatMap((event) => ledgerEntry(event) ?? []);
+  }
+
+  private replaySteered(entry: LedgerEntry, input: AcceptSubmissionInput): AcceptedSubmission {
+    if (entry.digest !== input.run.inputDigest) {
+      throw new ConversationRepositoryError("client_message_conflict", `client_message_id ${entry.clientMessageId} was already used with different user input`);
+    }
+    const run = this.runs.get(entry.runId!)!;
+    return { created: false, steered: false, run: cloneRun(run), receipt: { run_id: run.id, client_message_id: entry.clientMessageId, accepted_at: entry.acceptedAt } };
+  }
+
+  async hasAcceptedMessage(conversationId: string, clientMessageId: string): Promise<boolean> {
+    await this.readReady();
+    return [...this.runs.values()].some((run) => run.conversationId === conversationId && run.clientMessageId === clientMessageId)
+      || this.ledger(conversationId).some((entry) => entry.clientMessageId === clientMessageId);
+  }
+
+  async getActiveRun(conversationId: string): Promise<ConversationRunRecord | undefined> {
+    await this.readReady();
+    const run = [...this.runs.values()].find((row) => row.conversationId === conversationId && isActiveRun(row.status));
+    return run ? cloneRun(run) : undefined;
+  }
+
+  async claimSteeredMessages(runId: string): Promise<ClaimedMessage[]> {
+    return this.write(async () => {
+      const run = this.runs.get(runId);
+      if (!run || run.consumedCount >= run.steeredCount) return [];
+      const steered = this.ledger(run.conversationId).filter((entry) => entry.runId === runId && entry.steered)
+        .slice(run.consumedCount, run.steeredCount);
+      this.runs.set(runId, { ...run, consumedCount: run.steeredCount });
+      for (const entry of steered) {
+        this.appendEventUnsafe({ conversationId: run.conversationId, runId, type: "message.consumed", payload: { client_message_id: entry.clientMessageId } });
+      }
+      return steered.map((entry) => ({ clientMessageId: entry.clientMessageId, message: entry.message! }));
+    });
+  }
+
+  async savePartialOutput(runId: string, text: string): Promise<void> {
+    await this.write(async () => {
+      const run = this.runs.get(runId);
+      if (run && isActiveRun(run.status)) this.runs.set(runId, { ...run, partialOutput: text });
+    });
+  }
+
+  async claimOrphanedRuns(executorId: string, leaseMs: number): Promise<ConversationRunRecord[]> {
+    return this.write(async () => {
+      const claimed: ConversationRunRecord[] = [];
+      for (const run of this.runs.values()) {
+        if (!isActiveRun(run.status) || run.executorId === executorId) continue;
+        if (run.executorLeaseExpiresAt && Date.parse(run.executorLeaseExpiresAt) > Date.now()) continue;
+        const next = { ...run, executorId, executorLeaseExpiresAt: new Date(Date.now() + leaseMs).toISOString() };
+        this.runs.set(run.id, next);
+        claimed.push(cloneRun(next));
+      }
+      return claimed;
+    });
+  }
+
+  async renewLease(runId: string, executorId: string, leaseMs: number): Promise<boolean> {
+    return this.write(async () => {
+      const run = this.runs.get(runId);
+      if (!run || run.executorId !== executorId || !isActiveRun(run.status)) return false;
+      this.runs.set(runId, { ...run, executorLeaseExpiresAt: new Date(Date.now() + leaseMs).toISOString() });
+      return true;
     });
   }
 
@@ -453,8 +548,10 @@ export class InMemoryConversationRepository implements ConversationRepository {
         status: "queued",
         corpusDigest: input.corpusDigest,
         createdAt: now(),
+        steeredCount: 0,
+        consumedCount: 0,
         ...(input.executorId ? { executorId: input.executorId } : {}),
-        ...(input.executorLeaseExpiresAt ? { executorLeaseExpiresAt: input.executorLeaseExpiresAt } : {})
+        executorLeaseExpiresAt: input.executorLeaseExpiresAt ?? new Date(Date.now() + DEFAULT_RUN_LEASE_MS).toISOString()
       };
       this.runs.set(run.id, run);
       this.appendEventUnsafe({
@@ -505,6 +602,7 @@ export class InMemoryConversationRepository implements ConversationRepository {
       if (!current) throw new ConversationRepositoryError("run_not_found", `Run ${runId} was not found`);
       if (current.status === status) return cloneRun(current);
       if (TERMINAL_RUN_STATUSES.has(current.status)) return cloneRun(current);
+      assertNoUnclaimedSteer(current, status);
       const timestamp = now();
       const updated: ConversationRunRecord = {
         ...current,
@@ -594,39 +692,19 @@ export class InMemoryConversationRepository implements ConversationRepository {
     return 0;
   }
 
-  async interruptActiveRuns(reason: string): Promise<ConversationRunRecord[]> {
-    return this.write(async () => {
-      const interrupted: ConversationRunRecord[] = [];
-      for (const run of this.runs.values()) {
-        if (!isActiveRun(run.status)) continue;
-        const timestamp = now();
-        const next: ConversationRunRecord = {
-          ...run,
-          status: "interrupted",
-          completedAt: timestamp,
-          interruptedReason: reason
-        };
-        this.runs.set(run.id, next);
-        this.appendEventUnsafe({
-          conversationId: next.conversationId,
-          runId: next.id,
-          type: "run.state",
-          payload: { ...publicRunEvent(next), reason }
-        });
-        interrupted.push(cloneRun(next));
-      }
-      return interrupted;
-    });
-  }
-
   private async readReady(): Promise<void> {
     await this.localAuthority.ready();
-    this.loadAuthority();
+    // A read that lands while a write is staging must not replace the staged maps: that write would lose its changes.
+    if (this.writing === 0) this.loadAuthority();
   }
+
+  private writing = 0;
 
   private loadAuthority(): void {
     this.conversations = this.localAuthority.conversations;
     this.runs = this.localAuthority.runs;
+    // Runs committed before steering existed carry no counters.
+    for (const run of this.runs.values()) { run.steeredCount ??= 0; run.consumedCount ??= 0; }
     this.conversationRequests = this.localAuthority.requests;
     this.events = this.localAuthority.journal;
     this.nextCursor = (this.events.at(-1)?.cursor ?? 0) + 1;
@@ -634,6 +712,7 @@ export class InMemoryConversationRepository implements ConversationRepository {
 
   private async write<T>(operation: () => Promise<T>): Promise<T> {
     return this.localAuthority.transact(async () => {
+      this.writing += 1;
       this.loadAuthority();
       const beforeConversations = this.conversations;
       const beforeRuns = this.runs;
@@ -657,6 +736,7 @@ export class InMemoryConversationRepository implements ConversationRepository {
       } finally {
         this.loadAuthority();
         this.pendingStoreEvents = [];
+        this.writing -= 1;
       }
     });
   }
@@ -747,6 +827,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS hatch_conversation_one_active_run_idx
   WHERE status IN ('queued', 'running', 'waiting_for_tool', 'compacting');
 CREATE INDEX IF NOT EXISTS hatch_conversation_runs_conversation_idx
   ON hatch_conversation_runs (conversation_id, created_at ASC, id ASC);
+ALTER TABLE hatch_conversation_runs ADD COLUMN IF NOT EXISTS steered_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE hatch_conversation_runs ADD COLUMN IF NOT EXISTS consumed_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE hatch_conversation_runs ADD COLUMN IF NOT EXISTS partial_output TEXT;
 
 CREATE TABLE IF NOT EXISTS hatch_conversation_journal (
   cursor BIGSERIAL PRIMARY KEY,
@@ -758,6 +841,10 @@ CREATE TABLE IF NOT EXISTS hatch_conversation_journal (
 );
 CREATE INDEX IF NOT EXISTS hatch_conversation_journal_cursor_idx
   ON hatch_conversation_journal (conversation_id, cursor ASC);
+-- Message-level idempotency: the database, not the caller, guarantees one user message per client key.
+CREATE UNIQUE INDEX IF NOT EXISTS hatch_conversation_user_message_key_idx
+  ON hatch_conversation_journal (conversation_id, (payload->>'client_message_id'))
+  WHERE event_type = 'message.created' AND payload->>'role' = 'user';
 `;
 
 export type PostgresConversationRepositoryOptions = {
@@ -791,7 +878,153 @@ export class PostgresConversationRepository implements ConversationRepository {
   async acceptSubmission(input: AcceptSubmissionInput): Promise<AcceptedSubmission> {
     if (!this.submissionStore) throw new Error("Atomic submission store is not configured");
     await this.initialize();
-    return this.submissionStore.acceptSubmission(input);
+    // Steer-or-start: join the active Run, or start one. Losing the race to start
+    // means a Run now exists, so the next pass steers it.
+    for (let attempt = 0; ; attempt++) {
+      const joined = await this.steerOrReplay(input);
+      if (joined) return joined;
+      try {
+        return await this.submissionStore.acceptSubmission(input);
+      } catch (error) {
+        // Inside the submission transaction a unique violation (the single-active-run index) surfaces as run_id_conflict.
+        const retry = error instanceof ConversationRepositoryError ? error.code === "conversation_busy" || error.code === "run_id_conflict" : isUniqueViolation(error);
+        if (!retry || attempt >= 3) throw error;
+      }
+    }
+  }
+
+  /** One transaction under the conversation row lock; undefined means no Run is active to join. */
+  private async steerOrReplay(input: AcceptSubmissionInput): Promise<AcceptedSubmission | undefined> {
+    // Nothing to join and no earlier steer under this key: starting is the submission store's one transaction.
+    const probe = await this.pool.query<{ joinable: boolean }>(`
+      SELECT EXISTS (SELECT 1 FROM hatch_conversation_runs WHERE conversation_id = $1 AND status IN ('queued', 'running', 'waiting_for_tool', 'compacting'))
+        OR EXISTS (SELECT 1 FROM hatch_conversation_journal WHERE conversation_id = $1 AND event_type = 'message.created'
+          AND payload->>'role' = 'user' AND payload->>'client_message_id' = $2 AND payload->>'steered' = 'true') AS joinable
+    `, [input.run.conversationId, input.run.clientMessageId]);
+    if (!probe.rows[0]?.joinable) return undefined;
+    return this.inTransaction(async (repository) => {
+      await repository.pool.query("SELECT id FROM hatch_conversations WHERE id = $1 FOR UPDATE", [input.run.conversationId]);
+      const conversation = await repository.getConversation(input.run.conversationId);
+      if (!conversation) throw new ConversationRepositoryError("conversation_not_found", "Conversation was not found");
+      assertConversationBinding(conversation, input.binding);
+      const key = input.run.clientMessageId;
+      const prior = await repository.pool.query<JournalRow>(`
+        SELECT * FROM hatch_conversation_journal
+        WHERE conversation_id = $1 AND event_type = 'message.created' AND payload->>'role' = 'user' AND payload->>'client_message_id' = $2
+      `, [input.run.conversationId, key]);
+      const entry = prior.rows[0] ? ledgerEntry(eventFromRow(prior.rows[0])) : undefined;
+      if (entry?.steered) {
+        if (entry.digest !== input.run.inputDigest) {
+          throw new ConversationRepositoryError("client_message_conflict", `client_message_id ${key} was already used with different user input`);
+        }
+        const run = await repository.getRun(input.run.conversationId, entry.runId!);
+        return { created: false, steered: false, run: run!, receipt: { run_id: entry.runId!, client_message_id: key, accepted_at: entry.acceptedAt } };
+      }
+      if (entry) return undefined;
+      const active = await repository.pool.query<RunRow>(`
+        UPDATE hatch_conversation_runs SET steered_count = steered_count + 1
+        WHERE conversation_id = $1 AND status IN ('queued', 'running', 'waiting_for_tool', 'compacting')
+        RETURNING *
+      `, [input.run.conversationId]);
+      if (!active.rows[0]) return undefined;
+      const run = runFromRow(active.rows[0]);
+      const event = await repository.appendEvent({ conversationId: run.conversationId, runId: run.id, type: "message.created",
+        payload: steeredPayload(key, input.run.inputDigest, input.canonicalUser) });
+      return { created: false, steered: true, run, receipt: { run_id: run.id, client_message_id: key, accepted_at: event.createdAt } };
+    });
+  }
+
+  private async inTransaction<T>(body: (repository: PostgresConversationRepository) => Promise<T>): Promise<T> {
+    const pool = this.pool as PostgresQueryExecutor & { connect?: () => Promise<PostgresTransactionClient> };
+    if (!pool.connect) throw new Error("Atomic steering requires a pinned Postgres connection");
+    const client = await pool.connect();
+    let failure: Error | undefined;
+    try {
+      await client.query("BEGIN");
+      const result = await body(PostgresConversationRepository.inTransaction(client));
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      failure = error instanceof Error ? error : new Error(String(error));
+      try { await client.query("ROLLBACK"); } catch { /* an unacknowledged COMMIT is resolved by the unique ledger key on retry */ }
+      throw error;
+    } finally {
+      client.release(failure);
+    }
+  }
+
+  async hasAcceptedMessage(conversationId: string, clientMessageId: string): Promise<boolean> {
+    await this.initialize();
+    const result = await this.pool.query<{ accepted: boolean }>(`
+      SELECT EXISTS (SELECT 1 FROM hatch_conversation_runs WHERE conversation_id = $1 AND client_message_id = $2)
+        OR EXISTS (SELECT 1 FROM hatch_conversation_journal WHERE conversation_id = $1 AND event_type = 'message.created'
+          AND payload->>'role' = 'user' AND payload->>'client_message_id' = $2) AS accepted
+    `, [conversationId, clientMessageId]);
+    return result.rows[0]?.accepted === true;
+  }
+
+  async getActiveRun(conversationId: string): Promise<ConversationRunRecord | undefined> {
+    await this.initialize();
+    const result = await this.pool.query<RunRow>(`
+      SELECT * FROM hatch_conversation_runs
+      WHERE conversation_id = $1 AND status IN ('queued', 'running', 'waiting_for_tool', 'compacting')
+    `, [conversationId]);
+    return result.rows[0] ? runFromRow(result.rows[0]) : undefined;
+  }
+
+  async claimSteeredMessages(runId: string): Promise<ClaimedMessage[]> {
+    await this.initialize();
+    return this.inTransaction(async (repository) => {
+      const locked = await repository.pool.query<RunRow>("SELECT * FROM hatch_conversation_runs WHERE id = $1 FOR UPDATE", [runId]);
+      const run = locked.rows[0] ? runFromRow(locked.rows[0]) : undefined;
+      if (!run || run.consumedCount >= run.steeredCount) return [];
+      const rows = await repository.pool.query<JournalRow>(`
+        SELECT * FROM hatch_conversation_journal
+        WHERE run_id = $1 AND event_type = 'message.created' AND payload->>'steered' = 'true'
+        ORDER BY cursor ASC OFFSET $2 LIMIT $3
+      `, [runId, run.consumedCount, run.steeredCount - run.consumedCount]);
+      await repository.pool.query("UPDATE hatch_conversation_runs SET consumed_count = steered_count WHERE id = $1", [runId]);
+      const claimed: ClaimedMessage[] = [];
+      for (const row of rows.rows) {
+        const entry = ledgerEntry(eventFromRow(row))!;
+        await repository.appendEvent({ conversationId: run.conversationId, runId, type: "message.consumed", payload: { client_message_id: entry.clientMessageId } });
+        claimed.push({ clientMessageId: entry.clientMessageId, message: entry.message! });
+      }
+      return claimed;
+    });
+  }
+
+  async savePartialOutput(runId: string, text: string): Promise<void> {
+    await this.initialize();
+    await this.pool.query(`
+      UPDATE hatch_conversation_runs SET partial_output = $2
+      WHERE id = $1 AND status IN ('queued', 'running', 'waiting_for_tool', 'compacting')
+    `, [runId, text]);
+  }
+
+  async claimOrphanedRuns(executorId: string, leaseMs: number): Promise<ConversationRunRecord[]> {
+    await this.initialize();
+    const result = await this.pool.query<RunRow>(`
+      UPDATE hatch_conversation_runs SET executor_id = $1, executor_lease_expires_at = now() + ($2 * interval '1 millisecond')
+      WHERE id IN (
+        SELECT id FROM hatch_conversation_runs
+        WHERE status IN ('queued', 'running', 'waiting_for_tool', 'compacting')
+          AND executor_id IS DISTINCT FROM $1
+          AND (executor_lease_expires_at IS NULL OR executor_lease_expires_at < now())
+        FOR UPDATE SKIP LOCKED)
+      RETURNING *
+    `, [executorId, leaseMs]);
+    return result.rows.map(runFromRow);
+  }
+
+  async renewLease(runId: string, executorId: string, leaseMs: number): Promise<boolean> {
+    await this.initialize();
+    const result = await this.pool.query(`
+      UPDATE hatch_conversation_runs SET executor_lease_expires_at = now() + ($3 * interval '1 millisecond')
+      WHERE id = $1 AND executor_id = $2 AND status IN ('queued', 'running', 'waiting_for_tool', 'compacting')
+      RETURNING id
+    `, [runId, executorId, leaseMs]);
+    return result.rows.length > 0;
   }
 
   constructor(connectionString?: string);
@@ -977,11 +1210,11 @@ export class PostgresConversationRepository implements ConversationRepository {
       const result = await this.pool.query<RunRow>(`
         INSERT INTO hatch_conversation_runs (
           id, conversation_id, client_message_id, input_digest, status, corpus_digest, executor_id, executor_lease_expires_at
-        ) VALUES ($1, $2, $3, $4, 'queued', $5, $6, $7)
+        ) VALUES ($1, $2, $3, $4, 'queued', $5, $6, COALESCE($7::timestamptz, now() + ($8 * interval '1 millisecond')))
         RETURNING *
       `, [
         input.id, input.conversationId, input.clientMessageId, input.inputDigest, input.corpusDigest,
-        input.executorId ?? null, input.executorLeaseExpiresAt ?? null
+        input.executorId ?? null, input.executorLeaseExpiresAt ?? null, DEFAULT_RUN_LEASE_MS
       ]);
       const run = runFromRow(requireRow(result.rows[0], "Run insert returned no row"));
       await this.appendEvent({ conversationId: run.conversationId, runId: run.id, type: "run.created", payload: publicRunEvent(run) });
@@ -1053,16 +1286,18 @@ export class PostgresConversationRepository implements ConversationRepository {
     if (!currentRow) throw new ConversationRepositoryError("run_not_found", `Run ${runId} was not found`);
     const current = runFromRow(currentRow);
     if (current.status === status || TERMINAL_RUN_STATUSES.has(current.status)) return current;
+    assertNoUnclaimedSteer(current, status);
     const result = await this.pool.query<RunRow>(`
       UPDATE hatch_conversation_runs
       SET status = $2,
           started_at = CASE WHEN $2 = 'running' AND started_at IS NULL THEN now() ELSE started_at END,
           completed_at = CASE WHEN $2 IN ('completed', 'failed', 'cancelled', 'interrupted') THEN now() ELSE completed_at END,
           interrupted_reason = CASE WHEN $2 = 'interrupted' THEN $3 ELSE interrupted_reason END
-      WHERE id = $1
+      WHERE id = $1 AND NOT ($2 = 'completed' AND consumed_count < steered_count)
       RETURNING *
     `, [runId, status, reason ?? null]);
-    const updated = runFromRow(requireRow(result.rows[0], `Run ${runId} update returned no row`));
+    if (!result.rows[0]) throw new ConversationRepositoryError("steer_pending", `Run ${runId} accepted a message while completing`, current);
+    const updated = runFromRow(result.rows[0]);
     await this.appendEvent({
       conversationId: updated.conversationId,
       runId: updated.id,
@@ -1105,26 +1340,6 @@ export class PostgresConversationRepository implements ConversationRepository {
     const events = journal.rows.map(eventFromRow);
     const cursor = events.at(-1)?.cursor ?? await this.latestCursor(conversationId, afterCursor);
     return { conversation, runs, events, cursor };
-  }
-
-  async interruptActiveRuns(reason: string): Promise<ConversationRunRecord[]> {
-    await this.initialize();
-    const result = await this.pool.query<RunRow>(`
-      UPDATE hatch_conversation_runs
-      SET status = 'interrupted', completed_at = now(), interrupted_reason = $1
-      WHERE status IN ('queued', 'running', 'waiting_for_tool', 'compacting')
-      RETURNING *
-    `, [reason]);
-    const runs = result.rows.map(runFromRow);
-    for (const run of runs) {
-      await this.appendEvent({
-        conversationId: run.conversationId,
-        runId: run.id,
-        type: "run.state",
-        payload: { ...publicRunEvent(run), reason }
-      });
-    }
-    return runs;
   }
 
   private async latestCursor(conversationId: string, fallback: number): Promise<number> {
@@ -1218,6 +1433,9 @@ type RunRow = QueryResultRow & {
   created_at: string | Date;
   started_at: string | Date | null;
   completed_at: string | Date | null;
+  steered_count: number;
+  consumed_count: number;
+  partial_output: string | null;
 };
 
 type JournalRow = QueryResultRow & {
@@ -1261,7 +1479,10 @@ function runFromRow(row: RunRow): ConversationRunRecord {
     ...(row.completed_at ? { completedAt: iso(row.completed_at) } : {}),
     ...(row.interrupted_reason ? { interruptedReason: row.interrupted_reason } : {}),
     ...(row.executor_id ? { executorId: row.executor_id } : {}),
-    ...(row.executor_lease_expires_at ? { executorLeaseExpiresAt: iso(row.executor_lease_expires_at) } : {})
+    ...(row.executor_lease_expires_at ? { executorLeaseExpiresAt: iso(row.executor_lease_expires_at) } : {}),
+    steeredCount: Number(row.steered_count ?? 0),
+    consumedCount: Number(row.consumed_count ?? 0),
+    ...(row.partial_output ? { partialOutput: row.partial_output } : {})
   };
 }
 
@@ -1348,6 +1569,13 @@ export function assertConversationBinding(
 
 function cloneConversation(conversation: ConversationRecord): ConversationRecord {
   return { ...conversation, ...(conversation.briefSnapshot ? { briefSnapshot: structuredClone(conversation.briefSnapshot) } : {}) };
+}
+
+/** The database-level rule: a Run is not complete while a message it accepted is unclaimed. */
+function assertNoUnclaimedSteer(run: ConversationRunRecord, next: DurableRunStatus): void {
+  if (next === "completed" && run.consumedCount < run.steeredCount) {
+    throw new ConversationRepositoryError("steer_pending", `Run ${run.id} still has ${run.steeredCount - run.consumedCount} unclaimed message(s)`, run);
+  }
 }
 
 function cloneRun(run: ConversationRunRecord): ConversationRunRecord {

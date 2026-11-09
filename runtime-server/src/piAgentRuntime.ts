@@ -38,6 +38,7 @@ import {
   type WorkspacePathPolicy
 } from "./agentRuntime.js";
 import { SUMMARY_PREFIX, SUMMARY_SUFFIX } from "./compaction.js";
+import { renderSystemReminder } from "./surfaces/contract.js";
 import { createPiModel, createPiStreamFn } from "./piModel.js";
 import { traceAgentTools } from "./langfuse.js";
 import { resolveLlmProfile } from "./llmProfiles.js";
@@ -295,7 +296,9 @@ export class PiAgentRuntime implements AgentRuntime {
         ...await compactContext(messages),
         // Request-only: Pi sends the transformed list but keeps its own
         // transcript, so the reminder is never stored or repeated in history.
-        piUserMessage(runtimeReplyReminder(new Date(), input.time_zone))
+        piUserMessage(ctx.clientAttributes
+          ? `${runtimeReplyReminder(new Date(), input.time_zone)}\n${renderSystemReminder(ctx.clientAttributes())}`
+          : runtimeReplyReminder(new Date(), input.time_zone))
       ]
     });
 
@@ -775,6 +778,14 @@ export class PiAgentRuntime implements AgentRuntime {
 
     if (event.type === "turn_end" && (ctx.state.status === "cancelled" || ctx.state.status === "interrupted")) {
       agent.abort();
+      return;
+    }
+    if (event.type === "turn_end" && ctx.claimSteered) {
+      // Messages that joined the Run enter before its next model call. Pi injects
+      // them after the tool results of this turn, so history stays well-formed.
+      for (const message of await ctx.claimSteered()) {
+        agent.steer(toPiMessage(message, await loadAssetImages([message], ctx.assetStore)));
+      }
     }
   }
 }

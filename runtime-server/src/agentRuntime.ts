@@ -42,6 +42,8 @@ import { PiAgentRuntime } from "./piAgentRuntime.js";
 import type { PiAgentPromptRunner } from "./piPrompt.js";
 import { briefSnapshotPromptBlock, type BriefSnapshot } from "./brief.js";
 import type { RuntimeAssetStore } from "./assetStore.js";
+import { orderTools, type ClientAttributes } from "./surfaces/contract.js";
+import { describeLocalTool } from "./chat/toolSurface.js";
 
 export type RuntimeSessionSkills = {
   records: SkillRecord[];
@@ -86,6 +88,10 @@ export type RunContext = {
     protectedKnowledge: string;
   };
   knowledgeAvailable?: boolean;
+  /** The client of the latest message; the reminder appended to each model call describes it. */
+  clientAttributes?: () => ClientAttributes;
+  /** Hands the Run the messages that joined it. Called between model calls, never while compacting. */
+  claimSteered?: () => Promise<ConversationMessage[]>;
 };
 
 export interface AgentRuntime {
@@ -946,7 +952,7 @@ export function chatToolsForRun(
       || allowed === undefined
       || allowed.has(spec.runtimeName)
     ))
-    .map((spec) => tool(spec.name, spec.description, spec.properties, spec.required));
+    .map((spec) => tool(spec.name, spec.clientTool ? describeLocalTool(spec.clientTool, spec.description) : spec.description, spec.properties, spec.required));
   const creatorTools = externalToolDefinitions.map((definition) => tool(
     creatorModelToolName(definition.id),
     definition.description ?? "Expert-provided server tool.",
@@ -957,7 +963,8 @@ export function chatToolsForRun(
       ? definition.input_schema.required.filter((value): value is string => typeof value === "string")
       : []
   ));
-  return [...builtins, ...creatorTools];
+  // One fixed order, so a changed tool never invalidates the cached prefix after it.
+  return orderTools([...builtins, ...creatorTools].map((definition) => ({ name: definition.function.name, definition }))).map(({ definition }) => definition);
 }
 
 export function withActivityMessage(definition: PiToolDefinition): PiToolDefinition {

@@ -53,7 +53,9 @@ for (const backend of ["memory", "file"] as const) {
       assert.deepEqual((await repository.snapshot(id)).events.map((event) => event.type), ["conversation.created", "run.created", "message.created"]);
       assert.equal((await store.readEvents()).length, 2);
       await assert.rejects(repository.acceptSubmission({ ...input, run: { ...input.run, inputDigest: "different" } }), { code: "client_message_conflict" });
-      await assert.rejects(repository.acceptSubmission({ ...input, run: { ...input.run, clientMessageId: "another" } }), { code: "conversation_busy" });
+      const steered = await repository.acceptSubmission({ ...input, run: { ...input.run, id: "another-run", clientMessageId: "another" } });
+      assert.equal(steered.steered, true);
+      assert.equal(steered.run.id, winner.run.id);
       if (root) {
         const db = new DatabaseSync(path.join(root, "runtime-commits-v2.sqlite"));
         const accept = db.prepare("SELECT payload FROM commits WHERE json_extract(payload, '$.kind') = 'accept'").all();
@@ -74,7 +76,7 @@ for (const backend of ["memory", "file"] as const) {
         const reopenedAuthority = new LocalRuntimeAuthority(root);
         const reopened = new InMemoryConversationRepository(reopenedAuthority);
         const reopenedStore = new RuntimeStore(reopenedAuthority);
-        await reopened.interruptActiveRuns("executor lost");
+        await reopened.transitionRun(winner.run.id, "interrupted", "executor lost");
         const replay = await reopened.acceptSubmission(input);
         assert.equal(replay.created, false);
         assert.equal(replay.run.status, "interrupted");
@@ -154,7 +156,7 @@ test("file log survives process exits before and after commit, and independent w
     repository = new FileConversationRepository(root);
     const store = new RuntimeStore(repository.localAuthority);
     assert.deepEqual(await store.readSubmissionReceipt(id, receipts[0].run.id), receipts[0].receipt);
-    await repository.interruptActiveRuns("crashed after commit");
+    await repository.transitionRun(receipts[0].run.id, "interrupted", "crashed after commit");
     assert.equal((await repository.acceptSubmission(input)).created, false);
     assert.deepEqual(await store.readConversation(id), [input.canonicalUser]);
     await repository.close();
@@ -213,7 +215,7 @@ test("real PG: shared quota race admits one conversation; binding, archives and 
   await assert.rejects(repository.acceptSubmission(input), { code: "conversation_archived" });
   await repository.updateConversation(id, { status: "active" });
   await repository.createRun(input.run);
-  await repository.interruptActiveRuns("historical orphan");
+  await repository.transitionRun("run", "interrupted", "historical orphan");
   await assert.rejects(repository.acceptSubmission(input), { code: "submission_not_accepted" });
   assert.equal(await store.readSubmissionReceipt(id, "run"), undefined);
   assert.deepEqual(await store.readEvents(), []);
@@ -309,7 +311,7 @@ test("real PG: concurrent same ID, lost COMMIT acknowledgement and fresh pool re
     reopened.bindSubmissionStore(reopenedStore);
     const receipt = await reopenedStore.readSubmissionReceipt(id, "run");
     assert.ok(receipt);
-    await reopened.interruptActiveRuns("executor lost after commit");
+    await reopened.transitionRun("run", "interrupted", "executor lost after commit");
     const replays = await Promise.all(Array.from({ length: 8 }, (_, n) => reopened.acceptSubmission({ ...input, run: { ...input.run, id: `retry-${n}` } })));
     assert.ok(replays.every((row) => !row.created && row.run.status === "interrupted"));
     assert.ok(replays.every((row) => JSON.stringify(row.receipt) === JSON.stringify(receipt)));

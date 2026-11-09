@@ -125,6 +125,20 @@ export class ClientToolBroker {
     return result;
   }
 
+  /** Calls still waiting for a client, so a client that reconnects can answer them. */
+  pendingRequests(): ToolRequest[] {
+    return [...this.pending.values()].map((pending) => ({
+      type: "tool_call.request" as const,
+      run_id: pending.runId,
+      tool_call_id: pending.toolCallId,
+      name: pending.name,
+      arguments: pending.arguments,
+      approval: pending.approval,
+      ...(pending.scope ? { scope: pending.scope } : {}),
+      ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {})
+    }));
+  }
+
   private async dispatch(
     request: ToolRequest,
     pending: PendingCall,

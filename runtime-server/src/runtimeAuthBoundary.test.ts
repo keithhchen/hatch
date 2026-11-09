@@ -414,7 +414,7 @@ test("Runtime admits only one client hello while Registry authorization is pendi
   }
 });
 
-test("Runtime reserves the bound conversation slot before Registry awaits", async () => {
+test("a message waiting on the Registry does not hold the conversation: the next message authorizes on its own", async () => {
   const entitlement = testEntitlement();
   let identityCalls = 0;
   let releasePendingIdentity: ((identity: { sub: string } | undefined) => void) | undefined;
@@ -452,11 +452,12 @@ test("Runtime reserves the bound conversation slot before Registry awaits", asyn
     firstSocket.send(JSON.stringify(clientMessage("run-pending-first")));
     await pendingStarted;
 
-    const conversationBusy = waitForSocketMessage(secondSocket, (message) => message.run_id === "run-pending-same-conversation");
+    const secondFailure = waitForSocketMessage(secondSocket, (message) => message.run_id === "run-pending-same-conversation");
     secondSocket.send(JSON.stringify(clientMessage("run-pending-same-conversation")));
 
-    assert.equal(((await conversationBusy).error as { code?: string }).code, "conversation_busy");
-    assert.equal(identityCalls, 3);
+    // No Run exists yet, so nothing is busy: the second message asks the Registry itself, and is refused by it.
+    assert.equal(((await secondFailure).error as { code?: string }).code, "authentication_required");
+    assert.equal(identityCalls, 4);
     assert.equal(boundary.runCalls(), 0);
 
     releasePendingIdentity?.(undefined);

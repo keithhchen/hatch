@@ -18,7 +18,9 @@ export class RunStateMachine {
     readonly runId: string,
     readonly conversationId: string,
     private readonly store: RuntimeStore,
-    private readonly onTransition?: (status: RunStatus, reason?: string) => void | Promise<void>
+    private readonly onTransition?: (status: RunStatus, reason?: string) => void | Promise<void>,
+    /** Throws to refuse completion, for example while a message that joined the Run is unclaimed. */
+    private readonly canComplete?: () => Promise<void>
   ) {}
 
   get status(): RunStatus {
@@ -52,6 +54,7 @@ export class RunStateMachine {
   }
 
   async complete(): Promise<void> {
+    await this.canComplete?.();
     await this.transition("completed");
   }
 
