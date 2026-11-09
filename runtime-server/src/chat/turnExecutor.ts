@@ -56,13 +56,9 @@ export class TurnExecutor<Scope> implements RunExecutor {
     const conversation = await repository.getConversation(run.conversationId);
     if (!conversation) throw new Error(`Conversation ${run.conversationId} was not found`);
     const scope = registry.scopeOf(run.id) ?? await this.deps.scopes.resolve(conversation, control.signal);
-    const claimSteered = async (): Promise<ConversationMessage[]> => {
-      const claimed = await repository.claimSteeredMessages(run.id);
-      for (const { clientMessageId, message } of claimed) {
-        await store.append({ type: "conversation.model_message", conversation_id: conversation.id, run_id: run.id, client_message_id: clientMessageId, message });
-      }
-      return claimed.map(({ message }) => message);
-    };
+    // The repository appends each claimed message to the transcript in the claim's own transaction.
+    const claimSteered = async (): Promise<ConversationMessage[]> =>
+      (await repository.claimSteeredMessages(run.id)).map(({ message }) => message);
     await claimSteered();
     const history = await store.readConversation(conversation.id);
     const last = [...history].reverse().find((message) => message.role === "user");

@@ -159,7 +159,7 @@ test("a new message preempts background compaction and waits for it to end", asy
     await new Promise((resolve) => setTimeout(resolve, 20));
     events.push("job ended");
   });
-  assert.equal(background.schedule("c", async () => events.push("duplicate")), false);
+  assert.equal(background.schedule("c", async () => { events.push("duplicate"); }), false);
   await background.preempt("c");
   events.push("message proceeds");
   assert.deepEqual(events, ["job ended", "message proceeds"]);

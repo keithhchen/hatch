@@ -186,19 +186,27 @@ export class CompactionStrategy<M> {
     return messages.reduce((sum, message) => sum + this.adapter.describe(message).tokens, 0);
   }
 
+  private cold(request: Pick<CompactionRequest, "now" | "cacheTouchedAt">): boolean {
+    return request.now - (request.cacheTouchedAt ?? Number.NEGATIVE_INFINITY) > this.policy.cacheTtlMs;
+  }
+
+  /** Whether any stage would run: cheap, so a caller announces `compacting` only when something will happen. */
+  wants(messages: M[], request: Pick<CompactionRequest, "now" | "cacheTouchedAt" | "force">): boolean {
+    const tokens = this.tokensOf(messages);
+    return Boolean(request.force) || tokens >= this.policy.trigger || (tokens >= this.policy.prune && this.cold(request));
+  }
+
   /** The stage order is fixed: prune old tool results (only once the cache has expired), then summarize. */
   async compact(messages: M[], request: CompactionRequest): Promise<CompactionOutcome<M>> {
+    if (!this.wants(messages, request)) return { kind: "none" };
     const entries = messages.map((message) => this.adapter.describe(message));
     const tokensBefore = entries.reduce((sum, entry) => sum + entry.tokens, 0);
-    if (!request.force && tokensBefore < Math.min(this.policy.prune, this.policy.trigger)) return { kind: "none" };
     const cut = this.cutFor(entries, Math.floor(this.policy.tail * (request.tailScale ?? 1)));
     // Everything is the tail: there is nothing older to prune or summarize unless the context really is too big.
     if (cut <= 0 && tokensBefore < this.policy.trigger) return { kind: "none" };
     let current = messages;
     let pruned = 0;
-    if (request.now - (request.cacheTouchedAt ?? Number.NEGATIVE_INFINITY) > this.policy.cacheTtlMs) {
-      ({ messages: current, pruned } = this.prune(messages, entries, cut));
-    }
+    if (this.cold(request)) ({ messages: current, pruned } = this.prune(messages, entries, cut));
     const afterPrune = this.tokensOf(current);
     if (!request.force && afterPrune < this.policy.trigger) {
       return pruned ? { kind: "pruned", messages: current, tokensBefore, tokensAfter: afterPrune, pruned } : { kind: "none" };
@@ -292,8 +300,8 @@ export const newCompactionId = (): string => `cmp_${randomUUID().replaceAll("-",
 export class BackgroundCompactor<K> {
   private readonly jobs = new Map<K, { controller: AbortController; done: Promise<void>; timer?: NodeJS.Timeout }>();
 
-  /** Starts `run` after `delayMs` unless a job for this key is already pending. */
-  schedule(key: K, run: (signal: AbortSignal) => Promise<unknown>, delayMs = 0): boolean {
+  /** Starts `run` after `delayMs` unless a job for this key is already pending. A job that returns `{ again }` runs once more after that many ms. */
+  schedule(key: K, run: (signal: AbortSignal) => Promise<void | { again: number }>, delayMs = 0): boolean {
     if (this.jobs.has(key)) return false;
     const controller = new AbortController();
     let release!: () => void;
@@ -301,8 +309,13 @@ export class BackgroundCompactor<K> {
     const job: { controller: AbortController; done: Promise<void>; timer?: NodeJS.Timeout } = { controller, done };
     this.jobs.set(key, job);
     const start = (): void => {
-      void (async () => { try { if (!controller.signal.aborted) await run(controller.signal); } catch { /* the job reports its own failure */ } })()
-        .finally(() => { if (this.jobs.get(key) === job) this.jobs.delete(key); release(); });
+      let again: number | undefined;
+      void (async () => { try { if (!controller.signal.aborted) again = (await run(controller.signal))?.again; } catch { /* the job reports its own failure */ } })()
+        .finally(() => {
+          if (this.jobs.get(key) === job) this.jobs.delete(key);
+          release();
+          if (again !== undefined && !controller.signal.aborted) this.schedule(key, run, again);
+        });
     };
     if (delayMs > 0) { job.timer = setTimeout(start, delayMs); job.timer.unref(); } else start();
     return true;
