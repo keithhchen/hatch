@@ -538,10 +538,11 @@ test("per-user turn authorization capacity prevents one account from occupying t
 test("global active-run capacity rejects excess model work and releases on completion", async () => {
   let runCalls = 0;
   const runReleases: Array<() => void> = [];
+  const releaseByRun = new Map<string, () => void>();
   const agentRuntime: AgentRuntime = {
     async *run(input) {
       runCalls += 1;
-      await new Promise<void>((resolve) => runReleases.push(resolve));
+      await new Promise<void>((resolve) => { runReleases.push(resolve); releaseByRun.set(input.run_id, resolve); });
       yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
     }
   };
@@ -575,7 +576,8 @@ test("global active-run capacity rejects excess model work and releases on compl
     const firstCompleted = waitForMessage(sockets[0]!, (message) => message.type === "turn.completed" && message.run_id === "active-one");
     const firstStateCompleted = waitForMessage(sockets[0]!, (message) => message.type === "turn.state"
       && message.run_id === "active-one" && message.status === "completed");
-    runReleases[0]?.();
+    // Runs start in whatever order the server schedules them: release the one the test waits on.
+    releaseByRun.get("active-one")?.();
     await firstCompleted;
     await firstStateCompleted;
     await new Promise<void>((resolve) => setImmediate(resolve));

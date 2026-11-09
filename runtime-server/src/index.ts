@@ -2311,7 +2311,7 @@ async function handleRuntimeSocket(
             authToken = message.auth_token ?? message.license_token;
             client = clientAttributesOf(message, message);
             clearTimeout(helloDeadline);
-            await send({
+            const ready = send({
               type: "session.ready",
               conversation_id: conversation.publicId,
               accepted_protocol_version: message.protocol_version,
@@ -2348,7 +2348,9 @@ async function handleRuntimeSocket(
               } : {})
             });
             // A connection sees its conversation's live events, whoever started the Run.
+            // Subscribed before the ready frame is awaited: a client that answers it at once cannot outrun its own subscription.
             detach = chat.hub.subscribe(conversation.id, sink);
+            await ready;
             await replayPendingToolRequests(conversation.id);
             startEstablishedConnectionHeartbeat();
           } finally {

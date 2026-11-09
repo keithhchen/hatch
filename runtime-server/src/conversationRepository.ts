@@ -694,8 +694,11 @@ export class InMemoryConversationRepository implements ConversationRepository {
 
   private async readReady(): Promise<void> {
     await this.localAuthority.ready();
-    this.loadAuthority();
+    // A read that lands while a write is staging must not replace the staged maps: that write would lose its changes.
+    if (this.writing === 0) this.loadAuthority();
   }
+
+  private writing = 0;
 
   private loadAuthority(): void {
     this.conversations = this.localAuthority.conversations;
@@ -709,6 +712,7 @@ export class InMemoryConversationRepository implements ConversationRepository {
 
   private async write<T>(operation: () => Promise<T>): Promise<T> {
     return this.localAuthority.transact(async () => {
+      this.writing += 1;
       this.loadAuthority();
       const beforeConversations = this.conversations;
       const beforeRuns = this.runs;
@@ -732,6 +736,7 @@ export class InMemoryConversationRepository implements ConversationRepository {
       } finally {
         this.loadAuthority();
         this.pendingStoreEvents = [];
+        this.writing -= 1;
       }
     });
   }
