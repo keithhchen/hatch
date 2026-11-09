@@ -33,13 +33,13 @@ const output = (id: string, size: number): ConversationMessage => ({
 /** A test-only model: answers from a function, never from a real provider. */
 type Summarize = (input: SummarizeInput<RuntimeCompactionMessage>) => Promise<string>;
 
-async function harness(summarize: Summarize, options: { stopPollMs?: number } = {}) {
+async function harness(summarize: Summarize, options: { stopPollMs?: number; hard?: number } = {}) {
   const authority = new LocalRuntimeAuthority();
   const repository = new InMemoryConversationRepository(authority);
   const store = new RuntimeStore(authority);
   await repository.createConversation({ ...binding, id: conversationId, publicId: "compaction" });
   const hub = new RunEventHub();
-  const strategy = new CompactionStrategy(chatCompactionAdapter(summarize), { ...policyFor(20_000), prune: 150, trigger: 300, tail: 80, cacheTtlMs: 1_000, timeoutMs: 3_000, maxOverflowRetries: 2 });
+  const strategy = new CompactionStrategy(chatCompactionAdapter(summarize), { ...policyFor(20_000), prune: 150, trigger: 300, hard: options.hard ?? 300, tail: 80, cacheTtlMs: 1_000, timeoutMs: 3_000, maxOverflowRetries: 2 });
   const compaction = (executorId: string) => new ChatCompaction({ repository, store, hub, strategy: () => strategy, executorId, stopPollMs: options.stopPollMs ?? 10 });
   /** A finished conversation: the first Run's question, a file it wrote, and its answer. */
   const finished = async () => {
@@ -103,6 +103,25 @@ test("a new message preempts background compaction and waits for it to end; the 
   assert.equal(await repository.runningCompaction(conversationId), undefined, "ended before the message proceeds");
   assert.equal((await store.readConversation(conversationId))[0]!.role, "user");
   assert.deepEqual((await repository.snapshot(conversationId)).events.filter((row) => row.type === "compaction.completed"), []);
+  const types = (await repository.snapshot(conversationId)).events.filter((row) => row.type.startsWith("compaction.")).map((row) => `${row.type}:${(row.payload as { compaction_id: string }).compaction_id}`);
+  assert.equal(types.length, 2, "started and aborted");
+  assert.deepEqual(types.map((type) => type.split(":")[0]), ["compaction.started", "compaction.aborted"]);
+  assert.equal(new Set(types.map((type) => type.split(":")[1])).size, 1, "the same durable id");
+});
+
+test("a turn that is about to run answers without a summary while the history fits the hard limit", async () => {
+  const model = answers();
+  const { store, repository, compaction, finished } = await harness(model.summarize, { hard: 100_000 });
+  const first = await finished();
+  const { run } = await repository.acceptSubmission(submission(2, "continue please"));
+  await repository.transitionRun(run.id, "running");
+  const state = new RunStateMachine(run.id, conversationId, store, (status, reason) => repository.transitionRun(run.id, status, reason).then(() => undefined), undefined, "running");
+  const conversation = (await repository.getConversation(conversationId))!;
+  const turn = compaction("a").forRun({ run, conversation, state, publish: () => undefined, signal: new AbortController().signal });
+  assert.equal(await turn.ifNeeded(await store.readConversation(conversationId), "pre_turn"), undefined);
+  assert.deepEqual(model.inputs, []);
+  assert.deepEqual((await repository.snapshot(conversationId)).events.filter((row) => row.type.startsWith("compaction.")), []);
+  void first;
 });
 
 test("a new message on another instance preempts it too", async () => {

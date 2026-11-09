@@ -44,6 +44,8 @@ export interface CompactionMemory<M> {
 export type CompactionPolicy = {
   /** Summarize at or above this many tokens. */
   trigger: number;
+  /** Where the next reply no longer fits: a turn that is about to run waits for a summary only from here. */
+  hard: number;
   /** Prune old tool results at or above this many tokens, once the provider cache has expired. */
   prune: number;
   /** Verbatim tail kept after a summary. */
@@ -60,8 +62,10 @@ const DEFAULT_OUTPUT_TOKENS = 16_384;
 export function policyFor(contextWindow: number, options: { outputTokens?: number; cacheTtlMs?: number; timeoutMs?: number } = {}): CompactionPolicy {
   if (!Number.isFinite(contextWindow) || contextWindow < 4_096) throw new Error("A context window of at least 4096 tokens is required");
   const reserve = (options.outputTokens ?? DEFAULT_OUTPUT_TOKENS) + Math.floor(contextWindow * 0.1);
+  const trigger = Math.max(1_024, contextWindow - reserve);
   return {
-    trigger: Math.max(1_024, contextWindow - reserve),
+    trigger,
+    hard: Math.max(trigger, contextWindow - (options.outputTokens ?? DEFAULT_OUTPUT_TOKENS) - Math.floor(contextWindow * 0.05)),
     prune: Math.floor(contextWindow * 0.5),
     tail: Math.floor(contextWindow * 0.15),
     cacheTtlMs: options.cacheTtlMs ?? 5 * 60_000,
@@ -78,6 +82,8 @@ export type CompactionRequest = {
   signal: AbortSignal;
   /** Compact whatever the size: a manual request, or recovery from a provider overflow. */
   force?: boolean;
+  /** A turn is waiting: summarize only at the hard limit, because a summary costs a model call and a new message would pay for it. Pruning is free and still runs. */
+  turnWaiting?: boolean;
   /** Recovery halves the tail on every attempt. */
   tailScale?: number;
   /** A failed summary normally degrades to a bounded tail. A user who asked for it gets the error instead. */
@@ -192,10 +198,23 @@ export class CompactionStrategy<M> {
     return request.now - (request.cacheTouchedAt ?? Number.NEGATIVE_INFINITY) > this.policy.cacheTtlMs;
   }
 
-  /** Whether any stage would run: cheap, so a caller announces `compacting` only when something will happen. */
-  wants(messages: M[], request: Pick<CompactionRequest, "now" | "cacheTouchedAt" | "force">): boolean {
-    const tokens = this.tokensOf(messages);
-    return Boolean(request.force) || tokens >= this.policy.trigger || (tokens >= this.policy.prune && this.cold(request));
+  private limit(request: Pick<CompactionRequest, "turnWaiting">): number {
+    return request.turnWaiting ? this.policy.hard : this.policy.trigger;
+  }
+
+  /** Whether any stage has work: cheap, so a caller announces `compacting` only when something will happen. */
+  wants(messages: M[], request: Pick<CompactionRequest, "now" | "cacheTouchedAt" | "force" | "turnWaiting">): boolean {
+    if (request.force) return true;
+    const entries = messages.map((message) => this.adapter.describe(message));
+    const tokens = entries.reduce((sum, entry) => sum + entry.tokens, 0);
+    if (tokens >= this.limit(request)) return true;
+    if (tokens < this.policy.prune || !this.cold(request)) return false;
+    const cut = this.cutFor(entries, this.policy.tail);
+    return entries.some((entry, index) => index < cut && this.prunable(entry));
+  }
+
+  private prunable(entry: Entry): boolean {
+    return entry.role === "tool" && !entry.pruned && entry.tokens >= this.policy.minPruneTokens;
   }
 
   /** The stage order is fixed: prune old tool results (only once the cache has expired), then summarize. */
@@ -207,12 +226,12 @@ export class CompactionStrategy<M> {
     // Asked to compact a history that fits the tail: keep only the last turn, so there is something older to summarize.
     if (request.force && cut <= 0) cut = this.cutFor(entries, 0);
     // Everything is the tail: there is nothing older to prune or summarize unless the context really is too big.
-    if (cut <= 0 && tokensBefore < this.policy.trigger) return { kind: "none" };
+    if (cut <= 0 && tokensBefore < this.limit(request)) return { kind: "none" };
     let current = messages;
     let pruned = 0;
     if (this.cold(request)) ({ messages: current, pruned } = this.prune(messages, entries, cut));
     const afterPrune = this.tokensOf(current);
-    if (!request.force && afterPrune < this.policy.trigger) {
+    if (!request.force && afterPrune < this.limit(request)) {
       return pruned ? { kind: "pruned", messages: current, tokensBefore, tokensAfter: afterPrune, pruned } : { kind: "none" };
     }
     try {
@@ -237,7 +256,7 @@ export class CompactionStrategy<M> {
     let pruned = 0;
     const next = messages.map((message, index) => {
       const entry = entries[index]!;
-      if (index >= cut || entry.role !== "tool" || entry.pruned || entry.tokens < this.policy.minPruneTokens) return message;
+      if (index >= cut || !this.prunable(entry)) return message;
       pruned++;
       return this.adapter.prune(message, `[Tool result pruned: ${entry.toolName ?? "tool"}, about ${entry.tokens} tokens. Run the tool again if the output is needed.]`);
     });

@@ -122,7 +122,7 @@ export type ConversationJournalEvent = {
   cursor: number;
   conversationId: string;
   runId?: string;
-  type: "conversation.created" | "conversation.updated" | "run.created" | "run.state" | "message.created" | "message.consumed" | "compaction.started" | "compaction.completed";
+  type: "conversation.created" | "conversation.updated" | "run.created" | "run.state" | "message.created" | "message.consumed" | "compaction.started" | "compaction.completed" | "compaction.aborted";
   payload: Record<string, unknown>;
   createdAt: string;
 };
