@@ -12,7 +12,7 @@ const allowedTransitions: Record<RunStatus, RunStatus[]> = {
 };
 
 export class RunStateMachine {
-  private currentStatus: RunStatus = "queued";
+  private currentStatus: RunStatus;
 
   constructor(
     readonly runId: string,
@@ -20,8 +20,12 @@ export class RunStateMachine {
     private readonly store: RuntimeStore,
     private readonly onTransition?: (status: RunStatus, reason?: string) => void | Promise<void>,
     /** Throws to refuse completion, for example while a message that joined the Run is unclaimed. */
-    private readonly canComplete?: () => Promise<void>
-  ) {}
+    private readonly canComplete?: () => Promise<void>,
+    /** Where the Run already is when another instance takes it over. */
+    initial: RunStatus = "queued"
+  ) {
+    this.currentStatus = initial;
+  }
 
   get status(): RunStatus {
     return this.currentStatus;

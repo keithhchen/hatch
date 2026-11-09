@@ -1,4 +1,4 @@
-import type { ConversationRepository, ConversationRunRecord } from "../conversationRepository.js";
+import type { ConversationRepository, ConversationRunRecord, ToolCallOutcome } from "../conversationRepository.js";
 import type { ToolRequest, ToolResult } from "../protocol.js";
 
 /** The side of the client tool broker that outside callers reach: results in, cancellation out. */
@@ -34,7 +34,19 @@ export interface ResumePolicy {
   decide(run: ConversationRunRecord): Promise<ResumeDecision>;
 }
 
-export type SupervisorOptions = { executorId: string; leaseMs: number; sweepMs: number };
+export type SupervisorOptions = {
+  executorId: string;
+  leaseMs: number;
+  sweepMs: number;
+  /** How often answers stored by another instance are handed to the calls waiting here. */
+  toolPollMs?: number;
+  /** Called once a Run has completed, for work that follows a reply, such as compaction. */
+  afterReply?: (run: ConversationRunRecord) => void;
+};
+
+const outcomeOf = (result: ToolResult): ToolCallOutcome => result.status === "ok"
+  ? { status: "ok", result: result.result }
+  : { status: "error", error: result.error };
 
 type Owned = { conversationId: string; controller: AbortController; session?: ToolSession; done: Promise<void> };
 
@@ -50,7 +62,7 @@ export class RunSupervisor {
   private timers: NodeJS.Timeout[] = [];
 
   constructor(
-    private readonly repository: Pick<ConversationRepository, "renewLease" | "claimOrphanedRuns" | "getRun" | "transitionRun">,
+    private readonly repository: Pick<ConversationRepository, "renewLease" | "claimOrphanedRuns" | "getRun" | "transitionRun" | "listToolCalls" | "answerToolCall">,
     private readonly executor: RunExecutor,
     private readonly policy: ResumePolicy,
     private readonly options: SupervisorOptions
@@ -62,7 +74,8 @@ export class RunSupervisor {
     if (this.timers.length) return;
     this.timers = [
       setInterval(() => void this.renewLeases(), Math.max(1, Math.floor(this.options.leaseMs / 3))),
-      setInterval(() => void this.sweep(), this.options.sweepMs)
+      setInterval(() => void this.sweep(), this.options.sweepMs),
+      setInterval(() => void this.relayToolResults(), this.options.toolPollMs ?? 250)
     ];
     for (const timer of this.timers) timer.unref();
   }
@@ -88,8 +101,14 @@ export class RunSupervisor {
     return true;
   }
 
-  deliverToolResult(runId: string, result: ToolResult): Promise<boolean> {
-    return this.owned.get(runId)?.session?.handleResult(result) ?? Promise.resolve(false);
+  /**
+   * From any instance. The answer is recorded first, so the instance that waits for it, or one that takes
+   * the Run over, finds it; the instance that holds the call here gets it straight away.
+   */
+  async deliverToolResult(runId: string, result: ToolResult): Promise<boolean> {
+    const recorded = await this.repository.answerToolCall(runId, result.tool_call_id, outcomeOf(result)).catch(() => false);
+    const local = await this.owned.get(runId)?.session?.handleResult(result) ?? false;
+    return recorded || local;
   }
 
   owns(runId: string): boolean { return this.owned.has(runId); }
@@ -120,6 +139,21 @@ export class RunSupervisor {
     }
   }
 
+  /** Answers another instance recorded reach the calls this instance's Runs are waiting for. */
+  private async relayToolResults(): Promise<void> {
+    for (const [runId, owned] of this.owned) {
+      const waiting = owned.session?.pendingRequests() ?? [];
+      if (!waiting.length) continue;
+      const answered = (await this.repository.listToolCalls(runId).catch(() => [])).filter((call) => call.outcome && waiting.some((request) => request.tool_call_id === call.toolCallId));
+      for (const call of answered) {
+        const result = call.outcome!.status === "ok"
+          ? { type: "tool_call.result" as const, run_id: runId, tool_call_id: call.toolCallId, status: "ok" as const, result: call.outcome!.result }
+          : { type: "tool_call.result" as const, run_id: runId, tool_call_id: call.toolCallId, status: "error" as const, error: (call.outcome as { error: { code: string; message: string } }).error };
+        await owned.session!.handleResult(result).catch(() => false);
+      }
+    }
+  }
+
   private async renewLeases(): Promise<void> {
     for (const [runId, owned] of this.owned) {
       const held = await this.repository.renewLease(runId, this.options.executorId, this.options.leaseMs).catch(() => true);
@@ -134,6 +168,7 @@ export class RunSupervisor {
       for (;;) {
         await this.executor.execute(run, control);
         const latest = await this.repository.getRun(run.conversationId, run.id);
+        if (latest?.status === "completed") this.options.afterReply?.(latest);
         if (!latest || TERMINAL.has(latest.status) || owned.controller.signal.aborted) return;
         // A message joined after the executor's last claim: the Run is not over.
         if (latest.consumedCount < latest.steeredCount) { run = latest; continue; }

@@ -196,6 +196,7 @@ export type StoreEvent =
       conversation_id: string;
       parent_run_id: string;
       skill_run_id: string;
+      compaction_id?: string;
       replacement_history: ConversationMessage[];
       window_number: number;
       first_window_id: string;

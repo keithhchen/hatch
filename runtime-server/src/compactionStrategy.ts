@@ -80,6 +80,8 @@ export type CompactionRequest = {
   force?: boolean;
   /** Recovery halves the tail on every attempt. */
   tailScale?: number;
+  /** A failed summary normally degrades to a bounded tail. A user who asked for it gets the error instead. */
+  onFailure?: "degrade" | "throw";
 };
 
 export type CompactionOutcome<M> =
@@ -201,7 +203,9 @@ export class CompactionStrategy<M> {
     if (!this.wants(messages, request)) return { kind: "none" };
     const entries = messages.map((message) => this.adapter.describe(message));
     const tokensBefore = entries.reduce((sum, entry) => sum + entry.tokens, 0);
-    const cut = this.cutFor(entries, Math.floor(this.policy.tail * (request.tailScale ?? 1)));
+    let cut = this.cutFor(entries, Math.floor(this.policy.tail * (request.tailScale ?? 1)));
+    // Asked to compact a history that fits the tail: keep only the last turn, so there is something older to summarize.
+    if (request.force && cut <= 0) cut = this.cutFor(entries, 0);
     // Everything is the tail: there is nothing older to prune or summarize unless the context really is too big.
     if (cut <= 0 && tokensBefore < this.policy.trigger) return { kind: "none" };
     let current = messages;
@@ -215,6 +219,7 @@ export class CompactionStrategy<M> {
       return await this.summarize(messages, current, entries, cut, tokensBefore, request.signal);
     } catch (error) {
       if (request.signal.aborted) throw new CompactionAborted(String(request.signal.reason ?? "aborted"));
+      if (request.onFailure === "throw") throw error;
       return this.degrade(messages, entries, tokensBefore, Math.floor(this.policy.tail * (request.tailScale ?? 1) / 2), error instanceof Error ? error.message : String(error));
     }
   }

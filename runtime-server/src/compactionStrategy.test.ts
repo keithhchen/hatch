@@ -143,12 +143,16 @@ test("a timeout degrades; a preempting caller aborts instead", async () => {
   await assert.rejects(pending, CompactionAborted);
 });
 
-test("the tail shrinks on every recovery attempt, and a forced compaction of a short history does nothing", async () => {
+test("a forced compaction keeps less tail when the history fits it, and a user who asked gets the error, not a degraded tail", async () => {
   const history = [user("a"), answer("b"), user("c"), answer("d")];
-  const { port } = adapter(["## Goal\nx"]);
+  const { port } = adapter(["## Goal\nx", new Error("provider down")]);
   const strategy = new CompactionStrategy(port, policy());
-  assert.deepEqual(await strategy.compact(history, { ...live(), force: true }), { kind: "none" });
   assert.ok(strategy.cutFor(history, 150) >= strategy.cutFor(history, 300));
+  const outcome = await strategy.compact(history, { ...live(), force: true });
+  assert.equal(outcome.kind, "summarized");
+  assert.ok(outcome.kind === "summarized" && outcome.replaced >= 1 && outcome.messages.length < history.length + 1);
+  await assert.rejects(strategy.compact(history, { ...live(), force: true, onFailure: "throw" }), /provider down/);
+  assert.deepEqual(await strategy.compact([user("only")], { ...live(), force: true }), { kind: "none" });
 });
 
 test("a new message preempts background compaction and waits for it to end", async () => {

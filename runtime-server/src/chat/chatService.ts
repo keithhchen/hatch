@@ -71,10 +71,12 @@ export class ChatService<Scope> {
     admission: RunAdmission;
     registry: RunRegistry<Scope>;
     limits?: PrincipalLimits;
+    /** A message that may start a Run first ends the conversation's background compaction, on any instance. */
+    compaction?: { preempt(conversationId: string): Promise<void> };
   }) {}
 
   async submit(command: SubmitCommand<Scope>): Promise<Submission> {
-    const { repository, supervisor, hub, admission, registry, limits } = this.deps;
+    const { repository, supervisor, hub, admission, registry, limits, compaction } = this.deps;
     assertProductUsable(command.requiresLocalTools, command.client.client);
     await limits?.check(command.principal, command.conversation);
     // A message that joins a Run adds no work, so capacity is only reserved for one that may start a Run.
@@ -86,6 +88,8 @@ export class ChatService<Scope> {
     }
     let release = joining ? () => undefined : admission.reserve(command.principal);
     try {
+      // The new message aborts a compaction running after the last reply, and waits until it has ended.
+      if (!joining) await compaction?.preempt(command.conversation.id);
       const accepted = await repository.acceptSubmission({
         binding: command.conversation,
         run: {

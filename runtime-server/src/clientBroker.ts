@@ -25,6 +25,12 @@ type PendingCall = {
   state?: RunStateMachine;
 };
 
+/** Where a call is recorded before the client is asked, so another instance can answer it and a restart can find it. */
+export interface ToolCallLedger {
+  request(call: { runId: string; toolCallId: string; name: string; arguments: Record<string, unknown>; approval: "none" | "auto" | "ask";
+    scope?: ToolRequest["scope"]; skillRunId?: string; requestedAt: string; expiresAt: string }): Promise<void>;
+}
+
 export class ClientToolBroker {
   private nextId = 1;
   private readonly pending = new Map<string, PendingCall>();
@@ -32,7 +38,8 @@ export class ClientToolBroker {
   constructor(
     private readonly emit: (message: OutboundMessage) => Promise<void>,
     private readonly store: RuntimeStore,
-    private readonly timeoutMs = 120000
+    private readonly timeoutMs = 120000,
+    private readonly ledger?: ToolCallLedger
   ) {}
 
   execute(
@@ -164,6 +171,13 @@ export class ClientToolBroker {
       ...(options.skillRunId ? { skill_run_id: options.skillRunId } : {})
     });
     if (!this.isPending(key, pending)) return;
+    const requestedAt = Date.now();
+    await this.ledger?.request({
+      runId: pending.runId, toolCallId: pending.toolCallId, name: pending.name, arguments: parsedArgs, approval,
+      ...(options.scope ? { scope: options.scope } : {}), ...(options.skillRunId ? { skillRunId: options.skillRunId } : {}),
+      requestedAt: new Date(requestedAt).toISOString(), expiresAt: new Date(requestedAt + this.timeoutMs).toISOString()
+    });
+    if (!this.isPending(key, pending)) return;
     if (approval === "ask") {
       await this.emit({
         type: "approval.request",
@@ -281,6 +295,18 @@ export class ClientToolBroker {
       resume
     ]);
     return true;
+  }
+
+  /**
+   * This process lets go of its waiting calls without telling anyone they ended: another instance continues the Run
+   * and the calls stay recorded for it. Nothing is persisted and no client sees a cancellation.
+   */
+  abandon(reason = "Run handed off"): void {
+    for (const [key, pending] of this.pending) {
+      this.pending.delete(key);
+      clearTimeout(pending.timeout);
+      pending.reject(new Error(reason));
+    }
   }
 
   async cancelAll(reason = "Client broker canceled"): Promise<void> {
