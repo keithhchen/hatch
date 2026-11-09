@@ -6,13 +6,17 @@ import { ConversationRoutes, type ConversationRouteDeps } from "./conversations/
 import { createIngestService } from "./ingest/boot.js";
 import { IngestError, IngestService } from "./ingest/service.js";
 import { publicJob } from "./ingest/job.js";
-import { AccountReach, CHANNEL_KINDS, ChannelHub, PostgresChannelLinks, type ChannelKind, type ChannelLinks } from "./assistant/channels.js";
+import { AccountReach } from "./assistant/reach.js";
+import { AssistantTarget } from "./assistant/assistantTarget.js";
+import { CHANNEL_KINDS, isChannelKind, type ChannelKind } from "./channels/types.js";
+import { ChannelHub } from "./channels/hub.js";
+import { ChannelService, openChannelStores } from "./channels/service.js";
 import { safeError } from "./factoryAgents/runtime.js";
 import { CredentialSeal } from "./assistant/channelCredentials.js";
-import { IMessageChannel } from "./assistant/imessageChannel.js";
-import { LarkChannel, type LarkCredentials } from "./assistant/larkChannel.js";
-import { LineChannel } from "./assistant/lineChannel.js";
-import { TelegramChannel } from "./assistant/telegramChannel.js";
+import { IMessageChannel } from "./channels/imessageChannel.js";
+import { LarkChannel, type LarkCredentials } from "./channels/larkChannel.js";
+import { LineChannel } from "./channels/lineChannel.js";
+import { TelegramChannel } from "./channels/telegramChannel.js";
 import { PostgresTaskRepository } from "./assistant/tasks.js";
 import type { AgentCatalog, AgentChange, CatalogAgent } from "./assistant/catalog.js";
 import "dotenv/config";
@@ -84,10 +88,9 @@ export const CREATOR_FACTORY_JSON_BODY_MAX_BYTES = 32 * 1024 * 1024;
 type RegistryContext = {
   assistant?: AssistantService;
   ingest?: IngestService;
-  channels?: ChannelHub;
+  channels?: ChannelService;
   credentialSeal?: CredentialSeal;
   publicOrigin?: string;
-  links?: ChannelLinks;
   reach?: AccountReach;
   store: RegistryStoreTs;
   accounts: AccountStoreTs;
@@ -222,19 +225,19 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     await reach.ensureSchema();
     await PostgresWorkbenchBackend.ensureSchema(registryPool);
     const tasks = await PostgresTaskRepository.open(registryPool);
-    const links = await PostgresChannelLinks.open(registryPool, (accountId, kind) => kind === "lark" ? accountId : "");
+    // Lark has no shared bot, so its tenant is the Expert's account; every other platform is one shared tenant.
+    const scopeOf = (accountId: string, kind: ChannelKind) => kind === "lark" ? accountId : "";
+    const stores = await openChannelStores(registryPool, scopeOf);
     const studioUrl = environment.HATCH_STUDIO_ASSISTANT_URL?.trim() || "https://gethatchapp.com/studio/assistant";
     const telegram = new TelegramChannel({
       token: environment.HATCH_TELEGRAM_BOT_TOKEN?.trim() || undefined,
       username: environment.HATCH_TELEGRAM_BOT_USERNAME?.trim() || undefined,
       webhookSecret: environment.HATCH_TELEGRAM_WEBHOOK_SECRET?.trim() || undefined,
-      studioUrl,
     });
     const line = new LineChannel({
       channelSecret: environment.HATCH_LINE_CHANNEL_SECRET?.trim() || undefined,
       accessToken: environment.HATCH_LINE_CHANNEL_ACCESS_TOKEN?.trim() || undefined,
       basicId: environment.HATCH_LINE_BASIC_ID?.trim() || undefined,
-      studioUrl,
     });
     const imessage = new IMessageChannel({
       projectId: environment.HATCH_PHOTON_PROJECT_ID?.trim() || undefined,
@@ -245,9 +248,9 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     const sealKey = environment.HATCH_CREDENTIALS_KEY?.trim();
     const seal = sealKey ? new CredentialSeal(sealKey) : undefined;
     const larkApps = new Map<string, { sealed: string; adapter: LarkChannel }>();
-    const channels = new ChannelHub([telegram, line, imessage], async (kind, accountId) => {
+    const hub = new ChannelHub([telegram, line, imessage], async (kind, accountId) => {
       if (kind !== "lark" || !seal) return undefined;
-      const sealed = await links.credentials(accountId, "lark");
+      const sealed = await stores.connections.credentials(accountId, "lark");
       if (!sealed) return undefined;
       const cached = larkApps.get(accountId);
       if (cached?.sealed === sealed) return cached.adapter;
@@ -256,8 +259,9 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       return adapter;
     });
     const catalog = registryAgentCatalog(registryContext);
+    const channels = new ChannelService({ ...stores, hub, scopeOf });
     const assistant = new AssistantService({
-      tasks, reach, channels, links,
+      tasks, reach, channels,
       products: factoryAgents,
       catalog,
       backend: accountId => new PostgresWorkbenchBackend(registryPool, `assistant:${accountId}`),
@@ -273,11 +277,13 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       },
       productPrefix: (accountId, productId) => `${productsPrefix}/${accountId}/${productId}`,
     });
-    Object.assign(registryContext, { assistant, ingest, channels, links, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin });
+    // Product Connections have no handler until the Chat API's gateway is registered here.
+    channels.register("assistant", new AssistantTarget(assistant)).start();
+    Object.assign(registryContext, { assistant, ingest, channels, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin });
     // A platform that pushes over its own connection runs here, in one process at a time. A dropped connection comes back.
-    for (const adapter of channels.listeners()) void (async () => {
+    for (const adapter of hub.listeners()) void (async () => {
       while (!channelListeners.signal.aborted) {
-        await postgresExclusive(registryPool)(`assistant-channel:${adapter.kind}`, () => adapter.listen!(events => assistant.channelEvents(adapter, events), channelListeners.signal))
+        await postgresExclusive(registryPool)(`assistant-channel:${adapter.kind}`, () => adapter.listen!(events => channels.accept(adapter, events), channelListeners.signal))
           .catch(error => console.error(`[channel ${adapter.kind}]`, safeError(error)));
         await new Promise(resolve => setTimeout(resolve, 30_000).unref());
       }
@@ -377,6 +383,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     if (assistantTick) clearInterval(assistantTick);
     channelListeners.abort();
     await registryContext.assistant?.close();
+    await registryContext.channels?.close();
     immediateFactoryStop.abort();
     await factoryAgents.close();
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
@@ -444,7 +451,7 @@ async function route(
   // Conversation API: Product workers and the Assistant, one message shape.
   if (await new ConversationRoutes(conversationDeps(response, context)).handle(request, response, url)) return;
 
-  if (url.pathname.startsWith("/v1/channels/") || url.pathname.startsWith("/v1/creator/assistant")) {
+  if (url.pathname.startsWith("/v1/channels/") || url.pathname.startsWith("/v1/creator/assistant") || url.pathname.startsWith("/v1/creator/connections")) {
     await assistantRoute(request, response, url, context);
     return;
   }
@@ -1983,35 +1990,29 @@ function conversationDeps(response: http.ServerResponse, context: RegistryContex
 
 async function assistantRoute(request: http.IncomingMessage, response: http.ServerResponse, url: URL, context: RegistryContext): Promise<void> {
   const assistant = context.assistant;
-  if (!assistant || !context.reach) { sendJson(response, 503, { error: { code: "assistant_unavailable", message: "The Assistant requires the Registry database." } }); return; }
+  const channels = context.channels;
+  if (!assistant || !context.reach || !channels) { sendJson(response, 503, { error: { code: "assistant_unavailable", message: "The Assistant requires the Registry database." } }); return; }
   const webhook = url.pathname.match(/^\/v1\/channels\/([a-z]+)(?:\/([0-9a-f-]{36}))?\/webhook$/);
   if (webhook && request.method === "POST") {
-    const kind = webhook[1] as ChannelKind;
-    const adapter = (CHANNEL_KINDS as readonly string[]).includes(kind) ? await context.channels!.get(kind, webhook[2]) : undefined;
+    const kind = webhook[1]!;
+    const adapter = isChannelKind(kind) ? await channels.hub.get(kind, webhook[2]) : undefined;
     if (!adapter?.parse) { sendJson(response, 404, { ok: false }); return; }
     const raw = await readRawBody(request, 2 * 1024 * 1024);
     if (!adapter.verify?.(raw, request.headers)) { sendJson(response, 401, { ok: false }); return; }
     const { events, respond } = adapter.parse(raw);
-    // Platforms retry a slow webhook. Quick work is durable before we answer; a slow download finishes after.
-    const work = assistant.channelEvents(adapter, events);
-    await Promise.race([work, new Promise(resolve => setTimeout(resolve, 1500))]);
+    // Stored before we answer, so a platform retry finds the event already here and nothing is lost if we crash.
+    await channels.accept(adapter, events);
     sendJson(response, 200, respond ?? { ok: true });
     return;
   }
   const account = await authenticate(request, response, context);
   if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
-  const channelsView = async () => {
-    const links = await context.links!.list(account.id);
-    return Promise.all(CHANNEL_KINDS.map(async kind => {
-      const link = links.find(candidate => candidate.kind === kind);
-      const ownApp = kind === "lark" && Boolean(context.credentialSeal);
-      return {
-        kind, available: Boolean(await context.channels!.get(kind, account.id)), linked: Boolean(link?.peerId),
-        ...(ownApp ? { own_app: true, webhook_url: `${context.publicOrigin}/v1/channels/lark/${account.id}/webhook` } : {}),
-        ...(link?.lastEventAt ? { last_event_at: link.lastEventAt } : {}),
-      };
-    }));
-  };
+  const channelsView = async () => (await channels.view(account.id)).map(status => ({
+    kind: status.kind, available: status.available, linked: status.linked,
+    ...(status.state ? { state: status.state } : {}),
+    ...(status.kind === "lark" && context.credentialSeal ? { own_app: true, webhook_url: `${context.publicOrigin}/v1/channels/lark/${account.id}/webhook` } : {}),
+    ...(status.lastEventAt ? { last_event_at: status.lastEventAt } : {}),
+  }));
   if (url.pathname === "/v1/creator/assistant" && request.method === "GET") {
     const timezone = url.searchParams.get("tz");
     if (timezone) await context.reach.setTimezone(account.id, timezone);
@@ -2063,7 +2064,7 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
     sendJson(response, 200, { task });
     return;
   }
-  if (url.pathname === "/v1/creator/assistant/channels/lark/credentials" && request.method === "POST") {
+  if (url.pathname === "/v1/creator/connections/lark/credentials" && request.method === "POST") {
     if (!context.credentialSeal) { sendJson(response, 503, { error: { code: "channel_unavailable", message: "Lark is not available." } }); return; }
     const body = await readJson(request);
     const text = (name: string) => typeof body[name] === "string" ? (body[name] as string).trim() : "";
@@ -2071,15 +2072,15 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
     if (!credentials.appId || !credentials.appSecret || !credentials.verificationToken) { sendJson(response, 400, { error: { code: "invalid_credentials", message: "App ID, App Secret and Verification Token are required." } }); return; }
     try { await new LarkChannel(credentials, account.id).probe(); }
     catch (cause) { sendJson(response, 422, { error: { code: "lark_probe_failed", message: cause instanceof Error ? cause.message : String(cause) } }); return; }
-    await context.links!.saveCredentials(account.id, "lark", context.credentialSeal.seal(credentials));
+    await channels.connections.saveCredentials(account.id, "lark", context.credentialSeal.seal(credentials));
     sendJson(response, 200, { channels: await channelsView() });
     return;
   }
-  const channelRoute = url.pathname.match(/^\/v1\/creator\/assistant\/channels\/([a-z]+)(\/connect)?$/);
-  if (channelRoute && (CHANNEL_KINDS as readonly string[]).includes(channelRoute[1]!)) {
-    const kind = channelRoute[1] as ChannelKind;
-    if (channelRoute[2] && request.method === "POST") { sendJson(response, 200, await assistant.connectChannel(account.id, kind)); return; }
-    if (!channelRoute[2] && request.method === "DELETE") { await context.links!.unlink(account.id, kind); sendJson(response, 200, { channels: await channelsView() }); return; }
+  const connection = url.pathname.match(/^\/v1\/creator\/connections\/([a-z]+)(\/connect)?$/);
+  if (connection && isChannelKind(connection[1]!)) {
+    const kind = connection[1];
+    if (connection[2] && request.method === "POST") { sendJson(response, 200, await channels.connect(account.id, kind)); return; }
+    if (!connection[2] && request.method === "DELETE") { await channels.disconnect(account.id, kind); sendJson(response, 200, { channels: await channelsView() }); return; }
   }
   sendJson(response, 404, { error: { code: "not_found", message: "Route not found." } });
 }

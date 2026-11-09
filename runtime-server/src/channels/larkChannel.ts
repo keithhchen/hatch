@@ -1,5 +1,6 @@
-import { createDecipheriv, createHash, randomUUID, timingSafeEqual } from "node:crypto";
-import type { ChannelAdapter, InboundEvent, InboundFile, OutboundMessage, TaskButtonAction } from "./channels.js";
+import { createDecipheriv, createHash, timingSafeEqual } from "node:crypto";
+import type { ChannelCapabilities } from "../surfaces/contract.js";
+import { ChannelSendError, failureForStatus, guardSend, lostAccess, type ChannelAdapter, type InboundEvent, type InboundFile, type OutboundMessage, type PlatformAddress, type TaskButtonAction, idempotencyId } from "./types.js";
 
 export type LarkCredentials = { domain: "lark" | "feishu"; appId: string; appSecret: string; verificationToken: string; encryptKey?: string };
 
@@ -22,9 +23,8 @@ type LarkPayload = { code?: number; msg?: string; tenant_access_token?: string; 
 
 const BASE_URLS = { lark: "https://open.larksuite.com", feishu: "https://open.feishu.cn" };
 const APPLINKS = { lark: "https://applink.larksuite.com", feishu: "https://applink.feishu.cn" };
-/** Lark counts the request body, in bytes. */
-const TEXT_BYTES = 150 * 1024;
-const CARD_BYTES = 30 * 1024;
+/** Lark answers 99991400 when we send too fast: refused, nothing delivered. */
+const RATE_LIMITED = 99991400;
 const TOKEN_MARGIN_MS = 5 * 60_000;
 
 function same(supplied: unknown, expected: string): boolean {
@@ -44,16 +44,7 @@ function postText(post: LarkContent): string | undefined {
   return [post.title, ...(post.content ?? []).map(line)].filter(Boolean).join("\n").trim() || undefined;
 }
 
-/** Longest prefix of text, with an ellipsis, whose request still fits. */
-function fit(text: string, limit: number, requestFor: (text: string) => string): string {
-  const fits = (candidate: string) => Buffer.byteLength(requestFor(candidate)) <= limit;
-  if (fits(text)) return text;
-  const chars = [...text];
-  const cut = (count: number) => `${chars.slice(0, count).join("").trimEnd()}…`;
-  let low = 0; let high = chars.length;
-  while (low < high) { const middle = Math.ceil((low + high) / 2); if (fits(cut(middle))) low = middle; else high = middle - 1; }
-  return cut(low);
-}
+/** A UUID that is the same for the same key: LINE and Lark take one to make a repeated send a no-op. */
 
 function card(text: string, buttons: NonNullable<OutboundMessage["buttons"]>): unknown {
   return {
@@ -77,6 +68,8 @@ export class LarkChannel implements ChannelAdapter {
   readonly maxFileBytes = 50 * 1024 * 1024;
   private cachedToken?: { value: string; expiresAt: number };
   constructor(private credentials: LarkCredentials, readonly scope: string, private fetchImpl: typeof fetch = fetch) {}
+  /** Characters, so a card of that many stays under Lark's 30 KB. */
+  capabilities(): ChannelCapabilities { return { stream: false, edit: false, typing: false, buttons: true, maxLength: 9000, canInitiate: true, idempotentSend: true }; }
   available(): boolean { return Boolean(this.credentials.appId && this.credentials.appSecret && this.credentials.verificationToken); }
   /** The AppLink can't carry a prefilled code, so the Expert types it. */
   connectUrl(_code: string): undefined { return undefined; }
@@ -102,37 +95,36 @@ export class LarkChannel implements ChannelAdapter {
     if (body.type === "url_verification") return { events: [], respond: { challenge: body.challenge } };
     const type = body.header?.event_type;
     if (type === "card.action.trigger") {
-      const peerId = body.event?.operator?.open_id;
+      const id = body.event?.operator?.open_id;
       const eventId = body.header?.event_id;
-      if (!peerId || !eventId) return { events: [] };
+      if (!id || !eventId) return { events: [] };
       const value = body.event?.action?.value;
       const valid = typeof value?.taskId === "string" && (value.action === "approve" || value.action === "decline");
       const button = valid ? { taskId: value!.taskId as string, action: value!.action as TaskButtonAction } : { taskId: "", action: "decline" as const };
-      return { events: [{ eventId, peerId, button }], respond: { toast: { type: "info", content: "收到" } } };
+      return { events: [{ eventId, address: { threadId: id, senderId: id }, button }], respond: { toast: { type: "info", content: "收到" } } };
     }
     if (type !== "im.message.receive_v1") return { events: [] };
     const message = body.event?.message;
-    const peerId = body.event?.sender?.sender_id?.open_id;
-    if (!message || !peerId || message.chat_type !== "p2p") return { events: [] };
-    const id = message.message_id;
+    const id = body.event?.sender?.sender_id?.open_id;
+    if (!message || !id || message.chat_type !== "p2p") return { events: [] };
+    const messageId = message.message_id;
     const content = JSON.parse(message.content || "{}") as LarkContent;
     const text = message.message_type === "text" ? content.text?.trim() : message.message_type === "post" ? postText(content) : undefined;
-    const file = message.message_type === "image" && content.image_key ? { ref: `${id}|${content.image_key}|image`, name: "photo.jpg" }
-      : message.message_type === "file" && content.file_key ? { ref: `${id}|${content.file_key}|file`, name: content.file_name ?? "file" } : undefined;
+    const file = message.message_type === "image" && content.image_key ? { ref: `${messageId}|${content.image_key}|image`, name: "photo.jpg" }
+      : message.message_type === "file" && content.file_key ? { ref: `${messageId}|${content.file_key}|file`, name: content.file_name ?? "file" } : undefined;
     // Lark says to dedupe on message_id, not event_id.
-    return { events: [{ eventId: id, peerId, messageRef: id, ...(text ? { text } : {}), ...(file ? { file } : {}) }] };
+    return { events: [{ eventId: messageId, address: { threadId: id, senderId: id }, messageRef: messageId, ...(text ? { text } : {}), ...(file ? { file } : {}) }] };
   }
-  async send(peerId: string, message: OutboundMessage): Promise<void> {
+  async send(to: PlatformAddress, message: OutboundMessage, key: string): Promise<void> {
     const buttons = message.buttons ?? [];
-    const uuid = randomUUID();
-    const request = (text: string) => JSON.stringify({
-      ...(message.replyTo ? {} : { receive_id: peerId }),
+    const body = JSON.stringify({
+      ...(message.replyTo ? {} : { receive_id: to.threadId }),
       msg_type: buttons.length ? "interactive" : "text",
-      content: JSON.stringify(buttons.length ? card(text, buttons) : { text }),
-      uuid,
+      content: JSON.stringify(buttons.length ? card(message.text, buttons) : { text: message.text }),
+      uuid: idempotencyId(key),
     });
     const path = message.replyTo ? `/open-apis/im/v1/messages/${encodeURIComponent(message.replyTo)}/reply` : "/open-apis/im/v1/messages?receive_id_type=open_id";
-    await this.call(path, request(fit(message.text, buttons.length ? CARD_BYTES : TEXT_BYTES, request)));
+    await guardSend("Lark send", () => this.call(path, body, true));
   }
   async download(file: InboundFile): Promise<Buffer> {
     const [messageId, key, type] = file.ref.split("|");
@@ -172,9 +164,9 @@ export class LarkChannel implements ChannelAdapter {
     this.cachedToken = { value: payload.tenant_access_token, expiresAt: Date.now() + (payload.expire ?? 0) * 1000 - TOKEN_MARGIN_MS };
     return payload.tenant_access_token;
   }
-  private async call(path: string, body?: string): Promise<LarkPayload> { return this.request(path, body, await this.token()); }
+  private async call(path: string, body?: string, sending = false): Promise<LarkPayload> { return this.request(path, body, await this.token(), sending); }
   /** Lark reports failures in code, sometimes with HTTP 200. */
-  private async request(path: string, body?: string, token?: string): Promise<LarkPayload> {
+  private async request(path: string, body?: string, token?: string, sending = false): Promise<LarkPayload> {
     const response = await this.fetchImpl(`${this.base}${path}`, {
       method: body === undefined ? "GET" : "POST",
       headers: { "content-type": "application/json; charset=utf-8", ...(token ? { authorization: `Bearer ${token}` } : {}) },
@@ -182,7 +174,12 @@ export class LarkChannel implements ChannelAdapter {
       signal: AbortSignal.timeout(15_000),
     });
     const payload = await response.json().catch(() => ({})) as LarkPayload;
-    if (!response.ok || payload.code !== 0) throw new Error(`Lark ${path} failed: ${describe(payload, response.status)}`);
+    if (!response.ok || payload.code !== 0) {
+      const message = `Lark ${path} failed: ${describe(payload, response.status)}`;
+      if (!sending) throw new Error(message);
+      if (!response.ok) throw new ChannelSendError(message, failureForStatus(response.status), { access: lostAccess(response.status) });
+      throw new ChannelSendError(message, payload.code === RATE_LIMITED ? "definite" : "permanent");
+    }
     return payload;
   }
 }

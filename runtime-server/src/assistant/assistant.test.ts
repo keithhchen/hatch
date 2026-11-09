@@ -10,8 +10,12 @@ import { FileWorkbenchBackend, WorkbenchStore } from "../factoryAgents/store.js"
 import { WorkbenchRuntime } from "../factoryAgents/runtime.js";
 import type { FactoryWorkspace } from "../factoryAgents/service.js";
 import { AssistantService, type ProductWorkspaces } from "./assistant.js";
-import { ChannelHub, MemoryChannelLinks, type AccountReach } from "./channels.js";
-import { TelegramChannel } from "./telegramChannel.js";
+import type { AccountReach } from "./reach.js";
+import { AssistantTarget } from "./assistantTarget.js";
+import type { AssistantChannels, Inbound } from "../channels/ports.js";
+import type { ChannelConnection } from "../channels/connections.js";
+import { idempotencyId, type OutboundMessage } from "../channels/types.js";
+import { TelegramChannel } from "../channels/telegramChannel.js";
 import { MemoryTaskRepository } from "./tasks.js";
 import { MemoryAgentDefinitionRepository, initialAgentDefinitions } from "../factoryAgents/definitions.js";
 import type { AgentCatalog, AgentChange } from "./catalog.js";
@@ -47,16 +51,21 @@ const userTexts = (context: Context) => allUserTexts(context).filter(text => !te
 async function setup(scripts: { assistant: Script; worker?: Script }) {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-assistant-"));
   const tasks = new MemoryTaskRepository();
-  const sent: Array<{ chat_id: number; text: string; reply_markup?: unknown }> = [];
+  const sent: Array<{ text: string; buttons?: OutboundMessage["buttons"]; replyingTo?: string }> = [];
+  const compactions: string[] = [];
   const applied: AgentChange[] = [];
   const reach = { assistantAccounts: async () => [] } as unknown as AccountReach;
-  const links = new MemoryChannelLinks();
-  links.link(ACCOUNT, "telegram", "42");
-  const telegram = new TelegramChannel({ token: "test", username: "hatch_test_bot", webhookSecret: "secret", studioUrl: "https://studio.test" }, (async (url: string, init?: RequestInit) => {
+  // The channel layer is its own port: the Assistant only says where a reply goes. Delivery is tested in channels/.
+  const channels: AssistantChannels = {
+    reply: async (inboundId, message) => { sent.push({ text: message.text, replyingTo: inboundId, ...(message.buttons ? { buttons: message.buttons } : {}) }); return true; },
+    push: async (_account, message) => { sent.push({ text: message.text, ...(message.buttons ? { buttons: message.buttons } : {}) }); return true; },
+    canReach: async () => true,
+    compacting: async (_account, id) => { compactions.push(id); },
+  };
+  const telegram = new TelegramChannel({ token: "test", username: "hatch_test_bot", webhookSecret: "secret" }, (async (url: string) => {
     if (url.includes("/file/bot")) return new Response("# 我的选址笔记\n隔壁活过三年才算数\n", { status: 200 });
     if (url.endsWith("/getFile")) return new Response(JSON.stringify({ ok: true, result: { file_path: "documents/notes.md" } }), { status: 200 });
-    sent.push(JSON.parse(String(init?.body)));
-    return new Response(JSON.stringify({ ok: true, result: { message_id: sent.length } }), { status: 200 });
+    return new Response(JSON.stringify({ ok: true, result: true }), { status: 200 });
   }) as typeof fetch);
   const { factory, calls } = scriptedAgents(scripts);
   const productStore = new WorkbenchStore(path.join(root, "product"), { creatorId: ACCOUNT, productId: PRODUCT }, new MemoryAgentDefinitionRepository(await initialAgentDefinitions()));
@@ -74,13 +83,12 @@ async function setup(scripts: { assistant: Script; worker?: Script }) {
     token: async () => "token",
   };
   const assistant = new AssistantService({
-    tasks, reach, catalog, links, channels: new ChannelHub([telegram]),
+    tasks, reach, catalog, channels,
     products: { workspace: async () => { opened?.({ creatorId: ACCOUNT, productId: PRODUCT }, workspace); return workspace; }, attachAssistant: hooks => { opened = hooks.opened; grantedTools = hooks.grantedTools; withheldTools = hooks.withheldTools; } },
     backend: () => new FileWorkbenchBackend(path.join(root, "assistant")),
     exclusive: async (_name, fn) => fn(),
     env: { HATCH_FACTORY_LLM_PROFILE: "kimi-k2.6" },
     runtime: { agentFactory: factory },
-    settleMs: 20,
   });
   const idle = () => new Promise<void>(resolve => {
     const check = async () => {
@@ -91,8 +99,19 @@ async function setup(scripts: { assistant: Script; worker?: Script }) {
     const listener = (event: { type?: string }) => { if (event.type === "assistant") void check(); };
     assistant.events.on("event", listener);
   });
-  const telegramUpdate = (update: unknown) => assistant.channelEvents(telegram, telegram.parse(Buffer.from(JSON.stringify(update))).events);
-  return { root, tasks, sent, applied, links, telegramUpdate, assistant, calls, productStore, productRuntime, idle, close: async () => { await assistant.close(); await productRuntime.close(); await rm(root, { recursive: true, force: true, maxRetries: 5 }); } };
+  const connection: ChannelConnection = { id: "c0000000-0000-4000-8000-000000000001", ownerAccountId: ACCOUNT, channel: "telegram", scope: "", client: "im", target: { kind: "assistant" }, audience: "self", state: "active" };
+  const target = new AssistantTarget(assistant);
+  /** What the router hands the Assistant once it has authorized the sender; the inbox id is derived from the event id, so a repeat is the same message. */
+  const telegramUpdate = async (update: unknown) => {
+    for (const event of telegram.parse(Buffer.from(JSON.stringify(update))).events) {
+      const inbound: Inbound = {
+        id: idempotencyId(event.eventId), connection, event, adapter: telegram, principal: { kind: "account", accountId: ACCOUNT },
+        address: { connectionId: connection.id, ...event.address }, notify: async text => { sent.push({ text }); },
+      };
+      await target.handle(inbound);
+    }
+  };
+  return { root, tasks, sent, compactions, applied, telegramUpdate, assistant, calls, productStore, productRuntime, idle, close: async () => { await assistant.close(); await productRuntime.close(); await rm(root, { recursive: true, force: true, maxRetries: 5 }); } };
 }
 
 test("A burst of Telegram messages steers one turn and gets one reply, with every message in the context", async () => {
@@ -102,6 +121,8 @@ test("A burst of Telegram messages steers one turn and gets one reply, with ever
     const done = env.idle();
     await env.telegramUpdate({ update_id: 1, message: { message_id: 10, chat: { id: 42, type: "private" }, text: "第一条" } });
     await new Promise(resolve => setTimeout(resolve, 60));
+    assert.equal(env.calls.assistant, 1, "the first message started a turn at once: there is no merge window");
+    assert.deepEqual(seen[0]!.filter(text => text.startsWith("专家")), ["专家（Telegram）：第一条"]);
     await env.telegramUpdate({ update_id: 2, message: { message_id: 11, chat: { id: 42, type: "private" }, text: "第二条" } });
     await env.telegramUpdate({ update_id: 3, message: { message_id: 12, chat: { id: 42, type: "private" }, text: "第三条" } });
     await env.telegramUpdate({ update_id: 3, message: { message_id: 12, chat: { id: 42, type: "private" }, text: "第三条" } });
@@ -111,6 +132,7 @@ test("A burst of Telegram messages steers one turn and gets one reply, with ever
     assert.deepEqual(seen.at(-1)!.filter(text => text.startsWith("专家")), ["专家（Telegram）：第一条", "专家（Telegram）：第二条", "专家（Telegram）：第三条"]);
     const view = await env.assistant.view(ACCOUNT);
     assert.equal(view.messages.filter(message => message.role === "expert").length, 3, "the duplicate update was dropped");
+    assert.equal(env.sent[0]!.replyingTo, idempotencyId("3"), "the reply goes to the last message's inbox id");
   } finally { await env.close(); }
 });
 
@@ -287,25 +309,6 @@ test("The chat shows only what was said; live state reaches the model but never 
   } finally { await env.close(); }
 });
 
-test("A connect code links the platform peer; strangers and expired codes get nothing", async () => {
-  const env = await setup({ assistant: () => ({ text: "好" }) });
-  try {
-    const stranger = { update_id: 5, message: { message_id: 1, chat: { id: 77, type: "private" }, text: "你好" } };
-    await env.telegramUpdate(stranger);
-    assert.match(env.sent.at(-1)!.text, /请先从 Hatch Studio 连接/);
-    assert.equal((await env.tasks.open(ACCOUNT)).length, 0);
-    await env.telegramUpdate({ update_id: 6, message: { message_id: 2, chat: { id: 77, type: "private" }, text: "/start HATCH-AAAAAAAA" } });
-    assert.match(env.sent.at(-1)!.text, /已失效/);
-    const { code, url } = await env.assistant.connectChannel(ACCOUNT, "telegram");
-    assert.equal(url, `https://t.me/hatch_test_bot?start=${code}`);
-    await env.telegramUpdate({ update_id: 7, message: { message_id: 3, chat: { id: 77, type: "private" }, text: `/start ${code}` } });
-    assert.match(env.sent.at(-1)!.text, /连上了/);
-    assert.equal(await env.links.accountFor("telegram", "", "77"), ACCOUNT);
-    await env.telegramUpdate({ update_id: 8, message: { message_id: 4, chat: { id: 77, type: "private" }, text: `/start ${code}` } });
-    assert.match(env.sent.at(-1)!.text, /已失效/, "a code works once");
-  } finally { await env.close(); }
-});
-
 test("Publishing goes through the Product's interface, after the Expert confirms", async () => {
   const env = await setup({ assistant: () => ({ text: "好" }) });
   try {
@@ -346,3 +349,67 @@ async function waitFor(condition: () => Promise<boolean>, timeoutMs = 5000): Pro
     await new Promise(resolve => setTimeout(resolve, 20));
   }
 }
+
+/** The desk is private; these tests need its runtime to watch and to nudge a turn. */
+async function deskOf(env: Awaited<ReturnType<typeof setup>>) {
+  await env.assistant.view(ACCOUNT);
+  return await (env.assistant as unknown as { desk(account: string): Promise<{ runtime: WorkbenchRuntime; sessionId: string; taken: Map<string, unknown> }> }).desk(ACCOUNT);
+}
+
+test("A message that arrives as a turn ends is not lost, and never runs beside it", async () => {
+  const seen: string[][] = [];
+  const env = await setup({ assistant: (context, call) => { seen.push(userTexts(context).filter(text => text.startsWith("专家"))); return { text: call === 1 ? "第一个回复" : "第二个回复" }; } });
+  try {
+    const desk = await deskOf(env);
+    let running = 0; let peak = 0; let injected = false;
+    desk.runtime.events.on("event", (event: { sessionId?: string; type?: string }) => {
+      if (event.sessionId !== desk.sessionId) return;
+      if (event.type === "voice.run_started") peak = Math.max(peak, ++running);
+      if (event.type === "voice.run_completed") {
+        running -= 1;
+        // The turn has ended and its owner is still settling it: the worst moment for a message.
+        if (!injected) { injected = true; void env.telegramUpdate({ update_id: 2, message: { message_id: 11, chat: { id: 42, type: "private" }, text: "第二条" } }); }
+      }
+    });
+    const done = env.idle();
+    await env.telegramUpdate({ update_id: 1, message: { message_id: 10, chat: { id: 42, type: "private" }, text: "第一条" } });
+    await done;
+    await waitFor(async () => env.sent.length === 2 && !(await env.assistant.view(ACCOUNT)).running);
+    assert.equal(peak, 1, "at most one turn at a time");
+    assert.equal(env.calls.assistant, 2);
+    assert.deepEqual(seen.at(-1), ["专家（Telegram）：第一条", "专家（Telegram）：第二条"], "the late message is in the next turn's context");
+    assert.deepEqual(env.sent.map(message => message.text), ["第一个回复", "第二个回复"]);
+  } finally { await env.close(); }
+});
+
+test("While the turn is compacting, messages wait and join afterwards, and the Expert is told once", async () => {
+  const env = await setup({ assistant: (_context, call) => call === 1 ? { text: "还在想", delayMs: 200 } : { text: "两条都看到了" } });
+  try {
+    const desk = await deskOf(env);
+    await env.telegramUpdate({ update_id: 1, message: { message_id: 10, chat: { id: 42, type: "private" }, text: "第一条" } });
+    await new Promise(resolve => setTimeout(resolve, 40));
+    desk.runtime.emit(desk.sessionId, "compacting");
+    desk.runtime.emit(desk.sessionId, "compacting");
+    await env.telegramUpdate({ update_id: 2, message: { message_id: 11, chat: { id: 42, type: "private" }, text: "第二条" } });
+    await new Promise(resolve => setTimeout(resolve, 80));
+    assert.equal(desk.taken.size, 1, "the second message waited: it was not steered into a turn that is summarizing");
+    assert.equal(env.compactions.length, 1, "one notice per compaction, and a repeat of the same one is the channel layer's to drop");
+    desk.runtime.emit(desk.sessionId, "delta", { text: "…" });
+    await waitFor(async () => desk.taken.size === 2 || env.sent.length > 0);
+    await waitFor(async () => env.sent.length === 1 && !(await env.assistant.view(ACCOUNT)).running);
+    assert.deepEqual(env.sent.map(message => message.text), ["两条都看到了"]);
+  } finally { await env.close(); }
+});
+
+test("The daily check skips a model call when the Expert's chats cannot take the message", async () => {
+  let asked = 0;
+  const env = await setup({ assistant: () => { asked += 1; return { text: "好" }; } });
+  try {
+    (env.assistant as unknown as { deps: { channels: AssistantChannels; reach: unknown } }).deps.channels = { ...(env.assistant as unknown as { deps: { channels: AssistantChannels } }).deps.channels, canReach: async () => false };
+    (env.assistant as unknown as { deps: { reach: unknown } }).deps.reach = { assistantAccounts: async () => [{ accountId: ACCOUNT, timezone: "UTC" }] };
+    await env.assistant.tick(new Date("2026-11-10T12:00:00Z"));
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal(asked, 0);
+    assert.equal((await env.tasks.pokes(ACCOUNT, 3)).length, 0);
+  } finally { await env.close(); }
+});

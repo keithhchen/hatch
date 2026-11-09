@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import { createCipheriv, createHash, randomBytes } from "node:crypto";
 import { test } from "node:test";
 import { decryptLark, LarkChannel, type LarkCredentials } from "./larkChannel.js";
+import { ChannelSendError } from "./types.js";
 
 const PLAIN: LarkCredentials = { domain: "lark", appId: "cli_a", appSecret: "secret", verificationToken: "vtoken" };
 const SEALED: LarkCredentials = { ...PLAIN, encryptKey: "ekey" };
+const TO = { threadId: "ou_1", senderId: "ou_1" };
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const json = (value: unknown) => Buffer.from(JSON.stringify(value));
 
 function encrypt(plain: string, key: string): string {
@@ -131,7 +134,7 @@ test("an event dressed as url_verification gets past verify on the token but yie
 
 test("parse text", () => {
   const { events, respond } = new LarkChannel(PLAIN, "acct").parse(receive("text", { text: " HATCH-ABCDEFGH " }));
-  assert.deepEqual(events, [{ eventId: "om_1", peerId: "ou_1", messageRef: "om_1", text: "HATCH-ABCDEFGH" }]);
+  assert.deepEqual(events, [{ eventId: "om_1", address: TO, messageRef: "om_1", text: "HATCH-ABCDEFGH" }]);
   assert.equal(respond, undefined);
 });
 
@@ -148,7 +151,7 @@ test("parse post flattens to plain text", () => {
 
 test("other types are an event with no text and no file", () => {
   for (const [type, content] of [["audio", { file_key: "f" }], ["sticker", { file_key: "f" }], ["post", { content: [[{ tag: "img", image_key: "i" }]] }]] as const) {
-    assert.deepEqual(new LarkChannel(PLAIN, "acct").parse(receive(type, content)).events, [{ eventId: "om_1", peerId: "ou_1", messageRef: "om_1" }]);
+    assert.deepEqual(new LarkChannel(PLAIN, "acct").parse(receive(type, content)).events, [{ eventId: "om_1", address: TO, messageRef: "om_1" }]);
   }
 });
 
@@ -160,7 +163,7 @@ test("group chats and other event types are ignored", () => {
 
 test("a card press becomes a button event with a toast", () => {
   const { events, respond } = new LarkChannel(PLAIN, "acct").parse(press({ taskId: "task-1", action: "approve" }));
-  assert.deepEqual(events, [{ eventId: "ev2", peerId: "ou_1", button: { taskId: "task-1", action: "approve" } }]);
+  assert.deepEqual(events, [{ eventId: "ev2", address: TO, button: { taskId: "task-1", action: "approve" } }]);
   assert.deepEqual(respond, { toast: { type: "info", content: "收到" } });
 });
 
@@ -177,21 +180,21 @@ test("the tenant token is cached until shortly before expiry", async t => {
   t.mock.timers.enable({ apis: ["Date"], now: 0 });
   const lark = fakeLark();
   const channel = new LarkChannel(PLAIN, "acct", lark.fetchImpl);
-  await channel.send("ou_1", { text: "a" });
-  await channel.send("ou_1", { text: "b" });
+  await channel.send(TO, { text: "a" }, "k:0");
+  await channel.send(TO, { text: "b" }, "k:0");
   assert.equal(lark.tokens(), 1);
   assert.equal((lark.calls[1]?.init?.headers as Record<string, string>).authorization, "Bearer t-1");
   t.mock.timers.setTime(7200_000 - 60_000);
-  await channel.send("ou_1", { text: "c" });
+  await channel.send(TO, { text: "c" }, "k:0");
   assert.equal(lark.tokens(), 2);
   assert.equal((lark.calls[2]?.init?.headers as Record<string, string>).authorization, "Bearer t-2");
 });
 
-test("create without replyTo, reply with it, each with a fresh uuid", async () => {
+test("create without replyTo, reply with it, each with its key's uuid", async () => {
   const lark = fakeLark();
   const channel = new LarkChannel(PLAIN, "acct", lark.fetchImpl);
-  await channel.send("ou_1", { text: "hello" });
-  await channel.send("ou_1", { text: "hello", replyTo: "om_1" });
+  await channel.send(TO, { text: "hello" }, "k:0");
+  await channel.send(TO, { text: "hello", replyTo: "om_1" }, "k:1");
   const [create, reply] = lark.calls;
   assert.equal(create?.url, "https://open.larksuite.com/open-apis/im/v1/messages?receive_id_type=open_id");
   assert.equal(create?.body.receive_id, "ou_1");
@@ -205,14 +208,14 @@ test("create without replyTo, reply with it, each with a fresh uuid", async () =
 
 test("feishu uses its own host", async () => {
   const lark = fakeLark();
-  await new LarkChannel({ ...PLAIN, domain: "feishu" }, "acct", lark.fetchImpl).send("ou_1", { text: "x" });
+  await new LarkChannel({ ...PLAIN, domain: "feishu" }, "acct", lark.fetchImpl).send(TO, { text: "x" }, "k:0");
   assert.match(lark.calls[0]!.url, /^https:\/\/open\.feishu\.cn\//);
 });
 
 test("buttons send an interactive card whose values come back through parse", async () => {
   const lark = fakeLark();
   const channel = new LarkChannel(PLAIN, "acct", lark.fetchImpl);
-  await channel.send("ou_1", { text: "发布吗?", buttons: [{ label: "确认", taskId: "t1", action: "approve" }, { label: "取消", taskId: "t1", action: "decline" }] });
+  await channel.send(TO, { text: "发布吗?", buttons: [{ label: "确认", taskId: "t1", action: "approve" }, { label: "取消", taskId: "t1", action: "decline" }] }, "k:0");
   const body = lark.calls[0]?.body;
   assert.equal(body.msg_type, "interactive");
   const sent = JSON.parse(body.content);
@@ -224,33 +227,14 @@ test("buttons send an interactive card whose values come back through parse", as
   assert.deepEqual(sent.body.elements[2].behaviors[0].value, { taskId: "t1", action: "decline" });
 });
 
-test("long messages are cut by request bytes, with an ellipsis", async () => {
-  const lark = fakeLark();
-  const channel = new LarkChannel(PLAIN, "acct", lark.fetchImpl);
-  const buttons = [{ label: "确认", taskId: "t1", action: "approve" as const }];
-  // Multi-byte text and quotes, which JSON-escaping grows twice, on both sides of each limit.
-  await channel.send("ou_1", { text: "汉\"😀".repeat(40_000) });
-  await channel.send("ou_1", { text: "汉\"😀".repeat(40_000), buttons });
-  await channel.send("ou_1", { text: "short" });
-  const [text, cardCall, short] = lark.calls;
-  const size = (call?: { init?: RequestInit }) => Buffer.byteLength(String(call?.init?.body));
-  assert.ok(size(text) <= 150 * 1024 && size(text) > 149 * 1024, `text request was ${size(text)}`);
-  assert.ok(size(cardCall) <= 30 * 1024 && size(cardCall) > 29 * 1024, `card request was ${size(cardCall)}`);
-  const sentText: string = JSON.parse(text?.body.content).text;
-  assert.ok(sentText.endsWith("…"));
-  assert.doesNotMatch(sentText, /\p{Cs}/u);
-  assert.ok(JSON.parse(cardCall?.body.content).body.elements[0].text.content.endsWith("…"));
-  assert.equal(JSON.parse(short?.body.content).text, "short");
-});
-
 test("a non-zero code throws, even with HTTP 200", async () => {
   const lark = fakeLark(() => Response.json({ code: 230002, msg: "Bot is not in the chat" }));
-  await assert.rejects(new LarkChannel(PLAIN, "acct", lark.fetchImpl).send("ou_1", { text: "x" }), /Bot is not in the chat \(code 230002\)/);
+  await assert.rejects(new LarkChannel(PLAIN, "acct", lark.fetchImpl).send(TO, { text: "x" }, "k:0"), /Bot is not in the chat \(code 230002\)/);
 });
 
 test("an HTTP failure without a code throws", async () => {
   const lark = fakeLark(() => new Response("bad gateway", { status: 502 }));
-  await assert.rejects(new LarkChannel(PLAIN, "acct", lark.fetchImpl).send("ou_1", { text: "x" }), /HTTP 502/);
+  await assert.rejects(new LarkChannel(PLAIN, "acct", lark.fetchImpl).send(TO, { text: "x" }, "k:0"), /HTTP 502/);
 });
 
 test("download fetches the resource with the type from the ref", async () => {
@@ -311,4 +295,55 @@ test("a failed token is not cached and the secret stays out of the error", async
   await assert.rejects(channel.probe(), error => !(error as Error).message.includes("s3cr3t"));
   await assert.rejects(channel.probe());
   assert.equal(attempts, 2);
+});
+
+test("capabilities", () => {
+  assert.deepEqual(new LarkChannel(PLAIN, "acct").capabilities(), { stream: false, edit: false, typing: false, buttons: true, maxLength: 9000, canInitiate: true, idempotentSend: true });
+});
+
+test("send never truncates: a message at maxLength goes whole, as text and as a card", async () => {
+  const lark = fakeLark();
+  const channel = new LarkChannel(PLAIN, "acct", lark.fetchImpl);
+  const text = "汉\"😀".repeat(3000).slice(0, channel.capabilities().maxLength);
+  await channel.send(TO, { text }, "k:0");
+  await channel.send(TO, { text, buttons: [{ label: "确认", taskId: "t1", action: "approve" }] }, "k:0");
+  assert.equal(JSON.parse(lark.calls[0]!.body.content).text, text);
+  assert.equal(JSON.parse(lark.calls[1]!.body.content).body.elements[0].text.content, text);
+  assert.ok(Buffer.byteLength(String(lark.calls[1]!.init?.body)) < 30 * 1024);
+});
+
+test("the outbox key becomes the same uuid every time, and different keys differ", async () => {
+  const uuids: string[] = [];
+  for (const key of ["a:0", "a:0", "a:1"]) {
+    const lark = fakeLark();
+    await new LarkChannel(PLAIN, "acct", lark.fetchImpl).send(TO, { text: "hi" }, key);
+    uuids.push(lark.calls[0]!.body.uuid);
+  }
+  assert.match(uuids[0]!, UUID);
+  assert.equal(uuids[0], uuids[1]);
+  assert.notEqual(uuids[0], uuids[2]);
+});
+
+test("send failures are classified for the outbox", async () => {
+  const classify = async (answer: () => Response) => {
+    const lark = fakeLark(answer);
+    const error = await new LarkChannel(PLAIN, "acct", lark.fetchImpl).send(TO, { text: "x" }, "k:0").then(() => undefined, (e: unknown) => e);
+    assert.ok(error instanceof ChannelSendError);
+    return error;
+  };
+  assert.equal((await classify(() => new Response("{}", { status: 429 }))).failure, "definite");
+  const denied = await classify(() => new Response("{}", { status: 403 }));
+  assert.deepEqual([denied.failure, denied.options.access], ["permanent", true]);
+  assert.equal((await classify(() => new Response("{}", { status: 400 }))).failure, "permanent");
+  assert.equal((await classify(() => new Response("{}", { status: 500 }))).failure, "ambiguous");
+  assert.equal((await classify(() => Response.json({ code: 230002, msg: "Bot is not in the chat" }))).failure, "permanent");
+  assert.equal((await classify(() => Response.json({ code: 99991400, msg: "rate limit" }))).failure, "definite");
+  assert.equal((await classify(() => { throw new Error("timeout"); })).failure, "ambiguous");
+});
+
+test("recorded payload: a redelivered message parses to the same event id, and an unknown event type yields nothing", () => {
+  const channel = new LarkChannel(PLAIN, "acct");
+  const payload = receive("text", { text: "hi" });
+  assert.deepEqual(channel.parse(payload), channel.parse(payload));
+  assert.deepEqual(channel.parse(json({ header: { event_id: "e9", event_type: "im.message.reaction.created_v1" }, event: {} })).events, []);
 });
