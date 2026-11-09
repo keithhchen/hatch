@@ -14,7 +14,7 @@ export class ConversationEvidence {
     if (runId) return (await this.pool.query("SELECT conversation_id FROM hatch_conversation_runs WHERE id = $1", [runId])).rows[0]?.conversation_id;
     return (await this.pool.query("SELECT id FROM hatch_conversations WHERE public_id = $1 OR id = $1", [publicId])).rows[0]?.id;
   }
-  async runs(id) { return (await this.pool.query("SELECT id, status, client_message_id, steered_count, consumed_count, created_at, started_at, completed_at, interrupted_reason FROM hatch_conversation_runs WHERE conversation_id = $1 ORDER BY created_at, id", [id])).rows; }
+  async runs(id) { return (await this.pool.query("SELECT id, status, client_message_id, steered_count, consumed_count, created_at, started_at, completed_at, COALESCE(interrupted_reason, (SELECT payload->>'reason' FROM hatch_conversation_journal j WHERE j.run_id = hatch_conversation_runs.id AND j.event_type = 'run.state' AND j.payload->>'status' = 'failed' LIMIT 1)) AS interrupted_reason FROM hatch_conversation_runs WHERE conversation_id = $1 ORDER BY created_at, id", [id])).rows; }
   /** One row per user message the journal accepted (a key appears at most once by the database's own unique index). */
   async journalUsers(id) { return (await this.pool.query("SELECT cursor, run_id, payload->>'client_message_id' AS key, payload->>'steered' AS steered FROM hatch_conversation_journal WHERE conversation_id = $1 AND event_type = 'message.created' AND payload->>'role' = 'user' ORDER BY cursor", [id])).rows; }
   async consumed(id) { return (await this.pool.query("SELECT run_id, payload->>'client_message_id' AS key FROM hatch_conversation_journal WHERE conversation_id = $1 AND event_type = 'message.consumed' ORDER BY cursor", [id])).rows; }

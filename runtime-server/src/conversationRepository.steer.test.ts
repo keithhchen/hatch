@@ -95,6 +95,25 @@ for (const backend of ["memory", "file", "postgres"] as const) {
     assert.notEqual(next.run.id, start.run.id);
   }));
 
+  test(`${backend}: messages racing a Run's end never deadlock and are each claimed or start the next Run`, options, async () => withBackend(backend, async ({ repository }) => {
+    let n = 0;
+    const submit = (): Promise<unknown> => repository.acceptSubmission(message(n++)).catch((error: unknown) => error);
+    const first = await repository.acceptSubmission(message(n++));
+    // The Run ends while a burst arrives: claim then complete, retrying while a message joined in between.
+    const finish = async (runId: string): Promise<void> => {
+      for (;;) {
+        await repository.claimSteeredMessages(runId);
+        try { await repository.transitionRun(runId, "completed"); return; } catch (error) { if ((error as { code?: string }).code !== "steer_pending") throw error; }
+      }
+    };
+    const outcomes = await Promise.all([finish(first.run.id), ...Array.from({ length: 12 }, submit)]);
+    assert.deepEqual(outcomes.filter((outcome) => outcome instanceof Error), []);
+    // Whatever did not steer a Run started its own: nothing is lost.
+    const runs = await repository.listRuns(id);
+    assert.equal(runs.reduce((sum, run) => sum + 1 + run.steeredCount, 0), n);
+    assert.ok(runs.every((run) => run.status === "completed" || run.consumedCount <= run.steeredCount));
+  }));
+
   test(`${backend}: partial output is persisted on the Run for a snapshot`, options, async () => withBackend(backend, async ({ repository }) => {
     const start = await repository.acceptSubmission(message(0));
     await repository.savePartialOutput(start.run.id, "Hello wor");
