@@ -82,7 +82,7 @@ const corpus = (tools: Array<{ kind: string }>) => ({
   corpus: { creator: { id: creatorId, name: "C" }, product: { id: productId, name: "P", boundaries: [], presentation: {} }, tools, agent_id: productId }
 }) as unknown as ResolvedAgentCorpus;
 const connection = (patch: Partial<Connection> = {}): Connection => ({
-  id: "conn-1", ownerAccountId: "owner", channel: "instagram", client: "dm", target: { kind: "product", productId }, audience: "public", state: "active", ...patch
+  id: "conn-1", ownerAccountId: "owner", channel: "instagram", client: "dm", target: { kind: "product", productId }, audience: "public", taskSpecific: false, state: "active", ...patch
 });
 
 test("a contact is bound to its Connection's Product with no order, and isolated by connection and contact", async () => {
