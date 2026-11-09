@@ -27,7 +27,7 @@ export const attachmentTools = (files: AttachmentFiles): AttachmentTool[] => [
   define({ name: "grep", supportedClients: "*", description: "Search attachment text for a fixed string (fixed=true) or a regular expression. Prints path:line: text with optional context lines. Output is bounded; narrow with path." },
     z.object({ pattern: z.string(), path: z.string().optional(), fixed: z.boolean().optional(), ignoreCase: z.boolean().optional(), context: z.number().int().optional(), maxMatches: z.number().int().optional() }),
     (scope, args) => files.grep(scope, args)),
-  define({ name: "read", supportedClients: "*", description: "Read an attachment's text in pages. Returns content, offset, next_offset and total_chars; call again with offset=next_offset to continue until it is null. To summarize or judge a whole document, read every page (grep finds facts, it does not cover a document); ls shows the size." },
-    z.object({ path: z.string(), offset: z.number().int().optional(), limit: z.number().int().optional() }),
-    async (scope, { path, offset, limit }) => JSON.stringify(await files.read(scope, path, offset, limit)))
+  define({ name: "read", supportedClients: "*", description: "Read an attachment's text in pages. Returns content, offset, next_offset, total_chars and remaining_chars (what you have not read yet); call again with offset=next_offset to continue until it is null. To summarize or judge a whole document, read every page (grep finds facts, it does not cover a document); ls shows the size." },
+    z.object({ path: z.string(), offset: z.number().int().optional() }),
+    async (scope, { path, offset }) => JSON.stringify(await files.read(scope, path, offset)))
 ];

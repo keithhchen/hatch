@@ -63,7 +63,7 @@ export class AttachmentFiles {
     return [...shown, ...lines.length > shown.length ? [`... ${lines.length - shown.length} more`] : []].join("\n") || "(empty)";
   }
 
-  async read(scope: AssetScope, path: string, offset = 0, limit: number = FILE_LIMITS.readChars): Promise<{ path: string; content: string; offset: number; next_offset: number | null; total_chars: number }> {
+  async read(scope: AssetScope, path: string, offset = 0, limit: number = FILE_LIMITS.readChars): Promise<{ path: string; content: string; offset: number; next_offset: number | null; total_chars: number; remaining_chars: number }> {
     const parts = segments(path);
     if (parts.length !== 2) throw new FileToolError("read needs a file path");
     if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(limit) || limit < 1) throw new FileToolError("offset and limit must be non-negative integers");
@@ -72,7 +72,7 @@ export class AttachmentFiles {
     if (text === undefined) throw new FileToolError("This file has no text form (for example an image)");
     let end = Math.min(text.length, offset + Math.min(limit, FILE_LIMITS.readCharsMax));
     if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1] ?? "")) end -= 1;
-    return { path: entry!.path, content: text.slice(offset, end), offset, next_offset: end < text.length ? end : null, total_chars: text.length };
+    return { path: entry!.path, content: text.slice(offset, end), offset, next_offset: end < text.length ? end : null, total_chars: text.length, remaining_chars: text.length - end };
   }
 
   async grep(scope: AssetScope, query: GrepQuery): Promise<string> {
