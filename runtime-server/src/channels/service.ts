@@ -9,7 +9,7 @@ import type { AssistantChannels, ChatGateway, TargetHandler, TargetKind } from "
 import { ChatReplies } from "./productTarget.js";
 import { PostgresRateLimiter, type RateLimiter } from "./rateLimiter.js";
 import { ChannelRouter } from "./router.js";
-import { CHANNEL_KINDS, type ChannelAdapter, type ChannelKind, type InboundEvent } from "./types.js";
+import { CHANNEL_KINDS, type ChannelAdapter, type ChannelKind, type InboundEvent, type PullNotice } from "./types.js";
 
 /** Long enough for a file download to finish; a crashed process frees the event after this. */
 const INBOX_LEASE_MS = 3 * 60_000;
@@ -85,6 +85,13 @@ export class ChannelService implements AssistantChannels {
   /** Inbound, verified: stored before anything else, so the platform can be answered at once. */
   async accept(adapter: ChannelAdapter, events: InboundEvent[]): Promise<void> {
     if ((await this.inbox.store(adapter.kind, adapter.scope, events, this.deps.now?.())).length) this.inboxLoop?.wake();
+  }
+
+  /** After the platform is answered: fetch what a notification announced, and store it with the cursor in one step. A failed pull stores nothing, so the next notice pulls the same range; repeats are refused by event id. */
+  async pull(adapter: ChannelAdapter, notice: PullNotice): Promise<void> {
+    if (!adapter.pull) return;
+    const { events, cursor } = await adapter.pull(notice, await this.inbox.cursor(adapter.kind, adapter.scope, notice.key));
+    if ((await this.inbox.store(adapter.kind, adapter.scope, events, this.deps.now?.(), cursor ? { key: notice.key, cursor } : undefined)).length) this.inboxLoop?.wake();
   }
 
   private async processInbox(): Promise<number> {

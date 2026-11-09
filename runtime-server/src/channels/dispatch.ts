@@ -62,8 +62,13 @@ export class Dispatcher {
     const capabilities = adapter.capabilities();
     // The lease ran out in the middle of a send: the platform may already have it.
     if (delivery.inFlight && deliveryAfterFailure({ failure: "ambiguous", idempotent: capabilities.idempotentSend }) === "unknown") return outbox.settle(delivery.id, "unknown", "Lease expired while sending");
-    if (!replyWindowOpen(capabilities, await this.deps.inbox.lastInbound(delivery.channel, delivery.scope, delivery.address.threadId), this.now())) return outbox.settle(delivery.id, "undelivered");
+    const lastInbound = await this.deps.inbox.lastInbound(delivery.channel, delivery.scope, delivery.address.threadId);
+    if (!replyWindowOpen(capabilities, lastInbound, this.now())) return outbox.settle(delivery.id, "undelivered");
+    // The allowance restarts with each inbound message. Parts this delivery already sent are in the count.
+    let allowed = capabilities.replyAllowance === undefined ? Infinity
+      : capabilities.replyAllowance - (lastInbound ? await outbox.sentSince(delivery.channel, delivery.scope, delivery.address.threadId, lastInbound) : 0);
     for (let index = delivery.sentParts; index < delivery.parts.length; index += 1) {
+      if (allowed-- < 1) return outbox.settle(delivery.id, "undelivered", "Reply allowance spent");
       const wait = await this.throttle(delivery);
       if (wait > 0) return outbox.defer(delivery.id, wait, this.now());
       await outbox.begin(delivery.id);

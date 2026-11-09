@@ -57,6 +57,8 @@ export interface ConnectionRepository {
   revoke(ownerAccountId: string, channel: ChannelKind): Promise<void>;
   saveCredentials(ownerAccountId: string, channel: ChannelKind, sealed: string): Promise<void>;
   credentials(ownerAccountId: string, channel: ChannelKind): Promise<string | undefined>;
+  /** Tenants that bring their own app: Connections holding credentials that are not revoked. */
+  listening(): Promise<Array<{ ownerAccountId: string; channel: ChannelKind; scope: string }>>;
 }
 
 const COLUMNS = "id, owner_account_id, channel, scope, client, target, audience, state";
@@ -209,6 +211,11 @@ export class PostgresConnections implements ConnectionRepository {
 
   async credentials(ownerAccountId: string, channel: ChannelKind): Promise<string | undefined> {
     return (await this.pool.query("SELECT credentials FROM hatch_connections WHERE owner_account_id = $1 AND channel = $2 AND audience = 'self' AND target_key = 'assistant'", [ownerAccountId, channel])).rows[0]?.credentials ?? undefined;
+  }
+
+  async listening(): Promise<Array<{ ownerAccountId: string; channel: ChannelKind; scope: string }>> {
+    return (await this.pool.query("SELECT DISTINCT owner_account_id, channel, scope FROM hatch_connections WHERE credentials IS NOT NULL AND state <> 'revoked'")).rows
+      .map(row => ({ ownerAccountId: row.owner_account_id, channel: row.channel, scope: row.scope }));
   }
 
   private async transaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {

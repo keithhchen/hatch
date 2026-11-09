@@ -23,7 +23,12 @@ const WAITING_MS = 60 * 60_000;
  */
 export interface Inbox {
   /** The events not stored before. A repeat is refused by the database, whatever its timing. */
-  store(channel: ChannelKind, scope: string, events: InboundEvent[], now?: Date): Promise<InboxItem[]>;
+  store(channel: ChannelKind, scope: string, events: InboundEvent[], now?: Date, after?: { key: string; cursor: string }): Promise<InboxItem[]>;
+  /**
+   * Where a pull stopped, kept in one transaction with the events it fetched. It belongs to the platform tenant (scope) and
+   * the notice's key, not to a Connection: several Connections share a tenant, so none of them can name it.
+   */
+  cursor(channel: ChannelKind, scope: string, key: string): Promise<string | undefined>;
   /** Leases the next unprocessed event of each thread. Events of one thread are handed out in arrival order, one at a time. */
   claim(limit: number, leaseMs: number, now?: Date): Promise<InboxItem[]>;
   complete(id: string, outcome: { connectionId?: string; runId?: string; replied?: boolean }): Promise<void>;
@@ -73,17 +78,43 @@ export class PostgresInbox implements Inbox {
       CREATE INDEX IF NOT EXISTS hatch_channel_inbox_thread_idx ON hatch_channel_inbox (channel, scope, thread_id, received_at DESC);
       CREATE INDEX IF NOT EXISTS hatch_channel_inbox_run_idx ON hatch_channel_inbox (run_id) WHERE run_id IS NOT NULL;
     `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS hatch_channel_cursors (
+        channel TEXT NOT NULL,
+        scope TEXT NOT NULL,
+        key TEXT NOT NULL,
+        cursor TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (channel, scope, key)
+      )`);
     return new PostgresInbox(pool);
   }
 
-  async store(channel: ChannelKind, scope: string, events: InboundEvent[], now = new Date()): Promise<InboxItem[]> {
+  async store(channel: ChannelKind, scope: string, events: InboundEvent[], now = new Date(), after?: { key: string; cursor: string }): Promise<InboxItem[]> {
     const stored: InboxItem[] = [];
-    for (const event of events) {
-      const row = (await this.pool.query(`INSERT INTO hatch_channel_inbox (channel, scope, event_id, thread_id, sender_id, event, received_at) VALUES ($1, $2, $3, $4, $5, $6, $7)
-        ON CONFLICT (channel, scope, event_id) DO NOTHING RETURNING *`, [channel, event.scope ?? scope, event.eventId, event.address.threadId, event.address.senderId, JSON.stringify(event), now])).rows[0];
-      if (row) stored.push(itemOf(row));
-    }
+    const client = await this.pool.connect();
+    try {
+      // The events and the cursor commit together: a cursor never moves past an event that was not stored.
+      if (after) await client.query("BEGIN");
+      for (const event of events) {
+        const row = (await client.query(`INSERT INTO hatch_channel_inbox (channel, scope, event_id, thread_id, sender_id, event, received_at) VALUES ($1, $2, $3, $4, $5, $6, $7)
+          ON CONFLICT (channel, scope, event_id) DO NOTHING RETURNING *`, [channel, event.scope ?? scope, event.eventId, event.address.threadId, event.address.senderId, JSON.stringify(event), now])).rows[0];
+        if (row) stored.push(itemOf(row));
+      }
+      if (after) {
+        await client.query(`INSERT INTO hatch_channel_cursors (channel, scope, key, cursor, updated_at) VALUES ($1, $2, $3, $4, $5)
+          ON CONFLICT (channel, scope, key) DO UPDATE SET cursor = EXCLUDED.cursor, updated_at = EXCLUDED.updated_at`, [channel, scope, after.key, after.cursor, now]);
+        await client.query("COMMIT");
+      }
+    } catch (error) {
+      if (after) await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally { client.release(); }
     return stored;
+  }
+
+  async cursor(channel: ChannelKind, scope: string, key: string): Promise<string | undefined> {
+    return (await this.pool.query("SELECT cursor FROM hatch_channel_cursors WHERE channel = $1 AND scope = $2 AND key = $3", [channel, scope, key])).rows[0]?.cursor;
   }
 
   async claim(limit: number, leaseMs: number, now = new Date()): Promise<InboxItem[]> {
