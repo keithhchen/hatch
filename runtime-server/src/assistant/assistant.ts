@@ -9,9 +9,11 @@ import { WorkbenchStore, type AgentDefinitionSource, type AssistantDeskState, ty
 import { WorkbenchRuntime, safeError, type WorkbenchRuntimeOptions } from "../factoryAgents/runtime.js";
 import type { FactoryWorkspace } from "../factoryAgents/service.js";
 import type { AgentCatalog, AgentChange } from "./catalog.js";
-import { ACCEPTED_UPLOAD_EXTENSIONS, convertUpload } from "../factoryAgents/markdownConverter.js";
+import { convertUpload } from "../factoryAgents/markdownConverter.js";
 import { imageMime, userMessage } from "../factoryAgents/imageRefs.js";
-import { CHANNEL_KINDS, CHANNEL_LABELS, LINK_CODE_PATTERN, localDate, localHour, type AccountReach, type ChannelAdapter, type ChannelHub, type ChannelKind, type ChannelLinks, type InboundEvent, type OutboundMessage } from "./channels.js";
+import { CHANNEL_KINDS, CHANNEL_LABELS, type ChannelKind, type OutboundMessage } from "../channels/types.js";
+import type { AssistantChannels } from "../channels/ports.js";
+import { localDate, localHour, type AccountReach } from "./reach.js";
 import type { AssistantTask, TaskKind, TaskOrigin, TaskRepository } from "./tasks.js";
 
 const WORKER_LEASE_MS = 35 * 60_000;
@@ -48,8 +50,8 @@ export type ProductWorkspaces = {
 export type AssistantDependencies = {
   tasks: TaskRepository;
   reach: AccountReach;
-  channels: ChannelHub;
-  links: ChannelLinks;
+  /** Where its messages go: the channel layer, which knows every platform so the Assistant knows none. */
+  channels: AssistantChannels;
   products: ProductWorkspaces;
   catalog: AgentCatalog;
   /** The Assistant workspace of one account: its sessions and files. */
@@ -58,16 +60,22 @@ export type AssistantDependencies = {
   exclusive: (name: string, fn: () => Promise<void>) => Promise<void>;
   env: NodeJS.ProcessEnv;
   runtime?: Pick<WorkbenchRuntimeOptions, "agentFactory" | "deadlineMs" | "maxTurns">;
-  /** Quiet window before a new turn starts, so a burst of messages becomes one turn. */
-  settleMs?: number;
 };
+
+/**
+ * Where a desk's turn is. The decision to steer or start is made in one synchronous step against this phase, so
+ * a message cannot be steered into a turn that is ending, and two turns cannot start at once.
+ * idle: nothing runs. running: a turn takes steers. compacting: the turn is summarizing, messages wait.
+ * ending: the turn has finished and is being settled; messages wait for the next turn.
+ */
+type Phase = "idle" | "running" | "compacting" | "ending";
 
 type Desk = {
   accountId: string;
   store: WorkbenchStore;
   runtime: WorkbenchRuntime;
   sessionId: string;
-  timer?: NodeJS.Timeout;
+  phase: Phase;
   /** Ingress items handed to the running turn, by id. */
   taken: Map<string, IngressItem>;
   turnStart: number;
@@ -145,16 +153,12 @@ export class AssistantService {
   /** Stop the Assistant's running turn. */
   async stop(accountId: string): Promise<void> { const desk = await this.desk(accountId); desk.runtime.stop(desk.sessionId); }
 
-  /** Durably accept one inbound item. Returns false for a platform event already seen. A caller may name the item, to find its message later. */
+  /** Durably accept one inbound item. Returns false for an item already accepted: a caller that names the item (a channel message does, by its inbox id) can repeat itself safely. */
   async ingest(accountId: string, item: Omit<IngressItem, "id" | "at"> & { id?: string }): Promise<boolean> {
     const desk = await this.desk(accountId);
     const accepted = await desk.store.update(desk.sessionId, session => {
       const state = deskState(session);
-      if (item.eventId !== undefined) {
-        const seen = `${item.source}:${item.eventId}`;
-        if (state.seenEvents.includes(seen)) return false;
-        state.seenEvents = [...state.seenEvents, seen].slice(-200);
-      }
+      if (item.id !== undefined && (state.ingress.some(entry => entry.id === item.id) || session.messages.some(message => originOf(message)?.itemId === item.id))) return false;
       const at = new Date().toISOString();
       if (fromExpert(item)) state.lastExpert = { source: item.source as ExpertSource, at, ...(item.messageRef ? { messageRef: item.messageRef } : {}) };
       state.ingress.push({ id: randomUUID(), at, ...item });
@@ -177,29 +181,28 @@ export class AssistantService {
       if (expert.length) await this.passToInterview(desk, state.interview, expert);
       return;
     }
-    if (desk.runtime.isRunning(desk.sessionId)) {
-      let waiting = false;
-      for (const item of pending) {
-        if (desk.runtime.steer(desk.sessionId, itemMessage(item))) desk.taken.set(item.id, item);
-        else waiting = true;
-      }
-      // The turn has not reached its model loop yet; try again shortly.
-      if (waiting) setTimeout(() => void this.pump(accountId).catch(error => this.report(accountId, error)), 300);
+    // From here to the decision there is no await, so the phase cannot change under it.
+    if (desk.phase === "idle") {
+      desk.phase = "running";
+      void this.startTurn(desk).catch(error => { desk.taken = new Map(); desk.phase = "idle"; this.report(accountId, error); });
       return;
     }
-    if (desk.timer) return;
-    desk.timer = setTimeout(() => {
-      desk.timer = undefined;
-      void this.startTurn(desk).catch(error => this.report(accountId, error));
-    }, this.deps.settleMs ?? 1500);
+    // A turn that is summarizing or ending takes nothing: turnEnded and the end of compaction pump again.
+    if (desk.phase !== "running") return;
+    let waiting = false;
+    for (const item of pending) {
+      if (desk.runtime.steer(desk.sessionId, itemMessage(item))) desk.taken.set(item.id, item);
+      else waiting = true;
+    }
+    // The turn has not reached its model loop yet; try again shortly.
+    if (waiting) setTimeout(() => void this.pump(accountId).catch(error => this.report(accountId, error)), 50);
   }
 
   private async startTurn(desk: Desk): Promise<void> {
-    if (desk.runtime.isRunning(desk.sessionId)) return void this.pump(desk.accountId);
     const session = await desk.store.get(desk.sessionId);
     const state = deskState(session);
     const pending = state.ingress.filter(item => !desk.taken.has(item.id));
-    if (state.interview || !pending.length) return;
+    if (state.interview || !pending.length) { desk.phase = "idle"; return; }
     desk.taken = new Map(pending.map(item => [item.id, item]));
     desk.turnStart = session.messages.length;
     desk.createdTasks.clear();
@@ -211,6 +214,11 @@ export class AssistantService {
 
   private async turnEnded(desk: Desk, type: string): Promise<void> {
     if (this.closing) return;
+    try { await this.settleTurn(desk, type); } finally { desk.phase = "idle"; }
+    void this.pump(desk.accountId).catch(error => this.report(desk.accountId, error));
+  }
+
+  private async settleTurn(desk: Desk, type: string): Promise<void> {
     const session = await desk.store.get(desk.sessionId);
     const turn = session.messages.slice(desk.turnStart);
     const said = new Set(turn.flatMap(message => { const origin = originOf(message); return origin ? [origin.itemId] : []; }));
@@ -232,13 +240,12 @@ export class AssistantService {
     if (type === "voice.run_failed") await this.deliver(desk, `我这边出了点问题，刚才那条没处理完：${session.error ?? "未知错误"}`, taken);
     if (dropped.length) this.report(desk.accountId, new Error(`Dropped ${dropped.length} ingress item(s) after three failed turns`));
     this.emit(desk.accountId, { type: "assistant" });
-    void this.pump(desk.accountId).catch(error => this.report(desk.accountId, error));
   }
 
   // ── Delivery ───────────────────────────────────────────────────────────
 
   /**
-   * Studio reads the session directly. A reply goes back to the platform it came
+   * Studio reads the session directly. A reply goes back to the thread it came
    * from; a proactive message goes where the Expert was last, unless they are in Studio now.
    */
   private async deliver(desk: Desk, text: string, origins: IngressItem[]): Promise<void> {
@@ -247,15 +254,15 @@ export class AssistantService {
     const expertInvolved = origins.some(fromExpert);
     const activeInStudio = state.lastExpert?.source === "web" && Date.now() - Date.parse(state.lastExpert.at) < 10 * 60_000;
     if (!replying && (expertInvolved || activeInStudio)) return;
-    const links = await this.deps.links.list(desk.accountId);
     const last = state.lastExpert && isChannel(state.lastExpert.source) ? state.lastExpert.source : undefined;
-    const kind = (replying?.source as ChannelKind | undefined) ?? [last, ...CHANNEL_KINDS].find(candidate => candidate && links.some(link => link.kind === candidate && link.peerId));
-    const peerId = kind ? links.find(link => link.kind === kind)?.peerId : undefined;
-    const adapter = kind && peerId ? await this.deps.channels.get(kind, desk.accountId) : undefined;
-    if (!adapter || !peerId) return;
     const buttons = await this.reviewButtons(desk, origins);
-    const replyTo = [...origins].reverse().find(item => item.messageRef)?.messageRef;
-    await adapter.send(peerId, { text, ...(buttons.length ? { buttons } : {}), ...(replyTo ? { replyTo } : {}) }).catch(error => this.report(desk.accountId, error));
+    const message = { text, ...(buttons.length ? { buttons } : {}) };
+    const { channels } = this.deps;
+    // The final reply goes where the message came from; anything else goes where the Expert was last.
+    try {
+      if (replying?.eventId && await channels.reply(replying.eventId, message)) return;
+      await channels.push(desk.accountId, message, (replying?.source as ChannelKind | undefined) ?? last);
+    } catch (error) { this.report(desk.accountId, error); }
   }
 
   private async reviewButtons(desk: Desk, origins: IngressItem[]): Promise<NonNullable<OutboundMessage["buttons"]>> {
@@ -554,6 +561,8 @@ export class AssistantService {
     const current = deskState(await desk.store.get(desk.sessionId));
     if (current.interview) return;
     if (current.lastExpert && now.getTime() - Date.parse(current.lastExpert.at) < 30 * 60_000) return;
+    // A message the Expert's chats cannot take now is not worth a model call.
+    if (!(await this.deps.channels.canReach(accountId))) return;
     const pokes = await this.deps.tasks.pokes(accountId, 3);
     const latest = pokes[0];
     if (latest && localDate(timezone, new Date(latest.createdAt)) === localDate(timezone, now)) return;
@@ -587,13 +596,13 @@ export class AssistantService {
    * Keep a file as this Expert's material and tell the Assistant. Files live in
    * the Assistant session and are copied into a Product's input when work starts.
    */
-  async receiveFile(accountId: string, name: string, bytes: Buffer, source: ExpertSource, ref: { eventId?: string; messageRef?: string; caption?: string } = {}): Promise<{ name: string }> {
+  async receiveFile(accountId: string, name: string, bytes: Buffer, source: ExpertSource, ref: { id?: string; eventId?: string; messageRef?: string; caption?: string } = {}): Promise<{ name: string }> {
     const { caption, ...origin } = ref;
     const mimeType = imageMime(name);
     if (mimeType) {
       if (bytes.length > MAX_IMAGE_BYTES) throw Object.assign(new Error("这张图片太大了，超过 10 MB。可以压缩一下再发。"), { status: 413, code: "image_too_large" });
       const desk = await this.desk(accountId);
-      const file = `input/images/${randomUUID()}${path.extname(name).toLowerCase()}`;
+      const file = `input/images/${ref.id ?? randomUUID()}${path.extname(name).toLowerCase()}`;
       await desk.store.put(desk.sessionId, file, bytes, { actor: "host", mimeType });
       await this.ingest(accountId, { source, text: caption?.trim() ?? "", images: [file], ...origin });
       return { name };
@@ -624,67 +633,17 @@ export class AssistantService {
     return `<当前状态>\n系统自动生成，不是专家说的，不要复述。\n事项：\n${tasks.map(task => `- ${task.kind}（${task.id}）${task.status}${task.needs ? `/${task.needs}` : ""}：${task.summary ?? ""}`).join("\n") || "（没有）"}\nAgent 和访谈大纲：\n${lines.join("\n") || "（没有）"}\n</当前状态>`;
   }
 
-  /** A connect code for Studio to show: the Expert sends it to us from the platform. */
-  async connectChannel(accountId: string, kind: ChannelKind): Promise<{ code: string; url?: string }> {
-    const adapter = await this.deps.channels.get(kind, accountId);
-    if (!adapter) throw Object.assign(new Error(`${CHANNEL_LABELS[kind]} is not available.`), { status: 503, code: "channel_unavailable" });
-    const code = await this.deps.links.issueCode(accountId, kind);
-    const url = adapter.connectUrl(code) ?? adapter.chatUrl?.();
-    return { code, ...(url ? { url } : {}) };
-  }
-
-  /** Events from any platform, already verified and in our terms. */
-  async channelEvents(adapter: ChannelAdapter, events: InboundEvent[]): Promise<void> {
-    for (const event of events) await this.channelEvent(adapter, event).catch(error => this.report(adapter.scope || adapter.kind, error));
-  }
-
-  private async channelEvent(adapter: ChannelAdapter, event: InboundEvent): Promise<void> {
-    const { kind, scope } = adapter;
-    const say = (text: string) => adapter.send(event.peerId, { text, ...(event.messageRef ? { replyTo: event.messageRef } : {}) });
-    const code = event.text?.match(LINK_CODE_PATTERN)?.[0];
-    if (code) {
-      const linked = await this.deps.links.redeem(kind, scope, code, event.peerId);
-      if (!linked) return say(`这个连接码已失效。请回到 Hatch Studio 重新点「连接 ${CHANNEL_LABELS[kind]}」。`);
-      const known = (await this.deps.catalog.list(linked)).length > 0;
-      this.emit(linked, { type: "assistant" });
-      return say(known ? "连上了。以后我会在这里找你，你也可以随时在这里跟我说话。" : "连上了。先给我一样东西就行：你的名字、一个链接，或者现成的资料。");
-    }
-    const accountId = await this.deps.links.accountFor(kind, scope, event.peerId);
-    if (!accountId) return say(`请先从 Hatch Studio 连接 ${CHANNEL_LABELS[kind]}。`);
-    await this.deps.links.touch(accountId, kind);
-    if (event.button) {
-      try {
-        const { taskId, action } = event.button;
-        if (!taskId) return await adapter.acknowledge?.(event);
-        const task = action === "approve" ? await this.approve(accountId, taskId) : await this.decline(accountId, taskId);
-        await adapter.acknowledge?.(event, "好");
-        await this.ingest(accountId, { source: "task", taskId: task.id, text: `专家在 ${CHANNEL_LABELS[kind]} 点了「${action === "approve" ? "确认" : "取消"}」。`, ...(event.messageRef ? { messageRef: event.messageRef } : {}) });
-      } catch (error) { await (adapter.acknowledge ? adapter.acknowledge(event, safeError(error)) : say(safeError(error))); }
-      return;
-    }
-    if (event.file) {
-      const { name, size } = event.file;
-      if (!imageMime(name) && !ACCEPTED_UPLOAD_EXTENSIONS.some(extension => name.toLowerCase().endsWith(extension))) return say(`这种文件我还读不了。可以发图片，或 ${ACCEPTED_UPLOAD_EXTENSIONS.join("、")}。`);
-      if ((size ?? 0) > adapter.maxFileBytes) return say(`这个文件太大，${CHANNEL_LABELS[kind]} 传不过来。可以放到 Studio 里传。`);
-      if (await this.seenEvent(accountId, kind, event.eventId)) return;
-      try { await this.receiveFile(accountId, name, await adapter.download(event.file), kind, { eventId: event.eventId, ...(event.messageRef ? { messageRef: event.messageRef } : {}), ...(event.text ? { caption: event.text } : {}) }); }
-      catch (error) { this.report(accountId, error); await say((error as { code?: string }).code === "image_too_large" ? (error as Error).message : unreadableFile().message); }
-      return;
-    }
-    if (!event.text?.trim()) return say("这种消息我还读不了，可以发文字、图片或文档。");
-    await this.ingest(accountId, { source: kind, text: event.text.trim(), eventId: event.eventId, ...(event.messageRef ? { messageRef: event.messageRef } : {}) });
-  }
-
-  private async seenEvent(accountId: string, kind: ChannelKind, eventId: string): Promise<boolean> {
-    const desk = await this.desk(accountId);
-    return deskState(await desk.store.get(desk.sessionId)).seenEvents.includes(`${kind}:${eventId}`);
+  /** Someone linked their chat to this Assistant. Returns what to say to them. */
+  async linked(accountId: string): Promise<string> {
+    const known = (await this.deps.catalog.list(accountId)).length > 0;
+    this.emit(accountId, { type: "assistant" });
+    return known ? "连上了。以后我会在这里找你，你也可以随时在这里跟我说话。" : "连上了。先给我一样东西就行：你的名字、一个链接，或者现成的资料。";
   }
 
   async close(): Promise<void> {
     this.closing = true;
     for (const pending of this.desks.values()) {
       const desk = await pending.catch(() => undefined);
-      if (desk?.timer) clearTimeout(desk.timer);
       await desk?.runtime.close();
     }
   }
@@ -713,12 +672,21 @@ export class AssistantService {
       extraTools: async target => target.role === "assistant" ? this.tools(accountId, desk) : [],
       liveState: async id => id === desk.sessionId ? this.liveState(accountId).catch(error => { this.report(accountId, error); return "<当前状态>\n这次没有读到当前状态，需要时用 list_agents 和 list_tasks 查。\n</当前状态>"; }) : undefined,
     });
-    const desk: Desk = { accountId, store, runtime, sessionId: session.id, taken: new Map(), turnStart: 0, createdTasks: new Set() };
+    const desk: Desk = { accountId, store, runtime, sessionId: session.id, phase: "idle", taken: new Map(), turnStart: 0, createdTasks: new Set() };
     runtime.events.on("event", (event: { sessionId?: string; type?: string }) => {
       if (!event.sessionId || !event.type) return;
       if (event.sessionId === desk.sessionId) {
         if (["delta", "message", "state", "tool", "tool_end"].includes(event.type)) this.emit(accountId, event);
-        if (RUN_END.has(event.type)) void this.turnEnded(desk, event.type).catch(error => this.report(accountId, error));
+        // Synchronous, before anything else can run: from here a message waits for the next turn.
+        if (RUN_END.has(event.type)) { desk.phase = "ending"; void this.turnEnded(desk, event.type).catch(error => this.report(accountId, error)); }
+        else if (event.type === "compacting" && desk.phase === "running") {
+          desk.phase = "compacting";
+          void this.deps.channels.compacting(accountId, randomUUID()).catch(error => this.report(accountId, error));
+        } else if (desk.phase === "compacting" && ["delta", "message", "tool"].includes(event.type)) {
+          // Summarizing is over: what waited joins the turn.
+          desk.phase = "running";
+          void this.pump(accountId).catch(error => this.report(accountId, error));
+        }
         return;
       }
       if (RUN_END.has(event.type)) void this.deps.tasks.bySession(event.sessionId).then(task => { if (task) return this.workerTurnEnded(task, store, undefined, event.type!); }).catch(error => this.report(accountId, error));

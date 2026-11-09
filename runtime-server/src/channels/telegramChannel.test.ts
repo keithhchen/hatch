@@ -1,0 +1,151 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { TelegramChannel } from "./telegramChannel.js";
+import { ChannelSendError } from "./types.js";
+
+const TASK = "123e4567-e89b-12d3-a456-426614174000";
+const TO = { threadId: "42", senderId: "42" };
+const GROUP = { threadId: "-100", senderId: "7" };
+
+type Call = { url: string; body: any };
+
+function channel(respond: () => Response = () => Response.json({ ok: true, result: {} }), config: Partial<ConstructorParameters<typeof TelegramChannel>[0]> = {}) {
+  const calls: Call[] = [];
+  const fake = (async (url: string, init: RequestInit = {}) => {
+    calls.push({ url, body: init.body ? JSON.parse(init.body as string) : undefined });
+    return respond();
+  }) as typeof fetch;
+  return { calls, telegram: new TelegramChannel({ token: "tok", username: "HatchBot", webhookSecret: "s3cret", ...config }, fake) };
+}
+const parse = (update: unknown) => channel().telegram.parse(Buffer.from(JSON.stringify(update))).events;
+const privateMessage = (extra: object) => ({ update_id: 1, message: { message_id: 10, chat: { id: 42, type: "private" }, from: { id: 42 }, ...extra } });
+const groupMessage = (extra: object, type = "supergroup") => ({ update_id: 2, message: { message_id: 11, chat: { id: -100, type }, from: { id: 7 }, ...extra } });
+
+test("capabilities", () => {
+  assert.deepEqual(channel().telegram.capabilities(), { stream: false, edit: true, typing: true, buttons: true, maxLength: 4096, canInitiate: true, idempotentSend: false });
+});
+
+test("available needs token, username and secret; connectUrl carries the code", () => {
+  assert.equal(channel().telegram.available(), true);
+  for (const missing of ["token", "username", "webhookSecret"]) assert.equal(channel(undefined, { [missing]: undefined }).telegram.available(), false);
+  assert.equal(channel().telegram.connectUrl("HATCH-1"), "https://t.me/HatchBot?start=HATCH-1");
+});
+
+test("verify checks the secret header", () => {
+  const { telegram } = channel();
+  const raw = Buffer.from("{}");
+  assert.equal(telegram.verify(raw, { "x-telegram-bot-api-secret-token": "s3cret" }), true);
+  assert.equal(telegram.verify(raw, { "x-telegram-bot-api-secret-token": "wrong!" }), false);
+  assert.equal(telegram.verify(raw, { "x-telegram-bot-api-secret-token": "s" }), false);
+  assert.equal(telegram.verify(raw, {}), false);
+  assert.equal(channel(undefined, { webhookSecret: undefined }).telegram.verify(raw, { "x-telegram-bot-api-secret-token": "s3cret" }), false);
+});
+
+test("private text, photo and document parse with thread and sender the same", () => {
+  assert.deepEqual(parse(privateMessage({ text: "hi" })), [{ eventId: "1", address: TO, messageRef: "10", text: "hi" }]);
+  assert.deepEqual(parse(privateMessage({ photo: [{ file_id: "small" }, { file_id: "big", file_size: 99 }], caption: " look " })), [{ eventId: "1", address: TO, messageRef: "10", text: "look", file: { ref: "big", name: "photo.jpg", size: 99 } }]);
+  assert.deepEqual(parse(privateMessage({ document: { file_id: "d", file_name: "a.pdf", file_size: 5 } })), [{ eventId: "1", address: TO, messageRef: "10", file: { ref: "d", name: "a.pdf", size: 5 } }]);
+});
+
+test("/start CODE yields the code as text", () => {
+  assert.equal(parse(privateMessage({ text: "/start HATCH-ABCD" }))[0]?.text, "HATCH-ABCD");
+});
+
+test("a private message with no sender falls back to the chat id", () => {
+  const update = privateMessage({ text: "hi" });
+  delete (update.message as { from?: unknown }).from;
+  assert.deepEqual(parse(update)[0]?.address, TO);
+});
+
+test("in a group, a @mention reaches the bot with the mention stripped, case-insensitively", () => {
+  const events = parse(groupMessage({ text: "@hatchbot make a poster", entities: [{ type: "mention", offset: 0, length: 9 }] }));
+  assert.deepEqual(events, [{ eventId: "2", address: GROUP, group: true, messageRef: "11", text: "make a poster" }]);
+  assert.equal(parse(groupMessage({ text: "hey @HATCHBOT do it" }, "group"))[0]?.text, "hey  do it");
+  assert.equal(parse(groupMessage({ caption: "@HatchBot see", photo: [{ file_id: "p" }] }))[0]?.text, "see");
+});
+
+test("in a group, a reply to the bot's own message reaches the bot", () => {
+  const events = parse(groupMessage({ text: "yes", reply_to_message: { from: { username: "HatchBot", is_bot: true } } }));
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.text, "yes");
+  assert.equal(events[0]?.group, true);
+});
+
+test("an unaddressed group message, a mention of someone else and a reply to a person produce no event", () => {
+  assert.deepEqual(parse(groupMessage({ text: "lunch?" })), []);
+  assert.deepEqual(parse(groupMessage({ text: "@someone hi", entities: [{ type: "mention", offset: 0, length: 8 }] })), []);
+  assert.deepEqual(parse(groupMessage({ text: "ok", reply_to_message: { from: { username: "ann" } } })), []);
+  assert.deepEqual(parse(groupMessage({ text: "@hatchbotx hi" })), []);
+});
+
+test("a group event has a different thread and sender", () => {
+  const address = parse(groupMessage({ text: "@HatchBot hi" }))[0]!.address;
+  assert.notEqual(address.threadId, address.senderId);
+});
+
+test("channels and other chat types are ignored", () => {
+  assert.deepEqual(parse({ update_id: 3, message: { message_id: 1, chat: { id: -5, type: "channel" }, text: "@HatchBot hi" } }), []);
+  assert.deepEqual(parse({ update_id: 4 }), []);
+});
+
+test("a callback query takes the sender from `from` and the thread from the message's chat", () => {
+  const update = { update_id: 5, callback_query: { id: "q1", from: { id: 7 }, data: `t:${TASK}:approve`, message: { message_id: 20, chat: { id: -100, type: "supergroup" } } } };
+  assert.deepEqual(parse(update), [{ eventId: "5", address: GROUP, button: { taskId: TASK, action: "approve", ref: "q1|-100|20" } }]);
+  const unknown = parse({ ...update, callback_query: { ...update.callback_query, data: "menu" } });
+  assert.deepEqual(unknown[0]?.button, { taskId: "", action: "decline", ref: "q1|-100|20" });
+});
+
+test("recorded payload: a redelivered update parses to the same event id, and an edited message yields nothing", () => {
+  const update = privateMessage({ text: "hi" });
+  assert.equal(parse(update)[0]?.eventId, parse(update)[0]?.eventId);
+  assert.deepEqual(parse({ update_id: 6, edited_message: { message_id: 10, chat: { id: 42, type: "private" }, text: "hi!" } }), []);
+  // A sticker has no text and no file: an event the Expert hears about.
+  assert.deepEqual(parse(privateMessage({ sticker: { file_id: "s" } })), [{ eventId: "1", address: TO, messageRef: "10" }]);
+});
+
+test("send posts to the thread with reply parameters and inline buttons", async () => {
+  const { telegram, calls } = channel();
+  await telegram.send(GROUP, { text: "ok?", replyTo: "11", buttons: [{ label: "确认", taskId: TASK, action: "approve" }, { label: "取消", taskId: TASK, action: "decline" }] }, "k:0");
+  assert.equal(calls[0]!.url, "https://api.telegram.org/bottok/sendMessage");
+  assert.deepEqual(calls[0]!.body, {
+    chat_id: -100, text: "ok?", link_preview_options: { is_disabled: true },
+    reply_parameters: { message_id: 11, allow_sending_without_reply: true },
+    reply_markup: { inline_keyboard: [[{ text: "确认", callback_data: `t:${TASK}:approve` }, { text: "取消", callback_data: `t:${TASK}:decline` }]] },
+  });
+});
+
+test("send never truncates: a message at maxLength goes whole", async () => {
+  const { telegram, calls } = channel();
+  const text = "a".repeat(telegram.capabilities().maxLength);
+  await telegram.send(TO, { text }, "k:0");
+  assert.equal(calls[0]!.body.text, text);
+  assert.equal(calls[0]!.body.chat_id, 42);
+});
+
+test("send failures are classified for the outbox", async () => {
+  const classify = async (respond: () => Response) => {
+    const error = await channel(respond).telegram.send(TO, { text: "x" }, "k:0").then(() => undefined, (e: unknown) => e);
+    assert.ok(error instanceof ChannelSendError);
+    return error;
+  };
+  const body = (description: string) => ({ ok: false, description });
+  assert.equal((await classify(() => Response.json(body("Too Many Requests"), { status: 429 }))).failure, "definite");
+  const blocked = await classify(() => Response.json(body("Forbidden: bot was blocked by the user"), { status: 403 }));
+  assert.deepEqual([blocked.failure, blocked.options.access], ["permanent", true]);
+  assert.match(blocked.message, /blocked by the user/);
+  const bad = await classify(() => Response.json(body("Bad Request"), { status: 400 }));
+  assert.deepEqual([bad.failure, bad.options.access], ["permanent", false]);
+  assert.equal((await classify(() => new Response("oops", { status: 500 }))).failure, "ambiguous");
+  assert.equal((await classify(() => { throw new Error("timeout"); })).failure, "ambiguous");
+});
+
+test("download resolves the file path and fetches the bytes", async () => {
+  const urls: string[] = [];
+  const fake = (async (url: string) => {
+    urls.push(url);
+    return url.endsWith("/getFile") ? Response.json({ ok: true, result: { file_path: "photos/a.jpg" } }) : new Response(Buffer.from("bytes"));
+  }) as unknown as typeof fetch;
+  const telegram = new TelegramChannel({ token: "tok", username: "HatchBot", webhookSecret: "s" }, fake);
+  assert.deepEqual(await telegram.download({ ref: "f1", name: "a.jpg" }), Buffer.from("bytes"));
+  assert.deepEqual(urls, ["https://api.telegram.org/bottok/getFile", "https://api.telegram.org/file/bottok/photos/a.jpg"]);
+});

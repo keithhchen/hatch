@@ -6,6 +6,7 @@ import { BrowserImageAttachments } from "./webChatClient.js";
 import { ImageViewer } from "@hatch/chat/react";
 
 const ROOT = "/v1/creator/assistant";
+const CONNECTIONS = "/v1/creator/connections";
 const CHANNEL_NAMES = { telegram: "Telegram", line: "LINE", lark: "Lark", imessage: "iMessage" };
 const REVIEW_ACTIONS = { content: ["sxaContentYes", "sxaContentNo"], change: ["sxaChangeYes", "sxaChangeNo"] };
 
@@ -69,18 +70,18 @@ export function StudioAssistant({ request, t }) {
   };
   const connectChannel = async kind => {
     try {
-      const value = await send(`${ROOT}/channels/${kind}/connect`);
+      const value = await send(`${CONNECTIONS}/${kind}/connect`);
       setConnecting({ kind, ...value });
       if (value.url) window.open(value.url, "_blank", "noopener");
     } catch (cause) { setError(friendlyError(cause, t)); }
   };
   const saveLark = async event => {
     event.preventDefault();
-    try { await send(`${ROOT}/channels/lark/credentials`, Object.fromEntries(new FormData(event.currentTarget))); setLarkForm(false); await refresh(); }
+    try { await send(`${CONNECTIONS}/lark/credentials`, Object.fromEntries(new FormData(event.currentTarget))); setLarkForm(false); await refresh(); }
     catch (cause) { setError(friendlyError(cause, t)); }
   };
   const disconnectChannel = async kind => {
-    try { await request(`${ROOT}/channels/${kind}`, { method: "DELETE", body: JSON.stringify({}) }); setConnecting(null); await refresh(); }
+    try { await request(`${CONNECTIONS}/${kind}`, { method: "DELETE", body: JSON.stringify({}) }); setConnecting(null); await refresh(); }
     catch (cause) { setError(friendlyError(cause, t)); }
   };
 

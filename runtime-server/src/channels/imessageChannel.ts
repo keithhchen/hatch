@@ -1,6 +1,7 @@
 import type { Content } from "@spectrum-ts/core";
 import { imageMime } from "../factoryAgents/imageRefs.js";
-import type { ChannelAdapter, InboundEvent, InboundFile, OutboundMessage } from "./channels.js";
+import type { ChannelCapabilities } from "../surfaces/contract.js";
+import { guardSend, type ChannelAdapter, type InboundEvent, type InboundFile, type OutboundMessage, type PlatformAddress } from "./types.js";
 
 type IMessageConfig = { projectId?: string; projectSecret?: string; address?: string };
 type SpectrumSpace = { type: "dm" | "group"; phone: string };
@@ -35,14 +36,14 @@ const fileName = (name: string, mimeType: string) => {
 };
 
 /** Reactions, read receipts and the like yield nothing. A message we can't read yet yields an event with no text and no file. */
-function toEvents(eventId: string, peerId: string, phone: string, content: Content): InboundEvent[] {
+function toEvents(eventId: string, address: PlatformAddress, phone: string, content: Content): InboundEvent[] {
   switch (content.type) {
-    case "text": return [{ eventId, peerId, text: content.text }];
-    case "attachment": return [{ eventId, peerId, file: { ref: `${phone}|${content.id}`, name: fileName(content.name, content.mimeType), ...(content.size ? { size: content.size } : {}) } }];
-    case "reply": return toEvents(eventId, peerId, phone, content.content);
+    case "text": return [{ eventId, address, text: content.text }];
+    case "attachment": return [{ eventId, address, file: { ref: `${phone}|${content.id}`, name: fileName(content.name, content.mimeType), ...(content.size ? { size: content.size } : {}) } }];
+    case "reply": return toEvents(eventId, address, phone, content.content);
     // Text with attachments arrives as a group whose items have their own ids.
-    case "group": return content.items.flatMap(item => toEvents(item.id, peerId, phone, item.content));
-    case "voice": case "contact": case "custom": case "app": case "richlink": return [{ eventId, peerId }];
+    case "group": return content.items.flatMap(item => toEvents(item.id, address, phone, item.content));
+    case "voice": case "contact": case "custom": case "app": case "richlink": return [{ eventId, address }];
     default: return [];
   }
 }
@@ -55,6 +56,7 @@ export class IMessageChannel implements ChannelAdapter {
   readonly maxFileBytes = 20 * 1024 * 1024;
   private client?: Promise<SpectrumClient>;
   constructor(private config: IMessageConfig, private connect: (config: IMessageConfig) => Promise<SpectrumClient> = connectSpectrum) {}
+  capabilities(): ChannelCapabilities { return { stream: false, edit: false, typing: false, buttons: false, maxLength: 8000, canInitiate: true, idempotentSend: false }; }
   available(): boolean { return Boolean(this.config.projectId && this.config.projectSecret && this.config.address); }
   /** RFC 5724. It needs a phone number, so a line that is an email address has no link. */
   connectUrl(code: string): string | undefined {
@@ -68,7 +70,7 @@ export class IMessageChannel implements ChannelAdapter {
       if (signal.aborted) return;
       for await (const [space, message] of client.messages()) {
         if (space.type !== "dm" || message.direction !== "inbound" || !message.sender?.id) continue;
-        const events = toEvents(message.id, message.sender.id, space.phone, message.content);
+        const events = toEvents(message.id, { threadId: message.sender.id, senderId: message.sender.id }, space.phone, message.content);
         if (events.length) await onEvents(events);
       }
       if (!signal.aborted) throw new Error("iMessage stream ended");
@@ -80,9 +82,8 @@ export class IMessageChannel implements ChannelAdapter {
       await client.stop().catch(() => undefined);
     }
   }
-  async send(peerId: string, message: OutboundMessage): Promise<void> {
-    const labels = [...new Set(message.buttons?.map(button => `「${button.label}」`))];
-    await (await this.connection()).sendText(peerId, labels.length ? `${message.text}\n\n回复${labels.join("或")}` : message.text);
+  async send(to: PlatformAddress, message: OutboundMessage, _key: string): Promise<void> {
+    await guardSend("iMessage send", async () => (await this.connection()).sendText(to.threadId, message.text));
   }
   async download(file: InboundFile): Promise<Buffer> {
     const split = file.ref.indexOf("|");

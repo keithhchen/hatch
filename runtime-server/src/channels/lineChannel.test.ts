@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import test from "node:test";
 import { LineChannel } from "./lineChannel.js";
+import { ChannelSendError } from "./types.js";
 
 const TASK = "123e4567-e89b-12d3-a456-426614174000";
-const STUDIO = "https://studio.example/hatch";
+const TO = { threadId: "U1", senderId: "U1" };
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const REPLY = "https://api.line.me/v2/bot/message/reply";
 const PUSH = "https://api.line.me/v2/bot/message/push";
 
@@ -17,14 +19,14 @@ function channel(respond: (url: string) => Response = () => new Response("{}"), 
     calls.push({ url, init, body: init.body ? JSON.parse(init.body as string) : undefined });
     return respond(url);
   }) as typeof fetch;
-  return { calls, line: new LineChannel({ channelSecret: "secret", accessToken: "token", basicId: "@hatch", studioUrl: STUDIO, ...config }, fake) };
+  return { calls, line: new LineChannel({ channelSecret: "secret", accessToken: "token", basicId: "@hatch", ...config }, fake) };
 }
 const fresh = () => `tok|${Date.now()}`;
 const header = (call: Call, name: string) => (call.init.headers as Record<string, string>)[name];
 const parse = (...events: unknown[]) => channel().line.parse(Buffer.from(JSON.stringify({ destination: "U0", events }))).events;
 const user = { type: "user", userId: "U1" };
 const base = { webhookEventId: "E1", timestamp: 1700000000000, replyToken: "tok", source: user };
-const shared = { eventId: "E1", peerId: "U1", messageRef: "tok|1700000000000" };
+const shared = { eventId: "E1", address: TO, messageRef: "tok|1700000000000" };
 
 test("available needs secret, token and basic id", () => {
   assert.equal(channel().line.available(), true);
@@ -71,13 +73,13 @@ test("parse skips groups, rooms and unrelated events, and takes an empty check",
 
 test("parse leaves messageRef off without a reply token, and keeps events in order", () => {
   const { replyToken: _, ...standby } = base;
-  assert.deepEqual(parse({ ...standby, type: "message", message: { id: "1", type: "text", text: "hi" } }), [{ eventId: "E1", peerId: "U1", text: "hi" }]);
+  assert.deepEqual(parse({ ...standby, type: "message", message: { id: "1", type: "text", text: "hi" } }), [{ eventId: "E1", address: TO, text: "hi" }]);
   assert.deepEqual(parse({ ...base, type: "follow" }, { ...base, webhookEventId: "E2", type: "message", message: { id: "1", type: "text", text: "a" } }, { ...base, webhookEventId: "E3", type: "message", message: { id: "2", type: "text", text: "b" } }).map(event => event.eventId), ["E2", "E3"]);
 });
 
 test("send replies to a fresh token, with no retry key", async () => {
   const { line, calls } = channel();
-  await line.send("U1", { text: "hello", replyTo: fresh() });
+  await line.send(TO, { text: "hello", replyTo: fresh() }, "k:0");
   assert.equal(calls.length, 1);
   assert.equal(calls[0]!.url, REPLY);
   assert.deepEqual(calls[0]!.body, { replyToken: "tok", messages: [{ type: "text", text: "hello" }] });
@@ -88,7 +90,7 @@ test("send replies to a fresh token, with no retry key", async () => {
 test("send pushes with a UUID retry key when there's no usable token", async () => {
   for (const replyTo of [undefined, `tok|${Date.now() - 50_000}`, "|1700000000000", "tok|garbage", "tok"]) {
     const { line, calls } = channel();
-    await line.send("U1", { text: "hello", ...(replyTo ? { replyTo } : {}) });
+    await line.send(TO, { text: "hello", ...(replyTo ? { replyTo } : {}) }, "k:0");
     assert.equal(calls.length, 1, String(replyTo));
     assert.equal(calls[0]!.url, PUSH);
     assert.deepEqual(calls[0]!.body, { to: "U1", messages: [{ type: "text", text: "hello" }] });
@@ -98,63 +100,26 @@ test("send pushes with a UUID retry key when there's no usable token", async () 
 
 test("send falls back to push when the reply fails", async () => {
   const { line, calls } = channel(url => url === REPLY ? new Response('{"message":"Invalid reply token"}', { status: 400 }) : new Response("{}"));
-  await line.send("U1", { text: "hello", replyTo: fresh() });
+  await line.send(TO, { text: "hello", replyTo: fresh() }, "k:0");
   assert.deepEqual(calls.map(call => call.url), [REPLY, PUSH]);
 });
 
 test("send throws when push fails, including after a failed reply", async () => {
   const failing = () => new Response('{"message":"You have reached your monthly limit."}', { status: 429 });
-  await assert.rejects(channel(failing).line.send("U1", { text: "hello" }), /LINE push failed: You have reached your monthly limit/);
+  await assert.rejects(channel(failing).line.send(TO, { text: "hello" }, "k:0"), /LINE push failed: You have reached your monthly limit/);
   const both = channel(failing);
-  await assert.rejects(both.line.send("U1", { text: "hello", replyTo: fresh() }), /LINE push failed/);
+  await assert.rejects(both.line.send(TO, { text: "hello", replyTo: fresh() }, "k:0"), /LINE push failed/);
   assert.equal(both.calls.length, 2);
-  await assert.rejects(channel(() => new Response("nope", { status: 500 })).line.send("U1", { text: "hello" }), /LINE push failed: 500/);
+  await assert.rejects(channel(() => new Response("nope", { status: 500 })).line.send(TO, { text: "hello" }, "k:0"), /LINE push failed: 500/);
 });
 
-test("send splits long text across messages in UTF-16 units", async () => {
+test("send puts buttons on the message as postback quick replies", async () => {
   const { line, calls } = channel();
-  const text = "a".repeat(12_000);
-  await line.send("U1", { text });
-  const parts = calls[0]!.body.messages.map((message: { text: string }) => message.text);
-  assert.deepEqual(parts.map((part: string) => part.length), [5000, 5000, 2000]);
-  assert.equal(parts.join(""), text);
-});
-
-test("send never breaks a surrogate pair, and a worst-case text still fits five messages", async () => {
-  const { line, calls } = channel();
-  // Odd offset: every 5000-unit boundary lands inside an emoji.
-  const text = `a${"😀".repeat(12_497)}`;
-  assert.equal(text.length, 24_995);
-  await line.send("U1", { text });
-  const parts: string[] = calls[0]!.body.messages.map((message: { text: string }) => message.text);
-  assert.equal(parts.length, 5);
-  assert.equal(parts.join(""), text);
-  for (const part of parts) {
-    assert.ok(part.length <= 5000);
-    assert.doesNotMatch(part, /\p{Cs}/u);
-  }
-});
-
-test("send truncates past five messages and ends with the Studio link", async () => {
-  for (const text of ["a".repeat(30_000), `a${"😀".repeat(15_000)}`, "a".repeat(24_996)]) {
-    const { line, calls } = channel();
-    await line.send("U1", { text });
-    const parts: string[] = calls[0]!.body.messages.map((message: { text: string }) => message.text);
-    assert.equal(parts.length, 5);
-    assert.ok(parts.every(part => part.length <= 5000 && !/\p{Cs}/u.test(part)));
-    assert.ok(parts.at(-1)!.endsWith(`…\n\n${STUDIO}`));
-  }
-});
-
-test("send puts buttons on the last message as postback quick replies", async () => {
-  const { line, calls } = channel();
-  await line.send("U1", { text: "a".repeat(6000), buttons: [
+  await line.send(TO, { text: "hello", buttons: [
     { label: "确认", taskId: TASK, action: "approve" },
     { label: `${"x".repeat(19)}😀 too long`, taskId: TASK, action: "decline" },
-  ] });
-  const [first, last] = calls[0]!.body.messages;
-  assert.equal(first.quickReply, undefined);
-  const items = last.quickReply.items;
+  ] }, "k:0");
+  const items = calls[0]!.body.messages[0].quickReply.items;
   assert.equal(items.length, 2);
   assert.deepEqual(items[0], { type: "action", action: { type: "postback", label: "确认", data: `t:${TASK}:approve`, displayText: "确认" } });
   assert.equal(items[1].action.label, "x".repeat(19));
@@ -163,7 +128,7 @@ test("send puts buttons on the last message as postback quick replies", async ()
 
 test("a button's data parses back to the same task", async () => {
   const { line, calls } = channel();
-  await line.send("U1", { text: "ok?", buttons: [{ label: "确认", taskId: TASK, action: "approve" }] });
+  await line.send(TO, { text: "ok?", buttons: [{ label: "确认", taskId: TASK, action: "approve" }] }, "k:0");
   const data = calls[0]!.body.messages[0].quickReply.items[0].action.data;
   assert.deepEqual(parse({ ...base, type: "postback", postback: { data } })[0]?.button, { taskId: TASK, action: "approve" });
 });
@@ -190,4 +155,54 @@ test("identifies itself as the shared LINE account", () => {
   const { line } = channel();
   assert.equal(line.kind, "line");
   assert.equal(line.scope, "");
+});
+
+test("capabilities", () => {
+  assert.deepEqual(channel().line.capabilities(), { stream: false, edit: false, typing: false, buttons: true, maxLength: 5000, canInitiate: true, idempotentSend: true });
+});
+
+test("send never truncates or splits: a message at maxLength goes whole", async () => {
+  const { line, calls } = channel();
+  const text = "a".repeat(line.capabilities().maxLength);
+  await line.send(TO, { text }, "k:0");
+  assert.equal(calls[0]!.body.messages.length, 1);
+  assert.equal(calls[0]!.body.messages[0].text, text);
+});
+
+test("the outbox key becomes the same retry key every time, and different keys differ", async () => {
+  const keys: string[] = [];
+  for (const key of ["a:0", "a:0", "a:1"]) {
+    const { line, calls } = channel();
+    await line.send(TO, { text: "hi" }, key);
+    keys.push(header(calls[0]!, "x-line-retry-key")!);
+  }
+  assert.match(keys[0]!, UUID);
+  assert.equal(keys[0], keys[1]);
+  assert.notEqual(keys[0], keys[2]);
+});
+
+test("send failures are classified for the outbox", async () => {
+  const classify = async (respond: () => Response | Promise<Response>) => {
+    const error = await channel(respond as () => Response).line.send(TO, { text: "x" }, "k:0").then(() => undefined, (e: unknown) => e);
+    assert.ok(error instanceof ChannelSendError);
+    return error;
+  };
+  assert.equal((await classify(() => new Response("{}", { status: 429 }))).failure, "definite");
+  const denied = await classify(() => new Response("{}", { status: 403 }));
+  assert.deepEqual([denied.failure, denied.options.access], ["permanent", true]);
+  const bad = await classify(() => new Response("{}", { status: 400 }));
+  assert.deepEqual([bad.failure, bad.options.access], ["permanent", false]);
+  assert.equal((await classify(() => new Response("{}", { status: 500 }))).failure, "ambiguous");
+  assert.equal((await classify(() => { throw new Error("timeout"); })).failure, "ambiguous");
+});
+
+test("recorded payload: a redelivered webhook parses to the same event ids", () => {
+  const payload = { ...base, type: "message", message: { id: "9", type: "text", text: "hi" } };
+  assert.deepEqual(parse(payload).map(event => event.eventId), parse(payload).map(event => event.eventId));
+  assert.equal(parse(payload, payload).length, 2);
+});
+
+test("recorded payload: an unfollow and a beacon yield nothing, a sticker yields a bare event", () => {
+  assert.deepEqual(parse({ ...base, type: "unfollow" }, { ...base, type: "beacon" }), []);
+  assert.deepEqual(parse({ ...base, type: "message", message: { id: "5", type: "sticker", packageId: "1", stickerId: "2" } }), [shared]);
 });
