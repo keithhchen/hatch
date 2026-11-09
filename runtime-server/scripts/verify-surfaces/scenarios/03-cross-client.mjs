@@ -212,7 +212,8 @@ class CrossClient extends Scenario {
     const t0 = Date.now();
     if (strategy === "after_cursor" || strategy === "last-event-id") {
       const follower = await surface.follow(strategy === "after_cursor" ? { after: lastCursor } : { lastEventId: lastCursor });
-      return { held: heldBefore, seeded: false, from: lastCursor, follower, trace: () => follower.trace(surface.normalise, t0) };
+      // The client keeps the text it already showed; offsets in Chat deltas let it join the replay without repeats.
+      return { held: heldBefore, seeded: true, from: lastCursor, follower, trace: () => follower.trace(surface.normalise, t0, { text: heldBefore, at: t0 }) };
     }
     if (strategy === "snapshot-then-attach") {
       const snap = await surface.snapshot(); const follower = await surface.follow({ after: snap.cursor });

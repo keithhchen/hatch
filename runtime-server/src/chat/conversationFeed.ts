@@ -43,6 +43,9 @@ export class ConversationFeed {
       try { sink.push(event); } catch { drop(); }
     };
     const unsubscribe = options.stream ? this.hub.subscribe(conversationId, { push: guarded }) : () => undefined;
+    // Subscribing and catching up are one step, so the text is neither cut nor repeated.
+    const caughtUp = options.stream ? this.hub.catchUp(conversationId) : undefined;
+    if (caughtUp) guarded(caughtUp);
     const poll = async (): Promise<void> => {
       try {
         for (;;) {
