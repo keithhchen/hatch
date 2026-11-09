@@ -15,13 +15,20 @@ import { AccountReach } from "./assistant/reach.js";
 import { AssistantTarget } from "./assistant/assistantTarget.js";
 import { CHANNEL_KINDS, CHANNEL_LABELS, isChannelKind, type ChannelAdapter, type ChannelKind } from "./channels/types.js";
 import { ChannelListeners } from "./channels/listeners.js";
+import { CredentialRefresher } from "./channels/credentialRefresh.js";
 import { ChannelHub } from "./channels/hub.js";
 import { ChannelService, openChannelStores } from "./channels/service.js";
 import { safeError } from "./factoryAgents/runtime.js";
 import { CredentialSeal } from "./assistant/channelCredentials.js";
 import { IMessageChannel } from "./channels/imessageChannel.js";
-import { CREDENTIAL_FORMS, readCredentials } from "./channels/credentialForms.js";
+import { CREDENTIAL_FORMS, isTenantForm, readCredentials } from "./channels/credentialForms.js";
 import { LineChannel } from "./channels/lineChannel.js";
+import { guarded } from "./channels/eligibility.js";
+import { InstagramChannel } from "./channels/instagramChannel.js";
+import { MessengerChannel } from "./channels/messengerChannel.js";
+import { SlackChannel } from "./channels/slackChannel.js";
+import { sealedTokens } from "./channels/tenantTokens.js";
+import { WhatsAppChannel, whatsappEligibility } from "./channels/whatsappChannel.js";
 import { TelegramChannel } from "./channels/telegramChannel.js";
 import { PostgresTaskRepository } from "./assistant/tasks.js";
 import type { AgentCatalog, AgentChange, CatalogAgent } from "./assistant/catalog.js";
@@ -100,6 +107,7 @@ type RegistryContext = {
   channels?: ChannelService;
   credentialSeal?: CredentialSeal;
   publicOrigin?: string;
+  studioUrl?: string;
   reach?: AccountReach;
   store: RegistryStoreTs;
   accounts: AccountStoreTs;
@@ -233,6 +241,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const studioSockets = new StudioSockets({ studio, identify: token => identifyToken(registryContext, token) });
   let assistantTick: NodeJS.Timeout | undefined;
   let channelListeners: ChannelListeners | undefined;
+  let credentialRefresher: CredentialRefresher | undefined;
   if (registryPool) {
     const reach = new AccountReach(registryPool);
     await reach.ensureSchema();
@@ -240,7 +249,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     const tasks = await PostgresTaskRepository.open(registryPool);
     // Lark has no shared bot, so its tenant is the Expert's account; every other platform is one shared tenant.
     // Where each Expert brings their own app, the adapter is built from their sealed credentials and the scope is their account id.
-    const scopeOf = (accountId: string, kind: ChannelKind) => CREDENTIAL_FORMS[kind] ? accountId : "";
+    const scopeOf = (accountId: string, kind: ChannelKind) => { const form = CREDENTIAL_FORMS[kind]; return form && !isTenantForm(form) ? accountId : ""; };
     const stores = await openChannelStores(registryPool, scopeOf);
     const studioUrl = environment.HATCH_STUDIO_ASSISTANT_URL?.trim() || "https://gethatchapp.com/studio/assistant";
     const telegram = new TelegramChannel({
@@ -258,13 +267,27 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       projectSecret: environment.HATCH_PHOTON_PROJECT_SECRET?.trim() || undefined,
       address: environment.HATCH_IMESSAGE_ADDRESS?.trim() || undefined,
     });
-    // Lark has no shared bot: a custom app works in one enterprise, so each Expert brings theirs.
+    // One app serves many tenants (workspaces, Pages, business accounts). A tenant's token is a sealed credential on its Connection,
+    // so without the sealing key no tenant can be configured and these adapters are unavailable.
     const sealKey = environment.HATCH_CREDENTIALS_KEY?.trim();
     const seal = sealKey ? new CredentialSeal(sealKey) : undefined;
+    const env = (name: string) => environment[name]?.trim() || undefined;
+    const tokens = (kind: ChannelKind) => seal ? sealedTokens(stores.connections, seal, kind) : undefined;
+    const callback = (kind: ChannelKind) => `${new URL(studioUrl).origin}/v1/channels/${kind}/oauth/callback`;
+    const slack = new SlackChannel({
+      signingSecret: env("HATCH_SLACK_SIGNING_SECRET"), clientId: env("HATCH_SLACK_CLIENT_ID"), clientSecret: env("HATCH_SLACK_CLIENT_SECRET"), redirectUri: callback("slack"), tokens: tokens("slack"),
+    });
+    const whatsapp = new WhatsAppChannel({ appSecret: env("HATCH_WHATSAPP_APP_SECRET"), verifyToken: env("HATCH_WHATSAPP_VERIFY_TOKEN"), tokens: tokens("whatsapp") });
+    const instagram = new InstagramChannel({
+      appSecret: env("HATCH_INSTAGRAM_APP_SECRET"), verifyToken: env("HATCH_INSTAGRAM_VERIFY_TOKEN"), clientId: env("HATCH_INSTAGRAM_APP_ID"), clientSecret: env("HATCH_INSTAGRAM_APP_SECRET"), redirectUri: callback("instagram"), tokens: tokens("instagram"),
+    });
+    const messenger = new MessengerChannel({ appSecret: env("HATCH_MESSENGER_APP_SECRET"), verifyToken: env("HATCH_MESSENGER_VERIFY_TOKEN"), tokens: tokens("messenger") });
+    // Platform rules sit in front of every Agent. WhatsApp serves only Connections an operator marked task-specific.
+    const eligibility = { whatsapp: whatsappEligibility };
     const apps = new Map<string, { sealed: string; adapter: ChannelAdapter }>();
-    const hub = new ChannelHub([telegram, line, imessage], async (kind, accountId) => {
+    const hub = new ChannelHub([telegram, line, imessage, slack, whatsapp, instagram, messenger], async (kind, accountId) => {
       const form = CREDENTIAL_FORMS[kind];
-      if (!form || !seal) return undefined;
+      if (!form || isTenantForm(form) || !seal) return undefined;
       const sealed = await stores.connections.credentials(accountId, kind);
       if (!sealed) return undefined;
       const cached = apps.get(`${kind}:${accountId}`);
@@ -292,9 +315,9 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       },
       productPrefix: (accountId, productId) => `${productsPrefix}/${accountId}/${productId}`,
     });
-    // Product Connections have no handler until the Chat API's gateway is registered here.
-    channels.register("assistant", new AssistantTarget(assistant)).start();
-    Object.assign(registryContext, { assistant, ingest, channels, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin });
+    // Product Connections have no handler until the Chat API's gateway is registered here, also through `guarded(..., eligibility)`.
+    channels.register("assistant", guarded(new AssistantTarget(assistant), eligibility)).start();
+    Object.assign(registryContext, { assistant, ingest, channels, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin, studioUrl });
     studio.recordAssistant();
     // A platform that pushes over its own connection runs here, in one process at a time. A dropped connection comes back; credentials added or removed are picked up.
     channelListeners = new ChannelListeners({
@@ -303,6 +326,8 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       onError: (key, error) => console.error(`[channel ${key}]`, safeError(error)),
     });
     channelListeners.start();
+    // Credentials that expire (Instagram's 60-day tokens) are renewed before they do.
+    if (seal) { credentialRefresher = new CredentialRefresher({ hub, connections: stores.connections, seal, onError: (key, error) => console.error(`[credentials ${key}]`, safeError(error)) }); credentialRefresher.start(); }
     assistantTick = setInterval(() => void assistant.tick().catch(error => console.error("[assistant tick]", error)), 60_000);
     assistantTick.unref();
   }
@@ -404,6 +429,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   return { server, close: async () => {
     if (assistantTick) clearInterval(assistantTick);
     await channelListeners?.stop();
+    credentialRefresher?.stop();
     await registryContext.assistant?.close();
     await registryContext.channels?.close();
     immediateFactoryStop.abort();
@@ -2031,6 +2057,20 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
   const channels = context.channels;
   if (!assistant || !context.reach || !channels) { sendJson(response, 503, { error: { code: "assistant_unavailable", message: "The Assistant requires the Registry database." } }); return; }
   const webhook = url.pathname.match(/^\/v1\/channels\/([a-z]+)(?:\/([0-9a-f-]{36}))?\/webhook$/);
+  // A platform sends the person who installed the app back here with a code; the `state` they carry is the link code Studio issued.
+  const install = url.pathname.match(/^\/v1\/channels\/([a-z]+)\/oauth\/callback$/);
+  if (install && request.method === "GET") {
+    const kind = install[1]!;
+    const adapter = isChannelKind(kind) ? await channels.hub.get(kind) : undefined;
+    const [code, state] = [url.searchParams.get("code"), url.searchParams.get("state")];
+    const owner = isChannelKind(kind) && state ? await channels.connections.ownerOfCode(kind, state) : undefined;
+    if (!adapter?.install || !context.credentialSeal || !code || !owner) { sendJson(response, 400, { error: { code: "install_failed", message: "The install link is invalid or has expired." } }); return; }
+    const { scope, credentials } = await adapter.install(code);
+    await channels.connections.saveCredentials(owner, adapter.kind, context.credentialSeal.seal(credentials), scope);
+    response.writeHead(302, { location: context.studioUrl ?? context.publicOrigin ?? "/" });
+    response.end();
+    return;
+  }
   if (webhook && request.method === "GET") {
     const kind = webhook[1]!;
     const adapter = isChannelKind(kind) ? await channels.hub.get(kind, webhook[2]) : undefined;
@@ -2059,7 +2099,7 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
   const channelsView = async () => (await channels.view(account.id)).map(status => ({
     kind: status.kind, available: status.available, linked: status.linked,
     ...(status.state ? { state: status.state } : {}),
-    ...(CREDENTIAL_FORMS[status.kind] && context.credentialSeal ? { own_app: true, webhook_url: `${context.publicOrigin}/v1/channels/${status.kind}/${account.id}/webhook` } : {}),
+    ...(CREDENTIAL_FORMS[status.kind] && !isTenantForm(CREDENTIAL_FORMS[status.kind]!) && context.credentialSeal ? { own_app: true, webhook_url: `${context.publicOrigin}/v1/channels/${status.kind}/${account.id}/webhook` } : {}),
     ...(status.lastEventAt ? { last_event_at: status.lastEventAt } : {}),
   }));
   if (url.pathname === "/v1/creator/assistant" && request.method === "GET") {
@@ -2119,11 +2159,12 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
   if (kindOfForm && form && request.method === "POST") {
     if (!context.credentialSeal) { sendJson(response, 503, { error: { code: "channel_unavailable", message: `${CHANNEL_LABELS[kindOfForm]} is not available.` } }); return; }
     const credentials = readCredentials(form, await readJson(request));
-    const adapter = credentials && form.build(credentials, account.id);
+    // A tenant of the shared app is served by the shared adapter; an Expert's own app is built from what they typed.
+    const adapter = credentials && (isTenantForm(form) ? await channels.hub.get(kindOfForm) : form.build(credentials, account.id));
     if (!credentials || !adapter?.available()) { sendJson(response, 400, { error: { code: "invalid_credentials", message: `${CHANNEL_LABELS[kindOfForm]} credentials are missing or malformed.` } }); return; }
-    try { Object.assign(credentials, await form.probe?.(adapter)); }
+    try { Object.assign(credentials, await form.probe?.(adapter, credentials)); }
     catch (cause) { sendJson(response, 422, { error: { code: `${kindOfForm}_probe_failed`, message: cause instanceof Error ? cause.message : String(cause) } }); return; }
-    await channels.connections.saveCredentials(account.id, kindOfForm, context.credentialSeal.seal(credentials));
+    await channels.connections.saveCredentials(account.id, kindOfForm, context.credentialSeal.seal(credentials), isTenantForm(form) ? String(credentials[form.tenant]) : undefined);
     sendJson(response, 200, { channels: await channelsView() });
     return;
   }

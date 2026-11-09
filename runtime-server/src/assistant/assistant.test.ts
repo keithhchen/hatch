@@ -99,7 +99,7 @@ async function setup(scripts: { assistant: Script; worker?: Script }) {
     const listener = (event: { type?: string }) => { if (event.type === "assistant") void check(); };
     assistant.events.on("event", listener);
   });
-  const connection: ChannelConnection = { id: "c0000000-0000-4000-8000-000000000001", ownerAccountId: ACCOUNT, channel: "telegram", scope: "", client: "im", target: { kind: "assistant" }, audience: "self", state: "active" };
+  const connection: ChannelConnection = { id: "c0000000-0000-4000-8000-000000000001", ownerAccountId: ACCOUNT, channel: "telegram", scope: "", client: "im", target: { kind: "assistant" }, audience: "self", taskSpecific: false, state: "active" };
   const target = new AssistantTarget(assistant);
   /** What the router hands the Assistant once it has authorized the sender; the inbox id is derived from the event id, so a repeat is the same message. */
   const telegramUpdate = async (update: unknown) => {

@@ -20,6 +20,7 @@ export class ChannelRouter {
     const { channel, scope, event } = item;
     const { connections } = this.deps;
     if (event.unreachable) return { replied: true };
+    if (event.revoked) { await connections.revokeTenant(channel, scope); return { replied: true }; }
     const say = (text: string, connectionId?: string) => this.deps.notify({ ...(connectionId ? { connectionId } : {}), channel, scope, address: event.address }, text, event.messageRef);
     // A code binds the sender's private chat; posted in a group it would make the group the Expert's home.
     const code = event.button || event.group ? undefined : event.text?.match(LINK_CODE_PATTERN)?.[0];
@@ -42,6 +43,8 @@ export class ChannelRouter {
     await connections.touch(connection.id);
     const adapter = await this.deps.hub.get(channel, scope);
     if (!adapter) throw new Error(`${channel} is not available`);
+    // Best effort, and not awaited: the sender sees that an answer is coming while the Agent works.
+    if (!event.button) void adapter.typing?.(event.address, event.messageRef).catch(() => undefined);
     const inbound: Inbound = {
       id: item.id, connection, event, adapter, principal: principalFor(connection, identity),
       address: { connectionId: connection.id, ...event.address },

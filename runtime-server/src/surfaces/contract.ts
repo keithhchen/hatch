@@ -64,6 +64,8 @@ export type Connection = {
   client: Extract<ClientGroup, "im" | "dm">;
   target: AgentTarget;
   audience: Audience;
+  /** An operator reviewed the Agent as a task-specific business agent. Never assumed: platforms that bar general-purpose AI check it. */
+  taskSpecific: boolean;
   state: ConnectionState;
 };
 
