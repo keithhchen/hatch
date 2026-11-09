@@ -1182,6 +1182,7 @@ export class PostgresConversationRepository implements ConversationRepository {
   async claimSteeredMessages(runId: string): Promise<ClaimedMessage[]> {
     await this.initialize();
     return this.inTransaction(async (repository) => {
+      await repository.lockConversationOfRun(runId);
       const locked = await repository.pool.query<RunRow>("SELECT * FROM hatch_conversation_runs WHERE id = $1 FOR UPDATE", [runId]);
       const run = locked.rows[0] ? runFromRow(locked.rows[0]) : undefined;
       if (!run || run.consumedCount >= run.steeredCount) return [];
@@ -1599,32 +1600,42 @@ export class PostgresConversationRepository implements ConversationRepository {
     return result.rows.map(runFromRow);
   }
 
+  /**
+   * The one lock order for everything that touches a Run next to its conversation: conversation row first, then Run row.
+   * A steer, a claim and a Run-end transition therefore serialize instead of deadlocking.
+   */
+  private async lockConversationOfRun(runId: string): Promise<void> {
+    await this.pool.query("SELECT c.id FROM hatch_conversations c WHERE c.id = (SELECT conversation_id FROM hatch_conversation_runs WHERE id = $1) FOR UPDATE", [runId]);
+  }
+
   async transitionRun(runId: string, status: DurableRunStatus, reason?: string): Promise<ConversationRunRecord> {
     await this.initialize();
-    const currentResult = await this.pool.query<RunRow>("SELECT * FROM hatch_conversation_runs WHERE id = $1", [runId]);
-    const currentRow = currentResult.rows[0];
-    if (!currentRow) throw new ConversationRepositoryError("run_not_found", `Run ${runId} was not found`);
-    const current = runFromRow(currentRow);
-    if (current.status === status || TERMINAL_RUN_STATUSES.has(current.status)) return current;
-    assertNoUnclaimedSteer(current, status);
-    const result = await this.pool.query<RunRow>(`
-      UPDATE hatch_conversation_runs
-      SET status = $2,
-          started_at = CASE WHEN $2 = 'running' AND started_at IS NULL THEN now() ELSE started_at END,
-          completed_at = CASE WHEN $2 IN ('completed', 'failed', 'cancelled', 'interrupted') THEN now() ELSE completed_at END,
-          interrupted_reason = CASE WHEN $2 = 'interrupted' THEN $3 ELSE interrupted_reason END
-      WHERE id = $1 AND NOT ($2 = 'completed' AND consumed_count < steered_count)
-      RETURNING *
-    `, [runId, status, reason ?? null]);
-    if (!result.rows[0]) throw new ConversationRepositoryError("steer_pending", `Run ${runId} accepted a message while completing`, current);
-    const updated = runFromRow(result.rows[0]);
-    await this.appendEvent({
-      conversationId: updated.conversationId,
-      runId: updated.id,
-      type: "run.state",
-      payload: { ...publicRunEvent(updated), ...(reason ? { reason } : {}) }
+    return this.inTransaction(async (repository) => {
+      await repository.lockConversationOfRun(runId);
+      const currentResult = await repository.pool.query<RunRow>("SELECT * FROM hatch_conversation_runs WHERE id = $1 FOR UPDATE", [runId]);
+      const currentRow = currentResult.rows[0];
+      if (!currentRow) throw new ConversationRepositoryError("run_not_found", `Run ${runId} was not found`);
+      const current = runFromRow(currentRow);
+      if (current.status === status || TERMINAL_RUN_STATUSES.has(current.status)) return current;
+      assertNoUnclaimedSteer(current, status);
+      const result = await repository.pool.query<RunRow>(`
+        UPDATE hatch_conversation_runs
+        SET status = $2,
+            started_at = CASE WHEN $2 = 'running' AND started_at IS NULL THEN now() ELSE started_at END,
+            completed_at = CASE WHEN $2 IN ('completed', 'failed', 'cancelled', 'interrupted') THEN now() ELSE completed_at END,
+            interrupted_reason = CASE WHEN $2 = 'interrupted' THEN $3 ELSE interrupted_reason END
+        WHERE id = $1
+        RETURNING *
+      `, [runId, status, reason ?? null]);
+      const updated = runFromRow(result.rows[0]!);
+      await repository.appendEvent({
+        conversationId: updated.conversationId,
+        runId: updated.id,
+        type: "run.state",
+        payload: { ...publicRunEvent(updated), ...(reason ? { reason } : {}) }
+      });
+      return updated;
     });
-    return updated;
   }
 
   async appendEvent(input: Omit<ConversationJournalEvent, "cursor" | "createdAt"> & { createdAt?: string }): Promise<ConversationJournalEvent> {
