@@ -6,6 +6,8 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { agentEntries, assertAgentAvailable, initialAgentDefinitions } from "../factoryAgents/definitions.js";
 import type { Role, Session } from "../factoryAgents/store.js";
 import type { AssistantHost } from "./assistantConversation.js";
+import { MemoryEventLog } from "./eventLog.js";
+import { MemoryMessageLedger } from "./ledger.js";
 import { ConversationRoutes } from "./routes.js";
 import type { WorkerWorkspace } from "./workerConversation.js";
 
@@ -33,16 +35,19 @@ class FakeWorkspace implements WorkerWorkspace {
   };
   runtime = {
     events: this.events,
-    isRunning: (id: string) => this.sessions.find(s => s.id === id)?.status === "running",
-    steer: (id: string, message: AgentMessage) => { this.steered.push(id); this.sessions.find(s => s.id === id)!.messages.push(message); return true; },
-    stop: (id: string) => { this.stopped.push(id); },
-    start: async (id: string, input: string | AgentMessage[]) => {
+    send: async (id: string, message: AgentMessage) => {
       const target = this.sessions.find(s => s.id === id)!;
-      const messages = input as AgentMessage[];
-      this.started.push({ id, text: (messages[0] as unknown as { origin: { text: string } }).origin.text });
-      target.status = "running"; target.messages.push(...messages);
-      setTimeout(() => { target.messages.push(assistantLine(this.reply)); target.status = "idle"; }, this.replyAfterMs);
+      const queued = target.status === "running";
+      target.messages.push(message);
+      if (queued) this.steered.push(id);
+      else {
+        this.started.push({ id, text: (message as unknown as { origin: { text: string } }).origin.text });
+        target.status = "running";
+        setTimeout(() => { target.messages.push(assistantLine(this.reply)); target.status = "idle"; }, this.replyAfterMs);
+      }
+      return { queued };
     },
+    stop: (id: string) => { this.stopped.push(id); },
   };
   entries = async () => agentEntries(await this.definitions, this.sessions);
   assertRoleAvailable = async (role: Role) => assertAgentAvailable(await this.entries(), role);
@@ -75,6 +80,7 @@ async function harness(options: { assistant?: boolean } = { assistant: true }) {
     assistant: () => options.assistant === false ? undefined : assistant,
     json: (response, status, payload) => { response.writeHead(status, { "content-type": "application/json" }); response.end(JSON.stringify(payload)); },
     readJson: async request => { let body = ""; for await (const chunk of request) body += chunk; return JSON.parse(body || "{}"); },
+    eventLog: new MemoryEventLog(), ledger: new MemoryMessageLedger(),
     pace: { pollMs: 5 },
   });
   const server = http.createServer((req, res) => { void routes.handle(req, res, new URL(req.url!, "http://x")).then(handled => { if (!handled) { res.writeHead(404); res.end(); } }); });
@@ -204,7 +210,7 @@ test("workers: stop is 202, events stream the session's own events only", async 
     h.workspace.events.emit("event", { sessionId: "s-research", type: "voice.delta", text: "internal" });
     h.workspace.events.emit("event", { sessionId: "s-research", type: "delta", text: "hello" });
     const chunk = decoder.decode((await reader.read()).value);
-    assert.equal(chunk, 'data: {"type":"delta","text":"hello"}\n\n');
+    assert.equal(chunk, 'id: 1\ndata: {"type":"delta","text":"hello"}\n\n', "the SSE id is the log cursor");
     controller.abort();
     const stop = await h.call(`${root}/research/stop`, { method: "POST" });
     assert.equal(stop.status, 202);

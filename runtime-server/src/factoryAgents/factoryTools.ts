@@ -32,7 +32,9 @@ export async function factoryAgentTools(options: {
   // continuous conversation and must not receive a blocking structured prompt.
   // The definition-specific list still controls the business tools.
   return [...candidates.filter(tool => tool.name !== "youtube_transcript" && !options.withheldTools?.includes(tool.name)
-    && (options.definition.tools.includes(tool.name) || (tool.name === "askuser" && options.definition.role !== "voice"))), ...(options.grantedTools ?? [])];
+    && (options.definition.tools.includes(tool.name) || (tool.name === "askuser" && options.definition.role !== "voice")
+      // grep is how an Agent searches what read can open: stored definitions that grant read grant it too.
+      || (tool.name === "grep" && options.definition.tools.includes("read")))),...(options.grantedTools ?? [])];
 }
 
 const askUserOption = Type.Object({

@@ -1,11 +1,11 @@
 import type { EventEmitter } from "node:events";
-import { randomUUID } from "node:crypto";
-import { page, publicEvent, type Conversation, type ConversationEvent, type ConversationStatus, type PublicMessage, type Sent, type Unsubscribe } from "./conversation.js";
+import { attachmentLine } from "./assets.js";
+import { page, type Conversation, type ConversationStatus, type PublicMessage, type SendInput, type Sent } from "./conversation.js";
 
 /** The part of the Assistant an account-level conversation needs. */
 export interface AssistantHost {
   view(accountId: string): Promise<{ messages: Array<{ id: string; role: "expert" | "assistant"; text: string; at: string; images?: string[] }>; running: boolean }>;
-  ingest(accountId: string, item: { id: string; source: "web"; text: string }): Promise<boolean>;
+  ingest(accountId: string, item: { id: string; source: "web"; text: string; images?: string[] }): Promise<boolean>;
   stop(accountId: string): Promise<void>;
   readonly events: EventEmitter;
 }
@@ -25,18 +25,16 @@ export class AssistantConversation implements Conversation {
     return { status: { state: view.running ? "running" as const : "idle" as const }, messages: page(all, after, limit) };
   }
 
-  async send(content: string): Promise<Sent> {
+  /** Whether the message joins the running turn is the Assistant's own decision in `ingest`. */
+  async send(input: SendInput): Promise<Sent> {
     const queued = (await this.status()).state === "running";
-    const id = randomUUID();
-    await this.assistant.ingest(this.accountId, { id, source: "web", text: content });
-    return { conversationId: this.accountId, queued, message: { id, role: "user", text: content, created_at: new Date().toISOString() } };
+    const images = input.attachments.filter(asset => asset.kind === "image").map(asset => asset.path);
+    const text = [input.text, ...input.attachments.filter(asset => asset.kind !== "image").map(attachmentLine)].filter(Boolean).join("\n");
+    await this.assistant.ingest(this.accountId, { id: input.id, source: "web", text, ...(images.length ? { images } : {}) });
+    return { conversationId: this.accountId, queued, message: { id: input.id, role: "user", text: input.text, created_at: new Date().toISOString() } };
   }
 
-  async events(listener: (event: ConversationEvent) => void): Promise<Unsubscribe> {
-    const forward = (event: { accountId?: string }) => { const shown = event.accountId === this.accountId ? publicEvent(event) : undefined; if (shown) listener(shown); };
-    this.assistant.events.on("event", forward);
-    return () => { this.assistant.events.off("event", forward); };
-  }
+  async feedKey(): Promise<string | undefined> { return `assistant:${this.accountId}`; }
 
   stop(): Promise<void> { return this.assistant.stop(this.accountId); }
 }

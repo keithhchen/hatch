@@ -1,16 +1,16 @@
-import { randomUUID } from "node:crypto";
 import type { WorkbenchRuntime } from "../factoryAgents/runtime.js";
 import { AgentDependenciesNotReadyError, type AgentEntry } from "../factoryAgents/definitions.js";
 import { userMessage } from "../factoryAgents/imageRefs.js";
 import type { Role, Session, WorkbenchStore } from "../factoryAgents/store.js";
-import { ConversationError, page, publicEvent, type Conversation, type ConversationEvent, type ConversationStatus, type Sent, type Unsubscribe } from "./conversation.js";
+import { attachmentLine } from "./assets.js";
+import { ConversationError, page, type Conversation, type ConversationStatus, type SendInput, type Sent } from "./conversation.js";
 import { projectMessages } from "./project.js";
 import { blocked, blockedBy, blockedMessage, WORKERS, type Worker, type WorkerRegistry } from "./workers.js";
 
 /** The part of a Product workspace a worker conversation needs. */
 export interface WorkerWorkspace {
   store: Pick<WorkbenchStore, "list" | "create">;
-  runtime: Pick<WorkbenchRuntime, "start" | "steer" | "stop" | "isRunning" | "events">;
+  runtime: Pick<WorkbenchRuntime, "send" | "stop" | "events">;
   entries(): Promise<AgentEntry[]>;
   /** Throws AgentDependenciesNotReadyError when the worker's dependencies have no output yet. */
   assertRoleAvailable(role: Role): Promise<void>;
@@ -33,28 +33,22 @@ export class WorkerConversation implements Conversation {
     return { status, messages: session ? page(projectMessages(session.messages), after, limit) : [] };
   }
 
-  async send(content: string): Promise<Sent> {
+  /** The runtime decides atomically whether this steers the running turn or starts one. */
+  async send(input: SendInput): Promise<Sent> {
     await this.assertAvailable();
     const session = await this.session() ?? await this.workspace.store.create(this.worker.role);
-    const id = randomUUID();
-    const message = userMessage(content, [], { kind: "expert", itemId: id, text: content });
-    const queued = this.workspace.runtime.isRunning(session.id);
-    if (queued) {
-      if (!this.workspace.runtime.steer(session.id, message)) throw new ConversationError(409, "worker_busy", "The worker is starting its turn. Send again in a moment.");
-    } else await this.workspace.runtime.start(session.id, [message]);
-    return { conversationId: session.id, queued, message: { id, role: "user", text: content, created_at: new Date().toISOString() } };
+    const images = input.attachments.filter(asset => asset.kind === "image").map(asset => asset.path);
+    const lines = input.attachments.filter(asset => asset.kind !== "image").map(attachmentLine);
+    const attachments = input.attachments.map(({ kind, name, id }) => ({ type: kind, name, assetId: id }));
+    const message = userMessage([input.text, ...lines].filter(Boolean).join("\n"), images, { kind: "expert", itemId: input.id, text: input.text, attachments });
+    const { queued } = await this.workspace.runtime.send(session.id, message, input.client);
+    return {
+      conversationId: session.id, queued,
+      message: { id: input.id, role: "user", text: input.text, created_at: new Date().toISOString(), ...(attachments.length ? { attachments: attachments.map(({ type, name, assetId }) => ({ type, name, asset_id: assetId })) } : {}) },
+    };
   }
 
-  async events(listener: (event: ConversationEvent) => void): Promise<Unsubscribe> {
-    const session = await this.session();
-    if (!session) throw new ConversationError(404, "conversation_not_started", "This worker has no conversation yet. Send it a message first.");
-    const forward = (event: { sessionId?: string; type?: string }) => {
-      const shown = event.sessionId === session.id ? publicEvent(event) : undefined;
-      if (shown) listener(shown);
-    };
-    this.workspace.runtime.events.on("event", forward);
-    return () => { this.workspace.runtime.events.off("event", forward); };
-  }
+  async feedKey(): Promise<string | undefined> { return (await this.session())?.id; }
 
   async stop(): Promise<void> { const session = await this.session(); if (session) this.workspace.runtime.stop(session.id); }
 
