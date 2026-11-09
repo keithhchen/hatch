@@ -32,7 +32,7 @@ export class Chatter {
   }
   /** Presses an inline button (a Telegram callback_query) as this sender, in this chat. */
   async press(data, { messageId = 1 } = {}) {
-    const update = this.hooks.callback({ chatId: this.chatId, fromId: this.senderId, data, messageId });
+    const update = this.hooks.callback({ chatId: this.chatId, fromId: this.senderId, data, messageId, chatType: this.chatType });
     const { status } = await this.hooks.post(update);
     return { update, status, row: await this.#handled(String(update.update_id), 4000, 60_000) };
   }

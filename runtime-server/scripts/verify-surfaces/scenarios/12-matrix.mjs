@@ -421,6 +421,8 @@ class Matrix extends Scenario {
     await walk(matrix, rec, "4c", "Telegram -> Chat, audience public: anyone becomes a contact", async (cell) => {
       const connection = await stack.connection({ owner, audience: "public", productId }); cell.ids.connection = connection;
       const stranger = new TgChat(stack, hooks, 6201);
+      await stranger.say(`/start ${await stack.startCode(connection)}`);
+      await sleep(4000);
       const posted = await stranger.say("Reply with exactly the word: public-ok");
       await sleep(8000);
       const t = await trace(stack, "telegram", 6201);

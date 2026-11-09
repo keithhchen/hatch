@@ -18,8 +18,8 @@ export class TelegramWebhooks {
       ...(document ? { document } : {}), ...(photo ? { photo } : {})
     } };
   }
-  callback({ updateId = this.nextUpdate++, chatId, fromId, data, queryId = `cb-${updateId}`, messageId = 1 }) {
-    return { update_id: updateId, callback_query: { id: queryId, from: { id: fromId }, data, message: { message_id: messageId, chat: { id: chatId, type: "private" } } } };
+  callback({ updateId = this.nextUpdate++, chatId, fromId, data, queryId = `cb-${updateId}`, messageId = 1, chatType = "private" }) {
+    return { update_id: updateId, callback_query: { id: queryId, from: { id: fromId }, data, message: { message_id: messageId, chat: { id: chatId, type: chatType } } } };
   }
   /** Posts an update. `signed: false` omits the secret; `secret` overrides it. Returns the HTTP status and the time it took. */
   async post(update, { signed = true, secret = this.secret } = {}) {

@@ -178,6 +178,8 @@ export class Stack {
       [owner.id, channel, scope, JSON.stringify(target), key, audience]);
     return row.rows[0].id;
   }
+  /** The deep-link payload a public Connection exposes in its API record (`start_code`): t.me/<bot>?start=<code>. */
+  async startCode(connectionId) { return (await this.registryPool.query("SELECT start_code FROM hatch_connections WHERE id = $1", [connectionId])).rows[0].start_code; }
   async admit(connectionId, { channel = "telegram", senderId, threadId = senderId, scope = "" }) {
     await this.registryPool.query("INSERT INTO hatch_channel_identities (connection_id, channel, scope, sender_id, thread_id) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING", [connectionId, channel, scope, senderId, threadId]);
   }
