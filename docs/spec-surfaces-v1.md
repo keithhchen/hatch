@@ -53,11 +53,12 @@ Studio API and Chat API both accept browser auth and API keys. Browser WebSocket
 - `Connection` replaces `hatch_assistant_channels`, with no dual write. `ChannelAddress` separates thread from sender, and permission follows the sender.
 - Outbound: a durable outbox. A failure that may have reached the platform is retried only with an idempotent send; otherwise it becomes `unknown`.
 - Reply rendering degrades by `ChannelCapabilities`. A reply outside the platform's window stays in Hatch as `undelivered`.
+- A `self` Connection that targets a Product serves the account that linked it, as that account: its conversation is the account's own, and the Product must be its own.
 - `public` conversations have a contact `Principal`, with limits checked before a Run. Contacts are isolated by connection and contact. `public` never declares Studio tools. Billing for contacts is out of scope for v1.
 
 ## Attachments
 
-Upload first, reference by `assetId`, and send a message only when its assets are ready.
+Upload first, reference by `assetId`, and send a message only when its assets are ready. An asset joins its message in the transaction that accepts the message, so a crash leaves it free. An upload still `processing` after its lease was abandoned by a crash: uploading the same bytes again retries it.
 
 | | Image | File | Voice message |
 |---|---|---|---|

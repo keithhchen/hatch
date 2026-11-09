@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { zipSync } from "fflate";
 import sharp from "sharp";
-import { AssetError } from "./domain.js";
+import { createHash } from "node:crypto";
+import { Asset, AssetError } from "./domain.js";
+import { AssetPipeline } from "./pipeline.js";
+import { FileProcessor } from "./processors.js";
 import { fileLine, fitImagesToBudget, imageLabel, pathsFor } from "./views.js";
-import { block, docx, harness, png, saying, scopeA, scopeB, wav } from "./kit.test.js";
+import { allow, block, docx, harness, png, saying, scopeA, scopeB, wav } from "./kit.test.js";
 import { UnavailableTranscriber } from "./adapters.js";
 
 const rejects = (promise: Promise<unknown>, code: string) =>
@@ -143,4 +146,24 @@ test("paths in one message are distinct", async () => {
   const paths = [...pathsFor("m1", [a, b]).values()];
   assert.equal(new Set(paths).size, 2);
   assert.ok(paths.every(p => p.startsWith("/attachments/m1/")));
+});
+
+test("an upload whose processing never finished is taken over after its lease, not returned as processing forever", async () => {
+  const { blobs, repository } = await harness();
+  const bytes = Buffer.from("hello world");
+  let clock = Date.parse("2026-11-10T00:00:00Z");
+  const pipeline = new AssetPipeline(repository, blobs, allow, [new FileProcessor(async () => ({ bytes: Buffer.from("# converted") }))], { leaseMs: 60_000, now: () => new Date(clock) });
+  // A crash left this asset `processing`: its record is all that is left.
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  const stuck = Asset.restore({ ...Asset.received({ scope: scopeA, sha256, kind: "file", mime: "text/plain", name: "a.txt", bytes: bytes.length }).record, createdAt: new Date(clock).toISOString() });
+  await repository.insertIfAbsent(stuck);
+  // Within its lease another instance may still be working on it.
+  clock += 30_000;
+  assert.deepEqual([(await pipeline.accept(scopeA, { name: "a.txt", bytes })).id, (await repository.get(scopeA, stuck.id))!.state], [stuck.id, "processing"]);
+  // Past it the upload is retried as a new asset, and the abandoned one ends failed.
+  clock += 31_000;
+  const retried = await pipeline.accept(scopeA, { name: "a.txt", bytes });
+  assert.notEqual(retried.id, stuck.id);
+  assert.equal(retried.state, "ready");
+  assert.equal((await repository.get(scopeA, stuck.id))!.state, "failed");
 });

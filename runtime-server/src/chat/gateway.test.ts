@@ -3,7 +3,7 @@ import { test } from "node:test";
 import type { AgentRuntime } from "../agentRuntime.js";
 import { block, png, saying, wav } from "../assets/kit.test.js";
 import { principalKey } from "./principal.js";
-import { alice, bob, creatorId, dm, ended, gatewayFixture, productId, sleep, text, thread, withFixture, type Fixture } from "./kit.test.js";
+import { alice, bob, creatorId, dm, ended, gatewayFixture, owner, productId, selfThread, sleep, stranger, text, thread, withFixture, type Fixture } from "./kit.test.js";
 
 test("the channel layer sends a customer's message and learns the Run's one reply, with no transport", () => withFixture({}, async ({ runtime }) => {
   const sent = await runtime.chat.send(alice, thread, dm, "evt-1", text("hi"));
@@ -22,6 +22,21 @@ test("the channel layer sends a customer's message and learns the Run's one repl
   // Without an asset service an attachment is refused, never dropped.
   await assert.rejects(runtime.chat.send(alice, thread, dm, "evt-4", [{ type: "image", assetId: "asset" }]), { code: "attachments_unavailable", status: 501 });
   await assert.rejects(runtime.chat.upload(alice, thread, { name: "a.txt", bytes: Buffer.from("x") }), { code: "attachments_unavailable" });
+}));
+
+test("a self Connection serves its linked account its own Product, and no one else", () => withFixture({}, async ({ runtime, repository }) => {
+  const im = { client: "im" as const };
+  const sent = await runtime.chat.send(owner, selfThread, im, "evt-1", text("hi"));
+  assert.equal(sent.outcome, "started");
+  assert.deepEqual(await ended(runtime.chat, sent.runId), { runId: sent.runId, status: "completed", text: "echo: hi" });
+  assert.equal((await repository.getConversation(sent.conversationId))?.ownerAccountId, creatorId, "the conversation is the account's own");
+  const again = await runtime.chat.send(owner, selfThread, im, "evt-1", text("hi"));
+  assert.deepEqual([again.outcome, again.runId, again.conversationId], ["replayed", sent.runId, sent.conversationId]);
+  // Another account cannot use this Connection, and a Connection linked by a non-owner of the Product does not serve it.
+  await assert.rejects(runtime.chat.send(stranger, selfThread, im, "evt-2", text("hi")), { code: "connection_not_shared", status: 403 });
+  await assert.rejects(runtime.chat.send(stranger, { ...selfThread, connectionId: "conn-self-other" }, im, "evt-3", text("hi")), { code: "entitlement_required", status: 403 });
+  // A contact never reaches a self Connection as an account, and `public` never serves an account.
+  await assert.rejects(runtime.chat.send(owner, thread, im, "evt-4", text("hi")), { code: "connection_not_shared", status: 403 });
 }));
 
 test("a contact's follow-up while a Run is active joins it, and the channel gets that Run's one reply", () => withFixture({}, async ({ runtime, repository }) => {

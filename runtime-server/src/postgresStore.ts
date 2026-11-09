@@ -1,6 +1,6 @@
 import { Pool, type QueryResultRow } from "pg";
 import { PostgresConversationRepository, ConversationRepositoryError, assertConversationBinding,
-  submissionEvents, type AcceptSubmissionInput, type AcceptedSubmission } from "./conversationRepository.js";
+  submissionEvents, type AcceptSubmissionInput, type AcceptedSubmission, type AlsoCommit } from "./conversationRepository.js";
 import type { ConversationMessage, PersistedContextAttachment } from "./protocol.js";
 import { historyBoundary, historyCursor, historyLimit, historyMessages,
   type ConversationHistoryOptions, type ConversationHistoryPage } from "./conversationHistory.js";
@@ -370,7 +370,7 @@ export class PostgresStore extends RuntimeStore {
     return result.rows[0]?.receipt;
   }
 
-  async acceptSubmission(input: AcceptSubmissionInput): Promise<AcceptedSubmission> {
+  async acceptSubmission(input: AcceptSubmissionInput, alsoCommit?: AlsoCommit): Promise<AcceptedSubmission> {
     input = structuredClone(input);
     await this.ensureSchema();
     const pool = this.pool as PostgresQueryExecutor & { connect?: () => Promise<PostgresTransactionClient> };
@@ -395,6 +395,7 @@ export class PostgresStore extends RuntimeStore {
         await client.query("COMMIT");
         return { created: false, run: existing, receipt };
       }
+      await alsoCommit?.(client);
       const { run } = await repository.createRun(input.run);
       for (const event of submissionEvents(input, run.createdAt)) await this.appendOn(client, event);
       await repository.appendEvent({ conversationId: run.conversationId, runId: run.id, type: "message.created",

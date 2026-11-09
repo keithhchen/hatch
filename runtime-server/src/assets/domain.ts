@@ -95,6 +95,8 @@ export interface AssetBlobs {
  * - release: unbinds an asset from that message, and only from that one.
  */
 export interface AssetRepository {
+  /** The same repository inside a caller's transaction (`tx`), so a bind commits with what the caller commits. Without one, itself. */
+  on(tx?: unknown): AssetRepository;
   insertIfAbsent(asset: Asset): Promise<{ asset: Asset; created: boolean }>;
   transition(from: AssetState, next: Asset): Promise<Asset | undefined>;
   get(scope: AssetScope, id: string): Promise<Asset | undefined>;

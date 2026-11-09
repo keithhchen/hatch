@@ -37,9 +37,9 @@ export class ServiceChatGateway<Scope> implements ChatGateway {
 
   async send(principal: Principal, ref: ConversationRef, client: ClientAttributes, messageId: string, parts: ContentPart[]): Promise<SentMessage> {
     const bound = await this.deps.binders[principal.kind].bind(principal, ref);
-    const { message, digest } = await this.deps.parts.prepare(parts, bound.conversation, messageId);
+    const { message, digest, bind } = await this.deps.parts.prepare(parts, bound.conversation, messageId);
     const submission = await this.deps.chat.submit({
-      principal, client, message, digest, ...bound,
+      principal, client, message, digest, ...(bind ? { bind } : {}), ...bound,
       clientMessageId: messageId,
       runId: `run_${randomUUID().replaceAll("-", "")}`
     });

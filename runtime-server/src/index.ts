@@ -96,7 +96,8 @@ import { ChatRuntime, type ChatRuntimeOptions } from "./chat/chatRuntime.js";
 import { PostgresEventRelay } from "./chat/eventRelay.js";
 import { ChatError, principalKey, accountPrincipal } from "./chat/principal.js";
 import type { PrincipalLimits, RunAdmission, Submission } from "./chat/chatService.js";
-import { ContactBinder, type ConnectionDirectory } from "./chat/contactBinding.js";
+import { ContactBinder, SentMessageLimits, type ConnectionDirectory } from "./chat/contactBinding.js";
+import { SelfBinder } from "./chat/selfBinding.js";
 import type { ChatGateway } from "./chat/gateway.js";
 import { checkUpgrade, sessionTokenFromCookie } from "./chat/originPolicy.js";
 import { RunHandoff } from "./chat/runSupervisor.js";
@@ -180,8 +181,9 @@ export type RuntimeServerOptions = {
   maxPendingTurnAuthorizationsPerUser?: number;
   /** Origins that may use a browser session cookie on a WebSocket upgrade or a state-changing request. */
   allowedOrigins?: string[];
-  /** Limits checked before a customer's message becomes a Run. */
+  /** Limits checked before a customer's message becomes a Run. By default each contact may send `maxContactMessages` to a Product. */
   principalLimits?: PrincipalLimits;
+  maxContactMessages?: number;
   /** The channel layer's Connections, which a customer's messages arrive through. */
   connectionDirectory?: ConnectionDirectory;
   /** Uploads, attachments in messages, and the ls/grep/read tools over them. Without it a message takes text only. */
@@ -263,6 +265,9 @@ export async function commerceEventSinkFromEnvironment(
     completeDelivery: (input, options) => service.completeDelivery(input, options)
   };
 }
+
+/** What one contact may send to one Product, in all; the Registry's rate limit bounds how fast. */
+const DEFAULT_MAX_CONTACT_MESSAGES = 1_000;
 
 export async function createRuntimeServerFromEnvironment(
   environment: NodeJS.ProcessEnv = process.env
@@ -431,6 +436,7 @@ export async function createRuntimeServerFromEnvironment(
     ...(chatAssets ? { chatAssets } : {}),
     assetStore: runtimeAssetStoreFromEnvironment(environment, runtimeDataDir),
     chatServiceToken: environment.HATCH_RUNTIME_CHAT_SERVICE_TOKEN?.trim() || undefined,
+    maxContactMessages: runtimeCapacityLimit("HATCH_RUNTIME_MAX_CONTACT_MESSAGES", environment.HATCH_RUNTIME_MAX_CONTACT_MESSAGES, DEFAULT_MAX_CONTACT_MESSAGES, 10_000_000),
     ...(registryUrl && runtimeRegistryToken ? { connectionDirectory: new RegistryConnectionDirectory({ registryUrl, serviceToken: runtimeRegistryToken, timeoutMs: registryAuthorizationTimeoutMs(environment) }) } : {}),
     clientToolTimeoutMs: clientToolTimeoutMs(environment.HATCH_CLIENT_TOOL_TIMEOUT_MS),
     clientHelloTimeoutMs: helloTimeoutMs,
@@ -802,7 +808,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     runner,
     scopes,
     admission,
-    limits: options.principalLimits,
+    limits: options.principalLimits ?? new SentMessageLimits(conversationRepository, options.maxContactMessages ?? DEFAULT_MAX_CONTACT_MESSAGES),
     toolTimeoutMs: options.clientToolTimeoutMs ?? clientToolTimeoutMs(),
     compactionStrategy: options.compactionStrategy,
     // With a shared database every instance sees every Run's live events.
@@ -965,6 +971,9 @@ function chatGatewayFor(
   const contactBinder = options.connectionDirectory && agentCorpusResolver
     ? new ContactBinder(options.connectionDirectory, agentCorpusResolver, repository)
     : undefined;
+  const selfBinder = options.connectionDirectory && agentCorpusResolver
+    ? new SelfBinder(options.connectionDirectory, agentCorpusResolver, repository)
+    : undefined;
   const unavailable = (kind: string): never => { throw new ChatError("binding_unavailable", `${kind} messages are not configured on this Runtime.`, 503); };
   return new ServiceChatGateway<SessionBinding>({
     chat: chat.service,
@@ -983,8 +992,10 @@ function chatGatewayFor(
       },
       account: {
         async bind(principal, ref) {
-          if (principal.kind !== "account" || ref.kind !== "conversation") return unavailable("Account");
-          const conversation = await repository.getConversation(ref.id);
+          if (principal.kind !== "account") return unavailable("Account");
+          // A conversation by id is the account's own; a thread is a self Connection's, bound to its linked account.
+          if (ref.kind === "thread" && !selfBinder) return unavailable("Self-use");
+          const conversation = ref.kind === "conversation" ? await repository.getConversation(ref.id) : await selfBinder!.conversationFor(principal.accountId, ref);
           if (!conversation || conversation.ownerAccountId !== principal.accountId) throw new ChatError("conversation_not_found", "Conversation was not found.", 404);
           const scope = await scopes.resolve(conversation, new AbortController().signal);
           return { conversation, scope, corpusDigest: scope.corpusDigest, requiresLocalTools: scope.agentCorpus ? productRequiresLocalTools(scope.agentCorpus) : false };
@@ -1605,7 +1616,14 @@ async function handleConversationHttpRequest(
       ...(typeof body.time_zone === "string" ? { timeZone: body.time_zone } : {})
     }, signal);
     if (streaming) {
-      openEventStream(res, chatEdge, conversation, before, maxStreamBufferedBytes, submission);
+      // A send replayed after its Run ended has no end left to wait for: it is answered with the Run's result.
+      const ended = submission.outcome === "replayed" ? await repository.getRun(conversation.id, submission.run.id) : undefined;
+      const finished = ended && TERMINAL_STATUSES.has(ended.status) ? {
+        status: ended.status,
+        reply: ended.status === "completed" && store ? finalAssistantText(await store.readVisibleConversation(conversation.id), ended.id) : "",
+        cursor: await repository.latestRunStateCursor(ended.id)
+      } : undefined;
+      openEventStream(res, chatEdge, conversation, before, maxStreamBufferedBytes, submission, finished);
       return;
     }
     const run = await waitForTerminalRun(() => repository.getRun(conversation.id, submission.run.id), Math.min(wait, MAX_WAIT_SECONDS) * 1000, 100, signal);
@@ -1800,12 +1818,20 @@ function openEventStream(
   conversation: ConversationRecord,
   afterCursor: number,
   maxBufferedBytes: number,
-  submission?: Submission
+  submission?: Submission,
+  /** The submission's Run had already ended: the stream carries its reply and its end, and closes. */
+  finished?: { status: string; reply: string; cursor?: number }
 ): void {
   res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
   const sink = new SseSink(res, maxBufferedBytes);
   if (submission) {
     sink.push({ type: "message.accepted", conversation_id: conversation.publicId, run_id: submission.run.id, client_message_id: submission.clientMessageId, outcome: submission.outcome });
+  }
+  if (submission && finished) {
+    if (finished.reply) sink.push({ type: "assistant.delta", run_id: submission.run.id, delta: { kind: "text", content: finished.reply } });
+    sink.push({ type: "journal.event", ...(finished.cursor === undefined ? {} : { cursor: finished.cursor }), journal_type: "run.state", run_id: submission.run.id, payload: { id: submission.run.id, status: finished.status } });
+    res.end();
+    return;
   }
   const detach = edge.chat.feed.attach(conversation.id, { afterCursor, stream: true }, {
     push(event) {
@@ -2181,6 +2207,7 @@ async function submitUserMessage(
     client: request.client,
     clientMessageId: request.clientMessageId,
     message: canonicalMessage,
+    ...(request.prepared?.bind ? { bind: request.prepared.bind } : {}),
     digest: request.prepared?.digest ?? clientMessageInputDigest({ ...request.message, ...(request.taskStart ? { task_start: true } : {}) }),
     runId: request.runId,
     corpusDigest: binding.corpusDigest,

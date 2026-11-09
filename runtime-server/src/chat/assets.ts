@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { ConversationRecord } from "../conversationRepository.js";
+import type { AlsoCommit, ConversationRecord } from "../conversationRepository.js";
 import { AssetError, type Asset, type AssetBlobs, type AssetScope } from "../assets/domain.js";
 import type { AssetPipeline } from "../assets/pipeline.js";
 import { attachmentTools, type AttachmentTool } from "../assets/tools.js";
@@ -37,7 +37,8 @@ export const refusal = (error: unknown): unknown => error instanceof AssetError
 /** A platform event id may hold characters a path cannot, so the message id in /attachments/<id>/ is derived from it. */
 export const attachmentMessageId = (clientMessageId: string): string => `msg_${createHash("sha256").update(clientMessageId).digest("hex").slice(0, 16)}`;
 
-export type PreparedMessage = { digest: string; message: () => Promise<ConversationMessage> };
+/** `bind` is what must commit with the accepted message: its assets join it, in the same transaction, or the message is refused. */
+export type PreparedMessage = { digest: string; message: () => Promise<ConversationMessage>; bind?: AlsoCommit };
 
 /** Turns message parts into the canonical user message and the digest that makes a retry safe. */
 export interface PartsReader {
@@ -82,14 +83,17 @@ export class ChatAssets implements PartsReader {
     const digest = referenced.length === 0
       ? clientMessageInputDigest({ content: texts.join("\n") })
       : `sha256:${createHash("sha256").update(JSON.stringify(parts.map((part) => part.type === "text" ? part : { type: part.type, sha256: assets.get(part.assetId)!.record.sha256 }))).digest("hex")}`;
-    return { digest, message: () => this.build(parts, assets, scope, attachmentMessageId(clientMessageId)) };
+    const messageId = attachmentMessageId(clientMessageId);
+    return {
+      digest,
+      message: () => this.build(parts, assets, messageId),
+      // Binding is per asset, and it commits with the message: an asset of another message refuses this one, and a crash binds nothing.
+      bind: async (tx) => { for (const id of assets.keys()) await this.deps.pipeline.attach(scope, id, messageId, tx).catch((error) => { throw refusal(error); }); }
+    };
   }
 
   /** The message the model reads: text as written, a voice message as its transcript, an image as pixels beside its path, a file as one line. */
-  private async build(parts: ContentPart[], assets: Map<string, Asset>, scope: AssetScope, messageId: string): Promise<ConversationMessage> {
-    // Binding is atomic and per asset: an asset of another message is refused here, before the message is accepted.
-    const bound = new Map<string, Asset>();
-    for (const [id] of assets) bound.set(id, await this.deps.pipeline.attach(scope, id, messageId).catch((error) => { throw refusal(error); }));
+  private async build(parts: ContentPart[], bound: Map<string, Asset>, messageId: string): Promise<ConversationMessage> {
     const paths = pathsFor(messageId, [...bound.values()]);
     const lines: string[] = [];
     const images: NonNullable<ConversationMessage["model_images"]> = [];

@@ -5,6 +5,8 @@ import { Asset, AssetError, scopeKey, type AssetRecord, type AssetRepository, ty
 export class InMemoryAssetRepository implements AssetRepository {
   private readonly rows = new Map<string, Asset>();
 
+  on() { return this; }
+
   async insertIfAbsent(asset: Asset) {
     const { scope, sha256 } = asset.record;
     const existing = [...this.rows.values()].find(a => a.state !== "failed" && a.record.sha256 === sha256 && scopeKey(a.record.scope) === scopeKey(scope));
@@ -62,6 +64,8 @@ export class PostgresAssetRepository implements AssetRepository {
   constructor(private readonly db: PostgresQueryExecutor) {}
 
   initialize() { return this.db.query(POSTGRES_ASSET_SCHEMA); }
+
+  on(tx?: unknown): AssetRepository { return tx ? new PostgresAssetRepository(tx as PostgresQueryExecutor) : this; }
 
   async insertIfAbsent(asset: Asset) {
     const { scope, sha256 } = asset.record;
