@@ -172,6 +172,10 @@ export interface ConversationRepository {
   createRun(input: CreateRunInput): Promise<{ run: ConversationRunRecord; created: boolean }>;
   acceptSubmission(input: AcceptSubmissionInput): Promise<AcceptedSubmission>;
   getRun(conversationId: string, runId: string): Promise<ConversationRunRecord | undefined>;
+  /** A Run by its id alone, for callers that know no conversation, such as the channel layer. */
+  findRun(runId: string): Promise<ConversationRunRecord | undefined>;
+  /** The journal cursor of the Run's newest `run.state` event: it names one stage of the Run, such as one compaction. */
+  latestRunStateCursor(runId: string): Promise<number | undefined>;
   /** Lookup used to acknowledge a transport retry without starting tools again. */
   getRunByClientMessageId(conversationId: string, clientMessageId: string): Promise<ConversationRunRecord | undefined>;
   listRuns(conversationId: string): Promise<ConversationRunRecord[]>;
@@ -567,6 +571,17 @@ export class InMemoryConversationRepository implements ConversationRepository {
     await this.readReady();
     const run = this.runs.get(runId);
     return run?.conversationId === conversationId ? cloneRun(run) : undefined;
+  }
+
+  async findRun(runId: string): Promise<ConversationRunRecord | undefined> {
+    await this.readReady();
+    const run = this.runs.get(runId);
+    return run ? cloneRun(run) : undefined;
+  }
+
+  async latestRunStateCursor(runId: string): Promise<number | undefined> {
+    await this.readReady();
+    return this.events.filter((event) => event.runId === runId && event.type === "run.state").at(-1)?.cursor;
   }
 
   async getRunByClientMessageId(conversationId: string, clientMessageId: string): Promise<ConversationRunRecord | undefined> {
@@ -1249,6 +1264,21 @@ export class PostgresConversationRepository implements ConversationRepository {
       SELECT * FROM hatch_conversation_runs WHERE conversation_id = $1 AND id = $2
     `, [conversationId, runId]);
     return result.rows[0] ? runFromRow(result.rows[0]) : undefined;
+  }
+
+  async findRun(runId: string): Promise<ConversationRunRecord | undefined> {
+    await this.initialize();
+    const result = await this.pool.query<RunRow>("SELECT * FROM hatch_conversation_runs WHERE id = $1", [runId]);
+    return result.rows[0] ? runFromRow(result.rows[0]) : undefined;
+  }
+
+  async latestRunStateCursor(runId: string): Promise<number | undefined> {
+    await this.initialize();
+    const result = await this.pool.query<{ cursor: string }>(`
+      SELECT j.cursor FROM hatch_conversation_runs r JOIN hatch_conversation_journal j ON j.conversation_id = r.conversation_id
+      WHERE r.id = $1 AND j.run_id = $1 AND j.event_type = 'run.state' ORDER BY j.cursor DESC LIMIT 1
+    `, [runId]);
+    return result.rows[0] ? Number(result.rows[0].cursor) : undefined;
   }
 
   async getRunByClientMessageId(conversationId: string, clientMessageId: string): Promise<ConversationRunRecord | undefined> {

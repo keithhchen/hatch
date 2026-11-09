@@ -35,8 +35,9 @@ export class ContactBinder {
   async bind(principal: ContactPrincipal, ref: ConversationRef, signal?: AbortSignal): Promise<BoundContact> {
     const connection = await this.connections.get(principal.connectionId);
     if (!connection || connection.state !== "active") throw new ChatError("connection_unavailable", "This channel connection is not active.", 409);
-    if (connection.audience !== "public" || connection.target.kind !== "product") {
-      throw new ChatError("connection_not_public", "This connection does not serve customers.", 403);
+    // `org` members and `public` customers are both contacts; only the owner's `self` Connection acts as an account.
+    if (connection.audience === "self" || connection.target.kind !== "product") {
+      throw new ChatError("connection_not_shared", "This connection does not serve contacts.", 403);
     }
     const corpus = await this.products.resolveByProduct(connection.target.productId, signal);
     const owner = principalKey(principal);

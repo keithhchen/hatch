@@ -40,7 +40,6 @@ export class ChannelService implements AssistantChannels {
   private loops: Array<ReturnType<typeof pollLoop>> = [];
   private inboxLoop?: ReturnType<typeof pollLoop>;
   private outboxLoop?: ReturnType<typeof pollLoop>;
-  private unsubscribe: Array<() => void> = [];
 
   constructor(private deps: ChannelStores & { hub: ChannelHub; scopeOf: (ownerAccountId: string, channel: ChannelKind) => string; gateway?: ChatGateway; now?: () => Date; rates?: ConstructorParameters<typeof Dispatcher>[0]["rates"]; onError?: (error: unknown) => void }) {
     this.connections = deps.connections;
@@ -51,7 +50,7 @@ export class ChannelService implements AssistantChannels {
       hub: deps.hub, connections: deps.connections,
       notify: async (to, text, replyTo) => { await this.dispatcher.send({ ...to, kind: "notice", message: { text, ...(replyTo ? { replyTo } : {}) } }); },
     });
-    if (deps.gateway) this.replies = new ChatReplies({ gateway: deps.gateway, inbox: deps.inbox, dispatcher: this.dispatcher });
+    if (deps.gateway) this.replies = new ChatReplies({ gateway: deps.gateway, inbox: deps.inbox, dispatcher: this.dispatcher, compacting: (runId, compactionId) => this.compaction({ runId, compactionId }) });
   }
 
   register(kind: TargetKind, handler: TargetHandler): this { this.router.register(kind, handler); return this; }
@@ -70,15 +69,12 @@ export class ChannelService implements AssistantChannels {
     this.loops = [this.inboxLoop, this.outboxLoop];
     if (this.replies) {
       const replies = this.replies;
-      this.loops.push(pollLoop(async () => { await replies.sweep(); return 0; }, { idleMs: 15_000, onError }));
-      const gateway = this.deps.gateway!;
-      this.unsubscribe.push(gateway.onRunEnd(runId => void replies.settle(runId).catch(onError)));
-      if (gateway.onCompaction) this.unsubscribe.push(gateway.onCompaction(event => void this.compaction({ compactionId: event.compactionId, runId: event.runId }).catch(onError)));
+      // Chat may be another process: a Run's end and its compactions are read from its durable state, not heard.
+      this.loops.push(pollLoop(async () => { await replies.sweep(); return 0; }, { idleMs: 2_000, onError }));
     }
   }
 
   async close(): Promise<void> {
-    for (const off of this.unsubscribe) off();
     await Promise.all(this.loops.map(loop => loop.stop()));
   }
 

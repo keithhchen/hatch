@@ -1,4 +1,4 @@
-import type { AgentTarget, ChannelAddress, ClientGroup, ContentPart, Principal } from "../surfaces/contract.js";
+import type { AgentTarget, ChannelAddress, Principal } from "../surfaces/contract.js";
 import type { ChannelConnection } from "./connections.js";
 import type { ChannelAdapter, ChannelKind, InboundEvent, OutboundMessage } from "./types.js";
 
@@ -26,20 +26,8 @@ export interface TargetHandler {
 }
 export type TargetKind = AgentTarget["kind"];
 
-/**
- * Port: the Chat API, as the channel layer needs it. Workstream B implements it in chat/gateway.ts.
- * A message steers the conversation's active Run or starts one, atomically; the client key makes a repeat a no-op.
- */
-export interface ChatGateway {
-  submit(input: { productId: string; principal: Principal; address: ChannelAddress; client: Extract<ClientGroup, "im" | "dm">; clientKey: string; parts: ContentPart[] }): Promise<{ runId: string }>;
-  /** Stores a file the sender sent and returns the asset a message refers to. */
-  upload(input: { principal: Principal; address: ChannelAddress; name: string; bytes: Buffer }): Promise<{ assetId: string }>;
-  /** The Run's final reply, once it has ended; undefined while it runs. */
-  finalReply(runId: string): Promise<{ ok: boolean; text: string } | undefined>;
-  onRunEnd(listener: (runId: string) => void): () => void;
-  /** A Run is compacting its conversation. */
-  onCompaction?(listener: (event: { runId: string; compactionId: string }) => void): () => void;
-}
+/** Port: the Chat API. One contract for both sides: Chat implements it in its process, the Registry reaches it over HTTP. */
+export type { ChatGateway } from "../chat/gateway.js";
 
 /** Port: what the Assistant needs from the channel layer. It never sees a platform. */
 export interface AssistantChannels {

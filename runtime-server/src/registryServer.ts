@@ -17,6 +17,9 @@ import { CHANNEL_KINDS, CHANNEL_LABELS, isChannelKind, type ChannelAdapter, type
 import { ChannelListeners } from "./channels/listeners.js";
 import { ChannelHub } from "./channels/hub.js";
 import { ChannelService, openChannelStores } from "./channels/service.js";
+import { GuardedTarget, liveOwnProduct } from "./channels/guardedTarget.js";
+import { ProductTarget } from "./channels/productTarget.js";
+import { HttpChatGateway } from "./channels/runtimeChat.js";
 import { safeError } from "./factoryAgents/runtime.js";
 import { CredentialSeal } from "./assistant/channelCredentials.js";
 import { IMessageChannel } from "./channels/imessageChannel.js";
@@ -274,7 +277,11 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       return adapter;
     });
     const catalog = registryAgentCatalog(registryContext);
-    const channels = new ChannelService({ ...stores, hub, scopeOf });
+    // Chat runs in the Runtime process: the channel layer reaches it with its own service token, and never otherwise.
+    const chatUrl = environment.HATCH_RUNTIME_CHAT_URL?.trim();
+    const chatToken = environment.HATCH_RUNTIME_CHAT_SERVICE_TOKEN?.trim();
+    const gateway = chatUrl && chatToken ? new HttpChatGateway({ baseUrl: chatUrl, serviceToken: chatToken }) : undefined;
+    const channels = new ChannelService({ ...stores, hub, scopeOf, ...(gateway ? { gateway } : {}) });
     const assistant = new AssistantService({
       tasks, reach, channels,
       products: factoryAgents,
@@ -292,8 +299,10 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       },
       productPrefix: (accountId, productId) => `${productsPrefix}/${accountId}/${productId}`,
     });
-    // Product Connections have no handler until the Chat API's gateway is registered here.
-    channels.register("assistant", new AssistantTarget(assistant)).start();
+    channels.register("assistant", new AssistantTarget(assistant));
+    // Without a Chat gateway Product Connections have no handler, and their events wait in the inbox.
+    if (gateway) channels.register("product", new GuardedTarget(new ProductTarget({ gateway, limiter: stores.limiter }), [liveOwnProduct(releaseStore)]));
+    channels.start();
     Object.assign(registryContext, { assistant, ingest, channels, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin });
     studio.recordAssistant();
     // A platform that pushes over its own connection runs here, in one process at a time. A dropped connection comes back; credentials added or removed are picked up.
@@ -591,6 +600,16 @@ async function route(
       release: releasePayload,
       runtime_manifest_ref: runtimeManifestRef
     });
+    return;
+  }
+  const runtimeConnectionMatch = url.pathname.match(/^\/v1\/runtime\/connections\/([^/]+)$/);
+  if (runtimeConnectionMatch && request.method === "GET") {
+    requireRuntimeServiceAuth(request, context.runtimeServiceToken);
+    const connection = await context.channels?.connections.get(decodeURIComponent(runtimeConnectionMatch[1]!));
+    if (!connection) { sendJson(response, 404, { detail: "No such Connection." }); return; }
+    // The platform tenant is the channel layer's business; Chat is told who owns the Connection, whom it answers as, and for whom.
+    const { scope: _scope, ...shared } = connection;
+    sendJson(response, 200, { connection: shared });
     return;
   }
   const runtimeCreatorReleasesMatch = url.pathname.match(/^\/v1\/runtime\/creators\/([^/]+)\/releases$/);

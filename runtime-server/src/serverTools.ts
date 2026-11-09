@@ -15,14 +15,22 @@ type KnowledgeScope = {
   corpusDigest: string;
 };
 
+type AttachmentRunner = { run(name: string, args: unknown): Promise<string> };
+
 export class ServerToolExecutor {
   private knowledgeScope?: KnowledgeScope;
   private resolvedCreatorTools = new Map<string, RuntimeCreatorTool>();
+  private attachments?: AttachmentRunner;
 
   constructor(private readonly timeoutMs = 120000) {}
 
   setKnowledgeScope(scope: KnowledgeScope | undefined): void {
     this.knowledgeScope = scope;
+  }
+
+  /** The conversation's attachment tools, already bound to its scope: a call never names a scope. */
+  setAttachments(runner: AttachmentRunner | undefined): void {
+    this.attachments = runner;
   }
 
   setResolvedCreatorTools(tools: RuntimeCreatorTool[] = []): void {
@@ -53,6 +61,13 @@ export class ServerToolExecutor {
 
     const parsedArgs = tool.schema.parse(args) as Record<string, unknown>;
     const requestSignal = boundedSignal(signal, this.timeoutMs);
+
+    if (name.startsWith("attachments.")) {
+      if (!this.attachments) throw new Error("This conversation has no attachments service.");
+      const result = { output: await this.attachments.run(name.slice("attachments.".length), parsedArgs) };
+      assertBoundedJsonValue(result);
+      return result;
+    }
 
     if (name === "web.search" || name === "hatch.web_search") {
       const result = await this.webSearch(parsedArgs, requestSignal);
