@@ -33,8 +33,11 @@ export function withPartialOutput(publish: Publish, save: (text: string) => Prom
     publish: ((message) => {
       const delta = message.type === "assistant.delta" ? message.delta as { kind?: string; content?: string } : undefined;
       if (delta?.kind === "text" && typeof delta.content === "string") {
+        // The offset places the delta in the Run's text, so any client joins it to a snapshot or a replay exactly.
+        const offset = text.length;
         text += delta.content;
         saver.push(text);
+        return publish({ ...message, delta: { ...delta, offset } });
       }
       publish(message);
     }) as Publish,

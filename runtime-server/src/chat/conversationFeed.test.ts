@@ -59,3 +59,31 @@ test("resuming after a cursor replays only what the client has not seen", async 
   assert.ok((seen[0]!.cursor as number) > snapshot.cursor);
   stop();
 });
+
+const textDelta = (run: string, content: string, offset: number) => ({ type: "assistant.delta", run_id: run, delta: { kind: "text", content, offset } });
+
+test("an observer attaching mid-Run is caught up with the Run's text, joined to what it holds by offset", async () => {
+  const { hub, feed } = await fixture();
+  hub.publish(id, textDelta("r", "Hello ", 0));
+  hub.publish(id, textDelta("r", "wor", 6));
+  const seen: Record<string, unknown>[] = [];
+  const stop = feed.attach(id, { afterCursor: 0, stream: true }, { push: (event) => seen.push(event) });
+  hub.publish(id, textDelta("r", "ld", 9));
+  stop();
+  assert.deepEqual(seen.filter((event) => event.type === "assistant.delta").map((event) => event.delta), [
+    { kind: "text", content: "Hello wor", offset: 0 },
+    { kind: "text", content: "ld", offset: 9 }
+  ]);
+  const quiet: Record<string, unknown>[] = [];
+  feed.attach(id, { afterCursor: 0, stream: false }, { push: (event) => quiet.push(event) })();
+  assert.equal(quiet.some((event) => event.type === "assistant.delta"), false);
+});
+
+test("the caught-up text covers the live part only, and ends with the Run", () => {
+  const hub = new RunEventHub();
+  hub.publish(id, textDelta("r", "ab", 0));
+  hub.publish(id, textDelta("r", "ef", 4));
+  assert.deepEqual(hub.catchUp(id)?.delta, { kind: "text", content: "ef", offset: 4 });
+  hub.publish(id, { type: "turn.state", run_id: "r", status: "completed" });
+  assert.equal(hub.catchUp(id), undefined);
+});

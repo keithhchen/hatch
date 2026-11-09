@@ -181,6 +181,20 @@ test("watch resumes from --after with after_cursor and stops at a terminal run.s
   });
 });
 
+test("watch started mid-Run prints the answer so far from the snapshot, then only what follows its cursor", async () => {
+  const offsetDelta = (text, offset) => [undefined, "assistant.delta", { type: "assistant.delta", run_id: "r1", delta: { kind: "text", content: text, offset } }];
+  await withServer((call, res) => {
+    if (call.url === "/v1/conversations/c1/snapshot?product_id=p1") return json(res, { cursor: 6, runs: [{ id: "r1", status: "running", partial_output: "Hello " }] });
+    // The Runtime catches the reader up with the whole text so far: what the reader holds is skipped by offset.
+    if (call.url === "/v1/conversations/c1/events?product_id=p1&after_cursor=6") return stream(res, [offsetDelta("Hello wor", 0), offsetDelta("ld", 9), done("7")]);
+    json(res, {}, 404);
+  }, async (url) => {
+    const r = await cli(["conversation", "watch", "c1", "--product", "p1"], url);
+    assert.equal(r.code, 0, r.err);
+    assert.equal(r.out, "Hello world\n");
+  });
+});
+
 test("giving up on a stream says how to resume and does not cancel", async () => {
   await withServer((call, res) => stream(res, [journal("7", "run.created", { id: "r1" })], { drop: true }), async (url, requests) => {
     const r = await cli(["conversation", "watch", "c1", "--product", "p1", "--after", "6"], url);

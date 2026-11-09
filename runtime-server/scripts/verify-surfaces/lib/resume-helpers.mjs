@@ -22,7 +22,7 @@ export const chatText = (message) => message.content ?? message.text ?? (Array.i
 // ── What a client sees of a Run: normalised events of Chat (journal.event / assistant.delta) and Studio (log events) ──
 
 export const fromChat = (json) => {
-  if (json?.type === "assistant.delta") return json.delta?.kind === "text" ? { delta: json.delta.content } : { other: true };
+  if (json?.type === "assistant.delta") return json.delta?.kind === "text" ? { delta: json.delta.content, offset: json.delta.offset } : { other: true };
   if (json?.type === "journal.event") return { cursor: Number(json.cursor), tag: json.journal_type, ended: json.journal_type === "run.state" && TERMINAL.has(json.payload?.status) };
   return { other: true };
 };
@@ -35,6 +35,8 @@ export class Trace {
     if (norm.other && norm.delta === undefined && norm.cursor === undefined) { this.firstEventMs ??= at - this.startedAt; return; }
     this.firstEventMs ??= at - this.startedAt;
     if (norm.delta !== undefined || norm.cursor !== undefined) this.firstLiveMs ??= at - this.startedAt;
+    // A delta that says where it sits in the Run's text is joined by that position: what the client holds is skipped.
+    if (norm.offset !== undefined && norm.delta !== undefined) norm = { ...norm, delta: norm.delta.slice(Math.max(0, this.text.length - norm.offset)) };
     if (norm.delta !== undefined && norm.delta !== "") { this.text += norm.delta; this.deltas += 1; this.firstTextMs ??= at - this.startedAt; }
     if (norm.cursor !== undefined) { this.cursors.push(norm.cursor); this.tags.push(norm.tag); }
     if (norm.messageEnd) { this.lastMessage = this.text; this.text = ""; }

@@ -52,13 +52,34 @@ export const waitSeconds = (flag) => flag === true ? 60 : Number(flag) > 0 ? Num
 const FAILED = new Set(["failed", "interrupted"]);
 export const ACTIVE = new Set(["queued", "running", "waiting_for_tool", "compacting"]);
 
+// A Chat text delta says where it sits in the Run's text, so text the reader already holds is skipped, never repeated.
+class ChatRunObserver extends RunObserver {
+  apply(event) {
+    const delta = event.event === "assistant.delta" ? event.data.delta : undefined;
+    if (delta?.kind !== "text" || typeof delta.offset !== "number") return super.apply(event);
+    const skip = Math.max(0, this.text.length - delta.offset);
+    return super.apply({ ...event, data: { ...event.data, delta: { ...delta, content: delta.content.slice(skip) } } });
+  }
+}
+
 // Play a Run's events to the reader. Reading never cancels the Run; only `stop` does.
 export async function observe(ctx, events) {
-  const observer = new RunObserver();
+  const observer = new ChatRunObserver();
   const write = ctx.json ? () => {} : (text) => ctx.stdout.write(text);
   for await (const event of events) write(observer.apply(event));
   if (FAILED.has(observer.status)) ctx.exitCode = 1;
   return { ...(observer.error ? { error: observer.error } : {}), run_id: observer.runId, cursor: observer.cursor, status: observer.status, reply: { text: observer.text }, streamed: !ctx.json };
+}
+
+// Open a conversation at any moment: the answer so far, then everything after the snapshot's cursor.
+// `after` resumes from a cursor instead.
+export async function* watchEvents(api, after, { sleep }) {
+  const follow = resumable((cursor) => api.events(cursor), { sleep });
+  if (after) return yield* follow(after);
+  const snapshot = await api.snapshot();
+  const run = snapshot.runs?.find((r) => ACTIVE.has(r.status));
+  if (run?.partial_output) yield { event: "assistant.delta", data: { run_id: run.id, delta: { kind: "text", content: run.partial_output, offset: 0 } } };
+  yield* follow(String(snapshot.cursor));
 }
 
 // Send one logical message and return its outcome. `where` tells the reader how to look again.

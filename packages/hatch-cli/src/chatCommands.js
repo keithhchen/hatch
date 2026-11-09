@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { HatchError } from "./errors.js";
 import { need, object } from "./command.js";
-import { ACTIVE, ConversationApi, chatRoutes, formatMessages, formatSent, observe, send, sendOptions } from "./conversation.js";
-import { resumable } from "./run.js";
+import { ACTIVE, ConversationApi, chatRoutes, formatMessages, formatSent, observe, send, sendOptions, watchEvents } from "./conversation.js";
 
 // Consumer Chat: a conversation between the signed-in account and a published Product.
 // The Runtime binds every call to a Product through `?product_id=`, so every command needs --product.
@@ -94,11 +93,11 @@ const watch = {
   name: "conversation watch",
   describe: "Stream a conversation's events until a Run ends; closing it does not stop the Run",
   usage: "conversation watch <conversation-id> --product <id> [--after <cursor>]",
-  options: { ...productOption, after: { type: "string", describe: "Resume after this cursor (default: from now)" } },
+  options: { ...productOption, after: { type: "string", describe: "Resume after this cursor (default: the answer so far, then live)" } },
   async run(ctx, args) {
     const [id] = need(this, args, 1);
     const api = await conversationApi(ctx, id, productOf(this, args));
-    return observe(ctx, resumable((after) => api.events(after), { sleep: ctx.sleep })(args.flags.after));
+    return observe(ctx, watchEvents(api, args.flags.after, ctx));
   },
   format: (r) => r.streamed ? "" : r.reply.text
 };

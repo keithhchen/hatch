@@ -861,8 +861,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       edge,
       commerceEventSink,
       readiness,
-      allowedOrigins,
-      maxSocketBufferedBytes
+      allowedOrigins
     );
     void requestTask.catch((error) => {
       if (!res.destroyed && !res.writableEnded) handleHttpRequestFailure(res, error);
@@ -898,7 +897,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     const product = handleRuntimeSocket(
       socket,
       edge,
-      sessionTokenFromCookie(request.headers.cookie),
+      bearerToken(request),
       helloTimeoutMs,
       connectionHeartbeatMs,
       connectionIdleTimeoutMs,
@@ -1021,8 +1020,7 @@ async function handleHttpRequest(
   edge?: ChatEdge,
   commerceEventSink?: CommerceEventSink,
   readiness?: RuntimeReadiness,
-  allowedOrigins: readonly string[] = [],
-  maxStreamBufferedBytes = 160 * 1024 * 1024
+  allowedOrigins: readonly string[] = []
 ): Promise<void> {
   setCorsHeaders(res);
   if (req.method === "OPTIONS") {
@@ -1178,8 +1176,7 @@ async function handleHttpRequest(
         signal,
         edge,
         maxHttpResponseBytes,
-        allowedOrigins,
-        maxStreamBufferedBytes
+        allowedOrigins
       );
     } catch (error) {
       writeConversationHttpError(res, error);
@@ -1376,8 +1373,7 @@ async function handleConversationHttpRequest(
   signal: AbortSignal | undefined,
   edge: ChatEdge | undefined,
   maxHttpResponseBytes: number,
-  allowedOrigins: readonly string[],
-  maxStreamBufferedBytes: number
+  allowedOrigins: readonly string[]
 ): Promise<void> {
   const binding = await requireConversationBinding(
     req,
@@ -1564,7 +1560,7 @@ async function handleConversationHttpRequest(
       // Resume by cursor: after_cursor, or the Last-Event-ID the browser echoes on reconnect.
       const lastEventId = Number(req.headers["last-event-id"]);
       const resumeAfter = afterCursor ?? (Number.isSafeInteger(lastEventId) && lastEventId >= 0 ? lastEventId : (await repository.recoverySnapshot(conversation.id, [])).cursor);
-      openEventStream(res, requireEdge(), conversation, resumeAfter, maxStreamBufferedBytes);
+      openEventStream(res, requireEdge(), conversation, resumeAfter);
       return;
     }
     const snapshot = await repository.snapshot(conversation.id, afterCursor ?? 0);
@@ -1623,7 +1619,7 @@ async function handleConversationHttpRequest(
         reply: ended.status === "completed" && store ? finalAssistantText(await store.readVisibleConversation(conversation.id), ended.id) : "",
         cursor: await repository.latestRunStateCursor(ended.id)
       } : undefined;
-      openEventStream(res, chatEdge, conversation, before, maxStreamBufferedBytes, submission, finished);
+      openEventStream(res, chatEdge, conversation, before, submission, finished);
       return;
     }
     const run = await waitForTerminalRun(() => repository.getRun(conversation.id, submission.run.id), Math.min(wait, MAX_WAIT_SECONDS) * 1000, 100, signal);
@@ -1817,18 +1813,17 @@ function openEventStream(
   edge: ChatEdge,
   conversation: ConversationRecord,
   afterCursor: number,
-  maxBufferedBytes: number,
   submission?: Submission,
   /** The submission's Run had already ended: the stream carries its reply and its end, and closes. */
   finished?: { status: string; reply: string; cursor?: number }
 ): void {
   res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
-  const sink = new SseSink(res, maxBufferedBytes);
+  const sink = new SseSink(res);
   if (submission) {
     sink.push({ type: "message.accepted", conversation_id: conversation.publicId, run_id: submission.run.id, client_message_id: submission.clientMessageId, outcome: submission.outcome });
   }
   if (submission && finished) {
-    if (finished.reply) sink.push({ type: "assistant.delta", run_id: submission.run.id, delta: { kind: "text", content: finished.reply } });
+    if (finished.reply) sink.push({ type: "assistant.delta", run_id: submission.run.id, delta: { kind: "text", content: finished.reply, offset: 0 } });
     sink.push({ type: "journal.event", ...(finished.cursor === undefined ? {} : { cursor: finished.cursor }), journal_type: "run.state", run_id: submission.run.id, payload: { id: submission.run.id, status: finished.status } });
     res.end();
     return;
@@ -2308,7 +2303,7 @@ async function handleRuntimeSocket(
     connectionAbortController.abort(new Error("Runtime socket closed"));
   });
 
-  const sink = new SocketSink(socket, maxSocketBufferedBytes, (event) =>
+  const sink = new SocketSink(socket, (event) =>
     protectPrivateAgentBoundary(event as OutboundMessage, binding?.agentCorpusRoot, binding?.productId) as unknown as Record<string, unknown>);
   const send = async (message: OutboundMessage): Promise<void> => {
     const outbound = protectPrivateAgentBoundary(message, binding?.agentCorpusRoot, binding?.productId);
