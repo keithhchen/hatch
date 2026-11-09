@@ -1,0 +1,1190 @@
+{
+  "id": 5,
+  "title": "Atomic steer: messages raced at the moment a Run ends; IM bursts",
+  "status": "FAIL",
+  "durationMs": 230549,
+  "checks": [
+    {
+      "name": "lost = 0: every accepted message is stored once, reached the model once, and was answered inside a completed Run",
+      "ok": false,
+      "detail": [
+        {
+          "trial": 18,
+          "text": "Reply with exactly the word: t18m0",
+          "journal": 1,
+          "model": 1,
+          "status": "failed",
+          "addressed": false
+        },
+        {
+          "trial": 18,
+          "text": "Reply with exactly the word: t18m1",
+          "journal": 1,
+          "model": 0,
+          "addressed": false
+        },
+        {
+          "trial": 18,
+          "text": "Reply with exactly the word: t18m2",
+          "journal": 1,
+          "model": 0,
+          "addressed": false
+        },
+        {
+          "trial": 24,
+          "text": "Reply with exactly the word: t24m0",
+          "journal": 1,
+          "model": 1,
+          "status": "failed",
+          "addressed": false
+        },
+        {
+          "trial": 24,
+          "text": "Reply with exactly the word: t24m1",
+          "journal": 1,
+          "model": 0,
+          "addressed": false
+        }
+      ]
+    },
+    {
+      "name": "no client was left without an answer: a message is accepted, rejected with a code, or at least stored",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "no message was stored twice",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "active Runs per conversation never above 1 (polled every 25 ms)",
+      "ok": true,
+      "detail": {
+        "maxActive": 1
+      }
+    },
+    {
+      "name": "no Runs overlap in time within a conversation (created before the previous one completed)",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "every Run reached a terminal state",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "no Run ended failed or interrupted",
+      "ok": false,
+      "detail": [
+        {
+          "trial": 18,
+          "run": "run_949febaaeb4245db83306b0a6793a411",
+          "status": "failed",
+          "reason": null
+        },
+        {
+          "trial": 24,
+          "run": "run_02248d9465834429b448484a721a298e",
+          "status": "failed",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "name": "no Run ended with a steered message unclaimed",
+      "ok": false,
+      "detail": [
+        18,
+        24
+      ]
+    },
+    {
+      "name": "only documented rejections (conversation_busy) occurred",
+      "ok": true,
+      "detail": {
+        "conversation_busy": 9
+      }
+    },
+    {
+      "name": "IM: every message of every burst was stored once (5 inbox rows)",
+      "ok": true,
+      "detail": [
+        5,
+        5,
+        5,
+        5,
+        5,
+        5
+      ]
+    },
+    {
+      "name": "IM: every message was marked answered and sits in a Run that ended",
+      "ok": true,
+      "detail": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "IM: no Run got more than one final reply",
+      "ok": true,
+      "detail": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "IM: replies sent never exceed Runs, and every Run is answered",
+      "ok": true,
+      "detail": [
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "name": "IM: every message token is answered by some reply (soft: model dependent)",
+      "ok": true,
+      "detail": [
+        [],
+        [],
+        [],
+        [],
+        [],
+        []
+      ]
+    }
+  ],
+  "measurements": {
+    "calibration_median_run_ms": 2513,
+    "trials": 36,
+    "trial_modes": {
+      "delta": 18,
+      "timed": 18
+    },
+    "messages_total": 144,
+    "burst_messages": 108,
+    "accepted_by_client_signal": 135,
+    "lost": 6,
+    "silent_ws_messages_without_ack_or_row": 0,
+    "stored_more_than_once": 0,
+    "rejections_by_code": {
+      "conversation_busy": 9
+    },
+    "conversation_busy_rate": {
+      "busy": 9,
+      "of": 108,
+      "rate": 0.083
+    },
+    "burst_outcomes_by_database": {
+      "steered": 74,
+      "started": 25
+    },
+    "burst_accept_time_relative_to_first_run_end": {
+      "0..20ms": {
+        "steered": 32,
+        "started": 19
+      },
+      "<..-500ms": {
+        "steered": 33,
+        "started": 0
+      },
+      "500..>ms": {
+        "steered": 9,
+        "started": 6
+      }
+    },
+    "runs_per_trial_distribution": {
+      "1": 11,
+      "2": 25
+    },
+    "max_active_runs_polled_per_conversation": 1,
+    "poll_samples_total": 11298,
+    "run_overlap_trials": [],
+    "steered_runs": 34,
+    "runs_with_unclaimed_steer_at_end": 2,
+    "burst_messages_whose_reply_lacks_their_token_soft": 0,
+    "failed_or_interrupted_runs": [
+      {
+        "trial": 18,
+        "run": "run_949febaaeb4245db83306b0a6793a411",
+        "status": "failed",
+        "reason": null
+      },
+      {
+        "trial": 24,
+        "run": "run_02248d9465834429b448484a721a298e",
+        "status": "failed",
+        "reason": null
+      }
+    ],
+    "trial_conversations": [
+      {
+        "trial": 0,
+        "mode": "delta",
+        "offset": 0,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_18e9cb2b4b8e44108cb51317efe81f93",
+        "runs": [
+          "run_38fc39c1a3ba46639f53a0c27c9c59b2",
+          "run_67cbe71aedc34d278da1ea288077782f"
+        ]
+      },
+      {
+        "trial": 1,
+        "mode": "timed",
+        "offset": -400,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_342f2cddc2e943e2815b4e4faec6c1af",
+        "runs": [
+          "run_d12bb1dccfd84644aff89f9a44f63f5e"
+        ]
+      },
+      {
+        "trial": 2,
+        "mode": "delta",
+        "offset": 5,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_8888112c9ec64750bd7d2d9615f68a50",
+        "runs": [
+          "run_9b4bb37465774962bb70c1bc735c63e9",
+          "run_bf8cd4ffecf746d3887afc0777d097b4"
+        ]
+      },
+      {
+        "trial": 3,
+        "mode": "timed",
+        "offset": -200,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_b8c90fdb285645fa844fccf3b45fdaff",
+        "runs": [
+          "run_32f9a12c5df1480cbfd79fc7fabd9176"
+        ]
+      },
+      {
+        "trial": 4,
+        "mode": "delta",
+        "offset": 15,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_cf76f1e8066145bfa4175632f12c753f",
+        "runs": [
+          "run_06169751362e49a7b202bbbf7cca2f3a",
+          "run_55c714188bd74a7ba22a872f53226f1b"
+        ]
+      },
+      {
+        "trial": 5,
+        "mode": "timed",
+        "offset": -100,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_4081fcc68bcb43f18832998d3da765e7",
+        "runs": [
+          "run_b62603781a344b4f8607bf0c9ac16a8d",
+          "run_676d153c38294adcbf5a61a47af254a8"
+        ]
+      },
+      {
+        "trial": 6,
+        "mode": "delta",
+        "offset": 30,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_2cff39fe360c43f3812351ac03a25a8f",
+        "runs": [
+          "run_7f40b6d254dd4a40a3decc80ff341b96",
+          "run_f25e23a4eccb4390b5ba2ee57854447c"
+        ]
+      },
+      {
+        "trial": 7,
+        "mode": "timed",
+        "offset": -40,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_866900c4d8d945a19f4fda8047879ce4",
+        "runs": [
+          "run_a1fa418b894c4711aa1d4f0cff83e176"
+        ]
+      },
+      {
+        "trial": 8,
+        "mode": "delta",
+        "offset": 60,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_574b4cc5f5ac442abdb35100abc89c12",
+        "runs": [
+          "run_f9bb09ae6ed04cfa85793b1b14f6c978",
+          "run_4c0c1ba54629442f91d3cdff54dfbf00"
+        ]
+      },
+      {
+        "trial": 9,
+        "mode": "timed",
+        "offset": 0,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_ddee12f727cd44daa4d75e7b42e30c2a",
+        "runs": [
+          "run_b587a90fa2f644559b55371d4320aa53",
+          "run_e23432d809c54e81903be7e343020fe8"
+        ]
+      },
+      {
+        "trial": 10,
+        "mode": "delta",
+        "offset": 120,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_1977257264e341aa82edb9ae1483e21f",
+        "runs": [
+          "run_b81c7b3578d242449dcfda8e0cd41a27",
+          "run_40a494b8175b43d693f6cc1e42d16156"
+        ]
+      },
+      {
+        "trial": 11,
+        "mode": "timed",
+        "offset": 40,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_3826a30cd53d49eea1e73f77a5d3668d",
+        "runs": [
+          "run_8a39af7020234912a385e612dffc3c54",
+          "run_86f5eb551dd94816b0d6c143fa01ce2d"
+        ]
+      },
+      {
+        "trial": 12,
+        "mode": "delta",
+        "offset": 0,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_15470a3430c94cdaa1b34cfac7d4bf26",
+        "runs": [
+          "run_9c7db87827cf4df7bd70b352b2fdd840"
+        ]
+      },
+      {
+        "trial": 13,
+        "mode": "timed",
+        "offset": 100,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_ff3ca214b7e44096bcb48b6cf7ad1466",
+        "runs": [
+          "run_8e8b0200a7a542fab4a697cf82f16637",
+          "run_59b5f140ba3d430e8ecaf38d78a59888"
+        ]
+      },
+      {
+        "trial": 14,
+        "mode": "delta",
+        "offset": 5,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_4d53f71b867845ce897a3528a42306cf",
+        "runs": [
+          "run_3c525005121746ba8a6e4e440efb1d49"
+        ]
+      },
+      {
+        "trial": 15,
+        "mode": "timed",
+        "offset": 200,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_67258f9260624cedbbbf591156ba6ab1",
+        "runs": [
+          "run_e9468666b9f243f295317336f1a9a90c",
+          "run_025d643a75ab4f13a34598d5369e3e17"
+        ]
+      },
+      {
+        "trial": 16,
+        "mode": "delta",
+        "offset": 15,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_f76cb7e774a64d339fc218af1a4f95ed",
+        "runs": [
+          "run_7af636e7ad694e57b22b8a29135658db",
+          "run_1439387f7e25472f93a1815d06211f27"
+        ]
+      },
+      {
+        "trial": 17,
+        "mode": "timed",
+        "offset": -400,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_99d850fbaab74281b104ff684290af82",
+        "runs": [
+          "run_8faf568110c241e1bf52a556053a3892"
+        ]
+      },
+      {
+        "trial": 18,
+        "mode": "delta",
+        "offset": 30,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_8af0ee8cb7ae46d3837ab1c60e0df920",
+        "runs": [
+          "run_949febaaeb4245db83306b0a6793a411",
+          "run_0274d17ea97043e3823c7039aff480ba"
+        ]
+      },
+      {
+        "trial": 19,
+        "mode": "timed",
+        "offset": -200,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_f95e5220426b4ffa8c701538bfffa4be",
+        "runs": [
+          "run_8160ed02b96f4f82a9225e88f0fd1dcf",
+          "run_bc9ec9f631e443feb847adb373f970ef"
+        ]
+      },
+      {
+        "trial": 20,
+        "mode": "delta",
+        "offset": 60,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_5fb6d5a359b947f3991e3cfe06f0c98d",
+        "runs": [
+          "run_9e835575a7a14ca5a8570e6af1479123",
+          "run_48c29aab2cd04677abc64f0662d2aec1"
+        ]
+      },
+      {
+        "trial": 21,
+        "mode": "timed",
+        "offset": -100,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_e34103da87cb49038226af45dfb751be",
+        "runs": [
+          "run_b7c363fbe5d2442294da9dea331f28ae",
+          "run_7f70b322cef7432cb16e661758187ed5"
+        ]
+      },
+      {
+        "trial": 22,
+        "mode": "delta",
+        "offset": 120,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_04c670ad40334871bf56846eb3a4d2bc",
+        "runs": [
+          "run_72549c78df344bfda614970ef6f64ab6",
+          "run_2670e572b7c14ede884df20c272f10cd"
+        ]
+      },
+      {
+        "trial": 23,
+        "mode": "timed",
+        "offset": -40,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_213e525ef33647159263ae01c3e8f21e",
+        "runs": [
+          "run_c2b4ac1010884a4682d86ee7e1752b4c"
+        ]
+      },
+      {
+        "trial": 24,
+        "mode": "delta",
+        "offset": 0,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_6c2a4b212fff4d728149dddf3b413dfb",
+        "runs": [
+          "run_02248d9465834429b448484a721a298e",
+          "run_269fadabaeb64cd0b1d76e09ab9003b8"
+        ]
+      },
+      {
+        "trial": 25,
+        "mode": "timed",
+        "offset": 0,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_82a45c1b195640f0963ad45af9e43459",
+        "runs": [
+          "run_827144b07bb042248a959674582038b9"
+        ]
+      },
+      {
+        "trial": 26,
+        "mode": "delta",
+        "offset": 5,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_6d2d44c93dc7430e94d8094b0f84d3aa",
+        "runs": [
+          "run_05f1c8a028a3470399608537a5e15310",
+          "run_2cc267b1e14941b0901016c640342698"
+        ]
+      },
+      {
+        "trial": 27,
+        "mode": "timed",
+        "offset": 40,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_5cd6a8311ab84f40b7df6e65abc005c0",
+        "runs": [
+          "run_0829650c1d7d417692a0b98f45cbe9f9",
+          "run_78368993326249eba85c2d44c0cb9c15"
+        ]
+      },
+      {
+        "trial": 28,
+        "mode": "delta",
+        "offset": 15,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_892fc202cb84473383d35aa222cba6f9",
+        "runs": [
+          "run_00fd7796d90f49538784db284e84e490"
+        ]
+      },
+      {
+        "trial": 29,
+        "mode": "timed",
+        "offset": 100,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_61df888c91674aea81f7057f9ad8708b",
+        "runs": [
+          "run_931a7ec34e05424d9ca02115a421ebe6"
+        ]
+      },
+      {
+        "trial": 30,
+        "mode": "delta",
+        "offset": 30,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_b05d2fdb2073452ca5d5b14647f120f0",
+        "runs": [
+          "run_6703b9cdaa8b437bbe3a4717544c7731",
+          "run_22db9b6104d44bf49ca4e5a557d4313c"
+        ]
+      },
+      {
+        "trial": 31,
+        "mode": "timed",
+        "offset": 200,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_d2d379cb397043a59e84145eba063d5b",
+        "runs": [
+          "run_d6bb8dd91c7e458ab7badb5522b4e012",
+          "run_5711041434d94cdd9d07f6755ace16e3"
+        ]
+      },
+      {
+        "trial": 32,
+        "mode": "delta",
+        "offset": 60,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_29a8ac6268204bb9a5150f908d6a5eca",
+        "runs": [
+          "run_09edced9ed424c6abf5d1f88fe34249d",
+          "run_1d81f36d5efe442694ed4feae9584189"
+        ]
+      },
+      {
+        "trial": 33,
+        "mode": "timed",
+        "offset": -400,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_7eed4b04b0d14e3c92799bb3461d55e0",
+        "runs": [
+          "run_8ce8af021d6d45d4a3edbfdf4dcafc69"
+        ]
+      },
+      {
+        "trial": 34,
+        "mode": "delta",
+        "offset": 120,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_4ea640672ef34aa4b2d68a40bfa52982",
+        "runs": [
+          "run_d6b4d8acd79b48858b28dee92cbff111",
+          "run_a4c30299313f4826a75a684bb9cca923"
+        ]
+      },
+      {
+        "trial": 35,
+        "mode": "timed",
+        "offset": -200,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_96bad8e8fe564d21815cf92129216472",
+        "runs": [
+          "run_0fd719ef37c14b6f9d8bc1f89d7ae164",
+          "run_8549a338e5be462b8fe128a6815e4e51"
+        ]
+      }
+    ],
+    "runs_failed_by_deadlock": [
+      {
+        "trial": 18,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_8af0ee8cb7ae46d3837ab1c60e0df920",
+        "unclaimedMessages": 2
+      },
+      {
+        "trial": 24,
+        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_6c2a4b212fff4d728149dddf3b413dfb",
+        "unclaimedMessages": 2
+      }
+    ],
+    "send_errors": [
+      {
+        "trial": 5,
+        "text": "t5m1",
+        "http": 409,
+        "code": "conversation_busy",
+        "error": "The previous run is still stopping. Try again in a moment."
+      },
+      {
+        "trial": 8,
+        "text": "t8m1",
+        "http": 409,
+        "code": "conversation_busy",
+        "error": "The previous run is still stopping. Try again in a moment."
+      },
+      {
+        "trial": 8,
+        "text": "t8m3",
+        "http": 409,
+        "code": "conversation_busy",
+        "error": "The previous run is still stopping. Try again in a moment."
+      },
+      {
+        "trial": 16,
+        "text": "t16m1",
+        "http": 409,
+        "code": "conversation_busy",
+        "error": "The previous run is still stopping. Try again in a moment."
+      },
+      {
+        "trial": 16,
+        "text": "t16m3",
+        "http": 409,
+        "code": "conversation_busy",
+        "error": "The previous run is still stopping. Try again in a moment."
+      },
+      {
+        "trial": 20,
+        "text": "t20m3",
+        "http": 409,
+        "code": "conversation_busy",
+        "error": "The previous run is still stopping. Try again in a moment."
+      },
+      {
+        "trial": 30,
+        "text": "t30m1",
+        "http": 409,
+        "code": "conversation_busy",
+        "error": "The previous run is still stopping. Try again in a moment."
+      },
+      {
+        "trial": 32,
+        "text": "t32m3",
+        "http": 409,
+        "code": "conversation_busy",
+        "error": "The previous run is still stopping. Try again in a moment."
+      }
+    ],
+    "im_bursts": [
+      {
+        "burst": 0,
+        "postedMs": 284,
+        "inboxRows": 5,
+        "inboxStates": {
+          "done": 5
+        },
+        "runs": 1,
+        "runStatuses": {
+          "completed": 1
+        },
+        "runsFromInbox": 1,
+        "messagesPerRun": {
+          "run_50f92a2e6ffa4b6088bb763beab07cd4": 5
+        },
+        "userTurnsSeenByModel": 5,
+        "finalReplies": 1,
+        "outboxStates": {
+          "sent": 1
+        },
+        "maxRepliesPerRun": 1,
+        "unanswered": 0,
+        "tokensMissingFromReplies": [],
+        "replies": [
+          "im0x0im0x1im0x2im0x3im0x4"
+        ],
+        "runIds": [
+          "run_50f92a2e6ffa4b6088bb763beab07cd4"
+        ]
+      },
+      {
+        "burst": 1,
+        "postedMs": 284,
+        "inboxRows": 5,
+        "inboxStates": {
+          "done": 5
+        },
+        "runs": 1,
+        "runStatuses": {
+          "completed": 1
+        },
+        "runsFromInbox": 1,
+        "messagesPerRun": {
+          "run_87e9a1be5c0045f9aae1811fcf642c45": 5
+        },
+        "userTurnsSeenByModel": 5,
+        "finalReplies": 1,
+        "outboxStates": {
+          "sent": 1
+        },
+        "maxRepliesPerRun": 1,
+        "unanswered": 0,
+        "tokensMissingFromReplies": [],
+        "replies": [
+          "im1x0im1x1im1x2im1x3im1x4"
+        ],
+        "runIds": [
+          "run_87e9a1be5c0045f9aae1811fcf642c45"
+        ]
+      },
+      {
+        "burst": 2,
+        "postedMs": 284,
+        "inboxRows": 5,
+        "inboxStates": {
+          "done": 5
+        },
+        "runs": 1,
+        "runStatuses": {
+          "completed": 1
+        },
+        "runsFromInbox": 1,
+        "messagesPerRun": {
+          "run_25d227965b084280bea2b21c7fd508b0": 5
+        },
+        "userTurnsSeenByModel": 5,
+        "finalReplies": 1,
+        "outboxStates": {
+          "sent": 1
+        },
+        "maxRepliesPerRun": 1,
+        "unanswered": 0,
+        "tokensMissingFromReplies": [],
+        "replies": [
+          "im2x0im2x1im2x2im2x3im2x4"
+        ],
+        "runIds": [
+          "run_25d227965b084280bea2b21c7fd508b0"
+        ]
+      },
+      {
+        "burst": 3,
+        "postedMs": 284,
+        "inboxRows": 5,
+        "inboxStates": {
+          "done": 5
+        },
+        "runs": 1,
+        "runStatuses": {
+          "completed": 1
+        },
+        "runsFromInbox": 1,
+        "messagesPerRun": {
+          "run_0ee39833d2974e3c993b914462a93f13": 5
+        },
+        "userTurnsSeenByModel": 5,
+        "finalReplies": 1,
+        "outboxStates": {
+          "sent": 1
+        },
+        "maxRepliesPerRun": 1,
+        "unanswered": 0,
+        "tokensMissingFromReplies": [],
+        "replies": [
+          "im3x0im3x1im3x2im3x3im3x4"
+        ],
+        "runIds": [
+          "run_0ee39833d2974e3c993b914462a93f13"
+        ]
+      },
+      {
+        "burst": 4,
+        "postedMs": 285,
+        "inboxRows": 5,
+        "inboxStates": {
+          "done": 5
+        },
+        "runs": 1,
+        "runStatuses": {
+          "completed": 1
+        },
+        "runsFromInbox": 1,
+        "messagesPerRun": {
+          "run_549b0a20ca7740e4b81f11b9fbfa84a1": 5
+        },
+        "userTurnsSeenByModel": 5,
+        "finalReplies": 1,
+        "outboxStates": {
+          "sent": 1
+        },
+        "maxRepliesPerRun": 1,
+        "unanswered": 0,
+        "tokensMissingFromReplies": [],
+        "replies": [
+          "im4x0im4x1im4x2im4x3im4x4"
+        ],
+        "runIds": [
+          "run_549b0a20ca7740e4b81f11b9fbfa84a1"
+        ]
+      },
+      {
+        "burst": 5,
+        "postedMs": 284,
+        "inboxRows": 5,
+        "inboxStates": {
+          "done": 5
+        },
+        "runs": 1,
+        "runStatuses": {
+          "completed": 1
+        },
+        "runsFromInbox": 1,
+        "messagesPerRun": {
+          "run_7f9a0e3771144cf4945121e060949a76": 5
+        },
+        "userTurnsSeenByModel": 5,
+        "finalReplies": 1,
+        "outboxStates": {
+          "sent": 1
+        },
+        "maxRepliesPerRun": 1,
+        "unanswered": 0,
+        "tokensMissingFromReplies": [],
+        "replies": [
+          "im5x0im5x1im5x2im5x3im5x4"
+        ],
+        "runIds": [
+          "run_7f9a0e3771144cf4945121e060949a76"
+        ]
+      }
+    ],
+    "im_final_replies_per_burst_distribution": {
+      "1": 6
+    },
+    "im_runs_per_burst_distribution": {
+      "1": 6
+    },
+    "four_full_runs_36_trials_each": [
+      {
+        "lost": 0,
+        "failed_runs": 0,
+        "unclaimed": 0,
+        "rejections": {
+          "conversation_request_failed": 1,
+          "conversation_busy": 1
+        }
+      },
+      {
+        "lost": 3,
+        "failed_runs": 1,
+        "unclaimed": 1,
+        "rejections": {}
+      },
+      {
+        "lost": 6,
+        "failed_runs": 2,
+        "unclaimed": 0,
+        "rejections": {
+          "conversation_request_failed": 4,
+          "conversation_busy": 1
+        }
+      },
+      {
+        "lost": 6,
+        "failed_runs": 2,
+        "unclaimed": 2,
+        "rejections": {
+          "conversation_busy": 9
+        }
+      }
+    ]
+  },
+  "evidence": {
+    "anomaly_trial_18": {
+      "plan": {
+        "mode": "delta",
+        "offset": 30
+      },
+      "conversation": "conversation:3b7072d05a481fa93f7db967:conv_8af0ee8cb7ae46d3837ab1c60e0df920",
+      "messages": [
+        {
+          "text": "t18m0",
+          "via": "http",
+          "signal": "accepted",
+          "journal": 1,
+          "model": 1,
+          "run": "949feb",
+          "runStatus": "failed",
+          "steered": false,
+          "addressed": false,
+          "acceptDeltaMs": -2000
+        },
+        {
+          "text": "t18m1",
+          "via": "http",
+          "signal": "accepted",
+          "http": 200,
+          "journal": 1,
+          "model": 0,
+          "steered": true,
+          "addressed": false,
+          "acceptDeltaMs": 0
+        },
+        {
+          "text": "t18m2",
+          "via": "ws",
+          "signal": "accepted",
+          "journal": 1,
+          "model": 0,
+          "steered": true,
+          "addressed": false,
+          "acceptDeltaMs": 0
+        },
+        {
+          "text": "t18m3",
+          "via": "http",
+          "signal": "accepted",
+          "http": 202,
+          "journal": 1,
+          "model": 1,
+          "run": "0274d1",
+          "runStatus": "completed",
+          "steered": false,
+          "addressed": true,
+          "acceptDeltaMs": 1000
+        }
+      ],
+      "runs": [
+        {
+          "id": "run_949febaaeb4245db83306b0a6793a411",
+          "status": "failed",
+          "client_message_id": "38647c19-070a-44c3-9420-48bad3d007d2",
+          "steered_count": 2,
+          "consumed_count": 0,
+          "created_at": "2026-11-09T21:51:25.568Z",
+          "started_at": "2026-11-09T21:51:25.590Z",
+          "completed_at": "2026-11-09T21:51:28.583Z",
+          "interrupted_reason": null
+        },
+        {
+          "id": "run_0274d17ea97043e3823c7039aff480ba",
+          "status": "completed",
+          "client_message_id": "0e88714c-0a3a-4383-a3cf-86ad420fd963",
+          "steered_count": 0,
+          "consumed_count": 0,
+          "created_at": "2026-11-09T21:51:28.586Z",
+          "started_at": "2026-11-09T21:51:28.606Z",
+          "completed_at": "2026-11-09T21:51:30.608Z",
+          "interrupted_reason": null
+        }
+      ],
+      "journal": [
+        "239 25.541 conversation.created - {\"id\": \"conv_8af0ee8cb7ae46d3837ab1c60e0df920\", \"status\": \"active\", \"version\": 1, \"agent_id\": \"629787c0-f3e8-4112-9071-70c7836bcdf7\", \"creator_id\": \"33028f5b-3a",
+        "243 25.568 run.created 949feb {\"id\": \"run_949febaaeb4245db83306b0a6793a411\", \"status\": \"queued\", \"input_digest\": \"sha256:718e22dcb1865e5dd9923498d6e2cb4e1d3cf4f229100c404823643cf67a03f6\", \"c",
+        "247 25.568 message.created 949feb {\"role\": \"user\", \"client_message_id\": \"38647c19-070a-44c3-9420-48bad3d007d2\"}",
+        "250 25.591 run.state 949feb {\"id\": \"run_949febaaeb4245db83306b0a6793a411\", \"status\": \"running\", \"input_digest\": \"sha256:718e22dcb1865e5dd9923498d6e2cb4e1d3cf4f229100c404823643cf67a03f6\", \"",
+        "259 27.574 message.created 949feb {\"role\": \"assistant\"}",
+        "260 27.574 message.created 949feb {\"role\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"Reply with exactly the word: t18m2\"}, \"steered\": true, \"input_digest\": \"sha256:c14bf10a50566f4945ea3a92",
+        "272 27.580 message.created 949feb {\"role\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"Reply with exactly the word: t18m1\"}, \"steered\": true, \"input_digest\": \"sha256:d50a92300cdaae6e4281a20f",
+        "273 28.584 run.state 949feb {\"id\": \"run_949febaaeb4245db83306b0a6793a411\", \"reason\": \"deadlock detected\", \"status\": \"failed\", \"input_digest\": \"sha256:718e22dcb1865e5dd9923498d6e2cb4e1d3cf4",
+        "274 28.586 run.created 0274d1 {\"id\": \"run_0274d17ea97043e3823c7039aff480ba\", \"status\": \"queued\", \"input_digest\": \"sha256:bd00ed9f8bdd2854680be62cf5929be3dcfd73b4add216fa1f32283aee974d4e\", \"c",
+        "275 28.586 message.created 0274d1 {\"role\": \"user\", \"client_message_id\": \"0e88714c-0a3a-4383-a3cf-86ad420fd963\"}",
+        "276 28.606 run.state 0274d1 {\"id\": \"run_0274d17ea97043e3823c7039aff480ba\", \"status\": \"running\", \"input_digest\": \"sha256:bd00ed9f8bdd2854680be62cf5929be3dcfd73b4add216fa1f32283aee974d4e\", \"",
+        "284 30.606 message.created 0274d1 {\"role\": \"assistant\"}",
+        "285 30.608 run.state 0274d1 {\"id\": \"run_0274d17ea97043e3823c7039aff480ba\", \"status\": \"completed\", \"input_digest\": \"sha256:bd00ed9f8bdd2854680be62cf5929be3dcfd73b4add216fa1f32283aee974d4e\","
+      ],
+      "events": [
+        "207 25.568 conversation.model_message 949feb user Reply with exactly the word: t18m0",
+        "208 25.568 turn.state 949feb  queued",
+        "213 25.589 turn.state 949feb  running",
+        "222 27.574 conversation.model_message 949feb assistant t18m0",
+        "223 27.575 turn.state 949feb  completed",
+        "229 28.586 conversation.model_message 0274d1 user Reply with exactly the word: t18m3",
+        "230 28.586 turn.state 0274d1  queued",
+        "231 28.605 turn.state 0274d1  running",
+        "239 30.606 conversation.model_message 0274d1 assistant t18m3",
+        "240 30.607 turn.state 0274d1  completed"
+      ]
+    },
+    "anomaly_trial_24": {
+      "plan": {
+        "mode": "delta",
+        "offset": 0
+      },
+      "conversation": "conversation:3b7072d05a481fa93f7db967:conv_6c2a4b212fff4d728149dddf3b413dfb",
+      "messages": [
+        {
+          "text": "t24m0",
+          "via": "http",
+          "signal": "accepted",
+          "journal": 1,
+          "model": 1,
+          "run": "02248d",
+          "runStatus": "failed",
+          "steered": false,
+          "addressed": false,
+          "acceptDeltaMs": -3000
+        },
+        {
+          "text": "t24m1",
+          "via": "http",
+          "signal": "accepted",
+          "http": 200,
+          "journal": 1,
+          "model": 0,
+          "steered": true,
+          "addressed": false,
+          "acceptDeltaMs": 0
+        },
+        {
+          "text": "t24m2",
+          "via": "ws",
+          "signal": "accepted",
+          "journal": 1,
+          "model": 0,
+          "steered": true,
+          "addressed": false,
+          "acceptDeltaMs": 0
+        },
+        {
+          "text": "t24m3",
+          "via": "http",
+          "signal": "accepted",
+          "http": 202,
+          "journal": 1,
+          "model": 1,
+          "run": "269fad",
+          "runStatus": "completed",
+          "steered": false,
+          "addressed": true,
+          "acceptDeltaMs": 1000
+        }
+      ],
+      "runs": [
+        {
+          "id": "run_02248d9465834429b448484a721a298e",
+          "status": "failed",
+          "client_message_id": "1086ad4a-df8c-4687-abce-2352d81638b6",
+          "steered_count": 2,
+          "consumed_count": 0,
+          "created_at": "2026-11-09T21:51:45.872Z",
+          "started_at": "2026-11-09T21:51:45.894Z",
+          "completed_at": "2026-11-09T21:51:49.145Z",
+          "interrupted_reason": null
+        },
+        {
+          "id": "run_269fadabaeb64cd0b1d76e09ab9003b8",
+          "status": "completed",
+          "client_message_id": "ff2678da-cb34-4bd1-8173-d9d334983a18",
+          "steered_count": 0,
+          "consumed_count": 0,
+          "created_at": "2026-11-09T21:51:49.148Z",
+          "started_at": "2026-11-09T21:51:49.172Z",
+          "completed_at": "2026-11-09T21:51:51.091Z",
+          "interrupted_reason": null
+        }
+      ],
+      "journal": [
+        "346 45.844 conversation.created - {\"id\": \"conv_6c2a4b212fff4d728149dddf3b413dfb\", \"status\": \"active\", \"version\": 1, \"agent_id\": \"629787c0-f3e8-4112-9071-70c7836bcdf7\", \"creator_id\": \"33028f5b-3a",
+        "351 45.872 run.created 02248d {\"id\": \"run_02248d9465834429b448484a721a298e\", \"status\": \"queued\", \"input_digest\": \"sha256:dd9f94822d2265369fbb6116d7a4cc5b5e4d200bdc212b3c9c2fde330cb40a7c\", \"c",
+        "354 45.872 message.created 02248d {\"role\": \"user\", \"client_message_id\": \"1086ad4a-df8c-4687-abce-2352d81638b6\"}",
+        "358 45.894 run.state 02248d {\"id\": \"run_02248d9465834429b448484a721a298e\", \"status\": \"running\", \"input_digest\": \"sha256:dd9f94822d2265369fbb6116d7a4cc5b5e4d200bdc212b3c9c2fde330cb40a7c\", \"",
+        "369 48.137 message.created 02248d {\"role\": \"assistant\"}",
+        "370 48.136 message.created 02248d {\"role\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"Reply with exactly the word: t24m2\"}, \"steered\": true, \"input_digest\": \"sha256:a5341a0cd178a0e89275b2c2",
+        "383 48.142 message.created 02248d {\"role\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"Reply with exactly the word: t24m1\"}, \"steered\": true, \"input_digest\": \"sha256:38ea125505a5a56b9df1beb0",
+        "384 49.146 run.state 02248d {\"id\": \"run_02248d9465834429b448484a721a298e\", \"reason\": \"deadlock detected\", \"status\": \"failed\", \"input_digest\": \"sha256:dd9f94822d2265369fbb6116d7a4cc5b5e4d20",
+        "385 49.148 run.created 269fad {\"id\": \"run_269fadabaeb64cd0b1d76e09ab9003b8\", \"status\": \"queued\", \"input_digest\": \"sha256:6bcd3e8cc2aaefeac4d4b6156acca3bf9ed6554c6230df16cda669b3c2b9876a\", \"c",
+        "386 49.148 message.created 269fad {\"role\": \"user\", \"client_message_id\": \"ff2678da-cb34-4bd1-8173-d9d334983a18\"}",
+        "387 49.173 run.state 269fad {\"id\": \"run_269fadabaeb64cd0b1d76e09ab9003b8\", \"status\": \"running\", \"input_digest\": \"sha256:6bcd3e8cc2aaefeac4d4b6156acca3bf9ed6554c6230df16cda669b3c2b9876a\", \"",
+        "390 51.089 message.created 269fad {\"role\": \"assistant\"}",
+        "391 51.091 run.state 269fad {\"id\": \"run_269fadabaeb64cd0b1d76e09ab9003b8\", \"status\": \"completed\", \"input_digest\": \"sha256:6bcd3e8cc2aaefeac4d4b6156acca3bf9ed6554c6230df16cda669b3c2b9876a\","
+      ],
+      "events": [
+        "298 45.872 conversation.model_message 02248d user Reply with exactly the word: t24m0",
+        "299 45.872 turn.state 02248d  queued",
+        "305 45.893 turn.state 02248d  running",
+        "315 48.136 conversation.model_message 02248d assistant t24m0",
+        "322 49.148 conversation.model_message 269fad user Reply with exactly the word: t24m3",
+        "323 49.148 turn.state 269fad  queued",
+        "324 49.171 turn.state 269fad  running",
+        "327 51.088 conversation.model_message 269fad assistant t24m3",
+        "328 51.090 turn.state 269fad  completed"
+      ]
+    },
+    "lost_messages": [
+      {
+        "trial": 18,
+        "text": "Reply with exactly the word: t18m0",
+        "journal": 1,
+        "model": 1,
+        "run": "run_949febaaeb4245db83306b0a6793a411",
+        "runStatus": "failed",
+        "addressed": false
+      },
+      {
+        "trial": 18,
+        "text": "Reply with exactly the word: t18m1",
+        "journal": 1,
+        "model": 0,
+        "addressed": false
+      },
+      {
+        "trial": 18,
+        "text": "Reply with exactly the word: t18m2",
+        "journal": 1,
+        "model": 0,
+        "addressed": false
+      },
+      {
+        "trial": 24,
+        "text": "Reply with exactly the word: t24m0",
+        "journal": 1,
+        "model": 1,
+        "run": "run_02248d9465834429b448484a721a298e",
+        "runStatus": "failed",
+        "addressed": false
+      },
+      {
+        "trial": 24,
+        "text": "Reply with exactly the word: t24m1",
+        "journal": 1,
+        "model": 0,
+        "addressed": false
+      },
+      {
+        "trial": 24,
+        "text": "Reply with exactly the word: t24m2",
+        "journal": 1,
+        "model": 0,
+        "addressed": false
+      }
+    ],
+    "runtime_log_error_lines": {
+      "count": 0,
+      "first": [],
+      "last": []
+    }
+  },
+  "notes": [
+    "conversation_busy refused 9 of 108 burst messages. It is documented (a stopping Run), but each is a user-visible refusal at the moment a Run ends.",
+    "IM: 6 bursts of 5 messages from one sender 70 ms apart (about 280 ms in all). Final replies per burst: {\"1\":6}.",
+    "This file is the last of four 36-trial runs (the first had lost=0 and one 500 deadlock rejection; the three reruns each lost accepted messages). The scenario author recorded the cause as a deadlock in the Run failure (2 of 180 trials over five earlier runs); in the three reruns here the symptom reproduced in 3 of 3 runs (failed Run, steered messages never claimed) but the failure reason was not captured, so the lock-order cause rests on the author evidence."
+  ],
+  "defects": [
+    {
+      "title": "Messages raced at the moment a Run ends are accepted (200/202) and then lost: the Run fails and the steered messages are never claimed",
+      "severity": "high",
+      "expected": "Every accepted message is claimed into a Run and answered, or refused at acceptance (lost = 0, no failed Run).",
+      "actual": "Over four 36-trial runs (3 burst messages each, 2 HTTP and 1 WebSocket at the same tick): lost = 0, 3, 6, 6; Run status failed in 0, 1, 2, 2 trials; steered messages unclaimed at the end of a Run in 0, 1, 0, 2 runs. Author evidence names a Postgres deadlock between steerOrReplay (locks conversation row then Run row) and claimSteeredMessages (locks Run row then needs the conversation row for the journal insert), both in src/conversationRepository.ts.",
+      "repro": "node scripts/verify-surfaces/run.mjs --only 5 (under agentsecrets exec), read measurements.lost and failed_or_interrupted_runs; or fire 3 concurrent sends to a conversation within ~20 ms of its Run ending, about 30 trials."
+    },
+    {
+      "title": "Steering a message at the end of a Run deadlocks the database: the Run fails and the accepted messages are never answered",
+      "severity": "high",
+      "expected": "Claiming a steered message and appending it to the transcript is one transaction that cannot deadlock with a steer (spec: the steer-or-start decision is atomic; no accepted message is lost).",
+      "actual": "2 of 36 trials: the Run was failed with \"deadlock detected\" while 4 messages that had been accepted as steered (HTTP 200/202, journaled) were still unclaimed; they never reached the model. Likely cause by lock order: steerOrReplay locks the conversation row (FOR UPDATE) then updates the Run row; claimSteeredMessages locks the Run row (FOR UPDATE) then inserts a journal row, which takes a FOR KEY SHARE lock on the conversation row.",
+      "repro": "Scenario 5: send a first short message, then 3 messages (two HTTP, one WebSocket) at the moment its answer completes; about 1 trial in 36 deadlocks. Evidence ids: anomaly_trial_* in results/scenario-05.json."
+    },
+    {
+      "title": "A message accepted around the end of a Run was lost",
+      "severity": "high",
+      "expected": "Every accepted message is in the transcript once and answered (spec: steer-or-start is atomic).",
+      "actual": "6 of 135 accepted messages: [{\"trial\":18,\"text\":\"Reply with exactly the word: t18m0\",\"journal\":1,\"model\":1,\"status\":\"failed\"},{\"trial\":18,\"text\":\"Reply with exactly the word: t18m1\",\"journal\":1,\"model\":0},{\"trial\":18,\"text\":\"Reply with exactly the word: t18m2\",\"journal\":1,\"model\":0}]",
+      "repro": "scenario 5, STEER_TRIALS=36"
+    }
+  ]
+}

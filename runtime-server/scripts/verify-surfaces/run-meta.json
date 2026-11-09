@@ -1,0 +1,1 @@
+{ "commit": "90af5531 (surfaces hardening base)", "models": "gemini-3.8-flash via gemini-api; kimi-k2.6-no-thinking for KV and compaction" }

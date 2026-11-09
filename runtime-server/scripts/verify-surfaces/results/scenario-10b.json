@@ -1,0 +1,44 @@
+{
+  "id": "10b",
+  "title": "Compaction: cold cache with nothing to prune must not announce a compaction",
+  "status": "FAIL",
+  "durationMs": 37024,
+  "checks": [
+    {
+      "name": "nothing was summarized or pruned (no tool results, below the trigger)",
+      "ok": true,
+      "detail": 0
+    },
+    {
+      "name": "so no compaction was announced either (every compaction.started has a completed marker)",
+      "ok": false,
+      "detail": {
+        "started": 1,
+        "completed": 0
+      }
+    }
+  ],
+  "measurements": {
+    "tracked_tokens": 187561,
+    "compaction_started_events": 1,
+    "compaction_completed_events": 0,
+    "history_checkpoints": 0
+  },
+  "evidence": {
+    "journal": [
+      "compaction.started/background/cmp_3eb93ac8d47d48d4953b48991823bfb7"
+    ]
+  },
+  "notes": [
+    "Tool setting: HATCH_PROVIDER_CACHE_TTL_MS=2000 (default 5 minutes) so the cache goes cold within seconds. The conversation is about 190k estimated tokens (prune threshold 131k, summarize trigger 219.5k) and has no tool calls."
+  ],
+  "defects": [
+    {
+      "title": "A cold cache with nothing to prune announces a compaction that never happens",
+      "severity": "low",
+      "expected": "compaction.started only for a compaction that runs to a result; a conversation of 131k-219k tokens with no tool results has nothing to prune and below the trigger nothing to summarize.",
+      "actual": "1 compaction.started and 0 compaction.completed, with no history checkpoint. ChatCompaction.inBackground re-schedules itself after the cache TTL when tokens >= prune; ChatCompaction/CompactionStrategy.wants() then says yes for a cold cache, the job announces compaction.started, and strategy.compact finds nothing to prune and returns none.",
+      "repro": "HATCH_PROVIDER_CACHE_TTL_MS=2000; a Chat conversation of about 190k estimated tokens made of plain text turns; after the last reply wait a few seconds and read hatch_conversation_journal for compaction.% events."
+    }
+  ]
+}
