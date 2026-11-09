@@ -101,7 +101,10 @@ export class FileWorkbenchBackend implements WorkbenchBackend {
   private directory(id: string): string { return path.join(this.root, sessionId(id)); }
   async listIds(): Promise<string[]> {
     await mkdir(this.root, { recursive: true, mode: 0o700 });
-    return (await readdir(this.root)).filter(s => /^[0-9a-f-]{36}$/.test(s));
+    const names = (await readdir(this.root)).filter(s => /^[0-9a-f-]{36}$/.test(s));
+    // A session whose directory exists but whose session.json is not yet written is still being created.
+    const created = await Promise.all(names.map(name => lstat(path.join(this.directory(name), "session.json")).then(() => true, () => false)));
+    return names.filter((_, index) => created[index]);
   }
   async load(id: string) {
     const session = JSON.parse(await readFile(path.join(this.directory(id), "session.json"), "utf8"));
