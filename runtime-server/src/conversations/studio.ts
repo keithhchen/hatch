@@ -47,10 +47,16 @@ export class Studio {
     return { conversation: new IdempotentConversation(worker, this.deps.ledger, `worker:${spec.productId}:${spec.workerId}`), maxContent: 100_000, accountId };
   }
 
+  /** Starts recording the Assistant's events; call it once the Assistant exists so nothing before the first client is missed. */
+  recordAssistant(): void {
+    const host = this.deps.assistant();
+    if (host) record(this.deps.eventLog, host.events, event => event.accountId && `assistant:${event.accountId}`);
+  }
+
   private assistant(accountId: string): Conversation {
     const host = this.deps.assistant();
     if (!host) throw new ConversationError(503, "assistant_unavailable", "The Assistant requires the Registry database.");
-    record(this.deps.eventLog, host.events, event => event.accountId && `assistant:${event.accountId}`);
+    this.recordAssistant();
     return new IdempotentConversation(new AssistantConversation(accountId, host), this.deps.ledger, `assistant:${accountId}`);
   }
 }

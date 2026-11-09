@@ -219,7 +219,8 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const authSecret = legacyHmacEnabled ? environment.HATCH_AUTH_SIGNING_SECRET?.trim() || "" : "";
   const httpLimits = httpRequestLimitOptionsFromEnvironment(environment);
   const registryContext: RegistryContext = { store, accounts, accountAvatars, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, productLive, nodeObjectStore, releaseStore, authSecret, conversationPorts: await openConversationPorts(registryPool) };
-  const studioSockets = new StudioSockets({ studio: new Studio(studioDeps(registryContext)), identify: token => identifyToken(registryContext, token) });
+  const studio = new Studio(studioDeps(registryContext));
+  const studioSockets = new StudioSockets({ studio, identify: token => identifyToken(registryContext, token) });
   let assistantTick: NodeJS.Timeout | undefined;
   const channelListeners = new AbortController();
   if (registryPool) {
@@ -279,6 +280,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       productPrefix: (accountId, productId) => `${productsPrefix}/${accountId}/${productId}`,
     });
     Object.assign(registryContext, { assistant, ingest, channels, links, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin });
+    studio.recordAssistant();
     // A platform that pushes over its own connection runs here, in one process at a time. A dropped connection comes back.
     for (const adapter of channels.listeners()) void (async () => {
       while (!channelListeners.signal.aborted) {
