@@ -42,8 +42,7 @@ export function createHatchCandidateRuntimeExecutor(): HatchCandidateExecutor {
       // Passing an explicit empty list is materially different from relying on
       // the ordinary Runtime defaults, which include always-available tools.
       const runtime = new PiAgentRuntime({
-        toolDefinitions: [],
-        allowRequestedArtifactDelivery: false
+        toolDefinitions: []
       });
       const chunks: string[] = [];
       await state.queued();

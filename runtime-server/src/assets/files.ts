@@ -6,7 +6,7 @@ export { FileToolError };
 
 export const FILE_LIMITS = {
   lsEntries: 200, grepFiles: 100, grepScanBytes: 20 * 1024 * 1024, grepMatches: 50, grepMatchesMax: 200, grepContextMax: 5,
-  grepOutputChars: 8_000, lineChars: 300, patternChars: 300, regexMsPerFile: REGEX_TIMEOUT_MS, grepMs: 3_000, readChars: 8_000, readCharsMax: 20_000
+  grepOutputChars: 8_000, lineChars: 300, patternChars: 300, regexMsPerFile: REGEX_TIMEOUT_MS, grepMs: 3_000, readChars: 24_000, readCharsMax: 48_000
 } as const;
 
 type Entry = { path: string; asset: Asset };

@@ -681,7 +681,7 @@ function searchQuery(prompt: string): string {
   return "Hatch";
 }
 
-export function requestedOutputPath(prompt: string): string | undefined {
+function requestedOutputPath(prompt: string): string | undefined {
   const verbs = "(?:(?:save|write|create)\\b|保存|写入|创建)";
   const connectors = "(?:(?:to|as|at)\\b|到|为|至)";
   const quoted = prompt.match(new RegExp(`${verbs}[^\"'\\n]*?${connectors}\\s+[\"“']([^\"”'\\n]+)[\"”']`, "i"));
@@ -949,6 +949,8 @@ export function chatToolsForRun(
       // Hatch-provided server tools are part of the platform contract. The
       // external-tool allowlist only governs Creator-owned HTTP/MCP tools.
       || spec.runtimeName.startsWith("hatch.")
+      // Chat's Unix-style attachment retrieval is part of every Run's fixed surface.
+      || spec.runtimeName.startsWith("attachments.")
       || allowed === undefined
       || allowed.has(spec.runtimeName)
     ))
