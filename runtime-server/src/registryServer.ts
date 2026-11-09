@@ -11,13 +11,15 @@ import { IngestError, IngestService } from "./ingest/service.js";
 import { publicJob } from "./ingest/job.js";
 import { AccountReach } from "./assistant/reach.js";
 import { AssistantTarget } from "./assistant/assistantTarget.js";
-import { CHANNEL_KINDS, isChannelKind, type ChannelKind } from "./channels/types.js";
+import { CHANNEL_KINDS, isChannelKind, type ChannelAdapter, type ChannelKind } from "./channels/types.js";
 import { ChannelHub } from "./channels/hub.js";
 import { ChannelService, openChannelStores } from "./channels/service.js";
 import { safeError } from "./factoryAgents/runtime.js";
 import { CredentialSeal } from "./assistant/channelCredentials.js";
 import { IMessageChannel } from "./channels/imessageChannel.js";
 import { LarkChannel, type LarkCredentials } from "./channels/larkChannel.js";
+import { WeChatKfChannel, type WeChatKfCredentials } from "./channels/wechatKfChannel.js";
+import { WeComBotChannel, type WeComBotCredentials } from "./channels/wecomBotChannel.js";
 import { LineChannel } from "./channels/lineChannel.js";
 import { TelegramChannel } from "./channels/telegramChannel.js";
 import { PostgresTaskRepository } from "./assistant/tasks.js";
@@ -232,7 +234,14 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     await PostgresWorkbenchBackend.ensureSchema(registryPool);
     const tasks = await PostgresTaskRepository.open(registryPool);
     // Lark has no shared bot, so its tenant is the Expert's account; every other platform is one shared tenant.
-    const scopeOf = (accountId: string, kind: ChannelKind) => kind === "lark" ? accountId : "";
+    // Platforms where each Expert brings their own app: the adapter is built from their sealed credentials, and the scope is their account id.
+    const ownApps: Partial<Record<ChannelKind, (credentials: any, accountId: string) => ChannelAdapter>> = {
+      lark: (credentials: LarkCredentials, accountId) => new LarkChannel({ ...credentials, domain: "lark" }, accountId),
+      feishu: (credentials: LarkCredentials, accountId) => new LarkChannel({ ...credentials, domain: "feishu" }, accountId),
+      wecom: (credentials: WeComBotCredentials, accountId) => new WeComBotChannel(credentials, accountId),
+      wechatkf: (credentials: WeChatKfCredentials, accountId) => new WeChatKfChannel(credentials, accountId),
+    };
+    const scopeOf = (accountId: string, kind: ChannelKind) => ownApps[kind] ? accountId : "";
     const stores = await openChannelStores(registryPool, scopeOf);
     const studioUrl = environment.HATCH_STUDIO_ASSISTANT_URL?.trim() || "https://gethatchapp.com/studio/assistant";
     const telegram = new TelegramChannel({
@@ -253,15 +262,16 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     // Lark has no shared bot: a custom app works in one enterprise, so each Expert brings theirs.
     const sealKey = environment.HATCH_CREDENTIALS_KEY?.trim();
     const seal = sealKey ? new CredentialSeal(sealKey) : undefined;
-    const larkApps = new Map<string, { sealed: string; adapter: LarkChannel }>();
+    const apps = new Map<string, { sealed: string; adapter: ChannelAdapter }>();
     const hub = new ChannelHub([telegram, line, imessage], async (kind, accountId) => {
-      if (kind !== "lark" || !seal) return undefined;
-      const sealed = await stores.connections.credentials(accountId, "lark");
+      const build = ownApps[kind];
+      if (!build || !seal) return undefined;
+      const sealed = await stores.connections.credentials(accountId, kind);
       if (!sealed) return undefined;
-      const cached = larkApps.get(accountId);
+      const cached = apps.get(`${kind}:${accountId}`);
       if (cached?.sealed === sealed) return cached.adapter;
-      const adapter = new LarkChannel(seal.open<LarkCredentials>(sealed), accountId);
-      larkApps.set(accountId, { sealed, adapter });
+      const adapter = build(seal.open(sealed), accountId);
+      apps.set(`${kind}:${accountId}`, { sealed, adapter });
       return adapter;
     });
     const catalog = registryAgentCatalog(registryContext);
@@ -2021,13 +2031,22 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
   const channels = context.channels;
   if (!assistant || !context.reach || !channels) { sendJson(response, 503, { error: { code: "assistant_unavailable", message: "The Assistant requires the Registry database." } }); return; }
   const webhook = url.pathname.match(/^\/v1\/channels\/([a-z]+)(?:\/([0-9a-f-]{36}))?\/webhook$/);
+  if (webhook && request.method === "GET") {
+    const kind = webhook[1]!;
+    const adapter = isChannelKind(kind) ? await channels.hub.get(kind, webhook[2]) : undefined;
+    const echo = adapter?.challenge?.(url.searchParams);
+    if (echo === undefined) { sendJson(response, 401, { ok: false }); return; }
+    response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+    response.end(echo);
+    return;
+  }
   if (webhook && request.method === "POST") {
     const kind = webhook[1]!;
     const adapter = isChannelKind(kind) ? await channels.hub.get(kind, webhook[2]) : undefined;
     if (!adapter?.parse) { sendJson(response, 404, { ok: false }); return; }
     const raw = await readRawBody(request, 2 * 1024 * 1024);
-    if (!adapter.verify?.(raw, request.headers)) { sendJson(response, 401, { ok: false }); return; }
-    const { events, respond } = adapter.parse(raw);
+    if (!adapter.verify?.(raw, request.headers, url.searchParams)) { sendJson(response, 401, { ok: false }); return; }
+    const { events, respond } = await adapter.parse(raw);
     // Stored before we answer, so a platform retry finds the event already here and nothing is lost if we crash.
     await channels.accept(adapter, events);
     sendJson(response, 200, respond ?? { ok: true });
@@ -2038,7 +2057,7 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
   const channelsView = async () => (await channels.view(account.id)).map(status => ({
     kind: status.kind, available: status.available, linked: status.linked,
     ...(status.state ? { state: status.state } : {}),
-    ...(status.kind === "lark" && context.credentialSeal ? { own_app: true, webhook_url: `${context.publicOrigin}/v1/channels/lark/${account.id}/webhook` } : {}),
+    ...(["lark", "feishu", "wecom", "wechatkf"].includes(status.kind) && context.credentialSeal ? { own_app: true, webhook_url: `${context.publicOrigin}/v1/channels/${status.kind}/${account.id}/webhook` } : {}),
     ...(status.lastEventAt ? { last_event_at: status.lastEventAt } : {}),
   }));
   if (url.pathname === "/v1/creator/assistant" && request.method === "GET") {
@@ -2092,15 +2111,17 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
     sendJson(response, 200, { task });
     return;
   }
-  if (url.pathname === "/v1/creator/connections/lark/credentials" && request.method === "POST") {
+  const larkCredentials = url.pathname.match(/^\/v1\/creator\/connections\/(lark|feishu)\/credentials$/);
+  if (larkCredentials && request.method === "POST") {
+    const domain = larkCredentials[1] as "lark" | "feishu";
     if (!context.credentialSeal) { sendJson(response, 503, { error: { code: "channel_unavailable", message: "Lark is not available." } }); return; }
     const body = await readJson(request);
     const text = (name: string) => typeof body[name] === "string" ? (body[name] as string).trim() : "";
-    const credentials: LarkCredentials = { domain: body.domain === "feishu" ? "feishu" : "lark", appId: text("app_id"), appSecret: text("app_secret"), verificationToken: text("verification_token"), ...(text("encrypt_key") ? { encryptKey: text("encrypt_key") } : {}) };
+    const credentials: LarkCredentials = { domain, appId: text("app_id"), appSecret: text("app_secret"), verificationToken: text("verification_token"), ...(text("encrypt_key") ? { encryptKey: text("encrypt_key") } : {}) };
     if (!credentials.appId || !credentials.appSecret || !credentials.verificationToken) { sendJson(response, 400, { error: { code: "invalid_credentials", message: "App ID, App Secret and Verification Token are required." } }); return; }
-    try { await new LarkChannel(credentials, account.id).probe(); }
+    try { credentials.botOpenId = await new LarkChannel(credentials, account.id).probe(); }
     catch (cause) { sendJson(response, 422, { error: { code: "lark_probe_failed", message: cause instanceof Error ? cause.message : String(cause) } }); return; }
-    await channels.connections.saveCredentials(account.id, "lark", context.credentialSeal.seal(credentials));
+    await channels.connections.saveCredentials(account.id, domain, context.credentialSeal.seal(credentials));
     sendJson(response, 200, { channels: await channelsView() });
     return;
   }
