@@ -4,7 +4,7 @@ import type { ChannelConnection } from "./connections.js";
 import { ChannelPolicyError, guarded } from "./eligibility.js";
 import type { Inbound, TargetHandler } from "./ports.js";
 
-const connection = (channel: string): ChannelConnection => ({ id: "c", ownerAccountId: "a", channel, client: "im", target: { kind: "assistant" }, audience: "self", state: "active", scope: "" });
+const connection = (channel: string): ChannelConnection => ({ id: "c", ownerAccountId: "a", channel, client: "im", target: { kind: "assistant" }, audience: "self", taskSpecific: false, state: "active", scope: "" });
 const refuse = () => { throw new ChannelPolicyError("no", "not here"); };
 
 function recording() {

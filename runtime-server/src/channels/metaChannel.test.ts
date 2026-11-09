@@ -5,6 +5,7 @@ import { classifyGraphError, type MetaChannel } from "./metaChannel.js";
 import { MessengerChannel } from "./messengerChannel.js";
 import { WhatsAppChannel } from "./whatsappChannel.js";
 import { graphError, recorder, sign } from "./recorder.testkit.js";
+import { conformance, TIMEOUT } from "./adapterConformance.js";
 import { ChannelSendError } from "./types.js";
 
 const SECRET = "app-secret";
@@ -12,12 +13,14 @@ const VERIFY = "verify-me";
 const signed = (body: string | Buffer, secret = SECRET) => sign(body, secret);
 
 const tokens = async (tenant: string) => tenant === "T1" ? "token-1" : undefined;
-const platforms: Array<[string, (fetchImpl?: typeof fetch, config?: object) => MetaChannel, string]> = [
-  ["whatsapp", (fetchImpl, config) => new WhatsAppChannel({ appSecret: SECRET, verifyToken: VERIFY, tokens, ...config }, fetchImpl), "whatsapp_business_account"],
-  ["instagram", (fetchImpl, config) => new InstagramChannel({ appSecret: SECRET, verifyToken: VERIFY, tokens, ...config }, fetchImpl), "instagram"],
-  ["messenger", (fetchImpl, config) => new MessengerChannel({ appSecret: SECRET, verifyToken: VERIFY, tokens, ...config }, fetchImpl), "page"],
+type Platform = { name: string; make: (fetchImpl?: typeof fetch, config?: object) => MetaChannel; object: string; thread: string; message: (id: string, timestamp: number) => Buffer };
+const messaging = (object: string) => (id: string, timestamp: number) => Buffer.from(JSON.stringify({ object, entry: [{ id: "T1", messaging: [{ sender: { id: "C1" }, recipient: { id: "T1" }, timestamp, message: { mid: id, text: id } }] }] }));
+const whatsapp = (id: string, timestamp: number) => Buffer.from(JSON.stringify({ object: "whatsapp_business_account", entry: [{ id: "T1", changes: [{ field: "messages", value: { metadata: { phone_number_id: "PN1" }, messages: [{ from: "C1", id, timestamp: String(timestamp), type: "text", text: { body: id } }] } }] }] }));
+const platforms: Platform[] = [
+  { name: "whatsapp", make: (fetchImpl, config) => new WhatsAppChannel({ appSecret: SECRET, verifyToken: VERIFY, tokens, ...config }, fetchImpl), object: "whatsapp_business_account", thread: "T1:PN1:C1", message: whatsapp },
+  { name: "instagram", make: (fetchImpl, config) => new InstagramChannel({ appSecret: SECRET, verifyToken: VERIFY, tokens, ...config }, fetchImpl), object: "instagram", thread: "T1:C1", message: messaging("instagram") },
+  { name: "messenger", make: (fetchImpl, config) => new MessengerChannel({ appSecret: SECRET, verifyToken: VERIFY, tokens, ...config }, fetchImpl), object: "page", thread: "T1:C1", message: messaging("page") },
 ];
-const to = { threadId: "T1:C1", senderId: "C1" };
 
 test("classifyGraphError: throttled is refused outright, lost access is never retried, platform trouble may have gone through", () => {
   for (const code of [4, 17, 32, 613, 80007, 130429, 131056]) assert.deepEqual(classifyGraphError(400, { code }), { failure: "definite", access: false }, `code ${code}`);
@@ -32,7 +35,27 @@ test("classifyGraphError: throttled is refused outright, lost access is never re
   for (const code of [100, 131026, 131047, 551]) assert.deepEqual(classifyGraphError(400, { code }), { failure: "permanent", access: false }, `code ${code}`);
 });
 
-for (const [name, make, object] of platforms) {
+for (const { name, make, object, thread, message } of platforms) {
+  const to = { threadId: thread, senderId: "C1" };
+  conformance(name, {
+    adapter: make(),
+    send: async outcome => { await make(recorder(() => { if (outcome instanceof Error) throw outcome; return outcome.clone(); }).fake).send(to, { text: "hi" }, "k"); },
+    cases: [
+      { name: "a timeout", outcome: TIMEOUT, failure: "ambiguous" },
+      { name: "HTTP 500", outcome: new Response("{}", { status: 500 }), failure: "ambiguous" },
+      { name: "HTTP 429", outcome: new Response("{}", { status: 429 }), failure: "definite" },
+      { name: "a throttled app (code 4)", outcome: graphError(400, { code: 4 }), failure: "definite" },
+      { name: "an expired token (190)", outcome: graphError(400, { code: 190 }), failure: "permanent", access: true },
+      { name: "a refused parameter (100)", outcome: graphError(400, { code: 100 }), failure: "permanent" },
+      { name: "a send outside the window (10/2018278)", outcome: graphError(400, { code: 10, error_subcode: 2018278 }), failure: "permanent" },
+    ],
+    delivered: {
+      duplicate: async () => [...make().parse(message("m1", 1)).events, ...make().parse(message("m1", 1)).events],
+      ordered: async () => [[...make().parse(message("a", 1)).events, ...make().parse(message("b", 2)).events], [...make().parse(message("b", 2)).events, ...make().parse(message("a", 1)).events]],
+    },
+    forged: () => make().verify(message("m1", 1), { "x-hub-signature-256": signed(message("m1", 1), "not-the-secret") }),
+  });
+
   test(`${name}: available needs the app secret, the verify token and tenant tokens`, () => {
     assert.equal(make().available(), true);
     for (const missing of ["appSecret", "verifyToken", "tokens"]) assert.equal(make(undefined, { [missing]: undefined }).available(), false);
@@ -54,13 +77,13 @@ for (const [name, make, object] of platforms) {
     assert.equal(make(undefined, { appSecret: undefined }).verify(raw, { "x-hub-signature-256": signed(raw) }), false);
   });
 
-  test(`${name}: handshake echoes the challenge only for the right token`, () => {
+  test(`${name}: challenge echoes the challenge only for the right token`, () => {
     const query = (token: string, mode = "subscribe") => new URLSearchParams({ "hub.mode": mode, "hub.verify_token": token, "hub.challenge": "1158201444" });
-    assert.equal(make().handshake(query(VERIFY)), "1158201444");
-    assert.equal(make().handshake(query("wrong")), undefined);
-    assert.equal(make().handshake(query(VERIFY, "unsubscribe")), undefined);
-    assert.equal(make().handshake(new URLSearchParams()), undefined);
-    assert.equal(make(undefined, { verifyToken: undefined }).handshake(query("")), undefined);
+    assert.equal(make().challenge(query(VERIFY)), "1158201444");
+    assert.equal(make().challenge(query("wrong")), undefined);
+    assert.equal(make().challenge(query(VERIFY, "unsubscribe")), undefined);
+    assert.equal(make().challenge(new URLSearchParams()), undefined);
+    assert.equal(make(undefined, { verifyToken: undefined }).challenge(query("")), undefined);
   });
 
   test(`${name}: parse ignores a payload for another product and an empty batch`, () => {

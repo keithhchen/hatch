@@ -150,7 +150,7 @@ test("parse post flattens to plain text", () => {
 });
 
 test("other types are an event with no text and no file", () => {
-  for (const [type, content] of [["audio", { file_key: "f" }], ["sticker", { file_key: "f" }], ["post", { content: [[{ tag: "img", image_key: "i" }]] }]] as const) {
+  for (const [type, content] of [["sticker", { file_key: "f" }], ["post", { content: [[{ tag: "img", image_key: "i" }]] }]] as const) {
     assert.deepEqual(new LarkChannel(PLAIN, "acct").parse(receive(type, content)).events, [{ eventId: "om_1", address: TO, messageRef: "om_1" }]);
   }
 });

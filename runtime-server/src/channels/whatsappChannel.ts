@@ -23,18 +23,22 @@ function mediaName(message: Record<string, any>): string | undefined {
   return undefined;
 }
 
+/** An account change that ends our access to the business account. */
+const ENDS_ACCESS = new Set(["PARTNER_REMOVED", "PARTNER_APP_UNINSTALLED", "ACCOUNT_DELETED", "ACCOUNT_OFFBOARDED"]);
+
 /**
  * WhatsApp Business Policy: an AI provider may not serve on the platform when general-purpose AI is the primary functionality.
- * The Assistant is a general-purpose assistant, so it is never eligible. A Product is eligible only once someone reviewed it
- * as a task-specific business agent and listed it. Everything else fails with this error rather than being served.
+ * The Assistant is a general-purpose assistant, so it is never eligible. A Product is eligible only on a Connection an operator
+ * marked `taskSpecific`, which is never the default. Everything else fails with this error rather than being served.
  */
-export const whatsappEligibility = (reviewedProducts: ReadonlySet<string>): Eligibility => connection => {
-  if (connection.target.kind === "product" && reviewedProducts.has(connection.target.productId)) return;
+export const whatsappEligibility: Eligibility = connection => {
+  if (connection.target.kind === "product" && connection.taskSpecific) return;
   throw new ChannelPolicyError("whatsapp_general_purpose_ai", "WhatsApp does not allow a general-purpose AI assistant as the primary function of a business number. This Agent has not been reviewed as a task-specific business agent.");
 };
 
 /**
- * WhatsApp Cloud API. One webhook serves every business number that installed the app: the tenant is the phone number id.
+ * WhatsApp Cloud API. One webhook serves every business account that installed the app: the tenant is the business account (WABA) id,
+ * and a thread is `waba:phoneNumberId:contact`, since a send goes through one of its numbers.
  * The contact is their phone number, or their BSUID when they hide it. A reply is allowed for 24 hours after they last wrote;
  * after that only a template could be sent, and we never send one: the reply stays in Hatch as undelivered.
  */
@@ -47,17 +51,23 @@ export class WhatsAppChannel extends MetaChannel {
   }
 
   protected events(entry: Entry): InboundEvent[] {
-    return (entry.changes ?? []).filter((change: Entry) => change.field === "messages").flatMap((change: Entry) => {
+    const tenant = String(entry.id);
+    return (entry.changes ?? []).flatMap((change: Entry): InboundEvent[] => {
+      if (change.field === "account_update") return ENDS_ACCESS.has(change.value?.event) ? [this.revoked(String(change.value.waba_info?.waba_id ?? tenant), change.value.event, entry.time)] : [];
       const phoneNumberId = change.value?.metadata?.phone_number_id as string | undefined;
       const messages = [...change.value?.messages ?? []] as Array<Record<string, any>>;
-      return phoneNumberId ? messages.sort((a, b) => Number(a.timestamp) - Number(b.timestamp)).flatMap(message => this.message(phoneNumberId, message)) : [];
+      return change.field === "messages" && phoneNumberId ? messages.sort((a, b) => Number(a.timestamp) - Number(b.timestamp)).flatMap(message => this.message(tenant, phoneNumberId, message)) : [];
     });
   }
 
-  private message(tenant: string, message: Record<string, any>): InboundEvent[] {
+  private revoked(tenant: string, event: string, time: unknown): InboundEvent {
+    return { eventId: `account_update:${tenant}:${event}:${time ?? ""}`, address: { threadId: tenant, senderId: tenant }, scope: tenant, revoked: true };
+  }
+
+  private message(tenant: string, phoneNumberId: string, message: Record<string, any>): InboundEvent[] {
     const sender = (message.from ?? message.from_user_id) as string | undefined;
     if (!sender) return [];
-    const base = { eventId: message.id as string, address: { threadId: `${tenant}:${sender}`, senderId: sender }, scope: tenant, messageRef: message.id as string };
+    const base = { eventId: message.id as string, address: { threadId: `${tenant}:${phoneNumberId}:${sender}`, senderId: sender }, scope: tenant, messageRef: message.id as string };
     const button = parseButtonId(message.interactive?.button_reply?.id);
     if (button) return [{ ...base, button }];
     if (message.type === "text") return [{ ...base, ...(message.text?.body ? { text: message.text.body } : {}) }];
@@ -68,8 +78,7 @@ export class WhatsAppChannel extends MetaChannel {
   }
 
   protected requests(to: PlatformAddress, message: OutboundMessage): Array<{ url: string; body: unknown }> {
-    const [tenant, contact] = MetaChannel.split(to.threadId);
-    const url = `${GRAPH}/${tenant}/messages`;
+    const { url, contact } = WhatsAppChannel.route(to);
     const common = { messaging_product: "whatsapp", recipient_type: "individual", ...(BSUID.test(contact) ? { recipient: contact } : { to: contact }), ...(message.replyTo ? { context: { message_id: message.replyTo } } : {}) };
     const text = (body: string) => ({ url, body: { ...common, type: "text", text: { body, preview_url: false } } });
     const buttons = message.buttons?.slice(0, MAX_BUTTONS) ?? [];
@@ -77,6 +86,26 @@ export class WhatsAppChannel extends MetaChannel {
     const interactive = (body: string) => ({ url, body: { ...common, type: "interactive", interactive: { type: "button", body: { text: body }, action: { buttons: buttons.map(button => ({ type: "reply", reply: { id: buttonId(button), title: fitLabel(button.label, MAX_BUTTON_TITLE) } })) } } } });
     // The body of a button message is short: a long reply goes first as plain text, and the buttons follow with their labels.
     return message.text.length <= MAX_BUTTON_BODY ? [interactive(message.text)] : [text(message.text), interactive(buttons.map(button => button.label).join(" / "))];
+  }
+
+  /** The send endpoint of the number a thread was written to, and the contact on it. */
+  private static route(to: PlatformAddress): { tenant: string; url: string; contact: string } {
+    const [tenant, rest] = MetaChannel.split(to.threadId);
+    const at = rest.indexOf(":");
+    return { tenant, url: `${GRAPH}/${rest.slice(0, at)}/messages`, contact: rest.slice(at + 1) };
+  }
+
+  /** The indicator lasts until we reply or 25 seconds, and needs the message it answers. */
+  async typing(to: PlatformAddress, messageRef?: string): Promise<void> {
+    const { tenant, url } = WhatsAppChannel.route(to);
+    if (messageRef) await this.post(url, { messaging_product: "whatsapp", status: "read", message_id: messageRef, typing_indicator: { type: "text" } }, await this.token(tenant));
+  }
+
+  /** Proves the token reaches the business account and subscribes the app to it. Returns the account's name. */
+  async probe(waba: string, token: string): Promise<{ name: string }> {
+    const { name } = await this.call("GET", `${GRAPH}/${encodeURIComponent(waba)}?fields=name`, token);
+    await this.call("POST", `${GRAPH}/${encodeURIComponent(waba)}/subscribed_apps`, token);
+    return { name };
   }
 
   /** A media id becomes a short-lived URL, and the URL is fetched with the same token. */

@@ -5,7 +5,7 @@ import { replyWindowOpen } from "./dispatch.js";
 import { render } from "./render.js";
 import { failureForStatus, idempotencyId } from "./types.js";
 
-const connection = (audience: ChannelConnection["audience"]): ChannelConnection => ({ id: "c1", ownerAccountId: "a1", channel: "telegram", scope: "", client: "im", target: { kind: "product", productId: "p" }, audience, state: "active" });
+const connection = (audience: ChannelConnection["audience"]): ChannelConnection => ({ id: "c1", ownerAccountId: "a1", channel: "telegram", scope: "", client: "im", target: { kind: "product", productId: "p" }, audience, taskSpecific: false, state: "active" });
 const identity = { id: "i1", connectionId: "c1", senderId: "s", threadId: "t" };
 
 test("Only the owner acts as an account; org members and the public are contacts of that Connection", () => {
@@ -29,6 +29,17 @@ test("render splits long text in order without losing a character or cutting a s
   assert.equal(parts.map(part => part.text).join("").replace(/\s/g, ""), text.replace(/\s/g, ""));
   assert.ok(parts.every(part => ![...part.text].includes("�")));
   assert.ok(parts.every(part => !/[\ud800-\udbff]$/.test(part.text) && !/^[\udc00-\udfff]/.test(part.text)));
+});
+
+test("render splits by bytes where the platform counts bytes, and a reply that fits is one message", () => {
+  const fits = (text: string, maxBytes: number) => render({ text }, { buttons: false, maxLength: maxBytes, maxBytes });
+  assert.equal(fits("a".repeat(20_480), 20_480).length, 1);
+  const cjk = fits("汉".repeat(7_000), 20_480);
+  assert.deepEqual(cjk.map(part => part.text.length), [6_826, 174]);
+  assert.ok(cjk.every(part => Buffer.byteLength(part.text) <= 20_480));
+  const emoji = fits("😀".repeat(600), 2_048);
+  assert.ok(emoji.every(part => Buffer.byteLength(part.text) <= 2_048 && ![...part.text].includes("�")));
+  assert.equal(emoji.map(part => part.text).join(""), "😀".repeat(600));
 });
 
 test("render puts the quote on the first message and buttons on the last", () => {

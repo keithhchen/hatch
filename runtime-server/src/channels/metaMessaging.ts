@@ -21,7 +21,7 @@ export abstract class MetaMessagingChannel extends MetaChannel {
   protected envelope: Record<string, unknown> = {};
 
   capabilities(): ChannelCapabilities {
-    return { stream: false, edit: false, typing: true, buttons: true, maxLength: this.textLimit, replyWindowMs: DAY_MS, canInitiate: false, idempotentSend: false };
+    return { stream: false, edit: false, typing: false, buttons: true, maxLength: this.textLimit, replyWindowMs: DAY_MS, canInitiate: false, idempotentSend: false };
   }
 
   /** Delivery after failures can be out of order: events are read by their own timestamps. */
@@ -48,15 +48,9 @@ export abstract class MetaMessagingChannel extends MetaChannel {
     }));
   }
 
-  /** The platform's text limit may count bytes: a subclass cuts the text to what one message can hold. */
-  protected chunks(text: string): string[] { return [text]; }
-
   protected requests(to: PlatformAddress, message: OutboundMessage): Array<{ url: string; body: unknown }> {
     const [tenant, contact] = MetaChannel.split(to.threadId);
     const replies = message.buttons?.length ? { quick_replies: message.buttons.slice(0, MAX_QUICK_REPLIES).map(button => ({ content_type: "text", title: fitLabel(button.label, MAX_QUICK_TITLE), payload: buttonId(button) })) } : {};
-    const chunks = this.chunks(message.text);
-    return chunks.map((text, index) => ({
-      url: this.endpoint(tenant), body: { recipient: { id: contact }, ...this.envelope, message: { text, ...(index === chunks.length - 1 ? replies : {}) } },
-    }));
+    return [{ url: this.endpoint(tenant), body: { recipient: { id: contact }, ...this.envelope, message: { text: message.text, ...replies } } }];
   }
 }

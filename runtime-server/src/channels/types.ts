@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import type { ChannelAddress, ChannelCapabilities, DeliveryFailure } from "../surfaces/contract.js";
 
-export const CHANNEL_KINDS = ["telegram", "line", "lark", "imessage", "slack", "whatsapp", "instagram", "messenger"] as const;
+export const CHANNEL_KINDS = ["telegram", "line", "lark", "feishu", "wecom", "wechatkf", "imessage", "slack", "whatsapp", "instagram", "messenger"] as const;
 export type ChannelKind = typeof CHANNEL_KINDS[number];
-export const CHANNEL_LABELS: Record<ChannelKind, string> = { telegram: "Telegram", line: "LINE", lark: "Lark", imessage: "iMessage", slack: "Slack", whatsapp: "WhatsApp", instagram: "Instagram", messenger: "Messenger" };
+export const CHANNEL_LABELS: Record<ChannelKind, string> = { telegram: "Telegram", line: "LINE", lark: "Lark", feishu: "飞书", wecom: "企业微信", wechatkf: "微信客服", imessage: "iMessage", slack: "Slack", whatsapp: "WhatsApp", instagram: "Instagram", messenger: "Messenger" };
 export const isChannelKind = (value: string): value is ChannelKind => (CHANNEL_KINDS as readonly string[]).includes(value);
 
 export type TaskButtonAction = "approve" | "decline";
@@ -21,6 +21,10 @@ export type InboundEvent = {
   address: PlatformAddress;
   /** The platform tenant the event belongs to. Absent: the adapter's own scope. A platform whose one endpoint serves many tenants sets it per event. */
   scope?: string;
+  /** The platform ended this tenant's access (an uninstall, a revoked token): no message. Its Connections are revoked at once. */
+  revoked?: true;
+  /** The platform refuses any message to this thread (such as another tenant's one-to-one chat): stored, never routed, never answered. */
+  unreachable?: true;
   /** A group thread. Group messages reach us only when they address the bot (a mention, or a reply to it). */
   group?: true;
   text?: string;
@@ -33,6 +37,9 @@ export type InboundEvent = {
 export class ChannelSendError extends Error {
   constructor(message: string, readonly failure: DeliveryFailure, readonly options: { retryAfterMs?: number; access?: boolean } = {}) { super(message); }
 }
+
+/** Credentials that ran out and cannot be renewed: the tenant has to install again. */
+export class CredentialsExpired extends Error {}
 
 /** 429 was refused outright; other 4xx will never work; 5xx and timeouts may have gone through. */
 export function failureForStatus(status: number): DeliveryFailure {
@@ -50,6 +57,9 @@ export async function guardSend<T>(what: string, request: () => Promise<T>): Pro
   }
 }
 
+/** A platform that only notifies: what to pull. `key` names an independent cursor; `hint` is platform data the pull needs, such as the callback token. */
+export type PullNotice = { key: string; hint?: string };
+
 /**
  * Port: one messaging platform. Everything above it knows nothing else about the platform.
  * Webhook platforms implement verify and parse; a platform that pushes over its own connection implements listen.
@@ -61,13 +71,24 @@ export interface ChannelAdapter {
   readonly maxFileBytes: number;
   capabilities(): ChannelCapabilities;
   available(): boolean;
-  verify?(raw: Buffer, headers: Record<string, string | string[] | undefined>): boolean;
-  /** respond is the body the platform expects, such as a URL challenge. */
-  parse?(raw: Buffer): { events: InboundEvent[]; respond?: unknown };
+  /** `query` is the URL's query string, where some platforms put the signature. */
+  verify?(raw: Buffer, headers: Record<string, string | string[] | undefined>, query?: URLSearchParams): boolean;
+  /** respond is the body the platform expects, such as a URL challenge. A platform that only notifies returns `pull` instead of events. */
+  parse?(raw: Buffer): { events: InboundEvent[]; respond?: unknown; pull?: PullNotice } | Promise<{ events: InboundEvent[]; respond?: unknown; pull?: PullNotice }>;
+  /** After the platform is answered: one full pull from `cursor`, following every page, returning the final cursor. It changes nothing in the adapter, so a failed pull can be repeated. */
+  pull?(notice: PullNotice, cursor: string | undefined): Promise<{ events: InboundEvent[]; cursor: string }>;
+  /** Answers a GET the platform makes to prove the URL is ours: the plain text to return, or undefined to refuse. */
+  challenge?(query: URLSearchParams): string | undefined;
   listen?(onEvents: (events: InboundEvent[]) => Promise<void>, signal: AbortSignal): Promise<void>;
   /** `key` makes a repeated send a no-op on platforms whose capabilities say idempotentSend. A failure throws ChannelSendError. */
   send(to: PlatformAddress, message: OutboundMessage, key: string): Promise<void>;
   download(file: InboundFile): Promise<Buffer>;
+  /** Shows the sender that an answer is coming. Best effort: a failure changes nothing. */
+  typing?(to: PlatformAddress, messageRef?: string): Promise<void>;
+  /** The redirect of the platform's install flow (OAuth): trades its code for the tenant and the credentials to seal for it. */
+  install?(code: string): Promise<{ scope: string; credentials: Record<string, unknown> }>;
+  /** Credentials that expire: the renewed ones when they are due, undefined when they are not. Throws when they can no longer be renewed. */
+  refresh?(credentials: Record<string, unknown>, now: Date): Promise<Record<string, unknown> | undefined>;
   /** Clear a pressed button, where the platform needs that. */
   acknowledge?(event: InboundEvent, text?: string): Promise<void>;
   /** How the Expert reaches us with this code: a link when the platform has one, otherwise the code is enough. */

@@ -1,6 +1,6 @@
+import type { ChannelKind } from "../channels/types.js";
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
-import type { ChannelKind } from "../channels/types.js";
 
 export const TASK_KINDS = ["interview", "content", "research", "agent_research", "build", "evaluate", "poke", "change"] as const;
 export type TaskKind = typeof TASK_KINDS[number];

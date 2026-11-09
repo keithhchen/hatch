@@ -18,8 +18,8 @@ const slackError = (error: string, status = 200, headers: Record<string, string>
 const ok = () => new Response(JSON.stringify({ ok: true, ts: "1.2" }));
 const to = { threadId: "T1:D1", senderId: "U1" };
 
-test("capabilities: native streaming, edits, status, buttons; 3000 characters", () => {
-  assert.deepEqual(channel().capabilities(), { stream: true, edit: true, typing: true, buttons: true, maxLength: 3000, canInitiate: true, idempotentSend: false });
+test("capabilities declare only what is implemented: buttons and 3000 characters, no streaming, editing or status yet", () => {
+  assert.deepEqual(channel().capabilities(), { stream: false, edit: false, typing: false, buttons: true, maxLength: 3000, canInitiate: true, idempotentSend: false });
   assert.equal(channel().client, "im");
 });
 
@@ -70,11 +70,18 @@ test("parse: a channel message that does not mention us is not ours, whoever sen
 
 test("parse skips bots, edits, deletions and revocation notices", () => {
   for (const event of [im({ bot_id: "B1" }), im({ subtype: "bot_message" }), im({ subtype: "message_changed" }), im({ subtype: "message_deleted" }), im({ user: undefined }),
-    { type: "tokens_revoked", tokens: { oauth: ["U1"], bot: ["UBOT"] } }, { type: "app_uninstalled" }]) {
+    { type: "tokens_revoked", tokens: { oauth: ["U1"], bot: [] } }]) {
     assert.deepEqual(channel().parse(envelope(event)).events, []);
   }
   assert.deepEqual(channel().parse(Buffer.from(JSON.stringify({ type: "app_rate_limited", team_id: "T1" }))).events, []);
   assert.deepEqual(channel().parse(envelope(im(), { team_id: undefined })).events, []);
+});
+
+test("parse: uninstalling the app, or revoking its bot token, revokes the workspace; revoking only a person's token does not", () => {
+  const revoked = { eventId: "Ev1", address: { threadId: "T1", senderId: "T1" }, scope: "T1", revoked: true };
+  assert.deepEqual(channel().parse(envelope({ type: "app_uninstalled" })).events, [revoked]);
+  assert.deepEqual(channel().parse(envelope({ type: "tokens_revoked", tokens: { oauth: ["U1"], bot: ["UBOT"] } })).events, [revoked]);
+  assert.deepEqual(channel().parse(envelope({ type: "tokens_revoked", tokens: { oauth: ["U1"] } })).events, []);
 });
 
 test("parse: a retry of the same event has the same event id", () => {
@@ -189,7 +196,7 @@ test("connectUrl is the OAuth install link with the state, and install trades th
   assert.deepEqual(Object.fromEntries(url.searchParams), { client_id: "cid", scope: "app_mentions:read,chat:write,im:history,files:read", redirect_uri: "https://hatch.test/slack/callback", state: "state-1" });
   assert.equal(channel(undefined, { clientId: undefined }).connectUrl("s"), undefined);
   const { calls, fake } = recorder(() => new Response(JSON.stringify({ ok: true, access_token: "xoxb-new", bot_user_id: "UBOT", team: { id: "T9", name: "Acme" } })));
-  assert.deepEqual(await channel(fake).install("code-1"), { team: "T9", token: "xoxb-new", botUserId: "UBOT" });
+  assert.deepEqual(await channel(fake).install("code-1"), { scope: "T9", credentials: { token: "xoxb-new", botUserId: "UBOT" } });
   assert.equal(String(calls[0]?.init.body), "client_id=cid&client_secret=csecret&code=code-1&redirect_uri=https%3A%2F%2Fhatch.test%2Fslack%2Fcallback");
   await assert.rejects(channel(recorder(() => new Response(JSON.stringify({ ok: false, error: "invalid_code" }))).fake).install("bad"), /invalid_code/);
   await assert.rejects(channel(undefined, { clientSecret: undefined }).install("c"), /not configured/);

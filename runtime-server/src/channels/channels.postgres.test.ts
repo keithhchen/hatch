@@ -204,6 +204,63 @@ test("Duplicate deliveries are refused by the database, even concurrently, and r
   assert.equal((await pool.query("SELECT count(*)::int AS n FROM hatch_channel_inbox")).rows[0].n, 3);
 }));
 
+const openInbox = async (pool: Pool) => { await PostgresConnections.open(pool, scopeOf); return PostgresInbox.open(pool); };
+
+test("A pull's events and cursor commit together: a failing event leaves the cursor and the earlier events where they were", options, async () => isolated(async pool => {
+  const inbox = await openInbox(pool);
+  await inbox.store("wechatkf", "acct", [message("1", "a")], undefined, { key: "kf1", cursor: "c1" });
+  // An event with no thread violates NOT NULL after the first insert of the same call succeeded.
+  const broken = { ...message("1", "c"), address: {} } as unknown as InboundEvent;
+  await assert.rejects(inbox.store("wechatkf", "acct", [message("1", "b"), broken], undefined, { key: "kf1", cursor: "c2" }));
+  assert.equal(await inbox.cursor("wechatkf", "acct", "kf1"), "c1");
+  assert.equal((await pool.query("SELECT count(*)::int AS n FROM hatch_channel_inbox")).rows[0].n, 1);
+  // The failed call did not leave the pooled connection inside a transaction.
+  await inbox.store("wechatkf", "acct", [message("1", "b")], undefined, { key: "kf1", cursor: "c2" });
+  assert.equal(await inbox.cursor("wechatkf", "acct", "kf1"), "c2");
+}));
+
+test("A cursor belongs to its channel, scope and key, and survives a new inbox over the same database", options, async () => isolated(async pool => {
+  const inbox = await openInbox(pool);
+  assert.equal(await inbox.cursor("wechatkf", "acct", "kf1"), undefined);
+  await inbox.store("wechatkf", "acct", [], undefined, { key: "kf1", cursor: "c1" });
+  const restarted = await PostgresInbox.open(pool);
+  assert.equal(await restarted.cursor("wechatkf", "acct", "kf1"), "c1");
+  for (const [channel, scope, key] of [["wechatkf", "acct", "kf2"], ["wechatkf", "other", "kf1"], ["wecom", "acct", "kf1"]] as const) assert.equal(await restarted.cursor(channel, scope, key), undefined);
+}));
+
+test("Storing a pull twice keeps one event each and the cursor is what was last written", options, async () => isolated(async pool => {
+  const inbox = await openInbox(pool);
+  const events = [message("1", "a"), message("1", "b")];
+  assert.equal((await inbox.store("wechatkf", "acct", events, undefined, { key: "kf1", cursor: "c2" })).length, 2);
+  assert.equal((await inbox.store("wechatkf", "acct", events, undefined, { key: "kf1", cursor: "c2" })).length, 0);
+  assert.equal((await pool.query("SELECT count(*)::int AS n FROM hatch_channel_inbox")).rows[0].n, 2);
+  await inbox.store("wechatkf", "acct", events, undefined, { key: "kf1", cursor: "c1" });
+  assert.equal(await inbox.cursor("wechatkf", "acct", "kf1"), "c1");
+  assert.equal((await pool.query("SELECT count(*)::int AS n FROM hatch_channel_cursors")).rows[0].n, 1);
+}));
+
+test("ChannelService.pull stores the pulled events with the cursor, and a failed pull changes nothing", options, async () => isolated(async pool => {
+  const adapter = Object.assign(new FakeAdapter("wechatkf", "acct"), {
+    seen: [] as Array<string | undefined>, failing: false, next: [message("1", "a")], cursor: "c1",
+    async pull(this: any, notice: { key: string }, cursor: string | undefined) {
+      this.seen.push(`${notice.key}:${cursor}`);
+      if (this.failing) throw new Error("wecom down");
+      return { events: this.next, cursor: this.cursor };
+    },
+  });
+  const env = await stack(pool, { adapters: [adapter] });
+  await env.service.pull(adapter, { key: "kf1", hint: "t" });
+  assert.equal((await pool.query("SELECT count(*)::int AS n FROM hatch_channel_inbox")).rows[0].n, 1);
+  adapter.failing = true; adapter.next = [message("1", "b")]; adapter.cursor = "c2";
+  await assert.rejects(env.service.pull(adapter, { key: "kf1" }), /wecom down/);
+  assert.equal(await env.inbox.cursor("wechatkf", "acct", "kf1"), "c1");
+  adapter.failing = false;
+  await env.service.pull(adapter, { key: "kf1" });
+  assert.equal(await env.inbox.cursor("wechatkf", "acct", "kf1"), "c2");
+  assert.deepEqual(adapter.seen, ["kf1:undefined", "kf1:c1", "kf1:c1"]);
+  assert.equal((await pool.query("SELECT count(*)::int AS n FROM hatch_channel_inbox")).rows[0].n, 2);
+}));
+
 test("An event is leased: a crash returns it, one thread's events go one at a time in order, and retries are bounded", options, async () => isolated(async pool => {
   await PostgresConnections.open(pool, scopeOf);
   const inbox = await PostgresInbox.open(pool);
@@ -564,4 +621,39 @@ test("Telegram: a mention in a group reaches the Assistant of the sender who lin
   assert.equal(last.chat_id, -100);
   assert.equal(last.text, "published");
   assert.equal(last.reply_parameters.message_id, 2);
+}));
+
+test("A reply allowance: what the platform lets us send after each of its messages goes, the rest stays in Hatch as undelivered, and a new inbound message restores it", options, async () => isolated(async pool => {
+  const adapter = new FakeAdapter("telegram", "", { replyAllowance: 2, maxLength: 10 });
+  const env = await stack(pool, { adapters: [adapter] });
+  const owner = await link(env, "42");
+  const connection = (await env.connections.linked(owner))[0]!.connection;
+  adapter.sent.length = 0;
+  env.advance(1000);
+  await env.service.accept(adapter, [message("42", "hello")]);
+  await env.service.drain();
+  await env.service.push(owner, { text: "aaaaaaaaaa bbbbbbbbbb cccccccccc" });
+  await env.service.drain();
+  assert.deepEqual(adapter.texts, ["aaaaaaaaaa", "bbbbbbbbbb"]);
+  const [spent] = await env.outbox.undelivered(connection.id);
+  assert.deepEqual([spent!.sentParts, spent!.state, spent!.parts.length], [2, "undelivered", 3]);
+  assert.equal((await pool.query("SELECT 1 FROM hatch_channel_outbox WHERE state IN ('failed', 'unknown')")).rowCount, 0);
+  env.advance(1000);
+  await env.service.accept(adapter, [message("42", "again")]);
+  await env.service.drain();
+  await env.service.push(owner, { text: "fresh" });
+  await env.service.drain();
+  assert.equal(adapter.texts.at(-1), "fresh");
+}));
+
+test("An unreachable event is stored and completed, never routed and never answered", options, async () => isolated(async pool => {
+  const env = await stack(pool);
+  const owner = await link(env, "42");
+  env.adapter.sent.length = 0; env.target.handled.length = 0;
+  await env.service.accept(env.adapter, [message("42", "from another tenant", { unreachable: true })]);
+  await env.service.drain();
+  assert.equal(env.target.handled.length, 0);
+  assert.equal(env.adapter.sent.length, 0);
+  assert.equal((await pool.query("SELECT 1 FROM hatch_channel_inbox WHERE state = 'done' AND event->>'unreachable' = 'true'")).rowCount, 1);
+  assert.ok(owner);
 }));

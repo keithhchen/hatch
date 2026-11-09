@@ -31,8 +31,8 @@ export class SlackChannel implements ChannelAdapter {
   readonly maxFileBytes = 20 * 1024 * 1024;
   constructor(private config: SlackConfig, private fetchImpl: typeof fetch = fetch) {}
 
-  /** Streaming replies (chat.startStream) and a status line are Slack features; a reply can also be edited. */
-  capabilities(): ChannelCapabilities { return { stream: true, edit: true, typing: true, buttons: true, maxLength: MAX_TEXT, canInitiate: true, idempotentSend: false }; }
+  /** Slack can also stream a reply and show a status, but nothing above the port uses either yet: only what is implemented is declared. */
+  capabilities(): ChannelCapabilities { return { stream: false, edit: false, typing: false, buttons: true, maxLength: MAX_TEXT, canInitiate: true, idempotentSend: false }; }
   available(): boolean { return Boolean(this.config.signingSecret && this.config.tokens); }
 
   /** The workspace installs the app here; `state` comes back with the code. */
@@ -42,13 +42,13 @@ export class SlackChannel implements ChannelAdapter {
   }
 
   /** Trades the code from the install redirect for the workspace's bot token. The caller stores it. */
-  async install(code: string): Promise<{ team: string; token: string; botUserId: string }> {
+  async install(code: string): Promise<{ scope: string; credentials: { token: string; botUserId: string } }> {
     const { clientId, clientSecret, redirectUri } = this.config;
     if (!clientId || !clientSecret || !redirectUri) throw new Error("Slack OAuth is not configured");
     const response = await this.fetchImpl(`${API}/oauth.v2.access`, { method: "POST", body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, code, redirect_uri: redirectUri }), signal: AbortSignal.timeout(15_000) });
     const payload = await response.json().catch(() => ({})) as Json;
     if (!payload.ok || !payload.access_token || !payload.team?.id) throw new Error(`Slack install failed: ${payload.error ?? response.status}`);
-    return { team: payload.team.id, token: payload.access_token, botUserId: payload.bot_user_id };
+    return { scope: payload.team.id, credentials: { token: payload.access_token, botUserId: payload.bot_user_id } };
   }
 
   verify(raw: Buffer, headers: Record<string, string | string[] | undefined>): boolean {
@@ -67,6 +67,11 @@ export class SlackChannel implements ChannelAdapter {
     if (body.startsWith("payload=")) return { events: this.pressed(JSON.parse(new URLSearchParams(body).get("payload") ?? "{}")) };
     const envelope = JSON.parse(body) as Json;
     if (envelope.type === "url_verification") return { events: [], respond: { challenge: envelope.challenge } };
+    // The workspace removed the app, or its bot token: nothing we send will work, and nobody there is ours any more.
+    const { event } = envelope;
+    if (envelope.team_id && (event?.type === "app_uninstalled" || (event?.type === "tokens_revoked" && event.tokens?.bot?.length))) {
+      return { events: [{ eventId: envelope.event_id, address: { threadId: envelope.team_id, senderId: envelope.team_id }, scope: envelope.team_id, revoked: true }] };
+    }
     return { events: envelope.type === "event_callback" ? this.message(envelope) : [] };
   }
 

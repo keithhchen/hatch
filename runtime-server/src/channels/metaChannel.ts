@@ -70,7 +70,7 @@ export abstract class MetaChannel implements ChannelAdapter {
   }
 
   /** The GET Meta makes when the endpoint is set up: the challenge to echo, or nothing when the token is wrong. */
-  handshake(query: URLSearchParams): string | undefined {
+  challenge(query: URLSearchParams): string | undefined {
     const token = query.get("hub.verify_token");
     const { verifyToken } = this.config;
     if (query.get("hub.mode") !== "subscribe" || !verifyToken || !token) return undefined;
@@ -104,6 +104,14 @@ export abstract class MetaChannel implements ChannelAdapter {
     const token = await this.config.tokens?.(tenant);
     if (!token) throw new ChannelSendError(`${this.kind} access for ${tenant} is gone or was never granted`, "permanent", { access: true });
     return token;
+  }
+
+  /** A Graph call that is not a send, such as proving a token or subscribing the app: a refusal is an Error with Meta's words. */
+  protected async call(method: "GET" | "POST", url: string, token: string): Promise<Record<string, any>> {
+    const response = await this.fetchImpl(url, { method, headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) });
+    const body = await response.json().catch(() => ({})) as Record<string, any>;
+    if (!response.ok) throw new Error(`${this.kind} refused the request: ${this.explain(body.error)}`);
+    return body;
   }
 
   protected async fetchBytes(url: string, token?: string): Promise<Buffer> {

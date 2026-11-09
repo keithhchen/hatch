@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { InstagramChannel, splitBytes } from "./instagramChannel.js";
+import { InstagramChannel } from "./instagramChannel.js";
+import { render } from "./render.js";
 import { MessengerChannel } from "./messengerChannel.js";
 import { graphError, recorder } from "./recorder.testkit.js";
 import type { MetaMessagingChannel } from "./metaMessaging.js";
-import { ChannelSendError } from "./types.js";
+import { ChannelSendError, CredentialsExpired } from "./types.js";
 
 const TASK = "123e4567-e89b-12d3-a456-426614174000";
 const SECRET = "app-secret";
@@ -16,7 +17,7 @@ const messenger = (fetchImpl?: typeof fetch) => new MessengerChannel(config, fet
 const when = (id: string, timestamp: number, sender = "IGSID1", message: unknown = { mid: id, text: id }) => ({ sender: { id: sender }, recipient: { id: "IG1" }, timestamp, message });
 
 test("capabilities come from the documented limits", () => {
-  assert.deepEqual(instagram().capabilities(), { stream: false, edit: false, typing: true, buttons: true, maxLength: 1000, replyWindowMs: 86_400_000, canInitiate: false, idempotentSend: false });
+  assert.deepEqual(instagram().capabilities(), { stream: false, edit: false, typing: false, buttons: true, maxLength: 1000, maxBytes: 1000, replyWindowMs: 86_400_000, canInitiate: false, idempotentSend: false });
   assert.deepEqual(messenger().capabilities(), { stream: false, edit: false, typing: true, buttons: true, maxLength: 2000, replyWindowMs: 86_400_000, canInitiate: false, idempotentSend: false });
   assert.equal(instagram().client, "dm");
   assert.equal(messenger().client, "dm");
@@ -86,16 +87,77 @@ test("instagram send goes to the account's own endpoint with the tenant's token"
   assert.deepEqual(calls[0]?.body, { recipient: { id: "IGSID1" }, message: { text: "hello" } });
 });
 
-test("instagram never sends more than 1000 UTF-8 bytes in a message", async () => {
+test("instagram declares 1000 bytes, so the core renders no message over it, in any script", () => {
+  const capabilities = instagram().capabilities();
+  assert.equal(capabilities.maxBytes, 1000);
+  for (const text of ["你好".repeat(400), "😀".repeat(600), "plain text ".repeat(200)]) {
+    const parts = render({ text }, capabilities);
+    assert.ok(parts.length > 1);
+    for (const part of parts) assert.ok(Buffer.byteLength(part.text) <= 1000 && part.text.length <= 1000);
+    assert.equal(parts.map(part => part.text).join("").replace(/\s/g, ""), text.replace(/\s/g, ""));
+  }
+});
+
+test("messenger shows typing with a sender action to the contact on their Page", async () => {
   const { calls, fake } = recorder();
-  const text = "你好".repeat(400);
-  await instagram(fake).send({ threadId: "IG1:IGSID1", senderId: "IGSID1" }, { text }, "k");
-  assert.ok(calls.length >= 3);
-  for (const call of calls) assert.ok(Buffer.byteLength(call.body.message.text) <= 1000);
-  assert.equal(calls.map(call => call.body.message.text).join(""), text);
-  assert.deepEqual(splitBytes("ab😀c", 6), ["ab😀", "c"]);
-  assert.deepEqual(splitBytes("ab😀c", 5), ["ab", "😀c"]);
-  assert.deepEqual(splitBytes("", 5), [""]);
+  assert.equal(messenger().capabilities().typing, true);
+  await messenger(fake).typing({ threadId: "PAGE1:PSID1", senderId: "PSID1" });
+  assert.equal(calls[0]?.url, "https://graph.facebook.com/v27.0/PAGE1/messages");
+  assert.deepEqual(calls[0]?.body, { recipient: { id: "PSID1" }, sender_action: "typing_on" });
+  await assert.rejects(messenger(fake).typing({ threadId: "PAGE9:PSID1", senderId: "PSID1" }), ChannelSendError);
+});
+
+test("instagram does not declare typing: its documents disagree on whether the sender action exists", () => {
+  assert.equal(instagram().capabilities().typing, false);
+  assert.equal("typing" in instagram(), false);
+});
+
+test("messenger probe proves the Page's token and subscribes the app to its messages", async () => {
+  const { calls, fake } = recorder(() => new Response(JSON.stringify({ name: "Acme" })));
+  assert.deepEqual(await messenger(fake).probe("PAGE1", "tok"), { name: "Acme" });
+  assert.deepEqual(calls.map(call => [call.init.method, call.url]), [["GET", "https://graph.facebook.com/v27.0/PAGE1?fields=name"], ["POST", "https://graph.facebook.com/v27.0/PAGE1/subscribed_apps?subscribed_fields=messages,messaging_postbacks"]]);
+  assert.equal((calls[0]?.init.headers as Record<string, string>).authorization, "Bearer tok");
+  await assert.rejects(messenger(recorder(() => graphError(400, { code: 190, message: "bad token" })).fake).probe("PAGE1", "x"), /190/);
+});
+
+const login = { clientId: "ig-app", clientSecret: "ig-secret", redirectUri: "https://hatch.test/v1/channels/instagram/oauth/callback" };
+const DAY = 86_400_000;
+const igToken = (extra: object = {}) => ({ token: "long-1", userId: "IG1", expiresAt: 60 * DAY, refreshedAt: 0, ...extra });
+const igLogin = (fetchImpl: typeof fetch, now = 0) => new InstagramChannel({ ...config, ...login, now: () => now }, fetchImpl);
+
+test("instagram connectUrl is the business login with the state, and needs its app configured", () => {
+  const url = new URL(igLogin(recorder().fake).connectUrl("state-1")!);
+  assert.equal(url.origin + url.pathname, "https://www.instagram.com/oauth/authorize");
+  assert.deepEqual(Object.fromEntries(url.searchParams), { client_id: "ig-app", redirect_uri: login.redirectUri, response_type: "code", scope: "instagram_business_basic,instagram_business_manage_messages", state: "state-1" });
+  assert.equal(instagram().connectUrl("s"), undefined);
+});
+
+test("instagram install trades the code for a 60-day token and subscribes the account to messages", async () => {
+  const { calls, fake } = recorder(url => url.startsWith("https://api.instagram.com/oauth/access_token") ? new Response(JSON.stringify({ data: [{ access_token: "short", user_id: "IG1", permissions: "x" }] }))
+    : url.startsWith("https://graph.instagram.com/access_token") ? new Response(JSON.stringify({ access_token: "long-1", token_type: "bearer", expires_in: 5183944 })) : new Response(JSON.stringify({ success: true })));
+  const installed = await igLogin(fake, 1000).install("code-1");
+  assert.deepEqual(installed, { scope: "IG1", credentials: { token: "long-1", userId: "IG1", expiresAt: 1000 + 5183944 * 1000, refreshedAt: 1000 } });
+  assert.equal(String(calls[0]?.init.body), "client_id=ig-app&client_secret=ig-secret&grant_type=authorization_code&redirect_uri=https%3A%2F%2Fhatch.test%2Fv1%2Fchannels%2Finstagram%2Foauth%2Fcallback&code=code-1");
+  assert.match(calls[1]!.url, /grant_type=ig_exchange_token.*access_token=short/);
+  assert.equal(calls[2]?.url, "https://graph.instagram.com/v27.0/IG1/subscribed_apps?subscribed_fields=messages");
+  assert.equal((calls[2]?.init.headers as Record<string, string>).authorization, "Bearer long-1");
+  await assert.rejects(igLogin(recorder(() => new Response(JSON.stringify({ error_message: "Invalid authorization code" }), { status: 400 })).fake).install("bad"), /Invalid authorization code/);
+  await assert.rejects(instagram().install("c"), /not configured/);
+});
+
+test("instagram refresh renews a token in its last two weeks once it is a day old, and not before", async () => {
+  const { calls, fake } = recorder(() => new Response(JSON.stringify({ access_token: "long-2", token_type: "bearer", expires_in: 5184000 })));
+  const at = (days: number) => new Date(days * DAY);
+  assert.equal(await igLogin(fake).refresh(igToken(), at(10)), undefined);
+  assert.equal(await igLogin(fake).refresh(igToken({ refreshedAt: 47 * DAY }), at(47.5)), undefined, "less than a day old");
+  assert.equal(calls.length, 0);
+  assert.deepEqual(await igLogin(fake).refresh(igToken(), at(50)), igToken({ token: "long-2", expiresAt: 50 * DAY + 5184000 * 1000, refreshedAt: 50 * DAY }));
+  assert.match(calls[0]!.url, /^https:\/\/graph\.instagram\.com\/refresh_access_token\?grant_type=ig_refresh_token&access_token=long-1$/);
+});
+
+test("instagram refresh of an expired token says it cannot be renewed; a failed renewal is an ordinary error", async () => {
+  await assert.rejects(igLogin(recorder().fake).refresh(igToken(), new Date(61 * DAY)), CredentialsExpired);
+  await assert.rejects(igLogin(recorder(() => new Response("{}", { status: 500 })).fake).refresh(igToken(), new Date(50 * DAY)), (error: unknown) => error instanceof Error && !(error instanceof CredentialsExpired));
 });
 
 test("quick replies go on the last message only, titles cut to 20", async () => {
