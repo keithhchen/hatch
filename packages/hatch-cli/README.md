@@ -33,16 +33,16 @@ workers <product-id>
 chat <product-id> <worker> <message...> [--wait[=N]] [--stream] [--key <id>]     history <product-id> <worker> [--after <id>]
 stop <product-id> <worker>
 assistant <message...> [--wait[=N]] [--stream] [--key <id>]     assistant history [--after <id>]
-conversations                            list your Chat conversations
-ask <message...> (--product <id> | --conversation <id>) [--wait[=N]] [--stream] [--key <id>]
-conversation show <id> | watch <id> [--after <cursor>] | stop <id> <run-id>
+conversations --product <id> [--cursor <next_cursor>]     list your Chat conversations with a product
+ask <message...> --product <id> [--conversation <id>] [--wait[=N]] [--stream] [--key <id>]
+conversation show <id> | watch <id> [--after <cursor>] | stop <id> <run-id>      (each needs --product <id>)
 install-skill [-g] [--dir <skills-dir>]
 mcp
 ```
 
 Workers: `research`, `interview`, `builder`, `cases`, `evaluator`. `chat --wait` holds up to 60 s and prints the reply; without it, it prints the accepted message id. A worker whose dependencies have no output yet answers 409 with the reason.
 
-Chat (`ask`, `conversation ...`) is consumer Chat with a published Product, separate from the Studio workers. `--product` starts a conversation and prints its `conversation_id`; `--conversation` continues one. Every send carries a `client_message_id` (`--key` to choose it; the JSON result returns it): pass the same key to retry a send without sending it twice. `--stream` prints the reply as it arrives and, if the connection drops, reconnects after the last cursor without repeating text; if it gives up it prints the cursor for `conversation watch <id> --after <cursor>`. The Run belongs to the server: closing the CLI never stops it, only `conversation stop` does. Browser login and API keys both work for all of these.
+Chat (`ask`, `conversation ...`) is consumer Chat with a published Product, separate from the Studio workers. The Runtime binds every Chat call to a Product, so every command takes `--product`. `ask` without `--conversation` starts a conversation and prints its `conversation_id`; with it, continues one. Every send carries a `client_message_id` (`--key` to choose it; the JSON result returns it): pass the same key to retry a send without sending it twice. `--stream` prints the reply as it arrives and, if the connection drops, reconnects with `after_cursor` set to the last journal cursor (live text deltas carry no cursor and are not replayed, so read the full reply with `conversation show`); if it gives up it prints the cursor for `conversation watch <id> --after <cursor>`. The Run belongs to the server: closing the CLI never stops it, only `conversation stop` does. Browser login and API keys both work for all of these.
 
 Every command takes `--json`. `ingest` accepts links and files of any type (30 MB total); `--wait` polls every 5 s until the job finishes.
 

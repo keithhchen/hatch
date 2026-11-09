@@ -377,10 +377,10 @@ test("HTTP starts a Run with POST messages; the old POST runs reservation is gon
   const runs = (await json(base, `${pathPrefix}/runs?${scope}`)).body as { runs: unknown[] };
   assert.equal(runs.runs.length, 1);
 
-  // Message parts other than text are refused until the asset service is wired, not dropped.
+  // Without an asset service on this Runtime, a part that refers to an asset is refused, not dropped.
   const image = await json(base, `${pathPrefix}/messages?${scope}`, { method: "POST", body: { client_message_id: "http-2", parts: [{ type: "image", assetId: "asset-1" }] } });
-  assert.equal(image.response.status, 400);
-  assert.equal((image.body as { error: { code: string } }).error.code, "parts_unsupported");
+  assert.equal(image.response.status, 501);
+  assert.equal((image.body as { error: { code: string } }).error.code, "attachments_unavailable");
 });
 
 test("HTTP without wait returns 202 with the run id, and a stream delivers the Run's events then ends", async () => {

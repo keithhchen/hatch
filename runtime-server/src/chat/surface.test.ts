@@ -103,13 +103,15 @@ test("a contact is bound to its Connection's Product with no order, and isolated
   assert.equal((await binder.bind(alice, { kind: "conversation", id: first.conversation.id })).conversation.id, first.conversation.id);
 });
 
-test("a contact is refused on a revoked or non-public Connection, and past its message limit", async () => {
+test("a contact is refused on a revoked or self Connection, an org member is bound like a customer, and past its message limit", async () => {
   const repository = new InMemoryConversationRepository();
   const products = { resolveByProduct: async () => corpus([{ kind: "http_function" }]) };
   const alice = { kind: "contact" as const, connectionId: "conn-1", contactId: "alice" };
   const ref = { kind: "thread" as const, connectionId: "conn-1", threadId: "t" };
   await assert.rejects(new ContactBinder({ get: async () => connection({ state: "revoked" }) }, products, repository).bind(alice, ref), { code: "connection_unavailable" });
-  await assert.rejects(new ContactBinder({ get: async () => connection({ audience: "self" }) }, products, repository).bind(alice, ref), { code: "connection_not_public" });
+  await assert.rejects(new ContactBinder({ get: async () => connection({ audience: "self" }) }, products, repository).bind(alice, ref), { code: "connection_not_shared" });
+  const member = await new ContactBinder({ get: async () => connection({ audience: "org" }) }, products, repository).bind(alice, ref);
+  assert.equal(member.conversation.productId, productId);
   const bound = await new ContactBinder({ get: async () => connection() }, products, repository).bind(alice, ref);
   const limits = new SentMessageLimits({ countSentMessages: async () => 3 }, 3);
   await assert.rejects(limits.check(alice, bound.conversation), (error: unknown) => error instanceof ChatError && error.status === 429);

@@ -4,17 +4,23 @@ import { RunObserver, parseSse, resumable } from "./run.js";
 const enc = encodeURIComponent;
 
 // Adapters: where a conversation lives. The same ConversationApi runs over any of them.
-export const chatRoutes = (id) => {
+// `scope` is added to every query; `afterParam` names the resume cursor parameter; `sent` shapes a send answer.
+export const chatRoutes = (id, product) => {
   const base = `/v1/conversations/${enc(id)}`;
-  return { messages: `${base}/messages`, events: `${base}/events`, snapshot: `${base}/snapshot`, cancel: (run) => `${base}/runs/${enc(run)}/cancel` };
+  return {
+    messages: `${base}/messages`, events: `${base}/events`, snapshot: `${base}/snapshot`, cancel: (run) => `${base}/runs/${enc(run)}/cancel`,
+    scope: { product_id: product }, afterParam: "after_cursor",
+    // Runtime answers 200 {run, outcome, reply} or 202 {run_id, outcome, status}.
+    sent: (r) => r.run ? { run_id: r.run.id, outcome: r.outcome, status: r.run.status, reply: { text: r.reply } } : r
+  };
 };
 export const workerRoutes = (productId, worker) => {
   const base = `/v1/creator/products/${enc(productId)}/workers/${enc(worker)}`;
-  return { messages: `${base}/messages`, events: `${base}/events`, snapshot: `${base}/messages`, cancel: () => `${base}/stop` };
+  return { messages: `${base}/messages`, events: `${base}/events`, snapshot: `${base}/messages`, cancel: () => `${base}/stop`, afterParam: "after" };
 };
 export const assistantRoutes = () => {
   const base = "/v1/creator/assistant/conversation";
-  return { messages: `${base}/messages`, events: `${base}/events`, snapshot: `${base}/messages`, cancel: () => `${base}/stop` };
+  return { messages: `${base}/messages`, events: `${base}/events`, snapshot: `${base}/messages`, cancel: () => `${base}/stop`, afterParam: "after" };
 };
 
 const withQuery = (path, params) => {
@@ -27,27 +33,32 @@ const sseOf = (bodyPromise) => (async function* () { yield* parseSse(await bodyP
 export class ConversationApi {
   constructor(client, routes) { this.client = client; this.routes = routes; }
 
-  send({ content, key, wait }) {
-    return this.client.post(withQuery(this.routes.messages, { wait }), { content, client_message_id: key }, { "idempotency-key": key });
+  url(path, params = {}) { return withQuery(path, { ...this.routes.scope, ...params }); }
+  async send({ content, key, wait }) {
+    const r = await this.client.post(this.url(this.routes.messages, { wait }), { content, client_message_id: key }, { "idempotency-key": key });
+    return this.routes.sent ? this.routes.sent(r) : r;
   }
   stream({ content, key }) {
-    return sseOf(this.client.stream("POST", this.routes.messages, { content, client_message_id: key }, { "idempotency-key": key }));
+    return sseOf(this.client.stream("POST", this.url(this.routes.messages), { content, client_message_id: key }, { "idempotency-key": key }));
   }
-  events(after) { return sseOf(this.client.stream("GET", withQuery(this.routes.events, { after }))); }
-  snapshot(after) { return this.client.get(withQuery(this.routes.snapshot, { after })); }
-  cancel(runId) { return this.client.post(this.routes.cancel(runId), {}); }
+  events(after) { return sseOf(this.client.stream("GET", this.url(this.routes.events, { [this.routes.afterParam]: after }))); }
+  snapshot(after) { return this.client.get(this.url(this.routes.snapshot, { [this.routes.afterParam]: after })); }
+  cancel(runId) { return this.client.post(this.url(this.routes.cancel(runId)), {}); }
 }
 
 // --wait alone waits 60 s; MCP passes the seconds.
 export const waitSeconds = (flag) => flag === true ? 60 : Number(flag) > 0 ? Number(flag) : 0;
+
+const FAILED = new Set(["failed", "interrupted"]);
+export const ACTIVE = new Set(["queued", "running", "waiting_for_tool", "compacting"]);
 
 // Play a Run's events to the reader. Reading never cancels the Run; only `stop` does.
 export async function observe(ctx, events) {
   const observer = new RunObserver();
   const write = ctx.json ? () => {} : (text) => ctx.stdout.write(text);
   for await (const event of events) write(observer.apply(event));
-  if (observer.status === "failed") ctx.exitCode = 1;
-  return { run_id: observer.runId, cursor: observer.cursor, status: observer.status, reply: { text: observer.text }, streamed: !ctx.json };
+  if (FAILED.has(observer.status)) ctx.exitCode = 1;
+  return { ...(observer.error ? { error: observer.error } : {}), run_id: observer.runId, cursor: observer.cursor, status: observer.status, reply: { text: observer.text }, streamed: !ctx.json };
 }
 
 // Send one logical message and return its outcome. `where` tells the reader how to look again.
@@ -59,8 +70,8 @@ export async function send(ctx, api, { content, flags, where, extra = {} }) {
   }
   const wait = waitSeconds(flags.wait);
   const r = { ...extra, client_message_id: key, ...await api.send({ content, key, wait }) };
-  if (r.status === "failed") ctx.exitCode = 1;
-  if (wait && r.status === "running") ctx.log(`Still running. Read the reply later with \`${where}\`.`);
+  if (FAILED.has(r.status)) ctx.exitCode = 1;
+  if (wait && ACTIVE.has(r.status)) ctx.log(`Still running. Read the reply later with \`${where}\`.`);
   return r;
 }
 
@@ -73,5 +84,5 @@ export const sendOptions = {
 };
 
 export const formatMessages = (r) => r.messages?.length
-  ? r.messages.map((m) => `[${m.id}] ${m.role === "user" ? "you" : "assistant"} (${m.created_at})\n${m.text}`).join("\n\n")
+  ? r.messages.map((m) => `[${m.id ?? m.run_id}] ${m.role === "user" ? "you" : "assistant"} (${m.created_at ?? m.timestamp})\n${m.text ?? m.content}`).join("\n\n")
   : "No messages.";

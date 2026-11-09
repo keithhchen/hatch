@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { Pool } from "pg";
-import type { ChannelCapabilities } from "../surfaces/contract.js";
+import type { ChannelCapabilities, ClientAttributes, ContentPart, Principal } from "../surfaces/contract.js";
 import { ChannelHub } from "./hub.js";
 import { ChannelService, openChannelStores } from "./service.js";
 import { ChannelSendError, type ChannelAdapter, type ChannelKind, type InboundEvent, type InboundFile, type OutboundMessage, type PlatformAddress } from "./types.js";
 import type { ChatGateway, Handled, Inbound, TargetHandler } from "./ports.js";
+import type { ConversationRef, RunProgress } from "../chat/gateway.js";
 import { ProductTarget } from "./productTarget.js";
+import { GuardedTarget, liveOwnProduct } from "./guardedTarget.js";
+import { ChatError } from "../chat/principal.js";
 import { PostgresConnections } from "./connections.js";
 import { PostgresInbox } from "./inbox.js";
 import { PostgresRateLimiter } from "./rateLimiter.js";
@@ -63,19 +66,29 @@ class RecordingTarget implements TargetHandler {
   async linked() { return "linked"; }
 }
 
+/** Stands in for Chat in another process: it answers from state of its own, the way the durable Runtime does, and never calls back. */
 class FakeGateway implements ChatGateway {
-  submitted: Array<Parameters<ChatGateway["submit"]>[0]> = [];
-  results = new Map<string, { ok: boolean; text: string }>();
-  private ends = new Set<(runId: string) => void>();
-  private compactions = new Set<(event: { runId: string; compactionId: string }) => void>();
-  async submit(input: Parameters<ChatGateway["submit"]>[0]) { this.submitted.push(input); return { runId: `run-${this.submitted.length}` }; }
-  async upload() { return { assetId: "asset-1" }; }
-  async finalReply(runId: string) { return this.results.get(runId); }
-  onRunEnd(listener: (runId: string) => void) { this.ends.add(listener); return () => void this.ends.delete(listener); }
-  onCompaction(listener: (event: { runId: string; compactionId: string }) => void) { this.compactions.add(listener); return () => void this.compactions.delete(listener); }
-  /** `announce: false` is a Run that ended while nobody was listening, such as across a restart. */
-  finish(runId: string, result: { ok: boolean; text: string }, announce = true) { this.results.set(runId, result); if (announce) for (const listener of this.ends) listener(runId); }
-  compact(runId: string, compactionId: string) { for (const listener of this.compactions) listener({ runId, compactionId }); }
+  submitted: Array<{ principal: Principal; conversation: ConversationRef; client: ClientAttributes; messageId: string; parts: ContentPart[] }> = [];
+  uploaded: Array<{ principal: Principal; conversation: ConversationRef; name: string }> = [];
+  /** A failure for the next call to `send`: a ChatError is a refusal, anything else is a gateway that could not be reached. */
+  failSend: Error | undefined;
+  private runs = new Map<string, RunProgress>();
+  private byMessage = new Map<string, string>();
+  /** Like Chat, a repeated message id is the same message and Run. */
+  async send(principal: Principal, conversation: ConversationRef, client: ClientAttributes, messageId: string, parts: ContentPart[]) {
+    if (this.failSend) { const error = this.failSend; this.failSend = undefined; throw error; }
+    const known = this.byMessage.get(messageId);
+    if (known) return { outcome: "replayed" as const, conversationId: "conversation-1", runId: known, messageId };
+    this.submitted.push({ principal, conversation, client, messageId, parts });
+    const runId = `run-${this.submitted.length}`;
+    this.byMessage.set(messageId, runId);
+    this.runs.set(runId, { ended: false });
+    return { outcome: "started" as const, conversationId: "conversation-1", runId, messageId };
+  }
+  async upload(principal: Principal, conversation: ConversationRef, input: { name: string }) { this.uploaded.push({ principal, conversation, name: input.name }); return { assetId: "asset-1" }; }
+  async progress(runId: string) { return this.runs.get(runId); }
+  finish(runId: string, result: { ok: boolean; text: string }) { this.runs.set(runId, { ended: true, reply: { runId, status: result.ok ? "completed" : "failed", text: result.ok ? result.text : "" } }); }
+  compact(runId: string, compactionId: string) { if (!this.runs.get(runId)?.ended) this.runs.set(runId, { ended: false, compactionId }); }
 }
 
 const scopeOf = (accountId: string, kind: ChannelKind) => kind === "lark" ? accountId : "";
@@ -525,8 +538,8 @@ test("A public contact has a contact principal and never reaches Studio tools", 
     const [first] = gateway.submitted;
     assert.equal(first!.principal.kind, "contact");
     assert.equal(first!.principal.kind === "contact" && first!.principal.connectionId, connectionId);
-    assert.equal(first!.client, "im");
-    assert.equal(first!.productId, "p1");
+    assert.deepEqual(first!.client, { client: "im" });
+    assert.deepEqual(first!.conversation, { kind: "thread", connectionId, threadId: "stranger" });
     assert.deepEqual(first!.parts, [{ type: "text", text: "How much?" }]);
     assert.match(adapter.texts.at(-1)!, /Too many messages/);
   } finally { await env.service.close(); }
@@ -546,7 +559,7 @@ test("A Run's final reply is sent once, however it is announced, and a failed Ru
     await env.service.accept(env.adapter, [first, first]);
     await env.settle();
     assert.equal(gateway.submitted.length, 1);
-    assert.equal(gateway.submitted[0]!.clientKey, first.eventId, "the event id is the idempotency key");
+    assert.equal(gateway.submitted[0]!.messageId, first.eventId, "the event id is the idempotency key");
     assert.equal(gateway.submitted[0]!.principal.kind, "contact", "org members act as contacts, never as accounts");
     assert.deepEqual(env.adapter.texts, [], "no reply while the Run is going");
     gateway.finish("run-1", { ok: true, text: "the answer" });
@@ -555,10 +568,10 @@ test("A Run's final reply is sent once, however it is announced, and a failed Ru
     await env.settle();
     assert.deepEqual(env.adapter.texts, ["the answer"]);
     assert.equal(env.adapter.sent[0]!.message.replyTo, first.messageRef);
-    // A Run that ended while nobody listened is found by the sweep. A failed one is reported plainly.
+    // A Run's end is read from Chat's durable state, so it is found whenever it happened. A failed one is reported plainly.
     await env.service.accept(env.adapter, [message("member", "again")]);
     await env.settle();
-    gateway.finish("run-2", { ok: false, text: "internal stack trace" }, false);
+    gateway.finish("run-2", { ok: false, text: "internal stack trace" });
     await env.settle();
     assert.match(env.adapter.texts.at(-1)!, /Something went wrong/);
     assert.ok(!env.adapter.texts.join("").includes("stack trace"));
@@ -577,12 +590,10 @@ test("Compaction: one notice per compaction, only where someone is waiting, and 
     await env.service.accept(env.adapter, [message("member", "long question")]);
     await env.settle();
     gateway.compact("run-1", "c1");
-    gateway.compact("run-1", "c1");
-    await new Promise(resolve => setTimeout(resolve, 100));
     await env.settle();
-    assert.equal(env.adapter.texts.length, 1, "twice announced, once told");
+    await env.settle();
+    assert.equal(env.adapter.texts.length, 1, "seen twice, told once");
     gateway.compact("run-1", "c2");
-    await new Promise(resolve => setTimeout(resolve, 100));
     await env.settle();
     assert.equal(env.adapter.texts.length, 2, "a second compaction is a second notice");
     assert.equal(gateway.submitted.length, 1, "notices never enter the conversation");
@@ -590,11 +601,103 @@ test("Compaction: one notice per compaction, only where someone is waiting, and 
     gateway.finish("run-1", { ok: true, text: "done" });
     await env.settle();
     gateway.compact("run-1", "c3");
-    await new Promise(resolve => setTimeout(resolve, 100));
     await env.settle();
     assert.equal(env.adapter.texts.length, 3, "only the answer was added");
     assert.equal(env.adapter.texts.at(-1), "done");
   } finally { await env.service.close(); }
+}));
+
+/** A Connection of audience `org` to product p1, with `member` admitted. */
+async function orgMember(pool: Pool, owner = randomUUID()) {
+  const connectionId = (await pool.query("INSERT INTO hatch_connections (owner_account_id, channel, target, target_key, audience) VALUES ($1, 'telegram', $2, 'product:p1', 'org') RETURNING id", [owner, JSON.stringify({ kind: "product", productId: "p1" })])).rows[0].id;
+  await pool.query("INSERT INTO hatch_channel_identities (connection_id, channel, scope, sender_id, thread_id) VALUES ($1, 'telegram', '', 'member', 'member')", [connectionId]);
+  return { owner, connectionId: connectionId as string };
+}
+
+test("A file a contact sends is uploaded into the conversation's scope and sent as a part of the same message", options, async () => isolated(async pool => {
+  const gateway = new FakeGateway();
+  const env = await stack(pool, { gateway });
+  env.service.register("product", new ProductTarget({ gateway, limiter: env.limiter }));
+  const { connectionId } = await orgMember(pool);
+  env.service.start();
+  try {
+    await env.service.accept(env.adapter, [message("member", "see this", { file: { ref: "f1", name: "plan.pdf", size: 5 } }), message("member", "", { file: { ref: "f2", name: "face.jpg", size: 5 } })]);
+    await env.settle();
+    assert.deepEqual(gateway.uploaded.map(upload => [upload.name, upload.conversation]), [["plan.pdf", { kind: "thread", connectionId, threadId: "member" }], ["face.jpg", { kind: "thread", connectionId, threadId: "member" }]]);
+    assert.deepEqual(gateway.submitted.map(sent => sent.parts), [[{ type: "text", text: "see this" }, { type: "file", assetId: "asset-1" }], [{ type: "image", assetId: "asset-1" }]]);
+  } finally { await env.service.close(); }
+}));
+
+test("A refusal from Chat goes back to the sender; an unreachable Chat returns the event to the queue, and the retry is the same message", options, async () => isolated(async pool => {
+  const gateway = new FakeGateway();
+  const env = await stack(pool, { gateway });
+  env.service.register("product", new ProductTarget({ gateway, limiter: env.limiter }));
+  await orgMember(pool);
+  env.service.start();
+  try {
+    gateway.failSend = new ChatError("contact_limit_reached", "This contact has reached the message limit.", 429);
+    await env.service.accept(env.adapter, [message("member", "one")]);
+    await env.settle();
+    assert.deepEqual(env.adapter.texts, ["This contact has reached the message limit."]);
+    assert.equal(gateway.submitted.length, 0);
+    assert.equal((await pool.query("SELECT count(*)::int AS n FROM hatch_channel_inbox WHERE state = 'failed'")).rows[0].n, 0, "a refusal is an answer, not a failure to retry");
+    gateway.failSend = new Error("connect ECONNREFUSED");
+    const event = message("member", "two");
+    await env.service.accept(env.adapter, [event]);
+    await env.service.drain();
+    assert.equal(gateway.submitted.length, 0, "Chat was unreachable");
+    assert.equal(env.errors.length, 1);
+    env.advance(10_000);
+    await env.settle();
+    assert.deepEqual(gateway.submitted.map(sent => sent.messageId), [event.eventId], "tried again with the same key");
+  } finally { await env.service.close(); }
+}));
+
+test("Eligibility is checked before Chat: a Product that is not live and the owner's own gets a notice and no Run", options, async () => isolated(async pool => {
+  const gateway = new FakeGateway();
+  const env = await stack(pool, { gateway });
+  const owner = randomUUID();
+  const live = new Map<string, { creator_id: string }>();
+  env.service.register("product", new GuardedTarget(new ProductTarget({ gateway, limiter: env.limiter }), [liveOwnProduct({ getLive: async productId => live.get(productId) })]));
+  await orgMember(pool, owner);
+  env.service.start();
+  try {
+    await env.service.accept(env.adapter, [message("member", "anyone there?")]);
+    await env.settle();
+    assert.match(env.adapter.texts.at(-1)!, /not available right now/);
+    live.set("p1", { creator_id: randomUUID() });
+    await env.service.accept(env.adapter, [message("member", "still?")]);
+    await env.settle();
+    assert.equal(env.adapter.texts.length, 2, "another Expert's Product is not lent to this audience");
+    live.set("p1", { creator_id: owner });
+    await env.service.accept(env.adapter, [message("member", "now?")]);
+    await env.settle();
+    assert.equal(gateway.submitted.length, 1);
+  } finally { await env.service.close(); }
+}));
+
+test("A Registry restart loses neither a reply nor a compaction notice: both are read from Chat's durable state", options, async () => isolated(async pool => {
+  const gateway = new FakeGateway();
+  const first = await stack(pool, { gateway });
+  first.service.register("product", new ProductTarget({ gateway, limiter: first.limiter }));
+  await orgMember(pool);
+  first.service.start();
+  await first.service.accept(first.adapter, [message("member", "long question")]);
+  await first.settle();
+  await first.service.close();
+  // The old process is gone while the Run goes on in Chat.
+  gateway.compact("run-1", "run-1:7");
+  const second = await stack(pool, { gateway });
+  second.service.register("product", new ProductTarget({ gateway, limiter: second.limiter }));
+  second.service.start();
+  try {
+    await second.settle();
+    assert.equal(second.adapter.texts.length, 1, "told once that we are tidying up");
+    gateway.finish("run-1", { ok: true, text: "the answer" });
+    await second.settle();
+    await second.settle();
+    assert.deepEqual(second.adapter.texts.slice(1), ["the answer"]);
+  } finally { await second.service.close(); }
 }));
 
 test("Telegram: a mention in a group reaches the Assistant of the sender who linked, and the reply goes to the group", options, async () => isolated(async pool => {

@@ -29,7 +29,10 @@ function toEvent(block) {
   return { id: fields.id, event: fields.event ?? "message", data };
 }
 
-export const isTerminal = (e) => e.event === "done" || (e.event === "state" && e.data?.status !== "running");
+// Chat ends a Run with a durable journal `run.state` carrying one of these; the live `turn.state` is not authority.
+const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "interrupted"]);
+export const isTerminal = (e) => e.event === "done" || (e.event === "state" && e.data?.status !== "running")
+  || (e.event === "journal.event" && e.data?.journal_type === "run.state" && TERMINAL_STATUSES.has(e.data.payload?.status));
 
 // Domain object: folds a Run's events into what a caller needs. The cursor is the last event seen.
 export class RunObserver {
@@ -37,12 +40,21 @@ export class RunObserver {
   runId;
   cursor;
   status;
+  error;
 
   // Returns the text that is new to the reader.
   apply({ id, event, data }) {
     this.cursor = id ?? this.cursor;
     this.runId = data?.run_id ?? this.runId;
     if (event === "delta") { this.text += data.text; return data.text; }
+    if (event === "assistant.delta") {
+      if (data.delta?.kind !== "text") return "";
+      this.text += data.delta.content;
+      return data.delta.content;
+    }
+    if (event === "journal.event") { if (data.journal_type === "run.state") this.status = data.payload?.status; return ""; }
+    if (event === "turn.state") this.status = data.status;
+    if (event === "turn.failed") { this.status = "failed"; this.error = data.error; }
     if (event === "message" && data?.role !== "user") {
       const fresh = this.text ? "" : data.text;
       this.text = data.text;

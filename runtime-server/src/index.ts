@@ -104,7 +104,16 @@ import { ContactBinder, type ConnectionDirectory } from "./chat/contactBinding.j
 import type { ChatGateway } from "./chat/gateway.js";
 import { checkUpgrade, sessionTokenFromCookie } from "./chat/originPolicy.js";
 import { RunHandoff } from "./chat/runSupervisor.js";
-import { ServiceChatGateway, TextPartsReader } from "./chat/serviceGateway.js";
+import { ServiceChatGateway } from "./chat/serviceGateway.js";
+import { ChatServiceApi } from "./chat/serviceApi.js";
+import { ChatAssets, TextPartsReader, type PartsReader, type PreparedMessage } from "./chat/assets.js";
+import { attachmentToolDefinitions } from "./chat/attachmentTools.js";
+import { withinImageBudget } from "./chat/imageBudget.js";
+import { toolRegistry } from "./tools.js";
+import { MAX_BYTES as MAX_ASSET_BYTES } from "./assets/pipeline.js";
+import { RegistryConnectionDirectory } from "./chat/registryConnections.js";
+import { openChatAssets } from "./chat/openChatAssets.js";
+import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
 import { SocketSink, SseSink } from "./chat/sinks.js";
 import { authorizeLocalToolCall, productRequiresLocalTools } from "./chat/toolSurface.js";
 import type { ScopeResolver, TurnRunner } from "./chat/turnExecutor.js";
@@ -122,6 +131,9 @@ export type RuntimeServer = {
   chat: ChatGateway;
   close: () => Promise<void>;
 };
+
+/** The largest file the asset pipeline takes: a larger upload is refused before it is read. */
+const MAX_UPLOAD_BYTES = Math.max(...Object.values(MAX_ASSET_BYTES));
 
 /** The longest a client may ask a request to wait for a Run's result. */
 const MAX_WAIT_SECONDS = 60;
@@ -172,6 +184,10 @@ export type RuntimeServerOptions = {
   principalLimits?: PrincipalLimits;
   /** The channel layer's Connections, which a customer's messages arrive through. */
   connectionDirectory?: ConnectionDirectory;
+  /** Uploads, attachments in messages, and the ls/grep/read tools over them. Without it a message takes text only. */
+  chatAssets?: ChatAssets;
+  /** The token the channel layer presents to reach Chat from another process; without it that door stays shut. */
+  chatServiceToken?: string;
   /** Pending and active runs admitted for one authenticated user. */
   maxActiveRunsPerUser?: number;
   /** Pending and active runs admitted across the Runtime process. */
@@ -385,6 +401,11 @@ export async function createRuntimeServerFromEnvironment(
   if (registryUrl && commerceEventSink && environment.NODE_ENV === "production" && !deliveryOutboxFile) {
     throw new Error("HATCH_DELIVERY_OUTBOX_FILE or HATCH_RUNTIME_DATA_DIR is required for production delivery recovery.");
   }
+  const conversationStore = createConversationStore(environment);
+  // Attachments need records that outlive a restart: without a Runtime database a message takes text only.
+  const chatAssets = conversationStore instanceof PostgresStore
+    ? await openChatAssets({ pool: conversationStore.pool, blobs: objectStoreFromEnvironment(environment, path.join(runtimeDataDir, "chat-assets"))!, environment })
+    : undefined;
   return createRuntimeServer({
     outputGuard: createOutputGuardFromEnvironment(environment),
     commerceEventSink,
@@ -406,8 +427,11 @@ export async function createRuntimeServerFromEnvironment(
       : runtimeCorpusRoot
         ? new FilesystemAgentCorpusResolver(runtimeCorpusRoot)
         : undefined,
-    conversationStore: createConversationStore(environment),
+    conversationStore,
+    ...(chatAssets ? { chatAssets } : {}),
     assetStore: runtimeAssetStoreFromEnvironment(environment, runtimeDataDir),
+    chatServiceToken: environment.HATCH_RUNTIME_CHAT_SERVICE_TOKEN?.trim() || undefined,
+    ...(registryUrl && runtimeRegistryToken ? { connectionDirectory: new RegistryConnectionDirectory({ registryUrl, serviceToken: runtimeRegistryToken, timeoutMs: registryAuthorizationTimeoutMs(environment) }) } : {}),
     clientToolTimeoutMs: clientToolTimeoutMs(environment.HATCH_CLIENT_TOOL_TIMEOUT_MS),
     clientHelloTimeoutMs: helloTimeoutMs,
     maxPendingTurnAuthorizations,
@@ -700,6 +724,10 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     throw new Error("maxHttpResponseBytes must be an integer of at least 1024");
   }
   const allowedOrigins = options.allowedOrigins ?? [];
+  // The attachment tools are part of the Chat tool set whenever this Runtime can hold attachments, for every Run.
+  const chatAssets = options.chatAssets;
+  if (chatAssets) for (const definition of attachmentToolDefinitions(chatAssets.tools())) toolRegistry.set(definition.name, definition);
+  const parts: PartsReader = chatAssets ?? new TextPartsReader();
 
   const admission: RunAdmission = {
     reserve(principal) {
@@ -751,6 +779,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
             turn.signal
           ));
         }
+        if (chatAssets) serverTools.setAttachments(chatAssets.toolsFor(turn.conversation));
         const sessionSkills = await buildSessionSkills(binding.agentCorpusRoot);
         await runOneTurn(
           turn.input, turn.persistedUser, sessionSkills, binding, turn.broker, serverTools,
@@ -778,11 +807,12 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   });
   void repositoryReady.then(() => chat.start()).catch(() => undefined);
   const edge: ChatEdge = {
-    chat, assetStore, turnAuthorizationGate, turnAuthorizationPerUserGate,
+    chat, assetStore, parts, chatAssets, turnAuthorizationGate, turnAuthorizationPerUserGate,
     entitlementResolver, authIdentityResolver, agentCorpusResolver,
     creatorToolControlPlane: options.creatorToolControlPlane
   };
-  const gateway = chatGatewayFor(options, chat, scopes, conversationRepository, conversationStore, agentCorpusResolver);
+  const gateway = chatGatewayFor(options, chat, scopes, conversationRepository, conversationStore, agentCorpusResolver, parts, chatAssets);
+  edge.serviceApi = new ChatServiceApi({ token: options.chatServiceToken, gateway });
 
   const server = http.createServer((req, res) => {
     const requestAbortController = new AbortController();
@@ -925,7 +955,9 @@ function chatGatewayFor(
   scopes: ScopeResolver<SessionBinding>,
   repository: ConversationRepository,
   store: RuntimeStore,
-  agentCorpusResolver: AgentCorpusResolver | undefined
+  agentCorpusResolver: AgentCorpusResolver | undefined,
+  parts: PartsReader,
+  chatAssets: ChatAssets | undefined
 ): ChatGateway {
   const contactBinder = options.connectionDirectory && agentCorpusResolver
     ? new ContactBinder(options.connectionDirectory, agentCorpusResolver, repository)
@@ -933,7 +965,8 @@ function chatGatewayFor(
   const unavailable = (kind: string): never => { throw new ChatError("binding_unavailable", `${kind} messages are not configured on this Runtime.`, 503); };
   return new ServiceChatGateway<SessionBinding>({
     chat: chat.service,
-    parts: new TextPartsReader(),
+    parts,
+    ...(chatAssets ? { uploads: chatAssets } : {}),
     repository,
     history: store,
     binders: {
@@ -1096,6 +1129,16 @@ async function handleHttpRequest(
       writeJsonBounded(res, 200, { creator_agents: creatorAgents }, maxHttpResponseBytes);
     } catch (error) {
       writeHttpAuthorizationFailure(res, error, "entitlement_lookup_failed");
+    }
+    return;
+  }
+
+  if (url.pathname.startsWith("/v1/service/chat/")) {
+    try {
+      await repositoryReady;
+      if (!await edge?.serviceApi?.handle(req, res, url)) throw new ConversationHttpError(404, "not_found", "Route was not found.");
+    } catch (error) {
+      writeConversationHttpError(res, error);
     }
     return;
   }
@@ -1383,6 +1426,21 @@ async function handleConversationHttpRequest(
     throw new ConversationHttpError(405, "method_not_allowed", "Use GET or POST for /v1/conversations.");
   }
 
+  const uploadMatch = url.pathname.match(/^\/v1\/conversations\/([^/]+)\/assets$/);
+  if (uploadMatch) {
+    if (req.method !== "POST") throw new ConversationHttpError(405, "method_not_allowed", "Use POST to upload a file.");
+    const conversation = await requireBoundConversation(repository, binding, decodeURIComponent(uploadMatch[1] ?? ""));
+    const chatAssets = requireEdge().chatAssets;
+    if (!chatAssets) throw new ConversationHttpError(501, "attachments_unavailable", "This Runtime cannot take attachments.");
+    // The file is the request body and its name is `?name=`: it becomes a ready asset, or is refused with the reason.
+    const name = url.searchParams.get("name")?.trim();
+    if (!name) throw new ConversationHttpError(400, "invalid_upload", "name is the file's name.");
+    const bytes = await readBoundedBytes(req, MAX_UPLOAD_BYTES);
+    if (!bytes.length) throw new ConversationHttpError(400, "invalid_upload", "The file is empty.");
+    writeResponse(201, await chatAssets.upload(conversation, { name, bytes }));
+    return;
+  }
+
   const assetMatch = url.pathname.match(/^\/v1\/conversations\/([^/]+)\/assets\/([^/]+)$/);
   if (assetMatch) {
     const conversation = await requireBoundConversation(repository, binding, decodeURIComponent(assetMatch[1] ?? ""));
@@ -1525,20 +1583,20 @@ async function handleConversationHttpRequest(
     if ((body.content === undefined) === (body.parts === undefined)) {
       throw new ConversationHttpError(400, "invalid_request", "Provide either content or parts.");
     }
-    const parts = body.content !== undefined
-      ? [{ type: "text" as const, text: requiredString(body, "content", MAX_USER_MESSAGE_CHARS) }]
-      : contentPartsOf(body.parts);
-    const { message } = await new TextPartsReader().read(parts);
+    const content = body.content !== undefined ? requiredString(body, "content", MAX_USER_MESSAGE_CHARS) : "";
+    const chatEdge = requireEdge();
+    // Parts may refer to ready assets: they are resolved before anything is accepted.
+    const prepared = body.parts !== undefined ? await chatEdge.parts.prepare(contentPartsOf(body.parts), conversation, clientMessageId) : undefined;
     const wait = parseNonNegativeInteger(url.searchParams.get("wait"), "wait") ?? 0;
     const streaming = String(req.headers.accept ?? "").includes("text/event-stream");
     // Without more to go on, an HTTP caller is an agent without a machine for local tools.
     const client = clientAttributesOf({ client: "mcp", ...body } as { client?: string });
-    const chatEdge = requireEdge();
     const before = (await repository.recoverySnapshot(conversation.id, [])).cursor;
     const { submission } = await submitUserMessage(chatEdge, { authToken, binding, conversation }, {
       runId: `run_${randomUUID().replaceAll("-", "")}`,
       clientMessageId,
-      message: { role: "user", content: message.content ?? "" },
+      ...(prepared ? { prepared } : {}),
+      message: { role: "user", content },
       taskStart: false,
       client,
       ...(typeof body.time_zone === "string" ? { timeZone: body.time_zone } : {})
@@ -1794,6 +1852,18 @@ function parseNonNegativeInteger(value: string | null, field: string): number | 
   return parsed;
 }
 
+async function readBoundedBytes(req: http.IncomingMessage, maxBytes: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of req) {
+    const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += value.byteLength;
+    if (total > maxBytes) throw new ConversationHttpError(413, "request_too_large", `A file is limited to ${maxBytes} bytes.`);
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks);
+}
+
 async function readJsonObject(req: http.IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   let total = 0;
@@ -2028,6 +2098,10 @@ async function materializeUserMessageAssets(
 type ChatEdge = {
   chat: ChatRuntime<SessionBinding>;
   assetStore: RuntimeAssetStore;
+  parts: PartsReader;
+  chatAssets?: ChatAssets;
+  /** The channel layer's door into Chat from another process. */
+  serviceApi?: ChatServiceApi;
   turnAuthorizationGate: CapacityGate;
   turnAuthorizationPerUserGate: KeyedCapacityGate;
   entitlementResolver?: EntitlementResolver;
@@ -2043,6 +2117,8 @@ type ChatSession = {
 };
 
 type ChatMessageRequest = {
+  /** Parts a client sent, already resolved: the canonical message and digest come from them. */
+  prepared?: PreparedMessage;
   runId: string;
   clientMessageId: string;
   message: RunStart["message"];
@@ -2091,9 +2167,9 @@ async function submitUserMessage(
   if (request.taskStart && binding.briefSpec && !session.conversation.briefSnapshot) {
     throw new ChatError("conversation_brief_required", "A Brief is required before starting this task.", 409);
   }
-  const canonicalMessage = async (): Promise<ConversationMessage> => request.taskStart
+  const canonicalMessage = request.prepared?.message ?? (async (): Promise<ConversationMessage> => request.taskStart
     ? { role: "user", content: TASK_START_MESSAGE_CONTENT, kind: "task_start" }
-    : materializeUserMessageAssets(request.message, edge.assetStore);
+    : materializeUserMessageAssets(request.message, edge.assetStore));
   signal?.throwIfAborted();
   const submission = await edge.chat.service.submit({
     principal: accountPrincipal(binding.userId),
@@ -2102,7 +2178,7 @@ async function submitUserMessage(
     client: request.client,
     clientMessageId: request.clientMessageId,
     message: canonicalMessage,
-    digest: clientMessageInputDigest({ ...request.message, ...(request.taskStart ? { task_start: true } : {}) }),
+    digest: request.prepared?.digest ?? clientMessageInputDigest({ ...request.message, ...(request.taskStart ? { task_start: true } : {}) }),
     runId: request.runId,
     corpusDigest: binding.corpusDigest,
     requiresLocalTools: binding.agentCorpus ? productRequiresLocalTools(binding.agentCorpus) : false,
@@ -2805,7 +2881,8 @@ async function runOneTurnInternal(
     }
 
     setupCompleted = performance.now();
-    const messages = runtimeMessages;
+    // Older images beyond the byte budget leave the model's view; the path labels in the text stay.
+    const messages = withinImageBudget(runtimeMessages);
 
     // Store/materialization work may race with a disconnect. Never start a
     // provider request after the owning run has already been aborted.
