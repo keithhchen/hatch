@@ -157,6 +157,19 @@ test("a send dropped before any event is retried with the same client_message_id
   });
 });
 
+test("a replayed send of a finished Run returns its result from one request, however the stream ends", async () => {
+  await withServer((call, res) => {
+    if (call.method !== "POST") return json(res, {}, 404);
+    // What the Runtime answers a replay after the Run ended: the accept, the reply, the end, then the stream closes.
+    stream(res, [[undefined, "message.accepted", { type: "message.accepted", run_id: "r1", outcome: "replayed" }], delta("the answer"), done("9")]);
+  }, async (url, requests) => {
+    const r = await cli(["ask", "hi", "--conversation", "c1", "--product", "p1", "--stream", "--key", "k-9", "--json"], url);
+    assert.equal(r.code, 0, r.err);
+    assert.deepEqual([JSON.parse(r.out).reply.text, JSON.parse(r.out).status, JSON.parse(r.out).cursor], ["the answer", "completed", "9"]);
+    assert.equal(requests.length, 1, "nothing is opened to wait for an end that already happened");
+  });
+});
+
 test("watch resumes from --after with after_cursor and stops at a terminal run.state", async () => {
   await withServer((call, res) => {
     if (call.url === "/v1/conversations/c1/events?product_id=p1&after_cursor=6") return stream(res, [delta("x"), runState("7", "running"), runState("8", "cancelled")]);
