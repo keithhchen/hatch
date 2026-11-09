@@ -62,18 +62,21 @@ test("a contact past its message limit is refused before any Run exists", () => 
   await assert.rejects(runtime.chat.send(alice, thread, dm, "evt-2", text("two")), { code: "contact_limit_reached" });
 }));
 
-test("progress names each compaction, so a notice is sent once per compaction and the Run's end carries its reply", () => {
+test("progress names each compaction by the durable id Chat announced, so a notice is sent once per compaction and the Run's end carries its reply", () => {
   const gates: Array<() => void> = [];
+  let journal: Fixture["repository"];
   const runtime: AgentRuntime = { async *run(input, ctx) {
     for (const phase of ["pre_turn", "mid_turn"] as const) {
       await ctx.state.compact(phase);
+      await journal.appendEvent({ conversationId: (await journal.findRun(input.run_id))!.conversationId, runId: input.run_id, type: "compaction.started", payload: { compaction_id: `cmp_${phase}` } });
       await new Promise<void>((resolve) => gates.push(resolve));
       await ctx.state.start();
     }
     yield { type: "assistant.delta" as const, run_id: input.run_id, delta: { kind: "text" as const, content: "done" } };
     yield { type: "turn.completed" as const, run_id: input.run_id, finish_reason: "stop" as const };
   } };
-  return withFixture({ runtime }, async ({ runtime: server }) => {
+  return withFixture({ runtime }, async ({ runtime: server, repository }) => {
+    journal = repository;
     const sent = await server.chat.send(alice, thread, dm, "evt-c", text("long question"));
     const compactionOf = async () => {
       for (let waited = 0; waited < 500; waited += 1) {
@@ -84,11 +87,12 @@ test("progress names each compaction, so a notice is sent once per compaction an
       throw new Error("no compaction");
     };
     const first = await compactionOf();
+    assert.equal(first, "cmp_pre_turn");
     assert.equal(await compactionOf(), first, "one compaction has one id however often it is asked");
     gates.shift()!();
     for (let waited = 0; (await compactionOf()) === first && waited < 100; waited += 1) await sleep(20);
     const second = await compactionOf();
-    assert.notEqual(second, first, "the next compaction is another notice");
+    assert.equal(second, "cmp_mid_turn", "the next compaction is another notice");
     while (gates.length) gates.shift()!();
     assert.equal((await ended(server.chat, sent.runId)).text, "done");
   });

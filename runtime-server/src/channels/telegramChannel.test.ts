@@ -90,7 +90,7 @@ test("channels and other chat types are ignored", () => {
 
 test("a callback query takes the sender from `from` and the thread from the message's chat", () => {
   const update = { update_id: 5, callback_query: { id: "q1", from: { id: 7 }, data: `t:${TASK}:approve`, message: { message_id: 20, chat: { id: -100, type: "supergroup" } } } };
-  assert.deepEqual(parse(update), [{ eventId: "5", address: GROUP, button: { taskId: TASK, action: "approve", ref: "q1|-100|20" } }]);
+  assert.deepEqual(parse(update), [{ eventId: "5", address: GROUP, group: true, button: { taskId: TASK, action: "approve", ref: "q1|-100|20" } }]);
   const unknown = parse({ ...update, callback_query: { ...update.callback_query, data: "menu" } });
   assert.deepEqual(unknown[0]?.button, { taskId: "", action: "decline", ref: "q1|-100|20" });
 });

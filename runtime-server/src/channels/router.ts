@@ -1,5 +1,5 @@
 import { CHANNEL_LABELS, type ChannelKind } from "./types.js";
-import { assertReachable, LINK_CODE_PATTERN, principalFor, type ConnectionRepository } from "./connections.js";
+import { assertReachable, LINK_CODE_PATTERN, principalFor, START_CODE_PATTERN, type ConnectionRepository } from "./connections.js";
 import type { ChannelHub } from "./hub.js";
 import type { InboxItem } from "./inbox.js";
 import type { Handled, Inbound, TargetHandler, TargetKind } from "./ports.js";
@@ -29,6 +29,13 @@ export class ChannelRouter {
       if (!linked) { await say(`这个连接码已失效。请回到 Hatch Studio 重新点「连接 ${CHANNEL_LABELS[channel]}」。`); return { replied: true }; }
       await say(await this.handler(linked.target.kind).linked(linked), linked.id);
       return { replied: true, connectionId: linked.id };
+    }
+    // A public Connection's deep link, on any bot: the sender becomes its contact and later messages follow.
+    const start = event.button || event.group ? undefined : event.text?.match(START_CODE_PATTERN)?.[0];
+    const met = start && await connections.meetByStartCode(channel, scope, start, event.address);
+    if (met) {
+      await say(await this.handler(met.connection.target.kind).linked(met.connection), met.connection.id);
+      return { replied: true, connectionId: met.connection.id };
     }
     const resolved = await connections.resolveConnection({ channel, scope, senderId: event.address.senderId });
     // `public` takes anyone as a contact; every other audience takes only senders that were admitted.
