@@ -14,7 +14,7 @@ export type CompactionNotice = {
   conversationId: string;
   runId?: string;
   compactionId: string;
-  state: "started" | "completed";
+  state: "started" | "completed" | "aborted";
   /** A failed summary left only a bounded tail: this is the one case the user is told. */
   degraded?: boolean;
   droppedMessages?: number;
@@ -34,7 +34,7 @@ export interface RunCompactions {
 
 type Repository = Pick<ConversationRepository, "appendEvent" | "beginCompaction" | "requestCompactionPreempt" | "compactionStopped" | "runningCompaction" | "endCompaction" | "commitCompaction">;
 
-type Request = { trigger: CompactionTrigger; phase: CompactionPhase; reason: CompactionReason; force?: boolean; tailScale?: number };
+type Request = { trigger: CompactionTrigger; phase: CompactionPhase; reason: CompactionReason; force?: boolean; tailScale?: number; turnWaiting?: boolean };
 
 const messageOf = (outcome: Exclude<CompactionOutcome<RuntimeCompactionMessage>, { kind: "none" }>): string =>
   outcome.kind === "summarized" ? `${SUMMARY_PREFIX}${outcome.summary}${SUMMARY_SUFFIX}`
@@ -95,23 +95,26 @@ export class ChatCompaction implements RunCompactions {
       const now = (this.deps.now ?? Date.now)();
       // Between tool steps the provider has just seen this prefix; before a turn it has not been seen since the last event.
       const cacheTouchedAt = request.phase === "mid_turn" ? now : await store.lastActivityAt(conversation.id);
-      const strategyRequest = { now, cacheTouchedAt, signal, force: request.force, tailScale: request.tailScale, onFailure: request.trigger === "manual" ? "throw" as const : "degrade" as const };
+      const strategyRequest = { now, cacheTouchedAt, signal, force: request.force, turnWaiting: request.turnWaiting, tailScale: request.tailScale, onFailure: request.trigger === "manual" ? "throw" as const : "degrade" as const };
       if (!strategy.wants(messages, strategyRequest)) return undefined;
       const compactionId = newCompactionId();
       await state.compact(request.phase);
       await this.announce({ conversationId: conversation.id, runId: run.id, compactionId, state: "started" }, { phase: request.phase });
+      let checkpoint: CompactionCheckpoint | undefined;
       try {
         const outcome = await strategy.compact(messages, strategyRequest);
         if (outcome.kind === "none") return undefined;
-        const checkpoint = await this.commit(conversation.id, run.id, compactionId, request, outcome);
+        checkpoint = await this.commit(conversation.id, run.id, compactionId, request, outcome);
         if (checkpoint) publish({ type: "session.compacted", run_id: run.id, ...checkpoint } as OutboundMessage);
         return checkpoint;
       } finally {
+        // Every `started` ends: `completed` by the commit, otherwise `aborted`.
+        if (!checkpoint) await this.announce({ conversationId: conversation.id, runId: run.id, compactionId, state: "aborted" });
         await state.start().catch(() => undefined);
       }
     };
     return {
-      ifNeeded: (messages, phase) => compact(messages, { trigger: "auto", phase, reason: "context_limit" }),
+      ifNeeded: (messages, phase) => compact(messages, { trigger: "auto", phase, reason: "context_limit", turnWaiting: phase === "pre_turn" }),
       manual: (messages) => compact(messages, { trigger: "manual", phase: "standalone_turn", reason: "user_requested", force: true }),
       recoverFromOverflow: async (messages) => {
         if (overflows >= this.deps.strategy().policy.maxOverflowRetries) return undefined;
@@ -130,6 +133,8 @@ export class ChatCompaction implements RunCompactions {
     if (!claim.claimed) return;
     // A new message on any instance marks the claim; this is how this job hears about it.
     const stopped = new AbortController();
+    let started = false;
+    let committed = false;
     const poll = setInterval(() => void repository.compactionStopped(compactionId).then((stop) => { if (stop) stopped.abort(new CompactionAborted()); }, () => undefined), this.deps.stopPollMs ?? 300);
     try {
       const now = (this.deps.now ?? Date.now)();
@@ -142,14 +147,15 @@ export class ChatCompaction implements RunCompactions {
         return strategy.tokensOf(messages) >= strategy.policy.prune && waitMs > 0 ? { again: waitMs } : undefined;
       }
       await this.announce({ conversationId: run.conversationId, runId: run.id, compactionId, state: "started" }, { phase: "background" });
+      started = true;
       const outcome = await strategy.compact(messages, request);
-      if (outcome.kind === "none") return;
-      await this.commit(run.conversationId, run.id, compactionId, { trigger: "auto", phase: "background", reason: "context_limit" }, outcome, { latestRunId: claim.latestRunId });
+      if (outcome.kind !== "none") committed = Boolean(await this.commit(run.conversationId, run.id, compactionId, { trigger: "auto", phase: "background", reason: "context_limit" }, outcome, { latestRunId: claim.latestRunId }));
     } catch (error) {
       // Preempted: the history is untouched and the new message proceeds. Anything else is retried after the next reply.
       if (!(error instanceof CompactionAborted)) throw error;
     } finally {
       clearInterval(poll);
+      if (started && !committed) await this.announce({ conversationId: run.conversationId, runId: run.id, compactionId, state: "aborted" });
       await repository.endCompaction(compactionId);
     }
   }
@@ -178,10 +184,10 @@ export class ChatCompaction implements RunCompactions {
     return checkpoint;
   }
 
-  /** Live to observers and listeners; `started` is also durable, so a channel that was down still sees the id. */
+  /** Live to observers and listeners; `started` and `aborted` are also durable (`completed` is journaled by the commit), so a channel that was down still sees the id. */
   private async announce(notice: CompactionNotice, detail: { phase?: CompactionPhase } = {}): Promise<void> {
-    if (notice.state === "started") {
-      await this.deps.repository.appendEvent({ conversationId: notice.conversationId, ...(notice.runId ? { runId: notice.runId } : {}), type: "compaction.started", payload: { compaction_id: notice.compactionId, ...detail } }).catch(() => undefined);
+    if (notice.state !== "completed") {
+      await this.deps.repository.appendEvent({ conversationId: notice.conversationId, ...(notice.runId ? { runId: notice.runId } : {}), type: `compaction.${notice.state}`, payload: { compaction_id: notice.compactionId, ...detail } }).catch(() => undefined);
     }
     this.deps.hub.publish(notice.conversationId, {
       type: `compaction.${notice.state}`, compaction_id: notice.compactionId, ...(notice.runId ? { run_id: notice.runId } : {}),

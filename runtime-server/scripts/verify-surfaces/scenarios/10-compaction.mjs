@@ -115,12 +115,18 @@ class Compaction extends Scenario {
       const claim = (await probe.claims(internalId)).slice(claimsBefore).find((c) => c.id === started.payload.compaction_id);
       const inRunStarts = journal.filter((e) => e.runId === runId && e.type === "compaction.started");
       const completedFor = (id) => journal.find((e) => e.type === "compaction.completed" && e.payload.compaction_id === id);
+      const endedFor = (id) => journal.find((e) => (e.type === "compaction.completed" || e.type === "compaction.aborted") && e.payload.compaction_id === id);
       const inRun = inRunStarts.map((e) => ({ id: e.payload.compaction_id, phase: e.payload.phase, completed: Boolean(completedFor(e.payload.compaction_id)), ms: completedFor(e.payload.compaction_id) ? completedFor(e.payload.compaction_id).at - e.at : null }));
       const bgCheckpoint = (await probe.checkpoints(internalId)).some((c) => c.compactionId === started.payload.compaction_id);
       results.push({ n, acceptedMs, totalMs, runStatuses: seen.map((s) => `${s.status}@+${s.at - sentAt}ms`), final: final.status, bgEndedAfterSendMs: claim?.ended ? claim.ended - sentAt : null, bgPreemptedFlag: claim?.preempted,
-        bgCommitted: bgCheckpoint, bgTerminalInJournal: Boolean(completedFor(started.payload.compaction_id)), inRun, inRunCompactionMs: inRun[0]?.ms ?? null });
-      const done = await lastCompleted(probe, internalId);
-      grower.tokens = (done?.payload.tokens_after ?? 0) + estimate(content) + 5;
+        bgCommitted: bgCheckpoint, bgTerminalInJournal: Boolean(endedFor(started.payload.compaction_id)), bgAborted: endedFor(started.payload.compaction_id)?.type === "compaction.aborted", inRun, inRunCompactionMs: inRun[0]?.ms ?? null });
+      // The new Run answered without waiting; the compaction runs again after its reply.
+      const rerun = await until("the compaction after the reply completed", async () => {
+        const later = (await probe.journal(internalId)).filter((e) => e.cursor > before && e.payload.compaction_id !== started.payload.compaction_id);
+        const next = later.find((e) => e.type === "compaction.started" && e.payload.phase === "background");
+        return next && later.find((e) => e.type === "compaction.completed" && e.payload.compaction_id === next.payload.compaction_id);
+      }, { timeoutMs: 240_000, everyMs: 200 });
+      grower.tokens = rerun.payload.tokens_after;
     }
     rec.evidenceOf("preemption_trials", results);
     rec.measure("preempt_accept_ms", results.map((r) => r.acceptedMs));
@@ -129,13 +135,13 @@ class Compaction extends Scenario {
     rec.check("each trial's new message was accepted and its Run completed", results.length === trials && results.every((r) => r.final === "completed"), results.map((r) => r.final));
     rec.check("each new message ended the running compaction at once, without committing it (claim ended within 3 s of the send, no checkpoint for its id)", results.length === trials && results.every((r) => r.bgEndedAfterSendMs !== null && r.bgEndedAfterSendMs < 3_000 && !r.bgCommitted), results.map((r) => ({ endedAfterSendMs: r.bgEndedAfterSendMs, committed: r.bgCommitted, preemptedFlag: r.bgPreemptedFlag })));
     rec.check("a preempted compaction was left within 3 s of the message (it does not hold the message back)", results.every((r) => r.acceptedMs < 3_000), results.map((r) => r.acceptedMs));
-    rec.check("each preempted compaction id has a terminal marker in the journal", results.length === trials && results.every((r) => r.bgTerminalInJournal), results.map((r) => r.bgTerminalInJournal));
+    rec.check("each preempted compaction id ends with compaction.aborted in the journal", results.length === trials && results.every((r) => r.bgTerminalInJournal && r.bgAborted), results.map((r) => r.bgTerminalInJournal));
     const unmatched = results.filter((r) => !r.bgTerminalInJournal).length;
     if (unmatched) rec.defect({ title: "A preempted background compaction leaves compaction.started in the journal with no terminal event", severity: "low",
       expected: "Spec: compaction is visible; every compaction has a durable id with compaction.started and a completed marker. A compaction aborted by a new message should leave an observable end for observers of the journal, so a `compacting` indicator can clear.",
       actual: `${unmatched}/${results.length} preempted compactions had no compaction.completed (or any aborted marker) for their id; only the hatch_conversation_compactions claim row (ended_at) records the end.`,
       repro: "Grow a Chat conversation past the trigger with a long final reply so the compaction runs after the reply, send a message while it runs, then read hatch_conversation_journal for compaction.% events: started with no matching end." });
-    rec.check("after a preemption the history is still over the limit, so the new Run compacts it first (compaction.started and completed inside that Run)", results.length === trials && results.every((r) => r.inRun.length >= 1 && r.inRun.every((e) => e.completed)), results.map((r) => r.inRun));
+    rec.check("after a preemption the history is over the trigger but under the hard limit, so the new Run answers without compacting first (no compaction inside that Run, a short total time)", results.length === trials && results.every((r) => r.inRun.length === 0 && r.totalMs < 20_000), results.map((r) => ({ inRun: r.inRun.length, totalMs: r.totalMs })));
   }
 
   // ── (4) the IM notice ──
@@ -183,7 +189,8 @@ class Compaction extends Scenario {
     if (!rec.check("IM round 2: a background compaction started after the reply", Boolean(two), { tracked: grower.tokens })) return;
     const noticesBefore = noticeCount();
     const sentAt = Date.now();
-    const answer = await speak("Please confirm you are still there: reply with exactly: here-now");
+    // The waiting message itself carries the history over the hard limit (about 232.6k), the one case where a turn waits for a summary.
+    const answer = await speak(`Carrier note W, reference only.\n${chunk(15_000, "W")}\nPlease confirm you are still there: reply with exactly: here-now`);
     rec.measure("im_waiting_message_reply_ms", Date.now() - sentAt);
     await sleep(6_000);
     const journal = (await probe.journal(convo)).filter((e) => e.cursor > two.cursor);

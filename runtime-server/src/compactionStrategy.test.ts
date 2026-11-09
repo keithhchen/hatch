@@ -55,6 +55,16 @@ test("old tool results are pruned only after the cache expired; a live cache kee
   assert.deepEqual(outcome.messages.slice(5), history.slice(5));
 });
 
+test("a cold cache with nothing to prune has no work to announce; a turn that is waiting summarizes only at the hard limit", async () => {
+  const strategy = new CompactionStrategy(adapter([]).port, policy({ prune: 500, trigger: 1_000, hard: 1_500, tail: 150 }));
+  const plain = (n: number) => Array.from({ length: n }, (_, i) => (i % 2 ? answer(`a${i}`) : user(`q${i}`)));
+  assert.equal(strategy.wants(plain(8), cold()), false);
+  assert.deepEqual(await strategy.compact(plain(8), cold()), { kind: "none" });
+  assert.equal(strategy.wants(plain(12), cold()), true);
+  assert.equal(strategy.wants(plain(12), { ...cold(), turnWaiting: true }), false);
+  assert.equal(strategy.wants(plain(16), { ...cold(), turnWaiting: true }), true);
+});
+
 test("summarizing follows pruning and never separates a tool call from its results", async () => {
   const history = [user("start"), call("a"), result("a", 800), call("b"), result("b", 800), result("b2", 800), answer("mid"), user("tail question"), call("c"), result("c", 200)];
   history[3] = { ...call("b"), callIds: ["b", "b2"] };
