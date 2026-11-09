@@ -89,6 +89,23 @@ hatch assistant "What needs my attention?" --wait
 hatch assistant history
 ```
 
+`chat` and `assistant` also take `--stream` (print the reply as it arrives) and `--key <client_message_id>`. Every send carries a `client_message_id`; to retry a send safely, pass the same key again.
+
+### 12. Chat with a published product
+
+Consumer Chat is a different system from the workers above: a conversation between your account and a published Product.
+
+```sh
+hatch conversations
+hatch ask "What do you recommend?" --product <product-id> --wait      # starts a conversation, prints conversation_id
+hatch ask "And for a beginner?" --conversation <conversation-id> --stream
+hatch conversation show <conversation-id>                              # history, state, run_id, cursor
+hatch conversation watch <conversation-id> --after <cursor>            # resume after a dropped connection
+hatch conversation stop <conversation-id> <run-id>
+```
+
+The Run belongs to the server. Closing the CLI or losing the connection never stops it; only `conversation stop` does. A stream that drops reconnects after the last cursor and does not repeat text; if it gives up, it prints the cursor to resume from.
+
 ## HTTP API
 
 ### 1. Create an API key
@@ -229,7 +246,21 @@ curl -s -X POST https://gethatchapp.com/v1/creator/products/$PRODUCT_ID/workers/
 
 ```sh
 curl -s -X POST "https://gethatchapp.com/v1/creator/assistant/conversation/messages?wait=60" -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" \
-  -d '{"content":"What needs my attention?"}'
+  -d '{"content":"What needs my attention?","client_message_id":"'"$(uuidgen)"'"}'
+```
+
+Send `client_message_id` (and the same value as `Idempotency-Key`) so a retry does not send twice. `Accept: text/event-stream` on the POST streams the reply; `GET .../events?after=<cursor>` resumes it.
+
+### 15. Chat with a published product
+
+The Chat API is described in `docs/spec-surfaces-v1.md`. Same API key or browser session.
+
+```sh
+curl -s -X POST https://gethatchapp.com/v1/conversations -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" -d '{"product_id":"'"$PRODUCT_ID"'"}'
+curl -s -X POST "https://gethatchapp.com/v1/conversations/$CONVERSATION_ID/messages?wait=60" -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" \
+  -d '{"client_message_id":"'"$(uuidgen)"'","content":"What do you recommend?"}'
+curl -N "https://gethatchapp.com/v1/conversations/$CONVERSATION_ID/events?after=$CURSOR" -H "Authorization: Bearer $HATCH_API_KEY"
+curl -s -X POST "https://gethatchapp.com/v1/conversations/$CONVERSATION_ID/runs/$RUN_ID/cancel" -H "Authorization: Bearer $HATCH_API_KEY"
 ```
 
 ## MCP
@@ -276,6 +307,12 @@ ingest_submit  ingest_status  ingest_list
 ```sh
 workers_list  worker_send  worker_history  worker_stop
 assistant_send  assistant_history
+```
+
+Chat with a published product (send with `wait`; pass back `client_message_id` to retry):
+
+```sh
+conversations_list  chat_send  conversation_show  chat_stop
 ```
 
 ### 6. Agent skill
