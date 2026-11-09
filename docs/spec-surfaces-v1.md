@@ -20,6 +20,10 @@ Studio and Chat are two systems and stay two systems. These rules apply to both.
 - While compacting, messages wait and join afterwards.
 - Idempotency is per message: a client key plus a digest of content and ordered asset hashes. A channel message uses its event id as the key.
 - A channel gets one final reply, sent when the Run ends.
+- Claiming a steered message and appending it to the transcript is one transaction.
+- A call to a local tool is recorded before the client is asked. The Run stays `waiting_for_tool` across a Runtime restart; any permitted client, on any instance, answers it once, and the call times out at its recorded expiry.
+- A Run taken over after a crash continues from its transcript. A call that finished is never run again. A read-only call that did not finish is reported to the model as not run; any other server call that did not finish may have had an effect, so the Run is interrupted instead of repeating it.
+- Live deltas reach observers on every instance through a bounded relay that never waits for a consumer or the database.
 
 ## Transports
 
@@ -65,9 +69,16 @@ Retrieval is Unix style in both APIs: `ls`, `grep` and paged `read`, with no vec
 
 ## Compaction
 
-Runs after the reply in the background and yields to a new message. Falls back to before or during a turn, then to recovery after a provider overflow. Durable memory is written first. Old tool results are pruned separately, when the cache has expired.
+One strategy for Chat and Studio (`compactionStrategy.ts`), each with its own adapter. Its limits derive from the model's context window.
 
-Compaction is visible: a status in the UI, and on IM one notice per compaction, only when a user is waiting. The notice is not part of the conversation.
+- Order: prune old tool results, only once the provider's cache has expired (a live cache keeps its prefix), then summarize.
+- Timing: after the reply, in the background; a new message aborts it, on any instance, and waits for it to end. Falls back to before a turn, between tool steps, and recovery after a provider overflow, at most twice per Run.
+- Content: a verbatim tail that never splits a tool call from its results; a structured summary; unfinished requests, file paths read and written, senders and identifiers are checked after summarizing, retried once, then appended as written.
+- Failure or timeout: a bounded verbatim tail and a note of how many messages were dropped; the user is told only then. A manual compaction that fails raises.
+- Durable memory is written first where a conversation type has a memory layer. Chat and Studio have none.
+- Reminders are never compacted. Images are path labels.
+
+Compaction is visible: a `compacting` status, and a completed marker. Every compaction has a durable id (`compaction.started`, `compaction.completed` in the journal), which the channel layer uses for one notice per compaction, only when a user is waiting. The notice is not part of the conversation.
 
 ## Out of scope
 

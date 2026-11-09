@@ -3,8 +3,11 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { hydrateImages, imagesAsText, messageText, userMessage } from "./imageRefs.js";
-import { createCompactionSummaryMessage, estimateContextTokens, estimateTokens, generateSummaryWithUsage, type Agent, type AgentMessage, type AgentTool } from "@earendil-works/pi-agent-core";
-import { createFactoryPiAgent, createFactoryPiModels, type FactoryPiAgentOptions } from "../creatorLearning/factoryPi.js";
+import type { Agent, AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
+import { isContextOverflow } from "@earendil-works/pi-ai";
+import { BackgroundCompactor, CompactionStrategy, newCompactionId, policyFor, type CompactionAdapter, type CompactionOutcome, type CompactionPolicy, type CompactionRequest, type SummarizeInput } from "../compactionStrategy.js";
+import { describePiMessage, piSummaryMessage, prunePiMessage, summarizeWithPi } from "../piCompaction.js";
+import { createFactoryLlmModel, createFactoryPiAgent, createFactoryPiModels, type FactoryPiAgentOptions } from "../creatorLearning/factoryPi.js";
 import { classifyFactoryProviderFailure } from "../creatorLearning/factoryLlm.js";
 import { WorkbenchStore, isAssistantRole, type AgentDefinitionSource, type AnyRole, type Session } from "./store.js";
 import { factoryAgentTools } from "./factoryTools.js";
@@ -30,7 +33,12 @@ export type WorkbenchRuntimeOptions = {
   journal?: Journal;
   deadlineMs?: number;
   maxTurns?: number;
+  /** One strategy with Chat; this is Studio's adapter. Tests inject a test-only summarizer and a small window. */
+  compaction?: { summarize?: (input: SummarizeInput<AgentMessage>) => Promise<string>; contextWindow?: number; policy?: Partial<CompactionPolicy>; now?: () => number };
 };
+
+/** Studio output budget passed to the factory model; the policy reserves it. */
+const OUTPUT_TOKENS = 32768;
 
 export class WorkbenchRuntime {
   readonly events = new EventEmitter();
@@ -43,6 +51,10 @@ export class WorkbenchRuntime {
   /** Messages that arrived while the run could not take them: before its model loop starts, or during compaction. */
   private held = new Map<string, AgentMessage[]>();
   private compacting = new Set<string>();
+  private background = new BackgroundCompactor<string>();
+  /** When each conversation's prefix last reached the provider: the cache is alive for the policy's ttl after. */
+  private touched = new Map<string, number>();
+  private strategyCache?: CompactionStrategy<AgentMessage>;
   /** The client of the latest message of each running conversation. */
   private clients = new Map<string, ClientAttributes>();
   /** Messages steered into a running agent that its history does not hold yet. A failed run writes them down: an accepted message is never lost. */
@@ -89,6 +101,8 @@ export class WorkbenchRuntime {
     this.active.set(id, controller);
     this.runIds.set(id, runId);
     try {
+      // The run is already ours; background compaction yields and ends before the message proceeds.
+      await this.background.preempt(id);
       await this.store.update(id, s => { if (s.title === s.role) s.title = message.trim().slice(0, 60); s.turn++; s.status = "running"; s.lastRunAt = new Date().toISOString(); delete s.error; delete s.activeTool; });
     } catch (error) { this.active.delete(id); throw error; }
     this.emit(id, "state");
@@ -134,6 +148,44 @@ export class WorkbenchRuntime {
     this.held.delete(id);
     return waiting?.length ? waiting : undefined;
   }
+  /** Studio has no memory layer for conversations, so the strategy gets no CompactionMemory. */
+  private strategy(): CompactionStrategy<AgentMessage> {
+    if (this.strategyCache) return this.strategyCache;
+    const override = this.options.compaction;
+    const window = override?.contextWindow ?? createFactoryLlmModel({ env: this.env, maxTokens: 8000 }).contextWindow;
+    const adapter: CompactionAdapter<AgentMessage> = { describe: describePiMessage, prune: prunePiMessage, summaryMessage: piSummaryMessage,
+      summarize: override?.summarize ?? summarizeWithPi(message => imagesAsText([message])[0]!, () => createFactoryPiModels({ env: this.env, maxTokens: 8000 })) };
+    return this.strategyCache = new CompactionStrategy(adapter, { ...policyFor(window, { outputTokens: OUTPUT_TOKENS }), ...override?.policy });
+  }
+  private now(): number { return this.options.compaction?.now?.() ?? Date.now(); }
+  /** One compaction, visible as `compacting` then `compacted` (both journaled with the same id); degraded also says so. */
+  private async compactNow(id: string, messages: AgentMessage[], signal: AbortSignal, extra: Partial<CompactionRequest> = {}): Promise<CompactionOutcome<AgentMessage>> {
+    const strategy = this.strategy();
+    const compactionId = newCompactionId();
+    if (extra.force || strategy.tokensOf(messages) >= strategy.policy.trigger) this.emit(id, "compacting", { compactionId });
+    const outcome = await strategy.compact(messages, { now: this.now(), cacheTouchedAt: this.touched.get(id), signal, ...extra });
+    if (outcome.kind !== "none") this.emit(id, "compacted", { compactionId, kind: outcome.kind, degraded: outcome.kind === "degraded", dropped: outcome.kind === "degraded" ? outcome.dropped : 0 });
+    if (outcome.kind === "degraded") this.emit(id, "compaction_degraded", { compactionId, dropped: outcome.dropped, note: describePiMessage(outcome.messages[0]!).text });
+    return outcome;
+  }
+  /** After the reply, with no live agent: it applies only if nothing was added meanwhile, and a new message preempts it. */
+  private scheduleBackground(id: string): void {
+    void (async () => {
+      if (this.closing) return;
+      const strategy = this.strategy();
+      const tokens = strategy.tokensOf((await this.store.get(id)).context);
+      const remaining = strategy.policy.cacheTtlMs - (this.now() - (this.touched.get(id) ?? Number.NEGATIVE_INFINITY));
+      // Below the summary trigger, pruning waits for the provider cache to expire.
+      const delay = tokens < strategy.policy.trigger && remaining > 0 ? remaining + 1 : 0;
+      this.background.schedule(id, async signal => {
+        if (this.active.has(id)) return;
+        const context = (await this.store.get(id)).context;
+        const outcome = await this.compactNow(id, context, signal);
+        if (outcome.kind === "none") return;
+        await this.store.update(id, state => { if (!this.active.has(id) && state.context.length === context.length) state.context = outcome.messages; });
+      }, delay);
+    })().catch(() => undefined);
+  }
   triggerScribeVoiceEvidence(id: string, evidence: AgentMessage[]): void {
     if (!evidence.length) return;
     const previous = this.scribeRuns.get(id) ?? Promise.resolve();
@@ -157,6 +209,7 @@ export class WorkbenchRuntime {
   async close(): Promise<void> {
     this.closing = true;
     for (const controller of this.active.values()) controller.abort();
+    await this.background.drain();
     for (const controller of this.scribeControllers) controller.abort();
     await Promise.allSettled([...this.runs.values(), ...this.scribeRuns.values()]);
   }
@@ -238,6 +291,7 @@ export class WorkbenchRuntime {
       this.emit(id, controller.signal.aborted ? "voice.run_interrupted" : "voice.run_failed", { runId: this.runIds.get(id) });
     } finally {
       this.active.delete(id);
+      if (ended === "completed") this.scheduleBackground(id);
       this.runIds.delete(id);
       this.clients.delete(id);
       this.held.delete(id);
@@ -251,16 +305,20 @@ export class WorkbenchRuntime {
     let turnCount = 0;
     let persistence = Promise.resolve();
     let persistenceError: unknown;
-    let summarizedCount = 0;
-    let summaryMessage: AgentMessage | undefined;
+    // What stands in for the first `base` messages of the agent's transcript, once they were compacted.
+    let replaced: AgentMessage[] = [];
+    let base = 0;
+    if (channel === "visible") {
+      // Fallback before a turn: a conversation already over the trigger is compacted now.
+      const early = await this.compactNow(id, history, controller.signal);
+      if (early.kind !== "none") { history = early.messages; await this.store.update(id, state => { state.context = history; }); }
+    }
     const agent = factory({ env: this.env, maxTokens: 32768, initialState: { systemPrompt, messages: history, tools: traceAgentTools(tools) }, agentOptions: {
       toolExecution: "sequential",
       // askuser is a turn boundary. The tool result is persisted as a normal
       // tool result, then the next user message starts a fresh Agent turn.
       afterToolCall: async ({ toolCall }) => toolCall.name === "askuser" ? { terminate: true } : undefined,
       transformContext: async (messages, signal) => {
-        const effective = summaryMessage ? [summaryMessage, ...messages.slice(summarizedCount)] : messages;
-        const tokens = effective.reduce((sum, entry) => sum + estimateTokens(entry), 0);
         const forModel = async (current: AgentMessage[]) => {
           const hydrated = await hydrateImages(current, async file => (await this.store.read(id, file)).bytes);
           if (channel !== "visible") return hydrated;
@@ -268,24 +326,22 @@ export class WorkbenchRuntime {
           const tail = [await this.options.liveState?.(id), renderSystemReminder(this.clientOf(id))].filter(Boolean).join("\n\n");
           return [...hydrated, { role: "user" as const, content: tail, timestamp: Date.now() }];
         };
-        if (tokens < 165000) return forModel(effective);
-        this.emit(id, "compacting");
+        const effective = [...replaced, ...messages.slice(base)];
+        if (channel !== "visible") return forModel(effective);
         this.compacting.add(id);
         try {
-        // Retain recent messages, cutting before an assistant/tool-call group.
-        let cut = Math.max(summarizedCount, messages.length - 12);
-        while (cut > summarizedCount && messages[cut]?.role === "toolResult") cut--;
-        if (cut <= summarizedCount) throw new Error("当前上下文过大；请缩小单份工具输出或输入后继续");
-        const prefix = [...(summaryMessage ? [summaryMessage] : []), ...messages.slice(summarizedCount, cut)];
-        const { models, model } = createFactoryPiModels({ env: this.env, maxTokens: 8000 });
-        const summary = await generateSummaryWithUsage(imagesAsText(prefix), models, model, 10000, signal, "Preserve current user requirements, decisions, unresolved work, exact file paths and real upload/run receipts. Source files remain readable; never invent successful operations.");
-        if (!summary.ok) throw summary.error;
-        summaryMessage = createCompactionSummaryMessage(summary.value.text, tokens, new Date().toISOString());
-        summarizedCount = cut;
-        const compacted = [summaryMessage, ...messages.slice(cut)];
-        await persistence;
-        await this.store.update(id, state => { state.context = compacted; });
-        return forModel(compacted);
+          // Between tool steps: the same strategy, with the cache clock of the previous model call.
+          const outcome = await this.compactNow(id, effective, signal ?? controller.signal);
+          this.touched.set(id, this.now());
+          if (outcome.kind === "none") return forModel(effective);
+          // The tail is the same message objects as before, so what was replaced is everything in front of it.
+          let kept = 0;
+          while (kept < messages.length - base && outcome.messages.at(-1 - kept) === effective.at(-1 - kept)) kept++;
+          replaced = outcome.messages.slice(0, outcome.messages.length - kept);
+          base = messages.length - kept;
+          await persistence;
+          await this.store.update(id, state => { state.context = outcome.messages; });
+          return forModel(outcome.messages);
         } finally { this.compacting.delete(id); this.release(id); }
       }
     } });
@@ -322,6 +378,19 @@ export class WorkbenchRuntime {
       // A message steered after the loop's last poll is still queued: run it. The agent leaves the live set in
       // the same step as the last empty check, so a later message waits for the next pass instead of vanishing.
       while (agent.hasQueuedMessages() && !controller.signal.aborted) await agent.continue();
+      // A provider overflow is recovered by compacting harder and continuing, a bounded number of times.
+      const strategy = this.strategy();
+      for (let attempt = 1; channel === "visible" && !controller.signal.aborted && attempt <= strategy.policy.maxOverflowRetries; attempt++) {
+        const last = agent.state.messages.at(-1);
+        if (last?.role !== "assistant" || last.stopReason !== "error" || !isContextOverflow(last, this.options.compaction?.contextWindow)) break;
+        await persistence;
+        const outcome = await this.compactNow(id, agent.state.messages.slice(0, -1), controller.signal, { force: true, tailScale: 0.5 ** attempt });
+        if (outcome.kind === "none") break;
+        await this.store.update(id, state => { state.context = outcome.messages; });
+        replaced = []; base = 0;
+        agent.state.messages = outcome.messages;
+        await agent.continue();
+      }
       if (this.liveAgents.get(id) === agent) this.liveAgents.delete(id);
       await persistence;
       if (persistenceError) throw persistenceError;

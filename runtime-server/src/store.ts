@@ -1,6 +1,6 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
-import type { ConversationRecord, ConversationRunRecord, ConversationJournalEvent } from "./conversationRepository.js";
+import type { CompactionClaim, ConversationRecord, ConversationRunRecord, ConversationJournalEvent, ToolCallRecord } from "./conversationRepository.js";
 import path from "node:path";
 import { historyBoundary, historyCursor, historyEvent, historyLimit, historyMessages, isHistoryMessage,
   type ConversationHistoryOptions, type ConversationHistoryPage, type ConversationToolDetailRef } from "./conversationHistory.js";
@@ -196,6 +196,7 @@ export type StoreEvent =
       conversation_id: string;
       parent_run_id: string;
       skill_run_id: string;
+      compaction_id?: string;
       replacement_history: ConversationMessage[];
       window_number: number;
       first_window_id: string;
@@ -256,6 +257,12 @@ export type StoreEvent =
       reason: CompactionReason;
       message: string;
       replacement_history?: ConversationMessage[];
+      /** One id for the status, the transcript checkpoint and the channel's notice. */
+      compaction_id?: string;
+      stage?: "prune" | "summary" | "degraded";
+      /** Set when a failed summary left only a bounded tail: the user is told. */
+      degraded?: boolean;
+      dropped_messages?: number;
       window_number?: number;
       first_window_id?: string;
       previous_window_id?: string;
@@ -277,12 +284,17 @@ export type LocalCommit = {
   requests?: Array<[string, string]>;
   journal?: ConversationJournalEvent[];
   events?: StoreEvent[];
+  toolCalls?: ToolCallRecord[];
+  compactions?: CompactionClaim[];
 };
 
 export class LocalRuntimeAuthority {
   conversations = new Map<string, ConversationRecord>();
   runs = new Map<string, ConversationRunRecord>();
   requests = new Map<string, string>();
+  /** Local tools a Run waits for, by `${runId}\n${toolCallId}`: answered from any process. */
+  toolCalls = new Map<string, ToolCallRecord>();
+  compactions = new Map<string, CompactionClaim>();
   journal: ConversationJournalEvent[] = [];
   events: StoreEvent[] = [];
   private usage = new Map<string, { count: number; bytes: number }>();
@@ -347,6 +359,8 @@ export class LocalRuntimeAuthority {
     for (const row of commit.conversations ?? []) this.conversations.set(row.id, row);
     for (const row of commit.runs ?? []) this.runs.set(row.id, row);
     for (const [key, value] of commit.requests ?? []) this.requests.set(key, value);
+    for (const row of commit.toolCalls ?? []) this.toolCalls.set(`${row.runId}\n${row.toolCallId}`, row);
+    for (const row of commit.compactions ?? []) this.compactions.set(row.id, row);
     for (const event of commit.journal ?? []) this.journal.push(event);
     for (const event of commit.events ?? []) {
       this.events.push(event);
@@ -477,6 +491,17 @@ export class RuntimeStore {
   async readEvents(): Promise<StoreEvent[]> {
     await this.localAuthority.ready();
     return structuredClone(this.localAuthority.events);
+  }
+
+  /** When the provider last saw this conversation: the time of its latest event. */
+  async lastActivityAt(conversationId: string): Promise<number | undefined> {
+    await this.localAuthority.ready();
+    const events = this.localAuthority.events;
+    for (let index = events.length - 1; index >= 0; index--) {
+      const event = events[index]!;
+      if ("conversation_id" in event && event.conversation_id === conversationId) return Date.parse(event.timestamp);
+    }
+    return undefined;
   }
 
   async readConversation(conversationId: string): Promise<ConversationMessage[]> {

@@ -444,7 +444,8 @@ export class PostgresStore extends RuntimeStore {
     await write;
   }
 
-  private async appendOn(client: PostgresQueryExecutor, record: StoreEvent): Promise<void> {
+  /** Appends on the caller's connection, so an event commits in the caller's transaction. */
+  async appendOn(client: PostgresQueryExecutor, record: StoreEvent): Promise<void> {
       const conversationId = optionalStringField(record, "conversation_id");
       const payload = JSON.stringify(record);
       const payloadBytes = Buffer.byteLength(payload, "utf8");
@@ -788,6 +789,13 @@ export class PostgresStore extends RuntimeStore {
 
   async visibleConversationTruncated(conversationId: string): Promise<boolean> {
     return false;
+  }
+
+  override async lastActivityAt(conversationId: string): Promise<number | undefined> {
+    await this.waitForConversationAppends(conversationId);
+    await this.ensureSchema();
+    const result = await this.query<{ at: Date | null }>("SELECT max(created_at) AS at FROM hatch_conversation_events WHERE conversation_id = $1", [conversationId]);
+    return result.rows[0]?.at?.getTime();
   }
 
   async readCompactionState(conversationId: string): Promise<{

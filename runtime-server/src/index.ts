@@ -7,13 +7,8 @@ import path from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 import { ZodError } from "zod";
 import { ClientToolBroker } from "./clientBroker.js";
-import {
-  compactRuntimeMessages,
-  shouldAutoCompactMessages,
-  type CompactionCheckpoint,
-  type RuntimeCompactionMessage
-} from "./compaction.js";
-import { createAgentRuntime, type AgentRuntime, type RuntimeSessionSkills } from "./agentRuntime.js";
+import { type RuntimeCompactionMessage } from "./compaction.js";
+import { createAgentRuntime, type AgentRuntime, type RunContext, type RuntimeSessionSkills } from "./agentRuntime.js";
 import { ThinkingPartJournal } from "./thinkingPartJournal.js";
 import {
   clientMessageInputDigest,
@@ -97,7 +92,8 @@ import {
 import { writeOperationalError } from "./operationalLogging.js";
 import { RuntimeAssetStore, runtimeAssetStoreFromEnvironment } from "./assetStore.js";
 import { flushLangfuseObservability, initializeLangfuseObservability, withLangfuseTurn } from "./langfuse.js";
-import { ChatRuntime } from "./chat/chatRuntime.js";
+import { ChatRuntime, type ChatRuntimeOptions } from "./chat/chatRuntime.js";
+import { PostgresEventRelay } from "./chat/eventRelay.js";
 import { ChatError, principalKey, accountPrincipal } from "./chat/principal.js";
 import type { PrincipalLimits, RunAdmission, Submission } from "./chat/chatService.js";
 import { ContactBinder, type ConnectionDirectory } from "./chat/contactBinding.js";
@@ -117,6 +113,8 @@ import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
 import { SocketSink, SseSink } from "./chat/sinks.js";
 import { authorizeLocalToolCall, productRequiresLocalTools } from "./chat/toolSurface.js";
 import type { ScopeResolver, TurnRunner } from "./chat/turnExecutor.js";
+import type { TurnCompaction } from "./chat/chatCompaction.js";
+import { isContextOverflow, type AssistantMessage } from "@earendil-works/pi-ai";
 import { waitForTerminalRun, finalAssistantText, TERMINAL_STATUSES } from "./chat/runResult.js";
 import { clientAttributesOf, MAX_USER_MESSAGE_CHARS, ToolCallResultSchema } from "./protocol.js";
 import type { ClientToolName } from "./protocol.js";
@@ -145,6 +143,8 @@ export const MAX_RUNTIME_WEBSOCKET_PAYLOAD_BYTES = MAX_RICH_TOOL_RESULT_BYTES;
 
 export type RuntimeServerOptions = {
   createRuntime?: () => AgentRuntime;
+  /** Chat's compaction strategy; tests inject one with a test-only summarizer. */
+  compactionStrategy?: ChatRuntimeOptions<SessionBinding>["compactionStrategy"];
   conversationStore?: RuntimeStore;
   /** Optional injected store for tests; production defaults beside transcripts. */
   assetStore?: RuntimeAssetStore;
@@ -787,7 +787,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
           createRuntime(), conversationStore, conversationRepository, assetStore, turn.state,
           async (message) => turn.publish(message), outputGuard, turn.signal,
           commerceEventSink, deliveryAccountingOutbox, scheduleDeliveryReconciliation,
-          turn.clientOf, turn.claimSteered
+          turn.clientOf, turn.claimSteered, turn.compaction
         );
       } catch (error) {
         if (turn.signal.reason instanceof RunHandoff) return;
@@ -803,7 +803,10 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     scopes,
     admission,
     limits: options.principalLimits,
-    toolTimeoutMs: options.clientToolTimeoutMs ?? clientToolTimeoutMs()
+    toolTimeoutMs: options.clientToolTimeoutMs ?? clientToolTimeoutMs(),
+    compactionStrategy: options.compactionStrategy,
+    // With a shared database every instance sees every Run's live events.
+    ...(conversationStore instanceof PostgresStore ? { relay: new PostgresEventRelay(conversationStore.pool as never) } : {})
   });
   void repositoryReady.then(() => chat.start()).catch(() => undefined);
   const edge: ChatEdge = {
@@ -2618,7 +2621,8 @@ async function runOneTurnInternal(
   deliveryAccountingOutbox: DeliveryAccountingOutbox | undefined,
   scheduleDeliveryReconciliation: () => void,
   clientOf: () => ClientAttributes,
-  claimSteered: () => Promise<ConversationMessage[]>
+  claimSteered: () => Promise<ConversationMessage[]>,
+  compaction: TurnCompaction
 ): Promise<void> {
   const turnStarted = performance.now();
   let setupCompleted = turnStarted;
@@ -2856,11 +2860,7 @@ async function runOneTurnInternal(
       }
     }
     if (input.message.content.trim() === "/compact") {
-      await compactAndEmit(input, store, state, send, committedInput, {
-        trigger: "manual",
-        phase: "standalone_turn",
-        reason: "user_requested"
-      });
+      await compaction.manual(committedInput);
       await sendFixedAssistant("Compaction complete.");
       return;
     }
@@ -2874,7 +2874,7 @@ async function runOneTurnInternal(
       );
     }
 
-    const preTurnCompaction = await compactIfNeeded(input, store, state, send, committedInput, "pre_turn");
+    const preTurnCompaction = await compaction.ifNeeded(committedInput, "pre_turn");
     let runtimeMessages = committedInput;
     if (preTurnCompaction) {
       runtimeMessages = preTurnCompaction.replacement_history;
@@ -2887,7 +2887,8 @@ async function runOneTurnInternal(
     // Store/materialization work may race with a disconnect. Never start a
     // provider request after the owning run has already been aborted.
     abortSignal.throwIfAborted();
-    for await (const event of runtime.run(runtimeInput, {
+    const briefSnapshot = (await conversationRepository.getConversation(input.conversation_id))?.briefSnapshot;
+    const contextFor = (messages: ConversationMessage[]): RunContext => ({
       clientBroker: broker,
       assetStore,
       serverTools,
@@ -2906,14 +2907,11 @@ async function runOneTurnInternal(
           message
         });
       },
-      compactMessagesIfNeeded: async (runtimeMessages: RuntimeCompactionMessage[], phase) => {
-        const compacted = await compactIfNeeded(input, store, state, emit, runtimeMessages, phase);
-        return compacted?.replacement_history;
-      },
+      compactMessagesIfNeeded: async (runtimeMessages: RuntimeCompactionMessage[], phase) => (await compaction.ifNeeded(runtimeMessages, phase))?.replacement_history,
       toolBridge,
       toolScope: "main",
       agentSystemPrompt: materializedAgent?.systemPrompt,
-      briefSnapshot: (await conversationRepository.getConversation(input.conversation_id))?.briefSnapshot,
+      briefSnapshot,
       deliveryAuditContext: materializedAgent?.deliveryAuditContext,
       knowledgeAvailable: Boolean(
         binding.agentCorpus?.knowledge.documents.length
@@ -2922,7 +2920,28 @@ async function runOneTurnInternal(
       abortSignal,
       clientAttributes: clientOf,
       claimSteered
-    })) {
+    });
+    // A provider that refuses the request as too large is answered by compacting, a bounded number of times, and continuing.
+    const attempts = async function* (): AsyncGenerator<OutboundMessage> {
+      let current = runtimeInput;
+      let currentMessages = messages;
+      for (;;) {
+        try {
+          yield* runtime.run(current, contextFor(currentMessages));
+          return;
+        } catch (error) {
+          const overflow = isContextOverflow({ stopReason: "error", errorMessage: errorMessage(error) } as AssistantMessage);
+          const recovered = overflow ? await compaction.recoverFromOverflow(await store.readConversation(input.conversation_id)) : undefined;
+          if (!recovered) throw error;
+          currentMessages = await store.readConversation(input.conversation_id);
+          // Where the transcript ends decides how the turn resumes: a user message is prompted, anything else continued.
+          current = currentMessages.at(-1)?.role === "user"
+            ? runtimeInput
+            : { ...runtimeInput, task_start: true, message: { role: "user", content: TASK_START_MESSAGE_CONTENT } };
+        }
+      }
+    };
+    for await (const event of attempts()) {
       if (state.status === "cancelled" || state.status === "interrupted") {
         break;
       }
@@ -3493,56 +3512,6 @@ async function persistServerToolCallEvent(
     ...(event.result ? { result: event.result } : {}),
     ...(event.error ? { error: event.error } : {})
   });
-}
-
-async function compactIfNeeded(
-  input: RunStart,
-  store: RuntimeStore,
-  state: RunStateMachine,
-  send: (message: OutboundMessage) => Promise<void>,
-  messages: RuntimeCompactionMessage[],
-  phase: "pre_turn" | "mid_turn"
-): Promise<CompactionCheckpoint | undefined> {
-  if (!shouldAutoCompactMessages(messages)) {
-    return undefined;
-  }
-  return compactAndEmit(input, store, state, send, messages, {
-    trigger: "auto",
-    phase,
-    reason: "context_limit"
-  });
-}
-
-async function compactAndEmit(
-  input: RunStart,
-  store: RuntimeStore,
-  state: RunStateMachine,
-  send: (message: OutboundMessage) => Promise<void>,
-  messages: RuntimeCompactionMessage[],
-  options: {
-    trigger: "auto" | "manual";
-    phase: "pre_turn" | "mid_turn" | "standalone_turn";
-    reason: "context_limit" | "user_requested";
-  }
-): Promise<CompactionCheckpoint> {
-  await state.compact(options.phase);
-  const checkpoint = await compactRuntimeMessages(messages, {
-    ...options,
-    windowState: await store.readCompactionState(input.conversation_id)
-  });
-  await store.append({
-    type: "conversation.compacted",
-    conversation_id: input.conversation_id,
-    run_id: input.run_id,
-    ...checkpoint
-  });
-  await send({
-    type: "session.compacted",
-    run_id: input.run_id,
-    ...checkpoint
-  });
-  await state.start();
-  return checkpoint;
 }
 
 function errorMessage(error: unknown): string {

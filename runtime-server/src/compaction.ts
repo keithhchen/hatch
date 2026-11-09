@@ -1,12 +1,10 @@
 import {
   COMPACTION_SUMMARY_PREFIX,
   COMPACTION_SUMMARY_SUFFIX,
-  compact,
   createCompactionSummaryMessage,
   DEFAULT_COMPACTION_SETTINGS,
   estimateContextTokens,
   prepareCompaction,
-  shouldCompact,
   uuidv7,
   type AgentMessage,
   type SessionTreeEntry
@@ -19,17 +17,16 @@ import {
 } from "./protocol.js";
 import { createPiModel, createPiModels } from "./piModel.js";
 import { persistToolMessage, restoreToolMessage } from "./toolMessage.js";
+import { CompactionStrategy, policyFor, type CompactionAdapter, type CompactionMemory, type Entry, type SummarizeInput } from "./compactionStrategy.js";
+import { describePiMessage, summarizeWithPi } from "./piCompaction.js";
 
-// These are Pi's own model-facing compaction delimiters. Keep the export name
-// for the existing event/UI projection, but do not invent a second summary
-// protocol in the runtime.
 export const SUMMARY_PREFIX = COMPACTION_SUMMARY_PREFIX;
 export const SUMMARY_SUFFIX = COMPACTION_SUMMARY_SUFFIX;
 export const RUNTIME_CONTEXT_PREFIX = "HATCH RUNTIME CONTEXT";
 
-export type CompactionPhase = "pre_turn" | "mid_turn" | "standalone_turn";
+export type CompactionPhase = "pre_turn" | "mid_turn" | "standalone_turn" | "background" | "overflow_recovery";
 export type CompactionTrigger = "auto" | "manual";
-export type CompactionReason = "context_limit" | "user_requested";
+export type CompactionReason = "context_limit" | "user_requested" | "provider_overflow";
 
 export type RuntimeCompactionMessage = {
   role: string;
@@ -63,67 +60,56 @@ export type CompactionCheckpoint = {
   first_window_id: string;
   previous_window_id?: string;
   window_id: string;
+  /** One id for the status, the transcript checkpoint and the channel's single notice. */
+  compaction_id?: string;
+  stage?: "prune" | "summary" | "degraded";
+  /** Only set when a failed summary left a bounded tail; the user is told. */
+  degraded?: boolean;
+  dropped_messages?: number;
 };
-
-/**
- * Use Pi's context estimate and default compaction settings. There is no
- * Hatch output budget, per-turn budget, user-message truncation, or env-based
- * replacement threshold here.
- */
-export function shouldAutoCompactMessages(messages: RuntimeCompactionMessage[]): boolean {
-  const model = createPiModel();
-  const contextTokens = estimateContextTokens(messages.map(toPiMessage)).tokens;
-  return shouldCompact(contextTokens, model.contextWindow, DEFAULT_COMPACTION_SETTINGS);
-}
-
-/** Derived only from Pi's model context window and its default reserve. */
-export function autoCompactTokenLimit(): number {
-  const model = createPiModel();
-  return model.contextWindow - DEFAULT_COMPACTION_SETTINGS.reserveTokens;
-}
 
 export function estimateRuntimeMessageTokens(messages: RuntimeCompactionMessage[]): number {
   return estimateContextTokens(messages.map(toPiMessage)).tokens;
 }
 
-export async function compactRuntimeMessages(
-  messages: RuntimeCompactionMessage[],
-  options: {
-    trigger: CompactionTrigger;
-    phase: CompactionPhase;
-    reason: CompactionReason;
-    windowState?: CompactionWindowState;
-  }
-): Promise<CompactionCheckpoint> {
-  const entries = toSessionEntries(messages);
-  const preparation = prepareCompaction(entries, DEFAULT_COMPACTION_SETTINGS);
-  if (!preparation.ok) throw preparation.error;
-  if (!preparation.value) {
-    throw new Error("Pi compaction is not applicable to the current session");
-  }
+const BRACKET_SENDER = /^\[([^\]\n]{1,60})\]/;
 
-  const { models, model } = createPiModels();
-  const result = await compact(preparation.value, models, model, undefined, undefined, "high");
-  if (!result.ok) throw result.error;
+/** Chat's view of one message for the shared strategy. Images are path labels; who wrote a message is kept. */
+export function describeRuntimeMessage(message: RuntimeCompactionMessage): Entry {
+  const entry = describePiMessage(toPiMessage(message));
+  if (message.role !== "user") return entry;
+  const sender = (message as { sender?: string }).sender ?? BRACKET_SENDER.exec(entry.text)?.[1];
+  return sender ? { ...entry, sender } : entry;
+}
 
-  const summary = result.value.summary;
-  const message = `${SUMMARY_PREFIX}${summary}${SUMMARY_SUFFIX}`;
-  const replacementHistory: ConversationMessage[] = [
-    {
-      role: "compactionSummary",
-      content: summary,
-      tokens_before: result.value.tokensBefore
-    },
-    ...(result.value.retainedTail ?? []).map(fromPiMessage)
-  ];
+/** Chat's adapter of the shared compaction port. */
+export function chatCompactionAdapter(summarize: (input: SummarizeInput<RuntimeCompactionMessage>) => Promise<string>): CompactionAdapter<RuntimeCompactionMessage> {
   return {
-    trigger: options.trigger,
-    phase: options.phase,
-    reason: options.reason,
-    message,
-    replacement_history: replacementHistory,
-    ...nextWindow(options.windowState)
+    describe: describeRuntimeMessage,
+    prune: (message, placeholder) => ({ ...message, content: null, tool_content: [{ type: "text", text: placeholder }] }),
+    summaryMessage: (summary, tokensBefore) => ({ role: "compactionSummary", content: summary, tokens_before: tokensBefore }),
+    summarize
   };
+}
+
+export type ChatCompactionOptions = {
+  summarize?: (input: SummarizeInput<RuntimeCompactionMessage>) => Promise<string>;
+  /** Defaults to the model's window. */
+  contextWindow?: number;
+  cacheTtlMs?: number;
+  /** Chat conversations have no memory layer, so none is wired; the port stays for one that does. */
+  memory?: CompactionMemory<RuntimeCompactionMessage>;
+};
+
+/** The one strategy with Chat's adapter. The policy comes from the model's window. */
+export function chatCompactionStrategy(options: ChatCompactionOptions = {}): CompactionStrategy<RuntimeCompactionMessage> {
+  const model = createPiModel();
+  const cacheTtlMs = options.cacheTtlMs ?? (Number(process.env.HATCH_PROVIDER_CACHE_TTL_MS) || undefined);
+  return new CompactionStrategy(
+    chatCompactionAdapter(options.summarize ?? summarizeWithPi((message) => toPiMessage({ ...message, model_images: undefined }), createPiModels, 8_000)),
+    policyFor(options.contextWindow ?? model.contextWindow, { cacheTtlMs }),
+    options.memory
+  );
 }
 
 /**
@@ -320,7 +306,7 @@ function unwrapSummary(value: string): string {
   return value;
 }
 
-function nextWindow(state: CompactionWindowState = {}): Pick<CompactionCheckpoint, "window_number" | "first_window_id" | "previous_window_id" | "window_id"> {
+export function nextWindow(state: CompactionWindowState = {}): Pick<CompactionCheckpoint, "window_number" | "first_window_id" | "previous_window_id" | "window_id"> {
   const windowId = uuidv7();
   const firstWindowId = state.first_window_id ?? state.window_id ?? uuidv7();
   return {

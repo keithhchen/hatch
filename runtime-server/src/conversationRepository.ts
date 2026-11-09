@@ -3,6 +3,7 @@ import { Pool, type QueryResultRow } from "pg";
 import type { PostgresQueryExecutor } from "./postgresStore.js";
 import type { PostgresStore, PostgresTransactionClient } from "./postgresStore.js";
 import { LocalRuntimeAuthority, localRuntimeAuthority, type RunStatus, type StoreEvent, type SubmissionReceipt } from "./store.js";
+import type { ToolRequest } from "./protocol.js";
 import type { ConversationMessage } from "./protocol.js";
 import { normalizeBriefSnapshot, type BriefSnapshot } from "./brief.js";
 import { ledgerEntry, steeredPayload, type ClaimedMessage, type LedgerEntry } from "./chat/messageLedger.js";
@@ -70,12 +71,58 @@ export type ConversationRunRecord = {
   partialOutput?: string;
 };
 
+export type ToolCallOutcome =
+  | { status: "ok"; result: Record<string, unknown> }
+  | { status: "error"; error: { code: string; message: string } };
+
+/**
+ * A local-tool call a Run waits for. The record is the durable fact: any
+ * instance can answer it, any instance can read the answer, and a Runtime that
+ * restarts finds it again. It outlives neither its `expiresAt` nor its answer.
+ */
+export type ToolCallRecord = {
+  runId: string;
+  toolCallId: string;
+  name: string;
+  arguments: Record<string, unknown>;
+  approval: "none" | "auto" | "ask";
+  scope?: ToolRequest["scope"];
+  skillRunId?: string;
+  requestedAt: string;
+  expiresAt: string;
+  outcome?: ToolCallOutcome;
+  answeredAt?: string;
+};
+
+/** The one compaction running in a conversation, whichever instance runs it. */
+export type CompactionClaim = {
+  id: string;
+  conversationId: string;
+  executorId: string;
+  leaseExpiresAt: string;
+  /** A new message asked it to stop. */
+  preempted: boolean;
+  endedAt?: string;
+};
+
+type CompactedEvent = Extract<StoreEvent, { type: "conversation.compacted" }>;
+
+/** `basis` makes the commit conditional: it fails if a Run started after the compaction began. */
+export type CommitCompactionInput = {
+  conversationId: string;
+  compactionId: string;
+  basis?: { latestRunId?: string };
+  event: Omit<CompactedEvent, "timestamp">;
+  /** The journal entry that tells observers, and the channel layer, this compaction completed. */
+  journal: Record<string, unknown>;
+};
+
 export type ConversationJournalEvent = {
   /** Monotonically increasing within one repository. */
   cursor: number;
   conversationId: string;
   runId?: string;
-  type: "conversation.created" | "conversation.updated" | "run.created" | "run.state" | "message.created" | "message.consumed";
+  type: "conversation.created" | "conversation.updated" | "run.created" | "run.state" | "message.created" | "message.consumed" | "compaction.started" | "compaction.completed";
   payload: Record<string, unknown>;
   createdAt: string;
 };
@@ -198,8 +245,29 @@ export interface ConversationRepository {
   hasAcceptedMessage(conversationId: string, clientMessageId: string): Promise<boolean>;
   /** The conversation's one active Run, if any. */
   getActiveRun(conversationId: string): Promise<ConversationRunRecord | undefined>;
-  /** Hands the Run its steered messages exactly once, in arrival order. */
+  /**
+   * Hands the Run its steered messages exactly once, in arrival order. Claiming and appending them to the
+   * transcript is one transaction: a crash between the two can neither lose a message nor repeat it.
+   */
   claimSteeredMessages(runId: string): Promise<ClaimedMessage[]>;
+  /** Records a local-tool call before the client is asked, so the Run can wait across a restart. Idempotent. */
+  requestToolCall(call: Omit<ToolCallRecord, "outcome" | "answeredAt">): Promise<void>;
+  /** Stores a client's answer once. False when the call is unknown, already answered, or expired. */
+  answerToolCall(runId: string, toolCallId: string, outcome: ToolCallOutcome): Promise<boolean>;
+  listToolCalls(runId: string): Promise<ToolCallRecord[]>;
+  /**
+   * Takes the conversation's compaction claim. Not granted while a Run is active or another claim is live;
+   * `latestRunId` is the Run the compaction's history ends with.
+   */
+  beginCompaction(input: { id: string; conversationId: string; executorId: string; leaseMs: number }): Promise<{ claimed: boolean; latestRunId?: string }>;
+  /** Asks the running compaction to stop. False when none is running. */
+  requestCompactionPreempt(conversationId: string): Promise<boolean>;
+  /** True when the claim was preempted or has ended: the job must stop. */
+  compactionStopped(compactionId: string): Promise<boolean>;
+  runningCompaction(conversationId: string): Promise<CompactionClaim | undefined>;
+  endCompaction(compactionId: string): Promise<void>;
+  /** Appends the transcript checkpoint and the journal entry together, and ends the claim. False when stale. */
+  commitCompaction(input: CommitCompactionInput): Promise<boolean>;
   savePartialOutput(runId: string, text: string): Promise<void>;
   /** Atomically takes over active Runs whose owner's lease lapsed. */
   claimOrphanedRuns(executorId: string, leaseMs: number): Promise<ConversationRunRecord[]>;
@@ -285,6 +353,8 @@ export class InMemoryConversationRepository implements ConversationRepository {
   protected runs = new Map<string, ConversationRunRecord>();
   protected events: ConversationJournalEvent[] = [];
   protected conversationRequests = new Map<string, string>();
+  protected toolCalls = new Map<string, ToolCallRecord>();
+  protected compactions = new Map<string, CompactionClaim>();
   protected nextCursor = 1;
 
   private pendingStoreEvents: StoreEvent[] = [];
@@ -480,8 +550,88 @@ export class InMemoryConversationRepository implements ConversationRepository {
       this.runs.set(runId, { ...run, consumedCount: run.steeredCount });
       for (const entry of steered) {
         this.appendEventUnsafe({ conversationId: run.conversationId, runId, type: "message.consumed", payload: { client_message_id: entry.clientMessageId } });
+        // The transcript append commits with the claim: the commit log is one transaction.
+        this.pendingStoreEvents.push({ type: "conversation.model_message", conversation_id: run.conversationId, run_id: runId,
+          client_message_id: entry.clientMessageId, message: entry.message!, timestamp: now() });
       }
       return steered.map((entry) => ({ clientMessageId: entry.clientMessageId, message: entry.message! }));
+    });
+  }
+
+  async requestToolCall(call: Omit<ToolCallRecord, "outcome" | "answeredAt">): Promise<void> {
+    await this.write(async () => {
+      const key = `${call.runId}\n${call.toolCallId}`;
+      if (!this.toolCalls.has(key)) this.toolCalls.set(key, structuredClone(call));
+    });
+  }
+
+  async answerToolCall(runId: string, toolCallId: string, outcome: ToolCallOutcome): Promise<boolean> {
+    return this.write(async () => {
+      const key = `${runId}\n${toolCallId}`;
+      const call = this.toolCalls.get(key);
+      if (!call || call.outcome || Date.parse(call.expiresAt) <= Date.now()) return false;
+      this.toolCalls.set(key, { ...call, outcome: structuredClone(outcome), answeredAt: now() });
+      return true;
+    });
+  }
+
+  async listToolCalls(runId: string): Promise<ToolCallRecord[]> {
+    await this.readReady();
+    return [...this.toolCalls.values()].filter((call) => call.runId === runId).map((call) => structuredClone(call));
+  }
+
+  async beginCompaction(input: { id: string; conversationId: string; executorId: string; leaseMs: number }): Promise<{ claimed: boolean; latestRunId?: string }> {
+    return this.write(async () => {
+      const runs = [...this.runs.values()].filter((run) => run.conversationId === input.conversationId).sort(compareRuns);
+      if (runs.some((run) => isActiveRun(run.status))) return { claimed: false };
+      const running = [...this.compactions.values()].find((claim) => claim.conversationId === input.conversationId && !claim.endedAt);
+      if (running && Date.parse(running.leaseExpiresAt) > Date.now()) return { claimed: false };
+      if (running) this.compactions.set(running.id, { ...running, endedAt: now() });
+      this.compactions.set(input.id, { id: input.id, conversationId: input.conversationId, executorId: input.executorId,
+        leaseExpiresAt: new Date(Date.now() + input.leaseMs).toISOString(), preempted: false });
+      return { claimed: true, ...(runs.at(-1) ? { latestRunId: runs.at(-1)!.id } : {}) };
+    });
+  }
+
+  async requestCompactionPreempt(conversationId: string): Promise<boolean> {
+    return this.write(async () => {
+      const running = [...this.compactions.values()].find((claim) => claim.conversationId === conversationId && !claim.endedAt);
+      if (!running) return false;
+      this.compactions.set(running.id, { ...running, preempted: true });
+      return true;
+    });
+  }
+
+  async compactionStopped(compactionId: string): Promise<boolean> {
+    await this.readReady();
+    const claim = this.compactions.get(compactionId);
+    return !claim || claim.preempted || claim.endedAt !== undefined;
+  }
+
+  async runningCompaction(conversationId: string): Promise<CompactionClaim | undefined> {
+    await this.readReady();
+    const running = [...this.compactions.values()].find((claim) => claim.conversationId === conversationId && !claim.endedAt && Date.parse(claim.leaseExpiresAt) > Date.now());
+    return running ? { ...running } : undefined;
+  }
+
+  async endCompaction(compactionId: string): Promise<void> {
+    await this.write(async () => {
+      const claim = this.compactions.get(compactionId);
+      if (claim && !claim.endedAt) this.compactions.set(compactionId, { ...claim, endedAt: now() });
+    });
+  }
+
+  async commitCompaction(input: CommitCompactionInput): Promise<boolean> {
+    return this.write(async () => {
+      if (input.basis) {
+        const runs = [...this.runs.values()].filter((run) => run.conversationId === input.conversationId).sort(compareRuns);
+        if (runs.some((run) => isActiveRun(run.status)) || runs.at(-1)?.id !== input.basis.latestRunId) return false;
+      }
+      this.pendingStoreEvents.push({ ...input.event, timestamp: now() });
+      this.appendEventUnsafe({ conversationId: input.conversationId, type: "compaction.completed", payload: input.journal });
+      const claim = this.compactions.get(input.compactionId);
+      if (claim && !claim.endedAt) this.compactions.set(claim.id, { ...claim, endedAt: now() });
+      return true;
     });
   }
 
@@ -721,6 +871,8 @@ export class InMemoryConversationRepository implements ConversationRepository {
     // Runs committed before steering existed carry no counters.
     for (const run of this.runs.values()) { run.steeredCount ??= 0; run.consumedCount ??= 0; }
     this.conversationRequests = this.localAuthority.requests;
+    this.toolCalls = this.localAuthority.toolCalls;
+    this.compactions = this.localAuthority.compactions;
     this.events = this.localAuthority.journal;
     this.nextCursor = (this.events.at(-1)?.cursor ?? 0) + 1;
   }
@@ -732,10 +884,14 @@ export class InMemoryConversationRepository implements ConversationRepository {
       const beforeConversations = this.conversations;
       const beforeRuns = this.runs;
       const beforeRequests = this.conversationRequests;
+      const beforeToolCalls = this.toolCalls;
+      const beforeCompactions = this.compactions;
       // Stage control changes; history is not copied or rewritten per event.
       this.conversations = new Map(beforeConversations);
       this.runs = new Map(beforeRuns);
       this.conversationRequests = new Map(beforeRequests);
+      this.toolCalls = new Map(beforeToolCalls);
+      this.compactions = new Map(beforeCompactions);
       this.events = [];
       this.pendingStoreEvents = [];
       try {
@@ -743,10 +899,12 @@ export class InMemoryConversationRepository implements ConversationRepository {
         const conversations = [...this.conversations.values()].filter((row) => beforeConversations.get(row.id) !== row);
         const runs = [...this.runs.values()].filter((row) => beforeRuns.get(row.id) !== row);
         const requests = [...this.conversationRequests].filter(([key, value]) => beforeRequests.get(key) !== value);
+        const toolCalls = [...this.toolCalls.entries()].filter(([key, row]) => beforeToolCalls.get(key) !== row).map(([, row]) => row);
+        const compactions = [...this.compactions.values()].filter((row) => beforeCompactions.get(row.id) !== row);
         const journal = this.events;
         const events = this.pendingStoreEvents;
-        return { result, ...(conversations.length || runs.length || requests.length || journal.length || events.length ? {
-          commit: { kind: events.length ? "accept" as const : "control" as const, conversations, runs, requests, journal, events }
+        return { result, ...(conversations.length || runs.length || requests.length || journal.length || events.length || toolCalls.length || compactions.length ? {
+          commit: { kind: events.length ? "accept" as const : "control" as const, conversations, runs, requests, journal, events, toolCalls, compactions }
         } : {}) };
       } finally {
         this.loadAuthority();
@@ -857,6 +1015,32 @@ CREATE TABLE IF NOT EXISTS hatch_conversation_journal (
 CREATE INDEX IF NOT EXISTS hatch_conversation_journal_cursor_idx
   ON hatch_conversation_journal (conversation_id, cursor ASC);
 -- Message-level idempotency: the database, not the caller, guarantees one user message per client key.
+CREATE TABLE IF NOT EXISTS hatch_run_tool_calls (
+  run_id TEXT NOT NULL REFERENCES hatch_conversation_runs(id) ON DELETE CASCADE,
+  tool_call_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  arguments JSONB NOT NULL,
+  approval TEXT NOT NULL,
+  scope TEXT,
+  skill_run_id TEXT,
+  requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  outcome JSONB,
+  answered_at TIMESTAMPTZ,
+  PRIMARY KEY (run_id, tool_call_id)
+);
+CREATE TABLE IF NOT EXISTS hatch_conversation_compactions (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL REFERENCES hatch_conversations(id) ON DELETE CASCADE,
+  executor_id TEXT NOT NULL,
+  lease_expires_at TIMESTAMPTZ NOT NULL,
+  preempted BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  ended_at TIMESTAMPTZ
+);
+-- Single flight across instances: the database allows one running compaction per conversation.
+CREATE UNIQUE INDEX IF NOT EXISTS hatch_conversation_one_compaction_idx
+  ON hatch_conversation_compactions (conversation_id) WHERE ended_at IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS hatch_conversation_user_message_key_idx
   ON hatch_conversation_journal (conversation_id, (payload->>'client_message_id'))
   WHERE event_type = 'message.created' AND payload->>'role' = 'user';
@@ -1003,9 +1187,107 @@ export class PostgresConversationRepository implements ConversationRepository {
       for (const row of rows.rows) {
         const entry = ledgerEntry(eventFromRow(row))!;
         await repository.appendEvent({ conversationId: run.conversationId, runId, type: "message.consumed", payload: { client_message_id: entry.clientMessageId } });
+        // Same transaction as the claim above: a crash can neither lose the message nor append it twice.
+        await this.requireSubmissionStore().appendOn(repository.pool, { type: "conversation.model_message", conversation_id: run.conversationId,
+          run_id: runId, client_message_id: entry.clientMessageId, message: entry.message!, timestamp: new Date().toISOString() });
         claimed.push({ clientMessageId: entry.clientMessageId, message: entry.message! });
       }
       return claimed;
+    });
+  }
+
+  private requireSubmissionStore(): PostgresStore {
+    if (!this.submissionStore) throw new Error("Atomic submission store is not configured");
+    return this.submissionStore;
+  }
+
+  async requestToolCall(call: Omit<ToolCallRecord, "outcome" | "answeredAt">): Promise<void> {
+    await this.initialize();
+    await this.pool.query(`
+      INSERT INTO hatch_run_tool_calls (run_id, tool_call_id, name, arguments, approval, scope, skill_run_id, requested_at, expires_at)
+      VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8::timestamptz, $9::timestamptz)
+      ON CONFLICT (run_id, tool_call_id) DO NOTHING
+    `, [call.runId, call.toolCallId, call.name, JSON.stringify(call.arguments), call.approval, call.scope ?? null, call.skillRunId ?? null, call.requestedAt, call.expiresAt]);
+  }
+
+  async answerToolCall(runId: string, toolCallId: string, outcome: ToolCallOutcome): Promise<boolean> {
+    await this.initialize();
+    // The first answer wins and an expired call takes none: both are decided by this one statement.
+    const result = await this.pool.query(`
+      UPDATE hatch_run_tool_calls SET outcome = $3::jsonb, answered_at = now()
+      WHERE run_id = $1 AND tool_call_id = $2 AND outcome IS NULL AND expires_at > now()
+      RETURNING tool_call_id
+    `, [runId, toolCallId, JSON.stringify(outcome)]);
+    return result.rows.length > 0;
+  }
+
+  async listToolCalls(runId: string): Promise<ToolCallRecord[]> {
+    await this.initialize();
+    const result = await this.pool.query<ToolCallRow>("SELECT * FROM hatch_run_tool_calls WHERE run_id = $1 ORDER BY requested_at, tool_call_id", [runId]);
+    return result.rows.map((row) => ({
+      runId: row.run_id, toolCallId: row.tool_call_id, name: row.name, arguments: row.arguments, approval: row.approval as ToolCallRecord["approval"],
+      ...(row.scope ? { scope: row.scope as ToolCallRecord["scope"] } : {}), ...(row.skill_run_id ? { skillRunId: row.skill_run_id } : {}),
+      requestedAt: new Date(row.requested_at).toISOString(), expiresAt: new Date(row.expires_at).toISOString(),
+      ...(row.outcome ? { outcome: row.outcome, answeredAt: new Date(row.answered_at!).toISOString() } : {})
+    }));
+  }
+
+  async beginCompaction(input: { id: string; conversationId: string; executorId: string; leaseMs: number }): Promise<{ claimed: boolean; latestRunId?: string }> {
+    await this.initialize();
+    return this.inTransaction(async (repository) => {
+      // The same lock a submission takes: either the Run starts first and there is nothing to compact now, or this claim does.
+      await repository.pool.query("SELECT id FROM hatch_conversations WHERE id = $1 FOR UPDATE", [input.conversationId]);
+      const runs = await repository.pool.query<{ id: string; status: string }>(
+        "SELECT id, status FROM hatch_conversation_runs WHERE conversation_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1", [input.conversationId]);
+      if (runs.rows[0] && isActiveRun(runs.rows[0].status as DurableRunStatus)) return { claimed: false };
+      await repository.pool.query("UPDATE hatch_conversation_compactions SET ended_at = now() WHERE conversation_id = $1 AND ended_at IS NULL AND lease_expires_at < now()", [input.conversationId]);
+      const inserted = await repository.pool.query(`
+        INSERT INTO hatch_conversation_compactions (id, conversation_id, executor_id, lease_expires_at)
+        VALUES ($1, $2, $3, now() + ($4 * interval '1 millisecond')) ON CONFLICT DO NOTHING RETURNING id
+      `, [input.id, input.conversationId, input.executorId, input.leaseMs]);
+      return inserted.rows.length ? { claimed: true, ...(runs.rows[0] ? { latestRunId: runs.rows[0].id } : {}) } : { claimed: false };
+    });
+  }
+
+  async requestCompactionPreempt(conversationId: string): Promise<boolean> {
+    await this.initialize();
+    const result = await this.pool.query("UPDATE hatch_conversation_compactions SET preempted = true WHERE conversation_id = $1 AND ended_at IS NULL RETURNING id", [conversationId]);
+    return result.rows.length > 0;
+  }
+
+  async compactionStopped(compactionId: string): Promise<boolean> {
+    await this.initialize();
+    const result = await this.pool.query<{ stopped: boolean }>("SELECT preempted OR ended_at IS NOT NULL AS stopped FROM hatch_conversation_compactions WHERE id = $1", [compactionId]);
+    return result.rows[0]?.stopped ?? true;
+  }
+
+  async runningCompaction(conversationId: string): Promise<CompactionClaim | undefined> {
+    await this.initialize();
+    const result = await this.pool.query<CompactionRow>("SELECT * FROM hatch_conversation_compactions WHERE conversation_id = $1 AND ended_at IS NULL AND lease_expires_at > now()", [conversationId]);
+    const row = result.rows[0];
+    return row ? { id: row.id, conversationId: row.conversation_id, executorId: row.executor_id, leaseExpiresAt: new Date(row.lease_expires_at).toISOString(), preempted: row.preempted } : undefined;
+  }
+
+  async endCompaction(compactionId: string): Promise<void> {
+    await this.initialize();
+    await this.pool.query("UPDATE hatch_conversation_compactions SET ended_at = now() WHERE id = $1 AND ended_at IS NULL", [compactionId]);
+  }
+
+  async commitCompaction(input: CommitCompactionInput): Promise<boolean> {
+    await this.initialize();
+    const store = this.requireSubmissionStore();
+    return this.inTransaction(async (repository) => {
+      await repository.pool.query("SELECT id FROM hatch_conversations WHERE id = $1 FOR UPDATE", [input.conversationId]);
+      if (input.basis) {
+        const latest = await repository.pool.query<{ id: string; status: string }>(
+          "SELECT id, status FROM hatch_conversation_runs WHERE conversation_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1", [input.conversationId]);
+        const row = latest.rows[0];
+        if ((row && isActiveRun(row.status as DurableRunStatus)) || row?.id !== input.basis.latestRunId) return false;
+      }
+      await store.appendOn(repository.pool, { ...input.event, timestamp: new Date().toISOString() } as StoreEvent);
+      await repository.appendEvent({ conversationId: input.conversationId, type: "compaction.completed", payload: input.journal });
+      await repository.pool.query("UPDATE hatch_conversation_compactions SET ended_at = now() WHERE id = $1 AND ended_at IS NULL", [input.compactionId]);
+      return true;
     });
   }
 
@@ -1448,6 +1730,16 @@ type ConversationRow = QueryResultRow & {
   created_at: string | Date;
   updated_at: string | Date;
   brief_snapshot: BriefSnapshot | string | null;
+};
+
+type ToolCallRow = QueryResultRow & {
+  run_id: string; tool_call_id: string; name: string; arguments: Record<string, unknown>; approval: string;
+  scope: string | null; skill_run_id: string | null; requested_at: Date | string; expires_at: Date | string;
+  outcome: ToolCallOutcome | null; answered_at: Date | string | null;
+};
+
+type CompactionRow = QueryResultRow & {
+  id: string; conversation_id: string; executor_id: string; lease_expires_at: Date | string; preempted: boolean;
 };
 
 type RunRow = QueryResultRow & {

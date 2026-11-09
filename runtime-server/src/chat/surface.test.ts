@@ -8,7 +8,6 @@ import { ChatError, principalKey } from "./principal.js";
 import { ContactBinder, SentMessageLimits } from "./contactBinding.js";
 import { checkUpgrade, sessionTokenFromCookie } from "./originPolicy.js";
 import { throttled, withPartialOutput } from "./partialOutput.js";
-import { ReadOnlyRestartPolicy } from "./resumePolicy.js";
 import { CLIENT_TOOL_NAMES, assertProductUsable, authorizeLocalToolCall, productRequiresLocalTools } from "./toolSurface.js";
 
 test("the tool list is fixed, ordered, and names where each local tool runs", () => {
@@ -64,15 +63,6 @@ test("partial output is saved at most once per interval and flushed at the end",
   await wrapped.flush();
   assert.equal(published.length, 2);
   assert.equal(saved.at(-1), "hi");
-});
-
-test("a Run that only read restarts; one that used a local or side-effecting tool is interrupted", async () => {
-  const run = { id: "r", conversationId: "c", status: "running" } as ConversationRunRecord;
-  const policy = (calls: Array<{ name: string; locality?: "server" | "client" }>) => new ReadOnlyRestartPolicy({ callsOf: async () => calls });
-  assert.equal(await policy([{ name: "hatch.web_search", locality: "server" }, { name: "Skill", locality: "server" }]).decide(run), "restart");
-  assert.deepEqual(Object.keys(await policy([{ name: "file_write", locality: "client" }]).decide(run)), ["interrupt"]);
-  assert.deepEqual(Object.keys(await policy([{ name: "api.request", locality: "server" }]).decide(run)), ["interrupt"]);
-  assert.deepEqual(Object.keys(await policy([]).decide({ ...run, status: "waiting_for_tool" })), ["interrupt"]);
 });
 
 const productId = "11111111-1111-4111-8111-111111111111";

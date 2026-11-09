@@ -9,6 +9,8 @@ import { WebSocket } from "ws";
 import type { AgentCorpus, AgentCorpusResolver } from "./agentCorpus.js";
 import { DeterministicAgentRuntime } from "./agentRuntime.js";
 import { InMemoryConversationRepository } from "./conversationRepository.js";
+import { chatCompactionAdapter } from "./compaction.js";
+import { CompactionStrategy, policyFor } from "./compactionStrategy.js";
 import type { AuthIdentityResolver, EntitlementBinding, EntitlementResolver } from "./entitlements.js";
 import { RuntimeAssetStore } from "./assetStore.js";
 import { createRuntimeServer, durableConversationId, type RuntimeServer } from "./index.js";
@@ -710,6 +712,9 @@ test("a failed manual compaction does not lose the already accepted user command
     createRuntime: () => new DeterministicAgentRuntime() });
   const base = await listen(runtime.server);
   const messages: OutboundMessage[] = [];
+  // Something older than the last turn exists to be summarized, so the injected provider failure is reached.
+  await store.append({ type: "conversation.model_message", conversation_id: conversationId, run_id: "earlier", message: { role: "user", content: "an earlier question" } });
+  await store.append({ type: "conversation.model_message", conversation_id: conversationId, run_id: "earlier", message: { role: "assistant", content: "an earlier answer" } });
   const socket = await openRuntimeSocket(base, conversationId, messages);
   try {
     socket.send(JSON.stringify({ type: "client.message", run_id: "compact-run",
@@ -721,12 +726,52 @@ test("a failed manual compaction does not lose the already accepted user command
     assert.ok(accepted >= 0);
     assert.ok(accepted < messages.findIndex((message) => message.type === "turn.failed"));
     assert.equal((await store.readSubmissionReceipt(conversationId, "compact-run"))?.client_message_id, "compact-message");
-    assert.deepEqual((await store.readConversation(conversationId)).filter((message) => message.role === "user"),
-      [{ role: "user", content: "/compact", model_images: [] }]);
+    assert.deepEqual((await store.readConversation(conversationId)).filter((message) => message.role === "user").at(-1),
+      { role: "user", content: "/compact", model_images: [] });
   } finally { socket.close(); }
 });
 
-test("Runtime startup takes over a Run whose owner's lease lapsed: restarts it, or interrupts one that was waiting on a tool", async () => {
+test("a provider overflow is answered by compacting and continuing, once, and the turn completes", async () => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-overflow-recovery-"));
+  const repository = new InMemoryConversationRepository(localRuntimeAuthority(dataDir));
+  const store = new RuntimeStore(dataDir);
+  await repository.initialize();
+  const conversationId = "conversation_overflow";
+  await repository.createConversation({ id: conversationId, publicId: conversationId,
+    ownerAccountId: "local-development", creatorId: "local-development", agentId: "local-agent",
+    productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}` });
+  await store.append({ type: "conversation.model_message", conversation_id: conversationId, run_id: "earlier", message: { role: "user", content: "an earlier question" } });
+  await store.append({ type: "conversation.model_message", conversation_id: conversationId, run_id: "earlier", message: { role: "assistant", content: "an earlier answer" } });
+  const summarized: string[] = [];
+  let attempts = 0;
+  runtime = createRuntimeServer({
+    conversationStore: store, conversationRepository: repository,
+    // A test-only summarizer: no real model is called.
+    compactionStrategy: () => new CompactionStrategy(chatCompactionAdapter(async () => { summarized.push("asked"); return "## Goal\nan earlier question"; }), policyFor(262_144)),
+    createRuntime: () => ({ async *run(input) {
+      attempts += 1;
+      if (attempts === 1) throw new Error("Your input exceeds the context window of this model");
+      yield { type: "assistant.delta" as const, run_id: input.run_id, delta: { kind: "text" as const, content: "answered after compacting" } };
+      yield { type: "turn.completed" as const, run_id: input.run_id, finish_reason: "stop" as const };
+    } })
+  });
+  const base = await listen(runtime.server);
+  const messages: OutboundMessage[] = [];
+  const socket = await openRuntimeSocket(base, conversationId, messages);
+  try {
+    socket.send(JSON.stringify({ type: "client.message", run_id: "overflow-run", client_message_id: "overflow-message",
+      conversation_id: conversationId, local_tools: [], message: { role: "user", content: "a new question" } }));
+    await waitForSocket(messages, (message) => message.type === "turn.completed");
+    assert.equal(attempts, 2);
+    assert.deepEqual(summarized, ["asked"]);
+    const compacted = messages.find((message) => message.type === "session.compacted") as { phase?: string; compaction_id?: string } | undefined;
+    assert.equal(compacted?.phase, "overflow_recovery");
+    assert.match(compacted?.compaction_id ?? "", /^cmp_/);
+    assert.equal(messages.some((message) => message.type === "turn.failed"), false);
+  } finally { socket.close(); }
+});
+
+test("Runtime startup takes over a Run whose owner's lease lapsed: restarts it, and one waiting on a local tool keeps waiting", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-startup-recovery-"));
   const repository = new InMemoryConversationRepository(localRuntimeAuthority(dataDir));
   await repository.initialize();
@@ -746,6 +791,12 @@ test("Runtime startup takes over a Run whose owner's lease lapsed: restarts it, 
   };
   const reading = await carried("reading");
   const waiting = await carried("waiting");
+  // The dead process had asked a local tool: its call is on record, so the Run keeps waiting for the answer.
+  const asked = new RuntimeStore(dataDir);
+  await asked.append({ type: "conversation.model_message", conversation_id: waiting.conversation.id, run_id: waiting.run.id,
+    message: { role: "assistant", content: null, tool_calls: [{ id: "call_lost", type: "function", function: { name: "file_search", arguments: "{}" } }] } });
+  await repository.requestToolCall({ runId: waiting.run.id, toolCallId: "call_lost", name: "file_search", arguments: { query: "x" }, approval: "none",
+    requestedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString() });
   await repository.transitionRun(waiting.run.id, "waiting_for_tool");
 
   runtime = createRuntimeServer({
@@ -758,12 +809,11 @@ test("Runtime startup takes over a Run whose owner's lease lapsed: restarts it, 
   });
   await listen(runtime.server);
   await waitForCondition(async () => (await repository.getRun(reading.conversation.id, reading.run.id))?.status === "completed");
-  await waitForCondition(async () => (await repository.getRun(waiting.conversation.id, waiting.run.id))?.status === "interrupted");
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal((await repository.getRun(waiting.conversation.id, waiting.run.id))?.status, "waiting_for_tool");
 
   const restarted = new RuntimeStore(dataDir);
   assert.equal((await restarted.readConversation(reading.conversation.id)).at(-1)?.content, "answered question reading");
-  const interrupted = await repository.getRun(waiting.conversation.id, waiting.run.id);
-  assert.match(interrupted?.interruptedReason ?? "", /waiting for a local tool/);
 });
 
 test("closing every client never stops a Run: it waits for its local tool and a later client finishes it", async () => {

@@ -575,14 +575,18 @@ export type CompactionEvent = {
   type: "session.compacted";
   run_id: string;
   trigger: "auto" | "manual";
-  phase: "pre_turn" | "mid_turn" | "standalone_turn";
-  reason: "context_limit" | "user_requested";
+  phase: "pre_turn" | "mid_turn" | "standalone_turn" | "background" | "overflow_recovery";
+  reason: "context_limit" | "user_requested" | "provider_overflow";
   message: string;
   replacement_history: ConversationMessage[];
   window_number: number;
   first_window_id: string;
   previous_window_id?: string;
   window_id: string;
+  compaction_id?: string;
+  stage?: "prune" | "summary" | "degraded";
+  degraded?: boolean;
+  dropped_messages?: number;
 };
 
 export type RunFinal = {
