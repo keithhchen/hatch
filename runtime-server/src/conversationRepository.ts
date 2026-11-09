@@ -190,6 +190,10 @@ export interface ConversationRepository {
    * Throw RangeError unless afterCursor <= throughCursor <= current high water.
    */
   journalPage(conversationId: string, afterCursor: number, throughCursor?: number, limit?: number): Promise<ConversationJournalPage>;
+  /** Whether this client key was already accepted, so a retry needs no asset work. */
+  hasAcceptedMessage(conversationId: string, clientMessageId: string): Promise<boolean>;
+  /** The conversation's one active Run, if any. */
+  getActiveRun(conversationId: string): Promise<ConversationRunRecord | undefined>;
   /** Hands the Run its steered messages exactly once, in arrival order. */
   claimSteeredMessages(runId: string): Promise<ClaimedMessage[]>;
   savePartialOutput(runId: string, text: string): Promise<void>;
@@ -449,6 +453,18 @@ export class InMemoryConversationRepository implements ConversationRepository {
     }
     const run = this.runs.get(entry.runId!)!;
     return { created: false, steered: false, run: cloneRun(run), receipt: { run_id: run.id, client_message_id: entry.clientMessageId, accepted_at: entry.acceptedAt } };
+  }
+
+  async hasAcceptedMessage(conversationId: string, clientMessageId: string): Promise<boolean> {
+    await this.readReady();
+    return [...this.runs.values()].some((run) => run.conversationId === conversationId && run.clientMessageId === clientMessageId)
+      || this.ledger(conversationId).some((entry) => entry.clientMessageId === clientMessageId);
+  }
+
+  async getActiveRun(conversationId: string): Promise<ConversationRunRecord | undefined> {
+    await this.readReady();
+    const run = [...this.runs.values()].find((row) => row.conversationId === conversationId && isActiveRun(row.status));
+    return run ? cloneRun(run) : undefined;
   }
 
   async claimSteeredMessages(runId: string): Promise<ClaimedMessage[]> {
@@ -930,6 +946,25 @@ export class PostgresConversationRepository implements ConversationRepository {
     } finally {
       client.release(failure);
     }
+  }
+
+  async hasAcceptedMessage(conversationId: string, clientMessageId: string): Promise<boolean> {
+    await this.initialize();
+    const result = await this.pool.query<{ accepted: boolean }>(`
+      SELECT EXISTS (SELECT 1 FROM hatch_conversation_runs WHERE conversation_id = $1 AND client_message_id = $2)
+        OR EXISTS (SELECT 1 FROM hatch_conversation_journal WHERE conversation_id = $1 AND event_type = 'message.created'
+          AND payload->>'role' = 'user' AND payload->>'client_message_id' = $2) AS accepted
+    `, [conversationId, clientMessageId]);
+    return result.rows[0]?.accepted === true;
+  }
+
+  async getActiveRun(conversationId: string): Promise<ConversationRunRecord | undefined> {
+    await this.initialize();
+    const result = await this.pool.query<RunRow>(`
+      SELECT * FROM hatch_conversation_runs
+      WHERE conversation_id = $1 AND status IN ('queued', 'running', 'waiting_for_tool', 'compacting')
+    `, [conversationId]);
+    return result.rows[0] ? runFromRow(result.rows[0]) : undefined;
   }
 
   async claimSteeredMessages(runId: string): Promise<ClaimedMessage[]> {
