@@ -72,7 +72,7 @@ async function installRelease(corpusRoot: string): Promise<void> {
 type Spawned = { child: ChildProcess; output: () => string; stop: () => Promise<void> };
 function start(entry: string, env: Record<string, string>, args: string[] = []): Spawned {
   let output = "";
-  const child = spawn(process.execPath, [...args, path.join(dist, entry)], { cwd: path.resolve(dist, ".."), env: { PATH: process.env.PATH ?? "", ...env }, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(process.execPath, [...args, path.join(dist, entry)], { cwd: path.resolve(dist, ".."), env: { PATH: process.env.PATH ?? "", DOTENV_CONFIG_PATH: "/dev/null", ...env }, stdio: ["ignore", "pipe", "pipe"] });
   for (const stream of [child.stdout, child.stderr]) stream?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
   const stop = async () => { if (child.exitCode === null) { child.kill("SIGTERM"); await new Promise((resolve) => { child.once("exit", resolve); setTimeout(() => { child.kill("SIGKILL"); resolve(undefined); }, 5_000).unref(); }); } };
   return { child, output: () => output, stop };

@@ -1142,6 +1142,7 @@ export class PostgresConversationRepository implements ConversationRepository {
   }
 
   private async inTransaction<T>(body: (repository: PostgresConversationRepository) => Promise<T>): Promise<T> {
+    if (this.transactional) return body(this);
     const pool = this.pool as PostgresQueryExecutor & { connect?: () => Promise<PostgresTransactionClient> };
     if (!pool.connect) throw new Error("Atomic steering requires a pinned Postgres connection");
     const client = await pool.connect();

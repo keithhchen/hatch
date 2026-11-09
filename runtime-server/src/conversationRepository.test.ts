@@ -304,12 +304,16 @@ class ConversationPostgresFake implements PostgresQueryExecutor {
   readonly runs = new Map<string, DatabaseRow>();
   readonly events: DatabaseRow[] = [];
 
+  async connect() {
+    return { query: this.query.bind(this), release: () => undefined };
+  }
+
   async query<T extends Record<string, unknown> = Record<string, unknown>>(
     text: string,
     values?: unknown[]
   ): Promise<{ rows: T[] }> {
     this.queries.push({ text, values });
-    if (/^\s*CREATE TABLE/i.test(text)) return { rows: [] };
+    if (/^\s*(CREATE TABLE|BEGIN|COMMIT|ROLLBACK|SELECT c\.id FROM hatch_conversations c)/i.test(text)) return { rows: [] };
     if (/^\s*SELECT \* FROM hatch_conversations\s+WHERE owner_account_id/i.test(text)) {
       const [owner, creator, agent, requestId] = values ?? [];
       return this.rows([...this.conversations.values()].filter((row) => (

@@ -743,7 +743,7 @@ test("thinking deltas stream with Pi indexes and persist the same ordered snapsh
       { kind: "thinking_delta", contentIndex: 3, delta: "considering " },
       { kind: "thinking_delta", contentIndex: 3, delta: "the request" },
       { kind: "thinking_end", contentIndex: 3, content: "considering the request" },
-      { kind: "text", content: "Done." }
+      { kind: "text", content: "Done.", offset: 0 }
     ]
   );
   const visible = await store.readVisibleConversation("thinking-conversation");
