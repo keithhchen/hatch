@@ -46,7 +46,7 @@ function scriptedAgents(scripts: { assistant: Script; worker?: Script }) {
 }
 
 const allUserTexts = (context: Context) => context.messages.filter(message => message.role === "user").map(message => typeof message.content === "string" ? message.content : message.content.map(block => block.type === "text" ? block.text : "").join(""));
-const userTexts = (context: Context) => allUserTexts(context).filter(text => !text.startsWith("<当前状态>"));
+const userTexts = (context: Context) => allUserTexts(context).filter(text => !text.startsWith("<当前状态>") && !text.startsWith("<system-reminder>"));
 
 async function setup(scripts: { assistant: Script; worker?: Script }) {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-assistant-"));
