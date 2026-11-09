@@ -14,23 +14,26 @@ import { WorkbenchStore } from "./store.js";
 type Call = { tools: Array<{ name: string; description: string }>; last: string };
 
 /** Real store and runtime; only the model is scripted. `plan(call)` is the tool the model calls, if any. */
-async function harness(options: { plan?: (call: number) => string | undefined; toolSupport?: (name: string) => readonly ("web" | "cli")[] | "*"; delayMs?: number } = {}) {
+async function harness(options: { plan?: (call: number) => string | undefined; toolSupport?: (name: string) => readonly ("web" | "cli")[] | "*"; delayMs?: number; fail?: (call: number) => boolean; crashAfterMs?: number } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-send-"));
   const store = new WorkbenchStore(root, { creatorId: "c1", productId: "p1" }, new MemoryAgentDefinitionRepository(await initialAgentDefinitions()));
   const calls: Call[] = [];
   const runtime = new WorkbenchRuntime(store, {
     env: { HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash" },
     toolSupport: options.toolSupport as never,
-    agentFactory: factory => new Agent({ ...factory.agentOptions, initialState: { ...factory.initialState, model: createFactoryLlmModel({ env: factory.env }) }, streamFn: (_model, context) => {
+    liveState: options.crashAfterMs === undefined ? undefined : async () => { await new Promise(resolve => setTimeout(resolve, options.crashAfterMs)); throw new Error("live state crashed"); },
+    agentFactory: factory => new Agent({ ...factory.agentOptions, initialState: { ...factory.initialState, model: createFactoryLlmModel({ env: factory.env }) }, streamFn: (_model, context, streamOptions) => {
       const call = calls.length + 1;
       const final = context.messages.at(-1);
       calls.push({ tools: (context.tools ?? []).map(tool => ({ name: tool.name, description: tool.description })), last: JSON.stringify(final?.content) });
       const tool = options.plan?.(call);
       const message: AssistantMessage = { role: "assistant", api: "openai-completions", provider: "moonshotai-cn", model: "kimi-k2.6", timestamp: Date.now(),
         content: tool ? [{ type: "toolCall", id: `call-${call}`, name: tool, arguments: { directory: "input" } }] : [{ type: "text", text: `Reply ${call}` }],
-        stopReason: tool ? "toolUse" : "stop", usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
+        stopReason: options.fail?.(call) ? "error" : tool ? "toolUse" : "stop", ...(options.fail?.(call) ? { errorMessage: "model down" } : {}), usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
       const stream = createAssistantMessageEventStream();
-      setTimeout(() => { stream.push({ type: "start", partial: message }); stream.push({ type: "done", reason: tool ? "toolUse" : "stop", message }); stream.end(message); }, options.delayMs ?? 30);
+      const timer = setTimeout(() => { stream.push({ type: "start", partial: message }); stream.push({ type: "done", reason: tool ? "toolUse" : "stop", message }); stream.end(message); }, options.delayMs ?? 30);
+      // A provider call that honors the stop: it ends as aborted, and the loop ends without reading its steering queue.
+      streamOptions?.signal?.addEventListener("abort", () => { clearTimeout(timer); const aborted = { ...message, content: [], stopReason: "aborted" as const }; stream.push({ type: "error", reason: "aborted", error: aborted }); stream.end(aborted); }, { once: true });
       return stream;
     } }),
   });
@@ -129,5 +132,49 @@ test("closing every client does not stop a run: only an explicit stop does", asy
     h.runtime.stop(h.session.id);
     await h.idle();
     assert.equal((await h.store.get(h.session.id)).status, "interrupted");
+  } finally { await h.close(); }
+});
+
+test("send: every Run has its own id, shared by the messages that steer it", async () => {
+  const h = await harness({ plan: call => call === 1 ? "list" : undefined });
+  try {
+    const first = await h.runtime.send(h.session.id, h.say("one"));
+    const steered = await h.runtime.send(h.session.id, h.say("two"));
+    assert.match(first.runId, /^run_/);
+    assert.notEqual(first.runId, h.session.id, "a Run is not the conversation");
+    assert.equal(steered.runId, first.runId, "a steering message joins the running Run");
+    assert.equal(h.runtime.runId(h.session.id), first.runId);
+    await h.idle();
+    assert.equal(h.runtime.runId(h.session.id), undefined);
+    assert.notEqual((await h.runtime.send(h.session.id, h.say("three"))).runId, first.runId, "the next Run is a new one");
+    await h.idle();
+  } finally { await h.close(); }
+});
+
+test("send: a message steered into a run that then fails is still in history", async () => {
+  // The loop dies while the first message is being prepared: it never reads what was steered in meanwhile.
+  const h = await harness({ crashAfterMs: 60 });
+  try {
+    await h.runtime.send(h.session.id, h.say("one"));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal((await h.runtime.send(h.session.id, h.say("two"))).queued, true);
+    await h.idle();
+    const session = await h.store.get(h.session.id);
+    assert.equal(session.status, "failed");
+    assert.deepEqual(userTexts(session.messages), ["one", "two"], "the accepted message is not lost");
+    assert.deepEqual(userTexts(session.context), ["one", "two"]);
+    assert.equal(h.events.filter(event => event.type === "message").length, session.messages.length, "and it was announced like any other");
+  } finally { await h.close(); }
+});
+
+test("send: a message steered into a run that is stopped is still in history", async () => {
+  const h = await harness({ delayMs: 120 });
+  try {
+    await h.runtime.send(h.session.id, h.say("one"));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    await h.runtime.send(h.session.id, h.say("two"));
+    h.runtime.stop(h.session.id);
+    await h.idle();
+    assert.deepEqual(userTexts((await h.store.get(h.session.id)).messages), ["one", "two"]);
   } finally { await h.close(); }
 });

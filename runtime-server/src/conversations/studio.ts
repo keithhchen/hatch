@@ -1,5 +1,6 @@
 import { AssistantConversation, type AssistantHost } from "./assistantConversation.js";
-import type { AssetResolver } from "./assets.js";
+import type { AssetDesk, AssetShelf } from "./assets.js";
+import { AttachedConversation } from "./attachedConversation.js";
 import { ConversationError, type Conversation } from "./conversation.js";
 import type { EventLog } from "./eventLog.js";
 import { IdempotentConversation, type MessageLedger } from "./ledger.js";
@@ -13,38 +14,45 @@ export type StudioDeps = {
   assistant(): AssistantHost | undefined;
   eventLog: EventLog;
   ledger: MessageLedger;
-  assets?: AssetResolver;
+  /** Attachments for a Product's workers, over the files its workspace shares. Without it, workers take none. */
+  assets?: (files: WorkerWorkspace["store"]["backend"]) => AssetDesk;
 };
 
 /** What a client asks to talk to. */
 export type TargetSpec = { kind: "worker"; productId: string; workerId: string } | { kind: "assistant" };
 
-export type Target = { conversation: Conversation; maxContent: number; accountId: string };
+export type Target = { conversation: Conversation; maxContent: number; accountId: string; assets?: AssetShelf };
 
 const NOT_FOUND = (code: string, message: string) => new ConversationError(404, code, message);
 
 /**
- * Finds the conversation a client addressed, for every transport. Each conversation comes back
- * idempotent and recorded: what it does reaches the event log whether or not anyone is watching.
+ * Finds the conversation a client addressed, for every transport. Each conversation comes back idempotent.
+ * Recording is not done here: a Product's runtime journals every Run from its start, and the Assistant is recorded once it exists.
  */
 export class Studio {
   constructor(private deps: StudioDeps) {}
 
   get eventLog(): EventLog { return this.deps.eventLog; }
 
-  async directory(accountId: string, token: string, productId: string): Promise<WorkerDirectory> {
+  private async workspace(accountId: string, token: string, productId: string): Promise<WorkerWorkspace> {
     const product = await this.deps.product(accountId, productId);
     if (!product) throw NOT_FOUND("product_not_found", "Product was not found.");
-    const workspace = await this.deps.workspace({ creatorId: accountId, productId, briefSpec: product.brief_spec }, token);
-    record(this.deps.eventLog, workspace.runtime.events, event => event.sessionId);
-    return new WorkerDirectory(workspace);
+    return this.deps.workspace({ creatorId: accountId, productId, briefSpec: product.brief_spec }, token);
+  }
+
+  async directory(accountId: string, token: string, productId: string): Promise<WorkerDirectory> {
+    return new WorkerDirectory(await this.workspace(accountId, token, productId));
   }
 
   async target(accountId: string, token: string, spec: TargetSpec): Promise<Target> {
     if (spec.kind === "assistant") return { conversation: this.assistant(accountId), maxContent: 20_000, accountId };
-    const worker = (await this.directory(accountId, token, spec.productId)).conversation(spec.workerId);
+    const workspace = await this.workspace(accountId, token, spec.productId);
+    const worker = new WorkerDirectory(workspace).conversation(spec.workerId);
     if (!worker) throw NOT_FOUND("worker_not_found", `No worker named ${spec.workerId}.`);
-    return { conversation: new IdempotentConversation(worker, this.deps.ledger, `worker:${spec.productId}:${spec.workerId}`), maxContent: 100_000, accountId };
+    const conversationId = `worker:${spec.productId}:${spec.workerId}`;
+    const desk = this.deps.assets?.(workspace.store.backend);
+    const assets = desk && { desk, scope: { kind: "account" as const, accountId, conversationId } };
+    return { conversation: new IdempotentConversation(assets ? new AttachedConversation(worker, assets) : worker, this.deps.ledger, conversationId), maxContent: 100_000, accountId, ...(assets ? { assets } : {}) };
   }
 
   /** Starts recording the Assistant's events; call it once the Assistant exists so nothing before the first client is missed. */

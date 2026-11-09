@@ -1,14 +1,13 @@
-import vm from "node:vm";
 import type { Asset, AssetBlobs, AssetRepository, AssetScope } from "./domain.js";
+import { FileToolError, REGEX_TIMEOUT_MS, fixedMatcher, regexMatcher } from "./matchers.js";
 import { ATTACHMENTS_ROOT, pathsFor } from "./views.js";
+
+export { FileToolError };
 
 export const FILE_LIMITS = {
   lsEntries: 200, grepFiles: 100, grepScanBytes: 20 * 1024 * 1024, grepMatches: 50, grepMatchesMax: 200, grepContextMax: 5,
-  grepOutputChars: 8_000, lineChars: 300, patternChars: 300, regexMsPerFile: 400, grepMs: 3_000, readChars: 8_000, readCharsMax: 20_000
+  grepOutputChars: 8_000, lineChars: 300, patternChars: 300, regexMsPerFile: REGEX_TIMEOUT_MS, grepMs: 3_000, readChars: 8_000, readCharsMax: 20_000
 } as const;
-
-/** A tool-call mistake the model can read and correct. */
-export class FileToolError extends Error {}
 
 type Entry = { path: string; asset: Asset };
 type Segments = string[];
@@ -113,32 +112,4 @@ export class AttachmentFiles {
 }
 
 export type GrepQuery = { pattern: string; fixed?: boolean; ignoreCase?: boolean; context?: number; maxMatches?: number; path?: string };
-type Matcher = (lines: string[], cap: number) => number[];
-
 const clip = (text: string, max: number) => text.length <= max ? text : `${text.slice(0, max)}\n[output truncated]`;
-
-function fixedMatcher(needle: string, ignoreCase: boolean): Matcher {
-  const target = ignoreCase ? needle.toLowerCase() : needle;
-  return (lines, cap) => {
-    const hits: number[] = [];
-    for (let i = 0; i < lines.length && hits.length < cap; i++) if ((ignoreCase ? lines[i]!.toLowerCase() : lines[i]!).includes(target)) hits.push(i);
-    return hits;
-  };
-}
-
-const SCAN = new vm.Script(`(() => { const re = new RegExp(source, flags); const hits = []; for (let i = 0; i < lines.length && hits.length < cap; i++) if (re.test(lines[i])) hits.push(i); return hits; })()`);
-
-/**
- * A model-written regex runs in its own VM context under a hard time limit, so
- * catastrophic backtracking ends the scan with an error instead of the process.
- */
-function regexMatcher(source: string, ignoreCase: boolean): Matcher {
-  try { new RegExp(source); } catch { throw new FileToolError("Invalid regular expression"); }
-  return (lines, cap) => {
-    try {
-      return SCAN.runInContext(vm.createContext({ source, flags: ignoreCase ? "i" : "", lines, cap }), { timeout: FILE_LIMITS.regexMsPerFile }) as number[];
-    } catch {
-      throw new FileToolError("The regular expression took too long; use a simpler pattern or fixed=true");
-    }
-  };
-}

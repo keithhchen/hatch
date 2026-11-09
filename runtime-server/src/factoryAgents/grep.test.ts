@@ -22,5 +22,9 @@ test("grep finds matching lines in the files list shows, scoped by directory", a
     assert.deepEqual((await run({ pattern: "Acme", directory: "output/notes.md" })).matches, [], "a directory means a directory");
     assert.equal((await run({ pattern: "Acme", limit: 1 })).truncated, true);
     await assert.rejects(grep.execute("call", { pattern: "(" } as never), /Invalid regular expression/);
+    await store.put(session.id, "output/evil.md", Buffer.from(`${"a".repeat(40)}!`), { actor: "agent" });
+    const started = Date.now();
+    await assert.rejects(grep.execute("call", { pattern: "^(a+)+$", directory: "output" } as never), /took too long/);
+    assert.ok(Date.now() - started < 5000, "catastrophic backtracking ends at the time limit");
   } finally { await rm(root, { recursive: true, force: true }); }
 });

@@ -3,6 +3,7 @@ import type http from "node:http";
 import { normalizeClientAttributes, type ClientAttributes } from "../surfaces/contract.js";
 import { parseContent, resolveContent } from "./assets.js";
 import { awaitTurn } from "./awaitTurn.js";
+import { MAX_BYTES } from "../assets/pipeline.js";
 import { ConversationError, type Conversation, type SendInput } from "./conversation.js";
 import { START } from "./eventLog.js";
 import { follow, resumePoint } from "./follow.js";
@@ -10,6 +11,8 @@ import { snapshotOf } from "./snapshot.js";
 import { Studio, type StudioDeps, type Target, type TargetSpec } from "./studio.js";
 
 export const MAX_WAIT_SECONDS = 120;
+/** The most any kind of asset may weigh; the pipeline holds each kind to its own limit. */
+export const MAX_UPLOAD_BYTES = Math.max(...Object.values(MAX_BYTES));
 /** A consumer that lets this much pile up is disconnected; it resumes by cursor. */
 export const MAX_BUFFERED_BYTES = 1024 * 1024;
 
@@ -19,15 +22,17 @@ export type ConversationRouteDeps = StudioDeps & {
   token(request: http.IncomingMessage): string | undefined;
   json(response: http.ServerResponse, status: number, payload: unknown): void;
   readJson(request: http.IncomingMessage): Promise<Record<string, unknown>>;
+  /** The request body as it is, refusing more than `maxBytes`. */
+  readBytes(request: http.IncomingMessage, maxBytes: number): Promise<Buffer>;
   /** Pacing of `wait`, replaceable in tests. */
   pace?: { pollMs?: number; sleep?: (ms: number) => Promise<void>; now?: () => number };
 };
 
-type Action = "messages" | "events" | "stop" | "snapshot";
+type Action = "messages" | "events" | "stop" | "snapshot" | "assets";
 
-const WORKERS_ROUTE = /^\/v1\/creator\/products\/([^/]+)\/workers(?:\/([^/]+)\/(messages|events|stop|snapshot))?$/;
+const WORKERS_ROUTE = /^\/v1\/creator\/products\/([^/]+)\/workers(?:\/([^/]+)\/(messages|events|stop|snapshot|assets))?$/;
 const ASSISTANT_ROUTE = /^\/v1\/creator\/assistant\/conversation\/(messages|events|stop|snapshot)$/;
-const METHODS: Record<Action, string[]> = { messages: ["GET", "POST"], events: ["GET"], stop: ["POST"], snapshot: ["GET"] };
+const METHODS: Record<Action, string[]> = { messages: ["GET", "POST"], events: ["GET"], stop: ["POST"], snapshot: ["GET"], assets: ["POST"] };
 
 function clientOf(body: Record<string, unknown>): ClientAttributes {
   const raw = body.client;
@@ -90,6 +95,7 @@ export class ConversationRoutes {
     const { conversation } = target;
     if (!METHODS[action].includes(request.method ?? "")) throw new ConversationError(405, "method_not_allowed", "Method not allowed.");
     if (action === "stop") { await conversation.stop(); this.deps.json(response, 202, { requested: true }); return; }
+    if (action === "assets") { await this.upload(target, request, response, url); return; }
     if (action === "snapshot") { this.deps.json(response, 200, await snapshotOf(conversation, this.studio.eventLog)); return; }
     if (action === "events") { await this.events(conversation, request, response, url); return; }
     if (request.method === "GET") {
@@ -103,9 +109,19 @@ export class ConversationRoutes {
 
   private async input(target: Target, request: http.IncomingMessage): Promise<SendInput> {
     const body = await this.deps.readJson(request);
-    const { text, attachments } = await resolveContent(parseContent(body.content), target.accountId, this.deps.assets);
+    const { text, attachments } = await resolveContent(parseContent(body.content), target.assets);
     if ((!text && !attachments.length) || text.length > target.maxContent) throw new ConversationError(400, "invalid_message", `Message must contain 1–${target.maxContent} characters.`);
     return { id: randomUUID(), text, attachments, client: clientOf(body), key: keyOf(request, body) };
+  }
+
+  /** The file is the request body and its name is `?name=`; it is a ready asset, or refused with the reason, before any message is sent. */
+  private async upload(target: Target, request: http.IncomingMessage, response: http.ServerResponse, url: URL): Promise<void> {
+    if (!target.assets) throw new ConversationError(501, "attachments_unavailable", "This conversation cannot take attachments.");
+    const name = url.searchParams.get("name")?.trim();
+    if (!name) throw new ConversationError(400, "invalid_upload", "name is the file's name.");
+    const bytes = await this.deps.readBytes(request, MAX_UPLOAD_BYTES);
+    if (!bytes.length) throw new ConversationError(400, "invalid_upload", "The file is empty.");
+    this.deps.json(response, 201, await target.assets.desk.upload(target.assets.scope, { name, bytes }));
   }
 
   private async send(target: Target, request: http.IncomingMessage, response: http.ServerResponse, url: URL): Promise<void> {
@@ -118,7 +134,7 @@ export class ConversationRoutes {
     const cursor = feed ? await this.studio.eventLog.head(feed) : START;
     const after = wait ? (await conversation.messages(undefined, 1)).messages.at(-1)?.id : undefined;
     const sent = await conversation.send(input);
-    const accepted = { conversation_id: sent.conversationId, message: sent.message, queued: sent.queued };
+    const accepted = { conversation_id: sent.conversationId, ...(sent.runId ? { run_id: sent.runId } : {}), message: sent.message, queued: sent.queued };
     if (String(request.headers.accept).includes("text/event-stream")) { await this.streamTurn(conversation, sent.message.id, accepted, cursor, response); return; }
     if (!wait) { this.deps.json(response, 202, { ...accepted, status: "running" }); return; }
     const outcome = await awaitTurn(conversation, { sentId: sent.message.id, after, timeoutMs: Math.min(wait, MAX_WAIT_SECONDS) * 1000, ...this.deps.pace });
@@ -126,7 +142,7 @@ export class ConversationRoutes {
     this.deps.json(response, running ? 202 : 200, {
       ...accepted, status: outcome.status.state, ...(outcome.status.error ? { error: outcome.status.error } : {}), ...(outcome.reply ? { reply: outcome.reply } : {}),
       // The Run goes on without this request: follow it from `cursor`.
-      ...(running ? { run_id: sent.conversationId, cursor } : {}),
+      ...(running ? { cursor } : {}),
     });
   }
 

@@ -13,7 +13,7 @@ export type PublicMessage = {
 };
 
 /** An asset the upload side has finished with. Bytes live in the workspace at `path`; the model reads them there. */
-export type ReadyAsset = { id: string; kind: "image" | "file" | "audio"; name: string; mimeType: string; bytes: number; sha256: string; path: string; transcript?: string };
+export type ReadyAsset = { id: string; kind: "image" | "file" | "audio"; name: string; mimeType: string; bytes: number; sha256: string; path: string; transcript?: string; /** Set when the asset already belongs to a message. */ messageId?: string };
 
 /** What a client sent, with every attachment already resolved to a ready asset. */
 export type SendInput = {
@@ -27,8 +27,10 @@ export type SendInput = {
 };
 
 export type ConversationState = "idle" | "running" | "failed";
-export type ConversationStatus = { state: ConversationState; error?: string };
-export type Sent = { conversationId: string; message: PublicMessage; queued: boolean };
+/** `runId` names the Run in progress; it is not the conversation, and a conversation has many Runs. */
+export type ConversationStatus = { state: ConversationState; error?: string; runId?: string };
+/** `runId` is the Run that took the message, when the conversation can say. */
+export type Sent = { conversationId: string; message: PublicMessage; queued: boolean; runId?: string };
 export type ConversationEvent = { type: string; [key: string]: unknown };
 export type Unsubscribe = () => void;
 

@@ -5,6 +5,12 @@ import { authorizeToolCall, describeTool, orderTools, type ClientGroup, type Sur
 export type ClientSupport = (toolName: string) => SurfaceTool["supportedClients"];
 export const everywhere: ClientSupport = () => "*";
 
+/** Tools whose result is a form the user fills in: IM and DM have no such surface. */
+const NEEDS_FORM: Record<string, SurfaceTool["supportedClients"]> = { askuser: ["web", "desktop", "cli", "mcp"] };
+
+/** What Studio declares for its own tools; every other tool runs on every client. */
+export const studioToolSupport: ClientSupport = name => NEEDS_FORM[name] ?? "*";
+
 /**
  * The tool set as declared once: a fixed order, descriptions that say where each tool is available,
  * and every call authorized against the client of the latest message. The list never depends on who is asking.

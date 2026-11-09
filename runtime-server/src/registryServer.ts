@@ -3,6 +3,8 @@ import { PostgresAgentDefinitionRepository } from "./factoryAgents/definitions.j
 import { PostgresWorkbenchBackend } from "./factoryAgents/store.js";
 import { AssistantService } from "./assistant/assistant.js";
 import { ConversationRoutes, type ConversationRouteDeps } from "./conversations/routes.js";
+import { EventLogJournal } from "./conversations/journal.js";
+import { openProductAssets } from "./conversations/productAssets.js";
 import { openConversationPorts, type ConversationPorts } from "./conversations/ports.js";
 import { Studio, type StudioDeps } from "./conversations/studio.js";
 import { StudioSockets, STUDIO_SOCKET_PATH } from "./conversations/socket.js";
@@ -91,6 +93,8 @@ export type RegistryServer = { server: http.Server; close: () => Promise<void> }
 export const CREATOR_FACTORY_JSON_BODY_MAX_BYTES = 32 * 1024 * 1024;
 type RegistryContext = {
   conversationPorts: ConversationPorts;
+  /** Attachments for Studio; with the Registry database. */
+  studioAssets?: StudioDeps["assets"];
   assistant?: AssistantService;
   ingest?: IngestService;
   channels?: ChannelService;
@@ -129,7 +133,9 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const factoryRoot = path.resolve(environment.HATCH_CREATOR_FACTORY_ROOT ?? "creator-factory-runs");
   const registryPool = store.databasePool();
   const factoryAgentDefinitions = registryPool ? await PostgresAgentDefinitionRepository.open(registryPool) : undefined;
-  const factoryAgents = new FactoryAgentsService(path.join(factoryRoot, "agent-chats"), environment, factoryAgentDefinitions);
+  const conversationPorts = await openConversationPorts(registryPool);
+  // With a database every Product workspace journals each Run from its start; without one Studio has no conversations to record.
+  const factoryAgents = new FactoryAgentsService(path.join(factoryRoot, "agent-chats"), environment, factoryAgentDefinitions, registryPool ? () => new EventLogJournal(conversationPorts.eventLog, event => event.sessionId) : undefined);
   const objectStore = objectStoreFromEnvironment(environment);
   const productObjectStore = objectStoreFromEnvironment(environment, path.join(factoryRoot, "product-files"));
   if (!productObjectStore) throw new Error("Product File object storage is not configured");
@@ -222,7 +228,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const legacyHmacEnabled = environment.HATCH_ENABLE_LEGACY_HMAC_AUTH?.trim().toLowerCase() === "true";
   const authSecret = legacyHmacEnabled ? environment.HATCH_AUTH_SIGNING_SECRET?.trim() || "" : "";
   const httpLimits = httpRequestLimitOptionsFromEnvironment(environment);
-  const registryContext: RegistryContext = { store, accounts, accountAvatars, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, productLive, nodeObjectStore, releaseStore, authSecret, conversationPorts: await openConversationPorts(registryPool) };
+  const registryContext: RegistryContext = { store, accounts, accountAvatars, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, productLive, nodeObjectStore, releaseStore, authSecret, conversationPorts, studioAssets: registryPool ? await openProductAssets(registryPool, productObjectStore, environment) : undefined };
   const studio = new Studio(studioDeps(registryContext));
   const studioSockets = new StudioSockets({ studio, identify: token => identifyToken(registryContext, token) });
   let assistantTick: NodeJS.Timeout | undefined;
@@ -1998,6 +2004,7 @@ function studioDeps(context: RegistryContext): StudioDeps {
     workspace: (scope, token) => context.factoryAgents.workspace(scope, token),
     assistant: () => context.assistant,
     ...context.conversationPorts,
+    assets: context.studioAssets,
   };
 }
 
@@ -2008,6 +2015,7 @@ function conversationDeps(response: http.ServerResponse, context: RegistryContex
     token: bearer,
     json: sendJson,
     readJson: request => readJson(request),
+    readBytes: readRawBody,
   };
 }
 
