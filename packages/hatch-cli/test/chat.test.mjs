@@ -6,13 +6,20 @@ import { main } from "../src/cli.js";
 import { COMMANDS } from "../src/commands.js";
 import { McpServer } from "../src/mcp.js";
 import { CommandRegistry } from "../src/registry.js";
-import { RunObserver, parseSse, resumable } from "../src/run.js";
+import { RunObserver, isTerminal, parseSse, resumable } from "../src/run.js";
 import { makeContext, sink } from "./helpers.mjs";
 
 // These tests prove the client's behaviour against a local HTTP server. They are not end-to-end product evidence.
-const sse = (events) => events.map(([id, event, data]) => `id: ${id}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`).join("");
-const delta = (id, text) => [id, "delta", { text }];
-const done = (id) => [id, "state", { status: "idle" }];
+// The Chat shapes mirror runtime-server: index.ts handleConversationHttpRequest, chat/sinks.ts, chat/conversationFeed.ts.
+const sse = (events) => events.map(([id, event, data]) => `${id === undefined ? "" : `id: ${id}\n`}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`).join("");
+// Live events (deltas, turn.state, message.accepted) carry no id; durable journal events carry the cursor as id.
+const delta = (text) => [undefined, "assistant.delta", { type: "assistant.delta", run_id: "r1", delta: { kind: "text", content: text } }];
+const journal = (cursor, journalType, payload) => [cursor, "journal.event", { type: "journal.event", cursor, journal_type: journalType, run_id: "r1", payload, created_at: "t" }];
+const runState = (cursor, status) => journal(cursor, "run.state", { id: "r1", status });
+const done = (cursor) => runState(cursor, "completed");
+// Studio workers still speak their own wire (id per event, `delta`/`state`); only Chat changed.
+const workerDelta = (id, text) => [id, "delta", { text }];
+const workerDone = (id) => [id, "state", { status: "idle" }];
 
 async function withServer(handler, fn) {
   const requests = [];
@@ -41,29 +48,57 @@ async function cli(argv, url, env = { HATCH_API_KEY: "k" }) {
 }
 
 test("parseSse reads ids, events and JSON data across chunk boundaries", async () => {
-  const text = sse([delta("1", "he"), delta("2", "llo")]);
+  const text = sse([journal("1", "message.created", { role: "user" }), delta("hello")]);
   const events = [];
   for await (const e of parseSse([text.slice(0, 17), text.slice(17)])) events.push(e);
-  assert.deepEqual(events.map((e) => [e.id, e.event, e.data.text]), [["1", "delta", "he"], ["2", "delta", "llo"]]);
+  assert.deepEqual(events.map((e) => [e.id, e.event]), [["1", "journal.event"], [undefined, "assistant.delta"]]);
+  assert.equal(events[1].data.delta.content, "hello");
+});
+
+test("RunObserver folds the real Chat events: message.accepted, turn.state, deltas, journal run.state", () => {
+  const observer = new RunObserver();
+  const apply = (e) => observer.apply({ id: e[0], event: e[1], data: e[2] });
+  assert.equal(apply([undefined, "message.accepted", { type: "message.accepted", conversation_id: "c1", run_id: "r1", client_message_id: "k", outcome: "started" }]), "");
+  assert.equal(observer.runId, "r1");
+  apply([undefined, "turn.state", { type: "turn.state", run_id: "r1", status: "running" }]);
+  assert.equal(observer.status, "running");
+  assert.equal(apply(delta("Hel")), "Hel");
+  assert.equal(apply([undefined, "assistant.delta", { type: "assistant.delta", run_id: "r1", delta: { kind: "status", content: "thinking" } }]), "", "only text deltas are reply text");
+  assert.equal(apply(delta("lo")), "lo");
+  apply(journal("7", "message.created", { role: "assistant" }));
+  assert.equal(observer.cursor, "7", "the cursor is the journal event id");
+  apply(runState("8", "completed"));
+  assert.deepEqual([observer.text, observer.status, observer.cursor], ["Hello", "completed", "8"]);
+  apply([undefined, "turn.failed", { type: "turn.failed", run_id: "r1", error: { code: "run_cancelled", message: "Run cancelled" } }]);
+  assert.deepEqual([observer.status, observer.error.code], ["failed", "run_cancelled"]);
+});
+
+test("a Chat Run ends at a terminal journal run.state, not at a live turn.state", () => {
+  const ev = (e) => ({ id: e[0], event: e[1], data: e[2] });
+  assert.equal(isTerminal(ev([undefined, "turn.state", { type: "turn.state", run_id: "r1", status: "completed" }])), false);
+  assert.equal(isTerminal(ev(runState("3", "running"))), false);
+  assert.equal(isTerminal(ev(runState("3", "waiting_for_tool"))), false);
+  for (const status of ["completed", "failed", "cancelled", "interrupted"]) assert.equal(isTerminal(ev(runState("3", status))), true, status);
 });
 
 test("resumable reconnects after the last cursor and never repeats an event", async () => {
   const opened = [];
+  const state = (status) => ({ id: "4", event: "journal.event", data: { journal_type: "run.state", run_id: "r1", payload: { status } } });
   const open = (after) => {
     opened.push(after);
     return (async function* () {
-      if (after === undefined) { yield { id: "1", event: "delta", data: { text: "a" } }; yield { id: "2", event: "delta", data: { text: "b" } }; throw new Error("reset"); }
-      yield { id: "2", event: "delta", data: { text: "b" } }; // replayed overlap
-      yield { id: "3", event: "delta", data: { text: "c" } };
-      yield { id: "4", event: "state", data: { status: "idle" } };
+      if (after === undefined) { yield { id: "1", event: "journal.event", data: { journal_type: "message.created", payload: {} } }; yield { id: "2", event: "journal.event", data: { journal_type: "run.created", payload: {} } }; throw new Error("reset"); }
+      yield { id: "2", event: "journal.event", data: { journal_type: "run.created", payload: {} } }; // replayed overlap
+      yield { event: "assistant.delta", data: { delta: { kind: "text", content: "c" } } };
+      yield state("completed");
     })();
   };
   const observer = new RunObserver();
   let printed = "";
   for await (const e of resumable(open, { sleep: async () => {} })()) printed += observer.apply(e);
   assert.deepEqual(opened, [undefined, "2"]);
-  assert.equal(printed, "abc");
-  assert.equal(observer.status, "idle");
+  assert.equal(printed, "c");
+  assert.equal(observer.status, "completed");
   assert.equal(observer.cursor, "4");
 });
 
@@ -75,22 +110,36 @@ test("resumable does not retry an HTTP error", async () => {
   assert.equal(opens, 1);
 });
 
-test("ask starts a conversation with a product, streams the reply, and resumes by cursor after a drop", async () => {
+test("ask starts a conversation in the product, streams the reply, and resumes with after_cursor after a drop", async () => {
   await withServer((call, res) => {
-    if (call.url === "/v1/conversations") return json(res, { conversation_id: "c1" }, 201);
-    if (call.method === "POST" && call.url === "/v1/conversations/c1/messages") return stream(res, [delta("1", "Hel")], { drop: true });
-    if (call.url === "/v1/conversations/c1/events?after=1") return stream(res, [delta("1", "Hel"), delta("2", "lo"), done("3")]);
-    json(res, {}, 404);
+    if (call.url === "/v1/conversations?product_id=p1") return json(res, { conversation: { id: "c1" }, created: true }, 201);
+    if (call.method === "POST" && call.url === "/v1/conversations/c1/messages?product_id=p1") {
+      return stream(res, [[undefined, "message.accepted", { type: "message.accepted", run_id: "r1" }], delta("Hel"), journal("5", "run.created", { id: "r1" })], { drop: true });
+    }
+    if (call.url === "/v1/conversations/c1/events?product_id=p1&after_cursor=5") return stream(res, [delta("lo"), done("6")]);
+    json(res, { error: { code: "not_found", message: call.url } }, 404);
   }, async (url, requests) => {
-    const r = await cli(["ask", "hello", "--product", "p1", "--stream"], url);
+    const r = await cli(["ask", "hello", "--product", "p1", "--stream", "--json"], url);
     assert.equal(r.code, 0, r.err);
-    assert.equal(r.out, "Hello\n");
-    const send = requests.find((c) => c.method === "POST" && c.url.endsWith("/messages"));
+    const out = JSON.parse(r.out);
+    assert.deepEqual([out.conversation_id, out.run_id, out.status, out.cursor, out.reply.text], ["c1", "r1", "completed", "6", "Hello"]);
+    const send = requests.find((c) => c.method === "POST" && c.url.includes("/messages"));
     assert.equal(send.headers.accept, "text/event-stream");
     assert.match(send.body.client_message_id, /^[0-9a-f-]{36}$/);
-    assert.equal(send.headers["idempotency-key"], send.body.client_message_id);
-    assert.deepEqual(requests.find((c) => c.url === "/v1/conversations").body, { product_id: "p1" });
+    const create = requests.find((c) => c.url === "/v1/conversations?product_id=p1");
+    assert.deepEqual(create.body, { client_request_id: `${send.body.client_message_id}:conversation` }, "product_id is a query parameter; the body rejects unknown fields");
     assert.ok(!requests.some((c) => c.url.includes("cancel")), "dropping a connection never cancels the Run");
+  });
+});
+
+test("the plain-text stream prints only new reply text and a failed Run exits 1", async () => {
+  await withServer((call, res) => {
+    if (call.method === "POST") return stream(res, [delta("par"), runState("2", "failed")]);
+    json(res, {}, 404);
+  }, async (url) => {
+    const r = await cli(["ask", "hi", "--conversation", "c1", "--product", "p1", "--stream"], url);
+    assert.equal(r.out, "par\n");
+    assert.equal(r.code, 1);
   });
 });
 
@@ -99,66 +148,108 @@ test("a send dropped before any event is retried with the same client_message_id
     if (call.method !== "POST") return json(res, {}, 404);
     const attempts = requests.filter((c) => c.method === "POST").length;
     if (attempts === 1) return res.destroy();
-    stream(res, [delta("1", "ok"), done("2")]);
+    stream(res, [delta("ok"), done("2")]);
   }, async (url, requests) => {
-    const r = await cli(["ask", "hi", "--conversation", "c1", "--stream", "--key", "k-1"], url);
+    const r = await cli(["ask", "hi", "--conversation", "c1", "--product", "p1", "--stream", "--key", "k-1"], url);
     assert.equal(r.code, 0, r.err);
     assert.equal(r.out, "ok\n");
     assert.deepEqual(requests.map((c) => c.body?.client_message_id), ["k-1", "k-1"]);
   });
 });
 
+test("watch resumes from --after with after_cursor and stops at a terminal run.state", async () => {
+  await withServer((call, res) => {
+    if (call.url === "/v1/conversations/c1/events?product_id=p1&after_cursor=6") return stream(res, [delta("x"), runState("7", "running"), runState("8", "cancelled")]);
+    json(res, {}, 404);
+  }, async (url) => {
+    const r = await cli(["conversation", "watch", "c1", "--product", "p1", "--after", "6", "--json"], url);
+    assert.equal(r.code, 0, r.err);
+    assert.deepEqual([JSON.parse(r.out).status, JSON.parse(r.out).cursor], ["cancelled", "8"]);
+  });
+});
+
 test("giving up on a stream says how to resume and does not cancel", async () => {
-  await withServer((call, res) => stream(res, [delta("7", "x")], { drop: true }), async (url, requests) => {
-    const r = await cli(["conversation", "watch", "c1", "--after", "6"], url);
+  await withServer((call, res) => stream(res, [journal("7", "run.created", { id: "r1" })], { drop: true }), async (url, requests) => {
+    const r = await cli(["conversation", "watch", "c1", "--product", "p1", "--after", "6"], url);
     assert.equal(r.code, 1);
     assert.match(r.err, /--after 7/);
     assert.ok(!requests.some((c) => c.method === "POST"));
   });
 });
 
-test("ask --wait returns the reply, or the run id when it is still running", async () => {
+test("ask --wait flattens {run, outcome, reply}, or returns the run id from the 202", async () => {
   await withServer((call, res) => {
-    if (call.url === "/v1/conversations/c1/messages?wait=30") return json(res, { status: "running", run_id: "r9" }, 202);
+    if (call.url === "/v1/conversations/c1/messages?product_id=p1&wait=30") return json(res, { run_id: "r9", outcome: "started", status: "running" }, 202);
+    if (call.url === "/v1/conversations/c1/messages?product_id=p1&wait=60") return json(res, { run: { id: "r2", status: "completed" }, outcome: "started", reply: "Hi there." });
+    if (call.url === "/v1/conversations/c1/messages?product_id=p1&wait=5") return json(res, { run: { id: "r3", status: "failed" }, outcome: "started", reply: "" });
     json(res, {}, 404);
   }, async (url) => {
-    const r = await cli(["ask", "hi", "--conversation", "c1", "--wait=30", "--json"], url);
-    const out = JSON.parse(r.out);
-    assert.equal(out.run_id, "r9");
-    assert.equal(out.conversation_id, "c1");
+    const pending = await cli(["ask", "hi", "--conversation", "c1", "--product", "p1", "--wait=30", "--json"], url);
+    const out = JSON.parse(pending.out);
+    assert.deepEqual([out.run_id, out.status, out.conversation_id], ["r9", "running", "c1"]);
     assert.ok(out.client_message_id);
-    assert.match(r.err, /conversation show c1/);
+    assert.match(pending.err, /conversation show c1 --product p1/);
+    const answered = await cli(["ask", "hi", "--conversation", "c1", "--product", "p1", "--wait"], url);
+    assert.equal(answered.out, "Hi there.\n");
+    const failed = await cli(["ask", "hi", "--conversation", "c1", "--product", "p1", "--wait=5"], url);
+    assert.equal(failed.code, 1);
   });
 });
 
-test("conversations, show and stop use the Chat API routes", async () => {
+test("ask without --product is a usage error: every Chat call is scoped by product_id", async () => {
+  await withServer((call, res) => json(res, {}, 500), async (url, requests) => {
+    const r = await cli(["ask", "hi", "--conversation", "c1"], url);
+    assert.equal(r.code, 2);
+    assert.equal(requests.length, 0);
+  });
+});
+
+test("conversations lists with next_cursor; show derives status from runs; stop cancels the run", async () => {
   await withServer((call, res) => {
-    if (call.url === "/v1/conversations") return json(res, { conversations: [{ id: "c1", product_id: "p1", updated_at: "t" }] });
-    if (call.url === "/v1/conversations/c1/snapshot") return json(res, { status: "running", cursor: "5", run_id: "r1", messages: [{ id: "m1", role: "user", text: "hi", created_at: "t" }] });
-    if (call.url === "/v1/conversations/c1/runs/r1/cancel") return json(res, { requested: true }, 202);
-    json(res, {}, 404);
-  }, async (url) => {
-    assert.match((await cli(["conversations"], url)).out, /c1 .*p1/);
-    const shown = await cli(["conversation", "show", "c1", "--json"], url);
-    assert.equal(JSON.parse(shown.out).cursor, "5");
-    assert.match((await cli(["conversation", "stop", "c1", "r1"], url)).out, /Stop requested/);
+    if (call.url === "/v1/conversations?product_id=p1") return json(res, { conversations: [{ id: "c1", title: "T", updated_at: "t" }], next_cursor: "n1", sent_message_count: 1 });
+    if (call.url === "/v1/conversations?product_id=p1&cursor=n1") return json(res, { conversations: [], sent_message_count: 1 });
+    if (call.url === "/v1/conversations/c1/snapshot?product_id=p1") {
+      return json(res, { conversation: { id: "c1" }, runs: [{ id: "r0", status: "completed" }, { id: "r1", status: "running" }], messages: [{ run_id: "r0", role: "user", content: "hi", timestamp: "t" }], events: [], cursor: 5, pending_tool_calls: [] });
+    }
+    if (call.method === "POST" && call.url === "/v1/conversations/c1/runs/r1/cancel?product_id=p1") return json(res, { run: { id: "r1", status: "cancelled" }, submission: null });
+    json(res, { error: { code: "not_found", message: call.url } }, 404);
+  }, async (url, requests) => {
+    const listed = await cli(["conversations", "--product", "p1", "--json"], url);
+    assert.equal(JSON.parse(listed.out).next_cursor, "n1");
+    assert.match((await cli(["conversations", "--product", "p1"], url)).out, /c1 .*T/);
+    assert.equal((await cli(["conversations", "--product", "p1", "--cursor", "n1"], url)).code, 0);
+    const shown = await cli(["conversation", "show", "c1", "--product", "p1", "--json"], url);
+    const snap = JSON.parse(shown.out);
+    assert.deepEqual([snap.cursor, snap.run_id, snap.status], [5, "r1", "running"]);
+    assert.match((await cli(["conversation", "show", "c1", "--product", "p1"], url)).out, /running {2}run r1 {2}cursor 5\n\[r0\] you .*\nhi/);
+    const stopped = await cli(["conversation", "stop", "c1", "r1", "--product", "p1"], url);
+    assert.match(stopped.out, /r1 cancelled/);
+    assert.deepEqual(requests.at(-1).body, {});
+  });
+});
+
+test("an API error body {error:{code,message}} is reported", async () => {
+  await withServer((call, res) => json(res, { error: { code: "conversation_not_found", message: "Conversation c9 was not found." } }, 404), async (url) => {
+    const r = await cli(["conversation", "show", "c9", "--product", "p1"], url);
+    assert.equal(r.code, 1);
+    assert.match(r.err, /Conversation c9 was not found/);
   });
 });
 
 test("browser sessions and API keys both authenticate Chat calls", async () => {
-  await withServer((call, res) => json(res, { conversations: [], got: call.headers.authorization }), async (url, requests) => {
-    await cli(["conversations"], url, { HATCH_API_KEY: "key-1" });
+  await withServer((call, res) => json(res, { conversations: [] }), async (url, requests) => {
+    await cli(["conversations", "--product", "p1"], url, { HATCH_API_KEY: "key-1" });
     const { ctx } = await makeContext({ env: { HATCH_API_URL: url } });
     await ctx.store.put("default", { api_url: url, token: "session-1", kind: "session" });
     const deps = { env: { HATCH_API_URL: url }, fetch: globalThis.fetch, home: ctx.home, cwd: ctx.cwd, store: ctx.store, browser: { open() {} }, stdin: new PassThrough(), stdout: sink(), stderr: sink() };
-    assert.equal(await main(["conversations"], deps), 0);
+    assert.equal(await main(["conversations", "--product", "p1"], deps), 0);
     assert.deepEqual(requests.map((c) => c.headers.authorization), ["Bearer key-1", "Bearer session-1"]);
   });
 });
 
 test("Studio worker chat sends a client_message_id and streams; assistant does too", async () => {
   await withServer((call, res) => {
-    if (call.method === "POST") return stream(res, [delta("1", "done"), done("2")]);
+    if (call.method === "POST") return stream(res, [workerDelta("1", "done"), workerDone("2")]);
     json(res, {}, 404);
   }, async (url, requests) => {
     const w = await cli(["chat", "p1", "research", "go", "--stream", "--key", "w-1"], url);
@@ -174,14 +265,16 @@ test("Studio worker chat sends a client_message_id and streams; assistant does t
 
 test("MCP exposes the Chat tools and chat_send reports the key it used", async () => {
   await withServer((call, res) => {
-    if (call.url === "/v1/conversations/c1/messages?wait=20") return json(res, { status: "idle", reply: { text: "Hi." } });
+    if (call.url === "/v1/conversations/c1/messages?product_id=p1&wait=20") return json(res, { run: { id: "r1", status: "completed" }, outcome: "started", reply: "Hi." });
     json(res, {}, 404);
   }, async (url) => {
     const { ctx } = await makeContext({ env: { HATCH_API_URL: url, HATCH_API_KEY: "k" }, fetch: globalThis.fetch });
     const server = new McpServer(ctx, new CommandRegistry(COMMANDS));
-    const names = (await server.handle({ jsonrpc: "2.0", id: 1, method: "tools/list" })).result.tools.map((t) => t.name);
-    for (const n of ["conversations_list", "chat_send", "conversation_show", "chat_stop"]) assert.ok(names.includes(n), n);
-    const call = await server.handle({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "chat_send", arguments: { conversation_id: "c1", content: "hi", wait: 20, client_message_id: "m-1" } } });
-    assert.equal(JSON.parse(call.result.content[0].text).client_message_id, "m-1");
+    const tools = (await server.handle({ jsonrpc: "2.0", id: 1, method: "tools/list" })).result.tools;
+    for (const n of ["conversations_list", "chat_send", "conversation_show", "chat_stop"]) assert.ok(tools.some((t) => t.name === n), n);
+    assert.ok(tools.find((t) => t.name === "chat_send").inputSchema.required.includes("product_id"));
+    const call = await server.handle({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "chat_send", arguments: { product_id: "p1", conversation_id: "c1", content: "hi", wait: 20, client_message_id: "m-1" } } });
+    const out = JSON.parse(call.result.content[0].text);
+    assert.deepEqual([out.client_message_id, out.reply.text, out.status], ["m-1", "Hi.", "completed"]);
   });
 });

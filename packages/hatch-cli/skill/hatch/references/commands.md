@@ -20,11 +20,11 @@ Global: `--json` raw JSON, `--profile <name>` (default `default`), `--help`. Env
 | `stop <product-id> <worker>` | Stops the running turn. |
 | `assistant <message...> [--wait]` | Same as `chat`, for the account's Assistant. |
 | `assistant history [--after <message-id>]` | Same as `history`, for the Assistant. |
-| `conversations` | Your Chat conversations: `[{id, product_id, updated_at}]`. |
-| `ask <message...> (--product <id> \| --conversation <id>) [--wait[=N]] [--stream] [--key <id>]` | Chat with a published product. `--product` starts a conversation. `--json`: `{conversation_id, client_message_id, run_id?, status, reply?}`. |
-| `conversation show <id>` | `{status, run_id?, cursor, messages}` snapshot. |
-| `conversation watch <id> [--after <cursor>]` | Streams events; resumes after the cursor. |
-| `conversation stop <id> <run-id>` | Stops the Run. Closing a command never does. |
+| `conversations --product <id> [--cursor <next_cursor>]` | Your Chat conversations with a product: `{conversations: [{id, title?, updated_at}], next_cursor?}`. |
+| `ask <message...> --product <id> [--conversation <id>] [--wait[=N]] [--stream] [--key <id>]` | Chat with a published product; without `--conversation` a new one starts. `--json`: `{conversation_id, client_message_id, run_id, status, reply?}`; `status` is `queued`, `running`, `waiting_for_tool`, `compacting`, `completed`, `failed`, `cancelled` or `interrupted`. |
+| `conversation show <id> --product <id>` | `{status, run_id?, cursor, runs, messages}`: status and run id of the live (else last) Run. |
+| `conversation watch <id> --product <id> [--after <cursor>]` | Streams events until a Run ends; resumes after the cursor. |
+| `conversation stop <id> <run-id> --product <id>` | Stops the Run. Closing a command never does. |
 | `install-skill [-g] [--dir <skills-dir>]` | Installs this skill. |
 
 Human-only: `login [--browser | --api-key-stdin]`, `logout`, `keys create|list|revoke`.

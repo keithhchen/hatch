@@ -27,7 +27,7 @@ HTTP and WebSocket, each streaming and non-streaming, observe the same Run and t
 
 | | Non-streaming | Streaming |
 |---|---|---|
-| HTTP | `POST messages?wait=N`: result, or `202` with `run_id` | `Accept: text/event-stream`, or `GET events?after=cursor` |
+| HTTP | `POST messages?wait=N`: result, or `202` with `run_id` | `Accept: text/event-stream`, or `GET events?after_cursor=cursor` |
 | WebSocket | subscribe with `stream: false` | subscribe with `stream: true` |
 
 A slow consumer never slows a Run. It is disconnected and reconnects by cursor.
