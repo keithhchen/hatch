@@ -828,7 +828,7 @@ function assistantDefinitions(): AgentDefinitionSource {
 }
 
 function deskState(session: Session): AssistantDeskState {
-  session.assistantDesk ??= { ingress: [], seenEvents: [] };
+  session.assistantDesk ??= { ingress: [] };
   return session.assistantDesk;
 }
 

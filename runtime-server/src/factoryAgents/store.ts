@@ -37,7 +37,6 @@ export type IngressItem = {
 };
 export type AssistantDeskState = {
   ingress: IngressItem[];
-  seenEvents: string[];
   interview?: { taskId: string; productId: string; sessionId: string; relayFrom: number };
   lastExpert?: { source: "web" | ChannelKind; at: string; messageRef?: string; };
 };

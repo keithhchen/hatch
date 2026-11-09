@@ -104,11 +104,13 @@ async function stack(pool: Pool, config: { adapters?: FakeAdapter[]; gateway?: C
   const service = new ChannelService({ ...stores, hub: new ChannelHub(adapters), scopeOf, now: () => clock.at, onError: error => errors.push(error), rates: config.rates ?? { chat: { capacity: 100, perSecond: 100 }, connection: { capacity: 100, perSecond: 100 } }, ...(config.gateway ? { gateway: config.gateway } : {}) });
   const target = new RecordingTarget();
   service.register("assistant", target);
-  /** With the loops running, they may hold a delivery while drain finds nothing: wait until nothing is open. */
+  /** With the loops running, they may hold an event or a delivery while drain finds nothing: wait until nothing is open. */
   const settle = async () => {
     for (let waited = 0; waited < 50; waited += 1) {
       await service.drain();
-      if (!(await pool.query("SELECT 1 FROM hatch_channel_outbox WHERE state IN ('pending', 'sending') AND next_attempt_at <= $1", [clock.at])).rowCount) return;
+      const open = await pool.query(`SELECT 1 FROM hatch_channel_outbox WHERE state IN ('pending', 'sending') AND next_attempt_at <= $1
+        UNION ALL SELECT 1 FROM hatch_channel_inbox WHERE state = 'pending' AND last_error IS NULL`, [clock.at]);
+      if (!open.rowCount) return;
       await new Promise(resolve => setTimeout(resolve, 20));
     }
   };
@@ -644,7 +646,8 @@ test("A refusal from Chat goes back to the sender; an unreachable Chat returns t
     gateway.failSend = new Error("connect ECONNREFUSED");
     const event = message("member", "two");
     await env.service.accept(env.adapter, [event]);
-    await env.service.drain();
+    // The loops may hold the event: wait for the failed attempt itself.
+    for (let waited = 0; waited < 100 && !env.errors.length; waited += 1) { await env.service.drain(); await new Promise(resolve => setTimeout(resolve, 20)); }
     assert.equal(gateway.submitted.length, 0, "Chat was unreachable");
     assert.equal(env.errors.length, 1);
     env.advance(10_000);
