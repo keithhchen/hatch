@@ -1,0 +1,935 @@
+{
+  "id": 9,
+  "title": "Tool surface and KV: stable tools and system prompt, reminder never persisted, unsupported local tool runs 0 times, Kimi cache hit rate",
+  "status": "FAIL",
+  "durationMs": 172159,
+  "checks": [
+    {
+      "name": "(ii) the desktop provider is asked for the local tool call (positive control)",
+      "ok": true,
+      "detail": {
+        "frames": [
+          "turn.state",
+          "turn.state",
+          "tool_call.delta",
+          "assistant.delta",
+          "turn.state",
+          "tool_call.request"
+        ]
+      }
+    },
+    {
+      "name": "(ii) the call survives the provider's disconnect as a pending call (Run waits for a tool)",
+      "ok": true,
+      "detail": {
+        "pending": [
+          "file_read_0_c7d27852"
+        ]
+      }
+    },
+    {
+      "name": "(ii) a client that does not support the tool (mcp) cannot answer it (403 tool_unsupported_on_client)",
+      "ok": true,
+      "detail": {
+        "status": 403,
+        "body": "{\"error\":{\"code\":\"tool_unsupported_on_client\",\"message\":\"file_read is not available on mcp. Available on: desktop, cli.\"}}"
+      }
+    },
+    {
+      "name": "(ii) a provider that connects later is handed the pending call",
+      "ok": true,
+      "detail": {
+        "frames": [
+          "session.ready",
+          "tool_call.request"
+        ]
+      }
+    },
+    {
+      "name": "(ii) after a different provider answered, the Run continued with a new model call that carries the tool result",
+      "ok": true,
+      "detail": {
+        "modelCalls": 2
+      }
+    },
+    {
+      "name": "(ii) a cli client can be the provider: the pending call is visible over HTTP",
+      "ok": true,
+      "detail": {
+        "status": 202
+      }
+    },
+    {
+      "name": "(ii) the cli client's result is accepted",
+      "ok": true,
+      "detail": {
+        "status": 200
+      }
+    },
+    {
+      "name": "model calls were observed for every client switch",
+      "ok": true,
+      "detail": [
+        "web:1",
+        "mcp:1",
+        "cli:1",
+        "desktop:1",
+        "web again:1",
+        "provider disconnect/reconnect:2",
+        "cli provider:2"
+      ]
+    },
+    {
+      "name": "tool declarations (sha256 of the request's tools) are identical across web, mcp, cli, desktop and the provider disconnect",
+      "ok": true,
+      "detail": {
+        "distinct": 1
+      }
+    },
+    {
+      "name": "system prompt (sha256) is identical across web, mcp, cli, desktop and the provider disconnect",
+      "ok": true,
+      "detail": {
+        "distinct": 1
+      }
+    },
+    {
+      "name": "every client sees the full set: all seven local tools are declared on the web and mcp calls too",
+      "ok": true,
+      "detail": {
+        "names": [
+          "Skill",
+          "file_list",
+          "file_patch",
+          "file_read",
+          "file_search",
+          "file_write",
+          "git_diff",
+          "hatch_web_search",
+          "shell_exec"
+        ]
+      }
+    },
+    {
+      "name": "a local tool's description says where it is available (\"Available on: desktop, cli\")",
+      "ok": true,
+      "detail": {
+        "description": "F-8 file inside the client-declared local workspace.\n\nAvailable on: desktop, cli"
+      }
+    },
+    {
+      "name": "every model call ends with a <system-reminder> and carries exactly one",
+      "ok": true,
+      "detail": [
+        "web:1L",
+        "mcp:1L",
+        "cli:1L",
+        "desktop:1L",
+        "web again:1L",
+        "provider disconnect/reconnect:1L",
+        "provider disconnect/reconnect:1L",
+        "cli provider:1L",
+        "cli provider:1L"
+      ]
+    },
+    {
+      "name": "the reminder names the client of the latest message (web, mcp, cli, desktop)",
+      "ok": true,
+      "detail": [
+        [
+          "web",
+          true
+        ],
+        [
+          "mcp",
+          true
+        ],
+        [
+          "cli",
+          true
+        ],
+        [
+          "desktop",
+          true
+        ]
+      ]
+    },
+    {
+      "name": "(iii) mcp: the model attempted the unsupported file_write (precondition)",
+      "ok": true,
+      "detail": {
+        "calls": 2
+      }
+    },
+    {
+      "name": "(iii) mcp: file_write executed 0 times (the attached desktop client never receives tool_call.request)",
+      "ok": true,
+      "detail": {
+        "requests": 0
+      }
+    },
+    {
+      "name": "(iii) mcp: no local call was recorded for the Run",
+      "ok": true,
+      "detail": {
+        "rows": 0
+      }
+    },
+    {
+      "name": "(iii) mcp: the error is returned to the model",
+      "ok": true,
+      "detail": {
+        "toolResults": [
+          "file_write is not available on mcp. Available on: desktop, cli."
+        ]
+      }
+    },
+    {
+      "name": "(iii) web: the model attempted the unsupported file_write (precondition)",
+      "ok": true,
+      "detail": {
+        "calls": 2
+      }
+    },
+    {
+      "name": "(iii) web: file_write executed 0 times (the attached desktop client never receives tool_call.request)",
+      "ok": true,
+      "detail": {
+        "requests": 0
+      }
+    },
+    {
+      "name": "(iii) web: no local call was recorded for the Run",
+      "ok": true,
+      "detail": {
+        "rows": 0
+      }
+    },
+    {
+      "name": "(iii) web: the error is returned to the model",
+      "ok": true,
+      "detail": {
+        "toolResults": [
+          "file_write is not available on web. Available on: desktop, cli."
+        ]
+      }
+    },
+    {
+      "name": "an ordinary request that starts with \"Write\" completes with its reply on web and mcp (no unsupported local write is attempted for it)",
+      "ok": false,
+      "detail": {
+        "mcp": {
+          "status": "failed",
+          "reply_chars": 0,
+          "assistant_messages_in_history": 0,
+          "failure": "file_write is not available on mcp. Available on: desktop, cli."
+        },
+        "web": {
+          "status": "failed",
+          "reply_chars": 0,
+          "assistant_messages_in_history": 0,
+          "failure": "file_write is not available on web. Available on: desktop, cli."
+        },
+        "desktop": {
+          "file_write_requested": true,
+          "path": "20"
+        }
+      }
+    },
+    {
+      "name": "no Runtime table (transcript, journal, events, runs, tool calls, compactions) contains a <system-reminder>",
+      "ok": true,
+      "detail": {}
+    },
+    {
+      "name": "neither the history nor the snapshot API shows a <system-reminder>",
+      "ok": true
+    },
+    {
+      "name": "no Registry table contains a <system-reminder>",
+      "ok": true,
+      "detail": {
+        "rows": 0
+      }
+    },
+    {
+      "name": "KV long: provider usage was recorded for every Kimi call",
+      "ok": true,
+      "detail": {
+        "calls": 10
+      }
+    },
+    {
+      "name": "KV long: no compaction ran, so every turn after the first is a non-compacting turn",
+      "ok": true,
+      "detail": {
+        "compactions": 0
+      }
+    },
+    {
+      "name": "KV long: cached-token hit rate over calls 2..N is at least 90% on Kimi",
+      "ok": true,
+      "detail": {
+        "rate": 0.9008,
+        "calls": 9,
+        "prompt_tokens": [
+          13530,
+          13746
+        ]
+      }
+    },
+    {
+      "name": "KV long: every call after the first is at least 90% cached",
+      "ok": false,
+      "detail": [
+        0.9082,
+        0.9059,
+        0.9041,
+        0.9023,
+        0.9006,
+        0.899,
+        0.8974,
+        0.8957,
+        0.8939
+      ]
+    },
+    {
+      "name": "KV long: tools, system prompt and every earlier message are identical from call to call (as text)",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "KV short: provider usage was recorded for every Kimi call",
+      "ok": true,
+      "detail": {
+        "calls": 9
+      }
+    },
+    {
+      "name": "KV short: no compaction ran, so every turn after the first is a non-compacting turn",
+      "ok": true,
+      "detail": {
+        "compactions": 0
+      }
+    },
+    {
+      "name": "KV short: cached-token hit rate over calls 2..N is at least 90% on Kimi",
+      "ok": false,
+      "detail": {
+        "rate": 0.7749,
+        "calls": 8,
+        "prompt_tokens": [
+          5223,
+          5350
+        ]
+      }
+    },
+    {
+      "name": "KV short: every call after the first is at least 90% cached",
+      "ok": false,
+      "detail": [
+        0.7842,
+        0.7815,
+        0.7789,
+        0.7762,
+        0.7736,
+        0.7709,
+        0.7683,
+        0.7656
+      ]
+    },
+    {
+      "name": "KV short: tools, system prompt and every earlier message are identical from call to call (as text)",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "KV short_paced: provider usage was recorded for every Kimi call",
+      "ok": true,
+      "detail": {
+        "calls": 9
+      }
+    },
+    {
+      "name": "KV short_paced: no compaction ran, so every turn after the first is a non-compacting turn",
+      "ok": true,
+      "detail": {
+        "compactions": 0
+      }
+    }
+  ],
+  "measurements": {
+    "provider_request": {
+      "tool": "file_read",
+      "tool_call_id": "file_read_0_c7d27852"
+    },
+    "provider_call_rows": 1,
+    "model_calls_in_conversation": 9,
+    "tool_declaration_sha256_per_turn": {
+      "web": [
+        "dfb4b6f394da"
+      ],
+      "mcp": [
+        "dfb4b6f394da"
+      ],
+      "cli": [
+        "dfb4b6f394da"
+      ],
+      "desktop": [
+        "dfb4b6f394da"
+      ],
+      "web again": [
+        "dfb4b6f394da"
+      ],
+      "provider disconnect/reconnect": [
+        "dfb4b6f394da"
+      ],
+      "cli provider": [
+        "dfb4b6f394da"
+      ]
+    },
+    "system_prompt_sha256_per_turn": {
+      "web": [
+        "a33da8c022a7"
+      ],
+      "mcp": [
+        "a33da8c022a7"
+      ],
+      "cli": [
+        "a33da8c022a7"
+      ],
+      "desktop": [
+        "a33da8c022a7"
+      ],
+      "web again": [
+        "a33da8c022a7"
+      ],
+      "provider disconnect/reconnect": [
+        "a33da8c022a7"
+      ],
+      "cli provider": [
+        "a33da8c022a7"
+      ]
+    },
+    "declared_tool_names": [
+      "Skill",
+      "file_list",
+      "file_patch",
+      "file_read",
+      "file_search",
+      "file_write",
+      "git_diff",
+      "hatch_web_search",
+      "shell_exec"
+    ],
+    "unsupported_mcp_attempt_1": {
+      "status": 200,
+      "model_calls": 2,
+      "attempted": true
+    },
+    "unsupported_mcp": {
+      "tool_call_request_frames": 0,
+      "recorded_tool_call_rows": 0,
+      "error_returned_to_model": "file_write is not available on mcp. Available on: desktop, cli."
+    },
+    "unsupported_web_attempt_1": {
+      "status": 200,
+      "model_calls": 2,
+      "attempted": true
+    },
+    "unsupported_web": {
+      "tool_call_request_frames": 0,
+      "recorded_tool_call_rows": 0,
+      "error_returned_to_model": "file_write is not available on web. Available on: desktop, cli."
+    },
+    "delivery_heuristic_prompt": "Write the integers from 1 to 20 separated by single spaces. Output only the numbers.",
+    "delivery_heuristic_outcomes": {
+      "mcp": {
+        "status": "failed",
+        "reply_chars": 0,
+        "assistant_messages_in_history": 0,
+        "failure": "file_write is not available on mcp. Available on: desktop, cli."
+      },
+      "web": {
+        "status": "failed",
+        "reply_chars": 0,
+        "assistant_messages_in_history": 0,
+        "failure": "file_write is not available on web. Available on: desktop, cli."
+      },
+      "desktop": {
+        "file_write_requested": true,
+        "path": "20"
+      }
+    },
+    "runtime_tables_scanned": 9,
+    "kv_long_per_call": [
+      {
+        "call": 1,
+        "turn": 1,
+        "prompt_tokens": 13496,
+        "cached_tokens": 2048,
+        "hit": 0.1517
+      },
+      {
+        "call": 2,
+        "turn": 2,
+        "prompt_tokens": 13530,
+        "cached_tokens": 12288,
+        "hit": 0.9082
+      },
+      {
+        "call": 3,
+        "turn": 3,
+        "prompt_tokens": 13564,
+        "cached_tokens": 12288,
+        "hit": 0.9059
+      },
+      {
+        "call": 4,
+        "turn": 4,
+        "prompt_tokens": 13591,
+        "cached_tokens": 12288,
+        "hit": 0.9041
+      },
+      {
+        "call": 5,
+        "turn": 5,
+        "prompt_tokens": 13618,
+        "cached_tokens": 12288,
+        "hit": 0.9023
+      },
+      {
+        "call": 6,
+        "turn": 6,
+        "prompt_tokens": 13644,
+        "cached_tokens": 12288,
+        "hit": 0.9006
+      },
+      {
+        "call": 7,
+        "turn": 7,
+        "prompt_tokens": 13668,
+        "cached_tokens": 12288,
+        "hit": 0.899
+      },
+      {
+        "call": 8,
+        "turn": 8,
+        "prompt_tokens": 13693,
+        "cached_tokens": 12288,
+        "hit": 0.8974
+      },
+      {
+        "call": 9,
+        "turn": 9,
+        "prompt_tokens": 13719,
+        "cached_tokens": 12288,
+        "hit": 0.8957
+      },
+      {
+        "call": 10,
+        "turn": 10,
+        "prompt_tokens": 13746,
+        "cached_tokens": 12288,
+        "hit": 0.8939
+      }
+    ],
+    "kv_long_compactions": 0,
+    "kv_long_hit_rate_calls_2_to_n": 0.9008,
+    "kv_long_hit_rate_worst_call": 0.8939,
+    "kv_long_cached_token_values": [
+      12288
+    ],
+    "kv_long_cached_tokens_all_multiples_of_256": true,
+    "kv_long_raw_usage_sample": {
+      "prompt_tokens": 13746,
+      "completion_tokens": 4,
+      "total_tokens": 13750,
+      "cached_tokens": 12288,
+      "completion_tokens_details": {
+        "reasoning_tokens": 1
+      },
+      "prompt_tokens_details": {
+        "cached_tokens": 12288
+      }
+    },
+    "kv_long_prefix_vs_previous_call": [
+      {
+        "call": 2,
+        "same_tools": true,
+        "same_system": true,
+        "raw_prefix_preserved": false,
+        "raw_diverges_at": 26,
+        "normalized_prefix_preserved": true,
+        "normalized_diverges_at": 37535,
+        "prefix_chars": 37560
+      },
+      {
+        "call": 3,
+        "same_tools": true,
+        "same_system": true,
+        "raw_prefix_preserved": false,
+        "raw_diverges_at": 37634,
+        "normalized_prefix_preserved": true,
+        "normalized_diverges_at": 37684,
+        "prefix_chars": 37709
+      },
+      {
+        "call": 4,
+        "same_tools": true,
+        "same_system": true,
+        "raw_prefix_preserved": false,
+        "raw_diverges_at": 37776,
+        "normalized_prefix_preserved": true,
+        "normalized_diverges_at": 37832,
+        "prefix_chars": 37857
+      },
+      {
+        "call": 5,
+        "same_tools": true,
+        "same_system": true,
+        "raw_prefix_preserved": false,
+        "raw_diverges_at": 37899,
+        "normalized_prefix_preserved": true,
+        "normalized_diverges_at": 37958,
+        "prefix_chars": 37983
+      },
+      {
+        "call": 6,
+        "same_tools": true,
+        "same_system": true,
+        "raw_prefix_preserved": false,
+        "raw_diverges_at": 38019,
+        "normalized_prefix_preserved": true,
+        "normalized_diverges_at": 38083,
+        "prefix_chars": 38108
+      },
+      {
+        "call": 7,
+        "same_tools": true,
+        "same_system": true,
+        "raw_prefix_preserved": false,
+        "raw_diverges_at": 38147,
+        "normalized_prefix_preserved": true,
+        "normalized_diverges_at": 38202,
+        "prefix_chars": 38227
+      },
+      {
+        "call": 8,
+        "same_tools": true,
+        "same_system": true,
+        "raw_prefix_preserved": false,
+        "raw_diverges_at": 38265,
+        "normalized_prefix_preserved": true,
+        "normalized_diverges_at": 38313,
+        "prefix_chars": 38338
+      },
+      {
+        "call": 9,
+        "same_tools": true,
+        "same_system": true,
+        "raw_prefix_preserved": false,
+        "raw_diverges_at": 38382,
+        "normalized_prefix_preserved": true,
+        "normalized_diverges_at": 38432,
+        "prefix_chars": 38457
+      },
+      {
+        "call": 10,
+        "same_tools": true,
+        "same_system": true,
+        "raw_prefix_preserved": false,
+        "raw_diverges_at": 38496,
+        "normalized_prefix_preserved": true,
+        "normalized_diverges_at": 38552,
+        "prefix_chars": 38577
+      }
+    ],
+    "kv_short_per_call": [
+      {
+        "call": 1,
+        "turn": 1,
+        "prompt_tokens": 5205,
+        "cached_tokens": 2048,
+        "hit": 0.3935
+      },
+      {
+        "call": 2,
+        "turn": 2,
+        "prompt_tokens": 5223,
+        "cached_tokens": 4096,
+        "hit": 0.7842
+      },
+      {
+        "call": 3,
+        "turn": 3,
+        "prompt_tokens": 5241,
+        "cached_tokens": 4096,
+        "hit": 0.7815
+      },
+      {
+        "call": 4,
+        "turn": 4,
+        "prompt_tokens": 5259,
+        "cached_tokens": 4096,
+        "hit": 0.7789
+      },
+      {
+        "call": 5,
+        "turn": 5,
+        "prompt_tokens": 5277,
+        "cached_tokens": 4096,
+        "hit": 0.7762
+      },
+      {
+        "call": 6,
+        "turn": 6,
+        "prompt_tokens": 5295,
+        "cached_tokens": 4096,
+        "hit": 0.7736
+      },
+      {
+        "call": 7,
+        "turn": 7,
+        "prompt_tokens": 5313,
+        "cached_tokens": 4096,
+        "hit": 0.7709
+      },
+      {
+        "call": 8,
+        "turn": 8,
+        "prompt_tokens": 5331,
+        "cached_tokens": 4096,
+        "hit": 0.7683
+      },
+      {
+        "call": 9,
+        "turn": 9,
+        "prompt_tokens": 5350,
+        "cached_tokens": 4096,
+        "hit": 0.7656
+      }
+    ],
+    "kv_short_compactions": 0,
+    "kv_short_hit_rate_calls_2_to_n": 0.7749,
+    "kv_short_hit_rate_worst_call": 0.7656,
+    "kv_short_cached_token_values": [
+      4096
+    ],
+    "kv_short_cached_tokens_all_multiples_of_256": true,
+    "kv_short_raw_usage_sample": {
+      "prompt_tokens": 5350,
+      "completion_tokens": 4,
+      "total_tokens": 5354,
+      "cached_tokens": 4096,
+      "completion_tokens_details": {
+        "reasoning_tokens": 1
+      },
+      "prompt_tokens_details": {
+        "cached_tokens": 4096
+      }
+    },
+    "kv_short_prefix_vs_previous_call": [
+      {
+        "call": 2,
+        "same_tools": true,
+        "same_system": true,
+        "raw_prefix_preserved": false,
+        "raw_diverges_at": 26,
+        "normalized_prefix_preserved": true,
+        "normalized_diverges_at": 61,
+        "prefix_chars": 86
+      },
+      {
+        "call": 3,
+        "same_tools": true,
+        "same_system": true,
+        "raw_prefix_preserved": false,
+        "raw_diverges_at": 124,
+        "normalized_prefix_preserved": true,
+        "normalized_diverges_at": 159,
+        "prefix_chars": 184
+      },
+      {
+        "call": 4,
+        "same_tools": true,
+        "same_system": true,
+        "raw_prefix_preserved": false,
+        "raw_diverges_at": 222,
+        "normalized_prefix_preserved": true,
+        "normalized_diverges_at": 259,
+        "prefix_chars": 284
+      },
+      {
+        "call": 5,
+        "same_tools": true,
+        "same_system": true,
+        "raw_prefix_preserved": false,
+        "raw_diverges_at": 324,
+        "normalized_prefix_preserved": true,
+        "normalized_diverges_at": 360,
+        "prefix_chars": 385
+      },
+      {
+        "call": 6,
+        "same_tools": true,
+        "same_system": true,
+        "raw_prefix_preserved": false,
+        "raw_diverges_at": 424,
+        "normalized_prefix_preserved": true,
+        "normalized_diverges_at": 460,
+        "prefix_chars": 485
+      },
+      {
+        "call": 7,
+        "same_tools": true,
+        "same_system": true,
+        "raw_prefix_preserved": false,
+        "raw_diverges_at": 524,
+        "normalized_prefix_preserved": true,
+        "normalized_diverges_at": 559,
+        "prefix_chars": 584
+      },
+      {
+        "call": 8,
+        "same_tools": true,
+        "same_system": true,
+        "raw_prefix_preserved": false,
+        "raw_diverges_at": 622,
+        "normalized_prefix_preserved": true,
+        "normalized_diverges_at": 659,
+        "prefix_chars": 684
+      },
+      {
+        "call": 9,
+        "same_tools": true,
+        "same_system": true,
+        "raw_prefix_preserved": false,
+        "raw_diverges_at": 724,
+        "normalized_prefix_preserved": true,
+        "normalized_diverges_at": 761,
+        "prefix_chars": 786
+      }
+    ],
+    "kv_short_paced_per_call": [
+      {
+        "call": 1,
+        "turn": 1,
+        "prompt_tokens": 5207,
+        "cached_tokens": 2048,
+        "hit": 0.3933
+      },
+      {
+        "call": 2,
+        "turn": 2,
+        "prompt_tokens": 5225,
+        "cached_tokens": 4096,
+        "hit": 0.7839
+      },
+      {
+        "call": 3,
+        "turn": 3,
+        "prompt_tokens": 5243,
+        "cached_tokens": 4096,
+        "hit": 0.7812
+      },
+      {
+        "call": 4,
+        "turn": 4,
+        "prompt_tokens": 5261,
+        "cached_tokens": 4096,
+        "hit": 0.7786
+      },
+      {
+        "call": 5,
+        "turn": 5,
+        "prompt_tokens": 5279,
+        "cached_tokens": 4096,
+        "hit": 0.7759
+      },
+      {
+        "call": 6,
+        "turn": 6,
+        "prompt_tokens": 5297,
+        "cached_tokens": 4096,
+        "hit": 0.7733
+      },
+      {
+        "call": 7,
+        "turn": 7,
+        "prompt_tokens": 5315,
+        "cached_tokens": 4096,
+        "hit": 0.7706
+      },
+      {
+        "call": 8,
+        "turn": 8,
+        "prompt_tokens": 5333,
+        "cached_tokens": 4096,
+        "hit": 0.768
+      },
+      {
+        "call": 9,
+        "turn": 9,
+        "prompt_tokens": 5352,
+        "cached_tokens": 4096,
+        "hit": 0.7653
+      }
+    ],
+    "kv_short_paced_compactions": 0,
+    "kv_short_paced_hit_rate_calls_2_to_n": 0.7746,
+    "kv_short_paced_hit_rate_worst_call": 0.7653,
+    "kv_short_paced_cached_token_values": [
+      4096
+    ],
+    "kv_short_paced_cached_tokens_all_multiples_of_256": true,
+    "kv_short_paced_raw_usage_sample": {
+      "prompt_tokens": 5352,
+      "completion_tokens": 4,
+      "total_tokens": 5356,
+      "cached_tokens": 4096,
+      "completion_tokens_details": {
+        "reasoning_tokens": 1
+      },
+      "prompt_tokens_details": {
+        "cached_tokens": 4096
+      }
+    }
+  },
+  "evidence": {
+    "reminder_last_message_sample": "<system-reminder>\n当前时间：2026-11-09 21:30 星期一（UTC，GMT）\n这是聊天，不是交报告，就像在微信、Instagram 或 Slack 上回消息那样：先说此刻最要紧的一句判断，一到三句话、80 字左右。不列清单。必须遵守：整条消息最多一个问号。一次问好几个问题，对方只会挑一个回答，其余的就丢了；想知道的事情再多，这一条也只问最影响建议的那一个，其余留到下一轮。用户没要完整版就不给全文。\n用用户的语言回复：看用户最近一条自己写的消息；还没有的话，看 Brief 里填写的内容。不要跟随 Expert 指令、资料或这条提醒的语言。\n</system-reminder>\n<system-reminder>\nclient: cli\n</system-reminder>",
+    "kv_first_raw_prefix_break": {
+      "call": 2,
+      "at_char": 26,
+      "previous_request_bytes": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Read this document and answer questions about it. Reply to every q",
+      "next_request_bytes": "[{\"role\":\"user\",\"content\":\"Read this document and answer questions about it. Reply to every question in one short se"
+    }
+  },
+  "notes": [
+    "VERIFICATION-TOOL RECORDER: the Runtime is started with `node --import lib/modelRecorder.preload.mjs`, which copies each model request body and the provider's usage to a local JSONL file and forwards the request unchanged to the real provider (Moonshot). The product does not expose the request payload or raw provider usage. Nothing is faked.",
+    "KV short: hit rate 77.5%. Moonshot reports cached_tokens only at coarse boundaries (multiples of 256, mostly 2048), so a tail of up to a couple of thousand tokens plus the new turn is always uncached (prompt of 5350 tokens in the last call): 90% is only reachable when the prompt is long enough for that tail to be under 10%."
+  ],
+  "defects": [
+    {
+      "title": "Prompts like 'Write the integers from 1 to 20' are read as a file-save request: Runs fail on web/mcp, and the Desktop is asked to write a stray file",
+      "severity": "high",
+      "expected": "An ordinary answer is delivered as the reply on every client; a local file is written only when the user asked for one",
+      "actual": "requestedOutputPath() (agentRuntime.ts) matches write|save|create ... to|as|at <word> and takes the word as a file path (here \"20\"). After the answer streams, piAgentRuntime.persistRequestedArtifact calls file_write; on web/mcp the call is refused (tool_unsupported_on_client) and the whole Run ends failed with that reason and no assistant message in history ({\"mcp\":{\"status\":\"failed\",\"reply_chars\":0,\"assistant_messages_in_history\":0,\"failure\":\"file_write is not available on mcp. Available on: desktop, cli.\"},\"web\":{\"status\":\"failed\",\"reply_chars\":0,\"assistant_messages_in_history\":0,\"failure\":\"file_write is not available on web. Available on: desktop, cli.\"}}); on desktop the client is sent file_write path=20 for the model's answer",
+      "repro": "POST /v1/conversations/:id/messages {content:'Write the integers from 1 to 20 separated by single spaces.', client:'mcp'} -> run.status failed, reason 'file_write is not available on mcp'"
+    },
+    {
+      "title": "The serialized request prefix changes between calls: the newest user message is sent as a content-parts array, then as a plain string on every later call",
+      "severity": "low",
+      "expected": "A message's bytes in the request are the same on every later call, so a provider that caches by request bytes can keep the prefix (spec: the cached prefix survives)",
+      "actual": "Kimi's token-level cache still hit (the text is identical), but the user message at the end of each prefix is [{type:text,text}] in call N and a string in call N+1; the first raw divergence is at char 26 of 37560",
+      "repro": "run.mjs --only 9, then compare messages[].content of consecutive recorded requests (evidence kv_first_raw_prefix_break)"
+    },
+    {
+      "title": "Kimi prompt-cache hit rate on non-compacting turns is below the 90% target in a short conversation",
+      "severity": "medium",
+      "expected": "At least 90% of prompt tokens served from cache on every non-compacting turn after the first",
+      "actual": "77.5% over calls 2..N (worst call 76.6%), prompts of 5223..5350 tokens. The request prefix is byte-for-byte stable as text (tools, system prompt and history identical), so the shortfall is the provider's coarse cache boundaries (cached_tokens stop at values such as 2048 / 4096 / 4864 although the stable prefix is ~5.2k tokens) against a fixed ~5k-token system+tools prefix, not a prefix change",
+      "repro": "run.mjs --only 9: kv_short_per_call in results/scenario-09.json"
+    }
+  ]
+}

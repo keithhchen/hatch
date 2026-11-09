@@ -1,0 +1,446 @@
+{
+  "id": 10,
+  "title": "Compaction: long real conversation, survival, background cost, preemption, one IM notice",
+  "status": "FAIL",
+  "durationMs": 484839,
+  "checks": [
+    {
+      "name": "first turn answered",
+      "ok": true,
+      "detail": "noted"
+    },
+    {
+      "name": "a compaction started once the conversation went over the limit",
+      "ok": true,
+      "detail": {
+        "tracked": 219948,
+        "trigger": 219546
+      }
+    },
+    {
+      "name": "it ran after the reply (phase background), started after the Run completed",
+      "ok": true,
+      "detail": {
+        "phase": "background",
+        "startedMinusRunCompletedMs": 16,
+        "startedMinusHttpReturnMs": -24
+      }
+    },
+    {
+      "name": "the reply that crossed the limit was not slower than a control turn asking the same long reply on a smaller context (no compaction wait)",
+      "ok": true,
+      "detail": {
+        "crossing": 33684,
+        "control": 32599
+      }
+    },
+    {
+      "name": "compaction.completed carries the started id and stage summary",
+      "ok": true,
+      "detail": {
+        "phase": "background",
+        "stage": "summary",
+        "tokens_after": 31747,
+        "compaction_id": "cmp_d35edebe26b64ae3ae98389bd9549f30",
+        "tokens_before": 219948
+      }
+    },
+    {
+      "name": "a durable history checkpoint with the same id exists",
+      "ok": true,
+      "detail": {
+        "stage": "summary",
+        "phase": "background",
+        "messages": 4
+      }
+    },
+    {
+      "name": "every identifier survived into the summary",
+      "ok": true,
+      "detail": {
+        "order": true,
+        "person": true,
+        "email": true,
+        "path": true,
+        "tracking": true,
+        "shipment": true,
+        "ticket": true
+      }
+    },
+    {
+      "name": "the unfinished request (compute total and rows per region once the refund table comes) is named in the summary",
+      "ok": true
+    },
+    {
+      "name": "after compaction the model recalls every identifier",
+      "ok": true,
+      "detail": {
+        "order": true,
+        "person": true,
+        "email": true,
+        "path": true,
+        "tracking": true,
+        "shipment": true,
+        "ticket": true
+      }
+    },
+    {
+      "name": "after compaction the model carries out the unfinished request (TOTAL=280, North 2, South 1, East 1)",
+      "ok": true,
+      "detail": "ORD-48213, priya.raman@example.com, 1Z999AA10123456784, /srv/exports/q3/refunds-2026-10.csv, Marta Kowalczyk, SHP-77190, TCK-5521\n\nTOTAL=280 ROWS North=2 South=1 East=1"
+    },
+    {
+      "name": "trial 1: the background compaction was running",
+      "ok": true,
+      "detail": {
+        "tracked": 219949
+      }
+    },
+    {
+      "name": "trial 2: the background compaction was running",
+      "ok": true,
+      "detail": {
+        "tracked": 219949
+      }
+    },
+    {
+      "name": "trial 3: the background compaction was running",
+      "ok": true,
+      "detail": {
+        "tracked": 219949
+      }
+    },
+    {
+      "name": "each trial's new message was accepted and its Run completed",
+      "ok": true,
+      "detail": [
+        "completed",
+        "completed",
+        "completed"
+      ]
+    },
+    {
+      "name": "each new message ended the running compaction at once, without committing it (claim ended within 3 s of the send, no checkpoint for its id)",
+      "ok": true,
+      "detail": [
+        {
+          "endedAfterSendMs": 17,
+          "committed": false,
+          "preemptedFlag": false
+        },
+        {
+          "endedAfterSendMs": 15,
+          "committed": false,
+          "preemptedFlag": false
+        },
+        {
+          "endedAfterSendMs": 11,
+          "committed": false,
+          "preemptedFlag": false
+        }
+      ]
+    },
+    {
+      "name": "a preempted compaction was left within 3 s of the message (it does not hold the message back)",
+      "ok": true,
+      "detail": [
+        31,
+        24,
+        18
+      ]
+    },
+    {
+      "name": "each preempted compaction id has a terminal marker in the journal",
+      "ok": false,
+      "detail": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "name": "after a preemption the history is still over the limit, so the new Run compacts it first (compaction.started and completed inside that Run)",
+      "ok": true,
+      "detail": [
+        [
+          {
+            "id": "cmp_7350ad6a5a704776b22c96a1cada68d3",
+            "phase": "pre_turn",
+            "completed": true,
+            "ms": 6781
+          }
+        ],
+        [
+          {
+            "id": "cmp_be5d29f29c45403ca587d3dc3e0a1b78",
+            "phase": "pre_turn",
+            "completed": true,
+            "ms": 22403
+          }
+        ],
+        [
+          {
+            "id": "cmp_8f6398cadb954f0f8604eb1709917cb8",
+            "phase": "pre_turn",
+            "completed": true,
+            "ms": 28792
+          }
+        ]
+      ]
+    },
+    {
+      "name": "IM round 1: a background compaction started after the reply",
+      "ok": true,
+      "detail": {
+        "phase": "background",
+        "compaction_id": "cmp_ec7fe5a6f2f14599a29c27701338bbed"
+      }
+    },
+    {
+      "name": "no notice when the compaction runs after the reply and nobody is waiting",
+      "ok": true,
+      "detail": [
+        "Noted.",
+        "logged",
+        "logged",
+        "logged",
+        "logged\n\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 "
+      ]
+    },
+    {
+      "name": "IM round 2: a background compaction started after the reply",
+      "ok": true,
+      "detail": {
+        "tracked": 219951
+      }
+    },
+    {
+      "name": "a compaction ran inside the waiting user's Run",
+      "ok": true,
+      "detail": [
+        "compaction.started:pre_turn",
+        "compaction.completed:pre_turn"
+      ]
+    },
+    {
+      "name": "exactly one notice for each compaction the waiting user sat through",
+      "ok": true,
+      "detail": {
+        "notices": 1,
+        "compactions": 1,
+        "rows": 1
+      }
+    },
+    {
+      "name": "the notice is not part of the conversation transcript",
+      "ok": true,
+      "detail": {
+        "eventsContainingNotice": 0
+      }
+    },
+    {
+      "name": "the waiting user's real reply still arrived",
+      "ok": true,
+      "detail": "here-now"
+    },
+    {
+      "name": "the notice is keyed by the compaction's durable id (compaction:<cmp_id>:...)",
+      "ok": false,
+      "detail": {
+        "keys": [
+          "compaction:run_93f596ddc1364900b87f97bcbef7db13:49:telegram::5150"
+        ],
+        "compactionIds": [
+          "cmp_bb32478651bd4ea4a8e1b39d5cf6ee5a"
+        ]
+      }
+    }
+  ],
+  "measurements": {
+    "tracked_tokens_at_crossing_end": 219948,
+    "reply_ms": {
+      "pad_short_reply_at_125k": 6314,
+      "control_long_reply_at_126k": 32599,
+      "crossing_long_reply_at_219k": 33684
+    },
+    "background_compaction_ms": 38373,
+    "tokens_before_after_estimated": [
+      219948,
+      31747
+    ],
+    "tracker_drift_tokens": 0,
+    "identifiers_in_summary": "7/7",
+    "identifiers_in_recall_reply": "7/7",
+    "preempt_accept_ms": [
+      31,
+      24,
+      18
+    ],
+    "message_total_ms_after_preempt": [
+      10127,
+      30614,
+      31655
+    ],
+    "in_run_compaction_ms_after_preempt": [
+      6781,
+      22403,
+      28792
+    ],
+    "im_notices_when_nobody_waits": 0,
+    "im_waiting_message_reply_ms": 28185,
+    "im_notices_for_the_waiting_user": 1,
+    "im_compactions_in_the_waiting_users_run": 1
+  },
+  "evidence": {
+    "turns_label_tokens_ms_replychars": [
+      [
+        "first",
+        107,
+        1382,
+        5
+      ],
+      [
+        "pad-1",
+        62517,
+        5412,
+        6
+      ],
+      [
+        "pad-2",
+        62517,
+        6314,
+        6
+      ],
+      [
+        "control-long-reply",
+        1113,
+        32599,
+        2291
+      ],
+      [
+        "A-pad",
+        62517,
+        7038,
+        6
+      ],
+      [
+        "A-crossing",
+        31177,
+        33684,
+        2291
+      ]
+    ],
+    "summary_excerpt": "## Goal\n1. Investigate stuck order ORD-48213 for customer Priya Raman (shipment SHP-77190, tracking 1Z999AA10123456784, ticket TCK-5521).\n2. Compute total refund amount and number of rows per region from refund table at /srv/exports/q3/refunds-2026-10.csv (pending user sending the table).\n\n## Constraints & Preferences\n- User explicitly instructed: \"Do not do that yet\" regarding refund calculations; wait for user to send refund table.\n- Multiple carrier logs provided as \"reference only\" with exact response requirements (\"logged\" or specific output).\n- One carrier note (A-control) included an anomalous request to output numbers 1-600, which was fulfilled.\n\n## Progress\n### Done\n- [x] Initial order details noted (ORD-48213, Priya Raman, SHP-77190, 1Z999AA10123456784, TCK-5521).\n- [x] Refund export path recorded: /srv/exports/q3/refunds-2026-10.csv.\n- [x] Carrier log A1 reviewed and acknowledged (\"logged\").\n- [x] Carrier log A2 reviewed and acknowledged (\"logged\").\n- [x] Carrier note A-control reviewed; anomalous number sequence request (1-600) fulfilled.\n- [x] Carrier log A4 reviewed and acknowledged (\"logged\").\n\n### In Progress\n- [ ] Awaiting user to send refund table for computation (total refund amount and rows per region).\n\n### Blocked\n- Refund calculation blocked pending user providing the refund table data.\n\n## Key Decisions\n- **Defer refund calculation**: User explicitly requested to wait until they provide the table.\n- **Fulfill anomalous A-control request**: Output numbers 1-600 as requested, treating as valid user instruction despite atypical format.\n\n## Next Steps\n1. Receive refund table data from user.\n2. Compute total refund amount from the table.\n3. Compute number of rows per region from the table.\n\n## Critical Context\n- Support lead: Marta Kowalczyk\n- Customer: Priya Raman (priya.raman@example.com)\n- Order ID: ORD-48213\n- Shipment ID: SHP-77190\n- Tracking number: 1Z999AA10123456784\n- Ticket ID: TCK-5521\n- Refund export file path: /srv/exports/q3/refunds-2026-10.csv\n- Carrier logs reviewed: A1 (ledgers A1-0 through A1-727+), A2 (ledgers A2-0 through A2-727+), A-control (ledgers A-control-0 through A-control-5), A4 (ledgers A4-0 through A4-727+)\n- All carrier logs marked \"reference only\" with no actionable issues identified",
+    "recall_reply": "ORD-48213, priya.raman@example.com, 1Z999AA10123456784, /srv/exports/q3/refunds-2026-10.csv, Marta Kowalczyk, SHP-77190, TCK-5521\n\nTOTAL=280 ROWS North=2 South=1 East=1",
+    "preemption_trials": [
+      {
+        "n": 1,
+        "acceptedMs": 31,
+        "totalMs": 10127,
+        "runStatuses": [
+          "queued@+32ms",
+          "compacting@+74ms",
+          "running@+6886ms",
+          "completed@+9865ms"
+        ],
+        "final": "completed",
+        "bgEndedAfterSendMs": 17,
+        "bgPreemptedFlag": false,
+        "bgCommitted": false,
+        "bgTerminalInJournal": false,
+        "inRun": [
+          {
+            "id": "cmp_7350ad6a5a704776b22c96a1cada68d3",
+            "phase": "pre_turn",
+            "completed": true,
+            "ms": 6781
+          }
+        ],
+        "inRunCompactionMs": 6781
+      },
+      {
+        "n": 2,
+        "acceptedMs": 24,
+        "totalMs": 30614,
+        "runStatuses": [
+          "queued@+25ms",
+          "compacting@+66ms",
+          "running@+22489ms",
+          "completed@+30364ms"
+        ],
+        "final": "completed",
+        "bgEndedAfterSendMs": 15,
+        "bgPreemptedFlag": false,
+        "bgCommitted": false,
+        "bgTerminalInJournal": false,
+        "inRun": [
+          {
+            "id": "cmp_be5d29f29c45403ca587d3dc3e0a1b78",
+            "phase": "pre_turn",
+            "completed": true,
+            "ms": 22403
+          }
+        ],
+        "inRunCompactionMs": 22403
+      },
+      {
+        "n": 3,
+        "acceptedMs": 18,
+        "totalMs": 31655,
+        "runStatuses": [
+          "queued@+19ms",
+          "compacting@+61ms",
+          "running@+28861ms",
+          "completed@+31529ms"
+        ],
+        "final": "completed",
+        "bgEndedAfterSendMs": 11,
+        "bgPreemptedFlag": false,
+        "bgCommitted": false,
+        "bgTerminalInJournal": false,
+        "inRun": [
+          {
+            "id": "cmp_8f6398cadb954f0f8604eb1709917cb8",
+            "phase": "pre_turn",
+            "completed": true,
+            "ms": 28792
+          }
+        ],
+        "inRunCompactionMs": 28792
+      }
+    ],
+    "im_compaction_outbox_rows": [
+      {
+        "key": "compaction:run_93f596ddc1364900b87f97bcbef7db13:49:telegram::5150",
+        "state": "sent",
+        "kind": "notice"
+      }
+    ],
+    "im_waiting_user_events": [
+      "compaction.started/pre_turn/cmp_bb32478651bd4ea4a8e1b39d5cf6ee5a",
+      "compaction.completed/pre_turn/cmp_bb32478651bd4ea4a8e1b39d5cf6ee5a"
+    ]
+  },
+  "notes": [
+    "The summarize trigger derives from Kimi K2.6's 262,144-token window (219546 estimated tokens, chars/4) and no env var overrides it, so the conversation really is that large. Padding text is long runs of '=' (the product counts chars/4, Kimi far fewer real tokens) to keep the run affordable; this changes only how cheaply the trigger is reached. Stack option: registryEnv HATCH_FACTORY_LLM_PROFILE=kimi-k2.6, because the Registry rejects the Runtime-only profile name kimi-k2.6-no-thinking.",
+    "Prune stage (old tool results after the provider cache expires) and the failure/timeout (degraded) path are NOT exercised: no tool is called here, and the summarizer shares the chat model's provider config, so no env fails only the compaction call.",
+    "This result is assembled from three separate runs of the same scenario (VERIFY_PARTS=A, B, C). In the final combined run A and B passed/failed with the same results as here, then the Kimi account ran out of credit (429 exceeded_current_quota_error) on the first IM turn of C, so C is from its earlier passing run.",
+    "DISCLOSURE: one check (notice key is the compaction durable id) and its defect were added to this file by hand from the earlier run evidence after the Kimi quota ran out; the product-side facts come from that run, the combined file was not produced by a single uninterrupted run."
+  ],
+  "defects": [
+    {
+      "title": "A preempted background compaction leaves compaction.started in the journal with no terminal event",
+      "severity": "low",
+      "expected": "Spec: compaction is visible; every compaction has a durable id with compaction.started and a completed marker. A compaction aborted by a new message should leave an observable end for observers of the journal, so a `compacting` indicator can clear.",
+      "actual": "3/3 preempted compactions had no compaction.completed (or any aborted marker) for their id; only the hatch_conversation_compactions claim row (ended_at) records the end.",
+      "repro": "Grow a Chat conversation past the trigger with a long final reply so the compaction runs after the reply, send a message while it runs, then read hatch_conversation_journal for compaction.% events: started with no matching end."
+    },
+    {
+      "title": "The IM notice's dedupe key is Run id + journal cursor, not the compaction's durable id",
+      "severity": "low",
+      "expected": "Spec: every compaction has a durable id (cmp_...) which the channel layer uses for one notice per compaction.",
+      "actual": "Outbox source_key is compaction:run_93f596ddc1364900b87f97bcbef7db13:49:telegram::5150 while the journal compaction.started carried ['cmp_bb32478651bd4ea4a8e1b39d5cf6ee5a']. ChatGateway.progress derives the id as <runId>:<latest run.state cursor>. Exactly one notice was still sent, so this is a contract mismatch, not a duplicate.",
+      "repro": "Org Connection + Telegram sender; grow the conversation past the trigger; send a message while a background compaction runs; compare hatch_channel_outbox.source_key (kind notice) with the compaction.started payload."
+    }
+  ]
+}

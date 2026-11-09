@@ -30,7 +30,7 @@ export class Stack {
     this.accounts = [];
   }
 
-  static async start(options = {}) { const stack = new Stack(options); await stack.up(); return stack; }
+  static async start(options = {}) { const stack = new Stack(options); try { await stack.up(); } catch (error) { await stack.down().catch(() => undefined); throw error; } return stack; }
 
   async up() {
     this.root = makeRoot(this.options.name);
@@ -76,7 +76,7 @@ export class Stack {
 
   async startRuntime(extraEnv = {}) {
     const port = await freePort();
-    const proc = new ManagedProcess(`runtime:${port}`, process.execPath, [path.join(dist, "index.js")], { cwd: serverRoot, env: { ...this.runtimeEnv(port), ...extraEnv } });
+    const proc = new ManagedProcess(`runtime:${port}`, process.execPath, [...(this.options.runtimeNodeArgs ?? []), path.join(dist, "index.js")], { cwd: serverRoot, env: { ...this.runtimeEnv(port), ...extraEnv } });
     const instance = { port, proc, id: `runtime-${this.runtimes.length + 1}` };
     this.runtimes.push(instance);
     await until(`${instance.id} ready`, async () => { if (!proc.alive) throw new Error(`runtime exited:\n${proc.tail(3000)}`); return (await fetch(`http://127.0.0.1:${port}/readyz`)).ok; }, { timeoutMs: 90_000 }).catch((error) => { throw new Error(`${error.message}\n${proc.tail(3000)}`); });

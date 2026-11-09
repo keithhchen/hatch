@@ -69,7 +69,7 @@ export class ChatApi extends HttpApi {
   }
   sendSse(conversationId, productId, { key = randomUUID(), content, signal, client }) { return this.stream("POST", `/v1/conversations/${conversationId}/messages${this.q(productId)}`, { body: { client_message_id: key, content, ...(client ? { client } : {}) }, signal }); }
   snapshot(conversationId, productId, afterCursor) { return this.call("GET", `/v1/conversations/${conversationId}/snapshot${this.q(productId, afterCursor !== undefined ? { after_cursor: String(afterCursor) } : {})}`); }
-  history(conversationId, productId) { return this.call("GET", `/v1/conversations/${conversationId}/history${this.q(productId, { limit: "200" })}`); }
+  history(conversationId, productId) { return this.call("GET", `/v1/conversations/${conversationId}/history${this.q(productId, { limit: "100" })}`); }
   runs(conversationId, productId) { return this.call("GET", `/v1/conversations/${conversationId}/runs${this.q(productId)}`); }
   run(conversationId, productId, runId) { return this.call("GET", `/v1/conversations/${conversationId}/runs/${runId}${this.q(productId)}`); }
   events(conversationId, productId, { after, signal } = {}) { return this.stream("GET", `/v1/conversations/${conversationId}/events${this.q(productId, after !== undefined ? { after_cursor: String(after) } : {})}`, { signal }); }
@@ -140,7 +140,7 @@ export class ChatSocket extends JsonSocket {
     socket.conversationId = conversationId;
     socket.send({ type: "client.hello", protocol_version: "0.8", conversation_id: conversationId, ...(firstMessage ? { auth_token: auth.token } : {}), product_id: productId, local_tools: localTools, ...client });
     await socket.waitFor("session.ready", (f) => f.type === "session.ready" || f.type === "turn.failed");
-    if (socket.frames.at(-1)?.type === "turn.failed" && !socket.frames.some((f) => f.type === "session.ready")) throw new Error(`hello refused: ${JSON.stringify(socket.frames.at(-1).error)}`);
+    if (socket.frames.at(-1)?.type === "turn.failed" && !socket.frames.some((f) => f.type === "session.ready")) { socket.close(); throw new Error(`hello refused: ${JSON.stringify(socket.frames.at(-1).error)}`); }
     return socket;
   }
   message(text, { runId = `run_${randomUUID().replaceAll("-", "")}`, key = randomUUID(), client = {} } = {}) {

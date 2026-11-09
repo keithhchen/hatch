@@ -1,0 +1,2229 @@
+{
+  "id": 3,
+  "title": "Cross-client resume: start on A, open B mid-Run, return to A: text continuity and time to progress",
+  "status": "FAIL",
+  "durationMs": 146250,
+  "checks": [
+    {
+      "name": "chat: every trial's final message is the complete list and there is one assistant reply",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "chat: control (A never leaves) assembles exactly the stored message",
+      "ok": true,
+      "detail": {
+        "kind": "exact",
+        "missing": 0,
+        "duplicated": 0
+      }
+    },
+    {
+      "name": "chat: B over ws shows progress within 2000 ms (all 8 trials)",
+      "ok": true,
+      "detail": [
+        7,
+        10,
+        7,
+        7,
+        15,
+        8,
+        6,
+        6
+      ]
+    },
+    {
+      "name": "chat: B over ws assembles exactly the stored message (no missing or duplicated text)",
+      "ok": false,
+      "detail": {
+        "exact": 0,
+        "missing": 8,
+        "duplicated": 0,
+        "mismatch": 0,
+        "missing_chars": [
+          93,
+          195,
+          92,
+          219,
+          119,
+          97,
+          107,
+          364
+        ],
+        "duplicated_chars": []
+      }
+    },
+    {
+      "name": "chat: B over ws: cursors strictly increasing, none missing or duplicated",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "chat: B over cli shows progress within 2000 ms (all 6 trials)",
+      "ok": true,
+      "detail": [
+        315,
+        70,
+        195,
+        101,
+        70,
+        88
+      ]
+    },
+    {
+      "name": "chat: B over cli assembles exactly the stored message (no missing or duplicated text)",
+      "ok": false,
+      "detail": {
+        "exact": 0,
+        "missing": 6,
+        "duplicated": 0,
+        "mismatch": 0,
+        "missing_chars": [
+          668,
+          626,
+          650,
+          593,
+          544,
+          751
+        ],
+        "duplicated_chars": []
+      }
+    },
+    {
+      "name": "chat: B over sse shows progress within 2000 ms (all 8 trials)",
+      "ok": true,
+      "detail": [
+        8,
+        7,
+        13,
+        7,
+        6,
+        13,
+        7,
+        9
+      ]
+    },
+    {
+      "name": "chat: B over sse assembles exactly the stored message (no missing or duplicated text)",
+      "ok": false,
+      "detail": {
+        "exact": 0,
+        "missing": 8,
+        "duplicated": 0,
+        "mismatch": 0,
+        "missing_chars": [
+          166,
+          225,
+          116,
+          118,
+          92,
+          88,
+          102,
+          192
+        ],
+        "duplicated_chars": []
+      }
+    },
+    {
+      "name": "chat: B over sse: cursors strictly increasing, none missing or duplicated",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "chat: A returning by snapshot-then-attach shows progress within 2000 ms (all 6 trials)",
+      "ok": true,
+      "detail": [
+        8,
+        6,
+        16,
+        9,
+        6,
+        9
+      ]
+    },
+    {
+      "name": "chat: A returning by snapshot-then-attach assembles exactly the stored message",
+      "ok": false,
+      "detail": {
+        "exact": 0,
+        "missing": 6,
+        "duplicated": 0,
+        "mismatch": 0,
+        "missing_chars": [
+          211,
+          279,
+          95,
+          200,
+          99,
+          204
+        ],
+        "duplicated_chars": []
+      }
+    },
+    {
+      "name": "chat: A returning by snapshot-then-attach: cursors strictly increasing, none missing or duplicated",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "chat: A returning by last-event-id shows progress within 2000 ms (all 6 trials)",
+      "ok": true,
+      "detail": [
+        96,
+        186,
+        139,
+        224,
+        168,
+        234
+      ]
+    },
+    {
+      "name": "chat: A returning by last-event-id assembles exactly the stored message",
+      "ok": false,
+      "detail": {
+        "exact": 0,
+        "missing": 6,
+        "duplicated": 0,
+        "mismatch": 0,
+        "missing_chars": [
+          480,
+          490,
+          419,
+          527,
+          524,
+          537
+        ],
+        "duplicated_chars": []
+      }
+    },
+    {
+      "name": "chat: A returning by last-event-id: cursors strictly increasing, none missing or duplicated",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "chat: A returning by after_cursor shows progress within 2000 ms (all 4 trials)",
+      "ok": true,
+      "detail": [
+        97,
+        146,
+        119,
+        99
+      ]
+    },
+    {
+      "name": "chat: A returning by after_cursor assembles exactly the stored message",
+      "ok": false,
+      "detail": {
+        "exact": 0,
+        "missing": 4,
+        "duplicated": 0,
+        "mismatch": 0,
+        "missing_chars": [
+          454,
+          610,
+          524,
+          1047
+        ],
+        "duplicated_chars": []
+      }
+    },
+    {
+      "name": "chat: A returning by after_cursor: cursors strictly increasing, none missing or duplicated",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "chat: A returning by attach-then-snapshot shows progress within 2000 ms (all 5 trials)",
+      "ok": true,
+      "detail": [
+        128,
+        44,
+        79,
+        26,
+        97
+      ]
+    },
+    {
+      "name": "chat: A returning by attach-then-snapshot assembles exactly the stored message",
+      "ok": false,
+      "detail": {
+        "exact": 0,
+        "missing": 5,
+        "duplicated": 0,
+        "mismatch": 0,
+        "missing_chars": [
+          220,
+          81,
+          187,
+          93,
+          114
+        ],
+        "duplicated_chars": []
+      }
+    },
+    {
+      "name": "studio.worker: every trial's final message is the complete list and there is one assistant reply",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "studio.worker: B over sse shows progress within 2000 ms (all 3 trials)",
+      "ok": true,
+      "detail": [
+        5,
+        8,
+        6
+      ]
+    },
+    {
+      "name": "studio.worker: B over sse assembles exactly the stored message (no missing or duplicated text)",
+      "ok": true,
+      "detail": {
+        "exact": 3,
+        "missing": 0,
+        "duplicated": 0,
+        "mismatch": 0,
+        "missing_chars": [],
+        "duplicated_chars": []
+      }
+    },
+    {
+      "name": "studio.worker: B over sse: cursors strictly increasing, none missing or duplicated",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "studio.worker: B over ws shows progress within 2000 ms (all 3 trials)",
+      "ok": true,
+      "detail": [
+        8,
+        6,
+        5
+      ]
+    },
+    {
+      "name": "studio.worker: B over ws assembles exactly the stored message (no missing or duplicated text)",
+      "ok": true,
+      "detail": {
+        "exact": 3,
+        "missing": 0,
+        "duplicated": 0,
+        "mismatch": 0,
+        "missing_chars": [],
+        "duplicated_chars": []
+      }
+    },
+    {
+      "name": "studio.worker: B over ws: cursors strictly increasing, none missing or duplicated",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "studio.worker: A returning by last-event-id shows progress within 2000 ms (all 2 trials)",
+      "ok": true,
+      "detail": [
+        4,
+        5
+      ]
+    },
+    {
+      "name": "studio.worker: A returning by last-event-id assembles exactly the stored message",
+      "ok": true,
+      "detail": {
+        "exact": 2,
+        "missing": 0,
+        "duplicated": 0,
+        "mismatch": 0,
+        "missing_chars": [],
+        "duplicated_chars": []
+      }
+    },
+    {
+      "name": "studio.worker: A returning by last-event-id: cursors strictly increasing, none missing or duplicated",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "studio.worker: A returning by snapshot-then-attach shows progress within 2000 ms (all 2 trials)",
+      "ok": true,
+      "detail": [
+        6,
+        9
+      ]
+    },
+    {
+      "name": "studio.worker: A returning by snapshot-then-attach assembles exactly the stored message",
+      "ok": true,
+      "detail": {
+        "exact": 2,
+        "missing": 0,
+        "duplicated": 0,
+        "mismatch": 0,
+        "missing_chars": [],
+        "duplicated_chars": []
+      }
+    },
+    {
+      "name": "studio.worker: A returning by snapshot-then-attach: cursors strictly increasing, none missing or duplicated",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "studio.worker: A returning by after_cursor shows progress within 2000 ms (all 2 trials)",
+      "ok": true,
+      "detail": [
+        3,
+        2
+      ]
+    },
+    {
+      "name": "studio.worker: A returning by after_cursor assembles exactly the stored message",
+      "ok": true,
+      "detail": {
+        "exact": 2,
+        "missing": 0,
+        "duplicated": 0,
+        "mismatch": 0,
+        "missing_chars": [],
+        "duplicated_chars": []
+      }
+    },
+    {
+      "name": "studio.worker: A returning by after_cursor: cursors strictly increasing, none missing or duplicated",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "studio.assistant: every trial's final message is the complete list and there is one assistant reply",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "studio.assistant: B over ws shows progress within 2000 ms (all 3 trials)",
+      "ok": true,
+      "detail": [
+        4,
+        7,
+        4
+      ]
+    },
+    {
+      "name": "studio.assistant: B over ws assembles exactly the stored message (no missing or duplicated text)",
+      "ok": true,
+      "detail": {
+        "exact": 3,
+        "missing": 0,
+        "duplicated": 0,
+        "mismatch": 0,
+        "missing_chars": [],
+        "duplicated_chars": []
+      }
+    },
+    {
+      "name": "studio.assistant: B over ws: cursors strictly increasing, none missing or duplicated",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "studio.assistant: B over sse shows progress within 2000 ms (all 2 trials)",
+      "ok": true,
+      "detail": [
+        5,
+        3
+      ]
+    },
+    {
+      "name": "studio.assistant: B over sse assembles exactly the stored message (no missing or duplicated text)",
+      "ok": true,
+      "detail": {
+        "exact": 2,
+        "missing": 0,
+        "duplicated": 0,
+        "mismatch": 0,
+        "missing_chars": [],
+        "duplicated_chars": []
+      }
+    },
+    {
+      "name": "studio.assistant: B over sse: cursors strictly increasing, none missing or duplicated",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "studio.assistant: A returning by snapshot-then-attach shows progress within 2000 ms (all 1 trials)",
+      "ok": true,
+      "detail": [
+        4
+      ]
+    },
+    {
+      "name": "studio.assistant: A returning by snapshot-then-attach assembles exactly the stored message",
+      "ok": true,
+      "detail": {
+        "exact": 1,
+        "missing": 0,
+        "duplicated": 0,
+        "mismatch": 0,
+        "missing_chars": [],
+        "duplicated_chars": []
+      }
+    },
+    {
+      "name": "studio.assistant: A returning by snapshot-then-attach: cursors strictly increasing, none missing or duplicated",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "studio.assistant: A returning by last-event-id shows progress within 2000 ms (all 2 trials)",
+      "ok": true,
+      "detail": [
+        3,
+        4
+      ]
+    },
+    {
+      "name": "studio.assistant: A returning by last-event-id assembles exactly the stored message",
+      "ok": true,
+      "detail": {
+        "exact": 2,
+        "missing": 0,
+        "duplicated": 0,
+        "mismatch": 0,
+        "missing_chars": [],
+        "duplicated_chars": []
+      }
+    },
+    {
+      "name": "studio.assistant: A returning by last-event-id: cursors strictly increasing, none missing or duplicated",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "studio.assistant: A returning by after_cursor shows progress within 2000 ms (all 2 trials)",
+      "ok": true,
+      "detail": [
+        5,
+        2
+      ]
+    },
+    {
+      "name": "studio.assistant: A returning by after_cursor assembles exactly the stored message",
+      "ok": true,
+      "detail": {
+        "exact": 2,
+        "missing": 0,
+        "duplicated": 0,
+        "mismatch": 0,
+        "missing_chars": [],
+        "duplicated_chars": []
+      }
+    },
+    {
+      "name": "studio.assistant: A returning by after_cursor: cursors strictly increasing, none missing or duplicated",
+      "ok": true,
+      "detail": []
+    }
+  ],
+  "measurements": {
+    "trials_kept": 33,
+    "trials_discarded": 5,
+    "chat.snapshot_partial_chars_behind_the_live_stream_at_open": {
+      "n": 8,
+      "min": 88,
+      "median": 118,
+      "max": 225
+    },
+    "studio.worker.snapshot_partial_chars_behind_the_live_stream_at_open": {
+      "n": 3,
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "studio.assistant.snapshot_partial_chars_behind_the_live_stream_at_open": {
+      "n": 2,
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "chat.B.ws.first_text_ms": {
+      "n": 8,
+      "min": 6,
+      "median": 7,
+      "max": 15
+    },
+    "chat.B.ws.first_live_event_ms": {
+      "n": 8,
+      "min": 20,
+      "median": 208,
+      "max": 297
+    },
+    "chat.B.ws.text_vs_stored": {
+      "exact": 0,
+      "missing": 8,
+      "duplicated": 0,
+      "mismatch": 0,
+      "missing_chars": [
+        93,
+        195,
+        92,
+        219,
+        119,
+        97,
+        107,
+        364
+      ],
+      "duplicated_chars": []
+    },
+    "chat.B.cli.first_text_ms": {
+      "n": 6,
+      "min": 70,
+      "median": 101,
+      "max": 315
+    },
+    "chat.B.cli.first_live_event_ms": {
+      "n": 6,
+      "min": 70,
+      "median": 101,
+      "max": 315
+    },
+    "chat.B.cli.text_vs_stored": {
+      "exact": 0,
+      "missing": 6,
+      "duplicated": 0,
+      "mismatch": 0,
+      "missing_chars": [
+        668,
+        626,
+        650,
+        593,
+        544,
+        751
+      ],
+      "duplicated_chars": []
+    },
+    "chat.B.sse.first_text_ms": {
+      "n": 8,
+      "min": 6,
+      "median": 8,
+      "max": 13
+    },
+    "chat.B.sse.first_live_event_ms": {
+      "n": 8,
+      "min": 30,
+      "median": 145,
+      "max": 247
+    },
+    "chat.B.sse.text_vs_stored": {
+      "exact": 0,
+      "missing": 8,
+      "duplicated": 0,
+      "mismatch": 0,
+      "missing_chars": [
+        166,
+        225,
+        116,
+        118,
+        92,
+        88,
+        102,
+        192
+      ],
+      "duplicated_chars": []
+    },
+    "chat.A_return.snapshot-then-attach.first_text_ms": {
+      "n": 6,
+      "min": 6,
+      "median": 9,
+      "max": 16
+    },
+    "chat.A_return.snapshot-then-attach.first_live_event_ms": {
+      "n": 6,
+      "min": 91,
+      "median": 162,
+      "max": 220
+    },
+    "chat.A_return.snapshot-then-attach.text_vs_stored": {
+      "exact": 0,
+      "missing": 6,
+      "duplicated": 0,
+      "mismatch": 0,
+      "missing_chars": [
+        211,
+        279,
+        95,
+        200,
+        99,
+        204
+      ],
+      "duplicated_chars": []
+    },
+    "chat.A_return.last-event-id.first_text_ms": {
+      "n": 6,
+      "min": 96,
+      "median": 186,
+      "max": 234
+    },
+    "chat.A_return.last-event-id.first_live_event_ms": {
+      "n": 6,
+      "min": 96,
+      "median": 186,
+      "max": 234
+    },
+    "chat.A_return.last-event-id.text_vs_stored": {
+      "exact": 0,
+      "missing": 6,
+      "duplicated": 0,
+      "mismatch": 0,
+      "missing_chars": [
+        480,
+        490,
+        419,
+        527,
+        524,
+        537
+      ],
+      "duplicated_chars": []
+    },
+    "chat.A_return.after_cursor.first_text_ms": {
+      "n": 4,
+      "min": 97,
+      "median": 119,
+      "max": 146
+    },
+    "chat.A_return.after_cursor.first_live_event_ms": {
+      "n": 4,
+      "min": 97,
+      "median": 119,
+      "max": 146
+    },
+    "chat.A_return.after_cursor.text_vs_stored": {
+      "exact": 0,
+      "missing": 4,
+      "duplicated": 0,
+      "mismatch": 0,
+      "missing_chars": [
+        454,
+        610,
+        524,
+        1047
+      ],
+      "duplicated_chars": []
+    },
+    "chat.A_return.attach-then-snapshot.first_text_ms": {
+      "n": 5,
+      "min": 26,
+      "median": 79,
+      "max": 128
+    },
+    "chat.A_return.attach-then-snapshot.first_live_event_ms": {
+      "n": 5,
+      "min": 16,
+      "median": 74,
+      "max": 122
+    },
+    "chat.A_return.attach-then-snapshot.text_vs_stored": {
+      "exact": 0,
+      "missing": 5,
+      "duplicated": 0,
+      "mismatch": 0,
+      "missing_chars": [
+        220,
+        81,
+        187,
+        93,
+        114
+      ],
+      "duplicated_chars": []
+    },
+    "studio.worker.B.sse.first_text_ms": {
+      "n": 3,
+      "min": 5,
+      "median": 6,
+      "max": 8
+    },
+    "studio.worker.B.sse.first_live_event_ms": {
+      "n": 3,
+      "min": 22,
+      "median": 34,
+      "max": 244
+    },
+    "studio.worker.B.sse.text_vs_stored": {
+      "exact": 3,
+      "missing": 0,
+      "duplicated": 0,
+      "mismatch": 0,
+      "missing_chars": [],
+      "duplicated_chars": []
+    },
+    "studio.worker.B.ws.first_text_ms": {
+      "n": 3,
+      "min": 5,
+      "median": 6,
+      "max": 8
+    },
+    "studio.worker.B.ws.first_live_event_ms": {
+      "n": 3,
+      "min": 9,
+      "median": 46,
+      "max": 67
+    },
+    "studio.worker.B.ws.text_vs_stored": {
+      "exact": 3,
+      "missing": 0,
+      "duplicated": 0,
+      "mismatch": 0,
+      "missing_chars": [],
+      "duplicated_chars": []
+    },
+    "studio.worker.A_return.last-event-id.first_text_ms": {
+      "n": 2,
+      "min": 4,
+      "median": 5,
+      "max": 5
+    },
+    "studio.worker.A_return.last-event-id.first_live_event_ms": {
+      "n": 2,
+      "min": 4,
+      "median": 5,
+      "max": 5
+    },
+    "studio.worker.A_return.last-event-id.text_vs_stored": {
+      "exact": 2,
+      "missing": 0,
+      "duplicated": 0,
+      "mismatch": 0,
+      "missing_chars": [],
+      "duplicated_chars": []
+    },
+    "studio.worker.A_return.snapshot-then-attach.first_text_ms": {
+      "n": 2,
+      "min": 6,
+      "median": 9,
+      "max": 9
+    },
+    "studio.worker.A_return.snapshot-then-attach.first_live_event_ms": {
+      "n": 2,
+      "min": 67,
+      "median": 322,
+      "max": 322
+    },
+    "studio.worker.A_return.snapshot-then-attach.text_vs_stored": {
+      "exact": 2,
+      "missing": 0,
+      "duplicated": 0,
+      "mismatch": 0,
+      "missing_chars": [],
+      "duplicated_chars": []
+    },
+    "studio.worker.A_return.after_cursor.first_text_ms": {
+      "n": 2,
+      "min": 2,
+      "median": 3,
+      "max": 3
+    },
+    "studio.worker.A_return.after_cursor.first_live_event_ms": {
+      "n": 2,
+      "min": 2,
+      "median": 3,
+      "max": 3
+    },
+    "studio.worker.A_return.after_cursor.text_vs_stored": {
+      "exact": 2,
+      "missing": 0,
+      "duplicated": 0,
+      "mismatch": 0,
+      "missing_chars": [],
+      "duplicated_chars": []
+    },
+    "studio.assistant.B.ws.first_text_ms": {
+      "n": 3,
+      "min": 4,
+      "median": 4,
+      "max": 7
+    },
+    "studio.assistant.B.ws.first_live_event_ms": {
+      "n": 3,
+      "min": 71,
+      "median": 133,
+      "max": 186
+    },
+    "studio.assistant.B.ws.text_vs_stored": {
+      "exact": 3,
+      "missing": 0,
+      "duplicated": 0,
+      "mismatch": 0,
+      "missing_chars": [],
+      "duplicated_chars": []
+    },
+    "studio.assistant.B.sse.first_text_ms": {
+      "n": 2,
+      "min": 3,
+      "median": 5,
+      "max": 5
+    },
+    "studio.assistant.B.sse.first_live_event_ms": {
+      "n": 2,
+      "min": 56,
+      "median": 108,
+      "max": 108
+    },
+    "studio.assistant.B.sse.text_vs_stored": {
+      "exact": 2,
+      "missing": 0,
+      "duplicated": 0,
+      "mismatch": 0,
+      "missing_chars": [],
+      "duplicated_chars": []
+    },
+    "studio.assistant.A_return.snapshot-then-attach.first_text_ms": {
+      "n": 1,
+      "min": 4,
+      "median": 4,
+      "max": 4
+    },
+    "studio.assistant.A_return.snapshot-then-attach.first_live_event_ms": {
+      "n": 1,
+      "min": 331,
+      "median": 331,
+      "max": 331
+    },
+    "studio.assistant.A_return.snapshot-then-attach.text_vs_stored": {
+      "exact": 1,
+      "missing": 0,
+      "duplicated": 0,
+      "mismatch": 0,
+      "missing_chars": [],
+      "duplicated_chars": []
+    },
+    "studio.assistant.A_return.last-event-id.first_text_ms": {
+      "n": 2,
+      "min": 3,
+      "median": 4,
+      "max": 4
+    },
+    "studio.assistant.A_return.last-event-id.first_live_event_ms": {
+      "n": 2,
+      "min": 3,
+      "median": 4,
+      "max": 4
+    },
+    "studio.assistant.A_return.last-event-id.text_vs_stored": {
+      "exact": 2,
+      "missing": 0,
+      "duplicated": 0,
+      "mismatch": 0,
+      "missing_chars": [],
+      "duplicated_chars": []
+    },
+    "studio.assistant.A_return.after_cursor.first_text_ms": {
+      "n": 2,
+      "min": 2,
+      "median": 5,
+      "max": 5
+    },
+    "studio.assistant.A_return.after_cursor.first_live_event_ms": {
+      "n": 2,
+      "min": 2,
+      "median": 5,
+      "max": 5
+    },
+    "studio.assistant.A_return.after_cursor.text_vs_stored": {
+      "exact": 2,
+      "missing": 0,
+      "duplicated": 0,
+      "mismatch": 0,
+      "missing_chars": [],
+      "duplicated_chars": []
+    }
+  },
+  "evidence": {
+    "samples": [
+      {
+        "surface": "chat",
+        "bKind": "ws",
+        "aStrategy": "snapshot-then-attach",
+        "complete": true,
+        "finalLength": 2865,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 7,
+          "firstEventMs": 7,
+          "firstLiveMs": 34,
+          "text": {
+            "kind": "missing",
+            "missing": 93,
+            "duplicated": 0,
+            "lost": "ums taste sweet with tart skins.\n17. Raspberries are delicate and deeply flavorf"
+          },
+          "held_chars": 624,
+          "deltas": 22,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 8,
+          "firstEventMs": 8,
+          "firstLiveMs": 141,
+          "text": {
+            "kind": "missing",
+            "missing": 211,
+            "duplicated": 0,
+            "lost": ". Coconuts provide refreshing water and rich meat.\n29. Avocados offer creamy hea"
+          },
+          "held_chars": 1181,
+          "deltas": 15,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "cli",
+        "aStrategy": "last-event-id",
+        "complete": true,
+        "finalLength": 2494,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 315,
+          "firstEventMs": 315,
+          "firstLiveMs": 315,
+          "text": {
+            "kind": "missing",
+            "missing": 668,
+            "duplicated": 0,
+            "lost": "LIST-4F5AC900\n1. Apples are crisp and sweet.\n2. Bananas offer quick energy.\n3. O"
+          },
+          "held_chars": 0,
+          "deltas": 1
+        },
+        "A": {
+          "firstTextMs": 96,
+          "firstEventMs": 96,
+          "firstLiveMs": 96,
+          "text": {
+            "kind": "missing",
+            "missing": 480,
+            "duplicated": 0,
+            "lost": "ayas hold smooth tropical meat.\n17. Plums offer dark sweet skins.\n18. Pomegranat"
+          },
+          "held_chars": 581,
+          "deltas": 16,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "cli",
+        "aStrategy": "after_cursor",
+        "complete": true,
+        "finalLength": 2489,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 70,
+          "firstEventMs": 70,
+          "firstLiveMs": 70,
+          "text": {
+            "kind": "missing",
+            "missing": 626,
+            "duplicated": 0,
+            "lost": "LIST-D6C2A326\n1. Apples are crisp and sweet.\n2. Bananas offer quick energy.\n3. O"
+          },
+          "held_chars": 0,
+          "deltas": 1
+        },
+        "A": {
+          "firstTextMs": 97,
+          "firstEventMs": 97,
+          "firstLiveMs": 97,
+          "text": {
+            "kind": "missing",
+            "missing": 454,
+            "duplicated": 0,
+            "lost": " meat.\n17. Plums offer tart juicy bites.\n18. Pomegranates hold jewel-like ruby a"
+          },
+          "held_chars": 626,
+          "deltas": 16,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "ws",
+        "aStrategy": "last-event-id",
+        "complete": true,
+        "finalLength": 3550,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 10,
+          "firstEventMs": 10,
+          "firstLiveMs": 279,
+          "text": {
+            "kind": "missing",
+            "missing": 195,
+            "duplicated": 0,
+            "lost": "aches are known for their soft, fuzzy skin.\n10. Grapes grow in clusters and make"
+          },
+          "held_chars": 427,
+          "deltas": 29,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 186,
+          "firstEventMs": 186,
+          "firstLiveMs": 186,
+          "text": {
+            "kind": "missing",
+            "missing": 490,
+            "duplicated": 0,
+            "lost": " Cherries are small, round, and deeply red.\n14. Pears have a gentle sweetness an"
+          },
+          "held_chars": 622,
+          "deltas": 24,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "cli",
+        "aStrategy": "snapshot-then-attach",
+        "complete": true,
+        "finalLength": 3250,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 195,
+          "firstEventMs": 195,
+          "firstLiveMs": 195,
+          "text": {
+            "kind": "missing",
+            "missing": 650,
+            "duplicated": 0,
+            "lost": "LIST-1A69DE8B\n1. Apples are crisp and sweet.\n2. Bananas are rich in potassium.\n3"
+          },
+          "held_chars": 0,
+          "deltas": 1
+        },
+        "A": {
+          "firstTextMs": 6,
+          "firstEventMs": 6,
+          "firstLiveMs": 218,
+          "text": {
+            "kind": "missing",
+            "missing": 279,
+            "duplicated": 0,
+            "lost": ".\n22. Figs offer a unique, honeyed chewiness.\n23. Guavas are fragrant and packed"
+          },
+          "held_chars": 947,
+          "deltas": 20,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "sse",
+        "aStrategy": "after_cursor",
+        "complete": true,
+        "finalLength": 3505,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 8,
+          "firstEventMs": 8,
+          "firstLiveMs": 188,
+          "text": {
+            "kind": "missing",
+            "missing": 166,
+            "duplicated": 0,
+            "lost": " as they ripen.\n12. Cherries have a rich red color and firm stone.\n13. Kiwis hid"
+          },
+          "held_chars": 543,
+          "deltas": 28,
+          "partial_stale_chars": 166,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 146,
+          "firstEventMs": 146,
+          "firstLiveMs": 146,
+          "text": {
+            "kind": "missing",
+            "missing": 610,
+            "duplicated": 0,
+            "lost": " a slightly tart skin.\n17. Pomegranates hold hundreds of jewel-like ruby arils.\n"
+          },
+          "held_chars": 787,
+          "deltas": 21,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "sse",
+        "aStrategy": "attach-then-snapshot",
+        "complete": true,
+        "finalLength": 4467,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 7,
+          "firstEventMs": 7,
+          "firstLiveMs": 111,
+          "text": {
+            "kind": "missing",
+            "missing": 225,
+            "duplicated": 0,
+            "lost": " of refreshing water on hot summer days.\n9. Grapes grow in tight clusters and ca"
+          },
+          "held_chars": 545,
+          "deltas": 34,
+          "partial_stale_chars": 225,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 128,
+          "firstEventMs": 128,
+          "firstLiveMs": 122,
+          "text": {
+            "kind": "missing",
+            "missing": 220,
+            "duplicated": 0,
+            "lost": "wis hide vibrant green flesh and tiny black seeds inside fuzzy skin.\n17. Papayas"
+          },
+          "held_chars": 1075,
+          "deltas": 29
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "sse",
+        "aStrategy": "snapshot-then-attach",
+        "complete": true,
+        "finalLength": 4884,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 13,
+          "firstEventMs": 13,
+          "firstLiveMs": 145,
+          "text": {
+            "kind": "missing",
+            "missing": 116,
+            "duplicated": 0,
+            "lost": " grow in clusters and can be enjoyed fresh, dried, or fermented.\n10. Peaches fea"
+          },
+          "held_chars": 621,
+          "deltas": 39,
+          "partial_stale_chars": 116,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 16,
+          "firstEventMs": 16,
+          "firstLiveMs": 162,
+          "text": {
+            "kind": "missing",
+            "missing": 95,
+            "duplicated": 0,
+            "lost": "ckled flesh beneath fuzzy brown skin.\n16. Pomegranates hold hundreds of jewel-li"
+          },
+          "held_chars": 1147,
+          "deltas": 34,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "sse",
+        "aStrategy": "last-event-id",
+        "complete": true,
+        "finalLength": 4408,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 7,
+          "firstEventMs": 7,
+          "firstLiveMs": 30,
+          "text": {
+            "kind": "missing",
+            "missing": 118,
+            "duplicated": 0,
+            "lost": " juicy, hydrating sweetness on hot summer days.\n9. Grapes grow in plump clusters"
+          },
+          "held_chars": 516,
+          "deltas": 37,
+          "partial_stale_chars": 118,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 139,
+          "firstEventMs": 139,
+          "firstLiveMs": 139,
+          "text": {
+            "kind": "missing",
+            "missing": 419,
+            "duplicated": 0,
+            "lost": " gentle sweetness and a pleasantly tender texture.\n12. Cherries are glossy stone"
+          },
+          "held_chars": 723,
+          "deltas": 32,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "ws",
+        "aStrategy": "after_cursor",
+        "complete": true,
+        "finalLength": 4245,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 7,
+          "firstEventMs": 7,
+          "firstLiveMs": 20,
+          "text": {
+            "kind": "missing",
+            "missing": 92,
+            "duplicated": 0,
+            "lost": " hydrating.\n9. Grapes grow in tight clusters and can be dried into raisins.\n10. "
+          },
+          "held_chars": 494,
+          "deltas": 35,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 119,
+          "firstEventMs": 119,
+          "firstLiveMs": 119,
+          "text": {
+            "kind": "missing",
+            "missing": 524,
+            "duplicated": 0,
+            "lost": " soft, velvety skin and fragrant inner flesh.\n11. Lemons deliver an intensely so"
+          },
+          "held_chars": 586,
+          "deltas": 30,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "ws",
+        "aStrategy": "attach-then-snapshot",
+        "complete": true,
+        "finalLength": 4823,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 7,
+          "firstEventMs": 7,
+          "firstLiveMs": 297,
+          "text": {
+            "kind": "missing",
+            "missing": 219,
+            "duplicated": 0,
+            "lost": " spiky crown on top.\n8. Watermelons deliver refreshing, sweet hydration with ext"
+          },
+          "held_chars": 492,
+          "deltas": 39,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 44,
+          "firstEventMs": 44,
+          "firstLiveMs": 39,
+          "text": {
+            "kind": "missing",
+            "missing": 81,
+            "duplicated": 0,
+            "lost": ".\n15. Plums are smooth-skinned stone fruits that can be dried into prunes.\n16. K"
+          },
+          "held_chars": 1035,
+          "deltas": 35
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "sse",
+        "aStrategy": "attach-then-snapshot",
+        "complete": true,
+        "finalLength": 2657,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 6,
+          "firstEventMs": 6,
+          "firstLiveMs": 247,
+          "text": {
+            "kind": "missing",
+            "missing": 92,
+            "duplicated": 0,
+            "lost": " flavor.\n14. Limes enhance tropical drinks.\n15. Grapefruits carry a pleasant bit"
+          },
+          "held_chars": 481,
+          "deltas": 23,
+          "partial_stale_chars": 92,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 79,
+          "firstEventMs": 79,
+          "firstLiveMs": 74,
+          "text": {
+            "kind": "missing",
+            "missing": 187,
+            "duplicated": 0,
+            "lost": " Blackberries grow wild along thorny brambles.\n23. Cranberries taste extremely s"
+          },
+          "held_chars": 833,
+          "deltas": 18
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "cli",
+        "aStrategy": "attach-then-snapshot",
+        "complete": true,
+        "finalLength": 3062,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 101,
+          "firstEventMs": 101,
+          "firstLiveMs": 101,
+          "text": {
+            "kind": "missing",
+            "missing": 593,
+            "duplicated": 0,
+            "lost": "LIST-454BAF49\n1. Apples are crisp and sweet.\n2. Bananas provide quick energy.\n3."
+          },
+          "held_chars": 0,
+          "deltas": 1
+        },
+        "A": {
+          "firstTextMs": 26,
+          "firstEventMs": 26,
+          "firstLiveMs": 16,
+          "text": {
+            "kind": "missing",
+            "missing": 93,
+            "duplicated": 0,
+            "lost": " Cantaloupes have sweet orange perfumed flesh.\n24. Honeydew melons are mild and "
+          },
+          "held_chars": 990,
+          "deltas": 20
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "ws",
+        "aStrategy": "snapshot-then-attach",
+        "complete": true,
+        "finalLength": 4028,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 15,
+          "firstEventMs": 15,
+          "firstLiveMs": 208,
+          "text": {
+            "kind": "missing",
+            "missing": 119,
+            "duplicated": 0,
+            "lost": "rapes grow in plump clusters ideal for easy snacking.\n11. Lemons add an intensel"
+          },
+          "held_chars": 585,
+          "deltas": 33,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 9,
+          "firstEventMs": 9,
+          "firstLiveMs": 91,
+          "text": {
+            "kind": "missing",
+            "missing": 200,
+            "duplicated": 0,
+            "lost": " brown coat.\n17. Raspberries are delicate berries composed of tiny juicy drupele"
+          },
+          "held_chars": 1003,
+          "deltas": 28,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "sse",
+        "aStrategy": "snapshot-then-attach",
+        "complete": true,
+        "finalLength": 3970,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 13,
+          "firstEventMs": 13,
+          "firstLiveMs": 39,
+          "text": {
+            "kind": "missing",
+            "missing": 88,
+            "duplicated": 0,
+            "lost": " a convenient snack.\n10. Peaches feature velvety skin and soft, fragrant flesh.\n"
+          },
+          "held_chars": 449,
+          "deltas": 33,
+          "partial_stale_chars": 88,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 6,
+          "firstEventMs": 6,
+          "firstLiveMs": 220,
+          "text": {
+            "kind": "missing",
+            "missing": 99,
+            "duplicated": 0,
+            "lost": " tart seeds called arils.\n19. Raspberries are delicate berries composed of tiny "
+          },
+          "held_chars": 1011,
+          "deltas": 27,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "cli",
+        "aStrategy": "snapshot-then-attach",
+        "complete": true,
+        "finalLength": 3490,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 70,
+          "firstEventMs": 70,
+          "firstLiveMs": 70,
+          "text": {
+            "kind": "missing",
+            "missing": 544,
+            "duplicated": 0,
+            "lost": "LIST-084B1CD7\n1. Apples are crisp and sweet.\n2. Bananas offer a rich source of p"
+          },
+          "held_chars": 0,
+          "deltas": 1
+        },
+        "A": {
+          "firstTextMs": 9,
+          "firstEventMs": 9,
+          "firstLiveMs": 115,
+          "text": {
+            "kind": "missing",
+            "missing": 204,
+            "duplicated": 0,
+            "lost": ". Pears develop a tender, floral taste when ripe.\n19. Raspberries possess a deli"
+          },
+          "held_chars": 849,
+          "deltas": 24,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "ws",
+        "aStrategy": "last-event-id",
+        "complete": true,
+        "finalLength": 3432,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 8,
+          "firstEventMs": 8,
+          "firstLiveMs": 165,
+          "text": {
+            "kind": "missing",
+            "missing": 97,
+            "duplicated": 0,
+            "lost": "ons add vibrant sourness to drinks and dressings.\n12. Limes bring a zesty punch "
+          },
+          "held_chars": 504,
+          "deltas": 27,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 224,
+          "firstEventMs": 224,
+          "firstLiveMs": 224,
+          "text": {
+            "kind": "missing",
+            "missing": 527,
+            "duplicated": 0,
+            "lost": " Cherries offer deep color and rich sweetness.\n14. Pears have a delicate floral "
+          },
+          "held_chars": 601,
+          "deltas": 22,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "ws",
+        "aStrategy": "attach-then-snapshot",
+        "complete": true,
+        "finalLength": 4539,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 6,
+          "firstEventMs": 6,
+          "firstLiveMs": 208,
+          "text": {
+            "kind": "missing",
+            "missing": 107,
+            "duplicated": 0,
+            "lost": " grow in plump clusters ideal for snacking or making wine.\n10. Peaches have soft"
+          },
+          "held_chars": 614,
+          "deltas": 36,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 97,
+          "firstEventMs": 97,
+          "firstLiveMs": 92,
+          "text": {
+            "kind": "missing",
+            "missing": 114,
+            "duplicated": 0,
+            "lost": ". Plums come in varied colors, offering sweet flesh and tart skin.\n16. Kiwis hid"
+          },
+          "held_chars": 1032,
+          "deltas": 32
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "cli",
+        "aStrategy": "last-event-id",
+        "complete": true,
+        "finalLength": 4117,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 88,
+          "firstEventMs": 88,
+          "firstLiveMs": 88,
+          "text": {
+            "kind": "missing",
+            "missing": 751,
+            "duplicated": 0,
+            "lost": "LIST-F993C5C0\n1. Apples are crisp and naturally sweet snacks.\n2. Bananas offer c"
+          },
+          "held_chars": 0,
+          "deltas": 1
+        },
+        "A": {
+          "firstTextMs": 168,
+          "firstEventMs": 168,
+          "firstLiveMs": 168,
+          "text": {
+            "kind": "missing",
+            "missing": 524,
+            "duplicated": 0,
+            "lost": "\n13. Lemons add bright zesty acidity to culinary dishes.\n14. Limes deliver sharp"
+          },
+          "held_chars": 751,
+          "deltas": 26,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "sse",
+        "aStrategy": "last-event-id",
+        "complete": true,
+        "finalLength": 4482,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 7,
+          "firstEventMs": 7,
+          "firstLiveMs": 74,
+          "text": {
+            "kind": "missing",
+            "missing": 102,
+            "duplicated": 0,
+            "lost": " for hot days.\n9. Grapes grow in clusters and make convenient bite-sized snacks."
+          },
+          "held_chars": 572,
+          "deltas": 36,
+          "partial_stale_chars": 102,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 234,
+          "firstEventMs": 234,
+          "firstLiveMs": 234,
+          "text": {
+            "kind": "missing",
+            "missing": 537,
+            "duplicated": 0,
+            "lost": " grainy texture.\n12. Cherries are plump, glossy stone fruits prized for their de"
+          },
+          "held_chars": 777,
+          "deltas": 30,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "ws",
+        "aStrategy": "after_cursor",
+        "complete": true,
+        "finalLength": 3578,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 6,
+          "firstEventMs": 6,
+          "firstLiveMs": 29,
+          "text": {
+            "kind": "missing",
+            "missing": 364,
+            "duplicated": 0,
+            "lost": " bright green flesh dotted with black seeds.\n17. Papayas contain enzymes that ai"
+          },
+          "held_chars": 812,
+          "deltas": 25,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 99,
+          "firstEventMs": 99,
+          "firstLiveMs": 99,
+          "text": {
+            "kind": "missing",
+            "missing": 1047,
+            "duplicated": 0,
+            "lost": "3. Cantaloupes feature sweet orange flesh and netted rinds.\n24. Honeydew melons "
+          },
+          "held_chars": 1176,
+          "deltas": 14,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "sse",
+        "aStrategy": "control",
+        "complete": true,
+        "finalLength": 4238,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 9,
+          "firstEventMs": 9,
+          "firstLiveMs": 193,
+          "text": {
+            "kind": "missing",
+            "missing": 192,
+            "duplicated": 0,
+            "lost": ".\n10. Peaches have soft, velvety skin and fragrant nectar.\n11. Pears deliver a g"
+          },
+          "held_chars": 539,
+          "deltas": 34,
+          "partial_stale_chars": 192,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "control": {
+          "kind": "exact",
+          "missing": 0,
+          "duplicated": 0
+        }
+      },
+      {
+        "surface": "studio.worker",
+        "bKind": "sse",
+        "aStrategy": "last-event-id",
+        "complete": true,
+        "finalLength": 2429,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 5,
+          "firstEventMs": 5,
+          "firstLiveMs": 34,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 509,
+          "deltas": 22,
+          "partial_stale_chars": 0,
+          "cursors": [],
+          "cursor_count": 27
+        },
+        "A": {
+          "firstTextMs": 4,
+          "firstEventMs": 4,
+          "firstLiveMs": 4,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 509,
+          "deltas": 22,
+          "cursors": [],
+          "cursor_count": 27
+        }
+      },
+      {
+        "surface": "studio.worker",
+        "bKind": "sse",
+        "aStrategy": "snapshot-then-attach",
+        "complete": true,
+        "finalLength": 3264,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 8,
+          "firstEventMs": 8,
+          "firstLiveMs": 244,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 585,
+          "deltas": 27,
+          "partial_stale_chars": 0,
+          "cursors": [],
+          "cursor_count": 32
+        },
+        "A": {
+          "firstTextMs": 6,
+          "firstEventMs": 6,
+          "firstLiveMs": 322,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 1076,
+          "deltas": 22,
+          "cursors": [],
+          "cursor_count": 27
+        }
+      },
+      {
+        "surface": "studio.worker",
+        "bKind": "ws",
+        "aStrategy": "last-event-id",
+        "complete": true,
+        "finalLength": 4620,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 8,
+          "firstEventMs": 8,
+          "firstLiveMs": 67,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 494,
+          "deltas": 39,
+          "cursors": [],
+          "cursor_count": 44
+        },
+        "A": {
+          "firstTextMs": 5,
+          "firstEventMs": 5,
+          "firstLiveMs": 5,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 494,
+          "deltas": 39,
+          "cursors": [],
+          "cursor_count": 44
+        }
+      },
+      {
+        "surface": "studio.assistant",
+        "bKind": "ws",
+        "aStrategy": "snapshot-then-attach",
+        "complete": true,
+        "finalLength": 2354,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 4,
+          "firstEventMs": 4,
+          "firstLiveMs": 71,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 212,
+          "deltas": 554,
+          "cursors": [],
+          "cursor_count": 558
+        },
+        "A": {
+          "firstTextMs": 4,
+          "firstEventMs": 4,
+          "firstLiveMs": 331,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 410,
+          "deltas": 504,
+          "cursors": [],
+          "cursor_count": 508
+        }
+      },
+      {
+        "surface": "studio.worker",
+        "bKind": "sse",
+        "aStrategy": "after_cursor",
+        "complete": true,
+        "finalLength": 3376,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 6,
+          "firstEventMs": 6,
+          "firstLiveMs": 22,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 1110,
+          "deltas": 24,
+          "partial_stale_chars": 0,
+          "cursors": [],
+          "cursor_count": 29
+        },
+        "A": {
+          "firstTextMs": 3,
+          "firstEventMs": 3,
+          "firstLiveMs": 3,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 1110,
+          "deltas": 24,
+          "cursors": [],
+          "cursor_count": 29
+        }
+      },
+      {
+        "surface": "studio.worker",
+        "bKind": "ws",
+        "aStrategy": "snapshot-then-attach",
+        "complete": true,
+        "finalLength": 4043,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 6,
+          "firstEventMs": 6,
+          "firstLiveMs": 9,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 1112,
+          "deltas": 31,
+          "cursors": [],
+          "cursor_count": 36
+        },
+        "A": {
+          "firstTextMs": 9,
+          "firstEventMs": 9,
+          "firstLiveMs": 67,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 2028,
+          "deltas": 21,
+          "cursors": [],
+          "cursor_count": 26
+        }
+      },
+      {
+        "surface": "studio.worker",
+        "bKind": "ws",
+        "aStrategy": "after_cursor",
+        "complete": true,
+        "finalLength": 3379,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 5,
+          "firstEventMs": 5,
+          "firstLiveMs": 46,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 1098,
+          "deltas": 24,
+          "cursors": [],
+          "cursor_count": 29
+        },
+        "A": {
+          "firstTextMs": 2,
+          "firstEventMs": 2,
+          "firstLiveMs": 2,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 1098,
+          "deltas": 24,
+          "cursors": [],
+          "cursor_count": 29
+        }
+      },
+      {
+        "surface": "studio.assistant",
+        "bKind": "ws",
+        "aStrategy": "last-event-id",
+        "complete": true,
+        "finalLength": 3053,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 7,
+          "firstEventMs": 7,
+          "firstLiveMs": 133,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 307,
+          "deltas": 663,
+          "cursors": [],
+          "cursor_count": 667
+        },
+        "A": {
+          "firstTextMs": 3,
+          "firstEventMs": 3,
+          "firstLiveMs": 3,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 307,
+          "deltas": 663,
+          "cursors": [],
+          "cursor_count": 667
+        }
+      },
+      {
+        "surface": "studio.assistant",
+        "bKind": "ws",
+        "aStrategy": "after_cursor",
+        "complete": true,
+        "finalLength": 3125,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 4,
+          "firstEventMs": 4,
+          "firstLiveMs": 186,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 292,
+          "deltas": 699,
+          "cursors": [],
+          "cursor_count": 703
+        },
+        "A": {
+          "firstTextMs": 5,
+          "firstEventMs": 5,
+          "firstLiveMs": 5,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 292,
+          "deltas": 699,
+          "cursors": [],
+          "cursor_count": 703
+        }
+      },
+      {
+        "surface": "studio.assistant",
+        "bKind": "sse",
+        "aStrategy": "after_cursor",
+        "complete": true,
+        "finalLength": 2130,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 5,
+          "firstEventMs": 5,
+          "firstLiveMs": 108,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 230,
+          "deltas": 514,
+          "partial_stale_chars": 0,
+          "cursors": [],
+          "cursor_count": 518
+        },
+        "A": {
+          "firstTextMs": 2,
+          "firstEventMs": 2,
+          "firstLiveMs": 2,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 230,
+          "deltas": 514,
+          "cursors": [],
+          "cursor_count": 518
+        }
+      },
+      {
+        "surface": "studio.assistant",
+        "bKind": "sse",
+        "aStrategy": "last-event-id",
+        "complete": true,
+        "finalLength": 2717,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 3,
+          "firstEventMs": 3,
+          "firstLiveMs": 56,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 212,
+          "deltas": 603,
+          "partial_stale_chars": 0,
+          "cursors": [],
+          "cursor_count": 607
+        },
+        "A": {
+          "firstTextMs": 4,
+          "firstEventMs": 4,
+          "firstLiveMs": 4,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 212,
+          "deltas": 603,
+          "cursors": [],
+          "cursor_count": 607
+        }
+      }
+    ]
+  },
+  "notes": [
+    "Prompt: LIST-<token> then a numbered list of 60 short lines (a Run that streams for several seconds). B opens 1500 ms after A's list started streaming; A is dropped when B opens and returns 1200 ms later. Trials of one round run in parallel on one Stack, so timings include that contention.",
+    "Chat WebSocket has no snapshot frame: B-over-WS takes the snapshot over HTTP (cursor + the Run's partial_output), then conversation.subscribe(stream:true, after_cursor). B-over-CLI is `hatch conversation watch` (no snapshot, no cursor: 'from now'). Studio has no CLI watch.",
+    "Trial discarded, not a product result: chat: A never reached mid-Run streaming (frames 8, text \"\", last {\"type\":\"journal.event\",\"cursor\":55,\"journal_type\":\"run.state\",\"run_id\":\"run_00d4243123614b6390c9acfade2ac219\",\"payload\":{\"id\":\"run_00d4243123614b6390c9acfade2a)",
+    "Trial discarded, not a product result: chat: A never reached mid-Run streaming (frames 11, text \"一口气列 60 种水果太冗长了，屏幕上也不好读。你主要是想做特定分类（比如热带水果、低糖水果），还是有什么具体用途？\", last {\"type\":\"journal.event\",\"cursor\":54,\"journal_type\":\"run.state\",\"run_id\":\"run_83ae5858017c4544bd8dc97acc2609fe\",\"payload\":{\"id\":\"run_83ae5858017c4544bd8dc97acc26)",
+    "Trial discarded, not a product result: chat: A never reached mid-Run streaming (frames 8, text \"\", last {\"type\":\"journal.event\",\"cursor\":132,\"journal_type\":\"run.state\",\"run_id\":\"run_ca87b2d469684cccbefe190b177f9101\",\"payload\":{\"id\":\"run_ca87b2d469684cccbefe190b177)",
+    "Trial discarded, not a product result: chat: A never reached mid-Run streaming (frames 11, text \"一次列 60 种水果容易刷屏。你是需要常见水果的趣味特点，还是特定用途（比如食谱、儿童科普）的清单？\", last {\"type\":\"journal.event\",\"cursor\":131,\"journal_type\":\"run.state\",\"run_id\":\"run_748f769088444815a49351145b20f6de\",\"payload\":{\"id\":\"run_748f769088444815a49351145b2)",
+    "Trial discarded, not a product result: studio.assistant: A never reached mid-Run streaming (frames 38, text \"\", last {})"
+  ],
+  "defects": [
+    {
+      "title": "Chat: a client that resumes by cursor loses the text streamed while it was away",
+      "severity": "high",
+      "expected": "Spec: any client resumes from a cursor and sees no missing text (live deltas reach every observer).",
+      "actual": "Resuming at the last cursor (after_cursor / Last-Event-ID) replays only durable journal events. Text deltas carry no cursor and are not replayed, so 10 of 10 returning clients assembled a reply with missing text (missing chars: 454, 610, 524, 1047, 480, 490, 419, 527, 524, 537). The CLI's own resumable() stream uses exactly this path.",
+      "repro": "POST a long message with Accept: text/event-stream, drop the connection mid-stream, reconnect with GET events?after_cursor=<last cursor> (or Last-Event-ID), compare the concatenated deltas with the stored assistant message."
+    },
+    {
+      "title": "Chat: snapshot + live events cannot be joined without gaps or duplicates",
+      "severity": "high",
+      "expected": "Snapshot (partial output + cursor) then events after that cursor gives continuous text.",
+      "actual": "The snapshot's partial_output is saved at most once a second and live deltas have no cursor or offset, so the join is inexact: 11 of 11 returning clients got missing or duplicated text ({\"exact\":0,\"missing\":11,\"duplicated\":0,\"mismatch\":0,\"missing_chars\":[211,279,95,200,99,204,220,81,187,93,114],\"duplicated_chars\":[]}).",
+      "repro": "While a Run streams, GET snapshot (runs[].partial_output, cursor), then GET events?after_cursor=<cursor> with Accept: text/event-stream; concatenate partial_output and the following deltas and compare with the stored message."
+    },
+    {
+      "title": "hatch conversation watch started mid-Run prints only text from now",
+      "severity": "medium",
+      "expected": "Opening a conversation on another client mid-Run shows the answer so far.",
+      "actual": "watch has no snapshot step; 6 of 6 watchers printed only the tail (missing chars 668, 626, 650, 593, 544, 751).",
+      "repro": "hatch ask <long prompt> --product P --conversation C --wait=1 ; hatch conversation watch C --product P two seconds later."
+    },
+    {
+      "title": "Chat: a client opened mid-Run (snapshot then subscribe) shows missing or duplicated text",
+      "severity": "high",
+      "expected": "Snapshot partial output plus the following events equals the stored reply.",
+      "actual": "16 of 16 B clients (SSE / WebSocket) were not exact: {\"exact\":0,\"missing\":16,\"duplicated\":0,\"mismatch\":0,\"missing_chars\":[93,195,166,225,116,118,92,219,92,119,88,97,107,102,364,192],\"duplicated_chars\":[]}.",
+      "repro": "Same as above, from a second client while the first is still streaming."
+    }
+  ]
+}

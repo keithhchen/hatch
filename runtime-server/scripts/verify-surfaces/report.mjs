@@ -22,10 +22,10 @@ const lines = [];
 lines.push("# Surfaces verification report", "");
 lines.push(`Generated ${new Date().toISOString()} at commit ${meta.commit}. Every result below is labelled **real integration**: the real \`dist/registryServer.js\` and \`dist/index.js\` over HTTP and WebSocket, a throwaway Postgres 16, real model calls (${meta.models}), and a local fake platform. **None of it is product UAT.**`, "");
 lines.push(`Totals: ${count("PASS")} PASS, ${count("FAIL")} FAIL, ${count("BLOCKED")} BLOCKED of ${results.length}.`, "");
-lines.push("## Scenarios", "", "| # | Scenario | Result | Evidence level | Key measurements |", "|---|---|---|---|---|");
+lines.push("## Scenarios", "", "| # | Scenario | Result | Checks ok | Evidence level | Key measurements |", "|---|---|---|---|---|---|");
 for (const r of results) {
-  const keys = Object.entries(r.measurements ?? {}).slice(0, 6).map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`).join("; ");
-  lines.push(`| ${r.id} | ${cell(r.title)} | **${r.status}** | real integration | ${cell(keys)} |`);
+  const keys = Object.entries(r.measurements ?? {}).slice(0, 4).map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`).join("; ").slice(0, 260);
+  lines.push(`| ${r.id} | ${cell(r.title)} | **${r.status}** | ${r.checks.filter((c) => c.ok).length}/${r.checks.length} | real integration | ${cell(keys)} |`);
 }
 lines.push("", "## Defects, highest first", "");
 if (!defects.length) lines.push("None recorded.", "");
@@ -48,6 +48,7 @@ lines.push("## How this was set up (what is and is not the product)", "",
   "- The Expert Product release is written to the Runtime corpus root and the Registry release store directly (the way `chat/processes.e2e.test.ts` does). The Creator Factory publish path is not exercised.",
   "- Org and public Connections are inserted as rows. There is no product API for creating them yet. Only the `self` link-code flow is a product path.",
   "- The fake platform exists only in this tool. It records outbound calls, injects 429, timeouts, and revocation, and serves as the web-search provider. The adapters are the real ones; a preload rewrites only their host.",
+  "- Stand-ins that change the product build, used only for follow-on sub-checks and labelled in each scenario: scenarios 7 and 11 phase 2 run a second Stack whose Runtime loads a moderator stand-in and a hook that lets attachments tools through the model-declaration filter (the unmodified Runtime is always checked first); scenario 9 loads a request-recording preload that forwards model calls unchanged. Scenario 10 is assembled from three runs because the Kimi quota ran out (see its notes).",
   "- A path-routing edge stands where Caddy stands so the `hatch` CLI (one base URL) and the Registry's call into Chat share one address and a Runtime instance can be killed behind it.", "",
   "## What cannot be proved without a real platform", "",
   "- That a real Telegram, Feishu or WeCom server signs, retries, orders and rate-limits as the local formats assume (retry timing, event ordering, redelivery after timeouts, group mention rules).",
