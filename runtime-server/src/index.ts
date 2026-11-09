@@ -92,7 +92,7 @@ import {
 import { writeOperationalError } from "./operationalLogging.js";
 import { RuntimeAssetStore, runtimeAssetStoreFromEnvironment } from "./assetStore.js";
 import { flushLangfuseObservability, initializeLangfuseObservability, withLangfuseTurn } from "./langfuse.js";
-import { ChatRuntime } from "./chat/chatRuntime.js";
+import { ChatRuntime, type ChatRuntimeOptions } from "./chat/chatRuntime.js";
 import { PostgresEventRelay } from "./chat/eventRelay.js";
 import { ChatError, principalKey, accountPrincipal } from "./chat/principal.js";
 import type { PrincipalLimits, RunAdmission, Submission } from "./chat/chatService.js";
@@ -131,6 +131,8 @@ export const MAX_RUNTIME_WEBSOCKET_PAYLOAD_BYTES = MAX_RICH_TOOL_RESULT_BYTES;
 
 export type RuntimeServerOptions = {
   createRuntime?: () => AgentRuntime;
+  /** Chat's compaction strategy; tests inject one with a test-only summarizer. */
+  compactionStrategy?: ChatRuntimeOptions<SessionBinding>["compactionStrategy"];
   conversationStore?: RuntimeStore;
   /** Optional injected store for tests; production defaults beside transcripts. */
   assetStore?: RuntimeAssetStore;
@@ -773,6 +775,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     admission,
     limits: options.principalLimits,
     toolTimeoutMs: options.clientToolTimeoutMs ?? clientToolTimeoutMs(),
+    compactionStrategy: options.compactionStrategy,
     // With a shared database every instance sees every Run's live events.
     ...(conversationStore instanceof PostgresStore ? { relay: new PostgresEventRelay(conversationStore.pool as never) } : {})
   });

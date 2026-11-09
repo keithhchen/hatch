@@ -9,6 +9,8 @@ import { WebSocket } from "ws";
 import type { AgentCorpus, AgentCorpusResolver } from "./agentCorpus.js";
 import { DeterministicAgentRuntime } from "./agentRuntime.js";
 import { InMemoryConversationRepository } from "./conversationRepository.js";
+import { chatCompactionAdapter } from "./compaction.js";
+import { CompactionStrategy, policyFor } from "./compactionStrategy.js";
 import type { AuthIdentityResolver, EntitlementBinding, EntitlementResolver } from "./entitlements.js";
 import { RuntimeAssetStore } from "./assetStore.js";
 import { createRuntimeServer, durableConversationId, type RuntimeServer } from "./index.js";
@@ -726,6 +728,46 @@ test("a failed manual compaction does not lose the already accepted user command
     assert.equal((await store.readSubmissionReceipt(conversationId, "compact-run"))?.client_message_id, "compact-message");
     assert.deepEqual((await store.readConversation(conversationId)).filter((message) => message.role === "user").at(-1),
       { role: "user", content: "/compact", model_images: [] });
+  } finally { socket.close(); }
+});
+
+test("a provider overflow is answered by compacting and continuing, once, and the turn completes", async () => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-overflow-recovery-"));
+  const repository = new InMemoryConversationRepository(localRuntimeAuthority(dataDir));
+  const store = new RuntimeStore(dataDir);
+  await repository.initialize();
+  const conversationId = "conversation_overflow";
+  await repository.createConversation({ id: conversationId, publicId: conversationId,
+    ownerAccountId: "local-development", creatorId: "local-development", agentId: "local-agent",
+    productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}` });
+  await store.append({ type: "conversation.model_message", conversation_id: conversationId, run_id: "earlier", message: { role: "user", content: "an earlier question" } });
+  await store.append({ type: "conversation.model_message", conversation_id: conversationId, run_id: "earlier", message: { role: "assistant", content: "an earlier answer" } });
+  const summarized: string[] = [];
+  let attempts = 0;
+  runtime = createRuntimeServer({
+    conversationStore: store, conversationRepository: repository,
+    // A test-only summarizer: no real model is called.
+    compactionStrategy: () => new CompactionStrategy(chatCompactionAdapter(async () => { summarized.push("asked"); return "## Goal\nan earlier question"; }), policyFor(262_144)),
+    createRuntime: () => ({ async *run(input) {
+      attempts += 1;
+      if (attempts === 1) throw new Error("Your input exceeds the context window of this model");
+      yield { type: "assistant.delta" as const, run_id: input.run_id, delta: { kind: "text" as const, content: "answered after compacting" } };
+      yield { type: "turn.completed" as const, run_id: input.run_id, finish_reason: "stop" as const };
+    } })
+  });
+  const base = await listen(runtime.server);
+  const messages: OutboundMessage[] = [];
+  const socket = await openRuntimeSocket(base, conversationId, messages);
+  try {
+    socket.send(JSON.stringify({ type: "client.message", run_id: "overflow-run", client_message_id: "overflow-message",
+      conversation_id: conversationId, local_tools: [], message: { role: "user", content: "a new question" } }));
+    await waitForSocket(messages, (message) => message.type === "turn.completed");
+    assert.equal(attempts, 2);
+    assert.deepEqual(summarized, ["asked"]);
+    const compacted = messages.find((message) => message.type === "session.compacted") as { phase?: string; compaction_id?: string } | undefined;
+    assert.equal(compacted?.phase, "overflow_recovery");
+    assert.match(compacted?.compaction_id ?? "", /^cmp_/);
+    assert.equal(messages.some((message) => message.type === "turn.failed"), false);
   } finally { socket.close(); }
 });
 
