@@ -11,7 +11,9 @@ import { AssetPipeline } from "../assets/pipeline.js";
 import { FileProcessor, ImageProcessor } from "../assets/processors.js";
 import { InMemoryAssetRepository, PostgresAssetRepository } from "../assets/repositories.js";
 import { LocalArtifactObjectStore } from "../creatorLearning/objectStore.js";
-import { PipelineAssets, UnavailableModerator } from "./pipelineAssets.js";
+import { AttachedConversation } from "./attachedConversation.js";
+import type { Conversation, ReadyAsset, SendInput } from "./conversation.js";
+import { PipelineAssets, productPlacement, UnavailableModerator } from "./pipelineAssets.js";
 
 // The real pipeline, processors and object storage. Only the moderator is chosen by the test: it allows
 // everything, or it is the unavailable one a server without a moderator runs.
@@ -24,7 +26,7 @@ async function desk(repository: AssetRepository, moderator: ContentModerator) {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-assets-"));
   const blobs = new LocalArtifactObjectStore(root);
   const written = new Map<string, Buffer>();
-  const assets = new PipelineAssets(new AssetPipeline(repository, blobs, moderator, [new ImageProcessor(), new FileProcessor()]), blobs, { writeManual: async (name, bytes) => { written.set(name, bytes); } });
+  const assets = new PipelineAssets(new AssetPipeline(repository, blobs, moderator, [new ImageProcessor(), new FileProcessor()]), blobs, { files: { writeManual: async (name, bytes) => { written.set(name, bytes); } }, place: productPlacement });
   return { assets, written, close: () => rm(root, { recursive: true, force: true }) };
 }
 
@@ -59,8 +61,36 @@ for (const [name, run, skip] of adapters) {
       await d.assets.attach(mine, [asset], "m1");
       await d.assets.attach(mine, [asset], "m1");
       assert.equal(((await d.assets.resolve(mine, uploaded.asset_id)) as { messageId?: string }).messageId, "m1");
-      await assert.rejects(d.assets.attach(mine, [asset], "m2"), { code: "conflict" }, "an asset joins one message");
+      await assert.rejects(d.assets.attach(mine, [asset], "m2"), { status: 409, code: "asset_already_used" }, "an asset joins one message");
       assert.equal((await d.assets.upload(mine, { name: "again.txt", bytes: Buffer.from("alpha\nbeta") })).asset_id, uploaded.asset_id, "the same bytes are the same asset");
+    } finally { await d.close(); }
+  }));
+
+  test(`${name}: of concurrent sends of one asset exactly one is delivered, and a send that fails frees its assets`, { skip }, () => run(async repository => {
+    const d = await desk(repository, allow);
+    try {
+      const uploaded = await d.assets.upload(mine, { name: "notes.txt", bytes: Buffer.from("alpha") });
+      const second = await d.assets.upload(mine, { name: "more.txt", bytes: Buffer.from("beta") });
+      const asset = (await d.assets.resolve(mine, uploaded.asset_id)) as ReadyAsset;
+      const other = (await d.assets.resolve(mine, second.asset_id)) as ReadyAsset;
+      const delivered: string[] = [];
+      let failing = false;
+      const inner = { send: async (input: SendInput) => { await new Promise(resolve => setTimeout(resolve, 5)); if (failing) throw new Error("runtime down"); delivered.push(input.id); return { conversationId: "c", queued: false, message: { id: input.id, role: "user", text: "", created_at: "" } }; } } as unknown as Conversation;
+      const conversation = new AttachedConversation(inner, { scope: mine, desk: d.assets });
+      const send = (id: string, attachments: ReadyAsset[]) => conversation.send({ id, text: "hi", attachments, client: { client: "web" } }).then(() => "sent", (error: { code?: string }) => error.code);
+      const outcomes = await Promise.all(["m1", "m2", "m3", "m4"].map(id => send(id, [asset])));
+      assert.equal(outcomes.filter(outcome => outcome === "sent").length, 1);
+      assert.equal(outcomes.filter(outcome => outcome === "asset_already_used").length, 3);
+      assert.equal(delivered.length, 1);
+      assert.equal(((await d.assets.resolve(mine, asset.id)) as ReadyAsset).messageId, delivered[0], "bound to the message that was delivered");
+
+      failing = true;
+      assert.equal(await send("m5", [other]), undefined, "a delivery that throws is the caller's error");
+      assert.equal(((await d.assets.resolve(mine, other.id)) as ReadyAsset).messageId, undefined, "its asset is free again");
+      failing = false;
+      assert.equal(await send("m6", [asset, other]), "asset_already_used", "one used asset refuses the whole message");
+      assert.equal(((await d.assets.resolve(mine, other.id)) as ReadyAsset).messageId, undefined, "and binds none of it");
+      assert.equal(await send("m7", [other]), "sent");
     } finally { await d.close(); }
   }));
 

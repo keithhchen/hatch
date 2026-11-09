@@ -11,6 +11,8 @@ import type { FactoryWorkspace } from "../factoryAgents/service.js";
 import type { AgentCatalog, AgentChange } from "./catalog.js";
 import { convertUpload } from "../factoryAgents/markdownConverter.js";
 import { imageMime, userMessage } from "../factoryAgents/imageRefs.js";
+import type { Journal, JournalEvent } from "../factoryAgents/journal.js";
+import type { Workshop } from "../conversations/assets.js";
 import { CHANNEL_KINDS, CHANNEL_LABELS, type ChannelKind, type OutboundMessage } from "../channels/types.js";
 import type { AssistantChannels } from "../channels/ports.js";
 import { localDate, localHour, type AccountReach } from "./reach.js";
@@ -21,6 +23,7 @@ const ASSISTANT_PROFILE = "kimi-k2.6";
 const RUN_END = new Set(["voice.run_completed", "voice.run_failed", "voice.run_interrupted"]);
 const MATERIALS = "input/materials/";
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const IMAGE_EXTENSION: Record<string, string> = { "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp" };
 const REVIEW_LABELS: Partial<Record<TaskKind, [string, string]>> = {
   content: ["定稿", "不要"], change: ["确认", "取消"],
 };
@@ -60,6 +63,8 @@ export type AssistantDependencies = {
   exclusive: (name: string, fn: () => Promise<void>) => Promise<void>;
   env: NodeJS.ProcessEnv;
   runtime?: Pick<WorkbenchRuntimeOptions, "agentFactory" | "deadlineMs" | "maxTurns">;
+  /** Where the Expert's conversation is recorded: the journal of a runtime, told which of its events belong to the conversation. */
+  journal?: (keyOf: (event: JournalEvent) => string | undefined) => Journal;
 };
 
 /**
@@ -80,6 +85,8 @@ type Desk = {
   taken: Map<string, IngressItem>;
   turnStart: number;
   createdTasks: Set<string>;
+  /** The latest pump; the next one waits for it. */
+  pumps: Promise<unknown>;
 };
 
 /**
@@ -154,7 +161,21 @@ export class AssistantService {
   async stop(accountId: string): Promise<void> { const desk = await this.desk(accountId); desk.runtime.stop(desk.sessionId); }
 
   /** Durably accept one inbound item. Returns false for an item already accepted: a caller that names the item (a channel message does, by its inbox id) can repeat itself safely. */
-  async ingest(accountId: string, item: Omit<IngressItem, "id" | "at"> & { id?: string }): Promise<boolean> {
+  async ingest(accountId: string, item: Incoming): Promise<boolean> {
+    const accepted = await this.accept(accountId, item);
+    if (accepted) void this.pump(accountId).catch(error => this.report(accountId, error));
+    return accepted;
+  }
+
+  /** Like `ingest`, but returns once the item has met its turn, with the Run that took it. An item that waits for the next turn has none. */
+  async submit(accountId: string, item: Incoming): Promise<{ runId?: string }> {
+    if (await this.accept(accountId, item)) await this.pump(accountId).catch(error => this.report(accountId, error));
+    const desk = await this.desk(accountId);
+    const interview = deskState(await desk.store.get(desk.sessionId)).interview;
+    return { runId: interview ? (await this.workspace(accountId, interview.productId)).runtime.runId(interview.sessionId) : desk.runtime.runId(desk.sessionId) };
+  }
+
+  private async accept(accountId: string, item: Incoming): Promise<boolean> {
     const desk = await this.desk(accountId);
     const accepted = await desk.store.update(desk.sessionId, session => {
       const state = deskState(session);
@@ -164,14 +185,19 @@ export class AssistantService {
       state.ingress.push({ id: randomUUID(), at, ...item });
       return true;
     });
-    if (accepted) void this.pump(accountId).catch(error => this.report(accountId, error));
     return accepted;
   }
 
-  /** Hand pending ingress to the interview, the running turn, or a new turn. */
+  /** Hand pending ingress to the interview, the running turn, or a new turn. One at a time per desk: a pump that comes second finds the first one's turn already started. */
   private async pump(accountId: string): Promise<void> {
-    if (this.closing) return;
     const desk = await this.desk(accountId);
+    const run = desk.pumps.then(() => this.pumpOnce(accountId, desk));
+    desk.pumps = run.catch(() => undefined);
+    return run;
+  }
+
+  private async pumpOnce(accountId: string, desk: Desk): Promise<void> {
+    if (this.closing) return;
     const state = deskState(await desk.store.get(desk.sessionId));
     const pending = state.ingress.filter(item => !desk.taken.has(item.id));
     if (!pending.length) return;
@@ -184,7 +210,7 @@ export class AssistantService {
     // From here to the decision there is no await, so the phase cannot change under it.
     if (desk.phase === "idle") {
       desk.phase = "running";
-      void this.startTurn(desk).catch(error => { desk.taken = new Map(); desk.phase = "idle"; this.report(accountId, error); });
+      await this.startTurn(desk).catch(error => { desk.taken = new Map(); desk.phase = "idle"; this.report(accountId, error); });
       return;
     }
     // A turn that is summarizing or ending takes nothing: turnEnded and the end of compaction pump again.
@@ -287,11 +313,11 @@ export class AssistantService {
     const text = raw.replaceAll(MATERIALS, "input/manual/");
     for (const item of items) desk.taken.set(item.id, item);
     // The Expert's words also join the Assistant's history, so it knows what was said.
-    await desk.store.update(desk.sessionId, s => {
+    await desk.runtime.commit(desk.sessionId, () => desk.store.update(desk.sessionId, s => {
       for (const item of items) { const message: AgentMessage = { ...itemMessage(item), timestamp: Date.parse(item.at) }; s.messages.push(message); s.context.push(message); }
       const state = deskState(s);
       state.ingress = state.ingress.filter(entry => !items.some(item => item.id === entry.id));
-    });
+    }));
     for (const item of items) desk.taken.delete(item.id);
     const images = items.flatMap(item => item.images ?? []);
     for (const image of images) await workspace.store.put(interview.sessionId, image, (await desk.store.read(desk.sessionId, image)).bytes, { actor: "host", mimeType: imageMime(image) });
@@ -307,12 +333,12 @@ export class AssistantService {
     const relayFrom = state.interview?.taskId === task.id ? state.interview.relayFrom : voice.messages.length;
     const reply = finalText(voice.messages.slice(relayFrom));
     if (reply) {
-      await desk.store.update(desk.sessionId, s => {
+      await desk.runtime.commit(desk.sessionId, () => desk.store.update(desk.sessionId, s => {
         const message = relayedMessage(reply);
         s.messages.push(message); s.context.push(message);
         const current = deskState(s);
         if (current.interview?.taskId === task.id) current.interview.relayFrom = voice.messages.length;
-      });
+      }));
       const lastExpert = state.lastExpert;
       await this.deliver(desk, reply, lastExpert && isChannel(lastExpert.source) ? [{ id: "relay", at: lastExpert.at, source: lastExpert.source, text: "", ...(lastExpert.messageRef ? { messageRef: lastExpert.messageRef } : {}) }] : [{ id: "relay", at: new Date().toISOString(), source: "task", text: "" }]);
     }
@@ -578,18 +604,18 @@ export class AssistantService {
   // ── Studio and channel surfaces ───────────────────────────────────────
 
   /** What the chat shows: what the Expert said and what the Assistant said. System messages stay out. */
-  async view(accountId: string): Promise<{ messages: Array<{ id: string; role: "expert" | "assistant"; text: string; at: string; images?: string[] }>; tasks: AssistantTask[]; running: boolean; interviewing: boolean }> {
+  async view(accountId: string): Promise<{ messages: Array<{ id: string; role: "expert" | "assistant"; text: string; at: string; images?: string[]; attachments?: NonNullable<MessageOrigin["attachments"]> }>; tasks: AssistantTask[]; running: boolean; runId?: string; interviewing: boolean }> {
     const desk = await this.desk(accountId);
     const session = await desk.store.get(desk.sessionId);
-    type Line = { id: string; role: "expert" | "assistant"; text: string; at: string; images?: string[] };
+    type Line = { id: string; role: "expert" | "assistant"; text: string; at: string; images?: string[]; attachments?: NonNullable<MessageOrigin["attachments"]> };
     const messages = session.messages.flatMap((message, index): Line[] => {
       const at = new Date(message.timestamp ?? Date.now()).toISOString();
       if (message.role === "assistant") { const text = textOf(message).trim(); return text ? [{ id: `m${index + 1}`, role: "assistant", text, at }] : []; }
       const origin = originOf(message);
       if (origin?.kind !== "expert") return [];
-      return [{ id: origin.itemId, role: "expert", text: origin.text ?? "", at, ...(origin.images?.length ? { images: origin.images.map(file => path.basename(file)) } : {}) }];
+      return [{ id: origin.itemId, role: "expert", text: origin.text ?? "", at, ...(origin.images?.length ? { images: origin.images.map(file => path.basename(file)) } : {}), ...(origin.attachments?.length ? { attachments: origin.attachments } : {}) }];
     });
-    return { messages, tasks: await this.deps.tasks.open(accountId), running: desk.runtime.isRunning(desk.sessionId), interviewing: Boolean(deskState(session).interview) };
+    return { messages, tasks: await this.deps.tasks.open(accountId), running: desk.runtime.isRunning(desk.sessionId), runId: desk.runtime.runId(desk.sessionId), interviewing: Boolean(deskState(session).interview) };
   }
 
   /**
@@ -607,13 +633,21 @@ export class AssistantService {
       await this.ingest(accountId, { source, text: caption?.trim() ?? "", images: [file], ...origin });
       return { name };
     }
-    const safe = name.normalize("NFC").replace(/[\\/:\x00-\x1f]+/g, "-").replace(/^\.+/, "").slice(-120) || "file";
+    const safe = safeName(name);
     const converted = await convertUpload(safe, bytes).catch(error => { this.report(accountId, error); throw unreadableFile(); });
     if (!converted.bytes.toString().trim()) throw unreadableFile();
     const desk = await this.desk(accountId);
     await desk.store.put(desk.sessionId, `${MATERIALS}${converted.name}`, converted.bytes, { actor: "host", mimeType: converted.mimeType });
     await this.ingest(accountId, { source, text: `（传了一份资料：${converted.name}，已存到 ${MATERIALS}${converted.name}）`, ...origin });
     return { name: converted.name };
+  }
+
+  /** Where an upload for the Assistant goes: images where the model sees them, files among the Expert's materials. */
+  workshop(accountId: string): Workshop {
+    return {
+      files: { writeManual: async (file, bytes) => { const desk = await this.desk(accountId); await desk.store.put(desk.sessionId, file, bytes, { actor: "host", mimeType: imageMime(file) ?? "text/markdown" }); } },
+      place: asset => asset.record.kind === "audio" ? "" : asset.record.kind === "image" ? `input/images/${asset.id}${IMAGE_EXTENSION[asset.derivative("resized")?.mime ?? asset.record.mime] ?? ".jpg"}` : `${MATERIALS}${asset.id.slice(0, 8)}-${safeName(asset.record.name)}.md`,
+    };
   }
 
   async image(accountId: string, file: string): Promise<Buffer> {
@@ -670,9 +704,10 @@ export class AssistantService {
       ...this.deps.runtime,
       env: { ...this.deps.env, HATCH_FACTORY_LLM_PROFILE: ASSISTANT_PROFILE },
       extraTools: async target => target.role === "assistant" ? this.tools(accountId, desk) : [],
+      ...(this.deps.journal ? { journal: this.deps.journal(event => event.sessionId === session.id ? `assistant:${accountId}` : undefined) } : {}),
       liveState: async id => id === desk.sessionId ? this.liveState(accountId).catch(error => { this.report(accountId, error); return "<当前状态>\n这次没有读到当前状态，需要时用 list_agents 和 list_tasks 查。\n</当前状态>"; }) : undefined,
     });
-    const desk: Desk = { accountId, store, runtime, sessionId: session.id, phase: "idle", taken: new Map(), turnStart: 0, createdTasks: new Set() };
+    const desk: Desk = { accountId, store, runtime, sessionId: session.id, phase: "idle", taken: new Map(), turnStart: 0, createdTasks: new Set(), pumps: Promise.resolve() };
     runtime.events.on("event", (event: { sessionId?: string; type?: string }) => {
       if (!event.sessionId || !event.type) return;
       if (event.sessionId === desk.sessionId) {
@@ -797,6 +832,7 @@ function deskState(session: Session): AssistantDeskState {
   return session.assistantDesk;
 }
 
+type Incoming = Omit<IngressItem, "id" | "at"> & { id?: string };
 type ExpertSource = "web" | ChannelKind;
 const isChannel = (source: string): source is ChannelKind => (CHANNEL_KINDS as readonly string[]).includes(source);
 const fromExpert = (item: Pick<IngressItem, "source">) => item.source === "web" || isChannel(item.source);
@@ -810,7 +846,7 @@ function render(item: IngressItem): string {
 }
 
 function itemMessage(item: IngressItem): AgentMessage {
-  return userMessage(render(item), item.images, fromExpert(item) ? { kind: "expert", itemId: item.id, text: item.text, images: item.images } : { kind: "system", itemId: item.id });
+  return userMessage(render(item), item.images, fromExpert(item) ? { kind: "expert", itemId: item.id, text: item.text, images: item.images, ...(item.attachments?.length ? { attachments: item.attachments } : {}) } : { kind: "system", itemId: item.id });
 }
 
 const originOf = (message: AgentMessage) => (message as { origin?: MessageOrigin }).origin;
@@ -850,6 +886,8 @@ function relayedMessage(text: string): AgentMessage {
 async function outputText(store: WorkbenchStore, sessionId: string, file: string): Promise<string> {
   try { return (await store.read(sessionId, file)).bytes.toString("utf8"); } catch { return ""; }
 }
+
+const safeName = (name: string): string => name.normalize("NFC").replace(/[\\/:\x00-\x1f]+/g, "-").replace(/^\.+/, "").slice(-120) || "file";
 
 function excerpt(text: string): string { return text.length > 1500 ? `${text.slice(0, 1500).trimEnd()}…` : text; }
 function lease(): string { return new Date(Date.now() + WORKER_LEASE_MS).toISOString(); }

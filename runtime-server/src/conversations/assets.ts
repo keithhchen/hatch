@@ -1,4 +1,4 @@
-import type { AssetScope } from "../assets/domain.js";
+import type { Asset, AssetScope } from "../assets/domain.js";
 import { ConversationError, type ReadyAsset } from "./conversation.js";
 import type { ContentPart } from "../surfaces/contract.js";
 
@@ -8,9 +8,17 @@ export interface AssetResolver {
   resolve(scope: AssetScope, assetId: string): Promise<ReadyAsset | "pending" | undefined>;
   /** Puts what the model reads where it reads it. Runs before the message is delivered, and is safe to repeat. */
   stage(scope: AssetScope, assets: readonly ReadyAsset[]): Promise<void>;
-  /** Binds the assets to the message that was accepted. Safe to repeat for the same message. */
+  /**
+   * Binds the assets to the message about to be delivered, all or none: an asset that belongs to another message
+   * refuses with `asset_already_used`, so of two sends of one asset exactly one gets through. Safe to repeat for the same message.
+   */
   attach(scope: AssetScope, assets: readonly ReadyAsset[], messageId: string): Promise<void>;
+  /** Frees the assets of a message that was not delivered, so they can be sent again. */
+  release(scope: AssetScope, assets: readonly ReadyAsset[], messageId: string): Promise<void>;
 }
+
+/** Where a conversation keeps the files its model reads, and the path each asset gets there. Nothing for a voice message. */
+export type Workshop = { files: { writeManual(path: string, bytes: Buffer): Promise<void> }; place(asset: Asset): string };
 
 export type UploadedAsset = { asset_id: string; kind: ReadyAsset["kind"]; name: string; bytes: number; state: "ready" | "processing" };
 

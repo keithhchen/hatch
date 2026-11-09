@@ -31,7 +31,7 @@ export type ConversationRouteDeps = StudioDeps & {
 type Action = "messages" | "events" | "stop" | "snapshot" | "assets";
 
 const WORKERS_ROUTE = /^\/v1\/creator\/products\/([^/]+)\/workers(?:\/([^/]+)\/(messages|events|stop|snapshot|assets))?$/;
-const ASSISTANT_ROUTE = /^\/v1\/creator\/assistant\/conversation\/(messages|events|stop|snapshot)$/;
+const ASSISTANT_ROUTE = /^\/v1\/creator\/assistant\/conversation\/(messages|events|stop|snapshot|assets)$/;
 const METHODS: Record<Action, string[]> = { messages: ["GET", "POST"], events: ["GET"], stop: ["POST"], snapshot: ["GET"], assets: ["POST"] };
 
 function clientOf(body: Record<string, unknown>): ClientAttributes {

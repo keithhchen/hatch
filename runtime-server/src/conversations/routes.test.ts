@@ -68,15 +68,20 @@ class FakeAssistant implements AssistantHost {
   events = new EventEmitter();
   lines: Array<{ id: string; role: "expert" | "assistant"; text: string; at: string }> = [{ id: "m1", role: "assistant", text: "Hello", at: "2026-01-01T00:00:00.000Z" }];
   running = false;
-  ingested: Array<{ id: string; source: string; text: string }> = [];
+  ingested: Array<{ id: string; source: string; text: string; images?: string[]; attachments?: Array<{ type: string; name: string; assetId: string }> }> = [];
   stopped = 0;
-  view = async () => ({ messages: this.lines, running: this.running });
-  ingest = async (_account: string, item: { id: string; source: "web"; text: string }) => {
+  /** Looks at the world the moment a message is delivered. */
+  onDelivery: () => void = () => undefined;
+  view = async () => ({ messages: this.lines, running: this.running, ...(this.running ? { runId: "arun-1" } : {}) });
+  submit = async (_account: string, item: { id: string; source: "web"; text: string; images?: string[]; attachments?: Array<{ type: "image" | "file" | "audio"; name: string; assetId: string }> }) => {
+    this.onDelivery();
     this.ingested.push(item);
     this.running = true;
     setTimeout(() => { this.lines.push({ id: item.id, role: "expert", text: item.text, at: "t" }, { id: "m9", role: "assistant", text: "Noted.", at: "t" }); this.running = false; }, 20);
-    return true;
+    return { runId: "arun-1" };
   };
+  /** The desk here is a fake and ignores it. */
+  workshop = () => ({ files: { writeManual: async () => undefined }, place: () => "" });
   stop = async () => { this.stopped++; };
 }
 
@@ -97,6 +102,7 @@ class FakeDesk implements AssetDesk {
   };
   stage = async (_scope: unknown, assets: readonly ReadyAsset[]) => { for (const asset of assets) { this.staged.push(asset.path); this.files.set(asset.path, Buffer.from("bytes")); } };
   attach = async (_scope: unknown, assets: readonly ReadyAsset[], messageId: string) => { this.attached.push({ ids: assets.map(asset => asset.id), messageId }); };
+  release = async (_scope: unknown, assets: readonly ReadyAsset[], messageId: string) => { this.attached = this.attached.filter(entry => entry.messageId !== messageId || !assets.some(asset => entry.ids.includes(asset.id))); };
   upload = async (_scope: unknown, input: { name: string; bytes: Buffer }) => {
     if (input.name === "bad.exe") throw new ConversationError(415, "unsupported_type", "Not a supported file type.");
     this.uploads.push({ name: input.name, bytes: input.bytes.length });
@@ -268,6 +274,7 @@ test("assistant: same shape and verbs, over the existing Assistant", async () =>
     const body = await sent.json() as { message: { id: string; role: string }; reply: { text: string }; status: string };
     assert.equal(body.reply.text, "Noted.");
     assert.equal(body.message.role, "user");
+    assert.equal((body as unknown as { run_id: string }).run_id, "arun-1", "the Assistant's turn has a Run of its own");
     assert.equal(h.assistant.ingested[0]!.id, body.message.id);
     assert.equal(h.assistant.ingested[0]!.source, "web");
     const after = await (await h.call(`${path}/messages?after=m1`)).json() as { messages: Array<{ role: string; text: string }> };
@@ -430,12 +437,22 @@ test("upload: the body is the file, the name is a query parameter; refusals say 
   } finally { await h.close(); }
 });
 
-test("the Assistant takes no attachments yet: refused, not dropped", async () => {
+test("the Assistant takes attachments like a worker: upload, bound to the message before delivery, run_id returned", async () => {
   const h = await harness();
   try {
-    const response = await h.call("/v1/creator/assistant/conversation/messages", { method: "POST", body: { content: [{ type: "image", assetId: "a-img" }] } });
-    assert.equal(response.status, 501);
-    assert.equal(((await response.json()) as { error: { code: string } }).error.code, "attachments_unavailable");
-    assert.equal(h.assistant.ingested.length, 0);
+    const path = "/v1/creator/assistant/conversation";
+    const upload = await fetch(`${h.base}${path}/assets?name=notes.txt`, { method: "POST", headers: { authorization: "Bearer owner" }, body: "hello" });
+    assert.deepEqual([upload.status, ((await upload.json()) as { asset_id: string }).asset_id], [201, "a-new"]);
+    assert.equal((await fetch(`${h.base}${path}/assets?name=a.txt`, { method: "POST", body: "x" })).status, 401);
+    let boundAtDelivery: unknown;
+    h.assistant.onDelivery = () => { boundAtDelivery = [...h.desk.attached]; };
+    const sent = await (await h.call(`${path}/messages`, { method: "POST", body: { content: [{ type: "text", text: "see this" }, { type: "image", assetId: "a-img" }, { type: "file", assetId: "a-doc" }] } })).json() as { run_id: string; message: { id: string; attachments: unknown[] } };
+    assert.equal(sent.run_id, "arun-1");
+    assert.deepEqual(boundAtDelivery, [{ ids: ["a-img", "a-doc"], messageId: sent.message.id }], "bound before the Assistant sees the message, to the id the history shows");
+    assert.deepEqual(sent.message.attachments, [{ type: "image", name: "chart.png", asset_id: "a-img" }, { type: "file", name: "notes.pdf", asset_id: "a-doc" }]);
+    const item = h.assistant.ingested[0]!;
+    assert.deepEqual(item.images, [IMAGE.path]);
+    assert.match(item.text, /^see this\n\[file: notes\.pdf/);
+    assert.deepEqual(item.attachments, [{ type: "image", name: "chart.png", assetId: "a-img" }, { type: "file", name: "notes.pdf", assetId: "a-doc" }]);
   } finally { await h.close(); }
 });

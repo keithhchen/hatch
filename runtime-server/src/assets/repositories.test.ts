@@ -33,6 +33,14 @@ async function contract(repo: AssetRepository) {
   assert.equal(attachResults.filter(r => r === "conflict").length, 2);
   assert.equal((await repo.listAttached(scopeA)).length, 1);
   assert.equal((await repo.listAttached(scopeB)).length, 0);
+  const bound = (await repo.listAttached(scopeA))[0]!.messageId!;
+  const other = bound === "m1" ? "m2" : "m1";
+  await repo.release(scopeA, winner.id, other);
+  assert.equal((await repo.get(scopeA, winner.id))!.messageId, bound, "release frees only the message that holds it");
+  await repo.release(scopeA, winner.id, bound);
+  assert.equal((await repo.get(scopeA, winner.id))!.messageId, undefined);
+  assert.equal((await repo.listAttached(scopeA)).length, 0);
+  assert.equal(await code(repo.attach(scopeA, winner.id, other)), "ok", "a released asset can be sent again");
   const pending = (await repo.insertIfAbsent(fresh("s2"))).asset;
   assert.equal(await code(repo.attach(scopeA, pending.id, "m1")), "not_ready");
 }
