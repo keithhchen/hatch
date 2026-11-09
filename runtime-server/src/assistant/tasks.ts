@@ -1,3 +1,4 @@
+import type { ChannelKind } from "../channels/types.js";
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 
@@ -6,7 +7,7 @@ export type TaskKind = typeof TASK_KINDS[number];
 export type TaskStatus = "working" | "needs_you" | "done";
 export type TaskNeeds = "answer" | "review" | "blocked";
 /** Where a task came from and where its replies go. */
-export type TaskOrigin = { source: "web" | "telegram" | "line" | "lark" | "imessage" | "tick" | "consumer" };
+export type TaskOrigin = { source: "web" | ChannelKind | "tick" | "consumer" };
 /** The workbench session executing the task. Product sessions carry productId; Assistant-workspace sessions do not. */
 export type TaskSession = { scope: "product" | "assistant"; sessionId: string };
 

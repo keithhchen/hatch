@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import type { ChannelAddress, ChannelCapabilities, DeliveryFailure } from "../surfaces/contract.js";
 
-export const CHANNEL_KINDS = ["telegram", "line", "lark", "imessage"] as const;
+export const CHANNEL_KINDS = ["telegram", "line", "lark", "feishu", "wecom", "wechatkf", "imessage"] as const;
 export type ChannelKind = typeof CHANNEL_KINDS[number];
-export const CHANNEL_LABELS: Record<ChannelKind, string> = { telegram: "Telegram", line: "LINE", lark: "Lark", imessage: "iMessage" };
+export const CHANNEL_LABELS: Record<ChannelKind, string> = { telegram: "Telegram", line: "LINE", lark: "Lark", feishu: "飞书", wecom: "企业微信", wechatkf: "微信客服", imessage: "iMessage" };
 export const isChannelKind = (value: string): value is ChannelKind => (CHANNEL_KINDS as readonly string[]).includes(value);
 
 export type TaskButtonAction = "approve" | "decline";
@@ -61,9 +61,12 @@ export interface ChannelAdapter {
   readonly maxFileBytes: number;
   capabilities(): ChannelCapabilities;
   available(): boolean;
-  verify?(raw: Buffer, headers: Record<string, string | string[] | undefined>): boolean;
-  /** respond is the body the platform expects, such as a URL challenge. */
-  parse?(raw: Buffer): { events: InboundEvent[]; respond?: unknown };
+  /** `query` is the URL's query string, where some platforms put the signature. */
+  verify?(raw: Buffer, headers: Record<string, string | string[] | undefined>, query?: URLSearchParams): boolean;
+  /** respond is the body the platform expects, such as a URL challenge. A platform that only notifies pulls its messages here. */
+  parse?(raw: Buffer): { events: InboundEvent[]; respond?: unknown } | Promise<{ events: InboundEvent[]; respond?: unknown }>;
+  /** Answers a GET the platform makes to prove the URL is ours: the plain text to return, or undefined to refuse. */
+  challenge?(query: URLSearchParams): string | undefined;
   listen?(onEvents: (events: InboundEvent[]) => Promise<void>, signal: AbortSignal): Promise<void>;
   /** `key` makes a repeated send a no-op on platforms whose capabilities say idempotentSend. A failure throws ChannelSendError. */
   send(to: PlatformAddress, message: OutboundMessage, key: string): Promise<void>;
