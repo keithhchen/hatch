@@ -60,7 +60,8 @@
 
     # Runtime accounting is an internal service-to-service API. Runtime calls
     # Dashboard on hatch_internal; never expose these commands at the edge.
-    @internal_service_api path /v1/internal/access* /v1/internal/commerce* /v1/internal/deployments*
+    # Chat's service API (/v1/service/chat) is the Registry's door into the Runtime; it too stays off the edge.
+    @internal_service_api path /v1/internal/access* /v1/internal/commerce* /v1/internal/deployments* /v1/service/*
     respond @internal_service_api 404
 
     # Packaged Desktop uses an opaque Registry bearer (issued through browser

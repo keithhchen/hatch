@@ -25,7 +25,9 @@ export class AssetPipeline implements ReadyAssetResolver {
     private readonly repository: AssetRepository,
     private readonly blobs: AssetBlobs,
     private readonly moderator: ContentModerator,
-    processors: AssetProcessor[]
+    processors: AssetProcessor[],
+    /** An asset still `processing` after `leaseMs` was abandoned by a crash: the next upload of its bytes takes over. */
+    private readonly lease: { leaseMs: number; now: () => Date } = { leaseMs: 10 * 60_000, now: () => new Date() }
   ) {
     this.processors = new Map(processors.map(p => [p.kind, p]));
   }
@@ -39,7 +41,7 @@ export class AssetPipeline implements ReadyAssetResolver {
 
     const sha256 = createHash("sha256").update(input.bytes).digest("hex");
     const { asset, created } = await this.repository.insertIfAbsent(Asset.received({ scope, sha256, kind: sniffed.kind, mime: sniffed.mime, name, bytes: input.bytes.length }));
-    if (!created) return asset;
+    if (!created) return this.abandoned(asset) ? this.reclaim(asset, scope, input) : asset;
 
     const prefix = `${scopeKey(scope)}/${sha256}`;
     try {
@@ -59,6 +61,16 @@ export class AssetPipeline implements ReadyAssetResolver {
     }
   }
 
+  private abandoned(asset: Asset): boolean {
+    return asset.state === "processing" && this.lease.now().getTime() - Date.parse(asset.record.createdAt) > this.lease.leaseMs;
+  }
+
+  /** Fails the abandoned asset, which frees its bytes to be accepted again. Whoever fails it first wins; the others find the result. */
+  private async reclaim(asset: Asset, scope: AssetScope, input: { name: string; bytes: Buffer }): Promise<Asset> {
+    await this.repository.transition("processing", asset.failed({ code: "processing_failed", message: "Processing was interrupted" }));
+    return this.accept(scope, input);
+  }
+
   async resolveReadyAsset(scope: AssetScope, assetId: string): Promise<Asset> {
     const asset = await this.repository.get(scope, assetId);
     if (!asset) throw new AssetError("not_found", `Asset ${assetId} does not exist`);
@@ -66,9 +78,9 @@ export class AssetPipeline implements ReadyAssetResolver {
     return asset;
   }
 
-  /** A message submission binds its ready assets; this is the only way an asset gains a message id. */
-  attach(scope: AssetScope, assetId: string, messageId: string): Promise<Asset> {
-    return this.repository.attach(scope, assetId, messageId);
+  /** A message submission binds its ready assets; this is the only way an asset gains a message id. `tx` binds in the transaction that accepts the message. */
+  attach(scope: AssetScope, assetId: string, messageId: string, tx?: unknown): Promise<Asset> {
+    return this.repository.on(tx).attach(scope, assetId, messageId);
   }
 
   /** Undoes `attach` for a message that was not delivered, so its assets can be sent again. */

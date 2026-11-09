@@ -69,6 +69,7 @@ test("after the reply, in the background: the summary keeps paths and identifier
   const history = await store.readConversation(conversationId);
   assert.match(history[0]!.content!, new RegExp(`out/report\\.md.*88231045.*${uuid}`));
   assert.equal(model.inputs.length, 2, "one retry restored what the model first dropped");
+  assert.ok(!JSON.stringify([model.inputs, history]).includes("system-reminder"), "a reminder is in neither what is summarized nor what is kept");
   assert.deepEqual(history.slice(1), [{ role: "assistant", content: "Done: the report is written." }]);
   const event = (await store.readEvents()).find((row) => row.type === "conversation.compacted");
   assert.ok(event?.type === "conversation.compacted" && event.compaction_id?.startsWith("cmp_") && event.stage === "summary");

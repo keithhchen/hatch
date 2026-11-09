@@ -1,5 +1,5 @@
 import type { ConversationMessage } from "../protocol.js";
-import type { ConversationRecord, ConversationRepository, ConversationRunRecord } from "../conversationRepository.js";
+import type { AlsoCommit, ConversationRecord, ConversationRepository, ConversationRunRecord } from "../conversationRepository.js";
 import type { ClientAttributes, Principal } from "../surfaces/contract.js";
 import type { RunEventHub } from "./runEventHub.js";
 import type { RunSupervisor } from "./runSupervisor.js";
@@ -26,6 +26,8 @@ export type SubmitCommand<Scope> = {
   clientMessageId: string;
   /** The canonical user message, made only when this client key is new: a retry needs no asset work. */
   message: () => Promise<ConversationMessage>;
+  /** Commits with the message, when it is new: binding its assets. */
+  bind?: AlsoCommit;
   digest: string;
   runId: string;
   corpusDigest: string;
@@ -101,7 +103,7 @@ export class ChatService<Scope> {
           executorId: supervisor.executorId
         },
         canonicalUser: known ? { role: "user", content: "" } : await command.message()
-      });
+      }, known ? undefined : command.bind);
       const outcome = accepted.created ? "started" : accepted.steered ? "steered" : "replayed";
       if (outcome === "started" && joining) {
         // The Run we meant to join ended first, so this one starts a Run after all: admit it now.

@@ -13,7 +13,6 @@ import type { ConversationMessage } from "../protocol.js";
 import { RuntimeStore, localRuntimeAuthority } from "../store.js";
 import type { Connection } from "../surfaces/contract.js";
 import { ChatAssets } from "./assets.js";
-import { SentMessageLimits } from "./contactBinding.js";
 import type { ChatGateway } from "./gateway.js";
 
 export const productId = "33333333-3333-4333-8333-333333333333";
@@ -22,6 +21,9 @@ export const alice = { kind: "contact" as const, connectionId: "conn-1", contact
 export const bob = { ...alice, contactId: "bob" };
 export const thread = { kind: "thread" as const, connectionId: "conn-1", threadId: "t1" };
 export const dm = { client: "dm" as const };
+export const owner = { kind: "account" as const, accountId: creatorId };
+export const stranger = { kind: "account" as const, accountId: "44444444-4444-4444-8444-444444444444" };
+export const selfThread = { kind: "thread" as const, connectionId: "conn-self", threadId: "t1" };
 export const text = (value: string) => [{ type: "text" as const, text: value }];
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -50,10 +52,15 @@ export async function gatewayFixture(options: { noServiceToken?: boolean; localT
       tools: options.localTools ? [{ id: "local", kind: "local_harness" }] : [{ id: "web", kind: "http_function" }]
     } as unknown as AgentCorpus
   };
-  const connections = new Map<string, Connection>([["conn-1", {
-    id: "conn-1", ownerAccountId: creatorId, channel: "instagram", client: "dm",
-    target: { kind: "product", productId }, audience: "public", taskSpecific: false, state: "active"
-  }]]);
+  const connection = (id: string, ownerAccountId: string, audience: Connection["audience"]): [string, Connection] => [id, {
+    id, ownerAccountId, channel: "instagram", client: audience === "self" ? "im" : "dm",
+    target: { kind: "product", productId }, audience, taskSpecific: false, state: "active"
+  }];
+  const connections = new Map<string, Connection>([
+    connection("conn-1", creatorId, "public"),
+    connection("conn-self", creatorId, "self"),
+    connection("conn-self-other", stranger.accountId, "self")
+  ]);
   const kit = await harness(options.moderator);
   const chatAssets = options.assets ? new ChatAssets({ pipeline: kit.pipeline, blobs: kit.blobs, files: new AttachmentFiles(kit.repository, kit.blobs) }) : undefined;
   const seen: ConversationMessage[][] = [];
@@ -64,7 +71,8 @@ export async function gatewayFixture(options: { noServiceToken?: boolean; localT
     connectionDirectory: { get: async (id) => connections.get(id) },
     ...(chatAssets ? { chatAssets } : {}),
     ...(options.noServiceToken ? {} : { chatServiceToken: "service-secret" }),
-    ...(options.maxMessages ? { principalLimits: new SentMessageLimits(repository, options.maxMessages) } : {}),
+    // The Runtime's own contact limit, not one the test supplies.
+    ...(options.maxMessages ? { maxContactMessages: options.maxMessages } : {}),
     createRuntime: () => options.runtime ?? ({ async *run(input, ctx) {
       seen.push(ctx.messages);
       yield { type: "assistant.delta" as const, run_id: input.run_id, delta: { kind: "text" as const, content: `echo: ${input.message.content}` } };
@@ -72,7 +80,7 @@ export async function gatewayFixture(options: { noServiceToken?: boolean; localT
     } })
   });
   await new Promise<void>((resolve) => (runtime.server as http.Server).listen(0, "127.0.0.1", () => resolve()));
-  return { runtime, repository, kit, seen, port: ((runtime.server as http.Server).address() as { port: number }).port };
+  return { runtime, repository, store, kit, seen, port: ((runtime.server as http.Server).address() as { port: number }).port };
 }
 
 export async function withFixture(options: Parameters<typeof gatewayFixture>[0], body: (fixture: Fixture) => Promise<void>) {

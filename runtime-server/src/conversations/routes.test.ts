@@ -37,6 +37,8 @@ class FakeWorkspace implements WorkerWorkspace {
   events = new EventEmitter();
   private definitions = initialAgentDefinitions();
   manual = new Map<string, Buffer>();
+  /** Pending replies, so a test that ends first leaves no timer behind. */
+  replies = new Set<NodeJS.Timeout>();
   store = {
     backend: { writeManual: async (name: string, bytes: Buffer) => { this.manual.set(name, bytes); } },
     list: async () => this.sessions,
@@ -53,7 +55,7 @@ class FakeWorkspace implements WorkerWorkspace {
         this.runs.set(id, `run-${this.started.length + 1}`);
         this.started.push({ id, text: (message as unknown as { origin: { text: string } }).origin.text });
         target.status = "running";
-        setTimeout(() => { target.messages.push(assistantLine(this.reply)); target.status = "idle"; this.runs.delete(id); this.events.emit("event", { sessionId: id, type: "run_end", status: "completed" }); }, this.replyAfterMs);
+        this.replies.add(setTimeout(() => { target.messages.push(assistantLine(this.reply)); target.status = "idle"; this.runs.delete(id); this.events.emit("event", { sessionId: id, type: "run_end", status: "completed" }); }, this.replyAfterMs));
       }
       return { queued, runId: this.runs.get(id)! };
     },
@@ -135,7 +137,7 @@ async function harness(options: { assistant?: boolean } = { assistant: true }) {
     headers: { ...(init.token === null ? {} : { authorization: `Bearer ${init.token ?? "owner"}` }), "content-type": "application/json" },
     ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
   });
-  return { workspace, assistant, desk, call, base, close: () => { server.closeAllConnections(); return new Promise<void>(resolve => server.close(() => resolve())); } };
+  return { workspace, assistant, desk, call, base, close: () => { workspace.replies.forEach(clearTimeout); server.closeAllConnections(); return new Promise<void>(resolve => server.close(() => resolve())); } };
 }
 const root = `/v1/creator/products/${PRODUCT}/workers`;
 

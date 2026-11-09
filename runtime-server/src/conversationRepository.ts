@@ -171,6 +171,11 @@ export type AcceptSubmissionInput = {
   run: CreateRunInput;
   canonicalUser: ConversationMessage;
 };
+/**
+ * Work that must commit with the accepted message, or not at all, such as binding the message's assets. It runs only for a
+ * message that is new, inside the transaction that accepts it (`tx`), and a failure refuses the message.
+ */
+export type AlsoCommit = (tx?: PostgresQueryExecutor) => Promise<void>;
 /** `created`: a new Run started. `steered`: the message joined the active Run. Neither: an idempotent replay. */
 export type AcceptedSubmission = { created: boolean; steered?: boolean; run: ConversationRunRecord; receipt: SubmissionReceipt };
 
@@ -217,7 +222,7 @@ export interface ConversationRepository {
   }): Promise<ConversationListPage>;
   updateConversation(id: string, input: UpdateConversationInput): Promise<ConversationRecord>;
   createRun(input: CreateRunInput): Promise<{ run: ConversationRunRecord; created: boolean }>;
-  acceptSubmission(input: AcceptSubmissionInput): Promise<AcceptedSubmission>;
+  acceptSubmission(input: AcceptSubmissionInput, alsoCommit?: AlsoCommit): Promise<AcceptedSubmission>;
   getRun(conversationId: string, runId: string): Promise<ConversationRunRecord | undefined>;
   /** A Run by its id alone, for callers that know no conversation, such as the channel layer. */
   findRun(runId: string): Promise<ConversationRunRecord | undefined>;
@@ -481,7 +486,7 @@ export class InMemoryConversationRepository implements ConversationRepository {
     return this.write(() => this.createRunUnsafe(input));
   }
 
-  async acceptSubmission(input: AcceptSubmissionInput): Promise<AcceptedSubmission> {
+  async acceptSubmission(input: AcceptSubmissionInput, alsoCommit?: AlsoCommit): Promise<AcceptedSubmission> {
     input = structuredClone(input);
     return this.write(async () => {
       const conversation = this.conversations.get(input.run.conversationId);
@@ -501,12 +506,14 @@ export class InMemoryConversationRepository implements ConversationRepository {
       }
       const active = [...this.runs.values()].find((row) => row.conversationId === input.run.conversationId && isActiveRun(row.status));
       if (active) {
+        await alsoCommit?.();
         const run = { ...active, steeredCount: active.steeredCount + 1 };
         this.runs.set(run.id, run);
         const event = this.appendEventUnsafe({ conversationId: run.conversationId, runId: run.id, type: "message.created",
           payload: steeredPayload(key, input.run.inputDigest, input.canonicalUser) });
         return { created: false, steered: true, run: cloneRun(run), receipt: { run_id: run.id, client_message_id: key, accepted_at: event.createdAt } };
       }
+      await alsoCommit?.();
       const { run } = await this.createRunUnsafe(input.run);
       this.pendingStoreEvents = submissionEvents(input, run.createdAt);
       this.appendEventUnsafe({ conversationId: run.conversationId, runId: run.id, type: "message.created",
@@ -1074,16 +1081,16 @@ export class PostgresConversationRepository implements ConversationRepository {
     return repository;
   }
 
-  async acceptSubmission(input: AcceptSubmissionInput): Promise<AcceptedSubmission> {
+  async acceptSubmission(input: AcceptSubmissionInput, alsoCommit?: AlsoCommit): Promise<AcceptedSubmission> {
     if (!this.submissionStore) throw new Error("Atomic submission store is not configured");
     await this.initialize();
     // Steer-or-start: join the active Run, or start one. Losing the race to start
     // means a Run now exists, so the next pass steers it.
     for (let attempt = 0; ; attempt++) {
-      const joined = await this.steerOrReplay(input);
+      const joined = await this.steerOrReplay(input, alsoCommit);
       if (joined) return joined;
       try {
-        return await this.submissionStore.acceptSubmission(input);
+        return await this.submissionStore.acceptSubmission(input, alsoCommit);
       } catch (error) {
         // Inside the submission transaction a unique violation (the single-active-run index) surfaces as run_id_conflict.
         const retry = error instanceof ConversationRepositoryError ? error.code === "conversation_busy" || error.code === "run_id_conflict" : isUniqueViolation(error);
@@ -1093,7 +1100,7 @@ export class PostgresConversationRepository implements ConversationRepository {
   }
 
   /** One transaction under the conversation row lock; undefined means no Run is active to join. */
-  private async steerOrReplay(input: AcceptSubmissionInput): Promise<AcceptedSubmission | undefined> {
+  private async steerOrReplay(input: AcceptSubmissionInput, alsoCommit?: AlsoCommit): Promise<AcceptedSubmission | undefined> {
     // Nothing to join and no earlier steer under this key: starting is the submission store's one transaction.
     const probe = await this.pool.query<{ joinable: boolean }>(`
       SELECT EXISTS (SELECT 1 FROM hatch_conversation_runs WHERE conversation_id = $1 AND status IN ('queued', 'running', 'waiting_for_tool', 'compacting'))
@@ -1126,6 +1133,7 @@ export class PostgresConversationRepository implements ConversationRepository {
         RETURNING *
       `, [input.run.conversationId]);
       if (!active.rows[0]) return undefined;
+      await alsoCommit?.(repository.pool);
       const run = runFromRow(active.rows[0]);
       const event = await repository.appendEvent({ conversationId: run.conversationId, runId: run.id, type: "message.created",
         payload: steeredPayload(key, input.run.inputDigest, input.canonicalUser) });
