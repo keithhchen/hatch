@@ -11,8 +11,8 @@ import { PostgresRateLimiter, type RateLimiter } from "./rateLimiter.js";
 import { ChannelRouter } from "./router.js";
 import { CHANNEL_KINDS, type ChannelAdapter, type ChannelKind, type InboundEvent, type PullNotice } from "./types.js";
 
-/** Long enough for a file download to finish; a crashed process frees the event after this. */
-const INBOX_LEASE_MS = 3 * 60_000;
+/** A crashed process frees its event after this; a live one renews the lease every third of it while it works. */
+const INBOX_LEASE_MS = 30_000;
 const INBOX_ATTEMPTS = 5;
 const COMPACTING = "正在整理对话，稍等一下。\nTidying up our conversation, one moment.";
 
@@ -97,10 +97,11 @@ export class ChannelService implements AssistantChannels {
   }
 
   private async process(item: InboxItem): Promise<void> {
+    const heartbeat = setInterval(() => void this.inbox.extend(item.id, INBOX_LEASE_MS, this.deps.now?.()).catch(this.report), INBOX_LEASE_MS / 3);
     try { await this.inbox.complete(item.id, await this.router.route(item)); } catch (error) {
       await this.inbox.retry(item.id, error instanceof Error ? error.message : String(error), backoffMs(item.attempts), INBOX_ATTEMPTS, this.deps.now?.());
       this.report(error);
-    }
+    } finally { clearInterval(heartbeat); }
   }
 
   private report = (error: unknown): void => this.deps.onError ? this.deps.onError(error) : console.error("[channels]", error instanceof Error ? error.message : error);

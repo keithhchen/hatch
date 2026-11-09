@@ -83,15 +83,14 @@ class AnonymousIsolation extends Scenario {
     const runs = (await world.view.allRuns()).length - before;
     rec.measure("unknown_sender_runs_created", runs);
     rec.check("a sender the Connection never met gets no Run", runs === 0, { reply });
+    // The shared bot reaches a public Connection by its deep link: t.me/<bot>?start=<code> arrives as `/start <code>`.
+    await stranger.say(`/start ${await stack.startCode(world.connection)}`);
+    await stranger.replies(1);
     const metHere = await world.directory.contactId(stranger.senderId);
-    rec.check("`public` takes anyone: a first-time sender becomes a contact", Boolean(metHere), { reply });
-    if (!metHere) rec.defect({
-      title: "A `public` Connection on the shared Telegram bot cannot take anyone: unknown senders are told to connect from Studio",
-      severity: "medium",
-      expected: "Spec: `public` takes anyone as a contact (router.ts meets an unknown sender on a public Connection).",
-      actual: `A first-time sender on a public Product Connection received "${reply}" and no identity was created: PostgresConnections.resolveConnection returns undefined for an empty scope (the shared bot's scope), so ChannelRouter never reaches connections.meet(). Public contacts only work where the platform has a tenant scope.`,
-      repro: "Insert a public Product Connection, post a Telegram webhook from a sender id that was never admitted; observe the 'please connect from Hatch Studio' reply and zero hatch_channel_identities rows."
-    });
+    rec.check("`public` takes anyone who follows its deep link: the sender becomes a contact", Boolean(metHere), { replies: stranger.texts() });
+    await stranger.say("Hello again, anyone there?");
+    const answered = !/请先从/.test((await stranger.replies(1))[0] ?? "");
+    rec.check("a contact met by the deep link is answered by the Product on later messages", answered, {});
 
     // Upload from a contact: the Attachments path.
     const contact = await world.contact();

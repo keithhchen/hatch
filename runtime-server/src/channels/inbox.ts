@@ -31,6 +31,8 @@ export interface Inbox {
   cursor(channel: ChannelKind, scope: string, key: string): Promise<string | undefined>;
   /** Leases the next unprocessed event of each thread. Events of one thread are handed out in arrival order, one at a time. */
   claim(limit: number, leaseMs: number, now?: Date): Promise<InboxItem[]>;
+  /** The claimant is alive: pushes its lease out, so a dead one is noticed after a short lease however long processing takes. */
+  extend(id: string, leaseMs: number, now?: Date): Promise<void>;
   complete(id: string, outcome: { connectionId?: string; runId?: string; replied?: boolean }): Promise<void>;
   /** Releases the lease after `delayMs`; after `maxAttempts` the event is given up and kept as failed. */
   retry(id: string, error: string, delayMs: number, maxAttempts: number, now?: Date): Promise<"pending" | "failed">;
@@ -128,6 +130,10 @@ export class PostgresInbox implements Inbox {
       UPDATE hatch_channel_inbox i SET lease_until = $3, attempts = i.attempts + 1 FROM due WHERE i.id = due.id RETURNING i.*`,
     [now, limit, new Date(now.getTime() + leaseMs)])).rows;
     return rows.sort((a, b) => Number(a.seq) - Number(b.seq)).map(itemOf);
+  }
+
+  async extend(id: string, leaseMs: number, now = new Date()): Promise<void> {
+    await this.pool.query("UPDATE hatch_channel_inbox SET lease_until = $2 WHERE id = $1 AND state = 'pending'", [id, new Date(now.getTime() + leaseMs)]);
   }
 
   async complete(id: string, outcome: { connectionId?: string; runId?: string; replied?: boolean }): Promise<void> {

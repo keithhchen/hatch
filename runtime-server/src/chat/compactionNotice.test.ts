@@ -3,7 +3,7 @@ import { test } from "node:test";
 import type { AgentRuntime } from "../agentRuntime.js";
 import { ChatReplies } from "../channels/productTarget.js";
 import { HttpChatGateway } from "../channels/runtimeChat.js";
-import { alice, dm, ended, sleep, text, thread, withFixture } from "./kit.test.js";
+import { alice, dm, ended, sleep, text, thread, withFixture, type Fixture } from "./kit.test.js";
 
 /**
  * The channel layer is another process: it learns of a compaction only by asking Chat over the service API. A Run that
@@ -11,16 +11,19 @@ import { alice, dm, ended, sleep, text, thread, withFixture } from "./kit.test.j
  */
 test("a waiting channel hears each compaction once across the HTTP adapter, and the Run's end after them", () => {
   const gates: Array<() => void> = [];
+  let journal: Fixture["repository"];
   const runtime: AgentRuntime = { async *run(input, ctx) {
     for (const phase of ["pre_turn", "mid_turn"] as const) {
       await ctx.state.compact(phase);
+      await journal.appendEvent({ conversationId: (await journal.findRun(input.run_id))!.conversationId, runId: input.run_id, type: "compaction.started", payload: { compaction_id: `cmp_${phase}` } });
       await new Promise<void>((resolve) => gates.push(resolve));
       await ctx.state.start();
     }
     yield { type: "assistant.delta" as const, run_id: input.run_id, delta: { kind: "text" as const, content: "done" } };
     yield { type: "turn.completed" as const, run_id: input.run_id, finish_reason: "stop" as const };
   } };
-  return withFixture({ runtime }, async ({ runtime: server, port }) => {
+  return withFixture({ runtime }, async ({ runtime: server, port, repository }) => {
+    journal = repository;
     const remote = new HttpChatGateway({ baseUrl: `http://127.0.0.1:${port}`, serviceToken: "service-secret" });
     const sent = await server.chat.send(alice, thread, dm, "evt-c", text("long question"));
     const notices: string[] = [];
@@ -51,6 +54,6 @@ test("a waiting channel hears each compaction once across the HTTP adapter, and 
     await ended(remote, sent.runId);
     await channel.settle(sent.runId);
     assert.deepEqual(replies, ["done"]);
-    assert.deepEqual([...new Set(notices)], [first, second]);
+    assert.deepEqual([...new Set(notices)], ["cmp_pre_turn", "cmp_mid_turn"], "the ids are the durable compaction ids");
   });
 });

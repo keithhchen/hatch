@@ -31,7 +31,7 @@ export class ServiceChatGateway<Scope> implements ChatGateway {
     binders: Record<Principal["kind"], PrincipalBinder<Scope>>;
     parts: PartsReader;
     uploads?: Uploads;
-    repository: Pick<ConversationRepository, "findRun" | "latestRunStateCursor">;
+    repository: Pick<ConversationRepository, "findRun" | "latestRunStateCursor" | "snapshot">;
     history: { readVisibleConversation(conversationId: string): Promise<VisibleConversationMessage[]> };
   }) {}
 
@@ -56,8 +56,12 @@ export class ServiceChatGateway<Scope> implements ChatGateway {
     const run = await this.deps.repository.findRun(runId);
     if (!run) return undefined;
     if (!TERMINAL_STATUSES.has(run.status)) {
-      // The cursor of the Run's latest state change names this compaction: the next one has another.
-      return run.status === "compacting" ? { ended: false, compactionId: `${run.id}:${await this.deps.repository.latestRunStateCursor(run.id)}` } : { ended: false };
+      if (run.status !== "compacting") return { ended: false };
+      // The durable id Chat announced after the Run entered `compacting`; absent until that journal event lands, and the next ask finds it.
+      const after = await this.deps.repository.latestRunStateCursor(run.id) ?? 0;
+      const started = (await this.deps.repository.snapshot(run.conversationId, after)).events.find(event => event.type === "compaction.started" && event.runId === run.id);
+      const compactionId = started?.payload.compaction_id;
+      return typeof compactionId === "string" ? { ended: false, compactionId } : { ended: false };
     }
     const text = run.status === "completed" ? finalAssistantText(await this.deps.history.readVisibleConversation(run.conversationId), run.id) : "";
     return { ended: true, reply: { runId: run.id, status: run.status as "completed", text, ...(run.interruptedReason ? { reason: run.interruptedReason } : {}) } };

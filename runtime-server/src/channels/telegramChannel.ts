@@ -40,7 +40,8 @@ export class TelegramChannel implements ChannelAdapter {
       if (chat === undefined) return { events: [] };
       const address = { threadId: String(chat), senderId: String(query.from.id) };
       const ref = `${query.id}|${chat}|${query.message!.message_id}`;
-      return { events: [{ eventId, address, button: match ? { taskId: match[1]!, action: match[2] as "approve" | "decline", ref } : { taskId: "", action: "decline", ref } }] };
+      const group = query.message?.chat.type === "group" || query.message?.chat.type === "supergroup";
+      return { events: [{ eventId, address, ...(group ? { group: true as const } : {}), button: match ? { taskId: match[1]!, action: match[2] as "approve" | "decline", ref } : { taskId: "", action: "decline", ref } }] };
     }
     const message = update.message;
     if (!message) return { events: [] };

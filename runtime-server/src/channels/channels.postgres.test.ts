@@ -515,6 +515,39 @@ test("Groups: permission follows the sender, not the thread", options, async () 
   assert.equal(env.target.handled.length, 1);
 }));
 
+test("A public Connection on the shared bot meets a sender by its start code, and their later messages follow", options, async () => isolated(async pool => {
+  const env = await stack(pool);
+  const product = new RecordingTarget();
+  env.service.register("product", product);
+  const owner = randomUUID();
+  await pool.query("INSERT INTO hatch_connections (owner_account_id, channel, target, target_key, audience) VALUES ($1, 'telegram', $2, 'product:p1', 'public')", [owner, JSON.stringify({ kind: "product", productId: "p1" })]);
+  const [{ startCode }] = await env.connections.owned(owner);
+  assert.match(startCode!, /^[0-9a-f]{32}$/);
+  await env.service.accept(env.adapter, [message("walker", "hello")]);
+  await env.service.drain();
+  assert.match(env.adapter.texts.at(-1)!, /请先从 Hatch Studio 连接/, "without the code nobody is met");
+  await env.service.accept(env.adapter, [message("walker", startCode!)]);
+  await env.service.accept(env.adapter, [message("walker", "hi there")]);
+  await env.service.drain();
+  assert.equal(env.adapter.texts.at(-1), "linked");
+  assert.deepEqual(product.handled.map(inbound => [inbound.event.text, inbound.principal.kind]), [["hi there", "contact"]]);
+  await env.service.accept(env.adapter, [message("walker", "x".repeat(32))]);
+  await env.service.accept(env.adapter, [message("walker2", "0".repeat(32))]);
+  await env.service.drain();
+  assert.equal(product.handled.length, 2, "an unknown code meets no one");
+}));
+
+test("An expired lease is reclaimed, and extending it keeps a live claimant's event", options, async () => isolated(async pool => {
+  await PostgresConnections.open(pool, scopeOf);
+  const inbox = await PostgresInbox.open(pool);
+  const now = new Date("2026-11-10T00:00:00Z");
+  await inbox.store("telegram", "", [message("1", "first")]);
+  const [item] = await inbox.claim(10, 30_000, now);
+  await inbox.extend(item!.id, 30_000, new Date(now.getTime() + 20_000));
+  assert.deepEqual(await inbox.claim(10, 30_000, new Date(now.getTime() + 40_000)), [], "a heartbeat keeps the claim");
+  assert.equal((await inbox.claim(10, 30_000, new Date(now.getTime() + 51_000))).length, 1, "a silent claimant loses it after one lease");
+}));
+
 test("A link code posted in a group does not link", options, async () => isolated(async pool => {
   const env = await stack(pool);
   const owner = randomUUID();

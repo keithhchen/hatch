@@ -7,7 +7,7 @@ import type { ChannelKind } from "./types.js";
 export type ChannelConnection = Connection & { scope: string };
 /** A sender known to a Connection: the Expert who linked, a member, or a contact who wrote in. `threadId` is where they were reached last. */
 export type Identity = { id: string; connectionId: string; senderId: string; threadId: string };
-export type OwnedConnection = ChannelConnection & { linked: boolean; hasCredentials: boolean; lastEventAt?: string };
+export type OwnedConnection = ChannelConnection & { linked: boolean; hasCredentials: boolean; lastEventAt?: string; /** A `public` Connection's unguessable deep-link payload: `t.me/<bot>?start=<startCode>` meets anyone as its contact, also on a shared bot. */ startCode?: string };
 export type Resolved = { connection: ChannelConnection; identity?: Identity };
 
 const LINK_CODE_MS = 15 * 60_000;
@@ -17,6 +17,7 @@ function newLinkCode(): string {
   return `HATCH-${[...randomBytes(8)].map(byte => alphabet[byte % alphabet.length]).join("")}`;
 }
 export const LINK_CODE_PATTERN = /HATCH-[A-Z0-9]{8}/;
+export const START_CODE_PATTERN = /^[0-9a-f]{32}$/;
 
 export const targetKey = (target: Connection["target"]): string => target.kind === "assistant" ? "assistant" : `product:${target.productId}`;
 
@@ -45,6 +46,8 @@ export interface ConnectionRepository {
   resolveConnection(payload: { channel: ChannelKind; scope: string; senderId: string }): Promise<Resolved | undefined>;
   /** A contact writes in to a `public` Connection: remember them. */
   meet(connection: ChannelConnection, who: { senderId: string; threadId: string }): Promise<Identity>;
+  /** A sender arrives by a `public` Connection's start code: they become its contact. Undefined when no such Connection takes them. */
+  meetByStartCode(channel: ChannelKind, scope: string, code: string, who: { senderId: string; threadId: string }): Promise<{ connection: ChannelConnection; identity: Identity } | undefined>;
   /** Connections the account owns that someone is linked to, most recently active first. */
   linked(ownerAccountId: string): Promise<Resolved[]>;
   /** Every Connection the account owns, linked or not, with what Studio shows of it. */
@@ -101,6 +104,8 @@ export class PostgresConnections implements ConnectionRepository {
         UNIQUE (owner_account_id, channel, audience, target_key)
       );
       ALTER TABLE hatch_connections ADD COLUMN IF NOT EXISTS task_specific BOOLEAN NOT NULL DEFAULT false;
+      ALTER TABLE hatch_connections ADD COLUMN IF NOT EXISTS start_code TEXT NOT NULL DEFAULT replace(gen_random_uuid()::text, '-', '');
+      CREATE UNIQUE INDEX IF NOT EXISTS hatch_connections_start_code_idx ON hatch_connections (start_code);
       CREATE UNIQUE INDEX IF NOT EXISTS hatch_connections_code_idx ON hatch_connections (link_code) WHERE link_code IS NOT NULL;
       CREATE INDEX IF NOT EXISTS hatch_connections_scope_idx ON hatch_connections (channel, scope) WHERE scope <> '';
       CREATE TABLE IF NOT EXISTS hatch_channel_identities (
@@ -179,6 +184,13 @@ export class PostgresConnections implements ConnectionRepository {
     return identityOf(row);
   }
 
+  async meetByStartCode(channel: ChannelKind, scope: string, code: string, who: { senderId: string; threadId: string }): Promise<{ connection: ChannelConnection; identity: Identity } | undefined> {
+    const row = (await this.pool.query(`SELECT ${COLUMNS} FROM hatch_connections WHERE start_code = $1 AND channel = $2 AND scope = $3 AND audience = 'public' AND state <> 'revoked'`, [code, channel, scope])).rows[0];
+    if (!row) return undefined;
+    const connection = connectionOf(row);
+    return { connection, identity: await this.meet(connection, who) };
+  }
+
   async linked(ownerAccountId: string): Promise<Resolved[]> {
     const rows = (await this.pool.query(`SELECT c.id, c.owner_account_id, c.channel, c.scope, c.client, c.target, c.audience, c.task_specific, c.state, ${IDENTITY_COLUMNS}
       FROM hatch_connections c JOIN hatch_channel_identities i ON i.connection_id = c.id
@@ -187,9 +199,10 @@ export class PostgresConnections implements ConnectionRepository {
   }
 
   async owned(ownerAccountId: string): Promise<OwnedConnection[]> {
-    return (await this.pool.query(`SELECT ${COLUMNS}, credentials IS NOT NULL AS has_credentials, last_event_at, EXISTS (SELECT 1 FROM hatch_channel_identities i WHERE i.connection_id = c.id) AS linked
+    return (await this.pool.query(`SELECT ${COLUMNS}, credentials IS NOT NULL AS has_credentials, last_event_at, start_code, EXISTS (SELECT 1 FROM hatch_channel_identities i WHERE i.connection_id = c.id) AS linked
       FROM hatch_connections c WHERE owner_account_id = $1 ORDER BY created_at`, [ownerAccountId])).rows.map(row => ({
       ...connectionOf(row), linked: row.linked, hasCredentials: row.has_credentials, ...(row.last_event_at ? { lastEventAt: new Date(row.last_event_at).toISOString() } : {}),
+      ...(row.audience === "public" ? { startCode: row.start_code } : {}),
     }));
   }
 
