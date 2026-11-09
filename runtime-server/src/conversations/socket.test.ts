@@ -5,6 +5,7 @@ import test from "node:test";
 import { WebSocket } from "ws";
 import type { AssistantHost } from "./assistantConversation.js";
 import { MemoryEventLog } from "./eventLog.js";
+import { EventLogJournal } from "./journal.js";
 import { MemoryMessageLedger } from "./ledger.js";
 import { StudioSockets, type Identity } from "./socket.js";
 import { Studio } from "./studio.js";
@@ -13,9 +14,11 @@ import { Studio } from "./studio.js";
 const TOKENS: Record<string, string> = { key1: "a1" };
 
 async function harness() {
-  const assistant = { events: new EventEmitter(), stopped: 0, running: false, view: async () => ({ messages: [], running: assistant.running }), ingest: async () => true, stop: async () => { assistant.stopped++; } };
-  const studio = new Studio({ product: async () => undefined, workspace: async () => { throw new Error("unused"); }, assistant: () => assistant as unknown as AssistantHost, eventLog: new MemoryEventLog(), ledger: new MemoryMessageLedger() });
-  studio.recordAssistant();
+  const assistant = { events: new EventEmitter(), stopped: 0, running: false, view: async () => ({ messages: [], running: assistant.running }), submit: async () => ({}), workshop: () => ({ files: { writeManual: async () => undefined }, place: () => "" }), stop: async () => { assistant.stopped++; } };
+  const eventLog = new MemoryEventLog();
+  // The Assistant's runtime journals its events into the log; here the test plays that runtime.
+  const journal = new EventLogJournal(eventLog, () => "assistant:a1");
+  const studio = new Studio({ product: async () => undefined, workspace: async () => { throw new Error("unused"); }, assistant: () => assistant as unknown as AssistantHost, eventLog, ledger: new MemoryMessageLedger() });
   const sockets = new StudioSockets({ studio, pollMs: 10, identify: async token => TOKENS[token] ? { accountId: TOKENS[token]!, token } : undefined });
   const server = http.createServer();
   const clients: WebSocket[] = [];
@@ -35,7 +38,7 @@ async function harness() {
     const next = async (match: (message: Record<string, any>) => boolean) => { for (let i = 0; i < 200; i++) { const found = inbox.find(match); if (found) return found; await new Promise(resolve => setTimeout(resolve, 10)); } throw new Error(`no message: ${JSON.stringify(inbox)}`); };
     return { ws, inbox, next, send: (value: unknown) => ws.send(JSON.stringify(value)), closed: new Promise<number>(resolve => ws.once("close", code => resolve(code))) };
   };
-  const emit = (type: string, extra: Record<string, unknown> = {}) => assistant.events.emit("event", { accountId: "a1", type, ...extra });
+  const emit = (type: string, extra: Record<string, unknown> = {}) => journal.append({ sessionId: "s1", type, ...extra });
   return { assistant, open, emit, close: () => { clients.forEach(client => client.terminate()); server.closeAllConnections(); return new Promise<void>(resolve => server.close(() => resolve())); } };
 }
 

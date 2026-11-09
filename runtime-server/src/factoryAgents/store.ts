@@ -29,6 +29,8 @@ export type IngressItem = {
   text: string;
   /** Workspace paths of images that came with this item. */
   images?: string[];
+  /** Assets the Expert sent with this item. */
+  attachments?: MessageOrigin["attachments"];
   taskId?: string; eventId?: string; messageRef?: string;
   /** Turns that took this item but ended before it reached the context. */
   attempts?: number;

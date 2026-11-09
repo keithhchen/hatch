@@ -305,6 +305,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       backend: accountId => new PostgresWorkbenchBackend(registryPool, `assistant:${accountId}`),
       exclusive: postgresExclusive(registryPool),
       env: environment,
+      journal: keyOf => new EventLogJournal(conversationPorts.eventLog, keyOf),
     });
     const productsPrefix = environment.HATCH_CREATOR_PRODUCT_FILES_PREFIX?.trim() || "creator-products";
     const ingest = await createIngestService({
@@ -318,7 +319,6 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     // Product Connections have no handler until the Chat API's gateway is registered here, also through `guarded(..., eligibility)`.
     channels.register("assistant", guarded(new AssistantTarget(assistant), eligibility)).start();
     Object.assign(registryContext, { assistant, ingest, channels, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin, studioUrl });
-    studio.recordAssistant();
     // A platform that pushes over its own connection runs here, in one process at a time. A dropped connection comes back; credentials added or removed are picked up.
     channelListeners = new ChannelListeners({
       hub, connections: stores.connections, exclusive: postgresExclusive(registryPool),

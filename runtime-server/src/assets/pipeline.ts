@@ -71,6 +71,11 @@ export class AssetPipeline implements ReadyAssetResolver {
     return this.repository.attach(scope, assetId, messageId);
   }
 
+  /** Undoes `attach` for a message that was not delivered, so its assets can be sent again. */
+  release(scope: AssetScope, assetId: string, messageId: string): Promise<void> {
+    return this.repository.release(scope, assetId, messageId);
+  }
+
   private async finish(asset: Asset, next: (asset: Asset) => Asset): Promise<Asset> {
     const moved = await this.repository.transition("processing", next(asset));
     if (!moved) throw new AssetError("conflict", `Asset ${asset.id} changed while it was processed`);

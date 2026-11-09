@@ -9,6 +9,8 @@ import { createFactoryLlmModel, type FactoryPiAgentOptions } from "../creatorLea
 import { FileWorkbenchBackend, WorkbenchStore } from "../factoryAgents/store.js";
 import { WorkbenchRuntime } from "../factoryAgents/runtime.js";
 import type { FactoryWorkspace } from "../factoryAgents/service.js";
+import { MemoryEventLog } from "../conversations/eventLog.js";
+import { EventLogJournal } from "../conversations/journal.js";
 import { AssistantService, type ProductWorkspaces } from "./assistant.js";
 import type { AccountReach } from "./reach.js";
 import { AssistantTarget } from "./assistantTarget.js";
@@ -82,6 +84,7 @@ async function setup(scripts: { assistant: Script; worker?: Script }) {
     live: async () => ({ is_live: false, pending_changes: [] }),
     token: async () => "token",
   };
+  const log = new MemoryEventLog();
   const assistant = new AssistantService({
     tasks, reach, catalog, channels,
     products: { workspace: async () => { opened?.({ creatorId: ACCOUNT, productId: PRODUCT }, workspace); return workspace; }, attachAssistant: hooks => { opened = hooks.opened; grantedTools = hooks.grantedTools; withheldTools = hooks.withheldTools; } },
@@ -89,6 +92,7 @@ async function setup(scripts: { assistant: Script; worker?: Script }) {
     exclusive: async (_name, fn) => fn(),
     env: { HATCH_FACTORY_LLM_PROFILE: "kimi-k2.6" },
     runtime: { agentFactory: factory },
+    journal: keyOf => new EventLogJournal(log, keyOf),
   });
   const idle = () => new Promise<void>(resolve => {
     const check = async () => {
@@ -111,7 +115,13 @@ async function setup(scripts: { assistant: Script; worker?: Script }) {
       await target.handle(inbound);
     }
   };
-  return { root, tasks, sent, compactions, applied, telegramUpdate, assistant, calls, productStore, productRuntime, idle, close: async () => { await assistant.close(); await productRuntime.close(); await rm(root, { recursive: true, force: true, maxRetries: 5 }); } };
+  /** What the Assistant's runtime persisted, and what its journal says about it. */
+  const journaled = async () => {
+    const desk = await (assistant as unknown as { desk(account: string): Promise<{ store: WorkbenchStore; sessionId: string }> }).desk(ACCOUNT);
+    const events = (await log.after(`assistant:${ACCOUNT}`, "0", 5000)).map(entry => entry.event.type);
+    return { events, messages: (await desk.store.get(desk.sessionId)).messages.length, store: desk.store, sessionId: desk.sessionId };
+  };
+  return { root, tasks, sent, log, journaled, compactions, applied, telegramUpdate, assistant, calls, productStore, productRuntime, idle, close: async () => { await assistant.close(); await productRuntime.close(); await rm(root, { recursive: true, force: true, maxRetries: 5 }); } };
 }
 
 test("A burst of Telegram messages steers one turn and gets one reply, with every message in the context", async () => {
@@ -133,6 +143,9 @@ test("A burst of Telegram messages steers one turn and gets one reply, with ever
     const view = await env.assistant.view(ACCOUNT);
     assert.equal(view.messages.filter(message => message.role === "expert").length, 3, "the duplicate update was dropped");
     assert.equal(env.sent[0]!.replyingTo, idempotencyId("3"), "the reply goes to the last message's inbox id");
+    const { events, messages } = await env.journaled();
+    assert.ok(events.includes("run_end") && events.includes("message_end"), "the Assistant's Runs are in the conversation log like a worker's");
+    assert.ok(events.filter(type => type === "message").length >= 1 && messages >= 4);
   } finally { await env.close(); }
 });
 
@@ -238,6 +251,8 @@ test("Interview pass-through: the Expert's replies go to the interview, then it 
     assert.ok(assistantInputs.some(text => text.includes("聊清了三年的理由")));
     assert.ok(assistantInputs.some(text => text.includes("✓ 为什么是三年") && text.includes("○ 什么时候例外")), "the Assistant sees the outline's progress");
     assert.equal((await env.assistant.view(ACCOUNT)).interviewing, false);
+    const { events, messages } = await env.journaled();
+    assert.ok(events.filter(type => type === "message").length >= messages / 2, "messages that passed to the interview and came back were committed with their events too");
   } finally { await env.close(); }
 });
 
@@ -411,5 +426,61 @@ test("The daily check skips a model call when the Expert's chats cannot take the
     await new Promise(resolve => setTimeout(resolve, 100));
     assert.equal(asked, 0);
     assert.equal((await env.tasks.pokes(ACCOUNT, 3)).length, 0);
+  } finally { await env.close(); }
+});
+
+test("A message and its event are one step: a reader never sees one without the other", async () => {
+  const env = await setup({ assistant: (_context, call) => ({ text: `回复${call}`, delayMs: 20 }) });
+  try {
+    const key = `assistant:${ACCOUNT}`;
+    const { store, sessionId } = await env.journaled();
+    let torn = 0;
+    let reads = 0;
+    const watcher = setInterval(() => void env.log.consistent(key, async cursor => {
+      const events = (await env.log.after(key, "0", 5000)).filter(entry => Number(entry.cursor) <= Number(cursor)).filter(entry => entry.event.type === "message").length;
+      const messages = (await store.get(sessionId)).messages.length;
+      reads++;
+      // Each commit writes one message here, so the counts move together.
+      if (events !== messages) torn++;
+    }), 2);
+    for (let i = 0; i < 4; i++) { await env.assistant.submit(ACCOUNT, { source: "web", text: `第${i}条` }); await new Promise(resolve => setTimeout(resolve, 15)); }
+    await waitFor(async () => !(await env.assistant.view(ACCOUNT)).running);
+    await new Promise(resolve => setTimeout(resolve, 40));
+    clearInterval(watcher);
+    assert.ok(reads > 5);
+    assert.equal(torn, 0);
+    const { events, messages } = await env.journaled();
+    assert.equal(events.filter(type => type === "message").length, messages, "each message exactly once");
+  } finally { await env.close(); }
+});
+
+test("submit returns the Run that took the message, and an upload lands where the model reads it", async () => {
+  const env = await setup({ assistant: () => ({ text: "看到了", delayMs: 100 }) });
+  try {
+    const first = await env.assistant.submit(ACCOUNT, { source: "web", text: "你好" });
+    assert.match(first.runId ?? "", /^run_/, "a real Run, from the runtime");
+    assert.equal((await env.assistant.view(ACCOUNT)).runId, first.runId);
+    const second = await env.assistant.submit(ACCOUNT, { source: "web", text: "再补一句" });
+    assert.equal(second.runId, first.runId, "a message that steers the turn belongs to its Run");
+    await waitFor(async () => !(await env.assistant.view(ACCOUNT)).running);
+    assert.equal((await env.assistant.view(ACCOUNT)).runId, undefined);
+    assert.equal((await env.assistant.submit(ACCOUNT, { source: "web", text: "又来" })).runId?.startsWith("run_"), true);
+    await waitFor(async () => !(await env.assistant.view(ACCOUNT)).running);
+
+    const workshop = env.assistant.workshop(ACCOUNT);
+    const id = "33333333-3333-4333-8333-333333333333";
+    const asset = (kind: "image" | "file", name: string, mime: string) => ({ id, record: { kind, name, mime }, derivative: () => undefined }) as never;
+    const picture = workshop.place(asset("image", "我的 图.png", "image/png"));
+    const note = workshop.place(asset("file", "选址 笔记.pdf", "application/pdf"));
+    assert.deepEqual([picture, note], [`input/images/${id}.png`, "input/materials/33333333-选址 笔记.pdf.md"]);
+    await workshop.files.writeManual(picture, Buffer.from("png"));
+    assert.equal((await env.assistant.image(ACCOUNT, `${id}.png`)).toString(), "png", "the web image route finds it");
+    await workshop.files.writeManual(note, Buffer.from("# 笔记"));
+    await env.assistant.submit(ACCOUNT, { source: "web", text: "看图", images: [picture], attachments: [{ type: "image", name: "我的 图.png", assetId: "a1" }] });
+    await waitFor(async () => !(await env.assistant.view(ACCOUNT)).running);
+    const sent = (await env.assistant.view(ACCOUNT)).messages.find(message => message.text === "看图")!;
+    assert.deepEqual(sent.attachments, [{ type: "image", name: "我的 图.png", assetId: "a1" }], "history says which assets the message carried");
+    await env.assistant.dispatch(ACCOUNT, "build", PRODUCT, "更新", { source: "web" });
+    assert.ok((await env.productStore.listManualFiles()).some(file => file.path === "input/manual/33333333-选址 笔记.pdf.md"), "a file lands among the materials that reach every Product's input");
   } finally { await env.close(); }
 });

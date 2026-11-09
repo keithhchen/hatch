@@ -29,6 +29,10 @@ export class InMemoryAssetRepository implements AssetRepository {
     this.rows.set(id, attached);
     return attached;
   }
+  async release(scope: AssetScope, id: string, messageId: string) {
+    const current = this.find(scope, id);
+    if (current) this.rows.set(id, current.released(messageId));
+  }
   async listAttached(scope: AssetScope) {
     const key = scopeKey(scope);
     return [...this.rows.values()].filter(a => a.messageId && scopeKey(a.record.scope) === key);
@@ -92,6 +96,11 @@ export class PostgresAssetRepository implements AssetRepository {
     const current = await this.get(scope, id);
     if (!current) throw new AssetError("not_found", `Asset ${id} does not exist`);
     return current.attachedTo(messageId); // names the reason: not ready, or bound to another message
+  }
+  async release(scope: AssetScope, id: string, messageId: string) {
+    await this.db.query(
+      `UPDATE hatch_assets SET message_id = NULL, record = record - 'messageId' WHERE scope_key = $1 AND id = $2 AND message_id = $3`,
+      [scopeKey(scope), id, messageId]);
   }
   async listAttached(scope: AssetScope) {
     const result = await this.db.query<Row>(`SELECT record FROM hatch_assets WHERE scope_key = $1 AND message_id IS NOT NULL ORDER BY created_at, id`, [scopeKey(scope)]);

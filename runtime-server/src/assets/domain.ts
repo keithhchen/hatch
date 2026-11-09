@@ -69,6 +69,12 @@ export class Asset {
     if (this.messageId && this.messageId !== messageId) throw new AssetError("conflict", `Asset ${this.id} already belongs to another message`);
     return new Asset({ ...this.record, messageId });
   }
+  /** Frees the asset from `messageId`, the message that never got delivered. An asset bound to another message stays so. */
+  released(messageId: string): Asset {
+    if (this.messageId !== messageId) return this;
+    const { messageId: _bound, ...rest } = this.record;
+    return new Asset(rest);
+  }
   private require(state: AssetState, action: string) {
     if (this.state !== state) throw new Error(`An asset that is ${this.state} cannot ${action}`);
   }
@@ -86,12 +92,14 @@ export interface AssetBlobs {
  * - insertIfAbsent: at most one non-failed asset per (scope, sha256).
  * - transition: compare-and-set on state; undefined when the asset moved first.
  * - attach: only a ready asset in this scope, bound once to one message.
+ * - release: unbinds an asset from that message, and only from that one.
  */
 export interface AssetRepository {
   insertIfAbsent(asset: Asset): Promise<{ asset: Asset; created: boolean }>;
   transition(from: AssetState, next: Asset): Promise<Asset | undefined>;
   get(scope: AssetScope, id: string): Promise<Asset | undefined>;
   attach(scope: AssetScope, id: string, messageId: string): Promise<Asset>;
+  release(scope: AssetScope, id: string, messageId: string): Promise<void>;
   listAttached(scope: AssetScope): Promise<Asset[]>;
 }
 
