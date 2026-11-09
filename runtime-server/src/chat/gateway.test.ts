@@ -33,7 +33,7 @@ async function gatewayFixture(options: { localTools?: boolean; maxMessages?: num
   };
   const connections = new Map<string, Connection>([["conn-1", {
     id: "conn-1", ownerAccountId: creatorId, channel: "instagram", client: "dm",
-    target: { kind: "product", productId }, audience: "public", state: "active"
+    target: { kind: "product", productId }, audience: "public", taskSpecific: false, state: "active"
   }]]);
   const runtime: RuntimeServer = createRuntimeServer({
     conversationStore: store,
