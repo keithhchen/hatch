@@ -1,0 +1,38 @@
+{
+  "id": 0,
+  "title": "Tool self-check: one message through Chat HTTP and one through an IM webhook",
+  "status": "PASS",
+  "durationMs": 9830,
+  "checks": [
+    {
+      "name": "HTTP Chat answered",
+      "ok": true,
+      "detail": {
+        "status": 200,
+        "reply": "pong"
+      }
+    },
+    {
+      "name": "webhook accepted",
+      "ok": true,
+      "detail": {
+        "status": 200,
+        "ms": 3
+      }
+    },
+    {
+      "name": "one outbound reply mentions ping",
+      "ok": true,
+      "detail": [
+        "ping"
+      ]
+    }
+  ],
+  "measurements": {
+    "chat_http_wait_ms": 4265,
+    "outbound_sends": 1
+  },
+  "evidence": {},
+  "notes": [],
+  "defects": []
+}
