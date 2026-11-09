@@ -3,14 +3,18 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { randomUUID } from "node:crypto";
 import { Agent } from "@earendil-works/pi-agent-core";
 import { createAssistantMessageEventStream, type AssistantMessage } from "@earendil-works/pi-ai";
 import { createFactoryLlmModel } from "../creatorLearning/factoryPi.js";
 import { MemoryAgentDefinitionRepository, agentEntries, assertAgentAvailable, initialAgentDefinitions } from "../factoryAgents/definitions.js";
 import { WorkbenchRuntime } from "../factoryAgents/runtime.js";
 import { WorkbenchStore, type Role } from "../factoryAgents/store.js";
+import type { SendInput } from "./conversation.js";
 import { awaitTurn } from "./awaitTurn.js";
 import { WorkerDirectory, type WorkerWorkspace } from "./workerConversation.js";
+
+const input = (text: string): SendInput => ({ id: randomUUID(), text, attachments: [], client: { client: "cli" } });
 
 // Real store, real runtime and real projector; only the model is scripted.
 test("a worker conversation runs a real turn: stable ids, final reply, no internals, 409 while locked", async () => {
@@ -35,11 +39,11 @@ test("a worker conversation runs a real turn: stable ids, final reply, no intern
   const directory = new WorkerDirectory(workspace);
   try {
     assert.deepEqual((await directory.list()).map(w => [w.id, w.availability]), [["research", "available"], ["interview", "available"], ["builder", "locked"], ["cases", "locked"], ["evaluator", "locked"]]);
-    await assert.rejects(directory.conversation("builder")!.send("build"), /builder cannot start yet/);
+    await assert.rejects(directory.conversation("builder")!.send(input("build")), /builder cannot start yet/);
     assert.equal((await store.list()).length, 0);
 
     const research = directory.conversation("research")!;
-    const sent = await research.send("Look into Alice");
+    const sent = await research.send(input("Look into Alice"));
     assert.equal(sent.queued, false);
     const outcome = await awaitTurn(research, { sentId: sent.message.id, timeoutMs: 10_000, pollMs: 20 });
     assert.equal(outcome.reply?.text, "Reply 2");
@@ -48,7 +52,7 @@ test("a worker conversation runs a real turn: stable ids, final reply, no intern
     assert.equal(messages[0]!.id, sent.message.id, "the id returned at send time is the id in history");
     assert.ok(!JSON.stringify(messages).includes("Looking around"), "intermediate remarks and tool calls stay out");
 
-    const second = await research.send("Shorter please");
+    const second = await research.send(input("Shorter please"));
     assert.equal(second.conversationId, sent.conversationId, "one conversation per worker");
     await awaitTurn(research, { sentId: second.message.id, after: messages.at(-1)!.id, timeoutMs: 10_000, pollMs: 20 });
     const later = await research.messages(messages.at(-1)!.id);

@@ -6,6 +6,10 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { agentEntries, assertAgentAvailable, initialAgentDefinitions } from "../factoryAgents/definitions.js";
 import type { Role, Session } from "../factoryAgents/store.js";
 import type { AssistantHost } from "./assistantConversation.js";
+import type { AssetResolver } from "./assets.js";
+import type { ReadyAsset } from "./conversation.js";
+import { MemoryEventLog } from "./eventLog.js";
+import { MemoryMessageLedger } from "./ledger.js";
 import { ConversationRoutes } from "./routes.js";
 import type { WorkerWorkspace } from "./workerConversation.js";
 
@@ -33,16 +37,19 @@ class FakeWorkspace implements WorkerWorkspace {
   };
   runtime = {
     events: this.events,
-    isRunning: (id: string) => this.sessions.find(s => s.id === id)?.status === "running",
-    steer: (id: string, message: AgentMessage) => { this.steered.push(id); this.sessions.find(s => s.id === id)!.messages.push(message); return true; },
-    stop: (id: string) => { this.stopped.push(id); },
-    start: async (id: string, input: string | AgentMessage[]) => {
+    send: async (id: string, message: AgentMessage) => {
       const target = this.sessions.find(s => s.id === id)!;
-      const messages = input as AgentMessage[];
-      this.started.push({ id, text: (messages[0] as unknown as { origin: { text: string } }).origin.text });
-      target.status = "running"; target.messages.push(...messages);
-      setTimeout(() => { target.messages.push(assistantLine(this.reply)); target.status = "idle"; }, this.replyAfterMs);
+      const queued = target.status === "running";
+      target.messages.push(message);
+      if (queued) this.steered.push(id);
+      else {
+        this.started.push({ id, text: (message as unknown as { origin: { text: string } }).origin.text });
+        target.status = "running";
+        setTimeout(() => { target.messages.push(assistantLine(this.reply)); target.status = "idle"; this.events.emit("event", { sessionId: id, type: "run_end", status: "completed" }); }, this.replyAfterMs);
+      }
+      return { queued };
     },
+    stop: (id: string) => { this.stopped.push(id); },
   };
   entries = async () => agentEntries(await this.definitions, this.sessions);
   assertRoleAvailable = async (role: Role) => assertAgentAvailable(await this.entries(), role);
@@ -64,6 +71,10 @@ class FakeAssistant implements AssistantHost {
   stop = async () => { this.stopped++; };
 }
 
+const IMAGE: ReadyAsset = { id: "a-img", kind: "image", name: "chart.png", mimeType: "image/png", bytes: 10, sha256: "h-img", path: "input/manual/chart.png" };
+const NOTES: ReadyAsset = { id: "a-doc", kind: "file", name: "notes.pdf", mimeType: "application/pdf", bytes: 2048, sha256: "h-doc", path: "input/manual/notes.pdf" };
+const assets: AssetResolver = { resolve: async (account, id) => account !== "a1" ? undefined : id === "a-img" ? IMAGE : id === "a-doc" ? NOTES : id === "a-wait" ? "pending" : undefined };
+
 async function harness(options: { assistant?: boolean } = { assistant: true }) {
   const workspace = new FakeWorkspace();
   const assistant = new FakeAssistant();
@@ -75,6 +86,7 @@ async function harness(options: { assistant?: boolean } = { assistant: true }) {
     assistant: () => options.assistant === false ? undefined : assistant,
     json: (response, status, payload) => { response.writeHead(status, { "content-type": "application/json" }); response.end(JSON.stringify(payload)); },
     readJson: async request => { let body = ""; for await (const chunk of request) body += chunk; return JSON.parse(body || "{}"); },
+    eventLog: new MemoryEventLog(), ledger: new MemoryMessageLedger(), assets,
     pace: { pollMs: 5 },
   });
   const server = http.createServer((req, res) => { void routes.handle(req, res, new URL(req.url!, "http://x")).then(handled => { if (!handled) { res.writeHead(404); res.end(); } }); });
@@ -85,7 +97,7 @@ async function harness(options: { assistant?: boolean } = { assistant: true }) {
     headers: { ...(init.token === null ? {} : { authorization: `Bearer ${init.token ?? "owner"}` }), "content-type": "application/json" },
     ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
   });
-  return { workspace, assistant, call, close: () => { server.closeAllConnections(); return new Promise<void>(resolve => server.close(() => resolve())); } };
+  return { workspace, assistant, call, base, close: () => { server.closeAllConnections(); return new Promise<void>(resolve => server.close(() => resolve())); } };
 }
 const root = `/v1/creator/products/${PRODUCT}/workers`;
 
@@ -204,7 +216,7 @@ test("workers: stop is 202, events stream the session's own events only", async 
     h.workspace.events.emit("event", { sessionId: "s-research", type: "voice.delta", text: "internal" });
     h.workspace.events.emit("event", { sessionId: "s-research", type: "delta", text: "hello" });
     const chunk = decoder.decode((await reader.read()).value);
-    assert.equal(chunk, 'data: {"type":"delta","text":"hello"}\n\n');
+    assert.equal(chunk, 'id: 1\ndata: {"type":"delta","text":"hello"}\n\n', "the SSE id is the log cursor");
     controller.abort();
     const stop = await h.call(`${root}/research/stop`, { method: "POST" });
     assert.equal(stop.status, 202);
@@ -239,5 +251,94 @@ test("assistant: 503 when the Registry has no database", async () => {
     const response = await h.call("/v1/creator/assistant/conversation/messages");
     assert.equal(response.status, 503);
     assert.equal(((await response.json()) as { error: { code: string } }).error.code, "assistant_unavailable");
+  } finally { await h.close(); }
+});
+
+const post = (h: Awaited<ReturnType<typeof harness>>, body: unknown, query = "", headers: Record<string, string> = {}) =>
+  fetch(`${h.base}${root}/research/messages${query}`, { method: "POST", headers: { authorization: "Bearer owner", "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
+
+test("idempotency: same key and content is one message, other content is 409", async () => {
+  const h = await harness();
+  try {
+    const key = { "idempotency-key": "client-1" };
+    const first = await (await post(h, { content: "Look into Alice" }, "", key)).json() as { message: { id: string } };
+    const again = await post(h, { content: "Look into Alice" }, "", key);
+    assert.equal(again.status, 202);
+    assert.equal(((await again.json()) as { message: { id: string } }).message.id, first.message.id, "the original message comes back");
+    assert.equal(h.workspace.started.length, 1, "delivered once");
+    const conflict = await post(h, { content: "Something else" }, "", key);
+    assert.equal(conflict.status, 409);
+    assert.equal(((await conflict.json()) as { error: { code: string } }).error.code, "idempotency_conflict");
+    assert.equal(((await (await post(h, { content: "Look into Alice", idempotency_key: "client-1" })).json()) as { message: { id: string } }).message.id, first.message.id, "the key may travel in the body");
+    const unkeyed = await (await post(h, { content: "Look into Alice" })).json() as { message: { id: string } };
+    assert.notEqual(unkeyed.message.id, first.message.id, "without a key a repeat is a new message");
+  } finally { await h.close(); }
+});
+
+test("attachments: parts resolve to ready assets; pending, missing and mismatched assets are refused", async () => {
+  const h = await harness();
+  try {
+    const ok = await post(h, { content: [{ type: "text", text: "see these" }, { type: "image", assetId: "a-img" }, { type: "file", assetId: "a-doc" }] });
+    assert.equal(ok.status, 202);
+    const body = await ok.json() as { message: { attachments: unknown[] } };
+    assert.deepEqual(body.message.attachments, [{ type: "image", name: "chart.png", asset_id: "a-img" }, { type: "file", name: "notes.pdf", asset_id: "a-doc" }]);
+    const stored = h.workspace.sessions[0]!.messages[0] as unknown as { content: Array<{ type: string; text?: string; data?: string }>; origin: { text: string } };
+    assert.equal(stored.origin.text, "see these");
+    assert.equal(stored.content[0]!.text, "see these\n[file: notes.pdf (application/pdf, 2048 bytes) at input/manual/notes.pdf]", "a file is one line for the model");
+    assert.equal(stored.content[1]!.data, "hatch-file:input/manual/chart.png", "an image is a path reference");
+    const refused = async (assetId: string, type = "image") => { const r = await post(h, { content: [{ type, assetId }] }); return [r.status, ((await r.json()) as { error: { code: string } }).error.code]; };
+    assert.deepEqual(await refused("a-wait"), [409, "asset_not_ready"]);
+    assert.deepEqual(await refused("nope"), [404, "asset_not_found"]);
+    assert.deepEqual(await refused("a-doc", "image"), [400, "asset_kind_mismatch"]);
+    assert.equal((await post(h, { content: [{ type: "image" }] })).status, 400);
+    assert.equal((await post(h, { content: "x", client: "fax" })).status, 400, "an unknown client is refused");
+  } finally { await h.close(); }
+});
+
+test("snapshot and events share one cursor: replay from it has no gap and no duplicate", async () => {
+  const h = await harness();
+  try {
+    h.workspace.sessions.push(session("research", { status: "running" }));
+    await h.call(`${root}/research/messages`); // the first access starts recording
+    const emit = (type: string, extra: Record<string, unknown> = {}) => h.workspace.events.emit("event", { sessionId: "s-research", type, ...extra });
+    emit("message_end"); emit("delta", { text: "Hel" }); emit("delta", { text: "lo" });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    const snapshot = await (await h.call(`${root}/research/snapshot`)).json() as { cursor: string; status: { state: string }; partial: string; messages: unknown[] };
+    assert.deepEqual([snapshot.cursor, snapshot.status.state, snapshot.partial], ["3", "running", "Hello"], "partial output is what has streamed since the last finished message");
+    emit("delta", { text: "!" }); emit("tool", { name: "list" });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    const replay = async (init: { path?: string; headers?: Record<string, string> }) => {
+      const controller = new AbortController();
+      const response = await fetch(`${h.base}${root}/research/events${init.path ?? ""}`, { signal: controller.signal, headers: { authorization: "Bearer owner", ...init.headers } });
+      const reader = response.body!.getReader(); let text = "";
+      while (!text.includes("tool")) text += new TextDecoder().decode((await reader.read()).value);
+      controller.abort();
+      return text;
+    };
+    const expected = ': connected\n\nid: 4\ndata: {"type":"delta","text":"!"}\n\nid: 5\ndata: {"type":"tool","name":"list"}\n\n';
+    assert.equal(await replay({ path: `?after=${snapshot.cursor}` }), expected);
+    assert.equal(await replay({ headers: { "last-event-id": snapshot.cursor } }), expected, "Last-Event-ID resumes the same way");
+    assert.equal((await h.call(`${root}/research/events?after=99`)).status, 400, "a cursor the log never issued");
+    assert.equal((await h.call(`${root}/research/events?after=x`)).status, 400);
+    assert.deepEqual(h.workspace.stopped, [], "watching and unwatching never stops the Run");
+  } finally { await h.close(); }
+});
+
+test("wait timeout answers 202 with the run to follow; Accept: text/event-stream streams the turn to its end", async () => {
+  const h = await harness();
+  try {
+    h.workspace.replyAfterMs = 80;
+    const slow = await post(h, { content: "Slow one" }, "?wait=0.02");
+    assert.equal(slow.status, 202);
+    const pending = await slow.json() as { run_id: string; cursor: string; status: string };
+    assert.deepEqual([pending.run_id, pending.cursor, pending.status], ["s-research", "0", "running"]);
+    await new Promise(resolve => setTimeout(resolve, 150));
+    h.workspace.replyAfterMs = 40;
+    const streamed = await post(h, { content: "Stream it" }, "", { accept: "text/event-stream" });
+    assert.match(streamed.headers.get("content-type")!, /text\/event-stream/);
+    const text = await streamed.text();
+    assert.match(text, /^: connected\n\nevent: accepted\ndata: \{.*"text":"Stream it".*\}\n\n/);
+    assert.match(text, /id: \d+\ndata: \{"type":"run_end","status":"completed"\}\n\n/);
+    assert.match(text, /event: done\ndata: \{\}\n\n$/);
   } finally { await h.close(); }
 });

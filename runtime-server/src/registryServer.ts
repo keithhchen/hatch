@@ -3,6 +3,9 @@ import { PostgresAgentDefinitionRepository } from "./factoryAgents/definitions.j
 import { PostgresWorkbenchBackend } from "./factoryAgents/store.js";
 import { AssistantService } from "./assistant/assistant.js";
 import { ConversationRoutes, type ConversationRouteDeps } from "./conversations/routes.js";
+import { openConversationPorts, type ConversationPorts } from "./conversations/ports.js";
+import { Studio, type StudioDeps } from "./conversations/studio.js";
+import { StudioSockets, STUDIO_SOCKET_PATH } from "./conversations/socket.js";
 import { createIngestService } from "./ingest/boot.js";
 import { IngestError, IngestService } from "./ingest/service.js";
 import { publicJob } from "./ingest/job.js";
@@ -82,6 +85,7 @@ import {
 export type RegistryServer = { server: http.Server; close: () => Promise<void> };
 export const CREATOR_FACTORY_JSON_BODY_MAX_BYTES = 32 * 1024 * 1024;
 type RegistryContext = {
+  conversationPorts: ConversationPorts;
   assistant?: AssistantService;
   ingest?: IngestService;
   channels?: ChannelHub;
@@ -214,7 +218,9 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const legacyHmacEnabled = environment.HATCH_ENABLE_LEGACY_HMAC_AUTH?.trim().toLowerCase() === "true";
   const authSecret = legacyHmacEnabled ? environment.HATCH_AUTH_SIGNING_SECRET?.trim() || "" : "";
   const httpLimits = httpRequestLimitOptionsFromEnvironment(environment);
-  const registryContext: RegistryContext = { store, accounts, accountAvatars, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, productLive, nodeObjectStore, releaseStore, authSecret };
+  const registryContext: RegistryContext = { store, accounts, accountAvatars, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, productLive, nodeObjectStore, releaseStore, authSecret, conversationPorts: await openConversationPorts(registryPool) };
+  const studio = new Studio(studioDeps(registryContext));
+  const studioSockets = new StudioSockets({ studio, identify: token => identifyToken(registryContext, token) });
   let assistantTick: NodeJS.Timeout | undefined;
   const channelListeners = new AbortController();
   if (registryPool) {
@@ -274,6 +280,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       productPrefix: (accountId, productId) => `${productsPrefix}/${accountId}/${productId}`,
     });
     Object.assign(registryContext, { assistant, ingest, channels, links, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin });
+    studio.recordAssistant();
     // A platform that pushes over its own connection runs here, in one process at a time. A dropped connection comes back.
     for (const adapter of channels.listeners()) void (async () => {
       while (!channelListeners.signal.aborted) {
@@ -348,6 +355,13 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     socket.on("error", () => undefined);
     void (async () => {
       const url = new URL(request.url ?? "/", "http://registry.local");
+      if (url.pathname === STUDIO_SOCKET_PATH) {
+        const token = bearer(request);
+        const identity = token ? await identifyToken(registryContext, token) : undefined;
+        if (token && !identity) throw Object.assign(new Error("A valid account token is required."), { status: 401 });
+        studioSockets.upgrade(request, socket, head, identity);
+        return;
+      }
       const match = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/factory-agents\/sessions\/([0-9a-f-]{36})\/voice\/live$/);
       if (!match) throw Object.assign(new Error("Unknown WebSocket route"), { status: 404 });
       const token = bearer(request);
@@ -1969,16 +1983,30 @@ function postgresExclusive(pool: NonNullable<ReturnType<RegistryStoreTs["databas
   };
 }
 
-function conversationDeps(response: http.ServerResponse, context: RegistryContext): ConversationRouteDeps {
+function studioDeps(context: RegistryContext): StudioDeps {
   return {
-    authenticate: request => authenticate(request, response, context),
-    token: bearer,
     product: async (accountId, productId) => productForCreator(context, accountId, productId),
     workspace: (scope, token) => context.factoryAgents.workspace(scope, token),
     assistant: () => context.assistant,
+    ...context.conversationPorts,
+  };
+}
+
+function conversationDeps(response: http.ServerResponse, context: RegistryContext): ConversationRouteDeps {
+  return {
+    ...studioDeps(context),
+    authenticate: request => authenticate(request, response, context),
+    token: bearer,
     json: sendJson,
     readJson: request => readJson(request),
   };
+}
+
+/** The account a token belongs to, for the Studio WebSocket's first-message sign-in. */
+async function identifyToken(context: RegistryContext, token: string): Promise<{ accountId: string; token: string } | undefined> {
+  const claims = verifyAuthToken(token, context.authSecret);
+  const account = (await context.accounts.resolveSession(token))?.account ?? (claims ? await context.accounts.getById(claims.sub) : undefined);
+  return account ? { accountId: account.id, token } : undefined;
 }
 
 async function assistantRoute(request: http.IncomingMessage, response: http.ServerResponse, url: URL, context: RegistryContext): Promise<void> {

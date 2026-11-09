@@ -9,6 +9,10 @@ import { WorkbenchStore, isAssistantRole, type AgentDefinitionSource, type AnyRo
 import { factoryAgentTools } from "./factoryTools.js";
 import { fileTools } from "./tools.js";
 import { traceAgentTools, withLangfuseTurn, type LangfuseTurnIdentifiers } from "../langfuse.js";
+import { renderSystemReminder, type ClientAttributes } from "../surfaces/contract.js";
+import { declareTools, everywhere, type ClientSupport } from "./toolSurface.js";
+
+const WEB: ClientAttributes = { client: "web" };
 
 export type WorkbenchRuntimeOptions = {
   env?: NodeJS.ProcessEnv;
@@ -18,6 +22,8 @@ export type WorkbenchRuntimeOptions = {
   withheldTools?: (session: Session) => Promise<string[]>;
   /** Current state for the model, rebuilt for every model call. It never enters history, so clients never see it. */
   liveState?: (sessionId: string) => Promise<string | undefined>;
+  /** Which clients may run each tool. Defaults to every client. */
+  toolSupport?: ClientSupport;
   deadlineMs?: number;
   maxTurns?: number;
 };
@@ -30,6 +36,11 @@ export class WorkbenchRuntime {
   private scribeControllers = new Set<AbortController>();
   private runIds = new Map<string, string>();
   private liveAgents = new Map<string, Agent>();
+  /** Messages that arrived while the run could not take them: before its model loop starts, or during compaction. */
+  private held = new Map<string, AgentMessage[]>();
+  private compacting = new Set<string>();
+  /** The client of the latest message of each running conversation. */
+  private clients = new Map<string, ClientAttributes>();
   private closing = false;
   private readonly env: NodeJS.ProcessEnv;
   constructor(readonly store: WorkbenchStore, private options: WorkbenchRuntimeOptions = {}) {
@@ -39,6 +50,7 @@ export class WorkbenchRuntime {
     const scope = this.store.scope;
     return scope ? { productId: scope.productId, userId: scope.creatorId } : undefined;
   }
+  private clientOf(id: string): ClientAttributes { return this.clients.get(id) ?? WEB; }
   emit(id: string, type: string, data: Record<string, unknown> = {}): void { this.events.emit("event", { sessionId: id, type, ...data }); }
   async prompt(role: AnyRole, snapshot?: Awaited<ReturnType<AgentDefinitionSource["list"]>>[number]): Promise<string> {
     const definition = snapshot ?? await this.store.definition(role);
@@ -70,8 +82,7 @@ export class WorkbenchRuntime {
     void run.finally(() => { if (this.runs.get(id) === run) this.runs.delete(id); });
   }
   stop(id: string): void { this.active.get(id)?.abort(); }
-  isRunning(id: string): boolean { return this.active.has(id); }
-  /**
+  isRunning(id: string): boolean { return this.active.has(id); }  /**
    * Steer a running turn: the message joins the context before the next model
    * call and the turn goes on. Returns false when no turn is running, or when
    * it has not reached its model loop yet; the caller then starts a new turn.
@@ -81,6 +92,29 @@ export class WorkbenchRuntime {
     if (!agent || (typeof input === "string" && !input.trim())) return false;
     agent.steer(typeof input !== "string" ? input : images.length ? userMessage(input, images) : { role: "user", content: input, timestamp: Date.now() });
     return true;
+  }
+  /**
+   * Deliver a message: it steers the running turn or starts one. The check and the act share one
+   * synchronous step, so a message is never refused, never lost, and never starts a second run.
+   * Until the run's model loop can take it (or while it compacts) the message waits and joins after.
+   */
+  async send(id: string, message: AgentMessage, client: ClientAttributes = WEB): Promise<{ queued: boolean }> {
+    this.clients.set(id, client);
+    if (!this.active.has(id)) { await this.start(id, [message]); return { queued: false }; }
+    const agent = this.liveAgents.get(id);
+    if (agent && !this.compacting.has(id)) agent.steer(message);
+    else this.held.set(id, [...(this.held.get(id) ?? []), message]);
+    return { queued: true };
+  }
+  /** Gives the model loop what waited for it. */
+  private release(id: string): void {
+    const agent = this.liveAgents.get(id);
+    if (agent && !this.compacting.has(id)) for (const message of this.take(id) ?? []) agent.steer(message);
+  }
+  private take(id: string): AgentMessage[] | undefined {
+    const waiting = this.held.get(id);
+    this.held.delete(id);
+    return waiting?.length ? waiting : undefined;
   }
   triggerScribeVoiceEvidence(id: string, evidence: AgentMessage[]): void {
     if (!evidence.length) return;
@@ -123,6 +157,7 @@ export class WorkbenchRuntime {
   }
   private async main(id: string, message: string | AgentMessage[], controller: AbortController, images: string[] = []): Promise<void> {
     let system = "";
+    let ended: "completed" | "interrupted" | "failed" = "failed";
     try {
       const s = await this.store.get(id);
       const definition = await this.store.definition(s.role);
@@ -132,7 +167,7 @@ export class WorkbenchRuntime {
       if (s.role === "evaluator") system += `\n当前 Product 已由宿主固定；hatch_tool 只会运行它，不要查找或选择 Product。启动时如需 brief_answers，从案例中选择客户可见的信息作答；不能泄露评分标准。当前 Brief 字段：${JSON.stringify(this.store.scope?.briefSpec ?? null)}。`;
       const changed = () => this.emit(id, "files");
       const todosChanged = () => this.emit(id, "todos");
-      const tools = await factoryAgentTools({
+      const tools = declareTools(await factoryAgentTools({
         store: this.store,
         id,
         definition,
@@ -143,17 +178,34 @@ export class WorkbenchRuntime {
         extraTools: await this.options.extraTools?.(s, controller.signal, changed),
         grantedTools: this.options.grantedTools?.(s),
         withheldTools: await this.options.withheldTools?.(s),
-      });
+      }), this.options.toolSupport ?? everywhere, () => this.clientOf(id).client);
       const messageCount = s.messages.length;
-      const visibleMessages = await this.run(id, system, s.context, message, tools, controller, "visible", images);
-      if (s.role === "voice" && !controller.signal.aborted && !hasTrailingAskUser(visibleMessages)) {
-        const latest = await this.store.get(id);
-        const evidence = latest.messages.slice(messageCount);
-        this.triggerScribeVoiceEvidence(id, evidence);
+      let history = s.context;
+      let input = message;
+      let attachedImages = images;
+      // Messages that arrived while the loop could not take them start the next pass of this same run.
+      for (;;) {
+        const visibleMessages = await this.run(id, system, history, input, tools, controller, "visible", attachedImages);
+        const waiting = controller.signal.aborted ? undefined : this.take(id);
+        if (waiting) { history = (await this.store.get(id)).context; input = waiting; attachedImages = []; continue; }
+        if (s.role === "voice" && !controller.signal.aborted && !hasTrailingAskUser(visibleMessages)) {
+          const latest = await this.store.get(id);
+          const evidence = latest.messages.slice(messageCount);
+          this.triggerScribeVoiceEvidence(id, evidence);
+        }
+        await this.store.update(id, state => { state.status = controller.signal.aborted ? "interrupted" : "completed"; delete state.activeTool; });
+        const late = controller.signal.aborted ? undefined : this.take(id);
+        if (!late) break;
+        await this.store.update(id, state => { state.status = "running"; });
+        history = (await this.store.get(id)).context; input = late; attachedImages = [];
       }
-      await this.store.update(id, state => { state.status = controller.signal.aborted ? "interrupted" : "completed"; delete state.activeTool; });
+      ended = controller.signal.aborted ? "interrupted" : "completed";
       this.emit(id, controller.signal.aborted ? "voice.run_interrupted" : "voice.run_completed", { runId: this.runIds.get(id) });
     } catch (error) {
+      // Messages acknowledged to clients stay in history even when the run did not take them.
+      const lost = this.take(id);
+      if (lost) await this.store.update(id, state => { state.messages.push(...lost); state.context.push(...lost); }).catch(() => undefined);
+      ended = controller.signal.aborted ? "interrupted" : "failed";
       await this.store.update(id, s => {
         if (controller.signal.aborted) {
           // A user stop is a normal terminal state, not an error notice.
@@ -169,6 +221,9 @@ export class WorkbenchRuntime {
     } finally {
       this.active.delete(id);
       this.runIds.delete(id);
+      this.clients.delete(id);
+      this.held.delete(id);
+      this.emit(id, "run_end", { status: ended });
       this.emit(id, "state");
     }
   }
@@ -189,11 +244,15 @@ export class WorkbenchRuntime {
         const tokens = effective.reduce((sum, entry) => sum + estimateTokens(entry), 0);
         const forModel = async (current: AgentMessage[]) => {
           const hydrated = await hydrateImages(current, async file => (await this.store.read(id, file)).bytes);
-          const state = channel === "visible" ? await this.options.liveState?.(id) : undefined;
-          return state ? [...hydrated, { role: "user" as const, content: state, timestamp: Date.now() }] : hydrated;
+          if (channel !== "visible") return hydrated;
+          // After all history, rebuilt for every call and never stored: the cached prefix stays intact.
+          const tail = [await this.options.liveState?.(id), renderSystemReminder(this.clientOf(id))].filter(Boolean).join("\n\n");
+          return [...hydrated, { role: "user" as const, content: tail, timestamp: Date.now() }];
         };
         if (tokens < 165000) return forModel(effective);
         this.emit(id, "compacting");
+        this.compacting.add(id);
+        try {
         // Retain recent messages, cutting before an assistant/tool-call group.
         let cut = Math.max(summarizedCount, messages.length - 12);
         while (cut > summarizedCount && messages[cut]?.role === "toolResult") cut--;
@@ -208,9 +267,10 @@ export class WorkbenchRuntime {
         await persistence;
         await this.store.update(id, state => { state.context = compacted; });
         return forModel(compacted);
+        } finally { this.compacting.delete(id); this.release(id); }
       }
     } });
-    if (channel === "visible") this.liveAgents.set(id, agent);
+    if (channel === "visible") { this.liveAgents.set(id, agent); this.release(id); }
     const abort = () => agent.abort();
     controller.signal.addEventListener("abort", abort, { once: true });
     const timer = setTimeout(() => controller.abort(new Error("运行达到时间预算，可检查已有文件后继续")), this.options.deadlineMs ?? 1800000);
@@ -241,6 +301,10 @@ export class WorkbenchRuntime {
     try {
       controller.signal.throwIfAborted();
       await (typeof userText !== "string" ? agent.prompt(userText) : images.length ? agent.prompt(userMessage(userText, images)) : agent.prompt(userText));
+      // A message steered after the loop's last poll is still queued: run it. The agent leaves the live set in
+      // the same step as the last empty check, so a later message waits for the next pass instead of vanishing.
+      while (agent.hasQueuedMessages() && !controller.signal.aborted) await agent.continue();
+      if (this.liveAgents.get(id) === agent) this.liveAgents.delete(id);
       await persistence;
       if (persistenceError) throw persistenceError;
       controller.signal.throwIfAborted();

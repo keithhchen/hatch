@@ -1656,7 +1656,11 @@ export async function createDashboardApp(options = {}) {
         try {
           const upstream = await fetchImpl(new URL(url.pathname + url.search, registryUrl), {
             method: request.method,
-            headers: { authorization: `Bearer ${authentication.token}`, "content-type": "application/json" },
+            headers: {
+              authorization: `Bearer ${authentication.token}`, "content-type": "application/json",
+              // The conversation API's resume and idempotency contracts travel in headers.
+              ...Object.fromEntries(["accept", "last-event-id", "idempotency-key"].flatMap(name => request.headers[name] ? [[name, String(request.headers[name])]] : [])),
+            },
             ...(request.method === "GET" ? {} : { body: JSON.stringify(await readJson(request, factoryRequestMaxBytes)) }),
             signal: abort.signal,
             redirect: "error"
@@ -2267,22 +2271,27 @@ export async function createDashboardApp(options = {}) {
       });
       return;
     }
-    if (!/^\/v1\/creator\/products\/[^/]+\/factory-agents\/sessions\/[0-9a-f-]{36}\/voice\/live$/.test(url.pathname)) {
+    const studio = url.pathname === "/v1/creator/studio/ws";
+    if (!studio && !/^\/v1\/creator\/products\/[^/]+\/factory-agents\/sessions\/[0-9a-f-]{36}\/voice\/live$/.test(url.pathname)) {
       throw Object.assign(new Error("Unknown WebSocket route"), { status: 404 });
     }
     let requestOrigin;
     try { requestOrigin = request.headers.origin ? new URL(request.headers.origin).origin : ""; } catch { requestOrigin = ""; }
-    if (!requestOrigin || !allowedPublicOrigins.has(requestOrigin)) {
+    // Studio's WebSocket also serves API keys, which carry no cookie and so need no origin: they sign in with a bearer header or the first message.
+    const apiKeyClient = studio && !request.headers.cookie;
+    if (!apiKeyClient && (!requestOrigin || !allowedPublicOrigins.has(requestOrigin))) {
       throw Object.assign(new Error("Cross-origin WebSocket request rejected"), { status: 403 });
     }
-    const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+    const authentication = apiKeyClient && !bearerTokenFromAuthorization(request)
+      ? {}
+      : await authenticate(request, registryUrl, fetchImpl, portalState);
     if (authentication.error) throw Object.assign(new Error(authentication.error.body?.error?.message || "Sign in to continue."), { status: authentication.error.status });
     voiceWss.handleUpgrade(request, socket, head, browser => {
       browser.on("error", () => undefined);
       const upstreamUrl = new URL(url.pathname + url.search, registryUrl);
       upstreamUrl.protocol = upstreamUrl.protocol === "https:" ? "wss:" : "ws:";
       const upstream = new WebSocket(upstreamUrl, {
-        headers: { authorization: `Bearer ${authentication.token}` },
+        headers: authentication.token ? { authorization: `Bearer ${authentication.token}` } : {},
         handshakeTimeout: 20_000,
         maxPayload: 128 * 1024,
       });
@@ -2694,7 +2703,7 @@ function decryptOAuthSecret(value, key) {
 }
 
 /** Conversation API: a Product's workers and the Assistant's conversation. Streamed through to Registry as is. */
-const CONVERSATION_PATH = /^\/v1\/creator\/(?:products\/[^/]+\/workers(?:\/[^/]+\/(?:messages|events|stop))?|assistant\/conversation\/(?:messages|events|stop))$/;
+const CONVERSATION_PATH = /^\/v1\/creator\/(?:products\/[^/]+\/workers(?:\/[^/]+\/(?:messages|events|stop|snapshot))?|assistant\/conversation\/(?:messages|events|stop|snapshot))$/;
 
 function oauthEndpointScope(request) {
   const method = String(request.method ?? "GET").toUpperCase();
@@ -2711,6 +2720,7 @@ function oauthEndpointScope(request) {
     if (method === "PATCH") return "creator:products:write";
     return undefined;
   }
+  if (pathname === "/v1/creator/studio/ws") return "creator:products:read";
   if (CONVERSATION_PATH.test(pathname)) return method === "GET" ? "creator:products:read" : method === "POST" ? "creator:products:write" : undefined;
   const fileMatch = pathname.match(/^\/v1\/creator\/products\/[^/]+\/files(?:\/[^/]+)?$/);
   if (fileMatch) {

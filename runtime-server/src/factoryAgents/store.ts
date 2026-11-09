@@ -18,7 +18,9 @@ export type Comment = { id: string; path: string; start: number; end: number; qu
 export type FactoryProductScope = { creatorId: string; productId: string; briefSpec?: unknown };
 export type AgentDefinitionSource = { list(): Promise<Array<{ role: AnyRole; systemPrompt: string; tools: string[]; dependencies: { required: Role[]; normal: Role[]; updates: Role[] } }>> };
 /** Where a user message in history came from. The model reads its text; the chat shows only what the Expert said. */
-export type MessageOrigin = { kind: "expert" | "system"; itemId: string; text?: string; images?: string[] };
+export type MessageOrigin = { kind: "expert" | "system"; itemId: string; text?: string; images?: string[];
+  /** Assets the client sent with the message. */
+  attachments?: Array<{ type: "image" | "file" | "audio"; name: string; assetId: string }> };
 
 export type IngressItem = {
   id: string; at: string;

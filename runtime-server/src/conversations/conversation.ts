@@ -2,27 +2,44 @@
  * A conversation with something that works for the Expert: a Product worker or the Assistant.
  * Outside agents see every conversation through this one port and this one message shape.
  */
+import type { ClientAttributes } from "../surfaces/contract.js";
+
 export type PublicMessage = {
   id: string;
   role: "user" | "assistant";
   text: string;
   created_at: string;
-  attachments?: Array<{ type: "image"; name: string }>;
+  attachments?: Array<{ type: "image" | "file" | "audio"; name: string; asset_id?: string }>;
+};
+
+/** An asset the upload side has finished with. Bytes live in the workspace at `path`; the model reads them there. */
+export type ReadyAsset = { id: string; kind: "image" | "file" | "audio"; name: string; mimeType: string; bytes: number; sha256: string; path: string; transcript?: string };
+
+/** What a client sent, with every attachment already resolved to a ready asset. */
+export type SendInput = {
+  /** Assigned by the host; it is the message id in history. */
+  id: string;
+  text: string;
+  attachments: ReadyAsset[];
+  client: ClientAttributes;
+  /** The client's idempotency key. Without one a repeated send is a new message. */
+  key?: string;
 };
 
 export type ConversationState = "idle" | "running" | "failed";
 export type ConversationStatus = { state: ConversationState; error?: string };
 export type Sent = { conversationId: string; message: PublicMessage; queued: boolean };
 export type ConversationEvent = { type: string; [key: string]: unknown };
-/** Subscribers get events until they call the returned function. */
 export type Unsubscribe = () => void;
 
 export interface Conversation {
   status(): Promise<ConversationStatus>;
   /** Oldest first. Without `after`, the latest `limit`; with it, the first `limit` messages after that id. */
   messages(after?: string, limit?: number): Promise<{ status: ConversationStatus; messages: PublicMessage[] }>;
-  send(content: string): Promise<Sent>;
-  events(listener: (event: ConversationEvent) => void): Promise<Unsubscribe>;
+  /** Atomic: the message steers the running turn or starts one, and is never lost. */
+  send(input: SendInput): Promise<Sent>;
+  /** Key of this conversation's event log; nothing until the conversation exists. */
+  feedKey(): Promise<string | undefined>;
   stop(): Promise<void>;
 }
 
