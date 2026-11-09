@@ -19,6 +19,12 @@ import { CredentialSeal } from "./assistant/channelCredentials.js";
 import { IMessageChannel } from "./channels/imessageChannel.js";
 import { LarkChannel, type LarkCredentials } from "./channels/larkChannel.js";
 import { LineChannel } from "./channels/lineChannel.js";
+import { guarded } from "./channels/eligibility.js";
+import { InstagramChannel } from "./channels/instagramChannel.js";
+import { MessengerChannel } from "./channels/messengerChannel.js";
+import { SlackChannel } from "./channels/slackChannel.js";
+import { configuredTokens } from "./channels/tenantTokens.js";
+import { WhatsAppChannel, whatsappEligibility } from "./channels/whatsappChannel.js";
 import { TelegramChannel } from "./channels/telegramChannel.js";
 import { PostgresTaskRepository } from "./assistant/tasks.js";
 import type { AgentCatalog, AgentChange, CatalogAgent } from "./assistant/catalog.js";
@@ -250,11 +256,22 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       projectSecret: environment.HATCH_PHOTON_PROJECT_SECRET?.trim() || undefined,
       address: environment.HATCH_IMESSAGE_ADDRESS?.trim() || undefined,
     });
+    // One app serves many tenants (workspaces, Pages, numbers). Each needs its token, and an adapter without credentials is unavailable.
+    const env = (name: string) => environment[name]?.trim() || undefined;
+    const slack = new SlackChannel({
+      signingSecret: env("HATCH_SLACK_SIGNING_SECRET"), clientId: env("HATCH_SLACK_CLIENT_ID"), clientSecret: env("HATCH_SLACK_CLIENT_SECRET"), redirectUri: env("HATCH_SLACK_REDIRECT_URI"),
+      tokens: configuredTokens(env("HATCH_SLACK_BOT_TOKENS")),
+    });
+    const whatsapp = new WhatsAppChannel({ appSecret: env("HATCH_WHATSAPP_APP_SECRET"), verifyToken: env("HATCH_WHATSAPP_VERIFY_TOKEN"), tokens: configuredTokens(env("HATCH_WHATSAPP_TOKENS")) });
+    const instagram = new InstagramChannel({ appSecret: env("HATCH_INSTAGRAM_APP_SECRET"), verifyToken: env("HATCH_INSTAGRAM_VERIFY_TOKEN"), tokens: configuredTokens(env("HATCH_INSTAGRAM_TOKENS")) });
+    const messenger = new MessengerChannel({ appSecret: env("HATCH_MESSENGER_APP_SECRET"), verifyToken: env("HATCH_MESSENGER_VERIFY_TOKEN"), tokens: configuredTokens(env("HATCH_MESSENGER_TOKENS")) });
+    // Platform rules sit in front of every Agent: WhatsApp serves only Products that were reviewed as task-specific.
+    const eligibility = { whatsapp: whatsappEligibility(new Set((env("HATCH_WHATSAPP_REVIEWED_PRODUCTS") ?? "").split(",").map(id => id.trim()).filter(Boolean))) };
     // Lark has no shared bot: a custom app works in one enterprise, so each Expert brings theirs.
     const sealKey = environment.HATCH_CREDENTIALS_KEY?.trim();
     const seal = sealKey ? new CredentialSeal(sealKey) : undefined;
     const larkApps = new Map<string, { sealed: string; adapter: LarkChannel }>();
-    const hub = new ChannelHub([telegram, line, imessage], async (kind, accountId) => {
+    const hub = new ChannelHub([telegram, line, imessage, slack, whatsapp, instagram, messenger], async (kind, accountId) => {
       if (kind !== "lark" || !seal) return undefined;
       const sealed = await stores.connections.credentials(accountId, "lark");
       if (!sealed) return undefined;
@@ -283,8 +300,8 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       },
       productPrefix: (accountId, productId) => `${productsPrefix}/${accountId}/${productId}`,
     });
-    // Product Connections have no handler until the Chat API's gateway is registered here.
-    channels.register("assistant", new AssistantTarget(assistant)).start();
+    // Product Connections have no handler until the Chat API's gateway is registered here, also through `guarded(..., eligibility)`.
+    channels.register("assistant", guarded(new AssistantTarget(assistant), eligibility)).start();
     Object.assign(registryContext, { assistant, ingest, channels, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin });
     studio.recordAssistant();
     // A platform that pushes over its own connection runs here, in one process at a time. A dropped connection comes back.
