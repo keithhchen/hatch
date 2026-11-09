@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile, readdir, rm } from "node:fs/promises";
 import type { Pool } from "pg";
+import type { ChannelKind } from "../channels/types.js";
 import path from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { atomicWrite } from "./files.js";
@@ -24,7 +25,7 @@ export type MessageOrigin = { kind: "expert" | "system"; itemId: string; text?: 
 
 export type IngressItem = {
   id: string; at: string;
-  source: "web" | "telegram" | "line" | "lark" | "imessage" | "task" | "tick" | "consumer";
+  source: "web" | ChannelKind | "task" | "tick" | "consumer";
   text: string;
   /** Workspace paths of images that came with this item. */
   images?: string[];
@@ -36,7 +37,7 @@ export type AssistantDeskState = {
   ingress: IngressItem[];
   seenEvents: string[];
   interview?: { taskId: string; productId: string; sessionId: string; relayFrom: number };
-  lastExpert?: { source: "web" | "telegram" | "line" | "lark" | "imessage"; at: string; messageRef?: string; };
+  lastExpert?: { source: "web" | ChannelKind; at: string; messageRef?: string; };
 };
 export type Session = {
   id: string; role: AnyRole; title: string; createdAt: string; updatedAt: string;

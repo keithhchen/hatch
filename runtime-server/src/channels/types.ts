@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import type { ChannelAddress, ChannelCapabilities, DeliveryFailure } from "../surfaces/contract.js";
 
-export const CHANNEL_KINDS = ["telegram", "line", "lark", "imessage"] as const;
+export const CHANNEL_KINDS = ["telegram", "line", "lark", "imessage", "slack", "whatsapp", "instagram", "messenger"] as const;
 export type ChannelKind = typeof CHANNEL_KINDS[number];
-export const CHANNEL_LABELS: Record<ChannelKind, string> = { telegram: "Telegram", line: "LINE", lark: "Lark", imessage: "iMessage" };
+export const CHANNEL_LABELS: Record<ChannelKind, string> = { telegram: "Telegram", line: "LINE", lark: "Lark", imessage: "iMessage", slack: "Slack", whatsapp: "WhatsApp", instagram: "Instagram", messenger: "Messenger" };
 export const isChannelKind = (value: string): value is ChannelKind => (CHANNEL_KINDS as readonly string[]).includes(value);
 
 export type TaskButtonAction = "approve" | "decline";
