@@ -21,6 +21,8 @@ export type InboundEvent = {
   address: PlatformAddress;
   /** The platform tenant the event belongs to. Absent: the adapter's own scope. A platform whose one endpoint serves many tenants sets it per event. */
   scope?: string;
+  /** The platform refuses any message to this thread (such as another tenant's one-to-one chat): stored, never routed, never answered. */
+  unreachable?: true;
   /** A group thread. Group messages reach us only when they address the bot (a mention, or a reply to it). */
   group?: true;
   text?: string;
@@ -50,6 +52,9 @@ export async function guardSend<T>(what: string, request: () => Promise<T>): Pro
   }
 }
 
+/** A platform that only notifies: what to pull. `key` names an independent cursor; `hint` is platform data the pull needs, such as the callback token. */
+export type PullNotice = { key: string; hint?: string };
+
 /**
  * Port: one messaging platform. Everything above it knows nothing else about the platform.
  * Webhook platforms implement verify and parse; a platform that pushes over its own connection implements listen.
@@ -63,8 +68,10 @@ export interface ChannelAdapter {
   available(): boolean;
   /** `query` is the URL's query string, where some platforms put the signature. */
   verify?(raw: Buffer, headers: Record<string, string | string[] | undefined>, query?: URLSearchParams): boolean;
-  /** respond is the body the platform expects, such as a URL challenge. A platform that only notifies pulls its messages here. */
-  parse?(raw: Buffer): { events: InboundEvent[]; respond?: unknown } | Promise<{ events: InboundEvent[]; respond?: unknown }>;
+  /** respond is the body the platform expects, such as a URL challenge. A platform that only notifies returns `pull` instead of events. */
+  parse?(raw: Buffer): { events: InboundEvent[]; respond?: unknown; pull?: PullNotice } | Promise<{ events: InboundEvent[]; respond?: unknown; pull?: PullNotice }>;
+  /** After the platform is answered: one full pull from `cursor`, following every page, returning the final cursor. It changes nothing in the adapter, so a failed pull can be repeated. */
+  pull?(notice: PullNotice, cursor: string | undefined): Promise<{ events: InboundEvent[]; cursor: string }>;
   /** Answers a GET the platform makes to prove the URL is ours: the plain text to return, or undefined to refuse. */
   challenge?(query: URLSearchParams): string | undefined;
   listen?(onEvents: (events: InboundEvent[]) => Promise<void>, signal: AbortSignal): Promise<void>;

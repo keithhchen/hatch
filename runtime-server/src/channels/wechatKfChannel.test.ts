@@ -46,8 +46,7 @@ test("identity and capabilities: no links, 48 hours, text counted in characters 
   assert.equal(channel.maxFileBytes, 20 * 1024 * 1024);
   assert.equal(channel.connectUrl("HATCH-ABCDEFGH"), undefined);
   assert.equal("chatUrl" in channel, false);
-  assert.deepEqual(channel.capabilities(), { stream: false, edit: false, typing: false, buttons: false, maxLength: 682, canInitiate: false, replyWindowMs: 48 * 3600_000, idempotentSend: true });
-  assert.ok(Buffer.byteLength("好".repeat(682)) <= 2048);
+  assert.deepEqual(channel.capabilities(), { stream: false, edit: false, typing: false, buttons: false, maxLength: 2048, maxBytes: 2048, canInitiate: false, replyWindowMs: 48 * 3600_000, replyAllowance: 5, idempotentSend: true });
 });
 
 test("verify: the signature covers the body's Encrypt", () => {
@@ -75,36 +74,51 @@ test("challenge: a signed echostr is decrypted, anything else is refused", () =>
   assert.equal(new WeChatKfChannel({ ...CREDENTIALS, encodingAesKey: "short" }, "acct").challenge(query()), undefined);
 });
 
-test("parse pulls with the callback's token and open_kfid, then continues from the cursor", async () => {
-  const { channel, only } = kf((_url, _body, index) => page([message(`m${index}`)], `cursor-${index}`));
-  const first = await channel.parse(callback("t1").raw);
-  assert.deepEqual(first.events, [{ eventId: "m1", address: FROM, messageRef: "m1", text: "hi" }]);
-  assert.deepEqual(only("sync_msg")[0]?.body, { open_kfid: "wkf1", token: "t1", limit: 1000, voice_format: 0 });
-  assert.equal(only("sync_msg")[0]?.url, "https://qyapi.weixin.qq.com/cgi-bin/kf/sync_msg?access_token=at-1");
-  await channel.parse(callback("t2").raw);
-  assert.deepEqual(only("sync_msg")[1]?.body, { open_kfid: "wkf1", token: "t2", limit: 1000, voice_format: 0, cursor: "cursor-1" });
-  await channel.parse(callback("t3", "wkf2").raw);
-  assert.equal(only("sync_msg")[2]?.body.cursor, undefined);
+const notice = (token = "t1", key = "wkf1") => ({ key, hint: token });
+
+test("parse only reads the callback: it names what to pull and touches no network", () => {
+  const { channel, calls } = kf(() => ok());
+  assert.deepEqual(channel.parse(callback("t1").raw), { events: [], pull: { key: "wkf1", hint: "t1" } });
+  assert.deepEqual(channel.parse(callback("t2", "wkf2").raw), { events: [], pull: { key: "wkf2", hint: "t2" } });
+  assert.equal(calls.length, 0);
 });
 
-test("parse keeps pulling while has_more is 1, even over an empty page", async () => {
+test("pull uses the notice's token and open_kfid, starts at the given cursor and returns the new one", async () => {
+  const { channel, only } = kf(() => page([message("m1")], "cursor-1"));
+  assert.deepEqual(await channel.pull(notice("t1"), undefined), { events: [{ eventId: "m1", address: FROM, messageRef: "m1", text: "hi" }], cursor: "cursor-1" });
+  assert.deepEqual(only("sync_msg")[0]?.body, { open_kfid: "wkf1", token: "t1", limit: 1000, voice_format: 0 });
+  assert.equal(only("sync_msg")[0]?.url, "https://qyapi.weixin.qq.com/cgi-bin/kf/sync_msg?access_token=at-1");
+  assert.equal((await channel.pull(notice("t2"), "cursor-1")).cursor, "cursor-1");
+  assert.deepEqual(only("sync_msg")[1]?.body, { open_kfid: "wkf1", token: "t2", limit: 1000, voice_format: 0, cursor: "cursor-1" });
+});
+
+test("pull keeps no state: the same cursor gives the same request again", async () => {
+  const { channel, only } = kf(() => page([message("m1")], "c9"));
+  await channel.pull(notice(), "c1");
+  await channel.pull(notice(), "c1");
+  assert.deepEqual(only("sync_msg").map(call => call.body.cursor), ["c1", "c1"]);
+});
+
+test("pull keeps going while has_more is 1, even over an empty page, and returns the last cursor", async () => {
   const pages = [page([message("m1")], "c1", 1), page([], "c2", 1), page([message("m2")], "c3", 0)];
   const { channel, only } = kf((_url, _body, index) => pages[index - 1]!);
-  assert.deepEqual((await channel.parse(callback().raw)).events.map(event => event.eventId), ["m1", "m2"]);
+  const pulled = await channel.pull(notice(), undefined);
+  assert.deepEqual(pulled.events.map(event => event.eventId), ["m1", "m2"]);
+  assert.equal(pulled.cursor, "c3");
   assert.deepEqual(only("sync_msg").map(call => call.body.cursor), [undefined, "c1", "c2"]);
 });
 
-test("a failed pull keeps the old cursor, so nothing is skipped", async () => {
+test("a failed pull throws and returns no cursor, so the caller starts again from the same place", async () => {
   const answers = [page([message("m1")], "c1", 1), reply(-1), page([message("m1"), message("m2")], "c2")];
   const { channel, only } = kf((_url, _body, index) => answers[index - 1]!);
-  await assert.rejects(channel.parse(callback().raw));
-  assert.deepEqual((await channel.parse(callback().raw)).events.map(event => event.eventId), ["m1", "m2"]);
+  await assert.rejects(channel.pull(notice(), undefined));
+  assert.deepEqual((await channel.pull(notice(), undefined)).events.map(event => event.eventId), ["m1", "m2"]);
   assert.equal(only("sync_msg")[2]?.body.cursor, undefined);
 });
 
-test("other notifications pull nothing", async () => {
+test("other notifications name nothing to pull", () => {
   const { channel, calls } = kf(() => ok());
-  assert.deepEqual(await channel.parse(callback("t", "wkf1", "something_else").raw), { events: [] });
+  assert.deepEqual(channel.parse(callback("t", "wkf1", "something_else").raw), { events: [] });
   assert.equal(calls.length, 0);
 });
 
@@ -121,7 +135,7 @@ test("customer messages map to one event each; system and staff messages are ski
     { ...message("m9"), external_userid: "" },
   ];
   const { channel } = kf(() => page(list));
-  const { events } = await channel.parse(callback().raw);
+  const { events } = await channel.pull(notice(), undefined);
   const mapped = (id: string) => events.find(event => event.eventId === id);
   assert.deepEqual(mapped("m1")?.file, { ref: "mi", name: "photo.jpg" });
   assert.deepEqual(mapped("m2")?.file, { ref: "mv", name: "voice.amr" });
@@ -136,11 +150,11 @@ test("customer messages map to one event each; system and staff messages are ski
 test("the access token is cached, and a stale one is replaced once", async () => {
   const counter = { n: 0 };
   const { channel, calls } = kf((_url, _body, index) => index === 1 ? reply(42001) : page([message("m1")]), tokens(counter));
-  assert.equal((await channel.parse(callback().raw)).events.length, 1);
+  assert.equal((await channel.pull(notice(), undefined)).events.length, 1);
   assert.equal(counter.n, 2);
   assert.ok(calls[0]!.url.includes("corpid=wwcorp") && calls[0]!.url.includes("corpsecret=sec"));
   assert.ok(calls[3]!.url.endsWith("access_token=at-2"));
-  await channel.parse(callback().raw);
+  await channel.pull(notice(), undefined);
   assert.equal(counter.n, 2);
 });
 
@@ -194,13 +208,12 @@ conformance("WeChat KF", {
   delivered: {
     duplicate: async () => {
       const { channel } = kf(() => page([message("m1")]));
-      const { raw } = callback();
-      return [...(await channel.parse(raw)).events, ...(await channel.parse(raw)).events];
+      return [...(await channel.pull(notice(), undefined)).events, ...(await channel.pull(notice(), undefined)).events];
     },
     ordered: async () => {
       const run = async (order: string[]) => {
         const { channel } = kf((_url, request) => page([message(request.token === "t1" ? "m1" : "m2", { external_userid: request.token === "t1" ? "wm_1" : "wm_2" })]));
-        return (await Promise.all(order.map(token => channel.parse(callback(token).raw)))).flatMap(result => result.events);
+        return (await Promise.all(order.map(token => channel.pull(notice(token), undefined)))).flatMap(result => result.events);
       };
       return [await run(["t1", "t2"]), await run(["t2", "t1"])];
     },
@@ -228,4 +241,12 @@ test("download: over the size cap is refused, by length header and by counting b
   const cap = new WeChatKfChannel(CREDENTIALS, "acct").maxFileBytes;
   await assert.rejects(kf(() => media("x", { "content-type": "image/jpeg", "content-length": String(cap + 1) })).channel.download(file), /bytes/);
   await assert.rejects(kf(() => media(Buffer.alloc(cap + 1))).channel.download(file), /bytes/);
+});
+
+test("probe proves the corp id and secret by fetching an access token, and names the failure", async () => {
+  const good = kf(() => ok());
+  await good.channel.probe();
+  assert.equal(good.only("/cgi-bin/gettoken").length, 1);
+  const bad = kf(() => ok(), () => Response.json({ errcode: 40013, errmsg: "invalid corpid" }));
+  await assert.rejects(bad.channel.probe(), /invalid corpid/);
 });

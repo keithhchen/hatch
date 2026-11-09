@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ChannelCapabilities } from "../surfaces/contract.js";
-import { ChannelSendError, failureForStatus, guardSend, lostAccess, type ChannelAdapter, type InboundEvent, type InboundFile, type OutboundMessage, type PlatformAddress } from "./types.js";
+import { ChannelSendError, failureForStatus, guardSend, lostAccess, type ChannelAdapter, type InboundEvent, type InboundFile, type OutboundMessage, type PlatformAddress, type PullNotice } from "./types.js";
 import { WeComCrypto } from "./wecomCrypto.js";
 
 /**
@@ -44,11 +44,9 @@ export class WeChatKfChannel implements ChannelAdapter {
   /** WeCom's media limits are 2 MB images and voice, 10 MB video, 20 MB files. */
   readonly maxFileBytes = 20 * 1024 * 1024;
   private cachedToken?: { value: string; expiresAt: number };
-  /** Per kf account. Lost on restart: the pull then starts at the oldest message WeCom keeps (3 days), and the inbox's UNIQUE (channel, scope, event_id) on msgid makes those repeats harmless. */
-  private cursors = new Map<string, string>();
   constructor(private credentials: WeChatKfCredentials, readonly scope: string, private fetchImpl: typeof fetch = fetch) {}
   /** Text is at most 2048 bytes and a UTF-16 unit is at most 3 of them. A reply needs the customer's last message within 48 hours, and at most 5 replies follow it (95001, permanent). */
-  capabilities(): ChannelCapabilities { return { stream: false, edit: false, typing: false, buttons: false, maxLength: 682, canInitiate: false, replyWindowMs: 48 * 3600_000, idempotentSend: true }; }
+  capabilities(): ChannelCapabilities { return { stream: false, edit: false, typing: false, buttons: false, maxLength: 2048, maxBytes: 2048, canInitiate: false, replyWindowMs: 48 * 3600_000, replyAllowance: 5, idempotentSend: true }; }
   available(): boolean { return Object.values(this.credentials).every(Boolean); }
   connectUrl(_code: string): undefined { return undefined; }
   verify(raw: Buffer, _headers: Record<string, string | string[] | undefined>, query?: URLSearchParams): boolean {
@@ -63,11 +61,11 @@ export class WeChatKfChannel implements ChannelAdapter {
     const timestamp = query.get("timestamp"); const nonce = query.get("nonce");
     try { return echostr && timestamp && nonce && this.crypto.check(query.get("msg_signature"), timestamp, nonce, echostr) ? this.crypto.decrypt(echostr) : undefined; } catch { return undefined; }
   }
-  /** The notification only says something is waiting; the messages are pulled here. */
-  async parse(raw: Buffer): Promise<{ events: InboundEvent[] }> {
+  /** The notification only says something is waiting. WeCom wants the answer within 5 seconds, so the messages are pulled after it. */
+  parse(raw: Buffer): { events: InboundEvent[]; pull?: PullNotice } {
     const xml = this.crypto.decrypt(tag(raw.toString("utf8"), "Encrypt") ?? "");
     const [event, token, openKfId] = ["Event", "Token", "OpenKfId"].map(name => tag(xml, name));
-    return { events: event === "kf_msg_or_event" && openKfId ? await this.pull(openKfId, token) : [] };
+    return { events: [], ...(event === "kf_msg_or_event" && openKfId ? { pull: { key: openKfId, ...(token ? { hint: token } : {}) } } : {}) };
   }
   async send(to: PlatformAddress, message: OutboundMessage, key: string): Promise<void> {
     const [openKfId] = to.threadId.split("|");
@@ -103,9 +101,10 @@ export class WeChatKfChannel implements ChannelAdapter {
     });
   }
   private get crypto(): WeComCrypto { return new WeComCrypto(this.credentials.token, this.credentials.encodingAesKey, this.credentials.corpId); }
-  private async pull(openKfId: string, token?: string): Promise<InboundEvent[]> {
+  /** Without a cursor the pull starts at the oldest message WeCom keeps (3 days); the inbox refuses the repeats by msgid. */
+  async pull({ key: openKfId, hint: token }: PullNotice, from: string | undefined): Promise<{ events: InboundEvent[]; cursor: string }> {
     const events: InboundEvent[] = [];
-    let cursor = this.cursors.get(openKfId);
+    let cursor = from;
     for (let more = true; more;) {
       const page = await this.call("/cgi-bin/kf/sync_msg", { open_kfid: openKfId, ...(token ? { token } : {}), ...(cursor ? { cursor } : {}), limit: 1000, voice_format: 0 });
       events.push(...(page.msg_list ?? []).flatMap(item => this.toEvent(item)));
@@ -113,9 +112,7 @@ export class WeChatKfChannel implements ChannelAdapter {
       more = page.has_more === 1 && Boolean(page.next_cursor);
       cursor = page.next_cursor ?? cursor;
     }
-    // Committed only once every page arrived: a failed pull starts again from the same place.
-    if (cursor) this.cursors.set(openKfId, cursor);
-    return events;
+    return { events, cursor: cursor ?? "" };
   }
   /** Customer messages only. Origin 4 (system events) and 5 (staff) are not the customer speaking. */
   private toEvent(item: KfMessage): InboundEvent[] {
@@ -129,6 +126,8 @@ export class WeChatKfChannel implements ChannelAdapter {
     // Menus, mini programs, merged chats and the rest arrive as an event with no text and no file.
     return [{ eventId: msgid, address: { threadId: `${kfId}|${customer}`, senderId: customer }, messageRef: msgid, ...(text ? { text } : {}), ...(kind && mediaId ? { file: { ref: mediaId, name: FILE_NAMES[kind] } } : {}) }];
   }
+  /** Whether the corp id and secret are accepted. */
+  async probe(): Promise<void> { await this.token(); }
   private async token(): Promise<string> {
     if (this.cachedToken && Date.now() < this.cachedToken.expiresAt) return this.cachedToken.value;
     const { corpId, secret } = this.credentials;

@@ -11,15 +11,14 @@ import { IngestError, IngestService } from "./ingest/service.js";
 import { publicJob } from "./ingest/job.js";
 import { AccountReach } from "./assistant/reach.js";
 import { AssistantTarget } from "./assistant/assistantTarget.js";
-import { CHANNEL_KINDS, isChannelKind, type ChannelAdapter, type ChannelKind } from "./channels/types.js";
+import { CHANNEL_KINDS, CHANNEL_LABELS, isChannelKind, type ChannelAdapter, type ChannelKind } from "./channels/types.js";
+import { ChannelListeners } from "./channels/listeners.js";
 import { ChannelHub } from "./channels/hub.js";
 import { ChannelService, openChannelStores } from "./channels/service.js";
 import { safeError } from "./factoryAgents/runtime.js";
 import { CredentialSeal } from "./assistant/channelCredentials.js";
 import { IMessageChannel } from "./channels/imessageChannel.js";
-import { LarkChannel, type LarkCredentials } from "./channels/larkChannel.js";
-import { WeChatKfChannel, type WeChatKfCredentials } from "./channels/wechatKfChannel.js";
-import { WeComBotChannel, type WeComBotCredentials } from "./channels/wecomBotChannel.js";
+import { CREDENTIAL_FORMS, readCredentials } from "./channels/credentialForms.js";
 import { LineChannel } from "./channels/lineChannel.js";
 import { TelegramChannel } from "./channels/telegramChannel.js";
 import { PostgresTaskRepository } from "./assistant/tasks.js";
@@ -227,21 +226,15 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const studio = new Studio(studioDeps(registryContext));
   const studioSockets = new StudioSockets({ studio, identify: token => identifyToken(registryContext, token) });
   let assistantTick: NodeJS.Timeout | undefined;
-  const channelListeners = new AbortController();
+  let channelListeners: ChannelListeners | undefined;
   if (registryPool) {
     const reach = new AccountReach(registryPool);
     await reach.ensureSchema();
     await PostgresWorkbenchBackend.ensureSchema(registryPool);
     const tasks = await PostgresTaskRepository.open(registryPool);
     // Lark has no shared bot, so its tenant is the Expert's account; every other platform is one shared tenant.
-    // Platforms where each Expert brings their own app: the adapter is built from their sealed credentials, and the scope is their account id.
-    const ownApps: Partial<Record<ChannelKind, (credentials: any, accountId: string) => ChannelAdapter>> = {
-      lark: (credentials: LarkCredentials, accountId) => new LarkChannel({ ...credentials, domain: "lark" }, accountId),
-      feishu: (credentials: LarkCredentials, accountId) => new LarkChannel({ ...credentials, domain: "feishu" }, accountId),
-      wecom: (credentials: WeComBotCredentials, accountId) => new WeComBotChannel(credentials, accountId),
-      wechatkf: (credentials: WeChatKfCredentials, accountId) => new WeChatKfChannel(credentials, accountId),
-    };
-    const scopeOf = (accountId: string, kind: ChannelKind) => ownApps[kind] ? accountId : "";
+    // Where each Expert brings their own app, the adapter is built from their sealed credentials and the scope is their account id.
+    const scopeOf = (accountId: string, kind: ChannelKind) => CREDENTIAL_FORMS[kind] ? accountId : "";
     const stores = await openChannelStores(registryPool, scopeOf);
     const studioUrl = environment.HATCH_STUDIO_ASSISTANT_URL?.trim() || "https://gethatchapp.com/studio/assistant";
     const telegram = new TelegramChannel({
@@ -264,13 +257,13 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     const seal = sealKey ? new CredentialSeal(sealKey) : undefined;
     const apps = new Map<string, { sealed: string; adapter: ChannelAdapter }>();
     const hub = new ChannelHub([telegram, line, imessage], async (kind, accountId) => {
-      const build = ownApps[kind];
-      if (!build || !seal) return undefined;
+      const form = CREDENTIAL_FORMS[kind];
+      if (!form || !seal) return undefined;
       const sealed = await stores.connections.credentials(accountId, kind);
       if (!sealed) return undefined;
       const cached = apps.get(`${kind}:${accountId}`);
       if (cached?.sealed === sealed) return cached.adapter;
-      const adapter = build(seal.open(sealed), accountId);
+      const adapter = form.build(seal.open(sealed), accountId);
       apps.set(`${kind}:${accountId}`, { sealed, adapter });
       return adapter;
     });
@@ -297,14 +290,13 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     channels.register("assistant", new AssistantTarget(assistant)).start();
     Object.assign(registryContext, { assistant, ingest, channels, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin });
     studio.recordAssistant();
-    // A platform that pushes over its own connection runs here, in one process at a time. A dropped connection comes back.
-    for (const adapter of hub.listeners()) void (async () => {
-      while (!channelListeners.signal.aborted) {
-        await postgresExclusive(registryPool)(`assistant-channel:${adapter.kind}`, () => adapter.listen!(events => channels.accept(adapter, events), channelListeners.signal))
-          .catch(error => console.error(`[channel ${adapter.kind}]`, safeError(error)));
-        await new Promise(resolve => setTimeout(resolve, 30_000).unref());
-      }
-    })();
+    // A platform that pushes over its own connection runs here, in one process at a time. A dropped connection comes back; credentials added or removed are picked up.
+    channelListeners = new ChannelListeners({
+      hub, connections: stores.connections, exclusive: postgresExclusive(registryPool),
+      accept: (adapter, events) => channels.accept(adapter, events),
+      onError: (key, error) => console.error(`[channel ${key}]`, safeError(error)),
+    });
+    channelListeners.start();
     assistantTick = setInterval(() => void assistant.tick().catch(error => console.error("[assistant tick]", error)), 60_000);
     assistantTick.unref();
   }
@@ -405,7 +397,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   await new Promise<void>((resolve) => server.listen(port, host, resolve));
   return { server, close: async () => {
     if (assistantTick) clearInterval(assistantTick);
-    channelListeners.abort();
+    await channelListeners?.stop();
     await registryContext.assistant?.close();
     await registryContext.channels?.close();
     immediateFactoryStop.abort();
@@ -2046,10 +2038,12 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
     if (!adapter?.parse) { sendJson(response, 404, { ok: false }); return; }
     const raw = await readRawBody(request, 2 * 1024 * 1024);
     if (!adapter.verify?.(raw, request.headers, url.searchParams)) { sendJson(response, 401, { ok: false }); return; }
-    const { events, respond } = await adapter.parse(raw);
+    const { events, respond, pull } = await adapter.parse(raw);
     // Stored before we answer, so a platform retry finds the event already here and nothing is lost if we crash.
     await channels.accept(adapter, events);
     sendJson(response, 200, respond ?? { ok: true });
+    // After the answer: the platform's deadline is short and the pull may be long.
+    if (pull) void channels.pull(adapter, pull).catch(error => console.error("[channels] pull failed", error instanceof Error ? error.message : error));
     return;
   }
   const account = await authenticate(request, response, context);
@@ -2057,7 +2051,7 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
   const channelsView = async () => (await channels.view(account.id)).map(status => ({
     kind: status.kind, available: status.available, linked: status.linked,
     ...(status.state ? { state: status.state } : {}),
-    ...(["lark", "feishu", "wecom", "wechatkf"].includes(status.kind) && context.credentialSeal ? { own_app: true, webhook_url: `${context.publicOrigin}/v1/channels/${status.kind}/${account.id}/webhook` } : {}),
+    ...(CREDENTIAL_FORMS[status.kind] && context.credentialSeal ? { own_app: true, webhook_url: `${context.publicOrigin}/v1/channels/${status.kind}/${account.id}/webhook` } : {}),
     ...(status.lastEventAt ? { last_event_at: status.lastEventAt } : {}),
   }));
   if (url.pathname === "/v1/creator/assistant" && request.method === "GET") {
@@ -2111,17 +2105,17 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
     sendJson(response, 200, { task });
     return;
   }
-  const larkCredentials = url.pathname.match(/^\/v1\/creator\/connections\/(lark|feishu)\/credentials$/);
-  if (larkCredentials && request.method === "POST") {
-    const domain = larkCredentials[1] as "lark" | "feishu";
-    if (!context.credentialSeal) { sendJson(response, 503, { error: { code: "channel_unavailable", message: "Lark is not available." } }); return; }
-    const body = await readJson(request);
-    const text = (name: string) => typeof body[name] === "string" ? (body[name] as string).trim() : "";
-    const credentials: LarkCredentials = { domain, appId: text("app_id"), appSecret: text("app_secret"), verificationToken: text("verification_token"), ...(text("encrypt_key") ? { encryptKey: text("encrypt_key") } : {}) };
-    if (!credentials.appId || !credentials.appSecret || !credentials.verificationToken) { sendJson(response, 400, { error: { code: "invalid_credentials", message: "App ID, App Secret and Verification Token are required." } }); return; }
-    try { credentials.botOpenId = await new LarkChannel(credentials, account.id).probe(); }
-    catch (cause) { sendJson(response, 422, { error: { code: "lark_probe_failed", message: cause instanceof Error ? cause.message : String(cause) } }); return; }
-    await channels.connections.saveCredentials(account.id, domain, context.credentialSeal.seal(credentials));
+  const credentialsRoute = url.pathname.match(/^\/v1\/creator\/connections\/([a-z]+)\/credentials$/);
+  const kindOfForm = credentialsRoute && isChannelKind(credentialsRoute[1]!) ? credentialsRoute[1] : undefined;
+  const form = kindOfForm && CREDENTIAL_FORMS[kindOfForm];
+  if (kindOfForm && form && request.method === "POST") {
+    if (!context.credentialSeal) { sendJson(response, 503, { error: { code: "channel_unavailable", message: `${CHANNEL_LABELS[kindOfForm]} is not available.` } }); return; }
+    const credentials = readCredentials(form, await readJson(request));
+    const adapter = credentials && form.build(credentials, account.id);
+    if (!credentials || !adapter?.available()) { sendJson(response, 400, { error: { code: "invalid_credentials", message: `${CHANNEL_LABELS[kindOfForm]} credentials are missing or malformed.` } }); return; }
+    try { Object.assign(credentials, await form.probe?.(adapter)); }
+    catch (cause) { sendJson(response, 422, { error: { code: `${kindOfForm}_probe_failed`, message: cause instanceof Error ? cause.message : String(cause) } }); return; }
+    await channels.connections.saveCredentials(account.id, kindOfForm, context.credentialSeal.seal(credentials));
     sendJson(response, 200, { channels: await channelsView() });
     return;
   }
