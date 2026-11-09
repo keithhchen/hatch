@@ -27,8 +27,10 @@ export type SendInput = {
 };
 
 export type ConversationState = "idle" | "running" | "failed";
-export type ConversationStatus = { state: ConversationState; error?: string };
-export type Sent = { conversationId: string; message: PublicMessage; queued: boolean };
+/** `runId` names the Run in progress; it is not the conversation, and a conversation has many Runs. */
+export type ConversationStatus = { state: ConversationState; error?: string; runId?: string };
+/** `runId` is the Run that took the message, when the conversation can say. */
+export type Sent = { conversationId: string; message: PublicMessage; queued: boolean; runId?: string };
 export type ConversationEvent = { type: string; [key: string]: unknown };
 export type Unsubscribe = () => void;
 

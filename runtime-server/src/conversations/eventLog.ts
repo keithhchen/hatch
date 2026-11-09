@@ -24,14 +24,32 @@ export interface EventLog {
   after(key: string, cursor: EventCursor, limit?: number): Promise<LoggedEvent[]>;
   /** The latest cursor; START when nothing was appended. */
   head(key: string): Promise<EventCursor>;
+  /**
+   * Appends `event` and runs `work` as one step: `consistent` never sees the event without what `work`
+   * stored, or the reverse. When `work` throws, nothing is appended.
+   */
+  commit<T>(key: string, event: ConversationEvent, work: () => Promise<T>): Promise<T>;
+  /** Hands `read` the head at a moment no `commit` is half done, and holds commits back until `read` is over. */
+  consistent<T>(key: string, read: (head: EventCursor) => Promise<T>): Promise<T>;
   /** Wakes `wake` when this process appends to `key`. Other processes' appends are found by reading. */
   onAppend(key: string, wake: () => void): Unsubscribe;
 }
 
-/** Single-process adapter, for tests and a Registry without a database. */
+/** Single-process adapter. Only tests construct it: a Registry without a database has no event log. */
 export class MemoryEventLog implements EventLog {
   private events = new Map<string, LoggedEvent[]>();
   private wakes = new EventEmitter().setMaxListeners(0);
+  private turns = new Map<string, Promise<unknown>>();
+
+  private exclusively<T>(key: string, step: () => Promise<T>): Promise<T> {
+    const run = (this.turns.get(key) ?? Promise.resolve()).catch(() => undefined).then(step);
+    this.turns.set(key, run);
+    return run;
+  }
+  commit<T>(key: string, event: ConversationEvent, work: () => Promise<T>): Promise<T> {
+    return this.exclusively(key, async () => { const result = await work(); await this.append(key, event); return result; });
+  }
+  consistent<T>(key: string, read: (head: EventCursor) => Promise<T>): Promise<T> { return this.exclusively(key, async () => read(await this.head(key))); }
 
   async append(key: string, event: ConversationEvent): Promise<EventCursor> {
     const list = this.events.get(key) ?? [];

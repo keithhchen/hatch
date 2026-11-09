@@ -4,6 +4,7 @@ import type { Duplex } from "node:stream";
 import { createFactoryHandler } from "./server.js";
 import type { AgentDefinitionRepository } from "./definitions.js";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
+import type { Journal } from "./journal.js";
 import type { Session } from "./store.js";
 
 export type FactoryWorkspace = Awaited<ReturnType<typeof createFactoryHandler>>;
@@ -13,7 +14,8 @@ export class FactoryAgentsService {
   private grantedTools?: (scope: { creatorId: string; productId: string }, session: Session) => AgentTool[];
   private withheldTools?: (scope: { creatorId: string; productId: string }, session: Session) => Promise<string[]>;
   private opened = new Set<(scope: { creatorId: string; productId: string }, workspace: FactoryWorkspace) => void>();
-  constructor(private root: string, private env: NodeJS.ProcessEnv, private definitions?: AgentDefinitionRepository) {}
+  /** `journal` gives each Product workspace its own record of Runs, so every Run is recorded from its start, however it was started. */
+  constructor(private root: string, private env: NodeJS.ProcessEnv, private definitions?: AgentDefinitionRepository, private journal?: () => Journal) {}
   /** The Assistant grants its hand-off tool to sessions it drives and observes every Product workspace it opens. */
   attachAssistant(hooks: { grantedTools: (scope: { creatorId: string; productId: string }, session: Session) => AgentTool[]; withheldTools: (scope: { creatorId: string; productId: string }, session: Session) => Promise<string[]>; opened: (scope: { creatorId: string; productId: string }, workspace: FactoryWorkspace) => void }): void {
     this.grantedTools = hooks.grantedTools;
@@ -30,7 +32,7 @@ export class FactoryAgentsService {
     const key = `${creatorId}/${productId}`;
     let pending = this.products.get(key);
     if (!pending) {
-      pending = createFactoryHandler({ root: path.join(this.root, creatorId, productId), scope, definitions: this.definitions, grantedTools: session => this.grantedTools?.({ creatorId, productId }, session) ?? [], withheldTools: async session => await this.withheldTools?.({ creatorId, productId }, session) ?? [], env: {
+      pending = createFactoryHandler({ root: path.join(this.root, creatorId, productId), scope, definitions: this.definitions, runtime: this.journal ? { journal: this.journal() } : undefined, grantedTools: session => this.grantedTools?.({ creatorId, productId }, session) ?? [], withheldTools: async session => await this.withheldTools?.({ creatorId, productId }, session) ?? [], env: {
         ...this.env,
         HATCH_FACTORY_AUTH_TOKEN: undefined,
         HATCH_FACTORY_CREATOR_TOKEN: token,

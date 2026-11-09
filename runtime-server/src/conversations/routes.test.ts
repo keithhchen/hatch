@@ -9,6 +9,7 @@ import type { AssistantHost } from "./assistantConversation.js";
 import type { AssetResolver } from "./assets.js";
 import type { ReadyAsset } from "./conversation.js";
 import { MemoryEventLog } from "./eventLog.js";
+import { EventLogJournal } from "./journal.js";
 import { MemoryMessageLedger } from "./ledger.js";
 import { ConversationRoutes } from "./routes.js";
 import type { WorkerWorkspace } from "./workerConversation.js";
@@ -23,7 +24,10 @@ function session(role: Role, patch: Partial<Session> = {}): Session {
 const assistantLine = (text: string): AgentMessage => ({ role: "assistant", content: [{ type: "text", text }], timestamp: 5, stopReason: "stop" }) as unknown as AgentMessage;
 
 class FakeWorkspace implements WorkerWorkspace {
+  /** Like the real runtime, it journals its own events from the start, whatever route is or is not watching. */
+  constructor(log: MemoryEventLog) { const journal = new EventLogJournal(log, event => event.sessionId); this.events.on("event", event => journal.append(event)); }
   sessions: Session[] = [];
+  private runs = new Map<string, string>();
   started: Array<{ id: string; text: string }> = [];
   steered: string[] = [];
   stopped: string[] = [];
@@ -43,12 +47,14 @@ class FakeWorkspace implements WorkerWorkspace {
       target.messages.push(message);
       if (queued) this.steered.push(id);
       else {
+        this.runs.set(id, `run-${this.started.length + 1}`);
         this.started.push({ id, text: (message as unknown as { origin: { text: string } }).origin.text });
         target.status = "running";
-        setTimeout(() => { target.messages.push(assistantLine(this.reply)); target.status = "idle"; this.events.emit("event", { sessionId: id, type: "run_end", status: "completed" }); }, this.replyAfterMs);
+        setTimeout(() => { target.messages.push(assistantLine(this.reply)); target.status = "idle"; this.runs.delete(id); this.events.emit("event", { sessionId: id, type: "run_end", status: "completed" }); }, this.replyAfterMs);
       }
-      return { queued };
+      return { queued, runId: this.runs.get(id)! };
     },
+    runId: (id: string) => this.runs.get(id),
     stop: (id: string) => { this.stopped.push(id); },
   };
   entries = async () => agentEntries(await this.definitions, this.sessions);
@@ -76,7 +82,8 @@ const NOTES: ReadyAsset = { id: "a-doc", kind: "file", name: "notes.pdf", mimeTy
 const assets: AssetResolver = { resolve: async (account, id) => account !== "a1" ? undefined : id === "a-img" ? IMAGE : id === "a-doc" ? NOTES : id === "a-wait" ? "pending" : undefined };
 
 async function harness(options: { assistant?: boolean } = { assistant: true }) {
-  const workspace = new FakeWorkspace();
+  const eventLog = new MemoryEventLog();
+  const workspace = new FakeWorkspace(eventLog);
   const assistant = new FakeAssistant();
   const routes = new ConversationRoutes({
     authenticate: async request => { const token = request.headers.authorization?.replace(/^Bearer /, ""); return token && TOKENS[token] ? { id: TOKENS[token]! } : undefined; },
@@ -86,7 +93,7 @@ async function harness(options: { assistant?: boolean } = { assistant: true }) {
     assistant: () => options.assistant === false ? undefined : assistant,
     json: (response, status, payload) => { response.writeHead(status, { "content-type": "application/json" }); response.end(JSON.stringify(payload)); },
     readJson: async request => { let body = ""; for await (const chunk of request) body += chunk; return JSON.parse(body || "{}"); },
-    eventLog: new MemoryEventLog(), ledger: new MemoryMessageLedger(), assets,
+    eventLog, ledger: new MemoryMessageLedger(), assets,
     pace: { pollMs: 5 },
   });
   const server = http.createServer((req, res) => { void routes.handle(req, res, new URL(req.url!, "http://x")).then(handled => { if (!handled) { res.writeHead(404); res.end(); } }); });
@@ -299,7 +306,6 @@ test("snapshot and events share one cursor: replay from it has no gap and no dup
   const h = await harness();
   try {
     h.workspace.sessions.push(session("research", { status: "running" }));
-    await h.call(`${root}/research/messages`); // the first access starts recording
     const emit = (type: string, extra: Record<string, unknown> = {}) => h.workspace.events.emit("event", { sessionId: "s-research", type, ...extra });
     emit("message_end"); emit("delta", { text: "Hel" }); emit("delta", { text: "lo" });
     await new Promise(resolve => setTimeout(resolve, 30));
@@ -331,7 +337,7 @@ test("wait timeout answers 202 with the run to follow; Accept: text/event-stream
     const slow = await post(h, { content: "Slow one" }, "?wait=0.02");
     assert.equal(slow.status, 202);
     const pending = await slow.json() as { run_id: string; cursor: string; status: string };
-    assert.deepEqual([pending.run_id, pending.cursor, pending.status], ["s-research", "0", "running"]);
+    assert.deepEqual([pending.run_id, pending.cursor, pending.status], ["run-1", "0", "running"], "the Run is not the conversation");
     await new Promise(resolve => setTimeout(resolve, 150));
     h.workspace.replyAfterMs = 40;
     const streamed = await post(h, { content: "Stream it" }, "", { accept: "text/event-stream" });
@@ -340,5 +346,18 @@ test("wait timeout answers 202 with the run to follow; Accept: text/event-stream
     assert.match(text, /^: connected\n\nevent: accepted\ndata: \{.*"text":"Stream it".*\}\n\n/);
     assert.match(text, /id: \d+\ndata: \{"type":"run_end","status":"completed"\}\n\n/);
     assert.match(text, /event: done\ndata: \{\}\n\n$/);
+  } finally { await h.close(); }
+});
+
+test("snapshot names the Run in progress, which is not the conversation", async () => {
+  const h = await harness();
+  try {
+    const sent = await (await post(h, { content: "Go" })).json() as { run_id: string; conversation_id: string };
+    assert.equal(sent.run_id, "run-1");
+    assert.notEqual(sent.run_id, sent.conversation_id);
+    const snapshot = await (await h.call(`${root}/research/snapshot`)).json() as { run_id?: string; status: { state: string } };
+    assert.deepEqual([snapshot.status.state, snapshot.run_id], ["running", "run-1"]);
+    await new Promise(resolve => setTimeout(resolve, 60));
+    assert.equal(((await (await h.call(`${root}/research/snapshot`)).json()) as { run_id?: string }).run_id, undefined, "no Run, no run_id");
   } finally { await h.close(); }
 });

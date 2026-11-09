@@ -24,16 +24,44 @@ export class PostgresEventLog implements EventLog {
   }
 
   /** One statement: the head row's lock makes the next seq and its commit follow each other, so a reader never skips a position. */
-  async append(key: string, event: ConversationEvent): Promise<EventCursor> {
-    const { rows } = await this.pool.query<{ seq: string }>(`
+  private async insert(db: Pick<Pool, "query">, key: string, event: ConversationEvent): Promise<EventCursor> {
+    const { rows } = await db.query<{ seq: string }>(`
       WITH next AS (
         INSERT INTO hatch_conversation_event_heads (key, seq) VALUES ($1, 1)
         ON CONFLICT (key) DO UPDATE SET seq = hatch_conversation_event_heads.seq + 1
         RETURNING seq
       )
       INSERT INTO hatch_conversation_event_log (key, seq, event) SELECT $1, seq, $2::jsonb FROM next RETURNING seq`, [key, JSON.stringify(event)]);
-    this.wakes.emit(key);
     return rows[0]!.seq;
+  }
+
+  async append(key: string, event: ConversationEvent): Promise<EventCursor> {
+    const cursor = await this.insert(this.pool, key, event);
+    this.wakes.emit(key);
+    return cursor;
+  }
+
+  /** The database decides who goes first: writers take the key's advisory lock exclusively, readers share it, and it ends with the transaction. */
+  private async locked<T>(key: string, mode: "" | "_shared", step: (db: Pick<Pool, "query">) => Promise<T>): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(`SELECT pg_advisory_xact_lock${mode}(hashtextextended($1, 0))`, [key]);
+      const result = await step(client);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; } finally { client.release(); }
+  }
+
+  /** The event is appended inside the transaction and `work` runs before it commits: a failed `work` leaves no event. */
+  async commit<T>(key: string, event: ConversationEvent, work: () => Promise<T>): Promise<T> {
+    const result = await this.locked(key, "", async db => { await this.insert(db, key, event); return work(); });
+    this.wakes.emit(key);
+    return result;
+  }
+
+  consistent<T>(key: string, read: (head: EventCursor) => Promise<T>): Promise<T> {
+    return this.locked(key, "_shared", async db => read((await db.query<{ seq: string }>("SELECT seq FROM hatch_conversation_event_heads WHERE key = $1", [key])).rows[0]?.seq ?? "0"));
   }
 
   async after(key: string, cursor: EventCursor, limit = 500): Promise<LoggedEvent[]> {

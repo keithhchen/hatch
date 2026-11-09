@@ -10,14 +10,14 @@ import { blocked, blockedBy, blockedMessage, WORKERS, type Worker, type WorkerRe
 /** The part of a Product workspace a worker conversation needs. */
 export interface WorkerWorkspace {
   store: Pick<WorkbenchStore, "list" | "create">;
-  runtime: Pick<WorkbenchRuntime, "send" | "stop" | "events">;
+  runtime: Pick<WorkbenchRuntime, "send" | "stop" | "events" | "runId">;
   entries(): Promise<AgentEntry[]>;
   /** Throws AgentDependenciesNotReadyError when the worker's dependencies have no output yet. */
   assertRoleAvailable(role: Role): Promise<void>;
 }
 
-const statusOf = (session?: Session): ConversationStatus =>
-  session?.status === "running" ? { state: "running" } : session?.status === "failed" ? { state: "failed", ...(session.error ? { error: session.error } : {}) } : { state: "idle" };
+const statusOf = (session: Session | undefined, runId?: string): ConversationStatus =>
+  session?.status === "running" ? { state: "running", ...(runId ? { runId } : {}) } : session?.status === "failed" ? { state: "failed", ...(session.error ? { error: session.error } : {}) } : { state: "idle" };
 
 /** One worker's session in a Product workspace, as a conversation. The session is created by the first message. */
 export class WorkerConversation implements Conversation {
@@ -25,11 +25,13 @@ export class WorkerConversation implements Conversation {
 
   private async session(): Promise<Session | undefined> { return (await this.workspace.store.list()).find(session => session.role === this.worker.role); }
 
-  async status(): Promise<ConversationStatus> { return statusOf(await this.session()); }
+  async status(): Promise<ConversationStatus> { return this.statusOf(await this.session()); }
+
+  private statusOf(session?: Session): ConversationStatus { return statusOf(session, session && this.workspace.runtime.runId(session.id)); }
 
   async messages(after?: string, limit?: number) {
     const session = await this.session();
-    const status = statusOf(session);
+    const status = this.statusOf(session);
     return { status, messages: session ? page(projectMessages(session.messages), after, limit) : [] };
   }
 
@@ -41,9 +43,9 @@ export class WorkerConversation implements Conversation {
     const lines = input.attachments.filter(asset => asset.kind !== "image").map(attachmentLine);
     const attachments = input.attachments.map(({ kind, name, id }) => ({ type: kind, name, assetId: id }));
     const message = userMessage([input.text, ...lines].filter(Boolean).join("\n"), images, { kind: "expert", itemId: input.id, text: input.text, attachments });
-    const { queued } = await this.workspace.runtime.send(session.id, message, input.client);
+    const { queued, runId } = await this.workspace.runtime.send(session.id, message, input.client);
     return {
-      conversationId: session.id, queued,
+      conversationId: session.id, queued, runId,
       message: { id: input.id, role: "user", text: input.text, created_at: new Date().toISOString(), ...(attachments.length ? { attachments: attachments.map(({ type, name, assetId }) => ({ type, name, asset_id: assetId })) } : {}) },
     };
   }

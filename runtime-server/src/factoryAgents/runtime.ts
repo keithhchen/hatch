@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { hydrateImages, imagesAsText, messageText, userMessage } from "./imageRefs.js";
 import { createCompactionSummaryMessage, estimateContextTokens, estimateTokens, generateSummaryWithUsage, type Agent, type AgentMessage, type AgentTool } from "@earendil-works/pi-agent-core";
@@ -10,7 +11,8 @@ import { factoryAgentTools } from "./factoryTools.js";
 import { fileTools } from "./tools.js";
 import { traceAgentTools, withLangfuseTurn, type LangfuseTurnIdentifiers } from "../langfuse.js";
 import { renderSystemReminder, type ClientAttributes } from "../surfaces/contract.js";
-import { declareTools, everywhere, type ClientSupport } from "./toolSurface.js";
+import type { Journal } from "./journal.js";
+import { declareTools, studioToolSupport, type ClientSupport } from "./toolSurface.js";
 
 const WEB: ClientAttributes = { client: "web" };
 
@@ -22,8 +24,10 @@ export type WorkbenchRuntimeOptions = {
   withheldTools?: (session: Session) => Promise<string[]>;
   /** Current state for the model, rebuilt for every model call. It never enters history, so clients never see it. */
   liveState?: (sessionId: string) => Promise<string | undefined>;
-  /** Which clients may run each tool. Defaults to every client. */
+  /** Which clients may run each tool. Defaults to what Studio declares. */
   toolSupport?: ClientSupport;
+  /** Where public events are recorded from the first Run, and where a message is persisted together with its event. */
+  journal?: Journal;
   deadlineMs?: number;
   maxTurns?: number;
 };
@@ -41,6 +45,8 @@ export class WorkbenchRuntime {
   private compacting = new Set<string>();
   /** The client of the latest message of each running conversation. */
   private clients = new Map<string, ClientAttributes>();
+  /** Messages steered into a running agent that its history does not hold yet. A failed run writes them down: an accepted message is never lost. */
+  private steered = new Map<string, Set<AgentMessage>>();
   private closing = false;
   private readonly env: NodeJS.ProcessEnv;
   constructor(readonly store: WorkbenchStore, private options: WorkbenchRuntimeOptions = {}) {
@@ -51,7 +57,19 @@ export class WorkbenchRuntime {
     return scope ? { productId: scope.productId, userId: scope.creatorId } : undefined;
   }
   private clientOf(id: string): ClientAttributes { return this.clients.get(id) ?? WEB; }
-  emit(id: string, type: string, data: Record<string, unknown> = {}): void { this.events.emit("event", { sessionId: id, type, ...data }); }
+  emit(id: string, type: string, data: Record<string, unknown> = {}): void {
+    const event = { sessionId: id, type, ...data };
+    this.options.journal?.append(event);
+    this.events.emit("event", event);
+  }
+  /** The Run in progress, if any. */
+  runId(id: string): string | undefined { return this.runIds.get(id); }
+  /** Persists a message and announces it as one step, so no reader sees the message without its event or the reverse. */
+  async commit(id: string, persist: () => Promise<unknown>): Promise<void> {
+    const event = { sessionId: id, type: "message" };
+    await (this.options.journal ? this.options.journal.commit(event, persist) : persist());
+    this.events.emit("event", event);
+  }
   async prompt(role: AnyRole, snapshot?: Awaited<ReturnType<AgentDefinitionSource["list"]>>[number]): Promise<string> {
     const definition = snapshot ?? await this.store.definition(role);
     const dependencies = definition.dependencies;
@@ -67,7 +85,7 @@ export class WorkbenchRuntime {
     if (!message.trim() || message.length > 100000) throw new Error("Provide a message of 1–100000 characters");
     if (this.active.has(id)) throw new Error("This conversation is already running");
     const controller = new AbortController();
-    const runId = `factory_${Date.now()}_${id}`;
+    const runId = `run_${randomUUID()}`;
     this.active.set(id, controller);
     this.runIds.set(id, runId);
     try {
@@ -98,13 +116,13 @@ export class WorkbenchRuntime {
    * synchronous step, so a message is never refused, never lost, and never starts a second run.
    * Until the run's model loop can take it (or while it compacts) the message waits and joins after.
    */
-  async send(id: string, message: AgentMessage, client: ClientAttributes = WEB): Promise<{ queued: boolean }> {
+  async send(id: string, message: AgentMessage, client: ClientAttributes = WEB): Promise<{ queued: boolean; runId: string }> {
     this.clients.set(id, client);
-    if (!this.active.has(id)) { await this.start(id, [message]); return { queued: false }; }
+    if (!this.active.has(id)) { await this.start(id, [message]); return { queued: false, runId: this.runIds.get(id)! }; }
     const agent = this.liveAgents.get(id);
-    if (agent && !this.compacting.has(id)) agent.steer(message);
+    if (agent && !this.compacting.has(id)) { this.steered.set(id, (this.steered.get(id) ?? new Set()).add(message)); agent.steer(message); }
     else this.held.set(id, [...(this.held.get(id) ?? []), message]);
-    return { queued: true };
+    return { queued: true, runId: this.runIds.get(id)! };
   }
   /** Gives the model loop what waited for it. */
   private release(id: string): void {
@@ -178,7 +196,7 @@ export class WorkbenchRuntime {
         extraTools: await this.options.extraTools?.(s, controller.signal, changed),
         grantedTools: this.options.grantedTools?.(s),
         withheldTools: await this.options.withheldTools?.(s),
-      }), this.options.toolSupport ?? everywhere, () => this.clientOf(id).client);
+      }), this.options.toolSupport ?? studioToolSupport, () => this.clientOf(id).client);
       const messageCount = s.messages.length;
       let history = s.context;
       let input = message;
@@ -203,8 +221,8 @@ export class WorkbenchRuntime {
       this.emit(id, controller.signal.aborted ? "voice.run_interrupted" : "voice.run_completed", { runId: this.runIds.get(id) });
     } catch (error) {
       // Messages acknowledged to clients stay in history even when the run did not take them.
-      const lost = this.take(id);
-      if (lost) await this.store.update(id, state => { state.messages.push(...lost); state.context.push(...lost); }).catch(() => undefined);
+      const lost = [...this.take(id) ?? [], ...this.steered.get(id) ?? []];
+      for (const message of lost) await this.commit(id, () => this.store.update(id, state => { state.messages.push(message); state.context.push(message); })).catch(() => undefined);
       ended = controller.signal.aborted ? "interrupted" : "failed";
       await this.store.update(id, s => {
         if (controller.signal.aborted) {
@@ -223,6 +241,7 @@ export class WorkbenchRuntime {
       this.runIds.delete(id);
       this.clients.delete(id);
       this.held.delete(id);
+      this.steered.delete(id);
       this.emit(id, "run_end", { status: ended });
       this.emit(id, "state");
     }
@@ -280,11 +299,10 @@ export class WorkbenchRuntime {
         // In stream order with the deltas, so clients settle this reply before the next one streams.
         if (channel === "visible") this.emit(id, "message_end");
         persistence = persistence.then(async () => {
-          await this.store.update(id, s => {
-            if (channel === "visible") { s.messages.push(event.message); s.context.push(event.message); }
-            else { s.scribeContext ??= []; s.scribeContext.push(event.message); }
-          });
-          if (channel === "visible") this.emit(id, "message");
+          if (channel === "visible") {
+            await this.commit(id, () => this.store.update(id, s => { s.messages.push(event.message); s.context.push(event.message); }));
+            this.steered.get(id)?.delete(event.message);
+          } else await this.store.update(id, s => { s.scribeContext ??= []; s.scribeContext.push(event.message); });
         }).catch(error => { persistenceError = error; controller.abort(); });
       }
       if (event.type === "message_update") {

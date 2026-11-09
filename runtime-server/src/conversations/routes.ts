@@ -118,7 +118,7 @@ export class ConversationRoutes {
     const cursor = feed ? await this.studio.eventLog.head(feed) : START;
     const after = wait ? (await conversation.messages(undefined, 1)).messages.at(-1)?.id : undefined;
     const sent = await conversation.send(input);
-    const accepted = { conversation_id: sent.conversationId, message: sent.message, queued: sent.queued };
+    const accepted = { conversation_id: sent.conversationId, ...(sent.runId ? { run_id: sent.runId } : {}), message: sent.message, queued: sent.queued };
     if (String(request.headers.accept).includes("text/event-stream")) { await this.streamTurn(conversation, sent.message.id, accepted, cursor, response); return; }
     if (!wait) { this.deps.json(response, 202, { ...accepted, status: "running" }); return; }
     const outcome = await awaitTurn(conversation, { sentId: sent.message.id, after, timeoutMs: Math.min(wait, MAX_WAIT_SECONDS) * 1000, ...this.deps.pace });
@@ -126,7 +126,7 @@ export class ConversationRoutes {
     this.deps.json(response, running ? 202 : 200, {
       ...accepted, status: outcome.status.state, ...(outcome.status.error ? { error: outcome.status.error } : {}), ...(outcome.reply ? { reply: outcome.reply } : {}),
       // The Run goes on without this request: follow it from `cursor`.
-      ...(running ? { run_id: sent.conversationId, cursor } : {}),
+      ...(running ? { cursor } : {}),
     });
   }
 

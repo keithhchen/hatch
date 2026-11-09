@@ -24,8 +24,8 @@ export type Target = { conversation: Conversation; maxContent: number; accountId
 const NOT_FOUND = (code: string, message: string) => new ConversationError(404, code, message);
 
 /**
- * Finds the conversation a client addressed, for every transport. Each conversation comes back
- * idempotent and recorded: what it does reaches the event log whether or not anyone is watching.
+ * Finds the conversation a client addressed, for every transport. Each conversation comes back idempotent.
+ * Recording is not done here: a Product's runtime journals every Run from its start, and the Assistant is recorded once it exists.
  */
 export class Studio {
   constructor(private deps: StudioDeps) {}
@@ -36,7 +36,6 @@ export class Studio {
     const product = await this.deps.product(accountId, productId);
     if (!product) throw NOT_FOUND("product_not_found", "Product was not found.");
     const workspace = await this.deps.workspace({ creatorId: accountId, productId, briefSpec: product.brief_spec }, token);
-    record(this.deps.eventLog, workspace.runtime.events, event => event.sessionId);
     return new WorkerDirectory(workspace);
   }
 

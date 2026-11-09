@@ -108,13 +108,12 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
           onUserTranscript: async (_conversationId, text) => appendLiveMessage(store, runtime, id, { role: "user", content: text, timestamp: Date.now() }),
           onAssistantTranscript: async (_conversationId, text) => appendLiveMessage(store, runtime, id, liveAssistantMessage(text, env.HATCH_FACTORY_LIVE_MODEL)),
           onToolStart: async (_conversationId, value) => {
-            await store.update(id, state => {
+            await runtime.commit(id, () => store.update(id, state => {
               state.activeTool = value.name;
               state.messages.push(liveToolCallMessage(value.id, value.name, value.args, env.HATCH_FACTORY_LIVE_MODEL));
               state.context.push(state.messages.at(-1)!);
-            });
+            }));
             runtime.emit(id, "tool", { name: value.name });
-            runtime.emit(id, "message");
           },
           onToolEnd: async (_conversationId, value) => {
             await appendLiveMessage(store, runtime, id, liveToolResultMessage(value.id, value.name, value.result, value.isError));
@@ -306,8 +305,7 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
 const ZERO_USAGE = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } as const;
 
 async function appendLiveMessage(store: WorkbenchStore, runtime: WorkbenchRuntime, id: string, message: AgentMessage): Promise<void> {
-  await store.update(id, state => { state.messages.push(message); state.context.push(message); });
-  runtime.emit(id, "message");
+  await runtime.commit(id, () => store.update(id, state => { state.messages.push(message); state.context.push(message); }));
 }
 
 function liveAssistantMessage(text: string, model = "gemini-3.8-live"): AgentMessage {

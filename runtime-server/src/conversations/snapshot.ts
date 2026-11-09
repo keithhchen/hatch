@@ -6,6 +6,8 @@ export type Snapshot = {
   cursor: EventCursor;
   status: ConversationStatus;
   messages: PublicMessage[];
+  /** The Run in progress, when there is one. */
+  run_id?: string;
   /** What the running turn has said so far and not yet finished saying. */
   partial: string;
 };
@@ -21,16 +23,14 @@ const partialOutput = async (log: EventLog, key: string, head: EventCursor): Pro
 };
 
 /**
- * History, state, partial output and the cursor they are consistent with.
- * The log head is read before and after history; when it moved, the read is repeated,
- * so every event after `cursor` is one the history may not yet reflect.
+ * History, state, partial output and the cursor they are consistent with: a message is in `messages`
+ * or in the events after `cursor`, never both and never neither. The log holds writers back meanwhile.
  */
 export async function snapshotOf(conversation: Conversation, log: EventLog): Promise<Snapshot> {
   const key = await conversation.feedKey();
   if (!key) return { cursor: START, status: await conversation.status(), messages: [], partial: "" };
-  for (let attempt = 0; ; attempt++) {
-    const cursor = await log.head(key);
+  return log.consistent(key, async cursor => {
     const { status, messages } = await conversation.messages(undefined, MAX_PAGE);
-    if (attempt >= 4 || await log.head(key) === cursor) return { cursor, status, messages, partial: status.state === "running" ? await partialOutput(log, key, cursor) : "" };
-  }
+    return { cursor, status, messages, ...(status.runId ? { run_id: status.runId } : {}), partial: status.state === "running" ? await partialOutput(log, key, cursor) : "" };
+  });
 }
