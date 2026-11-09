@@ -2,14 +2,14 @@ import type { WorkbenchRuntime } from "../factoryAgents/runtime.js";
 import { AgentDependenciesNotReadyError, type AgentEntry } from "../factoryAgents/definitions.js";
 import { userMessage } from "../factoryAgents/imageRefs.js";
 import type { Role, Session, WorkbenchStore } from "../factoryAgents/store.js";
-import { attachmentLine } from "./assets.js";
+import { attachmentLines } from "./assets.js";
 import { ConversationError, page, type Conversation, type ConversationStatus, type SendInput, type Sent } from "./conversation.js";
 import { projectMessages } from "./project.js";
 import { blocked, blockedBy, blockedMessage, WORKERS, type Worker, type WorkerRegistry } from "./workers.js";
 
 /** The part of a Product workspace a worker conversation needs. */
 export interface WorkerWorkspace {
-  store: Pick<WorkbenchStore, "list" | "create">;
+  store: Pick<WorkbenchStore, "list" | "create"> & { backend: Pick<WorkbenchStore["backend"], "writeManual"> };
   runtime: Pick<WorkbenchRuntime, "send" | "stop" | "events" | "runId">;
   entries(): Promise<AgentEntry[]>;
   /** Throws AgentDependenciesNotReadyError when the worker's dependencies have no output yet. */
@@ -40,7 +40,7 @@ export class WorkerConversation implements Conversation {
     await this.assertAvailable();
     const session = await this.session() ?? await this.workspace.store.create(this.worker.role);
     const images = input.attachments.filter(asset => asset.kind === "image").map(asset => asset.path);
-    const lines = input.attachments.filter(asset => asset.kind !== "image").map(attachmentLine);
+    const lines = attachmentLines(input.attachments);
     const attachments = input.attachments.map(({ kind, name, id }) => ({ type: kind, name, assetId: id }));
     const message = userMessage([input.text, ...lines].filter(Boolean).join("\n"), images, { kind: "expert", itemId: input.id, text: input.text, attachments });
     const { queued, runId } = await this.workspace.runtime.send(session.id, message, input.client);

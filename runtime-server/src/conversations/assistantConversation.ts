@@ -1,5 +1,5 @@
 import type { EventEmitter } from "node:events";
-import { attachmentLine } from "./assets.js";
+import { attachmentLines } from "./assets.js";
 import { page, type Conversation, type ConversationStatus, type PublicMessage, type SendInput, type Sent } from "./conversation.js";
 
 /** The part of the Assistant an account-level conversation needs. */
@@ -29,7 +29,7 @@ export class AssistantConversation implements Conversation {
   async send(input: SendInput): Promise<Sent> {
     const queued = (await this.status()).state === "running";
     const images = input.attachments.filter(asset => asset.kind === "image").map(asset => asset.path);
-    const text = [input.text, ...input.attachments.filter(asset => asset.kind !== "image").map(attachmentLine)].filter(Boolean).join("\n");
+    const text = [input.text, ...attachmentLines(input.attachments)].filter(Boolean).join("\n");
     await this.assistant.ingest(this.accountId, { id: input.id, source: "web", text, ...(images.length ? { images } : {}) });
     return { conversationId: this.accountId, queued, message: { id: input.id, role: "user", text: input.text, created_at: new Date().toISOString() } };
   }

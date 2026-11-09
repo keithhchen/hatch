@@ -1,22 +1,39 @@
+import type { AssetScope } from "../assets/domain.js";
 import { ConversationError, type ReadyAsset } from "./conversation.js";
 import type { ContentPart } from "../surfaces/contract.js";
 
-/** Resolves an uploaded asset for an account. Implemented by the upload side; nothing here knows how assets are stored. */
+/** Resolves an uploaded asset in one conversation's scope. Nothing here knows how assets are stored. */
 export interface AssetResolver {
-  /** The asset when it exists, belongs to the account and is ready; `pending` when it exists but is not ready yet. */
-  resolve(accountId: string, assetId: string): Promise<ReadyAsset | "pending" | undefined>;
+  /** The asset when it exists in the scope and is ready; `pending` when it exists but is not ready yet. */
+  resolve(scope: AssetScope, assetId: string): Promise<ReadyAsset | "pending" | undefined>;
+  /** Puts what the model reads where it reads it. Runs before the message is delivered, and is safe to repeat. */
+  stage(scope: AssetScope, assets: readonly ReadyAsset[]): Promise<void>;
+  /** Binds the assets to the message that was accepted. Safe to repeat for the same message. */
+  attach(scope: AssetScope, assets: readonly ReadyAsset[], messageId: string): Promise<void>;
 }
+
+export type UploadedAsset = { asset_id: string; kind: ReadyAsset["kind"]; name: string; bytes: number; state: "ready" | "processing" };
+
+/** Takes a file from a client. A file that cannot become a ready asset is refused with a ConversationError saying why. */
+export interface AssetUploader {
+  upload(scope: AssetScope, input: { name: string; bytes: Buffer }): Promise<UploadedAsset>;
+}
+
+export type AssetDesk = AssetResolver & AssetUploader;
+
+/** What a conversation offers for attachments: the scope they live in and the desk that handles them. */
+export type AssetShelf = { scope: AssetScope; desk: AssetDesk };
 
 export type Content = { text: string; attachments: ReadyAsset[] };
 
 /** The ContentPart[] a client sent, as text plus ready assets. Voice messages count as their transcript. */
-export async function resolveContent(parts: readonly ContentPart[], accountId: string, assets: AssetResolver | undefined): Promise<Content> {
+export async function resolveContent(parts: readonly ContentPart[], shelf: AssetShelf | undefined): Promise<Content> {
   const texts: string[] = [];
   const attachments: ReadyAsset[] = [];
   for (const part of parts) {
     if (part.type === "text") { texts.push(part.text); continue; }
-    if (!assets) throw new ConversationError(501, "attachments_unavailable", "This server cannot accept attachments.");
-    const asset = await assets.resolve(accountId, part.assetId);
+    if (!shelf) throw new ConversationError(501, "attachments_unavailable", "This conversation cannot take attachments.");
+    const asset = await shelf.desk.resolve(shelf.scope, part.assetId);
     if (!asset) throw new ConversationError(404, "asset_not_found", `No asset ${part.assetId}.`);
     if (asset === "pending") throw new ConversationError(409, "asset_not_ready", `Asset ${part.assetId} is not ready yet. Send the message when it is.`);
     if (asset.kind !== part.type) throw new ConversationError(400, "asset_kind_mismatch", `Asset ${part.assetId} is a ${asset.kind}, not an ${part.type}.`);
@@ -35,5 +52,7 @@ export function parseContent(value: unknown): ContentPart[] {
   return parts as ContentPart[];
 }
 
-/** How the model sees an attachment that is not pixels: one line. */
-export const attachmentLine = (asset: ReadyAsset): string => `[${asset.kind}: ${asset.name} (${asset.mimeType}, ${asset.bytes} bytes) at ${asset.path}]`;
+/** How the model sees an attachment that is not pixels: one line. A voice message is its transcript, so it has none. */
+export const attachmentLines = (assets: readonly ReadyAsset[]): string[] => assets.filter(asset => asset.kind === "file").map(attachmentLine);
+
+const attachmentLine = (asset: ReadyAsset): string => `[${asset.kind}: ${asset.name} (${asset.mimeType}, ${asset.bytes} bytes) at ${asset.path}]`;
