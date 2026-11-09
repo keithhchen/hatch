@@ -141,7 +141,7 @@ export class LarkChannel implements ChannelAdapter {
     if (group && (!botOpenId || !message.mentions?.some(mention => mention.id?.open_id === botOpenId))) return { events: [] };
     // Another enterprise's user cannot be answered in a one-to-one chat (230038).
     const tenant = body.event?.sender?.tenant_key;
-    if (!group && tenant && body.header?.tenant_key && tenant !== body.header.tenant_key) return { events: [] };
+    const unreachable = !group && Boolean(tenant && body.header?.tenant_key && tenant !== body.header.tenant_key);
     const messageId = message.message_id;
     const content = JSON.parse(message.content || "{}") as LarkContent;
     const named = (value: string) => (message.mentions ?? []).reduce((result, mention) => result.replaceAll(mention.key, mention.id?.open_id === botOpenId ? "" : `@${mention.name ?? ""}`), value).trim();
@@ -150,7 +150,7 @@ export class LarkChannel implements ChannelAdapter {
     const file = message.message_type === "image" && content.image_key ? { ref: `${messageId}|${content.image_key}|image`, name: "photo.jpg" }
       : content.file_key && ["file", "audio", "media"].includes(message.message_type) ? { ref: `${messageId}|${content.file_key}|file`, name: content.file_name ?? (message.message_type === "audio" ? "voice.opus" : "file") } : undefined;
     // Lark says to dedupe on message_id, not event_id.
-    return { events: [{ eventId: messageId, address: { threadId: group ? message.chat_id ?? id : id, senderId: id }, ...(group ? { group: true as const } : {}), messageRef: messageId, ...(text ? { text } : {}), ...(file ? { file } : {}) }] };
+    return { events: [{ eventId: messageId, address: { threadId: group ? message.chat_id ?? id : id, senderId: id }, ...(group ? { group: true as const } : {}), ...(unreachable ? { unreachable: true as const } : {}), messageRef: messageId, ...(text ? { text } : {}), ...(file ? { file } : {}) }] };
   }
   async send(to: PlatformAddress, message: OutboundMessage, key: string): Promise<void> {
     const buttons = message.buttons ?? [];

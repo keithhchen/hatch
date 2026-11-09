@@ -47,11 +47,11 @@ test("other people mentioned in a group message stay in the text by name", () =>
   assert.equal(channel().parse(group("@_user_1 问问 @_user_2", [BOT, ANN])).events[0]?.text, "问问 @Ann");
 });
 
-test("a cross-tenant sender in a one-to-one chat is not answered, since Feishu refuses the reply", () => {
-  assert.deepEqual(channel().parse(receive({}, { tenant_key: "t2" })).events, []);
-  assert.equal(channel().parse(receive({})).events.length, 1);
+test("a cross-tenant sender in a one-to-one chat is kept but marked unreachable, since Feishu refuses any reply", () => {
+  assert.deepEqual(channel().parse(receive({}, { tenant_key: "t2" })).events, [{ eventId: "om_1", address: TO, messageRef: "om_1", text: "hi", unreachable: true }]);
+  assert.equal(channel().parse(receive({})).events[0]?.unreachable, undefined);
   // An external group can be answered once its owner shares it with the bot.
-  assert.equal(channel().parse(receive({ chat_type: "group", content: JSON.stringify({ text: "@_user_1 hi" }), mentions: [BOT] }, { tenant_key: "t2" })).events.length, 1);
+  assert.equal(channel().parse(receive({ chat_type: "group", content: JSON.stringify({ text: "@_user_1 hi" }), mentions: [BOT] }, { tenant_key: "t2" })).events[0]?.unreachable, undefined);
 });
 
 test("voice and video messages are files", () => {

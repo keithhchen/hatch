@@ -19,6 +19,7 @@ export class ChannelRouter {
   async route(item: InboxItem): Promise<Handled & { connectionId?: string }> {
     const { channel, scope, event } = item;
     const { connections } = this.deps;
+    if (event.unreachable) return { replied: true };
     const say = (text: string, connectionId?: string) => this.deps.notify({ ...(connectionId ? { connectionId } : {}), channel, scope, address: event.address }, text, event.messageRef);
     // A code binds the sender's private chat; posted in a group it would make the group the Expert's home.
     const code = event.button || event.group ? undefined : event.text?.match(LINK_CODE_PATTERN)?.[0];

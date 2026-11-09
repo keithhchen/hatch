@@ -36,8 +36,8 @@ export class WeComBotChannel implements ChannelAdapter {
   /** Media goes up to 100 MB; this is our cap, enforced in download. */
   readonly maxFileBytes = 50 * 1024 * 1024;
   constructor(private credentials: WeComBotCredentials, readonly scope: string, private fetchImpl: typeof fetch = fetch) {}
-  /** maxLength is in characters, so a message of that many stays under 20480 bytes. */
-  capabilities(): ChannelCapabilities { return { stream: false, edit: false, typing: false, buttons: false, maxLength: Math.floor(MAX_CONTENT_BYTES / 3), replyWindowMs: RESPONSE_URL_VALID_MS, canInitiate: false, idempotentSend: false }; }
+  /** One message of at most 20480 bytes per inbound message: its response_url works once. */
+  capabilities(): ChannelCapabilities { return { stream: false, edit: false, typing: false, buttons: false, maxLength: MAX_CONTENT_BYTES, maxBytes: MAX_CONTENT_BYTES, replyWindowMs: RESPONSE_URL_VALID_MS, replyAllowance: 1, canInitiate: false, idempotentSend: false }; }
   available(): boolean { return Boolean(this.credentials.token) && this.credentials.encodingAesKey?.length === 43; }
   connectUrl(_code: string): undefined { return undefined; }
   verify(raw: Buffer, _headers: unknown, query?: URLSearchParams): boolean {

@@ -42,6 +42,8 @@ export interface Outbox {
   retry(id: string, error: string, delayMs: number, maxAttempts: number, now?: Date): Promise<DeliveryState>;
   /** Not yet: the rate limit said wait. This is not a failed attempt. */
   defer(id: string, delayMs: number, now?: Date): Promise<void>;
+  /** Parts the platform accepted for this thread since `since`: what a reply allowance counts. */
+  sentSince(channel: ChannelKind, scope: string, threadId: string, since: Date): Promise<number>;
   undelivered(connectionId: string): Promise<Delivery[]>;
   get(id: string): Promise<Delivery | undefined>;
 }
@@ -73,8 +75,11 @@ export class PostgresOutbox implements Outbox {
         next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         lease_until TIMESTAMPTZ,
         last_error TEXT,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        last_sent_at TIMESTAMPTZ
       );
+      ALTER TABLE hatch_channel_outbox ADD COLUMN IF NOT EXISTS last_sent_at TIMESTAMPTZ;
+      CREATE INDEX IF NOT EXISTS hatch_channel_outbox_thread_idx ON hatch_channel_outbox (channel, scope, thread_id, last_sent_at);
       CREATE INDEX IF NOT EXISTS hatch_channel_outbox_due_idx ON hatch_channel_outbox (seq) WHERE state IN ('pending', 'sending');
       CREATE INDEX IF NOT EXISTS hatch_channel_outbox_undelivered_idx ON hatch_channel_outbox (connection_id, created_at DESC) WHERE state = 'undelivered';
     `);
@@ -104,7 +109,7 @@ export class PostgresOutbox implements Outbox {
   async begin(id: string): Promise<void> { await this.pool.query("UPDATE hatch_channel_outbox SET in_flight = true WHERE id = $1", [id]); }
 
   async progress(id: string, sentParts: number, leaseMs: number, now = new Date()): Promise<void> {
-    await this.pool.query("UPDATE hatch_channel_outbox SET sent_parts = $2, in_flight = false, lease_until = $3 WHERE id = $1", [id, sentParts, new Date(now.getTime() + leaseMs)]);
+    await this.pool.query("UPDATE hatch_channel_outbox SET sent_parts = $2, in_flight = false, lease_until = $3, last_sent_at = $4 WHERE id = $1", [id, sentParts, new Date(now.getTime() + leaseMs), now]);
   }
 
   async settle(id: string, state: DeliveryState, error?: string): Promise<void> {
@@ -118,6 +123,10 @@ export class PostgresOutbox implements Outbox {
 
   async defer(id: string, delayMs: number, now = new Date()): Promise<void> {
     await this.pool.query("UPDATE hatch_channel_outbox SET state = 'pending', in_flight = false, lease_until = NULL, next_attempt_at = $2 WHERE id = $1", [id, new Date(now.getTime() + delayMs)]);
+  }
+
+  async sentSince(channel: ChannelKind, scope: string, threadId: string, since: Date): Promise<number> {
+    return Number((await this.pool.query("SELECT COALESCE(SUM(sent_parts), 0) AS total FROM hatch_channel_outbox WHERE channel = $1 AND scope = $2 AND thread_id = $3 AND last_sent_at >= $4", [channel, scope, threadId, since])).rows[0].total);
   }
 
   async undelivered(connectionId: string): Promise<Delivery[]> {

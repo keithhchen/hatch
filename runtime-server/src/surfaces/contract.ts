@@ -77,6 +77,10 @@ export type ChannelCapabilities = {
   buttons: boolean;
   /** Longest single message the platform accepts, in characters. */
   maxLength: number;
+  /** Also longest, in UTF-8 bytes, where the platform counts bytes. */
+  maxBytes?: number;
+  /** Messages the platform lets us send to a thread after each message it sends us; absent when unlimited. What does not fit stays in Hatch as `undelivered`. */
+  replyAllowance?: number;
   /** Milliseconds after the last inbound message during which a reply is allowed; absent when unlimited. */
   replyWindowMs?: number;
   canInitiate: boolean;

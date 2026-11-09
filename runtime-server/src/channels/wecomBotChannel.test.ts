@@ -36,8 +36,7 @@ test("capabilities: a final reply into a one-time response_url", () => {
   assert.equal(channel.kind, "wecom");
   assert.equal(channel.scope, "acct");
   assert.equal(channel.connectUrl("HATCH-ABCDEFGH"), undefined);
-  assert.deepEqual(channel.capabilities(), { stream: false, edit: false, typing: false, buttons: false, maxLength: 6826, replyWindowMs: 3_600_000, canInitiate: false, idempotentSend: false });
-  assert.ok(6826 * 3 <= 20480);
+  assert.deepEqual(channel.capabilities(), { stream: false, edit: false, typing: false, buttons: false, maxLength: 20480, maxBytes: 20480, replyWindowMs: 3_600_000, replyAllowance: 1, canInitiate: false, idempotentSend: false });
 });
 
 test("signature: accepts the right one, refuses wrong, wrong token, tampered ciphertext and missing query", () => {
