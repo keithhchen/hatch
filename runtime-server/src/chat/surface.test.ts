@@ -4,6 +4,9 @@ import { InMemoryConversationRepository, type ConversationRunRecord } from "../c
 import type { ResolvedAgentCorpus } from "../agentCorpus.js";
 import type { Connection } from "../surfaces/contract.js";
 import { chatToolsForRun } from "../agentRuntime.js";
+import { attachmentTools } from "../assets/tools.js";
+import { attachmentToolDefinitions } from "./attachmentTools.js";
+import { toolRegistry } from "../tools.js";
 import { ChatError, principalKey } from "./principal.js";
 import { ContactBinder, SentMessageLimits } from "./contactBinding.js";
 import { checkUpgrade, sessionTokenFromCookie } from "./originPolicy.js";
@@ -17,6 +20,17 @@ test("the tool list is fixed, ordered, and names where each local tool runs", ()
   assert.deepEqual(chatToolsForRun([...CLIENT_TOOL_NAMES].reverse()).map((tool) => tool.function.name), names);
   const fileRead = first.find((tool) => tool.function.name === "file_read")!;
   assert.match(fileRead.function.description, /Available on: desktop, cli$/);
+});
+
+test("ls, grep and read are declared on a Product conversation whose allowlist is empty", () => {
+  const definitions = attachmentToolDefinitions(attachmentTools({} as never));
+  for (const definition of definitions) toolRegistry.set(definition.name, definition);
+  try {
+    const names = chatToolsForRun([], []).map((tool) => tool.function.name);
+    for (const name of ["ls", "grep", "read"]) assert.ok(names.includes(name), name);
+  } finally {
+    for (const definition of definitions) toolRegistry.delete(definition.name);
+  }
 });
 
 test("a local tool call is authorized against the client of the latest message", () => {

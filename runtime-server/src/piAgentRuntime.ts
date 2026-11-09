@@ -29,7 +29,6 @@ import {
   mergeRuntimeActiveSkill,
   modelVisibleToolResult,
   produceAuditedFinal,
-  requestedOutputPath,
   toolEventBase,
   withActivityMessage,
   workspaceDiffEvent,
@@ -78,7 +77,6 @@ export type PiToolDefinition = {
 
 export type PiAgentRuntimeOptions = {
   toolDefinitions?: PiToolDefinition[];
-  allowRequestedArtifactDelivery?: boolean;
 };
 
 type QueueItem<T> =
@@ -165,11 +163,9 @@ export class PiAgentRuntime implements AgentRuntime {
     let finalAssistant: AssistantMessage | undefined;
     let compacting = false;
     let hasExecutedTool = false;
-    const requestedFilePath = requestedOutputPath(input.message.content);
     const deliveryWorkflow = ctx.deliveryWorkflow;
     const deliveryReviewer = deliveryWorkflow ? await createDeliveryReviewer() : undefined;
     const transcriptMessages: ConversationMessage[] = [];
-    const completedArtifactPaths: string[] = [];
 
     // ctx.messages always contains the canonical current user turn. For
     // task_start, keep the complete transcript and continue from it so the
@@ -325,7 +321,6 @@ export class PiAgentRuntime implements AgentRuntime {
           setHasExecutedTool: () => { hasExecutedTool = true; },
           deliveryWorkflow,
           transcriptMessages,
-          completedArtifactPaths,
           setFinalAssistant: (message) => { finalAssistant = message; },
           setTerminalError: (error) => { terminalError ??= error; }
         });
@@ -335,15 +330,12 @@ export class PiAgentRuntime implements AgentRuntime {
       // before prompt startup. Once prompt() starts, abortAgent owns the same
       // Agent AbortController that is passed to the provider request.
       ensureNotCancelled(ctx);
-      // Pi's string-plus-images overload produces the provider-native user
-      // content array. Text stays text and image attachments become native
-      // ImageContent blocks; binary bytes never enter the prompt string.
+      // Built by the same function that rebuilds history, so the message's
+      // bytes in the request never change between calls (text stays a string
+      // until it has images).
       const promptPromise = (input.task_start
         ? agent.continue()
-        : agent.prompt(
-          renderUserMessageForModel(input.message),
-          currentAssetImages
-        ))
+        : agent.prompt(piUserMessage(withImages(renderUserMessageForModel(input.message), currentAssetImages))))
         .catch((error) => {
           terminalError = error instanceof Error ? error : new Error(String(error));
         })
@@ -371,21 +363,7 @@ export class PiAgentRuntime implements AgentRuntime {
           signal: ctx.abortSignal
         })
         : draftContent;
-      let finalContent = auditedContent;
-      const artifact = this.options.allowRequestedArtifactDelivery === false ? { events: [] } : await this.persistRequestedArtifact({
-        input,
-        ctx,
-        requestedFilePath,
-        completedArtifactPaths,
-        activeSkills,
-        resourceRoots,
-        workspacePathPolicy,
-        finalContent
-      });
-      for (const event of artifact.events) yield event;
-      if (artifact.error) throw artifact.error;
-      const savedPath = artifact.path;
-      if (savedPath) finalContent = `${finalContent}\n\nCompleted and saved the result to ${savedPath}.`;
+      const finalContent = auditedContent;
       if (deliveryWorkflow) {
         // Delivery drafts are intentionally not streamed before the audit.
         // The unified outbound Guard decides whether the accepted draft can be
@@ -394,14 +372,6 @@ export class PiAgentRuntime implements AgentRuntime {
           type: "assistant.delta",
           run_id: input.run_id,
           delta: { kind: "text", content: finalContent }
-        };
-      } else if (savedPath) {
-        // Ordinary Pi turns already streamed their final text. Emit only the
-        // runtime-owned delivery suffix to avoid duplicating the answer.
-        yield {
-          type: "assistant.delta",
-          run_id: input.run_id,
-          delta: { kind: "text", content: `\n\nCompleted and saved the result to ${savedPath}.` }
         };
       }
       yield {
@@ -412,82 +382,6 @@ export class PiAgentRuntime implements AgentRuntime {
     } finally {
       ctx.abortSignal?.removeEventListener("abort", abortAgent);
       agent.abort();
-    }
-  }
-
-  private async persistRequestedArtifact(options: {
-    input: RunStart;
-    ctx: RunContext;
-    requestedFilePath?: string;
-    completedArtifactPaths: string[];
-    activeSkills: ActivatedSkill[];
-    resourceRoots: string[];
-    workspacePathPolicy: WorkspacePathPolicy;
-    finalContent: string;
-  }): Promise<{
-    path?: string;
-    events: OutboundMessage[];
-    error?: Error;
-  }> {
-    const {
-      input,
-      ctx,
-      requestedFilePath,
-      completedArtifactPaths,
-      activeSkills,
-      resourceRoots,
-      workspacePathPolicy,
-      finalContent
-    } = options;
-    if (!requestedFilePath || completedArtifactPaths.includes(requestedFilePath)) {
-      return { events: [] };
-    }
-
-    const toolCallId = `${input.run_id}_delivery`;
-    const argumentsValue = { path: requestedFilePath, content: finalContent };
-    const eventBase = toolEventBase(
-      input,
-      toolCallId,
-      "file_write",
-      argumentsValue,
-      resourceRoots,
-      activeSkills,
-      ctx.sessionSkills.rendered.aliases,
-      ctx
-    );
-    const events: OutboundMessage[] = [
-      {
-        type: "assistant.delta",
-        run_id: input.run_id,
-        delta: { kind: "status", content: "Saving the completed work to your Workspace." }
-      },
-      { ...eventBase, status: "requested" }
-    ];
-    try {
-      const result = await executeChatTool(
-        input,
-        ctx,
-        toolCallId,
-        "file_write",
-        argumentsValue,
-        resourceRoots,
-        activeSkills,
-        ctx.sessionSkills.rendered.aliases,
-        workspacePathPolicy
-      );
-      const visibleResult = modelVisibleToolResult(eventBase.name, result);
-      events.push({ ...eventBase, status: "completed", result: visibleResult });
-      const diffEvent = workspaceDiffEvent(input.run_id, toolCallId, eventBase.name, result);
-      if (diffEvent) events.push(diffEvent);
-      completedArtifactPaths.push(requestedFilePath);
-      return { path: requestedFilePath, events };
-    } catch (error) {
-      events.push({
-        ...eventBase,
-        status: "failed",
-        error: { code: "tool_failed", message: errorMessage(error) }
-      });
-      return { events, error: error instanceof Error ? error : new Error(String(error)) };
     }
   }
 
@@ -567,7 +461,6 @@ export class PiAgentRuntime implements AgentRuntime {
     setHasExecutedTool: () => void;
     deliveryWorkflow?: RunContext["deliveryWorkflow"];
     transcriptMessages: ConversationMessage[];
-    completedArtifactPaths: string[];
     setFinalAssistant: (message: AssistantMessage) => void;
     setTerminalError: (error: Error) => void;
   }): Promise<void> {
@@ -585,7 +478,6 @@ export class PiAgentRuntime implements AgentRuntime {
       setHasExecutedTool,
       deliveryWorkflow,
       transcriptMessages,
-      completedArtifactPaths,
       setFinalAssistant,
       setTerminalError
     } = options;
@@ -744,12 +636,6 @@ export class PiAgentRuntime implements AgentRuntime {
         }
       } else {
         queue.push({ ...eventBase, status: "completed", result: visibleResult });
-        if (
-          eventBase.name === "file_write"
-          && typeof eventBase.arguments?.path === "string"
-        ) {
-          completedArtifactPaths.push(eventBase.arguments.path);
-        }
         const diffEvent = workspaceDiffEvent(input.run_id, event.toolCallId, eventBase.name, details);
         if (diffEvent) queue.push(diffEvent);
       }
@@ -838,6 +724,11 @@ function isModelMessage(message: AgentMessage): boolean {
     || message.role === "compactionSummary";
 }
 
+/** One shape for a user message in every request: a string until it has images. */
+function withImages(text: string, images: ImageContent[]): string | Array<{ type: "text"; text: string } | ImageContent> {
+  return images.length > 0 ? [{ type: "text", text }, ...images] : text;
+}
+
 function piUserMessage(content: string | Array<{ type: "text"; text: string } | ImageContent>): AgentMessage {
   return {
     role: "user",
@@ -861,9 +752,7 @@ function toPiMessage(
       const image = assetImages.get(attachment.asset_id);
       if (image) images.push(image);
     }
-    return piUserMessage(images.length > 0
-      ? [{ type: "text", text }, ...images]
-      : text);
+    return piUserMessage(withImages(text, images));
   }
   if (message.role === "compactionSummary") {
     return {
