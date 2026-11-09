@@ -80,7 +80,7 @@ test("MCP: initialize, tools/list, tools/call over in-memory streams", async () 
   assert.equal(replies.length, 6); // the notification gets no reply
   assert.equal(byId[1].result.protocolVersion, "2025-06-18");
   assert.deepEqual(byId[2].result.tools.map((t) => t.name).sort(), [
-    "assistant_history", "assistant_send", "ingest_list", "ingest_status", "ingest_submit", "products_create", "products_list", "products_show", "products_unlist", "products_update",
+    "assistant_history", "assistant_send", "chat_send", "chat_stop", "conversation_show", "conversations_list", "ingest_list", "ingest_status", "ingest_submit", "products_create", "products_list", "products_show", "products_unlist", "products_update",
     "whoami", "worker_history", "worker_send", "worker_stop", "workers_list"
   ]);
   const tool = (name) => byId[2].result.tools.find((t) => t.name === name);

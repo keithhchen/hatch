@@ -15,11 +15,16 @@ Global: `--json` raw JSON, `--profile <name>` (default `default`), `--help`. Env
 | `ingest status <product-id> <job-id>` | Current job. |
 | `ingest list <product-id>` | Recent jobs. |
 | `workers <product-id>` | `[{id, name, availability, status, blocked_by?}]`. Ids: research, interview, builder, cases, evaluator. |
-| `chat <product-id> <worker> <message...> [--wait]` | Sends a message. Prints the accepted message id; with `--wait` holds up to 60 s and prints the reply. `--json`: `{conversation_id, message, queued, status, reply?}`. |
+| `chat <product-id> <worker> <message...> [--wait[=N]] [--stream] [--key <id>]` | Sends a message. Prints the accepted message id; with `--wait` holds up to 60 s and prints the reply. `--json`: `{conversation_id, message, queued, status, reply?}`. |
 | `history <product-id> <worker> [--after <message-id>]` | `{status, messages:[{id, role, text, created_at}]}`, oldest first. Without `--after`: the latest 100. |
 | `stop <product-id> <worker>` | Stops the running turn. |
 | `assistant <message...> [--wait]` | Same as `chat`, for the account's Assistant. |
 | `assistant history [--after <message-id>]` | Same as `history`, for the Assistant. |
+| `conversations` | Your Chat conversations: `[{id, product_id, updated_at}]`. |
+| `ask <message...> (--product <id> \| --conversation <id>) [--wait[=N]] [--stream] [--key <id>]` | Chat with a published product. `--product` starts a conversation. `--json`: `{conversation_id, client_message_id, run_id?, status, reply?}`. |
+| `conversation show <id>` | `{status, run_id?, cursor, messages}` snapshot. |
+| `conversation watch <id> [--after <cursor>]` | Streams events; resumes after the cursor. |
+| `conversation stop <id> <run-id>` | Stops the Run. Closing a command never does. |
 | `install-skill [-g] [--dir <skills-dir>]` | Installs this skill. |
 
 Human-only: `login [--browser | --api-key-stdin]`, `logout`, `keys create|list|revoke`.

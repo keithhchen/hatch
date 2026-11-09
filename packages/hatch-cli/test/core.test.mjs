@@ -239,8 +239,9 @@ test("chat without --wait prints the accepted message id; --wait holds 60 s and 
     }
   });
   const chat = COMMANDS.find((c) => c.name === "chat");
-  const plain = await chat.run(ctx, { _: ["p1", "research", "Summarize", "this"], flags: {} });
-  assert.deepEqual(fetch.calls[0].body, { content: "Summarize this" });
+  const plain = await chat.run(ctx, { _: ["p1", "research", "Summarize", "this"], flags: { key: "k1" } });
+  assert.deepEqual(fetch.calls[0].body, { content: "Summarize this", client_message_id: "k1" });
+  assert.equal(fetch.calls[0].headers["idempotency-key"], "k1");
   assert.ok(!fetch.calls[0].url.includes("wait"));
   assert.equal(chat.format(plain), "u1");
   const waited = await chat.run(ctx, { _: ["p1", "research", "Summarize"], flags: { wait: true } });
@@ -295,8 +296,8 @@ test("assistant sends to the account conversation and reads its history", async 
       "GET /v1/creator/assistant/conversation/messages": { status: "idle", messages: [reply] }
     }
   });
-  const result = await run(ctx, "assistant", { _: ["What", "needs", "me?"], flags: { wait: true } });
-  assert.deepEqual(fetch.calls[0].body, { content: "What needs me?" });
+  const result = await run(ctx, "assistant", { _: ["What", "needs", "me?"], flags: { wait: true, key: "k2" } });
+  assert.deepEqual(fetch.calls[0].body, { content: "What needs me?", client_message_id: "k2" });
   assert.ok(fetch.calls[0].url.endsWith("/messages?wait=60"));
   assert.equal(result.reply.text, "Here is the summary.");
   await run(ctx, "assistant history", { _: [], flags: { after: "m1" } });
@@ -305,7 +306,7 @@ test("assistant sends to the account conversation and reads its history", async 
 
 test("MCP wait is in seconds", async () => {
   const send = COMMANDS.find((c) => c.name === "chat").mcp;
-  assert.deepEqual(send.toArgs({ product_id: "p1", worker: "research", content: "hi", wait: 90 }), { _: ["p1", "research", "hi"], flags: { wait: 90 } });
+  assert.deepEqual(send.toArgs({ product_id: "p1", worker: "research", content: "hi", wait: 90 }), { _: ["p1", "research", "hi"], flags: { wait: 90, key: undefined } });
   const { ctx, fetch } = await makeContext({ env: { HATCH_API_KEY: "k" }, routes: { "POST /v1/creator/products/p1/workers/research/messages": { ...sent, status: "running" } } });
   await run(ctx, "chat", { _: ["p1", "research", "hi"], flags: { wait: 90 } });
   assert.ok(fetch.calls[0].url.endsWith("?wait=90"));
