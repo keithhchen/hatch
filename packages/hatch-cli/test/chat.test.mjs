@@ -291,3 +291,27 @@ test("MCP exposes the Chat tools and chat_send reports the key it used", async (
     assert.deepEqual([out.client_message_id, out.reply.text, out.status], ["m-1", "Hi.", "completed"]);
   });
 });
+
+test("a Studio stream, whose frames have no event name, prints the reply and ends at run_end", async () => {
+  const frame = (id, data) => `id: ${id}\ndata: ${JSON.stringify(data)}\n\n`;
+  await withServer((call, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(`event: accepted\ndata: {"message":{"id":"m1"}}\n\n${frame("1", { type: "state" })}${frame("2", { type: "message" })}${frame("3", { type: "delta", text: "hi" })}${frame("4", { type: "run_end", status: "completed" })}`);
+  }, async (url) => {
+    const r = await cli(["ask", "hi", "--conversation", "c1", "--product", "p1", "--stream"], url);
+    assert.equal(r.code, 0, r.err);
+    assert.equal(r.out, "hi\n");
+  });
+});
+
+test("ask sends --brief answers when it starts a conversation, and MCP sends brief_answers", async () => {
+  await withServer((call, res) => {
+    if (call.url === "/v1/conversations?product_id=p1") return json(res, { conversation: { id: "c1" }, created: true }, 201);
+    json(res, { message: { id: "m1" }, run_id: "r1", status: "running" }, 202);
+  }, async (url, requests) => {
+    await cli(["ask", "hi", "--product", "p1", "--brief", "goal=ship", "--brief", "context=a=b"], url);
+    assert.deepEqual(requests[0].body.brief_answers, [{ field_id: "goal", value: "ship" }, { field_id: "context", value: "a=b" }]);
+    const chatSend = COMMANDS.find((c) => c.mcp?.name === "chat_send");
+    assert.deepEqual(chatSend.mcp.toArgs({ content: "hi", product_id: "p1", brief_answers: { goal: "ship" } }).flags.brief, ["goal=ship"]);
+  });
+});

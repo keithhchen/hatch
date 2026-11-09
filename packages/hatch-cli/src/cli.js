@@ -15,9 +15,11 @@ export function parseArgs(argv, booleans) {
     const m = a.match(/^--?([^=]+)(?:=(.*))?$/);
     if (!m || a === "-") { out._.push(a); continue; }
     const [, name, inline] = m;
-    if (inline !== undefined) out.flags[name] = inline;
+    // A repeated option collects its values.
+    const set = (value) => { out.flags[name] = name in out.flags && !booleans.has(name) ? [].concat(out.flags[name], value) : value; };
+    if (inline !== undefined) set(inline);
     else if (booleans.has(name)) out.flags[name] = true;
-    else if (i + 1 < argv.length) out.flags[name] = argv[++i];
+    else if (i + 1 < argv.length) set(argv[++i]);
     else throw new HatchError(`Option --${name} needs a value.`, { code: "usage" });
   }
   return out;

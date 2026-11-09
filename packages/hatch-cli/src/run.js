@@ -26,12 +26,13 @@ function toEvent(block) {
   const raw = fields.data.join("\n");
   let data = raw;
   try { data = JSON.parse(raw); } catch { /* plain text data */ }
-  return { id: fields.id, event: fields.event ?? "message", data };
+  // Studio frames carry no `event:` name; their kind is the `type` in the data.
+  return { id: fields.id, event: fields.event ?? data?.type ?? "message", data };
 }
 
 // Chat ends a Run with a durable journal `run.state` carrying one of these; the live `turn.state` is not authority.
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "interrupted"]);
-export const isTerminal = (e) => e.event === "done" || (e.event === "state" && e.data?.status !== "running")
+export const isTerminal = (e) => e.event === "done" || e.event === "run_end" || (e.event === "state" && e.data?.status !== undefined && e.data.status !== "running")
   || (e.event === "journal.event" && e.data?.journal_type === "run.state" && TERMINAL_STATUSES.has(e.data.payload?.status));
 
 // Domain object: folds a Run's events into what a caller needs. The cursor is the last event seen.
@@ -55,7 +56,8 @@ export class RunObserver {
     if (event === "journal.event") { if (data.journal_type === "run.state") this.status = data.payload?.status; return ""; }
     if (event === "turn.state") this.status = data.status;
     if (event === "turn.failed") { this.status = "failed"; this.error = data.error; }
-    if (event === "message" && data?.role !== "user") {
+    if (event === "run_end") this.status = data.status;
+    if (event === "message" && typeof data?.text === "string" && data.role !== "user") {
       const fresh = this.text ? "" : data.text;
       this.text = data.text;
       return fresh;

@@ -16,8 +16,15 @@ const productIdSchema = { product_id: { type: "string", description: "The publis
 const productOption = { product: { type: "string", describe: "The published product the conversation belongs to" } };
 
 // client_request_id is derived from the send's key, so a retried send continues the same conversation (200, created: false).
-async function startConversation(ctx, product, key) {
-  const r = await (await ctx.client()).post(`/v1/conversations?product_id=${encodeURIComponent(product)}`, { client_request_id: `${key}:conversation` });
+// --brief field=value answers the product's Brief; the Runtime's 422 names the fields it requires.
+const briefAnswers = (flags) => [].concat(flags.brief ?? []).map((pair) => {
+  const at = pair.indexOf("=");
+  if (at < 1) throw new HatchError("--brief takes field=value.", { code: "usage" });
+  return { field_id: pair.slice(0, at), value: pair.slice(at + 1) };
+});
+async function startConversation(ctx, product, key, flags) {
+  const answers = briefAnswers(flags);
+  const r = await (await ctx.client()).post(`/v1/conversations?product_id=${encodeURIComponent(product)}`, { client_request_id: `${key}:conversation`, ...(answers.length ? { brief_answers: answers } : {}) });
   return r.conversation.id;
 }
 
@@ -44,13 +51,13 @@ const conversations = {
 const ask = {
   name: "ask",
   describe: "Chat with a published product; --conversation continues one, otherwise a new one starts",
-  usage: "ask <message...> --product <id> [--conversation <id>] [--wait[=N]] [--stream] [--key <client_message_id>]",
-  options: { ...productOption, conversation: { type: "string", describe: "Continue this conversation (default: start a new one)" }, ...sendOptions },
+  usage: "ask <message...> --product <id> [--conversation <id>] [--brief field=value]... [--wait[=N]] [--stream] [--key <client_message_id>]",
+  options: { ...productOption, conversation: { type: "string", describe: "Continue this conversation (default: start a new one)" }, brief: { type: "string", describe: "Answer a Brief field when starting a conversation; repeatable" }, ...sendOptions },
   async run(ctx, args) {
     const content = need(this, args, 1).join(" ");
     const product = productOf(this, args);
     const key = args.flags.key ?? randomUUID();
-    const id = args.flags.conversation ?? await startConversation(ctx, product, key);
+    const id = args.flags.conversation ?? await startConversation(ctx, product, key, args.flags);
     return send(ctx, await conversationApi(ctx, id, product), { content, flags: { ...args.flags, key }, where: `hatch conversation show ${id} --product ${product}`, extra: { conversation_id: id } });
   },
   format: formatSent,
@@ -59,10 +66,11 @@ const ask = {
     description: "Send a message to a published Hatch product in Chat. product_id is required; give conversation_id to continue a conversation, otherwise one starts. wait is seconds to hold for the reply (max 60); without it the message is only accepted and the run id returned. Reuse client_message_id to retry a send without sending it twice.",
     inputSchema: object({
       ...productIdSchema, conversation_id: { type: "string", description: "Continue this conversation (default: start a new one)" },
+      brief_answers: { type: "object", additionalProperties: { type: "string" }, description: "When starting a conversation: answers to the product's Brief as {field_id: value}. A refusal names the required fields." },
       content: { type: "string", description: "The message" }, wait: { type: "number", description: "Seconds to wait for the reply, 0 to 60" },
       client_message_id: { type: "string", description: "Returned by the first call; pass it to retry" }
     }, ["product_id", "content"]),
-    toArgs: (i) => ({ _: [i.content], flags: { product: i.product_id, conversation: i.conversation_id, wait: i.wait, key: i.client_message_id } })
+    toArgs: (i) => ({ _: [i.content], flags: { product: i.product_id, conversation: i.conversation_id, wait: i.wait, key: i.client_message_id, brief: Object.entries(i.brief_answers ?? {}).map(([field, value]) => `${field}=${value}`) } })
   }
 };
 

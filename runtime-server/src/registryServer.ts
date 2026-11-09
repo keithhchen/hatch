@@ -380,7 +380,9 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
           });
           return;
         }
-        if (error && typeof error === "object" && typeof (error as { code?: unknown }).code === "string") {
+        // A 5xx hides its cause from the client (it is logged above); only a definitions failure may say what it is.
+        if (error && typeof error === "object" && typeof (error as { code?: unknown }).code === "string"
+          && (status < 500 || (error as { code: string }).code === "agent_definitions_invalid")) {
           const structured = error as { code: string; message?: string; details?: unknown };
           const message = status >= 500 ? "Factory Agent definitions are unavailable." : structured.message ?? "Request failed.";
           sendJson(response, status, { error: { code: structured.code, message, ...(structured.details === undefined ? {} : { details: structured.details }) }, detail: message });
