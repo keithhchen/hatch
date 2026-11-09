@@ -1,5 +1,6 @@
 import { Type } from "@earendil-works/pi-ai";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
+import { regexMatcher } from "../assets/matchers.js";
 import { detectMediaType, projectSource } from "../creatorLearning/sourceLibrary.js";
 import { result } from "./files.js";
 import { WorkbenchStore } from "./store.js";
@@ -29,7 +30,7 @@ export function fileTools(store: WorkbenchStore, id: string, options: { changed?
   tools.push({ name: "grep", label: "搜索文件", description: "Search file contents with a JavaScript regular expression across the same files list shows. Returns matching lines as path, line number and text. Use list to see files, grep to find where something is, then read for the surrounding text.", parameters: Type.Object({ pattern: Type.String({ minLength: 1, maxLength: 500 }), directory: Type.Optional(Type.String({ description: "Only search below this directory, such as input/manual or output." })), ignore_case: Type.Optional(Type.Boolean()), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })) }), execute: async (_id, raw) => {
     const a = raw as { pattern: string; directory?: string; ignore_case?: boolean; limit?: number };
     const directory = a.directory?.replace(/\/+$/, "");
-    const matcher = new RegExp(a.pattern, a.ignore_case ? "i" : "");
+    const matcher = regexMatcher(a.pattern, a.ignore_case === true);
     const limit = a.limit ?? 50;
     const matches: Array<{ path: string; line: number; text: string }> = [];
     for (const record of (await records()).filter(f => !directory || directory === "." || f.path.startsWith(`${directory}/`))) {
@@ -40,7 +41,8 @@ export function fileTools(store: WorkbenchStore, id: string, options: { changed?
       const plain = /\.(md|txt|srt|vtt|log)$/i.test(record.path);
       const text = plain ? bytes.toString("utf8") : ((await projectSource(record.path, mimeType, bytes).catch(() => undefined)) as { __content?: string } | undefined)?.__content;
       if (typeof text !== "string") continue;
-      text.split("\n").forEach((line, index) => { if (matches.length < limit && matcher.test(line)) matches.push({ path: record.path, line: index + 1, text: line.slice(0, 300) }); });
+      const lines = text.split("\n");
+      for (const hit of matcher(lines, limit - matches.length)) matches.push({ path: record.path, line: hit + 1, text: lines[hit]!.slice(0, 300) });
     }
     return result({ matches, truncated: matches.length >= limit });
   } });
