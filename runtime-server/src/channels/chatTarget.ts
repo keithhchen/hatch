@@ -33,7 +33,7 @@ export interface ChatTarget {
   upload(inbound: Inbound, file: { name: string; bytes: Buffer }): Promise<UploadedRef>;
   /** Steers the conversation's Run or starts one. `key` is the message's identity: sending it again is the same message. */
   send(inbound: Inbound, message: { key: string; parts: ContentPart[] }): Promise<{ runId: string }>;
-  /** A pressed button. The press is stored before anything is done about it, so a retry never loses or repeats it. Without it, buttons are cleared and ignored. */
+  /** A pressed button. `key` is the press's identity: whatever it does is done once however often the press is retried, and every retry answers the same. Without it, buttons are cleared and ignored. */
   press?(inbound: Inbound, key: string): Promise<Handled>;
 }
 

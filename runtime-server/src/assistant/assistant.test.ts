@@ -109,9 +109,11 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
     push: async (_account, message, prefer) => { pushed.push({ text: message.text, ...(message.buttons ? { buttons: message.buttons } : {}), ...(prefer ? { prefer } : {}) }); return true; },
     canReach: async () => reachable,
   };
+  const telegramCalls: Array<{ method: string; body: any }> = [];
   const telegram = new TelegramChannel({ token: "test", username: "hatch_test_bot", webhookSecret: "secret" }, "", (async (url: string, init?: RequestInit) => {
     if (url.includes("/file/bot")) return new Response(url.endsWith(".oga") ? Buffer.concat([Buffer.from("OggS"), Buffer.alloc(60)]) : "# 我的选址笔记\n隔壁活过三年才算数\n", { status: 200 });
     if (url.endsWith("/getFile")) return new Response(JSON.stringify({ ok: true, result: { file_path: String(init?.body).includes('"v1"') ? "voice/file_1.oga" : "documents/notes.md" } }), { status: 200 });
+    telegramCalls.push({ method: url.split("/").pop()!, body: JSON.parse(String(init?.body)) });
     return new Response(JSON.stringify({ ok: true, result: true }), { status: 200 });
   }) as typeof fetch);
   const productStore = new WorkbenchStore(path.join(root, "product"), { creatorId: ACCOUNT, productId: PRODUCT }, new MemoryAgentDefinitionRepository(await initialAgentDefinitions()));
@@ -174,7 +176,7 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
   const say = (text: string, id = `m-${Math.random().toString(36).slice(2)}`) => chat.say(ACCOUNT, { id, parts: [{ type: "text", text }], client: { client: "web" } });
   const idle = async () => { await sleep(30); await chat.idle(ACCOUNT, 20_000); await sleep(30); };
   return {
-    root, tasks, state, deliveries, pushed, notices, log, applied, telegramUpdate, assistant, chat, target, model, productStore, productRuntime, say, idle, legacy, store, kit, tools, chatAssets,
+    root, tasks, state, deliveries, pushed, notices, log, applied, telegramCalls, telegramUpdate, assistant, chat, target, model, productStore, productRuntime, say, idle, legacy, store, kit, tools, chatAssets,
     setReachable: (value: boolean) => { reachable = value; },
     close: async () => { await assistant.close(); await chat.close(); await productRuntime.close(); await rm(root, { recursive: true, force: true, maxRetries: 5 }); },
   };
@@ -468,8 +470,49 @@ test("Publishing goes through the Product's interface, after the Expert confirms
     const task = await env.assistant.propose(ACCOUNT, PRODUCT, { release: "publish" }, { source: "web" });
     assert.equal(task.needs, "review");
     assert.deepEqual(env.applied, [], "nothing goes out before the Expert confirms");
-    await env.assistant.approve(ACCOUNT, task.id);
+    await env.assistant.approve(ACCOUNT, task.id, "page-click-1");
     assert.deepEqual(env.applied, [{ release: "publish" }]);
+  } finally { await env.close(); }
+});
+
+test("A button pressed, delivered again or pressed twice decides the task once, before the Assistant hears of it; the other button afterwards is refused and said", async () => {
+  const env = await setup({ model: () => ({ text: "好" }) });
+  try {
+    const task = await env.assistant.propose(ACCOUNT, PRODUCT, { release: "publish" }, { source: "telegram" });
+    const press = (id: number, action: string) => ({ update_id: id, callback_query: { id: `cb${id}`, from: { id: 42 }, data: `t:${task.id}:${action}`, message: { message_id: 20, chat: { id: 42, type: "private" } } } });
+    const hear = env.assistant.hear.bind(env.assistant);
+    const decidedWhenHeard: Array<string | undefined> = [];
+    env.assistant.hear = async (account, input) => { decidedWhenHeard.push((await env.tasks.get(task.id))?.decision?.action); return hear(account, input); };
+    const [first] = await env.telegramUpdate(press(2, "approve"));
+    await env.idle();
+    assert.deepEqual(decidedWhenHeard, ["approve"], "no Run started before the task was decided");
+    assert.deepEqual(await env.telegramUpdate(press(2, "approve")), [first], "the update delivered again gets the same reply");
+    await env.telegramUpdate(press(3, "approve"));
+    await env.telegramUpdate(press(4, "decline"));
+    await env.idle();
+    assert.deepEqual(env.applied, [{ release: "publish" }], "the storefront changed once");
+    const stored = (await env.tasks.get(task.id))!;
+    assert.deepEqual([stored.status, stored.decision?.action, stored.decision?.key], ["done", "approve", "telegram::2"]);
+    assert.deepEqual(env.telegramCalls.filter(call => call.method === "answerCallbackQuery").map(call => call.body.text), ["好", "好", "好", "这件事已确认了，不能再取消"]);
+    assert.ok(env.model.state.turns.some(turn => turn.said.some(text => /没有生效：这件事已确认了，不能再取消/.test(text))), "the Assistant is told the decline did not take");
+  } finally { await env.close(); }
+});
+
+test("The page's approve and decline are the same decision: a click retried or the other button afterwards changes nothing, and the Assistant hears the decision once", async () => {
+  const env = await setup({ model: () => ({ text: "好" }) });
+  try {
+    const task = await env.assistant.propose(ACCOUNT, PRODUCT, { release: "publish" }, { source: "web" });
+    const click = async (action: "approve" | "decline", key: string) => {
+      const { task: decided } = await env.assistant.decide(ACCOUNT, task.id, action, key);
+      await env.assistant.news(ACCOUNT, decided.id, "专家在 Studio 里确认了这件事。", "task", `decided:${decided.id}`);
+    };
+    await click("approve", "click-1");
+    await click("approve", "click-1");
+    await click("approve", "click-2");
+    await assert.rejects(click("decline", "click-3"), /已确认了，不能再取消/);
+    await env.idle();
+    assert.deepEqual(env.applied, [{ release: "publish" }]);
+    assert.equal(env.model.state.calls, 1, "the Assistant heard one decision");
   } finally { await env.close(); }
 });
 

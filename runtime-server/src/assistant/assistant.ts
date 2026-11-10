@@ -15,7 +15,7 @@ import type { RunFailure } from "../factoryAgents/runFailure.js";
 import type { PublicMessage } from "../conversations/conversation.js";
 import type { ContentPart } from "../surfaces/contract.js";
 import type { SentMessage, UploadedRef } from "../chat/gateway.js";
-import type { AssistantTask, TaskKind, TaskOrigin, TaskRepository } from "./tasks.js";
+import type { AssistantTask, TaskDecision, TaskKind, TaskOrigin, TaskRepository } from "./tasks.js";
 import type { AssistantChat, ReplySteps } from "./chat.js";
 import type { DeliveryRepository } from "./deliveries.js";
 import type { ExpertMaterials } from "./materials.js";
@@ -202,14 +202,14 @@ export class AssistantService implements StudioOperations, InterviewDesk {
   }
 
   /** Task news the Assistant hears: what a worker finished, asked, or got stuck on. It waits while an interview holds the conversation. */
-  async news(accountId: string, taskId: string, text: string, kind: "task" | "tick" = "task"): Promise<void> {
+  async news(accountId: string, taskId: string, text: string, kind: "task" | "tick" = "task", key: string = randomUUID()): Promise<void> {
     const line = kind === "tick" ? `[日常检查 · 任务 ${taskId}] ${text}` : `[任务 ${taskId}] ${text}`;
-    if (await this.deps.state.interview(accountId)) { await this.deps.state.hold(accountId, { id: randomUUID(), text: line, taskId }); return; }
-    await this.hearSystem(accountId, line, taskId);
+    if (await this.deps.state.interview(accountId)) { await this.deps.state.hold(accountId, { id: key, text: line, taskId }); return; }
+    await this.hearSystem(accountId, line, taskId, key);
   }
 
-  private async hearSystem(accountId: string, text: string, taskId?: string): Promise<void> {
-    const sent = await this.chat.sayAsSystem(accountId, text);
+  private async hearSystem(accountId: string, text: string, taskId?: string, key?: string): Promise<void> {
+    const sent = await this.chat.sayAsSystem(accountId, text, key);
     // The reply to news is the Assistant's own to send, unless the news joined a Run that has its own reply path.
     if (sent.outcome === "started") await this.deps.deliveries.owe(sent.runId, accountId);
     const task = taskId ? await this.deps.tasks.get(taskId) : undefined;
@@ -298,7 +298,7 @@ export class AssistantService implements StudioOperations, InterviewDesk {
     await this.deps.state.endInterview(task.accountId, task.id);
     await workspace.store.update(task.session!.sessionId, s => { if (s.assistantTaskId === task.id) delete s.assistantTaskId; });
     // News that waited for the interview is now the Assistant's to hear.
-    for (const held of await this.deps.state.takeHeld(task.accountId)) await this.hearSystem(task.accountId, held.text, held.taskId);
+    for (const held of await this.deps.state.takeHeld(task.accountId)) await this.hearSystem(task.accountId, held.text, held.taskId, held.id);
   }
 
   private handoffTool(taskId: string): AgentTool {
@@ -416,18 +416,20 @@ export class AssistantService implements StudioOperations, InterviewDesk {
     return this.deps.tasks.create({ accountId, productId, kind: "change", origin, status: "needs_you", needs: "review", payload: { change }, summary: change.release ? `${change.release === "publish" ? "发布" : "下架"}「${agent.name}」` : `修改「${agent.name}」：${fields.join("、")}` });
   }
 
-  async approve(accountId: string, taskId: string): Promise<AssistantTask> {
-    const task = await this.ownedTask(accountId, taskId);
-    if (task.status !== "needs_you" || task.needs !== "review") throw new Error("这件事现在不需要确认");
-    if (task.kind === "change") await this.deps.catalog.apply(accountId, task.productId!, task.payload.change as AgentChange);
-    return this.deps.tasks.update(task.id, { status: "done", summary: `${task.summary ?? ""}（已确认）` });
+  /**
+   * The Expert's decision on a task, from a button, the page or the Assistant's tool. `key` is the decider's own, and deciding is
+   * idempotent: the same decision again is a replay (nothing runs twice), the other one is refused (TaskRefused).
+   */
+  async decide(accountId: string, taskId: string, action: TaskDecision["action"], key: string): Promise<{ task: AssistantTask; replayed: boolean }> {
+    await this.ownedTask(accountId, taskId);
+    return this.deps.tasks.decide(taskId, { action, key }, async task => {
+      if (action === "approve" && task.kind === "change") await this.deps.catalog.apply(accountId, task.productId!, task.payload.change as AgentChange);
+    });
   }
 
-  async decline(accountId: string, taskId: string): Promise<AssistantTask> {
-    const task = await this.ownedTask(accountId, taskId);
-    if (task.status !== "needs_you") throw new Error("这件事已经结束了");
-    return this.deps.tasks.update(task.id, { status: "done", summary: `${task.summary ?? ""}（已取消）` });
-  }
+  async approve(accountId: string, taskId: string, key: string): Promise<AssistantTask> { return (await this.decide(accountId, taskId, "approve", key)).task; }
+
+  async decline(accountId: string, taskId: string, key: string): Promise<AssistantTask> { return (await this.decide(accountId, taskId, "decline", key)).task; }
 
   /** Give a waiting task the Expert's answer. */
   async answer(accountId: string, taskId: string, text: string): Promise<AssistantTask> {

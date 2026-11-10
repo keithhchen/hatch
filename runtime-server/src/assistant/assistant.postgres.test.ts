@@ -7,6 +7,7 @@ import { PostgresDeliveries } from "./deliveries.js";
 import { PostgresAssistantState } from "./state.js";
 import { assistantConversationId } from "./studioVocabulary.js";
 import { PostgresTaskRepository } from "./tasks.js";
+import { decisionConformance } from "./tasksConformance.js";
 
 // Opt-in integration tests. Every test owns a random schema, never a database.
 const connectionString = process.env.HATCH_TEST_DATABASE_URL;
@@ -69,6 +70,14 @@ test("the tasks a Run created or announced are found by that Run", options, () =
   assert.deepEqual((await tasks.byRun("run_9")).map(task => task.id), [one.id]);
   assert.deepEqual(await tasks.byRun("run_none"), []);
 }));
+
+decisionConformance("Postgres tasks", async () => {
+  const schema = `assistant_test_${randomUUID().replaceAll("-", "")}`;
+  const admin = new Pool({ connectionString, connectionTimeoutMillis: 5_000 });
+  await admin.query(`CREATE SCHEMA "${schema}"`);
+  const pool = new Pool({ connectionString, options: `-c search_path=${schema}`, statement_timeout: 10_000, max: 8 });
+  return { tasks: await PostgresTaskRepository.open(pool), close: async () => { await pool.end(); await admin.query(`DROP SCHEMA "${schema}" CASCADE`); await admin.end(); } };
+}, options);
 
 test("on Postgres a user message is known by its client key, and a reply by the id its Run's ending stored it under", options, () => isolated(async (pool) => {
   const store = new PostgresStore(pool);

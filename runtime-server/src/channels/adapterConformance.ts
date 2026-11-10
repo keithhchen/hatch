@@ -81,8 +81,12 @@ export type TargetRig = {
   notices(): string[];
   /** The next call that stores a message fails with this. */
   failNext(error: Error): void;
-  /** `persist` for every call that stored a message or a press, `act:<action>` for every decision taken because of a press. */
+  /** `persist` for every call that told the Agent a message or a press (a repeated key is the same message, and still a call), `act:<action>` for every decision taken because of a press (a decision repeated under the same press is not taken again). */
   trace(): string[];
+  /** The next acknowledgement of a pressed button fails with this, as when the platform is unreachable. */
+  failAcknowledgeNext(error: Error): void;
+  /** What the sender was shown for each button press that was acknowledged. */
+  acknowledgements(): string[];
 };
 
 /** A caption and three photos that Telegram delivered together, merged the way the inbox hands them to a target. */
@@ -140,15 +144,31 @@ export function targetConformance(name: string, make: () => TargetRig | Promise<
   });
   const button = options.button;
   if (button) {
-    test(`${name}: a button press is stored before it is acted on, and a retry neither loses nor repeats it`, async () => {
+    const act = `act:${button.button!.action}`;
+    test(`${name}: a button press is decided before the Agent is told, and a retry neither loses nor repeats either`, async () => {
       const rig = await make();
       rig.failNext(new ChatError("conversation_busy", "The previous run is still stopping.", 409));
       await assert.rejects(rig.deliver(button), (error: unknown) => error instanceof ChatError && error.retryable);
-      assert.deepEqual(rig.trace(), [], "nothing is done until the press is stored");
+      assert.deepEqual(rig.trace(), [act], "the decision came first, and no Run was started for it");
       await rig.deliver(button);
-      assert.deepEqual(rig.trace(), ["persist", `act:${button.button!.action}`]);
+      assert.deepEqual(rig.trace(), [act, "persist"], "the retry told the Agent without deciding again");
       await rig.deliver(button);
       assert.equal(rig.messages().length, 1, "the same press is the same message");
+      assert.deepEqual(rig.trace().filter(step => step !== "persist"), [act], "decided once");
+    });
+    test(`${name}: approve succeeded, the acknowledgement failed, the update came again: one decision, the same reply`, async () => {
+      const rig = await make();
+      rig.failAcknowledgeNext(new Error("answerCallbackQuery timed out"));
+      await assert.rejects(rig.deliver(button), /timed out/);
+      assert.deepEqual(rig.trace(), [act, "persist"], "everything but the acknowledgement had been done");
+      const redelivered = await rig.deliver(button);
+      const again = await rig.deliver(button);
+      assert.deepEqual(rig.trace().filter(step => step !== "persist"), [act], "nothing was decided twice");
+      assert.equal(rig.messages().length, 1);
+      assert.deepEqual(again, redelivered, "every redelivery answers the same");
+      assert.equal(redelivered.replied, false);
+      assert.ok(redelivered.runId);
+      assert.deepEqual(rig.acknowledgements(), ["好", "好"], "the button was cleared on the retry");
     });
   }
 }
