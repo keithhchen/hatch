@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Button, InlineAlert } from "@hatch/ui";
+import { Plus } from "lucide-react";
+import { Button, IconButton, InlineAlert } from "@hatch/ui";
 import { friendlyError, LoadingState, mutationKey } from "./studioShellKit.jsx";
 import { subscribeFactoryEvents } from "./factoryEvents.js";
 import { BrowserImageAttachments } from "./webChatClient.js";
@@ -8,7 +9,7 @@ import { ChannelBindings } from "./ChannelBindings.jsx";
 
 const ROOT = "/v1/creator/assistant";
 const CONNECTIONS = "/v1/creator/connections";
-const CHANNEL_NAMES = { telegram: "Telegram", line: "LINE", lark: "Lark", imessage: "iMessage" };
+const CHANNEL_NAMES = { telegram: "Telegram", line: "LINE", lark: "Lark", feishu: "飞书", wecom: "WeCom", wechatkf: "WeChat", slack: "Slack", imessage: "iMessage" };
 const REVIEW_ACTIONS = { content: ["sxaContentYes", "sxaContentNo"], change: ["sxaChangeYes", "sxaChangeNo"] };
 
 /** One assistant per Expert: a conversation and the things that need them. */
@@ -22,6 +23,7 @@ export function StudioAssistant({ request, t }) {
   const inputRef = useRef(null);
   const fileRef = useRef(null);
   const endRef = useRef(null);
+  const follow = useRef(true);
   const send = useCallback((path, body) => request(path, { method: "POST", headers: { "idempotency-key": mutationKey() }, body: JSON.stringify(body ?? {}) }), [request]);
   const refresh = useCallback(() => {
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -40,13 +42,19 @@ export function StudioAssistant({ request, t }) {
     },
   }), [refresh, t]);
 
-  useEffect(() => { endRef.current?.scrollIntoView?.({ block: "end" }); }, [view?.messages?.length, streaming, pendingLines.length]);
+  useEffect(() => {
+    const track = () => { if (endRef.current) follow.current = endRef.current.getBoundingClientRect().top - window.innerHeight < 120; };
+    window.addEventListener("scroll", track, { passive: true });
+    return () => window.removeEventListener("scroll", track);
+  }, []);
+  useEffect(() => { if (follow.current) endRef.current?.scrollIntoView?.({ block: "end" }); }, [view?.messages?.length, streaming, pendingLines.length]);
 
   const submit = async event => {
     event.preventDefault();
     const content = draft.trim();
     if (!content) return;
     setDraft("");
+    follow.current = true;
     setPendingLines(lines => [...lines, content]);
     try { await send(`${ROOT}/messages`, { content }); }
     catch (cause) { setError(friendlyError(cause, t)); setDraft(content); setPendingLines(lines => lines.filter(line => line !== content)); }
@@ -81,7 +89,7 @@ export function StudioAssistant({ request, t }) {
   if (!view && !error) return <LoadingState t={t} />;
   const needs = (view?.tasks ?? []).filter(task => task.status === "needs_you");
   const lines = view?.messages ?? [];
-  const ownApps = (view?.channels ?? []).filter(channel => channel.own_app);
+  const ownApps = (view?.channels ?? []).filter(channel => channel.own_app && CHANNEL_NAMES[channel.kind] && (channel.linked || channel.available));
   return <div className="sxa">
     <section className="sxa-chat" aria-label={t("sxNavAssistant")}>
       <h1 className="sxa-title">{t("sxNavAssistant")}</h1>
@@ -99,9 +107,9 @@ export function StudioAssistant({ request, t }) {
       </div>
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
       <form className="sxa-input" onSubmit={submit}>
+        <IconButton label={t("sxaAttach")} title={t("sxaAttach")} variant="secondary" type="button" onClick={() => fileRef.current?.click()}><Plus aria-hidden="true" /></IconButton>
         <textarea ref={inputRef} value={draft} rows={2} aria-label={t("sxaInputLabel")} placeholder={t("sxaInputPlaceholder")} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) submit(event); }} />
         <input ref={fileRef} type="file" hidden accept="image/*,.txt,.md,.docx,.pptx,.xlsx,.pdf" onChange={attach} />
-        <Button variant="secondary" type="button" onClick={() => fileRef.current?.click()}>{t("sxaAttach")}</Button>
         <Button className="web-btn-yolk" type="submit" disabled={!draft.trim()}>{t("sxaSend")}</Button>
       </form>
     </section>

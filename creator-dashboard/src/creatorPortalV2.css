@@ -328,7 +328,7 @@
 .sxa-image { display: block; max-width: min(100%, 280px); max-height: 280px; margin-bottom: 6px; border-radius: 10px; object-fit: cover; }
 .sxa-line--assistant { align-self: flex-start; }
 .sxa-line--expert { align-self: flex-end; padding: 10px 14px; border: 1px solid var(--web-rule); border-radius: 14px 14px 4px 14px; background: var(--web-card); }
-.sxa-input { position: sticky; bottom: 16px; display: flex; align-items: flex-end; gap: 10px; padding: 10px; border: 1px solid var(--web-rule); border-radius: 14px; background: var(--web-card); }
+.sxa-input { position: sticky; bottom: 16px; display: flex; align-items: flex-end; gap: 10px; padding: 10px; border: 1px solid var(--web-rule); border-radius: 14px; background: var(--web-paper); }
 .sxa-input textarea { flex: 1; min-width: 0; border: 0; outline: 0; resize: none; background: transparent; color: var(--web-ink); font: inherit; }
 .sxa-side { position: sticky; top: 24px; display: flex; flex-direction: column; gap: 12px; }
 .sxa-side h2 { margin: 0; font-size: 15px; font-weight: 700; color: var(--web-ink); }
