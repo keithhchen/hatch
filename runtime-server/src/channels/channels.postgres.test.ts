@@ -91,7 +91,7 @@ class FakeGateway implements ChatGateway {
     const known = this.byMessage.get(messageId);
     if (known) return { outcome: "replayed" as const, conversationId: "conversation-1", runId: known, messageId, acceptedAt: "2026-01-01T00:00:00.000Z" };
     this.submitted.push({ principal, conversation, client, messageId, parts });
-    if (this.steerInto) { const runId = this.steerInto; this.steerInto = undefined; this.byMessage.set(messageId, runId); return { outcome: "steered" as const, conversationId: "conversation-1", runId, messageId }; }
+    if (this.steerInto) { const runId = this.steerInto; this.steerInto = undefined; this.byMessage.set(messageId, runId); return { outcome: "steered" as const, conversationId: "conversation-1", runId, messageId, acceptedAt: new Date().toISOString() }; }
     const runId = `run-${this.submitted.length}`;
     this.byMessage.set(messageId, runId);
     this.runs.set(runId, { ended: false });
