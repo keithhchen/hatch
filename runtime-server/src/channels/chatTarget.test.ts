@@ -13,11 +13,11 @@ import type { ChannelAdapter, InboundEvent } from "./types.js";
 const ACCOUNT = "a0000000-0000-4000-8000-000000000001";
 const connection = (target: ChannelConnection["target"]): ChannelConnection => ({ id: "c0000000-0000-4000-8000-000000000001", ownerAccountId: ACCOUNT, channel: "telegram", scope: "", client: "im", target, audience: "self", taskSpecific: false, state: "active" });
 
-const adapter = (acknowledged: string[]): ChannelAdapter => ({
+const adapter = (acknowledged: string[], failure: { next?: Error }): ChannelAdapter => ({
   kind: "telegram", scope: "", maxFileBytes: 1000, capabilities: () => ({ stream: false, edit: false, typing: false, buttons: true, maxLength: 4096, canInitiate: true, idempotentSend: false }),
   available: () => true, connectUrl: () => "", send: async () => undefined,
   download: async file => Buffer.from(file.ref),
-  acknowledge: async (_event, text) => { acknowledged.push(text ?? ""); },
+  acknowledge: async (_event, text) => { if (failure.next) { const error = failure.next; failure.next = undefined; throw error; } acknowledged.push(text ?? ""); },
 });
 
 /** The things both fakes do the same way: keep messages by key like Chat does, fail on demand, count uploads. */
@@ -37,7 +37,8 @@ function backend() {
 function rigOf(target: ChatFlow, shape: { connection: ChannelConnection; principal: Inbound["principal"]; speaker?: Inbound["speaker"] }, state: ReturnType<typeof backend>["state"]): TargetRig {
   const notices: string[] = [];
   const acknowledged: string[] = [];
-  const platform = adapter(acknowledged);
+  const ackFailure: { next?: Error } = {};
+  const platform = adapter(acknowledged, ackFailure);
   return {
     deliver: (event: InboundEvent) => target.handle({
       id: `inbox-${Math.random()}`, connection: shape.connection, event, adapter: platform, principal: shape.principal, speaker: shape.speaker ?? { role: "owner" },
@@ -47,6 +48,8 @@ function rigOf(target: ChatFlow, shape: { connection: ChannelConnection; princip
     notices: () => notices,
     failNext: error => { state.failure = error; },
     trace: () => state.trace,
+    failAcknowledgeNext: error => { ackFailure.next = error; },
+    acknowledgements: () => acknowledged,
   };
 }
 
@@ -59,11 +62,16 @@ targetConformance("Product target", () => {
 
 targetConformance("Assistant target", () => {
   const { state, store, upload } = backend();
+  const decided = new Set<string>();
   const assistant = {
     hear: async (_account: string, input: { id: string; parts: ContentPart[]; system?: boolean }) => ({ ...store(input.id, input.parts), outcome: "started" as const, conversationId: "c", messageId: input.id, acceptedAt: "" }),
     upload: (_account: string, name: string) => upload(name),
-    approve: async (_account: string, taskId: string) => { state.trace.push("act:approve"); return { id: taskId } as any; },
-    decline: async (_account: string, taskId: string) => { state.trace.push("act:decline"); return { id: taskId } as any; },
+    /** Deciding is keyed like the real service: a press decided before is replayed, not decided again. */
+    decide: async (_account: string, taskId: string, action: string, key: string) => {
+      const replayed = decided.has(key);
+      if (!replayed) { decided.add(key); state.trace.push(`act:${action}`); }
+      return { task: { id: taskId } as any, replayed };
+    },
     linked: async () => "", reviewButtons: async () => [],
   };
   const shape = { connection: connection({ kind: "assistant" }), principal: { kind: "account" as const, accountId: ACCOUNT } };
@@ -72,7 +80,7 @@ targetConformance("Assistant target", () => {
 
 test("Assistant target: a guest's words, and a guest's file with no words, carry the guest marker", async () => {
   const { state, store, upload } = backend();
-  const assistant = { hear: async (_a: string, input: { id: string; parts: ContentPart[] }) => ({ ...store(input.id, input.parts), outcome: "started" as const, conversationId: "c", messageId: input.id, acceptedAt: "" }), upload: (_a: string, name: string) => upload(name), approve: async () => ({}) as any, decline: async () => ({}) as any, linked: async () => "", reviewButtons: async () => [] };
+  const assistant = { hear: async (_a: string, input: { id: string; parts: ContentPart[] }) => ({ ...store(input.id, input.parts), outcome: "started" as const, conversationId: "c", messageId: input.id, acceptedAt: "" }), upload: (_a: string, name: string) => upload(name), decide: async () => ({}) as any, linked: async () => "", reviewButtons: async () => [] };
   const guestConnection = connection({ kind: "assistant" });
   const rig = rigOf(new ChatFlow(new AssistantTarget(assistant)), { connection: guestConnection, principal: { kind: "contact", connectionId: guestConnection.id, contactId: "k1" }, speaker: { role: "guest", label: "小王" } }, state);
   await rig.deliver({ eventId: "g1", address: { threadId: "42", senderId: "42" }, text: "帮我看看" });

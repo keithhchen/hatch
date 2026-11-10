@@ -35,9 +35,9 @@ export interface Inbox {
    * the notice's key, not to a Connection: several Connections share a tenant, so none of them can name it.
    */
   cursor(channel: ChannelKind, scope: string, key: string): Promise<string | undefined>;
-  /** Leases the next unprocessed event of each thread. Events of one thread are handed out in arrival order, one at a time; an album's first waits until its album is complete. */
+  /** Leases the next unprocessed event of each thread. Events of one thread are handed out one at a time, in the platform's sequence when events carry one (`InboundEvent.sequence`) and in arrival order otherwise; an album's first waits until its album is complete. */
   claim(limit: number, leaseMs: number, now?: Date): Promise<InboxItem[]>;
-  /** The other events of this event's album that are still waiting, in arrival order. */
+  /** The other events of this event's album that are still waiting, in the thread's order. */
   siblings(item: InboxItem): Promise<InboxItem[]>;
   /**
    * Every write below belongs to the claim that holds the lease and to it alone: once the lease has run out, or another worker has
@@ -60,7 +60,15 @@ export interface Inbox {
   openRuns(limit: number): Promise<string[]>;
 }
 
-const itemOf = (row: Record<string, any>): InboxItem => ({
+/**
+ * The order of one thread's events: by the platform's sequence where it numbers them, then by arrival. An event without one comes
+ * before the numbered ones, so a thread is always one total order whatever it holds. Only the events of one thread are compared,
+ * and a thread belongs to one platform.
+ */
+const IN_ORDER = "COALESCE(sequence, -1), seq";
+const BEFORE = "(COALESCE(earlier.sequence, -1), earlier.seq) < (COALESCE(i.sequence, -1), i.seq)";
+
+const itemOf =(row: Record<string, any>): InboxItem => ({
   id: row.id, channel: row.channel, scope: row.scope, event: row.event, attempts: row.attempts,
   ...(row.connection_id ? { connectionId: row.connection_id } : {}), ...(row.run_id ? { runId: row.run_id } : {}),
 });
@@ -72,6 +80,8 @@ export class PostgresInbox implements Inbox {
       CREATE TABLE IF NOT EXISTS hatch_channel_inbox (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         seq BIGSERIAL NOT NULL,
+        -- The platform's own order within a thread, when it has one. Arrival (seq) orders the rest.
+        sequence BIGINT,
         channel TEXT NOT NULL,
         scope TEXT NOT NULL DEFAULT '',
         event_id TEXT NOT NULL,
@@ -93,6 +103,7 @@ export class PostgresInbox implements Inbox {
       CREATE INDEX IF NOT EXISTS hatch_channel_inbox_thread_idx ON hatch_channel_inbox (channel, scope, thread_id, received_at DESC);
       CREATE INDEX IF NOT EXISTS hatch_channel_inbox_run_idx ON hatch_channel_inbox (run_id) WHERE run_id IS NOT NULL;
     `);
+    await pool.query("ALTER TABLE hatch_channel_inbox ADD COLUMN IF NOT EXISTS sequence BIGINT");
     await pool.query(`
       CREATE TABLE IF NOT EXISTS hatch_channel_cursors (
         channel TEXT NOT NULL,
@@ -112,8 +123,8 @@ export class PostgresInbox implements Inbox {
       // The events and the cursor commit together: a cursor never moves past an event that was not stored.
       if (after) await client.query("BEGIN");
       for (const event of events) {
-        const row = (await client.query(`INSERT INTO hatch_channel_inbox (channel, scope, event_id, thread_id, sender_id, event, received_at) VALUES ($1, $2, $3, $4, $5, $6, $7)
-          ON CONFLICT (channel, scope, event_id) DO NOTHING RETURNING *`, [channel, event.scope ?? scope, event.eventId, event.address.threadId, event.address.senderId, JSON.stringify(event), now])).rows[0];
+        const row = (await client.query(`INSERT INTO hatch_channel_inbox (channel, scope, event_id, thread_id, sender_id, event, received_at, sequence) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          ON CONFLICT (channel, scope, event_id) DO NOTHING RETURNING *`, [channel, event.scope ?? scope, event.eventId, event.address.threadId, event.address.senderId, JSON.stringify(event), now, event.sequence ?? null])).rows[0];
         if (row) stored.push(itemOf(row));
       }
       if (after) {
@@ -137,7 +148,7 @@ export class PostgresInbox implements Inbox {
       WITH due AS (
         SELECT i.id FROM hatch_channel_inbox i
         WHERE i.state = 'pending' AND (i.lease_until IS NULL OR i.lease_until < $1)
-          AND NOT EXISTS (SELECT 1 FROM hatch_channel_inbox earlier WHERE earlier.state = 'pending' AND earlier.channel = i.channel AND earlier.scope = i.scope AND earlier.thread_id = i.thread_id AND earlier.seq < i.seq)
+          AND NOT EXISTS (SELECT 1 FROM hatch_channel_inbox earlier WHERE earlier.state = 'pending' AND earlier.channel = i.channel AND earlier.scope = i.scope AND earlier.thread_id = i.thread_id AND ${BEFORE})
           AND NOT EXISTS (SELECT 1 FROM hatch_channel_inbox part WHERE part.state = 'pending' AND part.channel = i.channel AND part.scope = i.scope AND part.thread_id = i.thread_id AND part.event->>'album' = i.event->>'album' AND part.received_at > $1::timestamptz - make_interval(secs => ${ALBUM_SETTLE_MS / 1000}))
         ORDER BY i.seq LIMIT $2 FOR UPDATE OF i SKIP LOCKED
       )
@@ -148,7 +159,7 @@ export class PostgresInbox implements Inbox {
 
   async siblings(item: InboxItem): Promise<InboxItem[]> {
     if (!item.event.album) return [];
-    return (await this.pool.query(`SELECT * FROM hatch_channel_inbox WHERE state = 'pending' AND id <> $1 AND channel = $2 AND scope = $3 AND thread_id = $4 AND event->>'album' = $5 ORDER BY seq`,
+    return (await this.pool.query(`SELECT * FROM hatch_channel_inbox WHERE state = 'pending' AND id <> $1 AND channel = $2 AND scope = $3 AND thread_id = $4 AND event->>'album' = $5 ORDER BY ${IN_ORDER}`,
       [item.id, item.channel, item.scope, item.event.address.threadId, item.event.album])).rows.map(itemOf);
   }
 
@@ -200,7 +211,7 @@ export class PostgresInbox implements Inbox {
   }
 
   async byRun(runId: string): Promise<InboxItem[]> {
-    return (await this.pool.query("SELECT * FROM hatch_channel_inbox WHERE run_id = $1 ORDER BY seq", [runId])).rows.map(itemOf);
+    return (await this.pool.query(`SELECT * FROM hatch_channel_inbox WHERE run_id = $1 ORDER BY ${IN_ORDER}`, [runId])).rows.map(itemOf);
   }
 
   async openRuns(limit: number): Promise<string[]> {

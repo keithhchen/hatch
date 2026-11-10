@@ -18,6 +18,12 @@ export type InboundFile = { ref: string; name: string; size?: number };
 /** One thing that happened on a platform, in our terms. No text and no file means a type we can't read yet. */
 export type InboundEvent = {
   eventId: string;
+  /**
+   * Where the platform itself puts this event in its thread's history, when it numbers its events (Telegram's update_id). Events
+   * of one thread are handled in this order whatever order they arrived in; without it, in arrival order. A whole number a JSON
+   * document carries exactly (below 2^53), so it travels with the stored event.
+   */
+  sequence?: number;
   address: PlatformAddress;
   /** The platform tenant the event belongs to. Absent: the adapter's own scope. A platform whose one endpoint serves many tenants sets it per event. */
   scope?: string;

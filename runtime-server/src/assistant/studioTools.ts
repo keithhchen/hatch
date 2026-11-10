@@ -30,8 +30,9 @@ export interface StudioOperations {
   handsOver(kind: WorkerKind): boolean;
   excludeSource(accountId: string, source: string, reason?: string): Promise<void>;
   answer(accountId: string, taskId: string, text: string): Promise<AssistantTask>;
-  approve(accountId: string, taskId: string): Promise<AssistantTask>;
-  decline(accountId: string, taskId: string): Promise<AssistantTask>;
+  /** `key` is the decider's: the same decision under it again is the same decision, not a second one. */
+  approve(accountId: string, taskId: string, key: string): Promise<AssistantTask>;
+  decline(accountId: string, taskId: string, key: string): Promise<AssistantTask>;
   poke(accountId: string, taskId: string, question: string): Promise<AssistantTask>;
   finish(accountId: string, taskId: string, answered: boolean): Promise<AssistantTask>;
   /** Public web evidence: links and snippets, no generated answer. */
@@ -127,10 +128,10 @@ export function studioTools(ops: StudioOperations): StudioTool[] {
       run: async (call, args) => done(taskView(await ops.answer(call.accountId, String(args.task_id), String(args.answer)))) },
     { name: "approve_task", readOnly: false, schema: z.object({ task_id: z.string() }).strict(),
       description: "专家在对话里同意了某件需要确认的事。",
-      run: async (call, args) => done(taskView(await ops.approve(call.accountId, String(args.task_id)))) },
+      run: async (call, args) => done(taskView(await ops.approve(call.accountId, String(args.task_id), `run:${call.runId}:approve:${args.task_id}`))) },
     { name: "decline_task", readOnly: false, schema: z.object({ task_id: z.string() }).strict(),
       description: "专家拒绝了某件需要确认的事，或某件卡住的事不再需要。",
-      run: async (call, args) => done(taskView(await ops.decline(call.accountId, String(args.task_id)))) },
+      run: async (call, args) => done(taskView(await ops.decline(call.accountId, String(args.task_id), `run:${call.runId}:decline:${args.task_id}`))) },
     { name: "poke", readOnly: false, schema: z.object({ task_id: z.string(), question: text(1, 500) }).strict(),
       description: "日常检查时决定问专家一个问题。记下问题，然后把问题本身作为你的回复。",
       run: async (call, args) => done(taskView(await ops.poke(call.accountId, String(args.task_id), String(args.question)))) },

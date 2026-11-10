@@ -340,6 +340,38 @@ test("An event is leased: a crash returns it, one thread's events go one at a ti
   assert.equal(state, "failed");
 }));
 
+test("Two updates of one thread that arrive out of order are processed in the platform's order; other threads and platforms without a sequence keep arrival order", options, async () => isolated(async pool => {
+  await PostgresConnections.open(pool, scopeOf);
+  const inbox = await PostgresInbox.open(pool);
+  const now = at(0);
+  // Telegram's update 11 arrived before update 10 of the same chat; chat 2 has its own order.
+  await inbox.store("telegram", "", [message("1", "eleven", { sequence: 11 }), message("1", "ten", { sequence: 10 }), message("2", "other chat", { sequence: 12 })]);
+  const first = await inbox.claim(10, 60_000, now);
+  assert.deepEqual(first.map(item => item.event.text), ["ten", "other chat"], "update 10 goes before update 11 although it arrived after it");
+  assert.deepEqual(await inbox.claim(10, 60_000, now), [], "update 11 waits for 10 to be done");
+  assert.equal(await inbox.complete(first[0]!, {}, [], now), true);
+  assert.deepEqual((await inbox.claim(10, 60_000, now)).map(item => item.event.text), ["eleven"]);
+  // The same holds at any distance, and an album's members are listed in the platform's order.
+  await inbox.store("telegram", "", [message("3", "c", { sequence: 31, album: "g", file: { ref: "c", name: "c.jpg" } }), message("3", "a", { sequence: 29, album: "g", file: { ref: "a", name: "a.jpg" } }), message("3", "b", { sequence: 30, album: "g", file: { ref: "b", name: "b.jpg" } })]);
+  const [head] = await inbox.claim(10, 60_000, at(5_000));
+  assert.equal(head!.event.text, "a");
+  assert.deepEqual((await inbox.siblings(head!)).map(item => item.event.text), ["b", "c"]);
+  // Without a sequence, arrival is the order.
+  await inbox.store("line", "", [message("4", "first"), message("4", "second")]);
+  assert.deepEqual((await inbox.claim(10, 60_000, at(5_000))).map(item => item.event.text), ["first"]);
+}));
+
+test("Telegram updates that arrive out of order reach the Agent in update_id order, one thread at a time", options, async () => isolated(async pool => {
+  const env = await stack(pool);
+  await link(env, "42");
+  await env.service.accept(env.adapter, [message("42", "second", { sequence: 101 }), message("42", "first", { sequence: 100 })]);
+  await env.service.drain();
+  assert.deepEqual(env.target.handled.map(({ event }) => event.text), ["first", "second"]);
+}));
+
+// ── Outbox and delivery ──
+
+
 // ── Outbox and delivery ──
 
 test("Long replies go as several messages in order with buttons last, and nothing is cut", options, async () => isolated(async pool => {

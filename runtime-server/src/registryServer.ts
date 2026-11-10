@@ -2350,10 +2350,12 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
   if (taskAction && request.method === "POST") {
     const [, taskId, action] = taskAction;
     const body = await readJson(request);
-    const task = action === "approve" ? await assistant.approve(account.id, taskId!)
-      : action === "decline" ? await assistant.decline(account.id, taskId!)
-        : await assistant.answer(account.id, taskId!, String(body.answer ?? "").trim() || (() => { throw Object.assign(new Error("answer is required"), { status: 400 }); })());
-    await assistant.news(account.id, task.id, `专家在 Studio 里${action === "approve" ? "确认了" : action === "decline" ? "取消了" : "回答了"}这件事。`);
+    // A click retried, or clicked twice, is one decision: the page's key names it, and the Assistant hears it once.
+    const key = messageKey(request.headers["idempotency-key"]) ?? randomUUID();
+    const task = action === "answer"
+      ? await assistant.answer(account.id, taskId!, String(body.answer ?? "").trim() || (() => { throw Object.assign(new Error("answer is required"), { status: 400 }); })())
+      : (await assistant.decide(account.id, taskId!, action as "approve" | "decline", key)).task;
+    await assistant.news(account.id, task.id, `专家在 Studio 里${action === "approve" ? "确认了" : action === "decline" ? "取消了" : "回答了"}这件事。`, "task", action === "answer" ? undefined : `decided:${task.id}`);
     sendJson(response, 200, { task });
     return;
   }
