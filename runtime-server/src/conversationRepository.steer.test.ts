@@ -9,6 +9,7 @@ import {
   InMemoryConversationRepository, PostgresConversationRepository,
   type AcceptSubmissionInput, type ConversationRepository
 } from "./conversationRepository.js";
+import { journalEnvelope } from "./chat/conversationFeed.js";
 import { LocalRuntimeAuthority, RuntimeStore } from "./store.js";
 import { PostgresStore } from "./postgresStore.js";
 
@@ -122,6 +123,18 @@ for (const backend of ["memory", "file", "postgres"] as const) {
     assert.equal(row.timestamp, steered.receipt.accepted_at);
     const consumed = (await repository.snapshot(id)).events.find((event) => event.type === "message.consumed")!;
     assert.ok(Date.parse(consumed.createdAt) - Date.parse(row.timestamp) >= 40);
+  }));
+
+  test(`${backend}: a steered image keeps its pixels through the claim, into the transcript and the model's context, and stays out of the public journal`, options, async () => withBackend(backend, async ({ repository, store }) => {
+    const start = await repository.acceptSubmission(message(0));
+    const images = [{ type: "image" as const, mimeType: "image/png", data: "iVBORw0KGgo=" }];
+    const withImage = message(1);
+    await repository.acceptSubmission({ ...withImage, canonicalUser: { role: "user", content: "look\n[image: /attachments/a.png]", model_images: images } });
+    const claimed = await repository.claimSteeredMessages(start.run.id);
+    assert.deepEqual(claimed[0]!.message.model_images, images);
+    assert.deepEqual((await store.readConversation(id)).find((row) => row.content?.startsWith("look"))?.model_images, images);
+    const created = (await repository.snapshot(id)).events.find((event) => event.type === "message.created" && event.payload.steered === true)!;
+    assert.equal((journalEnvelope(created).payload as { message: { model_images?: unknown } }).message.model_images, undefined);
   }));
 
   test(`${backend}: messages racing a Run's end never deadlock and are each claimed or start the next Run`, options, async () => withBackend(backend, async ({ repository }) => {

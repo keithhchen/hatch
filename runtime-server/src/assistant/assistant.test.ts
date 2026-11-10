@@ -8,7 +8,7 @@ import { createAssistantMessageEventStream, type AssistantMessage, type Context 
 import { harness, png } from "../assets/kit.test.js";
 import { AttachmentFiles } from "../assets/files.js";
 import type { AgentRuntime, RunContext } from "../agentRuntime.js";
-import type { OutboundMessage, RunStart } from "../protocol.js";
+import type { ConversationMessage, OutboundMessage, RunStart } from "../protocol.js";
 import { RuntimeAssetStore } from "../assetStore.js";
 import { ChatAssets } from "../chat/assets.js";
 import { attachmentToolDefinitions } from "../chat/attachmentTools.js";
@@ -52,7 +52,7 @@ type Step = {
   /** The provider's error: the turn ends in it. */
   fail?: string;
 };
-type Turn = { input: RunStart; ctx: RunContext; /** Everything the Expert said in this turn, in order. */ said: string[]; live: string | undefined };
+type Turn = { input: RunStart; ctx: RunContext; /** Everything the Expert said in this turn, in order. */ said: string[]; /** What the Run claimed after it began: the messages the model reads next. */ claimed: ConversationMessage[]; live: string | undefined };
 
 /** Automated test double for the model: the Assistant's runtime, scripted, with the tools called as the real one calls them. */
 function scriptedModel(script: (turn: Turn, call: number) => Step | Promise<Step>) {
@@ -60,14 +60,14 @@ function scriptedModel(script: (turn: Turn, call: number) => Step | Promise<Step
   const runtime: AgentRuntime = {
     async *run(input, ctx): AsyncGenerator<OutboundMessage> {
       const call = ++state.calls;
-      const turn: Turn = { input, ctx, said: [input.message.content], live: await ctx.liveState?.() };
+      const turn: Turn = { input, ctx, said: [input.message.content], claimed: [], live: await ctx.liveState?.() };
       state.turns.push(turn);
       const step = await script(turn, call);
       if (step.delayMs) await sleep(step.delayMs);
       for (const [index, tool] of (step.tools ?? []).entries()) {
         await ctx.toolBridge!.execute({ scope: "main", runId: input.run_id, toolCallId: `t${call}-${index}`, name: `studio.${tool.name}`, arguments: tool.arguments, clientTools: ctx.clientTools, state: ctx.state });
       }
-      for (let more = await ctx.claimSteered?.(); more?.length; more = await ctx.claimSteered?.()) turn.said.push(...more.map(message => message.content ?? ""));
+      for (let more = await ctx.claimSteered?.(); more?.length; more = await ctx.claimSteered?.()) { turn.claimed.push(...more); turn.said.push(...more.map(message => message.content ?? "")); }
       if (step.fail) throw UpstreamError.of(step.fail);
       const text = typeof step.text === "function" ? step.text(turn) : step.text ?? "";
       if (text) yield { type: "assistant.delta", run_id: input.run_id, delta: { kind: "text", content: text } };
@@ -411,6 +411,23 @@ test("A picture reaches the model as pixels with a path label, and the page show
     const view = await env.assistant.view(ACCOUNT);
     assert.equal(view.messages[0]!.images?.length, 1);
     assert.equal((await env.chat.image(ACCOUNT, upload.assetId))?.mime, "image/png");
+  } finally { await env.close(); }
+});
+
+test("A picture sent while the Assistant works reaches the model as pixels", async () => {
+  const env = await setup({ model: (_turn, call) => call === 1 ? { delayMs: 300, text: "看到了" } : { text: "不该再有一轮" } });
+  try {
+    await env.say("先说一句");
+    await waitFor(async () => (await env.chat.status(ACCOUNT)).state === "running");
+    const upload = await env.assistant.upload(ACCOUNT, "店面.png", await png());
+    await env.assistant.hear(ACCOUNT, { id: "pic-late", source: "web", parts: [{ type: "text", text: "这家店怎么样" }, { type: "image", assetId: upload.assetId }] });
+    await env.idle();
+    const claimed = env.model.state.turns[0]!.claimed;
+    assert.equal(claimed.length, 1);
+    assert.equal(claimed[0]!.model_images?.length, 1);
+    assert.match(claimed[0]!.content ?? "", /\[image: \/attachments\//);
+    const history = await env.store.readConversation((await env.chat.conversation(ACCOUNT)).id);
+    assert.equal(history.find(message => message.content?.startsWith("这家店怎么样"))?.model_images?.length, 1);
   } finally { await env.close(); }
 });
 
