@@ -25,7 +25,7 @@ import type { AgentCatalog, AgentChange } from "./catalog.js";
 const ACCOUNT = "11111111-1111-4111-8111-111111111111";
 const PRODUCT = "22222222-2222-4222-8222-222222222222";
 
-type Step = { text?: string; tool?: { name: string; arguments: Record<string, unknown> }; delayMs?: number };
+type Step = { text?: string; tool?: { name: string; arguments: Record<string, unknown> }; delayMs?: number; /** The provider's error text: the model's turn ends in error. */ fail?: string };
 type Script = (context: Context, call: number) => Step;
 
 /** Automated test double for the model: a scripted stream, no network. */
@@ -38,9 +38,12 @@ function scriptedAgents(scripts: { assistant: Script; worker?: Script }) {
       const step: Step = (kind === "assistant" ? scripts.assistant : scripts.worker ?? ((): Step => ({ text: "完成" })))(context, call);
       const message: AssistantMessage = { role: "assistant", api: "openai-completions", provider: "moonshotai-cn", model: "kimi-k2.6", timestamp: Date.now(),
         content: step.tool ? [{ type: "toolCall", id: `call-${kind}-${call}`, ...step.tool }] : [{ type: "text", text: step.text ?? "" }],
-        stopReason: step.tool ? "toolUse" : "stop", usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
+        stopReason: step.fail ? "error" : step.tool ? "toolUse" : "stop", ...(step.fail ? { errorMessage: step.fail } : {}), usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
       const stream = createAssistantMessageEventStream();
-      setTimeout(() => { stream.push({ type: "start", partial: message }); stream.push({ type: "done", reason: step.tool ? "toolUse" : "stop", message }); stream.end(message); }, step.delayMs ?? 0);
+      setTimeout(() => {
+        if (step.fail) { stream.push({ type: "error", reason: "error", error: message }); stream.end(message); return; }
+        stream.push({ type: "start", partial: message }); stream.push({ type: "done", reason: step.tool ? "toolUse" : "stop", message }); stream.end(message);
+      }, step.delayMs ?? 0);
       return stream;
     } });
   };
@@ -483,4 +486,23 @@ test("submit returns the Run that took the message, and an upload lands where th
     await env.assistant.dispatch(ACCOUNT, "build", PRODUCT, "更新", { source: "web" });
     assert.ok((await env.productStore.listManualFiles()).some(file => file.path === "input/manual/33333333-选址 笔记.pdf.md"), "a file lands among the materials that reach every Product's input");
   } finally { await env.close(); }
+});
+
+test("A Run the provider refuses is a failed Assistant with a code, in the view and in the Run's end, until the next message", async () => {
+  const env = await setup({ assistant: (_context, call) => call === 1 ? { fail: '429 {"error":{"message":"Your account org-abc123<ak-secret9> is suspended due to insufficient balance"}}' } : { text: "好了" } });
+  const consoleError = console.error;
+  console.error = () => undefined;
+  try {
+    await env.assistant.submit(ACCOUNT, { source: "web", text: "你好" });
+    await waitFor(async () => !(await env.assistant.view(ACCOUNT)).running);
+    const view = await env.assistant.view(ACCOUNT);
+    assert.equal(view.failure?.code, "provider_quota");
+    assert.deepEqual(view.messages.map(message => message.role), ["expert"], "the message is kept; there is no reply");
+    const end = (await env.log.after(`assistant:${ACCOUNT}`, "0", 5000)).map(entry => entry.event).find(event => event.type === "run_end");
+    assert.deepEqual([end?.status, (end?.error as { code: string }).code], ["failed", "provider_quota"]);
+    assert.doesNotMatch(JSON.stringify([view.failure, end]), /org-abc123|ak-secret9|suspended/);
+    await env.assistant.submit(ACCOUNT, { source: "web", text: "再试" });
+    await waitFor(async () => !(await env.assistant.view(ACCOUNT)).running);
+    assert.equal((await env.assistant.view(ACCOUNT)).failure, undefined, "a new turn that succeeds clears it");
+  } finally { console.error = consoleError; await env.close(); }
 });

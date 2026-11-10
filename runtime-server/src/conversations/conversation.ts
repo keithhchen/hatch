@@ -2,7 +2,10 @@
  * A conversation with something that works for the Expert: a Product worker or the Assistant.
  * Outside agents see every conversation through this one port and this one message shape.
  */
+import type { RunFailure } from "../factoryAgents/runFailure.js";
 import type { ClientAttributes } from "../surfaces/contract.js";
+
+export type { RunFailure };
 
 export type PublicMessage = {
   id: string;
@@ -27,8 +30,8 @@ export type SendInput = {
 };
 
 export type ConversationState = "idle" | "running" | "failed";
-/** `runId` names the Run in progress; it is not the conversation, and a conversation has many Runs. */
-export type ConversationStatus = { state: ConversationState; error?: string; runId?: string };
+/** `runId` names the Run in progress; it is not the conversation, and a conversation has many Runs. `error` is why the last Run failed. */
+export type ConversationStatus = { state: ConversationState; error?: RunFailure; runId?: string };
 /** `runId` is the Run that took the message, when the conversation can say. */
 export type Sent = { conversationId: string; message: PublicMessage; queued: boolean; runId?: string };
 export type ConversationEvent = { type: string; [key: string]: unknown };

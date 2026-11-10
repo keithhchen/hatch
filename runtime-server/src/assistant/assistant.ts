@@ -16,6 +16,7 @@ import type { Workshop } from "../conversations/assets.js";
 import { CHANNEL_KINDS, CHANNEL_LABELS, type ChannelKind, type OutboundMessage } from "../channels/types.js";
 import type { AssistantChannels } from "../channels/ports.js";
 import { localDate, localHour, type AccountReach } from "./reach.js";
+import { failureOf, type RunFailure } from "../factoryAgents/runFailure.js";
 import type { AssistantTask, TaskKind, TaskOrigin, TaskRepository } from "./tasks.js";
 
 const WORKER_LEASE_MS = 35 * 60_000;
@@ -604,7 +605,7 @@ export class AssistantService {
   // ── Studio and channel surfaces ───────────────────────────────────────
 
   /** What the chat shows: what the Expert said and what the Assistant said. System messages stay out. */
-  async view(accountId: string): Promise<{ messages: Array<{ id: string; role: "expert" | "assistant"; text: string; at: string; images?: string[]; attachments?: NonNullable<MessageOrigin["attachments"]> }>; tasks: AssistantTask[]; running: boolean; runId?: string; interviewing: boolean }> {
+  async view(accountId: string): Promise<{ messages: Array<{ id: string; role: "expert" | "assistant"; text: string; at: string; images?: string[]; attachments?: NonNullable<MessageOrigin["attachments"]> }>; tasks: AssistantTask[]; running: boolean; runId?: string; /** Why the last turn failed, until the next one starts. */ failure?: RunFailure; interviewing: boolean }> {
     const desk = await this.desk(accountId);
     const session = await desk.store.get(desk.sessionId);
     type Line = { id: string; role: "expert" | "assistant"; text: string; at: string; images?: string[]; attachments?: NonNullable<MessageOrigin["attachments"]> };
@@ -615,7 +616,7 @@ export class AssistantService {
       if (origin?.kind !== "expert") return [];
       return [{ id: origin.itemId, role: "expert", text: origin.text ?? "", at, ...(origin.images?.length ? { images: origin.images.map(file => path.basename(file)) } : {}), ...(origin.attachments?.length ? { attachments: origin.attachments } : {}) }];
     });
-    return { messages, tasks: await this.deps.tasks.open(accountId), running: desk.runtime.isRunning(desk.sessionId), runId: desk.runtime.runId(desk.sessionId), interviewing: Boolean(deskState(session).interview) };
+    return { messages, tasks: await this.deps.tasks.open(accountId), running: desk.runtime.isRunning(desk.sessionId), runId: desk.runtime.runId(desk.sessionId), ...(session.status === "failed" ? { failure: failureOf(session) } : {}), interviewing: Boolean(deskState(session).interview) };
   }
 
   /**

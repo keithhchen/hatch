@@ -61,3 +61,39 @@ test("a worker conversation runs a real turn: stable ids, final reply, no intern
     assert.equal((await directory.list())[0]!.conversation_id, sent.conversationId);
   } finally { await runtime.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+// Real store, runtime and projector; the model answers like Moonshot does for a suspended account.
+test("a failed Run is a failed conversation with a stable code and no provider text, in status, history and the Run's end", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-"));
+  const definitions = new MemoryAgentDefinitionRepository(await initialAgentDefinitions());
+  const store = new WorkbenchStore(root, { creatorId: "c1", productId: "p1" }, definitions);
+  const providerBody = '429 {"error":{"message":"Your account org-abc123<ak-secret9> is suspended due to insufficient balance","type":"exceeded_current_quota_error"}}';
+  const runtime = new WorkbenchRuntime(store, { env: { HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash" }, agentFactory: options => new Agent({ ...options.agentOptions, initialState: { ...options.initialState, model: createFactoryLlmModel({ env: options.env }) }, streamFn: () => {
+    const message: AssistantMessage = { role: "assistant", api: "openai-completions", provider: "moonshotai-cn", model: "kimi-k2.6", timestamp: Date.now(), content: [], stopReason: "error", errorMessage: providerBody,
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
+    const stream = createAssistantMessageEventStream();
+    stream.push({ type: "error", reason: "error", error: message }); stream.end(message); return stream;
+  } }) });
+  const ended: Array<Record<string, unknown>> = [];
+  runtime.events.on("event", event => { if (event.type === "run_end") ended.push(event); });
+  const workspace: WorkerWorkspace = {
+    store, runtime,
+    entries: async () => agentEntries(await definitions.list(), await store.list()),
+    assertRoleAvailable: async (role: Role) => assertAgentAvailable(agentEntries(await definitions.list(), await store.list()), role),
+  };
+  const research = new WorkerDirectory(workspace).conversation("research")!;
+  const consoleError = console.error;
+  console.error = () => undefined;
+  try {
+    const sent = await research.send(input("Look into Alice"));
+    const outcome = await awaitTurn(research, { sentId: sent.message.id, timeoutMs: 10_000, pollMs: 20 });
+    assert.equal(outcome.reply, undefined);
+    assert.equal(outcome.status.state, "failed");
+    assert.equal(outcome.status.error?.code, "provider_quota");
+    const { status, messages } = await research.messages();
+    assert.deepEqual(status, outcome.status, "history shows the failed turn and why");
+    assert.deepEqual(messages.map(m => m.role), ["user"], "the accepted message is kept");
+    assert.deepEqual(ended.map(e => [e.status, (e.error as { code: string }).code]), [["failed", "provider_quota"]], "the Run's end carries the failure");
+    assert.doesNotMatch(JSON.stringify([status, ended]), /org-abc123|ak-secret9|suspended|exceeded_current_quota/);
+  } finally { console.error = consoleError; await runtime.close(); await rm(root, { recursive: true, force: true }); }
+});
