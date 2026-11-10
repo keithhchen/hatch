@@ -4,7 +4,7 @@
 //   node scripts/try-telegram/run.mjs
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,7 +14,9 @@ import { freePort, until } from "../../runtime-server/scripts/verify-surfaces/li
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const home = path.join(os.homedir(), "hatch-try-telegram");
-const run = path.join(home, "run"), logs = path.join(home, "logs");
+// Each instance owns its own directories, so starting one never touches another that is running.
+const instance = `${new Date().toISOString().replace(/[:.]/g, "-")}-${process.pid}`;
+const run = path.join(home, "runs", instance), logs = path.join(run, "logs");
 const telegramEnv = path.join(home, "telegram.env");
 // The keys come from agentsecrets unless the caller already set them; they are never printed.
 const KEYS = { GEMINI_API_KEY: ["hatch", "gemini"], LLM_API_KEY: ["hatch", "kimi"], FIRECRAWL_API_KEY: ["runtime-lab", "firecrawl"] };
@@ -30,8 +32,7 @@ const bot = telegram.HATCH_TELEGRAM_BOT_TOKEN && telegram.HATCH_TELEGRAM_BOT_USE
 const secret = randomBytes(24).toString("hex");
 const tok = { toRegistry: randomBytes(16).toString("hex"), toRuntime: randomBytes(16).toString("hex") };
 
-rmSync(run, { recursive: true, force: true }); rmSync(logs, { recursive: true, force: true });
-mkdirSync(run, { recursive: true }); mkdirSync(logs, { recursive: true });
+mkdirSync(logs, { recursive: true });
 
 const children = [];
 function start(name, command, args, { cwd = repo, env = {} } = {}) {
