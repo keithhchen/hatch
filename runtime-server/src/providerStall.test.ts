@@ -6,6 +6,7 @@ import { createKimiModel } from "./piModel.js";
 import { withStallGuard } from "./providerStall.js";
 import { UpstreamError } from "./errors/upstream.js";
 import { failures, UPSTREAM_CODE } from "./errors/failures.js";
+import { resolveLlmProfile } from "./llmProfiles.js";
 
 const limits = { firstEventMs: 40, silenceMs: 40 };
 const model = createKimiModel({ env: { LLM_API_KEY: "test-key" } } as never);
@@ -77,4 +78,64 @@ test("the caller's own abort still reaches the provider", async () => {
 
 test("an upstream failure names the provider that was called even when its error text does not", () => {
   assert.equal(UpstreamError.of("Connection error.", "kimi kimi-k2.6").provider, "moonshot");
+});
+
+/** A provider that sends `events`, one every `gapMs`, then finishes. */
+const sends = (events: AssistantMessageEvent[], gapMs: number): StreamFn => () => {
+  const stream = createAssistantMessageEventStream();
+  void (async () => {
+    for (const event of events) { await new Promise((resolve) => setTimeout(resolve, gapMs)); stream.push(event); }
+    stream.push({ type: "done", reason: "stop", message: partial });
+  })();
+  return stream;
+};
+
+test("thinking events keep the guard alive while the model reasons", async () => {
+  const thinking: AssistantMessageEvent[] = [
+    { type: "start", partial }, { type: "thinking_start", contentIndex: 0, partial },
+    ...Array.from({ length: 5 }, () => ({ type: "thinking_delta", contentIndex: 0, delta: "…", partial }) as AssistantMessageEvent),
+    { type: "thinking_end", contentIndex: 0, content: "…", partial }
+  ];
+  const events = await drain(withStallGuard(sends(thinking, 25), limits)(model, { messages: [] }, {}) as ReturnType<typeof call>);
+  assert.equal(events.filter((event) => event.type === "thinking_delta").length, 5);
+  assert.equal(events.at(-1)?.type, "done");
+});
+
+test("the first event and the silence between events have their own limits", async () => {
+  const lateFirst = withStallGuard(sends([{ type: "start", partial }], 70), { firstEventMs: 200, silenceMs: 40 });
+  assert.equal((await drain(lateFirst(model, { messages: [] }, {}) as ReturnType<typeof call>)).at(-1)?.type, "done");
+  const failedFirst = withStallGuard(hangs({ aborted: false }), { firstEventMs: 40, silenceMs: 200 });
+  assert.equal((await drain(failedFirst(model, { messages: [] }, {}) as ReturnType<typeof call>)).at(-1)?.type, "error");
+});
+
+test("a reasoning Gemini profile asks again when its first event never comes, and still bounds it", () => {
+  const { stall } = resolveLlmProfile({ HATCH_LLM_PROFILE: "gemini-3.1-pro" });
+  assert.ok(stall && Number.isFinite(stall.firstEventMs) && (stall.restarts ?? 0) > 0);
+  assert.equal(resolveLlmProfile({ HATCH_LLM_PROFILE: "kimi-k2.6-no-thinking" }).stall, undefined);
+});
+
+/** A provider whose first `hung` requests never answer and whose next one answers; `seen` counts the requests. */
+const hangsThenAnswers = (hung: number, seen: { requests: number; aborted: number }): StreamFn => (_model, _context, options) => {
+  const stream = createAssistantMessageEventStream();
+  if (++seen.requests <= hung) { options?.signal?.addEventListener("abort", () => { seen.aborted++; }); return stream; }
+  stream.push({ type: "start", partial });
+  stream.push({ type: "done", reason: "stop", message: partial });
+  return stream;
+};
+const guarded = (stub: StreamFn, restarts: number) => drain(withStallGuard(stub, { ...limits, restarts })(model, { messages: [] }, {}) as ReturnType<typeof call>);
+
+test("a call with no first event is aborted and issued again; the answer of the new call reaches the caller", async () => {
+  const seen = { requests: 0, aborted: 0 };
+  assert.deepEqual((await guarded(hangsThenAnswers(2, seen), 2)).map((event) => event.type), ["start", "done"]);
+  assert.deepEqual(seen, { requests: 3, aborted: 2 });
+});
+
+test("a provider that never answers any of the restarts still fails with the one error", async () => {
+  const seen = { requests: 0, aborted: 0 };
+  assert.deepEqual((await guarded(hangsThenAnswers(99, seen), 1)).map((event) => event.type), ["error"]);
+  assert.equal(seen.requests, 2);
+});
+
+test("a stream that went silent after its first event is not issued again", async () => {
+  assert.deepEqual((await guarded(hangs({ aborted: false }, [{ type: "start", partial }]), 2)).map((event) => event.type), ["start", "error"]);
 });

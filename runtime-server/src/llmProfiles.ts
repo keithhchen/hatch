@@ -1,4 +1,5 @@
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
+import type { StallLimits } from "./providerStall.js";
 
 export const RUNTIME_LLM_PROFILE_NAMES = ["kimi-k2.6", "kimi-k2.6-no-thinking", "deepseek-v4-flash", "gemini-api", "gemini-3.1-pro"] as const;
 export const FACTORY_LLM_PROFILE_NAMES = ["kimi-k2.6", "deepseek-v4-flash", "gemini-api", "gemini-3.1-pro"] as const;
@@ -22,6 +23,8 @@ export type LlmProfile = {
   temperature?: number;
   thinkingType?: "enabled" | "disabled";
   normalizeEmptyToolCallContent: boolean;
+  /** How long a call may stay silent; the default of providerStall when absent. */
+  stall?: StallLimits;
 };
 
 const PROFILES: Record<LlmProfileName, LlmProfile> = {
@@ -96,7 +99,11 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     maxTokens: 65_536,
     reasoning: true,
     thinkingLevel: "low",
-    normalizeEmptyToolCallContent: false
+    normalizeEmptyToolCallContent: false,
+    // Real Assistant path, about 100 calls: first event 3-15s (thought summaries arrive as one chunk, so the first event ends the
+    // thinking). Three simultaneous first calls once got nothing for 120s+ while a new call at that moment answered in 11s: a hung
+    // request does not recover, so wait 45s and ask again instead of waiting longer.
+    stall: { firstEventMs: 45_000, silenceMs: 60_000, restarts: 2 }
   }
 };
 
