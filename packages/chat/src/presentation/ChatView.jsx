@@ -87,7 +87,9 @@ export function TaskBriefDropdown({ snapshot, t }) {
 
 /** One reply's ordered entries: text, and runs of tool steps between it. */
 export function TimelineEntries({ timeline, live, activityKinds, t, errorText, loadToolDetail, approvals }) {
-  const visible = timeline.filter(entry => !ACTIVITY_KINDS.includes(entry.kind) || activityKinds.includes(entry.kind));
+  // A step with nothing to show (reasoning that came back empty, text of only whitespace) is no row, so no empty pill.
+  const empty = entry => (entry.kind === "thinking" && !entry.streaming && !entry.content?.trim()) || (entry.kind === "text" && !entry.content.trim());
+  const visible = timeline.filter(entry => !empty(entry) && (!ACTIVITY_KINDS.includes(entry.kind) || activityKinds.includes(entry.kind)));
   return groupTimelineEntries(visible, entry => approvalDecision(entry, approvals.decisions) !== null).map((entry, index, entries) => {
     const isLastItem = index === entries.length - 1;
     if (entry.kind === "text") return <div className="web-chat__bubble web-chat__content" key={entry.id}><MessageResponse isAnimating={live}>{entry.content}</MessageResponse></div>;
