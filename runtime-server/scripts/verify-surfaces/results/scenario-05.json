@@ -2,7 +2,7 @@
   "id": 5,
   "title": "Atomic steer: messages raced at the moment a Run ends; IM bursts",
   "status": "PASS",
-  "durationMs": 250149,
+  "durationMs": 421411,
   "checks": [
     {
       "name": "lost = 0: every accepted message is stored once, reached the model once, and was answered inside a completed Run",
@@ -49,9 +49,7 @@
     {
       "name": "only documented rejections (conversation_busy) occurred",
       "ok": true,
-      "detail": {
-        "conversation_busy": 1
-      }
+      "detail": {}
     },
     {
       "name": "IM: every message of every burst was stored once (5 inbox rows)",
@@ -130,10 +128,39 @@
         [],
         []
       ]
+    },
+    {
+      "name": "Assistant: both messages are stored once, in order",
+      "ok": true,
+      "detail": [
+        "Write the word ASTEER-400914, then the i",
+        "Also write the word BSTEER-13128c at the"
+      ]
+    },
+    {
+      "name": "Assistant: the second message was accepted as sent while the first Run went (joined it, or started the next Run), never rejected",
+      "ok": true,
+      "detail": 202
+    },
+    {
+      "name": "Assistant: every Run ended completed, with no message left unclaimed",
+      "ok": true,
+      "detail": [
+        {
+          "status": "completed",
+          "steered_count": 1,
+          "consumed_count": 1
+        }
+      ]
+    },
+    {
+      "name": "Assistant: the second message was answered",
+      "ok": true,
+      "detail": "20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40ASTEER-400914\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40\nBSTEER-13128c"
     }
   ],
   "measurements": {
-    "calibration_median_run_ms": 2943,
+    "calibration_median_run_ms": 3258,
     "trials": 36,
     "trial_modes": {
       "delta": 18,
@@ -141,42 +168,36 @@
     },
     "messages_total": 144,
     "burst_messages": 108,
-    "accepted_by_client_signal": 143,
+    "accepted_by_client_signal": 144,
     "lost": 0,
     "silent_ws_messages_without_ack_or_row": 0,
     "stored_more_than_once": 0,
-    "rejections_by_code": {
-      "conversation_busy": 1
-    },
+    "rejections_by_code": {},
     "conversation_busy_rate": {
-      "busy": 1,
+      "busy": 0,
       "of": 108,
-      "rate": 0.009
+      "rate": 0
     },
     "burst_outcomes_by_database": {
-      "steered": 86,
-      "started": 21
+      "steered": 95,
+      "started": 13
     },
     "burst_accept_time_relative_to_first_run_end": {
-      "0..20ms": {
-        "steered": 33,
-        "started": 14
-      },
       "<..-500ms": {
-        "steered": 39,
+        "steered": 69,
         "started": 0
       },
-      "500..>ms": {
-        "steered": 14,
-        "started": 7
+      "0..20ms": {
+        "steered": 26,
+        "started": 13
       }
     },
     "runs_per_trial_distribution": {
-      "1": 15,
-      "2": 21
+      "1": 23,
+      "2": 13
     },
     "max_active_runs_polled_per_conversation": 1,
-    "poll_samples_total": 11317,
+    "poll_samples_total": 19620,
     "run_overlap_trials": [],
     "steered_runs": 36,
     "runs_with_unclaimed_steer_at_end": 0,
@@ -187,345 +208,337 @@
         "trial": 0,
         "mode": "delta",
         "offset": 0,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_5b74cea1f0fb4a20b695e6ece656cca0",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_701ae6f3efdb4e4a8ed85ec55ec9c5dd",
         "runs": [
-          "run_0c5752cf48474760ae5307babdd6d2e3"
+          "run_45b0f33f61944e96b5fdd0645e5bea95"
         ]
       },
       {
         "trial": 1,
         "mode": "timed",
         "offset": -400,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_0ce9876a1c1e465da1072180dd49a805",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_bab16df4fa66449f82abae4d93120ed7",
         "runs": [
-          "run_ef3cd2bba8c74b01941b903e1e1a68f3"
+          "run_a39c6258cf634e1585b4475af5751c88"
         ]
       },
       {
         "trial": 2,
         "mode": "delta",
         "offset": 5,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_e25c8d71997b4921804fa4ec959c7c23",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_ce94655495614e2da732ce7f1a447eac",
         "runs": [
-          "run_5c2992579fd1434d84b96b755e1488b8",
-          "run_114fdd2cfe3b43a5a8c5382624122645"
+          "run_f162b389bb224cd89497d6ce17406bd0"
         ]
       },
       {
         "trial": 3,
         "mode": "timed",
         "offset": -200,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_bc3148c0956940e7a5bedf1bea37e410",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_a1d14acba34f4864bec009073e75f04f",
         "runs": [
-          "run_048df8927b4f4e5c921abfd6ff99d6f6"
+          "run_baf6a3e8ac1f498faead1cc31906c3b3"
         ]
       },
       {
         "trial": 4,
         "mode": "delta",
         "offset": 15,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_8747737cb4744302a13dbb798e7d8aba",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_42062b2c6249455f985c169cf5b1aea8",
         "runs": [
-          "run_f3e032840a41463dba25dc6ff0c3ce6b"
+          "run_5a4b40c74a64427798541cc8d955834e",
+          "run_619b4475cea6432d83c959f60c20d56f"
         ]
       },
       {
         "trial": 5,
         "mode": "timed",
         "offset": -100,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_e0dc18f6d48a44e1be3b890f3e324b4e",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_d7b8e4406ada4f2a83647c633c50569a",
         "runs": [
-          "run_e62d7a7f74c44259bb0b33f16d804f28"
+          "run_c87d205b38c746348f2be1276ed9053a"
         ]
       },
       {
         "trial": 6,
         "mode": "delta",
         "offset": 30,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_20b5fcd87f4548c08d4a2ac140f89e38",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_a712f85ddb8948ceaf1076588d815f95",
         "runs": [
-          "run_89fcd311265444ca8fb545278ccf121a",
-          "run_33e75e97de8d487ebe2ede0bd00e3d32"
+          "run_f04fb0fbca124b9699fc3db3bea98866"
         ]
       },
       {
         "trial": 7,
         "mode": "timed",
         "offset": -40,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_8f0de63060004fda80b0a6186b91f2b3",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_ed322cca6c7f45d5b869fefafc231466",
         "runs": [
-          "run_399a03f4078f44af982b24d8798132d6"
+          "run_fea3f70b188b466a87d219a283397d56"
         ]
       },
       {
         "trial": 8,
         "mode": "delta",
         "offset": 60,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_09dc17534fd9472ca040df0de31db4b8",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_039b35b8547541838575bfb723a571dc",
         "runs": [
-          "run_f07e7d05fef74d3d92ecea3fd52c9e2c",
-          "run_2a6ab3ed858c4e2487e882aee463743b"
+          "run_52609496522b45849b46f58d51eaf790",
+          "run_443f5e8bebc642a38f093754a695668d"
         ]
       },
       {
         "trial": 9,
         "mode": "timed",
         "offset": 0,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_63b7494f37264b078578aec37ca081b1",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_f249c0131e7040ceaf1d042d55ff27ed",
         "runs": [
-          "run_f05fbe1b00d94422879325b22412b796",
-          "run_1b7e66806b974314bf9c8399a695849a"
+          "run_1522de1b318f4fe5b67356c0766db6dc"
         ]
       },
       {
         "trial": 10,
         "mode": "delta",
         "offset": 120,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_3d77d72f6c45453b9164a6feb0021b58",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_59158f6e8e6f4d60beec48b4fe9667e8",
         "runs": [
-          "run_dab4020b9ef5418fb9b612f38aabc2d8",
-          "run_75c3ae7416994748afeb8b2b60f51c1c"
+          "run_20d0dcc7848e4e0691922bc9b72cfc8d",
+          "run_01ce944a30c1472d95e14d64f17e5b40"
         ]
       },
       {
         "trial": 11,
         "mode": "timed",
         "offset": 40,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_f0c8c9c8f81e4a4d8b1a8831b19b10f6",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_fa7ff94dc541440fa1a8c54782e700d8",
         "runs": [
-          "run_dc9a4c88ec0d45b6941a05faef832111",
-          "run_08445c71b12e4a34b3b7d1329f986f65"
+          "run_b0a06888839b45d0866542288849a5fc"
         ]
       },
       {
         "trial": 12,
         "mode": "delta",
         "offset": 0,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_d8b31ea7e5064f68a92fac185d452dbc",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_9f8835e5947a4d339e99bb56b4e0508d",
         "runs": [
-          "run_aff4941954f049568420d96bd0ccca74"
+          "run_853df9f7487a43b88681b86b1b74b6a3",
+          "run_b150fdfd31564e3c86c6a1ed3268d984"
         ]
       },
       {
         "trial": 13,
         "mode": "timed",
         "offset": 100,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_e579c5baee2942489934cdf9cebdb646",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_6cbafb0f768642948af70ae22a13132d",
         "runs": [
-          "run_2f7c8328b9b041219012700b2458c0b2"
+          "run_2eb7f6bf8dba4af0bcfaa68001a7f18e",
+          "run_f040225bf8a84af4a2a555a4ceea3084"
         ]
       },
       {
         "trial": 14,
         "mode": "delta",
         "offset": 5,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_04403d8cf4c944bbb39daf1e9bc2f1ef",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_2d6880a93e5b44cc84541c53c1962e4d",
         "runs": [
-          "run_64952289b0e549ed84fb9b3918d63a29"
+          "run_3307d945277740eb9ba2728f484df189",
+          "run_81ab20c184684efd85fd40f45e0d606c"
         ]
       },
       {
         "trial": 15,
         "mode": "timed",
         "offset": 200,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_8ce4cab0e13f492f828f817c997812d9",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_1cfebd8003fe48b29c44f8dac8f7300e",
         "runs": [
-          "run_ae2cbba0fa1e41ff882f4f414001bfe2",
-          "run_5e95c07092184cc2bf3e29b5d2033396"
+          "run_579fedb3887a42c89803b276943e7b51"
         ]
       },
       {
         "trial": 16,
         "mode": "delta",
         "offset": 15,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_d81122a02e17467fb557edc35d7000d5",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_005ac7e5d05c438892e154917a461710",
         "runs": [
-          "run_412acec9e73046f69c61e36212c88f7f"
+          "run_5feb37fe9c45484aabf6a69737fd821b"
         ]
       },
       {
         "trial": 17,
         "mode": "timed",
         "offset": -400,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_5d38bbdbf6bc42f7b811cd9aea9551c3",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_ef71f0dee07f4565acfd79843ee253de",
         "runs": [
-          "run_e1d48b766287478b8565a49a60c06bdd",
-          "run_d2f5b886a9274ddcab2e08f881978ea9"
+          "run_bf463f31572e43bf9c1bc4837a007262"
         ]
       },
       {
         "trial": 18,
         "mode": "delta",
         "offset": 30,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_a1841a13c3bb48d1aad1e999c60d41a5",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_337c64a6c05d4e0b86cb0d29f07fe9cc",
         "runs": [
-          "run_46ea205dceee406eb77694f44d95f1c1"
+          "run_43964829aad2450691a8765178fbfcd5",
+          "run_33e4a4b38f8d42f9a9bc47a965c282e2"
         ]
       },
       {
         "trial": 19,
         "mode": "timed",
         "offset": -200,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_c0dfb91ff23f499c979f1e1454b23cc1",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_4fbbc64d557648a5843927b06ca70d11",
         "runs": [
-          "run_665ac890931247739b957d00d671ff9b"
+          "run_6b07bdc265964f019fa843e7d6b4c1a6"
         ]
       },
       {
         "trial": 20,
         "mode": "delta",
         "offset": 60,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_4d6443cd174e4ac1bea359a9d40893f4",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_a68655e9e4164bf793736c75b55edc4a",
         "runs": [
-          "run_772aa483186845988360b9ea8c9f6666",
-          "run_09473631242a4c35bff7ede9e19ab5a4"
+          "run_f3cc992fc00c44e4804d321d2cac5486",
+          "run_bff7892de3f340d881c67f560039a136"
         ]
       },
       {
         "trial": 21,
         "mode": "timed",
         "offset": -100,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_e792985359eb4605980b3c5f5a27bfb8",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_80fc703c2cad43a0a6444a1521f0ebb7",
         "runs": [
-          "run_bb16f4359c5c4ba5b9105b9230f20966",
-          "run_93dbe1b8ea664bf283942fdd17c2ade4"
+          "run_789ebd431edb4771a4f3a80bea615e37"
         ]
       },
       {
         "trial": 22,
         "mode": "delta",
         "offset": 120,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_fd2d3b8b12a147a09db94abacb7e8d1b",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_ed1aa0c58252401eb37fb4ededca82fc",
         "runs": [
-          "run_9e46e38bffec48839ec337ae7ac93ba0",
-          "run_636ac97aa53547c6a0189b88e332b97f"
+          "run_65a568b86e754c0f8aa4a8715c9c9ade",
+          "run_a3dab2749b0b476b8dedb02e249b0b32"
         ]
       },
       {
         "trial": 23,
         "mode": "timed",
         "offset": -40,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_532118c435f34bb685581ad071fa42e1",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_d87c3ad848ef4a34b90ce90549131560",
         "runs": [
-          "run_4411c2efd5694e2ba4a8e076cbc91392",
-          "run_c4d94217adac4ba7b6a1d25ffa6cc9dd"
+          "run_5e379f11f74f4252b1101af7414b29f6"
         ]
       },
       {
         "trial": 24,
         "mode": "delta",
         "offset": 0,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_f12d38bceafb46bca1d384dfda19d319",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_15bdab5271994392880ebe090f3ed798",
         "runs": [
-          "run_ccd3573549c3443cab376f5c46812cf7"
+          "run_b1804efb634e443e9784e2aaedf118e8"
         ]
       },
       {
         "trial": 25,
         "mode": "timed",
         "offset": 0,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_b3f84b4bade4437e8ef37aca4a150676",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_9ee94780667d4bb5bbcfabaa68a90525",
         "runs": [
-          "run_b4aed9d4b15344be94f846bfaf68a6c1",
-          "run_14a9a469a39049768fe0894fa48f97a3"
+          "run_3a6f59f11c5b49f99a2c0f46ca4c06e1",
+          "run_d74dba7a6ced42cf91876d7a581b42ef"
         ]
       },
       {
         "trial": 26,
         "mode": "delta",
         "offset": 5,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_f61bd24d4ba44049a3540fe49a7583d9",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_ccffa08cc90544b3a923caeb303d66f8",
         "runs": [
-          "run_6e82b0691c83492c884594e807b6f4d6",
-          "run_03a215631d684f969ecaf504dce3d476"
+          "run_f75c1fbb04e94282a98579a02ebd57b9"
         ]
       },
       {
         "trial": 27,
         "mode": "timed",
         "offset": 40,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_13e9d79846554149b4049ccaddb55436",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_f27f9afdfc9a418b9bc90b4e93053451",
         "runs": [
-          "run_1fc37bfdd3ad4fc0beb42d7e8c66c941"
+          "run_5336cb956b334506af79472ef8f03075",
+          "run_461dd587cd51450eacbe6bd913086c67"
         ]
       },
       {
         "trial": 28,
         "mode": "delta",
         "offset": 15,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_12c8e0a03d4c401aac811b6d6cc2d985",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_4bfa520baa9142d4845ce4d3bd92347c",
         "runs": [
-          "run_cdab9630ae4b428c9531a90352ad71fb",
-          "run_f8095697398842f390fab2819aea2e40"
+          "run_f7579d76509240f6a976724dcef593bf",
+          "run_0723c466358149a48308d189165fd477"
         ]
       },
       {
         "trial": 29,
         "mode": "timed",
         "offset": 100,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_3e428e05718d452492c0044979df7c94",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_df6388f6ae4e4040b023179524d4b93c",
         "runs": [
-          "run_2ac60940013f448792ddda6ce646e71d",
-          "run_4ae4300bb2344c489331e6c95a35ec08"
+          "run_def7bf8ecf334c75a617c43b8f229093"
         ]
       },
       {
         "trial": 30,
         "mode": "delta",
         "offset": 30,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_f4627d3f4b844c03875091fd6fd18f9f",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_9f44a2362d2e47ffba4b6d15209ccb67",
         "runs": [
-          "run_7222b0be5f4441ee8455b799b0ecac6b",
-          "run_44873f8f12894c26b003bf9e5557d5ed"
+          "run_40b00825c044406a8008be75e0287583",
+          "run_f9cfc50486af4c938917e69e43d3c3af"
         ]
       },
       {
         "trial": 31,
         "mode": "timed",
         "offset": 200,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_954d814b4d0740d79699a1cc0ea3da19",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_35f12c3678d54cc198136bbfa7761dcc",
         "runs": [
-          "run_88262d2c61434a78bf37bd8d582fd455",
-          "run_a9ceeaf9ba604f8d92af2cc0c1860baf"
+          "run_a3b77d9cb0464b50bc338e8230f43899"
         ]
       },
       {
         "trial": 32,
         "mode": "delta",
         "offset": 60,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_2bda3269d9bf42ba8ef8e16620b315e5",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_26fa66f2e343420b85fc794f1289b7f9",
         "runs": [
-          "run_7c7c9e8980fc4818b2aa4b6094a467fa"
+          "run_7f3566f8f00f43a28709acc386505e37"
         ]
       },
       {
         "trial": 33,
         "mode": "timed",
         "offset": -400,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_7a5c8d7092cd4548b62d9f46aab40095",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_1e202835a78f4275acbcedaf51181058",
         "runs": [
-          "run_6135594465fc47d9a76fc62efd0117e1",
-          "run_6cbb5181e7e84231b6260a0d05861260"
+          "run_4d5bf1f1dcf14ce1a30ae6106ba57069"
         ]
       },
       {
         "trial": 34,
         "mode": "delta",
         "offset": 120,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_999d2c92df30443eaf5f52a2635ac220",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_0d95a07f88374ace88c49dd5603bb4c2",
         "runs": [
-          "run_8b82999692c04a3aaaf530637f5e0254",
-          "run_63903a78ebcb4835a1539e148ecdbd39"
+          "run_7425a1767b38458492b884a1a947cdc1"
         ]
       },
       {
         "trial": 35,
         "mode": "timed",
         "offset": -200,
-        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_da464ef1b4744dfc8656ddce6e02a601",
+        "conversation": "conversation:0c7c4d321a0c8139175913b1:conv_85efdc0dc65842279241656b7f187d6c",
         "runs": [
-          "run_f44b98ef2c5a4151bfb5e479acffda13",
-          "run_d0538be44d3c4f6a9b7359c246fd3129"
+          "run_b7c187a74cd44065a280f48a7100e1e2"
         ]
       }
     ],
@@ -534,7 +547,7 @@
     "im_bursts": [
       {
         "burst": 0,
-        "postedMs": 284,
+        "postedMs": 283,
         "inboxRows": 5,
         "inboxStates": {
           "done": 5
@@ -545,7 +558,7 @@
         },
         "runsFromInbox": 1,
         "messagesPerRun": {
-          "run_9f98e66f5271472886b7143e17df67f6": 5
+          "run_133d74be970c4b4bb6ada68fd787ff62": 5
         },
         "userTurnsSeenByModel": 5,
         "finalReplies": 1,
@@ -559,12 +572,12 @@
           "im0x0im0x1im0x2im0x3im0x4"
         ],
         "runIds": [
-          "run_9f98e66f5271472886b7143e17df67f6"
+          "run_133d74be970c4b4bb6ada68fd787ff62"
         ]
       },
       {
         "burst": 1,
-        "postedMs": 284,
+        "postedMs": 283,
         "inboxRows": 5,
         "inboxStates": {
           "done": 5
@@ -575,7 +588,7 @@
         },
         "runsFromInbox": 1,
         "messagesPerRun": {
-          "run_76f8cb2c43954d4a882230563b32e929": 5
+          "run_57b15a2b8005496a9e4865a0f70ec64f": 5
         },
         "userTurnsSeenByModel": 5,
         "finalReplies": 1,
@@ -589,12 +602,12 @@
           "im1x0im1x1im1x2im1x3im1x4"
         ],
         "runIds": [
-          "run_76f8cb2c43954d4a882230563b32e929"
+          "run_57b15a2b8005496a9e4865a0f70ec64f"
         ]
       },
       {
         "burst": 2,
-        "postedMs": 283,
+        "postedMs": 284,
         "inboxRows": 5,
         "inboxStates": {
           "done": 5
@@ -605,7 +618,7 @@
         },
         "runsFromInbox": 1,
         "messagesPerRun": {
-          "run_ff469890cb27497094f0b53ef9e62d0e": 5
+          "run_f98faee2f48c455bb0b42abef2127329": 5
         },
         "userTurnsSeenByModel": 5,
         "finalReplies": 1,
@@ -619,7 +632,7 @@
           "im2x0im2x1im2x2im2x3im2x4"
         ],
         "runIds": [
-          "run_ff469890cb27497094f0b53ef9e62d0e"
+          "run_f98faee2f48c455bb0b42abef2127329"
         ]
       },
       {
@@ -635,7 +648,7 @@
         },
         "runsFromInbox": 1,
         "messagesPerRun": {
-          "run_cb8111a1b0494169a45acc22976e47a2": 5
+          "run_05c0d93c5a0b4a9ea23055dd48aef97f": 5
         },
         "userTurnsSeenByModel": 5,
         "finalReplies": 1,
@@ -649,7 +662,7 @@
           "im3x0im3x1im3x2im3x3im3x4"
         ],
         "runIds": [
-          "run_cb8111a1b0494169a45acc22976e47a2"
+          "run_05c0d93c5a0b4a9ea23055dd48aef97f"
         ]
       },
       {
@@ -665,7 +678,7 @@
         },
         "runsFromInbox": 1,
         "messagesPerRun": {
-          "run_c3de8b7d291748c088bd5f0abd9d8d18": 5
+          "run_be46925539264931887452c65fb1a6e4": 5
         },
         "userTurnsSeenByModel": 5,
         "finalReplies": 1,
@@ -679,12 +692,12 @@
           "im4x0im4x1im4x2im4x3im4x4"
         ],
         "runIds": [
-          "run_c3de8b7d291748c088bd5f0abd9d8d18"
+          "run_be46925539264931887452c65fb1a6e4"
         ]
       },
       {
         "burst": 5,
-        "postedMs": 284,
+        "postedMs": 283,
         "inboxRows": 5,
         "inboxStates": {
           "done": 5
@@ -695,7 +708,7 @@
         },
         "runsFromInbox": 1,
         "messagesPerRun": {
-          "run_7504e434895043f099f0162eda7fb117": 5
+          "run_0298373451bb481db7edd66868d65d82": 5
         },
         "userTurnsSeenByModel": 5,
         "finalReplies": 1,
@@ -709,7 +722,7 @@
           "im5x0im5x1im5x2im5x3im5x4"
         ],
         "runIds": [
-          "run_7504e434895043f099f0162eda7fb117"
+          "run_0298373451bb481db7edd66868d65d82"
         ]
       }
     ],
@@ -718,7 +731,15 @@
     },
     "im_runs_per_burst_distribution": {
       "1": 6
-    }
+    },
+    "assistant_steer_runs": [
+      {
+        "status": "completed",
+        "steered_count": 1,
+        "consumed_count": 1
+      }
+    ],
+    "assistant_steer_second_joined_first": true
   },
   "evidence": {
     "lost_messages": [],
@@ -729,7 +750,6 @@
     }
   },
   "notes": [
-    "conversation_busy refused 1 of 108 burst messages. It is documented (a stopping Run), but each is a user-visible refusal at the moment a Run ends.",
     "IM: 6 bursts of 5 messages from one sender 70 ms apart (about 280 ms in all). Final replies per burst: {\"1\":6}."
   ],
   "defects": []

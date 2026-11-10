@@ -2,7 +2,7 @@
   "id": 4,
   "title": "Idempotency end to end: webhooks, outbound faults, HTTP/SSE/WS sends, Studio keys",
   "status": "PASS",
-  "durationMs": 171118,
+  "durationMs": 192727,
   "checks": [
     {
       "name": "A1 same update x10 sequential, then x5 after the reply: one inbox row per distinct update (1)",
@@ -693,8 +693,8 @@
       "name": "C2 exactly one send started the Run",
       "ok": true,
       "detail": {
-        "replayed": 9,
-        "started": 1
+        "started": 1,
+        "replayed": 9
       }
     },
     {
@@ -851,7 +851,7 @@
       "detail": [
         202,
         {
-          "run_id": "run_93c15d2c7c7a45f39f59ee37ed397de8",
+          "run_id": "run_760203bfb8cb4f26b50fd54c87aa41f6",
           "outcome": "steered",
           "status": "running"
         }
@@ -887,17 +887,66 @@
       "detail": [
         {
           "cursor": "101",
-          "run_id": "run_93c15d2c7c7a45f39f59ee37ed397de8",
-          "key": "f87d36b5-964e-4bbd-97dd-9f242388bb50",
+          "run_id": "run_760203bfb8cb4f26b50fd54c87aa41f6",
+          "key": "fc412fc6-74fb-45fc-a07f-19eb79849830",
           "steered": null
         },
         {
           "cursor": "103",
-          "run_id": "run_93c15d2c7c7a45f39f59ee37ed397de8",
-          "key": "7ca1aaf4-6416-43a8-8023-913bb474141b",
+          "run_id": "run_760203bfb8cb4f26b50fd54c87aa41f6",
+          "key": "8774bfad-539e-4880-ae14-ae9e82aba529",
           "steered": "true"
         }
       ]
+    },
+    {
+      "name": "C5 same key over an asset with the same bytes replays",
+      "ok": true,
+      "detail": {
+        "first": 200,
+        "sameBytes": [
+          200,
+          "replayed"
+        ]
+      }
+    },
+    {
+      "name": "C5 same key over an asset with other bytes: 409 client_message_conflict",
+      "ok": true,
+      "detail": [
+        409,
+        "client_message_conflict"
+      ]
+    },
+    {
+      "name": "c5_asset_key: 1 Run(s)",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "c5_asset_key: 1 user message(s) in the journal and in the model transcript",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "c5_asset_key: model calls = 1 (one answer per Run)",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
     },
     {
       "name": "D0 an API key in the upgrade's Authorization header opens the Desktop socket",
@@ -1375,8 +1424,8 @@
       "duplicateTurns": 0
     },
     "c2_http_concurrent_outcomes": {
-      "replayed": 9,
-      "started": 1
+      "started": 1,
+      "replayed": 9
     },
     "c2_http_concurrent_x10": {
       "runs": 1,
@@ -1452,18 +1501,48 @@
     ],
     "c5_asset_uploads": {
       "statuses": [
-        503,
         201,
-        503
+        201,
+        201
       ],
       "ids": [
-        null,
-        "5e16c949-3a3d-4acd-ae21-550e772d6b7d",
-        null
+        "3118dd6f-f96b-43c3-a307-898a7960ee88",
+        "3118dd6f-f96b-43c3-a307-898a7960ee88",
+        "ae86e22e-8c74-4459-94bd-bdcd1be6a754"
       ],
       "shape": [
-        "error"
+        "asset_id",
+        "kind",
+        "name",
+        "bytes",
+        "state"
       ]
+    },
+    "c5_asset_statuses": {
+      "first": [
+        200,
+        null
+      ],
+      "sameBytes": [
+        200,
+        "replayed",
+        null
+      ],
+      "otherBytes": [
+        409,
+        "client_message_conflict"
+      ]
+    },
+    "c5_asset_key": {
+      "runs": 1,
+      "modelUsers": 1,
+      "journalUsers": 1,
+      "modelReplies": 1,
+      "expectedTurns": 1,
+      "runStatuses": {
+        "completed": 1
+      },
+      "duplicateTurns": 0
     },
     "d0_api_key_in_upgrade_authorization_header": "ok",
     "d1_ws_frames": {
@@ -1518,23 +1597,23 @@
     "e1_assistant_sequential": [
       [
         202,
-        "fcc6d341"
+        "6dd11498"
       ],
       [
         202,
-        "fcc6d341"
+        "6dd11498"
       ],
       [
         202,
-        "fcc6d341"
+        "6dd11498"
       ],
       [
         202,
-        "fcc6d341"
+        "6dd11498"
       ],
       [
         202,
-        "fcc6d341"
+        "6dd11498"
       ]
     ],
     "e2_assistant_concurrent": {
@@ -1606,103 +1685,108 @@
   "evidence": {
     "A1 same update x10 sequential, then x5 after the reply": {
       "runIds": [
-        "run_5cc58940c17e4119aa01c22d54a4ae96"
+        "run_16793e095e7f41afb674ebf40baff6a2"
       ],
       "inboxEvents": [
-        "138398"
+        "107979"
       ],
       "outboxIds": [
-        "25c958be-8413-460b-9108-343f2a8c697c"
+        "c816f06c-0ecb-4427-8821-358d1e74ffe5"
       ]
     },
     "A2 same update x10 concurrent": {
       "runIds": [
-        "run_3c96f0fff6e64d74a06de5df86cc51e7"
+        "run_7d80ec59a9b0415993e975908b134ca0"
       ],
       "inboxEvents": [
-        "138399"
+        "107980"
       ],
       "outboxIds": [
-        "b064ab40-7928-4ad9-9d45-1068ea50fdfb"
+        "5ba024bd-2775-425a-9797-b4a02f41a709"
       ]
     },
     "A3 update ids out of order + redelivery": {
       "runIds": [
-        "run_489dbe9ef12948ec9129cab872f2c139"
+        "run_82bc3bd069954c3c9a41004c24b71425"
       ],
       "inboxEvents": [
-        "138901",
-        "138900"
+        "108482",
+        "108481"
       ],
       "outboxIds": [
-        "45f921e8-5bdb-4297-aa42-de4c7ceae997"
+        "3c254a5a-8093-47fd-ad59-4a5940c76a48"
       ]
     },
     "A4 webhook cut client-side x3, then retried x3": {
       "runIds": [
-        "run_0739542896104e00909041fdad4fe355"
+        "run_3280e1ac0dbd4a459da9cdc254551428"
       ],
       "inboxEvents": [
-        "138910"
+        "108491"
       ],
       "outboxIds": [
-        "8f9ed837-cf8a-476e-8a57-3803d8fe2f82"
+        "dec43484-cd85-4939-bcbe-4e3cca8361ce"
       ]
     },
     "c1_http_sequential_x10": {
-      "conversation": "conv_1e5095e54891484caeea749d14195f11",
+      "conversation": "conv_21fe3074d5e34f4aade0032646b100f7",
       "runIds": [
-        "run_5a2aa83ebc68494280bfa18483325e93"
+        "run_6ae1524a95bf467d85ebf9f1e047fa81"
       ]
     },
     "c1b_http_repeat_while_running_x6": {
-      "conversation": "conv_36031475a0e345a5b5549303f2f3e3a6",
+      "conversation": "conv_8a1a5d118cd54f1e978b4f1b83f00c68",
       "runIds": [
-        "run_6897242ac3a6490caffecb14895207eb"
+        "run_21ec50d4a05545d6915f23a644244230"
       ]
     },
     "c2_http_concurrent_x10": {
-      "conversation": "conv_d463b6c47bd94b0f8a742f1167de5d1d",
+      "conversation": "conv_41192a715abd4601a270ed9979d10623",
       "runIds": [
-        "run_afda3f0e57ce4f32938db697dd196476"
+        "run_e34458ca9a0c45d68411b90a0427fb80"
       ]
     },
     "c3_sse_same_key_x2": {
-      "conversation": "conv_fcf83ca62c6e4b529345fb3820dc8c19",
+      "conversation": "conv_0465b3ea78d04118a0041800879cd325",
       "runIds": [
-        "run_b208023a5ad54c2ab399eb42cb19372e"
+        "run_1ff93383ee834a0b9b00b559503157a4"
       ]
     },
     "c3_sse_after_replay": {
-      "conversation": "conv_fcf83ca62c6e4b529345fb3820dc8c19",
+      "conversation": "conv_0465b3ea78d04118a0041800879cd325",
       "runIds": [
-        "run_b208023a5ad54c2ab399eb42cb19372e"
+        "run_1ff93383ee834a0b9b00b559503157a4"
       ]
     },
     "c4_conflict_after_run": {
-      "conversation": "conv_88ab1cf8594548ef897f35c79ad03ce2",
+      "conversation": "conv_8e132275d9364596b9cc9d5f7b7a771e",
       "runIds": [
-        "run_55cc9234599246c181c64f474557bd31"
+        "run_25e609bf14a747cba3d912cd67254594"
+      ]
+    },
+    "c5_asset_key": {
+      "conversation": "conv_931f211a97194431acdffc1712448721",
+      "runIds": [
+        "run_006d70f0f77b42899f7977ee17885ebe"
       ]
     },
     "d1_ws_same_and_second_socket": {
-      "conversation": "conv_5d5287a0c8f245e89617f821ac663e33",
+      "conversation": "conv_9c4bb8d23b4f443a832e4bd33b186007",
       "runIds": [
-        "run_eaa09d33b89a444c975a734763dd550c"
+        "run_a99c0bef82e74fa4b250d633aa0acded"
       ]
     },
     "d2_ws_two_sockets_concurrent": {
-      "conversation": "conv_aeead13001af4f0b9acde626a3f7b19a",
+      "conversation": "conv_101c2c4c0ea3415c9860f628c0030880",
       "runIds": [
-        "run_a88d0562824e45afbdebc15f228eb7aa"
+        "run_850be4a9d9054920bba41a81a89d0c13"
       ]
     }
   },
   "notes": [
-    "A3: update 138901 (delta) arrived before 138900 (charlie); the transcript order is delta then charlie. Chat order follows arrival, not update_id.",
+    "A3: update 108482 (delta) arrived before 108481 (charlie); the transcript order is delta then charlie. Chat order follows arrival, not update_id.",
     "A5: a redelivered update id with different content is dropped silently (200, no turn, no notice); it is not rejected as a conflict the way a changed client_message_id is on the HTTP and WebSocket doors.",
-    "b: `unknown` is a reply the product will not resend because the platform may already have it. Where the platform did not have it (timeout without delivery, 502), the user never receives that reply; the product trades a possible duplicate for a possible silent loss on non-idempotent Telegram, as deliveryAfterFailure documents.",
-    "C5 not exercised: this Runtime has no content moderation adapter (documented in openChatAssets: every upload ends failed as unavailable, 503), so no asset becomes ready; upload statuses 503,201,503. Asset-hash idempotency stays unmeasured."
+    "b: `unknown` is a reply the product will not resend because the platform may already have it. Where the platform did not have it (timeout without delivery, 502), the user never receives that reply; the product trades a possible duplicate for a possible silent loss on non-idempotent Telegram, as deliveryAfterFailure documents."
   ],
   "defects": []
 }

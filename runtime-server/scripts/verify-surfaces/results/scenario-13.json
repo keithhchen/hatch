@@ -2,7 +2,7 @@
   "id": 13,
   "title": "Telegram binding self-served from the dashboard page: Assistant (Studio) and per-Product Chat, with the 2x2 for one account",
   "status": "PASS",
-  "durationMs": 61042,
+  "durationMs": 73799,
   "checks": [
     {
       "name": "Assistant: before binding the page shows an unbound Telegram tile",
@@ -16,7 +16,7 @@
     {
       "name": "Assistant: one click gives the bot's t.me deep link carrying a one-time code",
       "ok": true,
-      "detail": "https://t.me/hatch_verify_bot?start=HATCH-9UPFGKQU"
+      "detail": "https://t.me/hatch_verify_bot?start=HATCH-GRNF233C"
     },
     {
       "name": "Assistant: the page shows the bound state by itself, naming who is bound",
@@ -42,7 +42,7 @@
       "name": "Studio via Telegram: the Assistant answered the bound chat",
       "ok": true,
       "detail": [
-        "Hello! Good to see you. What would you like to work on today?"
+        "Hello! Nice to meet you."
       ]
     },
     {
@@ -57,7 +57,7 @@
     {
       "name": "Product ALPHA: one click gives the bot's t.me deep link carrying a one-time code",
       "ok": true,
-      "detail": "https://t.me/hatch_verify_bot?start=HATCH-WRB9THR7"
+      "detail": "https://t.me/hatch_verify_bot?start=HATCH-WB76EZS2"
     },
     {
       "name": "Product ALPHA: the page shows the bound state by itself, naming who is bound",
@@ -80,7 +80,7 @@
     {
       "name": "Product BRAVO: one click gives the bot's t.me deep link carrying a one-time code",
       "ok": true,
-      "detail": "https://t.me/hatch_verify_bot?start=HATCH-QNV53YP7"
+      "detail": "https://t.me/hatch_verify_bot?start=HATCH-53FDDFYD"
     },
     {
       "name": "Product BRAVO: the page shows the bound state by itself, naming who is bound",
@@ -107,18 +107,18 @@
       "detail": {
         "alphaRuns": [
           {
-            "id": "run_24195c07bc564f83b85e837ab86da897",
+            "id": "run_eee5c596e9fd4ce9916dab9e04d74b59",
             "status": "completed",
-            "owner_account_id": "26421247-74af-46bd-abf5-24ded63d10e7",
-            "product_id": "10a0cea1-8056-4c73-b47d-8345a96396c5"
+            "owner_account_id": "61f106db-6b5a-4aa4-95d0-914111f88f1e",
+            "product_id": "6ddd53d5-cd6b-4dbc-9615-6036c06932eb"
           }
         ],
         "bravoRuns": [
           {
-            "id": "run_1f19bff96cd14a0bb7865864e1c69c80",
+            "id": "run_35a81026e30b4b03ae332328ac1a61da",
             "status": "completed",
-            "owner_account_id": "26421247-74af-46bd-abf5-24ded63d10e7",
-            "product_id": "ea2db6f8-c769-4cba-92b1-9f5acdd51f3e"
+            "owner_account_id": "61f106db-6b5a-4aa4-95d0-914111f88f1e",
+            "product_id": "7838ab03-b53c-4c75-9b14-d75820212a9c"
           }
         ]
       }
@@ -171,28 +171,28 @@
             "available": false,
             "linked": false,
             "own_app": true,
-            "webhook_url": "http://studio.verify.local/v1/channels/lark/0ab06126-8d15-411e-9215-4c70162dd0d8/webhook"
+            "webhook_url": "http://studio.verify.local/v1/channels/lark/022fad25-b63b-4035-b54d-d6fbee80957a/webhook"
           },
           {
             "kind": "feishu",
             "available": false,
             "linked": false,
             "own_app": true,
-            "webhook_url": "http://studio.verify.local/v1/channels/feishu/0ab06126-8d15-411e-9215-4c70162dd0d8/webhook"
+            "webhook_url": "http://studio.verify.local/v1/channels/feishu/022fad25-b63b-4035-b54d-d6fbee80957a/webhook"
           },
           {
             "kind": "wecom",
             "available": false,
             "linked": false,
             "own_app": true,
-            "webhook_url": "http://studio.verify.local/v1/channels/wecom/0ab06126-8d15-411e-9215-4c70162dd0d8/webhook"
+            "webhook_url": "http://studio.verify.local/v1/channels/wecom/022fad25-b63b-4035-b54d-d6fbee80957a/webhook"
           },
           {
             "kind": "wechatkf",
             "available": false,
             "linked": false,
             "own_app": true,
-            "webhook_url": "http://studio.verify.local/v1/channels/wechatkf/0ab06126-8d15-411e-9215-4c70162dd0d8/webhook"
+            "webhook_url": "http://studio.verify.local/v1/channels/wechatkf/022fad25-b63b-4035-b54d-d6fbee80957a/webhook"
           },
           {
             "kind": "imessage",
@@ -275,7 +275,7 @@
   "evidence": {},
   "notes": [
     "Real: the dashboard server and built page driven by headless Chromium (sign-in form, tile clicks), the Registry, Runtime, Chat and Assistant. Simulated: only the messaging platform (Telegram webhooks in, bot sends read from the fake platform). The second account binds through the same HTTP endpoints the page calls, not through a second browser. Products are created through the real create route and given a live release by test setup (the factory is not exercised).",
-    "Assistant link code HATCH-9UPFGKQU was one-time."
+    "Assistant link code HATCH-GRNF233C was one-time."
   ],
   "defects": []
 }

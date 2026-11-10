@@ -2,7 +2,7 @@
   "id": 3,
   "title": "Cross-client resume: start on A, open B mid-Run, return to A: text continuity and time to progress",
   "status": "PASS",
-  "durationMs": 99812,
+  "durationMs": 153885,
   "checks": [
     {
       "name": "chat: every trial's final message is the complete list and there is one assistant reply",
@@ -22,14 +22,14 @@
       "name": "chat: B over cli shows progress within 2000 ms (all 8 trials)",
       "ok": true,
       "detail": [
-        82,
-        76,
-        85,
-        70,
+        66,
+        77,
+        66,
+        78,
+        78,
         71,
-        80,
-        68,
-        88
+        70,
+        79
       ]
     },
     {
@@ -45,50 +45,17 @@
       }
     },
     {
-      "name": "chat: B over sse shows progress within 2000 ms (all 10 trials)",
-      "ok": true,
-      "detail": [
-        22,
-        11,
-        8,
-        18,
-        15,
-        6,
-        12,
-        10,
-        9,
-        14
-      ]
-    },
-    {
-      "name": "chat: B over sse assembles exactly the stored message (no missing or duplicated text)",
-      "ok": true,
-      "detail": {
-        "exact": 10,
-        "missing": 0,
-        "duplicated": 0,
-        "mismatch": 0,
-        "missing_chars": [],
-        "duplicated_chars": []
-      }
-    },
-    {
-      "name": "chat: B over sse: cursors strictly increasing, none missing or duplicated",
-      "ok": true,
-      "detail": []
-    },
-    {
       "name": "chat: B over ws shows progress within 2000 ms (all 8 trials)",
       "ok": true,
       "detail": [
+        12,
         8,
-        7,
         11,
         10,
-        6,
-        10,
-        9,
-        16
+        12,
+        12,
+        13,
+        7
       ]
     },
     {
@@ -109,22 +76,26 @@
       "detail": []
     },
     {
-      "name": "chat: A returning by last-event-id shows progress within 2000 ms (all 6 trials)",
+      "name": "chat: B over sse shows progress within 2000 ms (all 10 trials)",
       "ok": true,
       "detail": [
-        0,
-        0,
-        0,
-        0,
-        0,
-        0
+        14,
+        7,
+        8,
+        13,
+        12,
+        6,
+        6,
+        9,
+        10,
+        7
       ]
     },
     {
-      "name": "chat: A returning by last-event-id assembles exactly the stored message",
+      "name": "chat: B over sse assembles exactly the stored message (no missing or duplicated text)",
       "ok": true,
       "detail": {
-        "exact": 6,
+        "exact": 10,
         "missing": 0,
         "duplicated": 0,
         "mismatch": 0,
@@ -133,7 +104,7 @@
       }
     },
     {
-      "name": "chat: A returning by last-event-id: cursors strictly increasing, none missing or duplicated",
+      "name": "chat: B over sse: cursors strictly increasing, none missing or duplicated",
       "ok": true,
       "detail": []
     },
@@ -142,11 +113,11 @@
       "ok": true,
       "detail": [
         14,
-        14,
-        15,
-        15,
-        18,
-        16
+        19,
+        12,
+        16,
+        11,
+        15
       ]
     },
     {
@@ -165,12 +136,12 @@
       "name": "chat: A returning by snapshot-then-attach shows progress within 2000 ms (all 6 trials)",
       "ok": true,
       "detail": [
-        15,
-        8,
         11,
         12,
-        7,
-        12
+        16,
+        6,
+        6,
+        5
       ]
     },
     {
@@ -220,24 +191,51 @@
       "detail": []
     },
     {
+      "name": "chat: A returning by last-event-id shows progress within 2000 ms (all 6 trials)",
+      "ok": true,
+      "detail": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "chat: A returning by last-event-id assembles exactly the stored message",
+      "ok": true,
+      "detail": {
+        "exact": 6,
+        "missing": 0,
+        "duplicated": 0,
+        "mismatch": 0,
+        "missing_chars": [],
+        "duplicated_chars": []
+      }
+    },
+    {
+      "name": "chat: A returning by last-event-id: cursors strictly increasing, none missing or duplicated",
+      "ok": true,
+      "detail": []
+    },
+    {
       "name": "studio.worker: every trial's final message is the complete list and there is one assistant reply",
       "ok": true,
       "detail": []
     },
     {
-      "name": "studio.worker: B over ws shows progress within 2000 ms (all 3 trials)",
+      "name": "studio.worker: B over ws shows progress within 2000 ms (all 1 trials)",
       "ok": true,
       "detail": [
-        15,
-        13,
-        8
+        9
       ]
     },
     {
       "name": "studio.worker: B over ws assembles exactly the stored message (no missing or duplicated text)",
       "ok": true,
       "detail": {
-        "exact": 3,
+        "exact": 1,
         "missing": 0,
         "duplicated": 0,
         "mismatch": 0,
@@ -251,94 +249,17 @@
       "detail": []
     },
     {
-      "name": "studio.worker: B over sse shows progress within 2000 ms (all 3 trials)",
+      "name": "studio.worker: A returning by snapshot-then-attach shows progress within 2000 ms (all 1 trials)",
       "ok": true,
       "detail": [
-        10,
-        7,
-        7
-      ]
-    },
-    {
-      "name": "studio.worker: B over sse assembles exactly the stored message (no missing or duplicated text)",
-      "ok": true,
-      "detail": {
-        "exact": 3,
-        "missing": 0,
-        "duplicated": 0,
-        "mismatch": 0,
-        "missing_chars": [],
-        "duplicated_chars": []
-      }
-    },
-    {
-      "name": "studio.worker: B over sse: cursors strictly increasing, none missing or duplicated",
-      "ok": true,
-      "detail": []
-    },
-    {
-      "name": "studio.worker: A returning by after_cursor shows progress within 2000 ms (all 2 trials)",
-      "ok": true,
-      "detail": [
-        0,
-        0
-      ]
-    },
-    {
-      "name": "studio.worker: A returning by after_cursor assembles exactly the stored message",
-      "ok": true,
-      "detail": {
-        "exact": 2,
-        "missing": 0,
-        "duplicated": 0,
-        "mismatch": 0,
-        "missing_chars": [],
-        "duplicated_chars": []
-      }
-    },
-    {
-      "name": "studio.worker: A returning by after_cursor: cursors strictly increasing, none missing or duplicated",
-      "ok": true,
-      "detail": []
-    },
-    {
-      "name": "studio.worker: A returning by last-event-id shows progress within 2000 ms (all 2 trials)",
-      "ok": true,
-      "detail": [
-        0,
-        0
-      ]
-    },
-    {
-      "name": "studio.worker: A returning by last-event-id assembles exactly the stored message",
-      "ok": true,
-      "detail": {
-        "exact": 2,
-        "missing": 0,
-        "duplicated": 0,
-        "mismatch": 0,
-        "missing_chars": [],
-        "duplicated_chars": []
-      }
-    },
-    {
-      "name": "studio.worker: A returning by last-event-id: cursors strictly increasing, none missing or duplicated",
-      "ok": true,
-      "detail": []
-    },
-    {
-      "name": "studio.worker: A returning by snapshot-then-attach shows progress within 2000 ms (all 2 trials)",
-      "ok": true,
-      "detail": [
-        6,
-        8
+        4
       ]
     },
     {
       "name": "studio.worker: A returning by snapshot-then-attach assembles exactly the stored message",
       "ok": true,
       "detail": {
-        "exact": 2,
+        "exact": 1,
         "missing": 0,
         "duplicated": 0,
         "mismatch": 0,
@@ -350,18 +271,150 @@
       "name": "studio.worker: A returning by snapshot-then-attach: cursors strictly increasing, none missing or duplicated",
       "ok": true,
       "detail": []
+    },
+    {
+      "name": "studio.assistant: every trial's final message is the complete list and there is one assistant reply",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "studio.assistant: B over sse shows progress within 2000 ms (all 3 trials)",
+      "ok": true,
+      "detail": [
+        11,
+        4,
+        5
+      ]
+    },
+    {
+      "name": "studio.assistant: B over sse assembles exactly the stored message (no missing or duplicated text)",
+      "ok": true,
+      "detail": {
+        "exact": 3,
+        "missing": 0,
+        "duplicated": 0,
+        "mismatch": 0,
+        "missing_chars": [],
+        "duplicated_chars": []
+      }
+    },
+    {
+      "name": "studio.assistant: B over sse: cursors strictly increasing, none missing or duplicated",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "studio.assistant: B over ws shows progress within 2000 ms (all 3 trials)",
+      "ok": true,
+      "detail": [
+        5,
+        4,
+        6
+      ]
+    },
+    {
+      "name": "studio.assistant: B over ws assembles exactly the stored message (no missing or duplicated text)",
+      "ok": true,
+      "detail": {
+        "exact": 3,
+        "missing": 0,
+        "duplicated": 0,
+        "mismatch": 0,
+        "missing_chars": [],
+        "duplicated_chars": []
+      }
+    },
+    {
+      "name": "studio.assistant: B over ws: cursors strictly increasing, none missing or duplicated",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "studio.assistant: A returning by last-event-id shows progress within 2000 ms (all 2 trials)",
+      "ok": true,
+      "detail": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "studio.assistant: A returning by last-event-id assembles exactly the stored message",
+      "ok": true,
+      "detail": {
+        "exact": 2,
+        "missing": 0,
+        "duplicated": 0,
+        "mismatch": 0,
+        "missing_chars": [],
+        "duplicated_chars": []
+      }
+    },
+    {
+      "name": "studio.assistant: A returning by last-event-id: cursors strictly increasing, none missing or duplicated",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "studio.assistant: A returning by after_cursor shows progress within 2000 ms (all 2 trials)",
+      "ok": true,
+      "detail": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "studio.assistant: A returning by after_cursor assembles exactly the stored message",
+      "ok": true,
+      "detail": {
+        "exact": 2,
+        "missing": 0,
+        "duplicated": 0,
+        "mismatch": 0,
+        "missing_chars": [],
+        "duplicated_chars": []
+      }
+    },
+    {
+      "name": "studio.assistant: A returning by after_cursor: cursors strictly increasing, none missing or duplicated",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "studio.assistant: A returning by snapshot-then-attach shows progress within 2000 ms (all 2 trials)",
+      "ok": true,
+      "detail": [
+        3,
+        3
+      ]
+    },
+    {
+      "name": "studio.assistant: A returning by snapshot-then-attach assembles exactly the stored message",
+      "ok": true,
+      "detail": {
+        "exact": 2,
+        "missing": 0,
+        "duplicated": 0,
+        "mismatch": 0,
+        "missing_chars": [],
+        "duplicated_chars": []
+      }
+    },
+    {
+      "name": "studio.assistant: A returning by snapshot-then-attach: cursors strictly increasing, none missing or duplicated",
+      "ok": true,
+      "detail": []
     }
   ],
   "measurements": {
-    "trials_kept": 32,
-    "trials_discarded": 6,
+    "trials_kept": 33,
+    "trials_discarded": 5,
     "chat.snapshot_partial_chars_behind_the_live_stream_at_open": {
       "n": 10,
       "min": 0,
-      "median": 164,
-      "max": 273
+      "median": 92,
+      "max": 734
     },
-    "studio.worker.snapshot_partial_chars_behind_the_live_stream_at_open": {
+    "studio.assistant.snapshot_partial_chars_behind_the_live_stream_at_open": {
       "n": 3,
       "min": 0,
       "median": 0,
@@ -369,17 +422,37 @@
     },
     "chat.B.cli.first_text_ms": {
       "n": 8,
-      "min": 68,
-      "median": 80,
-      "max": 88
+      "min": 66,
+      "median": 77,
+      "max": 79
     },
     "chat.B.cli.first_live_event_ms": {
       "n": 8,
-      "min": 68,
-      "median": 80,
-      "max": 88
+      "min": 66,
+      "median": 77,
+      "max": 79
     },
     "chat.B.cli.text_vs_stored": {
+      "exact": 8,
+      "missing": 0,
+      "duplicated": 0,
+      "mismatch": 0,
+      "missing_chars": [],
+      "duplicated_chars": []
+    },
+    "chat.B.ws.first_text_ms": {
+      "n": 8,
+      "min": 7,
+      "median": 12,
+      "max": 13
+    },
+    "chat.B.ws.first_live_event_ms": {
+      "n": 8,
+      "min": 13,
+      "median": 19,
+      "max": 22
+    },
+    "chat.B.ws.text_vs_stored": {
       "exact": 8,
       "missing": 0,
       "duplicated": 0,
@@ -390,14 +463,14 @@
     "chat.B.sse.first_text_ms": {
       "n": 10,
       "min": 6,
-      "median": 12,
-      "max": 22
+      "median": 9,
+      "max": 14
     },
     "chat.B.sse.first_live_event_ms": {
       "n": 10,
       "min": 10,
-      "median": 22,
-      "max": 29
+      "median": 15,
+      "max": 20
     },
     "chat.B.sse.text_vs_stored": {
       "exact": 10,
@@ -407,56 +480,16 @@
       "missing_chars": [],
       "duplicated_chars": []
     },
-    "chat.B.ws.first_text_ms": {
-      "n": 8,
-      "min": 6,
-      "median": 10,
-      "max": 16
-    },
-    "chat.B.ws.first_live_event_ms": {
-      "n": 8,
-      "min": 12,
-      "median": 19,
-      "max": 27
-    },
-    "chat.B.ws.text_vs_stored": {
-      "exact": 8,
-      "missing": 0,
-      "duplicated": 0,
-      "mismatch": 0,
-      "missing_chars": [],
-      "duplicated_chars": []
-    },
-    "chat.A_return.last-event-id.first_text_ms": {
-      "n": 6,
-      "min": 0,
-      "median": 0,
-      "max": 0
-    },
-    "chat.A_return.last-event-id.first_live_event_ms": {
-      "n": 6,
-      "min": 5,
-      "median": 8,
-      "max": 11
-    },
-    "chat.A_return.last-event-id.text_vs_stored": {
-      "exact": 6,
-      "missing": 0,
-      "duplicated": 0,
-      "mismatch": 0,
-      "missing_chars": [],
-      "duplicated_chars": []
-    },
     "chat.A_return.attach-then-snapshot.first_text_ms": {
       "n": 6,
-      "min": 14,
+      "min": 11,
       "median": 15,
-      "max": 18
+      "max": 19
     },
     "chat.A_return.attach-then-snapshot.first_live_event_ms": {
       "n": 6,
-      "min": 6,
-      "median": 8,
+      "min": 5,
+      "median": 9,
       "max": 10
     },
     "chat.A_return.attach-then-snapshot.text_vs_stored": {
@@ -469,15 +502,15 @@
     },
     "chat.A_return.snapshot-then-attach.first_text_ms": {
       "n": 6,
-      "min": 7,
-      "median": 12,
-      "max": 15
+      "min": 5,
+      "median": 11,
+      "max": 16
     },
     "chat.A_return.snapshot-then-attach.first_live_event_ms": {
       "n": 6,
-      "min": 11,
+      "min": 10,
       "median": 19,
-      "max": 21
+      "max": 24
     },
     "chat.A_return.snapshot-then-attach.text_vs_stored": {
       "exact": 6,
@@ -495,9 +528,9 @@
     },
     "chat.A_return.after_cursor.first_live_event_ms": {
       "n": 6,
-      "min": 6,
+      "min": 5,
       "median": 7,
-      "max": 12
+      "max": 10
     },
     "chat.A_return.after_cursor.text_vs_stored": {
       "exact": 6,
@@ -507,80 +540,40 @@
       "missing_chars": [],
       "duplicated_chars": []
     },
+    "chat.A_return.last-event-id.first_text_ms": {
+      "n": 6,
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "chat.A_return.last-event-id.first_live_event_ms": {
+      "n": 6,
+      "min": 7,
+      "median": 9,
+      "max": 11
+    },
+    "chat.A_return.last-event-id.text_vs_stored": {
+      "exact": 6,
+      "missing": 0,
+      "duplicated": 0,
+      "mismatch": 0,
+      "missing_chars": [],
+      "duplicated_chars": []
+    },
     "studio.worker.B.ws.first_text_ms": {
-      "n": 3,
-      "min": 8,
-      "median": 13,
-      "max": 15
+      "n": 1,
+      "min": 9,
+      "median": 9,
+      "max": 9
     },
     "studio.worker.B.ws.first_live_event_ms": {
-      "n": 3,
-      "min": 21,
-      "median": 67,
-      "max": 137
+      "n": 1,
+      "min": 96,
+      "median": 96,
+      "max": 96
     },
     "studio.worker.B.ws.text_vs_stored": {
-      "exact": 3,
-      "missing": 0,
-      "duplicated": 0,
-      "mismatch": 0,
-      "missing_chars": [],
-      "duplicated_chars": []
-    },
-    "studio.worker.B.sse.first_text_ms": {
-      "n": 3,
-      "min": 7,
-      "median": 7,
-      "max": 10
-    },
-    "studio.worker.B.sse.first_live_event_ms": {
-      "n": 3,
-      "min": 30,
-      "median": 33,
-      "max": 75
-    },
-    "studio.worker.B.sse.text_vs_stored": {
-      "exact": 3,
-      "missing": 0,
-      "duplicated": 0,
-      "mismatch": 0,
-      "missing_chars": [],
-      "duplicated_chars": []
-    },
-    "studio.worker.A_return.after_cursor.first_text_ms": {
-      "n": 2,
-      "min": 0,
-      "median": 0,
-      "max": 0
-    },
-    "studio.worker.A_return.after_cursor.first_live_event_ms": {
-      "n": 2,
-      "min": 6,
-      "median": 8,
-      "max": 8
-    },
-    "studio.worker.A_return.after_cursor.text_vs_stored": {
-      "exact": 2,
-      "missing": 0,
-      "duplicated": 0,
-      "mismatch": 0,
-      "missing_chars": [],
-      "duplicated_chars": []
-    },
-    "studio.worker.A_return.last-event-id.first_text_ms": {
-      "n": 2,
-      "min": 0,
-      "median": 0,
-      "max": 0
-    },
-    "studio.worker.A_return.last-event-id.first_live_event_ms": {
-      "n": 2,
-      "min": 6,
-      "median": 7,
-      "max": 7
-    },
-    "studio.worker.A_return.last-event-id.text_vs_stored": {
-      "exact": 2,
+      "exact": 1,
       "missing": 0,
       "duplicated": 0,
       "mismatch": 0,
@@ -588,18 +581,118 @@
       "duplicated_chars": []
     },
     "studio.worker.A_return.snapshot-then-attach.first_text_ms": {
-      "n": 2,
-      "min": 6,
-      "median": 8,
-      "max": 8
+      "n": 1,
+      "min": 4,
+      "median": 4,
+      "max": 4
     },
     "studio.worker.A_return.snapshot-then-attach.first_live_event_ms": {
-      "n": 2,
-      "min": 92,
-      "median": 95,
-      "max": 95
+      "n": 1,
+      "min": 780,
+      "median": 780,
+      "max": 780
     },
     "studio.worker.A_return.snapshot-then-attach.text_vs_stored": {
+      "exact": 1,
+      "missing": 0,
+      "duplicated": 0,
+      "mismatch": 0,
+      "missing_chars": [],
+      "duplicated_chars": []
+    },
+    "studio.assistant.B.sse.first_text_ms": {
+      "n": 3,
+      "min": 4,
+      "median": 5,
+      "max": 11
+    },
+    "studio.assistant.B.sse.first_live_event_ms": {
+      "n": 3,
+      "min": 82,
+      "median": 84,
+      "max": 158
+    },
+    "studio.assistant.B.sse.text_vs_stored": {
+      "exact": 3,
+      "missing": 0,
+      "duplicated": 0,
+      "mismatch": 0,
+      "missing_chars": [],
+      "duplicated_chars": []
+    },
+    "studio.assistant.B.ws.first_text_ms": {
+      "n": 3,
+      "min": 4,
+      "median": 5,
+      "max": 6
+    },
+    "studio.assistant.B.ws.first_live_event_ms": {
+      "n": 3,
+      "min": 54,
+      "median": 77,
+      "max": 294
+    },
+    "studio.assistant.B.ws.text_vs_stored": {
+      "exact": 3,
+      "missing": 0,
+      "duplicated": 0,
+      "mismatch": 0,
+      "missing_chars": [],
+      "duplicated_chars": []
+    },
+    "studio.assistant.A_return.last-event-id.first_text_ms": {
+      "n": 2,
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "studio.assistant.A_return.last-event-id.first_live_event_ms": {
+      "n": 2,
+      "min": 3,
+      "median": 7,
+      "max": 7
+    },
+    "studio.assistant.A_return.last-event-id.text_vs_stored": {
+      "exact": 2,
+      "missing": 0,
+      "duplicated": 0,
+      "mismatch": 0,
+      "missing_chars": [],
+      "duplicated_chars": []
+    },
+    "studio.assistant.A_return.after_cursor.first_text_ms": {
+      "n": 2,
+      "min": 0,
+      "median": 0,
+      "max": 0
+    },
+    "studio.assistant.A_return.after_cursor.first_live_event_ms": {
+      "n": 2,
+      "min": 2,
+      "median": 3,
+      "max": 3
+    },
+    "studio.assistant.A_return.after_cursor.text_vs_stored": {
+      "exact": 2,
+      "missing": 0,
+      "duplicated": 0,
+      "mismatch": 0,
+      "missing_chars": [],
+      "duplicated_chars": []
+    },
+    "studio.assistant.A_return.snapshot-then-attach.first_text_ms": {
+      "n": 2,
+      "min": 3,
+      "median": 3,
+      "max": 3
+    },
+    "studio.assistant.A_return.snapshot-then-attach.first_live_event_ms": {
+      "n": 2,
+      "min": 131,
+      "median": 134,
+      "max": 134
+    },
+    "studio.assistant.A_return.snapshot-then-attach.text_vs_stored": {
       "exact": 2,
       "missing": 0,
       "duplicated": 0,
@@ -613,15 +706,152 @@
       {
         "surface": "chat",
         "bKind": "cli",
-        "aStrategy": "last-event-id",
+        "aStrategy": "attach-then-snapshot",
         "complete": true,
-        "finalLength": 2655,
+        "finalLength": 3076,
         "assistantMessages": 1,
         "settled": true,
         "B": {
-          "firstTextMs": 82,
-          "firstEventMs": 82,
-          "firstLiveMs": 82,
+          "firstTextMs": 66,
+          "firstEventMs": 66,
+          "firstLiveMs": 66,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 0,
+          "deltas": 1
+        },
+        "A": {
+          "firstTextMs": 14,
+          "firstEventMs": 14,
+          "firstLiveMs": 7,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 882,
+          "deltas": 22
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "ws",
+        "aStrategy": "snapshot-then-attach",
+        "complete": true,
+        "finalLength": 2720,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 12,
+          "firstEventMs": 12,
+          "firstLiveMs": 22,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 1174,
+          "deltas": 16,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 11,
+          "firstEventMs": 11,
+          "firstLiveMs": 19,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 1558,
+          "deltas": 11,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "sse",
+        "aStrategy": "control",
+        "complete": true,
+        "finalLength": 2770,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 14,
+          "firstEventMs": 14,
+          "firstLiveMs": 20,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 445,
+          "deltas": 25,
+          "partial_stale_chars": 78,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "control": {
+          "kind": "exact",
+          "missing": 0,
+          "duplicated": 0
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "sse",
+        "aStrategy": "snapshot-then-attach",
+        "complete": true,
+        "finalLength": 3146,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 7,
+          "firstEventMs": 7,
+          "firstLiveMs": 12,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 628,
+          "deltas": 25,
+          "partial_stale_chars": 99,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 12,
+          "firstEventMs": 12,
+          "firstLiveMs": 24,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 930,
+          "deltas": 20,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "cli",
+        "aStrategy": "after_cursor",
+        "complete": true,
+        "finalLength": 3107,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 77,
+          "firstEventMs": 77,
+          "firstLiveMs": 77,
           "text": {
             "kind": "exact",
             "missing": 0,
@@ -633,14 +863,14 @@
         "A": {
           "firstTextMs": 0,
           "firstEventMs": 0,
-          "firstLiveMs": 11,
+          "firstLiveMs": 5,
           "text": {
             "kind": "exact",
             "missing": 0,
             "duplicated": 0
           },
-          "held_chars": 530,
-          "deltas": 19,
+          "held_chars": 235,
+          "deltas": 23,
           "cursors": [],
           "cursor_count": 2
         }
@@ -648,15 +878,15 @@
       {
         "surface": "chat",
         "bKind": "cli",
-        "aStrategy": "attach-then-snapshot",
+        "aStrategy": "last-event-id",
         "complete": true,
-        "finalLength": 2502,
+        "finalLength": 4090,
         "assistantMessages": 1,
         "settled": true,
         "B": {
-          "firstTextMs": 76,
-          "firstEventMs": 76,
-          "firstLiveMs": 76,
+          "firstTextMs": 66,
+          "firstEventMs": 66,
+          "firstLiveMs": 66,
           "text": {
             "kind": "exact",
             "missing": 0,
@@ -666,49 +896,53 @@
           "deltas": 1
         },
         "A": {
-          "firstTextMs": 14,
-          "firstEventMs": 14,
-          "firstLiveMs": 6,
+          "firstTextMs": 0,
+          "firstEventMs": 0,
+          "firstLiveMs": 8,
           "text": {
             "kind": "exact",
             "missing": 0,
             "duplicated": 0
           },
-          "held_chars": 799,
-          "deltas": 18
+          "held_chars": 563,
+          "deltas": 32,
+          "cursors": [],
+          "cursor_count": 2
         }
       },
       {
         "surface": "chat",
-        "bKind": "cli",
-        "aStrategy": "snapshot-then-attach",
+        "bKind": "ws",
+        "aStrategy": "after_cursor",
         "complete": true,
-        "finalLength": 2929,
+        "finalLength": 4154,
         "assistantMessages": 1,
         "settled": true,
         "B": {
-          "firstTextMs": 85,
-          "firstEventMs": 85,
-          "firstLiveMs": 85,
+          "firstTextMs": 8,
+          "firstEventMs": 8,
+          "firstLiveMs": 18,
           "text": {
             "kind": "exact",
             "missing": 0,
             "duplicated": 0
           },
-          "held_chars": 0,
-          "deltas": 1
+          "held_chars": 464,
+          "deltas": 35,
+          "cursors": [],
+          "cursor_count": 2
         },
         "A": {
-          "firstTextMs": 15,
-          "firstEventMs": 15,
-          "firstLiveMs": 21,
+          "firstTextMs": 0,
+          "firstEventMs": 0,
+          "firstLiveMs": 5,
           "text": {
             "kind": "exact",
             "missing": 0,
             "duplicated": 0
           },
-          "held_chars": 806,
-          "deltas": 21,
+          "held_chars": 664,
+          "deltas": 32,
           "cursors": [],
           "cursor_count": 2
         }
@@ -718,43 +952,43 @@
         "bKind": "sse",
         "aStrategy": "attach-then-snapshot",
         "complete": true,
-        "finalLength": 3546,
+        "finalLength": 4351,
         "assistantMessages": 1,
         "settled": true,
         "B": {
-          "firstTextMs": 22,
-          "firstEventMs": 22,
-          "firstLiveMs": 29,
+          "firstTextMs": 8,
+          "firstEventMs": 8,
+          "firstLiveMs": 13,
           "text": {
             "kind": "exact",
             "missing": 0,
             "duplicated": 0
           },
           "held_chars": 580,
-          "deltas": 30,
-          "partial_stale_chars": 73,
+          "deltas": 35,
+          "partial_stale_chars": 124,
           "cursors": [],
           "cursor_count": 2
         },
         "A": {
-          "firstTextMs": 14,
-          "firstEventMs": 14,
-          "firstLiveMs": 7,
+          "firstTextMs": 19,
+          "firstEventMs": 19,
+          "firstLiveMs": 10,
           "text": {
             "kind": "exact",
             "missing": 0,
             "duplicated": 0
           },
-          "held_chars": 1050,
-          "deltas": 25
+          "held_chars": 1125,
+          "deltas": 29
         }
       },
       {
         "surface": "chat",
-        "bKind": "sse",
-        "aStrategy": "after_cursor",
+        "bKind": "ws",
+        "aStrategy": "last-event-id",
         "complete": true,
-        "finalLength": 3352,
+        "finalLength": 3429,
         "assistantMessages": 1,
         "settled": true,
         "B": {
@@ -766,9 +1000,119 @@
             "missing": 0,
             "duplicated": 0
           },
-          "held_chars": 513,
-          "deltas": 28,
-          "partial_stale_chars": 174,
+          "held_chars": 748,
+          "deltas": 29,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 0,
+          "firstEventMs": 0,
+          "firstLiveMs": 8,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 835,
+          "deltas": 21,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "ws",
+        "aStrategy": "attach-then-snapshot",
+        "complete": true,
+        "finalLength": 4958,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 10,
+          "firstEventMs": 10,
+          "firstLiveMs": 19,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 551,
+          "deltas": 41,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 12,
+          "firstEventMs": 12,
+          "firstLiveMs": 6,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 659,
+          "deltas": 36
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "sse",
+        "aStrategy": "after_cursor",
+        "complete": true,
+        "finalLength": 4405,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 13,
+          "firstEventMs": 13,
+          "firstLiveMs": 20,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 45,
+          "deltas": 37,
+          "partial_stale_chars": 734,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 0,
+          "firstEventMs": 0,
+          "firstLiveMs": 10,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 779,
+          "deltas": 22,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "sse",
+        "aStrategy": "last-event-id",
+        "complete": true,
+        "finalLength": 3785,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 12,
+          "firstEventMs": 12,
+          "firstLiveMs": 18,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 1074,
+          "deltas": 22,
+          "partial_stale_chars": 614,
           "cursors": [],
           "cursor_count": 2
         },
@@ -781,8 +1125,118 @@
             "missing": 0,
             "duplicated": 0
           },
-          "held_chars": 687,
-          "deltas": 24,
+          "held_chars": 1688,
+          "deltas": 17,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "cli",
+        "aStrategy": "snapshot-then-attach",
+        "complete": true,
+        "finalLength": 4394,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 78,
+          "firstEventMs": 78,
+          "firstLiveMs": 78,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 0,
+          "deltas": 1
+        },
+        "A": {
+          "firstTextMs": 16,
+          "firstEventMs": 16,
+          "firstLiveMs": 20,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 818,
+          "deltas": 27,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "ws",
+        "aStrategy": "last-event-id",
+        "complete": true,
+        "finalLength": 2622,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 12,
+          "firstEventMs": 12,
+          "firstLiveMs": 21,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 518,
+          "deltas": 23,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 0,
+          "firstEventMs": 0,
+          "firstLiveMs": 10,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 610,
+          "deltas": 18,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "sse",
+        "aStrategy": "last-event-id",
+        "complete": true,
+        "finalLength": 2542,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 6,
+          "firstEventMs": 6,
+          "firstLiveMs": 12,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 507,
+          "deltas": 23,
+          "partial_stale_chars": 0,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 0,
+          "firstEventMs": 0,
+          "firstLiveMs": 9,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 507,
+          "deltas": 18,
           "cursors": [],
           "cursor_count": 2
         }
@@ -792,34 +1246,136 @@
         "bKind": "ws",
         "aStrategy": "attach-then-snapshot",
         "complete": true,
-        "finalLength": 2505,
+        "finalLength": 2806,
         "assistantMessages": 1,
         "settled": true,
         "B": {
-          "firstTextMs": 8,
-          "firstEventMs": 8,
+          "firstTextMs": 12,
+          "firstEventMs": 12,
+          "firstLiveMs": 19,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 567,
+          "deltas": 23,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 16,
+          "firstEventMs": 16,
+          "firstLiveMs": 9,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 975,
+          "deltas": 19
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "ws",
+        "aStrategy": "snapshot-then-attach",
+        "complete": true,
+        "finalLength": 2673,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 13,
+          "firstEventMs": 13,
+          "firstLiveMs": 20,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 345,
+          "deltas": 25,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 6,
+          "firstEventMs": 6,
+          "firstLiveMs": 10,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 767,
+          "deltas": 20,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "sse",
+        "aStrategy": "attach-then-snapshot",
+        "complete": true,
+        "finalLength": 3520,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 6,
+          "firstEventMs": 6,
+          "firstLiveMs": 10,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 456,
+          "deltas": 32,
+          "partial_stale_chars": 0,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 11,
+          "firstEventMs": 11,
+          "firstLiveMs": 5,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 561,
+          "deltas": 27
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "sse",
+        "aStrategy": "control",
+        "complete": true,
+        "finalLength": 3557,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 9,
+          "firstEventMs": 9,
           "firstLiveMs": 15,
           "text": {
             "kind": "exact",
             "missing": 0,
             "duplicated": 0
           },
-          "held_chars": 536,
-          "deltas": 23,
+          "held_chars": 470,
+          "deltas": 30,
+          "partial_stale_chars": 88,
           "cursors": [],
           "cursor_count": 2
         },
-        "A": {
-          "firstTextMs": 15,
-          "firstEventMs": 15,
-          "firstLiveMs": 7,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 963,
-          "deltas": 18
+        "control": {
+          "kind": "exact",
+          "missing": 0,
+          "duplicated": 0
         }
       },
       {
@@ -827,22 +1383,57 @@
         "bKind": "ws",
         "aStrategy": "after_cursor",
         "complete": true,
-        "finalLength": 3935,
+        "finalLength": 4621,
         "assistantMessages": 1,
         "settled": true,
         "B": {
           "firstTextMs": 7,
           "firstEventMs": 7,
-          "firstLiveMs": 16,
+          "firstLiveMs": 13,
           "text": {
             "kind": "exact",
             "missing": 0,
             "duplicated": 0
           },
-          "held_chars": 506,
-          "deltas": 33,
+          "held_chars": 642,
+          "deltas": 37,
           "cursors": [],
           "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 0,
+          "firstEventMs": 0,
+          "firstLiveMs": 8,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 753,
+          "deltas": 32,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "cli",
+        "aStrategy": "after_cursor",
+        "complete": true,
+        "finalLength": 4641,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 78,
+          "firstEventMs": 78,
+          "firstLiveMs": 78,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 0,
+          "deltas": 1
         },
         "A": {
           "firstTextMs": 0,
@@ -853,8 +1444,8 @@
             "missing": 0,
             "duplicated": 0
           },
-          "held_chars": 591,
-          "deltas": 29,
+          "held_chars": 609,
+          "deltas": 35,
           "cursors": [],
           "cursor_count": 2
         }
@@ -862,9 +1453,120 @@
       {
         "surface": "chat",
         "bKind": "cli",
+        "aStrategy": "snapshot-then-attach",
+        "complete": true,
+        "finalLength": 4217,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 71,
+          "firstEventMs": 71,
+          "firstLiveMs": 71,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 0,
+          "deltas": 1
+        },
+        "A": {
+          "firstTextMs": 6,
+          "firstEventMs": 6,
+          "firstLiveMs": 10,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 671,
+          "deltas": 32,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "sse",
         "aStrategy": "after_cursor",
         "complete": true,
-        "finalLength": 4292,
+        "finalLength": 3877,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 10,
+          "firstEventMs": 10,
+          "firstLiveMs": 16,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 501,
+          "deltas": 33,
+          "partial_stale_chars": 92,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 0,
+          "firstEventMs": 0,
+          "firstLiveMs": 7,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 593,
+          "deltas": 27,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "sse",
+        "aStrategy": "snapshot-then-attach",
+        "complete": true,
+        "finalLength": 4635,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 7,
+          "firstEventMs": 7,
+          "firstLiveMs": 11,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 656,
+          "deltas": 37,
+          "partial_stale_chars": 0,
+          "cursors": [],
+          "cursor_count": 2
+        },
+        "A": {
+          "firstTextMs": 5,
+          "firstEventMs": 5,
+          "firstLiveMs": 11,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 1101,
+          "deltas": 33,
+          "cursors": [],
+          "cursor_count": 2
+        }
+      },
+      {
+        "surface": "chat",
+        "bKind": "cli",
+        "aStrategy": "last-event-id",
+        "complete": true,
+        "finalLength": 3811,
         "assistantMessages": 1,
         "settled": true,
         "B": {
@@ -882,547 +1584,14 @@
         "A": {
           "firstTextMs": 0,
           "firstEventMs": 0,
-          "firstLiveMs": 6,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 708,
-          "deltas": 30,
-          "cursors": [],
-          "cursor_count": 2
-        }
-      },
-      {
-        "surface": "chat",
-        "bKind": "ws",
-        "aStrategy": "snapshot-then-attach",
-        "complete": true,
-        "finalLength": 4679,
-        "assistantMessages": 1,
-        "settled": true,
-        "B": {
-          "firstTextMs": 11,
-          "firstEventMs": 11,
-          "firstLiveMs": 20,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 816,
-          "deltas": 36,
-          "cursors": [],
-          "cursor_count": 2
-        },
-        "A": {
-          "firstTextMs": 8,
-          "firstEventMs": 8,
-          "firstLiveMs": 14,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 1264,
-          "deltas": 32,
-          "cursors": [],
-          "cursor_count": 2
-        }
-      },
-      {
-        "surface": "chat",
-        "bKind": "sse",
-        "aStrategy": "last-event-id",
-        "complete": true,
-        "finalLength": 4365,
-        "assistantMessages": 1,
-        "settled": true,
-        "B": {
-          "firstTextMs": 8,
-          "firstEventMs": 8,
-          "firstLiveMs": 13,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 594,
-          "deltas": 35,
-          "partial_stale_chars": 181,
-          "cursors": [],
-          "cursor_count": 2
-        },
-        "A": {
-          "firstTextMs": 0,
-          "firstEventMs": 0,
-          "firstLiveMs": 6,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 775,
-          "deltas": 30,
-          "cursors": [],
-          "cursor_count": 2
-        }
-      },
-      {
-        "surface": "chat",
-        "bKind": "ws",
-        "aStrategy": "last-event-id",
-        "complete": true,
-        "finalLength": 4347,
-        "assistantMessages": 1,
-        "settled": true,
-        "B": {
-          "firstTextMs": 10,
-          "firstEventMs": 10,
-          "firstLiveMs": 19,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 661,
-          "deltas": 34,
-          "cursors": [],
-          "cursor_count": 2
-        },
-        "A": {
-          "firstTextMs": 0,
-          "firstEventMs": 0,
-          "firstLiveMs": 9,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 778,
-          "deltas": 28,
-          "cursors": [],
-          "cursor_count": 2
-        }
-      },
-      {
-        "surface": "chat",
-        "bKind": "sse",
-        "aStrategy": "control",
-        "complete": true,
-        "finalLength": 4399,
-        "assistantMessages": 1,
-        "settled": true,
-        "B": {
-          "firstTextMs": 18,
-          "firstEventMs": 18,
-          "firstLiveMs": 28,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 920,
-          "deltas": 35,
-          "partial_stale_chars": 100,
-          "cursors": [],
-          "cursor_count": 2
-        },
-        "control": {
-          "kind": "exact",
-          "missing": 0,
-          "duplicated": 0
-        }
-      },
-      {
-        "surface": "chat",
-        "bKind": "sse",
-        "aStrategy": "snapshot-then-attach",
-        "complete": true,
-        "finalLength": 4795,
-        "assistantMessages": 1,
-        "settled": true,
-        "B": {
-          "firstTextMs": 15,
-          "firstEventMs": 15,
-          "firstLiveMs": 24,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 599,
-          "deltas": 39,
-          "partial_stale_chars": 0,
-          "cursors": [],
-          "cursor_count": 2
-        },
-        "A": {
-          "firstTextMs": 11,
-          "firstEventMs": 11,
-          "firstLiveMs": 19,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 1112,
-          "deltas": 33,
-          "cursors": [],
-          "cursor_count": 2
-        }
-      },
-      {
-        "surface": "chat",
-        "bKind": "cli",
-        "aStrategy": "snapshot-then-attach",
-        "complete": true,
-        "finalLength": 2520,
-        "assistantMessages": 1,
-        "settled": true,
-        "B": {
-          "firstTextMs": 71,
-          "firstEventMs": 71,
-          "firstLiveMs": 71,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 0,
-          "deltas": 1
-        },
-        "A": {
-          "firstTextMs": 12,
-          "firstEventMs": 12,
-          "firstLiveMs": 18,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 988,
-          "deltas": 17,
-          "cursors": [],
-          "cursor_count": 2
-        }
-      },
-      {
-        "surface": "chat",
-        "bKind": "ws",
-        "aStrategy": "attach-then-snapshot",
-        "complete": true,
-        "finalLength": 2735,
-        "assistantMessages": 1,
-        "settled": true,
-        "B": {
-          "firstTextMs": 6,
-          "firstEventMs": 6,
-          "firstLiveMs": 12,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 503,
-          "deltas": 23,
-          "cursors": [],
-          "cursor_count": 2
-        },
-        "A": {
-          "firstTextMs": 15,
-          "firstEventMs": 15,
-          "firstLiveMs": 8,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 966,
-          "deltas": 17
-        }
-      },
-      {
-        "surface": "chat",
-        "bKind": "cli",
-        "aStrategy": "attach-then-snapshot",
-        "complete": true,
-        "finalLength": 3046,
-        "assistantMessages": 1,
-        "settled": true,
-        "B": {
-          "firstTextMs": 80,
-          "firstEventMs": 80,
-          "firstLiveMs": 80,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 0,
-          "deltas": 1
-        },
-        "A": {
-          "firstTextMs": 18,
-          "firstEventMs": 18,
-          "firstLiveMs": 10,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 964,
-          "deltas": 20
-        }
-      },
-      {
-        "surface": "chat",
-        "bKind": "sse",
-        "aStrategy": "control",
-        "complete": true,
-        "finalLength": 2441,
-        "assistantMessages": 1,
-        "settled": true,
-        "B": {
-          "firstTextMs": 6,
-          "firstEventMs": 6,
-          "firstLiveMs": 10,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 507,
-          "deltas": 20,
-          "partial_stale_chars": 190,
-          "cursors": [],
-          "cursor_count": 2
-        },
-        "control": {
-          "kind": "exact",
-          "missing": 0,
-          "duplicated": 0
-        }
-      },
-      {
-        "surface": "chat",
-        "bKind": "sse",
-        "aStrategy": "after_cursor",
-        "complete": true,
-        "finalLength": 2963,
-        "assistantMessages": 1,
-        "settled": true,
-        "B": {
-          "firstTextMs": 12,
-          "firstEventMs": 12,
-          "firstLiveMs": 23,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 510,
-          "deltas": 25,
-          "partial_stale_chars": 164,
-          "cursors": [],
-          "cursor_count": 2
-        },
-        "A": {
-          "firstTextMs": 0,
-          "firstEventMs": 0,
-          "firstLiveMs": 7,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 674,
-          "deltas": 20,
-          "cursors": [],
-          "cursor_count": 2
-        }
-      },
-      {
-        "surface": "chat",
-        "bKind": "cli",
-        "aStrategy": "last-event-id",
-        "complete": true,
-        "finalLength": 2486,
-        "assistantMessages": 1,
-        "settled": true,
-        "B": {
-          "firstTextMs": 68,
-          "firstEventMs": 68,
-          "firstLiveMs": 68,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 0,
-          "deltas": 1
-        },
-        "A": {
-          "firstTextMs": 0,
-          "firstEventMs": 0,
-          "firstLiveMs": 7,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 544,
-          "deltas": 17,
-          "cursors": [],
-          "cursor_count": 2
-        }
-      },
-      {
-        "surface": "chat",
-        "bKind": "ws",
-        "aStrategy": "after_cursor",
-        "complete": true,
-        "finalLength": 3613,
-        "assistantMessages": 1,
-        "settled": true,
-        "B": {
-          "firstTextMs": 10,
-          "firstEventMs": 10,
-          "firstLiveMs": 23,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 465,
-          "deltas": 30,
-          "cursors": [],
-          "cursor_count": 2
-        },
-        "A": {
-          "firstTextMs": 0,
-          "firstEventMs": 0,
-          "firstLiveMs": 6,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 567,
-          "deltas": 25,
-          "cursors": [],
-          "cursor_count": 2
-        }
-      },
-      {
-        "surface": "chat",
-        "bKind": "ws",
-        "aStrategy": "snapshot-then-attach",
-        "complete": true,
-        "finalLength": 3107,
-        "assistantMessages": 1,
-        "settled": true,
-        "B": {
-          "firstTextMs": 9,
-          "firstEventMs": 9,
-          "firstLiveMs": 17,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 558,
-          "deltas": 26,
-          "cursors": [],
-          "cursor_count": 2
-        },
-        "A": {
-          "firstTextMs": 7,
-          "firstEventMs": 7,
           "firstLiveMs": 11,
           "text": {
             "kind": "exact",
             "missing": 0,
             "duplicated": 0
           },
-          "held_chars": 1024,
-          "deltas": 21,
-          "cursors": [],
-          "cursor_count": 2
-        }
-      },
-      {
-        "surface": "chat",
-        "bKind": "sse",
-        "aStrategy": "last-event-id",
-        "complete": true,
-        "finalLength": 4415,
-        "assistantMessages": 1,
-        "settled": true,
-        "B": {
-          "firstTextMs": 10,
-          "firstEventMs": 10,
-          "firstLiveMs": 16,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 604,
-          "deltas": 36,
-          "partial_stale_chars": 97,
-          "cursors": [],
-          "cursor_count": 2
-        },
-        "A": {
-          "firstTextMs": 0,
-          "firstEventMs": 0,
-          "firstLiveMs": 5,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 701,
-          "deltas": 31,
-          "cursors": [],
-          "cursor_count": 2
-        }
-      },
-      {
-        "surface": "chat",
-        "bKind": "ws",
-        "aStrategy": "last-event-id",
-        "complete": true,
-        "finalLength": 4773,
-        "assistantMessages": 1,
-        "settled": true,
-        "B": {
-          "firstTextMs": 16,
-          "firstEventMs": 16,
-          "firstLiveMs": 27,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 658,
-          "deltas": 39,
-          "cursors": [],
-          "cursor_count": 2
-        },
-        "A": {
-          "firstTextMs": 0,
-          "firstEventMs": 0,
-          "firstLiveMs": 8,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 766,
-          "deltas": 35,
+          "held_chars": 315,
+          "deltas": 27,
           "cursors": [],
           "cursor_count": 2
         }
@@ -1430,15 +1599,15 @@
       {
         "surface": "chat",
         "bKind": "cli",
-        "aStrategy": "after_cursor",
+        "aStrategy": "attach-then-snapshot",
         "complete": true,
-        "finalLength": 3454,
+        "finalLength": 4157,
         "assistantMessages": 1,
         "settled": true,
         "B": {
-          "firstTextMs": 88,
-          "firstEventMs": 88,
-          "firstLiveMs": 88,
+          "firstTextMs": 79,
+          "firstEventMs": 79,
+          "firstLiveMs": 79,
           "text": {
             "kind": "exact",
             "missing": 0,
@@ -1448,153 +1617,77 @@
           "deltas": 1
         },
         "A": {
-          "firstTextMs": 0,
-          "firstEventMs": 0,
-          "firstLiveMs": 12,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 1114,
-          "deltas": 15,
-          "cursors": [],
-          "cursor_count": 2
-        }
-      },
-      {
-        "surface": "chat",
-        "bKind": "sse",
-        "aStrategy": "snapshot-then-attach",
-        "complete": true,
-        "finalLength": 5120,
-        "assistantMessages": 1,
-        "settled": true,
-        "B": {
-          "firstTextMs": 9,
-          "firstEventMs": 9,
-          "firstLiveMs": 14,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 597,
-          "deltas": 41,
-          "partial_stale_chars": 121,
-          "cursors": [],
-          "cursor_count": 2
-        },
-        "A": {
-          "firstTextMs": 12,
-          "firstEventMs": 12,
-          "firstLiveMs": 20,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 1068,
-          "deltas": 37,
-          "cursors": [],
-          "cursor_count": 2
-        }
-      },
-      {
-        "surface": "chat",
-        "bKind": "sse",
-        "aStrategy": "attach-then-snapshot",
-        "complete": true,
-        "finalLength": 4500,
-        "assistantMessages": 1,
-        "settled": true,
-        "B": {
-          "firstTextMs": 14,
-          "firstEventMs": 14,
-          "firstLiveMs": 22,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 824,
-          "deltas": 33,
-          "partial_stale_chars": 273,
-          "cursors": [],
-          "cursor_count": 2
-        },
-        "A": {
-          "firstTextMs": 16,
-          "firstEventMs": 16,
+          "firstTextMs": 15,
+          "firstEventMs": 15,
           "firstLiveMs": 10,
           "text": {
             "kind": "exact",
             "missing": 0,
             "duplicated": 0
           },
-          "held_chars": 1688,
-          "deltas": 24
+          "held_chars": 750,
+          "deltas": 28
         }
       },
       {
         "surface": "studio.worker",
         "bKind": "ws",
-        "aStrategy": "after_cursor",
+        "aStrategy": "snapshot-then-attach",
         "complete": true,
-        "finalLength": 4250,
+        "finalLength": 3814,
         "assistantMessages": 1,
         "settled": true,
         "B": {
-          "firstTextMs": 15,
-          "firstEventMs": 15,
-          "firstLiveMs": 137,
+          "firstTextMs": 9,
+          "firstEventMs": 9,
+          "firstLiveMs": 96,
           "text": {
             "kind": "exact",
             "missing": 0,
             "duplicated": 0
           },
-          "held_chars": 596,
-          "deltas": 36,
+          "held_chars": 469,
+          "deltas": 33,
           "cursors": [],
-          "cursor_count": 41
+          "cursor_count": 38
         },
         "A": {
-          "firstTextMs": 0,
-          "firstEventMs": 0,
-          "firstLiveMs": 8,
+          "firstTextMs": 4,
+          "firstEventMs": 4,
+          "firstLiveMs": 780,
           "text": {
             "kind": "exact",
             "missing": 0,
             "duplicated": 0
           },
-          "held_chars": 596,
-          "deltas": 36,
+          "held_chars": 1064,
+          "deltas": 27,
           "cursors": [],
-          "cursor_count": 41
+          "cursor_count": 32
         }
       },
       {
-        "surface": "studio.worker",
+        "surface": "studio.assistant",
         "bKind": "sse",
         "aStrategy": "last-event-id",
         "complete": true,
-        "finalLength": 3282,
+        "finalLength": 2898,
         "assistantMessages": 1,
         "settled": true,
         "B": {
-          "firstTextMs": 10,
-          "firstEventMs": 10,
-          "firstLiveMs": 33,
+          "firstTextMs": 11,
+          "firstEventMs": 11,
+          "firstLiveMs": 158,
           "text": {
             "kind": "exact",
             "missing": 0,
             "duplicated": 0
           },
-          "held_chars": 1089,
-          "deltas": 23,
+          "held_chars": 298,
+          "deltas": 641,
           "partial_stale_chars": 0,
           "cursors": [],
-          "cursor_count": 28
+          "cursor_count": 644
         },
         "A": {
           "firstTextMs": 0,
@@ -1605,160 +1698,197 @@
             "missing": 0,
             "duplicated": 0
           },
-          "held_chars": 1089,
-          "deltas": 23,
+          "held_chars": 298,
+          "deltas": 641,
           "cursors": [],
-          "cursor_count": 28
+          "cursor_count": 644
         }
       },
       {
-        "surface": "studio.worker",
-        "bKind": "sse",
-        "aStrategy": "snapshot-then-attach",
-        "complete": true,
-        "finalLength": 2698,
-        "assistantMessages": 1,
-        "settled": true,
-        "B": {
-          "firstTextMs": 7,
-          "firstEventMs": 7,
-          "firstLiveMs": 30,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 1017,
-          "deltas": 20,
-          "partial_stale_chars": 0,
-          "cursors": [],
-          "cursor_count": 25
-        },
-        "A": {
-          "firstTextMs": 6,
-          "firstEventMs": 6,
-          "firstLiveMs": 95,
-          "text": {
-            "kind": "exact",
-            "missing": 0,
-            "duplicated": 0
-          },
-          "held_chars": 1968,
-          "deltas": 9,
-          "cursors": [],
-          "cursor_count": 14
-        }
-      },
-      {
-        "surface": "studio.worker",
-        "bKind": "sse",
+        "surface": "studio.assistant",
+        "bKind": "ws",
         "aStrategy": "after_cursor",
         "complete": true,
-        "finalLength": 4333,
+        "finalLength": 2727,
         "assistantMessages": 1,
         "settled": true,
         "B": {
-          "firstTextMs": 7,
-          "firstEventMs": 7,
-          "firstLiveMs": 75,
+          "firstTextMs": 5,
+          "firstEventMs": 5,
+          "firstLiveMs": 294,
           "text": {
             "kind": "exact",
             "missing": 0,
             "duplicated": 0
           },
-          "held_chars": 731,
-          "deltas": 35,
-          "partial_stale_chars": 0,
+          "held_chars": 271,
+          "deltas": 600,
           "cursors": [],
-          "cursor_count": 40
+          "cursor_count": 603
         },
         "A": {
           "firstTextMs": 0,
           "firstEventMs": 0,
-          "firstLiveMs": 6,
+          "firstLiveMs": 2,
           "text": {
             "kind": "exact",
             "missing": 0,
             "duplicated": 0
           },
-          "held_chars": 731,
-          "deltas": 35,
+          "held_chars": 271,
+          "deltas": 600,
           "cursors": [],
-          "cursor_count": 40
+          "cursor_count": 603
         }
       },
       {
-        "surface": "studio.worker",
+        "surface": "studio.assistant",
         "bKind": "ws",
         "aStrategy": "snapshot-then-attach",
         "complete": true,
-        "finalLength": 3918,
+        "finalLength": 2596,
         "assistantMessages": 1,
         "settled": true,
         "B": {
-          "firstTextMs": 13,
-          "firstEventMs": 13,
-          "firstLiveMs": 67,
+          "firstTextMs": 4,
+          "firstEventMs": 4,
+          "firstLiveMs": 77,
           "text": {
             "kind": "exact",
             "missing": 0,
             "duplicated": 0
           },
-          "held_chars": 1411,
-          "deltas": 25,
+          "held_chars": 217,
+          "deltas": 584,
           "cursors": [],
-          "cursor_count": 30
+          "cursor_count": 587
         },
         "A": {
-          "firstTextMs": 8,
-          "firstEventMs": 8,
-          "firstLiveMs": 92,
+          "firstTextMs": 3,
+          "firstEventMs": 3,
+          "firstLiveMs": 134,
           "text": {
             "kind": "exact",
             "missing": 0,
             "duplicated": 0
           },
-          "held_chars": 2560,
-          "deltas": 14,
+          "held_chars": 413,
+          "deltas": 530,
           "cursors": [],
-          "cursor_count": 19
+          "cursor_count": 533
         }
       },
       {
-        "surface": "studio.worker",
+        "surface": "studio.assistant",
         "bKind": "ws",
         "aStrategy": "last-event-id",
         "complete": true,
-        "finalLength": 3796,
+        "finalLength": 3073,
         "assistantMessages": 1,
         "settled": true,
         "B": {
-          "firstTextMs": 8,
-          "firstEventMs": 8,
-          "firstLiveMs": 21,
+          "firstTextMs": 6,
+          "firstEventMs": 6,
+          "firstLiveMs": 54,
           "text": {
             "kind": "exact",
             "missing": 0,
             "duplicated": 0
           },
-          "held_chars": 1199,
-          "deltas": 26,
+          "held_chars": 212,
+          "deltas": 691,
           "cursors": [],
-          "cursor_count": 31
+          "cursor_count": 694
         },
         "A": {
           "firstTextMs": 0,
           "firstEventMs": 0,
-          "firstLiveMs": 6,
+          "firstLiveMs": 3,
           "text": {
             "kind": "exact",
             "missing": 0,
             "duplicated": 0
           },
-          "held_chars": 1199,
-          "deltas": 26,
+          "held_chars": 212,
+          "deltas": 691,
           "cursors": [],
-          "cursor_count": 31
+          "cursor_count": 694
+        }
+      },
+      {
+        "surface": "studio.assistant",
+        "bKind": "sse",
+        "aStrategy": "snapshot-then-attach",
+        "complete": true,
+        "finalLength": 2427,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 4,
+          "firstEventMs": 4,
+          "firstLiveMs": 84,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 289,
+          "deltas": 553,
+          "partial_stale_chars": 0,
+          "cursors": [],
+          "cursor_count": 556
+        },
+        "A": {
+          "firstTextMs": 3,
+          "firstEventMs": 3,
+          "firstLiveMs": 131,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 535,
+          "deltas": 493,
+          "cursors": [],
+          "cursor_count": 496
+        }
+      },
+      {
+        "surface": "studio.assistant",
+        "bKind": "sse",
+        "aStrategy": "after_cursor",
+        "complete": true,
+        "finalLength": 2862,
+        "assistantMessages": 1,
+        "settled": true,
+        "B": {
+          "firstTextMs": 5,
+          "firstEventMs": 5,
+          "firstLiveMs": 82,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 318,
+          "deltas": 628,
+          "partial_stale_chars": 0,
+          "cursors": [],
+          "cursor_count": 631
+        },
+        "A": {
+          "firstTextMs": 0,
+          "firstEventMs": 0,
+          "firstLiveMs": 3,
+          "text": {
+            "kind": "exact",
+            "missing": 0,
+            "duplicated": 0
+          },
+          "held_chars": 318,
+          "deltas": 628,
+          "cursors": [],
+          "cursor_count": 631
         }
       }
     ]
@@ -1766,12 +1896,11 @@
   "notes": [
     "Prompt: LIST-<token> then a numbered list of 60 short lines (a Run that streams for several seconds). B opens 1500 ms after A's list started streaming; A is dropped when B opens and returns 1200 ms later. Trials of one round run in parallel on one Stack, so timings include that contention.",
     "Chat WebSocket has no snapshot frame: B-over-WS takes the snapshot over HTTP (cursor + the Run's partial_output), then conversation.subscribe(stream:true, after_cursor). B-over-CLI is `hatch conversation watch` (no snapshot, no cursor: 'from now'). Studio has no CLI watch.",
-    "Trial discarded, not a product result: studio.assistant: A never reached mid-Run streaming (frames 8, text \"\", last {})",
-    "Trial discarded, not a product result: studio.assistant: A never reached mid-Run streaming (frames 8, text \"\", last {})",
-    "Trial discarded, not a product result: studio.assistant: A never reached mid-Run streaming (frames 8, text \"\", last {})",
-    "Trial discarded, not a product result: studio.assistant: A never reached mid-Run streaming (frames 8, text \"\", last {})",
-    "Trial discarded, not a product result: studio.assistant: A never reached mid-Run streaming (frames 8, text \"\", last {})",
-    "Trial discarded, not a product result: studio.assistant: A never reached mid-Run streaming (frames 8, text \"\", last {})"
+    "Trial discarded, not a product result: studio.worker: A never reached mid-Run streaming (frames 36, text \"\", last {\"status\":\"idle\"})",
+    "Trial discarded, not a product result: studio.worker: A never reached mid-Run streaming (frames 53, text \"\", last {\"status\":\"idle\"})",
+    "Trial discarded, not a product result: studio.worker: A never reached mid-Run streaming (frames 8, text \"\", last {\"status\":\"failed\",\"error\":{\"code\":\"upstream_error\",\"message\":\"An upstream service Hatch uses failed. This is not a problem with your account. Reference: err_22)",
+    "Trial discarded, not a product result: studio.worker: A never reached mid-Run streaming (frames 14, text \"\", last {\"status\":\"idle\"})",
+    "Trial discarded, not a product result: studio.worker: A never reached mid-Run streaming (frames 43, text \"\", last {\"status\":\"idle\"})"
   ],
   "defects": []
 }

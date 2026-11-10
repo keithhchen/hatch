@@ -2,7 +2,7 @@
   "id": 6,
   "title": "Transports: one Run observed by HTTP, SSE, WS streaming and WS non-streaming; slow consumer",
   "status": "FAIL",
-  "durationMs": 799580,
+  "durationMs": 705144,
   "checks": [
     {
       "name": "chat: HTTP wait returned the final result (200 with reply)",
@@ -99,8 +99,8 @@
       "name": "chat: a stalled consumer does not delay the Run (median with <= 1.5 x median without + 3 s)",
       "ok": true,
       "detail": {
-        "without": 5517,
-        "with": 5295
+        "without": 6102,
+        "with": 5875
       }
     },
     {
@@ -109,34 +109,34 @@
       "detail": {
         "runs": [
           {
-            "ms": 30003,
+            "ms": 28457,
             "status": 200,
-            "offeredBytes": 32310
+            "offeredBytes": 31125
           },
           {
-            "ms": 3743,
+            "ms": 19885,
             "status": 200,
-            "offeredBytes": 35159
+            "offeredBytes": 49941
           },
           {
-            "ms": 8203,
+            "ms": 17558,
             "status": 200,
-            "offeredBytes": 38677
+            "offeredBytes": 69597
           },
           {
-            "ms": 34366,
+            "ms": 18198,
             "status": 200,
-            "offeredBytes": 78404
+            "offeredBytes": 89108
           },
           {
-            "ms": 4975,
+            "ms": 22861,
             "status": 200,
-            "offeredBytes": 81744
+            "offeredBytes": 109132
           },
           {
-            "ms": 2671,
+            "ms": 30710,
             "status": 200,
-            "offeredBytes": 85077
+            "offeredBytes": 144609
           }
         ]
       }
@@ -227,17 +227,17 @@
       "name": "studio: resuming by cursor delivers exactly the events after it",
       "ok": true,
       "detail": {
-        "after": 304,
-        "got": 3,
-        "want": 3
+        "after": 4,
+        "got": 303,
+        "want": 303
       }
     },
     {
       "name": "studio: a stalled consumer does not delay the Run (median with <= 1.5 x median without + 3 s)",
       "ok": true,
       "detail": {
-        "without": 98342,
-        "with": 97699
+        "without": 75697,
+        "with": 71667
       }
     },
     {
@@ -245,8 +245,8 @@
       "ok": true,
       "detail": {
         "raw": {
-          "frames": 18514,
-          "last_cursor": "18514",
+          "frames": 18516,
+          "last_cursor": "18516",
           "close_code": 1013,
           "ended": "close"
         },
@@ -257,17 +257,17 @@
       "name": "studio: the dropped consumer resumes by cursor and gets exactly what it missed",
       "ok": true,
       "detail": {
-        "from": 18514,
-        "got": 2841,
-        "want": 2841
+        "from": 18516,
+        "got": 2839,
+        "want": 2839
       }
     }
   ],
   "measurements": {
-    "chat_http_wait_ms": 8352,
+    "chat_http_wait_ms": 7775,
     "chat_observer_catch_up_ms": {
-      "sse": 108,
-      "wsStream": 0,
+      "sse": 0,
+      "wsStream": 1,
       "wsPlain": 0
     },
     "chat_reply_chars": 491,
@@ -304,84 +304,84 @@
       "last": 6
     },
     "chat_run_ms_without_slow": [
-      7860,
-      5722,
-      5517,
-      5161
+      6452,
+      6021,
+      6730,
+      6102
     ],
     "chat_run_ms_with_slow": [
-      5121,
-      6652,
-      5295,
-      6880
+      6626,
+      4667,
+      6101,
+      5875
     ],
     "chat_run_ms_median": {
-      "without": 5517,
-      "with": 5295
+      "without": 6102,
+      "with": 5875
     },
     "chat_slow_consumer_trials": [
       {
-        "runMs": 5121,
-        "wsFramesThatPiledUp": 32,
-        "sseBytesThatPiledUp": 6153
-      },
-      {
-        "runMs": 6652,
+        "runMs": 6626,
         "wsFramesThatPiledUp": 35,
-        "sseBytesThatPiledUp": 7311
+        "sseBytesThatPiledUp": 7299
       },
       {
-        "runMs": 5295,
-        "wsFramesThatPiledUp": 33,
-        "sseBytesThatPiledUp": 6304
+        "runMs": 4667,
+        "wsFramesThatPiledUp": 31,
+        "sseBytesThatPiledUp": 5997
       },
       {
-        "runMs": 6880,
-        "wsFramesThatPiledUp": 37,
-        "sseBytesThatPiledUp": 7582
+        "runMs": 6101,
+        "wsFramesThatPiledUp": 35,
+        "sseBytesThatPiledUp": 7098
+      },
+      {
+        "runMs": 5875,
+        "wsFramesThatPiledUp": 35,
+        "sseBytesThatPiledUp": 7279
       }
     ],
     "chat_slow_ws_closed_1013_trials": "0/4",
     "chat_slow_sse_destroyed_trials": "0/4",
     "chat_big_runs": [
       {
-        "ms": 30003,
+        "ms": 28457,
         "status": 200,
-        "offeredBytes": 32310
+        "offeredBytes": 31125
       },
       {
-        "ms": 3743,
+        "ms": 19885,
         "status": 200,
-        "offeredBytes": 35159
+        "offeredBytes": 49941
       },
       {
-        "ms": 8203,
+        "ms": 17558,
         "status": 200,
-        "offeredBytes": 38677
+        "offeredBytes": 69597
       },
       {
-        "ms": 34366,
+        "ms": 18198,
         "status": 200,
-        "offeredBytes": 78404
+        "offeredBytes": 89108
       },
       {
-        "ms": 4975,
+        "ms": 22861,
         "status": 200,
-        "offeredBytes": 81744
+        "offeredBytes": 109132
       },
       {
-        "ms": 2671,
+        "ms": 30710,
         "status": 200,
-        "offeredBytes": 85077
+        "offeredBytes": 144609
       }
     ],
     "chat_stalled_raw_tcp": {
-      "frames": 273,
-      "last_cursor": 73,
+      "frames": 329,
+      "last_cursor": 68,
       "close_code": null,
       "ended": "eof"
     },
-    "studio_http_wait_ms": 32551,
+    "studio_http_wait_ms": 17069,
     "studio_observer_catch_up_ms": {
       "sse": 0,
       "wsStream": 0,
@@ -390,9 +390,9 @@
     "studio_reply_chars": 491,
     "studio_wsPlain_frame_types": [
       "ready",
+      "event:message",
       "event:state",
       "event:message_end",
-      "event:message",
       "event:run_end"
     ],
     "studio_cursor_reports": {
@@ -424,42 +424,42 @@
       "last": 307
     },
     "studio_run_ms_without_slow": [
-      98342,
-      117723,
-      82386
+      75697,
+      82903,
+      72881
     ],
     "studio_run_ms_with_slow": [
-      106251,
-      97699,
-      78650
+      82044,
+      71667,
+      64965
     ],
     "studio_run_ms_median": {
-      "without": 98342,
-      "with": 97699
+      "without": 75697,
+      "with": 71667
     },
     "studio_slow_consumer_trials": [
       {
-        "runMs": 106251,
+        "runMs": 82044,
         "wsFramesThatPiledUp": 3509,
-        "sseBytesThatPiledUp": 157302
+        "sseBytesThatPiledUp": 157268
       },
       {
-        "runMs": 97699,
+        "runMs": 71667,
         "wsFramesThatPiledUp": 3509,
-        "sseBytesThatPiledUp": 160797
+        "sseBytesThatPiledUp": 160763
       },
       {
-        "runMs": 78650,
+        "runMs": 64965,
         "wsFramesThatPiledUp": 3509,
-        "sseBytesThatPiledUp": 160784
+        "sseBytesThatPiledUp": 160763
       }
     ],
     "studio_slow_ws_closed_1013_trials": "0/3",
     "studio_slow_sse_destroyed_trials": "0/3",
     "studio_late_joiner_raw_tcp": {
       "journal_events": 21355,
-      "frames": 18514,
-      "last_cursor": "18514",
+      "frames": 18516,
+      "last_cursor": "18516",
       "close_code": 1013,
       "ended": "close"
     }
@@ -479,7 +479,7 @@
     }
   },
   "notes": [
-    "studio: during the live Runs the stalled Node clients were not dropped (3509 frames / ~160784 SSE bytes piled up): the operating system's socket buffers absorbed them below the server's 1 MB limit. That is a limit of this stimulus, not a verdict; the drop itself is checked below with a raw TCP consumer whose receive buffer is 4 KB.",
+    "studio: during the live Runs the stalled Node clients were not dropped (3509 frames / ~160763 SSE bytes piled up): the operating system's socket buffers absorbed them below the server's 1 MB limit. That is a limit of this stimulus, not a verdict; the drop itself is checked below with a raw TCP consumer whose receive buffer is 4 KB.",
     "Chat observers send nothing: the sender is the HTTP POST ?wait=110; WS observers authenticate with the token in the hello (Bearer is only accepted on Studio upgrade). Studio target is the Assistant conversation on the Registry; Product worker conversations need a running pipeline and were not used.",
     "Cursor truth: Chat = GET events?after_cursor=<before> (JSON replay of the journal); Studio = a replayed SSE from the same cursor. Delta text is rebuilt from live deltas; the non-streaming WS observer reads the final text from history after its journal shows the assistant message."
   ],
