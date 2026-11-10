@@ -1,3 +1,4 @@
+import { endingOf } from "./testSupport.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -83,13 +84,13 @@ for (const backend of ["memory", "file", "postgres"] as const) {
     const start = await repository.acceptSubmission(message(0));
     await repository.acceptSubmission(message(1));
     await repository.acceptSubmission(message(2));
-    await assert.rejects(repository.transitionRun(start.run.id, "completed"), { code: "steer_pending" });
+    assert.equal((await repository.endRun(start.run.id, endingOf("completed"))).ended, false);
     assert.equal((await repository.getRun(id, start.run.id))!.status, "queued");
     const claimed = await Promise.all([repository.claimSteeredMessages(start.run.id), repository.claimSteeredMessages(start.run.id)]);
     const messages = claimed.flat();
     assert.deepEqual(messages.map((row) => row.clientMessageId), ["message-1", "message-2"]);
     assert.deepEqual(messages.map((row) => row.message.content), ["question 1", "question 2"]);
-    assert.equal((await repository.transitionRun(start.run.id, "completed")).status, "completed");
+    assert.equal((await repository.endRun(start.run.id, endingOf("completed"))).run.status, "completed");
     // The Run is over: the next message starts a new Run instead of joining it.
     const next = await repository.acceptSubmission(message(3));
     assert.equal(next.created, true);
@@ -101,7 +102,7 @@ for (const backend of ["memory", "file", "postgres"] as const) {
       const start = await repository.acceptSubmission(message(0));
       await repository.acceptSubmission(message(1));
       await repository.acceptSubmission(message(2));
-      const ended = await repository.transitionRun(start.run.id, terminal, "stopped");
+      const ended = await repository.endRun(start.run.id, endingOf(terminal, "stopped")).then((result) => result.run);
       assert.equal(ended.status, terminal);
       assert.equal(ended.consumedCount, 2);
       assert.deepEqual((await store.readVisibleConversation(id)).map((row) => row.content), ["question 0", "question 1", "question 2"]);
@@ -137,6 +138,18 @@ for (const backend of ["memory", "file", "postgres"] as const) {
     assert.equal((journalEnvelope(created).payload as { message: { model_images?: unknown } }).message.model_images, undefined);
   }));
 
+  test(`${backend}: a steered image's pixels are kept once the message is claimed: in the transcript, and in the journal only while it waits (Postgres)`, options, async () => withBackend(backend, async ({ repository, store }) => {
+    const start = await repository.acceptSubmission(message(0));
+    const images = [{ type: "image" as const, mimeType: "image/png", data: "iVBORw0KGgo=" }];
+    await repository.acceptSubmission({ ...message(1), canonicalUser: { role: "user", content: "look", model_images: images } });
+    const pixelsInJournal = async () => (await repository.snapshot(id)).events.some((event) => event.type === "message.created" && event.payload.steered === true && Boolean((event.payload.message as { model_images?: unknown }).model_images));
+    assert.equal(await pixelsInJournal(), true, "waiting: the claim will need them");
+    await repository.claimSteeredMessages(start.run.id);
+    assert.deepEqual((await store.readConversation(id)).find((row) => row.content === "look")?.model_images, images);
+    // The memory and file authority is an append-only commit log, which cannot be rewritten; the database's journal drops them.
+    assert.equal(await pixelsInJournal(), backend !== "postgres");
+  }));
+
   test(`${backend}: messages racing a Run's end never deadlock and are each claimed or start the next Run`, options, async () => withBackend(backend, async ({ repository }) => {
     let n = 0;
     const submit = (): Promise<unknown> => repository.acceptSubmission(message(n++)).catch((error: unknown) => error);
@@ -145,7 +158,7 @@ for (const backend of ["memory", "file", "postgres"] as const) {
     const finish = async (runId: string): Promise<void> => {
       for (;;) {
         await repository.claimSteeredMessages(runId);
-        try { await repository.transitionRun(runId, "completed"); return; } catch (error) { if ((error as { code?: string }).code !== "steer_pending") throw error; }
+        if ((await repository.endRun(runId, endingOf("completed"))).ended) return;
       }
     };
     const outcomes = await Promise.all([finish(first.run.id), ...Array.from({ length: 12 }, submit)]);

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { ClientToolBroker } from "../clientBroker.js";
 import { PiAgentRuntime } from "../piAgentRuntime.js";
-import { RunStateMachine } from "../runState.js";
+import { RunStateMachine, transcriptEnds } from "../runState.js";
 import { ServerToolExecutor } from "../serverTools.js";
 import { RuntimeStore } from "../store.js";
 import type { HatchCandidateExecutor } from "./types.js";
@@ -32,7 +32,7 @@ export function createHatchCandidateRuntimeExecutor(): HatchCandidateExecutor {
       runtimeRunId = runId;
       const conversationId = `factory_eval_conversation_${randomUUID().replaceAll("-", "")}`;
       const store = new RuntimeStore(scratch);
-      const state = new RunStateMachine(runId, conversationId, store);
+      const state: RunStateMachine = new RunStateMachine(runId, conversationId, store, transcriptEnds(store, conversationId, runId, () => state.status));
       broker = new ClientToolBroker(async () => {
         throw new Error("Creator Factory candidate evaluation has no buyer-local tools");
       }, store);
@@ -85,13 +85,13 @@ export function createHatchCandidateRuntimeExecutor(): HatchCandidateExecutor {
         })) {
           if (event.type === "assistant.delta" && event.delta.kind === "text") chunks.push(event.delta.content);
         }
-        if (state.status === "running") await state.complete();
+        if (state.status === "running") await state.complete({ message: { role: "assistant", content: chunks.join("") }, finishReason: "stop", visibleParts: [] });
         const result = chunks.join("");
         if (!result.trim()) throw new Error("Hatch candidate Runtime returned an empty result");
         return result;
       } catch (error) {
         if (["running", "waiting_for_tool", "compacting"].includes(state.status)) {
-          await state.fail(error instanceof Error ? error.message : String(error));
+          await state.fail({ code: "run_failed", message: error instanceof Error ? error.message : String(error) });
         }
         throw error;
       }

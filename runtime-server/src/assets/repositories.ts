@@ -35,12 +35,12 @@ export class InMemoryAssetRepository implements AssetRepository {
   async release(scope: AssetScope, id: string, messageId: string) {
     if (this.find(scope, id)) this.links.delete(`${id}\0${messageId}`);
   }
-  async listAttached(scope: AssetScope): Promise<AttachedAsset[]> {
+  async listAttached(scope: AssetScope, messageIds?: readonly string[]): Promise<AttachedAsset[]> {
     const key = scopeKey(scope);
     return [...this.links].flatMap(link => {
       const [id, messageId] = link.split("\0") as [string, string];
       const asset = this.rows.get(id);
-      return asset && scopeKey(asset.record.scope) === key ? [{ asset, messageId }] : [];
+      return asset && scopeKey(asset.record.scope) === key && (!messageIds || messageIds.includes(messageId)) ? [{ asset, messageId }] : [];
     });
   }
 }
@@ -123,10 +123,10 @@ export class PostgresAssetRepository implements AssetRepository {
   async release(scope: AssetScope, id: string, messageId: string) {
     await this.db.query(`DELETE FROM hatch_asset_messages WHERE scope_key = $1 AND asset_id = $2 AND message_id = $3`, [scopeKey(scope), id, messageId]);
   }
-  async listAttached(scope: AssetScope): Promise<AttachedAsset[]> {
+  async listAttached(scope: AssetScope, messageIds?: readonly string[]): Promise<AttachedAsset[]> {
     const result = await this.db.query<Row & { message_id: string }>(
       `SELECT a.record, l.message_id FROM hatch_asset_messages l JOIN hatch_assets a ON a.id = l.asset_id
-       WHERE l.scope_key = $1 ORDER BY l.created_at, a.created_at, a.id, l.message_id`, [scopeKey(scope)]);
+       WHERE l.scope_key = $1 AND ($2::text[] IS NULL OR l.message_id = ANY($2::text[])) ORDER BY l.created_at, a.created_at, a.id, l.message_id`, [scopeKey(scope), messageIds ?? null]);
     return result.rows.map(row => ({ asset: restore(row)!, messageId: row.message_id }));
   }
 }

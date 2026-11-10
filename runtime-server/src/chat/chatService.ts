@@ -1,7 +1,9 @@
 import type { ConversationMessage } from "../protocol.js";
 import type { AlsoCommit, ConversationRecord, ConversationRepository, ConversationRunRecord } from "../conversationRepository.js";
 import type { ClientAttributes, Principal } from "../surfaces/contract.js";
+import { failures } from "../errors/failures.js";
 import type { RunEventHub } from "./runEventHub.js";
+import type { RunTerminator } from "./runTerminator.js";
 import type { RunSupervisor } from "./runSupervisor.js";
 import { ChatError } from "./principal.js";
 import { assertProductUsable } from "./toolSurface.js";
@@ -67,7 +69,9 @@ export class RunRegistry<Scope> {
  */
 export class ChatService<Scope> {
   constructor(private readonly deps: {
-    repository: Pick<ConversationRepository, "acceptSubmission" | "getActiveRun" | "transitionRun" | "hasAcceptedMessage">;
+    repository: Pick<ConversationRepository, "acceptSubmission" | "getActiveRun" | "hasAcceptedMessage">;
+    /** A Run that cannot be admitted ends here, like any other: observers and the journal both hear of it. */
+    terminator: Pick<RunTerminator, "end">;
     supervisor: Pick<RunSupervisor, "adopt" | "executorId" | "holdsConversation">;
     hub: RunEventHub;
     admission: RunAdmission;
@@ -78,7 +82,7 @@ export class ChatService<Scope> {
   }) {}
 
   async submit(command: SubmitCommand<Scope>): Promise<Submission> {
-    const { repository, supervisor, hub, admission, registry, limits, compaction } = this.deps;
+    const { repository, supervisor, hub, admission, registry, limits, compaction, terminator } = this.deps;
     assertProductUsable(command.requiresLocalTools, command.client.client);
     await limits?.check(command.principal, command.conversation);
     // A message that joins a Run adds no work, so capacity is only reserved for one that may start a Run.
@@ -108,7 +112,11 @@ export class ChatService<Scope> {
       if (outcome === "started" && joining) {
         // The Run we meant to join ended first, so this one starts a Run after all: admit it now.
         try { release = admission.reserve(command.principal); }
-        catch (error) { await repository.transitionRun(accepted.run.id, "failed", error instanceof Error ? error.message : String(error)); throw error; }
+        catch (error) {
+          const failure = error instanceof ChatError ? { code: error.code, message: error.message } : failures.translate(error, { run: accepted.run.id, conversation: command.conversation.id });
+          await terminator.end(accepted.run.id, { status: "failed", failure });
+          throw error;
+        }
       }
       if (outcome !== "replayed") registry.rememberClient(command.conversation.id, command.client, command.timeZone);
       if (outcome === "started") {

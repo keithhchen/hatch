@@ -1,3 +1,4 @@
+import { endingOf } from "./testSupport.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -138,7 +139,7 @@ for (const backend of ["memory", "file", "postgres"] as const) {
     assert.equal(await repository.commitCompaction({ conversationId: id, compactionId: "cmp_3", basis: { latestRunId: begun.latestRunId }, event, journal: { compaction_id: "cmp_3" } }), false);
     assert.deepEqual((await store.readConversation(id)).map((row) => row.content), ["question 0"]);
     await repository.endCompaction("cmp_3");
-    await repository.transitionRun(run.run.id, "completed");
+    await repository.endRun(run.run.id, endingOf("completed"));
     const again = await repository.beginCompaction({ id: "cmp_4", conversationId: id, executorId: "a", leaseMs: 60_000 });
     assert.equal(again.latestRunId, run.run.id);
     assert.equal(await repository.commitCompaction({ conversationId: id, compactionId: "cmp_4", basis: { latestRunId: again.latestRunId }, event: { ...event, compaction_id: "cmp_4" }, journal: { compaction_id: "cmp_4", kind: "summarized" } }), true);

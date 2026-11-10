@@ -56,7 +56,7 @@ const finishing = (seen: Array<{ input: Turn<object>["input"]; tail: Conversatio
   async run(turn) {
     await turn.state.start();
     seen.push({ input: turn.input, tail: (await store.readConversation(conversationId)).slice(-2) });
-    await turn.state.complete();
+    await turn.state.complete({ message: { role: "assistant", content: "done" }, finishReason: "stop", visibleParts: [] });
   }
 });
 
@@ -120,7 +120,7 @@ test("a server tool that may have had an effect interrupts the Run and is never 
   await second.supervisor.sweep();
   const after = (await repository.getRun(conversationId, run.id))!;
   assert.equal(after.status, "interrupted");
-  assert.match(after.interruptedReason!, /api\.request.*may or may not have had an effect/);
+  assert.match(after.failure!.message, /api\.request.*may or may not have had an effect/);
   assert.deepEqual(seen, [], "the Run did not execute again");
   await second.stop();
 });

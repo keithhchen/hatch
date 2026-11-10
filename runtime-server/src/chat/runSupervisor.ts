@@ -3,6 +3,7 @@ import type { ConversationRepository, ConversationRunRecord, ToolCallOutcome } f
 import type { ToolRequest, ToolResult } from "../protocol.js";
 import type { StopRelay } from "./stopRelay.js";
 import { RunFenced } from "./runFence.js";
+import type { RunTerminators } from "./runTerminator.js";
 
 /** The side of the client tool broker that outside callers reach: results in, cancellation out. */
 export interface ToolSession {
@@ -68,10 +69,12 @@ export class RunSupervisor {
   private unsubscribe?: () => Promise<void>;
 
   constructor(
-    private readonly repository: Pick<ConversationRepository, "renewLease" | "claimOrphanedRuns" | "getRun" | "transitionRun" | "listToolCalls" | "answerToolCall">,
+    private readonly repository: Pick<ConversationRepository, "renewLease" | "claimOrphanedRuns" | "getRun" | "listToolCalls" | "answerToolCall">,
     private readonly executor: RunExecutor,
     private readonly policy: ResumePolicy,
-    private readonly options: SupervisorOptions
+    private readonly options: SupervisorOptions,
+    /** Every end of a Run that is not the executor's own goes through these: a stop from anywhere, a sweep, a thrown executor. */
+    private readonly terminators: RunTerminators
   ) {}
 
   get executorId(): string { return this.options.executorId; }
@@ -112,7 +115,7 @@ export class RunSupervisor {
     owned?.controller.abort(new Error(reason));
     await owned?.session?.cancelRun(runId, reason);
     // Already cancelled when the executor's own state machine recorded it; this covers a Run it does not hold.
-    await this.repository.transitionRun(runId, "cancelled", reason);
+    await this.terminators.external.end(runId, { status: "cancelled", failure: { code: "run_cancelled", message: reason } });
     // The state is written first: the instance that executes the Run, if not this one, learns of it at once.
     if (!owned) this.options.stops?.publish(runId);
     return true;
@@ -156,7 +159,7 @@ export class RunSupervisor {
     for (const run of claimed) {
       const decision = await this.policy.decide(run).catch((error): ResumeDecision => ({ interrupt: String(error) }));
       if (decision === "restart") this.adopt(run);
-      else await this.repository.transitionRun(run.id, "interrupted", decision.interrupt).catch(() => undefined);
+      else await this.terminators.executing.end(run.id, { status: "interrupted", failure: { code: "run_interrupted", message: decision.interrupt } }).catch(() => undefined);
     }
   }
 
@@ -193,13 +196,13 @@ export class RunSupervisor {
         if (!latest || TERMINAL.has(latest.status) || owned.controller.signal.aborted) return;
         // A message joined after the executor's last claim: the Run is not over.
         if (latest.consumedCount < latest.steeredCount) { run = latest; continue; }
-        await this.repository.transitionRun(run.id, "failed", "The Run ended without a result");
+        await this.terminators.executing.end(run.id, { status: "failed", failure: failures.translate(new Error("The Run ended without a result"), { run: run.id, conversation: run.conversationId }) });
         return;
       }
     } catch (error) {
       // A fenced executor no longer holds the Run: whoever does, or whoever stopped it, decides its state.
       if (owned.controller.signal.reason instanceof RunHandoff || error instanceof RunFenced) return;
-      await this.repository.transitionRun(run.id, "failed", failures.translate(error, { run: run.id, conversation: run.conversationId }).message).catch(() => undefined);
+      await this.terminators.executing.end(run.id, { status: "failed", failure: failures.translate(error, { run: run.id, conversation: run.conversationId }) }).catch(() => undefined);
     }
   }
 }

@@ -65,6 +65,6 @@ export class ServiceChatGateway<Scope> implements ChatGateway {
       return typeof compactionId === "string" ? { ended: false, compactionId } : { ended: false };
     }
     const text = run.status === "completed" ? finalAssistantText(await this.deps.history.readVisibleConversation(run.conversationId), run.id) : "";
-    return { ended: true, reply: { runId: run.id, status: run.status as "completed", text, ...(run.interruptedReason ? { reason: run.interruptedReason } : {}) } };
+    return { ended: true, reply: { runId: run.id, status: run.status as "completed", text, ...(run.failure ? { reason: run.failure.message } : {}) } };
   }
 }

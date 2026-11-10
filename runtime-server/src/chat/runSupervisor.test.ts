@@ -1,7 +1,10 @@
+import { endingOf } from "../testSupport.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { InMemoryConversationRepository, type AcceptSubmissionInput } from "../conversationRepository.js";
 import { RunHandoff, RunSupervisor, type ResumeDecision, type RunControl, type RunExecutor } from "./runSupervisor.js";
+import { runTerminators } from "./runTerminator.js";
+import { RunEventHub } from "./runEventHub.js";
 
 const binding = { ownerAccountId: "owner", creatorId: "creator", agentId: "agent", productId: "product", corpusDigest: "corpus" };
 const conversationId = `scope:${"c".repeat(24)}:supervisor`;
@@ -13,9 +16,10 @@ const message = (n: number, lease?: string): AcceptSubmissionInput => ({
 
 async function setup(executor: RunExecutor, decide: () => ResumeDecision = () => "restart") {
   const repository = new InMemoryConversationRepository();
+  const hub = new RunEventHub();
   await repository.createConversation({ ...binding, id: conversationId, publicId: "supervisor" });
-  const supervisor = (executorId: string) => new RunSupervisor(repository, executor, { decide: async () => decide() }, { executorId, leaseMs: 60_000, sweepMs: 60_000 });
-  return { repository, supervisor };
+  const supervisor = (executorId: string) => new RunSupervisor(repository, executor, { decide: async () => decide() }, { executorId, leaseMs: 60_000, sweepMs: 60_000 }, runTerminators(repository, hub, executorId));
+  return { repository, supervisor, hub };
 }
 
 const settled = async (condition: () => boolean | Promise<boolean>) => {
@@ -24,7 +28,7 @@ const settled = async (condition: () => boolean | Promise<boolean>) => {
 };
 
 test("a Run is executed by the supervisor with no client attached and completes on its own", async () => {
-  const { repository, supervisor } = await setup({ execute: async (run) => { await repository.transitionRun(run.id, "completed"); } });
+  const { repository, supervisor } = await setup({ execute: async (run) => { await repository.endRun(run.id, endingOf("completed")); } });
   const repositoryRef = repository;
   const started = await repositoryRef.acceptSubmission(message(0));
   supervisor("a").adopt(started.run);
@@ -52,7 +56,7 @@ test("the resume policy can interrupt an orphaned Run instead of restarting it",
   const started = await repository.acceptSubmission(message(0, new Date(Date.now() - 1000).toISOString()));
   await supervisor("a").sweep();
   const run = (await repository.getRun(conversationId, started.run.id))!;
-  assert.deepEqual([run.status, run.interruptedReason], ["interrupted", "used a local tool"]);
+  assert.deepEqual([run.status, run.failure?.message], ["interrupted", "used a local tool"]);
 });
 
 test("a message that joins after the executor's last claim makes the supervisor execute again", async () => {
@@ -60,7 +64,7 @@ test("a message that joins after the executor's last claim makes the supervisor 
   const { repository, supervisor } = await setup({ execute: async (run) => {
     seen.push(run.steeredCount);
     if (seen.length === 1) await repository.acceptSubmission(message(1));
-    else { await repository.claimSteeredMessages(run.id); await repository.transitionRun(run.id, "completed"); }
+    else { await repository.claimSteeredMessages(run.id); await repository.endRun(run.id, endingOf("completed")); }
   } });
   const started = await repository.acceptSubmission(message(0));
   supervisor("a").adopt(started.run);

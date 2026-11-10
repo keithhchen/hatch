@@ -1,5 +1,5 @@
 import { ClientToolBroker } from "../clientBroker.js";
-import { ConversationRepositoryError, type ConversationRecord, type ConversationRepository, type ConversationRunRecord, type ToolCallRecord } from "../conversationRepository.js";
+import { type ConversationRecord, type ConversationRepository, type ConversationRunRecord, type ToolCallRecord } from "../conversationRepository.js";
 import { type BoundRunStart, type ConversationMessage, type OutboundMessage, type ToolRequest } from "../protocol.js";
 import { RunStateMachine } from "../runState.js";
 import type { RuntimeStore } from "../store.js";
@@ -8,6 +8,7 @@ import { withPartialOutput } from "./partialOutput.js";
 import type { RunRegistry } from "./chatService.js";
 import type { RunCompactions, TurnCompaction } from "./chatCompaction.js";
 import type { RunEventHub } from "./runEventHub.js";
+import type { RunTerminator } from "./runTerminator.js";
 import { RunHandoff, type RunControl, type RunExecutor } from "./runSupervisor.js";
 import type { ToolRecovery } from "./toolRecovery.js";
 import { CLIENT_TOOL_NAMES } from "./toolSurface.js";
@@ -61,7 +62,9 @@ const sleep = (ms: number, signal: AbortSignal): Promise<void> => new Promise((r
 
 export class TurnExecutor<Scope> implements RunExecutor {
   constructor(private readonly deps: {
-    repository: Pick<ConversationRepository, "getConversation" | "transitionRun" | "claimSteeredMessages" | "savePartialOutput" | "getRun" | "requestToolCall">;
+    repository: Pick<ConversationRepository, "getConversation" | "transitionRun" | "claimSteeredMessages" | "savePartialOutput" | "requestToolCall">;
+    /** Ends the Run only while this executor holds it: the executor's way out, the same one a stop or a sweep takes. */
+    terminator: Pick<RunTerminator, "end">;
     store: Pick<RuntimeStore, "append" | "readConversation">;
     hub: RunEventHub;
     registry: RunRegistry<Scope>;
@@ -86,12 +89,12 @@ export class TurnExecutor<Scope> implements RunExecutor {
       (text) => repository.savePartialOutput(run.id, text)
     );
     const publish = (message: OutboundMessage): void => partial.publish(message as unknown as Record<string, unknown>);
-    const state = new RunStateMachine(run.id, conversation.id, store as RuntimeStore, async (status, reason) => {
+    const state = new RunStateMachine(run.id, conversation.id, store as RuntimeStore, async (ending) => {
+      const { run: ended, ended: did } = await this.deps.terminator.end(run.id, ending);
+      return { ended: did, status: ended.status };
+    }, async (status, reason) => {
       await repository.transitionRun(run.id, status, reason);
       publish({ type: "turn.state", run_id: run.id, status, ...(reason ? { reason } : {}) });
-    }, async () => {
-      const latest = await repository.getRun(conversation.id, run.id);
-      if (latest && latest.consumedCount < latest.steeredCount) throw new ConversationRepositoryError("steer_pending", `Run ${run.id} has an unclaimed message`, latest);
     }, run.status);
     const broker = new ClientToolBroker(async (message) => publish(message), store as RuntimeStore, this.deps.toolTimeoutMs, { request: (call) => repository.requestToolCall(call) });
     control.toolSession({
@@ -147,7 +150,6 @@ export class TurnExecutor<Scope> implements RunExecutor {
       const plan = await this.deps.recovery.plan(run, await this.deps.store.readConversation(conversation.id));
       if (plan.kind === "interrupt") {
         await state.interrupt(plan.reason);
-        publish({ type: "turn.failed", run_id: run.id, error: { code: "run_interrupted", message: plan.reason } });
         return false;
       }
       if (plan.kind === "ready") {

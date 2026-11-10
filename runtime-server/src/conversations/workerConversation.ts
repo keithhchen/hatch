@@ -1,7 +1,8 @@
 import type { WorkbenchRuntime } from "../factoryAgents/runtime.js";
 import { AgentDependenciesNotReadyError, type AgentEntry } from "../factoryAgents/definitions.js";
 import { userMessage } from "../factoryAgents/imageRefs.js";
-import type { Role, Session, WorkbenchStore } from "../factoryAgents/store.js";
+import type { MessageOrigin, Role, Session, WorkbenchStore } from "../factoryAgents/store.js";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { attachmentLines } from "./assets.js";
 import { failureOf } from "../factoryAgents/runFailure.js";
 import { ConversationError, page, type Conversation, type ConversationStatus, type SendInput, type Sent } from "./conversation.js";
@@ -11,10 +12,20 @@ import { blocked, blockedBy, blockedMessage, WORKERS, type Worker, type WorkerRe
 /** The part of a Product workspace a worker conversation needs. */
 export interface WorkerWorkspace {
   store: Pick<WorkbenchStore, "list" | "create"> & { backend: Pick<WorkbenchStore["backend"], "writeManual"> };
-  runtime: Pick<WorkbenchRuntime, "send" | "stop" | "events" | "runId">;
+  runtime: Pick<WorkbenchRuntime, "send" | "stop" | "events" | "runId" | "queued">;
   entries(): Promise<AgentEntry[]>;
   /** Throws AgentDependenciesNotReadyError when the worker's dependencies have no output yet. */
   assertRoleAvailable(role: Role): Promise<void>;
+}
+
+const originOf = (message: AgentMessage) => (message as { origin?: MessageOrigin }).origin;
+
+/** Sends under one session do not interleave: a repeat of a message waits for the first and finds it. */
+const sending = new Map<string, Promise<unknown>>();
+async function inTurn<T>(key: string, step: () => Promise<T>): Promise<T> {
+  const run = (sending.get(key) ?? Promise.resolve()).catch(() => undefined).then(step);
+  sending.set(key, run);
+  try { return await run; } finally { if (sending.get(key) === run) sending.delete(key); }
 }
 
 const statusOf = (session: Session | undefined, runId?: string): ConversationStatus =>
@@ -36,10 +47,31 @@ export class WorkerConversation implements Conversation {
     return { status, messages: session ? page(projectMessages(session.messages), after, limit) : [] };
   }
 
-  /** The runtime decides atomically whether this steers the running turn or starts one. */
+  /** The message the session already holds under this id, as it was sent. Its own record is the only one: there is no ledger beside it. */
+  async replay(input: SendInput): Promise<Sent | undefined> {
+    const session = await this.session();
+    const earlier = session && (session.messages.find(message => originOf(message)?.itemId === input.id) ?? this.workspace.runtime.queued(session.id, input.id));
+    if (!session || !earlier) return undefined;
+    const origin = originOf(earlier);
+    const assets = (origin?.attachments ?? []).map(asset => asset.assetId);
+    if (origin?.text !== input.text || assets.join() !== input.attachments.map(asset => asset.id).join()) {
+      throw new ConversationError(409, "idempotency_conflict", "This idempotency key was used for a different message.");
+    }
+    const attachments = (origin?.attachments ?? []).map(({ type, name, assetId }) => ({ type, name, asset_id: assetId }));
+    return {
+      conversationId: session.id, queued: false, runId: this.workspace.runtime.runId(session.id),
+      message: { id: input.id, role: "user", text: input.text, created_at: new Date(earlier.timestamp ?? 0).toISOString(), ...(attachments.length ? { attachments } : {}) }
+    };
+  }
+
+  /** The runtime decides atomically whether this steers the running turn or starts one; a message already accepted under this id is returned as it was. */
   async send(input: SendInput): Promise<Sent> {
     await this.assertAvailable();
     const session = await this.session() ?? await this.workspace.store.create(this.worker.role);
+    return inTurn(session.id, async () => (await this.replay(input)) ?? this.deliver(session, input));
+  }
+
+  private async deliver(session: Session, input: SendInput): Promise<Sent> {
     const images = input.attachments.filter(asset => asset.kind === "image").map(asset => asset.path);
     const lines = attachmentLines(input.attachments);
     const attachments = input.attachments.map(({ kind, name, id }) => ({ type: kind, name, assetId: id }));

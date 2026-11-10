@@ -1,3 +1,4 @@
+import { endingOf } from "./testSupport.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -111,11 +112,14 @@ test("real PostgreSQL strips heavy fields before transport, scopes tool details 
 
 test("real PostgreSQL recovery is bounded and journal pages retain a fixed watermark", options, async () => isolated(async (pool) => {
   const repository = new PostgresConversationRepository(pool);
+  const transcript = new PostgresStore(pool);
+  await transcript.migrate();
+  repository.bindSubmissionStore(transcript);
   const binding = { ownerAccountId: "owner", creatorId: "creator", agentId: "agent", productId: "product", corpusDigest: `sha256:${"a".repeat(64)}` };
   for (const id of ["history", "foreign"]) await repository.createConversation({ ...binding, id, publicId: id });
   for (const [id, status] of [["r1", "completed"], ["r2", "interrupted"], ["r3", "interrupted"], ["r4", "queued"]] as const) {
     await repository.createRun({ id, conversationId: "history", clientMessageId: id, inputDigest: binding.corpusDigest, corpusDigest: binding.corpusDigest });
-    await repository.transitionRun(id, status);
+    await (status === "completed" || status === "interrupted" ? repository.endRun(id, endingOf(status)) : repository.transitionRun(id, status));
   }
   await repository.createRun({ id: "foreign_run", conversationId: "foreign", clientMessageId: "foreign", inputDigest: binding.corpusDigest, corpusDigest: binding.corpusDigest });
   const baseline = await repository.snapshot("history");
@@ -149,7 +153,7 @@ test("real PostgreSQL recovery is bounded and journal pages retain a fixed water
   assert.equal(empty.has_more, false);
   await assert.rejects(repository.journalPage("history", later.cursor + 100, first.through_cursor, 2), RangeError);
   await assert.rejects(repository.journalPage("history", 0, later.cursor + 100, 2), RangeError);
-  await repository.transitionRun("r4", "interrupted", "executor lost");
+  await repository.endRun("r4", endingOf("interrupted", "executor lost"));
   const interrupted = await repository.recoverySnapshot("history", []);
   assert.deepEqual(interrupted.runs.map((run) => [run.id, run.status]), [["r4", "interrupted"]]);
   assert.deepEqual(interrupted.events, []);

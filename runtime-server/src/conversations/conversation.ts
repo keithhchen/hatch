@@ -12,6 +12,8 @@ export type PublicMessage = {
   role: "user" | "assistant";
   text: string;
   created_at: string;
+  /** "queued": the message joined a running turn and is not yet read by the model. Absent once it is. */
+  state?: "queued";
   attachments?: Array<{ type: "image" | "file" | "audio"; name: string; asset_id?: string; bytes?: number }>;
 };
 
@@ -20,13 +22,11 @@ export type ReadyAsset = { id: string; kind: "image" | "file" | "audio"; name: s
 
 /** What a client sent, with every attachment already resolved to a ready asset. */
 export type SendInput = {
-  /** Assigned by the host; it is the message id in history. */
+  /** The message's id in history and its idempotency key: the client's own `Idempotency-Key`, or one the host made. The same id and content is the same message. */
   id: string;
   text: string;
   attachments: ReadyAsset[];
   client: ClientAttributes;
-  /** The client's idempotency key. Without one a repeated send is a new message. */
-  key?: string;
 };
 
 export type ConversationState = "idle" | "running" | "failed";
@@ -43,9 +43,16 @@ export interface Conversation {
   messages(after?: string, limit?: number): Promise<{ status: ConversationStatus; messages: PublicMessage[] }>;
   /** Atomic: the message steers the running turn or starts one, and is never lost. */
   send(input: SendInput): Promise<Sent>;
+  /**
+   * The message when `input.id` was already accepted with this content, read from the conversation's own record; a refusal
+   * when it was accepted with other content. Nothing when the id is new. A conversation whose acceptance is atomic needs none.
+   */
+  replay?(input: SendInput): Promise<Sent | undefined>;
   /** Key of this conversation's event log; nothing until the conversation exists. */
   feedKey(): Promise<string | undefined>;
   stop(): Promise<void>;
+  /** What the running turn has said so far, when the conversation knows it without its event log. */
+  partial?(): Promise<string>;
 }
 
 /** An error the API shows as is: status, machine-readable code and a message for people. */

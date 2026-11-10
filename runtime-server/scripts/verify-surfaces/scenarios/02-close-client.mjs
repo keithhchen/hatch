@@ -61,7 +61,7 @@ class ChatClosers {
     let finalStatus; let waited;
     waited = await waitMs(async () => { const r = (await api.run(conversation, this.productId, id)).json?.run; finalStatus = r?.status; return TERMINAL.has(r?.status); }, { timeoutMs: RUN_TIMEOUT_MS, everyMs: 100 });
     const run = (await api.run(conversation, this.productId, id)).json?.run;
-    rec.check(`${label}: Run reaches completed`, run?.status === "completed", { status: run?.status, run_id: id, reason: run?.interrupted_reason });
+    rec.check(`${label}: Run reaches completed`, run?.status === "completed", { status: run?.status, run_id: id, reason: run?.failure?.message });
     const afterClose = run?.completed_at ? Date.parse(run.completed_at) - closedAt : undefined;
     rec.measure(`${label}.run_completed_after_close_ms`, afterClose);
     rec.measure(`${label}.polled_until_terminal_ms`, waited);

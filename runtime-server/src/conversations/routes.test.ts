@@ -8,10 +8,9 @@ import type { Role, Session } from "../factoryAgents/store.js";
 import type { AssistantHost } from "./assistantConversation.js";
 import type { AssetScope } from "../assets/domain.js";
 import type { AssetDesk } from "./assets.js";
-import { ConversationError, type ConversationStatus, type PublicMessage, type ReadyAsset, type SendInput, type Sent } from "./conversation.js";
+import { ConversationError, page, type ConversationStatus, type PublicMessage, type ReadyAsset, type SendInput, type Sent } from "./conversation.js";
 import { MemoryEventLog } from "./eventLog.js";
 import { EventLogJournal } from "./journal.js";
-import { MemoryMessageLedger } from "./ledger.js";
 import { ConversationRoutes } from "./routes.js";
 import type { WorkerWorkspace } from "./workerConversation.js";
 
@@ -60,6 +59,7 @@ class FakeWorkspace implements WorkerWorkspace {
       return { queued, runId: this.runs.get(id)! };
     },
     runId: (id: string) => this.runs.get(id),
+    queued: (_id: string, _itemId: string) => undefined,
     stop: (id: string) => { this.stopped.push(id); },
   };
   entries = async () => agentEntries(await this.definitions, this.sessions);
@@ -75,7 +75,7 @@ class FakeAssistant implements AssistantHost {
   /** Looks at the world the moment a message is delivered. */
   onDelivery: () => void = () => undefined;
   status = async (): Promise<ConversationStatus> => this.running ? { state: "running", runId: "arun-1" } : { state: "idle" };
-  lines = async () => this.history;
+  lines = async (_account: string, after?: string, limit?: number) => page(this.history, after, limit);
   send = async (_account: string, input: SendInput): Promise<Sent> => {
     this.onDelivery();
     this.ingested.push(input);
@@ -88,6 +88,7 @@ class FakeAssistant implements AssistantHost {
   conversationId = () => "assistant:a1";
   assets = () => this.desk;
   stop = async () => { this.stopped++; };
+  partial = async () => "";
 }
 
 const IMAGE: ReadyAsset = { id: "a-img", kind: "image", name: "chart.png", mimeType: "image/png", bytes: 10, sha256: "h-img", path: "input/manual/chart.png" };
@@ -128,7 +129,7 @@ async function harness(options: { assistant?: boolean } = { assistant: true }) {
     json: (response, status, payload) => { response.writeHead(status, { "content-type": "application/json" }); response.end(JSON.stringify(payload)); },
     readJson: async request => { let body = ""; for await (const chunk of request) body += chunk; return JSON.parse(body || "{}"); },
     readBytes: async request => { const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(chunk as Buffer); return Buffer.concat(chunks); },
-    eventLog, ledger: new MemoryMessageLedger(), assets: () => desk,
+    eventLog, assets: () => desk,
     pace: { pollMs: 5 },
   });
   const server = http.createServer((req, res) => { void routes.handle(req, res, new URL(req.url!, "http://x")).then(handled => { if (!handled) { res.writeHead(404); res.end(); } }); });
@@ -317,6 +318,19 @@ test("idempotency: same key and content is one message, other content is 409", a
   } finally { await h.close(); }
 });
 
+test("idempotency: the key is the message's id, a worker's own session is the only record, and a burst of one key is delivered once", async () => {
+  const h = await harness();
+  try {
+    const key = { "idempotency-key": "burst-1" };
+    const burst = await Promise.all(Array.from({ length: 6 }, () => post(h, { content: "Look into Bob" }, "", key)));
+    const ids = await Promise.all(burst.map(async response => ((await response.json()) as { message: { id: string } }).message.id));
+    assert.deepEqual([...new Set(ids)], ["burst-1"], "the key is the id");
+    assert.equal(h.workspace.started.length, 1, "delivered once");
+    assert.equal(h.workspace.sessions[0]!.messages.length, 1, "one record, in the session");
+    assert.equal(((await (await post(h, { content: "k".repeat(1) }, "", { "idempotency-key": "k".repeat(257) })).json()) as { error: { code: string } }).error.code, "invalid_idempotency_key");
+  } finally { await h.close(); }
+});
+
 test("attachments: parts resolve to ready assets; pending, missing and mismatched assets are refused", async () => {
   const h = await harness();
   try {
@@ -357,10 +371,10 @@ test("snapshot and events share one cursor: replay from it has no gap and no dup
       return text;
     };
     const expected = ': connected\n\nid: 4\ndata: {"type":"delta","text":"!"}\n\nid: 5\ndata: {"type":"tool","name":"list"}\n\n';
-    assert.equal(await replay({ path: `?after=${snapshot.cursor}` }), expected);
+    assert.equal(await replay({ path: `?after_cursor=${snapshot.cursor}` }), expected);
     assert.equal(await replay({ headers: { "last-event-id": snapshot.cursor } }), expected, "Last-Event-ID resumes the same way");
-    assert.equal((await h.call(`${root}/research/events?after=99`)).status, 400, "a cursor the log never issued");
-    assert.equal((await h.call(`${root}/research/events?after=x`)).status, 400);
+    assert.equal((await h.call(`${root}/research/events?after_cursor=99`)).status, 400, "a cursor the log never issued");
+    assert.equal((await h.call(`${root}/research/events?after_cursor=x`)).status, 400);
     assert.deepEqual(h.workspace.stopped, [], "watching and unwatching never stops the Run");
   } finally { await h.close(); }
 });

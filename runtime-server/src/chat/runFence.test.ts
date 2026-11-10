@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { InMemoryConversationRepository } from "../conversationRepository.js";
 import { LocalRuntimeAuthority, RuntimeStore } from "../store.js";
+import { endingOf } from "../testSupport.js";
 import { fenced, RunFenced } from "./runFence.js";
 
 const binding = { ownerAccountId: "owner", creatorId: "creator", agentId: "agent", productId: "product", corpusDigest: "corpus" };
@@ -17,8 +18,8 @@ async function setup() {
     canonicalUser: { role: "user", content: "q" }
   });
   const fencedWrites = {
-    fencedRepository: fenced(repository, "a", repository, { transitionRun: (runId: string) => runId, savePartialOutput: (runId: string) => runId }),
-    fencedStore: fenced(store, "a", repository, { append: (event: { run_id?: string }) => event.run_id })
+    fencedRepository: fenced(repository, "a", { transitionRun: 3, savePartialOutput: 2, endRun: 2 }),
+    fencedStore: fenced(store, "a", { append: 1 })
   };
   return { repository, store, run, ...fencedWrites };
 }
@@ -32,19 +33,21 @@ test("the executor writes while it holds the Run", async () => {
   await fencedRepository.transitionRun(run.id, "running");
 });
 
-test("a stopped executor can write nothing more: not state, not partial output, not the transcript", async () => {
+test("a stopped executor can write nothing more: not state, not partial output, not its ending, not the transcript", async () => {
   const { run, repository, store, fencedRepository, fencedStore } = await setup();
-  await repository.transitionRun(run.id, "cancelled", "stop");
+  await repository.endRun(run.id, endingOf("cancelled", "stop"));
   await assert.rejects(fencedRepository.savePartialOutput(run.id, "late"), RunFenced);
-  await assert.rejects(fencedRepository.transitionRun(run.id, "completed"), RunFenced);
+  await assert.rejects(fencedRepository.transitionRun(run.id, "running"), RunFenced);
+  await assert.rejects(fencedRepository.endRun(run.id, endingOf("completed")), RunFenced);
   await assert.rejects(fencedStore.append(answer), RunFenced);
   assert.deepEqual((await store.readConversation(conversationId)).map((message) => message.content), ["q"]);
   assert.equal((await repository.getRun(conversationId, run.id))!.status, "cancelled");
 });
 
 test("an executor whose Run another instance took over is fenced by its executor_id", async () => {
-  const { run, repository, fencedStore } = await setup();
+  const { run, repository, fencedStore, fencedRepository } = await setup();
   await repository.claimOrphanedRuns("b", -1);
   assert.equal((await repository.getRun(conversationId, run.id))!.executorId, "b");
   await assert.rejects(fencedStore.append(answer), RunFenced);
+  await assert.rejects(fencedRepository.endRun(run.id, endingOf("completed")), RunFenced);
 });

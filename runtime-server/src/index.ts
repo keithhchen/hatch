@@ -110,6 +110,8 @@ import { ChatServiceApi } from "./chat/serviceApi.js";
 import { ChatAssets, TextPartsReader, type PartsReader, type PreparedMessage } from "./chat/assets.js";
 import { attachmentToolDefinitions } from "./chat/attachmentTools.js";
 import { errorMessage, failRun, runModelTurn } from "./chat/modelTurn.js";
+import { publicRun } from "./chat/publicRun.js";
+import { ChatConversationReadModel } from "./chat/conversationReadModel.js";
 import { toolRegistry } from "./tools.js";
 import { MAX_BYTES as MAX_ASSET_BYTES } from "./assets/pipeline.js";
 import { RegistryConnectionDirectory } from "./chat/registryConnections.js";
@@ -1526,7 +1528,7 @@ async function handleConversationHttpRequest(
     const conversation = await requireBoundConversation(repository, binding, decodeURIComponent(historyMatch[1] ?? ""));
     if (!store) throw new ConversationHttpError(503, "history_unavailable", "Conversation history is unavailable.");
     const limit = parsePositiveInteger(url.searchParams.get("limit"), "limit", 100) ?? 50;
-    const page = await store.readVisibleConversationPage(conversation.id, {
+    const page = await new ChatConversationReadModel({ history: store, repository }).page(conversation.id, {
       limit,
       beforeCursor: url.searchParams.get("before_cursor") ?? undefined
     });
@@ -1555,7 +1557,7 @@ async function handleConversationHttpRequest(
       // Capture the recovery waterline before reading the projection. Events
       // committed while history is loading are then covered by incremental recovery.
       const snapshot = await repository.recoverySnapshot(conversation.id, []);
-      const page = await store.readVisibleConversationPage(conversation.id, { limit: 50 });
+      const page = await new ChatConversationReadModel({ history: store, repository }).page(conversation.id, { limit: 50 });
       const pageRuns = await Promise.all(page.run_ids.map((id) => repository.getRun(conversation.id, id)));
       const runs = new Map(snapshot.runs.map((run) => [run.id, run]));
       for (const run of pageRuns) if (run) runs.set(run.id, run);
@@ -1786,22 +1788,6 @@ function publicConversation(conversation: ConversationRecord): Record<string, un
     updated_at: conversation.updatedAt,
     version: conversation.version,
     ...(conversation.briefSnapshot ? { brief_snapshot: conversation.briefSnapshot } : {})
-  };
-}
-
-function publicRun(run: ConversationRunRecord): Record<string, unknown> {
-  return {
-    id: run.id,
-    client_message_id: run.clientMessageId,
-    ...(run.inputDigest ? { input_digest: run.inputDigest } : {}),
-    status: run.status,
-    corpus_digest: run.corpusDigest,
-    created_at: run.createdAt,
-    ...(run.startedAt ? { started_at: run.startedAt } : {}),
-    ...(run.completedAt ? { completed_at: run.completedAt } : {}),
-    ...(run.interruptedReason ? { interrupted_reason: run.interruptedReason } : {}),
-    steered_messages: run.steeredCount,
-    ...(run.partialOutput ? { partial_output: run.partialOutput } : {})
   };
 }
 
@@ -3014,7 +3000,7 @@ async function reconcileDeliveryAccountingOutbox(
   });
 }
 
-function sanitizeBoundHistory(messages: Awaited<ReturnType<RuntimeStore["readVisibleConversation"]>>, productId: string): Awaited<ReturnType<RuntimeStore["readVisibleConversation"]>> {
+function sanitizeBoundHistory<T extends Awaited<ReturnType<RuntimeStore["readVisibleConversation"]>>[number]>(messages: T[], productId: string): T[] {
   return messages.map((message) => ({
     ...message,
     ...(message.skill_events ? {

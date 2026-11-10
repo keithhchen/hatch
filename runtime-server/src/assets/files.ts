@@ -30,7 +30,7 @@ export class AttachmentFiles {
   constructor(private readonly repository: AssetRepository, private readonly blobs: AssetBlobs) {}
 
   /** Every asset as each message carried it in this scope, oldest first. */
-  attached(scope: AssetScope): Promise<AttachedAsset[]> { return this.repository.listAttached(scope); }
+  attached(scope: AssetScope, messageIds?: readonly string[]): Promise<AttachedAsset[]> { return this.repository.listAttached(scope, messageIds); }
 
   private async index(scope: AssetScope): Promise<Map<string, Entry[]>> {
     const byMessage = new Map<string, Asset[]>();

@@ -129,8 +129,8 @@ export class ChatAssets implements PartsReader {
   studioDesk(): AssetDesk { return new ChatBoundAssets(this.deps.pipeline, this.deps.blobs, { files: { writeManual: async () => undefined }, place: () => "" }); }
 
   /** What a conversation's messages carried, for history and for hosts that hand files on: the asset and the message it belongs to. */
-  async attachments(conversation: Pick<ConversationRecord, "id" | "ownerAccountId">): Promise<Array<{ asset: Asset; messageId: string }>> {
-    return this.deps.files.attached(assetScopeOf(conversation));
+  async attachments(conversation: Pick<ConversationRecord, "id" | "ownerAccountId">, messageIds?: readonly string[]): Promise<Array<{ asset: Asset; messageId: string }>> {
+    return this.deps.files.attached(assetScopeOf(conversation), messageIds);
   }
 
   /** The bytes of one of an asset's forms: the resized image, or the text a file or voice message was read as. */

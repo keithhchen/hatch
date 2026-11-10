@@ -19,7 +19,8 @@ import type { AssistantTask, TaskKind, TaskOrigin, TaskRepository } from "./task
 import type { AssistantChat, ReplySteps } from "./chat.js";
 import type { DeliveryRepository } from "./deliveries.js";
 import type { ExpertMaterials } from "./materials.js";
-import { RELAY_MARK, type InterviewDesk } from "./relay.js";
+import { RELAY_MARK, SYSTEM_MESSAGE_PREFIX, isSystemMessageId, type InterviewDesk } from "./relay.js";
+import { ChatError } from "../chat/principal.js";
 import type { AssistantStateRepository, Interview } from "./state.js";
 import type { AgentOverview, StudioOperations, WorkerKind } from "./studioTools.js";
 
@@ -179,6 +180,8 @@ export class AssistantService implements StudioOperations, InterviewDesk {
    * reuses, so a platform event delivered twice is one message. `system` is for what the Expert did without typing it, such as a button.
    */
   async hear(accountId: string, input: { id: string; source: ExpertSource; parts: ContentPart[]; messageRef?: string; system?: boolean; /** Someone the Expert authorized, not the Expert: where the Expert was last is unchanged. */ guest?: true }): Promise<SentMessage> {
+    // `sys:` ids are the Assistant's own to itself: a client's key cannot be one, or its message would be hidden as news.
+    if (!input.system && isSystemMessageId(input.id)) throw new ChatError("invalid_message_id", `A message id cannot start with ${SYSTEM_MESSAGE_PREFIX}.`, 400);
     if (!input.system && !input.guest) await this.deps.state.expertSpoke(accountId, { source: input.source, at: new Date().toISOString(), ...(input.messageRef ? { messageRef: input.messageRef } : {}) });
     const client = { client: input.source === "web" ? "web" as const : "im" as const };
     return input.system ? this.chat.sayAsSystem(accountId, textOf(input.parts), input.id).then(sent => sent) : this.chat.say(accountId, { id: input.id, parts: input.parts, client });
@@ -572,12 +575,13 @@ export class AssistantService implements StudioOperations, InterviewDesk {
   // ── Studio and channel surfaces ───────────────────────────────────────
 
   /** What the chat shows: what the Expert said and what the Assistant said. System messages stay out. */
-  async view(accountId: string): Promise<{ messages: Array<{ id: string; role: "expert" | "assistant"; text: string; at: string; images?: string[]; attachments?: NonNullable<PublicMessage["attachments"]>; /** What the Assistant did inside a reply, in order. */ steps?: ReplySteps }>; tasks: AssistantTask[]; running: boolean; runId?: string; /** Why the last turn failed, until the next one starts. */ failure?: RunFailure; interviewing: boolean }> {
-    const [lines, status] = await Promise.all([this.chat.shown(accountId), this.chat.status(accountId)]);
+  async view(accountId: string, options: { limit?: number; beforeCursor?: string } = {}): Promise<{ has_more: boolean; before_cursor?: string; messages: Array<{ id: string; role: "expert" | "assistant"; text: string; at: string; state?: "queued"; images?: string[]; attachments?: NonNullable<PublicMessage["attachments"]>; /** What the Assistant did inside a reply, in order. */ steps?: ReplySteps }>; tasks: AssistantTask[]; running: boolean; runId?: string; /** Why the last turn failed, until the next one starts. */ failure?: RunFailure; interviewing: boolean }> {
+    const [{ messages: lines, has_more, before_cursor }, status] = await Promise.all([this.chat.shown(accountId, options), this.chat.status(accountId)]);
     return {
+      has_more, ...(before_cursor ? { before_cursor } : {}),
       messages: lines.map(line => {
         const images = line.attachments?.filter(attachment => attachment.type === "image").map(attachment => `${attachment.asset_id}.jpg`);
-        return { id: line.id, role: line.role === "user" ? "expert" as const : "assistant" as const, text: line.text, at: line.created_at, ...(images?.length ? { images } : {}), ...(line.attachments?.length ? { attachments: line.attachments } : {}), ...(line.steps ? { steps: line.steps } : {}) };
+        return { id: line.id, role: line.role === "user" ? "expert" as const : "assistant" as const, text: line.text, at: line.created_at, ...(line.state ? { state: line.state } : {}), ...(images?.length ? { images } : {}), ...(line.attachments?.length ? { attachments: line.attachments } : {}), ...(line.steps ? { steps: line.steps } : {}) };
       }),
       tasks: await this.deps.tasks.open(accountId),
       running: status.state === "running", ...(status.runId ? { runId: status.runId } : {}),

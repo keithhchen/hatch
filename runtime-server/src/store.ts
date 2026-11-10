@@ -15,6 +15,7 @@ import {
   type PersistedContextAttachment
 } from "./protocol.js";
 import type { CompactionPhase, CompactionReason, CompactionTrigger } from "./compaction.js";
+import { RunFenced, type RunHold } from "./runHold.js";
 
 export type RunStatus = "queued" | "running" | "waiting_for_tool" | "compacting" | "completed" | "failed" | "cancelled" | "interrupted";
 
@@ -134,6 +135,8 @@ export type StoreEvent =
       conversation_id: string;
       run_id: string;
       client_message_id?: string;
+      /** A reply's stable id, `<run_id>:<n>`; a user message is known by its `client_message_id`. */
+      message_id?: string;
       message: ConversationMessage;
       finish_reason?: OutputFinishReason;
       visible_parts?: VisibleConversationPart[];
@@ -466,13 +469,21 @@ export class RuntimeStore {
     return this.root;
   }
 
-  async append(event: StoreEventInput): Promise<void> {
+  /** With `hold`, the append is refused, in the same commit that would make it, unless that executor still holds the event's Run. */
+  async append(event: StoreEventInput, hold?: RunHold): Promise<void> {
     assertCanonicalPersistedToolNames(event);
     const record: StoreEvent = {
       timestamp: new Date().toISOString(),
       ...event
     };
-    await this.localAuthority.transact(async () => ({ result: undefined, commit: { kind: "event", events: [record] } }));
+    await this.localAuthority.transact(async () => {
+      if (hold) {
+        const runId = "run_id" in record ? record.run_id : undefined;
+        const run = runId ? this.localAuthority.runs.get(runId) : undefined;
+        if (!run || run.executorId !== hold.heldBy || !["queued", "running", "waiting_for_tool", "compacting"].includes(run.status)) throw new RunFenced(runId ?? "unknown");
+      }
+      return { result: undefined, commit: { kind: "event", events: [record] } };
+    });
   }
 
   async close(): Promise<void> {
@@ -715,8 +726,8 @@ export class RuntimeStore {
           throw new Error(`Unsupported visible conversation role: ${role}`);
         }
         const message: VisibleConversationMessage = {
-          // A user message is known by the key its client sent it under.
-          ...(event.type === "conversation.model_message" && role === "user" && event.client_message_id ? { id: event.client_message_id } : {}),
+          // A message is known by the id it was stored under: its client's key, or `<run_id>:<n>` for a reply.
+          ...(persistedMessageId(event, role) ? { id: persistedMessageId(event, role) } : {}),
           run_id: event.run_id,
           role,
           content: event.type === "message.created"
@@ -824,6 +835,11 @@ export class RuntimeStore {
     return session;
   }
 
+}
+
+/** The id a visible message was stored under, when it was stored with one. */
+export function persistedMessageId(event: StoreEvent, role: "user" | "assistant"): string | undefined {
+  return event.type === "conversation.model_message" ? (role === "user" ? event.client_message_id : event.message_id) : undefined;
 }
 
 export function normalizePersistedStoreEvent(event: StoreEvent): StoreEvent {

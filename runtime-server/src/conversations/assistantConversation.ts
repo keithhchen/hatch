@@ -1,14 +1,16 @@
 import type { AssetDesk } from "./assets.js";
-import { page, type Conversation, type ConversationStatus, type PublicMessage, type SendInput, type Sent } from "./conversation.js";
+import { type Conversation, type ConversationStatus, type PublicMessage, type SendInput, type Sent } from "./conversation.js";
 
 /** The part of the Assistant an account-level conversation needs: its conversation on Chat, and where uploads for it go. */
 export interface AssistantHost {
   status(accountId: string): Promise<ConversationStatus>;
-  /** What the Expert and the Assistant said, oldest first. */
-  lines(accountId: string): Promise<PublicMessage[]>;
+  /** What the Expert and the Assistant said, oldest first: the latest `limit`, or the first `limit` after message `after`. */
+  lines(accountId: string, after?: string, limit?: number): Promise<PublicMessage[]>;
   /** Steers the running turn with the message or starts one, atomically, and says which Run took it. */
   send(accountId: string, input: SendInput): Promise<Sent>;
   stop(accountId: string): Promise<void>;
+  /** What the running turn has said so far. */
+  partial(accountId: string): Promise<string>;
   feedKey(accountId: string): string;
   /** The conversation's id, which is also the scope its attachments live in. */
   conversationId(accountId: string): string;
@@ -23,8 +25,8 @@ export class AssistantConversation implements Conversation {
   status(): Promise<ConversationStatus> { return this.assistant.status(this.accountId); }
 
   async messages(after?: string, limit?: number) {
-    const [status, lines] = await Promise.all([this.status(), this.assistant.lines(this.accountId)]);
-    return { status, messages: page(lines, after, limit) };
+    const [status, messages] = await Promise.all([this.status(), this.assistant.lines(this.accountId, after, limit)]);
+    return { status, messages };
   }
 
   send(input: SendInput): Promise<Sent> { return this.assistant.send(this.accountId, input); }
@@ -32,4 +34,6 @@ export class AssistantConversation implements Conversation {
   async feedKey(): Promise<string | undefined> { return this.assistant.feedKey(this.accountId); }
 
   stop(): Promise<void> { return this.assistant.stop(this.accountId); }
+
+  partial(): Promise<string> { return this.assistant.partial(this.accountId); }
 }

@@ -33,6 +33,11 @@ export interface EventLog {
   consistent<T>(key: string, read: (head: EventCursor) => Promise<T>): Promise<T>;
   /** Wakes `wake` when this process appends to `key`. Other processes' appends are found by reading. */
   onAppend(key: string, wake: () => void): Unsubscribe;
+  /**
+   * Events a conversation says as they happen and does not record, such as token deltas: pushed with no cursor of
+   * their own, so a reader that joins late gets what was said so far from the snapshot, not from here.
+   */
+  live?(key: string, push: (event: ConversationEvent) => void): Unsubscribe;
 }
 
 /** Single-process adapter. Only tests construct it: a Registry without a database has no event log. */

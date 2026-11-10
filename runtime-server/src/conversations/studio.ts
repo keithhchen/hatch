@@ -3,7 +3,6 @@ import type { AssetDesk, AssetShelf, Workshop } from "./assets.js";
 import { AttachedConversation } from "./attachedConversation.js";
 import { ConversationError, type Conversation } from "./conversation.js";
 import type { EventLog } from "./eventLog.js";
-import { IdempotentConversation, type MessageLedger } from "./ledger.js";
 import { productPlacement } from "./pipelineAssets.js";
 import { WorkerDirectory, type WorkerWorkspace } from "./workerConversation.js";
 
@@ -13,7 +12,6 @@ export type StudioDeps = {
   workspace(scope: { creatorId: string; productId: string; briefSpec?: unknown }, token: string): Promise<WorkerWorkspace>;
   assistant(): AssistantHost | undefined;
   eventLog: EventLog;
-  ledger: MessageLedger;
   /** Attachments for a conversation, over the files its workspace keeps. Without it, conversations take none. */
   assets?: (workshop: Workshop) => AssetDesk;
 };
@@ -26,7 +24,8 @@ export type Target = { conversation: Conversation; maxContent: number; accountId
 const NOT_FOUND = (code: string, message: string) => new ConversationError(404, code, message);
 
 /**
- * Finds the conversation a client addressed, for every transport. Each conversation comes back idempotent.
+ * Finds the conversation a client addressed, for every transport. A client's key is the message's id, and the conversation
+ * itself knows whether it already accepted it: the Assistant on Chat's acceptance, a worker from its own session.
  * Recording is not done here: every runtime, a Product's or the Assistant's, journals its Runs from the start.
  */
 export class Studio {
@@ -56,10 +55,10 @@ export class Studio {
     return this.shelved(worker, 100_000, accountId, conversationId, this.deps.assets?.({ files: workspace.store.backend, place: productPlacement }));
   }
 
-  /** A conversation that takes attachments when it has a desk, and is idempotent either way. */
+  /** A conversation that takes attachments when it has a desk. */
   private shelved(conversation: Conversation, maxContent: number, accountId: string, conversationId: string, desk?: AssetDesk): Target {
     const assets = desk && { desk, scope: { kind: "account" as const, accountId, conversationId } };
-    return { conversation: new IdempotentConversation(assets ? new AttachedConversation(conversation, assets) : conversation, this.deps.ledger, conversationId), maxContent, accountId, ...(assets ? { assets } : {}) };
+    return { conversation: assets ? new AttachedConversation(conversation, assets) : conversation, maxContent, accountId, ...(assets ? { assets } : {}) };
   }
 
   private assistantHost(): AssistantHost {

@@ -2,11 +2,13 @@ import { Pool, type QueryResultRow } from "pg";
 import { PostgresConversationRepository, ConversationRepositoryError, assertConversationBinding,
   submissionEvents, type AcceptSubmissionInput, type AcceptedSubmission, type AlsoCommit } from "./conversationRepository.js";
 import type { ConversationMessage, PersistedContextAttachment } from "./protocol.js";
+import { RunFenced, type RunHold } from "./runHold.js";
 import { historyBoundary, historyCursor, historyLimit, historyMessages,
   type ConversationHistoryOptions, type ConversationHistoryPage } from "./conversationHistory.js";
 import {
   assertCanonicalPersistedToolNames,
   normalizePersistedStoreEvent,
+  persistedMessageId,
   RuntimeStore,
   type SubmissionReceipt,
   type StoreEvent,
@@ -100,8 +102,19 @@ ON CONFLICT (scope_key) DO UPDATE SET
   total_bytes = GREATEST(hatch_conversation_usage.total_bytes, EXCLUDED.total_bytes);
 `;
 
-const INSERT_EVENT_SQL = `
-WITH requested AS (
+/**
+ * $6 is the executor that makes the write, when the write is fenced: `held` locks the Run's row for the rest of
+ * the statement, so a stop either committed first (nothing is written) or waits for this insert to commit.
+ */
+const HELD_RUN_SQL = `SELECT 1 AS ok FROM hatch_conversation_runs
+  WHERE id = $2 AND executor_id = $6::text AND status IN ('queued', 'running', 'waiting_for_tool', 'compacting')
+  FOR SHARE`;
+/** An unfenced write never touches the Runs table, which a bare store may not have. */
+const NO_HOLD_SQL = "SELECT 1 AS ok WHERE false";
+const insertEventSql = (held: boolean): string => `
+WITH held AS (
+  ${held ? HELD_RUN_SQL : NO_HOLD_SQL}
+), requested AS (
   SELECT scope_key, event_count, total_bytes, max_events, max_bytes
   FROM jsonb_to_recordset($5::jsonb) AS limits(
     scope_key TEXT,
@@ -110,6 +123,7 @@ WITH requested AS (
     max_events BIGINT,
     max_bytes BIGINT
   )
+  WHERE $6::text IS NULL OR EXISTS (SELECT 1 FROM held)
 ), reserved AS (
   INSERT INTO hatch_conversation_usage (scope_key, event_count, total_bytes)
   SELECT scope_key, event_count, total_bytes
@@ -136,7 +150,7 @@ INSERT INTO hatch_conversation_events
   (conversation_id, run_id, event_type, payload)
 SELECT $1, $2, $3, $4::jsonb
 FROM quota_assertion
-WHERE admitted = 1
+WHERE admitted = 1 AND ($6::text IS NULL OR EXISTS (SELECT 1 FROM held))
 RETURNING id
 `;
 
@@ -422,7 +436,7 @@ export class PostgresStore extends RuntimeStore {
     }
   }
 
-  async append(event: PostgresStoreEventInput): Promise<void> {
+  async append(event: PostgresStoreEventInput, hold?: RunHold): Promise<void> {
     assertCanonicalPersistedToolNames(event);
     const record = {
       ...event,
@@ -433,7 +447,7 @@ export class PostgresStore extends RuntimeStore {
     const previous = this.appendChains.get(serializationKey) ?? Promise.resolve();
     const write = previous.then(async () => {
       await this.ensureSchema();
-      await this.appendOn({ query: (text, values) => this.query(text, values) }, record);
+      await this.appendOn({ query: (text, values) => this.query(text, values) }, record, hold);
     });
     const tail = write.catch(() => undefined);
     this.appendChains.set(serializationKey, tail);
@@ -446,7 +460,7 @@ export class PostgresStore extends RuntimeStore {
   }
 
   /** Appends on the caller's connection, so an event commits in the caller's transaction. */
-  async appendOn(client: PostgresQueryExecutor, record: StoreEvent): Promise<void> {
+  async appendOn(client: PostgresQueryExecutor, record: StoreEvent, hold?: RunHold): Promise<void> {
       const conversationId = optionalStringField(record, "conversation_id");
       const payload = JSON.stringify(record);
       const payloadBytes = Buffer.byteLength(payload, "utf8");
@@ -478,18 +492,20 @@ export class PostgresStore extends RuntimeStore {
       }
       let result: { rows: QueryResultRow[] };
       try {
-        result = await client.query<QueryResultRow>(INSERT_EVENT_SQL, [
+        result = await client.query<QueryResultRow>(insertEventSql(Boolean(hold)), [
           conversationId,
           optionalStringField(record, "run_id"),
           record.type,
           payload,
-          JSON.stringify(reservations)
+          JSON.stringify(reservations),
+          hold?.heldBy ?? null
         ]);
       } catch (error) {
         if (isQuotaAssertionFailure(error)) throw storageQuotaError(conversationId);
         throw error;
       }
       if (result.rows.length === 0) {
+        if (hold) throw new RunFenced(optionalStringField(record, "run_id") ?? "unknown");
         throw storageQuotaError(conversationId);
       }
   }
@@ -740,8 +756,8 @@ export class PostgresStore extends RuntimeStore {
           throw new Error(`Unsupported visible conversation role: ${role}`);
         }
         const message: VisibleConversationMessage = {
-          // A user message is known by the key its client sent it under.
-          ...(event.type === "conversation.model_message" && role === "user" && event.client_message_id ? { id: event.client_message_id } : {}),
+          // A message is known by the id it was stored under: its client's key, or `<run_id>:<n>` for a reply.
+          ...(persistedMessageId(event, role) ? { id: persistedMessageId(event, role) } : {}),
           run_id: event.run_id,
           role,
           content: event.type === "message.created"

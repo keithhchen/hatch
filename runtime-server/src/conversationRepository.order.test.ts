@@ -1,3 +1,8 @@
+import { PostgresStore } from "./postgresStore.js";
+import type { PostgresConversationRepository as PgRepository } from "./conversationRepository.js";
+/** A repository whose Run endings can write their replies: the transcript store on the same pool. */
+const withStore = async (repository: PgRepository, pool: Pool): Promise<PgRepository> => { const store = new PostgresStore(pool); await store.migrate(); repository.bindSubmissionStore(store); return repository; };
+import { endingOf } from "./testSupport.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -48,7 +53,7 @@ for (const backend of ["memory", "file", "postgres"] as const) {
     if (backend !== "postgres") t.mock.timers.enable({ apis: ["Date"], now: new Date(oldTime) });
     const exercise = async (pool?: Pool) => {
       const root = backend === "file" ? await mkdtemp(path.join(os.tmpdir(), "conversation-order-")) : undefined;
-      let repository: ConversationRepository = pool ? new PostgresConversationRepository(pool)
+      let repository: ConversationRepository = pool ? await withStore(new PostgresConversationRepository(pool), pool)
         : root ? new FileConversationRepository(root) : new InMemoryConversationRepository();
       try {
         const createAt = async (id: string, createdAt: string, scope = binding) => {
@@ -88,7 +93,7 @@ for (const backend of ["memory", "file", "postgres"] as const) {
         });
         assert.deepEqual(await ids(), expected);
         for (const status of ["running", "waiting_for_tool", "completed"] as const) {
-          await repository.transitionRun("run-old", status);
+          await (status === "completed" ? repository.endRun("run-old", endingOf(status)) : repository.transitionRun("run-old", status));
           assert.deepEqual(await ids(), expected);
         }
         await repository.appendEvent({
