@@ -100,9 +100,10 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     reasoning: true,
     thinkingLevel: "low",
     normalizeEmptyToolCallContent: false,
-    // Gemini Pro sends nothing until its thinking is done (thought summaries arrive as one chunk, not a stream), so the
-    // first event is as late as the thinking is long. Measured 4-11s at up to 64k tokens, real turns up to 38s, one stall past 60s.
-    stall: { firstEventMs: 120_000, silenceMs: 60_000 }
+    // Real Assistant path, about 100 calls: first event 3-15s (thought summaries arrive as one chunk, so the first event ends the
+    // thinking). Three simultaneous first calls once got nothing for 120s+ while a new call at that moment answered in 11s: a hung
+    // request does not recover, so wait 45s and ask again instead of waiting longer.
+    stall: { firstEventMs: 45_000, silenceMs: 60_000, restarts: 2 }
   }
 };
 
