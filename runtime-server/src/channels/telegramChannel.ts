@@ -9,6 +9,7 @@ type TelegramUpdate = {
     entities?: Array<{ type: string; offset: number; length: number }>; caption_entities?: Array<{ type: string; offset: number; length: number }>;
     reply_to_message?: { from?: { username?: string; is_bot?: boolean } };
     document?: { file_id: string; file_name?: string; file_size?: number }; photo?: Array<{ file_id: string; file_size?: number }>;
+    voice?: { file_id: string; file_size?: number }; audio?: { file_id: string; file_name?: string; file_size?: number };
   };
   callback_query?: { id: string; from: { id: number }; data?: string; message?: { message_id: number; chat: { id: number; type?: string } } };
 };
@@ -52,8 +53,11 @@ export class TelegramChannel implements ChannelAdapter {
     // A photo comes in several sizes, smallest first. The largest is already compressed.
     const photo = message.photo?.at(-1);
     const document = message.document;
-    const file = photo ? { ref: photo.file_id, name: "photo.jpg", ...(photo.file_size ? { size: photo.file_size } : {}) }
-      : document ? { ref: document.file_id, name: document.file_name ?? "file", ...(document.file_size ? { size: document.file_size } : {}) } : undefined;
+    const media = photo ? { ...photo, name: "photo.jpg" }
+      : message.voice ? { ...message.voice, name: "voice.ogg" }
+      : message.audio ? { ...message.audio, name: message.audio.file_name ?? "audio" }
+      : document ? { ...document, name: document.file_name ?? "file" } : undefined;
+    const file = media ? { ref: media.file_id, name: media.name, ...(media.file_size ? { size: media.file_size } : {}) } : undefined;
     const body = (message.text?.replace(/^\/start\s+/, "") ?? message.caption ?? "");
     const text = (group ? body.replace(this.mention, "") : body).trim();
     const address = { threadId: String(message.chat.id), senderId: String(message.from?.id ?? message.chat.id) };
