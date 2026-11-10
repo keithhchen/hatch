@@ -30,6 +30,11 @@ export class OwnApps {
     return sealed ? { scope: own!.scope, credentials: this.deps.seal.open(sealed) } : undefined;
   }
 
+  /** The handle of the Product's own bot, when it has one. */
+  async username(accountId: string, kind: ChannelKind, productId: string): Promise<string | undefined> {
+    return (await this.current(accountId, kind, { kind: "product", productId }))?.credentials.username;
+  }
+
   async save(accountId: string, kind: ChannelKind, productId: string, body: Record<string, unknown>): Promise<void> {
     const form = this.form(kind);
     if (!await this.deps.ownsProduct(accountId, productId)) throw failure(404, "product_not_found", "Product was not found.");

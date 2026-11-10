@@ -1002,6 +1002,8 @@ test("Saving a bot token proves it, points the webhook at that bot, and the Prod
   assert.deepEqual(env.api.calls.map(call => call.method), ["getMe", "setWebhook"]);
   const bot = (await botOf(env, owner, "p1"))!;
   assert.equal(bot.audience, "public");
+  assert.equal(await env.apps.username(owner, "telegram", "p1"), "shop_bot");
+  assert.equal(await env.apps.username(owner, "telegram", "p2"), undefined, "a Product without its own bot has none");
   const hook = env.api.calls[1]!.body;
   assert.equal(hook.url, `https://site.test/v1/channels/telegram/${bot.scope}/webhook`);
   assert.match(hook.secret_token, /^[0-9a-f]{48}$/);
