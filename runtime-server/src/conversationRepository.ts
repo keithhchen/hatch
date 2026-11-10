@@ -141,12 +141,16 @@ export type CommitCompactionInput = {
   journal: Record<string, unknown>;
 };
 
+/** Every type the journal records. A client that reads the journal knows this list (packages/chat/src/domain/journal-events.js); a test holds them equal. */
+export const JOURNAL_EVENT_TYPES = ["conversation.created", "conversation.updated", "run.created", "run.state", "message.created", "message.consumed", "compaction.started", "compaction.completed", "compaction.aborted"] as const;
+export type JournalEventType = (typeof JOURNAL_EVENT_TYPES)[number];
+
 export type ConversationJournalEvent = {
   /** Monotonically increasing within one repository. */
   cursor: number;
   conversationId: string;
   runId?: string;
-  type: "conversation.created" | "conversation.updated" | "run.created" | "run.state" | "message.created" | "message.consumed" | "compaction.started" | "compaction.completed" | "compaction.aborted";
+  type: JournalEventType;
   payload: Record<string, unknown>;
   createdAt: string;
 };

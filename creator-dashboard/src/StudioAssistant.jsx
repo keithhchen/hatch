@@ -1,136 +1,71 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Paperclip } from "lucide-react";
+import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Button, InlineAlert } from "@hatch/ui";
-import { ChatTimeline } from "@hatch/chat";
-import { friendlyError, LoadingState, mutationKey } from "./studioShellKit.jsx";
-import { subscribeFactoryEvents } from "./factoryEvents.js";
-import { BrowserImageAttachments, base64Of, browserDictation } from "./webChatClient.js";
-import { Composer, ImageViewer, TimelineEntries } from "@hatch/chat/react";
+import { ConversationController } from "@hatch/chat";
+import { ChatView, useChatState } from "@hatch/chat/react";
+import { friendlyError, mutationKey } from "./studioShellKit.jsx";
+import { UnavailableToolExecutor, browserDictation } from "./webChatClient.js";
+import { ASSISTANT_CONVERSATION, SessionPendingStore, StudioAssistantTransport, StudioAttachments } from "./studioAssistantTransport.js";
 import { useLocale } from "./locale.jsx";
 import { webChatErrorText, webChatT } from "./webChatI18n.js";
 import "./webChat.css";
 import { ChannelBindings } from "./ChannelBindings.jsx";
-import { MessageKeys, unsaved } from "./assistantPending.js";
 
 const ROOT = "/v1/creator/assistant";
 const CONNECTIONS = "/v1/creator/connections";
 const CHANNEL_NAMES = { telegram: "Telegram", line: "LINE", lark: "Lark", feishu: "飞书", wecom: "WeCom", wechatkf: "WeChat", slack: "Slack", imessage: "iMessage" };
 // Thinking and tool steps, as Product web chat shows them.
 const STEP_KINDS = ["thinking", "tool"];
-const NO_APPROVALS = { decisions: {}, decide: null };
 const REVIEW_ACTIONS = { content: ["sxaContentYes", "sxaContentNo"], change: ["sxaChangeYes", "sxaChangeNo"] };
+const ATTACHABLE = "image/*,.txt,.md,.docx,.pptx,.xlsx,.pdf";
 
-const isChip = attachment => attachment.type === "file";
-const sizeOf = bytes => bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-
-/** A reply as Product chat draws it: words and runs of steps in the order they happened. */
-function Reply({ timeline, live, t, errorText }) {
-  return <article className="web-chat__message web-chat__message--assistant sxa-reply"><div className="web-chat__message-body">
-    <TimelineEntries timeline={timeline} live={live} activityKinds={STEP_KINDS} t={t} errorText={errorText} loadToolDetail={undefined} approvals={NO_APPROVALS} />
-  </div></article>;
+/** The Assistant's conversation on the shared chat: what the Expert sends goes out through the transport, the replies come back through it. */
+function openAssistant(request, describeError) {
+  const transport = new StudioAssistantTransport(request);
+  const controller = new ConversationController({
+    transport, attachments: new StudioAttachments(request), tools: new UnavailableToolExecutor(),
+    pendingStore: new SessionPendingStore(), draftScope: "studio-assistant", describeError,
+    // The page keeps listening for as long as it is open; the delay between attempts is capped.
+    reconnectAttempts: Number.POSITIVE_INFINITY
+  });
+  controller.open(ASSISTANT_CONVERSATION);
+  return { transport, controller, dictate: browserDictation(request) };
 }
 
 /** One assistant per Expert: a conversation and the things that need them. */
 export function StudioAssistant({ request, t }) {
-  const [view, setView] = useState(null);
-  const [draft, setDraft] = useState("");
-  const [files, setFiles] = useState([]);
-  const [live, setLive] = useState(null);
-  const liveRef = useRef(new ChatTimeline());
   const { locale } = useLocale();
   const chatT = useCallback((key, values) => webChatT(locale, key, values), [locale]);
-  const errorText = useCallback(cause => webChatErrorText(cause, locale), [locale]);
-  const [pendingLines, setPendingLines] = useState([]);
-  // The server sends the newest page; older ones are asked for, one page before what is shown.
-  const [earlier, setEarlier] = useState({ messages: [], cursor: undefined });
+  const latest = useRef({});
+  latest.current = { t, locale };
+  const errorText = useCallback(cause => cause?.status ? friendlyError(cause, latest.current.t) : webChatErrorText(cause, latest.current.locale), []);
+  const [assistant, setAssistant] = useState(null);
+  useEffect(() => {
+    const opened = openAssistant(request, errorText);
+    setAssistant(opened);
+    return () => opened.controller.dispose();
+  }, [request, errorText]);
+  if (!assistant) return null;
+  return <Assistant {...assistant} request={request} t={t} chatT={chatT} errorText={errorText} />;
+}
+
+function Assistant({ transport, controller, dictate, request, t, chatT, errorText }) {
+  const view = useSyncExternalStore(transport.subscribe, transport.getView);
+  const { connection, activeRun, error: chatError } = useChatState(controller);
+  const [wasOpen, setWasOpen] = useState(false);
   const [error, setError] = useState("");
   const [larkForm, setLarkForm] = useState(false);
-  const dockRef = useRef(null);
-  const endRef = useRef(null);
-  const follow = useRef(true);
-  const send = useCallback((path, body, key = mutationKey()) => request(path, { method: "POST", headers: { "idempotency-key": key }, body: JSON.stringify(body ?? {}) }), [request]);
-  // The id of a message is minted once, when the user sends it, and a retry of the same words reuses it: the server stores it once.
-  const keys = useRef(new MessageKeys(mutationKey));
-  const refresh = useCallback(() => {
-    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    return request(`${ROOT}?tz=${encodeURIComponent(timezone)}`).then(value => { setView(value); setPendingLines(lines => unsaved(lines, value.messages)); setError(""); if (!value.running) { liveRef.current.reset(); setLive(null); } }).catch(cause => setError(friendlyError(cause, t)));
-  }, [request, t]);
+  const chatRef = useRef(null);
+  useEffect(() => { if (connection === "open") setWasOpen(true); }, [connection]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
-  useEffect(() => subscribeFactoryEvents({
-    url: `${ROOT}/events`,
-    onOpen: () => { void refresh(); },
-    onError: () => setError(t("sxaConnectionLost")),
-    onMessage: event => {
-      const value = JSON.parse(event.data);
-      const timeline = liveRef.current;
-      const show = entries => setLive(entries.length ? entries : null);
-      if (value.type === "delta") { show(timeline.appendText(value.text ?? "")); return; }
-      if (value.type === "thinking" && !timeline.activeThinking.has(value.contentIndex)) { show(timeline.startThinking(value.contentIndex)); return; }
-      if (value.type === "thinking_delta" && timeline.activeThinking.has(value.contentIndex)) { show(timeline.appendThinking(value.contentIndex, value.delta)); return; }
-      if (value.type === "thinking_end" && timeline.activeThinking.has(value.contentIndex)) { show(timeline.finishThinking(value.contentIndex, value.content)); return; }
-      if (value.type === "tool" || value.type === "tool_end") {
-        show(timeline.upsertTool({ tool_call_id: value.id, name: value.name, activity_message: value.activity, status: value.type === "tool" ? "requested" : value.isError ? "failed" : "completed" }));
-        return;
-      }
-      // The live reply gives way to the saved one only once the saved one is on the page.
-      if (value.type === "message_end" || value.type === "assistant") { void refresh().then(() => show(timeline.reset())); return; }
-      if (value.type === "message" || value.type === "state" || value.type === "compacting") void refresh();
-    },
-  }), [refresh, t]);
-
-  useEffect(() => {
-    const track = () => { if (endRef.current) follow.current = endRef.current.getBoundingClientRect().top - window.innerHeight < 120; };
-    window.addEventListener("scroll", track, { passive: true });
-    return () => window.removeEventListener("scroll", track);
-  }, []);
-  // Instant, not the page's smooth scrolling: a new smooth scroll on every delta restarts the previous one.
-  useEffect(() => { if (follow.current) endRef.current?.scrollIntoView?.({ block: "end", behavior: "instant" }); }, [view?.messages?.length, live, pendingLines.length]);
-
-  const submit = async event => {
-    event.preventDefault();
-    const content = draft.trim();
-    const staged = files;
-    if (!content && !staged.length) return;
-    setDraft("");
-    setFiles([]);
-    follow.current = true;
-    const shown = content || staged.map(file => file.name).join(", ");
-    const words = `${content}\n${staged.map(file => `${file.name}:${file.size}`).join(",")}`;
-    const key = keys.current.keyFor(words);
-    // Kept until the saved history holds this id: a message sent into a running reply is not in history until the reply takes it up.
-    setPendingLines(lines => lines.some(line => line.id === key) ? lines : [...lines, { id: key, text: shown }]);
-    try {
-      // Upload first, then one message whose parts are the text and the files.
-      const attachments = [];
-      for (const file of staged) attachments.push(await upload(file));
-      await send(`${ROOT}/messages`, { content, attachments }, key);
-      keys.current.sent();
-    } catch (cause) { setError(friendlyError(cause, t)); setDraft(content); setFiles(staged); setPendingLines(lines => lines.filter(line => line.id !== key)); }
-  };
-  const loadEarlier = () => request(`${ROOT}?before_cursor=${encodeURIComponent(shownCursor)}`)
-    .then(page => setEarlier(current => ({ messages: [...page.messages, ...current.messages], cursor: page.before_cursor ?? null })))
-    .catch(cause => setError(friendlyError(cause, t)));
+  const post = useCallback((path, body) => request(path, { method: "POST", headers: { "idempotency-key": mutationKey() }, body: JSON.stringify(body ?? {}) }), [request]);
+  const refresh = () => controller.refresh(ASSISTANT_CONVERSATION).catch(cause => setError(friendlyError(cause, t)));
   const act = async (task, action) => {
-    try { await send(`${ROOT}/tasks/${task.id}/${action}`); await refresh(); }
+    try { await post(`${ROOT}/tasks/${task.id}/${action}`); await refresh(); }
     catch (cause) { setError(friendlyError(cause, t)); }
   };
-  const upload = async file => {
-    const ready = file.type.startsWith("image/") ? await BrowserImageAttachments.compress(file) : file;
-    const bytes = new Uint8Array(await ready.arrayBuffer());
-    const { asset_id, type } = await send(`${ROOT}/files`, { name: ready.name, base64: base64Of(bytes) });
-    return { asset_id, type };
-  };
-  // What the shared composer asks of its controller; files are chips until sent, and a Run cannot be stopped from here.
-  const dictate = useMemo(() => browserDictation(request), [request]);
-  const composer = useMemo(() => ({
-    setDraft, cancel: () => undefined, fail: cause => setError(friendlyError(cause, t)),
-    addImages: added => setFiles(current => [...current, ...added]),
-    removeImage: file => setFiles(current => current.filter(item => item !== file)),
-  }), [t]);
   const saveLark = async event => {
     event.preventDefault();
-    try { await send(`${CONNECTIONS}/lark/credentials`, Object.fromEntries(new FormData(event.currentTarget))); setLarkForm(false); await refresh(); }
+    try { await post(`${CONNECTIONS}/lark/credentials`, Object.fromEntries(new FormData(event.currentTarget))); setLarkForm(false); await refresh(); }
     catch (cause) { setError(friendlyError(cause, t)); }
   };
   const disconnectChannel = async kind => {
@@ -138,36 +73,24 @@ export function StudioAssistant({ request, t }) {
     catch (cause) { setError(friendlyError(cause, t)); }
   };
 
-  if (!view && !error) return <LoadingState t={t} />;
+  const identity = { creatorName: t("sxNavAssistant"), productName: t("sxNavAssistant") };
   const needs = (view?.tasks ?? []).filter(task => task.status === "needs_you");
-  const shownCursor = earlier.cursor === undefined ? view?.before_cursor : earlier.cursor ?? undefined;
-  const lines = [...earlier.messages, ...(view?.messages ?? [])];
   const ownApps = (view?.channels ?? []).filter(channel => channel.own_app && CHANNEL_NAMES[channel.kind] && (channel.linked || channel.available));
   return <div className="sxa">
-    <section className="sxa-chat web-chat web-chat--embedded" aria-label={t("sxNavAssistant")}>
+    <section className="sxa-chat web-chat web-chat--embedded" aria-label={t("sxNavAssistant")} ref={chatRef}>
       <h1 className="sxa-title">{t("sxNavAssistant")}</h1>
-      <div className="sxa-log" aria-live="polite">
-        {shownCursor ? <Button variant="secondary" type="button" onClick={loadEarlier}>{t("sxaEarlier")}</Button> : null}
-        {!lines.length && !pendingLines.length && !live ? <p className="sxa-empty">{t("sxaEmpty")}</p> : null}
-        {lines.map((line, index) => line.role === "assistant"
-          ? <Reply key={`${line.at}-${index}`} timeline={ChatTimeline.fromHistory({ content: line.text, run_id: line.id.split(":")[0], ...line.steps })} t={chatT} errorText={errorText} />
-          : <div key={`${line.at}-${index}`} className={`sxa-line sxa-line--${line.role}`}>
-          {line.images?.map(file => <ImageViewer key={file} src={`${ROOT}/images/${file}`} alt="" title={t("sxaImage")} closeLabel={t("sxaImageClose")} viewLabel={t("sxaImageView")}>
-            <img className="sxa-image" alt="" src={`${ROOT}/images/${file}`} />
-          </ImageViewer>)}
-          {line.text ? <p>{line.text}</p> : null}
-          {line.attachments?.some(isChip) ? <div className="web-chat__attachments">{line.attachments.filter(isChip).map(file => <span key={file.asset_id}><Paperclip aria-hidden="true" />{file.name}{file.bytes ? ` · ${sizeOf(file.bytes)}` : ""}</span>)}</div> : null}
-        </div>)}
-        {pendingLines.map(line => <p key={line.id} className="sxa-line sxa-line--expert">{line.text}</p>)}
-        {live ? <Reply timeline={live} live t={chatT} errorText={errorText} /> : null}
-        <div ref={endRef} />
-      </div>
-      {view?.failure && !live ? <InlineAlert tone="error">{view.failure.message}</InlineAlert> : null}
-      {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
-      <div className="sxa-dock" ref={dockRef}><Composer controller={composer} state={{ draft, images: files, activeRun: null, messages: lines, error }} agentName={t("sxNavAssistant")} t={chatT} accept="image/*,.txt,.md,.docx,.pptx,.xlsx,.pdf" onSend={() => submit({ preventDefault() {} })} dictate={dictate} /></div>
+      <ChatView controller={controller} identity={identity} agentName={t("sxNavAssistant")} t={chatT} errorText={errorText}
+        attachments={controller.attachments} activityKinds={STEP_KINDS} dictate={dictate} accept={ATTACHABLE} onNewConversation={() => undefined}
+        empty={<p className="sxa-empty">{t("sxaEmpty")}</p>}
+        dockAccessory={<>
+          {wasOpen && connection !== "open" ? <InlineAlert tone="error">{t("sxaConnectionLost")}</InlineAlert> : null}
+          {view?.failure && !activeRun && !chatError ? <InlineAlert tone="error">{view.failure.message}</InlineAlert> : null}
+          {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
+        </>} />
     </section>
     <aside className="sxa-side">
-      <h2>{t("sxaNeedsYou")}</h2>
+      <h2>{t("sxaReachMe")}</h2>
+      <ChannelBindings request={request} t={t} />
       {needs.length ? <ul className="sxa-needs">
         {needs.map(task => <li key={task.id} className="sxa-need">
           <span className="sxa-need__label">{t(task.needs === "review" ? "sxaNeedReview" : task.needs === "answer" ? "sxaNeedAnswer" : "sxaNeedBlocked")}</span>
@@ -177,11 +100,10 @@ export function StudioAssistant({ request, t }) {
             <Button className="web-btn-yolk" type="button" onClick={() => act(task, "approve")}>{t(REVIEW_ACTIONS[task.kind][0])}</Button>
             <Button variant="secondary" type="button" onClick={() => act(task, "decline")}>{t(REVIEW_ACTIONS[task.kind][1])}</Button>
           </div> : null}
-          {task.needs === "answer" ? <Button variant="secondary" type="button" onClick={() => dockRef.current?.querySelector("textarea")?.focus()}>{t("sxaAnswerHere")}</Button> : null}
+          {task.needs === "answer" ? <Button variant="secondary" type="button" onClick={() => chatRef.current?.querySelector("textarea")?.focus()}>{t("sxaAnswerHere")}</Button> : null}
           {task.needs === "blocked" ? <Button variant="secondary" type="button" onClick={() => act(task, "decline")}>{t("sxaDismiss")}</Button> : null}
         </li>)}
-      </ul> : <p className="sxa-empty">{t("sxaNothingNeeded")}</p>}
-      <ChannelBindings request={request} t={t} />
+      </ul> : null}
       {ownApps.length ? <div className="sxa-channels">
         {ownApps.map(channel => <div className="sxa-channel" key={channel.kind}>
           <div className="sxa-channel__row">

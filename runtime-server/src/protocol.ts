@@ -571,6 +571,8 @@ export type MessageAccepted = {
   conversation_id: string;
   run_id: string;
   client_message_id: string;
+  /** Whether the message started the Run, joined the running one (queued until the Run takes it up), or was already accepted. */
+  outcome?: "started" | "steered" | "replayed";
 };
 
 export type CompactionEvent = {

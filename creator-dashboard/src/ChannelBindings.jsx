@@ -5,7 +5,7 @@ import { friendlyError, mutationKey } from "./studioShellKit.jsx";
 import { TelegramBot, TelegramPeople } from "./TelegramBot.jsx";
 
 const CONNECTIONS = "/v1/creator/connections";
-const NAMES = { telegram: "Telegram", line: "LINE", lark: "Lark", imessage: "iMessage" };
+const NAMES = { telegram: "Telegram", line: "LINE", whatsapp: "WhatsApp", discord: "Discord", lark: "Lark", imessage: "iMessage" };
 const ICONS = { telegram: Send };
 const WAITING_MS = 2000;
 const IDLE_MS = 10000;

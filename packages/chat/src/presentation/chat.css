@@ -63,6 +63,8 @@
 .web-chat__bubble { max-width: 100%; padding: 12px 16px; border-radius: 22px; }
 .web-chat__message--user .web-chat__bubble { padding: 9px 15px; border-radius: 18px; color: var(--web-paper); background: var(--chat-ink); font-size: 15px; line-height: 1.55; }
 .web-chat__message--user .web-chat__bubble p { margin: 0; }
+/* A message not yet read by the Assistant: sent, or waiting for the running reply to take it up. */
+.web-chat__message--sending .web-chat__bubble, .web-chat__message--queued .web-chat__bubble { opacity: 0.6; }
 .web-chat__message--assistant .web-chat__bubble { padding: 2px 0 0; border-radius: 0; color: var(--chat-ink); background: transparent; }
 .web-chat__message--assistant .web-chat__bubble.web-chat__content { padding: 2px 0 0; font-size: 16px; line-height: 1.75; }
 

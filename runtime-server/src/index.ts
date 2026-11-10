@@ -2549,7 +2549,7 @@ async function handleRuntimeSocket(
             }, submission.signal);
             binding = current;
             if (accepted.outcome === "replayed") {
-              await send({ type: "message.accepted", conversation_id: conversation.publicId, run_id: accepted.run.id, client_message_id: accepted.clientMessageId });
+              await send({ type: "message.accepted", conversation_id: conversation.publicId, run_id: accepted.run.id, client_message_id: accepted.clientMessageId, outcome: accepted.outcome });
               await send({ type: "turn.state", run_id: accepted.run.id, status: accepted.run.status, reason: "Idempotent client message replay" });
             }
           } catch (error) {

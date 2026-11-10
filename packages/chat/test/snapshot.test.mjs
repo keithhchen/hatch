@@ -9,6 +9,7 @@ import {
   validateHistoryPage,
   validateSnapshotPage
 } from "../src/domain/snapshot.js";
+import { JOURNAL_EVENT_TYPES } from "../src/domain/journal-events.js";
 
 function message(overrides = {}) {
   return {
@@ -137,4 +138,12 @@ test("an active run missing from the page is read and included", async () => {
   const included = await includeActiveConversationRun(snapshot, "run_a", async id => ({ id, status: "running" }));
   assert.deepEqual(included.runs.map(run => run.id), ["run_a", "run_b"]);
   await assert.rejects(includeActiveConversationRun(snapshot, "run_a", async () => ({ id: "run_c", status: "running" })));
+});
+
+test("a drain holding every event type the server journals does not throw", async () => {
+  const types = ["conversation.created", "conversation.updated", "run.created", "run.state", "message.created", "message.consumed", "compaction.started", "compaction.completed", "compaction.aborted"];
+  const events = types.map((type, index) => ({ cursor: index + 1, type, run_id: "run_a", payload: {} }));
+  const read = async () => ({ events, runs: [{ id: "run_a" }], cursor: 9, through_cursor: 9, has_more: false });
+  assert.equal(await drainConversationJournal(read, 0), 9);
+  assert.deepEqual([...JOURNAL_EVENT_TYPES], types);
 });
