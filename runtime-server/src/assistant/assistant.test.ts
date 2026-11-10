@@ -234,6 +234,7 @@ test("The Assistant's build runs the Product's builder, which cannot go live", a
     worker: context => { toolNames.push((context.tools ?? []).map(tool => tool.name)); return { text: "构建完成" }; },
   });
   try {
+    await env.productStore.update((await env.productStore.create("voice")).id, session => { session.todos = [{ title: "选址的判断", status: "completed" }]; });
     await env.say("熟客店菜单可以长");
     await waitFor(async () => (await env.productStore.list()).some(session => session.role === "generation") && (await env.tasks.open(ACCOUNT)).length === 0);
     assert.ok(toolNames.length > 0);
