@@ -31,7 +31,7 @@ import type { AssetDesk } from "../conversations/assets.js";
 
 /** The Assistant is one Agent, not a Product: its conversation is bound to the account, under this id. */
 export const ASSISTANT_AGENT_ID = "assistant";
-const ASSISTANT_PROFILE = "kimi-k2.6";
+const ASSISTANT_PROFILE = "kimi-k2.6-no-thinking";
 const ACTIVE = new Set(["queued", "running", "waiting_for_tool", "compacting"]);
 
 /** What a Run of the Assistant needs beyond the binding every Chat Run has. */
