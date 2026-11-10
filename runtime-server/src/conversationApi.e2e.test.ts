@@ -386,6 +386,46 @@ test("HTTP starts a Run with POST messages; the old POST runs reservation is gon
   assert.equal((image.body as { error: { code: string } }).error.code, "attachments_unavailable");
 });
 
+test("HTTP answers a failed Run again with POST retry: one new Run over the same transcript, idempotent by retry_id, refused when there is nothing to answer", async () => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-retry-"));
+  let calls = 0;
+  runtime = createRuntimeServer({
+    conversationStore: new RuntimeStore(dataDir),
+    createRuntime: () => ({ async *run(input) {
+      if (++calls === 1) throw new Error("fetch failed");
+      yield { type: "assistant.delta" as const, run_id: input.run_id, delta: { kind: "text" as const, content: "second try" } };
+      yield { type: "turn.completed" as const, run_id: input.run_id, finish_reason: "stop" as const };
+    } })
+  });
+  const base = await listen(runtime.server);
+  const scope = new URLSearchParams(binding).toString();
+  const conversation = (await json(base, `/v1/conversations?${scope}`, { method: "POST", body: { client_request_id: "retry_target" } })).body as { conversation: { id: string } };
+  const prefix = `/v1/conversations/${encodeURIComponent(conversation.conversation.id)}`;
+  const statuses = async () => ((await json(base, `${prefix}/runs?${scope}`)).body as { runs: Array<{ id: string; status: string }> }).runs;
+
+  const failed = await json(base, `${prefix}/messages?${scope}&wait=5`, { method: "POST", body: { client_message_id: "m-1", content: "hello" } });
+  assert.equal((failed.body as { run: { status: string } }).run.status, "failed");
+
+  const retried = await json(base, `${prefix}/retry?${scope}`, { method: "POST", body: { retry_id: "retry-1" } });
+  assert.equal(retried.response.status, 202);
+  const started = retried.body as { run_id: string; outcome: string };
+  assert.equal(started.outcome, "started");
+  const deadline = Date.now() + 5_000;
+  while ((await statuses()).find((run) => run.id === started.run_id)?.status !== "completed" && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual((await statuses()).map((run) => run.status), ["failed", "completed"]);
+  assert.equal(calls, 2);
+
+  const replay = await json(base, `${prefix}/retry?${scope}`, { method: "POST", body: { retry_id: "retry-1" } });
+  assert.deepEqual([replay.response.status, (replay.body as typeof started).run_id, (replay.body as typeof started).outcome], [202, started.run_id, "replayed"]);
+  // The latest Run completed: another key has nothing to answer again.
+  const refused = await json(base, `${prefix}/retry?${scope}`, { method: "POST", body: { retry_id: "retry-2" } });
+  assert.equal(refused.response.status, 409);
+  assert.equal((refused.body as { error: { code: string } }).error.code, "run_not_retryable");
+  assert.equal((await json(base, `${prefix}/retry?${scope}`, { method: "GET" })).response.status, 405);
+  assert.equal((await json(base, `${prefix}/retry?${scope}`, { method: "POST", body: {} })).response.status, 400);
+  assert.equal((await statuses()).length, 2);
+});
+
 test("HTTP without wait returns 202 with the run id, and a stream delivers the Run's events then ends", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-stream-"));
   let release!: () => void;

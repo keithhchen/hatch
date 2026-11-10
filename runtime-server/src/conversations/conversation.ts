@@ -51,6 +51,11 @@ export interface Conversation {
   /** Key of this conversation's event log; nothing until the conversation exists. */
   feedKey(): Promise<string | undefined>;
   stop(): Promise<void>;
+  /**
+   * Answers the conversation again after a Run that failed or was interrupted, with no new message. The same `key` is the same
+   * Run. A refusal (ConversationError, 409) while a Run is active or when the latest Run did not fail. Nothing for a conversation that cannot.
+   */
+  retry?(key: string, client: ClientAttributes): Promise<{ runId: string; outcome: "started" | "replayed" }>;
   /** What the running turn has said so far, when the conversation knows it without its event log. */
   partial?(): Promise<string>;
 }

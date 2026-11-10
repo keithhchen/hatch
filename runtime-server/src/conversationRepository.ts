@@ -208,6 +208,38 @@ export type AlsoCommit = (tx?: PostgresQueryExecutor) => Promise<void>;
 /** `created`: a new Run started. `steered`: the message joined the active Run. Neither: an idempotent replay. */
 export type AcceptedSubmission = { created: boolean; steered?: boolean; run: ConversationRunRecord; receipt: SubmissionReceipt };
 
+/** A Run that answers the transcript again, with no new user message: its key is the client's, its digest names the Run it answers after. */
+export type AcceptRetryInput = { binding: ConversationBinding; run: Omit<CreateRunInput, "inputDigest"> };
+/** `created`: a new Run started. Otherwise this key was already accepted and the Run it started is returned. */
+export type AcceptedRetry = { created: boolean; run: ConversationRunRecord };
+
+const RETRY_DIGEST = "retry:";
+const RETRYABLE_STATUSES = new Set<DurableRunStatus>(["failed", "interrupted"]);
+
+/**
+ * The one decision of a retry, the same in every store, taken under the conversation's lock: replay this key's Run, or
+ * answer after the latest Run. Only a Run that failed or was interrupted, with nothing running and nothing after it, is answered again.
+ */
+export function planRetry(runs: ConversationRunRecord[], input: AcceptRetryInput): { replay: ConversationRunRecord } | { digest: string } {
+  const sameKey = runs.find((run) => run.clientMessageId === input.run.clientMessageId);
+  if (sameKey) {
+    if (!sameKey.inputDigest?.startsWith(RETRY_DIGEST)) throw new ConversationRepositoryError("client_message_conflict", `client_message_id ${sameKey.clientMessageId} was already used for a message`, sameKey);
+    return { replay: sameKey };
+  }
+  const active = runs.find((run) => isActiveRun(run.status));
+  if (active) throw new ConversationRepositoryError("conversation_busy", `Conversation already has an active run: ${active.id}`, active);
+  const latest = [...runs].sort(compareRuns).at(-1);
+  if (!latest || !RETRYABLE_STATUSES.has(latest.status)) {
+    throw new ConversationRepositoryError("run_not_retryable", latest ? `The latest run ${latest.id} is ${latest.status}; only a failed or interrupted run is answered again.` : "The conversation has no run to answer again.", latest);
+  }
+  return { digest: `${RETRY_DIGEST}${latest.id}` };
+}
+
+/** What the transcript hears of a retry: only that a Run is queued; the user's message is already in it. */
+const retryEvents = (run: ConversationRunRecord): StoreEvent[] => [{
+  type: "turn.state", conversation_id: run.conversationId, run_id: run.id, to: "queued", timestamp: run.createdAt
+}];
+
 export function submissionEvents(input: AcceptSubmissionInput, timestamp: string): StoreEvent[] {
   if (input.canonicalUser.role !== "user") throw new Error("Submission must contain a canonical user message");
   return [{
@@ -229,7 +261,7 @@ export type UpdateConversationInput = {
 
 export class ConversationRepositoryError extends Error {
   constructor(
-    readonly code: "conversation_not_found" | "conversation_binding_mismatch" | "conversation_archived" | "conversation_busy" | "version_conflict" | "run_not_found" | "run_id_conflict" | "client_message_conflict" | "submission_not_accepted",
+    readonly code: "conversation_not_found" | "conversation_binding_mismatch" | "conversation_archived" | "conversation_busy" | "version_conflict" | "run_not_found" | "run_id_conflict" | "client_message_conflict" | "submission_not_accepted" | "run_not_retryable",
     message: string,
     readonly existingRun?: ConversationRunRecord
   ) {
@@ -252,6 +284,11 @@ export interface ConversationRepository {
   updateConversation(id: string, input: UpdateConversationInput): Promise<ConversationRecord>;
   createRun(input: CreateRunInput): Promise<{ run: ConversationRunRecord; created: boolean }>;
   acceptSubmission(input: AcceptSubmissionInput, alsoCommit?: AlsoCommit): Promise<AcceptedSubmission>;
+  /**
+   * Starts a Run that answers the transcript again, atomically: refused unless nothing is active and the conversation's
+   * latest Run failed or was interrupted. Idempotent by `run.clientMessageId`: the same key returns the Run it started.
+   */
+  acceptRetry(input: AcceptRetryInput): Promise<AcceptedRetry>;
   getRun(conversationId: string, runId: string): Promise<ConversationRunRecord | undefined>;
   /** A Run by its id alone, for callers that know no conversation, such as the channel layer. */
   findRun(runId: string): Promise<ConversationRunRecord | undefined>;
@@ -561,6 +598,20 @@ export class InMemoryConversationRepository implements ConversationRepository {
       this.appendEventUnsafe({ conversationId: run.conversationId, runId: run.id, type: "message.created",
         payload: { role: "user", client_message_id: run.clientMessageId, input_digest: input.run.inputDigest }, createdAt: run.createdAt });
       return { created: true, steered: false, run, receipt: { run_id: run.id, client_message_id: run.clientMessageId, accepted_at: run.createdAt } };
+    });
+  }
+
+  async acceptRetry(input: AcceptRetryInput): Promise<AcceptedRetry> {
+    input = structuredClone(input);
+    return this.write(async () => {
+      const conversation = this.conversations.get(input.run.conversationId);
+      if (!conversation) throw new ConversationRepositoryError("conversation_not_found", "Conversation was not found");
+      assertSameConversationBinding(conversation, input.binding);
+      const plan = planRetry([...this.runs.values()].filter((run) => run.conversationId === conversation.id), input);
+      if ("replay" in plan) return { created: false, run: cloneRun(plan.replay) };
+      const { run } = await this.createRunUnsafe({ ...input.run, inputDigest: plan.digest });
+      this.pendingStoreEvents = retryEvents(run);
+      return { created: true, run };
     });
   }
 
@@ -1188,6 +1239,23 @@ export class PostgresConversationRepository implements ConversationRepository {
         if (!retry || attempt >= 3) throw error;
       }
     }
+  }
+
+  async acceptRetry(input: AcceptRetryInput): Promise<AcceptedRetry> {
+    if (!this.submissionStore) throw new Error("Atomic submission store is not configured");
+    await this.initialize();
+    // One transaction under the conversation row lock: two retries, or a retry and a message, serialize and the second sees the first.
+    return this.inTransaction(async (repository) => {
+      await repository.pool.query("SELECT id FROM hatch_conversations WHERE id = $1 FOR UPDATE", [input.run.conversationId]);
+      const conversation = await repository.getConversation(input.run.conversationId);
+      if (!conversation) throw new ConversationRepositoryError("conversation_not_found", "Conversation was not found");
+      assertConversationBinding(conversation, input.binding);
+      const plan = planRetry(await repository.listRuns(conversation.id), input);
+      if ("replay" in plan) return { created: false, run: plan.replay };
+      const { run } = await repository.createRun({ ...input.run, inputDigest: plan.digest });
+      for (const event of retryEvents(run)) await this.submissionStore!.appendOn(repository.pool, event);
+      return { created: true, run };
+    });
   }
 
   /** One transaction under the conversation row lock; undefined means no Run is active to join. */

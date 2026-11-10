@@ -103,7 +103,8 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     // Real Assistant path, about 100 calls: first event 3-15s (thought summaries arrive as one chunk, so the first event ends the
     // thinking). Three simultaneous first calls once got nothing for 120s+ while a new call at that moment answered in 11s: a hung
     // request does not recover, so wait 45s and ask again instead of waiting longer.
-    stall: { firstEventMs: 45_000, silenceMs: 60_000, restarts: 2 }
+    // A connection that drops before any output ("fetch failed") is asked again too, after a backoff, within the same restarts.
+    stall: { firstEventMs: 45_000, silenceMs: 60_000, restarts: 2, backoffMs: 1_000 }
   }
 };
 

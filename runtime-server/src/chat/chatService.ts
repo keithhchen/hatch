@@ -37,6 +37,15 @@ export type SubmitCommand<Scope> = {
   timeZone?: string;
 };
 
+/** Answering the transcript again after a Run that failed or was interrupted: no new message, so no digest or assets. */
+export type RetryCommand<Scope> = Pick<SubmitCommand<Scope>, "principal" | "conversation" | "scope" | "client" | "runId" | "corpusDigest" | "requiresLocalTools" | "timeZone"> & {
+  /** The client's key for this retry: the same key is the same Run. */
+  key: string;
+};
+
+/** `started`: a new Run. `replayed`: this key already started one. */
+export type Retried = { outcome: "started" | "replayed"; run: ConversationRunRecord };
+
 /** `started`: a new Run. `steered`: it joined the active Run. `replayed`: this client key was already accepted. */
 export type Submission = {
   outcome: "started" | "steered" | "replayed";
@@ -69,7 +78,7 @@ export class RunRegistry<Scope> {
  */
 export class ChatService<Scope> {
   constructor(private readonly deps: {
-    repository: Pick<ConversationRepository, "acceptSubmission" | "getActiveRun" | "hasAcceptedMessage">;
+    repository: Pick<ConversationRepository, "acceptSubmission" | "acceptRetry" | "getActiveRun" | "getRunByClientMessageId" | "hasAcceptedMessage">;
     /** A Run that cannot be admitted ends here, like any other: observers and the journal both hear of it. */
     terminator: Pick<RunTerminator, "end">;
     supervisor: Pick<RunSupervisor, "adopt" | "executorId" | "holdsConversation">;
@@ -80,6 +89,38 @@ export class ChatService<Scope> {
     /** A message that may start a Run first ends the conversation's background compaction, on any instance. */
     compaction?: { preempt(conversationId: string): Promise<void> };
   }) {}
+
+  /**
+   * The one way a failed Run is answered again, from any client: a new Run over the same transcript, started atomically, or
+   * refused (409) while a Run is active or when the latest Run is not failed or interrupted. A repeated key replays its Run.
+   */
+  async retry(command: RetryCommand<Scope>): Promise<Retried> {
+    const { repository, supervisor, hub, admission, registry, limits, compaction } = this.deps;
+    const binding = command.conversation;
+    const accept = () => repository.acceptRetry({
+      binding,
+      run: { id: command.runId, conversationId: binding.id, clientMessageId: command.key, corpusDigest: command.corpusDigest, executorId: supervisor.executorId }
+    }).catch((error: unknown) => { throw refused(error); });
+    // A key that already started a Run needs no capacity and no checks: it is told which Run that was, even while it runs.
+    if (await repository.getRunByClientMessageId(binding.id, command.key)) return { outcome: "replayed", run: (await accept()).run };
+    assertProductUsable(command.requiresLocalTools, command.client.client);
+    await limits?.check(command.principal, binding);
+    if (supervisor.holdsConversation(binding.id)) throw new ChatError("conversation_busy", "The previous run is still stopping. Try again in a moment.", 409);
+    const release = admission.reserve(command.principal);
+    try {
+      await compaction?.preempt(binding.id);
+      const accepted = await accept();
+      if (!accepted.created) { release(); return { outcome: "replayed", run: accepted.run }; }
+      registry.rememberClient(binding.id, command.client, command.timeZone);
+      registry.rememberScope(accepted.run.id, command.scope);
+      supervisor.adopt(accepted.run, () => { registry.forget(accepted.run.id); release(); });
+      hub.publish(binding.id, { type: "turn.state", run_id: accepted.run.id, status: "queued" });
+      return { outcome: "started", run: accepted.run };
+    } catch (error) {
+      release();
+      throw error;
+    }
+  }
 
   async submit(command: SubmitCommand<Scope>): Promise<Submission> {
     const { repository, supervisor, hub, admission, registry, limits, compaction, terminator } = this.deps;
@@ -132,11 +173,16 @@ export class ChatService<Scope> {
       return { outcome, run: accepted.run, clientMessageId: command.clientMessageId, acceptedAt: accepted.receipt.accepted_at };
     } catch (error) {
       release();
-      if (error instanceof Error && "code" in error && error.name === "ConversationRepositoryError") {
-        const code = (error as { code: string }).code;
-        throw new ChatError(code, error.message, code === "client_message_conflict" ? 409 : code === "conversation_archived" ? 409 : 400);
-      }
-      throw error;
+      throw refused(error);
     }
   }
+}
+
+/** A refusal of the repository, as the Chat API tells it. */
+function refused(error: unknown): unknown {
+  if (error instanceof Error && "code" in error && error.name === "ConversationRepositoryError") {
+    const code = (error as { code: string }).code;
+    return new ChatError(code, error.message, ["client_message_conflict", "conversation_archived", "conversation_busy", "run_not_retryable"].includes(code) ? 409 : 400);
+  }
+  return error;
 }

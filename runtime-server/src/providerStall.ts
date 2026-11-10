@@ -1,8 +1,16 @@
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { createAssistantMessageEventStream, type Api, type AssistantMessage, type AssistantMessageEvent, type Model } from "@earendil-works/pi-ai";
+import { UpstreamError } from "./errors/upstream.js";
 
 /** How long a provider call may say nothing: before its first event, and between any two events. */
-export type StallLimits = { firstEventMs: number; silenceMs: number; /** How often a call with no first event is issued again before it fails; never when absent. */ restarts?: number };
+export type StallLimits = {
+  firstEventMs: number;
+  silenceMs: number;
+  /** How often a call that produced nothing (no first event, or a transient failure as its first event) is issued again before it fails; never when absent. */
+  restarts?: number;
+  /** The wait before issuing a call again after a transient failure; it doubles with each restart. */
+  backoffMs?: number;
+};
 
 export const DEFAULT_STALL_LIMITS: StallLimits = { firstEventMs: 60_000, silenceMs: 60_000 };
 
@@ -24,10 +32,26 @@ const failed = (model: Model<Api>, errorMessage: string): AssistantMessage => ({
   stopReason: "error", errorMessage, timestamp: Date.now()
 });
 
+/** Waits `ms`, or until the caller's own signal aborts. */
+const pause = (ms: number, signal?: AbortSignal): Promise<void> => new Promise((resolve) => {
+  const timer = setTimeout(resolve, ms);
+  signal?.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
+});
+
+type Opened = { events: AsyncIterator<AssistantMessageEvent>; first: IteratorResult<AssistantMessageEvent> } | { failure: unknown };
+
+/** A call that failed in a way worth asking again, before it said anything: the call threw, or its first event is the error. */
+const transientBeforeOutput = (model: Model<Api>, opened: Opened): boolean => {
+  const failure = "failure" in opened ? opened.failure
+    : !opened.first.done && opened.first.value.type === "error" ? opened.first.value.error.errorMessage : undefined;
+  return failure !== undefined && UpstreamError.of(failure, `${model.provider} ${model.id}`).kind === "transient";
+};
+
 /**
  * Bounds a provider call. A stream that sends nothing for too long is aborted and ends as the error result the Agent
- * already turns into an upstream failure; the provider's own events pass through untouched. A call with no first event has
- * emitted nothing, so it is issued again (`restarts` times) before it fails.
+ * already turns into an upstream failure; the provider's own events pass through untouched. A call that has emitted nothing is
+ * issued again (`restarts` times, after a backoff when it failed) before it fails: one with no first event, and one whose first
+ * event is a transient failure such as a dropped connection. Once an event is out, a call is never issued again: it would repeat text.
  */
 export const withStallGuard = (inner: StreamFn, limits: StallLimits = DEFAULT_STALL_LIMITS): StreamFn => (model, context, options) => {
   const out = createAssistantMessageEventStream();
@@ -48,16 +72,24 @@ export const withStallGuard = (inner: StreamFn, limits: StallLimits = DEFAULT_ST
     }
   };
   void (async () => {
-    for (let restarts = limits.restarts ?? 0; ; restarts--) {
+    for (let restarts = limits.restarts ?? 0, attempt = 0; ; restarts--, attempt++) {
       request = new AbortController();
       const signal = options?.signal ? AbortSignal.any([options.signal, request.signal]) : request.signal;
-      const open = await within((async () => {
-        const events = (await inner(model, context, { ...options, signal }))[Symbol.asyncIterator]();
-        return { events, first: await events.next() };
+      const open = await within((async (): Promise<Opened> => {
+        try {
+          const events = (await inner(model, context, { ...options, signal }))[Symbol.asyncIterator]();
+          return { events, first: await events.next() };
+        } catch (failure) { return { failure }; }
       })(), limits.firstEventMs);
-      if (open !== STALLED) return relay(open.events, open.first);
+      const again = restarts > 0 && !options?.signal?.aborted;
+      if (open !== STALLED && !(again && transientBeforeOutput(model, open))) {
+        if ("failure" in open) throw open.failure;
+        return relay(open.events, open.first);
+      }
       request.abort();
-      if (restarts <= 0 || options?.signal?.aborted) return fail(`${model.id} stream timed out: no first event within ${limits.firstEventMs}ms`);
+      if (open === STALLED) {
+        if (!again) return fail(`${model.id} stream timed out: no first event within ${limits.firstEventMs}ms`);
+      } else await pause((limits.backoffMs ?? 500) * 2 ** attempt, options?.signal);
     }
   })().catch((error) => fail(error instanceof Error ? error.message : String(error)));
   return out;

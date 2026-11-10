@@ -21,6 +21,10 @@ export class ConversationTransport {
    * provisional until the server names the real one.
    */
   get steerable() { return false; }
+  /** Whether a Run that failed can be answered again: the transport has `retryRun`. */
+  get retriesRun() { return false; }
+  /** Answers the conversation again after a failed Run. The same `key` is the same Run. @returns {Promise<{run_id: string}>} */
+  retryRun(_conversationId, _key) { return unimplemented("ConversationTransport", "retryRun"); }
   /** Whether `events` pages the journal. A transport without it proves its cursor through the snapshot alone. */
   get journal() { return true; }
   /** Latest `view=page` snapshot. @returns {Promise<object>} */
@@ -112,6 +116,7 @@ export class ToolExecutor {
 /**
  * Messages the user sent that the server has not acknowledged, kept past a reload. A reload sends them again under the
  * same `clientMessageId`, which the server stores once. A record leaves the store when the server has the message.
+ * A record with `kind: "retry"` is an answer-again key, not a message: it is reused until the server answers it.
  */
 export class PendingStore {
   /** @returns {{conversationId: string, clientMessageId: string, content: string, attachments: object[]}[]} */

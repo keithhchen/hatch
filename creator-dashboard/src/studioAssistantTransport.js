@@ -66,6 +66,12 @@ export class StudioAssistantTransport extends ConversationTransport {
 
   get steerable() { return true; }
   get journal() { return false; }
+  get retriesRun() { return true; }
+
+  /** Answers the Assistant again after a failed Run; the key is the Idempotency-Key, so a repeat is the same Run. */
+  retryRun(_conversationId, key) {
+    return this.request(`${ROOT}/retry`, { method: "POST", headers: { "idempotency-key": key }, body: "{}" });
+  }
 
   subscribe = listener => { this.listeners.add(listener); return () => this.listeners.delete(listener); };
   getView = () => this.view;

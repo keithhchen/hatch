@@ -11,6 +11,7 @@ import type { ChatGateway, ConversationRef, SentMessage, UploadedRef } from "../
 import { ChatRuntime } from "../chat/chatRuntime.js";
 import { NO_SKILLS, failRun, runModelTurn, type TurnBinding } from "../chat/modelTurn.js";
 import { ChatError, accountPrincipal } from "../chat/principal.js";
+import type { Retried } from "../chat/chatService.js";
 import { ServiceChatGateway, type PrincipalBinder } from "../chat/serviceGateway.js";
 import type { ScopeResolver, TurnRunner } from "../chat/turnExecutor.js";
 import { ConversationError, DEFAULT_PAGE, MAX_PAGE, type ConversationStatus, type PublicMessage, type SendInput, type Sent } from "../conversations/conversation.js";
@@ -185,6 +186,18 @@ export class AssistantChat implements AssistantHost {
   /** Steers the Assistant's active Run with this message or starts one, atomically. `id` is the key a retry reuses. */
   async say(accountId: string, input: { id: string; parts: ContentPart[]; client: ClientAttributes }): Promise<SentMessage> {
     return this.gateway.send(accountPrincipal(accountId), { kind: "conversation", id: accountId }, input.client, input.id, input.parts);
+  }
+
+  /**
+   * Answers the conversation again after a Run that failed or was interrupted. `id` is the key a repeat reuses: the same key is
+   * the same Run. Refused (ChatError, 409) while a Run is active or when the latest Run is not failed or interrupted.
+   */
+  async retry(accountId: string, input: { id: string; client: ClientAttributes }): Promise<Retried> {
+    const conversation = await this.conversation(accountId);
+    return this.runtime.service.retry({
+      principal: accountPrincipal(accountId), conversation, scope: this.scopeOf(conversation), client: input.client, key: input.id,
+      runId: `run_${randomUUID().replaceAll("-", "")}`, corpusDigest: conversation.corpusDigest, requiresLocalTools: false
+    });
   }
 
   /** The Assistant's own words to itself: news from its workers, the daily check, an interview's reply. Never shown as the Expert's. */

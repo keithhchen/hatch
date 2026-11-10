@@ -99,7 +99,7 @@ import { PostgresEventRelay } from "./chat/eventRelay.js";
 import { PostgresStopRelay } from "./chat/stopRelay.js";
 import { publicJournalPayload } from "./chat/messageLedger.js";
 import { ChatError, principalKey, accountPrincipal } from "./chat/principal.js";
-import type { PrincipalLimits, RunAdmission, Submission } from "./chat/chatService.js";
+import type { PrincipalLimits, Retried, RunAdmission, Submission } from "./chat/chatService.js";
 import { ContactBinder, SentMessageLimits, type ConnectionDirectory } from "./chat/contactBinding.js";
 import { SelfBinder } from "./chat/selfBinding.js";
 import type { ChatGateway } from "./chat/gateway.js";
@@ -1647,6 +1647,23 @@ async function handleConversationHttpRequest(
     return;
   }
 
+  const retryMatch = url.pathname.match(/^\/v1\/conversations\/([^/]+)\/retry$/);
+  if (retryMatch) {
+    if (req.method !== "POST") throw new ConversationHttpError(405, "method_not_allowed", "Use POST to answer again.");
+    const conversation = await requireBoundConversation(repository, binding, decodeURIComponent(retryMatch[1] ?? ""));
+    const body = await readJsonObject(req);
+    rejectUnknownFields(body, ["retry_id", "client", "device", "locale", "language", "time_zone"]);
+    // The client's key for this answer again: the same key is the same Run, whatever happened to the response.
+    const retried = await retryRun(requireEdge(), { authToken, binding, conversation }, {
+      runId: `run_${randomUUID().replaceAll("-", "")}`,
+      key: requiredString(body, "retry_id", 256),
+      client: clientAttributesOf({ client: "mcp", ...body } as { client?: string }),
+      ...(typeof body.time_zone === "string" ? { timeZone: body.time_zone } : {})
+    }, signal);
+    writeResponse(202, { run_id: retried.run.id, outcome: retried.outcome, status: retried.run.status });
+    return;
+  }
+
   const toolResultsMatch = url.pathname.match(/^\/v1\/conversations\/([^/]+)\/tool-results$/);
   if (toolResultsMatch) {
     if (req.method !== "POST") throw new ConversationHttpError(405, "method_not_allowed", "Use POST to provide a tool result.");
@@ -2153,16 +2170,8 @@ type ChatMessageRequest = {
   timeZone?: string;
 };
 
-/**
- * The one path a user message takes, from WebSocket or HTTP: re-verify access,
- * make the message canonical, then steer the active Run or start one.
- */
-async function submitUserMessage(
-  edge: ChatEdge,
-  session: ChatSession,
-  request: ChatMessageRequest,
-  signal?: AbortSignal
-): Promise<{ submission: Submission; binding: SessionBinding }> {
+/** Access is verified again before any Run starts, for a message and for an answer again alike: what the user may use now. */
+async function authorizedBinding(edge: ChatEdge, session: ChatSession, signal?: AbortSignal): Promise<SessionBinding> {
   const releaseAuthorization = edge.turnAuthorizationGate.tryAcquire();
   if (!releaseAuthorization) {
     throw new ChatError("authorization_busy", "Hatch is already verifying the maximum number of turns. Try again shortly.", 429);
@@ -2190,6 +2199,20 @@ async function submitUserMessage(
     releaseAuthorization();
     releaseUserAuthorization();
   }
+  return binding;
+}
+
+/**
+ * The one path a user message takes, from WebSocket or HTTP: re-verify access,
+ * make the message canonical, then steer the active Run or start one.
+ */
+async function submitUserMessage(
+  edge: ChatEdge,
+  session: ChatSession,
+  request: ChatMessageRequest,
+  signal?: AbortSignal
+): Promise<{ submission: Submission; binding: SessionBinding }> {
+  const binding = await authorizedBinding(edge, session, signal);
   if (request.taskStart && binding.briefSpec && !session.conversation.briefSnapshot) {
     throw new ChatError("conversation_brief_required", "A Brief is required before starting this task.", 409);
   }
@@ -2212,6 +2235,31 @@ async function submitUserMessage(
     ...(request.timeZone ? { timeZone: request.timeZone } : {})
   });
   return { submission, binding };
+}
+
+/**
+ * Answers a conversation again after a Run that failed or was interrupted, with no new message: re-verify access,
+ * then start a Run over the same transcript, or replay the one this key started.
+ */
+async function retryRun(
+  edge: ChatEdge,
+  session: ChatSession,
+  request: { runId: string; key: string; client: ClientAttributes; timeZone?: string },
+  signal?: AbortSignal
+): Promise<Retried> {
+  const binding = await authorizedBinding(edge, session, signal);
+  signal?.throwIfAborted();
+  return edge.chat.service.retry({
+    principal: accountPrincipal(binding.userId),
+    conversation: session.conversation,
+    scope: binding,
+    client: request.client,
+    key: request.key,
+    runId: request.runId,
+    corpusDigest: binding.corpusDigest,
+    requiresLocalTools: binding.agentCorpus ? productRequiresLocalTools(binding.agentCorpus) : false,
+    ...(request.timeZone ? { timeZone: request.timeZone } : {})
+  });
 }
 
 /** A failure a client can act on, whichever way it arrived. */
