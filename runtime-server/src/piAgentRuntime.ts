@@ -81,7 +81,7 @@ export type PiAgentRuntimeOptions = {
   toolDefinitions?: PiToolDefinition[];
   /** The environment that names the model profile; the process's own when absent. */
   env?: NodeJS.ProcessEnv;
-  /** How long a model call may stay silent before the Run fails; 60s to the first event and 60s between events when absent. */
+  /** How long a model call may stay silent before the Run fails; the model profile's own limits when absent (60s to the first event and 60s between events unless the profile says otherwise). */
   stall?: StallLimits;
 };
 
@@ -154,7 +154,7 @@ export class PiAgentRuntime implements AgentRuntime {
   async *run(input: RunStart, ctx: RunContext): AsyncIterable<OutboundMessage> {
     ctx.abortSignal?.throwIfAborted();
     const model = createPiModel({ env: this.options.env });
-    const streamFn = withStallGuard(createPiStreamFn({ env: this.options.env }), this.options.stall);
+    const streamFn = withStallGuard(createPiStreamFn({ env: this.options.env }), this.options.stall ?? resolveLlmProfile(this.options.env).stall);
     const queue = new AsyncQueue<OutboundMessage>();
     const workspacePathPolicy = createWorkspacePathPolicy(input.message.content);
     const visibleSkills = ctx.sessionSkills.visibleRecords;

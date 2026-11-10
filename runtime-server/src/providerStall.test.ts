@@ -6,6 +6,7 @@ import { createKimiModel } from "./piModel.js";
 import { withStallGuard } from "./providerStall.js";
 import { UpstreamError } from "./errors/upstream.js";
 import { failures, UPSTREAM_CODE } from "./errors/failures.js";
+import { resolveLlmProfile } from "./llmProfiles.js";
 
 const limits = { firstEventMs: 40, silenceMs: 40 };
 const model = createKimiModel({ env: { LLM_API_KEY: "test-key" } } as never);
@@ -77,4 +78,38 @@ test("the caller's own abort still reaches the provider", async () => {
 
 test("an upstream failure names the provider that was called even when its error text does not", () => {
   assert.equal(UpstreamError.of("Connection error.", "kimi kimi-k2.6").provider, "moonshot");
+});
+
+/** A provider that sends `events`, one every `gapMs`, then finishes. */
+const sends = (events: AssistantMessageEvent[], gapMs: number): StreamFn => () => {
+  const stream = createAssistantMessageEventStream();
+  void (async () => {
+    for (const event of events) { await new Promise((resolve) => setTimeout(resolve, gapMs)); stream.push(event); }
+    stream.push({ type: "done", reason: "stop", message: partial });
+  })();
+  return stream;
+};
+
+test("thinking events keep the guard alive while the model reasons", async () => {
+  const thinking: AssistantMessageEvent[] = [
+    { type: "start", partial }, { type: "thinking_start", contentIndex: 0, partial },
+    ...Array.from({ length: 5 }, () => ({ type: "thinking_delta", contentIndex: 0, delta: "…", partial }) as AssistantMessageEvent),
+    { type: "thinking_end", contentIndex: 0, content: "…", partial }
+  ];
+  const events = await drain(withStallGuard(sends(thinking, 25), limits)(model, { messages: [] }, {}) as ReturnType<typeof call>);
+  assert.equal(events.filter((event) => event.type === "thinking_delta").length, 5);
+  assert.equal(events.at(-1)?.type, "done");
+});
+
+test("the first event and the silence between events have their own limits", async () => {
+  const lateFirst = withStallGuard(sends([{ type: "start", partial }], 70), { firstEventMs: 200, silenceMs: 40 });
+  assert.equal((await drain(lateFirst(model, { messages: [] }, {}) as ReturnType<typeof call>)).at(-1)?.type, "done");
+  const failedFirst = withStallGuard(hangs({ aborted: false }), { firstEventMs: 40, silenceMs: 200 });
+  assert.equal((await drain(failedFirst(model, { messages: [] }, {}) as ReturnType<typeof call>)).at(-1)?.type, "error");
+});
+
+test("a reasoning Gemini profile waits longer for its first event than the default, and still bounds it", () => {
+  const { stall } = resolveLlmProfile({ HATCH_LLM_PROFILE: "gemini-3.1-pro" });
+  assert.ok(stall && stall.firstEventMs > 60_000 && Number.isFinite(stall.firstEventMs));
+  assert.equal(resolveLlmProfile({ HATCH_LLM_PROFILE: "kimi-k2.6-no-thinking" }).stall, undefined);
 });

@@ -1,4 +1,5 @@
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
+import type { StallLimits } from "./providerStall.js";
 
 export const RUNTIME_LLM_PROFILE_NAMES = ["kimi-k2.6", "kimi-k2.6-no-thinking", "deepseek-v4-flash", "gemini-api", "gemini-3.1-pro"] as const;
 export const FACTORY_LLM_PROFILE_NAMES = ["kimi-k2.6", "deepseek-v4-flash", "gemini-api", "gemini-3.1-pro"] as const;
@@ -22,6 +23,8 @@ export type LlmProfile = {
   temperature?: number;
   thinkingType?: "enabled" | "disabled";
   normalizeEmptyToolCallContent: boolean;
+  /** How long a call may stay silent; the default of providerStall when absent. */
+  stall?: StallLimits;
 };
 
 const PROFILES: Record<LlmProfileName, LlmProfile> = {
@@ -96,7 +99,10 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     maxTokens: 65_536,
     reasoning: true,
     thinkingLevel: "low",
-    normalizeEmptyToolCallContent: false
+    normalizeEmptyToolCallContent: false,
+    // Gemini Pro sends nothing until its thinking is done (thought summaries arrive as one chunk, not a stream), so the
+    // first event is as late as the thinking is long. Measured 4-11s at up to 64k tokens, real turns up to 38s, one stall past 60s.
+    stall: { firstEventMs: 120_000, silenceMs: 60_000 }
   }
 };
 
