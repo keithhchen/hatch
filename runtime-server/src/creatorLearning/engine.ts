@@ -28,7 +28,8 @@ import { materializeAgentCorpusBundle } from "./corpusBundle.js";
 import { FactoryFileStore } from "./fileStore.js";
 import type { ArtifactObjectStore } from "./objectStore.js";
 import type { DistillationGraphStore } from "./distillationGraph.js";
-import { classifyFactoryProviderFailure } from "./factoryLlm.js";
+import { failures } from "../errors/failures.js";
+import { UpstreamError } from "../errors/upstream.js";
 import { issueQuestionBatch, requireQuestionBatchId } from "./questionBatch.js";
 import { requireUuidV4 } from "../identity.js";
 import { validateFactorySourceManifest } from "./sourceScope.js";
@@ -1698,13 +1699,12 @@ export class CreatorFactory {
     error: unknown
   ): Promise<FactoryRunState> {
     const rawMessage = error instanceof Error ? error.message : String(error);
-    const providerFailure = classifyFactoryProviderFailure(error);
     // Provider/runtime errors can echo their input. A held-out failure must not
     // declassify Question, Creator answer, or result through state.json or the
     // unsealed diagnostic journal.
     const message = isSealedFactoryFailure(error) || state.activeQaEvaluation?.sealed
       ? SEALED_FAILURE_MESSAGE
-      : providerFailure?.message ?? rawMessage;
+      : error instanceof UpstreamError ? failures.translate(error, { run: state.runId, stage: state.stage }).message : rawMessage;
     const terminal = /did not converge after|workflow step limit/i.test(rawMessage);
     // A bounded corpus loop is a Creator calibration checkpoint once a
     // complete candidate is durable. The candidate carries its synthetic QA

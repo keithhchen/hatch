@@ -618,6 +618,8 @@ export type RunError = {
   error: {
     code: string;
     message: string;
+    /** What staff look up for an upstream or internal failure. */
+    reference?: string;
   };
 };
 

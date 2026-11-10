@@ -56,13 +56,15 @@ export class ChatReplies {
     const progress = await this.deps.gateway.progress(runId);
     if (!progress) return;
     if (!progress.ended) { if (progress.compactionId) await this.deps.compacting(runId, progress.compactionId); return; }
-    const outcome = { ok: progress.reply.status === "completed", text: progress.reply.text };
+    const { status, text, reason } = progress.reply;
+    // A failed Run says why: Chat's public failure message, which carries the reference for an upstream failure.
+    const outcome = { text: status === "failed" && reason ? reason : text };
     const items = await this.deps.inbox.byRun(runId);
     const last = items.at(-1);
     if (!last?.connectionId) return;
     await this.deps.dispatcher.send({
       connectionId: last.connectionId, channel: last.channel, scope: last.scope, address: last.event.address, kind: "reply",
-      message: { text: outcome.ok && outcome.text.trim() ? outcome.text : FAILED, ...(last.event.messageRef ? { replyTo: last.event.messageRef } : {}) },
+      message: { text: outcome.text.trim() ? outcome.text : FAILED, ...(last.event.messageRef ? { replyTo: last.event.messageRef } : {}) },
       sourceKey: `run:${runId}`,
     });
     await this.deps.inbox.markReplied(last.id);

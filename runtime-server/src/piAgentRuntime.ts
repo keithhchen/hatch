@@ -1,3 +1,4 @@
+import { UpstreamError } from "./errors/upstream.js";
 import {
   Agent,
   convertToLlm,
@@ -538,7 +539,7 @@ export class PiAgentRuntime implements AgentRuntime {
           await ctx.persistModelMessage?.({ ...converted, content: null });
         }
         if (assistant.stopReason === "error" || assistant.stopReason === "aborted") {
-          setTerminalError(new Error(assistant.errorMessage ?? `Pi Agent stopped: ${assistant.stopReason}`));
+          setTerminalError(assistant.stopReason === "error" ? UpstreamError.of(assistant.errorMessage ?? "Pi Agent stopped: error") : new Error(assistant.errorMessage ?? `Pi Agent stopped: ${assistant.stopReason}`));
         } else if (assistant.stopReason === "stop" && !hasToolCall) {
           if (hasText) setFinalAssistant(assistant);
           else setTerminalError(new Error("Pi Agent returned an empty final response"));
@@ -657,7 +658,7 @@ export class PiAgentRuntime implements AgentRuntime {
         && !last.content.some((block) => block.type === "toolCall")) {
         setFinalAssistant(last);
       } else if (last) {
-        setTerminalError(new Error(last.errorMessage ?? "Pi Agent ended without a final assistant response"));
+        setTerminalError(last.stopReason === "error" ? UpstreamError.of(last.errorMessage ?? "Pi Agent stopped: error") : new Error(last.errorMessage ?? "Pi Agent ended without a final assistant response"));
       }
       return;
     }

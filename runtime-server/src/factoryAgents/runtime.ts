@@ -8,8 +8,9 @@ import { isContextOverflow } from "@earendil-works/pi-ai";
 import { BackgroundCompactor, CompactionStrategy, newCompactionId, policyFor, type CompactionAdapter, type CompactionOutcome, type CompactionPolicy, type CompactionRequest, type SummarizeInput } from "../compactionStrategy.js";
 import { describePiMessage, piSummaryMessage, prunePiMessage, summarizeWithPi } from "../piCompaction.js";
 import { createFactoryLlmModel, createFactoryPiAgent, createFactoryPiModels, type FactoryPiAgentOptions } from "../creatorLearning/factoryPi.js";
-import { classifyFactoryProviderFailure } from "../creatorLearning/factoryLlm.js";
-import { classifyRunFailure, type RunFailure } from "./runFailure.js";
+import { failures } from "../errors/failures.js";
+import { UpstreamError } from "../errors/upstream.js";
+import type { RunFailure } from "./runFailure.js";
 import { WorkbenchStore, isAssistantRole, type AgentDefinitionSource, type AnyRole, type Session } from "./store.js";
 import { factoryAgentTools } from "./factoryTools.js";
 import { fileTools } from "./tools.js";
@@ -104,7 +105,7 @@ export class WorkbenchRuntime {
     try {
       // The run is already ours; background compaction yields and ends before the message proceeds.
       await this.background.preempt(id);
-      await this.store.update(id, s => { if (s.title === s.role) s.title = message.trim().slice(0, 60); s.turn++; s.status = "running"; s.lastRunAt = new Date().toISOString(); delete s.error; delete s.errorCode; delete s.activeTool; });
+      await this.store.update(id, s => { if (s.title === s.role) s.title = message.trim().slice(0, 60); s.turn++; s.status = "running"; s.lastRunAt = new Date().toISOString(); delete s.error; delete s.errorCode; delete s.errorRef; delete s.activeTool; });
     } catch (error) { this.active.delete(id); throw error; }
     this.emit(id, "state");
     this.emit(id, "voice.run_started", { runId });
@@ -279,15 +280,15 @@ export class WorkbenchRuntime {
       const lost = [...this.take(id) ?? [], ...this.steered.get(id) ?? []];
       for (const message of lost) await this.commit(id, () => this.store.update(id, state => { state.messages.push(message); state.context.push(message); })).catch(() => undefined);
       ended = controller.signal.aborted ? "interrupted" : "failed";
-      if (!controller.signal.aborted) { failure = classifyRunFailure(error, safeError); console.error(`[run ${this.runIds.get(id)}] failed (${failure.code}):`, safeError(error)); }
+      if (!controller.signal.aborted) failure = failures.translate(error, { run: this.runIds.get(id), session: id });
       await this.store.update(id, s => {
         if (!failure) {
           // A user stop is a normal terminal state, not an error notice.
           s.status = "interrupted";
-          delete s.error; delete s.errorCode;
+          delete s.error; delete s.errorCode; delete s.errorRef;
         } else {
           s.status = "failed";
-          s.error = failure.message; s.errorCode = failure.code;
+          s.error = failure.message; s.errorCode = failure.code; s.errorRef = failure.reference;
         }
         delete s.activeTool;
       });
@@ -399,7 +400,7 @@ export class WorkbenchRuntime {
       if (persistenceError) throw persistenceError;
       controller.signal.throwIfAborted();
       const last = agent.state.messages.at(-1);
-      if (last?.role === "assistant" && ["error", "aborted", "length"].includes(last.stopReason)) throw new Error(last.errorMessage || `Model stopped: ${last.stopReason}`);
+      if (last?.role === "assistant" && ["error", "aborted", "length"].includes(last.stopReason)) throw last.stopReason === "error" ? UpstreamError.of(last.errorMessage || "Model stopped: error") : new Error(last.errorMessage || `Model stopped: ${last.stopReason}`);
       return agent.state.messages;
     } finally { if (this.liveAgents.get(id) === agent) this.liveAgents.delete(id); clearTimeout(timer); unsubscribe(); controller.signal.removeEventListener("abort", abort); await persistence; }
   }
@@ -417,7 +418,6 @@ function hasTrailingAskUser(messages: AgentMessage[]): boolean {
 }
 
 export function safeError(error: unknown): string {
-  const provider = classifyFactoryProviderFailure(error);
-  if (provider) return provider.message;
+  if (error instanceof UpstreamError) return failures.translate(error).message;
   return (error instanceof Error ? error.message : String(error)).replace(/\b(?:sk-|tvly-|fc-)[A-Za-z0-9_-]+/g, "[redacted]").slice(0, 1000);
 }

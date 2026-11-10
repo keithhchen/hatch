@@ -89,11 +89,12 @@ test("a failed Run is a failed conversation with a stable code and no provider t
     const outcome = await awaitTurn(research, { sentId: sent.message.id, timeoutMs: 10_000, pollMs: 20 });
     assert.equal(outcome.reply, undefined);
     assert.equal(outcome.status.state, "failed");
-    assert.equal(outcome.status.error?.code, "provider_quota");
+    assert.equal(outcome.status.error?.code, "upstream_error");
+    assert.match(outcome.status.error?.reference ?? "", /^err_[0-9a-f]{12}$/);
     const { status, messages } = await research.messages();
     assert.deepEqual(status, outcome.status, "history shows the failed turn and why");
     assert.deepEqual(messages.map(m => m.role), ["user"], "the accepted message is kept");
-    assert.deepEqual(ended.map(e => [e.status, (e.error as { code: string }).code]), [["failed", "provider_quota"]], "the Run's end carries the failure");
+    assert.deepEqual(ended.map(e => [e.status, (e.error as { code: string }).code]), [["failed", "upstream_error"]], "the Run's end carries the failure");
     assert.doesNotMatch(JSON.stringify([status, ended]), /org-abc123|ak-secret9|suspended|exceeded_current_quota/);
   } finally { console.error = consoleError; await runtime.close(); await rm(root, { recursive: true, force: true }); }
 });
