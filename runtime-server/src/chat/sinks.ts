@@ -13,17 +13,21 @@ export class SlowConsumerError extends Error {
   }
 }
 
+/** What one consumer may see of an event; the same projection stands before every transport's sink. */
+export type EventProjection = (event: Record<string, unknown>) => Record<string, unknown>;
+
+/** A sink that only ever receives events through `project`: transports stay ignorant of what is hidden. */
+export function projecting(sink: EventSink, project: EventProjection): EventSink {
+  return { push: (event) => sink.push(project(event)) };
+}
+
 /** Writes events to a WebSocket without waiting for the peer. */
 export class SocketSink implements EventSink {
-  constructor(
-    private readonly socket: WebSocket,
-    private readonly project: (event: Record<string, unknown>) => Record<string, unknown> = (event) => event,
-    private readonly maxBufferedBytes = MAX_CONSUMER_BUFFERED_BYTES
-  ) {}
+  constructor(private readonly socket: WebSocket, private readonly maxBufferedBytes = MAX_CONSUMER_BUFFERED_BYTES) {}
 
   push(event: Record<string, unknown>): void {
     if (this.socket.readyState !== WebSocket.OPEN) return;
-    const payload = JSON.stringify(this.project(event));
+    const payload = JSON.stringify(event);
     if (this.socket.bufferedAmount > this.maxBufferedBytes) {
       this.socket.terminate();
       throw new SlowConsumerError();

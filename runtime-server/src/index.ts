@@ -114,7 +114,7 @@ import { MAX_BYTES as MAX_ASSET_BYTES } from "./assets/pipeline.js";
 import { RegistryConnectionDirectory } from "./chat/registryConnections.js";
 import { openChatAssets } from "./chat/openChatAssets.js";
 import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
-import { MAX_CONSUMER_BUFFERED_BYTES, SocketSink, SseSink } from "./chat/sinks.js";
+import { MAX_CONSUMER_BUFFERED_BYTES, SocketSink, SseSink, projecting, type EventProjection } from "./chat/sinks.js";
 import { authorizeLocalToolCall, productRequiresLocalTools } from "./chat/toolSurface.js";
 import type { ScopeResolver, TurnRunner } from "./chat/turnExecutor.js";
 import type { TurnCompaction } from "./chat/chatCompaction.js";
@@ -1572,7 +1572,7 @@ async function handleConversationHttpRequest(
       // Resume by cursor: after_cursor, or the Last-Event-ID the browser echoes on reconnect.
       const lastEventId = Number(req.headers["last-event-id"]);
       const resumeAfter = afterCursor ?? (Number.isSafeInteger(lastEventId) && lastEventId >= 0 ? lastEventId : (await repository.recoverySnapshot(conversation.id, [])).cursor);
-      openEventStream(res, requireEdge(), conversation, resumeAfter);
+      openEventStream(res, requireEdge(), conversation, resumeAfter, privateBoundaryProjection(() => binding));
       return;
     }
     const snapshot = await repository.snapshot(conversation.id, afterCursor ?? 0);
@@ -1631,7 +1631,7 @@ async function handleConversationHttpRequest(
         reply: ended.status === "completed" && store ? finalAssistantText(await store.readVisibleConversation(conversation.id), ended.id) : "",
         cursor: await repository.latestRunStateCursor(ended.id)
       } : undefined;
-      openEventStream(res, chatEdge, conversation, before, submission, finished);
+      openEventStream(res, chatEdge, conversation, before, privateBoundaryProjection(() => binding), submission, finished);
       return;
     }
     const run = await waitForTerminalRun(() => repository.getRun(conversation.id, submission.run.id), Math.min(wait, MAX_WAIT_SECONDS) * 1000, 100, signal);
@@ -1825,12 +1825,13 @@ function openEventStream(
   edge: ChatEdge,
   conversation: ConversationRecord,
   afterCursor: number,
+  project: EventProjection,
   submission?: Submission,
   /** The submission's Run had already ended: the stream carries its reply and its end, and closes. */
   finished?: { status: string; reply: string; cursor?: number }
 ): void {
   res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
-  const sink = new SseSink(res, edge.consumerBufferedBytes);
+  const sink = projecting(new SseSink(res, edge.consumerBufferedBytes), project);
   if (submission) {
     sink.push({ type: "message.accepted", conversation_id: conversation.publicId, run_id: submission.run.id, client_message_id: submission.clientMessageId, outcome: submission.outcome });
   }
@@ -2317,10 +2318,10 @@ async function handleRuntimeSocket(
     connectionAbortController.abort(new Error("Runtime socket closed"));
   });
 
-  const sink = new SocketSink(socket, (event) =>
-    protectPrivateAgentBoundary(event as OutboundMessage, binding?.agentCorpusRoot, binding?.productId) as unknown as Record<string, unknown>, edge.consumerBufferedBytes);
+  const project = privateBoundaryProjection(() => binding);
+  const sink = projecting(new SocketSink(socket, edge.consumerBufferedBytes), project);
   const send = async (message: OutboundMessage): Promise<void> => {
-    const outbound = protectPrivateAgentBoundary(message, binding?.agentCorpusRoot, binding?.productId);
+    const outbound = project(message as unknown as Record<string, unknown>) as unknown as OutboundMessage;
     if (socket.readyState !== WebSocket.OPEN) return;
     const payload = JSON.stringify(outbound);
     const payloadBytes = Buffer.byteLength(payload, "utf8");
@@ -2603,6 +2604,17 @@ function withUpgradeToken(raw: unknown, token: string | undefined): unknown {
   if (!token || typeof raw !== "object" || raw === null) return raw;
   const message = raw as Record<string, unknown>;
   return message.type === "client.hello" && !message.auth_token && !message.license_token ? { ...message, auth_token: token } : raw;
+}
+
+/**
+ * The one projection standing before every transport's sink (WebSocket, SSE): what a buyer sees of an
+ * event never reveals the Expert's private corpus. The binding is read per event, as it can change.
+ */
+export function privateBoundaryProjection(current: () => { agentCorpusRoot?: string; productId?: string } | undefined): EventProjection {
+  return (event) => {
+    const binding = current();
+    return protectPrivateAgentBoundary(event as unknown as OutboundMessage, binding?.agentCorpusRoot, binding?.productId) as unknown as Record<string, unknown>;
+  };
 }
 
 export function protectPrivateAgentBoundary(
