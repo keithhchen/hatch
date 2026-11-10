@@ -58,7 +58,7 @@ export async function main(argv, deps) {
     return ctx.exitCode;
   } catch (error) {
     const e = error instanceof HatchError ? error : new HatchError(error.message ?? String(error), { code: "internal" });
-    stderr.write(json ? `${JSON.stringify({ error: { code: e.code, message: e.message, status: e.status } })}\n` : `hatch: ${e.message}\n`);
+    stderr.write(json ? `${JSON.stringify({ error: { code: e.code, message: e.message, status: e.status, ...(e.clientMessageId ? { client_message_id: e.clientMessageId } : {}) } })}\n` : `hatch: ${e.message}\n`);
     return e.code === "usage" ? 2 : 1;
   }
 }

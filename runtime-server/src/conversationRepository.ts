@@ -1801,9 +1801,13 @@ export class PostgresConversationRepository implements ConversationRepository {
 
   async appendEvent(input: Omit<ConversationJournalEvent, "cursor" | "createdAt"> & { createdAt?: string }): Promise<ConversationJournalEvent> {
     await this.initialize();
+    // The cursor is taken (nextval) only after the conversation's row is locked, and that lock is held until commit. Writers of one
+    // conversation therefore take their numbers and commit in the same order, so an observer that has seen a cursor has seen every smaller one.
+    // The lock is the one the conversation's other writers already take first, so no new lock order is introduced.
     const result = await this.pool.query<JournalRow>(`
+      WITH conversation AS (SELECT id FROM hatch_conversations WHERE id = $1 FOR NO KEY UPDATE)
       INSERT INTO hatch_conversation_journal (conversation_id, run_id, event_type, payload, created_at)
-      VALUES ($1, $2, $3, $4::jsonb, COALESCE($5::timestamptz, now()))
+      SELECT id, $2, $3, $4::jsonb, COALESCE($5::timestamptz, now()) FROM conversation
       RETURNING cursor, conversation_id, run_id, event_type, payload, created_at
     `, [input.conversationId, input.runId ?? null, input.type, JSON.stringify(input.payload), input.createdAt ?? null]);
     const event = eventFromRow(requireRow(result.rows[0], "Journal insert returned no row"));

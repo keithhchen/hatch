@@ -110,6 +110,27 @@ test("resumable does not retry an HTTP error", async () => {
   assert.equal(opens, 1);
 });
 
+test("a send that dies on the network prints its key, and sending again with it is a replay, not a second message", async () => {
+  const keys = [];
+  await withServer((call, res) => {
+    if (call.method !== "POST" || call.url !== "/v1/conversations/c1/messages?product_id=p1") return json(res, { error: { code: "not_found", message: call.url } }, 404);
+    keys.push([call.headers["idempotency-key"], call.body.client_message_id]);
+    // The first attempt reaches the server and the connection is lost before any answer.
+    if (keys.length === 1) return res.destroy();
+    json(res, { run: { id: "r1", status: "completed" }, outcome: "replayed", reply: "hello again" });
+  }, async (url) => {
+    const first = await cli(["ask", "hi", "--product", "p1", "--conversation", "c1"], url);
+    assert.equal(first.code, 1);
+    const key = first.err.match(/--key (\S+)/)?.[1];
+    assert.ok(key, `the error names the key to retry with: ${first.err}`);
+    assert.equal(keys[0][0], key, "it is the key that was sent");
+    const second = await cli(["ask", "hi", "--product", "p1", "--conversation", "c1", "--key", key], url);
+    assert.equal(second.code, 0);
+    assert.deepEqual(keys[1], [key, key], "the retry carries the same key in the header and the body");
+    assert.match(second.out, /hello again/);
+  });
+});
+
 test("ask starts a conversation in the product, streams the reply, and resumes with after_cursor after a drop", async () => {
   await withServer((call, res) => {
     if (call.url === "/v1/conversations?product_id=p1") return json(res, { conversation: { id: "c1" }, created: true }, 201);
