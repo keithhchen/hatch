@@ -8,6 +8,10 @@ import { ConversationSync } from "./conversation-sync.js";
 import { ChatError } from "./errors.js";
 import { OPEN_FREE_CHAT } from "../domain/free-chat.js";
 
+/** Everything keyed by one Run id, keyed by another. */
+const rekeyRun = (messages, old, runId) => messages.map(message => message.run_id === old
+  ? { ...message, run_id: runId, ...(message.transient ? { id: `stream-${runId}` } : {}) } : message);
+
 const newId = prefix => `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`;
 
 export const INITIAL_CHAT_STATE = Object.freeze({
@@ -106,8 +110,11 @@ export class ConversationController {
     for (const listener of this.listeners) listener();
   }
 
+  /** The one place a live row is admitted: a Run whose end was told never has one, whatever it was learned from. */
   updateMessages(update) {
-    const messages = typeof update === "function" ? update(this.state.messages) : update;
+    const next = typeof update === "function" ? update(this.state.messages) : update;
+    const messages = this.endedRuns.size && next.some(message => message.transient && this.endedRuns.has(message.run_id))
+      ? next.filter(message => !(message.transient && this.endedRuns.has(message.run_id))) : next;
     this.setState({ messages });
     return messages;
   }
@@ -203,8 +210,10 @@ export class ConversationController {
     const listed = activeSnapshotRun(snapshot);
     const running = listed && !this.endedRuns.has(listed.id) ? listed : null;
     this.endRunLostWhileAway(snapshot, running);
-    if (running && this.run?.id !== running.id) this.adoptRun(running.id);
-    let projected = result.messages;
+    const held = this.run?.id;
+    if (running && held !== running.id) this.adoptRun(running.id);
+    // The page's rows were read before the adoption: they are keyed by the Run it held, and move with it.
+    let projected = running && held && held !== running.id ? rekeyRun(result.messages, held, running.id) : result.messages;
     if (this.settleNext) {
       // The reply the live row was showing is now a saved message: the live row starts again from the next words.
       this.settleNext = false;
@@ -281,7 +290,7 @@ export class ConversationController {
     const old = this.run?.id;
     this.run = { id: runId };
     if (!old || old === runId) return;
-    this.updateMessages(current => current.map(message => message.run_id === old ? { ...message, run_id: runId, ...(message.transient ? { id: `stream-${runId}` } : {}) } : message));
+    this.updateMessages(current => rekeyRun(current, old, runId));
     for (const submission of this.pendings.values()) if (submission.runId === old) submission.runId = runId;
     if (this.state.activeRun === old) this.setState({ activeRun: runId });
   }
