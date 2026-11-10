@@ -1,6 +1,5 @@
 import type { ContentPart } from "../surfaces/contract.js";
 import { ChatError } from "../chat/principal.js";
-import { imageMime } from "../factoryAgents/imageRefs.js";
 import type { Dispatcher } from "./dispatch.js";
 import type { Inbox } from "./inbox.js";
 import type { ChatGateway, Handled, Inbound, ReplyPolicy, TargetHandler } from "./ports.js";
@@ -32,8 +31,8 @@ export class ProductTarget implements TargetHandler {
     try {
       if (event.file) {
         if ((event.file.size ?? 0) > adapter.maxFileBytes) { await inbound.notify("这个文件太大了。\nThat file is too large."); return { replied: true }; }
-        const { assetId } = await this.deps.gateway.upload(principal, thread, { name: event.file.name, bytes: await adapter.download(event.file) });
-        parts.push({ type: imageMime(event.file.name) ? "image" : "file", assetId });
+        const { assetId, kind } = await this.deps.gateway.upload(principal, thread, { name: event.file.name, bytes: await adapter.download(event.file) });
+        parts.push({ type: kind, assetId });
       }
       if (!parts.length) { await inbound.notify("这种消息我还读不了，可以发文字、图片或文档。\nI can't read that kind of message yet."); return { replied: true }; }
       const { runId } = await this.deps.gateway.send(principal, thread, { client: connection.client }, event.eventId, parts);

@@ -32,14 +32,17 @@ export type RunProgress = { ended: false; compactionId?: string } | { ended: tru
  * deduplication of platform events, and delivery of the reply. Chat implements it in its own process
  * (ServiceChatGateway); the Registry reaches it over a service-authenticated HTTP adapter of the same shape.
  */
+/** A stored upload: the asset, and the kind the content turned out to be, which is the type of the part that refers to it. */
+export type UploadedRef = { assetId: string; kind: Exclude<ContentPart, { type: "text" }>["type"] };
+
 export interface ChatGateway {
   /**
    * Steers the conversation's active Run or starts one, atomically. `messageId` is the key a retry reuses, such as the
    * platform's event id: a repeat yields the same message and Run.
    */
   send(principal: Principal, conversation: ConversationRef, client: ClientAttributes, messageId: string, parts: ContentPart[]): Promise<SentMessage>;
-  /** Stores a file in the conversation's scope and returns the asset a message refers to. */
-  upload(principal: Principal, conversation: ConversationRef, input: { name: string; bytes: Buffer }): Promise<{ assetId: string }>;
+  /** Stores a file in the conversation's scope and returns the asset a message refers to. Its kind, decided by the content, is the type of the part that carries it. */
+  upload(principal: Principal, conversation: ConversationRef, input: { name: string; bytes: Buffer }): Promise<UploadedRef>;
   /** Undefined for a Run that does not exist. One reply per Run, however many messages joined it. */
   progress(runId: string): Promise<RunProgress | undefined>;
 }

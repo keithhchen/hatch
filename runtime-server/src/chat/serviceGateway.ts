@@ -4,7 +4,7 @@ import type { VisibleConversationMessage } from "../store.js";
 import type { ClientAttributes, ContentPart, Principal } from "../surfaces/contract.js";
 import type { PartsReader } from "./assets.js";
 import type { ChatService } from "./chatService.js";
-import type { ChatGateway, ConversationRef, RunProgress, SentMessage } from "./gateway.js";
+import type { ChatGateway, ConversationRef, RunProgress, SentMessage, UploadedRef } from "./gateway.js";
 import { ChatError } from "./principal.js";
 import { finalAssistantText, TERMINAL_STATUSES } from "./runResult.js";
 
@@ -22,7 +22,7 @@ export interface PrincipalBinder<Scope> {
 
 /** Stores a file the way the conversation's scope requires. Chat has one; a Runtime without an asset service has none. */
 export interface Uploads {
-  upload(conversation: ConversationRecord, input: { name: string; bytes: Buffer }): Promise<{ asset_id: string }>;
+  upload(conversation: ConversationRecord, input: { name: string; bytes: Buffer }): Promise<{ asset_id: string; kind: UploadedRef["kind"] }>;
 }
 
 export class ServiceChatGateway<Scope> implements ChatGateway {
@@ -46,10 +46,11 @@ export class ServiceChatGateway<Scope> implements ChatGateway {
     return { outcome: submission.outcome, conversationId: bound.conversation.id, runId: submission.run.id, messageId };
   }
 
-  async upload(principal: Principal, ref: ConversationRef, input: { name: string; bytes: Buffer }): Promise<{ assetId: string }> {
+  async upload(principal: Principal, ref: ConversationRef, input: { name: string; bytes: Buffer }): Promise<UploadedRef> {
     if (!this.deps.uploads) throw new ChatError("attachments_unavailable", "This Runtime cannot take attachments.", 501);
     const { conversation } = await this.deps.binders[principal.kind].bind(principal, ref);
-    return { assetId: (await this.deps.uploads.upload(conversation, input)).asset_id };
+    const { asset_id: assetId, kind } = await this.deps.uploads.upload(conversation, input);
+    return { assetId, kind };
   }
 
   async progress(runId: string): Promise<RunProgress | undefined> {

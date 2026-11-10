@@ -3,7 +3,6 @@ import { safeError } from "../factoryAgents/runtime.js";
 import type { ChannelConnection } from "../channels/connections.js";
 import type { Handled, Inbound, ReplyPolicy, TargetHandler } from "../channels/ports.js";
 import { CHANNEL_LABELS, type ChannelKind } from "../channels/types.js";
-import { imageMime } from "../factoryAgents/imageRefs.js";
 import type { ContentPart } from "../surfaces/contract.js";
 import type { AssistantService } from "./assistant.js";
 
@@ -49,15 +48,15 @@ export class AssistantTarget implements TargetHandler {
         if ((size ?? 0) > adapter.maxFileBytes) { await inbound.notify(`这个文件太大，${CHANNEL_LABELS[kind]} 传不过来。可以放到 Studio 里传。`); return DONE; }
         // A failed download throws: the event stays in the inbox and is tried again, also after a restart.
         const bytes = await adapter.download(event.file);
-        const { assetId } = await this.assistant.upload(accountId, name, bytes);
-        parts.push({ type: imageMime(name) ? "image" : "file", assetId });
+        const { assetId, kind: type } = await this.assistant.upload(accountId, name, bytes);
+        parts.push({ type, assetId });
       }
       if (!parts.length) { await inbound.notify("这种消息我还读不了，可以发文字、图片或文档。"); return DONE; }
       const { runId } = await this.assistant.hear(accountId, { ...origin, parts });
       return { replied: false, runId };
     } catch (error) {
       // A refusal that no retry changes goes back to the sender; anything else returns the event to the queue.
-      if (!(error instanceof ChatError && (error.status < 500 || error.status === 501))) throw error;
+      if (!(error instanceof ChatError && (error.status < 500 || error.status === 501 || error.code === "unavailable"))) throw error;
       await inbound.notify(error.message);
       return DONE;
     }

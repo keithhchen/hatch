@@ -347,3 +347,12 @@ test("recorded payload: a redelivered message parses to the same event id, and a
   assert.deepEqual(channel.parse(payload), channel.parse(payload));
   assert.deepEqual(channel.parse(json({ header: { event_id: "e9", event_type: "im.message.reaction.created_v1" }, event: {} })).events, []);
 });
+
+test("an audio message is an opus file, fetched from the message's resources as type=file", async () => {
+  const lark = fakeLark(() => new Response(Buffer.from("OggS"), { headers: { "content-type": "audio/ogg" } }));
+  const channel = new LarkChannel(PLAIN, "acct", lark.fetchImpl);
+  const [event] = channel.parse(receive("audio", { file_key: "file_v2_abc", duration: 4000 })).events;
+  assert.deepEqual(event?.file, { ref: "om_1|file_v2_abc|file", name: "voice.opus" });
+  assert.equal((await channel.download(event!.file!)).toString(), "OggS");
+  assert.equal(lark.calls[0]?.url, "https://open.larksuite.com/open-apis/im/v1/messages/om_1/resources/file_v2_abc?type=file");
+});

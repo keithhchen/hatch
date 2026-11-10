@@ -105,15 +105,17 @@ test("a voice message is ready only with a transcript, which is the message text
 });
 
 test("without a transcription provider the voice message fails as unavailable, and a retry is a new asset", async () => {
+  const log = console.error; console.error = () => undefined;
   const down = await harness({ transcriber: new UnavailableTranscriber("DASHSCOPE_API_KEY is not set") });
   const first = await down.pipeline.accept(scopeA, { name: "v.wav", bytes: wav() });
   assert.equal(first.record.failure?.code, "unavailable");
-  assert.match(first.record.failure!.message, /DASHSCOPE_API_KEY/);
+  assert.doesNotMatch(first.record.failure!.message, /DASHSCOPE_API_KEY/);
   assert.equal(first.record.transcript, undefined);
   const again = await down.pipeline.accept(scopeA, { name: "v.wav", bytes: wav() });
   assert.notEqual(again.id, first.id);
   const silent = await harness({ transcriber: saying("   ") });
   assert.equal((await silent.pipeline.accept(scopeA, { name: "v.wav", bytes: wav() })).state, "failed");
+  console.error = log;
 });
 
 test("a voice message whose provider fails ends failed as upstream_error, without the provider's words", async () => {

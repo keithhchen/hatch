@@ -89,7 +89,7 @@ class FakeGateway implements ChatGateway {
     this.runs.set(runId, { ended: false });
     return { outcome: "started" as const, conversationId: "conversation-1", runId, messageId };
   }
-  async upload(principal: Principal, conversation: ConversationRef, input: { name: string }) { this.uploaded.push({ principal, conversation, name: input.name }); return { assetId: "asset-1" }; }
+  async upload(principal: Principal, conversation: ConversationRef, input: { name: string }) { this.uploaded.push({ principal, conversation, name: input.name }); return { assetId: "asset-1", kind: /\.(jpe?g|png)$/i.test(input.name) ? "image" as const : /\.(ogg|m4a|amr)$/i.test(input.name) ? "audio" as const : "file" as const }; }
   async progress(runId: string) { return this.runs.get(runId); }
   finish(runId: string, result: { ok: boolean; text: string }) { this.runs.set(runId, { ended: true, reply: { runId, status: result.ok ? "completed" : "failed", text: result.ok ? result.text : "" } }); }
   compact(runId: string, compactionId: string) { if (!this.runs.get(runId)?.ended) this.runs.set(runId, { ended: false, compactionId }); }

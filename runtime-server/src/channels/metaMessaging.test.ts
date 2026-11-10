@@ -197,3 +197,13 @@ test("download fetches the attachment URL without a token, over https only", asy
 test("a fan has to message first: the adapter cannot start a conversation", () => {
   for (const channel of [instagram(), messenger()] as MetaMessagingChannel[]) assert.equal(channel.capabilities().canInitiate, false);
 });
+
+test("a voice clip is an audio attachment fetched from its CDN URL, on Messenger and on Instagram", async () => {
+  const clip = { type: "audio", payload: { url: "https://cdn.fbsbx.test/v/t59/clip.mp4?oh=1" } };
+  const [fromPage] = messenger().parse(payload("page", { id: "PAGE1", messaging: [when("p1", 1, "PSID1", { mid: "p1", attachments: [clip] })] })).events;
+  const [fromAccount] = instagram().parse(payload("instagram", { id: "IG1", messaging: [when("i1", 1, "IGSID1", { mid: "i1", attachments: [clip] })] })).events;
+  for (const event of [fromPage, fromAccount]) assert.deepEqual(event?.file, { ref: clip.payload.url, name: "voice.m4a" });
+  const { calls, fake } = recorder(() => new Response(Buffer.from("m4a-bytes")));
+  assert.equal((await messenger(fake).download(fromPage!.file!)).toString(), "m4a-bytes");
+  assert.equal(calls[0]!.url, clip.payload.url);
+});

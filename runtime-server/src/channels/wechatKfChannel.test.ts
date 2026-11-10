@@ -147,6 +147,15 @@ test("customer messages map to one event each; system and staff messages are ski
   assert.ok(events.every(event => !event.group && event.scope === undefined));
 });
 
+test("a voice message is AMR: sync_msg asks for that format and the media is fetched by its media_id", async () => {
+  const { channel, only } = kf(url => url.includes("sync_msg") ? page([message("v1", { msgtype: "voice", voice: { media_id: "MEDIA_V" } })]) : new Response(Buffer.from("#!AMR\nframes"), { headers: { "content-type": "audio/amr" } }));
+  const { events } = await channel.pull(notice(), undefined);
+  assert.deepEqual(events[0]?.file, { ref: "MEDIA_V", name: "voice.amr" });
+  assert.equal(only("sync_msg")[0]!.body.voice_format, 0);
+  assert.equal((await channel.download(events[0]!.file!)).subarray(0, 5).toString(), "#!AMR");
+  assert.match(only("/cgi-bin/media/get")[0]!.url, /media_id=MEDIA_V$/);
+});
+
 test("the access token is cached, and a stale one is replaced once", async () => {
   const counter = { n: 0 };
   const { channel, calls } = kf((_url, _body, index) => index === 1 ? reply(42001) : page([message("m1")]), tokens(counter));
