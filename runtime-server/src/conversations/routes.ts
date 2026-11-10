@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type http from "node:http";
+import { MAX_CONSUMER_BUFFERED_BYTES as MAX_BUFFERED_BYTES } from "../chat/sinks.js";
 import { normalizeClientAttributes, type ClientAttributes } from "../surfaces/contract.js";
 import { parseContent, resolveContent } from "./assets.js";
 import { awaitTurn } from "./awaitTurn.js";
@@ -13,8 +14,6 @@ import { Studio, type StudioDeps, type Target, type TargetSpec } from "./studio.
 export const MAX_WAIT_SECONDS = 120;
 /** The most any kind of asset may weigh; the pipeline holds each kind to its own limit. */
 export const MAX_UPLOAD_BYTES = Math.max(...Object.values(MAX_BYTES));
-/** A consumer that lets this much pile up is disconnected; it resumes by cursor. */
-export const MAX_BUFFERED_BYTES = 1024 * 1024;
 
 export type ConversationRouteDeps = StudioDeps & {
   /** The signed-in account, or nothing. */

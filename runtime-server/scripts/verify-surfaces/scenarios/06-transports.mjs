@@ -1,11 +1,18 @@
-import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { Scenario } from "../lib/scenario.mjs";
 import { Auth, ChatApi, ChatSocket, StudioApi, StudioSocket } from "../lib/clients.mjs";
 import { sleep } from "../lib/util.mjs";
-import { StalledSse, SseCollector, bytesSha, cursorReport, median, sameBytes, settled, stall, timeTo, unstall } from "../lib/transport-helpers.mjs";
+import { StalledSse, SseCollector, bytesSha, cursorReport, median, rawStalledConsumer, sameBytes, settled, stall, timeTo, unstall } from "../lib/transport-helpers.mjs";
 
 const CHAT_PROMPT = "List the integers from 1 to 150 separated by single spaces. Output only the numbers, no other words.";
+/**
+ * One real Run of this size streams about 200 KB of frames in about three minutes: 1 MB would take a quarter of an hour of
+ * model time. The Runtime of this scenario is therefore started with a consumer bound of 4 KB (HATCH_RUNTIME_MAX_CONSUMER_BUFFERED_BYTES,
+ * product default 1 MB) and the Run only has to outgrow the kernel's 128 KB send buffer plus the consumer's 4 KB receive buffer.
+ */
+const CONSUMER_BOUND_BYTES = 4096;
+const KERNEL_ABSORBS_BYTES = 160 * 1024;
+const CHAT_BIG_PROMPT = "List the integers from 1 to 6000 separated by single spaces. Output only the numbers, no other words.";
+const CHAT_BIG_RUNS = 6;
 const STUDIO_PROMPT = "List the integers from 1 to 150 separated by single spaces. Output only the numbers, no other words.";
 /** One token per event in Studio, so a long answer is what can make a stalled consumer fall a megabyte behind. */
 const STUDIO_LONG_PROMPT = "List the integers from 1 to 1500 separated by single spaces. Output only the numbers, no other words.";
@@ -30,9 +37,15 @@ class ChatTarget {
     socket.subscribe({ stream, after });
     return socket;
   }
-  async send(prompt) {
+  async send(prompt, { poll = false } = {}) {
     const started = Date.now();
     const sent = await this.api.send(this.conversation, this.productId, { content: prompt, wait: 120 });
+    if (poll && sent.status !== 200) {
+      // A long answer outlasts the 120 s maximum of ?wait; the Run is timed until it is terminal.
+      const runId = sent.json?.run?.id ?? sent.json?.run_id;
+      const done = runId ? await this.api.finish(this.conversation, this.productId, runId, 600_000) : undefined;
+      return { ms: Date.now() - started, status: done?.status === "completed" ? 200 : sent.status, runId };
+    }
     return { ms: Date.now() - started, status: sent.status, reply: sent.json?.reply, runId: sent.json?.run?.id ?? sent.json?.run_id };
   }
   async history() { const messages = await this.api.messages(this.conversation, this.productId); return messages.filter((m) => m.role === "assistant").at(-1)?.content; }
@@ -47,6 +60,14 @@ class ChatTarget {
   assistantCommitted(cursorsAndFrames) { return cursorsAndFrames.some((f) => (f.type ?? f.json?.type) === "journal.event" && (f.journal_type ?? f.json?.journal_type) === "message.created" && (f.payload ?? f.json?.payload)?.role === "assistant"); }
   /** The terminal journal cursor of the Run, for catch-up. */
   caughtUp(cursors, head) { return cursors.includes(head); }
+  rawStalled(after) {
+    return rawStalledConsumer({
+      baseUrl: this.stack.url, path: "/v1/runtime",
+      hello: { type: "client.hello", protocol_version: "0.8", conversation_id: this.conversation, auth_token: this.owner.apiKey, product_id: this.productId, local_tools: [], client: "desktop", device: "mac" },
+      subscribe: { type: "conversation.subscribe", conversation_id: this.conversation, stream: true, after_cursor: after },
+      stallSeconds: 900
+    });
+  }
   async close() {}
 }
 
@@ -90,16 +111,8 @@ class StudioTarget {
     socket.subscribe("late", { assistant: true }, { stream: true, after: "0" });
     return socket;
   }
-  rawStalledFromStart() {
-    const url = new URL(this.stack.registryUrl);
-    const script = fileURLToPath(new URL("../lib/stalled_ws_client.py", import.meta.url));
-    const env = { PATH: process.env.PATH, HOST: url.hostname, PORT: url.port, PATH_: "/v1/creator/studio/ws", TOKEN: this.owner.apiKey, SUBSCRIBE_JSON: JSON.stringify({ type: "subscribe", id: "raw", target: { assistant: true }, stream: true, after: "0" }), STALL_SECONDS: "8" };
-    return new Promise((resolve) => {
-      const child = spawn("python3", ["-I", script], { env, stdio: ["ignore", "pipe", "pipe"] });
-      let out = "";
-      child.stdout.on("data", (d) => { out += d; });
-      child.on("exit", () => { try { resolve(JSON.parse(out)); } catch { resolve({ error: out.slice(0, 200) }); } });
-    });
+  rawStalled() {
+    return rawStalledConsumer({ baseUrl: this.stack.registryUrl, path: "/v1/creator/studio/ws", hello: { type: "auth", token: this.owner.apiKey }, subscribe: { type: "subscribe", id: "raw", target: { assistant: true }, stream: true, after: "0" } });
   }
   sseCursor(frame) { return frame.id; }
   wsCursor(frame) { return frame.type === "event" ? frame.cursor : undefined; }
@@ -141,7 +154,7 @@ class Observation {
 const say = (text) => process.stderr.write(`[6] ${new Date().toISOString().slice(11, 19)} ${text}\n`);
 
 class Transports extends Scenario {
-  constructor() { super({ id: 6, title: "Transports: one Run observed by HTTP, SSE, WS streaming and WS non-streaming; slow consumer" }); }
+  constructor() { super({ id: 6, title: "Transports: one Run observed by HTTP, SSE, WS streaming and WS non-streaming; slow consumer", stackOptions: { runtimeEnv: { HATCH_RUNTIME_MAX_CONSUMER_BUFFERED_BYTES: String(CONSUMER_BOUND_BYTES) } } }); }
 
   async run(stack, rec) {
     const owner = await stack.account("owner");
@@ -262,12 +275,45 @@ class Transports extends Scenario {
     const destroyed = evidence.filter((e) => e.sseClosed && e.sseClosed.complete === false).length;
     rec.measure(`${n}_slow_ws_closed_1013_trials`, `${dropped}/${evidence.length}`);
     rec.measure(`${n}_slow_sse_destroyed_trials`, `${destroyed}/${evidence.length}`);
-    if (n === "chat") rec.check(`chat: a consumer that stops reading is disconnected (WS close 1013 / SSE destroyed) rather than buffered without bound`, dropped > 0 || destroyed > 0, { evidence: evidence.slice(0, 2) });
+    if (n === "chat") await this.chatReplay(target, rec);
     else rec.note(`studio: during the live Runs the stalled Node clients were not dropped (${median(evidence.map((e) => e.wsFramesThatPiledUp))} frames / ~${median(evidence.map((e) => e.sseBytesThatPiledUp))} SSE bytes piled up): the operating system's socket buffers absorbed them below the server's 1 MB limit. That is a limit of this stimulus, not a verdict; the drop itself is checked below with a raw TCP consumer whose receive buffer is 4 KB.`);
     const reconnects = evidence.filter((e) => e.reconnect);
-    if (n === "chat" && !dropped && !destroyed) rec.defect({ title: "Chat never disconnects a stalled consumer: its limit is 160 MB per connection", severity: "medium", expected: "Spec: a slow consumer is disconnected and reconnects by cursor (Studio does this at 1 MB)", actual: `Stalled Chat WS and SSE consumers stayed connected through every Run (${evidence.length} trials, 0 closes) while ${median(evidence.map((e) => e.wsFramesThatPiledUp))} frames / ${median(evidence.map((e) => e.sseBytesThatPiledUp))} SSE bytes piled up unread. The limit is maxSocketBufferedBytes / maxStreamBufferedBytes, default 160 MB, and index.ts refuses any configured value below MAX_RUNTIME_WEBSOCKET_PAYLOAD_BYTES (160 MB), so it cannot be lowered: each stalled consumer can hold up to 160 MB of Runtime memory before it is dropped; no realistic answer reaches it, so the 1013 / destroy path was not reachable from outside`, repro: "run.mjs --only 6: chat_slow_consumer_trials" });
     if (n === "studio") await this.lateJoiner(target, rec);
     if (reconnects.length) rec.check(`${n}: a disconnected consumer reconnects by cursor and gets exactly the events it missed`, reconnects.every((e) => e.reconnect.exact), reconnects.map((e) => e.reconnect));
+  }
+  /**
+   * One Node client the kernel absorbs for megabytes, so the bound is exercised with a raw TCP consumer (4 KB receive buffer)
+   * that subscribes before the Runs and never reads. Real Runs, each asked for thousands of numbers, stream deltas to it until
+   * the frames offered to a live, reading observer exceed what the kernel can absorb.
+   */
+  async chatReplay(target, rec) {
+    const after = await target.prepare();
+    const stalled = target.rawStalled(after);
+    const reader = await target.openWs(after, true);
+    await sleep(2_000);
+    const offered = () => reader.frames.reduce((sum, f) => sum + Buffer.byteLength(JSON.stringify(f)), 0);
+    const runs = [];
+    for (let i = 0; i < CHAT_BIG_RUNS && offered() < KERNEL_ABSORBS_BYTES; i++) {
+      const sent = await target.send(CHAT_BIG_PROMPT, { poll: true });
+      runs.push({ ms: sent.ms, status: sent.status, offeredBytes: offered() });
+      say(`chat: big run ${i + 1} status ${sent.status} ${sent.ms} ms, ${offered()} bytes offered to a live reader`);
+    }
+    stalled.release();
+    const raw = await stalled.result;
+    rec.measure("chat_big_runs", runs);
+    rec.measure("chat_stalled_raw_tcp", raw);
+    if (!rec.check("chat: the Runs offered the stalled consumer more than the kernel can absorb (a live reader was sent more than 160 KB)", offered() > KERNEL_ABSORBS_BYTES, { runs })) { reader.close(); return; }
+    const dropped = raw.ended === "eof" || raw.close_code === 1013;
+    rec.check("chat: a raw TCP consumer (4 KB receive buffer) that never reads is disconnected rather than buffered without bound (WS close 1013 / connection dropped)", dropped, { raw, runs });
+    reader.close();
+    if (!dropped) return;
+    const last = Number(raw.last_cursor ?? after);
+    const again = await target.openWs(last, true);
+    await settled(() => again.frames.length, 2_000);
+    const got = again.frames.map((f) => target.wsCursor(f)).filter((c) => c !== undefined).map(Number);
+    const want = (await target.truth(last)).cursors.map(Number);
+    rec.check("chat: the dropped consumer resumes by cursor and gets exactly the durable events it missed", JSON.stringify(got) === JSON.stringify(want), { from: last, got: got.length, want: want.length });
+    again.close();
   }
   /**
    * The Studio log now holds several long Runs of one-token events. A consumer that joins from the start and never reads
@@ -275,7 +321,9 @@ class Transports extends Scenario {
    */
   async lateJoiner(target, rec) {
     const truth = (await target.truth("0")).cursors.map(Number);
-    const raw = await target.rawStalledFromStart();
+    const stalled = target.rawStalled();
+    await sleep(8_000); stalled.release();
+    const raw = await stalled.result;
     rec.measure("studio_late_joiner_raw_tcp", { journal_events: truth.length, ...raw });
     const dropped = raw.close_code === 1013;
     rec.check("studio: a raw TCP consumer (4 KB receive buffer) that joins from the start and never reads is closed with 1013 (slow consumer)", dropped, { raw, journal_events: truth.length });

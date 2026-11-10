@@ -1,35 +1,11 @@
 {
   "id": 12,
   "title": "The 2x2 matrix walked end to end: coding agent and IM (Telegram, Feishu, WeCom) to Studio and Chat",
-  "status": "FAIL",
-  "durationMs": 606293,
+  "status": "PASS",
+  "durationMs": 55359,
   "checks": [
     {
-      "name": "[3a] connect returned a HATCH- code and the bot's t.me link",
-      "ok": true,
-      "detail": {
-        "status": 200,
-        "url": "https://t.me/hatch_verify_bot?start=HATCH-AWNWEF3J"
-      }
-    },
-    {
-      "name": "[3a] the webhook carrying the code is accepted (200)",
-      "ok": true,
-      "detail": {
-        "status": 200,
-        "ms": 2
-      }
-    },
-    {
-      "name": "[4a] the webhook is accepted",
-      "ok": true,
-      "detail": {
-        "status": 200,
-        "ms": 2
-      }
-    },
-    {
-      "name": "[3f] WeCom credentials accepted (no probe exists for the smart bot): own-app Connection with its webhook URL",
+      "name": "[4e] WeCom credentials accepted (no probe exists for the smart bot): own-app Connection with its webhook URL",
       "ok": true,
       "detail": {
         "status": 200,
@@ -39,31 +15,12 @@
           "linked": false,
           "state": "active",
           "own_app": true,
-          "webhook_url": "http://studio.verify.local/v1/channels/wecom/3e63ceab-73c8-486e-9f79-15f0c4c976a8/webhook"
+          "webhook_url": "http://studio.verify.local/v1/channels/wecom/58da160d-0c7e-47ff-b550-5b98a985e987/webhook"
         }
       }
     },
     {
-      "name": "[3e] credentials accepted: probed the platform (tenant token, bot info) and the Connection is available with its own webhook URL",
-      "ok": true,
-      "detail": {
-        "status": 200,
-        "view": {
-          "kind": "feishu",
-          "available": true,
-          "linked": false,
-          "state": "active",
-          "own_app": true,
-          "webhook_url": "http://studio.verify.local/v1/channels/feishu/92f93571-3473-4d5b-a211-616e3f4584c0/webhook"
-        },
-        "probes": [
-          "/open-apis/auth/v3/tenant_access_token/internal",
-          "/open-apis/bot/v3/info"
-        ]
-      }
-    },
-    {
-      "name": "[3f] URL verification GET returns the decrypted echostr; a bad signature is refused (401)",
+      "name": "[4e] URL verification GET returns the decrypted echostr; a bad signature is refused (401)",
       "ok": true,
       "detail": {
         "verify": {
@@ -75,104 +32,29 @@
       }
     },
     {
-      "name": "[3e] a wrong signature is refused (401) and url_verification is echoed",
-      "ok": true,
-      "detail": {
-        "bad": 401,
-        "challenge": {
-          "status": 200,
-          "text": "{\"challenge\":\"verify-challenge\"}"
-        }
-      }
-    },
-    {
-      "name": "[3e] the code message is accepted (signed, encrypted)",
+      "name": "[4a] the webhook is accepted",
       "ok": true,
       "detail": {
         "status": 200,
-        "text": "{\"ok\":true}"
+        "ms": 3
       }
     },
     {
-      "name": "[1a] hatch whoami with the API key",
-      "ok": true,
-      "detail": {
-        "code": 0,
-        "id": "a7aecb6e-f152-449f-8b8a-9ded7e864e80"
-      }
-    },
-    {
-      "name": "[1a] hatch products create returned a Product id (real Registry, POST /v1/creator/products)",
-      "ok": true,
-      "detail": {
-        "code": 0,
-        "stdout": "{\n  \"product_id\": \"697d9923-c22a-4451-b5d5-39f6a405d0af\",\n  \"name\": \"Matrix CLI Product\",\n  \"promise\": \"A verification Product created from the hatch CLI\",\n  \"status\": \"draft\",\n  \"brief_spec\": {\n    \""
-      }
-    },
-    {
-      "name": "[3a] the bot answers the code with the connected notice",
-      "ok": true,
-      "detail": "连上了。先给我一样东西就行：你的名字、一个链接，或者现成的资料。"
-    },
-    {
-      "name": "[3a] a self Assistant Connection is linked to the sender's private chat",
+      "name": "[4e] org member: one reply with the answer on the response_url",
       "ok": true,
       "detail": [
         {
-          "id": "c316c913-de55-4f27-920e-f711ae9ff1e9",
-          "audience": "self",
-          "target_key": "assistant",
-          "sender_id": "7001",
-          "thread_id": "7001"
-        }
-      ]
-    },
-    {
-      "name": "[3f] the code is accepted and answered once on that message's response_url (markdown)",
-      "ok": true,
-      "detail": [
-        {
-          "at": 1794271856300,
-          "path": "/cgi-bin/aibot/response/49454b6b-78db-4dd9-ba64-131f12161e68",
+          "at": 1794272915888,
+          "path": "/cgi-bin/aibot/response/3cf6a3f1-7f75-4d52-8551-c321cc754021",
           "msgtype": "markdown",
-          "text": "连上了。先给我一样东西就行：你的名字、一个链接，或者现成的资料。"
+          "text": "wecom-org-ok"
         }
       ]
     },
     {
-      "name": "[3e] the adapter replied on the platform (reply API with the tenant token)",
+      "name": "[4d] org member: one reply with the answer",
       "ok": true,
-      "detail": {
-        "at": 1794271856297,
-        "path": "/open-apis/im/v1/messages/om_5f0d8f14e2064781ae50eb7881ca42b6/reply",
-        "text": "连上了。先给我一样东西就行：你的名字、一个链接，或者现成的资料。",
-        "msgType": "text",
-        "buttons": [],
-        "authorization": "present",
-        "uuid": "d88da0d1-9e58-e89a-639b-13f615e3505d"
-      }
-    },
-    {
-      "name": "[1a] price before the change is the initial one",
-      "ok": true,
-      "detail": "10000/2900"
-    },
-    {
-      "name": "[1a] hatch assistant --wait exited 0",
-      "ok": true,
-      "detail": {
-        "code": 0,
-        "stderr": "",
-        "stdout": "{\n  \"client_message_id\": \"6dcb8625-23f2-4484-9bf7-d99ba69a295a\",\n  \"conversation_id\": \"a7aecb6e-f152-449f-8b8a-9ded7e864e80\",\n  \"run_id\": \"run_540217b1-68b2-4629-a6ad-295a715d77d3\",\n  \"message\": {\n    \"id\": \"8cabe546-bb83-4683-97a4-35c4bb84856e\",\n    \"role\": \"user\",\n    \"text\": \"请调用 propose_change 工"
-      }
-    },
-    {
-      "name": "[3a] a used code does not link again (the replayed code gets the expired notice)",
-      "ok": true,
-      "detail": [
-        "连上了。先给我一样东西就行：你的名字、一个链接，或者现成的资料。",
-        "这个连接码已失效。请回到 Hatch Studio 重新点「连接 Telegram」。"
-      ]
+      "detail": "feishu-org-ok"
     },
     {
       "name": "[2a] ask --wait: completed with the reply",
@@ -187,10 +69,27 @@
       }
     },
     {
+      "name": "[4e] org outsider: refused with the connect notice",
+      "ok": true,
+      "detail": [
+        {
+          "at": 1794272916014,
+          "path": "/cgi-bin/aibot/response/c5c86b5c-b1ed-455e-8faf-8212448d9254",
+          "msgtype": "markdown",
+          "text": "请先从 Hatch Studio 连接 企业微信。"
+        }
+      ]
+    },
+    {
+      "name": "[4d] org outsider: refused with the connect notice (no Run)",
+      "ok": true,
+      "detail": "请先从 Hatch Studio 连接 飞书。"
+    },
+    {
       "name": "[2a] ask --conversation continues the same conversation with a new Run",
       "ok": true,
       "detail": {
-        "run": "run_27aab356e1bb48bca013445c4f24285b",
+        "run": "run_926522531e42499cb1fd3224b5baede5",
         "reply": {
           "text": "ping"
         }
@@ -217,15 +116,15 @@
       "detail": {
         "inbox": [
           {
-            "event_id": "129538",
+            "event_id": "135767",
             "state": "done",
-            "run_id": "run_c0f2a4f3a79743f5ae34465745c05c22",
+            "run_id": "run_be50ff48dabf4274982b96ea110b6de4",
             "attempts": 1
           }
         ],
         "runs": [
           {
-            "id": "run_c0f2a4f3a79743f5ae34465745c05c22",
+            "id": "run_be50ff48dabf4274982b96ea110b6de4",
             "status": "completed"
           }
         ]
@@ -239,15 +138,62 @@
       }
     },
     {
+      "name": "[4e] member: one Run, one reply row sent, still exactly one reply; outsider: no Run",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "outbox": [
+          {
+            "state": "sent",
+            "source_key": "run:run_c8048831e2b14b2aa64990994c2a5b98",
+            "sent_parts": 1,
+            "attempts": 0
+          }
+        ],
+        "outsiderRuns": 0
+      }
+    },
+    {
+      "name": "[4e] the WeCom org principal is a contact",
+      "ok": true,
+      "detail": "contact:3036beef-85ae-4c58-814b-7133c78cc074:7447fde2-e506-4ffe-9513-56035bf9e306"
+    },
+    {
+      "name": "[4d] member: one inbound -> one Run -> one reply row sent; outsider: no Run",
+      "ok": true,
+      "detail": {
+        "member": {
+          "runs": 1,
+          "outbox": [
+            {
+              "state": "sent",
+              "source_key": "run:run_86e7073640c34e17b071cb5c9926c7bc",
+              "sent_parts": 1,
+              "attempts": 0
+            }
+          ]
+        },
+        "outsider": 0
+      }
+    },
+    {
+      "name": "[4d] the Feishu principal is a contact, not the owner's account",
+      "ok": true,
+      "detail": {
+        "conversationOwner": "contact:a109efb7-44de-4316-9887-31c441c5dd2a:359d2d5f-82fe-4281-ab57-7313559ea7f1",
+        "owner": "149e8fd7-c488-47ab-9cb2-3db069c3897e"
+      }
+    },
+    {
       "name": "[2a] ask --stream: the Run completed and the streamed reply carries the answer",
       "ok": true,
       "detail": {
         "code": 0,
         "json": {
-          "conversation_id": "conv_5547d9d22a884ce0bfe7b178af6b8dde",
-          "client_message_id": "f330faf6-2663-4823-aceb-2f563f829644",
-          "run_id": "run_e6cc26ca2695402996970698ef820de6",
-          "cursor": "30",
+          "conversation_id": "conv_bd51196d56ac4973914c1d0576ab5725",
+          "client_message_id": "166c54cd-db7a-4a04-a6c6-137bc78f5786",
+          "run_id": "run_3e8e82bc628c49c0a53f61080bb4e91b",
+          "cursor": "50",
           "status": "completed",
           "reply": {
             "text": "streamed"
@@ -263,7 +209,7 @@
       "detail": {
         "runs": 3,
         "messages": 6,
-        "cursor": 30,
+        "cursor": 50,
         "status": "completed"
       }
     },
@@ -274,8 +220,8 @@
         "code": 0,
         "ms": 99,
         "json": {
-          "run_id": "run_0e4e7819bc924ebdbad892da6c372fc7",
-          "cursor": "12",
+          "run_id": "run_dc53c4f345994395a25552b85e8e6101",
+          "cursor": "24",
           "status": "completed",
           "reply": {
             "text": ""
@@ -288,7 +234,7 @@
     {
       "name": "[2a] conversations lists the conversation",
       "ok": true,
-      "detail": "{\n  \"conversations\": [\n    {\n      \"id\": \"conv_5547d9d22a884ce0bfe7b178af6b8dde\",\n      \"creator_id\": \"f57110b4-615f-49a4-930c-f728cc13e06e\",\n      \"agent_id\": \"480cd85e-15db-43b2-ae08-e833897078d5\",\n"
+      "detail": "{\n  \"conversations\": [\n    {\n      \"id\": \"conv_bd51196d56ac4973914c1d0576ab5725\",\n      \"creator_id\": \"ff14d415-2ea7-40aa-99d6-b357fe7a98e4\",\n      \"agent_id\": \"d2a551ba-a3aa-463c-b820-9e9e1292740f\",\n"
     },
     {
       "name": "[4b] each member gets one reply to their message",
@@ -307,36 +253,25 @@
       }
     },
     {
-      "name": "[2a] watching a live Run (from now) ends at its end with the full reply (Paris)",
+      "name": "[4e] public: an unknown sender is met as a contact and answered once",
       "ok": true,
       "detail": {
-        "askCode": 0,
-        "watchMs": 14894,
-        "watch": {
-          "run_id": "run_9952329dc9f3429fab01d60cd3c438f7",
-          "cursor": "50",
-          "status": "completed",
-          "reply": {
-            "text": "The capital of France is Paris."
-          },
-          "streamed": false
-        },
-        "stderr": ""
+        "reply": "wecom-public-ok",
+        "runs": 1
       }
     },
     {
-      "name": "[2a] ask without --wait is accepted with a run id",
+      "name": "[4d] public: two unknown senders are each met as contacts and answered",
       "ok": true,
       "detail": {
-        "code": 0,
-        "json": {
-          "conversation_id": "conv_6d308259dbea4da4bae626c0291c98bb",
-          "client_message_id": "16673bbc-3389-4ab6-b3af-44c0579a2643",
-          "run_id": "run_6b50e4f6e4114e9bafa8b15db688f018",
-          "outcome": "started",
-          "status": "queued"
-        }
+        "p1": "noted",
+        "p2": "none"
       }
+    },
+    {
+      "name": "[4d] public: contacts are isolated (the second does not learn the first's word)",
+      "ok": true,
+      "detail": "none"
     },
     {
       "name": "[4b] each member: two inbounds -> two Runs in ONE conversation, two replies sent once each",
@@ -358,17 +293,58 @@
       "name": "[4b] two members' conversations are distinct",
       "ok": true,
       "detail": {
-        "c1": "conversation:6851e42a3cd182dec1f651c2:de2b66cc20dfcaca12771f11",
-        "c2": "conversation:da3b3447ba54f1c6c5cd9a3d:df25bbd10565a7194dc26869"
+        "c1": "conversation:1e7cfbe72723c7a1bffff38d:db06e2b2c6faf9d745cbd9f8",
+        "c2": "conversation:877a6aed0ee9c1a00811ab2d:5646786230f7131ba28ae1b8"
       }
     },
     {
       "name": "[4b] org members are contacts: each conversation is owned by contact:<connection>:<contact>, never the owner's account",
       "ok": true,
       "detail": {
-        "m1": "contact:e937318d-aa99-463c-8fae-b70a76573349:4625d2e0-7b94-4db1-852d-a3534253f7d1",
-        "m2": "contact:e937318d-aa99-463c-8fae-b70a76573349:899b7b6c-f2ba-45ac-b9a0-e075492d1ef9",
-        "owner": "c974fccf-9006-412e-a356-8c3fc2f0cbd5"
+        "m1": "contact:ca5ae5b9-f1b5-4966-827c-cd19b4e5f11c:ff4d0ffa-1131-4d81-af35-81c904b751e5",
+        "m2": "contact:ca5ae5b9-f1b5-4966-827c-cd19b4e5f11c:6646fe8b-a030-4358-8d66-08d02955542a",
+        "owner": "57aa55b5-44c9-44e6-aade-6118ec48a938"
+      }
+    },
+    {
+      "name": "[4d] public: one Run each, distinct conversations, contact principals",
+      "ok": true,
+      "detail": {
+        "c1": "conversation:c129ccdbe696d8541a657f6b:76cb63f86d3375ecb7c341ec",
+        "c2": "conversation:10e538bde8d8dec43cf1e6dd:cd89044f5cc51ec0ef839431",
+        "owner": "contact:a5b1dcc2-94f5-476a-bc98-cb337c202ec1:3d224124-bc2b-458a-90fb-9a9ee2e997e6"
+      }
+    },
+    {
+      "name": "[2a] watching a live Run (from now) ends at its end with the full reply (Paris)",
+      "ok": true,
+      "detail": {
+        "askCode": 0,
+        "watchMs": 15275,
+        "watch": {
+          "run_id": "run_cfcfbbd168564d48bc4f81149100be77",
+          "cursor": "83",
+          "status": "completed",
+          "reply": {
+            "text": "The capital of France is Paris."
+          },
+          "streamed": false
+        },
+        "stderr": ""
+      }
+    },
+    {
+      "name": "[2a] ask without --wait is accepted with a run id",
+      "ok": true,
+      "detail": {
+        "code": 0,
+        "json": {
+          "conversation_id": "conv_955daa68a87243c6935f5793678817eb",
+          "client_message_id": "2d36addc-69c9-468d-bf3c-a099586090a1",
+          "run_id": "run_fdcb924af14745be90a1e45e032d5286",
+          "outcome": "started",
+          "status": "queued"
+        }
       }
     },
     {
@@ -376,7 +352,7 @@
       "ok": true,
       "detail": {
         "stopCode": 0,
-        "stdout": "{\n  \"run\": {\n    \"id\": \"run_6b50e4f6e4114e9bafa8b15db688f018\",\n    \"client_message_id\": \"16673bbc-3389-4ab6-b3af-44c0579a2643\",\n    \"input_digest\": \"sha256:4adec1cfd5533e882ff94428787840af759cc466fed5",
+        "stdout": "{\n  \"run\": {\n    \"id\": \"run_fdcb924af14745be90a1e45e032d5286\",\n    \"client_message_id\": \"2d36addc-69c9-468d-bf3c-a099586090a1\",\n    \"input_digest\": \"sha256:4adec1cfd5533e882ff94428787840af759cc466fed5",
         "final": "cancelled",
         "searchCalls": 2
       }
@@ -384,103 +360,29 @@
     {
       "name": "[2b] chat_send wait=60: reply",
       "ok": true,
-      "detail": "{\n  \"conversation_id\": \"conv_1849dff57fa8418fbf1916515f79716d\",\n  \"client_message_id\": \"ed3129cb-2093-4c55-abb9-34e64863c184\",\n  \"run_id\": \"run_abc3afd4cb964d7aa939f055922a7172\",\n  \"outcome\": \"started\",\n  \"status\": \"completed\",\n  \"reply\": {\n    \"text\": \"mcp-pong\"\n  }\n}"
+      "detail": "{\n  \"conversation_id\": \"conv_ade5e7247da24a06b6176f28c591daaf\",\n  \"client_message_id\": \"4f892ba8-b10d-441f-ad9f-5f59c9a8cc54\",\n  \"run_id\": \"run_ac58eaedf7ae4122a4e06c1db0186864\",\n  \"outcome\": \"started\",\n  \"status\": \"completed\",\n  \"reply\": {\n    \"text\": \"mcp-pong\"\n  }\n}"
     },
     {
       "name": "[2b] conversation_show: messages and the Run's status",
       "ok": true,
-      "detail": "{\n  \"conversation\": {\n    \"id\": \"conv_1849dff57fa8418fbf1916515f79716d\",\n    \"creator_id\": \"f57110b4-615f-49a4-930c-f728cc13e06e\",\n    \"agent_id\": \"480cd85e-15db-43b2-ae08-e833897078d5\",\n    \"product_"
+      "detail": "{\n  \"conversation\": {\n    \"id\": \"conv_ade5e7247da24a06b6176f28c591daaf\",\n    \"creator_id\": \"ff14d415-2ea7-40aa-99d6-b357fe7a98e4\",\n    \"agent_id\": \"d2a551ba-a3aa-463c-b820-9e9e1292740f\",\n    \"product_"
     },
     {
       "name": "[2b] conversations_list includes it",
       "ok": true,
-      "detail": "{\n  \"conversations\": [\n    {\n      \"id\": \"conv_1849dff57fa8418fbf1916515f79716d\",\n      \"creator_id\": \"f57110b4-615f-49a4-930c-f728cc13e06e\",\n      \"agent_id\": \"480cd85e-15db-43b2-ae08-e833897078d5\",\n"
+      "detail": "{\n  \"conversations\": [\n    {\n      \"id\": \"conv_ade5e7247da24a06b6176f28c591daaf\",\n      \"creator_id\": \"ff14d415-2ea7-40aa-99d6-b357fe7a98e4\",\n      \"agent_id\": \"d2a551ba-a3aa-463c-b820-9e9e1292740f\",\n"
     },
     {
       "name": "[2b] chat_send without wait returns a run id",
       "ok": true,
-      "detail": "{\n  \"conversation_id\": \"conv_594436f396864222b425682377d0430b\",\n  \"client_message_id\": \"d1b86667-e99c-4f40-ae57-3dd5c5ee8a04\",\n  \"run_id\": \"run_279e35d6cd1e45c6a0345c146ed57952\",\n  \"outcome\": \"started"
+      "detail": "{\n  \"conversation_id\": \"conv_dbc202546ef9467bb903559164586584\",\n  \"client_message_id\": \"9494b527-af2b-4dba-b10c-c2555025d2ac\",\n  \"run_id\": \"run_ada6f9b286fe4d0189a53de587c423f3\",\n  \"outcome\": \"started"
     },
     {
       "name": "[2b] chat_stop cancels a running Run",
       "ok": true,
       "detail": {
-        "stop": "{\n  \"run\": {\n    \"id\": \"run_279e35d6cd1e45c6a0345c146ed57952\",\n    \"client_message_id\": \"d1b86667-e99c-4f40-ae57-3dd5c5ee8a04\",\n    \"input_digest\": \"sha256:c3e4",
+        "stop": "{\n  \"run\": {\n    \"id\": \"run_ada6f9b286fe4d0189a53de587c423f3\",\n    \"client_message_id\": \"9494b527-af2b-4dba-b10c-c2555025d2ac\",\n    \"input_digest\": \"sha256:c3e4",
         "final": "cancelled"
-      }
-    },
-    {
-      "name": "[2c] precondition: the HTTP door works when brief_answers are supplied as the spec requires (and refuses a missing array)",
-      "ok": false,
-      "detail": {
-        "optional": {
-          "product": "55005e93-a81a-4ddd-9fe8-dd78289b8848",
-          "httpNoAnswers": 201,
-          "httpEmptyAnswers": 201,
-          "httpWithAnswer": 201,
-          "cliExit": 0,
-          "cliError": "",
-          "cliReply": "briefed",
-          "mcpReply": "briefed"
-        },
-        "required": {
-          "product": "f6036d7e-dd99-452e-b366-742cdb7e5012",
-          "httpNoAnswers": 422,
-          "httpEmptyAnswers": 422,
-          "httpWithAnswer": 201,
-          "cliExit": 1,
-          "cliError": "{\"error\":{\"code\":\"brief_required_answer_missing\",\"message\":\"Request failed (422): Answers required in brief_answers [{field_id, value}]: goal (What should we ac",
-          "mcpError": "Request failed (422): Answers required in brief_answers [{field_id, value}]: goal (What should we achieve?)"
-        },
-        "none": {
-          "product": "0ce31715-34c0-40ec-8def-6d453f0ae4b0",
-          "httpNoAnswers": 403,
-          "httpEmptyAnswers": 403,
-          "httpWithAnswer": 403,
-          "cliExit": 1,
-          "cliError": "{\"error\":{\"code\":\"forbidden\",\"message\":\"Forbidden: product.brief_spec: A Product requires a BriefSpec\",\"status\":403}}\n",
-          "mcpError": "Forbidden: product.brief_spec: A Product requires a BriefSpec"
-        }
-      }
-    },
-    {
-      "name": "[2c] a Product without a brief spec cannot be chatted by anyone (Chat refuses it: every Product needs a BriefSpec), so the CLI has no workable shape",
-      "ok": true,
-      "detail": {
-        "product": "0ce31715-34c0-40ec-8def-6d453f0ae4b0",
-        "httpNoAnswers": 403,
-        "httpEmptyAnswers": 403,
-        "httpWithAnswer": 403,
-        "cliExit": 1,
-        "cliError": "{\"error\":{\"code\":\"forbidden\",\"message\":\"Forbidden: product.brief_spec: A Product requires a BriefSpec\",\"status\":403}}\n",
-        "mcpError": "Forbidden: product.brief_spec: A Product requires a BriefSpec"
-      }
-    },
-    {
-      "name": "[2c] hatch ask / MCP chat_send chat a Product whose brief spec has only OPTIONAL fields",
-      "ok": true,
-      "detail": {
-        "product": "55005e93-a81a-4ddd-9fe8-dd78289b8848",
-        "httpNoAnswers": 201,
-        "httpEmptyAnswers": 201,
-        "httpWithAnswer": 201,
-        "cliExit": 0,
-        "cliError": "",
-        "cliReply": "briefed",
-        "mcpReply": "briefed"
-      }
-    },
-    {
-      "name": "[2c] hatch ask / MCP chat_send chat a Product whose brief spec has a REQUIRED field (it can supply brief_answers)",
-      "ok": false,
-      "detail": {
-        "product": "f6036d7e-dd99-452e-b366-742cdb7e5012",
-        "httpNoAnswers": 422,
-        "httpEmptyAnswers": 422,
-        "httpWithAnswer": 201,
-        "cliExit": 1,
-        "cliError": "{\"error\":{\"code\":\"brief_required_answer_missing\",\"message\":\"Request failed (422): Answers required in brief_answers [{field_id, value}]: goal (What should we ac",
-        "mcpError": "Request failed (422): Answers required in brief_answers [{field_id, value}]: goal (What should we achieve?)"
       }
     },
     {
@@ -515,6 +417,102 @@
       }
     },
     {
+      "name": "[2c] precondition: the HTTP door starts a conversation when the spec's required fields are answered, refuses a missing required answer with 422, and does not need answers for an optional-only spec",
+      "ok": true,
+      "detail": {
+        "optional": {
+          "product": "f1c53a81-9af6-46d7-860e-e200c3e22b1b",
+          "httpNoAnswers": 201,
+          "httpEmptyAnswers": 201,
+          "httpWithAnswer": 201,
+          "cliExit": 0,
+          "cliError": "",
+          "cliReply": "briefed",
+          "mcpReply": "briefed"
+        },
+        "required": {
+          "product": "ac58b239-4b76-40b0-b12a-af7aae1c7077",
+          "httpNoAnswers": 422,
+          "httpEmptyAnswers": 422,
+          "httpWithAnswer": 201,
+          "cliExit": 0,
+          "cliError": "",
+          "cliReply": "briefed",
+          "mcpReply": "briefed",
+          "unansweredCli": true,
+          "unansweredMcp": true
+        },
+        "none": {
+          "product": "523b90ea-a09d-477b-af10-a685203084d8",
+          "httpNoAnswers": 403,
+          "httpEmptyAnswers": 403,
+          "httpWithAnswer": 403,
+          "cliExit": 1,
+          "cliError": "{\"error\":{\"code\":\"forbidden\",\"message\":\"Forbidden: product.brief_spec: A Product requires a BriefSpec\",\"status\":403}}\n",
+          "mcpError": "Forbidden: product.brief_spec: A Product requires a BriefSpec"
+        }
+      }
+    },
+    {
+      "name": "[2c] a Product without a brief spec is refused by Chat itself (403: every Product requires a BriefSpec), also through the CLI and MCP",
+      "ok": true,
+      "detail": {
+        "product": "523b90ea-a09d-477b-af10-a685203084d8",
+        "httpNoAnswers": 403,
+        "httpEmptyAnswers": 403,
+        "httpWithAnswer": 403,
+        "cliExit": 1,
+        "cliError": "{\"error\":{\"code\":\"forbidden\",\"message\":\"Forbidden: product.brief_spec: A Product requires a BriefSpec\",\"status\":403}}\n",
+        "mcpError": "Forbidden: product.brief_spec: A Product requires a BriefSpec"
+      }
+    },
+    {
+      "name": "[2c] hatch ask / MCP chat_send chat a Product whose brief spec has only OPTIONAL fields",
+      "ok": true,
+      "detail": {
+        "product": "f1c53a81-9af6-46d7-860e-e200c3e22b1b",
+        "httpNoAnswers": 201,
+        "httpEmptyAnswers": 201,
+        "httpWithAnswer": 201,
+        "cliExit": 0,
+        "cliError": "",
+        "cliReply": "briefed",
+        "mcpReply": "briefed"
+      }
+    },
+    {
+      "name": "[2c] hatch ask --brief field=value / MCP chat_send brief_answers chat a Product whose brief spec has a REQUIRED field",
+      "ok": true,
+      "detail": {
+        "product": "ac58b239-4b76-40b0-b12a-af7aae1c7077",
+        "httpNoAnswers": 422,
+        "httpEmptyAnswers": 422,
+        "httpWithAnswer": 201,
+        "cliExit": 0,
+        "cliError": "",
+        "cliReply": "briefed",
+        "mcpReply": "briefed",
+        "unansweredCli": true,
+        "unansweredMcp": true
+      }
+    },
+    {
+      "name": "[2c] without the answer, hatch ask / MCP chat_send are refused with 422 brief_required_answer_missing naming the field",
+      "ok": true,
+      "detail": {
+        "product": "ac58b239-4b76-40b0-b12a-af7aae1c7077",
+        "httpNoAnswers": 422,
+        "httpEmptyAnswers": 422,
+        "httpWithAnswer": 201,
+        "cliExit": 0,
+        "cliError": "",
+        "cliReply": "briefed",
+        "mcpReply": "briefed",
+        "unansweredCli": true,
+        "unansweredMcp": true
+      }
+    },
+    {
       "name": "[4c] an unknown Telegram sender writing to a public Connection is met as a contact and answered",
       "ok": true,
       "detail": {
@@ -525,237 +523,32 @@
         "runs": 1,
         "inbox": [
           {
-            "event_id": "129544",
+            "event_id": "135773",
             "state": "done",
             "run_id": null,
             "attempts": 1
           },
           {
-            "event_id": "129545",
+            "event_id": "135774",
             "state": "done",
-            "run_id": "run_6e6b2f104ecc4bb48cb1f4c16037e2b7",
+            "run_id": "run_38bc3311415d49f1a92623f64925c3d9",
             "attempts": 1
           }
         ]
       }
-    },
-    {
-      "name": "[3f] cell ran to the end",
-      "ok": false,
-      "detail": "Timed out after 150000 ms waiting for a pending change task"
-    },
-    {
-      "name": "[3e] cell ran to the end",
-      "ok": false,
-      "detail": "Timed out after 150000 ms waiting for a pending change task"
-    },
-    {
-      "name": "[1a] cell ran to the end",
-      "ok": false,
-      "detail": "Timed out after 150000 ms waiting for a pending change task"
-    },
-    {
-      "name": "[1b] MCP initialize",
-      "ok": true,
-      "detail": {
-        "protocolVersion": "2025-06-18",
-        "capabilities": {
-          "tools": {}
-        },
-        "serverInfo": {
-          "name": "hatch",
-          "version": "0.1.0"
-        }
-      }
-    },
-    {
-      "name": "[1b] MCP lists products_create, products_show, assistant_send",
-      "ok": true,
-      "detail": [
-        "products_list",
-        "products_show",
-        "products_create",
-        "products_update",
-        "products_unlist",
-        "ingest_status",
-        "ingest_list",
-        "assistant_history",
-        "conversation_show",
-        "chat_stop",
-        "whoami",
-        "ingest_submit",
-        "workers_list",
-        "worker_send",
-        "worker_history",
-        "worker_stop",
-        "assistant_send",
-        "conversations_list",
-        "chat_send"
-      ]
-    },
-    {
-      "name": "[1b] products_create returned a Product id",
-      "ok": true,
-      "detail": "{\n  \"product_id\": \"a42bb6cf-398d-495c-b6a6-b16e2e1c02ad\",\n  \"name\": \"Matrix MCP Product\",\n  \"promise\": \"A verification Product created over MCP\",\n  \"status\": \"draft\",\n  \"brief_spec\": {\n    \"contract_v"
-    },
-    {
-      "name": "[1b] price before the change is the initial one",
-      "ok": true,
-      "detail": "10000/2900"
-    },
-    {
-      "name": "[1b] assistant_send returned without a tool error",
-      "ok": true,
-      "detail": "{\n  \"client_message_id\": \"09a67104-929b-4af5-bf82-01ebe8ba0de0\",\n  \"conversation_id\": \"7cd272cd-3eca-4e05-900f-cb43dbdf7090\",\n  \"run_id\": \"run_555df903-6b3d-48a1-aa78-77d5ef40531b\",\n  \"message\": {\n    \"id\": \"d1338d51-84b0-4132-aa0b-82e7a3d8c487\",\n    \"role\": \"user\",\n    \"text\": \"请调用 propose_change 工"
-    },
-    {
-      "name": "[3a] cell ran to the end",
-      "ok": false,
-      "detail": "Timed out after 150000 ms waiting for a research task"
-    },
-    {
-      "name": "[4e] org member: one reply with the answer on the response_url",
-      "ok": true,
-      "detail": [
-        {
-          "at": 1794272012061,
-          "path": "/cgi-bin/aibot/response/9df948d5-5129-4d23-9c7f-d8f0b9734c85",
-          "msgtype": "markdown",
-          "text": "wecom-org-ok"
-        }
-      ]
-    },
-    {
-      "name": "[4d] org member: one reply with the answer",
-      "ok": true,
-      "detail": "feishu-org-ok"
-    },
-    {
-      "name": "[4e] org outsider: refused with the connect notice",
-      "ok": true,
-      "detail": [
-        {
-          "at": 1794272013120,
-          "path": "/cgi-bin/aibot/response/b9cff0cb-2c06-4f3a-b828-f2b2e19c80fb",
-          "msgtype": "markdown",
-          "text": "请先从 Hatch Studio 连接 企业微信。"
-        }
-      ]
-    },
-    {
-      "name": "[4d] org outsider: refused with the connect notice (no Run)",
-      "ok": true,
-      "detail": "请先从 Hatch Studio 连接 飞书。"
-    },
-    {
-      "name": "[4e] member: one Run, one reply row sent, still exactly one reply; outsider: no Run",
-      "ok": true,
-      "detail": {
-        "runs": 1,
-        "outbox": [
-          {
-            "state": "sent",
-            "source_key": "run:run_1912712fb70f4320ba180c8626fe2994",
-            "sent_parts": 1,
-            "attempts": 0
-          }
-        ],
-        "outsiderRuns": 0
-      }
-    },
-    {
-      "name": "[4e] the WeCom org principal is a contact",
-      "ok": true,
-      "detail": "contact:f9488cd1-65da-4a63-b1e2-c5feb7545c40:8b5b51f0-667f-485c-8167-262129c04edc"
-    },
-    {
-      "name": "[4d] member: one inbound -> one Run -> one reply row sent; outsider: no Run",
-      "ok": true,
-      "detail": {
-        "member": {
-          "runs": 1,
-          "outbox": [
-            {
-              "state": "sent",
-              "source_key": "run:run_9afa1c71126c445993319bece0a2ac0f",
-              "sent_parts": 1,
-              "attempts": 0
-            }
-          ]
-        },
-        "outsider": 0
-      }
-    },
-    {
-      "name": "[4d] the Feishu principal is a contact, not the owner's account",
-      "ok": true,
-      "detail": {
-        "conversationOwner": "contact:b0da7864-6872-4725-9d39-bee289e3d5c0:2d08aae1-e479-436a-99f5-173a705d1cae",
-        "owner": "92f93571-3473-4d5b-a211-616e3f4584c0"
-      }
-    },
-    {
-      "name": "[4e] public: an unknown sender is met as a contact and answered once",
-      "ok": true,
-      "detail": {
-        "reply": "wecom-public-ok",
-        "runs": 1
-      }
-    },
-    {
-      "name": "[4d] public: two unknown senders are each met as contacts and answered",
-      "ok": true,
-      "detail": {
-        "p1": "noted",
-        "p2": "none"
-      }
-    },
-    {
-      "name": "[4d] public: contacts are isolated (the second does not learn the first's word)",
-      "ok": true,
-      "detail": "none"
-    },
-    {
-      "name": "[4d] public: one Run each, distinct conversations, contact principals",
-      "ok": true,
-      "detail": {
-        "c1": "conversation:dc05001d3b398826f35839e1:a98b554506ce2e8c35968996",
-        "c2": "conversation:9629e2fca70d8d0b319c002a:95356b9ba9f403e7a23756dd",
-        "owner": "contact:ff52c5f2-2646-4652-ad7c-7588f250724c:97045a70-28b0-4e87-a189-645c3df912df"
-      }
-    },
-    {
-      "name": "[1b] cell ran to the end",
-      "ok": false,
-      "detail": "Timed out after 150000 ms waiting for a pending change task"
-    },
-    {
-      "name": "[3b] cell ran to the end",
-      "ok": false,
-      "detail": "Timed out after 150000 ms waiting for a pending change task"
-    },
-    {
-      "name": "[3c] cell ran to the end",
-      "ok": false,
-      "detail": "Timed out after 150000 ms waiting for a pending change task"
-    },
-    {
-      "name": "[3d] cell ran to the end",
-      "ok": false,
-      "detail": "Timed out after 150000 ms waiting for a pending change task"
     }
   ],
   "measurements": {
     "cli_watch_replay_reply_chars": 0,
     "cells": {
-      "PASS": 7,
-      "FAIL": 9
+      "BLOCKED": 8,
+      "PASS": 8
     }
   },
   "evidence": {
     "brief_outcomes": {
       "optional": {
-        "product": "55005e93-a81a-4ddd-9fe8-dd78289b8848",
+        "product": "f1c53a81-9af6-46d7-860e-e200c3e22b1b",
         "httpNoAnswers": 201,
         "httpEmptyAnswers": 201,
         "httpWithAnswer": 201,
@@ -765,16 +558,19 @@
         "mcpReply": "briefed"
       },
       "required": {
-        "product": "f6036d7e-dd99-452e-b366-742cdb7e5012",
+        "product": "ac58b239-4b76-40b0-b12a-af7aae1c7077",
         "httpNoAnswers": 422,
         "httpEmptyAnswers": 422,
         "httpWithAnswer": 201,
-        "cliExit": 1,
-        "cliError": "{\"error\":{\"code\":\"brief_required_answer_missing\",\"message\":\"Request failed (422): Answers required in brief_answers [{field_id, value}]: goal (What should we ac",
-        "mcpError": "Request failed (422): Answers required in brief_answers [{field_id, value}]: goal (What should we achieve?)"
+        "cliExit": 0,
+        "cliError": "",
+        "cliReply": "briefed",
+        "mcpReply": "briefed",
+        "unansweredCli": true,
+        "unansweredMcp": true
       },
       "none": {
-        "product": "0ce31715-34c0-40ec-8def-6d453f0ae4b0",
+        "product": "523b90ea-a09d-477b-af10-a685203084d8",
         "httpNoAnswers": 403,
         "httpEmptyAnswers": 403,
         "httpWithAnswer": 403,
@@ -785,78 +581,39 @@
     },
     "matrix": {
       "1a": {
-        "title": "coding agent (CLI) -> Studio: create a Product, ask the Assistant to change its price, confirm",
-        "status": "FAIL",
-        "reason": "tool or product error: Error: Timed out after 150000 ms waiting for a pending change task |     at until (file:///Users/keithchen/Documents/code/hatch/runtime-server/scripts/verify-surfaces/lib/util.mjs:22:38) |     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)",
-        "failed": [
-          "cell ran to the end"
-        ],
-        "ids": {
-          "productId": "697d9923-c22a-4451-b5d5-39f6a405d0af"
-        }
+        "status": "BLOCKED",
+        "reason": "LLM_API_KEY (kimi-k2.6) is absent, the Studio Assistant cannot run"
       },
       "1b": {
-        "title": "coding agent (MCP, hatch mcp over stdio) -> Studio: same flow through MCP tools",
-        "status": "FAIL",
-        "reason": "tool or product error: Error: Timed out after 150000 ms waiting for a pending change task |     at until (file:///Users/keithchen/Documents/code/hatch/runtime-server/scripts/verify-surfaces/lib/util.mjs:22:38) |     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)",
-        "failed": [
-          "cell ran to the end"
-        ],
-        "ids": {
-          "tools": [
-            "products_list",
-            "products_show",
-            "products_create",
-            "products_update",
-            "products_unlist",
-            "ingest_status",
-            "ingest_list",
-            "assistant_history",
-            "conversation_show",
-            "chat_stop",
-            "whoami",
-            "ingest_submit",
-            "workers_list",
-            "worker_send",
-            "worker_history",
-            "worker_stop",
-            "assistant_send",
-            "conversations_list",
-            "chat_send"
-          ],
-          "productId": "a42bb6cf-398d-495c-b6a6-b16e2e1c02ad"
-        }
+        "status": "BLOCKED",
+        "reason": "LLM_API_KEY (kimi-k2.6) is absent, the Studio Assistant cannot run"
       },
       "2a": {
         "title": "coding agent (CLI) -> Chat: ask --wait, --stream, show, watch, stop",
         "status": "PASS",
         "ids": {
-          "productId": "480cd85e-15db-43b2-ae08-e833897078d5",
-          "conversationId": "conv_5547d9d22a884ce0bfe7b178af6b8dde",
-          "firstRun": "run_0e4e7819bc924ebdbad892da6c372fc7",
-          "streamRun": "run_e6cc26ca2695402996970698ef820de6",
-          "stoppedRun": "run_6b50e4f6e4114e9bafa8b15db688f018"
+          "productId": "d2a551ba-a3aa-463c-b820-9e9e1292740f",
+          "conversationId": "conv_bd51196d56ac4973914c1d0576ab5725",
+          "firstRun": "run_dc53c4f345994395a25552b85e8e6101",
+          "streamRun": "run_3e8e82bc628c49c0a53f61080bb4e91b",
+          "stoppedRun": "run_fdcb924af14745be90a1e45e032d5286"
         }
       },
       "2b": {
         "title": "coding agent (MCP) -> Chat: chat_send, conversation_show, chat_stop, conversations_list",
         "status": "PASS",
         "ids": {
-          "conversationId": "conv_1849dff57fa8418fbf1916515f79716d",
-          "run": "run_abc3afd4cb964d7aa939f055922a7172"
+          "conversationId": "conv_ade5e7247da24a06b6176f28c591daaf",
+          "run": "run_ac58eaedf7ae4122a4e06c1db0186864"
         }
       },
       "2c": {
-        "title": "coding agent (CLI, MCP) -> Chat on Products with a brief spec: optional-only field, required field, no brief",
-        "status": "FAIL",
-        "failed": [
-          "precondition: the HTTP door works when brief_answers are supplied as the spec requires (and refuses a missing array)",
-          "hatch ask / MCP chat_send chat a Product whose brief spec has a REQUIRED field (it can supply brief_answers)"
-        ],
+        "title": "coding agent (CLI, MCP) -> Chat on Products with a brief spec: optional-only field, required field (answered via --brief / brief_answers), no brief spec",
+        "status": "PASS",
         "ids": {
           "outcomes": {
             "optional": {
-              "product": "55005e93-a81a-4ddd-9fe8-dd78289b8848",
+              "product": "f1c53a81-9af6-46d7-860e-e200c3e22b1b",
               "httpNoAnswers": 201,
               "httpEmptyAnswers": 201,
               "httpWithAnswer": 201,
@@ -866,16 +623,19 @@
               "mcpReply": "briefed"
             },
             "required": {
-              "product": "f6036d7e-dd99-452e-b366-742cdb7e5012",
+              "product": "ac58b239-4b76-40b0-b12a-af7aae1c7077",
               "httpNoAnswers": 422,
               "httpEmptyAnswers": 422,
               "httpWithAnswer": 201,
-              "cliExit": 1,
-              "cliError": "{\"error\":{\"code\":\"brief_required_answer_missing\",\"message\":\"Request failed (422): Answers required in brief_answers [{field_id, value}]: goal (What should we ac",
-              "mcpError": "Request failed (422): Answers required in brief_answers [{field_id, value}]: goal (What should we achieve?)"
+              "cliExit": 0,
+              "cliError": "",
+              "cliReply": "briefed",
+              "mcpReply": "briefed",
+              "unansweredCli": true,
+              "unansweredMcp": true
             },
             "none": {
-              "product": "0ce31715-34c0-40ec-8def-6d453f0ae4b0",
+              "product": "523b90ea-a09d-477b-af10-a685203084d8",
               "httpNoAnswers": 403,
               "httpEmptyAnswers": 403,
               "httpWithAnswer": 403,
@@ -887,102 +647,61 @@
         }
       },
       "3a": {
-        "title": "Telegram -> Studio: link a self Assistant Connection with the real code flow, then dispatch a task",
-        "status": "FAIL",
-        "reason": "tool or product error: Error: Timed out after 150000 ms waiting for a research task |     at until (file:///Users/keithchen/Documents/code/hatch/runtime-server/scripts/verify-surfaces/lib/util.mjs:22:38) |     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)",
-        "failed": [
-          "cell ran to the end"
-        ],
-        "ids": {
-          "connectUrl": "https://t.me/hatch_verify_bot?start=HATCH-AWNWEF3J",
-          "connection": "c316c913-de55-4f27-920e-f711ae9ff1e9"
-        }
+        "status": "BLOCKED",
+        "reason": "LLM_API_KEY (kimi-k2.6) is absent, the Studio Assistant cannot run"
       },
       "3b": {
-        "title": "Telegram -> Studio: a price change confirmed with the inline 确认 button (callback_query)",
-        "status": "FAIL",
-        "reason": "tool or product error: Error: Timed out after 150000 ms waiting for a pending change task |     at until (file:///Users/keithchen/Documents/code/hatch/runtime-server/scripts/verify-surfaces/lib/util.mjs:22:38) |     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)",
-        "failed": [
-          "cell ran to the end"
-        ],
-        "ids": {
-          "productId": "ca9880b4-fdfc-4274-b879-a1b65af2908b"
-        }
+        "status": "BLOCKED",
+        "reason": "LLM_API_KEY (kimi-k2.6) is absent, the Studio Assistant cannot run"
       },
       "3c": {
-        "title": "Telegram -> Studio: a price change declined with the 取消 button",
-        "status": "FAIL",
-        "reason": "tool or product error: Error: Timed out after 150000 ms waiting for a pending change task |     at until (file:///Users/keithchen/Documents/code/hatch/runtime-server/scripts/verify-surfaces/lib/util.mjs:22:38) |     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)",
-        "failed": [
-          "cell ran to the end"
-        ],
-        "ids": {}
+        "status": "BLOCKED",
+        "reason": "LLM_API_KEY (kimi-k2.6) is absent, the Studio Assistant cannot run"
       },
       "3d": {
-        "title": "Telegram -> Studio: a stranger cannot reach the Assistant or press the owner's buttons",
-        "status": "FAIL",
-        "reason": "tool or product error: Error: Timed out after 150000 ms waiting for a pending change task |     at until (file:///Users/keithchen/Documents/code/hatch/runtime-server/scripts/verify-surfaces/lib/util.mjs:22:38) |     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)",
-        "failed": [
-          "cell ran to the end"
-        ],
-        "ids": {}
+        "status": "BLOCKED",
+        "reason": "LLM_API_KEY (kimi-k2.6) is absent, the Studio Assistant cannot run"
       },
       "3e": {
         "title": "Feishu -> Studio: own-app credentials, signed+encrypted webhook, link code, the Assistant answers and a card button confirms a price change",
-        "status": "FAIL",
-        "reason": "tool or product error: Error: Timed out after 150000 ms waiting for a pending change task |     at until (file:///Users/keithchen/Documents/code/hatch/runtime-server/scripts/verify-surfaces/lib/util.mjs:22:38) |     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)",
-        "failed": [
-          "cell ran to the end"
-        ],
-        "ids": {
-          "welcome": {
-            "path": "/open-apis/im/v1/messages/om_5f0d8f14e2064781ae50eb7881ca42b6/reply",
-            "text": "连上了。先给我一样东西就行：你的名字、一个链接，或者现成的资料。",
-            "authorization": "present",
-            "uuid": "d88da0d1-9e58-e89a-639b-13f615e3505d"
-          },
-          "productId": "920ad9dc-f981-45e0-b5c4-c4d10eab8ed1"
-        }
+        "status": "BLOCKED",
+        "reason": "LLM_API_KEY (kimi-k2.6) is absent, the Studio Assistant cannot run",
+        "ids": {}
       },
       "3f": {
         "title": "WeCom -> Studio: own-app credentials, encrypted webhook, link code, the Assistant answers via response_url, a price change confirmed by text (no buttons on WeCom)",
-        "status": "FAIL",
-        "reason": "tool or product error: Error: Timed out after 150000 ms waiting for a pending change task |     at until (file:///Users/keithchen/Documents/code/hatch/runtime-server/scripts/verify-surfaces/lib/util.mjs:22:38) |     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)",
-        "failed": [
-          "cell ran to the end"
-        ],
-        "ids": {
-          "productId": "5a430ebb-328c-4823-ba92-d77386c09509"
-        }
+        "status": "BLOCKED",
+        "reason": "LLM_API_KEY (kimi-k2.6) is absent, the Studio Assistant cannot run",
+        "ids": {}
       },
       "4a": {
         "title": "Telegram -> Chat, audience self: the owner's own Product, account principal",
         "status": "PASS",
         "ids": {
-          "connection": "1c4fb798-68fc-42bd-8203-c8631ff5d80b",
+          "connection": "3f9b4ef7-c253-4728-bf11-e15734607a61",
           "trace": {
             "inbox": [
               {
-                "event_id": "129538",
+                "event_id": "135767",
                 "state": "done",
-                "run_id": "run_c0f2a4f3a79743f5ae34465745c05c22",
+                "run_id": "run_be50ff48dabf4274982b96ea110b6de4",
                 "attempts": 1
               }
             ],
             "runs": [
               {
-                "id": "run_c0f2a4f3a79743f5ae34465745c05c22",
+                "id": "run_be50ff48dabf4274982b96ea110b6de4",
                 "status": "completed",
-                "conversation_id": "conversation:1abedce370073f047e330e3d:a8a27d0b4c7614e57e0346dc",
-                "public_id": "conv_a8a27d0b4c7614e57e0346dc",
-                "owner_account_id": "c974fccf-9006-412e-a356-8c3fc2f0cbd5",
-                "product_id": "1b1c649c-ce2a-412d-9c52-54cba6bd3908"
+                "conversation_id": "conversation:ed90290a07667038011b774d:36508ff49c1fe0d5ca2132b6",
+                "public_id": "conv_36508ff49c1fe0d5ca2132b6",
+                "owner_account_id": "57aa55b5-44c9-44e6-aade-6118ec48a938",
+                "product_id": "828ca9af-bddd-40a3-89a3-5bd8384b4d3d"
               }
             ],
             "outbox": [
               {
                 "state": "sent",
-                "source_key": "run:run_c0f2a4f3a79743f5ae34465745c05c22",
+                "source_key": "run:run_be50ff48dabf4274982b96ea110b6de4",
                 "sent_parts": 1,
                 "attempts": 0
               }
@@ -1003,20 +722,20 @@
         "title": "Telegram -> Chat, audience org: admitted members as contacts, isolated; a non-admitted sender is refused",
         "status": "PASS",
         "ids": {
-          "connection": "e937318d-aa99-463c-8fae-b70a76573349",
+          "connection": "ca5ae5b9-f1b5-4966-827c-cd19b4e5f11c",
           "traces": {
             "m1": [
-              "run_c803527db68c455fb1fa2b1977739f73",
-              "run_43c2820aa80341a8b1521bdc0f3dcf8f"
+              "run_c760a69c318041b2a284182c2c60d14b",
+              "run_780b8e3414a94365a0ee09acf57348ee"
             ],
             "m2": [
-              "run_5fb27611f0294412abf38d90e628c31c",
-              "run_2720b67008374316a7fa0aba904349b0"
+              "run_ec4048663edb49c984f5c55309a48974",
+              "run_a7f44ec7436f4ae583c481e995e0ea3f"
             ]
           },
           "principals": {
-            "m1": "contact:e937318d-aa99-463c-8fae-b70a76573349:4625d2e0-7b94-4db1-852d-a3534253f7d1",
-            "m2": "contact:e937318d-aa99-463c-8fae-b70a76573349:899b7b6c-f2ba-45ac-b9a0-e075492d1ef9"
+            "m1": "contact:ca5ae5b9-f1b5-4966-827c-cd19b4e5f11c:ff4d0ffa-1131-4d81-af35-81c904b751e5",
+            "m2": "contact:ca5ae5b9-f1b5-4966-827c-cd19b4e5f11c:6646fe8b-a030-4358-8d66-08d02955542a"
           }
         }
       },
@@ -1024,7 +743,7 @@
         "title": "Telegram -> Chat, audience public: anyone becomes a contact",
         "status": "PASS",
         "ids": {
-          "connection": "a3717cb1-e7cf-44f1-bf38-4086f208cc46",
+          "connection": "8a64b309-5384-4450-bc64-806b2678601d",
           "outcome": {
             "status": 200,
             "texts": [
@@ -1039,15 +758,15 @@
         "title": "Feishu -> Chat: org member answered, outsider refused, then a public Connection meets anyone as a contact",
         "status": "PASS",
         "ids": {
-          "productId": "9bc25d03-285d-4a10-b59e-d9e014a008db",
-          "orgConnection": "b0da7864-6872-4725-9d39-bee289e3d5c0",
-          "publicConnection": "ff52c5f2-2646-4652-ad7c-7588f250724c",
+          "productId": "5e9f649b-5942-4417-a613-b41d10153a40",
+          "orgConnection": "a109efb7-44de-4316-9887-31c441c5dd2a",
+          "publicConnection": "a5b1dcc2-94f5-476a-bc98-cb337c202ec1",
           "public": {
             "p1": [
-              "run_ad1a3dbff6c84a819fdf1b1008ac2c67"
+              "run_8c87c010b06242f89be5400705b1fb15"
             ],
             "p2": [
-              "run_6f13a81d946740d896e21c3a42a99a9f"
+              "run_ea317c94a1f842d3b7060099bdd125ca"
             ]
           }
         }
@@ -1056,23 +775,15 @@
         "title": "WeCom -> Chat: org member answered once on response_url, outsider refused, then a public Connection meets anyone",
         "status": "PASS",
         "ids": {
-          "productId": "c6b11ed7-b265-4403-aaf6-d1fa9830a3dc"
+          "productId": "c4718e93-8a24-45b2-89b4-ce5d830737a5"
         }
       }
     }
   },
   "notes": [
     "Fakes in this scenario: the fake messaging platform (incl. Feishu token/bot-info responders added here), and DB-inserted org/public/self-product Connections (no product API creates them). Everything else is the real product through its real doors.",
-    "hatch CLI has no pricing command: the Product's initial price is set through PUT /v1/creator/products/:id/pricing (the Studio route).",
+    "LLM_API_KEY is absent: the Assistant (pinned to kimi-k2.6) cannot run, so every Studio cell is BLOCKED.",
     "conversation watch --after 0 on finished Runs ends at the FIRST Run's end and carries no reply text (deltas are not replayed); catching up on history is conversation show. Watching a live Run from now returns the full reply."
   ],
-  "defects": [
-    {
-      "title": "hatch CLI and MCP cannot start a Chat conversation with any Product (every Product needs a brief spec; creating without brief_answers is refused)",
-      "severity": "high",
-      "expected": "A coding agent can start a Chat conversation with any published Product (matrix cell Coding agent x Chat). At least a spec with no required field must not need answers",
-      "actual": "ask/chat_send create the conversation with only client_request_id. createBriefSnapshot throws 'Brief answers must be an array' (HTTP 422 brief_answer_invalid) when brief_answers is missing, even for a spec whose only field is required:false (CLI exit 0: ). With a required field the same door needs an answer the CLI/MCP has no flag/argument to supply (CLI exit 1). HTTP works with brief_answers: [] (optional) or a real answer (required). Products without a brief spec are refused by Chat itself (403 Forbidden: product.brief_spec: A Product requires a BriefSpec), so no Product is reachable by 'hatch ask' / chat_send as a first message; only --conversation/conversation_id on a conversation the HTTP door started works.",
-      "repro": "Publish a Product with brief_spec.fields=[{id:'goal',label:'g',required:false}]; `hatch ask hi --product <id> --wait` -> 422 brief_answer_invalid; same for MCP chat_send. Root: runtime-server/src/brief.ts createBriefSnapshot (array check) called from index.ts POST /v1/conversations; packages/hatch-cli/src/chatCommands.js startConversation sends no brief_answers"
-    }
-  ]
+  "defects": []
 }
