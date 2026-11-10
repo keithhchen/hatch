@@ -495,9 +495,7 @@ async function runModelTurnInternal(
       || (error instanceof ConversationRepositoryError && error.code === "steer_pending")) {
       return;
     }
-    const failure = failures.translate(error, { run: input.run_id, conversation: input.conversation_id });
-    await state.fail(failure.message).catch(() => undefined);
-    await send({ type: "turn.failed", run_id: input.run_id, error: failure });
+    await recordFailure({ run: input.run_id, conversation: input.conversation_id }, error, state, send, claimSteered);
   } finally {
     if (commerceEventSink && deliveryReservation && !deliveryReservationConsumed && !deliveryAccountingPending) {
       const releaseReason = state.status === "cancelled"
@@ -604,12 +602,27 @@ export function errorMessage(error: unknown): string {
   return String(error);
 }
 
-/** A Run whose execution threw: recorded once, and told to every observer in the one shape the failure boundary builds. */
-export async function failRun(turn: Pick<Turn<unknown>, "run" | "conversation" | "signal" | "state" | "publish">, error: unknown): Promise<void> {
+/**
+ * A Run whose execution threw: recorded once, and told to every observer in the one shape the failure boundary builds.
+ * A message that joined the Run and was never claimed is appended to the transcript, so the next Run sees it and the
+ * conversation shows it unanswered.
+ */
+async function recordFailure(
+  scope: { run: string; conversation: string },
+  error: unknown,
+  state: RunStateMachine,
+  publish: (message: OutboundMessage) => void | Promise<void>,
+  claimSteered: () => Promise<unknown>
+): Promise<void> {
+  const failure = failures.translate(error, scope);
+  await state.fail(failure.message).catch(() => undefined);
+  await publish({ type: "turn.failed", run_id: scope.run, error: failure });
+  await claimSteered().catch((claimError) => writeOperationalError("steered_claim_after_failure_failed", claimError));
+}
+
+export async function failRun(turn: Pick<Turn<unknown>, "run" | "conversation" | "signal" | "state" | "publish" | "claimSteered">, error: unknown): Promise<void> {
   if (turn.signal.reason instanceof RunHandoff) return;
-  const failure = failures.translate(error, { run: turn.run.id, conversation: turn.conversation.id });
-  await turn.state.fail(failure.message).catch(() => undefined);
-  turn.publish({ type: "turn.failed", run_id: turn.run.id, error: failure });
+  await recordFailure({ run: turn.run.id, conversation: turn.conversation.id }, error, turn.state, turn.publish, turn.claimSteered);
 }
 
 /** A conversation whose agent has no Skills. */

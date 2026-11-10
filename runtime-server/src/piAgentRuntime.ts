@@ -40,6 +40,7 @@ import {
 import { SUMMARY_PREFIX, SUMMARY_SUFFIX } from "./compaction.js";
 import { renderSystemReminder } from "./surfaces/contract.js";
 import { createPiModel, createPiStreamFn } from "./piModel.js";
+import { withStallGuard, type StallLimits } from "./providerStall.js";
 import { traceAgentTools } from "./langfuse.js";
 import { resolveLlmProfile } from "./llmProfiles.js";
 import { runPiAgentPrompt, type PiAgentPromptRunner } from "./piPrompt.js";
@@ -80,6 +81,8 @@ export type PiAgentRuntimeOptions = {
   toolDefinitions?: PiToolDefinition[];
   /** The environment that names the model profile; the process's own when absent. */
   env?: NodeJS.ProcessEnv;
+  /** How long a model call may stay silent before the Run fails; 60s to the first event and 60s between events when absent. */
+  stall?: StallLimits;
 };
 
 type QueueItem<T> =
@@ -151,7 +154,7 @@ export class PiAgentRuntime implements AgentRuntime {
   async *run(input: RunStart, ctx: RunContext): AsyncIterable<OutboundMessage> {
     ctx.abortSignal?.throwIfAborted();
     const model = createPiModel({ env: this.options.env });
-    const streamFn = createPiStreamFn({ env: this.options.env });
+    const streamFn = withStallGuard(createPiStreamFn({ env: this.options.env }), this.options.stall);
     const queue = new AsyncQueue<OutboundMessage>();
     const workspacePathPolicy = createWorkspacePathPolicy(input.message.content);
     const visibleSkills = ctx.sessionSkills.visibleRecords;
@@ -562,7 +565,7 @@ export class PiAgentRuntime implements AgentRuntime {
           await ctx.persistModelMessage?.({ ...converted, content: null });
         }
         if (assistant.stopReason === "error" || assistant.stopReason === "aborted") {
-          setTerminalError(assistant.stopReason === "error" ? UpstreamError.of(assistant.errorMessage ?? "Pi Agent stopped: error") : new Error(assistant.errorMessage ?? `Pi Agent stopped: ${assistant.stopReason}`));
+          setTerminalError(assistant.stopReason === "error" ? UpstreamError.of(assistant.errorMessage ?? "Pi Agent stopped: error", `${assistant.provider} ${assistant.model}`) : new Error(assistant.errorMessage ?? `Pi Agent stopped: ${assistant.stopReason}`));
         } else if (assistant.stopReason === "stop" && !hasToolCall) {
           if (hasText) setFinalAssistant(assistant);
           else if (!ctx.mayStaySilent) setTerminalError(new Error("Pi Agent returned an empty final response"));
@@ -682,7 +685,7 @@ export class PiAgentRuntime implements AgentRuntime {
         && !last.content.some((block) => block.type === "toolCall")) {
         setFinalAssistant(last);
       } else if (last && !(ctx.mayStaySilent && (handedOver() || last.stopReason === "stop"))) {
-        setTerminalError(last.stopReason === "error" ? UpstreamError.of(last.errorMessage ?? "Pi Agent stopped: error") : new Error(last.errorMessage ?? "Pi Agent ended without a final assistant response"));
+        setTerminalError(last.stopReason === "error" ? UpstreamError.of(last.errorMessage ?? "Pi Agent stopped: error", `${last.provider} ${last.model}`) : new Error(last.errorMessage ?? "Pi Agent ended without a final assistant response"));
       }
       return;
     }
@@ -691,7 +694,9 @@ export class PiAgentRuntime implements AgentRuntime {
       agent.abort();
       return;
     }
-    if (event.type === "turn_end" && ctx.claimSteered) {
+    // A turn that failed has no next model call: the messages that joined stay unclaimed for the failure path to keep.
+    const turnFailed = event.type === "turn_end" && (event.message as AssistantMessage).stopReason === "error";
+    if (event.type === "turn_end" && ctx.claimSteered && !turnFailed) {
       // Messages that joined the Run enter before its next model call. Pi injects
       // them after the tool results of this turn, so history stays well-formed.
       for (const message of await ctx.claimSteered()) {
