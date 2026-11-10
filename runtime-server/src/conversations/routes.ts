@@ -29,11 +29,11 @@ export type ConversationRouteDeps = StudioDeps & {
   pace?: { pollMs?: number; sleep?: (ms: number) => Promise<void>; now?: () => number };
 };
 
-type Action = "messages" | "events" | "stop" | "snapshot" | "assets";
+type Action = "messages" | "events" | "stop" | "snapshot" | "assets" | "retry";
 
 const WORKERS_ROUTE = /^\/v1\/creator\/products\/([^/]+)\/workers(?:\/([^/]+)\/(messages|events|stop|snapshot|assets))?$/;
-const ASSISTANT_ROUTE = /^\/v1\/creator\/assistant\/conversation\/(messages|events|stop|snapshot|assets)$/;
-const METHODS: Record<Action, string[]> = { messages: ["GET", "POST"], events: ["GET"], stop: ["POST"], snapshot: ["GET"], assets: ["POST"] };
+const ASSISTANT_ROUTE = /^\/v1\/creator\/assistant\/conversation\/(messages|events|stop|snapshot|assets|retry)$/;
+const METHODS: Record<Action, string[]> = { messages: ["GET", "POST"], events: ["GET"], stop: ["POST"], snapshot: ["GET"], assets: ["POST"], retry: ["POST"] };
 
 function clientOf(body: Record<string, unknown>): ClientAttributes {
   const raw = body.client;
@@ -96,6 +96,7 @@ export class ConversationRoutes {
     const { conversation } = target;
     if (!METHODS[action].includes(request.method ?? "")) throw new ConversationError(405, "method_not_allowed", "Method not allowed.");
     if (action === "stop") { await conversation.stop(); this.deps.json(response, 202, { requested: true }); return; }
+    if (action === "retry") { await this.retry(conversation, request, response); return; }
     if (action === "assets") { await this.upload(target, request, response, url); return; }
     if (action === "snapshot") { this.deps.json(response, 200, await snapshotOf(conversation, this.studio.eventLog)); return; }
     if (action === "events") { await this.events(conversation, request, response, url); return; }
@@ -106,6 +107,14 @@ export class ConversationRoutes {
       return;
     }
     await this.send(target, request, response, url);
+  }
+
+  /** Answers the conversation again after a failed Run: no new message; the Idempotency-Key makes a repeat the same Run. */
+  private async retry(conversation: Conversation, request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+    if (!conversation.retry) throw new ConversationError(501, "retry_unavailable", "This conversation cannot answer again.");
+    const body = await this.deps.readJson(request);
+    const { runId, outcome } = await conversation.retry(keyOf(request, body) ?? randomUUID(), clientOf(body));
+    this.deps.json(response, 202, { run_id: runId, outcome });
   }
 
   private async input(target: Target, request: http.IncomingMessage): Promise<SendInput> {

@@ -89,6 +89,8 @@ class FakeAssistant implements AssistantHost {
   assets = () => this.desk;
   stop = async () => { this.stopped++; };
   partial = async () => "";
+  retried: string[] = [];
+  retry = async (_account: string, input: { id: string }) => { this.retried.push(input.id); return { run: { id: "arun-2" }, outcome: "started" as const }; };
 }
 
 const IMAGE: ReadyAsset = { id: "a-img", kind: "image", name: "chart.png", mimeType: "image/png", bytes: 10, sha256: "h-img", path: "input/manual/chart.png" };
@@ -285,6 +287,17 @@ test("assistant: same shape and verbs, over the existing Assistant", async () =>
     assert.deepEqual(after.messages.map(m => [m.role, m.text]), [["user", "Remind me tomorrow"], ["assistant", "Noted."]]);
     assert.equal((await h.call(`${path}/stop`, { method: "POST" })).status, 202);
     assert.equal(h.assistant.stopped, 1);
+  } finally { await h.close(); }
+});
+
+test("assistant: retry answers again under the client's key", async () => {
+  const h = await harness();
+  try {
+    const retried = await h.call("/v1/creator/assistant/conversation/retry", { method: "POST", body: { idempotency_key: "k-1" } });
+    assert.equal(retried.status, 202);
+    assert.deepEqual(await retried.json(), { run_id: "arun-2", outcome: "started" });
+    assert.deepEqual(h.assistant.retried, ["k-1"]);
+    assert.equal((await h.call("/v1/creator/assistant/conversation/retry", { method: "GET" })).status, 405);
   } finally { await h.close(); }
 });
 

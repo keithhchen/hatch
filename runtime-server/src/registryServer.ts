@@ -2299,6 +2299,15 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
     sendJson(response, 202, { accepted: true, message_id: sent.messageId, run_id: sent.runId, outcome: sent.outcome, accepted_at: sent.acceptedAt });
     return;
   }
+  if (url.pathname === "/v1/creator/assistant/retry" && request.method === "POST") {
+    // Answers the Expert's unanswered messages again after a Run that failed. The page's key makes a repeat the same Run.
+    if (!context.assistantChat) { sendJson(response, 503, { error: { code: "assistant_unavailable", message: "The Assistant requires the Registry database." } }); return; }
+    try {
+      const { run, outcome } = await context.assistantChat.retry(account.id, { id: messageKey(request.headers["idempotency-key"]) ?? randomUUID(), client: { client: "web" } });
+      sendJson(response, 202, { accepted: true, run_id: run.id, outcome });
+    } catch (error) { if (!(error instanceof ChatError)) throw error; sendJson(response, error.status, { error: { code: error.code, message: error.message } }); }
+    return;
+  }
   if (url.pathname === "/v1/creator/assistant/files" && request.method === "POST") {
     const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
     const name = typeof body.name === "string" ? body.name : ""; const bytes = Buffer.from(typeof body.base64 === "string" ? body.base64 : "", "base64");

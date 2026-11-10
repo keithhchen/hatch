@@ -35,6 +35,8 @@ function ofJournal(event: ConversationJournalEvent): ConversationEvent[] {
         : [{ type: "message_end", ...about(text(payload.message_id)) }];
     // A message the Run took up is now in the transcript: what was queued on the page is the conversation's.
     case "message.consumed": return [{ type: "state", ...about(text(payload.client_message_id)) }];
+    // A Run that answers again has no message to announce it: the page learns of it here.
+    case "run.created": return [{ type: "state", ...about(undefined) }];
     case "run.state": {
       const status = String(payload.status);
       if (status === "compacting") return [{ type: "compacting", ...about(undefined) }];
