@@ -9,7 +9,7 @@ import { ChannelBindings } from "./ChannelBindings.jsx";
 
 const ROOT = "/v1/creator/assistant";
 const CONNECTIONS = "/v1/creator/connections";
-const CHANNEL_NAMES = { telegram: "Telegram", line: "LINE", lark: "Lark", imessage: "iMessage" };
+const CHANNEL_NAMES = { telegram: "Telegram", line: "LINE", lark: "Lark", feishu: "飞书", wecom: "WeCom", wechatkf: "WeChat", slack: "Slack", imessage: "iMessage" };
 const REVIEW_ACTIONS = { content: ["sxaContentYes", "sxaContentNo"], change: ["sxaChangeYes", "sxaChangeNo"] };
 
 /** One assistant per Expert: a conversation and the things that need them. */
@@ -89,7 +89,7 @@ export function StudioAssistant({ request, t }) {
   if (!view && !error) return <LoadingState t={t} />;
   const needs = (view?.tasks ?? []).filter(task => task.status === "needs_you");
   const lines = view?.messages ?? [];
-  const ownApps = (view?.channels ?? []).filter(channel => channel.own_app);
+  const ownApps = (view?.channels ?? []).filter(channel => channel.own_app && CHANNEL_NAMES[channel.kind] && (channel.linked || channel.available));
   return <div className="sxa">
     <section className="sxa-chat" aria-label={t("sxNavAssistant")}>
       <h1 className="sxa-title">{t("sxNavAssistant")}</h1>
