@@ -54,21 +54,18 @@ test("an asset is bound in the transaction that accepts its message, so a crash 
       through(prepared.bind!)
     );
   };
-  const boundTo = async () => (await pool.query("SELECT message_id FROM hatch_assets WHERE id = $1", [assetId])).rows[0].message_id as string | null;
+  const boundTo = async () => (await pool.query("SELECT message_id FROM hatch_asset_messages WHERE asset_id = $1 ORDER BY message_id", [assetId])).rows.map(row => row.message_id as string);
 
   // The process dies after the bind and before the commit.
   await assert.rejects(submit("key-1", (bind) => async (tx) => { await bind(tx); throw new Error("crash"); }), /crash/);
-  assert.equal(await boundTo(), null, "the bind rolled back with the message");
+  assert.deepEqual(await boundTo(), [], "the bind rolled back with the message");
   assert.equal(await repository.hasAcceptedMessage(conversation.id, "key-1"), false);
   assert.equal((await assets.upload(conversation, { name: "photo.png", bytes: await png() })).asset_id, assetId, "re-upload is the same asset, and it is free");
 
-  // Any message may take it now, whatever its key: there is no orphan to recover.
+  // Any message may take it now, whatever its key, and so may the next: the same file in two messages is two successes.
   assert.equal((await submit("key-2")).created, true);
-  assert.match((await boundTo())!, /^msg_/);
-
-  // Another message cannot take it, and then nothing of that message is accepted.
-  await assert.rejects(submit("key-3"), { code: "asset_conflict", status: 409 });
-  assert.equal(await repository.hasAcceptedMessage(conversation.id, "key-3"), false);
-  const runs = await repository.listRuns(conversation.id);
-  assert.deepEqual([runs.length, runs[0]!.steeredCount], [1, 0]);
+  assert.equal((await submit("key-3")).steered, true, "joins the run key-2 started");
+  assert.deepEqual((await boundTo()).map(id => id.slice(0, 4)), ["msg_", "msg_"]);
+  assert.deepEqual((await assets.attachments(conversation)).map(entry => entry.asset.id), [assetId, assetId], "both messages list it");
+  assert.equal(new Set((await assets.attachments(conversation)).map(entry => entry.messageId)).size, 2);
 }));

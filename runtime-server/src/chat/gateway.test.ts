@@ -121,7 +121,7 @@ test("a message refers to ready assets: pixels with a path label, one line for a
   assert.equal((await fixture.kit.repository.listAttached({ kind: "contact", connectionId: "conn-1", contactId: "alice", conversationId: sent.conversationId })).length, 3);
 }));
 
-test("an asset belongs to one contact in one conversation and joins one message once", () => withFixture({ assets: true }, async (fixture) => {
+test("an asset belongs to one contact in one conversation and may join any number of its messages", () => withFixture({ assets: true }, async (fixture) => {
   const { runtime } = fixture;
   const image = await asset(fixture, alice, "photo.png", await png());
   // Another contact cannot refer to it, even by guessing its id.
@@ -131,9 +131,11 @@ test("an asset belongs to one contact in one conversation and joins one message 
   await assert.rejects(runtime.chat.send(alice, thread, dm, "evt-d", [{ type: "image", assetId: image }, { type: "image", assetId: image }]), { code: "duplicate_asset" });
   const sent = await runtime.chat.send(alice, thread, dm, "evt-1", [{ type: "image", assetId: image }]);
   await ended(runtime.chat, sent.runId);
-  // It is bound to that message: a different message cannot take it, and nothing is accepted for the attempt.
-  await assert.rejects(runtime.chat.send(alice, thread, dm, "evt-2", [{ type: "image", assetId: image }]), { code: "asset_conflict", status: 409 });
-  assert.equal((await fixture.repository.listRuns(sent.conversationId)).length, 1);
+  // The same picture sent again is another message that carries it; both list it.
+  const again = await runtime.chat.send(alice, thread, dm, "evt-2", [{ type: "image", assetId: image }]);
+  await ended(runtime.chat, again.runId);
+  const links = await fixture.kit.repository.listAttached({ kind: "contact", connectionId: "conn-1", contactId: "alice", conversationId: sent.conversationId });
+  assert.deepEqual([links.length, new Set(links.map(link => link.messageId)).size], [2, 2]);
   // The same bytes uploaded again are the same asset (idempotent upload), so a retry of the upload is harmless.
   assert.equal(await asset(fixture, alice, "photo.png", await png()), image);
 }));

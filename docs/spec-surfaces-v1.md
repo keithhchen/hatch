@@ -91,7 +91,7 @@ The Assistant is one conversation per account on Chat's runtime: the same Runs, 
 
 ## Attachments
 
-Upload first, reference by `assetId`, and send a message only when its assets are ready. An asset joins its message in the transaction that accepts the message, so a crash leaves it free. An upload still `processing` after its lease was abandoned by a crash: uploading the same bytes again retries it.
+Upload first, reference by `assetId`, and send a message only when its assets are ready. An asset joins its message in the transaction that accepts the message, so a crash leaves it free. The same file can join any number of messages: an asset is content, and each message links to it. An upload still `processing` after its lease was abandoned by a crash: uploading the same bytes again retries it.
 
 | | Image | File | Voice message |
 |---|---|---|---|

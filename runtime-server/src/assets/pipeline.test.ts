@@ -129,16 +129,17 @@ test("a voice message whose provider fails ends failed as upstream_error, withou
   } finally { console.error = log; }
 });
 
-test("only ready assets in the caller's scope resolve and attach, once", async () => {
-  const { pipeline } = await harness();
+test("only ready assets in the caller's scope resolve and attach, to any number of messages", async () => {
+  const { pipeline, repository } = await harness();
   const ready = await pipeline.accept(scopeA, { name: "a.txt", bytes: Buffer.from("hi") });
   assert.equal((await pipeline.resolveReadyAsset(scopeA, ready.id)).id, ready.id);
   await rejects(pipeline.resolveReadyAsset(scopeB, ready.id), "not_found");
   await rejects(pipeline.resolveReadyAsset(scopeA, "nope"), "not_found");
   await rejects(pipeline.attach(scopeB, ready.id, "m1"), "not_found");
-  assert.equal((await pipeline.attach(scopeA, ready.id, "m1")).messageId, "m1");
-  assert.equal((await pipeline.attach(scopeA, ready.id, "m1")).messageId, "m1");
-  await rejects(pipeline.attach(scopeA, ready.id, "m2"), "conflict");
+  await pipeline.attach(scopeA, ready.id, "m1");
+  await pipeline.attach(scopeA, ready.id, "m1");
+  await pipeline.attach(scopeA, ready.id, "m2");
+  assert.deepEqual((await repository.listAttached(scopeA)).map(link => link.messageId).sort(), ["m1", "m2"], "the same bytes join many messages");
   const blocked = await harness({ moderator: block() });
   const failed = await blocked.pipeline.accept(scopeA, { name: "b.txt", bytes: Buffer.from("x") });
   await rejects(blocked.pipeline.attach(scopeA, failed.id, "m1"), "not_ready");

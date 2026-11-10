@@ -369,6 +369,21 @@ test("A Telegram document is an attachment of the conversation, and flows into a
   } finally { await env.close(); }
 });
 
+test("The same Telegram document sent twice is two messages that both carry it, never a refusal", async () => {
+  const env = await setup({ model: () => ({ text: "收到" }) });
+  try {
+    const send = (updateId: number, messageId: number) => env.telegramUpdate({ update_id: updateId, message: { message_id: messageId, chat: { id: 42, type: "private" }, document: { file_id: "f1", file_name: "notes.md", file_size: 30 } } });
+    const [first] = await send(1, 10);
+    await env.idle();
+    const [second] = await send(2, 11);
+    await env.idle();
+    assert.ok(first!.runId?.startsWith("run_") && second!.runId?.startsWith("run_"), "each message started a Run");
+    assert.deepEqual(env.notices, [], "nothing was refused");
+    const experts = (await env.chat.lines(ACCOUNT)).filter(line => line.role === "user");
+    assert.deepEqual(experts.map(line => line.attachments?.[0]?.name), ["notes.md", "notes.md"]);
+  } finally { await env.close(); }
+});
+
 test("Rapid sends into a running reply store one message per id, however often an id is sent", async () => {
   const env = await setup({ model: (_turn, call) => call === 1 ? { delayMs: 300, text: "好" } : { text: "不该再有一轮" } });
   try {
