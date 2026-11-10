@@ -561,9 +561,9 @@ export class InMemoryConversationRepository implements ConversationRepository {
     this.runs.set(runId, { ...run, consumedCount: run.steeredCount });
     for (const entry of steered) {
       this.appendEventUnsafe({ conversationId: run.conversationId, runId, type: "message.consumed", payload: { client_message_id: entry.clientMessageId } });
-      // The transcript append commits with the claim: the commit log is one transaction.
+      // The transcript append commits with the claim: the commit log is one transaction. The message is dated when it arrived; the claim's own time is `message.consumed`'s.
       this.pendingStoreEvents.push({ type: "conversation.model_message", conversation_id: run.conversationId, run_id: runId,
-        client_message_id: entry.clientMessageId, message: entry.message!, timestamp: now() });
+        client_message_id: entry.clientMessageId, message: entry.message!, timestamp: entry.acceptedAt });
     }
     return steered.map((entry) => ({ clientMessageId: entry.clientMessageId, message: entry.message! }));
   }
@@ -1209,7 +1209,7 @@ export class PostgresConversationRepository implements ConversationRepository {
       await tx.appendEvent({ conversationId: run.conversationId, runId: run.id, type: "message.consumed", payload: { client_message_id: entry.clientMessageId } });
       // Same transaction as the claim above: a crash can neither lose the message nor append it twice.
       await this.requireSubmissionStore().appendOn(tx.pool, { type: "conversation.model_message", conversation_id: run.conversationId,
-        run_id: run.id, client_message_id: entry.clientMessageId, message: entry.message!, timestamp: new Date().toISOString() });
+        run_id: run.id, client_message_id: entry.clientMessageId, message: entry.message!, timestamp: entry.acceptedAt });
       claimed.push({ clientMessageId: entry.clientMessageId, message: entry.message! });
     }
     return claimed;

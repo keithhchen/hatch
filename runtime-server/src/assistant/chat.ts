@@ -272,7 +272,7 @@ export class AssistantChat implements AssistantHost {
       const sent = await this.say(accountId, { id: input.id, parts, client: input.client });
       return {
         conversationId: accountId, queued: Boolean(before), runId: sent.runId,
-        message: { id: input.id, role: "user", text: input.text, created_at: new Date().toISOString(), ...(input.attachments.length ? { attachments: input.attachments.map(asset => ({ type: asset.kind, name: asset.name, asset_id: asset.id })) } : {}) }
+        message: { id: input.id, role: "user", text: input.text, created_at: sent.acceptedAt, ...(input.attachments.length ? { attachments: input.attachments.map(asset => ({ type: asset.kind, name: asset.name, asset_id: asset.id })) } : {}) }
       };
     } catch (error) { throw refusedAs(error); }
   }

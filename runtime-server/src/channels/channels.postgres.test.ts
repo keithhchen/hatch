@@ -86,12 +86,12 @@ class FakeGateway implements ChatGateway {
   async send(principal: Principal, conversation: ConversationRef, client: ClientAttributes, messageId: string, parts: ContentPart[]) {
     if (this.failSend) { const error = this.failSend; this.failSend = undefined; throw error; }
     const known = this.byMessage.get(messageId);
-    if (known) return { outcome: "replayed" as const, conversationId: "conversation-1", runId: known, messageId };
+    if (known) return { outcome: "replayed" as const, conversationId: "conversation-1", runId: known, messageId, acceptedAt: "2026-01-01T00:00:00.000Z" };
     this.submitted.push({ principal, conversation, client, messageId, parts });
     const runId = `run-${this.submitted.length}`;
     this.byMessage.set(messageId, runId);
     this.runs.set(runId, { ended: false });
-    return { outcome: "started" as const, conversationId: "conversation-1", runId, messageId };
+    return { outcome: "started" as const, conversationId: "conversation-1", runId, messageId, acceptedAt: "2026-01-01T00:00:00.000Z" };
   }
   async upload(principal: Principal, conversation: ConversationRef, input: { name: string }) { this.uploaded.push({ principal, conversation, name: input.name }); return { assetId: "asset-1", kind: /\.(jpe?g|png)$/i.test(input.name) ? "image" as const : /\.(ogg|m4a|amr)$/i.test(input.name) ? "audio" as const : "file" as const }; }
   async progress(runId: string) { return this.runs.get(runId); }

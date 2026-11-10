@@ -511,6 +511,21 @@ test("A Run the provider refuses is a failed Assistant with a code, in the statu
   } finally { console.error = consoleError; await env.close(); }
 });
 
+test("The receipt of a sent message carries the time Chat accepted it", async () => {
+  const env = await setup({ model: (_turn, call) => call === 1 ? { delayMs: 300, text: "好" } : { text: "不该再有一轮" } });
+  try {
+    await env.say("第一句");
+    await waitFor(async () => (await env.chat.status(ACCOUNT)).state === "running");
+    const send = env.chat.gateway.send.bind(env.chat.gateway);
+    const accepted = "2020-01-01T00:00:00.000Z";
+    (env.chat.gateway as { send: typeof send }).send = async (...args) => ({ ...(await send(...args)), acceptedAt: accepted });
+    const sent = await env.chat.send(ACCOUNT, { id: "late-1", text: "补充一句", attachments: [], client: { client: "web" } });
+    assert.equal(sent.queued, true);
+    assert.equal(sent.message.created_at, accepted);
+    await env.idle();
+  } finally { await env.close(); }
+});
+
 test("A message sent twice with one key is one message, and another body under the key is refused", async () => {
   const env = await setup({ model: () => ({ text: "好" }) });
   try {

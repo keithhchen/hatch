@@ -112,6 +112,18 @@ for (const backend of ["memory", "file", "postgres"] as const) {
     }));
   }
 
+  test(`${backend}: a claimed message is dated when it arrived, as its receipt says, not when the Run claimed it`, options, async () => withBackend(backend, async ({ repository, store }) => {
+    const start = await repository.acceptSubmission(message(0));
+    const steered = await repository.acceptSubmission(message(1));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await repository.claimSteeredMessages(start.run.id);
+    const history = await store.readVisibleConversation(id);
+    const row = history.find((entry) => entry.content === "question 1")!;
+    assert.equal(row.timestamp, steered.receipt.accepted_at);
+    const consumed = (await repository.snapshot(id)).events.find((event) => event.type === "message.consumed")!;
+    assert.ok(Date.parse(consumed.createdAt) - Date.parse(row.timestamp) >= 40);
+  }));
+
   test(`${backend}: messages racing a Run's end never deadlock and are each claimed or start the next Run`, options, async () => withBackend(backend, async ({ repository }) => {
     let n = 0;
     const submit = (): Promise<unknown> => repository.acceptSubmission(message(n++)).catch((error: unknown) => error);
