@@ -16,7 +16,7 @@ export type PublicMessage = {
 };
 
 /** An asset the upload side has finished with. Bytes live in the workspace at `path`; the model reads them there. */
-export type ReadyAsset = { id: string; kind: "image" | "file" | "audio"; name: string; mimeType: string; bytes: number; sha256: string; path: string; transcript?: string; /** Set when the asset already belongs to a message. */ messageId?: string };
+export type ReadyAsset = { id: string; kind: "image" | "file" | "audio"; name: string; mimeType: string; bytes: number; sha256: string; path: string; transcript?: string };
 
 /** What a client sent, with every attachment already resolved to a ready asset. */
 export type SendInput = {

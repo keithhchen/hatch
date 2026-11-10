@@ -82,12 +82,12 @@ export class AssetPipeline implements ReadyAssetResolver {
     return asset;
   }
 
-  /** A message submission binds its ready assets; this is the only way an asset gains a message id. `tx` binds in the transaction that accepts the message. */
+  /** A message submission links its ready assets to it; the same asset may join any number of messages. `tx` links in the transaction that accepts the message. */
   attach(scope: AssetScope, assetId: string, messageId: string, tx?: unknown): Promise<Asset> {
     return this.repository.on(tx).attach(scope, assetId, messageId);
   }
 
-  /** Undoes `attach` for a message that was not delivered, so its assets can be sent again. */
+  /** Undoes `attach` for a message that was not delivered. */
   release(scope: AssetScope, assetId: string, messageId: string): Promise<void> {
     return this.repository.release(scope, assetId, messageId);
   }

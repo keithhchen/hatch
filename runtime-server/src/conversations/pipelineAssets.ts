@@ -7,7 +7,7 @@ const STATUS: Record<AssetError["code"], number> = {
   too_large: 413, unsupported_type: 415, unsafe_archive: 422, malformed: 422, moderation_blocked: 422, unavailable: 503, not_found: 404, not_ready: 409, conflict: 409
 };
 
-const CODE: Record<string, string> = { processing_failed: "asset_failed", not_ready: "asset_not_ready", conflict: "asset_already_used" };
+const CODE: Record<string, string> = { processing_failed: "asset_failed", not_ready: "asset_not_ready", conflict: "asset_conflict" };
 
 const refusal = (code: string, message: string) => new ConversationError(STATUS[code as AssetError["code"]] ?? 422, CODE[code] ?? code, message);
 
@@ -22,7 +22,7 @@ export const productPlacement = (asset: Asset): string =>
 
 const ready = (asset: Asset, place: Workshop["place"]): ReadyAsset => ({
   id: asset.id, kind: asset.record.kind, name: asset.record.name, mimeType: asset.record.mime, bytes: asset.record.bytes, sha256: asset.record.sha256,
-  path: place(asset), ...(asset.record.transcript ? { transcript: asset.record.transcript } : {}), ...(asset.messageId ? { messageId: asset.messageId } : {})
+  path: place(asset), ...(asset.record.transcript ? { transcript: asset.record.transcript } : {})
 });
 
 /** Assets as conversations see them, over the upload pipeline: nothing is ready until the pipeline says so. */

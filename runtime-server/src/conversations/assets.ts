@@ -9,11 +9,10 @@ export interface AssetResolver {
   /** Puts what the model reads where it reads it. Runs before the message is delivered, and is safe to repeat. */
   stage(scope: AssetScope, assets: readonly ReadyAsset[]): Promise<void>;
   /**
-   * Binds the assets to the message about to be delivered, all or none: an asset that belongs to another message
-   * refuses with `asset_already_used`, so of two sends of one asset exactly one gets through. Safe to repeat for the same message.
+   * Links the assets to the message about to be delivered. The same asset may join any number of messages. Safe to repeat for the same message.
    */
   attach(scope: AssetScope, assets: readonly ReadyAsset[], messageId: string): Promise<void>;
-  /** Frees the assets of a message that was not delivered, so they can be sent again. */
+  /** Drops the links of a message that was not delivered. */
   release(scope: AssetScope, assets: readonly ReadyAsset[], messageId: string): Promise<void>;
 }
 

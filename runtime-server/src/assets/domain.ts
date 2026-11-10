@@ -36,12 +36,12 @@ export class AssetError extends Error {
 
 export type AssetRecord = {
   id: string; scope: AssetScope; sha256: string; kind: AssetKind; mime: string; name: string; bytes: number;
-  state: AssetState; failure?: AssetFailure; derivatives: Derivative[]; transcript?: string; messageId?: string; createdAt: string;
+  state: AssetState; failure?: AssetFailure; derivatives: Derivative[]; transcript?: string; createdAt: string;
 };
 
 /**
- * One uploaded thing. The state machine lives here, not in callers:
- * processing -> ready | failed, and only a ready asset may join a message, once.
+ * One uploaded thing: content, not a message's. The state machine lives here, not in callers:
+ * processing -> ready | failed, and only a ready asset may join messages (see AssetRepository.attach).
  */
 export class Asset {
   private constructor(readonly record: Readonly<AssetRecord>) {}
@@ -53,7 +53,6 @@ export class Asset {
 
   get id() { return this.record.id; }
   get state() { return this.record.state; }
-  get messageId() { return this.record.messageId; }
   derivative(role: DerivativeRole) { return this.record.derivatives.find(d => d.role === role); }
 
   ready(derivatives: Derivative[], transcript?: string): Asset {
@@ -63,17 +62,6 @@ export class Asset {
   failed(failure: AssetFailure): Asset {
     this.require("processing", "fail");
     return new Asset({ ...this.record, state: "failed", failure });
-  }
-  attachedTo(messageId: string): Asset {
-    if (this.state !== "ready") throw new AssetError("not_ready", `Asset ${this.id} is ${this.state}`);
-    if (this.messageId && this.messageId !== messageId) throw new AssetError("conflict", `Asset ${this.id} already belongs to another message`);
-    return new Asset({ ...this.record, messageId });
-  }
-  /** Frees the asset from `messageId`, the message that never got delivered. An asset bound to another message stays so. */
-  released(messageId: string): Asset {
-    if (this.messageId !== messageId) return this;
-    const { messageId: _bound, ...rest } = this.record;
-    return new Asset(rest);
   }
   private require(state: AssetState, action: string) {
     if (this.state !== state) throw new Error(`An asset that is ${this.state} cannot ${action}`);
@@ -91,7 +79,7 @@ export interface AssetBlobs {
  * database constraints, so every method must be safe under concurrent callers:
  * - insertIfAbsent: at most one non-failed asset per (scope, sha256).
  * - transition: compare-and-set on state; undefined when the asset moved first.
- * - attach: only a ready asset in this scope, bound once to one message.
+ * - attach: only a ready asset in this scope; the same bytes may join any number of messages, and a message once.
  * - release: unbinds an asset from that message, and only from that one.
  */
 export interface AssetRepository {
@@ -102,8 +90,11 @@ export interface AssetRepository {
   get(scope: AssetScope, id: string): Promise<Asset | undefined>;
   attach(scope: AssetScope, id: string, messageId: string): Promise<Asset>;
   release(scope: AssetScope, id: string, messageId: string): Promise<void>;
-  listAttached(scope: AssetScope): Promise<Asset[]>;
+  listAttached(scope: AssetScope): Promise<AttachedAsset[]>;
 }
+
+/** An asset as one message carries it. The same asset appears once for every message it joined. */
+export type AttachedAsset = { asset: Asset; messageId: string };
 
 export type Moderated = { type: "image"; bytes: Buffer; mime: string } | { type: "text"; text: string };
 export interface ContentModerator { check(content: Moderated): Promise<{ allowed: true } | { allowed: false; reason: string }>; }

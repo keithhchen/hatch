@@ -60,37 +60,28 @@ for (const [name, run, skip] of adapters) {
       assert.equal(d.written.get(asset.path)?.toString(), "alpha\nbeta", "the extracted text, reachable by path");
       await d.assets.attach(mine, [asset], "m1");
       await d.assets.attach(mine, [asset], "m1");
-      assert.equal(((await d.assets.resolve(mine, uploaded.asset_id)) as { messageId?: string }).messageId, "m1");
-      await assert.rejects(d.assets.attach(mine, [asset], "m2"), { status: 409, code: "asset_already_used" }, "an asset joins one message");
+      await d.assets.attach(mine, [asset], "m2");
+      assert.deepEqual((await repository.listAttached(mine)).map(link => link.messageId).sort(), ["m1", "m2"], "one asset, two messages");
       assert.equal((await d.assets.upload(mine, { name: "again.txt", bytes: Buffer.from("alpha\nbeta") })).asset_id, uploaded.asset_id, "the same bytes are the same asset");
     } finally { await d.close(); }
   }));
 
-  test(`${name}: of concurrent sends of one asset exactly one is delivered, and a send that fails frees its assets`, { skip }, () => run(async repository => {
+  test(`${name}: the same file can be sent in many messages, and a send that fails frees its link`, { skip }, () => run(async repository => {
     const d = await desk(repository, allow);
     try {
       const uploaded = await d.assets.upload(mine, { name: "notes.txt", bytes: Buffer.from("alpha") });
-      const second = await d.assets.upload(mine, { name: "more.txt", bytes: Buffer.from("beta") });
       const asset = (await d.assets.resolve(mine, uploaded.asset_id)) as ReadyAsset;
-      const other = (await d.assets.resolve(mine, second.asset_id)) as ReadyAsset;
       const delivered: string[] = [];
       let failing = false;
       const inner = { send: async (input: SendInput) => { await new Promise(resolve => setTimeout(resolve, 5)); if (failing) throw new Error("runtime down"); delivered.push(input.id); return { conversationId: "c", queued: false, message: { id: input.id, role: "user", text: "", created_at: "" } }; } } as unknown as Conversation;
       const conversation = new AttachedConversation(inner, { scope: mine, desk: d.assets });
-      const send = (id: string, attachments: ReadyAsset[]) => conversation.send({ id, text: "hi", attachments, client: { client: "web" } }).then(() => "sent", (error: { code?: string }) => error.code);
-      const outcomes = await Promise.all(["m1", "m2", "m3", "m4"].map(id => send(id, [asset])));
-      assert.equal(outcomes.filter(outcome => outcome === "sent").length, 1);
-      assert.equal(outcomes.filter(outcome => outcome === "asset_already_used").length, 3);
-      assert.equal(delivered.length, 1);
-      assert.equal(((await d.assets.resolve(mine, asset.id)) as ReadyAsset).messageId, delivered[0], "bound to the message that was delivered");
+      const send = (id: string) => conversation.send({ id, text: "hi", attachments: [asset], client: { client: "web" } }).then(() => "sent", (error: { code?: string }) => error.code);
+      assert.deepEqual(await Promise.all(["m1", "m2", "m3"].map(send)), ["sent", "sent", "sent"]);
+      assert.deepEqual((await repository.listAttached(mine)).map(link => link.messageId).sort(), ["m1", "m2", "m3"]);
 
       failing = true;
-      assert.equal(await send("m5", [other]), undefined, "a delivery that throws is the caller's error");
-      assert.equal(((await d.assets.resolve(mine, other.id)) as ReadyAsset).messageId, undefined, "its asset is free again");
-      failing = false;
-      assert.equal(await send("m6", [asset, other]), "asset_already_used", "one used asset refuses the whole message");
-      assert.equal(((await d.assets.resolve(mine, other.id)) as ReadyAsset).messageId, undefined, "and binds none of it");
-      assert.equal(await send("m7", [other]), "sent");
+      assert.equal(await send("m4"), undefined, "a delivery that throws is the caller's error");
+      assert.deepEqual((await repository.listAttached(mine)).map(link => link.messageId).sort(), ["m1", "m2", "m3"], "the failed message holds nothing");
     } finally { await d.close(); }
   }));
 

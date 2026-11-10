@@ -1,4 +1,4 @@
-import type { Asset, AssetBlobs, AssetRepository, AssetScope } from "./domain.js";
+import type { Asset, AssetBlobs, AssetRepository, AssetScope, AttachedAsset } from "./domain.js";
 import { FileToolError, REGEX_TIMEOUT_MS, fixedMatcher, regexMatcher } from "./matchers.js";
 import { ATTACHMENTS_ROOT, pathsFor } from "./views.js";
 
@@ -29,12 +29,12 @@ function segments(path: string): Segments {
 export class AttachmentFiles {
   constructor(private readonly repository: AssetRepository, private readonly blobs: AssetBlobs) {}
 
-  /** Every asset attached to a message in this scope, oldest first. */
-  attached(scope: AssetScope): Promise<Asset[]> { return this.repository.listAttached(scope); }
+  /** Every asset as each message carried it in this scope, oldest first. */
+  attached(scope: AssetScope): Promise<AttachedAsset[]> { return this.repository.listAttached(scope); }
 
   private async index(scope: AssetScope): Promise<Map<string, Entry[]>> {
     const byMessage = new Map<string, Asset[]>();
-    for (const asset of await this.repository.listAttached(scope)) byMessage.set(asset.messageId!, [...byMessage.get(asset.messageId!) ?? [], asset]);
+    for (const { asset, messageId } of await this.repository.listAttached(scope)) byMessage.set(messageId, [...byMessage.get(messageId) ?? [], asset]);
     return new Map([...byMessage].map(([messageId, assets]) => {
       const paths = pathsFor(messageId, assets);
       return [messageId, assets.map(asset => ({ path: paths.get(asset.id)!, asset }))];

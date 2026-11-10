@@ -97,13 +97,11 @@ class FakeDesk implements AssetDesk {
   staged: string[] = [];
   attached: Array<{ ids: string[]; messageId: string }> = [];
   uploads: Array<{ name: string; bytes: number }> = [];
-  /** Assets that already belong to a message. */
-  used = new Set<string>();
   constructor(private files: Map<string, Buffer>) {}
   resolve = async (scope: AssetScope, id: string) => {
     if (scope.kind !== "account" || scope.accountId !== "a1") return undefined;
-    const asset = id === "a-img" ? IMAGE : id === "a-doc" ? NOTES : id === "a-used" ? { ...NOTES, id: "a-used" } : undefined;
-    return id === "a-wait" ? "pending" as const : asset && this.used.has(id) ? { ...asset, messageId: "old" } : asset;
+    const asset = id === "a-img" ? IMAGE : id === "a-doc" ? NOTES : undefined;
+    return id === "a-wait" ? "pending" as const : asset;
   };
   stage = async (_scope: unknown, assets: readonly ReadyAsset[]) => { for (const asset of assets) { this.staged.push(asset.path); this.files.set(asset.path, Buffer.from("bytes")); } };
   attach = async (_scope: unknown, assets: readonly ReadyAsset[], messageId: string) => { this.attached.push({ ids: assets.map(asset => asset.id), messageId }); };
@@ -411,18 +409,6 @@ test("attachments: staged before delivery, bound to the accepted message, and a 
     assert.equal(again.message.id, first.message.id);
     assert.equal(h.desk.attached.length, 1, "a replay is not a second binding");
     assert.equal(h.desk.staged.length, 1);
-  } finally { await h.close(); }
-});
-
-test("attachments: an asset that already belongs to a message is refused before anything is delivered", async () => {
-  const h = await harness();
-  try {
-    h.desk.used.add("a-used");
-    const response = await post(h, { content: [{ type: "file", assetId: "a-used" }] });
-    assert.equal(response.status, 409);
-    assert.equal(((await response.json()) as { error: { code: string } }).error.code, "asset_already_used");
-    assert.equal(h.workspace.started.length, 0);
-    assert.deepEqual(h.desk.attached, []);
   } finally { await h.close(); }
 });
 

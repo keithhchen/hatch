@@ -38,7 +38,7 @@ export const refusal = (error: unknown): unknown => error instanceof AssetError
 /** A platform event id may hold characters a path cannot, so the message id in /attachments/<id>/ is derived from it. */
 export const attachmentMessageId = (clientMessageId: string): string => `msg_${createHash("sha256").update(clientMessageId).digest("hex").slice(0, 16)}`;
 
-/** `bind` is what must commit with the accepted message: its assets join it, in the same transaction, or the message is refused. */
+/** `bind` is what must commit with the accepted message: its assets are linked to it, in the same transaction, or the message is refused. */
 export type PreparedMessage = { digest: string; message: () => Promise<ConversationMessage>; bind?: AlsoCommit };
 
 /** Turns message parts into the canonical user message and the digest that makes a retry safe. */
@@ -98,7 +98,7 @@ export class ChatAssets implements PartsReader {
     return {
       digest,
       message: () => this.build(parts, assets, messageId),
-      // Binding is per asset, and it commits with the message: an asset of another message refuses this one, and a crash binds nothing.
+      // The links commit with the message: a crash links nothing.
       bind: async (tx) => { for (const id of assets.keys()) await this.deps.pipeline.attach(scope, id, messageId, tx).catch((error) => { throw refusal(error); }); }
     };
   }
@@ -130,7 +130,7 @@ export class ChatAssets implements PartsReader {
 
   /** What a conversation's messages carried, for history and for hosts that hand files on: the asset and the message it belongs to. */
   async attachments(conversation: Pick<ConversationRecord, "id" | "ownerAccountId">): Promise<Array<{ asset: Asset; messageId: string }>> {
-    return (await this.deps.files.attached(assetScopeOf(conversation))).map((asset) => ({ asset, messageId: asset.messageId! }));
+    return this.deps.files.attached(assetScopeOf(conversation));
   }
 
   /** The bytes of one of an asset's forms: the resized image, or the text a file or voice message was read as. */

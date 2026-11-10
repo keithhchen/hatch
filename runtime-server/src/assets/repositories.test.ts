@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { Pool } from "pg";
-import { Asset, AssetError, type AssetRepository } from "./domain.js";
+import { Asset, AssetError, scopeKey, type AssetRepository } from "./domain.js";
 import { scopeA, scopeB } from "./kit.test.js";
 import { InMemoryAssetRepository, PostgresAssetRepository } from "./repositories.js";
 
@@ -29,18 +29,17 @@ async function contract(repo: AssetRepository) {
   }
   assert.equal(await repo.get(scopeB, winner.id), undefined);
   assert.equal(await code(repo.attach(scopeB, winner.id, "m1")), "not_found");
-  const attachResults = await Promise.all(["m1", "m2", "m1", "m2"].map(m => code(repo.attach(scopeA, winner.id, m))));
-  assert.equal(attachResults.filter(r => r === "conflict").length, 2);
-  assert.equal((await repo.listAttached(scopeA)).length, 1);
+  // One asset joins many messages; binding the same message twice is one link.
+  assert.deepEqual(await Promise.all(["m1", "m2", "m1", "m2"].map(m => code(repo.attach(scopeA, winner.id, m)))), ["ok", "ok", "ok", "ok"]);
+  const links = await repo.listAttached(scopeA);
+  assert.deepEqual(links.map(link => link.messageId).sort(), ["m1", "m2"]);
+  assert.ok(links.every(link => link.asset.id === winner.id));
   assert.equal((await repo.listAttached(scopeB)).length, 0);
-  const bound = (await repo.listAttached(scopeA))[0]!.messageId!;
-  const other = bound === "m1" ? "m2" : "m1";
-  await repo.release(scopeA, winner.id, other);
-  assert.equal((await repo.get(scopeA, winner.id))!.messageId, bound, "release frees only the message that holds it");
-  await repo.release(scopeA, winner.id, bound);
-  assert.equal((await repo.get(scopeA, winner.id))!.messageId, undefined);
+  await repo.release(scopeA, winner.id, "m1");
+  assert.deepEqual((await repo.listAttached(scopeA)).map(link => link.messageId), ["m2"], "release frees only the message it names");
+  await repo.release(scopeA, winner.id, "m2");
   assert.equal((await repo.listAttached(scopeA)).length, 0);
-  assert.equal(await code(repo.attach(scopeA, winner.id, other)), "ok", "a released asset can be sent again");
+  assert.equal(await code(repo.attach(scopeA, winner.id, "m1")), "ok", "a released asset can be sent again");
   const pending = (await repo.insertIfAbsent(fresh("s2"))).asset;
   assert.equal(await code(repo.attach(scopeA, pending.id, "m1")), "not_ready");
 }
@@ -58,8 +57,29 @@ test("PostgreSQL repository meets the contract, enforced by the database", { ski
   try {
     const repo = new PostgresAssetRepository(pool);
     await repo.initialize();
-    for (let i = 0; i < 5; i++) { await pool.query("TRUNCATE hatch_assets"); await contract(repo); }
-    await assert.rejects(pool.query(`INSERT INTO hatch_assets (id, scope_key, sha256, state, message_id, record) VALUES ('x','k','h','processing','m','{}')`), /check/i);
+    for (let i = 0; i < 5; i++) { await pool.query("TRUNCATE hatch_assets CASCADE"); await contract(repo); }
+  } finally {
+    await pool.end();
+    await admin.query(`DROP SCHEMA "${schema}" CASCADE`);
+    await admin.end();
+  }
+});
+
+test("rows written when an asset held one message become links, once", { skip: !url, timeout: 60_000 }, async () => {
+  const schema = `hatch_assets_test_${randomUUID().replaceAll("-", "")}`;
+  const admin = new Pool({ connectionString: url });
+  await admin.query(`CREATE SCHEMA "${schema}"`);
+  const pool = new Pool({ connectionString: url, options: `-c search_path=${schema}` });
+  try {
+    await pool.query(`CREATE TABLE hatch_assets (id text PRIMARY KEY, scope_key text NOT NULL, sha256 text NOT NULL, state text NOT NULL, message_id text, record jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now())`);
+    const record = { ...fresh("s1").record, state: "ready" as const, messageId: "m-old" };
+    await pool.query(`INSERT INTO hatch_assets (id, scope_key, sha256, state, message_id, record) VALUES ($1, $2, 's1', 'ready', 'm-old', $3)`, [record.id, scopeKey(scopeA), JSON.stringify(record)]);
+    const repo = new PostgresAssetRepository(pool);
+    await repo.initialize();
+    await repo.initialize();
+    assert.deepEqual((await repo.listAttached(scopeA)).map(link => [link.asset.id, link.messageId]), [[record.id, "m-old"]]);
+    assert.equal(await code(repo.attach(scopeA, record.id, "m-new")), "ok", "and the asset takes another message");
+    assert.equal((await repo.listAttached(scopeA)).length, 2);
   } finally {
     await pool.end();
     await admin.query(`DROP SCHEMA "${schema}" CASCADE`);
