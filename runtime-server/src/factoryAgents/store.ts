@@ -44,7 +44,7 @@ export type Session = {
   id: string; role: AnyRole; title: string; createdAt: string; updatedAt: string;
   revision: number; turn: number; status: "idle" | "running" | "completed" | "failed" | "interrupted";
   outputUpdatedAt?: string; lastRunAt?: string;
-  error?: string; /** Stable code of a failed Run; `error` is its message. */ errorCode?: string; activeTool?: string;
+  error?: string; /** Stable code of a failed Run; `error` is its message. */ errorCode?: string; errorRef?: string; activeTool?: string;
   files: FileRecord[]; comments: Comment[];
   messages: AgentMessage[]; context: AgentMessage[]; scribeContext?: AgentMessage[]; todos: Todo[];
   product?: Pick<FactoryProductScope, "creatorId" | "productId">;

@@ -24,6 +24,8 @@ import {
   type RunStart
 } from "./protocol.js";
 import { RunStateMachine } from "./runState.js";
+import { failures } from "./errors/failures.js";
+import { PostgresFailureLedger } from "./errors/postgresFailureLedger.js";
 import { ServerToolExecutor } from "./serverTools.js";
 import { RuntimeStore, type VisibleConversationPart } from "./store.js";
 import { PostgresStore } from "./postgresStore.js";
@@ -670,6 +672,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   const conversationRepository = options.conversationRepository ?? createConversationRepository(conversationStore);
   if (conversationStore instanceof PostgresStore && conversationRepository instanceof PostgresConversationRepository) {
     conversationRepository.bindSubmissionStore(conversationStore);
+    failures.attach(new PostgresFailureLedger(conversationStore.pool as never));
   } else if (!(conversationRepository instanceof InMemoryConversationRepository)
     || conversationRepository.localAuthority !== conversationStore.localAuthority) {
     throw new Error("Runtime store and repository must share one submission authority");
@@ -806,8 +809,9 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
         );
       } catch (error) {
         if (turn.signal.reason instanceof RunHandoff) return;
-        await turn.state.fail(errorMessage(error)).catch(() => undefined);
-        turn.publish({ type: "turn.failed", run_id: turn.run.id, error: { code: "run_failed", message: errorMessage(error) } });
+        const failure = failures.translate(error, { run: turn.run.id, conversation: turn.conversation.id });
+        await turn.state.fail(failure.message).catch(() => undefined);
+        turn.publish({ type: "turn.failed", run_id: turn.run.id, error: failure });
       }
     }
   };
@@ -3038,15 +3042,9 @@ async function runOneTurnInternal(
       || (error instanceof ConversationRepositoryError && error.code === "steer_pending")) {
       return;
     }
-    await state.fail(errorMessage(error)).catch(() => undefined);
-    await send({
-      type: "turn.failed",
-      run_id: input.run_id,
-      error: {
-        code: "run_failed",
-        message: errorMessage(error)
-      }
-    });
+    const failure = failures.translate(error, { run: input.run_id, conversation: input.conversation_id });
+    await state.fail(failure.message).catch(() => undefined);
+    await send({ type: "turn.failed", run_id: input.run_id, error: failure });
   } finally {
     if (commerceEventSink && deliveryReservation && !deliveryReservationConsumed && !deliveryAccountingPending) {
       const releaseReason = state.status === "cancelled"

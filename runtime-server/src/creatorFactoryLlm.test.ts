@@ -6,13 +6,10 @@ import {
   FACTORY_LLM_CONTEXT_WINDOW,
   FACTORY_LLM_MAX_COMPLETION_TOKENS,
   FACTORY_LLM_WALL_CLOCK_TIMEOUT_MS,
-  FACTORY_PROVIDER_CONFIGURATION_MESSAGE,
-  FACTORY_PROVIDER_QUOTA_MESSAGE,
-  FACTORY_PROVIDER_TRANSIENT_MESSAGE,
-  classifyFactoryProviderFailure,
   createFactoryLlmModel,
   createFactoryLlmPromptRunner
 } from "./creatorLearning/factoryLlm.js";
+import { UpstreamError } from "./errors/upstream.js";
 import type { FactoryPromptFailureTelemetry } from "./creatorLearning/types.js";
 import { PI_FACTORY_MODEL, runFactoryPromptWithPi } from "./creatorLearning/piGateway.js";
 import { KIMI_MODEL, createKimiModel } from "./piModel.js";
@@ -253,7 +250,7 @@ test("Factory Kimi K2.6 has a hard wall-clock deadline in addition to HTTP idle 
       signal: controller.signal,
       reportFailureTelemetry: (item) => telemetry.push(item)
     }),
-    new RegExp(FACTORY_PROVIDER_TRANSIENT_MESSAGE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    (error: unknown) => error instanceof UpstreamError && error.kind === "transient"
   );
   assert.equal(telemetry.length, 1);
   assert.equal(telemetry[0]!.code, "provider_error");
@@ -288,12 +285,10 @@ test("Factory Kimi K2.6 classifies quota exhaustion and never rethrows provider 
       reportFailureTelemetry: (row) => telemetry.push(row)
     }),
     (error: unknown) => {
-      assert.ok(error instanceof Error);
-      assert.equal(error.message, FACTORY_PROVIDER_QUOTA_MESSAGE);
+      assert.ok(error instanceof UpstreamError);
+      assert.equal(error.kind, "quota");
       assert.equal(error.message.includes(organizationId), false);
       assert.equal(error.message.includes(keyId), false);
-      assert.equal(error.message.includes("exceeded_current_quota_error"), false);
-      assert.equal(error.message.includes("{"), false);
       return true;
     }
   );
@@ -306,12 +301,12 @@ test("Factory Kimi K2.6 sanitizes transient and configuration provider errors wh
     {
       status: 503,
       body: { error: { message: "upstream temporarily unavailable for org-secret", type: "server_error" } },
-      expected: FACTORY_PROVIDER_TRANSIENT_MESSAGE
+      expected: "transient"
     },
     {
       status: 401,
       body: { error: { message: "invalid credential ak-secret-key-id", type: "authentication_error" } },
-      expected: FACTORY_PROVIDER_CONFIGURATION_MESSAGE
+      expected: "configuration"
     }
   ];
 
@@ -335,12 +330,10 @@ test("Factory Kimi K2.6 sanitizes transient and configuration provider errors wh
         reportFailureTelemetry: (item) => telemetry.push(item)
       }),
       (error: unknown) => {
-        assert.ok(error instanceof Error);
-        assert.equal(error.message, row.expected);
-        assert.match(error.message, /retry this stage/i);
+        assert.ok(error instanceof UpstreamError);
+        assert.equal(error.kind, row.expected);
         assert.equal(error.message.includes("org-secret"), false);
         assert.equal(error.message.includes("ak-secret-key-id"), false);
-        assert.equal(error.message.includes("{"), false);
         return true;
       }
     );
@@ -351,7 +344,7 @@ test("Factory Kimi K2.6 sanitizes transient and configuration provider errors wh
 
 test("Factory provider classification does not mask private harness response errors", () => {
   assert.equal(
-    classifyFactoryProviderFailure(new Error("Factory Hatch harness rejected the Runtime response: turn failed during candidate execution")),
-    undefined
+    UpstreamError.of(new Error("Factory Hatch harness rejected the Runtime response: turn failed during candidate execution")).kind,
+    "unknown"
   );
 });

@@ -1,3 +1,4 @@
+import { failures } from "../errors/failures.js";
 import type { ConversationRepository, ConversationRunRecord, ToolCallOutcome } from "../conversationRepository.js";
 import type { ToolRequest, ToolResult } from "../protocol.js";
 
@@ -177,7 +178,7 @@ export class RunSupervisor {
       }
     } catch (error) {
       if (owned.controller.signal.reason instanceof RunHandoff) return;
-      await this.repository.transitionRun(run.id, "failed", error instanceof Error ? error.message : String(error)).catch(() => undefined);
+      await this.repository.transitionRun(run.id, "failed", failures.translate(error, { run: run.id, conversation: run.conversationId }).message).catch(() => undefined);
     }
   }
 }

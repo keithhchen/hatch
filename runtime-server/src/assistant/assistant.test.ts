@@ -496,11 +496,13 @@ test("A Run the provider refuses is a failed Assistant with a code, in the view 
     await env.assistant.submit(ACCOUNT, { source: "web", text: "你好" });
     await waitFor(async () => !(await env.assistant.view(ACCOUNT)).running);
     const view = await env.assistant.view(ACCOUNT);
-    assert.equal(view.failure?.code, "provider_quota");
+    assert.equal(view.failure?.code, "upstream_error");
+    assert.match(view.failure?.message ?? "", /not a problem with your account. Reference: err_[0-9a-f]{12}\./);
+    assert.equal(view.failure?.message.includes(view.failure.reference!), true);
     assert.deepEqual(view.messages.map(message => message.role), ["expert"], "the message is kept; there is no reply");
     const end = (await env.log.after(`assistant:${ACCOUNT}`, "0", 5000)).map(entry => entry.event).find(event => event.type === "run_end");
-    assert.deepEqual([end?.status, (end?.error as { code: string }).code], ["failed", "provider_quota"]);
-    assert.doesNotMatch(JSON.stringify([view.failure, end]), /org-abc123|ak-secret9|suspended/);
+    assert.deepEqual([end?.status, (end?.error as { code: string }).code], ["failed", "upstream_error"]);
+    assert.doesNotMatch(JSON.stringify([view.failure, end]), /org-abc123|ak-secret9|suspended|insufficient balance/);
     await env.assistant.submit(ACCOUNT, { source: "web", text: "再试" });
     await waitFor(async () => !(await env.assistant.view(ACCOUNT)).running);
     assert.equal((await env.assistant.view(ACCOUNT)).failure, undefined, "a new turn that succeeds clears it");

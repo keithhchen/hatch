@@ -25,6 +25,13 @@ Studio and Chat are two systems and stay two systems. These rules apply to both.
 - A Run taken over after a crash continues from its transcript. A call that finished is never run again. A read-only call that did not finish is reported to the model as not run; any other server call that did not finish may have had an effect, so the Run is interrupted instead of repeating it.
 - Live deltas reach observers on every instance through a bounded relay that never waits for a consumer or the database.
 
+## Errors
+
+- A failed Run reaches every client as one shape, `{code, message, reference}`, built once by the failure boundary (`runtime-server/src/errors`). Chat `turn.failed`, Studio `run_end`/status, the CLI and IM replies all carry it.
+- A failure of something Hatch calls (the model provider, a third-party platform) is always `upstream_error`: "An upstream service Hatch uses failed. This is not a problem with your account. Reference: err_...". The provider's words, cause (quota, rate limit, configuration, transient), provider and status never leave the server.
+- Hatch's own errors keep their code and real message (`run_failed`, `run_cancelled`, `run_interrupted`, refusals).
+- Staff look a reference up in the server log line `{"event":"failure",...}` or `SELECT * FROM hatch_failures WHERE reference = ...` (Runtime with Postgres).
+
 ## Transports
 
 HTTP and WebSocket, each streaming and non-streaming, observe the same Run and the same events.

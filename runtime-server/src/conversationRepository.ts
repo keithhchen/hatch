@@ -781,7 +781,7 @@ export class InMemoryConversationRepository implements ConversationRepository {
         status,
         ...(status === "running" && !current.startedAt ? { startedAt: timestamp } : {}),
         ...(TERMINAL_RUN_STATUSES.has(status) ? { completedAt: timestamp } : {}),
-        ...(status === "interrupted" && reason ? { interruptedReason: reason } : {})
+        ...((status === "interrupted" || status === "failed") && reason ? { interruptedReason: reason } : {})
       };
       this.runs.set(runId, updated);
       this.appendEventUnsafe({
@@ -1624,7 +1624,7 @@ export class PostgresConversationRepository implements ConversationRepository {
         SET status = $2,
             started_at = CASE WHEN $2 = 'running' AND started_at IS NULL THEN now() ELSE started_at END,
             completed_at = CASE WHEN $2 IN ('completed', 'failed', 'cancelled', 'interrupted') THEN now() ELSE completed_at END,
-            interrupted_reason = CASE WHEN $2 = 'interrupted' THEN $3 ELSE interrupted_reason END
+            interrupted_reason = CASE WHEN $2 IN ('interrupted', 'failed') THEN $3 ELSE interrupted_reason END
         WHERE id = $1
         RETURNING *
       `, [runId, status, reason ?? null]);

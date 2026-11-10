@@ -5,6 +5,7 @@ import {
   type FactoryPiAdapterOptions
 } from "./factoryPi.js";
 import { resolveFactoryLlmProfile, type FactoryLlmProfileName, type LlmProfile } from "../llmProfiles.js";
+import { UpstreamError } from "../errors/upstream.js";
 import { createFactorySubmissionProtocol } from "./factorySubmission.js";
 import type { FactoryPromptFailureTelemetry, FactoryPromptRunner } from "./types.js";
 
@@ -15,12 +16,6 @@ export const FACTORY_LLM_WALL_CLOCK_TIMEOUT_MS = 15 * 60_000;
 export const FACTORY_LLM_CONTEXT_WINDOW = FACTORY_LLM_PROFILE.contextWindow;
 /** Moonshot's documented Kimi K2.6 default maximum for one completion. */
 export const FACTORY_LLM_MAX_COMPLETION_TOKENS = FACTORY_LLM_PROFILE.maxTokens;
-export const FACTORY_PROVIDER_QUOTA_MESSAGE =
-  "Factory LLM provider quota is unavailable; recharge or increase the provider quota, then retry this stage";
-export const FACTORY_PROVIDER_TRANSIENT_MESSAGE =
-  "Factory LLM provider request failed temporarily; retry this stage";
-export const FACTORY_PROVIDER_CONFIGURATION_MESSAGE =
-  "Factory LLM provider rejected the request; verify provider credentials and configuration, then retry this stage";
 /**
  * A provider may end a normal assistant turn without using the host-owned
  * submission tools even though tools are available. Give the protocol one
@@ -29,12 +24,6 @@ export const FACTORY_PROVIDER_CONFIGURATION_MESSAGE =
 const MAX_SUBMISSION_REPAIR_TURNS = 1;
 const SUBMISSION_REPAIR_PROMPT = `Protocol repair required: the previous assistant turn ended without an accepted finalize tool call. Do not return the artifact as prose. Continue from the host-retained draft, use the available local submission tool(s), and call the contract's required finalize tool as the last tool call. If no draft was retained, submit the complete result first, then finalize. Stop immediately after the host accepts FINALIZED.`;
 
-export type FactoryProviderFailure = {
-  code: "provider_quota" | "provider_error";
-  retryability: "immediate" | "after_operator_action";
-  message: string;
-};
-
 type FactoryLlmAdapterOptions = FactoryPiAdapterOptions & {
   /** Hard deadline for one prompt, in addition to the HTTP idle timeout. */
   wallClockTimeoutMs?: number;
@@ -42,62 +31,6 @@ type FactoryLlmAdapterOptions = FactoryPiAdapterOptions & {
 
 export { FACTORY_LLM_MODEL, createFactoryLlmModel } from "./factoryPi.js";
 export type { FactoryLlmModel } from "./factoryPi.js";
-
-function providerErrorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function providerHttpStatus(message: string): number | undefined {
-  const match = /^\s*([45]\d\d)\b/.exec(message)
-    ?? /\b(?:http(?:\s+error)?|status(?:\s+code)?)\s*[:=]?\s*([45]\d\d)\b/i.exec(message);
-  return match ? Number(match[1]) : undefined;
-}
-
-/**
- * Classify an untrusted provider failure without carrying any provider-authored
- * body into durable Factory state. In particular, Moonshot quota responses can
- * contain organization and API-key identifiers in their JSON message.
- */
-export function classifyFactoryProviderFailure(error: unknown): FactoryProviderFailure | undefined {
-  const message = providerErrorText(error);
-  const status = providerHttpStatus(message);
-  const quota = /(?:exceeded[\s_-]*(?:current[\s_-]*)?quota|insufficient[\s_-]*(?:balance|quota|credits?)|(?:balance|credits?|quota).{0,64}(?:exhausted|depleted|insufficient)|(?:exhausted|depleted).{0,32}(?:balance|credits?|quota))/i.test(message);
-  if (quota) {
-    return {
-      code: "provider_quota",
-      retryability: "after_operator_action",
-      message: FACTORY_PROVIDER_QUOTA_MESSAGE
-    };
-  }
-
-  const carriesCredentialOrAccountIdentifier = /(?:\borg-[a-z0-9][a-z0-9_-]*\b|<?\bak-[a-z0-9][a-z0-9_-]*\b>?|\bsk-[a-z0-9][a-z0-9_-]*\b)/i.test(message);
-  const providerShaped = status !== undefined
-    || carriesCredentialOrAccountIdentifier
-    // Keep this allow-list narrow. Generic words such as "request" and
-    // "response" also occur in the private Factory harness/runtime boundary;
-    // classifying those as provider failures hides the actionable local error
-    // behind a misleading credentials message.
-    || /(?:provider|moonshot|openai|api[\s_-]*key|network|fetch|rate[\s_-]*limit|too many requests|timeout|timed out|socket|connection|econn[a-z]*|eai_again)/i.test(message);
-  if (!providerShaped) return undefined;
-
-  const transient = status === 408
-    || status === 409
-    || status === 425
-    || status === 429
-    || (status !== undefined && status >= 500)
-    || /(?:rate[\s_-]*limit|too many requests|temporar|timeout|timed out|network|fetch|socket|connection|econn[a-z]*|eai_again)/i.test(message);
-  return transient
-    ? {
-        code: "provider_error",
-        retryability: "immediate",
-        message: FACTORY_PROVIDER_TRANSIENT_MESSAGE
-      }
-    : {
-        code: "provider_error",
-        retryability: "after_operator_action",
-        message: FACTORY_PROVIDER_CONFIGURATION_MESSAGE
-      };
-}
 
 function failureCode(
   error: unknown,
@@ -108,10 +41,10 @@ function failureCode(
   if (/exact submission tool cycle|repeated final validation failure/i.test(message)) return "exact_submission_cycle";
   if (/without an accepted finalize/i.test(message)) return "stopped_without_finalize";
   if (/did not complete: length|output token limit/i.test(message)) return "provider_incomplete";
-  const providerFailure = classifyFactoryProviderFailure(error);
-  if (providerFailure?.code === "provider_quota") return "provider_quota";
+  const upstream = UpstreamError.of(error);
+  if (upstream.kind === "quota") return "provider_quota";
   if (/submission|finalize|tool/i.test(message)) return "submission_protocol_error";
-  if (providerFailure) return "provider_error";
+  if (upstream.kind !== "unknown") return "provider_error";
   return "unknown";
 }
 
@@ -255,10 +188,7 @@ export function createFactoryLlmPromptRunner(
       // Never let a provider-authored body cross the adapter boundary. Pi's
       // OpenAI-compatible adapter intentionally includes that body in its
       // display error, and Moonshot may place org/key identifiers in it.
-      const providerFailure = classifyFactoryProviderFailure(error);
-      if (providerFailure && (code === "provider_quota" || code === "provider_error")) {
-        throw new Error(providerFailure.message);
-      }
+      if (code === "provider_quota" || code === "provider_error") throw UpstreamError.of(error);
       throw error;
     } finally {
       clearTimeout(wallClockTimer);

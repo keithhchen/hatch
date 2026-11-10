@@ -318,7 +318,7 @@ test("a Studio stream, whose frames have no event name, prints the reply and end
   });
 });
 
-const QUOTA = { code: "provider_quota", message: "The model provider has no quota or balance left." };
+const QUOTA = { code: "upstream_error", message: "An upstream service Hatch uses failed. This is not a problem with your account. Reference: err_0123456789ab.", reference: "err_0123456789ab" };
 
 test("a Studio Run that fails prints its error and exits 1, streamed or waited", async () => {
   await withServer((call, res) => {
@@ -328,10 +328,10 @@ test("a Studio Run that fails prints its error and exits 1, streamed or waited",
   }, async (url) => {
     const streamed = await cli(["assistant", "hi", "--stream"], url);
     assert.equal(streamed.code, 1);
-    assert.match(streamed.err, /provider_quota.*no quota or balance/);
+    assert.match(streamed.err, /upstream_error.*not a problem with your account.*err_0123456789ab/);
     const waited = await cli(["chat", "p1", "research", "hi", "--wait=5"], url);
     assert.equal(waited.code, 1);
-    assert.match(waited.err, /provider_quota.*no quota or balance/);
+    assert.match(waited.err, /upstream_error.*not a problem with your account.*err_0123456789ab/);
   });
 });
 
