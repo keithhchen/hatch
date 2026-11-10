@@ -99,3 +99,13 @@ test("an unreadable session storage is no pending messages, not an error", () =>
   assert.deepEqual(store.load(ASSISTANT_CONVERSATION), []);
   store.save({ conversationId: ASSISTANT_CONVERSATION, clientMessageId: "m", content: "x", attachments: [] });
 });
+
+test("answering a failed Run again posts to /retry under the key as its Idempotency-Key", async () => {
+  const calls = [];
+  const transport = new StudioAssistantTransport(async (path, init) => { calls.push({ path, init }); return { accepted: true, run_id: "run_9", outcome: "started" }; }, { stream: url => new FakeSource(url), timeZone: "UTC" });
+  assert.equal(transport.retriesRun, true);
+  assert.deepEqual(await transport.retryRun(ASSISTANT_CONVERSATION, "retry_1"), { accepted: true, run_id: "run_9", outcome: "started" });
+  assert.equal(calls[0].path, "/v1/creator/assistant/retry");
+  assert.equal(calls[0].init.method, "POST");
+  assert.equal(calls[0].init.headers["idempotency-key"], "retry_1");
+});

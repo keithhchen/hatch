@@ -57,6 +57,12 @@ export class WebConversationTransport extends ConversationTransport {
     return this.url(`/${encodeURIComponent(conversationId)}${path}`, parameters);
   }
 
+  get retriesRun() { return true; }
+
+  retryRun(conversationId, key) {
+    return this.request(this.conversationUrl(conversationId, "/retry"), { method: "POST", body: JSON.stringify({ retry_id: key, client: "web" }) });
+  }
+
   list(cursor) {
     return this.request(this.url("", cursor ? { cursor } : {}));
   }

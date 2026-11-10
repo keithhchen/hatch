@@ -22,6 +22,8 @@ export const INITIAL_CHAT_STATE = Object.freeze({
   status: Object.freeze({ key: "loading" }),
   error: null,
   activeRun: null,
+  /** The Run that ended failed and has not been answered again or dismissed: `{ id }`. */
+  failedRun: null,
   runState: null,
   session: null,
   connection: "idle",
@@ -170,7 +172,7 @@ export class ConversationController {
     this.sync.reset();
     this.reveal.discard();
     this.resetTimeline();
-    this.setState({ conversationId: id, historyCursor: null, snapshotConversationId: null, messages: [], activeRun: null, runState: null, session: null, connection: "idle", error: null, ...(id ? { status: { key: "loadingConversation" } } : {}) });
+    this.setState({ conversationId: id, historyCursor: null, snapshotConversationId: null, messages: [], activeRun: null, failedRun: null, runState: null, session: null, connection: "idle", error: null, ...(id ? { status: { key: "loadingConversation" } } : {}) });
     if (!id) return;
     void this.refresh(id).catch(cause => {
       if (generation === this.generation) this.fail(cause);
@@ -251,7 +253,13 @@ export class ConversationController {
     this.run = null;
     this.updateMessages(current => current.filter(message => !(message.transient && message.run_id === run.id)));
     this.resetTimeline();
-    if (record.status === "failed") this.fail(record.failure ?? new ChatError("replyFailed"));
+    if (record.status === "failed") this.failReply(run.id, record.failure);
+  }
+
+  /** A reply that failed: shown as an error that can be answered again, not as a broken connection. */
+  failReply(runId, error) {
+    this.setState({ failedRun: { id: runId } });
+    this.fail(error ?? new ChatError("replyFailed"));
   }
 
   /**
@@ -270,6 +278,7 @@ export class ConversationController {
   /** After a reload: what the server did not acknowledge is sent again, under the same key. */
   resumePending(conversationId, messages) {
     for (const record of this.pendingStore.load(conversationId)) {
+      if (record.kind === "retry") continue;
       if (messages.some(message => message.id === record.clientMessageId)) { this.pendingStore.settle(record.clientMessageId); continue; }
       const submission = PendingSubmission.fromRecord(record, { runId: this.run?.id ?? newId("run"), stableId: this.transport.steerable });
       submission.leadsRun = !this.run;
@@ -287,7 +296,37 @@ export class ConversationController {
     }
   }
 
-  /** Retry whatever failed: the first snapshot, or the live session. */
+  /** Whether the failed reply can be answered again here. */
+  get canRetryRun() { return this.transport.retriesRun; }
+
+  /**
+   * Answer the failed reply again: a new Run over the same conversation. The key is minted at the click and kept until the
+   * server answers, so an ambiguous failure and a click again are one Run.
+   */
+  async retryRun() {
+    const conversationId = this.state.conversationId;
+    if (!conversationId || !this.state.failedRun || !this.canRetryRun) return;
+    const kept = this.pendingStore.load(conversationId).find(record => record.kind === "retry");
+    const record = kept ?? { conversationId, clientMessageId: newId("retry"), kind: "retry" };
+    if (!kept) this.pendingStore.save(record);
+    this.setState({ error: null });
+    try {
+      const { run_id: runId } = await this.transport.retryRun(conversationId, record.clientMessageId);
+      this.pendingStore.settle(record.clientMessageId);
+      if (this.state.conversationId !== conversationId) return;
+      this.run = { id: runId };
+      this.resetTimeline();
+      this.updateMessages(current => [...current.filter(message => !message.transient), ChatTimeline.streamingAssistantMessage(runId)]);
+      this.setState({ failedRun: null, activeRun: runId, status: { key: "sending" } });
+      await this.refresh(conversationId);
+    } catch (cause) {
+      // A refusal is the server's answer: the key is spent. Anything else may have reached it, so the key stays.
+      if (Number.isInteger(cause?.status) && cause.status >= 400 && cause.status < 500) this.pendingStore.settle(record.clientMessageId);
+      this.fail(cause);
+    }
+  }
+
+  /** Retry whatever failed in the connection: the first snapshot, or the live session. */
   retry() {
     this.setState({ error: null });
     if (this.snapshotPending) this.open(this.state.conversationId, { force: true });
@@ -295,7 +334,7 @@ export class ConversationController {
   }
 
   dismissError() {
-    this.setState({ error: null });
+    this.setState({ error: null, failedRun: null });
   }
 
   async loadHistory() {
@@ -516,7 +555,7 @@ export class ConversationController {
       else this.terminalRun = { id: event.run_id, failed: outcome.failed };
       this.run = null;
       this.setState({ runState: null });
-      if (outcome.failed) this.fail(outcome.error ?? new ChatError("replyFailed"));
+      if (outcome.failed) this.failReply(event.run_id, outcome.error);
       if (!unaccepted) this.setState({ activeRun: event.run_id, status: { key: "syncingReply" } });
       await this.refresh(conversationId);
     },
@@ -593,6 +632,7 @@ export class ConversationController {
 
   async send() {
     const { conversationId, activeRun, draft, images } = this.state;
+    if (conversationId && (draft.trim() || images.length)) this.setState({ failedRun: null });
     const steering = this.transport.steerable && Boolean(this.run);
     if (!conversationId || this.snapshotPending || (activeRun && !this.transport.steerable) || (!draft.trim() && images.length === 0)) return;
     const connection = this.connection;
