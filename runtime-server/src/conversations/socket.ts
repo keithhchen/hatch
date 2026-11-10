@@ -1,13 +1,13 @@
 import type http from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer } from "ws";
+import { MAX_CONSUMER_BUFFERED_BYTES as MAX_BUFFERED_BYTES } from "../chat/sinks.js";
 import { ConversationError } from "./conversation.js";
 import { follow, resumePoint, withoutPartials } from "./follow.js";
 import { snapshotOf } from "./snapshot.js";
 import type { Studio, TargetSpec } from "./studio.js";
 
 export const STUDIO_SOCKET_PATH = "/v1/creator/studio/ws";
-const MAX_BUFFERED_BYTES = 1024 * 1024;
 const AUTH_TIMEOUT_MS = 10_000;
 
 export type Identity = { accountId: string; token: string };

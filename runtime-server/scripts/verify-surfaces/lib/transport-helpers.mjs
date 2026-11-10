@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import http from "node:http";
 import { createHash } from "node:crypto";
 import { until, sleep } from "./util.mjs";
@@ -78,4 +80,19 @@ export async function settled(count, quietMs = 1_000, timeoutMs = 60_000) {
     if (now !== last) { last = now; since = Date.now(); } else if (Date.now() - since >= quietMs) return now;
   }
   return count();
+}
+
+/**
+ * A raw TCP WebSocket consumer with a 4 KB receive buffer that handshakes, subscribes and reads nothing (lib/stalled_ws_client.py).
+ * It reads what reached it after `stallSeconds`, or as soon as `release()` is called. `result` is its one-line report.
+ */
+export function rawStalledConsumer({ baseUrl, path, hello, subscribe, stallSeconds = 8 }) {
+  const url = new URL(baseUrl);
+  const script = fileURLToPath(new URL("./stalled_ws_client.py", import.meta.url));
+  const env = { PATH: process.env.PATH, HOST: url.hostname, PORT: url.port, PATH_: path, HELLO_JSON: JSON.stringify(hello), SUBSCRIBE_JSON: JSON.stringify(subscribe), STALL_SECONDS: String(stallSeconds), RELEASE_ON_STDIN: "1" };
+  const child = spawn("python3", ["-I", script], { env, stdio: ["pipe", "pipe", "pipe"] });
+  let out = "";
+  child.stdout.on("data", (d) => { out += d; });
+  const result = new Promise((resolve) => child.on("exit", () => { try { resolve(JSON.parse(out)); } catch { resolve({ error: out.slice(0, 200) }); } }));
+  return { result, release: () => child.stdin.write("go\n") };
 }

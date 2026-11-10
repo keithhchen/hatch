@@ -111,7 +111,7 @@ import { MAX_BYTES as MAX_ASSET_BYTES } from "./assets/pipeline.js";
 import { RegistryConnectionDirectory } from "./chat/registryConnections.js";
 import { openChatAssets } from "./chat/openChatAssets.js";
 import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
-import { SocketSink, SseSink } from "./chat/sinks.js";
+import { MAX_CONSUMER_BUFFERED_BYTES, SocketSink, SseSink } from "./chat/sinks.js";
 import { authorizeLocalToolCall, productRequiresLocalTools } from "./chat/toolSurface.js";
 import type { ScopeResolver, TurnRunner } from "./chat/turnExecutor.js";
 import type { TurnCompaction } from "./chat/chatCompaction.js";
@@ -200,6 +200,8 @@ export type RuntimeServerOptions = {
   connectionIdleTimeoutMs?: number;
   /** Hard cap for a socket's queued outbound bytes. */
   maxSocketBufferedBytes?: number;
+  /** A Chat event consumer with this much unsent is disconnected and resumes by cursor (default 1 MB). */
+  maxConsumerBufferedBytes?: number;
   /** Hard deadline for Runtime-owned network tools. */
   serverToolTimeoutMs?: number;
   /** Deadline for receiving HTTP headers. */
@@ -306,6 +308,12 @@ export async function createRuntimeServerFromEnvironment(
     "HATCH_RUNTIME_MAX_SOCKET_BUFFERED_BYTES",
     environment.HATCH_RUNTIME_MAX_SOCKET_BUFFERED_BYTES,
     160 * 1024 * 1024,
+    256 * 1024 * 1024
+  );
+  const maxConsumerBufferedBytes = runtimeCapacityLimit(
+    "HATCH_RUNTIME_MAX_CONSUMER_BUFFERED_BYTES",
+    environment.HATCH_RUNTIME_MAX_CONSUMER_BUFFERED_BYTES,
+    MAX_CONSUMER_BUFFERED_BYTES,
     256 * 1024 * 1024
   );
   const connectionHeartbeatMs = runtimeDurationMs(
@@ -446,6 +454,7 @@ export async function createRuntimeServerFromEnvironment(
     maxActiveRunsPerUser,
     maxActiveRunsGlobal,
     maxSocketBufferedBytes,
+    maxConsumerBufferedBytes,
     connectionHeartbeatMs,
     connectionIdleTimeoutMs,
     serverToolTimeoutMs,
@@ -818,7 +827,8 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   const edge: ChatEdge = {
     chat, assetStore, parts, chatAssets, turnAuthorizationGate, turnAuthorizationPerUserGate,
     entitlementResolver, authIdentityResolver, agentCorpusResolver,
-    creatorToolControlPlane: options.creatorToolControlPlane
+    creatorToolControlPlane: options.creatorToolControlPlane,
+    consumerBufferedBytes: options.maxConsumerBufferedBytes ?? MAX_CONSUMER_BUFFERED_BYTES
   };
   const gateway = chatGatewayFor(options, chat, scopes, conversationRepository, conversationStore, agentCorpusResolver, parts, chatAssets);
   edge.serviceApi = new ChatServiceApi({ token: options.chatServiceToken, gateway });
@@ -1818,7 +1828,7 @@ function openEventStream(
   finished?: { status: string; reply: string; cursor?: number }
 ): void {
   res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
-  const sink = new SseSink(res);
+  const sink = new SseSink(res, edge.consumerBufferedBytes);
   if (submission) {
     sink.push({ type: "message.accepted", conversation_id: conversation.publicId, run_id: submission.run.id, client_message_id: submission.clientMessageId, outcome: submission.outcome });
   }
@@ -2120,6 +2130,8 @@ async function materializeUserMessageAssets(
 
 /** What both transports need to turn an authenticated user message into a Run or a steer. */
 type ChatEdge = {
+  /** What a Chat event consumer may leave unsent before it is disconnected. */
+  consumerBufferedBytes: number;
   chat: ChatRuntime<SessionBinding>;
   assetStore: RuntimeAssetStore;
   parts: PartsReader;
@@ -2304,7 +2316,7 @@ async function handleRuntimeSocket(
   });
 
   const sink = new SocketSink(socket, (event) =>
-    protectPrivateAgentBoundary(event as OutboundMessage, binding?.agentCorpusRoot, binding?.productId) as unknown as Record<string, unknown>);
+    protectPrivateAgentBoundary(event as OutboundMessage, binding?.agentCorpusRoot, binding?.productId) as unknown as Record<string, unknown>, edge.consumerBufferedBytes);
   const send = async (message: OutboundMessage): Promise<void> => {
     const outbound = protectPrivateAgentBoundary(message, binding?.agentCorpusRoot, binding?.productId);
     if (socket.readyState !== WebSocket.OPEN) return;

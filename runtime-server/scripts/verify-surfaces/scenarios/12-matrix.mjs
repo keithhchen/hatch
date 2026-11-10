@@ -143,8 +143,7 @@ class Matrix extends Scenario {
 
   async codingAgentToChat(stack, rec, matrix) {
     const owner = await stack.account("chat-coder");
-    // `hatch ask` and MCP chat_send cannot start a conversation with any Product (see 2c). The rest of the CLI/MCP surface is measured on conversations
-    // that the Chat HTTP door started with brief_answers, continued with --conversation / conversation_id. This is a workaround for the defect, not a product path.
+    // The CLI/MCP surface is measured on conversations the Chat HTTP door started (with brief_answers: []), continued with --conversation / conversation_id; starting through `hatch ask` is cell 2c.
     const productId = await stack.product(owner, { system: SYSTEM });
     const started = (product) => chat.create(product, randomUUID(), []);
     const chat = new ChatApi(stack.url, Auth.bearer(owner.apiKey));
@@ -222,7 +221,7 @@ class Matrix extends Scenario {
       } finally { mcp.close(); }
     });
 
-    await walk(matrix, rec, "2c", "coding agent (CLI, MCP) -> Chat on Products with a brief spec: optional-only field, required field, no brief", async (cell) => {
+    await walk(matrix, rec, "2c", "coding agent (CLI, MCP) -> Chat on Products with a brief spec: optional-only field, required field (answered via --brief / brief_answers), no brief spec", async (cell) => {
       const mcp = new McpClient({ apiUrl: stack.url, apiKey: owner.apiKey, home: cliHome(stack, "chat-brief") });
       await mcp.start();
       try {
@@ -238,18 +237,26 @@ class Matrix extends Scenario {
           const noAnswers = await create(undefined);
           const emptyAnswers = await create([]);
           const withAnswer = await create([{ field_id: "goal", value: "verify the brief path" }]);
-          const viaCli = await run("ask", "Reply with exactly the word: briefed", "--product", product, "--wait=60");
-          const viaMcp = await mcp.tool("chat_send", { product_id: product, content: "Reply with exactly the word: briefed", wait: 60 });
+          const answered = kind === "required";
+          const viaCli = await run("ask", "Reply with exactly the word: briefed", "--product", product, "--wait=60", ...(answered ? ["--brief", "goal=verify the brief path"] : []));
+          const viaMcp = await mcp.tool("chat_send", { product_id: product, content: "Reply with exactly the word: briefed", wait: 60, ...(answered ? { brief_answers: { goal: "verify the brief path" } } : {}) });
           outcomes[kind] = { product, httpNoAnswers: noAnswers.status, httpEmptyAnswers: emptyAnswers.status, httpWithAnswer: withAnswer.status, cliExit: viaCli.code, cliError: viaCli.stderr.slice(0, 160), mcpError: viaMcp.isError ? viaMcp.text.slice(0, 160) : undefined, cliReply: viaCli.json?.reply?.text, mcpReply: viaMcp.json?.reply?.text };
+          if (kind === "required") {
+            const refusedCli = await run("ask", "x", "--product", product, "--wait=60");
+            const refusedMcp = await mcp.tool("chat_send", { product_id: product, content: "x", wait: 60 });
+            outcomes[kind].unansweredCli = /brief_required_answer_missing/.test(refusedCli.stderr);
+            outcomes[kind].unansweredMcp = refusedMcp.isError && /Answers required in brief_answers/.test(refusedMcp.text);
+          }
         }
         cell.ids.outcomes = outcomes; rec.evidenceOf("brief_outcomes", outcomes);
-        cell.check("precondition: the HTTP door works when brief_answers are supplied as the spec requires (and refuses a missing array)", outcomes.optional.httpEmptyAnswers < 300 && outcomes.required.httpWithAnswer < 300 && outcomes.optional.httpNoAnswers === 422, outcomes);
-        cell.check("a Product without a brief spec cannot be chatted by anyone (Chat refuses it: every Product needs a BriefSpec), so the CLI has no workable shape", outcomes.none.httpNoAnswers === 403, outcomes.none);
+        cell.check("precondition: the HTTP door starts a conversation when the spec's required fields are answered, refuses a missing required answer with 422, and does not need answers for an optional-only spec", outcomes.optional.httpNoAnswers < 300 && outcomes.optional.httpEmptyAnswers < 300 && outcomes.required.httpWithAnswer < 300 && outcomes.required.httpNoAnswers === 422, outcomes);
+        cell.check("a Product without a brief spec is refused by Chat itself (403: every Product requires a BriefSpec), also through the CLI and MCP", outcomes.none.httpNoAnswers === 403 && outcomes.none.cliExit !== 0 && /BriefSpec/.test(outcomes.none.cliError) && /BriefSpec/.test(outcomes.none.mcpError ?? ""), outcomes.none);
         const optionalOk = outcomes.optional.cliExit === 0 && /briefed/i.test(outcomes.optional.cliReply ?? "") && /briefed/i.test(outcomes.optional.mcpReply ?? "");
         cell.check("hatch ask / MCP chat_send chat a Product whose brief spec has only OPTIONAL fields", optionalOk, outcomes.optional);
-        const requiredOk = outcomes.required.cliExit === 0 && /briefed/i.test(outcomes.required.cliReply ?? "");
-        cell.check("hatch ask / MCP chat_send chat a Product whose brief spec has a REQUIRED field (it can supply brief_answers)", requiredOk, outcomes.required);
-        if (!optionalOk || !requiredOk) rec.defect({ title: "hatch CLI and MCP cannot start a Chat conversation with any Product (every Product needs a brief spec; creating without brief_answers is refused)", severity: "high", expected: "A coding agent can start a Chat conversation with any published Product (matrix cell Coding agent x Chat). At least a spec with no required field must not need answers", actual: `ask/chat_send create the conversation with only client_request_id. createBriefSnapshot throws 'Brief answers must be an array' (HTTP 422 brief_answer_invalid) when brief_answers is missing, even for a spec whose only field is required:false (CLI exit ${outcomes.optional.cliExit}: ${outcomes.optional.cliError}). With a required field the same door needs an answer the CLI/MCP has no flag/argument to supply (CLI exit ${outcomes.required.cliExit}). HTTP works with brief_answers: [] (optional) or a real answer (required). Products without a brief spec are refused by Chat itself (403 Forbidden: product.brief_spec: A Product requires a BriefSpec), so no Product is reachable by 'hatch ask' / chat_send as a first message; only --conversation/conversation_id on a conversation the HTTP door started works.`, repro: "Publish a Product with brief_spec.fields=[{id:'goal',label:'g',required:false}]; `hatch ask hi --product <id> --wait` -> 422 brief_answer_invalid; same for MCP chat_send. Root: runtime-server/src/brief.ts createBriefSnapshot (array check) called from index.ts POST /v1/conversations; packages/hatch-cli/src/chatCommands.js startConversation sends no brief_answers" });
+        const requiredOk = outcomes.required.cliExit === 0 && /briefed/i.test(outcomes.required.cliReply ?? "") && /briefed/i.test(outcomes.required.mcpReply ?? "");
+        cell.check("hatch ask --brief field=value / MCP chat_send brief_answers chat a Product whose brief spec has a REQUIRED field", requiredOk, outcomes.required);
+        cell.check("without the answer, hatch ask / MCP chat_send are refused with 422 brief_required_answer_missing naming the field", outcomes.required.unansweredCli && outcomes.required.unansweredMcp, outcomes.required);
+
       } finally { mcp.close(); }
     });
   }

@@ -17,13 +17,14 @@ export class SlowConsumerError extends Error {
 export class SocketSink implements EventSink {
   constructor(
     private readonly socket: WebSocket,
-    private readonly project: (event: Record<string, unknown>) => Record<string, unknown> = (event) => event
+    private readonly project: (event: Record<string, unknown>) => Record<string, unknown> = (event) => event,
+    private readonly maxBufferedBytes = MAX_CONSUMER_BUFFERED_BYTES
   ) {}
 
   push(event: Record<string, unknown>): void {
     if (this.socket.readyState !== WebSocket.OPEN) return;
     const payload = JSON.stringify(this.project(event));
-    if (this.socket.bufferedAmount > MAX_CONSUMER_BUFFERED_BYTES) {
+    if (this.socket.bufferedAmount > this.maxBufferedBytes) {
       this.socket.terminate();
       throw new SlowConsumerError();
     }
@@ -33,11 +34,11 @@ export class SocketSink implements EventSink {
 
 /** Writes events to a Server-Sent Events response; `id` is the cursor, so Last-Event-ID resumes. */
 export class SseSink implements EventSink {
-  constructor(private readonly response: http.ServerResponse) {}
+  constructor(private readonly response: http.ServerResponse, private readonly maxBufferedBytes = MAX_CONSUMER_BUFFERED_BYTES) {}
 
   push(event: Record<string, unknown>): void {
     if (this.response.writableEnded || this.response.destroyed) throw new SlowConsumerError();
-    if (this.response.writableLength > MAX_CONSUMER_BUFFERED_BYTES) {
+    if (this.response.writableLength > this.maxBufferedBytes) {
       this.response.destroy();
       throw new SlowConsumerError();
     }

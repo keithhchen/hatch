@@ -13,3 +13,9 @@ test("a consumer with 1 MB unsent is disconnected, whatever the largest payload 
   assert.equal(destroyed, true);
   assert.equal(MAX_CONSUMER_BUFFERED_BYTES, 1024 * 1024);
 });
+
+test("the bound is a constructor value; 1 MB is only the default", () => {
+  const response = { writableEnded: false, destroyed: false, writableLength: 4097, write: () => true, destroy: () => undefined };
+  assert.throws(() => new SseSink(response as unknown as http.ServerResponse, 4096).push({ type: "x" }), SlowConsumerError);
+  assert.doesNotThrow(() => new SseSink(response as unknown as http.ServerResponse).push({ type: "x" }));
+});
