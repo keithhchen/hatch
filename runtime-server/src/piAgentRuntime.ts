@@ -696,7 +696,9 @@ export class PiAgentRuntime implements AgentRuntime {
     }
     // A turn that failed has no next model call: the messages that joined stay unclaimed for the failure path to keep.
     const turnFailed = event.type === "turn_end" && (event.message as AssistantMessage).stopReason === "error";
-    if (event.type === "turn_end" && ctx.claimSteered && !turnFailed) {
+    // After a hand-over the conversation belongs to whoever took it (an interview): a message that joins now is not the model's to
+    // read, so it stays unclaimed and the Run ends; Chat then runs it again from that message, and it reaches the new owner.
+    if (event.type === "turn_end" && ctx.claimSteered && !turnFailed && !handedOver()) {
       // Messages that joined the Run enter before its next model call. Pi injects
       // them after the tool results of this turn, so history stays well-formed.
       for (const message of await ctx.claimSteered()) {
