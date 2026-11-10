@@ -226,8 +226,27 @@
 .web-chat__attach:hover { color: var(--chat-ink); background: var(--chat-panel); }
 .web-chat__attach:focus-within { outline: 3px solid var(--web-yolk-soft); }
 .web-chat__attach > svg { width: 20px; height: 20px; }
+button.web-chat__attach { padding: 0; border: 0; background: transparent; }
+.web-chat__attach-menu { position: relative; display: grid; }
+.web-chat__sheet {
+  position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 3; display: grid; min-width: 180px; padding: 6px;
+  border: 1px solid var(--chat-border); border-radius: 18px; background: var(--chat-card); box-shadow: var(--web-shadow-lift);
+}
+.web-chat__sheet button { display: flex; min-height: 44px; align-items: center; gap: 12px; padding: 0 14px; border: 0; border-radius: 12px; background: transparent; cursor: pointer; font-size: 15px; text-align: left; }
+.web-chat__sheet button:active { background: var(--chat-panel); }
+.web-chat__sheet svg { width: 20px; height: 20px; color: var(--chat-muted); }
 .web-chat__attach input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .web-chat__attach:has(input:disabled) { cursor: not-allowed; opacity: .4; }
+.web-chat__voice { display: flex; height: 60px; align-items: center; padding: 14px 22px 0; color: var(--chat-ink); }
+.web-chat__waveform { width: 100%; height: 36px; }
+.web-chat__actions--voice { justify-content: flex-end; }
+.web-chat__voice-button { display: grid; width: 40px; height: 40px; place-items: center; padding: 0; border: 0; border-radius: 999px; color: var(--chat-muted); background: transparent; cursor: pointer; transition: color var(--chat-motion), background var(--chat-motion); }
+.web-chat__voice-button:not(:disabled):hover { color: var(--chat-ink); background: var(--chat-panel); }
+.web-chat__voice-button:disabled { cursor: default; }
+.web-chat__voice-button[data-phase="denied"] { color: var(--web-fail); }
+.web-chat__voice-button svg { width: 20px; height: 20px; }
+.web-chat__spin { animation: web-chat-spin 1s linear infinite; }
+@keyframes web-chat-spin { to { transform: rotate(360deg); } }
 .web-chat__hint { min-width: 0; flex: 1; overflow: hidden; color: var(--chat-muted); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .web-chat__send {
   display: grid; width: 44px; height: 44px; place-items: center; padding: 0; border: 0; border-radius: 999px;

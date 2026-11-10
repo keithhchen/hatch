@@ -1,27 +1,48 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Plus } from "lucide-react";
-import { Button, IconButton, InlineAlert } from "@hatch/ui";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Paperclip } from "lucide-react";
+import { Button, InlineAlert } from "@hatch/ui";
+import { ChatTimeline } from "@hatch/chat";
 import { friendlyError, LoadingState, mutationKey } from "./studioShellKit.jsx";
 import { subscribeFactoryEvents } from "./factoryEvents.js";
-import { BrowserImageAttachments } from "./webChatClient.js";
-import { ImageViewer } from "@hatch/chat/react";
+import { BrowserImageAttachments, base64Of, browserDictation } from "./webChatClient.js";
+import { Composer, ImageViewer, TimelineEntries } from "@hatch/chat/react";
+import { useLocale } from "./locale.jsx";
+import { webChatErrorText, webChatT } from "./webChatI18n.js";
+import "./webChat.css";
 import { ChannelBindings } from "./ChannelBindings.jsx";
 
 const ROOT = "/v1/creator/assistant";
 const CONNECTIONS = "/v1/creator/connections";
 const CHANNEL_NAMES = { telegram: "Telegram", line: "LINE", lark: "Lark", feishu: "飞书", wecom: "WeCom", wechatkf: "WeChat", slack: "Slack", imessage: "iMessage" };
+// Thinking and tool steps, as Product web chat shows them.
+const STEP_KINDS = ["thinking", "tool"];
+const NO_APPROVALS = { decisions: {}, decide: null };
 const REVIEW_ACTIONS = { content: ["sxaContentYes", "sxaContentNo"], change: ["sxaChangeYes", "sxaChangeNo"] };
+
+const isChip = attachment => attachment.type === "file";
+const sizeOf = bytes => bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+
+/** A reply as Product chat draws it: words and runs of steps in the order they happened. */
+function Reply({ timeline, live, t, errorText }) {
+  return <article className="web-chat__message web-chat__message--assistant sxa-reply"><div className="web-chat__message-body">
+    <TimelineEntries timeline={timeline} live={live} activityKinds={STEP_KINDS} t={t} errorText={errorText} loadToolDetail={undefined} approvals={NO_APPROVALS} />
+  </div></article>;
+}
 
 /** One assistant per Expert: a conversation and the things that need them. */
 export function StudioAssistant({ request, t }) {
   const [view, setView] = useState(null);
   const [draft, setDraft] = useState("");
-  const [streaming, setStreaming] = useState("");
+  const [files, setFiles] = useState([]);
+  const [live, setLive] = useState(null);
+  const liveRef = useRef(new ChatTimeline());
+  const { locale } = useLocale();
+  const chatT = useCallback((key, values) => webChatT(locale, key, values), [locale]);
+  const errorText = useCallback(cause => webChatErrorText(cause, locale), [locale]);
   const [pendingLines, setPendingLines] = useState([]);
   const [error, setError] = useState("");
   const [larkForm, setLarkForm] = useState(false);
-  const inputRef = useRef(null);
-  const fileRef = useRef(null);
+  const dockRef = useRef(null);
   const endRef = useRef(null);
   const follow = useRef(true);
   const send = useCallback((path, body) => request(path, { method: "POST", headers: { "idempotency-key": mutationKey() }, body: JSON.stringify(body ?? {}) }), [request]);
@@ -37,8 +58,19 @@ export function StudioAssistant({ request, t }) {
     onError: () => setError(t("sxaConnectionLost")),
     onMessage: event => {
       const value = JSON.parse(event.data);
-      if (value.type === "delta") { setStreaming(current => current + (value.text ?? "")); return; }
-      if (value.type === "message" || value.type === "assistant" || value.type === "state") { setStreaming(""); void refresh(); }
+      const timeline = liveRef.current;
+      const show = entries => setLive(entries.length ? entries : null);
+      if (value.type === "delta") { show(timeline.appendText(value.text ?? "")); return; }
+      if (value.type === "thinking" && !timeline.activeThinking.has(value.contentIndex)) { show(timeline.startThinking(value.contentIndex)); return; }
+      if (value.type === "thinking_delta" && timeline.activeThinking.has(value.contentIndex)) { show(timeline.appendThinking(value.contentIndex, value.delta)); return; }
+      if (value.type === "thinking_end" && timeline.activeThinking.has(value.contentIndex)) { show(timeline.finishThinking(value.contentIndex, value.content)); return; }
+      if (value.type === "tool" || value.type === "tool_end") {
+        show(timeline.upsertTool({ tool_call_id: value.id, name: value.name, activity_message: value.activity, status: value.type === "tool" ? "requested" : value.isError ? "failed" : "completed" }));
+        return;
+      }
+      // The live reply gives way to the saved one only once the saved one is on the page.
+      if (value.type === "message_end" || value.type === "assistant") { void refresh().then(() => show(timeline.reset())); return; }
+      if (value.type === "message" || value.type === "state") void refresh();
     },
   }), [refresh, t]);
 
@@ -47,35 +79,43 @@ export function StudioAssistant({ request, t }) {
     window.addEventListener("scroll", track, { passive: true });
     return () => window.removeEventListener("scroll", track);
   }, []);
-  useEffect(() => { if (follow.current) endRef.current?.scrollIntoView?.({ block: "end" }); }, [view?.messages?.length, streaming, pendingLines.length]);
+  // Instant, not the page's smooth scrolling: a new smooth scroll on every delta restarts the previous one.
+  useEffect(() => { if (follow.current) endRef.current?.scrollIntoView?.({ block: "end", behavior: "instant" }); }, [view?.messages?.length, live, pendingLines.length]);
 
   const submit = async event => {
     event.preventDefault();
     const content = draft.trim();
-    if (!content) return;
+    const staged = files;
+    if (!content && !staged.length) return;
     setDraft("");
+    setFiles([]);
     follow.current = true;
-    setPendingLines(lines => [...lines, content]);
-    try { await send(`${ROOT}/messages`, { content }); }
-    catch (cause) { setError(friendlyError(cause, t)); setDraft(content); setPendingLines(lines => lines.filter(line => line !== content)); }
+    const shown = content || staged.map(file => file.name).join(", ");
+    setPendingLines(lines => [...lines, shown]);
+    try {
+      // Upload first, then one message whose parts are the text and the files.
+      const attachments = [];
+      for (const file of staged) attachments.push(await upload(file));
+      await send(`${ROOT}/messages`, { content, attachments });
+    } catch (cause) { setError(friendlyError(cause, t)); setDraft(content); setFiles(staged); setPendingLines(lines => lines.filter(line => line !== shown)); }
   };
   const act = async (task, action) => {
     try { await send(`${ROOT}/tasks/${task.id}/${action}`); await refresh(); }
     catch (cause) { setError(friendlyError(cause, t)); }
   };
-  const attach = async event => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    try {
-      const upload = file.type.startsWith("image/") ? await BrowserImageAttachments.compress(file) : file;
-      const bytes = new Uint8Array(await upload.arrayBuffer());
-      let binary = "";
-      for (let offset = 0; offset < bytes.length; offset += 32768) binary += String.fromCharCode(...bytes.subarray(offset, offset + 32768));
-      await send(`${ROOT}/files`, { name: upload.name, base64: btoa(binary) });
-      await refresh();
-    } catch (cause) { setError(friendlyError(cause, t)); }
+  const upload = async file => {
+    const ready = file.type.startsWith("image/") ? await BrowserImageAttachments.compress(file) : file;
+    const bytes = new Uint8Array(await ready.arrayBuffer());
+    const { asset_id, type } = await send(`${ROOT}/files`, { name: ready.name, base64: base64Of(bytes) });
+    return { asset_id, type };
   };
+  // What the shared composer asks of its controller; files are chips until sent, and a Run cannot be stopped from here.
+  const dictate = useMemo(() => browserDictation(request), [request]);
+  const composer = useMemo(() => ({
+    setDraft, cancel: () => undefined, fail: cause => setError(friendlyError(cause, t)),
+    addImages: added => setFiles(current => [...current, ...added]),
+    removeImage: file => setFiles(current => current.filter(item => item !== file)),
+  }), [t]);
   const saveLark = async event => {
     event.preventDefault();
     try { await send(`${CONNECTIONS}/lark/credentials`, Object.fromEntries(new FormData(event.currentTarget))); setLarkForm(false); await refresh(); }
@@ -91,27 +131,25 @@ export function StudioAssistant({ request, t }) {
   const lines = view?.messages ?? [];
   const ownApps = (view?.channels ?? []).filter(channel => channel.own_app && CHANNEL_NAMES[channel.kind] && (channel.linked || channel.available));
   return <div className="sxa">
-    <section className="sxa-chat" aria-label={t("sxNavAssistant")}>
+    <section className="sxa-chat web-chat web-chat--embedded" aria-label={t("sxNavAssistant")}>
       <h1 className="sxa-title">{t("sxNavAssistant")}</h1>
       <div className="sxa-log" aria-live="polite">
-        {!lines.length && !pendingLines.length && !streaming ? <p className="sxa-empty">{t("sxaEmpty")}</p> : null}
-        {lines.map((line, index) => <div key={`${line.at}-${index}`} className={`sxa-line sxa-line--${line.role}`}>
+        {!lines.length && !pendingLines.length && !live ? <p className="sxa-empty">{t("sxaEmpty")}</p> : null}
+        {lines.map((line, index) => line.role === "assistant"
+          ? <Reply key={`${line.at}-${index}`} timeline={ChatTimeline.fromHistory({ content: line.text, run_id: line.id.split(":")[0], ...line.steps })} t={chatT} errorText={errorText} />
+          : <div key={`${line.at}-${index}`} className={`sxa-line sxa-line--${line.role}`}>
           {line.images?.map(file => <ImageViewer key={file} src={`${ROOT}/images/${file}`} alt="" title={t("sxaImage")} closeLabel={t("sxaImageClose")} viewLabel={t("sxaImageView")}>
             <img className="sxa-image" alt="" src={`${ROOT}/images/${file}`} />
           </ImageViewer>)}
           {line.text ? <p>{line.text}</p> : null}
+          {line.attachments?.some(isChip) ? <div className="web-chat__attachments">{line.attachments.filter(isChip).map(file => <span key={file.asset_id}><Paperclip aria-hidden="true" />{file.name}{file.bytes ? ` · ${sizeOf(file.bytes)}` : ""}</span>)}</div> : null}
         </div>)}
         {pendingLines.map((line, index) => <p key={`pending-${index}`} className="sxa-line sxa-line--expert">{line}</p>)}
-        {streaming ? <p className="sxa-line sxa-line--assistant">{streaming}</p> : null}
+        {live ? <Reply timeline={live} live t={chatT} errorText={errorText} /> : null}
         <div ref={endRef} />
       </div>
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
-      <form className="sxa-input" onSubmit={submit}>
-        <IconButton label={t("sxaAttach")} title={t("sxaAttach")} variant="secondary" type="button" onClick={() => fileRef.current?.click()}><Plus aria-hidden="true" /></IconButton>
-        <textarea ref={inputRef} value={draft} rows={2} aria-label={t("sxaInputLabel")} placeholder={t("sxaInputPlaceholder")} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) submit(event); }} />
-        <input ref={fileRef} type="file" hidden accept="image/*,.txt,.md,.docx,.pptx,.xlsx,.pdf" onChange={attach} />
-        <Button className="web-btn-yolk" type="submit" disabled={!draft.trim()}>{t("sxaSend")}</Button>
-      </form>
+      <div className="sxa-dock" ref={dockRef}><Composer controller={composer} state={{ draft, images: files, activeRun: null, messages: lines, error }} agentName={t("sxNavAssistant")} t={chatT} accept="image/*,.txt,.md,.docx,.pptx,.xlsx,.pdf" onSend={() => submit({ preventDefault() {} })} dictate={dictate} /></div>
     </section>
     <aside className="sxa-side">
       <h2>{t("sxaNeedsYou")}</h2>
@@ -124,7 +162,7 @@ export function StudioAssistant({ request, t }) {
             <Button className="web-btn-yolk" type="button" onClick={() => act(task, "approve")}>{t(REVIEW_ACTIONS[task.kind][0])}</Button>
             <Button variant="secondary" type="button" onClick={() => act(task, "decline")}>{t(REVIEW_ACTIONS[task.kind][1])}</Button>
           </div> : null}
-          {task.needs === "answer" ? <Button variant="secondary" type="button" onClick={() => inputRef.current?.focus()}>{t("sxaAnswerHere")}</Button> : null}
+          {task.needs === "answer" ? <Button variant="secondary" type="button" onClick={() => dockRef.current?.querySelector("textarea")?.focus()}>{t("sxaAnswerHere")}</Button> : null}
           {task.needs === "blocked" ? <Button variant="secondary" type="button" onClick={() => act(task, "decline")}>{t("sxaDismiss")}</Button> : null}
         </li>)}
       </ul> : <p className="sxa-empty">{t("sxaNothingNeeded")}</p>}

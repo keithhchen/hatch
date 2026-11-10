@@ -1,6 +1,56 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ChatTimeline, groupTimelineEntries, PendingSubmission } from "../src/domain/timeline.js";
+import { ChatTimeline, groupTimelineEntries, PendingSubmission, withoutRepeatedSteps } from "../src/domain/timeline.js";
+
+test("a Run's steps are shown once, on the last assistant message it passed through", () => {
+  const tool = { tool_call_id: "call-1", name: "search_web", status: "completed" };
+  const messages = [
+    { role: "user", run_id: "r", content: "查" },
+    { role: "assistant", run_id: "r", content: "", tool_calls: [tool] },
+    { role: "assistant", run_id: "r", content: "好", tool_calls: [tool], parts: [{ type: "tool_call", tool_call_id: "call-1" }, { type: "text", start: 0, end: 1 }] }
+  ];
+  const pills = withoutRepeatedSteps(messages).filter(message => message.role === "assistant")
+    .flatMap(message => groupTimelineEntries(ChatTimeline.fromHistory(message)).filter(entry => entry.kind === "activity_group"));
+  assert.equal(pills.length, 1);
+  assert.equal(withoutRepeatedSteps(messages)[2].tool_calls.length, 1, "the last one keeps them");
+});
+
+test("live reasoning then text is one thinking step that holds its text, and a reload shows the same", async () => {
+  const { RuntimeEventReducer } = await import("../src/domain/runtime-events.js");
+  const reducer = new RuntimeEventReducer();
+  const live = new ChatTimeline();
+  for (const delta of [{ kind: "thinking_start", contentIndex: 0 }, { kind: "thinking_delta", contentIndex: 0, delta: "先想" }, { kind: "thinking_delta", contentIndex: 0, delta: "一下" }, { kind: "thinking_end", contentIndex: 0, content: "先想一下" }]) {
+    reducer.reduce(live, { type: "assistant.delta", run_id: "run", delta }, "run");
+  }
+  live.appendText("好的");
+  const groups = groupTimelineEntries(live.snapshot());
+  assert.deepEqual(groups.map(entry => entry.kind), ["activity_group", "text"], "one indicator, then the words");
+  assert.deepEqual(groups[0].entries.map(entry => [entry.kind, entry.content, entry.streaming]), [["thinking", "先想一下", false]], "it expands to the text");
+
+  const saved = ChatTimeline.fromHistory({ run_id: "run", content: "好的", parts: [{ type: "thinking", contentIndex: 0, content: "先想一下" }, { type: "text", start: 0, end: 2 }] });
+  assert.deepEqual(groupTimelineEntries(saved).map(entry => entry.kind), ["activity_group", "text"]);
+  assert.equal(groupTimelineEntries(saved)[0].entries[0].content, "先想一下");
+});
+
+test("one run's steps are one pill, live and after the saved reply replaces the live one", () => {
+  const pills = entries => groupTimelineEntries(entries.filter(entry => entry.kind !== "thinking")).filter(entry => entry.kind === "activity_group");
+  const call = { type: "tool_call.delta", run_id: "run", tool_call_id: "call-1", name: "search_web", activity_message: "查资料" };
+
+  const live = new ChatTimeline();
+  live.upsertTool({ ...call, status: "requested" });
+  live.upsertTool({ ...call, status: "failed" });
+  live.appendText("搜索暂时连不上");
+  assert.equal(pills(live.snapshot()).length, 1);
+
+  const saved = ChatTimeline.fromHistory({
+    run_id: "run", content: "搜索暂时连不上",
+    parts: [{ type: "thinking", contentIndex: 0, content: "a" }, { type: "tool_call", tool_call_id: "call-1" }, { type: "thinking", contentIndex: 0, content: "b" }, { type: "text", start: 0, end: 7 }],
+    tool_calls: [{ tool_call_id: "call-1", name: "search_web", status: "failed", activity_message: "查资料" }]
+  });
+  assert.equal(pills(saved).length, 1);
+  assert.deepEqual(saved.filter(entry => entry.kind !== "thinking").map(entry => entry.kind), live.snapshot().map(entry => entry.kind), "a reload shows what the live view showed");
+  assert.equal(groupTimelineEntries([]).length, 0, "no steps, no pill");
+});
 
 test("Web Chat timeline keeps text, thinking, and tool activity in event order", () => {
   const timeline = new ChatTimeline();

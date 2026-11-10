@@ -22,14 +22,19 @@ function studioEvents(event: Hubbed, endedRuns: Set<string>): ConversationEvent[
   switch (event.type) {
     case "message.accepted": return [{ type: "message" }, { type: "state" }];
     case "assistant.delta": {
-      const delta = event.delta as { kind?: string; content?: string } | undefined;
+      const delta = event.delta as { kind?: string; content?: string; delta?: string; contentIndex?: number } | undefined;
       if (delta?.kind === "text" && delta.content) return [{ type: "delta", text: delta.content }];
-      return delta?.kind === "thinking_start" ? [{ type: "thinking" }] : [];
+      // Reasoning is carried as Chat has it, per content index, so the page lays it among the steps and words as it happened.
+      if (delta?.kind === "thinking_start") return [{ type: "thinking", contentIndex: delta.contentIndex }];
+      if (delta?.kind === "thinking_delta") return [{ type: "thinking_delta", contentIndex: delta.contentIndex, delta: delta.delta }];
+      return delta?.kind === "thinking_end" ? [{ type: "thinking_end", contentIndex: delta.contentIndex, content: delta.content }] : [];
     }
     case "tool_call.delta": {
       const name = String(event.name ?? "");
-      if (event.status === "requested") return [{ type: "tool", name }];
-      return event.status === "completed" || event.status === "failed" ? [{ type: "tool_end", name, isError: event.status === "failed" }] : [];
+      // The id and the model's own one-line description of the step are what an observer needs to show it; arguments and results stay in Chat.
+      const step = { name, id: event.tool_call_id, ...(event.activity_message ? { activity: event.activity_message } : {}) };
+      if (event.status === "requested") return [{ type: "tool", ...step }];
+      return event.status === "completed" || event.status === "failed" ? [{ type: "tool_end", ...step, isError: event.status === "failed" }] : [];
     }
     case "turn.state": {
       const status = String(event.status);

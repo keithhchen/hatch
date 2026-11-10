@@ -371,6 +371,8 @@ export type InboundMessage = z.infer<typeof InboundMessageSchema>;
 export type ConversationMessage = {
   role: "user" | "assistant" | "tool" | "compactionSummary";
   content: string | null;
+  /** What the user themselves wrote, when `content` is the model's rendering of the message (attachment lines). History shows this. */
+  typed?: string;
   /** Internal durable marker. UI projections hide it; provider adapters omit it. */
   kind?: "task_start";
   /** Structured dropped-file projection for durable audit and recovery. */

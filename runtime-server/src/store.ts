@@ -723,7 +723,7 @@ export class RuntimeStore {
             ? event.content
             : event.finish_reason === "content_filter"
               ? ""
-              : event.message.content ?? "",
+              : event.message.typed ?? event.message.content ?? "",
           timestamp: event.timestamp
         };
         const attachments = event.type === "conversation.model_message"
