@@ -42,7 +42,7 @@ export function fileTools(store: WorkbenchStore, id: string, options: { changed?
       const text = plain ? bytes.toString("utf8") : ((await projectSource(record.path, mimeType, bytes).catch(() => undefined)) as { __content?: string } | undefined)?.__content;
       if (typeof text !== "string") continue;
       const lines = text.split("\n");
-      for (const hit of matcher(lines, limit - matches.length)) matches.push({ path: record.path, line: hit + 1, text: lines[hit]!.slice(0, 300) });
+      for (const hit of await matcher(lines, limit - matches.length)) matches.push({ path: record.path, line: hit + 1, text: lines[hit]!.slice(0, 300) });
     }
     return result({ matches, truncated: matches.length >= limit });
   } });

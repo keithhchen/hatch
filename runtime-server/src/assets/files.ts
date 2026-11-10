@@ -59,11 +59,22 @@ export class AttachmentFiles {
     const lines = parts.length === 0
       ? [...index].map(([messageId, entries]) => `${messageId}/  (${entries.length} files)`)
       : this.select(index, parts).map(({ path: p, asset }) => `${p}  ${asset.record.mime}  ${asset.record.bytes} bytes${asset.derivative("text") || asset.derivative("transcript") ? "" : "  (not text)"}`);
+    if (parts.length === 2) lines.push(...await this.outline(this.select(index, parts)[0]!));
     const shown = lines.slice(0, FILE_LIMITS.lsEntries);
     return [...shown, ...lines.length > shown.length ? [`... ${lines.length - shown.length} more`] : []].join("\n") || "(empty)";
   }
 
-  async read(scope: AssetScope, path: string, offset = 0, limit: number = FILE_LIMITS.readChars): Promise<{ path: string; content: string; offset: number; next_offset: number | null; total_chars: number; remaining_chars: number }> {
+  /** Size in pages, and for markdown the headings with the offset to read each from: a map of the whole file. */
+  private async outline(entry: Entry): Promise<string[]> {
+    const text = await this.text(entry);
+    if (text === undefined) return [];
+    const pages = Math.ceil(text.length / FILE_LIMITS.readChars);
+    const headings: string[] = [];
+    for (const match of text.matchAll(/^#{1,6} .+$/gm)) headings.push(`  offset ${match.index}: ${match[0].slice(0, 80)}`);
+    return [`${text.length} chars, ${pages} pages of ${FILE_LIMITS.readChars} chars. Reading all ${pages} covers the whole file; the pages you skip are not in your answer.`, ...headings.length ? ["Outline:", ...headings] : []];
+  }
+
+  async read(scope: AssetScope, path: string, offset = 0, limit: number = FILE_LIMITS.readChars): Promise<{ path: string; content: string; offset: number; next_offset: number | null; total_chars: number; remaining_chars: number; note?: string }> {
     const parts = segments(path);
     if (parts.length !== 2) throw new FileToolError("read needs a file path");
     if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(limit) || limit < 1) throw new FileToolError("offset and limit must be non-negative integers");
@@ -72,7 +83,7 @@ export class AttachmentFiles {
     if (text === undefined) throw new FileToolError("This file has no text form (for example an image)");
     let end = Math.min(text.length, offset + Math.min(limit, FILE_LIMITS.readCharsMax));
     if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1] ?? "")) end -= 1;
-    return { path: entry!.path, content: text.slice(offset, end), offset, next_offset: end < text.length ? end : null, total_chars: text.length, remaining_chars: text.length - end };
+    return { path: entry!.path, content: text.slice(offset, end), offset, next_offset: end < text.length ? end : null, total_chars: text.length, remaining_chars: text.length - end, ...end < text.length && { note: `Partial: ${text.length - end} of ${text.length} chars not read yet. Call read again with offset=${end}.` } };
   }
 
   async grep(scope: AssetScope, query: GrepQuery): Promise<string> {
@@ -96,7 +107,7 @@ export class AttachmentFiles {
       scanned += text.length;
       if (scanned > FILE_LIMITS.grepScanBytes) { out.push("[stopped: scan limit]"); break; }
       const lines = text.split("\n");
-      const hits = matcher(lines.map(line => line.slice(0, FILE_LIMITS.lineChars * 10)), maxMatches - matches);
+      const hits = await matcher(lines.map(line => line.slice(0, FILE_LIMITS.lineChars * 10)), maxMatches - matches);
       matches += hits.length;
       const show = new Set<number>();
       for (const hit of hits) for (let i = Math.max(0, hit - around); i <= Math.min(lines.length - 1, hit + around); i++) show.add(i);
