@@ -1,150 +1,344 @@
 {
   "id": 13,
-  "title": "Telegram binding self-served from the dashboard page: Assistant (Studio) and per-Product Chat, with the 2x2 for one account",
+  "title": "Telegram: sign-in from the bot and from the site, the Assistant for the owner and the people they invite, and one bot per Product set up on its page",
   "status": "PASS",
-  "durationMs": 73799,
+  "durationMs": 69837,
   "checks": [
     {
-      "name": "Assistant: before binding the page shows an unbound Telegram tile",
+      "name": "Studio: before linking the page shows an unbound Telegram tile with a name and no description",
       "ok": true
     },
     {
-      "name": "Assistant: the tile carries a name and no description",
+      "name": "Studio: one click gives the bot's t.me deep link carrying a one-time code",
       "ok": true,
-      "detail": "Telegram"
+      "detail": "https://t.me/hatch_verify_bot?start=HATCH-U8TCYD67"
     },
     {
-      "name": "Assistant: one click gives the bot's t.me deep link carrying a one-time code",
-      "ok": true,
-      "detail": "https://t.me/hatch_verify_bot?start=HATCH-GRNF233C"
-    },
-    {
-      "name": "Assistant: the page shows the bound state by itself, naming who is bound",
-      "ok": true,
-      "detail": "7101"
-    },
-    {
-      "name": "Assistant: the bot confirmed in Telegram",
+      "name": "Studio: the page shows the linked state by itself, naming who is linked",
       "ok": true
     },
     {
-      "name": "the Assistant binding is the account's self Connection to the Assistant",
+      "name": "Studio: the bot confirmed in Telegram",
+      "ok": true
+    },
+    {
+      "name": "linking by code claims the Telegram id for the account: one id, one account",
+      "ok": true,
+      "detail": [
+        {
+          "account_id": "b7cc7bc5-51c6-44fc-ad3a-449d71b480ec"
+        }
+      ]
+    },
+    {
+      "name": "the same Telegram id cannot also link a second account",
+      "ok": true
+    },
+    {
+      "name": "Studio via Telegram: the Assistant answered the linked chat",
+      "ok": true,
+      "detail": [
+        "连上了。以后我会在这里找你，你也可以随时在这里跟我说话。"
+      ]
+    },
+    {
+      "name": "a stranger to the shared bot gets one sign-in button, and nothing reaches the Assistant",
+      "ok": true,
+      "detail": {
+        "chat_id": 7301,
+        "text": "登录 Hatch，就能在这里和助理聊了。",
+        "link_preview_options": {
+          "is_disabled": true
+        },
+        "reply_parameters": {
+          "message_id": 4,
+          "allow_sending_without_reply": true
+        },
+        "reply_markup": {
+          "inline_keyboard": [
+            [
+              {
+                "text": "用 Telegram 登录",
+                "url": "http://studio.verify.local/v1/auth/telegram/start?claim=yfM1g68B8IeXqTNLHFJ60HoOh5tg594n"
+              }
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "the sign-in goes to Telegram's authorize URL with PKCE and the bot_access scope",
+      "ok": true,
+      "detail": "https://oauth.telegram.org/auth?client_id=verify-login-client&redirect_uri=http%3A%2F%2Fstudio.verify.local%2Fv1%2Fauth%2Ftelegram%2Fcallback&response_type=code&scope=openid+profile+telegram%3Abot_access&state=zelLjKyNXtQhIFfStWLw3p6_FuHXbatW&nonce=TbIOlxwscS0Kd-n293iDfg&code_challenge=S4qskAulfwrXh0jodUQrMCrYjN6JHsjRCFlpZ3be_3I&code_challenge_method=S256"
+    },
+    {
+      "name": "coming back from Telegram signs them in: a session cookie and a redirect",
+      "ok": true,
+      "detail": {
+        "started": 302,
+        "authorize": "https://oauth.telegram.org/auth?client_id=verify-login-client&redirect_uri=http%3A%2F%2Fstudio.verify.local%2Fv1%2Fauth%2Ftelegram%2Fcallback&response_type=code&scope=openid+profile+telegram%3Abot_access&state=zelLjKyNXtQhIFfStWLw3p6_FuHXbatW&nonce=TbIOlxwscS0Kd-n293iDfg&code_challenge=S4qskAulfwrXh0jodUQrMCrYjN6JHsjRCFlpZ3be_3I&code_challenge_method=S256",
+        "state": "zelLjKyNXtQhIFfStWLw3p6_FuHXbatW",
+        "status": 302,
+        "location": "/",
+        "cookies": [
+          "hatch_web_session",
+          "hatch_web_csrf",
+          "hatch_tg_state"
+        ],
+        "replay": {
+          "status": 302,
+          "location": "/sign-in?telegram=failed"
+        }
+      }
+    },
+    {
+      "name": "the same callback replayed does not sign anyone in again",
+      "ok": true,
+      "detail": {
+        "status": 302,
+        "location": "/sign-in?telegram=failed"
+      }
+    },
+    {
+      "name": "an account was made for that Telegram id, with no email and no password",
+      "ok": true,
+      "detail": [
+        {
+          "id": "8295942f-3297-44d0-a202-d8cc6ae9ce3e",
+          "email": null,
+          "password_hash": null
+        }
+      ]
+    },
+    {
+      "name": "their private chat is bound to their own Studio Assistant as its owner",
       "ok": true,
       "detail": [
         {
           "audience": "self",
           "target_key": "assistant",
-          "sender_id": "7101"
+          "role": "owner"
         }
       ]
     },
     {
-      "name": "Studio via Telegram: the Assistant answered the bound chat",
+      "name": "the bot said the Assistant's greeting in that chat",
       "ok": true,
       "detail": [
-        "Hello! Nice to meet you."
+        "登录 Hatch，就能在这里和助理聊了。",
+        "连上了。先给我一样东西就行：你的名字、一个链接，或者现成的资料。"
       ]
     },
     {
-      "name": "Product ALPHA: before binding the page shows an unbound Telegram tile",
-      "ok": true
-    },
-    {
-      "name": "Product ALPHA: the tile carries a name and no description",
-      "ok": true,
-      "detail": "Telegram"
-    },
-    {
-      "name": "Product ALPHA: one click gives the bot's t.me deep link carrying a one-time code",
-      "ok": true,
-      "detail": "https://t.me/hatch_verify_bot?start=HATCH-WB76EZS2"
-    },
-    {
-      "name": "Product ALPHA: the page shows the bound state by itself, naming who is bound",
-      "ok": true,
-      "detail": "7102"
-    },
-    {
-      "name": "Product ALPHA: the bot confirmed in Telegram",
-      "ok": true
-    },
-    {
-      "name": "Product BRAVO: before binding the page shows an unbound Telegram tile",
-      "ok": true
-    },
-    {
-      "name": "Product BRAVO: the tile carries a name and no description",
-      "ok": true,
-      "detail": "Telegram"
-    },
-    {
-      "name": "Product BRAVO: one click gives the bot's t.me deep link carrying a one-time code",
-      "ok": true,
-      "detail": "https://t.me/hatch_verify_bot?start=HATCH-53FDDFYD"
-    },
-    {
-      "name": "Product BRAVO: the page shows the bound state by itself, naming who is bound",
-      "ok": true,
-      "detail": "7103"
-    },
-    {
-      "name": "Product BRAVO: the bot confirmed in Telegram",
-      "ok": true
-    },
-    {
-      "name": "Chat via Telegram: the chat bound to ALPHA is answered by ALPHA",
-      "ok": true,
-      "detail": "ALPHA"
-    },
-    {
-      "name": "Chat via Telegram: the chat bound to BRAVO is answered by BRAVO",
-      "ok": true,
-      "detail": "BRAVO"
-    },
-    {
-      "name": "each message started one Run, as the account (not a contact), on the right Product",
+      "name": "signing in again with the same Telegram id is the same account",
       "ok": true,
       "detail": {
-        "alphaRuns": [
-          {
-            "id": "run_eee5c596e9fd4ce9916dab9e04d74b59",
-            "status": "completed",
-            "owner_account_id": "61f106db-6b5a-4aa4-95d0-914111f88f1e",
-            "product_id": "6ddd53d5-cd6b-4dbc-9615-6036c06932eb"
-          }
-        ],
-        "bravoRuns": [
-          {
-            "id": "run_35a81026e30b4b03ae332328ac1a61da",
-            "status": "completed",
-            "owner_account_id": "61f106db-6b5a-4aa4-95d0-914111f88f1e",
-            "product_id": "7838ab03-b53c-4c75-9b14-d75820212a9c"
-          }
+        "started": 302,
+        "authorize": "https://oauth.telegram.org/auth?client_id=verify-login-client&redirect_uri=http%3A%2F%2Fstudio.verify.local%2Fv1%2Fauth%2Ftelegram%2Fcallback&response_type=code&scope=openid+profile+telegram%3Abot_access&state=yLV7VMzAhM3jmC6UkQcyyqKGqm0_7_Pt&nonce=CwHyO0P1f1e0UzW-i-cd_Q&code_challenge=TtP3qRkzkfCzjYQHOo2ftb56NRBTVHb4Ydzonm5_huI&code_challenge_method=S256",
+        "state": "yLV7VMzAhM3jmC6UkQcyyqKGqm0_7_Pt",
+        "status": 302,
+        "location": "/",
+        "cookies": [
+          "hatch_web_session",
+          "hatch_web_csrf",
+          "hatch_tg_state"
         ]
       }
     },
     {
-      "name": "ALPHA's page shows its own binding, and the Assistant's and BRAVO's bindings do not leak onto it",
+      "name": "a link issued to one sender, completed by another Telegram user, is refused",
+      "ok": true,
+      "detail": {
+        "started": 302,
+        "authorize": "https://oauth.telegram.org/auth?client_id=verify-login-client&redirect_uri=http%3A%2F%2Fstudio.verify.local%2Fv1%2Fauth%2Ftelegram%2Fcallback&response_type=code&scope=openid+profile+telegram%3Abot_access&state=0VhFn2njUCacB617yrtmBqRBwtrJ0SD9&nonce=fcSbTNMnRq3CN1WXghemWw&code_challenge=ESp0DJG6IbSd4AbP1O0Opz-sPZ9qeCZZd811bZr8Ej4&code_challenge_method=S256",
+        "state": "0VhFn2njUCacB617yrtmBqRBwtrJ0SD9",
+        "status": 302,
+        "location": "/sign-in?telegram=failed",
+        "cookies": [
+          "hatch_tg_state"
+        ]
+      }
+    },
+    {
+      "name": "and that link is spent: the rightful sender cannot use it afterwards",
+      "ok": true,
+      "detail": {
+        "started": 302,
+        "location": "/sign-in?telegram=failed"
+      }
+    },
+    {
+      "name": "a callback whose state is not the one this browser started is refused",
+      "ok": true,
+      "detail": {
+        "started": 302,
+        "authorize": "https://oauth.telegram.org/auth?client_id=verify-login-client&redirect_uri=http%3A%2F%2Fstudio.verify.local%2Fv1%2Fauth%2Ftelegram%2Fcallback&response_type=code&scope=openid+profile+telegram%3Abot_access&state=fiA4Ls9ik7qLmPdxtJU91_5t_sTXRGEw&nonce=zeHW2prGQgb_6RlZrE8JPw&code_challenge=I5AjiZZWsAoQd1WPR3NJ01ruUXuaYdT8OjsRPz2tAwU&code_challenge_method=S256",
+        "state": "fiA4Ls9ik7qLmPdxtJU91_5t_sTXRGEw",
+        "status": 302,
+        "location": "/sign-in?telegram=failed",
+        "cookies": [
+          "hatch_tg_state"
+        ]
+      }
+    },
+    {
+      "name": "a callback with no started sign-in is refused",
       "ok": true
     },
     {
-      "name": "Chat via coding agent (hatch CLI): the same Product answers",
+      "name": "the sign-in and sign-up pages offer Telegram",
+      "ok": true
+    },
+    {
+      "name": "the owner can create an invite: a t.me link with a one-time code",
       "ok": true,
       "detail": {
-        "code": 0,
-        "reply": "ALPHA"
+        "code": "HATCH-3MV9JT2U",
+        "url": "https://t.me/hatch_verify_bot?start=HATCH-3MV9JT2U"
       }
     },
     {
-      "name": "Studio via coding agent (hatch CLI): the Assistant answers",
+      "name": "the code alone admits no one: the invitee is sent to sign in",
+      "ok": true
+    },
+    {
+      "name": "after their own Telegram sign-in the invitee is admitted",
       "ok": true,
       "detail": {
-        "code": 0,
-        "stderr": ""
+        "started": 302,
+        "authorize": "https://oauth.telegram.org/auth?client_id=verify-login-client&redirect_uri=http%3A%2F%2Fstudio.verify.local%2Fv1%2Fauth%2Ftelegram%2Fcallback&response_type=code&scope=openid+profile+telegram%3Abot_access&state=pR4tPwKlA3fFijAUmJUvh0pAxX_VKVLa&nonce=rbnBZsEF-5M6nsBdqWtZcg&code_challenge=BWRL6a0cI9hoECHlU-avxyfw11Vw7pX8yADLvb9DslU&code_challenge_method=S256",
+        "state": "pR4tPwKlA3fFijAUmJUvh0pAxX_VKVLa",
+        "status": 302,
+        "location": "/",
+        "cookies": [
+          "hatch_web_session",
+          "hatch_web_csrf",
+          "hatch_tg_state"
+        ]
       }
     },
     {
-      "name": "another account cannot bind a chat to a Product it does not own (404)",
+      "name": "the owner sees them on the page, by the label they chose",
+      "ok": true,
+      "detail": [
+        {
+          "id": "d0ba3310-3bce-48c4-89c5-8aa9b7c1ddde",
+          "label": "Ann"
+        }
+      ]
+    },
+    {
+      "name": "the invitee is marked as a guest, not the owner",
+      "ok": true,
+      "detail": [
+        {
+          "role": "guest"
+        }
+      ]
+    },
+    {
+      "name": "the invitee was greeted in their chat",
+      "ok": true,
+      "detail": [
+        "登录 Hatch，就能在这里和助理聊了。",
+        "连上了。专家授权你和助理说话，直接说就行。"
+      ]
+    },
+    {
+      "name": "a guest's message reaches the owner's Assistant, which answers them",
+      "ok": true,
+      "detail": [
+        {
+          "run_id": "run_ca23159743d34a999cc21d0320eca761"
+        }
+      ]
+    },
+    {
+      "name": "the owner revokes them",
+      "ok": true
+    },
+    {
+      "name": "a revoked guest reaches nothing and is offered sign-in again",
+      "ok": true
+    },
+    {
+      "name": "a Product's page asks for a bot token and offers no link to our bot",
+      "ok": true
+    },
+    {
+      "name": "a bad token shows Telegram's refusal on the page and saves nothing",
+      "ok": true
+    },
+    {
+      "name": "saving the token shows the bot by its @name",
+      "ok": true
+    },
+    {
+      "name": "the product registered the webhook with Telegram: a per-bot URL and a secret",
+      "ok": true,
+      "detail": {
+        "url": "http://studio.verify.local/v1/channels/telegram/cb543bda-f2eb-4c01-8b0f-624228d7fb5b/webhook",
+        "secret": "23a4110e9b138731d391184d7d83d9e2d183d239765e808f"
+      }
+    },
+    {
+      "name": "each Product has a bot of its own: different webhook, different secret",
+      "ok": true
+    },
+    {
+      "name": "anyone who writes to ALPHA's bot is answered by ALPHA, with no sign-up",
+      "ok": true,
+      "detail": "ALPHA"
+    },
+    {
+      "name": "the same person writing to BRAVO's bot is answered by BRAVO",
+      "ok": true,
+      "detail": "BRAVO"
+    },
+    {
+      "name": "they are a contact of each bot's public Connection, one per bot",
+      "ok": true,
+      "detail": [
+        {
+          "target_key": "product:8794c56b-5aed-49d2-a096-4dd857a66560",
+          "audience": "public",
+          "role": "owner"
+        },
+        {
+          "target_key": "product:c4a9e111-c7ee-452e-adde-c98d23782ded",
+          "audience": "public",
+          "role": "owner"
+        }
+      ]
+    },
+    {
+      "name": "their Runs belong to the Products, never to the Assistant",
+      "ok": true,
+      "detail": [
+        {
+          "id": "run_7166acf94ff94c1ea866bb39de0d6817",
+          "status": "completed",
+          "owner_account_id": "contact:4d6de194-1f43-4d33-a884-f1759c3bce58:5651bfda-7877-4b34-8df2-d13e5ed62db7",
+          "product_id": "c4a9e111-c7ee-452e-adde-c98d23782ded"
+        },
+        {
+          "id": "run_7096f3eef66f4ed184b963c50f1e0de4",
+          "status": "completed",
+          "owner_account_id": "contact:49161433-af53-4d81-89d9-012b3dd7dad0:893ec948-2630-4cec-bc62-0ab15ceef823",
+          "product_id": "8794c56b-5aed-49d2-a096-4dd857a66560"
+        }
+      ]
+    },
+    {
+      "name": "a webhook that does not carry the bot's secret is refused",
+      "ok": true,
+      "detail": {
+        "status": 401,
+        "ms": 3
+      }
+    },
+    {
+      "name": "another account cannot put a bot on a Product it does not own (404)",
       "ok": true,
       "detail": {
         "status": 404,
@@ -152,14 +346,16 @@
       }
     },
     {
-      "name": "another account sees ALPHA as unbound",
+      "name": "another account sees ALPHA's bot as not set up",
       "ok": true,
       "detail": {
         "channels": [
           {
             "kind": "telegram",
+            "bot": true,
             "available": true,
-            "linked": false
+            "configured": false,
+            "handle": "hatch_verify_bot"
           },
           {
             "kind": "line",
@@ -171,28 +367,28 @@
             "available": false,
             "linked": false,
             "own_app": true,
-            "webhook_url": "http://studio.verify.local/v1/channels/lark/022fad25-b63b-4035-b54d-d6fbee80957a/webhook"
+            "webhook_url": "http://studio.verify.local/v1/channels/lark/567980ca-56f8-4c0b-9cbe-d9ce839b8523/webhook"
           },
           {
             "kind": "feishu",
             "available": false,
             "linked": false,
             "own_app": true,
-            "webhook_url": "http://studio.verify.local/v1/channels/feishu/022fad25-b63b-4035-b54d-d6fbee80957a/webhook"
+            "webhook_url": "http://studio.verify.local/v1/channels/feishu/567980ca-56f8-4c0b-9cbe-d9ce839b8523/webhook"
           },
           {
             "kind": "wecom",
             "available": false,
             "linked": false,
             "own_app": true,
-            "webhook_url": "http://studio.verify.local/v1/channels/wecom/022fad25-b63b-4035-b54d-d6fbee80957a/webhook"
+            "webhook_url": "http://studio.verify.local/v1/channels/wecom/567980ca-56f8-4c0b-9cbe-d9ce839b8523/webhook"
           },
           {
             "kind": "wechatkf",
             "available": false,
             "linked": false,
             "own_app": true,
-            "webhook_url": "http://studio.verify.local/v1/channels/wechatkf/022fad25-b63b-4035-b54d-d6fbee80957a/webhook"
+            "webhook_url": "http://studio.verify.local/v1/channels/wechatkf/567980ca-56f8-4c0b-9cbe-d9ce839b8523/webhook"
           },
           {
             "kind": "imessage",
@@ -223,59 +419,63 @@
       }
     },
     {
-      "name": "the second account's own binding reaches its own Product, as itself",
-      "ok": true,
-      "detail": "CHARLIE"
-    },
-    {
-      "name": "the owner cannot see or use the other account's binding",
+      "name": "removing the bot from the page ends its webhook at Telegram",
       "ok": true
     },
     {
-      "name": "an unbound Telegram user is told to connect from Studio and starts no Run",
+      "name": "and the old bot no longer reaches the Product",
       "ok": true,
-      "detail": [
-        "请先从 Hatch Studio 连接 Telegram。"
-      ]
+      "detail": {
+        "status": 401
+      }
     },
     {
-      "name": "unbinding from the page returns the tile to unbound",
+      "name": "a new token replaces the bot and the new webhook is registered",
       "ok": true
     },
     {
-      "name": "after unbinding, the chat is told to connect and no Run starts",
+      "name": "the replaced bot's webhook no longer reaches the Product",
       "ok": true,
-      "detail": [
-        "请先从 Hatch Studio 连接 Telegram。"
-      ]
+      "detail": {
+        "status": 401,
+        "ms": 2
+      }
     },
     {
-      "name": "unbinding ALPHA left BRAVO bound and answering",
+      "name": "changing ALPHA's bot left BRAVO's bot answering",
       "ok": true,
       "detail": [
         "BRAVO"
       ]
     },
     {
-      "name": "after unbinding the Assistant, its chat is told to connect",
+      "name": "Chat via coding agent (hatch CLI): the same Product answers",
       "ok": true,
-      "detail": [
-        "请先从 Hatch Studio 连接 Telegram。"
-      ]
+      "detail": {
+        "code": 0,
+        "reply": "ALPHA"
+      }
     },
     {
-      "name": "only BRAVO remains bound for the account",
+      "name": "Studio via coding agent (hatch CLI): the Assistant answers",
       "ok": true,
-      "detail": 1
+      "detail": {
+        "code": 0,
+        "stderr": ""
+      }
+    },
+    {
+      "name": "after unlinking, the chat is offered sign-in again and reaches no Assistant",
+      "ok": true,
+      "detail": [
+        "登录 Hatch，就能在这里和助理聊了。"
+      ]
     }
   ],
-  "measurements": {
-    "assistant_tasks_after_hello": 0
-  },
+  "measurements": {},
   "evidence": {},
   "notes": [
-    "Real: the dashboard server and built page driven by headless Chromium (sign-in form, tile clicks), the Registry, Runtime, Chat and Assistant. Simulated: only the messaging platform (Telegram webhooks in, bot sends read from the fake platform). The second account binds through the same HTTP endpoints the page calls, not through a second browser. Products are created through the real create route and given a live release by test setup (the factory is not exercised).",
-    "Assistant link code HATCH-GRNF233C was one-time."
+    "Real: the dashboard server and built page driven by headless Chromium (sign-in form, tile and bot form), the Registry, Runtime, Chat and Assistant, the OIDC code flow with PKCE and the JWKS check. Simulated: only the messaging platform and Telegram's login server (fake platform: webhooks in, bot sends out, oauth.telegram.org signing its own tokens with a test key). The browser's redirects to and from Telegram are played as HTTP calls to the real dashboard routes. Products are created through the real create route and given a live release by test setup (the factory is not exercised)."
   ],
   "defects": []
 }

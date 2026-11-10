@@ -10,7 +10,7 @@ import { freePort, sha, sleep, until } from "./util.mjs";
 
 const serverRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const dist = path.join(serverRoot, "dist");
-const PLATFORM_HOSTS = ["api.telegram.org", "open.feishu.cn", "open.larksuite.com", "qyapi.weixin.qq.com", "api.line.me", "slack.com"];
+const PLATFORM_HOSTS = ["api.telegram.org", "oauth.telegram.org", "open.feishu.cn", "open.larksuite.com", "qyapi.weixin.qq.com", "api.line.me", "slack.com"];
 export const TELEGRAM = { token: "verify-bot-token", username: "hatch_verify_bot", secret: "verify-webhook-secret" };
 export const BROWSER_ORIGIN = "http://studio.verify.local";
 const TOKENS = { runtimeToRegistry: "verify-runtime-to-registry", registryToRuntime: "verify-registry-to-runtime" };
@@ -41,6 +41,7 @@ export class Stack {
     this.registryPool = new pg.Pool({ connectionString: this.cluster.url(this.dbNames.registry), max: 4 });
     this.runtimePool = new pg.Pool({ connectionString: this.cluster.url(this.dbNames.runtime), max: 4 });
     this.platform = await new FakePlatform().start();
+    this.platform.bots.set(TELEGRAM.token, TELEGRAM.username);
     this.edge = await new Edge().start();
     this.corpusRoot = path.join(this.root, "corpora");
     this.dataDir = path.join(this.root, "runtime-data");
@@ -97,6 +98,7 @@ export class Stack {
       HATCH_REGISTRY_DATABASE_URL: this.cluster.url(this.dbNames.registry), HATCH_AGENT_CORPUS_ROOT: path.join(this.root, "registry-corpora"), HATCH_CREATOR_FACTORY_ROOT: path.join(this.root, "factory"),
       HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN: TOKENS.runtimeToRegistry, HATCH_RUNTIME_CHAT_URL: this.edge.url, HATCH_RUNTIME_CHAT_SERVICE_TOKEN: TOKENS.registryToRuntime,
       HATCH_TELEGRAM_BOT_TOKEN: TELEGRAM.token, HATCH_TELEGRAM_BOT_USERNAME: TELEGRAM.username, HATCH_TELEGRAM_WEBHOOK_SECRET: TELEGRAM.secret,
+      HATCH_TELEGRAM_LOGIN_CLIENT_ID: this.platform.login.clientId, HATCH_TELEGRAM_LOGIN_CLIENT_SECRET: this.platform.login.clientSecret,
       HATCH_CREDENTIALS_KEY: CREDENTIALS_KEY, HATCH_STUDIO_ASSISTANT_URL: `${BROWSER_ORIGIN}/studio/assistant`,
       HATCH_FACTORY_LLM_PROFILE: this.options.llmProfile, VERIFY_PLATFORM_URL: this.platform.url, ...this.options.registryEnv, ...extraEnv
     };
@@ -138,6 +140,14 @@ export class Stack {
 
   // ── A published Expert Product. Setup writes the release the way the repository's own e2e does; the factory is not exercised. ──
 
+  /** A Product its creator owns in the Registry (made through the real create route), with a live release written by setup. */
+  async ownedProduct(creator, options = {}) {
+    const response = await fetch(`${this.registryUrl}/v1/creator/products`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${creator.apiKey}` }, body: JSON.stringify({ name: options.name ?? "Verify Expert", promise: "Answers during a verification run." }) });
+    const productId = (await response.json())?.product?.product_id;
+    if (!productId) throw new Error(`product create failed: ${response.status}`);
+    return this.product(creator, { ...options, productId });
+  }
+
   async product(creator, { productId = randomUUID(), name = "Verify Expert", system = "You are the Verify Expert. Answer briefly and directly.", tools = [{ id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }], brief = { contract_version: "1", fields: [{ id: "goal", label: "What should we achieve?", required: false }] } } = {}) {
     const { CreatorRegistryReleaseStore } = await import(pathToFileURL(path.join(dist, "creatorLearning/creatorRegistryRelease.js")).href);
     const releaseHex = (await import("node:crypto")).createHash("sha256").update(`${productId}:${system}`).digest("hex");
@@ -178,8 +188,18 @@ export class Stack {
       [owner.id, channel, scope, JSON.stringify(target), key, audience]);
     return row.rows[0].id;
   }
-  /** The deep-link payload a public Connection exposes in its API record (`start_code`): t.me/<bot>?start=<code>. */
-  async startCode(connectionId) { return (await this.registryPool.query("SELECT start_code FROM hatch_connections WHERE id = $1", [connectionId])).rows[0].start_code; }
+  /**
+   * The Product's own Telegram bot, made the way the page does it: the owner saves a token through the Registry's route, and the product proves it
+   * (getMe) and registers its webhook. Returns the connection and the webhook client for that bot.
+   */
+  async productBot(owner, productId, { token = `verify-bot-${productId.slice(0, 8)}`, username = `shop_${productId.slice(0, 8)}_bot` } = {}) {
+    this.platform.bots.set(token, username);
+    const response = await fetch(`${this.registryUrl}/v1/creator/connections/telegram/credentials`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${owner.apiKey}` }, body: JSON.stringify({ token, product_id: productId }) });
+    if (response.status !== 200) throw new Error(`saving the bot token failed: ${response.status} ${await response.text()}`);
+    const row = (await this.registryPool.query("SELECT id, scope FROM hatch_connections WHERE owner_account_id = $1 AND channel = 'telegram' AND target_key = $2", [owner.id, `product:${productId}`])).rows[0];
+    const { TelegramWebhooks } = await import("./webhooks.mjs");
+    return { connection: row.id, scope: row.scope, token, username, hooks: TelegramWebhooks.forBot(this, token) };
+  }
   async admit(connectionId, { channel = "telegram", senderId, threadId = senderId, scope = "" }) {
     await this.registryPool.query("INSERT INTO hatch_channel_identities (connection_id, channel, scope, sender_id, thread_id) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING", [connectionId, channel, scope, senderId, threadId]);
   }

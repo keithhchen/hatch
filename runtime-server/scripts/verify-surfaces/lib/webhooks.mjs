@@ -8,6 +8,15 @@ import { TELEGRAM } from "./stack.mjs";
 export class TelegramWebhooks {
   constructor(registryUrl, { secret = TELEGRAM.secret, username = TELEGRAM.username } = {}) { this.url = `${registryUrl}/v1/channels/telegram/webhook`; this.secret = secret; this.username = username; this.nextUpdate = 100_000 + Math.floor(Math.random() * 100_000); this.nextMessage = 1; }
 
+  /** The client for a Product's own bot: it posts where the product registered the webhook (setWebhook), with the secret the product chose. */
+  static forBot(stack, token) {
+    const registered = stack.platform.webhookOf(token);
+    if (!registered) throw new Error(`no webhook registered for ${token}`);
+    const hooks = new TelegramWebhooks(stack.registryUrl, { secret: registered.secret, username: stack.platform.bots.get(token) });
+    hooks.url = `${stack.registryUrl}${new URL(registered.url).pathname}`;
+    return hooks;
+  }
+
   message({ updateId = this.nextUpdate++, chatId, fromId = chatId, text, chatType = "private", mention = false, replyToBot = false, document, photo, messageId = this.nextMessage++ }) {
     const body = mention ? `@${this.username} ${text ?? ""}` : text;
     const entities = mention ? [{ type: "mention", offset: 0, length: this.username.length + 1 }] : undefined;

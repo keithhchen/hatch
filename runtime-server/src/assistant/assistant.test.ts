@@ -108,7 +108,7 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
     push: async (_account, message, prefer) => { pushed.push({ text: message.text, ...(message.buttons ? { buttons: message.buttons } : {}), ...(prefer ? { prefer } : {}) }); return true; },
     canReach: async () => reachable,
   };
-  const telegram = new TelegramChannel({ token: "test", username: "hatch_test_bot", webhookSecret: "secret" }, (async (url: string, init?: RequestInit) => {
+  const telegram = new TelegramChannel({ token: "test", username: "hatch_test_bot", webhookSecret: "secret" }, "", (async (url: string, init?: RequestInit) => {
     if (url.includes("/file/bot")) return new Response(url.endsWith(".oga") ? Buffer.concat([Buffer.from("OggS"), Buffer.alloc(60)]) : "# 我的选址笔记\n隔壁活过三年才算数\n", { status: 200 });
     if (url.endsWith("/getFile")) return new Response(JSON.stringify({ ok: true, result: { file_path: String(init?.body).includes('"v1"') ? "voice/file_1.oga" : "documents/notes.md" } }), { status: 200 });
     return new Response(JSON.stringify({ ok: true, result: true }), { status: 200 });
@@ -163,7 +163,7 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
     const handled = [];
     for (const event of telegram.parse(Buffer.from(JSON.stringify(update))).events) {
       const inbound: Inbound = {
-        id: idempotencyId(event.eventId), connection, event, adapter: telegram, principal: { kind: "account", accountId: ACCOUNT },
+        id: idempotencyId(event.eventId), connection, event, adapter: telegram, principal: { kind: "account", accountId: ACCOUNT }, speaker: { role: "owner" },
         address: { connectionId: connection.id, ...event.address }, notify: async text => { notices.push(text); },
       };
       handled.push(await target.handle(inbound));

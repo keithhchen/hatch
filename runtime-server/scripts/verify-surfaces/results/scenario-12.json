@@ -2,14 +2,14 @@
   "id": 12,
   "title": "The 2x2 matrix walked end to end: coding agent and IM (Telegram, Feishu, WeCom) to Studio and Chat",
   "status": "PASS",
-  "durationMs": 109543,
+  "durationMs": 85003,
   "checks": [
     {
       "name": "[3a] connect returned a HATCH- code and the bot's t.me link",
       "ok": true,
       "detail": {
         "status": 200,
-        "url": "https://t.me/hatch_verify_bot?start=HATCH-C24C3EQY"
+        "url": "https://t.me/hatch_verify_bot?start=HATCH-RR2WB2V9"
       }
     },
     {
@@ -17,7 +17,7 @@
       "ok": true,
       "detail": {
         "status": 200,
-        "ms": 2
+        "ms": 4
       }
     },
     {
@@ -25,7 +25,7 @@
       "ok": true,
       "detail": {
         "status": 200,
-        "ms": 4
+        "ms": 3
       }
     },
     {
@@ -39,7 +39,7 @@
           "linked": false,
           "state": "active",
           "own_app": true,
-          "webhook_url": "http://studio.verify.local/v1/channels/wecom/40580454-95a4-4d0e-a53e-1f9f0da6f1ad/webhook"
+          "webhook_url": "http://studio.verify.local/v1/channels/wecom/2215af41-d1f3-4ea2-8eb1-4dbe8e1a7967/webhook"
         }
       }
     },
@@ -54,7 +54,7 @@
           "linked": false,
           "state": "active",
           "own_app": true,
-          "webhook_url": "http://studio.verify.local/v1/channels/feishu/5c71a097-ef11-41d2-b764-42c26971a34d/webhook"
+          "webhook_url": "http://studio.verify.local/v1/channels/feishu/4b7fef53-e304-4b4a-9809-44e52d075c45/webhook"
         },
         "probes": [
           "/open-apis/auth/v3/tenant_access_token/internal",
@@ -98,7 +98,7 @@
       "ok": true,
       "detail": {
         "code": 0,
-        "id": "7d7daf02-cbd0-4458-a298-c96e3fbb8532"
+        "id": "e51c107a-badd-4f43-89bc-ad8bc8c22a04"
       }
     },
     {
@@ -106,7 +106,7 @@
       "ok": true,
       "detail": {
         "code": 0,
-        "stdout": "{\n  \"product_id\": \"53451ba1-7295-4285-b9d4-4d2cfb385f01\",\n  \"name\": \"Matrix CLI Product\",\n  \"promise\": \"A verification Product created from the hatch CLI\",\n  \"status\": \"draft\",\n  \"brief_spec\": {\n    \""
+        "stdout": "{\n  \"product_id\": \"20efd2e5-47b0-4ba1-9f13-e2916db42faf\",\n  \"name\": \"Matrix CLI Product\",\n  \"promise\": \"A verification Product created from the hatch CLI\",\n  \"status\": \"draft\",\n  \"brief_spec\": {\n    \""
       }
     },
     {
@@ -119,7 +119,7 @@
       "ok": true,
       "detail": [
         {
-          "id": "b96c1c70-f5dc-4db9-8c52-e8eb448c1811",
+          "id": "a16c7e78-bb29-47c9-ae30-3dce57254af0",
           "audience": "self",
           "target_key": "assistant",
           "sender_id": "7001",
@@ -132,8 +132,8 @@
       "ok": true,
       "detail": [
         {
-          "at": 1794290393323,
-          "path": "/cgi-bin/aibot/response/ace2a6d1-f52d-4fe8-8892-f7d50ff33b11",
+          "at": 1794309442453,
+          "path": "/cgi-bin/aibot/response/d6a0f3b3-4326-4f09-8e30-494005b6c217",
           "msgtype": "markdown",
           "text": "连上了。先给我一样东西就行：你的名字、一个链接，或者现成的资料。"
         }
@@ -143,13 +143,13 @@
       "name": "[3e] the adapter replied on the platform (reply API with the tenant token)",
       "ok": true,
       "detail": {
-        "at": 1794290393325,
-        "path": "/open-apis/im/v1/messages/om_ce6bcb2fa8d04017916224c42edf5383/reply",
+        "at": 1794309442461,
+        "path": "/open-apis/im/v1/messages/om_b9a3fd9d384c413ab51abd224f9d1bda/reply",
         "text": "连上了。先给我一样东西就行：你的名字、一个链接，或者现成的资料。",
         "msgType": "text",
         "buttons": [],
         "authorization": "present",
-        "uuid": "f8ac83a2-3517-5a17-26ec-c99f8e4da81c"
+        "uuid": "ea2abe3d-d26d-0012-7edc-19d1886599de"
       }
     },
     {
@@ -178,16 +178,6 @@
       }
     },
     {
-      "name": "[2a] ask --conversation continues the same conversation with a new Run",
-      "ok": true,
-      "detail": {
-        "run": "run_f602b16e38724aec91ce19adfc09bc6f",
-        "reply": {
-          "text": "ping"
-        }
-      }
-    },
-    {
       "name": "[3a] dispatch: the Assistant created a research task originating from Telegram",
       "ok": true,
       "detail": {
@@ -195,6 +185,16 @@
           "source": "telegram"
         },
         "status": "working"
+      }
+    },
+    {
+      "name": "[2a] ask --conversation continues the same conversation with a new Run",
+      "ok": true,
+      "detail": {
+        "run": "run_bbe80378cb4042d29271eb3f40fd2d40",
+        "reply": {
+          "text": "ping"
+        }
       }
     },
     {
@@ -218,15 +218,15 @@
       "detail": {
         "inbox": [
           {
-            "event_id": "171182",
+            "event_id": "186579",
             "state": "done",
-            "run_id": "run_6e71fdf56d384f9eaeeacbce44854092",
+            "run_id": "run_0349dc83fbb1424da27109e0b753de04",
             "attempts": 1
           }
         ],
         "runs": [
           {
-            "id": "run_6e71fdf56d384f9eaeeacbce44854092",
+            "id": "run_0349dc83fbb1424da27109e0b753de04",
             "status": "completed"
           }
         ]
@@ -240,17 +240,24 @@
       }
     },
     {
+      "name": "[3a] the Assistant answered on the platform",
+      "ok": true,
+      "detail": [
+        "已经派出去了，查到结果会告诉你。"
+      ]
+    },
+    {
       "name": "[3e] the pending task is sent as an interactive card with 确认 and 取消",
       "ok": true,
       "detail": [
         {
           "label": "确认",
-          "taskId": "a248b12c-60bf-43da-9c92-4afb465512aa",
+          "taskId": "8bd55434-827a-4fff-893f-f2d9df193a0a",
           "action": "approve"
         },
         {
           "label": "取消",
-          "taskId": "a248b12c-60bf-43da-9c92-4afb465512aa",
+          "taskId": "8bd55434-827a-4fff-893f-f2d9df193a0a",
           "action": "decline"
         }
       ]
@@ -274,14 +281,14 @@
       "detail": {
         "code": 0,
         "stderr": "",
-        "stdout": "{\n  \"client_message_id\": \"62034796-7bf0-4caa-8a1f-62a87e765119\",\n  \"conversation_id\": \"7d7daf02-cbd0-4458-a298-c96e3fbb8532\",\n  \"run_id\": \"run_8995ef717b4543c99e2cf2cf7b36852a\",\n  \"message\": {\n    \"id\": \"3b30e359-00fb-41fd-8157-bd138015548a\",\n    \"role\": \"user\",\n    \"text\": \"请调用 propose_change 工具：ag"
+        "stdout": "{\n  \"client_message_id\": \"8b5cc9c9-2411-46b0-9700-b0dd6692ce24\",\n  \"conversation_id\": \"e51c107a-badd-4f43-89bc-ad8bc8c22a04\",\n  \"run_id\": \"run_99270f356d3c4e6a998c6b09fbaeeff1\",\n  \"message\": {\n    \"id\": \"5815d1a4-b93a-49c6-8549-7fbc83b2be29\",\n    \"role\": \"user\",\n    \"text\": \"请调用 propose_change 工具：ag"
       }
     },
     {
       "name": "[1a] the Assistant created a pending change task (needs_you, review)",
       "ok": true,
       "detail": {
-        "id": "638be1e2-3c87-44fe-ba5c-92cc2449af8e",
+        "id": "b93dbfde-7e15-4661-9544-98197c46ecde",
         "status": "needs_you",
         "needs": "review",
         "origin": {
@@ -294,7 +301,7 @@
       "name": "[1a] the task carries the proposed pricing and the right Product",
       "ok": true,
       "detail": {
-        "run": "run_8995ef717b4543c99e2cf2cf7b36852a",
+        "run": "run_99270f356d3c4e6a998c6b09fbaeeff1",
         "change": {
           "pricing": {
             "currency": "USD",
@@ -304,6 +311,15 @@
           }
         }
       }
+    },
+    {
+      "name": "[3f] the pending-change reply degrades the buttons into a typed instruction 「确认」/「取消」",
+      "ok": true,
+      "detail": "已按你给的数字提交定价改动：人机协作 20000 美元/小时，Agent 订阅 4900 美元/月。等你点确认才生效。\n\n回复「确认」或「取消」"
+    },
+    {
+      "name": "[3f] before the confirmation the price is unchanged",
+      "ok": true
     },
     {
       "name": "[3e] a stranger's card action neither declines nor changes anything",
@@ -318,10 +334,10 @@
       "detail": {
         "code": 0,
         "json": {
-          "conversation_id": "conv_0fe04d20a2e34e209344e4b83e17cda4",
-          "client_message_id": "11845644-1437-40f6-95f9-7a9ea7585cb1",
-          "run_id": "run_d88f2984a2bc47b4bf6ac296932a6d5f",
-          "cursor": "34",
+          "conversation_id": "conv_cf904916c3124e8f8a332b4916168979",
+          "client_message_id": "b6e8a2b7-7b1d-435c-8dd2-520f7eef6feb",
+          "run_id": "run_72309e2721e840a88cfbe1d1432d6a2c",
+          "cursor": "32",
           "status": "completed",
           "reply": {
             "text": "streamed"
@@ -337,7 +353,7 @@
       "detail": {
         "runs": 3,
         "messages": 6,
-        "cursor": 34,
+        "cursor": 32,
         "status": "completed"
       }
     },
@@ -346,10 +362,10 @@
       "ok": true,
       "detail": {
         "code": 0,
-        "ms": 102,
+        "ms": 124,
         "json": {
-          "run_id": "run_a381fc969cc24a9094f2a6365d4bff39",
-          "cursor": "12",
+          "run_id": "run_9dd993b9922f40d285fd0d122bd5491d",
+          "cursor": "10",
           "status": "completed",
           "reply": {
             "text": ""
@@ -362,16 +378,23 @@
     {
       "name": "[2a] conversations lists the conversation",
       "ok": true,
-      "detail": "{\n  \"conversations\": [\n    {\n      \"id\": \"conv_0fe04d20a2e34e209344e4b83e17cda4\",\n      \"creator_id\": \"96195de6-7811-4839-9fcb-7f9524d589fd\",\n      \"agent_id\": \"2059832c-35a7-4c74-a1c5-36840a9b0fe8\",\n"
+      "detail": "{\n  \"conversations\": [\n    {\n      \"id\": \"conv_cf904916c3124e8f8a332b4916168979\",\n      \"creator_id\": \"e6c2d8eb-8a1d-429a-8a8d-f338ba68ab49\",\n      \"agent_id\": \"cb486400-0a15-4ba4-808c-4941dfe6b4f4\",\n"
     },
     {
-      "name": "[3f] the pending-change reply degrades the buttons into a typed instruction 「确认」/「取消」",
+      "name": "[4b] each member gets one reply to their message",
       "ok": true,
-      "detail": "定价修改已提交，等你确认后才会生效。\n\n回复「确认」或「取消」"
+      "detail": {
+        "r1": "noted",
+        "r2": "noted"
+      }
     },
     {
-      "name": "[3f] before the confirmation the price is unchanged",
-      "ok": true
+      "name": "[3f] a typed confirmation in the chat (the Assistant's approve_task) applies the change",
+      "ok": true,
+      "detail": {
+        "status": "done",
+        "price": "20000/4900"
+      }
     },
     {
       "name": "[1a] an unconfirmed task does not change the price",
@@ -381,14 +404,6 @@
     {
       "name": "[1a] the Assistant did not confirm it by itself",
       "ok": true
-    },
-    {
-      "name": "[4b] each member gets one reply to their message",
-      "ok": true,
-      "detail": {
-        "r1": "noted",
-        "r2": "noted"
-      }
     },
     {
       "name": "[4d] org member: one reply with the answer",
@@ -401,12 +416,42 @@
       "detail": "请先从 Hatch Studio 连接 飞书。"
     },
     {
-      "name": "[4b] each member's conversation remembers only their own word",
+      "name": "[3f] every WeCom inbound message got at most one reply (response_url allows one)",
       "ok": true,
-      "detail": {
-        "m1": "BLUEBIRD",
-        "m2": "REDFOX"
-      }
+      "detail": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "[3a] the research worker did not end in an error",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "[4e] org member: one reply with the answer on the response_url",
+      "ok": true,
+      "detail": [
+        {
+          "at": 1794309465893,
+          "path": "/cgi-bin/aibot/response/4ef3158a-6ccf-47f2-b557-733d0f618ed2",
+          "msgtype": "markdown",
+          "text": "wecom-org-ok"
+        }
+      ]
+    },
+    {
+      "name": "[4e] org outsider: refused with the connect notice",
+      "ok": true,
+      "detail": [
+        {
+          "at": 1794309467022,
+          "path": "/cgi-bin/aibot/response/279cb0d6-a7d8-4d95-9b6d-0228a7fad984",
+          "msgtype": "markdown",
+          "text": "请先从 Hatch Studio 连接 企业微信。"
+        }
+      ]
     },
     {
       "name": "[4d] member: one inbound -> one Run -> one reply row sent; outsider: no Run",
@@ -417,7 +462,7 @@
           "outbox": [
             {
               "state": "sent",
-              "source_key": "run:run_af7abdddd1ab4c99916c18af392d4124",
+              "source_key": "run:run_420fb76d128449ffa5ba54cf034978e7",
               "sent_parts": 1,
               "attempts": 0
             }
@@ -430,81 +475,8 @@
       "name": "[4d] the Feishu principal is a contact, not the owner's account",
       "ok": true,
       "detail": {
-        "conversationOwner": "contact:fce70b68-092c-4161-9bc3-b5cd3878d81a:58c6ad3d-ea65-4fd0-a9db-978839333f51",
-        "owner": "5c71a097-ef11-41d2-b764-42c26971a34d"
-      }
-    },
-    {
-      "name": "[4b] each member: two inbounds -> two Runs in ONE conversation, two replies sent once each",
-      "ok": true,
-      "detail": {
-        "m1": {
-          "runs": 2,
-          "convs": 1,
-          "outbox": 2
-        },
-        "m2": {
-          "runs": 2,
-          "convs": 1,
-          "outbox": 2
-        }
-      }
-    },
-    {
-      "name": "[4b] two members' conversations are distinct",
-      "ok": true,
-      "detail": {
-        "c1": "conversation:0b4e400bcf6f8f55083bfa98:490020597bacb4c5b91f6dc1",
-        "c2": "conversation:f5823e453d9b1f88d5c021ee:1ddf52fc3f4ec24825f2b2a6"
-      }
-    },
-    {
-      "name": "[4b] org members are contacts: each conversation is owned by contact:<connection>:<contact>, never the owner's account",
-      "ok": true,
-      "detail": {
-        "m1": "contact:25d7a346-968a-4041-823e-c163cca2b69c:5e90f1bb-d59a-40d7-bc91-ee696cc3c7dd",
-        "m2": "contact:25d7a346-968a-4041-823e-c163cca2b69c:870f91b8-a8fa-465b-b344-e9962bf7a340",
-        "owner": "527234a7-8e95-443d-a76f-c71ca569172f"
-      }
-    },
-    {
-      "name": "[3f] a typed confirmation in the chat (the Assistant's approve_task) applies the change",
-      "ok": true,
-      "detail": {
-        "status": "done",
-        "price": "20000/4900"
-      }
-    },
-    {
-      "name": "[2a] watching a live Run (from now) ends at its end with the full reply (Paris)",
-      "ok": true,
-      "detail": {
-        "askCode": 0,
-        "watchMs": 16179,
-        "watch": {
-          "run_id": "run_bd103fadacbd4d2dbe3e0b8c73aead51",
-          "cursor": "63",
-          "status": "completed",
-          "reply": {
-            "text": "The capital of France is Paris."
-          },
-          "streamed": false
-        },
-        "stderr": ""
-      }
-    },
-    {
-      "name": "[2a] ask without --wait is accepted with a run id",
-      "ok": true,
-      "detail": {
-        "code": 0,
-        "json": {
-          "conversation_id": "conv_7515a586243e48a898be6ebe33885d24",
-          "client_message_id": "09b76cf6-4be2-402d-8993-9c9a947fb7ad",
-          "run_id": "run_a457f1f1690b465182165979c2b133a4",
-          "outcome": "started",
-          "status": "queued"
-        }
+        "conversationOwner": "contact:0a98af8e-559d-45a4-8472-d9d89a13093d:602387a1-5488-4cb9-8ebd-f8516ebeaaf2",
+        "owner": "4b7fef53-e304-4b4a-9809-44e52d075c45"
       }
     },
     {
@@ -513,7 +485,7 @@
       "detail": {
         "code": 0,
         "stderr": "",
-        "stdout": "{\n  \"client_message_id\": \"8368be72-25b4-4139-995c-a37377f319e7\",\n  \"conversation_id\": \"7d7daf02-cbd0-4458-a298-c96e3fbb8532\",\n  \"run_id\": \"run_639e7b53bf5847e1acfe362644f0cb09\",\n  \"message\": {\n    \"id\": \"f03cc3a3-3120-4e96-b6e6-348e2b312684\",\n    \"role\": \"user\",\n    \"text\": \"请调用 propose_change 工具：ag"
+        "stdout": "{\n  \"client_message_id\": \"4107862c-20e4-4112-a95d-38055939fddf\",\n  \"conversation_id\": \"e51c107a-badd-4f43-89bc-ad8bc8c22a04\",\n  \"run_id\": \"run_350613360eaf4c53b3f61e0dfa148534\",\n  \"message\": {\n    \"id\": \"848e9103-b7bb-41c3-9007-cb492a8adcf3\",\n    \"role\": \"user\",\n    \"text\": \"请调用 propose_change 工具：ag"
       }
     },
     {
@@ -521,24 +493,29 @@
       "ok": true,
       "detail": {
         "status": 200,
-        "body": "{\"task\":{\"id\":\"02ec344f-a2ec-4198-b5f2-e0187d3cf4d6\",\"accountId\":\"7d7daf02-cbd0-4458-a298-c96e3fbb8532\",\"kind\":\"change\",\"status\":\"done\",\"origin\":{\"source\":\"web\""
+        "body": "{\"task\":{\"id\":\"190d0c2c-8072-4a8b-90c4-774e003151f5\",\"accountId\":\"e51c107a-badd-4f43-89bc-ad8bc8c22a04\",\"kind\":\"change\",\"status\":\"done\",\"origin\":{\"source\":\"web\""
       }
     },
     {
-      "name": "[3a] the Assistant answered on the platform",
+      "name": "[4e] member: one Run, one reply row sent, still exactly one reply; outsider: no Run",
       "ok": true,
-      "detail": [
-        "已经安排去查 Verify Expert 的公开资料，有结果马上告诉你。"
-      ]
+      "detail": {
+        "runs": 1,
+        "outbox": [
+          {
+            "state": "sent",
+            "source_key": "run:run_2337afc1ba9c48d9a97b817828af3655",
+            "sent_parts": 1,
+            "attempts": 0
+          }
+        ],
+        "outsiderRuns": 0
+      }
     },
     {
-      "name": "[3f] every WeCom inbound message got at most one reply (response_url allows one)",
+      "name": "[4e] the WeCom org principal is a contact",
       "ok": true,
-      "detail": [
-        1,
-        1,
-        0
-      ]
+      "detail": "contact:fc6a2cca-c652-469b-b987-3b8933af4990:76b4ef54-971e-423d-af29-47301b296875"
     },
     {
       "name": "[1a] a declined task does not change the price",
@@ -558,7 +535,7 @@
       "ok": true,
       "detail": {
         "status": 200,
-        "body": "{\"task\":{\"id\":\"638be1e2-3c87-44fe-ba5c-92cc2449af8e\",\"accountId\":\"7d7daf02-cbd0-4458-a298-c96e3fbb8532\",\"kind\":\"change\",\"status\":\"done\",\"origin\":{\"source\":\"web\""
+        "body": "{\"task\":{\"id\":\"b93dbfde-7e15-4661-9544-98197c46ecde\",\"accountId\":\"e51c107a-badd-4f43-89bc-ad8bc8c22a04\",\"kind\":\"change\",\"status\":\"done\",\"origin\":{\"source\":\"web\""
       }
     },
     {
@@ -638,7 +615,7 @@
     {
       "name": "[1b] products_create returned a Product id",
       "ok": true,
-      "detail": "{\n  \"product_id\": \"6e1d7821-d183-49c9-9d5e-3547f002b72c\",\n  \"name\": \"Matrix MCP Product\",\n  \"promise\": \"A verification Product created over MCP\",\n  \"status\": \"draft\",\n  \"brief_spec\": {\n    \"contract_v"
+      "detail": "{\n  \"product_id\": \"7081cb94-d0c6-40ee-a0e0-72ce26c9b1d3\",\n  \"name\": \"Matrix MCP Product\",\n  \"promise\": \"A verification Product created over MCP\",\n  \"status\": \"draft\",\n  \"brief_spec\": {\n    \"contract_v"
     },
     {
       "name": "[1b] price before the change is the initial one",
@@ -646,65 +623,45 @@
       "detail": "10000/2900"
     },
     {
+      "name": "[2a] watching a live Run (from now) ends at its end with the full reply (Paris)",
+      "ok": true,
+      "detail": {
+        "askCode": 0,
+        "watchMs": 18124,
+        "watch": {
+          "run_id": "run_af615695336b4fc5871a2715910a960d",
+          "cursor": "74",
+          "status": "completed",
+          "reply": {
+            "text": "The capital of France is Paris."
+          },
+          "streamed": false
+        },
+        "stderr": ""
+      }
+    },
+    {
+      "name": "[2a] ask without --wait is accepted with a run id",
+      "ok": true,
+      "detail": {
+        "code": 0,
+        "json": {
+          "conversation_id": "conv_95ac43fc598640468b038d05a5a15fa9",
+          "client_message_id": "5b68deb7-2c48-4598-8524-73926ea9461c",
+          "run_id": "run_8f02fd8d978b479284feb9c8d5538ae9",
+          "outcome": "started",
+          "status": "queued"
+        }
+      }
+    },
+    {
       "name": "[2a] conversation stop cancels a running Run",
       "ok": true,
       "detail": {
         "stopCode": 0,
-        "stdout": "{\n  \"run\": {\n    \"id\": \"run_a457f1f1690b465182165979c2b133a4\",\n    \"client_message_id\": \"09b76cf6-4be2-402d-8993-9c9a947fb7ad\",\n    \"input_digest\": \"sha256:4adec1cfd5533e882ff94428787840af759cc466fed5",
+        "stdout": "{\n  \"run\": {\n    \"id\": \"run_8f02fd8d978b479284feb9c8d5538ae9\",\n    \"client_message_id\": \"5b68deb7-2c48-4598-8524-73926ea9461c\",\n    \"input_digest\": \"sha256:4adec1cfd5533e882ff94428787840af759cc466fed5",
         "final": "cancelled",
         "searchCalls": 2
-      }
-    },
-    {
-      "name": "[4e] org member: one reply with the answer on the response_url",
-      "ok": true,
-      "detail": [
-        {
-          "at": 1794290426832,
-          "path": "/cgi-bin/aibot/response/24ef2fd7-2b05-43e6-9f16-4ff400284071",
-          "msgtype": "markdown",
-          "text": "wecom-org-ok"
-        }
-      ]
-    },
-    {
-      "name": "[4e] org outsider: refused with the connect notice",
-      "ok": true,
-      "detail": [
-        {
-          "at": 1794290427028,
-          "path": "/cgi-bin/aibot/response/3c764bb6-1d00-49e2-a14a-0ac846318b2a",
-          "msgtype": "markdown",
-          "text": "请先从 Hatch Studio 连接 企业微信。"
-        }
-      ]
-    },
-    {
-      "name": "[2b] chat_send wait=60: reply",
-      "ok": true,
-      "detail": "{\n  \"conversation_id\": \"conv_17eb7cbb47f1409a9c2912e9fbcb2ceb\",\n  \"client_message_id\": \"d680d4eb-d7dc-4722-993c-72959f2cebac\",\n  \"run_id\": \"run_f42dce01bc70456f94a5c46bca98aa8e\",\n  \"outcome\": \"started\",\n  \"status\": \"completed\",\n  \"reply\": {\n    \"text\": \"mcp-pong\"\n  }\n}"
-    },
-    {
-      "name": "[2b] conversation_show: messages and the Run's status",
-      "ok": true,
-      "detail": "{\n  \"conversation\": {\n    \"id\": \"conv_17eb7cbb47f1409a9c2912e9fbcb2ceb\",\n    \"creator_id\": \"96195de6-7811-4839-9fcb-7f9524d589fd\",\n    \"agent_id\": \"2059832c-35a7-4c74-a1c5-36840a9b0fe8\",\n    \"product_"
-    },
-    {
-      "name": "[2b] conversations_list includes it",
-      "ok": true,
-      "detail": "{\n  \"conversations\": [\n    {\n      \"id\": \"conv_17eb7cbb47f1409a9c2912e9fbcb2ceb\",\n      \"creator_id\": \"96195de6-7811-4839-9fcb-7f9524d589fd\",\n      \"agent_id\": \"2059832c-35a7-4c74-a1c5-36840a9b0fe8\",\n"
-    },
-    {
-      "name": "[2b] chat_send without wait returns a run id",
-      "ok": true,
-      "detail": "{\n  \"conversation_id\": \"conv_d9c3bb4e3fb24bf7837463eb72449ba3\",\n  \"client_message_id\": \"2e70dedd-8b32-462f-9691-fd49897a822c\",\n  \"run_id\": \"run_69849552529a47c4a22c823198b42076\",\n  \"outcome\": \"started"
-    },
-    {
-      "name": "[2b] chat_stop cancels a running Run",
-      "ok": true,
-      "detail": {
-        "stop": "{\n  \"run\": {\n    \"id\": \"run_69849552529a47c4a22c823198b42076\",\n    \"client_message_id\": \"2e70dedd-8b32-462f-9691-fd49897a822c\",\n    \"input_digest\": \"sha256:c3e4",
-        "final": "cancelled"
       }
     },
     {
@@ -721,240 +678,39 @@
       "detail": "none"
     },
     {
-      "name": "[4b] the same update posted twice is one Run (database dedupe) and one more reply",
+      "name": "[2b] chat_send wait=60: reply",
+      "ok": true,
+      "detail": "{\n  \"conversation_id\": \"conv_1ecfff77942343659d35d10df8da297d\",\n  \"client_message_id\": \"f9e0c689-9ae6-407f-bf56-c53493bca86b\",\n  \"run_id\": \"run_816a13179cca484cbe89b95caff1d314\",\n  \"outcome\": \"started\",\n  \"status\": \"completed\",\n  \"reply\": {\n    \"text\": \"mcp-pong\"\n  }\n}"
+    },
+    {
+      "name": "[2b] conversation_show: messages and the Run's status",
+      "ok": true,
+      "detail": "{\n  \"conversation\": {\n    \"id\": \"conv_1ecfff77942343659d35d10df8da297d\",\n    \"creator_id\": \"e6c2d8eb-8a1d-429a-8a8d-f338ba68ab49\",\n    \"agent_id\": \"cb486400-0a15-4ba4-808c-4941dfe6b4f4\",\n    \"product_"
+    },
+    {
+      "name": "[2b] conversations_list includes it",
+      "ok": true,
+      "detail": "{\n  \"conversations\": [\n    {\n      \"id\": \"conv_1ecfff77942343659d35d10df8da297d\",\n      \"creator_id\": \"e6c2d8eb-8a1d-429a-8a8d-f338ba68ab49\",\n      \"agent_id\": \"cb486400-0a15-4ba4-808c-4941dfe6b4f4\",\n"
+    },
+    {
+      "name": "[2b] chat_send without wait returns a run id",
+      "ok": true,
+      "detail": "{\n  \"conversation_id\": \"conv_9e77d06a9f5147258df46fe41273a63b\",\n  \"client_message_id\": \"c73ba422-5099-4772-b01c-9f18c743cace\",\n  \"run_id\": \"run_15da0fd087664385b91258d61f6dbbc2\",\n  \"outcome\": \"started"
+    },
+    {
+      "name": "[2b] chat_stop cancels a running Run",
       "ok": true,
       "detail": {
-        "inbox": 3,
-        "runs": 3,
-        "sends": 3
+        "stop": "{\n  \"run\": {\n    \"id\": \"run_15da0fd087664385b91258d61f6dbbc2\",\n    \"client_message_id\": \"c73ba422-5099-4772-b01c-9f18c743cace\",\n    \"input_digest\": \"sha256:c3e4",
+        "final": "cancelled"
       }
     },
     {
-      "name": "[4b] journal isolation: BLUEBIRD only in member 1's conversation, REDFOX only in member 2's",
-      "ok": true
-    },
-    {
-      "name": "[4b] the owner's own Chat listing and reads never expose the contacts' conversations",
+      "name": "[4b] each member's conversation remembers only their own word",
       "ok": true,
       "detail": {
-        "listed": 1,
-        "peekStatus": 404
-      }
-    },
-    {
-      "name": "[4e] member: one Run, one reply row sent, still exactly one reply; outsider: no Run",
-      "ok": true,
-      "detail": {
-        "runs": 1,
-        "outbox": [
-          {
-            "state": "sent",
-            "source_key": "run:run_49232751ecfa4ac39d3a851894210b98",
-            "sent_parts": 1,
-            "attempts": 0
-          }
-        ],
-        "outsiderRuns": 0
-      }
-    },
-    {
-      "name": "[4e] the WeCom org principal is a contact",
-      "ok": true,
-      "detail": "contact:9bcd3d3e-e3a5-428c-94d0-2401c5bd3344:ffb8357b-77df-4f90-94c8-f1c678a112e0"
-    },
-    {
-      "name": "[4b] a non-admitted sender is refused with the connect-from-Studio notice and starts no Run",
-      "ok": true,
-      "detail": {
-        "texts": [
-          "请先从 Hatch Studio 连接 Telegram。"
-        ],
-        "runs": 0
-      }
-    },
-    {
-      "name": "[3a] the research worker did not end in an error",
-      "ok": true,
-      "detail": null
-    },
-    {
-      "name": "[4d] public: one Run each, distinct conversations, contact principals",
-      "ok": true,
-      "detail": {
-        "c1": "conversation:3de2a77c258a452e4d78f47e:a14f3e8459186ff1edb64e9d",
-        "c2": "conversation:e2a688aa8e18feb38488cb6c:1284414a46aac633690fce41",
-        "owner": "contact:b825cb36-ba24-4608-97d6-756229501307:ed9ceaf1-f204-42cf-a008-bf8597e40bed"
-      }
-    },
-    {
-      "name": "[1b] assistant_send returned without a tool error",
-      "ok": true,
-      "detail": "{\n  \"client_message_id\": \"56e6e139-63e9-429a-9eb1-0222c0a7a108\",\n  \"conversation_id\": \"5b416cfb-ae28-4ca8-8421-f8c1f7bce980\",\n  \"run_id\": \"run_ec65c54eec804da3849d6f0f9f56907e\",\n  \"message\": {\n    \"id\": \"ef4db20b-06a3-4e81-8c69-85545a4053fe\",\n    \"role\": \"user\",\n    \"text\": \"请调用 propose_change 工具：ag"
-    },
-    {
-      "name": "[1b] the Assistant created a pending change task (needs_you, review)",
-      "ok": true,
-      "detail": {
-        "id": "a1fd5c4f-4e6c-4a78-b7ff-a912db23ef36",
-        "status": "needs_you",
-        "needs": "review",
-        "origin": {
-          "source": "web"
-        },
-        "summary": "修改「Matrix MCP Product」：pricing"
-      }
-    },
-    {
-      "name": "[1b] the task carries the proposed pricing and the right Product",
-      "ok": true,
-      "detail": {
-        "run": "run_ec65c54eec804da3849d6f0f9f56907e",
-        "change": {
-          "pricing": {
-            "currency": "USD",
-            "free_messages": null,
-            "human_hourly_minor": 20000,
-            "agent_monthly_minor": 4900
-          }
-        }
-      }
-    },
-    {
-      "name": "[2c] precondition: the HTTP door starts a conversation when the spec's required fields are answered, refuses a missing required answer with 422, and does not need answers for an optional-only spec",
-      "ok": true,
-      "detail": {
-        "optional": {
-          "product": "3e9bcbbf-9c4c-46f7-ad3d-b8293806fa4d",
-          "httpNoAnswers": 201,
-          "httpEmptyAnswers": 201,
-          "httpWithAnswer": 201,
-          "cliExit": 0,
-          "cliError": "",
-          "cliReply": "briefed",
-          "mcpReply": "briefed"
-        },
-        "required": {
-          "product": "f719dace-231e-4931-b311-5e75fd5f60f2",
-          "httpNoAnswers": 422,
-          "httpEmptyAnswers": 422,
-          "httpWithAnswer": 201,
-          "cliExit": 0,
-          "cliError": "",
-          "cliReply": "briefed",
-          "mcpReply": "briefed",
-          "unansweredCli": true,
-          "unansweredMcp": true
-        },
-        "none": {
-          "product": "ef2f7023-3650-46e0-8112-1854755e804f",
-          "httpNoAnswers": 403,
-          "httpEmptyAnswers": 403,
-          "httpWithAnswer": 403,
-          "cliExit": 1,
-          "cliError": "{\"error\":{\"code\":\"forbidden\",\"message\":\"Forbidden: product.brief_spec: A Product requires a BriefSpec\",\"status\":403}}\n",
-          "mcpError": "Forbidden: product.brief_spec: A Product requires a BriefSpec"
-        }
-      }
-    },
-    {
-      "name": "[2c] a Product without a brief spec is refused by Chat itself (403: every Product requires a BriefSpec), also through the CLI and MCP",
-      "ok": true,
-      "detail": {
-        "product": "ef2f7023-3650-46e0-8112-1854755e804f",
-        "httpNoAnswers": 403,
-        "httpEmptyAnswers": 403,
-        "httpWithAnswer": 403,
-        "cliExit": 1,
-        "cliError": "{\"error\":{\"code\":\"forbidden\",\"message\":\"Forbidden: product.brief_spec: A Product requires a BriefSpec\",\"status\":403}}\n",
-        "mcpError": "Forbidden: product.brief_spec: A Product requires a BriefSpec"
-      }
-    },
-    {
-      "name": "[2c] hatch ask / MCP chat_send chat a Product whose brief spec has only OPTIONAL fields",
-      "ok": true,
-      "detail": {
-        "product": "3e9bcbbf-9c4c-46f7-ad3d-b8293806fa4d",
-        "httpNoAnswers": 201,
-        "httpEmptyAnswers": 201,
-        "httpWithAnswer": 201,
-        "cliExit": 0,
-        "cliError": "",
-        "cliReply": "briefed",
-        "mcpReply": "briefed"
-      }
-    },
-    {
-      "name": "[2c] hatch ask --brief field=value / MCP chat_send brief_answers chat a Product whose brief spec has a REQUIRED field",
-      "ok": true,
-      "detail": {
-        "product": "f719dace-231e-4931-b311-5e75fd5f60f2",
-        "httpNoAnswers": 422,
-        "httpEmptyAnswers": 422,
-        "httpWithAnswer": 201,
-        "cliExit": 0,
-        "cliError": "",
-        "cliReply": "briefed",
-        "mcpReply": "briefed",
-        "unansweredCli": true,
-        "unansweredMcp": true
-      }
-    },
-    {
-      "name": "[2c] without the answer, hatch ask / MCP chat_send are refused with 422 brief_required_answer_missing naming the field",
-      "ok": true,
-      "detail": {
-        "product": "f719dace-231e-4931-b311-5e75fd5f60f2",
-        "httpNoAnswers": 422,
-        "httpEmptyAnswers": 422,
-        "httpWithAnswer": 201,
-        "cliExit": 0,
-        "cliError": "",
-        "cliReply": "briefed",
-        "mcpReply": "briefed",
-        "unansweredCli": true,
-        "unansweredMcp": true
-      }
-    },
-    {
-      "name": "[1b] an unconfirmed task does not change the price",
-      "ok": true,
-      "detail": "10000/2900"
-    },
-    {
-      "name": "[1b] the Assistant did not confirm it by itself",
-      "ok": true
-    },
-    {
-      "name": "[4e] public: an unknown sender is met as a contact and answered once",
-      "ok": true,
-      "detail": {
-        "reply": "wecom-public-ok",
-        "runs": 1
-      }
-    },
-    {
-      "name": "[4c] an unknown Telegram sender writing to a public Connection is met as a contact and answered",
-      "ok": true,
-      "detail": {
-        "texts": [
-          "连上了。可以开始聊了。\nConnected. You can start talking.",
-          "public-ok"
-        ],
-        "runs": 1,
-        "inbox": [
-          {
-            "event_id": "171188",
-            "state": "done",
-            "run_id": null,
-            "attempts": 1
-          },
-          {
-            "event_id": "171189",
-            "state": "done",
-            "run_id": "run_17ce987d7251455b969233e35d45e05b",
-            "attempts": 1
-          }
-        ]
+        "m1": "BLUEBIRD",
+        "m2": "REDFOX"
       }
     },
     {
@@ -963,13 +719,30 @@
       "detail": [
         {
           "text": "确认",
-          "callback_data": "t:4b1361de-2aff-44d2-8a85-e0d4457e9be8:approve"
+          "callback_data": "t:7301d9f2-4ee6-4078-98c1-1f6acc3a2518:approve"
         },
         {
           "text": "取消",
-          "callback_data": "t:4b1361de-2aff-44d2-8a85-e0d4457e9be8:decline"
+          "callback_data": "t:7301d9f2-4ee6-4078-98c1-1f6acc3a2518:decline"
         }
       ]
+    },
+    {
+      "name": "[4d] public: one Run each, distinct conversations, contact principals",
+      "ok": true,
+      "detail": {
+        "c1": "conversation:3a15dd8c56993e53d71550d7:64194250b79362444eec0c0f",
+        "c2": "conversation:0d0f83e95f951357bca8b211:fe367d31d324b6bf2cd2ddd1",
+        "owner": "contact:5f315393-329e-4f17-a055-d4866d97529a:e1370f87-f63c-45d8-b1d3-134ed92e7f7e"
+      }
+    },
+    {
+      "name": "[4e] public: an unknown sender is met as a contact and answered once",
+      "ok": true,
+      "detail": {
+        "reply": "wecom-public-ok",
+        "runs": 1
+      }
     },
     {
       "name": "[3b] before the button is pressed the price is unchanged",
@@ -1010,7 +783,7 @@
       "ok": true,
       "detail": {
         "answered": {
-          "callback_query_id": "cb-182865",
+          "callback_query_id": "cb-136081",
           "text": "好"
         },
         "cleared": {
@@ -1033,16 +806,262 @@
       }
     },
     {
+      "name": "[4b] each member: two inbounds -> two Runs in ONE conversation, two replies sent once each",
+      "ok": true,
+      "detail": {
+        "m1": {
+          "runs": 2,
+          "convs": 1,
+          "outbox": 2
+        },
+        "m2": {
+          "runs": 2,
+          "convs": 1,
+          "outbox": 2
+        }
+      }
+    },
+    {
+      "name": "[4b] two members' conversations are distinct",
+      "ok": true,
+      "detail": {
+        "c1": "conversation:e1ed04c87a13f90ca2ae4ddc:3fda68e89f528e641cbe8c36",
+        "c2": "conversation:ce0b3c8e1daac71a4df08d4f:470cb8ee7be2c897263cf27f"
+      }
+    },
+    {
+      "name": "[4b] org members are contacts: each conversation is owned by contact:<connection>:<contact>, never the owner's account",
+      "ok": true,
+      "detail": {
+        "m1": "contact:77c3c177-ce4e-48ec-aacb-d2f5c69cfbe2:17ff32b3-8851-4c4d-b7f5-1c23dc48a659",
+        "m2": "contact:77c3c177-ce4e-48ec-aacb-d2f5c69cfbe2:cba89435-33a9-4ce5-9d43-65995703c6a8",
+        "owner": "a91efc6c-f58d-4e17-9df9-a73ae13a12a1"
+      }
+    },
+    {
+      "name": "[2c] precondition: the HTTP door starts a conversation when the spec's required fields are answered, refuses a missing required answer with 422, and does not need answers for an optional-only spec",
+      "ok": true,
+      "detail": {
+        "optional": {
+          "product": "775f4f90-3aba-49d9-bf32-fabc79e4e633",
+          "httpNoAnswers": 201,
+          "httpEmptyAnswers": 201,
+          "httpWithAnswer": 201,
+          "cliExit": 0,
+          "cliError": "",
+          "cliReply": "briefed",
+          "mcpReply": "briefed"
+        },
+        "required": {
+          "product": "f12ad016-259c-460b-9070-5e3a8f07443f",
+          "httpNoAnswers": 422,
+          "httpEmptyAnswers": 422,
+          "httpWithAnswer": 201,
+          "cliExit": 0,
+          "cliError": "",
+          "cliReply": "briefed",
+          "mcpReply": "briefed",
+          "unansweredCli": true,
+          "unansweredMcp": true
+        },
+        "none": {
+          "product": "fa7bd0fa-057b-4d05-9ff3-c17c7e7812ff",
+          "httpNoAnswers": 403,
+          "httpEmptyAnswers": 403,
+          "httpWithAnswer": 403,
+          "cliExit": 1,
+          "cliError": "{\"error\":{\"code\":\"forbidden\",\"message\":\"Forbidden: product.brief_spec: A Product requires a BriefSpec\",\"status\":403}}\n",
+          "mcpError": "Forbidden: product.brief_spec: A Product requires a BriefSpec"
+        }
+      }
+    },
+    {
+      "name": "[2c] a Product without a brief spec is refused by Chat itself (403: every Product requires a BriefSpec), also through the CLI and MCP",
+      "ok": true,
+      "detail": {
+        "product": "fa7bd0fa-057b-4d05-9ff3-c17c7e7812ff",
+        "httpNoAnswers": 403,
+        "httpEmptyAnswers": 403,
+        "httpWithAnswer": 403,
+        "cliExit": 1,
+        "cliError": "{\"error\":{\"code\":\"forbidden\",\"message\":\"Forbidden: product.brief_spec: A Product requires a BriefSpec\",\"status\":403}}\n",
+        "mcpError": "Forbidden: product.brief_spec: A Product requires a BriefSpec"
+      }
+    },
+    {
+      "name": "[2c] hatch ask / MCP chat_send chat a Product whose brief spec has only OPTIONAL fields",
+      "ok": true,
+      "detail": {
+        "product": "775f4f90-3aba-49d9-bf32-fabc79e4e633",
+        "httpNoAnswers": 201,
+        "httpEmptyAnswers": 201,
+        "httpWithAnswer": 201,
+        "cliExit": 0,
+        "cliError": "",
+        "cliReply": "briefed",
+        "mcpReply": "briefed"
+      }
+    },
+    {
+      "name": "[2c] hatch ask --brief field=value / MCP chat_send brief_answers chat a Product whose brief spec has a REQUIRED field",
+      "ok": true,
+      "detail": {
+        "product": "f12ad016-259c-460b-9070-5e3a8f07443f",
+        "httpNoAnswers": 422,
+        "httpEmptyAnswers": 422,
+        "httpWithAnswer": 201,
+        "cliExit": 0,
+        "cliError": "",
+        "cliReply": "briefed",
+        "mcpReply": "briefed",
+        "unansweredCli": true,
+        "unansweredMcp": true
+      }
+    },
+    {
+      "name": "[2c] without the answer, hatch ask / MCP chat_send are refused with 422 brief_required_answer_missing naming the field",
+      "ok": true,
+      "detail": {
+        "product": "f12ad016-259c-460b-9070-5e3a8f07443f",
+        "httpNoAnswers": 422,
+        "httpEmptyAnswers": 422,
+        "httpWithAnswer": 201,
+        "cliExit": 0,
+        "cliError": "",
+        "cliReply": "briefed",
+        "mcpReply": "briefed",
+        "unansweredCli": true,
+        "unansweredMcp": true
+      }
+    },
+    {
       "name": "[1b] assistant_send returned without a tool error",
       "ok": true,
-      "detail": "{\n  \"client_message_id\": \"d15123dd-3dec-4a6b-9d25-4cf002a5e54a\",\n  \"conversation_id\": \"5b416cfb-ae28-4ca8-8421-f8c1f7bce980\",\n  \"run_id\": \"run_fb74af2e7cde40d6abd85678498b963d\",\n  \"message\": {\n    \"id\": \"e38ff216-9fc6-42c8-97e4-319dadc86cfa\",\n    \"role\": \"user\",\n    \"text\": \"请调用 propose_change 工具：ag"
+      "detail": "{\n  \"client_message_id\": \"4f6802a4-c3d8-464c-9aaa-3f991950b997\",\n  \"conversation_id\": \"7d02bf41-2593-45c0-993a-49af8fce98c6\",\n  \"run_id\": \"run_d8ed206bb9764ac9a20f0d3d9b5374dc\",\n  \"message\": {\n    \"id\": \"20fad02b-0390-4eda-a962-0b3aada72d8c\",\n    \"role\": \"user\",\n    \"text\": \"请调用 propose_change 工具：ag"
+    },
+    {
+      "name": "[1b] the Assistant created a pending change task (needs_you, review)",
+      "ok": true,
+      "detail": {
+        "id": "f6efcb10-bb18-4bd2-afd4-d23f08bd4b32",
+        "status": "needs_you",
+        "needs": "review",
+        "origin": {
+          "source": "web"
+        },
+        "summary": "修改「Matrix MCP Product」：pricing"
+      }
+    },
+    {
+      "name": "[1b] the task carries the proposed pricing and the right Product",
+      "ok": true,
+      "detail": {
+        "run": "run_d8ed206bb9764ac9a20f0d3d9b5374dc",
+        "change": {
+          "pricing": {
+            "currency": "USD",
+            "free_messages": null,
+            "human_hourly_minor": 20000,
+            "agent_monthly_minor": 4900
+          }
+        }
+      }
+    },
+    {
+      "name": "[1b] an unconfirmed task does not change the price",
+      "ok": true,
+      "detail": "10000/2900"
+    },
+    {
+      "name": "[1b] the Assistant did not confirm it by itself",
+      "ok": true
+    },
+    {
+      "name": "[4b] the same update posted twice is one Run (database dedupe) and one more reply",
+      "ok": true,
+      "detail": {
+        "inbox": 3,
+        "runs": 3,
+        "sends": 3
+      }
+    },
+    {
+      "name": "[4b] journal isolation: BLUEBIRD only in member 1's conversation, REDFOX only in member 2's",
+      "ok": true
+    },
+    {
+      "name": "[4b] the owner's own Chat listing and reads never expose the contacts' conversations",
+      "ok": true,
+      "detail": {
+        "listed": 1,
+        "peekStatus": 404
+      }
+    },
+    {
+      "name": "[3c] the 取消 callback is accepted",
+      "ok": true,
+      "detail": {
+        "status": 200,
+        "ms": 2
+      }
+    },
+    {
+      "name": "[3c] the task is done and cancelled",
+      "ok": true,
+      "detail": {
+        "status": "done",
+        "summary": "修改「Matrix Telegram Product」：pricing（已取消）"
+      }
+    },
+    {
+      "name": "[3c] the price did not change",
+      "ok": true,
+      "detail": {
+        "free_messages": null,
+        "human_hourly_minor": 20000,
+        "agent_monthly_minor": 4900,
+        "currency": "USD"
+      }
+    },
+    {
+      "name": "[4b] a non-admitted sender is offered sign-in and starts no Run",
+      "ok": true,
+      "detail": {
+        "texts": [
+          "登录 Hatch，就能在这里和助理聊了。"
+        ],
+        "runs": 0
+      }
+    },
+    {
+      "name": "[1b] assistant_send returned without a tool error",
+      "ok": true,
+      "detail": "{\n  \"client_message_id\": \"c38a2c4e-834b-4bee-a589-f397216ef3f8\",\n  \"conversation_id\": \"7d02bf41-2593-45c0-993a-49af8fce98c6\",\n  \"run_id\": \"run_7071a716c4634613bbd0337345f85dac\",\n  \"message\": {\n    \"id\": \"c7cb34a4-fe18-4419-8a4c-3b875c02d603\",\n    \"role\": \"user\",\n    \"text\": \"请调用 propose_change 工具：ag"
     },
     {
       "name": "[1b] Studio HTTP: decline accepted",
       "ok": true,
       "detail": {
         "status": 200,
-        "body": "{\"task\":{\"id\":\"ebbc012d-a052-453a-948b-3d08f3c4867b\",\"accountId\":\"5b416cfb-ae28-4ca8-8421-f8c1f7bce980\",\"kind\":\"change\",\"status\":\"done\",\"origin\":{\"source\":\"web\""
+        "body": "{\"task\":{\"id\":\"c2f4095f-28f0-4533-b6e0-563dc6b2c0f7\",\"accountId\":\"7d02bf41-2593-45c0-993a-49af8fce98c6\",\"kind\":\"change\",\"status\":\"done\",\"origin\":{\"source\":\"web\""
+      }
+    },
+    {
+      "name": "[4c] an unknown Telegram sender writing to a Product's own bot is met as a contact and answered, with no sign-up",
+      "ok": true,
+      "detail": {
+        "texts": [
+          "public-ok"
+        ],
+        "runs": 1,
+        "inbox": [
+          {
+            "event_id": "115383",
+            "state": "done",
+            "run_id": "run_83d00f8bc7624e83adf567cd42bf0165",
+            "attempts": 1
+          }
+        ]
       }
     },
     {
@@ -1063,7 +1082,7 @@
       "ok": true,
       "detail": {
         "status": 200,
-        "body": "{\"task\":{\"id\":\"a1fd5c4f-4e6c-4a78-b7ff-a912db23ef36\",\"accountId\":\"5b416cfb-ae28-4ca8-8421-f8c1f7bce980\",\"kind\":\"change\",\"status\":\"done\",\"origin\":{\"source\":\"web\""
+        "body": "{\"task\":{\"id\":\"f6efcb10-bb18-4bd2-afd4-d23f08bd4b32\",\"accountId\":\"7d02bf41-2593-45c0-993a-49af8fce98c6\",\"kind\":\"change\",\"status\":\"done\",\"origin\":{\"source\":\"web\""
       }
     },
     {
@@ -1102,30 +1121,69 @@
       }
     },
     {
-      "name": "[3c] the 取消 callback is accepted",
+      "name": "[4d] a stranger gets one button that opens our sign-in, not a refusal",
       "ok": true,
       "detail": {
-        "status": 200,
-        "ms": 5
+        "chat_id": 6301,
+        "text": "登录 Hatch，就能在这里和助理聊了。",
+        "link_preview_options": {
+          "is_disabled": true
+        },
+        "reply_parameters": {
+          "message_id": 7,
+          "allow_sending_without_reply": true
+        },
+        "reply_markup": {
+          "inline_keyboard": [
+            [
+              {
+                "text": "用 Telegram 登录",
+                "url": "http://studio.verify.local/v1/auth/telegram/start?claim=eyag4SduTqY8VT_X0_IW3G_nIxZYTfHo"
+              }
+            ]
+          ]
+        }
       }
     },
     {
-      "name": "[3c] the task is done and cancelled",
+      "name": "[4d] in a group the same stranger gets silence",
+      "ok": true
+    },
+    {
+      "name": "[4d] the Registry starts the code flow with PKCE",
       "ok": true,
       "detail": {
-        "status": "done",
-        "summary": "修改「Matrix Telegram Product」：pricing（已取消）"
+        "status": 200
       }
     },
     {
-      "name": "[3c] the price did not change",
+      "name": "[4d] the callback verifies the id_token and answers with a session for a new account",
       "ok": true,
       "detail": {
-        "free_messages": null,
-        "human_hourly_minor": 20000,
-        "agent_monthly_minor": 4900,
-        "currency": "USD"
+        "status": 201,
+        "created": true
       }
+    },
+    {
+      "name": "[4d] the chat is bound and greeted in Telegram",
+      "ok": true,
+      "detail": {
+        "chat_id": 6301,
+        "text": "连上了。先给我一样东西就行：你的名字、一个链接，或者现成的资料。",
+        "link_preview_options": {
+          "is_disabled": true
+        }
+      }
+    },
+    {
+      "name": "[4d] the same callback again is refused",
+      "ok": true,
+      "detail": 400
+    },
+    {
+      "name": "[4d] a code Telegram never issued signs nobody in",
+      "ok": true,
+      "detail": 401
     },
     {
       "name": "[3d] a stranger's approve (own chat or the owner's chat id) does not apply the change",
@@ -1136,11 +1194,11 @@
       }
     },
     {
-      "name": "[3d] the stranger is told to connect from Studio and nothing was dispatched",
+      "name": "[3d] the stranger is offered sign-in and nothing was dispatched",
       "ok": true,
       "detail": [
-        "请先从 Hatch Studio 连接 Telegram。",
-        "请先从 Hatch Studio 连接 Telegram。"
+        "登录 Hatch，就能在这里和助理聊了。",
+        "登录 Hatch，就能在这里和助理聊了。"
       ]
     }
   ],
@@ -1160,7 +1218,7 @@
   "evidence": {
     "brief_outcomes": {
       "optional": {
-        "product": "3e9bcbbf-9c4c-46f7-ad3d-b8293806fa4d",
+        "product": "775f4f90-3aba-49d9-bf32-fabc79e4e633",
         "httpNoAnswers": 201,
         "httpEmptyAnswers": 201,
         "httpWithAnswer": 201,
@@ -1170,7 +1228,7 @@
         "mcpReply": "briefed"
       },
       "required": {
-        "product": "f719dace-231e-4931-b311-5e75fd5f60f2",
+        "product": "f12ad016-259c-460b-9070-5e3a8f07443f",
         "httpNoAnswers": 422,
         "httpEmptyAnswers": 422,
         "httpWithAnswer": 201,
@@ -1182,7 +1240,7 @@
         "unansweredMcp": true
       },
       "none": {
-        "product": "ef2f7023-3650-46e0-8112-1854755e804f",
+        "product": "fa7bd0fa-057b-4d05-9ff3-c17c7e7812ff",
         "httpNoAnswers": 403,
         "httpEmptyAnswers": 403,
         "httpWithAnswer": 403,
@@ -1196,28 +1254,28 @@
         "title": "coding agent (CLI) -> Studio: create a Product, ask the Assistant to change its price, confirm",
         "status": "PASS",
         "ids": {
-          "productId": "53451ba1-7295-4285-b9d4-4d2cfb385f01",
-          "approvedTask": "638be1e2-3c87-44fe-ba5c-92cc2449af8e",
+          "productId": "20efd2e5-47b0-4ba1-9f13-e2916db42faf",
+          "approvedTask": "b93dbfde-7e15-4661-9544-98197c46ecde",
           "askedA": {
-            "client_message_id": "62034796-7bf0-4caa-8a1f-62a87e765119",
-            "conversation_id": "7d7daf02-cbd0-4458-a298-c96e3fbb8532",
-            "run_id": "run_8995ef717b4543c99e2cf2cf7b36852a",
+            "client_message_id": "8b5cc9c9-2411-46b0-9700-b0dd6692ce24",
+            "conversation_id": "e51c107a-badd-4f43-89bc-ad8bc8c22a04",
+            "run_id": "run_99270f356d3c4e6a998c6b09fbaeeff1",
             "message": {
-              "id": "3b30e359-00fb-41fd-8157-bd138015548a",
+              "id": "5815d1a4-b93a-49c6-8549-7fbc83b2be29",
               "role": "user",
-              "text": "请调用 propose_change 工具：agent_id 是 53451ba1-7295-4285-b9d4-4d2cfb385f01，pricing 设为 {\"human_hourly_minor\":20000,\"agent_monthly_minor\":4900,\"free_messages\":null,\"currency\":\"USD\"}。只提议，不要自己确认，也不要调用 approve_task，等我确认。",
-              "created_at": "2026-11-10T05:59:53.605Z"
+              "text": "请调用 propose_change 工具：agent_id 是 20efd2e5-47b0-4ba1-9f13-e2916db42faf，pricing 设为 {\"human_hourly_minor\":20000,\"agent_monthly_minor\":4900,\"free_messages\":null,\"currency\":\"USD\"}。只提议，不要自己确认，也不要调用 approve_task，等我确认。",
+              "created_at": "2026-11-10T11:17:22.765Z"
             },
             "queued": false,
             "status": "idle",
             "reply": {
-              "id": "run_8995ef717b4543c99e2cf2cf7b36852a:1",
+              "id": "run_99270f356d3c4e6a998c6b09fbaeeff1:1",
               "role": "assistant",
-              "text": "已经向 Matrix CLI Product 提交了新的定价方案，等你确认后才会生效。",
-              "created_at": "2026-11-10T06:00:02.719Z"
+              "text": "定价改动已经提交，等你确认才生效。",
+              "created_at": "2026-11-10T11:17:33.989Z"
             }
           },
-          "declinedTask": "02ec344f-a2ec-4198-b5f2-e0187d3cf4d6"
+          "declinedTask": "190d0c2c-8072-4a8b-90c4-774e003151f5"
         }
       },
       "1b": {
@@ -1245,47 +1303,47 @@
             "conversations_list",
             "chat_send"
           ],
-          "productId": "6e1d7821-d183-49c9-9d5e-3547f002b72c",
-          "approvedTask": "a1fd5c4f-4e6c-4a78-b7ff-a912db23ef36",
+          "productId": "7081cb94-d0c6-40ee-a0e0-72ce26c9b1d3",
+          "approvedTask": "f6efcb10-bb18-4bd2-afd4-d23f08bd4b32",
           "askedA": {
-            "client_message_id": "56e6e139-63e9-429a-9eb1-0222c0a7a108",
-            "conversation_id": "5b416cfb-ae28-4ca8-8421-f8c1f7bce980",
-            "run_id": "run_ec65c54eec804da3849d6f0f9f56907e",
+            "client_message_id": "4f6802a4-c3d8-464c-9aaa-3f991950b997",
+            "conversation_id": "7d02bf41-2593-45c0-993a-49af8fce98c6",
+            "run_id": "run_d8ed206bb9764ac9a20f0d3d9b5374dc",
             "message": {
-              "id": "ef4db20b-06a3-4e81-8c69-85545a4053fe",
+              "id": "20fad02b-0390-4eda-a962-0b3aada72d8c",
               "role": "user",
-              "text": "请调用 propose_change 工具：agent_id 是 6e1d7821-d183-49c9-9d5e-3547f002b72c，pricing 设为 {\"human_hourly_minor\":20000,\"agent_monthly_minor\":4900,\"free_messages\":null,\"currency\":\"USD\"}。只提议，不要自己确认，也不要调用 approve_task，等我确认。",
-              "created_at": "2026-11-10T06:00:24.444Z"
+              "text": "请调用 propose_change 工具：agent_id 是 7081cb94-d0c6-40ee-a0e0-72ce26c9b1d3，pricing 设为 {\"human_hourly_minor\":20000,\"agent_monthly_minor\":4900,\"free_messages\":null,\"currency\":\"USD\"}。只提议，不要自己确认，也不要调用 approve_task，等我确认。",
+              "created_at": "2026-11-10T11:17:54.221Z"
             },
             "queued": false,
             "status": "idle",
             "reply": {
-              "id": "run_ec65c54eec804da3849d6f0f9f56907e:1",
+              "id": "run_d8ed206bb9764ac9a20f0d3d9b5374dc:1",
               "role": "assistant",
-              "text": "已经为你提交 Matrix MCP Product 的定价修改提议，等你确认后生效。",
-              "created_at": "2026-11-10T06:00:38.316Z"
+              "text": "定价改动已经提交了，等你确认才会生效。",
+              "created_at": "2026-11-10T11:18:13.474Z"
             }
           },
-          "declinedTask": "ebbc012d-a052-453a-948b-3d08f3c4867b"
+          "declinedTask": "c2f4095f-28f0-4533-b6e0-563dc6b2c0f7"
         }
       },
       "2a": {
         "title": "coding agent (CLI) -> Chat: ask --wait, --stream, show, watch, stop",
         "status": "PASS",
         "ids": {
-          "productId": "2059832c-35a7-4c74-a1c5-36840a9b0fe8",
-          "conversationId": "conv_0fe04d20a2e34e209344e4b83e17cda4",
-          "firstRun": "run_a381fc969cc24a9094f2a6365d4bff39",
-          "streamRun": "run_d88f2984a2bc47b4bf6ac296932a6d5f",
-          "stoppedRun": "run_a457f1f1690b465182165979c2b133a4"
+          "productId": "cb486400-0a15-4ba4-808c-4941dfe6b4f4",
+          "conversationId": "conv_cf904916c3124e8f8a332b4916168979",
+          "firstRun": "run_9dd993b9922f40d285fd0d122bd5491d",
+          "streamRun": "run_72309e2721e840a88cfbe1d1432d6a2c",
+          "stoppedRun": "run_8f02fd8d978b479284feb9c8d5538ae9"
         }
       },
       "2b": {
         "title": "coding agent (MCP) -> Chat: chat_send, conversation_show, chat_stop, conversations_list",
         "status": "PASS",
         "ids": {
-          "conversationId": "conv_17eb7cbb47f1409a9c2912e9fbcb2ceb",
-          "run": "run_f42dce01bc70456f94a5c46bca98aa8e"
+          "conversationId": "conv_1ecfff77942343659d35d10df8da297d",
+          "run": "run_816a13179cca484cbe89b95caff1d314"
         }
       },
       "2c": {
@@ -1294,7 +1352,7 @@
         "ids": {
           "outcomes": {
             "optional": {
-              "product": "3e9bcbbf-9c4c-46f7-ad3d-b8293806fa4d",
+              "product": "775f4f90-3aba-49d9-bf32-fabc79e4e633",
               "httpNoAnswers": 201,
               "httpEmptyAnswers": 201,
               "httpWithAnswer": 201,
@@ -1304,7 +1362,7 @@
               "mcpReply": "briefed"
             },
             "required": {
-              "product": "f719dace-231e-4931-b311-5e75fd5f60f2",
+              "product": "f12ad016-259c-460b-9070-5e3a8f07443f",
               "httpNoAnswers": 422,
               "httpEmptyAnswers": 422,
               "httpWithAnswer": 201,
@@ -1316,7 +1374,7 @@
               "unansweredMcp": true
             },
             "none": {
-              "product": "ef2f7023-3650-46e0-8112-1854755e804f",
+              "product": "fa7bd0fa-057b-4d05-9ff3-c17c7e7812ff",
               "httpNoAnswers": 403,
               "httpEmptyAnswers": 403,
               "httpWithAnswer": 403,
@@ -1331,11 +1389,11 @@
         "title": "Telegram -> Studio: link a self Assistant Connection with the real code flow, then dispatch a task",
         "status": "PASS",
         "ids": {
-          "connectUrl": "https://t.me/hatch_verify_bot?start=HATCH-C24C3EQY",
-          "connection": "b96c1c70-f5dc-4db9-8c52-e8eb448c1811",
-          "researchTask": "4105542c-4447-4b55-997f-f82bcd90a96a",
+          "connectUrl": "https://t.me/hatch_verify_bot?start=HATCH-RR2WB2V9",
+          "connection": "a16c7e78-bb29-47c9-ae30-3dce57254af0",
+          "researchTask": "95d4045e-909e-4be5-827b-3e9f88051907",
           "platformTextsAfterDispatch": [
-            "已经安排去查 Verify Expert 的公开资料，有结果马上告诉你。"
+            "已经派出去了，查到结果会告诉你。"
           ]
         }
       },
@@ -1343,11 +1401,11 @@
         "title": "Telegram -> Studio: a price change confirmed with the inline 确认 button (callback_query)",
         "status": "PASS",
         "ids": {
-          "productId": "14d0d7ad-cb17-4b7e-8fcd-efd6af456d5d",
-          "approvedTask": "4b1361de-2aff-44d2-8a85-e0d4457e9be8",
+          "productId": "f76a8610-263a-4b55-972c-bc3017b92d79",
+          "approvedTask": "7301d9f2-4ee6-4078-98c1-1f6acc3a2518",
           "assistantFollowUp": [
-            "查公开资料的搜索工具没配好，所以跑不起来。不过既然你说了是虚构专家，本来也就没有公开资料，不影响。Matrix Telegram Product 的定价修改已经提交，等你确认后生效。",
-            "已生效。Matrix Telegram Product 现在的定价是：月付 49 美元，人工咨询 200 美元/小时。"
+            "公开资料这边，搜索服务本身临时不可用，不等于网上没有；你传的材料目录也是空的。接下来怎么弄？定价改动已经提交，等你确认后才生效。",
+            "公开资料这边，搜索服务本身临时不可用，不等于网上没有；你传的材料目录也是空的。接下来怎么弄？定价改动已经提交，等你确认后才生效。"
           ]
         }
       },
@@ -1355,7 +1413,7 @@
         "title": "Telegram -> Studio: a price change declined with the 取消 button",
         "status": "PASS",
         "ids": {
-          "declinedTask": "4315998a-b8df-416f-b7ab-b1f95b626d20"
+          "declinedTask": "a548d818-4dd3-43a3-92d3-bed7ab6a209e"
         }
       },
       "3d": {
@@ -1368,51 +1426,51 @@
         "status": "PASS",
         "ids": {
           "welcome": {
-            "path": "/open-apis/im/v1/messages/om_ce6bcb2fa8d04017916224c42edf5383/reply",
+            "path": "/open-apis/im/v1/messages/om_b9a3fd9d384c413ab51abd224f9d1bda/reply",
             "text": "连上了。先给我一样东西就行：你的名字、一个链接，或者现成的资料。",
             "authorization": "present",
-            "uuid": "f8ac83a2-3517-5a17-26ec-c99f8e4da81c"
+            "uuid": "ea2abe3d-d26d-0012-7edc-19d1886599de"
           },
-          "productId": "30f38e7c-188f-4ec6-a180-ffb8fd749f2a",
-          "approvedTask": "a248b12c-60bf-43da-9c92-4afb465512aa"
+          "productId": "e5071d09-6c8a-438a-ac9b-38ef33fe3410",
+          "approvedTask": "8bd55434-827a-4fff-893f-f2d9df193a0a"
         }
       },
       "3f": {
         "title": "WeCom -> Studio: own-app credentials, encrypted webhook, link code, the Assistant answers via response_url, a price change confirmed by text (no buttons on WeCom)",
         "status": "PASS",
         "ids": {
-          "productId": "21c9dfe6-5ed2-4e10-82ac-cf5d219152b2",
-          "approvedTask": "69e0ab4d-3670-4a6d-b918-6a08c13ad51e"
+          "productId": "9dff36ca-331a-4939-a81b-eb02e24b0208",
+          "approvedTask": "2cfcf47c-100c-4a98-aa94-7b49b716ea0e"
         }
       },
       "4a": {
         "title": "Telegram -> Chat, audience self: the owner's own Product, account principal",
         "status": "PASS",
         "ids": {
-          "connection": "6c928917-80a3-41c4-bd1c-4e936be5ee8b",
+          "connection": "5260834a-acfc-47a8-8468-e1f29012aab8",
           "trace": {
             "inbox": [
               {
-                "event_id": "171182",
+                "event_id": "186579",
                 "state": "done",
-                "run_id": "run_6e71fdf56d384f9eaeeacbce44854092",
+                "run_id": "run_0349dc83fbb1424da27109e0b753de04",
                 "attempts": 1
               }
             ],
             "runs": [
               {
-                "id": "run_6e71fdf56d384f9eaeeacbce44854092",
+                "id": "run_0349dc83fbb1424da27109e0b753de04",
                 "status": "completed",
-                "conversation_id": "conversation:61850cef94fb26082c8c9078:778cf76f97be992978d7f7c2",
-                "public_id": "conv_778cf76f97be992978d7f7c2",
-                "owner_account_id": "527234a7-8e95-443d-a76f-c71ca569172f",
-                "product_id": "0ef4b819-de98-4e04-a3ac-97d498fe9cc2"
+                "conversation_id": "conversation:fadb41ad20c6a06aff5d30be:50011ae056bd898ac98cb767",
+                "public_id": "conv_50011ae056bd898ac98cb767",
+                "owner_account_id": "a91efc6c-f58d-4e17-9df9-a73ae13a12a1",
+                "product_id": "d2dd92f4-1edd-4adf-bb28-418601c6bb89"
               }
             ],
             "outbox": [
               {
                 "state": "sent",
-                "source_key": "run:run_6e71fdf56d384f9eaeeacbce44854092",
+                "source_key": "run:run_0349dc83fbb1424da27109e0b753de04",
                 "sent_parts": 1,
                 "attempts": 0
               }
@@ -1433,32 +1491,31 @@
         "title": "Telegram -> Chat, audience org: admitted members as contacts, isolated; a non-admitted sender is refused",
         "status": "PASS",
         "ids": {
-          "connection": "25d7a346-968a-4041-823e-c163cca2b69c",
+          "connection": "77c3c177-ce4e-48ec-aacb-d2f5c69cfbe2",
           "traces": {
             "m1": [
-              "run_71205153edae46acb98baedb0129df40",
-              "run_66445de66d9c4a549f7284c74d62e502"
+              "run_5d977d4a97f84424872f9b1ca5f206be",
+              "run_d6703d4981524658960d236de69299b8"
             ],
             "m2": [
-              "run_2d43573ea9e3454099031ce768d68eb0",
-              "run_55f2537357874b1fad15ace5463cb0a5"
+              "run_200ef5fae95e4b969fd03a5faaa65feb",
+              "run_d670852411c7414ab472eaa816e95222"
             ]
           },
           "principals": {
-            "m1": "contact:25d7a346-968a-4041-823e-c163cca2b69c:5e90f1bb-d59a-40d7-bc91-ee696cc3c7dd",
-            "m2": "contact:25d7a346-968a-4041-823e-c163cca2b69c:870f91b8-a8fa-465b-b344-e9962bf7a340"
+            "m1": "contact:77c3c177-ce4e-48ec-aacb-d2f5c69cfbe2:17ff32b3-8851-4c4d-b7f5-1c23dc48a659",
+            "m2": "contact:77c3c177-ce4e-48ec-aacb-d2f5c69cfbe2:cba89435-33a9-4ce5-9d43-65995703c6a8"
           }
         }
       },
       "4c": {
-        "title": "Telegram -> Chat, audience public: anyone becomes a contact",
+        "title": "Telegram -> Chat, audience public: a Product's own bot answers anyone who writes to it",
         "status": "PASS",
         "ids": {
-          "connection": "e628c537-b038-4878-90b1-13f1e0460bef",
+          "connection": "77c3c177-ce4e-48ec-aacb-d2f5c69cfbe2",
           "outcome": {
             "status": 200,
             "texts": [
-              "连上了。可以开始聊了。\nConnected. You can start talking.",
               "public-ok"
             ],
             "runs": 1
@@ -1466,27 +1523,15 @@
         }
       },
       "4d": {
-        "title": "Feishu -> Chat: org member answered, outsider refused, then a public Connection meets anyone as a contact",
+        "title": "Telegram login: a stranger on the shared bot is offered sign-in, and an invited guest reaches the Assistant only after signing in with their own id",
         "status": "PASS",
-        "ids": {
-          "productId": "41beff5a-b584-46c4-b8a4-51c3788a7941",
-          "orgConnection": "fce70b68-092c-4161-9bc3-b5cd3878d81a",
-          "publicConnection": "b825cb36-ba24-4608-97d6-756229501307",
-          "public": {
-            "p1": [
-              "run_a0e1604c3c0543febeb2f6b494285b82"
-            ],
-            "p2": [
-              "run_f6cbeb5fde1d488fa4cacd5035168b67"
-            ]
-          }
-        }
+        "ids": {}
       },
       "4e": {
         "title": "WeCom -> Chat: org member answered once on response_url, outsider refused, then a public Connection meets anyone",
         "status": "PASS",
         "ids": {
-          "productId": "71ad0a72-328c-43ab-a5a3-61b68965e59e"
+          "productId": "b6688091-6572-49f9-9b50-d121eec9259f"
         }
       }
     }

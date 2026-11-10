@@ -31,7 +31,7 @@ import type { AssetDesk } from "../conversations/assets.js";
 
 /** The Assistant is one Agent, not a Product: its conversation is bound to the account, under this id. */
 export const ASSISTANT_AGENT_ID = "assistant";
-const ASSISTANT_PROFILE = "kimi-k2.6-no-thinking";
+const ASSISTANT_PROFILE = "gemini-3.1-pro";
 const ACTIVE = new Set(["queued", "running", "waiting_for_tool", "compacting"]);
 
 /** The steps inside one reply, in the shape Chat's history keeps them: where each sits among the words, and what it was. */

@@ -1,3 +1,4 @@
+import { createSign, generateKeyPairSync, randomUUID } from "node:crypto";
 import http from "node:http";
 import { readBody, sleep } from "./util.mjs";
 
@@ -19,7 +20,31 @@ export class FakePlatform {
     this.search = { delayMs: 0, calls: [] };
     this.nextMessageId = 1000;
     this.waiters = [];
+    /** Bots by token: the username getMe answers, and the webhook the product registered for each (setWebhook), the way Telegram keeps it. */
+    this.bots = new Map();
+    this.webhooks = new Map();
+    /** Telegram's login (OpenID Connect): signs id_tokens with its own key, and remembers which Telegram user each authorization is for. */
+    this.login = { clientId: "verify-login-client", clientSecret: "verify-login-secret", issuer: "https://oauth.telegram.org", kid: "verify-key", ...generateKeyPairSync("rsa", { modulusLength: 2048 }), codes: new Map(), nextUser: undefined };
   }
+
+  /** The Telegram user who completes the next authorization at /auth, the way a person tapping "Log in" on Telegram does. */
+  nextLogin(user) { this.login.nextUser = user; }
+  /** An id_token as Telegram signs it. `overrides` makes a forged or stale one for refusal tests; `key` signs with another key. */
+  idToken({ nonce, user, overrides = {}, key = this.login }) {
+    const now = Math.floor(Date.now() / 1000);
+    const b64 = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
+    const body = `${b64({ alg: "RS256", kid: this.login.kid })}.${b64({ iss: this.login.issuer, aud: this.login.clientId, iat: now, exp: now + 300, nonce, id: user.id, name: user.name, preferred_username: user.username, ...overrides })}`;
+    return `${body}.${createSign("RSA-SHA256").update(body).sign(key.privateKey).toString("base64url")}`;
+  }
+  /** What a browser does with an authorize URL: Telegram asks the person, then sends them back with a code and the state. Returns the callback's query. */
+  authorize(authorizeUrl, user = this.login.nextUser) {
+    const params = new URL(authorizeUrl).searchParams;
+    const code = randomUUID();
+    this.login.codes.set(code, { user, nonce: params.get("nonce"), challenge: params.get("code_challenge"), redirectUri: params.get("redirect_uri"), clientId: params.get("client_id") });
+    return { code, state: params.get("state"), redirectUri: params.get("redirect_uri") };
+  }
+  /** The webhook a bot registered: where to post its updates and the secret to sign them with. */
+  webhookOf(token) { return this.webhooks.get(token); }
 
   async start() {
     this.server = http.createServer((request, response) => { void this.handle(request, response).catch((error) => { if (!response.headersSent) response.writeHead(500); response.end(String(error)); }); });
@@ -52,6 +77,7 @@ export class FakePlatform {
     const url = new URL(request.url, "http://platform.local");
     if (url.pathname === "/search") return this.handleSearch(raw, response);
     const [, host, ...rest] = url.pathname.split("/");
+    if (host === "oauth.telegram.org") return this.handleLogin(request, rest.join("/"), raw, response);
     const tail = `/${rest.join("/")}`;
     let body = {};
     const text = raw.toString("utf8");
@@ -71,6 +97,14 @@ export class FakePlatform {
     const custom = this.responders.get(`${host}:${call.method}`);
     if (custom) { const answer = custom(call); call.delivered = (answer.status ?? 200) < 300; return finish(answer.status ?? 200, answer.body); }
     if (telegram) {
+      if (call.method === "getMe") {
+        const username = this.bots.get(telegram[1]);
+        if (!username) return finish(401, { ok: false, error_code: 401, description: "Unauthorized" });
+        call.delivered = true;
+        return finish(200, { ok: true, result: { id: 1, is_bot: true, username } });
+      }
+      if (call.method === "setWebhook") { this.webhooks.set(telegram[1], { url: body.url, secret: body.secret_token }); call.delivered = true; return finish(200, { ok: true, result: true }); }
+      if (call.method === "deleteWebhook") { this.webhooks.delete(telegram[1]); call.delivered = true; return finish(200, { ok: true, result: true }); }
       if (call.method === "getFile") { const file = this.files.get(body.file_id); return file ? finish(200, { ok: true, result: { file_path: `files/${body.file_id}/${file.name}` } }) : finish(400, { ok: false, description: "no such file" }); }
       call.delivered = true;
       return finish(200, { ok: true, result: { message_id: this.nextMessageId++ } });
@@ -79,6 +113,25 @@ export class FakePlatform {
     if (download && this.files.has(download[1])) { response.writeHead(200); return response.end(this.files.get(download[1]).bytes); }
     call.delivered = true;
     finish(200, { ok: true, code: 0, msg: "ok", data: {}, result: {} });
+  }
+
+  /** oauth.telegram.org: the token endpoint (Basic auth, PKCE) and the key set. /auth is played by `authorize`. */
+  async handleLogin(request, tail, raw, response) {
+    const send = (status, payload) => { response.writeHead(status, { "content-type": "application/json" }); response.end(JSON.stringify(payload)); };
+    this.calls.push({ at: Date.now(), host: "oauth.telegram.org", path: `/${tail}`, method: tail, body: {}, headers: request.headers, delivered: true });
+    if (tail === ".well-known/jwks.json") return send(200, { keys: [{ ...this.login.publicKey.export({ format: "jwk" }), kid: this.login.kid, alg: "RS256", use: "sig" }] });
+    if (tail === "token") {
+      const form = new URLSearchParams(raw.toString("utf8"));
+      const basic = Buffer.from(String(request.headers.authorization ?? "").replace(/^Basic /, ""), "base64").toString();
+      const grant = this.login.codes.get(form.get("code"));
+      this.login.codes.delete(form.get("code"));
+      const verifier = form.get("code_verifier") ?? "";
+      const { createHash } = await import("node:crypto");
+      const proven = grant && createHash("sha256").update(verifier).digest("base64url") === grant.challenge;
+      if (basic !== `${this.login.clientId}:${this.login.clientSecret}` || !grant || !proven || form.get("redirect_uri") !== grant.redirectUri) return send(400, { error: "invalid_grant" });
+      return send(200, { id_token: this.idToken({ nonce: grant.nonce, user: grant.user }), token_type: "Bearer" });
+    }
+    send(404, { error: "not_found" });
   }
 
   async handleSearch(raw, response) {
