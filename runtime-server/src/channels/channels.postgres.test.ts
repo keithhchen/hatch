@@ -16,6 +16,10 @@ import { PostgresInbox } from "./inbox.js";
 import { PostgresRateLimiter } from "./rateLimiter.js";
 import { TelegramChannel } from "./telegramChannel.js";
 
+/** Test time starts a minute ahead of the real clock: rows the database stamps with now() are already due, never in the clock's future. */
+const START = Date.now() + 60_000;
+const at = (offsetMs: number) => new Date(START + offsetMs);
+
 // Opt-in integration tests. Every test owns a random schema, never a database.
 const connectionString = process.env.HATCH_TEST_DATABASE_URL;
 const options = { skip: !connectionString, timeout: 60_000 };
@@ -99,7 +103,7 @@ const message = (sender: string, text: string, extra: Partial<InboundEvent> = {}
 async function stack(pool: Pool, config: { adapters?: FakeAdapter[]; gateway?: ChatGateway; rates?: ConstructorParameters<typeof ChannelService>[0]["rates"] } = {}) {
   const adapters = config.adapters ?? [new FakeAdapter()];
   const stores = await openChannelStores(pool, scopeOf);
-  const clock = { at: new Date("2026-11-10T00:00:00Z") };
+  const clock = { at: at(0) };
   const errors: unknown[] = [];
   const service = new ChannelService({ ...stores, hub: new ChannelHub(adapters), scopeOf, now: () => clock.at, onError: error => errors.push(error), rates: config.rates ?? { chat: { capacity: 100, perSecond: 100 }, connection: { capacity: 100, perSecond: 100 } }, ...(config.gateway ? { gateway: config.gateway } : {}) });
   const target = new RecordingTarget();
@@ -158,9 +162,9 @@ test("A one-time code links a sender to an account; the sender can move, and rev
 test("An expired code does not link", options, async () => isolated(async pool => {
   const { connections } = await stack(pool);
   const owner = randomUUID();
-  const code = await connections.issueCode(owner, "telegram", new Date("2026-11-10T00:00:00Z"));
-  assert.equal(await connections.redeem("telegram", "", code, address("1"), new Date("2026-11-10T00:16:00Z")), undefined);
-  assert.ok(await connections.redeem("telegram", "", code, address("1"), new Date("2026-11-10T00:14:00Z")));
+  const code = await connections.issueCode(owner, "telegram", at(0));
+  assert.equal(await connections.redeem("telegram", "", code, address("1"), at(16 * 60_000)), undefined);
+  assert.ok(await connections.redeem("telegram", "", code, address("1"), at(14 * 60_000)));
 }));
 
 test("The database refuses a Connection that would give anyone but its owner the Assistant", options, async () => isolated(async pool => {
@@ -279,7 +283,7 @@ test("ChannelService.pull stores the pulled events with the cursor, and a failed
 test("An event is leased: a crash returns it, one thread's events go one at a time in order, and retries are bounded", options, async () => isolated(async pool => {
   await PostgresConnections.open(pool, scopeOf);
   const inbox = await PostgresInbox.open(pool);
-  const now = new Date("2026-11-10T00:00:00Z");
+  const now = at(0);
   const [first, second] = await inbox.store("telegram", "", [message("1", "first"), message("1", "second")]);
   await inbox.store("telegram", "", [message("2", "other thread")]);
   const claimed = await inbox.claim(10, 60_000, now);
@@ -449,7 +453,7 @@ test("The rate limit is shared and defers instead of failing", options, async ()
   const limiterA = await PostgresRateLimiter.open(pool);
   const limiterB = await PostgresRateLimiter.open(pool);
   const rate = { capacity: 2, perSecond: 1 };
-  const now = new Date("2026-11-10T01:00:00Z");
+  const now = at(3_600_000);
   const taken = await Promise.all([limiterA, limiterB, limiterA, limiterB].map(limiter => limiter.take("shared", rate, now)));
   assert.equal(taken.filter(wait => wait === 0).length, 2);
 }));
@@ -540,7 +544,7 @@ test("A public Connection on the shared bot meets a sender by its start code, an
 test("An expired lease is reclaimed, and extending it keeps a live claimant's event", options, async () => isolated(async pool => {
   await PostgresConnections.open(pool, scopeOf);
   const inbox = await PostgresInbox.open(pool);
-  const now = new Date("2026-11-10T00:00:00Z");
+  const now = at(0);
   await inbox.store("telegram", "", [message("1", "first")]);
   const [item] = await inbox.claim(10, 30_000, now);
   await inbox.extend(item!.id, 30_000, new Date(now.getTime() + 20_000));

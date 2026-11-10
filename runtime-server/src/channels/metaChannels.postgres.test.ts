@@ -16,6 +16,10 @@ import { sealedTokens } from "./tenantTokens.js";
 import { ChannelSendError, type ChannelAdapter, type ChannelKind } from "./types.js";
 import { WhatsAppChannel, whatsappEligibility } from "./whatsappChannel.js";
 
+/** Test time starts a minute ahead of the real clock: rows the database stamps with now() are already due, never in the clock's future. */
+const START = Date.now() + 60_000;
+const at = (offsetMs: number) => new Date(START + offsetMs);
+
 // Opt-in integration tests over a real database. Every test owns a random schema. The platforms are never called: fetch is recorded.
 const connectionString = process.env.HATCH_TEST_DATABASE_URL;
 const options = { skip: !connectionString, timeout: 60_000 };
@@ -51,7 +55,7 @@ const config = { appSecret: SECRET, verifyToken: "v" };
 async function stack(pool: Pool, make: (tokens: Tokens) => ChannelAdapter, wrap: (target: TargetHandler) => TargetHandler = target => target) {
   const stores = await openChannelStores(pool, scopeOf);
   const adapter = make(kind => sealedTokens(stores.connections, seal, kind));
-  const clock = { at: new Date("2026-11-10T00:00:00Z") };
+  const clock = { at: at(0) };
   const errors: unknown[] = [];
   const service = new ChannelService({ ...stores, hub: new ChannelHub([adapter]), scopeOf, now: () => clock.at, onError: error => errors.push(error) });
   const target = new RecordingTarget();
