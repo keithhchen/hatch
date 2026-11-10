@@ -236,7 +236,13 @@ class ColdCache extends Scenario {
     rec.measure("tracked_tokens", grower.tokens);
     await sleep(12_000);
     const internalId = (await probe.conversationIds())[0].id;
+    // A compaction still running is not a missing end: wait (bounded) for every started id to end before judging.
+    const ids = (events) => new Set(events.filter((e) => e.type === "compaction.started").map((e) => e.payload.compaction_id));
+    const endedIds = (events) => new Set(events.filter((e) => e.type !== "compaction.started").map((e) => e.payload.compaction_id));
+    const unended = (events) => [...ids(events)].filter((id) => !endedIds(events).has(id));
+    await until("every started compaction ended", async () => !unended(await probe.journal(internalId)).length, { timeoutMs: 180_000, everyMs: 500 }).catch(() => undefined);
     const journal = await probe.journal(internalId);
+    rec.evidenceOf("claims", await probe.claims(internalId));
     const started = journal.filter((e) => e.type === "compaction.started");
     const ended = journal.filter((e) => e.type === "compaction.completed" || e.type === "compaction.aborted");
     const checkpoints = await probe.checkpoints(internalId);
@@ -245,7 +251,7 @@ class ColdCache extends Scenario {
     rec.measure("history_checkpoints", checkpoints.length);
     rec.evidenceOf("journal", journal.map((e) => `${e.type}/${e.payload.phase ?? ""}/${e.payload.compaction_id}`));
     rec.check("nothing was summarized or pruned (no tool results, below the trigger)", checkpoints.length === 0, checkpoints.length);
-    rec.check("so no compaction was announced either (every compaction.started ends in completed or aborted)", started.length === ended.length, { started: started.length, completed: ended.length });
+    rec.check("so no compaction was announced either (every compaction.started ends in completed or aborted)", started.length === ended.length && started.length === 0, { started: started.length, completed: ended.length });
     if (started.length > ended.length) rec.defect({ title: "A cold cache with nothing to prune announces a compaction that never happens", severity: "low",
       expected: "compaction.started only for a compaction that runs to a result; a conversation of 131k-219k tokens with no tool results has nothing to prune and below the trigger nothing to summarize.",
       actual: `${started.length} compaction.started and ${ended.length} compaction.completed, with no history checkpoint. ChatCompaction.inBackground re-schedules itself after the cache TTL when tokens >= prune; ChatCompaction/CompactionStrategy.wants() then says yes for a cold cache, the job announces compaction.started, and strategy.compact finds nothing to prune and returns none.`,
