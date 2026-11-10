@@ -1648,7 +1648,7 @@ export async function createDashboardApp(options = {}) {
         }
       }
 
-      if (/^\/v1\/creator\/products\/[^/]+\/factory-agents(?:\/|$)/.test(url.pathname) || /^\/v1\/creator\/assistant(?:\/|$)/.test(url.pathname) || CONVERSATION_PATH.test(url.pathname)) {
+      if (/^\/v1\/creator\/products\/[^/]+\/factory-agents(?:\/|$)/.test(url.pathname) || /^\/v1\/creator\/(?:assistant|connections)(?:\/|$)/.test(url.pathname) || CONVERSATION_PATH.test(url.pathname)) {
         const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const abort = new AbortController();

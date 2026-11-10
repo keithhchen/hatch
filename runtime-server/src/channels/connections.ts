@@ -1,13 +1,13 @@
 import { randomBytes } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
-import type { Audience, Connection, ConnectionState, Principal } from "../surfaces/contract.js";
+import type { AgentTarget, Audience, Connection, ConnectionState, Principal } from "../surfaces/contract.js";
 import type { ChannelKind } from "./types.js";
 
 /** A Connection as the channel layer holds it. `scope` is the platform tenant it was authorized on: empty for our shared account. */
 export type ChannelConnection = Connection & { scope: string };
 /** A sender known to a Connection: the Expert who linked, a member, or a contact who wrote in. `threadId` is where they were reached last. */
 export type Identity = { id: string; connectionId: string; senderId: string; threadId: string };
-export type OwnedConnection = ChannelConnection & { linked: boolean; hasCredentials: boolean; lastEventAt?: string; /** A `public` Connection's unguessable deep-link payload: `t.me/<bot>?start=<startCode>` meets anyone as its contact, also on a shared bot. */ startCode?: string };
+export type OwnedConnection = ChannelConnection & { linked: boolean; hasCredentials: boolean; lastEventAt?: string; /** Who is bound, as the platform names them. */ senderId?: string; /** A `public` Connection's unguessable deep-link payload: `t.me/<bot>?start=<startCode>` meets anyone as its contact, also on a shared bot. */ startCode?: string };
 export type Resolved = { connection: ChannelConnection; identity?: Identity };
 
 const LINK_CODE_MS = 15 * 60_000;
@@ -20,6 +20,8 @@ export const LINK_CODE_PATTERN = /HATCH-[A-Z0-9]{8}/;
 export const START_CODE_PATTERN = /^[0-9a-f]{32}$/;
 
 export const targetKey = (target: Connection["target"]): string => target.kind === "assistant" ? "assistant" : `product:${target.productId}`;
+/** Studio's own entry is the Assistant, which works across the account's Products. A Product's Chat is bound per Product. */
+export const STUDIO_TARGET: AgentTarget = { kind: "assistant" };
 
 /** The Assistant manages Studio, so only its owner may reach it: a Connection that is not `self` can only point at a Product. */
 export function assertReachable(connection: Pick<Connection, "audience" | "target">): void {
@@ -35,8 +37,8 @@ export function principalFor(connection: ChannelConnection, identity: Identity):
 
 /** Port: who each platform sender is, and which Agent answers them. */
 export interface ConnectionRepository {
-  /** A one-time code the owner sends from the platform. The Connection is created on the first call. */
-  issueCode(ownerAccountId: string, channel: ChannelKind, now?: Date): Promise<string>;
+  /** A one-time code the owner sends from the platform, to bind their chat to the Assistant (Studio) or to one of their Products (Chat). The self Connection is created on the first call. */
+  issueCode(ownerAccountId: string, channel: ChannelKind, target?: AgentTarget, now?: Date): Promise<string>;
   /** Bind the sender to the Connection that issued the code. The sender moves away from any earlier Connection. */
   redeem(channel: ChannelKind, scope: string, code: string, who: { senderId: string; threadId: string }, now?: Date): Promise<ChannelConnection | undefined>;
   /**
@@ -48,7 +50,7 @@ export interface ConnectionRepository {
   meet(connection: ChannelConnection, who: { senderId: string; threadId: string }): Promise<Identity>;
   /** A sender arrives by a `public` Connection's start code: they become its contact. Undefined when no such Connection takes them. */
   meetByStartCode(channel: ChannelKind, scope: string, code: string, who: { senderId: string; threadId: string }): Promise<{ connection: ChannelConnection; identity: Identity } | undefined>;
-  /** Connections the account owns that someone is linked to, most recently active first. */
+  /** The Assistant Connections the account owns that someone is linked to, most recently active first: where the Assistant reaches them. */
   linked(ownerAccountId: string): Promise<Resolved[]>;
   /** Every Connection the account owns, linked or not, with what Studio shows of it. */
   owned(ownerAccountId: string): Promise<OwnedConnection[]>;
@@ -56,8 +58,8 @@ export interface ConnectionRepository {
   touch(id: string): Promise<void>;
   /** `degraded` only from `active`; back to `active` only from `degraded`. A revoked Connection stays revoked. */
   setState(id: string, state: Exclude<ConnectionState, "revoked">): Promise<void>;
-  /** Authorization withdrawn: nobody is linked and nothing is processed. Credentials stay, sealed, for a later link. */
-  revoke(ownerAccountId: string, channel: ChannelKind): Promise<void>;
+  /** The account unbinds its self Connection to `target`: nobody is linked and nothing is processed. Credentials stay, sealed, for a later link. */
+  revoke(ownerAccountId: string, channel: ChannelKind, target?: AgentTarget): Promise<void>;
   /** `scope` names the platform tenant the credentials belong to, where that is known only from them (a Slack workspace, a Page). */
   saveCredentials(ownerAccountId: string, channel: ChannelKind, sealed: string, scope?: string): Promise<void>;
   credentials(ownerAccountId: string, channel: ChannelKind): Promise<string | undefined>;
@@ -142,12 +144,12 @@ export class PostgresConnections implements ConnectionRepository {
     return new PostgresConnections(pool, scopeOf);
   }
 
-  async issueCode(ownerAccountId: string, channel: ChannelKind, now = new Date()): Promise<string> {
+  async issueCode(ownerAccountId: string, channel: ChannelKind, target: AgentTarget = STUDIO_TARGET, now = new Date()): Promise<string> {
     const code = newLinkCode();
     await this.pool.query(`INSERT INTO hatch_connections (owner_account_id, channel, scope, target, target_key, audience, link_code, link_expires_at)
-      VALUES ($1, $2, $3, '{"kind":"assistant"}', 'assistant', 'self', $4, $5)
+      VALUES ($1, $2, $3, $6, $7, 'self', $4, $5)
       ON CONFLICT (owner_account_id, channel, audience, target_key) DO UPDATE SET scope = CASE WHEN hatch_connections.credentials IS NOT NULL THEN hatch_connections.scope ELSE $3 END, link_code = $4, link_expires_at = $5`,
-    [ownerAccountId, channel, this.scopeOf(ownerAccountId, channel), code, new Date(now.getTime() + LINK_CODE_MS)]);
+    [ownerAccountId, channel, this.scopeOf(ownerAccountId, channel), code, new Date(now.getTime() + LINK_CODE_MS), JSON.stringify(target), targetKey(target)]);
     return code;
   }
 
@@ -194,14 +196,15 @@ export class PostgresConnections implements ConnectionRepository {
   async linked(ownerAccountId: string): Promise<Resolved[]> {
     const rows = (await this.pool.query(`SELECT c.id, c.owner_account_id, c.channel, c.scope, c.client, c.target, c.audience, c.task_specific, c.state, ${IDENTITY_COLUMNS}
       FROM hatch_connections c JOIN hatch_channel_identities i ON i.connection_id = c.id
-      WHERE c.owner_account_id = $1 AND c.audience = 'self' AND c.state <> 'revoked' ORDER BY c.last_event_at DESC NULLS LAST`, [ownerAccountId])).rows;
+      WHERE c.owner_account_id = $1 AND c.audience = 'self' AND c.target_key = 'assistant' AND c.state <> 'revoked' ORDER BY c.last_event_at DESC NULLS LAST`, [ownerAccountId])).rows;
     return rows.map(row => ({ connection: connectionOf(row), identity: { id: row.identity_id, connectionId: row.id, senderId: row.sender_id, threadId: row.thread_id } }));
   }
 
   async owned(ownerAccountId: string): Promise<OwnedConnection[]> {
-    return (await this.pool.query(`SELECT ${COLUMNS}, credentials IS NOT NULL AS has_credentials, last_event_at, start_code, EXISTS (SELECT 1 FROM hatch_channel_identities i WHERE i.connection_id = c.id) AS linked
+    return (await this.pool.query(`SELECT ${COLUMNS}, credentials IS NOT NULL AS has_credentials, last_event_at, start_code, EXISTS (SELECT 1 FROM hatch_channel_identities i WHERE i.connection_id = c.id) AS linked,
+      (SELECT i.sender_id FROM hatch_channel_identities i WHERE i.connection_id = c.id LIMIT 1) AS sender_id
       FROM hatch_connections c WHERE owner_account_id = $1 ORDER BY created_at`, [ownerAccountId])).rows.map(row => ({
-      ...connectionOf(row), linked: row.linked, hasCredentials: row.has_credentials, ...(row.last_event_at ? { lastEventAt: new Date(row.last_event_at).toISOString() } : {}),
+      ...connectionOf(row), linked: row.linked, hasCredentials: row.has_credentials, ...(row.sender_id ? { senderId: row.sender_id } : {}), ...(row.last_event_at ? { lastEventAt: new Date(row.last_event_at).toISOString() } : {}),
       ...(row.audience === "public" ? { startCode: row.start_code } : {}),
     }));
   }
@@ -218,9 +221,9 @@ export class PostgresConnections implements ConnectionRepository {
     await this.pool.query("UPDATE hatch_connections SET state = $2 WHERE id = $1 AND state = $3", [id, state, state === "degraded" ? "active" : "degraded"]);
   }
 
-  async revoke(ownerAccountId: string, channel: ChannelKind): Promise<void> {
+  async revoke(ownerAccountId: string, channel: ChannelKind, target: AgentTarget = STUDIO_TARGET): Promise<void> {
     await this.transaction(async client => {
-      const ids = (await client.query("UPDATE hatch_connections SET state = 'revoked', link_code = NULL, link_expires_at = NULL WHERE owner_account_id = $1 AND channel = $2 RETURNING id", [ownerAccountId, channel])).rows.map(row => row.id);
+      const ids = (await client.query("UPDATE hatch_connections SET state = 'revoked', link_code = NULL, link_expires_at = NULL WHERE owner_account_id = $1 AND channel = $2 AND audience = 'self' AND target_key = $3 RETURNING id", [ownerAccountId, channel, targetKey(target)])).rows.map(row => row.id);
       await client.query("DELETE FROM hatch_channel_identities WHERE connection_id = ANY($1::uuid[])", [ids]);
     });
   }

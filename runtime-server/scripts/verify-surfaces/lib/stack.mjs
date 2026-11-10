@@ -138,9 +138,8 @@ export class Stack {
 
   // ── A published Expert Product. Setup writes the release the way the repository's own e2e does; the factory is not exercised. ──
 
-  async product(creator, { name = "Verify Expert", system = "You are the Verify Expert. Answer briefly and directly.", tools = [{ id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }], brief = { contract_version: "1", fields: [{ id: "goal", label: "What should we achieve?", required: false }] } } = {}) {
+  async product(creator, { productId = randomUUID(), name = "Verify Expert", system = "You are the Verify Expert. Answer briefly and directly.", tools = [{ id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }], brief = { contract_version: "1", fields: [{ id: "goal", label: "What should we achieve?", required: false }] } } = {}) {
     const { CreatorRegistryReleaseStore } = await import(pathToFileURL(path.join(dist, "creatorLearning/creatorRegistryRelease.js")).href);
-    const productId = randomUUID();
     const releaseHex = (await import("node:crypto")).createHash("sha256").update(`${productId}:${system}`).digest("hex");
     const corpusDigest = `sha256:${"a".repeat(64)}`;
     const root = path.join(this.corpusRoot, productId, releaseHex);

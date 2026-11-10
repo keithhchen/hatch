@@ -4,6 +4,7 @@ import { friendlyError, LoadingState, mutationKey } from "./studioShellKit.jsx";
 import { subscribeFactoryEvents } from "./factoryEvents.js";
 import { BrowserImageAttachments } from "./webChatClient.js";
 import { ImageViewer } from "@hatch/chat/react";
+import { ChannelBindings } from "./ChannelBindings.jsx";
 
 const ROOT = "/v1/creator/assistant";
 const CONNECTIONS = "/v1/creator/connections";
@@ -17,7 +18,6 @@ export function StudioAssistant({ request, t }) {
   const [streaming, setStreaming] = useState("");
   const [pendingLines, setPendingLines] = useState([]);
   const [error, setError] = useState("");
-  const [connecting, setConnecting] = useState(null);
   const [larkForm, setLarkForm] = useState(false);
   const inputRef = useRef(null);
   const fileRef = useRef(null);
@@ -68,27 +68,20 @@ export function StudioAssistant({ request, t }) {
       await refresh();
     } catch (cause) { setError(friendlyError(cause, t)); }
   };
-  const connectChannel = async kind => {
-    try {
-      const value = await send(`${CONNECTIONS}/${kind}/connect`);
-      setConnecting({ kind, ...value });
-      if (value.url) window.open(value.url, "_blank", "noopener");
-    } catch (cause) { setError(friendlyError(cause, t)); }
-  };
   const saveLark = async event => {
     event.preventDefault();
     try { await send(`${CONNECTIONS}/lark/credentials`, Object.fromEntries(new FormData(event.currentTarget))); setLarkForm(false); await refresh(); }
     catch (cause) { setError(friendlyError(cause, t)); }
   };
   const disconnectChannel = async kind => {
-    try { await request(`${CONNECTIONS}/${kind}`, { method: "DELETE", body: JSON.stringify({}) }); setConnecting(null); await refresh(); }
+    try { await request(`${CONNECTIONS}/${kind}`, { method: "DELETE", body: JSON.stringify({}) }); await refresh(); }
     catch (cause) { setError(friendlyError(cause, t)); }
   };
 
   if (!view && !error) return <LoadingState t={t} />;
   const needs = (view?.tasks ?? []).filter(task => task.status === "needs_you");
   const lines = view?.messages ?? [];
-  const channels = (view?.channels ?? []).filter(channel => channel.available || channel.own_app);
+  const ownApps = (view?.channels ?? []).filter(channel => channel.own_app);
   return <div className="sxa">
     <section className="sxa-chat" aria-label={t("sxNavAssistant")}>
       <h1 className="sxa-title">{t("sxNavAssistant")}</h1>
@@ -127,19 +120,16 @@ export function StudioAssistant({ request, t }) {
           {task.needs === "blocked" ? <Button variant="secondary" type="button" onClick={() => act(task, "decline")}>{t("sxaDismiss")}</Button> : null}
         </li>)}
       </ul> : <p className="sxa-empty">{t("sxaNothingNeeded")}</p>}
-      {channels.length ? <div className="sxa-channels">
-        <h2>{t("sxaChannels")}</h2>
-        <p>{t("sxaChannelsBody")}</p>
-        {channels.map(channel => <div className="sxa-channel" key={channel.kind}>
+      <ChannelBindings request={request} t={t} />
+      {ownApps.length ? <div className="sxa-channels">
+        {ownApps.map(channel => <div className="sxa-channel" key={channel.kind}>
           <div className="sxa-channel__row">
             <strong>{CHANNEL_NAMES[channel.kind]}</strong>
             {channel.linked
               ? <Button variant="secondary" type="button" onClick={() => disconnectChannel(channel.kind)}>{t("sxaChannelDisconnect")}</Button>
-              : channel.available
-                ? <Button variant="secondary" type="button" onClick={() => connectChannel(channel.kind)}>{t("sxaChannelConnect")}</Button>
-                : <Button variant="secondary" type="button" onClick={() => setLarkForm(open => !open)}>{t("sxaChannelSetup")}</Button>}
+              : <Button variant="secondary" type="button" onClick={() => setLarkForm(open => !open)}>{t("sxaChannelSetup")}</Button>}
           </div>
-          {channel.own_app && !channel.linked && (larkForm || channel.available) ? <div className="sxa-channel__code">
+          {!channel.linked && (larkForm || channel.available) ? <div className="sxa-channel__code">
             <p>{t("sxaLarkSteps")}</p>
             <code>{channel.webhook_url}</code>
             {channel.available ? null : <form className="sxa-channel__form" onSubmit={saveLark}>
@@ -150,12 +140,6 @@ export function StudioAssistant({ request, t }) {
               <label>Encrypt Key<input name="encrypt_key" type="password" autoComplete="off" /></label>
               <Button variant="secondary" type="submit">{t("sxaLarkSave")}</Button>
             </form>}
-          </div> : null}
-          {channel.linked ? <p className="sxa-channel__status">{t("sxaChannelLinked")}</p> : null}
-          {!channel.linked && connecting?.kind === channel.kind ? <div className="sxa-channel__code">
-            <p>{t("sxaChannelCodeHint", CHANNEL_NAMES[channel.kind])}</p>
-            <code>{connecting.code}</code>
-            {connecting.url ? <a href={connecting.url} target="_blank" rel="noopener noreferrer">{t("sxaChannelOpen", CHANNEL_NAMES[channel.kind])}</a> : null}
           </div> : null}
         </div>)}
       </div> : null}
