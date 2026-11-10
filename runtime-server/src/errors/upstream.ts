@@ -33,8 +33,8 @@ export class UpstreamError extends Error {
     this.name = "UpstreamError";
   }
 
-  /** An error from an upstream call, named: an unrecognized one is `unknown`, still upstream. */
-  static of(error: unknown): UpstreamError {
+  /** An error from an upstream call, named: an unrecognized one is `unknown`, still upstream. `source` is the provider and model that were called, when the caller knows them. */
+  static of(error: unknown, source = ""): UpstreamError {
     if (error instanceof UpstreamError) return error;
     const text = error instanceof Error ? error.message : String(error);
     const status = httpStatus(text);
@@ -45,7 +45,7 @@ export class UpstreamError extends Error {
       : status === 408 || status === 409 || status === 425 || (status !== undefined && status >= 500) || TRANSIENT.test(text) ? "transient"
       : shaped ? "configuration"
       : "unknown";
-    const provider = PROVIDERS.find(([pattern]) => pattern.test(text))?.[1] ?? "unknown";
+    const provider = PROVIDERS.find(([pattern]) => pattern.test(text) || pattern.test(source))?.[1] ?? "unknown";
     return new UpstreamError(kind, provider, status, redact(text));
   }
 }
