@@ -184,3 +184,54 @@ test("a lost terminal and the journal types: a refresh drain is not asked of a t
   await controller.refresh("assistant");
   controller.dispose();
 });
+
+const userRow = (id, state) => ({ id, role: "user", content: id, run_id: "run_1", ...(state ? { state } : {}) });
+const userStates = controller => controller.getState().messages.filter(message => message.role === "user").map(message => message.state);
+
+test("a steered message is queued until the Run takes it up; then the server's row, without a state, settles it", async () => {
+  const { transport, controller, connection } = await open();
+  transport.receipts.push({ run_id: "run_1", outcome: "started" }, { run_id: "run_1", outcome: "steered" });
+  await say(controller, "first");
+  await say(controller, "second");
+  const [first, second] = transport.sent.map(message => message.clientMessageId);
+  transport.page = page([userRow(first), userRow(second, "queued")], [{ id: "run_1", status: "running" }]);
+  connection.emit({ type: "conversation.changed", committed: "user" });
+  await flush();
+  assert.deepEqual(userStates(controller), [undefined, "queued"]);
+  // The Run claims it: the journal says so, and the server's row carries no state any more.
+  transport.page = page([userRow(first), userRow(second)], [{ id: "run_1", status: "running" }], 3);
+  connection.emit({ type: "conversation.changed", committed: "claimed" });
+  await flush();
+  assert.deepEqual(userStates(controller), [undefined, undefined]);
+  controller.dispose();
+});
+
+test("a message taken up while the page was reading is not left queued by the older answer", async () => {
+  const { transport, controller, connection } = await open();
+  transport.receipts.push({ run_id: "run_1", outcome: "started" }, { run_id: "run_1", outcome: "steered" });
+  await say(controller, "first");
+  const slow = Promise.withResolvers();
+  transport.snapshot = () => slow.promise;
+  const reading = controller.refresh("assistant");
+  await say(controller, "second");
+  const [first, second] = transport.sent.map(message => message.clientMessageId);
+  slow.resolve(page([userRow(first), userRow(second)], [{ id: "run_1", status: "running" }], 3));
+  await reading;
+  transport.snapshot = () => Promise.resolve(page([userRow(first), userRow(second)], [{ id: "run_1", status: "running" }], 4));
+  connection.emit({ type: "conversation.changed", committed: "claimed" });
+  await flush();
+  assert.equal(controller.getState().messages.find(message => message.id === second).state, undefined, "the server's row wins once it exists");
+  controller.dispose();
+});
+
+test("a stale pending entry for a message the server holds neither keeps it queued nor sends it again", async () => {
+  const pendingStore = new MemoryPendingStore();
+  pendingStore.save({ conversationId: "assistant", clientMessageId: "message_held", content: "message_held", attachments: [] });
+  const transport = new FakeSteerableTransport();
+  transport.page = page([userRow("message_held")], [{ id: "run_1", status: "running" }]);
+  const { controller } = await open({ transport, pendingStore });
+  assert.equal(transport.sent.length, 0);
+  assert.equal(pendingStore.load("assistant").length, 0);
+  assert.deepEqual(userStates(controller), [undefined]);
+  controller.dispose();
+});

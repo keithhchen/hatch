@@ -32,11 +32,12 @@ export type EndStatus = "completed" | "failed" | "cancelled" | "interrupted";
 /** A status a Run passes through on its way; the way out is `endRun`, never `transitionRun`. */
 export type LiveRunStatus = Exclude<DurableRunStatus, EndStatus>;
 
-/** What the executor says when it ends a Run: the assistant's reply, or why there is none. */
+/** What the executor says when it ends a Run: the assistant's reply, and, when it did not complete, why. */
 export type RunReply = { message: ConversationMessage; finishReason: OutputFinishReason; visibleParts: VisibleConversationPart[] };
 export type RunEnding =
   | { status: "completed"; reply: RunReply }
-  | { status: "failed" | "cancelled" | "interrupted"; failure: PublicFailure };
+  /** What the model already produced is a reply the user saw, so it stays in history. Without one, the Run's saved partial output is kept. */
+  | { status: "failed" | "cancelled" | "interrupted"; failure: PublicFailure; reply?: RunReply };
 /**
  * `ended` is false when the Run was already over, or when the reply was kept but a message that joined the Run is still
  * unanswered. `messageId` is the reply's stable id, `<run_id>:<n>`, when this call wrote one.
@@ -856,7 +857,7 @@ export class InMemoryConversationRepository implements ConversationRepository {
       const claimed = this.runs.get(runId)!;
       this.pendingStoreEvents.push(...writes.transcript);
       for (const event of writes.journal) this.appendEventUnsafe({ conversationId: claimed.conversationId, runId, ...event });
-      const written = ending.status === "completed" ? { messageId } : {};
+      const written = writes.replied ? { messageId } : {};
       if (!writes.ends) return { run: cloneRun(claimed), ended: false, ...written };
       const at = now();
       const updated: ConversationRunRecord = { ...claimed, status: ending.status, completedAt: at, ...("failure" in ending ? { failure: ending.failure } : {}) };
@@ -1772,7 +1773,7 @@ export class PostgresConversationRepository implements ConversationRepository {
       }
       for (const event of writes.transcript) await this.requireSubmissionStore().appendOn(repository.pool, event);
       for (const event of writes.journal) await repository.appendEvent({ conversationId: current.conversationId, runId, ...event });
-      const written = ending.status === "completed" ? { messageId } : {};
+      const written = writes.replied ? { messageId } : {};
       if (!writes.ends) return { run: current, ended: false, ...written };
       const result = await repository.pool.query<RunRow>(`
         UPDATE hatch_conversation_runs SET status = $2, completed_at = now(), failure = $3::jsonb
@@ -2089,20 +2090,27 @@ function cloneConversation(conversation: ConversationRecord): ConversationRecord
  * while one is unclaimed keeps only its reply and stays open, and the supervisor runs it again from that message.
  */
 export function endingWrites(run: ConversationRunRecord, ending: RunEnding, at: string, replyId: string): {
-  claims: boolean; ends: boolean; transcript: StoreEvent[]; journal: Array<Pick<ConversationJournalEvent, "type" | "payload">>;
+  claims: boolean; ends: boolean; replied: boolean; transcript: StoreEvent[]; journal: Array<Pick<ConversationJournalEvent, "type" | "payload">>;
 } {
   const unanswered = ending.status === "completed" && run.consumedCount < run.steeredCount;
   const scope = { conversation_id: run.conversationId, run_id: run.id, timestamp: at };
-  const reply: StoreEvent[] = ending.status === "completed"
-    ? [{ type: "conversation.model_message", ...scope, message_id: replyId, message: ending.reply.message, finish_reason: ending.reply.finishReason, visible_parts: ending.reply.visibleParts }]
+  const kept = ending.reply ?? savedPartial(run);
+  const reply: StoreEvent[] = kept
+    ? [{ type: "conversation.model_message", ...scope, message_id: replyId, message: kept.message, finish_reason: kept.finishReason, visible_parts: kept.visibleParts }]
     : [];
-  const repliedJournal: Array<Pick<ConversationJournalEvent, "type" | "payload">> = ending.status === "completed"
-    ? [{ type: "message.created", payload: { role: "assistant", message_id: replyId, ...(ending.reply.finishReason === "content_filter" ? { finish_reason: "content_filter" } : {}) } }]
+  const repliedJournal: Array<Pick<ConversationJournalEvent, "type" | "payload">> = kept
+    ? [{ type: "message.created", payload: { role: "assistant", message_id: replyId, ...(kept.finishReason === "content_filter" ? { finish_reason: "content_filter" } : {}) } }]
     : [];
-  if (unanswered) return { claims: false, ends: false, transcript: reply, journal: repliedJournal };
+  const replied = reply.length > 0;
+  if (unanswered) return { claims: false, ends: false, replied, transcript: reply, journal: repliedJournal };
   // The Run's status is the journal's `run.state`, written with the row; the transcript keeps only what the model reads.
-  return { claims: ending.status !== "completed", ends: true, transcript: reply, journal: repliedJournal };
+  return { claims: ending.status !== "completed", ends: true, replied, transcript: reply, journal: repliedJournal };
 }
+
+/** An ending that brought no reply keeps what the Run saved as it streamed: the text the user may already have read. */
+const savedPartial = (run: ConversationRunRecord): RunReply | undefined => run.partialOutput
+  ? { message: { role: "assistant", content: run.partialOutput }, finishReason: "stop", visibleParts: [{ type: "text", start: 0, end: run.partialOutput.length }] }
+  : undefined;
 
 /** A transcript event that is a reply of this Run: an assistant message the model's turn ended with. */
 const isReplyOf = (runId: string) => (event: StoreEvent): boolean =>

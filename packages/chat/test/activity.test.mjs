@@ -12,6 +12,14 @@ test("thinking preview does not split grapheme characters and normalizes whitesp
   assert.equal(latestThinkingText("  先思考\n👩‍💻正在规划  "), "先思考 👩‍💻正在规划");
 });
 
+test("the thinking ticker shows the newest fifty characters once: a looping second copy made a short line appear twice", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../src/presentation/Activity.jsx", import.meta.url), "utf8");
+  const ticker = source.slice(source.indexOf("export function ThinkingTicker"), source.indexOf("const toolTitleKeys"));
+  assert.equal(ticker.split("{text}").length - 1, 1);
+  assert.doesNotMatch(await readFile(new URL("../src/presentation/chat.css", import.meta.url), "utf8"), /thinking-ticker-track|web-chat-thinking-ticker/);
+});
+
 test("thinking preview rejects invalid character limits", () => {
   assert.throws(() => latestThinkingText("thinking", 1), RangeError);
 });

@@ -8,7 +8,8 @@ import {
 } from "../conversationRepository.js";
 import { PostgresStore } from "../postgresStore.js";
 import { LocalRuntimeAuthority, RuntimeStore } from "../store.js";
-import { endingOf } from "../testSupport.js";
+import { RunStateMachine } from "../runState.js";
+import { endingOf, endsOf } from "../testSupport.js";
 import { ChatError } from "./principal.js";
 import { ChatService, RunRegistry } from "./chatService.js";
 import { RunEventHub } from "./runEventHub.js";
@@ -95,6 +96,39 @@ for (const backend of ["memory", "postgres"] as const) {
     assert.deepEqual(state.payload.failure, failure);
     assert.deepEqual(events.map((event) => event.type), ["turn.failed", "turn.state"]);
     assert.deepEqual((events[0] as { error: unknown }).error, failure);
+  }));
+
+  for (const status of ["failed", "cancelled", "interrupted"] as const) {
+    test(`${backend}: a ${status} Run keeps what the model already produced as its reply, before the failure`, options, async () => withBackend(backend, async ({ repository, store }) => {
+      const { run } = await repository.acceptSubmission(message(0));
+      const hub = new RunEventHub();
+      const events = heard(hub);
+      const produced = { message: { role: "assistant" as const, content: "你好。先给我一样东西" }, finishReason: "stop" as const, visibleParts: [{ type: "text" as const, start: 0, end: 10 }, { type: "tool_call" as const, tool_call_id: "call_1" }] };
+      const terminator = new RunTerminator(repository, hub);
+      const first = await terminator.end(run.id, { status, failure: { code: "upstream_error", message: "stalled" }, reply: produced });
+      assert.equal(first.ended, true);
+      assert.equal(first.messageId, "run-0:1");
+      assert.deepEqual((await store.readConversation(id)).map((row) => row.content), ["question 0", "你好。先给我一样东西"]);
+      const visible = (await store.readVisibleConversationPage(id)).messages;
+      assert.deepEqual(visible.map((row) => [row.id, row.role]), [["m-0", "user"], ["run-0:1", "assistant"]]);
+      assert.deepEqual(visible[1]!.parts, produced.visibleParts);
+      assert.equal((await repository.getRun(id, run.id))!.status, status);
+      assert.deepEqual(events.map((event) => event.type), ["assistant.message", "turn.failed", "turn.state"], "the reply is told before the failure");
+      // Written once: a second ending changes nothing.
+      await terminator.end(run.id, { status, failure: { code: "x", message: "again" }, reply: produced });
+      assert.equal((await store.readConversation(id)).length, 2);
+    }));
+  }
+
+  test(`${backend}: an ending with no reply keeps the partial output the Run saved; none saved, none written`, options, async () => withBackend(backend, async ({ repository, store }) => {
+    const { run } = await repository.acceptSubmission(message(0));
+    await repository.savePartialOutput(run.id, "half an ans");
+    const swept = await new RunTerminator(repository, new RunEventHub()).end(run.id, endingOf("interrupted", "orphan"));
+    assert.equal(swept.messageId, "run-0:1");
+    assert.deepEqual((await store.readConversation(id)).map((row) => row.content), ["question 0", "half an ans"]);
+    const silent = await repository.acceptSubmission(message(1));
+    await new RunTerminator(repository, new RunEventHub()).end(silent.run.id, endingOf("failed"));
+    assert.deepEqual((await store.readConversation(id)).map((row) => row.content), ["question 0", "half an ans", "question 1"]);
   }));
 
   test(`${backend}: a completion while a joined message is unclaimed keeps the reply, leaves the Run open, and claims nothing`, options, async () => withBackend(backend, async ({ repository, store }) => {
@@ -199,3 +233,17 @@ test("a message refused at admission ends its Run through the terminator: the jo
   const state = (await repository.snapshot(id)).events.filter((event) => event.type === "run.state").at(-1)!;
   assert.equal(state.payload.status, "failed");
 }));
+
+test("a Run's state machine ends a failure, a stop and an interruption with whatever the turn has produced by then", async () => {
+  for (const end of ["fail", "cancel", "interrupt"] as const) {
+    await withBackend("memory", async ({ repository, store }) => {
+      const { run } = await repository.acceptSubmission(message(0));
+      let text = "";
+      const state = new RunStateMachine(run.id, id, store as RuntimeStore, endsOf(repository, run.id));
+      state.keepsReplyFrom(() => text ? { message: { role: "assistant", content: text }, finishReason: "stop", visibleParts: [] } : undefined);
+      text = "already streamed";
+      if (end === "fail") await state.fail({ code: "upstream_error", message: "stalled" }); else await state[end]("stop");
+      assert.deepEqual((await store.readConversation(id)).map((row) => row.content), ["question 0", "already streamed"], end);
+    });
+  }
+});

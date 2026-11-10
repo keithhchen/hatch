@@ -28,6 +28,7 @@ export const transcriptEnds = (store: Pick<RuntimeStore, "append">, conversation
 
 export class RunStateMachine {
   private currentStatus: RunStatus;
+  private produced: () => RunReply | undefined = () => undefined;
 
   constructor(
     readonly runId: string,
@@ -77,16 +78,26 @@ export class RunStateMachine {
     return this.end({ status: "completed", reply });
   }
 
+  /** Where the Run reads what it has produced so far: a Run that does not complete keeps it as its reply. */
+  keepsReplyFrom(produced: () => RunReply | undefined): void {
+    this.produced = produced;
+  }
+
   async fail(failure: PublicFailure): Promise<void> {
-    await this.end({ status: "failed", failure });
+    await this.end({ status: "failed", failure, ...this.kept() });
   }
 
   async cancel(reason: string): Promise<void> {
-    await this.end({ status: "cancelled", failure: { code: "run_cancelled", message: reason } });
+    await this.end({ status: "cancelled", failure: { code: "run_cancelled", message: reason }, ...this.kept() });
   }
 
   async interrupt(reason: string): Promise<void> {
-    await this.end({ status: "interrupted", failure: { code: "run_interrupted", message: reason } });
+    await this.end({ status: "interrupted", failure: { code: "run_interrupted", message: reason }, ...this.kept() });
+  }
+
+  private kept(): { reply?: RunReply } {
+    const reply = this.produced();
+    return reply ? { reply } : {};
   }
 
   private async end(ending: RunEnding): Promise<boolean> {
