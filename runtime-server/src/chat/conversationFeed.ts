@@ -1,4 +1,5 @@
 import type { ConversationJournalEvent, ConversationJournalPage } from "../conversationRepository.js";
+import { publicJournalPayload } from "./messageLedger.js";
 import type { EventSink, RunEventHub } from "./runEventHub.js";
 
 export interface JournalSource {
@@ -11,7 +12,7 @@ export const journalEnvelope = (event: ConversationJournalEvent): Record<string,
   cursor: event.cursor,
   journal_type: event.type,
   ...(event.runId ? { run_id: event.runId } : {}),
-  payload: event.payload,
+  payload: publicJournalPayload(event.payload),
   created_at: event.createdAt
 });
 

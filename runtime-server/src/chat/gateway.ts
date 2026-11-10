@@ -11,6 +11,8 @@ export type SentMessage = {
   conversationId: string;
   runId: string;
   messageId: string;
+  /** When Chat accepted the message, by the database clock: the same time the receipt and the history give it. */
+  acceptedAt: string;
 };
 
 export type FinalReply = {

@@ -9,6 +9,7 @@ import {
   InMemoryConversationRepository, PostgresConversationRepository,
   type AcceptSubmissionInput, type ConversationRepository
 } from "./conversationRepository.js";
+import { journalEnvelope } from "./chat/conversationFeed.js";
 import { LocalRuntimeAuthority, RuntimeStore } from "./store.js";
 import { PostgresStore } from "./postgresStore.js";
 
@@ -93,6 +94,47 @@ for (const backend of ["memory", "file", "postgres"] as const) {
     const next = await repository.acceptSubmission(message(3));
     assert.equal(next.created, true);
     assert.notEqual(next.run.id, start.run.id);
+  }));
+
+  for (const terminal of ["cancelled", "failed", "interrupted"] as const) {
+    test(`${backend}: a Run that ends ${terminal} claims its steered messages in the same transition`, options, async () => withBackend(backend, async ({ repository, store }) => {
+      const start = await repository.acceptSubmission(message(0));
+      await repository.acceptSubmission(message(1));
+      await repository.acceptSubmission(message(2));
+      const ended = await repository.transitionRun(start.run.id, terminal, "stopped");
+      assert.equal(ended.status, terminal);
+      assert.equal(ended.consumedCount, 2);
+      assert.deepEqual((await store.readVisibleConversation(id)).map((row) => row.content), ["question 0", "question 1", "question 2"]);
+      const events = (await repository.snapshot(id)).events;
+      assert.deepEqual(events.filter((event) => event.type === "message.consumed").map((event) => event.payload.client_message_id), ["message-1", "message-2"]);
+      // The claim and the transition are one commit: the claim precedes the terminal state in the journal.
+      const types = events.map((event) => event.type);
+      assert.ok(types.lastIndexOf("message.consumed") < types.lastIndexOf("run.state"));
+    }));
+  }
+
+  test(`${backend}: a claimed message is dated when it arrived, as its receipt says, not when the Run claimed it`, options, async () => withBackend(backend, async ({ repository, store }) => {
+    const start = await repository.acceptSubmission(message(0));
+    const steered = await repository.acceptSubmission(message(1));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await repository.claimSteeredMessages(start.run.id);
+    const history = await store.readVisibleConversation(id);
+    const row = history.find((entry) => entry.content === "question 1")!;
+    assert.equal(row.timestamp, steered.receipt.accepted_at);
+    const consumed = (await repository.snapshot(id)).events.find((event) => event.type === "message.consumed")!;
+    assert.ok(Date.parse(consumed.createdAt) - Date.parse(row.timestamp) >= 40);
+  }));
+
+  test(`${backend}: a steered image keeps its pixels through the claim, into the transcript and the model's context, and stays out of the public journal`, options, async () => withBackend(backend, async ({ repository, store }) => {
+    const start = await repository.acceptSubmission(message(0));
+    const images = [{ type: "image" as const, mimeType: "image/png", data: "iVBORw0KGgo=" }];
+    const withImage = message(1);
+    await repository.acceptSubmission({ ...withImage, canonicalUser: { role: "user", content: "look\n[image: /attachments/a.png]", model_images: images } });
+    const claimed = await repository.claimSteeredMessages(start.run.id);
+    assert.deepEqual(claimed[0]!.message.model_images, images);
+    assert.deepEqual((await store.readConversation(id)).find((row) => row.content?.startsWith("look"))?.model_images, images);
+    const created = (await repository.snapshot(id)).events.find((event) => event.type === "message.created" && event.payload.steered === true)!;
+    assert.equal((journalEnvelope(created).payload as { message: { model_images?: unknown } }).message.model_images, undefined);
   }));
 
   test(`${backend}: messages racing a Run's end never deadlock and are each claimed or start the next Run`, options, async () => withBackend(backend, async ({ repository }) => {

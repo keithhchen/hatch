@@ -96,6 +96,7 @@ import { RuntimeAssetStore, runtimeAssetStoreFromEnvironment } from "./assetStor
 import { flushLangfuseObservability, initializeLangfuseObservability, withLangfuseTurn } from "./langfuse.js";
 import { ChatRuntime, type ChatRuntimeOptions } from "./chat/chatRuntime.js";
 import { PostgresEventRelay } from "./chat/eventRelay.js";
+import { publicJournalPayload } from "./chat/messageLedger.js";
 import { ChatError, principalKey, accountPrincipal } from "./chat/principal.js";
 import type { PrincipalLimits, RunAdmission, Submission } from "./chat/chatService.js";
 import { ContactBinder, SentMessageLimits, type ConnectionDirectory } from "./chat/contactBinding.js";
@@ -1858,7 +1859,7 @@ function publicJournalEvent(event: ConversationJournalEvent): Record<string, unk
     cursor: event.cursor,
     ...(event.runId ? { run_id: event.runId } : {}),
     type: event.type,
-    payload: event.payload,
+    payload: publicJournalPayload(event.payload),
     created_at: event.createdAt
   };
 }

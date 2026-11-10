@@ -27,9 +27,8 @@ test("a failed Run tells its observers one upstream failure and keeps the messag
 
   await failRun({
     run: first.run, conversation: { id } as never, signal: new AbortController().signal,
-    state: { fail: async (reason: string) => { failedWith = reason; } } as never,
-    publish: (message) => { published.push(message); },
-    claimSteered: async () => (await repository.claimSteeredMessages(first.run.id)).map(({ message }) => message)
+    state: { fail: async (reason: string) => { failedWith = reason; await repository.transitionRun(first.run.id, "failed", reason); } } as never,
+    publish: (message) => { published.push(message); }
   }, new UpstreamError("transient", "moonshot", undefined, "kimi-k2.6 stream timed out"));
 
   const failure = (published[0] as { error: { code: string; reference?: string } }).error;

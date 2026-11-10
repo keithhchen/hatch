@@ -99,3 +99,22 @@ test("a local-tool result reaches the Run through its registered tool session", 
   assert.deepEqual(delivered, ["t1"]);
   await instance.stop();
 });
+
+test("a message that joined a Run is claimed when a sweep interrupts the Run or the user stops it", async () => {
+  const { repository, supervisor } = await setup({ execute: async (_run, control) => {
+    await new Promise<void>((resolve) => control.signal.addEventListener("abort", () => resolve()));
+  } }, () => ({ interrupt: "used a local tool" }));
+  const consumed = async (runId: string) => (await repository.snapshot(conversationId)).events.filter((event) => event.runId === runId && event.type === "message.consumed").length;
+  const orphan = await repository.acceptSubmission(message(0, new Date(Date.now() - 1000).toISOString()));
+  await repository.acceptSubmission(message(1));
+  await supervisor("a").sweep();
+  assert.equal((await repository.getRun(conversationId, orphan.run.id))!.status, "interrupted");
+  assert.equal(await consumed(orphan.run.id), 1);
+
+  const live = await repository.acceptSubmission(message(2));
+  const instance = supervisor("a");
+  instance.adopt(live.run);
+  await repository.acceptSubmission(message(3));
+  assert.equal(await instance.cancel(conversationId, live.run.id, "stop"), true);
+  assert.equal(await consumed(live.run.id), 1);
+});

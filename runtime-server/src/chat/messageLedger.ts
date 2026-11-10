@@ -29,10 +29,16 @@ export const ledgerEntry = (event: ConversationJournalEvent): LedgerEntry | unde
   };
 };
 
-/** Image bytes are re-materialized from their assets when the message is claimed. */
-export const steeredPayload = (clientMessageId: string, digest: string, message: ConversationMessage): Record<string, unknown> => {
-  const { model_images: _bytes, ...stored } = message;
-  return { role: "user", client_message_id: clientMessageId, input_digest: digest, steered: true, message: stored };
+/** The steered message as the ledger keeps it, pixels included: the claim hands the Run exactly this message. */
+export const steeredPayload = (clientMessageId: string, digest: string, message: ConversationMessage): Record<string, unknown> =>
+  ({ role: "user", client_message_id: clientMessageId, input_digest: digest, steered: true, message });
+
+/** What a journal event shows a client: a steered message's pixels stay on the server, its text and image labels go out. */
+export const publicJournalPayload = (payload: Record<string, unknown>): Record<string, unknown> => {
+  const message = payload.message as ConversationMessage | undefined;
+  if (!message?.model_images) return payload;
+  const { model_images: _pixels, ...shown } = message;
+  return { ...payload, message: shown };
 };
 
 export type ClaimedMessage = { clientMessageId: string; message: ConversationMessage };

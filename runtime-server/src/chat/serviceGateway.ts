@@ -43,7 +43,7 @@ export class ServiceChatGateway<Scope> implements ChatGateway {
       clientMessageId: messageId,
       runId: `run_${randomUUID().replaceAll("-", "")}`
     });
-    return { outcome: submission.outcome, conversationId: bound.conversation.id, runId: submission.run.id, messageId };
+    return { outcome: submission.outcome, conversationId: bound.conversation.id, runId: submission.run.id, messageId, acceptedAt: submission.acceptedAt };
   }
 
   async upload(principal: Principal, ref: ConversationRef, input: { name: string; bytes: Buffer }): Promise<UploadedRef> {

@@ -81,7 +81,8 @@ for (const backend of ["memory", "file"] as const) {
         assert.equal(replay.created, false);
         assert.equal(replay.run.status, "interrupted");
         assert.deepEqual(replay.receipt, winner.receipt);
-        assert.deepEqual(await reopenedStore.readConversation(id), [input.canonicalUser]);
+        // The interrupt claimed the message that had joined the Run: it is in the transcript, pixels included.
+        assert.deepEqual(await reopenedStore.readConversation(id), [input.canonicalUser, input.canonicalUser]);
         await reopened.close();
       }
     } finally {
