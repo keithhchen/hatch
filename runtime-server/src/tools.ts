@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ClientToolName } from "./protocol.js";
+import type { ClientGroup } from "./surfaces/contract.js";
 
 export type ToolLocality = "server" | "client";
 export type ToolApproval = "none" | "auto" | "ask";
@@ -50,6 +51,8 @@ export type ToolDefinition = {
   description: string;
   /** Running it again changes nothing: a Run that used only such tools can restart safely. */
   readOnly?: boolean;
+  /** The clients that may run it, authorized against the client of the latest message. Absent: every client. */
+  supportedClients?: readonly ClientGroup[];
   schema: z.ZodTypeAny;
   model?: {
     name: string;

@@ -3,7 +3,7 @@ import type { ClientToolBroker } from "./clientBroker.js";
 import type { ServerToolExecutor } from "./serverTools.js";
 import type { RunStateMachine } from "./runState.js";
 import { requireClientToolEnabled, requireTool } from "./tools.js";
-import type { ClientGroup } from "./surfaces/contract.js";
+import { authorizeToolCall, type ClientGroup } from "./surfaces/contract.js";
 import { authorizeLocalToolCall } from "./chat/toolSurface.js";
 
 export type ToolRuntimeScope = "main" | "skill_run";
@@ -37,6 +37,10 @@ export class ToolBridge {
     const parsed = tool.schema.parse(request.arguments) as Record<string, unknown>;
 
     if (tool.locality === "server") {
+      if (tool.supportedClients && this.clientOf) {
+        const authorization = authorizeToolCall({ name: tool.model?.name ?? tool.name, description: "", supportedClients: tool.supportedClients }, this.clientOf());
+        if (!authorization.allowed) throw Object.assign(new Error(authorization.error.message), { code: authorization.error.code });
+      }
       return this.serverTools.execute(request.name, parsed, request.signal);
     }
 

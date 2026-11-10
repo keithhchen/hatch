@@ -270,7 +270,7 @@ export type StoreEvent =
       timestamp: string;
     };
 
-type StoreEventInput = StoreEvent extends infer Event
+export type StoreEventInput = StoreEvent extends infer Event
   ? Event extends { timestamp: string }
     ? Omit<Event, "timestamp"> & { timestamp?: string }
     : never
@@ -715,6 +715,8 @@ export class RuntimeStore {
           throw new Error(`Unsupported visible conversation role: ${role}`);
         }
         const message: VisibleConversationMessage = {
+          // A user message is known by the key its client sent it under.
+          ...(event.type === "conversation.model_message" && role === "user" && event.client_message_id ? { id: event.client_message_id } : {}),
           run_id: event.run_id,
           role,
           content: event.type === "message.created"

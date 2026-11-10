@@ -31,7 +31,7 @@ import {
   type DeliveryUnitReservation
 } from "../delivery.js";
 import type { DeliveryAccountingCommand, DeliveryAccountingOutbox } from "../deliveryOutbox.js";
-import { materializeAgentCorpus } from "../agentCorpusMaterialization.js";
+import { materializeAgentCorpus, type MaterializedAgentCorpus } from "../agentCorpusMaterialization.js";
 import { knowledgeProviderConfigured, type AgentCorpus } from "../agentCorpus.js";
 import {
   GuardedAssistantOutput,
@@ -44,6 +44,7 @@ import type { RuntimeAssetStore } from "../assetStore.js";
 import { withLangfuseTurn } from "../langfuse.js";
 import type { ClientAttributes } from "../surfaces/contract.js";
 import { withinImageBudget } from "./imageBudget.js";
+import type { Turn } from "./turnExecutor.js";
 import { RunHandoff } from "./runSupervisor.js";
 import type { TurnCompaction } from "./chatCompaction.js";
 
@@ -64,7 +65,7 @@ export type TurnBinding = {
 };
 
 /** The agent a turn runs as: its instructions and tools. A Product's comes from its Corpus; another host supplies its own. */
-export type MaterializedTurnAgent = Awaited<ReturnType<typeof materializeAgentCorpus>>;
+export type MaterializedTurnAgent = Omit<MaterializedAgentCorpus, "deliveryAuditContext"> & Partial<Pick<MaterializedAgentCorpus, "deliveryAuditContext">>;
 
 /** What a host adds to a turn beyond its Product binding. */
 export type TurnProfile = {
@@ -72,6 +73,10 @@ export type TurnProfile = {
   agent?: MaterializedTurnAgent;
   /** Rebuilt for every model call and never stored: the host's view of things right now. */
   liveState?: RunContext["liveState"];
+  /** The agent's prompt is its own whole prompt, not an Expert's instructions. */
+  ownPrompt?: boolean;
+  /** A Run may end having said nothing. */
+  mayStaySilent?: boolean;
 };
 
 export async function runModelTurn(...args: Parameters<typeof runModelTurnInternal>): Promise<void> {
@@ -395,6 +400,8 @@ async function runModelTurnInternal(
       toolScope: "main",
       agentSystemPrompt: materializedAgent?.systemPrompt,
       ...(profile?.liveState ? { liveState: profile.liveState } : {}),
+      ...(profile?.ownPrompt ? { ownPrompt: true } : {}),
+      ...(profile?.mayStaySilent ? { mayStaySilent: true } : {}),
       briefSnapshot,
       deliveryAuditContext: materializedAgent?.deliveryAuditContext,
       knowledgeAvailable: Boolean(
@@ -596,3 +603,22 @@ export function errorMessage(error: unknown): string {
   }
   return String(error);
 }
+
+/** A Run whose execution threw: recorded once, and told to every observer in the one shape the failure boundary builds. */
+export async function failRun(turn: Pick<Turn<unknown>, "run" | "conversation" | "signal" | "state" | "publish">, error: unknown): Promise<void> {
+  if (turn.signal.reason instanceof RunHandoff) return;
+  const failure = failures.translate(error, { run: turn.run.id, conversation: turn.conversation.id });
+  await turn.state.fail(failure.message).catch(() => undefined);
+  turn.publish({ type: "turn.failed", run_id: turn.run.id, error: failure });
+}
+
+/** A conversation whose agent has no Skills. */
+export const NO_SKILLS: RuntimeSessionSkills = {
+  records: [],
+  visibleRecords: [],
+  rendered: {
+    section: "",
+    aliases: {},
+    report: { total_count: 0, included_count: 0, omitted_count: 0, truncated_description_chars: 0, truncated_description_count: 0 }
+  }
+};

@@ -107,7 +107,7 @@ import { ServiceChatGateway } from "./chat/serviceGateway.js";
 import { ChatServiceApi } from "./chat/serviceApi.js";
 import { ChatAssets, TextPartsReader, type PartsReader, type PreparedMessage } from "./chat/assets.js";
 import { attachmentToolDefinitions } from "./chat/attachmentTools.js";
-import { errorMessage, runModelTurn } from "./chat/modelTurn.js";
+import { errorMessage, failRun, runModelTurn } from "./chat/modelTurn.js";
 import { toolRegistry } from "./tools.js";
 import { MAX_BYTES as MAX_ASSET_BYTES } from "./assets/pipeline.js";
 import { RegistryConnectionDirectory } from "./chat/registryConnections.js";
@@ -808,10 +808,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
           turn.clientOf, turn.claimSteered, turn.compaction
         );
       } catch (error) {
-        if (turn.signal.reason instanceof RunHandoff) return;
-        const failure = failures.translate(error, { run: turn.run.id, conversation: turn.conversation.id });
-        await turn.state.fail(failure.message).catch(() => undefined);
-        turn.publish({ type: "turn.failed", run_id: turn.run.id, error: failure });
+        await failRun(turn, error);
       }
     }
   };

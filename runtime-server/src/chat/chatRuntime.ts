@@ -29,6 +29,8 @@ export type ChatRuntimeOptions<Scope> = {
   toolPollMs?: number;
   /** Carries live events between instances. Without one, observers only see Runs this instance executes. */
   relay?: EventRelay;
+  /** The hub the Runs publish to, when a host also wants to hear every event; by default one over `relay`. */
+  hub?: RunEventHub;
   /** The compaction strategy; by default Chat's, built from the model's window on first use. */
   compactionStrategy?: () => CompactionStrategy<RuntimeCompactionMessage>;
 };
@@ -49,7 +51,7 @@ export class ChatRuntime<Scope> {
   constructor(private readonly options: ChatRuntimeOptions<Scope>) {
     const { repository, store } = options;
     const executorId = `executor_${randomUUID().replaceAll("-", "")}`;
-    this.hub = new RunEventHub(options.relay);
+    this.hub = options.hub ?? new RunEventHub(options.relay);
     this.feed = new ConversationFeed(repository, this.hub, options.feedPollMs);
     let strategy: CompactionStrategy<RuntimeCompactionMessage> | undefined;
     this.compaction = new ChatCompaction({

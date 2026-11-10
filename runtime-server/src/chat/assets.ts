@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import type { AlsoCommit, ConversationRecord } from "../conversationRepository.js";
-import { AssetError, type Asset, type AssetBlobs, type AssetScope } from "../assets/domain.js";
+import { AssetError, type Asset, type AssetBlobs, type AssetScope, type DerivativeRole } from "../assets/domain.js";
 import type { AssetPipeline } from "../assets/pipeline.js";
 import { attachmentTools, type AttachmentTool } from "../assets/tools.js";
 import { fileLine, imageLabel, pathsFor } from "../assets/views.js";
 import type { AttachmentFiles } from "../assets/files.js";
-import type { UploadedAsset } from "../conversations/assets.js";
+import type { AssetDesk, UploadedAsset } from "../conversations/assets.js";
+import { PipelineAssets } from "../conversations/pipelineAssets.js";
 import { clientMessageInputDigest, MAX_USER_MESSAGE_CHARS, type ConversationMessage } from "../protocol.js";
 import type { ContentPart } from "../surfaces/contract.js";
 import { ChatError } from "./principal.js";
@@ -53,6 +54,16 @@ export class TextPartsReader implements PartsReader {
     const content = parts.map((part) => (part as { text: string }).text).join("\n");
     return { digest: clientMessageInputDigest({ content }), message: async () => ({ role: "user", content }) };
   }
+}
+
+/**
+ * Assets as a Studio client sees them, for a conversation that is Chat's own: uploads and lookups are the pipeline's, but
+ * Chat copies nothing into a workspace and binds each asset to its message in the transaction that accepts the message.
+ */
+class ChatBoundAssets extends PipelineAssets {
+  override async stage(): Promise<void> { /* Chat's tools read the pipeline's own copy */ }
+  override async attach(): Promise<void> { /* bound by Chat with the message */ }
+  override async release(): Promise<void> { /* nothing was bound */ }
 }
 
 /** The upload pipeline as Chat uses it, for every client: ready assets in the conversation's scope. */
@@ -111,6 +122,20 @@ export class ChatAssets implements PartsReader {
     const content = lines.join("\n");
     if (content.length > MAX_USER_MESSAGE_CHARS) throw new ChatError("message_too_long", "This message is too long.", 413);
     return { role: "user", content, ...(images.length ? { model_images: images } : {}) };
+  }
+
+  /** The desk a Studio route uses to upload and resolve attachments for a conversation hosted on Chat. */
+  studioDesk(): AssetDesk { return new ChatBoundAssets(this.deps.pipeline, this.deps.blobs, { files: { writeManual: async () => undefined }, place: () => "" }); }
+
+  /** What a conversation's messages carried, for history and for hosts that hand files on: the asset and the message it belongs to. */
+  async attachments(conversation: Pick<ConversationRecord, "id" | "ownerAccountId">): Promise<Array<{ asset: Asset; messageId: string }>> {
+    return (await this.deps.files.attached(assetScopeOf(conversation))).map((asset) => ({ asset, messageId: asset.messageId! }));
+  }
+
+  /** The bytes of one of an asset's forms: the resized image, or the text a file or voice message was read as. */
+  derivative(asset: Asset, role: DerivativeRole): Promise<Buffer | undefined> {
+    const found = asset.derivative(role);
+    return found ? this.deps.blobs.get(found.key) : Promise.resolve(undefined);
   }
 
   /** The full list, declared once for every Run. */

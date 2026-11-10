@@ -56,3 +56,13 @@ export class FailureBoundary {
 
 /** The process's boundary: every surface translates through it, and the server attaches the ledger once. */
 export const failures = new FailureBoundary();
+
+/**
+ * A failed Run's stored reason, read back as the failure its clients see. The reason is the message this boundary built,
+ * and the message of an upstream failure carries its reference, so the shape is the same wherever a Run is looked up later.
+ */
+export function failureOfReason(reason: string | undefined): PublicFailure {
+  const reference = /Reference: (err_[0-9a-f]+)\./.exec(reason ?? "")?.[1];
+  const message = reason || "The Run failed. Send the message again.";
+  return reference ? { code: UPSTREAM_CODE, message, reference } : { code: "run_failed", message };
+}

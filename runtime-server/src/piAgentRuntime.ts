@@ -78,6 +78,8 @@ export type PiToolDefinition = {
 
 export type PiAgentRuntimeOptions = {
   toolDefinitions?: PiToolDefinition[];
+  /** The environment that names the model profile; the process's own when absent. */
+  env?: NodeJS.ProcessEnv;
 };
 
 type QueueItem<T> =
@@ -148,8 +150,8 @@ export class PiAgentRuntime implements AgentRuntime {
 
   async *run(input: RunStart, ctx: RunContext): AsyncIterable<OutboundMessage> {
     ctx.abortSignal?.throwIfAborted();
-    const model = createPiModel();
-    const streamFn = createPiStreamFn();
+    const model = createPiModel({ env: this.options.env });
+    const streamFn = createPiStreamFn({ env: this.options.env });
     const queue = new AsyncQueue<OutboundMessage>();
     const workspacePathPolicy = createWorkspacePathPolicy(input.message.content);
     const visibleSkills = ctx.sessionSkills.visibleRecords;
@@ -162,6 +164,7 @@ export class PiAgentRuntime implements AgentRuntime {
     const toolEvents = new Map<string, ToolEventState>();
     let terminalError: Error | undefined;
     let finalAssistant: AssistantMessage | undefined;
+    let handedOver = false;
     let compacting = false;
     let hasExecutedTool = false;
     const deliveryWorkflow = ctx.deliveryWorkflow;
@@ -258,9 +261,9 @@ export class PiAgentRuntime implements AgentRuntime {
       // summary delimiters.
       convertToLlm,
       initialState: {
-        systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools, skillsSection),
+        systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools, skillsSection, ctx.ownPrompt),
         model,
-        thinkingLevel: resolveLlmProfile().thinkingLevel,
+        thinkingLevel: resolveLlmProfile(this.options.env).thinkingLevel,
         messages: [...contextMessages, ...storedMessages],
         tools: traceAgentTools(tools)
       },
@@ -272,7 +275,7 @@ export class PiAgentRuntime implements AgentRuntime {
             toolName: toolCall.name,
             arguments: separateActivityMessage(args as Record<string, unknown>).toolArguments,
             messages: auditMessagesForRun(ctx, transcriptMessages, undefined),
-            systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools, skillsSection),
+            systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools, skillsSection, ctx.ownPrompt),
             auditContext: ctx.deliveryAuditContext,
             signal
           });
@@ -329,7 +332,9 @@ export class PiAgentRuntime implements AgentRuntime {
           deliveryWorkflow,
           transcriptMessages,
           setFinalAssistant: (message) => { finalAssistant = message; },
-          setTerminalError: (error) => { terminalError ??= error; }
+          setTerminalError: (error) => { terminalError ??= error; },
+          setHandedOver: () => { handedOver = true; },
+          handedOver: () => handedOver
         });
       });
 
@@ -356,6 +361,11 @@ export class PiAgentRuntime implements AgentRuntime {
       }
       await promptPromise;
       if (terminalError) throw terminalError;
+      if (!finalAssistant && ctx.mayStaySilent) {
+        // The agent had nothing to say, or a tool handed the conversation over: the Run completes with no reply.
+        yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
+        return;
+      }
       if (!finalAssistant) throw new Error("Pi Agent ended without a final assistant message");
       const draftContent = assistantText(finalAssistant);
       if (!draftContent.trim()) throw new Error("Pi Agent returned an empty final response");
@@ -365,7 +375,7 @@ export class PiAgentRuntime implements AgentRuntime {
           workflow: deliveryWorkflow,
           draft: draftContent,
           messages: auditMessagesForRun(ctx, transcriptMessages, finalAssistant),
-          systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools, skillsSection),
+          systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools, skillsSection, ctx.ownPrompt),
           auditContext: ctx.deliveryAuditContext,
           signal: ctx.abortSignal
         })
@@ -444,11 +454,14 @@ export class PiAgentRuntime implements AgentRuntime {
           }
         );
         ensureNotCancelled(ctx);
-        const modelResult = modelVisibleToolResult(definition.function.name, result);
+        // A tool that hands the conversation over says so; the model's turn ends with the call.
+        const { ends_turn: endsTurn, ...shown } = result;
+        const modelResult = modelVisibleToolResult(definition.function.name, shown);
         const visibleResult = boundToolResult(stripBinaryToolPayload(modelResult));
         return {
           content: piToolResultContent(modelResult),
-          details: visibleResult
+          details: visibleResult,
+          ...(endsTurn === true ? { terminate: true } : {})
         };
       }
     };
@@ -470,6 +483,8 @@ export class PiAgentRuntime implements AgentRuntime {
     transcriptMessages: ConversationMessage[];
     setFinalAssistant: (message: AssistantMessage) => void;
     setTerminalError: (error: Error) => void;
+    setHandedOver: () => void;
+    handedOver: () => boolean;
   }): Promise<void> {
     const {
       event,
@@ -486,7 +501,9 @@ export class PiAgentRuntime implements AgentRuntime {
       deliveryWorkflow,
       transcriptMessages,
       setFinalAssistant,
-      setTerminalError
+      setTerminalError,
+      setHandedOver,
+      handedOver
     } = options;
 
     if (event.type === "message_update") {
@@ -548,7 +565,7 @@ export class PiAgentRuntime implements AgentRuntime {
           setTerminalError(assistant.stopReason === "error" ? UpstreamError.of(assistant.errorMessage ?? "Pi Agent stopped: error") : new Error(assistant.errorMessage ?? `Pi Agent stopped: ${assistant.stopReason}`));
         } else if (assistant.stopReason === "stop" && !hasToolCall) {
           if (hasText) setFinalAssistant(assistant);
-          else setTerminalError(new Error("Pi Agent returned an empty final response"));
+          else if (!ctx.mayStaySilent) setTerminalError(new Error("Pi Agent returned an empty final response"));
         }
       } else if (event.message.role === "toolResult") {
         const converted = fromPiMessage(event.message as ToolResultMessage);
@@ -606,6 +623,7 @@ export class PiAgentRuntime implements AgentRuntime {
 
     if (event.type === "tool_execution_end") {
       setHasExecutedTool();
+      if ((event.result as { terminate?: boolean } | undefined)?.terminate) setHandedOver();
       const state = toolEvents.get(event.toolCallId);
       const rawEventBase = state?.event ?? toolEventBase(
         input,
@@ -663,7 +681,7 @@ export class PiAgentRuntime implements AgentRuntime {
         && last.content.some((block) => block.type === "text" && block.text.trim().length > 0)
         && !last.content.some((block) => block.type === "toolCall")) {
         setFinalAssistant(last);
-      } else if (last) {
+      } else if (last && !(ctx.mayStaySilent && (handedOver() || last.stopReason === "stop"))) {
         setTerminalError(last.stopReason === "error" ? UpstreamError.of(last.errorMessage ?? "Pi Agent stopped: error") : new Error(last.errorMessage ?? "Pi Agent ended without a final assistant response"));
       }
       return;
@@ -696,7 +714,7 @@ function auditMessagesForRun(
     ? transcriptMessages.slice(0, -1)
     : transcriptMessages;
   return [
-    { role: "system", content: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools, runtimeSkillsSection(ctx)) },
+    { role: "system", content: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools, runtimeSkillsSection(ctx), ctx.ownPrompt) },
     ...buildRuntimeContextMessages(ctx.activatedSkills ?? []),
     ...ctx.messages.map(toAuditMessage),
     ...transcript.map(toAuditMessage)

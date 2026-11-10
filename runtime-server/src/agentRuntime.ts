@@ -94,6 +94,10 @@ export type RunContext = {
   claimSteered?: () => Promise<ConversationMessage[]>;
   /** What the host sees right now. Appended to each model call like the reminder, and never stored. */
   liveState?: () => Promise<string | undefined>;
+  /** `agentSystemPrompt` is the agent's own whole prompt, not an Expert's instructions inside the Expert Agent frame. */
+  ownPrompt?: boolean;
+  /** A Run may end having said nothing: the agent had nothing to tell the user, or a tool handed the conversation over. */
+  mayStaySilent?: boolean;
 };
 
 export interface AgentRuntime {
@@ -771,9 +775,10 @@ export function buildRuntimeSystemPrompt(
   deliveryWorkflow?: DeliveryWorkflow,
   briefSnapshot?: BriefSnapshot,
   clientTools: ClientToolName[] = [],
-  skillsSection = ""
+  skillsSection = "",
+  ownPrompt = false
 ): string {
-  const prompt = agentSystemPrompt ? [
+  const prompt = agentSystemPrompt && ownPrompt ? agentSystemPrompt : agentSystemPrompt ? [
       "You are the server-side runtime for one exact, server-pinned Hatch Expert Agent.",
       "The private Expert product instructions below define the work. Execute them directly in this session; use the registered Skill tool when a cataloged Skill is needed, and do not describe private implementation to the Consumer.",
       ...(clientTools.length ? ["Local tools operate within the client's authorized directories: the selected workspace, managed attachments, and task output/runtime resources. The client enforces read/write permissions."] : ["This client has no local workspace or local tools. Server-hosted Skill resources remain available when a Skill is activated."]),
@@ -810,7 +815,7 @@ export function buildRuntimeSystemPrompt(
     "Negative examples: '查看推理记录和知识库的目录结构'; '搜索事实分类'; '查看索引中的第六份文件'; '继续分析'; '查看相关信息'. These expose internal mechanics or fail to explain a user-facing purpose. During initial preparation, use the broad preparation message instead of narrating any of these steps."
   ].join("\n");
   return [
-    REPLY_STYLE_PROMPT,
+    ownPrompt ? "" : REPLY_STYLE_PROMPT,
     prompt,
     skillsSection ? skillCatalogPromptBlock(skillsSection) : "",
     briefSnapshot ? briefSnapshotPromptBlock(briefSnapshot) : "",
@@ -953,8 +958,8 @@ export function chatToolsForRun(
       || spec.runtimeName.startsWith("hatch.")
       // Chat's Unix-style attachment retrieval is part of every Run's fixed surface.
       || spec.runtimeName.startsWith("attachments.")
-      || allowed === undefined
-      || allowed.has(spec.runtimeName)
+      // Studio tools belong to the Assistant alone: a conversation has them only when its agent names them.
+      || (allowed === undefined ? !spec.runtimeName.startsWith("studio.") : allowed.has(spec.runtimeName))
     ))
     .map((spec) => tool(spec.name, spec.clientTool ? describeLocalTool(spec.clientTool, spec.description) : spec.description, spec.properties, spec.required));
   const creatorTools = externalToolDefinitions.map((definition) => tool(
