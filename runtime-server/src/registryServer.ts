@@ -2267,9 +2267,17 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
     if (timezone) await context.reach.setTimezone(account.id, timezone);
     // The latest messages, or with `before_cursor` the page before them: the page asks for earlier ones as the Expert scrolls back.
     const limit = Number(url.searchParams.get("limit"));
-    let view: Awaited<ReturnType<typeof assistant.view>>;
-    try { view = await assistant.view(account.id, { limit: Number.isInteger(limit) && limit > 0 ? Math.min(limit, 200) : 200, beforeCursor: url.searchParams.get("before_cursor") ?? undefined }); }
-    catch (error) {
+    let view: Awaited<ReturnType<typeof assistant.view>> & { cursor?: string; partial?: string };
+    const options = { limit: Number.isInteger(limit) && limit > 0 ? Math.min(limit, 200) : 200, beforeCursor: url.searchParams.get("before_cursor") ?? undefined };
+    try {
+      // The newest page names the journal cursor it is consistent with (a message is in it or in the events after it, never both,
+      // never neither) and what the running turn has said so far, so a client resumes the stream from `cursor` and joins `partial` by offset.
+      view = options.beforeCursor !== undefined ? await assistant.view(account.id, options)
+        : await context.conversationPorts.eventLog.consistent(`assistant:${account.id}`, async cursor => {
+          const page = await assistant.view(account.id, options);
+          return { ...page, cursor, ...(page.running && context.assistantChat ? { partial: await context.assistantChat.partial(account.id) } : {}) };
+        });
+    } catch (error) {
       if (error instanceof HistoryCursorError) { sendJson(response, 400, { error: { code: "history_cursor_invalid", message: "Invalid conversation history cursor." } }); return; }
       throw error;
     }
@@ -2283,9 +2291,11 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
     const attached = (Array.isArray(body.attachments) ? body.attachments : []).flatMap((item: { asset_id?: unknown; type?: unknown }) => typeof item?.asset_id === "string" && (item.type === "image" || item.type === "file") ? [{ type: item.type as "image" | "file", assetId: item.asset_id }] : []);
     if ((!content && !attached.length) || content.length > 20_000) { sendJson(response, 400, { error: { code: "invalid_message", message: "Message must contain 1–20000 characters." } }); return; }
     // The page's own key is the message's id, as it is for the API: a retried send is one message.
-    try { await assistant.hear(account.id, { id: messageKey(request.headers["idempotency-key"]) ?? randomUUID(), source: "web", parts: [...(content ? [{ type: "text" as const, text: content }] : []), ...attached] }); }
+    let sent: Awaited<ReturnType<typeof assistant.hear>>;
+    try { sent = await assistant.hear(account.id, { id: messageKey(request.headers["idempotency-key"]) ?? randomUUID(), source: "web", parts: [...(content ? [{ type: "text" as const, text: content }] : []), ...attached] }); }
     catch (error) { if (!(error instanceof ChatError)) throw error; sendJson(response, error.status, { error: { code: error.code, message: error.message } }); return; }
-    sendJson(response, 202, { accepted: true });
+    // The receipt: which Run took the message, and whether it started it or joined it (queued until the Run takes it up).
+    sendJson(response, 202, { accepted: true, message_id: sent.messageId, run_id: sent.runId, outcome: sent.outcome, accepted_at: sent.acceptedAt });
     return;
   }
   if (url.pathname === "/v1/creator/assistant/files" && request.method === "POST") {
@@ -2321,9 +2331,7 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
     response.once("close", () => stop.abort());
     const heartbeat = setInterval(() => { if (!response.writableEnded) response.write(": heartbeat\n\n"); }, 15_000);
     await follow(context.conversationPorts.eventLog, feed, from, ({ cursor, event }) => {
-      // The page reloads when a Run ends; it hears that as `assistant`, and every event names its Run.
-      const shown = event.type === "run_end" ? { ...event, type: "assistant" } : event;
-      if (!response.writableEnded) response.write(`id: ${cursor}\ndata: ${JSON.stringify(shown)}\n\n`);
+      if (!response.writableEnded) response.write(`id: ${cursor}\ndata: ${JSON.stringify(event)}\n\n`);
     }, { signal: stop.signal });
     clearInterval(heartbeat);
     return;

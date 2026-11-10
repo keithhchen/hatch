@@ -361,7 +361,7 @@ export class ConversationController {
     }
     const attempt = ++this.attempts;
     this.setState({ connection: "connecting" });
-    const delay = Math.round(400 * (2 ** (attempt - 1)) * (0.75 + Math.random() * 0.5));
+    const delay = Math.round(Math.min(30_000, 400 * (2 ** (attempt - 1))) * (0.75 + Math.random() * 0.5));
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (link.live && this.state.conversationId === conversationId) this.reconnect();
