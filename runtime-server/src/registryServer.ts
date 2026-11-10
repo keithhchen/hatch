@@ -27,6 +27,8 @@ import { IMessageChannel } from "./channels/imessageChannel.js";
 import { CREDENTIAL_FORMS, isTenantForm, readCredentials } from "./channels/credentialForms.js";
 import { LineChannel } from "./channels/lineChannel.js";
 import { guarded } from "./channels/eligibility.js";
+import { STUDIO_TARGET } from "./channels/connections.js";
+import type { AgentTarget } from "./surfaces/contract.js";
 import { InstagramChannel } from "./channels/instagramChannel.js";
 import { MessengerChannel } from "./channels/messengerChannel.js";
 import { SlackChannel } from "./channels/slackChannel.js";
@@ -304,7 +306,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     const chatUrl = environment.HATCH_RUNTIME_CHAT_URL?.trim();
     const chatToken = environment.HATCH_RUNTIME_CHAT_SERVICE_TOKEN?.trim();
     const gateway = chatUrl && chatToken ? new HttpChatGateway({ baseUrl: chatUrl, serviceToken: chatToken }) : undefined;
-    const channels = new ChannelService({ ...stores, hub, scopeOf, ...(gateway ? { gateway } : {}) });
+    const channels = new ChannelService({ ...stores, hub, scopeOf, ownsProduct: async (accountId, productId) => Boolean(await productForCreator(registryContext, accountId, productId)), ...(gateway ? { gateway } : {}) });
     const assistant = new AssistantService({
       tasks, reach, channels,
       products: factoryAgents,
@@ -2117,8 +2119,11 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
   }
   const account = await authenticate(request, response, context);
   if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
-  const channelsView = async () => (await channels.view(account.id)).map(status => ({
+  /** Where the account's chats are bound: to the Assistant (Studio), or to one Product when the request names it. */
+  const bindingTarget = (productId: string | null | undefined): AgentTarget => productId ? { kind: "product", productId } : STUDIO_TARGET;
+  const channelsView = async (target: AgentTarget = STUDIO_TARGET) => (await channels.view(account.id, target)).map(status => ({
     kind: status.kind, available: status.available, linked: status.linked,
+    ...(status.senderId ? { sender_id: status.senderId } : {}),
     ...(status.state ? { state: status.state } : {}),
     ...(CREDENTIAL_FORMS[status.kind] && !isTenantForm(CREDENTIAL_FORMS[status.kind]!) && context.credentialSeal ? { own_app: true, webhook_url: `${context.publicOrigin}/v1/channels/${status.kind}/${account.id}/webhook` } : {}),
     ...(status.lastEventAt ? { last_event_at: status.lastEventAt } : {}),
@@ -2189,11 +2194,25 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
     sendJson(response, 200, { channels: await channelsView() });
     return;
   }
+  // Every account binds its chats: the Assistant for Studio, or a Product's Chat when `product_id` names one.
+  if (url.pathname === "/v1/creator/connections" && request.method === "GET") {
+    sendJson(response, 200, { channels: await channelsView(bindingTarget(url.searchParams.get("product_id"))) }, { "cache-control": "no-store" });
+    return;
+  }
   const connection = url.pathname.match(/^\/v1\/creator\/connections\/([a-z]+)(\/connect)?$/);
   if (connection && isChannelKind(connection[1]!)) {
     const kind = connection[1];
-    if (connection[2] && request.method === "POST") { sendJson(response, 200, await channels.connect(account.id, kind)); return; }
-    if (!connection[2] && request.method === "DELETE") { await channels.disconnect(account.id, kind); sendJson(response, 200, { channels: await channelsView() }); return; }
+    if (connection[2] && request.method === "POST") {
+      const target = bindingTarget((await readJson(request)).product_id as string | undefined);
+      sendJson(response, 200, await channels.connect(account.id, kind, target));
+      return;
+    }
+    if (!connection[2] && request.method === "DELETE") {
+      const target = bindingTarget(url.searchParams.get("product_id"));
+      await channels.disconnect(account.id, kind, target);
+      sendJson(response, 200, { channels: await channelsView(target) });
+      return;
+    }
   }
   sendJson(response, 404, { error: { code: "not_found", message: "Route not found." } });
 }

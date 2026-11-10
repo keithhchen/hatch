@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
-import { PostgresConnections, type ConnectionRepository, type OwnedConnection } from "./connections.js";
+import type { AgentTarget } from "../surfaces/contract.js";
+import { PostgresConnections, STUDIO_TARGET, targetKey, type ConnectionRepository, type OwnedConnection } from "./connections.js";
 import { Dispatcher, type Send } from "./dispatch.js";
 import type { ChannelHub } from "./hub.js";
 import { PostgresInbox, type Inbox, type InboxItem } from "./inbox.js";
@@ -24,7 +25,7 @@ export async function openChannelStores(pool: Pool, scopeOf: (ownerAccountId: st
   return { connections, inbox: await PostgresInbox.open(pool), outbox: await PostgresOutbox.open(pool), limiter: await PostgresRateLimiter.open(pool) };
 }
 
-export type ChannelStatus = { kind: ChannelKind; available: boolean; linked: boolean; state?: OwnedConnection["state"]; lastEventAt?: string };
+export type ChannelStatus = { kind: ChannelKind; available: boolean; linked: boolean; state?: OwnedConnection["state"]; lastEventAt?: string; senderId?: string };
 
 /**
  * The channel layer: inbound events are stored, then routed to the Agent behind their Connection; replies are queued
@@ -41,7 +42,7 @@ export class ChannelService implements AssistantChannels {
   private inboxLoop?: ReturnType<typeof pollLoop>;
   private outboxLoop?: ReturnType<typeof pollLoop>;
 
-  constructor(private deps: ChannelStores & { hub: ChannelHub; scopeOf: (ownerAccountId: string, channel: ChannelKind) => string; gateway?: ChatGateway; now?: () => Date; rates?: ConstructorParameters<typeof Dispatcher>[0]["rates"]; onError?: (error: unknown) => void }) {
+  constructor(private deps: ChannelStores & { hub: ChannelHub; scopeOf: (ownerAccountId: string, channel: ChannelKind) => string; gateway?: ChatGateway; /** Whether the account owns the Product: only its owner binds a chat to it. */ ownsProduct?: (accountId: string, productId: string) => Promise<boolean>; now?: () => Date; rates?: ConstructorParameters<typeof Dispatcher>[0]["rates"]; onError?: (error: unknown) => void }) {
     this.connections = deps.connections;
     this.hub = deps.hub;
     this.inbox = deps.inbox;
@@ -108,24 +109,25 @@ export class ChannelService implements AssistantChannels {
 
   // ── Studio ─────────────────────────────────────────────────────────────
 
-  /** A connect code for Studio to show: the Expert sends it to us from the platform. */
-  async connect(accountId: string, kind: ChannelKind): Promise<{ code: string; url?: string }> {
+  /** A connect code for Studio to show, for the Assistant or one of the account's Products: the account sends it to us from the platform. */
+  async connect(accountId: string, kind: ChannelKind, target: AgentTarget = STUDIO_TARGET): Promise<{ code: string; url?: string }> {
     const adapter = await this.deps.hub.get(kind, this.deps.scopeOf(accountId, kind));
     if (!adapter) throw Object.assign(new Error(`${kind} is not available.`), { status: 503, code: "channel_unavailable" });
-    const code = await this.connections.issueCode(accountId, kind, this.deps.now?.());
+    if (target.kind === "product" && !await this.deps.ownsProduct?.(accountId, target.productId)) throw Object.assign(new Error("Product was not found."), { status: 404, code: "product_not_found" });
+    const code = await this.connections.issueCode(accountId, kind, target, this.deps.now?.());
     const url = adapter.connectUrl(code) ?? adapter.chatUrl?.();
     return { code, ...(url ? { url } : {}) };
   }
 
-  disconnect(accountId: string, kind: ChannelKind): Promise<void> { return this.connections.revoke(accountId, kind); }
+  disconnect(accountId: string, kind: ChannelKind, target: AgentTarget = STUDIO_TARGET): Promise<void> { return this.connections.revoke(accountId, kind, target); }
 
-  async view(accountId: string): Promise<ChannelStatus[]> {
+  async view(accountId: string, target: AgentTarget = STUDIO_TARGET): Promise<ChannelStatus[]> {
     const owned = await this.connections.owned(accountId);
     return Promise.all(CHANNEL_KINDS.map(async kind => {
-      const own = owned.find(connection => connection.channel === kind && connection.audience === "self");
+      const own = owned.find(connection => connection.channel === kind && connection.audience === "self" && targetKey(connection.target) === targetKey(target));
       return {
         kind, available: Boolean(await this.deps.hub.get(kind, this.deps.scopeOf(accountId, kind))), linked: Boolean(own?.linked && own.state !== "revoked"),
-        ...(own ? { state: own.state } : {}), ...(own?.lastEventAt ? { lastEventAt: own.lastEventAt } : {}),
+        ...(own ? { state: own.state } : {}), ...(own?.lastEventAt ? { lastEventAt: own.lastEventAt } : {}), ...(own?.linked && own.senderId ? { senderId: own.senderId } : {}),
       };
     }));
   }

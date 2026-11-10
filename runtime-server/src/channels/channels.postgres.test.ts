@@ -162,9 +162,34 @@ test("A one-time code links a sender to an account; the sender can move, and rev
 test("An expired code does not link", options, async () => isolated(async pool => {
   const { connections } = await stack(pool);
   const owner = randomUUID();
-  const code = await connections.issueCode(owner, "telegram", at(0));
+  const code = await connections.issueCode(owner, "telegram", undefined, at(0));
   assert.equal(await connections.redeem("telegram", "", code, address("1"), at(16 * 60_000)), undefined);
   assert.ok(await connections.redeem("telegram", "", code, address("1"), at(14 * 60_000)));
+}));
+
+test("An account binds its Assistant and each Product separately: each chat reaches its own, as the account, and unbinding one leaves the rest", options, async () => isolated(async pool => {
+  const { connections } = await stack(pool);
+  const owner = randomUUID(); const stranger = randomUUID();
+  const product = (productId: string) => ({ kind: "product" as const, productId });
+  assert.ok(await connections.redeem("telegram", "", await connections.issueCode(owner, "telegram"), address("1")));
+  assert.ok(await connections.redeem("telegram", "", await connections.issueCode(owner, "telegram", product("pa")), address("2")));
+  assert.ok(await connections.redeem("telegram", "", await connections.issueCode(owner, "telegram", product("pb")), address("3")));
+  assert.ok(await connections.redeem("telegram", "", await connections.issueCode(stranger, "telegram", product("pa")), address("4")));
+  const reach = async (sender: string) => (await connections.resolveConnection({ channel: "telegram", scope: "", senderId: sender }))?.connection;
+  assert.deepEqual([(await reach("1"))?.target, (await reach("2"))?.target, (await reach("3"))?.target], [{ kind: "assistant" }, product("pa"), product("pb")]);
+  assert.equal((await reach("4"))?.ownerAccountId, stranger, "another account's binding to a Product of the same id is its own");
+  assert.equal((await reach("2"))?.audience, "self");
+  assert.deepEqual((await connections.linked(owner)).map(entry => entry.identity?.senderId), ["1"], "the Assistant reaches the account only where the Assistant is bound");
+  assert.deepEqual((await connections.owned(owner)).map(entry => [entry.target.kind, entry.senderId]).sort(), [["assistant", "1"], ["product", "2"], ["product", "3"]]);
+
+  await connections.revoke(owner, "telegram", product("pa"));
+  assert.equal(await reach("2"), undefined);
+  assert.ok(await reach("1") && await reach("3") && await reach("4"));
+  // A chat holds one binding: binding it again moves it.
+  assert.ok(await connections.redeem("telegram", "", await connections.issueCode(owner, "telegram", product("pb")), address("1")));
+  assert.deepEqual((await reach("1"))?.target, product("pb"));
+  assert.equal(await reach("3"), undefined, "a Product's binding has one chat: the new one replaces the old");
+  assert.equal((await connections.linked(owner)).length, 0);
 }));
 
 test("The database refuses a Connection that would give anyone but its owner the Assistant", options, async () => isolated(async pool => {

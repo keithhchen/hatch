@@ -373,3 +373,12 @@
   .sx-apikeys__row { grid-template-columns: minmax(0, 1fr) auto; }
   .sx-apikeys__head, .sx-apikeys__row > span:nth-child(n+2):nth-child(-n+4) { display: none; }
 }
+
+/* Channel bindings: tiles only, no prose. */
+.cb { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cb-tile { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--web-rule); border-radius: 12px; background: transparent; color: inherit; font: inherit; text-decoration: none; cursor: pointer; }
+.cb-tile svg { width: 16px; height: 16px; }
+.cb-tile.is-bound { cursor: default; border-color: currentColor; }
+.cb-tile.is-waiting { border-style: dashed; }
+.cb-who { font-size: 13px; opacity: 0.7; }
+.cb-unbind { display: inline-flex; padding: 2px; border: 0; background: transparent; color: inherit; cursor: pointer; border-radius: 6px; }

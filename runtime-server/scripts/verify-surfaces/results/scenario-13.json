@@ -1,0 +1,281 @@
+{
+  "id": 13,
+  "title": "Telegram binding self-served from the dashboard page: Assistant (Studio) and per-Product Chat, with the 2x2 for one account",
+  "status": "PASS",
+  "durationMs": 61042,
+  "checks": [
+    {
+      "name": "Assistant: before binding the page shows an unbound Telegram tile",
+      "ok": true
+    },
+    {
+      "name": "Assistant: the tile carries a name and no description",
+      "ok": true,
+      "detail": "Telegram"
+    },
+    {
+      "name": "Assistant: one click gives the bot's t.me deep link carrying a one-time code",
+      "ok": true,
+      "detail": "https://t.me/hatch_verify_bot?start=HATCH-9UPFGKQU"
+    },
+    {
+      "name": "Assistant: the page shows the bound state by itself, naming who is bound",
+      "ok": true,
+      "detail": "7101"
+    },
+    {
+      "name": "Assistant: the bot confirmed in Telegram",
+      "ok": true
+    },
+    {
+      "name": "the Assistant binding is the account's self Connection to the Assistant",
+      "ok": true,
+      "detail": [
+        {
+          "audience": "self",
+          "target_key": "assistant",
+          "sender_id": "7101"
+        }
+      ]
+    },
+    {
+      "name": "Studio via Telegram: the Assistant answered the bound chat",
+      "ok": true,
+      "detail": [
+        "Hello! Good to see you. What would you like to work on today?"
+      ]
+    },
+    {
+      "name": "Product ALPHA: before binding the page shows an unbound Telegram tile",
+      "ok": true
+    },
+    {
+      "name": "Product ALPHA: the tile carries a name and no description",
+      "ok": true,
+      "detail": "Telegram"
+    },
+    {
+      "name": "Product ALPHA: one click gives the bot's t.me deep link carrying a one-time code",
+      "ok": true,
+      "detail": "https://t.me/hatch_verify_bot?start=HATCH-WRB9THR7"
+    },
+    {
+      "name": "Product ALPHA: the page shows the bound state by itself, naming who is bound",
+      "ok": true,
+      "detail": "7102"
+    },
+    {
+      "name": "Product ALPHA: the bot confirmed in Telegram",
+      "ok": true
+    },
+    {
+      "name": "Product BRAVO: before binding the page shows an unbound Telegram tile",
+      "ok": true
+    },
+    {
+      "name": "Product BRAVO: the tile carries a name and no description",
+      "ok": true,
+      "detail": "Telegram"
+    },
+    {
+      "name": "Product BRAVO: one click gives the bot's t.me deep link carrying a one-time code",
+      "ok": true,
+      "detail": "https://t.me/hatch_verify_bot?start=HATCH-QNV53YP7"
+    },
+    {
+      "name": "Product BRAVO: the page shows the bound state by itself, naming who is bound",
+      "ok": true,
+      "detail": "7103"
+    },
+    {
+      "name": "Product BRAVO: the bot confirmed in Telegram",
+      "ok": true
+    },
+    {
+      "name": "Chat via Telegram: the chat bound to ALPHA is answered by ALPHA",
+      "ok": true,
+      "detail": "ALPHA"
+    },
+    {
+      "name": "Chat via Telegram: the chat bound to BRAVO is answered by BRAVO",
+      "ok": true,
+      "detail": "BRAVO"
+    },
+    {
+      "name": "each message started one Run, as the account (not a contact), on the right Product",
+      "ok": true,
+      "detail": {
+        "alphaRuns": [
+          {
+            "id": "run_24195c07bc564f83b85e837ab86da897",
+            "status": "completed",
+            "owner_account_id": "26421247-74af-46bd-abf5-24ded63d10e7",
+            "product_id": "10a0cea1-8056-4c73-b47d-8345a96396c5"
+          }
+        ],
+        "bravoRuns": [
+          {
+            "id": "run_1f19bff96cd14a0bb7865864e1c69c80",
+            "status": "completed",
+            "owner_account_id": "26421247-74af-46bd-abf5-24ded63d10e7",
+            "product_id": "ea2db6f8-c769-4cba-92b1-9f5acdd51f3e"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ALPHA's page shows its own binding, and the Assistant's and BRAVO's bindings do not leak onto it",
+      "ok": true
+    },
+    {
+      "name": "Chat via coding agent (hatch CLI): the same Product answers",
+      "ok": true,
+      "detail": {
+        "code": 0,
+        "reply": "ALPHA"
+      }
+    },
+    {
+      "name": "Studio via coding agent (hatch CLI): the Assistant answers",
+      "ok": true,
+      "detail": {
+        "code": 0,
+        "stderr": ""
+      }
+    },
+    {
+      "name": "another account cannot bind a chat to a Product it does not own (404)",
+      "ok": true,
+      "detail": {
+        "status": 404,
+        "body": "{\"error\":{\"code\":\"product_not_found\",\"message\":\"Product was not found.\"},\"detail\":\"Product was not found.\"}"
+      }
+    },
+    {
+      "name": "another account sees ALPHA as unbound",
+      "ok": true,
+      "detail": {
+        "channels": [
+          {
+            "kind": "telegram",
+            "available": true,
+            "linked": false
+          },
+          {
+            "kind": "line",
+            "available": false,
+            "linked": false
+          },
+          {
+            "kind": "lark",
+            "available": false,
+            "linked": false,
+            "own_app": true,
+            "webhook_url": "http://studio.verify.local/v1/channels/lark/0ab06126-8d15-411e-9215-4c70162dd0d8/webhook"
+          },
+          {
+            "kind": "feishu",
+            "available": false,
+            "linked": false,
+            "own_app": true,
+            "webhook_url": "http://studio.verify.local/v1/channels/feishu/0ab06126-8d15-411e-9215-4c70162dd0d8/webhook"
+          },
+          {
+            "kind": "wecom",
+            "available": false,
+            "linked": false,
+            "own_app": true,
+            "webhook_url": "http://studio.verify.local/v1/channels/wecom/0ab06126-8d15-411e-9215-4c70162dd0d8/webhook"
+          },
+          {
+            "kind": "wechatkf",
+            "available": false,
+            "linked": false,
+            "own_app": true,
+            "webhook_url": "http://studio.verify.local/v1/channels/wechatkf/0ab06126-8d15-411e-9215-4c70162dd0d8/webhook"
+          },
+          {
+            "kind": "imessage",
+            "available": false,
+            "linked": false
+          },
+          {
+            "kind": "slack",
+            "available": false,
+            "linked": false
+          },
+          {
+            "kind": "whatsapp",
+            "available": false,
+            "linked": false
+          },
+          {
+            "kind": "instagram",
+            "available": false,
+            "linked": false
+          },
+          {
+            "kind": "messenger",
+            "available": false,
+            "linked": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "the second account's own binding reaches its own Product, as itself",
+      "ok": true,
+      "detail": "CHARLIE"
+    },
+    {
+      "name": "the owner cannot see or use the other account's binding",
+      "ok": true
+    },
+    {
+      "name": "an unbound Telegram user is told to connect from Studio and starts no Run",
+      "ok": true,
+      "detail": [
+        "请先从 Hatch Studio 连接 Telegram。"
+      ]
+    },
+    {
+      "name": "unbinding from the page returns the tile to unbound",
+      "ok": true
+    },
+    {
+      "name": "after unbinding, the chat is told to connect and no Run starts",
+      "ok": true,
+      "detail": [
+        "请先从 Hatch Studio 连接 Telegram。"
+      ]
+    },
+    {
+      "name": "unbinding ALPHA left BRAVO bound and answering",
+      "ok": true,
+      "detail": [
+        "BRAVO"
+      ]
+    },
+    {
+      "name": "after unbinding the Assistant, its chat is told to connect",
+      "ok": true,
+      "detail": [
+        "请先从 Hatch Studio 连接 Telegram。"
+      ]
+    },
+    {
+      "name": "only BRAVO remains bound for the account",
+      "ok": true,
+      "detail": 1
+    }
+  ],
+  "measurements": {
+    "assistant_tasks_after_hello": 0
+  },
+  "evidence": {},
+  "notes": [
+    "Real: the dashboard server and built page driven by headless Chromium (sign-in form, tile clicks), the Registry, Runtime, Chat and Assistant. Simulated: only the messaging platform (Telegram webhooks in, bot sends read from the fake platform). The second account binds through the same HTTP endpoints the page calls, not through a second browser. Products are created through the real create route and given a live release by test setup (the factory is not exercised).",
+    "Assistant link code HATCH-9UPFGKQU was one-time."
+  ],
+  "defects": []
+}
