@@ -381,4 +381,9 @@
 .cb-tile.is-bound { cursor: default; border-color: currentColor; }
 .cb-tile.is-waiting { border-style: dashed; }
 .cb-who { font-size: 13px; opacity: 0.7; }
+.cb-bot, .cb-people { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cb-people { flex-basis: 100%; }
+.cb-person { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.cb-form { display: inline-flex; align-items: center; gap: 8px; }
+.cb-unbind svg { width: 14px; height: 14px; }
 .cb-unbind { display: inline-flex; padding: 2px; border: 0; background: transparent; color: inherit; cursor: pointer; border-radius: 6px; }

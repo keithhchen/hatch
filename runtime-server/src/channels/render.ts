@@ -34,11 +34,13 @@ function segments(text: string, maxLength: number, maxBytes: number): string[] {
 export function render(message: OutboundMessage, capabilities: Pick<ChannelCapabilities, "buttons" | "maxLength" | "maxBytes">): OutboundMessage[] {
   const labels = [...new Set(message.buttons?.map(button => `「${button.label}」`))];
   const typed = Boolean(message.buttons?.length) && !capabilities.buttons;
-  const text = typed ? `${message.text}\n\n回复${labels.join("或")}` : message.text;
+  const linked = message.link && !capabilities.buttons ? `${message.text}\n\n${message.link.url}` : message.text;
+  const text = typed ? `${linked}\n\n回复${labels.join("或")}` : linked;
   const parts = segments(text, capabilities.maxLength, capabilities.maxBytes ?? Infinity);
   return parts.map((part, index) => ({
     text: part,
     ...(index === 0 && message.replyTo ? { replyTo: message.replyTo } : {}),
     ...(index === parts.length - 1 && !typed && message.buttons?.length ? { buttons: message.buttons } : {}),
+    ...(index === parts.length - 1 && message.link && capabilities.buttons ? { link: message.link } : {}),
   }));
 }

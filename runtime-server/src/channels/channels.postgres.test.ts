@@ -4,6 +4,9 @@ import { test } from "node:test";
 import { Pool } from "pg";
 import type { ChannelCapabilities, ClientAttributes, ContentPart, Principal } from "../surfaces/contract.js";
 import { ChannelHub } from "./hub.js";
+import type { Claim, SignIn } from "./router.js";
+import { OwnApps } from "./ownApps.js";
+import { CREDENTIAL_FORMS } from "./credentialForms.js";
 import { ChannelService, openChannelStores } from "./service.js";
 import { ChannelSendError, type ChannelAdapter, type ChannelKind, type InboundEvent, type InboundFile, type OutboundMessage, type PlatformAddress } from "./types.js";
 import type { ChatGateway, Handled, Inbound, TargetHandler } from "./ports.js";
@@ -66,8 +69,9 @@ class RecordingTarget implements TargetHandler {
   handled: Inbound[] = [];
   failures = 0;
   result: Handled = { replied: false };
+  roles: string[] = [];
   async handle(inbound: Inbound) { if (this.failures-- > 0) throw new Error("target down"); this.handled.push(inbound); return this.result; }
-  async linked() { return "linked"; }
+  async linked(_connection: unknown, role: string) { this.roles.push(role); return "linked"; }
 }
 
 /** Stands in for Chat in another process: it answers from state of its own, the way the durable Runtime does, and never calls back. */
@@ -100,12 +104,12 @@ const address = (sender: string, thread = sender): PlatformAddress => ({ senderI
 let counter = 0;
 const message = (sender: string, text: string, extra: Partial<InboundEvent> = {}): InboundEvent => ({ eventId: `e${++counter}`, address: address(sender), text, messageRef: `m${counter}`, ...extra });
 
-async function stack(pool: Pool, config: { adapters?: FakeAdapter[]; gateway?: ChatGateway; rates?: ConstructorParameters<typeof ChannelService>[0]["rates"] } = {}) {
+async function stack(pool: Pool, config: { adapters?: FakeAdapter[]; gateway?: ChatGateway; rates?: ConstructorParameters<typeof ChannelService>[0]["rates"]; signIn?: SignIn; claim?: Claim; own?: ConstructorParameters<typeof ChannelHub>[1] } = {}) {
   const adapters = config.adapters ?? [new FakeAdapter()];
   const stores = await openChannelStores(pool, scopeOf);
   const clock = { at: at(0) };
   const errors: unknown[] = [];
-  const service = new ChannelService({ ...stores, hub: new ChannelHub(adapters), scopeOf, now: () => clock.at, onError: error => errors.push(error), rates: config.rates ?? { chat: { capacity: 100, perSecond: 100 }, connection: { capacity: 100, perSecond: 100 } }, ...(config.gateway ? { gateway: config.gateway } : {}) });
+  const service = new ChannelService({ ...stores, hub: new ChannelHub(adapters, config.own), scopeOf, now: () => clock.at, ...(config.signIn ? { signIn: config.signIn } : {}), ...(config.claim ? { claim: config.claim } : {}), onError: error => errors.push(error), rates: config.rates ?? { chat: { capacity: 100, perSecond: 100 }, connection: { capacity: 100, perSecond: 100 } }, ...(config.gateway ? { gateway: config.gateway } : {}) });
   const target = new RecordingTarget();
   service.register("assistant", target);
   /** With the loops running, they may hold an event or a delivery while drain finds nothing: wait until nothing is open. */
@@ -544,28 +548,6 @@ test("Groups: permission follows the sender, not the thread", options, async () 
   assert.equal(env.target.handled.length, 1);
 }));
 
-test("A public Connection on the shared bot meets a sender by its start code, and their later messages follow", options, async () => isolated(async pool => {
-  const env = await stack(pool);
-  const product = new RecordingTarget();
-  env.service.register("product", product);
-  const owner = randomUUID();
-  await pool.query("INSERT INTO hatch_connections (owner_account_id, channel, target, target_key, audience) VALUES ($1, 'telegram', $2, 'product:p1', 'public')", [owner, JSON.stringify({ kind: "product", productId: "p1" })]);
-  const [{ startCode }] = await env.connections.owned(owner);
-  assert.match(startCode!, /^[0-9a-f]{32}$/);
-  await env.service.accept(env.adapter, [message("walker", "hello")]);
-  await env.service.drain();
-  assert.match(env.adapter.texts.at(-1)!, /请先从 Hatch Studio 连接/, "without the code nobody is met");
-  await env.service.accept(env.adapter, [message("walker", startCode!)]);
-  await env.service.accept(env.adapter, [message("walker", "hi there")]);
-  await env.service.drain();
-  assert.equal(env.adapter.texts.at(-1), "linked");
-  assert.deepEqual(product.handled.map(inbound => [inbound.event.text, inbound.principal.kind]), [["hi there", "contact"]]);
-  await env.service.accept(env.adapter, [message("walker", "x".repeat(32))]);
-  await env.service.accept(env.adapter, [message("walker2", "0".repeat(32))]);
-  await env.service.drain();
-  assert.equal(product.handled.length, 2, "an unknown code meets no one");
-}));
-
 test("An expired lease is reclaimed, and extending it keeps a live claimant's event", options, async () => isolated(async pool => {
   await PostgresConnections.open(pool, scopeOf);
   const inbox = await PostgresInbox.open(pool);
@@ -767,7 +749,7 @@ test("A Registry restart loses neither a reply nor a compaction notice: both are
 
 test("Telegram: a mention in a group reaches the Assistant of the sender who linked, and the reply goes to the group", options, async () => isolated(async pool => {
   const sent: Array<Record<string, any>> = [];
-  const telegram = new TelegramChannel({ token: "t", username: "hatch_bot", webhookSecret: "s" }, (async (_url: string, init?: RequestInit) => {
+  const telegram = new TelegramChannel({ token: "t", username: "hatch_bot", webhookSecret: "s" }, "", (async (_url: string, init?: RequestInit) => {
     sent.push(JSON.parse(String(init?.body)));
     return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), { status: 200 });
   }) as typeof fetch);
@@ -824,4 +806,188 @@ test("An unreachable event is stored and completed, never routed and never answe
   assert.equal(env.adapter.sent.length, 0);
   assert.equal((await pool.query("SELECT 1 FROM hatch_channel_inbox WHERE state = 'done' AND event->>'unreachable' = 'true'")).rowCount, 1);
   assert.ok(owner);
+}));
+
+// ── Telegram: our shared bot signs people in and admits guests; each Product has a bot of its own ──
+
+test("A stranger on the shared bot is offered a sign-in link; a group gets silence; nothing is reached", options, async () => isolated(async pool => {
+  const asked: Array<[string, string | undefined]> = [];
+  const env = await stack(pool, { signIn: async (_kind, sender, invite) => { asked.push([sender, invite]); return `https://site.test/start?claim=${sender}`; } });
+  await env.service.accept(env.adapter, [message("stranger", "hello")]);
+  await env.service.accept(env.adapter, [message("stranger", "hello", { address: address("stranger", "group-1"), group: true })]);
+  await env.service.drain();
+  assert.deepEqual(env.adapter.sent.map(entry => entry.message.link?.url), ["https://site.test/start?claim=stranger"]);
+  assert.deepEqual(asked, [["stranger", undefined]]);
+  assert.equal(env.target.handled.length, 0);
+}));
+
+test("A sender asking too often gets the plain refusal instead of another link", options, async () => isolated(async pool => {
+  const env = await stack(pool, { signIn: async () => undefined });
+  await env.service.accept(env.adapter, [message("stranger", "hello")]);
+  await env.service.drain();
+  assert.match(env.adapter.texts[0]!, /请先从 Hatch Studio 连接/);
+}));
+
+test("An invite admits a guest only through a sign-in; the owner sees the guest and can revoke them", options, async () => isolated(async pool => {
+  const env = await stack(pool, { signIn: async (_kind, sender, invite) => `https://site.test/start?claim=${sender}:${invite ?? ""}` });
+  const owner = await link(env, "expert");
+  const { code, url } = await env.service.invite(owner, "telegram", "Ann [助理]");
+  assert.match(url!, /platform\.test/);
+  // The code alone admits no one: the sender is sent to sign in, carrying the invite.
+  await env.service.accept(env.adapter, [message("ann", code)]);
+  await env.service.drain();
+  assert.equal(env.adapter.sent.at(-1)!.message.link?.url, `https://site.test/start?claim=ann:${code}`);
+  assert.equal((await env.service.view(owner))[0]!.people.length, 0);
+  // The sign-in names the sender; only then is the invite spent.
+  await env.service.admit("telegram", address("ann"), { invite: code });
+  await env.service.drain();
+  assert.deepEqual(env.target.roles, ["owner", "guest"]);
+  assert.deepEqual((await env.service.view(owner)).find(status => status.kind === "telegram")!.people.map(person => person.label), ["Ann  助理"]);
+  await assert.rejects(env.service.admit("telegram", address("bob"), { invite: code }), /expired or was already used/);
+  await env.service.accept(env.adapter, [message("ann", "hi"), message("expert", "me")]);
+  await env.service.drain();
+  const [guest, expert] = env.target.handled.slice(-2);
+  assert.deepEqual([guest!.speaker.role, guest!.speaker.label, guest!.principal.kind], ["guest", "Ann  助理", "contact"]);
+  assert.deepEqual([expert!.speaker.role, expert!.principal.kind], ["owner", "account"]);
+  // The Assistant reaches the owner, never the guest.
+  assert.deepEqual((await env.connections.linked(owner)).map(entry => entry.identity!.senderId), ["expert"]);
+  const [person] = (await env.service.view(owner)).find(status => status.kind === "telegram")!.people;
+  assert.equal(await env.service.dismiss(randomUUID(), "telegram", person!.id), false, "only the owner revokes");
+  assert.equal(await env.service.dismiss(owner, "telegram", person!.id), true);
+  const handled = env.target.handled.length;
+  await env.service.accept(env.adapter, [message("ann", "hello again")]);
+  await env.service.drain();
+  assert.equal(env.target.handled.length, handled, "a revoked guest reaches nothing");
+}));
+
+test("An owner cannot be a guest, and the invite stays for someone else", options, async () => isolated(async pool => {
+  const env = await stack(pool);
+  const owner = await link(env, "expert");
+  const { code } = await env.service.invite(owner, "telegram", "x");
+  await assert.rejects(env.service.admit("telegram", address("expert"), { invite: code }), /expired or was already used/);
+  await env.service.admit("telegram", address("guest"), { invite: code });
+  assert.equal((await env.connections.guests(owner)).length, 1);
+}));
+
+test("A Telegram id that belongs to another account cannot link by code", options, async () => isolated(async pool => {
+  const env = await stack(pool, { claim: async () => false });
+  const owner = randomUUID();
+  const { code } = await env.service.connect(owner, "telegram");
+  await env.service.accept(env.adapter, [message("taken", code)]);
+  await env.service.drain();
+  assert.match(env.adapter.texts.at(-1)!, /已经连着另一个 Hatch 账号/);
+  assert.equal((await env.connections.linked(owner)).length, 0);
+}));
+
+type BotCall = { method: string; token: string; body: any };
+/** A Telegram that knows these tokens; every call is recorded. */
+function telegramApi(tokens: Record<string, string>) {
+  const calls: BotCall[] = [];
+  const fetchImpl = (async (url: string, init?: RequestInit) => {
+    const [, token, method] = String(url).match(/\/bot([^/]+)\/(\w+)$/)!;
+    calls.push({ method: method!, token: token!, body: init?.body ? JSON.parse(String(init.body)) : {} });
+    const username = tokens[token!];
+    if (!username) return new Response(JSON.stringify({ ok: false, description: "Unauthorized" }), { status: 401 });
+    return new Response(JSON.stringify({ ok: true, result: method === "getMe" ? { username } : true }), { status: 200 });
+  }) as typeof fetch;
+  return { calls, fetchImpl };
+}
+
+async function productBots(pool: Pool, tokens: Record<string, string>) {
+  const api = telegramApi(tokens);
+  const gateway = new FakeGateway();
+  const seal = { seal: (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64"), open: <T,>(sealed: string) => JSON.parse(Buffer.from(sealed, "base64").toString()) as T };
+  const telegramForm = { ...CREDENTIAL_FORMS.telegram!, build: (credentials: any, scope: string) => new TelegramChannel(credentials, scope, api.fetchImpl) } as typeof CREDENTIAL_FORMS.telegram;
+  const stores = await openChannelStores(pool, scopeOf);
+  const own = async (kind: ChannelKind, scope: string) => {
+    const sealed = kind === "telegram" ? await stores.connections.credentialsOf(kind, scope) : undefined;
+    return sealed ? new TelegramChannel(seal.open(sealed), scope, api.fetchImpl) : undefined;
+  };
+  const env = await stack(pool, { adapters: [], gateway, own });
+  env.service.register("product", new ProductTarget({ gateway, limiter: env.limiter }));
+  const apps = new OwnApps({ connections: stores.connections, seal, forms: { telegram: telegramForm }, origin: "https://site.test", ownsProduct: async (_account, product) => product !== "foreign" });
+  const adapterOf = async (scope: string) => (await env.service.hub.get("telegram", scope))!;
+  return { ...env, api, apps, gateway, adapterOf, stores, seal };
+}
+const botOf = async (env: Awaited<ReturnType<typeof productBots>>, owner: string, productId: string) =>
+  (await env.stores.connections.owned(owner)).find(connection => connection.channel === "telegram" && connection.target.kind === "product" && connection.target.productId === productId && connection.hasCredentials);
+
+test("Saving a bot token proves it, points the webhook at that bot, and the Product answers anyone who writes to it", options, async () => isolated(async pool => {
+  const env = await productBots(pool, { "111:aaa": "shop_bot" });
+  const owner = randomUUID();
+  await env.apps.save(owner, "telegram", "p1", { token: " 111:aaa " });
+  assert.deepEqual(env.api.calls.map(call => call.method), ["getMe", "setWebhook"]);
+  const bot = (await botOf(env, owner, "p1"))!;
+  assert.equal(bot.audience, "public");
+  const hook = env.api.calls[1]!.body;
+  assert.equal(hook.url, `https://site.test/v1/channels/telegram/${bot.scope}/webhook`);
+  assert.match(hook.secret_token, /^[0-9a-f]{48}$/);
+  const adapter = await env.adapterOf(bot.scope);
+  assert.equal(adapter.handle, "shop_bot");
+  assert.equal(adapter.verify!(Buffer.alloc(0), { "x-telegram-bot-api-secret-token": hook.secret_token }), true);
+  assert.equal(adapter.verify!(Buffer.alloc(0), { "x-telegram-bot-api-secret-token": "nope" }), false);
+  // No sign-up: a stranger's first message is a conversation with the Product.
+  await env.service.accept(adapter, [message("walker", "How much?")]);
+  await env.settle();
+  assert.deepEqual(env.gateway.submitted.map(sent => [sent.principal.kind, (sent.conversation as any).connectionId]), [["contact", bot.id]]);
+  assert.equal(env.errors.length, 0);
+}));
+
+test("Each Product's bot is its own tenant: the same person is a different contact on each", options, async () => isolated(async pool => {
+  const env = await productBots(pool, { "111:aaa": "shop_bot", "222:bbb": "faq_bot" });
+  const owner = randomUUID();
+  await env.apps.save(owner, "telegram", "p1", { token: "111:aaa" });
+  await env.apps.save(owner, "telegram", "p2", { token: "222:bbb" });
+  const [first, second] = [(await botOf(env, owner, "p1"))!, (await botOf(env, owner, "p2"))!];
+  assert.notEqual(first.scope, second.scope);
+  await env.service.accept(await env.adapterOf(first.scope), [message("walker", "one")]);
+  await env.service.accept(await env.adapterOf(second.scope), [message("walker", "two")]);
+  await env.settle();
+  const [a, b] = env.gateway.submitted;
+  assert.notDeepEqual(a!.principal, b!.principal);
+  assert.deepEqual([a, b].map(sent => (sent!.conversation as any).connectionId), [first.id, second.id]);
+}));
+
+test("A bad token is refused and nothing is saved; a product that is not theirs is refused", options, async () => isolated(async pool => {
+  const env = await productBots(pool, { "111:aaa": "shop_bot" });
+  const owner = randomUUID();
+  await assert.rejects(env.apps.save(owner, "telegram", "p1", { token: "999:bad" }), (error: any) => error.status === 422 && error.code === "telegram_probe_failed" && /Unauthorized/.test(error.message));
+  assert.equal(await botOf(env, owner, "p1"), undefined);
+  assert.deepEqual(env.api.calls.map(call => call.method), ["getMe"], "no webhook for a token that failed");
+  await assert.rejects(env.apps.save(owner, "telegram", "foreign", { token: "111:aaa" }), (error: any) => error.status === 404);
+  await assert.rejects(env.apps.save(owner, "telegram", "p1", {}), (error: any) => error.status === 400);
+}));
+
+test("Replacing the token lets the old bot go; saving the same token again does not", options, async () => isolated(async pool => {
+  const env = await productBots(pool, { "111:aaa": "shop_bot", "222:bbb": "new_bot" });
+  const owner = randomUUID();
+  await env.apps.save(owner, "telegram", "p1", { token: "111:aaa" });
+  const old = (await botOf(env, owner, "p1"))!;
+  await env.service.accept(await env.adapterOf(old.scope), [message("walker", "hi")]);
+  await env.settle();
+  env.api.calls.length = 0;
+  await env.apps.save(owner, "telegram", "p1", { token: "111:aaa" });
+  assert.deepEqual(env.api.calls.map(call => call.method), ["getMe", "setWebhook"], "the same bot is not let go");
+  env.api.calls.length = 0;
+  await env.apps.save(owner, "telegram", "p1", { token: "222:bbb" });
+  assert.deepEqual(env.api.calls.map(call => [call.method, call.token]), [["getMe", "222:bbb"], ["setWebhook", "222:bbb"], ["deleteWebhook", "111:aaa"]]);
+  const current = (await botOf(env, owner, "p1"))!;
+  assert.equal(await env.stores.connections.credentialsOf("telegram", old.scope), undefined, "the old bot's credentials are gone");
+  assert.equal((await env.adapterOf(current.scope)).handle, "new_bot");
+  assert.equal((await pool.query("SELECT count(*)::int AS n FROM hatch_connections WHERE owner_account_id = $1 AND channel = 'telegram'", [owner])).rows[0].n, 1, "a Product has one bot");
+  assert.equal((await pool.query("SELECT count(*)::int AS n FROM hatch_channel_identities WHERE connection_id = $1", [current.id])).rows[0].n, 0, "nobody carries over to the new bot");
+}));
+
+test("Removing a bot ends its webhook, its credentials and its conversations", options, async () => isolated(async pool => {
+  const env = await productBots(pool, { "111:aaa": "shop_bot" });
+  const owner = randomUUID();
+  await env.apps.save(owner, "telegram", "p1", { token: "111:aaa" });
+  const bot = (await botOf(env, owner, "p1"))!;
+  env.api.calls.length = 0;
+  await env.apps.remove(owner, "telegram", "p1");
+  assert.deepEqual(env.api.calls.map(call => [call.method, call.token]), [["deleteWebhook", "111:aaa"]]);
+  assert.equal(await botOf(env, owner, "p1"), undefined);
+  assert.equal(await env.service.hub.get("telegram", bot.scope), undefined);
+  await env.apps.save(owner, "telegram", "p1", { token: "111:aaa" });
+  assert.equal((await botOf(env, owner, "p1"))!.state, "active", "a bot can be added again");
 }));

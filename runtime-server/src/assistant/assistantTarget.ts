@@ -9,11 +9,16 @@ import type { AssistantService } from "./assistant.js";
 
 const DONE: Handled = { replied: true };
 
-/** The Assistant behind a self Connection: the Expert, in a linked chat, talking to their own Assistant. */
+/** What the Assistant is told a guest's message is: said by someone the Expert authorized, never by the Expert. */
+const asGuest = (label: string | undefined, text: string): string => `[${(label ?? "").replace(/[\[\]\r\n]/g, " ").trim().slice(0, 40) || "被授权的人"}，专家授权的人，不是专家本人] ${text}`;
+
+/** The Assistant behind a self Connection: the Expert, in a linked chat, talking to their own Assistant; and the people they invited. */
 export class AssistantTarget implements TargetHandler {
   constructor(private assistant: Pick<AssistantService, "hear" | "upload" | "approve" | "decline" | "linked" | "reviewButtons">) {}
 
-  linked(connection: { ownerAccountId: string }): Promise<string> { return this.assistant.linked(connection.ownerAccountId); }
+  async linked(connection: { ownerAccountId: string }, role: "owner" | "guest"): Promise<string> {
+    return role === "guest" ? "连上了。专家授权你和助理说话，直接说就行。" : this.assistant.linked(connection.ownerAccountId);
+  }
 
   /** A Run that said nothing sends nothing, and a reply that leaves a task waiting for the Expert's decision carries its buttons. */
   replyPolicy = async (_connection: ChannelConnection, runId: string): Promise<ReplyPolicy> => {
@@ -22,14 +27,17 @@ export class AssistantTarget implements TargetHandler {
   };
 
   async handle(inbound: Inbound): Promise<Handled> {
-    const { connection, principal, event, adapter, id } = inbound;
+    const { connection, principal, event, adapter, id, speaker } = inbound;
     const accountId = connection.ownerAccountId;
-    // The router only admits the owner here. Studio actions never depend on that alone.
-    if (principal.kind !== "account" || principal.accountId !== accountId) throw new Error("Only the owner reaches the Assistant");
+    const guest = speaker.role === "guest";
+    // The router admits the owner, and guests the owner invited. Studio actions never depend on that alone.
+    if (guest ? principal.kind !== "contact" || principal.connectionId !== connection.id : principal.kind !== "account" || principal.accountId !== accountId) throw new Error("Only the owner and their guests reach the Assistant");
     const kind = connection.channel as ChannelKind;
-    const origin = { id, source: kind, ...(event.messageRef ? { messageRef: event.messageRef } : {}) };
+    // A guest is not the Expert: their words are marked, and they never move where the Assistant looks for the Expert.
+    const origin = { id, source: kind, ...(event.messageRef ? { messageRef: event.messageRef } : {}), ...(guest ? { guest: true as const } : {}) };
 
     if (event.button) {
+      if (guest) { await adapter.acknowledge?.(event, "只有专家本人可以确认"); return DONE; }
       const { taskId, action } = event.button;
       try {
         if (!taskId) { await adapter.acknowledge?.(event); return DONE; }
@@ -42,7 +50,8 @@ export class AssistantTarget implements TargetHandler {
     }
 
     const parts: ContentPart[] = [];
-    if (event.text?.trim()) parts.push({ type: "text", text: event.text.trim() });
+    if (event.text?.trim()) parts.push({ type: "text", text: guest ? asGuest(speaker.label, event.text.trim()) : event.text.trim() });
+    else if (guest && event.file) parts.push({ type: "text", text: asGuest(speaker.label, "（发来一个文件）") });
     try {
       if (event.file) {
         const { name, size } = event.file;

@@ -1,7 +1,8 @@
 import { createHash, createHmac, randomBytes, randomUUID, scrypt, timingSafeEqual } from "node:crypto";
 import { Pool } from "pg";
 
-export type Account = { id: string; email: string; display_name: string; avatar_url: string | null; password_salt: string; password_hash: string; created_at: string };
+/** An account made by an identity provider alone (Telegram) has no email and no password. */
+export type Account = { id: string; email: string | null; display_name: string; avatar_url: string | null; password_salt: string | null; password_hash: string | null; created_at: string };
 export type AccountPublic = Pick<Account, "id" | "email" | "display_name" | "avatar_url">;
 export type CreatorAccountPublic = Pick<Account, "id" | "display_name">;
 export type ClientType = "desktop" | "cli" | "api_key";
@@ -112,6 +113,7 @@ export function passwordWorkOptionsFromEnvironment(
 export class AccountStoreTs {
   private readonly accounts = new Map<string, Account>();
   private readonly sessions = new Map<string, AccountSession>();
+  private readonly identities = new Map<string, string>();
   private readonly accountCreations = new Map<string, Promise<Account>>();
 
   constructor(
@@ -124,13 +126,25 @@ export class AccountStoreTs {
     await this.pool.query(`CREATE TABLE IF NOT EXISTS accounts (
       id UUID PRIMARY KEY,
       role TEXT,
-      email TEXT NOT NULL UNIQUE,
+      email TEXT UNIQUE,
       display_name TEXT NOT NULL,
       avatar_url TEXT,
-      password_salt TEXT NOT NULL,
-      password_hash TEXT NOT NULL,
+      password_salt TEXT,
+      password_hash TEXT,
       created_at TIMESTAMPTZ NOT NULL
     );
+    ALTER TABLE accounts ALTER COLUMN email DROP NOT NULL;
+    ALTER TABLE accounts ALTER COLUMN password_salt DROP NOT NULL;
+    ALTER TABLE accounts ALTER COLUMN password_hash DROP NOT NULL;
+    -- One identity at a provider (a Telegram user id) belongs to at most one account.
+    CREATE TABLE IF NOT EXISTS account_identities (
+      provider TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (provider, subject)
+    );
+    CREATE INDEX IF NOT EXISTS account_identities_account_idx ON account_identities(account_id);
     ALTER TABLE accounts ADD COLUMN IF NOT EXISTS avatar_url TEXT;
     -- role is historical only: never written or read by any decision.
     ALTER TABLE accounts ALTER COLUMN role DROP NOT NULL;
@@ -227,6 +241,46 @@ export class AccountStoreTs {
     return account;
   }
 
+  /** The account an identity at a provider signs in to; one is made, with no email and no password, when the identity is new. */
+  async signInWithIdentity(provider: string, subject: string, displayName: string): Promise<{ account: Account; created: boolean }> {
+    const known = await this.accountOfIdentity(provider, subject);
+    if (known) return { account: known, created: false };
+    const account: Account = { id: randomUUID(), email: null, display_name: normalizeDisplayName(displayName.slice(0, MAX_DISPLAY_NAME_LENGTH)), avatar_url: null, password_salt: null, password_hash: null, created_at: new Date().toISOString() };
+    if (!this.pool) {
+      const raced = this.identities.get(`${provider}:${subject}`);
+      if (raced) return { account: this.accounts.get(raced)!, created: false };
+      this.accounts.set(account.id, account); this.identities.set(`${provider}:${subject}`, account.id);
+      return { account, created: true };
+    }
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("INSERT INTO accounts (id, display_name, created_at) VALUES ($1,$2,$3)", [account.id, account.display_name, account.created_at]);
+      const bound = await client.query("INSERT INTO account_identities (provider, subject, account_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING", [provider, subject, account.id]);
+      // A concurrent first sign-in won: ours is dropped and theirs is the account.
+      await client.query(bound.rowCount ? "COMMIT" : "ROLLBACK");
+      if (bound.rowCount) return { account, created: true };
+    } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; } finally { client.release(); }
+    return { account: (await this.accountOfIdentity(provider, subject))!, created: false };
+  }
+
+  /** An account that already exists claims an identity. False when that identity belongs to another account. */
+  async linkIdentity(accountId: string, provider: string, subject: string): Promise<boolean> {
+    if (!this.pool) {
+      const owner = this.identities.get(`${provider}:${subject}`);
+      if (!owner) this.identities.set(`${provider}:${subject}`, accountId);
+      return !owner || owner === accountId;
+    }
+    await this.pool.query("INSERT INTO account_identities (provider, subject, account_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING", [provider, subject, accountId]);
+    return (await this.pool.query("SELECT account_id FROM account_identities WHERE provider=$1 AND subject=$2", [provider, subject])).rows[0]?.account_id === accountId;
+  }
+
+  private async accountOfIdentity(provider: string, subject: string): Promise<Account | undefined> {
+    if (!this.pool) { const id = this.identities.get(`${provider}:${subject}`); return id ? this.accounts.get(id) : undefined; }
+    const id = (await this.pool.query("SELECT account_id FROM account_identities WHERE provider=$1 AND subject=$2", [provider, subject])).rows[0]?.account_id;
+    return id ? this.getById(id) : undefined;
+  }
+
   async createSession(account: Account, now = Date.now(), options: SessionOptions = {}): Promise<{ token: string; session: AccountSession }> {
     const token = randomBytes(32).toString("base64url");
     const createdAt = new Date(now).toISOString();
@@ -309,11 +363,11 @@ export class AccountStoreTs {
     const refreshed = rowToSession(row);
     const account: Account = {
       id: String(row.account_id_value),
-      email: String(row.email),
+      email: row.email == null ? null : String(row.email),
       display_name: String(row.display_name),
       avatar_url: row.avatar_url == null ? null : String(row.avatar_url),
-      password_salt: String(row.password_salt),
-      password_hash: String(row.password_hash),
+      password_salt: row.password_salt == null ? null : String(row.password_salt),
+      password_hash: row.password_hash == null ? null : String(row.password_hash),
       created_at: new Date(row.account_created_at).toISOString()
     };
     return { account, session: refreshed };
@@ -415,11 +469,13 @@ export async function verifyPassword(
   account: Account | undefined,
   passwordHasher: PasswordHasher = DEFAULT_PASSWORD_HASHER
 ): Promise<boolean> {
-  const salt = account ? Buffer.from(account.password_salt, "base64url") : DUMMY_PASSWORD_SALT;
+  // An account with no password (an identity provider made it) is never signed in this way, and costs the same work.
+  const usable = account?.password_salt && account.password_hash ? account : undefined;
+  const salt = usable ? Buffer.from(usable.password_salt!, "base64url") : DUMMY_PASSWORD_SALT;
   const candidate = Buffer.from(await passwordHasher.derive(password, salt));
-  const expected = Buffer.from(account?.password_hash ?? DUMMY_PASSWORD_HASH);
+  const expected = Buffer.from(usable?.password_hash ?? DUMMY_PASSWORD_HASH);
   const matches = candidate.length === expected.length && timingSafeEqual(candidate, expected);
-  return Boolean(account) && matches;
+  return Boolean(usable) && matches;
 }
 
 export function createAuthToken(account: Account, secret: string, now = Date.now()): string {
@@ -498,11 +554,11 @@ function sign(value: string, secret: string): string { return createHmac("sha256
 function rowToAccount(row: Record<string, any>): Account {
   return {
     id: String(row.id),
-    email: String(row.email),
+    email: row.email == null ? null : String(row.email),
     display_name: String(row.display_name),
     avatar_url: row.avatar_url == null ? null : String(row.avatar_url),
-    password_salt: String(row.password_salt),
-    password_hash: String(row.password_hash),
+    password_salt: row.password_salt == null ? null : String(row.password_salt),
+    password_hash: row.password_hash == null ? null : String(row.password_hash),
     created_at: new Date(row.created_at).toISOString(),
   };
 }

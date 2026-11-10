@@ -14,13 +14,16 @@ type TelegramUpdate = {
   callback_query?: { id: string; from: { id: number }; data?: string; message?: { message_id: number; chat: { id: number; type?: string } } };
 };
 
-/** Telegram Bot API. One official bot; each Expert links their private chat. */
+/**
+ * Telegram Bot API. Two roles, one adapter: our official bot (scope ""), where each Expert links their private chat,
+ * and an Expert's own bot for one Product (scope: the id of that bot), where anyone may write.
+ */
 export class TelegramChannel implements ChannelAdapter {
   readonly kind = "telegram" as const;
-  readonly scope = "";
   /** The Bot API lets a bot download files up to 20 MB. */
   readonly maxFileBytes = 20 * 1024 * 1024;
-  constructor(private config: { token?: string; username?: string; webhookSecret?: string; }, private fetchImpl: typeof fetch = fetch) {}
+  constructor(private config: { token?: string; username?: string; webhookSecret?: string; }, readonly scope = "", private fetchImpl: typeof fetch = fetch) {}
+  get handle(): string | undefined { return this.config.username; }
   capabilities(): ChannelCapabilities { return { stream: false, edit: true, typing: true, buttons: true, maxLength: 4096, canInitiate: true, idempotentSend: false }; }
   available(): boolean { return Boolean(this.config.token && this.config.username && this.config.webhookSecret); }
   connectUrl(code: string): string { return `https://t.me/${this.config.username}?start=${code}`; }
@@ -80,9 +83,21 @@ export class TelegramChannel implements ChannelAdapter {
       text: message.text,
       link_preview_options: { is_disabled: true },
       ...(message.replyTo ? { reply_parameters: { message_id: Number(message.replyTo), allow_sending_without_reply: true } } : {}),
-      ...(message.buttons?.length ? { reply_markup: { inline_keyboard: [message.buttons.map(button => ({ text: button.label, callback_data: `t:${button.taskId}:${button.action}` }))] } } : {}),
+      ...(message.buttons?.length ? { reply_markup: { inline_keyboard: [message.buttons.map(button => ({ text: button.label, callback_data: `t:${button.taskId}:${button.action}` }))] } }
+        : message.link ? { reply_markup: { inline_keyboard: [[{ text: message.link.label, url: message.link.url }]] } } : {}),
     });
   }
+  /** getMe: proves the token and says what people call the bot. */
+  async probe(): Promise<string> {
+    const me = await this.call("getMe", {}) as { username?: string };
+    if (!me.username) throw new Error("Telegram did not say which bot this is");
+    return me.username;
+  }
+  /** Telegram posts every update to `url` with `secret` in a header, and nowhere else. */
+  async setWebhook(url: string, secret: string): Promise<void> {
+    await this.call("setWebhook", { url, secret_token: secret, allowed_updates: ["message", "callback_query"] });
+  }
+  async deleteWebhook(): Promise<void> { await this.call("deleteWebhook", {}); }
   async download(file: InboundFile): Promise<Buffer> {
     const found = await this.call("getFile", { file_id: file.ref }) as { file_path?: string };
     if (!found.file_path) throw new Error("Telegram did not return a file path");

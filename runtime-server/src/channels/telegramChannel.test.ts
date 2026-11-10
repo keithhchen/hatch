@@ -15,7 +15,7 @@ function channel(respond: () => Response = () => Response.json({ ok: true, resul
     calls.push({ url, body: init.body ? JSON.parse(init.body as string) : undefined });
     return respond();
   }) as typeof fetch;
-  return { calls, telegram: new TelegramChannel({ token: "tok", username: "HatchBot", webhookSecret: "s3cret", ...config }, fake) };
+  return { calls, telegram: new TelegramChannel({ token: "tok", username: "HatchBot", webhookSecret: "s3cret", ...config }, "", fake) };
 }
 const parse = (update: unknown) => channel().telegram.parse(Buffer.from(JSON.stringify(update))).events;
 const privateMessage = (extra: object) => ({ update_id: 1, message: { message_id: 10, chat: { id: 42, type: "private" }, from: { id: 42 }, ...extra } });
@@ -152,7 +152,7 @@ test("download resolves the file path and fetches the bytes", async () => {
     urls.push(url);
     return url.endsWith("/getFile") ? Response.json({ ok: true, result: { file_path: "photos/a.jpg" } }) : new Response(Buffer.from("bytes"));
   }) as unknown as typeof fetch;
-  const telegram = new TelegramChannel({ token: "tok", username: "HatchBot", webhookSecret: "s" }, fake);
+  const telegram = new TelegramChannel({ token: "tok", username: "HatchBot", webhookSecret: "s" }, "", fake);
   assert.deepEqual(await telegram.download({ ref: "f1", name: "a.jpg" }), Buffer.from("bytes"));
   assert.deepEqual(urls, ["https://api.telegram.org/bottok/getFile", "https://api.telegram.org/file/bottok/photos/a.jpg"]);
 });

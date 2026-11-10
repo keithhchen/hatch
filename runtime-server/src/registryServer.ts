@@ -42,7 +42,7 @@ import { HttpChatGateway } from "./channels/runtimeChat.js";
 import { safeError } from "./factoryAgents/runtime.js";
 import { CredentialSeal } from "./assistant/channelCredentials.js";
 import { IMessageChannel } from "./channels/imessageChannel.js";
-import { CREDENTIAL_FORMS, isTenantForm, readCredentials } from "./channels/credentialForms.js";
+import { CREDENTIAL_FORMS, isPerProduct, isTenantForm, readCredentials } from "./channels/credentialForms.js";
 import { LineChannel } from "./channels/lineChannel.js";
 import { guarded } from "./channels/eligibility.js";
 import { STUDIO_TARGET } from "./channels/connections.js";
@@ -53,6 +53,9 @@ import { SlackChannel } from "./channels/slackChannel.js";
 import { sealedTokens } from "./channels/tenantTokens.js";
 import { WhatsAppChannel, whatsappEligibility } from "./channels/whatsappChannel.js";
 import { TelegramChannel } from "./channels/telegramChannel.js";
+import { OwnApps } from "./channels/ownApps.js";
+import { LoginError, OidcClient } from "./auth/oidc.js";
+import { PostgresLoginStore, TelegramLogin, telegramOidc } from "./auth/telegramLogin.js";
 import { PostgresTaskRepository } from "./assistant/tasks.js";
 import type { AgentCatalog, AgentChange, CatalogAgent } from "./assistant/catalog.js";
 import "dotenv/config";
@@ -131,6 +134,9 @@ type RegistryContext = {
   ingest?: IngestService;
   channels?: ChannelService;
   credentialSeal?: CredentialSeal;
+  ownApps?: OwnApps;
+  /** Telegram as a way to sign in; absent when the login client is not configured. */
+  telegramLogin?: TelegramLogin;
   publicOrigin?: string;
   studioUrl?: string;
   reach?: AccountReach;
@@ -274,14 +280,18 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     const tasks = await PostgresTaskRepository.open(registryPool);
     // Lark has no shared bot, so its tenant is the Expert's account; every other platform is one shared tenant.
     // Where each Expert brings their own app, the adapter is built from their sealed credentials and the scope is their account id.
-    const scopeOf = (accountId: string, kind: ChannelKind) => { const form = CREDENTIAL_FORMS[kind]; return form && !isTenantForm(form) ? accountId : ""; };
+    const scopeOf = (accountId: string, kind: ChannelKind) => { const form = CREDENTIAL_FORMS[kind]; return form && !isTenantForm(form) && !isPerProduct(form) ? accountId : ""; };
     const stores = await openChannelStores(registryPool, scopeOf);
     const studioUrl = environment.HATCH_STUDIO_ASSISTANT_URL?.trim() || "https://gethatchapp.com/studio/assistant";
+    // Our one bot answers the Assistant, and signs people in. Telegram sends people back to the site its users know: the alias domain.
+    const telegramOrigin = environment.HATCH_TELEGRAM_PUBLIC_ORIGIN?.trim() || (environment.HATCH_DOMAIN_ALIAS?.trim() ? `https://${environment.HATCH_DOMAIN_ALIAS.trim()}` : new URL(studioUrl).origin);
     const telegram = new TelegramChannel({
       token: environment.HATCH_TELEGRAM_BOT_TOKEN?.trim() || undefined,
       username: environment.HATCH_TELEGRAM_BOT_USERNAME?.trim() || undefined,
       webhookSecret: environment.HATCH_TELEGRAM_WEBHOOK_SECRET?.trim() || undefined,
     });
+    // The bot posts here, and only here: set at every start, so a changed origin or secret needs no other step.
+    if (telegram.available()) void telegram.setWebhook(`${telegramOrigin}/v1/channels/telegram/webhook`, environment.HATCH_TELEGRAM_WEBHOOK_SECRET!.trim()).catch(error => console.error("[telegram webhook]", safeError(error)));
     const line = new LineChannel({
       channelSecret: environment.HATCH_LINE_CHANNEL_SECRET?.trim() || undefined,
       accessToken: environment.HATCH_LINE_CHANNEL_ACCESS_TOKEN?.trim() || undefined,
@@ -310,17 +320,26 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     // Platform rules sit in front of every Agent. WhatsApp serves only Connections an operator marked task-specific.
     const eligibility = { whatsapp: whatsappEligibility };
     const apps = new Map<string, { sealed: string; adapter: ChannelAdapter }>();
-    const hub = new ChannelHub([telegram, line, imessage, slack, whatsapp, instagram, messenger], async (kind, accountId) => {
+    // An Expert's own app: found by the account for one app per account, by the id of the bot for one bot per Product.
+    const hub = new ChannelHub([telegram, line, imessage, slack, whatsapp, instagram, messenger], async (kind, scope) => {
       const form = CREDENTIAL_FORMS[kind];
       if (!form || isTenantForm(form) || !seal) return undefined;
-      const sealed = await stores.connections.credentials(accountId, kind);
+      const sealed = form.perProduct ? await stores.connections.credentialsOf(kind, scope) : await stores.connections.credentials(scope, kind);
       if (!sealed) return undefined;
-      const cached = apps.get(`${kind}:${accountId}`);
+      const cached = apps.get(`${kind}:${scope}`);
       if (cached?.sealed === sealed) return cached.adapter;
-      const adapter = form.build(seal.open(sealed), accountId);
-      apps.set(`${kind}:${accountId}`, { sealed, adapter });
+      const adapter = form.build(seal.open(sealed), scope);
+      apps.set(`${kind}:${scope}`, { sealed, adapter });
       return adapter;
     });
+    // Telegram signs people in with OpenID Connect; a chat that started it is bound to the Assistant once the sign-in names the same sender.
+    const loginClientId = env("HATCH_TELEGRAM_LOGIN_CLIENT_ID"); const loginClientSecret = env("HATCH_TELEGRAM_LOGIN_CLIENT_SECRET");
+    let channels!: ChannelService;
+    const telegramLogin = loginClientId && loginClientSecret ? new TelegramLogin({
+      oidc: new OidcClient(telegramOidc({ clientId: loginClientId, clientSecret: loginClientSecret }, env("HATCH_TELEGRAM_LOGIN_BASE"))),
+      store: await PostgresLoginStore.open(registryPool), accounts, limiter: stores.limiter, origin: telegramOrigin,
+      admit: (account, telegramId, claim) => channels.admit("telegram", { senderId: telegramId, threadId: telegramId }, claim.invite ? { invite: claim.invite } : { account: account.id }),
+    }) : undefined;
     const catalog = registryAgentCatalog(registryContext);
     // Chat runs in the Runtime process: the channel layer reaches it with its own service token, and never otherwise.
     const chatUrl = environment.HATCH_RUNTIME_CHAT_URL?.trim();
@@ -328,7 +347,14 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     const gateway = chatUrl && chatToken ? new HttpChatGateway({ baseUrl: chatUrl, serviceToken: chatToken }) : undefined;
     // A Product's Runs are held by the Runtime; the Assistant's are held here. A reply is sent once for either.
     const routed = new RoutedChatGateway(gateway);
-    const channels = new ChannelService({ ...stores, hub, scopeOf, ownsProduct: async (accountId, productId) => Boolean(await productForCreator(registryContext, accountId, productId)), gateway: routed });
+    const ownsProduct = async (accountId: string, productId: string) => Boolean(await productForCreator(registryContext, accountId, productId));
+    channels = new ChannelService({
+      ...stores, hub, scopeOf, ownsProduct, gateway: routed,
+      audienceOf: (kind, target) => target.kind === "product" && isPerProduct(CREDENTIAL_FORMS[kind]) ? "public" : "self",
+      signIn: async (kind, senderId, invite) => kind === "telegram" ? telegramLogin?.claimLink(senderId, invite) : undefined,
+      // A Telegram id belongs to one Hatch account: linking from an account that is not its own is refused.
+      claim: async (kind, scope, accountId, senderId) => kind !== "telegram" || scope !== "" || await accounts.linkIdentity(accountId, "telegram", senderId),
+    });
     const assistantState = await PostgresAssistantState.open(registryPool);
     const assistant = new AssistantService({
       tasks, reach, channels,
@@ -372,7 +398,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     // Without a Chat gateway Product Connections have no handler, and their events wait in the inbox.
     if (gateway) channels.register("product", guarded(new GuardedTarget(new ProductTarget({ gateway, limiter: stores.limiter }), [liveOwnProduct(releaseStore)]), eligibility));
     channels.start();
-    Object.assign(registryContext, { assistant, assistantChat, ingest, channels, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin, studioUrl });
+    Object.assign(registryContext, { assistant, assistantChat, ingest, channels, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin, studioUrl, telegramLogin, ...(seal ? { ownApps: new OwnApps({ connections: stores.connections, seal, forms: CREDENTIAL_FORMS, origin: telegramOrigin, ownsProduct }) } : {}) });
     // A platform that pushes over its own connection runs here, in one process at a time. A dropped connection comes back; credentials added or removed are picked up.
     channelListeners = new ChannelListeners({
       hub, connections: stores.connections, exclusive: postgresExclusive(registryPool),
@@ -716,6 +742,23 @@ async function route(
     return;
   }
 
+  // Telegram signs people in (OpenID Connect, authorization code with PKCE). The site starts it and finishes it; the browser never sees a token here.
+  if (url.pathname === "/v1/auth/telegram" && request.method === "GET") {
+    sendAuthJson(response, 200, { enabled: Boolean(context.telegramLogin) });
+    return;
+  }
+  if (url.pathname === "/v1/auth/telegram/start" && request.method === "POST") {
+    const body = await readJson(request);
+    const { authorizeUrl, state } = await telegramLoginOf(context).start({ claim: typeof body.claim === "string" ? body.claim : undefined, returnTo: typeof body.return_to === "string" ? body.return_to : undefined });
+    sendAuthJson(response, 200, { authorize_url: authorizeUrl, state });
+    return;
+  }
+  if (url.pathname === "/v1/auth/telegram/callback" && request.method === "POST") {
+    const body = await readJson(request);
+    const { account, created, returnTo } = await telegramLoginOf(context).finish({ code: String(body.code ?? ""), state: String(body.state ?? "") });
+    sendAuthJson(response, created ? 201 : 200, { ...sessionResponse(account, await context.accounts.createSession(account)), created, return_to: returnTo });
+    return;
+  }
   if (url.pathname === "/v1/auth/signup" && request.method === "POST") {
     const body = await readJson(request);
     const email = String(body.email ?? "");
@@ -1961,6 +2004,11 @@ async function optionalJson(request: http.IncomingMessage): Promise<Record<strin
   return bytes.length ? readJsonBytes(bytes) : {};
 }
 
+function telegramLoginOf(context: RegistryContext): TelegramLogin {
+  if (!context.telegramLogin) throw new LoginError("login_unavailable", "Telegram sign-in is not available.", 503);
+  return context.telegramLogin;
+}
+
 function sendAuthBusy(response: http.ServerResponse): void {
   sendAuthJson(response, 503, { detail: "Authentication is temporarily busy. Try again shortly." }, {
     "retry-after": "1"
@@ -2165,13 +2213,19 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
   if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
   /** Where the account's chats are bound: to the Assistant (Studio), or to one Product when the request names it. */
   const bindingTarget = (productId: string | null | undefined): AgentTarget => productId ? { kind: "product", productId } : STUDIO_TARGET;
-  const channelsView = async (target: AgentTarget = STUDIO_TARGET) => (await channels.view(account.id, target)).map(status => ({
-    kind: status.kind, available: status.available, linked: status.linked,
-    ...(status.senderId ? { sender_id: status.senderId } : {}),
-    ...(status.state ? { state: status.state } : {}),
-    ...(CREDENTIAL_FORMS[status.kind] && !isTenantForm(CREDENTIAL_FORMS[status.kind]!) && context.credentialSeal ? { own_app: true, webhook_url: `${context.publicOrigin}/v1/channels/${status.kind}/${account.id}/webhook` } : {}),
-    ...(status.lastEventAt ? { last_event_at: status.lastEventAt } : {}),
-  }));
+  /** A platform where a Product has a bot of its own: its Product page holds a bot, not a link to ours. */
+  const botKind = (kind: ChannelKind, target: AgentTarget) => target.kind === "product" && isPerProduct(CREDENTIAL_FORMS[kind]);
+  const channelsView = async (target: AgentTarget = STUDIO_TARGET) => (await channels.view(account.id, target)).map(status => botKind(status.kind, target)
+    ? { kind: status.kind, bot: true, available: Boolean(context.ownApps), configured: status.configured, ...(status.handle ? { handle: status.handle } : {}), ...(status.state ? { state: status.state } : {}) }
+    : {
+      kind: status.kind, available: status.available, linked: status.linked,
+      ...(status.senderId ? { sender_id: status.senderId } : {}),
+      ...(status.state ? { state: status.state } : {}),
+      ...(status.handle ? { handle: status.handle } : {}),
+      ...(status.people.length ? { people: status.people } : {}),
+      ...(CREDENTIAL_FORMS[status.kind] && !isTenantForm(CREDENTIAL_FORMS[status.kind]!) && !isPerProduct(CREDENTIAL_FORMS[status.kind]) && context.credentialSeal ? { own_app: true, webhook_url: `${context.publicOrigin}/v1/channels/${status.kind}/${account.id}/webhook` } : {}),
+      ...(status.lastEventAt ? { last_event_at: status.lastEventAt } : {}),
+    });
   if (url.pathname === "/v1/creator/assistant" && request.method === "GET") {
     const timezone = url.searchParams.get("tz");
     if (timezone) await context.reach.setTimezone(account.id, timezone);
@@ -2234,6 +2288,14 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
   const credentialsRoute = url.pathname.match(/^\/v1\/creator\/connections\/([a-z]+)\/credentials$/);
   const kindOfForm = credentialsRoute && isChannelKind(credentialsRoute[1]!) ? credentialsRoute[1] : undefined;
   const form = kindOfForm && CREDENTIAL_FORMS[kindOfForm];
+  if (kindOfForm && request.method === "POST" && isPerProduct(form)) {
+    const body = await readJson(request);
+    const productId = String(body.product_id ?? "");
+    if (!context.ownApps || !productId) { sendJson(response, 503, { error: { code: "channel_unavailable", message: `${CHANNEL_LABELS[kindOfForm]} is not available.` } }); return; }
+    await context.ownApps.save(account.id, kindOfForm, productId, body);
+    sendJson(response, 200, { channels: await channelsView({ kind: "product", productId }) });
+    return;
+  }
   if (kindOfForm && form && request.method === "POST") {
     if (!context.credentialSeal) { sendJson(response, 503, { error: { code: "channel_unavailable", message: `${CHANNEL_LABELS[kindOfForm]} is not available.` } }); return; }
     const credentials = readCredentials(form, await readJson(request));
@@ -2251,6 +2313,19 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
     sendJson(response, 200, { channels: await channelsView(bindingTarget(url.searchParams.get("product_id"))) }, { "cache-control": "no-store" });
     return;
   }
+  // The owner of the Assistant invites one more person, and takes their access away again.
+  const people = url.pathname.match(/^\/v1\/creator\/connections\/([a-z]+)\/(invites|people\/([0-9a-f-]{36}))$/);
+  if (people && isChannelKind(people[1]!)) {
+    if (people[2] === "invites" && request.method === "POST") {
+      sendJson(response, 200, await channels.invite(account.id, people[1], String((await readJson(request)).label ?? "")));
+      return;
+    }
+    if (people[3] && request.method === "DELETE") {
+      await channels.dismiss(account.id, people[1], people[3]);
+      sendJson(response, 200, { channels: await channelsView() });
+      return;
+    }
+  }
   const connection = url.pathname.match(/^\/v1\/creator\/connections\/([a-z]+)(\/connect)?$/);
   if (connection && isChannelKind(connection[1]!)) {
     const kind = connection[1];
@@ -2261,7 +2336,8 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
     }
     if (!connection[2] && request.method === "DELETE") {
       const target = bindingTarget(url.searchParams.get("product_id"));
-      await channels.disconnect(account.id, kind, target);
+      if (target.kind === "product" && botKind(kind, target)) await context.ownApps?.remove(account.id, kind, target.productId);
+      else await channels.disconnect(account.id, kind, target);
       sendJson(response, 200, { channels: await channelsView(target) });
       return;
     }

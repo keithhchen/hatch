@@ -676,6 +676,8 @@ function AuthPage({ mode, search, request, navigate, session }) {
   const intent = useRemote(async (signal) => unwrap(await callRequest(request, intentEndpoint, { signal }), ["agent", "product"]), intentEndpoint || "no-intent", productIntent);
   const [form, setForm] = useState({ display_name: "", email: "", password: "" });
   const [submission, setSubmission] = useState({ status: "idle", error: null });
+  const telegram = useRemote(async (signal) => callRequest(request, "/v1/auth/telegram", { signal }), "telegram-login");
+  const telegramFailed = params.get("telegram") === "failed";
   const authBrandClassName = "buyer-v2__brand";
   const photo = signingUp ? "v_morning" : "v_window";
   usePageTitle(presentation.title);
@@ -725,6 +727,8 @@ function AuthPage({ mode, search, request, navigate, session }) {
           {submission.error ? <InlineError error={submission.error} /> : null}
           <Button type="submit" className="buyer-v2__button--wide web-btn-yolk" loading={submission.status === "pending"}>{presentation.action}</Button>
         </form>
+        {telegramFailed ? <InlineError error={new Error("Telegram login failed. Try again.")} /> : null}
+        {telegram.data?.enabled ? <Button asChild variant="secondary" className="buyer-v2__button--wide"><a href={`/v1/auth/telegram/start?returnTo=${encodeURIComponent(returnTo)}`}>{t("Log in with Telegram")}</a></Button> : null}
         <nav className="buyer-v2__auth-links" aria-label={presentation.switchAction}>
           <RouterLink className="buyer-v2__auth-switch" to={`${signingUp ? "/sign-in" : "/sign-up"}?returnTo=${encodeURIComponent(returnTo)}`} navigate={navigate}>{presentation.switchAction}</RouterLink>
           {!signingUp ? <RouterLink className="buyer-v2__auth-help" to="/account/help" navigate={navigate}>{t("Account help")}</RouterLink> : null}
