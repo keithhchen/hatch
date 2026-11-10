@@ -14,14 +14,13 @@ import { WorkbenchStore } from "./store.js";
 type Call = { tools: Array<{ name: string; description: string }>; last: string };
 
 /** Real store and runtime; only the model is scripted. `plan(call)` is the tool the model calls, if any. */
-async function harness(options: { plan?: (call: number) => string | undefined; toolSupport?: (name: string) => readonly ("web" | "cli")[] | "*"; delayMs?: number; fail?: (call: number) => boolean; crashAfterMs?: number } = {}) {
+async function harness(options: { plan?: (call: number) => string | undefined; toolSupport?: (name: string) => readonly ("web" | "cli")[] | "*"; delayMs?: number; fail?: (call: number) => boolean } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-send-"));
   const store = new WorkbenchStore(root, { creatorId: "c1", productId: "p1" }, new MemoryAgentDefinitionRepository(await initialAgentDefinitions()));
   const calls: Call[] = [];
   const runtime = new WorkbenchRuntime(store, {
     env: { HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash" },
     toolSupport: options.toolSupport as never,
-    liveState: options.crashAfterMs === undefined ? undefined : async () => { await new Promise(resolve => setTimeout(resolve, options.crashAfterMs)); throw new Error("live state crashed"); },
     agentFactory: factory => new Agent({ ...factory.agentOptions, initialState: { ...factory.initialState, model: createFactoryLlmModel({ env: factory.env }) }, streamFn: (_model, context, streamOptions) => {
       const call = calls.length + 1;
       const final = context.messages.at(-1);
@@ -152,8 +151,8 @@ test("send: every Run has its own id, shared by the messages that steer it", asy
 });
 
 test("send: a message steered into a run that then fails is still in history", async () => {
-  // The loop dies while the first message is being prepared: it never reads what was steered in meanwhile.
-  const h = await harness({ crashAfterMs: 60 });
+  // The loop dies while the first message is being answered: it never reads what was steered in meanwhile.
+  const h = await harness({ fail: () => true, delayMs: 60 });
   try {
     await h.runtime.send(h.session.id, h.say("one"));
     await new Promise(resolve => setTimeout(resolve, 20));

@@ -1,7 +1,25 @@
 import { FactoryAgentsService } from "./factoryAgents/service.js";
 import { PostgresAgentDefinitionRepository } from "./factoryAgents/definitions.js";
 import { PostgresWorkbenchBackend } from "./factoryAgents/store.js";
-import { AssistantService } from "./assistant/assistant.js";
+import { AssistantService, assistantPrompt } from "./assistant/assistant.js";
+import { AssistantChat } from "./assistant/chat.js";
+import { studioTools, studioToolDefinitions } from "./assistant/studioTools.js";
+import { LegacyAssistantHistory } from "./assistant/history.js";
+import { PostgresAssistantState } from "./assistant/state.js";
+import { PostgresDeliveries } from "./assistant/deliveries.js";
+import { ExpertMaterials } from "./assistant/materials.js";
+import { studioTranscripts } from "./assistant/studioFeed.js";
+import { PostgresStore } from "./postgresStore.js";
+import { PostgresConversationRepository } from "./conversationRepository.js";
+import { RuntimeAssetStore } from "./assetStore.js";
+import { openChatAssets } from "./chat/openChatAssets.js";
+import { attachmentToolDefinitions } from "./chat/attachmentTools.js";
+import { ChatError } from "./chat/principal.js";
+import { toolRegistry } from "./tools.js";
+import { RoutedChatGateway } from "./channels/routedGateway.js";
+import { follow } from "./conversations/follow.js";
+import { failures } from "./errors/failures.js";
+import { PostgresFailureLedger } from "./errors/postgresFailureLedger.js";
 import { ConversationRoutes, type ConversationRouteDeps } from "./conversations/routes.js";
 import { EventLogJournal } from "./conversations/journal.js";
 import { openProductAssets } from "./conversations/productAssets.js";
@@ -108,6 +126,8 @@ type RegistryContext = {
   /** Attachments for Studio; with the Registry database. */
   studioAssets?: StudioDeps["assets"];
   assistant?: AssistantService;
+  /** The Assistant's conversation, on Chat's runtime. */
+  assistantChat?: AssistantChat;
   ingest?: IngestService;
   channels?: ChannelService;
   credentialSeal?: CredentialSeal;
@@ -306,16 +326,39 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     const chatUrl = environment.HATCH_RUNTIME_CHAT_URL?.trim();
     const chatToken = environment.HATCH_RUNTIME_CHAT_SERVICE_TOKEN?.trim();
     const gateway = chatUrl && chatToken ? new HttpChatGateway({ baseUrl: chatUrl, serviceToken: chatToken }) : undefined;
-    const channels = new ChannelService({ ...stores, hub, scopeOf, ownsProduct: async (accountId, productId) => Boolean(await productForCreator(registryContext, accountId, productId)), ...(gateway ? { gateway } : {}) });
+    // A Product's Runs are held by the Runtime; the Assistant's are held here. A reply is sent once for either.
+    const routed = new RoutedChatGateway(gateway);
+    const channels = new ChannelService({ ...stores, hub, scopeOf, ownsProduct: async (accountId, productId) => Boolean(await productForCreator(registryContext, accountId, productId)), gateway: routed });
+    const assistantState = await PostgresAssistantState.open(registryPool);
     const assistant = new AssistantService({
       tasks, reach, channels,
       products: factoryAgents,
       catalog,
       backend: accountId => new PostgresWorkbenchBackend(registryPool, `assistant:${accountId}`),
+      state: assistantState,
+      deliveries: await PostgresDeliveries.open(registryPool),
       exclusive: postgresExclusive(registryPool),
       env: environment,
-      journal: keyOf => new EventLogJournal(conversationPorts.eventLog, keyOf),
     });
+    // The Assistant is a conversation on Chat's runtime, with its own transcript in this database and the Studio tools.
+    failures.attach(new PostgresFailureLedger(registryPool as never));
+    const transcripts = new (studioTranscripts(PostgresStore))({ pool: registryPool, maxConversationEvents: 1_000_000, maxConversationBytes: 1024 * 1024 * 1024 });
+    const conversations = new PostgresConversationRepository({ pool: registryPool });
+    conversations.bindSubmissionStore(transcripts);
+    await conversations.initialize();
+    const chatAssets = await openChatAssets({ pool: registryPool, blobs: productObjectStore, environment });
+    for (const definition of attachmentToolDefinitions(chatAssets.tools())) toolRegistry.set(definition.name, definition);
+    const tools = studioTools(assistant);
+    for (const definition of studioToolDefinitions(tools)) toolRegistry.set(definition.name, definition);
+    const assistantChat = new AssistantChat({
+      repository: conversations, store: transcripts, eventLog: conversationPorts.eventLog, chatAssets, state: assistantState, tools, desk: assistant,
+      assetStore: new RuntimeAssetStore(path.join(factoryRoot, "assistant-assets")),
+      history: new LegacyAssistantHistory({ backend: accountId => new PostgresWorkbenchBackend(registryPool, `assistant:${accountId}`), state: assistantState, store: transcripts }),
+      prompt: assistantPrompt, liveState: accountId => assistant.liveState(accountId), env: environment,
+    });
+    assistant.bind(assistantChat, new ExpertMaterials({ assets: chatAssets, conversation: accountId => assistantChat.conversation(accountId) }));
+    routed.bindLocal(assistantChat.gateway);
+    await assistantChat.start();
     const productsPrefix = environment.HATCH_CREATOR_PRODUCT_FILES_PREFIX?.trim() || "creator-products";
     const ingest = await createIngestService({
       environment, pool: registryPool, seal, objects: productObjectStore,
@@ -329,7 +372,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     // Without a Chat gateway Product Connections have no handler, and their events wait in the inbox.
     if (gateway) channels.register("product", guarded(new GuardedTarget(new ProductTarget({ gateway, limiter: stores.limiter }), [liveOwnProduct(releaseStore)]), eligibility));
     channels.start();
-    Object.assign(registryContext, { assistant, ingest, channels, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin, studioUrl });
+    Object.assign(registryContext, { assistant, assistantChat, ingest, channels, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin, studioUrl });
     // A platform that pushes over its own connection runs here, in one process at a time. A dropped connection comes back; credentials added or removed are picked up.
     channelListeners = new ChannelListeners({
       hub, connections: stores.connections, exclusive: postgresExclusive(registryPool),
@@ -444,6 +487,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     await channelListeners?.stop();
     credentialRefresher?.stop();
     await registryContext.assistant?.close();
+    await registryContext.assistantChat?.close();
     await registryContext.channels?.close();
     immediateFactoryStop.abort();
     await factoryAgents.close();
@@ -2051,7 +2095,7 @@ function studioDeps(context: RegistryContext): StudioDeps {
   return {
     product: async (accountId, productId) => productForCreator(context, accountId, productId),
     workspace: (scope, token) => context.factoryAgents.workspace(scope, token),
-    assistant: () => context.assistant,
+    assistant: () => context.assistantChat,
     ...context.conversationPorts,
     assets: context.studioAssets,
   };
@@ -2138,7 +2182,10 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
     const body = await readJson(request);
     const content = typeof body.content === "string" ? body.content.trim() : "";
     if (!content || content.length > 20_000) { sendJson(response, 400, { error: { code: "invalid_message", message: "Message must contain 1–20000 characters." } }); return; }
-    await assistant.ingest(account.id, { source: "web", text: content });
+    // The page's own key makes a retried send one message.
+    const key = String(request.headers["idempotency-key"] ?? "").trim().slice(0, 200);
+    try { await assistant.hear(account.id, { id: key || randomUUID(), source: "web", parts: [{ type: "text", text: content }] }); }
+    catch (error) { if (!(error instanceof ChatError)) throw error; sendJson(response, error.status, { error: { code: error.code, message: error.message } }); return; }
     sendJson(response, 202, { accepted: true });
     return;
   }
@@ -2146,26 +2193,31 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
     const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
     const name = typeof body.name === "string" ? body.name : ""; const bytes = Buffer.from(typeof body.base64 === "string" ? body.base64 : "", "base64");
     if (!name || !bytes.length || bytes.length > 20 * 1024 * 1024) { sendJson(response, 400, { error: { code: "invalid_file", message: "A file of 1 byte to 20 MiB is required." } }); return; }
-    sendJson(response, 201, await assistant.receiveFile(account.id, name, bytes, "web"));
+    try { sendJson(response, 201, { name: (await assistant.receive(account.id, name, bytes, "web")).name }); }
+    catch (error) { if (!(error instanceof ChatError)) throw error; sendJson(response, error.status, { error: { code: error.code, message: error.message } }); }
     return;
   }
   const imageMatch = url.pathname.match(/^\/v1\/creator\/assistant\/images\/([0-9a-f-]{36}\.(?:jpg|jpeg|png|webp|gif))$/);
   if (imageMatch && request.method === "GET") {
-    const bytes = await assistant.image(account.id, imageMatch[1]!).catch(() => undefined);
-    if (!bytes) { sendJson(response, 404, { error: { code: "image_not_found", message: "Image was not found." } }); return; }
-    response.writeHead(200, { "content-type": imageMime(imageMatch[1]!)!, "content-length": bytes.length, "cache-control": "private, max-age=86400" });
-    response.end(bytes);
+    const image = await assistant.image(account.id, imageMatch[1]!.replace(/\.[a-z]+$/, "")).catch(() => undefined);
+    if (!image) { sendJson(response, 404, { error: { code: "image_not_found", message: "Image was not found." } }); return; }
+    response.writeHead(200, { "content-type": image.mime, "content-length": image.bytes.length, "cache-control": "private, max-age=86400" });
+    response.end(image.bytes);
     return;
   }
   if (url.pathname === "/v1/creator/assistant/events" && request.method === "GET") {
     response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
     response.write(": connected\n\n");
-    const listener = (event: { accountId?: string }) => { if (event.accountId === account.id && !response.writableEnded) response.write(`data: ${JSON.stringify({ ...event, accountId: undefined })}\n\n`); };
-    assistant.events.on("event", listener);
+    // The page hears the same events every Studio client does, from now on, in the words it knows: a finished message or Run is something to reload.
+    const stop = new AbortController();
+    response.once("close", () => stop.abort());
     const heartbeat = setInterval(() => { if (!response.writableEnded) response.write(": heartbeat\n\n"); }, 15_000);
-    await new Promise<void>(resolve => response.once("close", () => resolve()));
+    const feed = `assistant:${account.id}`;
+    await follow(context.conversationPorts.eventLog, feed, await context.conversationPorts.eventLog.head(feed), ({ event }) => {
+      const shown = event.type === "message_end" ? { type: "message" } : event.type === "run_end" ? { type: "assistant" } : event;
+      if (!response.writableEnded) response.write(`data: ${JSON.stringify(shown)}\n\n`);
+    }, { signal: stop.signal });
     clearInterval(heartbeat);
-    assistant.events.off("event", listener);
     return;
   }
   const taskAction = url.pathname.match(/^\/v1\/creator\/assistant\/tasks\/([0-9a-f-]{36})\/(approve|decline|answer)$/);
@@ -2175,7 +2227,7 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
     const task = action === "approve" ? await assistant.approve(account.id, taskId!)
       : action === "decline" ? await assistant.decline(account.id, taskId!)
         : await assistant.answer(account.id, taskId!, String(body.answer ?? "").trim() || (() => { throw Object.assign(new Error("answer is required"), { status: 400 }); })());
-    await assistant.ingest(account.id, { source: "task", taskId: task.id, text: `专家在 Studio 里${action === "approve" ? "确认了" : action === "decline" ? "取消了" : "回答了"}这件事。` });
+    await assistant.news(account.id, task.id, `专家在 Studio 里${action === "approve" ? "确认了" : action === "decline" ? "取消了" : "回答了"}这件事。`);
     sendJson(response, 200, { task });
     return;
   }

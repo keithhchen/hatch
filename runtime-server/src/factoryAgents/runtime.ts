@@ -27,8 +27,6 @@ export type WorkbenchRuntimeOptions = {
   extraTools?: (session: Session, signal: AbortSignal, changed: () => void) => Promise<AgentTool[]>;
   grantedTools?: (session: Session) => AgentTool[];
   withheldTools?: (session: Session) => Promise<string[]>;
-  /** Current state for the model, rebuilt for every model call. It never enters history, so clients never see it. */
-  liveState?: (sessionId: string) => Promise<string | undefined>;
   /** Which clients may run each tool. Defaults to what Studio declares. */
   toolSupport?: ClientSupport;
   /** Where public events are recorded from the first Run, and where a message is persisted together with its event. */
@@ -327,7 +325,7 @@ export class WorkbenchRuntime {
           const hydrated = await hydrateImages(current, async file => (await this.store.read(id, file)).bytes);
           if (channel !== "visible") return hydrated;
           // After all history, rebuilt for every call and never stored: the cached prefix stays intact.
-          const tail = [await this.options.liveState?.(id), renderSystemReminder(this.clientOf(id))].filter(Boolean).join("\n\n");
+          const tail = renderSystemReminder(this.clientOf(id));
           return [...hydrated, { role: "user" as const, content: tail, timestamp: Date.now() }];
         };
         const effective = [...replaced, ...messages.slice(base)];

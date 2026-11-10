@@ -51,7 +51,10 @@ export class ChannelService implements AssistantChannels {
       hub: deps.hub, connections: deps.connections,
       notify: async (to, text, replyTo) => { await this.dispatcher.send({ ...to, kind: "notice", message: { text, ...(replyTo ? { replyTo } : {}) } }); },
     });
-    if (deps.gateway) this.replies = new ChatReplies({ gateway: deps.gateway, inbox: deps.inbox, dispatcher: this.dispatcher, compacting: (runId, compactionId) => this.compaction({ runId, compactionId }) });
+    if (deps.gateway) this.replies = new ChatReplies({
+      gateway: deps.gateway, inbox: deps.inbox, dispatcher: this.dispatcher, compacting: (runId, compactionId) => this.compaction({ runId, compactionId }),
+      policy: async (connectionId, runId) => { const connection = await deps.connections.get(connectionId); return connection ? this.router.replyPolicy(connection, runId) : {}; }
+    });
   }
 
   register(kind: TargetKind, handler: TargetHandler): this { this.router.register(kind, handler); return this; }

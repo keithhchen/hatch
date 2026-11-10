@@ -1,8 +1,8 @@
 import { CHANNEL_LABELS, type ChannelKind } from "./types.js";
-import { assertReachable, LINK_CODE_PATTERN, principalFor, START_CODE_PATTERN, type ConnectionRepository } from "./connections.js";
+import { assertReachable, LINK_CODE_PATTERN, principalFor, START_CODE_PATTERN, type ChannelConnection, type ConnectionRepository } from "./connections.js";
 import type { ChannelHub } from "./hub.js";
 import type { InboxItem } from "./inbox.js";
-import type { Handled, Inbound, TargetHandler, TargetKind } from "./ports.js";
+import type { Handled, Inbound, ReplyPolicy, TargetHandler, TargetKind } from "./ports.js";
 
 export type Notify = (to: { connectionId?: string; channel: ChannelKind; scope: string; address: InboxItem["event"]["address"] }, text: string, replyTo?: string) => Promise<void>;
 
@@ -58,6 +58,11 @@ export class ChannelRouter {
       notify: text => say(text, connection.id),
     };
     return { ...await this.handler(connection.target.kind).handle(inbound), connectionId: connection.id };
+  }
+
+  /** How the Agent behind a Connection wants the reply of one of its Runs sent. */
+  async replyPolicy(connection: ChannelConnection, runId: string): Promise<ReplyPolicy> {
+    return await this.targets.get(connection.target.kind)?.replyPolicy?.(connection, runId) ?? {};
   }
 
   private handler(kind: TargetKind): TargetHandler {

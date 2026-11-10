@@ -3,7 +3,7 @@ import { ChatError } from "../chat/principal.js";
 import { imageMime } from "../factoryAgents/imageRefs.js";
 import type { Dispatcher } from "./dispatch.js";
 import type { Inbox } from "./inbox.js";
-import type { ChatGateway, Handled, Inbound, TargetHandler } from "./ports.js";
+import type { ChatGateway, Handled, Inbound, ReplyPolicy, TargetHandler } from "./ports.js";
 import type { Rate, RateLimiter } from "./rateLimiter.js";
 
 /** A contact may write this much: a burst of 10, then one message every 20 seconds. */
@@ -49,7 +49,7 @@ export class ProductTarget implements TargetHandler {
 
 /** Sends a Run's final reply when it ends. The reply is its delivery's source key, so however many times this runs, it is sent once. */
 export class ChatReplies {
-  constructor(private deps: { gateway: ChatGateway; inbox: Inbox; dispatcher: Dispatcher; compacting(runId: string, compactionId: string): Promise<void> }) {}
+  constructor(private deps: { gateway: ChatGateway; inbox: Inbox; dispatcher: Dispatcher; compacting(runId: string, compactionId: string): Promise<void>; /** How the Agent that answered wants this reply sent. */ policy?(connectionId: string, runId: string): Promise<ReplyPolicy> }) {}
 
   /** Asks Chat how the Run stands. Everything it needs is durable on both sides, so this works after any restart. */
   async settle(runId: string): Promise<void> {
@@ -62,9 +62,11 @@ export class ChatReplies {
     const items = await this.deps.inbox.byRun(runId);
     const last = items.at(-1);
     if (!last?.connectionId) return;
+    const policy = await this.deps.policy?.(last.connectionId, runId) ?? {};
+    if (!outcome.text.trim() && status === "completed" && policy.quietWhenEmpty) { await this.deps.inbox.markReplied(last.id); return; }
     await this.deps.dispatcher.send({
       connectionId: last.connectionId, channel: last.channel, scope: last.scope, address: last.event.address, kind: "reply",
-      message: { text: outcome.text.trim() ? outcome.text : FAILED, ...(last.event.messageRef ? { replyTo: last.event.messageRef } : {}) },
+      message: { text: outcome.text.trim() ? outcome.text : FAILED, ...(policy.buttons?.length ? { buttons: policy.buttons } : {}), ...(last.event.messageRef ? { replyTo: last.event.messageRef } : {}) },
       sourceKey: `run:${runId}`,
     });
     await this.deps.inbox.markReplied(last.id);

@@ -8,7 +8,7 @@ import type { Role, Session } from "../factoryAgents/store.js";
 import type { AssistantHost } from "./assistantConversation.js";
 import type { AssetScope } from "../assets/domain.js";
 import type { AssetDesk } from "./assets.js";
-import { ConversationError, type ReadyAsset } from "./conversation.js";
+import { ConversationError, type ConversationStatus, type PublicMessage, type ReadyAsset, type SendInput, type Sent } from "./conversation.js";
 import { MemoryEventLog } from "./eventLog.js";
 import { EventLogJournal } from "./journal.js";
 import { MemoryMessageLedger } from "./ledger.js";
@@ -67,23 +67,25 @@ class FakeWorkspace implements WorkerWorkspace {
 }
 
 class FakeAssistant implements AssistantHost {
-  events = new EventEmitter();
-  lines: Array<{ id: string; role: "expert" | "assistant"; text: string; at: string }> = [{ id: "m1", role: "assistant", text: "Hello", at: "2026-01-01T00:00:00.000Z" }];
+  history: PublicMessage[] = [{ id: "m1", role: "assistant", text: "Hello", created_at: "2026-01-01T00:00:00.000Z" }];
   running = false;
-  ingested: Array<{ id: string; source: string; text: string; images?: string[]; attachments?: Array<{ type: string; name: string; assetId: string }> }> = [];
+  ingested: SendInput[] = [];
   stopped = 0;
+  desk!: AssetDesk;
   /** Looks at the world the moment a message is delivered. */
   onDelivery: () => void = () => undefined;
-  view = async () => ({ messages: this.lines, running: this.running, ...(this.running ? { runId: "arun-1" } : {}) });
-  submit = async (_account: string, item: { id: string; source: "web"; text: string; images?: string[]; attachments?: Array<{ type: "image" | "file" | "audio"; name: string; assetId: string }> }) => {
+  status = async (): Promise<ConversationStatus> => this.running ? { state: "running", runId: "arun-1" } : { state: "idle" };
+  lines = async () => this.history;
+  send = async (_account: string, input: SendInput): Promise<Sent> => {
     this.onDelivery();
-    this.ingested.push(item);
+    this.ingested.push(input);
     this.running = true;
-    setTimeout(() => { this.lines.push({ id: item.id, role: "expert", text: item.text, at: "t" }, { id: "m9", role: "assistant", text: "Noted.", at: "t" }); this.running = false; }, 20);
-    return { runId: "arun-1" };
+    setTimeout(() => { this.history.push({ id: input.id, role: "user", text: input.text, created_at: "t" }, { id: "m9", role: "assistant", text: "Noted.", created_at: "t" }); this.running = false; }, 20);
+    const attachments = input.attachments.map(asset => ({ type: asset.kind, name: asset.name, asset_id: asset.id }));
+    return { conversationId: "a1", queued: false, runId: "arun-1", message: { id: input.id, role: "user", text: input.text, created_at: "t", ...(attachments.length ? { attachments } : {}) } };
   };
-  /** The desk here is a fake and ignores it. */
-  workshop = () => ({ files: { writeManual: async () => undefined }, place: () => "" });
+  feedKey = () => "assistant:a1";
+  assets = () => this.desk;
   stop = async () => { this.stopped++; };
 }
 
@@ -117,6 +119,7 @@ async function harness(options: { assistant?: boolean } = { assistant: true }) {
   const workspace = new FakeWorkspace(eventLog);
   const assistant = new FakeAssistant();
   const desk = new FakeDesk(workspace.manual);
+  assistant.desk = desk;
   const routes = new ConversationRoutes({
     authenticate: async request => { const token = request.headers.authorization?.replace(/^Bearer /, ""); return token && TOKENS[token] ? { id: TOKENS[token]! } : undefined; },
     token: request => request.headers.authorization?.replace(/^Bearer /, ""),
@@ -278,7 +281,6 @@ test("assistant: same shape and verbs, over the existing Assistant", async () =>
     assert.equal(body.message.role, "user");
     assert.equal((body as unknown as { run_id: string }).run_id, "arun-1", "the Assistant's turn has a Run of its own");
     assert.equal(h.assistant.ingested[0]!.id, body.message.id);
-    assert.equal(h.assistant.ingested[0]!.source, "web");
     const after = await (await h.call(`${path}/messages?after=m1`)).json() as { messages: Array<{ role: string; text: string }> };
     assert.deepEqual(after.messages.map(m => [m.role, m.text]), [["user", "Remind me tomorrow"], ["assistant", "Noted."]]);
     assert.equal((await h.call(`${path}/stop`, { method: "POST" })).status, 202);
@@ -453,8 +455,7 @@ test("the Assistant takes attachments like a worker: upload, bound to the messag
     assert.deepEqual(boundAtDelivery, [{ ids: ["a-img", "a-doc"], messageId: sent.message.id }], "bound before the Assistant sees the message, to the id the history shows");
     assert.deepEqual(sent.message.attachments, [{ type: "image", name: "chart.png", asset_id: "a-img" }, { type: "file", name: "notes.pdf", asset_id: "a-doc" }]);
     const item = h.assistant.ingested[0]!;
-    assert.deepEqual(item.images, [IMAGE.path]);
-    assert.match(item.text, /^see this\n\[file: notes\.pdf/);
-    assert.deepEqual(item.attachments, [{ type: "image", name: "chart.png", assetId: "a-img" }, { type: "file", name: "notes.pdf", assetId: "a-doc" }]);
+    assert.equal(item.text, "see this");
+    assert.deepEqual(item.attachments.map(asset => asset.id), ["a-img", "a-doc"], "Chat reads them as parts: the picture as pixels, the file as one line");
   } finally { await h.close(); }
 });

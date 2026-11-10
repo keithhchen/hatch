@@ -9,6 +9,8 @@ export class GuardedTarget implements TargetHandler {
 
   linked: TargetHandler["linked"] = connection => this.inner.linked(connection);
 
+  replyPolicy: NonNullable<TargetHandler["replyPolicy"]> = async (connection, runId) => await this.inner.replyPolicy?.(connection, runId) ?? {};
+
   async handle(inbound: Inbound): Promise<Handled> {
     for (const guard of this.guards) {
       const refusal = await guard(inbound);

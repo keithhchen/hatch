@@ -45,6 +45,8 @@ export interface TaskRepository {
   /** The latest pokes of one account, newest first. */
   pokes(accountId: string, limit: number): Promise<AssistantTask[]>;
   bySession(sessionId: string): Promise<AssistantTask | undefined>;
+  /** Tasks that were created or announced in a Run (`payload.run`), so its reply can offer their buttons. */
+  byRun(runId: string): Promise<AssistantTask[]>;
 }
 
 export class PostgresTaskRepository implements TaskRepository {
@@ -113,6 +115,9 @@ export class PostgresTaskRepository implements TaskRepository {
   async pokes(accountId: string, limit: number): Promise<AssistantTask[]> {
     return (await this.pool.query("SELECT * FROM hatch_assistant_tasks WHERE account_id = $1 AND kind = 'poke' ORDER BY created_at DESC LIMIT $2", [accountId, limit])).rows.map(fromRow);
   }
+  async byRun(runId: string): Promise<AssistantTask[]> {
+    return (await this.pool.query("SELECT * FROM hatch_assistant_tasks WHERE payload->>'run' = $1 ORDER BY created_at LIMIT 20", [runId])).rows.map(fromRow);
+  }
   async bySession(sessionId: string): Promise<AssistantTask | undefined> {
     const row = (await this.pool.query("SELECT * FROM hatch_assistant_tasks WHERE status <> 'done' AND session->>'sessionId' = $1 ORDER BY updated_at DESC LIMIT 1", [sessionId])).rows[0];
     return row ? fromRow(row) : undefined;
@@ -140,6 +145,7 @@ export class MemoryTaskRepository implements TaskRepository {
   async open(accountId: string) { return [...this.tasks.values()].filter(task => task.accountId === accountId && task.status !== "done").sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(task => structuredClone(task)); }
   async expired(now: Date) { return [...this.tasks.values()].filter(task => task.status === "working" && task.leaseExpiresAt && task.leaseExpiresAt < now.toISOString()).map(task => structuredClone(task)); }
   async pokes(accountId: string, limit: number) { return [...this.tasks.values()].filter(task => task.accountId === accountId && task.kind === "poke").sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit).map(task => structuredClone(task)); }
+  async byRun(runId: string) { return [...this.tasks.values()].filter(task => task.payload.run === runId).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map(task => structuredClone(task)); }
   async bySession(sessionId: string) { const task = [...this.tasks.values()].filter(task => task.status !== "done" && task.session?.sessionId === sessionId).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]; return task && structuredClone(task); }
 }
 

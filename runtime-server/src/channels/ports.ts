@@ -18,11 +18,16 @@ export type Inbound = {
 /** `replied` means the sender already has their answer; a Run's reply comes later, by its id. */
 export type Handled = { replied: boolean; runId?: string };
 
+/** How a Run's final reply is dressed for the person waiting, as the Agent that answered wants it. */
+export type ReplyPolicy = { /** A Run that said nothing sends nothing. */ quietWhenEmpty?: boolean; buttons?: NonNullable<OutboundMessage["buttons"]> };
+
 /** Port: the Agent behind a Connection. One per kind of AgentTarget. Throwing returns the event to the queue. */
 export interface TargetHandler {
   handle(inbound: Inbound): Promise<Handled>;
   /** What to say once someone has linked to this Connection. */
   linked(connection: ChannelConnection): Promise<string>;
+  /** How the final reply of one of this Agent's Runs is sent. Without it, every Run's reply is sent as it is. */
+  replyPolicy?(connection: ChannelConnection, runId: string): Promise<ReplyPolicy>;
 }
 export type TargetKind = AgentTarget["kind"];
 

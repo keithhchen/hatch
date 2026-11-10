@@ -1,4 +1,3 @@
-import type { ChannelKind } from "../channels/types.js";
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile, readdir, rm } from "node:fs/promises";
 import type { Pool } from "pg";
@@ -23,23 +22,6 @@ export type MessageOrigin = { kind: "expert" | "system"; itemId: string; text?: 
   /** Assets the client sent with the message. */
   attachments?: Array<{ type: "image" | "file" | "audio"; name: string; assetId: string }> };
 
-export type IngressItem = {
-  id: string; at: string;
-  source: "web" | ChannelKind | "task" | "tick" | "consumer";
-  text: string;
-  /** Workspace paths of images that came with this item. */
-  images?: string[];
-  /** Assets the Expert sent with this item. */
-  attachments?: MessageOrigin["attachments"];
-  taskId?: string; eventId?: string; messageRef?: string;
-  /** Turns that took this item but ended before it reached the context. */
-  attempts?: number;
-};
-export type AssistantDeskState = {
-  ingress: IngressItem[];
-  interview?: { taskId: string; productId: string; sessionId: string; relayFrom: number };
-  lastExpert?: { source: "web" | ChannelKind; at: string; messageRef?: string; };
-};
 export type Session = {
   id: string; role: AnyRole; title: string; createdAt: string; updatedAt: string;
   revision: number; turn: number; status: "idle" | "running" | "completed" | "failed" | "interrupted";
@@ -52,8 +34,6 @@ export type Session = {
   voiceLive?: { resumptionHandle?: string };
   /** Set while the Assistant drives this session for one of its tasks. */
   assistantTaskId?: string;
-  /** Assistant session only: durable ingress and the interview it is passing through. */
-  assistantDesk?: AssistantDeskState;
   knowledge?: Array<{ path: string; id: string; source: string; title: string; productId: string; sha256: string }>;
   corpus?: { product_id: string; corpus_ref: string; corpus_digest: string; release_digest: string; status: "published"; published_at: string; files: string[] };
 };

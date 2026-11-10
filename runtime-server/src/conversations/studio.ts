@@ -47,7 +47,7 @@ export class Studio {
   async target(accountId: string, token: string, spec: TargetSpec): Promise<Target> {
     if (spec.kind === "assistant") {
       const host = this.assistantHost();
-      return this.shelved(new AssistantConversation(accountId, host), 20_000, accountId, `assistant:${accountId}`, this.deps.assets?.(host.workshop(accountId)));
+      return this.shelved(new AssistantConversation(accountId, host), 20_000, accountId, `assistant:${accountId}`, this.deps.assets && host.assets());
     }
     const workspace = await this.workspace(accountId, token, spec.productId);
     const worker = new WorkerDirectory(workspace).conversation(spec.workerId);

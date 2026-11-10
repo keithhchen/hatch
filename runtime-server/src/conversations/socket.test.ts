@@ -14,7 +14,7 @@ import { Studio } from "./studio.js";
 const TOKENS: Record<string, string> = { key1: "a1" };
 
 async function harness() {
-  const assistant = { events: new EventEmitter(), stopped: 0, running: false, view: async () => ({ messages: [], running: assistant.running }), submit: async () => ({}), workshop: () => ({ files: { writeManual: async () => undefined }, place: () => "" }), stop: async () => { assistant.stopped++; } };
+  const assistant = { stopped: 0, running: false, status: async () => assistant.running ? { state: "running" as const, runId: "r1" } : { state: "idle" as const }, lines: async () => [], send: async () => ({}), feedKey: () => "assistant:a1", assets: () => undefined, stop: async () => { assistant.stopped++; } };
   const eventLog = new MemoryEventLog();
   // The Assistant's runtime journals its events into the log; here the test plays that runtime.
   const journal = new EventLogJournal(eventLog, () => "assistant:a1");
