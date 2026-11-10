@@ -323,7 +323,8 @@
 .sxa-title { margin: 0; font-size: 24px; font-weight: 700; color: var(--web-ink); }
 .sxa-empty { color: var(--web-muted); }
 .web-chat.web-chat--embedded { display: flex; width: auto; height: calc(100dvh - 136px); min-height: 0; overflow: hidden; background: none; }
-.sxa-chat .web-chat__main { flex: 1; min-height: 0; }
+/* No header row here: the messages take the space and the composer sits at the bottom, never wider than the column. */
+.sxa-chat .web-chat__main { flex: 1; min-height: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
 .sxa-side { position: sticky; top: 24px; display: flex; flex-direction: column; gap: 12px; }
 .sxa-side h2 { margin: 0; font-size: 15px; font-weight: 700; color: var(--web-ink); }
 .sxa-side p { margin: 0; }
