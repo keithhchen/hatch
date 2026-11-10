@@ -39,7 +39,7 @@ export class AssetPipeline implements ReadyAssetResolver {
   async accept(scope: AssetScope, input: { name: string; bytes: Buffer }): Promise<Asset> {
     const name = displayName(input.name);
     const sniffed = sniff(input.bytes, name);
-    if (input.bytes.length > MAX_BYTES[sniffed.kind]) throw new AssetError("too_large", `${sniffed.kind} exceeds ${MAX_BYTES[sniffed.kind]} bytes`);
+    if (input.bytes.length > MAX_BYTES[sniffed.kind]) throw new AssetError("too_large", `这个文件太大了。\nThat file is too large (${sniffed.kind} limit ${MAX_BYTES[sniffed.kind]} bytes).`);
     const processor = this.processors.get(sniffed.kind);
     if (!processor) throw new AssetError("unsupported_type", `No processor for ${sniffed.kind}`);
 

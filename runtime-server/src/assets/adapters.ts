@@ -21,12 +21,12 @@ export class FfmpegAudioNormalizer implements AudioNormalizer {
       await writeFile(source, audio);
       const { stdout } = await run(this.binary, ["-v", "error", "-nostdin", "-protocol_whitelist", "file", "-i", source, "-t", String(maxSeconds + 1), "-vn", "-f", "s16le", "-ac", "1", "-ar", "16000", "pipe:1"],
         { encoding: "buffer", timeout: 60_000, maxBuffer: (maxSeconds + 2) * PCM_BYTES_PER_SECOND });
-      if (stdout.length > maxSeconds * PCM_BYTES_PER_SECOND) throw new AssetError("too_large", `Voice message is longer than ${maxSeconds} seconds`);
+      if (stdout.length > maxSeconds * PCM_BYTES_PER_SECOND) throw new AssetError("too_large", `语音太长，最长 ${maxSeconds} 秒。\nVoice message is longer than ${maxSeconds} seconds.`);
       return stdout;
     } catch (error) {
       if (error instanceof AssetError) throw error;
       if ((error as { code?: string }).code === "ENOENT") throw new AssetError("unavailable", "ffmpeg is not installed");
-      throw new AssetError("malformed", "Audio could not be decoded");
+      throw new AssetError("malformed", "这条语音读不出来。\nAudio could not be decoded.");
     } finally { await rm(directory, { recursive: true, force: true }); }
   }
 }

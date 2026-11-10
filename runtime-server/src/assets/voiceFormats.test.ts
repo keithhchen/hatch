@@ -80,7 +80,7 @@ test("a SILK voice message is recognized as audio but refused: ffmpeg has no SIL
       const bytes = Buffer.concat([head, Buffer.alloc(200, 7)]);
       assert.equal(sniff(bytes, "voice").kind, "audio");
       const asset = await pipeline.accept(scopeA, { name: "voice", bytes });
-      assert.deepEqual([asset.state, asset.record.failure], ["failed", { code: "malformed", message: "Audio could not be decoded" }]);
+      assert.deepEqual([asset.state, asset.record.failure], ["failed", { code: "malformed", message: "这条语音读不出来。\nAudio could not be decoded." }]);
     }
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

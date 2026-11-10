@@ -16,8 +16,8 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const home = path.join(os.homedir(), "hatch-try-telegram");
 const run = path.join(home, "run"), logs = path.join(home, "logs");
 const telegramEnv = path.join(home, "telegram.env");
-const MISSING = ["GEMINI_API_KEY", "LLM_API_KEY"].filter((name) => !process.env[name]);
-if (MISSING.length) { console.error(`Missing ${MISSING.join(", ")}. Run through:\n  agentsecrets exec --profile hatch --provider gemini -- agentsecrets exec --profile hatch --provider kimi -- node scripts/try-telegram/run.mjs`); process.exit(1); }
+const MISSING = ["GEMINI_API_KEY", "LLM_API_KEY", "FIRECRAWL_API_KEY"].filter((name) => !process.env[name]);
+if (MISSING.length) { console.error(`Missing ${MISSING.join(", ")}. Start it with:\n  scripts/try-telegram/start.sh`); process.exit(1); }
 
 const telegram = existsSync(telegramEnv) ? Object.fromEntries(readFileSync(telegramEnv, "utf8").split("\n").map((l) => l.match(/^\s*(?:export\s+)?(HATCH_TELEGRAM_BOT_[A-Z]+)=(.*)$/)).filter(Boolean).map((m) => [m[1], m[2].trim().replace(/^["']|["']$/g, "")])) : {};
 const bot = telegram.HATCH_TELEGRAM_BOT_TOKEN && telegram.HATCH_TELEGRAM_BOT_USERNAME ? { token: telegram.HATCH_TELEGRAM_BOT_TOKEN, username: telegram.HATCH_TELEGRAM_BOT_USERNAME.replace(/^@/, "") } : undefined;

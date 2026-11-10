@@ -63,12 +63,18 @@ const notReadyToBuild = (agent: AgentOverview): string | undefined => {
   if (open.length) return `「${agent.name}」的访谈大纲还有没聊完的：${open.join("、")}。构建只依据专家确认过的访谈，先派 interview 聊完。`;
 };
 
-/** The Agent a task is about: the one named, else the only one the Expert has. */
+/** The Agent a task is about: the one named (by id or by name), else the only one the Expert has. */
 const targetAgent = (agents: AgentOverview[], agentId: string | undefined): { agent?: AgentOverview; refusal?: string } => {
-  if (agentId) return { agent: agents.find(agent => agent.productId === agentId) };
+  const named = agentId?.trim();
+  if (named) {
+    const found = agents.find(agent => agent.productId === named) ?? agents.find(agent => agent.name === named);
+    return found ? { agent: found } : { refusal: `没有这个 Agent：${named}。${agentChoices(agents)}` };
+  }
   if (agents.length === 1) return { agent: agents[0] };
-  return { refusal: agents.length ? `这件事要指定 Agent，专家有这几个：${agents.map(agent => `「${agent.name}」（${agent.productId}）`).join("、")}。` : "专家还没有 Agent，先用 create_agent 建一个。" };
+  return { refusal: agents.length ? `这件事要指定 Agent。${agentChoices(agents)}` : "专家还没有 Agent，先用 create_agent 建一个。" };
 };
+
+const agentChoices = (agents: AgentOverview[]) => `专家有这几个（名字 → id）：${agents.map(agent => `「${agent.name}」 → ${agent.productId}`).join("；")}。请再调用一次，把 agent_id 设成其中一个。`;
 
 const done = (value: unknown): Record<string, unknown> => ({ output: typeof value === "string" ? value : JSON.stringify(value) });
 
@@ -97,8 +103,8 @@ export function studioTools(ops: StudioOperations): StudioTool[] {
         return done(await created(call, await ops.propose(call.accountId, input.agent_id, { release: input.release, name: input.name, promise: input.promise, pricing: input.pricing, briefSpec: input.opening_questions }, await call.origin())));
       } },
     { name: "start_task", readOnly: false,
-      schema: z.object({ kind: z.enum(WORKER_KINDS), agent_id: z.string().optional(), instruction: text(1, 4000).describe("要做什么、专家的原话、为什么现在做") }).strict(),
-      description: `派一件事，立刻返回，做完会告诉你。派活的这一轮不写预告，也不写"我这就""接下来"这类话。interview 例外：它接管和专家的对话，你这一轮随即结束，聊完才交回给你，派出后一个字都不要再说。build 只在这个 Agent 的访谈大纲全是 ✓ 后才会接受。专家只有一个 Agent 时可以不写 agent_id。${WORKER_KINDS.map(kind => ops.describeWorker(kind)).join("；")}。`,
+      schema: z.object({ kind: z.enum(WORKER_KINDS), agent_id: z.string().optional().describe("要做哪个 Agent 的事：Agent 的 id，或它的名字。interview、build、content、evaluate、agent_research 在专家有两个以上 Agent 时必填；只有一个 Agent 时可省；research 不用写"), instruction: text(1, 4000).describe("要做什么、专家的原话、为什么现在做") }).strict(),
+      description: `派一件事，立刻返回，做完会告诉你。派活的这一轮不写预告，也不写"我这就""接下来"这类话。interview 例外：它接管和专家的对话，你这一轮随即结束，聊完才交回给你，派出后一个字都不要再说。build 只在这个 Agent 的访谈大纲全是 ✓ 后才会接受。专家有两个以上 Agent 时，除 research 外都必须写 agent_id（id 或名字，用 list_agents 看）；只有一个时可以不写。${WORKER_KINDS.map(kind => ops.describeWorker(kind)).join("；")}。`,
       run: async (call, args) => {
         const input = args as { kind: WorkerKind; agent_id?: string; instruction: string };
         let agentId = input.agent_id;

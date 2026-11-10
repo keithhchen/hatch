@@ -44,13 +44,13 @@ test("a voice message that cannot be transcribed is answered at once with a fixe
   const log = console.error;
   console.error = () => undefined;
   try { assert.deepEqual(await handle(voice), { replied: true }); } finally { console.error = log; }
-  assert.deepEqual(notices, ["Voice messages cannot be transcribed right now. Please send text instead."]);
+  assert.deepEqual(notices, ["语音暂时转不成文字，请先发文字。\nVoice messages cannot be transcribed right now. Please send text instead."]);
   assert.deepEqual(sent, []);
 }));
 
 test("a voice message with no speech in it is answered with that, not with silence", () => withFixture({ assets: true, moderator: { transcriber: saying("  ") } }, async fixture => {
   const { handle, sent, notices } = receiving(fixture);
   assert.deepEqual(await handle(voice), { replied: true });
-  assert.deepEqual(notices, ["No speech was recognized in that voice message."]);
+  assert.deepEqual(notices, ["这条语音里没有听出内容。\nNo speech was recognized in that voice message."]);
   assert.deepEqual(sent, []);
 }));

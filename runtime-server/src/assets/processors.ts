@@ -71,10 +71,10 @@ export class VoiceProcessor implements AssetProcessor {
     if (result.status === "unavailable") {
       // The sender hears that it failed, never why: the provider's words stay in the log.
       console.error(JSON.stringify({ event: "transcription_unavailable", reason: result.reason }));
-      throw new AssetError("unavailable", "Voice messages cannot be transcribed right now. Please send text instead.");
+      throw new AssetError("unavailable", "语音暂时转不成文字，请先发文字。\nVoice messages cannot be transcribed right now. Please send text instead.");
     }
     const text = result.text.trim();
-    if (!text) throw new AssetError("malformed", "No speech was recognized in that voice message.");
+    if (!text) throw new AssetError("malformed", "这条语音里没有听出内容。\nNo speech was recognized in that voice message.");
     return { outputs: [{ role: "transcript", bytes: Buffer.from(text), mime: "text/plain" }], transcript: text, moderate: { type: "text", text } };
   }
 }

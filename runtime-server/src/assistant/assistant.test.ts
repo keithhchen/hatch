@@ -529,7 +529,7 @@ test("A voice message that cannot be transcribed is answered in the chat with a 
   try {
     const [handled] = await env.telegramUpdate(voiceUpdate);
     assert.deepEqual(handled, { replied: true });
-    assert.deepEqual(env.notices, ["Voice messages cannot be transcribed right now. Please send text instead."]);
+    assert.deepEqual(env.notices, ["语音暂时转不成文字，请先发文字。\nVoice messages cannot be transcribed right now. Please send text instead."]);
     assert.equal(env.model.state.calls, 0);
   } finally { console.error = log; await env.close(); }
 });

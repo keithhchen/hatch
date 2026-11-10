@@ -75,5 +75,5 @@ export function sniff(bytes: Buffer, name: string): Sniffed {
     const extension = /\.[^./\\]+$/.exec(name)?.[0]?.toLowerCase() ?? "";
     return { kind: "file", ext: TEXT_BY_EXTENSION[extension] ? extension : ".txt", mime: TEXT_BY_EXTENSION[extension] ?? "text/plain" };
   }
-  throw new AssetError("unsupported_type", "Unsupported file type");
+  throw new AssetError("unsupported_type", "这种文件暂不支持。\nUnsupported file type.");
 }
