@@ -854,6 +854,38 @@ test("closing every client never stops a Run: it waits for its local tool and a 
   second.close();
 });
 
+test("a tool result sent through another conversation never reaches the Run that asked", async () => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-foreign-result-"));
+  const repository = new InMemoryConversationRepository(localRuntimeAuthority(dataDir));
+  await repository.initialize();
+  for (const id of ["conversation_victim", "conversation_attacker"]) {
+    await repository.createConversation({
+      id, publicId: id, ownerAccountId: "local-development", creatorId: "local-development",
+      agentId: "local-agent", productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}`
+    });
+  }
+  runtime = createRuntimeServer({ conversationStore: new RuntimeStore(dataDir), conversationRepository: repository, createRuntime: () => new DeterministicAgentRuntime() });
+  const base = await listen(runtime.server);
+
+  const messages: OutboundMessage[] = [];
+  const socket = await openRuntimeSocket(base, "conversation_victim", messages, ["file_search"]);
+  socket.send(JSON.stringify({
+    type: "client.message", run_id: "run_victim", client_message_id: "message_victim", conversation_id: "conversation_victim",
+    local_tools: ["file_search"], message: { role: "user", content: "Find Hatch." }
+  }));
+  const request = await waitForSocket(messages, (message) => message.type === "tool_call.request") as { tool_call_id: string };
+
+  const attackerMessages: OutboundMessage[] = [];
+  const attacker = await openRuntimeSocket(base, "conversation_attacker", attackerMessages, ["file_search"]);
+  attacker.send(JSON.stringify({ type: "tool_call.result", run_id: "run_victim", tool_call_id: request.tool_call_id, status: "ok", result: { matches: [] } }));
+  await waitForSocket(attackerMessages, (message) => message.type === "turn.failed");
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal((await repository.getRun("conversation_victim", "run_victim"))?.status, "waiting_for_tool");
+  assert.equal((await repository.listToolCalls("run_victim"))[0]?.outcome, undefined);
+  socket.close();
+  attacker.close();
+});
+
 test("a message sent during a Run joins it, from any client, and is idempotent per message", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-steer-"));
   const repository = new InMemoryConversationRepository(localRuntimeAuthority(dataDir));

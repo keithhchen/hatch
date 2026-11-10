@@ -94,8 +94,11 @@ test("a local-tool result reaches the Run through its registered tool session", 
   const instance = supervisor("a");
   instance.adopt(started.run);
   await settled(() => control.current !== undefined);
-  assert.equal(await instance.deliverToolResult(started.run.id, { type: "tool_call.result", run_id: started.run.id, tool_call_id: "t1", status: "ok", result: {} } as never), true);
-  assert.equal(await instance.deliverToolResult("unknown", { type: "tool_call.result", run_id: "unknown", tool_call_id: "t2", status: "ok", result: {} } as never), false);
+  assert.equal(await instance.deliverToolResult(conversationId, started.run.id, { type: "tool_call.result", run_id: started.run.id, tool_call_id: "t1", status: "ok", result: {} } as never), true);
+  assert.equal(await instance.deliverToolResult(conversationId, "unknown", { type: "tool_call.result", run_id: "unknown", tool_call_id: "t2", status: "ok", result: {} } as never), false);
+  assert.deepEqual(delivered, ["t1"]);
+  // A Run answers only through its own conversation.
+  assert.equal(await instance.deliverToolResult("other-conversation", started.run.id, { type: "tool_call.result", run_id: started.run.id, tool_call_id: "t3", status: "ok", result: {} } as never), false);
   assert.deepEqual(delivered, ["t1"]);
   await instance.stop();
 });

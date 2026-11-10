@@ -106,9 +106,11 @@ export class RunSupervisor {
    * From any instance. The answer is recorded first, so the instance that waits for it, or one that takes
    * the Run over, finds it; the instance that holds the call here gets it straight away.
    */
-  async deliverToolResult(runId: string, result: ToolResult): Promise<boolean> {
-    const recorded = await this.repository.answerToolCall(runId, result.tool_call_id, outcomeOf(result)).catch(() => false);
-    const local = await this.owned.get(runId)?.session?.handleResult(result) ?? false;
+  async deliverToolResult(conversationId: string, runId: string, result: ToolResult): Promise<boolean> {
+    const recorded = await this.repository.answerToolCall(conversationId, runId, result.tool_call_id, outcomeOf(result)).catch(() => false);
+    // A Run is answered only through its own conversation, never by run id alone.
+    const owned = this.owned.get(runId);
+    const local = owned?.conversationId === conversationId ? await owned.session?.handleResult(result) ?? false : false;
     return recorded || local;
   }
 

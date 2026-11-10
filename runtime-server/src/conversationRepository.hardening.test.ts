@@ -108,13 +108,16 @@ for (const backend of ["memory", "file", "postgres"] as const) {
     await repository.requestToolCall(call);
     await repository.requestToolCall(call);
     assert.equal((await repository.listToolCalls(start.run.id)).length, 1);
-    const answers = await Promise.all([1, 2, 3].map((n) => repository.answerToolCall(start.run.id, "t1", { status: "ok", result: { n } })));
+    // Another conversation cannot answer this Run's call.
+    assert.equal(await repository.answerToolCall("scope:other:conversation", start.run.id, "t1", { status: "ok", result: {} }), false);
+    assert.equal((await repository.listToolCalls(start.run.id))[0]!.outcome, undefined);
+    const answers = await Promise.all([1, 2, 3].map((n) => repository.answerToolCall(id, start.run.id, "t1", { status: "ok", result: { n } })));
     assert.equal(answers.filter(Boolean).length, 1);
     const [stored] = await repository.listToolCalls(start.run.id);
     assert.equal(stored!.outcome?.status, "ok");
-    assert.equal(await repository.answerToolCall(start.run.id, "unknown", { status: "ok", result: {} }), false);
+    assert.equal(await repository.answerToolCall(id, start.run.id, "unknown", { status: "ok", result: {} }), false);
     await repository.requestToolCall({ ...call, toolCallId: "t2", expiresAt: new Date(Date.now() - 1).toISOString() });
-    assert.equal(await repository.answerToolCall(start.run.id, "t2", { status: "ok", result: {} }), false);
+    assert.equal(await repository.answerToolCall(id, start.run.id, "t2", { status: "ok", result: {} }), false);
   }));
 
   test(`${backend}: one compaction runs per conversation; a new message preempts it; a Run that started makes its commit stale`, options, async () => withBackend(backend, async ({ repository, store }) => {

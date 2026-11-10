@@ -1655,7 +1655,7 @@ async function handleConversationHttpRequest(
     const request = (await chatEdge.chat.pendingToolRequests(conversation.id)).find((pending) => pending.run_id === result.run_id && pending.tool_call_id === result.tool_call_id);
     const authorization = request ? authorizeLocalToolCall(request.name as ClientToolName, client.client) : undefined;
     if (authorization && !authorization.allowed) throw new ConversationHttpError(403, authorization.error.code, authorization.error.message);
-    if (!await chatEdge.chat.supervisor.deliverToolResult(result.run_id, result)) {
+    if (!await chatEdge.chat.supervisor.deliverToolResult(conversation.id, result.run_id, result)) {
       throw new ConversationHttpError(404, "unknown_tool_call", `No pending tool request for ${result.tool_call_id}`);
     }
     writeResponse(200, { accepted: true });
@@ -2505,7 +2505,7 @@ async function handleRuntimeSocket(
             await send({ type: "turn.failed", run_id: message.run_id, error: authorization.error });
             return;
           }
-          if (!await chat.supervisor.deliverToolResult(message.run_id, message)) {
+          if (!await chat.supervisor.deliverToolResult(conversation.id, message.run_id, message)) {
             await send({
               type: "turn.failed",
               run_id: message.run_id,

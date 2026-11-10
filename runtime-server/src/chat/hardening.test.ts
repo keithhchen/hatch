@@ -82,8 +82,8 @@ test("a Run waiting for a local tool survives a restart, takes the answer from a
   assert.deepEqual((await third.pendingToolRequests(conversationId)).map((request) => [request.tool_call_id, request.name]), [["call_1", "file_read"]]);
 
   const answer = { type: "tool_call.result" as const, run_id: run.id, tool_call_id: "call_1", status: "ok" as const, result: { content: "hello from a.md" } };
-  assert.equal(await third.supervisor.deliverToolResult(run.id, answer), true);
-  assert.equal(await third.supervisor.deliverToolResult(run.id, answer), false, "the first answer wins");
+  assert.equal(await third.supervisor.deliverToolResult(conversationId, run.id, answer), true);
+  assert.equal(await third.supervisor.deliverToolResult(conversationId, run.id, answer), false, "the first answer wins");
   await settled(async () => (await repository.getRun(conversationId, run.id))!.status === "completed", "run completes");
 
   assert.equal(seen.length, 1);

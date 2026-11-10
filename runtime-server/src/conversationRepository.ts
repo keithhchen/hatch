@@ -258,7 +258,7 @@ export interface ConversationRepository {
   /** Records a local-tool call before the client is asked, so the Run can wait across a restart. Idempotent. */
   requestToolCall(call: Omit<ToolCallRecord, "outcome" | "answeredAt">): Promise<void>;
   /** Stores a client's answer once. False when the call is unknown, already answered, or expired. */
-  answerToolCall(runId: string, toolCallId: string, outcome: ToolCallOutcome): Promise<boolean>;
+  answerToolCall(conversationId: string, runId: string, toolCallId: string, outcome: ToolCallOutcome): Promise<boolean>;
   listToolCalls(runId: string): Promise<ToolCallRecord[]>;
   /**
    * Takes the conversation's compaction claim. Not granted while a Run is active or another claim is live;
@@ -575,11 +575,11 @@ export class InMemoryConversationRepository implements ConversationRepository {
     });
   }
 
-  async answerToolCall(runId: string, toolCallId: string, outcome: ToolCallOutcome): Promise<boolean> {
+  async answerToolCall(conversationId: string, runId: string, toolCallId: string, outcome: ToolCallOutcome): Promise<boolean> {
     return this.write(async () => {
       const key = `${runId}\n${toolCallId}`;
       const call = this.toolCalls.get(key);
-      if (!call || call.outcome || Date.parse(call.expiresAt) <= Date.now()) return false;
+      if (!call || this.runs.get(runId)?.conversationId !== conversationId || call.outcome || Date.parse(call.expiresAt) <= Date.now()) return false;
       this.toolCalls.set(key, { ...call, outcome: structuredClone(outcome), answeredAt: now() });
       return true;
     });
@@ -1229,14 +1229,15 @@ export class PostgresConversationRepository implements ConversationRepository {
     `, [call.runId, call.toolCallId, call.name, JSON.stringify(call.arguments), call.approval, call.scope ?? null, call.skillRunId ?? null, call.requestedAt, call.expiresAt]);
   }
 
-  async answerToolCall(runId: string, toolCallId: string, outcome: ToolCallOutcome): Promise<boolean> {
+  async answerToolCall(conversationId: string, runId: string, toolCallId: string, outcome: ToolCallOutcome): Promise<boolean> {
     await this.initialize();
-    // The first answer wins and an expired call takes none: both are decided by this one statement.
+    // The first answer wins, an expired call takes none, and only the Run's own conversation may answer: one statement decides all three.
     const result = await this.pool.query(`
-      UPDATE hatch_run_tool_calls SET outcome = $3::jsonb, answered_at = now()
+      UPDATE hatch_run_tool_calls SET outcome = $4::jsonb, answered_at = now()
       WHERE run_id = $1 AND tool_call_id = $2 AND outcome IS NULL AND expires_at > now()
+        AND EXISTS (SELECT 1 FROM hatch_conversation_runs r WHERE r.id = $1 AND r.conversation_id = $3)
       RETURNING tool_call_id
-    `, [runId, toolCallId, JSON.stringify(outcome)]);
+    `, [runId, toolCallId, conversationId, JSON.stringify(outcome)]);
     return result.rows.length > 0;
   }
 
