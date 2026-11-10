@@ -1,8 +1,8 @@
 {
   "id": 4,
   "title": "Idempotency end to end: webhooks, outbound faults, HTTP/SSE/WS sends, Studio keys",
-  "status": "FAIL",
-  "durationMs": 178263,
+  "status": "PASS",
+  "durationMs": 171118,
   "checks": [
     {
       "name": "A1 same update x10 sequential, then x5 after the reply: one inbox row per distinct update (1)",
@@ -759,9 +759,11 @@
     },
     {
       "name": "C3 an SSE replay of a finished Run's key ends by itself",
-      "ok": false,
+      "ok": true,
       "detail": [
-        "message.accepted"
+        "message.accepted",
+        "assistant.delta",
+        "journal.event"
       ]
     },
     {
@@ -849,7 +851,7 @@
       "detail": [
         202,
         {
-          "run_id": "run_fcfda640953d4a2b86ce6fec8af194e3",
+          "run_id": "run_93c15d2c7c7a45f39f59ee37ed397de8",
           "outcome": "steered",
           "status": "running"
         }
@@ -885,22 +887,22 @@
       "detail": [
         {
           "cursor": "101",
-          "run_id": "run_fcfda640953d4a2b86ce6fec8af194e3",
-          "key": "a6fb0994-2632-4bb7-8b68-1fee672e47e5",
+          "run_id": "run_93c15d2c7c7a45f39f59ee37ed397de8",
+          "key": "f87d36b5-964e-4bbd-97dd-9f242388bb50",
           "steered": null
         },
         {
           "cursor": "103",
-          "run_id": "run_fcfda640953d4a2b86ce6fec8af194e3",
-          "key": "568c2dd7-86ce-437c-aa9a-140a871d318f",
+          "run_id": "run_93c15d2c7c7a45f39f59ee37ed397de8",
+          "key": "7ca1aaf4-6416-43a8-8023-913bb474141b",
           "steered": "true"
         }
       ]
     },
     {
       "name": "D0 an API key in the upgrade's Authorization header opens the Desktop socket",
-      "ok": false,
-      "detail": "hello refused: {\"code\":\"protocol_error\",\"message\":\"auth_token: auth_token is required\"}"
+      "ok": true,
+      "detail": "ok"
     },
     {
       "name": "D1 a second socket sending the same key is accepted as a replay",
@@ -1043,14 +1045,14 @@
     },
     {
       "name": "E4 creating a Product with one Idempotency-Key five times at once makes one Product",
-      "ok": false,
+      "ok": true,
       "detail": {
         "statuses": [
-          500,
           201,
-          500,
-          500,
-          500
+          201,
+          201,
+          201,
+          201
         ],
         "ids": 1,
         "products": 1
@@ -1074,13 +1076,13 @@
     },
     {
       "name": "E4 worker: five concurrent sends of one key leave one user message, and a replay returns the same message",
-      "ok": false,
+      "ok": true,
       "detail": {
         "statuses": [
           202,
           202,
           202,
-          500,
+          202,
           202
         ],
         "lines": 1,
@@ -1404,9 +1406,11 @@
       "duplicateTurns": 0
     },
     "c3_sse_replay_after_end": {
-      "endedByServer": false,
+      "endedByServer": true,
       "frames": [
-        "message.accepted"
+        "message.accepted",
+        "assistant.delta",
+        "journal.event"
       ]
     },
     "c3_sse_after_replay": {
@@ -1448,24 +1452,20 @@
     ],
     "c5_asset_uploads": {
       "statuses": [
-        201,
         503,
+        201,
         503
       ],
       "ids": [
-        "09ff8a0e-4164-4d00-a6a5-90e77243e0f5",
         null,
+        "5e16c949-3a3d-4acd-ae21-550e772d6b7d",
         null
       ],
       "shape": [
-        "asset_id",
-        "kind",
-        "name",
-        "bytes",
-        "state"
+        "error"
       ]
     },
-    "d0_api_key_in_upgrade_authorization_header": "hello refused: {\"code\":\"protocol_error\",\"message\":\"auth_token: auth_token is required\"}",
+    "d0_api_key_in_upgrade_authorization_header": "ok",
     "d1_ws_frames": {
       "s1": {
         "session.ready": 1,
@@ -1518,23 +1518,23 @@
     "e1_assistant_sequential": [
       [
         202,
-        "8c380649"
+        "fcc6d341"
       ],
       [
         202,
-        "8c380649"
+        "fcc6d341"
       ],
       [
         202,
-        "8c380649"
+        "fcc6d341"
       ],
       [
         202,
-        "8c380649"
+        "fcc6d341"
       ],
       [
         202,
-        "8c380649"
+        "fcc6d341"
       ]
     ],
     "e2_assistant_concurrent": {
@@ -1544,14 +1544,10 @@
       "messageIds": 1,
       "userLines": 1
     },
-    "e4_product_create_error_bodies": [
-      "{\"error\":{\"code\":\"23505\",\"message\":\"Factory Agent definitions are unavailable.\"},\"detail\":\"Factory Agent definitions are unavailable.\"}",
-      "{\"error\":{\"code\":\"23505\",\"message\":\"Factory Agent definitions are unavailable.\"},\"detail\":\"Factory Agent definitions are unavailable.\"}"
-    ],
+    "e4_product_create_error_bodies": [],
     "e4_product_create": {
       "statuses": {
-        "201": 1,
-        "500": 4
+        "201": 5
       },
       "distinctProducts": 1,
       "productsListed": 1,
@@ -1582,16 +1578,13 @@
         "availability": "locked"
       }
     ],
-    "e4_worker_error_bodies": [
-      "{\"error\":{\"code\":\"ENOENT\",\"message\":\"Factory Agent definitions are unavailable.\"},\"detail\":\"Factory Agent definitions are unavailable.\"}"
-    ],
+    "e4_worker_error_bodies": [],
     "e4_worker": {
       "worker": "research",
       "concurrent": {
-        "202": 4,
-        "500": 1
+        "202": 5
       },
-      "messageIds": 2,
+      "messageIds": 1,
       "replay": [
         202,
         true
@@ -1613,132 +1606,103 @@
   "evidence": {
     "A1 same update x10 sequential, then x5 after the reply": {
       "runIds": [
-        "run_4904b383bee2449a8c774889d1401e0b"
+        "run_5cc58940c17e4119aa01c22d54a4ae96"
       ],
       "inboxEvents": [
-        "140068"
+        "138398"
       ],
       "outboxIds": [
-        "1fe54f4d-3bce-4bf2-a257-0ab0af26a4dc"
+        "25c958be-8413-460b-9108-343f2a8c697c"
       ]
     },
     "A2 same update x10 concurrent": {
       "runIds": [
-        "run_edfa643fef504e19be8024b95b61fb8c"
+        "run_3c96f0fff6e64d74a06de5df86cc51e7"
       ],
       "inboxEvents": [
-        "140069"
+        "138399"
       ],
       "outboxIds": [
-        "048a358d-ed69-4a83-8eba-0c4b8f0f454f"
+        "b064ab40-7928-4ad9-9d45-1068ea50fdfb"
       ]
     },
     "A3 update ids out of order + redelivery": {
       "runIds": [
-        "run_13a8dab8bdc642678d012d394f6d8952"
+        "run_489dbe9ef12948ec9129cab872f2c139"
       ],
       "inboxEvents": [
-        "140571",
-        "140570"
+        "138901",
+        "138900"
       ],
       "outboxIds": [
-        "a2bd321b-fdcd-425a-963a-9efde7f6c16a"
+        "45f921e8-5bdb-4297-aa42-de4c7ceae997"
       ]
     },
     "A4 webhook cut client-side x3, then retried x3": {
       "runIds": [
-        "run_5031e477992d4f60b5680bef289ed1e5"
+        "run_0739542896104e00909041fdad4fe355"
       ],
       "inboxEvents": [
-        "140580"
+        "138910"
       ],
       "outboxIds": [
-        "1ab05eff-3c29-4113-ba34-071fdef54024"
+        "8f9ed837-cf8a-476e-8a57-3803d8fe2f82"
       ]
     },
     "c1_http_sequential_x10": {
-      "conversation": "conv_430f143d74f741a3a09a881ea73f3397",
+      "conversation": "conv_1e5095e54891484caeea749d14195f11",
       "runIds": [
-        "run_c02937a314db498d9d808b38061cd6f8"
+        "run_5a2aa83ebc68494280bfa18483325e93"
       ]
     },
     "c1b_http_repeat_while_running_x6": {
-      "conversation": "conv_5625af493df14696965c3d3b54cf866a",
+      "conversation": "conv_36031475a0e345a5b5549303f2f3e3a6",
       "runIds": [
-        "run_5fa110ec579c479487d5d590556077a5"
+        "run_6897242ac3a6490caffecb14895207eb"
       ]
     },
     "c2_http_concurrent_x10": {
-      "conversation": "conv_6671d68b5e0b42dc97a7288bff8acc2d",
+      "conversation": "conv_d463b6c47bd94b0f8a742f1167de5d1d",
       "runIds": [
-        "run_674b81acceaa421095668a46303f9f85"
+        "run_afda3f0e57ce4f32938db697dd196476"
       ]
     },
     "c3_sse_same_key_x2": {
-      "conversation": "conv_c541cf0803ef44239ff6d6d3686a30b2",
+      "conversation": "conv_fcf83ca62c6e4b529345fb3820dc8c19",
       "runIds": [
-        "run_03c19d07839e484d9f1be4edb280bfc2"
+        "run_b208023a5ad54c2ab399eb42cb19372e"
       ]
     },
     "c3_sse_after_replay": {
-      "conversation": "conv_c541cf0803ef44239ff6d6d3686a30b2",
+      "conversation": "conv_fcf83ca62c6e4b529345fb3820dc8c19",
       "runIds": [
-        "run_03c19d07839e484d9f1be4edb280bfc2"
+        "run_b208023a5ad54c2ab399eb42cb19372e"
       ]
     },
     "c4_conflict_after_run": {
-      "conversation": "conv_6d07f99a8cc5444dbda940169b267a89",
+      "conversation": "conv_88ab1cf8594548ef897f35c79ad03ce2",
       "runIds": [
-        "run_1595df8be0434d29b6da8ba9cd737811"
+        "run_55cc9234599246c181c64f474557bd31"
       ]
     },
     "d1_ws_same_and_second_socket": {
-      "conversation": "conv_6abf1488160342e6832236bce25bad41",
+      "conversation": "conv_5d5287a0c8f245e89617f821ac663e33",
       "runIds": [
-        "run_1ad4768d9a144f748e4f4655dd605e58"
+        "run_eaa09d33b89a444c975a734763dd550c"
       ]
     },
     "d2_ws_two_sockets_concurrent": {
-      "conversation": "conv_d2517dcaaabd4eedb274f3244efe2152",
+      "conversation": "conv_aeead13001af4f0b9acde626a3f7b19a",
       "runIds": [
-        "run_1f29bff754ad4d9cbffdcdb3a6f45368"
+        "run_a88d0562824e45afbdebc15f228eb7aa"
       ]
     }
   },
   "notes": [
-    "A3: update 140571 (delta) arrived before 140570 (charlie); the transcript order is delta then charlie. Chat order follows arrival, not update_id.",
+    "A3: update 138901 (delta) arrived before 138900 (charlie); the transcript order is delta then charlie. Chat order follows arrival, not update_id.",
     "A5: a redelivered update id with different content is dropped silently (200, no turn, no notice); it is not rejected as a conflict the way a changed client_message_id is on the HTTP and WebSocket doors.",
     "b: `unknown` is a reply the product will not resend because the platform may already have it. Where the platform did not have it (timeout without delivery, 502), the user never receives that reply; the product trades a possible duplicate for a possible silent loss on non-idempotent Telegram, as deliveryAfterFailure documents.",
-    "C5 not exercised: this Runtime has no content moderation adapter (documented in openChatAssets: every upload ends failed as unavailable, 503), so no asset becomes ready; upload statuses 201,503,503. Asset-hash idempotency stays unmeasured."
+    "C5 not exercised: this Runtime has no content moderation adapter (documented in openChatAssets: every upload ends failed as unavailable, 503), so no asset becomes ready; upload statuses 503,201,503. Asset-hash idempotency stays unmeasured."
   ],
-  "defects": [
-    {
-      "title": "SSE send replayed on a key whose Run already ended never closes",
-      "severity": "low",
-      "expected": "A replayed send on a finished Run answers with the accepted event and ends the stream (the stream is documented to end when its Run ends).",
-      "actual": "The stream stayed open for 8 s and was cut by the client; frames: message.accepted",
-      "repro": "POST /v1/conversations/:id/messages Accept: text/event-stream twice with one client_message_id, the second after the Run completed; the second response never ends (src/index.ts openEventStream waits for a run.state event that is never published again)."
-    },
-    {
-      "title": "Chat WebSocket ignores an API key sent in the Authorization header of the upgrade",
-      "severity": "low",
-      "expected": "Spec and the server's own error text: API keys go in the Authorization header or the first message.",
-      "actual": "client.hello without auth_token after an upgrade with Authorization: Bearer <api key> is refused: hello refused: {\"code\":\"protocol_error\",\"message\":\"auth_token: auth_token is required\"}. Only the first message (auth_token) or a session cookie works.",
-      "repro": "Open wss://<runtime>/v1/runtime with Authorization: Bearer <api key>, send client.hello without auth_token (src/index.ts withUpgradeToken only reads the hatch_session cookie)."
-    },
-    {
-      "title": "Concurrent POST /v1/creator/products with one Idempotency-Key fails with 500 instead of replaying",
-      "severity": "medium",
-      "expected": "Concurrent requests with one Idempotency-Key and one payload all return the same Product (201), as a sequential replay does.",
-      "actual": "4 of 5 concurrent creates returned 500: {\"error\":{\"code\":\"23505\",\"message\":\"Factory Agent definitions are unavailable.\"},\"detail\":\"Factory Agent definitions are unavailable.\"}. Exactly one Product was created.",
-      "repro": "Send 5 POST /v1/creator/products at once with the same Idempotency-Key and body (scenario 4, part E4)."
-    },
-    {
-      "title": "Concurrent worker sends with one Idempotency-Key fail with 500 instead of replaying",
-      "severity": "medium",
-      "expected": "Concurrent sends with one Idempotency-Key and one content all return the one accepted message (202), as a sequential replay does.",
-      "actual": "1 of 5 concurrent sends returned 500: {\"error\":{\"code\":\"ENOENT\",\"message\":\"Factory Agent definitions are unavailable.\"},\"detail\":\"Factory Agent definitions are unavailable.\"}. Exactly one message was stored.",
-      "repro": "POST /v1/creator/products/:id/workers/research/messages five times at once with one Idempotency-Key and one body (scenario 4, part E4)."
-    }
-  ]
+  "defects": []
 }

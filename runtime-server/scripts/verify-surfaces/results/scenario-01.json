@@ -1,8 +1,8 @@
 {
   "id": 1,
   "title": "Crash: kill -9 Runtime and Registry mid-Run, rolling restart, local-tool wait",
-  "status": "FAIL",
-  "durationMs": 471533,
+  "status": "PASS",
+  "durationMs": 314360,
   "checks": [
     {
       "name": "a1: every Run reached the slow web_search before the crash",
@@ -30,9 +30,9 @@
       "ok": true,
       "detail": {
         "replyMs": [
-          37799,
-          37804,
-          13716
+          37642,
+          13502,
+          37648
         ]
       }
     },
@@ -95,9 +95,9 @@
       "ok": true,
       "detail": {
         "replyMs": [
-          33766,
-          31744,
-          46811
+          34144,
+          33133,
+          35156
         ]
       }
     },
@@ -160,9 +160,9 @@
       "ok": true,
       "detail": {
         "replyMs": [
-          16999,
-          17008,
-          17017
+          20207,
+          20213,
+          20217
         ]
       }
     },
@@ -213,12 +213,12 @@
     },
     {
       "name": "b2: every reply within 90 s of the kill (recovery is prompt)",
-      "ok": false,
+      "ok": true,
       "detail": {
         "replyMs": [
-          187995,
-          12731,
-          10723
+          38783,
+          11709,
+          11713
         ]
       }
     },
@@ -281,9 +281,9 @@
       "ok": true,
       "detail": {
         "replyMs": [
-          40395,
-          38378,
-          38387
+          32520,
+          32535,
+          36561
         ]
       }
     },
@@ -341,12 +341,12 @@
         {
           "code": 1006,
           "reason": "",
-          "at": 1794258294460
+          "at": 1794266830506
         },
         {
           "code": 1006,
           "reason": "",
-          "at": 1794258294460
+          "at": 1794266830506
         }
       ]
     },
@@ -385,7 +385,7 @@
       "ok": true,
       "detail": {
         "status": 404,
-        "body": "{\"error\":{\"code\":\"unknown_tool_call\",\"message\":\"No pending tool request for call_13247985161216210762\"}}"
+        "body": "{\"error\":{\"code\":\"unknown_tool_call\",\"message\":\"No pending tool request for call_2267042293220018974\"}}"
       }
     },
     {
@@ -393,7 +393,7 @@
       "ok": true,
       "detail": {
         "status": "waiting_for_tool",
-        "executor_id": "executor_6416eed79fb7465187e5b4ce2e9c292a",
+        "executor_id": "executor_62f94f49b36643a8afd5f135340e1878",
         "interrupted_reason": null
       }
     },
@@ -415,7 +415,7 @@
       "ok": true,
       "detail": {
         "status": 404,
-        "body": "{\"error\":{\"code\":\"unknown_tool_call\",\"message\":\"No pending tool request for call_892830509211814616\"}}"
+        "body": "{\"error\":{\"code\":\"unknown_tool_call\",\"message\":\"No pending tool request for call_10698684922393778265\"}}"
       }
     },
     {
@@ -431,10 +431,10 @@
       "ok": true,
       "detail": [
         {
-          "tool_call_id": "call_892830509211814616",
+          "tool_call_id": "call_10698684922393778265",
           "name": "file_list",
-          "expires_at": "2026-11-09T21:09:50.319Z",
-          "answered_at": "2026-11-09T21:05:18.903Z",
+          "expires_at": "2026-11-09T23:32:07.173Z",
+          "answered_at": "2026-11-09T23:27:36.152Z",
           "answered": true
         }
       ]
@@ -442,7 +442,7 @@
     {
       "name": "d1: assistant replies for the Run = 1",
       "ok": true,
-      "detail": 1195
+      "detail": 1199
     },
     {
       "name": "d2: Run completed with one final reply carrying the answer",
@@ -457,10 +457,10 @@
       "ok": true,
       "detail": [
         {
-          "tool_call_id": "call_13247985161216210762",
+          "tool_call_id": "call_2267042293220018974",
           "name": "file_list",
-          "expires_at": "2026-11-09T21:09:53.305Z",
-          "answered_at": "2026-11-09T21:04:54.788Z",
+          "expires_at": "2026-11-09T23:32:09.978Z",
+          "answered_at": "2026-11-09T23:27:10.985Z",
           "answered": true
         }
       ]
@@ -468,7 +468,7 @@
     {
       "name": "d2: assistant replies for the Run = 1",
       "ok": true,
-      "detail": 1199
+      "detail": 1197
     },
     {
       "name": "d3: the unanswered call timed out (the model was told) and the Run ended with a final reply",
@@ -512,8 +512,8 @@
     ],
     "a1_executor_changed": [
       true,
-      true,
-      false
+      false,
+      true
     ],
     "a1_sends_per_sender": [
       1,
@@ -532,33 +532,33 @@
     ],
     "a1_web_search_calls_per_sender": [
       2,
-      2,
-      1
+      1,
+      2
     ],
     "a1_events_with_tool_not_completed_per_run": [
       1,
-      1,
-      0
+      0,
+      1
     ],
     "a1_ms_from_kill_to_first_reply": [
-      37799,
-      37804,
-      13716
+      37642,
+      13502,
+      37648
     ],
     "a1_reply_texts": [
       [
-        "DONE-a15060"
+        "DONE-a113320"
       ],
       [
-        "DONE-a15061"
+        "DONE-a113321"
       ],
       [
-        "DONE-a15062"
+        "DONE-a113322"
       ]
     ],
     "a1_run_starts_per_instance": {
-      "64618": 2,
-      "64635": 1
+      "50126": 2,
+      "50140": 1
     },
     "a2_accepted_webhooks": 3,
     "a2_inbox_rows": [
@@ -612,22 +612,22 @@
       1
     ],
     "a2_ms_from_kill_to_first_reply": [
-      33766,
-      31744,
-      46811
+      34144,
+      33133,
+      35156
     ],
     "a2_reply_texts": [
       [
-        "DONE-a25063"
+        "DONE-a213323"
       ],
       [
-        "DONE-a25064"
+        "DONE-a213324"
       ],
       [
-        "DONE-a25065"
+        "DONE-a213325"
       ]
     ],
-    "a2_rolling_restart_ms": 938,
+    "a2_rolling_restart_ms": 937,
     "b1_accepted_webhooks": 3,
     "b1_inbox_rows": [
       1,
@@ -680,19 +680,19 @@
       0
     ],
     "b1_ms_from_kill_to_first_reply": [
-      16999,
-      17008,
-      17017
+      20207,
+      20213,
+      20217
     ],
     "b1_reply_texts": [
       [
-        "DONE-b15066"
+        "DONE-b113326"
       ],
       [
-        "DONE-b15067"
+        "DONE-b113327"
       ],
       [
-        "DONE-b15068"
+        "DONE-b113328"
       ]
     ],
     "b1_sends_while_registry_down": [
@@ -752,19 +752,19 @@
       0
     ],
     "b2_ms_from_kill_to_first_reply": [
-      187995,
-      12731,
-      10723
+      38783,
+      11709,
+      11713
     ],
     "b2_reply_texts": [
       [
-        "DONE-b25069"
+        "DONE-b213329"
       ],
       [
-        "DONE-b25070"
+        "DONE-b213330"
       ],
       [
-        "DONE-b25071"
+        "DONE-b213331"
       ]
     ],
     "b2_post_while_registry_down": {
@@ -828,42 +828,42 @@
       1
     ],
     "c_ms_from_kill_to_first_reply": [
-      40395,
-      38378,
-      38387
+      32520,
+      32535,
+      36561
     ],
     "c_reply_texts": [
       [
-        "DONE-c5072"
+        "DONE-c13332"
       ],
       [
-        "DONE-c5073"
+        "DONE-c13333"
       ],
       [
-        "DONE-c5074"
+        "DONE-c13334"
       ]
     ],
-    "c_restart_after_ms": 6247,
-    "d_roll_ms": 1150,
+    "c_restart_after_ms": 6366,
+    "d_roll_ms": 942,
     "d_after_crash_status": [
       "waiting_for_tool",
       "waiting_for_tool"
     ],
     "d_after_crash_pending_tool_calls": [
       [
-        "call_892830509211814616"
+        "call_10698684922393778265"
       ],
       [
-        "call_13247985161216210762"
+        "call_2267042293220018974"
       ]
     ],
     "d_answer_from_web_client_status": 403,
     "d2_answer_status_before_takeover": 200,
-    "d2_answer_upstream": "50435",
+    "d2_answer_upstream": "50861",
     "d2_second_answer_status": 404,
-    "d1_ms_until_another_instance_took_the_run": 25561,
+    "d1_ms_until_another_instance_took_the_run": 26129,
     "d1_answer_status_after_takeover": 200,
-    "d1_answer_upstream": "50423",
+    "d1_answer_upstream": "50872",
     "d1_second_answer_status": 404,
     "d1_final_status": "completed",
     "d1_final_text": "DONE-d1 2",
@@ -871,386 +871,386 @@
     "d2_final_status": "completed",
     "d2_final_text": "DONE-d2 2",
     "d2_recorded_calls": 1,
-    "d3_ms_until_recorded_expiry_at_kill": 29496,
+    "d3_ms_until_recorded_expiry_at_kill": 29521,
     "d3_pending_calls_before_expiry": 1,
     "d3_final_status": "completed",
     "d3_final_text": "DONE-d3 0",
-    "d3_ms_from_recorded_expiry_to_run_end": 4577,
+    "d3_ms_from_recorded_expiry_to_run_end": 5040,
     "d3_late_answer_status": 404
   },
   "evidence": {
     "a1": {
-      "killAt": 1794257902593,
+      "killAt": 1794266596484,
       "inbox": [
         [
           {
-            "event_id": "130680",
+            "event_id": "100477",
             "state": "done",
-            "run_id": "run_b190bea2796f47919c2ac601b03afcb2",
+            "run_id": "run_653df3f1c8554eb79ccb75091fe19e4e",
             "attempts": 1,
-            "received_ms": "1794257897288",
-            "replied_ms": "1794257940389"
+            "received_ms": "1794266590907",
+            "replied_ms": "1794266634120"
           }
         ],
         [
           {
-            "event_id": "130681",
+            "event_id": "100478",
             "state": "done",
-            "run_id": "run_cb3335effa01423b8ff7bc4fed27993f",
+            "run_id": "run_619e804a347e4a47a20a3cbe87300086",
             "attempts": 1,
-            "received_ms": "1794257897291",
-            "replied_ms": "1794257940394"
+            "received_ms": "1794266590910",
+            "replied_ms": "1794266609979"
           }
         ],
         [
           {
-            "event_id": "130682",
+            "event_id": "100479",
             "state": "done",
-            "run_id": "run_ef0e53c6a039424d9ede19a7e014c67c",
+            "run_id": "run_6981ef87e7d94b048f5873be65cce448",
             "attempts": 1,
-            "received_ms": "1794257897296",
-            "replied_ms": "1794257916298"
+            "received_ms": "1794266590912",
+            "replied_ms": "1794266634128"
           }
         ]
       ],
       "runs": [
         [
           {
-            "id": "run_b190bea2796f47919c2ac601b03afcb2",
+            "id": "run_653df3f1c8554eb79ccb75091fe19e4e",
             "status": "completed",
             "reason": null,
-            "created_ms": "1794257897346",
-            "completed_ms": "1794257938393"
+            "created_ms": "1794266590967",
+            "completed_ms": "1794266632678"
           }
         ],
         [
           {
-            "id": "run_cb3335effa01423b8ff7bc4fed27993f",
+            "id": "run_619e804a347e4a47a20a3cbe87300086",
             "status": "completed",
             "reason": null,
-            "created_ms": "1794257897380",
-            "completed_ms": "1794257939730"
+            "created_ms": "1794266591021",
+            "completed_ms": "1794266608568"
           }
         ],
         [
           {
-            "id": "run_ef0e53c6a039424d9ede19a7e014c67c",
+            "id": "run_6981ef87e7d94b048f5873be65cce448",
             "status": "completed",
             "reason": null,
-            "created_ms": "1794257897401",
-            "completed_ms": "1794257915267"
+            "created_ms": "1794266591009",
+            "completed_ms": "1794266633330"
           }
         ]
       ],
       "sendAt": [
         [
-          1794257940392
+          1794266634126
         ],
         [
-          1794257940397
+          1794266609986
         ],
         [
-          1794257916309
+          1794266634132
         ]
       ]
     },
     "a2": {
-      "killAt": 1794257954881,
+      "killAt": 1794266648309,
       "inbox": [
         [
           {
-            "event_id": "130683",
+            "event_id": "100480",
             "state": "done",
-            "run_id": "run_4d5896c1f62049a28d1f8ef57bb0e6b2",
+            "run_id": "run_5ae2b764f0fc469c975362513ce823e0",
             "attempts": 1,
-            "received_ms": "1794257949581",
-            "replied_ms": "1794257988642"
+            "received_ms": "1794266643018",
+            "replied_ms": "1794266682450"
           }
         ],
         [
           {
-            "event_id": "130684",
+            "event_id": "100481",
             "state": "done",
-            "run_id": "run_73dc4389d96e4d82a3b1d1b7772bc5ca",
+            "run_id": "run_81f716e743094b2cbacd1867cd8c4061",
             "attempts": 1,
-            "received_ms": "1794257949583",
-            "replied_ms": "1794257986629"
+            "received_ms": "1794266643020",
+            "replied_ms": "1794266680437"
           }
         ],
         [
           {
-            "event_id": "130685",
+            "event_id": "100482",
             "state": "done",
-            "run_id": "run_dc1386adf74549719168812067bbf85e",
+            "run_id": "run_5c4d9a57e7b64ed780f3fbe8a219c233",
             "attempts": 1,
-            "received_ms": "1794257949585",
-            "replied_ms": "1794258000685"
+            "received_ms": "1794266643021",
+            "replied_ms": "1794266682456"
           }
         ]
       ],
       "runs": [
         [
           {
-            "id": "run_4d5896c1f62049a28d1f8ef57bb0e6b2",
+            "id": "run_5ae2b764f0fc469c975362513ce823e0",
             "status": "completed",
             "reason": null,
-            "created_ms": "1794257949626",
-            "completed_ms": "1794257987273"
+            "created_ms": "1794266643061",
+            "completed_ms": "1794266681424"
           }
         ],
         [
           {
-            "id": "run_73dc4389d96e4d82a3b1d1b7772bc5ca",
+            "id": "run_81f716e743094b2cbacd1867cd8c4061",
             "status": "completed",
             "reason": null,
-            "created_ms": "1794257949646",
-            "completed_ms": "1794257986400"
+            "created_ms": "1794266643082",
+            "completed_ms": "1794266679658"
           }
         ],
         [
           {
-            "id": "run_dc1386adf74549719168812067bbf85e",
+            "id": "run_5c4d9a57e7b64ed780f3fbe8a219c233",
             "status": "completed",
             "reason": null,
-            "created_ms": "1794257949657",
-            "completed_ms": "1794257999590"
+            "created_ms": "1794266643095",
+            "completed_ms": "1794266680917"
           }
         ]
       ],
       "sendAt": [
         [
-          1794257988647
+          1794266682453
         ],
         [
-          1794257986625
+          1794266681442
         ],
         [
-          1794258001692
+          1794266683465
         ]
       ]
     },
     "b1": {
-      "killAt": 1794258015240,
+      "killAt": 1794266697173,
       "inbox": [
         [
           {
-            "event_id": "130686",
+            "event_id": "100483",
             "state": "done",
-            "run_id": "run_9d37b50ec84e413ea6e07cc53a46960a",
+            "run_id": "run_e34f811d825d425785ebc373c6f2510b",
             "attempts": 1,
-            "received_ms": "1794258009952",
-            "replied_ms": "1794258032235"
+            "received_ms": "1794266691620",
+            "replied_ms": "1794266717376"
           }
         ],
         [
           {
-            "event_id": "130687",
+            "event_id": "100484",
             "state": "done",
-            "run_id": "run_7b65008e4e0d494cb66eb4766d12decb",
+            "run_id": "run_b31da9bd755b48a3a7affccd14827aac",
             "attempts": 1,
-            "received_ms": "1794258009955",
-            "replied_ms": "1794258032242"
+            "received_ms": "1794266691623",
+            "replied_ms": "1794266717383"
           }
         ],
         [
           {
-            "event_id": "130688",
+            "event_id": "100485",
             "state": "done",
-            "run_id": "run_40181aed7b7d4451bba176913e15e332",
+            "run_id": "run_cef13ef11b894345a3e342e96bcd267b",
             "attempts": 1,
-            "received_ms": "1794258009957",
-            "replied_ms": "1794258032250"
+            "received_ms": "1794266691625",
+            "replied_ms": "1794266717387"
           }
         ]
       ],
       "runs": [
         [
           {
-            "id": "run_9d37b50ec84e413ea6e07cc53a46960a",
+            "id": "run_e34f811d825d425785ebc373c6f2510b",
             "status": "completed",
             "reason": null,
-            "created_ms": "1794258009991",
-            "completed_ms": "1794258027844"
+            "created_ms": "1794266691660",
+            "completed_ms": "1794266713416"
           }
         ],
         [
           {
-            "id": "run_7b65008e4e0d494cb66eb4766d12decb",
+            "id": "run_b31da9bd755b48a3a7affccd14827aac",
             "status": "completed",
             "reason": null,
-            "created_ms": "1794258010012",
-            "completed_ms": "1794258027903"
+            "created_ms": "1794266691682",
+            "completed_ms": "1794266711736"
           }
         ],
         [
           {
-            "id": "run_40181aed7b7d4451bba176913e15e332",
+            "id": "run_cef13ef11b894345a3e342e96bcd267b",
             "status": "completed",
             "reason": null,
-            "created_ms": "1794258010020",
-            "completed_ms": "1794258027272"
+            "created_ms": "1794266691693",
+            "completed_ms": "1794266710449"
           }
         ]
       ],
       "sendAt": [
         [
-          1794258032239
+          1794266717380
         ],
         [
-          1794258032248
+          1794266717386
         ],
         [
-          1794258032257
+          1794266717390
         ]
       ]
     },
     "b2": {
-      "killAt": 1794258040530,
+      "killAt": 1794266725448,
       "inbox": [
         [
           {
-            "event_id": "130689",
+            "event_id": "100486",
             "state": "done",
-            "run_id": "run_d85277413aa64d51b4b1c702690bfbad",
+            "run_id": "run_990ccadc3bd74e0db4a5258c81bf623c",
             "attempts": 2,
-            "received_ms": "1794258040524",
-            "replied_ms": "1794258228523"
+            "received_ms": "1794266725443",
+            "replied_ms": "1794266763224"
           }
         ],
         [
           {
-            "event_id": "130690",
+            "event_id": "100487",
             "state": "done",
-            "run_id": "run_e400a43580f24c07a4b0d05d933702f1",
+            "run_id": "run_270b225121844a59b2404ac3744e439a",
             "attempts": 1,
-            "received_ms": "1794258040526",
-            "replied_ms": "1794258052254"
+            "received_ms": "1794266725445",
+            "replied_ms": "1794266737150"
           }
         ],
         [
           {
-            "event_id": "130691",
+            "event_id": "100488",
             "state": "done",
-            "run_id": "run_1f5e3ced872d4b97bd7fcb632fc37a03",
+            "run_id": "run_e9c14cb209074915808806b4fa56aa8f",
             "attempts": 1,
-            "received_ms": "1794258040528",
-            "replied_ms": "1794258050244"
+            "received_ms": "1794266725447",
+            "replied_ms": "1794266737158"
           }
         ]
       ],
       "runs": [
         [
           {
-            "id": "run_d85277413aa64d51b4b1c702690bfbad",
+            "id": "run_990ccadc3bd74e0db4a5258c81bf623c",
             "status": "completed",
             "reason": null,
-            "created_ms": "1794258220811",
-            "completed_ms": "1794258227378"
+            "created_ms": "1794266756279",
+            "completed_ms": "1794266762753"
           }
         ],
         [
           {
-            "id": "run_e400a43580f24c07a4b0d05d933702f1",
+            "id": "run_270b225121844a59b2404ac3744e439a",
             "status": "completed",
             "reason": null,
-            "created_ms": "1794258044233",
-            "completed_ms": "1794258050613"
+            "created_ms": "1794266729109",
+            "completed_ms": "1794266735155"
           }
         ],
         [
           {
-            "id": "run_1f5e3ced872d4b97bd7fcb632fc37a03",
+            "id": "run_e9c14cb209074915808806b4fa56aa8f",
             "status": "completed",
             "reason": null,
-            "created_ms": "1794258044234",
-            "completed_ms": "1794258049852"
+            "created_ms": "1794266729109",
+            "completed_ms": "1794266735794"
           }
         ]
       ],
       "sendAt": [
         [
-          1794258228525
+          1794266764231
         ],
         [
-          1794258053261
+          1794266737157
         ],
         [
-          1794258051253
+          1794266737161
         ]
       ]
     },
     "c": {
-      "killAt": 1794258237589,
+      "killAt": 1794266778092,
       "inbox": [
         [
           {
-            "event_id": "130692",
+            "event_id": "100489",
             "state": "done",
-            "run_id": "run_2104bbe6234f438da3536115cb560a7a",
+            "run_id": "run_f550ad89137d47a89ec5fde4789aa83b",
             "attempts": 1,
-            "received_ms": "1794258232299",
-            "replied_ms": "1794258277981"
+            "received_ms": "1794266772291",
+            "replied_ms": "1794266810602"
           }
         ],
         [
           {
-            "event_id": "130693",
+            "event_id": "100490",
             "state": "done",
-            "run_id": "run_beb741dbae5a405698622c4d06941609",
+            "run_id": "run_83fca11ca44c4b8b8d6b8144996a2fdc",
             "attempts": 1,
-            "received_ms": "1794258232301",
-            "replied_ms": "1794258275959"
+            "received_ms": "1794266772293",
+            "replied_ms": "1794266810617"
           }
         ],
         [
           {
-            "event_id": "130694",
+            "event_id": "100491",
             "state": "done",
-            "run_id": "run_e1e69a7084484ae083e4ad00b86a9d02",
+            "run_id": "run_3d36b2f8c8864e0e90db2d3e29a6cc18",
             "attempts": 1,
-            "received_ms": "1794258232302",
-            "replied_ms": "1794258275972"
+            "received_ms": "1794266772295",
+            "replied_ms": "1794266814648"
           }
         ]
       ],
       "runs": [
         [
           {
-            "id": "run_2104bbe6234f438da3536115cb560a7a",
+            "id": "run_f550ad89137d47a89ec5fde4789aa83b",
             "status": "completed",
             "reason": null,
-            "created_ms": "1794258232312",
-            "completed_ms": "1794258277386"
+            "created_ms": "1794266772310",
+            "completed_ms": "1794266810015"
           }
         ],
         [
           {
-            "id": "run_beb741dbae5a405698622c4d06941609",
+            "id": "run_83fca11ca44c4b8b8d6b8144996a2fdc",
             "status": "completed",
             "reason": null,
-            "created_ms": "1794258232339",
-            "completed_ms": "1794258275146"
+            "created_ms": "1794266772328",
+            "completed_ms": "1794266810473"
           }
         ],
         [
           {
-            "id": "run_e1e69a7084484ae083e4ad00b86a9d02",
+            "id": "run_3d36b2f8c8864e0e90db2d3e29a6cc18",
             "status": "completed",
             "reason": null,
-            "created_ms": "1794258232333",
-            "completed_ms": "1794258274733"
+            "created_ms": "1794266772331",
+            "completed_ms": "1794266813394"
           }
         ]
       ],
       "sendAt": [
         [
-          1794258277984
+          1794266810612
         ],
         [
-          1794258275967
+          1794266810627
         ],
         [
-          1794258275976
+          1794266814653
         ]
       ]
     },
@@ -1344,23 +1344,23 @@
     "d3_journal": [
       {
         "type": "run.created",
-        "payload": "{\"id\":\"run_a3fcec0a0ce342b2843858fe1ce853bf\",\"status\":\"queued\",\"input_digest\":\"sha256:a2b9095be321466a23dafa79d6633076777d58909c0f6ce9cd2a94f6bc4f56ee\",\"corpus_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        "payload": "{\"id\":\"run_7107f3901f3847439e2ebd437397807e\",\"status\":\"queued\",\"input_digest\":\"sha256:a2b9095be321466a23dafa79d6633076777d58909c0f6ce9cd2a94f6bc4f56ee\",\"corpus_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       },
       {
         "type": "message.created",
-        "payload": "{\"role\":\"user\",\"client_message_id\":\"376249b7-5f38-49ee-9242-b93a3c9f7292\"}"
+        "payload": "{\"role\":\"user\",\"client_message_id\":\"2210cb01-c8ab-4fe1-a074-9aea35e017c8\"}"
       },
       {
         "type": "run.state",
-        "payload": "{\"id\":\"run_a3fcec0a0ce342b2843858fe1ce853bf\",\"status\":\"running\",\"input_digest\":\"sha256:a2b9095be321466a23dafa79d6633076777d58909c0f6ce9cd2a94f6bc4f56ee\",\"corpus_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        "payload": "{\"id\":\"run_7107f3901f3847439e2ebd437397807e\",\"status\":\"running\",\"input_digest\":\"sha256:a2b9095be321466a23dafa79d6633076777d58909c0f6ce9cd2a94f6bc4f56ee\",\"corpus_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       },
       {
         "type": "run.state",
-        "payload": "{\"id\":\"run_a3fcec0a0ce342b2843858fe1ce853bf\",\"status\":\"waiting_for_tool\",\"input_digest\":\"sha256:a2b9095be321466a23dafa79d6633076777d58909c0f6ce9cd2a94f6bc4f56ee\",\"corpus_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        "payload": "{\"id\":\"run_7107f3901f3847439e2ebd437397807e\",\"status\":\"waiting_for_tool\",\"input_digest\":\"sha256:a2b9095be321466a23dafa79d6633076777d58909c0f6ce9cd2a94f6bc4f56ee\",\"corpus_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       },
       {
         "type": "run.state",
-        "payload": "{\"id\":\"run_a3fcec0a0ce342b2843858fe1ce853bf\",\"status\":\"running\",\"input_digest\":\"sha256:a2b9095be321466a23dafa79d6633076777d58909c0f6ce9cd2a94f6bc4f56ee\",\"corpus_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        "payload": "{\"id\":\"run_7107f3901f3847439e2ebd437397807e\",\"status\":\"running\",\"input_digest\":\"sha256:a2b9095be321466a23dafa79d6633076777d58909c0f6ce9cd2a94f6bc4f56ee\",\"corpus_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       },
       {
         "type": "message.created",
@@ -1368,24 +1368,16 @@
       },
       {
         "type": "run.state",
-        "payload": "{\"id\":\"run_a3fcec0a0ce342b2843858fe1ce853bf\",\"status\":\"completed\",\"input_digest\":\"sha256:a2b9095be321466a23dafa79d6633076777d58909c0f6ce9cd2a94f6bc4f56ee\",\"corpus_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        "payload": "{\"id\":\"run_7107f3901f3847439e2ebd437397807e\",\"status\":\"completed\",\"input_digest\":\"sha256:a2b9095be321466a23dafa79d6633076777d58909c0f6ce9cd2a94f6bc4f56ee\",\"corpus_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       }
     ],
     "d3_call_outcome": null,
     "d3_transcript_tool_messages": [
-      "{\"type\": \"conversation.model_message\", \"run_id\": \"run_a3fcec0a0ce342b2843858fe1ce853bf\", \"message\": {\"role\": \"tool\", \"content\": null, \"tool_name\": \"file_list\", \"tool_call_id\": \"call_3150498503856041032\", \"tool_content\": [{\"text\": \"{\\\"status\\\":\\\"error\\\",\\\"error\\\":{\\\"code\\\":\\\"tool_not_completed\\\",\\\"message\\\":\\\"Timed out waiting for client tool result: file_list\\\"}}\", \"type\": \"text\"}], \"tool_is_error"
+      "{\"type\": \"conversation.model_message\", \"run_id\": \"run_7107f3901f3847439e2ebd437397807e\", \"message\": {\"role\": \"tool\", \"content\": null, \"tool_name\": \"file_list\", \"tool_call_id\": \"call_13928506454745711840\", \"tool_content\": [{\"text\": \"{\\\"status\\\":\\\"error\\\",\\\"error\\\":{\\\"code\\\":\\\"tool_not_completed\\\",\\\"message\\\":\\\"Timed out waiting for client tool result: file_list\\\"}}\", \"type\": \"text\"}], \"tool_is_erro"
     ]
   },
   "notes": [
     "Fakes: the messaging platform and the web-search provider are the tool's local fakes; the org Connection row is inserted by Stack.connection (no product API yet). Model is real."
   ],
-  "defects": [
-    {
-      "title": "An inbox event claimed by a Registry that is killed waits out the whole 3-minute inbox lease before it is processed",
-      "severity": "low",
-      "expected": "After the Registry restarts, an accepted webhook message is processed within seconds (the other two events accepted in the same instant were).",
-      "actual": "b2: the event the dead Registry had claimed (inbox attempts=2) was replied to 188 s after the kill; the siblings took about 11 s. Nothing was lost or duplicated.",
-      "repro": "scenario 1, trial b2: post 3 signed Telegram webhooks, kill -9 the Registry immediately after the 200s, restart it 3 s later. Row in hatch_channel_inbox with attempts=2 gets its Run 180 s after receipt (INBOX_LEASE_MS = 3 min in src/channels/service.ts)."
-    }
-  ]
+  "defects": []
 }

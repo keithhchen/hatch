@@ -56,7 +56,8 @@ export class Stack {
   get url() { return this.edge.url; }
   get registryUrl() { return `http://127.0.0.1:${this.registryPort}`; }
   secrets() {
-    const env = {};
+    // The servers import dotenv/config; a developer's runtime-server/.env must never reach the isolated stack.
+    const env = { DOTENV_CONFIG_PATH: "/dev/null" };
     for (const name of ["GEMINI_API_KEY", "LLM_API_KEY"]) if (process.env[name]) env[name] = process.env[name];
     return env;
   }

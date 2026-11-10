@@ -1,51 +1,13 @@
 {
   "id": 5,
   "title": "Atomic steer: messages raced at the moment a Run ends; IM bursts",
-  "status": "FAIL",
-  "durationMs": 230549,
+  "status": "PASS",
+  "durationMs": 250149,
   "checks": [
     {
       "name": "lost = 0: every accepted message is stored once, reached the model once, and was answered inside a completed Run",
-      "ok": false,
-      "detail": [
-        {
-          "trial": 18,
-          "text": "Reply with exactly the word: t18m0",
-          "journal": 1,
-          "model": 1,
-          "status": "failed",
-          "addressed": false
-        },
-        {
-          "trial": 18,
-          "text": "Reply with exactly the word: t18m1",
-          "journal": 1,
-          "model": 0,
-          "addressed": false
-        },
-        {
-          "trial": 18,
-          "text": "Reply with exactly the word: t18m2",
-          "journal": 1,
-          "model": 0,
-          "addressed": false
-        },
-        {
-          "trial": 24,
-          "text": "Reply with exactly the word: t24m0",
-          "journal": 1,
-          "model": 1,
-          "status": "failed",
-          "addressed": false
-        },
-        {
-          "trial": 24,
-          "text": "Reply with exactly the word: t24m1",
-          "journal": 1,
-          "model": 0,
-          "addressed": false
-        }
-      ]
+      "ok": true,
+      "detail": []
     },
     {
       "name": "no client was left without an answer: a message is accepted, rejected with a code, or at least stored",
@@ -76,35 +38,19 @@
     },
     {
       "name": "no Run ended failed or interrupted",
-      "ok": false,
-      "detail": [
-        {
-          "trial": 18,
-          "run": "run_949febaaeb4245db83306b0a6793a411",
-          "status": "failed",
-          "reason": null
-        },
-        {
-          "trial": 24,
-          "run": "run_02248d9465834429b448484a721a298e",
-          "status": "failed",
-          "reason": null
-        }
-      ]
+      "ok": true,
+      "detail": []
     },
     {
       "name": "no Run ended with a steered message unclaimed",
-      "ok": false,
-      "detail": [
-        18,
-        24
-      ]
+      "ok": true,
+      "detail": []
     },
     {
       "name": "only documented rejections (conversation_busy) occurred",
       "ok": true,
       "detail": {
-        "conversation_busy": 9
+        "conversation_busy": 1
       }
     },
     {
@@ -187,7 +133,7 @@
     }
   ],
   "measurements": {
-    "calibration_median_run_ms": 2513,
+    "calibration_median_run_ms": 2943,
     "trials": 36,
     "trial_modes": {
       "delta": 18,
@@ -195,481 +141,396 @@
     },
     "messages_total": 144,
     "burst_messages": 108,
-    "accepted_by_client_signal": 135,
-    "lost": 6,
+    "accepted_by_client_signal": 143,
+    "lost": 0,
     "silent_ws_messages_without_ack_or_row": 0,
     "stored_more_than_once": 0,
     "rejections_by_code": {
-      "conversation_busy": 9
+      "conversation_busy": 1
     },
     "conversation_busy_rate": {
-      "busy": 9,
+      "busy": 1,
       "of": 108,
-      "rate": 0.083
+      "rate": 0.009
     },
     "burst_outcomes_by_database": {
-      "steered": 74,
-      "started": 25
+      "steered": 86,
+      "started": 21
     },
     "burst_accept_time_relative_to_first_run_end": {
       "0..20ms": {
-        "steered": 32,
-        "started": 19
+        "steered": 33,
+        "started": 14
       },
       "<..-500ms": {
-        "steered": 33,
+        "steered": 39,
         "started": 0
       },
       "500..>ms": {
-        "steered": 9,
-        "started": 6
+        "steered": 14,
+        "started": 7
       }
     },
     "runs_per_trial_distribution": {
-      "1": 11,
-      "2": 25
+      "1": 15,
+      "2": 21
     },
     "max_active_runs_polled_per_conversation": 1,
-    "poll_samples_total": 11298,
+    "poll_samples_total": 11317,
     "run_overlap_trials": [],
-    "steered_runs": 34,
-    "runs_with_unclaimed_steer_at_end": 2,
+    "steered_runs": 36,
+    "runs_with_unclaimed_steer_at_end": 0,
     "burst_messages_whose_reply_lacks_their_token_soft": 0,
-    "failed_or_interrupted_runs": [
-      {
-        "trial": 18,
-        "run": "run_949febaaeb4245db83306b0a6793a411",
-        "status": "failed",
-        "reason": null
-      },
-      {
-        "trial": 24,
-        "run": "run_02248d9465834429b448484a721a298e",
-        "status": "failed",
-        "reason": null
-      }
-    ],
+    "failed_or_interrupted_runs": [],
     "trial_conversations": [
       {
         "trial": 0,
         "mode": "delta",
         "offset": 0,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_18e9cb2b4b8e44108cb51317efe81f93",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_5b74cea1f0fb4a20b695e6ece656cca0",
         "runs": [
-          "run_38fc39c1a3ba46639f53a0c27c9c59b2",
-          "run_67cbe71aedc34d278da1ea288077782f"
+          "run_0c5752cf48474760ae5307babdd6d2e3"
         ]
       },
       {
         "trial": 1,
         "mode": "timed",
         "offset": -400,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_342f2cddc2e943e2815b4e4faec6c1af",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_0ce9876a1c1e465da1072180dd49a805",
         "runs": [
-          "run_d12bb1dccfd84644aff89f9a44f63f5e"
+          "run_ef3cd2bba8c74b01941b903e1e1a68f3"
         ]
       },
       {
         "trial": 2,
         "mode": "delta",
         "offset": 5,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_8888112c9ec64750bd7d2d9615f68a50",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_e25c8d71997b4921804fa4ec959c7c23",
         "runs": [
-          "run_9b4bb37465774962bb70c1bc735c63e9",
-          "run_bf8cd4ffecf746d3887afc0777d097b4"
+          "run_5c2992579fd1434d84b96b755e1488b8",
+          "run_114fdd2cfe3b43a5a8c5382624122645"
         ]
       },
       {
         "trial": 3,
         "mode": "timed",
         "offset": -200,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_b8c90fdb285645fa844fccf3b45fdaff",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_bc3148c0956940e7a5bedf1bea37e410",
         "runs": [
-          "run_32f9a12c5df1480cbfd79fc7fabd9176"
+          "run_048df8927b4f4e5c921abfd6ff99d6f6"
         ]
       },
       {
         "trial": 4,
         "mode": "delta",
         "offset": 15,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_cf76f1e8066145bfa4175632f12c753f",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_8747737cb4744302a13dbb798e7d8aba",
         "runs": [
-          "run_06169751362e49a7b202bbbf7cca2f3a",
-          "run_55c714188bd74a7ba22a872f53226f1b"
+          "run_f3e032840a41463dba25dc6ff0c3ce6b"
         ]
       },
       {
         "trial": 5,
         "mode": "timed",
         "offset": -100,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_4081fcc68bcb43f18832998d3da765e7",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_e0dc18f6d48a44e1be3b890f3e324b4e",
         "runs": [
-          "run_b62603781a344b4f8607bf0c9ac16a8d",
-          "run_676d153c38294adcbf5a61a47af254a8"
+          "run_e62d7a7f74c44259bb0b33f16d804f28"
         ]
       },
       {
         "trial": 6,
         "mode": "delta",
         "offset": 30,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_2cff39fe360c43f3812351ac03a25a8f",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_20b5fcd87f4548c08d4a2ac140f89e38",
         "runs": [
-          "run_7f40b6d254dd4a40a3decc80ff341b96",
-          "run_f25e23a4eccb4390b5ba2ee57854447c"
+          "run_89fcd311265444ca8fb545278ccf121a",
+          "run_33e75e97de8d487ebe2ede0bd00e3d32"
         ]
       },
       {
         "trial": 7,
         "mode": "timed",
         "offset": -40,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_866900c4d8d945a19f4fda8047879ce4",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_8f0de63060004fda80b0a6186b91f2b3",
         "runs": [
-          "run_a1fa418b894c4711aa1d4f0cff83e176"
+          "run_399a03f4078f44af982b24d8798132d6"
         ]
       },
       {
         "trial": 8,
         "mode": "delta",
         "offset": 60,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_574b4cc5f5ac442abdb35100abc89c12",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_09dc17534fd9472ca040df0de31db4b8",
         "runs": [
-          "run_f9bb09ae6ed04cfa85793b1b14f6c978",
-          "run_4c0c1ba54629442f91d3cdff54dfbf00"
+          "run_f07e7d05fef74d3d92ecea3fd52c9e2c",
+          "run_2a6ab3ed858c4e2487e882aee463743b"
         ]
       },
       {
         "trial": 9,
         "mode": "timed",
         "offset": 0,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_ddee12f727cd44daa4d75e7b42e30c2a",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_63b7494f37264b078578aec37ca081b1",
         "runs": [
-          "run_b587a90fa2f644559b55371d4320aa53",
-          "run_e23432d809c54e81903be7e343020fe8"
+          "run_f05fbe1b00d94422879325b22412b796",
+          "run_1b7e66806b974314bf9c8399a695849a"
         ]
       },
       {
         "trial": 10,
         "mode": "delta",
         "offset": 120,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_1977257264e341aa82edb9ae1483e21f",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_3d77d72f6c45453b9164a6feb0021b58",
         "runs": [
-          "run_b81c7b3578d242449dcfda8e0cd41a27",
-          "run_40a494b8175b43d693f6cc1e42d16156"
+          "run_dab4020b9ef5418fb9b612f38aabc2d8",
+          "run_75c3ae7416994748afeb8b2b60f51c1c"
         ]
       },
       {
         "trial": 11,
         "mode": "timed",
         "offset": 40,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_3826a30cd53d49eea1e73f77a5d3668d",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_f0c8c9c8f81e4a4d8b1a8831b19b10f6",
         "runs": [
-          "run_8a39af7020234912a385e612dffc3c54",
-          "run_86f5eb551dd94816b0d6c143fa01ce2d"
+          "run_dc9a4c88ec0d45b6941a05faef832111",
+          "run_08445c71b12e4a34b3b7d1329f986f65"
         ]
       },
       {
         "trial": 12,
         "mode": "delta",
         "offset": 0,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_15470a3430c94cdaa1b34cfac7d4bf26",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_d8b31ea7e5064f68a92fac185d452dbc",
         "runs": [
-          "run_9c7db87827cf4df7bd70b352b2fdd840"
+          "run_aff4941954f049568420d96bd0ccca74"
         ]
       },
       {
         "trial": 13,
         "mode": "timed",
         "offset": 100,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_ff3ca214b7e44096bcb48b6cf7ad1466",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_e579c5baee2942489934cdf9cebdb646",
         "runs": [
-          "run_8e8b0200a7a542fab4a697cf82f16637",
-          "run_59b5f140ba3d430e8ecaf38d78a59888"
+          "run_2f7c8328b9b041219012700b2458c0b2"
         ]
       },
       {
         "trial": 14,
         "mode": "delta",
         "offset": 5,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_4d53f71b867845ce897a3528a42306cf",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_04403d8cf4c944bbb39daf1e9bc2f1ef",
         "runs": [
-          "run_3c525005121746ba8a6e4e440efb1d49"
+          "run_64952289b0e549ed84fb9b3918d63a29"
         ]
       },
       {
         "trial": 15,
         "mode": "timed",
         "offset": 200,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_67258f9260624cedbbbf591156ba6ab1",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_8ce4cab0e13f492f828f817c997812d9",
         "runs": [
-          "run_e9468666b9f243f295317336f1a9a90c",
-          "run_025d643a75ab4f13a34598d5369e3e17"
+          "run_ae2cbba0fa1e41ff882f4f414001bfe2",
+          "run_5e95c07092184cc2bf3e29b5d2033396"
         ]
       },
       {
         "trial": 16,
         "mode": "delta",
         "offset": 15,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_f76cb7e774a64d339fc218af1a4f95ed",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_d81122a02e17467fb557edc35d7000d5",
         "runs": [
-          "run_7af636e7ad694e57b22b8a29135658db",
-          "run_1439387f7e25472f93a1815d06211f27"
+          "run_412acec9e73046f69c61e36212c88f7f"
         ]
       },
       {
         "trial": 17,
         "mode": "timed",
         "offset": -400,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_99d850fbaab74281b104ff684290af82",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_5d38bbdbf6bc42f7b811cd9aea9551c3",
         "runs": [
-          "run_8faf568110c241e1bf52a556053a3892"
+          "run_e1d48b766287478b8565a49a60c06bdd",
+          "run_d2f5b886a9274ddcab2e08f881978ea9"
         ]
       },
       {
         "trial": 18,
         "mode": "delta",
         "offset": 30,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_8af0ee8cb7ae46d3837ab1c60e0df920",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_a1841a13c3bb48d1aad1e999c60d41a5",
         "runs": [
-          "run_949febaaeb4245db83306b0a6793a411",
-          "run_0274d17ea97043e3823c7039aff480ba"
+          "run_46ea205dceee406eb77694f44d95f1c1"
         ]
       },
       {
         "trial": 19,
         "mode": "timed",
         "offset": -200,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_f95e5220426b4ffa8c701538bfffa4be",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_c0dfb91ff23f499c979f1e1454b23cc1",
         "runs": [
-          "run_8160ed02b96f4f82a9225e88f0fd1dcf",
-          "run_bc9ec9f631e443feb847adb373f970ef"
+          "run_665ac890931247739b957d00d671ff9b"
         ]
       },
       {
         "trial": 20,
         "mode": "delta",
         "offset": 60,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_5fb6d5a359b947f3991e3cfe06f0c98d",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_4d6443cd174e4ac1bea359a9d40893f4",
         "runs": [
-          "run_9e835575a7a14ca5a8570e6af1479123",
-          "run_48c29aab2cd04677abc64f0662d2aec1"
+          "run_772aa483186845988360b9ea8c9f6666",
+          "run_09473631242a4c35bff7ede9e19ab5a4"
         ]
       },
       {
         "trial": 21,
         "mode": "timed",
         "offset": -100,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_e34103da87cb49038226af45dfb751be",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_e792985359eb4605980b3c5f5a27bfb8",
         "runs": [
-          "run_b7c363fbe5d2442294da9dea331f28ae",
-          "run_7f70b322cef7432cb16e661758187ed5"
+          "run_bb16f4359c5c4ba5b9105b9230f20966",
+          "run_93dbe1b8ea664bf283942fdd17c2ade4"
         ]
       },
       {
         "trial": 22,
         "mode": "delta",
         "offset": 120,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_04c670ad40334871bf56846eb3a4d2bc",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_fd2d3b8b12a147a09db94abacb7e8d1b",
         "runs": [
-          "run_72549c78df344bfda614970ef6f64ab6",
-          "run_2670e572b7c14ede884df20c272f10cd"
+          "run_9e46e38bffec48839ec337ae7ac93ba0",
+          "run_636ac97aa53547c6a0189b88e332b97f"
         ]
       },
       {
         "trial": 23,
         "mode": "timed",
         "offset": -40,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_213e525ef33647159263ae01c3e8f21e",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_532118c435f34bb685581ad071fa42e1",
         "runs": [
-          "run_c2b4ac1010884a4682d86ee7e1752b4c"
+          "run_4411c2efd5694e2ba4a8e076cbc91392",
+          "run_c4d94217adac4ba7b6a1d25ffa6cc9dd"
         ]
       },
       {
         "trial": 24,
         "mode": "delta",
         "offset": 0,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_6c2a4b212fff4d728149dddf3b413dfb",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_f12d38bceafb46bca1d384dfda19d319",
         "runs": [
-          "run_02248d9465834429b448484a721a298e",
-          "run_269fadabaeb64cd0b1d76e09ab9003b8"
+          "run_ccd3573549c3443cab376f5c46812cf7"
         ]
       },
       {
         "trial": 25,
         "mode": "timed",
         "offset": 0,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_82a45c1b195640f0963ad45af9e43459",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_b3f84b4bade4437e8ef37aca4a150676",
         "runs": [
-          "run_827144b07bb042248a959674582038b9"
+          "run_b4aed9d4b15344be94f846bfaf68a6c1",
+          "run_14a9a469a39049768fe0894fa48f97a3"
         ]
       },
       {
         "trial": 26,
         "mode": "delta",
         "offset": 5,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_6d2d44c93dc7430e94d8094b0f84d3aa",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_f61bd24d4ba44049a3540fe49a7583d9",
         "runs": [
-          "run_05f1c8a028a3470399608537a5e15310",
-          "run_2cc267b1e14941b0901016c640342698"
+          "run_6e82b0691c83492c884594e807b6f4d6",
+          "run_03a215631d684f969ecaf504dce3d476"
         ]
       },
       {
         "trial": 27,
         "mode": "timed",
         "offset": 40,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_5cd6a8311ab84f40b7df6e65abc005c0",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_13e9d79846554149b4049ccaddb55436",
         "runs": [
-          "run_0829650c1d7d417692a0b98f45cbe9f9",
-          "run_78368993326249eba85c2d44c0cb9c15"
+          "run_1fc37bfdd3ad4fc0beb42d7e8c66c941"
         ]
       },
       {
         "trial": 28,
         "mode": "delta",
         "offset": 15,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_892fc202cb84473383d35aa222cba6f9",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_12c8e0a03d4c401aac811b6d6cc2d985",
         "runs": [
-          "run_00fd7796d90f49538784db284e84e490"
+          "run_cdab9630ae4b428c9531a90352ad71fb",
+          "run_f8095697398842f390fab2819aea2e40"
         ]
       },
       {
         "trial": 29,
         "mode": "timed",
         "offset": 100,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_61df888c91674aea81f7057f9ad8708b",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_3e428e05718d452492c0044979df7c94",
         "runs": [
-          "run_931a7ec34e05424d9ca02115a421ebe6"
+          "run_2ac60940013f448792ddda6ce646e71d",
+          "run_4ae4300bb2344c489331e6c95a35ec08"
         ]
       },
       {
         "trial": 30,
         "mode": "delta",
         "offset": 30,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_b05d2fdb2073452ca5d5b14647f120f0",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_f4627d3f4b844c03875091fd6fd18f9f",
         "runs": [
-          "run_6703b9cdaa8b437bbe3a4717544c7731",
-          "run_22db9b6104d44bf49ca4e5a557d4313c"
+          "run_7222b0be5f4441ee8455b799b0ecac6b",
+          "run_44873f8f12894c26b003bf9e5557d5ed"
         ]
       },
       {
         "trial": 31,
         "mode": "timed",
         "offset": 200,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_d2d379cb397043a59e84145eba063d5b",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_954d814b4d0740d79699a1cc0ea3da19",
         "runs": [
-          "run_d6bb8dd91c7e458ab7badb5522b4e012",
-          "run_5711041434d94cdd9d07f6755ace16e3"
+          "run_88262d2c61434a78bf37bd8d582fd455",
+          "run_a9ceeaf9ba604f8d92af2cc0c1860baf"
         ]
       },
       {
         "trial": 32,
         "mode": "delta",
         "offset": 60,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_29a8ac6268204bb9a5150f908d6a5eca",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_2bda3269d9bf42ba8ef8e16620b315e5",
         "runs": [
-          "run_09edced9ed424c6abf5d1f88fe34249d",
-          "run_1d81f36d5efe442694ed4feae9584189"
+          "run_7c7c9e8980fc4818b2aa4b6094a467fa"
         ]
       },
       {
         "trial": 33,
         "mode": "timed",
         "offset": -400,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_7eed4b04b0d14e3c92799bb3461d55e0",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_7a5c8d7092cd4548b62d9f46aab40095",
         "runs": [
-          "run_8ce8af021d6d45d4a3edbfdf4dcafc69"
+          "run_6135594465fc47d9a76fc62efd0117e1",
+          "run_6cbb5181e7e84231b6260a0d05861260"
         ]
       },
       {
         "trial": 34,
         "mode": "delta",
         "offset": 120,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_4ea640672ef34aa4b2d68a40bfa52982",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_999d2c92df30443eaf5f52a2635ac220",
         "runs": [
-          "run_d6b4d8acd79b48858b28dee92cbff111",
-          "run_a4c30299313f4826a75a684bb9cca923"
+          "run_8b82999692c04a3aaaf530637f5e0254",
+          "run_63903a78ebcb4835a1539e148ecdbd39"
         ]
       },
       {
         "trial": 35,
         "mode": "timed",
         "offset": -200,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_96bad8e8fe564d21815cf92129216472",
+        "conversation": "conversation:ac07aa3233985a6890aa54bf:conv_da464ef1b4744dfc8656ddce6e02a601",
         "runs": [
-          "run_0fd719ef37c14b6f9d8bc1f89d7ae164",
-          "run_8549a338e5be462b8fe128a6815e4e51"
+          "run_f44b98ef2c5a4151bfb5e479acffda13",
+          "run_d0538be44d3c4f6a9b7359c246fd3129"
         ]
       }
     ],
-    "runs_failed_by_deadlock": [
-      {
-        "trial": 18,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_8af0ee8cb7ae46d3837ab1c60e0df920",
-        "unclaimedMessages": 2
-      },
-      {
-        "trial": 24,
-        "conversation": "conversation:3b7072d05a481fa93f7db967:conv_6c2a4b212fff4d728149dddf3b413dfb",
-        "unclaimedMessages": 2
-      }
-    ],
-    "send_errors": [
-      {
-        "trial": 5,
-        "text": "t5m1",
-        "http": 409,
-        "code": "conversation_busy",
-        "error": "The previous run is still stopping. Try again in a moment."
-      },
-      {
-        "trial": 8,
-        "text": "t8m1",
-        "http": 409,
-        "code": "conversation_busy",
-        "error": "The previous run is still stopping. Try again in a moment."
-      },
-      {
-        "trial": 8,
-        "text": "t8m3",
-        "http": 409,
-        "code": "conversation_busy",
-        "error": "The previous run is still stopping. Try again in a moment."
-      },
-      {
-        "trial": 16,
-        "text": "t16m1",
-        "http": 409,
-        "code": "conversation_busy",
-        "error": "The previous run is still stopping. Try again in a moment."
-      },
-      {
-        "trial": 16,
-        "text": "t16m3",
-        "http": 409,
-        "code": "conversation_busy",
-        "error": "The previous run is still stopping. Try again in a moment."
-      },
-      {
-        "trial": 20,
-        "text": "t20m3",
-        "http": 409,
-        "code": "conversation_busy",
-        "error": "The previous run is still stopping. Try again in a moment."
-      },
-      {
-        "trial": 30,
-        "text": "t30m1",
-        "http": 409,
-        "code": "conversation_busy",
-        "error": "The previous run is still stopping. Try again in a moment."
-      },
-      {
-        "trial": 32,
-        "text": "t32m3",
-        "http": 409,
-        "code": "conversation_busy",
-        "error": "The previous run is still stopping. Try again in a moment."
-      }
-    ],
+    "runs_failed_by_deadlock": [],
+    "send_errors": [],
     "im_bursts": [
       {
         "burst": 0,
@@ -684,7 +545,7 @@
         },
         "runsFromInbox": 1,
         "messagesPerRun": {
-          "run_50f92a2e6ffa4b6088bb763beab07cd4": 5
+          "run_9f98e66f5271472886b7143e17df67f6": 5
         },
         "userTurnsSeenByModel": 5,
         "finalReplies": 1,
@@ -698,7 +559,7 @@
           "im0x0im0x1im0x2im0x3im0x4"
         ],
         "runIds": [
-          "run_50f92a2e6ffa4b6088bb763beab07cd4"
+          "run_9f98e66f5271472886b7143e17df67f6"
         ]
       },
       {
@@ -714,7 +575,7 @@
         },
         "runsFromInbox": 1,
         "messagesPerRun": {
-          "run_87e9a1be5c0045f9aae1811fcf642c45": 5
+          "run_76f8cb2c43954d4a882230563b32e929": 5
         },
         "userTurnsSeenByModel": 5,
         "finalReplies": 1,
@@ -728,12 +589,12 @@
           "im1x0im1x1im1x2im1x3im1x4"
         ],
         "runIds": [
-          "run_87e9a1be5c0045f9aae1811fcf642c45"
+          "run_76f8cb2c43954d4a882230563b32e929"
         ]
       },
       {
         "burst": 2,
-        "postedMs": 284,
+        "postedMs": 283,
         "inboxRows": 5,
         "inboxStates": {
           "done": 5
@@ -744,7 +605,7 @@
         },
         "runsFromInbox": 1,
         "messagesPerRun": {
-          "run_25d227965b084280bea2b21c7fd508b0": 5
+          "run_ff469890cb27497094f0b53ef9e62d0e": 5
         },
         "userTurnsSeenByModel": 5,
         "finalReplies": 1,
@@ -758,7 +619,7 @@
           "im2x0im2x1im2x2im2x3im2x4"
         ],
         "runIds": [
-          "run_25d227965b084280bea2b21c7fd508b0"
+          "run_ff469890cb27497094f0b53ef9e62d0e"
         ]
       },
       {
@@ -774,7 +635,7 @@
         },
         "runsFromInbox": 1,
         "messagesPerRun": {
-          "run_0ee39833d2974e3c993b914462a93f13": 5
+          "run_cb8111a1b0494169a45acc22976e47a2": 5
         },
         "userTurnsSeenByModel": 5,
         "finalReplies": 1,
@@ -788,12 +649,12 @@
           "im3x0im3x1im3x2im3x3im3x4"
         ],
         "runIds": [
-          "run_0ee39833d2974e3c993b914462a93f13"
+          "run_cb8111a1b0494169a45acc22976e47a2"
         ]
       },
       {
         "burst": 4,
-        "postedMs": 285,
+        "postedMs": 283,
         "inboxRows": 5,
         "inboxStates": {
           "done": 5
@@ -804,7 +665,7 @@
         },
         "runsFromInbox": 1,
         "messagesPerRun": {
-          "run_549b0a20ca7740e4b81f11b9fbfa84a1": 5
+          "run_c3de8b7d291748c088bd5f0abd9d8d18": 5
         },
         "userTurnsSeenByModel": 5,
         "finalReplies": 1,
@@ -818,7 +679,7 @@
           "im4x0im4x1im4x2im4x3im4x4"
         ],
         "runIds": [
-          "run_549b0a20ca7740e4b81f11b9fbfa84a1"
+          "run_c3de8b7d291748c088bd5f0abd9d8d18"
         ]
       },
       {
@@ -834,7 +695,7 @@
         },
         "runsFromInbox": 1,
         "messagesPerRun": {
-          "run_7f9a0e3771144cf4945121e060949a76": 5
+          "run_7504e434895043f099f0162eda7fb117": 5
         },
         "userTurnsSeenByModel": 5,
         "finalReplies": 1,
@@ -848,7 +709,7 @@
           "im5x0im5x1im5x2im5x3im5x4"
         ],
         "runIds": [
-          "run_7f9a0e3771144cf4945121e060949a76"
+          "run_7504e434895043f099f0162eda7fb117"
         ]
       }
     ],
@@ -857,302 +718,10 @@
     },
     "im_runs_per_burst_distribution": {
       "1": 6
-    },
-    "four_full_runs_36_trials_each": [
-      {
-        "lost": 0,
-        "failed_runs": 0,
-        "unclaimed": 0,
-        "rejections": {
-          "conversation_request_failed": 1,
-          "conversation_busy": 1
-        }
-      },
-      {
-        "lost": 3,
-        "failed_runs": 1,
-        "unclaimed": 1,
-        "rejections": {}
-      },
-      {
-        "lost": 6,
-        "failed_runs": 2,
-        "unclaimed": 0,
-        "rejections": {
-          "conversation_request_failed": 4,
-          "conversation_busy": 1
-        }
-      },
-      {
-        "lost": 6,
-        "failed_runs": 2,
-        "unclaimed": 2,
-        "rejections": {
-          "conversation_busy": 9
-        }
-      }
-    ]
+    }
   },
   "evidence": {
-    "anomaly_trial_18": {
-      "plan": {
-        "mode": "delta",
-        "offset": 30
-      },
-      "conversation": "conversation:3b7072d05a481fa93f7db967:conv_8af0ee8cb7ae46d3837ab1c60e0df920",
-      "messages": [
-        {
-          "text": "t18m0",
-          "via": "http",
-          "signal": "accepted",
-          "journal": 1,
-          "model": 1,
-          "run": "949feb",
-          "runStatus": "failed",
-          "steered": false,
-          "addressed": false,
-          "acceptDeltaMs": -2000
-        },
-        {
-          "text": "t18m1",
-          "via": "http",
-          "signal": "accepted",
-          "http": 200,
-          "journal": 1,
-          "model": 0,
-          "steered": true,
-          "addressed": false,
-          "acceptDeltaMs": 0
-        },
-        {
-          "text": "t18m2",
-          "via": "ws",
-          "signal": "accepted",
-          "journal": 1,
-          "model": 0,
-          "steered": true,
-          "addressed": false,
-          "acceptDeltaMs": 0
-        },
-        {
-          "text": "t18m3",
-          "via": "http",
-          "signal": "accepted",
-          "http": 202,
-          "journal": 1,
-          "model": 1,
-          "run": "0274d1",
-          "runStatus": "completed",
-          "steered": false,
-          "addressed": true,
-          "acceptDeltaMs": 1000
-        }
-      ],
-      "runs": [
-        {
-          "id": "run_949febaaeb4245db83306b0a6793a411",
-          "status": "failed",
-          "client_message_id": "38647c19-070a-44c3-9420-48bad3d007d2",
-          "steered_count": 2,
-          "consumed_count": 0,
-          "created_at": "2026-11-09T21:51:25.568Z",
-          "started_at": "2026-11-09T21:51:25.590Z",
-          "completed_at": "2026-11-09T21:51:28.583Z",
-          "interrupted_reason": null
-        },
-        {
-          "id": "run_0274d17ea97043e3823c7039aff480ba",
-          "status": "completed",
-          "client_message_id": "0e88714c-0a3a-4383-a3cf-86ad420fd963",
-          "steered_count": 0,
-          "consumed_count": 0,
-          "created_at": "2026-11-09T21:51:28.586Z",
-          "started_at": "2026-11-09T21:51:28.606Z",
-          "completed_at": "2026-11-09T21:51:30.608Z",
-          "interrupted_reason": null
-        }
-      ],
-      "journal": [
-        "239 25.541 conversation.created - {\"id\": \"conv_8af0ee8cb7ae46d3837ab1c60e0df920\", \"status\": \"active\", \"version\": 1, \"agent_id\": \"629787c0-f3e8-4112-9071-70c7836bcdf7\", \"creator_id\": \"33028f5b-3a",
-        "243 25.568 run.created 949feb {\"id\": \"run_949febaaeb4245db83306b0a6793a411\", \"status\": \"queued\", \"input_digest\": \"sha256:718e22dcb1865e5dd9923498d6e2cb4e1d3cf4f229100c404823643cf67a03f6\", \"c",
-        "247 25.568 message.created 949feb {\"role\": \"user\", \"client_message_id\": \"38647c19-070a-44c3-9420-48bad3d007d2\"}",
-        "250 25.591 run.state 949feb {\"id\": \"run_949febaaeb4245db83306b0a6793a411\", \"status\": \"running\", \"input_digest\": \"sha256:718e22dcb1865e5dd9923498d6e2cb4e1d3cf4f229100c404823643cf67a03f6\", \"",
-        "259 27.574 message.created 949feb {\"role\": \"assistant\"}",
-        "260 27.574 message.created 949feb {\"role\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"Reply with exactly the word: t18m2\"}, \"steered\": true, \"input_digest\": \"sha256:c14bf10a50566f4945ea3a92",
-        "272 27.580 message.created 949feb {\"role\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"Reply with exactly the word: t18m1\"}, \"steered\": true, \"input_digest\": \"sha256:d50a92300cdaae6e4281a20f",
-        "273 28.584 run.state 949feb {\"id\": \"run_949febaaeb4245db83306b0a6793a411\", \"reason\": \"deadlock detected\", \"status\": \"failed\", \"input_digest\": \"sha256:718e22dcb1865e5dd9923498d6e2cb4e1d3cf4",
-        "274 28.586 run.created 0274d1 {\"id\": \"run_0274d17ea97043e3823c7039aff480ba\", \"status\": \"queued\", \"input_digest\": \"sha256:bd00ed9f8bdd2854680be62cf5929be3dcfd73b4add216fa1f32283aee974d4e\", \"c",
-        "275 28.586 message.created 0274d1 {\"role\": \"user\", \"client_message_id\": \"0e88714c-0a3a-4383-a3cf-86ad420fd963\"}",
-        "276 28.606 run.state 0274d1 {\"id\": \"run_0274d17ea97043e3823c7039aff480ba\", \"status\": \"running\", \"input_digest\": \"sha256:bd00ed9f8bdd2854680be62cf5929be3dcfd73b4add216fa1f32283aee974d4e\", \"",
-        "284 30.606 message.created 0274d1 {\"role\": \"assistant\"}",
-        "285 30.608 run.state 0274d1 {\"id\": \"run_0274d17ea97043e3823c7039aff480ba\", \"status\": \"completed\", \"input_digest\": \"sha256:bd00ed9f8bdd2854680be62cf5929be3dcfd73b4add216fa1f32283aee974d4e\","
-      ],
-      "events": [
-        "207 25.568 conversation.model_message 949feb user Reply with exactly the word: t18m0",
-        "208 25.568 turn.state 949feb  queued",
-        "213 25.589 turn.state 949feb  running",
-        "222 27.574 conversation.model_message 949feb assistant t18m0",
-        "223 27.575 turn.state 949feb  completed",
-        "229 28.586 conversation.model_message 0274d1 user Reply with exactly the word: t18m3",
-        "230 28.586 turn.state 0274d1  queued",
-        "231 28.605 turn.state 0274d1  running",
-        "239 30.606 conversation.model_message 0274d1 assistant t18m3",
-        "240 30.607 turn.state 0274d1  completed"
-      ]
-    },
-    "anomaly_trial_24": {
-      "plan": {
-        "mode": "delta",
-        "offset": 0
-      },
-      "conversation": "conversation:3b7072d05a481fa93f7db967:conv_6c2a4b212fff4d728149dddf3b413dfb",
-      "messages": [
-        {
-          "text": "t24m0",
-          "via": "http",
-          "signal": "accepted",
-          "journal": 1,
-          "model": 1,
-          "run": "02248d",
-          "runStatus": "failed",
-          "steered": false,
-          "addressed": false,
-          "acceptDeltaMs": -3000
-        },
-        {
-          "text": "t24m1",
-          "via": "http",
-          "signal": "accepted",
-          "http": 200,
-          "journal": 1,
-          "model": 0,
-          "steered": true,
-          "addressed": false,
-          "acceptDeltaMs": 0
-        },
-        {
-          "text": "t24m2",
-          "via": "ws",
-          "signal": "accepted",
-          "journal": 1,
-          "model": 0,
-          "steered": true,
-          "addressed": false,
-          "acceptDeltaMs": 0
-        },
-        {
-          "text": "t24m3",
-          "via": "http",
-          "signal": "accepted",
-          "http": 202,
-          "journal": 1,
-          "model": 1,
-          "run": "269fad",
-          "runStatus": "completed",
-          "steered": false,
-          "addressed": true,
-          "acceptDeltaMs": 1000
-        }
-      ],
-      "runs": [
-        {
-          "id": "run_02248d9465834429b448484a721a298e",
-          "status": "failed",
-          "client_message_id": "1086ad4a-df8c-4687-abce-2352d81638b6",
-          "steered_count": 2,
-          "consumed_count": 0,
-          "created_at": "2026-11-09T21:51:45.872Z",
-          "started_at": "2026-11-09T21:51:45.894Z",
-          "completed_at": "2026-11-09T21:51:49.145Z",
-          "interrupted_reason": null
-        },
-        {
-          "id": "run_269fadabaeb64cd0b1d76e09ab9003b8",
-          "status": "completed",
-          "client_message_id": "ff2678da-cb34-4bd1-8173-d9d334983a18",
-          "steered_count": 0,
-          "consumed_count": 0,
-          "created_at": "2026-11-09T21:51:49.148Z",
-          "started_at": "2026-11-09T21:51:49.172Z",
-          "completed_at": "2026-11-09T21:51:51.091Z",
-          "interrupted_reason": null
-        }
-      ],
-      "journal": [
-        "346 45.844 conversation.created - {\"id\": \"conv_6c2a4b212fff4d728149dddf3b413dfb\", \"status\": \"active\", \"version\": 1, \"agent_id\": \"629787c0-f3e8-4112-9071-70c7836bcdf7\", \"creator_id\": \"33028f5b-3a",
-        "351 45.872 run.created 02248d {\"id\": \"run_02248d9465834429b448484a721a298e\", \"status\": \"queued\", \"input_digest\": \"sha256:dd9f94822d2265369fbb6116d7a4cc5b5e4d200bdc212b3c9c2fde330cb40a7c\", \"c",
-        "354 45.872 message.created 02248d {\"role\": \"user\", \"client_message_id\": \"1086ad4a-df8c-4687-abce-2352d81638b6\"}",
-        "358 45.894 run.state 02248d {\"id\": \"run_02248d9465834429b448484a721a298e\", \"status\": \"running\", \"input_digest\": \"sha256:dd9f94822d2265369fbb6116d7a4cc5b5e4d200bdc212b3c9c2fde330cb40a7c\", \"",
-        "369 48.137 message.created 02248d {\"role\": \"assistant\"}",
-        "370 48.136 message.created 02248d {\"role\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"Reply with exactly the word: t24m2\"}, \"steered\": true, \"input_digest\": \"sha256:a5341a0cd178a0e89275b2c2",
-        "383 48.142 message.created 02248d {\"role\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"Reply with exactly the word: t24m1\"}, \"steered\": true, \"input_digest\": \"sha256:38ea125505a5a56b9df1beb0",
-        "384 49.146 run.state 02248d {\"id\": \"run_02248d9465834429b448484a721a298e\", \"reason\": \"deadlock detected\", \"status\": \"failed\", \"input_digest\": \"sha256:dd9f94822d2265369fbb6116d7a4cc5b5e4d20",
-        "385 49.148 run.created 269fad {\"id\": \"run_269fadabaeb64cd0b1d76e09ab9003b8\", \"status\": \"queued\", \"input_digest\": \"sha256:6bcd3e8cc2aaefeac4d4b6156acca3bf9ed6554c6230df16cda669b3c2b9876a\", \"c",
-        "386 49.148 message.created 269fad {\"role\": \"user\", \"client_message_id\": \"ff2678da-cb34-4bd1-8173-d9d334983a18\"}",
-        "387 49.173 run.state 269fad {\"id\": \"run_269fadabaeb64cd0b1d76e09ab9003b8\", \"status\": \"running\", \"input_digest\": \"sha256:6bcd3e8cc2aaefeac4d4b6156acca3bf9ed6554c6230df16cda669b3c2b9876a\", \"",
-        "390 51.089 message.created 269fad {\"role\": \"assistant\"}",
-        "391 51.091 run.state 269fad {\"id\": \"run_269fadabaeb64cd0b1d76e09ab9003b8\", \"status\": \"completed\", \"input_digest\": \"sha256:6bcd3e8cc2aaefeac4d4b6156acca3bf9ed6554c6230df16cda669b3c2b9876a\","
-      ],
-      "events": [
-        "298 45.872 conversation.model_message 02248d user Reply with exactly the word: t24m0",
-        "299 45.872 turn.state 02248d  queued",
-        "305 45.893 turn.state 02248d  running",
-        "315 48.136 conversation.model_message 02248d assistant t24m0",
-        "322 49.148 conversation.model_message 269fad user Reply with exactly the word: t24m3",
-        "323 49.148 turn.state 269fad  queued",
-        "324 49.171 turn.state 269fad  running",
-        "327 51.088 conversation.model_message 269fad assistant t24m3",
-        "328 51.090 turn.state 269fad  completed"
-      ]
-    },
-    "lost_messages": [
-      {
-        "trial": 18,
-        "text": "Reply with exactly the word: t18m0",
-        "journal": 1,
-        "model": 1,
-        "run": "run_949febaaeb4245db83306b0a6793a411",
-        "runStatus": "failed",
-        "addressed": false
-      },
-      {
-        "trial": 18,
-        "text": "Reply with exactly the word: t18m1",
-        "journal": 1,
-        "model": 0,
-        "addressed": false
-      },
-      {
-        "trial": 18,
-        "text": "Reply with exactly the word: t18m2",
-        "journal": 1,
-        "model": 0,
-        "addressed": false
-      },
-      {
-        "trial": 24,
-        "text": "Reply with exactly the word: t24m0",
-        "journal": 1,
-        "model": 1,
-        "run": "run_02248d9465834429b448484a721a298e",
-        "runStatus": "failed",
-        "addressed": false
-      },
-      {
-        "trial": 24,
-        "text": "Reply with exactly the word: t24m1",
-        "journal": 1,
-        "model": 0,
-        "addressed": false
-      },
-      {
-        "trial": 24,
-        "text": "Reply with exactly the word: t24m2",
-        "journal": 1,
-        "model": 0,
-        "addressed": false
-      }
-    ],
+    "lost_messages": [],
     "runtime_log_error_lines": {
       "count": 0,
       "first": [],
@@ -1160,31 +729,8 @@
     }
   },
   "notes": [
-    "conversation_busy refused 9 of 108 burst messages. It is documented (a stopping Run), but each is a user-visible refusal at the moment a Run ends.",
-    "IM: 6 bursts of 5 messages from one sender 70 ms apart (about 280 ms in all). Final replies per burst: {\"1\":6}.",
-    "This file is the last of four 36-trial runs (the first had lost=0 and one 500 deadlock rejection; the three reruns each lost accepted messages). The scenario author recorded the cause as a deadlock in the Run failure (2 of 180 trials over five earlier runs); in the three reruns here the symptom reproduced in 3 of 3 runs (failed Run, steered messages never claimed) but the failure reason was not captured, so the lock-order cause rests on the author evidence."
+    "conversation_busy refused 1 of 108 burst messages. It is documented (a stopping Run), but each is a user-visible refusal at the moment a Run ends.",
+    "IM: 6 bursts of 5 messages from one sender 70 ms apart (about 280 ms in all). Final replies per burst: {\"1\":6}."
   ],
-  "defects": [
-    {
-      "title": "Messages raced at the moment a Run ends are accepted (200/202) and then lost: the Run fails and the steered messages are never claimed",
-      "severity": "high",
-      "expected": "Every accepted message is claimed into a Run and answered, or refused at acceptance (lost = 0, no failed Run).",
-      "actual": "Over four 36-trial runs (3 burst messages each, 2 HTTP and 1 WebSocket at the same tick): lost = 0, 3, 6, 6; Run status failed in 0, 1, 2, 2 trials; steered messages unclaimed at the end of a Run in 0, 1, 0, 2 runs. Author evidence names a Postgres deadlock between steerOrReplay (locks conversation row then Run row) and claimSteeredMessages (locks Run row then needs the conversation row for the journal insert), both in src/conversationRepository.ts.",
-      "repro": "node scripts/verify-surfaces/run.mjs --only 5 (under agentsecrets exec), read measurements.lost and failed_or_interrupted_runs; or fire 3 concurrent sends to a conversation within ~20 ms of its Run ending, about 30 trials."
-    },
-    {
-      "title": "Steering a message at the end of a Run deadlocks the database: the Run fails and the accepted messages are never answered",
-      "severity": "high",
-      "expected": "Claiming a steered message and appending it to the transcript is one transaction that cannot deadlock with a steer (spec: the steer-or-start decision is atomic; no accepted message is lost).",
-      "actual": "2 of 36 trials: the Run was failed with \"deadlock detected\" while 4 messages that had been accepted as steered (HTTP 200/202, journaled) were still unclaimed; they never reached the model. Likely cause by lock order: steerOrReplay locks the conversation row (FOR UPDATE) then updates the Run row; claimSteeredMessages locks the Run row (FOR UPDATE) then inserts a journal row, which takes a FOR KEY SHARE lock on the conversation row.",
-      "repro": "Scenario 5: send a first short message, then 3 messages (two HTTP, one WebSocket) at the moment its answer completes; about 1 trial in 36 deadlocks. Evidence ids: anomaly_trial_* in results/scenario-05.json."
-    },
-    {
-      "title": "A message accepted around the end of a Run was lost",
-      "severity": "high",
-      "expected": "Every accepted message is in the transcript once and answered (spec: steer-or-start is atomic).",
-      "actual": "6 of 135 accepted messages: [{\"trial\":18,\"text\":\"Reply with exactly the word: t18m0\",\"journal\":1,\"model\":1,\"status\":\"failed\"},{\"trial\":18,\"text\":\"Reply with exactly the word: t18m1\",\"journal\":1,\"model\":0},{\"trial\":18,\"text\":\"Reply with exactly the word: t18m2\",\"journal\":1,\"model\":0}]",
-      "repro": "scenario 5, STEER_TRIALS=36"
-    }
-  ]
+  "defects": []
 }

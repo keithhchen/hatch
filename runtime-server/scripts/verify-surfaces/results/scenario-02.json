@@ -2,8 +2,13 @@
   "id": 2,
   "title": "Close a client mid-Run (Web, Desktop WebSocket, CLI): the Run completes, the reply exists once",
   "status": "FAIL",
-  "durationMs": 66968,
+  "durationMs": 182684,
   "checks": [
+    {
+      "name": "studio.assistant.web: case ran",
+      "ok": false,
+      "detail": "Error: stream ended before any reply text arrived\n    at untilFirstText (file:///Users/keithchen/Documents/code/hatch/runtime-server/scripts/verify-surfaces/scenarios/02-close-client.mjs:11:9)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async StudioClosers.web (file:///Users/keithchen/Documents/code/hatch/runtime-server/scripts/verify-surfaces/scenarios/02-close-client.mjs:115:5)\n    at async CloseClient.studioCase (file:///Users/keithchen/Documents/"
+    },
     {
       "name": "studio.assistant.cli: the CLI streamed reply text and was then killed (not crashed)",
       "ok": false,
@@ -11,40 +16,88 @@
         "exit": {
           "code": 1,
           "signal": null,
-          "at": 1794258019804
+          "at": 1794266905078
         },
-        "stderr": "hatch: The \"chunk\" argument must be of type string or an instance of Buffer, TypedArray, or DataView. Received undefined\n"
+        "stderr": ""
       }
     },
     {
       "name": "studio.assistant.cli: closed while the turn was still running",
-      "ok": true,
-      "detail": "running"
+      "ok": false,
+      "detail": "idle"
     },
     {
-      "name": "studio.worker.cli: the CLI streamed reply text and was then killed (not crashed)",
-      "ok": false,
+      "name": "studio.assistant.cli: conversation ends idle (not failed)",
+      "ok": true,
+      "detail": "idle"
+    },
+    {
+      "name": "studio.assistant.cli: the user message exists once",
+      "ok": true,
       "detail": {
-        "exit": {
-          "code": 1,
-          "signal": null,
-          "at": 1794258019844
-        },
-        "stderr": "hatch: The \"chunk\" argument must be of type string or an instance of Buffer, TypedArray, or DataView. Received undefined\n"
+        "users": 1
       }
     },
     {
-      "name": "studio.worker.cli: closed while the turn was still running",
-      "ok": true,
-      "detail": "running"
+      "name": "studio.assistant.cli: the assistant reply exists exactly once",
+      "ok": false,
+      "detail": {
+        "replies": 0,
+        "assistant_tails": []
+      }
+    },
+    {
+      "name": "studio.assistant.cli: the log has one run_end and it is completed",
+      "ok": false,
+      "detail": [
+        {
+          "type": "run_end",
+          "status": "failed"
+        }
+      ]
     },
     {
       "name": "studio.assistant.cli-wait: closed while the turn was still running",
+      "ok": false,
+      "detail": "idle"
+    },
+    {
+      "name": "studio.assistant.cli-wait: conversation ends idle (not failed)",
+      "ok": true,
+      "detail": "idle"
+    },
+    {
+      "name": "studio.assistant.cli-wait: the user message exists once",
+      "ok": true,
+      "detail": {
+        "users": 1
+      }
+    },
+    {
+      "name": "studio.assistant.cli-wait: the assistant reply exists exactly once",
+      "ok": false,
+      "detail": {
+        "replies": 0,
+        "assistant_tails": []
+      }
+    },
+    {
+      "name": "studio.assistant.cli-wait: the log has one run_end and it is completed",
+      "ok": false,
+      "detail": [
+        {
+          "type": "run_end",
+          "status": "failed"
+        }
+      ]
+    },
+    {
+      "name": "studio.worker.cli-wait: closed while the turn was still running",
       "ok": true,
       "detail": "running"
     },
     {
-      "name": "studio.worker.cli-wait: closed while the turn was still running",
+      "name": "chat.web: closed while the Run was still going",
       "ok": true,
       "detail": "running"
     },
@@ -55,16 +108,6 @@
     },
     {
       "name": "studio.worker.ws: closed while the turn was still running",
-      "ok": true,
-      "detail": "running"
-    },
-    {
-      "name": "chat.web: closed while the Run was still going",
-      "ok": true,
-      "detail": "running"
-    },
-    {
-      "name": "chat.cli: closed while the Run was still going",
       "ok": true,
       "detail": "running"
     },
@@ -86,7 +129,7 @@
       "detail": {
         "replies": 1,
         "assistant_tails": [
-          "cots carry a subtle floral sweetness.\n25. Guavas give off an intense sweet tropical aroma."
+          "mall, golden, and gently tart.\n25. Guavas have an intense aroma and unique tropical taste."
         ]
       }
     },
@@ -99,6 +142,208 @@
           "status": "completed"
         }
       ]
+    },
+    {
+      "name": "chat.ws: Run reaches completed",
+      "ok": true,
+      "detail": {
+        "status": "completed",
+        "run_id": "run_acb5a2cf639e429db15d32a438304c07"
+      }
+    },
+    {
+      "name": "chat.ws: exactly one Run in the conversation",
+      "ok": true,
+      "detail": [
+        {
+          "id": "run_acb5a2cf639e429db15d32a438304c07",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "chat.ws: the user message exists once",
+      "ok": true,
+      "detail": {
+        "users": 1
+      }
+    },
+    {
+      "name": "chat.ws: the assistant reply exists exactly once",
+      "ok": true,
+      "detail": {
+        "assistants": 1,
+        "ids": [
+          "msg_9804dbaebd45a930ca6b321edfccd2a3c41aed343fd946786218ba69c7e02d5c"
+        ]
+      }
+    },
+    {
+      "name": "chat.ws: the reply is complete (LIST token and all 40 lines)",
+      "ok": true,
+      "detail": "39. Mangosteens are called fruit queens.\n40. Jackfruits grow to immense weights."
+    },
+    {
+      "name": "chat.ws: no cancel was recorded",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "chat.cli: closed while the Run was still going",
+      "ok": true,
+      "detail": "running"
+    },
+    {
+      "name": "chat.stay: Run reaches completed",
+      "ok": true,
+      "detail": {
+        "status": "completed",
+        "run_id": "run_e4c877a9d64243f19340a3d5da7141d7"
+      }
+    },
+    {
+      "name": "chat.stay: exactly one Run in the conversation",
+      "ok": true,
+      "detail": [
+        {
+          "id": "run_e4c877a9d64243f19340a3d5da7141d7",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "chat.stay: the user message exists once",
+      "ok": true,
+      "detail": {
+        "users": 1
+      }
+    },
+    {
+      "name": "chat.stay: the assistant reply exists exactly once",
+      "ok": true,
+      "detail": {
+        "assistants": 1,
+        "ids": [
+          "msg_33eb9a74d1b25b5c40130836d0ceb79f8cdcc32e4d6a860ae8b48af43a540adf"
+        ]
+      }
+    },
+    {
+      "name": "chat.stay: the reply is complete (LIST token and all 40 lines)",
+      "ok": true,
+      "detail": "y fried or baked.\n40. Durians are famous for their spiky husk and pungent aroma."
+    },
+    {
+      "name": "chat.stay: no cancel was recorded",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "chat.web: Run reaches completed",
+      "ok": true,
+      "detail": {
+        "status": "completed",
+        "run_id": "run_72f8336e64344743b81659133a222b13"
+      }
+    },
+    {
+      "name": "chat.web: exactly one Run in the conversation",
+      "ok": true,
+      "detail": [
+        {
+          "id": "run_72f8336e64344743b81659133a222b13",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "chat.web: the user message exists once",
+      "ok": true,
+      "detail": {
+        "users": 1
+      }
+    },
+    {
+      "name": "chat.web: the assistant reply exists exactly once",
+      "ok": true,
+      "detail": {
+        "assistants": 1,
+        "ids": [
+          "msg_2c5a26d31a4d7a1603a720b570c4451866234980bec03a63de1c23248b8296d1"
+        ]
+      }
+    },
+    {
+      "name": "chat.web: the reply is complete (LIST token and all 40 lines)",
+      "ok": true,
+      "detail": "40. Boysenberries blend blackberry and raspberry flavors into rich purple juice."
+    },
+    {
+      "name": "chat.web: no cancel was recorded",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "chat.cli: Run reaches completed",
+      "ok": true,
+      "detail": {
+        "status": "completed",
+        "run_id": "run_61c1c21b7f7d4a2db3a8656cebc8d995"
+      }
+    },
+    {
+      "name": "chat.cli: exactly one Run in the conversation",
+      "ok": true,
+      "detail": [
+        {
+          "id": "run_61c1c21b7f7d4a2db3a8656cebc8d995",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "chat.cli: the user message exists once",
+      "ok": true,
+      "detail": {
+        "users": 1
+      }
+    },
+    {
+      "name": "chat.cli: the assistant reply exists exactly once",
+      "ok": true,
+      "detail": {
+        "assistants": 1,
+        "ids": [
+          "msg_a7b2c50ae04f36fb8c56940fb4fd747a4d6a23fe7fe2b7d1b5138b68d7025e80"
+        ]
+      }
+    },
+    {
+      "name": "chat.cli: the reply is complete (LIST token and all 40 lines)",
+      "ok": true,
+      "detail": ".\n40. Kumquats have a sweet edible peel that contrasts with their sour interior."
+    },
+    {
+      "name": "chat.cli: no cancel was recorded",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "studio.worker.cli: the CLI streamed reply text and was then killed (not crashed)",
+      "ok": true,
+      "detail": {
+        "exit": {
+          "code": null,
+          "signal": "SIGKILL",
+          "at": 1794266924804
+        },
+        "stderr": ""
+      }
+    },
+    {
+      "name": "studio.worker.cli: closed while the turn was still running",
+      "ok": true,
+      "detail": "running"
     },
     {
       "name": "studio.worker.cli: conversation ends idle (not failed)",
@@ -118,7 +363,7 @@
       "detail": {
         "replies": 1,
         "assistant_tails": [
-          "th a milder flavor.\n25. Cranberries are sharply tart and commonly sweetened before eating."
+          "weet and fragrant orange flesh.\n25. Grapefruits have a bittersweet and invigorating taste."
         ]
       }
     },
@@ -150,7 +395,7 @@
       "detail": {
         "replies": 1,
         "assistant_tails": [
-          "bite.\n25. Passion fruits conceal an aromatic, gelatinous seed pulp inside a wrinkled rind."
+          "mall stone fruits with a velvety peel.\n25. Guavas give off a strong sweet scent when ripe."
         ]
       }
     },
@@ -163,186 +408,6 @@
           "status": "completed"
         }
       ]
-    },
-    {
-      "name": "chat.ws: Run reaches completed",
-      "ok": true,
-      "detail": {
-        "status": "completed",
-        "run_id": "run_a5254884eed84516aa1fd656b3830f38"
-      }
-    },
-    {
-      "name": "chat.ws: exactly one Run in the conversation",
-      "ok": true,
-      "detail": [
-        {
-          "id": "run_a5254884eed84516aa1fd656b3830f38",
-          "status": "completed"
-        }
-      ]
-    },
-    {
-      "name": "chat.ws: the user message exists once",
-      "ok": true,
-      "detail": {
-        "users": 1
-      }
-    },
-    {
-      "name": "chat.ws: the assistant reply exists exactly once",
-      "ok": true,
-      "detail": {
-        "assistants": 1,
-        "ids": [
-          "msg_7fb1e2af64edbacc232195c6fab64faad865cbc1f06ce51bfb9bb3d9391bfbca"
-        ]
-      }
-    },
-    {
-      "name": "chat.ws: the reply is complete (LIST token and all 40 lines)",
-      "ok": true,
-      "detail": "nts.\n40. Mulberries resemble slender blackberries and stain fingers deep purple."
-    },
-    {
-      "name": "chat.ws: no cancel was recorded",
-      "ok": true,
-      "detail": []
-    },
-    {
-      "name": "chat.stay: Run reaches completed",
-      "ok": true,
-      "detail": {
-        "status": "completed",
-        "run_id": "run_ae9bbb8e88d447ea9c138bd861189d0d"
-      }
-    },
-    {
-      "name": "chat.stay: exactly one Run in the conversation",
-      "ok": true,
-      "detail": [
-        {
-          "id": "run_ae9bbb8e88d447ea9c138bd861189d0d",
-          "status": "completed"
-        }
-      ]
-    },
-    {
-      "name": "chat.stay: the user message exists once",
-      "ok": true,
-      "detail": {
-        "users": 1
-      }
-    },
-    {
-      "name": "chat.stay: the assistant reply exists exactly once",
-      "ok": true,
-      "detail": {
-        "assistants": 1,
-        "ids": [
-          "msg_52fd119b984832b4198a8e24d631540eab52db6b330db1a75785a240f6b808d2"
-        ]
-      }
-    },
-    {
-      "name": "chat.stay: the reply is complete (LIST token and all 40 lines)",
-      "ok": true,
-      "detail": "segments.\n40. Boysenberries combine the flavors of blackberries and raspberries."
-    },
-    {
-      "name": "chat.web: Run reaches completed",
-      "ok": true,
-      "detail": {
-        "status": "completed",
-        "run_id": "run_9c7fc1f390be402bbbed27eca190c020"
-      }
-    },
-    {
-      "name": "chat.stay: no cancel was recorded",
-      "ok": true,
-      "detail": []
-    },
-    {
-      "name": "chat.web: exactly one Run in the conversation",
-      "ok": true,
-      "detail": [
-        {
-          "id": "run_9c7fc1f390be402bbbed27eca190c020",
-          "status": "completed"
-        }
-      ]
-    },
-    {
-      "name": "chat.web: the user message exists once",
-      "ok": true,
-      "detail": {
-        "users": 1
-      }
-    },
-    {
-      "name": "chat.web: the assistant reply exists exactly once",
-      "ok": true,
-      "detail": {
-        "assistants": 1,
-        "ids": [
-          "msg_b9237f8497357ac5e73a122bf7f1dd4a08fdad177ad9676ed6dabd3df558f228"
-        ]
-      }
-    },
-    {
-      "name": "chat.web: the reply is complete (LIST token and all 40 lines)",
-      "ok": true,
-      "detail": "\n40. Durians are infamous for their strong aroma and rich, custard-like texture."
-    },
-    {
-      "name": "chat.web: no cancel was recorded",
-      "ok": true,
-      "detail": []
-    },
-    {
-      "name": "chat.cli: Run reaches completed",
-      "ok": true,
-      "detail": {
-        "status": "completed",
-        "run_id": "run_31b914218e76484599ab53efc8af65b2"
-      }
-    },
-    {
-      "name": "chat.cli: exactly one Run in the conversation",
-      "ok": true,
-      "detail": [
-        {
-          "id": "run_31b914218e76484599ab53efc8af65b2",
-          "status": "completed"
-        }
-      ]
-    },
-    {
-      "name": "chat.cli: the user message exists once",
-      "ok": true,
-      "detail": {
-        "users": 1
-      }
-    },
-    {
-      "name": "chat.cli: the assistant reply exists exactly once",
-      "ok": true,
-      "detail": {
-        "assistants": 1,
-        "ids": [
-          "msg_0f3989ddfdf81a4bdc98a5890f614ee28d827516795fd295626e4c5bb07999e5"
-        ]
-      }
-    },
-    {
-      "name": "chat.cli: the reply is complete (LIST token and all 40 lines)",
-      "ok": true,
-      "detail": "rich fruit.\n40. Plantains are starchy cooking bananas typically prepared savory."
-    },
-    {
-      "name": "chat.cli: no cancel was recorded",
-      "ok": true,
-      "detail": []
     },
     {
       "name": "studio.worker.web: closed while the turn was still running",
@@ -367,7 +432,7 @@
       "detail": {
         "replies": 1,
         "assistant_tails": [
-          "lvety touch.\n25. Guavas give off a powerful fragrance and have sweet, tropical pink flesh."
+          "fruits resembling miniature peaches.\n25. Guavas have a strong floral aroma and pink flesh."
         ]
       }
     },
@@ -382,187 +447,62 @@
       ]
     },
     {
-      "name": "studio.assistant.cli: conversation ends idle (not failed)",
-      "ok": true,
-      "detail": "idle"
-    },
-    {
-      "name": "studio.assistant.cli: the user message exists once",
-      "ok": true,
-      "detail": {
-        "users": 1
-      }
-    },
-    {
-      "name": "studio.assistant.cli: the assistant reply exists exactly once",
-      "ok": true,
-      "detail": {
-        "replies": 1,
-        "assistant_tails": [
-          "d hairy shells.\n24. Grapefruits are bitter and citrusy.\n25. Avocados are creamy and green."
-        ]
-      }
-    },
-    {
-      "name": "studio.assistant.cli: the log has one run_end and it is completed",
-      "ok": true,
-      "detail": [
-        {
-          "type": "run_end",
-          "status": "completed"
-        }
-      ]
-    },
-    {
-      "name": "studio.assistant.web: closed while the turn was still running",
-      "ok": true,
-      "detail": "running"
-    },
-    {
-      "name": "studio.assistant.web: conversation ends idle (not failed)",
-      "ok": true,
-      "detail": "idle"
-    },
-    {
-      "name": "studio.assistant.web: the user message exists once",
-      "ok": true,
-      "detail": {
-        "users": 1
-      }
-    },
-    {
-      "name": "studio.assistant.web: the assistant reply exists exactly once",
-      "ok": true,
-      "detail": {
-        "replies": 1,
-        "assistant_tails": [
-          "\n24. Pomegranates hold hundreds of ruby arils.\n25. Pineapples wear crowns of spiky leaves."
-        ]
-      }
-    },
-    {
-      "name": "studio.assistant.web: the log has one run_end and it is completed",
-      "ok": true,
-      "detail": [
-        {
-          "type": "run_end",
-          "status": "completed"
-        }
-      ]
-    },
-    {
-      "name": "studio.assistant.ws: closed while the turn was still running",
-      "ok": true,
-      "detail": "running"
-    },
-    {
-      "name": "studio.assistant.ws: conversation ends idle (not failed)",
-      "ok": true,
-      "detail": "idle"
-    },
-    {
-      "name": "studio.assistant.ws: the user message exists once",
-      "ok": true,
-      "detail": {
-        "users": 1
-      }
-    },
-    {
-      "name": "studio.assistant.ws: the assistant reply exists exactly once",
-      "ok": true,
-      "detail": {
-        "replies": 1,
-        "assistant_tails": [
-          "uit.\n24. Lemons are sour yellow citrus stars.\n25. Coconuts carry water inside hard shells."
-        ]
-      }
-    },
-    {
-      "name": "studio.assistant.ws: the log has one run_end and it is completed",
-      "ok": true,
-      "detail": [
-        {
-          "type": "run_end",
-          "status": "completed"
-        }
-      ]
-    },
-    {
-      "name": "studio.assistant.cli-wait: conversation ends idle (not failed)",
-      "ok": true,
-      "detail": "idle"
-    },
-    {
-      "name": "studio.assistant.cli-wait: the user message exists once",
-      "ok": true,
-      "detail": {
-        "users": 1
-      }
-    },
-    {
-      "name": "studio.assistant.cli-wait: the assistant reply exists exactly once",
-      "ok": true,
-      "detail": {
-        "replies": 1,
-        "assistant_tails": [
-          ".\n24. Coconuts have hard hairy brown shells.\n25. Dragon fruit has vibrant pink scaly skin."
-        ]
-      }
-    },
-    {
-      "name": "studio.assistant.cli-wait: the log has one run_end and it is completed",
-      "ok": true,
-      "detail": [
-        {
-          "type": "run_end",
-          "status": "completed"
-        }
-      ]
+      "name": "studio.assistant.ws: case ran",
+      "ok": false,
+      "detail": "Error: Timed out waiting for first reply text; got event,event,event,event,event\n    at Timeout._onTimeout (file:///Users/keithchen/Documents/code/hatch/runtime-server/scripts/verify-surfaces/lib/clients.mjs:126:45)\n    at listOnTimeout (node:internal/timers:588:17)\n    at process.processTimers (node:internal/timers:523:7)"
     }
   ],
   "measurements": {
     "studio.assistant.cli.cli_exit": {
       "code": 1,
       "signal": null,
-      "stdout_bytes": 0,
-      "stderr": "hatch: The \"chunk\" argument must be of type string or an instance of Buffer, TypedArray, or DataView. Received undefined\n"
+      "stdout_bytes": 1,
+      "stderr": ""
     },
-    "studio.assistant.cli.status_at_close": "running",
-    "studio.worker.cli.cli_exit": {
-      "code": 1,
-      "signal": null,
-      "stdout_bytes": 0,
-      "stderr": "hatch: The \"chunk\" argument must be of type string or an instance of Buffer, TypedArray, or DataView. Received undefined\n"
-    },
-    "studio.worker.cli.status_at_close": "running",
-    "studio.assistant.cli-wait.status_at_close": "running",
+    "studio.assistant.cli.status_at_close": "idle",
+    "studio.assistant.cli.turn_finished_after_close_ms": 4,
+    "studio.assistant.cli-wait.status_at_close": "idle",
+    "studio.assistant.cli-wait.turn_finished_after_close_ms": 8,
     "studio.worker.cli-wait.status_at_close": "running",
+    "chat.web.status_at_close": "running",
     "chat.ws.status_at_close": "running",
     "studio.worker.ws.status_at_close": "running",
-    "chat.web.status_at_close": "running",
+    "studio.worker.ws.turn_finished_after_close_ms": 2940,
+    "chat.ws.run_completed_after_close_ms": 4389,
+    "chat.ws.polled_until_terminal_ms": 4404,
     "chat.cli.status_at_close": "running",
-    "studio.worker.ws.turn_finished_after_close_ms": 3415,
-    "studio.worker.cli.turn_finished_after_close_ms": 7300,
-    "studio.worker.cli-wait.turn_finished_after_close_ms": 5074,
-    "chat.ws.run_completed_after_close_ms": 6449,
-    "chat.ws.polled_until_terminal_ms": 6459,
     "chat.stay.status_at_close": "completed",
-    "chat.stay.run_completed_after_close_ms": -190,
-    "chat.stay.polled_until_terminal_ms": 5,
-    "chat.web.run_completed_after_close_ms": 6241,
-    "chat.web.polled_until_terminal_ms": 6246,
-    "chat.cli.run_completed_after_close_ms": 6536,
-    "chat.cli.polled_until_terminal_ms": 6620,
+    "chat.stay.run_completed_after_close_ms": -155,
+    "chat.stay.polled_until_terminal_ms": 6,
+    "chat.web.run_completed_after_close_ms": 7565,
+    "chat.web.polled_until_terminal_ms": 7555,
+    "chat.cli.run_completed_after_close_ms": 6884,
+    "chat.cli.polled_until_terminal_ms": 6904,
+    "studio.worker.cli.cli_exit": {
+      "code": null,
+      "signal": "SIGKILL",
+      "stdout_bytes": 13,
+      "stderr": ""
+    },
+    "studio.worker.cli.status_at_close": "running",
+    "studio.worker.cli.turn_finished_after_close_ms": 1720,
+    "studio.worker.cli-wait.turn_finished_after_close_ms": 22876,
     "studio.worker.web.status_at_close": "running",
-    "studio.worker.web.turn_finished_after_close_ms": 2391,
-    "studio.assistant.cli.turn_finished_after_close_ms": 28213,
-    "studio.assistant.web.status_at_close": "running",
-    "studio.assistant.web.turn_finished_after_close_ms": 6170,
-    "studio.assistant.ws.status_at_close": "running",
-    "studio.assistant.ws.turn_finished_after_close_ms": 6333,
-    "studio.assistant.cli-wait.turn_finished_after_close_ms": 60859
+    "studio.worker.web.turn_finished_after_close_ms": 1740
   },
   "evidence": {
+    "studio.assistant.cli.event_types": [
+      "state",
+      "message_end",
+      "message",
+      "run_end"
+    ],
+    "studio.assistant.cli-wait.event_types": [
+      "state",
+      "message_end",
+      "message",
+      "run_end"
+    ],
     "studio.worker.ws.event_types": [
       "state",
       "message_end",
@@ -570,23 +510,9 @@
       "delta",
       "run_end"
     ],
-    "studio.worker.cli.event_types": [
-      "state",
-      "message_end",
-      "message",
-      "delta",
-      "run_end"
-    ],
-    "studio.worker.cli-wait.event_types": [
-      "state",
-      "message_end",
-      "message",
-      "delta",
-      "run_end"
-    ],
     "chat.ws.ids": {
-      "conversation": "conv_9a4f795d6e964decb933ec3db3f0cb28",
-      "run_id": "run_a5254884eed84516aa1fd656b3830f38",
+      "conversation": "conv_d4cc8043d36d4d5aa5e99db1946fe244",
+      "run_id": "run_acb5a2cf639e429db15d32a438304c07",
       "journal_types": [
         "conversation.created",
         "run.created",
@@ -597,8 +523,8 @@
       ]
     },
     "chat.stay.ids": {
-      "conversation": "conv_edb7e96c311044cba7d1e97b5a3300f4",
-      "run_id": "run_ae9bbb8e88d447ea9c138bd861189d0d",
+      "conversation": "conv_3b2385a240ac4c3282ae981382c78875",
+      "run_id": "run_e4c877a9d64243f19340a3d5da7141d7",
       "journal_types": [
         "conversation.created",
         "run.created",
@@ -609,8 +535,8 @@
       ]
     },
     "chat.web.ids": {
-      "conversation": "conv_c29050bdef774abeb705450902d506b3",
-      "run_id": "run_9c7fc1f390be402bbbed27eca190c020",
+      "conversation": "conv_37124fad834245bca30c187712c3282a",
+      "run_id": "run_72f8336e64344743b81659133a222b13",
       "journal_types": [
         "conversation.created",
         "run.created",
@@ -621,8 +547,8 @@
       ]
     },
     "chat.cli.ids": {
-      "conversation": "conv_95e597cd16004e5caa8a3140f22def3a",
-      "run_id": "run_31b914218e76484599ab53efc8af65b2",
+      "conversation": "conv_0b26463ebea046a8aeac01f6f0c3ac2b",
+      "run_id": "run_61c1c21b7f7d4a2db3a8656cebc8d995",
       "journal_types": [
         "conversation.created",
         "run.created",
@@ -632,7 +558,7 @@
         "run.state"
       ]
     },
-    "studio.worker.web.event_types": [
+    "studio.worker.cli.event_types": [
       "state",
       "message_end",
       "message",
@@ -642,36 +568,24 @@
       "tool_end",
       "run_end"
     ],
-    "studio.assistant.cli.event_types": [
+    "studio.worker.cli-wait.event_types": [
       "state",
       "message_end",
       "message",
       "thinking",
       "delta",
+      "tool",
+      "tool_end",
       "run_end"
     ],
-    "studio.assistant.web.event_types": [
+    "studio.worker.web.event_types": [
       "state",
       "message_end",
       "message",
       "thinking",
       "delta",
-      "run_end"
-    ],
-    "studio.assistant.ws.event_types": [
-      "state",
-      "message_end",
-      "message",
-      "thinking",
-      "delta",
-      "run_end"
-    ],
-    "studio.assistant.cli-wait.event_types": [
-      "state",
-      "message_end",
-      "message",
-      "thinking",
-      "delta",
+      "tool",
+      "tool_end",
       "run_end"
     ]
   },
@@ -684,7 +598,7 @@
       "title": "hatch chat/assistant --stream crashes on the first Studio event",
       "severity": "medium",
       "expected": "`hatch assistant <msg> --stream` and `hatch chat <product> <worker> <msg> --stream` print the reply as it arrives (the CLI help says so).",
-      "actual": "The CLI exits 1 with: hatch: The \"chunk\" argument must be of type string or an instance of Buffer, TypedArray, or DataView. Received undefined. Studio SSE frames carry no `event:` name, so RunObserver (packages/hatch-cli/src/run.js) takes each as event \"message\", returns undefined for it, and stdout.write(undefined) throws. The Run itself is unaffected and completes.",
+      "actual": "The CLI exits 1 with: . Studio SSE frames carry no `event:` name, so RunObserver (packages/hatch-cli/src/run.js) takes each as event \"message\", returns undefined for it, and stdout.write(undefined) throws. The Run itself is unaffected and completes.",
       "repro": "hatch assistant \"hi\" --stream (any Studio worker or the Assistant, plain output, not --json)"
     }
   ]
