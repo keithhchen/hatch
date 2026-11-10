@@ -50,7 +50,7 @@ export function StudioAssistant({ request, t }) {
 
 function Assistant({ transport, controller, dictate, request, t, chatT, errorText }) {
   const view = useSyncExternalStore(transport.subscribe, transport.getView);
-  const { connection, activeRun, error: chatError } = useChatState(controller);
+  const { connection } = useChatState(controller);
   const [wasOpen, setWasOpen] = useState(false);
   const [error, setError] = useState("");
   const [larkForm, setLarkForm] = useState(false);
@@ -84,7 +84,6 @@ function Assistant({ transport, controller, dictate, request, t, chatT, errorTex
         empty={<p className="sxa-empty">{t("sxaEmpty")}</p>}
         dockAccessory={<>
           {wasOpen && connection !== "open" ? <InlineAlert tone="error">{t("sxaConnectionLost")}</InlineAlert> : null}
-          {view?.failure && !activeRun && !chatError ? <InlineAlert tone="error">{view.failure.message}</InlineAlert> : null}
           {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
         </>} />
     </section>

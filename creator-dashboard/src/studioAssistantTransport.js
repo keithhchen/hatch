@@ -91,8 +91,9 @@ export class StudioAssistantTransport extends ConversationTransport {
       conversation: { id: ASSISTANT_CONVERSATION },
       messages: view.messages.map(messageOf), events: [], cursor: Number(view.cursor),
       has_more: view.has_more, ...(view.before_cursor ? { before_cursor: view.before_cursor } : {}),
-      // The page lists only the Run in progress; a Run it does not list has ended.
-      runs: view.running ? [{ id: view.runId, status: "running", ...(view.partial ? { partial_output: view.partial } : {}) }] : []
+      // The page lists the Run in progress, or the last one when it failed; a Run it does not list has ended well.
+      runs: view.running ? [{ id: view.runId, status: "running", ...(view.partial ? { partial_output: view.partial } : {}) }]
+        : view.failure && view.runId ? [{ id: view.runId, status: "failed", failure: view.failure }] : []
     };
   }
 

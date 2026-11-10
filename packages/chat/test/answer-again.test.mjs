@@ -106,3 +106,23 @@ test("without transport support there is nothing to answer again, and a connecti
   assert.equal(transport.connections.length, connections + 1);
   controller.dispose();
 });
+
+test("opening a conversation whose last reply failed offers to answer it again, without a live failure", async () => {
+  const transport = new FakeTransport();
+  transport.runs = [{ id: "run_1", status: "completed" }, { id: "run_9", status: "failed", failure: { code: "upstream_error", message: "fetch failed" } }];
+  const controller = new ConversationController({ transport, attachments: new NoAttachments(), tools: new NoTools(), pendingStore: new MemoryPendingStore(), pollMs: 60_000, reconnectAttempts: 0 });
+  controller.open("assistant");
+  await flush();
+  assert.deepEqual(controller.getState().failedRun, { id: "run_9" });
+  assert.ok(controller.getState().error);
+});
+
+test("opening a conversation whose last reply completed offers nothing", async () => {
+  const transport = new FakeTransport();
+  transport.runs = [{ id: "run_9", status: "failed" }, { id: "run_10", status: "completed" }];
+  const controller = new ConversationController({ transport, attachments: new NoAttachments(), tools: new NoTools(), pendingStore: new MemoryPendingStore(), pollMs: 60_000, reconnectAttempts: 0 });
+  controller.open("assistant");
+  await flush();
+  assert.equal(controller.getState().failedRun, null);
+  assert.equal(controller.getState().error, null);
+});

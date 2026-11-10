@@ -235,7 +235,8 @@ export class AssistantChat implements AssistantHost {
     const last = runs.at(-1);
     if (!last) return { state: "idle" };
     if (ACTIVE.has(last.status)) return { state: "running", runId: last.id };
-    return last.status === "failed" ? { state: "failed", error: last.failure ?? failureOfReason(undefined) } : { state: "idle" };
+    // A Run that failed or was interrupted can be answered again, so the page is told which one.
+    return last.status === "failed" || last.status === "interrupted" ? { state: "failed", runId: last.id, error: last.failure ?? failureOfReason(undefined) } : { state: "idle" };
   }
 
   /**

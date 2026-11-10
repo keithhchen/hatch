@@ -229,7 +229,7 @@ export class ConversationController {
     } else {
       this.setState({ activeRun: running?.id ?? awaited, status: { key: running ? "agentReplying" : awaited ? "sending" : "connected" } });
     }
-    if (firstSnapshot) { this.resumePending(id, projected); this.connect(); }
+    if (firstSnapshot) { this.offerAnswerAgain(snapshot, running); this.resumePending(id, projected); this.connect(); }
     this.reconcilePending(projected);
     return { stale: false };
   }
@@ -254,6 +254,13 @@ export class ConversationController {
     this.updateMessages(current => current.filter(message => !(message.transient && message.run_id === run.id)));
     this.resetTimeline();
     if (record.status === "failed") this.failReply(run.id, record.failure);
+  }
+
+  /** On opening a conversation whose last reply failed, before any stream saw it: the same error, answerable again. */
+  offerAnswerAgain(snapshot, running) {
+    const last = snapshot.runs.at(-1);
+    if (running || this.state.failedRun || !last || !["failed", "interrupted"].includes(last.status)) return;
+    this.failReply(idOfRun(last), last.failure);
   }
 
   /** A reply that failed: shown as an error that can be answered again, not as a broken connection. */
