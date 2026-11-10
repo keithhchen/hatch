@@ -86,7 +86,7 @@ One strategy for Chat and Studio (`compactionStrategy.ts`), each with its own ad
 - Durable memory is written first where a conversation type has a memory layer. Chat and Studio have none.
 - Reminders are never compacted. Images are path labels.
 
-Compaction is visible: a `compacting` status, and a completed marker. Every compaction has a durable id (`compaction.started`, `compaction.completed` in the journal), which the channel layer uses for one notice per compaction, only when a user is waiting. The notice is not part of the conversation.
+Compaction is visible: a `compacting` status, and a completed marker. Every compaction has a durable id (`compaction.started`, then exactly one of `compaction.completed` or `compaction.aborted`, in the journal), which the channel layer uses for one notice per compaction, only when a user is waiting. The notice is not part of the conversation.
 
 ## Out of scope
 
