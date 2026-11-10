@@ -385,7 +385,7 @@ class Attachments extends Scenario {
     // The Studio grep calls the same matcher over every line of a file; the slow pattern must end, not hang.
     const lines = Array.from({ length: 5000 }, (_, n) => `${"a".repeat(36 + n % 6)}b`);
     const matchStarted = Date.now();
-    const verdict = (() => { try { regexMatcher("(a+)+$", false)(lines, 50); return "returned"; } catch (error) { return error.message; } })();
+    const verdict = await Promise.resolve().then(() => regexMatcher("(a+)+$", false)(lines, 50)).then(() => "returned", (error) => error.message);
     rec.measure("component_matcher_5000_slow_lines", { ms: Date.now() - matchStarted, verdict });
     rec.check("[component] the shared matcher (Chat grep and Studio grep) ends a catastrophic pattern over 5000 slow lines within 1 s", Date.now() - matchStarted < 1000 && /too long/.test(verdict), { ms: Date.now() - matchStarted, verdict });
   }
