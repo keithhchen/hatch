@@ -143,7 +143,7 @@ class Crash extends Scenario {
     const request = await socket.waitFor("tool_call.request", (f) => f.type === "tool_call.request", 90_000);
     return { chat, conversation, socket, runId, request, tag, productId };
   }
-  async runRow(stack, runId) { return (await stack.runtimePool.query("SELECT status, executor_id, interrupted_reason FROM hatch_conversation_runs WHERE id = $1", [runId])).rows[0]; }
+  async runRow(stack, runId) { return (await stack.runtimePool.query("SELECT status, executor_id, failure->>'message' AS interrupted_reason FROM hatch_conversation_runs WHERE id = $1", [runId])).rows[0]; }
   async callRows(stack, runId) { return (await stack.runtimePool.query("SELECT tool_call_id, name, expires_at, answered_at, outcome IS NOT NULL AS answered FROM hatch_run_tool_calls WHERE run_id = $1", [runId])).rows; }
   async finalText(chat, c) { const finished = await chat.finish(c.conversation, c.productId, c.runId, 120_000); const messages = (await chat.snapshot(c.conversation, c.productId)).json?.messages ?? []; return { status: finished.status, messages, text: [...messages].reverse().find((m) => m.role === "assistant")?.content ?? "" }; }
   answer(chat, c, client = "desktop") { return chat.toolResult(c.conversation, c.productId, { client, run_id: c.request.run_id, tool_call_id: c.request.tool_call_id, status: "ok", result: FILE_LIST }); }

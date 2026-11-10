@@ -37,7 +37,7 @@ class Compaction extends Scenario {
         const id = response.json?.run?.id;
         const journal = (await stack.runtimePool.query("SELECT event_type, left(payload::text, 400) AS p FROM hatch_conversation_journal WHERE run_id = $1 ORDER BY cursor", [id])).rows;
         const events = (await stack.runtimePool.query("SELECT event_type, left(payload::text, 600) AS p FROM hatch_conversation_events WHERE run_id = $1 AND event_type NOT IN ('message.created') ORDER BY id", [id])).rows;
-        const run = (await stack.runtimePool.query("SELECT status, interrupted_reason FROM hatch_conversation_runs WHERE id = $1", [id])).rows;
+        const run = (await stack.runtimePool.query("SELECT status, failure->>'message' AS interrupted_reason FROM hatch_conversation_runs WHERE id = $1", [id])).rows;
         rec.evidenceOf("failed_run_debug", { run, journal, events });
       }
       if (!response.json?.reply) throw new Error(`empty reply: ${JSON.stringify({ ...response.json, run: { ...response.json?.run, partial_output: String(response.json?.run?.partial_output ?? "").length } }).slice(0, 900)}`);

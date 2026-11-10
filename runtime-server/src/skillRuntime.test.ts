@@ -7,7 +7,7 @@ import { test } from "node:test";
 import type { AgentRuntime, RunContext } from "./agentRuntime.js";
 import { ClientToolBroker } from "./clientBroker.js";
 import type { OutboundMessage, RunStart } from "./protocol.js";
-import { RunStateMachine } from "./runState.js";
+import { RunStateMachine, transcriptEnds } from "./runState.js";
 import { ServerToolExecutor } from "./serverTools.js";
 import { SkillRuntime } from "./skillRuntime.js";
 import type { SkillRecord } from "./skills.js";
@@ -70,7 +70,7 @@ async function createHarness(
   timeoutMs = 1_000
 ) {
   const store = new RuntimeStore(path.join(root, "runtime-data"));
-  const state = new RunStateMachine(parentInput.run_id, parentInput.conversation_id, store);
+  const state: RunStateMachine = new RunStateMachine(parentInput.run_id, parentInput.conversation_id, store, transcriptEnds(store, parentInput.conversation_id, parentInput.run_id, () => state.status));
   await state.start();
   const outbound: OutboundMessage[] = [];
   const broker = new ClientToolBroker(async (event) => {

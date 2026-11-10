@@ -39,7 +39,9 @@ function studioEvents(event: Hubbed, endedRuns: Set<string>): ConversationEvent[
     case "turn.state": {
       const status = String(event.status);
       if (status === "compacting") return [{ type: "compacting" }, { type: "state" }];
-      if (status === "completed" || status === "cancelled" || status === "interrupted") return end(status);
+      // A Run's reply is written by its ending, which has committed by the time this is heard: its `message_end` comes with the end.
+      if (status === "completed") { const ended = end(status); return ended.length ? [{ type: "message_end" }, ...ended] : []; }
+      if (status === "cancelled" || status === "interrupted") return end(status);
       return status === "failed" ? [] : [{ type: "state" }];
     }
     case "turn.failed": {

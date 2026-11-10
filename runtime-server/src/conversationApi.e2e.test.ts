@@ -1,3 +1,4 @@
+import { endingOf } from "./testSupport.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdtemp } from "node:fs/promises";
@@ -452,7 +453,7 @@ test("GET run returns canonical submission receipts or null without writing on r
       inputDigest: `sha256:${"a".repeat(64)}`, corpusDigest: binding.corpus_digest
     });
     // Identical terminal run states must not determine message acceptance.
-    await repository.transitionRun(id, "interrupted", "Test executor disconnected");
+    await repository.endRun(id, endingOf("interrupted", "Test executor disconnected"));
   }
   await store.append({
     type: "conversation.model_message", conversation_id: conversationId,

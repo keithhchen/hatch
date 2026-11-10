@@ -1,3 +1,4 @@
+import { endingOf } from "./testSupport.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -83,13 +84,13 @@ for (const backend of ["memory", "file", "postgres"] as const) {
     const start = await repository.acceptSubmission(message(0));
     await repository.acceptSubmission(message(1));
     await repository.acceptSubmission(message(2));
-    await assert.rejects(repository.transitionRun(start.run.id, "completed"), { code: "steer_pending" });
+    assert.equal((await repository.endRun(start.run.id, endingOf("completed"))).ended, false);
     assert.equal((await repository.getRun(id, start.run.id))!.status, "queued");
     const claimed = await Promise.all([repository.claimSteeredMessages(start.run.id), repository.claimSteeredMessages(start.run.id)]);
     const messages = claimed.flat();
     assert.deepEqual(messages.map((row) => row.clientMessageId), ["message-1", "message-2"]);
     assert.deepEqual(messages.map((row) => row.message.content), ["question 1", "question 2"]);
-    assert.equal((await repository.transitionRun(start.run.id, "completed")).status, "completed");
+    assert.equal((await repository.endRun(start.run.id, endingOf("completed"))).run.status, "completed");
     // The Run is over: the next message starts a new Run instead of joining it.
     const next = await repository.acceptSubmission(message(3));
     assert.equal(next.created, true);
@@ -101,7 +102,7 @@ for (const backend of ["memory", "file", "postgres"] as const) {
       const start = await repository.acceptSubmission(message(0));
       await repository.acceptSubmission(message(1));
       await repository.acceptSubmission(message(2));
-      const ended = await repository.transitionRun(start.run.id, terminal, "stopped");
+      const ended = await repository.endRun(start.run.id, endingOf(terminal, "stopped")).then((result) => result.run);
       assert.equal(ended.status, terminal);
       assert.equal(ended.consumedCount, 2);
       assert.deepEqual((await store.readVisibleConversation(id)).map((row) => row.content), ["question 0", "question 1", "question 2"]);
@@ -145,7 +146,7 @@ for (const backend of ["memory", "file", "postgres"] as const) {
     const finish = async (runId: string): Promise<void> => {
       for (;;) {
         await repository.claimSteeredMessages(runId);
-        try { await repository.transitionRun(runId, "completed"); return; } catch (error) { if ((error as { code?: string }).code !== "steer_pending") throw error; }
+        if ((await repository.endRun(runId, endingOf("completed"))).ended) return;
       }
     };
     const outcomes = await Promise.all([finish(first.run.id), ...Array.from({ length: 12 }, submit)]);

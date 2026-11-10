@@ -15,6 +15,7 @@ import {
   type PersistedContextAttachment
 } from "./protocol.js";
 import type { CompactionPhase, CompactionReason, CompactionTrigger } from "./compaction.js";
+import { RunFenced, type RunHold } from "./runHold.js";
 
 export type RunStatus = "queued" | "running" | "waiting_for_tool" | "compacting" | "completed" | "failed" | "cancelled" | "interrupted";
 
@@ -466,13 +467,21 @@ export class RuntimeStore {
     return this.root;
   }
 
-  async append(event: StoreEventInput): Promise<void> {
+  /** With `hold`, the append is refused, in the same commit that would make it, unless that executor still holds the event's Run. */
+  async append(event: StoreEventInput, hold?: RunHold): Promise<void> {
     assertCanonicalPersistedToolNames(event);
     const record: StoreEvent = {
       timestamp: new Date().toISOString(),
       ...event
     };
-    await this.localAuthority.transact(async () => ({ result: undefined, commit: { kind: "event", events: [record] } }));
+    await this.localAuthority.transact(async () => {
+      if (hold) {
+        const runId = "run_id" in record ? record.run_id : undefined;
+        const run = runId ? this.localAuthority.runs.get(runId) : undefined;
+        if (!run || run.executorId !== hold.heldBy || !["queued", "running", "waiting_for_tool", "compacting"].includes(run.status)) throw new RunFenced(runId ?? "unknown");
+      }
+      return { result: undefined, commit: { kind: "event", events: [record] } };
+    });
   }
 
   async close(): Promise<void> {

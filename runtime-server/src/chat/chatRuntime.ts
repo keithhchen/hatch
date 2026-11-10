@@ -14,6 +14,7 @@ import type { StopRelay } from "./stopRelay.js";
 import { TranscriptResumePolicy } from "./resumePolicy.js";
 import { RunEventHub } from "./runEventHub.js";
 import { RunSupervisor } from "./runSupervisor.js";
+import { runTerminators } from "./runTerminator.js";
 import { ToolRecovery } from "./toolRecovery.js";
 import { TurnExecutor, type ScopeResolver, type TurnRunner } from "./turnExecutor.js";
 
@@ -63,22 +64,23 @@ export class ChatRuntime<Scope> {
       strategy: () => strategy ??= (options.compactionStrategy ?? chatCompactionStrategy)()
     });
     const recovery = new ToolRecovery({ repository });
+    const terminators = runTerminators(repository, this.hub, executorId);
     this.supervisor = new RunSupervisor(
       repository,
       new TurnExecutor({
         // The executor writes through the fence: once its Run is stopped or taken over it can write nothing more.
-        repository: fenced(repository, executorId, repository, {
-          transitionRun: (runId: string) => runId, savePartialOutput: (runId: string) => runId,
-          claimSteeredMessages: (runId: string) => runId, requestToolCall: (call: { runId: string }) => call.runId
-        }),
-        store: fenced(store, executorId, repository, { append: (event: { run_id?: string }) => event.run_id }),
+        // The index is where each write takes its hold, which the write itself checks.
+        repository: fenced(repository, executorId, { transitionRun: 3, savePartialOutput: 2, claimSteeredMessages: 1, requestToolCall: 1 }),
+        store: fenced(store, executorId, { append: 1 }),
+        terminator: terminators.executing,
         hub: this.hub, registry: this.registry, scopes: options.scopes, runner: options.runner, recovery,
         compactions: this.compaction, toolTimeoutMs: options.toolTimeoutMs, toolPollMs: options.toolPollMs
       }),
       new TranscriptResumePolicy(store, recovery),
-      { executorId, leaseMs: options.leaseMs ?? DEFAULT_RUN_LEASE_MS, sweepMs: options.sweepMs ?? 5_000, toolPollMs: options.toolPollMs, afterReply: (run) => this.compaction.afterReply(run), stops: options.stops }
+      { executorId, leaseMs: options.leaseMs ?? DEFAULT_RUN_LEASE_MS, sweepMs: options.sweepMs ?? 5_000, toolPollMs: options.toolPollMs, afterReply: (run) => this.compaction.afterReply(run), stops: options.stops },
+      terminators
     );
-    this.service = new ChatService({ repository, supervisor: this.supervisor, hub: this.hub, admission: options.admission, registry: this.registry, limits: options.limits, compaction: this.compaction });
+    this.service = new ChatService({ repository, terminator: terminators.external, supervisor: this.supervisor, hub: this.hub, admission: options.admission, registry: this.registry, limits: options.limits, compaction: this.compaction });
   }
 
   /** Takes over Runs a previous instance left behind, then keeps watching for more. */
@@ -96,9 +98,7 @@ export class ChatRuntime<Scope> {
 
   /** An explicit stop: the only thing that ends a Run early. */
   async cancel(conversationId: string, runId: string, reason: string): Promise<boolean> {
-    const cancelled = await this.supervisor.cancel(conversationId, runId, reason);
-    if (cancelled) this.hub.publish(conversationId, { type: "turn.failed", run_id: runId, error: { code: "run_cancelled", message: reason } });
-    return cancelled;
+    return this.supervisor.cancel(conversationId, runId, reason);
   }
 
   /**

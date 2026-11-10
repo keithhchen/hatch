@@ -36,7 +36,7 @@ export class ImWorld {
   async evidence(sender) {
     const inbox = (await this.stack.registryPool.query("SELECT event_id, state, run_id, attempts, (extract(epoch from received_at)*1000)::bigint AS received_ms, (extract(epoch from replied_at)*1000)::bigint AS replied_ms FROM hatch_channel_inbox WHERE sender_id = $1 ORDER BY seq", [String(sender.chatId)])).rows;
     const runIds = inbox.map((row) => row.run_id).filter(Boolean);
-    const runs = runIds.length ? (await this.stack.runtimePool.query("SELECT id, status, executor_id, interrupted_reason, (extract(epoch from created_at)*1000)::bigint AS created_ms, (extract(epoch from completed_at)*1000)::bigint AS completed_ms FROM hatch_conversation_runs WHERE id = ANY($1)", [runIds])).rows : [];
+    const runs = runIds.length ? (await this.stack.runtimePool.query("SELECT id, status, executor_id, failure->>'message' AS interrupted_reason, (extract(epoch from created_at)*1000)::bigint AS created_ms, (extract(epoch from completed_at)*1000)::bigint AS completed_ms FROM hatch_conversation_runs WHERE id = ANY($1)", [runIds])).rows : [];
     const outbox = runIds.length ? (await this.stack.registryPool.query("SELECT state, source_key, kind, sent_parts, attempts FROM hatch_channel_outbox WHERE source_key = ANY($1)", [runIds.map((id) => `run:${id}`)])).rows : [];
     const sends = this.sends(sender);
     // Calls the dead executor left unfinished that the model was told "did not run" (transcript tool results with that code).

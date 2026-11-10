@@ -1,3 +1,4 @@
+import { FileConversationRepository } from "./conversationRepository.js";
 import { access, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import http from "node:http";
@@ -2550,7 +2551,9 @@ test("run cancel for an unknown run does not cancel the active run", async () =>
   socket.close();
 
   const events = await new RuntimeStore(dataDir).readEvents();
-  assert.ok(events.some((event) => event.type === "turn.state" && event.run_id === "run_cancel_active" && event.to === "cancelled"));
+  const ended = new FileConversationRepository(dataDir);
+  assert.deepEqual([(await ended.findRun("run_cancel_active"))?.status, (await ended.findRun("run_cancel_active"))?.failure?.code], ["cancelled", "run_cancelled"]);
+  await ended.close();
   assert.ok(events.some((event) => event.type === "tool.call" && event.run_id === "run_cancel_active" && event.status === "cancelled"));
   assert.ok(!events.some((event) => event.type === "runtime.event"));
 });

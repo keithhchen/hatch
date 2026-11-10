@@ -221,7 +221,7 @@ export class AssistantChat implements AssistantHost {
     const last = runs.at(-1);
     if (!last) return { state: "idle" };
     if (ACTIVE.has(last.status)) return { state: "running", runId: last.id };
-    return last.status === "failed" ? { state: "failed", error: failureOfReason(last.interruptedReason) } : { state: "idle" };
+    return last.status === "failed" ? { state: "failed", error: last.failure ?? failureOfReason(undefined) } : { state: "idle" };
   }
 
   /** What the Expert and the Assistant said, oldest first, as every Studio client reads a conversation. */

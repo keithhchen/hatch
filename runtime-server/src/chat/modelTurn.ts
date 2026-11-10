@@ -17,7 +17,8 @@ import type { RunStateMachine } from "../runState.js";
 import { failures } from "../errors/failures.js";
 import type { ServerToolExecutor } from "../serverTools.js";
 import type { RuntimeStore, VisibleConversationPart } from "../store.js";
-import { ConversationRepositoryError, type ConversationRepository } from "../conversationRepository.js";
+import type { ConversationRepository, RunReply } from "../conversationRepository.js";
+import { RunFenced } from "../runHold.js";
 import type { ToolBridge } from "../toolBridge.js";
 import {
   findCompletedDelivery,
@@ -247,28 +248,14 @@ async function runModelTurnInternal(
       recordDelivery = true
     ): Promise<void> => {
       let receiptStatus: "recorded" | "syncing" | undefined;
-      const content = finishReason === "content_filter"
-        ? OUTPUT_GUARD_BLOCKED_MODEL_MESSAGE
-        : approvedAssistantText;
-      await store.append({
-        type: "conversation.model_message",
-        conversation_id: input.conversation_id,
-        run_id: input.run_id,
-        message: { role: "assistant", content },
-        finish_reason: finishReason,
-        visible_parts: finishReason === "content_filter"
+      // The reply is written by the Run's ending, in the same transaction as its status: a crash cannot leave a reply on a Run that was not ended.
+      const reply: RunReply = {
+        message: { role: "assistant", content: finishReason === "content_filter" ? OUTPUT_GUARD_BLOCKED_MODEL_MESSAGE : approvedAssistantText },
+        finishReason,
+        visibleParts: finishReason === "content_filter"
           ? visibleParts.filter((part) => part.type === "thinking")
           : visibleParts
-      });
-      await conversationRepository.appendEvent({
-        conversationId: input.conversation_id,
-        runId: input.run_id,
-        type: "message.created",
-        payload: {
-          role: "assistant",
-          ...(finishReason === "content_filter" ? { finish_reason: finishReason } : {})
-        }
-      });
+      };
       if (finishReason === "stop" && recordDelivery && commerceEventSink && deliveryBinding) {
         const receipt = prepareDelivery(
           deliveryBinding,
@@ -321,7 +308,7 @@ async function runModelTurnInternal(
           guard: guardTiming
         }
       });
-      await state.complete();
+      await state.complete(reply);
     };
     const sendFixedAssistant = async (content: string): Promise<void> => {
       const pushed = await guardedOutput.push(content);
@@ -490,12 +477,9 @@ async function runModelTurnInternal(
     if (state.status === "cancelled" || state.status === "interrupted") {
       return;
     }
-    // Shutting down is a handoff, and a message that joined at the last moment keeps the Run open.
-    if (abortSignal.reason instanceof RunHandoff
-      || (error instanceof ConversationRepositoryError && error.code === "steer_pending")) {
-      return;
-    }
-    await recordFailure({ run: input.run_id, conversation: input.conversation_id }, error, state, send);
+    // Shutting down is a handoff; another instance continues the Run.
+    if (abortSignal.reason instanceof RunHandoff || error instanceof RunFenced) return;
+    await recordFailure({ run: input.run_id, conversation: input.conversation_id }, error, state);
   } finally {
     if (commerceEventSink && deliveryReservation && !deliveryReservationConsumed && !deliveryAccountingPending) {
       const releaseReason = state.status === "cancelled"
@@ -603,23 +587,20 @@ export function errorMessage(error: unknown): string {
 }
 
 /**
- * A Run whose execution threw: recorded once, and told to every observer in the one shape the failure boundary builds.
- * The failed transition claims any message that joined the Run, so the next Run sees it and the conversation shows it.
+ * A Run whose execution threw: ended once, with the one failure shape the failure boundary builds. The ending is the Run's
+ * only exit, so it claims any message that joined the Run, writes the journal, and tells every observer, after it commits.
  */
 async function recordFailure(
   scope: { run: string; conversation: string },
   error: unknown,
-  state: RunStateMachine,
-  publish: (message: OutboundMessage) => void | Promise<void>
+  state: RunStateMachine
 ): Promise<void> {
-  const failure = failures.translate(error, scope);
-  await state.fail(failure.message).catch(() => undefined);
-  await publish({ type: "turn.failed", run_id: scope.run, error: failure });
+  await state.fail(failures.translate(error, scope)).catch(() => undefined);
 }
 
-export async function failRun(turn: Pick<Turn<unknown>, "run" | "conversation" | "signal" | "state" | "publish">, error: unknown): Promise<void> {
+export async function failRun(turn: Pick<Turn<unknown>, "run" | "conversation" | "signal" | "state">, error: unknown): Promise<void> {
   if (turn.signal.reason instanceof RunHandoff) return;
-  await recordFailure({ run: turn.run.id, conversation: turn.conversation.id }, error, turn.state, turn.publish);
+  await recordFailure({ run: turn.run.id, conversation: turn.conversation.id }, error, turn.state);
 }
 
 /** A conversation whose agent has no Skills. */
