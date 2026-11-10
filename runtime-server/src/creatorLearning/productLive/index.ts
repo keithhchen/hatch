@@ -6,7 +6,7 @@ import { CorpusPublisherReleaser, RegistryLiveReleaseRepository } from "./adapte
 import { WorkbenchAgentDefinitionRepository } from "./adapters/workbenchDefinitions.js";
 import { ProductLiveService } from "./productLiveService.js";
 
-export { ExpertProduct, SystemMissing } from "./domain.js";
+export { ExpertProduct, ProductAddresses, SystemMissing } from "./domain.js";
 export { ProductLiveService } from "./productLiveService.js";
 
 /** Composition root: wires the production adapters into the service. */
@@ -15,10 +15,12 @@ export function createProductLive(deps: {
   publisher: CorpusPublisher;
   releases: CreatorRegistryReleaseStore;
   objectStore: ArtifactObjectStore;
+  publicOrigin: string;
 }): ProductLiveService {
   return new ProductLiveService(
     new WorkbenchAgentDefinitionRepository(path.join(deps.factoryRoot, "agent-chats")),
     new RegistryLiveReleaseRepository(deps.releases, deps.objectStore),
     new CorpusPublisherReleaser(deps.publisher),
+    deps.publicOrigin,
   );
 }

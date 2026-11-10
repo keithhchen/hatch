@@ -17,9 +17,16 @@ export class ExpertProduct {
     readonly promise: string,
     readonly briefSpec: unknown = null,
   ) {}
+}
 
-  get publicUrl(): string {
-    return `/products/${encodeURIComponent(this.productId)}`;
+/** Where a published Product can be reached: its page and its chat page. Absolute, from the site's public origin. */
+export class ProductAddresses {
+  private constructor(readonly page: string, readonly chat: string) {}
+
+  static of(origin: string, productId: string): ProductAddresses {
+    const base = origin.replace(/\/+$/, "");
+    const id = encodeURIComponent(productId);
+    return new ProductAddresses(`${base}/products/${id}`, `${base}/chat/product/${id}`);
   }
 }
 
@@ -68,6 +75,7 @@ export type ProductLiveStatus = {
   is_live: boolean;
   pending_changes: PendingChange[];
   public_url: string | null;
+  chat_url: string | null;
   published_at: string | null;
 };
 
@@ -77,6 +85,7 @@ export class ProductLiveView {
     private readonly product: ExpertProduct,
     private readonly definition: AgentDefinition | null,
     private readonly live: LiveRelease | null,
+    private readonly addresses: ProductAddresses,
   ) {}
 
   toJSON(): ProductLiveStatus {
@@ -85,7 +94,8 @@ export class ProductLiveView {
       can_publish: this.definition !== null,
       is_live: this.live !== null,
       pending_changes: this.live?.pendingAgainst(this.product, this.definition) ?? [],
-      public_url: this.live ? this.product.publicUrl : null,
+      public_url: this.live ? this.addresses.page : null,
+      chat_url: this.live ? this.addresses.chat : null,
       published_at: this.live?.publishedAt ?? null,
     };
   }
@@ -97,6 +107,7 @@ export type PublishedProduct = {
   published_at: string;
   corpus_digest: string;
   public_url: string;
+  chat_url: string;
 };
 
 export class SystemMissing extends Error {
