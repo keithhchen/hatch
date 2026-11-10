@@ -249,7 +249,7 @@ curl -s -X POST "https://gethatchapp.com/v1/creator/assistant/conversation/messa
   -d '{"content":"What needs my attention?","client_message_id":"'"$(uuidgen)"'"}'
 ```
 
-Send `client_message_id` (and the same value as `Idempotency-Key`) so a retry does not send twice. `Accept: text/event-stream` on the POST streams the reply; `GET .../events?after=<cursor>` resumes it.
+Send `client_message_id` (and the same value as `Idempotency-Key`) so a retry does not send twice. `Accept: text/event-stream` on the POST streams the reply; `GET .../events?after_cursor=<cursor>` resumes it.
 
 ### 15. Chat with a published product
 

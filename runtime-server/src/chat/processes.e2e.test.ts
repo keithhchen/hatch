@@ -98,6 +98,8 @@ test("a signed platform webhook becomes one Run and one outbound delivery across
   for (const name of Object.values(names)) await admin.query(`CREATE DATABASE "${name}"`);
   const registryPool = new Pool({ connectionString: urlFor(names.registry) });
   const runtimePool = new Pool({ connectionString: urlFor(names.runtime) });
+  // The teardown drops these databases WITH (FORCE); an idle client the server cuts off then errors on its pool, which is expected.
+  for (const pool of [admin, registryPool, runtimePool]) pool.on("error", () => undefined);
   const spawned: Spawned[] = [];
   const servers: http.Server[] = [];
   context.after(async () => {

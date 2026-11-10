@@ -63,7 +63,7 @@ export const METHODS = Object.freeze([
       },
       { id: "events", code: [sh(`curl -N ${WORKER_URL}/events ${AUTH}`)] },
       { id: "stop", code: [sh(`curl -s -X POST ${WORKER_URL}/stop ${AUTH} ${JSON_HEADER} -d '{}'`)] },
-      { id: "assistant", code: [sh(`curl -s -X POST "${ORIGIN}/v1/creator/assistant/conversation/messages?wait=60" ${AUTH} ${JSON_HEADER} \\\n  -d '{"content":"What needs my attention?"}'`)] }
+      { id: "assistant", code: [sh(`curl -s -X POST "${ORIGIN}/v1/creator/assistant/conversation/messages?wait=60" ${AUTH} ${JSON_HEADER} \\\n  -d '{"content":"What needs my attention?","client_message_id":"'"$(uuidgen)"'"}'`)] }
     ]
   },
   {
