@@ -36,6 +36,7 @@ import type { AssistantChannels, Inbound } from "../channels/ports.js";
 import type { ChannelConnection } from "../channels/connections.js";
 import { idempotencyId, type OutboundMessage as ChannelMessage } from "../channels/types.js";
 import { TelegramChannel } from "../channels/telegramChannel.js";
+import { guarded } from "../channels/eligibility.js";
 import { MemoryTaskRepository } from "./tasks.js";
 import type { AgentCatalog, AgentChange } from "./catalog.js";
 
@@ -395,7 +396,7 @@ test("A task a Run created waits for the Expert's decision as buttons under that
   try {
     const [handled] = await env.telegramUpdate(update(1, "发布吧"));
     await env.idle();
-    const policy = await env.target.replyPolicy({} as ChannelConnection, handled!.runId!);
+    const policy = await guarded(env.target, {}).replyPolicy!({} as ChannelConnection, handled!.runId!);
     assert.equal(policy.quietWhenEmpty, true);
     assert.deepEqual(policy.buttons?.map(button => [button.label, button.action]), [["确认", "approve"], ["取消", "decline"]]);
     const [button] = await env.telegramUpdate({ update_id: 2, callback_query: { id: "cb1", from: { id: 42 }, data: `approve:${policy.buttons![0]!.taskId}`, message: { message_id: 20, chat: { id: 42, type: "private" } } } });

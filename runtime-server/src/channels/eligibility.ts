@@ -13,4 +13,5 @@ export class ChannelPolicyError extends Error {
 export const guarded = (handler: TargetHandler, rules: Partial<Record<ChannelKind, Eligibility>>): TargetHandler => ({
   async handle(inbound) { rules[inbound.connection.channel as ChannelKind]?.(inbound.connection); return handler.handle(inbound); },
   async linked(connection) { rules[connection.channel as ChannelKind]?.(connection); return handler.linked(connection); },
+  ...(handler.replyPolicy ? { replyPolicy: (connection, runId) => handler.replyPolicy!(connection, runId) } : {}),
 });

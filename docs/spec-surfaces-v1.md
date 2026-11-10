@@ -10,7 +10,7 @@ Status: in progress (2026-11-10). Types: `runtime-server/src/surfaces/contract.t
 | IM | the Assistant in a linked chat | self-use, company-wide, customers |
 | DM (Instagram, Messenger) | none | customers only |
 
-Studio and Chat are two systems and stay two systems. These rules apply to both.
+Studio and Chat are two systems and stay two systems. These rules apply to both. The Studio Assistant is not a third: it is a conversation on Chat's runtime (see "The Assistant").
 
 ## Runs
 
@@ -53,6 +53,18 @@ Studio API and Chat API both accept browser auth and API keys. Browser WebSocket
 - A tool declares `supportedClients` from `web, desktop, cli, mcp, im, dm`, and its description says "Available on: ...".
 - Each model call ends with a `<system-reminder>` of normalized client attributes: client, device, locale, language. It lists no tools and is never persisted or compacted.
 - The harness authorizes every call against the client of the latest message. A call in progress when its provider disconnects enters `waiting_for_tool` and resumes when a permitted provider returns, until it times out.
+
+## The Assistant
+
+The Assistant is one conversation per account on Chat's runtime: the same Runs, steering, resume by cursor, compaction, idempotency and attachments (`ls`, `grep`, `read`) as a Product's conversation, with its own system prompt, the model `kimi-k2.6`, and the Studio tools.
+
+- The Registry hosts it, because it holds the Products and tasks the tools operate. Its transcript, Runs and journal are in the Registry database; no other conversation lives there, and no part of the old factory-agent conversation runtime serves it.
+- The Studio tools are declared once as `studio.*` (`supportedClients`: web, cli, mcp, im). A Product's conversation never declares them. Search, `ls`, `grep` and `read` are the same tools every conversation has.
+- Studio's API for it (`/v1/creator/assistant/conversation/**`, the socket target `{assistant: true}`, the page's `/v1/creator/assistant`) is unchanged. Its event log is a projection of the Run's events in Studio's vocabulary; Chat's journal is the record.
+- Work it starts (interview, content, research, build, evaluate) still runs on the factory-agent runtime as workers; their news reaches the Assistant as messages whose client message id starts with `sys:`, which the chat never shows as the Expert's.
+- An interview holds the conversation by relay: the Expert's messages go to the interview, and its words come back as the Assistant's reply. News waits until it hands back.
+- A reply to a Run the Assistant started on its own is owed to the Expert and is sent once, unless they are in Studio.
+- The conversation it used to keep in its workspace is read once into Chat when the conversation is first opened.
 
 ## Channels
 
