@@ -122,7 +122,9 @@ const RuntimeStatus = ({ children }) => <div className="web-chat__runtime-status
 /** Where the Runtime compacted the conversation's context. */
 const CompactionDivider = ({ t }) => <div className="web-chat__divider" role="separator"><span>{t("compaction.done")}</span></div>;
 
-function ChatMessage({ message, identity, statusText, compacting, attachments, Viewer, assetSource, activityKinds, t, errorText, loadToolDetail, approvals }) {
+const REPLY_STATUSES = ["sending", "agentReplying", "syncingReply", "stopping"];
+
+function ChatMessage({ message, identity, typingText, compacting, attachments, Viewer, assetSource, activityKinds, t, errorText, loadToolDetail, approvals }) {
   const { files, pictures } = partitionAttachments(message, mediaType => attachments.accepts(mediaType));
   const live = message.transient && message.timeline?.filter(entry => !ACTIVITY_KINDS.includes(entry.kind) || activityKinds.includes(entry.kind)).length;
   const timelineProps = { activityKinds, t, errorText, loadToolDetail, approvals };
@@ -133,7 +135,7 @@ function ChatMessage({ message, identity, statusText, compacting, attachments, V
         ? message.transient
           ? live
             ? <><TimelineEntries timeline={message.timeline} live {...timelineProps} />{compacting ? <RuntimeStatus>{t("compaction.running")}</RuntimeStatus> : null}</>
-            : compacting ? <RuntimeStatus>{t("compaction.running")}</RuntimeStatus> : <div className="web-chat__bubble web-chat__typing" role="status"><span className="web-chat__typing-dots" aria-hidden="true"><i /><i /><i /></span><span>{statusText}</span></div>
+            : compacting ? <RuntimeStatus>{t("compaction.running")}</RuntimeStatus> : <div className="web-chat__bubble web-chat__typing" role="status"><span className="web-chat__typing-dots" aria-hidden="true"><i /><i /><i /></span>{typingText ? <span>{typingText}</span> : null}</div>
           : <TimelineEntries timeline={ChatTimeline.fromHistory(message)} live={false} {...timelineProps} />
         : message.content ? <div className="web-chat__bubble web-chat__content"><MessageResponse>{message.content}</MessageResponse></div> : null}
       {files.length ? <div className="web-chat__attachments">{files.map(item => <span key={item.attachment_id}><Paperclip aria-hidden="true" />{item.display_name}{item.source_bytes ? ` · ${sizeOf(item.source_bytes)}` : ""}</span>)}</div> : null}
@@ -232,7 +234,8 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
   const awaitingConversation = !conversationId && state.conversations.length > 0;
   const messagesRef = useRef(null);
   const followOutputRef = useRef(true);
-  const statusText = status.text ?? t(status.key);
+  // The dots say what the reply is doing; a connection or loading status is not a reply's.
+  const typingText = status.text ?? (REPLY_STATUSES.includes(status.key) ? t(status.key) : "");
   const loadToolDetail = useCallback(detailRef => controller.transport.toolDetail(conversationId, detailRef), [controller, conversationId]);
   const assetSource = useCallback(assetId => controller.transport.assetSource(conversationId, assetId), [controller, conversationId]);
 
@@ -292,7 +295,7 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
   }, [controller, onApprovalDecision]);
   const approvals = { decisions, decide: onApprovalDecision ? decide : null };
   const compactedRuns = new Set(compactions.filter(entry => entry.conversationId === conversationId).map(entry => entry.runId));
-  const messageProps = { identity, statusText, attachments, Viewer: AttachmentViewer, assetSource, activityKinds, t, errorText, loadToolDetail, approvals };
+  const messageProps = { identity, typingText, attachments, Viewer: AttachmentViewer, assetSource, activityKinds, t, errorText, loadToolDetail, approvals };
 
   return <main className="web-chat__main" inert={inert}>
     {header}

@@ -64,6 +64,8 @@ const sessionHandlers = Object.freeze({
 /** Whether the event belongs to one Run, as opposed to the session or the conversation. */
 export const isRunEvent = event => Boolean(runHandlers[event?.type]);
 
+const TERMINAL_EVENTS = new Set(["turn.completed", "turn.failed"]);
+
 export class RuntimeEventReducer {
   /**
    * @param {ChatTimeline} timeline live timeline of the active run
@@ -74,7 +76,9 @@ export class RuntimeEventReducer {
     const session = sessionHandlers[event?.type];
     if (session) return session(timeline, event);
     const run = runHandlers[event?.type];
-    if (!run || !activeRunId || event.run_id !== activeRunId) return IGNORED;
+    if (!run) return IGNORED;
+    // A Run's end is heard whoever holds the timeline: a Run the page never adopted still ended, and must not be adopted later.
+    if (!activeRunId || event.run_id !== activeRunId) return TERMINAL_EVENTS.has(event.type) ? run(timeline, event) : IGNORED;
     return run(timeline, event);
   }
 }

@@ -77,6 +77,8 @@ export class ConversationController {
     this.settleNext = false;
     this.taskStart = null;
     this.terminalRun = null;
+    /** Runs whose end the stream told: a snapshot read before that cannot bring them back. */
+    this.endedRuns = new Set();
     this.connection = null;
     this.link = null;
     this.reconnectTimer = null;
@@ -169,6 +171,7 @@ export class ConversationController {
     this.runText.reset();
     this.hasBeenReady = false;
     this.terminalRun = null;
+    this.endedRuns.clear();
     this.sync.reset();
     this.reveal.discard();
     this.resetTimeline();
@@ -197,7 +200,8 @@ export class ConversationController {
         : [conversation, ...state.conversations],
       historyCursor: state.historyCursor ?? snapshot.before_cursor ?? null
     }));
-    const running = activeSnapshotRun(snapshot);
+    const listed = activeSnapshotRun(snapshot);
+    const running = listed && !this.endedRuns.has(listed.id) ? listed : null;
     this.endRunLostWhileAway(snapshot, running);
     if (running && this.run?.id !== running.id) this.adoptRun(running.id);
     let projected = result.messages;
@@ -556,6 +560,14 @@ export class ConversationController {
     async terminal(outcome, { event, conversationId, link }) {
       await new Promise(resolve => this.reveal.complete(event.run_id, resolve));
       if (!link.live) return;
+      this.endedRuns.add(event.run_id);
+      if (this.run?.id !== event.run_id && ![...this.pendings.values()].some(submission => submission.runId === event.run_id)) {
+        // Not the Run this page holds (never adopted, or another adopted since): its row goes and the saved reply is read.
+        this.updateMessages(current => current.filter(message => !(message.transient && message.run_id === event.run_id)));
+        if (outcome.failed) this.failReply(event.run_id, outcome.error);
+        await this.refresh(conversationId);
+        return;
+      }
       // A Run that ended before the server took the message that started it sends the words back; a server that steers keeps them.
       const unaccepted = this.transport.steerable ? undefined : [...this.pendings.values()].find(submission => submission.runId === event.run_id);
       if (unaccepted) this.restoreSubmission(unaccepted);
