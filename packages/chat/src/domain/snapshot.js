@@ -165,7 +165,7 @@ export async function includeActiveConversationRun(snapshot, activeRunId, readRu
   return { ...snapshot, runs: [run, ...snapshot.runs] };
 }
 
-const MESSAGE_FIELDS = ["run_id", "role", "content", "timestamp", "attachments", "finish_reason", "parts", "tool_calls", "skill_events", "skill_runs"];
+const MESSAGE_FIELDS = ["run_id", "role", "content", "timestamp", "state", "attachments", "finish_reason", "parts", "tool_calls", "skill_events", "skill_runs"];
 const sameMessage = (left, right) => MESSAGE_FIELDS.every(field => canonicalValue(left[field] ?? null) === canonicalValue(right[field] ?? null));
 
 /**
