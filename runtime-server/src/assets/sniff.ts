@@ -62,10 +62,15 @@ export function sniff(bytes: Buffer, name: string): Sniffed {
   }
   if (ascii(bytes, 0, 4) === "RIFF" && ascii(bytes, 8, 4) === "WAVE") return { kind: "audio", mime: "audio/wav", ext: ".wav" };
   if (ascii(bytes, 0, 4) === "OggS") return { kind: "audio", mime: "audio/ogg", ext: ".ogg" };
+  // ADTS AAC: a 12-bit sync word, then layer bits 00 (MP3 has them set).
+  if (bytes[0] === 0xff && ((bytes[1] ?? 0) & 0xf6) === 0xf0) return { kind: "audio", mime: "audio/aac", ext: ".aac" };
   if (ascii(bytes, 0, 3) === "ID3" || (bytes[0] === 0xff && ((bytes[1] ?? 0) & 0xe0) === 0xe0)) return { kind: "audio", mime: "audio/mpeg", ext: ".mp3" };
   if (ascii(bytes, 4, 4) === "ftyp") return { kind: "audio", mime: "audio/mp4", ext: ".m4a" };
   if (startsWith(bytes, "1a45dfa3")) return { kind: "audio", mime: "audio/webm", ext: ".webm" };
   if (ascii(bytes, 0, 5) === "#!AMR") return { kind: "audio", mime: "audio/amr", ext: ".amr" };
+  if (ascii(bytes, 0, 4) === "caff") return { kind: "audio", mime: "audio/x-caf", ext: ".caf" };
+  // WeChat's SILK may start with one 0x02 byte before the signature. ffmpeg cannot decode it, but it is a voice message and is refused as one.
+  if (ascii(bytes, 0, 9) === "#!SILK_V3" || ascii(bytes, 1, 9) === "#!SILK_V3") return { kind: "audio", mime: "audio/silk", ext: ".silk" };
   if (decodeText(bytes) !== undefined) {
     const extension = /\.[^./\\]+$/.exec(name)?.[0]?.toLowerCase() ?? "";
     return { kind: "file", ext: TEXT_BY_EXTENSION[extension] ? extension : ".txt", mime: TEXT_BY_EXTENSION[extension] ?? "text/plain" };

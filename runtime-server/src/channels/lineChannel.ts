@@ -74,6 +74,8 @@ export class LineChannel implements ChannelAdapter {
     if (event.type !== "message" || !message) return [];
     if (message.type === "text") return [{ ...base, ...(message.text ? { text: message.text } : {}) }];
     if (message.type === "image") return [{ ...base, file: { ref: message.id, name: "photo.jpg" } }];
+    // A voice message is m4a; its content is fetched like an image's.
+    if (message.type === "audio") return [{ ...base, file: { ref: message.id, name: "voice.m4a" } }];
     if (message.type === "file") return [{ ...base, file: { ref: message.id, name: message.fileName ?? "file", ...(message.fileSize ? { size: message.fileSize } : {}) } }];
     return [base];
   }

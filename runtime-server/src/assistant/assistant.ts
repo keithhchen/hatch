@@ -7,7 +7,6 @@ import { WorkbenchStore, type AgentDefinitionSource, type AssistantRole, type Ro
 import { WorkbenchRuntime, safeError, type WorkbenchRuntimeOptions } from "../factoryAgents/runtime.js";
 import type { FactoryWorkspace } from "../factoryAgents/service.js";
 import type { AgentCatalog, AgentChange } from "./catalog.js";
-import { imageMime } from "../factoryAgents/imageRefs.js";
 import { FirecrawlSearchProvider } from "../factoryAgents/webProviders.js";
 import { CHANNEL_KINDS, type ChannelKind, type OutboundMessage } from "../channels/types.js";
 import type { AssistantChannels } from "../channels/ports.js";
@@ -15,7 +14,7 @@ import { localDate, localHour, type AccountReach } from "./reach.js";
 import type { RunFailure } from "../factoryAgents/runFailure.js";
 import type { PublicMessage } from "../conversations/conversation.js";
 import type { ContentPart } from "../surfaces/contract.js";
-import type { SentMessage } from "../chat/gateway.js";
+import type { SentMessage, UploadedRef } from "../chat/gateway.js";
 import type { AssistantTask, TaskKind, TaskOrigin, TaskRepository } from "./tasks.js";
 import type { AssistantChat } from "./chat.js";
 import type { DeliveryRepository } from "./deliveries.js";
@@ -186,15 +185,15 @@ export class AssistantService implements StudioOperations, InterviewDesk {
   }
 
   /** A file or a picture the Expert sends becomes an attachment of the conversation, and a message may then refer to it. */
-  upload(accountId: string, name: string, bytes: Buffer): Promise<{ assetId: string }> { return this.chat.upload(accountId, name, bytes); }
+  upload(accountId: string, name: string, bytes: Buffer): Promise<UploadedRef> { return this.chat.upload(accountId, name, bytes); }
 
   /** The Expert sent a file or a picture from Studio's page. It becomes an attachment of the conversation, and the Assistant is told. */
   async receive(accountId: string, name: string, bytes: Buffer, source: ExpertSource, ref: { id?: string; messageRef?: string; caption?: string } = {}): Promise<{ name: string; sent: SentMessage }> {
-    const { assetId } = await this.upload(accountId, name, bytes);
+    const { assetId, kind } = await this.upload(accountId, name, bytes);
     const caption = ref.caption?.trim();
     const sent = await this.hear(accountId, {
       id: ref.id ?? randomUUID(), source, ...(ref.messageRef ? { messageRef: ref.messageRef } : {}),
-      parts: [...(caption ? [{ type: "text" as const, text: caption }] : []), { type: imageMime(name) ? "image" : "file", assetId }]
+      parts: [...(caption ? [{ type: "text" as const, text: caption }] : []), { type: kind, assetId }]
     });
     return { name, sent };
   }

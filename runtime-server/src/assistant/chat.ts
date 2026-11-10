@@ -7,7 +7,7 @@ import type { RuntimeCompactionMessage } from "../compaction.js";
 import type { ConversationRecord, ConversationRepository, ConversationRunRecord } from "../conversationRepository.js";
 import { failureOfReason } from "../errors/failures.js";
 import { ChatAssets, attachmentMessageId } from "../chat/assets.js";
-import type { ChatGateway, ConversationRef, SentMessage } from "../chat/gateway.js";
+import type { ChatGateway, ConversationRef, SentMessage, UploadedRef } from "../chat/gateway.js";
 import { ChatRuntime } from "../chat/chatRuntime.js";
 import { NO_SKILLS, failRun, runModelTurn, type TurnBinding } from "../chat/modelTurn.js";
 import { ChatError, accountPrincipal } from "../chat/principal.js";
@@ -188,7 +188,7 @@ export class AssistantChat implements AssistantHost {
     return this.say(accountId, { id: `${SYSTEM_MESSAGE_PREFIX}${key}`, parts: [{ type: "text", text }], client: { client: "web" } });
   }
 
-  upload(accountId: string, name: string, bytes: Buffer): Promise<{ assetId: string }> {
+  upload(accountId: string, name: string, bytes: Buffer): Promise<UploadedRef> {
     return this.gateway.upload(accountPrincipal(accountId), { kind: "conversation", id: accountId }, { name, bytes });
   }
 

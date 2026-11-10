@@ -96,8 +96,11 @@ test("an inline reply reads as what it says", async () => {
   assert.deepEqual(await received([dm("guid-1", { type: "reply", content: { type: "text", text: "确认" }, target: {} })], 1), [{ eventId: "guid-1", address: ADDRESS, text: "确认" }]);
 });
 
-test("a voice note is an event we can't read yet, so the Expert hears why", async () => {
-  assert.deepEqual(await received([dm("guid-1", { type: "voice", id: "v", name: "a.caf", mimeType: "audio/x-caf" })], 1), [{ eventId: "guid-1", address: ADDRESS }]);
+test("a voice note is a file by its attachment id, fetched like any attachment; without an id there is nothing to fetch", async () => {
+  const voice = { type: "voice", id: "guid-v", name: "Audio Message.caf", mimeType: "audio/x-caf", size: 4096, duration: 3 };
+  assert.deepEqual(await received([dm("guid-1", voice)], 1), [{ eventId: "guid-1", address: ADDRESS, file: { ref: `${LINE}|guid-v`, name: "Audio Message.caf", size: 4096 } }]);
+  assert.equal((await received([dm("guid-2", { type: "voice", id: "v", mimeType: "audio/x-caf" })], 1))[0]!.file!.name, "voice.caf");
+  assert.deepEqual(await received([dm("guid-3", { type: "voice", mimeType: "audio/x-caf" })], 1), [{ eventId: "guid-3", address: ADDRESS }]);
 });
 
 test("groups, our own messages, senderless events, reactions and read receipts are ignored", async () => {

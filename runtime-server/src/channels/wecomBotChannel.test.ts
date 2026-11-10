@@ -183,3 +183,12 @@ test("download stops at maxFileBytes", async () => {
   await assert.rejects(download(new Response(new ReadableStream({ pull(controller) { pulled++; controller.enqueue(chunk); } }))), /over/);
   assert.ok(pulled <= max / chunk.length + 5);
 });
+
+test("a voice message is WeCom's own transcript and nothing else: the callback carries no audio to fetch", () => {
+  const channel = new WeComBotChannel(CREDENTIALS, "acct");
+  const single = parse(channel, message("voice", { voice: { content: "帮我订明天七点半的位子" } })).events[0];
+  assert.equal(single.text, "帮我订明天七点半的位子");
+  const grouped = parse(channel, message("voice", { voice: { content: "@Hatch 订位子" } }, true)).events[0];
+  assert.equal(grouped.text, "订位子");
+  assert.ok(single.file === undefined && grouped.file === undefined);
+});
