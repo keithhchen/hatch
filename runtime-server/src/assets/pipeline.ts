@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import {
   Asset, AssetError, scopeKey, type AssetBlobs, type AssetKind, type AssetRepository, type AssetScope, type ContentModerator, type Derivative, type ReadyAssetResolver
 } from "./domain.js";
+import { failures } from "../errors/failures.js";
+import { UpstreamError } from "../errors/upstream.js";
 import type { AssetProcessor } from "./processors.js";
 import { sniff } from "./sniff.js";
 
@@ -10,8 +12,10 @@ export const MAX_BYTES: Record<AssetKind, number> = { image: 20 * 1024 * 1024, f
 /** The name is display text only; storage keys never contain it. */
 const displayName = (name: string) => name.split(/[\\/]/).pop()!.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 120) || "file";
 
+/** An upstream failure is stored as the failure boundary words it, so a provider's text never reaches a client. */
 const failure = (error: unknown) => error instanceof AssetError
   ? { code: error.code, message: error.message }
+  : error instanceof UpstreamError ? (({ code, message }) => ({ code, message }))(failures.translate(error, { stage: "asset" }))
   : { code: "processing_failed", message: error instanceof Error ? error.message : String(error) };
 
 /**

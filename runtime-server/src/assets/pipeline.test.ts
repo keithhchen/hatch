@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { zipSync } from "fflate";
 import sharp from "sharp";
 import { createHash } from "node:crypto";
+import { UpstreamError } from "../errors/upstream.js";
 import { Asset, AssetError } from "./domain.js";
 import { AssetPipeline } from "./pipeline.js";
 import { FileProcessor } from "./processors.js";
@@ -113,6 +114,17 @@ test("without a transcription provider the voice message fails as unavailable, a
   assert.notEqual(again.id, first.id);
   const silent = await harness({ transcriber: saying("   ") });
   assert.equal((await silent.pipeline.accept(scopeA, { name: "v.wav", bytes: wav() })).state, "failed");
+});
+
+test("a voice message whose provider fails ends failed as upstream_error, without the provider's words", async () => {
+  const log = console.error; console.error = () => undefined;
+  try {
+    const down = await harness({ transcriber: { async transcribe() { throw UpstreamError.of(new Error("Gemini: HTTP 429 quota exhausted for org-secret")); } } });
+    const failed = await down.pipeline.accept(scopeA, { name: "v.wav", bytes: wav() });
+    assert.equal(failed.record.failure?.code, "upstream_error");
+    assert.match(failed.record.failure!.message, /Reference: err_[0-9a-f]+/);
+    assert.doesNotMatch(failed.record.failure!.message, /quota|Gemini|org-secret/);
+  } finally { console.error = log; }
 });
 
 test("only ready assets in the caller's scope resolve and attach, once", async () => {
