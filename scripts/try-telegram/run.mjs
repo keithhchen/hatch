@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Try "Telegram <-> Studio Assistant" with a REAL bot. Local isolated stack (own Postgres, Registry, Runtime, Dashboard, Caddy)
-// behind an ngrok tunnel. Everything lives under ~/hatch-try-telegram/ on non-default ports. Run it through agentsecrets (see README below).
-//   agentsecrets exec --profile hatch --provider gemini -- agentsecrets exec --profile hatch --provider kimi -- node scripts/try-telegram/run.mjs
-import { spawn } from "node:child_process";
+// behind an ngrok tunnel. Everything lives under ~/hatch-try-telegram/ on non-default ports.
+//   node scripts/try-telegram/run.mjs
+import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -16,8 +16,14 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const home = path.join(os.homedir(), "hatch-try-telegram");
 const run = path.join(home, "run"), logs = path.join(home, "logs");
 const telegramEnv = path.join(home, "telegram.env");
-const MISSING = ["GEMINI_API_KEY", "LLM_API_KEY", "FIRECRAWL_API_KEY"].filter((name) => !process.env[name]);
-if (MISSING.length) { console.error(`Missing ${MISSING.join(", ")}. Start it with:\n  scripts/try-telegram/start.sh`); process.exit(1); }
+// The keys come from agentsecrets unless the caller already set them; they are never printed.
+const KEYS = { GEMINI_API_KEY: ["hatch", "gemini"], LLM_API_KEY: ["hatch", "kimi"], FIRECRAWL_API_KEY: ["runtime-lab", "firecrawl"] };
+for (const [name, [profile, provider]] of Object.entries(KEYS)) {
+  if (process.env[name]) continue;
+  const read = spawnSync("agentsecrets", ["exec", "--profile", profile, "--provider", provider, "--", process.execPath, "-e", `process.stdout.write(process.env.${name} ?? "")`], { encoding: "utf8" });
+  if (!read.stdout) { console.error(`${name} is not in agentsecrets (${profile}/${provider}).`); process.exit(1); }
+  process.env[name] = read.stdout;
+}
 
 const telegram = existsSync(telegramEnv) ? Object.fromEntries(readFileSync(telegramEnv, "utf8").split("\n").map((l) => l.match(/^\s*(?:export\s+)?(HATCH_TELEGRAM_BOT_[A-Z]+)=(.*)$/)).filter(Boolean).map((m) => [m[1], m[2].trim().replace(/^["']|["']$/g, "")])) : {};
 const bot = telegram.HATCH_TELEGRAM_BOT_TOKEN && telegram.HATCH_TELEGRAM_BOT_USERNAME ? { token: telegram.HATCH_TELEGRAM_BOT_TOKEN, username: telegram.HATCH_TELEGRAM_BOT_USERNAME.replace(/^@/, "") } : undefined;
