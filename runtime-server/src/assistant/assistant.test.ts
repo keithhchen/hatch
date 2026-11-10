@@ -29,6 +29,7 @@ import { ExpertMaterials } from "./materials.js";
 import type { AccountReach } from "./reach.js";
 import { MemoryAssistantState } from "./state.js";
 import { assistantFeedKey } from "./studioVocabulary.js";
+import { messageKey } from "../chat/messageKey.js";
 import { studioToolDefinitions, studioTools } from "./studioTools.js";
 import { AssistantTarget } from "./assistantTarget.js";
 import type { AssistantChannels, Inbound } from "../channels/ports.js";
@@ -650,5 +651,29 @@ test("The Expert's page reads the conversation by page: never the whole of it, a
     const earlier = await env.assistant.view(ACCOUNT, { limit: 1 });
     assert.equal(earlier.has_more, true, "the first Run is a page of its own");
     assert.ok((await env.assistant.view(ACCOUNT, { limit: 200, beforeCursor: earlier.before_cursor })).messages.length > 0);
+  } finally { await env.close(); }
+});
+
+test("One key is one message whichever way it arrives: the page and the API share it, other content under it is refused, and a refused send leaves the key free", async () => {
+  const env = await setup({ model: () => ({ text: "好" }) });
+  try {
+    // The page sends it, then the Studio API retries it under the same Idempotency-Key.
+    await env.assistant.hear(ACCOUNT, { id: "key-1", source: "web", parts: [{ type: "text", text: "同一句" }] });
+    const again = await env.chat.send(ACCOUNT, { id: "key-1", text: "同一句", attachments: [], client: { client: "cli" } });
+    assert.equal(again.message.id, "key-1", "the key is the message's id");
+    await env.idle();
+    assert.deepEqual((await env.chat.lines(ACCOUNT)).filter(line => line.role === "user").map(line => [line.id, line.text]), [["key-1", "同一句"]], "one record");
+    assert.equal(env.model.state.calls, 1, "one Run");
+    await assert.rejects(env.chat.send(ACCOUNT, { id: "key-1", text: "别的话", attachments: [], client: { client: "cli" } }), { status: 409, code: "idempotency_conflict" });
+    // A key is the same length for every client, and `sys:` is the Assistant's own.
+    assert.throws(() => messageKey("k".repeat(257)), { code: "invalid_idempotency_key" });
+    assert.equal(messageKey(`  ${"k".repeat(256)} `)?.length, 256);
+    await assert.rejects(env.chat.send(ACCOUNT, { id: "sys:forged", text: "假装是系统", attachments: [], client: { client: "cli" } }), { status: 400, code: "invalid_message_id" });
+    // A send that fails before it is accepted never stands for anything: the retry is delivered, not answered with a stranded "sent".
+    await assert.rejects(env.chat.say(ACCOUNT, { id: "key-2", parts: [{ type: "image", assetId: "no-such-asset" }], client: { client: "web" } }));
+    const retried = await env.chat.send(ACCOUNT, { id: "key-2", text: "再来一次", attachments: [], client: { client: "web" } });
+    await env.idle();
+    assert.equal(retried.message.id, "key-2");
+    assert.ok((await env.chat.lines(ACCOUNT)).some(line => line.id === "key-2" && line.text === "再来一次"), "it was really sent");
   } finally { await env.close(); }
 });

@@ -4,7 +4,7 @@ import type { Conversation, SendInput, Sent } from "./conversation.js";
 /**
  * A conversation whose messages carry assets. Before delivery the bytes are put where the model reads them and
  * the assets are linked to the message. The same file may be sent in any number of messages. A message that fails to
- * deliver gives its links back. Put inside the idempotent layer, so a replayed send never gets here.
+ * deliver gives its links back, and a message the conversation already accepted binds nothing a second time.
  */
 export class AttachedConversation implements Conversation {
   constructor(private inner: Conversation, private shelf: AssetShelf) {}
@@ -15,9 +15,14 @@ export class AttachedConversation implements Conversation {
   get partial() { return this.inner.partial?.bind(this.inner); }
   stop() { return this.inner.stop(); }
 
+  replay(input: SendInput) { return this.inner.replay?.(input) ?? Promise.resolve(undefined); }
+
   async send(input: SendInput): Promise<Sent> {
     const { attachments } = input;
     if (!attachments.length) return this.inner.send(input);
+    // A message already accepted binds nothing a second time.
+    const replayed = await this.inner.replay?.(input);
+    if (replayed) return replayed;
     await this.shelf.desk.stage(this.shelf.scope, attachments);
     await this.shelf.desk.attach(this.shelf.scope, attachments, input.id);
     try { return await this.inner.send(input); } catch (error) {

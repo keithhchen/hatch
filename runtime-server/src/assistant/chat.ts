@@ -285,6 +285,7 @@ export class AssistantChat implements AssistantHost {
     const text = transcripts.reduce((rest, transcript) => rest.replace(transcript, ""), input.text).trim();
     const parts: ContentPart[] = [...(text ? [{ type: "text" as const, text }] : []), ...input.attachments.map(asset => ({ type: asset.kind, assetId: asset.id }))];
     try {
+      if (isSystemMessageId(input.id)) throw new ChatError("invalid_message_id", `A message id cannot start with ${SYSTEM_MESSAGE_PREFIX}.`, 400);
       await this.deps.state.expertSpoke(accountId, { source: "web", at: new Date().toISOString() });
       const sent = await this.say(accountId, { id: input.id, parts, client: input.client });
       return {

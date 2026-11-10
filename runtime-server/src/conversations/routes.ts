@@ -6,6 +6,8 @@ import { parseContent, resolveContent } from "./assets.js";
 import { awaitTurn } from "./awaitTurn.js";
 import { MAX_BYTES } from "../assets/pipeline.js";
 import { ConversationError, type Conversation, type SendInput } from "./conversation.js";
+import { messageKey } from "../chat/messageKey.js";
+import { ChatError } from "../chat/principal.js";
 import { START } from "./eventLog.js";
 import { follow, resumePoint } from "./follow.js";
 import { snapshotOf } from "./snapshot.js";
@@ -39,10 +41,10 @@ function clientOf(body: Record<string, unknown>): ClientAttributes {
   try { return normalizeClientAttributes(spec); } catch (error) { throw new ConversationError(400, "invalid_client", (error as Error).message); }
 }
 
+/** The client's key is the message's id: the same one the page and the Chat API mean by it. */
 function keyOf(request: http.IncomingMessage, body: Record<string, unknown>): string | undefined {
-  const key = String(request.headers["idempotency-key"] ?? body.idempotency_key ?? "").trim();
-  if (key.length > 200) throw new ConversationError(400, "invalid_idempotency_key", "The idempotency key is at most 200 characters.");
-  return key || undefined;
+  try { return messageKey(request.headers["idempotency-key"] ?? body.idempotency_key); }
+  catch (error) { if (error instanceof ChatError) throw new ConversationError(error.status, error.code, error.message); throw error; }
 }
 
 /** Server-Sent Events whose ids are log cursors, so Last-Event-ID resumes exactly. */
@@ -110,7 +112,7 @@ export class ConversationRoutes {
     const body = await this.deps.readJson(request);
     const { text, attachments } = await resolveContent(parseContent(body.content), target.assets);
     if ((!text && !attachments.length) || text.length > target.maxContent) throw new ConversationError(400, "invalid_message", `Message must contain 1–${target.maxContent} characters.`);
-    return { id: randomUUID(), text, attachments, client: clientOf(body), key: keyOf(request, body) };
+    return { id: keyOf(request, body) ?? randomUUID(), text, attachments, client: clientOf(body) };
   }
 
   /** The file is the request body and its name is `?name=`; it is a ready asset, or refused with the reason, before any message is sent. */

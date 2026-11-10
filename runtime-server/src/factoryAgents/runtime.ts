@@ -138,6 +138,10 @@ export class WorkbenchRuntime {
     else this.held.set(id, [...(this.held.get(id) ?? []), message]);
     return { queued: true, runId: this.runIds.get(id)! };
   }
+  /** The message with this item id, when the run has it waiting and its history does not hold it yet. */
+  queued(id: string, itemId: string): AgentMessage | undefined {
+    return [...this.held.get(id) ?? [], ...this.steered.get(id) ?? []].find(message => (message as { origin?: { itemId?: string } }).origin?.itemId === itemId);
+  }
   /** Gives the model loop what waited for it. */
   private release(id: string): void {
     const agent = this.liveAgents.get(id);

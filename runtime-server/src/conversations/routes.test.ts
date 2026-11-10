@@ -11,7 +11,6 @@ import type { AssetDesk } from "./assets.js";
 import { ConversationError, page, type ConversationStatus, type PublicMessage, type ReadyAsset, type SendInput, type Sent } from "./conversation.js";
 import { MemoryEventLog } from "./eventLog.js";
 import { EventLogJournal } from "./journal.js";
-import { MemoryMessageLedger } from "./ledger.js";
 import { ConversationRoutes } from "./routes.js";
 import type { WorkerWorkspace } from "./workerConversation.js";
 
@@ -60,6 +59,7 @@ class FakeWorkspace implements WorkerWorkspace {
       return { queued, runId: this.runs.get(id)! };
     },
     runId: (id: string) => this.runs.get(id),
+    queued: (_id: string, _itemId: string) => undefined,
     stop: (id: string) => { this.stopped.push(id); },
   };
   entries = async () => agentEntries(await this.definitions, this.sessions);
@@ -129,7 +129,7 @@ async function harness(options: { assistant?: boolean } = { assistant: true }) {
     json: (response, status, payload) => { response.writeHead(status, { "content-type": "application/json" }); response.end(JSON.stringify(payload)); },
     readJson: async request => { let body = ""; for await (const chunk of request) body += chunk; return JSON.parse(body || "{}"); },
     readBytes: async request => { const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(chunk as Buffer); return Buffer.concat(chunks); },
-    eventLog, ledger: new MemoryMessageLedger(), assets: () => desk,
+    eventLog, assets: () => desk,
     pace: { pollMs: 5 },
   });
   const server = http.createServer((req, res) => { void routes.handle(req, res, new URL(req.url!, "http://x")).then(handled => { if (!handled) { res.writeHead(404); res.end(); } }); });
@@ -315,6 +315,19 @@ test("idempotency: same key and content is one message, other content is 409", a
     assert.equal(((await (await post(h, { content: "Look into Alice", idempotency_key: "client-1" })).json()) as { message: { id: string } }).message.id, first.message.id, "the key may travel in the body");
     const unkeyed = await (await post(h, { content: "Look into Alice" })).json() as { message: { id: string } };
     assert.notEqual(unkeyed.message.id, first.message.id, "without a key a repeat is a new message");
+  } finally { await h.close(); }
+});
+
+test("idempotency: the key is the message's id, a worker's own session is the only record, and a burst of one key is delivered once", async () => {
+  const h = await harness();
+  try {
+    const key = { "idempotency-key": "burst-1" };
+    const burst = await Promise.all(Array.from({ length: 6 }, () => post(h, { content: "Look into Bob" }, "", key)));
+    const ids = await Promise.all(burst.map(async response => ((await response.json()) as { message: { id: string } }).message.id));
+    assert.deepEqual([...new Set(ids)], ["burst-1"], "the key is the id");
+    assert.equal(h.workspace.started.length, 1, "delivered once");
+    assert.equal(h.workspace.sessions[0]!.messages.length, 1, "one record, in the session");
+    assert.equal(((await (await post(h, { content: "k".repeat(1) }, "", { "idempotency-key": "k".repeat(257) })).json()) as { error: { code: string } }).error.code, "invalid_idempotency_key");
   } finally { await h.close(); }
 });
 

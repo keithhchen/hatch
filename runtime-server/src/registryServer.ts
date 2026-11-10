@@ -18,6 +18,7 @@ import { ChatError } from "./chat/principal.js";
 import { toolRegistry } from "./tools.js";
 import { RoutedChatGateway } from "./channels/routedGateway.js";
 import { follow, resumePoint } from "./conversations/follow.js";
+import { messageKey } from "./chat/messageKey.js";
 import { ConversationError } from "./conversations/conversation.js";
 import { failures } from "./errors/failures.js";
 import { UpstreamError } from "./errors/upstream.js";
@@ -2281,9 +2282,8 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
     // One message, many parts: the text and the files uploaded for it, each named by the id the upload returned.
     const attached = (Array.isArray(body.attachments) ? body.attachments : []).flatMap((item: { asset_id?: unknown; type?: unknown }) => typeof item?.asset_id === "string" && (item.type === "image" || item.type === "file") ? [{ type: item.type as "image" | "file", assetId: item.asset_id }] : []);
     if ((!content && !attached.length) || content.length > 20_000) { sendJson(response, 400, { error: { code: "invalid_message", message: "Message must contain 1–20000 characters." } }); return; }
-    // The page's own key makes a retried send one message.
-    const key = String(request.headers["idempotency-key"] ?? "").trim().slice(0, 200);
-    try { await assistant.hear(account.id, { id: key || randomUUID(), source: "web", parts: [...(content ? [{ type: "text" as const, text: content }] : []), ...attached] }); }
+    // The page's own key is the message's id, as it is for the API: a retried send is one message.
+    try { await assistant.hear(account.id, { id: messageKey(request.headers["idempotency-key"]) ?? randomUUID(), source: "web", parts: [...(content ? [{ type: "text" as const, text: content }] : []), ...attached] }); }
     catch (error) { if (!(error instanceof ChatError)) throw error; sendJson(response, error.status, { error: { code: error.code, message: error.message } }); return; }
     sendJson(response, 202, { accepted: true });
     return;

@@ -6,7 +6,6 @@ import { WebSocket } from "ws";
 import type { AssistantHost } from "./assistantConversation.js";
 import { MemoryEventLog } from "./eventLog.js";
 import { EventLogJournal } from "./journal.js";
-import { MemoryMessageLedger } from "./ledger.js";
 import { StudioSockets, type Identity } from "./socket.js";
 import { Studio } from "./studio.js";
 
@@ -18,7 +17,7 @@ async function harness() {
   const eventLog = new MemoryEventLog();
   // The Assistant's runtime journals its events into the log; here the test plays that runtime.
   const journal = new EventLogJournal(eventLog, () => "assistant:a1");
-  const studio = new Studio({ product: async () => undefined, workspace: async () => { throw new Error("unused"); }, assistant: () => assistant as unknown as AssistantHost, eventLog, ledger: new MemoryMessageLedger() });
+  const studio = new Studio({ product: async () => undefined, workspace: async () => { throw new Error("unused"); }, assistant: () => assistant as unknown as AssistantHost, eventLog });
   const sockets = new StudioSockets({ studio, pollMs: 10, identify: async token => TOKENS[token] ? { accountId: TOKENS[token]!, token } : undefined });
   const server = http.createServer();
   const clients: WebSocket[] = [];

@@ -19,7 +19,8 @@ import type { AssistantTask, TaskKind, TaskOrigin, TaskRepository } from "./task
 import type { AssistantChat, ReplySteps } from "./chat.js";
 import type { DeliveryRepository } from "./deliveries.js";
 import type { ExpertMaterials } from "./materials.js";
-import { RELAY_MARK, type InterviewDesk } from "./relay.js";
+import { RELAY_MARK, SYSTEM_MESSAGE_PREFIX, isSystemMessageId, type InterviewDesk } from "./relay.js";
+import { ChatError } from "../chat/principal.js";
 import type { AssistantStateRepository, Interview } from "./state.js";
 import type { AgentOverview, StudioOperations, WorkerKind } from "./studioTools.js";
 
@@ -179,6 +180,8 @@ export class AssistantService implements StudioOperations, InterviewDesk {
    * reuses, so a platform event delivered twice is one message. `system` is for what the Expert did without typing it, such as a button.
    */
   async hear(accountId: string, input: { id: string; source: ExpertSource; parts: ContentPart[]; messageRef?: string; system?: boolean; /** Someone the Expert authorized, not the Expert: where the Expert was last is unchanged. */ guest?: true }): Promise<SentMessage> {
+    // `sys:` ids are the Assistant's own to itself: a client's key cannot be one, or its message would be hidden as news.
+    if (!input.system && isSystemMessageId(input.id)) throw new ChatError("invalid_message_id", `A message id cannot start with ${SYSTEM_MESSAGE_PREFIX}.`, 400);
     if (!input.system && !input.guest) await this.deps.state.expertSpoke(accountId, { source: input.source, at: new Date().toISOString(), ...(input.messageRef ? { messageRef: input.messageRef } : {}) });
     const client = { client: input.source === "web" ? "web" as const : "im" as const };
     return input.system ? this.chat.sayAsSystem(accountId, textOf(input.parts), input.id).then(sent => sent) : this.chat.say(accountId, { id: input.id, parts: input.parts, client });
