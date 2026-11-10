@@ -57,7 +57,7 @@ async function stack(pool: Pool, make: (tokens: Tokens) => ChannelAdapter, wrap:
   const adapter = make(kind => sealedTokens(stores.connections, seal, kind));
   const clock = { at: at(0) };
   const errors: unknown[] = [];
-  const service = new ChannelService({ ...stores, hub: new ChannelHub([adapter]), scopeOf, now: () => clock.at, onError: error => errors.push(error) });
+  const service = new ChannelService({ ...stores, hub: new ChannelHub([adapter], undefined, () => true), scopeOf, now: () => clock.at, onError: error => errors.push(error) });
   const target = new RecordingTarget();
   service.register("product", wrap(target)).register("assistant", target);
   const credentialed = async (tenant: string, token = "token") => stores.connections.saveCredentials(randomUUID(), adapter.kind, seal.seal({ token }), tenant);
@@ -232,7 +232,7 @@ test("Another tenant is untouched by a revocation", options, async () => isolate
 }));
 
 const DAY = 86_400_000;
-const refresher = (env: Awaited<ReturnType<typeof stack>>, now: Date) => new CredentialRefresher({ hub: new ChannelHub([env.adapter]), connections: env.connections, seal, onError: () => undefined, now: () => now });
+const refresher = (env: Awaited<ReturnType<typeof stack>>, now: Date) => new CredentialRefresher({ hub: new ChannelHub([env.adapter], undefined, () => true), connections: env.connections, seal, onError: () => undefined, now: () => now });
 const instagram = (fetchImpl?: typeof fetch, now = 0) => (tokens: Tokens) => new InstagramChannel({ ...config, tokens: tokens("instagram"), now: () => now }, fetchImpl);
 
 test("Instagram tokens are renewed before they expire, and keep their tenant", options, async () => isolated(async pool => {

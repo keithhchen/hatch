@@ -1,13 +1,13 @@
 import type { ContentPart } from "../surfaces/contract.js";
 import { ChatError } from "../chat/principal.js";
 import type { Dispatcher } from "./dispatch.js";
-import type { Inbox } from "./inbox.js";
+import type { Inbox, InboxItem } from "./inbox.js";
 import type { ChatGateway, Handled, Inbound, ReplyPolicy, TargetHandler } from "./ports.js";
 import type { Rate, RateLimiter } from "./rateLimiter.js";
 
 /** A contact may write this much: a burst of 10, then one message every 20 seconds. */
 const CONTACT_RATE: Rate = { capacity: 10, perSecond: 1 / 20 };
-const FAILED = "出了点问题，请再发一次。\nSomething went wrong, please send that again.";
+export const FAILED = "出了点问题，请再发一次。\nSomething went wrong, please send that again.";
 const BUSY = "消息有点多，请稍后再发。\nToo many messages, please try again in a moment.";
 
 /** Chat answers the Connection: an Expert Product talking to its owner, an organization, or the public. */
@@ -58,17 +58,26 @@ export class ChatReplies {
     const { status, text, reason } = progress.reply;
     // A failed Run says why: Chat's public failure message, which carries the reference for an upstream failure.
     const outcome = { text: status === "failed" && reason ? reason : text };
-    const items = await this.deps.inbox.byRun(runId);
-    const last = items.at(-1);
-    if (!last?.connectionId) return;
-    const policy = await this.deps.policy?.(last.connectionId, runId) ?? {};
-    if (!outcome.text.trim() && status === "completed" && policy.quietWhenEmpty) { await this.deps.inbox.markReplied(last.id); return; }
-    await this.deps.dispatcher.send({
-      connectionId: last.connectionId, channel: last.channel, scope: last.scope, address: last.event.address, kind: "reply",
-      message: { text: outcome.text.trim() ? outcome.text : FAILED, ...(policy.buttons?.length ? { buttons: policy.buttons } : {}), ...(last.event.messageRef ? { replyTo: last.event.messageRef } : {}) },
-      sourceKey: `run:${runId}`,
-    });
-    await this.deps.inbox.markReplied(last.id);
+    // Every thread the Run was steered from is answered in its own thread, to its own latest message, and only those events are marked.
+    const threads = new Map<string, InboxItem[]>();
+    for (const item of await this.deps.inbox.byRun(runId)) {
+      const key = `${item.channel}:${item.scope}:${item.event.address.threadId}`;
+      if (item.connectionId) threads.set(key, [...threads.get(key) ?? [], item]);
+    }
+    const failures: unknown[] = [];
+    for (const [thread, items] of threads) {
+      const last = items.at(-1)!;
+      try {
+        const policy = await this.deps.policy?.(last.connectionId!, runId) ?? {};
+        if (outcome.text.trim() || status !== "completed" || !policy.quietWhenEmpty) await this.deps.dispatcher.send({
+          connectionId: last.connectionId!, channel: last.channel, scope: last.scope, address: last.event.address, kind: "reply",
+          message: { text: outcome.text.trim() ? outcome.text : FAILED, ...(policy.buttons?.length ? { buttons: policy.buttons } : {}), ...(last.event.messageRef ? { replyTo: last.event.messageRef } : {}) },
+          sourceKey: `run:${runId}:${thread}`,
+        });
+        await this.deps.inbox.markReplied(items.map(item => item.id));
+      } catch (error) { failures.push(error); }
+    }
+    if (failures.length) throw failures[0];
   }
 
   /** Runs that have not been answered: every one is asked about, so an end or a compaction is never missed. */

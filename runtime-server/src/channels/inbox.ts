@@ -39,8 +39,8 @@ export interface Inbox {
   get(id: string): Promise<InboxItem | undefined>;
   /** When the platform last wrote to this thread. */
   lastInbound(channel: ChannelKind, scope: string, threadId: string): Promise<Date | undefined>;
-  /** Everything in the thread up to this event has been answered. */
-  markReplied(id: string): Promise<void>;
+  /** These events have been answered, and nothing else has. */
+  markReplied(ids: string[]): Promise<void>;
   waiting(filter: { runId: string }, now?: Date): Promise<WaitingThread[]>;
   byRun(runId: string): Promise<InboxItem[]>;
   /** Runs started for a message nobody has answered yet, oldest first. */
@@ -157,9 +157,8 @@ export class PostgresInbox implements Inbox {
     return (await this.pool.query("SELECT max(received_at) AS at FROM hatch_channel_inbox WHERE channel = $1 AND scope = $2 AND thread_id = $3", [channel, scope, threadId])).rows[0]?.at ?? undefined;
   }
 
-  async markReplied(id: string): Promise<void> {
-    await this.pool.query(`UPDATE hatch_channel_inbox SET replied_at = now() WHERE replied_at IS NULL AND (channel, scope, thread_id) = (SELECT channel, scope, thread_id FROM hatch_channel_inbox WHERE id = $1)
-      AND seq <= (SELECT seq FROM hatch_channel_inbox WHERE id = $1)`, [id]);
+  async markReplied(ids: string[]): Promise<void> {
+    await this.pool.query("UPDATE hatch_channel_inbox SET replied_at = now() WHERE replied_at IS NULL AND id = ANY($1::uuid[])", [ids]);
   }
 
   async waiting(filter: { runId: string }, now = new Date()): Promise<WaitingThread[]> {

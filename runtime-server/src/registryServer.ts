@@ -338,7 +338,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       const adapter = form.build(seal.open(sealed), scope);
       apps.set(`${kind}:${scope}`, { sealed, adapter });
       return adapter;
-    });
+    }, kind => { const form = CREDENTIAL_FORMS[kind]; return Boolean(form && isTenantForm(form)); });
     // Telegram signs people in with OpenID Connect; a chat that started it is bound to the Assistant once the sign-in names the same sender.
     const loginClientId = env("HATCH_TELEGRAM_LOGIN_CLIENT_ID"); const loginClientSecret = env("HATCH_TELEGRAM_LOGIN_CLIENT_SECRET");
     let channels!: ChannelService;

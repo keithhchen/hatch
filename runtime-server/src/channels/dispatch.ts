@@ -26,7 +26,7 @@ export type Send = { connectionId?: string; channel: ChannelKind; scope: string;
 export class Dispatcher {
   constructor(private deps: {
     outbox: Outbox; hub: ChannelHub; limiter: RateLimiter; connections: Pick<ConnectionRepository, "setState">; inbox: Pick<Inbox, "lastInbound">;
-    now?: () => Date; rates?: { chat: Rate; connection: Rate }; maxAttempts?: number; onQueued?: () => void;
+    now?: () => Date; rates?: { chat: Rate; connection: Rate }; maxAttempts?: number; onQueued?: () => void; onError?: (error: unknown) => void;
   }) {}
 
   private now(): Date { return this.deps.now?.() ?? new Date(); }
@@ -58,7 +58,12 @@ export class Dispatcher {
   private async deliver(delivery: Delivery): Promise<void> {
     const { outbox } = this.deps;
     const adapter = await this.deps.hub.get(delivery.channel, delivery.scope);
-    if (!adapter) throw new Error(`${delivery.channel} is not available`);
+    if (!adapter) {
+      // Nothing may send this: its tenant is gone, and no other tenant's bot speaks for it.
+      const reason = `No ${delivery.channel} adapter for scope "${delivery.scope}"`;
+      this.deps.onError?.(new Error(`${reason}: delivery ${delivery.id} failed`));
+      return outbox.settle(delivery.id, "failed", reason);
+    }
     const capabilities = adapter.capabilities();
     // The lease ran out in the middle of a send: the platform may already have it.
     if (delivery.inFlight && deliveryAfterFailure({ failure: "ambiguous", idempotent: capabilities.idempotentSend }) === "unknown") return outbox.settle(delivery.id, "unknown", "Lease expired while sending");

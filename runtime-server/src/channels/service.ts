@@ -7,7 +7,7 @@ import { PostgresInbox, type Inbox, type InboxItem } from "./inbox.js";
 import { backoffMs, pollLoop } from "./loop.js";
 import { PostgresOutbox, type Outbox } from "./outbox.js";
 import type { AssistantChannels, ChatGateway, TargetHandler, TargetKind } from "./ports.js";
-import { ChatReplies } from "./productTarget.js";
+import { ChatReplies, FAILED } from "./productTarget.js";
 import { PostgresRateLimiter, type RateLimiter } from "./rateLimiter.js";
 import { ChannelRouter, type Claim, type SignIn } from "./router.js";
 import { CHANNEL_KINDS, type ChannelAdapter, type ChannelKind, type InboundEvent, type PullNotice } from "./types.js";
@@ -54,9 +54,9 @@ export class ChannelService implements AssistantChannels {
     this.connections = deps.connections;
     this.hub = deps.hub;
     this.inbox = deps.inbox;
-    this.dispatcher = new Dispatcher({ outbox: deps.outbox, hub: deps.hub, limiter: deps.limiter, connections: deps.connections, inbox: deps.inbox, ...(deps.now ? { now: deps.now } : {}), ...(deps.rates ? { rates: deps.rates } : {}), onQueued: () => this.outboxLoop?.wake() });
+    this.dispatcher = new Dispatcher({ outbox: deps.outbox, hub: deps.hub, limiter: deps.limiter, connections: deps.connections, inbox: deps.inbox, ...(deps.now ? { now: deps.now } : {}), ...(deps.rates ? { rates: deps.rates } : {}), onQueued: () => this.outboxLoop?.wake(), onError: this.report });
     this.router = new ChannelRouter({
-      hub: deps.hub, connections: deps.connections, ...(deps.signIn ? { signIn: deps.signIn } : {}), ...(deps.claim ? { claim: deps.claim } : {}),
+      hub: deps.hub, connections: deps.connections, onError: this.report, ...(deps.signIn ? { signIn: deps.signIn } : {}), ...(deps.claim ? { claim: deps.claim } : {}),
       notify: async (to, text, replyTo, link) => { await this.dispatcher.send({ ...to, kind: "notice", message: { text, ...(replyTo ? { replyTo } : {}), ...(link ? { link } : {}) } }); },
     });
     if (deps.gateway) this.replies = new ChatReplies({
@@ -111,9 +111,21 @@ export class ChannelService implements AssistantChannels {
   private async process(item: InboxItem): Promise<void> {
     const heartbeat = setInterval(() => void this.inbox.extend(item.id, INBOX_LEASE_MS, this.deps.now?.()).catch(this.report), INBOX_LEASE_MS / 3);
     try { await this.inbox.complete(item.id, await this.router.route(item)); } catch (error) {
-      await this.inbox.retry(item.id, error instanceof Error ? error.message : String(error), backoffMs(item.attempts), INBOX_ATTEMPTS, this.deps.now?.());
+      const message = error instanceof Error ? error.message : String(error);
+      const state = await this.inbox.retry(item.id, message, backoffMs(item.attempts), INBOX_ATTEMPTS, this.deps.now?.());
       this.report(error);
+      if (state === "failed") await this.giveUp(item, message);
     } finally { clearInterval(heartbeat); }
+  }
+
+  /** The last try failed: say so to the sender in plain words, never in the provider's, and log it as an error. */
+  private async giveUp(item: InboxItem, cause: string): Promise<void> {
+    this.report(new Error(`Giving up on ${item.channel} event ${item.id} after ${item.attempts} attempts: ${cause}`));
+    if (item.event.unreachable || item.event.revoked) return;
+    await this.dispatcher.send({
+      ...(item.connectionId ? { connectionId: item.connectionId } : {}), channel: item.channel, scope: item.scope, address: item.event.address, kind: "notice",
+      message: { text: FAILED, ...(item.event.messageRef ? { replyTo: item.event.messageRef } : {}) }, sourceKey: `inbox-failed:${item.id}`,
+    }).catch(this.report);
   }
 
   private report = (error: unknown): void => this.deps.onError ? this.deps.onError(error) : console.error("[channels]", error instanceof Error ? error.message : error);
@@ -191,7 +203,7 @@ export class ChannelService implements AssistantChannels {
     const connectionId = item.connectionId ?? (await this.connections.resolveConnection({ channel: item.channel, scope: item.scope, senderId: item.event.address.senderId }))?.connection.id;
     if (!connectionId) return false;
     await this.dispatcher.send({ connectionId, channel: item.channel, scope: item.scope, address: item.event.address, kind: "reply", message: { ...message, ...(item.event.messageRef ? { replyTo: item.event.messageRef } : {}) } });
-    await this.inbox.markReplied(item.id);
+    await this.inbox.markReplied([item.id]);
     return true;
   }
 

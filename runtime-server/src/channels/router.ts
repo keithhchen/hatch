@@ -19,13 +19,15 @@ const SIGN_IN_TEXT = "登录 Hatch，就能在这里和助理聊了。";
  */
 export class ChannelRouter {
   private targets = new Map<TargetKind, TargetHandler>();
-  constructor(private deps: { hub: ChannelHub; connections: ConnectionRepository; notify: Notify; signIn?: SignIn; claim?: Claim }) {}
+  constructor(private deps: { hub: ChannelHub; connections: ConnectionRepository; notify: Notify; signIn?: SignIn; claim?: Claim; onError?: (error: unknown) => void }) {}
 
   register(kind: TargetKind, handler: TargetHandler): this { this.targets.set(kind, handler); return this; }
 
   async route(item: InboxItem): Promise<Handled & { connectionId?: string }> {
     const { channel, scope, event } = item;
     const { connections } = this.deps;
+    // A scope nobody serves any more is refused: whatever it asked would be answered by another tenant's bot.
+    if (!await this.deps.hub.get(channel, scope)) { this.deps.onError?.(new Error(`Refused an inbound ${channel} event for unknown scope "${scope}"`)); return { replied: true }; }
     if (event.unreachable) return { replied: true };
     if (event.revoked) { await connections.revokeTenant(channel, scope); return { replied: true }; }
     const say = (text: string, connectionId?: string, link?: { label: string; url: string }) => this.deps.notify({ ...(connectionId ? { connectionId } : {}), channel, scope, address: event.address }, text, event.messageRef, link);
@@ -61,8 +63,7 @@ export class ChannelRouter {
     const { connection } = resolved;
     assertReachable(connection);
     await connections.touch(connection.id);
-    const adapter = await this.deps.hub.get(channel, scope);
-    if (!adapter) throw new Error(`${channel} is not available`);
+    const adapter = (await this.deps.hub.get(channel, scope))!;
     // Best effort, and not awaited: the sender sees that an answer is coming while the Agent works.
     if (!event.button) void adapter.typing?.(event.address, event.messageRef).catch(() => undefined);
     const inbound: Inbound = {

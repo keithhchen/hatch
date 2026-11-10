@@ -199,5 +199,5 @@ globalThis.fetch = (input, init) => { const url = typeof input === "string" ? in
   const inbox = (await registryPool.query("SELECT run_id, state FROM hatch_channel_inbox")).rows[0];
   assert.deepEqual([inbox.run_id, inbox.state], [runs[0].id, "done"]);
   const outbox = (await registryPool.query("SELECT state, source_key, connection_id FROM hatch_channel_outbox")).rows;
-  assert.deepEqual(outbox.map((row) => [row.state, row.source_key, row.connection_id]), [["sent", `run:${runs[0].id}`, connectionId]]);
+  assert.deepEqual(outbox.map((row) => [row.state, row.source_key, row.connection_id]), [["sent", `run:${runs[0].id}:telegram::777`, connectionId]]);
 });

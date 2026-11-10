@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { Pool } from "pg";
 import type { ChannelCapabilities, ClientAttributes, ContentPart, Principal } from "../surfaces/contract.js";
 import { ChannelHub } from "./hub.js";
+import { Dispatcher } from "./dispatch.js";
 import type { Claim, SignIn } from "./router.js";
 import { OwnApps } from "./ownApps.js";
 import { CREDENTIAL_FORMS } from "./credentialForms.js";
@@ -82,12 +83,15 @@ class FakeGateway implements ChatGateway {
   failSend: Error | undefined;
   private runs = new Map<string, RunProgress>();
   private byMessage = new Map<string, string>();
+  /** The Run that takes the next message as a steer, the way Chat folds a message into a Run that is going. */
+  steerInto: string | undefined;
   /** Like Chat, a repeated message id is the same message and Run. */
   async send(principal: Principal, conversation: ConversationRef, client: ClientAttributes, messageId: string, parts: ContentPart[]) {
     if (this.failSend) { const error = this.failSend; this.failSend = undefined; throw error; }
     const known = this.byMessage.get(messageId);
     if (known) return { outcome: "replayed" as const, conversationId: "conversation-1", runId: known, messageId };
     this.submitted.push({ principal, conversation, client, messageId, parts });
+    if (this.steerInto) { const runId = this.steerInto; this.steerInto = undefined; this.byMessage.set(messageId, runId); return { outcome: "steered" as const, conversationId: "conversation-1", runId, messageId }; }
     const runId = `run-${this.submitted.length}`;
     this.byMessage.set(messageId, runId);
     this.runs.set(runId, { ended: false });
@@ -623,6 +627,85 @@ test("A Run's final reply is sent once, however it is announced, and a failed Ru
     assert.ok(!env.adapter.texts.join("").includes("stack trace"));
     assert.equal(env.adapter.texts.length, 2);
   } finally { await env.service.close(); }
+}));
+
+/** A product Connection whose members are all in the thread or threads given: [sender, thread]. */
+async function productConnection(pool: Pool, members: Array<[string, string]>) {
+  await pool.query("INSERT INTO hatch_connections (owner_account_id, channel, target, target_key, audience) VALUES ($1, 'telegram', $2, 'product:p1', 'org')", [randomUUID(), JSON.stringify({ kind: "product", productId: "p1" })]);
+  const connectionId = (await pool.query("SELECT id FROM hatch_connections")).rows[0].id;
+  for (const [sender, thread] of members) await pool.query("INSERT INTO hatch_channel_identities (connection_id, channel, scope, sender_id, thread_id) VALUES ($1, 'telegram', '', $2, $3)", [connectionId, sender, thread]);
+}
+
+test("In a group, a reply goes to the message its Run answered: the other member's Run ending later is still answered", options, async () => isolated(async pool => {
+  const gateway = new FakeGateway();
+  const env = await stack(pool, { gateway });
+  env.service.register("product", new ProductTarget({ gateway, limiter: env.limiter }));
+  await productConnection(pool, [["b", "group"], ["a", "group"]]);
+  const [fromB, fromA] = [message("b", "from b", { address: address("b", "group") }), message("a", "from a", { address: address("a", "group") })];
+  await env.service.accept(env.adapter, [fromB]);
+  await env.settle();
+  await env.service.accept(env.adapter, [fromA]);
+  await env.settle();
+  gateway.finish("run-2", { ok: true, text: "answer to a" });
+  await env.settle();
+  gateway.finish("run-1", { ok: true, text: "answer to b" });
+  await env.settle();
+  assert.deepEqual(env.adapter.sent.map(sent => [sent.message.text, sent.message.replyTo]), [["answer to a", fromA.messageRef], ["answer to b", fromB.messageRef]]);
+  assert.equal((await pool.query("SELECT count(*)::int AS n FROM hatch_channel_inbox WHERE replied_at IS NULL")).rows[0].n, 0);
+}));
+
+test("A Run that two threads steered replies once in each thread, and nothing is marked replied that was not", options, async () => isolated(async pool => {
+  const gateway = new FakeGateway();
+  const env = await stack(pool, { gateway });
+  env.service.register("product", new ProductTarget({ gateway, limiter: env.limiter }));
+  await productConnection(pool, [["one", "one"], ["two", "two"]]);
+  await env.service.accept(env.adapter, [message("one", "first")]);
+  await env.settle();
+  gateway.steerInto = "run-1";
+  await env.service.accept(env.adapter, [message("two", "second")]);
+  await env.settle();
+  gateway.finish("run-1", { ok: true, text: "answer" });
+  await env.settle();
+  await env.settle();
+  assert.deepEqual(env.adapter.sent.map(sent => [sent.to.threadId, sent.message.text]).sort(), [["one", "answer"], ["two", "answer"]]);
+  assert.deepEqual(await env.inbox.openRuns(20), []);
+}));
+
+test("A removed bot's leftover delivery is failed with a reason, never sent through the shared bot; its inbound is refused", options, async () => isolated(async pool => {
+  const shared = new FakeAdapter();
+  const bot = new FakeAdapter("telegram", "bot-1");
+  let alive = true;
+  const env = await stack(pool, { adapters: [shared], own: async (_kind, scope) => alive && scope === "bot-1" ? bot : undefined });
+  const logged: string[] = [];
+  const dispatcher = new Dispatcher({ outbox: env.outbox, hub: env.service.hub, limiter: env.limiter, connections: env.connections, inbox: env.inbox, now: () => env.clock.at, onError: error => logged.push(String(error)) });
+  await dispatcher.send({ channel: "telegram", scope: "bot-1", address: address("walker"), kind: "notice", message: { text: "leftover" } });
+  alive = false;
+  assert.equal(await dispatcher.step(), 1);
+  const row = (await pool.query("SELECT state, last_error FROM hatch_channel_outbox")).rows[0];
+  assert.equal(row.state, "failed");
+  assert.match(row.last_error, /bot-1/);
+  assert.equal(logged.length, 1);
+  assert.deepEqual([shared.sent, bot.sent], [[], []]);
+  // Inbound for the same scope is refused: stored, never routed, and nothing is said through the shared bot.
+  await env.inbox.store("telegram", "bot-1", [message("walker", "hello?")]);
+  await env.service.drain();
+  assert.deepEqual(shared.sent, []);
+  assert.equal(env.target.handled.length, 0);
+  assert.equal((await pool.query("SELECT state FROM hatch_channel_inbox")).rows[0].state, "done");
+  assert.equal(env.errors.length, 1);
+}));
+
+test("An event that is finally given up on is told to its sender in plain words, and logged", options, async () => isolated(async pool => {
+  const env = await stack(pool);
+  await link(env, "42");
+  env.target.failures = 10;
+  await env.service.accept(env.adapter, [message("42", "hello")]);
+  for (let round = 0; round < 6; round += 1) { env.advance(120_000); await env.settle(); }
+  assert.equal(env.target.handled.length, 0);
+  assert.equal((await pool.query("SELECT state FROM hatch_channel_inbox ORDER BY seq DESC LIMIT 1")).rows[0].state, "failed");
+  assert.equal(env.adapter.texts.filter(text => /Something went wrong/.test(text)).length, 1, "told once");
+  assert.ok(!env.adapter.texts.join("").includes("target down"), "no provider text reaches the sender");
+  assert.ok(env.errors.some(error => /giving up/i.test(String(error instanceof Error ? error.message : error))), "the final failure is an error of its own");
 }));
 
 test("Compaction: one notice per compaction, only where someone is waiting, and it is not part of the conversation", options, async () => isolated(async pool => {
