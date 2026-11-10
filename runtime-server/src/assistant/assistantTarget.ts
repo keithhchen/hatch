@@ -1,7 +1,7 @@
 import type { ChannelConnection } from "../channels/connections.js";
 import type { ChatTarget } from "../channels/chatTarget.js";
 import type { Handled, Inbound, ReplyPolicy } from "../channels/ports.js";
-import { CHANNEL_LABELS, type ChannelKind } from "../channels/types.js";
+import { CHANNEL_LABELS, ChannelSendError, type ChannelKind } from "../channels/types.js";
 import type { ContentPart } from "../surfaces/contract.js";
 import type { AssistantService } from "./assistant.js";
 import { TaskRefused } from "./tasks.js";
@@ -62,7 +62,13 @@ export class AssistantTarget implements ChatTarget {
     }
     const pressed = `[任务 ${taskId}] 专家在 ${CHANNEL_LABELS[connection.channel as ChannelKind]} 点了「${action === "approve" ? "确认" : "取消"}」。`;
     const { runId } = await this.assistant.hear(accountId, { ...origin(inbound, key), system: true, parts: [{ type: "text", text: refusal ? `${pressed}没有生效：${refusal}` : pressed }] });
-    if (adapter.acknowledge) await adapter.acknowledge(event, refusal ?? "好"); else if (refusal) await inbound.notify(refusal);
+    if (!adapter.acknowledge) { if (refusal) await inbound.notify(refusal); return { replied: false, runId }; }
+    try { await adapter.acknowledge(event, refusal ?? "好"); } catch (error) {
+      // The decision stands; a button the platform will never answer (an expired press) is answered in the chat instead,
+      // and only a failure that may still go through is retried.
+      if (!(error instanceof ChannelSendError) || error.failure !== "permanent") throw error;
+      await inbound.notify(refusal ?? "好");
+    }
     return { replied: false, runId };
   }
 }

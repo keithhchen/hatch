@@ -170,5 +170,13 @@ export function targetConformance(name: string, make: () => TargetRig | Promise<
       assert.ok(redelivered.runId);
       assert.deepEqual(rig.acknowledgements(), ["好", "好"], "the button was cleared on the retry");
     });
+    test(`${name}: a press the platform will never answer is decided once and answered in the chat, not retried`, async () => {
+      const rig = await make();
+      rig.failAcknowledgeNext(new ChannelSendError("Telegram answerCallbackQuery failed: query is too old", "permanent"));
+      const handled = await rig.deliver(button);
+      assert.equal(handled.replied, false);
+      assert.deepEqual(rig.trace().filter(step => step !== "persist"), [act], "decided once");
+      assert.deepEqual(rig.notices(), ["好"], "the outcome reached the Expert in the chat");
+    });
   }
 }
