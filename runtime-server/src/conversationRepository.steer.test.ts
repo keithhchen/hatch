@@ -95,6 +95,23 @@ for (const backend of ["memory", "file", "postgres"] as const) {
     assert.notEqual(next.run.id, start.run.id);
   }));
 
+  for (const terminal of ["cancelled", "failed", "interrupted"] as const) {
+    test(`${backend}: a Run that ends ${terminal} claims its steered messages in the same transition`, options, async () => withBackend(backend, async ({ repository, store }) => {
+      const start = await repository.acceptSubmission(message(0));
+      await repository.acceptSubmission(message(1));
+      await repository.acceptSubmission(message(2));
+      const ended = await repository.transitionRun(start.run.id, terminal, "stopped");
+      assert.equal(ended.status, terminal);
+      assert.equal(ended.consumedCount, 2);
+      assert.deepEqual((await store.readVisibleConversation(id)).map((row) => row.content), ["question 0", "question 1", "question 2"]);
+      const events = (await repository.snapshot(id)).events;
+      assert.deepEqual(events.filter((event) => event.type === "message.consumed").map((event) => event.payload.client_message_id), ["message-1", "message-2"]);
+      // The claim and the transition are one commit: the claim precedes the terminal state in the journal.
+      const types = events.map((event) => event.type);
+      assert.ok(types.lastIndexOf("message.consumed") < types.lastIndexOf("run.state"));
+    }));
+  }
+
   test(`${backend}: messages racing a Run's end never deadlock and are each claimed or start the next Run`, options, async () => withBackend(backend, async ({ repository }) => {
     let n = 0;
     const submit = (): Promise<unknown> => repository.acceptSubmission(message(n++)).catch((error: unknown) => error);

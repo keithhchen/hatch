@@ -549,20 +549,23 @@ export class InMemoryConversationRepository implements ConversationRepository {
   }
 
   async claimSteeredMessages(runId: string): Promise<ClaimedMessage[]> {
-    return this.write(async () => {
-      const run = this.runs.get(runId);
-      if (!run || run.consumedCount >= run.steeredCount) return [];
-      const steered = this.ledger(run.conversationId).filter((entry) => entry.runId === runId && entry.steered)
-        .slice(run.consumedCount, run.steeredCount);
-      this.runs.set(runId, { ...run, consumedCount: run.steeredCount });
-      for (const entry of steered) {
-        this.appendEventUnsafe({ conversationId: run.conversationId, runId, type: "message.consumed", payload: { client_message_id: entry.clientMessageId } });
-        // The transcript append commits with the claim: the commit log is one transaction.
-        this.pendingStoreEvents.push({ type: "conversation.model_message", conversation_id: run.conversationId, run_id: runId,
-          client_message_id: entry.clientMessageId, message: entry.message!, timestamp: now() });
-      }
-      return steered.map((entry) => ({ clientMessageId: entry.clientMessageId, message: entry.message! }));
-    });
+    return this.write(async () => this.claimUnsafe(runId));
+  }
+
+  /** Inside a write: the one claim, shared by the executor's claim and every terminal transition. */
+  private claimUnsafe(runId: string): ClaimedMessage[] {
+    const run = this.runs.get(runId);
+    if (!run || run.consumedCount >= run.steeredCount) return [];
+    const steered = this.ledger(run.conversationId).filter((entry) => entry.runId === runId && entry.steered)
+      .slice(run.consumedCount, run.steeredCount);
+    this.runs.set(runId, { ...run, consumedCount: run.steeredCount });
+    for (const entry of steered) {
+      this.appendEventUnsafe({ conversationId: run.conversationId, runId, type: "message.consumed", payload: { client_message_id: entry.clientMessageId } });
+      // The transcript append commits with the claim: the commit log is one transaction.
+      this.pendingStoreEvents.push({ type: "conversation.model_message", conversation_id: run.conversationId, run_id: runId,
+        client_message_id: entry.clientMessageId, message: entry.message!, timestamp: now() });
+    }
+    return steered.map((entry) => ({ clientMessageId: entry.clientMessageId, message: entry.message! }));
   }
 
   async requestToolCall(call: Omit<ToolCallRecord, "outcome" | "answeredAt">): Promise<void> {
@@ -774,10 +777,12 @@ export class InMemoryConversationRepository implements ConversationRepository {
       if (!current) throw new ConversationRepositoryError("run_not_found", `Run ${runId} was not found`);
       if (current.status === status) return cloneRun(current);
       if (TERMINAL_RUN_STATUSES.has(current.status)) return cloneRun(current);
-      assertNoUnclaimedSteer(current, status);
+      if (endsWithoutReply(status)) this.claimUnsafe(runId);
+      const claimed = this.runs.get(runId)!;
+      assertNoUnclaimedSteer(claimed, status);
       const timestamp = now();
       const updated: ConversationRunRecord = {
-        ...current,
+        ...claimed,
         status,
         ...(status === "running" && !current.startedAt ? { startedAt: timestamp } : {}),
         ...(TERMINAL_RUN_STATUSES.has(status) ? { completedAt: timestamp } : {}),
@@ -1185,25 +1190,29 @@ export class PostgresConversationRepository implements ConversationRepository {
     return this.inTransaction(async (repository) => {
       await repository.lockConversationOfRun(runId);
       const locked = await repository.pool.query<RunRow>("SELECT * FROM hatch_conversation_runs WHERE id = $1 FOR UPDATE", [runId]);
-      const run = locked.rows[0] ? runFromRow(locked.rows[0]) : undefined;
-      if (!run || run.consumedCount >= run.steeredCount) return [];
-      const rows = await repository.pool.query<JournalRow>(`
-        SELECT * FROM hatch_conversation_journal
-        WHERE run_id = $1 AND event_type = 'message.created' AND payload->>'steered' = 'true'
-        ORDER BY cursor ASC OFFSET $2 LIMIT $3
-      `, [runId, run.consumedCount, run.steeredCount - run.consumedCount]);
-      await repository.pool.query("UPDATE hatch_conversation_runs SET consumed_count = steered_count WHERE id = $1", [runId]);
-      const claimed: ClaimedMessage[] = [];
-      for (const row of rows.rows) {
-        const entry = ledgerEntry(eventFromRow(row))!;
-        await repository.appendEvent({ conversationId: run.conversationId, runId, type: "message.consumed", payload: { client_message_id: entry.clientMessageId } });
-        // Same transaction as the claim above: a crash can neither lose the message nor append it twice.
-        await this.requireSubmissionStore().appendOn(repository.pool, { type: "conversation.model_message", conversation_id: run.conversationId,
-          run_id: runId, client_message_id: entry.clientMessageId, message: entry.message!, timestamp: new Date().toISOString() });
-        claimed.push({ clientMessageId: entry.clientMessageId, message: entry.message! });
-      }
-      return claimed;
+      return locked.rows[0] ? this.claimLocked(repository, runFromRow(locked.rows[0])) : [];
     });
+  }
+
+  /** Inside `tx`, which holds the Run's row lock: the one claim, shared by the executor's claim and every terminal transition. */
+  private async claimLocked(tx: PostgresConversationRepository, run: ConversationRunRecord): Promise<ClaimedMessage[]> {
+    if (run.consumedCount >= run.steeredCount) return [];
+    const rows = await tx.pool.query<JournalRow>(`
+      SELECT * FROM hatch_conversation_journal
+      WHERE run_id = $1 AND event_type = 'message.created' AND payload->>'steered' = 'true'
+      ORDER BY cursor ASC OFFSET $2 LIMIT $3
+    `, [run.id, run.consumedCount, run.steeredCount - run.consumedCount]);
+    await tx.pool.query("UPDATE hatch_conversation_runs SET consumed_count = steered_count WHERE id = $1", [run.id]);
+    const claimed: ClaimedMessage[] = [];
+    for (const row of rows.rows) {
+      const entry = ledgerEntry(eventFromRow(row))!;
+      await tx.appendEvent({ conversationId: run.conversationId, runId: run.id, type: "message.consumed", payload: { client_message_id: entry.clientMessageId } });
+      // Same transaction as the claim above: a crash can neither lose the message nor append it twice.
+      await this.requireSubmissionStore().appendOn(tx.pool, { type: "conversation.model_message", conversation_id: run.conversationId,
+        run_id: run.id, client_message_id: entry.clientMessageId, message: entry.message!, timestamp: new Date().toISOString() });
+      claimed.push({ clientMessageId: entry.clientMessageId, message: entry.message! });
+    }
+    return claimed;
   }
 
   private requireSubmissionStore(): PostgresStore {
@@ -1616,8 +1625,12 @@ export class PostgresConversationRepository implements ConversationRepository {
       const currentResult = await repository.pool.query<RunRow>("SELECT * FROM hatch_conversation_runs WHERE id = $1 FOR UPDATE", [runId]);
       const currentRow = currentResult.rows[0];
       if (!currentRow) throw new ConversationRepositoryError("run_not_found", `Run ${runId} was not found`);
-      const current = runFromRow(currentRow);
+      let current = runFromRow(currentRow);
       if (current.status === status || TERMINAL_RUN_STATUSES.has(current.status)) return current;
+      if (endsWithoutReply(status)) {
+        await this.claimLocked(repository, current);
+        current = { ...current, consumedCount: current.steeredCount };
+      }
       assertNoUnclaimedSteer(current, status);
       const result = await repository.pool.query<RunRow>(`
         UPDATE hatch_conversation_runs
@@ -1913,9 +1926,14 @@ function cloneConversation(conversation: ConversationRecord): ConversationRecord
   return { ...conversation, ...(conversation.briefSnapshot ? { briefSnapshot: structuredClone(conversation.briefSnapshot) } : {}) };
 }
 
-/** The database-level rule: a Run is not complete while a message it accepted is unclaimed. */
+/** A Run that ends without another turn claims its steered messages itself: the user sees them and the next Run reads them. */
+function endsWithoutReply(status: DurableRunStatus): boolean {
+  return TERMINAL_RUN_STATUSES.has(status) && status !== "completed";
+}
+
+/** The database-level rule: no Run reaches an end state while a message it accepted is unclaimed. */
 function assertNoUnclaimedSteer(run: ConversationRunRecord, next: DurableRunStatus): void {
-  if (next === "completed" && run.consumedCount < run.steeredCount) {
+  if (TERMINAL_RUN_STATUSES.has(next) && run.consumedCount < run.steeredCount) {
     throw new ConversationRepositoryError("steer_pending", `Run ${run.id} still has ${run.steeredCount - run.consumedCount} unclaimed message(s)`, run);
   }
 }
