@@ -165,6 +165,10 @@ async function runModelTurnInternal(
     let approvedAssistantText = "";
     const visibleParts: VisibleConversationPart[] = [];
     const thinkingPartJournal = new ThinkingPartJournal(visibleParts);
+    // A Run that fails or is stopped keeps what it already showed: the released text and the steps, as its reply.
+    state.keepsReplyFrom(() => approvedAssistantText || visibleParts.length
+      ? { message: { role: "assistant", content: approvedAssistantText }, finishReason: "stop", visibleParts: structuredClone(visibleParts) }
+      : undefined);
     const visibleActivityKeys = new Set<string>();
     const recordVisiblePart = (message: OutboundMessage): void => {
       if (!("run_id" in message) || message.run_id !== input.run_id) return;
