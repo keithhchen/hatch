@@ -15,6 +15,8 @@ export class RunTerminator {
 
   async end(runId: string, ending: RunEnding): Promise<EndedRun> {
     const ended = await this.repository.endRun(runId, ending);
+    // A reply that was written is told even when the Run stays open for a message that joined it.
+    if (ended.messageId) this.hub.publish(ended.run.conversationId, { type: "assistant.message", run_id: runId, message_id: ended.messageId });
     if (ended.ended) this.announce(ended.run.conversationId, runId, ending);
     return ended;
   }

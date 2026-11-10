@@ -8,7 +8,7 @@ import type { Role, Session } from "../factoryAgents/store.js";
 import type { AssistantHost } from "./assistantConversation.js";
 import type { AssetScope } from "../assets/domain.js";
 import type { AssetDesk } from "./assets.js";
-import { ConversationError, type ConversationStatus, type PublicMessage, type ReadyAsset, type SendInput, type Sent } from "./conversation.js";
+import { ConversationError, page, type ConversationStatus, type PublicMessage, type ReadyAsset, type SendInput, type Sent } from "./conversation.js";
 import { MemoryEventLog } from "./eventLog.js";
 import { EventLogJournal } from "./journal.js";
 import { MemoryMessageLedger } from "./ledger.js";
@@ -75,7 +75,7 @@ class FakeAssistant implements AssistantHost {
   /** Looks at the world the moment a message is delivered. */
   onDelivery: () => void = () => undefined;
   status = async (): Promise<ConversationStatus> => this.running ? { state: "running", runId: "arun-1" } : { state: "idle" };
-  lines = async () => this.history;
+  lines = async (_account: string, after?: string, limit?: number) => page(this.history, after, limit);
   send = async (_account: string, input: SendInput): Promise<Sent> => {
     this.onDelivery();
     this.ingested.push(input);

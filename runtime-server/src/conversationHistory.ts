@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import type { StoreEvent, VisibleConversationMessage } from "./store.js";
 
+/** The stable id of a Run's nth reply: what every client reconciles it by, wherever and however often it is read. */
+export const replyMessageId = (runId: string, ordinal: number): string => `${runId}:${ordinal}`;
+
 export type ConversationHistoryOptions = { limit?: number; beforeCursor?: string };
 export type ConversationHistoryPage = {
   messages: VisibleConversationMessage[];
@@ -53,15 +56,22 @@ export function historyEvent(event: StoreEvent): StoreEvent {
   return event;
 }
 
+/**
+ * Messages carry the ids they were stored under. Only a message stored before ids were persisted gets one here, at read time:
+ * a reply is its Run's nth, as new ones are stored, and an old user message is named by its place in the Run.
+ */
 export function historyMessages(conversationId: string, messages: VisibleConversationMessage[]): VisibleConversationMessage[] {
   const occurrences = new Map<string, number>();
   return messages.map((message) => {
     const key = JSON.stringify([conversationId, message.run_id, message.role]);
     const ordinal = occurrences.get(key) ?? 0;
     occurrences.set(key, ordinal + 1);
+    const legacy = message.role === "assistant"
+      ? replyMessageId(message.run_id, ordinal + 1)
+      : `msg_${createHash("sha256").update(JSON.stringify([key, ordinal])).digest("hex")}`;
     return {
       ...message,
-      id: `msg_${createHash("sha256").update(JSON.stringify([key, ordinal])).digest("hex")}`,
+      id: message.id ?? legacy,
       ...(message.tool_calls ? { tool_calls: message.tool_calls.map((tool) => ({
         ...tool, detail_ref: { run_id: tool.run_id, tool_call_id: tool.tool_call_id }
       })) } : {})

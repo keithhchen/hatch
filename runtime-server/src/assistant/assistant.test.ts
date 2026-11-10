@@ -642,3 +642,28 @@ test("A voice message that cannot be transcribed is answered in the chat with a 
     assert.equal(env.model.state.calls, 0);
   } finally { console.error = log; await env.close(); }
 });
+
+test("The Expert's page reads the conversation by page: never the whole of it, and a message sent into a running reply is already there, queued", async () => {
+  const env = await setup({ model: (turn, call) => call === 1 ? { delayMs: 300, text: "慢慢答" } : { text: "又答" } });
+  try {
+    // A page projects the events of its own Runs; reading the conversation's whole visible history is what it must not do.
+    const project = env.store.readVisibleConversation.bind(env.store);
+    env.store.readVisibleConversation = async (id, events) => events ? project(id, events) : assert.fail("the page must not read the whole conversation");
+    await env.say("第一句", "m-first");
+    await sleep(60);
+    await env.say("第二句", "m-second");
+    // Another reader, while the first reply is still being made: the second message is the conversation's already.
+    const during = await env.assistant.view(ACCOUNT);
+    assert.deepEqual(during.messages.map(message => [message.id, message.state]), [["m-first", undefined], ["m-second", "queued"]]);
+    await env.idle();
+    const after = await env.assistant.view(ACCOUNT);
+    assert.deepEqual(after.messages.filter(message => message.role === "expert").map(message => [message.id, message.state]), [["m-first", undefined], ["m-second", undefined]]);
+    assert.ok(after.messages.every(message => message.role === "expert" || /^run_[0-9a-f]+:[0-9]+$/.test(message.id)), "a reply is named <run_id>:<n>");
+    assert.deepEqual((await env.assistant.view(ACCOUNT)).messages.map(message => message.id), after.messages.map(message => message.id), "ids do not change on a refresh");
+    await env.say("第三句", "m-third");
+    await env.idle();
+    const earlier = await env.assistant.view(ACCOUNT, { limit: 1 });
+    assert.equal(earlier.has_more, true, "the first Run is a page of its own");
+    assert.ok((await env.assistant.view(ACCOUNT, { limit: 200, beforeCursor: earlier.before_cursor })).messages.length > 0);
+  } finally { await env.close(); }
+});

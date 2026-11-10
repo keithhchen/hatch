@@ -135,6 +135,8 @@ export type StoreEvent =
       conversation_id: string;
       run_id: string;
       client_message_id?: string;
+      /** A reply's stable id, `<run_id>:<n>`; a user message is known by its `client_message_id`. */
+      message_id?: string;
       message: ConversationMessage;
       finish_reason?: OutputFinishReason;
       visible_parts?: VisibleConversationPart[];
@@ -724,8 +726,8 @@ export class RuntimeStore {
           throw new Error(`Unsupported visible conversation role: ${role}`);
         }
         const message: VisibleConversationMessage = {
-          // A user message is known by the key its client sent it under.
-          ...(event.type === "conversation.model_message" && role === "user" && event.client_message_id ? { id: event.client_message_id } : {}),
+          // A message is known by the id it was stored under: its client's key, or `<run_id>:<n>` for a reply.
+          ...(persistedMessageId(event, role) ? { id: persistedMessageId(event, role) } : {}),
           run_id: event.run_id,
           role,
           content: event.type === "message.created"
@@ -833,6 +835,11 @@ export class RuntimeStore {
     return session;
   }
 
+}
+
+/** The id a visible message was stored under, when it was stored with one. */
+export function persistedMessageId(event: StoreEvent, role: "user" | "assistant"): string | undefined {
+  return event.type === "conversation.model_message" ? (role === "user" ? event.client_message_id : event.message_id) : undefined;
 }
 
 export function normalizePersistedStoreEvent(event: StoreEvent): StoreEvent {

@@ -572,12 +572,13 @@ export class AssistantService implements StudioOperations, InterviewDesk {
   // ── Studio and channel surfaces ───────────────────────────────────────
 
   /** What the chat shows: what the Expert said and what the Assistant said. System messages stay out. */
-  async view(accountId: string): Promise<{ messages: Array<{ id: string; role: "expert" | "assistant"; text: string; at: string; images?: string[]; attachments?: NonNullable<PublicMessage["attachments"]>; /** What the Assistant did inside a reply, in order. */ steps?: ReplySteps }>; tasks: AssistantTask[]; running: boolean; runId?: string; /** Why the last turn failed, until the next one starts. */ failure?: RunFailure; interviewing: boolean }> {
-    const [lines, status] = await Promise.all([this.chat.shown(accountId), this.chat.status(accountId)]);
+  async view(accountId: string, options: { limit?: number; beforeCursor?: string } = {}): Promise<{ has_more: boolean; before_cursor?: string; messages: Array<{ id: string; role: "expert" | "assistant"; text: string; at: string; state?: "queued"; images?: string[]; attachments?: NonNullable<PublicMessage["attachments"]>; /** What the Assistant did inside a reply, in order. */ steps?: ReplySteps }>; tasks: AssistantTask[]; running: boolean; runId?: string; /** Why the last turn failed, until the next one starts. */ failure?: RunFailure; interviewing: boolean }> {
+    const [{ messages: lines, has_more, before_cursor }, status] = await Promise.all([this.chat.shown(accountId, options), this.chat.status(accountId)]);
     return {
+      has_more, ...(before_cursor ? { before_cursor } : {}),
       messages: lines.map(line => {
         const images = line.attachments?.filter(attachment => attachment.type === "image").map(attachment => `${attachment.asset_id}.jpg`);
-        return { id: line.id, role: line.role === "user" ? "expert" as const : "assistant" as const, text: line.text, at: line.created_at, ...(images?.length ? { images } : {}), ...(line.attachments?.length ? { attachments: line.attachments } : {}), ...(line.steps ? { steps: line.steps } : {}) };
+        return { id: line.id, role: line.role === "user" ? "expert" as const : "assistant" as const, text: line.text, at: line.created_at, ...(line.state ? { state: line.state } : {}), ...(images?.length ? { images } : {}), ...(line.attachments?.length ? { attachments: line.attachments } : {}), ...(line.steps ? { steps: line.steps } : {}) };
       }),
       tasks: await this.deps.tasks.open(accountId),
       running: status.state === "running", ...(status.runId ? { runId: status.runId } : {}),

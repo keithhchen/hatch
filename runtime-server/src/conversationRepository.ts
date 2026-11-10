@@ -8,6 +8,7 @@ import type { ConversationMessage } from "./protocol.js";
 import { failureOfReason, type PublicFailure } from "./errors/failures.js";
 import type { VisibleConversationPart } from "./store.js";
 import { RunFenced, type RunHold } from "./runHold.js";
+import { replyMessageId } from "./conversationHistory.js";
 import { normalizeBriefSnapshot, type BriefSnapshot } from "./brief.js";
 import { ledgerEntry, steeredPayload, type ClaimedMessage, type LedgerEntry } from "./chat/messageLedger.js";
 
@@ -36,8 +37,14 @@ export type RunReply = { message: ConversationMessage; finishReason: OutputFinis
 export type RunEnding =
   | { status: "completed"; reply: RunReply }
   | { status: "failed" | "cancelled" | "interrupted"; failure: PublicFailure };
-/** `ended` is false when the Run was already over, or when the reply was kept but a message that joined the Run is still unanswered. */
-export type EndedRun = { run: ConversationRunRecord; ended: boolean };
+/**
+ * `ended` is false when the Run was already over, or when the reply was kept but a message that joined the Run is still
+ * unanswered. `messageId` is the reply's stable id, `<run_id>:<n>`, when this call wrote one.
+ */
+export type EndedRun = { run: ConversationRunRecord; ended: boolean; messageId?: string };
+
+/** A message that joined a Run and is not yet in the transcript: accepted, not yet read by the model. */
+export type QueuedMessage = { clientMessageId: string; runId: string; message: ConversationMessage; acceptedAt: string };
 
 export { RunFenced, type RunHold };
 
@@ -258,6 +265,8 @@ export interface ConversationRepository {
    * A completion while a joined message is still unclaimed keeps the reply and leaves the Run open.
    */
   endRun(runId: string, ending: RunEnding, hold?: RunHold): Promise<EndedRun>;
+  /** The messages that joined the conversation's active Run and are not yet in its transcript, oldest first. */
+  queuedMessages(conversationId: string): Promise<QueuedMessage[]>;
   appendEvent(input: Omit<ConversationJournalEvent, "cursor" | "createdAt"> & { createdAt?: string }): Promise<ConversationJournalEvent>;
   snapshot(conversationId: string, afterCursor?: number): Promise<ConversationSnapshot>;
   /**
@@ -549,7 +558,8 @@ export class InMemoryConversationRepository implements ConversationRepository {
   }
 
   private ledger(conversationId: string): LedgerEntry[] {
-    return [...this.localAuthority.journal, ...this.events]
+    // Outside a write the staged events are the authority's own journal; inside one they are what this write added to it.
+    return (this.events === this.localAuthority.journal ? this.events : [...this.localAuthority.journal, ...this.events])
       .filter((event) => event.conversationId === conversationId)
       .flatMap((event) => ledgerEntry(event) ?? []);
   }
@@ -833,18 +843,29 @@ export class InMemoryConversationRepository implements ConversationRepository {
       if (!current) throw new ConversationRepositoryError("run_not_found", `Run ${runId} was not found`);
       assertHeld(current, hold);
       if (TERMINAL_RUN_STATUSES.has(current.status)) return { run: cloneRun(current), ended: false };
-      const writes = endingWrites(current, ending, now());
+      const replied = [...this.localAuthority.events, ...this.pendingStoreEvents].filter(isReplyOf(runId)).length;
+      const messageId = replyMessageId(runId, replied + 1);
+      const writes = endingWrites(current, ending, now(), messageId);
       if (writes.claims) this.claimUnsafe(runId);
       const claimed = this.runs.get(runId)!;
       this.pendingStoreEvents.push(...writes.transcript);
       for (const event of writes.journal) this.appendEventUnsafe({ conversationId: claimed.conversationId, runId, ...event });
-      if (!writes.ends) return { run: cloneRun(claimed), ended: false };
+      const written = ending.status === "completed" ? { messageId } : {};
+      if (!writes.ends) return { run: cloneRun(claimed), ended: false, ...written };
       const at = now();
       const updated: ConversationRunRecord = { ...claimed, status: ending.status, completedAt: at, ...("failure" in ending ? { failure: ending.failure } : {}) };
       this.runs.set(runId, updated);
       this.appendEventUnsafe({ conversationId: updated.conversationId, runId, type: "run.state", payload: publicRunEvent(updated) });
-      return { run: cloneRun(updated), ended: true };
+      return { run: cloneRun(updated), ended: true, ...written };
     });
+  }
+
+  async queuedMessages(conversationId: string): Promise<QueuedMessage[]> {
+    await this.readReady();
+    const active = [...this.runs.values()].find((run) => run.conversationId === conversationId && isActiveRun(run.status));
+    if (!active) return [];
+    return this.ledger(conversationId).filter((entry) => entry.runId === active.id && entry.steered).slice(active.consumedCount)
+      .map((entry) => ({ clientMessageId: entry.clientMessageId, runId: active.id, message: entry.message!, acceptedAt: entry.acceptedAt }));
   }
 
   async appendEvent(input: Omit<ConversationJournalEvent, "cursor" | "createdAt"> & { createdAt?: string }): Promise<ConversationJournalEvent> {
@@ -1725,14 +1746,21 @@ export class PostgresConversationRepository implements ConversationRepository {
     return this.inTransaction(async (repository) => {
       let current = await this.lockRun(repository, runId, hold);
       if (TERMINAL_RUN_STATUSES.has(current.status)) return { run: current, ended: false };
-      const writes = endingWrites(current, ending, new Date().toISOString());
+      const replied = await repository.pool.query<{ n: string }>(`
+        SELECT count(*) AS n FROM hatch_conversation_events
+        WHERE conversation_id = $1 AND run_id = $2 AND event_type = 'conversation.model_message'
+          AND payload->'message'->>'role' = 'assistant' AND payload->>'finish_reason' IS NOT NULL
+      `, [current.conversationId, runId]);
+      const messageId = replyMessageId(runId, Number(replied.rows[0]?.n ?? 0) + 1);
+      const writes = endingWrites(current, ending, new Date().toISOString(), messageId);
       if (writes.claims) {
         await this.claimLocked(repository, current);
         current = { ...current, consumedCount: current.steeredCount };
       }
       for (const event of writes.transcript) await this.requireSubmissionStore().appendOn(repository.pool, event);
       for (const event of writes.journal) await repository.appendEvent({ conversationId: current.conversationId, runId, ...event });
-      if (!writes.ends) return { run: current, ended: false };
+      const written = ending.status === "completed" ? { messageId } : {};
+      if (!writes.ends) return { run: current, ended: false, ...written };
       const result = await repository.pool.query<RunRow>(`
         UPDATE hatch_conversation_runs SET status = $2, completed_at = now(), failure = $3::jsonb
         WHERE id = $1 AND status IN ('queued', 'running', 'waiting_for_tool', 'compacting') AND ($4::text IS NULL OR executor_id = $4)
@@ -1741,8 +1769,20 @@ export class PostgresConversationRepository implements ConversationRepository {
       if (!result.rows[0]) throw new RunFenced(runId);
       const updated = runFromRow(result.rows[0]);
       await repository.appendEvent({ conversationId: updated.conversationId, runId, type: "run.state", payload: publicRunEvent(updated) });
-      return { run: updated, ended: true };
+      return { run: updated, ended: true, ...written };
     });
+  }
+
+  async queuedMessages(conversationId: string): Promise<QueuedMessage[]> {
+    const active = await this.getActiveRun(conversationId);
+    if (!active) return [];
+    const rows = await this.pool.query<JournalRow>(`
+      SELECT * FROM hatch_conversation_journal
+      WHERE run_id = $1 AND event_type = 'message.created' AND payload->>'steered' = 'true'
+      ORDER BY cursor ASC OFFSET $2
+    `, [active.id, active.consumedCount]);
+    return rows.rows.map((row) => ledgerEntry(eventFromRow(row))!)
+      .map((entry) => ({ clientMessageId: entry.clientMessageId, runId: active.id, message: entry.message!, acceptedAt: entry.acceptedAt }));
   }
 
   async appendEvent(input: Omit<ConversationJournalEvent, "cursor" | "createdAt"> & { createdAt?: string }): Promise<ConversationJournalEvent> {
@@ -2026,21 +2066,25 @@ function cloneConversation(conversation: ConversationRecord): ConversationRecord
  * claims its joined messages first, so the user sees them and the next Run reads them; a Run that completes
  * while one is unclaimed keeps only its reply and stays open, and the supervisor runs it again from that message.
  */
-export function endingWrites(run: ConversationRunRecord, ending: RunEnding, at: string): {
+export function endingWrites(run: ConversationRunRecord, ending: RunEnding, at: string, replyId: string): {
   claims: boolean; ends: boolean; transcript: StoreEvent[]; journal: Array<Pick<ConversationJournalEvent, "type" | "payload">>;
 } {
   const unanswered = ending.status === "completed" && run.consumedCount < run.steeredCount;
   const scope = { conversation_id: run.conversationId, run_id: run.id, timestamp: at };
   const reply: StoreEvent[] = ending.status === "completed"
-    ? [{ type: "conversation.model_message", ...scope, message: ending.reply.message, finish_reason: ending.reply.finishReason, visible_parts: ending.reply.visibleParts }]
+    ? [{ type: "conversation.model_message", ...scope, message_id: replyId, message: ending.reply.message, finish_reason: ending.reply.finishReason, visible_parts: ending.reply.visibleParts }]
     : [];
   const repliedJournal: Array<Pick<ConversationJournalEvent, "type" | "payload">> = ending.status === "completed"
-    ? [{ type: "message.created", payload: { role: "assistant", ...(ending.reply.finishReason === "content_filter" ? { finish_reason: "content_filter" } : {}) } }]
+    ? [{ type: "message.created", payload: { role: "assistant", message_id: replyId, ...(ending.reply.finishReason === "content_filter" ? { finish_reason: "content_filter" } : {}) } }]
     : [];
   if (unanswered) return { claims: false, ends: false, transcript: reply, journal: repliedJournal };
   // The Run's status is the journal's `run.state`, written with the row; the transcript keeps only what the model reads.
   return { claims: ending.status !== "completed", ends: true, transcript: reply, journal: repliedJournal };
 }
+
+/** A transcript event that is a reply of this Run: an assistant message the model's turn ended with. */
+const isReplyOf = (runId: string) => (event: StoreEvent): boolean =>
+  event.type === "conversation.model_message" && event.run_id === runId && event.message.role === "assistant" && event.finish_reason !== undefined;
 
 /** Throws RunFenced unless `hold` names the executor that has this live Run. */
 function assertHeld(run: Pick<ConversationRunRecord, "id" | "executorId" | "status"> | undefined, hold: RunHold | undefined): void {

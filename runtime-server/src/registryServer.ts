@@ -1,3 +1,4 @@
+import { HistoryCursorError } from "./conversationHistory.js";
 import { FactoryAgentsService } from "./factoryAgents/service.js";
 import { PostgresAgentDefinitionRepository } from "./factoryAgents/definitions.js";
 import { PostgresWorkbenchBackend } from "./factoryAgents/store.js";
@@ -2261,7 +2262,15 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
   if (url.pathname === "/v1/creator/assistant" && request.method === "GET") {
     const timezone = url.searchParams.get("tz");
     if (timezone) await context.reach.setTimezone(account.id, timezone);
-    sendJson(response, 200, { ...await assistant.view(account.id), channels: await channelsView() }, { "cache-control": "no-store" });
+    // The latest messages, or with `before_cursor` the page before them: the page asks for earlier ones as the Expert scrolls back.
+    const limit = Number(url.searchParams.get("limit"));
+    let view: Awaited<ReturnType<typeof assistant.view>>;
+    try { view = await assistant.view(account.id, { limit: Number.isInteger(limit) && limit > 0 ? Math.min(limit, 200) : 200, beforeCursor: url.searchParams.get("before_cursor") ?? undefined }); }
+    catch (error) {
+      if (error instanceof HistoryCursorError) { sendJson(response, 400, { error: { code: "history_cursor_invalid", message: "Invalid conversation history cursor." } }); return; }
+      throw error;
+    }
+    sendJson(response, 200, { ...view, channels: await channelsView() }, { "cache-control": "no-store" });
     return;
   }
   if (url.pathname === "/v1/creator/assistant/messages" && request.method === "POST") {

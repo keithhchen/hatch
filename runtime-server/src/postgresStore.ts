@@ -8,6 +8,7 @@ import { historyBoundary, historyCursor, historyLimit, historyMessages,
 import {
   assertCanonicalPersistedToolNames,
   normalizePersistedStoreEvent,
+  persistedMessageId,
   RuntimeStore,
   type SubmissionReceipt,
   type StoreEvent,
@@ -755,8 +756,8 @@ export class PostgresStore extends RuntimeStore {
           throw new Error(`Unsupported visible conversation role: ${role}`);
         }
         const message: VisibleConversationMessage = {
-          // A user message is known by the key its client sent it under.
-          ...(event.type === "conversation.model_message" && role === "user" && event.client_message_id ? { id: event.client_message_id } : {}),
+          // A message is known by the id it was stored under: its client's key, or `<run_id>:<n>` for a reply.
+          ...(persistedMessageId(event, role) ? { id: persistedMessageId(event, role) } : {}),
           run_id: event.run_id,
           role,
           content: event.type === "message.created"

@@ -21,6 +21,8 @@ function studioEvents(event: Hubbed, endedRuns: Set<string>): ConversationEvent[
   };
   switch (event.type) {
     case "message.accepted": return [{ type: "message" }, { type: "state" }];
+    // A reply is written by the Run's ending, which has committed by the time this is heard.
+    case "assistant.message": return [{ type: "message_end" }];
     case "assistant.delta": {
       const delta = event.delta as { kind?: string; content?: string; delta?: string; contentIndex?: number } | undefined;
       if (delta?.kind === "text" && delta.content) return [{ type: "delta", text: delta.content }];
@@ -39,9 +41,7 @@ function studioEvents(event: Hubbed, endedRuns: Set<string>): ConversationEvent[
     case "turn.state": {
       const status = String(event.status);
       if (status === "compacting") return [{ type: "compacting" }, { type: "state" }];
-      // A Run's reply is written by its ending, which has committed by the time this is heard: its `message_end` comes with the end.
-      if (status === "completed") { const ended = end(status); return ended.length ? [{ type: "message_end" }, ...ended] : []; }
-      if (status === "cancelled" || status === "interrupted") return end(status);
+      if (status === "completed" || status === "cancelled" || status === "interrupted") return end(status);
       return status === "failed" ? [] : [{ type: "state" }];
     }
     case "turn.failed": {

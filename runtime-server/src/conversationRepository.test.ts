@@ -414,6 +414,7 @@ class ConversationPostgresFake implements PostgresQueryExecutor {
       const row = [...this.events].filter((event) => event.conversation_id === values?.[0]).at(-1);
       return this.rows(row ? [{ cursor: row.cursor }] : []);
     }
+    if (/SELECT count\(\*\) AS n FROM hatch_conversation_events/i.test(text)) return this.rows([{ n: "0" }]);
     throw new Error(`Unexpected query: ${text}`);
   }
 

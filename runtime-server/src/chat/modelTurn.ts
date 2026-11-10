@@ -454,14 +454,8 @@ async function runModelTurnInternal(
         if (latest && latest.consumedCount < latest.steeredCount && !final.blocked) {
           // A message joined after the last claim: keep this answer, leave the Run open, and
           // the supervisor runs it again from that message.
-          await store.append({
-            type: "conversation.model_message",
-            conversation_id: input.conversation_id,
-            run_id: input.run_id,
-            message: { role: "assistant", content: approvedAssistantText },
-            finish_reason: "stop",
-            visible_parts: visibleParts
-          });
+          // The ending keeps the reply and, because a message is unclaimed, leaves the Run open.
+          await state.complete({ message: { role: "assistant", content: approvedAssistantText }, finishReason: "stop", visibleParts });
           return;
         }
         await commitTerminal(

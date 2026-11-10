@@ -41,6 +41,8 @@ export function StudioAssistant({ request, t }) {
   const chatT = useCallback((key, values) => webChatT(locale, key, values), [locale]);
   const errorText = useCallback(cause => webChatErrorText(cause, locale), [locale]);
   const [pendingLines, setPendingLines] = useState([]);
+  // The server sends the newest page; older ones are asked for, one page before what is shown.
+  const [earlier, setEarlier] = useState({ messages: [], cursor: undefined });
   const [error, setError] = useState("");
   const [larkForm, setLarkForm] = useState(false);
   const dockRef = useRef(null);
@@ -106,6 +108,9 @@ export function StudioAssistant({ request, t }) {
       keys.current.sent();
     } catch (cause) { setError(friendlyError(cause, t)); setDraft(content); setFiles(staged); setPendingLines(lines => lines.filter(line => line.id !== key)); }
   };
+  const loadEarlier = () => request(`${ROOT}?before_cursor=${encodeURIComponent(shownCursor)}`)
+    .then(page => setEarlier(current => ({ messages: [...page.messages, ...current.messages], cursor: page.before_cursor ?? null })))
+    .catch(cause => setError(friendlyError(cause, t)));
   const act = async (task, action) => {
     try { await send(`${ROOT}/tasks/${task.id}/${action}`); await refresh(); }
     catch (cause) { setError(friendlyError(cause, t)); }
@@ -135,12 +140,14 @@ export function StudioAssistant({ request, t }) {
 
   if (!view && !error) return <LoadingState t={t} />;
   const needs = (view?.tasks ?? []).filter(task => task.status === "needs_you");
-  const lines = view?.messages ?? [];
+  const shownCursor = earlier.cursor === undefined ? view?.before_cursor : earlier.cursor ?? undefined;
+  const lines = [...earlier.messages, ...(view?.messages ?? [])];
   const ownApps = (view?.channels ?? []).filter(channel => channel.own_app && CHANNEL_NAMES[channel.kind] && (channel.linked || channel.available));
   return <div className="sxa">
     <section className="sxa-chat web-chat web-chat--embedded" aria-label={t("sxNavAssistant")}>
       <h1 className="sxa-title">{t("sxNavAssistant")}</h1>
       <div className="sxa-log" aria-live="polite">
+        {shownCursor ? <Button variant="secondary" type="button" onClick={loadEarlier}>{t("sxaEarlier")}</Button> : null}
         {!lines.length && !pendingLines.length && !live ? <p className="sxa-empty">{t("sxaEmpty")}</p> : null}
         {lines.map((line, index) => line.role === "assistant"
           ? <Reply key={`${line.at}-${index}`} timeline={ChatTimeline.fromHistory({ content: line.text, run_id: line.id.split(":")[0], ...line.steps })} t={chatT} errorText={errorText} />

@@ -12,6 +12,8 @@ export type PublicMessage = {
   role: "user" | "assistant";
   text: string;
   created_at: string;
+  /** "queued": the message joined a running turn and is not yet read by the model. Absent once it is. */
+  state?: "queued";
   attachments?: Array<{ type: "image" | "file" | "audio"; name: string; asset_id?: string; bytes?: number }>;
 };
 

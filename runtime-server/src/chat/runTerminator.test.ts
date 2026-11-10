@@ -76,12 +76,12 @@ for (const backend of ["memory", "postgres"] as const) {
     assert.deepEqual((await store.readConversation(id)).map((row) => row.content), ["question 0", "the answer"]);
     const journal = (await repository.snapshot(id)).events;
     assert.deepEqual(journal.filter((event) => event.runId === run.id).map((event) => event.type), ["run.created", "message.created", "message.created", "run.state"]);
-    assert.deepEqual(events.map((event) => [event.type, event.status]), [["turn.state", "completed"]]);
+    assert.deepEqual(events.map((event) => [event.type, event.message_id ?? event.status]), [["assistant.message", "run-0:1"], ["turn.state", "completed"]]);
     // A second ending, from anywhere, neither writes a second reply nor tells anyone again.
     const again = await terminator.end(run.id, reply("a second answer"));
     assert.equal(again.ended, false);
     assert.deepEqual((await store.readConversation(id)).map((row) => row.content), ["question 0", "the answer"]);
-    assert.equal(events.length, 1);
+    assert.equal(events.length, 2);
   }));
 
   test(`${backend}: a failed Run carries one structured failure in its record, its journal and what observers hear`, options, async () => withBackend(backend, async ({ repository }) => {
@@ -107,7 +107,7 @@ for (const backend of ["memory", "postgres"] as const) {
     assert.equal((await repository.getRun(id, run.id))!.status, "queued");
     assert.equal((await repository.getRun(id, run.id))!.consumedCount, 0);
     assert.deepEqual((await store.readConversation(id)).map((row) => row.content), ["question 0", "first answer"]);
-    assert.equal(events.length, 0);
+    assert.deepEqual(events.map((event) => event.type), ["assistant.message"], "the kept reply is told; the Run is not over");
   }));
 
   test(`${backend}: a stop claims what joined the Run, and a stopped executor's ending is refused`, options, async () => withBackend(backend, async ({ repository, store }) => {

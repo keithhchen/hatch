@@ -90,7 +90,8 @@ export interface AssetRepository {
   get(scope: AssetScope, id: string): Promise<Asset | undefined>;
   attach(scope: AssetScope, id: string, messageId: string): Promise<Asset>;
   release(scope: AssetScope, id: string, messageId: string): Promise<void>;
-  listAttached(scope: AssetScope): Promise<AttachedAsset[]>;
+  /** What messages carried in this scope; with `messageIds`, only what those messages carried. */
+  listAttached(scope: AssetScope, messageIds?: readonly string[]): Promise<AttachedAsset[]>;
 }
 
 /** An asset as one message carries it. The same asset appears once for every message it joined. */

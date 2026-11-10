@@ -13,7 +13,8 @@ import { NO_SKILLS, failRun, runModelTurn, type TurnBinding } from "../chat/mode
 import { ChatError, accountPrincipal } from "../chat/principal.js";
 import { ServiceChatGateway, type PrincipalBinder } from "../chat/serviceGateway.js";
 import type { ScopeResolver, TurnRunner } from "../chat/turnExecutor.js";
-import { ConversationError, type ConversationStatus, type PublicMessage, type SendInput, type Sent } from "../conversations/conversation.js";
+import { ConversationError, DEFAULT_PAGE, MAX_PAGE, type ConversationStatus, type PublicMessage, type SendInput, type Sent } from "../conversations/conversation.js";
+import { ChatConversationReadModel, type ConversationReadModel } from "../chat/conversationReadModel.js";
 import type { EventLog } from "../conversations/eventLog.js";
 import { PassThroughOutputGuard, type OutputGuard } from "../outputGuard.js";
 import { ServerToolExecutor } from "../serverTools.js";
@@ -90,9 +91,11 @@ export class AssistantChat implements AssistantHost {
   readonly runtime: ChatRuntime<AssistantScope>;
   readonly gateway: ChatGateway;
   private readonly conversations = new Map<string, Promise<ConversationRecord>>();
+  private readonly readModel: ConversationReadModel;
   private prompt?: Promise<string>;
 
   constructor(private readonly deps: AssistantChatDeps) {
+    this.readModel = new ChatConversationReadModel({ history: deps.store, repository: deps.repository });
     const projection = new StudioEventProjection(deps.eventLog);
     deps.store.projection = projection;
     const scopes: ScopeResolver<AssistantScope> = { resolve: async conversation => scopeOfConversation(conversation) };
@@ -224,9 +227,25 @@ export class AssistantChat implements AssistantHost {
     return last.status === "failed" ? { state: "failed", error: last.failure ?? failureOfReason(undefined) } : { state: "idle" };
   }
 
-  /** What the Expert and the Assistant said, oldest first, as every Studio client reads a conversation. */
-  async lines(accountId: string): Promise<PublicMessage[]> {
-    return (await this.shown(accountId)).map(({ steps: _steps, ...line }) => line);
+  /**
+   * What the Expert and the Assistant said, oldest first, as every Studio client reads a conversation: without `after`, the
+   * latest `limit`; with it, the first `limit` after that message. Only as much of the conversation is read as that needs.
+   */
+  async lines(accountId: string, after?: string, limit = DEFAULT_PAGE): Promise<PublicMessage[]> {
+    const size = Math.min(Math.max(Math.trunc(limit) || DEFAULT_PAGE, 1), MAX_PAGE);
+    let lines: PublicMessage[] = [];
+    let before: string | undefined;
+    for (;;) {
+      const page = await this.shown(accountId, { limit: 200, beforeCursor: before });
+      lines = [...page.messages.map(({ steps: _steps, ...line }) => line), ...lines];
+      const found = after === undefined ? lines.length >= size : lines.some(line => line.id === after);
+      if (found || !page.has_more) break;
+      before = page.before_cursor;
+    }
+    if (after === undefined) return lines.slice(-size);
+    const index = lines.findIndex(line => line.id === after);
+    if (index < 0) throw new ConversationError(400, "unknown_cursor", `No message with id ${after} in this conversation.`);
+    return lines.slice(index + 1, index + 1 + size);
   }
 
   /**
@@ -234,30 +253,30 @@ export class AssistantChat implements AssistantHost {
    * page needs to show a reply as it happened. A step is what Chat shows of a tool call, never its arguments or result.
    * The Assistant's own messages to itself and its silences are not part of the chat.
    */
-  async shown(accountId: string): Promise<Array<PublicMessage & { steps?: ReplySteps }>> {
+  async shown(accountId: string, options: { limit?: number; beforeCursor?: string } = {}): Promise<{ messages: Array<PublicMessage & { steps?: ReplySteps }>; has_more: boolean; before_cursor?: string }> {
     const conversation = await this.conversation(accountId);
-    const [history, attached] = await Promise.all([this.deps.store.readVisibleConversation(conversation.id), this.deps.chatAssets.attachments(conversation)]);
+    const { messages: history, ...paging } = await this.readModel.page(conversation.id, options);
+    // Only what this page's messages carried: a long conversation costs what one page does.
+    const attached = await this.deps.chatAssets.attachments(conversation, history.flatMap(message => message.role === "user" ? [attachmentMessageId(message.id)] : []));
     const byMessage = new Map<string, Array<{ type: "image" | "file" | "audio"; name: string; asset_id: string; bytes: number }>>();
     for (const { asset, messageId } of attached) byMessage.set(messageId, [...byMessage.get(messageId) ?? [], { type: asset.record.kind, name: asset.record.name, asset_id: asset.id, bytes: asset.record.bytes }]);
-    const counts = new Map<string, number>();
     const lastOfRun = new Map<string, (typeof history)[number]>();
     for (const message of history) if (message.role === "assistant") lastOfRun.set(message.run_id, message);
-    return history.flatMap((message): Array<PublicMessage & { steps?: ReplySteps }> => {
+    const messages = history.flatMap((message): Array<PublicMessage & { steps?: ReplySteps }> => {
       if (message.role === "user") {
-        if (!message.id || isSystemMessageId(message.id)) return [];
+        if (isSystemMessageId(message.id)) return [];
         const attachments = byMessage.get(attachmentMessageId(message.id));
         if (!message.content.trim() && !attachments?.length) return [];
-        return [{ id: message.id, role: "user", text: message.content, created_at: message.timestamp, ...(attachments?.length ? { attachments } : {}) }];
+        return [{ id: message.id, role: "user", text: message.content, created_at: message.accepted_at, ...(message.state ? { state: message.state } : {}), ...(attachments?.length ? { attachments } : {}) }];
       }
       // Chat keeps a Run's steps on every assistant message the Run passed through; the reply shows them once, on the last.
       const tools = lastOfRun.get(message.run_id) === message ? message.tool_calls ?? [] : [];
       const reasoned = Boolean(message.parts?.some(part => part.type === "thinking"));
       if (!message.content.trim() && !tools.length) return [];
-      const index = (counts.get(message.run_id) ?? 0) + 1;
-      counts.set(message.run_id, index);
       const steps = tools.length || reasoned ? { parts: message.parts, tool_calls: tools.map(({ tool_call_id, name, status, activity_message }) => ({ tool_call_id, name, status, activity_message })) } : undefined;
-      return [{ id: `${message.run_id}:${index}`, role: "assistant", text: message.content, created_at: message.timestamp, ...(steps ? { steps } : {}) }];
+      return [{ id: message.id, role: "assistant", text: message.content, created_at: message.accepted_at, ...(steps ? { steps } : {}) }];
     });
+    return { messages, ...paging };
   }
 
   async send(accountId: string, input: SendInput): Promise<Sent> {
