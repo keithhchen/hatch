@@ -24,5 +24,5 @@ Checklist: `docs/acceptance-studio-telegram.md`. Code: `chat-studio-surfaces` at
 
 ## Found and sent for a fix
 
-- After several Runs started by the system (`sys:` messages from the interview), the page kept a "typing… Connected" row although nothing was running. A refresh cleared it. A fix is in progress.
+- After several Runs started by the system (`sys:` messages from the interview), the page kept a "typing… Connected" row although nothing was running. A refresh cleared it. **Fixed** (merges of 724483fe and 88ec4630): a refresh that adopted the real id of a Run the page had started wrote back its rows under the provisional id, which left an orphan live row. Rechecked on the same stack with two more interview answers, each followed by fast handover and system Runs: no typing row remained, and the server reported `running: false`.
 - The interview repeated the same opening line ("我们还剩三件事…") after each system Run. This is Assistant behaviour, not a data fault. It is noted here and not yet changed.
