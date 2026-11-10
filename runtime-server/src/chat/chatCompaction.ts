@@ -110,7 +110,7 @@ export class ChatCompaction implements RunCompactions {
       } finally {
         // Every `started` ends: `completed` by the commit, otherwise `aborted`.
         if (!checkpoint) await this.announce({ conversationId: conversation.id, runId: run.id, compactionId, state: "aborted" });
-        await state.start().catch(() => undefined);
+        await state.start();
       }
     };
     return {
@@ -135,7 +135,8 @@ export class ChatCompaction implements RunCompactions {
     const stopped = new AbortController();
     let started = false;
     let committed = false;
-    const poll = setInterval(() => void repository.compactionStopped(compactionId).then((stop) => { if (stop) stopped.abort(new CompactionAborted()); }, () => undefined), this.deps.stopPollMs ?? 300);
+    // An interval has no caller to throw to: a failed poll is logged, and the next one asks again.
+    const poll = setInterval(() => void repository.compactionStopped(compactionId).then((stop) => { if (stop) stopped.abort(new CompactionAborted()); }, (error) => console.error(JSON.stringify({ event: "compaction_poll_failed", compaction_id: compactionId, error: String(error) }))), this.deps.stopPollMs ?? 300);
     try {
       const now = (this.deps.now ?? Date.now)();
       const messages = await store.readConversation(run.conversationId);
@@ -187,12 +188,13 @@ export class ChatCompaction implements RunCompactions {
   /** Live to observers and listeners; `started` and `aborted` are also durable (`completed` is journaled by the commit), so a channel that was down still sees the id. */
   private async announce(notice: CompactionNotice, detail: { phase?: CompactionPhase } = {}): Promise<void> {
     if (notice.state !== "completed") {
-      await this.deps.repository.appendEvent({ conversationId: notice.conversationId, ...(notice.runId ? { runId: notice.runId } : {}), type: `compaction.${notice.state}`, payload: { compaction_id: notice.compactionId, ...detail } }).catch(() => undefined);
+      await this.deps.repository.appendEvent({ conversationId: notice.conversationId, ...(notice.runId ? { runId: notice.runId } : {}), type: `compaction.${notice.state}`, payload: { compaction_id: notice.compactionId, ...detail } });
     }
     this.deps.hub.publish(notice.conversationId, {
       type: `compaction.${notice.state}`, compaction_id: notice.compactionId, ...(notice.runId ? { run_id: notice.runId } : {}),
       ...(notice.degraded ? { degraded: true, dropped_messages: notice.droppedMessages } : {})
     });
-    for (const listener of [...this.listeners]) { try { listener(notice); } catch { /* a listener never stops a compaction */ } }
+    // A listener never stops a compaction; its failure is logged, not hidden.
+    for (const listener of [...this.listeners]) { try { listener(notice); } catch (error) { console.error(JSON.stringify({ event: "compaction_listener_failed", compaction_id: notice.compactionId, error: String(error) })); } }
   }
 }
