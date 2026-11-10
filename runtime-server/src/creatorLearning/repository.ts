@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { Pool, type QueryResultRow } from "pg";
+import { createPool } from "../postgresPool.js";
 import type { PostgresQueryExecutor } from "../postgresStore.js";
 import { requireQuestionBatchId } from "./questionBatch.js";
 import type { FactoryRunState, FactoryStage, FactoryStartInput } from "./types.js";
@@ -681,7 +682,7 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
   constructor(pool: PostgresQueryExecutor);
   constructor(input: string | PostgresCreatorFactoryRepositoryOptions | PostgresQueryExecutor = {}) {
     if (typeof input === "string") {
-      this.pool = new Pool({ connectionString: input });
+      this.pool = createPool({ connectionString: input });
       this.ownsPool = true;
       return;
     }
@@ -703,7 +704,7 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
       ?? environment.HATCH_REGISTRY_DATABASE_URL
       ?? environment.DATABASE_URL;
     if (!connectionString) throw new Error("Postgres Creator Factory repository requires a database connection string");
-    this.pool = new Pool({
+    this.pool = createPool({
       connectionString,
       ...(input.maxConnections === undefined ? {} : { max: input.maxConnections })
     });

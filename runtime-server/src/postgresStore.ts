@@ -1,4 +1,5 @@
 import { Pool, type QueryResultRow } from "pg";
+import { createPool } from "./postgresPool.js";
 import { PostgresConversationRepository, ConversationRepositoryError, assertConversationBinding,
   submissionEvents, type AcceptSubmissionInput, type AcceptedSubmission, type AlsoCommit } from "./conversationRepository.js";
 import type { ConversationMessage, PersistedContextAttachment } from "./protocol.js";
@@ -233,7 +234,7 @@ export class PostgresStore extends RuntimeStore {
       this.maxGlobalBytes = 1024 * 1024 * 1024;
       this.maxScopeEvents = 100_000;
       this.maxScopeBytes = 256 * 1024 * 1024;
-      this.pool = new Pool({
+      this.pool = createPool({
         connectionString: input,
         connectionTimeoutMillis: 5_000,
         query_timeout: 5_000,
@@ -324,7 +325,7 @@ export class PostgresStore extends RuntimeStore {
     if (!connectionString) {
       throw new Error("Postgres conversation store requires a database connection string");
     }
-    this.pool = new Pool({
+    this.pool = createPool({
       connectionString,
       ...(input.maxConnections === undefined ? {} : { max: input.maxConnections }),
       connectionTimeoutMillis: boundedDatabaseSetting(

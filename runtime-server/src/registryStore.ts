@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { lstat, mkdir, open, readFile, writeFile, rename, rm, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { Pool, type QueryConfig } from "pg";
+import { createPool } from "./postgresPool.js";
 import {
   extractAgentCorpusBundle,
   activateCurrentCorpus,
@@ -147,7 +148,7 @@ export class RegistryStoreTs {
     this.publishTimeoutMs = options.publishTimeoutMs;
     if (options.pool && options.databaseUrl) throw new Error("RegistryStoreTs.open cannot accept both pool and databaseUrl");
     if (options.pool) this.pool = options.pool;
-    else if (options.databaseUrl) this.pool = new Pool({
+    else if (options.databaseUrl) this.pool = createPool({
       connectionString: options.databaseUrl,
       max: 10,
       connectionTimeoutMillis: options.databaseTimeoutMs,

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { Pool } from "pg";
+import { createPool } from "./postgresPool.js";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { NodeScope } from "./node.js";
 import type { PostgresQueryExecutor } from "./postgresStore.js";
@@ -134,7 +135,7 @@ export class PostgresNodeStore implements NodeSessionStore, NodeExecutionStore {
   constructor(pool: PostgresQueryExecutor);
   constructor(input: string | PostgresNodeStoreOptions | PostgresQueryExecutor = {}) {
     if (typeof input === "string") {
-      this.pool = new Pool({ connectionString: input });
+      this.pool = createPool({ connectionString: input });
       this.ownsPool = true;
       return;
     }
@@ -156,7 +157,7 @@ export class PostgresNodeStore implements NodeSessionStore, NodeExecutionStore {
       ?? environment.HATCH_REGISTRY_DATABASE_URL
       ?? environment.DATABASE_URL;
     if (!connectionString) throw new Error("Postgres Node store requires a database connection string");
-    this.pool = new Pool({
+    this.pool = createPool({
       connectionString,
       ...(input.maxConnections === undefined ? {} : { max: input.maxConnections })
     });

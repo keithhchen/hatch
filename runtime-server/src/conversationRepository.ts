@@ -1,5 +1,6 @@
 import path from "node:path";
 import { Pool, type QueryResultRow } from "pg";
+import { createPool } from "./postgresPool.js";
 import type { PostgresQueryExecutor } from "./postgresStore.js";
 import type { PostgresStore, PostgresTransactionClient } from "./postgresStore.js";
 import { LocalRuntimeAuthority, localRuntimeAuthority, type RunStatus, type StoreEvent, type SubmissionReceipt } from "./store.js";
@@ -1520,7 +1521,7 @@ export class PostgresConversationRepository implements ConversationRepository {
   constructor(pool: PostgresQueryExecutor);
   constructor(input: string | PostgresConversationRepositoryOptions | PostgresQueryExecutor = {}) {
     if (typeof input === "string") {
-      this.pool = new Pool({ connectionString: input });
+      this.pool = createPool({ connectionString: input });
       this.ownsPool = true;
       return;
     }
@@ -1541,7 +1542,7 @@ export class PostgresConversationRepository implements ConversationRepository {
       ?? environment.HATCH_REGISTRY_DATABASE_URL
       ?? environment.DATABASE_URL;
     if (!connectionString) throw new Error("Postgres conversation repository requires a database connection string");
-    this.pool = new Pool({
+    this.pool = createPool({
       connectionString,
       ...(input.maxConnections === undefined ? {} : { max: input.maxConnections })
     });
