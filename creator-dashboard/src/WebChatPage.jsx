@@ -7,7 +7,7 @@ import { WebBrand } from "./WebBrand.jsx";
 import { WebChatEgg, WebChatGate } from "./webChatGate.jsx";
 import { BuyerAccountMenu } from "./BuyerAccountControls.jsx";
 import { useLocale, documentLanguage } from "./locale.jsx";
-import { BrowserImageAttachments, UnavailableToolExecutor, WebConversationTransport } from "./webChatClient.js";
+import { BrowserImageAttachments, UnavailableToolExecutor, WebConversationTransport, browserDictation } from "./webChatClient.js";
 import { webChatErrorText, webChatT } from "./webChatI18n.js";
 import { WebChatRoute } from "./webChatRoute.js";
 import "./webChat.css";
@@ -74,7 +74,7 @@ function useFocusTrap(open, containerRef, selector, onEscape, { trapOutside = fa
 
 const isMobileLayout = () => window.matchMedia("(max-width: 760px)").matches;
 
-function WebChatWorkspace({ controller, access, productId, navigate, profile, onSignOut, t, locale }) {
+function WebChatWorkspace({ controller, dictate, access, productId, navigate, profile, onSignOut, t, locale }) {
   const state = useChatState(controller);
   const { conversations, conversationCursor, conversationId, error } = state;
   const [briefOpen, setBriefOpen] = useState(false);
@@ -186,7 +186,7 @@ function WebChatWorkspace({ controller, access, productId, navigate, profile, on
     </aside>
     <ChatView controller={controller} identity={identity} agentName={agentName} t={t} errorText={errorText} attachments={attachments}
       header={header} loadingIndicator={<WebChatEgg size={34} className="web-chat-egg--bob" />} onNewConversation={newConversation}
-      activityKinds={WEB_ACTIVITY_KINDS} inert={briefOpen} />
+      activityKinds={WEB_ACTIVITY_KINDS} dictate={dictate} inert={briefOpen} />
     {briefOpen ? <div className="web-chat__brief-backdrop"><form ref={briefDialogRef} className="web-chat__brief" role="dialog" aria-modal="true" aria-labelledby="web-chat-brief-title" onSubmit={submitBrief}>
       <button type="button" className="web-chat__icon-button web-chat__brief-close" aria-label={t("close")} onClick={closeBrief}><X aria-hidden="true" /></button>
       <div className="web-chat__brief-head"><Avatar src={identity.creatorAvatarUrl} name={identity.creatorName} size="medium" /><span className="web-pill">{agentName}</span></div>
@@ -244,7 +244,7 @@ export default function WebChatPage({ productId, conversationId: routedConversat
       });
       controller.open(routedConversationRef.current ?? "");
       await controller.loadLibrary();
-      if (live) setWorkspace({ controller, access });
+      if (live) setWorkspace({ controller, access, dictate: browserDictation(request) });
     }).catch(cause => { if (live) { setError(cause); setStatus("unableToOpenChat"); } });
     return () => {
       live = false;

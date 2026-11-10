@@ -29,7 +29,7 @@ import { LegacyAssistantHistory } from "./history.js";
 import { ExpertMaterials } from "./materials.js";
 import type { AccountReach } from "./reach.js";
 import { MemoryAssistantState } from "./state.js";
-import { studioTranscripts, assistantFeedKey } from "./studioFeed.js";
+import { StudioEventProjection, studioTranscripts, assistantConversationId, assistantFeedKey } from "./studioFeed.js";
 import { studioToolDefinitions, studioTools } from "./studioTools.js";
 import { AssistantTarget } from "./assistantTarget.js";
 import type { AssistantChannels, Inbound } from "../channels/ports.js";
@@ -224,6 +224,27 @@ test("The Assistant's tools are its own: declared once, absent from a Product's 
     await env.chat.say(ACCOUNT, { id: "from-dm", parts: [{ type: "text", text: "dm" }], client: { client: "dm" } });
     await env.idle();
     assert.equal((await env.chat.status(ACCOUNT)).state, "failed", "tool_unsupported_on_client ended the Run");
+  } finally { await env.close(); }
+});
+
+test("Studio observers see a step as Chat's own words for it, never its arguments or result", async () => {
+  const env = await setup({ model: () => ({ text: "好" }) });
+  try {
+    const projection = new StudioEventProjection(env.log);
+    const call = { run_id: "run-1", tool_call_id: "call-1", name: "list_tasks", activity_message: "看看有什么事项", arguments: { secret: "internal" } };
+    projection.project(assistantConversationId(ACCOUNT), { type: "tool_call.delta", ...call, status: "requested" });
+    projection.project(assistantConversationId(ACCOUNT), { type: "tool_call.delta", ...call, status: "completed", result: { secret: "internal" } });
+    await waitFor(async () => (await env.log.after(assistantFeedKey(ACCOUNT), "0", 5000)).length === 2);
+    for (const delta of [{ kind: "thinking_start", contentIndex: 0 }, { kind: "thinking_delta", contentIndex: 0, delta: "想" }, { kind: "thinking_end", contentIndex: 0, content: "想" }]) {
+      projection.project(assistantConversationId(ACCOUNT), { type: "assistant.delta", run_id: "run-1", delta });
+    }
+    await waitFor(async () => (await env.log.after(assistantFeedKey(ACCOUNT), "0", 5000)).length === 5);
+    const events = (await env.log.after(assistantFeedKey(ACCOUNT), "0", 5000)).map(entry => entry.event);
+    assert.deepEqual(events.slice(2), [{ type: "thinking", contentIndex: 0 }, { type: "thinking_delta", contentIndex: 0, delta: "想" }, { type: "thinking_end", contentIndex: 0, content: "想" }], "reasoning is carried, in order");
+    assert.deepEqual(events.slice(0, 2), [
+      { type: "tool", name: "list_tasks", id: "call-1", activity: "看看有什么事项" },
+      { type: "tool_end", name: "list_tasks", id: "call-1", activity: "看看有什么事项", isError: false },
+    ]);
   } finally { await env.close(); }
 });
 

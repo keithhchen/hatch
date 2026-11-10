@@ -19,6 +19,11 @@ import { toolRegistry } from "./tools.js";
 import { RoutedChatGateway } from "./channels/routedGateway.js";
 import { follow } from "./conversations/follow.js";
 import { failures } from "./errors/failures.js";
+import { UpstreamError } from "./errors/upstream.js";
+import { Dictation } from "./assets/dictation.js";
+import { FfmpegAudioNormalizer, transcriberFromEnvironment } from "./assets/adapters.js";
+import { AssetError } from "./assets/domain.js";
+import { VoiceProcessor } from "./assets/processors.js";
 import { PostgresFailureLedger } from "./errors/postgresFailureLedger.js";
 import { ConversationRoutes, type ConversationRouteDeps } from "./conversations/routes.js";
 import { EventLogJournal } from "./conversations/journal.js";
@@ -128,6 +133,8 @@ type RegistryContext = {
   assistant?: AssistantService;
   /** The Assistant's conversation, on Chat's runtime. */
   assistantChat?: AssistantChat;
+  /** Speech to text for the composers of Studio and web chat. */
+  dictation: Dictation;
   ingest?: IngestService;
   channels?: ChannelService;
   credentialSeal?: CredentialSeal;
@@ -261,7 +268,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const legacyHmacEnabled = environment.HATCH_ENABLE_LEGACY_HMAC_AUTH?.trim().toLowerCase() === "true";
   const authSecret = legacyHmacEnabled ? environment.HATCH_AUTH_SIGNING_SECRET?.trim() || "" : "";
   const httpLimits = httpRequestLimitOptionsFromEnvironment(environment);
-  const registryContext: RegistryContext = { store, accounts, accountAvatars, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, productLive, nodeObjectStore, releaseStore, authSecret, conversationPorts, studioAssets: registryPool ? await openProductAssets(registryPool, productObjectStore, environment) : undefined };
+  const registryContext: RegistryContext = { dictation: new Dictation(new VoiceProcessor(new FfmpegAudioNormalizer(), transcriberFromEnvironment(environment))), store, accounts, accountAvatars, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, productLive, nodeObjectStore, releaseStore, authSecret, conversationPorts, studioAssets: registryPool ? await openProductAssets(registryPool, productObjectStore, environment) : undefined };
   const studio = new Studio(studioDeps(registryContext));
   const studioSockets = new StudioSockets({ studio, identify: token => identifyToken(registryContext, token) });
   let assistantTick: NodeJS.Timeout | undefined;
@@ -555,6 +562,8 @@ async function route(
 
   // Conversation API: Product workers and the Assistant, one message shape.
   if (await new ConversationRoutes(conversationDeps(response, context)).handle(request, response, url)) return;
+
+  if (url.pathname === "/v1/transcriptions" && request.method === "POST") { await transcribe(request, response, context); return; }
 
   if (url.pathname.startsWith("/v1/channels/") || url.pathname.startsWith("/v1/creator/assistant") || url.pathname.startsWith("/v1/creator/connections")) {
     await assistantRoute(request, response, url, context);
@@ -1496,6 +1505,25 @@ async function resolvePublishedCreatorToolConnection(
   });
 }
 
+/** What was said in a recording, for the text box: the voice-message pipeline's transcription, with the same size and length caps. */
+async function transcribe(request: http.IncomingMessage, response: http.ServerResponse, context: RegistryContext): Promise<void> {
+  const account = await authenticate(request, response, context);
+  if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
+  await answerTranscription(request, response, context.dictation, account.id);
+}
+
+export async function answerTranscription(request: http.IncomingMessage, response: http.ServerResponse, dictation: Dictation, accountId: string): Promise<void> {
+  const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
+  const audio = Buffer.from(typeof body.base64 === "string" ? body.base64 : "", "base64");
+  if (!audio.length) { sendJson(response, 400, { error: { code: "invalid_audio", message: "A recording is required." } }); return; }
+  try { sendJson(response, 200, { text: await dictation.text(audio) }); }
+  catch (error) {
+    if (!(error instanceof AssetError)) throw error;
+    if (error.code === "unavailable") { sendJson(response, 502, { error: failures.translate(UpstreamError.of(error), { account: accountId, route: "transcriptions" }) }); return; }
+    sendJson(response, error.code === "too_large" ? 413 : 400, { error: { code: error.code === "too_large" ? "audio_too_large" : "invalid_audio", message: error.message } });
+  }
+}
+
 async function authenticate(
   request: http.IncomingMessage,
   response: http.ServerResponse,
@@ -2214,7 +2242,7 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
     const heartbeat = setInterval(() => { if (!response.writableEnded) response.write(": heartbeat\n\n"); }, 15_000);
     const feed = `assistant:${account.id}`;
     await follow(context.conversationPorts.eventLog, feed, await context.conversationPorts.eventLog.head(feed), ({ event }) => {
-      const shown = event.type === "message_end" ? { type: "message" } : event.type === "run_end" ? { type: "assistant" } : event;
+      const shown = event.type === "run_end" ? { type: "assistant" } : event;
       if (!response.writableEnded) response.write(`data: ${JSON.stringify(shown)}\n\n`);
     }, { signal: stop.signal });
     clearInterval(heartbeat);

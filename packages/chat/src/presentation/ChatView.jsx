@@ -1,14 +1,15 @@
 import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { ArrowUp, ChevronDown, ChevronUp, CircleAlert, ImagePlus, Paperclip, Plus, RotateCw, Square, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, ChevronUp, CircleAlert, ImagePlus, Loader2, Mic, MicOff, Paperclip, Plus, RotateCw, Square, X } from "lucide-react";
 import { Avatar } from "@hatch/ui";
 import { approvalDecision, partitionAttachments } from "../domain/activity.js";
-import { ACTIVITY_KINDS, ChatTimeline, groupTimelineEntries } from "../domain/timeline.js";
+import { ACTIVITY_KINDS, ChatTimeline, groupTimelineEntries, withoutRepeatedSteps } from "../domain/timeline.js";
 import { sharedScrollPositions } from "../domain/scroll-positions.js";
 import { OPEN_FREE_CHAT } from "../domain/free-chat.js";
 import { ActivityBlock, ActivityModal, ApprovalActivity } from "./Activity.jsx";
 import { ImageViewer } from "./ImageViewer.jsx";
 import { MessageResponse } from "./MessageResponse.jsx";
 import { Shimmer } from "./Shimmer.jsx";
+import { Waveform, useVoiceInput } from "./VoiceInput.jsx";
 import { FreeChatPaywall } from "./FreeChatPaywall.jsx";
 import "./chat.css";
 
@@ -83,7 +84,8 @@ export function TaskBriefDropdown({ snapshot, t }) {
   </details>;
 }
 
-function TimelineEntries({ timeline, live, activityKinds, t, errorText, loadToolDetail, approvals }) {
+/** One reply's ordered entries: text, and runs of tool steps between it. */
+export function TimelineEntries({ timeline, live, activityKinds, t, errorText, loadToolDetail, approvals }) {
   const visible = timeline.filter(entry => !ACTIVITY_KINDS.includes(entry.kind) || activityKinds.includes(entry.kind));
   return groupTimelineEntries(visible, entry => approvalDecision(entry, approvals.decisions) !== null).map((entry, index, entries) => {
     const isLastItem = index === entries.length - 1;
@@ -137,7 +139,8 @@ function ChatMessage({ message, identity, statusText, compacting, attachments, V
 
 const fileKey = file => file.id ?? `${file.name}-${file.lastModified}`;
 
-function Composer({ controller, state, snapshotPending, agentName, t, onSend, attachControl, accessory, onPaste }) {
+/** The composer: draft, attachment chips, picker, Enter to send, Shift+Enter for a newline. Hosts with their own thread reuse it with a controller-shaped adapter. */
+export function Composer({ controller, state, snapshotPending = false, agentName, t, onSend, attachControl, accessory, onPaste, accept = "image/*", dictate }) {
   const draftRef = useRef(null);
   const { draft, images, activeRun } = state;
   const busy = snapshotPending || Boolean(activeRun);
@@ -156,18 +159,31 @@ function Composer({ controller, state, snapshotPending, agentName, t, onSend, at
     event.preventDefault();
     onSend();
   };
+  // Dictation only fills the box: the user edits the text and decides whether to send.
+  const voice = useVoiceInput({
+    dictate,
+    onText: text => { if (text) { controller.setDraft(draft.trim() ? `${draft.trimEnd()} ${text}` : text); draftRef.current?.focus(); } },
+    onError: error => controller.fail?.(error)
+  });
+  const recording = voice.phase === "recording";
 
   return <form className="web-chat__composer" aria-busy={snapshotPending} onSubmit={submit}>
     {images.length ? <div className="web-chat__images" aria-label={t("imagesToSend")}>{images.map(file => <span className="web-chat__image-chip" key={fileKey(file)}><Paperclip aria-hidden="true" /><span title={file.name}>{file.name}</span><button type="button" aria-label={t("removeImage", { name: file.name })} onClick={() => controller.removeImage(file)} disabled={snapshotPending}><X aria-hidden="true" /></button></span>)}</div> : null}
-    <textarea ref={draftRef} aria-label={t("messageAgent", { agent: agentName })} value={draft} onChange={event => controller.setDraft(event.target.value)} placeholder={t("messagePlaceholder")} disabled={busy} onPaste={onPaste} onKeyDown={event => { if (event.key !== "Enter" || event.shiftKey || isImeConfirmation(event)) return; submit(event); }} />
-    <div className="web-chat__actions">
-      {attachControl ?? <label className="web-chat__attach" title={t("addImages")}><ImagePlus aria-hidden="true" /><input type="file" accept="image/*" multiple aria-label={t("addImages")} onChange={event => { controller.addImages([...event.target.files]); event.target.value = ""; }} disabled={busy} /></label>}
+    {recording ? <div className="web-chat__voice" role="status"><Waveform analyser={voice.analyser} /></div> : <textarea ref={draftRef} aria-label={t("messageAgent", { agent: agentName })} value={draft} onChange={event => controller.setDraft(event.target.value)} placeholder={t("messagePlaceholder")} disabled={busy} onPaste={onPaste} onKeyDown={event => { if (event.key !== "Enter" || event.shiftKey || isImeConfirmation(event)) return; submit(event); }} />}
+    {recording ? <div className="web-chat__actions web-chat__actions--voice">
+      <button type="button" className="web-chat__voice-button" aria-label={t("voiceCancel")} onClick={voice.cancel}><X aria-hidden="true" /></button>
+      <button type="button" className="web-chat__send" aria-label={t("voiceStop")} onClick={voice.confirm}><Check aria-hidden="true" /></button>
+    </div> : <div className="web-chat__actions">
+      {attachControl ?? <label className="web-chat__attach" title={t("addImages")}><ImagePlus aria-hidden="true" /><input type="file" accept={accept} multiple aria-label={t("addImages")} onChange={event => { controller.addImages([...event.target.files]); event.target.value = ""; }} disabled={busy} /></label>}
       {accessory}
+      {dictate ? <button type="button" className="web-chat__voice-button" aria-label={t(voice.phase === "denied" ? "voiceDenied" : "voiceStart")} data-phase={voice.phase} disabled={busy || voice.phase === "transcribing"} onClick={voice.start}>
+        {voice.phase === "transcribing" ? <Loader2 className="web-chat__spin" aria-hidden="true" /> : voice.phase === "denied" ? <MicOff aria-hidden="true" /> : <Mic aria-hidden="true" />}
+      </button> : null}
       <span className="web-chat__hint">{t("composerHint")}</span>
       {activeRun
         ? <button type="button" className="web-chat__stop" aria-label={t("stopReply")} onClick={() => controller.cancel()}><Square aria-hidden="true" /><span>{t("stopReply")}</span></button>
         : <button type="submit" className="web-chat__send" aria-label={t("sendMessage")} disabled={snapshotPending || (!draft.trim() && !images.length)}><ArrowUp aria-hidden="true" /></button>}
-    </div>
+    </div>}
   </form>;
 }
 
@@ -191,6 +207,7 @@ function Composer({ controller, state, snapshotPending, agentName, t, onSend, at
  * @param {React.ReactNode} [props.attachControl] replaces the default image picker
  * @param {React.ReactNode} [props.composerAccessory] extra composer controls
  * @param {(event) => void} [props.onComposerPaste]
+ * @param {(recording: Blob) => Promise<string>} [props.dictate] speech to text; shows the microphone when supplied
  * @param {(toolCallId: string, decision: "allow"|"deny") => void} [props.onApprovalDecision]
  *   the host's approval gate. A tool row the host marked "pending" with
  *   `controller.markApproval` shows Allow / Deny only when this is supplied;
@@ -198,7 +215,7 @@ function Composer({ controller, state, snapshotPending, agentName, t, onSend, at
  * @param {import("../domain/scroll-positions.js").ScrollPositions} [props.scrollPositions]
  *   where each conversation was left; defaults to one in-memory store per page.
  */
-export function ChatView({ controller, identity, agentName, t, errorText, attachments, AttachmentViewer = ImageViewer, header, loadingIndicator, onNewConversation, activityKinds = ACTIVITY_KINDS, inert, dockAccessory, attachControl, composerAccessory, onComposerPaste, onApprovalDecision, scrollPositions = sharedScrollPositions }) {
+export function ChatView({ controller, identity, agentName, t, errorText, attachments, AttachmentViewer = ImageViewer, header, loadingIndicator, onNewConversation, activityKinds = ACTIVITY_KINDS, inert, dockAccessory, attachControl, composerAccessory, onComposerPaste, onApprovalDecision, dictate, scrollPositions = sharedScrollPositions }) {
   const state = useChatState(controller);
   const meter = controller.freeChat ?? OPEN_FREE_CHAT;
   const freeChat = useSyncExternalStore(meter.subscribe, meter.getSnapshot);
@@ -287,7 +304,7 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
           <h2>{t("emptyHeadline")}</h2>
           <p>{t("emptyConversationBody", { agent: agentName })}</p>
         </section> : null}
-        {!snapshotPending ? messages.map(message => {
+        {!snapshotPending ? withoutRepeatedSteps(messages).map(message => {
           const key = message.renderKey ?? `${message.run_id}-${message.role}`;
           const compacting = Boolean(message.transient && activeRun && message.run_id === activeRun && state.runState === "compacting");
           return <React.Fragment key={key}>
@@ -301,7 +318,7 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
       {error ? <div className="web-chat__notice" role="alert"><CircleAlert aria-hidden="true" /><span>{errorText(error)}</span><button type="button" onClick={() => controller.retry()}><RotateCw aria-hidden="true" /><span>{t("retry")}</span></button></div> : null}
       {dockAccessory}
       {freeChat.locked && !activeRun ? <FreeChatPaywall access={freeChat} creatorName={identity.creatorName} t={t} />
-        : conversationId ? <Composer controller={controller} state={state} snapshotPending={snapshotPending} agentName={agentName} t={t} onSend={send} attachControl={attachControl} accessory={composerAccessory} onPaste={onComposerPaste} /> : null}
+        : conversationId ? <Composer controller={controller} state={state} snapshotPending={snapshotPending} agentName={agentName} t={t} onSend={send} attachControl={attachControl} accessory={composerAccessory} onPaste={onComposerPaste} dictate={dictate} /> : null}
     </div>
   </main>;
 }

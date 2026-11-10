@@ -17,7 +17,7 @@ import type { PublicMessage } from "../conversations/conversation.js";
 import type { ContentPart } from "../surfaces/contract.js";
 import type { SentMessage } from "../chat/gateway.js";
 import type { AssistantTask, TaskKind, TaskOrigin, TaskRepository } from "./tasks.js";
-import type { AssistantChat } from "./chat.js";
+import type { AssistantChat, ReplySteps } from "./chat.js";
 import type { DeliveryRepository } from "./deliveries.js";
 import type { ExpertMaterials } from "./materials.js";
 import { RELAY_MARK, type InterviewDesk } from "./relay.js";
@@ -572,12 +572,12 @@ export class AssistantService implements StudioOperations, InterviewDesk {
   // ── Studio and channel surfaces ───────────────────────────────────────
 
   /** What the chat shows: what the Expert said and what the Assistant said. System messages stay out. */
-  async view(accountId: string): Promise<{ messages: Array<{ id: string; role: "expert" | "assistant"; text: string; at: string; images?: string[]; attachments?: NonNullable<PublicMessage["attachments"]> }>; tasks: AssistantTask[]; running: boolean; runId?: string; /** Why the last turn failed, until the next one starts. */ failure?: RunFailure; interviewing: boolean }> {
-    const [lines, status] = await Promise.all([this.chat.lines(accountId), this.chat.status(accountId)]);
+  async view(accountId: string): Promise<{ messages: Array<{ id: string; role: "expert" | "assistant"; text: string; at: string; images?: string[]; attachments?: NonNullable<PublicMessage["attachments"]>; /** What the Assistant did inside a reply, in order. */ steps?: ReplySteps }>; tasks: AssistantTask[]; running: boolean; runId?: string; /** Why the last turn failed, until the next one starts. */ failure?: RunFailure; interviewing: boolean }> {
+    const [lines, status] = await Promise.all([this.chat.shown(accountId), this.chat.status(accountId)]);
     return {
       messages: lines.map(line => {
         const images = line.attachments?.filter(attachment => attachment.type === "image").map(attachment => `${attachment.asset_id}.jpg`);
-        return { id: line.id, role: line.role === "user" ? "expert" as const : "assistant" as const, text: line.text, at: line.created_at, ...(images?.length ? { images } : {}), ...(line.attachments?.length ? { attachments: line.attachments } : {}) };
+        return { id: line.id, role: line.role === "user" ? "expert" as const : "assistant" as const, text: line.text, at: line.created_at, ...(images?.length ? { images } : {}), ...(line.attachments?.length ? { attachments: line.attachments } : {}), ...(line.steps ? { steps: line.steps } : {}) };
       }),
       tasks: await this.deps.tasks.open(accountId),
       running: status.state === "running", ...(status.runId ? { runId: status.runId } : {}),

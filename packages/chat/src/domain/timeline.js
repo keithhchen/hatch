@@ -229,6 +229,20 @@ export function groupTimelineEntries(entries, standalone = () => false) {
   return grouped;
 }
 
+/**
+ * The Runtime keeps a Run's tool calls on every assistant message the Run passed through. A reply shows each step once,
+ * on the last message of its Run, where the interleaving parts are.
+ */
+export function withoutRepeatedSteps(messages) {
+  const seen = new Set();
+  return [...messages].reverse().map(message => {
+    if (message.role !== "assistant" || message.transient || !message.tool_calls?.length) return message;
+    const fresh = message.tool_calls.filter(tool => !seen.has(`${message.run_id}:${tool.tool_call_id}`));
+    for (const tool of message.tool_calls) seen.add(`${message.run_id}:${tool.tool_call_id}`);
+    return fresh.length === message.tool_calls.length ? message : { ...message, tool_calls: fresh };
+  }).reverse();
+}
+
 /** A message the user submitted that the Runtime has not yet confirmed. */
 export class PendingSubmission {
   constructor({ conversationId, runId, clientMessageId, content, attachments, files }) {

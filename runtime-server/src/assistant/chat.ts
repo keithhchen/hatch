@@ -17,7 +17,7 @@ import { ConversationError, type ConversationStatus, type PublicMessage, type Se
 import type { EventLog } from "../conversations/eventLog.js";
 import { PassThroughOutputGuard, type OutputGuard } from "../outputGuard.js";
 import { ServerToolExecutor } from "../serverTools.js";
-import type { RuntimeStore } from "../store.js";
+import type { RuntimeStore, VisibleConversationMessage } from "../store.js";
 import { ToolBridge } from "../toolBridge.js";
 import type { ClientAttributes, ContentPart } from "../surfaces/contract.js";
 import { InterviewRelay, isRelayed, isSystemMessageId, SYSTEM_MESSAGE_PREFIX, type InterviewDesk } from "./relay.js";
@@ -33,6 +33,9 @@ import type { AssetDesk } from "../conversations/assets.js";
 export const ASSISTANT_AGENT_ID = "assistant";
 const ASSISTANT_PROFILE = "kimi-k2.6";
 const ACTIVE = new Set(["queued", "running", "waiting_for_tool", "compacting"]);
+
+/** The steps inside one reply, in the shape Chat's history keeps them: where each sits among the words, and what it was. */
+export type ReplySteps = { parts?: VisibleConversationMessage["parts"]; tool_calls: Array<{ tool_call_id: string; name: string; status: string; activity_message?: string }> };
 
 /** What a Run of the Assistant needs beyond the binding every Chat Run has. */
 export type AssistantScope = TurnBinding & { accountId: string };
@@ -221,23 +224,38 @@ export class AssistantChat implements AssistantHost {
     return last.status === "failed" ? { state: "failed", error: failureOfReason(last.interruptedReason) } : { state: "idle" };
   }
 
-  /** What the Expert and the Assistant said, oldest first. The Assistant's own messages to itself and its silences are not part of the chat. */
+  /** What the Expert and the Assistant said, oldest first, as every Studio client reads a conversation. */
   async lines(accountId: string): Promise<PublicMessage[]> {
+    return (await this.shown(accountId)).map(({ steps: _steps, ...line }) => line);
+  }
+
+  /**
+   * `lines`, with the steps the Assistant took inside each reply, placed among its words as Chat keeps them: what the Expert's
+   * page needs to show a reply as it happened. A step is what Chat shows of a tool call, never its arguments or result.
+   * The Assistant's own messages to itself and its silences are not part of the chat.
+   */
+  async shown(accountId: string): Promise<Array<PublicMessage & { steps?: ReplySteps }>> {
     const conversation = await this.conversation(accountId);
     const [history, attached] = await Promise.all([this.deps.store.readVisibleConversation(conversation.id), this.deps.chatAssets.attachments(conversation)]);
     const byMessage = new Map<string, Array<{ type: "image" | "file" | "audio"; name: string; asset_id: string }>>();
     for (const { asset, messageId } of attached) byMessage.set(messageId, [...byMessage.get(messageId) ?? [], { type: asset.record.kind, name: asset.record.name, asset_id: asset.id }]);
     const counts = new Map<string, number>();
-    return history.flatMap((message): PublicMessage[] => {
+    const lastOfRun = new Map<string, (typeof history)[number]>();
+    for (const message of history) if (message.role === "assistant") lastOfRun.set(message.run_id, message);
+    return history.flatMap((message): Array<PublicMessage & { steps?: ReplySteps }> => {
       if (message.role === "user") {
         if (!message.id || isSystemMessageId(message.id) || !message.content.trim()) return [];
         const attachments = byMessage.get(attachmentMessageId(message.id));
         return [{ id: message.id, role: "user", text: message.content, created_at: message.timestamp, ...(attachments?.length ? { attachments } : {}) }];
       }
-      if (!message.content.trim()) return [];
+      // Chat keeps a Run's steps on every assistant message the Run passed through; the reply shows them once, on the last.
+      const tools = lastOfRun.get(message.run_id) === message ? message.tool_calls ?? [] : [];
+      const reasoned = Boolean(message.parts?.some(part => part.type === "thinking"));
+      if (!message.content.trim() && !tools.length) return [];
       const index = (counts.get(message.run_id) ?? 0) + 1;
       counts.set(message.run_id, index);
-      return [{ id: `${message.run_id}:${index}`, role: "assistant", text: message.content, created_at: message.timestamp }];
+      const steps = tools.length || reasoned ? { parts: message.parts, tool_calls: tools.map(({ tool_call_id, name, status, activity_message }) => ({ tool_call_id, name, status, activity_message })) } : undefined;
+      return [{ id: `${message.run_id}:${index}`, role: "assistant", text: message.content, created_at: message.timestamp, ...(steps ? { steps } : {}) }];
     });
   }
 
