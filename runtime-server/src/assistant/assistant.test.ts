@@ -95,7 +95,7 @@ function scriptedWorkers(script: (context: Context, call: number) => WorkerStep)
 
 const userTexts = (context: Context) => context.messages.filter(message => message.role === "user").map(message => typeof message.content === "string" ? message.content : message.content.map(block => block.type === "text" ? block.text : "").join("")).filter(text => !text.startsWith("<system-reminder>"));
 
-async function setup(options: { model: Parameters<typeof scriptedModel>[0]; worker?: Parameters<typeof scriptedWorkers>[0]; legacy?: boolean; transcriber?: Parameters<typeof harness>[0] extends infer H ? H extends { transcriber?: infer T } ? T : never : never }) {
+async function setup(options: { model: Parameters<typeof scriptedModel>[0]; worker?: Parameters<typeof scriptedWorkers>[0]; legacy?: boolean; live?: unknown; transcriber?: Parameters<typeof harness>[0] extends infer H ? H extends { transcriber?: infer T } ? T : never : never }) {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-assistant-"));
   const tasks = new MemoryTaskRepository();
   const state = new MemoryAssistantState();
@@ -125,7 +125,7 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
     get: async (_account, productId) => productId === PRODUCT ? { productId, name: "选址顾问", promise: "帮餐厅老板选址", status: "published" } : undefined,
     create: async () => { throw new Error("unused"); },
     apply: async (_account, _product, change) => { applied.push(change); },
-    live: async () => ({ is_live: false, pending_changes: [] }),
+    live: async () => options.live ?? ({ is_live: false, pending_changes: [] }),
     token: async () => "token",
   };
   const legacy = new FileWorkbenchBackend(path.join(root, "assistant"));
@@ -462,6 +462,17 @@ test("The chat shows only what was said; live state reaches the model but never 
     assert.ok(transcript.includes("构建好了"), "task news stays in the transcript for the model");
     assert.ok(!transcript.includes("<当前状态>"), "live state is never stored");
   } finally { await env.close(); }
+});
+
+test("Live state gives links only for a live Product, with its own bot when it has one", async () => {
+  const links = { public_url: "https://hatch.test/products/p1", chat_url: "https://hatch.test/chat/product/p1" };
+  const live = await setup({ model: () => ({ text: "好" }), live: { is_live: true, pending_changes: [], ...links, telegram_url: "https://t.me/essay_bot" } });
+  const draft = await setup({ model: () => ({ text: "好" }), live: { is_live: false, pending_changes: [], public_url: null, chat_url: null } });
+  try {
+    assert.match(await live.assistant.liveState(ACCOUNT), /在线[\s\S]*https:\/\/hatch\.test\/products\/p1[\s\S]*https:\/\/hatch\.test\/chat\/product\/p1[\s\S]*https:\/\/t\.me\/essay_bot/);
+    const unpublished = await draft.assistant.liveState(ACCOUNT);
+    assert.ok(unpublished.includes("未上线") && !unpublished.includes("http"), "no links before publish");
+  } finally { await live.close(); await draft.close(); }
 });
 
 test("Publishing goes through the Product's interface, after the Expert confirms", async () => {

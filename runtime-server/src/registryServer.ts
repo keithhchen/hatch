@@ -230,8 +230,11 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const corpusPublisher = nodeObjectStore
     ? new CorpusPublisher(factoryNodeService, nodeObjectStore, store, releaseStore, environment.HATCH_RUNTIME_CORPUS_ROOT?.trim() || "runtime-corpora", knowledgeIndexer)
     : undefined;
+  const studioUrl = environment.HATCH_STUDIO_ASSISTANT_URL?.trim() || "https://gethatchapp.com/studio/assistant";
+  // The site its users know: the alias domain. Products and the Telegram bots are reached here.
+  const siteOrigin = environment.HATCH_DOMAIN_ALIAS?.trim() ? `https://${environment.HATCH_DOMAIN_ALIAS.trim()}` : new URL(studioUrl).origin;
   const productLive = corpusPublisher && nodeObjectStore
-    ? createProductLive({ factoryRoot, publisher: corpusPublisher, releases: releaseStore, objectStore: nodeObjectStore })
+    ? createProductLive({ factoryRoot, publisher: corpusPublisher, releases: releaseStore, objectStore: nodeObjectStore, publicOrigin: siteOrigin })
     : undefined;
   const graphStore = graphPool ? new PostgresDistillationGraphStore(graphPool) : undefined;
   await graphStore?.initialize();
@@ -289,9 +292,8 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     // Where each Expert brings their own app, the adapter is built from their sealed credentials and the scope is their account id.
     const scopeOf = (accountId: string, kind: ChannelKind) => { const form = CREDENTIAL_FORMS[kind]; return form && !isTenantForm(form) && !isPerProduct(form) ? accountId : ""; };
     const stores = await openChannelStores(registryPool, scopeOf);
-    const studioUrl = environment.HATCH_STUDIO_ASSISTANT_URL?.trim() || "https://gethatchapp.com/studio/assistant";
     // Our one bot answers the Assistant, and signs people in. Telegram sends people back to the site its users know: the alias domain.
-    const telegramOrigin = environment.HATCH_TELEGRAM_PUBLIC_ORIGIN?.trim() || (environment.HATCH_DOMAIN_ALIAS?.trim() ? `https://${environment.HATCH_DOMAIN_ALIAS.trim()}` : new URL(studioUrl).origin);
+    const telegramOrigin = environment.HATCH_TELEGRAM_PUBLIC_ORIGIN?.trim() || siteOrigin;
     const telegram = new TelegramChannel({
       token: environment.HATCH_TELEGRAM_BOT_TOKEN?.trim() || undefined,
       username: environment.HATCH_TELEGRAM_BOT_USERNAME?.trim() || undefined,
@@ -2141,7 +2143,9 @@ function registryAgentCatalog(context: RegistryContext): AgentCatalog {
     live: async (accountId, productId) => {
       const product = await productForCreator(context, accountId, productId);
       if (!product || !context.productLive) return null;
-      return context.productLive.status(new ExpertProduct(accountId, productId, product.name, product.promise, product.brief_spec));
+      const status = (await context.productLive.status(new ExpertProduct(accountId, productId, product.name, product.promise, product.brief_spec))).toJSON();
+      const bot = status.is_live ? await context.ownApps?.username(accountId, "telegram", productId) : undefined;
+      return { ...status, ...(bot ? { telegram_url: `https://t.me/${bot}` } : {}) };
     },
     token: async accountId => {
       const cached = tokens.get(accountId);
