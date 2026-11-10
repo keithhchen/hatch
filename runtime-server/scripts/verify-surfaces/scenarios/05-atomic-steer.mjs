@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Scenario } from "../lib/scenario.mjs";
-import { Auth, ChatApi, ChatSocket } from "../lib/clients.mjs";
+import { Auth, ChatApi, ChatSocket, StudioApi } from "../lib/clients.mjs";
 import { TelegramWebhooks } from "../lib/webhooks.mjs";
 import { ACTIVE, ConversationEvidence, Maxima, postWebhook, tally } from "../lib/idem-helpers.mjs";
 import { percentile, sleep, until } from "../lib/util.mjs";
@@ -41,6 +41,30 @@ class AtomicSteer extends Scenario {
     const logLines = stack.runtimes.flatMap((r) => r.proc.output.split("\n")).filter((line) => /error|fail|steer|unhandled/i.test(line)).map((line) => line.slice(0, 300));
     rec.evidenceOf("runtime_log_error_lines", { count: logLines.length, first: logLines.slice(0, 25), last: logLines.slice(-10) });
     await this.imBursts();
+    await this.assistantSteer();
+  }
+
+  /** The Assistant is a conversation on Chat's runtime: a message sent while its Run goes joins that Run, and nothing is lost. */
+  async assistantSteer() {
+    const { stack, rec } = this;
+    const account = await stack.account("steer-assistant");
+    const studio = new StudioApi(stack.url, Auth.bearer(account.session));
+    const one = `ASTEER-${randomUUID().slice(0, 6)}`, two = `BSTEER-${randomUUID().slice(0, 6)}`;
+    const first = await studio.sendAssistant({ content: `Write the word ${one}, then the integers 1 to 40, one per line. Nothing else.` });
+    await until("the Assistant's Run is running", async () => (await studio.messagesAssistant()).json?.status === "running" || undefined, { timeoutMs: 30_000, everyMs: 50 }).catch(() => undefined);
+    const second = await studio.sendAssistant({ content: `Also write the word ${two} at the very end.` });
+    await until("the Assistant is idle", async () => { const { json } = await studio.messagesAssistant(); return json?.status === "idle" && json.messages?.some((m) => m.role === "assistant") || undefined; }, { timeoutMs: 180_000, everyMs: 500 });
+    await sleep(2_000);
+    const { json } = await studio.messagesAssistant();
+    const users = (json?.messages ?? []).filter((m) => m.role === "user");
+    const replies = (json?.messages ?? []).filter((m) => m.role === "assistant").map((m) => m.text).join("\n");
+    const runs = (await stack.registryPool.query("SELECT status, steered_count, consumed_count FROM hatch_conversation_runs WHERE conversation_id = $1", [`conversation:assistant:${account.id}`])).rows;
+    rec.measure("assistant_steer_runs", runs);
+    rec.measure("assistant_steer_second_joined_first", second.json?.run_id === first.json?.run_id);
+    rec.check("Assistant: both messages are stored once, in order", users.length === 2 && users[0].text.includes(one) && users[1].text.includes(two), users.map((m) => m.text.slice(0, 40)));
+    rec.check("Assistant: the second message was accepted as sent while the first Run went (joined it, or started the next Run), never rejected", [200, 202].includes(second.status), second.status);
+    rec.check("Assistant: every Run ended completed, with no message left unclaimed", runs.length > 0 && runs.every((r) => r.status === "completed" && r.consumed_count === r.steered_count), runs);
+    rec.check("Assistant: the second message was answered", replies.includes(two), replies.slice(-200));
   }
 
   /** Three single-message Runs, to learn how long a short answer takes. */

@@ -41,7 +41,7 @@ export interface Inbox {
   lastInbound(channel: ChannelKind, scope: string, threadId: string): Promise<Date | undefined>;
   /** Everything in the thread up to this event has been answered. */
   markReplied(id: string): Promise<void>;
-  waiting(filter: { runId: string } | { ownerAccountId: string }, now?: Date): Promise<WaitingThread[]>;
+  waiting(filter: { runId: string }, now?: Date): Promise<WaitingThread[]>;
   byRun(runId: string): Promise<InboxItem[]>;
   /** Runs started for a message nobody has answered yet, oldest first. */
   openRuns(limit: number): Promise<string[]>;
@@ -162,10 +162,9 @@ export class PostgresInbox implements Inbox {
       AND seq <= (SELECT seq FROM hatch_channel_inbox WHERE id = $1)`, [id]);
   }
 
-  async waiting(filter: { runId: string } | { ownerAccountId: string }, now = new Date()): Promise<WaitingThread[]> {
-    const [scope, value] = "runId" in filter ? ["i.run_id = $2", filter.runId] : ["c.owner_account_id = $2", filter.ownerAccountId];
+  async waiting(filter: { runId: string }, now = new Date()): Promise<WaitingThread[]> {
     return (await this.pool.query(`SELECT DISTINCT i.connection_id, i.channel, i.scope, i.thread_id, i.sender_id FROM hatch_channel_inbox i JOIN hatch_connections c ON c.id = i.connection_id
-      WHERE ${scope} AND i.state = 'done' AND i.replied_at IS NULL AND i.received_at > $1::timestamptz - interval '${WAITING_MS / 1000} seconds'`, [now, value])).rows
+      WHERE i.run_id = $2 AND i.state = 'done' AND i.replied_at IS NULL AND i.received_at > $1::timestamptz - interval '${WAITING_MS / 1000} seconds'`, [now, filter.runId])).rows
       .map(row => ({ connectionId: row.connection_id, channel: row.channel, scope: row.scope, threadId: row.thread_id, senderId: row.sender_id }));
   }
 

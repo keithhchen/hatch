@@ -10,6 +10,8 @@ export interface AssistantHost {
   send(accountId: string, input: SendInput): Promise<Sent>;
   stop(accountId: string): Promise<void>;
   feedKey(accountId: string): string;
+  /** The conversation's id, which is also the scope its attachments live in. */
+  conversationId(accountId: string): string;
   /** Uploads and lookups of attachments for this conversation. */
   assets(): AssetDesk;
 }

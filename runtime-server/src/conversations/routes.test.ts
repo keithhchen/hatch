@@ -85,6 +85,7 @@ class FakeAssistant implements AssistantHost {
     return { conversationId: "a1", queued: false, runId: "arun-1", message: { id: input.id, role: "user", text: input.text, created_at: "t", ...(attachments.length ? { attachments } : {}) } };
   };
   feedKey = () => "assistant:a1";
+  conversationId = () => "assistant:a1";
   assets = () => this.desk;
   stop = async () => { this.stopped++; };
 }

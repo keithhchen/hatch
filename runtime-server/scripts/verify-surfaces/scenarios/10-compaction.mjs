@@ -1,5 +1,5 @@
 import { Scenario } from "../lib/scenario.mjs";
-import { ChatApi, Auth } from "../lib/clients.mjs";
+import { ChatApi, Auth, StudioApi } from "../lib/clients.mjs";
 import { TelegramWebhooks } from "../lib/webhooks.mjs";
 import { CompactionProbe, StatusWatcher, Grower, MAX_CHUNK, TRIGGER, chunk, estimate } from "../lib/compaction-helpers.mjs";
 import { sleep, until } from "../lib/util.mjs";
@@ -25,7 +25,7 @@ class Compaction extends Scenario {
     rec.note("Observed while building this (not reproduced by the final steps): asking Kimi for a 450-word text on Chat HTTP failed the Run with reason \"file_write is not available on mcp. Available on: desktop, cli.\"; the Run ended `failed` after streaming the text instead of the model getting a tool error. The numbered-list reply used here avoids it.");
     rec.note("Prune stage (old tool results after the provider cache expires) and the failure/timeout (degraded) path are NOT exercised: no tool is called here, and the summarizer shares the chat model's provider config, so no env fails only the compaction call.");
     const probe = new CompactionProbe(stack.runtimePool);
-    const parts = (process.env.VERIFY_PARTS ?? "A,B,C").split(",");
+    const parts = (process.env.VERIFY_PARTS ?? "A,B,C,D").split(",");
     const owner = await stack.account("owner");
     const productId = await stack.product(owner, { name: "Order Support Expert", system: SYSTEM });
     const chat = new ChatApi(stack.url, Auth.bearer(owner.apiKey));
@@ -47,6 +47,30 @@ class Compaction extends Scenario {
     if (parts.includes("A")) await this.survival(rec, probe, state);
     if (parts.includes("B")) await this.preemption(rec, probe, state);
     if (parts.includes("C")) await this.imNotice(stack, rec, probe, owner, productId);
+    if (parts.includes("D")) await this.assistantCompaction(stack, rec);
+  }
+
+  // ── (4) the Assistant is a Chat conversation: the same compaction, in the Registry's journal ──
+  async assistantCompaction(stack, rec) {
+    const account = await stack.account("compaction-assistant");
+    const studio = new StudioApi(stack.url, Auth.bearer(account.session));
+    const probe = new CompactionProbe(stack.registryPool);
+    const word = `ZEBRA-${Math.floor(Math.random() * 9000 + 1000)}`;
+    const say = async (content) => { const r = await studio.sendAssistant({ content, wait: 120 }); if (!r.json?.reply) throw new Error(`Assistant did not answer: ${r.status} ${r.text.slice(0, 200)}`); return r.json.reply.text; };
+    rec.check("Assistant: the first turn is answered", /noted/i.test(await say(`My codeword is ${word}. Reply with exactly: noted`)), word);
+    for (let i = 1; i <= 3; i++) await say(`Reference log ${i}, reply with exactly: logged\n${chunk(3_500, `D${i}`)}`);
+    const reply = await say("/compact");
+    rec.measure("assistant_manual_compaction_reply", reply.slice(0, 120));
+    const id = `conversation:assistant:${account.id}`;
+    await sleep(1_000);
+    const journal = await probe.journal(id);
+    const started = journal.filter((e) => e.type === "compaction.started");
+    const ended = journal.filter((e) => e.type === "compaction.completed" || e.type === "compaction.aborted");
+    rec.evidenceOf("assistant_journal", journal.map((e) => `${e.type}/${e.payload.phase ?? ""}/${e.payload.compaction_id}`));
+    rec.check("Assistant: the compaction is announced and ends once, by the same id (the Registry's journal, as Chat's)", started.length >= 1 && started.length === ended.length && started.every((e) => ended.some((end) => end.payload.compaction_id === e.payload.compaction_id)), { started: started.length, ended: ended.map((e) => e.type) });
+    rec.check("Assistant: a completed marker, with a durable checkpoint", journal.some((e) => e.type === "compaction.completed") && (await probe.checkpoints(id)).length >= 1, (await probe.checkpoints(id)).length);
+    const recalled = await say("What is my codeword? Reply with the codeword only.");
+    rec.check("Assistant: what the Expert said before the compaction survives it", recalled.includes(word), recalled.slice(0, 200));
   }
 
   async conversationId(probe, publicId) { return (await probe.conversationIds()).find((c) => c.public_id === publicId || c.id === publicId)?.id; }

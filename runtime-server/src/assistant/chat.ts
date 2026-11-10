@@ -260,6 +260,8 @@ export class AssistantChat implements AssistantHost {
 
   feedKey(accountId: string): string { return assistantFeedKey(accountId); }
 
+  conversationId(accountId: string): string { return assistantConversationId(accountId); }
+
   assets(): AssetDesk { return this.deps.chatAssets.studioDesk(); }
 
   /** Tells Studio observers the Assistant changed in a way no Run shows, such as a chat being linked. */

@@ -60,6 +60,29 @@ class Attachments extends Scenario {
     } finally { await second.down().catch(() => undefined); }
     await this.componentProbe(rec);
     await this.studioGrep(stack, rec);
+    await this.assistantAttachment(stack, rec);
+  }
+
+  /** The Assistant takes attachments like a Chat conversation: upload, reference by asset id, read with the same tools; another account cannot use the asset. */
+  async assistantAttachment(stack, rec) {
+    const owner = await stack.account("assistant-files"), other = await stack.account("assistant-files-other");
+    const studio = new StudioApi(stack.url, Auth.bearer(owner.session)), stranger = new StudioApi(stack.url, Auth.bearer(other.session));
+    const path = "/v1/creator/assistant/conversation";
+    const notes = Buffer.from(`# Orchid notes\n\nThe vault passphrase for the Orchid project is ${NEEDLE}.\n`);
+    const upload = await studio.call("POST", `${path}/assets?name=orchid-notes.md`, { raw: notes, headers: { "content-type": "application/octet-stream" } });
+    rec.check("Assistant: the upload is a ready asset (201 with an asset id)", upload.status === 201 && Boolean(upload.json?.asset_id), { status: upload.status, body: upload.text.slice(0, 160) });
+    const assetId = upload.json?.asset_id;
+    if (!assetId) return;
+    const sent = await studio.sendAssistant({ content: [{ type: "text", text: "I attached my notes. Read the file and tell me the vault passphrase in it. Reply with the passphrase only." }, { type: "file", assetId }], wait: 150 });
+    rec.check("Assistant: the message with the file is accepted and answered", sent.status === 200, { status: sent.status, body: sent.text.slice(0, 200) });
+    rec.check("Assistant: the answer holds the fact that is only in the file", String(sent.json?.reply?.text ?? "").includes(NEEDLE), String(sent.json?.reply?.text ?? "").slice(0, 200));
+    const tools = (await stack.registryPool.query("SELECT payload->>'name' AS name FROM hatch_conversation_events WHERE conversation_id = $1 AND event_type = 'tool.call'", [`conversation:assistant:${owner.id}`])).rows.map((row) => row.name);
+    rec.measure("assistant_attachment_tool_calls", tools);
+    rec.check("Assistant: it read the file with the attachment tools (ls, grep or read)", tools.some((name) => ["attachments.read", "attachments.grep", "attachments.ls"].includes(name)), tools);
+    const history = await studio.messagesAssistant();
+    rec.check("Assistant: history shows the attachment on the message", JSON.stringify(history.json?.messages?.[0]?.attachments ?? []).includes("orchid-notes.md"), history.json?.messages?.[0]);
+    const theft = await stranger.sendAssistant({ content: [{ type: "text", text: "read this" }, { type: "file", assetId }] });
+    rec.check("Assistant: another account cannot send the asset (404 asset_not_found)", theft.status === 404 && theft.json?.error?.code === "asset_not_found", { status: theft.status, body: theft.text.slice(0, 160) });
   }
 
   /** The shipped Runtime: a ~300 KB document through the real upload route. */

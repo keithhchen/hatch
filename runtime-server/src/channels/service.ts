@@ -161,14 +161,12 @@ export class ChannelService implements AssistantChannels {
     return false;
   }
 
-  compacting(accountId: string, compactionId: string): Promise<void> { return this.compaction({ compactionId, accountId }); }
-
   /**
    * One notice per compaction per waiting thread, and only where someone is waiting. It is a delivery of its own:
    * it is never submitted to a conversation, so it is in no history and never compacted.
    */
-  async compaction(input: { compactionId: string } & ({ runId: string } | { accountId: string })): Promise<void> {
-    for (const thread of await this.inbox.waiting("runId" in input ? { runId: input.runId } : { ownerAccountId: input.accountId }, this.deps.now?.())) {
+  async compaction(input: { compactionId: string; runId: string }): Promise<void> {
+    for (const thread of await this.inbox.waiting({ runId: input.runId }, this.deps.now?.())) {
       await this.dispatcher.send({
         connectionId: thread.connectionId, channel: thread.channel, scope: thread.scope, address: { threadId: thread.threadId, senderId: thread.senderId }, kind: "notice",
         message: { text: COMPACTING }, sourceKey: `compaction:${input.compactionId}:${thread.channel}:${thread.scope}:${thread.threadId}`,

@@ -2,7 +2,7 @@
   "id": 0,
   "title": "Tool self-check: one message through Chat HTTP and one through an IM webhook",
   "status": "PASS",
-  "durationMs": 9848,
+  "durationMs": 12308,
   "checks": [
     {
       "name": "HTTP Chat answered",
@@ -17,7 +17,7 @@
       "ok": true,
       "detail": {
         "status": 200,
-        "ms": 5
+        "ms": 4
       }
     },
     {
@@ -29,7 +29,7 @@
     }
   ],
   "measurements": {
-    "chat_http_wait_ms": 3894,
+    "chat_http_wait_ms": 5723,
     "outbound_sends": 1
   },
   "evidence": {},
