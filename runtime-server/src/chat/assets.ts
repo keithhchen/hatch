@@ -107,12 +107,13 @@ export class ChatAssets implements PartsReader {
   private async build(parts: ContentPart[], bound: Map<string, Asset>, messageId: string): Promise<ConversationMessage> {
     const paths = pathsFor(messageId, [...bound.values()]);
     const lines: string[] = [];
+    const typed: string[] = [];
     const images: NonNullable<ConversationMessage["model_images"]> = [];
     for (const part of parts) {
-      if (part.type === "text") { lines.push(part.text); continue; }
+      if (part.type === "text") { lines.push(part.text); typed.push(part.text); continue; }
       const asset = bound.get(part.assetId)!;
       const path = paths.get(asset.id)!;
-      if (part.type === "audio") { lines.push(asset.record.transcript ?? ""); continue; }
+      if (part.type === "audio") { lines.push(asset.record.transcript ?? ""); typed.push(asset.record.transcript ?? ""); continue; }
       if (part.type === "file") { lines.push(fileLine(asset, path)); continue; }
       const resized = asset.derivative("resized");
       if (!resized) throw new ChatError("asset_incomplete", `Asset ${asset.id} has no resized image.`, 500);
@@ -121,7 +122,7 @@ export class ChatAssets implements PartsReader {
     }
     const content = lines.join("\n");
     if (content.length > MAX_USER_MESSAGE_CHARS) throw new ChatError("message_too_long", "This message is too long.", 413);
-    return { role: "user", content, ...(images.length ? { model_images: images } : {}) };
+    return { role: "user", content, ...(content === typed.join("\n") ? {} : { typed: typed.join("\n") }), ...(images.length ? { model_images: images } : {}) };
   }
 
   /** The desk a Studio route uses to upload and resolve attachments for a conversation hosted on Chat. */

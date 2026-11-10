@@ -369,6 +369,23 @@ test("A Telegram document is an attachment of the conversation, and flows into a
   } finally { await env.close(); }
 });
 
+test("Text and a file are one message; the model reads the file line and history shows only what was typed, with the file as an attachment", async () => {
+  const env = await setup({ model: () => ({ text: "看了" }) });
+  try {
+    const upload = await env.assistant.upload(ACCOUNT, "notes.md", Buffer.from("# 笔记\n选址很重要"));
+    await env.assistant.hear(ACCOUNT, { id: "one-1", source: "web", parts: [{ type: "text", text: "你看看" }, { type: "file", assetId: upload.assetId }] });
+    await env.idle();
+    assert.equal(env.model.state.calls, 1, "one message, one Run");
+    assert.match(env.model.state.turns[0]!.input.message.content, /^你看看\n\[file: notes\.md/, "the model reads the text and the file line");
+    const experts = (await env.chat.lines(ACCOUNT)).filter(line => line.role === "user");
+    assert.equal(experts.length, 1);
+    assert.equal(experts[0]!.text, "你看看", "history keeps what was typed");
+    assert.deepEqual(experts[0]!.attachments?.map(({ type, name }) => ({ type, name })), [{ type: "file", name: "notes.md" }]);
+    assert.ok((experts[0]!.attachments?.[0]?.bytes ?? 0) > 0);
+    assert.doesNotMatch(JSON.stringify(await env.assistant.view(ACCOUNT)), /\[file:/);
+  } finally { await env.close(); }
+});
+
 test("A picture reaches the model as pixels with a path label, and the page shows it", async () => {
   const env = await setup({ model: () => ({ text: "看到了" }) });
   try {

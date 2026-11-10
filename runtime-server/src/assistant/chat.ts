@@ -237,15 +237,16 @@ export class AssistantChat implements AssistantHost {
   async shown(accountId: string): Promise<Array<PublicMessage & { steps?: ReplySteps }>> {
     const conversation = await this.conversation(accountId);
     const [history, attached] = await Promise.all([this.deps.store.readVisibleConversation(conversation.id), this.deps.chatAssets.attachments(conversation)]);
-    const byMessage = new Map<string, Array<{ type: "image" | "file" | "audio"; name: string; asset_id: string }>>();
-    for (const { asset, messageId } of attached) byMessage.set(messageId, [...byMessage.get(messageId) ?? [], { type: asset.record.kind, name: asset.record.name, asset_id: asset.id }]);
+    const byMessage = new Map<string, Array<{ type: "image" | "file" | "audio"; name: string; asset_id: string; bytes: number }>>();
+    for (const { asset, messageId } of attached) byMessage.set(messageId, [...byMessage.get(messageId) ?? [], { type: asset.record.kind, name: asset.record.name, asset_id: asset.id, bytes: asset.record.bytes }]);
     const counts = new Map<string, number>();
     const lastOfRun = new Map<string, (typeof history)[number]>();
     for (const message of history) if (message.role === "assistant") lastOfRun.set(message.run_id, message);
     return history.flatMap((message): Array<PublicMessage & { steps?: ReplySteps }> => {
       if (message.role === "user") {
-        if (!message.id || isSystemMessageId(message.id) || !message.content.trim()) return [];
+        if (!message.id || isSystemMessageId(message.id)) return [];
         const attachments = byMessage.get(attachmentMessageId(message.id));
+        if (!message.content.trim() && !attachments?.length) return [];
         return [{ id: message.id, role: "user", text: message.content, created_at: message.timestamp, ...(attachments?.length ? { attachments } : {}) }];
       }
       // Chat keeps a Run's steps on every assistant message the Run passed through; the reply shows them once, on the last.

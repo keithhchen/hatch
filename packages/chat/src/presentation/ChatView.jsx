@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { ArrowUp, Check, ChevronDown, ChevronUp, CircleAlert, ImagePlus, Loader2, Mic, MicOff, Paperclip, Plus, RotateCw, Square, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, ChevronUp, CircleAlert, Loader2, Mic, MicOff, Paperclip, Plus, RotateCw, Square, X } from "lucide-react";
 import { Avatar } from "@hatch/ui";
 import { approvalDecision, partitionAttachments } from "../domain/activity.js";
 import { ACTIVITY_KINDS, ChatTimeline, groupTimelineEntries, withoutRepeatedSteps } from "../domain/timeline.js";
@@ -9,7 +9,8 @@ import { ActivityBlock, ActivityModal, ApprovalActivity } from "./Activity.jsx";
 import { ImageViewer } from "./ImageViewer.jsx";
 import { MessageResponse } from "./MessageResponse.jsx";
 import { Shimmer } from "./Shimmer.jsx";
-import { Waveform, useVoiceInput } from "./VoiceInput.jsx";
+import { AttachButton } from "./AttachButton.jsx";
+import { Waveform, canRecord, useVoiceInput } from "./VoiceInput.jsx";
 import { FreeChatPaywall } from "./FreeChatPaywall.jsx";
 import "./chat.css";
 
@@ -174,9 +175,9 @@ export function Composer({ controller, state, snapshotPending = false, agentName
       <button type="button" className="web-chat__voice-button" aria-label={t("voiceCancel")} onClick={voice.cancel}><X aria-hidden="true" /></button>
       <button type="button" className="web-chat__send" aria-label={t("voiceStop")} onClick={voice.confirm}><Check aria-hidden="true" /></button>
     </div> : <div className="web-chat__actions">
-      {attachControl ?? <label className="web-chat__attach" title={t("addImages")}><ImagePlus aria-hidden="true" /><input type="file" accept={accept} multiple aria-label={t("addImages")} onChange={event => { controller.addImages([...event.target.files]); event.target.value = ""; }} disabled={busy} /></label>}
+      {attachControl ?? <AttachButton accept={accept} disabled={busy} onFiles={files => controller.addImages(files)} t={t} />}
       {accessory}
-      {dictate ? <button type="button" className="web-chat__voice-button" aria-label={t(voice.phase === "denied" ? "voiceDenied" : "voiceStart")} data-phase={voice.phase} disabled={busy || voice.phase === "transcribing"} onClick={voice.start}>
+      {dictate && canRecord() ? <button type="button" className="web-chat__voice-button" aria-label={t(voice.phase === "denied" ? "voiceDenied" : "voiceStart")} data-phase={voice.phase} disabled={busy || voice.phase === "transcribing"} onClick={voice.start}>
         {voice.phase === "transcribing" ? <Loader2 className="web-chat__spin" aria-hidden="true" /> : voice.phase === "denied" ? <MicOff aria-hidden="true" /> : <Mic aria-hidden="true" />}
       </button> : null}
       <span className="web-chat__hint">{t("composerHint")}</span>

@@ -2209,10 +2209,12 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
   if (url.pathname === "/v1/creator/assistant/messages" && request.method === "POST") {
     const body = await readJson(request);
     const content = typeof body.content === "string" ? body.content.trim() : "";
-    if (!content || content.length > 20_000) { sendJson(response, 400, { error: { code: "invalid_message", message: "Message must contain 1–20000 characters." } }); return; }
+    // One message, many parts: the text and the files uploaded for it, each named by the id the upload returned.
+    const attached = (Array.isArray(body.attachments) ? body.attachments : []).flatMap((item: { asset_id?: unknown; type?: unknown }) => typeof item?.asset_id === "string" && (item.type === "image" || item.type === "file") ? [{ type: item.type as "image" | "file", assetId: item.asset_id }] : []);
+    if ((!content && !attached.length) || content.length > 20_000) { sendJson(response, 400, { error: { code: "invalid_message", message: "Message must contain 1–20000 characters." } }); return; }
     // The page's own key makes a retried send one message.
     const key = String(request.headers["idempotency-key"] ?? "").trim().slice(0, 200);
-    try { await assistant.hear(account.id, { id: key || randomUUID(), source: "web", parts: [{ type: "text", text: content }] }); }
+    try { await assistant.hear(account.id, { id: key || randomUUID(), source: "web", parts: [...(content ? [{ type: "text" as const, text: content }] : []), ...attached] }); }
     catch (error) { if (!(error instanceof ChatError)) throw error; sendJson(response, error.status, { error: { code: error.code, message: error.message } }); return; }
     sendJson(response, 202, { accepted: true });
     return;
@@ -2221,7 +2223,8 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
     const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
     const name = typeof body.name === "string" ? body.name : ""; const bytes = Buffer.from(typeof body.base64 === "string" ? body.base64 : "", "base64");
     if (!name || !bytes.length || bytes.length > 20 * 1024 * 1024) { sendJson(response, 400, { error: { code: "invalid_file", message: "A file of 1 byte to 20 MiB is required." } }); return; }
-    try { sendJson(response, 201, { name: (await assistant.receive(account.id, name, bytes, "web")).name }); }
+    // Only an upload: the file joins a message when the page sends one that names it.
+    try { const { assetId, kind } = await assistant.upload(account.id, name, bytes); sendJson(response, 201, { name, asset_id: assetId, type: kind }); }
     catch (error) { if (!(error instanceof ChatError)) throw error; sendJson(response, error.status, { error: { code: error.code, message: error.message } }); }
     return;
   }

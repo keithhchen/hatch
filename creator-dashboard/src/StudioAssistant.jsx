@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Paperclip } from "lucide-react";
 import { Button, InlineAlert } from "@hatch/ui";
 import { ChatTimeline } from "@hatch/chat";
 import { friendlyError, LoadingState, mutationKey } from "./studioShellKit.jsx";
@@ -17,6 +18,9 @@ const CHANNEL_NAMES = { telegram: "Telegram", line: "LINE", lark: "Lark", feishu
 const STEP_KINDS = ["thinking", "tool"];
 const NO_APPROVALS = { decisions: {}, decide: null };
 const REVIEW_ACTIONS = { content: ["sxaContentYes", "sxaContentNo"], change: ["sxaChangeYes", "sxaChangeNo"] };
+
+const isChip = attachment => attachment.type === "file";
+const sizeOf = bytes => bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
 /** A reply as Product chat draws it: words and runs of steps in the order they happened. */
 function Reply({ timeline, live, t, errorText }) {
@@ -75,7 +79,8 @@ export function StudioAssistant({ request, t }) {
     window.addEventListener("scroll", track, { passive: true });
     return () => window.removeEventListener("scroll", track);
   }, []);
-  useEffect(() => { if (follow.current) endRef.current?.scrollIntoView?.({ block: "end" }); }, [view?.messages?.length, live, pendingLines.length]);
+  // Instant, not the page's smooth scrolling: a new smooth scroll on every delta restarts the previous one.
+  useEffect(() => { if (follow.current) endRef.current?.scrollIntoView?.({ block: "end", behavior: "instant" }); }, [view?.messages?.length, live, pendingLines.length]);
 
   const submit = async event => {
     event.preventDefault();
@@ -85,12 +90,14 @@ export function StudioAssistant({ request, t }) {
     setDraft("");
     setFiles([]);
     follow.current = true;
-    if (content) setPendingLines(lines => [...lines, content]);
+    const shown = content || staged.map(file => file.name).join(", ");
+    setPendingLines(lines => [...lines, shown]);
     try {
-      for (const file of staged) await upload(file);
-      if (content) await send(`${ROOT}/messages`, { content });
-      else await refresh();
-    } catch (cause) { setError(friendlyError(cause, t)); setDraft(content); setFiles(staged); setPendingLines(lines => lines.filter(line => line !== content)); }
+      // Upload first, then one message whose parts are the text and the files.
+      const attachments = [];
+      for (const file of staged) attachments.push(await upload(file));
+      await send(`${ROOT}/messages`, { content, attachments });
+    } catch (cause) { setError(friendlyError(cause, t)); setDraft(content); setFiles(staged); setPendingLines(lines => lines.filter(line => line !== shown)); }
   };
   const act = async (task, action) => {
     try { await send(`${ROOT}/tasks/${task.id}/${action}`); await refresh(); }
@@ -99,7 +106,8 @@ export function StudioAssistant({ request, t }) {
   const upload = async file => {
     const ready = file.type.startsWith("image/") ? await BrowserImageAttachments.compress(file) : file;
     const bytes = new Uint8Array(await ready.arrayBuffer());
-    await send(`${ROOT}/files`, { name: ready.name, base64: base64Of(bytes) });
+    const { asset_id, type } = await send(`${ROOT}/files`, { name: ready.name, base64: base64Of(bytes) });
+    return { asset_id, type };
   };
   // What the shared composer asks of its controller; files are chips until sent, and a Run cannot be stopped from here.
   const dictate = useMemo(() => browserDictation(request), [request]);
@@ -134,13 +142,14 @@ export function StudioAssistant({ request, t }) {
             <img className="sxa-image" alt="" src={`${ROOT}/images/${file}`} />
           </ImageViewer>)}
           {line.text ? <p>{line.text}</p> : null}
+          {line.attachments?.some(isChip) ? <div className="web-chat__attachments">{line.attachments.filter(isChip).map(file => <span key={file.asset_id}><Paperclip aria-hidden="true" />{file.name}{file.bytes ? ` · ${sizeOf(file.bytes)}` : ""}</span>)}</div> : null}
         </div>)}
         {pendingLines.map((line, index) => <p key={`pending-${index}`} className="sxa-line sxa-line--expert">{line}</p>)}
         {live ? <Reply timeline={live} live t={chatT} errorText={errorText} /> : null}
         <div ref={endRef} />
       </div>
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
-      <div className="sxa-dock" ref={dockRef}><Composer controller={composer} state={{ draft, images: files, activeRun: null, messages: lines, status: live, error }} agentName={t("sxNavAssistant")} t={chatT} accept="image/*,.txt,.md,.docx,.pptx,.xlsx,.pdf" onSend={() => submit({ preventDefault() {} })} dictate={dictate} /></div>
+      <div className="sxa-dock" ref={dockRef}><Composer controller={composer} state={{ draft, images: files, activeRun: null, messages: lines, error }} agentName={t("sxNavAssistant")} t={chatT} accept="image/*,.txt,.md,.docx,.pptx,.xlsx,.pdf" onSend={() => submit({ preventDefault() {} })} dictate={dictate} /></div>
     </section>
     <aside className="sxa-side">
       <h2>{t("sxaNeedsYou")}</h2>

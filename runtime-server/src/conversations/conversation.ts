@@ -12,7 +12,7 @@ export type PublicMessage = {
   role: "user" | "assistant";
   text: string;
   created_at: string;
-  attachments?: Array<{ type: "image" | "file" | "audio"; name: string; asset_id?: string }>;
+  attachments?: Array<{ type: "image" | "file" | "audio"; name: string; asset_id?: string; bytes?: number }>;
 };
 
 /** An asset the upload side has finished with. Bytes live in the workspace at `path`; the model reads them there. */

@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 
 /** The longest recording a voice message may be; the server refuses more. */
 export const MAX_RECORDING_SECONDS = 300;
+/** Whether this browser can record at all; where it cannot, there is no microphone to show. */
+export const canRecord = () => typeof MediaRecorder !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia);
 const DENIED = new Set(["NotAllowedError", "SecurityError", "NotFoundError", "PermissionDeniedError"]);
 
 /**
