@@ -45,6 +45,7 @@ export class ConversationSync {
     if (!live()) return null;
     const journalCursor = this.cursor === null
       ? 0
+      : !transport.journal ? this.cursor
       : await drainConversationJournal(options => transport.events(conversationId, options), this.cursor, live);
     if (journalCursor === null || !live()) return null;
     const baseline = current();

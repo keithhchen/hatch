@@ -15,6 +15,14 @@ export class ConversationTransport {
   list(_cursor) { return unimplemented("ConversationTransport", "list"); }
   /** @param {{briefAnswers?: {field_id: string, value: string}[]}} input @returns {Promise<{conversation: object}>} */
   create(_input) { return unimplemented("ConversationTransport", "create"); }
+  /**
+   * Whether the server owns Run ids and takes a message while a Run is active (it steers the Run). Then the composer
+   * stays open during a Run, a send is a request that answers with its outcome, and a Run id the client minted is
+   * provisional until the server names the real one.
+   */
+  get steerable() { return false; }
+  /** Whether `events` pages the journal. A transport without it proves its cursor through the snapshot alone. */
+  get journal() { return true; }
   /** Latest `view=page` snapshot. @returns {Promise<object>} */
   snapshot(_conversationId) { return unimplemented("ConversationTransport", "snapshot"); }
   /** Older history page. @param {{beforeCursor: string}} options @returns {Promise<object>} */
@@ -99,6 +107,25 @@ export class ToolExecutor {
    * @param {object} request approval.request @returns {Promise<{approved: boolean, error?: object}>}
    */
   requestApproval(_request) { return unimplemented("ToolExecutor", "requestApproval"); }
+}
+
+/**
+ * Messages the user sent that the server has not acknowledged, kept past a reload. A reload sends them again under the
+ * same `clientMessageId`, which the server stores once. A record leaves the store when the server has the message.
+ */
+export class PendingStore {
+  /** @returns {{conversationId: string, clientMessageId: string, content: string, attachments: object[]}[]} */
+  load(_conversationId) { return unimplemented("PendingStore", "load"); }
+  save(_record) { return unimplemented("PendingStore", "save"); }
+  settle(_clientMessageId) { return unimplemented("PendingStore", "settle"); }
+}
+
+/** A PendingStore that lasts as long as the page. */
+export class MemoryPendingStore extends PendingStore {
+  constructor() { super(); this.records = new Map(); }
+  load(conversationId) { return [...this.records.values()].filter(record => record.conversationId === conversationId); }
+  save(record) { this.records.set(record.clientMessageId, record); }
+  settle(clientMessageId) { this.records.delete(clientMessageId); }
 }
 
 /** Composer draft persistence: unsent text and files, per host-defined scope. */

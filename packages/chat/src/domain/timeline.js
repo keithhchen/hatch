@@ -243,17 +243,37 @@ export function withoutRepeatedSteps(messages) {
   }).reverse();
 }
 
-/** A message the user submitted that the Runtime has not yet confirmed. */
+/**
+ * A message the user submitted that the Runtime has not yet confirmed. `clientMessageId` is minted when the user sends
+ * and is the message's id everywhere. With `stableId` the placeholder carries that id, so the saved row replaces it by id;
+ * without it the placeholder is matched to the saved row by Run and role.
+ */
 export class PendingSubmission {
-  constructor({ conversationId, runId, clientMessageId, content, attachments, files }) {
+  constructor({ conversationId, runId, clientMessageId, content, attachments, files, stableId = false }) {
     this.conversationId = conversationId;
     this.runId = runId;
     this.clientMessageId = clientMessageId;
     this.content = content;
     this.attachments = attachments;
     this.files = files;
-    this.optimisticMessageId = `optimistic-${clientMessageId}`;
-    this.renderKey = `${runId}-user`;
+    this.optimisticMessageId = stableId ? clientMessageId : `optimistic-${clientMessageId}`;
+    this.renderKey = stableId ? clientMessageId : `${runId}-user`;
+    this.stableId = stableId;
+    /** The user must send again: the send failed in a way that may or may not have reached the server. */
+    this.awaitingUser = false;
+    /** Handed to the transport on this connection; a transport that outlives its connection does not hand it twice. */
+    this.dispatched = false;
+    /** This message started the Run, rather than joining one that was already running. */
+    this.leadsRun = false;
+  }
+
+  /** What survives a page reload: the words and the already-uploaded attachments, never the files. */
+  record() {
+    return { conversationId: this.conversationId, clientMessageId: this.clientMessageId, content: this.content, attachments: this.attachments };
+  }
+
+  static fromRecord(record, { runId, stableId }) {
+    return new PendingSubmission({ ...record, runId, files: [], stableId });
   }
 
   optimisticMessage() {
@@ -266,7 +286,8 @@ export class PendingSubmission {
       timestamp: new Date().toISOString(),
       attachments: this.attachments.map(({ text: _text, data_base64: _data, ...attachment }) => attachment),
       optimistic: true,
-      provisional: true
+      provisional: true,
+      state: "sending"
     };
   }
 }

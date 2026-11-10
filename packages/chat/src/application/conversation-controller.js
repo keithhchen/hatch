@@ -1,8 +1,9 @@
 import { ChatTimeline, PendingSubmission } from "../domain/timeline.js";
-import { RuntimeEventReducer, toolEventFromApproval } from "../domain/runtime-events.js";
-import { activeSnapshotRun, mergeConversationPage, validateHistoryPage, ConversationSnapshotError } from "../domain/snapshot.js";
+import { RuntimeEventReducer, isRunEvent, toolEventFromApproval } from "../domain/runtime-events.js";
+import { activeSnapshotRun, isPlaceholderMessage, isTerminalRunStatus, mergeConversationPage, runId as idOfRun, validateHistoryPage, ConversationSnapshotError } from "../domain/snapshot.js";
+import { RunText } from "../domain/run-text.js";
 import { createImmediateTextReveal, textRevealBoundary } from "../domain/text-reveal.js";
-import { MemoryDraftStore } from "../ports/index.js";
+import { MemoryDraftStore, MemoryPendingStore } from "../ports/index.js";
 import { ConversationSync } from "./conversation-sync.js";
 import { ChatError } from "./errors.js";
 import { OPEN_FREE_CHAT } from "../domain/free-chat.js";
@@ -50,12 +51,13 @@ export class ConversationController {
    * @param {import("../ports/index.js").AttachmentSource} options.attachments
    * @param {import("../ports/index.js").ToolExecutor} options.tools
    * @param {import("../ports/index.js").DraftStore} [options.drafts]
+   * @param {import("../ports/index.js").PendingStore} [options.pendingStore] sent messages the server has not acknowledged
    * @param {string} [options.draftScope]
    * @param {(error: object) => string} [options.describeError] localized text sent back with tool errors
    * @param {(options: {onReveal: Function}) => object} [options.textReveal] text pacing policy factory
    */
-  constructor({ transport, attachments, tools, drafts = new MemoryDraftStore(), draftScope = "default", describeError = error => error?.message ?? String(error), textReveal = createImmediateTextReveal, reconnectAttempts = 3, pollMs = 2000, freeChat = OPEN_FREE_CHAT }) {
-    Object.assign(this, { transport, attachments, tools, drafts, draftScope, describeError, reconnectAttempts, pollMs, freeChat });
+  constructor({ transport, attachments, tools, drafts = new MemoryDraftStore(), draftScope = "default", describeError = error => error?.message ?? String(error), textReveal = createImmediateTextReveal, reconnectAttempts = 3, pollMs = 2000, freeChat = OPEN_FREE_CHAT, pendingStore = new MemoryPendingStore() }) {
+    Object.assign(this, { transport, attachments, tools, drafts, draftScope, describeError, reconnectAttempts, pollMs, freeChat, pendingStore });
     const draft = drafts.read(draftScope);
     this.state = { ...INITIAL_CHAT_STATE, draft: draft.text, images: draft.files };
     this.listeners = new Set();
@@ -66,7 +68,11 @@ export class ConversationController {
     this.generation = 0;
     this.attempts = 0;
     this.run = null;
-    this.pending = null;
+    /** Messages sent and not yet acknowledged, by clientMessageId. */
+    this.pendings = new Map();
+    this.runText = new RunText();
+    this.hasBeenReady = false;
+    this.settleNext = false;
     this.taskStart = null;
     this.terminalRun = null;
     this.connection = null;
@@ -82,6 +88,9 @@ export class ConversationController {
   };
 
   getState = () => this.state;
+
+  /** Whether the composer takes a message while a Run is active. */
+  get steerable() { return this.transport.steerable; }
 
   get snapshotPending() {
     return Boolean(this.state.conversationId && this.state.snapshotConversationId !== this.state.conversationId);
@@ -102,7 +111,9 @@ export class ConversationController {
   publishTimeline(apply) {
     const items = apply(this.timeline);
     const runId = this.run?.id;
-    this.updateMessages(current => current.map(message => message.transient && message.run_id === runId ? { ...message, timeline: items } : message));
+    this.updateMessages(current => !runId || current.some(message => message.transient && message.run_id === runId)
+      ? current.map(message => message.transient && message.run_id === runId ? { ...message, timeline: items } : message)
+      : [...current, { ...ChatTimeline.streamingAssistantMessage(runId), timeline: items }]);
   }
 
   resetTimeline() {
@@ -152,6 +163,9 @@ export class ConversationController {
     const generation = ++this.generation;
     this.attempts = 0;
     this.run = null;
+    this.pendings.clear();
+    this.runText.reset();
+    this.hasBeenReady = false;
     this.terminalRun = null;
     this.sync.reset();
     this.reveal.discard();
@@ -167,7 +181,7 @@ export class ConversationController {
     const generation = this.generation;
     const result = await this.sync.refresh(id, {
       current: () => this.state.messages,
-      activeRunId: () => this.run?.id ?? null,
+      activeRunId: () => this.run && !this.run.provisional ? this.run.id : null,
       isCurrent: () => generation === this.generation && this.state.conversationId === id
     });
     if (!result) return { stale: true };
@@ -182,12 +196,25 @@ export class ConversationController {
       historyCursor: state.historyCursor ?? snapshot.before_cursor ?? null
     }));
     const running = activeSnapshotRun(snapshot);
+    this.endRunLostWhileAway(snapshot, running);
+    if (running && this.run?.id !== running.id) this.adoptRun(running.id);
     let projected = result.messages;
-    if (running && !projected.some(message => message.run_id === running.id && message.role === "assistant")) {
-      projected = [...projected, ChatTimeline.streamingAssistantMessage(running.id)];
-      if (this.run?.id !== running.id) this.run = { id: running.id };
+    if (this.settleNext) {
+      // The reply the live row was showing is now a saved message: the live row starts again from the next words.
+      this.settleNext = false;
+      this.resetTimeline();
+    }
+    if (running) {
+      const tail = typeof running.partial_output === "string" ? this.runText.tail(running.id, running.partial_output, this.savedText(projected, running.id)) : "";
+      if (tail) this.timeline.appendText(tail);
+      if (!projected.some(message => message.transient && message.run_id === running.id)) {
+        projected = [...projected, { ...ChatTimeline.streamingAssistantMessage(running.id), timeline: this.timeline.snapshot() }];
+      } else if (tail) {
+        projected = projected.map(message => message.transient && message.run_id === running.id ? { ...message, timeline: this.timeline.snapshot() } : message);
+      }
     }
     this.updateMessages(projected);
+    const awaited = this.awaitedRunId();
     const terminal = this.terminalRun;
     const settled = terminal && projected.some(message => message.run_id === terminal.id && message.role === "assistant" && !message.transient);
     if (settled || terminal?.failed) {
@@ -198,10 +225,66 @@ export class ConversationController {
     } else if (terminal) {
       this.setState({ activeRun: terminal.id, status: { key: "syncingReply" } });
     } else {
-      this.setState({ activeRun: running?.id ?? null, status: { key: running ? "agentReplying" : "connected" } });
+      this.setState({ activeRun: running?.id ?? awaited, status: { key: running ? "agentReplying" : awaited ? "sending" : "connected" } });
     }
-    if (firstSnapshot) this.connect();
+    if (firstSnapshot) { this.resumePending(id, projected); this.connect(); }
+    this.reconcilePending(projected);
     return { stale: false };
+  }
+
+  /** The text of this Run already in saved messages. */
+  savedText(messages, runId) {
+    return messages.filter(message => message.run_id === runId && message.role === "assistant" && !message.transient).reduce((total, message) => total + (message.content?.length ?? 0), 0);
+  }
+
+  /** The Run a sent message is still waiting to start, while the server has not said it is running. */
+  awaitedRunId() {
+    return this.run && (this.run.provisional || [...this.pendings.values()].some(submission => submission.leadsRun)) ? this.run.id : null;
+  }
+
+  /** A Run that ended while no stream was listening: its terminal event is lost, but its record says how it ended. */
+  endRunLostWhileAway(snapshot, running) {
+    const run = this.run;
+    if (!run || running || run.provisional || this.terminalRun) return;
+    const record = snapshot.runs.find(entry => idOfRun(entry) === run.id);
+    if (!record || !isTerminalRunStatus(record.status)) return;
+    this.run = null;
+    this.updateMessages(current => current.filter(message => !(message.transient && message.run_id === run.id)));
+    this.resetTimeline();
+    if (record.status === "failed") this.fail(record.failure ?? new ChatError("replyFailed"));
+  }
+
+  /**
+   * A Run the server named while the client held another id for it (the client's was provisional, or it joined a Run it did
+   * not know): everything the client keyed by the old id moves to the real one.
+   */
+  adoptRun(runId) {
+    const old = this.run?.id;
+    this.run = { id: runId };
+    if (!old || old === runId) return;
+    this.updateMessages(current => current.map(message => message.run_id === old ? { ...message, run_id: runId, ...(message.transient ? { id: `stream-${runId}` } : {}) } : message));
+    for (const submission of this.pendings.values()) if (submission.runId === old) submission.runId = runId;
+    if (this.state.activeRun === old) this.setState({ activeRun: runId });
+  }
+
+  /** After a reload: what the server did not acknowledge is sent again, under the same key. */
+  resumePending(conversationId, messages) {
+    for (const record of this.pendingStore.load(conversationId)) {
+      if (messages.some(message => message.id === record.clientMessageId)) { this.pendingStore.settle(record.clientMessageId); continue; }
+      const submission = PendingSubmission.fromRecord(record, { runId: this.run?.id ?? newId("run"), stableId: this.transport.steerable });
+      submission.leadsRun = !this.run;
+      this.pendings.set(submission.clientMessageId, submission);
+    }
+  }
+
+  /** The server's page is the authority: a message it holds is acknowledged, queued or taken up, and no longer pending. */
+  reconcilePending(messages) {
+    for (const [id, submission] of this.pendings) {
+      if (!messages.some(message => message.id === id && !isPlaceholderMessage(message))) continue;
+      this.pendings.delete(id);
+      this.pendingStore.settle(id);
+      if (submission.awaitingUser) this.writeDraft({ draft: "", images: [] });
+    }
   }
 
   /** Retry whatever failed: the first snapshot, or the live session. */
@@ -269,7 +352,8 @@ export class ConversationController {
 
   handleClose(connection, link, conversationId) {
     if (!link.live) return;
-    if (this.pending?.conversationId === conversationId) this.restoreSubmission(this.pending, true);
+    // A socket that dies takes an unacknowledged message with it; a request that outlives its stream does not.
+    if (!this.transport.steerable) for (const submission of [...this.pendings.values()]) if (submission.conversationId === conversationId) this.restoreSubmission(submission, true);
     if (this.connection === connection) this.connection = null;
     if (this.attempts >= this.reconnectAttempts) {
       this.setState({ connection: "idle" });
@@ -287,11 +371,54 @@ export class ConversationController {
   /** Prepare client authority for the run, then hand the frame to the Runtime. */
   async dispatch(connection, message) {
     await this.tools.prepareRun({ conversationId: this.state.conversationId, runId: message.runId });
-    connection.send({ ...message, localTools: this.tools.localTools });
+    await connection.send({ ...message, localTools: this.tools.localTools });
+  }
+
+  /** Hand every message the server has not acknowledged to the connection, once. */
+  dispatchPending(connection, conversationId) {
+    for (const submission of [...this.pendings.values()]) {
+      if (submission.conversationId !== conversationId || submission.awaitingUser || (this.transport.steerable && submission.dispatched)) continue;
+      this.showSubmission(submission);
+      submission.dispatched = true;
+      void this.dispatch(connection, { runId: submission.runId, clientMessageId: submission.clientMessageId, content: submission.content, attachments: submission.attachments })
+        .catch(cause => this.refuse(submission, cause));
+    }
+  }
+
+  /** The message on the page, and, when it starts the Run, the reply that is coming. */
+  showSubmission(submission) {
+    const { runId } = submission;
+    this.updateMessages(current => {
+      const withUser = current.some(entry => entry.id === submission.optimisticMessageId || (!submission.stableId && entry.run_id === runId && entry.role === "user")) ? current : [...current, submission.optimisticMessage()];
+      return !submission.leadsRun || withUser.some(entry => entry.transient && entry.run_id === runId && entry.role === "assistant")
+        ? withUser : [...withUser, ChatTimeline.streamingAssistantMessage(runId)];
+    });
+    if (submission.leadsRun && !this.run) {
+      this.run = { id: runId, provisional: this.transport.steerable };
+      this.setState({ activeRun: runId, status: { key: "sending" } });
+    }
+  }
+
+  /** A send that did not go through. An ambiguous failure keeps the key, so sending again is the same message. */
+  refuse(submission, cause) {
+    const ambiguous = this.transport.steerable && !(Number.isInteger(cause?.status) && cause.status >= 400 && cause.status < 500);
+    this.restoreSubmission(submission, ambiguous);
+    if (ambiguous) submission.awaitingUser = true;
+    this.fail(cause);
+  }
+
+  /** Drop what a retry would have reused: the user changed the draft. */
+  discardRetry() {
+    for (const [id, submission] of this.pendings) {
+      if (this.transport.steerable && !submission.awaitingUser) continue;
+      this.pendings.delete(id);
+      this.pendingStore.settle(id);
+    }
   }
 
   async handleEvent(event, connection, link, conversationId) {
     if (!link.live) return;
+    if (this.run?.provisional && event.run_id && event.run_id !== this.run.id && isRunEvent(event)) this.adoptRun(event.run_id);
     const boundary = textRevealBoundary(event);
     if (boundary === "flush") this.reveal.flush(event.run_id);
     else if (boundary === "discard") this.reveal.discard(event.run_id);
@@ -302,8 +429,14 @@ export class ConversationController {
 
   outcomes = {
     text(outcome, { event }) {
-      this.reveal.enqueue({ runId: event.run_id, assistantId: event.run_id, content: outcome.content });
+      const content = this.runText.take(event.run_id, outcome.content, outcome.offset);
+      if (!content) return;
+      this.reveal.enqueue({ runId: event.run_id, assistantId: event.run_id, content });
       this.setState({ status: outcome.status });
+    },
+    changed(outcome, { conversationId }) {
+      if (outcome.committed === "assistant") this.settleNext = true;
+      void this.refresh(conversationId).catch(cause => { if (this.state.conversationId === conversationId) this.fail(cause); });
     },
     timeline(outcome) {
       this.publishTimeline(timeline => timeline.snapshot());
@@ -338,18 +471,10 @@ export class ConversationController {
       }
       this.attempts = 0;
       this.setState({ session, connection: "open" });
-      const pending = this.pending;
-      if (pending?.conversationId === conversationId) {
-        this.updateMessages(current => {
-          const withUser = current.some(entry => entry.run_id === pending.runId && entry.role === "user") ? current : [...current, pending.optimisticMessage()];
-          return withUser.some(entry => entry.transient && entry.run_id === pending.runId && entry.role === "assistant")
-            ? withUser : [...withUser, ChatTimeline.streamingAssistantMessage(pending.runId)];
-        });
-        this.run = { id: pending.runId };
-        this.setState({ activeRun: pending.runId, status: { key: "sending" } });
-        void this.dispatch(connection, { runId: pending.runId, clientMessageId: pending.clientMessageId, content: pending.content, attachments: pending.attachments })
-          .catch(cause => { this.restoreSubmission(pending); this.fail(cause); });
-      }
+      this.dispatchPending(connection, conversationId);
+      // Whatever happened while the session was down was not heard: read it.
+      if (this.hasBeenReady) void this.refresh(conversationId).catch(cause => { if (this.state.conversationId === conversationId) this.fail(cause); });
+      this.hasBeenReady = true;
       if (this.taskStart === conversationId) {
         this.taskStart = null;
         const runId = newId("run");
@@ -366,28 +491,38 @@ export class ConversationController {
         });
       }
     },
-    accepted() {
+    accepted(outcome) {
       this.freeChat.record();
-      const submission = this.pending;
-      this.pending = null;
-      if (submission) this.updateMessages(current => current.map(entry => entry.id === submission.optimisticMessageId ? { ...entry, optimistic: false, provisional: true } : entry));
-      this.writeDraft({ draft: "", images: [] });
+      const receipt = outcome.receipt;
+      const submission = this.pendings.get(receipt.client_message_id) ?? (receipt.client_message_id || this.pendings.size !== 1 ? undefined : [...this.pendings.values()][0]);
+      if (!submission) return;
+      // The server has it now, and says whether it started a Run or joined the running one (queued until it takes it up).
+      this.pendings.delete(submission.clientMessageId);
+      this.pendingStore.settle(submission.clientMessageId);
+      this.updateMessages(current => current.map(entry => {
+        if (entry.id !== submission.optimisticMessageId) return entry;
+        const { state: _sending, ...rest } = entry;
+        return { ...rest, optimistic: false, provisional: true, ...(receipt.outcome === "steered" ? { state: "queued" } : {}) };
+      }));
+      // Only the copy of the message restored into the composer is cleared: a draft typed since is the user's.
+      if (this.state.draft === submission.content) this.writeDraft({ draft: "", images: [] });
     },
     async terminal(outcome, { event, conversationId, link }) {
       await new Promise(resolve => this.reveal.complete(event.run_id, resolve));
       if (!link.live) return;
-      const pending = this.pending;
-      if (pending?.runId === event.run_id) this.restoreSubmission(pending);
+      // A Run that ended before the server took the message that started it sends the words back; a server that steers keeps them.
+      const unaccepted = this.transport.steerable ? undefined : [...this.pendings.values()].find(submission => submission.runId === event.run_id);
+      if (unaccepted) this.restoreSubmission(unaccepted);
       else this.terminalRun = { id: event.run_id, failed: outcome.failed };
       this.run = null;
       this.setState({ runState: null });
       if (outcome.failed) this.fail(outcome.error ?? new ChatError("replyFailed"));
-      if (!pending) this.setState({ activeRun: event.run_id, status: { key: "syncingReply" } });
+      if (!unaccepted) this.setState({ activeRun: event.run_id, status: { key: "syncingReply" } });
       await this.refresh(conversationId);
     },
     session_error(outcome) {
-      const pending = this.pending;
-      if (pending && pending.runId === this.run?.id) this.restoreSubmission(pending);
+      const unaccepted = this.transport.steerable ? undefined : [...this.pendings.values()].find(submission => submission.runId === this.run?.id);
+      if (unaccepted) this.restoreSubmission(unaccepted);
       this.fail(outcome.error ?? new ChatError("connectionFailed"));
     }
   };
@@ -421,7 +556,7 @@ export class ConversationController {
   }
 
   setDraft(draft) {
-    this.pending = null;
+    this.discardRetry();
     this.writeDraft({ draft });
   }
 
@@ -430,58 +565,66 @@ export class ConversationController {
       this.fail(new ChatError("imageCountLimit"));
       return;
     }
-    this.pending = null;
+    this.discardRetry();
     this.writeDraft({ images: [...this.state.images, ...files] });
   }
 
   removeImage(file) {
-    this.pending = null;
+    this.discardRetry();
     this.writeDraft({ images: this.state.images.filter(entry => entry !== file) });
   }
 
   restoreSubmission(submission, preservePending = false) {
     if (!submission) return;
     this.updateMessages(current => current.filter(message => message.id !== submission.optimisticMessageId
-      && !(message.transient && message.run_id === submission.runId && message.role === "assistant")));
+      && !(submission.leadsRun && message.transient && message.run_id === submission.runId && message.role === "assistant")));
     this.writeDraft({ draft: submission.content, images: submission.files });
-    if (this.run?.id === submission.runId) this.run = null;
-    if (!preservePending && this.pending === submission) this.pending = null;
-    this.resetTimeline();
-    this.setState({ activeRun: null });
+    if (submission.leadsRun && this.run?.id === submission.runId) {
+      this.run = null;
+      this.resetTimeline();
+      this.setState({ activeRun: null });
+    }
+    submission.dispatched = false;
+    if (!preservePending) {
+      this.pendings.delete(submission.clientMessageId);
+      this.pendingStore.settle(submission.clientMessageId);
+    }
   }
 
   async send() {
     const { conversationId, activeRun, draft, images } = this.state;
-    if (!conversationId || this.snapshotPending || activeRun || (!draft.trim() && images.length === 0)) return;
+    const steering = this.transport.steerable && Boolean(this.run);
+    if (!conversationId || this.snapshotPending || (activeRun && !this.transport.steerable) || (!draft.trim() && images.length === 0)) return;
     const connection = this.connection;
     this.setState({ error: null });
+    let submission = null;
     try {
-      const pending = this.pending?.conversationId === conversationId ? this.pending : null;
-      const files = pending?.files ?? [...images];
-      const attachments = pending ? pending.attachments : await this.attachments.prepareAll(files);
-      const submission = pending ?? new PendingSubmission({
-        conversationId, runId: newId("run"), clientMessageId: newId("message"), content: draft, attachments, files
+      const retry = [...this.pendings.values()].find(entry => entry.conversationId === conversationId && (!this.transport.steerable || entry.awaitingUser));
+      // The message's id is minted here, when the user sends, and a retry of the same message keeps it.
+      const clientMessageId = retry?.clientMessageId ?? newId("message");
+      const files = retry?.files ?? [...images];
+      const attachments = retry ? retry.attachments : await this.attachments.prepareAll(files);
+      submission = retry ?? new PendingSubmission({
+        conversationId, runId: steering ? this.run.id : newId("run"), clientMessageId, content: draft, attachments, files, stableId: this.transport.steerable
       });
-      const { runId, clientMessageId, content } = submission;
-      this.run = { id: runId };
-      this.pending = submission;
-      this.updateMessages(current => {
-        const next = current.some(message => message.id === submission.optimisticMessageId) ? current : [...current, submission.optimisticMessage()];
-        return next.some(message => message.transient && message.run_id === runId && message.role === "assistant")
-          ? next : [...next, ChatTimeline.streamingAssistantMessage(runId)];
-      });
-      this.resetTimeline();
+      submission.leadsRun = !steering;
+      submission.awaitingUser = false;
+      const { runId, content } = submission;
+      this.pendings.set(clientMessageId, submission);
+      this.pendingStore.save(submission.record());
+      if (submission.leadsRun) { this.run = null; this.resetTimeline(); }
+      this.showSubmission(submission);
       this.writeDraft({ draft: "", images: [] });
-      this.setState({ activeRun: runId, status: { key: "sending" } });
       if (connection?.ready) {
+        submission.dispatched = true;
         await this.dispatch(connection, { runId, clientMessageId, content, attachments });
       } else {
         this.attempts = 0;
         this.reconnect();
       }
     } catch (cause) {
-      if (this.pending?.conversationId === conversationId) this.restoreSubmission(this.pending);
-      this.fail(cause);
+      if (submission) this.refuse(submission, cause);
+      else this.fail(cause);
     }
   }
 
