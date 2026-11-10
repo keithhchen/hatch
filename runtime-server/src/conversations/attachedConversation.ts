@@ -13,6 +13,7 @@ export class AttachedConversation implements Conversation {
   messages(after?: string, limit?: number) { return this.inner.messages(after, limit); }
   feedKey() { return this.inner.feedKey(); }
   get partial() { return this.inner.partial?.bind(this.inner); }
+  get retry() { return this.inner.retry?.bind(this.inner); }
   stop() { return this.inner.stop(); }
 
   replay(input: SendInput) { return this.inner.replay?.(input) ?? Promise.resolve(undefined); }

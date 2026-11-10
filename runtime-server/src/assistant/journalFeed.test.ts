@@ -66,7 +66,8 @@ test("the vocabulary names every event's Run and message, and carries a failure 
   const failure = { code: "upstream_error", message: "An upstream service failed. Reference: err_1.", reference: "err_1" };
   assert.deepEqual(studioVocabulary({ journal: at(3, "run.state" as never, { status: "failed", failure }) }), [{ type: "run_end", status: "failed", error: failure, run_id: "run-9" }]);
   assert.deepEqual(studioVocabulary({ journal: at(4, "run.state" as never, { status: "compacting" }) }).map(event => event.type), ["compacting"]);
-  assert.deepEqual(studioVocabulary({ journal: at(5, "run.created" as never, {}) }), []);
+  // A Run that answers again has no message to announce it: its creation tells observers to look again.
+  assert.deepEqual(studioVocabulary({ journal: at(5, "run.created" as never, {}) }), [{ type: "state", run_id: "run-9" }]);
 });
 
 test("a step is Chat's own words for it, never its arguments or result, and reasoning is carried in order", () => {
