@@ -726,9 +726,9 @@ function AuthPage({ mode, search, request, navigate, session }) {
           <Field label={t('Password')} hint={signingUp ? t("At least 8 characters") : undefined}><Input required minLength={8} type="password" autoComplete={signingUp ? "new-password" : "current-password"} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></Field>
           {submission.error ? <InlineError error={submission.error} /> : null}
           <Button type="submit" className="buyer-v2__button--wide web-btn-yolk" loading={submission.status === "pending"}>{presentation.action}</Button>
+          {telegramFailed ? <InlineError error={new Error(t("Telegram login failed. Try again."))} /> : null}
+          {telegram.data?.enabled ? <Button asChild variant="secondary" className="buyer-v2__button--wide"><a href={`/v1/auth/telegram/start?returnTo=${encodeURIComponent(returnTo)}`}>{t("Log in with Telegram")}</a></Button> : null}
         </form>
-        {telegramFailed ? <InlineError error={new Error("Telegram login failed. Try again.")} /> : null}
-        {telegram.data?.enabled ? <Button asChild variant="secondary" className="buyer-v2__button--wide"><a href={`/v1/auth/telegram/start?returnTo=${encodeURIComponent(returnTo)}`}>{t("Log in with Telegram")}</a></Button> : null}
         <nav className="buyer-v2__auth-links" aria-label={presentation.switchAction}>
           <RouterLink className="buyer-v2__auth-switch" to={`${signingUp ? "/sign-in" : "/sign-up"}?returnTo=${encodeURIComponent(returnTo)}`} navigate={navigate}>{presentation.switchAction}</RouterLink>
           {!signingUp ? <RouterLink className="buyer-v2__auth-help" to="/account/help" navigate={navigate}>{t("Account help")}</RouterLink> : null}
