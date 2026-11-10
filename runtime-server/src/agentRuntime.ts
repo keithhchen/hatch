@@ -92,6 +92,8 @@ export type RunContext = {
   clientAttributes?: () => ClientAttributes;
   /** Hands the Run the messages that joined it. Called between model calls, never while compacting. */
   claimSteered?: () => Promise<ConversationMessage[]>;
+  /** What the host sees right now. Appended to each model call like the reminder, and never stored. */
+  liveState?: () => Promise<string | undefined>;
 };
 
 export interface AgentRuntime {

@@ -289,14 +289,20 @@ export class PiAgentRuntime implements AgentRuntime {
         if (isHatchToolFailure(result.details)) return { isError: true };
         return undefined;
       },
-      transformContext: async (messages) => [
-        ...await compactContext(messages),
-        // Request-only: Pi sends the transformed list but keeps its own
-        // transcript, so the reminder is never stored or repeated in history.
-        piUserMessage(ctx.clientAttributes
-          ? `${runtimeReplyReminder(new Date(), input.time_zone)}\n${renderSystemReminder(ctx.clientAttributes())}`
-          : runtimeReplyReminder(new Date(), input.time_zone))
-      ]
+      transformContext: async (messages) => {
+        const live = await ctx.liveState?.();
+        return [
+          ...await compactContext(messages),
+          // Request-only: Pi sends the transformed list but keeps its own
+          // transcript, so the reminder is never stored or repeated in history.
+          piUserMessage([
+            ...(live ? [live] : []),
+            ctx.clientAttributes
+              ? `${runtimeReplyReminder(new Date(), input.time_zone)}\n${renderSystemReminder(ctx.clientAttributes())}`
+              : runtimeReplyReminder(new Date(), input.time_zone)
+          ].join("\n"))
+        ];
+      }
     });
 
     // Abort the provider-backed Pi loop as soon as the owning Runtime run is
