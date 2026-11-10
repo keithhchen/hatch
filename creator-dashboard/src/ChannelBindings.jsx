@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { ExternalLink, MessageCircle, Send, X } from "lucide-react";
 import { InlineAlert } from "@hatch/ui";
 import { friendlyError, mutationKey } from "./studioShellKit.jsx";
+import { TelegramBot, TelegramPeople } from "./TelegramBot.jsx";
 
 const CONNECTIONS = "/v1/creator/connections";
 const NAMES = { telegram: "Telegram", line: "LINE", lark: "Lark", imessage: "iMessage" };
@@ -47,13 +48,14 @@ export function ChannelBindings({ request, productId, t }) {
   if (!tiles.length && !error) return null;
   return <div className="cb">
     {tiles.map(channel => {
+      if (channel.bot) return <TelegramBot key={channel.kind} request={request} productId={productId} channel={channel} onChannels={setChannels} t={t} />;
       const Icon = ICONS[channel.kind] ?? MessageCircle;
       const name = NAMES[channel.kind] ?? channel.kind;
       return channel.linked
-        ? <div className="cb-tile is-bound" key={channel.kind} data-channel={channel.kind} data-state="bound">
+        ? <React.Fragment key={channel.kind}><div className="cb-tile is-bound" data-channel={channel.kind} data-state="bound">
           <Icon aria-hidden="true" /><span className="cb-name">{name}</span>{channel.sender_id ? <code className="cb-who">{channel.sender_id}</code> : null}
           <button type="button" className="cb-unbind" aria-label={t("sxaChannelDisconnect")} onClick={() => unbind(channel.kind)}><X aria-hidden="true" /></button>
-        </div>
+        </div>{channel.kind === "telegram" && !productId ? <TelegramPeople request={request} channel={channel} onChannels={setChannels} t={t} /> : null}</React.Fragment>
         : waiting?.kind === channel.kind
           ? <a className="cb-tile is-waiting" key={channel.kind} data-channel={channel.kind} data-state="waiting" href={waiting.url} target="_blank" rel="noopener noreferrer">
             <Icon aria-hidden="true" /><span className="cb-name">{name}</span><ExternalLink aria-hidden="true" />

@@ -9,7 +9,7 @@ export const isChannelKind = (value: string): value is ChannelKind => (CHANNEL_K
 export type TaskButtonAction = "approve" | "decline";
 export type Button = { label: string; taskId: string; action: TaskButtonAction };
 /** One message to a platform. Adapters send it as given: the renderer has already made it fit `capabilities()`. */
-export type OutboundMessage = { text: string; buttons?: Button[]; replyTo?: string };
+export type OutboundMessage = { text: string; buttons?: Button[]; replyTo?: string; /** One button that opens a web page, such as a sign-in. */ link?: { label: string; url: string } };
 
 /** Where on a platform: the thread a message lives in, and the person who sent it. Permission follows the sender. */
 export type PlatformAddress = Omit<ChannelAddress, "connectionId">;
@@ -68,6 +68,8 @@ export interface ChannelAdapter {
   readonly kind: ChannelKind;
   /** Empty for our official account; the account id when the Expert brings their own app. */
   readonly scope: string;
+  /** What people call this account on the platform (a bot's username), when it has one. */
+  readonly handle?: string;
   readonly maxFileBytes: number;
   capabilities(): ChannelCapabilities;
   available(): boolean;

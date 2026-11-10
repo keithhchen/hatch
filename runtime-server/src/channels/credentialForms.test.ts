@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CREDENTIAL_FORMS, isTenantForm, readCredentials, type OwnAppForm } from "./credentialForms.js";
+import { CREDENTIAL_FORMS, isPerProduct, isTenantForm, readCredentials, type OwnAppForm } from "./credentialForms.js";
 import { CHANNEL_KINDS } from "./types.js";
 
 const KEY = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
 
 test("a form exists where the Expert brings their own app, or their own tenant of a shared one", () => {
   const kinds = Object.keys(CREDENTIAL_FORMS) as Array<keyof typeof CREDENTIAL_FORMS>;
-  assert.deepEqual(kinds.filter(kind => !isTenantForm(CREDENTIAL_FORMS[kind]!)).sort(), ["feishu", "lark", "wechatkf", "wecom"]);
+  assert.deepEqual(kinds.filter(kind => !isTenantForm(CREDENTIAL_FORMS[kind]!)).sort(), ["feishu", "lark", "telegram", "wechatkf", "wecom"]);
+  assert.deepEqual(kinds.filter(kind => isPerProduct(CREDENTIAL_FORMS[kind])), ["telegram"], "only a Product's bot is made by hand for each Product");
   assert.deepEqual(kinds.filter(kind => isTenantForm(CREDENTIAL_FORMS[kind]!)).sort(), ["messenger", "whatsapp"]);
   for (const kind of kinds) assert.ok(CHANNEL_KINDS.includes(kind as never));
 });

@@ -178,8 +178,8 @@ export class AssistantService implements StudioOperations, InterviewDesk {
    * The Expert said something in a chat: it steers the Assistant's Run or starts one, atomically. `id` is the key a retry
    * reuses, so a platform event delivered twice is one message. `system` is for what the Expert did without typing it, such as a button.
    */
-  async hear(accountId: string, input: { id: string; source: ExpertSource; parts: ContentPart[]; messageRef?: string; system?: boolean }): Promise<SentMessage> {
-    if (!input.system) await this.deps.state.expertSpoke(accountId, { source: input.source, at: new Date().toISOString(), ...(input.messageRef ? { messageRef: input.messageRef } : {}) });
+  async hear(accountId: string, input: { id: string; source: ExpertSource; parts: ContentPart[]; messageRef?: string; system?: boolean; /** Someone the Expert authorized, not the Expert: where the Expert was last is unchanged. */ guest?: true }): Promise<SentMessage> {
+    if (!input.system && !input.guest) await this.deps.state.expertSpoke(accountId, { source: input.source, at: new Date().toISOString(), ...(input.messageRef ? { messageRef: input.messageRef } : {}) });
     const client = { client: input.source === "web" ? "web" as const : "im" as const };
     return input.system ? this.chat.sayAsSystem(accountId, textOf(input.parts), input.id).then(sent => sent) : this.chat.say(accountId, { id: input.id, parts: input.parts, client });
   }

@@ -136,6 +136,15 @@ export async function createDashboardApp(options = {}) {
   const recordTelemetry = (eventName, attributes, idempotencyKey) => telemetry
     .record(eventName, attributes, { idempotencyKey })
     .catch(() => undefined);
+  const startWebSession = async (request, response, requestId, auth) => {
+    const profile = publicProfile(auth.account);
+    const webSession = await portalState.createWebSession(auth.token, profile, {
+      registryTokenCiphertext: encryptOAuthSecret(auth.token, oauthStateKey)
+    });
+    await recordTelemetry("auth_completed", { request_id: requestId }, `auth-completed:${webSession.session_id}`);
+    setWebSessionCookies(request, response, webSession.session_id);
+    return profile;
+  };
   const fetchImpl = options.fetchImpl ?? fetch;
   const factoryRequestMaxBytes = options.factoryRequestMaxBytes ?? CREATOR_FACTORY_JSON_BODY_MAX_BYTES;
   const configuredPaymentMode = options.paymentMode ?? process.env.HATCH_COMMERCE_PAYMENT_MODE ?? "disabled";
@@ -859,6 +868,42 @@ export async function createDashboardApp(options = {}) {
         }
         return servePortalIndex(response, metadata, portalStatus, noScriptFallback);
       }
+      if (request.method === "GET" && url.pathname === "/v1/auth/telegram") {
+        const status = await registryRequest(registryUrl, "/v1/auth/telegram", { fetchImpl }).catch(() => undefined);
+        return send(response, 200, { enabled: status?.enabled === true });
+      }
+      if (request.method === "GET" && url.pathname === "/v1/auth/telegram/start") {
+        try {
+          const started = await registryRequest(registryUrl, "/v1/auth/telegram/start", {
+            method: "POST",
+            body: JSON.stringify({ claim: url.searchParams.get("claim") || undefined, return_to: safeLocalPath(url.searchParams.get("returnTo")) }),
+            fetchImpl
+          });
+          response.setHeader("set-cookie", telegramStateCookie(request, started.state, 600));
+          return redirect(response, started.authorize_url);
+        } catch {
+          return redirect(response, "/sign-in?telegram=failed");
+        }
+      }
+      if (request.method === "GET" && url.pathname === "/v1/auth/telegram/callback") {
+        const state = url.searchParams.get("state") ?? "";
+        const expected = requestCookies(request).hatch_tg_state ?? "";
+        const clearState = telegramStateCookie(request, "", 0);
+        try {
+          if (!state || !expected || !safeEqual(state, expected) || url.searchParams.get("error")) throw new Error("telegram_state_rejected");
+          const auth = await registryRequest(registryUrl, "/v1/auth/telegram/callback", {
+            method: "POST",
+            body: JSON.stringify({ code: url.searchParams.get("code") ?? "", state }),
+            fetchImpl
+          });
+          await startWebSession(request, response, requestId, auth);
+          response.setHeader("set-cookie", [...response.getHeader("set-cookie"), clearState]);
+          return redirect(response, safeLocalPath(auth.return_to));
+        } catch {
+          response.setHeader("set-cookie", clearState);
+          return redirect(response, "/sign-in?telegram=failed");
+        }
+      }
       if (request.method === "POST" && ["/v1/auth/login", "/v1/auth/sign-in"].includes(url.pathname)) {
         const originError = crossSiteMutationError(request);
         if (originError) return send(response, originError.status, originError.body);
@@ -869,12 +914,7 @@ export async function createDashboardApp(options = {}) {
           body: JSON.stringify({ email: body.email, password: body.password }),
           fetchImpl
         });
-        const profile = publicProfile(auth.account);
-        const webSession = await portalState.createWebSession(auth.token, profile, {
-          registryTokenCiphertext: encryptOAuthSecret(auth.token, oauthStateKey)
-        });
-        await recordTelemetry("auth_completed", { request_id: requestId }, `auth-completed:${webSession.session_id}`);
-        setWebSessionCookies(request, response, webSession.session_id);
+        const profile = await startWebSession(request, response, requestId, auth);
         return send(response, 200, {
           ...(exposeBearerTokens ? { token: auth.token } : {}),
           profile
@@ -894,12 +934,7 @@ export async function createDashboardApp(options = {}) {
           }),
           fetchImpl
         });
-        const profile = publicProfile(auth.account);
-        const webSession = await portalState.createWebSession(auth.token, profile, {
-          registryTokenCiphertext: encryptOAuthSecret(auth.token, oauthStateKey)
-        });
-        await recordTelemetry("auth_completed", { request_id: requestId }, `auth-completed:${webSession.session_id}`);
-        setWebSessionCookies(request, response, webSession.session_id);
+        const profile = await startWebSession(request, response, requestId, auth);
         return send(response, 201, {
           ...(exposeBearerTokens ? { token: auth.token } : {}),
           profile
@@ -4086,6 +4121,20 @@ function cookieCsrfError(request, sessionToken = requestCookies(request).hatch_w
     };
   }
   return undefined;
+}
+
+function telegramStateCookie(request, value, maxAge) {
+  return `hatch_tg_state=${encodeURIComponent(value)}; Path=/v1/auth/telegram; SameSite=Lax; Max-Age=${maxAge}${requestIsSecure(request) ? "; Secure" : ""}; HttpOnly`;
+}
+
+function safeLocalPath(value) {
+  const candidate = String(value ?? "");
+  return candidate.startsWith("/") && !candidate.startsWith("//") && !candidate.includes("\\") && !/[\u0000-\u001f]/.test(candidate) ? candidate : "/";
+}
+
+function redirect(response, location) {
+  response.writeHead(302, { ...response.getHeaders(), location, "cache-control": "no-store" });
+  response.end();
 }
 
 function setWebSessionCookies(request, response, token) {

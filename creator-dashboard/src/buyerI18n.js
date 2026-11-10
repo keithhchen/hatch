@@ -106,6 +106,8 @@ const ENTRIES = {
   "Hatch account": ["Hatch 账户", "Hatch アカウント"],
   "Signed-in account": ["已登录的账户", "ログイン中のアカウント"],
   "Account help": ["账户帮助", "アカウントヘルプ"],
+  "Log in with Telegram": ["使用 Telegram 登录", "Telegram でログイン"],
+  "Telegram login failed. Try again.": ["Telegram 登录失败，请重试。", "Telegram ログインに失敗しました。もう一度お試しください。"],
   "Edit name": ["修改姓名", "名前を変更"],
   Save: ["保存", "保存する"],
   "Enter a name.": ["请输入姓名。", "名前を入力してください。"],

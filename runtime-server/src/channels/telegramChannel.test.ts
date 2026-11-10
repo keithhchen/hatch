@@ -15,7 +15,7 @@ function channel(respond: () => Response = () => Response.json({ ok: true, resul
     calls.push({ url, body: init.body ? JSON.parse(init.body as string) : undefined });
     return respond();
   }) as typeof fetch;
-  return { calls, telegram: new TelegramChannel({ token: "tok", username: "HatchBot", webhookSecret: "s3cret", ...config }, fake) };
+  return { calls, telegram: new TelegramChannel({ token: "tok", username: "HatchBot", webhookSecret: "s3cret", ...config }, "", fake) };
 }
 const parse = (update: unknown) => channel().telegram.parse(Buffer.from(JSON.stringify(update))).events;
 const privateMessage = (extra: object) => ({ update_id: 1, message: { message_id: 10, chat: { id: 42, type: "private" }, from: { id: 42 }, ...extra } });
@@ -152,7 +152,21 @@ test("download resolves the file path and fetches the bytes", async () => {
     urls.push(url);
     return url.endsWith("/getFile") ? Response.json({ ok: true, result: { file_path: "photos/a.jpg" } }) : new Response(Buffer.from("bytes"));
   }) as unknown as typeof fetch;
-  const telegram = new TelegramChannel({ token: "tok", username: "HatchBot", webhookSecret: "s" }, fake);
+  const telegram = new TelegramChannel({ token: "tok", username: "HatchBot", webhookSecret: "s" }, "", fake);
   assert.deepEqual(await telegram.download({ ref: "f1", name: "a.jpg" }), Buffer.from("bytes"));
   assert.deepEqual(urls, ["https://api.telegram.org/bottok/getFile", "https://api.telegram.org/file/bottok/photos/a.jpg"]);
+});
+
+test("a link goes out as a URL button; the bot, its scope and webhook are managed through the Bot API", async () => {
+  const { telegram, calls } = channel(() => Response.json({ ok: true, result: { username: "shop_bot" } }));
+  await telegram.send(TO, { text: "Sign in", link: { label: "Log in", url: "https://site.test/v1/auth/telegram/start?claim=c" } }, "k");
+  assert.deepEqual(calls[0]!.body.reply_markup, { inline_keyboard: [[{ text: "Log in", url: "https://site.test/v1/auth/telegram/start?claim=c" }]] });
+  assert.equal(await telegram.probe(), "shop_bot");
+  await telegram.setWebhook("https://site.test/hook", "sec");
+  assert.deepEqual(calls.at(-1)!.body, { url: "https://site.test/hook", secret_token: "sec", allowed_updates: ["message", "callback_query"] });
+  await telegram.deleteWebhook();
+  assert.deepEqual(calls.map(call => call.url.split("/").pop()), ["sendMessage", "getMe", "setWebhook", "deleteWebhook"]);
+  const bot = new TelegramChannel({ token: "t", username: "shop_bot", webhookSecret: "s" }, "scope-1");
+  assert.deepEqual([bot.scope, bot.handle], ["scope-1", "shop_bot"]);
+  await assert.rejects(channel(() => Response.json({ ok: true, result: {} })).telegram.probe(), /did not say which bot/);
 });

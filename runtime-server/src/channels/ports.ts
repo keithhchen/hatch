@@ -1,5 +1,5 @@
 import type { AgentTarget, ChannelAddress, Principal } from "../surfaces/contract.js";
-import type { ChannelConnection } from "./connections.js";
+import type { ChannelConnection, Role } from "./connections.js";
 import type { ChannelAdapter, ChannelKind, InboundEvent, OutboundMessage } from "./types.js";
 
 /** One authorized event on its way to the Agent that answers it. */
@@ -8,6 +8,8 @@ export type Inbound = {
   id: string;
   connection: ChannelConnection;
   principal: Principal;
+  /** Who is speaking, as the Connection knows them: the owner, or a guest the owner invited. */
+  speaker: { role: Role; label?: string };
   address: ChannelAddress;
   event: InboundEvent;
   adapter: ChannelAdapter;
@@ -24,8 +26,8 @@ export type ReplyPolicy = { /** A Run that said nothing sends nothing. */ quietW
 /** Port: the Agent behind a Connection. One per kind of AgentTarget. Throwing returns the event to the queue. */
 export interface TargetHandler {
   handle(inbound: Inbound): Promise<Handled>;
-  /** What to say once someone has linked to this Connection. */
-  linked(connection: ChannelConnection): Promise<string>;
+  /** What to say once someone has linked to this Connection, as the owner or as a guest. */
+  linked(connection: ChannelConnection, role: Role): Promise<string>;
   /** How the final reply of one of this Agent's Runs is sent. Without it, every Run's reply is sent as it is. */
   replyPolicy?(connection: ChannelConnection, runId: string): Promise<ReplyPolicy>;
 }

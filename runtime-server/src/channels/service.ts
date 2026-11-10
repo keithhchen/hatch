@@ -9,7 +9,7 @@ import { PostgresOutbox, type Outbox } from "./outbox.js";
 import type { AssistantChannels, ChatGateway, TargetHandler, TargetKind } from "./ports.js";
 import { ChatReplies } from "./productTarget.js";
 import { PostgresRateLimiter, type RateLimiter } from "./rateLimiter.js";
-import { ChannelRouter } from "./router.js";
+import { ChannelRouter, type Claim, type SignIn } from "./router.js";
 import { CHANNEL_KINDS, type ChannelAdapter, type ChannelKind, type InboundEvent, type PullNotice } from "./types.js";
 
 /** A crashed process frees its event after this; a live one renews the lease every third of it while it works. */
@@ -25,7 +25,15 @@ export async function openChannelStores(pool: Pool, scopeOf: (ownerAccountId: st
   return { connections, inbox: await PostgresInbox.open(pool), outbox: await PostgresOutbox.open(pool), limiter: await PostgresRateLimiter.open(pool) };
 }
 
-export type ChannelStatus = { kind: ChannelKind; available: boolean; linked: boolean; state?: OwnedConnection["state"]; lastEventAt?: string; senderId?: string };
+export type ChannelStatus = {
+  kind: ChannelKind; available: boolean; linked: boolean; state?: OwnedConnection["state"]; lastEventAt?: string; senderId?: string;
+  /** Credentials are saved for this Connection. */
+  configured: boolean;
+  /** What people call the account on the platform (a bot's username). */
+  handle?: string;
+  /** Who the owner invited to their Assistant here. */
+  people: Array<{ id: string; label: string }>;
+};
 
 /**
  * The channel layer: inbound events are stored, then routed to the Agent behind their Connection; replies are queued
@@ -42,14 +50,14 @@ export class ChannelService implements AssistantChannels {
   private inboxLoop?: ReturnType<typeof pollLoop>;
   private outboxLoop?: ReturnType<typeof pollLoop>;
 
-  constructor(private deps: ChannelStores & { hub: ChannelHub; scopeOf: (ownerAccountId: string, channel: ChannelKind) => string; gateway?: ChatGateway; /** Whether the account owns the Product: only its owner binds a chat to it. */ ownsProduct?: (accountId: string, productId: string) => Promise<boolean>; now?: () => Date; rates?: ConstructorParameters<typeof Dispatcher>[0]["rates"]; onError?: (error: unknown) => void }) {
+  constructor(private deps: ChannelStores & { hub: ChannelHub; scopeOf: (ownerAccountId: string, channel: ChannelKind) => string; /** Whose Connection a Product's chat on this platform is: its own bot's public one, or the Expert's own. Default: the Expert's. */ audienceOf?: (channel: ChannelKind, target: AgentTarget) => "self" | "public"; signIn?: SignIn; claim?: Claim; gateway?: ChatGateway; /** Whether the account owns the Product: only its owner binds a chat to it. */ ownsProduct?: (accountId: string, productId: string) => Promise<boolean>; now?: () => Date; rates?: ConstructorParameters<typeof Dispatcher>[0]["rates"]; onError?: (error: unknown) => void }) {
     this.connections = deps.connections;
     this.hub = deps.hub;
     this.inbox = deps.inbox;
     this.dispatcher = new Dispatcher({ outbox: deps.outbox, hub: deps.hub, limiter: deps.limiter, connections: deps.connections, inbox: deps.inbox, ...(deps.now ? { now: deps.now } : {}), ...(deps.rates ? { rates: deps.rates } : {}), onQueued: () => this.outboxLoop?.wake() });
     this.router = new ChannelRouter({
-      hub: deps.hub, connections: deps.connections,
-      notify: async (to, text, replyTo) => { await this.dispatcher.send({ ...to, kind: "notice", message: { text, ...(replyTo ? { replyTo } : {}) } }); },
+      hub: deps.hub, connections: deps.connections, ...(deps.signIn ? { signIn: deps.signIn } : {}), ...(deps.claim ? { claim: deps.claim } : {}),
+      notify: async (to, text, replyTo, link) => { await this.dispatcher.send({ ...to, kind: "notice", message: { text, ...(replyTo ? { replyTo } : {}), ...(link ? { link } : {}) } }); },
     });
     if (deps.gateway) this.replies = new ChatReplies({
       gateway: deps.gateway, inbox: deps.inbox, dispatcher: this.dispatcher, compacting: (runId, compactionId) => this.compaction({ runId, compactionId }),
@@ -114,7 +122,7 @@ export class ChannelService implements AssistantChannels {
 
   /** A connect code for Studio to show, for the Assistant or one of the account's Products: the account sends it to us from the platform. */
   async connect(accountId: string, kind: ChannelKind, target: AgentTarget = STUDIO_TARGET): Promise<{ code: string; url?: string }> {
-    const adapter = await this.deps.hub.get(kind, this.deps.scopeOf(accountId, kind));
+    const adapter = await this.deps.hub.get(kind, await this.scopeFor(accountId, kind, target));
     if (!adapter) throw Object.assign(new Error(`${kind} is not available.`), { status: 503, code: "channel_unavailable" });
     if (target.kind === "product" && !await this.deps.ownsProduct?.(accountId, target.productId)) throw Object.assign(new Error("Product was not found."), { status: 404, code: "product_not_found" });
     const code = await this.connections.issueCode(accountId, kind, target, this.deps.now?.());
@@ -124,15 +132,55 @@ export class ChannelService implements AssistantChannels {
 
   disconnect(accountId: string, kind: ChannelKind, target: AgentTarget = STUDIO_TARGET): Promise<void> { return this.connections.revoke(accountId, kind, target); }
 
+  /** The Connection the account holds on a platform for a target: the Expert's own, or a Product's public one where it has a bot of its own. */
+  private ownedFor(owned: OwnedConnection[], kind: ChannelKind, target: AgentTarget): OwnedConnection | undefined {
+    const audience = this.deps.audienceOf?.(kind, target) ?? "self";
+    return owned.find(connection => connection.channel === kind && connection.audience === audience && targetKey(connection.target) === targetKey(target));
+  }
+
+  /** Where the account's chats on a platform live: under the scope its saved credentials name, otherwise the platform's default. */
+  private async scopeFor(accountId: string, kind: ChannelKind, target: AgentTarget): Promise<string> {
+    const own = this.ownedFor(await this.connections.owned(accountId), kind, target);
+    return own?.hasCredentials ? own.scope : this.deps.scopeOf(accountId, kind);
+  }
+
   async view(accountId: string, target: AgentTarget = STUDIO_TARGET): Promise<ChannelStatus[]> {
     const owned = await this.connections.owned(accountId);
+    const guests = target.kind === "assistant" ? await this.connections.guests(accountId) : [];
     return Promise.all(CHANNEL_KINDS.map(async kind => {
-      const own = owned.find(connection => connection.channel === kind && connection.audience === "self" && targetKey(connection.target) === targetKey(target));
+      const own = this.ownedFor(owned, kind, target);
+      const adapter = await this.deps.hub.get(kind, own?.hasCredentials ? own.scope : this.deps.scopeOf(accountId, kind));
       return {
-        kind, available: Boolean(await this.deps.hub.get(kind, this.deps.scopeOf(accountId, kind))), linked: Boolean(own?.linked && own.state !== "revoked"),
+        kind, available: Boolean(adapter), linked: Boolean(own?.linked && own.state !== "revoked"), configured: Boolean(own?.hasCredentials && own.state !== "revoked"),
+        ...(adapter?.handle ? { handle: adapter.handle } : {}),
+        people: guests.filter(guest => guest.channel === kind).map(({ id, label }) => ({ id, label })),
         ...(own ? { state: own.state } : {}), ...(own?.lastEventAt ? { lastEventAt: own.lastEventAt } : {}), ...(own?.linked && own.senderId ? { senderId: own.senderId } : {}),
       };
     }));
+  }
+
+  /** The owner invites one more person to their Assistant: a single-use link to send them. */
+  async invite(accountId: string, kind: ChannelKind, label: string): Promise<{ code: string; url?: string }> {
+    const adapter = await this.deps.hub.get(kind, await this.scopeFor(accountId, kind, STUDIO_TARGET));
+    const code = adapter && await this.connections.invite(accountId, kind, label.replace(/[\[\]\r\n]/g, " ").trim().slice(0, 40) || "?", this.deps.now?.());
+    if (!adapter || !code) throw Object.assign(new Error(`${kind} is not connected.`), { status: 409, code: "channel_not_connected" });
+    const url = adapter.connectUrl(code) ?? adapter.chatUrl?.();
+    return { code, ...(url ? { url } : {}) };
+  }
+
+  dismiss(accountId: string, kind: ChannelKind, identityId: string): Promise<boolean> { return this.connections.dismiss(accountId, kind, identityId); }
+
+  /**
+   * Someone the platform vouched for (a sign-in that named them) is bound to the Assistant, as its owner or as the guest an invite let in,
+   * and told so in the chat they came from. Only our own shared account does this: the chat is the sender's own.
+   */
+  async admit(kind: ChannelKind, who: { senderId: string; threadId: string }, grant: { account: string } | { invite: string }): Promise<void> {
+    const adapter = await this.deps.hub.get(kind);
+    if (!adapter) throw Object.assign(new Error(`${kind} is not available.`), { status: 503, code: "channel_unavailable" });
+    const code = "invite" in grant ? grant.invite : await this.connections.issueCode(grant.account, kind, STUDIO_TARGET, this.deps.now?.());
+    const linked = await this.connections.redeem(kind, adapter.scope, code, who, this.deps.now?.());
+    if (!linked) throw Object.assign(new Error("This invite has expired or was already used."), { status: 410, code: "invite_expired" });
+    await this.dispatcher.send({ connectionId: linked.id, channel: kind, scope: linked.scope, address: who, kind: "notice", message: { text: await this.router.greeting(linked) } });
   }
 
   // ── The Assistant ──────────────────────────────────────────────────────
