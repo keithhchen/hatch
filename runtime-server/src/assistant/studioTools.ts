@@ -2,7 +2,8 @@ import { z } from "zod";
 import type { HostToolRunner } from "../serverTools.js";
 import { describeTool, type ClientGroup } from "../surfaces/contract.js";
 import type { ToolDefinition } from "../tools.js";
-import type { AgentChange } from "./catalog.js";
+import type { Todo } from "../factoryAgents/store.js";
+import type { AgentChange, CatalogAgent } from "./catalog.js";
 import type { AssistantTask, TaskOrigin } from "./tasks.js";
 
 /** Studio is operated from these clients. A Product's customers never reach it. */
@@ -11,15 +12,20 @@ export const STUDIO_CLIENTS: readonly ClientGroup[] = ["web", "cli", "mcp", "im"
 export const WORKER_KINDS = ["interview", "content", "research", "agent_research", "build", "evaluate"] as const;
 export type WorkerKind = typeof WORKER_KINDS[number];
 
+/** An Agent as the Assistant sees it: what it promises, whether it is live, and how far its interview has got. */
+export type AgentOverview = CatalogAgent & { live: unknown; interview_outline: Todo[] };
+
 /** What the Studio tools need from the Assistant: operating the Expert's Products and tasks. */
 export interface StudioOperations {
-  agents(accountId: string): Promise<unknown>;
+  agents(accountId: string): Promise<AgentOverview[]>;
   openTasks(accountId: string): Promise<AssistantTask[]>;
   createAgent(accountId: string, name: string, promise: string): Promise<unknown>;
   propose(accountId: string, productId: string, change: AgentChange, origin: TaskOrigin): Promise<AssistantTask>;
   dispatch(accountId: string, kind: WorkerKind, productId: string | undefined, instruction: string, origin: TaskOrigin): Promise<AssistantTask>;
   /** One line per kind, for the start_task description. */
   describeWorker(kind: WorkerKind): string;
+  /** Whether the kind works on one Agent, so it must be told which. */
+  needsAgent(kind: WorkerKind): boolean;
   /** A kind that takes over the conversation: starting it ends the Assistant's turn. */
   handsOver(kind: WorkerKind): boolean;
   excludeSource(accountId: string, source: string, reason?: string): Promise<void>;
@@ -50,6 +56,26 @@ const text = (min: number, max: number) => z.string().min(min).max(max);
 
 const taskView = (task: AssistantTask) => ({ id: task.id, kind: task.kind, status: task.status, needs: task.needs, agent: task.productId, summary: task.summary, questions: task.payload.questions, error: task.lastError, updated_at: task.updatedAt });
 
+/** Why an Agent may not be built yet, or undefined when its interview is finished and confirmed (every outline item ✓). */
+const notReadyToBuild = (agent: AgentOverview): string | undefined => {
+  const open = agent.interview_outline.filter(item => item.status !== "completed").map(item => item.title);
+  if (!agent.interview_outline.length) return `「${agent.name}」还没访谈过，不能构建。先派 interview。`;
+  if (open.length) return `「${agent.name}」的访谈大纲还有没聊完的：${open.join("、")}。构建只依据专家确认过的访谈，先派 interview 聊完。`;
+};
+
+/** The Agent a task is about: the one named (by id or by name), else the only one the Expert has. */
+const targetAgent = (agents: AgentOverview[], agentId: string | undefined): { agent?: AgentOverview; refusal?: string } => {
+  const named = agentId?.trim();
+  if (named) {
+    const found = agents.find(agent => agent.productId === named) ?? agents.find(agent => agent.name === named);
+    return found ? { agent: found } : { refusal: `没有这个 Agent：${named}。${agentChoices(agents)}` };
+  }
+  if (agents.length === 1) return { agent: agents[0] };
+  return { refusal: agents.length ? `这件事要指定 Agent。${agentChoices(agents)}` : "专家还没有 Agent，先用 create_agent 建一个。" };
+};
+
+const agentChoices = (agents: AgentOverview[]) => `专家有这几个（名字 → id）：${agents.map(agent => `「${agent.name}」 → ${agent.productId}`).join("；")}。请再调用一次，把 agent_id 设成其中一个。`;
+
 const done = (value: unknown): Record<string, unknown> => ({ output: typeof value === "string" ? value : JSON.stringify(value) });
 
 /** The Assistant's tools, declared once: the set and its order never change within a conversation. */
@@ -77,11 +103,20 @@ export function studioTools(ops: StudioOperations): StudioTool[] {
         return done(await created(call, await ops.propose(call.accountId, input.agent_id, { release: input.release, name: input.name, promise: input.promise, pricing: input.pricing, briefSpec: input.opening_questions }, await call.origin())));
       } },
     { name: "start_task", readOnly: false,
-      schema: z.object({ kind: z.enum(WORKER_KINDS), agent_id: z.string().optional(), instruction: text(1, 4000).describe("要做什么、专家的原话、为什么现在做") }).strict(),
-      description: `派一件事，立刻返回，做完会告诉你。interview 例外：它接管和专家的对话，你这一轮随即结束，聊完才交回给你。${WORKER_KINDS.map(kind => ops.describeWorker(kind)).join("；")}。`,
+      schema: z.object({ kind: z.enum(WORKER_KINDS), agent_id: z.string().optional().describe("要做哪个 Agent 的事：Agent 的 id，或它的名字。interview、build、content、evaluate、agent_research 在专家有两个以上 Agent 时必填；只有一个 Agent 时可省；research 不用写"), instruction: text(1, 4000).describe("要做什么、专家的原话、为什么现在做") }).strict(),
+      description: `派一件事，立刻返回，做完会告诉你。派活的这一轮不写预告，也不写"我这就""接下来"这类话。interview 例外：它接管和专家的对话，你这一轮随即结束，聊完才交回给你，派出后一个字都不要再说。build 只在这个 Agent 的访谈大纲全是 ✓ 后才会接受。专家有两个以上 Agent 时，除 research 外都必须写 agent_id（id 或名字，用 list_agents 看）；只有一个时可以不写。${WORKER_KINDS.map(kind => ops.describeWorker(kind)).join("；")}。`,
       run: async (call, args) => {
         const input = args as { kind: WorkerKind; agent_id?: string; instruction: string };
-        const task = await ops.dispatch(call.accountId, input.kind, input.agent_id, input.instruction, await call.origin());
+        let agentId = input.agent_id;
+        if (ops.needsAgent(input.kind)) {
+          const agents = await ops.agents(call.accountId);
+          const { agent, refusal } = targetAgent(agents, agentId);
+          if (refusal) throw new Error(refusal);
+          agentId = agent?.productId ?? agentId;
+          const unready = input.kind === "build" && agent ? notReadyToBuild(agent) : undefined;
+          if (unready) throw new Error(unready);
+        }
+        const task = await ops.dispatch(call.accountId, input.kind, agentId, input.instruction, await call.origin());
         return { ...done(await created(call, task)), ...(ops.handsOver(input.kind) ? { ends_turn: true } : {}) };
       } },
     { name: "exclude_source", readOnly: false, schema: z.object({ source: text(1, 500), reason: z.string().max(500).optional() }).strict(),

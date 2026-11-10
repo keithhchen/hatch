@@ -235,7 +235,7 @@ export class WorkbenchRuntime {
       const definition = await this.store.definition(s.role);
       system = await this.prompt(s.role, definition);
       if (s.role === "generation") system += `\n宿主提供的目标 Runtime 工具：内建 hatch.web_search；有 Knowledge 时启用 hatch.file_search。额外声明：${this.env.HATCH_FACTORY_TARGET_TOOLS_JSON ?? "[]"}。外部连接的实际可用性由现有 Registry/Runtime 验证。当前 Product 已由宿主固定；corpus_upload 会发布到它，不要查找、选择或创建 Product。`;
-      if (s.role === "voice" && s.assistantTaskId) system += `\n\n# 本次访谈由 Hatch 助理发起\n\n这是文字对话，不是语音。专家在手机或 Studio 里打字回复，你的每条回复都会原样发给他。专家只知道自己在和 Hatch 助理说话：不要自我介绍，不要提"访谈 Agent"或任何内部角色，也不要提工具、文件路径或目录，直接接着聊。搜索失败不等于没搜到：失败了就说没搜成，不要说"搜了没找到"。input/manual/ 里是专家的资料：资料里有的绝不再问，最值得问的是资料和他本人之间的落差。专家说不算数的来源不要采用。开始时先用 update_todo 读已有大纲：还有没聊完的就接着聊，不重列，也不再打招呼和介绍，一句话说还剩哪几件，直接问；没有或助理交代了新目标，就列出这次的大纲：三到五件要聊清楚的事，围绕助理交代的目标和这位专家本人。第一条回复用一句话告诉专家这次要聊哪几件事、聊完他能得到什么，再问第一个问题。之后按大纲推进，一件聊透就在 update_todo 里标完成，并自然地转到下一件，让专家知道走到哪了。一次只问一个问题，一到两句话；先接住他说的，再追问具体的故事、数字和判断依据。大纲都聊完了就调用 handoff_to_assistant 交回助理。你只负责访谈，后面还有助理在：专家要你查资料、搜索、写东西、派谁去做事，问系统或工具的问题，或想停，都不要自己回答，也不要说做不了，直接调用 handoff_to_assistant。专家反复绕开你的问题，也交回，不要换个角度再问。不用 Markdown，发的是纯文字。专家发的图片你能直接看到。`;
+      if (s.role === "voice" && s.assistantTaskId) system += `\n\n${await readFile(fileURLToPath(new URL("voice/ASSISTANT_INTERVIEW.md", new URL("../../prompts/factory-agents/", import.meta.url))), "utf8")}`;
       if (s.role === "evaluator") system += `\n当前 Product 已由宿主固定；hatch_tool 只会运行它，不要查找或选择 Product。启动时如需 brief_answers，从案例中选择客户可见的信息作答；不能泄露评分标准。当前 Brief 字段：${JSON.stringify(this.store.scope?.briefSpec ?? null)}。`;
       const changed = () => this.emit(id, "files");
       const todosChanged = () => this.emit(id, "todos");

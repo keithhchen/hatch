@@ -95,7 +95,7 @@ function scriptedWorkers(script: (context: Context, call: number) => WorkerStep)
 
 const userTexts = (context: Context) => context.messages.filter(message => message.role === "user").map(message => typeof message.content === "string" ? message.content : message.content.map(block => block.type === "text" ? block.text : "").join("")).filter(text => !text.startsWith("<system-reminder>"));
 
-async function setup(options: { model: Parameters<typeof scriptedModel>[0]; worker?: Parameters<typeof scriptedWorkers>[0]; legacy?: boolean }) {
+async function setup(options: { model: Parameters<typeof scriptedModel>[0]; worker?: Parameters<typeof scriptedWorkers>[0]; legacy?: boolean; transcriber?: Parameters<typeof harness>[0] extends infer H ? H extends { transcriber?: infer T } ? T : never : never }) {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-assistant-"));
   const tasks = new MemoryTaskRepository();
   const state = new MemoryAssistantState();
@@ -108,9 +108,9 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
     push: async (_account, message, prefer) => { pushed.push({ text: message.text, ...(message.buttons ? { buttons: message.buttons } : {}), ...(prefer ? { prefer } : {}) }); return true; },
     canReach: async () => reachable,
   };
-  const telegram = new TelegramChannel({ token: "test", username: "hatch_test_bot", webhookSecret: "secret" }, (async (url: string) => {
-    if (url.includes("/file/bot")) return new Response("# 我的选址笔记\n隔壁活过三年才算数\n", { status: 200 });
-    if (url.endsWith("/getFile")) return new Response(JSON.stringify({ ok: true, result: { file_path: "documents/notes.md" } }), { status: 200 });
+  const telegram = new TelegramChannel({ token: "test", username: "hatch_test_bot", webhookSecret: "secret" }, (async (url: string, init?: RequestInit) => {
+    if (url.includes("/file/bot")) return new Response(url.endsWith(".oga") ? Buffer.concat([Buffer.from("OggS"), Buffer.alloc(60)]) : "# 我的选址笔记\n隔壁活过三年才算数\n", { status: 200 });
+    if (url.endsWith("/getFile")) return new Response(JSON.stringify({ ok: true, result: { file_path: String(init?.body).includes('"v1"') ? "voice/file_1.oga" : "documents/notes.md" } }), { status: 200 });
     return new Response(JSON.stringify({ ok: true, result: true }), { status: 200 });
   }) as typeof fetch);
   const productStore = new WorkbenchStore(path.join(root, "product"), { creatorId: ACCOUNT, productId: PRODUCT }, new MemoryAgentDefinitionRepository(await initialAgentDefinitions()));
@@ -140,7 +140,7 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
   const dataDir = path.join(root, "chat");
   const store = new (studioTranscripts(RuntimeStore))(dataDir);
   const repository = new InMemoryConversationRepository(localRuntimeAuthority(dataDir));
-  const kit = await harness();
+  const kit = await harness({ ...(options.transcriber ? { transcriber: options.transcriber } : {}) });
   const chatAssets = new ChatAssets({ pipeline: kit.pipeline, blobs: kit.blobs, files: new AttachmentFiles(kit.repository, kit.blobs) });
   for (const definition of attachmentToolDefinitions(chatAssets.tools())) toolRegistry.set(definition.name, definition);
   const tools = studioTools(assistant);
@@ -255,6 +255,7 @@ test("The Assistant's build runs the Product's builder, which cannot go live", a
     worker: context => { toolNames.push((context.tools ?? []).map(tool => tool.name)); return { text: "构建完成" }; },
   });
   try {
+    await env.productStore.update((await env.productStore.create("voice")).id, session => { session.todos = [{ title: "选址的判断", status: "completed" }]; });
     await env.say("熟客店菜单可以长");
     await waitFor(async () => (await env.productStore.list()).some(session => session.role === "generation") && (await env.tasks.open(ACCOUNT)).length === 0);
     assert.ok(toolNames.length > 0);
@@ -525,4 +526,31 @@ test("The old conversation is read once into Chat: the Expert's words, the Assis
     assert.equal((await env.chat.lines(ACCOUNT)).length, 4, "the history was not imported again");
     assert.ok(env.model.state.turns[0]!.ctx.messages.some(message => message.content === "我是陈姐"), "the model has it as context");
   } finally { await env.close(); }
+});
+
+const voiceUpdate = { update_id: 1, message: { message_id: 10, chat: { id: 42, type: "private" }, voice: { file_id: "v1", file_size: 60, duration: 2 } } };
+
+test("A voice message in an IM chat is the Expert's words: the chat shows its transcript as text, and the model reads it", async () => {
+  const env = await setup({ model: () => ({ text: "好的" }) });
+  try {
+    const [handled] = await env.telegramUpdate(voiceUpdate);
+    assert.ok(handled!.runId?.startsWith("run_"));
+    await env.idle();
+    assert.deepEqual(env.model.state.turns[0]!.said, ["hello there"]);
+    const [line] = (await env.chat.lines(ACCOUNT)).filter(entry => entry.role === "user");
+    assert.equal(line!.text, "hello there");
+    assert.equal(line!.attachments?.[0]?.type, "audio");
+  } finally { await env.close(); }
+});
+
+test("A voice message that cannot be transcribed is answered in the chat with a fixed message, never with the provider's error", async () => {
+  const env = await setup({ model: () => ({ text: "不该有" }), transcriber: { async transcribe() { return { status: "unavailable", reason: "DashScope 401 key sk-secret" }; } } });
+  const log = console.error;
+  console.error = () => undefined;
+  try {
+    const [handled] = await env.telegramUpdate(voiceUpdate);
+    assert.deepEqual(handled, { replied: true });
+    assert.deepEqual(env.notices, ["语音暂时转不成文字，请先发文字。\nVoice messages cannot be transcribed right now. Please send text instead."]);
+    assert.equal(env.model.state.calls, 0);
+  } finally { console.error = log; await env.close(); }
 });

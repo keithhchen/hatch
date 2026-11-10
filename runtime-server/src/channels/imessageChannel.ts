@@ -40,10 +40,12 @@ function toEvents(eventId: string, address: PlatformAddress, phone: string, cont
   switch (content.type) {
     case "text": return [{ eventId, address, text: content.text }];
     case "attachment": return [{ eventId, address, file: { ref: `${phone}|${content.id}`, name: fileName(content.name, content.mimeType), ...(content.size ? { size: content.size } : {}) } }];
+    // A voice note is an attachment with its own id (an Apple CAF or m4a): fetched the same way.
+    case "voice": return content.id ? [{ eventId, address, file: { ref: `${phone}|${content.id}`, name: content.name || "voice.caf", ...(content.size ? { size: content.size } : {}) } }] : [{ eventId, address }];
     case "reply": return toEvents(eventId, address, phone, content.content);
     // Text with attachments arrives as a group whose items have their own ids.
     case "group": return content.items.flatMap(item => toEvents(item.id, address, phone, item.content));
-    case "voice": case "contact": case "custom": case "app": case "richlink": return [{ eventId, address }];
+    case "contact": case "custom": case "app": case "richlink": return [{ eventId, address }];
     default: return [];
   }
 }

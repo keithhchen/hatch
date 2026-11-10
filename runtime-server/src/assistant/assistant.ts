@@ -7,7 +7,6 @@ import { WorkbenchStore, type AgentDefinitionSource, type AssistantRole, type Ro
 import { WorkbenchRuntime, safeError, type WorkbenchRuntimeOptions } from "../factoryAgents/runtime.js";
 import type { FactoryWorkspace } from "../factoryAgents/service.js";
 import type { AgentCatalog, AgentChange } from "./catalog.js";
-import { imageMime } from "../factoryAgents/imageRefs.js";
 import { FirecrawlSearchProvider } from "../factoryAgents/webProviders.js";
 import { CHANNEL_KINDS, type ChannelKind, type OutboundMessage } from "../channels/types.js";
 import type { AssistantChannels } from "../channels/ports.js";
@@ -15,14 +14,14 @@ import { localDate, localHour, type AccountReach } from "./reach.js";
 import type { RunFailure } from "../factoryAgents/runFailure.js";
 import type { PublicMessage } from "../conversations/conversation.js";
 import type { ContentPart } from "../surfaces/contract.js";
-import type { SentMessage } from "../chat/gateway.js";
+import type { SentMessage, UploadedRef } from "../chat/gateway.js";
 import type { AssistantTask, TaskKind, TaskOrigin, TaskRepository } from "./tasks.js";
 import type { AssistantChat, ReplySteps } from "./chat.js";
 import type { DeliveryRepository } from "./deliveries.js";
 import type { ExpertMaterials } from "./materials.js";
 import { RELAY_MARK, type InterviewDesk } from "./relay.js";
 import type { AssistantStateRepository, Interview } from "./state.js";
-import type { StudioOperations, WorkerKind } from "./studioTools.js";
+import type { AgentOverview, StudioOperations, WorkerKind } from "./studioTools.js";
 
 const WORKER_LEASE_MS = 35 * 60_000;
 const ASSISTANT_PROFILE = "kimi-k2.6";
@@ -186,15 +185,15 @@ export class AssistantService implements StudioOperations, InterviewDesk {
   }
 
   /** A file or a picture the Expert sends becomes an attachment of the conversation, and a message may then refer to it. */
-  upload(accountId: string, name: string, bytes: Buffer): Promise<{ assetId: string }> { return this.chat.upload(accountId, name, bytes); }
+  upload(accountId: string, name: string, bytes: Buffer): Promise<UploadedRef> { return this.chat.upload(accountId, name, bytes); }
 
   /** The Expert sent a file or a picture from Studio's page. It becomes an attachment of the conversation, and the Assistant is told. */
   async receive(accountId: string, name: string, bytes: Buffer, source: ExpertSource, ref: { id?: string; messageRef?: string; caption?: string } = {}): Promise<{ name: string; sent: SentMessage }> {
-    const { assetId } = await this.upload(accountId, name, bytes);
+    const { assetId, kind } = await this.upload(accountId, name, bytes);
     const caption = ref.caption?.trim();
     const sent = await this.hear(accountId, {
       id: ref.id ?? randomUUID(), source, ...(ref.messageRef ? { messageRef: ref.messageRef } : {}),
-      parts: [...(caption ? [{ type: "text" as const, text: caption }] : []), { type: imageMime(name) ? "image" : "file", assetId }]
+      parts: [...(caption ? [{ type: "text" as const, text: caption }] : []), { type: kind, assetId }]
     });
     return { name, sent };
   }
@@ -303,7 +302,7 @@ export class AssistantService implements StudioOperations, InterviewDesk {
     return {
       name: "handoff_to_assistant",
       label: "交回助理",
-      description: "把对话交回助理。派活、查资料、写东西、发布，以及系统和工具的问题，都只有助理能处理。以下情况立刻调用，不要自己回答：专家要你查、搜、写、做任何访谈之外的事；专家问你能做什么、某个功能为什么不行；专家想停；大纲聊完了。note 写：专家的原话和他要什么、聊到了哪、还剩哪几件。调用后本轮结束，不要再回复专家。",
+      description: "把对话交回助理。派活、查资料、写东西、发布，以及系统和工具的问题，都只有助理能处理。以下情况立刻调用，不要自己回答：专家要你查、搜、写、做任何访谈之外的事；专家问你能做什么、某个功能为什么不行；专家想停；大纲聊完且专家确认了。note 写：专家的原话和他要什么、聊到了哪、还剩哪几件。调用后本轮结束，不要再回复专家。",
       parameters: Type.Object({ note: Type.String({ minLength: 1, maxLength: 600 }) }),
       execute: async (_id, raw) => {
         const { note } = raw as { note: string };
@@ -317,6 +316,7 @@ export class AssistantService implements StudioOperations, InterviewDesk {
   // ── Tasks ──────────────────────────────────────────────────────────────
 
   describeWorker(kind: WorkerKind): string { return this.workers[kind].about; }
+  needsAgent(kind: WorkerKind): boolean { return Boolean(this.workers[kind].needsAgent); }
   handsOver(kind: WorkerKind): boolean { return Boolean(this.workers[kind].handsOver); }
 
   /** Start one piece of work. What it takes and how it ends is declared in this.workers. */
@@ -439,7 +439,7 @@ export class AssistantService implements StudioOperations, InterviewDesk {
   async openTasks(accountId: string): Promise<AssistantTask[]> { return this.deps.tasks.open(accountId); }
 
   /** Everything the Assistant knows of the Expert's Agents: what they promise, whether they are live, and how far their interview has got. */
-  async agents(accountId: string): Promise<unknown> {
+  async agents(accountId: string): Promise<AgentOverview[]> {
     return Promise.all((await this.deps.catalog.list(accountId)).map(async agent => ({ ...agent, live: await this.deps.catalog.live(accountId, agent.productId), interview_outline: await this.interviewOutline(accountId, agent.productId) })));
   }
 

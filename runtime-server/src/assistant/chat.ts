@@ -7,7 +7,7 @@ import type { RuntimeCompactionMessage } from "../compaction.js";
 import type { ConversationRecord, ConversationRepository, ConversationRunRecord } from "../conversationRepository.js";
 import { failureOfReason } from "../errors/failures.js";
 import { ChatAssets, attachmentMessageId } from "../chat/assets.js";
-import type { ChatGateway, ConversationRef, SentMessage } from "../chat/gateway.js";
+import type { ChatGateway, ConversationRef, SentMessage, UploadedRef } from "../chat/gateway.js";
 import { ChatRuntime } from "../chat/chatRuntime.js";
 import { NO_SKILLS, failRun, runModelTurn, type TurnBinding } from "../chat/modelTurn.js";
 import { ChatError, accountPrincipal } from "../chat/principal.js";
@@ -31,7 +31,7 @@ import type { AssetDesk } from "../conversations/assets.js";
 
 /** The Assistant is one Agent, not a Product: its conversation is bound to the account, under this id. */
 export const ASSISTANT_AGENT_ID = "assistant";
-const ASSISTANT_PROFILE = "kimi-k2.6";
+const ASSISTANT_PROFILE = "kimi-k2.6-no-thinking";
 const ACTIVE = new Set(["queued", "running", "waiting_for_tool", "compacting"]);
 
 /** The steps inside one reply, in the shape Chat's history keeps them: where each sits among the words, and what it was. */
@@ -191,7 +191,7 @@ export class AssistantChat implements AssistantHost {
     return this.say(accountId, { id: `${SYSTEM_MESSAGE_PREFIX}${key}`, parts: [{ type: "text", text }], client: { client: "web" } });
   }
 
-  upload(accountId: string, name: string, bytes: Buffer): Promise<{ assetId: string }> {
+  upload(accountId: string, name: string, bytes: Buffer): Promise<UploadedRef> {
     return this.gateway.upload(accountPrincipal(accountId), { kind: "conversation", id: accountId }, { name, bytes });
   }
 

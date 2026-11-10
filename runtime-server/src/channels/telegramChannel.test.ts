@@ -47,6 +47,13 @@ test("private text, photo and document parse with thread and sender the same", (
   assert.deepEqual(parse(privateMessage({ document: { file_id: "d", file_name: "a.pdf", file_size: 5 } })), [{ eventId: "1", address: TO, messageRef: "10", file: { ref: "d", name: "a.pdf", size: 5 } }]);
 });
 
+test("a voice message or audio file parses into a file for the asset pipeline, with its size for the 20 MB refusal", () => {
+  assert.deepEqual(parse(privateMessage({ voice: { file_id: "v", file_size: 7, duration: 3, mime_type: "audio/ogg" } })), [{ eventId: "1", address: TO, messageRef: "10", file: { ref: "v", name: "voice.ogg", size: 7 } }]);
+  assert.deepEqual(parse(privateMessage({ audio: { file_id: "a", file_name: "memo.m4a", file_size: 9 } })), [{ eventId: "1", address: TO, messageRef: "10", file: { ref: "a", name: "memo.m4a", size: 9 } }]);
+  assert.equal(parse(privateMessage({ audio: { file_id: "a" } }))[0]?.file?.name, "audio");
+  assert.equal(parse(privateMessage({ voice: { file_id: "big", file_size: 25 * 1024 * 1024 } }))[0]!.file!.size! > channel().telegram.maxFileBytes, true);
+});
+
 test("/start CODE yields the code as text", () => {
   assert.equal(parse(privateMessage({ text: "/start HATCH-ABCD" }))[0]?.text, "HATCH-ABCD");
 });

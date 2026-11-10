@@ -4,6 +4,7 @@ import type { ChannelConnection } from "./connections.js";
 import { ChannelPolicyError } from "./eligibility.js";
 import { graphError, recorder } from "./recorder.testkit.js";
 import { ChannelSendError } from "./types.js";
+import { GRAPH } from "./metaChannel.js";
 import { WhatsAppChannel, whatsappEligibility } from "./whatsappChannel.js";
 
 const TASK = "123e4567-e89b-12d3-a456-426614174000";
@@ -148,4 +149,15 @@ test("eligibility: a Connection is ineligible unless an operator marked it task-
   assert.throws(() => whatsappEligibility(connection({ kind: "assistant" }, true)), ChannelPolicyError);
   assert.throws(() => whatsappEligibility(connection({ kind: "product", productId: "p" })), ChannelPolicyError);
   assert.doesNotThrow(() => whatsappEligibility(connection({ kind: "product", productId: "p" }, true)));
+});
+
+test("a voice note is ogg opus: its media id is looked up, then the URL is fetched with the token", async () => {
+  const note = { from: "16315551181", id: "wamid.V", timestamp: "1700000000", type: "audio", audio: { mime_type: "audio/ogg; codecs=opus", sha256: "abc", id: "1234", voice: true } };
+  const [event] = parse(note, { ...note, id: "wamid.A", audio: { mime_type: "audio/mp4", id: "5678" } });
+  assert.deepEqual(event?.file, { ref: "W1:1234", name: "voice.ogg" });
+  assert.equal(parse({ ...note, id: "wamid.A", audio: { mime_type: "audio/mp4", id: "5678" } })[0]?.file?.name, "audio.mp4");
+  const { calls, fake } = recorder(url => url.endsWith("/1234") ? Response.json({ url: "https://lookaside.fbsbx.com/whatsapp_business/attachments/?mid=1234", mime_type: "audio/ogg" }) : new Response(Buffer.from("ogg-bytes")));
+  assert.equal((await channel(fake).download(event!.file!)).toString(), "ogg-bytes");
+  assert.deepEqual(calls.map(call => call.url), [`${GRAPH}/1234`, "https://lookaside.fbsbx.com/whatsapp_business/attachments/?mid=1234"]);
+  assert.ok(calls.every(call => (call.init.headers as Record<string, string>).authorization === "Bearer token"));
 });

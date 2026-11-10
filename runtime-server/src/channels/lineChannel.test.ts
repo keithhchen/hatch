@@ -52,7 +52,7 @@ test("parse maps text, image and file messages", () => {
 });
 
 test("parse leaves other message types with no text and no file", () => {
-  for (const type of ["sticker", "audio", "video", "location"]) assert.deepEqual(parse({ ...base, type: "message", message: { id: "4", type } }), [shared]);
+  for (const type of ["sticker", "video", "location"]) assert.deepEqual(parse({ ...base, type: "message", message: { id: "4", type } }), [shared]);
 });
 
 test("parse turns task postbacks into buttons and skips other postbacks", () => {
@@ -205,4 +205,12 @@ test("recorded payload: a redelivered webhook parses to the same event ids", () 
 test("recorded payload: an unfollow and a beacon yield nothing, a sticker yields a bare event", () => {
   assert.deepEqual(parse({ ...base, type: "unfollow" }, { ...base, type: "beacon" }), []);
   assert.deepEqual(parse({ ...base, type: "message", message: { id: "5", type: "sticker", packageId: "1", stickerId: "2" } }), [shared]);
+});
+
+test("a voice message is an m4a, fetched by its message id like an image", async () => {
+  const audio = { id: "468789577898262530", type: "audio", duration: 60000, contentProvider: { type: "line" } };
+  assert.deepEqual(parse({ ...base, type: "message", message: audio }), [{ ...shared, file: { ref: "468789577898262530", name: "voice.m4a" } }]);
+  const { line, calls } = channel(() => new Response(Buffer.from("m4a-bytes")));
+  assert.equal((await line.download({ ref: "468789577898262530", name: "voice.m4a" })).toString(), "m4a-bytes");
+  assert.equal(calls[0]!.url, "https://api-data.line.me/v2/bot/message/468789577898262530/content");
 });

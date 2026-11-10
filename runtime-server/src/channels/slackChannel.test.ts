@@ -201,3 +201,12 @@ test("connectUrl is the OAuth install link with the state, and install trades th
   await assert.rejects(channel(recorder(() => new Response(JSON.stringify({ ok: false, error: "invalid_code" }))).fake).install("bad"), /invalid_code/);
   await assert.rejects(channel(undefined, { clientSecret: undefined }).install("c"), /not configured/);
 });
+
+test("parse: an audio clip is a file_share carrying the clip as an m4a file", () => {
+  const clip = {
+    id: "F0AUDIO", name: "Audio Message.m4a", title: "Audio Message", mimetype: "audio/mp4", filetype: "m4a", subtype: "slack_audio", mode: "hosted", size: 48213,
+    url_private_download: "https://files.slack.com/files-pri/T1-F0AUDIO/download/audio_message.m4a",
+  };
+  const { events } = channel().parse(envelope(im({ subtype: "file_share", text: "", files: [clip] })));
+  assert.deepEqual(events.map(event => [event.text, event.file]), [[undefined, { ref: `T1|${clip.url_private_download}`, name: "Audio Message.m4a", size: 48213 }]]);
+});

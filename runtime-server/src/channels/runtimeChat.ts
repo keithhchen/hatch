@@ -1,4 +1,4 @@
-import type { ChatGateway, RunProgress, SentMessage } from "../chat/gateway.js";
+import type { ChatGateway, RunProgress, SentMessage, UploadedRef } from "../chat/gateway.js";
 import { ChatError } from "../chat/principal.js";
 
 /**
@@ -13,7 +13,7 @@ export class HttpChatGateway implements ChatGateway {
     return this.call("POST", "/messages", { body: JSON.stringify({ principal, conversation, client, message_id: messageId, parts }), type: "application/json" });
   }
 
-  upload(...[principal, conversation, input]: Parameters<ChatGateway["upload"]>): Promise<{ assetId: string }> {
+  upload(...[principal, conversation, input]: Parameters<ChatGateway["upload"]>): Promise<UploadedRef> {
     // The bytes are the body; who they are for rides in a header, so they need no envelope.
     return this.call("POST", "/uploads", { body: new Blob([input.bytes as BlobPart]), type: "application/octet-stream", headers: { "x-hatch-upload": Buffer.from(JSON.stringify({ principal, conversation, name: input.name })).toString("base64url") } });
   }
