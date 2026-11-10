@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { HatchError } from "./errors.js";
 import { need, object } from "./command.js";
-import { ACTIVE, ConversationApi, chatRoutes, formatMessages, formatSent, observe, send, sendOptions, watchEvents } from "./conversation.js";
+import { ACTIVE, ConversationApi, chatRoutes, formatMessages, formatSent, keyed, observe, send, sendOptions, watchEvents } from "./conversation.js";
 
 // Consumer Chat: a conversation between the signed-in account and a published Product.
 // The Runtime binds every call to a Product through `?product_id=`, so every command needs --product.
@@ -56,8 +56,10 @@ const ask = {
     const content = need(this, args, 1).join(" ");
     const product = productOf(this, args);
     const key = args.flags.key ?? randomUUID();
-    const id = args.flags.conversation ?? await startConversation(ctx, product, key, args.flags);
-    return send(ctx, await conversationApi(ctx, id, product), { content, flags: { ...args.flags, key }, where: `hatch conversation show ${id} --product ${product}`, extra: { conversation_id: id } });
+    return keyed(key, async () => {
+      const id = args.flags.conversation ?? await startConversation(ctx, product, key, args.flags);
+      return send(ctx, await conversationApi(ctx, id, product), { content, flags: { ...args.flags, key }, where: `hatch conversation show ${id} --product ${product}`, extra: { conversation_id: id } });
+    });
   },
   format: formatSent,
   mcp: {

@@ -12,6 +12,7 @@ import { ChannelService, openChannelStores } from "./service.js";
 import { ChannelSendError, type ChannelAdapter, type ChannelKind, type InboundEvent, type InboundFile, type OutboundMessage, type PlatformAddress } from "./types.js";
 import type { ChatGateway, Handled, Inbound, TargetHandler } from "./ports.js";
 import type { ConversationRef, RunProgress } from "../chat/gateway.js";
+import { ChatFlow } from "./chatTarget.js";
 import { ProductTarget } from "./productTarget.js";
 import { GuardedTarget, liveOwnProduct } from "./guardedTarget.js";
 import { ChatError } from "../chat/principal.js";
@@ -324,13 +325,17 @@ test("An event is leased: a crash returns it, one thread's events go one at a ti
   assert.deepEqual(await inbox.claim(10, 60_000, now), [], "leased events are not handed out twice");
   // The process died holding the lease.
   const later = new Date(now.getTime() + 61_000);
-  assert.equal((await inbox.claim(10, 60_000, later)).filter(item => item.id === first!.id).length, 1);
-  await inbox.complete(first!.id, {});
-  assert.equal((await inbox.claim(10, 60_000, later)).filter(item => item.id === second!.id).length, 1, "the next one is released by completion");
-  let state = "pending";
+  const reclaimed = (await inbox.claim(10, 60_000, later)).filter(item => item.id === first!.id);
+  assert.equal(reclaimed.length, 1);
+  assert.equal(await inbox.complete(reclaimed[0]!, {}, [], later), true);
+  const [next] = (await inbox.claim(10, 60_000, later)).filter(item => item.id === second!.id);
+  assert.ok(next, "the next one is released by completion");
+  let state: string | undefined = "pending";
+  let current = next!;
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    await inbox.claim(10, 1, new Date(later.getTime() + attempt * 100_000));
-    state = await inbox.retry(second!.id, "boom", 0, 5, new Date(later.getTime() + attempt * 100_000));
+    const when = new Date(later.getTime() + attempt * 100_000);
+    if (attempt > 0) current = (await inbox.claim(10, 1, when)).find(item => item.id === second!.id)!;
+    state = await inbox.retry(current, "boom", 0, 5, when);
   }
   assert.equal(state, "failed");
 }));
@@ -558,9 +563,52 @@ test("An expired lease is reclaimed, and extending it keeps a live claimant's ev
   const now = at(0);
   await inbox.store("telegram", "", [message("1", "first")]);
   const [item] = await inbox.claim(10, 30_000, now);
-  await inbox.extend(item!.id, 30_000, new Date(now.getTime() + 20_000));
+  assert.equal(await inbox.extend(item!, 30_000, new Date(now.getTime() + 20_000)), true);
   assert.deepEqual(await inbox.claim(10, 30_000, new Date(now.getTime() + 40_000)), [], "a heartbeat keeps the claim");
   assert.equal((await inbox.claim(10, 30_000, new Date(now.getTime() + 51_000))).length, 1, "a silent claimant loses it after one lease");
+}));
+
+test("A worker whose lease ran out cannot mark the event done, retry it, or fail it; the one that holds the lease can", options, async () => isolated(async pool => {
+  await PostgresConnections.open(pool, scopeOf);
+  const inbox = await PostgresInbox.open(pool);
+  await inbox.store("telegram", "", [message("1", "first")]);
+  const [slow] = await inbox.claim(10, 30_000, at(0));
+  // The slow worker went quiet; another claims the event after the lease.
+  const [fast] = await inbox.claim(10, 30_000, at(31_000));
+  assert.equal(fast!.id, slow!.id);
+  assert.equal(await inbox.extend(slow!, 30_000, at(32_000)), false, "the old claim cannot keep the event");
+  assert.equal(await inbox.complete(slow!, { runId: "stale" }, [], at(32_000)), false, "the old claim cannot complete it");
+  assert.equal(await inbox.retry(slow!, "late", 0, 1, at(32_000)), undefined, "the old claim cannot give it up");
+  assert.equal((await inbox.get(slow!.id))?.runId, undefined);
+  assert.equal(await inbox.complete(fast!, { runId: "run-1" }, [], at(33_000)), true);
+  assert.equal((await inbox.get(fast!.id))?.runId, "run-1");
+  // Nobody reclaimed it, but the lease is over: the claimant has lost the event all the same.
+  await inbox.store("telegram", "", [message("2", "second")]);
+  const [alone] = await inbox.claim(10, 30_000, at(40_000));
+  assert.equal(await inbox.complete(alone!, {}, [], at(71_000)), false);
+}));
+
+test("The photos of one album wait until the album is complete, and reach the Agent as one message", options, async () => isolated(async pool => {
+  const env = await stack(pool);
+  await link(env, "42");
+  const photo = (name: string, extra: Partial<InboundEvent> = {}) => message("42", "", { text: undefined, album: "g1", file: { ref: name, name: `${name}.jpg`, size: 3 }, ...extra });
+  await env.service.accept(env.adapter, [photo("a", { text: "三张图" })]);
+  await env.service.drain();
+  assert.equal(env.target.handled.length, 0, "the rest of the album may still be on its way");
+  const third = photo("c");
+  await env.service.accept(env.adapter, [photo("b"), third, third]);
+  env.advance(5_000);
+  await env.service.drain();
+  assert.equal(env.target.handled.length, 1);
+  const { event } = env.target.handled[0]!;
+  assert.deepEqual(event.files?.map(file => file.ref), ["a", "b", "c"]);
+  assert.equal(event.text, "三张图");
+  assert.equal((await pool.query("SELECT count(*)::int AS n FROM hatch_channel_inbox WHERE state = 'pending'")).rows[0].n, 0, "every member of the album is done with the first");
+  // A photo that comes after the album was handed over is a message of its own.
+  await env.service.accept(env.adapter, [photo("d")]);
+  env.advance(5_000);
+  await env.service.drain();
+  assert.equal(env.target.handled.length, 2);
 }));
 
 test("A link code posted in a group does not link", options, async () => isolated(async pool => {
@@ -576,7 +624,7 @@ test("A public contact has a contact principal and never reaches Studio tools", 
   const gateway = new FakeGateway();
   const adapter = new FakeAdapter("telegram", "page-1");
   const env = await stack(pool, { adapters: [adapter], gateway });
-  const product = new ProductTarget({ gateway, limiter: env.limiter, contactRate: { capacity: 2, perSecond: 0.001 } });
+  const product = new ChatFlow(new ProductTarget({ gateway, limiter: env.limiter, contactRate: { capacity: 2, perSecond: 0.001 } }));
   env.service.register("product", product);
   const connectionId = (await pool.query("INSERT INTO hatch_connections (owner_account_id, channel, scope, target, target_key, audience) VALUES ($1, 'telegram', 'page-1', $2, 'product:p1', 'public') RETURNING id", [randomUUID(), JSON.stringify({ kind: "product", productId: "p1" })])).rows[0].id;
   env.service.start();
@@ -598,7 +646,7 @@ test("A public contact has a contact principal and never reaches Studio tools", 
 test("A Run's final reply is sent once, however it is announced, and a failed Run says so", options, async () => isolated(async pool => {
   const gateway = new FakeGateway();
   const env = await stack(pool, { gateway });
-  env.service.register("product", new ProductTarget({ gateway, limiter: env.limiter }));
+  env.service.register("product", new ChatFlow(new ProductTarget({ gateway, limiter: env.limiter })));
   const owner = randomUUID();
   await pool.query("INSERT INTO hatch_connections (owner_account_id, channel, target, target_key, audience) VALUES ($1, 'telegram', $2, 'product:p1', 'org')", [owner, JSON.stringify({ kind: "product", productId: "p1" })]);
   const connectionId = (await pool.query("SELECT id FROM hatch_connections")).rows[0].id;
@@ -609,7 +657,7 @@ test("A Run's final reply is sent once, however it is announced, and a failed Ru
     await env.service.accept(env.adapter, [first, first]);
     await env.settle();
     assert.equal(gateway.submitted.length, 1);
-    assert.equal(gateway.submitted[0]!.messageId, first.eventId, "the event id is the idempotency key");
+    assert.equal(gateway.submitted[0]!.messageId, `telegram::${first.eventId}`, "channel, scope and event id are the idempotency key");
     assert.equal(gateway.submitted[0]!.principal.kind, "contact", "org members act as contacts, never as accounts");
     assert.deepEqual(env.adapter.texts, [], "no reply while the Run is going");
     gateway.finish("run-1", { ok: true, text: "the answer" });
@@ -639,7 +687,7 @@ async function productConnection(pool: Pool, members: Array<[string, string]>) {
 test("In a group, a reply goes to the message its Run answered: the other member's Run ending later is still answered", options, async () => isolated(async pool => {
   const gateway = new FakeGateway();
   const env = await stack(pool, { gateway });
-  env.service.register("product", new ProductTarget({ gateway, limiter: env.limiter }));
+  env.service.register("product", new ChatFlow(new ProductTarget({ gateway, limiter: env.limiter })));
   await productConnection(pool, [["b", "group"], ["a", "group"]]);
   const [fromB, fromA] = [message("b", "from b", { address: address("b", "group") }), message("a", "from a", { address: address("a", "group") })];
   await env.service.accept(env.adapter, [fromB]);
@@ -657,7 +705,7 @@ test("In a group, a reply goes to the message its Run answered: the other member
 test("A Run that two threads steered replies once in each thread, and nothing is marked replied that was not", options, async () => isolated(async pool => {
   const gateway = new FakeGateway();
   const env = await stack(pool, { gateway });
-  env.service.register("product", new ProductTarget({ gateway, limiter: env.limiter }));
+  env.service.register("product", new ChatFlow(new ProductTarget({ gateway, limiter: env.limiter })));
   await productConnection(pool, [["one", "one"], ["two", "two"]]);
   await env.service.accept(env.adapter, [message("one", "first")]);
   await env.settle();
@@ -711,7 +759,7 @@ test("An event that is finally given up on is told to its sender in plain words,
 test("Compaction: one notice per compaction, only where someone is waiting, and it is not part of the conversation", options, async () => isolated(async pool => {
   const gateway = new FakeGateway();
   const env = await stack(pool, { gateway });
-  env.service.register("product", new ProductTarget({ gateway, limiter: env.limiter }));
+  env.service.register("product", new ChatFlow(new ProductTarget({ gateway, limiter: env.limiter })));
   const connectionId = (await pool.query("INSERT INTO hatch_connections (owner_account_id, channel, target, target_key, audience) VALUES ($1, 'telegram', $2, 'product:p1', 'org') RETURNING id", [randomUUID(), JSON.stringify({ kind: "product", productId: "p1" })])).rows[0].id;
   await pool.query("INSERT INTO hatch_channel_identities (connection_id, channel, scope, sender_id, thread_id) VALUES ($1, 'telegram', '', 'member', 'member')", [connectionId]);
   env.service.start();
@@ -746,7 +794,7 @@ async function orgMember(pool: Pool, owner = randomUUID()) {
 test("A file a contact sends is uploaded into the conversation's scope and sent as a part of the same message", options, async () => isolated(async pool => {
   const gateway = new FakeGateway();
   const env = await stack(pool, { gateway });
-  env.service.register("product", new ProductTarget({ gateway, limiter: env.limiter }));
+  env.service.register("product", new ChatFlow(new ProductTarget({ gateway, limiter: env.limiter })));
   const { connectionId } = await orgMember(pool);
   env.service.start();
   try {
@@ -760,7 +808,7 @@ test("A file a contact sends is uploaded into the conversation's scope and sent 
 test("A refusal from Chat goes back to the sender; an unreachable Chat returns the event to the queue, and the retry is the same message", options, async () => isolated(async pool => {
   const gateway = new FakeGateway();
   const env = await stack(pool, { gateway });
-  env.service.register("product", new ProductTarget({ gateway, limiter: env.limiter }));
+  env.service.register("product", new ChatFlow(new ProductTarget({ gateway, limiter: env.limiter })));
   await orgMember(pool);
   env.service.start();
   try {
@@ -779,7 +827,7 @@ test("A refusal from Chat goes back to the sender; an unreachable Chat returns t
     assert.equal(env.errors.length, 1);
     env.advance(10_000);
     await env.settle();
-    assert.deepEqual(gateway.submitted.map(sent => sent.messageId), [event.eventId], "tried again with the same key");
+    assert.deepEqual(gateway.submitted.map(sent => sent.messageId), [`telegram::${event.eventId}`], "tried again with the same key");
   } finally { await env.service.close(); }
 }));
 
@@ -788,7 +836,7 @@ test("Eligibility is checked before Chat: a Product that is not live and the own
   const env = await stack(pool, { gateway });
   const owner = randomUUID();
   const live = new Map<string, { creator_id: string }>();
-  env.service.register("product", new GuardedTarget(new ProductTarget({ gateway, limiter: env.limiter }), [liveOwnProduct({ getLive: async productId => live.get(productId) })]));
+  env.service.register("product", new GuardedTarget(new ChatFlow(new ProductTarget({ gateway, limiter: env.limiter })), [liveOwnProduct({ getLive: async productId => live.get(productId) })]));
   await orgMember(pool, owner);
   env.service.start();
   try {
@@ -809,7 +857,7 @@ test("Eligibility is checked before Chat: a Product that is not live and the own
 test("A Registry restart loses neither a reply nor a compaction notice: both are read from Chat's durable state", options, async () => isolated(async pool => {
   const gateway = new FakeGateway();
   const first = await stack(pool, { gateway });
-  first.service.register("product", new ProductTarget({ gateway, limiter: first.limiter }));
+  first.service.register("product", new ChatFlow(new ProductTarget({ gateway, limiter: first.limiter })));
   await orgMember(pool);
   first.service.start();
   await first.service.accept(first.adapter, [message("member", "long question")]);
@@ -818,7 +866,7 @@ test("A Registry restart loses neither a reply nor a compaction notice: both are
   // The old process is gone while the Run goes on in Chat.
   gateway.compact("run-1", "run-1:7");
   const second = await stack(pool, { gateway });
-  second.service.register("product", new ProductTarget({ gateway, limiter: second.limiter }));
+  second.service.register("product", new ChatFlow(new ProductTarget({ gateway, limiter: second.limiter })));
   second.service.start();
   try {
     await second.settle();
@@ -987,7 +1035,7 @@ async function productBots(pool: Pool, tokens: Record<string, string>) {
     return sealed ? new TelegramChannel(seal.open(sealed), scope, api.fetchImpl) : undefined;
   };
   const env = await stack(pool, { adapters: [], gateway, own });
-  env.service.register("product", new ProductTarget({ gateway, limiter: env.limiter }));
+  env.service.register("product", new ChatFlow(new ProductTarget({ gateway, limiter: env.limiter })));
   const apps = new OwnApps({ connections: stores.connections, seal, forms: { telegram: telegramForm }, origin: "https://site.test", ownsProduct: async (_account, product) => product !== "foreign" });
   const adapterOf = async (scope: string) => (await env.service.hub.get("telegram", scope))!;
   return { ...env, api, apps, gateway, adapterOf, stores, seal };

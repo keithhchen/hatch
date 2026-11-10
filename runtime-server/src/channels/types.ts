@@ -29,9 +29,24 @@ export type InboundEvent = {
   group?: true;
   text?: string;
   file?: InboundFile;
+  /** Every file of an album that arrived as several events: the inbox merges them into the first. Read both through `filesOf`. */
+  files?: InboundFile[];
+  /** The platform's id for a set of messages sent together (a media group). Its events are held until the set is complete, then handled as one. */
+  album?: string;
   messageRef?: string;
   button?: { taskId: string; action: TaskButtonAction; ref?: string };
 };
+
+export const filesOf = (event: Pick<InboundEvent, "file" | "files">): InboundFile[] => event.files ?? (event.file ? [event.file] : []);
+
+/** The members of an album as one event: the first's address and reference, every file in order, the first caption. */
+export function mergeAlbum(first: InboundEvent, rest: InboundEvent[]): InboundEvent {
+  if (!rest.length) return first;
+  const all = [first, ...rest];
+  const text = all.find(event => event.text)?.text;
+  const { album: _album, file: _file, ...head } = first;
+  return { ...head, ...(text ? { text } : {}), files: all.flatMap(filesOf) };
+}
 
 /** What an adapter throws when a send fails, so the outbox can decide what happens next. */
 export class ChannelSendError extends Error {

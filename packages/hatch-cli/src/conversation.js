@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { HatchError } from "./errors.js";
 import { RunObserver, parseSse, resumable } from "./run.js";
 
 const enc = encodeURIComponent;
@@ -88,9 +89,25 @@ export async function* watchEvents(api, after, { sleep }) {
   yield* follow(String(snapshot.cursor));
 }
 
+// A send that failed without an answer may have been received. The error names its key: sending again with it is the same message, never a second one.
+export async function keyed(key, run) {
+  try { return await run(); } catch (error) {
+    if (error instanceof HatchError && (error.code === "network" || error.status >= 500) && !error.clientMessageId) {
+      error.message += `. The message may have been received: send it again with --key ${key} and it arrives once.`;
+      error.clientMessageId = key;
+    }
+    throw error;
+  }
+}
+
 // Send one logical message and return its outcome. `where` tells the reader how to look again.
-export async function send(ctx, api, { content, flags, where, extra = {} }) {
-  const key = flags.key ?? randomUUID();
+export const send = (ctx, api, options) => {
+  const key = options.flags.key ?? randomUUID();
+  return keyed(key, () => sendKeyed(ctx, api, { ...options, flags: { ...options.flags, key } }));
+};
+
+async function sendKeyed(ctx, api, { content, flags, where, extra = {} }) {
+  const key = flags.key;
   if (flags.stream) {
     const events = resumable((after) => after ? api.events(after) : api.stream({ content, key }), { sleep: ctx.sleep });
     return { ...extra, client_message_id: key, ...await observe(ctx, events()) };

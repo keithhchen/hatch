@@ -10,7 +10,7 @@ import type { AssistantChannels, ChatGateway, TargetHandler, TargetKind } from "
 import { ChatReplies, FAILED } from "./productTarget.js";
 import { PostgresRateLimiter, type RateLimiter } from "./rateLimiter.js";
 import { ChannelRouter, type Claim, type SignIn } from "./router.js";
-import { CHANNEL_KINDS, type ChannelAdapter, type ChannelKind, type InboundEvent, type PullNotice } from "./types.js";
+import { CHANNEL_KINDS, mergeAlbum, type ChannelAdapter, type ChannelKind, type InboundEvent, type PullNotice } from "./types.js";
 
 /** A crashed process frees its event after this; a live one renews the lease every third of it while it works. */
 const INBOX_LEASE_MS = 30_000;
@@ -109,10 +109,16 @@ export class ChannelService implements AssistantChannels {
   }
 
   private async process(item: InboxItem): Promise<void> {
-    const heartbeat = setInterval(() => void this.inbox.extend(item.id, INBOX_LEASE_MS, this.deps.now?.()).catch(this.report), INBOX_LEASE_MS / 3);
-    try { await this.inbox.complete(item.id, await this.router.route(item)); } catch (error) {
+    const now = () => this.deps.now?.();
+    const heartbeat = setInterval(() => void this.inbox.extend(item, INBOX_LEASE_MS, now()).catch(this.report), INBOX_LEASE_MS / 3);
+    try {
+      // The photos of an album that were stored as events of their own are handled as one message, and done with it.
+      const rest = await this.inbox.siblings(item);
+      const outcome = await this.router.route(rest.length ? { ...item, event: mergeAlbum(item.event, rest.map(part => part.event)) } : item);
+      if (!await this.inbox.complete(item, outcome, rest.map(part => part.id), now())) this.report(new Error(`Lost the lease on ${item.channel} event ${item.id} before it was done: another worker has it`));
+    } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const state = await this.inbox.retry(item.id, message, backoffMs(item.attempts), INBOX_ATTEMPTS, this.deps.now?.());
+      const state = await this.inbox.retry(item, message, backoffMs(item.attempts), INBOX_ATTEMPTS, now());
       this.report(error);
       if (state === "failed") await this.giveUp(item, message);
     } finally { clearInterval(heartbeat); }

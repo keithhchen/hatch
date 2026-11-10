@@ -1,8 +1,8 @@
 import type { ContentPart } from "../surfaces/contract.js";
-import { ChatError } from "../chat/principal.js";
 import type { Dispatcher } from "./dispatch.js";
 import type { Inbox, InboxItem } from "./inbox.js";
-import type { ChatGateway, Handled, Inbound, ReplyPolicy, TargetHandler } from "./ports.js";
+import type { ChatTarget } from "./chatTarget.js";
+import type { ChatGateway, Inbound, ReplyPolicy } from "./ports.js";
 import type { Rate, RateLimiter } from "./rateLimiter.js";
 
 /** A contact may write this much: a burst of 10, then one message every 20 seconds. */
@@ -11,40 +11,27 @@ export const FAILED = "出了点问题，请再发一次。\nSomething went wron
 const BUSY = "消息有点多，请稍后再发。\nToo many messages, please try again in a moment.";
 
 /** Chat answers the Connection: an Expert Product talking to its owner, an organization, or the public. */
-export class ProductTarget implements TargetHandler {
+export class ProductTarget implements ChatTarget {
   constructor(private deps: { gateway: ChatGateway; limiter: RateLimiter; contactRate?: Rate }) {}
 
   async linked(): Promise<string> { return "连上了。可以开始聊了。\nConnected. You can start talking."; }
 
-  async handle(inbound: Inbound): Promise<Handled> {
-    const { connection, principal, event, address, adapter } = inbound;
+  wording = { tooLarge: () => "这个文件太大了。\nThat file is too large.", unreadable: "这种消息我还读不了，可以发文字、图片或文档。\nI can't read that kind of message yet." };
+
+  async admit({ connection, principal }: Inbound): Promise<string | undefined> {
     if (connection.target.kind !== "product") throw new Error("Not a Product Connection");
-    if (event.button) { await adapter.acknowledge?.(event); return { replied: true }; }
     // Limits are checked before a Run is started, not after.
-    if (principal.kind === "contact" && connection.audience === "public" && await this.deps.limiter.take(`contact:${connection.id}:${principal.contactId}`, this.deps.contactRate ?? CONTACT_RATE)) {
-      await inbound.notify(BUSY);
-      return { replied: true };
-    }
-    const parts: ContentPart[] = [];
-    if (event.text?.trim()) parts.push({ type: "text", text: event.text.trim() });
-    const thread = { kind: "thread" as const, connectionId: connection.id, threadId: address.threadId };
-    try {
-      if (event.file) {
-        if ((event.file.size ?? 0) > adapter.maxFileBytes) { await inbound.notify("这个文件太大了。\nThat file is too large."); return { replied: true }; }
-        const { assetId, kind } = await this.deps.gateway.upload(principal, thread, { name: event.file.name, bytes: await adapter.download(event.file) });
-        parts.push({ type: kind, assetId });
-      }
-      if (!parts.length) { await inbound.notify("这种消息我还读不了，可以发文字、图片或文档。\nI can't read that kind of message yet."); return { replied: true }; }
-      const { runId } = await this.deps.gateway.send(principal, thread, { client: connection.client }, event.eventId, parts);
-      return { replied: false, runId };
-    } catch (error) {
-      // A refusal that no retry changes goes back to the sender; anything else returns the event to the queue.
-      if (!(error instanceof ChatError && (error.status < 500 || error.status === 501 || error.code === "unavailable"))) throw error;
-      await inbound.notify(error.message);
-      return { replied: true };
-    }
+    return principal.kind === "contact" && connection.audience === "public" && await this.deps.limiter.take(`contact:${connection.id}:${principal.contactId}`, this.deps.contactRate ?? CONTACT_RATE) ? BUSY : undefined;
+  }
+
+  upload({ connection, principal, address }: Inbound, file: { name: string; bytes: Buffer }) { return this.deps.gateway.upload(principal, thread(connection, address), file); }
+
+  send({ connection, principal, address }: Inbound, { key, parts }: { key: string; parts: ContentPart[] }) {
+    return this.deps.gateway.send(principal, thread(connection, address), { client: connection.client }, key, parts);
   }
 }
+
+const thread = (connection: Inbound["connection"], address: Inbound["address"]) => ({ kind: "thread" as const, connectionId: connection.id, threadId: address.threadId });
 
 /** Sends a Run's final reply when it ends. The reply is its delivery's source key, so however many times this runs, it is sent once. */
 export class ChatReplies {

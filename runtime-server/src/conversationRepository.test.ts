@@ -391,7 +391,7 @@ class ConversationPostgresFake implements PostgresQueryExecutor {
       if (status === "interrupted") row.interrupted_reason = reason;
       return this.rows([row]);
     }
-    if (/^\s*INSERT INTO hatch_conversation_journal/i.test(text)) {
+    if (/INSERT INTO hatch_conversation_journal/i.test(text)) {
       const [conversationId, runId, eventType, payload, createdAt] = values ?? [];
       const row: DatabaseRow = {
         cursor: this.events.length + 1,

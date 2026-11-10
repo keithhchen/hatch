@@ -44,6 +44,7 @@ import { CredentialRefresher } from "./channels/credentialRefresh.js";
 import { ChannelHub } from "./channels/hub.js";
 import { ChannelService, openChannelStores } from "./channels/service.js";
 import { GuardedTarget, liveOwnProduct } from "./channels/guardedTarget.js";
+import { ChatFlow } from "./channels/chatTarget.js";
 import { ProductTarget } from "./channels/productTarget.js";
 import { HttpChatGateway } from "./channels/runtimeChat.js";
 import { safeError } from "./factoryAgents/runtime.js";
@@ -407,9 +408,9 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       },
       productPrefix: (accountId, productId) => `${productsPrefix}/${accountId}/${productId}`,
     });
-    channels.register("assistant", guarded(new AssistantTarget(assistant), eligibility));
+    channels.register("assistant", guarded(new ChatFlow(new AssistantTarget(assistant)), eligibility));
     // Without a Chat gateway Product Connections have no handler, and their events wait in the inbox.
-    if (gateway) channels.register("product", guarded(new GuardedTarget(new ProductTarget({ gateway, limiter: stores.limiter }), [liveOwnProduct(releaseStore)]), eligibility));
+    if (gateway) channels.register("product", guarded(new GuardedTarget(new ChatFlow(new ProductTarget({ gateway, limiter: stores.limiter })), [liveOwnProduct(releaseStore)]), eligibility));
     channels.start();
     Object.assign(registryContext, { assistant, assistantChat, ingest, channels, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin, studioUrl, telegramLogin, ...(seal ? { ownApps: new OwnApps({ connections: stores.connections, seal, forms: CREDENTIAL_FORMS, origin: telegramOrigin, ownsProduct }) } : {}) });
     // A platform that pushes over its own connection runs here, in one process at a time. A dropped connection comes back; credentials added or removed are picked up.
