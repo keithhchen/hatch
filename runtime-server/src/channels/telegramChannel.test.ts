@@ -42,9 +42,14 @@ test("verify checks the secret header", () => {
 });
 
 test("private text, photo and document parse with thread and sender the same", () => {
-  assert.deepEqual(parse(privateMessage({ text: "hi" })), [{ eventId: "1", address: TO, messageRef: "10", text: "hi" }]);
-  assert.deepEqual(parse(privateMessage({ photo: [{ file_id: "small" }, { file_id: "big", file_size: 99 }], caption: " look " })), [{ eventId: "1", address: TO, messageRef: "10", text: "look", file: { ref: "big", name: "photo.jpg", size: 99 } }]);
-  assert.deepEqual(parse(privateMessage({ document: { file_id: "d", file_name: "a.pdf", file_size: 5 } })), [{ eventId: "1", address: TO, messageRef: "10", file: { ref: "d", name: "a.pdf", size: 5 } }]);
+  assert.deepEqual(parse(privateMessage({ text: "hi" })), [{ eventId: "1", sequence: 1, address: TO, messageRef: "10", text: "hi" }]);
+  assert.deepEqual(parse(privateMessage({ photo: [{ file_id: "small" }, { file_id: "big", file_size: 99 }], caption: " look " })), [{ eventId: "1", sequence: 1, address: TO, messageRef: "10", text: "look", file: { ref: "big", name: "photo.jpg", size: 99 } }]);
+  assert.deepEqual(parse(privateMessage({ document: { file_id: "d", file_name: "a.pdf", file_size: 5 } })), [{ eventId: "1", sequence: 1, address: TO, messageRef: "10", file: { ref: "d", name: "a.pdf", size: 5 } }]);
+});
+
+test("every event carries Telegram's update_id as its sequence, so the inbox can keep Telegram's order", () => {
+  assert.equal(parse({ ...privateMessage({ text: "a" }), update_id: 90_000_000_007 })[0]?.sequence, 90_000_000_007);
+  assert.equal(parse({ update_id: 5, callback_query: { id: "q", from: { id: 7 }, data: "x", message: { message_id: 1, chat: { id: 42, type: "private" } } } })[0]?.sequence, 5);
 });
 
 test("the photos of one album parse as events of one album, so the inbox can hand them over together", () => {
@@ -56,8 +61,8 @@ test("the photos of one album parse as events of one album, so the inbox can han
 });
 
 test("a voice message or audio file parses into a file for the asset pipeline, with its size for the 20 MB refusal", () => {
-  assert.deepEqual(parse(privateMessage({ voice: { file_id: "v", file_size: 7, duration: 3, mime_type: "audio/ogg" } })), [{ eventId: "1", address: TO, messageRef: "10", file: { ref: "v", name: "voice.ogg", size: 7 } }]);
-  assert.deepEqual(parse(privateMessage({ audio: { file_id: "a", file_name: "memo.m4a", file_size: 9 } })), [{ eventId: "1", address: TO, messageRef: "10", file: { ref: "a", name: "memo.m4a", size: 9 } }]);
+  assert.deepEqual(parse(privateMessage({ voice: { file_id: "v", file_size: 7, duration: 3, mime_type: "audio/ogg" } })), [{ eventId: "1", sequence: 1, address: TO, messageRef: "10", file: { ref: "v", name: "voice.ogg", size: 7 } }]);
+  assert.deepEqual(parse(privateMessage({ audio: { file_id: "a", file_name: "memo.m4a", file_size: 9 } })), [{ eventId: "1", sequence: 1, address: TO, messageRef: "10", file: { ref: "a", name: "memo.m4a", size: 9 } }]);
   assert.equal(parse(privateMessage({ audio: { file_id: "a" } }))[0]?.file?.name, "audio");
   assert.equal(parse(privateMessage({ voice: { file_id: "big", file_size: 25 * 1024 * 1024 } }))[0]!.file!.size! > channel().telegram.maxFileBytes, true);
 });
@@ -74,7 +79,7 @@ test("a private message with no sender falls back to the chat id", () => {
 
 test("in a group, a @mention reaches the bot with the mention stripped, case-insensitively", () => {
   const events = parse(groupMessage({ text: "@hatchbot make a poster", entities: [{ type: "mention", offset: 0, length: 9 }] }));
-  assert.deepEqual(events, [{ eventId: "2", address: GROUP, group: true, messageRef: "11", text: "make a poster" }]);
+  assert.deepEqual(events, [{ eventId: "2", sequence: 2, address: GROUP, group: true, messageRef: "11", text: "make a poster" }]);
   assert.equal(parse(groupMessage({ text: "hey @HATCHBOT do it" }, "group"))[0]?.text, "hey  do it");
   assert.equal(parse(groupMessage({ caption: "@HatchBot see", photo: [{ file_id: "p" }] }))[0]?.text, "see");
 });
@@ -105,7 +110,7 @@ test("channels and other chat types are ignored", () => {
 
 test("a callback query takes the sender from `from` and the thread from the message's chat", () => {
   const update = { update_id: 5, callback_query: { id: "q1", from: { id: 7 }, data: `t:${TASK}:approve`, message: { message_id: 20, chat: { id: -100, type: "supergroup" } } } };
-  assert.deepEqual(parse(update), [{ eventId: "5", address: GROUP, group: true, button: { taskId: TASK, action: "approve", ref: "q1|-100|20" } }]);
+  assert.deepEqual(parse(update), [{ eventId: "5", sequence: 5, address: GROUP, group: true, button: { taskId: TASK, action: "approve", ref: "q1|-100|20" } }]);
   const unknown = parse({ ...update, callback_query: { ...update.callback_query, data: "menu" } });
   assert.deepEqual(unknown[0]?.button, { taskId: "", action: "decline", ref: "q1|-100|20" });
 });
@@ -115,7 +120,7 @@ test("recorded payload: a redelivered update parses to the same event id, and an
   assert.equal(parse(update)[0]?.eventId, parse(update)[0]?.eventId);
   assert.deepEqual(parse({ update_id: 6, edited_message: { message_id: 10, chat: { id: 42, type: "private" }, text: "hi!" } }), []);
   // A sticker has no text and no file: an event the Expert hears about.
-  assert.deepEqual(parse(privateMessage({ sticker: { file_id: "s" } })), [{ eventId: "1", address: TO, messageRef: "10" }]);
+  assert.deepEqual(parse(privateMessage({ sticker: { file_id: "s" } })), [{ eventId: "1", sequence: 1, address: TO, messageRef: "10" }]);
 });
 
 test("send posts to the thread with reply parameters and inline buttons", async () => {
@@ -171,7 +176,7 @@ test("a link goes out as a URL button; the bot, its scope and webhook are manage
   assert.deepEqual(calls[0]!.body.reply_markup, { inline_keyboard: [[{ text: "Log in", url: "https://site.test/v1/auth/telegram/start?claim=c" }]] });
   assert.equal(await telegram.probe(), "shop_bot");
   await telegram.setWebhook("https://site.test/hook", "sec");
-  assert.deepEqual(calls.at(-1)!.body, { url: "https://site.test/hook", secret_token: "sec", allowed_updates: ["message", "callback_query"] });
+  assert.deepEqual(calls.at(-1)!.body, { url: "https://site.test/hook", secret_token: "sec", allowed_updates: ["message", "callback_query"], max_connections: 1 }, "one connection: Telegram delivers in update_id order");
   await telegram.deleteWebhook();
   assert.deepEqual(calls.map(call => call.url.split("/").pop()), ["sendMessage", "getMe", "setWebhook", "deleteWebhook"]);
   const bot = new TelegramChannel({ token: "t", username: "shop_bot", webhookSecret: "s" }, "scope-1");

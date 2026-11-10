@@ -14,6 +14,8 @@ type TelegramUpdate = {
   callback_query?: { id: string; from: { id: number }; data?: string; message?: { message_id: number; chat: { id: number; type?: string } } };
 };
 
+const WEBHOOK_MAX_CONNECTIONS = 1;
+
 /**
  * Telegram Bot API. Two roles, one adapter: our official bot (scope ""), where each Expert links their private chat,
  * and an Expert's own bot for one Product (scope: the id of that bot), where anyone may write.
@@ -36,7 +38,9 @@ export class TelegramChannel implements ChannelAdapter {
   }
   parse(raw: Buffer): { events: InboundEvent[] } {
     const update = JSON.parse(raw.toString("utf8")) as TelegramUpdate;
+    // update_id grows with every update the bot gets: it is the order Telegram means, which deliveries do not keep.
     const eventId = String(update.update_id);
+    const sequence = update.update_id;
     const query = update.callback_query;
     if (query) {
       const match = query.data?.match(/^t:([0-9a-f-]{36}):(approve|decline)$/);
@@ -45,7 +49,7 @@ export class TelegramChannel implements ChannelAdapter {
       const address = { threadId: String(chat), senderId: String(query.from.id) };
       const ref = `${query.id}|${chat}|${query.message!.message_id}`;
       const group = query.message?.chat.type === "group" || query.message?.chat.type === "supergroup";
-      return { events: [{ eventId, address, ...(group ? { group: true as const } : {}), button: match ? { taskId: match[1]!, action: match[2] as "approve" | "decline", ref } : { taskId: "", action: "decline", ref } }] };
+      return { events: [{ eventId, sequence, address, ...(group ? { group: true as const } : {}), button: match ? { taskId: match[1]!, action: match[2] as "approve" | "decline", ref } : { taskId: "", action: "decline", ref } }] };
     }
     const message = update.message;
     if (!message) return { events: [] };
@@ -64,7 +68,7 @@ export class TelegramChannel implements ChannelAdapter {
     const body = (message.text?.replace(/^\/start\s+/, "") ?? message.caption ?? "");
     const text = (group ? body.replace(this.mention, "") : body).trim();
     const address = { threadId: String(message.chat.id), senderId: String(message.from?.id ?? message.chat.id) };
-    return { events: [{ eventId, address, ...(group ? { group: true as const } : {}), messageRef: String(message.message_id), ...(text ? { text } : {}), ...(file ? { file } : {}), ...(file && message.media_group_id ? { album: message.media_group_id } : {}) }] };
+    return { events: [{ eventId, sequence, address, ...(group ? { group: true as const } : {}), messageRef: String(message.message_id), ...(text ? { text } : {}), ...(file ? { file } : {}), ...(file && message.media_group_id ? { album: message.media_group_id } : {}) }] };
   }
   /** In a group the bot answers only when named or replied to. */
   private addressed(message: NonNullable<TelegramUpdate["message"]>): boolean {
@@ -93,9 +97,14 @@ export class TelegramChannel implements ChannelAdapter {
     if (!me.username) throw new Error("Telegram did not say which bot this is");
     return me.username;
   }
-  /** Telegram posts every update to `url` with `secret` in a header, and nowhere else. */
+  /**
+   * Telegram posts every update to `url` with `secret` in a header, and nowhere else. It posts over `max_connections` parallel
+   * connections (default 40), and updates sent in parallel arrive in any order. Ours only verifies and stores an update (one
+   * insert) before it answers, so one connection carries hundreds a second and delivers them in update_id order; more would buy
+   * nothing and reorder. The inbox still orders a thread by update_id for what one connection cannot prevent: a retried update.
+   */
   async setWebhook(url: string, secret: string): Promise<void> {
-    await this.call("setWebhook", { url, secret_token: secret, allowed_updates: ["message", "callback_query"] });
+    await this.call("setWebhook", { url, secret_token: secret, allowed_updates: ["message", "callback_query"], max_connections: WEBHOOK_MAX_CONNECTIONS });
   }
   async deleteWebhook(): Promise<void> { await this.call("deleteWebhook", {}); }
   async download(file: InboundFile): Promise<Buffer> {
