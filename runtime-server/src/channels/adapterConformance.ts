@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { DeliveryFailure } from "../surfaces/contract.js";
+import { ChatError } from "../chat/principal.js";
+import type { ContentPart, DeliveryFailure } from "../surfaces/contract.js";
+import type { Handled } from "./ports.js";
 import { ChannelSendError, type ChannelAdapter, type InboundEvent } from "./types.js";
 
 /** What a platform answers to a send, in the platform's own shape; an Error is a transport failure such as a timeout. */
@@ -68,3 +70,85 @@ export function fakeFetch(answer: (url: string, init: RequestInit | undefined, i
 }
 
 export const TIMEOUT = Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+
+/** What a ChatTarget rig lets the conformance cases see and steer: the Agent behind the target is a fake that keeps what it was given. */
+export type TargetRig = {
+  /** An authorized sender's event, as the router hands it to the target. */
+  deliver(event: InboundEvent): Promise<Handled>;
+  /** Each distinct message the Agent was given, by key. A repeated key is the same message, as in Chat. */
+  messages(): Array<{ key: string; parts: ContentPart[] }>;
+  /** What the sender was told outside any conversation. */
+  notices(): string[];
+  /** The next call that stores a message fails with this. */
+  failNext(error: Error): void;
+  /** `persist` for every call that stored a message or a press, `act:<action>` for every decision taken because of a press. */
+  trace(): string[];
+};
+
+/** A caption and three photos that Telegram delivered together, merged the way the inbox hands them to a target. */
+export const albumEvent = (eventId: string): InboundEvent => ({
+  eventId, address: { threadId: "42", senderId: "42" }, messageRef: "9", text: "三张图",
+  files: [1, 2, 3].map(n => ({ ref: `f${n}`, name: `photo${n}.jpg`, size: 10 })),
+});
+
+/**
+ * The contract every ChatTarget keeps, whichever Agent is behind it: the same event is the same message, an album is one
+ * message, a refusal that will pass is retried and one that will not is answered, and a pressed button is stored before
+ * anything is done about it.
+ */
+export function targetConformance(name: string, make: () => TargetRig | Promise<TargetRig>, options: { button?: InboundEvent } = {}): void {
+  const text = (eventId: string): InboundEvent => ({ eventId, address: { threadId: "42", senderId: "42" }, messageRef: "9", text: "你好" });
+  test(`${name}: an event delivered twice is one message and one Run`, async () => {
+    const rig = await make();
+    const first = await rig.deliver(text("e1"));
+    const second = await rig.deliver(text("e1"));
+    assert.equal(rig.messages().length, 1);
+    assert.equal(second.runId, first.runId);
+    assert.deepEqual(rig.messages()[0]!.parts, [{ type: "text", text: "你好" }]);
+  });
+  test(`${name}: the key names the channel, the scope and the event`, async () => {
+    const rig = await make();
+    await rig.deliver(text("e1"));
+    assert.match(rig.messages()[0]!.key, /^telegram:[^:]*:e1$/);
+  });
+  test(`${name}: a media album is one message: its caption, then every photo in order`, async () => {
+    const rig = await make();
+    await rig.deliver(albumEvent("e2"));
+    assert.equal(rig.messages().length, 1);
+    assert.deepEqual(rig.messages()[0]!.parts.map(part => part.type), ["text", "image", "image", "image"]);
+  });
+  test(`${name}: a refusal that will pass returns the event to the queue, and the retry is the same message`, async () => {
+    const rig = await make();
+    rig.failNext(new ChatError("conversation_busy", "The previous run is still stopping.", 409));
+    await assert.rejects(rig.deliver(text("e3")), (error: unknown) => error instanceof ChatError && error.retryable);
+    assert.deepEqual(rig.notices(), []);
+    assert.equal(rig.messages().length, 0);
+    await rig.deliver(text("e3"));
+    assert.equal(rig.messages().length, 1);
+  });
+  test(`${name}: a refusal that never changes is told to the sender and not retried`, async () => {
+    const rig = await make();
+    rig.failNext(new ChatError("invalid_request", "That cannot be sent.", 400));
+    assert.deepEqual(await rig.deliver(text("e4")), { replied: true });
+    assert.deepEqual(rig.notices(), ["That cannot be sent."]);
+  });
+  test(`${name}: a failure nobody classified is retried, never shown`, async () => {
+    const rig = await make();
+    rig.failNext(new Error("socket hang up"));
+    await assert.rejects(rig.deliver(text("e5")), /socket hang up/);
+    assert.deepEqual(rig.notices(), []);
+  });
+  const button = options.button;
+  if (button) {
+    test(`${name}: a button press is stored before it is acted on, and a retry neither loses nor repeats it`, async () => {
+      const rig = await make();
+      rig.failNext(new ChatError("conversation_busy", "The previous run is still stopping.", 409));
+      await assert.rejects(rig.deliver(button), (error: unknown) => error instanceof ChatError && error.retryable);
+      assert.deepEqual(rig.trace(), [], "nothing is done until the press is stored");
+      await rig.deliver(button);
+      assert.deepEqual(rig.trace(), ["persist", `act:${button.button!.action}`]);
+      await rig.deliver(button);
+      assert.equal(rig.messages().length, 1, "the same press is the same message");
+    });
+  }
+}

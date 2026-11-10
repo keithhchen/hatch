@@ -11,6 +11,12 @@ export type InboxItem = {
   runId?: string;
 };
 
+/** Who holds an event: the claim that leased it. `attempts` counts claims, so an older claim never matches a newer one. */
+export type Lease = Pick<InboxItem, "id" | "attempts">;
+
+/** The photos of an album arrive as separate events; the first is handled once no new one has come for this long. */
+export const ALBUM_SETTLE_MS = 1500;
+
 /** A thread with a message nobody has answered yet. */
 export type WaitingThread = { connectionId: string; channel: ChannelKind; scope: string; threadId: string; senderId: string };
 
@@ -29,13 +35,20 @@ export interface Inbox {
    * the notice's key, not to a Connection: several Connections share a tenant, so none of them can name it.
    */
   cursor(channel: ChannelKind, scope: string, key: string): Promise<string | undefined>;
-  /** Leases the next unprocessed event of each thread. Events of one thread are handed out in arrival order, one at a time. */
+  /** Leases the next unprocessed event of each thread. Events of one thread are handed out in arrival order, one at a time; an album's first waits until its album is complete. */
   claim(limit: number, leaseMs: number, now?: Date): Promise<InboxItem[]>;
+  /** The other events of this event's album that are still waiting, in arrival order. */
+  siblings(item: InboxItem): Promise<InboxItem[]>;
+  /**
+   * Every write below belongs to the claim that holds the lease and to it alone: once the lease has run out, or another worker has
+   * claimed the event, the write changes nothing and says so (false or undefined), so a slow worker cannot undo a faster one.
+   */
   /** The claimant is alive: pushes its lease out, so a dead one is noticed after a short lease however long processing takes. */
-  extend(id: string, leaseMs: number, now?: Date): Promise<void>;
-  complete(id: string, outcome: { connectionId?: string; runId?: string; replied?: boolean }): Promise<void>;
+  extend(lease: Lease, leaseMs: number, now?: Date): Promise<boolean>;
+  /** Marks the event done, together with the `absorbed` events that were handled as part of it (the rest of an album). */
+  complete(lease: Lease, outcome: { connectionId?: string; runId?: string; replied?: boolean }, absorbed?: string[], now?: Date): Promise<boolean>;
   /** Releases the lease after `delayMs`; after `maxAttempts` the event is given up and kept as failed. */
-  retry(id: string, error: string, delayMs: number, maxAttempts: number, now?: Date): Promise<"pending" | "failed">;
+  retry(lease: Lease, error: string, delayMs: number, maxAttempts: number, now?: Date): Promise<"pending" | "failed" | undefined>;
   get(id: string): Promise<InboxItem | undefined>;
   /** When the platform last wrote to this thread. */
   lastInbound(channel: ChannelKind, scope: string, threadId: string): Promise<Date | undefined>;
@@ -125,6 +138,7 @@ export class PostgresInbox implements Inbox {
         SELECT i.id FROM hatch_channel_inbox i
         WHERE i.state = 'pending' AND (i.lease_until IS NULL OR i.lease_until < $1)
           AND NOT EXISTS (SELECT 1 FROM hatch_channel_inbox earlier WHERE earlier.state = 'pending' AND earlier.channel = i.channel AND earlier.scope = i.scope AND earlier.thread_id = i.thread_id AND earlier.seq < i.seq)
+          AND NOT EXISTS (SELECT 1 FROM hatch_channel_inbox part WHERE part.state = 'pending' AND part.channel = i.channel AND part.scope = i.scope AND part.thread_id = i.thread_id AND part.event->>'album' = i.event->>'album' AND part.received_at > $1::timestamptz - make_interval(secs => ${ALBUM_SETTLE_MS / 1000}))
         ORDER BY i.seq LIMIT $2 FOR UPDATE OF i SKIP LOCKED
       )
       UPDATE hatch_channel_inbox i SET lease_until = $3, attempts = i.attempts + 1 FROM due WHERE i.id = due.id RETURNING i.*`,
@@ -132,19 +146,37 @@ export class PostgresInbox implements Inbox {
     return rows.sort((a, b) => Number(a.seq) - Number(b.seq)).map(itemOf);
   }
 
-  async extend(id: string, leaseMs: number, now = new Date()): Promise<void> {
-    await this.pool.query("UPDATE hatch_channel_inbox SET lease_until = $2 WHERE id = $1 AND state = 'pending'", [id, new Date(now.getTime() + leaseMs)]);
+  async siblings(item: InboxItem): Promise<InboxItem[]> {
+    if (!item.event.album) return [];
+    return (await this.pool.query(`SELECT * FROM hatch_channel_inbox WHERE state = 'pending' AND id <> $1 AND channel = $2 AND scope = $3 AND thread_id = $4 AND event->>'album' = $5 ORDER BY seq`,
+      [item.id, item.channel, item.scope, item.event.address.threadId, item.event.album])).rows.map(itemOf);
   }
 
-  async complete(id: string, outcome: { connectionId?: string; runId?: string; replied?: boolean }): Promise<void> {
-    await this.pool.query(`UPDATE hatch_channel_inbox SET state = 'done', lease_until = NULL, connection_id = COALESCE($2, connection_id), run_id = COALESCE($3, run_id),
-      replied_at = CASE WHEN $4 THEN now() ELSE replied_at END WHERE id = $1`, [id, outcome.connectionId ?? null, outcome.runId ?? null, outcome.replied ?? false]);
+  /** The rows a lease still holds: claimed by this attempt, and not yet expired. */
+  private static readonly HELD = "id = $1 AND state = 'pending' AND attempts = $2 AND lease_until > $3";
+
+  async extend(lease: Lease, leaseMs: number, now = new Date()): Promise<boolean> {
+    return Boolean((await this.pool.query(`UPDATE hatch_channel_inbox SET lease_until = $4 WHERE ${PostgresInbox.HELD}`, [lease.id, lease.attempts, now, new Date(now.getTime() + leaseMs)])).rowCount);
   }
 
-  async retry(id: string, error: string, delayMs: number, maxAttempts: number, now = new Date()): Promise<"pending" | "failed"> {
-    const row = (await this.pool.query(`UPDATE hatch_channel_inbox SET last_error = $2, lease_until = $3, state = CASE WHEN attempts >= $4 THEN 'failed' ELSE 'pending' END WHERE id = $1 RETURNING state`,
-      [id, error.slice(0, 1000), new Date(now.getTime() + delayMs), maxAttempts])).rows[0];
-    return row.state;
+  async complete(lease: Lease, outcome: { connectionId?: string; runId?: string; replied?: boolean }, absorbed: string[] = [], now = new Date()): Promise<boolean> {
+    const client = await this.pool.connect();
+    const set = (first: number) => `state = 'done', lease_until = NULL, connection_id = COALESCE($${first}, connection_id), run_id = COALESCE($${first + 1}, run_id), replied_at = CASE WHEN $${first + 2} THEN now() ELSE replied_at END`;
+    const values = [outcome.connectionId ?? null, outcome.runId ?? null, outcome.replied ?? false];
+    try {
+      await client.query("BEGIN");
+      const held = await client.query(`UPDATE hatch_channel_inbox SET ${set(4)} WHERE ${PostgresInbox.HELD}`, [lease.id, lease.attempts, now, ...values]);
+      if (!held.rowCount) { await client.query("ROLLBACK"); return false; }
+      if (absorbed.length) await client.query(`UPDATE hatch_channel_inbox SET ${set(2)} WHERE id = ANY($1::uuid[]) AND state = 'pending'`, [absorbed, ...values]);
+      await client.query("COMMIT");
+      return true;
+    } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; } finally { client.release(); }
+  }
+
+  async retry(lease: Lease, error: string, delayMs: number, maxAttempts: number, now = new Date()): Promise<"pending" | "failed" | undefined> {
+    const row = (await this.pool.query(`UPDATE hatch_channel_inbox SET last_error = $4, lease_until = $5, state = CASE WHEN attempts >= $6 THEN 'failed' ELSE 'pending' END WHERE ${PostgresInbox.HELD} RETURNING state`,
+      [lease.id, lease.attempts, now, error.slice(0, 1000), new Date(now.getTime() + delayMs), maxAttempts])).rows[0];
+    return row?.state;
   }
 
   async get(id: string): Promise<InboxItem | undefined> {

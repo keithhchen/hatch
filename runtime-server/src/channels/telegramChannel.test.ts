@@ -47,6 +47,14 @@ test("private text, photo and document parse with thread and sender the same", (
   assert.deepEqual(parse(privateMessage({ document: { file_id: "d", file_name: "a.pdf", file_size: 5 } })), [{ eventId: "1", address: TO, messageRef: "10", file: { ref: "d", name: "a.pdf", size: 5 } }]);
 });
 
+test("the photos of one album parse as events of one album, so the inbox can hand them over together", () => {
+  const [first] = parse(privateMessage({ photo: [{ file_id: "a" }], caption: "三张", media_group_id: "g1" }));
+  const [second] = parse(privateMessage({ photo: [{ file_id: "b" }], media_group_id: "g1" }));
+  assert.equal(first?.album, "g1");
+  assert.equal(second?.album, "g1");
+  assert.equal(parse(privateMessage({ photo: [{ file_id: "c" }] }))[0]?.album, undefined);
+});
+
 test("a voice message or audio file parses into a file for the asset pipeline, with its size for the 20 MB refusal", () => {
   assert.deepEqual(parse(privateMessage({ voice: { file_id: "v", file_size: 7, duration: 3, mime_type: "audio/ogg" } })), [{ eventId: "1", address: TO, messageRef: "10", file: { ref: "v", name: "voice.ogg", size: 7 } }]);
   assert.deepEqual(parse(privateMessage({ audio: { file_id: "a", file_name: "memo.m4a", file_size: 9 } })), [{ eventId: "1", address: TO, messageRef: "10", file: { ref: "a", name: "memo.m4a", size: 9 } }]);

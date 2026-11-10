@@ -31,6 +31,7 @@ import { MemoryAssistantState } from "./state.js";
 import { assistantFeedKey } from "./studioVocabulary.js";
 import { messageKey } from "../chat/messageKey.js";
 import { studioToolDefinitions, studioTools } from "./studioTools.js";
+import { ChatFlow } from "../channels/chatTarget.js";
 import { AssistantTarget } from "./assistantTarget.js";
 import type { AssistantChannels, Inbound } from "../channels/ports.js";
 import type { ChannelConnection } from "../channels/connections.js";
@@ -156,7 +157,7 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
   await chat.start();
   const log = chat.feed;
   const connection: ChannelConnection = { id: "c0000000-0000-4000-8000-000000000001", ownerAccountId: ACCOUNT, channel: "telegram", scope: "", client: "im", target: { kind: "assistant" }, audience: "self", taskSpecific: false, state: "active" };
-  const target = new AssistantTarget(assistant);
+  const target = new ChatFlow(new AssistantTarget(assistant));
   const notices: string[] = [];
   /** What the router hands the Assistant once it has authorized the sender; the inbox id is derived from the event id, so a repeat is the same message. */
   const telegramUpdate = async (update: unknown) => {

@@ -5,7 +5,7 @@ import { ChannelSendError, failureForStatus, guardSend, lostAccess, type Channel
 type TelegramUpdate = {
   update_id: number;
   message?: {
-    message_id: number; chat: { id: number; type: string }; from?: { id: number }; text?: string; caption?: string;
+    message_id: number; media_group_id?: string; chat: { id: number; type: string }; from?: { id: number }; text?: string; caption?: string;
     entities?: Array<{ type: string; offset: number; length: number }>; caption_entities?: Array<{ type: string; offset: number; length: number }>;
     reply_to_message?: { from?: { username?: string; is_bot?: boolean } };
     document?: { file_id: string; file_name?: string; file_size?: number }; photo?: Array<{ file_id: string; file_size?: number }>;
@@ -64,7 +64,7 @@ export class TelegramChannel implements ChannelAdapter {
     const body = (message.text?.replace(/^\/start\s+/, "") ?? message.caption ?? "");
     const text = (group ? body.replace(this.mention, "") : body).trim();
     const address = { threadId: String(message.chat.id), senderId: String(message.from?.id ?? message.chat.id) };
-    return { events: [{ eventId, address, ...(group ? { group: true as const } : {}), messageRef: String(message.message_id), ...(text ? { text } : {}), ...(file ? { file } : {}) }] };
+    return { events: [{ eventId, address, ...(group ? { group: true as const } : {}), messageRef: String(message.message_id), ...(text ? { text } : {}), ...(file ? { file } : {}), ...(file && message.media_group_id ? { album: message.media_group_id } : {}) }] };
   }
   /** In a group the bot answers only when named or replied to. */
   private addressed(message: NonNullable<TelegramUpdate["message"]>): boolean {

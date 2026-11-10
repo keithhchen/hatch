@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { saying } from "../assets/kit.test.js";
 import type { ChannelConnection } from "../channels/connections.js";
 import type { Inbound } from "../channels/ports.js";
+import { ChatFlow } from "../channels/chatTarget.js";
 import { ProductTarget } from "../channels/productTarget.js";
 import type { ChannelAdapter, InboundEvent } from "../channels/types.js";
 import type { ChatGateway, SentMessage } from "./gateway.js";
@@ -18,7 +19,7 @@ function receiving({ runtime }: Fixture) {
   const sent: SentMessage[] = [];
   const notices: string[] = [];
   const gateway: ChatGateway = { send: async (...args) => { const result = await runtime.chat.send(...args); sent.push(result); return result; }, upload: (...args) => runtime.chat.upload(...args), progress: runId => runtime.chat.progress(runId) };
-  const target = new ProductTarget({ gateway, limiter: { take: async () => 0 } });
+  const target = new ChatFlow(new ProductTarget({ gateway, limiter: { take: async () => 0 } }));
   const adapter = { maxFileBytes: 20 * 1024 * 1024, download: async () => ogg } as unknown as ChannelAdapter;
   const handle = (event: InboundEvent) => target.handle({ id: event.eventId, connection, principal: alice, address: { connectionId: connection.id, ...event.address }, event, adapter, notify: async text => { notices.push(text); } } as Inbound);
   return { handle, sent, notices };
