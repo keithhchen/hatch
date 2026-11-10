@@ -48,6 +48,8 @@ export interface Conversation {
   /** Key of this conversation's event log; nothing until the conversation exists. */
   feedKey(): Promise<string | undefined>;
   stop(): Promise<void>;
+  /** What the running turn has said so far, when the conversation knows it without its event log. */
+  partial?(): Promise<string>;
 }
 
 /** An error the API shows as is: status, machine-readable code and a message for people. */

@@ -9,7 +9,6 @@ import { LegacyAssistantHistory } from "./assistant/history.js";
 import { PostgresAssistantState } from "./assistant/state.js";
 import { PostgresDeliveries } from "./assistant/deliveries.js";
 import { ExpertMaterials } from "./assistant/materials.js";
-import { studioTranscripts } from "./assistant/studioFeed.js";
 import { PostgresStore } from "./postgresStore.js";
 import { PostgresConversationRepository } from "./conversationRepository.js";
 import { RuntimeAssetStore } from "./assetStore.js";
@@ -18,7 +17,8 @@ import { attachmentToolDefinitions } from "./chat/attachmentTools.js";
 import { ChatError } from "./chat/principal.js";
 import { toolRegistry } from "./tools.js";
 import { RoutedChatGateway } from "./channels/routedGateway.js";
-import { follow } from "./conversations/follow.js";
+import { follow, resumePoint } from "./conversations/follow.js";
+import { ConversationError } from "./conversations/conversation.js";
 import { failures } from "./errors/failures.js";
 import { UpstreamError } from "./errors/upstream.js";
 import { Dictation } from "./assets/dictation.js";
@@ -378,7 +378,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     });
     // The Assistant is a conversation on Chat's runtime, with its own transcript in this database and the Studio tools.
     failures.attach(new PostgresFailureLedger(registryPool as never));
-    const transcripts = new (studioTranscripts(PostgresStore))({ pool: registryPool, maxConversationEvents: 1_000_000, maxConversationBytes: 1024 * 1024 * 1024 });
+    const transcripts = new PostgresStore({ pool: registryPool, maxConversationEvents: 1_000_000, maxConversationBytes: 1024 * 1024 * 1024 });
     const conversations = new PostgresConversationRepository({ pool: registryPool });
     conversations.bindSubmissionStore(transcripts);
     await conversations.initialize();
@@ -387,13 +387,15 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     const tools = studioTools(assistant);
     for (const definition of studioToolDefinitions(tools)) toolRegistry.set(definition.name, definition);
     const assistantChat = new AssistantChat({
-      repository: conversations, store: transcripts, eventLog: conversationPorts.eventLog, chatAssets, state: assistantState, tools, desk: assistant,
+      repository: conversations, store: transcripts, chatAssets, state: assistantState, tools, desk: assistant,
       assetStore: new RuntimeAssetStore(path.join(factoryRoot, "assistant-assets")),
       history: new LegacyAssistantHistory({ backend: accountId => new PostgresWorkbenchBackend(registryPool, `assistant:${accountId}`), state: assistantState, store: transcripts }),
       prompt: assistantPrompt, liveState: accountId => assistant.liveState(accountId), env: environment,
     });
     assistant.bind(assistantChat, new ExpertMaterials({ assets: chatAssets, conversation: accountId => assistantChat.conversation(accountId) }));
     routed.bindLocal(assistantChat.gateway);
+    // Studio observers read the Assistant's events from its Run's journal; every other conversation keeps its log.
+    conversationPorts.eventLog.bind("assistant:", assistantChat.feed);
     await assistantChat.start();
     const productsPrefix = environment.HATCH_CREATOR_PRODUCT_FILES_PREFIX?.trim() || "creator-products";
     const ingest = await createIngestService({
@@ -2304,16 +2306,24 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
     return;
   }
   if (url.pathname === "/v1/creator/assistant/events" && request.method === "GET") {
+    const feed = `assistant:${account.id}`;
+    // From the cursor the page last heard (`after_cursor`, or the Last-Event-ID the browser echoes on reconnect), else from now. A cursor the feed never issued is refused before the stream opens.
+    let from: string;
+    try { from = await resumePoint(context.conversationPorts.eventLog, feed, url.searchParams.get("after_cursor") ?? (request.headers["last-event-id"] as string | undefined)); }
+    catch (error) {
+      if (error instanceof ConversationError) { sendJson(response, error.status, { error: { code: error.code, message: error.message } }); return; }
+      throw error;
+    }
     response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
     response.write(": connected\n\n");
-    // The page hears the same events every Studio client does, from now on, in the words it knows: a finished message or Run is something to reload.
+    // The page hears the same events every Studio client does, in the words it knows: a finished message or Run is something to reload.
     const stop = new AbortController();
     response.once("close", () => stop.abort());
     const heartbeat = setInterval(() => { if (!response.writableEnded) response.write(": heartbeat\n\n"); }, 15_000);
-    const feed = `assistant:${account.id}`;
-    await follow(context.conversationPorts.eventLog, feed, await context.conversationPorts.eventLog.head(feed), ({ event }) => {
-      const shown = event.type === "run_end" ? { type: "assistant" } : event;
-      if (!response.writableEnded) response.write(`data: ${JSON.stringify(shown)}\n\n`);
+    await follow(context.conversationPorts.eventLog, feed, from, ({ cursor, event }) => {
+      // The page reloads when a Run ends; it hears that as `assistant`, and every event names its Run.
+      const shown = event.type === "run_end" ? { ...event, type: "assistant" } : event;
+      if (!response.writableEnded) response.write(`id: ${cursor}\ndata: ${JSON.stringify(shown)}\n\n`);
     }, { signal: stop.signal });
     clearInterval(heartbeat);
     return;

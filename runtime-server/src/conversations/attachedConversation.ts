@@ -12,6 +12,7 @@ export class AttachedConversation implements Conversation {
   status() { return this.inner.status(); }
   messages(after?: string, limit?: number) { return this.inner.messages(after, limit); }
   feedKey() { return this.inner.feedKey(); }
+  get partial() { return this.inner.partial?.bind(this.inner); }
   stop() { return this.inner.stop(); }
 
   async send(input: SendInput): Promise<Sent> {

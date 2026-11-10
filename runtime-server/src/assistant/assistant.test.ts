@@ -15,7 +15,6 @@ import { attachmentToolDefinitions } from "../chat/attachmentTools.js";
 import { createFactoryLlmModel, type FactoryPiAgentOptions } from "../creatorLearning/factoryPi.js";
 import { UpstreamError } from "../errors/upstream.js";
 import { InMemoryConversationRepository } from "../conversationRepository.js";
-import { MemoryEventLog } from "../conversations/eventLog.js";
 import { FileWorkbenchBackend, WorkbenchStore } from "../factoryAgents/store.js";
 import { WorkbenchRuntime } from "../factoryAgents/runtime.js";
 import type { FactoryWorkspace } from "../factoryAgents/service.js";
@@ -29,7 +28,7 @@ import { LegacyAssistantHistory } from "./history.js";
 import { ExpertMaterials } from "./materials.js";
 import type { AccountReach } from "./reach.js";
 import { MemoryAssistantState } from "./state.js";
-import { StudioEventProjection, studioTranscripts, assistantConversationId, assistantFeedKey } from "./studioFeed.js";
+import { assistantFeedKey } from "./studioVocabulary.js";
 import { studioToolDefinitions, studioTools } from "./studioTools.js";
 import { AssistantTarget } from "./assistantTarget.js";
 import type { AssistantChannels, Inbound } from "../channels/ports.js";
@@ -138,23 +137,23 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
     runtime: { agentFactory },
   });
   const dataDir = path.join(root, "chat");
-  const store = new (studioTranscripts(RuntimeStore))(dataDir);
+  const store = new RuntimeStore(dataDir);
   const repository = new InMemoryConversationRepository(localRuntimeAuthority(dataDir));
   const kit = await harness({ ...(options.transcriber ? { transcriber: options.transcriber } : {}) });
   const chatAssets = new ChatAssets({ pipeline: kit.pipeline, blobs: kit.blobs, files: new AttachmentFiles(kit.repository, kit.blobs) });
   for (const definition of attachmentToolDefinitions(chatAssets.tools())) toolRegistry.set(definition.name, definition);
   const tools = studioTools(assistant);
   for (const definition of studioToolDefinitions(tools)) toolRegistry.set(definition.name, definition);
-  const log = new MemoryEventLog();
   const model = scriptedModel(options.model);
   const chat = new AssistantChat({
-    repository, store, eventLog: log, chatAssets, state, tools, desk: assistant, assetStore: new RuntimeAssetStore(dataDir),
+    repository, store, chatAssets, state, tools, desk: assistant, assetStore: new RuntimeAssetStore(dataDir),
     history: new LegacyAssistantHistory({ backend: () => legacy, state, store }),
     prompt: async () => "你是 Hatch 助理。", liveState: id => assistant.liveState(id), env: {}, createRuntime: () => model.runtime,
     sweepMs: 60_000,
   });
   assistant.bind(chat, new ExpertMaterials({ assets: chatAssets, conversation: id => chat.conversation(id) }));
   await chat.start();
+  const log = chat.feed;
   const connection: ChannelConnection = { id: "c0000000-0000-4000-8000-000000000001", ownerAccountId: ACCOUNT, channel: "telegram", scope: "", client: "im", target: { kind: "assistant" }, audience: "self", taskSpecific: false, state: "active" };
   const target = new AssistantTarget(assistant);
   const notices: string[] = [];
@@ -192,6 +191,9 @@ const update = (id: number, text: string) => ({ update_id: id, message: { messag
 test("A burst of Telegram messages steers one Run: every message is in it, and one reply is owed", async () => {
   const env = await setup({ model: (turn, call) => call === 1 ? { delayMs: 200, text: turn2 => `看到${turn2.said.length}条` } : { text: "不该再有一轮" } });
   try {
+    // What the Run says as it goes is live and not recorded; what it did is the journal's.
+    const live: string[] = [];
+    env.log.live(assistantFeedKey(ACCOUNT), event => { live.push(String(event.type)); });
     const first = await env.telegramUpdate(update(1, "第一条"));
     await sleep(60);
     const burst = [...await env.telegramUpdate(update(2, "第二条")), ...await env.telegramUpdate(update(3, "第三条")), ...await env.telegramUpdate(update(3, "第三条"))];
@@ -203,8 +205,12 @@ test("A burst of Telegram messages steers one Run: every message is in it, and o
     assert.equal(progress?.ended && progress.reply.text, "看到3条");
     const lines = await env.chat.lines(ACCOUNT);
     assert.deepEqual(lines.filter(line => line.role === "user").map(line => line.text), ["第一条", "第二条", "第三条"], "the repeated update was one message");
-    const kinds = (await env.log.after(assistantFeedKey(ACCOUNT), "0", 5000)).map(entry => entry.event.type);
-    assert.ok(kinds.includes("delta") && kinds.includes("message_end") && kinds.includes("run_end"), "Studio observers see the Run like a worker's");
+    const recorded = await env.log.after(assistantFeedKey(ACCOUNT), "0", 5000);
+    const kinds = recorded.map(entry => entry.event.type);
+    assert.ok(live.includes("delta") && kinds.includes("message_end") && kinds.includes("run_end"), "Studio observers see the Run like a worker's");
+    assert.ok(recorded.every(entry => typeof entry.event.run_id === "string"), "every event names its Run");
+    assert.equal(recorded.filter(entry => entry.event.type === "message").length, 3, "each message is an event, and names itself");
+    assert.ok(recorded.filter(entry => entry.event.type === "message" || entry.event.type === "message_end").every(entry => typeof entry.event.message_id === "string"));
   } finally { await env.close(); }
 });
 
@@ -224,27 +230,6 @@ test("The Assistant's tools are its own: declared once, absent from a Product's 
     await env.chat.say(ACCOUNT, { id: "from-dm", parts: [{ type: "text", text: "dm" }], client: { client: "dm" } });
     await env.idle();
     assert.equal((await env.chat.status(ACCOUNT)).state, "failed", "tool_unsupported_on_client ended the Run");
-  } finally { await env.close(); }
-});
-
-test("Studio observers see a step as Chat's own words for it, never its arguments or result", async () => {
-  const env = await setup({ model: () => ({ text: "好" }) });
-  try {
-    const projection = new StudioEventProjection(env.log);
-    const call = { run_id: "run-1", tool_call_id: "call-1", name: "list_tasks", activity_message: "看看有什么事项", arguments: { secret: "internal" } };
-    projection.project(assistantConversationId(ACCOUNT), { type: "tool_call.delta", ...call, status: "requested" });
-    projection.project(assistantConversationId(ACCOUNT), { type: "tool_call.delta", ...call, status: "completed", result: { secret: "internal" } });
-    await waitFor(async () => (await env.log.after(assistantFeedKey(ACCOUNT), "0", 5000)).length === 2);
-    for (const delta of [{ kind: "thinking_start", contentIndex: 0 }, { kind: "thinking_delta", contentIndex: 0, delta: "想" }, { kind: "thinking_end", contentIndex: 0, content: "想" }]) {
-      projection.project(assistantConversationId(ACCOUNT), { type: "assistant.delta", run_id: "run-1", delta });
-    }
-    await waitFor(async () => (await env.log.after(assistantFeedKey(ACCOUNT), "0", 5000)).length === 5);
-    const events = (await env.log.after(assistantFeedKey(ACCOUNT), "0", 5000)).map(entry => entry.event);
-    assert.deepEqual(events.slice(2), [{ type: "thinking", contentIndex: 0 }, { type: "thinking_delta", contentIndex: 0, delta: "想" }, { type: "thinking_end", contentIndex: 0, content: "想" }], "reasoning is carried, in order");
-    assert.deepEqual(events.slice(0, 2), [
-      { type: "tool", name: "list_tasks", id: "call-1", activity: "看看有什么事项" },
-      { type: "tool_end", name: "list_tasks", id: "call-1", activity: "看看有什么事项", isError: false },
-    ]);
   } finally { await env.close(); }
 });
 

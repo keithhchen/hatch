@@ -265,6 +265,8 @@ export interface ConversationRepository {
    * A completion while a joined message is still unclaimed keeps the reply and leaves the Run open.
    */
   endRun(runId: string, ending: RunEnding, hold?: RunHold): Promise<EndedRun>;
+  /** The cursor of the conversation's newest journal event; 0 when it has none. */
+  journalHead(conversationId: string): Promise<number>;
   /** The messages that joined the conversation's active Run and are not yet in its transcript, oldest first. */
   queuedMessages(conversationId: string): Promise<QueuedMessage[]>;
   appendEvent(input: Omit<ConversationJournalEvent, "cursor" | "createdAt"> & { createdAt?: string }): Promise<ConversationJournalEvent>;
@@ -860,6 +862,11 @@ export class InMemoryConversationRepository implements ConversationRepository {
     });
   }
 
+  async journalHead(conversationId: string): Promise<number> {
+    await this.readReady();
+    return this.latestCursor(conversationId);
+  }
+
   async queuedMessages(conversationId: string): Promise<QueuedMessage[]> {
     await this.readReady();
     const active = [...this.runs.values()].find((run) => run.conversationId === conversationId && isActiveRun(run.status));
@@ -1285,6 +1292,8 @@ export class PostgresConversationRepository implements ConversationRepository {
       // Same transaction as the claim above: a crash can neither lose the message nor append it twice.
       await this.requireSubmissionStore().appendOn(tx.pool, { type: "conversation.model_message", conversation_id: run.conversationId,
         run_id: run.id, client_message_id: entry.clientMessageId, message: entry.message!, timestamp: entry.acceptedAt });
+      // The pixels now live in the transcript, where the model reads them; the journal keeps them only while the message waits.
+      await tx.pool.query("UPDATE hatch_conversation_journal SET payload = payload #- '{message,model_images}' WHERE cursor = $1", [row.cursor]);
       claimed.push({ clientMessageId: entry.clientMessageId, message: entry.message! });
     }
     return claimed;
@@ -1771,6 +1780,11 @@ export class PostgresConversationRepository implements ConversationRepository {
       await repository.appendEvent({ conversationId: updated.conversationId, runId, type: "run.state", payload: publicRunEvent(updated) });
       return { run: updated, ended: true, ...written };
     });
+  }
+
+  async journalHead(conversationId: string): Promise<number> {
+    await this.initialize();
+    return this.latestCursor(conversationId, 0);
   }
 
   async queuedMessages(conversationId: string): Promise<QueuedMessage[]> {

@@ -138,6 +138,18 @@ for (const backend of ["memory", "file", "postgres"] as const) {
     assert.equal((journalEnvelope(created).payload as { message: { model_images?: unknown } }).message.model_images, undefined);
   }));
 
+  test(`${backend}: a steered image's pixels are kept once the message is claimed: in the transcript, and in the journal only while it waits (Postgres)`, options, async () => withBackend(backend, async ({ repository, store }) => {
+    const start = await repository.acceptSubmission(message(0));
+    const images = [{ type: "image" as const, mimeType: "image/png", data: "iVBORw0KGgo=" }];
+    await repository.acceptSubmission({ ...message(1), canonicalUser: { role: "user", content: "look", model_images: images } });
+    const pixelsInJournal = async () => (await repository.snapshot(id)).events.some((event) => event.type === "message.created" && event.payload.steered === true && Boolean((event.payload.message as { model_images?: unknown }).model_images));
+    assert.equal(await pixelsInJournal(), true, "waiting: the claim will need them");
+    await repository.claimSteeredMessages(start.run.id);
+    assert.deepEqual((await store.readConversation(id)).find((row) => row.content === "look")?.model_images, images);
+    // The memory and file authority is an append-only commit log, which cannot be rewritten; the database's journal drops them.
+    assert.equal(await pixelsInJournal(), backend !== "postgres");
+  }));
+
   test(`${backend}: messages racing a Run's end never deadlock and are each claimed or start the next Run`, options, async () => withBackend(backend, async ({ repository }) => {
     let n = 0;
     const submit = (): Promise<unknown> => repository.acceptSubmission(message(n++)).catch((error: unknown) => error);

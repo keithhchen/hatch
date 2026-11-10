@@ -31,6 +31,7 @@ export async function snapshotOf(conversation: Conversation, log: EventLog): Pro
   if (!key) return { cursor: START, status: await conversation.status(), messages: [], partial: "" };
   return log.consistent(key, async cursor => {
     const { status, messages } = await conversation.messages(undefined, MAX_PAGE);
-    return { cursor, status, messages, ...(status.runId ? { run_id: status.runId } : {}), partial: status.state === "running" ? await partialOutput(log, key, cursor) : "" };
+    const partial = status.state !== "running" ? "" : conversation.partial ? await conversation.partial() : await partialOutput(log, key, cursor);
+    return { cursor, status, messages, ...(status.runId ? { run_id: status.runId } : {}), partial };
   });
 }

@@ -88,6 +88,7 @@ class FakeAssistant implements AssistantHost {
   conversationId = () => "assistant:a1";
   assets = () => this.desk;
   stop = async () => { this.stopped++; };
+  partial = async () => "";
 }
 
 const IMAGE: ReadyAsset = { id: "a-img", kind: "image", name: "chart.png", mimeType: "image/png", bytes: 10, sha256: "h-img", path: "input/manual/chart.png" };
@@ -357,10 +358,10 @@ test("snapshot and events share one cursor: replay from it has no gap and no dup
       return text;
     };
     const expected = ': connected\n\nid: 4\ndata: {"type":"delta","text":"!"}\n\nid: 5\ndata: {"type":"tool","name":"list"}\n\n';
-    assert.equal(await replay({ path: `?after=${snapshot.cursor}` }), expected);
+    assert.equal(await replay({ path: `?after_cursor=${snapshot.cursor}` }), expected);
     assert.equal(await replay({ headers: { "last-event-id": snapshot.cursor } }), expected, "Last-Event-ID resumes the same way");
-    assert.equal((await h.call(`${root}/research/events?after=99`)).status, 400, "a cursor the log never issued");
-    assert.equal((await h.call(`${root}/research/events?after=x`)).status, 400);
+    assert.equal((await h.call(`${root}/research/events?after_cursor=99`)).status, 400, "a cursor the log never issued");
+    assert.equal((await h.call(`${root}/research/events?after_cursor=x`)).status, 400);
     assert.deepEqual(h.workspace.stopped, [], "watching and unwatching never stops the Run");
   } finally { await h.close(); }
 });

@@ -75,7 +75,7 @@ export function StudioAssistant({ request, t }) {
       }
       // The live reply gives way to the saved one only once the saved one is on the page.
       if (value.type === "message_end" || value.type === "assistant") { void refresh().then(() => show(timeline.reset())); return; }
-      if (value.type === "message" || value.type === "state") void refresh();
+      if (value.type === "message" || value.type === "state" || value.type === "compacting") void refresh();
     },
   }), [refresh, t]);
 

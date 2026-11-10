@@ -9,6 +9,8 @@ export interface AssistantHost {
   /** Steers the running turn with the message or starts one, atomically, and says which Run took it. */
   send(accountId: string, input: SendInput): Promise<Sent>;
   stop(accountId: string): Promise<void>;
+  /** What the running turn has said so far. */
+  partial(accountId: string): Promise<string>;
   feedKey(accountId: string): string;
   /** The conversation's id, which is also the scope its attachments live in. */
   conversationId(accountId: string): string;
@@ -32,4 +34,6 @@ export class AssistantConversation implements Conversation {
   async feedKey(): Promise<string | undefined> { return this.assistant.feedKey(this.accountId); }
 
   stop(): Promise<void> { return this.assistant.stop(this.accountId); }
+
+  partial(): Promise<string> { return this.assistant.partial(this.accountId); }
 }

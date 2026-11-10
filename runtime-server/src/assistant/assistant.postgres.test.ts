@@ -5,8 +5,7 @@ import { Pool } from "pg";
 import { PostgresStore } from "../postgresStore.js";
 import { PostgresDeliveries } from "./deliveries.js";
 import { PostgresAssistantState } from "./state.js";
-import { studioTranscripts, StudioEventProjection, assistantConversationId, assistantFeedKey } from "./studioFeed.js";
-import { MemoryEventLog } from "../conversations/eventLog.js";
+import { assistantConversationId } from "./studioVocabulary.js";
 import { PostgresTaskRepository } from "./tasks.js";
 
 // Opt-in integration tests. Every test owns a random schema, never a database.
@@ -71,14 +70,11 @@ test("the tasks a Run created or announced are found by that Run", options, () =
   assert.deepEqual(await tasks.byRun("run_none"), []);
 }));
 
-test("on Postgres a user message is known by its client key, and an assistant message commits with the message_end Studio shows", options, () => isolated(async (pool) => {
-  const store = new (studioTranscripts(PostgresStore))({ pool });
-  const log = new MemoryEventLog();
-  store.projection = new StudioEventProjection(log);
+test("on Postgres a user message is known by its client key, and a reply by the id its Run's ending stored it under", options, () => isolated(async (pool) => {
+  const store = new PostgresStore(pool);
   const conversationId = assistantConversationId(ACCOUNT);
   await store.append({ type: "conversation.model_message", conversation_id: conversationId, run_id: "run_1", client_message_id: "key-1", message: { role: "user", content: "你好" } });
-  await store.append({ type: "conversation.model_message", conversation_id: conversationId, run_id: "run_1", message: { role: "assistant", content: "你好呀" }, finish_reason: "stop" });
+  await store.append({ type: "conversation.model_message", conversation_id: conversationId, run_id: "run_1", message_id: "run_1:1", message: { role: "assistant", content: "你好呀" }, finish_reason: "stop" });
   const history = await store.readVisibleConversation(conversationId);
-  assert.deepEqual(history.map(message => [message.id, message.role, message.content]), [["key-1", "user", "你好"], [undefined, "assistant", "你好呀"]]);
-  assert.deepEqual((await log.after(assistantFeedKey(ACCOUNT), "0")).map(entry => entry.event.type), ["message_end"]);
+  assert.deepEqual(history.map(message => [message.id, message.role, message.content]), [["key-1", "user", "你好"], ["run_1:1", "assistant", "你好呀"]]);
 }));

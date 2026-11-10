@@ -15,7 +15,6 @@ import { ServiceChatGateway, type PrincipalBinder } from "../chat/serviceGateway
 import type { ScopeResolver, TurnRunner } from "../chat/turnExecutor.js";
 import { ConversationError, DEFAULT_PAGE, MAX_PAGE, type ConversationStatus, type PublicMessage, type SendInput, type Sent } from "../conversations/conversation.js";
 import { ChatConversationReadModel, type ConversationReadModel } from "../chat/conversationReadModel.js";
-import type { EventLog } from "../conversations/eventLog.js";
 import { PassThroughOutputGuard, type OutputGuard } from "../outputGuard.js";
 import { ServerToolExecutor } from "../serverTools.js";
 import type { RuntimeStore, VisibleConversationMessage } from "../store.js";
@@ -23,7 +22,8 @@ import { ToolBridge } from "../toolBridge.js";
 import type { ClientAttributes, ContentPart } from "../surfaces/contract.js";
 import { InterviewRelay, isRelayed, isSystemMessageId, SYSTEM_MESSAGE_PREFIX, type InterviewDesk } from "./relay.js";
 import type { AssistantStateRepository } from "./state.js";
-import { StudioEventProjection, StudioHub, accountOfConversation, assistantConversationId, assistantFeedKey } from "./studioFeed.js";
+import { JournalFeed } from "./journalFeed.js";
+import { accountOfConversation, assistantConversationId, assistantFeedKey } from "./studioVocabulary.js";
 import { StudioToolRunner, studioToolNames, type StudioTool } from "./studioTools.js";
 import type { TaskOrigin } from "./tasks.js";
 import type { LegacyAssistantHistory } from "./history.js";
@@ -43,9 +43,7 @@ export type AssistantScope = TurnBinding & { accountId: string };
 
 export type AssistantChatDeps = {
   repository: ConversationRepository;
-  /** The transcript store, whose final assistant messages are committed with the `message_end` Studio shows. */
-  store: RuntimeStore & { projection?: StudioEventProjection };
-  eventLog: EventLog;
+  store: RuntimeStore;
   assetStore: RuntimeAssetStore;
   chatAssets: ChatAssets;
   state: AssistantStateRepository;
@@ -92,21 +90,21 @@ export class AssistantChat implements AssistantHost {
   readonly gateway: ChatGateway;
   private readonly conversations = new Map<string, Promise<ConversationRecord>>();
   private readonly readModel: ConversationReadModel;
+  /** The Assistant's events for Studio observers: Chat's own journal in Studio's words, with the live steps beside it. */
+  readonly feed: JournalFeed;
   private prompt?: Promise<string>;
 
   constructor(private readonly deps: AssistantChatDeps) {
     this.readModel = new ChatConversationReadModel({ history: deps.store, repository: deps.repository });
-    const projection = new StudioEventProjection(deps.eventLog);
-    deps.store.projection = projection;
     const scopes: ScopeResolver<AssistantScope> = { resolve: async conversation => scopeOfConversation(conversation) };
     this.runtime = new ChatRuntime<AssistantScope>({
       repository: deps.repository, store: deps.store, scopes, runner: this.runner(),
       admission: { reserve: () => () => undefined },
       toolTimeoutMs: deps.toolTimeoutMs ?? 120_000,
       leaseMs: deps.leaseMs, sweepMs: deps.sweepMs,
-      hub: new StudioHub(projection),
       ...(deps.compactionStrategy ? { compactionStrategy: deps.compactionStrategy } : {})
     });
+    this.feed = new JournalFeed({ repository: deps.repository, hub: this.runtime.hub });
     this.gateway = new ServiceChatGateway<AssistantScope>({
       chat: this.runtime.service,
       binders: { account: new AssistantBinder(this), contact: { bind: async () => { throw new ChatError("principal_not_allowed", "Only the Expert reaches the Assistant.", 403); } } },
@@ -303,7 +301,14 @@ export class AssistantChat implements AssistantHost {
   assets(): AssetDesk { return this.deps.chatAssets.studioDesk(); }
 
   /** Tells Studio observers the Assistant changed in a way no Run shows, such as a chat being linked. */
-  async touch(accountId: string): Promise<void> { await this.deps.eventLog.append(assistantFeedKey(accountId), { type: "state" }); }
+  async touch(accountId: string): Promise<void> { this.runtime.hub.publish(assistantConversationId(accountId), { type: "studio.touched" }); }
+
+  /** What the running turn has said so far: from the live text when this process has it, else from what the Run last saved. */
+  async partial(accountId: string): Promise<string> {
+    const conversation = await this.conversation(accountId);
+    const live = this.runtime.hub.catchUp(conversation.id)?.delta as { content?: string } | undefined;
+    return live?.content ?? (await this.deps.repository.getActiveRun(conversation.id))?.partialOutput ?? "";
+  }
 
   /** The pixels of a picture the Expert sent, for the chat page. */
   async image(accountId: string, assetId: string): Promise<{ bytes: Buffer; mime: string } | undefined> {

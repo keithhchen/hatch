@@ -169,7 +169,7 @@ export class ConversationRoutes {
   private async events(conversation: Conversation, request: http.IncomingMessage, response: http.ServerResponse, url: URL): Promise<void> {
     const feed = await conversation.feedKey();
     if (!feed) throw new ConversationError(404, "conversation_not_started", "This worker has no conversation yet. Send it a message first.");
-    const given = url.searchParams.get("after") ?? (request.headers["last-event-id"] as string | undefined);
+    const given = url.searchParams.get("after_cursor") ?? (request.headers["last-event-id"] as string | undefined);
     const from = await resumePoint(this.studio.eventLog, feed, given);
     const stream = new EventStream(response);
     const stop = new AbortController();
