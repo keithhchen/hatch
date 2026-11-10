@@ -139,3 +139,61 @@ test("a provider that never answers any of the restarts still fails with the one
 test("a stream that went silent after its first event is not issued again", async () => {
   assert.deepEqual((await guarded(hangs({ aborted: false }, [{ type: "start", partial }]), 2)).map((event) => event.type), ["start", "error"]);
 });
+
+/** The error result a provider's stream ends with when its request fails. */
+const errorOf = (errorMessage: string): AssistantMessageEvent => ({ type: "error", reason: "error", error: { ...partial, stopReason: "error", errorMessage } });
+/** A provider whose first requests end as each of `outcomes` says (the events it sends), and that answers after them; `seen` counts requests. */
+const failsThenAnswers = (outcomes: AssistantMessageEvent[][], seen: { requests: number }): StreamFn => () => {
+  const stream = createAssistantMessageEventStream();
+  const events = outcomes[seen.requests++] ?? [{ type: "start", partial } as AssistantMessageEvent, { type: "done", reason: "stop", message: partial } as AssistantMessageEvent];
+  for (const event of events) stream.push(event);
+  return stream;
+};
+const retrying = (stub: StreamFn, restarts: number, signal?: AbortSignal) =>
+  drain(withStallGuard(stub, { ...limits, restarts, backoffMs: 5 })(model, { messages: [] }, { signal }) as ReturnType<typeof call>);
+
+test("a transient failure before any output is asked again with a backoff, and the answer of the new call reaches the caller", async () => {
+  const seen = { requests: 0 };
+  const started = Date.now();
+  const events = await retrying(failsThenAnswers([[errorOf("fetch failed")], [errorOf("fetch failed")]], seen), 2);
+  assert.deepEqual(events.map((event) => event.type), ["start", "done"]);
+  assert.equal(seen.requests, 3);
+  assert.ok(Date.now() - started >= 14, "5ms, then 10ms");
+});
+
+test("a transient failure that outlasts the restarts fails with the provider's own error", async () => {
+  const seen = { requests: 0 };
+  const events = await retrying(failsThenAnswers([[errorOf("fetch failed")], [errorOf("fetch failed")], [errorOf("fetch failed")]], seen), 1);
+  assert.deepEqual(events.map((event) => event.type), ["error"]);
+  assert.equal((events[0] as { error: AssistantMessage }).error.errorMessage, "fetch failed");
+  assert.equal(seen.requests, 2);
+});
+
+test("a call that threw before its stream opened is asked again when the failure is transient", async () => {
+  let requests = 0;
+  const throws: StreamFn = (...args) => { if (++requests === 1) throw new Error("fetch failed"); return sends([], 1)(...args); };
+  assert.deepEqual((await retrying(throws, 1)).map((event) => event.type), ["done"]);
+  assert.equal(requests, 2);
+});
+
+test("a failure that asking again cannot fix is not asked again", async () => {
+  const seen = { requests: 0 };
+  const events = await retrying(failsThenAnswers([[errorOf("Incorrect API key provided")]], seen), 2);
+  assert.deepEqual(events.map((event) => event.type), ["error"]);
+  assert.equal(seen.requests, 1);
+});
+
+test("once a call has produced output it is never asked again: the text would repeat", async () => {
+  const seen = { requests: 0 };
+  const events = await retrying(failsThenAnswers([[{ type: "start", partial }, { type: "text_start", contentIndex: 0, partial }, errorOf("fetch failed")]], seen), 2);
+  assert.deepEqual(events.map((event) => event.type), ["start", "text_start", "error"]);
+  assert.equal(seen.requests, 1);
+});
+
+test("a caller that aborted is not asked again after a transient failure", async () => {
+  const seen = { requests: 0 };
+  const controller = new AbortController();
+  controller.abort();
+  assert.deepEqual((await retrying(failsThenAnswers([[errorOf("fetch failed")]], seen), 2, controller.signal)).map((event) => event.type), ["error"]);
+  assert.equal(seen.requests, 1);
+});
