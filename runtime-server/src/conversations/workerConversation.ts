@@ -3,6 +3,7 @@ import { AgentDependenciesNotReadyError, type AgentEntry } from "../factoryAgent
 import { userMessage } from "../factoryAgents/imageRefs.js";
 import type { Role, Session, WorkbenchStore } from "../factoryAgents/store.js";
 import { attachmentLines } from "./assets.js";
+import { failureOf } from "../factoryAgents/runFailure.js";
 import { ConversationError, page, type Conversation, type ConversationStatus, type SendInput, type Sent } from "./conversation.js";
 import { projectMessages } from "./project.js";
 import { blocked, blockedBy, blockedMessage, WORKERS, type Worker, type WorkerRegistry } from "./workers.js";
@@ -17,7 +18,7 @@ export interface WorkerWorkspace {
 }
 
 const statusOf = (session: Session | undefined, runId?: string): ConversationStatus =>
-  session?.status === "running" ? { state: "running", ...(runId ? { runId } : {}) } : session?.status === "failed" ? { state: "failed", ...(session.error ? { error: session.error } : {}) } : { state: "idle" };
+  session?.status === "running" ? { state: "running", ...(runId ? { runId } : {}) } : session?.status === "failed" ? { state: "failed", error: failureOf(session) } : { state: "idle" };
 
 /** One worker's session in a Product workspace, as a conversation. The session is created by the first message. */
 export class WorkerConversation implements Conversation {

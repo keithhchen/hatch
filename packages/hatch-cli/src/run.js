@@ -56,14 +56,14 @@ export class RunObserver {
     if (event === "journal.event") { if (data.journal_type === "run.state") this.status = data.payload?.status; return ""; }
     if (event === "turn.state") this.status = data.status;
     if (event === "turn.failed") { this.status = "failed"; this.error = data.error; }
-    if (event === "run_end") this.status = data.status;
+    if (event === "run_end") { this.status = data.status; this.error = data.error ?? this.error; }
     if (event === "message" && typeof data?.text === "string" && data.role !== "user") {
       const fresh = this.text ? "" : data.text;
       this.text = data.text;
       return fresh;
     }
     if (event === "state") this.status = data.status;
-    if (event === "done") this.status = data?.status ?? "idle";
+    if (event === "done") { this.status = data?.status ?? "idle"; this.error = data?.error ?? this.error; }
     return "";
   }
 }

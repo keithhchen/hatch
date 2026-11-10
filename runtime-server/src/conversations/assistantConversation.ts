@@ -1,12 +1,12 @@
 import type { EventEmitter } from "node:events";
 import { attachmentLines, type Workshop } from "./assets.js";
-import { page, type Conversation, type ConversationStatus, type PublicMessage, type SendInput, type Sent } from "./conversation.js";
+import { page, type RunFailure, type Conversation, type ConversationStatus, type PublicMessage, type SendInput, type Sent } from "./conversation.js";
 
 type Attachment = { type: "image" | "file" | "audio"; name: string; assetId: string };
 
 /** The part of the Assistant an account-level conversation needs. */
 export interface AssistantHost {
-  view(accountId: string): Promise<{ messages: Array<{ id: string; role: "expert" | "assistant"; text: string; at: string; images?: string[]; attachments?: Attachment[] }>; running: boolean; runId?: string }>;
+  view(accountId: string): Promise<{ messages: Array<{ id: string; role: "expert" | "assistant"; text: string; at: string; images?: string[]; attachments?: Attachment[] }>; running: boolean; runId?: string; failure?: RunFailure }>;
   /** Accepts the message and says which Run took it, when one did. A message that waits for the next turn has no Run yet. */
   submit(accountId: string, item: { id: string; source: "web"; text: string; images?: string[]; attachments?: Attachment[] }): Promise<{ runId?: string }>;
   /** Where this account's Assistant keeps the files it reads, for uploads. */
@@ -16,7 +16,8 @@ export interface AssistantHost {
 }
 
 const wire = ({ type, name, assetId }: Attachment) => ({ type, name, asset_id: assetId });
-const statusOf = (view: { running: boolean; runId?: string }): ConversationStatus => view.running ? { state: "running", ...(view.runId ? { runId: view.runId } : {}) } : { state: "idle" };
+const statusOf = (view: { running: boolean; runId?: string; failure?: RunFailure }): ConversationStatus =>
+  view.running ? { state: "running", ...(view.runId ? { runId: view.runId } : {}) } : view.failure ? { state: "failed", error: view.failure } : { state: "idle" };
 
 /** The account's Assistant chat, in the same shape as a worker's. */
 export class AssistantConversation implements Conversation {

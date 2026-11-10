@@ -153,10 +153,13 @@ export class ConversationRoutes {
     response.once("close", () => stop.abort());
     const heartbeat = setInterval(() => stream.heartbeat(), 15_000);
     stream.frame(accepted, { name: "accepted" });
-    const settled = async () => (await conversation.status()).state !== "running" && (await conversation.messages(undefined, 500)).messages.some(message => message.id === sentId);    await follow(this.studio.eventLog, feed, cursor, async ({ cursor: id, event }) => {
+    // The turn is over once nothing runs and the message is in history; how it ended is the conversation's status.
+    const settled = async () => { const status = await conversation.status(); return status.state !== "running" && (await conversation.messages(undefined, 500)).messages.some(message => message.id === sentId) ? status : undefined; };
+    await follow(this.studio.eventLog, feed, cursor, async ({ cursor: id, event }) => {
       stream.frame(event, { id });
       if (stream.lagging) { response.destroy(); stop.abort(); return; }
-      if ((event.type === "run_end" || event.type === "state") && await settled()) { stream.frame({}, { name: "done" }); stop.abort(); }
+      const ended = event.type === "run_end" || event.type === "state" ? await settled() : undefined;
+      if (ended) { stream.frame({ status: ended.state, ...(ended.error ? { error: ended.error } : {}) }, { name: "done" }); stop.abort(); }
     }, { signal: stop.signal, ...this.deps.pace });
     clearInterval(heartbeat);
     stream.end();

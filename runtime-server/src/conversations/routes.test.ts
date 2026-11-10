@@ -379,7 +379,7 @@ test("wait timeout answers 202 with the run to follow; Accept: text/event-stream
     const text = await streamed.text();
     assert.match(text, /^: connected\n\nevent: accepted\ndata: \{.*"text":"Stream it".*\}\n\n/);
     assert.match(text, /id: \d+\ndata: \{"type":"run_end","status":"completed"\}\n\n/);
-    assert.match(text, /event: done\ndata: \{\}\n\n$/);
+    assert.match(text, /event: done\ndata: \{"status":"idle"\}\n\n$/);
   } finally { await h.close(); }
 });
 

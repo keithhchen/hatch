@@ -9,6 +9,7 @@ import { BackgroundCompactor, CompactionStrategy, newCompactionId, policyFor, ty
 import { describePiMessage, piSummaryMessage, prunePiMessage, summarizeWithPi } from "../piCompaction.js";
 import { createFactoryLlmModel, createFactoryPiAgent, createFactoryPiModels, type FactoryPiAgentOptions } from "../creatorLearning/factoryPi.js";
 import { classifyFactoryProviderFailure } from "../creatorLearning/factoryLlm.js";
+import { classifyRunFailure, type RunFailure } from "./runFailure.js";
 import { WorkbenchStore, isAssistantRole, type AgentDefinitionSource, type AnyRole, type Session } from "./store.js";
 import { factoryAgentTools } from "./factoryTools.js";
 import { fileTools } from "./tools.js";
@@ -103,7 +104,7 @@ export class WorkbenchRuntime {
     try {
       // The run is already ours; background compaction yields and ends before the message proceeds.
       await this.background.preempt(id);
-      await this.store.update(id, s => { if (s.title === s.role) s.title = message.trim().slice(0, 60); s.turn++; s.status = "running"; s.lastRunAt = new Date().toISOString(); delete s.error; delete s.activeTool; });
+      await this.store.update(id, s => { if (s.title === s.role) s.title = message.trim().slice(0, 60); s.turn++; s.status = "running"; s.lastRunAt = new Date().toISOString(); delete s.error; delete s.errorCode; delete s.activeTool; });
     } catch (error) { this.active.delete(id); throw error; }
     this.emit(id, "state");
     this.emit(id, "voice.run_started", { runId });
@@ -229,6 +230,7 @@ export class WorkbenchRuntime {
   private async main(id: string, message: string | AgentMessage[], controller: AbortController, images: string[] = []): Promise<void> {
     let system = "";
     let ended: "completed" | "interrupted" | "failed" = "failed";
+    let failure: RunFailure | undefined;
     try {
       const s = await this.store.get(id);
       const definition = await this.store.definition(s.role);
@@ -277,14 +279,15 @@ export class WorkbenchRuntime {
       const lost = [...this.take(id) ?? [], ...this.steered.get(id) ?? []];
       for (const message of lost) await this.commit(id, () => this.store.update(id, state => { state.messages.push(message); state.context.push(message); })).catch(() => undefined);
       ended = controller.signal.aborted ? "interrupted" : "failed";
+      if (!controller.signal.aborted) { failure = classifyRunFailure(error, safeError); console.error(`[run ${this.runIds.get(id)}] failed (${failure.code}):`, safeError(error)); }
       await this.store.update(id, s => {
-        if (controller.signal.aborted) {
+        if (!failure) {
           // A user stop is a normal terminal state, not an error notice.
           s.status = "interrupted";
-          delete s.error;
+          delete s.error; delete s.errorCode;
         } else {
           s.status = "failed";
-          s.error = safeError(error);
+          s.error = failure.message; s.errorCode = failure.code;
         }
         delete s.activeTool;
       });
@@ -296,7 +299,7 @@ export class WorkbenchRuntime {
       this.clients.delete(id);
       this.held.delete(id);
       this.steered.delete(id);
-      this.emit(id, "run_end", { status: ended });
+      this.emit(id, "run_end", { status: ended, ...(failure ? { error: failure } : {}) });
       this.emit(id, "state");
     }
   }

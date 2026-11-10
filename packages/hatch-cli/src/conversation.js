@@ -62,12 +62,18 @@ class ChatRunObserver extends RunObserver {
   }
 }
 
+// A failed Run exits non-zero and says why on stderr, so a script and a person both see it.
+const failed = (ctx, error) => {
+  ctx.exitCode = 1;
+  if (error?.message) ctx.log(`hatch: the Run failed (${error.code ?? "run_failed"}): ${error.message}`);
+};
+
 // Play a Run's events to the reader. Reading never cancels the Run; only `stop` does.
 export async function observe(ctx, events) {
   const observer = new ChatRunObserver();
   const write = ctx.json ? () => {} : (text) => ctx.stdout.write(text);
   for await (const event of events) write(observer.apply(event));
-  if (FAILED.has(observer.status)) ctx.exitCode = 1;
+  if (FAILED.has(observer.status)) failed(ctx, observer.error);
   return { ...(observer.error ? { error: observer.error } : {}), run_id: observer.runId, cursor: observer.cursor, status: observer.status, reply: { text: observer.text }, streamed: !ctx.json };
 }
 
@@ -91,7 +97,7 @@ export async function send(ctx, api, { content, flags, where, extra = {} }) {
   }
   const wait = waitSeconds(flags.wait);
   const r = { ...extra, client_message_id: key, ...await api.send({ content, key, wait }) };
-  if (FAILED.has(r.status)) ctx.exitCode = 1;
+  if (FAILED.has(r.status)) failed(ctx, r.error);
   if (wait && ACTIVE.has(r.status)) ctx.log(`Still running. Read the reply later with \`${where}\`.`);
   return r;
 }
@@ -104,6 +110,9 @@ export const sendOptions = {
   key: { type: "string", describe: "client_message_id: reuse it to retry a send safely (default: new)" }
 };
 
-export const formatMessages = (r) => r.messages?.length
-  ? r.messages.map((m) => `[${m.id ?? m.run_id}] ${m.role === "user" ? "you" : "assistant"} (${m.created_at ?? m.timestamp})\n${m.text ?? m.content}`).join("\n\n")
-  : "No messages.";
+export const formatMessages = (r) => [
+  r.messages?.length
+    ? r.messages.map((m) => `[${m.id ?? m.run_id}] ${m.role === "user" ? "you" : "assistant"} (${m.created_at ?? m.timestamp})\n${m.text ?? m.content}`).join("\n\n")
+    : "No messages.",
+  ...(r.status === "failed" && r.error?.message ? [`The last Run failed (${r.error.code}): ${r.error.message}`] : [])
+].join("\n\n");

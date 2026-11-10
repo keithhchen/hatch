@@ -318,6 +318,23 @@ test("a Studio stream, whose frames have no event name, prints the reply and end
   });
 });
 
+const QUOTA = { code: "provider_quota", message: "The model provider has no quota or balance left." };
+
+test("a Studio Run that fails prints its error and exits 1, streamed or waited", async () => {
+  await withServer((call, res) => {
+    if (call.method === "POST" && call.url.endsWith("?wait=5")) return json(res, { status: "failed", error: QUOTA, message: { id: "m1" } });
+    if (call.method === "POST") return stream(res, [["1", "run_end", { type: "run_end", status: "failed", error: QUOTA }], [undefined, "done", { status: "failed", error: QUOTA }]]);
+    json(res, {}, 404);
+  }, async (url) => {
+    const streamed = await cli(["assistant", "hi", "--stream"], url);
+    assert.equal(streamed.code, 1);
+    assert.match(streamed.err, /provider_quota.*no quota or balance/);
+    const waited = await cli(["chat", "p1", "research", "hi", "--wait=5"], url);
+    assert.equal(waited.code, 1);
+    assert.match(waited.err, /provider_quota.*no quota or balance/);
+  });
+});
+
 test("ask sends --brief answers when it starts a conversation, and MCP sends brief_answers", async () => {
   await withServer((call, res) => {
     if (call.url === "/v1/conversations?product_id=p1") return json(res, { conversation: { id: "c1" }, created: true }, 201);
