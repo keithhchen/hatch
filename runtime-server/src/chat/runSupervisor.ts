@@ -1,6 +1,8 @@
 import { failures } from "../errors/failures.js";
 import type { ConversationRepository, ConversationRunRecord, ToolCallOutcome } from "../conversationRepository.js";
 import type { ToolRequest, ToolResult } from "../protocol.js";
+import type { StopRelay } from "./stopRelay.js";
+import { RunFenced } from "./runFence.js";
 
 /** The side of the client tool broker that outside callers reach: results in, cancellation out. */
 export interface ToolSession {
@@ -43,6 +45,8 @@ export type SupervisorOptions = {
   toolPollMs?: number;
   /** Called once a Run has completed, for work that follows a reply, such as compaction. */
   afterReply?: (run: ConversationRunRecord) => void;
+  /** Tells the instance that executes a Run it was stopped, so it does not wait for its next lease renewal. */
+  stops?: StopRelay;
 };
 
 const outcomeOf = (result: ToolResult): ToolCallOutcome => result.status === "ok"
@@ -61,6 +65,7 @@ const TERMINAL = new Set(["completed", "failed", "cancelled", "interrupted"]);
 export class RunSupervisor {
   private readonly owned = new Map<string, Owned>();
   private timers: NodeJS.Timeout[] = [];
+  private unsubscribe?: () => Promise<void>;
 
   constructor(
     private readonly repository: Pick<ConversationRepository, "renewLease" | "claimOrphanedRuns" | "getRun" | "transitionRun" | "listToolCalls" | "answerToolCall">,
@@ -71,7 +76,7 @@ export class RunSupervisor {
 
   get executorId(): string { return this.options.executorId; }
 
-  start(): void {
+  async start(): Promise<void> {
     if (this.timers.length) return;
     this.timers = [
       setInterval(() => void this.renewLeases(), Math.max(1, Math.floor(this.options.leaseMs / 3))),
@@ -79,6 +84,15 @@ export class RunSupervisor {
       setInterval(() => void this.relayToolResults(), this.options.toolPollMs ?? 250)
     ];
     for (const timer of this.timers) timer.unref();
+    this.unsubscribe = await this.options.stops?.subscribe((runId) => void this.stopLocally(runId, "The Run stopped")).catch(() => undefined);
+  }
+
+  /** Ends this instance's execution of a Run; its state is recorded by whoever stopped it. */
+  private async stopLocally(runId: string, reason: string): Promise<void> {
+    const owned = this.owned.get(runId);
+    if (!owned || owned.controller.signal.aborted) return;
+    owned.controller.abort(new Error(reason));
+    await owned.session?.cancelRun(runId, reason).catch(() => undefined);
   }
 
   /** Takes responsibility for a Run this process just started, continued or claimed. */
@@ -99,6 +113,8 @@ export class RunSupervisor {
     await owned?.session?.cancelRun(runId, reason);
     // Already cancelled when the executor's own state machine recorded it; this covers a Run it does not hold.
     await this.repository.transitionRun(runId, "cancelled", reason);
+    // The state is written first: the instance that executes the Run, if not this one, learns of it at once.
+    if (!owned) this.options.stops?.publish(runId);
     return true;
   }
 
@@ -127,6 +143,8 @@ export class RunSupervisor {
   async stop(): Promise<void> {
     for (const timer of this.timers) clearInterval(timer);
     this.timers = [];
+    await this.unsubscribe?.().catch(() => undefined);
+    this.unsubscribe = undefined;
     const running = [...this.owned.values()];
     for (const owned of running) owned.controller.abort(new RunHandoff("Runtime shutting down"));
     await Promise.allSettled(running.map((owned) => owned.done));
@@ -179,7 +197,8 @@ export class RunSupervisor {
         return;
       }
     } catch (error) {
-      if (owned.controller.signal.reason instanceof RunHandoff) return;
+      // A fenced executor no longer holds the Run: whoever does, or whoever stopped it, decides its state.
+      if (owned.controller.signal.reason instanceof RunHandoff || error instanceof RunFenced) return;
       await this.repository.transitionRun(run.id, "failed", failures.translate(error, { run: run.id, conversation: run.conversationId }).message).catch(() => undefined);
     }
   }

@@ -278,6 +278,8 @@ export interface ConversationRepository {
   claimOrphanedRuns(executorId: string, leaseMs: number): Promise<ConversationRunRecord[]>;
   /** False when the lease is no longer this executor's. */
   renewLease(runId: string, executorId: string, leaseMs: number): Promise<boolean>;
+  /** True while this executor holds the Run and it is not over: the fence every executor write passes. */
+  holdsRun(runId: string, executorId: string): Promise<boolean>;
 }
 
 const ACTIVE_RUN_STATUSES = new Set<DurableRunStatus>([
@@ -673,6 +675,12 @@ export class InMemoryConversationRepository implements ConversationRepository {
       this.runs.set(runId, { ...run, executorLeaseExpiresAt: new Date(Date.now() + leaseMs).toISOString() });
       return true;
     });
+  }
+
+  async holdsRun(runId: string, executorId: string): Promise<boolean> {
+    await this.readReady();
+    const run = this.runs.get(runId);
+    return run?.executorId === executorId && isActiveRun(run.status);
   }
 
   private async createRunUnsafe(input: CreateRunInput): Promise<{ run: ConversationRunRecord; created: boolean }> {
@@ -1341,6 +1349,14 @@ export class PostgresConversationRepository implements ConversationRepository {
       WHERE id = $1 AND executor_id = $2 AND status IN ('queued', 'running', 'waiting_for_tool', 'compacting')
       RETURNING id
     `, [runId, executorId, leaseMs]);
+    return result.rows.length > 0;
+  }
+
+  async holdsRun(runId: string, executorId: string): Promise<boolean> {
+    await this.initialize();
+    const result = await this.pool.query(
+      "SELECT 1 FROM hatch_conversation_runs WHERE id = $1 AND executor_id = $2 AND status IN ('queued', 'running', 'waiting_for_tool', 'compacting')",
+      [runId, executorId]);
     return result.rows.length > 0;
   }
 

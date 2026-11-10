@@ -9,6 +9,8 @@ import { ChatCompaction } from "./chatCompaction.js";
 import { ChatService, RunRegistry, type PrincipalLimits, type RunAdmission } from "./chatService.js";
 import { ConversationFeed } from "./conversationFeed.js";
 import type { EventRelay } from "./eventRelay.js";
+import { fenced } from "./runFence.js";
+import type { StopRelay } from "./stopRelay.js";
 import { TranscriptResumePolicy } from "./resumePolicy.js";
 import { RunEventHub } from "./runEventHub.js";
 import { RunSupervisor } from "./runSupervisor.js";
@@ -29,6 +31,8 @@ export type ChatRuntimeOptions<Scope> = {
   toolPollMs?: number;
   /** Carries live events between instances. Without one, observers only see Runs this instance executes. */
   relay?: EventRelay;
+  /** Tells the instance that executes a Run it was stopped. Without one, a stop reaches another instance at its next lease renewal. */
+  stops?: StopRelay;
   /** The hub the Runs publish to, when a host also wants to hear every event; by default one over `relay`. */
   hub?: RunEventHub;
   /** The compaction strategy; by default Chat's, built from the model's window on first use. */
@@ -62,11 +66,17 @@ export class ChatRuntime<Scope> {
     this.supervisor = new RunSupervisor(
       repository,
       new TurnExecutor({
-        repository, store, hub: this.hub, registry: this.registry, scopes: options.scopes, runner: options.runner, recovery,
+        // The executor writes through the fence: once its Run is stopped or taken over it can write nothing more.
+        repository: fenced(repository, executorId, repository, {
+          transitionRun: (runId: string) => runId, savePartialOutput: (runId: string) => runId,
+          claimSteeredMessages: (runId: string) => runId, requestToolCall: (call: { runId: string }) => call.runId
+        }),
+        store: fenced(store, executorId, repository, { append: (event: { run_id?: string }) => event.run_id }),
+        hub: this.hub, registry: this.registry, scopes: options.scopes, runner: options.runner, recovery,
         compactions: this.compaction, toolTimeoutMs: options.toolTimeoutMs, toolPollMs: options.toolPollMs
       }),
       new TranscriptResumePolicy(store, recovery),
-      { executorId, leaseMs: options.leaseMs ?? DEFAULT_RUN_LEASE_MS, sweepMs: options.sweepMs ?? 5_000, toolPollMs: options.toolPollMs, afterReply: (run) => this.compaction.afterReply(run) }
+      { executorId, leaseMs: options.leaseMs ?? DEFAULT_RUN_LEASE_MS, sweepMs: options.sweepMs ?? 5_000, toolPollMs: options.toolPollMs, afterReply: (run) => this.compaction.afterReply(run), stops: options.stops }
     );
     this.service = new ChatService({ repository, supervisor: this.supervisor, hub: this.hub, admission: options.admission, registry: this.registry, limits: options.limits, compaction: this.compaction });
   }
@@ -74,7 +84,7 @@ export class ChatRuntime<Scope> {
   /** Takes over Runs a previous instance left behind, then keeps watching for more. */
   async start(): Promise<void> {
     this.stopListening = await this.hub.listen();
-    this.supervisor.start();
+    await this.supervisor.start();
     await this.supervisor.sweep();
   }
 

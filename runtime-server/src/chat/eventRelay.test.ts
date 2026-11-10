@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Pool } from "pg";
 import { PostgresEventRelay } from "./eventRelay.js";
+import { PostgresStopRelay } from "./stopRelay.js";
 import { RunEventHub } from "./runEventHub.js";
 
 const databaseUrl = process.env.HATCH_TEST_DATABASE_URL;
@@ -60,4 +61,22 @@ test("an event too large for a notification is not relayed", async () => {
   hub.publish("c", { type: "assistant.delta" });
   await settled(() => batches.length === 1);
   assert.equal(batches[0]!.length, 1);
+});
+
+test("a stop announced by one instance reaches another over LISTEN/NOTIFY within a second", { skip: !databaseUrl }, async () => {
+  const pools = [new Pool({ connectionString: databaseUrl }), new Pool({ connectionString: databaseUrl })];
+  const channel = `stop_test_${process.pid}`;
+  const [a, b] = pools.map((pool) => new PostgresStopRelay(pool, { channel }));
+  const heard: string[] = [];
+  const unsubscribe = await a!.subscribe((runId) => heard.push(runId));
+  try {
+    const began = Date.now();
+    b!.publish("run-1");
+    await settled(() => heard.length === 1);
+    assert.deepEqual(heard, ["run-1"]);
+    assert.ok(Date.now() - began < 1000);
+  } finally {
+    await unsubscribe();
+    await Promise.all(pools.map((pool) => pool.end()));
+  }
 });

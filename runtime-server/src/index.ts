@@ -96,6 +96,7 @@ import { RuntimeAssetStore, runtimeAssetStoreFromEnvironment } from "./assetStor
 import { flushLangfuseObservability, initializeLangfuseObservability, withLangfuseTurn } from "./langfuse.js";
 import { ChatRuntime, type ChatRuntimeOptions } from "./chat/chatRuntime.js";
 import { PostgresEventRelay } from "./chat/eventRelay.js";
+import { PostgresStopRelay } from "./chat/stopRelay.js";
 import { publicJournalPayload } from "./chat/messageLedger.js";
 import { ChatError, principalKey, accountPrincipal } from "./chat/principal.js";
 import type { PrincipalLimits, RunAdmission, Submission } from "./chat/chatService.js";
@@ -823,7 +824,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     toolTimeoutMs: options.clientToolTimeoutMs ?? clientToolTimeoutMs(),
     compactionStrategy: options.compactionStrategy,
     // With a shared database every instance sees every Run's live events.
-    ...(conversationStore instanceof PostgresStore ? { relay: new PostgresEventRelay(conversationStore.pool as never) } : {})
+    ...(conversationStore instanceof PostgresStore ? { relay: new PostgresEventRelay(conversationStore.pool as never), stops: new PostgresStopRelay(conversationStore.pool as never) } : {})
   });
   void repositoryReady.then(() => chat.start()).catch(() => undefined);
   const edge: ChatEdge = {
