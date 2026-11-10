@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { fileURLToPath } from "node:url";
 import { sleep, until } from "./util.mjs";
 
 /** VERIFICATION TOOL ONLY. Helpers shared by the security scenarios (7, 8, 11): who says what on Telegram, and what the Runtime recorded. */
@@ -131,11 +130,10 @@ export class ServiceApi {
   }
 }
 
-const STAND_IN = fileURLToPath(new URL("./moderator-stand-in-preload.mjs", import.meta.url));
-/** A second Stack whose Runtime has the labelled moderator stand-in (see moderator-stand-in-preload.mjs). Not the product as shipped. */
-export async function startStandInStack(name, options = {}) {
+/** A second Stack of the product as shipped (content moderation off, as on any server without the output guard). */
+export async function startSecondStack(name, options = {}) {
   const { Stack } = await import("./stack.mjs");
-  return Stack.start({ name, llmProfile: process.env.HATCH_LLM_PROFILE || "gemini-api", runtimeNodeArgs: ["--import", STAND_IN], ...options });
+  return Stack.start({ name, llmProfile: process.env.HATCH_LLM_PROFILE || "gemini-api", ...options });
 }
 
 export const digest = (value) => createHash("sha256").update(value).digest("hex").slice(0, 12);

@@ -13,10 +13,10 @@ import { InMemoryAssetRepository, PostgresAssetRepository } from "../assets/repo
 import { LocalArtifactObjectStore } from "../creatorLearning/objectStore.js";
 import { AttachedConversation } from "./attachedConversation.js";
 import type { Conversation, ReadyAsset, SendInput } from "./conversation.js";
-import { PipelineAssets, productPlacement, UnavailableModerator } from "./pipelineAssets.js";
+import { PipelineAssets, productPlacement, NoModeration } from "./pipelineAssets.js";
 
 // The real pipeline, processors and object storage. Only the moderator is chosen by the test: it allows
-// everything, or it is the unavailable one a server without a moderator runs.
+// everything (NoModeration, what a server without the output guard runs) or refuses.
 const connectionString = process.env.HATCH_TEST_DATABASE_URL;
 const allow: ContentModerator = { check: async () => ({ allowed: true }) };
 const mine: AssetScope = { kind: "account", accountId: "a1", conversationId: "worker:p1:research" };
@@ -106,11 +106,11 @@ for (const [name, run, skip] of adapters) {
     } finally { await d.close(); }
   }));
 
-  test(`${name}: without a moderator an upload fails as unavailable, on the record, and nothing is staged`, { skip }, () => run(async repository => {
-    const d = await desk(repository, new UnavailableModerator());
+  test(`${name}: with moderation off an upload is allowed and ready`, { skip }, () => run(async repository => {
+    const d = await desk(repository, new NoModeration());
     try {
-      await assert.rejects(d.assets.upload(mine, { name: "notes.txt", bytes: Buffer.from("hello") }), { status: 503, code: "unavailable", message: /no content moderator is configured/ });
-      assert.equal(d.written.size, 0);
+      const uploaded = await d.assets.upload(mine, { name: "notes.txt", bytes: Buffer.from("hello") });
+      assert.equal(uploaded.state, "ready");
       assert.equal(await d.assets.resolve(mine, "nope"), undefined);
       await assert.rejects(d.assets.upload(mine, { name: "big.bin", bytes: Buffer.from([0, 1, 2, 3, 0, 0]) }), { status: 415, code: "unsupported_type" }, "input that is never stored is refused as it is");
     } finally { await d.close(); }

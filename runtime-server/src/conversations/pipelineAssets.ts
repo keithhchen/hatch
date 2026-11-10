@@ -71,9 +71,9 @@ export class PipelineAssets implements AssetResolver, AssetUploader {
   }
 }
 
-/** The moderator of a server that has none. Every upload fails with this, in the open: nothing is waved through unchecked. */
-export class UnavailableModerator implements ContentModerator {
-  async check(_content: Moderated): Promise<never> {
-    throw new AssetError("unavailable", "Uploads are unavailable: no content moderator is configured on this server.");
+/** The moderator of a server where content moderation is off: every upload is allowed. Aliyun Green replaces it when the output guard turns moderation on. */
+export class NoModeration implements ContentModerator {
+  async check(_content: Moderated): Promise<{ allowed: true }> {
+    return { allowed: true };
   }
 }

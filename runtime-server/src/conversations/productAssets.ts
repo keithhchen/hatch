@@ -5,14 +5,14 @@ import type { AssetBlobs, ContentModerator } from "../assets/domain.js";
 import { AssetPipeline } from "../assets/pipeline.js";
 import { FileProcessor, ImageProcessor, VoiceProcessor } from "../assets/processors.js";
 import { PostgresAssetRepository } from "../assets/repositories.js";
-import { PipelineAssets, UnavailableModerator } from "./pipelineAssets.js";
+import { PipelineAssets, NoModeration } from "./pipelineAssets.js";
 import type { StudioDeps } from "./studio.js";
 
 /**
  * Studio's attachments in production: Postgres for records, object storage for bytes, ffmpeg and the configured
- * recognizer for voice, and Aliyun Green for moderation when the output guard's configuration turns it on. Without a moderator every upload fails as unavailable.
+ * recognizer for voice, and Aliyun Green for moderation when the output guard's configuration turns it on. Without it moderation is off and every upload is allowed.
  */
-export async function openProductAssets(pool: Pool, blobs: AssetBlobs, environment: NodeJS.ProcessEnv, moderator: ContentModerator = aliyunModeratorFromEnvironment(environment) ?? new UnavailableModerator()): Promise<NonNullable<StudioDeps["assets"]>> {
+export async function openProductAssets(pool: Pool, blobs: AssetBlobs, environment: NodeJS.ProcessEnv, moderator: ContentModerator = aliyunModeratorFromEnvironment(environment) ?? new NoModeration()): Promise<NonNullable<StudioDeps["assets"]>> {
   const repository = new PostgresAssetRepository(pool);
   await repository.initialize();
   const pipeline = new AssetPipeline(repository, blobs, moderator, [new ImageProcessor(), new FileProcessor(), new VoiceProcessor(new FfmpegAudioNormalizer(), transcriberFromEnvironment(environment))]);

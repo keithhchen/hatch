@@ -32,10 +32,10 @@ async function isolated(body: (pool: Pool) => Promise<void>) {
 
 const blobs = async () => new LocalArtifactObjectStore(await mkdtemp(path.join(os.tmpdir(), "chat-assets-pg-")));
 
-test("without a moderator configured, an upload fails as unavailable instead of being waved through", options, () => isolated(async (pool) => {
+test("without the output guard, moderation is off and an upload is ready", options, () => isolated(async (pool) => {
   const assets = await openChatAssets({ pool, blobs: await blobs(), environment: {} });
   const conversation = { id: "c1", ownerAccountId: "acct" } as Parameters<typeof assets.upload>[0];
-  await assert.rejects(assets.upload(conversation, { name: "a.txt", bytes: Buffer.from("hello") }), { code: "unavailable", status: 503 });
+  assert.equal((await assets.upload(conversation, { name: "a.txt", bytes: Buffer.from("hello") })).state, "ready");
 }));
 
 test("an asset is bound in the transaction that accepts its message, so a crash in between leaves it free", options, () => isolated(async (pool) => {

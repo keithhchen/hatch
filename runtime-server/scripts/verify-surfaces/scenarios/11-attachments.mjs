@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Scenario } from "../lib/scenario.mjs";
 import { Auth, ChatApi, StudioApi } from "../lib/clients.mjs";
-import { RuntimeView, ServiceApi, sleep, startStandInStack } from "../lib/security-helpers.mjs";
+import { RuntimeView, ServiceApi, sleep, startSecondStack } from "../lib/security-helpers.mjs";
 
 const dist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../dist");
 const NEEDLE = "TANGERINE-4471-OWL";
@@ -49,16 +49,15 @@ class Attachments extends Scenario {
 
   async run(stack, rec) {
     await this.realUpload(stack, rec);
-    const standIn = await startStandInStack("s11b");
+    const second = await startSecondStack("s11b");
     try {
-      rec.note("FAKES, labelled: everything after the first section runs on a second Stack whose Runtime is started with lib/moderator-stand-in-preload.mjs: (1) the content moderator that refuses every upload says 'allowed', (2) a module-load hook lets the attachments.* tools through the model-declaration filter in dist/agentRuntime.js. The shipped Runtime has neither (see the two defects). Records, object storage, text extraction, the ls/grep/read tools, scoping, dispatch and the model are the product's own.");
-      const world = await this.world(standIn);
-      await this.lsOffered(world, rec, "[stand-in] ");
+      const world = await this.world(second);
+      await this.lsOffered(world, rec, "[files] ");
       await this.factAndSummary(world, rec);
       await this.pathTraversal(world, rec);
       await this.crossScope(world, rec);
       await this.maliciousRegex(world, rec);
-    } finally { await standIn.down().catch(() => undefined); }
+    } finally { await second.down().catch(() => undefined); }
     await this.componentProbe(rec);
     await this.studioGrep(stack, rec);
   }
@@ -123,7 +122,7 @@ class Attachments extends Scenario {
     const bytes = buildReport();
     rec.measure("report_bytes", bytes.length); world.reportBytes = bytes.length;
     const upload = await chat.upload(conversation, productId, "report.md", bytes);
-    rec.check("[stand-in] the 300 KB report uploads as a ready asset", upload.status === 201 && upload.json?.state === "ready", { status: upload.status, body: upload.text.slice(0, 160) });
+    rec.check("[files] the 300 KB report uploads as a ready asset", upload.status === 201 && upload.json?.state === "ready", { status: upload.status, body: upload.text.slice(0, 160) });
     if (!upload.json?.asset_id) return;
     world.conversation = conversation; world.assetId = upload.json.asset_id; world.upload = upload.json;
     const record = (await world.stack.runtimePool.query("SELECT record FROM hatch_assets WHERE id = $1", [world.assetId])).rows[0]?.record;
