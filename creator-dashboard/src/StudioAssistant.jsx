@@ -10,6 +10,7 @@ import { useLocale } from "./locale.jsx";
 import { webChatErrorText, webChatT } from "./webChatI18n.js";
 import "./webChat.css";
 import { ChannelBindings } from "./ChannelBindings.jsx";
+import { MessageKeys, unsaved } from "./assistantPending.js";
 
 const ROOT = "/v1/creator/assistant";
 const CONNECTIONS = "/v1/creator/connections";
@@ -45,10 +46,12 @@ export function StudioAssistant({ request, t }) {
   const dockRef = useRef(null);
   const endRef = useRef(null);
   const follow = useRef(true);
-  const send = useCallback((path, body) => request(path, { method: "POST", headers: { "idempotency-key": mutationKey() }, body: JSON.stringify(body ?? {}) }), [request]);
+  const send = useCallback((path, body, key = mutationKey()) => request(path, { method: "POST", headers: { "idempotency-key": key }, body: JSON.stringify(body ?? {}) }), [request]);
+  // The id of a message is minted once, when the user sends it, and a retry of the same words reuses it: the server stores it once.
+  const keys = useRef(new MessageKeys(mutationKey));
   const refresh = useCallback(() => {
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    return request(`${ROOT}?tz=${encodeURIComponent(timezone)}`).then(value => { setView(value); setPendingLines([]); setError(""); }).catch(cause => setError(friendlyError(cause, t)));
+    return request(`${ROOT}?tz=${encodeURIComponent(timezone)}`).then(value => { setView(value); setPendingLines(lines => unsaved(lines, value.messages)); setError(""); if (!value.running) { liveRef.current.reset(); setLive(null); } }).catch(cause => setError(friendlyError(cause, t)));
   }, [request, t]);
 
   useEffect(() => { void refresh(); }, [refresh]);
@@ -91,13 +94,17 @@ export function StudioAssistant({ request, t }) {
     setFiles([]);
     follow.current = true;
     const shown = content || staged.map(file => file.name).join(", ");
-    setPendingLines(lines => [...lines, shown]);
+    const words = `${content}\n${staged.map(file => `${file.name}:${file.size}`).join(",")}`;
+    const key = keys.current.keyFor(words);
+    // Kept until the saved history holds this id: a message sent into a running reply is not in history until the reply takes it up.
+    setPendingLines(lines => lines.some(line => line.id === key) ? lines : [...lines, { id: key, text: shown }]);
     try {
       // Upload first, then one message whose parts are the text and the files.
       const attachments = [];
       for (const file of staged) attachments.push(await upload(file));
-      await send(`${ROOT}/messages`, { content, attachments });
-    } catch (cause) { setError(friendlyError(cause, t)); setDraft(content); setFiles(staged); setPendingLines(lines => lines.filter(line => line !== shown)); }
+      await send(`${ROOT}/messages`, { content, attachments }, key);
+      keys.current.sent();
+    } catch (cause) { setError(friendlyError(cause, t)); setDraft(content); setFiles(staged); setPendingLines(lines => lines.filter(line => line.id !== key)); }
   };
   const act = async (task, action) => {
     try { await send(`${ROOT}/tasks/${task.id}/${action}`); await refresh(); }
@@ -144,10 +151,11 @@ export function StudioAssistant({ request, t }) {
           {line.text ? <p>{line.text}</p> : null}
           {line.attachments?.some(isChip) ? <div className="web-chat__attachments">{line.attachments.filter(isChip).map(file => <span key={file.asset_id}><Paperclip aria-hidden="true" />{file.name}{file.bytes ? ` · ${sizeOf(file.bytes)}` : ""}</span>)}</div> : null}
         </div>)}
-        {pendingLines.map((line, index) => <p key={`pending-${index}`} className="sxa-line sxa-line--expert">{line}</p>)}
+        {pendingLines.map(line => <p key={line.id} className="sxa-line sxa-line--expert">{line.text}</p>)}
         {live ? <Reply timeline={live} live t={chatT} errorText={errorText} /> : null}
         <div ref={endRef} />
       </div>
+      {view?.failure && !live ? <InlineAlert tone="error">{view.failure.message}</InlineAlert> : null}
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
       <div className="sxa-dock" ref={dockRef}><Composer controller={composer} state={{ draft, images: files, activeRun: null, messages: lines, error }} agentName={t("sxNavAssistant")} t={chatT} accept="image/*,.txt,.md,.docx,.pptx,.xlsx,.pdf" onSend={() => submit({ preventDefault() {} })} dictate={dictate} /></div>
     </section>

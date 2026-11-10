@@ -369,6 +369,19 @@ test("A Telegram document is an attachment of the conversation, and flows into a
   } finally { await env.close(); }
 });
 
+test("Rapid sends into a running reply store one message per id, however often an id is sent", async () => {
+  const env = await setup({ model: (_turn, call) => call === 1 ? { delayMs: 300, text: "好" } : { text: "不该再有一轮" } });
+  try {
+    const send = (id: string, text: string) => env.assistant.hear(ACCOUNT, { id, source: "web", parts: [{ type: "text", text }] });
+    await send("m-1", "第一句");
+    await Promise.all([send("m-2", "他对我的影响很大"), send("m-2", "他对我的影响很大"), send("m-2", "他对我的影响很大"), send("m-3", "另一句"), send("m-3", "另一句")]);
+    await send("m-2", "他对我的影响很大");
+    await env.idle();
+    const said = (await env.chat.lines(ACCOUNT)).filter(line => line.role === "user");
+    assert.deepEqual(said.map(line => [line.id, line.text]), [["m-1", "第一句"], ["m-2", "他对我的影响很大"], ["m-3", "另一句"]]);
+  } finally { await env.close(); }
+});
+
 test("Text and a file are one message; the model reads the file line and history shows only what was typed, with the file as an attachment", async () => {
   const env = await setup({ model: () => ({ text: "看了" }) });
   try {
