@@ -140,6 +140,14 @@ export class Stack {
 
   // ── A published Expert Product. Setup writes the release the way the repository's own e2e does; the factory is not exercised. ──
 
+  /** A Product its creator owns in the Registry (made through the real create route), with a live release written by setup. */
+  async ownedProduct(creator, options = {}) {
+    const response = await fetch(`${this.registryUrl}/v1/creator/products`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${creator.apiKey}` }, body: JSON.stringify({ name: options.name ?? "Verify Expert", promise: "Answers during a verification run." }) });
+    const productId = (await response.json())?.product?.product_id;
+    if (!productId) throw new Error(`product create failed: ${response.status}`);
+    return this.product(creator, { ...options, productId });
+  }
+
   async product(creator, { productId = randomUUID(), name = "Verify Expert", system = "You are the Verify Expert. Answer briefly and directly.", tools = [{ id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }], brief = { contract_version: "1", fields: [{ id: "goal", label: "What should we achieve?", required: false }] } } = {}) {
     const { CreatorRegistryReleaseStore } = await import(pathToFileURL(path.join(dist, "creatorLearning/creatorRegistryRelease.js")).href);
     const releaseHex = (await import("node:crypto")).createHash("sha256").update(`${productId}:${system}`).digest("hex");

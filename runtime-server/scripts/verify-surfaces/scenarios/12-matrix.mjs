@@ -363,7 +363,7 @@ class Matrix extends Scenario {
       await sleep(5000);
       const row = await priced.task(task.id);
       cell.check("a stranger's approve (own chat or the owner's chat id) does not apply the change", direct.status === 200 && spoof.status === 200 && row.status === "needs_you" && PricedProduct.same((await priced.price()).pricing, PRICE.approved), { status: row.status, price: price((await priced.price()).pricing) });
-      cell.check("the stranger is told to connect from Studio and nothing was dispatched", stranger.texts().some((t) => /请先从 Hatch Studio 连接 Telegram/.test(t)) && text.status === 200 && (await taskRows(stack, account.id)).filter((r) => r.kind === "research").length === 1, stranger.texts());
+      cell.check("the stranger is offered sign-in and nothing was dispatched", stranger.texts().some((t) => /登录 Hatch，就能在这里和助理聊了/.test(t)) && text.status === 200 && (await taskRows(stack, account.id)).filter((r) => r.kind === "research").length === 1, stranger.texts());
       await tg.press(keyboard[1].callback_data);
     });
   }
@@ -372,7 +372,7 @@ class Matrix extends Scenario {
 
   async telegramToChat(stack, rec, matrix) {
     const owner = await stack.account("chat-im-owner");
-    const productId = await stack.product(owner, { system: SYSTEM });
+    const productId = await stack.ownedProduct(owner, { system: SYSTEM });
     const hooks = new TelegramWebhooks(stack.registryUrl);
     const chat = new ChatApi(stack.url, Auth.bearer(owner.apiKey));
     const one = async (tg, text) => { const before = tg.sends().length; const posted = await tg.say(text); const sends = await tg.waitSends(before + 1, 120_000); return { posted, reply: sends[before].body.text, count: before + 1 }; };
@@ -422,21 +422,49 @@ class Matrix extends Scenario {
       const refused = await outsider.say("Reply with exactly the word: intruder");
       await sleep(4000);
       const o = await trace(stack, "telegram", 6199);
-      cell.check("a non-admitted sender is refused with the connect-from-Studio notice and starts no Run", refused.status === 200 && outsider.texts().length === 1 && /请先从 Hatch Studio 连接 Telegram/.test(outsider.texts()[0]) && o.runs.length === 0, { texts: outsider.texts(), runs: o.runs.length });
+      cell.check("a non-admitted sender is offered sign-in and starts no Run", refused.status === 200 && outsider.texts().length === 1 && /登录 Hatch，就能在这里和助理聊了/.test(outsider.texts()[0]) && o.runs.length === 0, { texts: outsider.texts(), runs: o.runs.length });
     });
 
-    await walk(matrix, rec, "4c", "Telegram -> Chat, audience public: anyone becomes a contact", async (cell) => {
-      const connection = await stack.connection({ owner, audience: "public", productId }); cell.ids.connection = connection;
-      const stranger = new TgChat(stack, hooks, 6201);
-      await stranger.say(`/start ${await stack.startCode(connection)}`);
-      await sleep(4000);
+    await walk(matrix, rec, "4c", "Telegram -> Chat, audience public: a Product's own bot answers anyone who writes to it", async (cell) => {
+      const bot = await stack.productBot(owner, productId); cell.ids.connection = bot.connection;
+      const stranger = new TgChat(stack, bot.hooks, 6201);
       const posted = await stranger.say("Reply with exactly the word: public-ok");
       await sleep(8000);
       const t = await trace(stack, "telegram", 6201);
       const answered = stranger.texts().some((text) => /public-ok/i.test(text));
       cell.ids.outcome = { status: posted.status, texts: stranger.texts(), runs: t.runs.length };
-      cell.check("an unknown Telegram sender writing to a public Connection is met as a contact and answered", answered && t.runs.length === 1, { texts: stranger.texts(), runs: t.runs.length, inbox: t.inbox });
-      if (!answered) rec.defect({ title: "A public Connection cannot be reached on Telegram: an unknown sender is told to connect from Studio", severity: "medium", expected: "Spec: `public` takes anyone as a contact (router: 'public takes anyone'). A public Product Connection answers any Telegram user", actual: `With a public Connection for the Product, an unknown sender got: ${JSON.stringify(stranger.texts())}. resolveConnection returns undefined for an unknown sender when the tenant scope is empty (the shared Telegram bot), so the router never reaches meet(); only own-app tenants (scope = account id, Feishu/Lark/WeCom) can meet public contacts, and no code path (deep link, link code) binds a public Connection on a shared bot`, repro: "stack.connection({audience:'public', productId}); POST a Telegram private message from a never-seen sender id" });
+      cell.check("an unknown Telegram sender writing to a Product's own bot is met as a contact and answered, with no sign-up", answered && t.runs.length === 1, { texts: stranger.texts(), runs: t.runs.length, inbox: t.inbox });
+    });
+
+    await walk(matrix, rec, "4d", "Telegram login: a stranger on the shared bot is offered sign-in, and an invited guest reaches the Assistant only after signing in with their own id", async (cell) => {
+      const studioOwner = await stack.account("tg-guest-owner");
+      const api = new StudioApi(stack.url, Auth.bearer(studioOwner.apiKey));
+      const stranger = new TgChat(stack, hooks, 6301);
+      await stranger.say("hello");
+      const [prompt] = await stranger.waitSends(1, 30_000);
+      const link = prompt.body.reply_markup?.inline_keyboard?.[0]?.[0]?.url;
+      cell.check("a stranger gets one button that opens our sign-in, not a refusal", /\/v1\/auth\/telegram\/start\?claim=/.test(link ?? "") && prompt.body.text === "登录 Hatch，就能在这里和助理聊了。", prompt.body);
+      const group = new TgChat(stack, hooks, -6302, 6302);
+      const before = stack.platform.sends().length;
+      await group.say("hello", { chatType: "supergroup", mention: true });
+      await sleep(1500);
+      cell.check("in a group the same stranger gets silence", stack.platform.sends().length === before);
+      const start = await fetch(`${stack.registryUrl}/v1/auth/telegram/start`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ claim: new URL(link).searchParams.get("claim") }) });
+      const { authorize_url: authorizeUrl, state } = await start.json();
+      cell.check("the Registry starts the code flow with PKCE", start.status === 200 && /code_challenge_method=S256/.test(authorizeUrl) && Boolean(state), { status: start.status });
+      const back = stack.platform.authorize(authorizeUrl, { id: 6301, name: "Stranger Six", username: "six" });
+      const finish = await fetch(`${stack.registryUrl}/v1/auth/telegram/callback`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: back.code, state: back.state }) });
+      const session = await finish.json();
+      cell.check("the callback verifies the id_token and answers with a session for a new account", finish.status === 201 && session.created === true && Boolean(session.token), { status: finish.status, created: session.created });
+      const greeted = await stranger.waitSends(2, 30_000);
+      cell.check("the chat is bound and greeted in Telegram", /连上了/.test(greeted[1].body.text), greeted[1]?.body);
+      const replay = await fetch(`${stack.registryUrl}/v1/auth/telegram/callback`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: back.code, state: back.state }) });
+      cell.check("the same callback again is refused", replay.status === 400, replay.status);
+
+      const forged = stack.platform.authorize((await (await fetch(`${stack.registryUrl}/v1/auth/telegram/start`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).json()).authorize_url, { id: 6310, name: "Forger", username: "f" });
+      stack.platform.login.codes.get(forged.code).user = { id: 6310, name: "Forger", username: "f" };
+      const noSignature = await fetch(`${stack.registryUrl}/v1/auth/telegram/callback`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: "never-issued", state: forged.state }) });
+      cell.check("a code Telegram never issued signs nobody in", noSignature.status >= 400 && !(await stack.registryPool.query("SELECT 1 FROM account_identities WHERE subject = '6310'")).rowCount, noSignature.status);
     });
   }
 

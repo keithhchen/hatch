@@ -144,7 +144,7 @@ class ImBinding extends Scenario {
       rec.check("a callback whose state is not the one this browser started is refused", /telegram=failed/.test(noCookie.location ?? "") && (await stack.registryPool.query("SELECT count(*)::int AS n FROM account_identities WHERE subject = '7501'")).rows[0].n === 0, noCookie);
       const unsigned = await fetch(`${dash.origin}/v1/auth/telegram/callback?code=forged&state=forged`, { redirect: "manual" });
       rec.check("a callback with no started sign-in is refused", unsigned.status === 302 && /telegram=failed/.test(unsigned.headers.get("location") ?? ""));
-      rec.check("the sign-in and sign-up pages offer Telegram", await (async () => { await page.context().clearCookies(); await page.goto("/sign-in"); return (await page.locator('a[href^="/v1/auth/telegram/start"]').count()) >= 1; })());
+      rec.check("the sign-in and sign-up pages offer Telegram", await (async () => { await page.context().clearCookies(); await page.goto("/sign-in"); return page.locator('a[href^="/v1/auth/telegram/start"]').first().waitFor({ timeout: 15_000 }).then(() => true, () => false); })());
       await page.goto("/sign-in?returnTo=%2Fstudio%2Fassistant");
       await page.getByLabel("Email").fill(owner.email);
       await page.getByLabel("Password").fill(PASSWORD);
@@ -200,8 +200,11 @@ class ImBinding extends Scenario {
       const [alphaHooks, bravoHooks] = [TelegramWebhooks.forBot(stack, alphaToken), TelegramWebhooks.forBot(stack, bravoToken)];
       rec.check("each Product has a bot of its own: different webhook, different secret", alphaHooks.url !== bravoHooks.url && alphaHooks.secret !== bravoHooks.secret);
       const [shopper, sameShopperElsewhere] = [new TgChat(stack, alphaHooks, 7701), new TgChat(stack, bravoHooks, 7701)];
-      await shopper.say("hello"); await sameShopperElsewhere.say("hello");
-      const alphaReply = (await shopper.waitTexts(1, 150_000))[0]; const bravoReply = (await sameShopperElsewhere.waitTexts(1, 150_000))[0];
+      // One person, one chat id on Telegram: both bots' replies land in the same chat, in order.
+      await shopper.say("hello");
+      const alphaReply = (await shopper.waitTexts(1, 150_000))[0];
+      await sameShopperElsewhere.say("hello");
+      const bravoReply = (await sameShopperElsewhere.waitTexts(2, 150_000))[1];
       rec.check("anyone who writes to ALPHA's bot is answered by ALPHA, with no sign-up", /ALPHA/.test(alphaReply) && !/BRAVO/.test(alphaReply) && !/登录|请先/.test(alphaReply), alphaReply);
       rec.check("the same person writing to BRAVO's bot is answered by BRAVO", /BRAVO/.test(bravoReply) && !/ALPHA/.test(bravoReply), bravoReply);
       await sleep(2000);
