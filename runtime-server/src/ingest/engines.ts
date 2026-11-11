@@ -1,4 +1,5 @@
 import { HostedIngest, HostedIngestError, type IngestItem as HostedItem } from "../hostedAgents/ingest.js";
+import { withLangfuseContext } from "../langfuse.js";
 import { mediaTypeOf } from "./names.js";
 import type { IngestEngine, Result, Source } from "./ports.js";
 
@@ -25,7 +26,7 @@ export class HostedEngine implements IngestEngine {
       ? { id: source.id, kind: "link", url: source.url }
       : { id: source.id, kind: "file", name: source.name, bytes: source.bytes, ...(source.mimeType ? { mimeType: source.mimeType } : {}) });
     const sessionOf = (id: string) => ({ session: { provider: "kimi_hosted_agents" as const, id } });
-    const outcome = await this.hosted.ingest({ accountId, items, context }, signal).catch((error: unknown) => {
+    const outcome = await withLangfuseContext({ userId: accountId }, () => this.hosted.ingest({ accountId, items, context }, signal)).catch((error: unknown) => {
       if (!(error instanceof HostedIngestError)) throw error;
       return error;
     });

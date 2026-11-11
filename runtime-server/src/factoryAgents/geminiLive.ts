@@ -7,6 +7,7 @@ import {
   type LiveServerMessage,
   type Session,
 } from "@google/genai";
+import { openObservation, type OpenObservation } from "../langfuse.js";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 
 export const GEMINI_LIVE_MODEL = "gemini-3.8-live";
@@ -61,6 +62,8 @@ export class GeminiLiveSession {
   private toolAbort = new Map<string, AbortController>();
   private turnWaiters = new Set<() => void>();
   private messageQueue: Promise<void> = Promise.resolve();
+  private trace?: OpenObservation;
+  private reconnects = 0;
 
   constructor(private readonly options: GeminiLiveSessionOptions) {
     if (!options.apiKey.trim()) throw new Error("Missing GEMINI_API_KEY");
@@ -75,19 +78,20 @@ export class GeminiLiveSession {
   async start(): Promise<void> {
     if (this.session) return;
     this.closed = false;
+    this.trace = openObservation("gemini-live.session", { type: "generation", provider: "google", model: this.model, metadata: { tools: this.tools.size, resumed: Boolean(this.resumptionHandle) } });
     try {
       await this.connect();
     } catch (error) {
       // A resumption handle belongs to the previous Live connection. If it
       // has expired or been closed by Gemini, retry this start once as a new
       // session instead of surfacing a false voice-session failure.
-      if (!this.resumptionHandle || this.closed) throw error;
+      if (!this.resumptionHandle || this.closed) { this.trace?.end(error); throw error; }
       this.connectionId += 1;
       const staleSession = this.session as Session | undefined;
       staleSession?.close();
       this.session = undefined;
       this.resumptionHandle = undefined;
-      await this.connect();
+      await this.connect().catch(failure => { this.trace?.end(failure); throw failure; });
     }
   }
 
@@ -198,6 +202,8 @@ export class GeminiLiveSession {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    this.trace?.update({ metadata: { reconnects: this.reconnects } });
+    this.trace?.end();
     this.connectionId += 1;
     for (const controller of this.toolAbort.values()) controller.abort(new Error("Gemini Live session closed"));
     this.toolAbort.clear();
@@ -314,12 +320,14 @@ export class GeminiLiveSession {
   }
 
   private report(error: unknown): void {
+    this.trace?.update({ metadata: { last_error: error instanceof Error ? error.message : String(error) } });
     this.callbacks.onError?.(error);
   }
 
   private async reconnect(cause?: unknown): Promise<void> {
     if (this.closed) return;
     if (this.connecting) return this.connecting;
+    this.reconnects += 1;
     const previous = this.session;
     this.session = undefined;
     this.connecting = (async () => {

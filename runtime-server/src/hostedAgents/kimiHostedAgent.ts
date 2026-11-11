@@ -1,3 +1,4 @@
+import { traceGeneration } from "../langfuse.js";
 import type { HostedAgentProvider, HostedResult, HostedTask, KimiHostedApi } from "./ports.js";
 import type { Provisioner } from "./provisioner.js";
 
@@ -88,5 +89,22 @@ export class KimiHostedAgent implements HostedAgentProvider {
       }
     }
     return { ...turn, ended: "error", error: turn.error ?? "The hosted session stream kept dropping" };
+  }
+}
+
+/** Traces each hosted run: the agent's model, the provider's session id, and how it ended. */
+export class TracedHostedAgent implements HostedAgentProvider {
+  constructor(private readonly inner: HostedAgentProvider, private readonly provider: string, private readonly model: string) {}
+  run(task: HostedTask, signal?: AbortSignal): Promise<HostedResult> {
+    return traceGeneration(
+      "hosted-agent.run",
+      { provider: this.provider, model: this.model, input: task.prompt, metadata: { title: task.title, files: task.files.length, secrets: task.secrets.length } },
+      () => this.inner.run(task, signal),
+      result => ({
+        output: result.text,
+        metadata: { provider_session_id: result.sessionId, status: result.status, artifacts: result.artifacts.length },
+        ...(result.status === "failed" ? { failed: result.error ?? "The hosted run failed" } : {})
+      })
+    );
   }
 }

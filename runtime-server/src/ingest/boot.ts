@@ -5,7 +5,7 @@ import { HostedIngest } from "../hostedAgents/ingest.js";
 import { INGEST_SANDBOX, ingestAgent, ingestSecrets } from "../hostedAgents/ingestAgent.js";
 import { PostgresBrowserProfiles } from "../hostedAgents/browserProfiles.js";
 import { KimiApi } from "../hostedAgents/kimiApi.js";
-import { KimiHostedAgent } from "../hostedAgents/kimiHostedAgent.js";
+import { KimiHostedAgent, TracedHostedAgent } from "../hostedAgents/kimiHostedAgent.js";
 import type { BrowserProfileStore } from "../hostedAgents/ports.js";
 import { Provisioner } from "../hostedAgents/provisioner.js";
 import { zipDirectory } from "../hostedAgents/zip.js";
@@ -30,7 +30,8 @@ export const hostedEngineFromEnvironment = async (environment: NodeJS.ProcessEnv
   const apiKey = environment.HATCH_MANAGED_AGENTS_API_KEY?.trim();
   if (!apiKey) return new UnavailableEngine(HOSTED_NOT_CONFIGURED);
   const api = new KimiApi({ apiKey });
-  const agent = new KimiHostedAgent(api, new Provisioner(api, INGEST_SANDBOX, ingestAgent(environment.HATCH_INGEST_MODEL?.trim() || "kimi-k3.1-pro"), zipDirectory));
+  const model = environment.HATCH_INGEST_MODEL?.trim() || "kimi-k3.1-pro";
+  const agent = new TracedHostedAgent(new KimiHostedAgent(api, new Provisioner(api, INGEST_SANDBOX, ingestAgent(model), zipDirectory)), "kimi_hosted_agents", model);
   const profiles = seal ? await PostgresBrowserProfiles.open(pool, seal) : new NoBrowserProfiles();
   return new HostedEngine(new HostedIngest(agent, profiles, ingestSecrets(environment)));
 };

@@ -23,6 +23,7 @@
     "@google/genai": "^1.52.0",
     "@langfuse/otel": "^5.13.1",
     "@langfuse/tracing": "^5.13.1",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.223.0",
     "@opentelemetry/sdk-node": "^0.223.0",
     "@spectrum-ts/core": "12.14.0",
     "@spectrum-ts/imessage": "12.14.0",

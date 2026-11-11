@@ -3,9 +3,10 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { ElevenLabsStreamingStt, QwenStreamingStt, type StreamingSttCallbacks, type StreamingSttProvider } from "../factoryAgents/stt.js";
+import { ElevenLabsStreamingStt, QWEN_STT_MODEL, QwenStreamingStt, type StreamingSttCallbacks, type StreamingSttProvider } from "../factoryAgents/stt.js";
 import { UpstreamError } from "../errors/upstream.js";
-import { GeminiTranscriber } from "./geminiTranscriber.js";
+import { traceGeneration } from "../langfuse.js";
+import { GEMINI_TRANSCRIBE_MODEL, GeminiTranscriber } from "./geminiTranscriber.js";
 import { AssetError, type AudioNormalizer, type Transcriber, type Transcript } from "./domain.js";
 
 const run = promisify(execFile);
@@ -66,6 +67,19 @@ export class StreamingSttTranscriber implements Transcriber {
   }
 }
 
+/** Traces each transcription as a generation: provider, model, audio size, and why it failed when it did. */
+export class TracedTranscriber implements Transcriber {
+  constructor(readonly provider: string, private readonly model: string, private readonly inner: Transcriber) {}
+  transcribe(pcm16k: Buffer): Promise<Transcript> {
+    return traceGeneration(
+      "transcribe",
+      { provider: this.provider, model: this.model, metadata: { audio_seconds: pcm16k.length / PCM_BYTES_PER_SECOND } },
+      () => this.inner.transcribe(pcm16k),
+      transcript => transcript.status === "ok" ? { output: transcript.text } : { failed: transcript.reason }
+    );
+  }
+}
+
 /** Tries each transcriber in order; one that is unavailable or fails upstream hands over to the next. When none succeeds, an upstream failure is thrown, else the last result stands. */
 export class FirstAvailableTranscriber implements Transcriber {
   constructor(private readonly chain: Transcriber[]) {}
@@ -80,7 +94,7 @@ export class FirstAvailableTranscriber implements Transcriber {
         if (!(error instanceof UpstreamError)) throw error;
         upstream ??= error;
       }
-      console.error(JSON.stringify({ event: "transcriber_fallback", transcriber: transcriber.constructor.name, ...(upstream ? { provider: upstream.provider, status: upstream.status } : {}) }));
+      console.error(JSON.stringify({ event: "transcriber_fallback", transcriber: transcriber instanceof TracedTranscriber ? transcriber.provider : transcriber.constructor.name, ...(upstream ? { provider: upstream.provider, status: upstream.status } : {}) }));
     }
     if (upstream) throw upstream;
     return last;
@@ -90,10 +104,10 @@ export class FirstAvailableTranscriber implements Transcriber {
 const streaming = (recognizer: new (options: StreamingSttCallbacks & { environment: NodeJS.ProcessEnv }) => StreamingSttProvider, environment: NodeJS.ProcessEnv): Transcriber =>
   new StreamingSttTranscriber(callbacks => new recognizer({ ...callbacks, environment }));
 
-const PROVIDERS: Record<string, { key: string; create(environment: NodeJS.ProcessEnv): Transcriber }> = {
-  gemini: { key: "GEMINI_API_KEY", create: environment => new GeminiTranscriber(environment.GEMINI_API_KEY!.trim(), environment.HATCH_GEMINI_STT_MODEL?.trim() || undefined) },
-  qwen: { key: "DASHSCOPE_API_KEY", create: environment => streaming(QwenStreamingStt, environment) },
-  elevenlabs: { key: "ELEVENLABS_API_KEY", create: environment => streaming(ElevenLabsStreamingStt, environment) }
+const PROVIDERS: Record<string, { key: string; model(environment: NodeJS.ProcessEnv): string; create(environment: NodeJS.ProcessEnv): Transcriber }> = {
+  gemini: { key: "GEMINI_API_KEY", model: environment => environment.HATCH_GEMINI_STT_MODEL?.trim() || GEMINI_TRANSCRIBE_MODEL, create: environment => new GeminiTranscriber(environment.GEMINI_API_KEY!.trim(), environment.HATCH_GEMINI_STT_MODEL?.trim() || undefined) },
+  qwen: { key: "DASHSCOPE_API_KEY", model: environment => environment.HATCH_FACTORY_QWEN_STT_MODEL?.trim() || QWEN_STT_MODEL, create: environment => streaming(QwenStreamingStt, environment) },
+  elevenlabs: { key: "ELEVENLABS_API_KEY", model: () => "scribe_v2_realtime", create: environment => streaming(ElevenLabsStreamingStt, environment) }
 };
 
 /** HATCH_TRANSCRIBE_PROVIDERS is a comma-separated chain, default `gemini,qwen`; a provider without its API key is left out. (HATCH_FACTORY_STT_PROVIDER stays the live Factory recognizer's.) */
@@ -101,8 +115,8 @@ export function transcriberFromEnvironment(environment: NodeJS.ProcessEnv = proc
   const names = (environment.HATCH_TRANSCRIBE_PROVIDERS?.trim() || "gemini,qwen").toLowerCase().split(",").map(name => name.trim()).filter(Boolean);
   const unsupported = names.find(name => !PROVIDERS[name]);
   if (unsupported) return new UnavailableTranscriber(`Unsupported STT provider: ${unsupported}`);
-  const configured = names.map(name => PROVIDERS[name]!).filter(provider => environment[provider.key]?.trim());
+  const configured = names.map(name => [name, PROVIDERS[name]!] as const).filter(([, provider]) => environment[provider.key]?.trim());
   if (!configured.length) return new UnavailableTranscriber(`${names.map(name => PROVIDERS[name]!.key).join(" or ")} is not set`);
-  const chain = configured.map(provider => provider.create(environment));
+  const chain = configured.map(([name, provider]) => new TracedTranscriber(name, provider.model(environment), provider.create(environment)));
   return chain.length === 1 ? chain[0]! : new FirstAvailableTranscriber(chain);
 }

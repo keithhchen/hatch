@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { test } from "node:test";
 import { UpstreamError } from "../errors/upstream.js";
-import { FfmpegAudioNormalizer, FirstAvailableTranscriber, StreamingSttTranscriber, UnavailableTranscriber, transcriberFromEnvironment } from "./adapters.js";
+import { FfmpegAudioNormalizer, FirstAvailableTranscriber, StreamingSttTranscriber, TracedTranscriber, UnavailableTranscriber, transcriberFromEnvironment } from "./adapters.js";
 import { AssetError, type Transcriber, type Transcript } from "./domain.js";
 import { GeminiTranscriber } from "./geminiTranscriber.js";
 
@@ -16,10 +16,12 @@ test("without a key the transcriber is unavailable and says why", async () => {
 });
 
 test("the default chain is Gemini then Qwen, each only when its key is set", () => {
-  assert.ok(transcriberFromEnvironment({ GEMINI_API_KEY: "k" }) instanceof GeminiTranscriber);
-  assert.ok(transcriberFromEnvironment({ DASHSCOPE_API_KEY: "k" }) instanceof StreamingSttTranscriber);
+  const gemini = transcriberFromEnvironment({ GEMINI_API_KEY: "k" });
+  assert.ok(gemini instanceof TracedTranscriber && gemini.provider === "gemini");
+  const qwen = transcriberFromEnvironment({ DASHSCOPE_API_KEY: "k" });
+  assert.ok(qwen instanceof TracedTranscriber && qwen.provider === "qwen");
   assert.ok(transcriberFromEnvironment({ GEMINI_API_KEY: "k", DASHSCOPE_API_KEY: "k" }) instanceof FirstAvailableTranscriber);
-  assert.ok(transcriberFromEnvironment({ HATCH_TRANSCRIBE_PROVIDERS: "qwen", GEMINI_API_KEY: "k", DASHSCOPE_API_KEY: "k" }) instanceof StreamingSttTranscriber);
+  assert.ok(transcriberFromEnvironment({ HATCH_TRANSCRIBE_PROVIDERS: "qwen", GEMINI_API_KEY: "k", DASHSCOPE_API_KEY: "k" }) instanceof TracedTranscriber);
 });
 
 const stub = (outcome: Transcript | Error): Transcriber & { calls: number } => ({

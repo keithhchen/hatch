@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { traceGeneration, usageOf } from "./langfuse.js";
 import { type AgentCorpus } from "./agentCorpus.js";
 import { MAX_RUNTIME_RESPONSE_BODY_BYTES, readBoundedJsonObject } from "./boundedResponse.js";
 
@@ -176,7 +177,12 @@ export class QdrantKnowledgeIndexer {
   }
 
   private async dashscope(pathname: string, body: Record<string, unknown>, baseUrl: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    return this.httpJson(`${baseUrl.replace(/\/$/, "")}${pathname}`, "POST", body, { authorization: `Bearer ${this.dashscopeApiKey}` }, signal);
+    return traceGeneration(
+      "embed",
+      { provider: "dashscope", model: String(body.model), metadata: { inputs: Array.isArray(body.input) ? body.input.length : 1, purpose: "index" } },
+      () => this.httpJson(`${baseUrl.replace(/\/$/, "")}${pathname}`, "POST", body, { authorization: `Bearer ${this.dashscopeApiKey}` }, signal),
+      response => ({ usage: usageOf(response.usage) })
+    );
   }
 
   private async httpJson(

@@ -3,6 +3,7 @@ import { createReadStream } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
+import { traceGeneration, usageOf } from "./langfuse.js";
 import { readBoundedJsonObject } from "./boundedResponse.js";
 import { requireUuidV4, UUID_V4_RE } from "./identity.js";
 import { normalizeBriefSpec, type BriefSpec } from "./brief.js";
@@ -464,11 +465,11 @@ export class QdrantKnowledgeProvider implements KnowledgeProvider {
     baseUrl: string,
     signal?: AbortSignal
   ): Promise<Record<string, unknown>> {
-    return this.httpJson(
-      `${baseUrl.replace(/\/$/, "")}${pathname}`,
-      body,
-      { authorization: `Bearer ${this.dashscopeApiKey}` },
-      signal
+    return traceGeneration(
+      pathname === "/reranks" ? "rerank" : "embed",
+      { provider: "dashscope", model: String(body.model), metadata: { inputs: Array.isArray(body.documents) ? body.documents.length : Array.isArray(body.input) ? body.input.length : 1 } },
+      () => this.httpJson(`${baseUrl.replace(/\/$/, "")}${pathname}`, body, { authorization: `Bearer ${this.dashscopeApiKey}` }, signal),
+      response => ({ usage: usageOf(response.usage) })
     );
   }
 
