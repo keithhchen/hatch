@@ -92,6 +92,8 @@ export type RunContext = {
   clientAttributes?: () => ClientAttributes;
   /** Hands the Run the messages that joined it. Called between model calls, never while compacting. */
   claimSteered?: () => Promise<ConversationMessage[]>;
+  /** Hears each message that joins the Run, so a streaming model call can be cut at once. Resolves to the way to stop hearing. */
+  onSteer?: (listener: () => void) => () => void;
   /** What the host sees right now. Appended to each model call like the reminder, and never stored. */
   liveState?: () => Promise<string | undefined>;
   /** `agentSystemPrompt` is the agent's own whole prompt, not an Expert's instructions inside the Expert Agent frame. */

@@ -32,6 +32,8 @@ export type Turn<Scope> = {
   clientOf: () => ClientAttributes;
   /** Hands the Run the messages that joined it; they are appended to the transcript in order. */
   claimSteered: () => Promise<ConversationMessage[]>;
+  /** Hears each message that joins the Run. */
+  onSteer: (listener: () => void) => () => void;
   /** Compaction of this Run's conversation: before the turn, between tool steps, after an overflow. */
   compaction: TurnCompaction;
 };
@@ -130,6 +132,7 @@ export class TurnExecutor<Scope> implements RunExecutor {
         run, conversation, scope, input, persistedUser: last, state, broker, publish, signal: control.signal,
         clientOf: () => registry.clientOf(conversation.id) ?? FALLBACK_CLIENT,
         claimSteered,
+        onSteer: control.onSteer,
         compaction: this.deps.compactions.forRun({ run, conversation, state, publish, signal: control.signal })
       });
     } finally {

@@ -41,6 +41,7 @@ import { SUMMARY_PREFIX, SUMMARY_SUFFIX } from "./compaction.js";
 import { renderSystemReminder } from "./surfaces/contract.js";
 import { createPiModel, createPiStreamFn } from "./piModel.js";
 import { withStallGuard, type StallLimits } from "./providerStall.js";
+import { SteerInterrupt } from "./steerInterrupt.js";
 import { traceAgentTools } from "./langfuse.js";
 import { resolveLlmProfile } from "./llmProfiles.js";
 import { runPiAgentPrompt, type PiAgentPromptRunner } from "./piPrompt.js";
@@ -154,7 +155,11 @@ export class PiAgentRuntime implements AgentRuntime {
   async *run(input: RunStart, ctx: RunContext): AsyncIterable<OutboundMessage> {
     ctx.abortSignal?.throwIfAborted();
     const model = createPiModel({ env: this.options.env });
-    const streamFn = withStallGuard(createPiStreamFn({ env: this.options.env }), this.options.stall ?? resolveLlmProfile(this.options.env).stall);
+    const stallGuarded = withStallGuard(createPiStreamFn({ env: this.options.env }), this.options.stall ?? resolveLlmProfile(this.options.env).stall);
+    // A joining message cuts a streaming model call. A delivery draft is audited whole, so it is never cut.
+    const steer = new SteerInterrupt();
+    const streamFn = ctx.deliveryWorkflow ? stallGuarded : steer.wrap(stallGuarded);
+    const unsubscribeSteer = ctx.onSteer?.(() => steer.wake());
     const queue = new AsyncQueue<OutboundMessage>();
     const workspacePathPolicy = createWorkspacePathPolicy(input.message.content);
     const visibleSkills = ctx.sessionSkills.visibleRecords;
@@ -337,7 +342,8 @@ export class PiAgentRuntime implements AgentRuntime {
           setFinalAssistant: (message) => { finalAssistant = message; },
           setTerminalError: (error) => { terminalError ??= error; },
           setHandedOver: () => { handedOver = true; },
-          handedOver: () => handedOver
+          handedOver: () => handedOver,
+          steer
         });
       });
 
@@ -348,9 +354,21 @@ export class PiAgentRuntime implements AgentRuntime {
       // Built by the same function that rebuilds history, so the message's
       // bytes in the request never change between calls (text stays a string
       // until it has images).
-      const promptPromise = (input.task_start
-        ? agent.continue()
-        : agent.prompt(piUserMessage(withImages(renderUserMessageForModel(input.message), currentAssetImages))))
+      const runAgent = async (): Promise<void> => {
+        await (input.task_start
+          ? agent.continue()
+          : agent.prompt(piUserMessage(withImages(renderUserMessageForModel(input.message), currentAssetImages))));
+        // A call cut before it wrote any text has nothing to keep: the messages that joined are read by a fresh call, here.
+        while (steer.cut && !finalAssistant) {
+          steer.settle();
+          ensureNotCancelled(ctx);
+          const joined = ctx.claimSteered ? await ctx.claimSteered() : [];
+          const images = await loadAssetImages(joined, ctx.assetStore);
+          agent.state.messages = [...agent.state.messages.slice(0, -1), ...joined.map((message) => toPiMessage(message, images))];
+          await agent.continue();
+        }
+      };
+      const promptPromise = runAgent()
         .catch((error) => {
           terminalError = error instanceof Error ? error : new Error(String(error));
         })
@@ -401,6 +419,7 @@ export class PiAgentRuntime implements AgentRuntime {
       };
     } finally {
       ctx.abortSignal?.removeEventListener("abort", abortAgent);
+      unsubscribeSteer?.();
       agent.abort();
     }
   }
@@ -488,6 +507,7 @@ export class PiAgentRuntime implements AgentRuntime {
     setTerminalError: (error: Error) => void;
     setHandedOver: () => void;
     handedOver: () => boolean;
+    steer?: SteerInterrupt;
   }): Promise<void> {
     const {
       event,
@@ -506,8 +526,21 @@ export class PiAgentRuntime implements AgentRuntime {
       setFinalAssistant,
       setTerminalError,
       setHandedOver,
-      handedOver
+      handedOver,
+      steer
     } = options;
+
+    // A call cut by a joining message is not a failure. What it wrote is kept as an interrupted reply: the Run ends with it
+    // while the message stays unclaimed, and Chat runs again from that message with the partial reply in its history.
+    if (steer?.cut && event.type === "message_end" && event.message.role === "assistant") {
+      const kept = interruptedReply(event.message as AssistantMessage);
+      if (kept) {
+        transcriptMessages.push(fromPiMessage(kept));
+        setFinalAssistant(kept);
+      }
+      return;
+    }
+    if (steer?.cut && (event.type === "turn_end" || event.type === "agent_end")) return;
 
     if (event.type === "message_update") {
       if (event.assistantMessageEvent.type === "text_delta" && !deliveryWorkflow) {
@@ -706,6 +739,12 @@ export class PiAgentRuntime implements AgentRuntime {
       }
     }
   }
+}
+
+/** What a cut call had written, as a finished reply: its text only, since a half-written tool call or thought is not a reply. */
+function interruptedReply(message: AssistantMessage): AssistantMessage | undefined {
+  const content = message.content.filter((block) => block.type === "text" && block.text.trim().length > 0);
+  return content.length ? { ...message, content, stopReason: "stop", errorMessage: undefined } : undefined;
 }
 
 function createDeliveryReviewer(): PiAgentPromptRunner {
