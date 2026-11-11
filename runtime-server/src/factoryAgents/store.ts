@@ -34,7 +34,6 @@ export type Session = {
   voiceLive?: { resumptionHandle?: string };
   /** Set while the Assistant drives this session for one of its tasks. */
   assistantTaskId?: string;
-  knowledge?: Array<{ path: string; id: string; source: string; title: string; productId: string; sha256: string }>;
   corpus?: { product_id: string; corpus_ref: string; corpus_digest: string; release_digest: string; status: "published"; published_at: string; files: string[] };
 };
 

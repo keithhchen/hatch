@@ -15,7 +15,6 @@ const auth = [
   ["studio-factory-uploads", `/studio/factory/${PID}/sources/uploads`], ["studio-factory-research", `/studio/factory/${PID}/sources/research`],
   ["studio-factory-voice", `/studio/factory/${PID}/sources/voice`], ["studio-factory-build", `/studio/factory/${PID}/build/generation`],
   ["studio-factory-cases", `/studio/factory/${PID}/evaluate/case-generation`], ["studio-factory-eval", `/studio/factory/${PID}/evaluate/evaluator`],
-  ["studio-product-files", `/studio/products/${PID}/files`], ["studio-product-complete", `/studio/products/${PID}/complete`],
   ["studio-preview", `/studio/products/${PID}/preview`], ["product-page", `/products/${PID}`], ["chat", `/chat/product/${PID}`],
 ];
 const browser = await chromium.launch({ channel: "chrome" });

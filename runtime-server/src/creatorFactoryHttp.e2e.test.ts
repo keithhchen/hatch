@@ -88,18 +88,8 @@ test("Product Creator API owns Files and routes Node workflow through the new bo
   assert.equal(productConflict.status, 409);
   assert.equal((await productConflict.json() as { error: { code: string } }).error.code, "idempotency_conflict");
 
-  const content = Buffer.from("Choose one recommendation and return final copy.");
-  const upload = await fetch(`${base}/v1/creator/products/${productId}/files`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${creatorA}`, "content-type": "application/json", "idempotency-key": "file-1" },
-    body: JSON.stringify({ display_name: "method.txt", media_type: "text/plain", content_base64: content.toString("base64") })
-  });
-  assert.equal(upload.status, 201);
-  const file = await upload.json() as { id: string; path: string; projection: { kind: string } };
-  assert.equal(file.projection.kind, "markdown");
-  assert.equal(file.path, `creator-products/${creatorAAccount.id}/${productId}/files/${file.id}/projection.md`);
-
   for (const legacyPath of [
+    `/v1/creator/products/${productId}/files`,
     `/v1/creator/products/${productId}/snapshots`,
     `/v1/creator/products/${productId}/runs`,
     `/v1/creator/products/${productId}/versions`
@@ -117,9 +107,6 @@ test("Product Creator API owns Files and routes Node workflow through the new bo
   // it through HATCH_DATABASE_URL; the route must fail honestly rather than
   // silently falling back to the removed Factory run API.
   assert.equal(nodeStatus.status, 503);
-
-  const crossCreator = await fetch(`${base}/v1/creator/products/${productId}/files`, { headers: { authorization: `Bearer ${creatorB}` } });
-  assert.equal(crossCreator.status, 404);
 });
 
 async function signup(base: string, email: string, displayName: string): Promise<string> {

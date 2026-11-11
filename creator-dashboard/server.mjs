@@ -1536,7 +1536,7 @@ export async function createDashboardApp(options = {}) {
         return send(response, 404, { error: { code: "not_found", message: "Route not found." } });
       }
 
-      const productContractPath = url.pathname.match(/^\/v1\/creator\/products(?:\/[^/]+(?:\/files(?:\/[^/]+)?|\/ingest(?:\/[^/]+)?|\/graph|\/brief-spec|\/registry|\/live|\/withdraw|\/listing|\/pricing|\/nodes\/(?:about-you|corpus)\/executions(?:\/[^/]+(?:\/answers)?)?)?)?$/);
+      const productContractPath = url.pathname.match(/^\/v1\/creator\/products(?:\/[^/]+(?:\/ingest(?:\/[^/]+)?|\/graph|\/brief-spec|\/registry|\/live|\/withdraw|\/listing|\/pricing|\/nodes\/(?:about-you|corpus)\/executions(?:\/[^/]+(?:\/answers)?)?)?)?$/);
       const productNodeContract = /\/nodes\/(?:about-you|corpus)\/executions(?:\/[^/]+(?:\/answers)?)?$/.test(url.pathname);
       const productRegistryContract = /\/registry$/.test(url.pathname);
       const productLiveContract = /\/live$/.test(url.pathname);
@@ -1544,7 +1544,7 @@ export async function createDashboardApp(options = {}) {
         request.method === "POST" || request.method === "PATCH" || request.method === "PUT"
       ) && (
         url.pathname === "/v1/creator/products"
-        || /\/(files|brief-spec|pricing|ingest)$/.test(url.pathname)
+        || /\/(brief-spec|pricing|ingest)$/.test(url.pathname)
         || /\/withdraw$/.test(url.pathname)
         || /\/listing$/.test(url.pathname)
         || productNodeContract
@@ -1554,11 +1554,10 @@ export async function createDashboardApp(options = {}) {
       );
       const productContractDelete = productContractPath
         && request.method === "DELETE"
-        && (/\/files\/[^/]+$/.test(url.pathname) || /^\/v1\/creator\/products\/[^/]+$/.test(url.pathname));
+        && /^\/v1\/creator\/products\/[^/]+$/.test(url.pathname);
       const productContractRead = productContractPath && request.method === "GET" && (
         url.pathname === "/v1/creator/products"
         || /^\/v1\/creator\/products\/[^/]+$/.test(url.pathname)
-        || /\/files(?:\/[^/]+)?$/.test(url.pathname)
         || /\/ingest(?:\/[^/]+)?$/.test(url.pathname)
         || /\/graph$/.test(url.pathname)
         || productLiveContract
@@ -1570,7 +1569,7 @@ export async function createDashboardApp(options = {}) {
         const isProductRoot = url.pathname === "/v1/creator/products" || /^\/v1\/creator\/products\/[^/]+$/.test(url.pathname);
         const requiredScope = isProductRoot
           ? (request.method === "GET" ? "creator:products:read" : "creator:products:write")
-          : (url.pathname.includes("/files") || url.pathname.includes("/ingest")
+          : (url.pathname.includes("/ingest")
             ? (request.method === "GET" ? "creator:files:read" : "creator:files:write")
             : (request.method === "GET" ? "creator:products:read" : "creator:products:write"));
         requireOAuthScope(request, requiredScope, url.pathname);
@@ -2757,13 +2756,10 @@ function oauthEndpointScope(request) {
   }
   if (pathname === "/v1/creator/studio/ws") return "creator:products:read";
   if (CONVERSATION_PATH.test(pathname)) return method === "GET" ? "creator:products:read" : method === "POST" ? "creator:products:write" : undefined;
-  const fileMatch = pathname.match(/^\/v1\/creator\/products\/[^/]+\/files(?:\/[^/]+)?$/);
-  if (fileMatch) {
+  const ingestMatch = pathname.match(/^\/v1\/creator\/products\/[^/]+\/ingest(?:\/[^/]+)?$/);
+  if (ingestMatch) {
     if (method === "GET") return "creator:files:read";
-    if (method === "POST" && !pathname.endsWith("/files")) return undefined;
-    if (method === "POST") return "creator:files:write";
-    if (method === "DELETE" && !pathname.endsWith("/files")) return "creator:files:write";
-    return undefined;
+    if (method === "POST" && pathname.endsWith("/ingest")) return "creator:files:write";
   }
   return undefined;
 }

@@ -18,12 +18,9 @@ const CREATOR_STUDIO_KEYS = [
   "recentActivity",
   "ordersAndAccess",
   "productsPageTitle",
-  "productsPageBody",
   "createFirstProduct",
   "createProduct",
   "openProduct",
-  "productFiles",
-  "uploadFiles",
   "generateVersion",
   "productStatus_preparing",
   "productStatus_needs_attention"
@@ -38,16 +35,6 @@ test("Creator Studio entry paths have English, Chinese, and Japanese copy", () =
 
 test("Studio stays untranslated across locales", () => {
   for (const locale of CREATOR_LOCALES) assert.equal(createCreatorTranslator(locale)("studio"), "Studio");
-});
-
-test("file processing copy stays provider-neutral", () => {
-  for (const locale of CREATOR_LOCALES) {
-    const t = createCreatorTranslator(locale);
-    for (const key of ["sourceNote", "imageNative"]) {
-      const value = String(t(key)).toLowerCase();
-      assert.doesNotMatch(value, /kimi|moonshot|deepseek|k2\.6/);
-    }
-  }
 });
 
 test("legacy Product, preview, release, and order surfaces have complete locale copy", () => {

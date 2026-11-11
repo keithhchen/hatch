@@ -7,56 +7,35 @@ const MESSAGES = {
     chinese: "中文",
     japanese: "日本語",
     files: "Files",
-    aboutYou: "About you",
     corpus: "Method",
     review: "Review",
     brief: "Starting questions",
     complete: "Complete",
-    briefTitle: "Set the starting questions",
-    briefBody: "Write the questions a Buyer answers before work begins.",
-    addBriefQuestion: "Add question",
-    briefQuestion: "Question",
     briefQuestionPlaceholder: "What should the buyer tell you before you start?",
-    requiredQuestion: "Required",
     moveQuestionUp: "Move question up",
     moveQuestionDown: "Move question down",
-    saveBriefAndContinue: "Save questions and continue to publish",
-    briefSaved: "Starting questions saved.",
     optional: "optional",
-    briefRequiredBeforePublish: "Add and save at least one starting question before publishing.",
     backToBrief: "Back to starting questions",
-    giveMaterial: "Give Hatch the material behind your method.",
-    uploadFiles: "Upload files",
     chooseFiles: "Choose files",
-    uploadHint: "PDF, Office, Markdown, and text files",
     localFilesOnly: "Local files only; repeat uploads are allowed.",
     startDistillation: "Generate version",
-    continueWithFiles: "Continue with these files",
-    helpUnderstand: "Help Hatch understand you.",
-    questionOf: (current, total) => `Question ${current} of ${total}`,
     previous: "Previous",
     next: "Next",
     other: "Other",
     sourceEvidence: "Source evidence",
     whatHatchFound: "What Hatch found",
     yourContext: "Your context",
-    addContext: "Add the context, influence, or nuance…",
     saveAndNext: "Save and next",
-    continueToCorpus: "Continue to Method",
     reviewResult: "Does this result meet your standard?",
     userSituation: "User situation",
     yourMethod: "Your method",
     currentResponse: "Current response",
     useResult: "Use this result",
     correctResult: "Correct this result",
-    removeQuestion: "Remove this question",
     removeQuestionHelp: "You do not agree with this question design. Remove it from the review set.",
     confirmRemoveQuestion: "Remove question",
-    fullCorpus: "The method Hatch prepared",
-    viewProductDetails: "View Product Details",
     publishProduct: "Publish product",
     generateAnotherVersion: "Generate another version",
-    addSourceFiles: "Add source files",
     addFilesForVersion: "To make another version without corrections, add new source material first.",
     reviewBeforeComplete: "Finish reviewing this version before completing it.",
     published: "Published",
@@ -64,24 +43,14 @@ const MESSAGES = {
     deleteProduct: "Delete product",
     deleteProductConfirm: "Delete this unpublished Product? This cannot be undone.",
     noRun: "Start distillation from Files to generate the first version.",
-    noQuestions: "Hatch has not generated an About you question yet.",
     loading: "Loading",
     saved: "Saved",
-    answersSaved: "Your answers are saved.",
     saving: "Saving…",
     correctionSaved: "Correction saved. Generate another version when you are ready.",
     versionGenerated: "A new version is being generated.",
-    productPublished: "Your product is published.",
-    filesReady: (count) => `${count} file${count === 1 ? "" : "s"} ready`,
     product: "Product",
-    unnamedFile: "Unnamed file",
     ready: "Ready",
     removeFile: "Remove",
-    confirmRemoveFile: "Remove this file from the Product? It will be hidden from future runs, while its stored artifact remains available for audit.",
-    fileRemoved: "File removed from the active Product files.",
-    fileStatus_ready: "Ready",
-    fileStatus_processing: "Preparing",
-    fileStatus_error: "Could not prepare",
     imageNative: "Image · native",
     markdownProjection: "Markdown projection",
     uploadForProduct: "Upload local files for this Product.",
@@ -98,27 +67,16 @@ const MESSAGES = {
     heldoutCorrectionFailed: "Unable to start the held-out correction version.",
     correctionRequired: "Correction required",
     sealed: "Sealed",
-    whatProductDelivers: "What does your product deliver?",
-    saveProductPromise: "Save product promise",
-    productPromiseSaved: "Product promise saved.",
     productOverview: "Product overview",
-    editProductDetails: "Edit product details",
-    productOverviewBody: "Set the product name and the promise a customer should understand at a glance.",
-    saveProductDetails: "Save changes",
     productDetailsSaved: "Product details saved.",
-    openFactory: "Open Factory",
     products: "Products",
     browse: "Browse",
     currentVersion: "Current version",
     version: (number, status) => `Version ${number} · ${status}`,
-    sourceNote: "PDF and Office (Word, Excel, PowerPoint) documents are converted to Markdown. Text files are stored as Markdown too. Images are not supported yet.",
     whatShouldHatchHaveDone: "What should Hatch have done?",
     why: "Why?",
-    evaluationUnavailable: "Evaluation unavailable",
-    corpusUnavailable: "Method unavailable"
-    ,versionNeedsAttention: "Needs attention"
+    evaluationUnavailable: "Evaluation unavailable"
     ,versionGenerationPaused: "This version could not be completed."
-    ,failureDetailsUnavailable: "Hatch did not return failure details for this version."
     ,retryFailedStage: "Retry this step"
     ,retryStarted: "Hatch is retrying the failed step."
     ,reviewStatus_accepted: "Used in this version"
@@ -149,14 +107,11 @@ const MESSAGES = {
     ,filesAdded: (count) => `${count} file${count === 1 ? "" : "s"} added to this Product.`
     ,filesUnavailable: "Files unavailable"
     ,filesAddedTitle: "Files added"
-    ,productFiles: "Product files"
     ,addFilesBody: "Add as many local files as you need. They stay with this Product and are versioned when you generate."
     ,generateVersion: "Generate version"
-    ,noFilesYet: "No files yet"
     ,firstFileForProduct: "Upload the first file for this Product."
     ,productCouldNotBeCreated: "Product could not be created"
     ,productCreatedWithoutId: "The Product was created, but Hatch could not open it."
-    ,productNameExample: "e.g. Interview Answer Rewriter"
     ,preparingFile: "Preparing"
     ,explore: "Explore"
     ,library: "Library"
@@ -198,7 +153,6 @@ const MESSAGES = {
     ,noAccessRecordsBody: "Records appear here after someone adds a published Product to their account."
     ,productsLoadError: "We couldn't load your Products"
     ,productsPageTitle: "Turn your method into a Product people can use."
-    ,productsPageBody: "Each Product keeps its files, versions, starting questions, and release together."
     ,createFirstProduct: "Create your first Product"
     ,createFirstProductBody: "Start with one focused result, add the material behind it, and generate the first version."
     ,notPublished: "Not published"
@@ -207,7 +161,6 @@ const MESSAGES = {
     ,openProduct: "Open Product"
     ,createFocusedProduct: "Create one focused Product"
     ,createFocusedProductBody: "Name the result, add your material, and generate the first version."
-    ,continueProductWorkflow: "Continue building this Product."
     ,continueProduct: "Continue"
     ,live: "Live"
     ,storefrontLiveBody: "Your Product is live. Share it or inspect the latest access records."
@@ -230,7 +183,6 @@ const MESSAGES = {
     ,productStatus_preparing: "Generating version"
     ,productStatus_needs_attention: "Needs attention"
     ,productStatus_draft: "Draft"
-    ,productWorkflow: "Product workflow"
   },
   zh: {
     language: "语言",
@@ -238,56 +190,35 @@ const MESSAGES = {
     chinese: "中文",
     japanese: "日本語",
     files: "文件",
-    aboutYou: "关于你",
     corpus: "方法",
     review: "审核",
     brief: "开始问题",
     complete: "完成",
-    briefTitle: "设置开始问题",
-    briefBody: "写下用户开始工作前需要回答的问题。",
-    addBriefQuestion: "添加问题",
-    briefQuestion: "问题",
     briefQuestionPlaceholder: "开始工作前，你希望用户告诉你什么？",
-    requiredQuestion: "必填",
     moveQuestionUp: "问题上移",
     moveQuestionDown: "问题下移",
-    saveBriefAndContinue: "保存问题，继续发布",
-    briefSaved: "开始问题已保存。",
     optional: "选填",
-    briefRequiredBeforePublish: "发布前请至少添加并保存一个开始问题。",
     backToBrief: "返回开始问题",
-    giveMaterial: "把支撑你方法的材料交给 Hatch。",
-    uploadFiles: "上传文件",
     chooseFiles: "选择文件",
-    uploadHint: "支持 PDF、Office、Markdown 和文本文件",
     localFilesOnly: "仅支持本地文件，可以分批上传。",
     startDistillation: "生成版本",
-    continueWithFiles: "使用这些文件继续",
-    helpUnderstand: "帮助 Hatch 更了解你。",
-    questionOf: (current, total) => `问题 ${current} / ${total}`,
     previous: "上一题",
     next: "下一题",
     other: "其他",
     sourceEvidence: "来源证据",
     whatHatchFound: "Hatch 找到的内容",
     yourContext: "你的背景",
-    addContext: "补充背景、影响或细节……",
     saveAndNext: "保存并继续",
-    continueToCorpus: "继续生成方法",
     reviewResult: "这个结果符合你的标准吗？",
     userSituation: "用户情境",
     yourMethod: "你的方法",
     currentResponse: "当前回答",
     useResult: "采用这个结果",
     correctResult: "修正这个结果",
-    removeQuestion: "移除这个问题",
     removeQuestionHelp: "你不认可这个问题的设计。移除后，它不会再用于审核这个产品。",
     confirmRemoveQuestion: "移除问题",
-    fullCorpus: "Hatch 准备好的方法",
-    viewProductDetails: "查看产品详情",
     publishProduct: "发布产品",
     generateAnotherVersion: "生成新版本",
-    addSourceFiles: "添加源文件",
     addFilesForVersion: "如果没有修正内容，请先添加新的源材料，再生成新版本。",
     reviewBeforeComplete: "请先完成这个版本的审核。",
     published: "已发布",
@@ -295,24 +226,14 @@ const MESSAGES = {
     deleteProduct: "删除产品",
     deleteProductConfirm: "删除这个未发布的产品？此操作无法撤销。",
     noRun: "请先在“文件”中开始提炼，生成第一个版本。",
-    noQuestions: "Hatch 还没有生成“关于你”的问题。",
     loading: "加载中",
     saved: "已保存",
-    answersSaved: "你的回答已保存。",
     saving: "保存中……",
     correctionSaved: "修正已保存。准备好后可以生成新版本。",
     versionGenerated: "正在生成新版本。",
-    productPublished: "你的产品已发布。",
-    filesReady: (count) => `${count} 个文件已准备好`,
     product: "产品",
-    unnamedFile: "未命名文件",
     ready: "已准备好",
     removeFile: "移除",
-    confirmRemoveFile: "从这个产品中移除这个文件？它会从后续运行中隐藏，但保存的文件仍会保留用于审计。",
-    fileRemoved: "文件已从当前产品文件列表中移除。",
-    fileStatus_ready: "已准备好",
-    fileStatus_processing: "准备中",
-    fileStatus_error: "无法处理",
     imageNative: "图片 · 原生读取",
     markdownProjection: "Markdown 投影",
     uploadForProduct: "为这个产品上传本地文件。",
@@ -329,27 +250,16 @@ const MESSAGES = {
     heldoutCorrectionFailed: "无法启动留出评估修正版本。",
     correctionRequired: "需要修正",
     sealed: "已密封",
-    whatProductDelivers: "你的产品交付什么？",
-    saveProductPromise: "保存产品承诺",
-    productPromiseSaved: "产品承诺已保存。",
     productOverview: "产品概览",
-    editProductDetails: "编辑产品信息",
-    productOverviewBody: "设置产品名称，以及用户一眼就应该理解的产品承诺。",
-    saveProductDetails: "保存修改",
     productDetailsSaved: "产品信息已保存。",
-    openFactory: "打开 Factory",
     products: "产品",
     browse: "浏览",
     currentVersion: "当前版本",
     version: (number, status) => `版本 ${number} · ${status}`,
-    sourceNote: "PDF 和 Office（Word、Excel、PowerPoint）文档会转换为 Markdown，文本文件也会按 Markdown 保存。暂不支持图片。",
     whatShouldHatchHaveDone: "Hatch 应该怎么做？",
     why: "为什么？",
-    evaluationUnavailable: "评估不可用",
-    corpusUnavailable: "方法不可用"
-    ,versionNeedsAttention: "需要处理"
+    evaluationUnavailable: "评估不可用"
     ,versionGenerationPaused: "这个版本未能完成。"
-    ,failureDetailsUnavailable: "Hatch 没有返回这个版本的失败详情。"
     ,retryFailedStage: "重试这一步"
     ,retryStarted: "Hatch 正在重试失败的步骤。"
     ,reviewStatus_accepted: "已纳入此版本"
@@ -380,14 +290,11 @@ const MESSAGES = {
     ,filesAdded: (count) => `已向该产品添加 ${count} 个文件。`
     ,filesUnavailable: "文件不可用"
     ,filesAddedTitle: "文件已添加"
-    ,productFiles: "产品文件"
     ,addFilesBody: "可以多次添加本地文件。它们会跟随这个产品，并在生成版本时被锁定。"
     ,generateVersion: "生成版本"
-    ,noFilesYet: "还没有文件"
     ,firstFileForProduct: "为这个产品上传第一个文件。"
     ,productCouldNotBeCreated: "产品无法创建"
     ,productCreatedWithoutId: "产品已创建，但 Hatch 无法打开它。"
-    ,productNameExample: "例如：面试答案改写助手"
     ,preparingFile: "准备中"
     ,explore: "探索"
     ,library: "资料库"
@@ -429,7 +336,6 @@ const MESSAGES = {
     ,noAccessRecordsBody: "有人将已发布产品添加到账户后，记录会显示在这里。"
     ,productsLoadError: "无法加载你的产品"
     ,productsPageTitle: "把你的方法变成人们可以使用的产品。"
-    ,productsPageBody: "每个产品都把文件、版本、开始问题与发布记录放在一起。"
     ,createFirstProduct: "创建你的第一个产品"
     ,createFirstProductBody: "从一个明确结果开始，添加支撑材料，再生成第一个版本。"
     ,notPublished: "未发布"
@@ -438,7 +344,6 @@ const MESSAGES = {
     ,openProduct: "打开产品"
     ,createFocusedProduct: "创建一个目标明确的产品"
     ,createFocusedProductBody: "先写下交付结果，添加材料，再生成第一个版本。"
-    ,continueProductWorkflow: "继续完善这个产品。"
     ,continueProduct: "继续"
     ,live: "已上线"
     ,storefrontLiveBody: "你的产品已经上线，可以分享或查看最新使用记录。"
@@ -461,7 +366,6 @@ const MESSAGES = {
     ,productStatus_preparing: "正在生成版本"
     ,productStatus_needs_attention: "需要处理"
     ,productStatus_draft: "草稿"
-    ,productWorkflow: "产品流程"
   },
   ja: {
     language: "言語",
@@ -469,56 +373,35 @@ const MESSAGES = {
     chinese: "中文",
     japanese: "日本語",
     files: "ファイル",
-    aboutYou: "あなたについて",
     corpus: "方法",
     review: "レビュー",
     brief: "開始前の質問",
     complete: "完了",
-    briefTitle: "開始前の質問を設定",
-    briefBody: "作業を始める前に Buyer が答える質問を書きます。",
-    addBriefQuestion: "質問を追加",
-    briefQuestion: "質問",
     briefQuestionPlaceholder: "開始前に購入者から何を聞きたいですか？",
-    requiredQuestion: "必須",
     moveQuestionUp: "質問を上へ",
     moveQuestionDown: "質問を下へ",
-    saveBriefAndContinue: "質問を保存して公開へ進む",
-    briefSaved: "開始前の質問を保存しました。",
     optional: "任意",
-    briefRequiredBeforePublish: "公開前に開始前の質問を1つ以上保存してください。",
     backToBrief: "開始前の質問に戻る",
-    giveMaterial: "あなたの方法を支える資料を Hatch に渡します。",
-    uploadFiles: "ファイルをアップロード",
     chooseFiles: "ファイルを選択",
-    uploadHint: "PDF、Office、Markdown、テキストに対応",
     localFilesOnly: "ローカルファイルのみ。何度でも追加できます。",
     startDistillation: "バージョンを生成",
-    continueWithFiles: "このファイルで続ける",
-    helpUnderstand: "Hatch があなたを理解できるようにします。",
-    questionOf: (current, total) => `質問 ${current} / ${total}`,
     previous: "前へ",
     next: "次へ",
     other: "その他",
     sourceEvidence: "出典エビデンス",
     whatHatchFound: "Hatch が見つけたこと",
     yourContext: "あなたの背景",
-    addContext: "背景、影響、ニュアンスを追加…",
     saveAndNext: "保存して次へ",
-    continueToCorpus: "方法に進む",
     reviewResult: "この結果はあなたの基準を満たしていますか？",
     userSituation: "ユーザーの状況",
     yourMethod: "あなたの方法",
     currentResponse: "現在の回答",
     useResult: "この結果を使う",
     correctResult: "この結果を修正",
-    removeQuestion: "この質問を削除",
     removeQuestionHelp: "この質問の設計に同意しません。レビュー対象から削除します。",
     confirmRemoveQuestion: "質問を削除",
-    fullCorpus: "Hatch が準備した方法",
-    viewProductDetails: "プロダクト詳細を見る",
     publishProduct: "プロダクトを公開",
     generateAnotherVersion: "新しいバージョンを生成",
-    addSourceFiles: "ソースファイルを追加",
     addFilesForVersion: "修正がない場合は、新しいソース資料を追加してから別のバージョンを生成してください。",
     reviewBeforeComplete: "このバージョンのレビューを完了してください。",
     published: "公開済み",
@@ -526,24 +409,14 @@ const MESSAGES = {
     deleteProduct: "プロダクトを削除",
     deleteProductConfirm: "この未公開プロダクトを削除しますか？この操作は取り消せません。",
     noRun: "まず「ファイル」から抽出を開始して、最初のバージョンを生成してください。",
-    noQuestions: "Hatch はまだ「あなたについて」の質問を生成していません。",
     loading: "読み込み中",
     saved: "保存済み",
-    answersSaved: "回答を保存しました。",
     saving: "保存中…",
     correctionSaved: "修正を保存しました。準備ができたら新しいバージョンを生成できます。",
     versionGenerated: "新しいバージョンを生成しています。",
-    productPublished: "プロダクトを公開しました。",
-    filesReady: (count) => `${count} ファイル準備完了`,
     product: "プロダクト",
-    unnamedFile: "名前のないファイル",
     ready: "準備完了",
     removeFile: "削除",
-    confirmRemoveFile: "このファイルをプロダクトから削除しますか？今後の実行からは非表示になりますが、監査用の保存 artifact は残ります。",
-    fileRemoved: "ファイルをアクティブなプロダクト一覧から削除しました。",
-    fileStatus_ready: "準備完了",
-    fileStatus_processing: "準備中",
-    fileStatus_error: "処理できません",
     imageNative: "画像 · ネイティブ",
     markdownProjection: "Markdown 投影",
     uploadForProduct: "このプロダクト用のローカルファイルをアップロードします。",
@@ -560,27 +433,16 @@ const MESSAGES = {
     heldoutCorrectionFailed: "ホールドアウト修正版を開始できませんでした。",
     correctionRequired: "修正が必要",
     sealed: "封印済み",
-    whatProductDelivers: "プロダクトは何を届けますか？",
-    saveProductPromise: "プロダクトの約束を保存",
-    productPromiseSaved: "プロダクトの約束を保存しました。",
     productOverview: "プロダクト概要",
-    editProductDetails: "プロダクト情報を編集",
-    productOverviewBody: "プロダクト名と、顧客が一目で理解できる約束を設定します。",
-    saveProductDetails: "変更を保存",
     productDetailsSaved: "プロダクト情報を保存しました。",
-    openFactory: "Factory を開く",
     products: "プロダクト",
     browse: "参照",
     currentVersion: "現在のバージョン",
     version: (number, status) => `バージョン ${number} · ${status}`,
-    sourceNote: "PDF と Office（Word、Excel、PowerPoint）文書は Markdown に変換され、テキストも Markdown として保存されます。画像はまだ対応していません。",
     whatShouldHatchHaveDone: "Hatch はどうすべきでしたか？",
     why: "理由",
-    evaluationUnavailable: "評価を利用できません",
-    corpusUnavailable: "方法を利用できません"
-    ,versionNeedsAttention: "対応が必要"
+    evaluationUnavailable: "評価を利用できません"
     ,versionGenerationPaused: "このバージョンを完了できませんでした。"
-    ,failureDetailsUnavailable: "Hatch はこのバージョンの失敗詳細を返しませんでした。"
     ,retryFailedStage: "このステップを再試行"
     ,retryStarted: "Hatch が失敗したステップを再試行しています。"
     ,reviewStatus_accepted: "このバージョンに採用"
@@ -611,14 +473,11 @@ const MESSAGES = {
     ,filesAdded: (count) => `${count} ファイルをこのプロダクトに追加しました。`
     ,filesUnavailable: "ファイルを利用できません"
     ,filesAddedTitle: "ファイルを追加しました"
-    ,productFiles: "プロダクトファイル"
     ,addFilesBody: "ローカルファイルは何度でも追加できます。生成時にこのプロダクトと一緒にバージョン化されます。"
     ,generateVersion: "バージョンを生成"
-    ,noFilesYet: "ファイルはまだありません"
     ,firstFileForProduct: "このプロダクトに最初のファイルをアップロードします。"
     ,productCouldNotBeCreated: "プロダクトを作成できませんでした"
     ,productCreatedWithoutId: "プロダクトは作成されましたが、Hatch で開けませんでした。"
-    ,productNameExample: "例：面接回答リライター"
     ,preparingFile: "準備中"
     ,explore: "見つける"
     ,library: "ライブラリ"
@@ -660,7 +519,6 @@ const MESSAGES = {
     ,noAccessRecordsBody: "公開したプロダクトがアカウントに追加されると、ここに記録されます。"
     ,productsLoadError: "プロダクトを読み込めませんでした"
     ,productsPageTitle: "あなたの方法を、人が使えるプロダクトに。"
-    ,productsPageBody: "各プロダクトに、ファイル、バージョン、開始前の質問、公開履歴がまとまります。"
     ,createFirstProduct: "最初のプロダクトを作成"
     ,createFirstProductBody: "明確な成果から始め、資料を追加して、最初のバージョンを生成します。"
     ,notPublished: "未公開"
@@ -669,7 +527,6 @@ const MESSAGES = {
     ,openProduct: "プロダクトを開く"
     ,createFocusedProduct: "目的が明確なプロダクトを作成"
     ,createFocusedProductBody: "成果を決め、資料を追加し、最初のバージョンを生成します。"
-    ,continueProductWorkflow: "このプロダクトの作成を続けます。"
     ,continueProduct: "続ける"
     ,live: "公開中"
     ,storefrontLiveBody: "プロダクトは公開中です。共有するか、最新のアクセス記録を確認できます。"
@@ -692,7 +549,6 @@ const MESSAGES = {
     ,productStatus_preparing: "バージョンを生成中"
     ,productStatus_needs_attention: "対応が必要"
     ,productStatus_draft: "下書き"
-    ,productWorkflow: "プロダクトの進行"
   }
 };
 
@@ -746,7 +602,6 @@ const PORTAL_MESSAGES = {
     creatorFactory: "Product workflow",
     creatorDashboard: "Expert dashboard",
     candidate: "Candidate",
-    notReady: "Not ready",
     release: "Release",
     publicUrl: "Public URL",
     notPublic: "Not public",
@@ -863,11 +718,9 @@ const PORTAL_MESSAGES = {
     getAccess: "Get access",
     publishReadiness: "Publish readiness",
     finalChecks: "Final checks",
-    publishCandidateConfirm: "Publish this immutable candidate?",
     publicPointerAfterMaterialization: "The public current pointer changes only after materialization succeeds.",
     assignedAfterPublish: "Assigned after publish",
     publishingCreates: "Publishing creates an immutable release. Future changes require another release or an audited rollback.",
-    confirmPublish: "Confirm publish",
     publish: "Publish",
     releaseLoadError: "We couldn't load this release",
     releaseNotFound: "Release not found",
@@ -996,7 +849,6 @@ const PORTAL_MESSAGES = {
     creatorFactory: "产品流程",
     creatorDashboard: "Expert 控制台",
     candidate: "候选版本",
-    notReady: "尚未准备好",
     release: "发布版本",
     publicUrl: "公开 URL",
     notPublic: "尚未公开",
@@ -1113,11 +965,9 @@ const PORTAL_MESSAGES = {
     getAccess: "获取使用权",
     publishReadiness: "发布准备度",
     finalChecks: "最终检查",
-    publishCandidateConfirm: "发布这个不可变候选版本？",
     publicPointerAfterMaterialization: "只有物化成功后，公开的当前指针才会更新。",
     assignedAfterPublish: "发布后分配",
     publishingCreates: "发布会创建不可变版本。未来变更需要新的发布版本或经过审计的回滚。",
-    confirmPublish: "确认发布",
     publish: "发布",
     releaseLoadError: "无法加载这个发布版本",
     releaseNotFound: "找不到发布版本",
@@ -1246,7 +1096,6 @@ const PORTAL_MESSAGES = {
     creatorFactory: "プロダクトの流れ",
     creatorDashboard: "Expert ダッシュボード",
     candidate: "候補",
-    notReady: "準備未完了",
     release: "リリース",
     publicUrl: "公開 URL",
     notPublic: "非公開",
@@ -1363,11 +1212,9 @@ const PORTAL_MESSAGES = {
     getAccess: "アクセスする",
     publishReadiness: "公開準備",
     finalChecks: "最終チェック",
-    publishCandidateConfirm: "このイミュータブルな候補を公開しますか？",
     publicPointerAfterMaterialization: "マテリアライズが成功した後だけ公開中のポインターが変わります。",
     assignedAfterPublish: "公開後に割り当て",
     publishingCreates: "公開するとイミュータブルなリリースが作成されます。今後の変更には別リリースまたは監査済みロールバックが必要です。",
-    confirmPublish: "公開を確定",
     publish: "公開",
     releaseLoadError: "このリリースを読み込めませんでした",
     releaseNotFound: "リリースが見つかりません",

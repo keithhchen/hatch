@@ -346,7 +346,7 @@ test("Creator browser session proxies Product BriefSpec writes to Registry", asy
   }]);
 });
 
-test("browser OAuth PKCE keeps state and authorizes Product Files without Version scope", async (context) => {
+test("browser OAuth PKCE keeps state and authorizes Product Ingest without Version scope", async (context) => {
   const account = {
     id: catalogAgent.creator_id,
     email: "creator@example.test",
@@ -369,8 +369,8 @@ test("browser OAuth PKCE keeps state and authorizes Product Files without Versio
       response.end(JSON.stringify(account));
       return;
     }
-    if (requestUrl.pathname === "/v1/creator/products/product-1/files" && request.method === "GET") {
-      response.end(JSON.stringify({ product_id: "product-1", files: [{ id: "file-1", product_id: "product-1" }] }));
+    if (requestUrl.pathname === "/v1/creator/products/product-1/ingest" && request.method === "GET") {
+      response.end(JSON.stringify({ product_id: "product-1", jobs: [{ id: "job-1", product_id: "product-1" }] }));
       return;
     }
     response.statusCode = 404;
@@ -450,14 +450,14 @@ test("browser OAuth PKCE keeps state and authorizes Product Files without Versio
   const token = await tokenResponse.json();
   assert.doesNotMatch(token.scope, /creator:versions:read/);
 
-  const files = await fetch(`${serverUrl(api)}/v1/creator/products/product-1/files`, {
+  const ingest = await fetch(`${serverUrl(api)}/v1/creator/products/product-1/ingest`, {
     headers: { authorization: `Bearer ${token.access_token}` }
   });
-  assert.equal(files.status, 200);
-  const filesBody = await files.json();
-  assert.deepEqual(filesBody.product_id, "product-1");
-  assert.deepEqual(filesBody.files, [{ id: "file-1", product_id: "product-1" }]);
-  assert.match(filesBody.request_id, /^req_/);
+  assert.equal(ingest.status, 200);
+  const ingestBody = await ingest.json();
+  assert.deepEqual(ingestBody.product_id, "product-1");
+  assert.deepEqual(ingestBody.jobs, [{ id: "job-1", product_id: "product-1" }]);
+  assert.match(ingestBody.request_id, /^req_/);
 
   const forbiddenBriefResponse = await fetch(`${serverUrl(api)}/v1/creator/products/product-1/brief-spec`, {
     method: "PUT",
@@ -508,13 +508,13 @@ test("browser OAuth PKCE keeps state and authorizes Product Files without Versio
     })
   });
   const limitedToken = await limitedTokenResponse.json();
-  const limitedFilesWrite = await fetch(`${serverUrl(api)}/v1/creator/products/product-1/files`, {
+  const limitedIngestWrite = await fetch(`${serverUrl(api)}/v1/creator/products/product-1/ingest`, {
     method: "POST",
     headers: { authorization: `Bearer ${limitedToken.access_token}`, "content-type": "application/json" },
-    body: JSON.stringify({ display_name: "not-authorized.md", content_base64: "bm8=" })
+    body: JSON.stringify({ links: ["https://example.test/not-authorized"] })
   });
-  assert.equal(limitedFilesWrite.status, 403);
-  assert.equal((await limitedFilesWrite.json()).error.code, "oauth_scope_required");
+  assert.equal(limitedIngestWrite.status, 403);
+  assert.equal((await limitedIngestWrite.json()).error.code, "oauth_scope_required");
 
   const persistedState = await readFile(path.join(directory, "portal-state.json"), "utf8");
   assert.doesNotMatch(persistedState, /signed-creator-token/);
@@ -529,10 +529,10 @@ test("browser OAuth PKCE keeps state and authorizes Product Files without Versio
   const restartedApi = createServer(restartedDashboard.handler);
   await listen(restartedApi);
   context.after(() => restartedApi.close());
-  const filesAfterRestart = await fetch(`${serverUrl(restartedApi)}/v1/creator/products/product-1/files`, {
+  const ingestAfterRestart = await fetch(`${serverUrl(restartedApi)}/v1/creator/products/product-1/ingest`, {
     headers: { authorization: `Bearer ${token.access_token}` }
   });
-  assert.equal(filesAfterRestart.status, 200);
+  assert.equal(ingestAfterRestart.status, 200);
   const refreshedAfterRestart = await fetch(`${serverUrl(restartedApi)}/v1/auth/token`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
