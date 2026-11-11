@@ -20,7 +20,7 @@ export interface IdentityProvider {
 /** A sign-in in flight: its single-use `state`, and what only we know about it. */
 export type LoginTransaction = { kind: ChannelKind; state: string; verifier: string; nonce: string; claim?: string; returnTo: string };
 /** A one-time permission, handed to one platform id in its chat with the bot, to sign in from that chat. */
-export type LoginClaim = { kind: ChannelKind; subject: string; invite?: string };
+export type LoginClaim = { kind: ChannelKind; subject: string };
 
 /** Port: what a sign-in keeps between its two requests. Both reads are single-use. */
 export interface LoginStore {
@@ -41,7 +41,7 @@ export class PostgresLoginStore implements LoginStore {
         state TEXT PRIMARY KEY, verifier TEXT NOT NULL, nonce TEXT NOT NULL, claim TEXT, return_to TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL
       );
       CREATE TABLE IF NOT EXISTS auth_login_claims (
-        code TEXT PRIMARY KEY, subject TEXT NOT NULL, invite TEXT, expires_at TIMESTAMPTZ NOT NULL, used_at TIMESTAMPTZ
+        code TEXT PRIMARY KEY, subject TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL, used_at TIMESTAMPTZ
       );
       ALTER TABLE auth_login_transactions ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'telegram';
       ALTER TABLE auth_login_claims ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'telegram'`);
@@ -57,14 +57,14 @@ export class PostgresLoginStore implements LoginStore {
   }
   async issueClaim(code: string, claim: LoginClaim, expiresAt: Date): Promise<void> {
     await this.pool.query("DELETE FROM auth_login_claims WHERE expires_at < now() - interval '1 day'");
-    await this.pool.query("INSERT INTO auth_login_claims (code, subject, invite, expires_at, kind) VALUES ($1,$2,$3,$4,$5)", [code, claim.subject, claim.invite ?? null, expiresAt, claim.kind]);
+    await this.pool.query("INSERT INTO auth_login_claims (code, subject, expires_at, kind) VALUES ($1,$2,$3,$4)", [code, claim.subject, expiresAt, claim.kind]);
   }
-  private static claimOf = (row?: { kind: ChannelKind; subject: string; invite: string | null }): LoginClaim | undefined => row && { kind: row.kind, subject: row.subject, ...(row.invite ? { invite: row.invite } : {}) };
+  private static claimOf = (row?: { kind: ChannelKind; subject: string }): LoginClaim | undefined => row && { kind: row.kind, subject: row.subject };
   async peekClaim(code: string, now: Date): Promise<LoginClaim | undefined> {
-    return PostgresLoginStore.claimOf((await this.pool.query("SELECT kind, subject, invite FROM auth_login_claims WHERE code = $1 AND used_at IS NULL AND expires_at > $2", [code, now])).rows[0]);
+    return PostgresLoginStore.claimOf((await this.pool.query("SELECT kind, subject FROM auth_login_claims WHERE code = $1 AND used_at IS NULL AND expires_at > $2", [code, now])).rows[0]);
   }
   async useClaim(code: string, now: Date): Promise<LoginClaim | undefined> {
-    return PostgresLoginStore.claimOf((await this.pool.query("UPDATE auth_login_claims SET used_at = $2 WHERE code = $1 AND used_at IS NULL AND expires_at > $2 RETURNING kind, subject, invite", [code, now])).rows[0]);
+    return PostgresLoginStore.claimOf((await this.pool.query("UPDATE auth_login_claims SET used_at = $2 WHERE code = $1 AND used_at IS NULL AND expires_at > $2 RETURNING kind, subject", [code, now])).rows[0]);
   }
 }
 
@@ -79,7 +79,7 @@ export class PlatformLogin {
     providers: Partial<Record<ChannelKind, IdentityProvider>>; store: LoginStore; accounts: Pick<AccountStoreTs, "signInWithIdentity" | "linkIdentity">; limiter: RateLimiter;
     /** The public origin of the site the provider sends the person back to. */
     origin: string;
-    /** After a sign-in that started from a chat: bind that chat (or admit an invitee). Failing refuses the sign-in. */
+    /** After a sign-in that started from a chat: bind that chat. Failing refuses the sign-in. */
     admit: (kind: ChannelKind, account: Account, subject: string, claim: LoginClaim) => Promise<void>;
     now?: () => Date;
   }) {}
@@ -100,10 +100,10 @@ export class PlatformLogin {
   }
 
   /** The link the bot puts in front of a sender it does not know. Undefined when the platform has no sign-in, or this sender has asked too often. */
-  async claimLink(kind: ChannelKind, subject: string, invite?: string): Promise<string | undefined> {
+  async claimLink(kind: ChannelKind, subject: string): Promise<string | undefined> {
     if (!this.enabled(kind) || await this.deps.limiter.take(`auth:${kind}:claim:${subject}`, CLAIM_RATE, this.now())) return undefined;
     const code = randomBytes(24).toString("base64url");
-    await this.deps.store.issueClaim(code, { kind, subject, ...(invite ? { invite } : {}) }, new Date(this.now().getTime() + CLAIM_MS));
+    await this.deps.store.issueClaim(code, { kind, subject }, new Date(this.now().getTime() + CLAIM_MS));
     return `${this.deps.origin}/v1/auth/${kind}/start?claim=${code}`;
   }
 

@@ -55,7 +55,7 @@ async function signInWithTelegram(stack, origin, { claim, user, returnTo, cookie
 }
 
 class ImBinding extends Scenario {
-  constructor() { super({ id: 13, title: "Telegram: sign-in from the bot and from the site, the Assistant for the owner and the people they invite, and one bot per Product set up on its page" }); }
+  constructor() { super({ id: 13, title: "Telegram: sign-in from the bot and from the site, and the Assistant for the owner" }); }
 
   async run(stack, rec) {
     const hasKimi = Boolean(process.env.LLM_API_KEY);
@@ -150,102 +150,6 @@ class ImBinding extends Scenario {
       await page.getByLabel("Password").fill(PASSWORD);
       await page.getByRole("button", { name: "Sign in", exact: true }).click();
       await page.waitForURL(/\/studio\/assistant/);
-
-      // ── The owner invites someone; the invitee signs in with their own Telegram id; the owner revokes ──
-      const invite = await studio.call("POST", "/v1/creator/connections/telegram/invites", { body: { label: "Ann" } });
-      const inviteCode = invite.json?.url?.match(/start=(HATCH-[A-Z0-9]{8})/)?.[1];
-      rec.check("the owner can create an invite: a t.me link with a one-time code", invite.status === 200 && Boolean(inviteCode), invite.json);
-      const ann = new TgChat(stack, shared, 7601);
-      await ann.say(`/start ${inviteCode}`);
-      await ann.waitTexts(1, 30_000);
-      rec.check("the code alone admits no one: the invitee is sent to sign in", /\/v1\/auth\/telegram\/start\?claim=/.test(signInLink(ann.calls()[0]) ?? "") && (await studio.call("GET", "/v1/creator/connections")).json.channels.find((c) => c.kind === "telegram").people === undefined);
-      const joined = await signInWithTelegram(stack, dash.origin, { claim: claimOf(signInLink(ann.calls()[0])), user: { id: 7601, name: "Ann Lee", username: "ann" } });
-      rec.check("after their own Telegram sign-in the invitee is admitted", joined.status === 302 && !/failed/.test(joined.location ?? ""), joined);
-      const people = (await studio.call("GET", "/v1/creator/connections")).json.channels.find((c) => c.kind === "telegram").people;
-      rec.check("the owner sees them on the page, by the label they chose", people?.length === 1 && people[0].label === "Ann", people);
-      const roles = (await stack.registryPool.query("SELECT role FROM hatch_channel_identities WHERE sender_id = '7601'")).rows;
-      rec.check("the invitee is marked as a guest, not the owner", roles.length === 1 && roles[0].role === "guest", roles);
-      rec.check("the invitee was greeted in their chat", (await ann.waitTexts(2, 30_000)).length === 2 && /专家授权/.test(ann.texts()[1]), ann.texts());
-      if (hasKimi) {
-        const before = ann.texts().length;
-        await ann.say("Hi, I help the expert. Please say hello in one short sentence.");
-        await ann.waitTexts(before + 1, 150_000);
-        const speaker = (await stack.registryPool.query("SELECT i.run_id FROM hatch_channel_inbox i WHERE i.sender_id = '7601' AND i.run_id IS NOT NULL")).rows;
-        rec.check("a guest's message reaches the owner's Assistant, which answers them", speaker.length >= 1, speaker);
-      } else rec.check("a guest's message reaches the owner's Assistant (BLOCKED: no LLM_API_KEY)", true, "blocked, not verified");
-      const revoked = await studio.call("DELETE", `/v1/creator/connections/telegram/people/${people[0].id}`, { body: {} });
-      rec.check("the owner revokes them", revoked.status === 200);
-      const runsBefore = (await runsOf(7601)).length;
-      const afterRevoke = ann.texts().length;
-      await ann.say("Are you there?");
-      await ann.waitTexts(afterRevoke + 1, 30_000);
-      rec.check("a revoked guest reaches nothing and is offered sign-in again", Boolean(signInLink(ann.calls().at(-1))) && (await runsOf(7601)).length === runsBefore);
-
-      // ── Chat: one bot per Product, set up on its page ──
-      const botPage = async (productId) => { await page.goto(`/studio/products/${productId}/publish`); await page.locator(".cb-bot").waitFor({ timeout: 30_000 }); };
-      const saveToken = async (token) => { await page.locator('.cb-bot input[type="password"]').fill(token); await page.locator(".cb-bot .cb-form button[type=submit]").click(); };
-      await botPage(alpha);
-      rec.check("a Product's page asks for a bot token and offers no link to our bot", await page.locator('.cb-bot input[type="password"]').count() === 1 && await page.locator('.cb-tile[data-channel="telegram"]').count() === 0);
-      await saveToken("not-a-token");
-      await page.locator('.cb-bot [role="alert"], .cb-bot .web-inline-alert, .cb-bot [class*="alert"]').first().waitFor({ timeout: 15_000 });
-      rec.check("a bad token shows Telegram's refusal on the page and saves nothing", /Unauthorized/i.test(await page.locator(".cb-bot").innerText()) && !(await stack.registryPool.query("SELECT 1 FROM hatch_connections WHERE channel = 'telegram' AND target_key = $1 AND credentials IS NOT NULL", [`product:${alpha}`])).rowCount && !stack.platform.webhooks.has("not-a-token"));
-      const alphaToken = "verify-bot-alpha"; const bravoToken = "verify-bot-bravo";
-      stack.platform.bots.set(alphaToken, "alpha_shop_bot"); stack.platform.bots.set(bravoToken, "bravo_shop_bot");
-      await saveToken(alphaToken);
-      await page.locator(".cb-bot .cb-tile.is-bound").waitFor({ timeout: 15_000 });
-      rec.check("saving the token shows the bot by its @name", (await page.locator(".cb-bot .cb-name").innerText()) === "@alpha_shop_bot");
-      const registered = stack.platform.webhookOf(alphaToken);
-      rec.check("the product registered the webhook with Telegram: a per-bot URL and a secret", /\/v1\/channels\/telegram\/[0-9a-f-]{36}\/webhook$/.test(registered?.url ?? "") && (registered?.secret ?? "").length >= 32, registered);
-      await botPage(bravo); await saveToken(bravoToken); await page.locator(".cb-bot .cb-tile.is-bound").waitFor({ timeout: 15_000 });
-      const [alphaHooks, bravoHooks] = [TelegramWebhooks.forBot(stack, alphaToken), TelegramWebhooks.forBot(stack, bravoToken)];
-      rec.check("each Product has a bot of its own: different webhook, different secret", alphaHooks.url !== bravoHooks.url && alphaHooks.secret !== bravoHooks.secret);
-      const [shopper, sameShopperElsewhere] = [new TgChat(stack, alphaHooks, 7701), new TgChat(stack, bravoHooks, 7701)];
-      // One person, one chat id on Telegram: both bots' replies land in the same chat, in order.
-      await shopper.say("hello");
-      const alphaReply = (await shopper.waitTexts(1, 150_000))[0];
-      await sameShopperElsewhere.say("hello");
-      const bravoReply = (await sameShopperElsewhere.waitTexts(2, 150_000))[1];
-      rec.check("anyone who writes to ALPHA's bot is answered by ALPHA, with no sign-up", /ALPHA/.test(alphaReply) && !/BRAVO/.test(alphaReply) && !/登录|请先/.test(alphaReply), alphaReply);
-      rec.check("the same person writing to BRAVO's bot is answered by BRAVO", /BRAVO/.test(bravoReply) && !/ALPHA/.test(bravoReply), bravoReply);
-      await sleep(2000);
-      const productRuns = await runsOf(7701);
-      const contacts = (await stack.registryPool.query("SELECT c.target_key, c.audience, i.role FROM hatch_channel_identities i JOIN hatch_connections c ON c.id = i.connection_id WHERE i.sender_id = '7701' ORDER BY c.target_key")).rows;
-      rec.check("they are a contact of each bot's public Connection, one per bot", contacts.length === 2 && contacts.every((row) => row.audience === "public"), contacts);
-      rec.check("their Runs belong to the Products, never to the Assistant", productRuns.length === 2 && productRuns.every((run) => [alpha, bravo].includes(run.product_id)), productRuns);
-      const wrongSecret = await alphaHooks.post(alphaHooks.message({ chatId: 7702, text: "hi" }), { secret: "not-the-secret" });
-      rec.check("a webhook that does not carry the bot's secret is refused", wrongSecret.status === 401, wrongSecret);
-      const foreign = await otherStudio.call("POST", "/v1/creator/connections/telegram/credentials", { body: { token: alphaToken, product_id: alpha } });
-      rec.check("another account cannot put a bot on a Product it does not own (404)", foreign.status === 404, { status: foreign.status, body: foreign.text.slice(0, 120) });
-      const foreignView = await otherStudio.call("GET", `/v1/creator/connections?product_id=${alpha}`);
-      rec.check("another account sees ALPHA's bot as not set up", foreignView.status === 200 && foreignView.json.channels.find((c) => c.kind === "telegram")?.configured === false, foreignView.json);
-
-      // ── Replace and remove from the page ──
-      const replacementToken = "verify-bot-alpha-2";
-      stack.platform.bots.set(replacementToken, "alpha_two_bot");
-      await botPage(alpha);
-      await page.locator(".cb-bot .cb-unbind").click();
-      await page.locator('.cb-bot input[type="password"]').waitFor({ timeout: 15_000 });
-      rec.check("removing the bot from the page ends its webhook at Telegram", !stack.platform.webhooks.has(alphaToken));
-      const sentBefore = shopper.texts().length;
-      const afterRemove = await alphaHooks.post(alphaHooks.message({ chatId: 7701, text: "still there?" }));
-      await sleep(2500);
-      rec.check("and the old bot no longer reaches the Product", afterRemove.status >= 400 && shopper.texts().length === sentBefore, { status: afterRemove.status });
-      await saveToken(replacementToken);
-      await page.locator(".cb-bot .cb-tile.is-bound").waitFor({ timeout: 15_000 });
-      const oldHooks = TelegramWebhooks.forBot(stack, replacementToken);
-      stack.platform.bots.set("verify-bot-alpha-3", "alpha_three_bot");
-      await page.locator(".cb-bot .cb-unbind").click();
-      await page.locator('.cb-bot input[type="password"]').waitFor({ timeout: 15_000 });
-      await saveToken("verify-bot-alpha-3");
-      await page.locator(".cb-bot .cb-tile.is-bound").waitFor({ timeout: 15_000 });
-      rec.check("a new token replaces the bot and the new webhook is registered", (await page.locator(".cb-bot .cb-name").innerText()) === "@alpha_three_bot" && stack.platform.webhooks.has("verify-bot-alpha-3") && !stack.platform.webhooks.has(replacementToken));
-      const retired = await oldHooks.post(oldHooks.message({ chatId: 7703, text: "hello?" }));
-      rec.check("the replaced bot's webhook no longer reaches the Product", retired.status >= 400, retired);
-      const bravoStill = new TgChat(stack, bravoHooks, 7701);
-      const bravoBefore = bravoStill.texts().length;
-      await bravoStill.say("still there?");
-      await bravoStill.waitTexts(bravoBefore + 1, 150_000);
-      rec.check("changing ALPHA's bot left BRAVO's bot answering", /BRAVO/.test(bravoStill.texts()[bravoBefore]), bravoStill.texts().slice(bravoBefore));
 
       // ── Coding agent row: the same account through the CLI ──
       const cli = new HatchCli({ apiUrl: stack.url, apiKey: owner.apiKey, home: cliHome(stack, "binding-cli") });

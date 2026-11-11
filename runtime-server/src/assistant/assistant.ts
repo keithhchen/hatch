@@ -192,10 +192,10 @@ export class AssistantService implements StudioOperations, InterviewDesk {
    * The Expert said something in a chat: it steers the Assistant's Run or starts one, atomically. `id` is the key a retry
    * reuses, so a platform event delivered twice is one message. `system` is for what the Expert did without typing it, such as a button.
    */
-  async hear(accountId: string, input: { id: string; source: ExpertSource; parts: ContentPart[]; messageRef?: string; system?: boolean; /** Someone the Expert authorized, not the Expert: where the Expert was last is unchanged. */ guest?: true }): Promise<SentMessage> {
+  async hear(accountId: string, input: { id: string; source: ExpertSource; parts: ContentPart[]; messageRef?: string; system?: boolean }): Promise<SentMessage> {
     // `sys:` ids are the Assistant's own to itself: a client's key cannot be one, or its message would be hidden as news.
     if (!input.system && isSystemMessageId(input.id)) throw new ChatError("invalid_message_id", `A message id cannot start with ${SYSTEM_MESSAGE_PREFIX}.`, 400);
-    if (!input.system && !input.guest) await this.deps.state.expertSpoke(accountId, { source: input.source, at: new Date().toISOString(), ...(input.messageRef ? { messageRef: input.messageRef } : {}) });
+    if (!input.system) await this.deps.state.expertSpoke(accountId, { source: input.source, at: new Date().toISOString(), ...(input.messageRef ? { messageRef: input.messageRef } : {}) });
     const client = { client: input.source === "web" ? "web" as const : "im" as const };
     return input.system ? this.chat.sayAsSystem(accountId, textOf(input.parts), input.id).then(sent => sent) : this.chat.say(accountId, { id: input.id, parts: input.parts, client });
   }

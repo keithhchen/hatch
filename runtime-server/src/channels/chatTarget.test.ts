@@ -34,14 +34,14 @@ function backend() {
   return { state, store, upload };
 }
 
-function rigOf(target: ChatFlow, shape: { connection: ChannelConnection; principal: Inbound["principal"]; speaker?: Inbound["speaker"] }, state: ReturnType<typeof backend>["state"]): TargetRig {
+function rigOf(target: ChatFlow, shape: { connection: ChannelConnection; principal: Inbound["principal"] }, state: ReturnType<typeof backend>["state"]): TargetRig {
   const notices: string[] = [];
   const acknowledged: string[] = [];
   const ackFailure: { next?: Error } = {};
   const platform = adapter(acknowledged, ackFailure);
   return {
     deliver: (event: InboundEvent) => target.handle({
-      id: `inbox-${Math.random()}`, connection: shape.connection, event, adapter: platform, principal: shape.principal, speaker: shape.speaker ?? { role: "owner" },
+      id: `inbox-${Math.random()}`, connection: shape.connection, event, adapter: platform, principal: shape.principal,
       address: { connectionId: shape.connection.id, ...event.address }, notify: async text => { notices.push(text); },
     }),
     messages: () => [...state.messages.values()].map(({ key, parts }) => ({ key, parts })),
@@ -77,16 +77,3 @@ targetConformance("Assistant target", () => {
   const shape = { connection: connection({ kind: "assistant" }), principal: { kind: "account" as const, accountId: ACCOUNT } };
   return rigOf(new ChatFlow(new AssistantTarget(assistant)), shape, state);
 }, { button: { eventId: "b1", address: { threadId: "42", senderId: "42" }, button: { taskId: "11111111-1111-4111-8111-111111111111", action: "approve" } } });
-
-test("Assistant target: a guest's words, and a guest's file with no words, carry the guest marker", async () => {
-  const { state, store, upload } = backend();
-  const assistant = { hear: async (_a: string, input: { id: string; parts: ContentPart[] }) => ({ ...store(input.id, input.parts), outcome: "started" as const, conversationId: "c", messageId: input.id, acceptedAt: "" }), upload: (_a: string, name: string) => upload(name), decide: async () => ({}) as any, linked: async () => "", reviewButtons: async () => [] };
-  const guestConnection = connection({ kind: "assistant" });
-  const rig = rigOf(new ChatFlow(new AssistantTarget(assistant)), { connection: guestConnection, principal: { kind: "contact", connectionId: guestConnection.id, contactId: "k1" }, speaker: { role: "guest", label: "小王" } }, state);
-  await rig.deliver({ eventId: "g1", address: { threadId: "42", senderId: "42" }, text: "帮我看看" });
-  await rig.deliver({ eventId: "g2", address: { threadId: "42", senderId: "42" }, file: { ref: "f", name: "a.pdf", size: 1 } });
-  const [first, second] = rig.messages();
-  assert.match((first!.parts[0] as { text: string }).text, /^\[小王，专家授权的人，不是专家本人\] 帮我看看$/);
-  assert.match((second!.parts[0] as { text: string }).text, /^\[小王，专家授权的人，不是专家本人\] （发来一个文件）$/);
-  assert.equal(second!.parts[1]!.type, "file");
-});

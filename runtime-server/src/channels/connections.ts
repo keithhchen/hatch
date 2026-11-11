@@ -5,19 +5,14 @@ import type { ChannelKind } from "./types.js";
 
 /** A Connection as the channel layer holds it. `scope` is the platform tenant it was authorized on: empty for our shared account. */
 export type ChannelConnection = Connection & { scope: string };
-/** The Expert who linked is the `owner`; a `guest` is a person the owner invited to their Assistant. */
-export type Role = "owner" | "guest";
-/** A sender known to a Connection: the Expert who linked, a guest, or a contact who wrote in. `threadId` is where they were reached last. */
-export type Identity = { id: string; connectionId: string; senderId: string; threadId: string; role: Role; label?: string };
+/** A sender known to a Connection: the Expert who linked, or a contact who wrote in. `threadId` is where they were reached last. */
+export type Identity = { id: string; connectionId: string; senderId: string; threadId: string };
 export type OwnedConnection = ChannelConnection & { linked: boolean; hasCredentials: boolean; lastEventAt?: string; /** Who is bound, as the platform names them. */ senderId?: string };
 export type Resolved = { connection: ChannelConnection; identity?: Identity };
-/** A Connection a sender was just bound to, and as whom. */
-export type Linked = ChannelConnection & { role: Role };
-/** A person the owner invited, as the owner sees them. */
-export type Guest = { id: string; channel: ChannelKind; label: string };
+/** A Connection a sender was just bound to. */
+export type Linked = ChannelConnection;
 
 const LINK_CODE_MS = 15 * 60_000;
-const INVITE_MS = 7 * 24 * 60 * 60_000;
 /** No lookalikes: Experts may retype this. */
 function newLinkCode(): string {
   const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -36,7 +31,7 @@ export function assertReachable(connection: Pick<Connection, "audience" | "targe
 
 /** `self` acts as its owner. Everyone else is a contact, isolated by Connection and contact. */
 export function principalFor(connection: ChannelConnection, identity: Identity): Principal {
-  return connection.audience === "self" && identity.role === "owner"
+  return connection.audience === "self"
     ? { kind: "account", accountId: connection.ownerAccountId }
     : { kind: "contact", connectionId: connection.id, contactId: identity.id };
 }
@@ -48,13 +43,7 @@ export interface ConnectionRepository {
   /** Bind the sender to the Connection that issued the code. The sender moves away from any earlier Connection. */
   redeem(channel: ChannelKind, scope: string, code: string, who: { senderId: string; threadId: string }, now?: Date): Promise<Linked | undefined>;
   /** What a still-valid code would make of whoever sends it, and whose Assistant that is. */
-  peekCode(channel: ChannelKind, scope: string, code: string, now?: Date): Promise<{ kind: Role; ownerAccountId: string } | undefined>;
-  /** A single-use code for one more person to reach the owner's Assistant, as a guest. Undefined when the owner has no such Connection. */
-  invite(ownerAccountId: string, channel: ChannelKind, label: string, now?: Date): Promise<string | undefined>;
-  /** The people the owner invited who have joined. */
-  guests(ownerAccountId: string): Promise<Guest[]>;
-  /** The owner takes a guest's access away. False when there is no such guest of theirs. */
-  dismiss(ownerAccountId: string, channel: ChannelKind, identityId: string): Promise<boolean>;
+  peekCode(channel: ChannelKind, scope: string, code: string, now?: Date): Promise<{ ownerAccountId: string } | undefined>;
   /**
    * Which Connection a sender on a platform tenant belongs to. One endpoint can serve many tenants, so this runs per event.
    * A sender we know resolves through their identity. An unknown sender resolves to the tenant's own Connection, if it has one.
@@ -89,12 +78,11 @@ export interface ConnectionRepository {
 }
 
 const COLUMNS = "id, owner_account_id, channel, scope, client, target, audience, task_specific, state";
-const IDENTITY_COLUMNS = "i.id AS identity_id, i.sender_id, i.thread_id, i.role, i.label";
-const C_COLUMNS = COLUMNS.split(", ").map(column => `c.${column}`).join(", ");
+const IDENTITY_COLUMNS = "i.id AS identity_id, i.sender_id, i.thread_id";
 const connectionOf = (row: Record<string, any>): ChannelConnection => ({
   id: row.id, ownerAccountId: row.owner_account_id, channel: row.channel, scope: row.scope, client: row.client, target: row.target, audience: row.audience as Audience, taskSpecific: row.task_specific, state: row.state as ConnectionState,
 });
-const identityOf = (row: Record<string, any>): Identity => ({ id: row.identity_id ?? row.id, connectionId: row.connection_id ?? row.id, senderId: row.sender_id, threadId: row.thread_id, role: row.role, ...(row.label ? { label: row.label } : {}) });
+const identityOf = (row: Record<string, any>): Identity => ({ id: row.identity_id ?? row.id, connectionId: row.connection_id ?? row.id, senderId: row.sender_id, threadId: row.thread_id });
 
 export class PostgresConnections implements ConnectionRepository {
   private constructor(private pool: Pool, private scopeOf: (ownerAccountId: string, channel: ChannelKind) => string) {}
@@ -135,14 +123,8 @@ export class PostgresConnections implements ConnectionRepository {
         UNIQUE (channel, scope, sender_id)
       );
       CREATE INDEX IF NOT EXISTS hatch_channel_identities_connection_idx ON hatch_channel_identities (connection_id);
+      -- Rows that an earlier version stored as role 'guest' stay in place and are never read: only 'owner' rows are admitted.
       ALTER TABLE hatch_channel_identities ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'owner' CHECK (role IN ('owner', 'guest'));
-      ALTER TABLE hatch_channel_identities ADD COLUMN IF NOT EXISTS label TEXT;
-      CREATE TABLE IF NOT EXISTS hatch_connection_invites (
-        code TEXT PRIMARY KEY,
-        connection_id UUID NOT NULL REFERENCES hatch_connections (id) ON DELETE CASCADE,
-        label TEXT NOT NULL,
-        expires_at TIMESTAMPTZ NOT NULL
-      );
     `);
     const client = await pool.connect();
     try {
@@ -179,61 +161,26 @@ export class PostgresConnections implements ConnectionRepository {
   async redeem(channel: ChannelKind, scope: string, code: string, who: { senderId: string; threadId: string }, now = new Date()): Promise<Linked | undefined> {
     return this.transaction(async client => {
       const row = (await client.query(`SELECT ${COLUMNS} FROM hatch_connections WHERE link_code = $1 AND channel = $2 AND scope = $3 AND link_expires_at > $4 FOR UPDATE`, [code, channel, scope, now])).rows[0];
-      if (!row) return this.admitGuest(client, channel, scope, code, who, now);
+      if (!row) return undefined;
       const connection = connectionOf(row);
-      // The sender moves away from any earlier Connection. A self Connection has one owner: the new one replaces the old; its guests stay.
+      // The sender moves away from any earlier Connection. A self Connection has one owner: the new one replaces the old.
       await client.query("DELETE FROM hatch_channel_identities WHERE channel = $1 AND scope = $2 AND sender_id = $3", [channel, scope, who.senderId]);
       if (connection.audience === "self") await client.query("DELETE FROM hatch_channel_identities WHERE connection_id = $1 AND role = 'owner'", [connection.id]);
       await client.query("INSERT INTO hatch_channel_identities (connection_id, channel, scope, sender_id, thread_id) VALUES ($1, $2, $3, $4, $5)", [connection.id, channel, scope, who.senderId, who.threadId]);
       await client.query("UPDATE hatch_connections SET link_code = NULL, link_expires_at = NULL, state = 'active', last_event_at = $2 WHERE id = $1", [connection.id, now]);
-      return { ...connection, state: "active" as const, role: "owner" as const };
+      return { ...connection, state: "active" as const };
     });
   }
 
-  /** An invite is spent by the first person who redeems it. Someone who is already an owner cannot also be a guest: the invite stays. */
-  private async admitGuest(client: PoolClient, channel: ChannelKind, scope: string, code: string, who: { senderId: string; threadId: string }, now: Date): Promise<Linked | undefined> {
-    const row = (await client.query(`SELECT i.label, ${C_COLUMNS} FROM hatch_connection_invites i JOIN hatch_connections c ON c.id = i.connection_id
-      WHERE i.code = $1 AND i.expires_at > $4 AND c.channel = $2 AND c.scope = $3 AND c.state <> 'revoked' FOR UPDATE OF i`, [code, channel, scope, now])).rows[0];
-    if (!row) return undefined;
-    if ((await client.query("SELECT 1 FROM hatch_channel_identities WHERE channel = $1 AND scope = $2 AND sender_id = $3 AND role = 'owner'", [channel, scope, who.senderId])).rowCount) return undefined;
-    await client.query("DELETE FROM hatch_connection_invites WHERE code = $1", [code]);
-    await client.query(`INSERT INTO hatch_channel_identities (connection_id, channel, scope, sender_id, thread_id, role, label) VALUES ($1, $2, $3, $4, $5, 'guest', $6)
-      ON CONFLICT (channel, scope, sender_id) DO UPDATE SET connection_id = EXCLUDED.connection_id, thread_id = EXCLUDED.thread_id, role = 'guest', label = EXCLUDED.label`, [row.id, channel, scope, who.senderId, who.threadId, row.label]);
-    return { ...connectionOf(row), role: "guest" };
-  }
-
-  async peekCode(channel: ChannelKind, scope: string, code: string, now = new Date()): Promise<{ kind: Role; ownerAccountId: string } | undefined> {
+  async peekCode(channel: ChannelKind, scope: string, code: string, now = new Date()): Promise<{ ownerAccountId: string } | undefined> {
     const owner = (await this.pool.query("SELECT owner_account_id FROM hatch_connections WHERE channel = $1 AND scope = $2 AND link_code = $3 AND link_expires_at > $4", [channel, scope, code, now])).rows[0];
-    if (owner) return { kind: "owner", ownerAccountId: owner.owner_account_id };
-    const guest = (await this.pool.query(`SELECT c.owner_account_id FROM hatch_connection_invites i JOIN hatch_connections c ON c.id = i.connection_id
-      WHERE i.code = $3 AND i.expires_at > $4 AND c.channel = $1 AND c.scope = $2 AND c.state <> 'revoked'`, [channel, scope, code, now])).rows[0];
-    return guest && { kind: "guest", ownerAccountId: guest.owner_account_id };
-  }
-
-  async invite(ownerAccountId: string, channel: ChannelKind, label: string, now = new Date()): Promise<string | undefined> {
-    const code = newLinkCode();
-    const made = await this.pool.query(`INSERT INTO hatch_connection_invites (code, connection_id, label, expires_at)
-      SELECT $1, id, $4, $5 FROM hatch_connections WHERE owner_account_id = $2 AND channel = $3 AND audience = 'self' AND target_key = 'assistant' AND state <> 'revoked'`,
-    [code, ownerAccountId, channel, label, new Date(now.getTime() + INVITE_MS)]);
-    return made.rowCount ? code : undefined;
-  }
-
-  async guests(ownerAccountId: string): Promise<Guest[]> {
-    return (await this.pool.query(`SELECT i.id, c.channel, i.label FROM hatch_channel_identities i JOIN hatch_connections c ON c.id = i.connection_id
-      WHERE c.owner_account_id = $1 AND c.audience = 'self' AND c.target_key = 'assistant' AND c.state <> 'revoked' AND i.role = 'guest' ORDER BY i.id`, [ownerAccountId])).rows
-      .map(row => ({ id: row.id, channel: row.channel, label: row.label ?? "" }));
-  }
-
-  async dismiss(ownerAccountId: string, channel: ChannelKind, identityId: string): Promise<boolean> {
-    if (!/^[0-9a-f-]{36}$/.test(identityId)) return false;
-    return Boolean((await this.pool.query(`DELETE FROM hatch_channel_identities i USING hatch_connections c
-      WHERE i.id = $3 AND c.id = i.connection_id AND c.owner_account_id = $1 AND c.channel = $2 AND i.role = 'guest'`, [ownerAccountId, channel, identityId])).rowCount);
+    return owner && { ownerAccountId: owner.owner_account_id };
   }
 
   async resolveConnection(payload: { channel: ChannelKind; scope: string; senderId: string }): Promise<Resolved | undefined> {
     const known = (await this.pool.query(`SELECT c.id, c.owner_account_id, c.channel, c.scope, c.client, c.target, c.audience, c.task_specific, c.state, ${IDENTITY_COLUMNS}
       FROM hatch_channel_identities i JOIN hatch_connections c ON c.id = i.connection_id
-      WHERE i.channel = $1 AND i.scope = $2 AND i.sender_id = $3 AND c.state <> 'revoked'`, [payload.channel, payload.scope, payload.senderId])).rows[0];
+      WHERE i.channel = $1 AND i.scope = $2 AND i.sender_id = $3 AND i.role = 'owner' AND c.state <> 'revoked'`, [payload.channel, payload.scope, payload.senderId])).rows[0];
     if (known) return { connection: connectionOf(known), identity: identityOf(known) };
     if (!payload.scope) return undefined;
     const tenant = (await this.pool.query(`SELECT ${COLUMNS} FROM hatch_connections WHERE channel = $1 AND scope = $2 AND state <> 'revoked' ORDER BY (audience = 'public') DESC, created_at LIMIT 1`, [payload.channel, payload.scope])).rows[0];
@@ -280,7 +227,6 @@ export class PostgresConnections implements ConnectionRepository {
     await this.transaction(async client => {
       const ids = (await client.query("UPDATE hatch_connections SET state = 'revoked', link_code = NULL, link_expires_at = NULL WHERE owner_account_id = $1 AND channel = $2 AND audience = 'self' AND target_key = $3 RETURNING id", [ownerAccountId, channel, targetKey(target)])).rows.map(row => row.id);
       await client.query("DELETE FROM hatch_channel_identities WHERE connection_id = ANY($1::uuid[])", [ids]);
-      await client.query("DELETE FROM hatch_connection_invites WHERE connection_id = ANY($1::uuid[])", [ids]);
     });
   }
 
@@ -295,7 +241,6 @@ export class PostgresConnections implements ConnectionRepository {
       // Under a new scope nobody who was bound under the old one is known any more.
       if (before && before.scope !== scope) {
         await client.query("DELETE FROM hatch_channel_identities WHERE connection_id = $1", [id]);
-        await client.query("DELETE FROM hatch_connection_invites WHERE connection_id = $1", [id]);
       }
     });
   }
@@ -318,7 +263,6 @@ export class PostgresConnections implements ConnectionRepository {
     await this.transaction(async client => {
       const ids = (await client.query("UPDATE hatch_connections SET state = 'revoked', credentials = NULL, link_code = NULL, link_expires_at = NULL WHERE channel = $1 AND scope = $2 RETURNING id", [channel, scope])).rows.map(row => row.id);
       await client.query("DELETE FROM hatch_channel_identities WHERE connection_id = ANY($1::uuid[])", [ids]);
-      await client.query("DELETE FROM hatch_connection_invites WHERE connection_id = ANY($1::uuid[])", [ids]);
     });
   }
 

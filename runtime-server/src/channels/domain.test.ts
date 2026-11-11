@@ -7,11 +7,7 @@ import { render } from "./render.js";
 import { failureForStatus, idempotencyId } from "./types.js";
 
 const connection = (audience: ChannelConnection["audience"]): ChannelConnection => ({ id: "c1", ownerAccountId: "a1", channel: "telegram", scope: "", client: "im", target: { kind: "product", productId: "p" }, audience, taskSpecific: false, state: "active" });
-const identity: Identity = { id: "i1", connectionId: "c1", senderId: "s", threadId: "t", role: "owner" };
-
-test("A guest of the Assistant is a contact of its Connection, never the account", () => {
-  assert.deepEqual(principalFor(connection("self"), { ...identity, role: "guest" }), { kind: "contact", connectionId: "c1", contactId: "i1" });
-});
+const identity: Identity = { id: "i1", connectionId: "c1", senderId: "s", threadId: "t" };
 
 test("Only the owner acts as an account; org members and the public are contacts of that Connection", () => {
   assert.deepEqual(principalFor(connection("self"), identity), { kind: "account", accountId: "a1" });

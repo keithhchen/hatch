@@ -28,7 +28,7 @@ class MemoryLoginStore implements LoginStore {
   async begin(t: LoginTransaction, expiresAt: Date) { this.transactions.set(t.state, { ...t, expiresAt }); }
   async take(state: string, now: Date) { const t = this.transactions.get(state); this.transactions.delete(state); return t && t.expiresAt > now ? t : undefined; }
   async issueClaim(code: string, claim: LoginClaim, expiresAt: Date) { this.claims.set(code, { ...claim, expiresAt }); }
-  async peekClaim(code: string, now: Date) { const c = this.claims.get(code); return c && !c.used && c.expiresAt > now ? { kind: c.kind, subject: c.subject, ...(c.invite ? { invite: c.invite } : {}) } : undefined; }
+  async peekClaim(code: string, now: Date) { const c = this.claims.get(code); return c && !c.used && c.expiresAt > now ? { kind: c.kind, subject: c.subject } : undefined; }
   async useClaim(code: string, now: Date) { const c = await this.peekClaim(code, now); if (c) this.claims.get(code)!.used = true; return c; }
 }
 
@@ -100,11 +100,11 @@ test("A return path that leaves the site is dropped", async () => {
 
 test("A sign-in that began in the chat is bound to the sender it was issued for, and a link is used once", async () => {
   const env = harness();
-  const link = (await env.login.claimLink("telegram", "4242", "HATCH-INVITE"))!;
+  const link = (await env.login.claimLink("telegram", "4242"))!;
   const claim = new URL(link).searchParams.get("claim")!;
   assert.equal(`${new URL(link).origin}${new URL(link).pathname}`, `${ORIGIN}/v1/auth/telegram/start`);
   const outcome = await env.comeBack(await env.login.start("telegram", { claim }));
-  assert.deepEqual(env.admitted, [[outcome.account.id, "4242", { kind: "telegram", subject: "4242", invite: "HATCH-INVITE" }]]);
+  assert.deepEqual(env.admitted, [[outcome.account.id, "4242", { kind: "telegram", subject: "4242" }]]);
   await assert.rejects(env.login.start("telegram", { claim }), refused("claim_invalid"), "the same link a second time");
 });
 
@@ -223,8 +223,8 @@ test("In Postgres a state and a claim are each spent once, and an identity is on
     assert.equal(taken.filter(Boolean).length, 1, "one of two racing callbacks wins");
     await store.begin({ kind: "telegram", state: "s2", verifier: "v", nonce: "n", returnTo: "/" }, new Date(now.getTime() - 1));
     assert.equal(await store.take("s2", now), undefined, "expired");
-    await store.issueClaim("c1", { kind: "telegram", subject: "9", invite: "I" }, later);
-    assert.deepEqual(await store.peekClaim("c1", now), { kind: "telegram", subject: "9", invite: "I" });
+    await store.issueClaim("c1", { kind: "telegram", subject: "9" }, later);
+    assert.deepEqual(await store.peekClaim("c1", now), { kind: "telegram", subject: "9" });
     const used = await Promise.all([store.useClaim("c1", now), store.useClaim("c1", now)]);
     assert.equal(used.filter(Boolean).length, 1, "one of two racing uses wins");
     assert.equal(await store.peekClaim("c1", now), undefined);
