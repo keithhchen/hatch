@@ -1,4 +1,4 @@
-# Ships every Hatch container's stdout/stderr to Axiom (dataset HATCH_AXIOM_CONTAINER_DATASET).
+# Ships every Hatch container's stdout/stderr to Axiom (dataset HATCH_AXIOM_DATASET, beside the OTLP traces).
 data_dir: /var/lib/vector
 
 sources:
@@ -17,6 +17,8 @@ transforms:
         .log = parsed
         del(.message)
       }
+      .service = string(.label."com.docker.compose.service") ?? .container_name
+      .layer = if .service == "caddy" { "gateway" } else if includes(["postgres", "qdrant"], .service) { "infra" } else if .service == "vector" { "shipper" } else { "backend" }
       del(.label)
       del(.source_type)
 
@@ -24,7 +26,7 @@ sinks:
   axiom:
     type: http
     inputs: [shaped]
-    uri: ${HATCH_AXIOM_ENDPOINT}/v1/ingest/${HATCH_AXIOM_CONTAINER_DATASET}
+    uri: ${HATCH_AXIOM_ENDPOINT}/v1/ingest/${HATCH_AXIOM_DATASET}
     method: post
     auth:
       strategy: bearer

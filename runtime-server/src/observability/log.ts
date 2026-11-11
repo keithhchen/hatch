@@ -46,8 +46,5 @@ export class StdoutJsonSink implements LogSink {
 
 const sinks: LogSink[] = [new StdoutJsonSink()];
 
-/** Adds an adapter (the OTel one) to the process's root log. */
-export const addLogSink = (sink: LogSink): void => { sinks.push(sink); };
-
 /** The process's root log; `HATCH_SERVICE_NAME` (registry, runtime, dashboard) names the emitting service. */
 export const log: Log = new Logger(() => sinks);

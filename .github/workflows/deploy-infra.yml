@@ -35,7 +35,7 @@ jobs:
           HATCH_CREATOR_NAS_GATEWAY_TOKEN: ${{ secrets.HATCH_CREATOR_NAS_GATEWAY_TOKEN }}
           HATCH_AXIOM_TOKEN: ${{ secrets.HATCH_AXIOM_TOKEN }}
           HATCH_AXIOM_ENDPOINT: ${{ secrets.HATCH_AXIOM_ENDPOINT }}
-          HATCH_AXIOM_CONTAINER_DATASET: ${{ secrets.HATCH_AXIOM_CONTAINER_DATASET }}
+          HATCH_AXIOM_DATASET: ${{ secrets.HATCH_AXIOM_DATASET }}
         run: |
           set -euo pipefail
           test -n "$HATCH_PRODUCTION_ENV"
@@ -46,8 +46,8 @@ jobs:
           printf '%s\n' "$HATCH_PRODUCTION_ENV" > "$temp_env"
           test -s "$temp_env"
           printf 'HATCH_CREATOR_NAS_GATEWAY_TOKEN=%s\n' "$HATCH_CREATOR_NAS_GATEWAY_TOKEN" >> "$temp_env"
-          if test -n "$HATCH_AXIOM_TOKEN" && test -n "$HATCH_AXIOM_ENDPOINT"; then
-            printf 'HATCH_AXIOM_TOKEN=%s\nHATCH_AXIOM_ENDPOINT=%s\nHATCH_AXIOM_CONTAINER_DATASET=%s\n' "$HATCH_AXIOM_TOKEN" "$HATCH_AXIOM_ENDPOINT" "${HATCH_AXIOM_CONTAINER_DATASET:-hatch_prod_containers}" >> "$temp_env"
+          if test -n "$HATCH_AXIOM_TOKEN" && test -n "$HATCH_AXIOM_ENDPOINT" && test -n "$HATCH_AXIOM_DATASET"; then
+            printf 'HATCH_AXIOM_TOKEN=%s\nHATCH_AXIOM_ENDPOINT=%s\nHATCH_AXIOM_DATASET=%s\n' "$HATCH_AXIOM_TOKEN" "$HATCH_AXIOM_ENDPOINT" "$HATCH_AXIOM_DATASET" >> "$temp_env"
           fi
           grep -Eq '^HATCH_DOMAIN=[^[:space:]]+$' "$temp_env"
           chmod 600 "$temp_env"
