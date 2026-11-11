@@ -30,6 +30,7 @@ import type { TaskOrigin } from "./tasks.js";
 import type { LegacyAssistantHistory } from "./history.js";
 import type { AssistantHost } from "../conversations/assistantConversation.js";
 import type { AssetDesk } from "../conversations/assets.js";
+import { log } from "../observability/log.js";
 
 /** The Assistant is one Agent, not a Product: its conversation is bound to the account, under this id. A UUID, as every Agent id is once the identity migration has run. */
 export const ASSISTANT_AGENT_ID = "a5515700-0000-4000-8000-000000000001";
@@ -336,7 +337,7 @@ export class AssistantChat implements AssistantHost {
 
   accountOf(conversationId: string): string | undefined { return accountOfConversation(conversationId); }
 
-  private report(accountId: string, error: unknown): void { (this.deps.report ?? ((id, cause) => console.error(`[assistant ${id}]`, cause)))(accountId, error); }
+  private report(accountId: string, error: unknown): void { (this.deps.report ?? ((id, cause) => log.error("assistant_failed", { account: id, error: cause })))(accountId, error); }
 }
 
 /** Studio shows a refusal from Chat as its own, with the status and code Studio's clients know. */

@@ -26,6 +26,7 @@ import type { AssistantStateRepository, Interview } from "./state.js";
 import type { Material } from "./materials.js";
 import type { IngestJob } from "../ingest/job.js";
 import type { AgentOverview, StudioOperations, WorkerKind } from "./studioTools.js";
+import { log } from "../observability/log.js";
 
 const WORKER_LEASE_MS = 35 * 60_000;
 const ASSISTANT_PROFILE = "kimi-k2.6";
@@ -780,7 +781,7 @@ export class AssistantService implements StudioOperations, InterviewDesk {
     await store.put(workerId, "input/interview/TRANSCRIPT.md", Buffer.from(transcript), { actor: "host" });
   }
 
-  private report(scope: string, error: unknown): void { console.error(`[assistant ${scope}]`, safeError(error)); }
+  private report(scope: string, error: unknown): void { log.error("assistant_failed", { scope, error: safeError(error) }); }
 }
 
 /** The Assistant's own system prompt: its persona, and how it works with its tools. */

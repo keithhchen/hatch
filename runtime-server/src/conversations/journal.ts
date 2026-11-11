@@ -1,6 +1,7 @@
 import type { Journal, JournalEvent } from "../factoryAgents/journal.js";
 import { publicEvent } from "./conversation.js";
 import type { EventLog } from "./eventLog.js";
+import { log } from "../observability/log.js";
 
 /** A runtime's journal in a conversation's event log. Only what leaves the process is written. */
 export class EventLogJournal implements Journal {
@@ -9,7 +10,7 @@ export class EventLogJournal implements Journal {
 
   append(event: JournalEvent): void {
     const target = this.target(event);
-    if (target) this.enqueue(() => this.log.append(target.key, target.shown)).catch(error => console.error("[conversation log]", error));
+    if (target) this.enqueue(() => this.log.append(target.key, target.shown)).catch(error => log.error("conversation_log_failed", { error }));
   }
 
   async commit(event: JournalEvent, persist: () => Promise<unknown>): Promise<void> {

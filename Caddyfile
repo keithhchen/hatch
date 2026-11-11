@@ -1,6 +1,13 @@
 (hatch_routes) {
     encode gzip
 
+    # One correlation id per request: keep the caller's, else mint one. Every backend reads and echoes it.
+    request_header ?X-Request-Id {http.request.uuid}
+    log {
+        output stdout
+        format json
+    }
+
     # Public deploy probes expose readiness without opening service command
     # routes. Each backend keeps its separate private liveness endpoint.
     @runtime_health path /health/runtime

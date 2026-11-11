@@ -17,6 +17,7 @@ import {
 import type { ArtifactRef, CreatorQuestion, FactoryAgentProduct, FactoryAgentTool, FactoryStage, FactoryStartInput, MaterializedAgentCorpus } from "./types.js";
 import { draftBriefSpecForProduct, normalizeBriefSpec, type BriefSpec } from "../brief.js";
 import { normalizeProductPricing } from "./pricing.js";
+import { log } from "../observability/log.js";
 
 export type CreatorCorpusAssetLayer = "manifest" | "system" | "skill" | "reference" | "knowledge";
 
@@ -1051,7 +1052,7 @@ export class CreatorFactoryService {
       // The durable queued row is intentionally retained as a recovery
       // fallback if the in-process direct starter is temporarily unavailable.
       // Do not turn a successfully-created command into a generic 500.
-      console.error("Creator Factory immediate start failed", {
+      log.error("Creator Factory immediate start failed", {
         runId,
         error: error instanceof Error ? error.message : String(error)
       });

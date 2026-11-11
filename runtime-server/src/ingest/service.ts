@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { fail, finish, interrupt, queuedJob, start, type IngestInput, type IngestJob, type ItemOutcome } from "./job.js";
 import { labelOfUrl, safeName, stemOf } from "./names.js";
 import type { IngestEngine, IngestJobRepository, IngestSink, Result, Source } from "./ports.js";
+import { log } from "../observability/log.js";
 
 export const MAX_ITEMS = 50;
 export const MAX_INLINE_BYTES = 30 * 1024 * 1024;
@@ -17,7 +18,7 @@ export type RawItem = { url?: unknown; name?: unknown; content_base64?: unknown;
 
 /** Runs work away from the request. Tests pass one that lets them wait for the work. */
 export type InBackground = (work: () => Promise<void>) => void;
-export const detached: InBackground = work => { void work().catch(error => console.error("[ingest]", error)); };
+export const detached: InBackground = work => { void work().catch(error => log.error("ingest_failed", { error })); };
 
 const invalid = (message: string) => new IngestError(400, "invalid_ingest", message);
 const BASE64 = /^[A-Za-z0-9+/\r\n]*={0,2}$/;
@@ -109,7 +110,7 @@ export class IngestService {
       outcomes => finish(running, outcomes, this.now()),
       error => fail(running, error instanceof Error ? error.message : String(error), this.now()));
     await this.deps.jobs.save(settled);
-    for (const listener of this.settledListeners) await listener(settled).catch(error => console.error(JSON.stringify({ event: "ingest_settled_listener_failed", job: settled.id, message: error instanceof Error ? error.message : String(error) })));
+    for (const listener of this.settledListeners) await listener(settled).catch(error => log.error("ingest_settled_listener_failed", { job: settled.id, message: error instanceof Error ? error.message : String(error) }));
   }
 
   private async process(job: IngestJob, sources: Source[]): Promise<Map<string, ItemOutcome>> {

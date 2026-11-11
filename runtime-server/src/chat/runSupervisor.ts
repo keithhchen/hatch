@@ -4,6 +4,7 @@ import type { ToolRequest, ToolResult } from "../protocol.js";
 import type { StopRelay } from "./stopRelay.js";
 import { RunFenced } from "./runFence.js";
 import type { RunTerminators } from "./runTerminator.js";
+import { currentContext, newRequestId, runInContext } from "../observability/context.js";
 
 /** The side of the client tool broker that outside callers reach: results in, cancellation out. */
 export interface ToolSession {
@@ -185,7 +186,12 @@ export class RunSupervisor {
     }
   }
 
-  private async drive(first: ConversationRunRecord, owned: Owned): Promise<void> {
+  /** A Run is driven in its own context: the request that started it when there is one, a fresh id otherwise. */
+  private drive(first: ConversationRunRecord, owned: Owned): Promise<void> {
+    return runInContext({ request_id: currentContext()?.request_id ?? newRequestId(), conversation_id: first.conversationId, run_id: first.id }, () => this.driveRun(first, owned));
+  }
+
+  private async driveRun(first: ConversationRunRecord, owned: Owned): Promise<void> {
     let run = first;
     const control: RunControl = { signal: owned.controller.signal, toolSession: (session) => { owned.session = session; } };
     try {

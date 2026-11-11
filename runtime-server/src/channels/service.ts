@@ -11,6 +11,7 @@ import { ChatReplies, FAILED } from "./productTarget.js";
 import { PostgresRateLimiter, type RateLimiter } from "./rateLimiter.js";
 import { ChannelRouter, type Claim, type SignIn } from "./router.js";
 import { CHANNEL_KINDS, mergeAlbum, type ChannelAdapter, type ChannelKind, type InboundEvent, type PullNotice } from "./types.js";
+import { log } from "../observability/log.js";
 
 /** A crashed process frees its event after this; a live one renews the lease every third of it while it works. */
 const INBOX_LEASE_MS = 30_000;
@@ -134,7 +135,7 @@ export class ChannelService implements AssistantChannels {
     }).catch(this.report);
   }
 
-  private report = (error: unknown): void => this.deps.onError ? this.deps.onError(error) : console.error("[channels]", error instanceof Error ? error.message : error);
+  private report = (error: unknown): void => this.deps.onError ? this.deps.onError(error) : log.error("channels_failed", { error: error instanceof Error ? error.message : error });
 
   // ── Studio ─────────────────────────────────────────────────────────────
 
