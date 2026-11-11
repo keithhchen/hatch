@@ -266,14 +266,6 @@ jobs:
             sleep 2
           done
           test "$postgres_ready" = 1 || { echo "Postgres did not become ready" >&2; exit 1; }
-      - name: Ship container logs to Axiom
-        run: |
-          set -euo pipefail
-          cd /opt/hatch
-          if grep -Eq '^HATCH_AXIOM_TOKEN=[^[:space:]]+' .env; then
-            docker compose --env-file .env -f compose.infra.yml run --rm --no-deps vector validate --no-environment /etc/vector/vector.yaml || { echo "vector/vector.yaml failed validation; not starting vector" >&2; exit 1; }
-            docker compose --env-file .env -f compose.infra.yml up -d --force-recreate vector
-          fi
       - name: Pull and switch application containers
         env:
           GHCR_USERNAME: ${{ github.actor }}
@@ -423,6 +415,16 @@ jobs:
             private_grant_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' -X POST "https://$domain/v1/commerce/product-access")"
             test "$private_grant_status" = 404
           done
+      # After the release and its health check: log shipping never blocks or rolls back a release.
+      - name: Ship container logs to Axiom
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          cd /opt/hatch
+          if grep -Eq '^HATCH_AXIOM_TOKEN=[^[:space:]]+' .env; then
+            docker compose --env-file .env -f compose.infra.yml run --rm --no-deps vector validate --no-environment /etc/vector/vector.yaml || { echo "vector/vector.yaml failed validation; not starting vector" >&2; exit 1; }
+            docker compose --env-file .env -f compose.infra.yml up -d --force-recreate vector
+          fi
       - name: Roll back application release when health fails
         if: failure()
         env:
