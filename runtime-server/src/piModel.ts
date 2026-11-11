@@ -561,10 +561,6 @@ function piStreamFnFor(config: ResolvedKimiOptions & { profile: LlmProfile }): S
 
 function normalizeProfilePayload(payload: unknown, profile: LlmProfile): unknown {
   const normalized = profile.normalizeEmptyToolCallContent ? normalizeKimiPayload(payload) : payload;
-  if (profile.reasoningEffort && normalized && typeof normalized === "object" && !Array.isArray(normalized)) {
-    const { thinking: _thinking, ...body } = normalized as Record<string, unknown>;
-    return { ...body, reasoning_effort: profile.reasoningEffort };
-  }
   if (!profile.thinkingType || !normalized || typeof normalized !== "object" || Array.isArray(normalized)) {
     return normalized;
   }

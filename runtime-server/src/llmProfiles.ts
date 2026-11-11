@@ -22,8 +22,6 @@ export type LlmProfile = {
   thinkingLevel: ThinkingLevel;
   temperature?: number;
   thinkingType?: "enabled" | "disabled";
-  /** Kimi K3 family: sent as top-level reasoning_effort; the K2.x `thinking` field is never sent (K3 cannot turn reasoning off). */
-  reasoningEffort?: "low" | "high" | "max";
   normalizeEmptyToolCallContent: boolean;
   /** How long a call may stay silent; the default of providerStall when absent. */
   stall?: StallLimits;
@@ -89,7 +87,8 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     thinkingLevel: "low",
     normalizeEmptyToolCallContent: false
   },
-  // The plain pro, not -highspeed: that is the variant the user picked, and "low" effort already keeps reasoning short.
+  // The plain pro, not -highspeed: that is the variant the user picked. Verified against api.moonshot.cn: `thinking: disabled` is
+  // accepted by K3.1 and returns no reasoning, despite the docs saying K3 cannot turn reasoning off.
   "kimi-k3.1-pro": {
     name: "kimi-k3.1-pro",
     provider: "moonshotai-cn",
@@ -100,9 +99,9 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     apiKeyEnv: "LLM_API_KEY",
     contextWindow: 262_144,
     maxTokens: 32_768,
-    reasoning: true,
-    thinkingLevel: "low",
-    reasoningEffort: "low",
+    reasoning: false,
+    thinkingLevel: "minimal",
+    thinkingType: "disabled",
     normalizeEmptyToolCallContent: true,
     stall: { firstEventMs: 45_000, silenceMs: 60_000, restarts: 2, backoffMs: 1_000 }
   },
