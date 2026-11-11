@@ -35,27 +35,36 @@ jobs:
           set -euo pipefail
           printf '%s' "$RELEASE_TAG" | grep -Eq '^[0-9a-f]{40}$'
           git merge-base --is-ancestor "$RELEASE_TAG" origin/master
+      # workflow_run deploys follow a passing Hatch Web CI for this exact SHA,
+      # which already ran these tests; manual dispatch has no CI behind it.
       - uses: actions/setup-node@v4
+        if: github.event_name == 'workflow_dispatch'
         with:
           node-version: 22
       - name: Install Dashboard server dependencies
+        if: github.event_name == 'workflow_dispatch'
         working-directory: creator-dashboard
         run: npm ci
       - name: Verify Runtime and Registry
+        if: github.event_name == 'workflow_dispatch'
         working-directory: runtime-server
         run: |
           npm ci
           npm test
       - name: Verify cross-process Commerce ledger
+        if: github.event_name == 'workflow_dispatch'
         working-directory: packages/commerce
         run: npm test
       - name: Install shared UI dependencies
+        if: github.event_name == 'workflow_dispatch'
         working-directory: packages/ui
         run: npm ci
       - name: Install shared chat dependencies
+        if: github.event_name == 'workflow_dispatch'
         working-directory: packages/chat
         run: npm ci
       - name: Verify Creator Dashboard
+        if: github.event_name == 'workflow_dispatch'
         working-directory: creator-dashboard
         run: |
           npm ci
