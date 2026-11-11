@@ -897,8 +897,11 @@ export async function createDashboardApp(options = {}) {
         const clearState = loginStateCookie(request, loginKind, "", 0);
         try {
           if (!state || !expected || !safeEqual(state, expected) || url.searchParams.get("error")) throw new Error("login_state_rejected");
+          // Someone already signed in keeps their account: the platform id is bound to it, and the Registry is told whose it is.
+          const current = requestCookies(request).hatch_web_session ? (await authenticate(request, registryUrl, fetchImpl, portalState)).token : undefined;
           const auth = await registryRequest(registryUrl, `/v1/auth/${loginKind}/callback`, {
             method: "POST",
+            ...(current ? { headers: { authorization: `Bearer ${current}` } } : {}),
             body: JSON.stringify({ code: url.searchParams.get("code") ?? "", state }),
             fetchImpl
           });

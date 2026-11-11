@@ -169,6 +169,16 @@ test("A one-time code links a sender to an account; the sender can move, and rev
   assert.equal((await env.connections.redeem("telegram", "", fresh, address("44")))?.state, "active");
 }));
 
+test("A new sender redeeming the account's code replaces the old one, which no longer reaches the account", options, async () => isolated(async pool => {
+  const env = await stack(pool);
+  const owner = await link(env, "42");
+  const code = await env.connections.issueCode(owner, "telegram");
+  assert.ok(await env.connections.redeem("telegram", "", code, address("43")));
+  assert.equal(await env.connections.resolveConnection({ channel: "telegram", scope: "", senderId: "42" }), undefined);
+  assert.equal((await env.connections.resolveConnection({ channel: "telegram", scope: "", senderId: "43" }))?.connection.ownerAccountId, owner);
+  assert.equal((await env.connections.linked(owner)).length, 1);
+}));
+
 test("An expired code does not link", options, async () => isolated(async pool => {
   const { connections } = await stack(pool);
   const owner = randomUUID();

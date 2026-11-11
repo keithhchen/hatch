@@ -787,7 +787,9 @@ async function route(
   }
   if (loginKind && login![2] === "callback" && request.method === "POST") {
     const body = await readJson(request);
-    const { account, created, returnTo } = await platformLoginOf(context).finish(loginKind, { code: String(body.code ?? ""), state: String(body.state ?? "") });
+    // A request that carries a session is a person already signed in: the platform id is bound to their account, never made a new one.
+    const signedIn = bearer(request) ? await authenticate(request, response, context) : undefined;
+    const { account, created, returnTo } = await platformLoginOf(context).finish(loginKind, { code: String(body.code ?? ""), state: String(body.state ?? ""), ...(signedIn ? { signedIn } : {}) });
     sendAuthJson(response, created ? 201 : 200, { ...sessionResponse(account, await context.accounts.createSession(account)), created, return_to: returnTo });
     return;
   }
