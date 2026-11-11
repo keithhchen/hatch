@@ -34,7 +34,7 @@ import { log } from "../observability/log.js";
 
 /** The Assistant is one Agent, not a Product: its conversation is bound to the account, under this id. A UUID, as every Agent id is once the identity migration has run. */
 export const ASSISTANT_AGENT_ID = "a5515700-0000-4000-8000-000000000001";
-const ASSISTANT_PROFILE = "kimi-k3.1-pro";
+const ASSISTANT_PROFILE = "deepseek-v4-pro";
 const ACTIVE = new Set(["queued", "running", "waiting_for_tool", "compacting"]);
 
 /** The steps inside one reply, in the shape Chat's history keeps them: where each sits among the words, and what it was. */

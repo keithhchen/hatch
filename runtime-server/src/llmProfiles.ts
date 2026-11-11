@@ -1,7 +1,7 @@
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import type { StallLimits } from "./providerStall.js";
 
-export const RUNTIME_LLM_PROFILE_NAMES = ["kimi-k2.6", "kimi-k2.6-no-thinking", "deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro"] as const;
+export const RUNTIME_LLM_PROFILE_NAMES = ["kimi-k2.6", "kimi-k2.6-no-thinking", "deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro", "deepseek-v4-pro"] as const;
 export const FACTORY_LLM_PROFILE_NAMES = ["kimi-k2.6", "deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro"] as const;
 export type FactoryLlmProfileName = (typeof FACTORY_LLM_PROFILE_NAMES)[number];
 export const LLM_PROFILE_NAMES = RUNTIME_LLM_PROFILE_NAMES;
@@ -64,6 +64,23 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     providerName: "DeepSeek",
     api: "openai-completions",
     model: "deepseek-v4-flash",
+    baseUrl: "https://api.deepseek.com",
+    apiKeyEnv: "DEEPSEEK_API_KEY",
+    contextWindow: 1_048_576,
+    maxTokens: 65_536,
+    reasoning: false,
+    thinkingLevel: "minimal",
+    thinkingType: "disabled",
+    normalizeEmptyToolCallContent: false
+  },
+  // DeepSeek's flagship, run without thinking: on the Assistant's real request (58k tokens, 21 tools) its first token comes
+  // in about 1-2 s once the prefix is cached, against 3-5 s for Kimi K3.1, and it chose the same tools with valid arguments.
+  "deepseek-v4-pro": {
+    name: "deepseek-v4-pro",
+    provider: "deepseek",
+    providerName: "DeepSeek",
+    api: "openai-completions",
+    model: "deepseek-v4-pro",
     baseUrl: "https://api.deepseek.com",
     apiKeyEnv: "DEEPSEEK_API_KEY",
     contextWindow: 1_048_576,
