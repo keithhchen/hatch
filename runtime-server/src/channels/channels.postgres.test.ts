@@ -20,6 +20,7 @@ import { PostgresConnections } from "./connections.js";
 import { PostgresInbox } from "./inbox.js";
 import { PostgresRateLimiter } from "./rateLimiter.js";
 import { TelegramChannel } from "./telegramChannel.js";
+import { DiscordChannel } from "./discordChannel.js";
 
 /** Test time starts a minute ahead of the real clock: rows the database stamps with now() are already due, never in the clock's future. */
 const START = Date.now() + 60_000;
@@ -1074,6 +1075,42 @@ async function productBots(pool: Pool, tokens: Record<string, string>) {
 }
 const botOf = async (env: Awaited<ReturnType<typeof productBots>>, owner: string, productId: string) =>
   (await env.stores.connections.owned(owner)).find(connection => connection.channel === "telegram" && connection.target.kind === "product" && connection.target.productId === productId && connection.hasCredentials);
+
+/** A Discord that answers every call it is given, and records the paths. */
+const discordApi = () => {
+  const paths: string[] = [];
+  const fetchImpl = (async (url: string) => {
+    paths.push(String(url).replace("https://discord.com/api/v10", ""));
+    return new Response(JSON.stringify(String(url).endsWith("/users/@me") ? { id: "9000", username: "shop_bot" } : {}), { status: 200 });
+  }) as typeof fetch;
+  return { paths, fetchImpl };
+};
+
+test("Studio's Discord connect takes the Expert to the one shared bot, and the code they send it binds their sender id", options, async () => isolated(async pool => {
+  const api = discordApi();
+  const shared = new DiscordChannel({ token: "shared-token", applicationId: "1234" }, "", api.fetchImpl);
+  const env = await stack(pool, { adapters: [shared as unknown as FakeAdapter] });
+  const owner = randomUUID();
+  const { code, url } = await env.service.connect(owner, "discord");
+  assert.equal(url, "https://discord.com/users/1234", "the shared bot's chat, with nothing for the Expert to configure");
+  await env.service.accept(shared, [message("80351110224678912", code)]);
+  await env.service.drain();
+  const resolved = await env.connections.resolveConnection({ channel: "discord", scope: "", senderId: "80351110224678912" });
+  assert.equal(resolved?.connection.ownerAccountId, owner);
+  assert.ok(api.paths.some(path => path.endsWith("/messages")), "the bot greeted them in the chat");
+}));
+
+test("A Product's own Discord bot is saved on a proven token alone: there is no webhook to set", options, async () => isolated(async pool => {
+  const api = discordApi();
+  const seal = { seal: (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64"), open: <T,>(sealed: string) => JSON.parse(Buffer.from(sealed, "base64").toString()) as T };
+  const form = { ...CREDENTIAL_FORMS.discord!, build: (credentials: any, scope: string) => new DiscordChannel(credentials, scope, api.fetchImpl) } as typeof CREDENTIAL_FORMS.discord;
+  const stores = await openChannelStores(pool, scopeOf);
+  const apps = new OwnApps({ connections: stores.connections, seal, forms: { discord: form }, origin: "https://site.test", ownsProduct: async () => true });
+  const owner = randomUUID();
+  await apps.save(owner, "discord", "p1", { token: " bot-token ", application_id: "9000" });
+  assert.deepEqual(api.paths, ["/users/@me"]);
+  assert.equal(await apps.username(owner, "discord", "p1"), "shop_bot");
+}));
 
 test("Saving a bot token proves it, points the webhook at that bot, and the Product answers anyone who writes to it", options, async () => isolated(async pool => {
   const env = await productBots(pool, { "111:aaa": "shop_bot" });

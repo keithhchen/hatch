@@ -43,7 +43,9 @@ export class OwnApps {
     const target: AgentTarget = { kind: "product", productId };
     const scope = randomUUID();
     const previous = await this.current(accountId, kind, target);
-    try { Object.assign(credentials, await form.provision!(form.build(credentials, scope), { webhookUrl: webhookUrl(this.deps.origin, kind, scope), secret: randomBytes(24).toString("hex") })); }
+    // A platform that is not told where to post (the Gateway) has nothing to provision: its probe is the proof.
+    const adapter = form.build(credentials, scope);
+    try { Object.assign(credentials, await (form.provision ? form.provision(adapter, { webhookUrl: webhookUrl(this.deps.origin, kind, scope), secret: randomBytes(24).toString("hex") }) : form.probe?.(adapter))); }
     catch (cause) { throw failure(422, `${kind}_probe_failed`, cause instanceof Error ? cause.message : String(cause)); }
     await this.deps.connections.saveCredentials(accountId, kind, this.deps.seal.seal(credentials), scope, target);
     // The same bot saved again was already pointed here by its probe; a different one is let go.

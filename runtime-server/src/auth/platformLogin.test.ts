@@ -4,7 +4,8 @@ import { test } from "node:test";
 import { Pool } from "pg";
 import { AccountStoreTs } from "../registryAuth.js";
 import { LoginError, OidcClient } from "./oidc.js";
-import { PostgresLoginStore, TelegramLogin, telegramOidc, type LoginClaim, type LoginStore, type LoginTransaction } from "./telegramLogin.js";
+import { telegramIdentity, telegramOidc } from "./identities.js";
+import { PlatformLogin, PostgresLoginStore, type LoginClaim, type LoginStore, type LoginTransaction } from "./platformLogin.js";
 
 // Automated test doubles: a Telegram that signs its own tokens with a local key. The product never constructs these.
 const CLIENT = { clientId: "client-1", clientSecret: "secret-1" };
@@ -27,7 +28,7 @@ class MemoryLoginStore implements LoginStore {
   async begin(t: LoginTransaction, expiresAt: Date) { this.transactions.set(t.state, { ...t, expiresAt }); }
   async take(state: string, now: Date) { const t = this.transactions.get(state); this.transactions.delete(state); return t && t.expiresAt > now ? t : undefined; }
   async issueClaim(code: string, claim: LoginClaim, expiresAt: Date) { this.claims.set(code, { ...claim, expiresAt }); }
-  async peekClaim(code: string, now: Date) { const c = this.claims.get(code); return c && !c.used && c.expiresAt > now ? { subject: c.subject, ...(c.invite ? { invite: c.invite } : {}) } : undefined; }
+  async peekClaim(code: string, now: Date) { const c = this.claims.get(code); return c && !c.used && c.expiresAt > now ? { kind: c.kind, subject: c.subject, ...(c.invite ? { invite: c.invite } : {}) } : undefined; }
   async useClaim(code: string, now: Date) { const c = await this.peekClaim(code, now); if (c) this.claims.get(code)!.used = true; return c; }
 }
 
@@ -45,13 +46,13 @@ function harness(options: { idToken?: (nonce: string) => string; now?: () => Dat
   const store = new MemoryLoginStore();
   const accounts = new AccountStoreTs();
   const admitted: Array<[string, string, LoginClaim]> = [];
-  const login = new TelegramLogin({
-    oidc: new OidcClient(telegramOidc(CLIENT), fetchImpl), store, accounts, origin: ORIGIN,
+  const login = new PlatformLogin({
+    providers: { telegram: telegramIdentity(new OidcClient(telegramOidc(CLIENT), fetchImpl)) }, store, accounts, origin: ORIGIN,
     limiter: { take: async () => options.limited ? 1000 : 0 }, now: () => clock.at,
-    admit: async (account, telegramId, claim) => { admitted.push([account.id, telegramId, claim]); },
+    admit: async (_kind, account, telegramId, claim) => { admitted.push([account.id, telegramId, claim]); },
   });
   /** The person comes back from Telegram with a code for the sign-in that began at `authorizeUrl`. */
-  const comeBack = async (started: { authorizeUrl: string; state: string }) => login.finish({ code: nonceOf(started.authorizeUrl), state: started.state });
+  const comeBack = async (started: { authorizeUrl: string; state: string }) => login.finish("telegram", { code: nonceOf(started.authorizeUrl), state: started.state });
   return { login, store, accounts, admitted, requests, comeBack, clock };
 }
 const claims = (extra: Record<string, unknown> = {}) => ({
@@ -62,7 +63,7 @@ const refused = (code: string) => (error: unknown) => error instanceof LoginErro
 
 test("The authorize URL asks for the code flow with PKCE S256 and the scopes the bot needs", async () => {
   const { login } = harness();
-  const { authorizeUrl } = await login.start({});
+  const { authorizeUrl } = await login.start("telegram", {});
   const url = new URL(authorizeUrl);
   assert.equal(`${url.origin}${url.pathname}`, "https://oauth.telegram.org/auth");
   const params = Object.fromEntries(url.searchParams);
@@ -73,9 +74,9 @@ test("The authorize URL asks for the code flow with PKCE S256 and the scopes the
 
 test("A sign-in from the site makes an account with no email or password, and the same Telegram id comes back to it", async () => {
   const env = harness();
-  const first = await env.comeBack(await env.login.start({ returnTo: "/account" }));
+  const first = await env.comeBack(await env.login.start("telegram", { returnTo: "/account" }));
   assert.deepEqual([first.created, first.returnTo, first.account.email, first.account.password_hash, first.account.display_name], [true, "/account", null, null, "Ann Lee"]);
-  const again = await env.comeBack(await env.login.start({}));
+  const again = await env.comeBack(await env.login.start("telegram", {}));
   assert.deepEqual([again.created, again.account.id], [false, first.account.id]);
   assert.deepEqual(env.admitted, [], "from the site no chat is bound");
   // The token endpoint is asked with Basic auth, the verifier and the same redirect URI.
@@ -88,29 +89,29 @@ test("A sign-in from the site makes an account with no email or password, and th
 
 test("An account cannot sign in with a password it does not have", async () => {
   const env = harness();
-  const { account } = await env.comeBack(await env.login.start({}));
+  const { account } = await env.comeBack(await env.login.start("telegram", {}));
   assert.equal(await env.accounts.verifyPassword("anything-at-all", account), false);
 });
 
 test("A return path that leaves the site is dropped", async () => {
   const env = harness();
-  for (const returnTo of ["//evil.test", "https://evil.test", "/\\evil"]) assert.equal((await env.comeBack(await env.login.start({ returnTo }))).returnTo, "/");
+  for (const returnTo of ["//evil.test", "https://evil.test", "/\\evil"]) assert.equal((await env.comeBack(await env.login.start("telegram", { returnTo }))).returnTo, "/");
 });
 
 test("A sign-in that began in the chat is bound to the sender it was issued for, and a link is used once", async () => {
   const env = harness();
-  const link = (await env.login.claimLink("4242", "HATCH-INVITE"))!;
+  const link = (await env.login.claimLink("telegram", "4242", "HATCH-INVITE"))!;
   const claim = new URL(link).searchParams.get("claim")!;
   assert.equal(`${new URL(link).origin}${new URL(link).pathname}`, `${ORIGIN}/v1/auth/telegram/start`);
-  const outcome = await env.comeBack(await env.login.start({ claim }));
-  assert.deepEqual(env.admitted, [[outcome.account.id, "4242", { subject: "4242", invite: "HATCH-INVITE" }]]);
-  await assert.rejects(env.login.start({ claim }), refused("claim_invalid"), "the same link a second time");
+  const outcome = await env.comeBack(await env.login.start("telegram", { claim }));
+  assert.deepEqual(env.admitted, [[outcome.account.id, "4242", { kind: "telegram", subject: "4242", invite: "HATCH-INVITE" }]]);
+  await assert.rejects(env.login.start("telegram", { claim }), refused("claim_invalid"), "the same link a second time");
 });
 
 test("A token whose id is not the sender the link was issued for is refused, and the link is spent", async () => {
   const env = harness();
-  const claim = new URL((await env.login.claimLink("1111"))!).searchParams.get("claim")!;
-  await assert.rejects(env.comeBack(await env.login.start({ claim })), refused("claim_mismatch"));
+  const claim = new URL((await env.login.claimLink("telegram", "1111"))!).searchParams.get("claim")!;
+  await assert.rejects(env.comeBack(await env.login.start("telegram", { claim })), refused("claim_mismatch"));
   assert.deepEqual(env.admitted, []);
   assert.equal(await env.store.peekClaim(claim, env.clock.at), undefined);
   assert.equal([...env.accounts["identities"].keys()].length, 0, "nobody was signed in");
@@ -118,13 +119,13 @@ test("A token whose id is not the sender the link was issued for is refused, and
 
 test("A state is single-use and expires", async () => {
   const env = harness();
-  const started = await env.login.start({});
+  const started = await env.login.start("telegram", {});
   await env.comeBack(started);
-  await assert.rejects(env.login.finish({ code: "c", state: started.state }), refused("login_state_invalid"), "replayed");
-  const late = await env.login.start({});
+  await assert.rejects(env.login.finish("telegram", { code: "c", state: started.state }), refused("login_state_invalid"), "replayed");
+  const late = await env.login.start("telegram", {});
   env.clock.at = new Date(env.clock.at.getTime() + 11 * 60_000);
-  await assert.rejects(env.login.finish({ code: "c", state: late.state }), refused("login_state_invalid"), "expired");
-  await assert.rejects(env.login.finish({ code: "c", state: "never-issued" }), refused("login_state_invalid"));
+  await assert.rejects(env.login.finish("telegram", { code: "c", state: late.state }), refused("login_state_invalid"), "expired");
+  await assert.rejects(env.login.finish("telegram", { code: "c", state: "never-issued" }), refused("login_state_invalid"));
 });
 
 test("A token that does not verify signs nobody in", async () => {
@@ -144,27 +145,27 @@ test("A token that does not verify signs nobody in", async () => {
   };
   for (const [name, idToken] of Object.entries(cases)) {
     const env = harness({ idToken });
-    await assert.rejects(env.comeBack(await env.login.start({})), refused("login_failed"), name);
+    await assert.rejects(env.comeBack(await env.login.start("telegram", {})), refused("login_failed"), name);
     assert.equal(env.accounts["identities"].size, 0, name);
   }
 });
 
 test("The same Telegram id is one account, however many sign-ins race", async () => {
   const env = harness();
-  const started = await Promise.all([env.login.start({}), env.login.start({}), env.login.start({})]);
+  const started = await Promise.all([env.login.start("telegram", {}), env.login.start("telegram", {}), env.login.start("telegram", {})]);
   const outcomes = await Promise.all(started.map(env.comeBack));
   assert.equal(new Set(outcomes.map(outcome => outcome.account.id)).size, 1);
 });
 
 test("Too many attempts are refused", async () => {
   const env = harness({ limited: true });
-  await assert.rejects(env.login.start({}), refused("rate_limited"));
-  await assert.rejects(env.login.finish({ code: "c", state: "s" }), refused("rate_limited"));
+  await assert.rejects(env.login.start("telegram", {}), refused("rate_limited"));
+  await assert.rejects(env.login.finish("telegram", { code: "c", state: "s" }), refused("rate_limited"));
 });
 
 test("A chat that asks for a link too often gets none", async () => {
   const { login } = harness({ limited: true });
-  assert.equal(await login.claimLink("4242"), undefined);
+  assert.equal(await login.claimLink("telegram", "4242"), undefined);
 });
 
 test("One Telegram id belongs to at most one account", async () => {
@@ -187,13 +188,13 @@ test("In Postgres a state and a claim are each spent once, and an identity is on
   try {
     const store = await PostgresLoginStore.open(pool);
     const now = new Date(); const later = new Date(now.getTime() + 60_000);
-    await store.begin({ state: "s1", verifier: "v", nonce: "n", claim: "c1", returnTo: "/x" }, later);
+    await store.begin({ kind: "telegram", state: "s1", verifier: "v", nonce: "n", claim: "c1", returnTo: "/x" }, later);
     const taken = await Promise.all([store.take("s1", now), store.take("s1", now)]);
     assert.equal(taken.filter(Boolean).length, 1, "one of two racing callbacks wins");
-    await store.begin({ state: "s2", verifier: "v", nonce: "n", returnTo: "/" }, new Date(now.getTime() - 1));
+    await store.begin({ kind: "telegram", state: "s2", verifier: "v", nonce: "n", returnTo: "/" }, new Date(now.getTime() - 1));
     assert.equal(await store.take("s2", now), undefined, "expired");
-    await store.issueClaim("c1", { subject: "9", invite: "I" }, later);
-    assert.deepEqual(await store.peekClaim("c1", now), { subject: "9", invite: "I" });
+    await store.issueClaim("c1", { kind: "telegram", subject: "9", invite: "I" }, later);
+    assert.deepEqual(await store.peekClaim("c1", now), { kind: "telegram", subject: "9", invite: "I" });
     const used = await Promise.all([store.useClaim("c1", now), store.useClaim("c1", now)]);
     assert.equal(used.filter(Boolean).length, 1, "one of two racing uses wins");
     assert.equal(await store.peekClaim("c1", now), undefined);
