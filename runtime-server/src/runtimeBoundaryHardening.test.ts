@@ -299,64 +299,6 @@ test("one account can resolve multiple sessions concurrently", async () => {
   }
 });
 
-test("concurrent hello setup aborts Creator tool resolution when its socket closes", async () => {
-  const entitlement = fixtureEntitlement();
-  const corpus = fixtureCreatorToolCorpus(entitlement);
-  const setupSignals: AbortSignal[] = [];
-  let markSetupStarted!: () => void;
-  const setupStarted = new Promise<void>((resolve) => { markSetupStarted = resolve; });
-  const controlPlane: CreatorToolControlPlane = {
-    resolve: async (request) => {
-      setupSignals.push(request.signal!);
-      if (setupSignals.length === 1) markSetupStarted();
-      return new Promise((_resolve, reject) => {
-        request.signal?.addEventListener("abort", () => reject(request.signal?.reason), { once: true });
-      });
-    }
-  };
-  const conversationRepository = await authBoundaryConversations(entitlement, [
-    "creator-setup-install-one",
-    "creator-setup-install-two"
-  ]);
-  const runtime = createRuntimeServer({
-    conversationStore: new RuntimeStore(conversationRepository.localAuthority),
-    conversationRepository,
-    authIdentityResolver: { resolveIdentity: async () => ({ sub: entitlement.user_id }) },
-    entitlementResolver: fixtureEntitlementResolver(entitlement),
-    agentCorpusResolver: {
-      resolve: async () => ({ root: "/fixture-corpus", corpus, digest: `sha256:${"1".repeat(64)}` })
-    } as unknown as AgentCorpusResolver,
-    creatorToolControlPlane: controlPlane,
-    clientHelloTimeoutMs: 2_000
-  });
-  const port = await listen(runtime);
-  const first = await openSocket(port);
-  const second = await openSocket(port);
-  try {
-    first.send(JSON.stringify({
-      ...hello("creator-setup-one", "creator-setup-install-one"),
-      entitlement_id: entitlement.entitlement_id
-    }));
-    await setupStarted;
-
-    const secondSetupStarted = waitUntil(() => setupSignals.length === 2);
-    second.send(JSON.stringify({
-      ...hello("creator-setup-two", "creator-setup-install-two"),
-      entitlement_id: entitlement.entitlement_id
-    }));
-    await secondSetupStarted;
-
-    const closed = new Promise<void>((resolve) => first.once("close", () => resolve()));
-    first.close();
-    await closed;
-    await waitUntil(() => setupSignals[0]?.aborted === true);
-  } finally {
-    first.close();
-    second.close();
-    await runtime.close();
-  }
-});
-
 test("an existing session re-resolves Creator tool bindings and blocks a disabled binding before model work", async () => {
   const entitlement = fixtureEntitlement();
   const corpus = fixtureCreatorToolCorpus(entitlement);
@@ -364,7 +306,7 @@ test("an existing session re-resolves Creator tool bindings and blocks a disable
   const controlPlane: CreatorToolControlPlane = {
     resolve: async (request) => {
       resolutionCalls += 1;
-      if (resolutionCalls > 1) throw new Error("binding disabled");
+      if (resolutionCalls > 0) throw new Error("binding disabled");
       assert.equal(request.tool.kind, "http_function");
       if (request.tool.kind !== "http_function") throw new Error("unexpected tool kind");
       return [{
@@ -401,7 +343,7 @@ test("an existing session re-resolves Creator tool bindings and blocks a disable
       && (message.error as { code?: string } | undefined)?.code === "authorization_unavailable");
     socket.send(JSON.stringify(clientMessage("creator-disabled-run", "creator-disabled-conversation")));
     assert.equal(((await rejected).error as { code?: string }).code, "authorization_unavailable");
-    assert.equal(resolutionCalls, 2);
+    assert.equal(resolutionCalls, 1);
     assert.equal(runCalls, 0);
   } finally {
     socket.close();
@@ -457,6 +399,10 @@ test("an existing session uses a rotated Creator tool binding on its next turn",
     const completed = waitForMessage(socket, (message) => message.type === "turn.completed" && message.run_id === "creator-rotation-run");
     socket.send(JSON.stringify(clientMessage("creator-rotation-run", "creator-rotation-conversation")));
     await completed;
+    assert.equal(observedVersion, 1);
+    const next = waitForMessage(socket, (message) => message.type === "turn.completed" && message.run_id === "creator-rotation-run-2");
+    socket.send(JSON.stringify(clientMessage("creator-rotation-run-2", "creator-rotation-conversation")));
+    await next;
     assert.equal(resolutionCalls, 2);
     assert.equal(observedVersion, 2);
   } finally {
@@ -592,10 +538,11 @@ test("per-user turn authorization capacity prevents one account from occupying t
 test("global active-run capacity rejects excess model work and releases on completion", async () => {
   let runCalls = 0;
   const runReleases: Array<() => void> = [];
+  const releaseByRun = new Map<string, () => void>();
   const agentRuntime: AgentRuntime = {
     async *run(input) {
       runCalls += 1;
-      await new Promise<void>((resolve) => runReleases.push(resolve));
+      await new Promise<void>((resolve) => { runReleases.push(resolve); releaseByRun.set(input.run_id, resolve); });
       yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
     }
   };
@@ -629,7 +576,8 @@ test("global active-run capacity rejects excess model work and releases on compl
     const firstCompleted = waitForMessage(sockets[0]!, (message) => message.type === "turn.completed" && message.run_id === "active-one");
     const firstStateCompleted = waitForMessage(sockets[0]!, (message) => message.type === "turn.state"
       && message.run_id === "active-one" && message.status === "completed");
-    runReleases[0]?.();
+    // Runs start in whatever order the server schedules them: release the one the test waits on.
+    releaseByRun.get("active-one")?.();
     await firstCompleted;
     await firstStateCompleted;
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -669,8 +617,7 @@ test("per-user active-run capacity preserves room for another account", async ()
       })
     },
     maxActiveRunsGlobal: 3,
-    maxActiveRunsPerUser: 1,
-    maxActiveRunsPerConnection: 1
+    maxActiveRunsPerUser: 1
   });
   const port = await listen(runtime);
   const first = await openSocket(port);
@@ -1404,15 +1351,17 @@ test("disconnect cleanup finishes when cancellation persistence fails", async ()
   const attemptId = randomUUID();
   const conversationId = `disconnect-conversation-${attemptId}`;
   let storeClosed = false;
+  const authority = new LocalRuntimeAuthority();
   const store = {
-    localAuthority: new LocalRuntimeAuthority(),
+    localAuthority: authority,
     append: async (event: { type: string; status?: string; to?: string }) => {
       if ((event.type === "tool.call" && event.status === "cancelled")
         || (event.type === "turn.state" && event.to === "cancelled")) {
         throw new Error("cancellation persistence unavailable");
       }
     },
-    readConversation: async () => [],
+    // A Run restarts from the last user message of the transcript, so the stub reads what was accepted.
+    readConversation: async (id: string) => new RuntimeStore(authority).readConversation(id),
     close: async () => { storeClosed = true; }
   } as unknown as RuntimeStore;
   const agentRuntime: AgentRuntime = {

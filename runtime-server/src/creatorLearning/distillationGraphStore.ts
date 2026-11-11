@@ -290,12 +290,14 @@ export class PostgresDistillationGraphStore implements DistillationGraphStore {
       assertSameJson(runIdentity(current), runIdentity(run), `Distillation Run ${run.id} is immutable`);
       return current;
     }
-    const result = await this.pool.query<RunRow>(`
+    // Concurrent first calls conflict on the id or the product; whichever lost reads the winner's row.
+    const inserted = await this.pool.query<RunRow>(`
       INSERT INTO hatch_creator_distillation_runs (id, product_id, creator_id, created_at)
       VALUES ($1, $2, $3, COALESCE($4::timestamptz, clock_timestamp()))
-      ON CONFLICT (product_id) DO UPDATE SET id = hatch_creator_distillation_runs.id
+      ON CONFLICT DO NOTHING
       RETURNING *
     `, [run.id, run.productId, run.creatorId, run.createdAt]);
+    const result = inserted.rows[0] ? inserted : await this.pool.query<RunRow>(`SELECT * FROM hatch_creator_distillation_runs WHERE product_id = $1`, [run.productId]);
     const current = runFromRow(result.rows[0]!);
     if (current.id !== run.id) throw new Error(`Product ${run.productId} is already attached to another Distillation Run`);
     return current;

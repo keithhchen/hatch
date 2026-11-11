@@ -1,118 +1,95 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Button, InlineAlert } from "@hatch/ui";
-import { friendlyError, LoadingState, mutationKey } from "./studioShellKit.jsx";
-import { subscribeFactoryEvents } from "./factoryEvents.js";
-import { BrowserImageAttachments } from "./webChatClient.js";
-import { ImageViewer } from "@hatch/chat/react";
+import { ConversationController } from "@hatch/chat";
+import { ChatView, useChatState } from "@hatch/chat/react";
+import { friendlyError, mutationKey } from "./studioShellKit.jsx";
+import { UnavailableToolExecutor, browserDictation } from "./webChatClient.js";
+import { ASSISTANT_CONVERSATION, SessionPendingStore, StudioAssistantTransport, StudioAttachments } from "./studioAssistantTransport.js";
+import { useLocale } from "./locale.jsx";
+import { webChatErrorText, webChatT } from "./webChatI18n.js";
+import "./webChat.css";
+import { ChannelBindings } from "./ChannelBindings.jsx";
 
 const ROOT = "/v1/creator/assistant";
-const CHANNEL_NAMES = { telegram: "Telegram", line: "LINE", lark: "Lark", imessage: "iMessage" };
+const CONNECTIONS = "/v1/creator/connections";
+const CHANNEL_NAMES = { telegram: "Telegram", line: "LINE", lark: "Lark", feishu: "飞书", wecom: "WeCom", wechatkf: "WeChat", slack: "Slack", imessage: "iMessage" };
+// Thinking and tool steps, as Product web chat shows them.
+const STEP_KINDS = ["thinking", "tool"];
 const REVIEW_ACTIONS = { content: ["sxaContentYes", "sxaContentNo"], change: ["sxaChangeYes", "sxaChangeNo"] };
+const ATTACHABLE = "image/*,.txt,.md,.docx,.pptx,.xlsx,.pdf";
+
+/** The Assistant's conversation on the shared chat: what the Expert sends goes out through the transport, the replies come back through it. */
+function openAssistant(request, describeError) {
+  const transport = new StudioAssistantTransport(request);
+  const controller = new ConversationController({
+    transport, attachments: new StudioAttachments(request), tools: new UnavailableToolExecutor(),
+    pendingStore: new SessionPendingStore(), draftScope: "studio-assistant", describeError,
+    // The page keeps listening for as long as it is open; the delay between attempts is capped.
+    reconnectAttempts: Number.POSITIVE_INFINITY
+  });
+  controller.open(ASSISTANT_CONVERSATION);
+  return { transport, controller, dictate: browserDictation(request) };
+}
 
 /** One assistant per Expert: a conversation and the things that need them. */
 export function StudioAssistant({ request, t }) {
-  const [view, setView] = useState(null);
-  const [draft, setDraft] = useState("");
-  const [streaming, setStreaming] = useState("");
-  const [pendingLines, setPendingLines] = useState([]);
+  const { locale } = useLocale();
+  const chatT = useCallback((key, values) => webChatT(locale, key, values), [locale]);
+  const latest = useRef({});
+  latest.current = { t, locale };
+  const errorText = useCallback(cause => cause?.status ? friendlyError(cause, latest.current.t) : webChatErrorText(cause, latest.current.locale), []);
+  const [assistant, setAssistant] = useState(null);
+  useEffect(() => {
+    const opened = openAssistant(request, errorText);
+    setAssistant(opened);
+    return () => opened.controller.dispose();
+  }, [request, errorText]);
+  if (!assistant) return null;
+  return <Assistant {...assistant} request={request} t={t} chatT={chatT} errorText={errorText} />;
+}
+
+function Assistant({ transport, controller, dictate, request, t, chatT, errorText }) {
+  const view = useSyncExternalStore(transport.subscribe, transport.getView);
+  const { connection } = useChatState(controller);
+  const [wasOpen, setWasOpen] = useState(false);
   const [error, setError] = useState("");
-  const [connecting, setConnecting] = useState(null);
   const [larkForm, setLarkForm] = useState(false);
-  const inputRef = useRef(null);
-  const fileRef = useRef(null);
-  const endRef = useRef(null);
-  const send = useCallback((path, body) => request(path, { method: "POST", headers: { "idempotency-key": mutationKey() }, body: JSON.stringify(body ?? {}) }), [request]);
-  const refresh = useCallback(() => {
-    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    return request(`${ROOT}?tz=${encodeURIComponent(timezone)}`).then(value => { setView(value); setPendingLines([]); setError(""); }).catch(cause => setError(friendlyError(cause, t)));
-  }, [request, t]);
+  const chatRef = useRef(null);
+  useEffect(() => { if (connection === "open") setWasOpen(true); }, [connection]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
-  useEffect(() => subscribeFactoryEvents({
-    url: `${ROOT}/events`,
-    onOpen: () => { void refresh(); },
-    onError: () => setError(t("sxaConnectionLost")),
-    onMessage: event => {
-      const value = JSON.parse(event.data);
-      if (value.type === "delta") { setStreaming(current => current + (value.text ?? "")); return; }
-      if (value.type === "message" || value.type === "assistant" || value.type === "state") { setStreaming(""); void refresh(); }
-    },
-  }), [refresh, t]);
-
-  useEffect(() => { endRef.current?.scrollIntoView?.({ block: "end" }); }, [view?.messages?.length, streaming, pendingLines.length]);
-
-  const submit = async event => {
-    event.preventDefault();
-    const content = draft.trim();
-    if (!content) return;
-    setDraft("");
-    setPendingLines(lines => [...lines, content]);
-    try { await send(`${ROOT}/messages`, { content }); }
-    catch (cause) { setError(friendlyError(cause, t)); setDraft(content); setPendingLines(lines => lines.filter(line => line !== content)); }
-  };
+  const post = useCallback((path, body) => request(path, { method: "POST", headers: { "idempotency-key": mutationKey() }, body: JSON.stringify(body ?? {}) }), [request]);
+  const refresh = () => controller.refresh(ASSISTANT_CONVERSATION).catch(cause => setError(friendlyError(cause, t)));
   const act = async (task, action) => {
-    try { await send(`${ROOT}/tasks/${task.id}/${action}`); await refresh(); }
+    try { await post(`${ROOT}/tasks/${task.id}/${action}`); await refresh(); }
     catch (cause) { setError(friendlyError(cause, t)); }
-  };
-  const attach = async event => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    try {
-      const upload = file.type.startsWith("image/") ? await BrowserImageAttachments.compress(file) : file;
-      const bytes = new Uint8Array(await upload.arrayBuffer());
-      let binary = "";
-      for (let offset = 0; offset < bytes.length; offset += 32768) binary += String.fromCharCode(...bytes.subarray(offset, offset + 32768));
-      await send(`${ROOT}/files`, { name: upload.name, base64: btoa(binary) });
-      await refresh();
-    } catch (cause) { setError(friendlyError(cause, t)); }
-  };
-  const connectChannel = async kind => {
-    try {
-      const value = await send(`${ROOT}/channels/${kind}/connect`);
-      setConnecting({ kind, ...value });
-      if (value.url) window.open(value.url, "_blank", "noopener");
-    } catch (cause) { setError(friendlyError(cause, t)); }
   };
   const saveLark = async event => {
     event.preventDefault();
-    try { await send(`${ROOT}/channels/lark/credentials`, Object.fromEntries(new FormData(event.currentTarget))); setLarkForm(false); await refresh(); }
+    try { await post(`${CONNECTIONS}/lark/credentials`, Object.fromEntries(new FormData(event.currentTarget))); setLarkForm(false); await refresh(); }
     catch (cause) { setError(friendlyError(cause, t)); }
   };
   const disconnectChannel = async kind => {
-    try { await request(`${ROOT}/channels/${kind}`, { method: "DELETE", body: JSON.stringify({}) }); setConnecting(null); await refresh(); }
+    try { await request(`${CONNECTIONS}/${kind}`, { method: "DELETE", body: JSON.stringify({}) }); await refresh(); }
     catch (cause) { setError(friendlyError(cause, t)); }
   };
 
-  if (!view && !error) return <LoadingState t={t} />;
+  const identity = { creatorName: t("sxNavAssistant"), productName: t("sxNavAssistant") };
   const needs = (view?.tasks ?? []).filter(task => task.status === "needs_you");
-  const lines = view?.messages ?? [];
-  const channels = (view?.channels ?? []).filter(channel => channel.available || channel.own_app);
+  const ownApps = (view?.channels ?? []).filter(channel => channel.own_app && CHANNEL_NAMES[channel.kind] && (channel.linked || channel.available));
   return <div className="sxa">
-    <section className="sxa-chat" aria-label={t("sxNavAssistant")}>
+    <section className="sxa-chat web-chat web-chat--embedded" aria-label={t("sxNavAssistant")} ref={chatRef}>
       <h1 className="sxa-title">{t("sxNavAssistant")}</h1>
-      <div className="sxa-log" aria-live="polite">
-        {!lines.length && !pendingLines.length && !streaming ? <p className="sxa-empty">{t("sxaEmpty")}</p> : null}
-        {lines.map((line, index) => <div key={`${line.at}-${index}`} className={`sxa-line sxa-line--${line.role}`}>
-          {line.images?.map(file => <ImageViewer key={file} src={`${ROOT}/images/${file}`} alt="" title={t("sxaImage")} closeLabel={t("sxaImageClose")} viewLabel={t("sxaImageView")}>
-            <img className="sxa-image" alt="" src={`${ROOT}/images/${file}`} />
-          </ImageViewer>)}
-          {line.text ? <p>{line.text}</p> : null}
-        </div>)}
-        {pendingLines.map((line, index) => <p key={`pending-${index}`} className="sxa-line sxa-line--expert">{line}</p>)}
-        {streaming ? <p className="sxa-line sxa-line--assistant">{streaming}</p> : null}
-        <div ref={endRef} />
-      </div>
-      {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
-      <form className="sxa-input" onSubmit={submit}>
-        <textarea ref={inputRef} value={draft} rows={2} aria-label={t("sxaInputLabel")} placeholder={t("sxaInputPlaceholder")} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) submit(event); }} />
-        <input ref={fileRef} type="file" hidden accept="image/*,.txt,.md,.docx,.pptx,.xlsx,.pdf" onChange={attach} />
-        <Button variant="secondary" type="button" onClick={() => fileRef.current?.click()}>{t("sxaAttach")}</Button>
-        <Button className="web-btn-yolk" type="submit" disabled={!draft.trim()}>{t("sxaSend")}</Button>
-      </form>
+      <ChatView controller={controller} identity={identity} agentName={t("sxNavAssistant")} t={chatT} errorText={errorText}
+        attachments={controller.attachments} activityKinds={STEP_KINDS} dictate={dictate} accept={ATTACHABLE} onNewConversation={() => undefined}
+        empty={<p className="sxa-empty">{t("sxaEmpty")}</p>}
+        dockAccessory={<>
+          {wasOpen && connection !== "open" ? <InlineAlert tone="error">{t("sxaConnectionLost")}</InlineAlert> : null}
+          {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
+        </>} />
     </section>
     <aside className="sxa-side">
-      <h2>{t("sxaNeedsYou")}</h2>
+      <h2>{t("sxaReachMe")}</h2>
+      <ChannelBindings request={request} t={t} />
       {needs.length ? <ul className="sxa-needs">
         {needs.map(task => <li key={task.id} className="sxa-need">
           <span className="sxa-need__label">{t(task.needs === "review" ? "sxaNeedReview" : task.needs === "answer" ? "sxaNeedAnswer" : "sxaNeedBlocked")}</span>
@@ -122,23 +99,19 @@ export function StudioAssistant({ request, t }) {
             <Button className="web-btn-yolk" type="button" onClick={() => act(task, "approve")}>{t(REVIEW_ACTIONS[task.kind][0])}</Button>
             <Button variant="secondary" type="button" onClick={() => act(task, "decline")}>{t(REVIEW_ACTIONS[task.kind][1])}</Button>
           </div> : null}
-          {task.needs === "answer" ? <Button variant="secondary" type="button" onClick={() => inputRef.current?.focus()}>{t("sxaAnswerHere")}</Button> : null}
+          {task.needs === "answer" ? <Button variant="secondary" type="button" onClick={() => chatRef.current?.querySelector("textarea")?.focus()}>{t("sxaAnswerHere")}</Button> : null}
           {task.needs === "blocked" ? <Button variant="secondary" type="button" onClick={() => act(task, "decline")}>{t("sxaDismiss")}</Button> : null}
         </li>)}
-      </ul> : <p className="sxa-empty">{t("sxaNothingNeeded")}</p>}
-      {channels.length ? <div className="sxa-channels">
-        <h2>{t("sxaChannels")}</h2>
-        <p>{t("sxaChannelsBody")}</p>
-        {channels.map(channel => <div className="sxa-channel" key={channel.kind}>
+      </ul> : null}
+      {ownApps.length ? <div className="sxa-channels">
+        {ownApps.map(channel => <div className="sxa-channel" key={channel.kind}>
           <div className="sxa-channel__row">
             <strong>{CHANNEL_NAMES[channel.kind]}</strong>
             {channel.linked
               ? <Button variant="secondary" type="button" onClick={() => disconnectChannel(channel.kind)}>{t("sxaChannelDisconnect")}</Button>
-              : channel.available
-                ? <Button variant="secondary" type="button" onClick={() => connectChannel(channel.kind)}>{t("sxaChannelConnect")}</Button>
-                : <Button variant="secondary" type="button" onClick={() => setLarkForm(open => !open)}>{t("sxaChannelSetup")}</Button>}
+              : <Button variant="secondary" type="button" onClick={() => setLarkForm(open => !open)}>{t("sxaChannelSetup")}</Button>}
           </div>
-          {channel.own_app && !channel.linked && (larkForm || channel.available) ? <div className="sxa-channel__code">
+          {!channel.linked && (larkForm || channel.available) ? <div className="sxa-channel__code">
             <p>{t("sxaLarkSteps")}</p>
             <code>{channel.webhook_url}</code>
             {channel.available ? null : <form className="sxa-channel__form" onSubmit={saveLark}>
@@ -149,12 +122,6 @@ export function StudioAssistant({ request, t }) {
               <label>Encrypt Key<input name="encrypt_key" type="password" autoComplete="off" /></label>
               <Button variant="secondary" type="submit">{t("sxaLarkSave")}</Button>
             </form>}
-          </div> : null}
-          {channel.linked ? <p className="sxa-channel__status">{t("sxaChannelLinked")}</p> : null}
-          {!channel.linked && connecting?.kind === channel.kind ? <div className="sxa-channel__code">
-            <p>{t("sxaChannelCodeHint", CHANNEL_NAMES[channel.kind])}</p>
-            <code>{connecting.code}</code>
-            {connecting.url ? <a href={connecting.url} target="_blank" rel="noopener noreferrer">{t("sxaChannelOpen", CHANNEL_NAMES[channel.kind])}</a> : null}
           </div> : null}
         </div>)}
       </div> : null}

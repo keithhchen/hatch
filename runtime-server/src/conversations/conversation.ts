@@ -2,28 +2,62 @@
  * A conversation with something that works for the Expert: a Product worker or the Assistant.
  * Outside agents see every conversation through this one port and this one message shape.
  */
+import type { RunFailure } from "../factoryAgents/runFailure.js";
+import type { ClientAttributes } from "../surfaces/contract.js";
+
+export type { RunFailure };
+
 export type PublicMessage = {
   id: string;
   role: "user" | "assistant";
   text: string;
   created_at: string;
-  attachments?: Array<{ type: "image"; name: string }>;
+  /** "queued": the message joined a running turn and is not yet read by the model. Absent once it is. */
+  state?: "queued";
+  attachments?: Array<{ type: "image" | "file" | "audio"; name: string; asset_id?: string; bytes?: number }>;
+};
+
+/** An asset the upload side has finished with. Bytes live in the workspace at `path`; the model reads them there. */
+export type ReadyAsset = { id: string; kind: "image" | "file" | "audio"; name: string; mimeType: string; bytes: number; sha256: string; path: string; transcript?: string };
+
+/** What a client sent, with every attachment already resolved to a ready asset. */
+export type SendInput = {
+  /** The message's id in history and its idempotency key: the client's own `Idempotency-Key`, or one the host made. The same id and content is the same message. */
+  id: string;
+  text: string;
+  attachments: ReadyAsset[];
+  client: ClientAttributes;
 };
 
 export type ConversationState = "idle" | "running" | "failed";
-export type ConversationStatus = { state: ConversationState; error?: string };
-export type Sent = { conversationId: string; message: PublicMessage; queued: boolean };
+/** `runId` names the Run in progress; it is not the conversation, and a conversation has many Runs. `error` is why the last Run failed. */
+export type ConversationStatus = { state: ConversationState; error?: RunFailure; runId?: string };
+/** `runId` is the Run that took the message, when the conversation can say. */
+export type Sent = { conversationId: string; message: PublicMessage; queued: boolean; runId?: string };
 export type ConversationEvent = { type: string; [key: string]: unknown };
-/** Subscribers get events until they call the returned function. */
 export type Unsubscribe = () => void;
 
 export interface Conversation {
   status(): Promise<ConversationStatus>;
   /** Oldest first. Without `after`, the latest `limit`; with it, the first `limit` messages after that id. */
   messages(after?: string, limit?: number): Promise<{ status: ConversationStatus; messages: PublicMessage[] }>;
-  send(content: string): Promise<Sent>;
-  events(listener: (event: ConversationEvent) => void): Promise<Unsubscribe>;
+  /** Atomic: the message steers the running turn or starts one, and is never lost. */
+  send(input: SendInput): Promise<Sent>;
+  /**
+   * The message when `input.id` was already accepted with this content, read from the conversation's own record; a refusal
+   * when it was accepted with other content. Nothing when the id is new. A conversation whose acceptance is atomic needs none.
+   */
+  replay?(input: SendInput): Promise<Sent | undefined>;
+  /** Key of this conversation's event log; nothing until the conversation exists. */
+  feedKey(): Promise<string | undefined>;
   stop(): Promise<void>;
+  /**
+   * Answers the conversation again after a Run that failed or was interrupted, with no new message. The same `key` is the same
+   * Run. A refusal (ConversationError, 409) while a Run is active or when the latest Run did not fail. Nothing for a conversation that cannot.
+   */
+  retry?(key: string, client: ClientAttributes): Promise<{ runId: string; outcome: "started" | "replayed" }>;
+  /** What the running turn has said so far, when the conversation knows it without its event log. */
+  partial?(): Promise<string>;
 }
 
 /** An error the API shows as is: status, machine-readable code and a message for people. */

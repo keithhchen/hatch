@@ -95,7 +95,7 @@ Telegram ──┤──> 代码过滤 ──> 判断 Agent + 环节 ───�
 
 ### 3.1f 消息渠道
 
-Telegram、LINE、Lark、iMessage 都实现同一个 `ChannelAdapter` port，助理不感知平台。Telegram 和 LINE 用我们的官方账号，iMessage 用 Photon 托管的线路，Lark 由专家自带应用（凭据加密存储），因为自建应用只在一个企业内可用。绑定统一用 15 分钟有效的一次性连接码，存在 `hatch_assistant_channels`。回复回到消息来源的平台；主动消息发到专家最近活跃的平台。WhatsApp 暂不接：Meta 条款 §4.7 禁止以通用 AI 助手为主要功能的产品使用其平台。
+Telegram、LINE、Lark、iMessage 都实现同一个 `ChannelAdapter` port，助理不感知平台。Telegram 和 LINE 用我们的官方账号，iMessage 用 Photon 托管的线路，Lark 由专家自带应用（凭据加密存储），因为自建应用只在一个企业内可用。绑定统一用 15 分钟有效的一次性连接码，存在 `hatch_connections`（`hatch_assistant_channels` 已在启动时一次性迁入，不再读取）。回复回到消息来源的平台；主动消息发到专家最近活跃的平台。WhatsApp 暂不接：Meta 条款 §4.7 禁止以通用 AI 助手为主要功能的产品使用其平台。
 
 ### 3.1e 消息来源与当前状态
 

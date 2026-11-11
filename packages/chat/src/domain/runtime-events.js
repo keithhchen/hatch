@@ -7,14 +7,14 @@ import { ChatTimeline } from "./timeline.js";
  * not applied, so a host text-reveal policy can pace them.
  *
  * Outcome kinds: text, timeline, tool_request, approval_request, turn_state,
- * compacted, accepted, ready, terminal, session_error, ignored.
+ * compacted, changed, accepted, ready, terminal, session_error, ignored.
  */
 const replying = Object.freeze({ key: "agentReplying" });
 const outcome = (kind, fields = {}) => Object.freeze({ kind, ...fields });
 const IGNORED = outcome("ignored");
 
 const deltaHandlers = Object.freeze({
-  text: (_timeline, delta) => outcome("text", { content: delta.content ?? "", status: replying }),
+  text: (_timeline, delta) => outcome("text", { content: delta.content ?? "", offset: delta.offset, status: replying }),
   thinking_start: (timeline, delta) => (timeline.startThinking(delta.contentIndex), outcome("timeline", { status: replying })),
   thinking_delta: (timeline, delta) => (timeline.appendThinking(delta.contentIndex, delta.delta), outcome("timeline", { status: replying })),
   thinking_end: (timeline, delta) => (timeline.finishThinking(delta.contentIndex, delta.content), outcome("timeline")),
@@ -56,8 +56,15 @@ const runHandlers = Object.freeze({
 const sessionHandlers = Object.freeze({
   "session.ready": (_timeline, event) => outcome("ready", { session: event }),
   "session.error": (_timeline, event) => outcome("session_error", { error: event.error }),
-  "session.compacted": (_timeline, event) => outcome("compacted", { compaction: event })
+  "session.compacted": (_timeline, event) => outcome("compacted", { compaction: event }),
+  // The conversation changed in a way the stream does not carry: a message was saved (`committed`: "assistant" or "user"), or a queued one was taken up ("claimed").
+  "conversation.changed": (_timeline, event) => outcome("changed", { committed: event.committed })
 });
+
+/** Whether the event belongs to one Run, as opposed to the session or the conversation. */
+export const isRunEvent = event => Boolean(runHandlers[event?.type]);
+
+const TERMINAL_EVENTS = new Set(["turn.completed", "turn.failed"]);
 
 export class RuntimeEventReducer {
   /**
@@ -69,7 +76,9 @@ export class RuntimeEventReducer {
     const session = sessionHandlers[event?.type];
     if (session) return session(timeline, event);
     const run = runHandlers[event?.type];
-    if (!run || !activeRunId || event.run_id !== activeRunId) return IGNORED;
+    if (!run) return IGNORED;
+    // A Run's end is heard whoever holds the timeline: a Run the page never adopted still ended, and must not be adopted later.
+    if (!activeRunId || event.run_id !== activeRunId) return TERMINAL_EVENTS.has(event.type) ? run(timeline, event) : IGNORED;
     return run(timeline, event);
   }
 }

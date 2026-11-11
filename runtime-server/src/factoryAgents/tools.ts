@@ -1,5 +1,6 @@
 import { Type } from "@earendil-works/pi-ai";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
+import { regexMatcher } from "../assets/matchers.js";
 import { detectMediaType, projectSource } from "../creatorLearning/sourceLibrary.js";
 import { result } from "./files.js";
 import { WorkbenchStore } from "./store.js";
@@ -26,6 +27,25 @@ export function fileTools(store: WorkbenchStore, id: string, options: { changed?
       return result({ path: a.path, representation: plain ? "original_text" : "extracted_text_original_retained", total_characters: text.length, offset, next_offset: end < text.length ? end : null, content: text.slice(offset, end) });
     } }
   ];
+  tools.push({ name: "grep", label: "搜索文件", description: "Search file contents with a JavaScript regular expression across the same files list shows. Returns matching lines as path, line number and text. Use list to see files, grep to find where something is, then read for the surrounding text.", parameters: Type.Object({ pattern: Type.String({ minLength: 1, maxLength: 500 }), directory: Type.Optional(Type.String({ description: "Only search below this directory, such as input/manual or output." })), ignore_case: Type.Optional(Type.Boolean()), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })) }), execute: async (_id, raw) => {
+    const a = raw as { pattern: string; directory?: string; ignore_case?: boolean; limit?: number };
+    const directory = a.directory?.replace(/\/+$/, "");
+    const matcher = regexMatcher(a.pattern, a.ignore_case === true);
+    const limit = a.limit ?? 50;
+    const matches: Array<{ path: string; line: number; text: string }> = [];
+    for (const record of (await records()).filter(f => !directory || directory === "." || f.path.startsWith(`${directory}/`))) {
+      if (matches.length >= limit) break;
+      const { bytes } = await store.read(id, record.path);
+      const mimeType = detectMediaType(record.path, record.mimeType === "application/octet-stream" ? undefined : record.mimeType, bytes);
+      if (mimeType.startsWith("image/") || /\.(mp3|mp4|wav|m4a|mov|webm|ogg)$/i.test(record.path)) continue;
+      const plain = /\.(md|txt|srt|vtt|log)$/i.test(record.path);
+      const text = plain ? bytes.toString("utf8") : ((await projectSource(record.path, mimeType, bytes).catch(() => undefined)) as { __content?: string } | undefined)?.__content;
+      if (typeof text !== "string") continue;
+      const lines = text.split("\n");
+      for (const hit of await matcher(lines, limit - matches.length)) matches.push({ path: record.path, line: hit + 1, text: lines[hit]!.slice(0, 300) });
+    }
+    return result({ matches, truncated: matches.length >= limit });
+  } });
   tools.push({ name: "write", label: "写入 Markdown", description: "Save one actual output/*.md file. Read an existing file before editing it. Writing the same path replaces its current contents. A failed call means nothing was saved. Input files and Runtime results are read-only.", parameters: Type.Object({ path: Type.String(), content: Type.String({ minLength: 1 }) }), execute: async (_id, raw) => {
     const a = raw as { path: string; content: string };
     const record = await store.put(id, a.path, Buffer.from(a.content), { actor: "agent" });

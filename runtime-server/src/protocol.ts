@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { Api, AssistantMessage, Usage } from "@earendil-works/pi-ai";
 import { UUID_V4_RE } from "./identity.js";
 import type { BriefSpec } from "./brief.js";
+import { CLIENT_GROUPS, normalizeClientAttributes, type ClientAttributes } from "./surfaces/contract.js";
 
 export const PROTOCOL_VERSION = "0.8";
 export const SUPPORTED_PROTOCOL_VERSIONS = [PROTOCOL_VERSION] as const;
@@ -47,6 +48,17 @@ const TimeZoneSchema = z.string().min(1).max(64).refine((zone) => {
   }
 }, "time_zone must be an IANA time zone");
 const AuthorityIdSchema = z.string().regex(UUID_V4_RE);
+/**
+ * What the client says about itself. The Runtime normalizes it: only a known client
+ * group, device, and well-formed locales ever reach the model. Without `client`, a
+ * client that declares local tools is a desktop and any other is the web.
+ */
+const ClientAttributeFields = {
+  client: z.enum(CLIENT_GROUPS).optional(),
+  device: z.string().max(32).optional(),
+  locale: z.string().max(35).optional(),
+  language: z.string().max(35).optional()
+};
 export const ClientToolNameSchema = z.enum([
   "file_list",
   "file_search",
@@ -83,7 +95,8 @@ export const ClientHelloSchema = z.object({
   product_id: AuthorityIdSchema.optional(),
   client_version: z.string().max(MAX_PROTOCOL_ID_CHARS).optional(),
   local_tools: z.array(ClientToolNameSchema).max(ClientToolNameSchema.options.length),
-  time_zone: TimeZoneSchema.optional()
+  time_zone: TimeZoneSchema.optional(),
+  ...ClientAttributeFields
 }).strict().superRefine((message, ctx) => {
   if (!message.auth_token && !message.license_token) {
     ctx.addIssue({ code: "custom", path: ["auth_token"], message: "auth_token is required" });
@@ -268,6 +281,7 @@ export const ClientMessageSchema = z.object({
   local_tools: z.array(ClientToolNameSchema).max(ClientToolNameSchema.options.length).optional(),
   /** Overrides the session's client.hello time_zone for this turn. */
   time_zone: TimeZoneSchema.optional(),
+  ...ClientAttributeFields,
   message: UserMessageSchema,
   /** Requests the first Agent run; Runtime materializes its internal marked user turn. */
   task_start: z.literal(true).optional()
@@ -303,12 +317,37 @@ export const TurnCancelSchema = z.object({
   reason: z.string().max(4096).optional()
 }).strict();
 
+/**
+ * Observe the conversation from a cursor. `stream: true` adds the live deltas of the
+ * Run to its durable events; `stream: false` delivers durable events only.
+ */
+export const ConversationSubscribeSchema = z.object({
+  type: z.literal("conversation.subscribe"),
+  conversation_id: ProtocolIdSchema,
+  stream: z.boolean(),
+  after_cursor: z.number().int().min(0).optional()
+}).strict();
+
 export const InboundMessageSchema = z.discriminatedUnion("type", [
   ClientHelloSchema,
   ClientMessageSchema,
   ToolCallResultSchema,
-  TurnCancelSchema
+  TurnCancelSchema,
+  ConversationSubscribeSchema
 ]);
+
+export type ConversationSubscribe = z.infer<typeof ConversationSubscribeSchema>;
+
+/** The server-normalized attributes of the client that sent a hello or a message. */
+export function clientAttributesOf(
+  message: { client?: string; device?: string; locale?: string; language?: string },
+  fallback: { local_tools?: readonly unknown[] } & { client?: string; device?: string; locale?: string; language?: string } = {}
+): ClientAttributes {
+  const merged = { ...fallback, ...Object.fromEntries(Object.entries(message).filter(([, value]) => value !== undefined)) } as {
+    client?: string; device?: string; locale?: string; language?: string; local_tools?: readonly unknown[];
+  };
+  return normalizeClientAttributes({ ...merged, client: merged.client ?? (merged.local_tools?.length ? "desktop" : "web") });
+}
 
 export type ClientHello = z.infer<typeof ClientHelloSchema>;
 export type RunStart = z.infer<typeof ClientMessageSchema>;
@@ -332,6 +371,8 @@ export type InboundMessage = z.infer<typeof InboundMessageSchema>;
 export type ConversationMessage = {
   role: "user" | "assistant" | "tool" | "compactionSummary";
   content: string | null;
+  /** What the user themselves wrote, when `content` is the model's rendering of the message (attachment lines). History shows this. */
+  typed?: string;
   /** Internal durable marker. UI projections hide it; provider adapters omit it. */
   kind?: "task_start";
   /** Structured dropped-file projection for durable audit and recovery. */
@@ -530,20 +571,26 @@ export type MessageAccepted = {
   conversation_id: string;
   run_id: string;
   client_message_id: string;
+  /** Whether the message started the Run, joined the running one (queued until the Run takes it up), or was already accepted. */
+  outcome?: "started" | "steered" | "replayed";
 };
 
 export type CompactionEvent = {
   type: "session.compacted";
   run_id: string;
   trigger: "auto" | "manual";
-  phase: "pre_turn" | "mid_turn" | "standalone_turn";
-  reason: "context_limit" | "user_requested";
+  phase: "pre_turn" | "mid_turn" | "standalone_turn" | "background" | "overflow_recovery";
+  reason: "context_limit" | "user_requested" | "provider_overflow";
   message: string;
   replacement_history: ConversationMessage[];
   window_number: number;
   first_window_id: string;
   previous_window_id?: string;
   window_id: string;
+  compaction_id?: string;
+  stage?: "prune" | "summary" | "degraded";
+  degraded?: boolean;
+  dropped_messages?: number;
 };
 
 export type RunFinal = {
@@ -575,6 +622,8 @@ export type RunError = {
   error: {
     code: string;
     message: string;
+    /** What staff look up for an upstream or internal failure. */
+    reference?: string;
   };
 };
 

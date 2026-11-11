@@ -22,8 +22,9 @@ function userLine(message: AgentMessage, index: number): PublicMessage | undefin
   if (origin && origin.kind !== "expert") return undefined;
   const text = (origin?.text ?? textOf(message)).trim();
   if (!text) return undefined;
-  const images = origin?.images?.map(file => file.split("/").pop()!) ?? [];
-  return { id: origin?.itemId ?? positionId(index), role: "user", text, created_at: at(message), ...(images.length ? { attachments: images.map(name => ({ type: "image" as const, name })) } : {}) };
+  const attachments = origin?.attachments?.map(({ type, name, assetId }) => ({ type, name, asset_id: assetId }))
+    ?? origin?.images?.map(file => ({ type: "image" as const, name: file.split("/").pop()! })) ?? [];
+  return { id: origin?.itemId ?? positionId(index), role: "user", text, created_at: at(message), ...(attachments.length ? { attachments } : {}) };
 }
 
 type Block = { type: string; name?: string };

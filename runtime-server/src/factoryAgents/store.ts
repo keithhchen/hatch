@@ -18,29 +18,15 @@ export type Comment = { id: string; path: string; start: number; end: number; qu
 export type FactoryProductScope = { creatorId: string; productId: string; briefSpec?: unknown };
 export type AgentDefinitionSource = { list(): Promise<Array<{ role: AnyRole; systemPrompt: string; tools: string[]; dependencies: { required: Role[]; normal: Role[]; updates: Role[] } }>> };
 /** Where a user message in history came from. The model reads its text; the chat shows only what the Expert said. */
-export type MessageOrigin = { kind: "expert" | "system"; itemId: string; text?: string; images?: string[] };
+export type MessageOrigin = { kind: "expert" | "system"; itemId: string; text?: string; images?: string[];
+  /** Assets the client sent with the message. */
+  attachments?: Array<{ type: "image" | "file" | "audio"; name: string; assetId: string }> };
 
-export type IngressItem = {
-  id: string; at: string;
-  source: "web" | "telegram" | "line" | "lark" | "imessage" | "task" | "tick" | "consumer";
-  text: string;
-  /** Workspace paths of images that came with this item. */
-  images?: string[];
-  taskId?: string; eventId?: string; messageRef?: string;
-  /** Turns that took this item but ended before it reached the context. */
-  attempts?: number;
-};
-export type AssistantDeskState = {
-  ingress: IngressItem[];
-  seenEvents: string[];
-  interview?: { taskId: string; productId: string; sessionId: string; relayFrom: number };
-  lastExpert?: { source: "web" | "telegram" | "line" | "lark" | "imessage"; at: string; messageRef?: string; };
-};
 export type Session = {
   id: string; role: AnyRole; title: string; createdAt: string; updatedAt: string;
   revision: number; turn: number; status: "idle" | "running" | "completed" | "failed" | "interrupted";
   outputUpdatedAt?: string; lastRunAt?: string;
-  error?: string; activeTool?: string;
+  error?: string; /** Stable code of a failed Run; `error` is its message. */ errorCode?: string; errorRef?: string; activeTool?: string;
   files: FileRecord[]; comments: Comment[];
   messages: AgentMessage[]; context: AgentMessage[]; scribeContext?: AgentMessage[]; todos: Todo[];
   product?: Pick<FactoryProductScope, "creatorId" | "productId">;
@@ -48,8 +34,6 @@ export type Session = {
   voiceLive?: { resumptionHandle?: string };
   /** Set while the Assistant drives this session for one of its tasks. */
   assistantTaskId?: string;
-  /** Assistant session only: durable ingress and the interview it is passing through. */
-  assistantDesk?: AssistantDeskState;
   knowledge?: Array<{ path: string; id: string; source: string; title: string; productId: string; sha256: string }>;
   corpus?: { product_id: string; corpus_ref: string; corpus_digest: string; release_digest: string; status: "published"; published_at: string; files: string[] };
 };
@@ -97,7 +81,10 @@ export class FileWorkbenchBackend implements WorkbenchBackend {
   private directory(id: string): string { return path.join(this.root, sessionId(id)); }
   async listIds(): Promise<string[]> {
     await mkdir(this.root, { recursive: true, mode: 0o700 });
-    return (await readdir(this.root)).filter(s => /^[0-9a-f-]{36}$/.test(s));
+    const names = (await readdir(this.root)).filter(s => /^[0-9a-f-]{36}$/.test(s));
+    // A session whose directory exists but whose session.json is not yet written is still being created.
+    const created = await Promise.all(names.map(name => lstat(path.join(this.directory(name), "session.json")).then(() => true, () => false)));
+    return names.filter((_, index) => created[index]);
   }
   async load(id: string) {
     const session = JSON.parse(await readFile(path.join(this.directory(id), "session.json"), "utf8"));

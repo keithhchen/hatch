@@ -248,3 +248,49 @@ test("approval decisions are recorded per tool call and validated", () => {
   assert.throws(() => controller.markApproval("t1", "maybe"), RangeError);
   controller.dispose();
 });
+
+test("a reconnect reads the conversation, and a Run that ended while the socket was down frees the composer", async () => {
+  const { transport, controller } = setup();
+  transport.page = page([], [{ id: "run_live", status: "running" }]);
+  controller.open("conv");
+  await flush();
+  transport.connections[0].emit({ type: "session.ready", conversation_id: "conv" });
+  assert.equal(controller.getState().activeRun, "run_live");
+  const reads = transport.snapshots;
+  transport.page = page([{ id: "a1", run_id: "run_live", role: "assistant", content: "done" }], [{ id: "run_live", status: "completed" }], 5);
+  transport.connections[0].handlers.onClose();
+  controller.reconnect();
+  transport.connections.at(-1).emit({ type: "session.ready", conversation_id: "conv" });
+  await flush();
+  assert.equal(transport.snapshots, reads + 1);
+  const state = controller.getState();
+  assert.equal(state.activeRun, null);
+  assert.deepEqual(state.messages.map(message => message.id), ["a1"]);
+  controller.dispose();
+});
+
+test("text deltas carry their offset: a replay after a reconnect is not drawn twice", async () => {
+  const { transport, controller } = setup();
+  transport.page = page([], [{ id: "run_live", status: "running", partial_output: "Hel" }]);
+  controller.open("conv");
+  await flush();
+  const connection = transport.connections[0];
+  connection.emit({ type: "assistant.delta", run_id: "run_live", delta: { kind: "text", content: "Hello", offset: 0 } });
+  connection.emit({ type: "assistant.delta", run_id: "run_live", delta: { kind: "text", content: "Hello", offset: 0 } });
+  assert.equal(controller.getState().messages.at(-1).timeline[0].content, "Hello");
+  controller.dispose();
+});
+
+test("message.accepted tells whether the message started the Run or joined it", async () => {
+  const { transport, controller } = setup();
+  controller.open("conv");
+  await flush();
+  const connection = transport.connections[0];
+  connection.emit({ type: "session.ready", conversation_id: "conv" });
+  controller.setDraft("hello");
+  await controller.send();
+  const sent = connection.sent.find(frame => frame.type === "client.message");
+  connection.emit({ type: "message.accepted", run_id: sent.runId, client_message_id: sent.clientMessageId, outcome: "steered" });
+  assert.equal(controller.getState().messages.find(message => message.role === "user").state, "queued");
+  controller.dispose();
+});

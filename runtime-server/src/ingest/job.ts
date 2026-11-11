@@ -1,6 +1,8 @@
 /** Domain: an ingest job and its legal transitions. Pure functions; nothing here touches I/O. */
 
 export type IngestInput = { url: string } | { name: string; media_type?: string; bytes: number };
+/** The run on an outside provider that handled an item: where to read what happened. */
+export type ProviderSession = { provider: "kimi_hosted_agents"; id: string };
 export type ItemStatus = "pending" | "ok" | "partial" | "failed";
 export type JobStatus = "queued" | "running" | "done" | "failed";
 
@@ -10,6 +12,7 @@ export type IngestItem = {
   status: ItemStatus;
   markdown_path?: string;
   original_ref?: string;
+  session?: ProviderSession;
   error?: string;
 };
 
@@ -26,7 +29,7 @@ export type IngestJob = {
 };
 
 /** What the item looks like once settled: everything but the id and input. */
-export type ItemOutcome = Pick<IngestItem, "status" | "markdown_path" | "original_ref" | "error">;
+export type ItemOutcome = Pick<IngestItem, "status" | "markdown_path" | "original_ref" | "session" | "error">;
 
 const ALLOWED: Record<JobStatus, JobStatus[]> = { queued: ["running", "failed"], running: ["done", "failed"], done: [], failed: [] };
 

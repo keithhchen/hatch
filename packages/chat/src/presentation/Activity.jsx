@@ -7,10 +7,7 @@ export function ThinkingTicker({ content }) {
   const text = latestThinkingText(content, 50);
   if (!text) return null;
   return <span className="web-chat__activity-thinking-preview">
-    <span className="web-chat__thinking-ticker-track">
-      <span className="web-chat__thinking-ticker-copy">{text}</span>
-      <span className="web-chat__thinking-ticker-copy" aria-hidden="true">{text}</span>
-    </span>
+    <span className="web-chat__thinking-ticker-copy">{text}</span>
   </span>;
 }
 
@@ -61,7 +58,7 @@ export function ActivityModal({ entries, isLastItem, t, errorText, loadToolDetai
         <button type="button" aria-label={t("close")} onClick={() => setOpen(false)}><X aria-hidden="true" /></button>
       </header>
       {hasOpened ? <div className="web-chat__activity-modal-items">
-        {entries.map(activity => <ActivityBlock key={activity.id} entry={activity} t={t} errorText={errorText} loadToolDetail={loadToolDetail} expandable={false} />)}
+        {entries.map(activity => <ActivityBlock key={activity.id} entry={activity} t={t} errorText={errorText} loadToolDetail={loadToolDetail} expandable={activity.kind === "thinking"} />)}
       </div> : null}
     </dialog>
   </>;

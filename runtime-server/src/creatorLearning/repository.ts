@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { Pool, type QueryResultRow } from "pg";
+import { createPool } from "../postgresPool.js";
 import type { PostgresQueryExecutor } from "../postgresStore.js";
 import { requireQuestionBatchId } from "./questionBatch.js";
 import type { FactoryRunState, FactoryStage, FactoryStartInput } from "./types.js";
@@ -681,7 +682,7 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
   constructor(pool: PostgresQueryExecutor);
   constructor(input: string | PostgresCreatorFactoryRepositoryOptions | PostgresQueryExecutor = {}) {
     if (typeof input === "string") {
-      this.pool = new Pool({ connectionString: input });
+      this.pool = createPool({ connectionString: input });
       this.ownsPool = true;
       return;
     }
@@ -703,7 +704,7 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
       ?? environment.HATCH_REGISTRY_DATABASE_URL
       ?? environment.DATABASE_URL;
     if (!connectionString) throw new Error("Postgres Creator Factory repository requires a database connection string");
-    this.pool = new Pool({
+    this.pool = createPool({
       connectionString,
       ...(input.maxConnections === undefined ? {} : { max: input.maxConnections })
     });
@@ -730,22 +731,21 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
     const briefSpec = normalizeBriefSpec(input.briefSpec);
     const idempotencyKey = input.idempotencyKey?.trim() || null;
     const inputDigest = productInputDigest(input);
-    if (idempotencyKey) {
-      const replay = await this.pool.query<ProductRow>(`
-        SELECT * FROM hatch_creator_products WHERE creator_id = $1 AND idempotency_key = $2
-      `, [creatorId, idempotencyKey]);
-      if (replay.rows[0]) {
-        assertIdempotentDigest(replay.rows[0].input_digest ?? "", inputDigest, idempotencyKey);
-        return productFromRow(replay.rows[0]);
-      }
-    }
     const runId = input.runId?.trim() || null;
+    // Concurrent requests with one key race on the unique index: the loser inserts nothing and replays the winner's row.
     const result = await this.pool.query<ProductRow>(`
       INSERT INTO hatch_creator_products (id, creator_id, name, promise, brief_spec, run_id, idempotency_key, input_digest)
       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8)
+      ON CONFLICT (creator_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
       RETURNING *
     `, [id, creatorId, name, promise, JSON.stringify(briefSpec), runId, idempotencyKey, inputDigest]);
-    return productFromRow(requireRow(result.rows[0], "Product insert returned no row"));
+    if (result.rows[0]) return productFromRow(result.rows[0]);
+    const replay = await this.pool.query<ProductRow>(`
+      SELECT * FROM hatch_creator_products WHERE creator_id = $1 AND idempotency_key = $2
+    `, [creatorId, idempotencyKey]);
+    const row = requireRow(replay.rows[0], "Product insert returned no row");
+    assertIdempotentDigest(row.input_digest ?? "", inputDigest, idempotencyKey!);
+    return productFromRow(row);
   }
 
   async getProduct(creatorId: string, productId: string): Promise<CreatorProductRecord | undefined> {

@@ -1,3 +1,7 @@
+import type { PostgresConversationRepository as PgRepository } from "./conversationRepository.js";
+/** A repository whose Run endings can write their replies; this fake pool keeps no transcript. */
+const withTranscript = (repository: PgRepository, pool: object): PgRepository => { repository.bindSubmissionStore({ pool, appendOn: async () => undefined } as never); return repository; };
+import { endingOf } from "./testSupport.js";
 import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
@@ -110,7 +114,7 @@ test("ConversationRepository enforces idempotent client messages and one active 
   );
 
   await repository.transitionRun("run_1", "running");
-  await repository.transitionRun("run_1", "completed");
+  await repository.endRun("run_1", endingOf("completed"));
   const second = await repository.createRun({
     id: "run_2",
     conversationId: conversation.id,
@@ -122,13 +126,13 @@ test("ConversationRepository enforces idempotent client messages and one active 
   assert.equal(second.run.status, "queued");
 
   const firstSnapshot = await repository.snapshot(conversation.id);
-  assert.deepEqual(firstSnapshot.events.map((event) => event.cursor), [1, 2, 3, 4, 5]);
+  assert.deepEqual(firstSnapshot.events.map((event) => event.cursor), [1, 2, 3, 4, 5, 6]);
   const replaySnapshot = await repository.snapshot(conversation.id, 3);
-  assert.deepEqual(replaySnapshot.events.map((event) => event.type), ["run.state", "run.created"]);
-  assert.equal(replaySnapshot.cursor, 5);
+  assert.deepEqual(replaySnapshot.events.map((event) => event.type), ["message.created", "run.state", "run.created"]);
+  assert.equal(replaySnapshot.cursor, 6);
 });
 
-test("FileConversationRepository survives restart and interrupts rather than replays an active run", async () => {
+test("FileConversationRepository survives restart and keeps an interrupted run interrupted", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-repository-"));
   const first = new FileConversationRepository(root);
   const conversation = (await first.createConversation(conversationInput("conversation_file"))).conversation;
@@ -142,14 +146,12 @@ test("FileConversationRepository survives restart and interrupts rather than rep
   await first.close();
 
   const restarted = new FileConversationRepository(root);
-  const interrupted = await restarted.interruptActiveRuns("Runtime restarted");
-  assert.equal(interrupted.length, 1);
-  assert.equal(interrupted[0]?.status, "interrupted");
-  assert.equal(interrupted[0]?.interruptedReason, "Runtime restarted");
-  assert.equal((await restarted.interruptActiveRuns("again")).length, 0);
+  const interrupted = await restarted.endRun("run_pending", endingOf("interrupted", "Runtime restarted"));
+  assert.equal(interrupted.run.status, "interrupted");
+  assert.equal(interrupted.run.failure?.message, "Runtime restarted");
   const snapshot = await restarted.snapshot(conversation.id);
   assert.equal(snapshot.runs[0]?.status, "interrupted");
-  assert.ok(snapshot.events.some((event) => event.type === "run.state" && event.payload.reason === "Runtime restarted"));
+  assert.ok(snapshot.events.some((event) => event.type === "run.state" && (event.payload.failure as { message?: string } | undefined)?.message === "Runtime restarted"));
   await restarted.close();
 
   const reopened = new FileConversationRepository(root);
@@ -204,14 +206,14 @@ type DatabaseRow = Record<string, unknown>;
 for (const backend of ["memory", "postgres"] as const) {
   test(`${backend} bounded recovery and journal pages preserve scope, content and a stable watermark`, async () => {
     const pool = new ConversationPostgresFake();
-    const repository = backend === "memory" ? new InMemoryConversationRepository() : new PostgresConversationRepository({ pool });
+    const repository = backend === "memory" ? new InMemoryConversationRepository() : withTranscript(new PostgresConversationRepository({ pool }), pool);
     await repository.createConversation(conversationInput("paged"));
     await repository.createConversation(conversationInput("other"));
     for (const [id, status] of [
       ["run_1", "completed"], ["run_2", "interrupted"], ["run_3", "interrupted"], ["run_4", "completed"], ["run_5", "queued"]
     ] as const) {
       await repository.createRun({ id, conversationId: "paged", clientMessageId: id, inputDigest, corpusDigest: binding.corpusDigest });
-      await repository.transitionRun(id, status);
+      await (status === "completed" || status === "interrupted" ? repository.endRun(id, endingOf(status)) : repository.transitionRun(id, status));
     }
     await repository.createRun({ id: "foreign", conversationId: "other", clientMessageId: "foreign", inputDigest, corpusDigest: binding.corpusDigest });
     const content = "large message ".repeat(10_000);
@@ -257,11 +259,11 @@ for (const backend of ["memory", "postgres"] as const) {
     await assert.rejects(repository.journalPage("paged", page.cursor + 100, first.through_cursor), RangeError);
     await assert.rejects(repository.journalPage("paged", 0, first.through_cursor + 100), RangeError);
     await assert.rejects(repository.journalPage("paged", first.through_cursor + 100), RangeError);
-    await repository.transitionRun("run_5", "completed");
+    await repository.endRun("run_5", endingOf("completed"));
     assert.deepEqual((await repository.recoverySnapshot("paged", [])).runs, []);
     assert.deepEqual((await repository.recoverySnapshot("paged", ["run_3"])).runs.map((run) => run.id), ["run_3"]);
     await repository.createRun({ id: "run_6", conversationId: "paged", clientMessageId: "run_6", inputDigest, corpusDigest: binding.corpusDigest });
-    await repository.transitionRun("run_6", "interrupted");
+    await repository.endRun("run_6", endingOf("interrupted"));
     assert.deepEqual((await repository.recoverySnapshot("paged", [])).runs.map((run) => run.id), ["run_6"]);
     assert.deepEqual((await repository.recoverySnapshot("paged", ["run_6"])).runs.map((run) => run.id), ["run_6"]);
     for (const limit of [0, -1, NaN, Infinity]) await assert.rejects(repository.journalPage("paged", 0, undefined, limit), RangeError);
@@ -306,12 +308,16 @@ class ConversationPostgresFake implements PostgresQueryExecutor {
   readonly runs = new Map<string, DatabaseRow>();
   readonly events: DatabaseRow[] = [];
 
+  async connect() {
+    return { query: this.query.bind(this), release: () => undefined };
+  }
+
   async query<T extends Record<string, unknown> = Record<string, unknown>>(
     text: string,
     values?: unknown[]
   ): Promise<{ rows: T[] }> {
     this.queries.push({ text, values });
-    if (/^\s*CREATE TABLE/i.test(text)) return { rows: [] };
+    if (/^\s*(CREATE TABLE|BEGIN|COMMIT|ROLLBACK|SELECT c\.id FROM hatch_conversations c)/i.test(text)) return { rows: [] };
     if (/^\s*SELECT \* FROM hatch_conversations\s+WHERE owner_account_id/i.test(text)) {
       const [owner, creator, agent, requestId] = values ?? [];
       return this.rows([...this.conversations.values()].filter((row) => (
@@ -385,7 +391,7 @@ class ConversationPostgresFake implements PostgresQueryExecutor {
       if (status === "interrupted") row.interrupted_reason = reason;
       return this.rows([row]);
     }
-    if (/^\s*INSERT INTO hatch_conversation_journal/i.test(text)) {
+    if (/INSERT INTO hatch_conversation_journal/i.test(text)) {
       const [conversationId, runId, eventType, payload, createdAt] = values ?? [];
       const row: DatabaseRow = {
         cursor: this.events.length + 1,
@@ -408,6 +414,7 @@ class ConversationPostgresFake implements PostgresQueryExecutor {
       const row = [...this.events].filter((event) => event.conversation_id === values?.[0]).at(-1);
       return this.rows(row ? [{ cursor: row.cursor }] : []);
     }
+    if (/SELECT count\(\*\) AS n FROM hatch_conversation_events/i.test(text)) return this.rows([{ n: "0" }]);
     throw new Error(`Unexpected query: ${text}`);
   }
 

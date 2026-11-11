@@ -1,3 +1,5 @@
+import { JOURNAL_EVENT_TYPES } from "./journal-events.js";
+
 /**
  * Durable Conversation snapshot / page reconciliation (protocol 0.8).
  * Canonical rules come from Desktop: validate every page, drain the journal
@@ -26,7 +28,7 @@ export const isTerminalRunStatus = value => TERMINAL_RUN_STATUSES.includes(Strin
 export const runId = run => String(run?.id ?? run?.run_id ?? "").trim();
 export const activeSnapshotRun = snapshot => snapshot.runs?.find(run => ACTIVE_RUN_STATUSES.includes(run.status)) ?? null;
 
-const SNAPSHOT_EVENT_TYPES = new Set(["conversation.created", "conversation.updated", "run.created", "run.state", "message.created"]);
+const SNAPSHOT_EVENT_TYPES = new Set(JOURNAL_EVENT_TYPES);
 
 // Runtime JSON key order is not semantic; canonical keys distinguish a true
 // idempotent duplicate from a same-cursor event whose payload changed.
@@ -163,7 +165,7 @@ export async function includeActiveConversationRun(snapshot, activeRunId, readRu
   return { ...snapshot, runs: [run, ...snapshot.runs] };
 }
 
-const MESSAGE_FIELDS = ["run_id", "role", "content", "timestamp", "attachments", "finish_reason", "parts", "tool_calls", "skill_events", "skill_runs"];
+const MESSAGE_FIELDS = ["run_id", "role", "content", "timestamp", "state", "attachments", "finish_reason", "parts", "tool_calls", "skill_events", "skill_runs"];
 const sameMessage = (left, right) => MESSAGE_FIELDS.every(field => canonicalValue(left[field] ?? null) === canonicalValue(right[field] ?? null));
 
 /**
@@ -183,8 +185,8 @@ export function mergeConversationPage(current, incoming, { older = false, baseli
   }
   const before = new Set(baseline);
   const byId = new Map(current.map(message => [message.id, message]));
-  const placeholders = new Map(current.filter(isPlaceholderMessage).map(message => [placeholderAlias(message), message]));
-  const aliasOwners = new Map(incoming.map(message => [placeholderAlias(message), message.id]));
+  const placeholders = new Map(current.filter(message => isPlaceholderMessage(message) && placeholderAlias(message)).map(message => [placeholderAlias(message), message]));
+  const aliasOwners = new Map(incoming.filter(placeholderAlias).map(message => [placeholderAlias(message), message.id]));
   const consumed = new Set();
   const projected = incoming.map(message => {
     const alias = placeholderAlias(message);

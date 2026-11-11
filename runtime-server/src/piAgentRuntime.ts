@@ -1,3 +1,4 @@
+import { UpstreamError } from "./errors/upstream.js";
 import {
   Agent,
   convertToLlm,
@@ -29,7 +30,6 @@ import {
   mergeRuntimeActiveSkill,
   modelVisibleToolResult,
   produceAuditedFinal,
-  requestedOutputPath,
   toolEventBase,
   withActivityMessage,
   workspaceDiffEvent,
@@ -38,7 +38,9 @@ import {
   type WorkspacePathPolicy
 } from "./agentRuntime.js";
 import { SUMMARY_PREFIX, SUMMARY_SUFFIX } from "./compaction.js";
+import { renderSystemReminder } from "./surfaces/contract.js";
 import { createPiModel, createPiStreamFn } from "./piModel.js";
+import { withStallGuard, type StallLimits } from "./providerStall.js";
 import { traceAgentTools } from "./langfuse.js";
 import { resolveLlmProfile } from "./llmProfiles.js";
 import { runPiAgentPrompt, type PiAgentPromptRunner } from "./piPrompt.js";
@@ -77,7 +79,10 @@ export type PiToolDefinition = {
 
 export type PiAgentRuntimeOptions = {
   toolDefinitions?: PiToolDefinition[];
-  allowRequestedArtifactDelivery?: boolean;
+  /** The environment that names the model profile; the process's own when absent. */
+  env?: NodeJS.ProcessEnv;
+  /** How long a model call may stay silent before the Run fails; the model profile's own limits when absent (60s to the first event and 60s between events unless the profile says otherwise). */
+  stall?: StallLimits;
 };
 
 type QueueItem<T> =
@@ -148,8 +153,8 @@ export class PiAgentRuntime implements AgentRuntime {
 
   async *run(input: RunStart, ctx: RunContext): AsyncIterable<OutboundMessage> {
     ctx.abortSignal?.throwIfAborted();
-    const model = createPiModel();
-    const streamFn = createPiStreamFn();
+    const model = createPiModel({ env: this.options.env });
+    const streamFn = withStallGuard(createPiStreamFn({ env: this.options.env }), this.options.stall ?? resolveLlmProfile(this.options.env).stall);
     const queue = new AsyncQueue<OutboundMessage>();
     const workspacePathPolicy = createWorkspacePathPolicy(input.message.content);
     const visibleSkills = ctx.sessionSkills.visibleRecords;
@@ -162,13 +167,12 @@ export class PiAgentRuntime implements AgentRuntime {
     const toolEvents = new Map<string, ToolEventState>();
     let terminalError: Error | undefined;
     let finalAssistant: AssistantMessage | undefined;
+    let handedOver = false;
     let compacting = false;
     let hasExecutedTool = false;
-    const requestedFilePath = requestedOutputPath(input.message.content);
     const deliveryWorkflow = ctx.deliveryWorkflow;
     const deliveryReviewer = deliveryWorkflow ? await createDeliveryReviewer() : undefined;
     const transcriptMessages: ConversationMessage[] = [];
-    const completedArtifactPaths: string[] = [];
 
     // ctx.messages always contains the canonical current user turn. For
     // task_start, keep the complete transcript and continue from it so the
@@ -260,9 +264,9 @@ export class PiAgentRuntime implements AgentRuntime {
       // summary delimiters.
       convertToLlm,
       initialState: {
-        systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools, skillsSection),
+        systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools, skillsSection, ctx.ownPrompt),
         model,
-        thinkingLevel: resolveLlmProfile().thinkingLevel,
+        thinkingLevel: resolveLlmProfile(this.options.env).thinkingLevel,
         messages: [...contextMessages, ...storedMessages],
         tools: traceAgentTools(tools)
       },
@@ -274,7 +278,7 @@ export class PiAgentRuntime implements AgentRuntime {
             toolName: toolCall.name,
             arguments: separateActivityMessage(args as Record<string, unknown>).toolArguments,
             messages: auditMessagesForRun(ctx, transcriptMessages, undefined),
-            systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools, skillsSection),
+            systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools, skillsSection, ctx.ownPrompt),
             auditContext: ctx.deliveryAuditContext,
             signal
           });
@@ -291,12 +295,20 @@ export class PiAgentRuntime implements AgentRuntime {
         if (isHatchToolFailure(result.details)) return { isError: true };
         return undefined;
       },
-      transformContext: async (messages) => [
-        ...await compactContext(messages),
-        // Request-only: Pi sends the transformed list but keeps its own
-        // transcript, so the reminder is never stored or repeated in history.
-        piUserMessage(runtimeReplyReminder(new Date(), input.time_zone))
-      ]
+      transformContext: async (messages) => {
+        const live = await ctx.liveState?.();
+        return [
+          ...await compactContext(messages),
+          // Request-only: Pi sends the transformed list but keeps its own
+          // transcript, so the reminder is never stored or repeated in history.
+          piUserMessage([
+            ...(live ? [live] : []),
+            ctx.clientAttributes
+              ? `${runtimeReplyReminder(new Date(), input.time_zone)}\n${renderSystemReminder(ctx.clientAttributes())}`
+              : runtimeReplyReminder(new Date(), input.time_zone)
+          ].join("\n"))
+        ];
+      }
     });
 
     // Abort the provider-backed Pi loop as soon as the owning Runtime run is
@@ -322,9 +334,10 @@ export class PiAgentRuntime implements AgentRuntime {
           setHasExecutedTool: () => { hasExecutedTool = true; },
           deliveryWorkflow,
           transcriptMessages,
-          completedArtifactPaths,
           setFinalAssistant: (message) => { finalAssistant = message; },
-          setTerminalError: (error) => { terminalError ??= error; }
+          setTerminalError: (error) => { terminalError ??= error; },
+          setHandedOver: () => { handedOver = true; },
+          handedOver: () => handedOver
         });
       });
 
@@ -332,15 +345,12 @@ export class PiAgentRuntime implements AgentRuntime {
       // before prompt startup. Once prompt() starts, abortAgent owns the same
       // Agent AbortController that is passed to the provider request.
       ensureNotCancelled(ctx);
-      // Pi's string-plus-images overload produces the provider-native user
-      // content array. Text stays text and image attachments become native
-      // ImageContent blocks; binary bytes never enter the prompt string.
+      // Built by the same function that rebuilds history, so the message's
+      // bytes in the request never change between calls (text stays a string
+      // until it has images).
       const promptPromise = (input.task_start
         ? agent.continue()
-        : agent.prompt(
-          renderUserMessageForModel(input.message),
-          currentAssetImages
-        ))
+        : agent.prompt(piUserMessage(withImages(renderUserMessageForModel(input.message), currentAssetImages))))
         .catch((error) => {
           terminalError = error instanceof Error ? error : new Error(String(error));
         })
@@ -354,6 +364,11 @@ export class PiAgentRuntime implements AgentRuntime {
       }
       await promptPromise;
       if (terminalError) throw terminalError;
+      if (!finalAssistant && ctx.mayStaySilent) {
+        // The agent had nothing to say, or a tool handed the conversation over: the Run completes with no reply.
+        yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
+        return;
+      }
       if (!finalAssistant) throw new Error("Pi Agent ended without a final assistant message");
       const draftContent = assistantText(finalAssistant);
       if (!draftContent.trim()) throw new Error("Pi Agent returned an empty final response");
@@ -363,26 +378,12 @@ export class PiAgentRuntime implements AgentRuntime {
           workflow: deliveryWorkflow,
           draft: draftContent,
           messages: auditMessagesForRun(ctx, transcriptMessages, finalAssistant),
-          systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools, skillsSection),
+          systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools, skillsSection, ctx.ownPrompt),
           auditContext: ctx.deliveryAuditContext,
           signal: ctx.abortSignal
         })
         : draftContent;
-      let finalContent = auditedContent;
-      const artifact = this.options.allowRequestedArtifactDelivery === false ? { events: [] } : await this.persistRequestedArtifact({
-        input,
-        ctx,
-        requestedFilePath,
-        completedArtifactPaths,
-        activeSkills,
-        resourceRoots,
-        workspacePathPolicy,
-        finalContent
-      });
-      for (const event of artifact.events) yield event;
-      if (artifact.error) throw artifact.error;
-      const savedPath = artifact.path;
-      if (savedPath) finalContent = `${finalContent}\n\nCompleted and saved the result to ${savedPath}.`;
+      const finalContent = auditedContent;
       if (deliveryWorkflow) {
         // Delivery drafts are intentionally not streamed before the audit.
         // The unified outbound Guard decides whether the accepted draft can be
@@ -391,14 +392,6 @@ export class PiAgentRuntime implements AgentRuntime {
           type: "assistant.delta",
           run_id: input.run_id,
           delta: { kind: "text", content: finalContent }
-        };
-      } else if (savedPath) {
-        // Ordinary Pi turns already streamed their final text. Emit only the
-        // runtime-owned delivery suffix to avoid duplicating the answer.
-        yield {
-          type: "assistant.delta",
-          run_id: input.run_id,
-          delta: { kind: "text", content: `\n\nCompleted and saved the result to ${savedPath}.` }
         };
       }
       yield {
@@ -409,82 +402,6 @@ export class PiAgentRuntime implements AgentRuntime {
     } finally {
       ctx.abortSignal?.removeEventListener("abort", abortAgent);
       agent.abort();
-    }
-  }
-
-  private async persistRequestedArtifact(options: {
-    input: RunStart;
-    ctx: RunContext;
-    requestedFilePath?: string;
-    completedArtifactPaths: string[];
-    activeSkills: ActivatedSkill[];
-    resourceRoots: string[];
-    workspacePathPolicy: WorkspacePathPolicy;
-    finalContent: string;
-  }): Promise<{
-    path?: string;
-    events: OutboundMessage[];
-    error?: Error;
-  }> {
-    const {
-      input,
-      ctx,
-      requestedFilePath,
-      completedArtifactPaths,
-      activeSkills,
-      resourceRoots,
-      workspacePathPolicy,
-      finalContent
-    } = options;
-    if (!requestedFilePath || completedArtifactPaths.includes(requestedFilePath)) {
-      return { events: [] };
-    }
-
-    const toolCallId = `${input.run_id}_delivery`;
-    const argumentsValue = { path: requestedFilePath, content: finalContent };
-    const eventBase = toolEventBase(
-      input,
-      toolCallId,
-      "file_write",
-      argumentsValue,
-      resourceRoots,
-      activeSkills,
-      ctx.sessionSkills.rendered.aliases,
-      ctx
-    );
-    const events: OutboundMessage[] = [
-      {
-        type: "assistant.delta",
-        run_id: input.run_id,
-        delta: { kind: "status", content: "Saving the completed work to your Workspace." }
-      },
-      { ...eventBase, status: "requested" }
-    ];
-    try {
-      const result = await executeChatTool(
-        input,
-        ctx,
-        toolCallId,
-        "file_write",
-        argumentsValue,
-        resourceRoots,
-        activeSkills,
-        ctx.sessionSkills.rendered.aliases,
-        workspacePathPolicy
-      );
-      const visibleResult = modelVisibleToolResult(eventBase.name, result);
-      events.push({ ...eventBase, status: "completed", result: visibleResult });
-      const diffEvent = workspaceDiffEvent(input.run_id, toolCallId, eventBase.name, result);
-      if (diffEvent) events.push(diffEvent);
-      completedArtifactPaths.push(requestedFilePath);
-      return { path: requestedFilePath, events };
-    } catch (error) {
-      events.push({
-        ...eventBase,
-        status: "failed",
-        error: { code: "tool_failed", message: errorMessage(error) }
-      });
-      return { events, error: error instanceof Error ? error : new Error(String(error)) };
     }
   }
 
@@ -540,11 +457,14 @@ export class PiAgentRuntime implements AgentRuntime {
           }
         );
         ensureNotCancelled(ctx);
-        const modelResult = modelVisibleToolResult(definition.function.name, result);
+        // A tool that hands the conversation over says so; the model's turn ends with the call.
+        const { ends_turn: endsTurn, ...shown } = result;
+        const modelResult = modelVisibleToolResult(definition.function.name, shown);
         const visibleResult = boundToolResult(stripBinaryToolPayload(modelResult));
         return {
           content: piToolResultContent(modelResult),
-          details: visibleResult
+          details: visibleResult,
+          ...(endsTurn === true ? { terminate: true } : {})
         };
       }
     };
@@ -564,9 +484,10 @@ export class PiAgentRuntime implements AgentRuntime {
     setHasExecutedTool: () => void;
     deliveryWorkflow?: RunContext["deliveryWorkflow"];
     transcriptMessages: ConversationMessage[];
-    completedArtifactPaths: string[];
     setFinalAssistant: (message: AssistantMessage) => void;
     setTerminalError: (error: Error) => void;
+    setHandedOver: () => void;
+    handedOver: () => boolean;
   }): Promise<void> {
     const {
       event,
@@ -582,9 +503,10 @@ export class PiAgentRuntime implements AgentRuntime {
       setHasExecutedTool,
       deliveryWorkflow,
       transcriptMessages,
-      completedArtifactPaths,
       setFinalAssistant,
-      setTerminalError
+      setTerminalError,
+      setHandedOver,
+      handedOver
     } = options;
 
     if (event.type === "message_update") {
@@ -643,10 +565,10 @@ export class PiAgentRuntime implements AgentRuntime {
           await ctx.persistModelMessage?.({ ...converted, content: null });
         }
         if (assistant.stopReason === "error" || assistant.stopReason === "aborted") {
-          setTerminalError(new Error(assistant.errorMessage ?? `Pi Agent stopped: ${assistant.stopReason}`));
+          setTerminalError(assistant.stopReason === "error" ? UpstreamError.of(assistant.errorMessage ?? "Pi Agent stopped: error", `${assistant.provider} ${assistant.model}`) : new Error(assistant.errorMessage ?? `Pi Agent stopped: ${assistant.stopReason}`));
         } else if (assistant.stopReason === "stop" && !hasToolCall) {
           if (hasText) setFinalAssistant(assistant);
-          else setTerminalError(new Error("Pi Agent returned an empty final response"));
+          else if (!ctx.mayStaySilent) setTerminalError(new Error("Pi Agent returned an empty final response"));
         }
       } else if (event.message.role === "toolResult") {
         const converted = fromPiMessage(event.message as ToolResultMessage);
@@ -704,6 +626,7 @@ export class PiAgentRuntime implements AgentRuntime {
 
     if (event.type === "tool_execution_end") {
       setHasExecutedTool();
+      if ((event.result as { terminate?: boolean } | undefined)?.terminate) setHandedOver();
       const state = toolEvents.get(event.toolCallId);
       const rawEventBase = state?.event ?? toolEventBase(
         input,
@@ -741,12 +664,6 @@ export class PiAgentRuntime implements AgentRuntime {
         }
       } else {
         queue.push({ ...eventBase, status: "completed", result: visibleResult });
-        if (
-          eventBase.name === "file_write"
-          && typeof eventBase.arguments?.path === "string"
-        ) {
-          completedArtifactPaths.push(eventBase.arguments.path);
-        }
         const diffEvent = workspaceDiffEvent(input.run_id, event.toolCallId, eventBase.name, details);
         if (diffEvent) queue.push(diffEvent);
       }
@@ -767,14 +684,26 @@ export class PiAgentRuntime implements AgentRuntime {
         && last.content.some((block) => block.type === "text" && block.text.trim().length > 0)
         && !last.content.some((block) => block.type === "toolCall")) {
         setFinalAssistant(last);
-      } else if (last) {
-        setTerminalError(new Error(last.errorMessage ?? "Pi Agent ended without a final assistant response"));
+      } else if (last && !(ctx.mayStaySilent && (handedOver() || last.stopReason === "stop"))) {
+        setTerminalError(last.stopReason === "error" ? UpstreamError.of(last.errorMessage ?? "Pi Agent stopped: error", `${last.provider} ${last.model}`) : new Error(last.errorMessage ?? "Pi Agent ended without a final assistant response"));
       }
       return;
     }
 
     if (event.type === "turn_end" && (ctx.state.status === "cancelled" || ctx.state.status === "interrupted")) {
       agent.abort();
+      return;
+    }
+    // A turn that failed has no next model call: the messages that joined stay unclaimed for the failure path to keep.
+    const turnFailed = event.type === "turn_end" && (event.message as AssistantMessage).stopReason === "error";
+    // After a hand-over the conversation belongs to whoever took it (an interview): a message that joins now is not the model's to
+    // read, so it stays unclaimed and the Run ends; Chat then runs it again from that message, and it reaches the new owner.
+    if (event.type === "turn_end" && ctx.claimSteered && !turnFailed && !handedOver()) {
+      // Messages that joined the Run enter before its next model call. Pi injects
+      // them after the tool results of this turn, so history stays well-formed.
+      for (const message of await ctx.claimSteered()) {
+        agent.steer(toPiMessage(message, await loadAssetImages([message], ctx.assetStore)));
+      }
     }
   }
 }
@@ -792,7 +721,7 @@ function auditMessagesForRun(
     ? transcriptMessages.slice(0, -1)
     : transcriptMessages;
   return [
-    { role: "system", content: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools, runtimeSkillsSection(ctx)) },
+    { role: "system", content: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools, runtimeSkillsSection(ctx), ctx.ownPrompt) },
     ...buildRuntimeContextMessages(ctx.activatedSkills ?? []),
     ...ctx.messages.map(toAuditMessage),
     ...transcript.map(toAuditMessage)
@@ -827,6 +756,11 @@ function isModelMessage(message: AgentMessage): boolean {
     || message.role === "compactionSummary";
 }
 
+/** One shape for a user message in every request: a string until it has images. */
+function withImages(text: string, images: ImageContent[]): string | Array<{ type: "text"; text: string } | ImageContent> {
+  return images.length > 0 ? [{ type: "text", text }, ...images] : text;
+}
+
 function piUserMessage(content: string | Array<{ type: "text"; text: string } | ImageContent>): AgentMessage {
   return {
     role: "user",
@@ -850,9 +784,7 @@ function toPiMessage(
       const image = assetImages.get(attachment.asset_id);
       if (image) images.push(image);
     }
-    return piUserMessage(images.length > 0
-      ? [{ type: "text", text }, ...images]
-      : text);
+    return piUserMessage(withImages(text, images));
   }
   if (message.role === "compactionSummary") {
     return {

@@ -136,6 +136,15 @@ export async function createDashboardApp(options = {}) {
   const recordTelemetry = (eventName, attributes, idempotencyKey) => telemetry
     .record(eventName, attributes, { idempotencyKey })
     .catch(() => undefined);
+  const startWebSession = async (request, response, requestId, auth) => {
+    const profile = publicProfile(auth.account);
+    const webSession = await portalState.createWebSession(auth.token, profile, {
+      registryTokenCiphertext: encryptOAuthSecret(auth.token, oauthStateKey)
+    });
+    await recordTelemetry("auth_completed", { request_id: requestId }, `auth-completed:${webSession.session_id}`);
+    setWebSessionCookies(request, response, webSession.session_id);
+    return profile;
+  };
   const fetchImpl = options.fetchImpl ?? fetch;
   const factoryRequestMaxBytes = options.factoryRequestMaxBytes ?? CREATOR_FACTORY_JSON_BODY_MAX_BYTES;
   const configuredPaymentMode = options.paymentMode ?? process.env.HATCH_COMMERCE_PAYMENT_MODE ?? "disabled";
@@ -859,6 +868,42 @@ export async function createDashboardApp(options = {}) {
         }
         return servePortalIndex(response, metadata, portalStatus, noScriptFallback);
       }
+      if (request.method === "GET" && url.pathname === "/v1/auth/telegram") {
+        const status = await registryRequest(registryUrl, "/v1/auth/telegram", { fetchImpl }).catch(() => undefined);
+        return send(response, 200, { enabled: status?.enabled === true });
+      }
+      if (request.method === "GET" && url.pathname === "/v1/auth/telegram/start") {
+        try {
+          const started = await registryRequest(registryUrl, "/v1/auth/telegram/start", {
+            method: "POST",
+            body: JSON.stringify({ claim: url.searchParams.get("claim") || undefined, return_to: safeLocalPath(url.searchParams.get("returnTo")) }),
+            fetchImpl
+          });
+          response.setHeader("set-cookie", telegramStateCookie(request, started.state, 600));
+          return redirect(response, started.authorize_url);
+        } catch {
+          return redirect(response, "/sign-in?telegram=failed");
+        }
+      }
+      if (request.method === "GET" && url.pathname === "/v1/auth/telegram/callback") {
+        const state = url.searchParams.get("state") ?? "";
+        const expected = requestCookies(request).hatch_tg_state ?? "";
+        const clearState = telegramStateCookie(request, "", 0);
+        try {
+          if (!state || !expected || !safeEqual(state, expected) || url.searchParams.get("error")) throw new Error("telegram_state_rejected");
+          const auth = await registryRequest(registryUrl, "/v1/auth/telegram/callback", {
+            method: "POST",
+            body: JSON.stringify({ code: url.searchParams.get("code") ?? "", state }),
+            fetchImpl
+          });
+          await startWebSession(request, response, requestId, auth);
+          response.setHeader("set-cookie", [...response.getHeader("set-cookie"), clearState]);
+          return redirect(response, safeLocalPath(auth.return_to));
+        } catch {
+          response.setHeader("set-cookie", clearState);
+          return redirect(response, "/sign-in?telegram=failed");
+        }
+      }
       if (request.method === "POST" && ["/v1/auth/login", "/v1/auth/sign-in"].includes(url.pathname)) {
         const originError = crossSiteMutationError(request);
         if (originError) return send(response, originError.status, originError.body);
@@ -869,12 +914,7 @@ export async function createDashboardApp(options = {}) {
           body: JSON.stringify({ email: body.email, password: body.password }),
           fetchImpl
         });
-        const profile = publicProfile(auth.account);
-        const webSession = await portalState.createWebSession(auth.token, profile, {
-          registryTokenCiphertext: encryptOAuthSecret(auth.token, oauthStateKey)
-        });
-        await recordTelemetry("auth_completed", { request_id: requestId }, `auth-completed:${webSession.session_id}`);
-        setWebSessionCookies(request, response, webSession.session_id);
+        const profile = await startWebSession(request, response, requestId, auth);
         return send(response, 200, {
           ...(exposeBearerTokens ? { token: auth.token } : {}),
           profile
@@ -894,12 +934,7 @@ export async function createDashboardApp(options = {}) {
           }),
           fetchImpl
         });
-        const profile = publicProfile(auth.account);
-        const webSession = await portalState.createWebSession(auth.token, profile, {
-          registryTokenCiphertext: encryptOAuthSecret(auth.token, oauthStateKey)
-        });
-        await recordTelemetry("auth_completed", { request_id: requestId }, `auth-completed:${webSession.session_id}`);
-        setWebSessionCookies(request, response, webSession.session_id);
+        const profile = await startWebSession(request, response, requestId, auth);
         return send(response, 201, {
           ...(exposeBearerTokens ? { token: auth.token } : {}),
           profile
@@ -1648,7 +1683,7 @@ export async function createDashboardApp(options = {}) {
         }
       }
 
-      if (/^\/v1\/creator\/products\/[^/]+\/factory-agents(?:\/|$)/.test(url.pathname) || /^\/v1\/creator\/assistant(?:\/|$)/.test(url.pathname) || CONVERSATION_PATH.test(url.pathname)) {
+      if (/^\/v1\/creator\/products\/[^/]+\/factory-agents(?:\/|$)/.test(url.pathname) || /^\/v1\/creator\/(?:assistant|connections)(?:\/|$)/.test(url.pathname) || CONVERSATION_PATH.test(url.pathname) || (request.method === "POST" && url.pathname === "/v1/transcriptions")) {
         const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const abort = new AbortController();
@@ -1656,7 +1691,11 @@ export async function createDashboardApp(options = {}) {
         try {
           const upstream = await fetchImpl(new URL(url.pathname + url.search, registryUrl), {
             method: request.method,
-            headers: { authorization: `Bearer ${authentication.token}`, "content-type": "application/json" },
+            headers: {
+              authorization: `Bearer ${authentication.token}`, "content-type": "application/json",
+              // The conversation API's resume and idempotency contracts travel in headers.
+              ...Object.fromEntries(["accept", "last-event-id", "idempotency-key"].flatMap(name => request.headers[name] ? [[name, String(request.headers[name])]] : [])),
+            },
             ...(request.method === "GET" ? {} : { body: JSON.stringify(await readJson(request, factoryRequestMaxBytes)) }),
             signal: abort.signal,
             redirect: "error"
@@ -2267,22 +2306,27 @@ export async function createDashboardApp(options = {}) {
       });
       return;
     }
-    if (!/^\/v1\/creator\/products\/[^/]+\/factory-agents\/sessions\/[0-9a-f-]{36}\/voice\/live$/.test(url.pathname)) {
+    const studio = url.pathname === "/v1/creator/studio/ws";
+    if (!studio && !/^\/v1\/creator\/products\/[^/]+\/factory-agents\/sessions\/[0-9a-f-]{36}\/voice\/live$/.test(url.pathname)) {
       throw Object.assign(new Error("Unknown WebSocket route"), { status: 404 });
     }
     let requestOrigin;
     try { requestOrigin = request.headers.origin ? new URL(request.headers.origin).origin : ""; } catch { requestOrigin = ""; }
-    if (!requestOrigin || !allowedPublicOrigins.has(requestOrigin)) {
+    // Studio's WebSocket also serves API keys, which carry no cookie and so need no origin: they sign in with a bearer header or the first message.
+    const apiKeyClient = studio && !request.headers.cookie;
+    if (!apiKeyClient && (!requestOrigin || !allowedPublicOrigins.has(requestOrigin))) {
       throw Object.assign(new Error("Cross-origin WebSocket request rejected"), { status: 403 });
     }
-    const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+    const authentication = apiKeyClient && !bearerTokenFromAuthorization(request)
+      ? {}
+      : await authenticate(request, registryUrl, fetchImpl, portalState);
     if (authentication.error) throw Object.assign(new Error(authentication.error.body?.error?.message || "Sign in to continue."), { status: authentication.error.status });
     voiceWss.handleUpgrade(request, socket, head, browser => {
       browser.on("error", () => undefined);
       const upstreamUrl = new URL(url.pathname + url.search, registryUrl);
       upstreamUrl.protocol = upstreamUrl.protocol === "https:" ? "wss:" : "ws:";
       const upstream = new WebSocket(upstreamUrl, {
-        headers: { authorization: `Bearer ${authentication.token}` },
+        headers: authentication.token ? { authorization: `Bearer ${authentication.token}` } : {},
         handshakeTimeout: 20_000,
         maxPayload: 128 * 1024,
       });
@@ -2694,7 +2738,7 @@ function decryptOAuthSecret(value, key) {
 }
 
 /** Conversation API: a Product's workers and the Assistant's conversation. Streamed through to Registry as is. */
-const CONVERSATION_PATH = /^\/v1\/creator\/(?:products\/[^/]+\/workers(?:\/[^/]+\/(?:messages|events|stop))?|assistant\/conversation\/(?:messages|events|stop))$/;
+const CONVERSATION_PATH = /^\/v1\/creator\/(?:products\/[^/]+\/workers(?:\/[^/]+\/(?:messages|events|stop|snapshot))?|assistant\/conversation\/(?:messages|events|stop|snapshot))$/;
 
 function oauthEndpointScope(request) {
   const method = String(request.method ?? "GET").toUpperCase();
@@ -2711,6 +2755,7 @@ function oauthEndpointScope(request) {
     if (method === "PATCH") return "creator:products:write";
     return undefined;
   }
+  if (pathname === "/v1/creator/studio/ws") return "creator:products:read";
   if (CONVERSATION_PATH.test(pathname)) return method === "GET" ? "creator:products:read" : method === "POST" ? "creator:products:write" : undefined;
   const fileMatch = pathname.match(/^\/v1\/creator\/products\/[^/]+\/files(?:\/[^/]+)?$/);
   if (fileMatch) {
@@ -4076,6 +4121,20 @@ function cookieCsrfError(request, sessionToken = requestCookies(request).hatch_w
     };
   }
   return undefined;
+}
+
+function telegramStateCookie(request, value, maxAge) {
+  return `hatch_tg_state=${encodeURIComponent(value)}; Path=/v1/auth/telegram; SameSite=Lax; Max-Age=${maxAge}${requestIsSecure(request) ? "; Secure" : ""}; HttpOnly`;
+}
+
+function safeLocalPath(value) {
+  const candidate = String(value ?? "");
+  return candidate.startsWith("/") && !candidate.startsWith("//") && !candidate.includes("\\") && !/[\u0000-\u001f]/.test(candidate) ? candidate : "/";
+}
+
+function redirect(response, location) {
+  response.writeHead(302, { ...response.getHeaders(), location, "cache-control": "no-store" });
+  response.end();
 }
 
 function setWebSessionCookies(request, response, token) {

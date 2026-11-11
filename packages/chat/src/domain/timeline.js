@@ -229,17 +229,51 @@ export function groupTimelineEntries(entries, standalone = () => false) {
   return grouped;
 }
 
-/** A message the user submitted that the Runtime has not yet confirmed. */
+/**
+ * The Runtime keeps a Run's tool calls on every assistant message the Run passed through. A reply shows each step once,
+ * on the last message of its Run, where the interleaving parts are.
+ */
+export function withoutRepeatedSteps(messages) {
+  const seen = new Set();
+  return [...messages].reverse().map(message => {
+    if (message.role !== "assistant" || message.transient || !message.tool_calls?.length) return message;
+    const fresh = message.tool_calls.filter(tool => !seen.has(`${message.run_id}:${tool.tool_call_id}`));
+    for (const tool of message.tool_calls) seen.add(`${message.run_id}:${tool.tool_call_id}`);
+    return fresh.length === message.tool_calls.length ? message : { ...message, tool_calls: fresh };
+  }).reverse();
+}
+
+/**
+ * A message the user submitted that the Runtime has not yet confirmed. `clientMessageId` is minted when the user sends
+ * and is the message's id everywhere. With `stableId` the placeholder carries that id, so the saved row replaces it by id;
+ * without it the placeholder is matched to the saved row by Run and role.
+ */
 export class PendingSubmission {
-  constructor({ conversationId, runId, clientMessageId, content, attachments, files }) {
+  constructor({ conversationId, runId, clientMessageId, content, attachments, files, stableId = false }) {
     this.conversationId = conversationId;
     this.runId = runId;
     this.clientMessageId = clientMessageId;
     this.content = content;
     this.attachments = attachments;
     this.files = files;
-    this.optimisticMessageId = `optimistic-${clientMessageId}`;
-    this.renderKey = `${runId}-user`;
+    this.optimisticMessageId = stableId ? clientMessageId : `optimistic-${clientMessageId}`;
+    this.renderKey = stableId ? clientMessageId : `${runId}-user`;
+    this.stableId = stableId;
+    /** The user must send again: the send failed in a way that may or may not have reached the server. */
+    this.awaitingUser = false;
+    /** Handed to the transport on this connection; a transport that outlives its connection does not hand it twice. */
+    this.dispatched = false;
+    /** This message started the Run, rather than joining one that was already running. */
+    this.leadsRun = false;
+  }
+
+  /** What survives a page reload: the words and the already-uploaded attachments, never the files. */
+  record() {
+    return { conversationId: this.conversationId, clientMessageId: this.clientMessageId, content: this.content, attachments: this.attachments };
+  }
+
+  static fromRecord(record, { runId, stableId }) {
+    return new PendingSubmission({ ...record, runId, files: [], stableId });
   }
 
   optimisticMessage() {
@@ -252,7 +286,8 @@ export class PendingSubmission {
       timestamp: new Date().toISOString(),
       attachments: this.attachments.map(({ text: _text, data_base64: _data, ...attachment }) => attachment),
       optimistic: true,
-      provisional: true
+      provisional: true,
+      state: "sending"
     };
   }
 }

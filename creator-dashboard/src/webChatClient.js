@@ -15,6 +15,19 @@ function browserTimeZone() {
   }
 }
 
+/** Bytes as base64, in slices the call stack can take. */
+export function base64Of(bytes) {
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 32768) binary += String.fromCharCode(...bytes.subarray(offset, offset + 32768));
+  return btoa(binary);
+}
+
+/** Speech to text for a composer: the Registry's transcription of a recording, through the Dashboard proxy. */
+export const browserDictation = request => async recording => {
+  const { text } = await request("/v1/transcriptions", { method: "POST", body: JSON.stringify({ base64: base64Of(new Uint8Array(await recording.arrayBuffer())) }) });
+  return text;
+};
+
 export class WebChatClientError extends Error {
   constructor(code) {
     super(code);
@@ -42,6 +55,12 @@ export class WebConversationTransport extends ConversationTransport {
 
   conversationUrl(conversationId, path = "", parameters) {
     return this.url(`/${encodeURIComponent(conversationId)}${path}`, parameters);
+  }
+
+  get retriesRun() { return true; }
+
+  retryRun(conversationId, key) {
+    return this.request(this.conversationUrl(conversationId, "/retry"), { method: "POST", body: JSON.stringify({ retry_id: key, client: "web" }) });
   }
 
   list(cursor) {

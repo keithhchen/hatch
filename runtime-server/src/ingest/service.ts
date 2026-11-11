@@ -115,13 +115,14 @@ export class IngestService {
   }
 
   private async place(job: IngestJob, item: { id: string; label: string }, result: Result): Promise<ItemOutcome> {
-    if (result.status === "failed") return { status: "failed", error: result.error ?? "Ingest failed" };
+    const session = result.session ? { session: result.session } : {};
+    if (result.status === "failed") return { status: "failed", error: result.error ?? "Ingest failed", ...session };
     try {
       const placement = await this.deps.sink.store({ accountId: job.accountId, productId: job.productId, jobId: job.id }, item, result);
-      if (!placement.markdown_path && !placement.original_ref) return { status: "failed", error: "The engine returned nothing for this item" };
-      return { status: result.status, ...placement, ...(result.error ? { error: result.error } : {}) };
+      if (!placement.markdown_path && !placement.original_ref) return { status: "failed", error: "The engine returned nothing for this item", ...session };
+      return { status: result.status, ...placement, ...session, ...(result.error ? { error: result.error } : {}) };
     } catch (error) {
-      return { status: "failed", error: error instanceof Error ? error.message : String(error) };
+      return { status: "failed", error: error instanceof Error ? error.message : String(error), ...session };
     }
   }
 }

@@ -15,14 +15,30 @@ type KnowledgeScope = {
   corpusDigest: string;
 };
 
+type AttachmentRunner = { run(name: string, args: unknown): Promise<string> };
+/** A host's own tools, already bound to the conversation they serve: a call never names whose data it touches. */
+export type HostToolRunner = { run(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown>> };
+
 export class ServerToolExecutor {
   private knowledgeScope?: KnowledgeScope;
   private resolvedCreatorTools = new Map<string, RuntimeCreatorTool>();
+  private attachments?: AttachmentRunner;
+  private studio?: HostToolRunner;
 
   constructor(private readonly timeoutMs = 120000) {}
 
   setKnowledgeScope(scope: KnowledgeScope | undefined): void {
     this.knowledgeScope = scope;
+  }
+
+  /** The conversation's attachment tools, already bound to its scope: a call never names a scope. */
+  setAttachments(runner: AttachmentRunner | undefined): void {
+    this.attachments = runner;
+  }
+
+  /** The Studio tools of the conversation (`studio.*`), bound to the account it belongs to. */
+  setStudio(runner: HostToolRunner | undefined): void {
+    this.studio = runner;
   }
 
   setResolvedCreatorTools(tools: RuntimeCreatorTool[] = []): void {
@@ -53,6 +69,20 @@ export class ServerToolExecutor {
 
     const parsedArgs = tool.schema.parse(args) as Record<string, unknown>;
     const requestSignal = boundedSignal(signal, this.timeoutMs);
+
+    if (name.startsWith("attachments.")) {
+      if (!this.attachments) throw new Error("This conversation has no attachments service.");
+      const result = { output: await this.attachments.run(name.slice("attachments.".length), parsedArgs) };
+      assertBoundedJsonValue(result);
+      return result;
+    }
+
+    if (name.startsWith("studio.")) {
+      if (!this.studio) throw new Error("This conversation has no Studio tools.");
+      const result = await this.studio.run(name.slice("studio.".length), parsedArgs, requestSignal);
+      assertBoundedJsonValue(result);
+      return result;
+    }
 
     if (name === "web.search" || name === "hatch.web_search") {
       const result = await this.webSearch(parsedArgs, requestSignal);

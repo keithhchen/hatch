@@ -11,7 +11,7 @@
     "transfer:creator-product": "node scripts/transfer-creator-product.mjs",
     "build": "rm -rf dist && tsc -p tsconfig.json",
     "eval:output-guard": "npm run build && node scripts/eval-output-guard.mjs",
-    "test": "npm run build && node --test --test-concurrency=1 dist/*.test.js dist/factoryAgents/*.test.js dist/assistant/*.test.js dist/ingest/*.test.js dist/hostedAgents/*.test.js dist/conversations/*.test.js"
+    "test": "npm run build && DOTENV_CONFIG_PATH=/dev/null node --test --test-concurrency=1 \"dist/**/*.test.js\""
   },
   "dependencies": {
     "@alicloud/credentials": "^2.4.5",
@@ -32,6 +32,7 @@
     "mammoth": "^1.12.1",
     "pdf-parse": "^2.4.5",
     "pg": "^8.22.0",
+    "sharp": "^0.34.5",
     "ws": "^8.18.0",
     "xlsx": "^0.18.5",
     "yaml": "^2.8.0",

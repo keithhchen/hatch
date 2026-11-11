@@ -7,17 +7,11 @@ import path from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 import { ZodError } from "zod";
 import { ClientToolBroker } from "./clientBroker.js";
-import {
-  compactRuntimeMessages,
-  shouldAutoCompactMessages,
-  type CompactionCheckpoint,
-  type RuntimeCompactionMessage
-} from "./compaction.js";
-import { createAgentRuntime, type AgentRuntime, type RuntimeSessionSkills } from "./agentRuntime.js";
+import { type RuntimeCompactionMessage } from "./compaction.js";
+import { createAgentRuntime, type AgentRuntime, type RunContext, type RuntimeSessionSkills } from "./agentRuntime.js";
 import { ThinkingPartJournal } from "./thinkingPartJournal.js";
 import {
   clientMessageInputDigest,
-  ClientToolCapabilityPolicy,
   persistedAttachment,
   MAX_RICH_TOOL_RESULT_BYTES,
   parseInboundMessage,
@@ -30,6 +24,8 @@ import {
   type RunStart
 } from "./protocol.js";
 import { RunStateMachine } from "./runState.js";
+import { failures } from "./errors/failures.js";
+import { PostgresFailureLedger } from "./errors/postgresFailureLedger.js";
 import { ServerToolExecutor } from "./serverTools.js";
 import { RuntimeStore, type VisibleConversationPart } from "./store.js";
 import { PostgresStore } from "./postgresStore.js";
@@ -42,8 +38,7 @@ import {
   type ConversationJournalEvent,
   type ConversationRepository,
   type ConversationRecord,
-  type ConversationRunRecord,
-  type AcceptedSubmission
+  type ConversationRunRecord
 } from "./conversationRepository.js";
 import { ToolBridge } from "./toolBridge.js";
 import {
@@ -71,7 +66,7 @@ import {
 import { HttpCommerceEventSink } from "./commerceHttpSink.js";
 import { DeliveryAccountingOutbox, type DeliveryAccountingCommand } from "./deliveryOutbox.js";
 import { materializeAgentCorpus } from "./agentCorpusMaterialization.js";
-import { creatorToolControlPlaneFromEnvironment, resolveCreatorTools, type CreatorToolControlPlane } from "./creatorTools.js";
+import { creatorToolControlPlaneFromEnvironment, resolveCreatorTools, type CreatorToolControlPlane, type RuntimeCreatorTool } from "./creatorTools.js";
 import {
   AgentCorpusResolver as FilesystemAgentCorpusResolver,
   createKnowledgeProvider,
@@ -99,14 +94,54 @@ import {
 import { writeOperationalError } from "./operationalLogging.js";
 import { RuntimeAssetStore, runtimeAssetStoreFromEnvironment } from "./assetStore.js";
 import { flushLangfuseObservability, initializeLangfuseObservability, withLangfuseTurn } from "./langfuse.js";
+import { ChatRuntime, type ChatRuntimeOptions } from "./chat/chatRuntime.js";
+import { PostgresEventRelay } from "./chat/eventRelay.js";
+import { PostgresStopRelay } from "./chat/stopRelay.js";
+import { publicJournalPayload } from "./chat/messageLedger.js";
+import { ChatError, principalKey, accountPrincipal } from "./chat/principal.js";
+import type { PrincipalLimits, Retried, RunAdmission, Submission } from "./chat/chatService.js";
+import { ContactBinder, SentMessageLimits, type ConnectionDirectory } from "./chat/contactBinding.js";
+import { SelfBinder } from "./chat/selfBinding.js";
+import type { ChatGateway } from "./chat/gateway.js";
+import { checkUpgrade, sessionTokenFromCookie } from "./chat/originPolicy.js";
+import { RunHandoff } from "./chat/runSupervisor.js";
+import { ServiceChatGateway } from "./chat/serviceGateway.js";
+import { ChatServiceApi } from "./chat/serviceApi.js";
+import { ChatAssets, TextPartsReader, type PartsReader, type PreparedMessage } from "./chat/assets.js";
+import { attachmentToolDefinitions } from "./chat/attachmentTools.js";
+import { errorMessage, failRun, runModelTurn } from "./chat/modelTurn.js";
+import { publicRun } from "./chat/publicRun.js";
+import { ChatConversationReadModel } from "./chat/conversationReadModel.js";
+import { toolRegistry } from "./tools.js";
+import { MAX_BYTES as MAX_ASSET_BYTES } from "./assets/pipeline.js";
+import { RegistryConnectionDirectory } from "./chat/registryConnections.js";
+import { openChatAssets } from "./chat/openChatAssets.js";
+import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
+import { MAX_CONSUMER_BUFFERED_BYTES, SocketSink, SseSink, projecting, type EventProjection } from "./chat/sinks.js";
+import { authorizeLocalToolCall, productRequiresLocalTools } from "./chat/toolSurface.js";
+import type { ScopeResolver, TurnRunner } from "./chat/turnExecutor.js";
+import type { TurnCompaction } from "./chat/chatCompaction.js";
+import { isContextOverflow, type AssistantMessage } from "@earendil-works/pi-ai";
+import { waitForTerminalRun, finalAssistantText, TERMINAL_STATUSES } from "./chat/runResult.js";
+import { clientAttributesOf, MAX_USER_MESSAGE_CHARS, ToolCallResultSchema } from "./protocol.js";
+import type { ClientToolName } from "./protocol.js";
+import type { ClientAttributes, ContentPart } from "./surfaces/contract.js";
 
 type AgentCorpusResolver = AgentCorpusResolverLike;
 
 export type RuntimeServer = {
   server: http.Server;
   wss: WebSocketServer;
+  /** What the channel layer calls to talk to the Chat API without a transport. */
+  chat: ChatGateway;
   close: () => Promise<void>;
 };
+
+/** The largest file the asset pipeline takes: a larger upload is refused before it is read. */
+const MAX_UPLOAD_BYTES = Math.max(...Object.values(MAX_ASSET_BYTES));
+
+/** The longest a client may ask a request to wait for a Run's result. */
+const MAX_WAIT_SECONDS = 60;
 
 // A rich asset is base64-encoded on the client-to-Runtime frame. The protocol
 // keeps one asset/message at 100 MiB; 160 MiB leaves room for the ~133 MiB
@@ -115,6 +150,8 @@ export const MAX_RUNTIME_WEBSOCKET_PAYLOAD_BYTES = MAX_RICH_TOOL_RESULT_BYTES;
 
 export type RuntimeServerOptions = {
   createRuntime?: () => AgentRuntime;
+  /** Chat's compaction strategy; tests inject one with a test-only summarizer. */
+  compactionStrategy?: ChatRuntimeOptions<SessionBinding>["compactionStrategy"];
   conversationStore?: RuntimeStore;
   /** Optional injected store for tests; production defaults beside transcripts. */
   assetStore?: RuntimeAssetStore;
@@ -148,8 +185,17 @@ export type RuntimeServerOptions = {
   maxPendingTurnAuthorizations?: number;
   /** Per-user cap on concurrent per-turn Registry authorization checks. */
   maxPendingTurnAuthorizationsPerUser?: number;
-  /** Pending and active runs admitted from one WebSocket connection. */
-  maxActiveRunsPerConnection?: number;
+  /** Origins that may use a browser session cookie on a WebSocket upgrade or a state-changing request. */
+  allowedOrigins?: string[];
+  /** Limits checked before a customer's message becomes a Run. By default each contact may send `maxContactMessages` to a Product. */
+  principalLimits?: PrincipalLimits;
+  maxContactMessages?: number;
+  /** The channel layer's Connections, which a customer's messages arrive through. */
+  connectionDirectory?: ConnectionDirectory;
+  /** Uploads, attachments in messages, and the ls/grep/read tools over them. Without it a message takes text only. */
+  chatAssets?: ChatAssets;
+  /** The token the channel layer presents to reach Chat from another process; without it that door stays shut. */
+  chatServiceToken?: string;
   /** Pending and active runs admitted for one authenticated user. */
   maxActiveRunsPerUser?: number;
   /** Pending and active runs admitted across the Runtime process. */
@@ -160,6 +206,8 @@ export type RuntimeServerOptions = {
   connectionIdleTimeoutMs?: number;
   /** Hard cap for a socket's queued outbound bytes. */
   maxSocketBufferedBytes?: number;
+  /** A Chat event consumer with this much unsent is disconnected and resumes by cursor (default 1 MB). */
+  maxConsumerBufferedBytes?: number;
   /** Hard deadline for Runtime-owned network tools. */
   serverToolTimeoutMs?: number;
   /** Deadline for receiving HTTP headers. */
@@ -226,6 +274,9 @@ export async function commerceEventSinkFromEnvironment(
   };
 }
 
+/** What one contact may send to one Product, in all; the Registry's rate limit bounds how fast. */
+const DEFAULT_MAX_CONTACT_MESSAGES = 1_000;
+
 export async function createRuntimeServerFromEnvironment(
   environment: NodeJS.ProcessEnv = process.env
 ): Promise<RuntimeServer> {
@@ -247,11 +298,6 @@ export async function createRuntimeServerFromEnvironment(
     environment.HATCH_RUNTIME_MAX_PENDING_TURN_AUTHORIZATIONS_PER_USER,
     4
   );
-  const maxActiveRunsPerConnection = runtimeCapacityLimit(
-    "HATCH_RUNTIME_MAX_ACTIVE_RUNS_PER_CONNECTION",
-    environment.HATCH_RUNTIME_MAX_ACTIVE_RUNS_PER_CONNECTION,
-    1
-  );
   const maxActiveRunsGlobal = runtimeCapacityLimit(
     "HATCH_RUNTIME_MAX_ACTIVE_RUNS_GLOBAL",
     environment.HATCH_RUNTIME_MAX_ACTIVE_RUNS_GLOBAL,
@@ -268,6 +314,12 @@ export async function createRuntimeServerFromEnvironment(
     "HATCH_RUNTIME_MAX_SOCKET_BUFFERED_BYTES",
     environment.HATCH_RUNTIME_MAX_SOCKET_BUFFERED_BYTES,
     160 * 1024 * 1024,
+    256 * 1024 * 1024
+  );
+  const maxConsumerBufferedBytes = runtimeCapacityLimit(
+    "HATCH_RUNTIME_MAX_CONSUMER_BUFFERED_BYTES",
+    environment.HATCH_RUNTIME_MAX_CONSUMER_BUFFERED_BYTES,
+    MAX_CONSUMER_BUFFERED_BYTES,
     256 * 1024 * 1024
   );
   const connectionHeartbeatMs = runtimeDurationMs(
@@ -368,6 +420,11 @@ export async function createRuntimeServerFromEnvironment(
   if (registryUrl && commerceEventSink && environment.NODE_ENV === "production" && !deliveryOutboxFile) {
     throw new Error("HATCH_DELIVERY_OUTBOX_FILE or HATCH_RUNTIME_DATA_DIR is required for production delivery recovery.");
   }
+  const conversationStore = createConversationStore(environment);
+  // Attachments need records that outlive a restart: without a Runtime database a message takes text only.
+  const chatAssets = conversationStore instanceof PostgresStore
+    ? await openChatAssets({ pool: conversationStore.pool, blobs: objectStoreFromEnvironment(environment, path.join(runtimeDataDir, "chat-assets"))!, environment })
+    : undefined;
   return createRuntimeServer({
     outputGuard: createOutputGuardFromEnvironment(environment),
     commerceEventSink,
@@ -389,16 +446,21 @@ export async function createRuntimeServerFromEnvironment(
       : runtimeCorpusRoot
         ? new FilesystemAgentCorpusResolver(runtimeCorpusRoot)
         : undefined,
-    conversationStore: createConversationStore(environment),
+    conversationStore,
+    ...(chatAssets ? { chatAssets } : {}),
     assetStore: runtimeAssetStoreFromEnvironment(environment, runtimeDataDir),
+    chatServiceToken: environment.HATCH_RUNTIME_CHAT_SERVICE_TOKEN?.trim() || undefined,
+    maxContactMessages: runtimeCapacityLimit("HATCH_RUNTIME_MAX_CONTACT_MESSAGES", environment.HATCH_RUNTIME_MAX_CONTACT_MESSAGES, DEFAULT_MAX_CONTACT_MESSAGES, 10_000_000),
+    ...(registryUrl && runtimeRegistryToken ? { connectionDirectory: new RegistryConnectionDirectory({ registryUrl, serviceToken: runtimeRegistryToken, timeoutMs: registryAuthorizationTimeoutMs(environment) }) } : {}),
     clientToolTimeoutMs: clientToolTimeoutMs(environment.HATCH_CLIENT_TOOL_TIMEOUT_MS),
     clientHelloTimeoutMs: helloTimeoutMs,
     maxPendingTurnAuthorizations,
     maxPendingTurnAuthorizationsPerUser,
-    maxActiveRunsPerConnection,
+    allowedOrigins: (environment.HATCH_RUNTIME_ALLOWED_ORIGINS ?? "").split(",").map((origin) => origin.trim()).filter(Boolean),
     maxActiveRunsPerUser,
     maxActiveRunsGlobal,
     maxSocketBufferedBytes,
+    maxConsumerBufferedBytes,
     connectionHeartbeatMs,
     connectionIdleTimeoutMs,
     serverToolTimeoutMs,
@@ -489,6 +551,8 @@ type SessionBinding = {
   briefSpec?: BriefSpec;
   agentCorpus?: AgentCorpus;
   agentCorpusRoot?: string;
+  /** Creator tools resolved when the message was authorized; a Run taken over by another instance resolves them again. */
+  creatorTools?: RuntimeCreatorTool[];
   entitlementId?: string;
   orderId?: string;
   explicit: boolean;
@@ -501,16 +565,6 @@ type SessionBindingRequest = {
   creator_id?: string;
   user_id?: string;
   product_id?: string;
-};
-
-type PendingTurnAuthorization = {
-  runId: string;
-  conversationId: string;
-  controller: AbortController;
-  cancelled: boolean;
-  detachConnectionAbort: () => void;
-  releaseAuthorizationCapacity: () => void;
-  releaseActiveRunCapacity: () => void;
 };
 
 class CapacityGate {
@@ -564,18 +618,12 @@ function combineCapacityReleases(...releases: Array<() => void>): () => void {
   };
 }
 
-type ActiveRunControl = {
-  cancel: (reason: string) => Promise<void>;
-};
-
 type ReadinessCheck = "starting" | "ready" | "failed";
 type RuntimeReadiness = {
   repository: ReadinessCheck;
   deliveryAccounting: ReadinessCheck | "disabled";
 };
 export function createRuntimeServer(options: RuntimeServerOptions = {}): RuntimeServer {
-  const activeConversationRuns = new Map<string, string>();
-  const activeRunControls = new Map<string, ActiveRunControl>();
   const connectionTasks = new Set<Promise<void>>();
   const createRuntime = options.createRuntime ?? createAgentRuntime;
   const entitlementResolver = options.entitlementResolver;
@@ -620,10 +668,6 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   if (!Number.isSafeInteger(connectionIdleTimeoutMs) || connectionIdleTimeoutMs < 1) {
     throw new Error("connectionIdleTimeoutMs must be a positive safe integer");
   }
-  const maxActiveRunsPerConnection = options.maxActiveRunsPerConnection ?? 1;
-  if (!Number.isSafeInteger(maxActiveRunsPerConnection) || maxActiveRunsPerConnection < 1) {
-    throw new Error("maxActiveRunsPerConnection must be a positive safe integer");
-  }
   const conversationStore = options.conversationStore
     ?? (options.conversationRepository instanceof InMemoryConversationRepository
       ? new RuntimeStore(options.conversationRepository.localAuthority)
@@ -632,6 +676,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   const conversationRepository = options.conversationRepository ?? createConversationRepository(conversationStore);
   if (conversationStore instanceof PostgresStore && conversationRepository instanceof PostgresConversationRepository) {
     conversationRepository.bindSubmissionStore(conversationStore);
+    failures.attach(new PostgresFailureLedger(conversationStore.pool as never));
   } else if (!(conversationRepository instanceof InMemoryConversationRepository)
     || conversationRepository.localAuthority !== conversationStore.localAuthority) {
     throw new Error("Runtime store and repository must share one submission authority");
@@ -649,10 +694,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     ?? (commerceEventSink?.authorizeAndReserve
       ? new DeliveryAccountingOutbox(path.join(dataDirectory, "delivery-accounting-outbox.json"))
       : undefined);
-  // A restart never silently resumes a tool-effecting run. The durable status
-  // becomes Interrupted before a new socket can create a replacement run.
-  const repositoryReady = conversationRepository.initialize()
-    .then(() => conversationRepository.interruptActiveRuns("Runtime restarted; the executor connection was lost."));
+  const repositoryReady = conversationRepository.initialize();
   const readiness: RuntimeReadiness = {
     repository: "starting",
     deliveryAccounting: commerceEventSink ? "starting" : "disabled"
@@ -703,6 +745,99 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   if (!Number.isSafeInteger(maxHttpResponseBytes) || maxHttpResponseBytes < 1_024) {
     throw new Error("maxHttpResponseBytes must be an integer of at least 1024");
   }
+  const allowedOrigins = options.allowedOrigins ?? [];
+  // The attachment tools are part of the Chat tool set whenever this Runtime can hold attachments, for every Run.
+  const chatAssets = options.chatAssets;
+  if (chatAssets) for (const definition of attachmentToolDefinitions(chatAssets.tools())) toolRegistry.set(definition.name, definition);
+  const parts: PartsReader = chatAssets ?? new TextPartsReader();
+
+  const admission: RunAdmission = {
+    reserve(principal) {
+      const releaseGlobal = activeRunGate.tryAcquire();
+      if (!releaseGlobal) throw new ChatError("runtime_run_capacity", "Hatch is already running the maximum number of tasks. Try again shortly.", 503);
+      const releaseUser = activeRunPerUserGate.tryAcquire(principalKey(principal));
+      if (!releaseUser) {
+        releaseGlobal();
+        throw new ChatError("user_run_capacity", "This account already has the maximum number of pending or active tasks.", 429);
+      }
+      return once(combineCapacityReleases(releaseGlobal, releaseUser));
+    }
+  };
+  const scopes: ScopeResolver<SessionBinding> = {
+    // A Run this process did not start (taken over after a restart) is rebuilt from its conversation.
+    async resolve(conversation, signal) {
+      const base = { creatorId: conversation.creatorId, userId: conversation.ownerAccountId, productId: conversation.productId };
+      if (!agentCorpusResolver) return { ...base, corpusDigest: conversation.corpusDigest, explicit: false };
+      const current = await agentCorpusResolver.resolve(conversation.creatorId, conversation.productId, signal);
+      return {
+        ...base,
+        corpusDigest: current.digest,
+        runtimeDigest: current.runtimeDigest,
+        briefSpec: current.corpus.product.brief_spec as BriefSpec | undefined,
+        agentCorpus: current.corpus,
+        agentCorpusRoot: current.root,
+        explicit: true
+      };
+    }
+  };
+  const serverToolTimeoutMs = options.serverToolTimeoutMs ?? 120_000;
+  const runner: TurnRunner<SessionBinding> = {
+    async run(turn) {
+      const binding = turn.scope;
+      try {
+        const serverTools = new ServerToolExecutor(serverToolTimeoutMs);
+        if (binding.agentCorpus && binding.agentCorpusRoot) {
+          serverTools.setKnowledgeScope({
+            provider: createKnowledgeProvider(binding.agentCorpusRoot, binding.agentCorpus, binding.corpusDigest),
+            creatorId: binding.creatorId,
+            agentId: binding.productId,
+            corpusDigest: binding.corpusDigest
+          });
+          serverTools.setResolvedCreatorTools(binding.creatorTools ?? await resolveCreatorTools(
+            options.creatorToolControlPlane,
+            binding.creatorId,
+            binding.productId,
+            binding.agentCorpus,
+            turn.signal
+          ));
+        }
+        if (chatAssets) serverTools.setAttachments(chatAssets.toolsFor(turn.conversation));
+        const sessionSkills = await buildSessionSkills(binding.agentCorpusRoot);
+        await runModelTurn(
+          turn.input, turn.persistedUser, sessionSkills, binding, turn.broker, serverTools,
+          new ToolBridge(turn.broker, serverTools, () => turn.clientOf().client),
+          createRuntime(), conversationStore, conversationRepository, assetStore, turn.state,
+          async (message) => turn.publish(message), outputGuard, turn.signal,
+          commerceEventSink, deliveryAccountingOutbox, scheduleDeliveryReconciliation,
+          turn.clientOf, turn.claimSteered, turn.compaction
+        );
+      } catch (error) {
+        await failRun(turn, error);
+      }
+    }
+  };
+  const chat = new ChatRuntime<SessionBinding>({
+    repository: conversationRepository,
+    store: conversationStore,
+    runner,
+    scopes,
+    admission,
+    limits: options.principalLimits ?? new SentMessageLimits(conversationRepository, options.maxContactMessages ?? DEFAULT_MAX_CONTACT_MESSAGES),
+    toolTimeoutMs: options.clientToolTimeoutMs ?? clientToolTimeoutMs(),
+    compactionStrategy: options.compactionStrategy,
+    // With a shared database every instance sees every Run's live events.
+    ...(conversationStore instanceof PostgresStore ? { relay: new PostgresEventRelay(conversationStore.pool as never), stops: new PostgresStopRelay(conversationStore.pool as never) } : {})
+  });
+  void repositoryReady.then(() => chat.start()).catch(() => undefined);
+  const edge: ChatEdge = {
+    chat, assetStore, parts, chatAssets, turnAuthorizationGate, turnAuthorizationPerUserGate,
+    entitlementResolver, authIdentityResolver, agentCorpusResolver,
+    creatorToolControlPlane: options.creatorToolControlPlane,
+    consumerBufferedBytes: options.maxConsumerBufferedBytes ?? MAX_CONSUMER_BUFFERED_BYTES
+  };
+  const gateway = chatGatewayFor(options, chat, scopes, conversationRepository, conversationStore, agentCorpusResolver, parts, chatAssets);
+  edge.serviceApi = new ChatServiceApi({ token: options.chatServiceToken, gateway });
+
   const server = http.createServer((req, res) => {
     const requestAbortController = new AbortController();
     const abortDisconnectedRequest = () => {
@@ -712,7 +847,9 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     res.once("close", () => {
       if (!res.writableEnded) abortDisconnectedRequest();
     });
-    const requestDeadline = setTimeout(() => {
+    // A stream or a long wait is bounded by its own protocol, not by the short request deadline.
+    const requestDeadlineMs = httpDeadlineMs(req, httpRequestTimeoutMs);
+    const requestDeadline = requestDeadlineMs === undefined ? undefined : setTimeout(() => {
       requestAbortController.abort(new Error("Runtime HTTP request deadline exceeded"));
       if (!res.headersSent && !res.writableEnded) {
         writeJson(res, 504, {
@@ -721,8 +858,8 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       } else if (!res.writableEnded) {
         res.destroy();
       }
-    }, httpRequestTimeoutMs);
-    requestDeadline.unref();
+    }, requestDeadlineMs);
+    requestDeadline?.unref();
     const requestTask = handleHttpRequest(
       req,
       res,
@@ -736,9 +873,10 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       maxHttpResponseBytes,
       conversationRepository,
       repositoryReady,
-      activeRunControls,
+      edge,
       commerceEventSink,
-      readiness
+      readiness,
+      allowedOrigins
     );
     void requestTask.catch((error) => {
       if (!res.destroyed && !res.writableEnded) handleHttpRequestFailure(res, error);
@@ -758,41 +896,30 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   const wss = new WebSocketServer({
     server,
     path: "/runtime",
-    maxPayload: MAX_RUNTIME_WEBSOCKET_PAYLOAD_BYTES
+    maxPayload: MAX_RUNTIME_WEBSOCKET_PAYLOAD_BYTES,
+    // A browser attaches its cookie to a cross-site upgrade: cookie auth needs an allowed Origin.
+    verifyClient: (info, done) => {
+      const verdict = checkUpgrade({ origin: info.origin, cookie: info.req.headers.cookie, url: info.req.url ?? "" }, allowedOrigins);
+      if (verdict.ok) done(true);
+      else done(false, verdict.status, verdict.message);
+    }
   });
-  wss.on("connection", (socket) => {
+  wss.on("connection", (socket, request) => {
     // `ws` emits an error before close for malformed/oversized frames. Owning
     // the event prevents a process-level uncaught exception; close performs
-    // the same reservation and broker cleanup as any other disconnect.
+    // the same cleanup as any other disconnect.
     socket.on("error", () => undefined);
     const product = handleRuntimeSocket(
       socket,
-      activeConversationRuns,
-      turnAuthorizationGate,
-      turnAuthorizationPerUserGate,
-      activeRunGate,
-      activeRunPerUserGate,
-      maxActiveRunsPerConnection,
+      edge,
+      bearerToken(request),
       helloTimeoutMs,
       connectionHeartbeatMs,
       connectionIdleTimeoutMs,
-      activeRunControls,
       conversationStore,
       conversationRepository,
-      assetStore,
       repositoryReady,
-      createRuntime,
-      entitlementResolver,
-      agentCorpusResolver,
-      authIdentityResolver,
       legacyHmacAuth,
-      options.creatorToolControlPlane,
-      outputGuard,
-      commerceEventSink,
-      deliveryAccountingOutbox,
-      scheduleDeliveryReconciliation,
-      options.clientToolTimeoutMs ?? clientToolTimeoutMs(),
-      options.serverToolTimeoutMs ?? 120_000,
       maxSocketBufferedBytes
     );
     connectionTasks.add(product);
@@ -805,6 +932,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   return {
     server,
     wss,
+    chat: gateway,
     close: async () => {
       if (reconciliationInterval) clearInterval(reconciliationInterval);
       for (const client of wss.clients) {
@@ -820,12 +948,75 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       await new Promise<void>((resolve) => wss.close(() => resolve()));
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
       await Promise.allSettled([...connectionTasks]);
+      // Runs are handed off, not failed: another instance continues them.
+      await chat.stop();
       await Promise.allSettled([...reconciliationTasks]);
       await conversationStore.close();
       await conversationRepository.close();
       await flushLangfuseObservability();
     }
   };
+}
+
+/** Streams and `?wait=` polls bound themselves; everything else gets the request deadline. */
+function httpDeadlineMs(req: http.IncomingMessage, requestTimeoutMs: number): number | undefined {
+  const url = new URL(req.url ?? "/", "http://127.0.0.1");
+  if (String(req.headers.accept ?? "").includes("text/event-stream")) return undefined;
+  const wait = Number(url.searchParams.get("wait") ?? 0);
+  return requestTimeoutMs + (Number.isFinite(wait) && wait > 0 ? Math.min(wait, MAX_WAIT_SECONDS) * 1000 : 0);
+}
+
+function once(release: () => void): () => void {
+  let released = false;
+  return () => { if (!released) { released = true; release(); } };
+}
+
+/** The gateway the channel layer calls: contacts through their Connection, accounts through their conversation. */
+function chatGatewayFor(
+  options: RuntimeServerOptions,
+  chat: ChatRuntime<SessionBinding>,
+  scopes: ScopeResolver<SessionBinding>,
+  repository: ConversationRepository,
+  store: RuntimeStore,
+  agentCorpusResolver: AgentCorpusResolver | undefined,
+  parts: PartsReader,
+  chatAssets: ChatAssets | undefined
+): ChatGateway {
+  const contactBinder = options.connectionDirectory && agentCorpusResolver
+    ? new ContactBinder(options.connectionDirectory, agentCorpusResolver, repository)
+    : undefined;
+  const selfBinder = options.connectionDirectory && agentCorpusResolver
+    ? new SelfBinder(options.connectionDirectory, agentCorpusResolver, repository)
+    : undefined;
+  const unavailable = (kind: string): never => { throw new ChatError("binding_unavailable", `${kind} messages are not configured on this Runtime.`, 503); };
+  return new ServiceChatGateway<SessionBinding>({
+    chat: chat.service,
+    parts,
+    ...(chatAssets ? { uploads: chatAssets } : {}),
+    repository,
+    history: store,
+    binders: {
+      contact: {
+        async bind(principal, ref) {
+          if (principal.kind !== "contact" || !contactBinder) return unavailable("Customer");
+          const bound = await contactBinder.bind(principal, ref);
+          const scope = await scopes.resolve(bound.conversation, new AbortController().signal);
+          return { conversation: bound.conversation, scope: { ...scope, userId: principalKey(principal) }, corpusDigest: bound.corpus.digest, requiresLocalTools: bound.requiresLocalTools };
+        }
+      },
+      account: {
+        async bind(principal, ref) {
+          if (principal.kind !== "account") return unavailable("Account");
+          // A conversation by id is the account's own; a thread is a self Connection's, bound to its linked account.
+          if (ref.kind === "thread" && !selfBinder) return unavailable("Self-use");
+          const conversation = ref.kind === "conversation" ? await repository.getConversation(ref.id) : await selfBinder!.conversationFor(principal.accountId, ref);
+          if (!conversation || conversation.ownerAccountId !== principal.accountId) throw new ChatError("conversation_not_found", "Conversation was not found.", 404);
+          const scope = await scopes.resolve(conversation, new AbortController().signal);
+          return { conversation, scope, corpusDigest: scope.corpusDigest, requiresLocalTools: scope.agentCorpus ? productRequiresLocalTools(scope.agentCorpus) : false };
+        }
+      }
+    }
+  });
 }
 
 async function handleHttpRequest(
@@ -841,9 +1032,10 @@ async function handleHttpRequest(
   maxHttpResponseBytes = 64 * 1024 * 1024,
   conversationRepository?: ConversationRepository,
   repositoryReady?: Promise<unknown>,
-  activeRunControls?: Map<string, ActiveRunControl>,
+  edge?: ChatEdge,
   commerceEventSink?: CommerceEventSink,
-  readiness?: RuntimeReadiness
+  readiness?: RuntimeReadiness,
+  allowedOrigins: readonly string[] = []
 ): Promise<void> {
   setCorsHeaders(res);
   if (req.method === "OPTIONS") {
@@ -968,6 +1160,16 @@ async function handleHttpRequest(
     return;
   }
 
+  if (url.pathname.startsWith("/v1/service/chat/")) {
+    try {
+      await repositoryReady;
+      if (!await edge?.serviceApi?.handle(req, res, url)) throw new ConversationHttpError(404, "not_found", "Route was not found.");
+    } catch (error) {
+      writeConversationHttpError(res, error);
+    }
+    return;
+  }
+
   if (url.pathname === "/v1/conversations" || url.pathname.startsWith("/v1/conversations/")) {
     if (!conversationRepository) {
       writeJson(res, 503, { error: { code: "conversation_repository_unavailable", message: "Conversation storage is unavailable." } });
@@ -987,8 +1189,9 @@ async function handleHttpRequest(
         authIdentityResolver,
         legacyHmacAuth,
         signal,
-        activeRunControls,
-        maxHttpResponseBytes
+        edge,
+        maxHttpResponseBytes,
+        allowedOrigins
       );
     } catch (error) {
       writeConversationHttpError(res, error);
@@ -1183,8 +1386,9 @@ async function handleConversationHttpRequest(
   authIdentityResolver: AuthIdentityResolver | undefined,
   legacyHmacAuth: LegacyHmacAuth,
   signal: AbortSignal | undefined,
-  activeRunControls: Map<string, ActiveRunControl> | undefined,
-  maxHttpResponseBytes: number
+  edge: ChatEdge | undefined,
+  maxHttpResponseBytes: number,
+  allowedOrigins: readonly string[]
 ): Promise<void> {
   const binding = await requireConversationBinding(
     req,
@@ -1197,6 +1401,16 @@ async function handleConversationHttpRequest(
   );
   const repoBinding = conversationBinding(binding);
   const writeResponse = (status: number, body: unknown) => writeJsonBounded(res, status, body, maxHttpResponseBytes);
+  const authToken = bearerToken(req);
+  // A cookie is sent by the browser on any cross-site request, so changing anything with one needs an allowed Origin.
+  if (req.method !== "GET" && typeof req.headers.authorization !== "string" && sessionTokenFromCookie(req.headers.cookie)
+    && !(typeof req.headers.origin === "string" && allowedOrigins.includes(req.headers.origin))) {
+    throw new ConversationHttpError(403, "origin_not_allowed", "This origin may not use a browser session.");
+  }
+  const requireEdge = (): ChatEdge => {
+    if (!edge) throw new ConversationHttpError(503, "chat_unavailable", "The Chat API is unavailable.");
+    return edge;
+  };
 
   if (url.pathname === "/v1/conversations") {
     if (req.method === "GET") {
@@ -1235,6 +1449,21 @@ async function handleConversationHttpRequest(
       return;
     }
     throw new ConversationHttpError(405, "method_not_allowed", "Use GET or POST for /v1/conversations.");
+  }
+
+  const uploadMatch = url.pathname.match(/^\/v1\/conversations\/([^/]+)\/assets$/);
+  if (uploadMatch) {
+    if (req.method !== "POST") throw new ConversationHttpError(405, "method_not_allowed", "Use POST to upload a file.");
+    const conversation = await requireBoundConversation(repository, binding, decodeURIComponent(uploadMatch[1] ?? ""));
+    const chatAssets = requireEdge().chatAssets;
+    if (!chatAssets) throw new ConversationHttpError(501, "attachments_unavailable", "This Runtime cannot take attachments.");
+    // The file is the request body and its name is `?name=`: it becomes a ready asset, or is refused with the reason.
+    const name = url.searchParams.get("name")?.trim();
+    if (!name) throw new ConversationHttpError(400, "invalid_upload", "name is the file's name.");
+    const bytes = await readBoundedBytes(req, MAX_UPLOAD_BYTES);
+    if (!bytes.length) throw new ConversationHttpError(400, "invalid_upload", "The file is empty.");
+    writeResponse(201, await chatAssets.upload(conversation, { name, bytes }));
+    return;
   }
 
   const assetMatch = url.pathname.match(/^\/v1\/conversations\/([^/]+)\/assets\/([^/]+)$/);
@@ -1299,7 +1528,7 @@ async function handleConversationHttpRequest(
     const conversation = await requireBoundConversation(repository, binding, decodeURIComponent(historyMatch[1] ?? ""));
     if (!store) throw new ConversationHttpError(503, "history_unavailable", "Conversation history is unavailable.");
     const limit = parsePositiveInteger(url.searchParams.get("limit"), "limit", 100) ?? 50;
-    const page = await store.readVisibleConversationPage(conversation.id, {
+    const page = await new ChatConversationReadModel({ history: store, repository }).page(conversation.id, {
       limit,
       beforeCursor: url.searchParams.get("before_cursor") ?? undefined
     });
@@ -1328,7 +1557,7 @@ async function handleConversationHttpRequest(
       // Capture the recovery waterline before reading the projection. Events
       // committed while history is loading are then covered by incremental recovery.
       const snapshot = await repository.recoverySnapshot(conversation.id, []);
-      const page = await store.readVisibleConversationPage(conversation.id, { limit: 50 });
+      const page = await new ChatConversationReadModel({ history: store, repository }).page(conversation.id, { limit: 50 });
       const pageRuns = await Promise.all(page.run_ids.map((id) => repository.getRun(conversation.id, id)));
       const runs = new Map(snapshot.runs.map((run) => [run.id, run]));
       for (const run of pageRuns) if (run) runs.set(run.id, run);
@@ -1340,6 +1569,13 @@ async function handleConversationHttpRequest(
         events: [],
         cursor: snapshot.cursor
       });
+      return;
+    }
+    if (snapshotMatch[2] === "events" && String(req.headers.accept ?? "").includes("text/event-stream")) {
+      // Resume by cursor: after_cursor, or the Last-Event-ID the browser echoes on reconnect.
+      const lastEventId = Number(req.headers["last-event-id"]);
+      const resumeAfter = afterCursor ?? (Number.isSafeInteger(lastEventId) && lastEventId >= 0 ? lastEventId : (await repository.recoverySnapshot(conversation.id, [])).cursor);
+      openEventStream(res, requireEdge(), conversation, resumeAfter, privateBoundaryProjection(() => binding));
       return;
     }
     const snapshot = await repository.snapshot(conversation.id, afterCursor ?? 0);
@@ -1356,8 +1592,93 @@ async function handleConversationHttpRequest(
       runs: snapshot.runs.map(publicRun),
       messages,
       events: eventResponse,
-      cursor: snapshot.cursor
+      cursor: snapshot.cursor,
+      pending_tool_calls: await edge?.chat.pendingToolRequests(conversation.id) ?? []
     });
+    return;
+  }
+
+  const messagesMatch = url.pathname.match(/^\/v1\/conversations\/([^/]+)\/messages$/);
+  if (messagesMatch) {
+    if (req.method !== "POST") throw new ConversationHttpError(405, "method_not_allowed", "Use POST to send a message.");
+    const conversation = await requireBoundConversation(repository, binding, decodeURIComponent(messagesMatch[1] ?? ""));
+    const body = await readJsonObject(req);
+    rejectUnknownFields(body, ["client_message_id", "content", "parts", "client", "device", "locale", "language", "time_zone"]);
+    const clientMessageId = requiredString(body, "client_message_id", 256);
+    if ((body.content === undefined) === (body.parts === undefined)) {
+      throw new ConversationHttpError(400, "invalid_request", "Provide either content or parts.");
+    }
+    const content = body.content !== undefined ? requiredString(body, "content", MAX_USER_MESSAGE_CHARS) : "";
+    const chatEdge = requireEdge();
+    // Parts may refer to ready assets: they are resolved before anything is accepted.
+    const prepared = body.parts !== undefined ? await chatEdge.parts.prepare(contentPartsOf(body.parts), conversation, clientMessageId) : undefined;
+    const wait = parseNonNegativeInteger(url.searchParams.get("wait"), "wait") ?? 0;
+    const streaming = String(req.headers.accept ?? "").includes("text/event-stream");
+    // Without more to go on, an HTTP caller is an agent without a machine for local tools.
+    const client = clientAttributesOf({ client: "mcp", ...body } as { client?: string });
+    const before = (await repository.recoverySnapshot(conversation.id, [])).cursor;
+    const { submission } = await submitUserMessage(chatEdge, { authToken, binding, conversation }, {
+      runId: `run_${randomUUID().replaceAll("-", "")}`,
+      clientMessageId,
+      ...(prepared ? { prepared } : {}),
+      message: { role: "user", content },
+      taskStart: false,
+      client,
+      ...(typeof body.time_zone === "string" ? { timeZone: body.time_zone } : {})
+    }, signal);
+    if (streaming) {
+      // A send replayed after its Run ended has no end left to wait for: it is answered with the Run's result.
+      const ended = submission.outcome === "replayed" ? await repository.getRun(conversation.id, submission.run.id) : undefined;
+      const finished = ended && TERMINAL_STATUSES.has(ended.status) ? {
+        status: ended.status,
+        reply: ended.status === "completed" && store ? finalAssistantText(await store.readVisibleConversation(conversation.id), ended.id) : "",
+        cursor: await repository.latestRunStateCursor(ended.id)
+      } : undefined;
+      openEventStream(res, chatEdge, conversation, before, privateBoundaryProjection(() => binding), submission, finished);
+      return;
+    }
+    const run = await waitForTerminalRun(() => repository.getRun(conversation.id, submission.run.id), Math.min(wait, MAX_WAIT_SECONDS) * 1000, 100, signal);
+    if (!run || !TERMINAL_STATUSES.has(run.status)) {
+      writeResponse(202, { run_id: submission.run.id, outcome: submission.outcome, status: run?.status ?? submission.run.status });
+      return;
+    }
+    const reply = run.status === "completed" && store ? finalAssistantText(await store.readVisibleConversation(conversation.id), run.id) : "";
+    writeResponse(200, { run: publicRun(run), outcome: submission.outcome, reply });
+    return;
+  }
+
+  const retryMatch = url.pathname.match(/^\/v1\/conversations\/([^/]+)\/retry$/);
+  if (retryMatch) {
+    if (req.method !== "POST") throw new ConversationHttpError(405, "method_not_allowed", "Use POST to answer again.");
+    const conversation = await requireBoundConversation(repository, binding, decodeURIComponent(retryMatch[1] ?? ""));
+    const body = await readJsonObject(req);
+    rejectUnknownFields(body, ["retry_id", "client", "device", "locale", "language", "time_zone"]);
+    // The client's key for this answer again: the same key is the same Run, whatever happened to the response.
+    const retried = await retryRun(requireEdge(), { authToken, binding, conversation }, {
+      runId: `run_${randomUUID().replaceAll("-", "")}`,
+      key: requiredString(body, "retry_id", 256),
+      client: clientAttributesOf({ client: "mcp", ...body } as { client?: string }),
+      ...(typeof body.time_zone === "string" ? { timeZone: body.time_zone } : {})
+    }, signal);
+    writeResponse(202, { run_id: retried.run.id, outcome: retried.outcome, status: retried.run.status });
+    return;
+  }
+
+  const toolResultsMatch = url.pathname.match(/^\/v1\/conversations\/([^/]+)\/tool-results$/);
+  if (toolResultsMatch) {
+    if (req.method !== "POST") throw new ConversationHttpError(405, "method_not_allowed", "Use POST to provide a tool result.");
+    const conversation = await requireBoundConversation(repository, binding, decodeURIComponent(toolResultsMatch[1] ?? ""));
+    const chatEdge = requireEdge();
+    const { client: clientField, ...resultBody } = await readJsonObject(req);
+    const result = ToolCallResultSchema.parse({ type: "tool_call.result", ...resultBody });
+    const client = clientAttributesOf({ client: typeof clientField === "string" ? clientField : "cli" });
+    const request = (await chatEdge.chat.pendingToolRequests(conversation.id)).find((pending) => pending.run_id === result.run_id && pending.tool_call_id === result.tool_call_id);
+    const authorization = request ? authorizeLocalToolCall(request.name as ClientToolName, client.client) : undefined;
+    if (authorization && !authorization.allowed) throw new ConversationHttpError(403, authorization.error.code, authorization.error.message);
+    if (!await chatEdge.chat.supervisor.deliverToolResult(conversation.id, result.run_id, result)) {
+      throw new ConversationHttpError(404, "unknown_tool_call", `No pending tool request for ${result.tool_call_id}`);
+    }
+    writeResponse(200, { accepted: true });
     return;
   }
 
@@ -1368,21 +1689,7 @@ async function handleConversationHttpRequest(
       writeResponse(200, { conversation_id: conversation.publicId, runs: (await repository.listRuns(conversation.id)).map(publicRun) });
       return;
     }
-    if (req.method === "POST") {
-      const body = await readJsonObject(req);
-      rejectUnknownFields(body, ["client_message_id"]);
-      requiredString(body, "client_message_id", 256);
-      // Do not manufacture a queued Run without a live executor. That would
-      // reserve the single active-run slot with no window that is authorized
-      // to answer local-tool or approval requests. `/runtime` client.message
-      // is the sole executable-run creation path in V1.
-      throw new ConversationHttpError(
-        409,
-        "executor_attach_required",
-        "Create an executable Run with /runtime client.message. HTTP cannot create a detached Run reservation."
-      );
-    }
-    throw new ConversationHttpError(405, "method_not_allowed", "Use GET for runs; executable Runs are created with /runtime client.message.");
+    throw new ConversationHttpError(405, "method_not_allowed", "Use GET for runs; send a message with POST /messages to start or steer a Run.");
   }
 
   const runMatch = url.pathname.match(/^\/v1\/conversations\/([^/]+)\/runs\/([^/]+)(?:\/(cancel))?$/);
@@ -1393,12 +1700,7 @@ async function handleConversationHttpRequest(
       const body = await readJsonObject(req);
       rejectUnknownFields(body, ["reason"]);
       const reason = optionalString(body, "reason", 500) ?? "Run cancelled";
-      const control = activeRunControls?.get(runControlKey(conversation.id, runId));
-      if (control) {
-        await control.cancel(reason);
-      } else {
-        await repository.transitionRun(runId, "cancelled", reason);
-      }
+      await requireEdge().chat.cancel(conversation.id, runId, reason);
       const run = await repository.getRun(conversation.id, runId);
       if (!run) throw new ConversationHttpError(404, "run_not_found", `Run ${runId} was not found.`);
       if (!store) throw new ConversationHttpError(503, "history_unavailable", "Message acceptance is unavailable.");
@@ -1506,18 +1808,55 @@ function publicConversation(conversation: ConversationRecord): Record<string, un
   };
 }
 
-function publicRun(run: ConversationRunRecord): Record<string, unknown> {
-  return {
-    id: run.id,
-    client_message_id: run.clientMessageId,
-    ...(run.inputDigest ? { input_digest: run.inputDigest } : {}),
-    status: run.status,
-    corpus_digest: run.corpusDigest,
-    created_at: run.createdAt,
-    ...(run.startedAt ? { started_at: run.startedAt } : {}),
-    ...(run.completedAt ? { completed_at: run.completedAt } : {}),
-    ...(run.interruptedReason ? { interrupted_reason: run.interruptedReason } : {})
-  };
+function contentPartsOf(value: unknown): ContentPart[] {
+  if (!Array.isArray(value) || value.length === 0) throw new ConversationHttpError(400, "invalid_request", "parts must be a non-empty array.");
+  return value.map((part) => {
+    const record = part as Record<string, unknown>;
+    if (record?.type === "text" && typeof record.text === "string") return { type: "text" as const, text: record.text };
+    if ((record?.type === "image" || record?.type === "file" || record?.type === "audio") && typeof record.assetId === "string") {
+      return { type: record.type, assetId: record.assetId };
+    }
+    throw new ConversationHttpError(400, "invalid_request", "Each part is text, or an image, file or audio with an assetId.");
+  });
+}
+
+/**
+ * Streams a conversation as Server-Sent Events from a cursor. The stream ends when the
+ * Run it was opened for ends; closing it early never stops the Run.
+ */
+function openEventStream(
+  res: http.ServerResponse,
+  edge: ChatEdge,
+  conversation: ConversationRecord,
+  afterCursor: number,
+  project: EventProjection,
+  submission?: Submission,
+  /** The submission's Run had already ended: the stream carries its reply and its end, and closes. */
+  finished?: { status: string; reply: string; cursor?: number }
+): void {
+  res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
+  const sink = projecting(new SseSink(res, edge.consumerBufferedBytes), project);
+  if (submission) {
+    sink.push({ type: "message.accepted", conversation_id: conversation.publicId, run_id: submission.run.id, client_message_id: submission.clientMessageId, outcome: submission.outcome });
+  }
+  if (submission && finished) {
+    if (finished.reply) sink.push({ type: "assistant.delta", run_id: submission.run.id, delta: { kind: "text", content: finished.reply, offset: 0 } });
+    sink.push({ type: "journal.event", ...(finished.cursor === undefined ? {} : { cursor: finished.cursor }), journal_type: "run.state", run_id: submission.run.id, payload: { id: submission.run.id, status: finished.status } });
+    res.end();
+    return;
+  }
+  const detach = edge.chat.feed.attach(conversation.id, { afterCursor, stream: true }, {
+    push(event) {
+      sink.push(event);
+      const ended = event.type === "journal.event" && event.journal_type === "run.state" && event.run_id === submission?.run.id
+        && TERMINAL_STATUSES.has(String((event.payload as { status?: string }).status));
+      if (ended) { detach(); res.end(); }
+    }
+  });
+  res.once("close", detach);
+  void edge.chat.pendingToolRequests(conversation.id).then((pending) => {
+    for (const request of pending) { try { sink.push(request as unknown as Record<string, unknown>); } catch { detach(); } }
+  });
 }
 
 function publicJournalEvent(event: ConversationJournalEvent): Record<string, unknown> {
@@ -1525,7 +1864,7 @@ function publicJournalEvent(event: ConversationJournalEvent): Record<string, unk
     cursor: event.cursor,
     ...(event.runId ? { run_id: event.runId } : {}),
     type: event.type,
-    payload: event.payload,
+    payload: publicJournalPayload(event.payload),
     created_at: event.createdAt
   };
 }
@@ -1552,6 +1891,18 @@ function parseNonNegativeInteger(value: string | null, field: string): number | 
     throw new ConversationHttpError(400, "invalid_request", `${field} must be a non-negative integer.`);
   }
   return parsed;
+}
+
+async function readBoundedBytes(req: http.IncomingMessage, maxBytes: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of req) {
+    const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += value.byteLength;
+    if (total > maxBytes) throw new ConversationHttpError(413, "request_too_large", `A file is limited to ${maxBytes} bytes.`);
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks);
 }
 
 async function readJsonObject(req: http.IncomingMessage): Promise<Record<string, unknown>> {
@@ -1626,6 +1977,14 @@ function writeConversationHttpError(res: http.ServerResponse, error: unknown): v
   }
   if (error instanceof BriefValidationError) {
     writeJson(res, 422, { error: { code: error.code, message: error.message } });
+    return;
+  }
+  if (error instanceof ChatError) {
+    writeJson(res, error.status, { error: { code: error.code, message: error.message } });
+    return;
+  }
+  if (error instanceof EntitlementError) {
+    writeHttpAuthorizationFailure(res, error, "entitlement_required");
     return;
   }
   if (error instanceof ConversationRepositoryError) {
@@ -1744,20 +2103,6 @@ function writeJsonBounded(
   res.end(serialized);
 }
 
-function runControlKey(conversationId: string, runId: string): string {
-  return `${conversationId}\u0000${runId}`;
-}
-
-function releaseConversationRun(
-  activeConversationRuns: Map<string, string>,
-  conversationId: string,
-  runId: string
-): void {
-  if (activeConversationRuns.get(conversationId) === runId) {
-    activeConversationRuns.delete(conversationId);
-  }
-}
-
 async function materializeUserMessageAssets(
   message: RunStart["message"],
   assetStore: RuntimeAssetStore
@@ -1790,40 +2135,163 @@ async function materializeUserMessageAssets(
   };
 }
 
+/** What both transports need to turn an authenticated user message into a Run or a steer. */
+type ChatEdge = {
+  /** What a Chat event consumer may leave unsent before it is disconnected. */
+  consumerBufferedBytes: number;
+  chat: ChatRuntime<SessionBinding>;
+  assetStore: RuntimeAssetStore;
+  parts: PartsReader;
+  chatAssets?: ChatAssets;
+  /** The channel layer's door into Chat from another process. */
+  serviceApi?: ChatServiceApi;
+  turnAuthorizationGate: CapacityGate;
+  turnAuthorizationPerUserGate: KeyedCapacityGate;
+  entitlementResolver?: EntitlementResolver;
+  authIdentityResolver?: AuthIdentityResolver;
+  agentCorpusResolver?: AgentCorpusResolver;
+  creatorToolControlPlane?: CreatorToolControlPlane;
+};
+
+type ChatSession = {
+  authToken: string | undefined;
+  binding: SessionBinding;
+  conversation: ConversationRecord;
+};
+
+type ChatMessageRequest = {
+  /** Parts a client sent, already resolved: the canonical message and digest come from them. */
+  prepared?: PreparedMessage;
+  runId: string;
+  clientMessageId: string;
+  message: RunStart["message"];
+  taskStart: boolean;
+  client: ClientAttributes;
+  timeZone?: string;
+};
+
+/** Access is verified again before any Run starts, for a message and for an answer again alike: what the user may use now. */
+async function authorizedBinding(edge: ChatEdge, session: ChatSession, signal?: AbortSignal): Promise<SessionBinding> {
+  const releaseAuthorization = edge.turnAuthorizationGate.tryAcquire();
+  if (!releaseAuthorization) {
+    throw new ChatError("authorization_busy", "Hatch is already verifying the maximum number of turns. Try again shortly.", 429);
+  }
+  const releaseUserAuthorization = edge.turnAuthorizationPerUserGate.tryAcquire(session.binding.userId);
+  if (!releaseUserAuthorization) {
+    releaseAuthorization();
+    throw new ChatError("user_authorization_busy", "This account is already verifying the maximum number of turns. Try again shortly.", 429);
+  }
+  let binding = session.binding;
+  try {
+    await revalidateTurnAuthorization({ auth_token: session.authToken }, binding, edge.entitlementResolver, edge.authIdentityResolver, signal);
+    if (binding.agentCorpus) {
+      binding = await resolveTurnAgentBinding(binding, edge.agentCorpusResolver, signal);
+      // A disabled binding blocks the message here, before any Run exists.
+      binding = {
+        ...binding,
+        creatorTools: await resolveCreatorTools(edge.creatorToolControlPlane, binding.creatorId, binding.productId, binding.agentCorpus!, signal)
+      };
+    }
+  } catch (error) {
+    if (error instanceof EntitlementError) throw error;
+    throw new EntitlementError("authorization_unavailable", errorMessage(error));
+  } finally {
+    releaseAuthorization();
+    releaseUserAuthorization();
+  }
+  return binding;
+}
+
+/**
+ * The one path a user message takes, from WebSocket or HTTP: re-verify access,
+ * make the message canonical, then steer the active Run or start one.
+ */
+async function submitUserMessage(
+  edge: ChatEdge,
+  session: ChatSession,
+  request: ChatMessageRequest,
+  signal?: AbortSignal
+): Promise<{ submission: Submission; binding: SessionBinding }> {
+  const binding = await authorizedBinding(edge, session, signal);
+  if (request.taskStart && binding.briefSpec && !session.conversation.briefSnapshot) {
+    throw new ChatError("conversation_brief_required", "A Brief is required before starting this task.", 409);
+  }
+  const canonicalMessage = request.prepared?.message ?? (async (): Promise<ConversationMessage> => request.taskStart
+    ? { role: "user", content: TASK_START_MESSAGE_CONTENT, kind: "task_start" }
+    : materializeUserMessageAssets(request.message, edge.assetStore));
+  signal?.throwIfAborted();
+  const submission = await edge.chat.service.submit({
+    principal: accountPrincipal(binding.userId),
+    conversation: session.conversation,
+    scope: binding,
+    client: request.client,
+    clientMessageId: request.clientMessageId,
+    message: canonicalMessage,
+    ...(request.prepared?.bind ? { bind: request.prepared.bind } : {}),
+    digest: request.prepared?.digest ?? clientMessageInputDigest({ ...request.message, ...(request.taskStart ? { task_start: true } : {}) }),
+    runId: request.runId,
+    corpusDigest: binding.corpusDigest,
+    requiresLocalTools: binding.agentCorpus ? productRequiresLocalTools(binding.agentCorpus) : false,
+    ...(request.timeZone ? { timeZone: request.timeZone } : {})
+  });
+  return { submission, binding };
+}
+
+/**
+ * Answers a conversation again after a Run that failed or was interrupted, with no new message: re-verify access,
+ * then start a Run over the same transcript, or replay the one this key started.
+ */
+async function retryRun(
+  edge: ChatEdge,
+  session: ChatSession,
+  request: { runId: string; key: string; client: ClientAttributes; timeZone?: string },
+  signal?: AbortSignal
+): Promise<Retried> {
+  const binding = await authorizedBinding(edge, session, signal);
+  signal?.throwIfAborted();
+  return edge.chat.service.retry({
+    principal: accountPrincipal(binding.userId),
+    conversation: session.conversation,
+    scope: binding,
+    client: request.client,
+    key: request.key,
+    runId: request.runId,
+    corpusDigest: binding.corpusDigest,
+    requiresLocalTools: binding.agentCorpus ? productRequiresLocalTools(binding.agentCorpus) : false,
+    ...(request.timeZone ? { timeZone: request.timeZone } : {})
+  });
+}
+
+/** A failure a client can act on, whichever way it arrived. */
+function chatFailure(error: unknown): { code: string; message: string } {
+  if (error instanceof ChatError) return { code: error.code, message: error.message };
+  if (error instanceof EntitlementError) return controlledTurnAuthorizationError(error);
+  if (error instanceof ConversationRepositoryError) {
+    return {
+      code: error.code,
+      message: error.code === "client_message_conflict"
+        ? "This client_message_id was already used with different message or attachment content."
+        : error.code === "conversation_not_found" ? "Create the task before starting a run." : error.message
+    };
+  }
+  return { code: "protocol_error", message: errorMessage(error) };
+}
+
 async function handleRuntimeSocket(
   socket: WebSocket,
-  activeConversationRuns: Map<string, string>,
-  turnAuthorizationGate: CapacityGate,
-  turnAuthorizationPerUserGate: KeyedCapacityGate,
-  activeRunGate: CapacityGate,
-  activeRunPerUserGate: KeyedCapacityGate,
-  maxActiveRunsPerConnection: number,
+  edge: ChatEdge,
+  upgradeToken: string | undefined,
   helloTimeoutMs: number,
   connectionHeartbeatMs: number,
   connectionIdleTimeoutMs: number,
-  activeRunControls: Map<string, ActiveRunControl>,
   store: RuntimeStore,
   conversationRepository: ConversationRepository,
-  assetStore: RuntimeAssetStore,
   repositoryReady: Promise<unknown>,
-  createRuntime: () => AgentRuntime,
-  entitlementResolver?: EntitlementResolver,
-  agentCorpusResolver?: AgentCorpusResolver,
-  authIdentityResolver?: AuthIdentityResolver,
   legacyHmacAuth: LegacyHmacAuth = { enabled: false },
-  configuredCreatorToolControlPlane?: CreatorToolControlPlane,
-  outputGuard: OutputGuard = new PassThroughOutputGuard(),
-  commerceEventSink?: CommerceEventSink,
-  deliveryAccountingOutbox?: DeliveryAccountingOutbox,
-  scheduleDeliveryReconciliation: () => void = () => undefined,
-  toolResultTimeoutMs = clientToolTimeoutMs(),
-  serverToolTimeoutMs = 120_000,
   maxSocketBufferedBytes = 160 * 1024 * 1024
 ): Promise<void> {
+  const { chat, entitlementResolver, agentCorpusResolver, authIdentityResolver } = edge;
   const connectionAbortController = new AbortController();
-  // Each WebSocket owns a Runtime-generated executor lease. No client/device
-  // installation identifier participates in authority.
-  const executorId = `executor_${randomUUID().replaceAll("-", "")}`;
   let hello: ClientHello | undefined;
   const helloDeadline = setTimeout(() => {
     if (hello || socket.readyState === WebSocket.CLOSED) return;
@@ -1833,22 +2301,16 @@ async function handleRuntimeSocket(
   helloDeadline.unref();
   let binding: SessionBinding | undefined;
   let connectionConversation: ConversationRecord | undefined;
-  let sessionSkills: RuntimeSessionSkills | undefined;
-  const serverTools = new ServerToolExecutor(serverToolTimeoutMs);
-  const creatorToolControlPlane = configuredCreatorToolControlPlane;
-  const runtime = createRuntime();
-  const activeRuns = new Set<Promise<void>>();
-  const messageTasks = new Set<Promise<void>>();
-  const activeRunStates = new Map<string, RunStateMachine>();
-  const activeRunAbortControllers = new Map<string, AbortController>();
-  const pendingTurnAuthorizations = new Map<string, PendingTurnAuthorization>();
-  const reservedRunIds = new Set<string>();
-  const cancellingRunIds = new Set<string>();
+  let authToken: string | undefined;
+  let client: ClientAttributes = { client: "web" };
   let helloPending = false;
-  let authorizationSlotRunId: string | undefined;
+  let detach: (() => void) | undefined;
   let heartbeatTimer: NodeJS.Timeout | undefined;
   let awaitingPong = false;
   let lastClientActivityAt = Date.now();
+  const messageTasks = new Set<Promise<void>>();
+  // A message being authorized has no Run yet; a cancel with its run id stops it before one exists.
+  const pendingSubmissions = new Map<string, AbortController>();
 
   const terminateConnection = (reason: string): void => {
     connectionAbortController.abort(new Error(reason));
@@ -1881,24 +2343,20 @@ async function handleRuntimeSocket(
     awaitingPong = false;
   });
 
+  // Closing a connection ends the connection, nothing else: the Runs it started belong to the server.
   socket.once("close", () => {
     clearTimeout(helloDeadline);
     if (heartbeatTimer) clearInterval(heartbeatTimer);
     heartbeatTimer = undefined;
+    detach?.();
+    detach = undefined;
     connectionAbortController.abort(new Error("Runtime socket closed"));
-    for (const pending of pendingTurnAuthorizations.values()) {
-      pending.cancelled = true;
-      pending.controller.abort(new Error("Runtime socket closed"));
-      releaseConversationRun(activeConversationRuns, pending.conversationId, pending.runId);
-    }
-    for (const controller of activeRunAbortControllers.values()) {
-      controller.abort(new Error("Runtime socket closed"));
-    }
-    authorizationSlotRunId = undefined;
   });
 
+  const project = privateBoundaryProjection(() => binding);
+  const sink = projecting(new SocketSink(socket, edge.consumerBufferedBytes), project);
   const send = async (message: OutboundMessage): Promise<void> => {
-    const outbound = protectPrivateAgentBoundary(message, binding?.agentCorpusRoot, binding?.productId);
+    const outbound = project(message as unknown as Record<string, unknown>) as unknown as OutboundMessage;
     if (socket.readyState !== WebSocket.OPEN) return;
     const payload = JSON.stringify(outbound);
     const payloadBytes = Buffer.byteLength(payload, "utf8");
@@ -1917,15 +2375,17 @@ async function handleRuntimeSocket(
       throw error;
     });
   };
-  const broker = new ClientToolBroker(send, store, toolResultTimeoutMs);
-  const toolBridge = new ToolBridge(broker, serverTools);
+  /** Local-tool calls still waiting for a client: whoever reconnects can answer them. */
+  const replayPendingToolRequests = async (conversationId: string): Promise<void> => {
+    for (const request of await chat.pendingToolRequests(conversationId)) sink.push(request as unknown as Record<string, unknown>);
+  };
 
   socket.on("message", (data) => {
     lastClientActivityAt = Date.now();
     awaitingPong = false;
     const messageTask = (async () => {
       try {
-        const message = parseInboundMessage(JSON.parse(String(data)));
+        const message = parseInboundMessage(withUpgradeToken(JSON.parse(String(data)), upgradeToken));
 
         if (message.type === "client.hello") {
           if (hello || helloPending) {
@@ -1974,24 +2434,6 @@ async function handleRuntimeSocket(
             }
             assertConversationBinding(conversation, conversationBinding(nextBinding));
             connectionAbortController.signal.throwIfAborted();
-            if (nextBinding.agentCorpus && nextBinding.agentCorpusRoot) {
-              serverTools.setKnowledgeScope({
-                provider: createKnowledgeProvider(nextBinding.agentCorpusRoot, nextBinding.agentCorpus, nextBinding.corpusDigest),
-                creatorId: nextBinding.agentCorpus.creator.id,
-                agentId: nextBinding.productId,
-                corpusDigest: nextBinding.corpusDigest
-              });
-              serverTools.setResolvedCreatorTools(await resolveCreatorTools(
-                creatorToolControlPlane,
-                nextBinding.agentCorpus.creator.id,
-                nextBinding.agentCorpus.agent_id,
-                nextBinding.agentCorpus,
-                connectionAbortController.signal
-              ));
-              connectionAbortController.signal.throwIfAborted();
-            }
-            const nextSessionSkills = await buildSessionSkills(nextBinding.agentCorpusRoot);
-            connectionAbortController.signal.throwIfAborted();
             await store.append({
               type: "session.started",
               creator_id: nextBinding.creatorId,
@@ -2017,9 +2459,10 @@ async function handleRuntimeSocket(
             binding = nextBinding;
             connectionConversation = conversation;
             hello = message;
-            sessionSkills = nextSessionSkills;
+            authToken = message.auth_token ?? message.license_token;
+            client = clientAttributesOf(message, message);
             clearTimeout(helloDeadline);
-            await send({
+            const ready = send({
               type: "session.ready",
               conversation_id: conversation.publicId,
               accepted_protocol_version: message.protocol_version,
@@ -2055,6 +2498,11 @@ async function handleRuntimeSocket(
                 }
               } : {})
             });
+            // A connection sees its conversation's live events, whoever started the Run.
+            // Subscribed before the ready frame is awaited: a client that answers it at once cannot outrun its own subscription.
+            detach = chat.hub.subscribe(conversation.id, sink);
+            await ready;
+            await replayPendingToolRequests(conversation.id);
             startEstablishedConnectionHeartbeat();
           } finally {
             helloPending = false;
@@ -2072,9 +2520,28 @@ async function handleRuntimeSocket(
           });
           return;
         }
+        const conversation = connectionConversation;
+
+        if (message.type === "conversation.subscribe") {
+          if (message.conversation_id !== conversation.publicId) {
+            await send({ type: "turn.failed", error: { code: "conversation_mismatch", message: `This connection is bound to conversation ${conversation.publicId}.` } });
+            return;
+          }
+          detach?.();
+          const afterCursor = message.after_cursor ?? (await conversationRepository.recoverySnapshot(conversation.id, [])).cursor;
+          detach = chat.feed.attach(conversation.id, { afterCursor, stream: message.stream }, sink);
+          if (message.stream) await replayPendingToolRequests(conversation.id);
+          return;
+        }
 
         if (message.type === "tool_call.result") {
-          if (!await broker.handleResult(message)) {
+          const request = (await chat.pendingToolRequests(conversation.id)).find((pending) => pending.run_id === message.run_id && pending.tool_call_id === message.tool_call_id);
+          const authorization = request ? authorizeLocalToolCall(request.name as ClientToolName, client.client) : undefined;
+          if (authorization && !authorization.allowed) {
+            await send({ type: "turn.failed", run_id: message.run_id, error: authorization.error });
+            return;
+          }
+          if (!await chat.supervisor.deliverToolResult(conversation.id, message.run_id, message)) {
             await send({
               type: "turn.failed",
               run_id: message.run_id,
@@ -2088,573 +2555,58 @@ async function handleRuntimeSocket(
         }
 
         if (message.type === "turn.cancel") {
-          const pendingAuthorization = pendingTurnAuthorizations.get(message.run_id);
-          if (pendingAuthorization) {
-            if (!pendingAuthorization.cancelled) {
-              const reason = message.reason ?? "Run canceled";
-              pendingAuthorization.cancelled = true;
-              pendingAuthorization.controller.abort(new Error(reason));
-              releaseConversationRun(
-                activeConversationRuns,
-                pendingAuthorization.conversationId,
-                pendingAuthorization.runId
-              );
-              await send({
-                type: "turn.failed",
-                run_id: message.run_id,
-                error: { code: "run_cancelled", message: reason }
-              });
-            }
-            return;
-          }
-          const state = activeRunStates.get(message.run_id);
-          if (!state) {
-            await send({
-              type: "turn.failed",
-              run_id: message.run_id,
-              error: {
-                code: "unknown_run",
-                message: `No active run for ${message.run_id}`
-              }
-            });
-            return;
-          }
-          cancellingRunIds.add(message.run_id);
           const reason = message.reason ?? "Run canceled";
-          activeRunAbortControllers.get(message.run_id)?.abort(new Error(reason));
-          const control = activeRunControls.get(runControlKey(state.conversationId, message.run_id));
-          try {
-            if (control) {
-              await control.cancel(reason);
-            } else {
-              // Defensive fallback for the tiny interval while a newly-created
-              // run is being registered with the process-local control map.
-              await state.cancel(reason).catch(() => undefined);
-              await broker.cancelRun(message.run_id, reason);
-              await send({ type: "turn.failed", run_id: message.run_id, error: { code: "run_cancelled", message: reason } });
-            }
-          } finally {
-            cancellingRunIds.delete(message.run_id);
-            if (!activeRunStates.has(message.run_id)) reservedRunIds.delete(message.run_id);
+          const pending = pendingSubmissions.get(message.run_id);
+          if (pending) {
+            pending.abort(new Error(reason));
+            await send({ type: "turn.failed", run_id: message.run_id, error: { code: "run_cancelled", message: reason } });
+            return;
+          }
+          if (!await chat.cancel(conversation.id, message.run_id, reason)) {
+            await send({ type: "turn.failed", run_id: message.run_id, error: { code: "unknown_run", message: `No active run for ${message.run_id}` } });
           }
           return;
         }
 
         if (message.type === "client.message") {
-          if (message.conversation_id !== connectionConversation.publicId) {
+          if (message.conversation_id !== conversation.publicId) {
             await send({
               type: "turn.failed",
               run_id: message.run_id,
               error: {
                 code: "conversation_mismatch",
-                message: `This connection is bound to conversation ${connectionConversation.publicId}.`
+                message: `This connection is bound to conversation ${conversation.publicId}.`
               }
             });
             return;
           }
-          if (!sessionSkills) {
-            await send({
-              type: "turn.failed",
-              run_id: message.run_id,
-              error: {
-                code: "session_not_ready",
-                message: "session skills were not initialized"
-              }
-            });
-            return;
-          }
-          // Durable identity deliberately excludes corpus_digest: an Agent
-          // update must not orphan an existing Account/Creator/Agent thread.
-          const storageConversationId = connectionConversation.id;
-          const clientMessageId = message.client_message_id ?? message.run_id;
-          const inputDigest = clientMessageInputDigest({ ...message.message, ...(message.task_start ? { task_start: true } : {}) });
-          if (reservedRunIds.has(message.run_id) || activeConversationRuns.has(storageConversationId)) {
-            await repositoryReady;
-            const existing = await conversationRepository.getRunByClientMessageId(storageConversationId, clientMessageId);
-            if (existing) {
-              if (authorizationSlotRunId) {
-                await send({ type: "turn.failed", run_id: message.run_id, error: { code: "connection_busy", message: "This connection is already authorizing a submission." } });
-                return;
-              }
-              const releaseReplay = turnAuthorizationGate.tryAcquire();
-              const releaseUserReplay = releaseReplay ? turnAuthorizationPerUserGate.tryAcquire(binding.userId) : undefined;
-              if (!releaseReplay || !releaseUserReplay) {
-                releaseReplay?.();
-                await send({ type: "turn.failed", run_id: message.run_id, error: { code: "authorization_busy", message: "Submission authorization capacity is busy." } });
-                return;
-              }
-              authorizationSlotRunId = message.run_id;
-              try {
-                await revalidateTurnAuthorization(hello, binding, entitlementResolver, authIdentityResolver,
-                  connectionAbortController.signal);
-                const conversation = await conversationRepository.getConversation(storageConversationId);
-                if (!conversation) throw new ConversationRepositoryError("conversation_not_found", "Conversation was not found");
-                assertConversationBinding(conversation, conversationBinding(binding));
-                if (existing.inputDigest && existing.inputDigest !== inputDigest) {
-                  await send({
-                    type: "turn.failed",
-                    run_id: message.run_id,
-                    error: {
-                      code: "client_message_conflict",
-                      message: "This client_message_id was already used with different message or attachment content."
-                    }
-                  });
-                  return;
-                }
-                const receipt = await store.readSubmissionReceipt(storageConversationId, existing.id);
-                if (!receipt) {
-                  await send({ type: "turn.failed", run_id: message.run_id, error: {
-                    code: "submission_not_accepted", message: "Historical run has no accepted submission; submit explicitly with a new client_message_id."
-                  } });
-                  return;
-                }
-                await send({
-                  type: "message.accepted",
-                  conversation_id: connectionConversation.publicId,
-                  run_id: receipt.run_id,
-                  client_message_id: receipt.client_message_id
-                });
-                await send({
-                  type: "turn.state",
-                  run_id: existing.id,
-                  status: existing.status,
-                  reason: "Idempotent client message replay"
-                });
-                return;
-              } catch (error) {
-                await send({ type: "turn.failed", run_id: message.run_id, error: controlledTurnAuthorizationError(error) });
-                return;
-              } finally {
-                releaseReplay();
-                releaseUserReplay();
-                if (authorizationSlotRunId === message.run_id) authorizationSlotRunId = undefined;
-              }
-            }
-          }
-          if (reservedRunIds.has(message.run_id)) {
-            await send({
-              type: "turn.failed",
-              run_id: message.run_id,
-              error: {
-                code: "duplicate_run_id",
-                message: `Run ID ${message.run_id} is already pending or active on this connection.`
-              }
-            });
-            return;
-          }
-          const activeRunId = activeConversationRuns.get(storageConversationId);
-          if (activeRunId) {
-            await send({
-              type: "turn.failed",
-              run_id: message.run_id,
-              error: {
-                code: "conversation_busy",
-                message: `Conversation ${message.conversation_id} already has an active or pending run: ${activeRunId}`
-              }
-            });
-            return;
-          }
-          if (authorizationSlotRunId) {
-            await send({
-              type: "turn.failed",
-              run_id: message.run_id,
-              error: {
-                code: "connection_busy",
-                message: `This connection is already authorizing run ${authorizationSlotRunId}. Try again after it finishes.`
-              }
-            });
-            return;
-          }
-          if (reservedRunIds.size >= maxActiveRunsPerConnection) {
-            await send({
-              type: "turn.failed",
-              run_id: message.run_id,
-              error: {
-                code: "connection_run_capacity",
-                message: "This connection already has the maximum number of pending or active runs."
-              }
-            });
-            return;
-          }
-          const releaseTurnAuthorizationCapacity = turnAuthorizationGate.tryAcquire();
-          if (!releaseTurnAuthorizationCapacity) {
-            await send({
-              type: "turn.failed",
-              run_id: message.run_id,
-              error: {
-                code: "authorization_busy",
-                message: "Hatch is already verifying the maximum number of turns. Try again shortly."
-              }
-            });
-            return;
-          }
-          const releaseUserTurnAuthorizationCapacity = turnAuthorizationPerUserGate.tryAcquire(binding.userId);
-          if (!releaseUserTurnAuthorizationCapacity) {
-            releaseTurnAuthorizationCapacity();
-            await send({
-              type: "turn.failed",
-              run_id: message.run_id,
-              error: {
-                code: "user_authorization_busy",
-                message: "This account is already verifying the maximum number of turns. Try again shortly."
-              }
-            });
-            return;
-          }
-          const releaseActiveRunCapacity = activeRunGate.tryAcquire();
-          if (!releaseActiveRunCapacity) {
-            releaseTurnAuthorizationCapacity();
-            releaseUserTurnAuthorizationCapacity();
-            await send({
-              type: "turn.failed",
-              run_id: message.run_id,
-              error: {
-                code: "runtime_run_capacity",
-                message: "Hatch is already running the maximum number of tasks. Try again shortly."
-              }
-            });
-            return;
-          }
-          const releaseUserActiveRunCapacity = activeRunPerUserGate.tryAcquire(binding.userId);
-          if (!releaseUserActiveRunCapacity) {
-            releaseActiveRunCapacity();
-            releaseTurnAuthorizationCapacity();
-            releaseUserTurnAuthorizationCapacity();
-            await send({
-              type: "turn.failed",
-              run_id: message.run_id,
-              error: {
-                code: "user_run_capacity",
-                message: "This account already has the maximum number of pending or active tasks."
-              }
-            });
-            return;
-          }
-
-          // Both reservations happen synchronously before the first Registry
-          // await, so a burst cannot multiply identity/entitlement requests.
-          const authorizationController = new AbortController();
-          const abortFromConnection = () => authorizationController.abort(connectionAbortController.signal.reason);
-          if (connectionAbortController.signal.aborted) abortFromConnection();
-          else connectionAbortController.signal.addEventListener("abort", abortFromConnection, { once: true });
-          const pendingAuthorization: PendingTurnAuthorization = {
-            runId: message.run_id,
-            conversationId: storageConversationId,
-            controller: authorizationController,
-            cancelled: false,
-            detachConnectionAbort: () => connectionAbortController.signal.removeEventListener("abort", abortFromConnection),
-            releaseAuthorizationCapacity: combineCapacityReleases(
-              releaseTurnAuthorizationCapacity,
-              releaseUserTurnAuthorizationCapacity
-            ),
-            releaseActiveRunCapacity: combineCapacityReleases(
-              releaseActiveRunCapacity,
-              releaseUserActiveRunCapacity
-            )
-          };
-          authorizationSlotRunId = message.run_id;
-          pendingTurnAuthorizations.set(message.run_id, pendingAuthorization);
-          reservedRunIds.add(message.run_id);
-          activeConversationRuns.set(storageConversationId, message.run_id);
+          // The client of this message decides which tools the Run may use from now on.
+          const messageClient = clientAttributesOf({ ...message }, { ...client, local_tools: message.local_tools ?? hello.local_tools });
+          const submission = new AbortController();
+          const abortWithConnection = () => submission.abort(connectionAbortController.signal.reason);
+          connectionAbortController.signal.addEventListener("abort", abortWithConnection, { once: true });
+          pendingSubmissions.set(message.run_id, submission);
           try {
-            await revalidateTurnAuthorization(
-              hello,
-              binding,
-              entitlementResolver,
-              authIdentityResolver,
-              authorizationController.signal
-            );
-            if (authorizationController.signal.aborted || pendingAuthorization.cancelled) {
-              throw new EntitlementError("authorization_cancelled", "Authorization verification was cancelled.");
-            }
-            if (binding.agentCorpus) {
-              binding = await resolveTurnAgentBinding(
-                binding,
-                agentCorpusResolver,
-                authorizationController.signal
-              );
-              serverTools.setKnowledgeScope({
-                provider: createKnowledgeProvider(binding.agentCorpusRoot!, binding.agentCorpus!, binding.corpusDigest),
-                creatorId: binding.creatorId,
-                agentId: binding.productId,
-                corpusDigest: binding.corpusDigest
-              });
-              serverTools.setResolvedCreatorTools(await resolveCreatorTools(
-                creatorToolControlPlane,
-                binding.creatorId,
-                binding.productId,
-                binding.agentCorpus!,
-                authorizationController.signal
-              ));
-              sessionSkills = await buildSessionSkills(binding.agentCorpusRoot);
-              authorizationController.signal.throwIfAborted();
-            }
-            if (authorizationController.signal.aborted || pendingAuthorization.cancelled) {
-              throw new EntitlementError("authorization_cancelled", "Authorization verification was cancelled.");
+            const { submission: accepted, binding: current } = await submitUserMessage(edge, { authToken, binding, conversation }, {
+              runId: message.run_id,
+              clientMessageId: message.client_message_id ?? message.run_id,
+              message: message.message,
+              taskStart: message.task_start === true,
+              client: messageClient,
+              ...((message.time_zone ?? hello.time_zone) ? { timeZone: message.time_zone ?? hello.time_zone } : {})
+            }, submission.signal);
+            binding = current;
+            if (accepted.outcome === "replayed") {
+              await send({ type: "message.accepted", conversation_id: conversation.publicId, run_id: accepted.run.id, client_message_id: accepted.clientMessageId, outcome: accepted.outcome });
+              await send({ type: "turn.state", run_id: accepted.run.id, status: accepted.run.status, reason: "Idempotent client message replay" });
             }
           } catch (error) {
-            releaseConversationRun(activeConversationRuns, storageConversationId, message.run_id);
-            if (pendingTurnAuthorizations.get(message.run_id) === pendingAuthorization) {
-              pendingTurnAuthorizations.delete(message.run_id);
-            }
-            reservedRunIds.delete(message.run_id);
-            pendingAuthorization.detachConnectionAbort();
-            pendingAuthorization.releaseAuthorizationCapacity();
-            pendingAuthorization.releaseActiveRunCapacity();
-            if (authorizationSlotRunId === message.run_id) authorizationSlotRunId = undefined;
-            if (!pendingAuthorization.cancelled && !connectionAbortController.signal.aborted) {
-              await send({
-                type: "turn.failed",
-                run_id: message.run_id,
-                error: controlledTurnAuthorizationError(error)
-              });
-            }
-            return;
-          }
-          // Transition pending -> active without an await. A cancel can now
-          // observe exactly one owner and a late resolver can never resurrect
-          // a tombstoned authorization.
-          if (pendingAuthorization.cancelled
-            || authorizationController.signal.aborted
-            || pendingTurnAuthorizations.get(message.run_id) !== pendingAuthorization) {
-            releaseConversationRun(activeConversationRuns, storageConversationId, message.run_id);
-            reservedRunIds.delete(message.run_id);
-            pendingAuthorization.detachConnectionAbort();
-            pendingAuthorization.releaseAuthorizationCapacity();
-            pendingAuthorization.releaseActiveRunCapacity();
-            if (authorizationSlotRunId === message.run_id) authorizationSlotRunId = undefined;
-            return;
-          }
-          // Keep the authorization/cancel owner through materialization and commit.
-          if (connectionAbortController.signal.aborted) {
-            pendingTurnAuthorizations.delete(message.run_id);
-            pendingAuthorization.detachConnectionAbort();
-            pendingAuthorization.releaseAuthorizationCapacity();
-            if (authorizationSlotRunId === message.run_id) authorizationSlotRunId = undefined;
-            releaseConversationRun(activeConversationRuns, storageConversationId, message.run_id);
-            reservedRunIds.delete(message.run_id);
-            pendingAuthorization.releaseActiveRunCapacity();
-            return;
-          }
-
-          let durableRun: AcceptedSubmission;
-          let acceptedUser: ConversationMessage;
-          try {
-            await repositoryReady;
-            const conversation = await conversationRepository.getConversation(storageConversationId);
-            if (!conversation) {
-              const error = new ConversationRepositoryError("conversation_not_found", `Conversation ${message.conversation_id} was not found`);
-              throw error;
-            }
-            assertConversationBinding(conversation, conversationBinding(binding));
-            if (message.task_start && binding.briefSpec && !conversation.briefSnapshot) {
-              const error = new Error("conversation_brief_required");
-              (error as Error & { code?: string }).code = "conversation_brief_required";
-              throw error;
-            }
-            // An authenticated idempotent retry needs no asset upload/read. Its
-            // existing canonical message is already the immutable accepted input.
-            const existing = await conversationRepository.getRunByClientMessageId(storageConversationId, clientMessageId);
-            acceptedUser = existing ? { role: "user", content: "" } : message.task_start
-              ? { role: "user", content: TASK_START_MESSAGE_CONTENT, kind: "task_start" }
-              : await materializeUserMessageAssets(message.message, assetStore);
-            authorizationController.signal.throwIfAborted();
-            durableRun = await conversationRepository.acceptSubmission({
-              binding: conversationBinding(binding),
-              canonicalUser: acceptedUser,
-              run: {
-                id: message.run_id,
-                conversationId: storageConversationId,
-                // Existing clients use run_id as their stable retry key until
-                // they send client_message_id from this protocol extension.
-                clientMessageId,
-                inputDigest,
-                corpusDigest: binding.corpusDigest,
-                executorId
-              }
-            });
-          } catch (error) {
-            releaseConversationRun(activeConversationRuns, storageConversationId, message.run_id);
-            reservedRunIds.delete(message.run_id);
-            pendingAuthorization.releaseActiveRunCapacity();
-            if (authorizationController.signal.aborted) return;
-            if (error instanceof ConversationRepositoryError && error.code === "submission_not_accepted") {
-              await send({ type: "turn.failed", run_id: message.run_id, error: { code: error.code, message: error.message } });
-              return;
-            }
-            if (error instanceof ConversationRepositoryError && error.code === "conversation_busy") {
-              await send({
-                type: "turn.failed",
-                run_id: message.run_id,
-                error: { code: "conversation_busy", message: error.message }
-              });
-              return;
-            }
-            if (error instanceof ConversationRepositoryError && error.code === "client_message_conflict") {
-              await send({
-                type: "turn.failed",
-                run_id: message.run_id,
-                error: {
-                  code: "client_message_conflict",
-                  message: "This client_message_id was already used with different message or attachment content."
-                }
-              });
-              return;
-            }
-            if (error instanceof ConversationRepositoryError && error.code === "conversation_not_found") {
-              await send({
-                type: "turn.failed",
-                run_id: message.run_id,
-                error: { code: "conversation_not_found", message: "Create the task before starting a run." }
-              });
-              return;
-            }
-            if (error instanceof Error && (error as Error & { code?: string }).code === "conversation_brief_required") {
-              await send({
-                type: "turn.failed",
-                run_id: message.run_id,
-                error: { code: "conversation_brief_required", message: "A Brief is required before starting this task." }
-              });
-              return;
-            }
-            throw error;
+            if (submission.signal.aborted) return;
+            await send({ type: "turn.failed", run_id: message.run_id, error: chatFailure(error) });
           } finally {
-            pendingTurnAuthorizations.delete(message.run_id);
-            pendingAuthorization.detachConnectionAbort();
-            pendingAuthorization.releaseAuthorizationCapacity();
-            if (authorizationSlotRunId === message.run_id) authorizationSlotRunId = undefined;
+            pendingSubmissions.delete(message.run_id);
+            connectionAbortController.signal.removeEventListener("abort", abortWithConnection);
           }
-          // A close can race the repository write above. Never let that race
-          // leave a queued Run whose executor has already disappeared.
-          if (connectionAbortController.signal.aborted || pendingAuthorization.cancelled) {
-            if (durableRun.created) {
-              await conversationRepository.transitionRun(
-                message.run_id,
-                "interrupted",
-                "Client disconnected before the executor started"
-              ).catch(() => undefined);
-            }
-            releaseConversationRun(activeConversationRuns, storageConversationId, message.run_id);
-            reservedRunIds.delete(message.run_id);
-            pendingAuthorization.releaseActiveRunCapacity();
-            return;
-          }
-          if (!durableRun.created) {
-            releaseConversationRun(activeConversationRuns, storageConversationId, message.run_id);
-            reservedRunIds.delete(message.run_id);
-            pendingAuthorization.releaseActiveRunCapacity();
-            const receipt = durableRun.receipt;
-            await send({
-              type: "message.accepted",
-              conversation_id: connectionConversation.publicId,
-              run_id: receipt.run_id,
-              client_message_id: receipt.client_message_id
-            });
-            await send({
-              type: "turn.state",
-              run_id: durableRun.run.id,
-              status: durableRun.run.status,
-              reason: "Idempotent client message replay"
-            });
-            return;
-          }
-
-          const boundMessage: BoundRunStart = {
-            ...message,
-            conversation_id: storageConversationId,
-            local_tools: new ClientToolCapabilityPolicy(hello.local_tools).forRun(message.local_tools),
-            ...(message.time_zone ?? hello.time_zone ? { time_zone: message.time_zone ?? hello.time_zone } : {})
-          };
-          const runAbortController = new AbortController();
-          activeRunAbortControllers.set(message.run_id, runAbortController);
-          const state = new RunStateMachine(message.run_id, storageConversationId, store, async (status, reason) => {
-            await conversationRepository.transitionRun(message.run_id, status, reason);
-            await send({
-              type: "turn.state",
-              run_id: message.run_id,
-              status,
-              reason
-            });
-          });
-          activeRunStates.set(message.run_id, state);
-          const interruptFromConnectionClose = () => {
-            runAbortController.abort(new Error("Runtime socket closed"));
-            void state.interrupt("Client disconnected").catch(() => undefined);
-          };
-          if (connectionAbortController.signal.aborted) interruptFromConnectionClose();
-          else connectionAbortController.signal.addEventListener("abort", interruptFromConnectionClose, { once: true });
-          const cancelActiveRun = async (reason: string): Promise<void> => {
-            runAbortController.abort(new Error(reason));
-            await state.cancel(reason).catch(() => undefined);
-            await broker.cancelRun(message.run_id, reason);
-            await send({
-              type: "turn.failed",
-              run_id: message.run_id,
-              error: { code: "run_cancelled", message: reason }
-            });
-          };
-          activeRunControls.set(runControlKey(storageConversationId, message.run_id), { cancel: cancelActiveRun });
-          try {
-            await send({
-              type: "message.accepted",
-              conversation_id: connectionConversation.publicId,
-              run_id: durableRun.receipt.run_id,
-              client_message_id: durableRun.receipt.client_message_id
-            });
-            // The initial queued record is already part of acceptSubmission.
-            await send({ type: "turn.state", run_id: message.run_id, status: "queued" });
-          } catch {
-            connectionAbortController.signal.removeEventListener("abort", interruptFromConnectionClose);
-            activeRunStates.delete(message.run_id);
-            activeRunAbortControllers.delete(message.run_id);
-            activeRunControls.delete(runControlKey(storageConversationId, message.run_id));
-            releaseConversationRun(activeConversationRuns, storageConversationId, message.run_id);
-            reservedRunIds.delete(message.run_id);
-            pendingAuthorization.releaseActiveRunCapacity();
-            await conversationRepository.transitionRun(message.run_id, "failed", "Run setup failed").catch(() => undefined);
-            await send({
-              type: "turn.failed",
-              run_id: message.run_id,
-              error: {
-                code: "run_setup_failed",
-                message: "The turn could not be started. Try again."
-              }
-            });
-            return;
-          }
-          const product = runOneTurn(
-            boundMessage,
-            acceptedUser,
-            hello,
-            sessionSkills,
-            binding,
-            broker,
-            serverTools,
-            toolBridge,
-            runtime,
-            store,
-            conversationRepository,
-            assetStore,
-            state,
-            send,
-            outputGuard,
-            runAbortController.signal,
-            commerceEventSink,
-            deliveryAccountingOutbox,
-            scheduleDeliveryReconciliation
-          );
-          activeRuns.add(product);
-          const releaseActiveRun = () => {
-            activeRuns.delete(product);
-            connectionAbortController.signal.removeEventListener("abort", interruptFromConnectionClose);
-            activeRunStates.delete(message.run_id);
-            activeRunAbortControllers.delete(message.run_id);
-            if (!cancellingRunIds.has(message.run_id)) reservedRunIds.delete(message.run_id);
-            activeRunControls.delete(runControlKey(storageConversationId, message.run_id));
-            releaseConversationRun(activeConversationRuns, storageConversationId, message.run_id);
-            pendingAuthorization.releaseActiveRunCapacity();
-          };
-          void product.then(releaseActiveRun, releaseActiveRun);
         }
       } catch (error) {
         await send({
@@ -2677,26 +2629,27 @@ async function handleRuntimeSocket(
 
   return new Promise<void>((resolve) => {
     socket.once("close", () => {
-      void (async () => {
-        try {
-          const reason = "Client disconnected";
-          const states = [...activeRunStates.values()];
-          for (const state of states) {
-            activeRunControls.delete(runControlKey(state.conversationId, state.runId));
-          }
-          // A transport loss is not an explicit user Stop. It revokes the
-          // connection-bound executor lease and leaves a durable, recoverable
-          // Interrupted state; no tool invocation may be replayed from it.
-          await Promise.allSettled(states.map((state) => state.interrupt(reason)));
-          await broker.cancelAll(reason).catch(() => undefined);
-          await Promise.allSettled([...messageTasks]);
-          await Promise.allSettled([...activeRuns]);
-        } finally {
-          resolve();
-        }
-      })().catch(() => resolve());
+      void Promise.allSettled([...messageTasks]).then(() => resolve());
     });
   });
+}
+
+/** A session cookie lets a browser omit the token from its hello; the upgrade already verified its Origin. */
+function withUpgradeToken(raw: unknown, token: string | undefined): unknown {
+  if (!token || typeof raw !== "object" || raw === null) return raw;
+  const message = raw as Record<string, unknown>;
+  return message.type === "client.hello" && !message.auth_token && !message.license_token ? { ...message, auth_token: token } : raw;
+}
+
+/**
+ * The one projection standing before every transport's sink (WebSocket, SSE): what a buyer sees of an
+ * event never reveals the Expert's private corpus. The binding is read per event, as it can change.
+ */
+export function privateBoundaryProjection(current: () => { agentCorpusRoot?: string; productId?: string } | undefined): EventProjection {
+  return (event) => {
+    const binding = current();
+    return protectPrivateAgentBoundary(event as unknown as OutboundMessage, binding?.agentCorpusRoot, binding?.productId) as unknown as Record<string, unknown>;
+  };
 }
 
 export function protectPrivateAgentBoundary(
@@ -2722,401 +2675,6 @@ export function protectPrivateAgentBoundary(
   return message;
 }
 
-async function runOneTurn(...args: Parameters<typeof runOneTurnInternal>): Promise<void> {
-  const [input, , , , binding] = args;
-  return withLangfuseTurn("user-runtime.turn", input.message.content, () => runOneTurnInternal(...args), {
-    productId: binding.productId,
-    userId: binding.userId,
-    conversationId: input.conversation_id
-  });
-}
-
-async function runOneTurnInternal(
-  input: BoundRunStart,
-  persistedUserMessage: ConversationMessage,
-  hello: ClientHello,
-  sessionSkills: RuntimeSessionSkills,
-  binding: SessionBinding,
-  broker: ClientToolBroker,
-  serverTools: ServerToolExecutor,
-  toolBridge: ToolBridge,
-  runtime: AgentRuntime,
-  store: RuntimeStore,
-  conversationRepository: ConversationRepository,
-  assetStore: RuntimeAssetStore,
-  state: RunStateMachine,
-  send: (message: OutboundMessage) => Promise<void>,
-  outputGuard: OutputGuard,
-  abortSignal: AbortSignal,
-  commerceEventSink?: CommerceEventSink,
-  deliveryAccountingOutbox?: DeliveryAccountingOutbox,
-  scheduleDeliveryReconciliation: () => void = () => undefined
-): Promise<void> {
-  const turnStarted = performance.now();
-  let setupCompleted = turnStarted;
-  let modelFirstText: number | undefined;
-  let firstSafeSegment: number | undefined;
-  const guardTiming: Array<import("./outputGuard.js").OutputGuardTiming & { released_ms?: number }> = [];
-  let deliveredArtifact: DeliveryArtifact | undefined;
-  const deliveryBinding = deliveryBindingFromSession(binding);
-  let deliveryReservation: DeliveryUnitReservation | undefined;
-  let deliveryReservationConsumed = false;
-  let deliveryAccountingPending = false;
-  try {
-    abortSignal.throwIfAborted();
-    await state.start();
-    const committedInput = await store.readConversation(input.conversation_id);
-    // The wire-level task_start message is intentionally empty, but the
-    // Runtime's canonical user turn is not. Keep the same marked message in
-    // the durable transcript and pass its non-empty content to the Agent.
-    const runtimeInput: RunStart = input.task_start
-      ? { ...input, message: { role: "user", content: TASK_START_MESSAGE_CONTENT } }
-      : {
-        ...input,
-        message: {
-          role: "user",
-          content: persistedUserMessage.content ?? "",
-          ...(persistedUserMessage.attachments?.length ? { attachments: persistedUserMessage.attachments } : {})
-        }
-      };
-    // Execution consumes the accepted canonical history, including images.
-    // No second append, image materialization, or journal repair is allowed.
-    const materializedAgent = binding.agentCorpusRoot
-      ? await materializeAgentCorpus(
-        binding.agentCorpusRoot,
-        input.message.content,
-        input.local_tools,
-        binding.runtimeDigest ?? binding.corpusDigest,
-        abortSignal
-      )
-      : undefined;
-    const guardedOutput = new GuardedAssistantOutput(
-      outputGuard,
-      input.run_id,
-      undefined,
-      undefined,
-      undefined,
-      (timing) => guardTiming.push({
-        ...timing,
-        started_ms: timing.started_ms - turnStarted
-      })
-    );
-    let approvedAssistantText = "";
-    const visibleParts: VisibleConversationPart[] = [];
-    const thinkingPartJournal = new ThinkingPartJournal(visibleParts);
-    const visibleActivityKeys = new Set<string>();
-    const recordVisiblePart = (message: OutboundMessage): void => {
-      if (!("run_id" in message) || message.run_id !== input.run_id) return;
-      if (message.type === "assistant.delta" && message.delta.kind === "text") {
-        const end = approvedAssistantText.length;
-        const start = end - message.delta.content.length;
-        if (start < 0) return;
-        const last = visibleParts.at(-1);
-        if (last?.type === "text" && last.end === start) {
-          last.end = end;
-        } else {
-          visibleParts.push({ type: "text", start, end });
-        }
-        return;
-      }
-      if (
-        message.type === "assistant.delta"
-        && (message.delta.kind === "thinking_start"
-          || message.delta.kind === "thinking_delta"
-          || message.delta.kind === "thinking_end")
-      ) {
-        thinkingPartJournal.accept(message.delta);
-        return;
-      }
-      if (message.type === "tool_call.delta") {
-        const key = `tool:${message.tool_call_id}`;
-        if (!visibleActivityKeys.has(key)) {
-          visibleActivityKeys.add(key);
-          visibleParts.push({ type: "tool_call", tool_call_id: message.tool_call_id });
-        }
-        return;
-      }
-      if (message.type === "skill.invoked" || message.type === "skill.activated") {
-        const key = [
-          "skill",
-          message.status,
-          message.name,
-          message.reason,
-          "source_tool_call_id" in message ? message.source_tool_call_id : ""
-        ].join(":");
-        if (!visibleActivityKeys.has(key)) {
-          visibleActivityKeys.add(key);
-          visibleParts.push({
-            type: "skill_event",
-            name: message.name,
-            status: message.status,
-            reason: message.reason,
-            ...(message.type === "skill.invoked" ? { source_tool_call_id: message.source_tool_call_id } : {})
-          });
-        }
-        return;
-      }
-      if (message.type === "skill.run") {
-        const key = `skill-run:${message.skill_run_id}`;
-        if (!visibleActivityKeys.has(key)) {
-          visibleActivityKeys.add(key);
-          visibleParts.push({ type: "skill_run", skill_run_id: message.skill_run_id });
-        }
-      }
-    };
-    const emit = async (message: OutboundMessage): Promise<void> => {
-      await send(message);
-      recordVisiblePart(message);
-    };
-    const emitReleased = async (result: GuardedOutputResult): Promise<void> => {
-      for (const content of result.released) {
-        approvedAssistantText += content;
-        const releasedAt = performance.now();
-        firstSafeSegment ??= releasedAt;
-        await emit({
-          type: "assistant.delta",
-          run_id: input.run_id,
-          delta: { kind: "text", content }
-        });
-        const timing = guardTiming.find((entry) => entry.outcome === "pass" && entry.released_ms === undefined);
-        if (timing) timing.released_ms = releasedAt - turnStarted;
-      }
-    };
-    const commitTerminal = async (
-      finishReason: OutputFinishReason,
-      recordDelivery = true
-    ): Promise<void> => {
-      let receiptStatus: "recorded" | "syncing" | undefined;
-      const content = finishReason === "content_filter"
-        ? OUTPUT_GUARD_BLOCKED_MODEL_MESSAGE
-        : approvedAssistantText;
-      await store.append({
-        type: "conversation.model_message",
-        conversation_id: input.conversation_id,
-        run_id: input.run_id,
-        message: { role: "assistant", content },
-        finish_reason: finishReason,
-        visible_parts: finishReason === "content_filter"
-          ? visibleParts.filter((part) => part.type === "thinking")
-          : visibleParts
-      });
-      await conversationRepository.appendEvent({
-        conversationId: input.conversation_id,
-        runId: input.run_id,
-        type: "message.created",
-        payload: {
-          role: "assistant",
-          ...(finishReason === "content_filter" ? { finish_reason: finishReason } : {})
-        }
-      });
-      if (finishReason === "stop" && recordDelivery && commerceEventSink && deliveryBinding) {
-        const receipt = prepareDelivery(
-          deliveryBinding,
-          input.conversation_id,
-          input.run_id,
-          deliveredArtifact ?? { type: "message", content: approvedAssistantText }
-        );
-        try {
-          const recorded = await recordPreparedDelivery(
-            commerceEventSink,
-            deliveryBinding,
-            input.conversation_id,
-            input.run_id,
-            receipt,
-            deliveryReservation
-          );
-          deliveryReservationConsumed = Boolean(deliveryReservation);
-          receiptStatus = "recorded";
-          await emit({ type: "delivery.ready", run_id: input.run_id, ...recorded, receipt_status: receiptStatus });
-        } catch (error) {
-          if (!deliveryAccountingOutbox || !deliveryReservation) throw error;
-          const command: DeliveryAccountingCommand = {
-            version: 1,
-            commandId: receipt.delivery_id,
-            binding: deliveryBinding,
-            conversationId: input.conversation_id,
-            runId: input.run_id,
-            artifact: { type: receipt.artifact_type, digest: receipt.artifact_digest },
-            reservation: deliveryReservation
-          };
-          await deliveryAccountingOutbox.enqueue(command);
-          deliveryAccountingPending = true;
-          receiptStatus = "syncing";
-          writeOperationalError("commerce_delivery_receipt_deferred", error);
-          await emit({ type: "delivery.ready", run_id: input.run_id, ...receipt, receipt_status: receiptStatus });
-          scheduleDeliveryReconciliation();
-        }
-      }
-      const completedAt = performance.now();
-      await emit({
-        type: "turn.completed",
-        run_id: input.run_id,
-        finish_reason: finishReason,
-        ...(receiptStatus ? { receipt_status: receiptStatus } : {}),
-        timing: {
-          total_ms: completedAt - turnStarted,
-          setup_ms: setupCompleted - turnStarted,
-          ...(modelFirstText === undefined ? {} : { model_first_text_ms: modelFirstText - turnStarted }),
-          ...(firstSafeSegment === undefined ? {} : { first_safe_segment_ms: firstSafeSegment - turnStarted }),
-          guard: guardTiming
-        }
-      });
-      await state.complete();
-    };
-    const sendFixedAssistant = async (content: string): Promise<void> => {
-      const pushed = await guardedOutput.push(content);
-      await emitReleased(pushed);
-      if (pushed.blocked) {
-        await commitTerminal("content_filter", false);
-        return;
-      }
-      const final = await guardedOutput.finish();
-      await emitReleased(final);
-      await commitTerminal(final.blocked ? "content_filter" : "stop", false);
-    };
-    if (commerceEventSink && deliveryBinding) {
-      const completedDelivery = await findCompletedDelivery(
-        commerceEventSink,
-        deliveryBinding,
-        input.conversation_id,
-        input.run_id
-      );
-      if (completedDelivery) {
-        await send({ type: "delivery.ready", run_id: input.run_id, ...completedDelivery, receipt_status: "recorded" });
-        await sendFixedAssistant("This delivery was already completed. The existing artifact has not been changed.");
-        return;
-      }
-    }
-    if (input.message.content.trim() === "/compact") {
-      await compactAndEmit(input, store, state, send, committedInput, {
-        trigger: "manual",
-        phase: "standalone_turn",
-        reason: "user_requested"
-      });
-      await sendFixedAssistant("Compaction complete.");
-      return;
-    }
-
-    if (commerceEventSink && deliveryBinding) {
-      deliveryReservation = await reserveDeliveryUnit(
-        commerceEventSink,
-        deliveryBinding,
-        input.conversation_id,
-        input.run_id
-      );
-    }
-
-    const preTurnCompaction = await compactIfNeeded(input, store, state, send, committedInput, "pre_turn");
-    let runtimeMessages = committedInput;
-    if (preTurnCompaction) {
-      runtimeMessages = preTurnCompaction.replacement_history;
-    }
-
-    setupCompleted = performance.now();
-    const messages = runtimeMessages;
-
-    // Store/materialization work may race with a disconnect. Never start a
-    // provider request after the owning run has already been aborted.
-    abortSignal.throwIfAborted();
-    for await (const event of runtime.run(runtimeInput, {
-      clientBroker: broker,
-      assetStore,
-      serverTools,
-      state,
-      messages,
-      sessionSkills,
-      activatedSkills: [],
-      clientTools: materializedAgent?.localTools ?? input.local_tools,
-      allowedExternalTools: materializedAgent?.externalTools,
-      externalToolDefinitions: materializedAgent?.externalToolDefinitions,
-      persistModelMessage: async (message) => {
-        await store.append({
-          type: "conversation.model_message",
-          conversation_id: input.conversation_id,
-          run_id: input.run_id,
-          message
-        });
-      },
-      compactMessagesIfNeeded: async (runtimeMessages: RuntimeCompactionMessage[], phase) => {
-        const compacted = await compactIfNeeded(input, store, state, emit, runtimeMessages, phase);
-        return compacted?.replacement_history;
-      },
-      toolBridge,
-      toolScope: "main",
-      agentSystemPrompt: materializedAgent?.systemPrompt,
-      briefSnapshot: (await conversationRepository.getConversation(input.conversation_id))?.briefSnapshot,
-      deliveryAuditContext: materializedAgent?.deliveryAuditContext,
-      knowledgeAvailable: Boolean(
-        binding.agentCorpus?.knowledge.documents.length
-        && knowledgeProviderConfigured()
-      ),
-      abortSignal
-    })) {
-      if (state.status === "cancelled" || state.status === "interrupted") {
-        break;
-      }
-      await persistServerToolCallEvent(event, input, store);
-      await persistSkillEvent(event, input, store);
-      if (event.type === "assistant.delta" && event.delta.kind === "text") {
-        modelFirstText ??= performance.now();
-        const result = await guardedOutput.push(event.delta.content);
-        await emitReleased(result);
-        if (result.blocked) {
-          await commitTerminal("content_filter");
-          return;
-        }
-        continue;
-      }
-      if (
-        event.type === "tool_call.delta"
-        && event.locality === "client"
-        && event.name === "file_write"
-        && event.status === "completed"
-        && typeof event.arguments?.content === "string"
-      ) {
-        deliveredArtifact = {
-          type: "file",
-          content: event.arguments.content
-        };
-      }
-      if (event.type === "turn.completed") {
-        const final = await guardedOutput.finish();
-        await emitReleased(final);
-        await commitTerminal(
-          event.finish_reason === "content_filter" || final.blocked
-            ? "content_filter"
-            : "stop"
-        );
-        return;
-      }
-      await emit(event);
-    }
-  } catch (error) {
-    if (state.status === "cancelled" || state.status === "interrupted") {
-      return;
-    }
-    await state.fail(errorMessage(error)).catch(() => undefined);
-    await send({
-      type: "turn.failed",
-      run_id: input.run_id,
-      error: {
-        code: "run_failed",
-        message: errorMessage(error)
-      }
-    });
-  } finally {
-    if (commerceEventSink && deliveryReservation && !deliveryReservationConsumed && !deliveryAccountingPending) {
-      const releaseReason = state.status === "cancelled"
-        ? "run_cancelled"
-        : state.status === "failed"
-          ? "run_failed"
-          : "delivery_not_completed";
-      await releaseDeliveryUnit(commerceEventSink, deliveryReservation, releaseReason).catch((error) => {
-        writeOperationalError("commerce_delivery_reservation_release_failed", error);
-      });
-    }
-  }
-}
 
 async function buildSessionSkills(corpusRoot?: string): Promise<RuntimeSessionSkills> {
   // Both standalone Runtime Skills and published Agent Corpus Skills use the
@@ -3460,28 +3018,14 @@ async function bindingFromHistoryRequest(
   return { creatorId, userId, productId, corpusDigest: corpusDigestValue, explicit: true };
 }
 
+/** An API key or session token from Authorization; a browser may use its session cookie instead. */
 function bearerToken(req: http.IncomingMessage): string | undefined {
   const authorization = req.headers.authorization;
-  if (typeof authorization !== "string") return undefined;
+  if (typeof authorization !== "string") return sessionTokenFromCookie(req.headers.cookie);
   const match = authorization.match(/^Bearer\s+(.+)$/i);
   return match?.[1]?.trim() || undefined;
 }
 
-function deliveryBindingFromSession(binding: SessionBinding): DeliveryBinding | undefined {
-  // Permanent free purchases do not reserve, consume, or produce delivery
-  // events. Metering is an explicit future paid-product capability.
-  if (binding.accessMode !== "metered" || !binding.entitlementId || !binding.orderId) return undefined;
-  return {
-    entitlementId: binding.entitlementId,
-    orderId: binding.orderId,
-    userId: binding.userId,
-    creatorId: binding.creatorId,
-    agentId: binding.productId,
-    productId: binding.productId,
-    purchasedCorpusDigest: binding.purchasedCorpusDigest ?? binding.corpusDigest,
-    corpusDigest: binding.corpusDigest
-  };
-}
 
 async function reconcileDeliveryAccountingOutbox(
   outbox: DeliveryAccountingOutbox,
@@ -3504,7 +3048,7 @@ async function reconcileDeliveryAccountingOutbox(
   });
 }
 
-function sanitizeBoundHistory(messages: Awaited<ReturnType<RuntimeStore["readVisibleConversation"]>>, productId: string): Awaited<ReturnType<RuntimeStore["readVisibleConversation"]>> {
+function sanitizeBoundHistory<T extends Awaited<ReturnType<RuntimeStore["readVisibleConversation"]>>[number]>(messages: T[], productId: string): T[] {
   return messages.map((message) => ({
     ...message,
     ...(message.skill_events ? {
@@ -3538,131 +3082,6 @@ function emptyRenderedSkills(): ReturnType<typeof renderSkillsSection> {
   };
 }
 
-async function persistSkillEvent(
-  event: OutboundMessage,
-  input: RunStart,
-  store: RuntimeStore
-): Promise<void> {
-  if (event.type === "skill.activated") {
-    await store.append({
-      type: "skill.activated",
-      conversation_id: input.conversation_id,
-      run_id: input.run_id,
-      name: event.name,
-      path: event.path,
-      scope: event.scope,
-      directory: path.dirname(event.path),
-      // The complete Skill instructions are already injected into the model
-      // context. Persist only activation metadata so protected Skill content
-      // is not duplicated in the visible conversation journal.
-      content: "",
-      invocation_type: event.invocation_type,
-      reason: event.reason,
-      resource_paths: event.resource_paths,
-      resource_manifest_truncated: event.resource_manifest_truncated
-    });
-    return;
-  }
-  if (event.type !== "skill.invoked") {
-    return;
-  }
-  await store.append({
-    type: "skill.invoked",
-    conversation_id: input.conversation_id,
-    run_id: input.run_id,
-    name: event.name,
-    path: event.path,
-    scope: event.scope,
-    invocation_type: event.invocation_type,
-    reason: event.reason,
-    source_tool_call_id: event.source_tool_call_id,
-    trigger: event.trigger
-  });
-}
-
-async function persistServerToolCallEvent(
-  event: OutboundMessage,
-  input: RunStart,
-  store: RuntimeStore
-): Promise<void> {
-  if (event.type !== "tool_call.delta" || event.locality !== "server") {
-    return;
-  }
-  await store.append({
-    type: "tool.call",
-    conversation_id: input.conversation_id,
-    run_id: input.run_id,
-    tool_call_id: event.tool_call_id,
-    name: event.name,
-    arguments: event.arguments ?? {},
-    status: event.status,
-    activity_message: event.activity_message,
-    locality: event.locality,
-    approval: event.approval,
-    ...(event.result ? { result: event.result } : {}),
-    ...(event.error ? { error: event.error } : {})
-  });
-}
-
-async function compactIfNeeded(
-  input: RunStart,
-  store: RuntimeStore,
-  state: RunStateMachine,
-  send: (message: OutboundMessage) => Promise<void>,
-  messages: RuntimeCompactionMessage[],
-  phase: "pre_turn" | "mid_turn"
-): Promise<CompactionCheckpoint | undefined> {
-  if (!shouldAutoCompactMessages(messages)) {
-    return undefined;
-  }
-  return compactAndEmit(input, store, state, send, messages, {
-    trigger: "auto",
-    phase,
-    reason: "context_limit"
-  });
-}
-
-async function compactAndEmit(
-  input: RunStart,
-  store: RuntimeStore,
-  state: RunStateMachine,
-  send: (message: OutboundMessage) => Promise<void>,
-  messages: RuntimeCompactionMessage[],
-  options: {
-    trigger: "auto" | "manual";
-    phase: "pre_turn" | "mid_turn" | "standalone_turn";
-    reason: "context_limit" | "user_requested";
-  }
-): Promise<CompactionCheckpoint> {
-  await state.compact(options.phase);
-  const checkpoint = await compactRuntimeMessages(messages, {
-    ...options,
-    windowState: await store.readCompactionState(input.conversation_id)
-  });
-  await store.append({
-    type: "conversation.compacted",
-    conversation_id: input.conversation_id,
-    run_id: input.run_id,
-    ...checkpoint
-  });
-  await send({
-    type: "session.compacted",
-    run_id: input.run_id,
-    ...checkpoint
-  });
-  await state.start();
-  return checkpoint;
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof ZodError) {
-    return error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ");
-  }
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
-}
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const port = Number(process.env.PORT ?? 8400);

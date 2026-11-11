@@ -1,0 +1,197 @@
+{
+  "id": 8,
+  "title": "Group authorization: non-linked members cannot approve or command; a link code in a group is ignored",
+  "status": "PASS",
+  "durationMs": 38182,
+  "checks": [
+    {
+      "name": "the real connect route issues a link code",
+      "ok": true,
+      "detail": {
+        "status": 200
+      }
+    },
+    {
+      "name": "a link code posted in a group, by a member or by the owner, links nobody",
+      "ok": true,
+      "detail": {
+        "identities": 0
+      }
+    },
+    {
+      "name": "the code stays unused after being posted in a group",
+      "ok": true
+    },
+    {
+      "name": "a code in a group draws no reply into the group",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "the same code in the owner's private chat links the owner (sender and private thread)",
+      "ok": true,
+      "detail": {
+        "reply": "连上了。先给我一样东西就行：你的名字、一个链接，或者现成的资料。"
+      }
+    },
+    {
+      "name": "a second use of the code does nothing",
+      "ok": true
+    },
+    {
+      "name": "both unlinked members' mentions were handled (inbox done) with no outbound message",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "the Assistant conversation never received an unlinked member's text",
+      "ok": true
+    },
+    {
+      "name": "no identity was created for the members",
+      "ok": true
+    },
+    {
+      "name": "a draft Agent exists for the Assistant to change",
+      "ok": true,
+      "detail": {
+        "status": 201
+      }
+    },
+    {
+      "name": "approve pressed by unlinked members changes no task (crafted id)",
+      "ok": true
+    },
+    {
+      "name": "every button press was handled by the inbox",
+      "ok": true
+    },
+    {
+      "name": "an unlinked member's button press in a group draws no reply into the group (the documented group silence)",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "the linked owner's mention in the group reached the Assistant and was answered in the group",
+      "ok": true,
+      "detail": {
+        "answer": "我这边出了点问题，刚才那条没处理完：Factory LLM provider quota is unavailable; recharge or increase the provider quota, then retry this stage",
+        "assistantMessages": [
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "an org member who was never admitted gets silence in a group: no Run, no outbound",
+      "ok": true
+    },
+    {
+      "name": "an admitted org member mentioning the bot in the group gets a Product Run and a reply in the group",
+      "ok": true,
+      "detail": {
+        "pong": "pong"
+      }
+    },
+    {
+      "name": "a message from an unlinked sender id inside the owner's chat id never reaches the Assistant",
+      "ok": true,
+      "detail": {
+        "messagesBefore": 916,
+        "inbox": "done"
+      }
+    },
+    {
+      "name": "a button press from an unlinked sender id inside the owner's chat id changes no task",
+      "ok": true,
+      "detail": {
+        "press": "done"
+      }
+    },
+    {
+      "name": "no identity row exists for any spoofing or unlinked sender",
+      "ok": true,
+      "detail": [
+        "9001",
+        "9101"
+      ]
+    },
+    {
+      "name": "no inbox row failed or is stuck pending",
+      "ok": true,
+      "detail": {
+        "pending": 0,
+        "done": 17,
+        "failed": 0
+      }
+    }
+  ],
+  "measurements": {
+    "code_in_group_unaddressed_queued": false,
+    "code_in_group_inbox_states": [
+      "done",
+      "done"
+    ],
+    "code_in_group_outbound_messages": 0,
+    "identities_after_private_link": [
+      [
+        "9001",
+        "9001"
+      ]
+    ],
+    "unlinked_member_mentions": 2,
+    "unlinked_member_inbox_states": [
+      "done",
+      "done"
+    ],
+    "unlinked_member_outbound_messages": 0,
+    "assistant_messages_before_after": [
+      0,
+      0
+    ],
+    "approve_target_is_real_task": false,
+    "button_presses_by_unlinked": 4,
+    "button_press_inbox_states": [
+      "done",
+      "done",
+      "done",
+      "done"
+    ],
+    "button_press_outbound_notices": [],
+    "answerCallbackQuery_calls": 0,
+    "owner_in_group_reply_chat_ids": [
+      -1001234567890
+    ],
+    "org_unadmitted_runs_created": 0,
+    "org_admitted_group_reply": "pong",
+    "spoof_notices": [
+      [
+        9001,
+        "请先从 Hatch Studio 连接 Telegram。"
+      ],
+      [
+        9001,
+        "请先从 Hatch Studio 连接 Telegram。"
+      ]
+    ],
+    "inbox_rows_by_state": {
+      "pending": 0,
+      "done": 17,
+      "failed": 0
+    },
+    "identities_final": [
+      "9001",
+      "9101"
+    ],
+    "tasks_final": [],
+    "platform_calls_by_method": {
+      "sendMessage": 8
+    }
+  },
+  "evidence": {},
+  "notes": [
+    "Setup: the self Assistant Connection and its link code come from the real Registry route. The org Connection row and its admitted member are inserted by the tool (stack.connection / stack.admit). Everything else is signed Telegram webhooks through the real router.",
+    "The Assistant did not produce a review task in 3 attempts; the button checks below use a crafted task id."
+  ],
+  "defects": []
+}

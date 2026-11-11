@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ClientToolName } from "./protocol.js";
+import type { ClientGroup } from "./surfaces/contract.js";
 
 export type ToolLocality = "server" | "client";
 export type ToolApproval = "none" | "auto" | "ask";
@@ -48,6 +49,10 @@ export type ToolDefinition = {
   locality: ToolLocality;
   approval: ToolApproval;
   description: string;
+  /** Running it again changes nothing: a Run that used only such tools can restart safely. */
+  readOnly?: boolean;
+  /** The clients that may run it, authorized against the client of the latest message. Absent: every client. */
+  supportedClients?: readonly ClientGroup[];
   schema: z.ZodTypeAny;
   model?: {
     name: string;
@@ -64,6 +69,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     name: "hatch.web_search",
     locality: "server",
     approval: "none",
+    readOnly: true,
     description: "Hatch-provided public web search.",
     schema: z.object({ query: z.string(), limit: z.number().int().min(1).max(10).default(5) }).strict(),
     model: {
@@ -82,6 +88,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     name: "hatch.file_search",
     locality: "server",
     approval: "none",
+    readOnly: true,
     description: "Search the current Expert Agent's retrieval-only knowledge space.",
     schema: z.object({ query: z.string(), limit: z.number().int().min(1).max(6).default(6) }).strict(),
     model: {
@@ -100,6 +107,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     name: "web.search",
     locality: "server",
     approval: "none",
+    readOnly: true,
     description: "Search public web or creator-owned API sources from the runtime server.",
     schema: z.object({ query: z.string(), limit: z.number().int().min(1).max(10).default(5) }).strict(),
     model: {
@@ -160,6 +168,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     name: "Skill",
     locality: "server",
     approval: "none",
+    readOnly: true,
     description: "Load a Skill's SKILL.md and bundle into the current Agent context.",
     schema: z.object({
       skill_name: z.string().min(1)
@@ -327,6 +336,12 @@ export function assertClientToolNameInvariant(
 }
 
 assertClientToolNameInvariant();
+
+/** Accepts the runtime name or the model-facing name. Unknown tools are not read-only. */
+export function isReadOnlyTool(name: string): boolean {
+  const tool = toolRegistry.get(name) ?? [...toolRegistry.values()].find((candidate) => candidate.model?.name === name);
+  return tool?.readOnly === true;
+}
 
 export function requireTool(name: string): ToolDefinition {
   const tool = toolRegistry.get(name);

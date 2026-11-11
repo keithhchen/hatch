@@ -3,12 +3,14 @@ export const NODE_VERSION = "22.23.2";
 export const PYTHON_VERSION = "3.12.14";
 export const PYTHON_BUILD_TAG = "20260901";
 export const LIBREOFFICE_VERSION = "26.2.5";
+// The exact build behind the pinned checksums; the archive keeps it after "stable" moves on.
+const LIBREOFFICE_BUILD = "26.2.5.2";
 export const POPPLER_VERSION = "26.05.0";
 export const MICROMAMBA_VERSION = "2.8.1-0";
 
 const NODE_BASE_URL = `https://nodejs.org/download/release/v${NODE_VERSION}`;
 const PYTHON_BASE_URL = `https://github.com/astral-sh/python-build-standalone/releases/download/${PYTHON_BUILD_TAG}`;
-const LIBREOFFICE_BASE_URL = `https://download.documentfoundation.org/libreoffice/stable/${LIBREOFFICE_VERSION}`;
+const LIBREOFFICE_BASE_URL = `https://downloadarchive.documentfoundation.org/libreoffice/old/${LIBREOFFICE_BUILD}`;
 const MICROMAMBA_BASE_URL = `https://github.com/mamba-org/micromamba-releases/releases/download/${MICROMAMBA_VERSION}`;
 const POPPLER_CHANNEL = "https://conda.anaconda.org/conda-forge";
 
@@ -34,7 +36,7 @@ const targets = {
       libreoffice: {
         format: "dmg",
         archive: `LibreOffice_${LIBREOFFICE_VERSION}_MacOS_aarch64.dmg`,
-        url: `${LIBREOFFICE_BASE_URL}/mac/aarch64/LibreOffice_${LIBREOFFICE_VERSION}_MacOS_aarch64.dmg`,
+        url: `${LIBREOFFICE_BASE_URL}/mac/aarch64/LibreOffice_${LIBREOFFICE_BUILD}_MacOS_aarch64.dmg`,
         sha256: "c99fb4fe574437fc4cb820a4ca15271bca325920861f7139858b36d7f9df78ad",
         license: "MPL-2.0"
       },
@@ -72,7 +74,7 @@ const targets = {
       libreoffice: {
         format: "dmg",
         archive: `LibreOffice_${LIBREOFFICE_VERSION}_MacOS_x86-64.dmg`,
-        url: `${LIBREOFFICE_BASE_URL}/mac/x86_64/LibreOffice_${LIBREOFFICE_VERSION}_MacOS_x86-64.dmg`,
+        url: `${LIBREOFFICE_BASE_URL}/mac/x86_64/LibreOffice_${LIBREOFFICE_BUILD}_MacOS_x86-64.dmg`,
         sha256: "e26180298685274b54aa7fe6e1101c65465a372f457a6748ebd642720811db36",
         license: "MPL-2.0"
       },
@@ -110,7 +112,7 @@ const targets = {
       libreoffice: {
         format: "msi",
         archive: `LibreOffice_${LIBREOFFICE_VERSION}_Win_x86-64.msi`,
-        url: `${LIBREOFFICE_BASE_URL}/win/x86_64/LibreOffice_${LIBREOFFICE_VERSION}_Win_x86-64.msi`,
+        url: `${LIBREOFFICE_BASE_URL}/win/x86_64/LibreOffice_${LIBREOFFICE_BUILD}_Win_x86-64.msi`,
         sha256: "f15ba07bfcb0186986cf3171063506f5d207c11f8cc051ba0d135209e9e915f9",
         license: "MPL-2.0"
       },
@@ -148,7 +150,7 @@ const targets = {
       libreoffice: {
         format: "msi",
         archive: `LibreOffice_${LIBREOFFICE_VERSION}_Win_aarch64.msi`,
-        url: `${LIBREOFFICE_BASE_URL}/win/aarch64/LibreOffice_${LIBREOFFICE_VERSION}_Win_aarch64.msi`,
+        url: `${LIBREOFFICE_BASE_URL}/win/aarch64/LibreOffice_${LIBREOFFICE_BUILD}_Win_aarch64.msi`,
         sha256: "48e99bba813c65a823b86a9fe8c0746a415f3d0e9459255f81f745f58fd353aa",
         license: "MPL-2.0"
       },

@@ -6,6 +6,11 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { agentEntries, assertAgentAvailable, initialAgentDefinitions } from "../factoryAgents/definitions.js";
 import type { Role, Session } from "../factoryAgents/store.js";
 import type { AssistantHost } from "./assistantConversation.js";
+import type { AssetScope } from "../assets/domain.js";
+import type { AssetDesk } from "./assets.js";
+import { ConversationError, page, type ConversationStatus, type PublicMessage, type ReadyAsset, type SendInput, type Sent } from "./conversation.js";
+import { MemoryEventLog } from "./eventLog.js";
+import { EventLogJournal } from "./journal.js";
 import { ConversationRoutes } from "./routes.js";
 import type { WorkerWorkspace } from "./workerConversation.js";
 
@@ -19,7 +24,10 @@ function session(role: Role, patch: Partial<Session> = {}): Session {
 const assistantLine = (text: string): AgentMessage => ({ role: "assistant", content: [{ type: "text", text }], timestamp: 5, stopReason: "stop" }) as unknown as AgentMessage;
 
 class FakeWorkspace implements WorkerWorkspace {
+  /** Like the real runtime, it journals its own events from the start, whatever route is or is not watching. */
+  constructor(log: MemoryEventLog) { const journal = new EventLogJournal(log, event => event.sessionId); this.events.on("event", event => journal.append(event)); }
   sessions: Session[] = [];
+  private runs = new Map<string, string>();
   started: Array<{ id: string; text: string }> = [];
   steered: string[] = [];
   stopped: string[] = [];
@@ -27,46 +35,93 @@ class FakeWorkspace implements WorkerWorkspace {
   replyAfterMs = 20;
   events = new EventEmitter();
   private definitions = initialAgentDefinitions();
+  manual = new Map<string, Buffer>();
+  /** Pending replies, so a test that ends first leaves no timer behind. */
+  replies = new Set<NodeJS.Timeout>();
   store = {
+    backend: { writeManual: async (name: string, bytes: Buffer) => { this.manual.set(name, bytes); } },
     list: async () => this.sessions,
     create: async (role: Role) => { const created = session(role); this.sessions.push(created); return created; },
   };
   runtime = {
     events: this.events,
-    isRunning: (id: string) => this.sessions.find(s => s.id === id)?.status === "running",
-    steer: (id: string, message: AgentMessage) => { this.steered.push(id); this.sessions.find(s => s.id === id)!.messages.push(message); return true; },
-    stop: (id: string) => { this.stopped.push(id); },
-    start: async (id: string, input: string | AgentMessage[]) => {
+    send: async (id: string, message: AgentMessage) => {
       const target = this.sessions.find(s => s.id === id)!;
-      const messages = input as AgentMessage[];
-      this.started.push({ id, text: (messages[0] as unknown as { origin: { text: string } }).origin.text });
-      target.status = "running"; target.messages.push(...messages);
-      setTimeout(() => { target.messages.push(assistantLine(this.reply)); target.status = "idle"; }, this.replyAfterMs);
+      const queued = target.status === "running";
+      target.messages.push(message);
+      if (queued) this.steered.push(id);
+      else {
+        this.runs.set(id, `run-${this.started.length + 1}`);
+        this.started.push({ id, text: (message as unknown as { origin: { text: string } }).origin.text });
+        target.status = "running";
+        this.replies.add(setTimeout(() => { target.messages.push(assistantLine(this.reply)); target.status = "idle"; this.runs.delete(id); this.events.emit("event", { sessionId: id, type: "run_end", status: "completed" }); }, this.replyAfterMs));
+      }
+      return { queued, runId: this.runs.get(id)! };
     },
+    runId: (id: string) => this.runs.get(id),
+    queued: (_id: string, _itemId: string) => undefined,
+    stop: (id: string) => { this.stopped.push(id); },
   };
   entries = async () => agentEntries(await this.definitions, this.sessions);
   assertRoleAvailable = async (role: Role) => assertAgentAvailable(await this.entries(), role);
 }
 
 class FakeAssistant implements AssistantHost {
-  events = new EventEmitter();
-  lines: Array<{ id: string; role: "expert" | "assistant"; text: string; at: string }> = [{ id: "m1", role: "assistant", text: "Hello", at: "2026-01-01T00:00:00.000Z" }];
+  history: PublicMessage[] = [{ id: "m1", role: "assistant", text: "Hello", created_at: "2026-01-01T00:00:00.000Z" }];
   running = false;
-  ingested: Array<{ id: string; source: string; text: string }> = [];
+  ingested: SendInput[] = [];
   stopped = 0;
-  view = async () => ({ messages: this.lines, running: this.running });
-  ingest = async (_account: string, item: { id: string; source: "web"; text: string }) => {
-    this.ingested.push(item);
+  desk!: AssetDesk;
+  /** Looks at the world the moment a message is delivered. */
+  onDelivery: () => void = () => undefined;
+  status = async (): Promise<ConversationStatus> => this.running ? { state: "running", runId: "arun-1" } : { state: "idle" };
+  lines = async (_account: string, after?: string, limit?: number) => page(this.history, after, limit);
+  send = async (_account: string, input: SendInput): Promise<Sent> => {
+    this.onDelivery();
+    this.ingested.push(input);
     this.running = true;
-    setTimeout(() => { this.lines.push({ id: item.id, role: "expert", text: item.text, at: "t" }, { id: "m9", role: "assistant", text: "Noted.", at: "t" }); this.running = false; }, 20);
-    return true;
+    setTimeout(() => { this.history.push({ id: input.id, role: "user", text: input.text, created_at: "t" }, { id: "m9", role: "assistant", text: "Noted.", created_at: "t" }); this.running = false; }, 20);
+    const attachments = input.attachments.map(asset => ({ type: asset.kind, name: asset.name, asset_id: asset.id }));
+    return { conversationId: "a1", queued: false, runId: "arun-1", message: { id: input.id, role: "user", text: input.text, created_at: "t", ...(attachments.length ? { attachments } : {}) } };
   };
+  feedKey = () => "assistant:a1";
+  conversationId = () => "assistant:a1";
+  assets = () => this.desk;
   stop = async () => { this.stopped++; };
+  partial = async () => "";
+  retried: string[] = [];
+  retry = async (_account: string, input: { id: string }) => { this.retried.push(input.id); return { run: { id: "arun-2" }, outcome: "started" as const }; };
+}
+
+const IMAGE: ReadyAsset = { id: "a-img", kind: "image", name: "chart.png", mimeType: "image/png", bytes: 10, sha256: "h-img", path: "input/manual/chart.png" };
+const NOTES: ReadyAsset = { id: "a-doc", kind: "file", name: "notes.pdf", mimeType: "application/pdf", bytes: 2048, sha256: "h-doc", path: "input/manual/notes.pdf" };
+/** An explicit fake of the upload side; the real one runs in pipelineAssets.test.ts. */
+class FakeDesk implements AssetDesk {
+  staged: string[] = [];
+  attached: Array<{ ids: string[]; messageId: string }> = [];
+  uploads: Array<{ name: string; bytes: number }> = [];
+  constructor(private files: Map<string, Buffer>) {}
+  resolve = async (scope: AssetScope, id: string) => {
+    if (scope.kind !== "account" || scope.accountId !== "a1") return undefined;
+    const asset = id === "a-img" ? IMAGE : id === "a-doc" ? NOTES : undefined;
+    return id === "a-wait" ? "pending" as const : asset;
+  };
+  stage = async (_scope: unknown, assets: readonly ReadyAsset[]) => { for (const asset of assets) { this.staged.push(asset.path); this.files.set(asset.path, Buffer.from("bytes")); } };
+  attach = async (_scope: unknown, assets: readonly ReadyAsset[], messageId: string) => { this.attached.push({ ids: assets.map(asset => asset.id), messageId }); };
+  release = async (_scope: unknown, assets: readonly ReadyAsset[], messageId: string) => { this.attached = this.attached.filter(entry => entry.messageId !== messageId || !assets.some(asset => entry.ids.includes(asset.id))); };
+  upload = async (_scope: unknown, input: { name: string; bytes: Buffer }) => {
+    if (input.name === "bad.exe") throw new ConversationError(415, "unsupported_type", "Not a supported file type.");
+    this.uploads.push({ name: input.name, bytes: input.bytes.length });
+    return { asset_id: "a-new", kind: "file" as const, name: input.name, bytes: input.bytes.length, state: "ready" as const };
+  };
 }
 
 async function harness(options: { assistant?: boolean } = { assistant: true }) {
-  const workspace = new FakeWorkspace();
+  const eventLog = new MemoryEventLog();
+  const workspace = new FakeWorkspace(eventLog);
   const assistant = new FakeAssistant();
+  const desk = new FakeDesk(workspace.manual);
+  assistant.desk = desk;
   const routes = new ConversationRoutes({
     authenticate: async request => { const token = request.headers.authorization?.replace(/^Bearer /, ""); return token && TOKENS[token] ? { id: TOKENS[token]! } : undefined; },
     token: request => request.headers.authorization?.replace(/^Bearer /, ""),
@@ -75,6 +130,8 @@ async function harness(options: { assistant?: boolean } = { assistant: true }) {
     assistant: () => options.assistant === false ? undefined : assistant,
     json: (response, status, payload) => { response.writeHead(status, { "content-type": "application/json" }); response.end(JSON.stringify(payload)); },
     readJson: async request => { let body = ""; for await (const chunk of request) body += chunk; return JSON.parse(body || "{}"); },
+    readBytes: async request => { const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(chunk as Buffer); return Buffer.concat(chunks); },
+    eventLog, assets: () => desk,
     pace: { pollMs: 5 },
   });
   const server = http.createServer((req, res) => { void routes.handle(req, res, new URL(req.url!, "http://x")).then(handled => { if (!handled) { res.writeHead(404); res.end(); } }); });
@@ -85,7 +142,7 @@ async function harness(options: { assistant?: boolean } = { assistant: true }) {
     headers: { ...(init.token === null ? {} : { authorization: `Bearer ${init.token ?? "owner"}` }), "content-type": "application/json" },
     ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
   });
-  return { workspace, assistant, call, close: () => { server.closeAllConnections(); return new Promise<void>(resolve => server.close(() => resolve())); } };
+  return { workspace, assistant, desk, call, base, close: () => { workspace.replies.forEach(clearTimeout); server.closeAllConnections(); return new Promise<void>(resolve => server.close(() => resolve())); } };
 }
 const root = `/v1/creator/products/${PRODUCT}/workers`;
 
@@ -204,7 +261,7 @@ test("workers: stop is 202, events stream the session's own events only", async 
     h.workspace.events.emit("event", { sessionId: "s-research", type: "voice.delta", text: "internal" });
     h.workspace.events.emit("event", { sessionId: "s-research", type: "delta", text: "hello" });
     const chunk = decoder.decode((await reader.read()).value);
-    assert.equal(chunk, 'data: {"type":"delta","text":"hello"}\n\n');
+    assert.equal(chunk, 'id: 1\ndata: {"type":"delta","text":"hello"}\n\n', "the SSE id is the log cursor");
     controller.abort();
     const stop = await h.call(`${root}/research/stop`, { method: "POST" });
     assert.equal(stop.status, 202);
@@ -224,12 +281,23 @@ test("assistant: same shape and verbs, over the existing Assistant", async () =>
     const body = await sent.json() as { message: { id: string; role: string }; reply: { text: string }; status: string };
     assert.equal(body.reply.text, "Noted.");
     assert.equal(body.message.role, "user");
+    assert.equal((body as unknown as { run_id: string }).run_id, "arun-1", "the Assistant's turn has a Run of its own");
     assert.equal(h.assistant.ingested[0]!.id, body.message.id);
-    assert.equal(h.assistant.ingested[0]!.source, "web");
     const after = await (await h.call(`${path}/messages?after=m1`)).json() as { messages: Array<{ role: string; text: string }> };
     assert.deepEqual(after.messages.map(m => [m.role, m.text]), [["user", "Remind me tomorrow"], ["assistant", "Noted."]]);
     assert.equal((await h.call(`${path}/stop`, { method: "POST" })).status, 202);
     assert.equal(h.assistant.stopped, 1);
+  } finally { await h.close(); }
+});
+
+test("assistant: retry answers again under the client's key", async () => {
+  const h = await harness();
+  try {
+    const retried = await h.call("/v1/creator/assistant/conversation/retry", { method: "POST", body: { idempotency_key: "k-1" } });
+    assert.equal(retried.status, 202);
+    assert.deepEqual(await retried.json(), { run_id: "arun-2", outcome: "started" });
+    assert.deepEqual(h.assistant.retried, ["k-1"]);
+    assert.equal((await h.call("/v1/creator/assistant/conversation/retry", { method: "GET" })).status, 405);
   } finally { await h.close(); }
 });
 
@@ -239,5 +307,169 @@ test("assistant: 503 when the Registry has no database", async () => {
     const response = await h.call("/v1/creator/assistant/conversation/messages");
     assert.equal(response.status, 503);
     assert.equal(((await response.json()) as { error: { code: string } }).error.code, "assistant_unavailable");
+  } finally { await h.close(); }
+});
+
+const post = (h: Awaited<ReturnType<typeof harness>>, body: unknown, query = "", headers: Record<string, string> = {}) =>
+  fetch(`${h.base}${root}/research/messages${query}`, { method: "POST", headers: { authorization: "Bearer owner", "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
+
+test("idempotency: same key and content is one message, other content is 409", async () => {
+  const h = await harness();
+  try {
+    const key = { "idempotency-key": "client-1" };
+    const first = await (await post(h, { content: "Look into Alice" }, "", key)).json() as { message: { id: string } };
+    const again = await post(h, { content: "Look into Alice" }, "", key);
+    assert.equal(again.status, 202);
+    assert.equal(((await again.json()) as { message: { id: string } }).message.id, first.message.id, "the original message comes back");
+    assert.equal(h.workspace.started.length, 1, "delivered once");
+    const conflict = await post(h, { content: "Something else" }, "", key);
+    assert.equal(conflict.status, 409);
+    assert.equal(((await conflict.json()) as { error: { code: string } }).error.code, "idempotency_conflict");
+    assert.equal(((await (await post(h, { content: "Look into Alice", idempotency_key: "client-1" })).json()) as { message: { id: string } }).message.id, first.message.id, "the key may travel in the body");
+    const unkeyed = await (await post(h, { content: "Look into Alice" })).json() as { message: { id: string } };
+    assert.notEqual(unkeyed.message.id, first.message.id, "without a key a repeat is a new message");
+  } finally { await h.close(); }
+});
+
+test("idempotency: the key is the message's id, a worker's own session is the only record, and a burst of one key is delivered once", async () => {
+  const h = await harness();
+  try {
+    const key = { "idempotency-key": "burst-1" };
+    const burst = await Promise.all(Array.from({ length: 6 }, () => post(h, { content: "Look into Bob" }, "", key)));
+    const ids = await Promise.all(burst.map(async response => ((await response.json()) as { message: { id: string } }).message.id));
+    assert.deepEqual([...new Set(ids)], ["burst-1"], "the key is the id");
+    assert.equal(h.workspace.started.length, 1, "delivered once");
+    assert.equal(h.workspace.sessions[0]!.messages.length, 1, "one record, in the session");
+    assert.equal(((await (await post(h, { content: "k".repeat(1) }, "", { "idempotency-key": "k".repeat(257) })).json()) as { error: { code: string } }).error.code, "invalid_idempotency_key");
+  } finally { await h.close(); }
+});
+
+test("attachments: parts resolve to ready assets; pending, missing and mismatched assets are refused", async () => {
+  const h = await harness();
+  try {
+    const ok = await post(h, { content: [{ type: "text", text: "see these" }, { type: "image", assetId: "a-img" }, { type: "file", assetId: "a-doc" }] });
+    assert.equal(ok.status, 202);
+    const body = await ok.json() as { message: { attachments: unknown[] } };
+    assert.deepEqual(body.message.attachments, [{ type: "image", name: "chart.png", asset_id: "a-img" }, { type: "file", name: "notes.pdf", asset_id: "a-doc" }]);
+    const stored = h.workspace.sessions[0]!.messages[0] as unknown as { content: Array<{ type: string; text?: string; data?: string }>; origin: { text: string } };
+    assert.equal(stored.origin.text, "see these");
+    assert.equal(stored.content[0]!.text, "see these\n[file: notes.pdf (application/pdf, 2048 bytes) at input/manual/notes.pdf]", "a file is one line for the model");
+    assert.equal(stored.content[1]!.data, "hatch-file:input/manual/chart.png", "an image is a path reference");
+    const refused = async (assetId: string, type = "image") => { const r = await post(h, { content: [{ type, assetId }] }); return [r.status, ((await r.json()) as { error: { code: string } }).error.code]; };
+    assert.deepEqual(await refused("a-wait"), [409, "asset_not_ready"]);
+    assert.deepEqual(await refused("nope"), [404, "asset_not_found"]);
+    assert.deepEqual(await refused("a-doc", "image"), [400, "asset_kind_mismatch"]);
+    assert.equal((await post(h, { content: [{ type: "image" }] })).status, 400);
+    assert.equal((await post(h, { content: "x", client: "fax" })).status, 400, "an unknown client is refused");
+  } finally { await h.close(); }
+});
+
+test("snapshot and events share one cursor: replay from it has no gap and no duplicate", async () => {
+  const h = await harness();
+  try {
+    h.workspace.sessions.push(session("research", { status: "running" }));
+    const emit = (type: string, extra: Record<string, unknown> = {}) => h.workspace.events.emit("event", { sessionId: "s-research", type, ...extra });
+    emit("message_end"); emit("delta", { text: "Hel" }); emit("delta", { text: "lo" });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    const snapshot = await (await h.call(`${root}/research/snapshot`)).json() as { cursor: string; status: { state: string }; partial: string; messages: unknown[] };
+    assert.deepEqual([snapshot.cursor, snapshot.status.state, snapshot.partial], ["3", "running", "Hello"], "partial output is what has streamed since the last finished message");
+    emit("delta", { text: "!" }); emit("tool", { name: "list" });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    const replay = async (init: { path?: string; headers?: Record<string, string> }) => {
+      const controller = new AbortController();
+      const response = await fetch(`${h.base}${root}/research/events${init.path ?? ""}`, { signal: controller.signal, headers: { authorization: "Bearer owner", ...init.headers } });
+      const reader = response.body!.getReader(); let text = "";
+      while (!text.includes("tool")) text += new TextDecoder().decode((await reader.read()).value);
+      controller.abort();
+      return text;
+    };
+    const expected = ': connected\n\nid: 4\ndata: {"type":"delta","text":"!"}\n\nid: 5\ndata: {"type":"tool","name":"list"}\n\n';
+    assert.equal(await replay({ path: `?after_cursor=${snapshot.cursor}` }), expected);
+    assert.equal(await replay({ headers: { "last-event-id": snapshot.cursor } }), expected, "Last-Event-ID resumes the same way");
+    assert.equal((await h.call(`${root}/research/events?after_cursor=99`)).status, 400, "a cursor the log never issued");
+    assert.equal((await h.call(`${root}/research/events?after_cursor=x`)).status, 400);
+    assert.deepEqual(h.workspace.stopped, [], "watching and unwatching never stops the Run");
+  } finally { await h.close(); }
+});
+
+test("wait timeout answers 202 with the run to follow; Accept: text/event-stream streams the turn to its end", async () => {
+  const h = await harness();
+  try {
+    h.workspace.replyAfterMs = 80;
+    const slow = await post(h, { content: "Slow one" }, "?wait=0.02");
+    assert.equal(slow.status, 202);
+    const pending = await slow.json() as { run_id: string; cursor: string; status: string };
+    assert.deepEqual([pending.run_id, pending.cursor, pending.status], ["run-1", "0", "running"], "the Run is not the conversation");
+    await new Promise(resolve => setTimeout(resolve, 150));
+    h.workspace.replyAfterMs = 40;
+    const streamed = await post(h, { content: "Stream it" }, "", { accept: "text/event-stream" });
+    assert.match(streamed.headers.get("content-type")!, /text\/event-stream/);
+    const text = await streamed.text();
+    assert.match(text, /^: connected\n\nevent: accepted\ndata: \{.*"text":"Stream it".*\}\n\n/);
+    assert.match(text, /id: \d+\ndata: \{"type":"run_end","status":"completed"\}\n\n/);
+    assert.match(text, /event: done\ndata: \{"status":"idle"\}\n\n$/);
+  } finally { await h.close(); }
+});
+
+test("snapshot names the Run in progress, which is not the conversation", async () => {
+  const h = await harness();
+  try {
+    const sent = await (await post(h, { content: "Go" })).json() as { run_id: string; conversation_id: string };
+    assert.equal(sent.run_id, "run-1");
+    assert.notEqual(sent.run_id, sent.conversation_id);
+    const snapshot = await (await h.call(`${root}/research/snapshot`)).json() as { run_id?: string; status: { state: string } };
+    assert.deepEqual([snapshot.status.state, snapshot.run_id], ["running", "run-1"]);
+    await new Promise(resolve => setTimeout(resolve, 60));
+    assert.equal(((await (await h.call(`${root}/research/snapshot`)).json()) as { run_id?: string }).run_id, undefined, "no Run, no run_id");
+  } finally { await h.close(); }
+});
+
+test("attachments: staged before delivery, bound to the accepted message, and a replay binds nothing twice", async () => {
+  const h = await harness();
+  try {
+    const content = [{ type: "text", text: "see this" }, { type: "file", assetId: "a-doc" }];
+    const first = await (await post(h, { content }, "", { "idempotency-key": "k-assets" })).json() as { message: { id: string } };
+    assert.deepEqual(h.desk.staged, [NOTES.path], "the bytes were in the workspace before the message was delivered");
+    assert.ok(h.workspace.manual.has(NOTES.path));
+    assert.deepEqual(h.desk.attached, [{ ids: ["a-doc"], messageId: first.message.id }], "bound to the id the history shows");
+    const again = await (await post(h, { content }, "", { "idempotency-key": "k-assets" })).json() as { message: { id: string } };
+    assert.equal(again.message.id, first.message.id);
+    assert.equal(h.desk.attached.length, 1, "a replay is not a second binding");
+    assert.equal(h.desk.staged.length, 1);
+  } finally { await h.close(); }
+});
+
+test("upload: the body is the file, the name is a query parameter; refusals say why", async () => {
+  const h = await harness();
+  try {
+    const upload = (query: string, body: string) => fetch(`${h.base}${root}/research/assets${query}`, { method: "POST", headers: { authorization: "Bearer owner" }, body: body || undefined });
+    const ok = await upload("?name=notes.txt", "hello");
+    assert.equal(ok.status, 201);
+    assert.deepEqual(await ok.json(), { asset_id: "a-new", kind: "file", name: "notes.txt", bytes: 5, state: "ready" });
+    assert.equal((await upload("", "hello")).status, 400, "a file needs a name");
+    assert.equal((await upload("?name=empty.txt", "")).status, 400);
+    const refused = await upload("?name=bad.exe", "MZ");
+    assert.deepEqual([refused.status, ((await refused.json()) as { error: { code: string } }).error.code], [415, "unsupported_type"]);
+    assert.equal((await fetch(`${h.base}${root}/research/assets?name=a.txt`, { method: "POST", body: "x" })).status, 401);
+    assert.equal((await fetch(`${h.base}${root}/research/assets?name=a.txt`, { headers: { authorization: "Bearer owner" } })).status, 405);
+  } finally { await h.close(); }
+});
+
+test("the Assistant takes attachments like a worker: upload, bound to the message before delivery, run_id returned", async () => {
+  const h = await harness();
+  try {
+    const path = "/v1/creator/assistant/conversation";
+    const upload = await fetch(`${h.base}${path}/assets?name=notes.txt`, { method: "POST", headers: { authorization: "Bearer owner" }, body: "hello" });
+    assert.deepEqual([upload.status, ((await upload.json()) as { asset_id: string }).asset_id], [201, "a-new"]);
+    assert.equal((await fetch(`${h.base}${path}/assets?name=a.txt`, { method: "POST", body: "x" })).status, 401);
+    let boundAtDelivery: unknown;
+    h.assistant.onDelivery = () => { boundAtDelivery = [...h.desk.attached]; };
+    const sent = await (await h.call(`${path}/messages`, { method: "POST", body: { content: [{ type: "text", text: "see this" }, { type: "image", assetId: "a-img" }, { type: "file", assetId: "a-doc" }] } })).json() as { run_id: string; message: { id: string; attachments: unknown[] } };
+    assert.equal(sent.run_id, "arun-1");
+    assert.deepEqual(boundAtDelivery, [{ ids: ["a-img", "a-doc"], messageId: sent.message.id }], "bound before the Assistant sees the message, to the id the history shows");
+    assert.deepEqual(sent.message.attachments, [{ type: "image", name: "chart.png", asset_id: "a-img" }, { type: "file", name: "notes.pdf", asset_id: "a-doc" }]);
+    const item = h.assistant.ingested[0]!;
+    assert.equal(item.text, "see this");
+    assert.deepEqual(item.attachments.map(asset => asset.id), ["a-img", "a-doc"], "Chat reads them as parts: the picture as pixels, the file as one line");
   } finally { await h.close(); }
 });

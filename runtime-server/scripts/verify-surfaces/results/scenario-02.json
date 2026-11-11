@@ -1,0 +1,690 @@
+{
+  "id": 2,
+  "title": "Close a client mid-Run (Web, Desktop WebSocket, CLI): the Run completes, the reply exists once",
+  "status": "FAIL",
+  "durationMs": 44907,
+  "checks": [
+    {
+      "name": "studio.assistant.cli-wait: closed while the turn was still running",
+      "ok": true,
+      "detail": "running"
+    },
+    {
+      "name": "studio.worker.cli-wait: closed while the turn was still running",
+      "ok": true,
+      "detail": "running"
+    },
+    {
+      "name": "chat.ws: closed while the Run was still going",
+      "ok": true,
+      "detail": "running"
+    },
+    {
+      "name": "chat.web: closed while the Run was still going",
+      "ok": true,
+      "detail": "running"
+    },
+    {
+      "name": "chat.cli: closed while the Run was still going",
+      "ok": true,
+      "detail": "running"
+    },
+    {
+      "name": "studio.worker.ws: closed while the turn was still running",
+      "ok": true,
+      "detail": "running"
+    },
+    {
+      "name": "studio.assistant.web: closed while the turn was still running",
+      "ok": true,
+      "detail": "running"
+    },
+    {
+      "name": "chat.web: Run reaches completed",
+      "ok": true,
+      "detail": {
+        "status": "completed",
+        "run_id": "run_0047c4eca30148c7b73e8ab505567baa"
+      }
+    },
+    {
+      "name": "chat.ws: Run reaches completed",
+      "ok": true,
+      "detail": {
+        "status": "completed",
+        "run_id": "run_234c90d1b79c4aee988cbac5080c765c"
+      }
+    },
+    {
+      "name": "chat.web: exactly one Run in the conversation",
+      "ok": true,
+      "detail": [
+        {
+          "id": "run_0047c4eca30148c7b73e8ab505567baa",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "chat.ws: exactly one Run in the conversation",
+      "ok": true,
+      "detail": [
+        {
+          "id": "run_234c90d1b79c4aee988cbac5080c765c",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "chat.ws: the user message exists once",
+      "ok": true,
+      "detail": {
+        "users": 1
+      }
+    },
+    {
+      "name": "chat.ws: the assistant reply exists exactly once",
+      "ok": true,
+      "detail": {
+        "assistants": 1,
+        "ids": [
+          "msg_e0b586937fb0cb00bb450732317bcd448a159c33deb86e775798e57834f50aaa"
+        ]
+      }
+    },
+    {
+      "name": "chat.ws: the reply is complete (LIST token and all 40 lines)",
+      "ok": true,
+      "detail": "es pack a crisp sour punch.\n40. Dates offer concentrated caramel-like sweetness."
+    },
+    {
+      "name": "chat.web: the user message exists once",
+      "ok": true,
+      "detail": {
+        "users": 1
+      }
+    },
+    {
+      "name": "chat.web: the assistant reply exists exactly once",
+      "ok": true,
+      "detail": {
+        "assistants": 1,
+        "ids": [
+          "msg_9614a8bdd9a8e8211d0360bce4848093ef816e9e61e4d0455b1f90041405a297"
+        ]
+      }
+    },
+    {
+      "name": "chat.web: the reply is complete (LIST token and all 40 lines)",
+      "ok": true,
+      "detail": ". Durians emit uniquely pungent aromas.\n40. Jackfruits yield massive sweet pods."
+    },
+    {
+      "name": "chat.ws: no cancel was recorded",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "chat.web: no cancel was recorded",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "studio.worker.ws: conversation ends idle (not failed)",
+      "ok": true,
+      "detail": "idle"
+    },
+    {
+      "name": "studio.worker.ws: the user message exists once",
+      "ok": true,
+      "detail": {
+        "users": 1
+      }
+    },
+    {
+      "name": "studio.worker.ws: the assistant reply exists exactly once",
+      "ok": true,
+      "detail": {
+        "replies": 1,
+        "assistant_tails": [
+          "s they reach maturity.\n25. Apricots provide a gentle sweetness with a velvety golden skin."
+        ]
+      }
+    },
+    {
+      "name": "studio.worker.ws: the log has one run_end and it is completed",
+      "ok": true,
+      "detail": [
+        {
+          "type": "run_end",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "chat.cli: Run reaches completed",
+      "ok": true,
+      "detail": {
+        "status": "completed",
+        "run_id": "run_21cbce93767c42fea48bc9f493ff3662"
+      }
+    },
+    {
+      "name": "chat.cli: exactly one Run in the conversation",
+      "ok": true,
+      "detail": [
+        {
+          "id": "run_21cbce93767c42fea48bc9f493ff3662",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "chat.cli: the user message exists once",
+      "ok": true,
+      "detail": {
+        "users": 1
+      }
+    },
+    {
+      "name": "chat.cli: the assistant reply exists exactly once",
+      "ok": true,
+      "detail": {
+        "assistants": 1,
+        "ids": [
+          "msg_144c405bc958e7d01f66451a3521ac57f32c60736001963e0e466f6262e037cc"
+        ]
+      }
+    },
+    {
+      "name": "chat.cli: the reply is complete (LIST token and all 40 lines)",
+      "ok": true,
+      "detail": "anberry flavors.\n40. Gooseberries provide a firm, sharply sour translucent bite."
+    },
+    {
+      "name": "chat.cli: no cancel was recorded",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "chat.stay: Run reaches completed",
+      "ok": true,
+      "detail": {
+        "status": "completed",
+        "run_id": "run_10a507a549344657878f26558b863aca"
+      }
+    },
+    {
+      "name": "chat.stay: exactly one Run in the conversation",
+      "ok": true,
+      "detail": [
+        {
+          "id": "run_10a507a549344657878f26558b863aca",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "chat.stay: the user message exists once",
+      "ok": true,
+      "detail": {
+        "users": 1
+      }
+    },
+    {
+      "name": "chat.stay: the assistant reply exists exactly once",
+      "ok": true,
+      "detail": {
+        "assistants": 1,
+        "ids": [
+          "msg_11422cb5245afc36a24cb61d1f7122e4ddb66f035738d0ef8eea05c37d3c792d"
+        ]
+      }
+    },
+    {
+      "name": "chat.stay: the reply is complete (LIST token and all 40 lines)",
+      "ok": true,
+      "detail": " culinary twist.\n40. Durians are famous for pungent aromas and custard textures."
+    },
+    {
+      "name": "chat.stay: no cancel was recorded",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "studio.assistant.web: conversation ends idle (not failed)",
+      "ok": true,
+      "detail": "idle"
+    },
+    {
+      "name": "studio.assistant.web: the user message exists once",
+      "ok": true,
+      "detail": {
+        "users": 1
+      }
+    },
+    {
+      "name": "studio.assistant.web: the assistant reply exists exactly once",
+      "ok": true,
+      "detail": {
+        "replies": 1,
+        "assistant_tails": [
+          "s grow on thorny shrubs in Africa.\n25. Yuzu citrus adds aromatic zest to Japanese cuisine."
+        ]
+      }
+    },
+    {
+      "name": "studio.assistant.web: the log has one run_end and it is completed",
+      "ok": true,
+      "detail": [
+        {
+          "type": "run_end",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "studio.assistant.cli: the CLI streamed reply text and was then killed (not crashed)",
+      "ok": true,
+      "detail": {
+        "exit": {
+          "code": null,
+          "signal": "SIGKILL",
+          "at": 1794287996870
+        },
+        "stderr": ""
+      }
+    },
+    {
+      "name": "studio.assistant.cli: closed while the turn was still running",
+      "ok": true,
+      "detail": "running"
+    },
+    {
+      "name": "studio.assistant.cli: conversation ends idle (not failed)",
+      "ok": true,
+      "detail": "idle"
+    },
+    {
+      "name": "studio.assistant.cli: the user message exists once",
+      "ok": true,
+      "detail": {
+        "users": 1
+      }
+    },
+    {
+      "name": "studio.assistant.cli: the assistant reply exists exactly once",
+      "ok": true,
+      "detail": {
+        "replies": 1,
+        "assistant_tails": [
+          "flesh under rough pink shells.\n25. Dragon fruit looks like fire with white speckled flesh."
+        ]
+      }
+    },
+    {
+      "name": "studio.assistant.cli: the log has one run_end and it is completed",
+      "ok": true,
+      "detail": [
+        {
+          "type": "run_end",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "studio.worker.web: closed while the turn was still running",
+      "ok": true,
+      "detail": "running"
+    },
+    {
+      "name": "studio.worker.web: conversation ends idle (not failed)",
+      "ok": true,
+      "detail": "idle"
+    },
+    {
+      "name": "studio.worker.web: the user message exists once",
+      "ok": true,
+      "detail": {
+        "users": 1
+      }
+    },
+    {
+      "name": "studio.worker.web: the assistant reply exists exactly once",
+      "ok": true,
+      "detail": {
+        "replies": 1,
+        "assistant_tails": [
+          "uits with velvety skin.\n25. Grapefruits have a distinct blend of sweetness and bitterness."
+        ]
+      }
+    },
+    {
+      "name": "studio.worker.web: the log has one run_end and it is completed",
+      "ok": true,
+      "detail": [
+        {
+          "type": "run_end",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "studio.assistant.ws: closed while the turn was still running",
+      "ok": true,
+      "detail": "running"
+    },
+    {
+      "name": "studio.assistant.cli-wait: conversation ends idle (not failed)",
+      "ok": true,
+      "detail": "idle"
+    },
+    {
+      "name": "studio.assistant.cli-wait: the user message exists once",
+      "ok": true,
+      "detail": {
+        "users": 1
+      }
+    },
+    {
+      "name": "studio.assistant.cli-wait: the assistant reply exists exactly once",
+      "ok": true,
+      "detail": {
+        "replies": 1,
+        "assistant_tails": [
+          "water.\n24. Ximenia fruits grow on thorny shrubs.\n25. Yuzu is a fragrant East Asian citrus."
+        ]
+      }
+    },
+    {
+      "name": "studio.assistant.cli-wait: the log has one run_end and it is completed",
+      "ok": true,
+      "detail": [
+        {
+          "type": "run_end",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "studio.worker.cli-wait: conversation ends idle (not failed)",
+      "ok": true,
+      "detail": "idle"
+    },
+    {
+      "name": "studio.worker.cli-wait: the user message exists once",
+      "ok": true,
+      "detail": {
+        "users": 1
+      }
+    },
+    {
+      "name": "studio.worker.cli-wait: the assistant reply exists exactly once",
+      "ok": true,
+      "detail": {
+        "replies": 1,
+        "assistant_tails": [
+          "and bitter citrus flavors.\n25. Cantaloupes have netted rinds and sweet orange melon flesh."
+        ]
+      }
+    },
+    {
+      "name": "studio.worker.cli-wait: the log has one run_end and it is completed",
+      "ok": true,
+      "detail": [
+        {
+          "type": "run_end",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "studio.assistant.ws: conversation ends idle (not failed)",
+      "ok": true,
+      "detail": "idle"
+    },
+    {
+      "name": "studio.assistant.ws: the user message exists once",
+      "ok": true,
+      "detail": {
+        "users": 1
+      }
+    },
+    {
+      "name": "studio.assistant.ws: the assistant reply exists exactly once",
+      "ok": true,
+      "detail": {
+        "replies": 1,
+        "assistant_tails": [
+          "zed citrus fruit.\n24. Zucchini is technically a fruit.\n25. Plums can be dried into prunes."
+        ]
+      }
+    },
+    {
+      "name": "studio.assistant.ws: the log has one run_end and it is completed",
+      "ok": true,
+      "detail": [
+        {
+          "type": "run_end",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "name": "studio.worker.cli: the CLI streamed reply text and was then killed (not crashed)",
+      "ok": true,
+      "detail": {
+        "exit": {
+          "code": null,
+          "signal": "SIGKILL",
+          "at": 1794288025702
+        },
+        "stderr": ""
+      }
+    },
+    {
+      "name": "studio.worker.cli: closed while the turn was still running",
+      "ok": true,
+      "detail": "running"
+    },
+    {
+      "name": "studio.worker.cli: conversation ends idle (not failed)",
+      "ok": true,
+      "detail": "idle"
+    },
+    {
+      "name": "studio.worker.cli: the user message exists once",
+      "ok": true,
+      "detail": {
+        "users": 1
+      }
+    },
+    {
+      "name": "studio.worker.cli: the assistant reply exists exactly once",
+      "ok": false,
+      "detail": {
+        "replies": 0,
+        "assistant_tails": [
+          "天你分享的所有内容，完全由你掌控，随时可以导出或删除。我不是来做机械问答的，而是想理解你真实的做事方式和取舍。\n\n我想先把话语权交给你：能跟我聊聊你自己，还有你现在最想做成的事吗？"
+        ]
+      }
+    },
+    {
+      "name": "studio.worker.cli: the log has one run_end and it is completed",
+      "ok": true,
+      "detail": [
+        {
+          "type": "run_end",
+          "status": "completed"
+        }
+      ]
+    }
+  ],
+  "measurements": {
+    "studio.assistant.cli-wait.status_at_close": "running",
+    "studio.worker.cli-wait.status_at_close": "running",
+    "chat.ws.status_at_close": "running",
+    "chat.web.status_at_close": "running",
+    "chat.cli.status_at_close": "running",
+    "studio.worker.ws.status_at_close": "running",
+    "studio.assistant.web.status_at_close": "running",
+    "chat.web.run_completed_after_close_ms": 4270,
+    "chat.web.polled_until_terminal_ms": 4357,
+    "chat.ws.run_completed_after_close_ms": 4571,
+    "chat.ws.polled_until_terminal_ms": 4602,
+    "studio.worker.ws.turn_finished_after_close_ms": 4336,
+    "chat.cli.run_completed_after_close_ms": 5403,
+    "chat.cli.polled_until_terminal_ms": 5426,
+    "chat.stay.status_at_close": "completed",
+    "chat.stay.run_completed_after_close_ms": -53,
+    "chat.stay.polled_until_terminal_ms": 7,
+    "studio.assistant.web.turn_finished_after_close_ms": 6958,
+    "studio.assistant.cli.cli_exit": {
+      "code": null,
+      "signal": "SIGKILL",
+      "stdout_bytes": 4,
+      "stderr": ""
+    },
+    "studio.assistant.cli.status_at_close": "running",
+    "studio.assistant.cli.turn_finished_after_close_ms": 6522,
+    "studio.worker.web.status_at_close": "running",
+    "studio.worker.web.turn_finished_after_close_ms": 2002,
+    "studio.assistant.ws.status_at_close": "running",
+    "studio.assistant.cli-wait.turn_finished_after_close_ms": 26061,
+    "studio.worker.cli-wait.turn_finished_after_close_ms": 28483,
+    "studio.assistant.ws.turn_finished_after_close_ms": 6033,
+    "studio.worker.cli.cli_exit": {
+      "code": null,
+      "signal": "SIGKILL",
+      "stdout_bytes": 20,
+      "stderr": ""
+    },
+    "studio.worker.cli.status_at_close": "running",
+    "studio.worker.cli.turn_finished_after_close_ms": 1196
+  },
+  "evidence": {
+    "chat.ws.ids": {
+      "conversation": "conv_2aec8af226624fa48d32908a9a24cee5",
+      "run_id": "run_234c90d1b79c4aee988cbac5080c765c",
+      "journal_types": [
+        "conversation.created",
+        "run.created",
+        "message.created",
+        "run.state",
+        "message.created",
+        "run.state"
+      ]
+    },
+    "chat.web.ids": {
+      "conversation": "conv_bdd1285ef91843faa17a4be461d97a6a",
+      "run_id": "run_0047c4eca30148c7b73e8ab505567baa",
+      "journal_types": [
+        "conversation.created",
+        "run.created",
+        "message.created",
+        "run.state",
+        "message.created",
+        "run.state"
+      ]
+    },
+    "studio.worker.ws.event_types": [
+      "state",
+      "message_end",
+      "message",
+      "delta",
+      "run_end"
+    ],
+    "chat.cli.ids": {
+      "conversation": "conv_fc163d8d22a94b209eee81481cd9134f",
+      "run_id": "run_21cbce93767c42fea48bc9f493ff3662",
+      "journal_types": [
+        "conversation.created",
+        "run.created",
+        "message.created",
+        "run.state",
+        "message.created",
+        "run.state"
+      ]
+    },
+    "chat.stay.ids": {
+      "conversation": "conv_18471338507c4768a05113ce082ce937",
+      "run_id": "run_10a507a549344657878f26558b863aca",
+      "journal_types": [
+        "conversation.created",
+        "run.created",
+        "message.created",
+        "run.state",
+        "message.created",
+        "run.state"
+      ]
+    },
+    "studio.assistant.web.event_types": [
+      "message",
+      "state",
+      "thinking",
+      "delta",
+      "message_end",
+      "run_end"
+    ],
+    "studio.assistant.cli.event_types": [
+      "message",
+      "state",
+      "thinking",
+      "delta",
+      "message_end",
+      "run_end"
+    ],
+    "studio.worker.web.event_types": [
+      "state",
+      "message_end",
+      "message",
+      "thinking",
+      "delta",
+      "tool",
+      "tool_end",
+      "run_end"
+    ],
+    "studio.assistant.cli-wait.event_types": [
+      "message",
+      "state",
+      "thinking",
+      "delta",
+      "message_end",
+      "run_end"
+    ],
+    "studio.worker.cli-wait.event_types": [
+      "state",
+      "message_end",
+      "message",
+      "thinking",
+      "delta",
+      "tool",
+      "tool_end",
+      "run_end"
+    ],
+    "studio.assistant.ws.event_types": [
+      "message",
+      "state",
+      "thinking",
+      "delta",
+      "message_end",
+      "run_end"
+    ],
+    "studio.worker.cli.event_types": [
+      "state",
+      "message_end",
+      "message",
+      "thinking",
+      "delta",
+      "tool",
+      "tool_end",
+      "todos",
+      "run_end"
+    ]
+  },
+  "notes": [
+    "Chat prompt asks for a 40 line list starting with LIST-<token> (Studio: 25 lines); each client is closed at its first visible reply text. Every case has its own conversation (Studio: own account, and own Product for the worker case). Cases run in parallel in one Stack.",
+    "Studio has no WebSocket send: the 'ws' client sends over HTTP (202) and observes over the Studio socket, which is then terminated. Studio worker = `interview` of a Product created through POST /v1/creator/products."
+  ],
+  "defects": []
+}

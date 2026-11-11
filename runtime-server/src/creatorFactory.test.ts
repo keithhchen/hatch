@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { UpstreamError } from "./errors/upstream.js";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -7,8 +8,6 @@ import test from "node:test";
 import { CreatorFactory } from "./creatorLearning/engine.js";
 import { FactoryFileStore } from "./creatorLearning/fileStore.js";
 import {
-  FACTORY_PROVIDER_QUOTA_MESSAGE,
-  FACTORY_PROVIDER_TRANSIENT_MESSAGE
 } from "./creatorLearning/factoryLlm.js";
 import {
   CORPUS_ASSET_BEGIN_MARKER,
@@ -937,14 +936,14 @@ test("a failed LLM stage is resumable from its checkpoint instead of restarting 
   let evidenceAttempts = 0;
   const scripted = new ScriptedFactoryModel("heldout_failure");
   const runner = async (call: FactoryPromptCall): Promise<string> => {
-    if (call.purpose === "evidence.extract" && evidenceAttempts++ === 0) throw new Error("temporary evidence provider error");
+    if (call.purpose === "evidence.extract" && evidenceAttempts++ === 0) throw UpstreamError.of(new Error("temporary evidence provider error"));
     return scripted.run(call);
   };
   const factory = new CreatorFactory(root, runner, scripted.execute, { model: { provider: "test", model: "retry-script" } });
   const failed = await factory.start(sampleInput("run-retry"));
   assert.equal(failed.stage, "needs_attention");
   assert.equal(failed.retryStage, "extracting_evidence");
-  assert.equal(failed.lastError, FACTORY_PROVIDER_TRANSIENT_MESSAGE);
+  assert.match(failed.lastError!, /^An upstream service Hatch uses failed\. This is not a problem with your account\. Reference: err_[0-9a-f]{12}\.$/);
 
   const retried = await factory.retry(failed.runId);
   assert.equal(retried.stage, "awaiting_creator_answers");
@@ -972,7 +971,7 @@ test("quota errors persist only fixed guidance and content-free telemetry", asyn
         toolResultsObserved: 0,
         toolErrorsObserved: 0
       });
-      throw new Error(rawProviderJson);
+      throw UpstreamError.of(new Error(rawProviderJson));
     },
     async () => "unused"
   );
@@ -980,7 +979,7 @@ test("quota errors persist only fixed guidance and content-free telemetry", asyn
   const failed = await factory.start(sampleInput(runId));
   assert.equal(failed.stage, "needs_attention");
   assert.equal(failed.retryStage, "extracting_evidence");
-  assert.equal(failed.lastError, FACTORY_PROVIDER_QUOTA_MESSAGE);
+  assert.match(failed.lastError!, /^An upstream service Hatch uses failed\. This is not a problem with your account\. Reference: err_[0-9a-f]{12}\.$/);
 
   const store = new FactoryFileStore(root, runId);
   const durableDiagnostics = [
@@ -990,7 +989,7 @@ test("quota errors persist only fixed guidance and content-free telemetry", asyn
   for (const secret of [organizationId, keyId, providerType, rawProviderJson]) {
     assert.equal(durableDiagnostics.includes(secret), false);
   }
-  assert.match(durableDiagnostics, new RegExp(FACTORY_PROVIDER_QUOTA_MESSAGE));
+  assert.match(durableDiagnostics, /An upstream service Hatch uses failed/);
 
   const timing = await store.listExecutionTimings();
   assert.equal(timing.length, 1);

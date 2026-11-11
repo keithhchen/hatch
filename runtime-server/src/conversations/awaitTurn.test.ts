@@ -41,8 +41,8 @@ test("a reply to an earlier message is not the reply to this one", async () => {
 test("a turn that ends without a reply returns its status at once; failure is reported", async () => {
   const quiet = await awaitTurn(scripted([{ status: idle, messages: [line("u", "user")] }]), { sentId: "u", timeoutMs: 60_000, pollMs: 100, ...clock() });
   assert.deepEqual(quiet, { status: idle });
-  const failed = await awaitTurn(scripted([{ status: { state: "failed", error: "model down" }, messages: [line("u", "user")] }]), { sentId: "u", timeoutMs: 60_000, ...clock() });
-  assert.equal(failed.status.error, "model down");
+  const failed = await awaitTurn(scripted([{ status: { state: "failed", error: { code: "upstream_error", message: "model down" } }, messages: [line("u", "user")] }]), { sentId: "u", timeoutMs: 60_000, ...clock() });
+  assert.equal(failed.status.error?.message, "model down");
 });
 
 test("several assistant lines in one turn become one reply", async () => {

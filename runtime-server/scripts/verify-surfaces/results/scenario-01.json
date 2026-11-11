@@ -1,0 +1,1383 @@
+{
+  "id": 1,
+  "title": "Crash: kill -9 Runtime and Registry mid-Run, rolling restart, local-tool wait",
+  "status": "PASS",
+  "durationMs": 342601,
+  "checks": [
+    {
+      "name": "a1: every Run reached the slow web_search before the crash",
+      "ok": true,
+      "detail": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "a1: lost accepted messages = 0 (every accepted webhook has an inbox row and a delivered reply)",
+      "ok": true,
+      "detail": {
+        "accepted": 3,
+        "replies": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "a1: every reply within 90 s of the kill (recovery is prompt)",
+      "ok": true,
+      "detail": {
+        "replyMs": [
+          38890,
+          36885,
+          12786
+        ]
+      }
+    },
+    {
+      "name": "a1: exactly one final reply per Run (duplicate outbound = 0)",
+      "ok": true,
+      "detail": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "a1: one Run per accepted event id",
+      "ok": true,
+      "detail": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "a1: every Run ended completed (reply carries the expected token)",
+      "ok": true,
+      "detail": [
+        [
+          "completed"
+        ],
+        [
+          "completed"
+        ],
+        [
+          "completed"
+        ]
+      ]
+    },
+    {
+      "name": "a2: every Run reached the slow web_search before the crash",
+      "ok": true,
+      "detail": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "a2: lost accepted messages = 0 (every accepted webhook has an inbox row and a delivered reply)",
+      "ok": true,
+      "detail": {
+        "accepted": 3,
+        "replies": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "a2: every reply within 90 s of the kill (recovery is prompt)",
+      "ok": true,
+      "detail": {
+        "replyMs": [
+          43459,
+          36416,
+          40449
+        ]
+      }
+    },
+    {
+      "name": "a2: exactly one final reply per Run (duplicate outbound = 0)",
+      "ok": true,
+      "detail": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "a2: one Run per accepted event id",
+      "ok": true,
+      "detail": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "a2: every Run ended completed (reply carries the expected token)",
+      "ok": true,
+      "detail": [
+        [
+          "completed"
+        ],
+        [
+          "completed"
+        ],
+        [
+          "completed"
+        ]
+      ]
+    },
+    {
+      "name": "b1: every Run reached the slow web_search before the crash",
+      "ok": true,
+      "detail": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "b1: lost accepted messages = 0 (every accepted webhook has an inbox row and a delivered reply)",
+      "ok": true,
+      "detail": {
+        "accepted": 3,
+        "replies": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "b1: every reply within 90 s of the kill (recovery is prompt)",
+      "ok": true,
+      "detail": {
+        "replyMs": [
+          18236,
+          18237,
+          18242
+        ]
+      }
+    },
+    {
+      "name": "b1: exactly one final reply per Run (duplicate outbound = 0)",
+      "ok": true,
+      "detail": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "b1: one Run per accepted event id",
+      "ok": true,
+      "detail": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "b1: every Run ended completed (reply carries the expected token)",
+      "ok": true,
+      "detail": [
+        [
+          "completed"
+        ],
+        [
+          "completed"
+        ],
+        [
+          "completed"
+        ]
+      ]
+    },
+    {
+      "name": "b2: lost accepted messages = 0 (every accepted webhook has an inbox row and a delivered reply)",
+      "ok": true,
+      "detail": {
+        "accepted": 3,
+        "replies": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "b2: every reply within 90 s of the kill (recovery is prompt)",
+      "ok": true,
+      "detail": {
+        "replyMs": [
+          40795,
+          15715,
+          13709
+        ]
+      }
+    },
+    {
+      "name": "b2: exactly one final reply per Run (duplicate outbound = 0)",
+      "ok": true,
+      "detail": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "b2: one Run per accepted event id",
+      "ok": true,
+      "detail": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "b2: every Run ended completed (reply carries the expected token)",
+      "ok": true,
+      "detail": [
+        [
+          "completed"
+        ],
+        [
+          "completed"
+        ],
+        [
+          "completed"
+        ]
+      ]
+    },
+    {
+      "name": "c: every Run reached the slow web_search before the crash",
+      "ok": true,
+      "detail": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "c: lost accepted messages = 0 (every accepted webhook has an inbox row and a delivered reply)",
+      "ok": true,
+      "detail": {
+        "accepted": 3,
+        "replies": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "c: every reply within 90 s of the kill (recovery is prompt)",
+      "ok": true,
+      "detail": {
+        "replyMs": [
+          45560,
+          38524,
+          38529
+        ]
+      }
+    },
+    {
+      "name": "c: exactly one final reply per Run (duplicate outbound = 0)",
+      "ok": true,
+      "detail": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "c: one Run per accepted event id",
+      "ok": true,
+      "detail": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "c: every Run ended completed (reply carries the expected token)",
+      "ok": true,
+      "detail": [
+        [
+          "completed"
+        ],
+        [
+          "completed"
+        ],
+        [
+          "completed"
+        ]
+      ]
+    },
+    {
+      "name": "d: before the crash both Runs are waiting_for_tool with the call recorded",
+      "ok": true,
+      "detail": [
+        {
+          "status": "waiting_for_tool",
+          "calls": 1
+        },
+        {
+          "status": "waiting_for_tool",
+          "calls": 1
+        }
+      ]
+    },
+    {
+      "name": "d: the old WebSocket client lost its connection",
+      "ok": true,
+      "detail": [
+        {
+          "code": 1006,
+          "reason": "",
+          "at": 1794287907466
+        },
+        {
+          "code": 1006,
+          "reason": "",
+          "at": 1794287907466
+        }
+      ]
+    },
+    {
+      "name": "d: after the crash the Run is still waiting_for_tool and the new instance lists the pending call (snapshot)",
+      "ok": true,
+      "detail": [
+        {
+          "status": "waiting_for_tool",
+          "pending": 1
+        },
+        {
+          "status": "waiting_for_tool",
+          "pending": 1
+        }
+      ]
+    },
+    {
+      "name": "d: a client without local tools (web) is refused",
+      "ok": true,
+      "detail": {
+        "status": 403,
+        "body": "{\"error\":{\"code\":\"tool_unsupported_on_client\",\"message\":\"file_list is not available on web. Available on: desktop, cli.\"}}"
+      }
+    },
+    {
+      "name": "d2: a different client on a different instance answers the call once (accepted)",
+      "ok": true,
+      "detail": {
+        "status": 200,
+        "body": "{\"accepted\":true}"
+      }
+    },
+    {
+      "name": "d2: a second answer is refused or ignored",
+      "ok": true,
+      "detail": {
+        "status": 404,
+        "body": "{\"error\":{\"code\":\"unknown_tool_call\",\"message\":\"No pending tool request for call_3055352729026630625\"}}"
+      }
+    },
+    {
+      "name": "d1: another instance took the Run over and it stayed waiting_for_tool until answered",
+      "ok": true,
+      "detail": {
+        "status": "waiting_for_tool",
+        "executor_id": "executor_095862d279ce43edac877e6f4d654cf0",
+        "interrupted_reason": null
+      }
+    },
+    {
+      "name": "d1: the call is still pending after takeover",
+      "ok": true,
+      "detail": 1
+    },
+    {
+      "name": "d1: the call is answered once after takeover (accepted)",
+      "ok": true,
+      "detail": {
+        "status": 200,
+        "body": "{\"accepted\":true}"
+      }
+    },
+    {
+      "name": "d1: a second answer is refused or ignored",
+      "ok": true,
+      "detail": {
+        "status": 404,
+        "body": "{\"error\":{\"code\":\"unknown_tool_call\",\"message\":\"No pending tool request for call_14447634554072549067\"}}"
+      }
+    },
+    {
+      "name": "d1: Run completed with one final reply carrying the answer",
+      "ok": true,
+      "detail": {
+        "status": "completed",
+        "text": "DONE-d1 2"
+      }
+    },
+    {
+      "name": "d1: exactly one local-tool call exists for the Run and it is answered once",
+      "ok": true,
+      "detail": [
+        {
+          "tool_call_id": "call_14447634554072549067",
+          "name": "file_list",
+          "expires_at": "2026-11-10T05:23:24.016Z",
+          "answered_at": "2026-11-10T05:18:53.068Z",
+          "answered": true
+        }
+      ]
+    },
+    {
+      "name": "d1: assistant replies for the Run = 1",
+      "ok": true,
+      "detail": 1243
+    },
+    {
+      "name": "d2: Run completed with one final reply carrying the answer",
+      "ok": true,
+      "detail": {
+        "status": "completed",
+        "text": "DONE-d2 2"
+      }
+    },
+    {
+      "name": "d2: exactly one local-tool call exists for the Run and it is answered once",
+      "ok": true,
+      "detail": [
+        {
+          "tool_call_id": "call_3055352729026630625",
+          "name": "file_list",
+          "expires_at": "2026-11-10T05:23:26.837Z",
+          "answered_at": "2026-11-10T05:18:27.943Z",
+          "answered": true
+        }
+      ]
+    },
+    {
+      "name": "d2: assistant replies for the Run = 1",
+      "ok": true,
+      "detail": 1241
+    },
+    {
+      "name": "d3: the unanswered call timed out (the model was told) and the Run ended with a final reply",
+      "ok": true,
+      "detail": {
+        "status": "completed",
+        "timedOut": true,
+        "text": "DONE-d3 0"
+      }
+    },
+    {
+      "name": "d3: no pending call after expiry and a late answer is refused",
+      "ok": true,
+      "detail": {
+        "pendingLate": 0,
+        "late": 404
+      }
+    }
+  ],
+  "measurements": {
+    "a1_accepted_webhooks": 3,
+    "a1_inbox_rows": [
+      1,
+      1,
+      1
+    ],
+    "a1_inbox_states": [
+      "done",
+      "done",
+      "done"
+    ],
+    "a1_runs_per_sender": [
+      1,
+      1,
+      1
+    ],
+    "a1_run_status": [
+      "completed",
+      "completed",
+      "completed"
+    ],
+    "a1_executor_changed": [
+      true,
+      true,
+      false
+    ],
+    "a1_sends_per_sender": [
+      1,
+      1,
+      1
+    ],
+    "a1_sends_with_expected_token": [
+      1,
+      1,
+      1
+    ],
+    "a1_outbox_rows": [
+      "sent/reply/parts1/attempts0",
+      "sent/reply/parts1/attempts0",
+      "sent/reply/parts1/attempts0"
+    ],
+    "a1_web_search_calls_per_sender": [
+      2,
+      2,
+      1
+    ],
+    "a1_events_with_tool_not_completed_per_run": [
+      1,
+      1,
+      0
+    ],
+    "a1_ms_from_kill_to_first_reply": [
+      38890,
+      36885,
+      12786
+    ],
+    "a1_reply_texts": [
+      [
+        "DONE-a19110"
+      ],
+      [
+        "DONE-a19111"
+      ],
+      [
+        "DONE-a19112"
+      ]
+    ],
+    "a1_run_starts_per_instance": {
+      "53880": 2,
+      "53892": 1
+    },
+    "a2_accepted_webhooks": 3,
+    "a2_inbox_rows": [
+      1,
+      1,
+      1
+    ],
+    "a2_inbox_states": [
+      "done",
+      "done",
+      "done"
+    ],
+    "a2_runs_per_sender": [
+      1,
+      1,
+      1
+    ],
+    "a2_run_status": [
+      "completed",
+      "completed",
+      "completed"
+    ],
+    "a2_executor_changed": [
+      true,
+      true,
+      true
+    ],
+    "a2_sends_per_sender": [
+      1,
+      1,
+      1
+    ],
+    "a2_sends_with_expected_token": [
+      1,
+      1,
+      1
+    ],
+    "a2_outbox_rows": [
+      "sent/reply/parts1/attempts0",
+      "sent/reply/parts1/attempts0",
+      "sent/reply/parts1/attempts0"
+    ],
+    "a2_web_search_calls_per_sender": [
+      2,
+      2,
+      2
+    ],
+    "a2_events_with_tool_not_completed_per_run": [
+      1,
+      1,
+      1
+    ],
+    "a2_ms_from_kill_to_first_reply": [
+      43459,
+      36416,
+      40449
+    ],
+    "a2_reply_texts": [
+      [
+        "DONE-a29113"
+      ],
+      [
+        "DONE-a29114"
+      ],
+      [
+        "DONE-a29115"
+      ]
+    ],
+    "a2_rolling_restart_ms": 1042,
+    "b1_accepted_webhooks": 3,
+    "b1_inbox_rows": [
+      1,
+      1,
+      1
+    ],
+    "b1_inbox_states": [
+      "done",
+      "done",
+      "done"
+    ],
+    "b1_runs_per_sender": [
+      1,
+      1,
+      1
+    ],
+    "b1_run_status": [
+      "completed",
+      "completed",
+      "completed"
+    ],
+    "b1_executor_changed": [
+      false,
+      false,
+      false
+    ],
+    "b1_sends_per_sender": [
+      1,
+      1,
+      1
+    ],
+    "b1_sends_with_expected_token": [
+      1,
+      1,
+      1
+    ],
+    "b1_outbox_rows": [
+      "sent/reply/parts1/attempts0",
+      "sent/reply/parts1/attempts0",
+      "sent/reply/parts1/attempts0"
+    ],
+    "b1_web_search_calls_per_sender": [
+      1,
+      1,
+      1
+    ],
+    "b1_events_with_tool_not_completed_per_run": [
+      0,
+      0,
+      0
+    ],
+    "b1_ms_from_kill_to_first_reply": [
+      18236,
+      18237,
+      18242
+    ],
+    "b1_reply_texts": [
+      [
+        "DONE-b19116"
+      ],
+      [
+        "DONE-b19117"
+      ],
+      [
+        "DONE-b19118"
+      ]
+    ],
+    "b1_sends_while_registry_down": [
+      0,
+      0,
+      0
+    ],
+    "b2_accepted_webhooks": 3,
+    "b2_inbox_rows": [
+      1,
+      1,
+      1
+    ],
+    "b2_inbox_states": [
+      "done",
+      "done",
+      "done"
+    ],
+    "b2_runs_per_sender": [
+      1,
+      1,
+      1
+    ],
+    "b2_run_status": [
+      "completed",
+      "completed",
+      "completed"
+    ],
+    "b2_executor_changed": [
+      true,
+      true,
+      true
+    ],
+    "b2_sends_per_sender": [
+      1,
+      1,
+      1
+    ],
+    "b2_sends_with_expected_token": [
+      1,
+      1,
+      1
+    ],
+    "b2_outbox_rows": [
+      "sent/reply/parts1/attempts0",
+      "sent/reply/parts1/attempts0",
+      "sent/reply/parts1/attempts0"
+    ],
+    "b2_web_search_calls_per_sender": [
+      1,
+      1,
+      1
+    ],
+    "b2_events_with_tool_not_completed_per_run": [
+      0,
+      0,
+      0
+    ],
+    "b2_ms_from_kill_to_first_reply": [
+      40795,
+      15715,
+      13709
+    ],
+    "b2_reply_texts": [
+      [
+        "DONE-b29119"
+      ],
+      [
+        "DONE-b29120"
+      ],
+      [
+        "DONE-b29121"
+      ]
+    ],
+    "b2_post_while_registry_down": {
+      "updateId": 987654,
+      "error": "ECONNREFUSED"
+    },
+    "b2_redelivery_statuses": [
+      200,
+      200,
+      200
+    ],
+    "c_accepted_webhooks": 3,
+    "c_inbox_rows": [
+      1,
+      1,
+      1
+    ],
+    "c_inbox_states": [
+      "done",
+      "done",
+      "done"
+    ],
+    "c_runs_per_sender": [
+      1,
+      1,
+      1
+    ],
+    "c_run_status": [
+      "completed",
+      "completed",
+      "completed"
+    ],
+    "c_executor_changed": [
+      true,
+      true,
+      true
+    ],
+    "c_sends_per_sender": [
+      1,
+      1,
+      1
+    ],
+    "c_sends_with_expected_token": [
+      1,
+      1,
+      1
+    ],
+    "c_outbox_rows": [
+      "sent/reply/parts1/attempts0",
+      "sent/reply/parts1/attempts0",
+      "sent/reply/parts1/attempts0"
+    ],
+    "c_web_search_calls_per_sender": [
+      2,
+      2,
+      2
+    ],
+    "c_events_with_tool_not_completed_per_run": [
+      1,
+      1,
+      1
+    ],
+    "c_ms_from_kill_to_first_reply": [
+      45560,
+      38524,
+      38529
+    ],
+    "c_reply_texts": [
+      [
+        "DONE-c9122"
+      ],
+      [
+        "DONE-c9123"
+      ],
+      [
+        "DONE-c9124"
+      ]
+    ],
+    "c_restart_after_ms": 6352,
+    "d_roll_ms": 1043,
+    "d_after_crash_status": [
+      "waiting_for_tool",
+      "waiting_for_tool"
+    ],
+    "d_after_crash_pending_tool_calls": [
+      [
+        "call_14447634554072549067"
+      ],
+      [
+        "call_3055352729026630625"
+      ]
+    ],
+    "d_answer_from_web_client_status": 403,
+    "d2_answer_status_before_takeover": 200,
+    "d2_answer_upstream": "54723",
+    "d2_second_answer_status": 404,
+    "d1_ms_until_another_instance_took_the_run": 26197,
+    "d1_answer_status_after_takeover": 200,
+    "d1_answer_upstream": "54733",
+    "d1_second_answer_status": 404,
+    "d1_final_status": "completed",
+    "d1_final_text": "DONE-d1 2",
+    "d1_recorded_calls": 1,
+    "d2_final_status": "completed",
+    "d2_final_text": "DONE-d2 2",
+    "d2_recorded_calls": 1,
+    "d3_ms_until_recorded_expiry_at_kill": 29297,
+    "d3_pending_calls_before_expiry": 1,
+    "d3_final_status": "completed",
+    "d3_final_text": "DONE-d3 0",
+    "d3_ms_from_recorded_expiry_to_run_end": 4895,
+    "d3_late_answer_status": 404
+  },
+  "evidence": {
+    "a1": {
+      "killAt": 1794287648949,
+      "inbox": [
+        [
+          {
+            "event_id": "160967",
+            "state": "done",
+            "run_id": "run_bd92fedd76ef48e5a09b14097cea9753",
+            "attempts": 1,
+            "received_ms": "1794287642870",
+            "replied_ms": "1794287687837"
+          }
+        ],
+        [
+          {
+            "event_id": "160968",
+            "state": "done",
+            "run_id": "run_412c0b5f70e24165996aee36f3a92af8",
+            "attempts": 1,
+            "received_ms": "1794287642872",
+            "replied_ms": "1794287685830"
+          }
+        ],
+        [
+          {
+            "event_id": "160969",
+            "state": "done",
+            "run_id": "run_8dcfb389d12548348c89851ed144c4bf",
+            "attempts": 1,
+            "received_ms": "1794287642878",
+            "replied_ms": "1794287661733"
+          }
+        ]
+      ],
+      "runs": [
+        [
+          {
+            "id": "run_bd92fedd76ef48e5a09b14097cea9753",
+            "status": "completed",
+            "reason": null,
+            "created_ms": "1794287642930",
+            "completed_ms": "1794287687469"
+          }
+        ],
+        [
+          {
+            "id": "run_412c0b5f70e24165996aee36f3a92af8",
+            "status": "completed",
+            "reason": null,
+            "created_ms": "1794287642965",
+            "completed_ms": "1794287685732"
+          }
+        ],
+        [
+          {
+            "id": "run_8dcfb389d12548348c89851ed144c4bf",
+            "status": "completed",
+            "reason": null,
+            "created_ms": "1794287642986",
+            "completed_ms": "1794287661062"
+          }
+        ]
+      ],
+      "sendAt": [
+        [
+          1794287687839
+        ],
+        [
+          1794287685834
+        ],
+        [
+          1794287661735
+        ]
+      ]
+    },
+    "a2": {
+      "killAt": 1794287703720,
+      "inbox": [
+        [
+          {
+            "event_id": "160970",
+            "state": "done",
+            "run_id": "run_5b99449a5cf64b98b313322f774a42ad",
+            "attempts": 1,
+            "received_ms": "1794287696661",
+            "replied_ms": "1794287746174"
+          }
+        ],
+        [
+          {
+            "event_id": "160971",
+            "state": "done",
+            "run_id": "run_22989e1503dc4d5f9fbd3b52d37c08a1",
+            "attempts": 1,
+            "received_ms": "1794287696663",
+            "replied_ms": "1794287740143"
+          }
+        ],
+        [
+          {
+            "event_id": "160972",
+            "state": "done",
+            "run_id": "run_225f44b9687b449e931c1c862e589154",
+            "attempts": 1,
+            "received_ms": "1794287696664",
+            "replied_ms": "1794287744166"
+          }
+        ]
+      ],
+      "runs": [
+        [
+          {
+            "id": "run_5b99449a5cf64b98b313322f774a42ad",
+            "status": "completed",
+            "reason": null,
+            "created_ms": "1794287696676",
+            "completed_ms": "1794287745478"
+          }
+        ],
+        [
+          {
+            "id": "run_22989e1503dc4d5f9fbd3b52d37c08a1",
+            "status": "completed",
+            "reason": null,
+            "created_ms": "1794287696728",
+            "completed_ms": "1794287739317"
+          }
+        ],
+        [
+          {
+            "id": "run_225f44b9687b449e931c1c862e589154",
+            "status": "completed",
+            "reason": null,
+            "created_ms": "1794287696696",
+            "completed_ms": "1794287742330"
+          }
+        ]
+      ],
+      "sendAt": [
+        [
+          1794287747179
+        ],
+        [
+          1794287740136
+        ],
+        [
+          1794287744169
+        ]
+      ]
+    },
+    "b1": {
+      "killAt": 1794287763714,
+      "inbox": [
+        [
+          {
+            "event_id": "160973",
+            "state": "done",
+            "run_id": "run_4aaafb73b7b4482785f013846e0273bf",
+            "attempts": 1,
+            "received_ms": "1794287755389",
+            "replied_ms": "1794287781936"
+          }
+        ],
+        [
+          {
+            "event_id": "160974",
+            "state": "done",
+            "run_id": "run_40fe3f40e1144942a38752fa5a891017",
+            "attempts": 1,
+            "received_ms": "1794287755391",
+            "replied_ms": "1794287781942"
+          }
+        ],
+        [
+          {
+            "event_id": "160975",
+            "state": "done",
+            "run_id": "run_932b9b2a56ff4ac0b9e00e43147695a8",
+            "attempts": 1,
+            "received_ms": "1794287755393",
+            "replied_ms": "1794287781953"
+          }
+        ]
+      ],
+      "runs": [
+        [
+          {
+            "id": "run_4aaafb73b7b4482785f013846e0273bf",
+            "status": "completed",
+            "reason": null,
+            "created_ms": "1794287755408",
+            "completed_ms": "1794287775000"
+          }
+        ],
+        [
+          {
+            "id": "run_40fe3f40e1144942a38752fa5a891017",
+            "status": "completed",
+            "reason": null,
+            "created_ms": "1794287755447",
+            "completed_ms": "1794287777721"
+          }
+        ],
+        [
+          {
+            "id": "run_932b9b2a56ff4ac0b9e00e43147695a8",
+            "status": "completed",
+            "reason": null,
+            "created_ms": "1794287755436",
+            "completed_ms": "1794287775993"
+          }
+        ]
+      ],
+      "sendAt": [
+        [
+          1794287781950
+        ],
+        [
+          1794287781951
+        ],
+        [
+          1794287781956
+        ]
+      ]
+    },
+    "b2": {
+      "killAt": 1794287790222,
+      "inbox": [
+        [
+          {
+            "event_id": "160976",
+            "state": "done",
+            "run_id": "run_addcf021dad048b5a5144e5a893a5f15",
+            "attempts": 2,
+            "received_ms": "1794287790216",
+            "replied_ms": "1794287830009"
+          }
+        ],
+        [
+          {
+            "event_id": "160977",
+            "state": "done",
+            "run_id": "run_0137a8ba213546dd861e51aafa5fd474",
+            "attempts": 1,
+            "received_ms": "1794287790218",
+            "replied_ms": "1794287805935"
+          }
+        ],
+        [
+          {
+            "event_id": "160978",
+            "state": "done",
+            "run_id": "run_0797963d4e934cdeb3917a09a2345799",
+            "attempts": 1,
+            "received_ms": "1794287790220",
+            "replied_ms": "1794287803929"
+          }
+        ]
+      ],
+      "runs": [
+        [
+          {
+            "id": "run_addcf021dad048b5a5144e5a893a5f15",
+            "status": "completed",
+            "reason": null,
+            "created_ms": "1794287821006",
+            "completed_ms": "1794287828837"
+          }
+        ],
+        [
+          {
+            "id": "run_0137a8ba213546dd861e51aafa5fd474",
+            "status": "completed",
+            "reason": null,
+            "created_ms": "1794287793896",
+            "completed_ms": "1794287804451"
+          }
+        ],
+        [
+          {
+            "id": "run_0797963d4e934cdeb3917a09a2345799",
+            "status": "completed",
+            "reason": null,
+            "created_ms": "1794287793899",
+            "completed_ms": "1794287802680"
+          }
+        ]
+      ],
+      "sendAt": [
+        [
+          1794287831017
+        ],
+        [
+          1794287805937
+        ],
+        [
+          1794287803931
+        ]
+      ]
+    },
+    "c": {
+      "killAt": 1794287845569,
+      "inbox": [
+        [
+          {
+            "event_id": "160979",
+            "state": "done",
+            "run_id": "run_b14fa7f774af453f9d61f381d849acbe",
+            "attempts": 1,
+            "received_ms": "1794287839261",
+            "replied_ms": "1794287890124"
+          }
+        ],
+        [
+          {
+            "event_id": "160980",
+            "state": "done",
+            "run_id": "run_0a9106c30760462e91a8b10e579d2182",
+            "attempts": 1,
+            "received_ms": "1794287839262",
+            "replied_ms": "1794287884089"
+          }
+        ],
+        [
+          {
+            "event_id": "160981",
+            "state": "done",
+            "run_id": "run_942262db59974979a0525f745863f3e1",
+            "attempts": 1,
+            "received_ms": "1794287839263",
+            "replied_ms": "1794287884096"
+          }
+        ]
+      ],
+      "runs": [
+        [
+          {
+            "id": "run_b14fa7f774af453f9d61f381d849acbe",
+            "status": "completed",
+            "reason": null,
+            "created_ms": "1794287839275",
+            "completed_ms": "1794287888932"
+          }
+        ],
+        [
+          {
+            "id": "run_0a9106c30760462e91a8b10e579d2182",
+            "status": "completed",
+            "reason": null,
+            "created_ms": "1794287839293",
+            "completed_ms": "1794287883358"
+          }
+        ],
+        [
+          {
+            "id": "run_942262db59974979a0525f745863f3e1",
+            "status": "completed",
+            "reason": null,
+            "created_ms": "1794287839299",
+            "completed_ms": "1794287883698"
+          }
+        ]
+      ],
+      "sendAt": [
+        [
+          1794287891129
+        ],
+        [
+          1794287884093
+        ],
+        [
+          1794287884098
+        ]
+      ]
+    },
+    "d1_history": [
+      {
+        "role": "user",
+        "content": "Call the file_list tool for path \".\" exactly once, then reply with exactly: DONE-d1 followed by a space and the number of entries it returned.",
+        "tools": []
+      },
+      {
+        "role": "assistant",
+        "content": "",
+        "tools": [
+          {
+            "name": "file_list",
+            "status": "requested",
+            "result": "null"
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": "DONE-d1 2",
+        "tools": [
+          {
+            "name": "file_list",
+            "status": "requested",
+            "result": "null"
+          }
+        ]
+      }
+    ],
+    "d2_history": [
+      {
+        "role": "user",
+        "content": "Call the file_list tool for path \".\" exactly once, then reply with exactly: DONE-d2 followed by a space and the number of entries it returned.",
+        "tools": []
+      },
+      {
+        "role": "assistant",
+        "content": "",
+        "tools": [
+          {
+            "name": "file_list",
+            "status": "requested",
+            "result": "null"
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": "DONE-d2 2",
+        "tools": [
+          {
+            "name": "file_list",
+            "status": "requested",
+            "result": "null"
+          }
+        ]
+      }
+    ],
+    "d3_history": [
+      {
+        "role": "user",
+        "content": "Call the file_list tool for path \".\" exactly once, then reply with exactly: DONE-d3 followed by a space and the number of entries it returned.",
+        "tools": []
+      },
+      {
+        "role": "assistant",
+        "content": "",
+        "tools": [
+          {
+            "name": "file_list",
+            "status": "requested",
+            "result": "null"
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": "DONE-d3 0",
+        "tools": [
+          {
+            "name": "file_list",
+            "status": "requested",
+            "result": "null"
+          }
+        ]
+      }
+    ],
+    "d3_journal": [
+      {
+        "type": "run.created",
+        "payload": "{\"id\":\"run_491a000c21654d0997b3557d7d09584c\",\"status\":\"queued\",\"input_digest\":\"sha256:a2b9095be321466a23dafa79d6633076777d58909c0f6ce9cd2a94f6bc4f56ee\",\"corpus_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "type": "message.created",
+        "payload": "{\"role\":\"user\",\"client_message_id\":\"d68315fc-f94f-4123-bf91-e3f49240f9c9\"}"
+      },
+      {
+        "type": "run.state",
+        "payload": "{\"id\":\"run_491a000c21654d0997b3557d7d09584c\",\"status\":\"running\",\"input_digest\":\"sha256:a2b9095be321466a23dafa79d6633076777d58909c0f6ce9cd2a94f6bc4f56ee\",\"corpus_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "type": "run.state",
+        "payload": "{\"id\":\"run_491a000c21654d0997b3557d7d09584c\",\"status\":\"waiting_for_tool\",\"input_digest\":\"sha256:a2b9095be321466a23dafa79d6633076777d58909c0f6ce9cd2a94f6bc4f56ee\",\"corpus_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "type": "run.state",
+        "payload": "{\"id\":\"run_491a000c21654d0997b3557d7d09584c\",\"status\":\"running\",\"input_digest\":\"sha256:a2b9095be321466a23dafa79d6633076777d58909c0f6ce9cd2a94f6bc4f56ee\",\"corpus_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "type": "message.created",
+        "payload": "{\"role\":\"assistant\"}"
+      },
+      {
+        "type": "run.state",
+        "payload": "{\"id\":\"run_491a000c21654d0997b3557d7d09584c\",\"status\":\"completed\",\"input_digest\":\"sha256:a2b9095be321466a23dafa79d6633076777d58909c0f6ce9cd2a94f6bc4f56ee\",\"corpus_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "d3_call_outcome": null,
+    "d3_transcript_tool_messages": [
+      "{\"type\": \"conversation.model_message\", \"run_id\": \"run_491a000c21654d0997b3557d7d09584c\", \"message\": {\"role\": \"tool\", \"content\": null, \"tool_name\": \"file_list\", \"tool_call_id\": \"call_15286928177903991219\", \"tool_content\": [{\"text\": \"{\\\"status\\\":\\\"error\\\",\\\"error\\\":{\\\"code\\\":\\\"tool_not_completed\\\",\\\"message\\\":\\\"Timed out waiting for client tool result: file_list\\\"}}\", \"type\": \"text\"}], \"tool_is_erro"
+    ]
+  },
+  "notes": [
+    "Fakes: the messaging platform and the web-search provider are the tool's local fakes; the org Connection row is inserted by Stack.connection (no product API yet). Model is real."
+  ],
+  "defects": []
+}

@@ -1,23 +1,35 @@
-import { randomUUID } from "node:crypto";
 import type { WorkbenchRuntime } from "../factoryAgents/runtime.js";
 import { AgentDependenciesNotReadyError, type AgentEntry } from "../factoryAgents/definitions.js";
 import { userMessage } from "../factoryAgents/imageRefs.js";
-import type { Role, Session, WorkbenchStore } from "../factoryAgents/store.js";
-import { ConversationError, page, publicEvent, type Conversation, type ConversationEvent, type ConversationStatus, type Sent, type Unsubscribe } from "./conversation.js";
+import type { MessageOrigin, Role, Session, WorkbenchStore } from "../factoryAgents/store.js";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { attachmentLines } from "./assets.js";
+import { failureOf } from "../factoryAgents/runFailure.js";
+import { ConversationError, page, type Conversation, type ConversationStatus, type SendInput, type Sent } from "./conversation.js";
 import { projectMessages } from "./project.js";
 import { blocked, blockedBy, blockedMessage, WORKERS, type Worker, type WorkerRegistry } from "./workers.js";
 
 /** The part of a Product workspace a worker conversation needs. */
 export interface WorkerWorkspace {
-  store: Pick<WorkbenchStore, "list" | "create">;
-  runtime: Pick<WorkbenchRuntime, "start" | "steer" | "stop" | "isRunning" | "events">;
+  store: Pick<WorkbenchStore, "list" | "create"> & { backend: Pick<WorkbenchStore["backend"], "writeManual"> };
+  runtime: Pick<WorkbenchRuntime, "send" | "stop" | "events" | "runId" | "queued">;
   entries(): Promise<AgentEntry[]>;
   /** Throws AgentDependenciesNotReadyError when the worker's dependencies have no output yet. */
   assertRoleAvailable(role: Role): Promise<void>;
 }
 
-const statusOf = (session?: Session): ConversationStatus =>
-  session?.status === "running" ? { state: "running" } : session?.status === "failed" ? { state: "failed", ...(session.error ? { error: session.error } : {}) } : { state: "idle" };
+const originOf = (message: AgentMessage) => (message as { origin?: MessageOrigin }).origin;
+
+/** Sends under one session do not interleave: a repeat of a message waits for the first and finds it. */
+const sending = new Map<string, Promise<unknown>>();
+async function inTurn<T>(key: string, step: () => Promise<T>): Promise<T> {
+  const run = (sending.get(key) ?? Promise.resolve()).catch(() => undefined).then(step);
+  sending.set(key, run);
+  try { return await run; } finally { if (sending.get(key) === run) sending.delete(key); }
+}
+
+const statusOf = (session: Session | undefined, runId?: string): ConversationStatus =>
+  session?.status === "running" ? { state: "running", ...(runId ? { runId } : {}) } : session?.status === "failed" ? { state: "failed", error: failureOf(session) } : { state: "idle" };
 
 /** One worker's session in a Product workspace, as a conversation. The session is created by the first message. */
 export class WorkerConversation implements Conversation {
@@ -25,36 +37,53 @@ export class WorkerConversation implements Conversation {
 
   private async session(): Promise<Session | undefined> { return (await this.workspace.store.list()).find(session => session.role === this.worker.role); }
 
-  async status(): Promise<ConversationStatus> { return statusOf(await this.session()); }
+  async status(): Promise<ConversationStatus> { return this.statusOf(await this.session()); }
+
+  private statusOf(session?: Session): ConversationStatus { return statusOf(session, session && this.workspace.runtime.runId(session.id)); }
 
   async messages(after?: string, limit?: number) {
     const session = await this.session();
-    const status = statusOf(session);
+    const status = this.statusOf(session);
     return { status, messages: session ? page(projectMessages(session.messages), after, limit) : [] };
   }
 
-  async send(content: string): Promise<Sent> {
-    await this.assertAvailable();
-    const session = await this.session() ?? await this.workspace.store.create(this.worker.role);
-    const id = randomUUID();
-    const message = userMessage(content, [], { kind: "expert", itemId: id, text: content });
-    const queued = this.workspace.runtime.isRunning(session.id);
-    if (queued) {
-      if (!this.workspace.runtime.steer(session.id, message)) throw new ConversationError(409, "worker_busy", "The worker is starting its turn. Send again in a moment.");
-    } else await this.workspace.runtime.start(session.id, [message]);
-    return { conversationId: session.id, queued, message: { id, role: "user", text: content, created_at: new Date().toISOString() } };
+  /** The message the session already holds under this id, as it was sent. Its own record is the only one: there is no ledger beside it. */
+  async replay(input: SendInput): Promise<Sent | undefined> {
+    const session = await this.session();
+    const earlier = session && (session.messages.find(message => originOf(message)?.itemId === input.id) ?? this.workspace.runtime.queued(session.id, input.id));
+    if (!session || !earlier) return undefined;
+    const origin = originOf(earlier);
+    const assets = (origin?.attachments ?? []).map(asset => asset.assetId);
+    if (origin?.text !== input.text || assets.join() !== input.attachments.map(asset => asset.id).join()) {
+      throw new ConversationError(409, "idempotency_conflict", "This idempotency key was used for a different message.");
+    }
+    const attachments = (origin?.attachments ?? []).map(({ type, name, assetId }) => ({ type, name, asset_id: assetId }));
+    return {
+      conversationId: session.id, queued: false, runId: this.workspace.runtime.runId(session.id),
+      message: { id: input.id, role: "user", text: input.text, created_at: new Date(earlier.timestamp ?? 0).toISOString(), ...(attachments.length ? { attachments } : {}) }
+    };
   }
 
-  async events(listener: (event: ConversationEvent) => void): Promise<Unsubscribe> {
-    const session = await this.session();
-    if (!session) throw new ConversationError(404, "conversation_not_started", "This worker has no conversation yet. Send it a message first.");
-    const forward = (event: { sessionId?: string; type?: string }) => {
-      const shown = event.sessionId === session.id ? publicEvent(event) : undefined;
-      if (shown) listener(shown);
-    };
-    this.workspace.runtime.events.on("event", forward);
-    return () => { this.workspace.runtime.events.off("event", forward); };
+  /** The runtime decides atomically whether this steers the running turn or starts one; a message already accepted under this id is returned as it was. */
+  async send(input: SendInput): Promise<Sent> {
+    await this.assertAvailable();
+    const session = await this.session() ?? await this.workspace.store.create(this.worker.role);
+    return inTurn(session.id, async () => (await this.replay(input)) ?? this.deliver(session, input));
   }
+
+  private async deliver(session: Session, input: SendInput): Promise<Sent> {
+    const images = input.attachments.filter(asset => asset.kind === "image").map(asset => asset.path);
+    const lines = attachmentLines(input.attachments);
+    const attachments = input.attachments.map(({ kind, name, id }) => ({ type: kind, name, assetId: id }));
+    const message = userMessage([input.text, ...lines].filter(Boolean).join("\n"), images, { kind: "expert", itemId: input.id, text: input.text, attachments });
+    const { queued, runId } = await this.workspace.runtime.send(session.id, message, input.client);
+    return {
+      conversationId: session.id, queued, runId,
+      message: { id: input.id, role: "user", text: input.text, created_at: new Date().toISOString(), ...(attachments.length ? { attachments: attachments.map(({ type, name, assetId }) => ({ type, name, asset_id: assetId })) } : {}) },
+    };
+  }
+
+  async feedKey(): Promise<string | undefined> { return (await this.session())?.id; }
 
   async stop(): Promise<void> { const session = await this.session(); if (session) this.workspace.runtime.stop(session.id); }
 

@@ -15,9 +15,11 @@ export function parseArgs(argv, booleans) {
     const m = a.match(/^--?([^=]+)(?:=(.*))?$/);
     if (!m || a === "-") { out._.push(a); continue; }
     const [, name, inline] = m;
-    if (inline !== undefined) out.flags[name] = inline;
+    // A repeated option collects its values.
+    const set = (value) => { out.flags[name] = name in out.flags && !booleans.has(name) ? [].concat(out.flags[name], value) : value; };
+    if (inline !== undefined) set(inline);
     else if (booleans.has(name)) out.flags[name] = true;
-    else if (i + 1 < argv.length) out.flags[name] = argv[++i];
+    else if (i + 1 < argv.length) set(argv[++i]);
     else throw new HatchError(`Option --${name} needs a value.`, { code: "usage" });
   }
   return out;
@@ -56,7 +58,7 @@ export async function main(argv, deps) {
     return ctx.exitCode;
   } catch (error) {
     const e = error instanceof HatchError ? error : new HatchError(error.message ?? String(error), { code: "internal" });
-    stderr.write(json ? `${JSON.stringify({ error: { code: e.code, message: e.message, status: e.status } })}\n` : `hatch: ${e.message}\n`);
+    stderr.write(json ? `${JSON.stringify({ error: { code: e.code, message: e.message, status: e.status, ...(e.clientMessageId ? { client_message_id: e.clientMessageId } : {}) } })}\n` : `hatch: ${e.message}\n`);
     return e.code === "usage" ? 2 : 1;
   }
 }

@@ -42,6 +42,8 @@ import { PiAgentRuntime } from "./piAgentRuntime.js";
 import type { PiAgentPromptRunner } from "./piPrompt.js";
 import { briefSnapshotPromptBlock, type BriefSnapshot } from "./brief.js";
 import type { RuntimeAssetStore } from "./assetStore.js";
+import { orderTools, type ClientAttributes } from "./surfaces/contract.js";
+import { describeLocalTool } from "./chat/toolSurface.js";
 
 export type RuntimeSessionSkills = {
   records: SkillRecord[];
@@ -86,6 +88,16 @@ export type RunContext = {
     protectedKnowledge: string;
   };
   knowledgeAvailable?: boolean;
+  /** The client of the latest message; the reminder appended to each model call describes it. */
+  clientAttributes?: () => ClientAttributes;
+  /** Hands the Run the messages that joined it. Called between model calls, never while compacting. */
+  claimSteered?: () => Promise<ConversationMessage[]>;
+  /** What the host sees right now. Appended to each model call like the reminder, and never stored. */
+  liveState?: () => Promise<string | undefined>;
+  /** `agentSystemPrompt` is the agent's own whole prompt, not an Expert's instructions inside the Expert Agent frame. */
+  ownPrompt?: boolean;
+  /** A Run may end having said nothing: the agent had nothing to tell the user, or a tool handed the conversation over. */
+  mayStaySilent?: boolean;
 };
 
 export interface AgentRuntime {
@@ -675,7 +687,7 @@ function searchQuery(prompt: string): string {
   return "Hatch";
 }
 
-export function requestedOutputPath(prompt: string): string | undefined {
+function requestedOutputPath(prompt: string): string | undefined {
   const verbs = "(?:(?:save|write|create)\\b|保存|写入|创建)";
   const connectors = "(?:(?:to|as|at)\\b|到|为|至)";
   const quoted = prompt.match(new RegExp(`${verbs}[^\"'\\n]*?${connectors}\\s+[\"“']([^\"”'\\n]+)[\"”']`, "i"));
@@ -763,9 +775,10 @@ export function buildRuntimeSystemPrompt(
   deliveryWorkflow?: DeliveryWorkflow,
   briefSnapshot?: BriefSnapshot,
   clientTools: ClientToolName[] = [],
-  skillsSection = ""
+  skillsSection = "",
+  ownPrompt = false
 ): string {
-  const prompt = agentSystemPrompt ? [
+  const prompt = agentSystemPrompt && ownPrompt ? agentSystemPrompt : agentSystemPrompt ? [
       "You are the server-side runtime for one exact, server-pinned Hatch Expert Agent.",
       "The private Expert product instructions below define the work. Execute them directly in this session; use the registered Skill tool when a cataloged Skill is needed, and do not describe private implementation to the Consumer.",
       ...(clientTools.length ? ["Local tools operate within the client's authorized directories: the selected workspace, managed attachments, and task output/runtime resources. The client enforces read/write permissions."] : ["This client has no local workspace or local tools. Server-hosted Skill resources remain available when a Skill is activated."]),
@@ -802,7 +815,7 @@ export function buildRuntimeSystemPrompt(
     "Negative examples: '查看推理记录和知识库的目录结构'; '搜索事实分类'; '查看索引中的第六份文件'; '继续分析'; '查看相关信息'. These expose internal mechanics or fail to explain a user-facing purpose. During initial preparation, use the broad preparation message instead of narrating any of these steps."
   ].join("\n");
   return [
-    REPLY_STYLE_PROMPT,
+    ownPrompt ? "" : REPLY_STYLE_PROMPT,
     prompt,
     skillsSection ? skillCatalogPromptBlock(skillsSection) : "",
     briefSnapshot ? briefSnapshotPromptBlock(briefSnapshot) : "",
@@ -943,10 +956,12 @@ export function chatToolsForRun(
       // Hatch-provided server tools are part of the platform contract. The
       // external-tool allowlist only governs Creator-owned HTTP/MCP tools.
       || spec.runtimeName.startsWith("hatch.")
-      || allowed === undefined
-      || allowed.has(spec.runtimeName)
+      // Chat's Unix-style attachment retrieval is part of every Run's fixed surface.
+      || spec.runtimeName.startsWith("attachments.")
+      // Studio tools belong to the Assistant alone: a conversation has them only when its agent names them.
+      || (allowed === undefined ? !spec.runtimeName.startsWith("studio.") : allowed.has(spec.runtimeName))
     ))
-    .map((spec) => tool(spec.name, spec.description, spec.properties, spec.required));
+    .map((spec) => tool(spec.name, spec.clientTool ? describeLocalTool(spec.clientTool, spec.description) : spec.description, spec.properties, spec.required));
   const creatorTools = externalToolDefinitions.map((definition) => tool(
     creatorModelToolName(definition.id),
     definition.description ?? "Expert-provided server tool.",
@@ -957,7 +972,8 @@ export function chatToolsForRun(
       ? definition.input_schema.required.filter((value): value is string => typeof value === "string")
       : []
   ));
-  return [...builtins, ...creatorTools];
+  // One fixed order, so a changed tool never invalidates the cached prefix after it.
+  return orderTools([...builtins, ...creatorTools].map((definition) => ({ name: definition.function.name, definition }))).map(({ definition }) => definition);
 }
 
 export function withActivityMessage(definition: PiToolDefinition): PiToolDefinition {

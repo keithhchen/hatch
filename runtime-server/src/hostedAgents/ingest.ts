@@ -13,6 +13,11 @@ export type IngestedItem = {
   error?: string;
 };
 
+/** A hosted run that produced no usable result; the session is kept so its events can still be read. */
+export class HostedIngestError extends Error {
+  constructor(message: string, readonly sessionId: string) { super(message); }
+}
+
 export type IngestRequest = { accountId: string; items: IngestItem[]; context: string };
 export type IngestOutcome = { sessionId: string; items: IngestedItem[]; report: string };
 
@@ -88,9 +93,13 @@ export class HostedIngest {
       }, signal);
       const byName = new Map(run.artifacts.map(a => [a.name, a]));
       const manifest = byName.get("result.json");
-      if (!manifest) throw new Error(run.error ?? "The hosted agent finished without result.json");
-      result = JSON.parse(manifest.bytes.toString("utf8")) as SkillResult;
-      await this.writeBack(leases, result, byName);
+      if (!manifest) throw new HostedIngestError(run.error ?? "The hosted agent finished without result.json", run.sessionId);
+      try {
+        result = JSON.parse(manifest.bytes.toString("utf8")) as SkillResult;
+        await this.writeBack(leases, result, byName);
+      } catch (error) {
+        throw new HostedIngestError(error instanceof Error ? error.message : String(error), run.sessionId);
+      }
       return {
         sessionId: run.sessionId,
         report: run.text,

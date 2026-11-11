@@ -33,6 +33,9 @@ test("BriefSnapshot rejects missing required answers and digest tampering", () =
     () => createBriefSnapshot(spec, []),
     (error: unknown) => (error as { code?: string }).code === "brief_required_answer_missing"
   );
+  assert.throws(() => createBriefSnapshot(spec), /goal \(/, "missing answers name the required fields");
+  const optional = { contract_version: "1", fields: [{ id: "goal", label: "Goal", required: false }] };
+  assert.equal(createBriefSnapshot(optional).fields[0]!.value, null, "no answers are valid when nothing is required");
   const snapshot = createBriefSnapshot(spec, [{ field_id: "goal", value: "Ship" }]);
   assert.throws(
     () => normalizeBriefSnapshot({ ...snapshot, spec_digest: "sha256:" + "0".repeat(64) }),

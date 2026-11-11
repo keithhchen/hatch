@@ -1,18 +1,69 @@
+import { HistoryCursorError } from "./conversationHistory.js";
 import { FactoryAgentsService } from "./factoryAgents/service.js";
 import { PostgresAgentDefinitionRepository } from "./factoryAgents/definitions.js";
 import { PostgresWorkbenchBackend } from "./factoryAgents/store.js";
-import { AssistantService } from "./assistant/assistant.js";
+import { AssistantService, assistantPrompt } from "./assistant/assistant.js";
+import { AssistantChat } from "./assistant/chat.js";
+import { studioTools, studioToolDefinitions } from "./assistant/studioTools.js";
+import { LegacyAssistantHistory } from "./assistant/history.js";
+import { PostgresAssistantState } from "./assistant/state.js";
+import { PostgresDeliveries } from "./assistant/deliveries.js";
+import { ExpertMaterials } from "./assistant/materials.js";
+import { PostgresStore } from "./postgresStore.js";
+import { PostgresConversationRepository } from "./conversationRepository.js";
+import { RuntimeAssetStore } from "./assetStore.js";
+import { openChatAssets } from "./chat/openChatAssets.js";
+import { attachmentToolDefinitions } from "./chat/attachmentTools.js";
+import { ChatError } from "./chat/principal.js";
+import { toolRegistry } from "./tools.js";
+import { RoutedChatGateway } from "./channels/routedGateway.js";
+import { follow, resumePoint } from "./conversations/follow.js";
+import { messageKey } from "./chat/messageKey.js";
+import { ConversationError } from "./conversations/conversation.js";
+import { failures } from "./errors/failures.js";
+import { UpstreamError } from "./errors/upstream.js";
+import { Dictation } from "./assets/dictation.js";
+import { FfmpegAudioNormalizer, transcriberFromEnvironment } from "./assets/adapters.js";
+import { AssetError } from "./assets/domain.js";
+import { VoiceProcessor } from "./assets/processors.js";
+import { PostgresFailureLedger } from "./errors/postgresFailureLedger.js";
 import { ConversationRoutes, type ConversationRouteDeps } from "./conversations/routes.js";
+import { EventLogJournal } from "./conversations/journal.js";
+import { openProductAssets } from "./conversations/productAssets.js";
+import { openConversationPorts, type ConversationPorts } from "./conversations/ports.js";
+import { Studio, type StudioDeps } from "./conversations/studio.js";
+import { StudioSockets, STUDIO_SOCKET_PATH } from "./conversations/socket.js";
 import { createIngestService } from "./ingest/boot.js";
 import { IngestError, IngestService } from "./ingest/service.js";
 import { publicJob } from "./ingest/job.js";
-import { AccountReach, CHANNEL_KINDS, ChannelHub, PostgresChannelLinks, type ChannelKind, type ChannelLinks } from "./assistant/channels.js";
+import { AccountReach } from "./assistant/reach.js";
+import { AssistantTarget } from "./assistant/assistantTarget.js";
+import { CHANNEL_KINDS, CHANNEL_LABELS, isChannelKind, type ChannelAdapter, type ChannelKind } from "./channels/types.js";
+import { ChannelListeners } from "./channels/listeners.js";
+import { CredentialRefresher } from "./channels/credentialRefresh.js";
+import { ChannelHub } from "./channels/hub.js";
+import { ChannelService, openChannelStores } from "./channels/service.js";
+import { GuardedTarget, liveOwnProduct } from "./channels/guardedTarget.js";
+import { ChatFlow } from "./channels/chatTarget.js";
+import { ProductTarget } from "./channels/productTarget.js";
+import { HttpChatGateway } from "./channels/runtimeChat.js";
 import { safeError } from "./factoryAgents/runtime.js";
 import { CredentialSeal } from "./assistant/channelCredentials.js";
-import { IMessageChannel } from "./assistant/imessageChannel.js";
-import { LarkChannel, type LarkCredentials } from "./assistant/larkChannel.js";
-import { LineChannel } from "./assistant/lineChannel.js";
-import { TelegramChannel } from "./assistant/telegramChannel.js";
+import { IMessageChannel } from "./channels/imessageChannel.js";
+import { CREDENTIAL_FORMS, isPerProduct, isTenantForm, readCredentials } from "./channels/credentialForms.js";
+import { LineChannel } from "./channels/lineChannel.js";
+import { guarded } from "./channels/eligibility.js";
+import { STUDIO_TARGET } from "./channels/connections.js";
+import type { AgentTarget } from "./surfaces/contract.js";
+import { InstagramChannel } from "./channels/instagramChannel.js";
+import { MessengerChannel } from "./channels/messengerChannel.js";
+import { SlackChannel } from "./channels/slackChannel.js";
+import { sealedTokens } from "./channels/tenantTokens.js";
+import { WhatsAppChannel, whatsappEligibility } from "./channels/whatsappChannel.js";
+import { TelegramChannel } from "./channels/telegramChannel.js";
+import { OwnApps } from "./channels/ownApps.js";
+import { LoginError, OidcClient } from "./auth/oidc.js";
+import { PostgresLoginStore, TelegramLogin, telegramOidc } from "./auth/telegramLogin.js";
 import { PostgresTaskRepository } from "./assistant/tasks.js";
 import type { AgentCatalog, AgentChange, CatalogAgent } from "./assistant/catalog.js";
 import "dotenv/config";
@@ -82,12 +133,22 @@ import {
 export type RegistryServer = { server: http.Server; close: () => Promise<void> };
 export const CREATOR_FACTORY_JSON_BODY_MAX_BYTES = 32 * 1024 * 1024;
 type RegistryContext = {
+  conversationPorts: ConversationPorts;
+  /** Attachments for Studio; with the Registry database. */
+  studioAssets?: StudioDeps["assets"];
   assistant?: AssistantService;
+  /** The Assistant's conversation, on Chat's runtime. */
+  assistantChat?: AssistantChat;
+  /** Speech to text for the composers of Studio and web chat. */
+  dictation: Dictation;
   ingest?: IngestService;
-  channels?: ChannelHub;
+  channels?: ChannelService;
   credentialSeal?: CredentialSeal;
+  ownApps?: OwnApps;
+  /** Telegram as a way to sign in; absent when the login client is not configured. */
+  telegramLogin?: TelegramLogin;
   publicOrigin?: string;
-  links?: ChannelLinks;
+  studioUrl?: string;
   reach?: AccountReach;
   store: RegistryStoreTs;
   accounts: AccountStoreTs;
@@ -121,7 +182,9 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const factoryRoot = path.resolve(environment.HATCH_CREATOR_FACTORY_ROOT ?? "creator-factory-runs");
   const registryPool = store.databasePool();
   const factoryAgentDefinitions = registryPool ? await PostgresAgentDefinitionRepository.open(registryPool) : undefined;
-  const factoryAgents = new FactoryAgentsService(path.join(factoryRoot, "agent-chats"), environment, factoryAgentDefinitions);
+  const conversationPorts = await openConversationPorts(registryPool);
+  // With a database every Product workspace journals each Run from its start; without one Studio has no conversations to record.
+  const factoryAgents = new FactoryAgentsService(path.join(factoryRoot, "agent-chats"), environment, factoryAgentDefinitions, registryPool ? () => new EventLogJournal(conversationPorts.eventLog, event => event.sessionId) : undefined);
   const objectStore = objectStoreFromEnvironment(environment);
   const productObjectStore = objectStoreFromEnvironment(environment, path.join(factoryRoot, "product-files"));
   if (!productObjectStore) throw new Error("Product File object storage is not configured");
@@ -170,8 +233,11 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const corpusPublisher = nodeObjectStore
     ? new CorpusPublisher(factoryNodeService, nodeObjectStore, store, releaseStore, environment.HATCH_RUNTIME_CORPUS_ROOT?.trim() || "runtime-corpora", knowledgeIndexer)
     : undefined;
+  const studioUrl = environment.HATCH_STUDIO_ASSISTANT_URL?.trim() || "https://gethatchapp.com/studio/assistant";
+  // The site its users know: the alias domain. Products and the Telegram bots are reached here.
+  const siteOrigin = environment.HATCH_DOMAIN_ALIAS?.trim() ? `https://${environment.HATCH_DOMAIN_ALIAS.trim()}` : new URL(studioUrl).origin;
   const productLive = corpusPublisher && nodeObjectStore
-    ? createProductLive({ factoryRoot, publisher: corpusPublisher, releases: releaseStore, objectStore: nodeObjectStore })
+    ? createProductLive({ factoryRoot, publisher: corpusPublisher, releases: releaseStore, objectStore: nodeObjectStore, publicOrigin: siteOrigin })
     : undefined;
   const graphStore = graphPool ? new PostgresDistillationGraphStore(graphPool) : undefined;
   await graphStore?.initialize();
@@ -214,56 +280,125 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const legacyHmacEnabled = environment.HATCH_ENABLE_LEGACY_HMAC_AUTH?.trim().toLowerCase() === "true";
   const authSecret = legacyHmacEnabled ? environment.HATCH_AUTH_SIGNING_SECRET?.trim() || "" : "";
   const httpLimits = httpRequestLimitOptionsFromEnvironment(environment);
-  const registryContext: RegistryContext = { store, accounts, accountAvatars, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, productLive, nodeObjectStore, releaseStore, authSecret };
+  const registryContext: RegistryContext = { dictation: new Dictation(new VoiceProcessor(new FfmpegAudioNormalizer(), transcriberFromEnvironment(environment))), store, accounts, accountAvatars, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, productLive, nodeObjectStore, releaseStore, authSecret, conversationPorts, studioAssets: registryPool ? await openProductAssets(registryPool, productObjectStore, environment) : undefined };
+  const studio = new Studio(studioDeps(registryContext));
+  const studioSockets = new StudioSockets({ studio, identify: token => identifyToken(registryContext, token) });
   let assistantTick: NodeJS.Timeout | undefined;
-  const channelListeners = new AbortController();
+  let channelListeners: ChannelListeners | undefined;
+  let credentialRefresher: CredentialRefresher | undefined;
   if (registryPool) {
     const reach = new AccountReach(registryPool);
     await reach.ensureSchema();
     await PostgresWorkbenchBackend.ensureSchema(registryPool);
     const tasks = await PostgresTaskRepository.open(registryPool);
-    const links = await PostgresChannelLinks.open(registryPool, (accountId, kind) => kind === "lark" ? accountId : "");
-    const studioUrl = environment.HATCH_STUDIO_ASSISTANT_URL?.trim() || "https://gethatchapp.com/studio/assistant";
+    // Lark has no shared bot, so its tenant is the Expert's account; every other platform is one shared tenant.
+    // Where each Expert brings their own app, the adapter is built from their sealed credentials and the scope is their account id.
+    const scopeOf = (accountId: string, kind: ChannelKind) => { const form = CREDENTIAL_FORMS[kind]; return form && !isTenantForm(form) && !isPerProduct(form) ? accountId : ""; };
+    const stores = await openChannelStores(registryPool, scopeOf);
+    // Our one bot answers the Assistant, and signs people in. Telegram sends people back to the site its users know: the alias domain.
+    const telegramOrigin = environment.HATCH_TELEGRAM_PUBLIC_ORIGIN?.trim() || siteOrigin;
     const telegram = new TelegramChannel({
       token: environment.HATCH_TELEGRAM_BOT_TOKEN?.trim() || undefined,
       username: environment.HATCH_TELEGRAM_BOT_USERNAME?.trim() || undefined,
       webhookSecret: environment.HATCH_TELEGRAM_WEBHOOK_SECRET?.trim() || undefined,
-      studioUrl,
     });
+    // The bot posts here, and only here: set at every start, so a changed origin or secret needs no other step.
+    if (telegram.available()) void telegram.setWebhook(`${telegramOrigin}/v1/channels/telegram/webhook`, environment.HATCH_TELEGRAM_WEBHOOK_SECRET!.trim()).catch(error => console.error("[telegram webhook]", safeError(error)));
     const line = new LineChannel({
       channelSecret: environment.HATCH_LINE_CHANNEL_SECRET?.trim() || undefined,
       accessToken: environment.HATCH_LINE_CHANNEL_ACCESS_TOKEN?.trim() || undefined,
       basicId: environment.HATCH_LINE_BASIC_ID?.trim() || undefined,
-      studioUrl,
     });
     const imessage = new IMessageChannel({
       projectId: environment.HATCH_PHOTON_PROJECT_ID?.trim() || undefined,
       projectSecret: environment.HATCH_PHOTON_PROJECT_SECRET?.trim() || undefined,
       address: environment.HATCH_IMESSAGE_ADDRESS?.trim() || undefined,
     });
-    // Lark has no shared bot: a custom app works in one enterprise, so each Expert brings theirs.
+    // One app serves many tenants (workspaces, Pages, business accounts). A tenant's token is a sealed credential on its Connection,
+    // so without the sealing key no tenant can be configured and these adapters are unavailable.
     const sealKey = environment.HATCH_CREDENTIALS_KEY?.trim();
     const seal = sealKey ? new CredentialSeal(sealKey) : undefined;
-    const larkApps = new Map<string, { sealed: string; adapter: LarkChannel }>();
-    const channels = new ChannelHub([telegram, line, imessage], async (kind, accountId) => {
-      if (kind !== "lark" || !seal) return undefined;
-      const sealed = await links.credentials(accountId, "lark");
-      if (!sealed) return undefined;
-      const cached = larkApps.get(accountId);
-      if (cached?.sealed === sealed) return cached.adapter;
-      const adapter = new LarkChannel(seal.open<LarkCredentials>(sealed), accountId);
-      larkApps.set(accountId, { sealed, adapter });
-      return adapter;
+    const env = (name: string) => environment[name]?.trim() || undefined;
+    const tokens = (kind: ChannelKind) => seal ? sealedTokens(stores.connections, seal, kind) : undefined;
+    const callback = (kind: ChannelKind) => `${new URL(studioUrl).origin}/v1/channels/${kind}/oauth/callback`;
+    const slack = new SlackChannel({
+      signingSecret: env("HATCH_SLACK_SIGNING_SECRET"), clientId: env("HATCH_SLACK_CLIENT_ID"), clientSecret: env("HATCH_SLACK_CLIENT_SECRET"), redirectUri: callback("slack"), tokens: tokens("slack"),
     });
+    const whatsapp = new WhatsAppChannel({ appSecret: env("HATCH_WHATSAPP_APP_SECRET"), verifyToken: env("HATCH_WHATSAPP_VERIFY_TOKEN"), tokens: tokens("whatsapp") });
+    const instagram = new InstagramChannel({
+      appSecret: env("HATCH_INSTAGRAM_APP_SECRET"), verifyToken: env("HATCH_INSTAGRAM_VERIFY_TOKEN"), clientId: env("HATCH_INSTAGRAM_APP_ID"), clientSecret: env("HATCH_INSTAGRAM_APP_SECRET"), redirectUri: callback("instagram"), tokens: tokens("instagram"),
+    });
+    const messenger = new MessengerChannel({ appSecret: env("HATCH_MESSENGER_APP_SECRET"), verifyToken: env("HATCH_MESSENGER_VERIFY_TOKEN"), tokens: tokens("messenger") });
+    // Platform rules sit in front of every Agent. WhatsApp serves only Connections an operator marked task-specific.
+    const eligibility = { whatsapp: whatsappEligibility };
+    const apps = new Map<string, { sealed: string; adapter: ChannelAdapter }>();
+    // An Expert's own app: found by the account for one app per account, by the id of the bot for one bot per Product.
+    const hub = new ChannelHub([telegram, line, imessage, slack, whatsapp, instagram, messenger], async (kind, scope) => {
+      const form = CREDENTIAL_FORMS[kind];
+      if (!form || isTenantForm(form) || !seal) return undefined;
+      const sealed = form.perProduct ? await stores.connections.credentialsOf(kind, scope) : await stores.connections.credentials(scope, kind);
+      if (!sealed) return undefined;
+      const cached = apps.get(`${kind}:${scope}`);
+      if (cached?.sealed === sealed) return cached.adapter;
+      const adapter = form.build(seal.open(sealed), scope);
+      apps.set(`${kind}:${scope}`, { sealed, adapter });
+      return adapter;
+    }, kind => { const form = CREDENTIAL_FORMS[kind]; return Boolean(form && isTenantForm(form)); });
+    // Telegram signs people in with OpenID Connect; a chat that started it is bound to the Assistant once the sign-in names the same sender.
+    const loginClientId = env("HATCH_TELEGRAM_LOGIN_CLIENT_ID"); const loginClientSecret = env("HATCH_TELEGRAM_LOGIN_CLIENT_SECRET");
+    let channels!: ChannelService;
+    const telegramLogin = loginClientId && loginClientSecret ? new TelegramLogin({
+      oidc: new OidcClient(telegramOidc({ clientId: loginClientId, clientSecret: loginClientSecret }, env("HATCH_TELEGRAM_LOGIN_BASE"))),
+      store: await PostgresLoginStore.open(registryPool), accounts, limiter: stores.limiter, origin: telegramOrigin,
+      admit: (account, telegramId, claim) => channels.admit("telegram", { senderId: telegramId, threadId: telegramId }, claim.invite ? { invite: claim.invite } : { account: account.id }),
+    }) : undefined;
     const catalog = registryAgentCatalog(registryContext);
+    // Chat runs in the Runtime process: the channel layer reaches it with its own service token, and never otherwise.
+    const chatUrl = environment.HATCH_RUNTIME_CHAT_URL?.trim();
+    const chatToken = environment.HATCH_RUNTIME_CHAT_SERVICE_TOKEN?.trim();
+    const gateway = chatUrl && chatToken ? new HttpChatGateway({ baseUrl: chatUrl, serviceToken: chatToken }) : undefined;
+    // A Product's Runs are held by the Runtime; the Assistant's are held here. A reply is sent once for either.
+    const routed = new RoutedChatGateway(gateway);
+    const ownsProduct = async (accountId: string, productId: string) => Boolean(await productForCreator(registryContext, accountId, productId));
+    channels = new ChannelService({
+      ...stores, hub, scopeOf, ownsProduct, gateway: routed,
+      audienceOf: (kind, target) => target.kind === "product" && isPerProduct(CREDENTIAL_FORMS[kind]) ? "public" : "self",
+      signIn: async (kind, senderId, invite) => kind === "telegram" ? telegramLogin?.claimLink(senderId, invite) : undefined,
+      // A Telegram id belongs to one Hatch account: linking from an account that is not its own is refused.
+      claim: async (kind, scope, accountId, senderId) => kind !== "telegram" || scope !== "" || await accounts.linkIdentity(accountId, "telegram", senderId),
+    });
+    const assistantState = await PostgresAssistantState.open(registryPool);
     const assistant = new AssistantService({
-      tasks, reach, channels, links,
+      tasks, reach, channels,
       products: factoryAgents,
       catalog,
       backend: accountId => new PostgresWorkbenchBackend(registryPool, `assistant:${accountId}`),
+      state: assistantState,
+      deliveries: await PostgresDeliveries.open(registryPool),
       exclusive: postgresExclusive(registryPool),
       env: environment,
     });
+    // The Assistant is a conversation on Chat's runtime, with its own transcript in this database and the Studio tools.
+    failures.attach(new PostgresFailureLedger(registryPool as never));
+    const transcripts = new PostgresStore({ pool: registryPool, maxConversationEvents: 1_000_000, maxConversationBytes: 1024 * 1024 * 1024 });
+    const conversations = new PostgresConversationRepository({ pool: registryPool });
+    conversations.bindSubmissionStore(transcripts);
+    await conversations.initialize();
+    const chatAssets = await openChatAssets({ pool: registryPool, blobs: productObjectStore, environment });
+    for (const definition of attachmentToolDefinitions(chatAssets.tools())) toolRegistry.set(definition.name, definition);
+    const tools = studioTools(assistant);
+    for (const definition of studioToolDefinitions(tools)) toolRegistry.set(definition.name, definition);
+    const assistantChat = new AssistantChat({
+      repository: conversations, store: transcripts, chatAssets, state: assistantState, tools, desk: assistant,
+      assetStore: new RuntimeAssetStore(path.join(factoryRoot, "assistant-assets")),
+      history: new LegacyAssistantHistory({ backend: accountId => new PostgresWorkbenchBackend(registryPool, `assistant:${accountId}`), state: assistantState, store: transcripts }),
+      prompt: assistantPrompt, liveState: accountId => assistant.liveState(accountId), env: environment,
+    });
+    assistant.bind(assistantChat, new ExpertMaterials({ assets: chatAssets, conversation: accountId => assistantChat.conversation(accountId) }));
+    routed.bindLocal(assistantChat.gateway);
+    // Studio observers read the Assistant's events from its Run's journal; every other conversation keeps its log.
+    conversationPorts.eventLog.bind("assistant:", assistantChat.feed);
+    await assistantChat.start();
     const productsPrefix = environment.HATCH_CREATOR_PRODUCT_FILES_PREFIX?.trim() || "creator-products";
     const ingest = await createIngestService({
       environment, pool: registryPool, seal, objects: productObjectStore,
@@ -273,15 +408,20 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       },
       productPrefix: (accountId, productId) => `${productsPrefix}/${accountId}/${productId}`,
     });
-    Object.assign(registryContext, { assistant, ingest, channels, links, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin });
-    // A platform that pushes over its own connection runs here, in one process at a time. A dropped connection comes back.
-    for (const adapter of channels.listeners()) void (async () => {
-      while (!channelListeners.signal.aborted) {
-        await postgresExclusive(registryPool)(`assistant-channel:${adapter.kind}`, () => adapter.listen!(events => assistant.channelEvents(adapter, events), channelListeners.signal))
-          .catch(error => console.error(`[channel ${adapter.kind}]`, safeError(error)));
-        await new Promise(resolve => setTimeout(resolve, 30_000).unref());
-      }
-    })();
+    channels.register("assistant", guarded(new ChatFlow(new AssistantTarget(assistant)), eligibility));
+    // Without a Chat gateway Product Connections have no handler, and their events wait in the inbox.
+    if (gateway) channels.register("product", guarded(new GuardedTarget(new ChatFlow(new ProductTarget({ gateway, limiter: stores.limiter })), [liveOwnProduct(releaseStore)]), eligibility));
+    channels.start();
+    Object.assign(registryContext, { assistant, assistantChat, ingest, channels, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin, studioUrl, telegramLogin, ...(seal ? { ownApps: new OwnApps({ connections: stores.connections, seal, forms: CREDENTIAL_FORMS, origin: telegramOrigin, ownsProduct }) } : {}) });
+    // A platform that pushes over its own connection runs here, in one process at a time. A dropped connection comes back; credentials added or removed are picked up.
+    channelListeners = new ChannelListeners({
+      hub, connections: stores.connections, exclusive: postgresExclusive(registryPool),
+      accept: (adapter, events) => channels.accept(adapter, events),
+      onError: (key, error) => console.error(`[channel ${key}]`, safeError(error)),
+    });
+    channelListeners.start();
+    // Credentials that expire (Instagram's 60-day tokens) are renewed before they do.
+    if (seal) { credentialRefresher = new CredentialRefresher({ hub, connections: stores.connections, seal, onError: (key, error) => console.error(`[credentials ${key}]`, safeError(error)) }); credentialRefresher.start(); }
     assistantTick = setInterval(() => void assistant.tick().catch(error => console.error("[assistant tick]", error)), 60_000);
     assistantTick.unref();
   }
@@ -325,7 +465,9 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
           });
           return;
         }
-        if (error && typeof error === "object" && typeof (error as { code?: unknown }).code === "string") {
+        // A 5xx hides its cause from the client (it is logged above); only a definitions failure may say what it is.
+        if (error && typeof error === "object" && typeof (error as { code?: unknown }).code === "string"
+          && (status < 500 || (error as { code: string }).code === "agent_definitions_invalid")) {
           const structured = error as { code: string; message?: string; details?: unknown };
           const message = status >= 500 ? "Factory Agent definitions are unavailable." : structured.message ?? "Request failed.";
           sendJson(response, status, { error: { code: structured.code, message, ...(structured.details === undefined ? {} : { details: structured.details }) }, detail: message });
@@ -348,6 +490,13 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     socket.on("error", () => undefined);
     void (async () => {
       const url = new URL(request.url ?? "/", "http://registry.local");
+      if (url.pathname === STUDIO_SOCKET_PATH) {
+        const token = bearer(request);
+        const identity = token ? await identifyToken(registryContext, token) : undefined;
+        if (token && !identity) throw Object.assign(new Error("A valid account token is required."), { status: 401 });
+        studioSockets.upgrade(request, socket, head, identity);
+        return;
+      }
       const match = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/factory-agents\/sessions\/([0-9a-f-]{36})\/voice\/live$/);
       if (!match) throw Object.assign(new Error("Unknown WebSocket route"), { status: 404 });
       const token = bearer(request);
@@ -375,8 +524,11 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   await new Promise<void>((resolve) => server.listen(port, host, resolve));
   return { server, close: async () => {
     if (assistantTick) clearInterval(assistantTick);
-    channelListeners.abort();
+    await channelListeners?.stop();
+    credentialRefresher?.stop();
     await registryContext.assistant?.close();
+    await registryContext.assistantChat?.close();
+    await registryContext.channels?.close();
     immediateFactoryStop.abort();
     await factoryAgents.close();
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
@@ -444,7 +596,9 @@ async function route(
   // Conversation API: Product workers and the Assistant, one message shape.
   if (await new ConversationRoutes(conversationDeps(response, context)).handle(request, response, url)) return;
 
-  if (url.pathname.startsWith("/v1/channels/") || url.pathname.startsWith("/v1/creator/assistant")) {
+  if (url.pathname === "/v1/transcriptions" && request.method === "POST") { await transcribe(request, response, context); return; }
+
+  if (url.pathname.startsWith("/v1/channels/") || url.pathname.startsWith("/v1/creator/assistant") || url.pathname.startsWith("/v1/creator/connections")) {
     await assistantRoute(request, response, url, context);
     return;
   }
@@ -564,6 +718,16 @@ async function route(
     });
     return;
   }
+  const runtimeConnectionMatch = url.pathname.match(/^\/v1\/runtime\/connections\/([^/]+)$/);
+  if (runtimeConnectionMatch && request.method === "GET") {
+    requireRuntimeServiceAuth(request, context.runtimeServiceToken);
+    const connection = await context.channels?.connections.get(decodeURIComponent(runtimeConnectionMatch[1]!));
+    if (!connection) { sendJson(response, 404, { detail: "No such Connection." }); return; }
+    // The platform tenant is the channel layer's business; Chat is told who owns the Connection, whom it answers as, and for whom.
+    const { scope: _scope, ...shared } = connection;
+    sendJson(response, 200, { connection: shared });
+    return;
+  }
   const runtimeCreatorReleasesMatch = url.pathname.match(/^\/v1\/runtime\/creators\/([^/]+)\/releases$/);
   if (runtimeCreatorReleasesMatch && request.method === "GET") {
     requireRuntimeServiceAuth(request, context.runtimeServiceToken);
@@ -594,6 +758,23 @@ async function route(
     return;
   }
 
+  // Telegram signs people in (OpenID Connect, authorization code with PKCE). The site starts it and finishes it; the browser never sees a token here.
+  if (url.pathname === "/v1/auth/telegram" && request.method === "GET") {
+    sendAuthJson(response, 200, { enabled: Boolean(context.telegramLogin) });
+    return;
+  }
+  if (url.pathname === "/v1/auth/telegram/start" && request.method === "POST") {
+    const body = await readJson(request);
+    const { authorizeUrl, state } = await telegramLoginOf(context).start({ claim: typeof body.claim === "string" ? body.claim : undefined, returnTo: typeof body.return_to === "string" ? body.return_to : undefined });
+    sendAuthJson(response, 200, { authorize_url: authorizeUrl, state });
+    return;
+  }
+  if (url.pathname === "/v1/auth/telegram/callback" && request.method === "POST") {
+    const body = await readJson(request);
+    const { account, created, returnTo } = await telegramLoginOf(context).finish({ code: String(body.code ?? ""), state: String(body.state ?? "") });
+    sendAuthJson(response, created ? 201 : 200, { ...sessionResponse(account, await context.accounts.createSession(account)), created, return_to: returnTo });
+    return;
+  }
   if (url.pathname === "/v1/auth/signup" && request.method === "POST") {
     const body = await readJson(request);
     const email = String(body.email ?? "");
@@ -1374,6 +1555,25 @@ async function resolvePublishedCreatorToolConnection(
   });
 }
 
+/** What was said in a recording, for the text box: the voice-message pipeline's transcription, with the same size and length caps. */
+async function transcribe(request: http.IncomingMessage, response: http.ServerResponse, context: RegistryContext): Promise<void> {
+  const account = await authenticate(request, response, context);
+  if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
+  await answerTranscription(request, response, context.dictation, account.id);
+}
+
+export async function answerTranscription(request: http.IncomingMessage, response: http.ServerResponse, dictation: Dictation, accountId: string): Promise<void> {
+  const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
+  const audio = Buffer.from(typeof body.base64 === "string" ? body.base64 : "", "base64");
+  if (!audio.length) { sendJson(response, 400, { error: { code: "invalid_audio", message: "A recording is required." } }); return; }
+  try { sendJson(response, 200, { text: await dictation.text(audio) }); }
+  catch (error) {
+    if (!(error instanceof AssetError)) throw error;
+    if (error.code === "unavailable") { sendJson(response, 502, { error: failures.translate(UpstreamError.of(error), { account: accountId, route: "transcriptions" }) }); return; }
+    sendJson(response, error.code === "too_large" ? 413 : 400, { error: { code: error.code === "too_large" ? "audio_too_large" : "invalid_audio", message: error.message } });
+  }
+}
+
 async function authenticate(
   request: http.IncomingMessage,
   response: http.ServerResponse,
@@ -1839,6 +2039,11 @@ async function optionalJson(request: http.IncomingMessage): Promise<Record<strin
   return bytes.length ? readJsonBytes(bytes) : {};
 }
 
+function telegramLoginOf(context: RegistryContext): TelegramLogin {
+  if (!context.telegramLogin) throw new LoginError("login_unavailable", "Telegram sign-in is not available.", 503);
+  return context.telegramLogin;
+}
+
 function sendAuthBusy(response: http.ServerResponse): void {
   sendAuthJson(response, 503, { detail: "Authentication is temporarily busy. Try again shortly." }, {
     "retry-after": "1"
@@ -1943,7 +2148,9 @@ function registryAgentCatalog(context: RegistryContext): AgentCatalog {
     live: async (accountId, productId) => {
       const product = await productForCreator(context, accountId, productId);
       if (!product || !context.productLive) return null;
-      return context.productLive.status(new ExpertProduct(accountId, productId, product.name, product.promise, product.brief_spec));
+      const status = (await context.productLive.status(new ExpertProduct(accountId, productId, product.name, product.promise, product.brief_spec))).toJSON();
+      const bot = status.is_live ? await context.ownApps?.username(accountId, "telegram", productId) : undefined;
+      return { ...status, ...(bot ? { telegram_url: `https://t.me/${bot}` } : {}) };
     },
     token: async accountId => {
       const cached = tokens.get(accountId);
@@ -1969,117 +2176,245 @@ function postgresExclusive(pool: NonNullable<ReturnType<RegistryStoreTs["databas
   };
 }
 
-function conversationDeps(response: http.ServerResponse, context: RegistryContext): ConversationRouteDeps {
+function studioDeps(context: RegistryContext): StudioDeps {
   return {
-    authenticate: request => authenticate(request, response, context),
-    token: bearer,
     product: async (accountId, productId) => productForCreator(context, accountId, productId),
     workspace: (scope, token) => context.factoryAgents.workspace(scope, token),
-    assistant: () => context.assistant,
+    assistant: () => context.assistantChat,
+    ...context.conversationPorts,
+    assets: context.studioAssets,
+  };
+}
+
+function conversationDeps(response: http.ServerResponse, context: RegistryContext): ConversationRouteDeps {
+  return {
+    ...studioDeps(context),
+    authenticate: request => authenticate(request, response, context),
+    token: bearer,
     json: sendJson,
     readJson: request => readJson(request),
+    readBytes: readRawBody,
   };
+}
+
+/** The account a token belongs to, for the Studio WebSocket's first-message sign-in. */
+async function identifyToken(context: RegistryContext, token: string): Promise<{ accountId: string; token: string } | undefined> {
+  const claims = verifyAuthToken(token, context.authSecret);
+  const account = (await context.accounts.resolveSession(token))?.account ?? (claims ? await context.accounts.getById(claims.sub) : undefined);
+  return account ? { accountId: account.id, token } : undefined;
 }
 
 async function assistantRoute(request: http.IncomingMessage, response: http.ServerResponse, url: URL, context: RegistryContext): Promise<void> {
   const assistant = context.assistant;
-  if (!assistant || !context.reach) { sendJson(response, 503, { error: { code: "assistant_unavailable", message: "The Assistant requires the Registry database." } }); return; }
+  const channels = context.channels;
+  if (!assistant || !context.reach || !channels) { sendJson(response, 503, { error: { code: "assistant_unavailable", message: "The Assistant requires the Registry database." } }); return; }
   const webhook = url.pathname.match(/^\/v1\/channels\/([a-z]+)(?:\/([0-9a-f-]{36}))?\/webhook$/);
+  // A platform sends the person who installed the app back here with a code; the `state` they carry is the link code Studio issued.
+  const install = url.pathname.match(/^\/v1\/channels\/([a-z]+)\/oauth\/callback$/);
+  if (install && request.method === "GET") {
+    const kind = install[1]!;
+    const adapter = isChannelKind(kind) ? await channels.hub.get(kind) : undefined;
+    const [code, state] = [url.searchParams.get("code"), url.searchParams.get("state")];
+    const owner = isChannelKind(kind) && state ? await channels.connections.ownerOfCode(kind, state) : undefined;
+    if (!adapter?.install || !context.credentialSeal || !code || !owner) { sendJson(response, 400, { error: { code: "install_failed", message: "The install link is invalid or has expired." } }); return; }
+    const { scope, credentials } = await adapter.install(code);
+    await channels.connections.saveCredentials(owner, adapter.kind, context.credentialSeal.seal(credentials), scope);
+    response.writeHead(302, { location: context.studioUrl ?? context.publicOrigin ?? "/" });
+    response.end();
+    return;
+  }
+  if (webhook && request.method === "GET") {
+    const kind = webhook[1]!;
+    const adapter = isChannelKind(kind) ? await channels.hub.get(kind, webhook[2]) : undefined;
+    const echo = adapter?.challenge?.(url.searchParams);
+    if (echo === undefined) { sendJson(response, 401, { ok: false }); return; }
+    response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+    response.end(echo);
+    return;
+  }
   if (webhook && request.method === "POST") {
-    const kind = webhook[1] as ChannelKind;
-    const adapter = (CHANNEL_KINDS as readonly string[]).includes(kind) ? await context.channels!.get(kind, webhook[2]) : undefined;
+    const kind = webhook[1]!;
+    const adapter = isChannelKind(kind) ? await channels.hub.get(kind, webhook[2]) : undefined;
     if (!adapter?.parse) { sendJson(response, 404, { ok: false }); return; }
     const raw = await readRawBody(request, 2 * 1024 * 1024);
-    if (!adapter.verify?.(raw, request.headers)) { sendJson(response, 401, { ok: false }); return; }
-    const { events, respond } = adapter.parse(raw);
-    // Platforms retry a slow webhook. Quick work is durable before we answer; a slow download finishes after.
-    const work = assistant.channelEvents(adapter, events);
-    await Promise.race([work, new Promise(resolve => setTimeout(resolve, 1500))]);
+    if (!adapter.verify?.(raw, request.headers, url.searchParams)) { sendJson(response, 401, { ok: false }); return; }
+    const { events, respond, pull } = await adapter.parse(raw);
+    // Stored before we answer, so a platform retry finds the event already here and nothing is lost if we crash.
+    await channels.accept(adapter, events);
     sendJson(response, 200, respond ?? { ok: true });
+    // After the answer: the platform's deadline is short and the pull may be long.
+    if (pull) void channels.pull(adapter, pull).catch(error => console.error("[channels] pull failed", error instanceof Error ? error.message : error));
     return;
   }
   const account = await authenticate(request, response, context);
   if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
-  const channelsView = async () => {
-    const links = await context.links!.list(account.id);
-    return Promise.all(CHANNEL_KINDS.map(async kind => {
-      const link = links.find(candidate => candidate.kind === kind);
-      const ownApp = kind === "lark" && Boolean(context.credentialSeal);
-      return {
-        kind, available: Boolean(await context.channels!.get(kind, account.id)), linked: Boolean(link?.peerId),
-        ...(ownApp ? { own_app: true, webhook_url: `${context.publicOrigin}/v1/channels/lark/${account.id}/webhook` } : {}),
-        ...(link?.lastEventAt ? { last_event_at: link.lastEventAt } : {}),
-      };
-    }));
-  };
+  /** Where the account's chats are bound: to the Assistant (Studio), or to one Product when the request names it. */
+  const bindingTarget = (productId: string | null | undefined): AgentTarget => productId ? { kind: "product", productId } : STUDIO_TARGET;
+  /** A platform where a Product has a bot of its own: its Product page holds a bot, not a link to ours. */
+  const botKind = (kind: ChannelKind, target: AgentTarget) => target.kind === "product" && isPerProduct(CREDENTIAL_FORMS[kind]);
+  const channelsView = async (target: AgentTarget = STUDIO_TARGET) => (await channels.view(account.id, target)).map(status => botKind(status.kind, target)
+    ? { kind: status.kind, bot: true, available: Boolean(context.ownApps), configured: status.configured, ...(status.handle ? { handle: status.handle } : {}), ...(status.state ? { state: status.state } : {}) }
+    : {
+      kind: status.kind, available: status.available, linked: status.linked,
+      ...(status.senderId ? { sender_id: status.senderId } : {}),
+      ...(status.state ? { state: status.state } : {}),
+      ...(status.handle ? { handle: status.handle } : {}),
+      ...(status.people.length ? { people: status.people } : {}),
+      ...(CREDENTIAL_FORMS[status.kind] && !isTenantForm(CREDENTIAL_FORMS[status.kind]!) && !isPerProduct(CREDENTIAL_FORMS[status.kind]) && context.credentialSeal ? { own_app: true, webhook_url: `${context.publicOrigin}/v1/channels/${status.kind}/${account.id}/webhook` } : {}),
+      ...(status.lastEventAt ? { last_event_at: status.lastEventAt } : {}),
+    });
   if (url.pathname === "/v1/creator/assistant" && request.method === "GET") {
     const timezone = url.searchParams.get("tz");
     if (timezone) await context.reach.setTimezone(account.id, timezone);
-    sendJson(response, 200, { ...await assistant.view(account.id), channels: await channelsView() }, { "cache-control": "no-store" });
+    // The latest messages, or with `before_cursor` the page before them: the page asks for earlier ones as the Expert scrolls back.
+    const limit = Number(url.searchParams.get("limit"));
+    let view: Awaited<ReturnType<typeof assistant.view>> & { cursor?: string; partial?: string };
+    const options = { limit: Number.isInteger(limit) && limit > 0 ? Math.min(limit, 200) : 200, beforeCursor: url.searchParams.get("before_cursor") ?? undefined };
+    try {
+      // The newest page names the journal cursor it is consistent with (a message is in it or in the events after it, never both,
+      // never neither) and what the running turn has said so far, so a client resumes the stream from `cursor` and joins `partial` by offset.
+      view = options.beforeCursor !== undefined ? await assistant.view(account.id, options)
+        : await context.conversationPorts.eventLog.consistent(`assistant:${account.id}`, async cursor => {
+          const page = await assistant.view(account.id, options);
+          return { ...page, cursor, ...(page.running && context.assistantChat ? { partial: await context.assistantChat.partial(account.id) } : {}) };
+        });
+    } catch (error) {
+      if (error instanceof HistoryCursorError) { sendJson(response, 400, { error: { code: "history_cursor_invalid", message: "Invalid conversation history cursor." } }); return; }
+      throw error;
+    }
+    sendJson(response, 200, { ...view, channels: await channelsView() }, { "cache-control": "no-store" });
     return;
   }
   if (url.pathname === "/v1/creator/assistant/messages" && request.method === "POST") {
     const body = await readJson(request);
     const content = typeof body.content === "string" ? body.content.trim() : "";
-    if (!content || content.length > 20_000) { sendJson(response, 400, { error: { code: "invalid_message", message: "Message must contain 1–20000 characters." } }); return; }
-    await assistant.ingest(account.id, { source: "web", text: content });
-    sendJson(response, 202, { accepted: true });
+    // One message, many parts: the text and the files uploaded for it, each named by the id the upload returned.
+    const attached = (Array.isArray(body.attachments) ? body.attachments : []).flatMap((item: { asset_id?: unknown; type?: unknown }) => typeof item?.asset_id === "string" && (item.type === "image" || item.type === "file") ? [{ type: item.type as "image" | "file", assetId: item.asset_id }] : []);
+    if ((!content && !attached.length) || content.length > 20_000) { sendJson(response, 400, { error: { code: "invalid_message", message: "Message must contain 1–20000 characters." } }); return; }
+    // The page's own key is the message's id, as it is for the API: a retried send is one message.
+    let sent: Awaited<ReturnType<typeof assistant.hear>>;
+    try { sent = await assistant.hear(account.id, { id: messageKey(request.headers["idempotency-key"]) ?? randomUUID(), source: "web", parts: [...(content ? [{ type: "text" as const, text: content }] : []), ...attached] }); }
+    catch (error) { if (!(error instanceof ChatError)) throw error; sendJson(response, error.status, { error: { code: error.code, message: error.message } }); return; }
+    // The receipt: which Run took the message, and whether it started it or joined it (queued until the Run takes it up).
+    sendJson(response, 202, { accepted: true, message_id: sent.messageId, run_id: sent.runId, outcome: sent.outcome, accepted_at: sent.acceptedAt });
+    return;
+  }
+  if (url.pathname === "/v1/creator/assistant/retry" && request.method === "POST") {
+    // Answers the Expert's unanswered messages again after a Run that failed. The page's key makes a repeat the same Run.
+    if (!context.assistantChat) { sendJson(response, 503, { error: { code: "assistant_unavailable", message: "The Assistant requires the Registry database." } }); return; }
+    try {
+      const { run, outcome } = await context.assistantChat.retry(account.id, { id: messageKey(request.headers["idempotency-key"]) ?? randomUUID(), client: { client: "web" } });
+      sendJson(response, 202, { accepted: true, run_id: run.id, outcome });
+    } catch (error) { if (!(error instanceof ChatError)) throw error; sendJson(response, error.status, { error: { code: error.code, message: error.message } }); }
     return;
   }
   if (url.pathname === "/v1/creator/assistant/files" && request.method === "POST") {
     const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
     const name = typeof body.name === "string" ? body.name : ""; const bytes = Buffer.from(typeof body.base64 === "string" ? body.base64 : "", "base64");
     if (!name || !bytes.length || bytes.length > 20 * 1024 * 1024) { sendJson(response, 400, { error: { code: "invalid_file", message: "A file of 1 byte to 20 MiB is required." } }); return; }
-    sendJson(response, 201, await assistant.receiveFile(account.id, name, bytes, "web"));
+    // Only an upload: the file joins a message when the page sends one that names it.
+    try { const { assetId, kind } = await assistant.upload(account.id, name, bytes); sendJson(response, 201, { name, asset_id: assetId, type: kind }); }
+    catch (error) { if (!(error instanceof ChatError)) throw error; sendJson(response, error.status, { error: { code: error.code, message: error.message } }); }
     return;
   }
   const imageMatch = url.pathname.match(/^\/v1\/creator\/assistant\/images\/([0-9a-f-]{36}\.(?:jpg|jpeg|png|webp|gif))$/);
   if (imageMatch && request.method === "GET") {
-    const bytes = await assistant.image(account.id, imageMatch[1]!).catch(() => undefined);
-    if (!bytes) { sendJson(response, 404, { error: { code: "image_not_found", message: "Image was not found." } }); return; }
-    response.writeHead(200, { "content-type": imageMime(imageMatch[1]!)!, "content-length": bytes.length, "cache-control": "private, max-age=86400" });
-    response.end(bytes);
+    const image = await assistant.image(account.id, imageMatch[1]!.replace(/\.[a-z]+$/, "")).catch(() => undefined);
+    if (!image) { sendJson(response, 404, { error: { code: "image_not_found", message: "Image was not found." } }); return; }
+    response.writeHead(200, { "content-type": image.mime, "content-length": image.bytes.length, "cache-control": "private, max-age=86400" });
+    response.end(image.bytes);
     return;
   }
   if (url.pathname === "/v1/creator/assistant/events" && request.method === "GET") {
+    const feed = `assistant:${account.id}`;
+    // From the cursor the page last heard (`after_cursor`, or the Last-Event-ID the browser echoes on reconnect), else from now. A cursor the feed never issued is refused before the stream opens.
+    let from: string;
+    try { from = await resumePoint(context.conversationPorts.eventLog, feed, url.searchParams.get("after_cursor") ?? (request.headers["last-event-id"] as string | undefined)); }
+    catch (error) {
+      if (error instanceof ConversationError) { sendJson(response, error.status, { error: { code: error.code, message: error.message } }); return; }
+      throw error;
+    }
     response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
     response.write(": connected\n\n");
-    const listener = (event: { accountId?: string }) => { if (event.accountId === account.id && !response.writableEnded) response.write(`data: ${JSON.stringify({ ...event, accountId: undefined })}\n\n`); };
-    assistant.events.on("event", listener);
+    // The page hears the same events every Studio client does, in the words it knows: a finished message or Run is something to reload.
+    const stop = new AbortController();
+    response.once("close", () => stop.abort());
     const heartbeat = setInterval(() => { if (!response.writableEnded) response.write(": heartbeat\n\n"); }, 15_000);
-    await new Promise<void>(resolve => response.once("close", () => resolve()));
+    await follow(context.conversationPorts.eventLog, feed, from, ({ cursor, event }) => {
+      if (!response.writableEnded) response.write(`id: ${cursor}\ndata: ${JSON.stringify(event)}\n\n`);
+    }, { signal: stop.signal });
     clearInterval(heartbeat);
-    assistant.events.off("event", listener);
     return;
   }
   const taskAction = url.pathname.match(/^\/v1\/creator\/assistant\/tasks\/([0-9a-f-]{36})\/(approve|decline|answer)$/);
   if (taskAction && request.method === "POST") {
     const [, taskId, action] = taskAction;
     const body = await readJson(request);
-    const task = action === "approve" ? await assistant.approve(account.id, taskId!)
-      : action === "decline" ? await assistant.decline(account.id, taskId!)
-        : await assistant.answer(account.id, taskId!, String(body.answer ?? "").trim() || (() => { throw Object.assign(new Error("answer is required"), { status: 400 }); })());
-    await assistant.ingest(account.id, { source: "task", taskId: task.id, text: `专家在 Studio 里${action === "approve" ? "确认了" : action === "decline" ? "取消了" : "回答了"}这件事。` });
+    // A click retried, or clicked twice, is one decision: the page's key names it, and the Assistant hears it once.
+    const key = messageKey(request.headers["idempotency-key"]) ?? randomUUID();
+    const task = action === "answer"
+      ? await assistant.answer(account.id, taskId!, String(body.answer ?? "").trim() || (() => { throw Object.assign(new Error("answer is required"), { status: 400 }); })())
+      : (await assistant.decide(account.id, taskId!, action as "approve" | "decline", key)).task;
+    await assistant.news(account.id, task.id, `专家在 Studio 里${action === "approve" ? "确认了" : action === "decline" ? "取消了" : "回答了"}这件事。`, "task", action === "answer" ? undefined : `decided:${task.id}`);
     sendJson(response, 200, { task });
     return;
   }
-  if (url.pathname === "/v1/creator/assistant/channels/lark/credentials" && request.method === "POST") {
-    if (!context.credentialSeal) { sendJson(response, 503, { error: { code: "channel_unavailable", message: "Lark is not available." } }); return; }
+  const credentialsRoute = url.pathname.match(/^\/v1\/creator\/connections\/([a-z]+)\/credentials$/);
+  const kindOfForm = credentialsRoute && isChannelKind(credentialsRoute[1]!) ? credentialsRoute[1] : undefined;
+  const form = kindOfForm && CREDENTIAL_FORMS[kindOfForm];
+  if (kindOfForm && request.method === "POST" && isPerProduct(form)) {
     const body = await readJson(request);
-    const text = (name: string) => typeof body[name] === "string" ? (body[name] as string).trim() : "";
-    const credentials: LarkCredentials = { domain: body.domain === "feishu" ? "feishu" : "lark", appId: text("app_id"), appSecret: text("app_secret"), verificationToken: text("verification_token"), ...(text("encrypt_key") ? { encryptKey: text("encrypt_key") } : {}) };
-    if (!credentials.appId || !credentials.appSecret || !credentials.verificationToken) { sendJson(response, 400, { error: { code: "invalid_credentials", message: "App ID, App Secret and Verification Token are required." } }); return; }
-    try { await new LarkChannel(credentials, account.id).probe(); }
-    catch (cause) { sendJson(response, 422, { error: { code: "lark_probe_failed", message: cause instanceof Error ? cause.message : String(cause) } }); return; }
-    await context.links!.saveCredentials(account.id, "lark", context.credentialSeal.seal(credentials));
+    const productId = String(body.product_id ?? "");
+    if (!context.ownApps || !productId) { sendJson(response, 503, { error: { code: "channel_unavailable", message: `${CHANNEL_LABELS[kindOfForm]} is not available.` } }); return; }
+    await context.ownApps.save(account.id, kindOfForm, productId, body);
+    sendJson(response, 200, { channels: await channelsView({ kind: "product", productId }) });
+    return;
+  }
+  if (kindOfForm && form && request.method === "POST") {
+    if (!context.credentialSeal) { sendJson(response, 503, { error: { code: "channel_unavailable", message: `${CHANNEL_LABELS[kindOfForm]} is not available.` } }); return; }
+    const credentials = readCredentials(form, await readJson(request));
+    // A tenant of the shared app is served by the shared adapter; an Expert's own app is built from what they typed.
+    const adapter = credentials && (isTenantForm(form) ? await channels.hub.get(kindOfForm) : form.build(credentials, account.id));
+    if (!credentials || !adapter?.available()) { sendJson(response, 400, { error: { code: "invalid_credentials", message: `${CHANNEL_LABELS[kindOfForm]} credentials are missing or malformed.` } }); return; }
+    try { Object.assign(credentials, await form.probe?.(adapter, credentials)); }
+    catch (cause) { sendJson(response, 422, { error: { code: `${kindOfForm}_probe_failed`, message: cause instanceof Error ? cause.message : String(cause) } }); return; }
+    await channels.connections.saveCredentials(account.id, kindOfForm, context.credentialSeal.seal(credentials), isTenantForm(form) ? String(credentials[form.tenant]) : undefined);
     sendJson(response, 200, { channels: await channelsView() });
     return;
   }
-  const channelRoute = url.pathname.match(/^\/v1\/creator\/assistant\/channels\/([a-z]+)(\/connect)?$/);
-  if (channelRoute && (CHANNEL_KINDS as readonly string[]).includes(channelRoute[1]!)) {
-    const kind = channelRoute[1] as ChannelKind;
-    if (channelRoute[2] && request.method === "POST") { sendJson(response, 200, await assistant.connectChannel(account.id, kind)); return; }
-    if (!channelRoute[2] && request.method === "DELETE") { await context.links!.unlink(account.id, kind); sendJson(response, 200, { channels: await channelsView() }); return; }
+  // Every account binds its chats: the Assistant for Studio, or a Product's Chat when `product_id` names one.
+  if (url.pathname === "/v1/creator/connections" && request.method === "GET") {
+    sendJson(response, 200, { channels: await channelsView(bindingTarget(url.searchParams.get("product_id"))) }, { "cache-control": "no-store" });
+    return;
+  }
+  // The owner of the Assistant invites one more person, and takes their access away again.
+  const people = url.pathname.match(/^\/v1\/creator\/connections\/([a-z]+)\/(invites|people\/([0-9a-f-]{36}))$/);
+  if (people && isChannelKind(people[1]!)) {
+    if (people[2] === "invites" && request.method === "POST") {
+      sendJson(response, 200, await channels.invite(account.id, people[1], String((await readJson(request)).label ?? "")));
+      return;
+    }
+    if (people[3] && request.method === "DELETE") {
+      await channels.dismiss(account.id, people[1], people[3]);
+      sendJson(response, 200, { channels: await channelsView() });
+      return;
+    }
+  }
+  const connection = url.pathname.match(/^\/v1\/creator\/connections\/([a-z]+)(\/connect)?$/);
+  if (connection && isChannelKind(connection[1]!)) {
+    const kind = connection[1];
+    if (connection[2] && request.method === "POST") {
+      const target = bindingTarget((await readJson(request)).product_id as string | undefined);
+      sendJson(response, 200, await channels.connect(account.id, kind, target));
+      return;
+    }
+    if (!connection[2] && request.method === "DELETE") {
+      const target = bindingTarget(url.searchParams.get("product_id"));
+      if (target.kind === "product" && botKind(kind, target)) await context.ownApps?.remove(account.id, kind, target.productId);
+      else await channels.disconnect(account.id, kind, target);
+      sendJson(response, 200, { channels: await channelsView(target) });
+      return;
+    }
   }
   sendJson(response, 404, { error: { code: "not_found", message: "Route not found." } });
 }

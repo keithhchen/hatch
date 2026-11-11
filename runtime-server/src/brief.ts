@@ -122,7 +122,7 @@ export function briefSpecDigest(spec: BriefSpec): string {
 
 export function createBriefSnapshot(
   specValue: unknown,
-  answersValue: unknown,
+  answersValue: unknown = [],
   options: { id?: string; submittedAt?: string } = {}
 ): BriefSnapshot {
   const spec = normalizeBriefSpec(specValue);
@@ -153,13 +153,14 @@ export function createBriefSnapshot(
   if (totalCharacters > MAX_BRIEF_ANSWER_TOTAL_CHARS) {
     throw new BriefValidationError("brief_answer_invalid", "Brief answers are too large in total");
   }
-  const fields = spec.fields.map((field): BriefSnapshotField => {
-    const value = answers.get(field.id) ?? "";
-    if (field.required && !value) {
-      throw new BriefValidationError("brief_required_answer_missing", `Answer required: ${field.label}`);
-    }
-    return { ...field, value: value || null };
-  });
+  const missing = spec.fields.filter((field) => field.required && !answers.get(field.id));
+  if (missing.length) {
+    throw new BriefValidationError(
+      "brief_required_answer_missing",
+      `Answers required in brief_answers [{field_id, value}]: ${missing.map((field) => `${field.id} (${field.label})`).join("; ")}`
+    );
+  }
+  const fields = spec.fields.map((field): BriefSnapshotField => ({ ...field, value: answers.get(field.id) || null }));
   return {
     id: normalizeSnapshotId(options.id ?? `brief_${randomUUID().replaceAll("-", "")}`),
     spec_digest: briefSpecDigest(spec),

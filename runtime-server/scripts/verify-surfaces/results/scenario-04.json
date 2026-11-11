@@ -1,0 +1,1792 @@
+{
+  "id": 4,
+  "title": "Idempotency end to end: webhooks, outbound faults, HTTP/SSE/WS sends, Studio keys",
+  "status": "PASS",
+  "durationMs": 192727,
+  "checks": [
+    {
+      "name": "A1 same update x10 sequential, then x5 after the reply: one inbox row per distinct update (1)",
+      "ok": true,
+      "detail": {
+        "rows": 1
+      }
+    },
+    {
+      "name": "A1 same update x10 sequential, then x5 after the reply: duplicate turns = 0",
+      "ok": true,
+      "detail": {
+        "users": [
+          "Reply with exactly the word: alpha"
+        ],
+        "runs": 1
+      }
+    },
+    {
+      "name": "A1 same update x10 sequential, then x5 after the reply: every distinct message reached the model once",
+      "ok": true,
+      "detail": {
+        "seen": 1
+      }
+    },
+    {
+      "name": "A1 same update x10 sequential, then x5 after the reply: duplicate outbound deliveries = 0 (delivered <= Runs, one outbox row per source key)",
+      "ok": true,
+      "detail": {
+        "delivered": 1,
+        "runs": 1,
+        "texts": [
+          "alpha"
+        ]
+      }
+    },
+    {
+      "name": "A1 same update x10 sequential, then x5 after the reply: the webhook always answered 200",
+      "ok": true,
+      "detail": {
+        "posts": 15,
+        "non200": 0
+      }
+    },
+    {
+      "name": "A2 same update x10 concurrent: one inbox row per distinct update (1)",
+      "ok": true,
+      "detail": {
+        "rows": 1
+      }
+    },
+    {
+      "name": "A2 same update x10 concurrent: duplicate turns = 0",
+      "ok": true,
+      "detail": {
+        "users": [
+          "Reply with exactly the word: bravo"
+        ],
+        "runs": 1
+      }
+    },
+    {
+      "name": "A2 same update x10 concurrent: every distinct message reached the model once",
+      "ok": true,
+      "detail": {
+        "seen": 1
+      }
+    },
+    {
+      "name": "A2 same update x10 concurrent: duplicate outbound deliveries = 0 (delivered <= Runs, one outbox row per source key)",
+      "ok": true,
+      "detail": {
+        "delivered": 1,
+        "runs": 1,
+        "texts": [
+          "bravo"
+        ]
+      }
+    },
+    {
+      "name": "A2 same update x10 concurrent: the webhook always answered 200",
+      "ok": true,
+      "detail": {
+        "posts": 10,
+        "non200": 0
+      }
+    },
+    {
+      "name": "A3 update ids out of order + redelivery: one inbox row per distinct update (2)",
+      "ok": true,
+      "detail": {
+        "rows": 2
+      }
+    },
+    {
+      "name": "A3 update ids out of order + redelivery: duplicate turns = 0",
+      "ok": true,
+      "detail": {
+        "users": [
+          "Reply with exactly the word: delta",
+          "Reply with exactly the word: charlie"
+        ],
+        "runs": 1
+      }
+    },
+    {
+      "name": "A3 update ids out of order + redelivery: every distinct message reached the model once",
+      "ok": true,
+      "detail": {
+        "seen": 2
+      }
+    },
+    {
+      "name": "A3 update ids out of order + redelivery: duplicate outbound deliveries = 0 (delivered <= Runs, one outbox row per source key)",
+      "ok": true,
+      "detail": {
+        "delivered": 1,
+        "runs": 1,
+        "texts": [
+          "deltacharlie"
+        ]
+      }
+    },
+    {
+      "name": "A3 update ids out of order + redelivery: the webhook always answered 200",
+      "ok": true,
+      "detail": {
+        "posts": 6,
+        "non200": 0
+      }
+    },
+    {
+      "name": "A4 the cut posts were stored although the platform never saw an answer",
+      "ok": true,
+      "detail": {
+        "storedBeforeAnyRetry": 1,
+        "cut": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    {
+      "name": "A4 webhook cut client-side x3, then retried x3: one inbox row per distinct update (1)",
+      "ok": true,
+      "detail": {
+        "rows": 1
+      }
+    },
+    {
+      "name": "A4 webhook cut client-side x3, then retried x3: duplicate turns = 0",
+      "ok": true,
+      "detail": {
+        "users": [
+          "Reply with exactly the word: echo"
+        ],
+        "runs": 1
+      }
+    },
+    {
+      "name": "A4 webhook cut client-side x3, then retried x3: every distinct message reached the model once",
+      "ok": true,
+      "detail": {
+        "seen": 1
+      }
+    },
+    {
+      "name": "A4 webhook cut client-side x3, then retried x3: duplicate outbound deliveries = 0 (delivered <= Runs, one outbox row per source key)",
+      "ok": true,
+      "detail": {
+        "delivered": 1,
+        "runs": 1,
+        "texts": [
+          "echo"
+        ]
+      }
+    },
+    {
+      "name": "A4 webhook cut client-side x3, then retried x3: the webhook always answered 200",
+      "ok": true,
+      "detail": {
+        "posts": 6,
+        "cutShortClientSide": 3,
+        "non200": 0
+      }
+    },
+    {
+      "name": "A5 same update id, other content: one turn, the first text; webhook answered 200",
+      "ok": true,
+      "detail": {
+        "statuses": [
+          200,
+          200
+        ],
+        "texts": [
+          "Reply with exactly the word: foxtrot"
+        ]
+      }
+    },
+    {
+      "name": "b: 429 once, then OK: outbox ends sent",
+      "ok": true,
+      "detail": {
+        "chat": 7201,
+        "outboxRows": 1,
+        "state": "sent",
+        "rowAttempts": 1,
+        "platformAttempts": 2,
+        "platformFaults": [
+          "429",
+          "ok"
+        ],
+        "delivered": 1,
+        "lastError": "Telegram sendMessage failed: Too Many Requests: retry after 1"
+      }
+    },
+    {
+      "name": "b: 429 once, then OK: the platform was asked exactly 2 time(s) (no resend of an ambiguous send)",
+      "ok": true,
+      "detail": {
+        "chat": 7201,
+        "outboxRows": 1,
+        "state": "sent",
+        "rowAttempts": 1,
+        "platformAttempts": 2,
+        "platformFaults": [
+          "429",
+          "ok"
+        ],
+        "delivered": 1,
+        "lastError": "Telegram sendMessage failed: Too Many Requests: retry after 1"
+      }
+    },
+    {
+      "name": "b: 429 once, then OK: exactly one delivered",
+      "ok": true,
+      "detail": {
+        "chat": 7201,
+        "outboxRows": 1,
+        "state": "sent",
+        "rowAttempts": 1,
+        "platformAttempts": 2,
+        "platformFaults": [
+          "429",
+          "ok"
+        ],
+        "delivered": 1,
+        "lastError": "Telegram sendMessage failed: Too Many Requests: retry after 1"
+      }
+    },
+    {
+      "name": "b: 429 once, then OK: never delivered twice",
+      "ok": true,
+      "detail": {
+        "chat": 7201,
+        "outboxRows": 1,
+        "state": "sent",
+        "rowAttempts": 1,
+        "platformAttempts": 2,
+        "platformFaults": [
+          "429",
+          "ok"
+        ],
+        "delivered": 1,
+        "lastError": "Telegram sendMessage failed: Too Many Requests: retry after 1"
+      }
+    },
+    {
+      "name": "b: 429 twice, then OK: outbox ends sent",
+      "ok": true,
+      "detail": {
+        "chat": 7202,
+        "outboxRows": 1,
+        "state": "sent",
+        "rowAttempts": 2,
+        "platformAttempts": 3,
+        "platformFaults": [
+          "429",
+          "429",
+          "ok"
+        ],
+        "delivered": 1,
+        "lastError": "Telegram sendMessage failed: Too Many Requests"
+      }
+    },
+    {
+      "name": "b: 429 twice, then OK: the platform was asked exactly 3 time(s) (no resend of an ambiguous send)",
+      "ok": true,
+      "detail": {
+        "chat": 7202,
+        "outboxRows": 1,
+        "state": "sent",
+        "rowAttempts": 2,
+        "platformAttempts": 3,
+        "platformFaults": [
+          "429",
+          "429",
+          "ok"
+        ],
+        "delivered": 1,
+        "lastError": "Telegram sendMessage failed: Too Many Requests"
+      }
+    },
+    {
+      "name": "b: 429 twice, then OK: exactly one delivered",
+      "ok": true,
+      "detail": {
+        "chat": 7202,
+        "outboxRows": 1,
+        "state": "sent",
+        "rowAttempts": 2,
+        "platformAttempts": 3,
+        "platformFaults": [
+          "429",
+          "429",
+          "ok"
+        ],
+        "delivered": 1,
+        "lastError": "Telegram sendMessage failed: Too Many Requests"
+      }
+    },
+    {
+      "name": "b: 429 twice, then OK: never delivered twice",
+      "ok": true,
+      "detail": {
+        "chat": 7202,
+        "outboxRows": 1,
+        "state": "sent",
+        "rowAttempts": 2,
+        "platformAttempts": 3,
+        "platformFaults": [
+          "429",
+          "429",
+          "ok"
+        ],
+        "delivered": 1,
+        "lastError": "Telegram sendMessage failed: Too Many Requests"
+      }
+    },
+    {
+      "name": "b: timeout, platform received it anyway: outbox ends unknown",
+      "ok": true,
+      "detail": {
+        "chat": 7203,
+        "outboxRows": 1,
+        "state": "unknown",
+        "rowAttempts": 0,
+        "platformAttempts": 1,
+        "platformFaults": [
+          "timeout"
+        ],
+        "delivered": 1,
+        "lastError": "Telegram sendMessage did not complete: The operation was aborted due to timeout"
+      }
+    },
+    {
+      "name": "b: timeout, platform received it anyway: the platform was asked exactly 1 time(s) (no resend of an ambiguous send)",
+      "ok": true,
+      "detail": {
+        "chat": 7203,
+        "outboxRows": 1,
+        "state": "unknown",
+        "rowAttempts": 0,
+        "platformAttempts": 1,
+        "platformFaults": [
+          "timeout"
+        ],
+        "delivered": 1,
+        "lastError": "Telegram sendMessage did not complete: The operation was aborted due to timeout"
+      }
+    },
+    {
+      "name": "b: timeout, platform received it anyway: never delivered twice",
+      "ok": true,
+      "detail": {
+        "chat": 7203,
+        "outboxRows": 1,
+        "state": "unknown",
+        "rowAttempts": 0,
+        "platformAttempts": 1,
+        "platformFaults": [
+          "timeout"
+        ],
+        "delivered": 1,
+        "lastError": "Telegram sendMessage did not complete: The operation was aborted due to timeout"
+      }
+    },
+    {
+      "name": "b: timeout, platform never received it: outbox ends unknown",
+      "ok": true,
+      "detail": {
+        "chat": 7204,
+        "outboxRows": 1,
+        "state": "unknown",
+        "rowAttempts": 0,
+        "platformAttempts": 1,
+        "platformFaults": [
+          "timeout"
+        ],
+        "delivered": 0,
+        "lastError": "Telegram sendMessage did not complete: The operation was aborted due to timeout"
+      }
+    },
+    {
+      "name": "b: timeout, platform never received it: the platform was asked exactly 1 time(s) (no resend of an ambiguous send)",
+      "ok": true,
+      "detail": {
+        "chat": 7204,
+        "outboxRows": 1,
+        "state": "unknown",
+        "rowAttempts": 0,
+        "platformAttempts": 1,
+        "platformFaults": [
+          "timeout"
+        ],
+        "delivered": 0,
+        "lastError": "Telegram sendMessage did not complete: The operation was aborted due to timeout"
+      }
+    },
+    {
+      "name": "b: timeout, platform never received it: never delivered twice",
+      "ok": true,
+      "detail": {
+        "chat": 7204,
+        "outboxRows": 1,
+        "state": "unknown",
+        "rowAttempts": 0,
+        "platformAttempts": 1,
+        "platformFaults": [
+          "timeout"
+        ],
+        "delivered": 0,
+        "lastError": "Telegram sendMessage did not complete: The operation was aborted due to timeout"
+      }
+    },
+    {
+      "name": "b: 5xx once, then OK: outbox ends unknown",
+      "ok": true,
+      "detail": {
+        "chat": 7205,
+        "outboxRows": 1,
+        "state": "unknown",
+        "rowAttempts": 0,
+        "platformAttempts": 1,
+        "platformFaults": [
+          "502"
+        ],
+        "delivered": 0,
+        "lastError": "Telegram sendMessage failed: Bad Gateway"
+      }
+    },
+    {
+      "name": "b: 5xx once, then OK: the platform was asked exactly 1 time(s) (no resend of an ambiguous send)",
+      "ok": true,
+      "detail": {
+        "chat": 7205,
+        "outboxRows": 1,
+        "state": "unknown",
+        "rowAttempts": 0,
+        "platformAttempts": 1,
+        "platformFaults": [
+          "502"
+        ],
+        "delivered": 0,
+        "lastError": "Telegram sendMessage failed: Bad Gateway"
+      }
+    },
+    {
+      "name": "b: 5xx once, then OK: never delivered twice",
+      "ok": true,
+      "detail": {
+        "chat": 7205,
+        "outboxRows": 1,
+        "state": "unknown",
+        "rowAttempts": 0,
+        "platformAttempts": 1,
+        "platformFaults": [
+          "502"
+        ],
+        "delivered": 0,
+        "lastError": "Telegram sendMessage failed: Bad Gateway"
+      }
+    },
+    {
+      "name": "b: 400 permanent: outbox ends failed",
+      "ok": true,
+      "detail": {
+        "chat": 7206,
+        "outboxRows": 1,
+        "state": "failed",
+        "rowAttempts": 0,
+        "platformAttempts": 1,
+        "platformFaults": [
+          "400"
+        ],
+        "delivered": 0,
+        "lastError": "Telegram sendMessage failed: Bad Request: chat not found"
+      }
+    },
+    {
+      "name": "b: 400 permanent: the platform was asked exactly 1 time(s) (no resend of an ambiguous send)",
+      "ok": true,
+      "detail": {
+        "chat": 7206,
+        "outboxRows": 1,
+        "state": "failed",
+        "rowAttempts": 0,
+        "platformAttempts": 1,
+        "platformFaults": [
+          "400"
+        ],
+        "delivered": 0,
+        "lastError": "Telegram sendMessage failed: Bad Request: chat not found"
+      }
+    },
+    {
+      "name": "b: 400 permanent: never delivered twice",
+      "ok": true,
+      "detail": {
+        "chat": 7206,
+        "outboxRows": 1,
+        "state": "failed",
+        "rowAttempts": 0,
+        "platformAttempts": 1,
+        "platformFaults": [
+          "400"
+        ],
+        "delivered": 0,
+        "lastError": "Telegram sendMessage failed: Bad Request: chat not found"
+      }
+    },
+    {
+      "name": "C1 first send answered, repeats replay the same Run",
+      "ok": true,
+      "detail": {
+        "first": 200,
+        "outcomes": [
+          "replayed",
+          "replayed",
+          "replayed",
+          "replayed",
+          "replayed",
+          "replayed",
+          "replayed",
+          "replayed",
+          "replayed"
+        ]
+      }
+    },
+    {
+      "name": "c1_http_sequential_x10: 1 Run(s)",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "c1_http_sequential_x10: 1 user message(s) in the journal and in the model transcript",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "c1_http_sequential_x10: model calls = 1 (one answer per Run)",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "C1b repeats while running are accepted without a second Run",
+      "ok": true,
+      "detail": [
+        [
+          202,
+          "started"
+        ],
+        [
+          202,
+          "replayed"
+        ],
+        [
+          202,
+          "replayed"
+        ],
+        [
+          202,
+          "replayed"
+        ],
+        [
+          202,
+          "replayed"
+        ],
+        [
+          202,
+          "replayed"
+        ]
+      ]
+    },
+    {
+      "name": "c1b_http_repeat_while_running_x6: 1 Run(s)",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "c1b_http_repeat_while_running_x6: 1 user message(s) in the journal and in the model transcript",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "c1b_http_repeat_while_running_x6: model calls = 1 (one answer per Run)",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "C2 no concurrent same-key send failed",
+      "ok": true,
+      "detail": [
+        [
+          202,
+          null
+        ],
+        [
+          202,
+          null
+        ],
+        [
+          202,
+          null
+        ],
+        [
+          202,
+          null
+        ],
+        [
+          202,
+          null
+        ],
+        [
+          202,
+          null
+        ],
+        [
+          202,
+          null
+        ],
+        [
+          202,
+          null
+        ],
+        [
+          202,
+          null
+        ],
+        [
+          202,
+          null
+        ]
+      ]
+    },
+    {
+      "name": "C2 exactly one send started the Run",
+      "ok": true,
+      "detail": {
+        "started": 1,
+        "replayed": 9
+      }
+    },
+    {
+      "name": "c2_http_concurrent_x10: 1 Run(s)",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "c2_http_concurrent_x10: 1 user message(s) in the journal and in the model transcript",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "c2_http_concurrent_x10: model calls = 1 (one answer per Run)",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "c3_sse_same_key_x2: 1 Run(s)",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "c3_sse_same_key_x2: 1 user message(s) in the journal and in the model transcript",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "c3_sse_same_key_x2: model calls = 1 (one answer per Run)",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "C3 an SSE replay of a finished Run's key ends by itself",
+      "ok": true,
+      "detail": [
+        "message.accepted",
+        "assistant.delta",
+        "journal.event"
+      ]
+    },
+    {
+      "name": "c3_sse_after_replay: 1 Run(s)",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "c3_sse_after_replay: 1 user message(s) in the journal and in the model transcript",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "c3_sse_after_replay: model calls = 1 (one answer per Run)",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "C4 same key, other content, after the Run: 409 client_message_conflict",
+      "ok": true,
+      "detail": {
+        "ok": 200,
+        "clash": [
+          409,
+          "client_message_conflict"
+        ]
+      }
+    },
+    {
+      "name": "C4 same key, same content still replays",
+      "ok": true,
+      "detail": [
+        200,
+        "replayed"
+      ]
+    },
+    {
+      "name": "c4_conflict_after_run: 1 Run(s)",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "c4_conflict_after_run: 1 user message(s) in the journal and in the model transcript",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "c4_conflict_after_run: model calls = 1 (one answer per Run)",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "C4b second message during the Run steers it",
+      "ok": true,
+      "detail": [
+        202,
+        {
+          "run_id": "run_760203bfb8cb4f26b50fd54c87aa41f6",
+          "outcome": "steered",
+          "status": "running"
+        }
+      ]
+    },
+    {
+      "name": "C4b other content on the first key during the Run: 409 client_message_conflict",
+      "ok": true,
+      "detail": [
+        409,
+        "client_message_conflict"
+      ]
+    },
+    {
+      "name": "C4b other content on the steered key: 409 client_message_conflict",
+      "ok": true,
+      "detail": [
+        409,
+        "client_message_conflict"
+      ]
+    },
+    {
+      "name": "C4b same content on the steered key replays",
+      "ok": true,
+      "detail": [
+        202,
+        "replayed"
+      ]
+    },
+    {
+      "name": "C4b the journal holds exactly the two accepted messages",
+      "ok": true,
+      "detail": [
+        {
+          "cursor": "101",
+          "run_id": "run_760203bfb8cb4f26b50fd54c87aa41f6",
+          "key": "fc412fc6-74fb-45fc-a07f-19eb79849830",
+          "steered": null
+        },
+        {
+          "cursor": "103",
+          "run_id": "run_760203bfb8cb4f26b50fd54c87aa41f6",
+          "key": "8774bfad-539e-4880-ae14-ae9e82aba529",
+          "steered": "true"
+        }
+      ]
+    },
+    {
+      "name": "C5 same key over an asset with the same bytes replays",
+      "ok": true,
+      "detail": {
+        "first": 200,
+        "sameBytes": [
+          200,
+          "replayed"
+        ]
+      }
+    },
+    {
+      "name": "C5 same key over an asset with other bytes: 409 client_message_conflict",
+      "ok": true,
+      "detail": [
+        409,
+        "client_message_conflict"
+      ]
+    },
+    {
+      "name": "c5_asset_key: 1 Run(s)",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "c5_asset_key: 1 user message(s) in the journal and in the model transcript",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "c5_asset_key: model calls = 1 (one answer per Run)",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "D0 an API key in the upgrade's Authorization header opens the Desktop socket",
+      "ok": true,
+      "detail": "ok"
+    },
+    {
+      "name": "D1 a second socket sending the same key is accepted as a replay",
+      "ok": true,
+      "detail": [
+        "client_message_conflict"
+      ]
+    },
+    {
+      "name": "D1 same key, other content over the socket: turn.failed client_message_conflict",
+      "ok": true,
+      "detail": [
+        "client_message_conflict"
+      ]
+    },
+    {
+      "name": "D1 the same key over HTTP after the socket replays",
+      "ok": true,
+      "detail": [
+        200,
+        "replayed",
+        null
+      ]
+    },
+    {
+      "name": "d1_ws_same_and_second_socket: 1 Run(s)",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "d1_ws_same_and_second_socket: 1 user message(s) in the journal and in the model transcript",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "d1_ws_same_and_second_socket: model calls = 1 (one answer per Run)",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "D2 concurrent same-key sends on two sockets never fail",
+      "ok": true,
+      "detail": {
+        "s1": [],
+        "s2": []
+      }
+    },
+    {
+      "name": "d2_ws_two_sockets_concurrent: 1 Run(s)",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "d2_ws_two_sockets_concurrent: 1 user message(s) in the journal and in the model transcript",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "d2_ws_two_sockets_concurrent: model calls = 1 (one answer per Run)",
+      "ok": true,
+      "detail": {
+        "runs": 1,
+        "modelUsers": 1,
+        "journalUsers": 1,
+        "modelReplies": 1
+      }
+    },
+    {
+      "name": "E1 Assistant: five sends of one key leave one user message",
+      "ok": true,
+      "detail": {
+        "lines": 1,
+        "statuses": [
+          202,
+          202,
+          202,
+          202,
+          202
+        ]
+      }
+    },
+    {
+      "name": "E2 Assistant: ten concurrent sends of one key leave one user message",
+      "ok": true,
+      "detail": {
+        "lines": 1,
+        "statuses": [
+          202,
+          202,
+          202,
+          202,
+          202,
+          202,
+          202,
+          202,
+          202,
+          202
+        ]
+      }
+    },
+    {
+      "name": "E3 Assistant: same key, other content: 409 idempotency_conflict",
+      "ok": true,
+      "detail": {
+        "first": 202,
+        "clash": [
+          409,
+          "idempotency_conflict"
+        ]
+      }
+    },
+    {
+      "name": "E3 Assistant: the refused message was not stored",
+      "ok": true
+    },
+    {
+      "name": "E4 creating a Product with one Idempotency-Key five times at once makes one Product",
+      "ok": true,
+      "detail": {
+        "statuses": [
+          201,
+          201,
+          201,
+          201,
+          201
+        ],
+        "ids": 1,
+        "products": 1
+      }
+    },
+    {
+      "name": "E4 the same key with another payload: 409 idempotency_conflict",
+      "ok": true,
+      "detail": [
+        409,
+        "idempotency_conflict"
+      ]
+    },
+    {
+      "name": "E4 a later replay of the create returns the same Product",
+      "ok": true,
+      "detail": [
+        201,
+        true
+      ]
+    },
+    {
+      "name": "E4 worker: five concurrent sends of one key leave one user message, and a replay returns the same message",
+      "ok": true,
+      "detail": {
+        "statuses": [
+          202,
+          202,
+          202,
+          202,
+          202
+        ],
+        "lines": 1,
+        "again": 202
+      }
+    },
+    {
+      "name": "E4 worker: same key, other content: 409 idempotency_conflict",
+      "ok": true,
+      "detail": [
+        409,
+        "idempotency_conflict"
+      ]
+    }
+  ],
+  "measurements": {
+    "A1 same update x10 sequential, then x5 after the reply": {
+      "posts": 15,
+      "non200": 0,
+      "inboxRows": 1,
+      "inboxStates": {
+        "done": 1
+      },
+      "runs": 1,
+      "userTurnsSeenByModel": 1,
+      "modelReplies": 1,
+      "outboundDelivered": 1,
+      "outboundAttempts": 1,
+      "outboxStates": {
+        "sent": 1
+      },
+      "duplicateTurns": 0,
+      "duplicateDeliveries": 0
+    },
+    "A2 same update x10 concurrent": {
+      "posts": 10,
+      "non200": 0,
+      "inboxRows": 1,
+      "inboxStates": {
+        "done": 1
+      },
+      "runs": 1,
+      "userTurnsSeenByModel": 1,
+      "modelReplies": 1,
+      "outboundDelivered": 1,
+      "outboundAttempts": 1,
+      "outboxStates": {
+        "sent": 1
+      },
+      "duplicateTurns": 0,
+      "duplicateDeliveries": 0
+    },
+    "A3 update ids out of order + redelivery": {
+      "posts": 6,
+      "non200": 0,
+      "inboxRows": 2,
+      "inboxStates": {
+        "done": 2
+      },
+      "runs": 1,
+      "userTurnsSeenByModel": 2,
+      "modelReplies": 1,
+      "outboundDelivered": 1,
+      "outboundAttempts": 1,
+      "outboxStates": {
+        "sent": 1
+      },
+      "duplicateTurns": 0,
+      "duplicateDeliveries": 0
+    },
+    "a3_transcript_order_of_arrival_vs_update_id": [
+      "delta",
+      "charlie"
+    ],
+    "a4_inbox_rows_after_cut_posts_only": 1,
+    "A4 webhook cut client-side x3, then retried x3": {
+      "posts": 6,
+      "cutShortClientSide": 3,
+      "non200": 0,
+      "inboxRows": 1,
+      "inboxStates": {
+        "done": 1
+      },
+      "runs": 1,
+      "userTurnsSeenByModel": 1,
+      "modelReplies": 1,
+      "outboundDelivered": 1,
+      "outboundAttempts": 1,
+      "outboxStates": {
+        "sent": 1
+      },
+      "duplicateTurns": 0,
+      "duplicateDeliveries": 0
+    },
+    "a5_same_update_id_other_content": {
+      "statuses": [
+        200,
+        200
+      ],
+      "texts": [
+        "Reply with exactly the word: foxtrot"
+      ],
+      "inboxRows": 1
+    },
+    "a_summary": {
+      "sequential": {
+        "posts": 15,
+        "non200": 0,
+        "inboxRows": 1,
+        "inboxStates": {
+          "done": 1
+        },
+        "runs": 1,
+        "userTurnsSeenByModel": 1,
+        "modelReplies": 1,
+        "outboundDelivered": 1,
+        "outboundAttempts": 1,
+        "outboxStates": {
+          "sent": 1
+        },
+        "duplicateTurns": 0,
+        "duplicateDeliveries": 0
+      },
+      "concurrent": {
+        "posts": 10,
+        "non200": 0,
+        "inboxRows": 1,
+        "inboxStates": {
+          "done": 1
+        },
+        "runs": 1,
+        "userTurnsSeenByModel": 1,
+        "modelReplies": 1,
+        "outboundDelivered": 1,
+        "outboundAttempts": 1,
+        "outboxStates": {
+          "sent": 1
+        },
+        "duplicateTurns": 0,
+        "duplicateDeliveries": 0
+      },
+      "outOfOrder": {
+        "posts": 6,
+        "non200": 0,
+        "inboxRows": 2,
+        "inboxStates": {
+          "done": 2
+        },
+        "runs": 1,
+        "userTurnsSeenByModel": 2,
+        "modelReplies": 1,
+        "outboundDelivered": 1,
+        "outboundAttempts": 1,
+        "outboxStates": {
+          "sent": 1
+        },
+        "duplicateTurns": 0,
+        "duplicateDeliveries": 0
+      },
+      "timedOut": {
+        "posts": 6,
+        "cutShortClientSide": 3,
+        "non200": 0,
+        "inboxRows": 1,
+        "inboxStates": {
+          "done": 1
+        },
+        "runs": 1,
+        "userTurnsSeenByModel": 1,
+        "modelReplies": 1,
+        "outboundDelivered": 1,
+        "outboundAttempts": 1,
+        "outboxStates": {
+          "sent": 1
+        },
+        "duplicateTurns": 0,
+        "duplicateDeliveries": 0
+      }
+    },
+    "b_fault_cases": {
+      "429 once, then OK": {
+        "chat": 7201,
+        "outboxRows": 1,
+        "state": "sent",
+        "rowAttempts": 1,
+        "platformAttempts": 2,
+        "platformFaults": [
+          "429",
+          "ok"
+        ],
+        "delivered": 1,
+        "lastError": "Telegram sendMessage failed: Too Many Requests: retry after 1"
+      },
+      "429 twice, then OK": {
+        "chat": 7202,
+        "outboxRows": 1,
+        "state": "sent",
+        "rowAttempts": 2,
+        "platformAttempts": 3,
+        "platformFaults": [
+          "429",
+          "429",
+          "ok"
+        ],
+        "delivered": 1,
+        "lastError": "Telegram sendMessage failed: Too Many Requests"
+      },
+      "timeout, platform received it anyway": {
+        "chat": 7203,
+        "outboxRows": 1,
+        "state": "unknown",
+        "rowAttempts": 0,
+        "platformAttempts": 1,
+        "platformFaults": [
+          "timeout"
+        ],
+        "delivered": 1,
+        "lastError": "Telegram sendMessage did not complete: The operation was aborted due to timeout"
+      },
+      "timeout, platform never received it": {
+        "chat": 7204,
+        "outboxRows": 1,
+        "state": "unknown",
+        "rowAttempts": 0,
+        "platformAttempts": 1,
+        "platformFaults": [
+          "timeout"
+        ],
+        "delivered": 0,
+        "lastError": "Telegram sendMessage did not complete: The operation was aborted due to timeout"
+      },
+      "5xx once, then OK": {
+        "chat": 7205,
+        "outboxRows": 1,
+        "state": "unknown",
+        "rowAttempts": 0,
+        "platformAttempts": 1,
+        "platformFaults": [
+          "502"
+        ],
+        "delivered": 0,
+        "lastError": "Telegram sendMessage failed: Bad Gateway"
+      },
+      "400 permanent": {
+        "chat": 7206,
+        "outboxRows": 1,
+        "state": "failed",
+        "rowAttempts": 0,
+        "platformAttempts": 1,
+        "platformFaults": [
+          "400"
+        ],
+        "delivered": 0,
+        "lastError": "Telegram sendMessage failed: Bad Request: chat not found"
+      }
+    },
+    "b_outbox_states": {
+      "sent": 7,
+      "unknown": 3,
+      "failed": 1,
+      "pending": 0,
+      "other": {}
+    },
+    "b_unknown_delivered_by_platform": 1,
+    "b_unknown_not_delivered_by_platform": 2,
+    "c1_http_sequential_x10": {
+      "runs": 1,
+      "modelUsers": 1,
+      "journalUsers": 1,
+      "modelReplies": 1,
+      "expectedTurns": 1,
+      "runStatuses": {
+        "completed": 1
+      },
+      "duplicateTurns": 0
+    },
+    "c1b_outcomes_during_run": {
+      "started": 1,
+      "replayed": 5
+    },
+    "c1b_http_repeat_while_running_x6": {
+      "runs": 1,
+      "modelUsers": 1,
+      "journalUsers": 1,
+      "modelReplies": 1,
+      "expectedTurns": 1,
+      "runStatuses": {
+        "completed": 1
+      },
+      "duplicateTurns": 0
+    },
+    "c2_http_concurrent_outcomes": {
+      "started": 1,
+      "replayed": 9
+    },
+    "c2_http_concurrent_x10": {
+      "runs": 1,
+      "modelUsers": 1,
+      "journalUsers": 1,
+      "modelReplies": 1,
+      "expectedTurns": 1,
+      "runStatuses": {
+        "completed": 1
+      },
+      "duplicateTurns": 0
+    },
+    "c3_sse_concurrent_frames": {
+      "a": 10,
+      "b": 10,
+      "aAccepted": 1
+    },
+    "c3_sse_same_key_x2": {
+      "runs": 1,
+      "modelUsers": 1,
+      "journalUsers": 1,
+      "modelReplies": 1,
+      "expectedTurns": 1,
+      "runStatuses": {
+        "completed": 1
+      },
+      "duplicateTurns": 0
+    },
+    "c3_sse_replay_after_end": {
+      "endedByServer": true,
+      "frames": [
+        "message.accepted",
+        "assistant.delta",
+        "journal.event"
+      ]
+    },
+    "c3_sse_after_replay": {
+      "runs": 1,
+      "modelUsers": 1,
+      "journalUsers": 1,
+      "modelReplies": 1,
+      "expectedTurns": 1,
+      "runStatuses": {
+        "completed": 1
+      },
+      "duplicateTurns": 0
+    },
+    "c4_conflict_after_run": {
+      "runs": 1,
+      "modelUsers": 1,
+      "journalUsers": 1,
+      "modelReplies": 1,
+      "expectedTurns": 1,
+      "runStatuses": {
+        "completed": 1
+      },
+      "duplicateTurns": 0
+    },
+    "c4b_outcomes": {
+      "first": "started",
+      "steered": "steered",
+      "replaySteered": "replayed"
+    },
+    "c4b_journal_users": [
+      {
+        "key": "A",
+        "steered": null
+      },
+      {
+        "key": "B",
+        "steered": "true"
+      }
+    ],
+    "c5_asset_uploads": {
+      "statuses": [
+        201,
+        201,
+        201
+      ],
+      "ids": [
+        "3118dd6f-f96b-43c3-a307-898a7960ee88",
+        "3118dd6f-f96b-43c3-a307-898a7960ee88",
+        "ae86e22e-8c74-4459-94bd-bdcd1be6a754"
+      ],
+      "shape": [
+        "asset_id",
+        "kind",
+        "name",
+        "bytes",
+        "state"
+      ]
+    },
+    "c5_asset_statuses": {
+      "first": [
+        200,
+        null
+      ],
+      "sameBytes": [
+        200,
+        "replayed",
+        null
+      ],
+      "otherBytes": [
+        409,
+        "client_message_conflict"
+      ]
+    },
+    "c5_asset_key": {
+      "runs": 1,
+      "modelUsers": 1,
+      "journalUsers": 1,
+      "modelReplies": 1,
+      "expectedTurns": 1,
+      "runStatuses": {
+        "completed": 1
+      },
+      "duplicateTurns": 0
+    },
+    "d0_api_key_in_upgrade_authorization_header": "ok",
+    "d1_ws_frames": {
+      "s1": {
+        "session.ready": 1,
+        "message.accepted": 5,
+        "turn.state": 7,
+        "assistant.delta": 1,
+        "turn.completed": 1
+      },
+      "s2": {
+        "session.ready": 1,
+        "message.accepted": 6,
+        "turn.state": 8,
+        "assistant.delta": 1,
+        "turn.completed": 1,
+        "turn.failed": 1
+      },
+      "s1Failures": [],
+      "s2Failures": [
+        "client_message_conflict"
+      ],
+      "httpOutcome": "replayed"
+    },
+    "d1_ws_same_and_second_socket": {
+      "runs": 1,
+      "modelUsers": 1,
+      "journalUsers": 1,
+      "modelReplies": 1,
+      "expectedTurns": 1,
+      "runStatuses": {
+        "completed": 1
+      },
+      "duplicateTurns": 0
+    },
+    "d2_ws_concurrent_failures": {
+      "s1": [],
+      "s2": []
+    },
+    "d2_ws_two_sockets_concurrent": {
+      "runs": 1,
+      "modelUsers": 1,
+      "journalUsers": 1,
+      "modelReplies": 1,
+      "expectedTurns": 1,
+      "runStatuses": {
+        "completed": 1
+      },
+      "duplicateTurns": 0
+    },
+    "e_assistant_view_status": 200,
+    "e1_assistant_sequential": [
+      [
+        202,
+        "6dd11498"
+      ],
+      [
+        202,
+        "6dd11498"
+      ],
+      [
+        202,
+        "6dd11498"
+      ],
+      [
+        202,
+        "6dd11498"
+      ],
+      [
+        202,
+        "6dd11498"
+      ]
+    ],
+    "e2_assistant_concurrent": {
+      "statuses": {
+        "202": 10
+      },
+      "messageIds": 1,
+      "userLines": 1
+    },
+    "e4_product_create_error_bodies": [],
+    "e4_product_create": {
+      "statuses": {
+        "201": 5
+      },
+      "distinctProducts": 1,
+      "productsListed": 1,
+      "clash": [
+        409,
+        "idempotency_conflict"
+      ]
+    },
+    "e4_workers": [
+      {
+        "id": "research",
+        "availability": "available"
+      },
+      {
+        "id": "interview",
+        "availability": "available"
+      },
+      {
+        "id": "builder",
+        "availability": "locked"
+      },
+      {
+        "id": "cases",
+        "availability": "locked"
+      },
+      {
+        "id": "evaluator",
+        "availability": "locked"
+      }
+    ],
+    "e4_worker_error_bodies": [],
+    "e4_worker": {
+      "worker": "research",
+      "concurrent": {
+        "202": 5
+      },
+      "messageIds": 1,
+      "replay": [
+        202,
+        true
+      ],
+      "other": [
+        409,
+        "idempotency_conflict"
+      ],
+      "userLines": 1
+    },
+    "duplicate_turns_total": 0,
+    "duplicate_outbound_deliveries_total": 0,
+    "outbox_states_final": {
+      "sent": 7,
+      "unknown": 3,
+      "failed": 1
+    }
+  },
+  "evidence": {
+    "A1 same update x10 sequential, then x5 after the reply": {
+      "runIds": [
+        "run_16793e095e7f41afb674ebf40baff6a2"
+      ],
+      "inboxEvents": [
+        "107979"
+      ],
+      "outboxIds": [
+        "c816f06c-0ecb-4427-8821-358d1e74ffe5"
+      ]
+    },
+    "A2 same update x10 concurrent": {
+      "runIds": [
+        "run_7d80ec59a9b0415993e975908b134ca0"
+      ],
+      "inboxEvents": [
+        "107980"
+      ],
+      "outboxIds": [
+        "5ba024bd-2775-425a-9797-b4a02f41a709"
+      ]
+    },
+    "A3 update ids out of order + redelivery": {
+      "runIds": [
+        "run_82bc3bd069954c3c9a41004c24b71425"
+      ],
+      "inboxEvents": [
+        "108482",
+        "108481"
+      ],
+      "outboxIds": [
+        "3c254a5a-8093-47fd-ad59-4a5940c76a48"
+      ]
+    },
+    "A4 webhook cut client-side x3, then retried x3": {
+      "runIds": [
+        "run_3280e1ac0dbd4a459da9cdc254551428"
+      ],
+      "inboxEvents": [
+        "108491"
+      ],
+      "outboxIds": [
+        "dec43484-cd85-4939-bcbe-4e3cca8361ce"
+      ]
+    },
+    "c1_http_sequential_x10": {
+      "conversation": "conv_21fe3074d5e34f4aade0032646b100f7",
+      "runIds": [
+        "run_6ae1524a95bf467d85ebf9f1e047fa81"
+      ]
+    },
+    "c1b_http_repeat_while_running_x6": {
+      "conversation": "conv_8a1a5d118cd54f1e978b4f1b83f00c68",
+      "runIds": [
+        "run_21ec50d4a05545d6915f23a644244230"
+      ]
+    },
+    "c2_http_concurrent_x10": {
+      "conversation": "conv_41192a715abd4601a270ed9979d10623",
+      "runIds": [
+        "run_e34458ca9a0c45d68411b90a0427fb80"
+      ]
+    },
+    "c3_sse_same_key_x2": {
+      "conversation": "conv_0465b3ea78d04118a0041800879cd325",
+      "runIds": [
+        "run_1ff93383ee834a0b9b00b559503157a4"
+      ]
+    },
+    "c3_sse_after_replay": {
+      "conversation": "conv_0465b3ea78d04118a0041800879cd325",
+      "runIds": [
+        "run_1ff93383ee834a0b9b00b559503157a4"
+      ]
+    },
+    "c4_conflict_after_run": {
+      "conversation": "conv_8e132275d9364596b9cc9d5f7b7a771e",
+      "runIds": [
+        "run_25e609bf14a747cba3d912cd67254594"
+      ]
+    },
+    "c5_asset_key": {
+      "conversation": "conv_931f211a97194431acdffc1712448721",
+      "runIds": [
+        "run_006d70f0f77b42899f7977ee17885ebe"
+      ]
+    },
+    "d1_ws_same_and_second_socket": {
+      "conversation": "conv_9c4bb8d23b4f443a832e4bd33b186007",
+      "runIds": [
+        "run_a99c0bef82e74fa4b250d633aa0acded"
+      ]
+    },
+    "d2_ws_two_sockets_concurrent": {
+      "conversation": "conv_101c2c4c0ea3415c9860f628c0030880",
+      "runIds": [
+        "run_850be4a9d9054920bba41a81a89d0c13"
+      ]
+    }
+  },
+  "notes": [
+    "A3: update 108482 (delta) arrived before 108481 (charlie); the transcript order is delta then charlie. Chat order follows arrival, not update_id.",
+    "A5: a redelivered update id with different content is dropped silently (200, no turn, no notice); it is not rejected as a conflict the way a changed client_message_id is on the HTTP and WebSocket doors.",
+    "b: `unknown` is a reply the product will not resend because the platform may already have it. Where the platform did not have it (timeout without delivery, 502), the user never receives that reply; the product trades a possible duplicate for a possible silent loss on non-idempotent Telegram, as deliveryAfterFailure documents."
+  ],
+  "defects": []
+}

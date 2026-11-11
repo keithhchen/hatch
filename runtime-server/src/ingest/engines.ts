@@ -1,4 +1,4 @@
-import { HostedIngest, type IngestItem as HostedItem } from "../hostedAgents/ingest.js";
+import { HostedIngest, HostedIngestError, type IngestItem as HostedItem } from "../hostedAgents/ingest.js";
 import { mediaTypeOf } from "./names.js";
 import type { IngestEngine, Result, Source } from "./ports.js";
 
@@ -24,9 +24,14 @@ export class HostedEngine implements IngestEngine {
     const items: HostedItem[] = sources.map(source => source.kind === "link"
       ? { id: source.id, kind: "link", url: source.url }
       : { id: source.id, kind: "file", name: source.name, bytes: source.bytes, ...(source.mimeType ? { mimeType: source.mimeType } : {}) });
-    const outcome = await this.hosted.ingest({ accountId, items, context }, signal);
+    const sessionOf = (id: string) => ({ session: { provider: "kimi_hosted_agents" as const, id } });
+    const outcome = await this.hosted.ingest({ accountId, items, context }, signal).catch((error: unknown) => {
+      if (!(error instanceof HostedIngestError)) throw error;
+      return error;
+    });
+    if (outcome instanceof HostedIngestError) return sources.map(source => ({ id: source.id, status: "failed", error: outcome.message, ...sessionOf(outcome.sessionId) }));
     return outcome.items.map(item => ({
-      id: item.id, status: item.status,
+      id: item.id, status: item.status, ...sessionOf(outcome.sessionId),
       ...(item.original ? { original: { name: item.original.name, bytes: item.original.bytes, mediaType: mediaTypeOf(item.original.name) } } : {}),
       ...(item.markdown !== undefined ? { markdown: item.markdown } : {}),
       ...(item.error ? { error: item.error } : {}),

@@ -1,10 +1,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import {
-  compactRuntimeMessages,
-  shouldAutoCompactMessages,
-  type RuntimeCompactionMessage
-} from "./compaction.js";
+import { chatCompactionStrategy, nextWindow, type RuntimeCompactionMessage } from "./compaction.js";
+import { newCompactionId, type CompactionStrategy } from "./compactionStrategy.js";
 import {
   createAgentRuntime,
   type AgentRuntime,
@@ -12,7 +9,7 @@ import {
   type RuntimeSessionSkills
 } from "./agentRuntime.js";
 import type { ClientToolBroker } from "./clientBroker.js";
-import type { OutboundMessage, RunStart } from "./protocol.js";
+import type { ConversationMessage, OutboundMessage, RunStart } from "./protocol.js";
 import type { ServerToolExecutor } from "./serverTools.js";
 import type { RunStateMachine } from "./runState.js";
 import {
@@ -50,6 +47,8 @@ type SkillRuntimeOptions = {
   store: RuntimeStore;
   emit: (event: OutboundMessage) => Promise<void>;
   createWorkerRuntime?: () => AgentRuntime;
+  /** The shared compaction strategy; the worker's session is compacted as any conversation is. */
+  compaction?: () => CompactionStrategy<RuntimeCompactionMessage>;
 };
 
 /**
@@ -148,6 +147,8 @@ export class SkillRuntime {
         }
       }
     };
+    let compaction: CompactionStrategy<RuntimeCompactionMessage> | undefined;
+    let windowState: ReturnType<typeof nextWindow> | undefined;
     const workerContext: RunContext = {
       clientBroker: this.options.clientBroker,
       serverTools: this.options.serverTools,
@@ -169,26 +170,27 @@ export class SkillRuntime {
         workerMessages.push(message);
         await this.persistMessage(skillRunId, message);
       },
-      compactMessagesIfNeeded: async (messages, phase) => {
-        if (!shouldAutoCompactMessages(messages)) return undefined;
-        const checkpoint = await compactRuntimeMessages(messages, {
-          trigger: "auto",
-          phase,
-          reason: "context_limit"
-        });
-        workerMessages.splice(0, workerMessages.length, ...checkpoint.replacement_history);
+      compactMessagesIfNeeded: async (messages) => {
+        // Between tool steps the provider's cache is alive, so only a summary or a bounded tail can apply.
+        const outcome = await (compaction ??= (this.options.compaction ?? chatCompactionStrategy)()).compact(messages, { now: Date.now(), cacheTouchedAt: Date.now(), signal: controller.signal });
+        if (outcome.kind === "none") return undefined;
+        const replacement = outcome.messages as ConversationMessage[];
+        workerMessages.splice(0, workerMessages.length, ...replacement);
+        const window = nextWindow(windowState);
+        windowState = window;
         await this.options.store.append({
           type: "skill.session.compacted",
           conversation_id: this.options.parentInput.conversation_id,
           parent_run_id: this.options.parentInput.run_id,
           skill_run_id: skillRunId,
-          replacement_history: checkpoint.replacement_history,
-          window_number: checkpoint.window_number,
-          first_window_id: checkpoint.first_window_id,
-          previous_window_id: checkpoint.previous_window_id,
-          window_id: checkpoint.window_id
+          compaction_id: newCompactionId(),
+          replacement_history: replacement,
+          window_number: window.window_number,
+          first_window_id: window.first_window_id,
+          previous_window_id: window.previous_window_id,
+          window_id: window.window_id
         });
-        return checkpoint.replacement_history;
+        return replacement;
       }
     };
 

@@ -1,6 +1,6 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
-import type { ConversationRecord, ConversationRunRecord, ConversationJournalEvent } from "./conversationRepository.js";
+import type { CompactionClaim, ConversationRecord, ConversationRunRecord, ConversationJournalEvent, ToolCallRecord } from "./conversationRepository.js";
 import path from "node:path";
 import { historyBoundary, historyCursor, historyEvent, historyLimit, historyMessages, isHistoryMessage,
   type ConversationHistoryOptions, type ConversationHistoryPage, type ConversationToolDetailRef } from "./conversationHistory.js";
@@ -15,6 +15,7 @@ import {
   type PersistedContextAttachment
 } from "./protocol.js";
 import type { CompactionPhase, CompactionReason, CompactionTrigger } from "./compaction.js";
+import { RunFenced, type RunHold } from "./runHold.js";
 
 export type RunStatus = "queued" | "running" | "waiting_for_tool" | "compacting" | "completed" | "failed" | "cancelled" | "interrupted";
 
@@ -134,6 +135,8 @@ export type StoreEvent =
       conversation_id: string;
       run_id: string;
       client_message_id?: string;
+      /** A reply's stable id, `<run_id>:<n>`; a user message is known by its `client_message_id`. */
+      message_id?: string;
       message: ConversationMessage;
       finish_reason?: OutputFinishReason;
       visible_parts?: VisibleConversationPart[];
@@ -196,6 +199,7 @@ export type StoreEvent =
       conversation_id: string;
       parent_run_id: string;
       skill_run_id: string;
+      compaction_id?: string;
       replacement_history: ConversationMessage[];
       window_number: number;
       first_window_id: string;
@@ -256,6 +260,12 @@ export type StoreEvent =
       reason: CompactionReason;
       message: string;
       replacement_history?: ConversationMessage[];
+      /** One id for the status, the transcript checkpoint and the channel's notice. */
+      compaction_id?: string;
+      stage?: "prune" | "summary" | "degraded";
+      /** Set when a failed summary left only a bounded tail: the user is told. */
+      degraded?: boolean;
+      dropped_messages?: number;
       window_number?: number;
       first_window_id?: string;
       previous_window_id?: string;
@@ -263,7 +273,7 @@ export type StoreEvent =
       timestamp: string;
     };
 
-type StoreEventInput = StoreEvent extends infer Event
+export type StoreEventInput = StoreEvent extends infer Event
   ? Event extends { timestamp: string }
     ? Omit<Event, "timestamp"> & { timestamp?: string }
     : never
@@ -277,12 +287,17 @@ export type LocalCommit = {
   requests?: Array<[string, string]>;
   journal?: ConversationJournalEvent[];
   events?: StoreEvent[];
+  toolCalls?: ToolCallRecord[];
+  compactions?: CompactionClaim[];
 };
 
 export class LocalRuntimeAuthority {
   conversations = new Map<string, ConversationRecord>();
   runs = new Map<string, ConversationRunRecord>();
   requests = new Map<string, string>();
+  /** Local tools a Run waits for, by `${runId}\n${toolCallId}`: answered from any process. */
+  toolCalls = new Map<string, ToolCallRecord>();
+  compactions = new Map<string, CompactionClaim>();
   journal: ConversationJournalEvent[] = [];
   events: StoreEvent[] = [];
   private usage = new Map<string, { count: number; bytes: number }>();
@@ -305,7 +320,8 @@ export class LocalRuntimeAuthority {
     this.database = db;
     // SQLite supplies crash-safe record framing and OS-managed writer locks.
     // The application owns only this append-only table; no snapshot dual write.
-    db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS commits (sequence INTEGER PRIMARY KEY, payload TEXT NOT NULL)");
+    // busy_timeout first: switching to WAL takes an exclusive lock, and a second process opening at the same moment must wait for it.
+    db.exec("PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS commits (sequence INTEGER PRIMARY KEY, payload TEXT NOT NULL)");
     db.exec("BEGIN IMMEDIATE");
     try {
       if (!(db.prepare("SELECT 1 FROM commits LIMIT 1").get())) {
@@ -347,6 +363,8 @@ export class LocalRuntimeAuthority {
     for (const row of commit.conversations ?? []) this.conversations.set(row.id, row);
     for (const row of commit.runs ?? []) this.runs.set(row.id, row);
     for (const [key, value] of commit.requests ?? []) this.requests.set(key, value);
+    for (const row of commit.toolCalls ?? []) this.toolCalls.set(`${row.runId}\n${row.toolCallId}`, row);
+    for (const row of commit.compactions ?? []) this.compactions.set(row.id, row);
     for (const event of commit.journal ?? []) this.journal.push(event);
     for (const event of commit.events ?? []) {
       this.events.push(event);
@@ -452,13 +470,21 @@ export class RuntimeStore {
     return this.root;
   }
 
-  async append(event: StoreEventInput): Promise<void> {
+  /** With `hold`, the append is refused, in the same commit that would make it, unless that executor still holds the event's Run. */
+  async append(event: StoreEventInput, hold?: RunHold): Promise<void> {
     assertCanonicalPersistedToolNames(event);
     const record: StoreEvent = {
       timestamp: new Date().toISOString(),
       ...event
     };
-    await this.localAuthority.transact(async () => ({ result: undefined, commit: { kind: "event", events: [record] } }));
+    await this.localAuthority.transact(async () => {
+      if (hold) {
+        const runId = "run_id" in record ? record.run_id : undefined;
+        const run = runId ? this.localAuthority.runs.get(runId) : undefined;
+        if (!run || run.executorId !== hold.heldBy || !["queued", "running", "waiting_for_tool", "compacting"].includes(run.status)) throw new RunFenced(runId ?? "unknown");
+      }
+      return { result: undefined, commit: { kind: "event", events: [record] } };
+    });
   }
 
   async close(): Promise<void> {
@@ -477,6 +503,17 @@ export class RuntimeStore {
   async readEvents(): Promise<StoreEvent[]> {
     await this.localAuthority.ready();
     return structuredClone(this.localAuthority.events);
+  }
+
+  /** When the provider last saw this conversation: the time of its latest event. */
+  async lastActivityAt(conversationId: string): Promise<number | undefined> {
+    await this.localAuthority.ready();
+    const events = this.localAuthority.events;
+    for (let index = events.length - 1; index >= 0; index--) {
+      const event = events[index]!;
+      if ("conversation_id" in event && event.conversation_id === conversationId) return Date.parse(event.timestamp);
+    }
+    return undefined;
   }
 
   async readConversation(conversationId: string): Promise<ConversationMessage[]> {
@@ -690,13 +727,15 @@ export class RuntimeStore {
           throw new Error(`Unsupported visible conversation role: ${role}`);
         }
         const message: VisibleConversationMessage = {
+          // A message is known by the id it was stored under: its client's key, or `<run_id>:<n>` for a reply.
+          ...(persistedMessageId(event, role) ? { id: persistedMessageId(event, role) } : {}),
           run_id: event.run_id,
           role,
           content: event.type === "message.created"
             ? event.content
             : event.finish_reason === "content_filter"
               ? ""
-              : event.message.content ?? "",
+              : event.message.typed ?? event.message.content ?? "",
           timestamp: event.timestamp
         };
         const attachments = event.type === "conversation.model_message"
@@ -797,6 +836,11 @@ export class RuntimeStore {
     return session;
   }
 
+}
+
+/** The id a visible message was stored under, when it was stored with one. */
+export function persistedMessageId(event: StoreEvent, role: "user" | "assistant"): string | undefined {
+  return event.type === "conversation.model_message" ? (role === "user" ? event.client_message_id : event.message_id) : undefined;
 }
 
 export function normalizePersistedStoreEvent(event: StoreEvent): StoreEvent {

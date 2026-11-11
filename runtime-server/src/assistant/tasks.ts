@@ -1,3 +1,4 @@
+import type { ChannelKind } from "../channels/types.js";
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 
@@ -6,9 +7,15 @@ export type TaskKind = typeof TASK_KINDS[number];
 export type TaskStatus = "working" | "needs_you" | "done";
 export type TaskNeeds = "answer" | "review" | "blocked";
 /** Where a task came from and where its replies go. */
-export type TaskOrigin = { source: "web" | "telegram" | "line" | "lark" | "imessage" | "tick" | "consumer" };
+export type TaskOrigin = { source: "web" | ChannelKind | "tick" | "consumer" };
 /** The workbench session executing the task. Product sessions carry productId; Assistant-workspace sessions do not. */
 export type TaskSession = { scope: "product" | "assistant"; sessionId: string };
+
+/** How the Expert decided a task waiting for them. `key` is the decider's own: a button press, a page click, a tool call. */
+export type TaskDecision = { action: "approve" | "decline"; key: string; at: string };
+
+/** A decision that cannot be taken now: the task is out of the Expert's hands, or was decided the other way. The Expert is told why. */
+export class TaskRefused extends Error { readonly status = 409; }
 
 export type AssistantTask = {
   id: string;
@@ -23,6 +30,8 @@ export type AssistantTask = {
   payload: Record<string, unknown>;
   outputRef?: string;
   summary?: string;
+  /** Set once, in the same step that finishes the task, and never changed. */
+  decision?: TaskDecision;
   answeredAt?: string;
   leaseExpiresAt?: string;
   attempts: number;
@@ -32,6 +41,22 @@ export type AssistantTask = {
 };
 
 export type TaskChange = Partial<Pick<AssistantTask, "status" | "needs" | "session" | "payload" | "outputRef" | "summary" | "answeredAt" | "leaseExpiresAt" | "lastError" | "attempts">>;
+
+const VERB = { approve: "确认", decline: "取消" } as const;
+const PAST = { approve: "已确认", decline: "已取消" } as const;
+
+/**
+ * The rules of deciding, kept apart from any store so every store keeps them. Deciding a task again the same way is a replay and
+ * changes nothing (undefined); the other way is refused; otherwise it returns what the decision changes.
+ */
+export function settle(task: AssistantTask, action: TaskDecision["action"], key: string, at = new Date().toISOString()): { change: TaskChange; decision: TaskDecision } | undefined {
+  if (task.decision) {
+    if (task.decision.action === action) return undefined;
+    throw new TaskRefused(`这件事${PAST[task.decision.action]}了，不能再${VERB[action]}`);
+  }
+  if (task.status !== "needs_you" || (action === "approve" && task.needs !== "review")) throw new TaskRefused(action === "approve" ? "这件事现在不需要确认" : "这件事已经结束了");
+  return { change: { status: "done", summary: `${task.summary ?? ""}（${PAST[action]}）` }, decision: { action, key, at } };
+}
 
 export interface TaskRepository {
   create(input: Pick<AssistantTask, "accountId" | "kind" | "origin"> & Partial<Pick<AssistantTask, "productId" | "status" | "needs" | "session" | "payload" | "summary" | "leaseExpiresAt">>): Promise<AssistantTask>;
@@ -44,6 +69,14 @@ export interface TaskRepository {
   /** The latest pokes of one account, newest first. */
   pokes(accountId: string, limit: number): Promise<AssistantTask[]>;
   bySession(sessionId: string): Promise<AssistantTask | undefined>;
+  /**
+   * The Expert decides a waiting task, once. The decision is recorded in the same step that finishes the task, and `effect` (what
+   * approving does to the world) runs inside that step: if it throws, nothing is recorded and the task still waits. Asked again
+   * the same way, it returns the recorded task with `replayed` and runs nothing; the other way is refused with TaskRefused.
+   */
+  decide(id: string, decision: Pick<TaskDecision, "action" | "key">, effect: (task: AssistantTask) => Promise<void>): Promise<{ task: AssistantTask; replayed: boolean }>;
+  /** Tasks that were created or announced in a Run (`payload.run`), so its reply can offer their buttons. */
+  byRun(runId: string): Promise<AssistantTask[]>;
 }
 
 export class PostgresTaskRepository implements TaskRepository {
@@ -62,6 +95,7 @@ export class PostgresTaskRepository implements TaskRepository {
         payload JSONB NOT NULL DEFAULT '{}'::jsonb,
         output_ref TEXT,
         summary TEXT,
+        decision JSONB,
         answered_at TIMESTAMPTZ,
         lease_expires_at TIMESTAMPTZ,
         attempts INTEGER NOT NULL DEFAULT 0,
@@ -69,6 +103,7 @@ export class PostgresTaskRepository implements TaskRepository {
         created_at TIMESTAMPTZ NOT NULL,
         updated_at TIMESTAMPTZ NOT NULL
       );
+      ALTER TABLE hatch_assistant_tasks ADD COLUMN IF NOT EXISTS decision JSONB;
       CREATE INDEX IF NOT EXISTS hatch_assistant_tasks_open_idx ON hatch_assistant_tasks (account_id, updated_at DESC) WHERE status <> 'done';
       CREATE INDEX IF NOT EXISTS hatch_assistant_tasks_lease_idx ON hatch_assistant_tasks (lease_expires_at) WHERE status = 'working';
       CREATE INDEX IF NOT EXISTS hatch_assistant_tasks_session_idx ON hatch_assistant_tasks ((session->>'sessionId')) WHERE status <> 'done';
@@ -103,6 +138,23 @@ export class PostgresTaskRepository implements TaskRepository {
     if (!row) throw Object.assign(new Error("Task was not found"), { status: 404 });
     return fromRow(row);
   }
+  async decide(id: string, { action, key }: Pick<TaskDecision, "action" | "key">, effect: (task: AssistantTask) => Promise<void>): Promise<{ task: AssistantTask; replayed: boolean }> {
+    if (!/^[0-9a-f-]{36}$/.test(id)) throw Object.assign(new Error("Task was not found"), { status: 404 });
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      // The row lock makes a second decider wait, then see the first one's decision.
+      const row = (await client.query("SELECT * FROM hatch_assistant_tasks WHERE id = $1 FOR UPDATE", [id])).rows[0];
+      if (!row) throw Object.assign(new Error("Task was not found"), { status: 404 });
+      const task = fromRow(row);
+      const settled = settle(task, action, key);
+      if (!settled) { await client.query("COMMIT"); return { task, replayed: true }; }
+      await effect(task);
+      const done = (await client.query("UPDATE hatch_assistant_tasks SET status = $2, needs = NULL, summary = $3, decision = $4::jsonb, updated_at = NOW() WHERE id = $1 RETURNING *", [id, settled.change.status, settled.change.summary, JSON.stringify(settled.decision)])).rows[0];
+      await client.query("COMMIT");
+      return { task: fromRow(done), replayed: false };
+    } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; } finally { client.release(); }
+  }
   async open(accountId: string): Promise<AssistantTask[]> {
     return (await this.pool.query("SELECT * FROM hatch_assistant_tasks WHERE account_id = $1 AND status <> 'done' ORDER BY updated_at DESC LIMIT 100", [accountId])).rows.map(fromRow);
   }
@@ -111,6 +163,9 @@ export class PostgresTaskRepository implements TaskRepository {
   }
   async pokes(accountId: string, limit: number): Promise<AssistantTask[]> {
     return (await this.pool.query("SELECT * FROM hatch_assistant_tasks WHERE account_id = $1 AND kind = 'poke' ORDER BY created_at DESC LIMIT $2", [accountId, limit])).rows.map(fromRow);
+  }
+  async byRun(runId: string): Promise<AssistantTask[]> {
+    return (await this.pool.query("SELECT * FROM hatch_assistant_tasks WHERE payload->>'run' = $1 ORDER BY created_at LIMIT 20", [runId])).rows.map(fromRow);
   }
   async bySession(sessionId: string): Promise<AssistantTask | undefined> {
     const row = (await this.pool.query("SELECT * FROM hatch_assistant_tasks WHERE status <> 'done' AND session->>'sessionId' = $1 ORDER BY updated_at DESC LIMIT 1", [sessionId])).rows[0];
@@ -136,9 +191,27 @@ export class MemoryTaskRepository implements TaskRepository {
     for (const key of Object.keys(task) as Array<keyof AssistantTask>) if (task[key] === undefined) delete task[key];
     return structuredClone(task);
   }
+  private deciding = new Map<string, Promise<unknown>>();
+  async decide(id: string, { action, key }: Pick<TaskDecision, "action" | "key">, effect: (task: AssistantTask) => Promise<void>): Promise<{ task: AssistantTask; replayed: boolean }> {
+    const run = async () => {
+      const task = this.tasks.get(id);
+      if (!task) throw Object.assign(new Error("Task was not found"), { status: 404 });
+      const settled = settle(task, action, key);
+      if (!settled) return { task: structuredClone(task), replayed: true };
+      await effect(structuredClone(task));
+      Object.assign(task, settled.change, { decision: settled.decision, updatedAt: new Date(Date.now() + 1).toISOString() });
+      delete task.needs;
+      return { task: structuredClone(task), replayed: false };
+    };
+    // One decider at a time per task, as the row lock does in Postgres.
+    const turn = (this.deciding.get(id) ?? Promise.resolve()).then(run, run);
+    this.deciding.set(id, turn.catch(() => undefined));
+    return turn;
+  }
   async open(accountId: string) { return [...this.tasks.values()].filter(task => task.accountId === accountId && task.status !== "done").sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(task => structuredClone(task)); }
   async expired(now: Date) { return [...this.tasks.values()].filter(task => task.status === "working" && task.leaseExpiresAt && task.leaseExpiresAt < now.toISOString()).map(task => structuredClone(task)); }
   async pokes(accountId: string, limit: number) { return [...this.tasks.values()].filter(task => task.accountId === accountId && task.kind === "poke").sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit).map(task => structuredClone(task)); }
+  async byRun(runId: string) { return [...this.tasks.values()].filter(task => task.payload.run === runId).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map(task => structuredClone(task)); }
   async bySession(sessionId: string) { const task = [...this.tasks.values()].filter(task => task.status !== "done" && task.session?.sessionId === sessionId).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]; return task && structuredClone(task); }
 }
 
@@ -153,6 +226,7 @@ function fromRow(row: Record<string, any>): AssistantTask {
   if (row.session) task.session = row.session;
   if (row.output_ref) task.outputRef = row.output_ref;
   if (row.summary) task.summary = row.summary;
+  if (row.decision) task.decision = row.decision;
   if (row.answered_at) task.answeredAt = iso(row.answered_at);
   if (row.lease_expires_at) task.leaseExpiresAt = iso(row.lease_expires_at);
   if (row.last_error) task.lastError = row.last_error;

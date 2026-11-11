@@ -260,12 +260,9 @@ test("Pi runtime preserves legacy DOCX references without reading or re-parsing 
     assert.ok(events.some((event) => event.type === "turn.completed"));
     assert.ok(events.some((event) => event.type === "skill.activated" && event.reason === "attachment"));
     const messages = requests[0]?.messages as Array<Record<string, unknown>>;
-    const uploadedMessage = messages.find((message) => message.role === "user" && Array.isArray(message.content));
+    const uploadedMessage = messages.find((message) => message.role === "user" && typeof message.content === "string" && /brief\.docx/.test(message.content));
     assert.ok(uploadedMessage);
-    const uploadedText = (uploadedMessage.content as Array<Record<string, unknown>>)
-      .filter((part) => part.type === "text")
-      .map((part) => String(part.text ?? ""))
-      .join("\n");
+    const uploadedText = uploadedMessage.content as string;
     assert.match(uploadedText, /brief\.docx/);
     assert.match(uploadedText, /asset_docx_1/);
     assert.doesNotMatch(uploadedText, /Uploaded document text|hatch_asset_text/);
@@ -294,6 +291,8 @@ test("Pi runtime preserves legacy DOCX references without reading or re-parsing 
         "historical attachments must not implicitly activate today's Skill");
     }
     assert.equal(documentReads, 0);
+    assert.ok((requests[1]?.messages as unknown[]).some((message) => JSON.stringify(message) === JSON.stringify(uploadedMessage)),
+      "a message's bytes in the request are the same on every later call");
     assert.deepEqual(requests[1]?.messages, requests[2]?.messages,
       "repeated continuation of the same committed boundary must keep its provider messages");
   } finally {

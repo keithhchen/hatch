@@ -30,6 +30,7 @@ export type PublicReleaseListing = CreatorRegistryRelease & {
 export class CreatorRegistryReleaseStore {
   private readonly memory = new Map<string, CreatorRegistryRelease>();
   private readonly unlisted = new Set<string>();
+  private readonly everPublished = new Set<string>();
 
   constructor(private readonly pool?: Pool) {}
 
@@ -82,12 +83,22 @@ export class CreatorRegistryReleaseStore {
       published_at: input.published_at ?? new Date().toISOString(),
     };
     if (!this.pool) {
+      if (!this.everPublished.has(input.product_id)) this.unlisted.add(input.product_id);
+      this.everPublished.add(input.product_id);
       this.memory.set(input.product_id, published);
       return published;
     }
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
+      // A Product's first release is unlisted unless the Expert already chose. Same transaction as the release;
+      // Products that had a release before this rule keep reading as listed.
+      await client.query(`
+        INSERT INTO hatch_creator_product_listing(product_id, creator_id, listed, updated_at)
+        SELECT $1,$2,false,now()
+        WHERE NOT EXISTS (SELECT 1 FROM hatch_creator_registry_releases WHERE product_id=$1)
+        ON CONFLICT (product_id) DO NOTHING
+      `, [published.product_id, published.creator_id]);
       await client.query(`
         INSERT INTO hatch_creator_registry_releases
           (product_id, creator_id, release_digest, corpus_digest, corpus_ref,
