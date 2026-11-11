@@ -321,7 +321,7 @@
 .sxa { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 28px; align-items: start; }
 .sxa--solo { grid-template-columns: minmax(0, 1fr); }
 .sxa-chat { display: flex; min-height: calc(100dvh - 136px); flex-direction: column; gap: 14px; }
-.sxa-title { margin: 0; font-size: 24px; font-weight: 700; color: var(--web-ink); }
+.sxa-title { width: min(780px, 100%); margin: 0 auto; padding: 0 clamp(16px, 4vw, 32px); box-sizing: border-box; font-size: 24px; font-weight: 700; color: var(--web-ink); }
 .sxa-empty { color: var(--web-muted); }
 .web-chat.web-chat--embedded { display: flex; width: auto; height: calc(100dvh - 136px); min-height: 0; overflow: hidden; background: none; }
 /* No header row here: the messages take the space and the composer sits at the bottom, never wider than the column. */
