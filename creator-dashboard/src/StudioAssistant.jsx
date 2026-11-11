@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Button, InlineAlert } from "@hatch/ui";
 import { ConversationController } from "@hatch/chat";
-import { ChatView, useChatState } from "@hatch/chat/react";
+import { ChatView } from "@hatch/chat/react";
 import { friendlyError, mutationKey } from "./studioShellKit.jsx";
 import { UnavailableToolExecutor, browserDictation } from "./webChatClient.js";
 import { ASSISTANT_CONVERSATION, SessionPendingStore, StudioAssistantTransport, StudioAttachments } from "./studioAssistantTransport.js";
@@ -49,12 +49,9 @@ export function StudioAssistant({ request, t }) {
 
 function Assistant({ transport, controller, dictate, request, t, chatT, errorText }) {
   const view = useSyncExternalStore(transport.subscribe, transport.getView);
-  const { connection } = useChatState(controller);
-  const [wasOpen, setWasOpen] = useState(false);
   const [error, setError] = useState("");
   const [larkForm, setLarkForm] = useState(false);
   const chatRef = useRef(null);
-  useEffect(() => { if (connection === "open") setWasOpen(true); }, [connection]);
 
   const post = useCallback((path, body) => request(path, { method: "POST", headers: { "idempotency-key": mutationKey() }, body: JSON.stringify(body ?? {}) }), [request]);
   const refresh = () => controller.refresh(ASSISTANT_CONVERSATION).catch(cause => setError(friendlyError(cause, t)));
@@ -82,10 +79,7 @@ function Assistant({ transport, controller, dictate, request, t, chatT, errorTex
       <ChatView controller={controller} identity={identity} agentName={t("sxNavAssistant")} t={chatT} errorText={errorText}
         attachments={controller.attachments} activityKinds={STEP_KINDS} dictate={dictate} accept={ATTACHABLE} onNewConversation={() => undefined}
         empty={<p className="sxa-empty">{t("sxaEmpty")}</p>}
-        dockAccessory={<>
-          {wasOpen && connection !== "open" ? <InlineAlert tone="error">{t("sxaConnectionLost")}</InlineAlert> : null}
-          {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
-        </>} />
+        dockAccessory={error ? <InlineAlert tone="error">{error}</InlineAlert> : null} />
     </section>
     {hasSide ? <aside className="sxa-side">
       {needs.length ? <ul className="sxa-needs">

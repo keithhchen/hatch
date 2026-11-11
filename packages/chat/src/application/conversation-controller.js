@@ -110,11 +110,15 @@ export class ConversationController {
     for (const listener of this.listeners) listener();
   }
 
-  /** The one place a live row is admitted: a Run whose end was told never has one, whatever it was learned from. */
+  /**
+   * The one place a live row is admitted: a Run whose end was told never gains one, whatever it was learned from. A row it
+   * already shows with words stays until the saved reply takes its place, so the reply is never absent in between.
+   */
   updateMessages(update) {
     const next = typeof update === "function" ? update(this.state.messages) : update;
+    const shown = message => this.state.messages.some(entry => entry.id === message.id && entry.timeline?.length);
     const messages = this.endedRuns.size && next.some(message => message.transient && this.endedRuns.has(message.run_id))
-      ? next.filter(message => !(message.transient && this.endedRuns.has(message.run_id))) : next;
+      ? next.filter(message => !(message.transient && this.endedRuns.has(message.run_id) && !shown(message))) : next;
     this.setState({ messages });
     return messages;
   }
@@ -124,7 +128,14 @@ export class ConversationController {
     const runId = this.run?.id;
     this.updateMessages(current => !runId || current.some(message => message.transient && message.run_id === runId)
       ? current.map(message => message.transient && message.run_id === runId ? { ...message, timeline: items } : message)
-      : [...current, { ...ChatTimeline.streamingAssistantMessage(runId), timeline: items }]);
+      : [...current, { ...this.liveRow(runId, current), timeline: items }]);
+  }
+
+  /** The row of a Run's reply in progress. A Run with saved replies already has rows of its own, so this one is keyed apart from them. */
+  liveRow(runId, messages) {
+    const saved = messages.filter(message => message.run_id === runId && message.role === "assistant" && !message.transient).length;
+    const row = ChatTimeline.streamingAssistantMessage(runId);
+    return saved ? { ...row, renderKey: `${row.renderKey}-${saved + 1}` } : row;
   }
 
   resetTimeline() {
@@ -223,7 +234,7 @@ export class ConversationController {
       const tail = typeof running.partial_output === "string" ? this.runText.tail(running.id, running.partial_output, this.savedText(projected, running.id)) : "";
       if (tail) this.timeline.appendText(tail);
       if (!projected.some(message => message.transient && message.run_id === running.id)) {
-        projected = [...projected, { ...ChatTimeline.streamingAssistantMessage(running.id), timeline: this.timeline.snapshot() }];
+        projected = [...projected, { ...this.liveRow(running.id, projected), timeline: this.timeline.snapshot() }];
       } else if (tail) {
         projected = projected.map(message => message.transient && message.run_id === running.id ? { ...message, timeline: this.timeline.snapshot() } : message);
       }

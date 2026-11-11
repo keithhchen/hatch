@@ -194,7 +194,7 @@ export function mergeConversationPage(current, incoming, { older = false, baseli
     if (existing) consumed.add(existing);
     if (existing && !before.has(existing)) return existing;
     if (existing && !isPlaceholderMessage(existing) && sameMessage(existing, message)) return existing;
-    return { ...message, renderKey: existing?.renderKey ?? `${message.run_id}:${message.role}` };
+    return { ...message, renderKey: existing?.renderKey ?? message.id };
   });
   const remaining = current.filter(message => !consumed.has(message));
   const live = message => isPlaceholderMessage(message) || !before.has(message);
