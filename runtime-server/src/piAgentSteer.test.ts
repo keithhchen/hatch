@@ -121,3 +121,32 @@ test("A message that joins while a tool executes waits for the tool, then is rea
   assert.match(bodies[1], /工具运行时的新消息/);
   assert.equal(joined.length, 0, "claimed at the turn end, as before");
 });
+
+test("A call cut while thinking ends its thinking block, so the next call may start block 0 again", async (t) => {
+  environment(t);
+  process.env.HATCH_LLM_PROFILE = "kimi-k2.6";
+  const encoder = new TextEncoder();
+  const bodies: string[] = [];
+  let wake = (): void => undefined;
+  t.mock.method(globalThis, "fetch", async (_url: unknown, init: RequestInit) => {
+    bodies.push(String(init.body));
+    if (bodies.length === 1) {
+      setTimeout(() => wake(), 20);
+      return sse(new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(chunk({ role: "assistant", reasoning_content: "想了一半" })));
+          init.signal?.addEventListener("abort", () => controller.error(new DOMException("aborted", "AbortError")), { once: true });
+        }
+      }));
+    }
+    return sse(`${chunk({ role: "assistant", reasoning_content: "重新想" })}${chunk({ content: "一个回答" }, "stop")}data: [DONE]\n\n`);
+  });
+  const harness = contextWith({}, [{ role: "user", content: "其实我想问别的" }]);
+  wake = harness.wake;
+  const events: OutboundMessage[] = [];
+  for await (const event of new PiAgentRuntime().run(input, harness.ctx)) events.push(event);
+  const thinking = events.flatMap((event) => event.type === "assistant.delta" && event.delta.kind.startsWith("thinking_") ? [`${event.delta.kind}:${(event.delta as { contentIndex: number }).contentIndex}`] : []);
+  assert.equal(bodies.length, 2);
+  assert.deepEqual(thinking.filter((kind) => !kind.startsWith("thinking_delta")), ["thinking_start:0", "thinking_end:0", "thinking_start:0", "thinking_end:0"]);
+  assert.ok(events.some((event) => event.type === "turn.completed"), JSON.stringify(events.map((event) => event.type)));
+});
