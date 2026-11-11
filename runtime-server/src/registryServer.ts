@@ -408,7 +408,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     const tools = studioTools(assistant);
     for (const definition of studioToolDefinitions(tools)) toolRegistry.set(definition.name, definition);
     const assistantChat = new AssistantChat({
-      repository: conversations, store: transcripts, chatAssets, state: assistantState, tools, desk: assistant,
+      repository: conversations, store: transcripts, chatAssets, state: assistantState, tools,
       assetStore: new RuntimeAssetStore(path.join(factoryRoot, "assistant-assets")),
       history: new LegacyAssistantHistory({ backend: accountId => new PostgresWorkbenchBackend(registryPool, `assistant:${accountId}`), state: assistantState, store: transcripts }),
       prompt: assistantPrompt, liveState: accountId => assistant.liveState(accountId), env: environment,

@@ -21,7 +21,7 @@ import { ServerToolExecutor } from "../serverTools.js";
 import type { RuntimeStore, VisibleConversationMessage } from "../store.js";
 import { ToolBridge } from "../toolBridge.js";
 import type { ClientAttributes, ContentPart } from "../surfaces/contract.js";
-import { InterviewRelay, isRelayed, isSystemMessageId, SYSTEM_MESSAGE_PREFIX, type InterviewDesk } from "./relay.js";
+import { isSystemMessageId, SYSTEM_MESSAGE_PREFIX } from "./systemMessage.js";
 import type { AssistantStateRepository } from "./state.js";
 import { JournalFeed } from "./journalFeed.js";
 import { accountOfConversation, assistantConversationId, assistantFeedKey } from "./studioVocabulary.js";
@@ -49,7 +49,6 @@ export type AssistantChatDeps = {
   chatAssets: ChatAssets;
   state: AssistantStateRepository;
   tools: readonly StudioTool[];
-  desk: InterviewDesk;
   history: Pick<LegacyAssistantHistory, "importInto">;
   /** The Assistant's whole system prompt. */
   prompt: () => Promise<string>;
@@ -164,11 +163,10 @@ export class AssistantChat implements AssistantHost {
         const serverTools = new ServerToolExecutor(deps.toolTimeoutMs ?? 120_000);
         serverTools.setAttachments(deps.chatAssets.toolsFor(turn.conversation));
         serverTools.setStudio(new StudioToolRunner(deps.tools, { accountId, runId: turn.run.id, origin: () => this.origin(accountId) }));
-        const relayed = isRelayed(turn.input.message.content, Boolean(await deps.state.interview(accountId)));
         await runModelTurn(
           turn.input, turn.persistedUser, NO_SKILLS, turn.scope, turn.broker, serverTools,
           new ToolBridge(turn.broker, serverTools, () => turn.clientOf().client),
-          relayed ? new InterviewRelay({ accountId, state: deps.state, desk: deps.desk }) : this.agentRuntime(),
+          this.agentRuntime(),
           deps.store, deps.repository, deps.assetStore, turn.state, async message => turn.publish(message), deps.outputGuard ?? new PassThroughOutputGuard(),
           turn.signal, undefined, undefined, () => undefined, turn.clientOf, turn.claimSteered, turn.compaction,
           {
@@ -200,7 +198,7 @@ export class AssistantChat implements AssistantHost {
     });
   }
 
-  /** The Assistant's own words to itself: news from its workers, the daily check, an interview's reply. Never shown as the Expert's. */
+  /** The Assistant's own words to itself: news from its workers, the daily check, Never shown as the Expert's. */
   sayAsSystem(accountId: string, text: string, key: string = randomUUID()): Promise<SentMessage> {
     return this.say(accountId, { id: `${SYSTEM_MESSAGE_PREFIX}${key}`, parts: [{ type: "text", text }], client: { client: "web" } });
   }

@@ -26,8 +26,8 @@ export interface StudioOperations {
   describeWorker(kind: WorkerKind): string;
   /** Whether the kind works on one Agent, so it must be told which. */
   needsAgent(kind: WorkerKind): boolean;
-  /** A kind that takes over the conversation: starting it ends the Assistant's turn. */
-  handsOver(kind: WorkerKind): boolean;
+  /** Marks one item of an Agent's interview outline done. Returns the outline. */
+  tickOutline(accountId: string, productId: string, item: string): Promise<Todo[]>;
   excludeSource(accountId: string, source: string, reason?: string): Promise<void>;
   answer(accountId: string, taskId: string, text: string): Promise<AssistantTask>;
   /** `key` is the decider's: the same decision under it again is the same decision, not a second one. */
@@ -62,8 +62,8 @@ const taskView = (task: AssistantTask) => ({ id: task.id, kind: task.kind, statu
 /** Why an Agent may not be built yet, or undefined when its interview is finished and confirmed (every outline item ✓). */
 const notReadyToBuild = (agent: AgentOverview): string | undefined => {
   const open = agent.interview_outline.filter(item => item.status !== "completed").map(item => item.title);
-  if (!agent.interview_outline.length) return `「${agent.name}」还没访谈过，不能构建。先派 interview。`;
-  if (open.length) return `「${agent.name}」的访谈大纲还有没聊完的：${open.join("、")}。构建只依据专家确认过的访谈，先派 interview 聊完。`;
+  if (!agent.interview_outline.length) return `「${agent.name}」还没有访谈大纲，不能构建。先派 interview 写大纲，再去问专家。`;
+  if (open.length) return `「${agent.name}」的访谈大纲还有没聊完的：${open.join("、")}。构建只依据专家确认过的访谈：接着问专家，聊完一项勾一项（tick_outline）。`;
 };
 
 /** The Agent a task is about: the one named (by id or by name), else the only one the Expert has. */
@@ -113,7 +113,7 @@ export function studioTools(ops: StudioOperations): StudioTool[] {
       } },
     { name: "start_task", readOnly: false,
       schema: z.object({ kind: z.enum(WORKER_KINDS), agent_id: z.string().optional().describe("要做哪个 Agent 的事：Agent 的 id，或它的名字。interview、build、content、evaluate、agent_research 在专家有两个以上 Agent 时必填；只有一个 Agent 时可省；research 不用写"), instruction: text(1, 4000).describe("要做什么、专家的原话、为什么现在做") }).strict(),
-      description: `派一件事，立刻返回，做完会告诉你。派活的这一轮不写预告，也不写"我这就""接下来"这类话。interview 例外：它接管和专家的对话，你这一轮随即结束，聊完才交回给你，派出后一个字都不要再说。build 只在这个 Agent 的访谈大纲全是 ✓ 后才会接受。专家有两个以上 Agent 时，除 research 外都必须写 agent_id（id 或名字，用 list_agents 看）；只有一个时可以不写。${WORKER_KINDS.map(kind => ops.describeWorker(kind)).join("；")}。`,
+      description: `派一件事，立刻返回，做完会告诉你。派活的这一轮不写预告，也不写"我这就""接下来"这类话。interview 只写访谈大纲，不和专家说话；大纲写好会告诉你，之后由你来问专家。build 只在这个 Agent 的访谈大纲全是 ✓ 后才会接受。专家有两个以上 Agent 时，除 research 外都必须写 agent_id（id 或名字，用 list_agents 看）；只有一个时可以不写。${WORKER_KINDS.map(kind => ops.describeWorker(kind)).join("；")}。`,
       run: async (call, args) => {
         const input = args as { kind: WorkerKind; agent_id?: string; instruction: string };
         let agentId = input.agent_id;
@@ -126,8 +126,12 @@ export function studioTools(ops: StudioOperations): StudioTool[] {
           if (unready) throw new Error(unready);
         }
         const task = await ops.dispatch(call.accountId, input.kind, agentId, input.instruction, await call.origin());
-        return { ...done(await created(call, task)), ...(ops.handsOver(input.kind) ? { ends_turn: true } : {}) };
+        return done(await created(call, task));
       } },
+    { name: "tick_outline", readOnly: false,
+      schema: z.object({ agent_id: z.string().optional().describe("Agent 的 id 或名字；专家只有一个 Agent 时可省"), item: text(1, 160).describe("大纲里这一项的标题（照 list_agents 里的写，写一段能唯一对上的就行）") }).strict(),
+      description: "勾掉访谈大纲里的一项：只有专家自己的话已经满足提示词里「聊完的标准」，这一项才算聊完。没满足就不要勾，继续追问。大纲全勾完才能派 build。",
+      run: async (call, args) => done({ outline: await ops.tickOutline(call.accountId, await agentFor(ops, call.accountId, args.agent_id), String(args.item)) }) },
     { name: "add_to_agent", readOnly: false,
       schema: z.object({ agent_id: z.string().optional().describe("Agent 的 id 或名字；专家只有一个 Agent 时可省"), files: z.array(z.string()).max(20).optional().describe("专家发来的文件在对话里显示的路径"), links: z.array(z.string()).max(20).optional().describe("要抓取的网页链接"), context: text(1, 2000).optional().describe("这些资料是什么、为什么给") }).strict(),
       description: "专家发来的文件或链接，按常识（看文件名和内容）明显属于某个 Agent 的资料时，加进它的资料；只是发来随便看看的，留在对话里，什么都不用做。放在哪里是自动的，不用你选。",
