@@ -91,6 +91,7 @@ export class TelegramChannel implements ChannelAdapter {
         : message.link ? { reply_markup: { inline_keyboard: [[{ text: message.link.label, url: message.link.url }]] } } : {}),
     });
   }
+  async typing(to: PlatformAddress): Promise<void> { await this.call("sendChatAction", { chat_id: Number(to.threadId), action: "typing" }); }
   /** getMe: proves the token and says what people call the bot. */
   async probe(): Promise<string> {
     const me = await this.call("getMe", {}) as { username?: string };

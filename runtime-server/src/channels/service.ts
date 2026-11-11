@@ -9,12 +9,14 @@ import { PostgresOutbox, type Outbox } from "./outbox.js";
 import type { AssistantChannels, ChatGateway, TargetHandler, TargetKind } from "./ports.js";
 import { ChatReplies, FAILED } from "./productTarget.js";
 import { PostgresRateLimiter, type RateLimiter } from "./rateLimiter.js";
+import { keepTyping } from "./typing.js";
 import { ChannelRouter, type Claim, type SignIn } from "./router.js";
 import { CHANNEL_KINDS, mergeAlbum, type ChannelAdapter, type ChannelKind, type InboundEvent, type PullNotice } from "./types.js";
 
 /** A crashed process frees its event after this; a live one renews the lease every third of it while it works. */
 const INBOX_LEASE_MS = 30_000;
 const INBOX_ATTEMPTS = 5;
+const TYPING = { everyMs: 4_000, maxMs: 3 * 60_000 };
 const COMPACTING = "正在整理对话，稍等一下。\nTidying up our conversation, one moment.";
 
 export type ChannelStores = { connections: ConnectionRepository; inbox: Inbox; outbox: Outbox; limiter: RateLimiter };
@@ -116,12 +118,22 @@ export class ChannelService implements AssistantChannels {
       const rest = await this.inbox.siblings(item);
       const outcome = await this.router.route(rest.length ? { ...item, event: mergeAlbum(item.event, rest.map(part => part.event)) } : item);
       if (!await this.inbox.complete(item, outcome, rest.map(part => part.id), now())) this.report(new Error(`Lost the lease on ${item.channel} event ${item.id} before it was done: another worker has it`));
+      else if (outcome.runId && !outcome.replied) void this.showTyping(item, outcome.runId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const state = await this.inbox.retry(item, message, backoffMs(item.attempts), INBOX_ATTEMPTS, now());
       this.report(error);
       if (state === "failed") await this.giveUp(item, message);
     } finally { clearInterval(heartbeat); }
+  }
+
+  /** While the Run's reply is unsent, the sender sees that an answer is coming. The reply marks the event replied, which is what ends it. */
+  private async showTyping(item: InboxItem, runId: string): Promise<void> {
+    const adapter = await this.deps.hub.get(item.channel, item.scope).catch(() => undefined);
+    if (!adapter?.typing) return;
+    const { address, messageRef } = item.event;
+    await keepTyping(() => adapter.typing!(address, messageRef),
+      async () => (await this.inbox.waiting({ runId }, this.deps.now?.())).some(thread => thread.channel === item.channel && thread.scope === item.scope && thread.threadId === address.threadId), TYPING);
   }
 
   /** The last try failed: say so to the sender in plain words, never in the provider's, and log it as an error. */

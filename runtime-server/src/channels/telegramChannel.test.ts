@@ -25,6 +25,13 @@ test("capabilities", () => {
   assert.deepEqual(channel().telegram.capabilities(), { stream: false, edit: true, typing: true, buttons: true, maxLength: 4096, canInitiate: true, idempotentSend: false });
 });
 
+test("typing sends the chat action to the chat, and a failure is a ChannelSendError", async () => {
+  const { calls, telegram } = channel();
+  await telegram.typing(TO);
+  assert.deepEqual(calls, [{ url: "https://api.telegram.org/bottok/sendChatAction", body: { chat_id: 42, action: "typing" } }]);
+  await assert.rejects(channel(() => Response.json({ ok: false, description: "nope" }, { status: 403 })).telegram.typing(TO), ChannelSendError);
+});
+
 test("available needs token, username and secret; connectUrl carries the code", () => {
   assert.equal(channel().telegram.available(), true);
   for (const missing of ["token", "username", "webhookSecret"]) assert.equal(channel(undefined, { [missing]: undefined }).telegram.available(), false);
