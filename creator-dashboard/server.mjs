@@ -868,30 +868,36 @@ export async function createDashboardApp(options = {}) {
         }
         return servePortalIndex(response, metadata, portalStatus, noScriptFallback);
       }
-      if (request.method === "GET" && url.pathname === "/v1/auth/telegram") {
-        const status = await registryRequest(registryUrl, "/v1/auth/telegram", { fetchImpl }).catch(() => undefined);
+      if (request.method === "GET" && url.pathname === "/v1/auth/providers") {
+        const status = await registryRequest(registryUrl, "/v1/auth/providers", { fetchImpl }).catch(() => undefined);
+        return send(response, 200, { providers: Array.isArray(status?.providers) ? status.providers.filter((kind) => LOGIN_KINDS.includes(kind)) : [] });
+      }
+      const login = request.method === "GET" ? url.pathname.match(/^\/v1\/auth\/([a-z]+)(?:\/(start|callback))?$/) : null;
+      const loginKind = login && LOGIN_KINDS.includes(login[1]) ? login[1] : undefined;
+      if (loginKind && !login[2]) {
+        const status = await registryRequest(registryUrl, `/v1/auth/${loginKind}`, { fetchImpl }).catch(() => undefined);
         return send(response, 200, { enabled: status?.enabled === true });
       }
-      if (request.method === "GET" && url.pathname === "/v1/auth/telegram/start") {
+      if (loginKind && login[2] === "start") {
         try {
-          const started = await registryRequest(registryUrl, "/v1/auth/telegram/start", {
+          const started = await registryRequest(registryUrl, `/v1/auth/${loginKind}/start`, {
             method: "POST",
             body: JSON.stringify({ claim: url.searchParams.get("claim") || undefined, return_to: safeLocalPath(url.searchParams.get("returnTo")) }),
             fetchImpl
           });
-          response.setHeader("set-cookie", telegramStateCookie(request, started.state, 600));
+          response.setHeader("set-cookie", loginStateCookie(request, loginKind, started.state, 600));
           return redirect(response, started.authorize_url);
         } catch {
-          return redirect(response, "/sign-in?telegram=failed");
+          return redirect(response, `/sign-in?${loginKind}=failed`);
         }
       }
-      if (request.method === "GET" && url.pathname === "/v1/auth/telegram/callback") {
+      if (loginKind && login[2] === "callback") {
         const state = url.searchParams.get("state") ?? "";
-        const expected = requestCookies(request).hatch_tg_state ?? "";
-        const clearState = telegramStateCookie(request, "", 0);
+        const expected = requestCookies(request).hatch_login_state ?? "";
+        const clearState = loginStateCookie(request, loginKind, "", 0);
         try {
-          if (!state || !expected || !safeEqual(state, expected) || url.searchParams.get("error")) throw new Error("telegram_state_rejected");
-          const auth = await registryRequest(registryUrl, "/v1/auth/telegram/callback", {
+          if (!state || !expected || !safeEqual(state, expected) || url.searchParams.get("error")) throw new Error("login_state_rejected");
+          const auth = await registryRequest(registryUrl, `/v1/auth/${loginKind}/callback`, {
             method: "POST",
             body: JSON.stringify({ code: url.searchParams.get("code") ?? "", state }),
             fetchImpl
@@ -901,7 +907,7 @@ export async function createDashboardApp(options = {}) {
           return redirect(response, safeLocalPath(auth.return_to));
         } catch {
           response.setHeader("set-cookie", clearState);
-          return redirect(response, "/sign-in?telegram=failed");
+          return redirect(response, `/sign-in?${loginKind}=failed`);
         }
       }
       if (request.method === "POST" && ["/v1/auth/login", "/v1/auth/sign-in"].includes(url.pathname)) {
@@ -4119,8 +4125,11 @@ function cookieCsrfError(request, sessionToken = requestCookies(request).hatch_w
   return undefined;
 }
 
-function telegramStateCookie(request, value, maxAge) {
-  return `hatch_tg_state=${encodeURIComponent(value)}; Path=/v1/auth/telegram; SameSite=Lax; Max-Age=${maxAge}${requestIsSecure(request) ? "; Secure" : ""}; HttpOnly`;
+/** The platforms a person can sign in with; the Registry says which of them are on. */
+const LOGIN_KINDS = ["telegram", "line", "discord"];
+
+function loginStateCookie(request, kind, value, maxAge) {
+  return `hatch_login_state=${encodeURIComponent(value)}; Path=/v1/auth/${kind}; SameSite=Lax; Max-Age=${maxAge}${requestIsSecure(request) ? "; Secure" : ""}; HttpOnly`;
 }
 
 function safeLocalPath(value) {

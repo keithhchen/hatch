@@ -63,7 +63,9 @@ import { WhatsAppChannel, whatsappEligibility } from "./channels/whatsappChannel
 import { TelegramChannel } from "./channels/telegramChannel.js";
 import { OwnApps } from "./channels/ownApps.js";
 import { LoginError, OidcClient } from "./auth/oidc.js";
-import { PostgresLoginStore, TelegramLogin, telegramOidc } from "./auth/telegramLogin.js";
+import { DiscordIdentity, lineIdentity, lineOidc, telegramIdentity, telegramOidc } from "./auth/identities.js";
+import { PlatformLogin, PostgresLoginStore, type IdentityProvider } from "./auth/platformLogin.js";
+import { DiscordChannel } from "./channels/discordChannel.js";
 import { PostgresTaskRepository } from "./assistant/tasks.js";
 import type { AgentCatalog, AgentChange, CatalogAgent } from "./assistant/catalog.js";
 import "dotenv/config";
@@ -145,8 +147,8 @@ type RegistryContext = {
   channels?: ChannelService;
   credentialSeal?: CredentialSeal;
   ownApps?: OwnApps;
-  /** Telegram as a way to sign in; absent when the login client is not configured. */
-  telegramLogin?: TelegramLogin;
+  /** The platforms a person signs in with; absent without the Registry database. */
+  platformLogin?: PlatformLogin;
   publicOrigin?: string;
   studioUrl?: string;
   reach?: AccountReach;
@@ -309,6 +311,8 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       accessToken: environment.HATCH_LINE_CHANNEL_ACCESS_TOKEN?.trim() || undefined,
       basicId: environment.HATCH_LINE_BASIC_ID?.trim() || undefined,
     });
+    // Discord's shared bot answers direct messages only: without its own id (from a probe) a mention in a server is not recognised.
+    const discord = new DiscordChannel({ token: environment.HATCH_DISCORD_BOT_TOKEN?.trim() ?? "", applicationId: environment.HATCH_DISCORD_APPLICATION_ID?.trim() ?? "" }, "");
     const imessage = new IMessageChannel({
       projectId: environment.HATCH_PHOTON_PROJECT_ID?.trim() || undefined,
       projectSecret: environment.HATCH_PHOTON_PROJECT_SECRET?.trim() || undefined,
@@ -333,7 +337,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     const eligibility = { whatsapp: whatsappEligibility };
     const apps = new Map<string, { sealed: string; adapter: ChannelAdapter }>();
     // An Expert's own app: found by the account for one app per account, by the id of the bot for one bot per Product.
-    const hub = new ChannelHub([telegram, line, imessage, slack, whatsapp, instagram, messenger], async (kind, scope) => {
+    const hub = new ChannelHub([telegram, line, discord, imessage, slack, whatsapp, instagram, messenger], async (kind, scope) => {
       const form = CREDENTIAL_FORMS[kind];
       if (!form || isTenantForm(form) || !seal) return undefined;
       const sealed = form.perProduct ? await stores.connections.credentialsOf(kind, scope) : await stores.connections.credentials(scope, kind);
@@ -344,14 +348,19 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       apps.set(`${kind}:${scope}`, { sealed, adapter });
       return adapter;
     }, kind => { const form = CREDENTIAL_FORMS[kind]; return Boolean(form && isTenantForm(form)); });
-    // Telegram signs people in with OpenID Connect; a chat that started it is bound to the Assistant once the sign-in names the same sender.
-    const loginClientId = env("HATCH_TELEGRAM_LOGIN_CLIENT_ID"); const loginClientSecret = env("HATCH_TELEGRAM_LOGIN_CLIENT_SECRET");
+    // Each platform's own sign-in: one Hatch account per platform id. A chat that started it is bound to the Assistant once the sign-in names the same sender.
+    const clientOf = (prefix: string) => { const clientId = env(`${prefix}_CLIENT_ID`); const clientSecret = env(`${prefix}_CLIENT_SECRET`); return clientId && clientSecret ? { clientId, clientSecret } : undefined; };
+    const [telegramClient, lineClient, discordClient] = [clientOf("HATCH_TELEGRAM_LOGIN"), clientOf("HATCH_LINE_LOGIN"), clientOf("HATCH_DISCORD")];
+    const providers: Partial<Record<ChannelKind, IdentityProvider>> = {
+      ...(telegramClient ? { telegram: telegramIdentity(new OidcClient(telegramOidc(telegramClient, env("HATCH_TELEGRAM_LOGIN_BASE")))) } : {}),
+      ...(lineClient ? { line: lineIdentity(new OidcClient(lineOidc(lineClient))) } : {}),
+      ...(discordClient ? { discord: new DiscordIdentity(discordClient) } : {}),
+    };
     let channels!: ChannelService;
-    const telegramLogin = loginClientId && loginClientSecret ? new TelegramLogin({
-      oidc: new OidcClient(telegramOidc({ clientId: loginClientId, clientSecret: loginClientSecret }, env("HATCH_TELEGRAM_LOGIN_BASE"))),
-      store: await PostgresLoginStore.open(registryPool), accounts, limiter: stores.limiter, origin: telegramOrigin,
-      admit: (account, telegramId, claim) => channels.admit("telegram", { senderId: telegramId, threadId: telegramId }, claim.invite ? { invite: claim.invite } : { account: account.id }),
-    }) : undefined;
+    const platformLogin = new PlatformLogin({
+      providers, store: await PostgresLoginStore.open(registryPool), accounts, limiter: stores.limiter, origin: telegramOrigin,
+      admit: (kind, account, subject, claim) => channels.admit(kind, { senderId: subject, threadId: subject }, claim.invite ? { invite: claim.invite } : { account: account.id }),
+    });
     const catalog = registryAgentCatalog(registryContext);
     // Chat runs in the Runtime process: the channel layer reaches it with its own service token, and never otherwise.
     const chatUrl = environment.HATCH_RUNTIME_CHAT_URL?.trim();
@@ -363,9 +372,9 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     channels = new ChannelService({
       ...stores, hub, scopeOf, ownsProduct, gateway: routed,
       audienceOf: (kind, target) => target.kind === "product" && isPerProduct(CREDENTIAL_FORMS[kind]) ? "public" : "self",
-      signIn: async (kind, senderId, invite) => kind === "telegram" ? telegramLogin?.claimLink(senderId, invite) : undefined,
-      // A Telegram id belongs to one Hatch account: linking from an account that is not its own is refused.
-      claim: async (kind, scope, accountId, senderId) => kind !== "telegram" || scope !== "" || await accounts.linkIdentity(accountId, "telegram", senderId),
+      signIn: (kind, senderId, invite) => platformLogin.claimLink(kind, senderId, invite),
+      // A platform id on our shared bot belongs to one Hatch account: linking from an account that is not its own is refused.
+      claim: async (kind, scope, accountId, senderId) => !["telegram", "line", "discord"].includes(kind) || scope !== "" || await accounts.linkIdentity(accountId, kind, senderId),
     });
     const assistantState = await PostgresAssistantState.open(registryPool);
     const productsPrefix = environment.HATCH_CREATOR_PRODUCT_FILES_PREFIX?.trim() || "creator-products";
@@ -413,7 +422,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     // Without a Chat gateway Product Connections have no handler, and their events wait in the inbox.
     if (gateway) channels.register("product", guarded(new GuardedTarget(new ChatFlow(new ProductTarget({ gateway, limiter: stores.limiter })), [liveOwnProduct(releaseStore)]), eligibility));
     channels.start();
-    Object.assign(registryContext, { assistant, assistantChat, ingest, channels, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin, studioUrl, telegramLogin, ...(seal ? { ownApps: new OwnApps({ connections: stores.connections, seal, forms: CREDENTIAL_FORMS, origin: telegramOrigin, ownsProduct }) } : {}) });
+    Object.assign(registryContext, { assistant, assistantChat, ingest, channels, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin, studioUrl, platformLogin,...(seal ? { ownApps: new OwnApps({ connections: stores.connections, seal, forms: CREDENTIAL_FORMS, origin: telegramOrigin, ownsProduct }) } : {}) });
     // A platform that pushes over its own connection runs here, in one process at a time. A dropped connection comes back; credentials added or removed are picked up.
     channelListeners = new ChannelListeners({
       hub, connections: stores.connections, exclusive: postgresExclusive(registryPool),
@@ -759,20 +768,26 @@ async function route(
     return;
   }
 
-  // Telegram signs people in (OpenID Connect, authorization code with PKCE). The site starts it and finishes it; the browser never sees a token here.
-  if (url.pathname === "/v1/auth/telegram" && request.method === "GET") {
-    sendAuthJson(response, 200, { enabled: Boolean(context.telegramLogin) });
+  // A platform signs people in (OpenID Connect or OAuth2, authorization code with PKCE). The site starts it and finishes it; the browser never sees a token here.
+  if (url.pathname === "/v1/auth/providers" && request.method === "GET") {
+    sendAuthJson(response, 200, { providers: context.platformLogin?.kinds() ?? [] });
     return;
   }
-  if (url.pathname === "/v1/auth/telegram/start" && request.method === "POST") {
+  const login = url.pathname.match(/^\/v1\/auth\/([a-z]+)(?:\/(start|callback))?$/);
+  const loginKind = login && isChannelKind(login[1]!) ? login[1] : undefined;
+  if (loginKind && !login![2] && request.method === "GET") {
+    sendAuthJson(response, 200, { enabled: Boolean(context.platformLogin?.enabled(loginKind)) });
+    return;
+  }
+  if (loginKind && login![2] === "start" && request.method === "POST") {
     const body = await readJson(request);
-    const { authorizeUrl, state } = await telegramLoginOf(context).start({ claim: typeof body.claim === "string" ? body.claim : undefined, returnTo: typeof body.return_to === "string" ? body.return_to : undefined });
+    const { authorizeUrl, state } = await platformLoginOf(context).start(loginKind, { claim: typeof body.claim === "string" ? body.claim : undefined, returnTo: typeof body.return_to === "string" ? body.return_to : undefined });
     sendAuthJson(response, 200, { authorize_url: authorizeUrl, state });
     return;
   }
-  if (url.pathname === "/v1/auth/telegram/callback" && request.method === "POST") {
+  if (loginKind && login![2] === "callback" && request.method === "POST") {
     const body = await readJson(request);
-    const { account, created, returnTo } = await telegramLoginOf(context).finish({ code: String(body.code ?? ""), state: String(body.state ?? "") });
+    const { account, created, returnTo } = await platformLoginOf(context).finish(loginKind, { code: String(body.code ?? ""), state: String(body.state ?? "") });
     sendAuthJson(response, created ? 201 : 200, { ...sessionResponse(account, await context.accounts.createSession(account)), created, return_to: returnTo });
     return;
   }
@@ -1938,9 +1953,9 @@ async function optionalJson(request: http.IncomingMessage): Promise<Record<strin
   return bytes.length ? readJsonBytes(bytes) : {};
 }
 
-function telegramLoginOf(context: RegistryContext): TelegramLogin {
-  if (!context.telegramLogin) throw new LoginError("login_unavailable", "Telegram sign-in is not available.", 503);
-  return context.telegramLogin;
+function platformLoginOf(context: RegistryContext): PlatformLogin {
+  if (!context.platformLogin) throw new LoginError("login_unavailable", "Sign-in is not available.", 503);
+  return context.platformLogin;
 }
 
 function sendAuthBusy(response: http.ServerResponse): void {
