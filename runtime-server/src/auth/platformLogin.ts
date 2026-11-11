@@ -71,12 +71,12 @@ export class PostgresLoginStore implements LoginStore {
 export type LoginOutcome = { account: Account; created: boolean; returnTo: string };
 
 /**
- * Platforms as identity providers. A platform id (the sender id its bot sees) is an identity of exactly one account.
+ * Platforms as identity providers. A platform id (the sender id its bot sees) is an identity of exactly one account, and an account has one per platform.
  * Two ways in, the same flow: from the site, or from the bot's own chat, where a claim ties the sign-in to the sender id the bot saw.
  */
 export class PlatformLogin {
   constructor(private deps: {
-    providers: Partial<Record<ChannelKind, IdentityProvider>>; store: LoginStore; accounts: Pick<AccountStoreTs, "signInWithIdentity">; limiter: RateLimiter;
+    providers: Partial<Record<ChannelKind, IdentityProvider>>; store: LoginStore; accounts: Pick<AccountStoreTs, "signInWithIdentity" | "linkIdentity">; limiter: RateLimiter;
     /** The public origin of the site the provider sends the person back to. */
     origin: string;
     /** After a sign-in that started from a chat: bind that chat (or admit an invitee). Failing refuses the sign-in. */
@@ -118,7 +118,12 @@ export class PlatformLogin {
     return { authorizeUrl: provider.authorizeUrl({ redirectUri: this.redirectUri(kind), state, nonce, challenge }), state };
   }
 
-  async finish(kind: ChannelKind, input: { code: string; state: string }): Promise<LoginOutcome> {
+  /**
+   * `signedIn` is the account the request already carries a session for. Then the platform id is bound to that account and replaces
+   * its previous one on that platform (and the Assistant's chat moves to it): the account stays, only the way in changes.
+   * Without a session, the platform id signs in to its account, or makes one when it is new.
+   */
+  async finish(kind: ChannelKind, input: { code: string; state: string; signedIn?: Account }): Promise<LoginOutcome> {
     const provider = this.provider(kind);
     await this.throttle(`auth:${kind}:callback`, START_RATE);
     // A state is spent where it is presented, so one started for another platform is spent too.
@@ -128,6 +133,11 @@ export class PlatformLogin {
     // Used even when it does not fit: a link that someone else tapped is spent.
     const claim = transaction.claim ? await this.deps.store.useClaim(transaction.claim, this.now()) : undefined;
     if (transaction.claim && (!claim || claim.kind !== kind || claim.subject !== subject)) throw new LoginError("claim_mismatch", `This sign-in link belongs to another ${CHANNEL_LABELS[kind]} account.`, 403);
+    if (input.signedIn) {
+      if (!await this.deps.accounts.linkIdentity(input.signedIn.id, kind, subject)) throw new LoginError("identity_taken", `This ${CHANNEL_LABELS[kind]} account already belongs to another Hatch account.`, 409);
+      await this.deps.admit(kind, input.signedIn, subject, claim ?? { kind, subject });
+      return { account: input.signedIn, created: false, returnTo: transaction.returnTo };
+    }
     const { account, created } = await this.deps.accounts.signInWithIdentity(kind, subject, name ?? CHANNEL_LABELS[kind]);
     if (claim) await this.deps.admit(kind, account, subject, claim);
     return { account, created, returnTo: transaction.returnTo };

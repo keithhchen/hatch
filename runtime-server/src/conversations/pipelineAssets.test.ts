@@ -103,7 +103,8 @@ for (const [name, run, skip] of adapters) {
       const uploaded = await d.assets.upload(mine, { name: "notes.txt", bytes: Buffer.from("hello") });
       assert.equal(uploaded.state, "ready");
       assert.equal(await d.assets.resolve(mine, "nope"), undefined);
-      await assert.rejects(d.assets.upload(mine, { name: "big.bin", bytes: Buffer.from([0, 1, 2, 3, 0, 0]) }), { status: 415, code: "unsupported_type" }, "input that is never stored is refused as it is");
+      const unknown = await d.assets.upload(mine, { name: "big.bin", bytes: Buffer.from([0, 1, 2, 3, 0, 0]) });
+      assert.equal(unknown.state, "ready", "a file of a type we do not know is passed through, not refused");
     } finally { await d.close(); }
   }));
 }

@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { zipSync } from "fflate";
 import { Agent } from "@earendil-works/pi-agent-core";
 import { createAssistantMessageEventStream, type AssistantMessage, type Context } from "@earendil-works/pi-ai";
 import { harness, png } from "../assets/kit.test.js";
@@ -441,6 +442,23 @@ test("add_to_agent: a PDF goes to Ingest with its original bytes, never into the
     assert.equal((await env.productStore.backend.listManual()).length, 0);
   } finally { await env.close(); }
 });
+
+for (const [label, name, bytes, mediaType] of [
+  ["a zip", "资料.zip", Buffer.from(zipSync({ "a.txt": new Uint8Array([65]) })), "application/zip"],
+  ["an unknown binary", "data.bin", Buffer.from([0, 1, 2, 3, 0, 0xff, 0xfe]), "application/octet-stream"],
+] as const) {
+  test(`add_to_agent: ${label} is an attachment the Assistant sees, and goes to Ingest with its original bytes`, async () => {
+    const { submitted, ingest } = ingestRecorder();
+    const env = await setup({ ingest, model: turn => ({ tools: [{ name: "add_to_agent", arguments: { files: [sentPath(turn)] } }], text: "交给整理了" }) });
+    try {
+      const upload = await env.assistant.upload(ACCOUNT, name, bytes);
+      await env.assistant.hear(ACCOUNT, { id: `bin-${name}`, source: "web", parts: [{ type: "text", text: "这个也是资料" }, { type: "file", assetId: upload.assetId }] });
+      await env.idle();
+      assert.deepEqual(submitted, [{ productId: PRODUCT, context: undefined, items: [{ name, content_base64: bytes.toString("base64"), media_type: mediaType }] }]);
+      assert.equal((await env.productStore.backend.listManual()).length, 0);
+    } finally { await env.close(); }
+  });
+}
 
 test("add_to_agent: links go to Ingest; a mixed call writes the text now and submits one job for the rest", async () => {
   const { submitted, ingest } = ingestRecorder();

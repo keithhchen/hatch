@@ -264,15 +264,29 @@ export class AccountStoreTs {
     return { account: (await this.accountOfIdentity(provider, subject))!, created: false };
   }
 
-  /** An account that already exists claims an identity. False when that identity belongs to another account. */
+  /**
+   * An account that already exists claims an identity at a provider, and it is then the account's only one there: the one it had is let go.
+   * False, and nothing changed, when that identity belongs to another account. Repeating it changes nothing.
+   */
   async linkIdentity(accountId: string, provider: string, subject: string): Promise<boolean> {
     if (!this.pool) {
       const owner = this.identities.get(`${provider}:${subject}`);
-      if (!owner) this.identities.set(`${provider}:${subject}`, accountId);
-      return !owner || owner === accountId;
+      if (owner && owner !== accountId) return false;
+      for (const [key, id] of this.identities) if (id === accountId && key.startsWith(`${provider}:`)) this.identities.delete(key);
+      this.identities.set(`${provider}:${subject}`, accountId);
+      return true;
     }
-    await this.pool.query("INSERT INTO account_identities (provider, subject, account_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING", [provider, subject, accountId]);
-    return (await this.pool.query("SELECT account_id FROM account_identities WHERE provider=$1 AND subject=$2", [provider, subject])).rows[0]?.account_id === accountId;
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      // Per account, one at a time: two sign-ins of one account cannot both leave their identity behind.
+      await client.query("SELECT 1 FROM accounts WHERE id=$1 FOR UPDATE", [accountId]);
+      await client.query("INSERT INTO account_identities (provider, subject, account_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING", [provider, subject, accountId]);
+      const mine = (await client.query("SELECT account_id FROM account_identities WHERE provider=$1 AND subject=$2", [provider, subject])).rows[0]?.account_id === accountId;
+      if (mine) await client.query("DELETE FROM account_identities WHERE account_id=$1 AND provider=$2 AND subject<>$3", [accountId, provider, subject]);
+      await client.query("COMMIT");
+      return mine;
+    } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; } finally { client.release(); }
   }
 
   private async accountOfIdentity(provider: string, subject: string): Promise<Account | undefined> {

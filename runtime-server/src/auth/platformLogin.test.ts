@@ -108,6 +108,36 @@ test("A sign-in that began in the chat is bound to the sender it was issued for,
   await assert.rejects(env.login.start("telegram", { claim }), refused("claim_invalid"), "the same link a second time");
 });
 
+test("Signed in, a new Telegram id replaces the old one on the same account; it never makes an account", async () => {
+  const env = harness({ idToken: nonce => sign(claims({ nonce, id: 5151 })) });
+  const { account } = await env.accounts.signInWithIdentity("telegram", "4242", "Ann");
+  const started = await env.login.start("telegram", {});
+  const outcome = await env.login.finish("telegram", { code: new URL(started.authorizeUrl).searchParams.get("nonce")!, state: started.state, signedIn: account });
+  assert.deepEqual([outcome.created, outcome.account.id], [false, account.id]);
+  assert.deepEqual(env.admitted, [[account.id, "5151", { kind: "telegram", subject: "5151" }]], "the Assistant's chat moves to the new sender");
+  assert.equal((await env.accounts.signInWithIdentity("telegram", "5151", "x")).account.id, account.id);
+  assert.equal((await env.accounts.signInWithIdentity("telegram", "4242", "Ann again")).created, true, "the old id is a stranger now");
+});
+
+test("Signed in, a Telegram id that belongs to another account is refused and nothing changes", async () => {
+  const env = harness();
+  const other = (await env.comeBack(await env.login.start("telegram", {}))).account;
+  const me = await env.accounts.create("me@verify.test", "long-enough-password", "Me");
+  const started = await env.login.start("telegram", {});
+  await assert.rejects(env.login.finish("telegram", { code: new URL(started.authorizeUrl).searchParams.get("nonce")!, state: started.state, signedIn: me }), refused("identity_taken"));
+  assert.deepEqual(env.admitted, []);
+  assert.equal((await env.accounts.signInWithIdentity("telegram", "4242", "x")).account.id, other.id);
+});
+
+test("Linking the same identity again changes nothing, and each account keeps one identity per provider", async () => {
+  const accounts = new AccountStoreTs();
+  const { account } = await accounts.signInWithIdentity("telegram", "1", "Ann");
+  assert.equal(await accounts.linkIdentity(account.id, "telegram", "2"), true);
+  assert.equal(await accounts.linkIdentity(account.id, "telegram", "2"), true);
+  assert.equal(await accounts.linkIdentity(account.id, "line", "U1"), true, "another provider is another identity");
+  assert.deepEqual([...accounts["identities"].keys()].sort(), ["line:U1", "telegram:2"]);
+});
+
 test("A token whose id is not the sender the link was issued for is refused, and the link is spent", async () => {
   const env = harness();
   const claim = new URL((await env.login.claimLink("telegram", "1111"))!).searchParams.get("claim")!;
@@ -206,5 +236,12 @@ test("In Postgres a state and a claim are each spent once, and an identity is on
     assert.equal(results.filter(result => result.created).length, 1);
     assert.equal((await pool.query("SELECT count(*)::int AS n FROM accounts")).rows[0].n, 1, "a lost race leaves no account behind");
     assert.equal((await accounts.getById(results[0]!.account.id))!.email, null);
+    const id = results[0]!.account.id;
+    const other = (await accounts.signInWithIdentity("telegram", "77", "Bob")).account;
+    assert.equal(await accounts.linkIdentity(id, "telegram", "77"), false, "another account's id is not stolen");
+    assert.deepEqual(await Promise.all(["56", "57", "56", "56"].map(subject => accounts.linkIdentity(id, "telegram", subject))), [true, true, true, true]);
+    assert.equal((await pool.query("SELECT count(*)::int AS n FROM account_identities WHERE account_id=$1", [id])).rows[0].n, 1, "one identity per provider, even when racing");
+    assert.equal((await accounts.signInWithIdentity("telegram", "55", "Ann")).account.id !== id, true, "the replaced id no longer reaches the account");
+    assert.equal((await accounts.signInWithIdentity("telegram", "77", "Bob")).account.id, other.id);
   } finally { await pool.end(); await admin.query(`DROP SCHEMA "${schema}" CASCADE`); await admin.end(); }
 });
