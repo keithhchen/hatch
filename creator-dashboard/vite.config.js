@@ -2,6 +2,7 @@ import http from "node:http";
 import https from "node:https";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { sentryVitePlugin } from "@sentry/vite-plugin";
 
 const dashboardApiTarget = process.env.HATCH_CREATOR_DASHBOARD_API_URL ?? "http://127.0.0.1:8500";
 const dashboardApiUrl = new URL(dashboardApiTarget);
@@ -33,8 +34,20 @@ function createDashboardApiProxy() {
 
 export default defineConfig({
   base: process.env.VITE_BASE_PATH ?? "/",
-  plugins: [react()],
-  // Hidden maps carry no sourceMappingURL; the Dockerfile deletes them from the served dist.
+  plugins: [
+    react(),
+    // Uploads the hidden maps only when the publish build mounts the token; the Dockerfile deletes them from dist either way.
+    ...(process.env.SENTRY_AUTH_TOKEN
+      ? [sentryVitePlugin({
+          org: "hatch-ns",
+          project: "hatch-web",
+          authToken: process.env.SENTRY_AUTH_TOKEN,
+          release: { name: process.env.VITE_RELEASE },
+          telemetry: false
+        })]
+      : [])
+  ],
+  // Hidden maps carry no sourceMappingURL.
   build: { sourcemap: "hidden" },
   // @hatch/ui is a linked local package during development. Force every
   // component onto the Dashboard's React instance so hooks cannot resolve a
