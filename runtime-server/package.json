@@ -24,10 +24,7 @@
     "@langfuse/otel": "^5.13.1",
     "@langfuse/tracing": "^5.13.1",
     "@opentelemetry/api": "^1.9.0",
-    "@opentelemetry/api-logs": "^0.223.0",
-    "@opentelemetry/exporter-logs-otlp-http": "^0.223.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.223.0",
-    "@opentelemetry/sdk-logs": "^0.223.0",
     "@opentelemetry/sdk-node": "^0.223.0",
     "@opentelemetry/sdk-trace-base": "^2.12.0",
     "@spectrum-ts/core": "12.14.0",
@@ -45,6 +42,7 @@
     "zod": "^4.1.0"
   },
   "devDependencies": {
+    "@opentelemetry/context-async-hooks": "^2.12.1",
     "@types/node": "^24.0.0",
     "@types/pg": "^8.20.3",
     "@types/ws": "^8.5.0",

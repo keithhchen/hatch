@@ -29,28 +29,16 @@ jobs:
           tar -xzf "$archive" -C "$temp_dir"
           cp -a "$temp_dir/$root_dir/." "$GITHUB_WORKSPACE/"
           rm -rf "$temp_dir"
-      - name: Materialize GitHub production environment
-        env:
-          HATCH_PRODUCTION_ENV: ${{ secrets.HATCH_PRODUCTION_ENV }}
-          HATCH_CREATOR_NAS_GATEWAY_TOKEN: ${{ secrets.HATCH_CREATOR_NAS_GATEWAY_TOKEN }}
+      - name: Require the production environment the application CD wrote
         run: |
           set -euo pipefail
-          test -n "$HATCH_PRODUCTION_ENV"
-          test -n "$HATCH_CREATOR_NAS_GATEWAY_TOKEN"
-          temp_env="$(mktemp /opt/hatch/.env.github.XXXXXX)"
-          trap 'rm -f "$temp_env"' EXIT
-          umask 077
-          printf '%s\n' "$HATCH_PRODUCTION_ENV" > "$temp_env"
-          test -s "$temp_env"
-          printf 'HATCH_CREATOR_NAS_GATEWAY_TOKEN=%s\n' "$HATCH_CREATOR_NAS_GATEWAY_TOKEN" >> "$temp_env"
-          grep -Eq '^HATCH_DOMAIN=[^[:space:]]+$' "$temp_env"
-          chmod 600 "$temp_env"
-          mv -f "$temp_env" /opt/hatch/.env
-          trap - EXIT
+          test -f /opt/hatch/.env || { echo "Run Hatch application CD first: it writes /opt/hatch/.env"; exit 1; }
+          grep -Eq '^HATCH_DOMAIN=[^[:space:]]+$' /opt/hatch/.env
       - name: Prepare infrastructure definition
         run: |
           set -euo pipefail
           install -m 640 compose.infra.yml /opt/hatch/compose.infra.yml
+          install -D -m 640 vector/vector.yaml /opt/hatch/vector/vector.yaml
       - name: Start infrastructure only
         run: |
           set -euo pipefail
@@ -62,3 +50,7 @@ jobs:
           docker network inspect hatch_internal >/dev/null 2>&1 || docker network create hatch_internal
           docker compose --env-file .env -f compose.infra.yml up -d postgres qdrant
           docker compose --env-file .env -f compose.infra.yml ps --status running postgres qdrant
+          if grep -Eq '^HATCH_AXIOM_TOKEN=[^[:space:]]+' .env; then
+            docker compose --env-file .env -f compose.infra.yml run --rm --no-deps vector validate --no-environment /etc/vector/vector.yaml || { echo "vector/vector.yaml failed validation; not starting vector" >&2; exit 1; }
+            docker compose --env-file .env -f compose.infra.yml up -d vector
+          fi

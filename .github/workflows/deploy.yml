@@ -183,7 +183,7 @@ jobs:
           HATCH_DISCORD_CLIENT_SECRET: ${{ secrets.HATCH_DISCORD_CLIENT_SECRET }}
           HATCH_DISCORD_BOT_TOKEN: ${{ secrets.HATCH_DISCORD_BOT_TOKEN }}
           HATCH_DISCORD_APPLICATION_ID: ${{ secrets.HATCH_DISCORD_APPLICATION_ID }}
-          # Backend logs and traces to Axiom over OTLP; off until both are set.
+          # Backend traces to Axiom over OTLP, and every container's logs through Vector, into one dataset; off until the token and dataset are set.
           HATCH_AXIOM_TOKEN: ${{ secrets.HATCH_AXIOM_TOKEN }}
           HATCH_AXIOM_DATASET: ${{ secrets.HATCH_AXIOM_DATASET }}
           # The organization's ingest edge, e.g. https://us-east-1.aws.edge.axiom.co; Axiom's API host when unset.
@@ -204,7 +204,7 @@ jobs:
           umask 077
           printf '%s\n' "$HATCH_PRODUCTION_ENV" > "$temp_env"
           test -s "$temp_env"
-          grep -Ev '^(HATCH_MANAGED_AGENTS_API_KEY|HATCH_CREDENTIALS_KEY|GEMINI_API_KEY|HATCH_LLM_PROFILE|HATCH_FACTORY_LLM_PROFILE|HATCH_FACTORY_VOICE_PROVIDER|HATCH_FACTORY_LIVE_MODEL|HATCH_FACTORY_LIVE_VOICE|HATCH_FACTORY_STT_PROVIDER|HATCH_FACTORY_VOICE_PAUSE_MS|HATCH_CREATOR_NAS_GATEWAY_TOKEN|FEISHU_APP_ID|FEISHU_APP_SECRET|FEISHU_BASE_TOKEN|FEISHU_TABLE_ID|FIRECRAWL_API_KEY|LANGFUSE_ENABLED|LANGFUSE_PUBLIC_KEY|LANGFUSE_SECRET_KEY|LANGFUSE_BASE_URL|LANGFUSE_TRACING_ENVIRONMENT|HATCH_RUNTIME_CHAT_SERVICE_TOKEN|HATCH_TELEGRAM_BOT_TOKEN|HATCH_TELEGRAM_BOT_USERNAME|HATCH_TELEGRAM_WEBHOOK_SECRET|HATCH_TELEGRAM_LOGIN_CLIENT_ID|HATCH_TELEGRAM_LOGIN_CLIENT_SECRET|HATCH_LINE_LOGIN_CLIENT_ID|HATCH_LINE_LOGIN_CLIENT_SECRET|HATCH_DISCORD_CLIENT_ID|HATCH_DISCORD_CLIENT_SECRET|HATCH_DISCORD_BOT_TOKEN|HATCH_DISCORD_APPLICATION_ID|OTEL_EXPORTER_OTLP_ENDPOINT|OTEL_EXPORTER_OTLP_HEADERS)=' "$temp_env" > "$normalized_env"
+          grep -Ev '^(HATCH_MANAGED_AGENTS_API_KEY|HATCH_CREDENTIALS_KEY|GEMINI_API_KEY|HATCH_LLM_PROFILE|HATCH_FACTORY_LLM_PROFILE|HATCH_FACTORY_VOICE_PROVIDER|HATCH_FACTORY_LIVE_MODEL|HATCH_FACTORY_LIVE_VOICE|HATCH_FACTORY_STT_PROVIDER|HATCH_FACTORY_VOICE_PAUSE_MS|HATCH_CREATOR_NAS_GATEWAY_TOKEN|FEISHU_APP_ID|FEISHU_APP_SECRET|FEISHU_BASE_TOKEN|FEISHU_TABLE_ID|FIRECRAWL_API_KEY|LANGFUSE_ENABLED|LANGFUSE_PUBLIC_KEY|LANGFUSE_SECRET_KEY|LANGFUSE_BASE_URL|LANGFUSE_TRACING_ENVIRONMENT|HATCH_RUNTIME_CHAT_SERVICE_TOKEN|HATCH_TELEGRAM_BOT_TOKEN|HATCH_TELEGRAM_BOT_USERNAME|HATCH_TELEGRAM_WEBHOOK_SECRET|HATCH_TELEGRAM_LOGIN_CLIENT_ID|HATCH_TELEGRAM_LOGIN_CLIENT_SECRET|HATCH_LINE_LOGIN_CLIENT_ID|HATCH_LINE_LOGIN_CLIENT_SECRET|HATCH_DISCORD_CLIENT_ID|HATCH_DISCORD_CLIENT_SECRET|HATCH_DISCORD_BOT_TOKEN|HATCH_DISCORD_APPLICATION_ID|OTEL_EXPORTER_OTLP_ENDPOINT|OTEL_EXPORTER_OTLP_HEADERS|HATCH_AXIOM_TOKEN|HATCH_AXIOM_ENDPOINT|HATCH_AXIOM_DATASET)=' "$temp_env" > "$normalized_env"
           printf 'GEMINI_API_KEY=%s\nHATCH_LLM_PROFILE=kimi-k2.6-no-thinking\nHATCH_FACTORY_LLM_PROFILE=gemini-3.1-pro\nHATCH_FACTORY_VOICE_PROVIDER=legacy\nHATCH_FACTORY_LIVE_MODEL=gemini-3.8-live\nHATCH_FACTORY_LIVE_VOICE=\nHATCH_FACTORY_STT_PROVIDER=qwen\nHATCH_FACTORY_VOICE_PAUSE_MS=2500\n' "$HATCH_GEMINI_API_KEY" >> "$normalized_env"
           printf 'HATCH_CREATOR_NAS_GATEWAY_TOKEN=%s\n' "$HATCH_CREATOR_NAS_GATEWAY_TOKEN" >> "$normalized_env"
           if test -n "$FEISHU_APP_SECRET"; then
@@ -216,6 +216,9 @@ jobs:
           done
           if test -n "$HATCH_AXIOM_TOKEN" && test -n "$HATCH_AXIOM_DATASET"; then
             printf 'OTEL_EXPORTER_OTLP_ENDPOINT=%s\nOTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer %s,X-Axiom-Dataset=%s\n' "${HATCH_AXIOM_ENDPOINT:-https://api.axiom.co}" "$HATCH_AXIOM_TOKEN" "$HATCH_AXIOM_DATASET" >> "$normalized_env"
+          fi
+          if test -n "$HATCH_AXIOM_TOKEN" && test -n "$HATCH_AXIOM_ENDPOINT" && test -n "$HATCH_AXIOM_DATASET"; then
+            printf 'HATCH_AXIOM_TOKEN=%s\nHATCH_AXIOM_ENDPOINT=%s\nHATCH_AXIOM_DATASET=%s\n' "$HATCH_AXIOM_TOKEN" "$HATCH_AXIOM_ENDPOINT" "$HATCH_AXIOM_DATASET" >> "$normalized_env"
           fi
           printf 'LANGFUSE_ENABLED=true\nLANGFUSE_PUBLIC_KEY=%s\nLANGFUSE_SECRET_KEY=%s\nLANGFUSE_BASE_URL=%s\nLANGFUSE_TRACING_ENVIRONMENT=production\n' "$LANGFUSE_PUBLIC_KEY" "$LANGFUSE_SECRET_KEY" "$LANGFUSE_BASE_URL" >> "$normalized_env"
           mv -f "$normalized_env" "$temp_env"
@@ -234,6 +237,7 @@ jobs:
           fi
           install -m 640 compose.app.yml /opt/hatch/
           install -m 640 compose.infra.yml /opt/hatch/
+          install -D -m 640 vector/vector.yaml /opt/hatch/vector/vector.yaml
       - name: Ensure shared Postgres is ready
         run: |
           set -euo pipefail
@@ -262,6 +266,14 @@ jobs:
             sleep 2
           done
           test "$postgres_ready" = 1 || { echo "Postgres did not become ready" >&2; exit 1; }
+      - name: Ship container logs to Axiom
+        run: |
+          set -euo pipefail
+          cd /opt/hatch
+          if grep -Eq '^HATCH_AXIOM_TOKEN=[^[:space:]]+' .env; then
+            docker compose --env-file .env -f compose.infra.yml run --rm --no-deps vector validate --no-environment /etc/vector/vector.yaml || { echo "vector/vector.yaml failed validation; not starting vector" >&2; exit 1; }
+            docker compose --env-file .env -f compose.infra.yml up -d --force-recreate vector
+          fi
       - name: Pull and switch application containers
         env:
           GHCR_USERNAME: ${{ github.actor }}

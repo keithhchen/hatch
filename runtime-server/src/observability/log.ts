@@ -1,10 +1,11 @@
+import { trace } from "@opentelemetry/api";
 import { currentContext } from "./context.js";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 export type LogFields = Record<string, unknown>;
 export type LogEntry = { ts: string; level: LogLevel; event: string; service?: string; fields: LogFields };
 
-/** Where entries go. Adapters: stdout JSON (always) and OpenTelemetry logs (when configured). */
+/** Where entries go. Today: stdout JSON, which Vector ships to Axiom. */
 export interface LogSink { write(entry: LogEntry): void }
 
 /** The domain-level port: name an event, attach fields; the bound and request context ride along. */
@@ -39,15 +40,14 @@ export class Logger implements Log {
 /** One JSON line per entry. warn/error go to stderr, the rest to stdout, through console so they stay capturable. */
 export class StdoutJsonSink implements LogSink {
   write({ ts, level, event, service, fields }: LogEntry): void {
-    const line = JSON.stringify({ ts, level, event, ...(service ? { service } : {}), ...fields });
+    const span = trace.getActiveSpan()?.spanContext();
+    const ids = span && trace.isSpanContextValid(span) ? { trace_id: span.traceId, span_id: span.spanId } : {};
+    const line = JSON.stringify({ ts, level, event, ...(service ? { service } : {}), ...ids, ...fields });
     if (level === "warn" || level === "error") console.error(line); else console.log(line);
   }
 }
 
 const sinks: LogSink[] = [new StdoutJsonSink()];
-
-/** Adds an adapter (the OTel one) to the process's root log. */
-export const addLogSink = (sink: LogSink): void => { sinks.push(sink); };
 
 /** The process's root log; `HATCH_SERVICE_NAME` (registry, runtime, dashboard) names the emitting service. */
 export const log: Log = new Logger(() => sinks);
