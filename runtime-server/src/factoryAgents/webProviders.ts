@@ -296,3 +296,10 @@ function firecrawlTimeRange(value: WebSearchRequest["timeRange"]): string | unde
   if (value === "year" || value === "y") return "qdr:y";
   return undefined;
 }
+
+/** The scrape provider Workers and the Assistant share: Tavily unless the Registry is set to Firecrawl. */
+export function scrapeProviderFrom(env: NodeJS.ProcessEnv): WebScrapeProvider {
+  const name = env.HATCH_FACTORY_SCRAPE_PROVIDER;
+  if (name && !["tavily", "firecrawl"].includes(name)) throw new Error("Unknown scrape provider");
+  return name === "firecrawl" ? new FirecrawlScrapeProvider({ apiKey: env.FIRECRAWL_API_KEY }) : new TavilyScrapeProvider({ apiKey: env.TAVILY_API_KEY });
+}

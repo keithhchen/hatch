@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { HostToolRunner } from "../serverTools.js";
 import { describeTool, type ClientGroup } from "../surfaces/contract.js";
 import type { ToolDefinition } from "../tools.js";
+import type { WebScrapeProvider } from "../factoryAgents/webTypes.js";
 import type { Todo } from "../factoryAgents/store.js";
 import type { AgentChange, CatalogAgent } from "./catalog.js";
 import type { AssistantTask, TaskOrigin } from "./tasks.js";
@@ -37,6 +38,8 @@ export interface StudioOperations {
   finish(accountId: string, taskId: string, answered: boolean): Promise<AssistantTask>;
   /** Public web evidence: links and snippets, no generated answer. */
   searchWeb(input: { query: string; max_results?: number; domains?: string[]; topic?: "general" | "news" }, signal?: AbortSignal): Promise<unknown>;
+  /** One public page's main text as Markdown, with its URL. */
+  readPage(url: string, signal?: AbortSignal): Promise<unknown>;
   /** Adds material the Expert sent to the Agent: plain text into its manual input, anything more complex and links to Ingest. Returns where each item went. */
   addToAgent(accountId: string, productId: string, input: { files: string[]; links: string[]; context?: string }): Promise<string[]>;
   /** Remembers the Run a task was created in, so that Run's reply can offer its buttons. */
@@ -85,6 +88,15 @@ const agentFor = async (ops: StudioOperations, accountId: string, agentId: unkno
   return agent!.productId;
 };
 
+/** Longest page text handed to the model; the rest is dropped and said so. */
+export const PAGE_TEXT_LIMIT = 50_000;
+
+/** Reads one page through the scrape port Workers use. */
+export async function readPage(scraper: WebScrapeProvider, url: string, signal?: AbortSignal) {
+  const page = await scraper.scrape({ url, extractDepth: "advanced", format: "markdown" }, AbortSignal.any([signal ?? new AbortController().signal, AbortSignal.timeout(90_000)]));
+  return { url: page.url, title: page.title, retrieved_at: page.retrievedAt, text: page.content.slice(0, PAGE_TEXT_LIMIT), ...(page.content.length > PAGE_TEXT_LIMIT ? { truncated: true, total_chars: page.content.length } : {}) };
+}
+
 const done = (value: unknown): Record<string, unknown> => ({ output: typeof value === "string" ? value : JSON.stringify(value) });
 
 /** The Assistant's tools, declared once: the set and its order never change within a conversation. */
@@ -95,6 +107,9 @@ export function studioTools(ops: StudioOperations): StudioTool[] {
       schema: z.object({ query: text(1, 500), max_results: z.number().int().min(1).max(10).optional(), domains: z.array(z.string()).max(10).optional(), topic: z.enum(["general", "news"]).optional() }).strict(),
       description: "搜公开网页，返回来源链接和摘要，不是核实过的全文，也不生成回答。需要很快查一个事实时直接用。",
       run: async (call, args) => done(await ops.searchWeb(args as { query: string; max_results?: number; domains?: string[]; topic?: "general" | "news" }, call.signal)) },
+    { name: "read_page", readOnly: true, schema: z.object({ url: text(1, 2000) }).strict(),
+      description: "读一个公开网页的正文（Markdown），带原网址。专家要看某篇文章、某个页面的全文时用；搜索结果只有摘要。读不了登录后的页面，也不转写视频。",
+      run: async (call, args) => done(await ops.readPage(String(args.url), call.signal)) },
     { name: "list_agents", readOnly: true, schema: z.object({}).strict(),
       description: "专家的全部 Agent：id、名字、承诺、状态、价格、开场问题，是否在线和待发布的改动（live），以及访谈大纲的进度。",
       run: async call => done(await ops.agents(call.accountId)) },
