@@ -461,18 +461,16 @@ export class AssistantService implements StudioOperations, InterviewDesk {
     await desk.store.put(desk.sessionId, file, Buffer.from(`${existing || "# 专家说这些来源不算数，不要采用\n"}\n- ${source}${reason ? `：${reason}` : ""}`), { actor: "host" });
   }
 
-  /** Copy the Expert's materials into a Product's shared input, where its Agents read them. */
+  /** Copy the Assistant's notes into a Product's shared input, where its Agents read them. Files the Expert sent get there only through add_to_agent. */
   private async shareMaterials(accountId: string, productId: string): Promise<void> {
     const desk = await this.desk(accountId);
     const notes = (await desk.store.get(desk.sessionId)).files.filter(file => file.path.startsWith(MATERIALS));
-    const sent = (await this.materials.list(accountId)).filter(material => material.kind === "file");
-    if (!notes.length && !sent.length) return;
+    if (!notes.length) return;
     const workspace = await this.workspace(accountId, productId);
     for (const file of notes) {
       const { bytes } = await desk.store.read(desk.sessionId, file.path);
       await workspace.store.backend.writeManual(`input/manual/${file.path.slice(MATERIALS.length)}`, bytes);
     }
-    for (const material of sent) await this.writeManual(workspace, material);
   }
 
   private async copyMaterials(desk: Desk, workerId: string): Promise<void> {

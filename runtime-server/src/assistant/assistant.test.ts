@@ -352,18 +352,21 @@ test("Interview: its words are the Assistant's reply, the Expert's replies go to
   } finally { await env.close(); }
 });
 
-test("A Telegram document is an attachment of the conversation, and flows into a Product's input when work starts", async () => {
-  const env = await setup({ model: () => ({ text: "收到" }) });
+test("A Telegram document is an attachment of the conversation; starting work copies none of it into a Product's input, only add_to_agent does", async () => {
+  const env = await setup({ model: (turn, call) => call === 1 ? { tools: [{ name: "add_to_agent", arguments: { files: [sentPath(turn)] } }], text: "记下了" } : { text: "收到" } });
   try {
-    const [handled] = await env.telegramUpdate({ update_id: 1, message: { message_id: 10, chat: { id: 42, type: "private" }, document: { file_id: "f1", file_name: "notes.md", file_size: 30 } } });
+    const send = (updateId: number, messageId: number, name: string) => env.telegramUpdate({ update_id: updateId, message: { message_id: messageId, chat: { id: 42, type: "private" }, document: { file_id: "f1", file_name: name, file_size: 30 } } });
+    const [handled] = await send(1, 10, "notes.md");
     assert.ok(handled!.runId?.startsWith("run_"));
     await env.idle();
     assert.match(env.model.state.turns[0]!.input.message.content, /\[file: notes\.md \| .* \| \/attachments\/msg_[0-9a-f]+\/notes\.md\]/, "the model sees one line and reads it with ls, grep and read");
     const lines = await env.chat.lines(ACCOUNT);
     assert.equal(lines[0]!.attachments?.[0]?.name, "notes.md");
+    await send(2, 11, "other.md");
+    await env.idle();
     await env.assistant.dispatch(ACCOUNT, "build", PRODUCT, "更新", { source: "web" });
     const manual = await env.productStore.listManualFiles();
-    assert.equal(manual.length, 1);
+    assert.equal(manual.length, 1, "the file nobody added did not appear");
     assert.match(manual[0]!.path, /^input\/manual\/[0-9a-f]{8}-notes\.md\.md$/);
     assert.match((await env.productStore.backend.readManual(manual[0]!.path)).toString(), /converted|选址/);
   } finally { await env.close(); }
