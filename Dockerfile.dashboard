@@ -42,14 +42,8 @@ COPY packages/brand /app/packages/brand
 COPY packages/chat /app/packages/chat
 COPY creator-dashboard/package.json creator-dashboard/package-lock.json ./
 RUN npm ci --omit=dev
-COPY --from=build /workspace/creator-dashboard/server.mjs ./server.mjs
-COPY --from=build /workspace/creator-dashboard/webChatRuntimeBridge.mjs ./webChatRuntimeBridge.mjs
-COPY --from=build /workspace/creator-dashboard/portalState.mjs ./portalState.mjs
-COPY --from=build /workspace/creator-dashboard/contactForm.mjs ./contactForm.mjs
-COPY --from=build /workspace/creator-dashboard/providerAdapters.mjs ./providerAdapters.mjs
-COPY --from=build /workspace/creator-dashboard/publicMetadata.mjs ./publicMetadata.mjs
-COPY --from=build /workspace/creator-dashboard/telemetry.mjs ./telemetry.mjs
-COPY --from=build /workspace/creator-dashboard/desktopSignIn.mjs ./desktopSignIn.mjs
+# Every server module ships: a new .mjs the server imports must never be left out of the image.
+COPY --from=build /workspace/creator-dashboard/*.mjs ./
 # The production server imports its own .mjs modules and serves the bundled
 # browser output. Keep tests, stories, and client source out of the runtime
 # image; they are built and verified in the Web CI job above.
