@@ -360,7 +360,7 @@
 .sx-apikeys__token code { padding: 8px 12px; border-radius: 10px; background: var(--web-paper); font-size: 13px; }
 .sx-apikeys__copyrow { display: flex; width: 100%; gap: 8px; }
 .sx-apikeys__copyrow .hui-input { flex: 1; min-width: 0; }
-.sx-apikeys__row { display: grid; grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr)) auto; align-items: center; gap: 16px; padding: 14px 20px; font-size: 14px; }
+.sx-apikeys__row { display: grid; grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr)) 88px; align-items: center; gap: 16px; padding: 14px 20px; font-size: 14px; }
 .sx-apikeys__row + .sx-apikeys__row { border-top: 1px solid var(--web-rule); }
 .sx-apikeys__head { color: var(--web-muted); font-size: 12px; font-weight: 600; }
 @media (max-width: 720px) {
