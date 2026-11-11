@@ -41,6 +41,11 @@ export const decodeText = (bytes: Buffer): string | undefined => {
   return undefined;
 };
 
+/** A track's `hdlr` box names its handler type: `vide` for video. */
+const hasMp4VideoTrack = (bytes: Buffer): boolean => /hdlr[\s\S]{8}vide/.test(bytes.toString("latin1"));
+/** Matroska names each track's codec; the video ones all start with `V_`. */
+const hasWebmVideoTrack = (bytes: Buffer): boolean => bytes.includes("V_VP") || bytes.includes("V_AV1") || bytes.includes("V_MPEG4");
+
 const TEXT_BY_EXTENSION: Record<string, string> = {
   ".md": "text/markdown", ".csv": "text/csv", ".tsv": "text/tab-separated-values", ".json": "application/json",
   ".yaml": "application/yaml", ".yml": "application/yaml", ".xml": "application/xml", ".html": "text/html", ".log": "text/plain"
@@ -64,8 +69,9 @@ export function sniff(bytes: Buffer, name: string): Sniffed {
   // ADTS AAC: a 12-bit sync word, then layer bits 00 (MP3 has them set).
   if (bytes[0] === 0xff && ((bytes[1] ?? 0) & 0xf6) === 0xf0) return { kind: "audio", mime: "audio/aac", ext: ".aac" };
   if (ascii(bytes, 0, 3) === "ID3" || (bytes[0] === 0xff && ((bytes[1] ?? 0) & 0xe0) === 0xe0)) return { kind: "audio", mime: "audio/mpeg", ext: ".mp3" };
-  if (ascii(bytes, 4, 4) === "ftyp") return { kind: "audio", mime: "audio/mp4", ext: ".m4a" };
-  if (startsWith(bytes, "1a45dfa3")) return { kind: "audio", mime: "audio/webm", ext: ".webm" };
+  // An MP4 or WebM is a video as soon as it carries a video track; it is not a voice message and is passed on as a file.
+  if (ascii(bytes, 4, 4) === "ftyp") return hasMp4VideoTrack(bytes) ? { kind: "file", mime: "video/mp4", ext: ".mp4" } : { kind: "audio", mime: "audio/mp4", ext: ".m4a" };
+  if (startsWith(bytes, "1a45dfa3")) return hasWebmVideoTrack(bytes) ? { kind: "file", mime: "video/webm", ext: ".webm" } : { kind: "audio", mime: "audio/webm", ext: ".webm" };
   if (ascii(bytes, 0, 5) === "#!AMR") return { kind: "audio", mime: "audio/amr", ext: ".amr" };
   if (ascii(bytes, 0, 4) === "caff") return { kind: "audio", mime: "audio/x-caf", ext: ".caf" };
   // WeChat's SILK may start with one 0x02 byte before the signature. ffmpeg cannot decode it, but it is a voice message and is refused as one.

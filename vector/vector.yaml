@@ -5,6 +5,8 @@ sources:
   containers:
     type: docker_logs
     include_containers: ["hatch-app-", "hatch-infra-"]
+    # Not shipped for now: the vector database (qdrant). Vector never ships its own logs.
+    exclude_containers: ["hatch-infra-qdrant"]
 
 transforms:
   shaped:

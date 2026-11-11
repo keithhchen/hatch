@@ -192,6 +192,8 @@ jobs:
             VITE_HATCH_WEB_MEDIA_BASE_URL=${{ vars.HATCH_OSS_PUBLIC_BASE_URL }}/desktop/web/${{ github.sha }}
             VITE_SENTRY_DSN=${{ secrets.HATCH_SENTRY_WEB_DSN }}
             VITE_RELEASE=${{ github.sha }}
+          secrets: |
+            sentry_auth_token=${{ secrets.SENTRY_AUTH_TOKEN }}
           cache-from: type=gha,scope=dashboard
           cache-to: type=gha,scope=dashboard,mode=max
 

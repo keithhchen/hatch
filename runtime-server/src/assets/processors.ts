@@ -39,7 +39,7 @@ export class ImageProcessor implements AssetProcessor {
 
 export const MAX_EXTRACTED_CHARS = 5_000_000;
 /** Kept as they came: no text form here. Ingest unpacks or converts them. */
-const NO_TEXT = new Set(["application/zip", "application/octet-stream"]);
+const NO_TEXT = new Set(["application/zip", "application/octet-stream", "video/mp4", "video/webm"]);
 type Convert = (name: string, bytes: Buffer) => Promise<{ bytes: Buffer }>;
 
 /** Text formats are read directly; Office and PDF go through the shared Markdown converter. Anything else is kept as it came. */
