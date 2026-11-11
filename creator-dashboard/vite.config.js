@@ -34,6 +34,8 @@ function createDashboardApiProxy() {
 export default defineConfig({
   base: process.env.VITE_BASE_PATH ?? "/",
   plugins: [react()],
+  // Hidden maps carry no sourceMappingURL; the Dockerfile deletes them from the served dist.
+  build: { sourcemap: "hidden" },
   // @hatch/ui is a linked local package during development. Force every
   // component onto the Dashboard's React instance so hooks cannot resolve a
   // second physical copy from packages/ui/node_modules.
