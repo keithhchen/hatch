@@ -1,5 +1,5 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Bot, Check, ChevronsUpDown, Copy, Download, ExternalLink, Languages, KeyRound, LayoutDashboard, LogOut, Menu, MessageCircle, MoreHorizontal, Plus, ReceiptText, Search, Settings, X } from "lucide-react";
+import { ArrowLeft, Bot, Check, ChevronsUpDown, Copy, Download, ExternalLink, Languages, LayoutDashboard, LogOut, Menu, MessageCircle, MoreHorizontal, Plus, ReceiptText, Search, Settings, X } from "lucide-react";
 import { Button, CommandMenu, ConfirmDialog, DropdownMenu, IconButton } from "@hatch/ui";
 import { ButtonBase, Divider as MuiDivider, ListItemIcon, ListItemText, Menu as MuiMenu, MenuItem as MuiMenuItem } from "@mui/material";
 import { createTheme, ThemeProvider } from "@mui/material/styles";
@@ -20,7 +20,7 @@ import "./creatorPortalV2.css";
 
 const FactoryAgents = React.lazy(() => import("./FactoryAgents.jsx").then(({ FactoryAgents: Component }) => ({ default: Component })));
 const CreatorProductFiles = React.lazy(() => import("./CreatorSourceLibrary.jsx").then(({ CreatorProductFiles: Component }) => ({ default: Component })));
-const ApiKeysPage = React.lazy(() => import("./ApiKeysPage.jsx").then(({ ApiKeysPage: Component }) => ({ default: Component })));
+const SettingsPage = React.lazy(() => import("./SettingsPage.jsx").then(({ SettingsPage: Component }) => ({ default: Component })));
 const StudioAssistant = React.lazy(() => import("./StudioAssistant.jsx").then(({ StudioAssistant: Component }) => ({ default: Component })));
 const StudioAgentWorkspace = React.lazy(() => import("./studioAgentWorkspace.jsx").then(({ StudioAgentWorkspace: Component }) => ({ default: Component })));
 const opsPage = (name) => React.lazy(() => import("./studioOps.jsx").then((module) => ({ default: module[name] })));
@@ -35,7 +35,7 @@ const NAV_ITEMS = [
   { section: "home", href: ROOT, label: "sxNavOverview", Icon: LayoutDashboard },
   { section: "products", href: `${ROOT}/products`, label: "sxNavAgents", Icon: Bot },
   { section: "orders", href: `${ROOT}/orders`, label: "sxNavOrders", Icon: ReceiptText },
-  { section: "api-keys", href: `${ROOT}/api-keys`, label: "sxNavApiKeys", Icon: KeyRound }
+  { section: "settings", href: `${ROOT}/settings`, label: "sxNavSettings", Icon: Settings }
 ];
 
 export function CreatorPortalV2({
@@ -174,7 +174,7 @@ function CreatorRoute({ route, request, navigate, locale, t, profile }) {
   if (route.kind === "agent") return lazy(<StudioAgentWorkspace key={route.productId} route={route} request={request} navigate={navigate} locale={locale} t={t} profile={profile} renderBuild={(product) => <FactoryAgents productId={route.productId} section={route.factorySection} agent={route.factoryAgent} navigate={navigate} locale={locale} />} />);
   if (route.kind === "orders") return lazy(<StudioOrdersPage {...ops} />);
   if (route.kind === "order") return lazy(<StudioOrderDetailPage {...ops} orderId={route.orderId} />);
-  if (route.kind === "api-keys") return lazy(<ApiKeysPage request={request} t={t} locale={locale} />);
+  if (route.kind === "settings") return lazy(<SettingsPage request={request} t={t} locale={locale} />);
   if (route.kind === "earnings") return lazy(<StudioEarningsPage {...ops} />);
   return <RouteProblem title={t("pageNotFound")} body={t("pageNotFoundBody")} action={t("backToProducts")} onAction={() => navigate(`${ROOT}/products`)} />;
 }
@@ -360,6 +360,6 @@ function defaultNavigate(path) {
 }
 
 function localizedRouteTitle(route, t) {
-  const keys = { assistant: "sxNavAssistant", home: "sxNavOverview", products: "sxNavAgents", agent: "sxNavAgents", "product-create": "newAgent", orders: "sxNavOrders", order: "orderDetail", earnings: "sxNavEarnings", "api-keys": "sxNavApiKeys" };
+  const keys = { assistant: "sxNavAssistant", home: "sxNavOverview", products: "sxNavAgents", agent: "sxNavAgents", "product-create": "newAgent", orders: "sxNavOrders", order: "orderDetail", earnings: "sxNavEarnings", settings: "sxNavSettings" };
   return keys[route.kind] ? t(keys[route.kind]) : t("studio");
 }

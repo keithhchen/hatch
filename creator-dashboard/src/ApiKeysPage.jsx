@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, ConfirmDialog, InlineAlert, Input } from "@hatch/ui";
 import { ApiKeysClient, dateFormatter, keyRow, LOGIN_COMMAND } from "./apiKeys.js";
-import { friendlyError, LoadingState, PageHeader } from "./studioShellKit.jsx";
+import { friendlyError, LoadingState } from "./studioShellKit.jsx";
 
 /** Create, list and revoke the signed-in user's API keys. Real endpoints only. */
 export function ApiKeysPage({ request, t, locale }) {
@@ -31,8 +31,8 @@ export function ApiKeysPage({ request, t, locale }) {
   const copy = () => navigator.clipboard?.writeText(created.token).then(() => setCopied(true)).catch((cause) => setError(friendlyError(cause, t)));
   const revoke = () => attempt(async () => { await client.revoke(revoking.id); setRevoking(null); await refresh(); });
 
-  return <div className="sx-apikeys">
-    <PageHeader title={t("sxNavApiKeys")} actions={<Button asChild variant="secondary"><a href="/developers">{t("sxakDevelopers")}</a></Button>} />
+  return <section className="sx-apikeys" aria-labelledby="sx-apikeys-title">
+    <div className="sx-section-head"><h2 id="sx-apikeys-title">{t("sxNavApiKeys")}</h2><Button asChild variant="secondary"><a href="/developers">{t("sxakDevelopers")}</a></Button></div>
     {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
     <form className="sx-card sx-apikeys__create" onSubmit={create}>
       <Input aria-label={t("sxakNameLabel")} value={name} maxLength={80} placeholder={t("sxakNamePlaceholder")} onChange={(event) => setName(event.target.value)} />
@@ -56,5 +56,5 @@ export function ApiKeysPage({ request, t, locale }) {
     </div>}
     <ConfirmDialog open={Boolean(revoking)} onOpenChange={(open) => { if (!open) setRevoking(null); }} title={t("sxakRevokeTitle", revoking?.name ?? "")} description={t("sxakRevokeBody")}
       confirmLabel={t("sxakRevoke")} cancelLabel={t("cancel")} destructive busy={busy} onConfirm={revoke} />
-  </div>;
+  </section>;
 }
