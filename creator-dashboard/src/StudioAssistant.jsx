@@ -8,7 +8,6 @@ import { ASSISTANT_CONVERSATION, SessionPendingStore, StudioAssistantTransport, 
 import { useLocale } from "./locale.jsx";
 import { webChatErrorText, webChatT } from "./webChatI18n.js";
 import "./webChat.css";
-import { ChannelBindings } from "./ChannelBindings.jsx";
 
 const ROOT = "/v1/creator/assistant";
 const CONNECTIONS = "/v1/creator/connections";
@@ -76,7 +75,8 @@ function Assistant({ transport, controller, dictate, request, t, chatT, errorTex
   const identity = { creatorName: t("sxNavAssistant"), productName: t("sxNavAssistant") };
   const needs = (view?.tasks ?? []).filter(task => task.status === "needs_you");
   const ownApps = (view?.channels ?? []).filter(channel => channel.own_app && CHANNEL_NAMES[channel.kind] && (channel.linked || channel.available));
-  return <div className="sxa">
+  const hasSide = needs.length > 0 || ownApps.length > 0;
+  return <div className={`sxa${hasSide ? "" : " sxa--solo"}`}>
     <section className="sxa-chat web-chat web-chat--embedded" aria-label={t("sxNavAssistant")} ref={chatRef}>
       <h1 className="sxa-title">{t("sxNavAssistant")}</h1>
       <ChatView controller={controller} identity={identity} agentName={t("sxNavAssistant")} t={chatT} errorText={errorText}
@@ -87,9 +87,7 @@ function Assistant({ transport, controller, dictate, request, t, chatT, errorTex
           {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
         </>} />
     </section>
-    <aside className="sxa-side">
-      <h2>{t("sxaReachMe")}</h2>
-      <ChannelBindings request={request} t={t} />
+    {hasSide ? <aside className="sxa-side">
       {needs.length ? <ul className="sxa-needs">
         {needs.map(task => <li key={task.id} className="sxa-need">
           <span className="sxa-need__label">{t(task.needs === "review" ? "sxaNeedReview" : task.needs === "answer" ? "sxaNeedAnswer" : "sxaNeedBlocked")}</span>
@@ -125,6 +123,6 @@ function Assistant({ transport, controller, dictate, request, t, chatT, errorTex
           </div> : null}
         </div>)}
       </div> : null}
-    </aside>
+    </aside> : null}
   </div>;
 }

@@ -76,19 +76,19 @@ export function parseCreatorRoute(pathname) {
     if (segments.length === 2) return page("order", "orders", { orderId: second });
     return page("not-found", "orders");
   }
-  if (head === "api-keys" && segments.length === 1) return page("api-keys", "api-keys");
+  if (head === "settings" && segments.length === 1) return page("settings", "settings");
+  // API keys now live in Settings.
+  if (head === "api-keys" && segments.length === 1) return redirect(`${ROOT}/settings`, "settings");
   if (head === "earnings" && segments.length === 1) return page("earnings", "earnings");
   // The payout onboarding provider returns to /studio/payouts.
   if (head === "payouts" && segments.length === 1) return redirect(`${ROOT}/earnings`, "earnings");
-  // Account settings live on the one account page.
-  if (head === "settings" && segments.length === 1) return redirect("/account", "");
   return page("not-found", "");
 }
 
 export function creatorRouteTitle(route) {
   const titles = {
     assistant: "Assistant", home: "Overview", products: "Agents", "product-create": "New Agent", agent: "Agent",
-    orders: "Orders", order: "Order", earnings: "Earnings", "api-keys": "API keys"
+    orders: "Orders", order: "Order", earnings: "Earnings", settings: "Settings"
   };
   return titles[route.kind] ?? "Studio";
 }

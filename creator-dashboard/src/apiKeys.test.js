@@ -38,13 +38,13 @@ test("view model shows Never for missing dates and does not mutate input", () =>
   assert.equal(input[0].created_at, "1");
 });
 
-test("api-keys route and copy exist in every locale", () => {
-  assert.deepEqual(parseCreatorRoute("/studio/api-keys"), { kind: "api-keys", section: "api-keys" });
+test("settings route, the api-keys redirect and copy exist in every locale", () => {
+  assert.deepEqual(parseCreatorRoute("/studio/api-keys"), { kind: "redirect", section: "settings", to: "/studio/settings" });
   assert.equal(parseCreatorRoute("/studio/api-keys/x").kind, "not-found");
-  assert.equal(creatorRouteTitle(parseCreatorRoute("/studio/api-keys")), "API keys");
+  assert.equal(creatorRouteTitle(parseCreatorRoute("/studio/settings")), "Settings");
   for (const locale of ["en", "zh", "ja"]) {
     const t = createCreatorTranslator(locale);
-    for (const key of ["sxNavApiKeys", "sxakCreate", "sxakCreatedWarn", "sxakNever", "sxakRevoke", "sxakEmpty"]) assert.notEqual(t(key), key, `${locale}.${key}`);
+    for (const key of ["sxNavSettings", "sxaReachMe", "sxNavApiKeys", "sxakCreate", "sxakCreatedWarn", "sxakNever", "sxakRevoke", "sxakEmpty"]) assert.notEqual(t(key), key, `${locale}.${key}`);
     assert.match(t("sxakRevokeTitle", "k"), /k/);
   }
 });

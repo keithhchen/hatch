@@ -2,7 +2,7 @@
 // code, and one copy table per locale. DevelopersGuide joins them for a locale;
 // DevelopersPage renders any guide, so adding a method or a language adds data only.
 export const ORIGIN = "https://gethatchapp.com";
-export const KEYS_PATH = "/studio/api-keys";
+export const KEYS_PATH = "/studio/settings";
 export const TARBALL_URL = `${ORIGIN}/downloads/hatch-cli.tgz`;
 
 const sh = (text) => ({ lang: "sh", text });
