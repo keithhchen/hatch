@@ -94,6 +94,10 @@ type Desk = {
 };
 
 type ExpertSource = "web" | ChannelKind;
+/** Plain text is told by the file as sent: its type (text/*, JSON) or its extension. A picture never is, nor is HTML. */
+const PLAIN_TEXT_EXTENSION = /\.(txt|md|markdown|csv|tsv|json|log)$/i;
+const isPlainText = ({ kind, original }: Material): boolean =>
+  kind === "file" && ((/^text\//.test(original.mimeType) && original.mimeType !== "text/html") || original.mimeType === "application/json" || PLAIN_TEXT_EXTENSION.test(original.name));
 const isChannel = (source: string): source is ChannelKind => (CHANNEL_KINDS as readonly string[]).includes(source);
 
 /**
@@ -155,7 +159,7 @@ export class AssistantService implements StudioOperations, InterviewDesk {
   constructor(private deps: AssistantDependencies) {
     this.definitions = assistantDefinitions();
     deps.products.attachAssistant({
-      grantedTools: (scope, session) => session.role === "voice" && session.assistantTaskId ? [this.handoffTool(session.assistantTaskId)] : [],
+      grantedTools: (scope, session) => session.role === "voice" && session.assistantTaskId ? [this.handoffTool(session.assistantTaskId), this.addToAgentTool(scope)] : [],
       // Publishing is the Assistant's tool, after the Expert confirms. A build it started has no way to go live.
       withheldTools: async (_scope, session) => session.role === "generation" && (await this.deps.tasks.bySession(session.id))?.kind === "build" ? ["corpus_upload"] : [],
       opened: (scope, workspace) => this.observe(scope.creatorId, workspace),
@@ -269,23 +273,26 @@ export class AssistantService implements StudioOperations, InterviewDesk {
 
   // ── Interview pass-through ─────────────────────────────────────────────
 
-  /** The Expert's words reach the interview while it holds the conversation. A file they sent is readable by it, at the path it can see. */
+  /**
+   * The Expert's words reach the interview while it holds the conversation. A file they sent is readable by it, and
+   * the interview decides, by common sense, whether it becomes the Agent's material: with add_to_agent, by the path it sees.
+   */
   async tell(accountId: string, interview: Interview, text: string): Promise<void> {
     const workspace = await this.workspace(accountId, interview.productId);
     const files = (await this.materials.list(accountId)).filter(material => text.includes(material.chatPath));
     let said = text;
     const images: string[] = [];
     for (const material of files) {
-      if (material.kind === "file") { said = said.replaceAll(material.chatPath, await this.writeManual(workspace, material)); continue; }
-      const image = `input/images/${material.name}`;
-      await workspace.store.put(interview.sessionId, image, material.bytes, { actor: "host", mimeType: material.mimeType });
-      images.push(image);
+      const seen = `input/${material.kind === "image" ? "images" : "files"}/${material.name}`;
+      await workspace.store.put(interview.sessionId, seen, material.bytes, { actor: "host", mimeType: material.mimeType });
+      if (material.kind === "image") images.push(seen);
+      else said = said.replaceAll(material.chatPath, `${material.chatPath}（内容在 ${seen}）`);
     }
     // One step steers, queues or starts: a turn that is just ending takes the message on its next pass instead of refusing it.
     await workspace.runtime.send(interview.sessionId, userMessage(said, images));
   }
 
-  /** The one way a file the Expert sent becomes an Agent's material: its text, in the manual input. */
+  /** A file's text in the Agent's manual input: where plain text goes. */
   private async writeManual(workspace: FactoryWorkspace, material: Material): Promise<string> {
     const path = `input/manual/${material.name}`;
     await workspace.store.backend.writeManual(path, material.bytes);
@@ -302,19 +309,39 @@ export class AssistantService implements StudioOperations, InterviewDesk {
     });
   }
 
-  async addToAgent(accountId: string, productId: string, files: string[]): Promise<string[]> {
-    const materials = await this.sent(accountId, files);
-    const picture = materials.find(material => material.kind === "image");
-    if (picture) throw new Error(`${picture.chatPath} 是图片，不是文字，不能直接写进资料。交给 ingest。`);
+  /**
+   * Material the Expert sent becomes the Agent's by its form, never by judgement: plain text is written into the
+   * manual input now; anything more complex, and every link, goes to Ingest as one job. All or nothing: when Ingest
+   * is needed and not configured, nothing is written. Returns where each item went.
+   */
+  async addToAgent(accountId: string, productId: string, input: { files: string[]; links: string[]; context?: string }): Promise<string[]> {
+    const materials = await this.sent(accountId, input.files);
+    const plain = materials.filter(isPlainText);
+    const complex = materials.filter(material => !isPlainText(material));
+    const ingested = [...complex.map(material => material.chatPath), ...input.links];
+    if (ingested.length && !this.deps.ingest) throw new Error(`Ingest 没有配置，收不了：${ingested.join("、")}。这次什么都没有加进资料。`);
     const workspace = await this.workspace(accountId, productId);
-    return Promise.all(materials.map(material => this.writeManual(workspace, material)));
+    const went = await Promise.all(plain.map(async material => `${material.chatPath} → ${await this.writeManual(workspace, material)}`));
+    if (!ingested.length) return went;
+    const originals = await Promise.all(complex.map(async ({ original }) => ({ name: original.name, content_base64: (await original.read()).toString("base64"), media_type: original.mimeType })));
+    const { id } = await this.deps.ingest!.submit(accountId, productId, [...originals, ...input.links.map(url => ({ url }))], input.context);
+    return [...went, ...ingested.map(item => `${item} → ingest job ${id}，整理好会放进 input/manual`)];
   }
 
-  async ingest(accountId: string, productId: string, input: { files: string[]; links: string[]; context?: string }): Promise<{ id: string; status: string }> {
-    if (!this.deps.ingest) throw new Error("Ingest 没有配置，现在不能收资料。");
-    const originals = await Promise.all((await this.sent(accountId, input.files)).map(async ({ original }) => ({ name: original.name, content_base64: (await original.read()).toString("base64"), media_type: original.mimeType })));
-    const { id, status } = await this.deps.ingest.submit(accountId, productId, [...originals, ...input.links.map(url => ({ url }))], input.context);
-    return { id, status };
+  /** The interview's own add_to_agent: the same operation, for the Agent it is interviewing about. */
+  private addToAgentTool(scope: { creatorId: string; productId: string }): AgentTool {
+    return {
+      name: "add_to_agent",
+      label: "加进资料",
+      description: "专家发来的文件或链接，按常识（看文件名和内容）明显属于这位 Agent 的资料时，加进它的资料；只是发来随便看看的，不要加。放在哪里是自动的，不用你选。files 写文件在消息里显示的路径。",
+      parameters: Type.Object({ files: Type.Optional(Type.Array(Type.String(), { maxItems: 20 })), links: Type.Optional(Type.Array(Type.String(), { maxItems: 20 })), context: Type.Optional(Type.String({ maxLength: 2000 })) }),
+      execute: async (_id, raw) => {
+        const { files = [], links = [], context } = raw as { files?: string[]; links?: string[]; context?: string };
+        if (!files.length && !links.length) throw new Error("files 和 links 至少要给一个。");
+        const went = await this.addToAgent(scope.creatorId, scope.productId, { files, links, context });
+        return { content: [{ type: "text" as const, text: went.join("\n") }], details: {} };
+      },
+    };
   }
 
   private async interviewTurnEnded(task: AssistantTask, workspace: FactoryWorkspace, type: string): Promise<void> {

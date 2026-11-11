@@ -156,7 +156,8 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
     prompt: async () => "你是 Hatch 助理。", liveState: id => assistant.liveState(id), env: {}, createRuntime: () => model.runtime,
     sweepMs: 60_000,
   });
-  assistant.bind(chat, new ExpertMaterials({ assets: chatAssets, conversation: id => chat.conversation(id) }));
+  const materials = new ExpertMaterials({ assets: chatAssets, conversation: id => chat.conversation(id) });
+  assistant.bind(chat, materials);
   await chat.start();
   const log = chat.feed;
   const connection: ChannelConnection = { id: "c0000000-0000-4000-8000-000000000001", ownerAccountId: ACCOUNT, channel: "telegram", scope: "", client: "im", target: { kind: "assistant" }, audience: "self", taskSpecific: false, state: "active" };
@@ -177,7 +178,7 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
   const say = (text: string, id = `m-${Math.random().toString(36).slice(2)}`) => chat.say(ACCOUNT, { id, parts: [{ type: "text", text }], client: { client: "web" } });
   const idle = async () => { await sleep(30); await chat.idle(ACCOUNT, 20_000); await sleep(30); };
   return {
-    root, tasks, state, deliveries, pushed, notices, log, applied, telegramCalls, telegramUpdate, assistant, chat, target, model, productStore, productRuntime, say, idle, legacy, store, kit, tools, chatAssets,
+    root, tasks, state, deliveries, pushed, notices, log, applied, telegramCalls, telegramUpdate, assistant, chat, target, model, productStore, productRuntime, say, idle, legacy, store, kit, tools, chatAssets, materials,
     setReachable: (value: boolean) => { reachable = value; },
     close: async () => { await assistant.close(); await chat.close(); await productRuntime.close(); await rm(root, { recursive: true, force: true, maxRetries: 5 }); },
   };
@@ -301,6 +302,7 @@ test("start_task is one tool: a new kind runs its steps in order and reports", a
 
 test("Interview: its words are the Assistant's reply, the Expert's replies go to it, and it hands back to the Assistant", async () => {
   const voiceInputs: string[] = [];
+  const sentPaths: string[] = [];
   const env = await setup({
     model: (_turn, call) => call === 1 ? { tools: [{ name: "start_task", arguments: { kind: "interview", agent_id: PRODUCT, instruction: "为什么是三年" } }] } : { text: "聊得很好" },
     worker: context => {
@@ -308,6 +310,9 @@ test("Interview: its words are the Assistant's reply, the Expert's replies go to
       if (input.startsWith("{")) return { text: "已更新" };
       voiceInputs.push(input);
       if (input.includes("第三年还在")) return { tool: { name: "handoff_to_assistant", arguments: { note: "聊清了三年的理由" } } };
+      if (context.messages.some(message => message.role === "toolResult")) return { text: "加好了" };
+      if (input.includes("/attachments/")) sentPaths.push(input.match(/\/attachments\/[^\s\]|（]+/)![0]);
+      if (input.includes("加进资料")) return { tool: { name: "add_to_agent", arguments: { files: sentPaths } } };
       return { text: "为什么是三年，不是一年？" };
     },
   });
@@ -324,8 +329,13 @@ test("Interview: its words are the Assistant's reply, the Expert's replies go to
     await sleep(100);
     assert.equal(env.model.state.calls, 1, "task news waits until the interview hands back");
     await env.telegramUpdate({ update_id: 5, message: { message_id: 14, chat: { id: 42, type: "private" }, document: { file_id: "f1", file_name: "notes.md", file_size: 30 } } });
-    await waitFor(() => voiceInputs.some(text => text.includes("input/manual/")));
-    assert.equal((await env.productStore.listManualFiles()).length, 1, "a file sent mid-interview is readable by the interview");
+    await waitFor(() => voiceInputs.some(text => text.includes("input/files/")));
+    assert.equal((await env.productStore.listManualFiles()).length, 0, "a file sent mid-interview is not the Agent's material until the interview adds it");
+    await env.idle();
+    assert.equal((await env.productStore.listManualFiles()).length, 0, "still not, however long it sits");
+    await env.telegramUpdate(update(3, "把它加进资料"));
+    await waitFor(async () => (await env.productStore.listManualFiles()).length === 1);
+    assert.match((await env.productStore.listManualFiles())[0]!.path, /notes\.md\.md$/, "the interview added it, and plain text landed in the manual input");
     await env.productStore.update(interview!.session!.sessionId, session => { session.todos = [{ title: "为什么是三年", status: "completed" }, { title: "什么时候例外", status: "pending" }]; });
     await env.telegramUpdate(update(2, "第三年还在，说明真的有人吃饭"));
     await waitFor(async () => (await env.tasks.get(interview!.id))!.status === "done" && env.model.state.turns.some(turn => turn.said.some(text => text.includes("聊清了三年的理由"))));
@@ -408,7 +418,14 @@ const sentPath = (turn: { input: RunStart }) => turn.input.message.content.match
 const studioTool = (env: { tools: ReturnType<typeof studioTools> }, name: string) => env.tools.find(tool => tool.name === name)!;
 const callTool = (env: { tools: ReturnType<typeof studioTools> }, name: string, args: Record<string, unknown>) => { const tool = studioTool(env, name); return tool.run({ accountId: ACCOUNT, runId: "r", origin: async () => ({ source: "web" }) }, tool.schema.parse(args)); };
 
-test("add_to_agent writes a file the Expert sent into the Agent's manual input; an unknown path is refused", async () => {
+const ingestRecorder = () => {
+  const submitted: Array<{ productId: string; items: unknown; context?: string }> = [];
+  const ingest: AssistantIngest = { submit: async (_account, productId, items, context) => { submitted.push({ productId, items, context }); return { id: "job-1", status: "queued" }; } };
+  return { submitted, ingest };
+};
+const PDF = Buffer.from("%PDF-1.4 选址清单");
+
+test("add_to_agent: plain text is written into the manual input by its form; an unknown path is refused", async () => {
   const env = await setup({ model: turn => ({ tools: [{ name: "add_to_agent", arguments: { files: [sentPath(turn)] } }], text: "记下了" }) });
   try {
     const upload = await env.assistant.upload(ACCOUNT, "notes.md", Buffer.from("# 笔记\n选址很重要"));
@@ -418,23 +435,56 @@ test("add_to_agent writes a file the Expert sent into the Agent's manual input; 
     assert.match(manual!.path, /notes\.md\.md$/);
     assert.match((await env.productStore.backend.readManual(manual!.path)).toString(), /选址很重要/);
     await assert.rejects(callTool(env, "add_to_agent", { files: ["/attachments/none/x.md"] }), /专家没有发过这个文件：\/attachments\/none\/x\.md.*notes\.md/);
+    await assert.rejects(callTool(env, "add_to_agent", {}), /至少要给一个/);
   } finally { await env.close(); }
 });
 
-test("ingest submits one job for the resolved Agent with the file's original bytes and the links; without Ingest it refuses", async () => {
-  const submitted: Array<{ productId: string; items: unknown; context?: string }> = [];
-  const ingest: AssistantIngest = { submit: async (_account, productId, items, context) => { submitted.push({ productId, items, context }); return { id: "job-1", status: "queued" }; } };
-  const original = Buffer.from("# 笔记\n选址很重要");
-  const env = await setup({ ingest, model: turn => ({ tools: [{ name: "ingest", arguments: { files: [sentPath(turn)], links: ["https://example.com/a"], context: "选址笔记" }}], text: "交给整理了" }) });
+test("add_to_agent: a PDF goes to Ingest with its original bytes, never into the manual input", async () => {
+  const { submitted, ingest } = ingestRecorder();
+  const env = await setup({ ingest, model: turn => ({ tools: [{ name: "add_to_agent", arguments: { files: [sentPath(turn)], context: "选址清单" } }], text: "交给整理了" }) });
   try {
-    const upload = await env.assistant.upload(ACCOUNT, "notes.md", original);
-    await env.assistant.hear(ACCOUNT, { id: "ing-1", source: "web", parts: [{ type: "text", text: "整理一下" }, { type: "file", assetId: upload.assetId }] });
+    const upload = await env.assistant.upload(ACCOUNT, "list.pdf", PDF);
+    await env.assistant.hear(ACCOUNT, { id: "pdf-1", source: "web", parts: [{ type: "text", text: "这是我的清单" }, { type: "file", assetId: upload.assetId }] });
     await env.idle();
-    assert.deepEqual(submitted, [{ productId: PRODUCT, context: "选址笔记", items: [{ name: "notes.md", content_base64: original.toString("base64"), media_type: "text/markdown" }, { url: "https://example.com/a" }] }]);
-    await assert.rejects(callTool(env, "ingest", {}), /至少要给一个/);
+    assert.deepEqual(submitted, [{ productId: PRODUCT, context: "选址清单", items: [{ name: "list.pdf", content_base64: PDF.toString("base64"), media_type: "application/pdf" }] }]);
+    assert.equal((await env.productStore.backend.listManual()).length, 0);
   } finally { await env.close(); }
-  const bare = await setup({ model: () => ({ text: "" }) });
-  try { await assert.rejects(callTool(bare, "ingest", { links: ["https://example.com/a"] }), /Ingest 没有配置/); } finally { await bare.close(); }
+});
+
+test("add_to_agent: links go to Ingest; a mixed call writes the text now and submits one job for the rest", async () => {
+  const { submitted, ingest } = ingestRecorder();
+  const env = await setup({ ingest, model: () => ({ text: "" }) });
+  try {
+    const text = await env.assistant.upload(ACCOUNT, "notes.md", Buffer.from("# 笔记\n选址很重要"));
+    const pdf = await env.assistant.upload(ACCOUNT, "list.pdf", PDF);
+    await env.assistant.hear(ACCOUNT, { id: "mix-1", source: "web", parts: [{ type: "file", assetId: text.assetId }, { type: "file", assetId: pdf.assetId }] });
+    await env.idle();
+    const paths = (await env.materials.list(ACCOUNT)).map(material => material.chatPath);
+    const result = await callTool(env, "add_to_agent", { files: paths, links: ["https://example.com/a"] });
+    assert.equal(submitted.length, 1, "one job for everything that goes to Ingest");
+    assert.deepEqual((submitted[0]!.items as unknown[]).length, 2);
+    const went = (JSON.parse(String(result.output)) as { went: string[] }).went;
+    assert.equal(went.length, 3);
+    assert.ok(went.some(line => /notes\.md → input\/manual\/.*notes\.md\.md$/.test(line)));
+    assert.ok(went.filter(line => line.includes("ingest job job-1，整理好会放进 input/manual")).length === 2);
+    assert.equal((await env.productStore.backend.listManual()).length, 1);
+  } finally { await env.close(); }
+});
+
+test("add_to_agent: without Ingest a call with a non-text item is refused whole, and the text half is not written", async () => {
+  const env = await setup({ model: () => ({ text: "" }) });
+  try {
+    const text = await env.assistant.upload(ACCOUNT, "notes.md", Buffer.from("# 笔记"));
+    const pdf = await env.assistant.upload(ACCOUNT, "list.pdf", PDF);
+    await env.assistant.hear(ACCOUNT, { id: "bare-1", source: "web", parts: [{ type: "file", assetId: text.assetId }, { type: "file", assetId: pdf.assetId }] });
+    await env.idle();
+    const paths = (await env.materials.list(ACCOUNT)).map(material => material.chatPath);
+    await assert.rejects(callTool(env, "add_to_agent", { files: paths }), /Ingest 没有配置，收不了：.*list\.pdf.*什么都没有加进资料/);
+    await assert.rejects(callTool(env, "add_to_agent", { links: ["https://example.com/a"] }), /Ingest 没有配置/);
+    assert.equal((await env.productStore.backend.listManual()).length, 0);
+    await callTool(env, "add_to_agent", { files: paths.filter(path => path.endsWith("notes.md")) });
+    assert.equal((await env.productStore.backend.listManual()).length, 1, "plain text alone needs no Ingest");
+  } finally { await env.close(); }
 });
 
 test("A settled Ingest job reaches the Assistant once, with what came of each item", async () => {
