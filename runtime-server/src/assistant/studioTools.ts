@@ -37,10 +37,8 @@ export interface StudioOperations {
   finish(accountId: string, taskId: string, answered: boolean): Promise<AssistantTask>;
   /** Public web evidence: links and snippets, no generated answer. */
   searchWeb(input: { query: string; max_results?: number; domains?: string[]; topic?: "general" | "news" }, signal?: AbortSignal): Promise<unknown>;
-  /** Writes the text of files the Expert sent, by the path the Assistant saw, into the Agent's manual input. Returns where each went. */
-  addToAgent(accountId: string, productId: string, files: string[]): Promise<string[]>;
-  /** Hands the originals of files the Expert sent, and links, to Ingest as one job for the Agent. */
-  ingest(accountId: string, productId: string, input: { files: string[]; links: string[]; context?: string }): Promise<{ id: string; status: string }>;
+  /** Adds material the Expert sent to the Agent: plain text into its manual input, anything more complex and links to Ingest. Returns where each item went. */
+  addToAgent(accountId: string, productId: string, input: { files: string[]; links: string[]; context?: string }): Promise<string[]>;
   /** Remembers the Run a task was created in, so that Run's reply can offer its buttons. */
   inRun(task: AssistantTask, runId: string): Promise<AssistantTask>;
 }
@@ -131,16 +129,12 @@ export function studioTools(ops: StudioOperations): StudioTool[] {
         return { ...done(await created(call, task)), ...(ops.handsOver(input.kind) ? { ends_turn: true } : {}) };
       } },
     { name: "add_to_agent", readOnly: false,
-      schema: z.object({ agent_id: z.string().optional().describe("Agent 的 id 或名字；专家只有一个 Agent 时可省"), files: z.array(z.string()).min(1).max(20).describe("专家发来的文件在对话里显示的路径") }).strict(),
-      description: "专家发来的纯文字文件（笔记、文稿、聊天记录），要成为某个 Agent 的资料时，直接写进它的 input/manual。PDF、Word、文档图片、要抓取的链接不用这个，用 ingest。只是随口给你看的，什么都不用做。",
-      run: async (call, args) => done({ written: await ops.addToAgent(call.accountId, await agentFor(ops, call.accountId, args.agent_id), args.files as string[]) }) },
-    { name: "ingest", readOnly: false,
       schema: z.object({ agent_id: z.string().optional().describe("Agent 的 id 或名字；专家只有一个 Agent 时可省"), files: z.array(z.string()).max(20).optional().describe("专家发来的文件在对话里显示的路径"), links: z.array(z.string()).max(20).optional().describe("要抓取的网页链接"), context: text(1, 2000).optional().describe("这些资料是什么、为什么给") }).strict(),
-      description: "把比纯文字复杂的资料交给 Ingest 整理进某个 Agent 的资料：PDF、Word、文档图片、要抓取的链接。一次调用是一个任务，在后台做，立刻返回任务 id 和状态。纯文字文件用 add_to_agent。",
+      description: "专家发来的文件或链接，按常识（看文件名和内容）明显属于某个 Agent 的资料时，加进它的资料；只是发来随便看看的，留在对话里，什么都不用做。放在哪里是自动的，不用你选。",
       run: async (call, args) => {
         const input = args as { files?: string[]; links?: string[]; context?: string };
         if (!input.files?.length && !input.links?.length) throw new Error("files 和 links 至少要给一个。");
-        return done(await ops.ingest(call.accountId, await agentFor(ops, call.accountId, args.agent_id), { files: input.files ?? [], links: input.links ?? [], context: input.context }));
+        return done({ went: await ops.addToAgent(call.accountId, await agentFor(ops, call.accountId, args.agent_id), { files: input.files ?? [], links: input.links ?? [], context: input.context }) });
       } },
     { name: "exclude_source", readOnly: false, schema: z.object({ source: text(1, 500), reason: z.string().max(500).optional() }).strict(),
       description: "专家说某个来源不算数时调用。之后所有工作都不再采用它。",
