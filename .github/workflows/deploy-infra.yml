@@ -33,6 +33,9 @@ jobs:
         env:
           HATCH_PRODUCTION_ENV: ${{ secrets.HATCH_PRODUCTION_ENV }}
           HATCH_CREATOR_NAS_GATEWAY_TOKEN: ${{ secrets.HATCH_CREATOR_NAS_GATEWAY_TOKEN }}
+          HATCH_AXIOM_TOKEN: ${{ secrets.HATCH_AXIOM_TOKEN }}
+          HATCH_AXIOM_ENDPOINT: ${{ secrets.HATCH_AXIOM_ENDPOINT }}
+          HATCH_AXIOM_CONTAINER_DATASET: ${{ secrets.HATCH_AXIOM_CONTAINER_DATASET }}
         run: |
           set -euo pipefail
           test -n "$HATCH_PRODUCTION_ENV"
@@ -43,6 +46,9 @@ jobs:
           printf '%s\n' "$HATCH_PRODUCTION_ENV" > "$temp_env"
           test -s "$temp_env"
           printf 'HATCH_CREATOR_NAS_GATEWAY_TOKEN=%s\n' "$HATCH_CREATOR_NAS_GATEWAY_TOKEN" >> "$temp_env"
+          if test -n "$HATCH_AXIOM_TOKEN" && test -n "$HATCH_AXIOM_ENDPOINT"; then
+            printf 'HATCH_AXIOM_TOKEN=%s\nHATCH_AXIOM_ENDPOINT=%s\nHATCH_AXIOM_CONTAINER_DATASET=%s\n' "$HATCH_AXIOM_TOKEN" "$HATCH_AXIOM_ENDPOINT" "${HATCH_AXIOM_CONTAINER_DATASET:-hatch_prod_containers}" >> "$temp_env"
+          fi
           grep -Eq '^HATCH_DOMAIN=[^[:space:]]+$' "$temp_env"
           chmod 600 "$temp_env"
           mv -f "$temp_env" /opt/hatch/.env
@@ -51,6 +57,7 @@ jobs:
         run: |
           set -euo pipefail
           install -m 640 compose.infra.yml /opt/hatch/compose.infra.yml
+          install -D -m 640 vector/vector.yaml /opt/hatch/vector/vector.yaml
       - name: Start infrastructure only
         run: |
           set -euo pipefail
@@ -62,3 +69,6 @@ jobs:
           docker network inspect hatch_internal >/dev/null 2>&1 || docker network create hatch_internal
           docker compose --env-file .env -f compose.infra.yml up -d postgres qdrant
           docker compose --env-file .env -f compose.infra.yml ps --status running postgres qdrant
+          if grep -Eq '^HATCH_AXIOM_TOKEN=[^[:space:]]+' .env; then
+            docker compose --env-file .env -f compose.infra.yml up -d vector
+          fi

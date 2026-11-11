@@ -31,7 +31,22 @@ services:
       timeout: 5s
       retries: 12
 
+  vector:
+    image: ${VECTOR_IMAGE:-timberio/vector:0.61.0-alpine}
+    restart: unless-stopped
+    command: ["--config", "/etc/vector/vector.yaml"]
+    environment:
+      HATCH_AXIOM_TOKEN: ${HATCH_AXIOM_TOKEN:-}
+      HATCH_AXIOM_ENDPOINT: ${HATCH_AXIOM_ENDPOINT:-}
+      HATCH_AXIOM_CONTAINER_DATASET: ${HATCH_AXIOM_CONTAINER_DATASET:-hatch_prod_containers}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./vector/vector.yaml:/etc/vector/vector.yaml:ro
+      - vector_data:/var/lib/vector
+
 volumes:
+  vector_data:
+    name: hatch_vector_data
   postgres_data:
     name: hatch_postgres_data
   qdrant_data:
