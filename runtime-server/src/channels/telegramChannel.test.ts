@@ -67,6 +67,15 @@ test("the photos of one album parse as events of one album, so the inbox can han
   assert.equal(parse(privateMessage({ photo: [{ file_id: "c" }] }))[0]?.album, undefined);
 });
 
+test("a video, a round video note and an animation parse into files too", () => {
+  const event = (file: { ref: string; name: string; size?: number }) => [{ eventId: "1", sequence: 1, address: TO, messageRef: "10", text: "你看看", file }];
+  assert.deepEqual(parse(privateMessage({ video: { file_id: "v", file_size: 5 }, caption: "你看看" })), event({ ref: "v", name: "video.mp4", size: 5 }));
+  assert.deepEqual(parse(privateMessage({ video: { file_id: "v", file_name: "clip.mov" }, caption: "你看看" })), event({ ref: "v", name: "clip.mov" }));
+  assert.deepEqual(parse(privateMessage({ video_note: { file_id: "n", file_size: 6 }, caption: "你看看" })), event({ ref: "n", name: "video_note.mp4", size: 6 }));
+  assert.deepEqual(parse(privateMessage({ animation: { file_id: "g" }, caption: "你看看" })), event({ ref: "g", name: "animation.mp4" }));
+  assert.equal(parse(privateMessage({ video: { file_id: "big", file_size: 25 * 1024 * 1024 } }))[0]!.file!.size! > channel().telegram.maxFileBytes, true);
+});
+
 test("a voice message or audio file parses into a file for the asset pipeline, with its size for the 20 MB refusal", () => {
   assert.deepEqual(parse(privateMessage({ voice: { file_id: "v", file_size: 7, duration: 3, mime_type: "audio/ogg" } })), [{ eventId: "1", sequence: 1, address: TO, messageRef: "10", file: { ref: "v", name: "voice.ogg", size: 7 } }]);
   assert.deepEqual(parse(privateMessage({ audio: { file_id: "a", file_name: "memo.m4a", file_size: 9 } })), [{ eventId: "1", sequence: 1, address: TO, messageRef: "10", file: { ref: "a", name: "memo.m4a", size: 9 } }]);

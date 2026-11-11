@@ -13,6 +13,17 @@ import { RuntimeStore, localRuntimeAuthority } from "../store.js";
 import { ChatAssets, assetScopeOf, attachmentMessageId } from "./assets.js";
 import { withinImageBudget } from "./imageBudget.js";
 import { principalKey } from "./principal.js";
+import { sniff } from "../assets/sniff.js";
+
+const box = (type: string, ...body: Buffer[]) => { const payload = Buffer.concat(body); const head = Buffer.alloc(8); head.writeUInt32BE(8 + payload.length); head.write(type, 4, "latin1"); return Buffer.concat([head, payload]); };
+/** The smallest MP4 that names its handler: a video track makes it a video, an audio track a voice message. */
+const mp4 = (handler: "vide" | "soun") => Buffer.concat([box("ftyp", Buffer.from("isom\0\0\0\0isom")), box("moov", box("trak", box("mdia", box("hdlr", Buffer.alloc(8), Buffer.from(handler), Buffer.alloc(12)))))]);
+
+test("an MP4 with a video track is a file, not a voice message; one with only audio stays audio", () => {
+  assert.deepEqual(sniff(mp4("vide"), "download.mp4"), { kind: "file", mime: "video/mp4", ext: ".mp4" });
+  assert.equal(sniff(mp4("soun"), "voice.m4a").kind, "audio");
+  assert.equal(sniff(Buffer.concat([Buffer.from("1a45dfa3", "hex"), Buffer.from("V_VP9")]), "clip.webm").kind, "file");
+});
 
 test("the asset scope follows the conversation's owner, so a contact's and an account's never meet", () => {
   assert.deepEqual(assetScopeOf({ id: "c1", ownerAccountId: principalKey({ kind: "contact", connectionId: "conn-1", contactId: "alice" }) }),
@@ -109,5 +120,21 @@ test("without an asset service the Chat API refuses uploads and attachments, nev
     assert.deepEqual([sent.status, sent.body.error.code], [501, "attachments_unavailable"]);
     // Text parts still work.
     assert.equal((await call(`/v1/conversations/${conversation}/messages?wait=5`, { method: "POST", body: JSON.stringify({ client_message_id: "m2", parts: [{ type: "text", text: "hi" }] }) })).body.reply, "seen");
+  } finally { await runtime.close(); }
+});
+
+test("a video and a screenshot sent together both reach the model's message, each labelled", async () => {
+  const { runtime, call, conversation, seen } = await httpFixture(true);
+  try {
+    const upload = async (name: string, bytes: Buffer) => (await call(`/v1/conversations/${conversation}/assets?name=${name}`, { method: "POST", body: new Blob([new Uint8Array(bytes)]) })).body;
+    const video = await upload("download.mp4", mp4("vide"));
+    const shot = await upload("Screenshot.png", await png(16, 16));
+    assert.deepEqual([video.kind, video.state], ["file", "ready"], JSON.stringify(video));
+    const parts = [{ type: "text", text: "你看看" }, { type: video.kind, assetId: video.asset_id }, { type: shot.kind, assetId: shot.asset_id }];
+    const sent = await call(`/v1/conversations/${conversation}/messages?wait=5`, { method: "POST", body: JSON.stringify({ client_message_id: "m1", parts }) });
+    assert.equal(sent.status, 200);
+    const user = seen.find((entry) => entry.role === "user")!;
+    assert.match(user.content!, /^你看看\n\[file: download\.mp4 \| video\/mp4 \| [^\]]+ \| \/attachments\/msg_[0-9a-f]{16}\/download\.mp4\]\n\[image: \/attachments\/msg_[0-9a-f]{16}\/Screenshot\.png\]$/);
+    assert.equal(user.model_images?.length, 1);
   } finally { await runtime.close(); }
 });
