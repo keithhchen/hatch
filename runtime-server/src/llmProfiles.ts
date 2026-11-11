@@ -1,8 +1,8 @@
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import type { StallLimits } from "./providerStall.js";
 
-export const RUNTIME_LLM_PROFILE_NAMES = ["kimi-k2.6", "kimi-k2.6-no-thinking", "deepseek-v4-flash", "gemini-api", "gemini-3.1-pro"] as const;
-export const FACTORY_LLM_PROFILE_NAMES = ["kimi-k2.6", "deepseek-v4-flash", "gemini-api", "gemini-3.1-pro"] as const;
+export const RUNTIME_LLM_PROFILE_NAMES = ["kimi-k2.6", "kimi-k2.6-no-thinking", "deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro"] as const;
+export const FACTORY_LLM_PROFILE_NAMES = ["kimi-k2.6", "deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro"] as const;
 export type FactoryLlmProfileName = (typeof FACTORY_LLM_PROFILE_NAMES)[number];
 export const LLM_PROFILE_NAMES = RUNTIME_LLM_PROFILE_NAMES;
 export type LlmProfileName = RuntimeLlmProfileName | FactoryLlmProfileName;
@@ -22,6 +22,8 @@ export type LlmProfile = {
   thinkingLevel: ThinkingLevel;
   temperature?: number;
   thinkingType?: "enabled" | "disabled";
+  /** Kimi K3 family: sent as top-level reasoning_effort; the K2.x `thinking` field is never sent (K3 cannot turn reasoning off). */
+  reasoningEffort?: "low" | "high" | "max";
   normalizeEmptyToolCallContent: boolean;
   /** How long a call may stay silent; the default of providerStall when absent. */
   stall?: StallLimits;
@@ -86,6 +88,23 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     reasoning: true,
     thinkingLevel: "low",
     normalizeEmptyToolCallContent: false
+  },
+  // The plain pro, not -highspeed: that is the variant the user picked, and "low" effort already keeps reasoning short.
+  "kimi-k3.1-pro": {
+    name: "kimi-k3.1-pro",
+    provider: "moonshotai-cn",
+    providerName: "Moonshot Kimi",
+    api: "openai-completions",
+    model: "kimi-k3.1-pro",
+    baseUrl: "https://api.moonshot.cn/v1",
+    apiKeyEnv: "LLM_API_KEY",
+    contextWindow: 262_144,
+    maxTokens: 32_768,
+    reasoning: true,
+    thinkingLevel: "low",
+    reasoningEffort: "low",
+    normalizeEmptyToolCallContent: true,
+    stall: { firstEventMs: 45_000, silenceMs: 60_000, restarts: 2, backoffMs: 1_000 }
   },
   "gemini-3.1-pro": {
     name: "gemini-3.1-pro",

@@ -304,6 +304,37 @@ test("Kimi no-thinking profile sends the official disabled payload without tempe
   assert.equal(body.reasoning_effort, undefined);
 });
 
+test("Kimi K3.1 profile sends reasoning_effort and never the thinking field", async () => {
+  const calls: Array<{ init: RequestInit }> = [];
+  const fetch: typeof globalThis.fetch = async (_input, init) => {
+    calls.push({ init: init ?? {} });
+    return streamResponse("pong");
+  };
+  const env = { HATCH_LLM_PROFILE: "kimi-k3.1-pro", LLM_API_KEY: "kimi-test-key" };
+
+  const agent = createPiAgent({ env, fetch, timeoutMs: 8_000 });
+  await agent.prompt("Say pong");
+
+  const body = JSON.parse(String(calls[0]!.init.body)) as Record<string, unknown>;
+  assert.equal(body.model, "kimi-k3.1-pro");
+  assert.equal(body.reasoning_effort, "low");
+  assert.equal("thinking" in body, false);
+});
+
+test("Kimi K3.1 reasoning_content streams as normal thinking events", async () => {
+  const chunk = (delta: Record<string, unknown>, finish: string | null = null) =>
+    `data: ${JSON.stringify({ id: "c", object: "chat.completion.chunk", created: 1, model: "kimi-k3.1-pro", choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+  const body = chunk({ role: "assistant", reasoning_content: "hmm" }) + chunk({ content: "Hi" }) + chunk({}, "stop") + "data: [DONE]\n\n";
+  const fetch: typeof globalThis.fetch = async () => new Response(body, { headers: { "content-type": "text/event-stream" } });
+  const agent = createPiAgent({ env: { HATCH_LLM_PROFILE: "kimi-k3.1-pro", LLM_API_KEY: "kimi-test-key" }, fetch, timeoutMs: 8_000 });
+  const types: string[] = [];
+  agent.subscribe((event) => {
+    if (event.type === "message_update") types.push(event.assistantMessageEvent.type);
+  });
+  await agent.prompt("Hi");
+  assert.ok(types.includes("thinking_delta"));
+});
+
 test("active profile rejects unknown names and missing provider credentials", () => {
   assert.throws(() => createPiModel({ env: { HATCH_LLM_PROFILE: "unknown" } }), /Unknown (?:Runtime )?HATCH_LLM_PROFILE/);
   assert.throws(
