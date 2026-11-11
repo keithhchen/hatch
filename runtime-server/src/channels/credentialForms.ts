@@ -72,6 +72,8 @@ export const CREDENTIAL_FORMS: Partial<Record<ChannelKind, CredentialForm>> = {
   whatsapp: { tenant: "wabaId", fields: [{ field: "waba_id", key: "wabaId", required: true }, { field: "access_token", key: "token", required: true }], probe: (adapter: WhatsAppChannel, credentials) => adapter.probe(credentials.wabaId, credentials.token) },
   messenger: { tenant: "pageId", fields: [{ field: "page_id", key: "pageId", required: true }, { field: "access_token", key: "token", required: true }], probe: (adapter: MessengerChannel, credentials) => adapter.probe(credentials.pageId, credentials.token) },
   discord: {
+    // Our shared bot answers the Assistant; an Expert's own bot is for one Product. The Gateway needs no webhook, so saving proves the token and stops.
+    perProduct: true,
     fields: [{ field: "token", key: "token", required: true }, { field: "application_id", key: "applicationId", required: true }],
     build: (credentials, scope) => new DiscordChannel(credentials, scope),
     probe: (adapter: DiscordChannel) => adapter.probe(),
