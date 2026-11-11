@@ -5,6 +5,8 @@ services:
     image: ${HATCH_IMAGE_PREFIX:-ghcr.io/example/hatch}/runtime:${HATCH_RELEASE_TAG:-dev}
     command: ["node", "dist/registryServer.js"]
     restart: unless-stopped
+    # Longer than the drain (HATCH_DRAIN_MS, 90s): a stopped container finishes its Runs and requests before it is killed.
+    stop_grace_period: 120s
     environment:
       NODE_ENV: production
       REGISTRY_HOST: 0.0.0.0
@@ -190,6 +192,8 @@ services:
     image: ${HATCH_IMAGE_PREFIX:-ghcr.io/example/hatch}/runtime:${HATCH_RELEASE_TAG:-dev}
     command: ["node", "dist/index.js"]
     restart: unless-stopped
+    # Longer than the drain (HATCH_DRAIN_MS, 90s): a stopped container finishes its Runs and requests before it is killed.
+    stop_grace_period: 120s
     environment:
       NODE_ENV: production
       HATCH_RUNTIME_HOST: 0.0.0.0
@@ -305,6 +309,8 @@ services:
   dashboard:
     image: ${HATCH_IMAGE_PREFIX:-ghcr.io/example/hatch}/dashboard:${HATCH_RELEASE_TAG:-dev}
     restart: unless-stopped
+    # Longer than the drain (HATCH_DRAIN_MS, 90s): a stopped container finishes its Runs and requests before it is killed.
+    stop_grace_period: 120s
     environment:
       NODE_ENV: production
       HATCH_CREATOR_DASHBOARD_API_HOST: 0.0.0.0

@@ -51,6 +51,29 @@ test("two instances sweeping an orphaned Run execute it once", async () => {
   assert.equal((await repository.getRun(conversationId, started.run.id))!.status, "queued");
 });
 
+test("draining waits for a Run held here and stops claiming other instances' Runs", async () => {
+  let finish!: () => void;
+  const held = new Promise<void>((resolve) => { finish = resolve; });
+  const executed: string[] = [];
+  const { repository, supervisor } = await setup({ execute: async (run) => {
+    executed.push(run.id);
+    await held;
+    await repository.endRun(run.id, endingOf("completed"));
+  } });
+  const started = await repository.acceptSubmission(message(0));
+  const draining = supervisor("a");
+  draining.adopt(started.run);
+  await settled(() => executed.length === 1);
+  let drained = false;
+  const drain = draining.drain().then(() => { drained = true; });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(drained, false, "the Run is still going");
+  finish();
+  await drain;
+  assert.equal((await repository.getRun(conversationId, started.run.id))!.status, "completed");
+  await draining.stop();
+});
+
 test("the resume policy can interrupt an orphaned Run instead of restarting it", async () => {
   const { repository, supervisor } = await setup({ execute: async () => assert.fail("must not run") }, () => ({ interrupt: "used a local tool" }));
   const started = await repository.acceptSubmission(message(0, new Date(Date.now() - 1000).toISOString()));

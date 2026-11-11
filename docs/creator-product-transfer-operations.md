@@ -14,7 +14,7 @@ target account whose production audit is embedded in the command. `--check`
 performs a read-only preflight and prints a privacy-filtered report.
 
 ```bash
-docker exec hatch-app-registry-1 node scripts/transfer-creator-product.mjs \
+docker exec "$(docker ps -q -f label=com.docker.compose.service=registry)" node scripts/transfer-creator-product.mjs \
   802f2105-e28e-4ddc-996a-0a97a7fa4bb5 tina@gethatchapp.com --check
 ```
 
@@ -24,7 +24,7 @@ authorizes transferring that connection to Tina, first run a read-only
 preflight with the opt-in flag:
 
 ```bash
-docker exec hatch-app-registry-1 node scripts/transfer-creator-product.mjs \
+docker exec "$(docker ps -q -f label=com.docker.compose.service=registry)" node scripts/transfer-creator-product.mjs \
   802f2105-e28e-4ddc-996a-0a97a7fa4bb5 tina@gethatchapp.com \
   --check --transfer-account-connections
 ```
@@ -33,7 +33,7 @@ That preflight must report no other current source Products using the
 connection. With that authorization and a passing preflight, run:
 
 ```bash
-docker exec hatch-app-registry-1 node scripts/transfer-creator-product.mjs \
+docker exec "$(docker ps -q -f label=com.docker.compose.service=registry)" node scripts/transfer-creator-product.mjs \
   802f2105-e28e-4ddc-996a-0a97a7fa4bb5 tina@gethatchapp.com \
   --transfer-account-connections
 ```
@@ -51,7 +51,7 @@ refresh the Dashboard's in-memory Commerce and Portal views through the
 authenticated operations endpoint from the Dashboard container:
 
 ```bash
-docker exec hatch-app-dashboard-1 sh -lc 'curl --fail --silent --show-error \
+docker exec "$(docker ps -q -f label=com.docker.compose.service=dashboard)" sh -lc 'curl --fail --silent --show-error \
   -H "Authorization: Bearer $HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN" \
   http://127.0.0.1:8500/v1/internal/commerce/operations >/dev/null'
 ```

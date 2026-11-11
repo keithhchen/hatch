@@ -48,6 +48,10 @@ test("workspaces isolate files, overwrite ordinary files and retain exact expert
     assert.equal((await store.read(a.id, first.path)).bytes.toString(), "# 第二版\n已修改。\n");
     await store.put(a.id, first.path, Buffer.from("Agent 完成"), { actor: "agent" });
     await store.recover();
+    assert.equal((await store.get(a.id)).status, "running", "a run another live instance heartbeats is not interrupted");
+    const realNow = Date.now;
+    Date.now = () => realNow() + 120_000;
+    try { await store.recover(); } finally { Date.now = realNow; }
     assert.equal((await store.get(a.id)).status, "interrupted");
     await store.put(a.id, first.path, Buffer.from("用户编辑"), { actor: "user" });
     assert.equal((await store.read(a.id, first.path)).bytes.toString(), "用户编辑");

@@ -43,8 +43,11 @@ export class PostgresIngestJobs implements IngestJobRepository {
   async recent(accountId: string, productId: string, limit: number) {
     return (await this.pool.query("SELECT * FROM hatch_ingest_jobs WHERE account_id = $1 AND product_id = $2 ORDER BY created_at DESC LIMIT $3", [accountId, productId, limit])).rows.map(fromRow);
   }
-  async unfinished() {
-    return (await this.pool.query("SELECT * FROM hatch_ingest_jobs WHERE status IN ('queued', 'running')")).rows.map(fromRow);
+  async touch(id: string, now: string) {
+    await this.pool.query("UPDATE hatch_ingest_jobs SET updated_at = $2 WHERE id = $1 AND status IN ('queued', 'running')", [id, now]);
+  }
+  async unfinished(staleBefore: string) {
+    return (await this.pool.query("SELECT * FROM hatch_ingest_jobs WHERE status IN ('queued', 'running') AND updated_at < $1", [staleBefore])).rows.map(fromRow);
   }
 }
 
@@ -61,7 +64,8 @@ export class MemoryIngestJobs implements IngestJobRepository {
     return [...this.jobs.values()].filter(job => job.accountId === accountId && job.productId === productId)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit).map(job => structuredClone(job));
   }
-  async unfinished() { return [...this.jobs.values()].filter(isUnfinished).map(job => structuredClone(job)); }
+  async touch(id: string, now: string) { const job = this.jobs.get(id); if (job && isUnfinished(job)) job.updatedAt = now; }
+  async unfinished(staleBefore: string) { return [...this.jobs.values()].filter(job => isUnfinished(job) && job.updatedAt < staleBefore).map(job => structuredClone(job)); }
 }
 
 const fromRow = (row: Record<string, any>): IngestJob => {

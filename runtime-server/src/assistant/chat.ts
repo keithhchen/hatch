@@ -115,6 +115,8 @@ export class AssistantChat implements AssistantHost {
 
   start(): Promise<void> { return this.runtime.start(); }
 
+  drain(): Promise<void> { return this.runtime.drain(); }
+
   /** Hands the Assistant's Runs to another instance, and lets go of its storage. */
   async close(): Promise<void> {
     await this.runtime.stop();

@@ -210,6 +210,7 @@ jobs:
           test -f /opt/hatch/.env || { echo "Run Hatch application CD first: it writes /opt/hatch/.env"; exit 1; }
           grep -Eq '^HATCH_DOMAIN=[^[:space:]]+$' /opt/hatch/.env
           grep -Eq '^HATCH_RUNTIME_CHAT_SERVICE_TOKEN=[^[:space:]]+' /opt/hatch/.env || { echo "/opt/hatch/.env lacks keys only the application CD writes; run it first"; exit 1; }
+          test -f /opt/hatch/roll-service.sh || { echo "/opt/hatch/roll-service.sh is installed by the application CD; run it first"; exit 1; }
       - name: Inspect production Docker host
         run: |
           set -u
@@ -230,10 +231,6 @@ jobs:
           test -n "$HATCH_DOMAIN"
           export DOCKER_DEFAULT_PLATFORM=linux/amd64
           printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
-          # A first deployment to a new production host has no previous
-          # Dashboard container. Keep the rollback path when one exists, but
-          # do not make its absence a deployment failure.
-          previous_image="$(docker inspect --format '{{.Config.Image}}' hatch-app-dashboard-1 2>/dev/null || true)"
           override="$(mktemp)"
           printf 'services:\n  dashboard:\n    image: ${HATCH_DASHBOARD_IMAGE}\n' > "$override"
           compose=(docker compose --env-file /opt/hatch/.env --env-file /opt/hatch/.release.env -f /opt/hatch/compose.app.yml -f "$override")
@@ -254,20 +251,11 @@ jobs:
             echo "Dashboard image pull timed out or failed; leaving the current container in place." >&2
             exit 1
           fi
-          if ! timeout 180s env HATCH_DASHBOARD_IMAGE="$DASHBOARD_IMAGE" "${compose[@]}" up -d --no-deps --pull never dashboard; then
-            if test -n "$previous_image"; then
-              HATCH_DASHBOARD_IMAGE="$previous_image" "${compose[@]}" up -d --no-deps dashboard
-            else
-              docker rm -f hatch-app-dashboard-1 >/dev/null 2>&1 || true
-            fi
-            exit 1
-          fi
           # Validate the container on this host. During a region migration the
           # public DNS may still point at the old production host, so probing
           # HATCH_DOMAIN here can produce a false positive.
-          dashboard_ready=0
-          for attempt in $(seq 1 30); do
-            if timeout 5s docker exec hatch-app-dashboard-1 node --input-type=module -e '
+          probe_dashboard() {
+            timeout 5s docker exec "$1" node --input-type=module -e '
             const checks = ["/readyz", "/explore"];
             for (const path of checks) {
               const response = await fetch(`http://127.0.0.1:8500${path}`);
@@ -276,18 +264,11 @@ jobs:
                 throw new Error("/explore did not return the dashboard asset shell");
               }
             }
-          ' >/dev/null 2>&1; then
-              dashboard_ready=1
-              break
-            fi
-            sleep 2
-          done
-          if test "$dashboard_ready" != 1; then
-            if test -n "$previous_image"; then
-              HATCH_DASHBOARD_IMAGE="$previous_image" "${compose[@]}" up -d --no-deps dashboard
-            else
-              docker rm -f hatch-app-dashboard-1 >/dev/null 2>&1 || true
-            fi
-            exit 1
-          fi
+          ' >/dev/null 2>&1
+          }
+          # The new Dashboard starts beside the running one and replaces it only once it passes the probe;
+          # one that does not is removed and the running Dashboard keeps serving.
+          . /opt/hatch/roll-service.sh
+          export HATCH_DASHBOARD_IMAGE="$DASHBOARD_IMAGE"
+          roll_service dashboard probe_dashboard 60
           rm -f "$override"

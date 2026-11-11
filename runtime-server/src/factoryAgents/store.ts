@@ -205,6 +205,10 @@ export class PostgresWorkbenchBackend implements WorkbenchBackend {
   async removeManual(): Promise<void> { throw new Error("This workspace has no shared input/manual files"); }
 }
 
+/** A live run touches its Session every RUN_HEARTBEAT_MS; one running and silent for RUN_STALE_MS lost its process. */
+export const RUN_HEARTBEAT_MS = 15_000;
+const RUN_STALE_MS = 60_000;
+
 /** Each chat owns ordinary files; completed Runtime results retain their own paths. */
 export class WorkbenchStore {
   private queues = new Map<string, Promise<unknown>>();
@@ -302,7 +306,8 @@ export class WorkbenchStore {
       // One-time metadata cutover. Current input/output files already exist on disk.
       current.files = current.files.map(f => ({ path: f.path, bytes: f.bytes, mimeType: f.mimeType, ...(f.readonly ? { readonly: true } : {}), ...(f.origin ? { origin: { sessionId: f.origin.sessionId, path: f.origin.path } } : {}) }));
       current.comments = current.comments.map(({ id, path, start, end, quote, text, replacement, createdAt }) => ({ id, path, start, end, quote, text, replacement, createdAt }));
-      if (current.status === "running") { current.status = "interrupted"; current.error = "服务已重启；请检查已有结果后继续，未自动重放操作。"; }
+      // A running Session whose process still heartbeats belongs to another live instance (a deploy overlaps old and new).
+      if (current.status === "running" && Date.now() - Date.parse(current.updatedAt) > RUN_STALE_MS) { current.status = "interrupted"; current.error = "服务已重启；请检查已有结果后继续，未自动重放操作。"; }
     });
   }
 }

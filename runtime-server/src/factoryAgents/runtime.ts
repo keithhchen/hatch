@@ -11,7 +11,7 @@ import { createFactoryLlmModel, createFactoryPiAgent, createFactoryPiModels, typ
 import { failures } from "../errors/failures.js";
 import { UpstreamError } from "../errors/upstream.js";
 import type { RunFailure } from "./runFailure.js";
-import { WorkbenchStore, isAssistantRole, type AgentDefinitionSource, type AnyRole, type Session } from "./store.js";
+import { RUN_HEARTBEAT_MS, WorkbenchStore, isAssistantRole, type AgentDefinitionSource, type AnyRole, type Session } from "./store.js";
 import { factoryAgentTools } from "./factoryTools.js";
 import { fileTools } from "./tools.js";
 import { traceAgentTools, withLangfuseTurn, type LangfuseTurnIdentifiers } from "../langfuse.js";
@@ -106,11 +106,13 @@ export class WorkbenchRuntime {
     } catch (error) { this.active.delete(id); throw error; }
     this.emit(id, "state");
     this.emit(id, "voice.run_started", { runId });
+    const beat = setInterval(() => void this.store.update(id, () => undefined).catch(() => undefined), RUN_HEARTBEAT_MS);
+    beat.unref();
     const run = withLangfuseTurn("studio.turn", message, () => this.main(id, input, controller, images), this.traceIdentifiers()).catch(error => {
       if (!controller.signal.aborted) this.emit(id, "error", { message: safeError(error) });
     });
     this.runs.set(id, run);
-    void run.finally(() => { if (this.runs.get(id) === run) this.runs.delete(id); });
+    void run.finally(() => { clearInterval(beat); if (this.runs.get(id) === run) this.runs.delete(id); });
   }
   stop(id: string): void { this.active.get(id)?.abort(); }
   isRunning(id: string): boolean { return this.active.has(id); }  /**
@@ -208,6 +210,10 @@ export class WorkbenchRuntime {
         }
       },
     );
+  }
+  /** Resolves when the Runs under way have ended. */
+  async drain(): Promise<void> {
+    await Promise.allSettled([...this.runs.values(), ...this.scribeRuns.values()]);
   }
   async close(): Promise<void> {
     this.closing = true;

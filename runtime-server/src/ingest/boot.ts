@@ -12,7 +12,8 @@ import { zipDirectory } from "../hostedAgents/zip.js";
 import { HostedEngine, PlainTextEngine, RoutingEngine, UnavailableEngine } from "./engines.js";
 import { PostgresIngestJobs } from "./jobs.js";
 import { ProductWorkspaceSink, type ManualFiles } from "./sink.js";
-import { IngestService } from "./service.js";
+import { IngestService, STALE_MS } from "./service.js";
+import { log } from "../observability/log.js";
 
 /** A deployment without a profile seal has no stored logins: links run anonymously. */
 export class NoBrowserProfiles implements BrowserProfileStore {
@@ -53,5 +54,7 @@ export const createIngestService = async (deps: {
     sink: new ProductWorkspaceSink(deps.manual, deps.objects, deps.productPrefix),
   });
   await service.recoverInterrupted();
+  // A job another process was running when this one booted is only recovered once it falls silent.
+  setInterval(() => void service.recoverInterrupted().catch(error => log.error("ingest_recover_failed", { error })), STALE_MS).unref();
   return service;
 };

@@ -16,6 +16,7 @@ import {
   projectPayoutAccount,
   projectPayoutBalance
 } from "./finance.js";
+import { withSchemaLock } from "./schemaLock.js";
 
 const ENVELOPE_FIELDS = [
   "event_id",
@@ -502,7 +503,7 @@ export class PostgresCommerceLedger {
   }
 
   async #initialize() {
-    for (const migration of MIGRATIONS) await this.#pool.query(migration);
+    await withSchemaLock(this.#pool, MIGRATIONS);
     const state = await this.#loadConsistentState();
     this.#replaceState(state.events, state.readModels, state.sequence);
   }

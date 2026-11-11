@@ -90,6 +90,9 @@ export class ChatRuntime<Scope> {
     await this.supervisor.sweep();
   }
 
+  /** Waits for the Runs this instance holds; see RunSupervisor.drain. */
+  drain(): Promise<void> { return this.supervisor.drain(); }
+
   async stop(): Promise<void> {
     await this.supervisor.stop();
     await this.compaction.drain();

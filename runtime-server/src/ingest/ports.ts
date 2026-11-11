@@ -23,5 +23,8 @@ export interface IngestJobRepository {
   save(job: IngestJob): Promise<void>;
   get(accountId: string, productId: string, id: string): Promise<IngestJob | undefined>;
   recent(accountId: string, productId: string, limit: number): Promise<IngestJob[]>;
-  unfinished(): Promise<IngestJob[]>;
+  /** Heartbeat of the process running the job: pushes `updatedAt` forward while the job is unfinished. */
+  touch(id: string, now: string): Promise<void>;
+  /** Unfinished jobs nobody has touched since `staleBefore`. */
+  unfinished(staleBefore: string): Promise<IngestJob[]>;
 }

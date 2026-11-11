@@ -49,6 +49,7 @@ COPY --from=build /workspace/creator-dashboard/contactForm.mjs ./contactForm.mjs
 COPY --from=build /workspace/creator-dashboard/providerAdapters.mjs ./providerAdapters.mjs
 COPY --from=build /workspace/creator-dashboard/publicMetadata.mjs ./publicMetadata.mjs
 COPY --from=build /workspace/creator-dashboard/telemetry.mjs ./telemetry.mjs
+COPY --from=build /workspace/creator-dashboard/gracefulShutdown.mjs ./gracefulShutdown.mjs
 COPY --from=build /workspace/creator-dashboard/desktopSignIn.mjs ./desktopSignIn.mjs
 # The production server imports its own .mjs modules and serves the bundled
 # browser output. Keep tests, stories, and client source out of the runtime
