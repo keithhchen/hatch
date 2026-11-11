@@ -6,6 +6,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { WorkbenchStore, type AgentDefinitionSource, type AssistantRole, type Role, type Session, type Todo, type WorkbenchBackend } from "../factoryAgents/store.js";
 import { WorkbenchRuntime, safeError, type WorkbenchRuntimeOptions } from "../factoryAgents/runtime.js";
 import type { FactoryWorkspace } from "../factoryAgents/service.js";
+import { userMessage } from "../factoryAgents/imageRefs.js";
 import type { AgentCatalog, AgentChange } from "./catalog.js";
 import { FirecrawlSearchProvider } from "../factoryAgents/webProviders.js";
 import { CHANNEL_KINDS, type ChannelKind, type OutboundMessage } from "../channels/types.js";
@@ -262,8 +263,8 @@ export class AssistantService implements StudioOperations, InterviewDesk {
       await workspace.store.put(interview.sessionId, image, material.bytes, { actor: "host", mimeType: material.mimeType });
       images.push(image);
     }
-    if (workspace.runtime.isRunning(interview.sessionId) && workspace.runtime.steer(interview.sessionId, said, images)) return;
-    await workspace.runtime.start(interview.sessionId, said, images);
+    // One step steers, queues or starts: a turn that is just ending takes the message on its next pass instead of refusing it.
+    await workspace.runtime.send(interview.sessionId, userMessage(said, images));
   }
 
   private async interviewTurnEnded(task: AssistantTask, workspace: FactoryWorkspace, type: string): Promise<void> {
