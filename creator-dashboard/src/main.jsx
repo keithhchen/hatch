@@ -10,8 +10,10 @@ import { WebBrand } from "./WebBrand.jsx";
 import "./styles.css";
 import "./webTheme.css";
 import { captureRenderError, initSentry } from "./sentry.js";
+import { reloadOnStaleBuild } from "./staleBuild.js";
 
 initSentry(import.meta.env);
+reloadOnStaleBuild();
 
 const CREATOR_ROOT = "/studio";
 const BuyerPortalV2 = React.lazy(() => import("./BuyerPortalV2.jsx").then(({ BuyerPortalV2: Component }) => ({ default: Component })));
