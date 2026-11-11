@@ -196,6 +196,8 @@ export class ChannelService implements AssistantChannels {
     const adapter = await this.deps.hub.get(kind);
     if (!adapter) throw Object.assign(new Error(`${kind} is not available.`), { status: 503, code: "channel_unavailable" });
     const code = "invite" in grant ? grant.invite : await this.connections.issueCode(grant.account, kind, STUDIO_TARGET, this.deps.now?.());
+    // A sign-in knows the user, not the chat: where the platform's DM is not the user's id, the adapter says where it is.
+    if (adapter.directThread) who = { ...who, threadId: await adapter.directThread(who.senderId) };
     const linked = await this.connections.redeem(kind, adapter.scope, code, who, this.deps.now?.());
     if (!linked) throw Object.assign(new Error("This invite has expired or was already used."), { status: 410, code: "invite_expired" });
     await this.dispatcher.send({ connectionId: linked.id, channel: kind, scope: linked.scope, address: who, kind: "notice", message: { text: await this.router.greeting(linked) } });

@@ -118,6 +118,8 @@ export interface ChannelAdapter {
   connectUrl(code: string): string | undefined;
   /** Opens the chat when no link can carry the code. */
   chatUrl?(): string;
+  /** Where a direct message to this user goes, on a platform where that is not the user's own id (a Discord DM is a channel). */
+  directThread?(senderId: string): Promise<string>;
 }
 
 /** A UUID-shaped, deterministic form of an outbox key, for platforms that take an idempotency key as a UUID. */
