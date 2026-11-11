@@ -1,3 +1,4 @@
+import { DiscordChannel } from "./discordChannel.js";
 import { LarkChannel } from "./larkChannel.js";
 import { MessengerChannel } from "./messengerChannel.js";
 import { TelegramChannel } from "./telegramChannel.js";
@@ -70,6 +71,11 @@ export const CREDENTIAL_FORMS: Partial<Record<ChannelKind, CredentialForm>> = {
   // Slack and Instagram install by OAuth, not by form: see `ChannelAdapter.install`.
   whatsapp: { tenant: "wabaId", fields: [{ field: "waba_id", key: "wabaId", required: true }, { field: "access_token", key: "token", required: true }], probe: (adapter: WhatsAppChannel, credentials) => adapter.probe(credentials.wabaId, credentials.token) },
   messenger: { tenant: "pageId", fields: [{ field: "page_id", key: "pageId", required: true }, { field: "access_token", key: "token", required: true }], probe: (adapter: MessengerChannel, credentials) => adapter.probe(credentials.pageId, credentials.token) },
+  discord: {
+    fields: [{ field: "token", key: "token", required: true }, { field: "application_id", key: "applicationId", required: true }],
+    build: (credentials, scope) => new DiscordChannel(credentials, scope),
+    probe: (adapter: DiscordChannel) => adapter.probe(),
+  },
   lark: lark("lark"),
   feishu: lark("feishu"),
   wecom: {
