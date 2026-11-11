@@ -118,10 +118,9 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
     return new Response(JSON.stringify({ ok: true, result: true }), { status: 200 });
   }) as typeof fetch);
   const productStore = new WorkbenchStore(path.join(root, "product"), { creatorId: ACCOUNT, productId: PRODUCT }, new MemoryAgentDefinitionRepository(await initialAgentDefinitions()));
-  let grantedTools: Parameters<ProductWorkspaces["attachAssistant"]>[0]["grantedTools"] | undefined;
   let withheldTools: Parameters<ProductWorkspaces["attachAssistant"]>[0]["withheldTools"] | undefined;
   const agentFactory = scriptedWorkers(options.worker ?? (() => ({ text: "完成" })));
-  const productRuntime = new WorkbenchRuntime(productStore, { env: { HATCH_FACTORY_LLM_PROFILE: "kimi-k2.6" }, agentFactory, maxTurns: 6, grantedTools: session => grantedTools?.({ creatorId: ACCOUNT, productId: PRODUCT }, session) ?? [], withheldTools: async session => await withheldTools?.({ creatorId: ACCOUNT, productId: PRODUCT }, session) ?? [] });
+  const productRuntime = new WorkbenchRuntime(productStore, { env: { HATCH_FACTORY_LLM_PROFILE: "kimi-k2.6" }, agentFactory, maxTurns: 6, withheldTools: async session => await withheldTools?.({ creatorId: ACCOUNT, productId: PRODUCT }, session) ?? [] });
   const workspace = { store: productStore, runtime: productRuntime } as unknown as FactoryWorkspace;
   let opened: ((scope: { creatorId: string; productId: string }, workspace: FactoryWorkspace) => void) | undefined;
   const catalog: AgentCatalog = {
@@ -135,7 +134,7 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
   const legacy = new FileWorkbenchBackend(path.join(root, "assistant"));
   const assistant = new AssistantService({
     tasks, reach, catalog, channels, state, deliveries,
-    products: { workspace: async () => { opened?.({ creatorId: ACCOUNT, productId: PRODUCT }, workspace); return workspace; }, attachAssistant: hooks => { opened = hooks.opened; grantedTools = hooks.grantedTools; withheldTools = hooks.withheldTools; } },
+    products: { workspace: async () => { opened?.({ creatorId: ACCOUNT, productId: PRODUCT }, workspace); return workspace; }, attachAssistant: hooks => { opened = hooks.opened; withheldTools = hooks.withheldTools; } },
     backend: () => legacy,
     exclusive: async (_name, fn) => fn(),
     env: { HATCH_FACTORY_LLM_PROFILE: "kimi-k2.6" },
@@ -152,7 +151,7 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
   for (const definition of studioToolDefinitions(tools)) toolRegistry.set(definition.name, definition);
   const model = scriptedModel(options.model);
   const chat = new AssistantChat({
-    repository, store, chatAssets, state, tools, desk: assistant, assetStore: new RuntimeAssetStore(dataDir),
+    repository, store, chatAssets, state, tools, assetStore: new RuntimeAssetStore(dataDir),
     history: new LegacyAssistantHistory({ backend: () => legacy, state, store }),
     prompt: async () => "你是 Hatch 助理。", liveState: id => assistant.liveState(id), env: {}, createRuntime: () => model.runtime,
     sweepMs: 60_000,
@@ -301,55 +300,44 @@ test("start_task is one tool: a new kind runs its steps in order and reports", a
   } finally { await env.close(); }
 });
 
-test("Interview: its words are the Assistant's reply, the Expert's replies go to it, and it hands back to the Assistant", async () => {
+test("Interview is an ordinary worker: it writes the outline on the Product's session and reports, the conversation stays with the Assistant, and build waits for every item to be ticked", async () => {
   const voiceInputs: string[] = [];
-  const sentPaths: string[] = [];
   const env = await setup({
-    model: (_turn, call) => call === 1 ? { tools: [{ name: "start_task", arguments: { kind: "interview", agent_id: PRODUCT, instruction: "为什么是三年" } }] } : { text: "聊得很好" },
+    model: (_turn, call) => call === 1 ? { tools: [{ name: "start_task", arguments: { kind: "interview", agent_id: PRODUCT, instruction: "为什么是三年" } }] } : { text: "第一个问题：你怎么选址？" },
     worker: context => {
       const input = userTexts(context).at(-1) ?? "";
       if (input.startsWith("{")) return { text: "已更新" };
       voiceInputs.push(input);
-      if (input.includes("第三年还在")) return { tool: { name: "handoff_to_assistant", arguments: { note: "聊清了三年的理由" } } };
-      if (context.messages.some(message => message.role === "toolResult")) return { text: "加好了" };
-      if (input.includes("/attachments/")) sentPaths.push(input.match(/\/attachments\/[^\s\]|（]+/)![0]);
-      if (input.includes("加进资料")) return { tool: { name: "add_to_agent", arguments: { files: sentPaths } } };
-      return { text: "为什么是三年，不是一年？" };
+      if (context.messages.some(message => message.role === "toolResult")) return { text: "大纲写好了" };
+      return { tool: { name: "update_todo", arguments: { todos: [{ title: "技能·选址：例子、规则、例外、触发", status: "pending" }, { title: "底线：不答什么", status: "pending" }] } } };
     },
   });
   try {
     await env.telegramUpdate(update(1, "我选址先看隔壁活了几年"));
-    await waitFor(async () => (await env.chat.lines(ACCOUNT)).some(line => line.role === "assistant" && line.text === "为什么是三年，不是一年？"));
+    await waitFor(async () => env.model.state.turns.some(turn => turn.said.some(text => text.includes("访谈大纲写好了"))));
     await env.idle();
-    const [interview] = await env.tasks.open(ACCOUNT);
-    assert.equal(interview!.kind, "interview");
-    assert.ok(await env.state.interview(ACCOUNT), "the interview holds the conversation");
-    assert.equal(env.model.state.calls, 1, "the model ran once; the interview's first question is not a model turn");
-    assert.ok(env.deliveries && (await env.deliveries.open(10)).length >= 0);
-    await env.assistant.news(ACCOUNT, interview!.id, "公开资料读完了");
-    await sleep(100);
-    assert.equal(env.model.state.calls, 1, "task news waits until the interview hands back");
-    await env.telegramUpdate({ update_id: 5, message: { message_id: 14, chat: { id: 42, type: "private" }, document: { file_id: "f1", file_name: "notes.md", file_size: 30 } } });
-    await waitFor(() => voiceInputs.some(text => text.includes("input/files/")));
-    assert.equal((await env.productStore.listManualFiles()).length, 0, "a file sent mid-interview is not the Agent's material until the interview adds it");
+    assert.match(voiceInputs[0]!, /^\[Hatch 助理请你写访谈大纲\]/, "the worker is told it was dispatched by the Assistant");
+    const outline = env.model.state.turns.flatMap(turn => turn.said).find(text => text.includes("访谈大纲写好了"))!;
+    assert.match(outline, /○ 技能·选址.*\n○ 底线/, "the Assistant hears the outline");
+    assert.equal((await env.productStore.list()).find(session => session.role === "voice")!.assistantTaskId, undefined, "the dispatch mark is cleared when the worker is done");
+    assert.equal((await env.chat.lines(ACCOUNT)).filter(line => line.role === "assistant").some(line => line.text.startsWith("[访谈]")), false);
+
+    // The Expert's next message goes to the Assistant's model, not to the worker.
+    const calls = env.model.state.calls;
+    await env.say("三年还在，说明真有人吃饭");
     await env.idle();
-    assert.equal((await env.productStore.listManualFiles()).length, 0, "still not, however long it sits");
-    await env.telegramUpdate(update(3, "把它加进资料"));
-    await waitFor(async () => (await env.productStore.listManualFiles()).length === 1);
-    assert.match((await env.productStore.listManualFiles())[0]!.path, /notes\.md\.md$/, "the interview added it, and plain text landed in the manual input");
-    await env.productStore.update(interview!.session!.sessionId, session => { session.todos = [{ title: "为什么是三年", status: "completed" }, { title: "什么时候例外", status: "pending" }]; });
-    await env.telegramUpdate(update(2, "第三年还在，说明真的有人吃饭"));
-    await waitFor(async () => (await env.tasks.get(interview!.id))!.status === "done" && env.model.state.turns.some(turn => turn.said.some(text => text.includes("聊清了三年的理由"))));
-    await env.idle();
-    assert.ok(voiceInputs.some(text => text.includes("第三年还在")), "the reply went to the interview");
-    assert.equal(env.model.state.turns.filter(turn => turn.said.some(text => text.includes("第三年还在"))).length, 0, "the Assistant did not answer it itself");
-    assert.equal(await env.state.interview(ACCOUNT), undefined);
-    const heard = env.model.state.turns.flatMap(turn => turn.said);
-    assert.ok(heard.some(text => text.includes("✓ 为什么是三年") && text.includes("○ 什么时候例外")), "the Assistant sees the outline's progress");
-    assert.ok(heard.some(text => text.includes("公开资料读完了")), "the news that waited reached the Assistant after the handback");
-    const expert = (await env.chat.lines(ACCOUNT)).filter(line => line.role === "user").map(line => line.text);
-    assert.ok(expert.includes("第三年还在，说明真的有人吃饭") && !expert.some(text => text.startsWith("[访谈]")), "the chat holds what the Expert said, and the interview's words only as the Assistant's");
-    assert.equal((await env.assistant.view(ACCOUNT)).interviewing, false);
+    assert.equal(env.model.state.calls, calls + 1);
+    assert.ok(env.model.state.turns.at(-1)!.said.includes("三年还在，说明真有人吃饭"));
+    assert.equal(voiceInputs.some(text => text.includes("三年还在")), false, "the worker heard nothing of it");
+
+    const build = () => callTool(env, "start_task", { kind: "build", agent_id: PRODUCT, instruction: "构建" });
+    await assert.rejects(build(), /还有没聊完的：技能·选址.*、底线/);
+    await assert.rejects(callTool(env, "tick_outline", { item: "不存在的项" }), /大纲里没有这一项/);
+    await callTool(env, "tick_outline", { item: "技能·选址" });
+    await assert.rejects(build(), /还有没聊完的：底线：不答什么/);
+    await callTool(env, "tick_outline", { item: "底线" });
+    assert.deepEqual((await env.productStore.list()).find(session => session.role === "voice")!.todos.map(todo => todo.status), ["completed", "completed"]);
+    await build();
   } finally { await env.close(); }
 });
 
@@ -744,7 +732,7 @@ test("A stop ends the Run, and only a stop does", async () => {
   } finally { await env.close(); }
 });
 
-test("The old conversation is read once into Chat: the Expert's words, the Assistant's replies, the interview and where the Expert last spoke", async () => {
+test("The old conversation is read once into Chat: the Expert's words, the Assistant's replies and where the Expert last spoke", async () => {
   const env = await setup({ model: () => ({ text: "好" }) });
   try {
     const old = new WorkbenchStore(env.legacy, undefined, undefined);
@@ -752,15 +740,13 @@ test("The old conversation is read once into Chat: the Expert's words, the Assis
     const user = (text: string, itemId: string) => ({ role: "user" as const, content: `专家（Studio）：${text}`, timestamp: 1000, origin: { kind: "expert" as const, itemId, text } });
     await old.update(session.id, s => {
       s.messages = [user("我是陈姐", "a"), { role: "assistant", content: [{ type: "text", text: "你好陈姐" }], timestamp: 2000 } as never, { role: "user", content: "[任务 x] 构建好了", timestamp: 3000, origin: { kind: "system", itemId: "b" } } as never];
-      (s as { assistantDesk?: unknown }).assistantDesk = { ingress: [], interview: { taskId: "t1", productId: PRODUCT, sessionId: "s1", relayFrom: 4 }, lastExpert: { source: "telegram", at: "2026-11-09T00:00:00.000Z" } };
+      (s as { assistantDesk?: unknown }).assistantDesk = { ingress: [], lastExpert: { source: "telegram", at: "2026-11-09T00:00:00.000Z" } };
     });
     const lines = await env.chat.lines(ACCOUNT);
     assert.deepEqual(lines.map(line => [line.role, line.text]), [["user", "我是陈姐"], ["assistant", "你好陈姐"]], "the system message stays out of the chat, as it did");
-    assert.deepEqual(await env.state.interview(ACCOUNT), { taskId: "t1", productId: PRODUCT, sessionId: "s1", relayFrom: 4 });
     assert.equal((await env.state.lastExpert(ACCOUNT))?.source, "telegram");
     const after = await old.get(session.id);
     assert.deepEqual([after.messages.length, (after as { assistantDesk?: unknown }).assistantDesk], [0, undefined], "the old session keeps only the Expert's files");
-    await env.state.endInterview(ACCOUNT, "t1");
     await env.say("继续");
     await env.idle();
     assert.equal((await env.chat.lines(ACCOUNT)).length, 4, "the history was not imported again");
