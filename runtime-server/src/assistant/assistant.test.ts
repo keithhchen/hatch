@@ -21,7 +21,7 @@ import type { FactoryWorkspace } from "../factoryAgents/service.js";
 import { RuntimeStore, localRuntimeAuthority } from "../store.js";
 import { toolRegistry } from "../tools.js";
 import { MemoryAgentDefinitionRepository, initialAgentDefinitions } from "../factoryAgents/definitions.js";
-import { AssistantService, type ProductWorkspaces } from "./assistant.js";
+import { AssistantService, type AssistantIngest, type ProductWorkspaces } from "./assistant.js";
 import { AssistantChat } from "./chat.js";
 import { MemoryDeliveries } from "./deliveries.js";
 import { LegacyAssistantHistory } from "./history.js";
@@ -96,7 +96,7 @@ function scriptedWorkers(script: (context: Context, call: number) => WorkerStep)
 
 const userTexts = (context: Context) => context.messages.filter(message => message.role === "user").map(message => typeof message.content === "string" ? message.content : message.content.map(block => block.type === "text" ? block.text : "").join("")).filter(text => !text.startsWith("<system-reminder>"));
 
-async function setup(options: { model: Parameters<typeof scriptedModel>[0]; worker?: Parameters<typeof scriptedWorkers>[0]; legacy?: boolean; live?: unknown; transcriber?: Parameters<typeof harness>[0] extends infer H ? H extends { transcriber?: infer T } ? T : never : never }) {
+async function setup(options: { model: Parameters<typeof scriptedModel>[0]; worker?: Parameters<typeof scriptedWorkers>[0]; legacy?: boolean; live?: unknown; ingest?: AssistantIngest; transcriber?: Parameters<typeof harness>[0] extends infer H ? H extends { transcriber?: infer T } ? T : never : never }) {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-assistant-"));
   const tasks = new MemoryTaskRepository();
   const state = new MemoryAssistantState();
@@ -139,6 +139,7 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
     exclusive: async (_name, fn) => fn(),
     env: { HATCH_FACTORY_LLM_PROFILE: "kimi-k2.6" },
     runtime: { agentFactory },
+    ...(options.ingest ? { ingest: options.ingest } : {}),
   });
   const dataDir = path.join(root, "chat");
   const store = new RuntimeStore(dataDir);
@@ -401,6 +402,39 @@ test("Text and a file are one message; the model reads the file line and history
     assert.ok((experts[0]!.attachments?.[0]?.bytes ?? 0) > 0);
     assert.doesNotMatch(JSON.stringify(await env.assistant.view(ACCOUNT)), /\[file:/);
   } finally { await env.close(); }
+});
+
+const sentPath = (turn: { input: RunStart }) => turn.input.message.content.match(/\/attachments\/[^\s\]|]+/)![0];
+const studioTool = (env: { tools: ReturnType<typeof studioTools> }, name: string) => env.tools.find(tool => tool.name === name)!;
+const callTool = (env: { tools: ReturnType<typeof studioTools> }, name: string, args: Record<string, unknown>) => { const tool = studioTool(env, name); return tool.run({ accountId: ACCOUNT, runId: "r", origin: async () => ({ source: "web" }) }, tool.schema.parse(args)); };
+
+test("add_to_agent writes a file the Expert sent into the Agent's manual input; an unknown path is refused", async () => {
+  const env = await setup({ model: turn => ({ tools: [{ name: "add_to_agent", arguments: { files: [sentPath(turn)] } }], text: "记下了" }) });
+  try {
+    const upload = await env.assistant.upload(ACCOUNT, "notes.md", Buffer.from("# 笔记\n选址很重要"));
+    await env.assistant.hear(ACCOUNT, { id: "add-1", source: "web", parts: [{ type: "text", text: "放进资料" }, { type: "file", assetId: upload.assetId }] });
+    await env.idle();
+    const [manual] = await env.productStore.backend.listManual();
+    assert.match(manual!.path, /notes\.md\.md$/);
+    assert.match((await env.productStore.backend.readManual(manual!.path)).toString(), /选址很重要/);
+    await assert.rejects(callTool(env, "add_to_agent", { files: ["/attachments/none/x.md"] }), /专家没有发过这个文件：\/attachments\/none\/x\.md.*notes\.md/);
+  } finally { await env.close(); }
+});
+
+test("ingest submits one job for the resolved Agent with the file's original bytes and the links; without Ingest it refuses", async () => {
+  const submitted: Array<{ productId: string; items: unknown; context?: string }> = [];
+  const ingest: AssistantIngest = { submit: async (_account, productId, items, context) => { submitted.push({ productId, items, context }); return { id: "job-1", status: "queued" }; } };
+  const original = Buffer.from("# 笔记\n选址很重要");
+  const env = await setup({ ingest, model: turn => ({ tools: [{ name: "ingest", arguments: { files: [sentPath(turn)], links: ["https://example.com/a"], context: "选址笔记" }}], text: "交给整理了" }) });
+  try {
+    const upload = await env.assistant.upload(ACCOUNT, "notes.md", original);
+    await env.assistant.hear(ACCOUNT, { id: "ing-1", source: "web", parts: [{ type: "text", text: "整理一下" }, { type: "file", assetId: upload.assetId }] });
+    await env.idle();
+    assert.deepEqual(submitted, [{ productId: PRODUCT, context: "选址笔记", items: [{ name: "notes.md", content_base64: original.toString("base64"), media_type: "text/markdown" }, { url: "https://example.com/a" }] }]);
+    await assert.rejects(callTool(env, "ingest", {}), /至少要给一个/);
+  } finally { await env.close(); }
+  const bare = await setup({ model: () => ({ text: "" }) });
+  try { await assert.rejects(callTool(bare, "ingest", { links: ["https://example.com/a"] }), /Ingest 没有配置/); } finally { await bare.close(); }
 });
 
 test("A picture reaches the model as pixels with a path label, and the page shows it", async () => {

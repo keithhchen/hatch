@@ -368,6 +368,15 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       claim: async (kind, scope, accountId, senderId) => kind !== "telegram" || scope !== "" || await accounts.linkIdentity(accountId, "telegram", senderId),
     });
     const assistantState = await PostgresAssistantState.open(registryPool);
+    const productsPrefix = environment.HATCH_CREATOR_PRODUCT_FILES_PREFIX?.trim() || "creator-products";
+    const ingest = await createIngestService({
+      environment, pool: registryPool, seal, objects: productObjectStore,
+      manual: async (accountId, productId) => {
+        const { backend } = (await factoryAgents.workspace({ creatorId: accountId, productId }, await catalog.token(accountId))).store;
+        return { list: async () => (await backend.listManual()).map(file => file.path), read: name => backend.readManual(name), write: (name, bytes) => backend.writeManual(name, bytes) };
+      },
+      productPrefix: (accountId, productId) => `${productsPrefix}/${accountId}/${productId}`,
+    });
     const assistant = new AssistantService({
       tasks, reach, channels,
       products: factoryAgents,
@@ -376,7 +385,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       state: assistantState,
       deliveries: await PostgresDeliveries.open(registryPool),
       exclusive: postgresExclusive(registryPool),
-      env: environment,
+      env: environment, ingest,
     });
     // The Assistant is a conversation on Chat's runtime, with its own transcript in this database and the Studio tools.
     failures.attach(new PostgresFailureLedger(registryPool as never));
@@ -399,15 +408,6 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     // Studio observers read the Assistant's events from its Run's journal; every other conversation keeps its log.
     conversationPorts.eventLog.bind("assistant:", assistantChat.feed);
     await assistantChat.start();
-    const productsPrefix = environment.HATCH_CREATOR_PRODUCT_FILES_PREFIX?.trim() || "creator-products";
-    const ingest = await createIngestService({
-      environment, pool: registryPool, seal, objects: productObjectStore,
-      manual: async (accountId, productId) => {
-        const { backend } = (await factoryAgents.workspace({ creatorId: accountId, productId }, await catalog.token(accountId))).store;
-        return { list: async () => (await backend.listManual()).map(file => file.path), read: name => backend.readManual(name), write: (name, bytes) => backend.writeManual(name, bytes) };
-      },
-      productPrefix: (accountId, productId) => `${productsPrefix}/${accountId}/${productId}`,
-    });
     channels.register("assistant", guarded(new ChatFlow(new AssistantTarget(assistant)), eligibility));
     // Without a Chat gateway Product Connections have no handler, and their events wait in the inbox.
     if (gateway) channels.register("product", guarded(new GuardedTarget(new ChatFlow(new ProductTarget({ gateway, limiter: stores.limiter })), [liveOwnProduct(releaseStore)]), eligibility));
