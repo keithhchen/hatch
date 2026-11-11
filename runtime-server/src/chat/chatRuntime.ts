@@ -34,6 +34,8 @@ export type ChatRuntimeOptions<Scope> = {
   relay?: EventRelay;
   /** Tells the instance that executes a Run it was stopped. Without one, a stop reaches another instance at its next lease renewal. */
   stops?: StopRelay;
+  /** Tells the instance that executes a Run a message joined it. Without one, it reads the message when its model call ends. */
+  steers?: StopRelay;
   /** The hub the Runs publish to, when a host also wants to hear every event; by default one over `relay`. */
   hub?: RunEventHub;
   /** The compaction strategy; by default Chat's, built from the model's window on first use. */
@@ -77,7 +79,7 @@ export class ChatRuntime<Scope> {
         compactions: this.compaction, toolTimeoutMs: options.toolTimeoutMs, toolPollMs: options.toolPollMs
       }),
       new TranscriptResumePolicy(store, recovery),
-      { executorId, leaseMs: options.leaseMs ?? DEFAULT_RUN_LEASE_MS, sweepMs: options.sweepMs ?? 5_000, toolPollMs: options.toolPollMs, afterReply: (run) => this.compaction.afterReply(run), stops: options.stops },
+      { executorId, leaseMs: options.leaseMs ?? DEFAULT_RUN_LEASE_MS, sweepMs: options.sweepMs ?? 5_000, toolPollMs: options.toolPollMs, afterReply: (run) => this.compaction.afterReply(run), stops: options.stops, steers: options.steers },
       terminators
     );
     this.service = new ChatService({ repository, terminator: terminators.external, supervisor: this.supervisor, hub: this.hub, admission: options.admission, registry: this.registry, limits: options.limits, compaction: this.compaction });

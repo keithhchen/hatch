@@ -31,7 +31,7 @@ function harness(repository: ConversationRepository, store: Harness["store"]): H
   const adopted: string[] = [];
   const service = new ChatService<object>({
     repository, terminator: new RunTerminator(repository, hub),
-    supervisor: { adopt: (run: ConversationRunRecord) => { adopted.push(run.id); }, executorId: "exec-a", holdsConversation: () => false },
+    supervisor: { adopt: (run: ConversationRunRecord) => { adopted.push(run.id); }, executorId: "exec-a", holdsConversation: () => false, steered: () => undefined },
     hub, admission: { reserve: () => () => undefined }, registry: new RunRegistry<object>()
   });
   return { repository, store, service, adopted, heard };

@@ -25,6 +25,8 @@ export type RunControl = {
   signal: AbortSignal;
   /** The executor registers where local-tool results for this Run arrive. */
   toolSession(session: ToolSession): void;
+  /** The executor hears each message that joins this Run; resolves to the way to stop hearing. */
+  onSteer(listener: () => void): () => void;
 };
 
 /** Executes a Run from the last user message until it is terminal or handed off. */
@@ -49,13 +51,15 @@ export type SupervisorOptions = {
   afterReply?: (run: ConversationRunRecord) => void;
   /** Tells the instance that executes a Run it was stopped, so it does not wait for its next lease renewal. */
   stops?: StopRelay;
+  /** Tells the instance that executes a Run a message joined it, so it cuts the model call in flight without waiting for it to end. */
+  steers?: StopRelay;
 };
 
 const outcomeOf = (result: ToolResult): ToolCallOutcome => result.status === "ok"
   ? { status: "ok", result: result.result }
   : { status: "error", error: result.error };
 
-type Owned = { conversationId: string; controller: AbortController; session?: ToolSession; done: Promise<void> };
+type Owned = { conversationId: string; controller: AbortController; session?: ToolSession; wake?: () => void; done: Promise<void> };
 
 const TERMINAL = new Set(["completed", "failed", "cancelled", "interrupted"]);
 
@@ -68,6 +72,7 @@ export class RunSupervisor {
   private readonly owned = new Map<string, Owned>();
   private timers: NodeJS.Timeout[] = [];
   private unsubscribe?: () => Promise<void>;
+  private unsubscribeSteers?: () => Promise<void>;
 
   constructor(
     private readonly repository: Pick<ConversationRepository, "renewLease" | "claimOrphanedRuns" | "getRun" | "listToolCalls" | "answerToolCall">,
@@ -89,6 +94,14 @@ export class RunSupervisor {
     ];
     for (const timer of this.timers) timer.unref();
     this.unsubscribe = await this.options.stops?.subscribe((runId) => void this.stopLocally(runId, "The Run stopped")).catch(() => undefined);
+    this.unsubscribeSteers = await this.options.steers?.subscribe((runId) => this.owned.get(runId)?.wake?.()).catch(() => undefined);
+  }
+
+  /** A message joined the Run, on any instance: the one that executes it cuts the model call in flight. */
+  steered(runId: string): void {
+    const owned = this.owned.get(runId);
+    if (owned) owned.wake?.();
+    else this.options.steers?.publish(runId);
   }
 
   /** Ends this instance's execution of a Run; its state is recorded by whoever stopped it. */
@@ -149,6 +162,8 @@ export class RunSupervisor {
     this.timers = [];
     await this.unsubscribe?.().catch(() => undefined);
     this.unsubscribe = undefined;
+    await this.unsubscribeSteers?.().catch(() => undefined);
+    this.unsubscribeSteers = undefined;
     const running = [...this.owned.values()];
     for (const owned of running) owned.controller.abort(new RunHandoff("Runtime shutting down"));
     await Promise.allSettled(running.map((owned) => owned.done));
@@ -193,7 +208,8 @@ export class RunSupervisor {
 
   private async driveRun(first: ConversationRunRecord, owned: Owned): Promise<void> {
     let run = first;
-    const control: RunControl = { signal: owned.controller.signal, toolSession: (session) => { owned.session = session; } };
+    const control: RunControl = { signal: owned.controller.signal, toolSession: (session) => { owned.session = session; },
+      onSteer: (listener) => { owned.wake = listener; return () => { if (owned.wake === listener) owned.wake = undefined; }; } };
     try {
       for (;;) {
         await this.executor.execute(run, control);

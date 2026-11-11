@@ -5,6 +5,7 @@ import { InMemoryConversationRepository, type AcceptSubmissionInput } from "../c
 import { RunHandoff, RunSupervisor, type ResumeDecision, type RunControl, type RunExecutor } from "./runSupervisor.js";
 import { runTerminators } from "./runTerminator.js";
 import { RunEventHub } from "./runEventHub.js";
+import { InProcessStopRelay } from "./stopRelay.js";
 
 const binding = { ownerAccountId: "owner", creatorId: "creator", agentId: "agent", productId: "product", corpusDigest: "corpus" };
 const conversationId = `scope:${"c".repeat(24)}:supervisor`;
@@ -124,4 +125,31 @@ test("a message that joined a Run is claimed when a sweep interrupts the Run or 
   await repository.acceptSubmission(message(3));
   assert.equal(await instance.cancel(conversationId, live.run.id, "stop"), true);
   assert.equal(await consumed(live.run.id), 1);
+});
+
+test("a message that joins on another instance wakes the instance that executes the Run, and stop still ends it", async () => {
+  const woken: string[] = [];
+  const { repository, hub } = await setup({ execute: async () => undefined });
+  const steers = new InProcessStopRelay();
+  const executor: RunExecutor = { execute: async (run, control) => {
+    control.onSteer(() => woken.push(run.id));
+    await new Promise<void>((resolve) => control.signal.addEventListener("abort", () => resolve()));
+  } };
+  const build = (executorId: string) => new RunSupervisor(repository, executor, { decide: async () => "restart" }, { executorId, leaseMs: 60_000, sweepMs: 60_000, steers }, runTerminators(repository, hub, executorId));
+  const [owner, other] = [build("owner"), build("other")];
+  await Promise.all([owner.start(), other.start()]);
+  const started = await repository.acceptSubmission(message(0));
+  owner.adopt(started.run);
+  await settled(() => owner.owns(started.run.id));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  other.steered(started.run.id);
+  await settled(() => woken.length === 1);
+  owner.steered(started.run.id);
+  assert.equal(woken.length, 2, "on the instance that holds the Run the wake is direct");
+  other.steered("run-unknown");
+  assert.equal(woken.length, 2);
+  assert.equal(await other.cancel(conversationId, started.run.id, "stopped"), true);
+  await owner.stop();
+  await other.stop();
+  assert.equal((await repository.getRun(conversationId, started.run.id))!.status, "cancelled");
 });
