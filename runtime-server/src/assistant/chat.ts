@@ -31,8 +31,8 @@ import type { LegacyAssistantHistory } from "./history.js";
 import type { AssistantHost } from "../conversations/assistantConversation.js";
 import type { AssetDesk } from "../conversations/assets.js";
 
-/** The Assistant is one Agent, not a Product: its conversation is bound to the account, under this id. */
-export const ASSISTANT_AGENT_ID = "assistant";
+/** The Assistant is one Agent, not a Product: its conversation is bound to the account, under this id. A UUID, as every Agent id is once the identity migration has run. */
+export const ASSISTANT_AGENT_ID = "a5515700-0000-4000-8000-000000000001";
 const ASSISTANT_PROFILE = "gemini-3.1-pro";
 const ACTIVE = new Set(["queued", "running", "waiting_for_tool", "compacting"]);
 
