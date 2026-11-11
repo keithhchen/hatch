@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { AlsoCommit, ConversationRecord } from "../conversationRepository.js";
-import { AssetError, type Asset, type AssetBlobs, type AssetScope, type DerivativeRole } from "../assets/domain.js";
+import { AssetError, scopeKey, type Asset, type AssetBlobs, type AssetScope, type DerivativeRole } from "../assets/domain.js";
 import type { AssetPipeline } from "../assets/pipeline.js";
 import { attachmentTools, type AttachmentTool } from "../assets/tools.js";
 import { fileLine, imageLabel, pathsFor } from "../assets/views.js";
@@ -137,6 +137,11 @@ export class ChatAssets implements PartsReader {
   derivative(asset: Asset, role: DerivativeRole): Promise<Buffer | undefined> {
     const found = asset.derivative(role);
     return found ? this.deps.blobs.get(found.key) : Promise.resolve(undefined);
+  }
+
+  /** The bytes as they were uploaded, for whoever converts them itself. */
+  original(conversation: Pick<ConversationRecord, "id" | "ownerAccountId">, asset: Asset): Promise<Buffer> {
+    return this.deps.blobs.get(`${scopeKey(assetScopeOf(conversation))}/${asset.record.sha256}/original`);
   }
 
   /** The full list, declared once for every Run. */

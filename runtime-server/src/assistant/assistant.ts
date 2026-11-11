@@ -23,6 +23,8 @@ import type { ExpertMaterials } from "./materials.js";
 import { RELAY_MARK, SYSTEM_MESSAGE_PREFIX, isSystemMessageId, type InterviewDesk } from "./relay.js";
 import { ChatError } from "../chat/principal.js";
 import type { AssistantStateRepository, Interview } from "./state.js";
+import type { Material } from "./materials.js";
+import type { IngestJob } from "../ingest/job.js";
 import type { AgentOverview, StudioOperations, WorkerKind } from "./studioTools.js";
 
 const WORKER_LEASE_MS = 35 * 60_000;
@@ -57,6 +59,11 @@ export type ProductWorkspaces = {
   attachAssistant(hooks: { grantedTools: (scope: { creatorId: string; productId: string }, session: Session) => AgentTool[]; withheldTools: (scope: { creatorId: string; productId: string }, session: Session) => Promise<string[]>; opened: (scope: { creatorId: string; productId: string }, workspace: FactoryWorkspace) => void }): void;
 };
 
+/** Where the Assistant hands material that needs converting; Ingest is what answers. */
+export interface AssistantIngest {
+  submit(accountId: string, productId: string, items: Array<{ url: string } | { name: string; content_base64: string; media_type: string }>, context?: string): Promise<{ id: string; status: string }>;
+}
+
 export type AssistantDependencies = {
   tasks: TaskRepository;
   reach: AccountReach;
@@ -74,6 +81,7 @@ export type AssistantDependencies = {
   exclusive: (name: string, fn: () => Promise<void>) => Promise<void>;
   env: NodeJS.ProcessEnv;
   runtime?: Pick<WorkbenchRuntimeOptions, "agentFactory" | "deadlineMs" | "maxTurns">;
+  ingest?: AssistantIngest;
 };
 
 /** One workspace per account: where the Assistant's workers run, and its notes. The conversation is Chat's. */
@@ -204,8 +212,18 @@ export class AssistantService implements StudioOperations, InterviewDesk {
 
   /** Task news the Assistant hears: what a worker finished, asked, or got stuck on. It waits while an interview holds the conversation. */
   async news(accountId: string, taskId: string, text: string, kind: "task" | "tick" = "task", key: string = randomUUID()): Promise<void> {
-    const line = kind === "tick" ? `[日常检查 · 任务 ${taskId}] ${text}` : `[任务 ${taskId}] ${text}`;
-    if (await this.deps.state.interview(accountId)) { await this.deps.state.hold(accountId, { id: key, text: line, taskId }); return; }
+    await this.toldItself(accountId, kind === "tick" ? `[日常检查 · 任务 ${taskId}] ${text}` : `[任务 ${taskId}] ${text}`, key, taskId);
+  }
+
+  /** Ingest settled a job for one of the Expert's Agents, whoever submitted it: the Assistant hears what came of each item. */
+  async ingested(job: IngestJob): Promise<void> {
+    const items = job.items.map(item => `- ${"url" in item.input ? item.input.url : item.input.name}：${item.status === "failed" ? `没成，${item.error ?? "没有原因"}` : `${item.status === "partial" ? "部分完成，" : ""}已放进 ${item.markdown_path ?? item.original_ref}`}`);
+    await this.toldItself(job.accountId, `[资料 ${job.id} · Agent ${job.productId}] Ingest ${job.status === "failed" ? "没做成" : "做完了"}：\n${items.join("\n")}`, `ingested:${job.id}`);
+  }
+
+  /** News waits while an interview holds the conversation, and reaches the Assistant once under its key. */
+  private async toldItself(accountId: string, line: string, key: string, taskId?: string): Promise<void> {
+    if (await this.deps.state.interview(accountId)) { await this.deps.state.hold(accountId, { id: key, text: line, ...(taskId ? { taskId } : {}) }); return; }
     await this.hearSystem(accountId, line, taskId, key);
   }
 
@@ -258,13 +276,45 @@ export class AssistantService implements StudioOperations, InterviewDesk {
     let said = text;
     const images: string[] = [];
     for (const material of files) {
-      if (material.kind === "file") { await workspace.store.backend.writeManual(`input/manual/${material.name}`, material.bytes); said = said.replaceAll(material.chatPath, `input/manual/${material.name}`); continue; }
+      if (material.kind === "file") { said = said.replaceAll(material.chatPath, await this.writeManual(workspace, material)); continue; }
       const image = `input/images/${material.name}`;
       await workspace.store.put(interview.sessionId, image, material.bytes, { actor: "host", mimeType: material.mimeType });
       images.push(image);
     }
     // One step steers, queues or starts: a turn that is just ending takes the message on its next pass instead of refusing it.
     await workspace.runtime.send(interview.sessionId, userMessage(said, images));
+  }
+
+  /** The one way a file the Expert sent becomes an Agent's material: its text, in the manual input. */
+  private async writeManual(workspace: FactoryWorkspace, material: Material): Promise<string> {
+    const path = `input/manual/${material.name}`;
+    await workspace.store.backend.writeManual(path, material.bytes);
+    return path;
+  }
+
+  /** The materials the Assistant named by the path it saw; a path that is not one is refused with the paths that are. */
+  private async sent(accountId: string, paths: string[]): Promise<Material[]> {
+    const all = await this.materials.list(accountId);
+    return paths.map(path => {
+      const found = all.find(material => material.chatPath === path);
+      if (!found) throw new Error(`专家没有发过这个文件：${path}。发过的有：${all.map(material => material.chatPath).join("、") || "没有"}。`);
+      return found;
+    });
+  }
+
+  async addToAgent(accountId: string, productId: string, files: string[]): Promise<string[]> {
+    const materials = await this.sent(accountId, files);
+    const picture = materials.find(material => material.kind === "image");
+    if (picture) throw new Error(`${picture.chatPath} 是图片，不是文字，不能直接写进资料。交给 ingest。`);
+    const workspace = await this.workspace(accountId, productId);
+    return Promise.all(materials.map(material => this.writeManual(workspace, material)));
+  }
+
+  async ingest(accountId: string, productId: string, input: { files: string[]; links: string[]; context?: string }): Promise<{ id: string; status: string }> {
+    if (!this.deps.ingest) throw new Error("Ingest 没有配置，现在不能收资料。");
+    const originals = await Promise.all((await this.sent(accountId, input.files)).map(async ({ original }) => ({ name: original.name, content_base64: (await original.read()).toString("base64"), media_type: original.mimeType })));
+    const { id, status } = await this.deps.ingest.submit(accountId, productId, [...originals, ...input.links.map(url => ({ url }))], input.context);
+    return { id, status };
   }
 
   private async interviewTurnEnded(task: AssistantTask, workspace: FactoryWorkspace, type: string): Promise<void> {
@@ -395,7 +445,7 @@ export class AssistantService implements StudioOperations, InterviewDesk {
       const { bytes } = await desk.store.read(desk.sessionId, file.path);
       await workspace.store.backend.writeManual(`input/manual/${file.path.slice(MATERIALS.length)}`, bytes);
     }
-    for (const material of sent) await workspace.store.backend.writeManual(`input/manual/${material.name}`, material.bytes);
+    for (const material of sent) await this.writeManual(workspace, material);
   }
 
   private async copyMaterials(desk: Desk, workerId: string): Promise<void> {

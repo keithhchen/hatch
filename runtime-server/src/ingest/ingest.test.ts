@@ -201,6 +201,17 @@ test("Submit persists a queued job and returns it before the work runs; completi
   assert.equal((await service.recent(ACCOUNT, PRODUCT)).length, 1);
 });
 
+test("Listeners hear a job once it is settled and saved; a listener that fails changes nothing", async () => {
+  const { service, settle } = await harness();
+  const heard: Array<{ status: string; saved: string | undefined }> = [];
+  service.onSettled(async () => { throw new Error("listener down"); });
+  service.onSettled(async job => { heard.push({ status: job.status, saved: (await service.get(ACCOUNT, PRODUCT, job.id))?.status }); });
+  const job = await service.submit(ACCOUNT, PRODUCT, [{ name: "a.txt", content_base64: b64("alpha") }]);
+  await settle();
+  assert.deepEqual(heard, [{ status: "done", saved: "done" }]);
+  assert.equal((await service.get(ACCOUNT, PRODUCT, job.id))!.status, "done");
+});
+
 test("Without the hosted agent, hosted items fail with a clear error while plain text still works", async () => {
   const { service, settle } = await harness();
   const job = await service.submit(ACCOUNT, PRODUCT, [{ url: "https://x.test/a" }, { name: "n.md", content_base64: b64("# n") }]);

@@ -75,6 +75,11 @@ export class IngestService {
     now?: () => string;
   }) {}
 
+  private readonly settledListeners: Array<(job: IngestJob) => Promise<void>> = [];
+
+  /** Who hears a job once it is done or failed and saved. A listener that fails changes nothing about the job. */
+  onSettled(listener: (job: IngestJob) => Promise<void>): void { this.settledListeners.push(listener); }
+
   private now() { return this.deps.now?.() ?? new Date().toISOString(); }
 
   async submit(accountId: string, productId: string, items: unknown, context?: unknown): Promise<IngestJob> {
@@ -104,6 +109,7 @@ export class IngestService {
       outcomes => finish(running, outcomes, this.now()),
       error => fail(running, error instanceof Error ? error.message : String(error), this.now()));
     await this.deps.jobs.save(settled);
+    for (const listener of this.settledListeners) await listener(settled).catch(error => console.error(JSON.stringify({ event: "ingest_settled_listener_failed", job: settled.id, message: error instanceof Error ? error.message : String(error) })));
   }
 
   private async process(job: IngestJob, sources: Source[]): Promise<Map<string, ItemOutcome>> {

@@ -12,6 +12,8 @@ export type Material = {
   /** A file as the text it was read as; a picture as its resized pixels. */
   bytes: Buffer;
   mimeType: string;
+  /** The file as the Expert sent it: what Ingest converts itself. */
+  original: { name: string; mimeType: string; read: () => Promise<Buffer> };
 };
 
 const safeName = (name: string): string => name.normalize("NFC").replace(/[\\/:\x00-\x1f]+/g, "-").replace(/^\.+/, "").slice(-120) || "file";
@@ -40,7 +42,8 @@ export class ExpertMaterials {
         materials.push({
           chatPath: paths.get(asset.id)!, kind: image ? "image" : "file", bytes,
           name: `${asset.id.slice(0, 8)}-${safeName(asset.record.name)}${image ? IMAGE_EXTENSION[resized?.mime ?? ""] ?? ".jpg" : ".md"}`,
-          mimeType: image ? resized?.mime ?? "image/jpeg" : "text/markdown"
+          mimeType: image ? resized?.mime ?? "image/jpeg" : "text/markdown",
+          original: { name: asset.record.name, mimeType: asset.record.mime, read: () => this.deps.assets.original(conversation, asset) }
         });
       }
     }
