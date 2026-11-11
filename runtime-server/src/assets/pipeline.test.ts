@@ -19,7 +19,19 @@ test("the content decides the type, not the extension", async () => {
   const asset = await pipeline.accept(scopeA, { name: "notes.txt", bytes: await png() });
   assert.equal(asset.record.kind, "image");
   assert.equal(asset.record.mime, "image/png");
-  await rejects(pipeline.accept(scopeA, { name: "pic.png", bytes: Buffer.from([0, 1, 2, 3, 0, 0xff, 0xfe]) }), "unsupported_type");
+});
+
+test("a file of an unknown type and a plain zip are accepted as they came, with no text and no conversion", async () => {
+  const { pipeline, blobs } = await harness({ convert: async () => { throw new Error("must not convert"); } });
+  const unknown = await pipeline.accept(scopeA, { name: "pic.png", bytes: Buffer.from([0, 1, 2, 3, 0, 0xff, 0xfe]) });
+  assert.deepEqual([unknown.state, unknown.record.kind, unknown.record.mime], ["ready", "file", "application/octet-stream"]);
+  assert.equal(unknown.derivative("text"), undefined);
+  const zip = Buffer.from(zipSync({ "a.txt": new Uint8Array([65]) }));
+  const asset = await pipeline.accept(scopeA, { name: "x.zip", bytes: zip });
+  assert.deepEqual([asset.state, asset.record.kind, asset.record.mime], ["ready", "file", "application/zip"]);
+  assert.equal(asset.derivative("text"), undefined);
+  assert.ok((await blobs.get(`account/acct-1/c/conv-1/${asset.record.sha256}/original`)).equals(zip));
+  assert.match(fileLine(asset, "/attachments/m/x.zip"), /^\[file: x\.zip \| application\/zip \| /);
 });
 
 test("an image is resized to 2000, loses EXIF, and keeps its original", async () => {
@@ -74,14 +86,14 @@ test("a converter that fails ends the asset failed with its reason", async () =>
   assert.equal(asset.record.failure?.code, "unavailable");
 });
 
-test("a zip bomb is rejected before anything is stored or inflated", async () => {
+test("a zip bomb is never inflated: it is passed through as a plain zip, never converted", async () => {
   const { pipeline, repository } = await harness();
   const bomb = Buffer.from(zipSync({ "word/document.xml": new Uint8Array(120 * 1024 * 1024) }));
   assert.ok(bomb.length < 1024 * 1024);
-  await rejects(pipeline.accept(scopeA, { name: "bomb.docx", bytes: bomb }), "unsafe_archive");
-  assert.equal((await repository.listAttached(scopeA)).length, 0);
-  await rejects(pipeline.accept(scopeA, { name: "bad.docx", bytes: Buffer.from("PK\x03\x04garbage garbage garbage") }), "malformed");
-  await rejects(pipeline.accept(scopeA, { name: "x.zip", bytes: Buffer.from(zipSync({ "a.txt": new Uint8Array([65]) })) }), "unsupported_type");
+  const asset = await pipeline.accept(scopeA, { name: "bomb.docx", bytes: bomb });
+  assert.deepEqual([asset.state, asset.record.mime, asset.derivative("text")], ["ready", "application/zip", undefined]);
+  const bad = await pipeline.accept(scopeA, { name: "bad.docx", bytes: Buffer.from("PK\x03\x04garbage garbage garbage") });
+  assert.deepEqual([bad.state, bad.record.mime], ["ready", "application/zip"]);
 });
 
 test("oversize input is rejected", async () => {

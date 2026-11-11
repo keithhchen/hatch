@@ -9,8 +9,8 @@ export type Material = {
   /** A name of its own, so two files with one name never share a path. */
   name: string;
   kind: "image" | "file";
-  /** A file as the text it was read as; a picture as its resized pixels. */
-  bytes: Buffer;
+  /** A file as the text it was read as; a picture as its resized pixels; absent for a file with no text form, such as a zip. */
+  bytes?: Buffer;
   mimeType: string;
   /** The file as the Expert sent it: what Ingest converts itself. */
   original: { name: string; mimeType: string; read: () => Promise<Buffer> };
@@ -38,9 +38,9 @@ export class ExpertMaterials {
         const image = asset.record.kind === "image";
         const resized = image ? asset.derivative("resized") : undefined;
         const bytes = await this.deps.assets.derivative(asset, image ? "resized" : "text");
-        if (!bytes) continue;
+        if (!bytes && image) continue;
         materials.push({
-          chatPath: paths.get(asset.id)!, kind: image ? "image" : "file", bytes,
+          chatPath: paths.get(asset.id)!, kind: image ? "image" : "file", ...(bytes ? { bytes } : {}),
           name: `${asset.id.slice(0, 8)}-${safeName(asset.record.name)}${image ? IMAGE_EXTENSION[resized?.mime ?? ""] ?? ".jpg" : ".md"}`,
           mimeType: image ? resized?.mime ?? "image/jpeg" : "text/markdown",
           original: { name: asset.record.name, mimeType: asset.record.mime, read: () => this.deps.assets.original(conversation, asset) }

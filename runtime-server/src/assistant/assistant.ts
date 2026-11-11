@@ -96,8 +96,8 @@ type Desk = {
 type ExpertSource = "web" | ChannelKind;
 /** Plain text is told by the file as sent: its type (text/*, JSON) or its extension. A picture never is, nor is HTML. */
 const PLAIN_TEXT_EXTENSION = /\.(txt|md|markdown|csv|tsv|json|log)$/i;
-const isPlainText = ({ kind, original }: Material): boolean =>
-  kind === "file" && ((/^text\//.test(original.mimeType) && original.mimeType !== "text/html") || original.mimeType === "application/json" || PLAIN_TEXT_EXTENSION.test(original.name));
+const isPlainText = ({ kind, bytes, original }: Material): boolean =>
+  kind === "file" && bytes !== undefined && ((/^text\//.test(original.mimeType) && original.mimeType !== "text/html") || original.mimeType === "application/json" || PLAIN_TEXT_EXTENSION.test(original.name));
 const isChannel = (source: string): source is ChannelKind => (CHANNEL_KINDS as readonly string[]).includes(source);
 
 /**
@@ -283,6 +283,7 @@ export class AssistantService implements StudioOperations, InterviewDesk {
     let said = text;
     const images: string[] = [];
     for (const material of files) {
+      if (!material.bytes) continue;
       const seen = `input/${material.kind === "image" ? "images" : "files"}/${material.name}`;
       await workspace.store.put(interview.sessionId, seen, material.bytes, { actor: "host", mimeType: material.mimeType });
       if (material.kind === "image") images.push(seen);
@@ -295,7 +296,7 @@ export class AssistantService implements StudioOperations, InterviewDesk {
   /** A file's text in the Agent's manual input: where plain text goes. */
   private async writeManual(workspace: FactoryWorkspace, material: Material): Promise<string> {
     const path = `input/manual/${material.name}`;
-    await workspace.store.backend.writeManual(path, material.bytes);
+    await workspace.store.backend.writeManual(path, material.bytes!);
     return path;
   }
 
@@ -479,8 +480,8 @@ export class AssistantService implements StudioOperations, InterviewDesk {
       const { bytes } = await desk.store.read(desk.sessionId, file.path);
       await desk.store.put(workerId, file.path, bytes, { actor: "host", mimeType: file.mimeType });
     }
-    for (const material of (await this.materials.list(desk.accountId)).filter(candidate => candidate.kind === "file")) {
-      await desk.store.put(workerId, `${MATERIALS}${material.name}`, material.bytes, { actor: "host", mimeType: material.mimeType });
+    for (const material of (await this.materials.list(desk.accountId)).filter(candidate => candidate.kind === "file" && candidate.bytes)) {
+      await desk.store.put(workerId, `${MATERIALS}${material.name}`, material.bytes!, { actor: "host", mimeType: material.mimeType });
     }
   }
 

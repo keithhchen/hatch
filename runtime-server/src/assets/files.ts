@@ -83,7 +83,7 @@ export class AttachmentFiles {
     if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(limit) || limit < 1) throw new FileToolError("offset and limit must be non-negative integers");
     const [entry] = this.select(await this.index(scope), parts);
     const text = await this.text(entry!);
-    if (text === undefined) throw new FileToolError("This file has no text form (for example an image)");
+    if (text === undefined) throw new FileToolError("This file has no text form here (for example an image or an archive)");
     let end = Math.min(text.length, offset + Math.min(limit, FILE_LIMITS.readCharsMax));
     if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1] ?? "")) end -= 1;
     return { path: entry!.path, content: text.slice(offset, end), offset, next_offset: end < text.length ? end : null, total_chars: text.length, remaining_chars: text.length - end, ...end < text.length && { note: `Partial: ${text.length - end} of ${text.length} chars not read yet. Call read again with offset=${end}.` } };

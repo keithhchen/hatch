@@ -1,5 +1,5 @@
 import { unzipSync } from "fflate";
-import { AssetError, type AssetKind } from "./domain.js";
+import type { AssetKind } from "./domain.js";
 
 export type Sniffed = { kind: AssetKind; mime: string; ext: string };
 
@@ -8,7 +8,11 @@ export const ZIP_LIMITS = { entries: 2_000, uncompressedBytes: 200 * 1024 * 1024
 const startsWith = (b: Buffer, hex: string, at = 0) => b.subarray(at, at + hex.length / 2).toString("hex") === hex;
 const ascii = (b: Buffer, at: number, length: number) => b.subarray(at, at + length).toString("latin1");
 
-/** Declared sizes are checked before anything inflates; the filter never selects an entry, so nothing inflates here. */
+/**
+ * An Office package, or undefined for any other zip. Only the central directory is read; the filter never selects an
+ * entry, so nothing inflates here. A zip that is unreadable or declares an absurd size is labelled a plain zip, so it
+ * is passed through and never handed to a converter.
+ */
 function sniffOffice(bytes: Buffer): Sniffed | undefined {
   const names: string[] = [];
   let total = 0;
@@ -16,14 +20,11 @@ function sniffOffice(bytes: Buffer): Sniffed | undefined {
     unzipSync(bytes, { filter: file => {
       names.push(file.name); total += file.originalSize;
       if (names.length > ZIP_LIMITS.entries || total > ZIP_LIMITS.uncompressedBytes || total > bytes.length * ZIP_LIMITS.ratio) {
-        throw new AssetError("unsafe_archive", "Archive is too large or too compressed");
+        throw new Error("unsafe archive");
       }
       return false;
     } });
-  } catch (error) {
-    if (error instanceof AssetError) throw error;
-    throw new AssetError("malformed", "Unreadable archive");
-  }
+  } catch { return undefined; }
   const has = (prefix: string) => names.some(name => name.startsWith(prefix));
   if (has("word/")) return { kind: "file", ext: ".docx", mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" };
   if (has("ppt/")) return { kind: "file", ext: ".pptx", mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation" };
@@ -56,9 +57,7 @@ export function sniff(bytes: Buffer, name: string): Sniffed {
   if (ascii(bytes, 0, 4) === "RIFF" && ascii(bytes, 8, 4) === "WEBP") return { kind: "image", mime: "image/webp", ext: ".webp" };
   if (ascii(bytes, 0, 5) === "%PDF-") return { kind: "file", mime: "application/pdf", ext: ".pdf" };
   if (startsWith(bytes, "504b0304")) {
-    const office = sniffOffice(bytes);
-    if (office) return office;
-    throw new AssetError("unsupported_type", "Unsupported archive");
+    return sniffOffice(bytes) ?? { kind: "file", mime: "application/zip", ext: ".zip" };
   }
   if (ascii(bytes, 0, 4) === "RIFF" && ascii(bytes, 8, 4) === "WAVE") return { kind: "audio", mime: "audio/wav", ext: ".wav" };
   if (ascii(bytes, 0, 4) === "OggS") return { kind: "audio", mime: "audio/ogg", ext: ".ogg" };
@@ -75,5 +74,6 @@ export function sniff(bytes: Buffer, name: string): Sniffed {
     const extension = /\.[^./\\]+$/.exec(name)?.[0]?.toLowerCase() ?? "";
     return { kind: "file", ext: TEXT_BY_EXTENSION[extension] ? extension : ".txt", mime: TEXT_BY_EXTENSION[extension] ?? "text/plain" };
   }
-  throw new AssetError("unsupported_type", "这种文件暂不支持。\nUnsupported file type.");
+  // Anything else is passed through as it came; whether it belongs anywhere is the Assistant's call, not ours.
+  return { kind: "file", mime: "application/octet-stream", ext: /\.[^./\\]{1,16}$/.exec(name)?.[0]?.toLowerCase() ?? "" };
 }

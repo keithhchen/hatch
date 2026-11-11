@@ -39,6 +39,10 @@ class ToolError(IngestError):
     pass
 
 
+class ArchiveRefused(IngestError):
+    """The archive itself is unsafe or unreadable: the item fails, with this reason."""
+
+
 class NoTranscriber(IngestError):
     pass
 

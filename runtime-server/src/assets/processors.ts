@@ -37,13 +37,16 @@ export class ImageProcessor implements AssetProcessor {
 }
 
 export const MAX_EXTRACTED_CHARS = 5_000_000;
+/** Kept as they came: no text form here. Ingest unpacks or converts them. */
+const NO_TEXT = new Set(["application/zip", "application/octet-stream"]);
 type Convert = (name: string, bytes: Buffer) => Promise<{ bytes: Buffer }>;
 
-/** Text formats are read directly; Office and PDF go through the shared Markdown converter. */
+/** Text formats are read directly; Office and PDF go through the shared Markdown converter. Anything else is kept as it came. */
 export class FileProcessor implements AssetProcessor {
   readonly kind = "file";
   constructor(private readonly convert: Convert = convertUpload) {}
   async process({ bytes, sniffed }: ProcessorInput): Promise<Processed> {
+    if (NO_TEXT.has(sniffed.mime)) return { outputs: [], moderate: { type: "text", text: "" } };
     const text = sniffed.mime === "application/pdf" || sniffed.mime.startsWith("application/vnd.") ? await this.convertDocument(bytes, sniffed) : decodeText(bytes);
     if (text === undefined) throw new AssetError("malformed", "File is not readable text");
     const truncated = text.length > MAX_EXTRACTED_CHARS;
