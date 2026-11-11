@@ -44,6 +44,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   commerce:
     name: Commerce ledger tests
@@ -127,7 +131,6 @@ jobs:
 
   containers:
     name: Build deployable web containers
-    needs: [commerce, runtime, dashboard]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

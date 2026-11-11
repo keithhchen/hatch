@@ -137,6 +137,12 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
+      - name: Cache Rust build inputs
+        uses: Swatinem/rust-cache@v2.7.8
+        with:
+          workspaces: |
+            local-runner -> target
+            desktop-app/src-tauri -> target
       - name: Install shared UI dependencies
         working-directory: packages/ui
         run: npm ci
@@ -230,6 +236,12 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
+      - name: Cache Rust build inputs
+        uses: Swatinem/rust-cache@v2.7.8
+        with:
+          workspaces: |
+            local-runner -> target
+            desktop-app/src-tauri -> target
       - name: Install shared UI dependencies
         working-directory: packages/ui
         run: npm ci
