@@ -30,26 +30,12 @@ async function isolated(body: (pool: Pool) => Promise<void>) {
 
 const ACCOUNT = randomUUID();
 
-test("an interview holds the conversation for one account at a time, and its news waits once each", options, () => isolated(async (pool) => {
+test("a row that still carries an old interview and held news is inert: Expert state reads and writes as before", options, () => isolated(async (pool) => {
   const state = await PostgresAssistantState.open(pool);
-  const interview = { taskId: "t1", productId: "p1", sessionId: "s1", relayFrom: 2 };
-  assert.equal(await state.startInterview(ACCOUNT, interview), true);
-  assert.equal(await state.startInterview(ACCOUNT, { ...interview, taskId: "t2" }), false, "a second interview waits for the first");
-  await state.advanceInterview(ACCOUNT, "t1", 7);
-  await state.advanceInterview(ACCOUNT, "t2", 99);
-  assert.deepEqual(await state.interview(ACCOUNT), { ...interview, relayFrom: 7 });
-  await state.hold(ACCOUNT, { id: "n1", text: "[任务 a] 好了" });
-  await state.hold(ACCOUNT, { id: "n1", text: "[任务 a] 好了" });
-  await state.hold(ACCOUNT, { id: "n2", text: "[任务 b] 卡住了", taskId: "b" });
-  await state.endInterview(ACCOUNT, "t2");
-  assert.equal((await state.interview(ACCOUNT))?.taskId, "t1", "only the interview that holds it can end it");
-  await state.endInterview(ACCOUNT, "t1");
-  assert.equal(await state.interview(ACCOUNT), undefined);
-  assert.deepEqual((await state.takeHeld(ACCOUNT)).map(news => news.id), ["n1", "n2"]);
-  assert.deepEqual(await state.takeHeld(ACCOUNT), [], "taken once");
+  await pool.query("INSERT INTO hatch_assistant_state (account_id, interview, held) VALUES ($1, $2::jsonb, $3::jsonb)", [ACCOUNT, JSON.stringify({ taskId: "t1", productId: "p1", sessionId: "s1", relayFrom: 2 }), JSON.stringify([{ id: "n1", text: "[任务 a] 好了" }])]);
+  assert.equal(await state.lastExpert(ACCOUNT), undefined);
   await state.expertSpoke(ACCOUNT, { source: "telegram", at: "2026-11-10T00:00:00.000Z", messageRef: "7" });
   assert.equal((await state.lastExpert(ACCOUNT))?.source, "telegram");
-  assert.equal(await state.startInterview(ACCOUNT, interview), true, "speaking and holding news did not disturb the interview slot");
 }));
 
 test("of any number of instances, exactly one takes the reply a Run owes", options, () => isolated(async (pool) => {

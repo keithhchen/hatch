@@ -37,7 +37,7 @@ export class WebChatCapabilityPolicy {
 }
 
 export class WebChatRuntimeBridge {
-  constructor({ browser, runtimeUrl, token, policy = new WebChatCapabilityPolicy() }) {
+  constructor({ browser, runtimeUrl, token, requestId, policy = new WebChatCapabilityPolicy() }) {
     this.browser = browser;
     this.token = token;
     this.policy = policy;
@@ -45,7 +45,7 @@ export class WebChatRuntimeBridge {
     this.pending = [];
     const upstreamUrl = new URL("/runtime", runtimeUrl);
     upstreamUrl.protocol = upstreamUrl.protocol === "https:" ? "wss:" : "ws:";
-    this.upstream = new WebSocket(upstreamUrl, { maxPayload: 160 * 1024 * 1024, handshakeTimeout: 20_000 });
+    this.upstream = new WebSocket(upstreamUrl, { maxPayload: 160 * 1024 * 1024, handshakeTimeout: 20_000, ...(requestId ? { headers: { "x-request-id": requestId } } : {}) });
   }
 
   connect() {

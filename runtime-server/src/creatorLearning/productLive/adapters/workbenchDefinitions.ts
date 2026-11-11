@@ -3,6 +3,7 @@ import { parseSkillMarkdown } from "../../../skills.js";
 import { WorkbenchStore } from "../../../factoryAgents/store.js";
 import { AgentDefinition, type ExpertProduct, type Skill } from "../domain.js";
 import type { AgentDefinitionRepository } from "../ports.js";
+import { log } from "../../../observability/log.js";
 
 const SYSTEM_PATH = "output/SYSTEM.md";
 const SKILL_PATH = /^output\/skills\/([^/]+)\/SKILL\.md$/;
@@ -67,7 +68,7 @@ export class SkillFolderReader {
       // Correctly named folders first, so they win over leftovers that repair to the same id.
       .sort((a, b) => Number(runtimeId(b) === b) - Number(runtimeId(a) === a) || a.localeCompare(b));
     const loaded = await Promise.all(folders.map((folder) => this.skill(folder).catch((error: unknown) => {
-      console.warn(`[productLive] skipped Skill ${folder}: ${error instanceof Error ? error.message : String(error)}`);
+      log.warn("productLive_skill_skipped", { folder, error: error instanceof Error ? error.message : String(error) });
       return null;
     })));
     const seen = new Set<string>();

@@ -282,3 +282,12 @@ test("gateway: closes that no reconnect fixes make listen fail; an expired sessi
   await dropped.done;
   assert.equal(dropped.session.id, "s1", "an ordinary drop keeps the session");
 });
+
+test("Discord: a user's DM is the channel Discord opens for them, not their user id", async () => {
+  const { fetchImpl, calls } = fakeFetch(() => new Response(JSON.stringify({ id: "dm-channel-9", type: 1 }), { status: 200 }));
+  assert.equal(await channel(fetchImpl).directThread("user-7"), "dm-channel-9");
+  assert.match(calls[0]!.url, /\/users\/@me\/channels$/);
+  assert.deepEqual(calls[0]!.body, { recipient_id: "user-7" });
+  const refused = fakeFetch(() => new Response(JSON.stringify({ message: "Cannot send messages to this user" }), { status: 403 }));
+  await assert.rejects(channel(refused.fetchImpl).directThread("user-7"), /did not open a DM/);
+});

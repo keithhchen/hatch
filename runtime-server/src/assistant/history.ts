@@ -2,11 +2,11 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ChannelKind } from "../channels/types.js";
 import type { MessageOrigin, WorkbenchBackend } from "../factoryAgents/store.js";
 import type { RuntimeStore } from "../store.js";
-import { SYSTEM_MESSAGE_PREFIX } from "./relay.js";
-import type { AssistantStateRepository, Interview, LastExpert } from "./state.js";
+import { SYSTEM_MESSAGE_PREFIX } from "./systemMessage.js";
+import type { AssistantStateRepository, LastExpert } from "./state.js";
 
 /** The shape the old conversation kept its own state in. Only this read-time boundary knows it. */
-type LegacyDesk = { interview?: Interview; lastExpert?: LastExpert & { source: "web" | ChannelKind } };
+type LegacyDesk = { lastExpert?: LastExpert & { source: "web" | ChannelKind } };
 
 /** The Assistant used to keep its conversation in its workspace's session. That session is read once, here, and never again. */
 const textOf = (message: AgentMessage): string => {
@@ -22,8 +22,8 @@ const hasToolCall = (message: AgentMessage): boolean => {
 
 /**
  * The one-time import of an account's Assistant history into Chat. The boundary is read-time and one-way: what the old
- * conversation said becomes the first messages of the Chat conversation, the interview it held and where the Expert last
- * spoke move to the Assistant's state, and the old session keeps only the files the Expert gave. Nothing is written twice.
+ * conversation said becomes the first messages of the Chat conversation, where the Expert last
+ * spoke moves to the Assistant's state, and the old session keeps only the files the Expert gave. Nothing is written twice.
  */
 export class LegacyAssistantHistory {
   constructor(private readonly deps: {
@@ -41,7 +41,6 @@ export class LegacyAssistantHistory {
     const assistantDesk = (id.loaded.session as { assistantDesk?: LegacyDesk }).assistantDesk;
     const imported = (await this.deps.store.readConversation(conversationId)).length > 0;
     if (!imported) await this.append(conversationId, messages);
-    if (assistantDesk?.interview) await this.deps.state.startInterview(accountId, assistantDesk.interview);
     if (assistantDesk?.lastExpert) await this.deps.state.expertSpoke(accountId, assistantDesk.lastExpert);
     if (messages.length || assistantDesk) await backend.transact(id.id, session => { session.messages = []; session.context = []; delete (session as { assistantDesk?: LegacyDesk }).assistantDesk; });
   }

@@ -17,11 +17,11 @@ import type { AgentMessage, AgentTool, AgentToolResult } from "@earendil-works/p
 
 export function publicSession(s: Session) { const { context, ...publicData } = s; return publicData; }
 
-export async function createFactoryHandler(options: { root: string; scope: FactoryProductScope; definitions: AgentDefinitionRepository; env?: NodeJS.ProcessEnv; runtime?: WorkbenchRuntimeOptions; withheldTools?: (session: Session) => Promise<string[]>; grantedTools?: (session: Session) => AgentTool[] }) {
+export async function createFactoryHandler(options: { root: string; scope: FactoryProductScope; definitions: AgentDefinitionRepository; env?: NodeJS.ProcessEnv; runtime?: WorkbenchRuntimeOptions; withheldTools?: (session: Session) => Promise<string[]> }) {
   const env: NodeJS.ProcessEnv = { HATCH_FACTORY_LLM_PROFILE: "kimi-k2.6", ...(options.env ?? process.env) };
   const store = new WorkbenchStore(options.root, options.scope, options.definitions);
   await store.recover();
-  const runtime = new WorkbenchRuntime(store, { env, ...options.runtime, grantedTools: options.runtime?.grantedTools ?? (session => options.grantedTools?.(session) ?? []), withheldTools: options.runtime?.withheldTools ?? options.withheldTools, extraTools: options.runtime?.extraTools ?? (async (s, _signal, changed) => [...corpusTools(store, s.id, changed, options.scope, env), hatchTool(store, s.id, changed, options.scope, env)]) });
+  const runtime = new WorkbenchRuntime(store, { env, ...options.runtime, withheldTools: options.runtime?.withheldTools ?? options.withheldTools, extraTools: options.runtime?.extraTools ?? (async (s, _signal, changed) => [...corpusTools(store, s.id, changed, options.scope, env), hatchTool(store, s.id, changed, options.scope, env)]) });
   const streams = new Set<ServerResponse>();
   const chatStreams = new Set<ServerResponse>();
   const liveSockets = new Map<string, Set<WebSocket>>();

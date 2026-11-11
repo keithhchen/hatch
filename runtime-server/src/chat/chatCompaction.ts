@@ -8,6 +8,7 @@ import type { ConversationMessage, OutboundMessage } from "../protocol.js";
 import type { RunStateMachine } from "../runState.js";
 import type { RuntimeStore } from "../store.js";
 import type { RunEventHub } from "./runEventHub.js";
+import { log } from "../observability/log.js";
 
 /** What the rest of the system learns about a compaction: its id, and how it ended. */
 export type CompactionNotice = {
@@ -136,7 +137,7 @@ export class ChatCompaction implements RunCompactions {
     let started = false;
     let committed = false;
     // An interval has no caller to throw to: a failed poll is logged, and the next one asks again.
-    const poll = setInterval(() => void repository.compactionStopped(compactionId).then((stop) => { if (stop) stopped.abort(new CompactionAborted()); }, (error) => console.error(JSON.stringify({ event: "compaction_poll_failed", compaction_id: compactionId, error: String(error) }))), this.deps.stopPollMs ?? 300);
+    const poll = setInterval(() => void repository.compactionStopped(compactionId).then((stop) => { if (stop) stopped.abort(new CompactionAborted()); }, (error) => log.error("compaction_poll_failed", { compaction_id: compactionId, error: String(error) })), this.deps.stopPollMs ?? 300);
     try {
       const now = (this.deps.now ?? Date.now)();
       const messages = await store.readConversation(run.conversationId);
@@ -195,6 +196,6 @@ export class ChatCompaction implements RunCompactions {
       ...(notice.degraded ? { degraded: true, dropped_messages: notice.droppedMessages } : {})
     });
     // A listener never stops a compaction; its failure is logged, not hidden.
-    for (const listener of [...this.listeners]) { try { listener(notice); } catch (error) { console.error(JSON.stringify({ event: "compaction_listener_failed", compaction_id: notice.compactionId, error: String(error) })); } }
+    for (const listener of [...this.listeners]) { try { listener(notice); } catch (error) { log.error("compaction_listener_failed", { compaction_id: notice.compactionId, error: String(error) }); } }
   }
 }

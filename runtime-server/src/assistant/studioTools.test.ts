@@ -11,7 +11,6 @@ function startTask(agents: AgentOverview[]) {
   const ops = {
     agents: async () => agents,
     needsAgent: (kind: WorkerKind) => kind !== "research",
-    handsOver: (kind: WorkerKind) => kind === "interview",
     describeWorker: (kind: WorkerKind) => kind,
     dispatch: async (_account: string, kind: WorkerKind, productId?: string) => { dispatched.push({ kind, productId }); return { id: "t1", kind, status: "working", payload: {}, productId } as unknown as AssistantTask; },
     inRun: async (task: AssistantTask) => task,
@@ -44,7 +43,7 @@ test("build refuses until the interview outline is all done", async () => {
   const open = [{ title: "案例", status: "completed" as const }, { title: "例外", status: "pending" as const }];
   const { dispatched, run } = startTask([agent("p1", "文书顾问", open), agent("p2", "没访谈过", [])]);
   await assert.rejects(run({ kind: "build", agent_id: "p1", instruction: "构建" }), /还有没聊完的：例外/);
-  await assert.rejects(run({ kind: "build", agent_id: "p2", instruction: "构建" }), /还没访谈过/);
+  await assert.rejects(run({ kind: "build", agent_id: "p2", instruction: "构建" }), /还没有访谈大纲/);
   await run({ kind: "interview", agent_id: "p1", instruction: "接着聊" });
   assert.deepEqual(dispatched, [{ kind: "interview", productId: "p1" }], "interview is never gated");
 });

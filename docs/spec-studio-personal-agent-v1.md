@@ -111,9 +111,8 @@ Telegram、LINE、Lark、iMessage 都实现同一个 `ChannelAdapter` port，助
 
 补访谈时，专家只面对一个声音，但助理不在环中转话：
 
-- `interview` 任务处于 `working` 时，专家的消息直接投递给 `voice` 会话；它的回复以助理的身份写回同一个对话，说话方式同 P4a。
-- `voice` 会话在被助理派活时获得工具 `handoff_to_assistant`：专家说的话与访谈无关时交回助理。在现有 Build 页里直接使用 `voice` 时，行为不变。
-- 访谈结束（interview 判断这一轮够了），任务 `done`，Scribe 照常更新 `CREATOR_PERSONA.md`。
+- `interview` 是普通 worker：被助理派活时只在 Product 的 `voice` 会话上写访谈大纲（todo）并报告，不接管对话；助理自己在对话里问专家，用 `tick_outline` 勾掉聊完的项。专家直接进 Studio 和 `voice` 聊，行为不变。
+- 大纲写好，任务 `done`；Scribe 照常更新 `CREATOR_PERSONA.md`。
 - 补访谈的问题来源：评测结果、消费者对话里 Agent 答不好的问题、专家新说的话。
 
 ### 3.3 五件事

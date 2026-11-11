@@ -126,6 +126,10 @@ import { waitForTerminalRun, finalAssistantText, TERMINAL_STATUSES } from "./cha
 import { clientAttributesOf, MAX_USER_MESSAGE_CHARS, ToolCallResultSchema } from "./protocol.js";
 import type { ClientToolName } from "./protocol.js";
 import type { ClientAttributes, ContentPart } from "./surfaces/contract.js";
+import { bindContext } from "./observability/context.js";
+import { observed } from "./observability/http.js";
+import { log } from "./observability/log.js";
+import { startObservability } from "./observability/start.js";
 
 type AgentCorpusResolver = AgentCorpusResolverLike;
 
@@ -838,7 +842,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   const gateway = chatGatewayFor(options, chat, scopes, conversationRepository, conversationStore, agentCorpusResolver, parts, chatAssets);
   edge.serviceApi = new ChatServiceApi({ token: options.chatServiceToken, gateway });
 
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(observed((req, res) => {
     const requestAbortController = new AbortController();
     const abortDisconnectedRequest = () => {
       requestAbortController.abort(new Error("Runtime HTTP client disconnected"));
@@ -884,7 +888,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       clearTimeout(requestDeadline);
       req.off("aborted", abortDisconnectedRequest);
     });
-  });
+  }));
   server.headersTimeout = httpHeadersTimeoutMs;
   server.requestTimeout = httpRequestTimeoutMs;
   const acceptedConnections = new Set<import("node:net").Socket>();
@@ -2826,7 +2830,9 @@ async function resolveAuthIdentity(
   signal?: AbortSignal
 ): Promise<AuthIdentity | undefined> {
   if (!authIdentityResolver) return undefined;
-  return authIdentityResolver.resolveIdentity(authToken, { signal });
+  const identity = await authIdentityResolver.resolveIdentity(authToken, { signal });
+  if (identity) bindContext({ account_id: identity.sub });
+  return identity;
 }
 
 function legacyAuthClaims(
@@ -3084,6 +3090,7 @@ function emptyRenderedSkills(): ReturnType<typeof renderSkillsSection> {
 
 
 if (import.meta.url === `file://${process.argv[1]}`) {
+  startObservability("runtime");
   const port = Number(process.env.PORT ?? 8400);
   const host = process.env.HATCH_RUNTIME_HOST?.trim() || "127.0.0.1";
   void createRuntimeServerFromEnvironment().then((runtimeServer) => {
@@ -3092,7 +3099,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       console.log(`Hatch TS runtime listening on ws://${host}:${port}/runtime${commerce}`);
     });
   }).catch((error: unknown) => {
-    console.error("Unable to start Hatch Runtime:", error);
+    log.error("runtime_startup_failed", { error });
     process.exitCode = 1;
   });
 }

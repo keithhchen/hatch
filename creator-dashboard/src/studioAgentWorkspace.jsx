@@ -5,7 +5,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Copy, ExternalLink, Plus, Trash2 } from "lucide-react";
 import { Button, Checkbox, FormField, Input, Textarea } from "@hatch/ui";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
-import { ChannelBindings } from "./ChannelBindings.jsx";
 import { creatorFactoryPath, creatorProductPath } from "./creatorRoutes.js";
 import { isProductLive } from "./studioPath.js";
 import {
@@ -39,7 +38,6 @@ export function StudioAgentWorkspace({ route, request, navigate, locale, t, prof
         </div>
         {product ? <AgentHeaderActions product={product} live={live} t={t} /> : null}
       </div>
-      {product ? <ChannelBindings request={request} productId={productId} t={t} /> : null}
       <nav className="sx-tabs" aria-label={t("sxAgentTabs")}>
         {TABS.map((item) => <a key={item.value} href={creatorProductPath(productId, item.value)} aria-current={tab === item.value ? "page" : undefined} className={tab === item.value ? "is-active" : ""} onClick={(event) => { event.preventDefault(); navigate(creatorProductPath(productId, item.value)); }}>
           {t(item.label)}
