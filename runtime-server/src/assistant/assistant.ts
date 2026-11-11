@@ -6,7 +6,7 @@ import { WorkbenchStore, type AgentDefinitionSource, type AssistantRole, type Ro
 import { WorkbenchRuntime, safeError, type WorkbenchRuntimeOptions } from "../factoryAgents/runtime.js";
 import type { FactoryWorkspace } from "../factoryAgents/service.js";
 import type { AgentCatalog, AgentChange } from "./catalog.js";
-import { FirecrawlSearchProvider } from "../factoryAgents/webProviders.js";
+import { FirecrawlSearchProvider, scrapeProviderFrom } from "../factoryAgents/webProviders.js";
 import { CHANNEL_KINDS, type ChannelKind, type OutboundMessage } from "../channels/types.js";
 import type { AssistantChannels } from "../channels/ports.js";
 import { localDate, localHour, type AccountReach } from "./reach.js";
@@ -23,7 +23,7 @@ import { ChatError } from "../chat/principal.js";
 import type { AssistantStateRepository } from "./state.js";
 import type { Material } from "./materials.js";
 import type { IngestJob } from "../ingest/job.js";
-import type { AgentOverview, StudioOperations, WorkerKind } from "./studioTools.js";
+import { readPage, type AgentOverview, type StudioOperations, type WorkerKind } from "./studioTools.js";
 import { log } from "../observability/log.js";
 
 const WORKER_LEASE_MS = 35 * 60_000;
@@ -591,6 +591,9 @@ export class AssistantService implements StudioOperations {
       AbortSignal.any([signal ?? new AbortController().signal, AbortSignal.timeout(90_000)])
     );
   }
+
+  /** One page's full text, through the scrape provider Workers use. */
+  readPage(url: string, signal?: AbortSignal): Promise<unknown> { return readPage(scrapeProviderFrom(this.deps.env), url, signal); }
 
   /** The Assistant's view of things right now. Rebuilt for every model call and never stored. */
   async liveState(accountId: string): Promise<string> {

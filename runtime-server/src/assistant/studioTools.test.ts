@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AssistantTask } from "./tasks.js";
-import { studioTools, type AgentOverview, type StudioOperations, type WorkerKind } from "./studioTools.js";
+import type { WebScrapeProvider } from "../factoryAgents/webTypes.js";
+import { PAGE_TEXT_LIMIT, readPage, studioTools, type AgentOverview, type StudioOperations, type WorkerKind } from "./studioTools.js";
 
 const agent = (productId: string, name: string, outline: AgentOverview["interview_outline"]): AgentOverview => ({ productId, name, promise: "p", status: "draft", live: null, interview_outline: outline });
 
@@ -54,4 +55,23 @@ test("with two Agents, agent_id may be the Agent's name, and an unknown one list
   await run({ kind: "build", agent_id: "p1", instruction: "构建" });
   assert.deepEqual(dispatched, [{ kind: "build", productId: "p2" }, { kind: "build", productId: "p1" }]);
   await assert.rejects(run({ kind: "build", agent_id: "不存在", instruction: "构建" }), /没有这个 Agent：不存在.*「UCAS 顾问」 → p2.*agent_id/);
+});
+
+test("the Assistant has read_page, and it reads through the ops", async () => {
+  const urls: string[] = [];
+  const ops = { describeWorker: (kind: WorkerKind) => kind, readPage: async (url: string) => { urls.push(url); return { url, text: "全文" }; } } as unknown as StudioOperations;
+  const tool = studioTools(ops).find(candidate => candidate.name === "read_page")!;
+  assert.ok(tool?.readOnly);
+  assert.deepEqual(await tool.run({ accountId: "a", runId: "r", origin: async () => ({ source: "web" }) }, tool.schema.parse({ url: "https://example.com/a" })), { output: JSON.stringify({ url: "https://example.com/a", text: "全文" }) });
+  assert.deepEqual(urls, ["https://example.com/a"]);
+});
+
+test("readPage asks the scrape port for Markdown and cuts what is too long", async () => {
+  const asked: unknown[] = [];
+  const port: WebScrapeProvider = { scrape: async request => { asked.push(request); return { provider: "fake", url: "https://example.com/final", retrievedAt: "t", title: "T", content: "x".repeat(PAGE_TEXT_LIMIT + 5) }; } };
+  const page = await readPage(port, "https://example.com/a");
+  assert.deepEqual(asked, [{ url: "https://example.com/a", extractDepth: "advanced", format: "markdown" }]);
+  assert.equal(page.url, "https://example.com/final");
+  assert.equal(page.text.length, PAGE_TEXT_LIMIT);
+  assert.deepEqual([page.truncated, page.total_chars], [true, PAGE_TEXT_LIMIT + 5]);
 });
