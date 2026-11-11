@@ -34,10 +34,11 @@ ENV NODE_ENV=production
 WORKDIR /app/runtime-server
 COPY runtime-server/requirements-markitdown.txt /tmp/requirements-markitdown.txt
 
-# MarkItDown runs locally for the Factory upload converter. Keep it inside the
-# image so Compose deployments do not depend on a host Python installation.
+# MarkItDown runs locally for the Factory upload converter, and ffmpeg decodes voice for transcription. Keep both
+# inside the image so Compose deployments do not depend on the host; the build fails if ffmpeg is missing.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 python3-venv \
+  && apt-get install -y --no-install-recommends python3 python3-venv ffmpeg \
+  && ffmpeg -version >/dev/null \
   && python3 -m venv /opt/markitdown \
   && /opt/markitdown/bin/pip install --no-cache-dir -r /tmp/requirements-markitdown.txt \
   && rm -rf /var/lib/apt/lists/*
