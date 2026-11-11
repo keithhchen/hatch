@@ -2,7 +2,8 @@
     encode gzip
 
     # One correlation id per request: keep the caller's, else mint one. Every backend reads and echoes it.
-    request_header ?X-Request-Id {http.request.uuid}
+    @no_request_id not header X-Request-Id *
+    request_header @no_request_id X-Request-Id {http.request.uuid}
     log {
         output stdout
         format json

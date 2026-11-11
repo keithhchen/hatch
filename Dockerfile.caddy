@@ -1,3 +1,5 @@
 FROM caddy:2.10.2-alpine
 
 COPY Caddyfile /etc/caddy/Caddyfile
+# A Caddyfile that does not parse never ships: production's Caddy would refuse to start and take the whole site down.
+RUN HATCH_DOMAIN=example.com HATCH_DOMAIN_ALIAS=alias.example.com caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
