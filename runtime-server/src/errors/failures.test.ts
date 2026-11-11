@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { bindContext, runInContext } from "../observability/context.js";
 import { FailureBoundary, type FailureRecord } from "./failures.js";
 import { UpstreamError } from "./upstream.js";
 import { failureOf } from "../factoryAgents/runFailure.js";
@@ -37,7 +38,7 @@ test("the cause stays server-side: logged once and recorded redacted under the r
   try { failure = b.translate(UpstreamError.of(new Error(QUOTA)), { run: "r1", conversation: "c1" }); } finally { console.error = log; }
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(lines.length, 1);
-  assert.deepEqual(JSON.parse(lines[0]!), { event: "failure", ...records[0] });
+  assert.deepEqual(JSON.parse(lines[0]!), { ts: JSON.parse(lines[0]!).ts, level: "error", event: "failure", ...records[0] });
   const [record] = records;
   assert.equal(record!.reference, failure.reference);
   assert.deepEqual(record!.scope, { run: "r1", conversation: "c1" });
@@ -67,4 +68,13 @@ test("guard hands one translated failure to the caller and returns the result ot
 test("a failed session reads back its code, message and reference; older ones read as run_failed", () => {
   assert.deepEqual(failureOf({ error: "m", errorCode: "upstream_error", errorRef: "err_1" }), { code: "upstream_error", message: "m", reference: "err_1" });
   assert.deepEqual(failureOf({}), { code: "run_failed", message: "The Run failed. Send the message again." });
+});
+
+test("a failure's scope carries the request id and the ids bound so far, and the caller's scope wins", () => {
+  const { b, records } = boundary();
+  quiet(() => runInContext({ request_id: "req_1" }, () => {
+    bindContext({ account_id: "a1", conversation_id: "c1" });
+    b.translate(new Error("boom"), { conversation: "c2" });
+  }));
+  assert.deepEqual(JSON.parse(JSON.stringify(records[0]!.scope)), { request_id: "req_1", account: "a1", conversation: "c2" });
 });

@@ -4,6 +4,7 @@ import type { Inbox, InboxItem } from "./inbox.js";
 import type { ChatTarget } from "./chatTarget.js";
 import type { ChatGateway, Inbound, ReplyPolicy } from "./ports.js";
 import type { Rate, RateLimiter } from "./rateLimiter.js";
+import { log } from "../observability/log.js";
 
 /** A contact may write this much: a burst of 10, then one message every 20 seconds. */
 const CONTACT_RATE: Rate = { capacity: 10, perSecond: 1 / 20 };
@@ -69,6 +70,6 @@ export class ChatReplies {
 
   /** Runs that have not been answered: every one is asked about, so an end or a compaction is never missed. */
   async sweep(): Promise<void> {
-    for (const runId of await this.deps.inbox.openRuns(20)) await this.settle(runId).catch(error => console.error("[channel reply]", (error as Error).message));
+    for (const runId of await this.deps.inbox.openRuns(20)) await this.settle(runId).catch(error => log.error("channel_reply_failed", { error: (error as Error).message }));
   }
 }

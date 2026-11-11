@@ -7,6 +7,7 @@ import { ElevenLabsStreamingStt, QwenStreamingStt, type StreamingSttCallbacks, t
 import { UpstreamError } from "../errors/upstream.js";
 import { GeminiTranscriber } from "./geminiTranscriber.js";
 import { AssetError, type AudioNormalizer, type Transcriber, type Transcript } from "./domain.js";
+import { log } from "../observability/log.js";
 
 const run = promisify(execFile);
 const PCM_BYTES_PER_SECOND = 32_000;
@@ -80,7 +81,7 @@ export class FirstAvailableTranscriber implements Transcriber {
         if (!(error instanceof UpstreamError)) throw error;
         upstream ??= error;
       }
-      console.error(JSON.stringify({ event: "transcriber_fallback", transcriber: transcriber.constructor.name, ...(upstream ? { provider: upstream.provider, status: upstream.status } : {}) }));
+      log.error("transcriber_fallback", { transcriber: transcriber.constructor.name, ...(upstream ? { provider: upstream.provider, status: upstream.status } : {}) });
     }
     if (upstream) throw upstream;
     return last;

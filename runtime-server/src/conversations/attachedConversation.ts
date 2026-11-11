@@ -1,5 +1,6 @@
 import type { AssetShelf } from "./assets.js";
 import type { Conversation, SendInput, Sent } from "./conversation.js";
+import { log } from "../observability/log.js";
 
 /**
  * A conversation whose messages carry assets. Before delivery the bytes are put where the model reads them and
@@ -27,7 +28,7 @@ export class AttachedConversation implements Conversation {
     await this.shelf.desk.stage(this.shelf.scope, attachments);
     await this.shelf.desk.attach(this.shelf.scope, attachments, input.id);
     try { return await this.inner.send(input); } catch (error) {
-      await this.shelf.desk.release(this.shelf.scope, attachments, input.id).catch(failure => console.error("[conversation assets]", failure));
+      await this.shelf.desk.release(this.shelf.scope, attachments, input.id).catch(failure => log.error("conversation_assets_failed", { error: failure }));
       throw error;
     }
   }
