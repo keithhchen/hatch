@@ -23,7 +23,7 @@ Every merge into `chat-studio-surfaces` is checked against this list on a real l
 14. The same person on the web uses "Log in with Telegram" and sees the same Assistant and history.
 15. Text, photo, file and voice in Telegram all reach the Assistant. Voice arrives as text.
 16. Several quick messages in Telegram give one reply each time the Assistant answers, sent to the right chat.
-17. Invite a second Telegram account. It can talk to the owner's Assistant, is marked as not the owner, and loses access once revoked.
+17. A second Telegram account that writes to the bot is not admitted to the owner's Assistant: it gets the sign-in button.
 
 ## Products
 

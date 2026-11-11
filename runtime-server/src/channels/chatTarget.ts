@@ -1,6 +1,6 @@
 import { ChatError } from "../chat/principal.js";
 import type { UploadedRef } from "../chat/gateway.js";
-import type { ChannelConnection, Role } from "./connections.js";
+import type { ChannelConnection } from "./connections.js";
 import type { Handled, Inbound, ReplyPolicy, TargetHandler } from "./ports.js";
 import { filesOf } from "./types.js";
 import type { ContentPart } from "../surfaces/contract.js";
@@ -19,16 +19,14 @@ export const idempotencyKey = ({ connection, event }: Pick<Inbound, "connection"
  * changes nothing here; a new kind of Agent is one more ChatTarget.
  */
 export interface ChatTarget {
-  /** What to say once someone has linked to this Connection, as the owner or as a guest. */
-  linked(connection: ChannelConnection, role: Role): Promise<string>;
+  /** What to say once someone has linked to this Connection. */
+  linked(connection: ChannelConnection): Promise<string>;
   /** How the final reply of one of this Agent's Runs is sent. Without it, every Run's reply is sent as it is. */
   replyPolicy?(connection: ChannelConnection, runId: string): Promise<ReplyPolicy>;
   /** Whether this sender may speak here now. Throws when the Connection was never meant for them; a returned text is told to the sender, and nothing starts. */
   admit(inbound: Inbound): Promise<string | undefined>;
   /** What this Agent says to a sender whose file is too big, and whose message it cannot read. */
   wording: { tooLarge(inbound: Inbound): string; unreadable: string };
-  /** The text part of a message as this Agent is told it: a guest's words are marked. `attached` says the message also carries files. */
-  said?(inbound: Inbound, text: string | undefined, attached: boolean): string | undefined;
   /** Stores a file in the conversation and returns the asset a message refers to. */
   upload(inbound: Inbound, file: { name: string; bytes: Buffer }): Promise<UploadedRef>;
   /** Steers the conversation's Run or starts one. `key` is the message's identity: sending it again is the same message. */
@@ -41,7 +39,7 @@ export interface ChatTarget {
 export class ChatFlow implements TargetHandler {
   constructor(private target: ChatTarget) {}
 
-  linked: TargetHandler["linked"] = (connection, role) => this.target.linked(connection, role);
+  linked: TargetHandler["linked"] = connection => this.target.linked(connection);
 
   replyPolicy: NonNullable<TargetHandler["replyPolicy"]> = async (connection, runId) => await this.target.replyPolicy?.(connection, runId) ?? {};
 
@@ -59,8 +57,7 @@ export class ChatFlow implements TargetHandler {
     const files = filesOf(event);
     if (files.some(file => (file.size ?? 0) > adapter.maxFileBytes)) { await inbound.notify(target.wording.tooLarge(inbound)); return DONE; }
     const text = event.text?.trim() || undefined;
-    const said = target.said ? target.said(inbound, text, files.length > 0) : text;
-    const parts: ContentPart[] = said ? [{ type: "text", text: said }] : [];
+    const parts: ContentPart[] = text ? [{ type: "text", text }] : [];
     try {
       // A failed download or upload throws: the event stays in the inbox and is tried again, also after a restart.
       for (const file of files) {

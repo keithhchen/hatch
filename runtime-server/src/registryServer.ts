@@ -363,7 +363,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     let channels!: ChannelService;
     const platformLogin = new PlatformLogin({
       providers, store: await PostgresLoginStore.open(registryPool), accounts, limiter: stores.limiter, origin: telegramOrigin,
-      admit: (kind, account, subject, claim) => channels.admit(kind, { senderId: subject, threadId: subject }, claim.invite ? { invite: claim.invite } : { account: account.id }),
+      admit: (kind, account, subject, claim) => channels.admit(kind, { senderId: subject, threadId: subject }, account.id),
     });
     const catalog = registryAgentCatalog(registryContext);
     // Chat runs in the Runtime process: the channel layer reaches it with its own service token, and never otherwise.
@@ -376,7 +376,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     channels = new ChannelService({
       ...stores, hub, scopeOf, ownsProduct, gateway: routed,
       audienceOf: (kind, target) => target.kind === "product" && isPerProduct(CREDENTIAL_FORMS[kind]) ? "public" : "self",
-      signIn: (kind, senderId, invite) => platformLogin.claimLink(kind, senderId, invite),
+      signIn: (kind, senderId) => platformLogin.claimLink(kind, senderId),
       // A platform id on our shared bot belongs to one Hatch account: linking from an account that is not its own is refused.
       claim: async (kind, scope, accountId, senderId) => !["telegram", "line", "discord"].includes(kind) || scope !== "" || await accounts.linkIdentity(accountId, kind, senderId),
     });
@@ -2181,7 +2181,6 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
       ...(status.senderId ? { sender_id: status.senderId } : {}),
       ...(status.state ? { state: status.state } : {}),
       ...(status.handle ? { handle: status.handle } : {}),
-      ...(status.people.length ? { people: status.people } : {}),
       ...(CREDENTIAL_FORMS[status.kind] && !isTenantForm(CREDENTIAL_FORMS[status.kind]!) && !isPerProduct(CREDENTIAL_FORMS[status.kind]) && context.credentialSeal ? { own_app: true, webhook_url: `${context.publicOrigin}/v1/channels/${status.kind}/${account.id}/webhook` } : {}),
       ...(status.lastEventAt ? { last_event_at: status.lastEventAt } : {}),
     });
@@ -2308,19 +2307,6 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
   if (url.pathname === "/v1/creator/connections" && request.method === "GET") {
     sendJson(response, 200, { channels: await channelsView(bindingTarget(url.searchParams.get("product_id"))) }, { "cache-control": "no-store" });
     return;
-  }
-  // The owner of the Assistant invites one more person, and takes their access away again.
-  const people = url.pathname.match(/^\/v1\/creator\/connections\/([a-z]+)\/(invites|people\/([0-9a-f-]{36}))$/);
-  if (people && isChannelKind(people[1]!)) {
-    if (people[2] === "invites" && request.method === "POST") {
-      sendJson(response, 200, await channels.invite(account.id, people[1], String((await readJson(request)).label ?? "")));
-      return;
-    }
-    if (people[3] && request.method === "DELETE") {
-      await channels.dismiss(account.id, people[1], people[3]);
-      sendJson(response, 200, { channels: await channelsView() });
-      return;
-    }
   }
   const connection = url.pathname.match(/^\/v1\/creator\/connections\/([a-z]+)(\/connect)?$/);
   if (connection && isChannelKind(connection[1]!)) {

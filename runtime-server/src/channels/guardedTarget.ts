@@ -7,7 +7,7 @@ export type Guard = (inbound: Inbound) => Promise<string | undefined>;
 export class GuardedTarget implements TargetHandler {
   constructor(private inner: TargetHandler, private guards: Guard[]) {}
 
-  linked: TargetHandler["linked"] = (connection, role) => this.inner.linked(connection, role);
+  linked: TargetHandler["linked"] = connection => this.inner.linked(connection);
 
   replyPolicy: NonNullable<TargetHandler["replyPolicy"]> = async (connection, runId) => await this.inner.replyPolicy?.(connection, runId) ?? {};
 

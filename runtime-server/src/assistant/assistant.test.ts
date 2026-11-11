@@ -168,7 +168,7 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
     const handled = [];
     for (const event of telegram.parse(Buffer.from(JSON.stringify(update))).events) {
       const inbound: Inbound = {
-        id: idempotencyId(event.eventId), connection, event, adapter: telegram, principal: { kind: "account", accountId: ACCOUNT }, speaker: { role: "owner" },
+        id: idempotencyId(event.eventId), connection, event, adapter: telegram, principal: { kind: "account", accountId: ACCOUNT },
         address: { connectionId: connection.id, ...event.address }, notify: async text => { notices.push(text); },
       };
       handled.push(await target.handle(inbound));

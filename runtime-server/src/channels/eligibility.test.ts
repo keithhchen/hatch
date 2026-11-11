@@ -17,9 +17,9 @@ test("a rule runs before the Agent, only for its own platform", async () => {
   const { seen, handler } = recording();
   const target = guarded(handler, { whatsapp: refuse });
   await assert.rejects(target.handle({ connection: connection("whatsapp") } as Inbound), ChannelPolicyError);
-  await assert.rejects(target.linked(connection("whatsapp"), "owner"), ChannelPolicyError);
+  await assert.rejects(target.linked(connection("whatsapp")), ChannelPolicyError);
   assert.deepEqual(seen, []);
   assert.deepEqual(await target.handle({ connection: connection("telegram") } as Inbound), { replied: true });
-  assert.equal(await target.linked(connection("telegram"), "owner"), "linked");
+  assert.equal(await target.linked(connection("telegram")), "linked");
   assert.deepEqual(seen, ["telegram"]);
 });

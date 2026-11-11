@@ -32,8 +32,6 @@ export type ChannelStatus = {
   configured: boolean;
   /** What people call the account on the platform (a bot's username). */
   handle?: string;
-  /** Who the owner invited to their Assistant here. */
-  people: Array<{ id: string; label: string }>;
 };
 
 /**
@@ -165,42 +163,29 @@ export class ChannelService implements AssistantChannels {
 
   async view(accountId: string, target: AgentTarget = STUDIO_TARGET): Promise<ChannelStatus[]> {
     const owned = await this.connections.owned(accountId);
-    const guests = target.kind === "assistant" ? await this.connections.guests(accountId) : [];
     return Promise.all(CHANNEL_KINDS.map(async kind => {
       const own = this.ownedFor(owned, kind, target);
       const adapter = await this.deps.hub.get(kind, own?.hasCredentials ? own.scope : this.deps.scopeOf(accountId, kind));
       return {
         kind, available: Boolean(adapter), linked: Boolean(own?.linked && own.state !== "revoked"), configured: Boolean(own?.hasCredentials && own.state !== "revoked"),
         ...(adapter?.handle ? { handle: adapter.handle } : {}),
-        people: guests.filter(guest => guest.channel === kind).map(({ id, label }) => ({ id, label })),
         ...(own ? { state: own.state } : {}), ...(own?.lastEventAt ? { lastEventAt: own.lastEventAt } : {}), ...(own?.linked && own.senderId ? { senderId: own.senderId } : {}),
       };
     }));
   }
 
-  /** The owner invites one more person to their Assistant: a single-use link to send them. */
-  async invite(accountId: string, kind: ChannelKind, label: string): Promise<{ code: string; url?: string }> {
-    const adapter = await this.deps.hub.get(kind, await this.scopeFor(accountId, kind, STUDIO_TARGET));
-    const code = adapter && await this.connections.invite(accountId, kind, label.replace(/[\[\]\r\n]/g, " ").trim().slice(0, 40) || "?", this.deps.now?.());
-    if (!adapter || !code) throw Object.assign(new Error(`${kind} is not connected.`), { status: 409, code: "channel_not_connected" });
-    const url = adapter.connectUrl(code) ?? adapter.chatUrl?.();
-    return { code, ...(url ? { url } : {}) };
-  }
-
-  dismiss(accountId: string, kind: ChannelKind, identityId: string): Promise<boolean> { return this.connections.dismiss(accountId, kind, identityId); }
-
   /**
-   * Someone the platform vouched for (a sign-in that named them) is bound to the Assistant, as its owner or as the guest an invite let in,
+   * Someone the platform vouched for (a sign-in that named them) is bound to the Assistant as its owner,
    * and told so in the chat they came from. Only our own shared account does this: the chat is the sender's own.
    */
-  async admit(kind: ChannelKind, who: { senderId: string; threadId: string }, grant: { account: string } | { invite: string }): Promise<void> {
+  async admit(kind: ChannelKind, who: { senderId: string; threadId: string }, accountId: string): Promise<void> {
     const adapter = await this.deps.hub.get(kind);
     if (!adapter) throw Object.assign(new Error(`${kind} is not available.`), { status: 503, code: "channel_unavailable" });
-    const code = "invite" in grant ? grant.invite : await this.connections.issueCode(grant.account, kind, STUDIO_TARGET, this.deps.now?.());
+    const code = await this.connections.issueCode(accountId, kind, STUDIO_TARGET, this.deps.now?.());
     // A sign-in knows the user, not the chat: where the platform's DM is not the user's id, the adapter says where it is.
     if (adapter.directThread) who = { ...who, threadId: await adapter.directThread(who.senderId) };
     const linked = await this.connections.redeem(kind, adapter.scope, code, who, this.deps.now?.());
-    if (!linked) throw Object.assign(new Error("This invite has expired or was already used."), { status: 410, code: "invite_expired" });
+    if (!linked) throw Object.assign(new Error("This link code has expired."), { status: 410, code: "link_expired" });
     await this.dispatcher.send({ connectionId: linked.id, channel: kind, scope: linked.scope, address: who, kind: "notice", message: { text: await this.router.greeting(linked) } });
   }
 
