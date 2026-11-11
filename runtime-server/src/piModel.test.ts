@@ -331,3 +331,17 @@ test("active profile rejects unknown names and missing provider credentials", ()
     /Missing GEMINI_API_KEY/
   );
 });
+
+test("DeepSeek V4 Pro profile sends its model with thinking disabled to DeepSeek", async () => {
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  const fetch: typeof globalThis.fetch = async (input, init) => {
+    calls.push({ url: String(input), init: init ?? {} });
+    return streamResponse("pong");
+  };
+  const agent = createPiAgent({ env: { HATCH_LLM_PROFILE: "deepseek-v4-pro", DEEPSEEK_API_KEY: "deepseek-test-key" }, fetch, timeoutMs: 8_000 });
+  await agent.prompt("Say pong");
+  const body = JSON.parse(String(calls[0]!.init.body)) as Record<string, unknown>;
+  assert.match(calls[0]!.url, /^https:\/\/api\.deepseek\.com\//);
+  assert.equal(body.model, "deepseek-v4-pro");
+  assert.deepEqual(body.thinking, { type: "disabled" });
+});
