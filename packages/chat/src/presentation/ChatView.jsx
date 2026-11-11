@@ -187,7 +187,6 @@ export function Composer({ controller, state, snapshotPending = false, agentName
       {dictate && canRecord() ? <button type="button" className="web-chat__voice-button" aria-label={t(voice.phase === "denied" ? "voiceDenied" : "voiceStart")} data-phase={voice.phase} disabled={busy || voice.phase === "transcribing"} onClick={voice.start}>
         {voice.phase === "transcribing" ? <Loader2 className="web-chat__spin" aria-hidden="true" /> : voice.phase === "denied" ? <MicOff aria-hidden="true" /> : <Mic aria-hidden="true" />}
       </button> : null}
-      <span className="web-chat__hint">{t("composerHint")}</span>
       {activeRun && !steer
         ? <button type="button" className="web-chat__stop" aria-label={t("stopReply")} onClick={() => controller.cancel()}><Square aria-hidden="true" /><span>{t("stopReply")}</span></button>
         : <button type="submit" className="web-chat__send" aria-label={t("sendMessage")} disabled={snapshotPending || (!draft.trim() && !images.length)}><ArrowUp aria-hidden="true" /></button>}

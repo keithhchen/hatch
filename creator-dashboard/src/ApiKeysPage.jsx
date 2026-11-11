@@ -32,7 +32,7 @@ export function ApiKeysPage({ request, t, locale }) {
   const revoke = () => attempt(async () => { await client.revoke(revoking.id); setRevoking(null); await refresh(); });
 
   return <div className="sx-apikeys">
-    <PageHeader title={t("sxNavApiKeys")} />
+    <PageHeader title={t("sxNavApiKeys")} actions={<Button asChild variant="secondary"><a href="/developers">{t("sxakDevelopers")}</a></Button>} />
     {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
     <form className="sx-card sx-apikeys__create" onSubmit={create}>
       <Input aria-label={t("sxakNameLabel")} value={name} maxLength={80} placeholder={t("sxakNamePlaceholder")} onChange={(event) => setName(event.target.value)} />

@@ -99,7 +99,6 @@ export const webChatCopy = Object.freeze({
     paywallUnavailable: "Online payment isn't open yet. Please check back soon.",
     unavailablePill: "Expert AI",
     agentUnavailable: "This AI is currently unavailable. It may not be published yet, or it may be paused.",
-    composerHint: "Enter to send, Shift + Enter for a new line",
     briefIntro: "This information is shared with {agent} when the conversation starts. Optional fields can be left blank.",
     noDetails: "No details",
   }),
@@ -203,7 +202,6 @@ export const webChatCopy = Object.freeze({
     paywallUnavailable: "在线支付暂未开通，请稍后再来。",
     unavailablePill: "专家 AI",
     agentUnavailable: "该 AI 暂不可用，可能尚未发布或已暂停。",
-    composerHint: "Enter 发送，Shift + Enter 换行",
     briefIntro: "以下信息将在对话开始时提供给 {agent}。选填项可留空。",
     noDetails: "无详细信息",
   }),
@@ -307,7 +305,6 @@ export const webChatCopy = Object.freeze({
     paywallUnavailable: "オンライン決済はまだ開始していません。しばらくお待ちください。",
     unavailablePill: "専門家のAI",
     agentUnavailable: "このAIは現在ご利用いただけません。未公開、または一時停止中の可能性があります。",
-    composerHint: "Enter で送信、Shift + Enter で改行",
     briefIntro: "以下の情報は会話の開始時に{agent}へ共有されます。任意項目は空欄のままでも構いません。",
     noDetails: "詳細はありません",
   })
