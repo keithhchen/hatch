@@ -249,6 +249,10 @@ jobs:
           export DOCKER_DEFAULT_PLATFORM=linux/amd64
           printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
           cd /opt/hatch
+          # Images no container uses are earlier releases (a rollback pulls its own again); a full disk takes Postgres down with it.
+          docker image prune -a -f
+          # A release needs about 2.5GB; stop here, with the old release still serving, rather than fill the disk mid-pull.
+          test "$(df --output=avail -BG /var/lib/docker | tail -1 | tr -dc 0-9)" -ge 4 || { df -h /var/lib/docker; echo "Less than 4GB free for the new release"; exit 1; }
           test -f .env
           test -f compose.app.yml
           grep -q '^HATCH_DOMAIN=' .env
