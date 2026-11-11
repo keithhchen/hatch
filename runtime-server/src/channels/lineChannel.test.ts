@@ -51,8 +51,12 @@ test("parse maps text, image and file messages", () => {
   assert.deepEqual(parse({ ...base, type: "message", message: { id: "3", type: "file", fileName: "a.pdf", fileSize: 2138 } }), [{ ...shared, file: { ref: "3", name: "a.pdf", size: 2138 } }]);
 });
 
+test("parse reads a video like an image: its content is fetched by message id", () => {
+  assert.deepEqual(parse({ ...base, type: "message", message: { id: "5", type: "video", duration: 1000 } }), [{ ...shared, file: { ref: "5", name: "video.mp4" } }]);
+});
+
 test("parse leaves other message types with no text and no file", () => {
-  for (const type of ["sticker", "video", "location"]) assert.deepEqual(parse({ ...base, type: "message", message: { id: "4", type } }), [shared]);
+  for (const type of ["sticker", "location"]) assert.deepEqual(parse({ ...base, type: "message", message: { id: "4", type } }), [shared]);
 });
 
 test("parse turns task postbacks into buttons and skips other postbacks", () => {

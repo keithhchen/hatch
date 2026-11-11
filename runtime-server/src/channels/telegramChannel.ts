@@ -9,6 +9,7 @@ type TelegramUpdate = {
     entities?: Array<{ type: string; offset: number; length: number }>; caption_entities?: Array<{ type: string; offset: number; length: number }>;
     reply_to_message?: { from?: { username?: string; is_bot?: boolean } };
     document?: { file_id: string; file_name?: string; file_size?: number }; photo?: Array<{ file_id: string; file_size?: number }>;
+    video?: { file_id: string; file_name?: string; file_size?: number }; video_note?: { file_id: string; file_size?: number }; animation?: { file_id: string; file_name?: string; file_size?: number };
     voice?: { file_id: string; file_size?: number }; audio?: { file_id: string; file_name?: string; file_size?: number };
   };
   callback_query?: { id: string; from: { id: number }; data?: string; message?: { message_id: number; chat: { id: number; type?: string } } };
@@ -63,6 +64,9 @@ export class TelegramChannel implements ChannelAdapter {
     const media = photo ? { ...photo, name: "photo.jpg" }
       : message.voice ? { ...message.voice, name: "voice.ogg" }
       : message.audio ? { ...message.audio, name: message.audio.file_name ?? "audio" }
+      : message.video ? { ...message.video, name: message.video.file_name ?? "video.mp4" }
+      : message.video_note ? { ...message.video_note, name: "video_note.mp4" }
+      : message.animation ? { ...message.animation, name: message.animation.file_name ?? "animation.mp4" }
       : document ? { ...document, name: document.file_name ?? "file" } : undefined;
     const file = media ? { ref: media.file_id, name: media.name, ...(media.file_size ? { size: media.file_size } : {}) } : undefined;
     const body = (message.text?.replace(/^\/start\s+/, "") ?? message.caption ?? "");
