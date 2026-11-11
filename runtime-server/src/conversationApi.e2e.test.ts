@@ -9,6 +9,7 @@ import { afterEach, test } from "node:test";
 import { WebSocket } from "ws";
 import type { AgentCorpus, AgentCorpusResolver } from "./agentCorpus.js";
 import { DeterministicAgentRuntime } from "./agentRuntime.js";
+import { useSearchFixture } from "./searchFixture.testkit.js";
 import { InMemoryConversationRepository } from "./conversationRepository.js";
 import { chatCompactionAdapter } from "./compaction.js";
 import { CompactionStrategy, policyFor } from "./compactionStrategy.js";
@@ -17,6 +18,8 @@ import { RuntimeAssetStore } from "./assetStore.js";
 import { createRuntimeServer, durableConversationId, type RuntimeServer } from "./index.js";
 import { PROTOCOL_VERSION, type OutboundMessage } from "./protocol.js";
 import { RuntimeStore, localRuntimeAuthority } from "./store.js";
+
+useSearchFixture();
 
 let runtime: RuntimeServer | undefined;
 
