@@ -36,6 +36,8 @@ services:
     restart: unless-stopped
     command: ["--config", "/etc/vector/vector.yaml"]
     environment:
+      # Vector 0.61 leaves ${VAR} in its config untouched unless told to: the config and the values are both ours.
+      VECTOR_DANGEROUSLY_ALLOW_ENV_VAR_INTERPOLATION: "true"
       HATCH_AXIOM_TOKEN: ${HATCH_AXIOM_TOKEN:-}
       HATCH_AXIOM_DATASET: ${HATCH_AXIOM_DATASET:-}
     volumes:
