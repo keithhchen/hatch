@@ -14,7 +14,13 @@ ARG VITE_HATCH_DESKTOP_DOWNLOAD_BASE_URL
 ENV VITE_HATCH_DESKTOP_DOWNLOAD_BASE_URL=${VITE_HATCH_DESKTOP_DOWNLOAD_BASE_URL}
 ARG VITE_HATCH_WEB_MEDIA_BASE_URL
 ENV VITE_HATCH_WEB_MEDIA_BASE_URL=${VITE_HATCH_WEB_MEDIA_BASE_URL}
+ARG VITE_SENTRY_DSN
+ENV VITE_SENTRY_DSN=${VITE_SENTRY_DSN}
+ARG VITE_RELEASE
+ENV VITE_RELEASE=${VITE_RELEASE}
+# Source maps are never served; delete them until CI uploads them to Sentry.
 RUN npm run build \
+  && find dist -name "*.map" -delete \
   && if [ -n "$VITE_HATCH_WEB_MEDIA_BASE_URL" ]; then \
     rm -f dist/assets/web/*.mp4 public/assets/web/*.mp4; \
   fi

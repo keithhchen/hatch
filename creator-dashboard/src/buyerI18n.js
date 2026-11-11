@@ -253,6 +253,7 @@ const ENTRIES = {
   "Hatch Expert": ["Hatch 专家", "Hatch 専門家"],
   "Product detail": ["产品信息", "製品情報"],
   "Not recorded": ["未记录", "記録なし"],
+  "Hatch is temporarily unavailable. Try again shortly.": ["Hatch 暂时不可用，请稍后重试。", "Hatch は一時的に利用できません。しばらくしてからお試しください。"],
   "Something went wrong. Try again.": ["出现错误，请重试。", "エラーが発生しました。もう一度お試しください。"],
   "This product was updated. Refresh to confirm the current version.": ["该产品已更新，请刷新后确认当前版本。", "製品が更新されました。ページを更新して現在のバージョンを確認してください。"],
   "Too many requests. Try again shortly.": ["请求过于频繁，请稍后重试。", "リクエストが多すぎます。しばらくしてからお試しください。"],

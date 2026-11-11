@@ -9,6 +9,9 @@ import { WebChatRoute } from "./webChatRoute.js";
 import { WebBrand } from "./WebBrand.jsx";
 import "./styles.css";
 import "./webTheme.css";
+import { captureRenderError, initSentry } from "./sentry.js";
+
+initSentry(import.meta.env);
 
 const CREATOR_ROOT = "/studio";
 const BuyerPortalV2 = React.lazy(() => import("./BuyerPortalV2.jsx").then(({ BuyerPortalV2: Component }) => ({ default: Component })));
@@ -31,6 +34,7 @@ class AppErrorBoundary extends React.Component {
 
   componentDidCatch(error, details) {
     console.error("Hatch Web failed to render", error, details);
+    captureRenderError(error, details);
   }
 
   render() {

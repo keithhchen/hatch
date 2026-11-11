@@ -1,3 +1,7 @@
+import { reportRequestFailure } from "./sentry.js";
+
+export const SERVICE_UNAVAILABLE_MESSAGE = "Hatch is temporarily unavailable. Try again shortly.";
+
 export async function dashboardRequest(path, options = {}) {
   const { token, ...requestOptions } = options;
   const method = String(options.method ?? "GET").toUpperCase();
@@ -17,14 +21,29 @@ export async function dashboardRequest(path, options = {}) {
     }
   });
   if (response.status === 204) return undefined;
-  const payload = await response.json();
+  const failure = (error) => {
+    error.status = response.status;
+    error.request_id ??= response.headers.get("x-request-id");
+    reportRequestFailure(error, {
+      method,
+      path: String(path).split("?")[0],
+      capture: response.status >= 500 || !error.code
+    });
+    return error;
+  };
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    // Non-JSON body (e.g. a Cloudflare HTML error page): never leak the parser error.
+    throw failure(new Error(response.ok ? "Something went wrong. Try again." : SERVICE_UNAVAILABLE_MESSAGE));
+  }
   if (!response.ok) {
     const error = new Error(payload.error?.message ?? `Request failed with ${response.status}`);
-    error.status = response.status;
     error.code = payload.error?.code;
     error.details = payload.error?.details;
-    error.request_id = payload.request_id ?? response.headers.get("x-request-id");
-    throw error;
+    error.request_id = payload.request_id;
+    throw failure(error);
   }
   return payload;
 }
