@@ -4,14 +4,16 @@ A new format = one new BaseConverter subclass registered in `default_registry`.
 """
 from __future__ import annotations
 
+import dataclasses
 import re
+import zipfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Sequence
 from urllib.parse import urlparse
 
-from .domain import Converted, Payload, ToolError
+from .domain import ArchiveRefused, Converted, Payload, ToolError
 from .ports import Converter, Transcriber
 from .shell import Shell
 
@@ -287,6 +289,89 @@ class FallbackConverter(BaseConverter):
                          error=f"no converter for '{p.ext or 'unknown'}'; original kept untouched")
 
 
+class ArchiveConverter(BaseConverter):
+    """A zip is unpacked safely and each entry converted by its own type, into one document: contents, then a section per entry."""
+    name = "archive"
+    exts = frozenset({".zip"})
+    MAX_ENTRIES = 2000
+    MAX_BYTES = 200 * 1024 * 1024
+    MAX_RATIO = 200
+    JUNK = frozenset({".ds_store", "thumbs.db"})
+
+    def __init__(self, entries: "ConverterRegistry"):
+        self.entries = entries
+
+    @staticmethod
+    def _name(info: zipfile.ZipInfo) -> str:
+        name = info.filename
+        if not info.flag_bits & 0x800:  # not flagged UTF-8: zipfile guessed cp437; Chinese archives are usually GBK
+            try:
+                name = name.encode("cp437").decode("gb18030")
+            except (UnicodeEncodeError, UnicodeDecodeError):
+                pass
+        return name.replace("\\", "/")
+
+    def _members(self, zf: zipfile.ZipFile, size: int) -> list[tuple[zipfile.ZipInfo, str]]:
+        infos = zf.infolist()
+        if len(infos) > self.MAX_ENTRIES:
+            raise ArchiveRefused(f"archive has {len(infos)} entries; the limit is {self.MAX_ENTRIES}")
+        total = sum(i.file_size for i in infos)
+        if total > self.MAX_BYTES:
+            raise ArchiveRefused(f"archive unpacks to {total} bytes; the limit is {self.MAX_BYTES}")
+        if total > max(size, 1) * self.MAX_RATIO:
+            raise ArchiveRefused(f"archive is compressed {total // max(size, 1)}x; the limit is {self.MAX_RATIO}x")
+        members = []
+        for info in infos:
+            name = self._name(info)
+            parts = [p for p in name.split("/") if p]
+            if name.startswith("/") or re.match(r"^[A-Za-z]:", name) or ".." in parts:
+                raise ArchiveRefused(f"archive entry {name!r} has an unsafe path")
+            if info.is_dir() or not parts or "__MACOSX" in parts or parts[-1].lower() in self.JUNK:
+                continue
+            members.append((info, "/".join(parts)))
+        return members
+
+    def _extract(self, zf: zipfile.ZipFile, info: zipfile.ZipInfo, dest: Path) -> None:
+        with zf.open(info) as src:
+            data = src.read(info.file_size + 1)
+        if len(data) > info.file_size:
+            raise ArchiveRefused(f"archive entry {info.filename!r} is larger than it declares")
+        dest.write_bytes(data)
+
+    def convert(self, p: Payload, ctx: ConversionContext) -> Converted:
+        try:
+            zf = zipfile.ZipFile(p.path)
+        except (zipfile.BadZipFile, OSError) as e:
+            raise ArchiveRefused(f"archive cannot be opened: {e}") from e
+        sections, listing, problems = [], [], []
+        with zf:
+            for n, (info, path) in enumerate(self._members(zf, p.path.stat().st_size), 1):
+                work = ctx.workdir / "entries" / str(n)
+                work.mkdir(parents=True, exist_ok=True)
+                source = work / ("entry" + (Path(path).suffix.lower() or ".bin"))
+                try:
+                    if info.flag_bits & 0x1:
+                        raise ToolError("the entry is encrypted")
+                    self._extract(zf, info, source)
+                    entry = Payload(dataclasses.replace(p.item, name=path), source, source.suffix, source_name=path)
+                    done = self.entries.select(entry).convert(entry, dataclasses.replace(ctx, workdir=work))
+                    reason = done.error or ("; ".join(done.notes) if done.status != "ok" else "")
+                    outcome = "converted" if done.body.strip() and done.status == "ok" else reason or "no text"
+                    if done.status != "ok" or done.error:
+                        problems.append(f"{path}: {reason or 'not fully converted'}")
+                    sections.append(f"## {path}\n\n{done.body.strip() or '(no text)'}")
+                except ArchiveRefused:
+                    raise
+                except Exception as e:  # noqa: BLE001 - one entry failing must not lose the others
+                    outcome = f"failed: {e}"
+                    problems.append(f"{path}: {e}")
+                    sections.append(f"## {path}\n\n(not converted: {e})")
+                listing.append(f"- {path} ({outcome})")
+        body = "\n\n".join(["## Contents\n\n" + ("\n".join(listing) or "(empty archive)"), *sections])
+        return Converted(original=p.path, converter=self.name, body=body, status="partial" if problems else "ok",
+                         notes=problems, error="; ".join(problems) or None)
+
+
 class ConverterRegistry:
     """First registered converter whose `matches` is true wins; `default` is the last resort."""
 
@@ -303,5 +388,6 @@ class ConverterRegistry:
 
 
 def default_registry() -> ConverterRegistry:
-    return ConverterRegistry([HtmlPageConverter(), TextConverter(), PdfConverter(), ImageConverter(),
-                              MediaConverter(), DocumentConverter()])
+    each = [HtmlPageConverter(), TextConverter(), PdfConverter(), ImageConverter(), MediaConverter(), DocumentConverter()]
+    # An archive inside an archive is listed, not unpacked: its entries go to the registry that has no ArchiveConverter.
+    return ConverterRegistry([*each, ArchiveConverter(ConverterRegistry(each))])

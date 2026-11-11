@@ -92,6 +92,22 @@ class IngestorTest(unittest.TestCase):
                         OutputDelivery(self.tmp / "out", clock=lambda: "T"), ctx, self.tmp / "work",
                         ledger or ProfileLedger(), lambda m: None)
 
+    def test_archive_is_one_document_and_an_unsafe_one_fails_the_item(self):
+        import zipfile
+        blob = self.tmp / "upload" / "files" / "blob"
+        for name, entries in (("good", {"a.md": "alpha"}), ("evil", {"../x.txt": "x"})):
+            with zipfile.ZipFile(blob / name, "w") as zf:
+                for entry, text in entries.items():
+                    zf.writestr(entry, text)
+            (blob / f"{name}.json").write_text(json.dumps({"title": f"{name}.zip", "id": name}))
+        self.uploads = UploadIndex(self.tmp / "upload")
+        good, evil = self.ingestor().run([Item("g", "file", name="good.zip", upload_name="good.zip"),
+                                          Item("e", "file", name="evil.zip", upload_name="evil.zip")])
+        self.assertEqual((good.status, good.original, good.markdown, good.error), ("ok", "g.original.zip", "g.content.md", None))
+        self.assertIn("## a.md\n\nalpha", (self.tmp / "out" / "g.content.md").read_text())
+        self.assertEqual(evil.status, "failed")
+        self.assertIn("unsafe path", evil.error)
+
     def test_end_to_end_flat_output_and_batch_continues(self):
         items = [Item("i1", "file", name="notes.txt", upload_name="notes.txt"),
                  Item("i2", "file", name="gone.txt", upload_name="gone.txt"),

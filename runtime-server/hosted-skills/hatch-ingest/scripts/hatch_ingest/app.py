@@ -11,7 +11,7 @@ from typing import Any, Callable, Mapping, Sequence
 from .browser import PlaywrightBrowser
 from .converters import ConversionContext, ConverterRegistry, HtmlExtractor, default_registry
 from .delivery import OutputDelivery
-from .domain import (Converted, Item, ItemResult, LoginRequired, Payload, Profile, ProfileLedger,
+from .domain import (ArchiveRefused, Converted, Item, ItemResult, LoginRequired, Payload, Profile, ProfileLedger,
                      redact, writable_cookies)
 from .ports import Browser, Delivery, Transcriber
 from .resilience import never_fail, retry, timed
@@ -55,6 +55,8 @@ class Ingestor:
         run = timed(f"[{payload.item.id}] {converter.name}", self.log)(converter.convert)
         try:
             return run(payload, self.make_context(workdir))
+        except ArchiveRefused:
+            raise
         except Exception as exc:  # noqa: BLE001 - keep the original, report the error
             self.log(f"[{payload.item.id}] conversion failed: {exc}")
             return Converted(original=payload.path, converter=converter.name, status="partial",

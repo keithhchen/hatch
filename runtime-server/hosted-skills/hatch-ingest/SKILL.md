@@ -46,6 +46,7 @@ Turns each item into `original` + `content.md`. Never summarize, never invent me
   (`matches` + `convert`) and register it in `default_registry`, or a new `Source` in
   `sources.py`. A new platform's media discovery is one `HostStrategy` subclass in `sources.py`,
   registered in `default_strategies()`. Nothing else changes.
+- A `.zip` is unpacked by `ArchiveConverter` (limits: 2000 entries, 200 MB unpacked, ratio 200, no absolute or `..` paths; `__MACOSX` and `.DS_Store` skipped) into one `content.md`: a Contents list, then a section per entry converted by its own type. An unreadable or unsafe archive fails the item; entries that cannot be converted make it `partial`. A zip inside a zip is listed, not unpacked.
 - Schemas: `references/task.schema.json`, `browser-profiles.schema.json`, `result.schema.json`.
 - Headed Chromium cannot print `page.pdf()`; link pages without media fall back to an HTML
   snapshot as the original.
