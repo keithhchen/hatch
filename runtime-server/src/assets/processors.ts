@@ -2,6 +2,7 @@ import sharp from "sharp";
 import { convertUpload } from "../factoryAgents/markdownConverter.js";
 import { AssetError, type AssetKind, type AudioNormalizer, type DerivativeRole, type Moderated, type Transcriber } from "./domain.js";
 import { decodeText, type Sniffed } from "./sniff.js";
+import { log } from "../observability/log.js";
 
 export type Output = { role: DerivativeRole; bytes: Buffer; mime: string; truncated?: boolean };
 export type Processed = { outputs: Output[]; transcript?: string; moderate: Moderated };
@@ -73,7 +74,7 @@ export class VoiceProcessor implements AssetProcessor {
     const result = await this.transcriber.transcribe(pcm);
     if (result.status === "unavailable") {
       // The sender hears that it failed, never why: the provider's words stay in the log.
-      console.error(JSON.stringify({ event: "transcription_unavailable", reason: result.reason }));
+      log.error("transcription_unavailable", { reason: result.reason });
       throw new AssetError("unavailable", "语音暂时转不成文字，请先发文字。\nVoice messages cannot be transcribed right now. Please send text instead.");
     }
     const text = result.text.trim();

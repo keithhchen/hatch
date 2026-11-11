@@ -18,7 +18,6 @@ export async function factoryAgentTools(options: {
   env?: NodeJS.ProcessEnv;
   extraTools?: AgentTool[] | Promise<AgentTool[]>;
   /** Host capabilities granted to this session regardless of its definition, e.g. the Assistant's hand-off while it drives the session. */
-  grantedTools?: AgentTool[];
   withheldTools?: string[];
 }): Promise<AgentTool[]> {
   const candidates = [
@@ -34,7 +33,7 @@ export async function factoryAgentTools(options: {
   return [...candidates.filter(tool => tool.name !== "youtube_transcript" && !options.withheldTools?.includes(tool.name)
     && (options.definition.tools.includes(tool.name) || (tool.name === "askuser" && options.definition.role !== "voice")
       // grep is how an Agent searches what read can open: stored definitions that grant read grant it too.
-      || (tool.name === "grep" && options.definition.tools.includes("read")))),...(options.grantedTools ?? [])];
+      || (tool.name === "grep" && options.definition.tools.includes("read"))))];
 }
 
 const askUserOption = Type.Object({

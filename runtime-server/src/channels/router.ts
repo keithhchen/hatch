@@ -7,7 +7,7 @@ import type { Handled, Inbound, ReplyPolicy, TargetHandler, TargetKind } from ".
 export type Notify = (to: { connectionId?: string; channel: ChannelKind; scope: string; address: InboxItem["event"]["address"] }, text: string, replyTo?: string, link?: { label: string; url: string }) => Promise<void>;
 
 /** Port: how a sender the platform vouches for but we do not know signs in to Hatch from their chat. Undefined: not here, or asked too often. */
-export type SignIn = (channel: ChannelKind, senderId: string, invite?: string) => Promise<string | undefined>;
+export type SignIn = (channel: ChannelKind, senderId: string) => Promise<string | undefined>;
 /** Port: the owner of a code is the platform identity that sends it: false when that identity already belongs to another account. */
 export type Claim = (channel: ChannelKind, scope: string, ownerAccountId: string, senderId: string) => Promise<boolean>;
 
@@ -32,8 +32,8 @@ export class ChannelRouter {
     if (event.revoked) { await connections.revokeTenant(channel, scope); return { replied: true }; }
     const say = (text: string, connectionId?: string, link?: { label: string; url: string }) => this.deps.notify({ ...(connectionId ? { connectionId } : {}), channel, scope, address: event.address }, text, event.messageRef, link);
     /** The sign-in button for a sender we do not know, or false where there is none. */
-    const offerSignIn = async (invite?: string): Promise<boolean> => {
-      const url = await this.deps.signIn?.(channel, event.address.senderId, invite);
+    const offerSignIn = async (): Promise<boolean> => {
+      const url = await this.deps.signIn?.(channel, event.address.senderId);
       if (url) await say(SIGN_IN_TEXT, undefined, { label: `用 ${CHANNEL_LABELS[channel]} 登录`, url });
       return Boolean(url);
     };
@@ -41,13 +41,11 @@ export class ChannelRouter {
     const code = event.button || event.group ? undefined : event.text?.match(LINK_CODE_PATTERN)?.[0];
     if (code) {
       const peek = await connections.peekCode(channel, scope, code);
-      // An invitee is let in only through a sign-in that proves who they are, so the code never admits anyone by itself.
-      if (peek?.kind === "guest" && await offerSignIn(code)) return { replied: true };
-      if (peek?.kind === "owner" && await this.deps.claim?.(channel, scope, peek.ownerAccountId, event.address.senderId) === false) {
+      if (peek && await this.deps.claim?.(channel, scope, peek.ownerAccountId, event.address.senderId) === false) {
         await say(`这个 ${CHANNEL_LABELS[channel]} 账号已经连着另一个 Hatch 账号。`);
         return { replied: true };
       }
-      const linked = peek?.kind === "guest" ? undefined : await connections.redeem(channel, scope, code, event.address);
+      const linked = await connections.redeem(channel, scope, code, event.address);
       if (!linked) { await say(`这个连接码已失效。请回到 Hatch Studio 重新点「连接 ${CHANNEL_LABELS[channel]}」。`); return { replied: true }; }
       await say(await this.greeting(linked), linked.id);
       return { replied: true, connectionId: linked.id };
@@ -64,10 +62,8 @@ export class ChannelRouter {
     assertReachable(connection);
     await connections.touch(connection.id);
     const adapter = (await this.deps.hub.get(channel, scope))!;
-    // Best effort, and not awaited: the sender sees that an answer is coming while the Agent works.
-    if (!event.button) void adapter.typing?.(event.address, event.messageRef).catch(() => undefined);
     const inbound: Inbound = {
-      id: item.id, connection, event, adapter, principal: principalFor(connection, identity), speaker: { role: identity.role, ...(identity.label ? { label: identity.label } : {}) },
+      id: item.id, connection, event, adapter, principal: principalFor(connection, identity),
       address: { connectionId: connection.id, ...event.address },
       notify: text => say(text, connection.id),
     };
@@ -75,7 +71,7 @@ export class ChannelRouter {
   }
 
   /** What the Agent behind a Connection says to someone who has just been bound to it. */
-  greeting(linked: Linked): Promise<string> { return this.handler(linked.target.kind).linked(linked, linked.role); }
+  greeting(linked: Linked): Promise<string> { return this.handler(linked.target.kind).linked(linked); }
 
   /** How the Agent behind a Connection wants the reply of one of its Runs sent. */
   async replyPolicy(connection: ChannelConnection, runId: string): Promise<ReplyPolicy> {

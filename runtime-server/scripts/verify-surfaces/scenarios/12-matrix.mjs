@@ -436,9 +436,7 @@ class Matrix extends Scenario {
       cell.check("an unknown Telegram sender writing to a Product's own bot is met as a contact and answered, with no sign-up", answered && t.runs.length === 1, { texts: stranger.texts(), runs: t.runs.length, inbox: t.inbox });
     });
 
-    await walk(matrix, rec, "4d", "Telegram login: a stranger on the shared bot is offered sign-in, and an invited guest reaches the Assistant only after signing in with their own id", async (cell) => {
-      const studioOwner = await stack.account("tg-guest-owner");
-      const api = new StudioApi(stack.url, Auth.bearer(studioOwner.apiKey));
+    await walk(matrix, rec, "4d", "Telegram login: a stranger on the shared bot is offered sign-in and reaches the Assistant only after signing in with their own id", async (cell) => {
       const stranger = new TgChat(stack, hooks, 6301);
       await stranger.say("hello");
       const [prompt] = await stranger.waitSends(1, 30_000);

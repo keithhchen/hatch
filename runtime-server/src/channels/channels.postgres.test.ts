@@ -72,9 +72,8 @@ class RecordingTarget implements TargetHandler {
   handled: Inbound[] = [];
   failures = 0;
   result: Handled = { replied: false };
-  roles: string[] = [];
   async handle(inbound: Inbound) { if (this.failures-- > 0) throw new Error("target down"); this.handled.push(inbound); return this.result; }
-  async linked(_connection: unknown, role: string) { this.roles.push(role); return "linked"; }
+  async linked() { return "linked"; }
 }
 
 /** Stands in for Chat in another process: it answers from state of its own, the way the durable Runtime does, and never calls back. */
@@ -982,16 +981,16 @@ test("An unreachable event is stored and completed, never routed and never answe
   assert.ok(owner);
 }));
 
-// ── Telegram: our shared bot signs people in and admits guests; each Product has a bot of its own ──
+// ── Telegram: our shared bot signs people in; each Product has a bot of its own ──
 
 test("A stranger on the shared bot is offered a sign-in link; a group gets silence; nothing is reached", options, async () => isolated(async pool => {
-  const asked: Array<[string, string | undefined]> = [];
-  const env = await stack(pool, { signIn: async (_kind, sender, invite) => { asked.push([sender, invite]); return `https://site.test/start?claim=${sender}`; } });
+  const asked: string[] = [];
+  const env = await stack(pool, { signIn: async (_kind, sender) => { asked.push(sender); return `https://site.test/start?claim=${sender}`; } });
   await env.service.accept(env.adapter, [message("stranger", "hello")]);
   await env.service.accept(env.adapter, [message("stranger", "hello", { address: address("stranger", "group-1"), group: true })]);
   await env.service.drain();
   assert.deepEqual(env.adapter.sent.map(entry => entry.message.link?.url), ["https://site.test/start?claim=stranger"]);
-  assert.deepEqual(asked, [["stranger", undefined]]);
+  assert.deepEqual(asked, ["stranger"]);
   assert.equal(env.target.handled.length, 0);
 }));
 
@@ -1002,45 +1001,16 @@ test("A sender asking too often gets the plain refusal instead of another link",
   assert.match(env.adapter.texts[0]!, /请先从 Hatch Studio 连接/);
 }));
 
-test("An invite admits a guest only through a sign-in; the owner sees the guest and can revoke them", options, async () => isolated(async pool => {
-  const env = await stack(pool, { signIn: async (_kind, sender, invite) => `https://site.test/start?claim=${sender}:${invite ?? ""}` });
+test("A former guest row no longer reaches the Assistant: the sender is a stranger offered a sign-in", options, async () => isolated(async pool => {
+  const env = await stack(pool, { signIn: async (_kind, sender) => `https://site.test/start?claim=${sender}` });
   const owner = await link(env, "expert");
-  const { code, url } = await env.service.invite(owner, "telegram", "Ann [助理]");
-  assert.match(url!, /platform\.test/);
-  // The code alone admits no one: the sender is sent to sign in, carrying the invite.
-  await env.service.accept(env.adapter, [message("ann", code)]);
+  await pool.query(`INSERT INTO hatch_channel_identities (connection_id, channel, scope, sender_id, thread_id, role)
+    SELECT connection_id, channel, scope, 'ann', 'ann', 'guest' FROM hatch_channel_identities WHERE sender_id = 'expert'`);
+  await env.service.accept(env.adapter, [message("ann", "hi")]);
   await env.service.drain();
-  assert.equal(env.adapter.sent.at(-1)!.message.link?.url, `https://site.test/start?claim=ann:${code}`);
-  assert.equal((await env.service.view(owner))[0]!.people.length, 0);
-  // The sign-in names the sender; only then is the invite spent.
-  await env.service.admit("telegram", address("ann"), { invite: code });
-  await env.service.drain();
-  assert.deepEqual(env.target.roles, ["owner", "guest"]);
-  assert.deepEqual((await env.service.view(owner)).find(status => status.kind === "telegram")!.people.map(person => person.label), ["Ann  助理"]);
-  await assert.rejects(env.service.admit("telegram", address("bob"), { invite: code }), /expired or was already used/);
-  await env.service.accept(env.adapter, [message("ann", "hi"), message("expert", "me")]);
-  await env.service.drain();
-  const [guest, expert] = env.target.handled.slice(-2);
-  assert.deepEqual([guest!.speaker.role, guest!.speaker.label, guest!.principal.kind], ["guest", "Ann  助理", "contact"]);
-  assert.deepEqual([expert!.speaker.role, expert!.principal.kind], ["owner", "account"]);
-  // The Assistant reaches the owner, never the guest.
+  assert.equal(env.target.handled.length, 0);
+  assert.equal(env.adapter.sent.at(-1)!.message.link?.url, "https://site.test/start?claim=ann");
   assert.deepEqual((await env.connections.linked(owner)).map(entry => entry.identity!.senderId), ["expert"]);
-  const [person] = (await env.service.view(owner)).find(status => status.kind === "telegram")!.people;
-  assert.equal(await env.service.dismiss(randomUUID(), "telegram", person!.id), false, "only the owner revokes");
-  assert.equal(await env.service.dismiss(owner, "telegram", person!.id), true);
-  const handled = env.target.handled.length;
-  await env.service.accept(env.adapter, [message("ann", "hello again")]);
-  await env.service.drain();
-  assert.equal(env.target.handled.length, handled, "a revoked guest reaches nothing");
-}));
-
-test("An owner cannot be a guest, and the invite stays for someone else", options, async () => isolated(async pool => {
-  const env = await stack(pool);
-  const owner = await link(env, "expert");
-  const { code } = await env.service.invite(owner, "telegram", "x");
-  await assert.rejects(env.service.admit("telegram", address("expert"), { invite: code }), /expired or was already used/);
-  await env.service.admit("telegram", address("guest"), { invite: code });
-  assert.equal((await env.connections.guests(owner)).length, 1);
 }));
 
 test("A Telegram id that belongs to another account cannot link by code", options, async () => isolated(async pool => {

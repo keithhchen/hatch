@@ -32,6 +32,7 @@ import {
 } from "./publicMetadata.mjs";
 import { PortalTelemetryStore } from "./telemetry.mjs";
 import { WebChatRuntimeBridge } from "./webChatRuntimeBridge.mjs";
+import { bindAccount, currentContext, logEvent, observed, propagatingFetch, requestIdFrom } from "./observability.mjs";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_JSON_BODY_MAX_BYTES = 1024 * 1024;
@@ -145,7 +146,7 @@ export async function createDashboardApp(options = {}) {
     setWebSessionCookies(request, response, webSession.session_id);
     return profile;
   };
-  const fetchImpl = options.fetchImpl ?? fetch;
+  const fetchImpl = propagatingFetch(options.fetchImpl ?? fetch);
   const factoryRequestMaxBytes = options.factoryRequestMaxBytes ?? CREATOR_FACTORY_JSON_BODY_MAX_BYTES;
   const configuredPaymentMode = options.paymentMode ?? process.env.HATCH_COMMERCE_PAYMENT_MODE ?? "disabled";
   const paymentProvider = createProviderAdapter({
@@ -159,7 +160,7 @@ export async function createDashboardApp(options = {}) {
     apiToken: options.providerApiToken ?? process.env.HATCH_PAYMENT_PROVIDER_API_TOKEN,
     webhookSecret: options.providerWebhookSecret ?? process.env.HATCH_PAYMENT_PROVIDER_WEBHOOK_SECRET,
     sandboxScenario: options.paymentSandboxScenario,
-    fetchImpl: options.fetchImpl
+    fetchImpl
   });
   const paymentMode = paymentProvider.mode;
   const payoutSchedule = String(options.payoutSchedule
@@ -479,9 +480,9 @@ export async function createDashboardApp(options = {}) {
     return results;
   };
 
-  const handler = async (request, response) => {
+  const handler = observed(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://dashboard.local");
-    const requestId = normalizedRequestId(request.headers["x-request-id"]);
+    const requestId = currentContext().request_id;
     if (url.pathname === "/v1/user/product-access" || url.pathname === DESKTOP_TOKEN_PATH) {
       response.__hatchCorsOrigin = "*";
     }
@@ -2295,7 +2296,7 @@ export async function createDashboardApp(options = {}) {
       const failure = publicRequestError(error);
       return send(response, failure.status, { error: failure.error });
     }
-  };
+  });
 
   const handleUpgrade = async (request, socket, head) => {
     request.__oauthStateKey = oauthStateKey;
@@ -2310,7 +2311,7 @@ export async function createDashboardApp(options = {}) {
       const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
       if (authentication.error) throw Object.assign(new Error("Sign in to continue."), { status: authentication.error.status });
       chatWss.handleUpgrade(request, socket, head, browser => {
-        new WebChatRuntimeBridge({ browser, runtimeUrl, token: authentication.token }).connect();
+        new WebChatRuntimeBridge({ browser, runtimeUrl, token: authentication.token, requestId: requestIdFrom(request.headers["x-request-id"]) }).connect();
       });
       return;
     }
@@ -2858,6 +2859,7 @@ async function authenticate(request, registryUrl, fetchImpl, portalState) {
       headers: { authorization: `Bearer ${token}` }
     });
     const profile = publicProfile(account);
+    bindAccount(profile.id);
     request.__registryToken = token;
     request.__oauthScopes = oauthToken?.scopes;
     return { profile, account, token };
@@ -4411,11 +4413,6 @@ function csvCell(value) {
   return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 
-function normalizedRequestId(value) {
-  const candidate = String(Array.isArray(value) ? value[0] : value ?? "").trim();
-  return /^[A-Za-z0-9_.:-]{1,128}$/.test(candidate) ? candidate : `req_${randomId()}`;
-}
-
 async function commerceOperationsSnapshot({ ledger, commerce, portalState, telemetry, now = new Date() }) {
   await ledger.refresh?.();
   await portalState.refresh?.();
@@ -4677,5 +4674,5 @@ function contentType(filePath) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const { host, port } = await startDashboardServer();
-  console.log(`Hatch Expert Dashboard API listening on http://${host}:${port}`);
+  logEvent("info", "listening", { message: `Hatch Expert Dashboard API listening on http://${host}:${port}` });
 }

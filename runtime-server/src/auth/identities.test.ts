@@ -144,7 +144,7 @@ test("A state or a claim belongs to the platform it was issued for", async () =>
   const started = await login.start("line", {});
   await assert.rejects(login.finish("discord", { code: "c", state: started.state }), refused("login_state_invalid"));
   await assert.rejects(login.finish("line", { code: "c", state: started.state }), refused("login_state_invalid"), "and it is spent");
-  const claim = new URL((await login.claimLink("line", LINE_USER, "INVITE"))!).searchParams.get("claim")!;
+  const claim = new URL((await login.claimLink("line", LINE_USER))!).searchParams.get("claim")!;
   assert.equal((await login.claimLink("line", LINE_USER))!.startsWith(`${ORIGIN}/v1/auth/line/start?claim=`), true);
   await assert.rejects(login.start("discord", { claim }), refused("claim_invalid"));
   assert.ok(await store.peekClaim(claim), "refusing to start did not spend it");

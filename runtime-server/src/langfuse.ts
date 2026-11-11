@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { propagateAttributes, startActiveObservation, startObservation, type LangfuseGenerationAttributes } from "@langfuse/tracing";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { NodeSDK } from "@opentelemetry/sdk-node";
+import { otlpSpanProcessors } from "./observability/otel.js";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { createAssistantMessageEventStream, type AssistantMessage, type AssistantMessageEvent, type AssistantMessageEventStream, type Context, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 
@@ -103,7 +104,7 @@ export function initializeLangfuseObservability(environment: NodeJS.ProcessEnv =
     exporter: reportExportFailures(delegate),
     mask: ({ data }) => maskSecrets(data)
   });
-  const sdk = new NodeSDK({ spanProcessors: [processor] });
+  const sdk = new NodeSDK({ spanProcessors: [processor, ...otlpSpanProcessors(environment)] });
   sdk.start();
   runtime = { sdk, processor };
 }

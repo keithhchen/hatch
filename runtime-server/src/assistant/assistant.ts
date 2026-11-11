@@ -2,11 +2,9 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { Type } from "@earendil-works/pi-ai";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { WorkbenchStore, type AgentDefinitionSource, type AssistantRole, type Role, type Session, type Todo, type WorkbenchBackend } from "../factoryAgents/store.js";
 import { WorkbenchRuntime, safeError, type WorkbenchRuntimeOptions } from "../factoryAgents/runtime.js";
 import type { FactoryWorkspace } from "../factoryAgents/service.js";
-import { userMessage } from "../factoryAgents/imageRefs.js";
 import type { AgentCatalog, AgentChange } from "./catalog.js";
 import { FirecrawlSearchProvider } from "../factoryAgents/webProviders.js";
 import { CHANNEL_KINDS, type ChannelKind, type OutboundMessage } from "../channels/types.js";
@@ -20,12 +18,13 @@ import type { AssistantTask, TaskDecision, TaskKind, TaskOrigin, TaskRepository 
 import type { AssistantChat, ReplySteps } from "./chat.js";
 import type { DeliveryRepository } from "./deliveries.js";
 import type { ExpertMaterials } from "./materials.js";
-import { RELAY_MARK, SYSTEM_MESSAGE_PREFIX, isSystemMessageId, type InterviewDesk } from "./relay.js";
+import { SYSTEM_MESSAGE_PREFIX, isSystemMessageId } from "./systemMessage.js";
 import { ChatError } from "../chat/principal.js";
-import type { AssistantStateRepository, Interview } from "./state.js";
+import type { AssistantStateRepository } from "./state.js";
 import type { Material } from "./materials.js";
 import type { IngestJob } from "../ingest/job.js";
 import type { AgentOverview, StudioOperations, WorkerKind } from "./studioTools.js";
+import { log } from "../observability/log.js";
 
 const WORKER_LEASE_MS = 35 * 60_000;
 const ASSISTANT_PROFILE = "kimi-k2.6";
@@ -50,13 +49,11 @@ type WorkerSpec = {
   finish: WorkerFinish;
   /** Product roles run in order. */
   steps?: readonly Role[];
-  /** A handoff, not a background job: the worker takes over the conversation, so starting it ends the Assistant's turn. */
-  handsOver?: boolean;
 };
 
 export type ProductWorkspaces = {
   workspace(scope: { creatorId: string; productId: string }, token: string): Promise<FactoryWorkspace>;
-  attachAssistant(hooks: { grantedTools: (scope: { creatorId: string; productId: string }, session: Session) => AgentTool[]; withheldTools: (scope: { creatorId: string; productId: string }, session: Session) => Promise<string[]>; opened: (scope: { creatorId: string; productId: string }, workspace: FactoryWorkspace) => void }): void;
+  attachAssistant(hooks: { withheldTools: (scope: { creatorId: string; productId: string }, session: Session) => Promise<string[]>; opened: (scope: { creatorId: string; productId: string }, workspace: FactoryWorkspace) => void }): void;
 };
 
 /** Where the Assistant hands material that needs converting; Ingest is what answers. */
@@ -73,7 +70,7 @@ export type AssistantDependencies = {
   catalog: AgentCatalog;
   /** The Assistant workspace of one account: its notes and the sessions of the workers it runs itself. */
   backend: (accountId: string) => WorkbenchBackend;
-  /** What the Assistant knows about an Expert beyond the conversation: the interview that holds it, and where the Expert last spoke. */
+  /** What the Assistant knows about an Expert beyond the conversation: where the Expert last spoke. */
   state: AssistantStateRepository;
   /** Replies it owes for Runs it started on its own. */
   deliveries: DeliveryRepository;
@@ -105,7 +102,7 @@ const isChannel = (source: string): source is ChannelKind => (CHANNEL_KINDS as r
  * into short replies. It never does the work itself. Its conversation is a conversation on Chat, hosted by `AssistantChat`;
  * this class is what the conversation operates: the Expert's Agents, tasks and workers.
  */
-export class AssistantService implements StudioOperations, InterviewDesk {
+export class AssistantService implements StudioOperations {
   private desks = new Map<string, Promise<Desk>>();
   private observed = new WeakSet<FactoryWorkspace>();
   private definitions: AgentDefinitionSource;
@@ -115,9 +112,8 @@ export class AssistantService implements StudioOperations, InterviewDesk {
   /** Adding a worker means adding one entry here: the tool, dispatch and completion all read from it. */
   private workers: Record<WorkerKind, WorkerSpec> = {
     interview: {
-      about: "interview 访谈（需要 agent_id）",
+      about: "interview 写这个 Agent 的访谈大纲，交给你去问专家（需要 agent_id）",
       needsAgent: true,
-      handsOver: true,
       start: input => this.startInterview(input),
       finish: async () => undefined,
     },
@@ -159,7 +155,6 @@ export class AssistantService implements StudioOperations, InterviewDesk {
   constructor(private deps: AssistantDependencies) {
     this.definitions = assistantDefinitions();
     deps.products.attachAssistant({
-      grantedTools: (scope, session) => session.role === "voice" && session.assistantTaskId ? [this.handoffTool(session.assistantTaskId), this.addToAgentTool(scope)] : [],
       // Publishing is the Assistant's tool, after the Expert confirms. A build it started has no way to go live.
       withheldTools: async (_scope, session) => session.role === "generation" && (await this.deps.tasks.bySession(session.id))?.kind === "build" ? ["corpus_upload"] : [],
       opened: (scope, workspace) => this.observe(scope.creatorId, workspace),
@@ -192,10 +187,10 @@ export class AssistantService implements StudioOperations, InterviewDesk {
    * The Expert said something in a chat: it steers the Assistant's Run or starts one, atomically. `id` is the key a retry
    * reuses, so a platform event delivered twice is one message. `system` is for what the Expert did without typing it, such as a button.
    */
-  async hear(accountId: string, input: { id: string; source: ExpertSource; parts: ContentPart[]; messageRef?: string; system?: boolean; /** Someone the Expert authorized, not the Expert: where the Expert was last is unchanged. */ guest?: true }): Promise<SentMessage> {
+  async hear(accountId: string, input: { id: string; source: ExpertSource; parts: ContentPart[]; messageRef?: string; system?: boolean }): Promise<SentMessage> {
     // `sys:` ids are the Assistant's own to itself: a client's key cannot be one, or its message would be hidden as news.
     if (!input.system && isSystemMessageId(input.id)) throw new ChatError("invalid_message_id", `A message id cannot start with ${SYSTEM_MESSAGE_PREFIX}.`, 400);
-    if (!input.system && !input.guest) await this.deps.state.expertSpoke(accountId, { source: input.source, at: new Date().toISOString(), ...(input.messageRef ? { messageRef: input.messageRef } : {}) });
+    if (!input.system) await this.deps.state.expertSpoke(accountId, { source: input.source, at: new Date().toISOString(), ...(input.messageRef ? { messageRef: input.messageRef } : {}) });
     const client = { client: input.source === "web" ? "web" as const : "im" as const };
     return input.system ? this.chat.sayAsSystem(accountId, textOf(input.parts), input.id).then(sent => sent) : this.chat.say(accountId, { id: input.id, parts: input.parts, client });
   }
@@ -214,21 +209,15 @@ export class AssistantService implements StudioOperations, InterviewDesk {
     return { name, sent };
   }
 
-  /** Task news the Assistant hears: what a worker finished, asked, or got stuck on. It waits while an interview holds the conversation. */
+  /** Task news the Assistant hears: what a worker finished, asked, or got stuck on. */
   async news(accountId: string, taskId: string, text: string, kind: "task" | "tick" = "task", key: string = randomUUID()): Promise<void> {
-    await this.toldItself(accountId, kind === "tick" ? `[日常检查 · 任务 ${taskId}] ${text}` : `[任务 ${taskId}] ${text}`, key, taskId);
+    await this.hearSystem(accountId, kind === "tick" ? `[日常检查 · 任务 ${taskId}] ${text}` : `[任务 ${taskId}] ${text}`, taskId, key);
   }
 
   /** Ingest settled a job for one of the Expert's Agents, whoever submitted it: the Assistant hears what came of each item. */
   async ingested(job: IngestJob): Promise<void> {
     const items = job.items.map(item => `- ${"url" in item.input ? item.input.url : item.input.name}：${item.status === "failed" ? `没成，${item.error ?? "没有原因"}` : `${item.status === "partial" ? "部分完成，" : ""}已放进 ${item.markdown_path ?? item.original_ref}`}`);
-    await this.toldItself(job.accountId, `[资料 ${job.id} · Agent ${job.productId}] Ingest ${job.status === "failed" ? "没做成" : "做完了"}：\n${items.join("\n")}`, `ingested:${job.id}`);
-  }
-
-  /** News waits while an interview holds the conversation, and reaches the Assistant once under its key. */
-  private async toldItself(accountId: string, line: string, key: string, taskId?: string): Promise<void> {
-    if (await this.deps.state.interview(accountId)) { await this.deps.state.hold(accountId, { id: key, text: line, ...(taskId ? { taskId } : {}) }); return; }
-    await this.hearSystem(accountId, line, taskId, key);
+    await this.hearSystem(job.accountId, `[资料 ${job.id} · Agent ${job.productId}] Ingest ${job.status === "failed" ? "没做成" : "做完了"}：\n${items.join("\n")}`, undefined, `ingested:${job.id}`);
   }
 
   private async hearSystem(accountId: string, text: string, taskId?: string, key?: string): Promise<void> {
@@ -271,28 +260,6 @@ export class AssistantService implements StudioOperations, InterviewDesk {
     }
   }
 
-  // ── Interview pass-through ─────────────────────────────────────────────
-
-  /**
-   * The Expert's words reach the interview while it holds the conversation. A file they sent is readable by it, and
-   * the interview decides, by common sense, whether it becomes the Agent's material: with add_to_agent, by the path it sees.
-   */
-  async tell(accountId: string, interview: Interview, text: string): Promise<void> {
-    const workspace = await this.workspace(accountId, interview.productId);
-    const files = (await this.materials.list(accountId)).filter(material => text.includes(material.chatPath));
-    let said = text;
-    const images: string[] = [];
-    for (const material of files) {
-      if (!material.bytes) continue;
-      const seen = `input/${material.kind === "image" ? "images" : "files"}/${material.name}`;
-      await workspace.store.put(interview.sessionId, seen, material.bytes, { actor: "host", mimeType: material.mimeType });
-      if (material.kind === "image") images.push(seen);
-      else said = said.replaceAll(material.chatPath, `${material.chatPath}（内容在 ${seen}）`);
-    }
-    // One step steers, queues or starts: a turn that is just ending takes the message on its next pass instead of refusing it.
-    await workspace.runtime.send(interview.sessionId, userMessage(said, images));
-  }
-
   /** A file's text in the Agent's manual input: where plain text goes. */
   private async writeManual(workspace: FactoryWorkspace, material: Material): Promise<string> {
     const path = `input/manual/${material.name}`;
@@ -329,77 +296,19 @@ export class AssistantService implements StudioOperations, InterviewDesk {
     return [...went, ...ingested.map(item => `${item} → ingest job ${id}，整理好会放进 input/manual`)];
   }
 
-  /** The interview's own add_to_agent: the same operation, for the Agent it is interviewing about. */
-  private addToAgentTool(scope: { creatorId: string; productId: string }): AgentTool {
-    return {
-      name: "add_to_agent",
-      label: "加进资料",
-      description: "专家发来的文件或链接，按常识（看文件名和内容）明显属于这位 Agent 的资料时，加进它的资料；只是发来随便看看的，不要加。放在哪里是自动的，不用你选。files 写文件在消息里显示的路径。",
-      parameters: Type.Object({ files: Type.Optional(Type.Array(Type.String(), { maxItems: 20 })), links: Type.Optional(Type.Array(Type.String(), { maxItems: 20 })), context: Type.Optional(Type.String({ maxLength: 2000 })) }),
-      execute: async (_id, raw) => {
-        const { files = [], links = [], context } = raw as { files?: string[]; links?: string[]; context?: string };
-        if (!files.length && !links.length) throw new Error("files 和 links 至少要给一个。");
-        const went = await this.addToAgent(scope.creatorId, scope.productId, { files, links, context });
-        return { content: [{ type: "text" as const, text: went.join("\n") }], details: {} };
-      },
-    };
-  }
-
+  /** The interview worker wrote the outline and stopped: the Assistant now asks the Expert and ticks it off. */
   private async interviewTurnEnded(task: AssistantTask, workspace: FactoryWorkspace, type: string): Promise<void> {
     const voice = await workspace.store.get(task.session!.sessionId);
-    const interview = await this.deps.state.interview(task.accountId);
-    const relayFrom = interview?.taskId === task.id ? interview.relayFrom : voice.messages.length;
-    const reply = finalText(voice.messages.slice(relayFrom));
-    if (reply) {
-      await this.chat.idle(task.accountId);
-      await this.relay(task.accountId, reply);
-      await this.deps.state.advanceInterview(task.accountId, task.id, voice.messages.length);
-    }
-    const latest = (await this.deps.tasks.get(task.id))!;
-    const handoff = typeof latest.payload.handoff === "string" ? latest.payload.handoff : undefined;
-    if (type === "voice.run_completed" && !handoff) return;
-    await this.endInterview(workspace, latest);
-    if (type === "voice.run_completed") {
-      await this.deps.tasks.update(task.id, { status: "done", summary: handoff });
-      await this.news(task.accountId, task.id, `访谈结束，交回给你。访谈那边的小结：${handoff}${outlineText(voice.todos)}`);
-    } else {
-      await this.block(task, voice.error ?? "访谈中断了");
-    }
-  }
-
-  /** The interview's words, as the Assistant says them: the conversation records them as its own reply. */
-  private async relay(accountId: string, reply: string): Promise<void> {
-    const sent = await this.chat.sayAsSystem(accountId, `${RELAY_MARK}${reply}`);
-    if (sent.outcome === "started") await this.deps.deliveries.owe(sent.runId, accountId);
-  }
-
-  private async endInterview(workspace: FactoryWorkspace, task: AssistantTask): Promise<void> {
-    await this.deps.state.endInterview(task.accountId, task.id);
-    await workspace.store.update(task.session!.sessionId, s => { if (s.assistantTaskId === task.id) delete s.assistantTaskId; });
-    // News that waited for the interview is now the Assistant's to hear.
-    for (const held of await this.deps.state.takeHeld(task.accountId)) await this.hearSystem(task.accountId, held.text, held.taskId, held.id);
-  }
-
-  private handoffTool(taskId: string): AgentTool {
-    return {
-      name: "handoff_to_assistant",
-      label: "交回助理",
-      description: "把对话交回助理。派活、查资料、写东西、发布，以及系统和工具的问题，都只有助理能处理。以下情况立刻调用，不要自己回答：专家要你查、搜、写、做任何访谈之外的事；专家问你能做什么、某个功能为什么不行；专家想停；大纲聊完且专家确认了。note 写：专家的原话和他要什么、聊到了哪、还剩哪几件。调用后本轮结束，不要再回复专家。",
-      parameters: Type.Object({ note: Type.String({ minLength: 1, maxLength: 600 }) }),
-      execute: async (_id, raw) => {
-        const { note } = raw as { note: string };
-        const task = await this.deps.tasks.get(taskId);
-        if (task) await this.deps.tasks.update(taskId, { payload: { ...task.payload, handoff: note.trim() } });
-        return { content: [{ type: "text" as const, text: "已交回助理。本轮到此结束。" }], details: {}, terminate: true };
-      },
-    };
+    await workspace.store.update(voice.id, s => { if (s.assistantTaskId === task.id) delete s.assistantTaskId; });
+    if (type !== "voice.run_completed") return this.block(task, voice.error ?? "访谈大纲没写成");
+    await this.deps.tasks.update(task.id, { status: "done", leaseExpiresAt: undefined });
+    await this.news(task.accountId, task.id, `访谈大纲写好了。接下来你自己在对话里一个一个问专家，用 tick_outline 勾掉聊完的项。${outlineText(voice.todos)}`);
   }
 
   // ── Tasks ──────────────────────────────────────────────────────────────
 
   describeWorker(kind: WorkerKind): string { return this.workers[kind].about; }
   needsAgent(kind: WorkerKind): boolean { return Boolean(this.workers[kind].needsAgent); }
-  handsOver(kind: WorkerKind): boolean { return Boolean(this.workers[kind].handsOver); }
 
   /** Start one piece of work. What it takes and how it ends is declared in this.workers. */
   async dispatch(accountId: string, kind: WorkerKind, productId: string | undefined, instruction: string, origin: TaskOrigin): Promise<AssistantTask> {
@@ -413,18 +322,25 @@ export class AssistantService implements StudioOperations, InterviewDesk {
 
   private async startInterview(input: WorkerStart): Promise<AssistantTask> {
     const { accountId, kind, instruction, origin } = input; const productId = input.productId!;
-    if (await this.deps.state.interview(accountId)) throw new Error("已经有一个访谈在进行，先结束它");
     const workspace = await this.workspace(accountId, productId);
     const voice = (await workspace.store.list()).find(session => session.role === "voice") ?? await workspace.store.create("voice");
     if (workspace.runtime.isRunning(voice.id)) throw new Error("这个 Agent 的访谈正在 Studio 里进行，稍后再试");
-    const task = await this.deps.tasks.create({ accountId, productId, kind, origin, session: { scope: "product", sessionId: voice.id }, payload: { instruction }, summary: `补访谈「${input.agentName}」` });
-    if (!await this.deps.state.startInterview(accountId, { taskId: task.id, productId, sessionId: voice.id, relayFrom: voice.messages.length })) {
-      await this.deps.tasks.update(task.id, { status: "done", summary: "已有访谈在进行" });
-      throw new Error("已经有一个访谈在进行，先结束它");
-    }
+    const task = await this.deps.tasks.create({ accountId, productId, kind, origin, session: { scope: "product", sessionId: voice.id }, payload: { instruction }, summary: `写「${input.agentName}」的访谈大纲`, leaseExpiresAt: lease() });
     await workspace.store.update(voice.id, s => { s.assistantTaskId = task.id; });
-    await workspace.runtime.start(voice.id, `[Hatch 助理请你做一次访谈]\n\n要了解的：${instruction}\n\n现在问第一个问题。`);
+    await workspace.runtime.start(voice.id, `[Hatch 助理请你写访谈大纲]\n\n要了解的：${instruction}`);
     return task;
+  }
+
+  /** The Assistant's judgement that one outline item is done. The outline is the interview session's todo list, the same one the interview worker writes. */
+  async tickOutline(accountId: string, productId: string, item: string): Promise<Todo[]> {
+    const workspace = await this.workspace(accountId, productId);
+    const voice = (await workspace.store.list()).find(session => session.role === "voice");
+    const wanted = item.trim();
+    const matches = (voice?.todos ?? []).filter(todo => todo.title === wanted || todo.title.includes(wanted));
+    if (matches.length !== 1) throw new Error(`${matches.length ? "这个说法对应不止一项" : "大纲里没有这一项"}：${wanted}。大纲现在是：${(voice?.todos ?? []).map(todo => todo.title).join("；") || "（空）"}`);
+    await workspace.store.update(voice!.id, s => { s.todos = s.todos.map(todo => todo === matches[0] || todo.title === matches[0]!.title ? { ...todo, status: "completed" as const } : todo); });
+    workspace.runtime.emit(voice!.id, "todos");
+    return (await workspace.store.get(voice!.id)).todos;
   }
 
   /** The interview outline is the interview session's todo list: one source, read wherever it is needed. */
@@ -602,8 +518,6 @@ export class AssistantService implements StudioOperations, InterviewDesk {
       return;
     }
     await desk.store.put(desk.sessionId, `${MATERIALS}公开资料.md`, Buffer.from(profile), { actor: "host" });
-    const interview = await this.deps.state.interview(task.accountId);
-    if (interview) await this.shareMaterials(task.accountId, interview.productId);
     await this.deps.tasks.update(task.id, { status: "done", leaseExpiresAt: undefined, outputRef: `assistant:${desk.sessionId}:${MATERIALS}公开资料.md` });
     await this.news(task.accountId, task.id, `公开资料读完了：\n${excerpt(profile)}\n\n把发现自然地接进对话，告诉专家你看过哪些来源，他可以说哪篇不算数。`);
   }
@@ -633,8 +547,7 @@ export class AssistantService implements StudioOperations, InterviewDesk {
   private async dailyCheck(accountId: string, timezone: string, now: Date): Promise<void> {
     const hour = localHour(timezone, now);
     if (hour < 10 || hour >= 20) return;
-    // Never interrupt a live conversation: no check during an interview or right after the Expert spoke.
-    if (await this.deps.state.interview(accountId)) return;
+    // Never interrupt a live conversation: no check right after the Expert spoke.
     const last = await this.deps.state.lastExpert(accountId);
     if (last && now.getTime() - Date.parse(last.at) < 30 * 60_000) return;
     // A message the Expert's chats cannot take now is not worth a model call.
@@ -654,7 +567,7 @@ export class AssistantService implements StudioOperations, InterviewDesk {
   // ── Studio and channel surfaces ───────────────────────────────────────
 
   /** What the chat shows: what the Expert said and what the Assistant said. System messages stay out. */
-  async view(accountId: string, options: { limit?: number; beforeCursor?: string } = {}): Promise<{ has_more: boolean; before_cursor?: string; messages: Array<{ id: string; role: "expert" | "assistant"; text: string; at: string; state?: "queued"; images?: string[]; attachments?: NonNullable<PublicMessage["attachments"]>; /** What the Assistant did inside a reply, in order. */ steps?: ReplySteps }>; tasks: AssistantTask[]; running: boolean; runId?: string; /** Why the last turn failed, until the next one starts. */ failure?: RunFailure; interviewing: boolean }> {
+  async view(accountId: string, options: { limit?: number; beforeCursor?: string } = {}): Promise<{ has_more: boolean; before_cursor?: string; messages: Array<{ id: string; role: "expert" | "assistant"; text: string; at: string; state?: "queued"; images?: string[]; attachments?: NonNullable<PublicMessage["attachments"]>; /** What the Assistant did inside a reply, in order. */ steps?: ReplySteps }>; tasks: AssistantTask[]; running: boolean; runId?: string; /** Why the last turn failed, until the next one starts. */ failure?: RunFailure }> {
     const [{ messages: lines, has_more, before_cursor }, status] = await Promise.all([this.chat.shown(accountId, options), this.chat.status(accountId)]);
     return {
       has_more, ...(before_cursor ? { before_cursor } : {}),
@@ -665,7 +578,6 @@ export class AssistantService implements StudioOperations, InterviewDesk {
       tasks: await this.deps.tasks.open(accountId),
       running: status.state === "running", ...(status.runId ? { runId: status.runId } : {}),
       ...(status.state === "failed" && status.error ? { failure: status.error } : {}),
-      interviewing: Boolean(await this.deps.state.interview(accountId)),
     };
   }
 
@@ -780,12 +692,13 @@ export class AssistantService implements StudioOperations, InterviewDesk {
     await store.put(workerId, "input/interview/TRANSCRIPT.md", Buffer.from(transcript), { actor: "host" });
   }
 
-  private report(scope: string, error: unknown): void { console.error(`[assistant ${scope}]`, safeError(error)); }
+  private report(scope: string, error: unknown): void { log.error("assistant_failed", { scope, error: safeError(error) }); }
 }
 
 /** The Assistant's own system prompt: its persona, and how it works with its tools. */
-export function assistantPrompt(): Promise<string> {
-  return readFile(fileURLToPath(new URL("../../prompts/assistant/ASSISTANT.md", import.meta.url)), "utf8");
+export async function assistantPrompt(): Promise<string> {
+  const read = (name: string) => readFile(fileURLToPath(new URL(`../../prompts/assistant/${name}`, import.meta.url)), "utf8");
+  return `${await read("ASSISTANT.md")}\n\n${await read("INTERVIEW_DONE.md")}`;
 }
 
 function assistantDefinitions(): AgentDefinitionSource {

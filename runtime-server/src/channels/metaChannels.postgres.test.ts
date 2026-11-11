@@ -39,9 +39,12 @@ async function isolated<T>(body: (pool: Pool) => Promise<T>): Promise<T> {
   }
 }
 
+/** The typing indicator starts in the background once the event is done. */
+const until = async (done: () => boolean) => { for (let i = 0; i < 100 && !done(); i += 1) await new Promise(resolve => setTimeout(resolve, 10)); };
+
 class RecordingTarget implements TargetHandler {
   handled: Inbound[] = [];
-  async handle(inbound: Inbound): Promise<Handled> { this.handled.push(inbound); return { replied: false }; }
+  async handle(inbound: Inbound): Promise<Handled> { this.handled.push(inbound); return { replied: false, runId: "run" }; }
   async linked() { return "linked"; }
 }
 
@@ -118,6 +121,7 @@ test("A message shows typing while the Agent works, and a typing failure changes
   await env.connect("PAGE1", "p1");
   await env.deliver({ object: "page", entry: [messaging("PAGE1", "m1", "PSID1", 1)] });
   assert.equal(env.target.handled.length, 1);
+  await until(() => calls.length > 0);
   assert.deepEqual(calls.map(call => call.body.sender_action), ["typing_on"]);
   assert.deepEqual(env.errors, []);
 }));
@@ -170,6 +174,7 @@ test("WhatsApp: a Connection an operator marked task-specific is answered throug
   await env.connect("W1", "p1", true);
   await env.deliver({ ...hi, entry: [{ id: "W1", changes: [{ field: "messages", value: { metadata: { phone_number_id: "PN1" }, messages: [{ from_user_id: "US.123", id: "wamid.1", timestamp: "1", type: "text", text: { body: "hi" } }] } }] }] });
   assert.equal(env.target.handled.length, 1);
+  await until(() => calls.length > 0);
   assert.equal(calls[0]?.body.typing_indicator.type, "text");
   await env.service.reply(env.target.handled[0]!.id, { text: "hello" });
   await env.service.drain();

@@ -9,12 +9,15 @@ import { PostgresOutbox, type Outbox } from "./outbox.js";
 import type { AssistantChannels, ChatGateway, TargetHandler, TargetKind } from "./ports.js";
 import { ChatReplies, FAILED } from "./productTarget.js";
 import { PostgresRateLimiter, type RateLimiter } from "./rateLimiter.js";
+import { keepTyping } from "./typing.js";
 import { ChannelRouter, type Claim, type SignIn } from "./router.js";
 import { CHANNEL_KINDS, mergeAlbum, type ChannelAdapter, type ChannelKind, type InboundEvent, type PullNotice } from "./types.js";
+import { log } from "../observability/log.js";
 
 /** A crashed process frees its event after this; a live one renews the lease every third of it while it works. */
 const INBOX_LEASE_MS = 30_000;
 const INBOX_ATTEMPTS = 5;
+const TYPING = { everyMs: 4_000, maxMs: 3 * 60_000 };
 const COMPACTING = "正在整理对话，稍等一下。\nTidying up our conversation, one moment.";
 
 export type ChannelStores = { connections: ConnectionRepository; inbox: Inbox; outbox: Outbox; limiter: RateLimiter };
@@ -31,8 +34,6 @@ export type ChannelStatus = {
   configured: boolean;
   /** What people call the account on the platform (a bot's username). */
   handle?: string;
-  /** Who the owner invited to their Assistant here. */
-  people: Array<{ id: string; label: string }>;
 };
 
 /**
@@ -116,12 +117,22 @@ export class ChannelService implements AssistantChannels {
       const rest = await this.inbox.siblings(item);
       const outcome = await this.router.route(rest.length ? { ...item, event: mergeAlbum(item.event, rest.map(part => part.event)) } : item);
       if (!await this.inbox.complete(item, outcome, rest.map(part => part.id), now())) this.report(new Error(`Lost the lease on ${item.channel} event ${item.id} before it was done: another worker has it`));
+      else if (outcome.runId && !outcome.replied) void this.showTyping(item, outcome.runId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const state = await this.inbox.retry(item, message, backoffMs(item.attempts), INBOX_ATTEMPTS, now());
       this.report(error);
       if (state === "failed") await this.giveUp(item, message);
     } finally { clearInterval(heartbeat); }
+  }
+
+  /** While the Run's reply is unsent, the sender sees that an answer is coming. The reply marks the event replied, which is what ends it. */
+  private async showTyping(item: InboxItem, runId: string): Promise<void> {
+    const adapter = await this.deps.hub.get(item.channel, item.scope).catch(() => undefined);
+    if (!adapter?.typing) return;
+    const { address, messageRef } = item.event;
+    await keepTyping(() => adapter.typing!(address, messageRef),
+      async () => (await this.inbox.waiting({ runId }, this.deps.now?.())).some(thread => thread.channel === item.channel && thread.scope === item.scope && thread.threadId === address.threadId), TYPING);
   }
 
   /** The last try failed: say so to the sender in plain words, never in the provider's, and log it as an error. */
@@ -134,7 +145,7 @@ export class ChannelService implements AssistantChannels {
     }).catch(this.report);
   }
 
-  private report = (error: unknown): void => this.deps.onError ? this.deps.onError(error) : console.error("[channels]", error instanceof Error ? error.message : error);
+  private report = (error: unknown): void => this.deps.onError ? this.deps.onError(error) : log.error("channels_failed", { error: error instanceof Error ? error.message : error });
 
   // ── Studio ─────────────────────────────────────────────────────────────
 
@@ -164,40 +175,29 @@ export class ChannelService implements AssistantChannels {
 
   async view(accountId: string, target: AgentTarget = STUDIO_TARGET): Promise<ChannelStatus[]> {
     const owned = await this.connections.owned(accountId);
-    const guests = target.kind === "assistant" ? await this.connections.guests(accountId) : [];
     return Promise.all(CHANNEL_KINDS.map(async kind => {
       const own = this.ownedFor(owned, kind, target);
       const adapter = await this.deps.hub.get(kind, own?.hasCredentials ? own.scope : this.deps.scopeOf(accountId, kind));
       return {
         kind, available: Boolean(adapter), linked: Boolean(own?.linked && own.state !== "revoked"), configured: Boolean(own?.hasCredentials && own.state !== "revoked"),
         ...(adapter?.handle ? { handle: adapter.handle } : {}),
-        people: guests.filter(guest => guest.channel === kind).map(({ id, label }) => ({ id, label })),
         ...(own ? { state: own.state } : {}), ...(own?.lastEventAt ? { lastEventAt: own.lastEventAt } : {}), ...(own?.linked && own.senderId ? { senderId: own.senderId } : {}),
       };
     }));
   }
 
-  /** The owner invites one more person to their Assistant: a single-use link to send them. */
-  async invite(accountId: string, kind: ChannelKind, label: string): Promise<{ code: string; url?: string }> {
-    const adapter = await this.deps.hub.get(kind, await this.scopeFor(accountId, kind, STUDIO_TARGET));
-    const code = adapter && await this.connections.invite(accountId, kind, label.replace(/[\[\]\r\n]/g, " ").trim().slice(0, 40) || "?", this.deps.now?.());
-    if (!adapter || !code) throw Object.assign(new Error(`${kind} is not connected.`), { status: 409, code: "channel_not_connected" });
-    const url = adapter.connectUrl(code) ?? adapter.chatUrl?.();
-    return { code, ...(url ? { url } : {}) };
-  }
-
-  dismiss(accountId: string, kind: ChannelKind, identityId: string): Promise<boolean> { return this.connections.dismiss(accountId, kind, identityId); }
-
   /**
-   * Someone the platform vouched for (a sign-in that named them) is bound to the Assistant, as its owner or as the guest an invite let in,
+   * Someone the platform vouched for (a sign-in that named them) is bound to the Assistant as its owner,
    * and told so in the chat they came from. Only our own shared account does this: the chat is the sender's own.
    */
-  async admit(kind: ChannelKind, who: { senderId: string; threadId: string }, grant: { account: string } | { invite: string }): Promise<void> {
+  async admit(kind: ChannelKind, who: { senderId: string; threadId: string }, accountId: string): Promise<void> {
     const adapter = await this.deps.hub.get(kind);
     if (!adapter) throw Object.assign(new Error(`${kind} is not available.`), { status: 503, code: "channel_unavailable" });
-    const code = "invite" in grant ? grant.invite : await this.connections.issueCode(grant.account, kind, STUDIO_TARGET, this.deps.now?.());
+    const code = await this.connections.issueCode(accountId, kind, STUDIO_TARGET, this.deps.now?.());
+    // A sign-in knows the user, not the chat: where the platform's DM is not the user's id, the adapter says where it is.
+    if (adapter.directThread) who = { ...who, threadId: await adapter.directThread(who.senderId) };
     const linked = await this.connections.redeem(kind, adapter.scope, code, who, this.deps.now?.());
-    if (!linked) throw Object.assign(new Error("This invite has expired or was already used."), { status: 410, code: "invite_expired" });
+    if (!linked) throw Object.assign(new Error("This link code has expired."), { status: 410, code: "link_expired" });
     await this.dispatcher.send({ connectionId: linked.id, channel: kind, scope: linked.scope, address: who, kind: "notice", message: { text: await this.router.greeting(linked) } });
   }
 

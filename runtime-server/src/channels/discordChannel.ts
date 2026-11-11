@@ -51,6 +51,16 @@ export class DiscordChannel implements ChannelAdapter {
     return { botId: me.id, username: me.username };
   }
 
+  /** A DM is a channel of its own: Discord opens it, or returns the one it already has, for this user. */
+  async directThread(senderId: string): Promise<string> {
+    const response = await this.fetchImpl(`${API}/users/@me/channels`, {
+      method: "POST", headers: { authorization: `Bot ${this.credentials.token}`, "content-type": "application/json" }, body: JSON.stringify({ recipient_id: senderId }), signal: AbortSignal.timeout(15_000),
+    });
+    const channel = await response.json().catch(() => ({})) as Json;
+    if (!response.ok || !channel.id) throw new Error(`Discord did not open a DM with ${senderId}: ${channel.message ?? response.status}`);
+    return channel.id;
+  }
+
   listen(onEvents: (events: InboundEvent[]) => Promise<void>, signal: AbortSignal): Promise<void> {
     return listenDiscord({
       token: this.credentials.token, session: this.session, connect: this.connect, signal,

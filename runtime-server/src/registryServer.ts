@@ -131,6 +131,10 @@ import { accountAvatarApplicationServiceFromEnvironment, MAX_ACCOUNT_AVATAR_BYTE
 import {
   httpRequestLimitOptionsFromEnvironment,
 } from "./registryRequestLimits.js";
+import { bindContext } from "./observability/context.js";
+import { startObservability } from "./observability/start.js";
+import { observed } from "./observability/http.js";
+import { log } from "./observability/log.js";
 
 export type RegistryServer = { server: http.Server; close: () => Promise<void> };
 export const CREATOR_FACTORY_JSON_BODY_MAX_BYTES = 32 * 1024 * 1024;
@@ -305,7 +309,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       webhookSecret: environment.HATCH_TELEGRAM_WEBHOOK_SECRET?.trim() || undefined,
     });
     // The bot posts here, and only here: set at every start, so a changed origin or secret needs no other step.
-    if (telegram.available()) void telegram.setWebhook(`${telegramOrigin}/v1/channels/telegram/webhook`, environment.HATCH_TELEGRAM_WEBHOOK_SECRET!.trim()).catch(error => console.error("[telegram webhook]", safeError(error)));
+    if (telegram.available()) void telegram.setWebhook(`${telegramOrigin}/v1/channels/telegram/webhook`, environment.HATCH_TELEGRAM_WEBHOOK_SECRET!.trim()).catch(error => log.error("telegram_webhook_failed", { error: safeError(error) }));
     const line = new LineChannel({
       channelSecret: environment.HATCH_LINE_CHANNEL_SECRET?.trim() || undefined,
       accessToken: environment.HATCH_LINE_CHANNEL_ACCESS_TOKEN?.trim() || undefined,
@@ -359,7 +363,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     let channels!: ChannelService;
     const platformLogin = new PlatformLogin({
       providers, store: await PostgresLoginStore.open(registryPool), accounts, limiter: stores.limiter, origin: telegramOrigin,
-      admit: (kind, account, subject, claim) => channels.admit(kind, { senderId: subject, threadId: subject }, claim.invite ? { invite: claim.invite } : { account: account.id }),
+      admit: (kind, account, subject, claim) => channels.admit(kind, { senderId: subject, threadId: subject }, account.id),
     });
     const catalog = registryAgentCatalog(registryContext);
     // Chat runs in the Runtime process: the channel layer reaches it with its own service token, and never otherwise.
@@ -372,7 +376,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     channels = new ChannelService({
       ...stores, hub, scopeOf, ownsProduct, gateway: routed,
       audienceOf: (kind, target) => target.kind === "product" && isPerProduct(CREDENTIAL_FORMS[kind]) ? "public" : "self",
-      signIn: (kind, senderId, invite) => platformLogin.claimLink(kind, senderId, invite),
+      signIn: (kind, senderId) => platformLogin.claimLink(kind, senderId),
       // A platform id on our shared bot belongs to one Hatch account: linking from an account that is not its own is refused.
       claim: async (kind, scope, accountId, senderId) => !["telegram", "line", "discord"].includes(kind) || scope !== "" || await accounts.linkIdentity(accountId, kind, senderId),
     });
@@ -408,7 +412,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     const tools = studioTools(assistant);
     for (const definition of studioToolDefinitions(tools)) toolRegistry.set(definition.name, definition);
     const assistantChat = new AssistantChat({
-      repository: conversations, store: transcripts, chatAssets, state: assistantState, tools, desk: assistant,
+      repository: conversations, store: transcripts, chatAssets, state: assistantState, tools,
       assetStore: new RuntimeAssetStore(path.join(factoryRoot, "assistant-assets")),
       history: new LegacyAssistantHistory({ backend: accountId => new PostgresWorkbenchBackend(registryPool, `assistant:${accountId}`), state: assistantState, store: transcripts }),
       prompt: assistantPrompt, liveState: accountId => assistant.liveState(accountId), env: environment,
@@ -427,19 +431,19 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     channelListeners = new ChannelListeners({
       hub, connections: stores.connections, exclusive: postgresExclusive(registryPool),
       accept: (adapter, events) => channels.accept(adapter, events),
-      onError: (key, error) => console.error(`[channel ${key}]`, safeError(error)),
+      onError: (key, error) => log.error("channel_listener_failed", { channel: key, error: safeError(error) }),
     });
     channelListeners.start();
     // Credentials that expire (Instagram's 60-day tokens) are renewed before they do.
-    if (seal) { credentialRefresher = new CredentialRefresher({ hub, connections: stores.connections, seal, onError: (key, error) => console.error(`[credentials ${key}]`, safeError(error)) }); credentialRefresher.start(); }
-    assistantTick = setInterval(() => void assistant.tick().catch(error => console.error("[assistant tick]", error)), 60_000);
+    if (seal) { credentialRefresher = new CredentialRefresher({ hub, connections: stores.connections, seal, onError: (key, error) => log.error("credential_refresh_failed", { connection: key, error: safeError(error) }) }); credentialRefresher.start(); }
+    assistantTick = setInterval(() => void assistant.tick().catch(error => log.error("assistant_tick_failed", { error })), 60_000);
     assistantTick.unref();
   }
-  const server = http.createServer((request, response) => {
+  const server = http.createServer(observed((request, response) => {
     void route(request, response, registryContext)
       .catch((error) => {
         const status = errorStatus(error);
-        if (status >= 500) console.error("Registry request failed", error);
+        if (status >= 500) log.error("Registry request failed", { error, status });
         if (error instanceof ProductFilesError) {
           sendJson(response, status, {
             error: { code: error.code, message: error.message },
@@ -491,7 +495,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
               : error instanceof Error ? error.message : String(error)
         });
       });
-  });
+  }));
   server.headersTimeout = httpLimits.headersTimeoutMs;
   server.requestTimeout = httpLimits.requestTimeoutMs;
   server.keepAliveTimeout = 5_000;
@@ -1538,9 +1542,10 @@ async function authenticate(
   context: RegistryContext,
 ): Promise<Account | undefined> {
   const session = await context.accounts.resolveSession(bearer(request));
-  if (session) return session.account;
+  if (session) { bindContext({ account_id: session.account.id }); return session.account; }
   const claims = verifyAuthToken(bearer(request), context.authSecret);
   if (!claims) return undefined;
+  bindContext({ account_id: claims.sub });
   return context.accounts.getById(claims.sub);
 }
 
@@ -2013,9 +2018,10 @@ function sendError(response: http.ServerResponse, error: unknown, known: Record<
 function corsHeaders(): Record<string, string> { return { "access-control-allow-origin": "*", "access-control-allow-methods": "GET,POST,PUT,PATCH,OPTIONS", "access-control-allow-headers": "authorization,content-type,idempotency-key,x-hatch-creator-id,x-csrf-token", "access-control-expose-headers": "retry-after,x-hatch-page-limit,x-hatch-page-offset,x-hatch-next-offset" }; }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
+  startObservability("registry");
   createRegistryServerFromEnvironment().then(({ server }) => {
     console.log(`Hatch TypeScript Registry listening on ${JSON.stringify(server.address())}`);
-  }).catch((error) => { console.error(error); process.exitCode = 1; });
+  }).catch((error) => { log.error("registry_startup_failed", { error }); process.exitCode = 1; });
 }
 
 
@@ -2159,7 +2165,7 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
     await channels.accept(adapter, events);
     sendJson(response, 200, respond ?? { ok: true });
     // After the answer: the platform's deadline is short and the pull may be long.
-    if (pull) void channels.pull(adapter, pull).catch(error => console.error("[channels] pull failed", error instanceof Error ? error.message : error));
+    if (pull) void channels.pull(adapter, pull).catch(error => log.error("channels_pull_failed", { error: error instanceof Error ? error.message : error }));
     return;
   }
   const account = await authenticate(request, response, context);
@@ -2175,7 +2181,6 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
       ...(status.senderId ? { sender_id: status.senderId } : {}),
       ...(status.state ? { state: status.state } : {}),
       ...(status.handle ? { handle: status.handle } : {}),
-      ...(status.people.length ? { people: status.people } : {}),
       ...(CREDENTIAL_FORMS[status.kind] && !isTenantForm(CREDENTIAL_FORMS[status.kind]!) && !isPerProduct(CREDENTIAL_FORMS[status.kind]) && context.credentialSeal ? { own_app: true, webhook_url: `${context.publicOrigin}/v1/channels/${status.kind}/${account.id}/webhook` } : {}),
       ...(status.lastEventAt ? { last_event_at: status.lastEventAt } : {}),
     });
@@ -2302,19 +2307,6 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
   if (url.pathname === "/v1/creator/connections" && request.method === "GET") {
     sendJson(response, 200, { channels: await channelsView(bindingTarget(url.searchParams.get("product_id"))) }, { "cache-control": "no-store" });
     return;
-  }
-  // The owner of the Assistant invites one more person, and takes their access away again.
-  const people = url.pathname.match(/^\/v1\/creator\/connections\/([a-z]+)\/(invites|people\/([0-9a-f-]{36}))$/);
-  if (people && isChannelKind(people[1]!)) {
-    if (people[2] === "invites" && request.method === "POST") {
-      sendJson(response, 200, await channels.invite(account.id, people[1], String((await readJson(request)).label ?? "")));
-      return;
-    }
-    if (people[3] && request.method === "DELETE") {
-      await channels.dismiss(account.id, people[1], people[3]);
-      sendJson(response, 200, { channels: await channelsView() });
-      return;
-    }
   }
   const connection = url.pathname.match(/^\/v1\/creator\/connections\/([a-z]+)(\/connect)?$/);
   if (connection && isChannelKind(connection[1]!)) {

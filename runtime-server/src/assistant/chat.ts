@@ -21,7 +21,7 @@ import { ServerToolExecutor } from "../serverTools.js";
 import type { RuntimeStore, VisibleConversationMessage } from "../store.js";
 import { ToolBridge } from "../toolBridge.js";
 import type { ClientAttributes, ContentPart } from "../surfaces/contract.js";
-import { InterviewRelay, isRelayed, isSystemMessageId, SYSTEM_MESSAGE_PREFIX, type InterviewDesk } from "./relay.js";
+import { isSystemMessageId, SYSTEM_MESSAGE_PREFIX } from "./systemMessage.js";
 import type { AssistantStateRepository } from "./state.js";
 import { JournalFeed } from "./journalFeed.js";
 import { accountOfConversation, assistantConversationId, assistantFeedKey } from "./studioVocabulary.js";
@@ -30,6 +30,7 @@ import type { TaskOrigin } from "./tasks.js";
 import type { LegacyAssistantHistory } from "./history.js";
 import type { AssistantHost } from "../conversations/assistantConversation.js";
 import type { AssetDesk } from "../conversations/assets.js";
+import { log } from "../observability/log.js";
 
 /** The Assistant is one Agent, not a Product: its conversation is bound to the account, under this id. A UUID, as every Agent id is once the identity migration has run. */
 export const ASSISTANT_AGENT_ID = "a5515700-0000-4000-8000-000000000001";
@@ -49,7 +50,6 @@ export type AssistantChatDeps = {
   chatAssets: ChatAssets;
   state: AssistantStateRepository;
   tools: readonly StudioTool[];
-  desk: InterviewDesk;
   history: Pick<LegacyAssistantHistory, "importInto">;
   /** The Assistant's whole system prompt. */
   prompt: () => Promise<string>;
@@ -164,11 +164,10 @@ export class AssistantChat implements AssistantHost {
         const serverTools = new ServerToolExecutor(deps.toolTimeoutMs ?? 120_000);
         serverTools.setAttachments(deps.chatAssets.toolsFor(turn.conversation));
         serverTools.setStudio(new StudioToolRunner(deps.tools, { accountId, runId: turn.run.id, origin: () => this.origin(accountId) }));
-        const relayed = isRelayed(turn.input.message.content, Boolean(await deps.state.interview(accountId)));
         await runModelTurn(
           turn.input, turn.persistedUser, NO_SKILLS, turn.scope, turn.broker, serverTools,
           new ToolBridge(turn.broker, serverTools, () => turn.clientOf().client),
-          relayed ? new InterviewRelay({ accountId, state: deps.state, desk: deps.desk }) : this.agentRuntime(),
+          this.agentRuntime(),
           deps.store, deps.repository, deps.assetStore, turn.state, async message => turn.publish(message), deps.outputGuard ?? new PassThroughOutputGuard(),
           turn.signal, undefined, undefined, () => undefined, turn.clientOf, turn.claimSteered, turn.compaction,
           {
@@ -200,7 +199,7 @@ export class AssistantChat implements AssistantHost {
     });
   }
 
-  /** The Assistant's own words to itself: news from its workers, the daily check, an interview's reply. Never shown as the Expert's. */
+  /** The Assistant's own words to itself: news from its workers, the daily check, Never shown as the Expert's. */
   sayAsSystem(accountId: string, text: string, key: string = randomUUID()): Promise<SentMessage> {
     return this.say(accountId, { id: `${SYSTEM_MESSAGE_PREFIX}${key}`, parts: [{ type: "text", text }], client: { client: "web" } });
   }
@@ -336,7 +335,7 @@ export class AssistantChat implements AssistantHost {
 
   accountOf(conversationId: string): string | undefined { return accountOfConversation(conversationId); }
 
-  private report(accountId: string, error: unknown): void { (this.deps.report ?? ((id, cause) => console.error(`[assistant ${id}]`, cause)))(accountId, error); }
+  private report(accountId: string, error: unknown): void { (this.deps.report ?? ((id, cause) => log.error("assistant_failed", { account: id, error: cause })))(accountId, error); }
 }
 
 /** Studio shows a refusal from Chat as its own, with the status and code Studio's clients know. */
