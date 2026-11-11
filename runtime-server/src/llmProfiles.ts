@@ -1,8 +1,8 @@
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import type { StallLimits } from "./providerStall.js";
 
-export const RUNTIME_LLM_PROFILE_NAMES = ["kimi-k2.6", "kimi-k2.6-no-thinking", "deepseek-v4-flash", "gemini-api", "gemini-3.1-pro"] as const;
-export const FACTORY_LLM_PROFILE_NAMES = ["kimi-k2.6", "deepseek-v4-flash", "gemini-api", "gemini-3.1-pro"] as const;
+export const RUNTIME_LLM_PROFILE_NAMES = ["kimi-k2.6", "kimi-k2.6-no-thinking", "deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro"] as const;
+export const FACTORY_LLM_PROFILE_NAMES = ["kimi-k2.6", "deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro"] as const;
 export type FactoryLlmProfileName = (typeof FACTORY_LLM_PROFILE_NAMES)[number];
 export const LLM_PROFILE_NAMES = RUNTIME_LLM_PROFILE_NAMES;
 export type LlmProfileName = RuntimeLlmProfileName | FactoryLlmProfileName;
@@ -86,6 +86,24 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     reasoning: true,
     thinkingLevel: "low",
     normalizeEmptyToolCallContent: false
+  },
+  // The plain pro, not -highspeed: that is the variant the user picked. Verified against api.moonshot.cn: `thinking: disabled` is
+  // accepted by K3.1 and returns no reasoning, despite the docs saying K3 cannot turn reasoning off.
+  "kimi-k3.1-pro": {
+    name: "kimi-k3.1-pro",
+    provider: "moonshotai-cn",
+    providerName: "Moonshot Kimi",
+    api: "openai-completions",
+    model: "kimi-k3.1-pro",
+    baseUrl: "https://api.moonshot.cn/v1",
+    apiKeyEnv: "LLM_API_KEY",
+    contextWindow: 262_144,
+    maxTokens: 32_768,
+    reasoning: false,
+    thinkingLevel: "minimal",
+    thinkingType: "disabled",
+    normalizeEmptyToolCallContent: true,
+    stall: { firstEventMs: 45_000, silenceMs: 60_000, restarts: 2, backoffMs: 1_000 }
   },
   "gemini-3.1-pro": {
     name: "gemini-3.1-pro",

@@ -304,6 +304,23 @@ test("Kimi no-thinking profile sends the official disabled payload without tempe
   assert.equal(body.reasoning_effort, undefined);
 });
 
+test("Kimi K3.1 profile sends thinking disabled and no reasoning_effort", async () => {
+  const calls: Array<{ init: RequestInit }> = [];
+  const fetch: typeof globalThis.fetch = async (_input, init) => {
+    calls.push({ init: init ?? {} });
+    return streamResponse("pong");
+  };
+  const env = { HATCH_LLM_PROFILE: "kimi-k3.1-pro", LLM_API_KEY: "kimi-test-key" };
+
+  const agent = createPiAgent({ env, fetch, timeoutMs: 8_000 });
+  await agent.prompt("Say pong");
+
+  const body = JSON.parse(String(calls[0]!.init.body)) as Record<string, unknown>;
+  assert.equal(body.model, "kimi-k3.1-pro");
+  assert.deepEqual(body.thinking, { type: "disabled" });
+  assert.equal(body.reasoning_effort, undefined);
+});
+
 test("active profile rejects unknown names and missing provider credentials", () => {
   assert.throws(() => createPiModel({ env: { HATCH_LLM_PROFILE: "unknown" } }), /Unknown (?:Runtime )?HATCH_LLM_PROFILE/);
   assert.throws(
