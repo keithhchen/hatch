@@ -18,8 +18,9 @@ ARG VITE_SENTRY_DSN
 ENV VITE_SENTRY_DSN=${VITE_SENTRY_DSN}
 ARG VITE_RELEASE
 ENV VITE_RELEASE=${VITE_RELEASE}
-# Source maps are never served; delete them until CI uploads them to Sentry.
-RUN npm run build \
+# Source maps are never served: the publish build uploads them to Sentry with a BuildKit secret (never an ARG/ENV), then they are deleted.
+RUN --mount=type=secret,id=sentry_auth_token \
+  SENTRY_AUTH_TOKEN="$(cat /run/secrets/sentry_auth_token 2>/dev/null)" npm run build \
   && find dist -name "*.map" -delete \
   && if [ -n "$VITE_HATCH_WEB_MEDIA_BASE_URL" ]; then \
     rm -f dist/assets/web/*.mp4 public/assets/web/*.mp4; \

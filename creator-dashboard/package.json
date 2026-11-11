@@ -37,6 +37,7 @@
     "@hatch/chat": "file:../packages/chat",
     "@hatch/ui": "file:../packages/ui",
     "@playwright/test": "^1.62.1",
+    "@sentry/vite-plugin": "5.4.1",
     "@storybook/addon-a11y": "^10.5.7",
     "@storybook/addon-docs": "^10.5.8",
     "@storybook/react-vite": "^10.5.8",
