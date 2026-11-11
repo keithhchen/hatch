@@ -66,7 +66,7 @@ test("Agent workspace tabs and the create page have their own URLs", () => {
   assert.equal(creatorProductPath("p1", "publish"), "/studio/products/p1/publish");
   for (const tab of ["storefront", "readiness", "versions"]) assert.throws(() => creatorProductPath("p1", tab), RangeError);
   assert.equal(creatorProductPath("p1", "build"), "/studio/factory/p1");
-  assert.deepEqual(parseCreatorRoute("/studio/products/p1/candidates/c2"), { kind: "candidate", section: "products", productId: "p1", candidateId: "c2" });
+  assert.equal(parseCreatorRoute("/studio/products/p1/candidates/c2").kind, "not-found");
 });
 
 test("old Product URLs redirect to the matching Agent workspace tab", () => {

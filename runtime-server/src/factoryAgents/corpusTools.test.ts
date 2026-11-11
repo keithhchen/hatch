@@ -45,7 +45,7 @@ test("Generation uploads canonical files through Registry and the existing Runti
     const upload = tools.find(t => t.name === "corpus_upload")!;
     const exposedParameters = JSON.stringify(upload.parameters);
     assert.ok(!exposedParameters.includes("productId") && !exposedParameters.includes("product_id") && !exposedParameters.includes('"name"'));
-    const args = { title: "Argument review", opening_questions: [{ label: "Paste the argument to review.", required: true }, { label: "Who is the audience?", required: false }], promise: "Review an argument using its evidence.", skills: [{ path: "output/skills/review/SKILL.md", references: [{ path: "output/skills/review/references/evidence.md", kind: "method" }] }], knowledge: [] };
+    const args = { title: "Argument review", opening_questions: [{ label: "Paste the argument to review.", required: true }, { label: "Who is the audience?", required: false }], promise: "Review an argument using its evidence.", skills: [{ path: "output/skills/review/SKILL.md", references: [{ path: "output/skills/review/references/evidence.md", kind: "method" }] }] };
     const { title: _title, opening_questions: _questions, ...withoutStorefront } = args;
     await assert.doesNotReject(upload.execute("publish-without-storefront", withoutStorefront));
     await upload.execute("publish", args);
@@ -71,38 +71,9 @@ test("Generation uploads canonical files through Registry and the existing Runti
     assert.deepEqual(written.brief_spec.fields, [{ id: "q1", label: "Paste the argument to review.", required: true }, { id: "q2", label: "Who is the audience?", required: false }]);
     await assert.rejects(store.put(session.id, "output/CORPUS.md", Buffer.from("fake receipt"), { actor: "agent" }), /immutable/);
 
-    const bytes = Buffer.from("# Original source\r\n\r\nKeep every line,  spacing and 中文.\r\n");
-    const original = await store.put(session.id, "input/source.md", bytes, { actor: "user", mimeType: "text/markdown" });
-    const selected = { path: original.path, title: "Original", reason: "Canonical source" };
-    await assert.rejects(upload.execute("index-unavailable", { ...args, knowledge: [selected] }), /503.*knowledge_index_unavailable/);
-    await assert.rejects(upload.execute("index-retry", { ...args, knowledge: [selected] }), error => {
-      assert.match(String(error), /503.*knowledge_index_unavailable/);
-      assert.match(String(error), /Original files already uploaded/);
-      assert.ok(String(error).includes(digest(bytes)));
-      return true;
-    });
-    // Shared input/manual files are selectable, even when the stored name is NFD.
-    const manualName = "input/manual/プロフィール.md";
-    await store.put(session.id, manualName.normalize("NFD"), Buffer.from("# 手動\n"), { actor: "user", mimeType: "text/markdown" });
-    await assert.rejects(upload.execute("manual-file", { ...args, knowledge: [{ path: manualName.normalize("NFC"), title: "Manual", reason: "Uploaded by the Expert" }] }), /503.*knowledge_index_unavailable/);
-    await rm(path.join(store.root!, "manual"), { recursive: true, force: true });
-    await store.update(session.id, state => { state.knowledge = state.knowledge?.filter(k => !k.path.startsWith("input/manual/")); });
-    const withKnowledge = await store.get(session.id);
-    assert.equal(withKnowledge.knowledge?.length, 1);
-    assert.equal(withKnowledge.knowledge?.[0]?.sha256, digest(bytes));
-    assert.deepEqual((await store.read(session.id, original.path)).bytes, bytes);
-    // No index configured: real service failure, no new success receipt/live pointer.
-    assert.equal((await store.get(session.id)).corpus?.corpus_digest, saved.corpus.corpus_digest);
-    const stillLive = await resolver.resolve(auth.account.id, productId, saved.corpus.corpus_digest);
-    assert.equal(stillLive.corpus.knowledge.documents.length, 0);
-
-    // A different Product cannot select the uploaded source through this API.
-    const other = await registryRequest(env, "/v1/creator/products", { name: "Other product", promise: "Separate ownership scope" }) as { product: { product_id: string } };
-    await assert.rejects(registryRequest(env, `/v1/creator/products/${other.product.product_id}/registry`, { corpus: { system_instructions: system, skills: [], knowledge: [{ source: withKnowledge.knowledge![0]!.source, title: "Cross product" }], tools: [] } }), /422/);
     // Completion over quality: a missing file or a broken Skill is skipped and reported to the Builder, never blocking.
-    const lenient = await upload.execute("unknown-file", { ...args, knowledge: [{ ...selected, path: "input/invented.md" }], skills: [...args.skills, { path: "output/skills/missing/SKILL.md", references: [] }] }) as { details?: unknown; content?: Array<{ text?: string }> };
+    const lenient = await upload.execute("unknown-file", { ...args, skills: [...args.skills, { path: "output/skills/missing/SKILL.md", references: [] }] }) as { details?: unknown; content?: Array<{ text?: string }> };
     const reported = JSON.stringify(lenient);
-    assert.match(reported, /input\/invented\.md/);
     assert.match(reported, /output\/skills\/missing\/SKILL\.md/);
   } finally { await server.close(); await rm(root, { recursive: true, force: true }); }
 });

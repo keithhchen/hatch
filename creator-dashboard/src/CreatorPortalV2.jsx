@@ -20,7 +20,6 @@ import "./creatorPortalV2.css";
 
 const FactoryAgents = React.lazy(() => import("./FactoryAgents.jsx").then(({ FactoryAgents: Component }) => ({ default: Component })));
 const CreatorProductFiles = React.lazy(() => import("./CreatorSourceLibrary.jsx").then(({ CreatorProductFiles: Component }) => ({ default: Component })));
-const CreatorProductWorkspace = React.lazy(() => import("./CreatorProductWorkspace.jsx").then(({ CreatorProductWorkspace: Component }) => ({ default: Component })));
 const ApiKeysPage = React.lazy(() => import("./ApiKeysPage.jsx").then(({ ApiKeysPage: Component }) => ({ default: Component })));
 const StudioAssistant = React.lazy(() => import("./StudioAssistant.jsx").then(({ StudioAssistant: Component }) => ({ default: Component })));
 const StudioAgentWorkspace = React.lazy(() => import("./studioAgentWorkspace.jsx").then(({ StudioAgentWorkspace: Component }) => ({ default: Component })));
@@ -173,7 +172,6 @@ function CreatorRoute({ route, request, navigate, locale, t, profile }) {
   if (route.kind === "products") return <ProductsPage request={request} navigate={navigate} t={t} locale={locale} />;
   if (route.kind === "product-create") return lazy(<CreatorProductFiles navigate={navigate} locale={locale} />);
   if (route.kind === "agent") return lazy(<StudioAgentWorkspace key={route.productId} route={route} request={request} navigate={navigate} locale={locale} t={t} profile={profile} renderBuild={(product) => <FactoryAgents productId={route.productId} section={route.factorySection} agent={route.factoryAgent} navigate={navigate} locale={locale} />} />);
-  if (route.kind === "candidate") return lazy(<CreatorProductWorkspace request={request} navigate={navigate} productId={route.productId} tab="corpus" locale={locale} />);
   if (route.kind === "orders") return lazy(<StudioOrdersPage {...ops} />);
   if (route.kind === "order") return lazy(<StudioOrderDetailPage {...ops} orderId={route.orderId} />);
   if (route.kind === "api-keys") return lazy(<ApiKeysPage request={request} t={t} locale={locale} />);

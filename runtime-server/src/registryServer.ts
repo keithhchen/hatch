@@ -1339,66 +1339,6 @@ async function route(
     return;
   }
 
-  const productFilesMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/files(?:\/([^/]+))?$/);
-  if (productFilesMatch) {
-    const account = await authenticate(request, response, context);
-    if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
-    const productId = decodeURIComponent(productFilesMatch[1]!);
-    const product = await productForCreator(context, account.id, productId);
-    if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
-
-    if (productFilesMatch) {
-      const fileId = productFilesMatch[2] ? decodeURIComponent(productFilesMatch[2]) : undefined;
-      if (request.method === "GET" && !fileId) {
-        const files = await context.productFileStore.listFiles(account.id, productId);
-        sendJson(response, 200, { product_id: productId, files: files.map((file) => publicProductFile(file)) });
-        return;
-      }
-      if (request.method === "GET" && fileId) {
-        const file = await context.productFileStore.getFile(account.id, productId, fileId);
-        sendJson(response, 200, publicProductFile(file, url.searchParams.get("include_content") === "true"));
-        return;
-      }
-      if (request.method === "POST" && !fileId) {
-        const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
-        const encoded = typeof body.content_base64 === "string" ? body.content_base64 : "";
-        if (!encoded) throw new ProductFilesError("invalid_product_file", "content_base64 is required");
-        const bytes = decodeProductBase64(encoded);
-        const suppliedDigest = typeof body.sha256 === "string" ? body.sha256.trim().toLowerCase() : undefined;
-        const actualDigest = sha256Bytes(bytes);
-        if (suppliedDigest && suppliedDigest.replace(/^sha256:/, "") !== actualDigest) {
-          sendJson(response, 422, { error: { code: "digest_mismatch", message: "Uploaded content does not match sha256." } });
-          return;
-        }
-        const metadata = body.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata)
-          ? body.metadata as Record<string, unknown>
-          : {};
-        const file = await context.productFileStore.createFromUpload({
-          creatorId: account.id,
-          productId,
-          displayName: String(body.display_name ?? body.file_name ?? ""),
-          mediaType: typeof body.media_type === "string" ? body.media_type : undefined,
-          bytes,
-          idempotencyKey: request.headers["idempotency-key"]?.toString(),
-          metadata: {
-            ...metadata,
-            ...(body.source_kind !== undefined ? { source_kind: body.source_kind } : {}),
-            ...(body.source_ref !== undefined ? { source_ref: body.source_ref } : {}),
-            ...(body.source_url !== undefined ? { source_url: body.source_url } : {}),
-            ...(body.provenance !== undefined ? { provenance: body.provenance } : {}),
-            ...(body.selection_reason !== undefined ? { selection_reason: body.selection_reason } : {}),
-            ...(body.creator_approved !== undefined ? { creator_approved: body.creator_approved } : {})
-          }
-        });
-        sendJson(response, 201, publicProductFile(file), {
-          "idempotency-key": request.headers["idempotency-key"]?.toString() ?? ""
-        });
-        return;
-      }
-    }
-
-  }
-
   if (url.pathname === "/v1/public/products" && request.method === "GET") {
     const limit = boundedQueryInteger(url, "limit", 20, 1, 20);
     const offset = boundedQueryInteger(url, "offset", 0, 0, 100_000);
@@ -1836,33 +1776,6 @@ function publicProductPromise(product: { brief?: string; promise?: string }): st
   return product.promise ?? product.brief ?? "";
 }
 
-function publicProductFile(file: ProductFileView, includeContent = false): Record<string, unknown> {
-  const projection = {
-    kind: file.projection.kind,
-    media_type: file.projection.mediaType,
-    sha256: file.projection.sha256,
-    bytes: file.projection.bytes,
-    ...(includeContent && file.projectionContent !== undefined ? { content: file.projectionContent } : {}),
-    ...(includeContent && file.projectionBase64 !== undefined ? { base64: file.projectionBase64 } : {})
-  };
-  return {
-    id: file.id,
-    artifact_id: file.artifactId,
-    product_id: file.productId,
-    // This is the canonical input path for Node manifests. Callers must use
-    // it as returned; they must not reconstruct an OSS key from file.id.
-    path: file.projection.contentRef,
-    display_name: file.displayName,
-    media_type: file.mediaType,
-    sha256: file.originalSha256,
-    bytes: file.originalBytes,
-    projection,
-    metadata: file.metadata,
-    created_at: file.createdAt,
-    updated_at: file.updatedAt
-  };
-}
-
 function publicFactoryNodeRun(run: FactoryNodeRunView): Record<string, unknown> {
   return {
     node: run.node,
@@ -1930,21 +1843,6 @@ function requiredProductText(value: unknown, field: string, max: number): string
   const normalized = value.trim();
   if (normalized.length > max) throw new Error(`${field} is too long`);
   return normalized;
-}
-
-function decodeProductBase64(value: string): Buffer {
-  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(value) || value.length % 4 === 1) {
-    throw new ProductFilesError("invalid_product_file", "content_base64 is invalid");
-  }
-  const bytes = Buffer.from(value, "base64");
-  if (!bytes.length || bytes.length > 20 * 1024 * 1024) {
-    throw new ProductFilesError("invalid_product_file", "Uploaded file is empty or too large");
-  }
-  return bytes;
-}
-
-function sha256Bytes(bytes: Buffer): string {
-  return createHash("sha256").update(bytes).digest("hex");
 }
 
 function boundedQueryInteger(

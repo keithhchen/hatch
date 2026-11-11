@@ -69,7 +69,6 @@ export function parseCreatorRoute(pathname) {
     if (segments.length === 3 && RETIRED_PRODUCT_TABS.has(third)) return redirect(creatorFactoryPath(productId), "products");
     // Studio has no version history; Storefront, readiness, preview and version links open Publish.
     if ((segments.length === 3 && PUBLISH_ALIASES.has(third)) || (segments.length === 4 && third === "releases")) return redirect(creatorProductPath(productId, "publish"), "products");
-    if (segments.length === 4 && third === "candidates") return page("candidate", "products", { productId, candidateId: fourth });
     return page("not-found", "products");
   }
   if (head === "orders") {
@@ -88,7 +87,7 @@ export function parseCreatorRoute(pathname) {
 
 export function creatorRouteTitle(route) {
   const titles = {
-    assistant: "Assistant", home: "Overview", products: "Agents", "product-create": "New Agent", agent: "Agent", candidate: "Candidate review",
+    assistant: "Assistant", home: "Overview", products: "Agents", "product-create": "New Agent", agent: "Agent",
     orders: "Orders", order: "Order", earnings: "Earnings", "api-keys": "API keys"
   };
   return titles[route.kind] ?? "Studio";

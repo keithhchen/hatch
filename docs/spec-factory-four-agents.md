@@ -208,7 +208,7 @@ Knowledge 工作限定为选择原始文档并上传，不进行模型改写。
 ### 6.3 Tools
 
 - `list`、`read`、`write`：编写 System、Skills、工具说明和上传记录。
-- `corpus_upload`：读取已写入的 System、Skills、References 与选中的原始 Knowledge 文件路径，先复用 Product Files API 原样上传，按现有 `corpusOutputSchema` 装配，提交现有 Product Registry API，保存 `CORPUS.md`。JSON 正文与哈希由程序生成。
+- `corpus_upload`：读取已写入的 System、Skills 与 References，按现有 `corpusOutputSchema` 装配，提交现有 Product Registry API，保存 `CORPUS.md`。JSON 正文与哈希由程序生成。
 - 上传返回原件 ID、digest、投影路径和 Corpus 发布凭据；同步完成索引才算发布成功。
 
 `corpus_upload` 不接受模型重新生成的全文作为替代 Knowledge 原件。首次调用通过现有 Creator API 创建当前聊天的 Agent Product；后续使用同一真实身份。Product 创建和原件上传均使用幂等键，重试不重复创建。
@@ -272,7 +272,7 @@ Knowledge 只做选择和上传：选中值得保留的原始文档，调用上�
 不生成评测答案，不擅自修改原始材料。定义完成后调用 `corpus_upload`，保存真实上传凭据到 `CORPUS.md`。
 ```
 
-生成文件转为 Runtime 可加载资产时，复用既有 Corpus 格式与装配代码。JSON manifest 和 digest 由程序生成，不让模型手写伪 ID、哈希或另一种 Agent 格式。装配、上传和可执行状态必须分别显示。发布入口 `/v1/creator/products/:id/registry` 只接受 Agent Generation 的 System、Skills、Knowledge 提交；缺少 corpus 时明确拒绝，不读取旧 Node 最新结果。装配、索引和发布复用 CorpusPublisher，原始文件复用 `/v1/creator/products/:id/files`；拒绝非所属 Product 的 Knowledge 引用。`CORPUS.md` 记录已发布 Agent、文件及 Knowledge 的实际上传状态。既有 API 必需的摘要与发布标识只留在内部调用中，不成为 Factory 版本功能。
+生成文件转为 Runtime 可加载资产时，复用既有 Corpus 格式与装配代码。JSON manifest 和 digest 由程序生成，不让模型手写伪 ID、哈希或另一种 Agent 格式。装配、上传和可执行状态必须分别显示。发布入口 `/v1/creator/products/:id/registry` 只接受 Agent Generation 的 System、Skills 提交；缺少 corpus 时明确拒绝，不读取旧 Node 最新结果。装配、索引和发布复用 CorpusPublisher，`CORPUS.md` 记录已发布 Agent 与文件的实际上传状态。既有 API 必需的摘要与发布标识只留在内部调用中，不成为 Factory 版本功能。
 
 ## 7. Case Generation Agent
 
