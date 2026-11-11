@@ -304,7 +304,7 @@ test("Kimi no-thinking profile sends the official disabled payload without tempe
   assert.equal(body.reasoning_effort, undefined);
 });
 
-test("Kimi K3.1 profile sends thinking disabled and no reasoning_effort", async () => {
+test("Kimi K3.1 profile sends thinking enabled so reasoning stays out of the reply", async () => {
   const calls: Array<{ init: RequestInit }> = [];
   const fetch: typeof globalThis.fetch = async (_input, init) => {
     calls.push({ init: init ?? {} });
@@ -317,8 +317,7 @@ test("Kimi K3.1 profile sends thinking disabled and no reasoning_effort", async 
 
   const body = JSON.parse(String(calls[0]!.init.body)) as Record<string, unknown>;
   assert.equal(body.model, "kimi-k3.1-pro");
-  assert.deepEqual(body.thinking, { type: "disabled" });
-  assert.equal(body.reasoning_effort, undefined);
+  assert.deepEqual(body.thinking, { type: "enabled" });
 });
 
 test("active profile rejects unknown names and missing provider credentials", () => {
