@@ -75,7 +75,8 @@ test("a failed Run is a failed conversation with a stable code and no provider t
     stream.push({ type: "error", reason: "error", error: message }); stream.end(message); return stream;
   } }) });
   const ended: Array<Record<string, unknown>> = [];
-  runtime.events.on("event", event => { if (event.type === "run_end") ended.push(event); });
+  // The Run's status is saved before its end is emitted: wait for the event instead of assuming it already came.
+  const runEnded = new Promise<void>(resolve => runtime.events.on("event", event => { if (event.type === "run_end") { ended.push(event); resolve(); } }));
   const workspace: WorkerWorkspace = {
     store, runtime,
     entries: async () => agentEntries(await definitions.list(), await store.list()),
@@ -94,6 +95,7 @@ test("a failed Run is a failed conversation with a stable code and no provider t
     const { status, messages } = await research.messages();
     assert.deepEqual(status, outcome.status, "history shows the failed turn and why");
     assert.deepEqual(messages.map(m => m.role), ["user"], "the accepted message is kept");
+    await runEnded;
     assert.deepEqual(ended.map(e => [e.status, (e.error as { code: string }).code]), [["failed", "upstream_error"]], "the Run's end carries the failure");
     assert.doesNotMatch(JSON.stringify([status, ended]), /org-abc123|ak-secret9|suspended|exceeded_current_quota/);
   } finally { console.error = consoleError; await runtime.close(); await rm(root, { recursive: true, force: true }); }
