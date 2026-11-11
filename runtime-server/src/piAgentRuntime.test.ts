@@ -22,6 +22,7 @@ test("Pi thinking lifecycle preserves each event kind, content index and payload
   } as RunStart;
   const emitted: OutboundMessage[] = [];
   const queue = { push: (message: OutboundMessage) => emitted.push(message) };
+  const openThinking = new Set<number>();
   const handleEvent = Reflect.get(runtime, "handleEvent");
   assert.equal(typeof handleEvent, "function");
 
@@ -33,7 +34,8 @@ test("Pi thinking lifecycle preserves each event kind, content index and payload
     await Reflect.apply(handleEvent as (...args: unknown[]) => unknown, runtime, [{
       event: { type: "message_update", assistantMessageEvent },
       input,
-      queue
+      queue,
+      openThinking
     }]);
   }
 

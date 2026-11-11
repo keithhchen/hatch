@@ -170,6 +170,7 @@ export class PiAgentRuntime implements AgentRuntime {
       resourceRoots = activeSkillResourceRoots(visibleSkills, activeSkills);
     };
     const toolEvents = new Map<string, ToolEventState>();
+    const openThinking = new Set<number>();
     let terminalError: Error | undefined;
     let finalAssistant: AssistantMessage | undefined;
     let handedOver = false;
@@ -332,6 +333,7 @@ export class PiAgentRuntime implements AgentRuntime {
           ctx,
           queue,
           toolEvents,
+          openThinking,
           workspacePathPolicy,
           getActiveSkills: () => activeSkills,
           setActiveSkills,
@@ -496,6 +498,8 @@ export class PiAgentRuntime implements AgentRuntime {
     ctx: RunContext;
     queue: AsyncQueue<OutboundMessage>;
     toolEvents: Map<string, ToolEventState>;
+    /** Thinking blocks of the current message that started and have not ended yet. */
+    openThinking: Set<number>;
     workspacePathPolicy: WorkspacePathPolicy;
     getActiveSkills: () => ActivatedSkill[];
     setActiveSkills: (skills: ActivatedSkill[]) => void;
@@ -516,6 +520,7 @@ export class PiAgentRuntime implements AgentRuntime {
       ctx,
       queue,
       toolEvents,
+      openThinking,
       workspacePathPolicy,
       getActiveSkills,
       setActiveSkills,
@@ -530,6 +535,20 @@ export class PiAgentRuntime implements AgentRuntime {
       steer
     } = options;
 
+    // Every thinking block a message starts is ended with that message, also when the call is cut or aborted mid-thought:
+    // the next call numbers its blocks from 0 again.
+    if (event.type === "message_end" && event.message.role === "assistant" && openThinking.size) {
+      const content = (event.message as AssistantMessage).content;
+      for (const contentIndex of openThinking) {
+        const block = content[contentIndex];
+        queue.push({
+          type: "assistant.delta",
+          run_id: input.run_id,
+          delta: { kind: "thinking_end", contentIndex, content: block?.type === "thinking" ? block.thinking : "" }
+        });
+      }
+      openThinking.clear();
+    }
     // A call cut by a joining message is not a failure. What it wrote is kept as an interrupted reply: the Run ends with it
     // while the message stays unclaimed, and Chat runs again from that message with the partial reply in its history.
     if (steer?.cut && event.type === "message_end" && event.message.role === "assistant") {
@@ -550,6 +569,7 @@ export class PiAgentRuntime implements AgentRuntime {
           delta: { kind: "text", content: event.assistantMessageEvent.delta }
         });
       } else if (event.assistantMessageEvent.type === "thinking_start") {
+        openThinking.add(event.assistantMessageEvent.contentIndex);
         queue.push({
           type: "assistant.delta",
           run_id: input.run_id,
@@ -571,6 +591,7 @@ export class PiAgentRuntime implements AgentRuntime {
           }
         });
       } else if (event.assistantMessageEvent.type === "thinking_end") {
+        openThinking.delete(event.assistantMessageEvent.contentIndex);
         queue.push({
           type: "assistant.delta",
           run_id: input.run_id,
