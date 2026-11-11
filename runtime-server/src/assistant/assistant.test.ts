@@ -437,6 +437,23 @@ test("ingest submits one job for the resolved Agent with the file's original byt
   try { await assert.rejects(callTool(bare, "ingest", { links: ["https://example.com/a"] }), /Ingest 没有配置/); } finally { await bare.close(); }
 });
 
+test("A settled Ingest job reaches the Assistant once, with what came of each item", async () => {
+  const env = await setup({ model: () => ({ text: "资料好了" }) });
+  try {
+    const job = { id: "job-9", accountId: ACCOUNT, productId: PRODUCT, status: "done" as const, context: "", createdAt: "", updatedAt: "", items: [
+      { id: "i1", input: { name: "deck.pdf", bytes: 10 }, status: "ok" as const, markdown_path: "input/manual/deck.md" },
+      { id: "i2", input: { url: "https://example.com/a" }, status: "failed" as const, error: "页面打不开" },
+    ] };
+    await env.assistant.ingested(job);
+    await env.assistant.ingested(job);
+    await env.idle();
+    const heard = env.model.state.turns.flatMap(turn => turn.said).filter(text => text.includes("[资料 job-9"));
+    assert.equal(heard.length, 1, "the same job is heard once");
+    assert.match(heard[0]!, /deck\.pdf：已放进 input\/manual\/deck\.md/);
+    assert.match(heard[0]!, /https:\/\/example\.com\/a：没成，页面打不开/);
+  } finally { await env.close(); }
+});
+
 test("A picture reaches the model as pixels with a path label, and the page shows it", async () => {
   const env = await setup({ model: () => ({ text: "看到了" }) });
   try {

@@ -24,6 +24,7 @@ import { RELAY_MARK, SYSTEM_MESSAGE_PREFIX, isSystemMessageId, type InterviewDes
 import { ChatError } from "../chat/principal.js";
 import type { AssistantStateRepository, Interview } from "./state.js";
 import type { Material } from "./materials.js";
+import type { IngestJob } from "../ingest/job.js";
 import type { AgentOverview, StudioOperations, WorkerKind } from "./studioTools.js";
 
 const WORKER_LEASE_MS = 35 * 60_000;
@@ -211,8 +212,18 @@ export class AssistantService implements StudioOperations, InterviewDesk {
 
   /** Task news the Assistant hears: what a worker finished, asked, or got stuck on. It waits while an interview holds the conversation. */
   async news(accountId: string, taskId: string, text: string, kind: "task" | "tick" = "task", key: string = randomUUID()): Promise<void> {
-    const line = kind === "tick" ? `[日常检查 · 任务 ${taskId}] ${text}` : `[任务 ${taskId}] ${text}`;
-    if (await this.deps.state.interview(accountId)) { await this.deps.state.hold(accountId, { id: key, text: line, taskId }); return; }
+    await this.toldItself(accountId, kind === "tick" ? `[日常检查 · 任务 ${taskId}] ${text}` : `[任务 ${taskId}] ${text}`, key, taskId);
+  }
+
+  /** Ingest settled a job for one of the Expert's Agents, whoever submitted it: the Assistant hears what came of each item. */
+  async ingested(job: IngestJob): Promise<void> {
+    const items = job.items.map(item => `- ${"url" in item.input ? item.input.url : item.input.name}：${item.status === "failed" ? `没成，${item.error ?? "没有原因"}` : `${item.status === "partial" ? "部分完成，" : ""}已放进 ${item.markdown_path ?? item.original_ref}`}`);
+    await this.toldItself(job.accountId, `[资料 ${job.id} · Agent ${job.productId}] Ingest ${job.status === "failed" ? "没做成" : "做完了"}：\n${items.join("\n")}`, `ingested:${job.id}`);
+  }
+
+  /** News waits while an interview holds the conversation, and reaches the Assistant once under its key. */
+  private async toldItself(accountId: string, line: string, key: string, taskId?: string): Promise<void> {
+    if (await this.deps.state.interview(accountId)) { await this.deps.state.hold(accountId, { id: key, text: line, ...(taskId ? { taskId } : {}) }); return; }
     await this.hearSystem(accountId, line, taskId, key);
   }
 
