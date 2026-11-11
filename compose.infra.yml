@@ -37,7 +37,6 @@ services:
     command: ["--config", "/etc/vector/vector.yaml"]
     environment:
       HATCH_AXIOM_TOKEN: ${HATCH_AXIOM_TOKEN:-}
-      HATCH_AXIOM_ENDPOINT: ${HATCH_AXIOM_ENDPOINT:-}
       HATCH_AXIOM_DATASET: ${HATCH_AXIOM_DATASET:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
