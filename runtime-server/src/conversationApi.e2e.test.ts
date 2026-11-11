@@ -977,7 +977,9 @@ test("a message sent during a Run joins it, from any client, and is idempotent p
   await waitForCondition(async () => (await repository.getRun(conversationId, "run_steer"))?.status === "completed");
   const users = (await new RuntimeStore(dataDir).readConversation(conversationId)).filter((message) => message.role === "user").map((message) => message.content);
   assert.deepEqual(users, ["Find Hatch.", "Also check the docs."]);
-  // The reply to both messages is one Run's one final answer.
+  // The reply to both messages is one Run's one final answer. The Run is stored completed before its end reaches the socket.
+  await waitForSocket(firstMessages, (message) => message.type === "turn.completed");
+  await new Promise((resolve) => setTimeout(resolve, 100));
   assert.equal(firstMessages.filter((message) => message.type === "turn.completed").length, 1);
   first.close();
   second.close();
