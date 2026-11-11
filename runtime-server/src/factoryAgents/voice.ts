@@ -1,4 +1,5 @@
 import { WebSocket as ElevenWebSocket } from "ws";
+import { openObservation, type OpenObservation } from "../langfuse.js";
 import { createStreamingSttProvider, type StreamingSttProvider } from "./stt.js";
 type RuntimeEvent =
   | { type: "run.started"; agent: "interviewer"; conversationId: string; runId: string }
@@ -339,6 +340,8 @@ class ElevenTtsSocket {
   private resolveTurnFinal?: () => void;
   private turnError?: Error;
   private cancelled = false;
+  private trace?: OpenObservation;
+  private characters = 0;
 
   constructor(private readonly options: {
     apiKey: string;
@@ -355,6 +358,7 @@ class ElevenTtsSocket {
 
   start(): Promise<void> {
     this.cancelled = false;
+    this.trace = openObservation("tts.session", { type: "generation", provider: "elevenlabs", model: this.options.profile.ttsModel, metadata: { run_id: this.runId } });
     const params = new URLSearchParams({ model_id: this.options.profile.ttsModel, output_format: this.options.profile.audioFormat });
     const endpoint = `wss://api.elevenlabs.io/v1/text-to-dialogue/stream-input?${params}`;
     const socket = new ElevenWebSocket(endpoint, {
@@ -391,6 +395,7 @@ class ElevenTtsSocket {
         }
         if (message.error) {
           const error = new Error(message.error);
+          this.trace?.end(error);
           this.turnError = error;
           this.resolveTurnFinal?.();
           this.resolveTurnFinal = undefined;
@@ -427,6 +432,7 @@ class ElevenTtsSocket {
     if (this.cancelled) return;
     if (!this.socket || this.socket.readyState !== ElevenWebSocket.OPEN) throw new Error("ElevenLabs TTS socket is not open");
     this.turnError = undefined;
+    this.characters += text.length;
     const turnFinal = new Promise<void>((resolve) => { this.resolveTurnFinal = resolve; });
     this.socket.send(JSON.stringify({ inputs: [{ text, voice_id: this.options.voiceId, new_turn: true }], flush: true }));
     await turnFinal;
@@ -439,12 +445,19 @@ class ElevenTtsSocket {
     if (!this.socket || this.socket.readyState !== ElevenWebSocket.OPEN) return;
     this.socket.send(JSON.stringify({ close_socket: true }));
     await this.final;
+    this.endTrace();
     closeElevenSocket(this.socket);
     this.socket = undefined;
   }
 
+  private endTrace(): void {
+    this.trace?.update({ metadata: { characters: this.characters } });
+    this.trace?.end();
+  }
+
   close(): void {
     this.cancelled = true;
+    this.endTrace();
     this.resolveTurnFinal?.();
     this.resolveTurnFinal = undefined;
     this.resolveFinal?.();

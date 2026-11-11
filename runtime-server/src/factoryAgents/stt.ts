@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
+import { openObservation } from "../langfuse.js";
 
 export type StreamingSttCallbacks = {
   onPartial: (text: string) => void;
@@ -18,11 +19,32 @@ type SttProviderOptions = StreamingSttCallbacks & {
   environment?: NodeJS.ProcessEnv;
 };
 
+export const QWEN_STT_MODEL = "qwen-audio-3.0-asr-flash-streaming";
+
+/** One recognition session as one generation: opened at start, closed at close, with the audio sent and any error. */
+export class TracedStreamingStt implements StreamingSttProvider {
+  private session?: ReturnType<typeof openObservation>;
+  private audioBytes = 0;
+  constructor(private readonly provider: string, private readonly inner: StreamingSttProvider) {}
+  get model() { return this.inner.model; }
+  async start(): Promise<void> {
+    this.session = openObservation("stt.session", { type: "generation", provider: this.provider, model: this.inner.model });
+    try { await this.inner.start(); } catch (error) { this.session.end(error); this.session = undefined; throw error; }
+  }
+  sendAudio(chunk: Buffer): void { this.audioBytes += chunk.length; this.inner.sendAudio(chunk); }
+  close(): void {
+    this.inner.close();
+    this.session?.update({ metadata: { audio_seconds: this.audioBytes / 32_000 } });
+    this.session?.end();
+    this.session = undefined;
+  }
+}
+
 export function createStreamingSttProvider(options: SttProviderOptions): StreamingSttProvider {
   const environment = options.environment ?? process.env;
   const provider = (environment.HATCH_FACTORY_STT_PROVIDER?.trim() || "qwen").toLowerCase();
-  if (provider === "qwen") return new QwenStreamingStt({ ...options, environment });
-  if (provider === "elevenlabs") return new ElevenLabsStreamingStt({ ...options, environment });
+  if (provider === "qwen") return new TracedStreamingStt(provider, new QwenStreamingStt({ ...options, environment }));
+  if (provider === "elevenlabs") return new TracedStreamingStt(provider, new ElevenLabsStreamingStt({ ...options, environment }));
   throw new Error(`Unsupported Factory STT provider: ${provider}`);
 }
 
@@ -37,7 +59,7 @@ export class QwenStreamingStt implements StreamingSttProvider {
   private cancelled = false;
 
   constructor(options: SttProviderOptions & { environment: NodeJS.ProcessEnv }) {
-    this.model = options.environment.HATCH_FACTORY_QWEN_STT_MODEL?.trim() || "qwen-audio-3.0-asr-flash-streaming";
+    this.model = options.environment.HATCH_FACTORY_QWEN_STT_MODEL?.trim() || QWEN_STT_MODEL;
     this.apiKey = options.environment.DASHSCOPE_API_KEY?.trim() || "";
     this.endpoint = options.environment.HATCH_FACTORY_QWEN_STT_URL?.trim() || "wss://dashscope.aliyuncs.com/api-ws/v1/inference";
     this.maxSentenceSilence = parsePositiveInteger(options.environment.HATCH_FACTORY_VOICE_PAUSE_MS, 2500);

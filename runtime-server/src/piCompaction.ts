@@ -1,6 +1,7 @@
 import { createCompactionSummaryMessage, estimateTokens, generateSummaryWithUsage, type AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Model, Models } from "@earendil-works/pi-ai";
 import type { Entry, SummarizeInput } from "./compactionStrategy.js";
+import { traceObservation } from "./langfuse.js";
 
 /** The Pi side of the compaction port, shared by Chat's adapter and Studio's. */
 
@@ -59,7 +60,15 @@ export function summarizeWithPi<M>(
   return async ({ messages, previous, instructions, signal }) => {
     const { models: registry, model } = models();
     const asText = messages.map(toPi).filter((message) => !textOf(message).startsWith("<system-reminder>"));
-    const result = await generateSummaryWithUsage(asText, registry, model, reserveTokens, signal, instructions, previous);
+    // A span, not a generation: the summary request is already a generation underneath, and cost counts once.
+    const result = await traceObservation(
+      "compaction.summarize",
+      { model: model.id, provider: model.provider, metadata: { messages: asText.length, has_previous_summary: Boolean(previous) } },
+      () => generateSummaryWithUsage(asText, registry, model, reserveTokens, signal, instructions, previous),
+      outcome => outcome.ok
+        ? { output: outcome.value.text, metadata: { usage: outcome.value.usage } }
+        : { failed: outcome.error.message }
+    );
     if (!result.ok) throw result.error;
     return result.value.text;
   };

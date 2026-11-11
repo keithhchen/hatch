@@ -1,6 +1,7 @@
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { createAssistantMessageEventStream, type Api, type AssistantMessage, type AssistantMessageEvent, type Model } from "@earendil-works/pi-ai";
 import { UpstreamError } from "./errors/upstream.js";
+import { labelAttempt } from "./langfuse.js";
 
 /** How long a provider call may say nothing: before its first event, and between any two events. */
 export type StallLimits = {
@@ -77,7 +78,7 @@ export const withStallGuard = (inner: StreamFn, limits: StallLimits = DEFAULT_ST
       const signal = options?.signal ? AbortSignal.any([options.signal, request.signal]) : request.signal;
       const open = await within((async (): Promise<Opened> => {
         try {
-          const events = (await inner(model, context, { ...options, signal }))[Symbol.asyncIterator]();
+          const events = (await labelAttempt(attempt, () => inner(model, context, { ...options, signal })))[Symbol.asyncIterator]();
           return { events, first: await events.next() };
         } catch (failure) { return { failure }; }
       })(), limits.firstEventMs);
