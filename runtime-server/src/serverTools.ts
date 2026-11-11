@@ -130,24 +130,8 @@ export class ServerToolExecutor {
       const payload = await readBoundedJsonObject(response) as { results?: unknown };
       return { query, results: Array.isArray(payload.results) ? payload.results.slice(0, Math.max(1, Math.min(limit, 10))) : [] };
     }
-    if (process.env.NODE_ENV === "production") {
-      throw new Error("hatch.web_search is not configured (set HATCH_WEB_SEARCH_URL)");
-    }
-    return {
-      query,
-      results: [
-        {
-          title: "Hatch runtime architecture",
-          url: "https://example.invalid/hatch/runtime",
-          snippet: "Server-side tools run on the runtime server; filesystem, shell, and git tools are brokered to the local client."
-        },
-        {
-          title: "Brokered local tool execution",
-          url: "https://example.invalid/hatch/local-tools",
-          snippet: "The agent can request local tools, but the client validates permissions and executes them locally."
-        }
-      ].slice(0, Math.max(1, Math.min(limit, 10)))
-    };
+    // Not configured is an honest unavailable error in every environment, never made-up results.
+    throw new Error("hatch.web_search is not configured (set HATCH_WEB_SEARCH_URL or HATCH_WEB_SEARCH_API_KEY)");
   }
 
   private async bochaSearch(

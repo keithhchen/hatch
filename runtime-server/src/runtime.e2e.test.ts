@@ -7,6 +7,7 @@ import path from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { WebSocket } from "ws";
 import { DeterministicAgentRuntime, type AgentRuntime } from "./agentRuntime.js";
+import { useSearchFixture } from "./searchFixture.testkit.js";
 import { buildCompactedHistory, RUNTIME_CONTEXT_PREFIX, runtimeMessagesTranscript, SUMMARY_PREFIX } from "./compaction.js";
 import { clientToolTimeoutMs, createRuntimeServer, scopedConversationId, type RuntimeServer } from "./index.js";
 import {
@@ -824,6 +825,8 @@ test("Output Guard provider errors degrade to a normal committed response", asyn
   ]);
   socket.close();
 });
+
+useSearchFixture();
 
 beforeEach(() => {
   process.env.HATCH_TS_SKILLS_ROOT = path.resolve("skills");
