@@ -171,7 +171,7 @@ export class AssistantChat implements AssistantHost {
           new ToolBridge(turn.broker, serverTools, () => turn.clientOf().client),
           this.agentRuntime(),
           deps.store, deps.repository, deps.assetStore, turn.state, async message => turn.publish(message), deps.outputGuard ?? new PassThroughOutputGuard(),
-          turn.signal, undefined, undefined, () => undefined, turn.clientOf, turn.claimSteered, turn.compaction,
+          turn.signal, undefined, undefined, () => undefined, turn.clientOf, turn.claimSteered, turn.onSteer, turn.compaction,
           {
             agent: { systemPrompt: await this.systemPrompt(), localTools: [], externalTools: studioToolNames(deps.tools), externalToolDefinitions: [] },
             liveState: () => deps.liveState(accountId).catch(error => { this.report(accountId, error); return "<当前状态>\n这次没有读到当前状态，需要时用 list_agents 和 list_tasks 查。\n</当前状态>"; }),

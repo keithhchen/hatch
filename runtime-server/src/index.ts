@@ -818,7 +818,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
           createRuntime(), conversationStore, conversationRepository, assetStore, turn.state,
           async (message) => turn.publish(message), outputGuard, turn.signal,
           commerceEventSink, deliveryAccountingOutbox, scheduleDeliveryReconciliation,
-          turn.clientOf, turn.claimSteered, turn.compaction
+          turn.clientOf, turn.claimSteered, turn.onSteer, turn.compaction
         );
       } catch (error) {
         await failRun(turn, error);
@@ -835,7 +835,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     toolTimeoutMs: options.clientToolTimeoutMs ?? clientToolTimeoutMs(),
     compactionStrategy: options.compactionStrategy,
     // With a shared database every instance sees every Run's live events.
-    ...(conversationStore instanceof PostgresStore ? { relay: new PostgresEventRelay(conversationStore.pool as never), stops: new PostgresStopRelay(conversationStore.pool as never) } : {})
+    ...(conversationStore instanceof PostgresStore ? { relay: new PostgresEventRelay(conversationStore.pool as never), stops: new PostgresStopRelay(conversationStore.pool as never), steers: new PostgresStopRelay(conversationStore.pool as never, { channel: "hatch_run_steers" }) } : {})
   });
   void repositoryReady.then(() => chat.start()).catch(() => undefined);
   const edge: ChatEdge = {

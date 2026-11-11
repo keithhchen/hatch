@@ -110,6 +110,7 @@ async function runModelTurnInternal(
   scheduleDeliveryReconciliation: () => void,
   clientOf: () => ClientAttributes,
   claimSteered: () => Promise<ConversationMessage[]>,
+  onSteer: (listener: () => void) => () => void,
   compaction: TurnCompaction,
   profile?: TurnProfile
 ): Promise<void> {
@@ -401,7 +402,8 @@ async function runModelTurnInternal(
       ),
       abortSignal,
       clientAttributes: clientOf,
-      claimSteered
+      claimSteered,
+      onSteer
     });
     // A provider that refuses the request as too large is answered by compacting, a bounded number of times, and continuing.
     const attempts = async function* (): AsyncGenerator<OutboundMessage> {

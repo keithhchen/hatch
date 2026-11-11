@@ -216,7 +216,7 @@ test("a message refused at admission ends its Run through the terminator: the jo
   const service = new ChatService<object>({
     repository: lookingRepository,
     terminator: new RunTerminator(repository, hub),
-    supervisor: { adopt: () => undefined, executorId: "exec-a", holdsConversation: () => false },
+    supervisor: { adopt: () => undefined, executorId: "exec-a", holdsConversation: () => false, steered: () => undefined },
     hub,
     admission: { reserve: () => { reserved++; throw new ChatError("capacity", "The server is at capacity.", 429); } },
     registry: new RunRegistry<object>()

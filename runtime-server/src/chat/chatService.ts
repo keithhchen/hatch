@@ -81,7 +81,7 @@ export class ChatService<Scope> {
     repository: Pick<ConversationRepository, "acceptSubmission" | "acceptRetry" | "getActiveRun" | "getRunByClientMessageId" | "hasAcceptedMessage">;
     /** A Run that cannot be admitted ends here, like any other: observers and the journal both hear of it. */
     terminator: Pick<RunTerminator, "end">;
-    supervisor: Pick<RunSupervisor, "adopt" | "executorId" | "holdsConversation">;
+    supervisor: Pick<RunSupervisor, "adopt" | "executorId" | "holdsConversation" | "steered">;
     hub: RunEventHub;
     admission: RunAdmission;
     registry: RunRegistry<Scope>;
@@ -169,6 +169,8 @@ export class ChatService<Scope> {
       if (outcome !== "replayed") {
         hub.publish(command.conversation.id, { type: "message.accepted", conversation_id: command.conversation.publicId, run_id: accepted.run.id, client_message_id: command.clientMessageId, outcome });
         if (outcome === "started") hub.publish(command.conversation.id, { type: "turn.state", run_id: accepted.run.id, status: "queued" });
+        // The message is recorded: wake whoever executes the Run.
+        if (outcome === "steered") supervisor.steered(accepted.run.id);
       }
       return { outcome, run: accepted.run, clientMessageId: command.clientMessageId, acceptedAt: accepted.receipt.accepted_at };
     } catch (error) {
