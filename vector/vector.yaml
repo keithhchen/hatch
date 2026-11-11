@@ -26,7 +26,8 @@ sinks:
   axiom:
     type: http
     inputs: [shaped]
-    uri: ${HATCH_AXIOM_ENDPOINT}/v1/ingest/${HATCH_AXIOM_DATASET}
+    # Vector refuses a destination host that is not written in the config: the organization's ingest edge (us-east-1).
+    uri: https://us-east-1.aws.edge.axiom.co/v1/ingest/${HATCH_AXIOM_DATASET}
     method: post
     auth:
       strategy: bearer
