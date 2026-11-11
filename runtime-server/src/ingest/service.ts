@@ -8,6 +8,9 @@ export const MAX_ITEMS = 50;
 export const MAX_INLINE_BYTES = 30 * 1024 * 1024;
 const MAX_CONTEXT = 4000;
 const RECENT = 20;
+const HEARTBEAT_MS = 30_000;
+/** A running job is touched every HEARTBEAT_MS; one silent this long has lost its process. */
+export const STALE_MS = 120_000;
 
 export class IngestError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
@@ -89,26 +92,38 @@ export class IngestService {
     const accepted = parse(items);
     const job = queuedJob(this.deps.newId?.() ?? randomUUID(), accountId, productId, accepted.map(entry => entry.input), context?.trim() ?? "", this.now());
     await this.deps.jobs.create(job);
-    (this.deps.inBackground ?? detached)(() => this.run(job, accepted.map(entry => entry.source)));
+    (this.deps.inBackground ?? detached)(() => this.track(this.run(job, accepted.map(entry => entry.source))));
     return job;
   }
 
   get(accountId: string, productId: string, id: string) { return this.deps.jobs.get(accountId, productId, id); }
   recent(accountId: string, productId: string) { return this.deps.jobs.recent(accountId, productId, RECENT); }
 
-  /** Jobs a dead process left behind will never finish: say so. */
-  async recoverInterrupted(): Promise<number> {
-    const left = await this.deps.jobs.unfinished();
+  /** Jobs a dead process left behind will never finish: say so. A job another live process still touches is left alone. */
+  async recoverInterrupted(staleMs = STALE_MS): Promise<number> {
+    const left = await this.deps.jobs.unfinished(new Date(Date.now() - staleMs).toISOString());
     await Promise.all(left.map(job => this.deps.jobs.save(interrupt(job, this.now()))));
     return left.length;
   }
 
+  private readonly inFlight = new Set<Promise<void>>();
+  private track(work: Promise<void>): Promise<void> {
+    this.inFlight.add(work);
+    return work.finally(() => this.inFlight.delete(work));
+  }
+
+  /** Resolves when the jobs this process runs have settled. */
+  async drain(): Promise<void> { while (this.inFlight.size) await Promise.allSettled([...this.inFlight]); }
+
   private async run(job: IngestJob, sources: Source[]): Promise<void> {
     const running = start(job, this.now());
     await this.deps.jobs.save(running);
+    const beat = setInterval(() => void this.deps.jobs.touch(job.id, this.now()).catch(error => log.error("ingest_heartbeat_failed", { job: job.id, error })), HEARTBEAT_MS);
+    beat.unref();
     const settled = await this.process(running, sources).then(
       outcomes => finish(running, outcomes, this.now()),
-      error => fail(running, error instanceof Error ? error.message : String(error), this.now()));
+      error => fail(running, error instanceof Error ? error.message : String(error), this.now()))
+      .finally(() => clearInterval(beat));
     await this.deps.jobs.save(settled);
     for (const listener of this.settledListeners) await listener(settled).catch(error => log.error("ingest_settled_listener_failed", { job: settled.id, message: error instanceof Error ? error.message : String(error) }));
   }

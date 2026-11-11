@@ -9,7 +9,7 @@ test("production keeps browser APIs on the Dashboard BFF and disables legacy HMA
   const caddyfile = await readFile(path.join(repositoryRoot, "Caddyfile"), "utf8");
   assert.doesNotMatch(caddyfile, /^\s*@registry_api\b/m,
     "the Registry must not own a broad public browser API matcher");
-  assert.match(caddyfile, /handle \/v1\/\*\s*\{[\s\S]*?reverse_proxy dashboard:8500/,
+  assert.match(caddyfile, /handle \/v1\/\*\s*\{[\s\S]*?import upstream dashboard 8500/,
     "all browser APIs must reach the cookie-backed Dashboard BFF");
   const registryHealthBlock = caddyfile.match(/handle @registry_health \{([\s\S]*?)\n    \}/)?.[1] ?? "";
   assert.doesNotMatch(registryHealthBlock, /\/v1\//,
@@ -23,14 +23,14 @@ test("production keeps browser APIs on the Dashboard BFF and disables legacy HMA
     "Desktop Registry preflights must cover the narrow identity endpoints");
   assert.doesNotMatch(desktopPreflightBlock, /\/v1\/user\/product-access/,
     "Desktop access must use the Dashboard's authoritative entitlement view");
-  assert.match(caddyfile, /handle @desktop_registry_preflight \{[\s\S]*?reverse_proxy registry:8100/,
+  assert.match(caddyfile, /handle @desktop_registry_preflight \{[\s\S]*?import upstream registry 8100/,
     "Desktop preflights must reach Registry rather than the browser BFF");
   const contextOAuthBlock = caddyfile.match(/@context_oauth_me \{([\s\S]*?)\n    \}/)?.[1] ?? "";
   assert.match(contextOAuthBlock, /path \/v1\/auth\/me/,
     "Context Intake OAuth must use the narrow identity endpoint only");
   assert.match(contextOAuthBlock, /header_regexp Authorization .*hatch_at_/,
     "Only Dashboard-issued Context Intake access tokens may use the OAuth identity route");
-  assert.match(caddyfile, /handle @context_oauth_me \{[\s\S]*?reverse_proxy dashboard:8500/,
+  assert.match(caddyfile, /handle @context_oauth_me \{[\s\S]*?import upstream dashboard 8500/,
     "Context Intake OAuth identity must reach the Dashboard BFF");
   const desktopBearerBlock = caddyfile.match(/@desktop_registry_bearer \{([\s\S]*?)\n    \}/)?.[1] ?? "";
   assert.match(desktopBearerBlock, /path \/v1\/auth\/me \/v1\/auth\/logout/,
@@ -39,7 +39,7 @@ test("production keeps browser APIs on the Dashboard BFF and disables legacy HMA
     "Registry must not project Desktop ownership");
   assert.match(desktopBearerBlock, /header Authorization \*/,
     "Desktop Registry routes must require an Authorization bearer");
-  assert.match(caddyfile, /handle @desktop_registry_bearer \{[\s\S]*?reverse_proxy registry:8100/,
+  assert.match(caddyfile, /handle @desktop_registry_bearer \{[\s\S]*?import upstream registry 8100/,
     "Desktop bearer routes must reach the Registry, not the browser BFF");
   const runtimeMatcher = caddyfile.match(/^\s*@runtime_api path ([^\n]+)$/m)?.[1];
   assert.ok(runtimeMatcher, "Caddyfile must declare the Runtime HTTP API matcher");

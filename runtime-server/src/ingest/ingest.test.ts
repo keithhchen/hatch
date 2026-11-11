@@ -255,14 +255,19 @@ test("An engine that crashes outright fails the job with its message", async () 
   assert.equal(done.error, "kaput");
 });
 
-test("Jobs a dead process left running or queued are marked interrupted on boot", async () => {
+test("Jobs a dead process left running or queued are marked interrupted on boot; a job still touched is left alone", async () => {
   const { service, jobs } = await harness();
-  const queued = queuedJob("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ACCOUNT, PRODUCT, [{ url: "https://x.test/" }], "", "t0");
-  const running = start(queuedJob("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ACCOUNT, PRODUCT, [{ url: "https://x.test/" }], "", "t0"), "t1");
-  const finished = finish(start(queuedJob("cccccccc-cccc-4ccc-8ccc-cccccccccccc", ACCOUNT, PRODUCT, [{ url: "https://x.test/" }], "", "t0"), "t1"), new Map([["i1", { status: "ok" as const, markdown_path: "m" }]]), "t2");
-  for (const job of [queued, running, finished]) await jobs.create(job);
+  const old = "2020-01-01T00:00:00.000Z";
+  const fresh = new Date().toISOString();
+  const input = [{ url: "https://x.test/" }];
+  const queued = queuedJob("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ACCOUNT, PRODUCT, input, "", old);
+  const running = start(queuedJob("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ACCOUNT, PRODUCT, input, "", old), old);
+  const finished = finish(start(queuedJob("cccccccc-cccc-4ccc-8ccc-cccccccccccc", ACCOUNT, PRODUCT, input, "", old), old), new Map([["i1", { status: "ok" as const, markdown_path: "m" }]]), old);
+  const live = start(queuedJob("dddddddd-dddd-4ddd-8ddd-dddddddddddd", ACCOUNT, PRODUCT, input, "", old), old);
+  for (const job of [queued, running, finished, live]) await jobs.create(job);
+  await jobs.touch(live.id, fresh);
   assert.equal(await service.recoverInterrupted(), 2);
-  assert.deepEqual([queued, running, finished].map(job => jobs.jobs.get(job.id)!.status), ["failed", "failed", "done"]);
+  assert.deepEqual([queued, running, finished, live].map(job => jobs.jobs.get(job.id)!.status), ["failed", "failed", "done", "running"]);
   assert.equal(jobs.jobs.get(queued.id)!.error, "interrupted");
 });
 

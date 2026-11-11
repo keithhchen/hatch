@@ -34,6 +34,7 @@ import { openConversationPorts, type ConversationPorts } from "./conversations/p
 import { Studio, type StudioDeps } from "./conversations/studio.js";
 import { StudioSockets, STUDIO_SOCKET_PATH } from "./conversations/socket.js";
 import { createIngestService } from "./ingest/boot.js";
+import { InflightResponses, drainMsFromEnvironment, exitOnSignal, gracefulShutdown } from "./gracefulShutdown.js";
 import { IngestError, IngestService } from "./ingest/service.js";
 import { publicJob } from "./ingest/job.js";
 import { AccountReach } from "./assistant/reach.js";
@@ -136,7 +137,12 @@ import { startObservability } from "./observability/start.js";
 import { observed } from "./observability/http.js";
 import { log } from "./observability/log.js";
 
-export type RegistryServer = { server: http.Server; close: () => Promise<void> };
+export type RegistryServer = {
+  server: http.Server;
+  close: () => Promise<void>;
+  /** Leaves production traffic to the next instance: unready, stop intake, finish what is held, then close. */
+  shutdown: (deadlineMs: number) => Promise<{ drained: boolean }>;
+};
 export const CREATOR_FACTORY_JSON_BODY_MAX_BYTES = 32 * 1024 * 1024;
 type RegistryContext = {
   conversationPorts: ConversationPorts;
@@ -148,6 +154,8 @@ type RegistryContext = {
   /** Speech to text for the composers of Studio and web chat. */
   dictation: Dictation;
   ingest?: IngestService;
+  /** Set once shutdown begins: readiness fails so the proxy sends nothing new. */
+  draining?: boolean;
   channels?: ChannelService;
   credentialSeal?: CredentialSeal;
   ownApps?: OwnApps;
@@ -439,7 +447,9 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     assistantTick = setInterval(() => void assistant.tick().catch(error => log.error("assistant_tick_failed", { error })), 60_000);
     assistantTick.unref();
   }
+  const inflight = new InflightResponses();
   const server = http.createServer(observed((request, response) => {
+    inflight.track(response);
     void route(request, response, registryContext)
       .catch((error) => {
         const status = errorStatus(error);
@@ -536,21 +546,43 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const port = Number(environment.REGISTRY_PORT ?? 8100);
   const host = environment.REGISTRY_HOST ?? "127.0.0.1";
   await new Promise<void>((resolve) => server.listen(port, host, resolve));
-  return { server, close: async () => {
+  // Nothing new is claimed or accepted from here on; the other instance takes the work over.
+  let intakeStopped: Promise<void> | undefined;
+  let serverClosed: Promise<void> | undefined;
+  const stopIntake = () => intakeStopped ??= (async () => {
+    registryContext.draining = true;
+    serverClosed = new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    serverClosed.catch(() => undefined);
     if (assistantTick) clearInterval(assistantTick);
     await channelListeners?.stop();
     credentialRefresher?.stop();
+    await registryContext.channels?.close();
+  })();
+  const close = async () => {
+    await stopIntake();
     await registryContext.assistant?.close();
     await registryContext.assistantChat?.close();
-    await registryContext.channels?.close();
     immediateFactoryStop.abort();
     await factoryAgents.close();
-    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    inflight.endAll();
+    studioSockets.close();
+    server.closeAllConnections();
+    await serverClosed;
     await factoryRepository.close();
     await store.close();
     await flushLangfuseObservability();
     if (ownsReleasePool) await releasePool?.end();
-  } };
+  };
+  return { server, close, shutdown: deadlineMs => gracefulShutdown({
+    deadlineMs,
+    markUnready: () => { registryContext.draining = true; },
+    stopIntake,
+    // Studio Runs, the Assistant's Runs (leased, so a Run left over is handed to the next instance), ingest jobs, and requests in flight.
+    drain: async () => { await Promise.all([registryContext.assistantChat?.drain(), registryContext.assistant?.drain(), factoryAgents.drain(), registryContext.ingest?.drain(), inflight.requestsDone()]); },
+    closeConnections: async () => { inflight.endAll(); studioSockets.close(); },
+    closeStorage: close,
+    onError: (step, error) => log.error("registry_shutdown_step_failed", { step, error }),
+  }) };
 }
 
 function integerEnvironment(raw: string | undefined, fallback: number): number {
@@ -758,6 +790,7 @@ async function route(
   }
   if (request.method === "GET" && (url.pathname === "/readyz" || url.pathname === "/health")) {
     try {
+      if (context.draining) throw new Error("Registry is shutting down");
       await context.store.checkReady();
       sendJson(response, 200, {
         status: "ok",
@@ -2019,7 +2052,8 @@ function corsHeaders(): Record<string, string> { return { "access-control-allow-
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   startObservability("registry");
-  createRegistryServerFromEnvironment().then(({ server }) => {
+  createRegistryServerFromEnvironment().then(({ server, shutdown }) => {
+    exitOnSignal(() => shutdown(drainMsFromEnvironment(process.env)));
     console.log(`Hatch TypeScript Registry listening on ${JSON.stringify(server.address())}`);
   }).catch((error) => { log.error("registry_startup_failed", { error }); process.exitCode = 1; });
 }

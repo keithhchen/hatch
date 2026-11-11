@@ -60,5 +60,6 @@ export class FactoryAgentsService {
     request.url = original?.replace(/^\/v1\/creator\/products\/[^/]+\/factory-agents(?=\/|$)/, "/api");
     try { await app.handleUpgrade(request, socket, head); } finally { request.url = original; }
   }
+  async drain() { await Promise.all([...this.products.values()].map(async app => (await app).runtime.drain())); }
   async close() { await Promise.all([...this.products.values()].map(async app => (await app).close())); }
 }

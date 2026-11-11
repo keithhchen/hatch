@@ -71,6 +71,7 @@ const TERMINAL = new Set(["completed", "failed", "cancelled", "interrupted"]);
 export class RunSupervisor {
   private readonly owned = new Map<string, Owned>();
   private timers: NodeJS.Timeout[] = [];
+  private sweepTimer?: NodeJS.Timeout;
   private unsubscribe?: () => Promise<void>;
   private unsubscribeSteers?: () => Promise<void>;
 
@@ -87,9 +88,10 @@ export class RunSupervisor {
 
   async start(): Promise<void> {
     if (this.timers.length) return;
+    this.sweepTimer = setInterval(() => void this.sweep(), this.options.sweepMs);
     this.timers = [
       setInterval(() => void this.renewLeases(), Math.max(1, Math.floor(this.options.leaseMs / 3))),
-      setInterval(() => void this.sweep(), this.options.sweepMs),
+      this.sweepTimer,
       setInterval(() => void this.relayToolResults(), this.options.toolPollMs ?? 250)
     ];
     for (const timer of this.timers) timer.unref();
@@ -156,6 +158,16 @@ export class RunSupervisor {
 
   /** Local-tool calls of a Run that wait for a client, so any permitted client can answer them. */
   pendingToolRequests(runId: string): ToolRequest[] { return this.owned.get(runId)?.session?.pendingRequests() ?? []; }
+
+  /**
+   * Lets the Runs held here finish. Leases keep being renewed, but no lapsed Run of another instance is
+   * claimed any more; a Run that starts meanwhile is waited for too.
+   */
+  async drain(): Promise<void> {
+    if (this.sweepTimer) clearInterval(this.sweepTimer);
+    this.sweepTimer = undefined;
+    while (this.owned.size) await Promise.allSettled([...this.owned.values()].map((owned) => owned.done));
+  }
 
   async stop(): Promise<void> {
     for (const timer of this.timers) clearInterval(timer);

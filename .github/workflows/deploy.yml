@@ -238,6 +238,7 @@ jobs:
           install -m 640 compose.app.yml /opt/hatch/
           install -m 640 compose.infra.yml /opt/hatch/
           install -D -m 640 vector/vector.yaml /opt/hatch/vector/vector.yaml
+          install -m 640 scripts/roll-service.sh /opt/hatch/roll-service.sh
       - name: Ensure shared Postgres is ready
         run: |
           set -euo pipefail
@@ -353,14 +354,21 @@ jobs:
           }
           pull_image "$IMAGE_PREFIX/runtime:$RELEASE_TAG" Runtime
           pull_image "$IMAGE_PREFIX/caddy:$RELEASE_TAG" Caddy
-          # Always recreate the release-tagged services. A self-hosted runner
-          # can retain a container created from an older tag; reusing it would
-          # silently leave one production surface behind the release.
+          # Roll every release-tagged service: the new container starts beside the old one, and the old one
+          # is stopped (and drains) only once the new one is healthy. A self-hosted runner can retain a
+          # container created from an older tag; reusing it would silently leave one surface behind the release.
           # The retired Factory worker is intentionally not started. Remove
           # any container left by an older release before bringing up the
           # Node-based Registry.
           docker ps -aq --filter label=com.docker.compose.service=factory-worker | xargs -r docker rm -f
-          if ! timeout 180s "${compose[@]}" up -d --no-deps --pull never --force-recreate registry runtime caddy; then
+          . /opt/hatch/roll-service.sh
+          # Caddy owns ports 80 and 443, so it cannot run twice: it is replaced only when its Caddyfile changed.
+          caddy_image="$IMAGE_PREFIX/caddy:$RELEASE_TAG"
+          running_caddy="$(docker ps -q --filter label=com.docker.compose.project=hatch-app --filter label=com.docker.compose.service=caddy)"
+          wanted_caddyfile="$(docker run --rm --entrypoint sha256sum "$caddy_image" /etc/caddy/Caddyfile | cut -d' ' -f1)"
+          running_caddyfile="$(test -z "$running_caddy" || docker exec "$running_caddy" sha256sum /etc/caddy/Caddyfile | cut -d' ' -f1)"
+          if ! { roll_service registry && roll_service runtime \
+            && { test "$wanted_caddyfile" = "$running_caddyfile" || timeout 180s "${compose[@]}" up -d --no-deps --pull never --force-recreate caddy; }; }; then
             "${compose[@]}" ps -a
             for service in registry dashboard runtime; do
               echo "--- $service container logs (last 80 lines) ---" >&2
@@ -439,7 +447,11 @@ jobs:
             fi
             cp .release.env.previous .release.env
             docker ps -aq --filter label=com.docker.compose.service=factory-worker | xargs -r docker rm -f
-            docker compose --env-file .env --env-file .release.env -f compose.app.yml up -d --no-deps registry runtime caddy
+            compose=(docker compose --env-file .env --env-file .release.env -f compose.app.yml)
+            . /opt/hatch/roll-service.sh
+            roll_service registry
+            roll_service runtime
+            "${compose[@]}" up -d --no-deps caddy
             docker compose --env-file .env --env-file .release.env -f compose.app.yml ps --status running --services | grep -Fxq registry
             test -n "$HATCH_DOMAIN"
             for domain in "$HATCH_DOMAIN" "$HATCH_DOMAIN_ALIAS"; do

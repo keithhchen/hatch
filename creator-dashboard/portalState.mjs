@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { withSchemaLock } from "../packages/commerce/src/schemaLock.js";
 
 const EMPTY_STATE = Object.freeze({
   contract_version: "1",
@@ -43,11 +44,11 @@ export class PortalStateStore {
       });
       const ownsPool = !options.pool;
       try {
-        await pool.query(`CREATE TABLE IF NOT EXISTS portal_workflow_state (
+        await withSchemaLock(pool, [`CREATE TABLE IF NOT EXISTS portal_workflow_state (
           singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
           state JSONB NOT NULL,
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )`);
+        )`]);
         await pool.query(
           `INSERT INTO portal_workflow_state (singleton, state)
            VALUES (TRUE, $1::jsonb)

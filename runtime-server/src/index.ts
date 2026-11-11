@@ -128,6 +128,7 @@ import type { ClientToolName } from "./protocol.js";
 import type { ClientAttributes, ContentPart } from "./surfaces/contract.js";
 import { bindContext } from "./observability/context.js";
 import { observed } from "./observability/http.js";
+import { InflightResponses, drainMsFromEnvironment, exitOnSignal, gracefulShutdown } from "./gracefulShutdown.js";
 import { log } from "./observability/log.js";
 import { startObservability } from "./observability/start.js";
 
@@ -139,6 +140,8 @@ export type RuntimeServer = {
   /** What the channel layer calls to talk to the Chat API without a transport. */
   chat: ChatGateway;
   close: () => Promise<void>;
+  /** Leaves production traffic to the next instance: unready, stop intake, finish the Runs held, then close. */
+  shutdown: (deadlineMs: number) => Promise<{ drained: boolean }>;
 };
 
 /** The largest file the asset pipeline takes: a larger upload is refused before it is read. */
@@ -624,6 +627,8 @@ function combineCapacityReleases(...releases: Array<() => void>): () => void {
 
 type ReadinessCheck = "starting" | "ready" | "failed";
 type RuntimeReadiness = {
+  /** Set once shutdown begins, so the proxy sends nothing new. */
+  draining?: boolean;
   repository: ReadinessCheck;
   deliveryAccounting: ReadinessCheck | "disabled";
 };
@@ -842,7 +847,9 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   const gateway = chatGatewayFor(options, chat, scopes, conversationRepository, conversationStore, agentCorpusResolver, parts, chatAssets);
   edge.serviceApi = new ChatServiceApi({ token: options.chatServiceToken, gateway });
 
+  const inflight = new InflightResponses();
   const server = http.createServer(observed((req, res) => {
+    inflight.track(res);
     const requestAbortController = new AbortController();
     const abortDisconnectedRequest = () => {
       requestAbortController.abort(new Error("Runtime HTTP client disconnected"));
@@ -933,33 +940,55 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     );
   });
 
+  let serverClosed: Promise<void> | undefined;
+  const stopIntake = async () => {
+    readiness.draining = true;
+    if (reconciliationInterval) clearInterval(reconciliationInterval);
+    serverClosed ??= new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    serverClosed.catch(() => undefined);
+  };
   return {
     server,
     wss,
     chat: gateway,
-    close: async () => {
-      if (reconciliationInterval) clearInterval(reconciliationInterval);
-      for (const client of wss.clients) {
-        // Shutdown must not wait for a peer to complete the WebSocket close
-        // handshake. Tests caught the same production failure mode: a Desktop
-        // connection can keep the Runtime process alive indefinitely during a
-        // deploy after the HTTP server has otherwise stopped accepting work.
-        client.terminate();
-      }
-      // A peer may already have started a close handshake and disappeared
-      // from `wss.clients` while its upgraded TCP socket is still open.
-      for (const connection of acceptedConnections) connection.destroy();
-      await new Promise<void>((resolve) => wss.close(() => resolve()));
-      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-      await Promise.allSettled([...connectionTasks]);
-      // Runs are handed off, not failed: another instance continues them.
-      await chat.stop();
-      await Promise.allSettled([...reconciliationTasks]);
-      await conversationStore.close();
-      await conversationRepository.close();
-      await flushLangfuseObservability();
-    }
+    shutdown: (deadlineMs) => gracefulShutdown({
+      deadlineMs,
+      markUnready: () => { readiness.draining = true; },
+      stopIntake,
+      // Runs finish here; one still going at the deadline is handed to the next instance, which resumes it from its lease.
+      drain: async () => { await Promise.all([chat.drain(), inflight.requestsDone()]); },
+      closeConnections: async () => {
+        inflight.endAll();
+        for (const client of wss.clients) client.close(1001, "server restarting: reconnect and resume");
+        for (let waited = 0; wss.clients.size && waited < 1_000; waited += 50) await new Promise((resolve) => setTimeout(resolve, 50));
+      },
+      closeStorage: () => close(),
+      onError: (step, error) => log.error("runtime_shutdown_step_failed", { step, error }),
+    }),
+    close: () => close()
   };
+  async function close(): Promise<void> {
+    await stopIntake();
+    for (const client of wss.clients) {
+      // Shutdown must not wait for a peer to complete the WebSocket close
+      // handshake. Tests caught the same production failure mode: a Desktop
+      // connection can keep the Runtime process alive indefinitely during a
+      // deploy after the HTTP server has otherwise stopped accepting work.
+      client.terminate();
+    }
+    // A peer may already have started a close handshake and disappeared
+    // from `wss.clients` while its upgraded TCP socket is still open.
+    for (const connection of acceptedConnections) connection.destroy();
+    await new Promise<void>((resolve) => wss.close(() => resolve()));
+    await serverClosed;
+    await Promise.allSettled([...connectionTasks]);
+    // Runs are handed off, not failed: another instance continues them.
+    await chat.stop();
+    await Promise.allSettled([...reconciliationTasks]);
+    await conversationStore.close();
+    await conversationRepository.close();
+    await flushLangfuseObservability();
+  }
 }
 
 /** Streams and `?wait=` polls bound themselves; everything else gets the request deadline. */
@@ -1056,7 +1085,7 @@ async function handleHttpRequest(
   if (req.method === "GET" && url.pathname === "/readyz") {
     const repository = readiness?.repository ?? "failed";
     const deliveryAccounting = readiness?.deliveryAccounting ?? "disabled";
-    const ready = repository === "ready"
+    const ready = !readiness?.draining && repository === "ready"
       && (deliveryAccounting === "ready" || deliveryAccounting === "disabled");
     writeJson(res, ready ? 200 : 503, {
       ok: ready,
@@ -3094,6 +3123,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const port = Number(process.env.PORT ?? 8400);
   const host = process.env.HATCH_RUNTIME_HOST?.trim() || "127.0.0.1";
   void createRuntimeServerFromEnvironment().then((runtimeServer) => {
+    exitOnSignal(() => runtimeServer.shutdown(drainMsFromEnvironment(process.env)));
     runtimeServer.server.listen(port, host, () => {
       const commerce = process.env.HATCH_COMMERCE_LEDGER_FILE ? " with commerce ledger" : "";
       console.log(`Hatch TS runtime listening on ws://${host}:${port}/runtime${commerce}`);

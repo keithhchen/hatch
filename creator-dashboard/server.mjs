@@ -1,6 +1,7 @@
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createServer } from "node:http";
+import { InflightResponses, drainMsFromEnvironment, exitOnSignal, gracefulShutdown } from "./gracefulShutdown.mjs";
 import { WebSocket, WebSocketServer } from "ws";
 import {
   createCipheriv,
@@ -83,6 +84,8 @@ export async function createDashboardApp(options = {}) {
   if (process.env.NODE_ENV !== "production") allowedPublicOrigins.add("http://127.0.0.1:8510");
   const voiceWss = new WebSocketServer({ noServer: true, maxPayload: 128 * 1024 });
   const chatWss = new WebSocketServer({ noServer: true, maxPayload: 160 * 1024 * 1024 });
+  // Set once shutdown begins: readiness fails so the proxy sends nothing new.
+  let draining = false;
   let PostgresPool = options.PostgresPool;
   let ledger = options.ledger;
   if (!ledger && commerceDatabaseUrl) {
@@ -524,6 +527,7 @@ export async function createDashboardApp(options = {}) {
       }
       if (request.method === "GET" && url.pathname === "/readyz") {
         try {
+          if (draining) throw new Error("Dashboard is shutting down");
           if (process.env.NODE_ENV === "production"
             && (!registryDeploymentServiceToken || !commerceRuntimeServiceToken)) {
             throw new Error("Dashboard service credentials are not configured");
@@ -2376,10 +2380,14 @@ export async function createDashboardApp(options = {}) {
   return {
     handler,
     handleUpgrade,
+    beginDrain: () => { draining = true; },
+    // A clean close first: the browser reconnects to the next instance. A peer that does not answer is cut after a second.
     closeVoiceSockets: () => {
-      for (const socket of voiceWss.clients) socket.terminate();
+      for (const socket of [...voiceWss.clients, ...chatWss.clients]) {
+        socket.close(1001, "server restarting: reconnect");
+        setTimeout(() => socket.terminate(), 1_000).unref();
+      }
       voiceWss.close();
-      for (const socket of chatWss.clients) socket.terminate();
       chatWss.close();
     },
     ledger,
@@ -2399,6 +2407,8 @@ export async function startDashboardServer(options = {}) {
   const port = Number(options.port ?? process.env.HATCH_CREATOR_DASHBOARD_API_PORT ?? 8500);
   const host = options.host ?? process.env.HATCH_CREATOR_DASHBOARD_API_HOST ?? "127.0.0.1";
   const server = createServer(app.handler);
+  const inflight = new InflightResponses();
+  server.on("request", (_request, response) => inflight.track(response));
   server.on("upgrade", (request, socket, head) => {
     socket.on("error", () => undefined);
     void app.handleUpgrade(request, socket, head).catch(error => {
@@ -2426,21 +2436,33 @@ export async function startDashboardServer(options = {}) {
     app.reconcileDeployments().catch(() => undefined);
   }, 5_000);
   deploymentTimer.unref?.();
-  server.once("close", () => {
-    clearInterval(reconcileTimer);
-    clearInterval(outboxTimer);
-    clearInterval(financeTimer);
-    clearInterval(deploymentTimer);
+  const stopTimers = () => [reconcileTimer, outboxTimer, financeTimer, deploymentTimer].forEach(clearInterval);
+  let released;
+  const release = () => released ??= (async () => {
+    stopTimers();
     app.closeVoiceSockets();
-    app.ledger.close?.().catch(() => undefined);
-    app.portalState.close?.().catch(() => undefined);
-    app.telemetry.close?.().catch(() => undefined);
+    await Promise.allSettled([app.ledger.close?.(), app.portalState.close?.(), app.telemetry.close?.()]);
+  })();
+  server.once("close", () => void release());
+  let serverClosed;
+  const stopIntake = async () => {
+    stopTimers();
+    serverClosed ??= new Promise(resolve => server.close(resolve));
+  };
+  const shutdown = deadlineMs => gracefulShutdown({
+    deadlineMs,
+    markUnready: app.beginDrain,
+    stopIntake,
+    drain: () => inflight.requestsDone(),
+    closeConnections: async () => { inflight.endAll(); app.closeVoiceSockets(); },
+    closeStorage: async () => { server.closeAllConnections(); await serverClosed; await release(); },
+    onError: (step, error) => logEvent("error", "shutdown_step_failed", { message: `${step}: ${error instanceof Error ? error.message : String(error)}` })
   });
   app.reconcilePendingCheckouts().catch(() => undefined);
   app.dispatchCommerceOutbox().catch(() => undefined);
   app.reconcileFinance().catch(() => undefined);
   app.reconcileDeployments().catch(() => undefined);
-  return { ...app, server, port, host };
+  return { ...app, server, port, host, shutdown };
 }
 
 async function registryRequest(registryUrl, pathname, options = {}) {
@@ -4672,6 +4694,7 @@ function contentType(filePath) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const { host, port } = await startDashboardServer();
+  const { host, port, shutdown } = await startDashboardServer();
+  exitOnSignal(() => shutdown(drainMsFromEnvironment(process.env)));
   logEvent("info", "listening", { message: `Hatch Expert Dashboard API listening on http://${host}:${port}` });
 }

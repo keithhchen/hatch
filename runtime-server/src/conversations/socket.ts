@@ -38,6 +38,9 @@ export class StudioSockets {
   private server = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
   constructor(private deps: SocketDeps) {}
 
+  /** A clean close: each client reconnects and resumes from the cursor it last heard. */
+  close(): void { for (const client of this.server.clients) client.close(1001, "server restarting: resume from your last cursor"); }
+
   /** `identity` is what the upgrade already proved; without it the first message must be `auth`. */
   upgrade(request: http.IncomingMessage, socket: Duplex, head: Buffer, identity?: Identity): void {
     this.server.handleUpgrade(request, socket, head, ws => this.connection(ws, identity));

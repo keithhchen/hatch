@@ -21,3 +21,4 @@ export {
 export { LedgerCommerceSink } from "./sink.js";
 export { CommerceService, DEFAULT_RESERVATION_TTL_MS } from "./service.js";
 export { PostgresCommerceLedger } from "./postgresLedger.js";
+export { SCHEMA_LOCK_KEY, withSchemaLock } from "./schemaLock.js";

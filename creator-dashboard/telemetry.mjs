@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import { withSchemaLock } from "../packages/commerce/src/schemaLock.js";
 
 export const PORTAL_FUNNEL_EVENTS = Object.freeze(new Set([
   "catalog_viewed", "product_viewed", "auth_started", "auth_completed",
@@ -38,15 +39,15 @@ export class PortalTelemetryStore {
       });
       const ownsPool = !options.pool;
       try {
-        await pool.query(`CREATE TABLE IF NOT EXISTS portal_telemetry_events (
+        await withSchemaLock(pool, [`CREATE TABLE IF NOT EXISTS portal_telemetry_events (
           event_id TEXT PRIMARY KEY,
           idempotency_key TEXT NOT NULL UNIQUE,
           event_name TEXT NOT NULL,
           occurred_at TIMESTAMPTZ NOT NULL,
           attributes JSONB NOT NULL,
           payload_digest TEXT NOT NULL
-        )`);
-        await pool.query("CREATE INDEX IF NOT EXISTS portal_telemetry_name_time_idx ON portal_telemetry_events (event_name, occurred_at)");
+        )`,
+        "CREATE INDEX IF NOT EXISTS portal_telemetry_name_time_idx ON portal_telemetry_events (event_name, occurred_at)"]);
         return new PortalTelemetryStore({ pool, ownsPool });
       } catch (error) {
         if (ownsPool) await pool.end?.().catch(() => undefined);

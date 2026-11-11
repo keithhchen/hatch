@@ -612,6 +612,11 @@ export class AssistantService implements StudioOperations {
     return known ? "连上了。以后我会在这里找你，你也可以随时在这里跟我说话。" : "连上了。先给我一样东西就行：你的名字、一个链接，或者现成的资料。";
   }
 
+  /** Resolves when the Studio Runs this process holds have ended. */
+  async drain(): Promise<void> {
+    for (const pending of this.desks.values()) await (await pending.catch(() => undefined))?.runtime.drain();
+  }
+
   async close(): Promise<void> {
     this.closing = true;
     if (this.deliveryLoop) clearInterval(this.deliveryLoop);

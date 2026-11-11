@@ -1,3 +1,18 @@
+# The Registry, Runtime and Dashboard each run two containers while a release replaces the old one. Resolve the
+# service name again every second so both are balanced during the overlap, and retry a request the draining
+# container refuses on the other. (Dynamic upstreams have no active health checks; a refused connection is the signal.)
+(upstream) {
+    reverse_proxy {
+        dynamic a {args[0]} {args[1]} {
+            refresh 1s
+        }
+        lb_try_duration 5s
+        lb_try_interval 250ms
+        fail_duration 3s
+        max_fails 1
+    }
+}
+
 (hatch_routes) {
     encode gzip
 
@@ -14,13 +29,13 @@
     @runtime_health path /health/runtime
     handle @runtime_health {
         rewrite * /readyz
-        reverse_proxy runtime:8400
+        import upstream runtime 8400
     }
 
     @dashboard_health path /health/dashboard
     handle @dashboard_health {
         rewrite * /readyz
-        reverse_proxy dashboard:8500
+        import upstream dashboard 8500
     }
 
     # The Registry owns the authenticated Runtime release read. Keep this
@@ -29,7 +44,7 @@
     # returns a misleading 404.
     @runtime_release path /v1/runtime/products/*/release
     handle @runtime_release {
-        reverse_proxy registry:8100
+        import upstream registry 8100
     }
 
     # Desktop WebSocket endpoint. The public /v1 prefix is removed before the
@@ -37,25 +52,25 @@
     @runtime_socket path /v1/runtime*
     handle @runtime_socket {
         uri strip_prefix /v1
-        reverse_proxy runtime:8400
+        import upstream runtime 8400
     }
 
     # Keep the native Runtime WebSocket address shareable for Desktop clients
     # that do not use the public /v1 compatibility prefix.
     @runtime_native path /runtime*
     handle @runtime_native {
-        reverse_proxy runtime:8400
+        import upstream runtime 8400
     }
 
     # Desktop HTTP APIs owned by Runtime.
     @runtime_api path /v1/me/creator-agents /v1/conversations*
     handle @runtime_api {
-        reverse_proxy runtime:8400
+        import upstream runtime 8400
     }
 
     @runtime_history path /conversations/*
     handle @runtime_history {
-        reverse_proxy runtime:8400
+        import upstream runtime 8400
     }
 
     # Expose only the Registry readiness check. Never bridge a broad public
@@ -63,7 +78,7 @@
     @registry_health path /health/registry
     handle @registry_health {
         rewrite * /readyz
-        reverse_proxy registry:8100
+        import upstream registry 8100
     }
 
     # Runtime accounting is an internal service-to-service API. Runtime calls
@@ -78,7 +93,7 @@
     # Platform webhooks authenticate with their own signatures.
     @channel_webhooks path /v1/channels/*
     handle @channel_webhooks {
-        reverse_proxy registry:8100
+        import upstream registry 8100
     }
     # A WebView CORS preflight never carries the bearer itself. Route the
     # narrow Desktop endpoint preflights to the same Registry owner so the
@@ -88,7 +103,7 @@
         path /v1/auth/me /v1/auth/logout
     }
     handle @desktop_registry_preflight {
-        reverse_proxy registry:8100
+        import upstream registry 8100
     }
     # Context Intake OAuth access tokens are Dashboard-owned opaque grants,
     # not Registry session bearers. Route only the hatch_at_ token form to the
@@ -98,7 +113,7 @@
         header_regexp Authorization ^Bearer[[:space:]]+hatch_at_[A-Za-z0-9_-]+$
     }
     handle @context_oauth_me {
-        reverse_proxy dashboard:8500
+        import upstream dashboard 8500
     }
     # API keys are Registry-owned; a CLI bearer reaches Registry directly, the
     # browser (cookie, no bearer) falls through to the Dashboard proxy.
@@ -107,23 +122,23 @@
         header Authorization *
     }
     handle @desktop_registry_bearer {
-        reverse_proxy registry:8100
+        import upstream registry 8100
     }
 
     # All browser APIs belong to the cookie-backed Dashboard BFF. In
     # particular, /v1/auth/me must not be shadowed by Registry.
     handle /v1/* {
-        reverse_proxy dashboard:8500
+        import upstream dashboard 8500
     }
 
     # Static assets and all addressable public/private pages are served by the
     # Dashboard. The browser app owns auth/returnTo and private authorization.
     handle /assets/* {
-        reverse_proxy dashboard:8500
+        import upstream dashboard 8500
     }
 
     handle {
-        reverse_proxy dashboard:8500
+        import upstream dashboard 8500
     }
 }
 
