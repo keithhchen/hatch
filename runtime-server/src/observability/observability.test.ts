@@ -1,3 +1,5 @@
+import { context, trace } from "@opentelemetry/api";
+import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import assert from "node:assert/strict";
 import http from "node:http";
 import test from "node:test";
@@ -6,7 +8,7 @@ import { FailureBoundary, type FailureRecord } from "../errors/failures.js";
 import { timedQueries } from "../postgresPool.js";
 import { bindContext, runInContext } from "./context.js";
 import { observed, propagatingFetch } from "./http.js";
-import { Logger, type LogEntry } from "./log.js";
+import { Logger, StdoutJsonSink, type LogEntry } from "./log.js";
 
 const capture = () => {
   const entries: LogEntry[] = [];
@@ -77,4 +79,21 @@ test("a fast query is not logged", async () => {
   const pool = timedQueries({ query: async () => ({ rows: [] }) } as unknown as Pool, log, 500);
   await pool.query("SELECT 1");
   assert.equal(entries.length, 0);
+});
+
+test("a stdout log line inside an active span carries its trace_id and span_id, and none outside", () => {
+  context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
+  const lines: string[] = [];
+  const original = console.log;
+  console.log = (line: string) => { lines.push(line); };
+  try {
+    const entry: LogEntry = { ts: "2026-01-01T00:00:00.000Z", level: "info", event: "x", fields: {} };
+    const sink = new StdoutJsonSink();
+    sink.write(entry);
+    const span = trace.wrapSpanContext({ traceId: "0af7651916cd43dd8448eb211c80319c", spanId: "b7ad6b7169203331", traceFlags: 1 });
+    context.with(trace.setSpan(context.active(), span), () => sink.write(entry));
+  } finally { console.log = original; context.disable(); }
+  assert.equal(JSON.parse(lines[0]).trace_id, undefined);
+  assert.equal(JSON.parse(lines[1]).trace_id, "0af7651916cd43dd8448eb211c80319c");
+  assert.equal(JSON.parse(lines[1]).span_id, "b7ad6b7169203331");
 });

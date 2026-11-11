@@ -271,6 +271,7 @@ jobs:
           set -euo pipefail
           cd /opt/hatch
           if grep -Eq '^HATCH_AXIOM_TOKEN=[^[:space:]]+' .env; then
+            docker compose --env-file .env -f compose.infra.yml run --rm --no-deps vector validate --no-environment /etc/vector/vector.yaml || { echo "vector/vector.yaml failed validation; not starting vector" >&2; exit 1; }
             docker compose --env-file .env -f compose.infra.yml up -d --force-recreate vector
           fi
       - name: Pull and switch application containers
