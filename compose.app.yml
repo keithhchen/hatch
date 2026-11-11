@@ -352,6 +352,8 @@ services:
       # TCP mapping above for HTTP/1.1 and HTTP/2 fallback clients.
       - "443:443/udp"
     volumes:
+      # A directory, not the file: deploys replace the Caddyfile and `caddy reload` it in place (scripts/roll-caddy.sh).
+      - ./caddy:/etc/caddy:ro
       - caddy_data:/data
       - caddy_config:/config
     networks:

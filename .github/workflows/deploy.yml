@@ -239,6 +239,7 @@ jobs:
           install -m 640 compose.infra.yml /opt/hatch/
           install -D -m 640 vector/vector.yaml /opt/hatch/vector/vector.yaml
           install -m 640 scripts/roll-service.sh /opt/hatch/roll-service.sh
+          install -m 640 scripts/roll-caddy.sh /opt/hatch/roll-caddy.sh
       - name: Ensure shared Postgres is ready
         run: |
           set -euo pipefail
@@ -362,13 +363,9 @@ jobs:
           # Node-based Registry.
           docker ps -aq --filter label=com.docker.compose.service=factory-worker | xargs -r docker rm -f
           . /opt/hatch/roll-service.sh
-          # Caddy owns ports 80 and 443, so it cannot run twice: it is replaced only when its Caddyfile changed.
-          caddy_image="$IMAGE_PREFIX/caddy:$RELEASE_TAG"
-          running_caddy="$(docker ps -q --filter label=com.docker.compose.project=hatch-app --filter label=com.docker.compose.service=caddy)"
-          wanted_caddyfile="$(docker run --rm --entrypoint sha256sum "$caddy_image" /etc/caddy/Caddyfile | cut -d' ' -f1)"
-          running_caddyfile="$(test -z "$running_caddy" || docker exec "$running_caddy" sha256sum /etc/caddy/Caddyfile | cut -d' ' -f1)"
-          if ! { roll_service registry && roll_service runtime \
-            && { test "$wanted_caddyfile" = "$running_caddyfile" || timeout 180s "${compose[@]}" up -d --no-deps --pull never --force-recreate caddy; }; }; then
+          . /opt/hatch/roll-caddy.sh
+          # Caddy owns ports 80 and 443, so it is not rolled: a Caddyfile change is validated and reloaded in place.
+          if ! { roll_service registry && roll_service runtime && roll_caddy "$IMAGE_PREFIX/caddy:$RELEASE_TAG"; }; then
             "${compose[@]}" ps -a
             for service in registry dashboard runtime; do
               echo "--- $service container logs (last 80 lines) ---" >&2
@@ -451,7 +448,8 @@ jobs:
             . /opt/hatch/roll-service.sh
             roll_service registry
             roll_service runtime
-            "${compose[@]}" up -d --no-deps caddy
+            . /opt/hatch/roll-caddy.sh
+            roll_caddy "$(sed -n 's/^HATCH_IMAGE_PREFIX=//p' .release.env)/caddy:$(sed -n 's/^HATCH_RELEASE_TAG=//p' .release.env)"
             docker compose --env-file .env --env-file .release.env -f compose.app.yml ps --status running --services | grep -Fxq registry
             test -n "$HATCH_DOMAIN"
             for domain in "$HATCH_DOMAIN" "$HATCH_DOMAIN_ALIAS"; do
