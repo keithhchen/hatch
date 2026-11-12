@@ -23,7 +23,7 @@ export function FileList({ title, records, onOpen, onDelete, deletable = () => t
       {groups.length > 1 || group.folder ? <h4 className="fl__folder">{group.folder || t("filesRoot")}</h4> : null}
       <ul>{group.records.map(record => {
         const busy = BUSY.has(record.status);
-        const failed = record.status === "failed" || record.status === "partial";
+        const failed = record.status === "failed" || record.status === "partial" || record.status === "unsupported";
         const openable = !record.status;
         return <li key={record.path} className={`fl__row${failed ? " is-failed" : ""}`}>
           <button type="button" className="fl__name" disabled={!openable} onClick={() => onOpen?.(record.path)} title={record.name}>
