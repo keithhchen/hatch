@@ -272,7 +272,7 @@ test("Voice Agent stays conversational and never receives askuser", async () => 
     const prompt = await runtime.prompt("voice", voice);
     assert.doesNotMatch(prompt, /askuser/);
     assert.doesNotMatch(prompt, /youtube_transcript/);
-    assert.match(prompt, /连续的语音访谈/);
+    assert.match(prompt, /Phase 2 — One complete question list/);
   } finally { await runtime.close(); await rm(root, { recursive: true, force: true }); }
 });
 
