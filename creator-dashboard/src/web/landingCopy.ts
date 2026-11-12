@@ -23,7 +23,7 @@ const zh = {
   pickLabel: "你是做什么的？",
   roles: ["销售", "顾问", "教练", "老师"],
   tryCta: "免费试试",
-  trial: { title: "三步，拥有你的专属分身", steps: [{ title: "提交你的素材", body: "课程、文章、录音、聊天记录皆可，无需整理。" }, { title: "深度理解，专访追问", body: "提炼只存在于你经验中的判断。" }, { title: "获得你的分身链接", body: "经你确认后上线，分享给用户，由它代你解答。" }], cta: "前往 Studio", mini: { pdf: "课程讲义.pdf", link: "文章", voice: "0:42", chatA: "这个方案怎么选？", chatB: "先看预算", ask: "那次你为什么没接这个客户？", noted: "已记录", outline: ["人格与语气", "判断方式", "底线"], name: "你的分身", url: "hatch.ai/你的名字", copy: "复制", userQ: "我该先做哪一步？", aiA: "先看你的预算，再…" } },
+  trial: { title: "三步，拥有你的专属分身", steps: [{ title: "提交你的素材", body: "课程、文章、录音、聊天记录皆可，无需整理。" }, { title: "深度理解，专访追问", body: "提炼只存在于你经验中的判断。" }, { title: "获得你的分身链接", body: "经你确认后上线，分享给用户，由它代你解答。" }], cta: "前往 Studio", mini: { pdf: "课程讲义.pdf", link: "文章", voice: "0:42", chatA: "这个方案怎么选？", chatB: "先看预算", ask: "那次你为什么没接这个客户？", noted: "已记录", outline: ["人格与语气", "判断方式", "底线"], name: "你的分身", url: "gethatchapp.com/你的名字", copy: "复制", userQ: "我该先做哪一步？", aiA: "先看你的预算，再…" } },
   storyTitle: (field: string) => `一位${field}客户，从咨询到成交。`,
   storySteps: [
     { title: "客户从你的主页点进来", body: "放一个链接就行，不用换平台。", soon: false },
@@ -168,7 +168,7 @@ const en: LandingCopy = {
   pickLabel: "What do you do?",
   roles: ["Sales", "Advisory", "Coaching", "Teaching"],
   tryCta: "Try it free",
-  trial: { title: "Keep being you. We'll do the rest.", steps: [{ title: "Hand us what you already have", body: "Talks, posts, voice notes, client chats. No tidying up." }, { title: "We read you, then ask you", body: "We dig for the calls that only live in your head." }, { title: "Get a link to your AI", body: "It goes live only when you say so. Share it, and it answers for you." }], cta: "Start in Studio", mini: { pdf: "Course notes.pdf", link: "Article", voice: "0:42", chatA: "Which plan fits me?", chatB: "Start with budget", ask: "Why did you turn that client down?", noted: "Noted", outline: ["Voice", "How you judge", "Lines you hold"], name: "Your AI", url: "hatch.ai/you", copy: "Copy", userQ: "Where should I start?", aiA: "Start with your budget, then…" } },
+  trial: { title: "Keep being you. We'll do the rest.", steps: [{ title: "Hand us what you already have", body: "Talks, posts, voice notes, client chats. No tidying up." }, { title: "We read you, then ask you", body: "We dig for the calls that only live in your head." }, { title: "Get a link to your AI", body: "It goes live only when you say so. Share it, and it answers for you." }], cta: "Start in Studio", mini: { pdf: "Course notes.pdf", link: "Article", voice: "0:42", chatA: "Which plan fits me?", chatB: "Start with budget", ask: "Why did you turn that client down?", noted: "Noted", outline: ["Voice", "How you judge", "Lines you hold"], name: "Your AI", url: "gethatchapp.com/you", copy: "Copy", userQ: "Where should I start?", aiA: "Start with your budget, then…" } },
   storyTitle: (field: string) => `One ${field.toLowerCase()} client, from question to sale.`,
   storySteps: [
     { title: "A client taps the link in your bio", body: "One link. No new platform.", soon: false },
@@ -311,7 +311,7 @@ const ja: LandingCopy = {
   pickLabel: "あなたのお仕事は？",
   roles: ["営業", "コンサル", "コーチ", "先生"],
   tryCta: "無料で試す",
-  trial: { title: "あなたはそのままで。あとは任せて。", steps: [{ title: "手元にあるものを渡す", body: "講義、記事、録音、お客様とのチャット。整理は不要。" }, { title: "読み込んで、問いかける", body: "あなたの頭の中にしかない判断を、掘り起こします。" }, { title: "あなたのAIのリンクが届く", body: "公開はあなたの承認後。リンクを送れば、あなたの代わりに答えます。" }], cta: "Studioではじめる", mini: { pdf: "講義資料.pdf", link: "記事", voice: "0:42", chatA: "どのプランが合う？", chatB: "まず予算から", ask: "なぜあの依頼を断ったのですか？", noted: "記録しました", outline: ["人柄と語り口", "判断の仕方", "譲れない線"], name: "あなたのAI", url: "hatch.ai/you", copy: "コピー", userQ: "何から始めればいい？", aiA: "まず予算を見て、それから…" } },
+  trial: { title: "あなたはそのままで。あとは任せて。", steps: [{ title: "手元にあるものを渡す", body: "講義、記事、録音、お客様とのチャット。整理は不要。" }, { title: "読み込んで、問いかける", body: "あなたの頭の中にしかない判断を、掘り起こします。" }, { title: "あなたのAIのリンクが届く", body: "公開はあなたの承認後。リンクを送れば、あなたの代わりに答えます。" }], cta: "Studioではじめる", mini: { pdf: "講義資料.pdf", link: "記事", voice: "0:42", chatA: "どのプランが合う？", chatB: "まず予算から", ask: "なぜあの依頼を断ったのですか？", noted: "記録しました", outline: ["人柄と語り口", "判断の仕方", "譲れない線"], name: "あなたのAI", url: "gethatchapp.com/you", copy: "コピー", userQ: "何から始めればいい？", aiA: "まず予算を見て、それから…" } },
   storyTitle: (field: string) => `${field}のお客様、相談から成約まで。`,
   storySteps: [
     { title: "プロフィールのリンクから来る", body: "リンク一つ。新しいサービスは不要。", soon: false },
