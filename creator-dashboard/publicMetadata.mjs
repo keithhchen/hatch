@@ -1,5 +1,5 @@
 const DEFAULT_TITLE = "Hatch — Private Intelligence for Experts";
-const DEFAULT_DESCRIPTION = "Discover Expert Agents you can use with Hatch Desktop.";
+const DEFAULT_DESCRIPTION = "Discover Expert Agents you can chat with in your browser.";
 
 /**
  * Builds the client-safe metadata model for a canonical public product route.

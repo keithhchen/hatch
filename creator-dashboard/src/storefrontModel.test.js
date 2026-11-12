@@ -29,7 +29,6 @@ test("shared storefront model preserves client-safe content and never invents mi
   assert.deepEqual(model.outputs, []);
   assert.deepEqual(model.boundaries, ["No hiring guarantee"]);
   assert.equal(model.privacy, "");
-  assert.equal(model.desktopRequirement, "");
   assert.equal(model.refundPolicy, "");
 
   const registryPresentation = storefrontModel({

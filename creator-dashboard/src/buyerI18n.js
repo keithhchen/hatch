@@ -46,7 +46,6 @@ const ENTRIES = {
   "Free. The Agent is saved to My Agents.": ["免费。Agent 会保存到我的 Agent。", "無料です。Agent はマイ Agent に保存されます。"],
   "If My Agents is empty, the Agent may have been added with a different email. Sign out and sign in with that email.": ["如果我的 Agent 是空的，可能是用其他邮箱添加的。请退出后用那个邮箱登录。", "マイ Agent が空の場合は、別のメールアドレスで追加された可能性があります。ログアウトして、そのメールアドレスでログインしてください。"],
   "Orders and receipts": ["订单与收据", "注文と領収書"],
-  "Download Desktop": ["下载 Desktop", "Desktop をダウンロード"],
   Settings: ["设置", "設定"],
 
   // Catalog
@@ -68,7 +67,6 @@ const ENTRIES = {
 
   // Product
   "Agent details": ["Agent 详情", "Agent の詳細"],
-  "Available in the browser and in Hatch Desktop.": ["可在浏览器和 Hatch Desktop 中使用。", "ブラウザと Hatch Desktop で利用できます。"],
   "How it works": ["使用方式", "ご利用の流れ"],
   "Add to your account": ["添加到账户", "アカウントに追加"],
   "Start a conversation": ["开始对话", "会話を開始"],
@@ -78,21 +76,14 @@ const ENTRIES = {
   "Manage product": ["管理产品", "製品を管理"],
   "Setting up access": ["正在开通", "準備中"],
   "No need to add it again.": ["无需重复添加。", "再度追加する必要はありません。"],
-  "Chat in the browser or open it in Hatch Desktop.": ["可在浏览器中对话，或在 Hatch Desktop 中打开。", "ブラウザで会話するか、Hatch Desktop で開けます。"],
+  "Chat in the browser.": ["可在浏览器中对话。", "ブラウザで会話できます。"],
   "Start chat": ["开始对话", "会話を開始"],
   "Setting up access…": ["正在开通…", "準備中…"],
   "Order confirmed. Access appears here when ready.": ["订单已确认，开通后将显示在此处。", "注文は確定済みです。準備ができるとここに表示されます。"],
   "This product is unavailable": ["该产品暂不可用", "この製品は現在利用できません"],
   "The expert has unpublished it. Past receipts remain in Orders.": ["专家已下架该产品，历史收据仍保留在订单中。", "専門家が公開を停止しました。過去の領収書は注文に残っています。"],
   "Get access": ["免费添加", "無料で追加"],
-  "Download Hatch Desktop": ["下载 Hatch Desktop", "Hatch Desktop をダウンロード"],
-  "Chat right in your browser, no download needed. To work with local files, use Hatch Desktop.": ["在浏览器里直接对话，无需下载。需要处理本地文件时，也可以用 Hatch Desktop。", "ブラウザでそのまま会話できます。ダウンロードは不要です。ローカルファイルを扱うときは Hatch Desktop も使えます。"],
-  "No download needed.": ["无需下载。", "ダウンロードは不要です。"],
-  "Or use Hatch Desktop for local files": ["或者，用 Hatch Desktop 处理本地文件", "または、Hatch Desktop でローカルファイルを扱う"],
-  "Download it, sign in with this account, then review local file permissions.": ["下载后用此账户登录，再确认本地文件权限。", "ダウンロードしてこのアカウントでログインし、ローカルファイルの権限を確認します。"],
-  "Hatch Desktop": ["Hatch Desktop", "Hatch Desktop"],
-  Download: ["下载", "ダウンロード"],
-  Open: ["打开", "開く"],
+  "Chat right in your browser.": ["在浏览器里直接对话。", "ブラウザでそのまま会話できます。"],
   "Untitled product": ["未命名产品", "名称未設定の製品"],
   "Preview offer": ["预览", "プレビュー"],
   "Product offer": ["添加方式", "追加方法"],
@@ -100,7 +91,6 @@ const ENTRIES = {
   "What you receive": ["交付内容", "提供内容"],
   "Out of scope": ["不包含", "対象外"],
   Privacy: ["隐私", "プライバシー"],
-  Availability: ["使用环境", "利用環境"],
 
   // Account
   "Hatch account": ["Hatch 账户", "Hatch アカウント"],
@@ -117,7 +107,7 @@ const ENTRIES = {
   "Enter a name.": ["请输入姓名。", "名前を入力してください。"],
   "Display name is required.": ["请输入姓名。", "名前を入力してください。"],
   "Display name must not exceed 128 characters.": ["姓名不能超过 128 个字符。", "名前は 128 文字以内で入力してください。"],
-  "Agents and orders belong to the account used to add them. Use the same account on the web and in Desktop.": ["Agent 和订单归属于添加时使用的账户。网页端和 Desktop 请使用同一账户。", "Agent と注文は、追加時に使用したアカウントに紐づきます。Web と Desktop では同じアカウントを使用してください。"],
+  "Agents and orders belong to the account used to add them.": ["Agent 和订单归属于添加时使用的账户。", "Agent と注文は、追加時に使用したアカウントに紐づきます。"],
   "Signed in as {name}": ["当前登录：{name}", "ログイン中：{name}"],
   "Check your account": ["核对账户", "アカウントの確認"],
   "Sign in with the email used to add the Agent.": ["请使用添加 Agent 时的邮箱登录。", "Agent を追加したときのメールアドレスでログインしてください。"],

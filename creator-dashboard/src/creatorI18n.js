@@ -117,7 +117,6 @@ const MESSAGES = {
     ,library: "Library"
     ,home: "Home"
     ,studio: "Studio"
-    ,download: "Download"
     ,orders: "Orders"
     ,account: "Account"
     ,hatchCreatorHome: "Hatch Expert home"
@@ -300,7 +299,6 @@ const MESSAGES = {
     ,library: "资料库"
     ,home: "首页"
     ,studio: "Studio"
-    ,download: "下载"
     ,orders: "订单"
     ,account: "账户"
     ,hatchCreatorHome: "Hatch Expert 首页"
@@ -483,7 +481,6 @@ const MESSAGES = {
     ,library: "ライブラリ"
     ,home: "ホーム"
     ,studio: "Studio"
-    ,download: "ダウンロード"
     ,orders: "注文"
     ,account: "アカウント"
     ,hatchCreatorHome: "Hatch Expert ホーム"
@@ -773,7 +770,7 @@ const PORTAL_MESSAGES = {
     reasonRequired: "A reason is required for the audit record.",
     revokeReasonPlaceholder: "Reason for revoking this access",
     revokeConfirm: "Revoke this access?",
-    entitlementNotUsable: "The client will no longer be able to use it in the browser or in Hatch Desktop.",
+    entitlementNotUsable: "The client will no longer be able to use it in the browser.",
     confirmRevoke: "Confirm revoke",
     reviewRevoke: "Review revoke",
     noRevokeAvailable: "No revoke action is available for this order state.",
@@ -1020,7 +1017,7 @@ const PORTAL_MESSAGES = {
     reasonRequired: "审计记录需要填写原因。",
     revokeReasonPlaceholder: "撤销这项使用权的原因",
     revokeConfirm: "撤销这项使用权？",
-    entitlementNotUsable: "客户将无法继续在浏览器或 Hatch Desktop 中使用。",
+    entitlementNotUsable: "客户将无法继续在浏览器中使用。",
     confirmRevoke: "确认撤销",
     reviewRevoke: "检查撤销",
     noRevokeAvailable: "当前订单状态不支持撤销使用权。",
@@ -1267,7 +1264,7 @@ const PORTAL_MESSAGES = {
     reasonRequired: "監査記録の理由が必要です。",
     revokeReasonPlaceholder: "このアクセスを取り消す理由",
     revokeConfirm: "このアクセスを取り消しますか？",
-    entitlementNotUsable: "クライアントはブラウザでも Hatch Desktop でも利用できなくなります。",
+    entitlementNotUsable: "クライアントはブラウザで利用できなくなります。",
     confirmRevoke: "取り消しを確定",
     reviewRevoke: "取り消しを確認",
     noRevokeAvailable: "この注文状態では取り消し操作を利用できません。",

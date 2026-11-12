@@ -268,7 +268,7 @@ function PreviewPane({ resource, profile, t }) {
       const preview = payload?.preview && typeof payload.preview === "object" ? payload.preview : payload;
       const product = preview.product ?? preview;
       return <div className="cpv2-storefront-frame sx-frame">
-        <StorefrontDetails product={product} creatorName={preview.creator?.display_name ?? profile?.display_name} creatorAvatarUrl={preview.creator?.avatar_url ?? profile?.avatar_url} mode="preview" headingLevel={2} desktopRequirement={preview.desktop_requirement ?? product.desktop_requirement} action={<Button type="button" disabled>{t("getAccess")}</Button>} />
+        <StorefrontDetails product={product} creatorName={preview.creator?.display_name ?? profile?.display_name} creatorAvatarUrl={preview.creator?.avatar_url ?? profile?.avatar_url} mode="preview" headingLevel={2} action={<Button type="button" disabled>{t("getAccess")}</Button>} />
       </div>;
     }}</PageBoundary>
     {resource.state === "ready" && !isProductLive(unwrap(resource.data, "product")) ? <p className="sx-quiet sx-preview-note">{t("previewBody")}</p> : null}

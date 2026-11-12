@@ -9,7 +9,6 @@ const CREATOR_STUDIO_KEYS = [
   "library",
   "home",
   "studio",
-  "download",
   "products",
   "orders",
   "account",
