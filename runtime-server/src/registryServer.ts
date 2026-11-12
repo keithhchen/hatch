@@ -160,6 +160,8 @@ type RegistryContext = {
   /** Set once shutdown begins: readiness fails so the proxy sends nothing new. */
   draining?: boolean;
   channels?: ChannelService;
+  /** Why Product channels cannot handle messages, when they cannot. Absent: they can, or are deliberately off. */
+  productChannelsUnavailable?: string;
   credentialSeal?: CredentialSeal;
   ownApps?: OwnApps;
   /** The platforms a person signs in with; absent without the Registry database. */
@@ -372,13 +374,13 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     };
     const providers: Partial<Record<ChannelKind, IdentityProvider>> = {};
     for (const [kind, build] of Object.entries(identityProviders)) { const provider = build(); if (provider) providers[kind as ChannelKind] = provider; }
-    let channels!: ChannelService;
     // Signing in with a platform is closed for now: on its own it creates a Hatch account per platform id, and an account that
     // later unbinds the platform has no way back in yet, which leaves ghost accounts and platform ids that cannot be bound.
     // Binding a chat to an existing account (a link code from Studio) is not affected. Reopen when binding is account-level.
     const PLATFORM_SIGN_IN_OPEN = false;
     const platformLogin = new PlatformLogin({
       providers: PLATFORM_SIGN_IN_OPEN ? providers : {}, store: await PostgresLoginStore.open(registryPool), accounts, limiter: stores.limiter, origin: telegramOrigin,
+      // `channels` is built just below from this login, and is only called once a person signs in.
       admit: (kind, account, subject, claim) => channels.admit(kind, { senderId: subject, threadId: subject }, account.id),
     });
     const catalog = registryAgentCatalog(registryContext);
@@ -389,7 +391,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     // A Product's Runs are held by the Runtime; the Assistant's are held here. A reply is sent once for either.
     const routed = new RoutedChatGateway(gateway);
     const ownsProduct = async (accountId: string, productId: string) => Boolean(await productForCreator(registryContext, accountId, productId));
-    channels = new ChannelService({
+    const channels: ChannelService = new ChannelService({
       ...stores, hub, scopeOf, ownsProduct, gateway: routed,
       audienceOf: (kind, target) => target.kind === "product" && isPerProduct(CREDENTIAL_FORMS[kind]) ? "public" : "self",
       signIn: (kind, senderId) => platformLogin.claimLink(kind, senderId),
@@ -440,10 +442,12 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     conversationPorts.eventLog.bind("assistant:", assistantChat.feed);
     await assistantChat.start();
     channels.register("assistant", guarded(new ChatFlow(new AssistantTarget(assistant)), eligibility));
-    // Without a Chat gateway Product Connections have no handler, and their events wait in the inbox.
+    // Without a Chat gateway Product Connections have no handler: readiness says so, and their webhooks are refused. HATCH_PRODUCT_CHANNELS=off makes that deliberate.
+    const productChannelsOff = environment.HATCH_PRODUCT_CHANNELS?.trim() === "off";
+    const productChannelsUnavailable = gateway || productChannelsOff ? undefined : "Product channels need HATCH_RUNTIME_CHAT_URL and HATCH_RUNTIME_CHAT_SERVICE_TOKEN; set both, or set HATCH_PRODUCT_CHANNELS=off.";
     if (gateway) channels.register("product", guarded(new GuardedTarget(new ChatFlow(new ProductTarget({ gateway, limiter: stores.limiter })), [liveOwnProduct(releaseStore)]), eligibility));
     channels.start();
-    Object.assign(registryContext, { assistant, assistantChat, assistantStorage: [transcripts, conversations], ingest, channels, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin, studioUrl, platformLogin,...(seal ? { ownApps: new OwnApps({ connections: stores.connections, seal, forms: CREDENTIAL_FORMS, origin: telegramOrigin, ownsProduct }) } : {}) });
+    Object.assign(registryContext, { productChannelsUnavailable, assistant, assistantChat, assistantStorage: [transcripts, conversations], ingest, channels, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin, studioUrl, platformLogin,...(seal ? { ownApps: new OwnApps({ connections: stores.connections, seal, forms: CREDENTIAL_FORMS, origin: telegramOrigin, ownsProduct }) } : {}) });
     // A platform that pushes over its own connection runs here, in one process at a time. A dropped connection comes back; credentials added or removed are picked up.
     channelListeners = new ChannelListeners({
       hub, connections: stores.connections, exclusive: postgresExclusive(registryPool),
@@ -786,6 +790,7 @@ async function route(
     try {
       if (context.draining) throw new Error("Registry is shutting down");
       await context.store.checkReady();
+      if (context.productChannelsUnavailable) { sendJson(response, 503, { status: "unavailable", checks: { registry_store: "ready", product_channels: context.productChannelsUnavailable } }); return; }
       sendJson(response, 200, {
         status: "ok",
         checks: {
@@ -2191,6 +2196,11 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
   }
   if (webhook && request.method === "POST") {
     const kind = webhook[1]!;
+    if (context.productChannelsUnavailable && webhook[2] && isChannelKind(kind) && isPerProduct(CREDENTIAL_FORMS[kind])) {
+      log.error("product_webhook_unhandled", { channel: kind, reason: context.productChannelsUnavailable });
+      sendJson(response, 503, { error: { code: "product_channels_unavailable", message: context.productChannelsUnavailable } });
+      return;
+    }
     const adapter = isChannelKind(kind) ? await channels.hub.get(kind, webhook[2]) : undefined;
     if (!adapter?.parse) { sendJson(response, 404, { ok: false }); return; }
     const raw = await readRawBody(request, 2 * 1024 * 1024);
