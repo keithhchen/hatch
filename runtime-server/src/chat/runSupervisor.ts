@@ -5,6 +5,7 @@ import type { StopRelay } from "./stopRelay.js";
 import { RunFenced } from "./runFence.js";
 import type { RunTerminators } from "./runTerminator.js";
 import { currentContext, newRequestId, runInContext } from "../observability/context.js";
+import { log } from "../observability/log.js";
 
 /** The side of the client tool broker that outside callers reach: results in, cancellation out. */
 export interface ToolSession {
@@ -63,6 +64,12 @@ type Owned = { conversationId: string; controller: AbortController; session?: To
 
 const TERMINAL = new Set(["completed", "failed", "cancelled", "interrupted"]);
 
+/** A rejection handler that reports the failure with its context, then yields what the caller continues with. */
+const logged = <T>(event: string, fallback: T, fields: Record<string, unknown> = {}) => (error: unknown): T => {
+  log.error(event, { ...fields, error });
+  return fallback;
+};
+
 /**
  * Owns Runs for as long as they last, whichever client started them. A Run is
  * kept alive by a renewed lease; when its owner disappears another instance
@@ -95,8 +102,8 @@ export class RunSupervisor {
       setInterval(() => void this.relayToolResults(), this.options.toolPollMs ?? 250)
     ];
     for (const timer of this.timers) timer.unref();
-    this.unsubscribe = await this.options.stops?.subscribe((runId) => void this.stopLocally(runId, "The Run stopped")).catch(() => undefined);
-    this.unsubscribeSteers = await this.options.steers?.subscribe((runId) => this.owned.get(runId)?.wake?.()).catch(() => undefined);
+    this.unsubscribe = await this.options.stops?.subscribe((runId) => void this.stopLocally(runId, "The Run stopped")).catch(logged("run_stop_subscribe_failed", undefined));
+    this.unsubscribeSteers = await this.options.steers?.subscribe((runId) => this.owned.get(runId)?.wake?.()).catch(logged("run_steer_subscribe_failed", undefined));
   }
 
   /** A message joined the Run, on any instance: the one that executes it cuts the model call in flight. */
@@ -111,7 +118,7 @@ export class RunSupervisor {
     const owned = this.owned.get(runId);
     if (!owned || owned.controller.signal.aborted) return;
     owned.controller.abort(new Error(reason));
-    await owned.session?.cancelRun(runId, reason).catch(() => undefined);
+    await owned.session?.cancelRun(runId, reason).catch(logged("run_cancel_tools_failed", undefined, { run_id: runId }));
   }
 
   /** Takes responsibility for a Run this process just started, continued or claimed. */
@@ -142,7 +149,7 @@ export class RunSupervisor {
    * the Run over, finds it; the instance that holds the call here gets it straight away.
    */
   async deliverToolResult(conversationId: string, runId: string, result: ToolResult): Promise<boolean> {
-    const recorded = await this.repository.answerToolCall(conversationId, runId, result.tool_call_id, outcomeOf(result)).catch(() => false);
+    const recorded = await this.repository.answerToolCall(conversationId, runId, result.tool_call_id, outcomeOf(result)).catch(logged("tool_result_record_failed", false, { run_id: runId, tool_call_id: result.tool_call_id }));
     // A Run is answered only through its own conversation, never by run id alone.
     const owned = this.owned.get(runId);
     const local = owned?.conversationId === conversationId ? await owned.session?.handleResult(result) ?? false : false;
@@ -172,9 +179,9 @@ export class RunSupervisor {
   async stop(): Promise<void> {
     for (const timer of this.timers) clearInterval(timer);
     this.timers = [];
-    await this.unsubscribe?.().catch(() => undefined);
+    await this.unsubscribe?.().catch(logged("run_stop_unsubscribe_failed", undefined));
     this.unsubscribe = undefined;
-    await this.unsubscribeSteers?.().catch(() => undefined);
+    await this.unsubscribeSteers?.().catch(logged("run_steer_unsubscribe_failed", undefined));
     this.unsubscribeSteers = undefined;
     const running = [...this.owned.values()];
     for (const owned of running) owned.controller.abort(new RunHandoff("Runtime shutting down"));
@@ -183,11 +190,11 @@ export class RunSupervisor {
 
   /** Claims lapsed Runs; exposed so a starting instance does not wait for the first timer. */
   async sweep(): Promise<void> {
-    const claimed = await this.repository.claimOrphanedRuns(this.options.executorId, this.options.leaseMs).catch(() => []);
+    const claimed = await this.repository.claimOrphanedRuns(this.options.executorId, this.options.leaseMs).catch(logged("run_sweep_failed", []));
     for (const run of claimed) {
-      const decision = await this.policy.decide(run).catch((error): ResumeDecision => ({ interrupt: String(error) }));
+      const decision = await this.policy.decide(run).catch((error): ResumeDecision => { log.error("run_resume_decision_failed", { run_id: run.id, conversation_id: run.conversationId, error }); return { interrupt: String(error) }; });
       if (decision === "restart") this.adopt(run);
-      else await this.terminators.executing.end(run.id, { status: "interrupted", failure: { code: "run_interrupted", message: decision.interrupt } }).catch(() => undefined);
+      else await this.terminators.executing.end(run.id, { status: "interrupted", failure: { code: "run_interrupted", message: decision.interrupt } }).catch(logged("run_interrupt_unrecorded", undefined, { run_id: run.id, conversation_id: run.conversationId }));
     }
   }
 
@@ -196,19 +203,19 @@ export class RunSupervisor {
     for (const [runId, owned] of this.owned) {
       const waiting = owned.session?.pendingRequests() ?? [];
       if (!waiting.length) continue;
-      const answered = (await this.repository.listToolCalls(runId).catch(() => [])).filter((call) => call.outcome && waiting.some((request) => request.tool_call_id === call.toolCallId));
+      const answered = (await this.repository.listToolCalls(runId).catch(logged("tool_calls_read_failed", [], { run_id: runId }))).filter((call) => call.outcome && waiting.some((request) => request.tool_call_id === call.toolCallId));
       for (const call of answered) {
         const result = call.outcome!.status === "ok"
           ? { type: "tool_call.result" as const, run_id: runId, tool_call_id: call.toolCallId, status: "ok" as const, result: call.outcome!.result }
           : { type: "tool_call.result" as const, run_id: runId, tool_call_id: call.toolCallId, status: "error" as const, error: (call.outcome as { error: { code: string; message: string } }).error };
-        await owned.session!.handleResult(result).catch(() => false);
+        try { await owned.session!.handleResult(result); } catch (error) { await this.fail({ id: runId, conversationId: owned.conversationId }, error); }
       }
     }
   }
 
   private async renewLeases(): Promise<void> {
     for (const [runId, owned] of this.owned) {
-      const held = await this.repository.renewLease(runId, this.options.executorId, this.options.leaseMs).catch(() => true);
+      const held = await this.repository.renewLease(runId, this.options.executorId, this.options.leaseMs).catch(logged("lease_renew_failed", true, { run_id: runId }));
       if (!held) owned.controller.abort(new RunHandoff("Run lease lost"));
     }
   }
@@ -236,7 +243,14 @@ export class RunSupervisor {
     } catch (error) {
       // A fenced executor no longer holds the Run: whoever does, or whoever stopped it, decides its state.
       if (owned.controller.signal.reason instanceof RunHandoff || error instanceof RunFenced) return;
-      await this.terminators.executing.end(run.id, { status: "failed", failure: failures.translate(error, { run: run.id, conversation: run.conversationId }) }).catch(() => undefined);
+      await this.fail(run, error);
     }
+  }
+
+  /** The Run cannot go on: say why, with its context, and record it failed through the Run's one exit. */
+  private async fail(run: Pick<ConversationRunRecord, "id" | "conversationId">, error: unknown): Promise<void> {
+    log.error("run_failed", { run_id: run.id, conversation_id: run.conversationId, error });
+    await this.terminators.executing.end(run.id, { status: "failed", failure: failures.translate(error, { run: run.id, conversation: run.conversationId }) })
+      .catch(logged("run_failure_unrecorded", undefined, { run_id: run.id, conversation_id: run.conversationId }));
   }
 }
