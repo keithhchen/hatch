@@ -44,9 +44,11 @@ on:
 permissions:
   contents: read
 
+# Only the newest commit of a ref is worth testing. On master this is safe too: the release deploys the commit it tested,
+# and the newest commit already contains every earlier one. Deploys themselves are never cancelled (deploy.yml, web.yml).
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   commerce:
