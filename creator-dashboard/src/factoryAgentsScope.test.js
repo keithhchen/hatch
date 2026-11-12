@@ -326,7 +326,6 @@ test('Collect sources lists the real manual-upload files from the research sessi
   assert.match(source, /const \[manualFiles, setManualFiles\] = useState\(\[\]\)/);
   assert.match(source, /setManualFiles\(value\.manualFiles \|\| \[\]\)/);
   assert.match(source, /<FileList title=\{t\("factoryUploadedTitle"\)\}/);
-  assert.match(source, /onOpenAgent\("research"\)/);
   assert.match(source, /t\("factoryUploadedTitle"\)/);
 });
 

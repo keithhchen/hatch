@@ -62,3 +62,11 @@ test("Upload has no file-type whitelist and no old files path for uploads; long 
   assert.match(css, /\.fl__row \{[^}]*grid-template-columns: minmax\(0, 1fr\) auto/);
   assert.match(css, /\.fl__label \{[^}]*text-overflow: ellipsis/);
 });
+
+test("Clicking an uploaded file previews it in place instead of navigating into an Agent", async () => {
+  const source = await readFile(new URL("./FactoryAgents.jsx", import.meta.url), "utf8");
+  assert.match(source, /onOpen=\{onOpenFile\}/);
+  assert.doesNotMatch(source, /onOpen=\{\(\) => onOpenAgent\("research"\)\}/);
+  assert.match(source, /<FileViewer key=\{preview\.path\}[\s\S]*?siblings=\{manualFiles\}/);
+  assert.match(source, /const researchTransport = async \(\) => agentSession\("research"\) \?\? await api/);
+});
