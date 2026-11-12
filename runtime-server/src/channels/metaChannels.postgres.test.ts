@@ -9,7 +9,8 @@ import { ChannelHub } from "./hub.js";
 import { InstagramChannel } from "./instagramChannel.js";
 import { MessengerChannel } from "./messengerChannel.js";
 import type { Handled, Inbound, TargetHandler } from "./ports.js";
-import { graphError, recorder, sign } from "./recorder.testkit.js";
+import type { Dispatcher } from "./dispatch.js";
+import { graphError, recorder, replyToInbound, sign } from "./recorder.testkit.js";
 import { ChannelService } from "./service.js";
 import { openChannelStores } from "./postgres/stores.js";
 import { SlackChannel } from "./slackChannel.js";
@@ -75,7 +76,7 @@ async function stack(pool: Pool, make: (tokens: Tokens) => ChannelAdapter, wrap:
     await service.accept(adapter, (await adapter.parse!(raw)).events);
     await service.drain();
   };
-  return { ...stores, adapter, service, target, clock, errors, connect, credentialed, deliver };
+  return { ...stores, adapter, service, dispatcher: (service as unknown as { dispatcher: Dispatcher }).dispatcher, target, clock, errors, connect, credentialed, deliver };
 }
 const messenger = (fetchImpl?: typeof fetch) => (tokens: Tokens) => new MessengerChannel({ ...config, tokens: tokens("messenger") }, fetchImpl);
 const messaging = (page: string, mid: string, sender: string, timestamp: number) => ({ id: page, messaging: [{ sender: { id: sender }, recipient: { id: page }, timestamp, message: { mid, text: mid } }] });
@@ -101,7 +102,7 @@ test("A reply goes to the Page it came from inside the 24 hour window, with that
   const connection = await env.connect("PAGE2", "p2");
   await env.deliver({ object: "page", entry: [messaging("PAGE2", "m1", "PSID9", 1)] });
   const [inbound] = env.target.handled;
-  assert.ok(await env.service.reply(inbound!.id, { text: "Hello!" }));
+  await replyToInbound(env, inbound!.id, { text: "Hello!" });
   await env.service.drain();
   const sends = calls.filter(call => call.body.message);
   assert.equal(sends.length, 1);
@@ -109,7 +110,7 @@ test("A reply goes to the Page it came from inside the 24 hour window, with that
   assert.equal((sends[0]?.init.headers as Record<string, string>).authorization, "Bearer page-2-token");
   assert.deepEqual(sends[0]?.body, { recipient: { id: "PSID9" }, messaging_type: "RESPONSE", message: { text: "Hello!" } });
   env.clock.at = new Date(env.clock.at.getTime() + 25 * 60 * 60_000);
-  assert.ok(await env.service.reply(inbound!.id, { text: "too late" }));
+  await replyToInbound(env, inbound!.id, { text: "too late" });
   await env.service.drain();
   assert.equal(calls.filter(call => call.body.message).length, 1);
   assert.deepEqual((await env.outbox.undelivered(connection)).map(delivery => delivery.parts[0]!.text), ["too late"]);
@@ -134,7 +135,7 @@ test("Revoked access fails the delivery for good and degrades the Connection", o
   const connection = await env.connect("PAGE1", "p1");
   await env.deliver({ object: "page", entry: [messaging("PAGE1", "m1", "PSID1", 1)] });
   const before = calls.length;
-  await env.service.reply(env.target.handled[0]!.id, { text: "hi" });
+  await replyToInbound(env, env.target.handled[0]!.id, { text: "hi" });
   await env.service.drain();
   await env.service.drain();
   assert.equal(calls.length - before, 1);
@@ -149,7 +150,7 @@ test("A send that timed out is left unknown, never sent twice", options, async (
   await env.connect("PAGE1", "p1");
   await env.deliver({ object: "page", entry: [messaging("PAGE1", "m1", "PSID1", 1)] });
   const before = calls.length;
-  await env.service.reply(env.target.handled[0]!.id, { text: "hi" });
+  await replyToInbound(env, env.target.handled[0]!.id, { text: "hi" });
   await env.service.drain();
   await env.service.drain();
   assert.equal(calls.length - before, 1);
@@ -177,7 +178,7 @@ test("WhatsApp: a Connection an operator marked task-specific is answered throug
   assert.equal(env.target.handled.length, 1);
   await until(() => calls.length > 0);
   assert.equal(calls[0]?.body.typing_indicator.type, "text");
-  await env.service.reply(env.target.handled[0]!.id, { text: "hello" });
+  await replyToInbound(env, env.target.handled[0]!.id, { text: "hello" });
   await env.service.drain();
   const send = calls.find(call => call.body.text);
   assert.equal(send?.url, "https://graph.facebook.com/v27.0/PN1/messages");

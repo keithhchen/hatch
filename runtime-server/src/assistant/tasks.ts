@@ -40,7 +40,11 @@ export type AssistantTask = {
   updatedAt: string;
 };
 
-export type TaskChange = Partial<Pick<AssistantTask, "status" | "needs" | "session" | "payload" | "outputRef" | "summary" | "answeredAt" | "leaseExpiresAt" | "lastError" | "attempts">>;
+/**
+ * What one update changes. Updates are applied where the row lives, so concurrent ones never overwrite each other's fields:
+ * `payload` holds only the keys to set (merged into the stored payload), and `attempted` adds one to `attempts`.
+ */
+export type TaskChange = Partial<Pick<AssistantTask, "status" | "needs" | "session" | "payload" | "outputRef" | "summary" | "answeredAt" | "leaseExpiresAt" | "lastError">> & { attempted?: true };
 
 const VERB = { approve: "确认", decline: "取消" } as const;
 const PAST = { approve: "已确认", decline: "已取消" } as const;
@@ -125,14 +129,16 @@ export class PostgresTaskRepository implements TaskRepository {
     return row ? fromRow(row) : undefined;
   }
   async update(id: string, change: TaskChange): Promise<AssistantTask> {
-    const columns: Record<keyof TaskChange, string> = { status: "status", needs: "needs", session: "session", payload: "payload", outputRef: "output_ref", summary: "summary", answeredAt: "answered_at", leaseExpiresAt: "lease_expires_at", lastError: "last_error", attempts: "attempts" };
+    const columns: Record<Exclude<keyof TaskChange, "attempted">, string> = { status: "status", needs: "needs", session: "session", payload: "payload", outputRef: "output_ref", summary: "summary", answeredAt: "answered_at", leaseExpiresAt: "lease_expires_at", lastError: "last_error" };
     const sets: string[] = []; const values: unknown[] = [id];
-    for (const [key, column] of Object.entries(columns) as Array<[keyof TaskChange, string]>) {
+    for (const [key, column] of Object.entries(columns) as Array<[keyof typeof columns, string]>) {
       if (!(key in change)) continue;
       const value = change[key];
       values.push(value === undefined ? null : key === "session" || key === "payload" ? JSON.stringify(value) : value);
-      sets.push(`${column} = $${values.length}${key === "session" || key === "payload" ? "::jsonb" : ""}`);
+      // One statement, so the row changes from what it holds now, not from what the caller read earlier.
+      sets.push(key === "payload" ? `payload = payload || $${values.length}::jsonb` : `${column} = $${values.length}${key === "session" ? "::jsonb" : ""}`);
     }
+    if (change.attempted) sets.push("attempts = attempts + 1");
     if (change.status && change.status !== "needs_you" && !("needs" in change)) sets.push("needs = NULL");
     const row = (await this.pool.query(`UPDATE hatch_assistant_tasks SET ${[...sets, "updated_at = NOW()"].join(", ")} WHERE id = $1 RETURNING *`, values)).rows[0];
     if (!row) throw Object.assign(new Error("Task was not found"), { status: 404 });
@@ -186,7 +192,10 @@ export class MemoryTaskRepository implements TaskRepository {
   async update(id: string, change: TaskChange): Promise<AssistantTask> {
     const task = this.tasks.get(id);
     if (!task) throw Object.assign(new Error("Task was not found"), { status: 404 });
-    Object.assign(task, change, { updatedAt: new Date(Date.now() + 1).toISOString() });
+    const { payload, attempted, ...fields } = change;
+    Object.assign(task, fields, { updatedAt: new Date(Date.now() + 1).toISOString() });
+    if (payload) task.payload = { ...task.payload, ...payload };
+    if (attempted) task.attempts += 1;
     if (change.status && change.status !== "needs_you" && !("needs" in change)) delete task.needs;
     for (const key of Object.keys(task) as Array<keyof AssistantTask>) if (task[key] === undefined) delete task[key];
     return structuredClone(task);

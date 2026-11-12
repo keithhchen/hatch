@@ -32,7 +32,7 @@ import type { AssistantHost } from "../conversations/assistantConversation.js";
 import type { AssetDesk } from "../conversations/assets.js";
 import { log } from "../observability/log.js";
 import { memoizeSuccess } from "../memoizeSuccess.js";
-import { MODEL_ROLES } from "../modelRoles.js";
+import { modelRole } from "../modelRoles.js";
 
 /** The Assistant is one Agent, not a Product: its conversation is bound to the account, under this id. A UUID, as every Agent id is once the identity migration has run. */
 export const ASSISTANT_AGENT_ID = "a5515700-0000-4000-8000-000000000001";
@@ -148,7 +148,7 @@ export class AssistantChat implements AssistantHost {
 
 
   private agentRuntime(): AgentRuntime {
-    return this.deps.createRuntime?.() ?? new PiAgentRuntime({ env: { ...this.deps.env, HATCH_LLM_PROFILE: MODEL_ROLES.assistant } });
+    return this.deps.createRuntime?.() ?? new PiAgentRuntime({ env: { ...this.deps.env, HATCH_LLM_PROFILE: modelRole("assistant", this.deps.env) } });
   }
 
   /** Where the Expert last spoke: the origin of what the Assistant starts. */

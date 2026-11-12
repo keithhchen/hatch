@@ -14,7 +14,7 @@ import { PostgresIngestJobs } from "./jobs.js";
 import { ProductWorkspaceSink, type ManualFiles } from "./sink.js";
 import { IngestService, STALE_MS } from "./service.js";
 import { log } from "../observability/log.js";
-import { MODEL_ROLES } from "../modelRoles.js";
+import { modelRole } from "../modelRoles.js";
 
 /** A deployment without a profile seal has no stored logins: links run anonymously. */
 export class NoBrowserProfiles implements BrowserProfileStore {
@@ -32,7 +32,7 @@ export const hostedEngineFromEnvironment = async (environment: NodeJS.ProcessEnv
   const apiKey = environment.HATCH_MANAGED_AGENTS_API_KEY?.trim();
   if (!apiKey) return new UnavailableEngine(HOSTED_NOT_CONFIGURED);
   const api = new KimiApi({ apiKey });
-  const model = environment.HATCH_INGEST_MODEL?.trim() || MODEL_ROLES.ingest;
+  const model = modelRole("ingest", environment);
   const agent = new TracedHostedAgent(new KimiHostedAgent(api, new Provisioner(api, INGEST_SANDBOX, ingestAgent(model), zipDirectory)), "kimi_hosted_agents", model);
   const profiles = seal ? await PostgresBrowserProfiles.open(pool, seal) : new NoBrowserProfiles();
   return new HostedEngine(new HostedIngest(agent, profiles, ingestSecrets(environment)));

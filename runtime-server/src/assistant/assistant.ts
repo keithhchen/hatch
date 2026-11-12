@@ -26,7 +26,7 @@ import type { Material } from "./materials.js";
 import type { IngestJob } from "../ingest/job.js";
 import { readPage, type AgentOverview, type StudioOperations, type WorkerKind } from "./studioTools.js";
 import { log } from "../observability/log.js";
-import { MODEL_ROLES } from "../modelRoles.js";
+import { modelRole } from "../modelRoles.js";
 
 const WORKER_LEASE_MS = 35 * 60_000;
 const RUN_END = new Set(["voice.run_completed", "voice.run_failed", "voice.run_interrupted"]);
@@ -459,7 +459,7 @@ export class AssistantService implements StudioOperations {
   async poke(accountId: string, taskId: string, question: string): Promise<AssistantTask> {
     const task = await this.ownedTask(accountId, taskId);
     if (task.kind !== "poke") throw new Error("只有日常检查可以戳一戳");
-    return this.deps.tasks.update(task.id, { status: "needs_you", needs: "answer", payload: { ...task.payload, question } });
+    return this.deps.tasks.update(task.id, { status: "needs_you", needs: "answer", payload: { question } });
   }
 
   async finish(accountId: string, taskId: string, answered: boolean): Promise<AssistantTask> {
@@ -469,7 +469,7 @@ export class AssistantService implements StudioOperations {
   }
 
   /** The Run a task was created or announced in, so that Run's reply can carry the task's buttons. */
-  inRun(task: AssistantTask, runId: string): Promise<AssistantTask> { return this.deps.tasks.update(task.id, { payload: { ...task.payload, run: runId } }); }
+  inRun(task: AssistantTask, runId: string): Promise<AssistantTask> { return this.deps.tasks.update(task.id, { payload: { run: runId } }); }
 
   private async runStep(task: AssistantTask, step: Role): Promise<AssistantTask> {
     const workspace = await this.workspace(task.accountId, task.productId!);
@@ -479,7 +479,7 @@ export class AssistantService implements StudioOperations {
     const message = step === "generation" ? `按最新的访谈和评测构建这个 Agent。专家这次想改的：${instruction}\n这次只构建：写好并核对文件就结束，发布由助理负责。`
       : step === "case-generation" ? "根据刚更新的 Agent，构造一个新的真实客户案例。"
         : step === "evaluator" ? "用最新案例评测线上 Agent。" : instruction;
-    const updated = await this.deps.tasks.update(task.id, { status: "working", session: { scope: "product", sessionId: session.id }, payload: { ...task.payload, step }, leaseExpiresAt: lease() });
+    const updated = await this.deps.tasks.update(task.id, { status: "working", session: { scope: "product", sessionId: session.id }, payload: { step }, leaseExpiresAt: lease() });
     await workspace.runtime.start(session.id, message);
     return updated;
   }
@@ -492,7 +492,7 @@ export class AssistantService implements StudioOperations {
     if (type !== "voice.run_completed") return void await this.block(task, session.error ?? "被中断了", session.messages.length);
     const questions = trailingQuestions(session.messages);
     if (questions.length) {
-      await this.deps.tasks.update(task.id, { status: "needs_you", needs: "answer", leaseExpiresAt: undefined, payload: { ...task.payload, questions } });
+      await this.deps.tasks.update(task.id, { status: "needs_you", needs: "answer", leaseExpiresAt: undefined, payload: { questions } });
       // Each question the worker asks is a turn of its own: the length of its session tells them apart, and tells a replay of one from the next.
       await this.news(task.accountId, task.id, `想问专家：\n${questions.map((question, index) => `${index + 1}. ${question}`).join("\n")}`, `asked:${session.messages.length}`);
       return;
@@ -554,7 +554,7 @@ export class AssistantService implements StudioOperations {
   private async recover(task: AssistantTask): Promise<void> {
     if (task.attempts >= 3) return this.block(task, "多次中断，没能完成", task.attempts);
     const runtime = await this.sessionRuntime(task);
-    await this.deps.tasks.update(task.id, { attempts: task.attempts + 1, leaseExpiresAt: lease() });
+    await this.deps.tasks.update(task.id, { attempted: true, leaseExpiresAt: lease() });
     if (runtime.isRunning(task.session!.sessionId)) return;
     await runtime.start(task.session!.sessionId, "服务重启过，上一轮被中断了。先检查已有的结果，再从中断的地方继续。");
   }
@@ -662,7 +662,7 @@ export class AssistantService implements StudioOperations {
     await store.recover();
     const sessions = await store.list();
     const notes = sessions.find(candidate => candidate.role === "assistant") ?? await store.create("assistant", "Hatch 助理");
-    const runtime = new WorkbenchRuntime(store, { ...this.deps.runtime, env: { ...this.deps.env, HATCH_FACTORY_LLM_PROFILE: MODEL_ROLES.worker } });
+    const runtime = new WorkbenchRuntime(store, { ...this.deps.runtime, env: { ...this.deps.env, HATCH_FACTORY_LLM_PROFILE: modelRole("worker", this.deps.env) } });
     const desk: Desk = { accountId, store, runtime, sessionId: notes.id };
     runtime.events.on("event", (event: { sessionId?: string; type?: string }) => {
       if (!event.sessionId || !event.type || !RUN_END.has(event.type)) return;
