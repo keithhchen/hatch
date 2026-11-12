@@ -369,8 +369,12 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       ...(discordClient ? { discord: new DiscordIdentity(discordClient) } : {}),
     };
     let channels!: ChannelService;
+    // Signing in with a platform is closed for now: on its own it creates a Hatch account per platform id, and an account that
+    // later unbinds the platform has no way back in yet, which leaves ghost accounts and platform ids that cannot be bound.
+    // Binding a chat to an existing account (a link code from Studio) is not affected. Reopen when binding is account-level.
+    const PLATFORM_SIGN_IN_OPEN = false;
     const platformLogin = new PlatformLogin({
-      providers, store: await PostgresLoginStore.open(registryPool), accounts, limiter: stores.limiter, origin: telegramOrigin,
+      providers: PLATFORM_SIGN_IN_OPEN ? providers : {}, store: await PostgresLoginStore.open(registryPool), accounts, limiter: stores.limiter, origin: telegramOrigin,
       admit: (kind, account, subject, claim) => channels.admit(kind, { senderId: subject, threadId: subject }, account.id),
     });
     const catalog = registryAgentCatalog(registryContext);

@@ -18,6 +18,7 @@ import { traceAgentTools, withLangfuseTurn, type LangfuseTurnIdentifiers } from 
 import { renderSystemReminder, type ClientAttributes } from "../surfaces/contract.js";
 import type { Journal } from "./journal.js";
 import { declareTools, studioToolSupport, type ClientSupport } from "./toolSurface.js";
+import { MODEL_ROLES } from "../modelRoles.js";
 
 const WEB: ClientAttributes = { client: "web" };
 
@@ -61,7 +62,7 @@ export class WorkbenchRuntime {
   private closing = false;
   private readonly env: NodeJS.ProcessEnv;
   constructor(readonly store: WorkbenchStore, private options: WorkbenchRuntimeOptions = {}) {
-    this.env = { HATCH_FACTORY_LLM_PROFILE: "kimi-k2.6", ...(options.env ?? process.env) };
+    this.env = { HATCH_FACTORY_LLM_PROFILE: MODEL_ROLES.factory, ...(options.env ?? process.env) };
   }
   private traceIdentifiers(): LangfuseTurnIdentifiers | undefined {
     const scope = this.store.scope;
