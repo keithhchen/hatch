@@ -15,7 +15,7 @@ import { modelRole } from "../modelRoles.js";
 
 /** How many message keys a session remembers. */
 const MESSAGE_KEYS_KEPT = 100;
-export function publicSession(s: Session) { const { context, messageKeys, ...publicData } = s; return publicData; }
+export function publicSession(s: Session) { const { context, messageKeys, queue, ...publicData } = s; return publicData; }
 
 export async function createFactoryHandler(options: { root: string; scope: FactoryProductScope; definitions: AgentDefinitionRepository; env?: NodeJS.ProcessEnv; runtime?: WorkbenchRuntimeOptions; withheldTools?: (session: Session) => Promise<string[]> }) {
   const source = options.env ?? process.env;
@@ -104,10 +104,9 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
       if (url.pathname === "/api/sessions" && req.method === "POST") {
         const b = z.object({ role: z.enum(ROLES), title: z.string().max(200).optional() }).parse(await body(req));
         await assertRoleAvailable(b.role);
-        const existing = (await store.list()).find(session => session.role === b.role);
-        const session = existing ?? await store.create(b.role, b.title);
-        if (!existing) await enqueueFactorySnapshot();
-        return json(res, existing ? 200 : 201, publicSession(await store.get(session.id)));
+        const { session, created } = await store.getOrCreate(b.role, b.title);
+        if (created) await enqueueFactorySnapshot();
+        return json(res, created ? 201 : 200, publicSession(await store.get(session.id)));
       }
       const match = url.pathname.match(/^\/api\/sessions\/([0-9a-f-]{36})(?:\/(.*))?$/);
       if (match) {

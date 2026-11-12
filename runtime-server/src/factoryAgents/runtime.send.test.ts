@@ -8,7 +8,9 @@ import { createAssistantMessageEventStream, type AssistantMessage } from "@earen
 import { createFactoryLlmModel } from "../creatorLearning/factoryPi.js";
 import { userMessage } from "./imageRefs.js";
 import { MemoryAgentDefinitionRepository, initialAgentDefinitions } from "./definitions.js";
-import { WorkbenchRuntime } from "./runtime.js";
+import { MessageAlreadyAccepted, WorkbenchRuntime } from "./runtime.js";
+import { WorkerConversation } from "../conversations/workerConversation.js";
+import { WORKERS } from "../conversations/workers.js";
 import { WorkbenchStore } from "./store.js";
 
 type Call = { tools: Array<{ name: string; description: string }>; last: string };
@@ -18,7 +20,7 @@ async function harness(options: { plan?: (call: number) => string | undefined; t
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-send-"));
   const store = new WorkbenchStore(root, { creatorId: "c1", productId: "p1" }, new MemoryAgentDefinitionRepository(await initialAgentDefinitions()));
   const calls: Call[] = [];
-  const runtime = new WorkbenchRuntime(store, {
+  const build = () => new WorkbenchRuntime(store, {
     env: { HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash" },
     toolSupport: options.toolSupport as never,
     agentFactory: factory => new Agent({ ...factory.agentOptions, initialState: { ...factory.initialState, model: createFactoryLlmModel({ env: factory.env }) }, streamFn: (_model, context, streamOptions) => {
@@ -36,12 +38,13 @@ async function harness(options: { plan?: (call: number) => string | undefined; t
       return stream;
     } }),
   });
+  const runtime = build();
   const events: Array<{ type: string; sessionId?: string }> = [];
   runtime.events.on("event", event => events.push(event));
   const session = await store.create("research");
   const say = (text: string) => userMessage(text, [], { kind: "expert", itemId: text, text });
   const idle = async () => { for (let i = 0; i < 400; i++) { if (!runtime.isRunning(session.id)) return; await new Promise(resolve => setTimeout(resolve, 10)); } throw new Error("run did not end"); };
-  return { runtime, store, session, calls, events, say, idle, close: async () => { await runtime.close(); await rm(root, { recursive: true, force: true }); } };
+  return { runtime, build, store, session, calls, events, say, idle, close: async () => { await runtime.close(); await rm(root, { recursive: true, force: true }); } };
 }
 
 const userTexts = (messages: AgentMessage[]) => messages.filter(message => message.role === "user").map(message => (message as { origin?: { text?: string } }).origin?.text);
@@ -77,10 +80,10 @@ test("send: while compacting, a message waits and joins afterwards", async () =>
   try {
     await h.runtime.send(h.session.id, h.say("one"));
     await new Promise(resolve => setTimeout(resolve, 20));
-    const internals = h.runtime as unknown as { compacting: Set<string>; release(id: string): void; held: Map<string, AgentMessage[]> };
+    const internals = h.runtime as unknown as { compacting: Set<string>; release(id: string): void };
     internals.compacting.add(h.session.id);
     assert.equal((await h.runtime.send(h.session.id, h.say("during"))).queued, true);
-    assert.equal(internals.held.get(h.session.id)?.length, 1, "held, not injected");
+    assert.equal((await h.store.get(h.session.id)).queue?.length, 1, "queued on the session, not injected");
     internals.compacting.delete(h.session.id); internals.release(h.session.id);
     await h.idle();
     assert.deepEqual(userTexts((await h.store.get(h.session.id)).messages), ["one", "during"]);
@@ -163,6 +166,63 @@ test("send: a message steered into a run that then fails is still in history", a
     assert.deepEqual(userTexts(session.messages), ["one", "two"], "the accepted message is not lost");
     assert.deepEqual(userTexts(session.context), ["one", "two"]);
     assert.equal(h.events.filter(event => event.type === "message").length, session.messages.length, "and it was announced like any other");
+  } finally { await h.close(); }
+});
+
+const busy = (h: { runtime: WorkbenchRuntime; session: { id: string } }, on: boolean) => (h.runtime as unknown as { compacting: Set<string> }).compacting[on ? "add" : "delete"](h.session.id);
+
+test("send: the message is on the session before the call returns, and a repeat of its item id is refused", async () => {
+  const h = await harness({ delayMs: 120 });
+  try {
+    await h.runtime.send(h.session.id, h.say("one"));
+    busy(h, true);
+    assert.equal((await h.runtime.send(h.session.id, h.say("two"))).queued, true);
+    assert.ok(userTexts((await h.store.get(h.session.id)).queue ?? []).includes("two"), "durable, with its origin item id");
+    await assert.rejects(h.runtime.send(h.session.id, h.say("two")), MessageAlreadyAccepted);
+    assert.equal(userTexts((await h.store.get(h.session.id)).queue ?? []).filter(text => text === "two").length, 1);
+    busy(h, false);
+    await h.idle();
+    const session = await h.store.get(h.session.id);
+    assert.deepEqual(userTexts(session.messages), ["one", "two"]);
+    assert.equal(session.queue, undefined, "committed to history, gone from the queue");
+  } finally { await h.close(); }
+});
+
+test("send: a queued message survives a restart and is processed once", async () => {
+  const h = await harness({ delayMs: 150 });
+  const restarted = h.build();
+  try {
+    await h.runtime.send(h.session.id, h.say("one"));
+    for (let i = 0; i < 100 && !userTexts((await h.store.get(h.session.id)).messages).includes("one"); i++) await new Promise(resolve => setTimeout(resolve, 5));
+    // The first process cannot take the message (it is busy compacting), then it is gone: only the session remembers it.
+    busy(h, true);
+    assert.equal((await h.runtime.send(h.session.id, h.say("lost?"))).queued, true);
+    assert.ok(userTexts((await h.store.get(h.session.id)).queue ?? []).includes("lost?"));
+    // A new runtime over the same store: its next run consumes the durable queue first.
+    assert.equal((await restarted.send(h.session.id, h.say("after restart"))).queued, false);
+    await assert.rejects(restarted.send(h.session.id, h.say("lost?")), MessageAlreadyAccepted);
+    for (let i = 0; i < 400 && restarted.isRunning(h.session.id); i++) await new Promise(resolve => setTimeout(resolve, 10));
+    const session = await h.store.get(h.session.id);
+    assert.deepEqual(userTexts(session.messages).sort(), ["after restart", "lost?", "one"], "each exactly once");
+    assert.equal(session.queue, undefined);
+  } finally { await restarted.close(); await h.close(); }
+});
+
+test("replay: a message that is only queued is found, and the same id with other content conflicts", async () => {
+  const h = await harness({ delayMs: 120 });
+  try {
+    const conversation = new WorkerConversation(WORKERS.byId("research")!, { store: h.store, runtime: h.runtime, entries: async () => [], assertRoleAvailable: async () => undefined });
+    const input = (text: string) => ({ id: "item-1", text, attachments: [], client: { client: "cli" as const } });
+    await conversation.send({ ...input("first"), id: "item-0" });
+    busy(h, true);
+    const queuedItems = async () => ((await h.store.get(h.session.id)).queue ?? []).filter(message => (message as { origin?: { itemId?: string } }).origin?.itemId === "item-1").length;
+    assert.equal((await conversation.send(input("queued one"))).queued, true);
+    assert.equal(await queuedItems(), 1);
+    assert.equal((await conversation.send(input("queued one"))).message.id, "item-1");
+    assert.equal(await queuedItems(), 1, "no second copy");
+    await assert.rejects(conversation.send(input("different")), /idempotency key was used for a different message/);
+    busy(h, false);
+    await h.idle();
   } finally { await h.close(); }
 });
 

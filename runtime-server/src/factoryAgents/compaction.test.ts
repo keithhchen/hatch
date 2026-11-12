@@ -45,7 +45,7 @@ async function harness(options: { summarize?: (input: SummarizeInput<AgentMessag
   if (options.seed) await store.update(session.id, state => { state.context = options.seed!; });
   const say = (value: string) => userMessage(value, [], { kind: "expert", itemId: value, text: value });
   const idle = async () => { for (let i = 0; i < 400; i++) { if (!runtime.isRunning(session.id)) return; await new Promise(resolve => setTimeout(resolve, 10)); } throw new Error("run did not end"); };
-  const internals = runtime as unknown as { compactNow(id: string, messages: AgentMessage[], signal: AbortSignal, extra?: object): Promise<{ kind: string; messages: AgentMessage[]; dropped?: number }>; touched: Map<string, number>; held: Map<string, AgentMessage[]> };
+  const internals = runtime as unknown as { compactNow(id: string, messages: AgentMessage[], signal: AbortSignal, extra?: object): Promise<{ kind: string; messages: AgentMessage[]; dropped?: number }>; touched: Map<string, number> };
   return { runtime, store, session, clock, log, modelCalls, events, say, idle, internals, close: async () => { await runtime.close(); await rm(root, { recursive: true, force: true }); } };
 }
 
@@ -139,7 +139,7 @@ test("a message sent while the conversation compacts waits and joins afterwards"
     await h.runtime.send(h.session.id, h.say("one"));
     await new Promise(resolve => setTimeout(resolve, 40));
     assert.equal((await h.runtime.send(h.session.id, h.say("during"))).queued, true);
-    assert.equal(h.internals.held.get(h.session.id)?.length, 1, "held while compacting");
+    assert.ok((await h.store.get(h.session.id)).queue?.some(message => (message as { origin?: { text?: string } }).origin?.text === "during"), "on the session while compacting");
     await h.idle();
     const texts = (await h.store.get(h.session.id)).messages.filter(message => message.role === "user").map(message => (message as { origin?: { text?: string } }).origin?.text);
     assert.deepEqual(texts, ["one", "during"]);

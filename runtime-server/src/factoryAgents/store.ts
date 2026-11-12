@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { lstat, mkdir, readFile, readdir, rm } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { link, lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import type { Pool } from "pg";
 import path from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -37,10 +37,20 @@ export type Session = {
   hatch?: { conversationId: string; lastRunId?: string; pending?: boolean };
   /** The latest message Idempotency-Keys and a digest of what each carried: a retried send is recognised here, not run again. */
   messageKeys?: Array<[key: string, digest: string]>;
+  /** Messages accepted but not yet in `messages`: written before the client is told, removed when the run commits them to history. */
+  queue?: AgentMessage[];
   /** Set while the Assistant drives this session for one of its tasks. */
   assistantTaskId?: string;
   corpus?: { product_id: string; corpus_ref: string; corpus_digest: string; release_digest: string; status: "published"; published_at: string; files: string[] };
 };
+
+export const itemIdOf = (message: AgentMessage) => (message as { origin?: MessageOrigin }).origin?.itemId;
+/** Moves a message into history; a queued message leaves the queue in the same write. */
+export function settleMessage(session: Session, message: AgentMessage): void {
+  const id = itemIdOf(message);
+  if (id && session.queue) { session.queue = session.queue.filter(queued => itemIdOf(queued) !== id); if (!session.queue.length) delete session.queue; }
+  session.messages.push(message); session.context.push(message);
+}
 
 export function filePath(value: string): string {
   if (!/^(input|output)\//.test(value) || value.includes("\\") || value.split("/").some(s => !s || s === "." || s === ".." || s.startsWith("."))) throw new Error("Invalid workspace file path");
@@ -95,7 +105,15 @@ export class FileWorkbenchBackend implements WorkbenchBackend {
     const todo = await readFile(path.join(this.directory(id), "todo.json"), "utf8").then(JSON.parse).catch(() => ({ todos: [] }));
     return { session, todos: todo.todos };
   }
-  async insert(session: Session): Promise<void> { await mkdir(this.directory(session.id), { recursive: true, mode: 0o700 }); await this.save(session); }
+  /** Exclusive: a session that exists is never replaced (EEXIST), so two creators of one id settle at the filesystem. */
+  async insert(session: Session): Promise<void> {
+    const directory = this.directory(session.id);
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const { todos, ...metadata } = session;
+    const temporary = path.join(directory, `.${randomUUID()}.tmp`);
+    try { await writeFile(temporary, JSON.stringify(metadata), { flag: "wx", mode: 0o600 }); await link(temporary, path.join(directory, "session.json")); } finally { await rm(temporary, { force: true }); }
+    await atomicWrite(path.join(directory, "todo.json"), JSON.stringify({ todos }));
+  }
   private async save(session: Session): Promise<void> { const { todos, ...metadata } = session; await Promise.all([atomicWrite(path.join(this.directory(session.id), "session.json"), JSON.stringify(metadata)), atomicWrite(path.join(this.directory(session.id), "todo.json"), JSON.stringify({ todos }))]); }
   async transact<T>(id: string, change: (session: Session) => T | Promise<T>): Promise<T> {
     const session = withTodos(await this.load(id));
@@ -228,9 +246,37 @@ export class WorkbenchStore {
     return definition;
   }
   async listManualFiles(): Promise<FileRecord[]> { return this.backend.listManual(); }
-  async create(role: AnyRole, title?: string): Promise<Session> {
+  /** The same id for the same workspace and role: concurrent creators collide on it instead of making two sessions. */
+  private stableId(role: AnyRole): string {
+    const h = createHash("sha256").update(`${this.scope?.creatorId ?? ""}/${this.scope?.productId ?? ""}/${role}`).digest("hex");
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
+  }
+  /** The role's session, created by the first caller; the insert is exclusive in both backends, so a race yields one session. */
+  async getOrCreate(role: AnyRole, title?: string): Promise<{ session: Session; created: boolean }> {
+    const existing = (await this.list()).find(candidate => candidate.role === role);
+    if (existing) return { session: existing, created: false };
+    const id = this.stableId(role);
+    try { return { session: await this.create(role, title, id), created: true }; }
+    catch (error) {
+      if (!["EEXIST", "23505"].includes((error as { code?: string }).code ?? "")) throw error;
+      return { session: await this.get(id), created: false };
+    }
+  }
+  /** Writes an accepted message to the session before anyone is told. Returns the queue, or undefined when this item id was already accepted. */
+  async enqueue(id: string, message: AgentMessage): Promise<AgentMessage[] | undefined> {
+    const item = itemIdOf(message);
+    if (!item) throw new Error("A queued message needs an origin item id");
+    return this.update(id, s => {
+      if (s.messages.some(known => itemIdOf(known) === item) || s.queue?.some(known => itemIdOf(known) === item)) return undefined;
+      s.queue = [...s.queue ?? [], message];
+      return s.queue;
+    });
+  }
+  async dequeue(id: string, itemId: string): Promise<void> {
+    await this.update(id, s => { if (s.queue) { s.queue = s.queue.filter(queued => itemIdOf(queued) !== itemId); if (!s.queue.length) delete s.queue; } });
+  }
+  async create(role: AnyRole, title?: string, id: string = randomUUID()): Promise<Session> {
     if (!(ROLES as readonly string[]).includes(role) && !isAssistantRole(role)) throw new Error("Unknown agent role");
-    const id = randomUUID();
     const now = new Date().toISOString();
     const session: Session = { id, role, title: title?.trim() || role, createdAt: now, updatedAt: now, revision: 0, turn: 0, status: "idle", files: [], comments: [], messages: [], context: [], todos: [], ...(this.scope ? { product: { creatorId: this.scope.creatorId, productId: this.scope.productId } } : {}) };
     await this.backend.insert(session);
