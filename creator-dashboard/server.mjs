@@ -1030,6 +1030,15 @@ export async function createDashboardApp(options = {}) {
         return send(response, upstream.status, upstream.status === 204 ? undefined : await upstream.json());
       }
 
+      // What the Expert has spent lives in Registry's ledger; the cookie session reads it through this proxy.
+      if (request.method === "GET" && url.pathname === "/v1/creator/usage") {
+        const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
+        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
+        const upstream = await fetchImpl(new URL(`${url.pathname}${url.search}`, registryUrl), { headers: { authorization: `Bearer ${authentication.token}` } });
+        response.setHeader("cache-control", "no-store");
+        return send(response, upstream.status, await upstream.json());
+      }
+
       if (await desktopSignIn(request, response, url)) return;
 
       // Browser OAuth is an authorization-code + PKCE bridge to the existing

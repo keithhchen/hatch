@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { UsageSink } from "./usage/usage.js";
 
 /**
  * One compaction strategy for Chat and Studio. It knows nothing about either:
@@ -25,7 +26,7 @@ export type Entry = {
   pruned?: boolean;
 };
 
-export type SummarizeInput<M> = { messages: M[]; previous?: string; instructions: string; signal: AbortSignal };
+export type SummarizeInput<M> = { messages: M[]; previous?: string; instructions: string; signal: AbortSignal; /** Told of each model call the summary makes. */ usage?: UsageSink };
 
 export interface CompactionAdapter<M> {
   describe(message: M): Entry;
@@ -88,6 +89,8 @@ export type CompactionRequest = {
   tailScale?: number;
   /** A failed summary normally degrades to a bounded tail. A user who asked for it gets the error instead. */
   onFailure?: "degrade" | "throw";
+  /** Who pays for the summary. */
+  usage?: UsageSink;
 };
 
 export type CompactionOutcome<M> =
@@ -235,7 +238,7 @@ export class CompactionStrategy<M> {
       return pruned ? { kind: "pruned", messages: current, tokensBefore, tokensAfter: afterPrune, pruned } : { kind: "none" };
     }
     try {
-      return await this.summarize(messages, current, entries, cut, tokensBefore, request.signal);
+      return await this.summarize(messages, current, entries, cut, tokensBefore, request.signal, request.usage);
     } catch (error) {
       if (request.signal.aborted) throw new CompactionAborted(String(request.signal.reason ?? "aborted"));
       if (request.onFailure === "throw") throw error;
@@ -263,7 +266,7 @@ export class CompactionStrategy<M> {
     return { messages: next, pruned };
   }
 
-  private async summarize(original: M[], current: M[], entries: Entry[], cut: number, tokensBefore: number, caller: AbortSignal): Promise<CompactionOutcome<M>> {
+  private async summarize(original: M[], current: M[], entries: Entry[], cut: number, tokensBefore: number, caller: AbortSignal, usage?: UsageSink): Promise<CompactionOutcome<M>> {
     if (cut <= 0) throw new Error("There is nothing older than the verbatim tail to summarize");
     const timeout = new AbortController();
     const timer = setTimeout(() => timeout.abort(new CompactionTimeout()), this.policy.timeoutMs);
@@ -275,7 +278,7 @@ export class CompactionStrategy<M> {
       const body = previous ? head.slice(1) : head;
       const preserved = preservedFrom(entries, cut);
       await this.memory?.flush(original.slice(0, cut), signal).catch((error: unknown) => { if (signal.aborted) throw error; });
-      const ask = (instructions: string) => { signal.throwIfAborted(); return this.adapter.summarize({ messages: body, previous, instructions, signal }); };
+      const ask = (instructions: string) => { signal.throwIfAborted(); return this.adapter.summarize({ messages: body, previous, instructions, signal, usage }); };
       let summary = await ask(`${INSTRUCTIONS}\n${render(preserved)}`);
       const lacking = missingFrom(summary, preserved);
       let retried = false;

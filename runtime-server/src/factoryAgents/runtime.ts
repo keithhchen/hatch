@@ -19,6 +19,8 @@ import { renderSystemReminder, type ClientAttributes } from "../surfaces/contrac
 import type { Journal } from "./journal.js";
 import { declareTools, studioToolSupport, type ClientSupport } from "./toolSurface.js";
 import { modelRole } from "../modelRoles.js";
+import { log } from "../observability/log.js";
+import { usageSink, type UsageRecorder, type UsageSink } from "../usage/usage.js";
 
 const WEB: ClientAttributes = { client: "web" };
 
@@ -31,6 +33,8 @@ export type WorkbenchRuntimeOptions = {
   toolSupport?: ClientSupport;
   /** Where public events are recorded from the first Run, and where a message is persisted together with its event. */
   journal?: Journal;
+  /** Whose Studio usage this workspace's model calls are, and where they are recorded. */
+  usage?: { recorder: UsageRecorder; accountId: string };
   deadlineMs?: number;
   maxTurns?: number;
   /** One strategy with Chat; this is Studio's adapter. Tests inject a test-only summarizer and a small window. */
@@ -69,6 +73,12 @@ export class WorkbenchRuntime {
   private traceIdentifiers(): LangfuseTurnIdentifiers | undefined {
     const scope = this.store.scope;
     return scope ? { productId: scope.productId, userId: scope.creatorId } : undefined;
+  }
+  /** Each model call of a session's Run counts as the Expert's Studio usage. */
+  private usageFor(id: string): UsageSink | undefined {
+    const { usage } = this.options;
+    const productId = this.store.scope?.productId;
+    return usage && usageSink(usage.recorder, { accountId: usage.accountId, surface: "studio", ...(productId ? { productId } : {}), runId: this.runIds.get(id) }, log);
   }
   private clientOf(id: string): ClientAttributes { return this.clients.get(id) ?? WEB; }
   emit(id: string, type: string, data: Record<string, unknown> = {}): void {
@@ -180,7 +190,7 @@ export class WorkbenchRuntime {
     const strategy = this.strategy();
     const compactionId = newCompactionId();
     if (extra.force || strategy.tokensOf(messages) >= strategy.policy.trigger) this.emit(id, "compacting", { compactionId });
-    const outcome = await strategy.compact(messages, { now: this.now(), cacheTouchedAt: this.touched.get(id), signal, ...extra });
+    const outcome = await strategy.compact(messages, { now: this.now(), cacheTouchedAt: this.touched.get(id), signal, usage: this.usageFor(id), ...extra });
     if (outcome.kind !== "none") this.emit(id, "compacted", { compactionId, kind: outcome.kind, degraded: outcome.kind === "degraded", dropped: outcome.kind === "degraded" ? outcome.dropped : 0 });
     if (outcome.kind === "degraded") this.emit(id, "compaction_degraded", { compactionId, dropped: outcome.dropped, note: describePiMessage(outcome.messages[0]!).text });
     return outcome;
@@ -370,6 +380,9 @@ export class WorkbenchRuntime {
     const timer = setTimeout(() => controller.abort(new Error("运行达到时间预算，可检查已有文件后继续")), this.options.deadlineMs ?? 1800000);
     const unsubscribe = agent.subscribe(event => {
       if (event.type === "turn_start" && ++turnCount > (this.options.maxTurns ?? 80)) controller.abort(new Error("运行达到工具轮次预算，可检查已有文件后继续"));
+      if (event.type === "message_end" && event.message.role === "assistant" && event.message.usage.totalTokens > 0) {
+        void this.usageFor(id)?.({ id: `${this.runIds.get(id) ?? id}:${event.message.timestamp}`, model: event.message.model, usage: event.message.usage });
+      }
       if (event.type === "message_end") {
         // In stream order with the deltas, so clients settle this reply before the next one streams.
         if (channel === "visible") this.emit(id, "message_end");

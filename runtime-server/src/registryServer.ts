@@ -5,6 +5,9 @@ import { PostgresWorkbenchBackend } from "./factoryAgents/store.js";
 import { FirecrawlSearchProvider } from "./factoryAgents/webProviders.js";
 import { AssistantService, assistantPrompt } from "./assistant/assistant.js";
 import { AssistantChat } from "./assistant/chat.js";
+import { InMemoryUsageLedger } from "./usage/memoryUsage.js";
+import { PostgresUsageLedger } from "./usage/postgresUsage.js";
+import { monthlyTokenCap, usageReport, utcDay, type UsageReader } from "./usage/usage.js";
 import { studioTools, studioToolDefinitions } from "./assistant/studioTools.js";
 import { LegacyAssistantHistory } from "./assistant/history.js";
 import { PostgresAssistantState } from "./assistant/state.js";
@@ -148,6 +151,9 @@ export type RegistryServer = {
 export const CREATOR_FACTORY_JSON_BODY_MAX_BYTES = 32 * 1024 * 1024;
 type RegistryContext = {
   conversationPorts: ConversationPorts;
+  /** What every Expert has spent, and the monthly cap if one is set. */
+  usage: UsageReader;
+  monthlyTokenCap: number | null;
   /** Attachments for Studio; with the Registry database. */
   studioAssets?: StudioDeps["assets"];
   assistant?: AssistantService;
@@ -204,7 +210,9 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const factoryAgentDefinitions = registryPool ? await PostgresAgentDefinitionRepository.open(registryPool) : undefined;
   const conversationPorts = await openConversationPorts(registryPool);
   // With a database every Product workspace journals each Run from its start; without one Studio has no conversations to record.
-  const factoryAgents = new FactoryAgentsService(path.join(factoryRoot, "agent-chats"), environment, factoryAgentDefinitions, registryPool ? () => new EventLogJournal(conversationPorts.eventLog, event => event.sessionId) : undefined);
+  // One ledger for every Studio model call, and the source of the usage the Expert reads back.
+  const usage = registryPool ? new PostgresUsageLedger(registryPool) : new InMemoryUsageLedger();
+  const factoryAgents = new FactoryAgentsService(path.join(factoryRoot, "agent-chats"), environment, factoryAgentDefinitions, registryPool ? () => new EventLogJournal(conversationPorts.eventLog, event => event.sessionId) : undefined, usage);
   const objectStore = objectStoreFromEnvironment(environment);
   const productObjectStore = objectStoreFromEnvironment(environment, path.join(factoryRoot, "product-files"));
   if (!productObjectStore) throw new Error("Product File object storage is not configured");
@@ -299,7 +307,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const legacyHmacEnabled = environment.HATCH_ENABLE_LEGACY_HMAC_AUTH?.trim().toLowerCase() === "true";
   const authSecret = legacyHmacEnabled ? environment.HATCH_AUTH_SIGNING_SECRET?.trim() || "" : "";
   const httpLimits = httpRequestLimitOptionsFromEnvironment(environment);
-  const registryContext: RegistryContext = { dictation: new Dictation(new VoiceProcessor(new FfmpegAudioNormalizer(), transcriberFromEnvironment(environment))), store, accounts, accountAvatars, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, productLive, nodeObjectStore, releaseStore, authSecret, conversationPorts, studioAssets: registryPool ? await openProductAssets(registryPool, productObjectStore, environment) : undefined };
+  const registryContext: RegistryContext = { usage, monthlyTokenCap: monthlyTokenCap(environment), dictation: new Dictation(new VoiceProcessor(new FfmpegAudioNormalizer(), transcriberFromEnvironment(environment))), store, accounts, accountAvatars, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, productLive, nodeObjectStore, releaseStore, authSecret, conversationPorts, studioAssets: registryPool ? await openProductAssets(registryPool, productObjectStore, environment) : undefined };
   const studio = new Studio(studioDeps(registryContext));
   const studioSockets = new StudioSockets({ studio, identify: token => identifyToken(registryContext, token) });
   let assistantTick: NodeJS.Timeout | undefined;
@@ -419,7 +427,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       deliveries: await PostgresDeliveries.open(registryPool),
       exclusive: postgresExclusive(registryPool),
       search: new FirecrawlSearchProvider({ apiKey: environment.FIRECRAWL_API_KEY }),
-      env: environment, ingest,
+      env: environment, ingest, usage,
     });
     ingest.onSettled(job => assistant.ingested(job));
     // The Assistant is a conversation on Chat's runtime, with its own transcript in this database and the Studio tools.
@@ -436,7 +444,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       repository: conversations, store: transcripts, chatAssets, state: assistantState, tools,
       assetStore: new RuntimeAssetStore(path.join(factoryRoot, "assistant-assets")),
       history: new LegacyAssistantHistory({ backend: accountId => new PostgresWorkbenchBackend(registryPool, `assistant:${accountId}`), state: assistantState, store: transcripts }),
-      prompt: assistantPrompt, liveState: accountId => assistant.liveState(accountId), env: environment,
+      prompt: assistantPrompt, liveState: accountId => assistant.liveState(accountId), env: environment, usage,
     });
     assistant.bind(assistantChat, new ExpertMaterials({ assets: chatAssets, conversation: accountId => assistantChat.conversation(accountId) }));
     routed.bindLocal(assistantChat.gateway);
@@ -973,6 +981,18 @@ async function route(
   if (url.pathname === "/v1/auth/api-keys" && request.method === "GET") {
     await requireInteractive(context, async (current) => {
       sendAuthJson(response, 200, { api_keys: await context.accounts.listApiKeys(current.account.id) });
+    })(request, response);
+    return;
+  }
+  // What the signed-in Expert has spent this month and each day of a range (default: the last 30 days), by surface.
+  if (url.pathname === "/v1/creator/usage" && request.method === "GET") {
+    await requireInteractive(context, async (current) => {
+      const today = utcDay(new Date());
+      const from = url.searchParams.get("from") ?? utcDay(new Date(Date.parse(`${today}T00:00:00Z`) - 29 * 86_400_000));
+      const to = url.searchParams.get("to") ?? today;
+      const valid = (day: string) => /^\d{4}-\d{2}-\d{2}$/.test(day) && !Number.isNaN(Date.parse(`${day}T00:00:00Z`));
+      if (!valid(from) || !valid(to) || from > to || Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`) > 366 * 86_400_000) { sendAuthJson(response, 400, { detail: "from and to must be YYYY-MM-DD dates, at most a year apart." }); return; }
+      sendAuthJson(response, 200, await usageReport(context.usage, current.account.id, from, to, context.monthlyTokenCap));
     })(request, response);
     return;
   }
