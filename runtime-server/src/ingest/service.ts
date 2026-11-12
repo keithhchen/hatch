@@ -76,6 +76,8 @@ export class IngestService {
     jobs: IngestJobRepository;
     engine: IngestEngine;
     sink: IngestSink;
+    /** Whether the account owns the Product. Jobs are only made for, and read from, a Product the account owns. */
+    owns: (accountId: string, productId: string) => Promise<boolean>;
     inBackground?: InBackground;
     newId?: () => string;
     now?: () => string;
@@ -86,10 +88,15 @@ export class IngestService {
   /** Who hears a job once it is done or failed and saved. A listener that fails changes nothing about the job. */
   onSettled(listener: (job: IngestJob) => Promise<void>): void { this.settledListeners.push(listener); }
 
+  private async assertOwns(accountId: string, productId: string): Promise<void> {
+    if (!await this.deps.owns(accountId, productId)) throw new IngestError(404, "product_not_found", "Product was not found.");
+  }
+
   private now() { return this.deps.now?.() ?? new Date().toISOString(); }
 
   /** With an Idempotency-Key the job id comes from the key, so a repeat finds the first job instead of making another. */
   async submit(accountId: string, productId: string, items: unknown, context?: unknown, idempotencyKey?: string): Promise<IngestJob> {
+    await this.assertOwns(accountId, productId);
     if (context !== undefined && typeof context !== "string") throw invalid("context must be text");
     if ((context ?? "").length > MAX_CONTEXT) throw invalid(`context may be at most ${MAX_CONTEXT} characters`);
     const accepted = parse(items);
@@ -105,8 +112,8 @@ export class IngestService {
     { create: job => this.deps.jobs.create(job), find: job => this.deps.jobs.get(job.accountId, job.productId, job.id) },
     (stored, fresh) => stored.context === fresh.context && JSON.stringify(stored.items.map(item => item.input)) === JSON.stringify(fresh.items.map(item => item.input)));
 
-  get(accountId: string, productId: string, id: string) { return this.deps.jobs.get(accountId, productId, id); }
-  recent(accountId: string, productId: string) { return this.deps.jobs.recent(accountId, productId, RECENT); }
+  async get(accountId: string, productId: string, id: string) { await this.assertOwns(accountId, productId); return this.deps.jobs.get(accountId, productId, id); }
+  async recent(accountId: string, productId: string) { await this.assertOwns(accountId, productId); return this.deps.jobs.recent(accountId, productId, RECENT); }
 
   /** Jobs a dead process left behind will never finish: say so. A job another live process still touches is left alone. */
   async recoverInterrupted(staleMs = STALE_MS): Promise<number> {

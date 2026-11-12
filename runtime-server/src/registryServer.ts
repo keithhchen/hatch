@@ -407,6 +407,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
         return { list: async () => (await backend.listManual()).map(file => file.path), read: name => backend.readManual(name), write: (name, bytes) => backend.writeManual(name, bytes) };
       },
       productPrefix: (accountId, productId) => `${productsPrefix}/${accountId}/${productId}`,
+      owns: ownsProduct,
     });
     const assistant = new AssistantService({
       tasks, reach, channels,

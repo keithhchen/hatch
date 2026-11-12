@@ -19,6 +19,7 @@ import { ProductWorkspaceSink, placeManual, type ManualFiles } from "./sink.js";
 
 const ACCOUNT = "11111111-1111-4111-8111-111111111111";
 const OTHER = "99999999-9999-4999-8999-999999999999";
+const STRANGER = "88888888-8888-4888-8888-888888888888";
 const PRODUCT = "22222222-2222-4222-8222-222222222222";
 const b64 = (text: string) => Buffer.from(text).toString("base64");
 
@@ -53,7 +54,7 @@ async function harness(options: { hosted?: IngestEngine; sink?: ProductWorkspace
   const inBackground: InBackground = work => { pending.push(work()); };
   const hosted = options.hosted ?? new UnavailableEngine("Hosted ingest is not configured");
   const service = new IngestService({
-    jobs, inBackground,
+    jobs, inBackground, owns: async (account, product) => [ACCOUNT, OTHER].includes(account) && [PRODUCT, "other-product"].includes(product),
     engine: new RoutingEngine([new PlainTextEngine(), hosted]),
     sink: options.sink ?? new ProductWorkspaceSink(async () => manual, objects, (account, product) => `creator-products/${account}/${product}`),
   });
@@ -202,7 +203,7 @@ test("Submit persists a queued job and returns it before the work runs; completi
   const done = (await service.get(ACCOUNT, PRODUCT, job.id))!;
   assert.equal(done.status, "done");
   assert.equal(done.items[0]!.status, "ok");
-  assert.equal(await service.get(OTHER, PRODUCT, job.id), undefined, "another account cannot read it");
+  await assert.rejects(service.get(STRANGER, PRODUCT, job.id), (error: any) => error.status === 404 && error.code === "product_not_found", "another account cannot read it");
   assert.equal(await service.get(ACCOUNT, "other-product", job.id), undefined);
   assert.equal((await service.recent(ACCOUNT, PRODUCT)).length, 1);
 });
@@ -252,7 +253,7 @@ test("A hosted run lands its Markdown and original; a sink failure fails only th
 test("An engine that crashes outright fails the job with its message", async () => {
   const service = new IngestService({
     jobs: new MemoryIngestJobs(), engine: { accepts: () => true, ingest: async () => { throw new Error("kaput"); } },
-    sink: { store: async () => ({}) }, inBackground: work => { void work(); },
+    sink: { store: async () => ({}) }, owns: async () => true, inBackground: work => { void work(); },
   });
   const job = await service.submit(ACCOUNT, PRODUCT, [{ url: "https://x.test/" }]);
   await new Promise(resolve => setImmediate(resolve));
@@ -307,4 +308,14 @@ test("Without an Idempotency-Key every submit is its own job", async () => {
   const items = [{ url: "https://a.test/" }];
   assert.notEqual((await service.submit(ACCOUNT, PRODUCT, items)).id, (await service.submit(ACCOUNT, PRODUCT, items)).id);
   assert.equal(jobs.jobs.size, 2);
+});
+
+test("Ingest only makes and reads jobs for a Product the account owns, whoever calls it", async () => {
+  const { service } = await harness();
+  const refused = (error: any) => error.status === 404 && error.code === "product_not_found";
+  await assert.rejects(service.submit(STRANGER, PRODUCT, [{ url: "https://a.test/" }]), refused, "a stranger's Product");
+  await assert.rejects(service.submit(ACCOUNT, "33333333-3333-4333-8333-333333333333", [{ url: "https://a.test/" }]), refused, "an unknown Product");
+  await assert.rejects(service.recent(STRANGER, PRODUCT), refused);
+  await assert.rejects(service.get(STRANGER, PRODUCT, "j"), refused);
+  assert.equal((await service.recent(ACCOUNT, PRODUCT)).length, 0, "no job was made for either");
 });
