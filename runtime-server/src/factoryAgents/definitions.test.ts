@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MemoryAgentDefinitionRepository, PostgresAgentDefinitionRepository, agentEntries, initialAgentDefinitions } from "./definitions.js";
+import { BuildNotReadyError, MemoryAgentDefinitionRepository, PostgresAgentDefinitionRepository, agentEntries, assertAgentAvailable, initialAgentDefinitions } from "./definitions.js";
 import type { Session } from "./store.js";
 import type { Pool } from "pg";
 
@@ -10,36 +10,39 @@ const session = (role: Session["role"], values: Partial<Session> = {}): Session 
   revision: 0, turn: 0, status: "idle", files: [], comments: [], messages: [], context: [], todos: [], ...values,
 });
 
-test("Agent dependency state uses output timestamps, not run timestamps", async () => {
+const stateOf = (entries: ReturnType<typeof agentEntries>, role: string) => entries.find(entry => entry.role === role)?.state;
+const upload = { path: "input/manual/notes.md", bytes: 1, mimeType: "text/markdown" };
+
+test("advanced Agents are never locked, whatever else exists", async () => {
   const definitions = await initialAgentDefinitions();
-  let entries = agentEntries(definitions, []);
-  assert.equal(entries.find(entry => entry.role === "research")?.state, "ready");
-  assert.equal(entries.find(entry => entry.role === "voice")?.state, "ready");
-  assert.deepEqual(entries.find(entry => entry.role === "generation")?.availability, {
-    missingRequired: [], normal: { required: true, satisfied: false }
-  });
-  assert.deepEqual(entries.find(entry => entry.role === "generation")?.dependencies, { required: [], normal: ["research", "voice"], updates: ["evaluator"] });
+  for (const sessions of [[], [session("generation", { outputUpdatedAt: "2026-09-10T01:00:00.000Z" })]]) {
+    const entries = agentEntries(definitions, sessions, []);
+    for (const role of ["research", "case-generation", "evaluator", "voice"]) assert.equal(stateOf(entries, role), "ready");
+  }
+});
 
-  const research = session("research", { outputUpdatedAt: "2026-09-10T01:00:00.000Z", lastRunAt: "2026-09-10T00:30:00.000Z" });
-  const voice = session("voice", { outputUpdatedAt: "2026-09-10T02:00:00.000Z", lastRunAt: "2026-09-10T01:30:00.000Z" });
-  const generation = session("generation", { outputUpdatedAt: "2026-09-10T02:30:00.000Z", lastRunAt: "2026-09-10T02:15:00.000Z" });
-  const evaluator = session("evaluator", { outputUpdatedAt: "2026-09-10T03:00:00.000Z", lastRunAt: "2026-09-10T02:45:00.000Z" });
-  assert.equal(agentEntries(definitions, [research]).find(entry => entry.role === "generation")?.state, "ready");
-  assert.equal(agentEntries(definitions, [voice]).find(entry => entry.role === "generation")?.state, "ready");
-  entries = agentEntries(definitions, [research, voice, generation]);
-  assert.equal(entries.find(entry => entry.role === "generation")?.state, "complete");
-  entries = agentEntries(definitions, [research, voice, generation, evaluator]);
-  assert.equal(entries.find(entry => entry.role === "generation")?.state, "update_available");
-  assert.deepEqual(entries.find(entry => entry.role === "generation")?.availability, { missingRequired: [], normal: { required: true, satisfied: true } });
+test("Build is locked until there are uploads or interview output, and either one unlocks it", async () => {
+  const definitions = await initialAgentDefinitions();
+  assert.equal(stateOf(agentEntries(definitions, [], []), "generation"), "locked");
+  const research = session("research", { outputUpdatedAt: "2026-09-10T01:00:00.000Z" });
+  assert.equal(stateOf(agentEntries(definitions, [research], []), "generation"), "locked", "research output does not unlock Build");
+  assert.equal(stateOf(agentEntries(definitions, [], [upload]), "generation"), "ready");
+  assert.equal(stateOf(agentEntries(definitions, [session("voice", { outputUpdatedAt: "2026-09-10T01:00:00.000Z" })], []), "generation"), "ready");
+  assert.equal(stateOf(agentEntries(definitions, [session("voice")], []), "generation"), "locked", "a voice session without output is not an interview");
+  assert.throws(() => assertAgentAvailable(agentEntries(definitions, [], []), "generation"), BuildNotReadyError);
+  assertAgentAvailable(agentEntries(definitions, [], [upload]), "generation");
+});
 
-  voice.outputUpdatedAt = "2026-09-10T03:00:00.000Z";
-  entries = agentEntries(definitions, [research, voice, generation]);
-  assert.equal(entries.find(entry => entry.role === "generation")?.state, "update_available");
-  assert.equal("updatedDependencies" in (entries.find(entry => entry.role === "generation")?.availability ?? {}), false);
-  generation.lastRunAt = "2026-09-10T03:30:00.000Z";
-  assert.equal(agentEntries(definitions, [research, voice, generation]).find(entry => entry.role === "generation")?.state, "update_available");
-  generation.status = "failed";
-  assert.equal(agentEntries(definitions, [research, voice, generation]).find(entry => entry.role === "generation")?.state, "failed");
+test("Build is updatable only by the interview, never by advanced output", async () => {
+  const definitions = await initialAgentDefinitions();
+  const generation = session("generation", { outputUpdatedAt: "2026-09-10T02:00:00.000Z" });
+  const later = "2026-09-10T03:00:00.000Z";
+  assert.equal(stateOf(agentEntries(definitions, [generation], [upload]), "generation"), "complete");
+  for (const role of ["research", "case-generation", "evaluator"] as const) {
+    assert.equal(stateOf(agentEntries(definitions, [generation, session(role, { outputUpdatedAt: later })], [upload]), "generation"), "complete");
+  }
+  assert.equal(stateOf(agentEntries(definitions, [generation, session("voice", { outputUpdatedAt: later })], []), "generation"), "update_available");
+  assert.equal(stateOf(agentEntries(definitions, [{ ...generation, status: "failed" }], [upload]), "generation"), "failed");
 });
 
 test("Evaluator is a Creator calibration loop, not a publishing or scoring loop", async () => {
@@ -57,9 +60,10 @@ test("Evaluator is a Creator calibration loop, not a publishing or scoring loop"
 test("definition repository is read dynamically for each request", async () => {
   const repository = new MemoryAgentDefinitionRepository(await initialAgentDefinitions());
   const changed = await repository.list();
-  changed.find(definition => definition.role === "voice")!.dependencies.required = [];
+  const hint = { en: "Custom", zh: "自定义", ja: "カスタム" };
+  changed.find(definition => definition.role === "voice")!.hint = hint;
   repository.replace(changed);
-  assert.deepEqual((await repository.list()).find(definition => definition.role === "voice")!.dependencies.required, []);
+  assert.deepEqual((await repository.list()).find(definition => definition.role === "voice")!.hint, hint);
 });
 
 test("database cold start seeds atomically, then the database remains the only authority", async () => {
@@ -83,24 +87,20 @@ test("database cold start seeds atomically, then the database remains the only a
   const repository = await PostgresAgentDefinitionRepository.open(pool);
   assert.equal(inserts, 5);
   assert.equal((await repository.list()).length, 5);
-  (rows.find(row => row.role === "voice")!.definition.dependencies as { required: string[] }).required = [];
-  assert.deepEqual((await repository.list()).find(row => row.role === "voice")?.dependencies.required, []);
   const replacement = await initialAgentDefinitions();
-  replacement.find(row => row.role === "voice")!.dependencies.required = [];
+  replacement.find(row => row.role === "voice")!.order = 2;
   await repository.replace(replacement);
-  assert.deepEqual((await repository.list()).find(row => row.role === "voice")?.dependencies.required, []);
   await assert.rejects(repository.replace(replacement.slice(0, 4)));
   await assert.rejects(repository.replace(replacement.map((row, index) => ({ ...row, order: index === 1 ? replacement[0]!.order : row.order }))));
-  await assert.rejects(repository.replace(replacement.map(row => row.role === "research" ? { ...row, dependencies: { required: ["research"], normal: [], updates: [] } } : row)));
+  await assert.rejects(repository.replace(replacement.map(row => row.role === "research" ? { ...row, dependencies: { required: ["research"], normal: [], updates: [] } } : row)), "the retired dependencies field is not accepted from a writer");
   assert.equal((await repository.list()).length, 5);
 
+  // Rows stored while dependencies existed still carry the field; it is dropped on read and the row is left as it was.
   const legacy = await initialAgentDefinitions();
-  legacy.find(row => row.role === "voice")!.dependencies = { required: ["research"], normal: [], updates: [] };
-  legacy.find(row => row.role === "generation")!.dependencies = { required: ["research"], normal: ["voice", "evaluator"], updates: [] };
-  rows.splice(0, rows.length, ...legacy.map(definition => ({ role: definition.role, definition: structuredClone(definition) })));
+  rows.splice(0, rows.length, ...legacy.map(definition => ({ role: definition.role, definition: { ...structuredClone(definition), dependencies: { required: ["research"], normal: [], updates: [] } } })));
   const migrated = await PostgresAgentDefinitionRepository.open(pool);
-  assert.deepEqual((await migrated.list()).find(row => row.role === "voice")?.dependencies, { required: [], normal: [], updates: ["research"] });
-  assert.deepEqual((await migrated.list()).find(row => row.role === "generation")?.dependencies, { required: [], normal: ["research", "voice"], updates: ["evaluator"] });
+  assert.equal("dependencies" in (await migrated.list())[0]!, false);
+  assert.equal((await migrated.list()).length, 5);
   const customHint = { en: "Custom English", zh: "自定义中文", ja: "カスタム" };
   (rows.find(row => row.role === "research")!.definition as { hint?: unknown }).hint = customHint;
   assert.deepEqual((await (await PostgresAgentDefinitionRepository.open(pool)).list()).find(item => item.role === "research")?.hint, customHint);

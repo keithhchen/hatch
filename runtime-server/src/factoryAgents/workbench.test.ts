@@ -148,11 +148,11 @@ test("declared upstream outputs are live read-only inputs without copying files"
     await store.put(voice.id, "output/VOICE.md", Buffer.from("# Live voice\n"), { actor: "agent" });
     await store.put(evaluator.id, "output/EVALUATION.md", Buffer.from("# Live evaluation\n"), { actor: "agent" });
     await store.put(generation.id, "input/manual/brief.md", Buffer.from("# Shared manual\n"), { actor: "user" });
-    assert.deepEqual((await store.contextFiles(generation.id)).map(file => file.path).sort(), ["input/evaluator/EVALUATION.md", "input/manual/brief.md", "input/research/RESEARCH.md", "input/voice/CREATOR_PERSONA.md", "input/voice/VOICE.md"]);
-    assert.equal((await store.read(generation.id, "input/research/RESEARCH.md")).bytes.toString(), "# Live research\n");
-    await store.put(research.id, "output/RESEARCH.md", Buffer.from("# Updated live research\n"), { actor: "agent" });
-    assert.equal((await store.read(generation.id, "input/research/RESEARCH.md")).bytes.toString(), "# Updated live research\n");
-    await assert.rejects(store.put(generation.id, "input/research/RESEARCH.md", Buffer.from("overwrite"), { actor: "agent" }), /only write output/);
+    assert.deepEqual((await store.contextFiles(generation.id)).map(file => file.path).sort(), ["input/manual/brief.md", "input/voice/CREATOR_PERSONA.md", "input/voice/VOICE.md"], "Build reads the interview and uploads, never advanced output");
+    assert.equal((await store.read(generation.id, "input/voice/VOICE.md")).bytes.toString(), "# Live voice\n");
+    await store.put(voice.id, "output/VOICE.md", Buffer.from("# Updated live voice\n"), { actor: "agent" });
+    assert.equal((await store.read(generation.id, "input/voice/VOICE.md")).bytes.toString(), "# Updated live voice\n");
+    await assert.rejects(store.put(generation.id, "input/voice/VOICE.md", Buffer.from("overwrite"), { actor: "agent" }), /only write output/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -219,7 +219,7 @@ test("Factory SSE sends complete snapshots while chat SSE stays event-specific",
     const address = app.server.address(); assert.ok(address && typeof address !== "string");
     const base = `http://127.0.0.1:${address.port}/api`;
     const factory = await fetch(`${base}/events`); assert.equal(factory.status, 200); const factoryReader = factory.body!.getReader();
-    const initial = await readSse(factoryReader); assert.equal(initial.value.type, "snapshot"); assert.equal(initial.value.sessions.length, 0); assert.ok(initial.value.agents.every((entry: any) => !("updatedDependencies" in entry.availability)));
+    const initial = await readSse(factoryReader); assert.equal(initial.value.type, "snapshot"); assert.equal(initial.value.sessions.length, 0); assert.ok(initial.value.agents.every((entry: any) => !("dependencies" in entry || "availability" in entry)));
     const created = await fetch(`${base}/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role: "research" }) });
     assert.equal(created.status, 201); const session = await created.json() as { id: string };
     const afterCreate = await readSse(factoryReader, initial.carry); assert.equal(afterCreate.value.type, "snapshot"); assert.equal(afterCreate.value.sessions[0].id, session.id);

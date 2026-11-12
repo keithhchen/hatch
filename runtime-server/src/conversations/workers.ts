@@ -20,26 +20,14 @@ export const WORKERS = new WorkerRegistry([
   { id: "evaluator", role: "evaluator" },
 ]);
 
-export type Blocked = { missing_required: string[]; needs_one_of: string[] };
-type Gap = { missingRequired: Role[]; normalCandidates: Role[]; normalSatisfied: boolean };
-
-/** A dependency gap in public worker ids. */
-export const blocked = (gap: Gap, workers: WorkerRegistry = WORKERS): Blocked => ({
-  missing_required: gap.missingRequired.map(role => workers.idOf(role)),
-  needs_one_of: gap.normalSatisfied ? [] : gap.normalCandidates.map(role => workers.idOf(role)),
-});
+/** Build waits for one of these; no other worker is ever blocked. */
+export type Blocked = { needs_one_of: string[] };
 
 /** Why a worker cannot start yet; nothing when it can. */
-export const blockedBy = (entry: AgentEntry, workers: WorkerRegistry = WORKERS): Blocked | undefined =>
-  entry.state === "locked" ? blocked({ missingRequired: entry.availability.missingRequired, normalCandidates: entry.dependencies.normal, normalSatisfied: entry.availability.normal.satisfied }, workers) : undefined;
+export const blockedBy = (entry: AgentEntry): Blocked | undefined =>
+  entry.state === "locked" ? { needs_one_of: ["uploads", "interview"] } : undefined;
 
-export const blockedMessage = (workerId: string, reason: Blocked) => {
-  const parts = [
-    reason.missing_required.length ? `${reason.missing_required.join(", ")} must produce output first` : "",
-    reason.needs_one_of.length ? `at least one of ${reason.needs_one_of.join(", ")} must produce output first` : "",
-  ].filter(Boolean);
-  return `${workerId} cannot start yet: ${parts.join("; ")}.`;
-};
+export const blockedMessage = (workerId: string) => `${workerId} cannot start yet: upload material or do the interview first.`;
 
 /** Keeps `ROLES` and the registry in step: every role has exactly one public worker. */
 export const unmappedRoles = (workers: WorkerRegistry = WORKERS): Role[] => ROLES.filter(role => workers.all.filter(worker => worker.role === role).length !== 1);

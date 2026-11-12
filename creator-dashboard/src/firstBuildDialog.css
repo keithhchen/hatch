@@ -1,0 +1,13 @@
+/* The paper keeps the landing dialog's warm look in light and dark Studio themes alike. */
+.fbd.trial-modal { background: var(--paper); color: var(--ink); border-radius: 24px; margin: 16px; max-width: min(1000px, calc(100vw - 32px)); }
+.fbd__inner { padding: 32px; }
+.fbd__inner h2 { margin: 0 0 20px; font-size: 28px; font-weight: 900; }
+.fbd__bullets, .fbd__bullets ul { margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.55; color: var(--muted); }
+.fbd__bullets { padding-top: 2px; }
+.fbd__bullets li + li { margin-top: 4px; }
+.fbd__bullets ul { margin-top: 4px; }
+@media (max-width: 720px) {
+  .fbd.trial-modal { margin: 8px; max-width: calc(100vw - 16px); }
+  .fbd__inner { padding: 20px 16px; }
+  .fbd__inner h2 { font-size: 22px; }
+}

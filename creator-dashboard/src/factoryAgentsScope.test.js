@@ -54,7 +54,7 @@ test('Factory navigation is URL-controlled down to the Agent page', async () => 
 test('Factory overview is a guided path, not an admin tree', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /<SimpleTreeView|<TreeItem/);
-  assert.match(source, /studioPathStates\(agents, product\)/);
+  assert.match(source, /studioPathStates\(agents, product, manualFiles\)/);
   assert.match(source, /function FactoryStepper/);
   assert.match(source, /onClick=\{\(\) => onStep\(step\)\}/);
   assert.match(source, /onClick=\{\(\) => goToStep\(next\.step\)\}/);
@@ -147,8 +147,7 @@ test('Factory JSX keeps visible copy in i18n and reads Agent identity from datab
 
 test('Factory uses live dependency state at each interaction boundary', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
-  assert.match(source, /changedDependencies\(entry, agents\)/);
-  assert.match(source, /const updatedDependencies = entry\?\.state === "update_available" \? changedDependencies\(entry, agents\) : \[\]/);
+  assert.match(source, /const updatedDependencies = updatedSources\(entry\)/);
   assert.match(source, /updatedDependencies\.length > 0 && <Button[^>]*variant="contained"[^>]*color="primary"[^>]*onClick=\{onUseLatest\}/);
   assert.match(source, /const composerDisabled = locked \|\| busy \|\| Boolean\(pendingAskUser\) \|\| !config\?\.services\.model/);
   assert.match(source, /<ChatComposer disabled=\{composerDisabled\}/);

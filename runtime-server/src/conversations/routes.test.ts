@@ -62,7 +62,7 @@ class FakeWorkspace implements WorkerWorkspace {
     queued: (_id: string, _itemId: string) => undefined,
     stop: (id: string) => { this.stopped.push(id); },
   };
-  entries = async () => agentEntries(await this.definitions, this.sessions);
+  entries = async () => agentEntries(await this.definitions, this.sessions, [...this.manual.keys()]);
   assertRoleAvailable = async (role: Role) => assertAgentAvailable(await this.entries(), role);
 }
 
@@ -170,7 +170,7 @@ test("workers: list shows availability and status", async () => {
     assert.deepEqual(workers.map(w => w.id), ["research", "interview", "builder", "cases", "evaluator"]);
     assert.deepEqual(workers[0], { id: "research", name: "Deep Research", availability: "available", status: "running", conversation_id: "s-research", updated_at: "t9" });
     assert.equal(workers[2]!.availability, "locked");
-    assert.deepEqual(workers[2]!.blocked_by, { missing_required: [], needs_one_of: ["research", "interview"] });
+    assert.deepEqual(workers[2]!.blocked_by, { needs_one_of: ["uploads", "interview"] });
     assert.equal(workers[3]!.status, "idle");
     assert.equal("conversation_id" in workers[3]!, false);
   } finally { await h.close(); }
@@ -179,12 +179,12 @@ test("workers: list shows availability and status", async () => {
 test("workers: a locked worker is 409 with the reason and nothing starts", async () => {
   const h = await harness();
   try {
-    const response = await h.call(`${root}/cases/messages`, { method: "POST", body: { content: "go" } });
+    const response = await h.call(`${root}/builder/messages`, { method: "POST", body: { content: "go" } });
     assert.equal(response.status, 409);
     const { error } = await response.json() as { error: { code: string; message: string; details: unknown } };
     assert.equal(error.code, "worker_unavailable");
-    assert.match(error.message, /builder must produce output first/);
-    assert.deepEqual(error.details, { worker: "cases", missing_required: ["builder"], needs_one_of: [] });
+    assert.match(error.message, /upload material or do the interview first/);
+    assert.deepEqual(error.details, { worker: "builder", needs_one_of: ["uploads", "interview"] });
     assert.equal(h.workspace.sessions.length, 0, "no conversation is created for a blocked worker");
     assert.equal(h.workspace.started.length, 0);
   } finally { await h.close(); }

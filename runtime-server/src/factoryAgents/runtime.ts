@@ -11,7 +11,7 @@ import { createFactoryLlmModel, createFactoryPiAgent, createFactoryPiModels, typ
 import { failures } from "../errors/failures.js";
 import { UpstreamError } from "../errors/upstream.js";
 import type { RunFailure } from "./runFailure.js";
-import { RUN_HEARTBEAT_MS, WorkbenchStore, isAssistantRole, type AgentDefinitionSource, type AnyRole, type Session } from "./store.js";
+import { INPUT_ROLES, RUN_HEARTBEAT_MS, WorkbenchStore, isAssistantRole, type AgentDefinitionSource, type AnyRole, type Session } from "./store.js";
 import { factoryAgentTools } from "./factoryTools.js";
 import { fileTools } from "./tools.js";
 import { traceAgentTools, withLangfuseTurn, type LangfuseTurnIdentifiers } from "../langfuse.js";
@@ -84,8 +84,7 @@ export class WorkbenchRuntime {
   }
   async prompt(role: AnyRole, snapshot?: Awaited<ReturnType<AgentDefinitionSource["list"]>>[number]): Promise<string> {
     const definition = snapshot ?? await this.store.definition(role);
-    const dependencies = definition.dependencies;
-    const folders = ["input/manual", ...[...dependencies.required, ...dependencies.normal, ...dependencies.updates].map(source => `input/${source}`)];
+    const folders = ["input/manual", ...(isAssistantRole(role) ? [] : INPUT_ROLES[role]).map(source => `input/${source}`)];
     if (isAssistantRole(role)) return `${definition.systemPrompt}\n\n# 本会话的 Input\n\n宿主为当前任务放入的材料在 \`input/\` 下，只读。使用 list 查看，使用 read 读取。`;
     const interaction = role === "voice"
       ? "# 对话方式\n\n这是连续的语音访谈。通过自然的语音对话逐步追问缺失事实、具体故事和判断依据，不暂停等待结构化问答。"

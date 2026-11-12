@@ -728,11 +728,10 @@ function assistantDefinitions(): AgentDefinitionSource {
     if (!pending) { pending = readFile(fileURLToPath(new URL(`../../prompts/assistant/${name}.md`, import.meta.url)), "utf8"); prompts.set(name, pending); }
     return pending;
   };
-  const none = { required: [], normal: [], updates: [] };
   return {
     list: async () => [
-      { role: "profile-research" as const, systemPrompt: await prompt("PROFILE_RESEARCH"), tools: ["list", "read", "write", "web_search", "web_scrape"], dependencies: none },
-      { role: "content" as const, systemPrompt: await prompt("CONTENT"), tools: ["list", "read", "write"], dependencies: none },
+      { role: "profile-research" as const, systemPrompt: await prompt("PROFILE_RESEARCH"), tools: ["list", "read", "write", "web_search", "web_scrape"] },
+      { role: "content" as const, systemPrompt: await prompt("CONTENT"), tools: ["list", "read", "write"] },
     ],
   };
 }

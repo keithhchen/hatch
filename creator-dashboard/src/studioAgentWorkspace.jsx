@@ -4,6 +4,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Copy, ExternalLink, Plus, Trash2 } from "lucide-react";
 import { Button, Checkbox, FormField, Input, Textarea } from "@hatch/ui";
+import { FirstBuildIntro } from "./FirstBuildDialog.jsx";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
 import { creatorFactoryPath, creatorProductPath } from "./creatorRoutes.js";
 import { isProductLive } from "./studioPath.js";
@@ -45,6 +46,7 @@ export function StudioAgentWorkspace({ route, request, navigate, locale, t, prof
       </nav>
     </header>
     <div className="sx-agent__body">
+      {tab === "build" ? <FirstBuildIntro request={request} productId={productId} profile={profile} locale={locale} navigate={navigate} /> : null}
       {tab === "build" ? renderBuild(product)
         : !product ? <LoadingState t={t} />
         : <PublishTab {...ctx} />}

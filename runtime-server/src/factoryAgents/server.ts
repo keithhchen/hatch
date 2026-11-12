@@ -35,13 +35,15 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
   };
   const voices = new Map<string, VoiceConnection>();
   const liveStartCounts = new Map<string, number>();
-  const entries = async () => agentEntries(await options.definitions.list(), await store.list());
+  const entries = async () => agentEntries(await options.definitions.list(), await store.list(), await store.listManualFiles());
   const assertRoleAvailable = async (role: Session["role"]) => { if (isAssistantRole(role)) throw new Error("Assistant sessions are not part of a Product workspace"); return assertAgentAvailable(await entries(), role); };
   const factorySnapshot = async () => {
     const sessions = await store.list();
+    const manualFiles = await store.listManualFiles();
     return {
       type: "snapshot" as const,
-      agents: agentEntries(await options.definitions.list(), sessions),
+      manualFiles,
+      agents: agentEntries(await options.definitions.list(), sessions, manualFiles),
       sessions: sessions.map(session => ({
         id: session.id,
         role: session.role,
@@ -50,7 +52,6 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
         outputUpdatedAt: session.outputUpdatedAt,
         todos: session.todos,
       })),
-      manualFiles: await store.listManualFiles(),
     };
   };
   const writeSse = (res: ServerResponse, value: unknown) => {
@@ -197,10 +198,10 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
           : voiceProvider === "legacy"
             ? Boolean(env.ELEVENLABS_API_KEY?.trim() && env.ELEVENLABS_VOICE_ID?.trim())
             : false;
-        return json(res, 200, { roles: ROLES, agents: await entries(), runtimeUrl: env.HATCH_FACTORY_RUNTIME_URL ?? "", services: { model: Boolean(env[resolveFactoryLlmProfile(env).apiKeyEnv]?.trim()), search: Boolean(env.FIRECRAWL_API_KEY?.trim()), scrape: Boolean(env.HATCH_FACTORY_SCRAPE_PROVIDER === "firecrawl" ? env.FIRECRAWL_API_KEY : env.TAVILY_API_KEY), hatch: Boolean(env.HATCH_FACTORY_RUNTIME_URL && env.HATCH_FACTORY_CREATOR_TOKEN), corpus: Boolean(env.HATCH_FACTORY_REGISTRY_URL && env.HATCH_FACTORY_CREATOR_TOKEN), voice: voiceReady } });
+        return json(res, 200, { roles: ROLES, agents: await entries(), manualFiles: await store.listManualFiles(), runtimeUrl: env.HATCH_FACTORY_RUNTIME_URL ?? "", services: { model: Boolean(env[resolveFactoryLlmProfile(env).apiKeyEnv]?.trim()), search: Boolean(env.FIRECRAWL_API_KEY?.trim()), scrape: Boolean(env.HATCH_FACTORY_SCRAPE_PROVIDER === "firecrawl" ? env.FIRECRAWL_API_KEY : env.TAVILY_API_KEY), hatch: Boolean(env.HATCH_FACTORY_RUNTIME_URL && env.HATCH_FACTORY_CREATOR_TOKEN), corpus: Boolean(env.HATCH_FACTORY_REGISTRY_URL && env.HATCH_FACTORY_CREATOR_TOKEN), voice: voiceReady } });
       }
 
-      if (url.pathname === "/api/sessions" && req.method === "GET") { const sessions = await store.list(); return json(res, 200, { sessions: sessions.map(s => ({ ...publicSession(s), messages: undefined })), agents: agentEntries(await options.definitions.list(), sessions), manualFiles: await store.listManualFiles() }); }
+      if (url.pathname === "/api/sessions" && req.method === "GET") { const sessions = await store.list(); const manualFiles = await store.listManualFiles(); return json(res, 200, { sessions: sessions.map(s => ({ ...publicSession(s), messages: undefined })), agents: agentEntries(await options.definitions.list(), sessions, manualFiles), manualFiles }); }
       if (url.pathname === "/api/sessions" && req.method === "POST") {
         const b = z.object({ role: z.enum(ROLES), title: z.string().max(200).optional() }).parse(await body(req));
         await assertRoleAvailable(b.role);

@@ -33,12 +33,12 @@ test("a worker conversation runs a real turn: stable ids, final reply, no intern
   } }) });
   const workspace: WorkerWorkspace = {
     store, runtime,
-    entries: async () => agentEntries(await definitions.list(), await store.list()),
-    assertRoleAvailable: async (role: Role) => assertAgentAvailable(agentEntries(await definitions.list(), await store.list()), role),
+    entries: async () => agentEntries(await definitions.list(), await store.list(), await store.listManualFiles()),
+    assertRoleAvailable: async (role: Role) => assertAgentAvailable(agentEntries(await definitions.list(), await store.list(), await store.listManualFiles()), role),
   };
   const directory = new WorkerDirectory(workspace);
   try {
-    assert.deepEqual((await directory.list()).map(w => [w.id, w.availability]), [["research", "available"], ["interview", "available"], ["builder", "locked"], ["cases", "locked"], ["evaluator", "locked"]]);
+    assert.deepEqual((await directory.list()).map(w => [w.id, w.availability]), [["research", "available"], ["interview", "available"], ["builder", "locked"], ["cases", "available"], ["evaluator", "available"]]);
     await assert.rejects(directory.conversation("builder")!.send(input("build")), /builder cannot start yet/);
     assert.equal((await store.list()).length, 0);
 
@@ -79,8 +79,8 @@ test("a failed Run is a failed conversation with a stable code and no provider t
   const runEnded = new Promise<void>(resolve => runtime.events.on("event", event => { if (event.type === "run_end") { ended.push(event); resolve(); } }));
   const workspace: WorkerWorkspace = {
     store, runtime,
-    entries: async () => agentEntries(await definitions.list(), await store.list()),
-    assertRoleAvailable: async (role: Role) => assertAgentAvailable(agentEntries(await definitions.list(), await store.list()), role),
+    entries: async () => agentEntries(await definitions.list(), await store.list(), await store.listManualFiles()),
+    assertRoleAvailable: async (role: Role) => assertAgentAvailable(agentEntries(await definitions.list(), await store.list(), await store.listManualFiles()), role),
   };
   const research = new WorkerDirectory(workspace).conversation("research")!;
   const consoleError = console.error;
