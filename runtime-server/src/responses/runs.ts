@@ -3,6 +3,7 @@ import type { ChatEdge } from "../chat/turnSubmission.js";
 import type { RuntimeStore } from "../store.js";
 import type { VisibleConversationMessage } from "../store.js";
 import { attachmentMessageId, type ChatAssets } from "../chat/assets.js";
+import type { UsageReader } from "../usage/usage.js";
 import { isTerminal, responseObject, usageOf, userMessageItem, type AttachedFile, type Json, type RunView } from "./mapping.js";
 
 /**
@@ -10,7 +11,7 @@ import { isTerminal, responseObject, usageOf, userMessageItem, type AttachedFile
  * calls each model turn persisted, the approvals it waits for from the durable tool requests. Reads only; it decides nothing.
  */
 export class RunViews {
-  constructor(private readonly deps: { repository: ConversationRepository; store: RuntimeStore; chat: ChatEdge["chat"]; assets?: ChatAssets }) {}
+  constructor(private readonly deps: { repository: ConversationRepository; store: RuntimeStore; chat: ChatEdge["chat"]; assets?: ChatAssets; usage?: Pick<UsageReader, "forRun"> }) {}
 
   /** How a user message of this conversation is shown: its words and the files it carried. */
   async userItems(conversation: ConversationRecord): Promise<(message: VisibleConversationMessage) => Json> {
@@ -34,7 +35,8 @@ export class RunViews {
       ...(reply?.finish_reason ? { finishReason: reply.finish_reason } : {}),
       toolCalls: reply?.tool_calls ?? [],
       approvals: await this.approvals(conversation, run, chat),
-      usage: isTerminal(run.status) ? usageOf(events, run.id) : null,
+      // From the ledger, the one record of what a Run spent. Unknown (null) without one, never invented as zero.
+      usage: isTerminal(run.status) && this.deps.usage ? usageOf(await this.deps.usage.forRun(run.id)) : null,
       ...(at > 0 ? { previousRunId: runs[at - 1]!.id } : {})
     };
   }

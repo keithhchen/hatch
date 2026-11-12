@@ -13,6 +13,7 @@ import { AttachmentFiles } from "../assets/files.js";
 import { harness, png } from "../assets/kit.test.js";
 import { ChatAssets } from "../chat/assets.js";
 import { InMemoryConversationRepository } from "../conversationRepository.js";
+import { InMemoryUsageLedger } from "../usage/memoryUsage.js";
 import type { UsageEvent } from "../usage/usage.js";
 import type { AuthIdentity, AuthIdentityResolver } from "../entitlements.js";
 import { createRuntimeServer, type RuntimeServer } from "../index.js";
@@ -69,6 +70,8 @@ async function fixture(options: { holdMs?: number; keepAliveMs?: number; assets?
   const kit = options.assets ? await harness() : undefined;
   const chatAssets = kit ? new ChatAssets({ pipeline: kit.pipeline, blobs: kit.blobs, files: new AttachmentFiles(kit.repository, kit.blobs) }) : undefined;
   const usage: UsageEvent[] = [];
+  const ledger = new InMemoryUsageLedger();
+  const recorder = { record: async (event: UsageEvent) => { usage.push(event); await ledger.record(event); }, forRun: (runId: string) => ledger.forRun(runId) };
   const control = { held: undefined as Gate | undefined, seen: [] as string[] };
   const model: AgentRuntime = {
     async *run(input, ctx) {
@@ -85,7 +88,7 @@ async function fixture(options: { holdMs?: number; keepAliveMs?: number; assets?
   };
   const runtime = createRuntimeServer({
     conversationStore: store, conversationRepository: repository, authIdentityResolver: identities, agentCorpusResolver: corpora,
-    createRuntime: () => model, usage: { record: async (event) => { usage.push(event); } }, ...(chatAssets ? { chatAssets } : {}),
+    createRuntime: () => model, usage: recorder, ...(chatAssets ? { chatAssets } : {}),
     responsesApi: { ...(options.holdMs ? { holdMs: options.holdMs } : {}), ...(options.keepAliveMs ? { keepAliveMs: options.keepAliveMs } : {}) }
   });
   runtimes.push(runtime);
@@ -191,8 +194,10 @@ test("responses: a plain request holds until the run ends and reports usage summ
   assert.equal(response.output_text, "Hello world: hello there");
   assert.equal(response.output[0]?.type, "message");
   assert.deepEqual(response.usage, {
-    input_tokens: 140, input_tokens_details: { cached_tokens: 30 }, output_tokens: 25, output_tokens_details: { reasoning_tokens: 0 }, total_tokens: 165
+    input_tokens: 130, input_tokens_details: { cached_tokens: 30 }, output_tokens: 20, output_tokens_details: { reasoning_tokens: 0 }, total_tokens: 150
   });
+  assert.ok((response.usage?.total_tokens ?? 0) > 0, "a run that called the model reports what it spent");
+  assert.deepEqual((await openai.responses.retrieve(response.id)).usage, response.usage, "polling reads the same ledger");
   const again = await openai.responses.retrieve(response.id);
   assert.equal(again.status, "completed");
   assert.equal(again.output_text, response.output_text);

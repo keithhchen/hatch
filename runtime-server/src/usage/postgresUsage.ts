@@ -1,5 +1,5 @@
 import type { Pool } from "pg";
-import { emptySurfaces, monthStart, sumDays, USAGE_SURFACES, utcDay, type DailyUsage, type SurfaceTokens, type UsageEvent, type UsageReader, type UsageRecorder, type UsageSurface } from "./usage.js";
+import { emptyTokens, emptySurfaces, monthStart, sumDays, USAGE_SURFACES, utcDay, type DailyUsage, type SurfaceTokens, type TokenCount, type UsageEvent, type UsageReader, type UsageRecorder, type UsageSurface } from "./usage.js";
 
 const DDL = [
   `CREATE TABLE IF NOT EXISTS hatch_usage_events (
@@ -73,6 +73,16 @@ export class PostgresUsageLedger implements UsageRecorder, UsageReader {
     } finally {
       client.release();
     }
+  }
+
+  async forRun(runId: string): Promise<TokenCount> {
+    await this.schema();
+    const { rows } = await this.pool.query(
+      `SELECT COALESCE(SUM(input_tokens), 0) AS input, COALESCE(SUM(cached_input_tokens), 0) AS cached, COALESCE(SUM(output_tokens), 0) AS output, COALESCE(SUM(reasoning_tokens), 0) AS reasoning
+       FROM hatch_usage_events WHERE run_id = $1`, [runId]
+    );
+    const row = rows[0];
+    return row ? { input: Number(row.input), cachedInput: Number(row.cached), output: Number(row.output), reasoning: Number(row.reasoning) } : emptyTokens();
   }
 
   async daily(accountId: string, from: string, to: string): Promise<DailyUsage[]> {

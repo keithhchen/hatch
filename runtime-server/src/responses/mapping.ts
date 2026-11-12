@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { BriefSnapshot } from "../brief.js";
 import type { ConversationRecord, ConversationRunRecord } from "../conversationRepository.js";
-import type { StoreEvent, VisibleConversationMessage, VisibleConversationToolCall } from "../store.js";
+import type { VisibleConversationMessage, VisibleConversationToolCall } from "../store.js";
 import { modelIdOf } from "./models.js";
 import { taskBriefObject } from "./taskBrief.js";
 
@@ -48,27 +48,15 @@ export const approvalRequestItem = (call: { toolCallId: string; name: string; ar
   type: "mcp_approval_request", id: call.toolCallId, server_label: "hatch", name: call.name, arguments: asJson(call.arguments)
 });
 
-type Usage = { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; reasoning?: number; totalTokens?: number };
-
 /**
- * The usage of every model call of a Run, summed from what each call persisted. `input_tokens` counts the whole prompt
- * (fresh, cache read and cache write), as the OpenAI shape does; `cached_tokens` is the part read from cache.
+ * A Run's usage as the OpenAI shape tells it, from the ledger's one total for the Run. `input_tokens` counts the whole prompt,
+ * as the ledger does (fresh, cache read and cache write); `cached_tokens` is the part read from cache.
  */
-export function usageOf(events: readonly StoreEvent[], runId: string): Json {
-  let input = 0, cached = 0, output = 0, reasoning = 0;
-  for (const event of events) {
-    if (event.type !== "conversation.model_message" || event.run_id !== runId) continue;
-    const usage = event.message.usage as Usage | undefined;
-    if (!usage) continue;
-    cached += usage.cacheRead ?? 0;
-    input += (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
-    output += usage.output ?? 0;
-    reasoning += usage.reasoning ?? 0;
-  }
+export function usageOf(total: { input: number; cachedInput: number; output: number; reasoning: number }): Json {
   return {
-    input_tokens: input, input_tokens_details: { cached_tokens: cached },
-    output_tokens: output, output_tokens_details: { reasoning_tokens: reasoning },
-    total_tokens: input + output
+    input_tokens: total.input, input_tokens_details: { cached_tokens: total.cachedInput },
+    output_tokens: total.output, output_tokens_details: { reasoning_tokens: total.reasoning },
+    total_tokens: total.input + total.output
   };
 }
 

@@ -111,14 +111,8 @@ test("mapping: the response object has its output, text, usage and place in the 
   assert.deepEqual(hidden.output.map((item: { type: string }) => item.type), ["message"], "tool activity is shown only on request");
 });
 
-test("mapping: usage is the sum over every model call of the run, and only that run", () => {
-  const call = (run_id: string, usage: Record<string, number>) => ({ type: "conversation.model_message" as const, conversation_id: "c", run_id, timestamp: "t", message: { role: "assistant" as const, content: "", usage } });
-  const events = [
-    call("run_a", { input: 100, output: 20, cacheRead: 30, cacheWrite: 10, reasoning: 5, totalTokens: 160 }),
-    call("run_a", { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15 }),
-    call("run_b", { input: 999, output: 999, cacheRead: 0, cacheWrite: 0, totalTokens: 1998 })
-  ] as never;
-  assert.deepEqual(usageOf(events, "run_a"), {
+test("mapping: the ledger's total for a run is the response's usage", () => {
+  assert.deepEqual(usageOf({ input: 150, cachedInput: 30, output: 25, reasoning: 5 }), {
     input_tokens: 150, input_tokens_details: { cached_tokens: 30 }, output_tokens: 25, output_tokens_details: { reasoning_tokens: 5 }, total_tokens: 175
   });
 });

@@ -14,6 +14,7 @@ import type { Json } from "./mapping.js";
 import { ModelCatalog } from "./models.js";
 import { ResponsesApi, type Delivery } from "./responses.js";
 import { RunViews } from "./runs.js";
+import type { UsageReader } from "../usage/usage.js";
 import { streamResponse } from "./stream.js";
 
 export const RESPONSES_BASE = "/responses/v1";
@@ -28,6 +29,8 @@ export type ResponsesHttpDeps = {
   corpora: AgentCorpusResolverLike | undefined;
   identities: AuthIdentityResolver | undefined;
   urls?: UrlFetcher;
+  /** The usage ledger's reader: what a response reports as its usage. */
+  usage?: Pick<UsageReader, "forRun">;
   /** Resolves once the repository can be used. */
   ready?: Promise<unknown>;
   /** Overrides for tests; production uses the defaults (a 90 s hold, a 15 s keep-alive). */
@@ -47,7 +50,7 @@ export class ResponsesHttpApi {
     const identities = deps.identities ? cachingIdentityResolver(deps.identities) : undefined;
     this.authenticator = new ApiAuthenticator(identities);
     this.models = new ModelCatalog({ corpora: deps.corpora, identities });
-    this.views = new RunViews({ repository: deps.repository, store: deps.store, chat: deps.edge.chat, ...(deps.edge.chatAssets ? { assets: deps.edge.chatAssets } : {}) });
+    this.views = new RunViews({ repository: deps.repository, store: deps.store, chat: deps.edge.chat, ...(deps.usage ? { usage: deps.usage } : {}), ...(deps.edge.chatAssets ? { assets: deps.edge.chatAssets } : {}) });
     this.conversations = new ConversationsApi({ repository: deps.repository, store: deps.store, catalog: this.models, views: this.views });
     this.responses = new ResponsesApi({
       repository: deps.repository, store: deps.store, edge: deps.edge, catalog: this.models, conversations: this.conversations,

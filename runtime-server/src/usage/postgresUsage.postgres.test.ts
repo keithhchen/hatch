@@ -29,6 +29,15 @@ async function isolated(body: (pool: Pool) => Promise<void>) {
   }
 }
 
+test("a run's usage is the sum of its calls, and only its own", options, () => isolated(async (pool) => {
+  const ledger = new PostgresUsageLedger(pool);
+  await ledger.record(event("r1-a", { runId: "run_one", inputTokens: 100, cachedInputTokens: 30, outputTokens: 20, reasoningTokens: 5 }));
+  await ledger.record(event("r1-b", { runId: "run_one", inputTokens: 10, cachedInputTokens: 0, outputTokens: 5, reasoningTokens: 0 }));
+  await ledger.record(event("r2-a", { runId: "run_two" }));
+  assert.deepEqual(await ledger.forRun("run_one"), { input: 110, cachedInput: 30, output: 25, reasoning: 5 });
+  assert.deepEqual(await ledger.forRun("run_none"), { input: 0, cachedInput: 0, output: 0, reasoning: 0 });
+}));
+
 test("a call recorded twice, even at once, is one event and one increment", options, () => isolated(async (pool) => {
   const ledger = new PostgresUsageLedger(pool);
   await Promise.all(Array.from({ length: 10 }, () => ledger.record(event("same"))));

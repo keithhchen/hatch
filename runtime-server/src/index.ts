@@ -56,7 +56,7 @@ import { ChatAssets, TextPartsReader, type PartsReader } from "./chat/assets.js"
 import { attachmentToolDefinitions } from "./chat/attachmentTools.js";
 import { failRun, runModelTurn } from "./chat/modelTurn.js";
 import { toolRegistry } from "./tools.js";
-import { attributeByScope, type UsageRecorder } from "./usage/usage.js";
+import { attributeByScope, type UsageReader, type UsageRecorder } from "./usage/usage.js";
 import { PostgresUsageLedger } from "./usage/postgresUsage.js";
 import { RegistryConnectionDirectory } from "./chat/registryConnections.js";
 import { openChatAssets } from "./chat/openChatAssets.js";
@@ -541,6 +541,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   const responses = new ResponsesHttpApi({
     repository: conversationRepository, store: conversationStore, edge,
     corpora: agentCorpusResolver, identities: authIdentityResolver, ready: repositoryReady,
+    ...(options.usage && "forRun" in options.usage ? { usage: options.usage as unknown as Pick<UsageReader, "forRun"> } : {}),
     ...(options.responsesApi ?? {})
   });
 
