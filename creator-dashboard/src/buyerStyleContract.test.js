@@ -39,14 +39,21 @@ test("Studio opens for any signed-in account; signed-out visitors go to the one 
   assert.match(source, /params\.get\("returnTo"\) \|\| EXPLORE_ROOT/);
 });
 
-test("buyer navigation is two tabs, Explore and Studio, with orders/download/settings in the avatar menu and no search", () => {
+test("buyer navigation is two tabs, Explore and Studio, with orders/settings in the avatar menu and no search", () => {
   const nav = source.match(/<nav className="buyer-v2__nav"[\s\S]*?<\/nav>/)[0];
   assert.deepEqual([...nav.matchAll(/<RouterLink to=\{(\w+)\}/g)].map((match) => match[1]), ["EXPLORE_ROOT", "STUDIO_ROOT"]);
   assert.match(source, /<WebBrand as=\{RouterLink\} className="buyer-v2__brand" to=\{EXPLORE_ROOT\}/);
   assert.doesNotMatch(source, /buyer-v2__mobile-nav|buyer-v2__studio-link|HOME_ROOT|LIBRARY_ROOT|type="search"/);
-  assert.match(accountSource, /href: "\/explore\/orders"[\s\S]*href: "\/download"[\s\S]*href: "\/account"/);
-  assert.match(source, /const DEFAULT_DOWNLOAD_URL = "\/download"/);
+  assert.match(accountSource, /href: "\/explore\/orders"[\s\S]*href: "\/account"/);
   assert.doesNotMatch(source, /github\.com\/keithhchen\/hatch-releases\/releases\/latest/);
+});
+
+test("the web app offers no Desktop link or instruction: success page, account menus, storefront", () => {
+  const creatorPortal = readFileSync(new URL("./CreatorPortalV2.jsx", import.meta.url), "utf8");
+  const storefront = readFileSync(new URL("./StorefrontDetails.jsx", import.meta.url), "utf8");
+  for (const [name, text] of Object.entries({ source, accountSource, creatorPortal, storefront })) {
+    assert.doesNotMatch(text, /\/download|Hatch Desktop|hatch:\/\/|desktopRequirement|desktop_(download|open)_clicked/, name);
+  }
 });
 
 test("Explore shows one panel at a time behind a remembered segmented switcher on narrow screens", () => {

@@ -15,12 +15,6 @@ export function storefrontModel(product = {}, options = {}) {
     outputs: storefrontList(product.outputs ?? product.what_you_receive ?? product.deliverables ?? product.presentation?.outputs),
     boundaries: storefrontList(product.boundaries ?? product.product_boundaries ?? product.limitations ?? product.presentation?.boundaries),
     privacy: String(product.privacy_copy ?? product.presentation?.privacy_copy ?? ""),
-    desktopRequirement: String(
-      options.desktopRequirement
-      ?? product.desktop_requirement
-      ?? product.presentation?.desktop_requirement
-      ?? ""
-    ),
     refundPolicy: String(
       options.refundPolicy
       ?? product.refund_policy?.summary

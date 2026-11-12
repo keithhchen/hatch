@@ -13,13 +13,12 @@ export function StorefrontDetails({
   action,
   mode = "public",
   headingLevel = 1,
-  desktopRequirement,
   refundPolicy,
   releaseLabel
 }) {
   const { locale } = useLocale();
   const t = (key) => buyerT(locale, key);
-  const model = storefrontModel(product, { desktopRequirement, refundPolicy });
+  const model = storefrontModel(product, { refundPolicy });
   const Heading = headingLevel === 1 ? "h1" : "h2";
   const fallbackCreator = t("Hatch Expert");
   const hasDetails = model.inputs.length || model.outputs.length || model.boundaries.length || model.privacy;
@@ -50,11 +49,6 @@ export function StorefrontDetails({
         </div>
       ) : null}
 
-      {model.desktopRequirement ? (
-        <footer className="storefront-shared__policies">
-          <section><strong>{t("Availability")}</strong><p>{model.desktopRequirement}</p></section>
-        </footer>
-      ) : null}
     </article>
   );
 }

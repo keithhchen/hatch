@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, ArrowRight, Check, ChevronDown, Inbox, Pencil, SearchX } from "lucide-react";
+import { AlertCircle, ArrowRight, Check, Inbox, Pencil, SearchX } from "lucide-react";
 import {
   Button,
-  DropdownMenu,
   InlineAlert as HatchInlineAlert,
   Input,
   SegmentedControl,
@@ -24,7 +23,6 @@ import { BuyerAccountControls, BuyerLanguageMenu } from "./BuyerAccountControls.
 import { AccountAvatarSettings } from "./AccountAvatarSettings.jsx";
 import "./buyerPortalV2.css";
 
-const DEFAULT_DOWNLOAD_URL = "/download";
 const EXPLORE_ROOT = "/explore";
 const ORDERS_ROOT = "/explore/orders";
 const CHECKOUT_ROOT = "/checkout";
@@ -85,7 +83,6 @@ export function BuyerPortalV2({
   navigate,
   request,
   session = { status: "anonymous" },
-  downloadUrl = DEFAULT_DOWNLOAD_URL,
   openPayment = defaultOpenPayment
 }) {
   const t = useBuyerCopy();
@@ -119,7 +116,7 @@ export function BuyerPortalV2({
   } else if (route.name === "order") {
     page = <OrderPage id={route.params.orderId} request={request} navigate={navigate} session={session} />;
   } else if (route.name === "success") {
-    page = <SuccessPage id={route.params.orderId} request={request} navigate={navigate} downloadUrl={downloadUrl} session={session} />;
+    page = <SuccessPage id={route.params.orderId} request={request} navigate={navigate} session={session} />;
   } else if (route.name === "settings") {
     page = <SettingsPage session={session} request={request} navigate={navigate} />;
   } else if (route.name === "account-help") {
@@ -440,7 +437,6 @@ function ProductPage({ route, request, navigate, session }) {
   if (resource.status === "error") return <div className="buyer-v2__container buyer-v2__page"><RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} session={session} returnTo={path} /></div>;
 
   const examples = arrayValue(product.examples || product.proof, []);
-  const desktopRequirement = product.desktop_requirement || t("Available in the browser and in Hatch Desktop.");
   const productCreatorId = product?.creator_id ?? product?.creator?.id;
   const productCreatorName = creatorName(product, t);
   const productCreatorByline = productCreatorId
@@ -455,7 +451,6 @@ function ProductPage({ route, request, navigate, session }) {
         creatorName={productCreatorByline}
         creatorAvatarName={productCreatorName}
         creatorAvatarUrl={product.creator_avatar_url || product.creator?.avatar_url || product.creator?.image_url}
-        desktopRequirement={desktopRequirement}
         releaseLabel={product.release_label || product.release?.label}
         action={<ProductAction embedded product={product} currentPath={path} request={request} navigate={navigate} session={session} />}
       />
@@ -464,7 +459,7 @@ function ProductPage({ route, request, navigate, session }) {
         <h2>{t('How it works')}</h2>
         <ol className="buyer-v2__steps">
           <li className="web-card"><span>1</span><strong>{t('Add to your account')}</strong><p>{t('Free. The Agent is saved to My Agents.')}</p></li>
-          <li className="web-card"><span>2</span><strong>{t('Start a conversation')}</strong><p>{t('Chat right in your browser, no download needed. To work with local files, use Hatch Desktop.')}</p></li>
+          <li className="web-card"><span>2</span><strong>{t('Start a conversation')}</strong><p>{t('Chat right in your browser.')}</p></li>
           <li className="web-card"><span>3</span><strong>{t("The expert's own judgment")}</strong><p>{t("Answers draw on this expert's methods and experience, in their own style — not a generic AI answer.")}</p></li>
         </ol>
       </section>
@@ -513,7 +508,7 @@ function ProductAction({ product, currentPath, request, navigate, session, embed
     action = <><LinkButton className="web-btn-yolk" to={`/chat/product/${encodeURIComponent(productId(product))}`} navigate={navigate}>{t('Go to chat')}</LinkButton><LinkButton variant="secondary" to={`${STUDIO_ROOT}/products/${encodeURIComponent(productId(product))}`} navigate={navigate}>{t('Manage product')}</LinkButton></>;
   } else if (status === "active" || status === "reserved") {
     title = status === "reserved" ? t("Setting up access") : t("Added to My Agents");
-    body = status === "reserved" ? t("No need to add it again.") : t("Chat in the browser or open it in Hatch Desktop.");
+    body = status === "reserved" ? t("No need to add it again.") : t("Chat in the browser.");
     action = <><LinkButton className="web-btn-yolk" to={`/chat/product/${encodeURIComponent(productId(product))}`} navigate={navigate}>{t('Start chat')}</LinkButton></>;
   } else if (status === "pending") {
     title = t("Setting up access…");
@@ -637,7 +632,7 @@ function AccountHelpPage({ session, navigate }) {
   const authenticated = session.status === "authenticated";
   usePageTitle(t("Account help"));
   return <div className="buyer-v2__container buyer-v2__page">
-    <PageIntro title={t('Account help')} lead={t("Agents and orders belong to the account used to add them. Use the same account on the web and in Desktop.")} />
+    <PageIntro title={t('Account help')} lead={t("Agents and orders belong to the account used to add them.")} />
     <div className="buyer-v2__help-cards">
       <article className="buyer-v2__info-card web-card">
         <h2>{authenticated ? t("Check your account") : t("Sign in")}</h2>
@@ -830,7 +825,7 @@ function CheckoutPage({ id, request, navigate, session }) {
   );
 }
 
-function SuccessPage({ id, request, navigate, downloadUrl, session }) {
+function SuccessPage({ id, request, navigate, session }) {
   const t = useBuyerCopy();
   const endpoint = `${BUYER_PORTAL_V2_ENDPOINTS.orders}/${encodeURIComponent(id)}`;
   const resource = useRemote(async (signal) => {
@@ -868,7 +863,7 @@ function SuccessPage({ id, request, navigate, downloadUrl, session }) {
   if (resource.status === "error" && resource.error?.status >= 500) return <div className="buyer-v2__container buyer-v2__page"><StatePanel tone="warning" title={t('Order completed. Receipt unavailable')} body={t('Do not place another order. The receipt will load when the service is available.')}><Button type="button" onClick={resource.reload}>{t('Reload receipt')}</Button></StatePanel></div>;
   if (resource.status === "error") return <div className="buyer-v2__container buyer-v2__page"><RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} session={session} returnTo={`${ORDERS_ROOT}/${id}/success`} /></div>;
 
-  const { order, entitlement, entitlementError } = data;
+  const { order, entitlementError } = data;
   const product = order.product_snapshot || order.product || order;
   const amount = orderAmount(order);
   const creator = publicProduct.data || product;
@@ -893,21 +888,11 @@ function SuccessPage({ id, request, navigate, downloadUrl, session }) {
       </div>} title={t("{name} added", { name: productTitle(identity, t) })} body={`${t("Order #{reference}", { reference: orderReference(order) })} · ${amount === 0 ? t("Free") : money(amount, order.currency, t)}`}>
         {entitlementError ? <HatchInlineAlert tone="warning" action={<Button size="small" variant="ghost" type="button" onClick={resource.reload}>{t('Retry')}</Button>}>{t('Order completed. Some access details are unavailable.')}</HatchInlineAlert> : null}
         <LinkButton className="web-btn-yolk" to={`/chat/product/${encodeURIComponent(productId(product))}`} navigate={navigate}>{t('Start chat')}</LinkButton>
-        <DropdownMenu
-          align="center"
-          label={t("Hatch Desktop")}
-          trigger={<Button variant="secondary" type="button" trailing={<ChevronDown aria-hidden="true" />}>{t("Hatch Desktop")}</Button>}
-          items={[
-            { value: "download", label: t("Download"), onSelect: () => { trackPortalEvent(request, "desktop_download_clicked", productTelemetry(product)); window.open(downloadUrl, "_blank", "noopener,noreferrer"); } },
-            { value: "open", label: t("Open"), onSelect: () => { trackPortalEvent(request, "desktop_open_clicked", productTelemetry(product)); window.location.assign(desktopUrl(entitlement, product)); } }
-          ]}
-        />
       </Notice>
       <section className="buyer-v2__next-steps">
         <h2>{t('Next steps')}</h2>
         <ol className="buyer-v2__steps">
-          <li className="web-card"><span>1</span><strong>{t("Chat in the browser")}</strong><p>{t("No download needed.")} <RouterLink to={`/chat/product/${encodeURIComponent(productId(product))}`} navigate={navigate}>{t('Start chat')}</RouterLink></p></li>
-          <li className="web-card"><span>2</span><strong>{t("Or use Hatch Desktop for local files")}</strong><p>{t("Download it, sign in with this account, then review local file permissions.")} <a href={downloadUrl} target="_blank" rel="noreferrer" onClick={() => trackPortalEvent(request, "desktop_download_clicked", productTelemetry(product))}>{t('Download Hatch Desktop')}</a></p></li>
+          <li className="web-card"><span>1</span><strong>{t("Chat in the browser")}</strong><p><RouterLink to={`/chat/product/${encodeURIComponent(productId(product))}`} navigate={navigate}>{t('Start chat')}</RouterLink></p></li>
         </ol>
         <div className="buyer-v2__detail-links">
           <RouterLink to={`${ORDERS_ROOT}/${encodeURIComponent(orderReference(order))}`} navigate={navigate}>{t('View receipt →')}</RouterLink>
@@ -1283,23 +1268,6 @@ async function callRequest(request, path, options = {}) {
   return request(path, options);
 }
 
-function trackPortalEvent(request, eventName, attributes = {}) {
-  if (typeof request !== "function") return;
-  const key = requestId();
-  const options = jsonMutation("POST", { event_name: eventName, attributes }, key);
-  options.keepalive = true;
-  void callRequest(request, "/v1/analytics/events", options).catch(() => undefined);
-}
-
-function productTelemetry(product) {
-  return {
-    creator_id: product?.creator_id ?? product?.creator?.id,
-    product_id: productId(product),
-    release_id: product?.release_id ?? product?.release?.release_id,
-    platform: typeof navigator === "undefined" ? "web" : /Mac/i.test(navigator.platform) ? "macos" : "web"
-  };
-}
-
 function jsonMutation(method, payload, idempotencyKey = requestId()) {
   return {
     method,
@@ -1391,7 +1359,6 @@ function productName(value, t = identity) { return value?.product_name || value?
 function productPromise(value, t = identity) { return value?.promise || value?.product_description || value?.description || value?.product?.promise || value?.product?.description || t("An Agent built from an expert's method."); }
 function creatorName(value, t = identity) { return value?.creator_name || value?.creator_display_name || value?.display_name || value?.name || value?.creator?.display_name || value?.creator?.name || value?.creator?.handle || t("Hatch Expert"); }
 function creatorAvatarUrl(value) { return value?.creator_avatar_url || value?.avatar_url || value?.image_url || value?.creator?.avatar_url || value?.creator?.image_url; }
-function creatorId(value) { return value?.creator_id || value?.creator?.id || ""; }
 function orderIdFor(value) { return value?.order_id || value?.id; }
 
 function productPath(value) {
@@ -1449,17 +1416,6 @@ function successReady(order, entitlement) {
 
 function paymentFailed(order) {
   return ["failed", "declined", "cancelled"].includes(order?.payment_status || order?.payment?.status) || orderStatus(order) === "failed";
-}
-
-function desktopUrl(entitlement, product) {
-  const params = new URLSearchParams();
-  const entitlementId = entitlement?.entitlement_id || entitlement?.id;
-  if (entitlementId) params.set("entitlement_id", entitlementId);
-  const id = productId(product);
-  if (id) params.set("product_id", id);
-  const creator = creatorId(product) || entitlement?.creator_id;
-  if (creator) params.set("creator_id", creator);
-  return `hatch://products/open${params.toString() ? `?${params}` : ""}`;
 }
 
 function arrayValue(value, fallback = []) {

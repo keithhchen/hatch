@@ -1,5 +1,5 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Bot, Check, ChevronsUpDown, Copy, Download, ExternalLink, Languages, LayoutDashboard, LogOut, Menu, MessageCircle, MoreHorizontal, Plus, ReceiptText, Search, Settings, X } from "lucide-react";
+import { ArrowLeft, Bot, Check, ChevronsUpDown, Copy, ExternalLink, Languages, LayoutDashboard, LogOut, Menu, MessageCircle, MoreHorizontal, Plus, ReceiptText, Search, Settings, X } from "lucide-react";
 import { Button, CommandMenu, ConfirmDialog, DropdownMenu, IconButton } from "@hatch/ui";
 import { ButtonBase, Divider as MuiDivider, ListItemIcon, ListItemText, Menu as MuiMenu, MenuItem as MuiMenuItem } from "@mui/material";
 import { createTheme, ThemeProvider } from "@mui/material/styles";
@@ -124,7 +124,6 @@ export function CreatorPortalV2({
           slotProps={{ paper: { className: "cpv2-account-menu", sx: { minWidth: 248, mb: 1 } }, list: { dense: true, "aria-label": t("account") } }}
         >
           <MuiMenuItem onClick={() => { closeAccountMenu(); go("/account"); }}><ListItemIcon><Settings size={18} /></ListItemIcon><ListItemText primary={t("sxNavSettings")} /></MuiMenuItem>
-          <MuiMenuItem onClick={() => { closeAccountMenu(); go("/download"); }}><ListItemIcon><Download size={18} /></ListItemIcon><ListItemText primary={t("download")} /></MuiMenuItem>
           <MuiDivider />
           <div className="cpv2-account-menu-label"><Languages size={16} /><span>{t("language")}</span></div>
           {[['en', t("english")], ['zh', t("chinese")], ['ja', t("japanese")]].map(([value, label]) => <MuiMenuItem key={value} selected={locale === value} onClick={() => { setLocale(value); closeAccountMenu(); }}><ListItemIcon>{locale === value ? <Check size={18} /> : <span className="cpv2-menu-icon-placeholder" />}</ListItemIcon><ListItemText primary={label} /></MuiMenuItem>)}

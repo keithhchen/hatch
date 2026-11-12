@@ -202,7 +202,7 @@ test("R30 keyboard-only Buyer flow completes free checkout with stable focus and
   const successHeading = page.getByRole("heading", { level: 1, name: "Signal Resume Review is ready." });
   await expect(successHeading).toBeFocused();
   await expect(page.getByText(/Free · Access granted/)).toBeVisible();
-  await expect(page.getByRole("link", { name: "Open Hatch Desktop" })).toHaveAttribute("href", /^hatch:\/\//);
+  await expect(page.getByText(/Desktop/)).toHaveCount(0);
   await expectNoSeriousAccessibilityViolations(page);
 });
 
