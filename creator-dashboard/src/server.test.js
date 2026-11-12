@@ -787,7 +787,7 @@ test("non-UUID product paths are rejected without redirects", async (context) =>
   assert.equal(apiResponse.status, 404);
 });
 
-test("retired buyer routes 301 to /explore and /explore/orders at the routing boundary", async (context) => {
+test("retired routes 301 to /studio and /explore/orders at the routing boundary", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-retired-routes-"));
   const registry = registryFixture({ signedIn: "buyer" });
   await listen(registry);
@@ -801,9 +801,9 @@ test("retired buyer routes 301 to /explore and /explore/orders at the routing bo
   context.after(() => api.close());
 
   for (const [from, to] of [
-    ["/home", "/explore"],
-    ["/library", "/explore"],
-    ["/library/ent-1", "/explore"],
+    ["/home", "/studio"],
+    ["/library", "/studio"],
+    ["/library/ent-1", "/studio"],
     ["/orders?status=pending", "/explore/orders?status=pending"],
     ["/orders/HAT-1", "/explore/orders/HAT-1"],
     ["/orders/HAT-1/success", "/explore/orders/HAT-1/success"]

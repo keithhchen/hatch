@@ -17,7 +17,7 @@ export function WebChatEgg({ size = 40, className = "" }) {
 export function WebChatGate({ pill, title, body, visual, actions, account, busy = false, alert = false }) {
   return <div className="web-chat-gate" aria-busy={busy || undefined}>
     <header className="web-chat-gate__bar">
-      <WebBrand href="/explore" />
+      <WebBrand href="/" />
       {account}
     </header>
     <section className="web-chat-gate__body" role={alert ? "alert" : busy ? "status" : undefined}>

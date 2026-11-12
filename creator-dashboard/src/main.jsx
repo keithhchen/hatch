@@ -125,7 +125,7 @@ function App() {
 
   const signOutFromChat = useCallback(async () => {
     await signOut();
-    location.navigate("/explore", { replace: true });
+    location.navigate("/studio", { replace: true });
   }, [location.navigate, signOut]);
 
   const invalidate = useCallback((error) => {
@@ -194,7 +194,7 @@ function App() {
           profile={profile}
           onLogout={async () => {
             await signOut();
-            location.navigate("/explore", { replace: true });
+            location.navigate("/studio", { replace: true });
           }}
         />
       </Suspense>
