@@ -12,6 +12,7 @@ import type { AgentRuntime } from "../agentRuntime.js";
 import { AttachmentFiles } from "../assets/files.js";
 import { harness, png } from "../assets/kit.test.js";
 import { ChatAssets } from "../chat/assets.js";
+import { InMemoryAccountFiles } from "./accountFiles.js";
 import { InMemoryConversationRepository } from "../conversationRepository.js";
 import { InMemoryUsageLedger } from "../usage/memoryUsage.js";
 import type { UsageEvent } from "../usage/usage.js";
@@ -89,7 +90,7 @@ async function fixture(options: { holdMs?: number; keepAliveMs?: number; assets?
   const runtime = createRuntimeServer({
     conversationStore: store, conversationRepository: repository, authIdentityResolver: identities, agentCorpusResolver: corpora,
     createRuntime: () => model, usage: recorder, ...(chatAssets ? { chatAssets } : {}),
-    responsesApi: { ...(options.holdMs ? { holdMs: options.holdMs } : {}), ...(options.keepAliveMs ? { keepAliveMs: options.keepAliveMs } : {}) }
+    responsesApi: { accountFiles: new InMemoryAccountFiles(), ...(options.holdMs ? { holdMs: options.holdMs } : {}), ...(options.keepAliveMs ? { keepAliveMs: options.keepAliveMs } : {}) }
   });
   runtimes.push(runtime);
   await new Promise<void>((resolve) => (runtime.server as http.Server).listen(0, "127.0.0.1", () => resolve()));
@@ -352,8 +353,6 @@ test("parameters the Agent owns are refused by name, and the ones that change no
   await expectUnsupported({ text: { format: { type: "json_object" } } }, "text.format");
   await expectUnsupported({ input: [{ role: "system", content: "x" }] }, "input[0].role");
   await expectUnsupported({ input: [{ role: "user", content: "ok" }, { role: "assistant", content: "x" }] }, "input[1].role");
-  await expectUnsupported({ input: [{ role: "user", content: [{ type: "input_image", file_id: "file_123" }] }] }, "input[0].content[0].file_id");
-  await expectUnsupported({ input: [{ role: "user", content: [{ type: "input_file", file_id: "file_123" }] }] }, "input[0].content[0].file_id");
   await expectUnsupported({ include: ["reasoning.encrypted_content"] }, "include[0]");
   assert.deepEqual(await refused(create({ colour: "red" })), { status: 400, code: "unknown_parameter", param: "colour", type: "invalid_request_error" });
   assert.deepEqual(await refused(openai.delete("/responses/resp_x")), { status: 400, code: "unsupported_parameter", param: "response_id", type: "invalid_request_error" });
@@ -389,4 +388,55 @@ test("a Responses API run is billed to the owner on the chat_api surface, under 
     { accountId: usage[0]!.accountId, surface: usage[0]!.surface, apiKeyId: usage[0]!.apiKeyId, productId: usage[0]!.productId, runId: `resp_${usage[0]!.runId!.replace(/^run_/, "")}`, input: usage[0]!.inputTokens, cached: usage[0]!.cachedInputTokens, output: usage[0]!.outputTokens },
     { accountId: OWNER, surface: "chat_api", apiKeyId: "session-1", productId: PRODUCT, runId: response.id, input: 130, cached: 30, output: 20 }
   );
+});
+
+test("Files API: files.create (multipart) then file_id in input_file and input_image reaches the run; private to the account; delete ends use", async () => {
+  const { openai, client, control } = await fixture({ assets: true });
+  const stranger = client("hatch_test_key_stranger");
+  const notes = await openai.files.create({ file: new File(["quarterly notes"], "notes.txt", { type: "text/plain" }), purpose: "user_data" });
+  assert.match(notes.id, /^file_/);
+  assert.deepEqual({ object: notes.object, bytes: notes.bytes, filename: notes.filename, purpose: notes.purpose, status: notes.status }, { object: "file", bytes: 15, filename: "notes.txt", purpose: "user_data", status: "processed" });
+  const picture = await openai.files.create({ file: new File([new Uint8Array(await png(12, 12))], "chart.png", { type: "image/png" }), purpose: "vision" });
+
+  const response = await openai.responses.create({
+    model: `hatch:${PRODUCT}`,
+    input: [{ role: "user", content: [{ type: "input_text", text: "read these" }, { type: "input_file", file_id: notes.id }, { type: "input_image", file_id: picture.id, detail: "auto" }] }]
+  });
+  assert.equal(response.status, "completed");
+  const said = control.seen.at(-1)!;
+  assert.match(said, /^read these/);
+  assert.match(said, /notes\.txt/);
+  assert.match(said, /chart\.png/);
+  const inputs = await openai.responses.inputItems.list(response.id);
+  assert.deepEqual((inputs.data[0] as unknown as { content: Array<{ type: string }> }).content.map((part) => part.type), ["input_text", "input_file", "input_image"]);
+
+  assert.deepEqual((await openai.files.list()).data.map((file) => file.id).sort(), [notes.id, picture.id].sort());
+  assert.equal((await openai.files.retrieve(notes.id)).filename, "notes.txt");
+  assert.equal(await (await openai.files.content(notes.id)).text(), "quarterly notes");
+
+  assert.deepEqual(await refused(stranger.files.retrieve(notes.id)), { status: 404, code: "file_not_found", param: null, type: "not_found_error" });
+  assert.equal((await refused(stranger.files.content(notes.id))).code, "file_not_found");
+  assert.equal((await refused(stranger.files.delete(notes.id))).code, "file_not_found");
+  assert.equal((await stranger.files.list()).data.length, 0);
+  assert.deepEqual(await refused(stranger.responses.create({ model: `hatch:${FOREIGN}`, input: [{ role: "user", content: [{ type: "input_file", file_id: notes.id }] }] })), { status: 404, code: "file_not_found", param: null, type: "not_found_error" });
+
+  assert.deepEqual(await openai.files.delete(notes.id), { id: notes.id, object: "file", deleted: true });
+  assert.equal((await refused(openai.files.retrieve(notes.id))).status, 404);
+  assert.equal((await refused(openai.responses.create({ model: `hatch:${PRODUCT}`, input: [{ role: "user", content: [{ type: "input_file", file_id: notes.id }] }] }))).code, "file_not_found");
+  assert.equal((await refused(openai.responses.create({ model: `hatch:${PRODUCT}`, input: [{ role: "user", content: [{ type: "input_image", file_id: notes.id, detail: "auto" }] }] }))).code, "file_not_found");
+});
+
+test("Files API: a missing file part is 400, an oversized file 413, no asset service 501 on use", async () => {
+  const { openai, origin } = await fixture({ assets: true });
+  const form = new FormData();
+  form.set("purpose", "user_data");
+  const missing = await fetch(`${origin}/responses/v1/files`, { method: "POST", headers: { authorization: `Bearer ${KEY}` }, body: form });
+  assert.equal(missing.status, 400);
+  assert.deepEqual(await missing.json(), { error: { message: "A multipart `file` part is required.", type: "invalid_request_error", param: "file", code: "invalid_request" } });
+  const big = Buffer.concat([Buffer.from("\x89PNG\r\n\x1a\n", "latin1"), Buffer.alloc(21 * 1024 * 1024)]);
+  assert.deepEqual(await refused(openai.files.create({ file: new File([new Uint8Array(big)], "big.png", { type: "image/png" }), purpose: "user_data" })), { status: 413, code: "file_too_large", param: "file", type: "invalid_request_error" });
+
+  const plain = await fixture();
+  const file = await plain.openai.files.create({ file: new File(["hello"], "a.txt"), purpose: "user_data" });
+  assert.equal((await refused(plain.openai.responses.create({ model: `hatch:${PRODUCT}`, input: [{ role: "user", content: [{ type: "input_file", file_id: file.id }] }] }))).status, 501);
 });

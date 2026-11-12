@@ -81,6 +81,7 @@ import {
 import type { ChatEdge } from "./chat/turnSubmission.js";
 import { bearerToken, handleHttpRequestFailure, httpDeadlineMs, writeJson } from "./http/httpSupport.js";
 import { handleHttpRequest, type RuntimeReadiness } from "./http/runtimeRouter.js";
+import { PostgresAccountFiles } from "./responses/accountFiles.js";
 import { ResponsesHttpApi } from "./responses/router.js";
 import { handleRuntimeSocket } from "./ws/runtimeSocket.js";
 
@@ -183,7 +184,7 @@ export type RuntimeServerOptions = {
   /** Maximum serialized JSON response size for discovery and history. */
   maxHttpResponseBytes?: number;
   /** Test seams of the Responses API: how URLs are fetched, how long a request is held, the keep-alive interval. */
-  responsesApi?: Pick<ConstructorParameters<typeof ResponsesHttpApi>[0], "urls" | "holdMs" | "keepAliveMs">;
+  responsesApi?: Pick<ConstructorParameters<typeof ResponsesHttpApi>[0], "urls" | "accountFiles" | "holdMs" | "keepAliveMs">;
 };
 
 /**
@@ -278,6 +279,9 @@ export async function createRuntimeServerFromEnvironment(
   const chatAssets = conversationStore instanceof PostgresStore
     ? await openChatAssets({ pool: conversationStore.pool, blobs: objectStoreFromEnvironment(environment, path.join(runtimeDataDir, "chat-assets"))!, environment })
     : undefined;
+  // The Files API stores an account's files in the same database; without one it answers 501.
+  const accountFiles = conversationStore instanceof PostgresStore ? new PostgresAccountFiles(conversationStore.pool as never) : undefined;
+  await accountFiles?.initialize();
   return createRuntimeServer({
     outputGuard: createOutputGuardFromEnvironment(environment),
     commerceEventSink,
@@ -303,6 +307,7 @@ export async function createRuntimeServerFromEnvironment(
     conversationStore,
     ...(conversationStore instanceof PostgresStore ? { usage: new PostgresUsageLedger(conversationStore.pool as never) } : {}),
     ...(chatAssets ? { chatAssets } : {}),
+    ...(accountFiles ? { responsesApi: { accountFiles } } : {}),
     assetStore: runtimeAssetStoreFromEnvironment(environment, runtimeDataDir),
     chatServiceToken: config.chatServiceToken,
     maxContactMessages: config.maxContactMessages,
