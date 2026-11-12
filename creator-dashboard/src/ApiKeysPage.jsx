@@ -31,7 +31,7 @@ export function ApiKeysPage({ request, t, locale }) {
   const copy = () => navigator.clipboard?.writeText(created.token).then(() => setCopied(true)).catch((cause) => setError(friendlyError(cause, t)));
   const revoke = () => attempt(async () => { await client.revoke(revoking.id); setRevoking(null); await refresh(); });
 
-  return <section className="sx-apikeys" aria-labelledby="sx-apikeys-title">
+  return <section id="api-keys" className="sx-apikeys" aria-labelledby="sx-apikeys-title">
     <div className="sx-section-head"><h2 id="sx-apikeys-title">{t("sxNavApiKeys")}</h2><Button asChild variant="secondary"><a href="/developers">{t("sxakDevelopers")}</a></Button></div>
     {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
     <form className="sx-card sx-apikeys__create" onSubmit={create}>

@@ -1,6 +1,8 @@
 // API keys: a port over the dashboard `request` helper plus pure view-model helpers.
 // Tokens are returned once by create() and are never stored or logged here.
 const ROOT = "/v1/auth/api-keys";
+// Settings route + the id of the API keys section there.
+export const API_KEYS_PATH = "/studio/settings#api-keys";
 export const LOGIN_COMMAND = "hatch login --api-key-stdin";
 
 export class ApiKeysClient {
@@ -10,6 +12,9 @@ export class ApiKeysClient {
   create(name) { return this.#request(ROOT, { method: "POST", body: JSON.stringify({ name: String(name).trim() }) }); }
   async revoke(id) { await this.#request(`${ROOT}/${encodeURIComponent(id)}`, { method: "DELETE" }); }
 }
+
+/** True only when the real key list loaded and is empty; a failure is never read as "no keys". */
+export const hasNoApiKeys = (request) => new ApiKeysClient(request).list().then((keys) => keys.length === 0, () => false);
 
 export const sortNewestFirst = (keys) => [...keys].sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
 
