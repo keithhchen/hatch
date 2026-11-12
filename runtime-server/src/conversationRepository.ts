@@ -58,6 +58,9 @@ export type ConversationBinding = {
   corpusDigest: string;
 };
 
+/** The account whose own Products a caller chats with: the owner is also the creator. */
+export type OwnerScope = Pick<ConversationBinding, "ownerAccountId" | "creatorId">;
+
 export type ConversationRecord = ConversationBinding & {
   /** Private storage key. The server scopes it to the authenticated binding. */
   id: string;
@@ -200,6 +203,11 @@ export type AcceptSubmissionInput = {
   binding: ConversationBinding;
   run: CreateRunInput;
   canonicalUser: ConversationMessage;
+  /**
+   * `start_or_steer` (default): a message joins the active Run. `start_only`: it never joins, so an active Run refuses it
+   * with `conversation_busy`, decided in the same step that would start the Run. A repeated client key still replays.
+   */
+  mode?: "start_or_steer" | "start_only";
 };
 /**
  * Work that must commit with the accepted message, or not at all, such as binding the message's assets. It runs only for a
@@ -276,8 +284,10 @@ export interface ConversationRepository {
   close(): Promise<void>;
   createConversation(input: CreateConversationInput): Promise<{ conversation: ConversationRecord; created: boolean }>;
   getConversation(id: string): Promise<ConversationRecord | undefined>;
-  /** Immutable createdAt DESC, id DESC order; cursors never track activity. */
-  listConversations(binding: Pick<ConversationBinding, "ownerAccountId" | "creatorId" | "agentId">, options?: {
+  /** A conversation by the id its client knows, within one account's own Products (owner path): no Product needs to be named. */
+  findOwnedConversation(owner: OwnerScope, publicId: string): Promise<ConversationRecord | undefined>;
+  /** Immutable createdAt DESC, id DESC order; cursors never track activity. Without `agentId`, every Product of the owner. */
+  listConversations(binding: OwnerScope & { agentId?: string }, options?: {
     status?: ConversationStatus;
     cursor?: string;
     limit?: number;
@@ -509,8 +519,15 @@ export class InMemoryConversationRepository implements ConversationRepository {
     return conversation ? cloneConversation(conversation) : undefined;
   }
 
+  async findOwnedConversation(owner: OwnerScope, publicId: string): Promise<ConversationRecord | undefined> {
+    await this.readReady();
+    const found = [...this.conversations.values()].find((conversation) => conversation.publicId === publicId
+      && conversation.ownerAccountId === owner.ownerAccountId && conversation.creatorId === owner.creatorId);
+    return found ? cloneConversation(found) : undefined;
+  }
+
   async listConversations(
-    binding: Pick<ConversationBinding, "ownerAccountId" | "creatorId" | "agentId">,
+    binding: OwnerScope & { agentId?: string },
     options: { status?: ConversationStatus; cursor?: string; limit?: number } = {}
   ): Promise<ConversationListPage> {
     await this.readReady();
@@ -520,7 +537,7 @@ export class InMemoryConversationRepository implements ConversationRepository {
       .filter((conversation) => (
         conversation.ownerAccountId === binding.ownerAccountId
         && conversation.creatorId === binding.creatorId
-        && conversation.agentId === binding.agentId
+        && (binding.agentId === undefined || conversation.agentId === binding.agentId)
         && (options.status === undefined || conversation.status === options.status)
       ))
       .sort(compareConversationNewestFirst)
@@ -586,6 +603,7 @@ export class InMemoryConversationRepository implements ConversationRepository {
       }
       const active = [...this.runs.values()].find((row) => row.conversationId === input.run.conversationId && isActiveRun(row.status));
       if (active) {
+        if (input.mode === "start_only") throw new ConversationRepositoryError("conversation_busy", `Conversation ${conversation.publicId} already has an active run: ${active.id}`, cloneRun(active));
         await alsoCommit?.();
         const run = { ...active, steeredCount: active.steeredCount + 1 };
         this.runs.set(run.id, run);
@@ -1120,6 +1138,8 @@ CREATE TABLE IF NOT EXISTS hatch_conversations (
   UNIQUE (owner_account_id, creator_id, agent_id, client_request_id)
 );
 ALTER TABLE hatch_conversations ADD COLUMN IF NOT EXISTS brief_snapshot JSONB;
+CREATE INDEX IF NOT EXISTS hatch_conversations_owner_public_idx
+  ON hatch_conversations (owner_account_id, public_id);
 CREATE INDEX IF NOT EXISTS hatch_conversations_library_created_idx
   ON hatch_conversations (owner_account_id, creator_id, agent_id, created_at DESC, id COLLATE "C" DESC);
 DROP INDEX IF EXISTS hatch_conversations_library_idx;
@@ -1287,6 +1307,15 @@ export class PostgresConversationRepository implements ConversationRepository {
         return { created: false, steered: false, run: run!, receipt: { run_id: entry.runId!, client_message_id: key, accepted_at: entry.acceptedAt } };
       }
       if (entry) return undefined;
+      if (input.mode === "start_only") {
+        // Under the conversation lock: either a Run is active and the message is refused, or none is and it starts.
+        const running = await repository.pool.query<RunRow>(`
+          SELECT * FROM hatch_conversation_runs WHERE conversation_id = $1 AND status IN ('queued', 'running', 'waiting_for_tool', 'compacting') LIMIT 1
+        `, [input.run.conversationId]);
+        if (!running.rows[0]) return undefined;
+        const activeRun = runFromRow(running.rows[0]);
+        throw new ConversationRepositoryError("conversation_busy", `Conversation ${conversation.publicId} already has an active run: ${activeRun.id}`, activeRun);
+      }
       const active = await repository.pool.query<RunRow>(`
         UPDATE hatch_conversation_runs SET steered_count = steered_count + 1
         WHERE conversation_id = $1 AND status IN ('queued', 'running', 'waiting_for_tool', 'compacting')
@@ -1627,14 +1656,23 @@ export class PostgresConversationRepository implements ConversationRepository {
     return result.rows[0] ? conversationFromRow(result.rows[0]) : undefined;
   }
 
+  async findOwnedConversation(owner: OwnerScope, publicId: string): Promise<ConversationRecord | undefined> {
+    await this.initialize();
+    const result = await this.pool.query<ConversationRow>(
+      "SELECT * FROM hatch_conversations WHERE owner_account_id = $1 AND creator_id = $2 AND public_id = $3 LIMIT 1",
+      [owner.ownerAccountId, owner.creatorId, publicId]
+    );
+    return result.rows[0] ? conversationFromRow(result.rows[0]) : undefined;
+  }
+
   async listConversations(
-    binding: Pick<ConversationBinding, "ownerAccountId" | "creatorId" | "agentId">,
+    binding: OwnerScope & { agentId?: string },
     options: { status?: ConversationStatus; cursor?: string; limit?: number } = {}
   ): Promise<ConversationListPage> {
     await this.initialize();
     const limit = boundedLimit(options.limit);
     const cursor = decodeListCursor(options.cursor);
-    const values: unknown[] = [binding.ownerAccountId, binding.creatorId, binding.agentId, options.status ?? null];
+    const values: unknown[] = [binding.ownerAccountId, binding.creatorId, binding.agentId ?? null, options.status ?? null];
     let pagination = "";
     if (cursor) {
       values.push(cursor.createdAt, cursor.id);
@@ -1644,7 +1682,7 @@ export class PostgresConversationRepository implements ConversationRepository {
     const result = await this.pool.query<ConversationRow & { list_created_at: string }>(`
       SELECT *, to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS list_created_at
       FROM hatch_conversations
-      WHERE owner_account_id = $1 AND creator_id = $2 AND agent_id = $3
+      WHERE owner_account_id = $1 AND creator_id = $2 AND ($3::text IS NULL OR agent_id = $3)
         AND ($4::text IS NULL OR status = $4)${pagination}
       ORDER BY created_at DESC, id COLLATE "C" DESC
       LIMIT $${values.length}

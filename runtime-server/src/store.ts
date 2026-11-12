@@ -500,9 +500,11 @@ export class RuntimeStore {
     return { run_id: event.run_id, client_message_id: event.client_message_id, accepted_at: event.timestamp };
   }
 
-  async readEvents(): Promise<StoreEvent[]> {
+  async readEvents(conversationId?: string): Promise<StoreEvent[]> {
     await this.localAuthority.ready();
-    return structuredClone(this.localAuthority.events);
+    const events = conversationId === undefined ? this.localAuthority.events
+      : this.localAuthority.events.filter((event) => "conversation_id" in event && event.conversation_id === conversationId);
+    return structuredClone(events);
   }
 
   /** When the provider last saw this conversation: the time of its latest event. */

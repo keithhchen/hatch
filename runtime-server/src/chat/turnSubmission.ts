@@ -54,6 +54,8 @@ export type ChatMessageRequest = {
   taskStart: boolean;
   client: ClientAttributes;
   timeZone?: string;
+  /** `start_only`: refuse the message (409 conversation_busy) rather than steer a Run that is active. */
+  mode?: "start_or_steer" | "start_only";
 };
 
 /** Access is verified again before any Run starts, for a message and for an answer again alike: what the user may use now. */
@@ -118,7 +120,8 @@ export async function submitUserMessage(
     runId: request.runId,
     corpusDigest: binding.corpusDigest,
     requiresLocalTools: binding.agentCorpus ? productRequiresLocalTools(binding.agentCorpus) : false,
-    ...(request.timeZone ? { timeZone: request.timeZone } : {})
+    ...(request.timeZone ? { timeZone: request.timeZone } : {}),
+    ...(request.mode ? { mode: request.mode } : {})
   });
   return { submission, binding };
 }

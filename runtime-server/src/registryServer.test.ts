@@ -106,7 +106,9 @@ test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () =
     const me = await fetch(`${base}/v1/auth/me`, { headers: { authorization: `Bearer ${auth.session.token}` } });
     assert.equal(me.status, 200);
     assert.equal(me.headers.get("cache-control"), "no-store");
-    const mePayload = await me.json() as { id: string; session_expires_at: string };
+    const mePayload = await me.json() as { id: string; session_expires_at: string; session_id: string; client_type: string };
+    assert.ok(mePayload.session_id);
+    assert.equal(mePayload.client_type, "desktop");
     assert.match(mePayload.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     assert.match(mePayload.session_expires_at, /^20/);
     assert.equal(Object.hasOwn(mePayload, "role"), false);
