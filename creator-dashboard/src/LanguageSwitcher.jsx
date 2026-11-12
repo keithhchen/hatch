@@ -1,23 +1,20 @@
 import React from "react";
+import { Select } from "@hatch/ui";
 import { LOCALES, useLocale } from "./locale.jsx";
 import "./languageSwitcher.css";
 
-const DEFAULT_LABELS = { zh: "中文", en: "English", ja: "日本語" };
-const SHORT_LABELS = { en: "EN", zh: "中", ja: "日" };
+const LABELS = { zh: "中文", en: "English", ja: "日本語" };
 
-export function LanguageSwitcher({ className = "", labels = DEFAULT_LABELS, compact = false }) {
+export function LanguageSwitcher({ className = "" }) {
   const { locale, setLocale } = useLocale();
-  const visibleLabels = compact ? SHORT_LABELS : labels;
   return (
-    <div className={`hatch-language-switcher ${compact ? "is-compact" : ""} ${className}`.trim()} role="group" aria-label={labels.language ?? "Language"}>
-      {LOCALES.map((value, index) => (
-        <React.Fragment key={value}>
-          {index ? <span aria-hidden="true">/</span> : null}
-          <button type="button" className={locale === value ? "active" : ""} aria-pressed={locale === value} onClick={() => setLocale(value)}>
-            {visibleLabels[value]}
-          </button>
-        </React.Fragment>
-      ))}
-    </div>
+    <Select
+      className={`hatch-language-switcher ${className}`.trim()}
+      size="compact"
+      value={locale}
+      onValueChange={setLocale}
+      options={LOCALES.map((value) => ({ value, label: LABELS[value] }))}
+      label="Language"
+    />
   );
 }
