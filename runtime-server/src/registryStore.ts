@@ -987,7 +987,7 @@ export class RegistryStoreTs {
           `INSERT INTO agent_access
              (entitlement_id, user_id, creator_id, agent_id, product_id, order_id,
               purchased_corpus_digest, version_policy, status, granted_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'',$9,$10)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
            ON CONFLICT (user_id, creator_id, agent_id) DO UPDATE SET
              product_id=EXCLUDED.product_id, order_id=COALESCE(agent_access.order_id, EXCLUDED.order_id),
              purchased_corpus_digest=COALESCE(agent_access.purchased_corpus_digest, EXCLUDED.purchased_corpus_digest),
