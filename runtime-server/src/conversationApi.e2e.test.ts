@@ -815,7 +815,7 @@ test("a provider overflow is answered by compacting and continuing, once, and th
   } finally { socket.close(); }
 });
 
-test("Runtime startup takes over a Run whose owner's lease lapsed: restarts it, and one waiting on a local tool keeps waiting", async () => {
+test("Runtime startup ends a Run whose owner's lease lapsed as interrupted, keeps its partial reply, and never executes it", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-startup-recovery-"));
   const repository = new InMemoryConversationRepository(localRuntimeAuthority(dataDir));
   await repository.initialize();
@@ -835,7 +835,8 @@ test("Runtime startup takes over a Run whose owner's lease lapsed: restarts it, 
   };
   const reading = await carried("reading");
   const waiting = await carried("waiting");
-  // The dead process had asked a local tool: its call is on record, so the Run keeps waiting for the answer.
+  // The dead process had streamed part of a reply to the first Run, and asked a local tool in the second.
+  await repository.savePartialOutput(reading.run.id, "partial reading");
   const asked = new RuntimeStore(dataDir);
   await asked.append({ type: "conversation.model_message", conversation_id: waiting.conversation.id, run_id: waiting.run.id,
     message: { role: "assistant", content: null, tool_calls: [{ id: "call_lost", type: "function", function: { name: "file_search", arguments: "{}" } }] } });
@@ -843,21 +844,25 @@ test("Runtime startup takes over a Run whose owner's lease lapsed: restarts it, 
     requestedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString() });
   await repository.transitionRun(waiting.run.id, "waiting_for_tool");
 
+  const executed: string[] = [];
   runtime = createRuntimeServer({
     conversationStore: new RuntimeStore(dataDir),
     conversationRepository: repository,
     createRuntime: () => ({ async *run(input) {
-      yield { type: "assistant.delta" as const, run_id: input.run_id, delta: { kind: "text" as const, content: `answered ${input.message.content}` } };
+      executed.push(input.run_id);
       yield { type: "turn.completed" as const, run_id: input.run_id, finish_reason: "stop" as const };
     } })
   });
   await listen(runtime.server);
-  await waitForCondition(async () => (await repository.getRun(reading.conversation.id, reading.run.id))?.status === "completed");
-  await new Promise((resolve) => setTimeout(resolve, 300));
-  assert.equal((await repository.getRun(waiting.conversation.id, waiting.run.id))?.status, "waiting_for_tool");
+  for (const carriedRun of [reading, waiting]) {
+    await waitForCondition(async () => (await repository.getRun(carriedRun.conversation.id, carriedRun.run.id))?.status === "interrupted");
+    assert.equal((await repository.getRun(carriedRun.conversation.id, carriedRun.run.id))?.failure?.code, "run_interrupted");
+  }
+  assert.deepEqual(executed, [], "no Run was resumed");
 
   const restarted = new RuntimeStore(dataDir);
-  assert.equal((await restarted.readConversation(reading.conversation.id)).at(-1)?.content, "answered question reading");
+  assert.equal((await restarted.readConversation(reading.conversation.id)).at(-1)?.content, "partial reading");
+  assert.deepEqual((await restarted.readConversation(waiting.conversation.id)).slice(-1).map((message) => [message.role, message.tool_call_id]), [["tool", "call_lost"]]);
 });
 
 test("closing every client never stops a Run: it waits for its local tool and a later client finishes it", async () => {

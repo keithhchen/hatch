@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { InMemoryConversationRepository, type AcceptSubmissionInput } from "../conversationRepository.js";
 import { RunEventHub } from "./runEventHub.js";
-import { RunSupervisor, type ResumeDecision, type RunExecutor } from "./runSupervisor.js";
+import { RunSupervisor, type RunExecutor } from "./runSupervisor.js";
 import { runTerminators } from "./runTerminator.js";
 
 const binding = { ownerAccountId: "owner", creatorId: "creator", agentId: "agent", productId: "product", corpusDigest: "corpus" };
@@ -13,13 +13,13 @@ const message = (n: number, lease?: string): AcceptSubmissionInput => ({
   canonicalUser: { role: "user", content: `q${n}` }
 });
 
-async function setup(executor: RunExecutor, decide: () => ResumeDecision = () => "restart") {
+async function setup(executor: RunExecutor) {
   const repository = new InMemoryConversationRepository();
   const hub = new RunEventHub();
   await repository.createConversation({ ...binding, id: conversationId, publicId: "supervisor-terminal" });
   const heard: Array<Record<string, unknown>> = [];
   hub.subscribe(conversationId, { push: (event) => { heard.push(event); } });
-  const supervisor = (executorId: string) => new RunSupervisor(repository, executor, { decide: async () => decide() }, { executorId, leaseMs: 60_000, sweepMs: 60_000 }, runTerminators(repository, hub, executorId));
+  const supervisor = (executorId: string) => new RunSupervisor(repository, executor, async () => undefined, { executorId, leaseMs: 60_000, sweepMs: 60_000 }, runTerminators(repository, hub, executorId));
   return { repository, supervisor, heard };
 }
 
@@ -31,7 +31,7 @@ const terminalOf = async (repository: InMemoryConversationRepository, runId: str
   (await repository.snapshot(conversationId)).events.filter((event) => event.runId === runId && event.type === "run.state").at(-1);
 
 test("a sweep that interrupts an orphan writes the journal's terminal and tells observers", async () => {
-  const { repository, supervisor, heard } = await setup({ execute: async () => assert.fail("must not run") }, () => ({ interrupt: "used a local tool" }));
+  const { repository, supervisor, heard } = await setup({ execute: async () => assert.fail("must not run") });
   const orphan = await repository.acceptSubmission(message(0, new Date(Date.now() - 1000).toISOString()));
   await supervisor("a").sweep();
   const terminal = await terminalOf(repository, orphan.run.id);

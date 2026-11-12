@@ -11,11 +11,10 @@ import { ConversationFeed } from "./conversationFeed.js";
 import type { EventRelay } from "./eventRelay.js";
 import { fenced } from "./runFence.js";
 import type { StopRelay } from "./stopRelay.js";
-import { TranscriptResumePolicy } from "./resumePolicy.js";
 import { RunEventHub } from "./runEventHub.js";
 import { RunSupervisor } from "./runSupervisor.js";
 import { runTerminators } from "./runTerminator.js";
-import { ToolRecovery } from "./toolRecovery.js";
+import { closeDanglingCalls } from "./toolRecovery.js";
 import { TurnExecutor, type ScopeResolver, type TurnRunner } from "./turnExecutor.js";
 
 export type ChatRuntimeOptions<Scope> = {
@@ -65,7 +64,6 @@ export class ChatRuntime<Scope> {
       repository, store, hub: this.hub, executorId,
       strategy: () => strategy ??= (options.compactionStrategy ?? chatCompactionStrategy)()
     });
-    const recovery = new ToolRecovery({ repository });
     const terminators = runTerminators(repository, this.hub, executorId);
     this.supervisor = new RunSupervisor(
       repository,
@@ -75,17 +73,17 @@ export class ChatRuntime<Scope> {
         repository: fenced(repository, executorId, { transitionRun: 3, savePartialOutput: 2, claimSteeredMessages: 1, requestToolCall: 1 }),
         store: fenced(store, executorId, { append: 1 }),
         terminator: terminators.executing,
-        hub: this.hub, registry: this.registry, scopes: options.scopes, runner: options.runner, recovery,
-        compactions: this.compaction, toolTimeoutMs: options.toolTimeoutMs, toolPollMs: options.toolPollMs
+        hub: this.hub, registry: this.registry, scopes: options.scopes, runner: options.runner,
+        compactions: this.compaction, toolTimeoutMs: options.toolTimeoutMs
       }),
-      new TranscriptResumePolicy(store, recovery),
+      (run) => closeDanglingCalls(store, run),
       { executorId, leaseMs: options.leaseMs ?? DEFAULT_RUN_LEASE_MS, sweepMs: options.sweepMs ?? 5_000, toolPollMs: options.toolPollMs, afterReply: (run) => this.compaction.afterReply(run), stops: options.stops, steers: options.steers },
       terminators
     );
     this.service = new ChatService({ repository, terminator: terminators.external, supervisor: this.supervisor, hub: this.hub, admission: options.admission, registry: this.registry, limits: options.limits, compaction: this.compaction });
   }
 
-  /** Takes over Runs a previous instance left behind, then keeps watching for more. */
+  /** Ends the Runs a previous instance left behind as interrupted, then keeps watching for more. */
   async start(): Promise<void> {
     this.stopListening = await this.hub.listen();
     await this.supervisor.start();

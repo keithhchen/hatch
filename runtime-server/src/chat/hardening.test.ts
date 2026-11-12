@@ -4,7 +4,7 @@ import { InMemoryConversationRepository, type AcceptSubmissionInput, type Conver
 import type { ConversationMessage } from "../protocol.js";
 import { LocalRuntimeAuthority, RuntimeStore } from "../store.js";
 import { ChatRuntime } from "./chatRuntime.js";
-import { ToolRecovery } from "./toolRecovery.js";
+import { closeDanglingCalls } from "./toolRecovery.js";
 import type { Turn, TurnRunner } from "./turnExecutor.js";
 
 const binding = { ownerAccountId: "owner", creatorId: "creator", agentId: "agent", productId: "product", corpusDigest: "corpus" };
@@ -27,14 +27,14 @@ const callMessage = (id: string, name: string): ConversationMessage => ({
 });
 
 /** Two Runtime instances over one durable authority: what one leaves behind, the other finds. */
-async function cluster(options: { toolTimeoutMs?: number } = {}) {
+async function cluster() {
   const authority = new LocalRuntimeAuthority();
   const repository = new InMemoryConversationRepository(authority);
   const store = new RuntimeStore(authority);
   await repository.createConversation({ ...binding, id: conversationId, publicId: "restart" });
   const instance = (runner: TurnRunner<object>) => new ChatRuntime<object>({
     repository, store, runner, scopes: { resolve: async () => ({}) }, admission: { reserve: () => () => undefined },
-    toolTimeoutMs: options.toolTimeoutMs ?? 60_000, leaseMs: 60_000, sweepMs: 60_000, toolPollMs: 15,
+    toolTimeoutMs: 60_000, leaseMs: 60_000, sweepMs: 60_000, toolPollMs: 15,
     // The compaction strategy is irrelevant here: nothing is large.
     compactionStrategy: () => ({ wants: () => false, tokensOf: () => 0, policy: { prune: 1e9, cacheTtlMs: 1, maxOverflowRetries: 2, timeoutMs: 1000 } }) as never
   });
@@ -66,75 +66,44 @@ const startFirst = async (repository: InMemoryConversationRepository, first: Cha
   return run;
 };
 
-test("a Run waiting for a local tool survives a restart, takes the answer from any instance, and continues from the transcript", async () => {
+test("a Run whose instance is lost is interrupted, keeps its partial reply, and the next message starts a fresh Run", async () => {
   const { repository, store, instance } = await cluster();
   const first = instance(asker(store, "file_read", "call_1", { path: "a.md" }));
   const run = await startFirst(repository, first);
   await settled(async () => (await repository.getRun(conversationId, run.id))!.status === "waiting_for_tool" && (await repository.listToolCalls(run.id)).length === 1, "first instance waits");
+  await repository.savePartialOutput(run.id, "Let me read a.md");
 
   const seen: Array<{ input: Turn<object>["input"]; tail: ConversationMessage[] }> = [];
   const second = instance(finishing(seen, store));
-  const third = instance(finishing(seen, store));
   await second.supervisor.sweep();
-  // Taken over: still waiting for the tool, neither interrupted nor failed, and the request is visible from any instance.
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  assert.equal((await repository.getRun(conversationId, run.id))!.status, "waiting_for_tool");
-  assert.deepEqual((await third.pendingToolRequests(conversationId)).map((request) => [request.tool_call_id, request.name]), [["call_1", "file_read"]]);
+  const ended = (await repository.getRun(conversationId, run.id))!;
+  assert.deepEqual([ended.status, ended.failure?.code], ["interrupted", "run_interrupted"]);
+  assert.equal(seen.length, 0, "the Run was not executed again");
+  // No spinner: the tool call is closed and nothing waits for it.
+  assert.deepEqual(await second.pendingToolRequests(conversationId), []);
+  const history = await store.readConversation(conversationId);
+  assert.deepEqual(history.slice(-2).map((message) => [message.role, message.tool_call_id ?? message.content]), [["tool", "call_1"], ["assistant", "Let me read a.md"]]);
+  assert.equal(history.at(-2)!.tool_is_error, true);
 
-  const answer = { type: "tool_call.result" as const, run_id: run.id, tool_call_id: "call_1", status: "ok" as const, result: { content: "hello from a.md" } };
-  assert.equal(await third.supervisor.deliverToolResult(conversationId, run.id, answer), true);
-  assert.equal(await third.supervisor.deliverToolResult(conversationId, run.id, answer), false, "the first answer wins");
-  await settled(async () => (await repository.getRun(conversationId, run.id))!.status === "completed", "run completes");
-
+  const next = await repository.acceptSubmission({ ...submission(second.supervisor.executorId), run: { ...submission(second.supervisor.executorId).run, id: "run-2", clientMessageId: "m-2", inputDigest: "d-2", executorLeaseExpiresAt: new Date(Date.now() + 60_000).toISOString() }, canonicalUser: { role: "user", content: "try again" } });
+  assert.equal(next.created, true);
+  second.supervisor.adopt(next.run);
+  await settled(async () => (await repository.getRun(conversationId, "run-2"))!.status === "completed", "next run completes");
   assert.equal(seen.length, 1);
-  assert.equal(seen[0]!.input.task_start, true, "continued from the transcript, not prompted again");
-  assert.equal(seen[0]!.tail.at(-1)!.role, "tool");
-  assert.match(seen[0]!.tail.at(-1)!.tool_content![0]!.type === "text" ? (seen[0]!.tail.at(-1)!.tool_content![0] as { text: string }).text : "", /hello from a\.md/);
-  assert.deepEqual(await third.pendingToolRequests(conversationId), []);
-  await Promise.all([second.stop(), third.stop()]);
-});
-
-test("a local tool nobody answers times out durably and the Run resumes with an error result", async () => {
-  const { repository, store, instance } = await cluster({ toolTimeoutMs: 60 });
-  const first = instance(asker(store, "file_read", "call_1", { path: "a.md" }));
-  const run = await startFirst(repository, first);
-  await settled(async () => (await repository.listToolCalls(run.id)).length === 1, "call recorded");
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  const seen: Array<{ input: Turn<object>["input"]; tail: ConversationMessage[] }> = [];
-  const second = instance(finishing(seen, store));
-  await second.supervisor.sweep();
-  await settled(async () => (await repository.getRun(conversationId, run.id))!.status === "completed", "run completes");
-  const result = seen[0]!.tail.at(-1)!;
-  assert.equal(result.tool_is_error, true);
-  assert.match(JSON.stringify(result.tool_content), /Timed out waiting for client tool result: file_read/);
+  assert.equal(seen[0]!.input.message.content, "try again");
   await second.stop();
 });
 
-test("a server tool that may have had an effect interrupts the Run and is never run again", async () => {
-  const { repository, store, instance } = await cluster();
-  const first = instance({ run: async () => new Promise(() => undefined) });
-  const run = await startFirst(repository, first);
-  await store.append({ type: "conversation.model_message", conversation_id: conversationId, run_id: run.id, message: callMessage("call_9", "api.request") });
-  const seen: Array<{ input: Turn<object>["input"]; tail: ConversationMessage[] }> = [];
-  const second = instance(finishing(seen, store));
-  await second.supervisor.sweep();
-  const after = (await repository.getRun(conversationId, run.id))!;
-  assert.equal(after.status, "interrupted");
-  assert.match(after.failure!.message, /api\.request.*may or may not have had an effect/);
-  assert.deepEqual(seen, [], "the Run did not execute again");
-  await second.stop();
-});
-
-test("the recovery policy: finished calls are never repeated, read-only calls are reissuable, others interrupt", async () => {
-  const records: never[] = [];
-  const recovery = new ToolRecovery({ repository: { listToolCalls: async () => records } });
-  const finished: ConversationMessage[] = [{ role: "user", content: "q" }, callMessage("a", "api.request"), { role: "tool", content: null, tool_call_id: "a", tool_name: "api.request", tool_content: [{ type: "text", text: "{}" }] }];
-  assert.deepEqual(await recovery.plan({ id: "r" }, finished), { kind: "ready", results: [] });
-  const readOnly = await recovery.plan({ id: "r" }, [{ role: "user", content: "q" }, callMessage("b", "hatch.web_search")]);
-  assert.equal(readOnly.kind, "ready");
-  if (readOnly.kind === "ready") assert.match(JSON.stringify(readOnly.results), /did not run; call it again/);
-  const effectful = await recovery.plan({ id: "r" }, [{ role: "user", content: "q" }, callMessage("c", "api.request")]);
-  assert.equal(effectful.kind, "interrupt");
-  const local = await recovery.plan({ id: "r" }, [{ role: "user", content: "q" }, callMessage("d", "file_write")]);
-  assert.equal(local.kind, "ready");
+test("closing dangling calls answers only calls without a result", async () => {
+  const { store } = await cluster();
+  const run = { id: "run-1", conversationId };
+  await store.append({ type: "conversation.model_message", conversation_id: conversationId, run_id: run.id, message: callMessage("a", "api.request") });
+  await store.append({ type: "conversation.model_message", conversation_id: conversationId, run_id: run.id, message: { role: "tool", content: null, tool_call_id: "a", tool_name: "api.request", tool_content: [{ type: "text", text: "{}" }] } });
+  await store.append({ type: "conversation.model_message", conversation_id: conversationId, run_id: run.id, message: callMessage("b", "hatch.web_search") });
+  await closeDanglingCalls(store, run);
+  const tools = (await store.readConversation(conversationId)).filter((message) => message.role === "tool");
+  assert.deepEqual(tools.map((message) => message.tool_call_id), ["a", "b"]);
+  assert.match(JSON.stringify(tools[1]!.tool_content), /may or may not have had an effect/);
+  await closeDanglingCalls(store, run);
+  assert.equal((await store.readConversation(conversationId)).filter((message) => message.role === "tool").length, 2);
 });

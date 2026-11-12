@@ -14,7 +14,7 @@ export interface ToolSession {
   pendingRequests(): ToolRequest[];
 }
 
-/** Aborting with this means "another instance continues this Run": the Run keeps its state. */
+/** Aborting with this means "this instance stops executing the Run": whoever sweeps its lapsed lease ends it as interrupted. */
 export class RunHandoff extends Error {
   constructor(message = "Run handed off") {
     super(message);
@@ -30,16 +30,9 @@ export type RunControl = {
   onSteer(listener: () => void): () => void;
 };
 
-/** Executes a Run from the last user message until it is terminal or handed off. */
+/** Executes a Run from the last user message until it is terminal or this instance lets go of it. */
 export interface RunExecutor {
   execute(run: ConversationRunRecord, control: RunControl): Promise<void>;
-}
-
-export type ResumeDecision = "restart" | { interrupt: string };
-
-/** What to do with a Run whose executor disappeared. */
-export interface ResumePolicy {
-  decide(run: ConversationRunRecord): Promise<ResumeDecision>;
 }
 
 export type SupervisorOptions = {
@@ -73,7 +66,7 @@ const logged = <T>(event: string, fallback: T, fields: Record<string, unknown> =
 /**
  * Owns Runs for as long as they last, whichever client started them. A Run is
  * kept alive by a renewed lease; when its owner disappears another instance
- * claims the lapsed lease and continues according to the ResumePolicy.
+ * claims the lapsed lease and ends the Run as interrupted. A Run is never resumed.
  */
 export class RunSupervisor {
   private readonly owned = new Map<string, Owned>();
@@ -85,7 +78,8 @@ export class RunSupervisor {
   constructor(
     private readonly repository: Pick<ConversationRepository, "renewLease" | "claimOrphanedRuns" | "getRun" | "listToolCalls" | "answerToolCall">,
     private readonly executor: RunExecutor,
-    private readonly policy: ResumePolicy,
+    /** Settles what an orphaned Run left open in the transcript, before it ends interrupted. */
+    private readonly settleOrphan: (run: ConversationRunRecord) => Promise<void>,
     private readonly options: SupervisorOptions,
     /** Every end of a Run that is not the executor's own goes through these: a stop from anywhere, a sweep, a thrown executor. */
     private readonly terminators: RunTerminators
@@ -121,7 +115,7 @@ export class RunSupervisor {
     await owned.session?.cancelRun(runId, reason).catch(logged("run_cancel_tools_failed", undefined, { run_id: runId }));
   }
 
-  /** Takes responsibility for a Run this process just started, continued or claimed. */
+  /** Takes responsibility for a Run this process just started. */
   adopt(run: ConversationRunRecord, onSettled?: () => void): void {
     if (this.owned.has(run.id)) return;
     const controller = new AbortController();
@@ -188,13 +182,14 @@ export class RunSupervisor {
     await Promise.allSettled(running.map((owned) => owned.done));
   }
 
-  /** Claims lapsed Runs; exposed so a starting instance does not wait for the first timer. */
+  /** Ends the Runs whose owner is gone as interrupted; exposed so a starting instance does not wait for the first timer. */
   async sweep(): Promise<void> {
     const claimed = await this.repository.claimOrphanedRuns(this.options.executorId, this.options.leaseMs).catch(logged("run_sweep_failed", []));
     for (const run of claimed) {
-      const decision = await this.policy.decide(run).catch((error): ResumeDecision => { log.error("run_resume_decision_failed", { run_id: run.id, conversation_id: run.conversationId, error }); return { interrupt: String(error) }; });
-      if (decision === "restart") this.adopt(run);
-      else await this.terminators.executing.end(run.id, { status: "interrupted", failure: { code: "run_interrupted", message: decision.interrupt } }).catch(logged("run_interrupt_unrecorded", undefined, { run_id: run.id, conversation_id: run.conversationId }));
+      try {
+        await this.settleOrphan(run);
+        await this.terminators.executing.end(run.id, { status: "interrupted", failure: { code: "run_interrupted", message: "The Runtime restarted while this Run was in progress. Send the message again to continue." } });
+      } catch (error) { log.error("run_interrupt_unrecorded", { run_id: run.id, conversation_id: run.conversationId, error }); }
     }
   }
 
