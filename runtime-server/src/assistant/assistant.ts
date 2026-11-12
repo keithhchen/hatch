@@ -331,7 +331,7 @@ export class AssistantService implements StudioOperations {
   private async startInterview(input: WorkerStart): Promise<AssistantTask> {
     const { accountId, kind, instruction, origin } = input; const productId = input.productId!;
     const workspace = await this.workspace(accountId, productId);
-    const voice = (await workspace.store.list()).find(session => session.role === "voice") ?? await workspace.store.create("voice");
+    const voice = (await workspace.store.getOrCreate("voice")).session;
     if (workspace.runtime.isRunning(voice.id)) throw new Error("这个 Agent 的访谈正在 Studio 里进行，稍后再试");
     const task = await this.deps.tasks.create({ accountId, productId, kind, origin, session: { scope: "product", sessionId: voice.id }, payload: { instruction }, summary: `写「${input.agentName}」的访谈大纲`, leaseExpiresAt: lease() });
     await workspace.store.update(voice.id, s => { s.assistantTaskId = task.id; });
@@ -470,7 +470,7 @@ export class AssistantService implements StudioOperations {
 
   private async runStep(task: AssistantTask, step: Role): Promise<AssistantTask> {
     const workspace = await this.workspace(task.accountId, task.productId!);
-    const session = (await workspace.store.list()).find(candidate => candidate.role === step) ?? await workspace.store.create(step);
+    const session = (await workspace.store.getOrCreate(step)).session;
     if (workspace.runtime.isRunning(session.id)) throw new Error("这个 Agent 正在 Studio 里构建，稍后再试");
     const instruction = String(task.payload.instruction ?? "");
     const message = step === "generation" ? `按最新的访谈和评测构建这个 Agent。专家这次想改的：${instruction}\n这次只构建：写好并核对文件就结束，发布由助理负责。`
@@ -657,8 +657,7 @@ export class AssistantService implements StudioOperations {
   private async openDesk(accountId: string): Promise<Desk> {
     const store = new WorkbenchStore(this.deps.backend(accountId), undefined, this.definitions);
     await store.recover();
-    const sessions = await store.list();
-    const notes = sessions.find(candidate => candidate.role === "assistant") ?? await store.create("assistant", "Hatch 助理");
+    const notes = (await store.getOrCreate("assistant", "Hatch 助理")).session;
     const runtime = new WorkbenchRuntime(store, { ...this.deps.runtime, env: { ...this.deps.env, HATCH_FACTORY_LLM_PROFILE: modelRole("worker", this.deps.env) } });
     const desk: Desk = { accountId, store, runtime, sessionId: notes.id };
     runtime.events.on("event", (event: { sessionId?: string; type?: string }) => {
