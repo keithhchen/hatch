@@ -115,6 +115,17 @@ test("layered Corpus permits empty optional layers and rejects legacy production
   ].join("\n")), /must contain asset blocks/i);
 });
 
+test("a compile record written while Knowledge existed is still read: its knowledge blocks are dropped", () => {
+  const markdown = corpusCompilation([
+    corpusAsset(["layer: system", "id: system"], "# Role\nDeliver the finished work."),
+    corpusAsset(["layer: knowledge", "id: old-notes", "title: Old notes", "retrieval_only: true"], "# Long tail\nRetired content.")
+  ]);
+  const parsed = parseCorpusCompilation(markdown);
+  assert.equal(parsed.systemInstructions, "# Role\nDeliver the finished work.");
+  assert.equal("knowledge" in parsed, false);
+  assert.deepEqual(parsed.skills, []);
+});
+
 test("layered Corpus rejects malformed blocks, invalid identifiers, empty content, and undeclared tools", () => {
   const valid = corpusCompilation([
     corpusAsset(["layer: system", "id: system"], "Complete instructions.")

@@ -41,6 +41,12 @@ const AssetSchema = z.object({
   description: DescriptionSchema.optional()
 }).strict();
 
+/** Retired: still accepted in agent.json, never read. */
+const KnowledgeAssetSchema = AssetSchema.extend({
+  retrieval_only: z.literal(true),
+  title: NameSchema
+}).strict();
+
 const ToolSchema = z.object({
   id: ToolIdentifierSchema,
   kind: z.string().min(1).max(64),
@@ -74,6 +80,9 @@ export const AgentCorpusSchema = z.object({
     references: z.array(z.object({ asset: AssetSchema, kind: z.enum(["method", "style", "example", "few_shots"]) }).strict()).max(64).default([]),
     allowed_tool_ids: z.array(ToolIdentifierSchema).max(64).default([])
   }).strict()).max(32).default([]),
+  knowledge: z.object({
+    documents: z.array(KnowledgeAssetSchema).max(256).default([])
+  }).strict().default({ documents: [] }),
   tools: z.array(ToolSchema).min(1).max(64),
   evaluations: z.object({
     synthetic_qa: z.array(AssetSchema).max(128).default([]),
@@ -243,7 +252,7 @@ export async function loadAgentCorpus(root: string, signal?: AbortSignal): Promi
   if (manifest.byteLength > AGENT_CORPUS_MANIFEST_MAX_BYTES) {
     throw new Error("Agent Corpus manifest is too large");
   }
-  const corpus = AgentCorpusSchema.parse(stripRetiredManifestFields(JSON.parse(manifest.toString("utf8"))));
+  const corpus = AgentCorpusSchema.parse(stripRemovedProductMetadata(JSON.parse(manifest.toString("utf8"))));
   const forbidden = new Set(["provider", "api_key", "credential", "credentials", "endpoint", "vector_store_id", "raw_material", "factory_trace"]);
   const leaked = findForbiddenKeys(corpus, forbidden);
   if (leaked.length) throw new Error(`Agent Corpus contains runtime or Factory fields: ${leaked.join(", ")}`);
@@ -276,33 +285,17 @@ export async function loadAgentCorpus(root: string, signal?: AbortSignal): Promi
   return corpus;
 }
 
-/**
- * Read boundary for releases published before a capability was retired. Their
- * immutable bytes and digests stay as published; the retired fields are
- * discarded here and never reach Runtime: the storefront `product.offer` and
- * the knowledge retrieval layer (`knowledge` plus the `hatch.file_search` tool).
- */
-export function stripRetiredManifestFields(value: unknown): unknown {
+function stripRemovedProductMetadata(value: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const manifest = structuredClone(value) as Record<string, unknown>;
-  delete manifest.knowledge;
-  if (Array.isArray(manifest.tools)) {
-    manifest.tools = manifest.tools.filter((tool) => (tool as { id?: unknown } | null)?.id !== RETIRED_FILE_SEARCH_TOOL_ID);
-  }
-  if (Array.isArray(manifest.skills)) {
-    for (const skill of manifest.skills as Array<Record<string, unknown>>) {
-      if (Array.isArray(skill?.allowed_tool_ids)) {
-        skill.allowed_tool_ids = skill.allowed_tool_ids.filter((id) => id !== RETIRED_FILE_SEARCH_TOOL_ID);
-      }
-    }
-  }
-  if (manifest.product && typeof manifest.product === "object" && !Array.isArray(manifest.product)) {
-    delete (manifest.product as Record<string, unknown>).offer;
-  }
+  if (!manifest.product || typeof manifest.product !== "object" || Array.isArray(manifest.product)) return manifest;
+  // Immutable releases published before the free-Product cutover retain their
+  // original bytes and digest. Discard the removed storefront pricing field at
+  // the read boundary without exposing it to Runtime or accepting any other
+  // unknown Product metadata.
+  delete (manifest.product as Record<string, unknown>).offer;
   return manifest;
 }
-
-const RETIRED_FILE_SEARCH_TOOL_ID = "hatch.file_search";
 
 function embeddedJsonLimitFailure(value: Record<string, unknown>): string | undefined {
   let encoded: string;

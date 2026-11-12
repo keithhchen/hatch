@@ -5,7 +5,6 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { materializeAgentCorpus } from "./agentCorpusMaterialization.js";
-import { parseRuntimeCorpusManifest } from "./runtimeReleaseContract.js";
 import { AgentReleaseUnavailableError, RuntimeReleaseAgentCorpusResolver } from "./runtimeCorpusResolver.js";
 
 const CREATOR_ID = "11111111-1111-4111-8111-111111111111";
@@ -30,6 +29,7 @@ test("Runtime resolves the installed agent.json as the same corpus used for turn
       product: { id: PRODUCT_ID, name: "Test Agent", promise: "A test promise.", brief_spec: BRIEF_SPEC, boundaries: [], presentation: {} },
       instructions: { system: { id: "system", path: "instructions/system.md", sha256: systemSha } },
       skills: [],
+      knowledge: { documents: [] },
       tools: [{ id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }],
       evaluations: { synthetic_qa: [], held_out: [] }
     }), "utf8");
@@ -40,6 +40,7 @@ test("Runtime resolves the installed agent.json as the same corpus used for turn
       corpus_digest: SOURCE_DIGEST,
       system_ref: { path: "runtime/instructions/system.md", sha256: systemSha },
       skills: [],
+      knowledge: [],
       brief_spec: BRIEF_SPEC
     }), "utf8");
 
@@ -103,18 +104,4 @@ test("a Product without a live release is reported as unavailable, not as a Regi
     fetchImpl: async () => new Response(JSON.stringify({ detail: "No live release exists for this Product." }), { status: 404 })
   });
   await assert.rejects(resolver.resolve(CREATOR_ID, PRODUCT_ID), AgentReleaseUnavailableError);
-});
-
-test("runtime manifest read boundary drops the retired knowledge list", () => {
-  const manifest = parseRuntimeCorpusManifest({
-    contract_version: "1",
-    creator: { id: CREATOR_ID },
-    product: { id: PRODUCT_ID, name: "Product", promise: "Promise" },
-    corpus_digest: SOURCE_DIGEST,
-    system_ref: { path: "runtime/instructions/system.md", sha256: SOURCE_DIGEST },
-    skills: [],
-    knowledge: [],
-    brief_spec: null
-  });
-  assert.equal("knowledge" in manifest, false);
 });

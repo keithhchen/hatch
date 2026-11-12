@@ -1559,6 +1559,7 @@ function fixtureCorpusResolver(entitlement: EntitlementBinding): AgentCorpusReso
       boundaries: [],
       presentation: {}
     },
+    knowledge: { documents: [] },
     tools: []
   } as unknown as AgentCorpus;
   const resolved = { root: "", corpus, digest: `sha256:${"1".repeat(64)}` };
@@ -1579,6 +1580,7 @@ function fixtureCreatorToolCorpus(entitlement: EntitlementBinding): AgentCorpus 
       boundaries: [],
       presentation: {}
     },
+    knowledge: { documents: [] },
     tools: [{
       id: "creator.boundary.lookup",
       kind: "http_function",
@@ -1608,6 +1610,7 @@ async function writeCreatorCorpusFixture(
     product: { id: entitlement.product_id, name: "Boundary Product" },
     instructions: { system: corpusAsset("system", "instructions/system.md", system) },
     skills: [],
+    knowledge: { documents: [] },
     tools: [
       { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
       ...(includeCreatorTool ? [{

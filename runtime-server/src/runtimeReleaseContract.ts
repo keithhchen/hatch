@@ -33,14 +33,17 @@ export const runtimeCorpusManifestSchema = z.object({
       }).strict()
     }).strict())
   }).strict()),
+  // Retired: no longer used, still accepted and emitted as [] so every Registry/Runtime version reads the same manifest.
+  knowledge: z.array(z.object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    ref: z.object({
+      path: z.string().min(1),
+      sha256: digestSchema
+    }).strict(),
+  }).strict()),
   tools: z.array(z.record(z.string(), z.unknown())).default([]),
   brief_spec: z.unknown()
 }).strict();
 
 export type RuntimeCorpusManifest = z.infer<typeof runtimeCorpusManifestSchema>;
-
-/** Read boundary: manifests published while knowledge retrieval existed carry a retired `knowledge` list, which is dropped. */
-export function parseRuntimeCorpusManifest(raw: unknown): RuntimeCorpusManifest {
-  const { knowledge: _retired, ...manifest } = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-  return runtimeCorpusManifestSchema.parse(manifest);
-}

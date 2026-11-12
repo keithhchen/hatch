@@ -945,8 +945,8 @@ export class RegistryStoreTs {
         await executor.query(
           `INSERT INTO agent_corpora
              (creator_id, agent_id, corpus_digest, creator_name, product_id, product_name,
-              product_description, product_json, status, published_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+              product_description, product_json, knowledge_namespace, status, published_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'',$9,$10)
            ON CONFLICT (creator_id, agent_id) DO UPDATE SET
              corpus_digest=EXCLUDED.corpus_digest, creator_name=EXCLUDED.creator_name,
              product_id=EXCLUDED.product_id, product_name=EXCLUDED.product_name,
@@ -987,7 +987,7 @@ export class RegistryStoreTs {
           `INSERT INTO agent_access
              (entitlement_id, user_id, creator_id, agent_id, product_id, order_id,
               purchased_corpus_digest, version_policy, status, granted_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'',$9,$10)
            ON CONFLICT (user_id, creator_id, agent_id) DO UPDATE SET
              product_id=EXCLUDED.product_id, order_id=COALESCE(agent_access.order_id, EXCLUDED.order_id),
              purchased_corpus_digest=COALESCE(agent_access.purchased_corpus_digest, EXCLUDED.purchased_corpus_digest),
@@ -1052,6 +1052,7 @@ export class RegistryStoreTs {
         product_name TEXT NOT NULL,
         product_description TEXT,
         product_json TEXT,
+        knowledge_namespace TEXT NOT NULL,
         status TEXT NOT NULL,
         published_at TIMESTAMPTZ NOT NULL,
         PRIMARY KEY (creator_id, agent_id)
@@ -1087,7 +1088,6 @@ export class RegistryStoreTs {
       );
       ALTER TABLE tool_connections ADD COLUMN IF NOT EXISTS secret_value TEXT;
       ALTER TABLE agent_corpora ADD COLUMN IF NOT EXISTS product_json TEXT;
-      ALTER TABLE agent_corpora DROP COLUMN IF EXISTS knowledge_namespace;
       ALTER TABLE agent_access ADD COLUMN IF NOT EXISTS order_id TEXT;
       ALTER TABLE agent_access ADD COLUMN IF NOT EXISTS purchased_corpus_digest TEXT;
       ALTER TABLE agent_access ADD COLUMN IF NOT EXISTS version_policy TEXT NOT NULL DEFAULT 'pinned';
@@ -1345,8 +1345,8 @@ export class RegistryStoreTs {
         [corpus.product_id, corpus.creator_id, corpus.product_name, corpus.product_description ?? corpus.product_name, corpus.status],
       );
       const query: QueryConfig & { query_timeout: number } = {
-        text: `INSERT INTO agent_corpora (creator_id, agent_id, corpus_digest, creator_name, product_id, product_name, product_description, product_json, status, published_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        text: `INSERT INTO agent_corpora (creator_id, agent_id, corpus_digest, creator_name, product_id, product_name, product_description, product_json, knowledge_namespace, status, published_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'',$9,$10)
         ON CONFLICT (creator_id, agent_id) DO UPDATE SET corpus_digest=EXCLUDED.corpus_digest, creator_name=EXCLUDED.creator_name, product_id=EXCLUDED.product_id, product_name=EXCLUDED.product_name, product_description=EXCLUDED.product_description, product_json=EXCLUDED.product_json, status=EXCLUDED.status, published_at=EXCLUDED.published_at`,
         values: [corpus.creator_id, corpus.agent_id, corpus.corpus_digest, corpus.creator_name, corpus.product_id, corpus.product_name, corpus.product_description ?? null, JSON.stringify({ promise: corpus.product_promise, boundaries: corpus.product_boundaries, ...(corpus.brief_spec ? { brief_spec: corpus.brief_spec } : {}), presentation: corpus.presentation }), corpus.status, corpus.published_at],
         query_timeout: deadline.remainingMs(),

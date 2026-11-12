@@ -24,7 +24,7 @@ async function writeCorpus(entitlement: EntitlementBinding): Promise<{ baseRoot:
     creator: { id: entitlement.creator_id, name: "Expert" },
     product: { id: entitlement.product_id, name: "Product" },
     instructions: { system: asset("system", "instructions/system.md", "Be useful.") },
-    skills: [],
+    skills: [], knowledge: { documents: [] },
     tools: [{ id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }],
     evaluations: { synthetic_qa: [asset("synthetic", "evals/evals.json", "[]")], held_out: [asset("held-out", "evals/evals.json", "[]")] }
   }), "utf8");

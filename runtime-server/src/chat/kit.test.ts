@@ -48,6 +48,7 @@ export async function gatewayFixture(options: { noServiceToken?: boolean; localT
     corpus: {
       agent_id: productId, creator: { id: creatorId, name: "Creator" },
       product: { id: productId, name: "Product", boundaries: [], presentation: {} },
+      knowledge: { documents: [] },
       tools: options.localTools ? [{ id: "local", kind: "local_harness" }] : [{ id: "web", kind: "http_function" }]
     } as unknown as AgentCorpus
   };

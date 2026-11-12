@@ -45,6 +45,12 @@ export const CREATOR_RUNTIME_MANIFEST_SCHEMA = z.object({
       ref: RUNTIME_ASSET_REF_SCHEMA
     }).strict())
   }).strict()),
+  // Retired: still part of the manifest contract, always empty.
+  knowledge: z.array(z.object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    ref: RUNTIME_ASSET_REF_SCHEMA,
+  }).strict()),
   brief_spec: z.unknown()
 }).strict();
 
@@ -307,6 +313,7 @@ export class CreatorRegistry {
       corpus_digest: input.corpusDigest,
       system_ref: { path: systemPath, sha256: sha256(systemBytes) },
       skills,
+      knowledge: [],
       brief_spec: input.briefSpec
     });
     const manifestPath = `${runtimeRoot}/manifest.json`;

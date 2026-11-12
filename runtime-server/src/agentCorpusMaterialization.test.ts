@@ -35,6 +35,7 @@ test("Agent Corpus cannot remove File or Shell capabilities advertised by Deskto
       product: { id: PRODUCT_ID, name: "API Focused Agent" },
       instructions: { system: asset("instructions/system.md", system, "system") },
       skills: [],
+      knowledge: { documents: [] },
       // This Corpus intentionally declares no local_harness entries. Creator
       // manifests describe Agent dependencies; they do not revoke the user's
       // Desktop Workspace capability.
@@ -67,6 +68,7 @@ test("Runtime never invents a local capability the Desktop did not advertise", a
       product: { id: PRODUCT_ID, name: "Limited Client Agent" },
       instructions: { system: asset("instructions/system.md", system, "system") },
       skills: [],
+      knowledge: { documents: [] },
       tools: [
         { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
         { id: "hatch.local.files", kind: "local_harness", capability: "filesystem" },

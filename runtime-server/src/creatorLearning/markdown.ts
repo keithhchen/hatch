@@ -227,6 +227,7 @@ export function parseCorpusCompilation(
   options: ParseCorpusCompilationOptions = {}
 ): CorpusCompilation {
   const availableToolIds = validateAvailableToolIds(options.availableToolIds ?? []);
+  markdown = dropRetiredKnowledgeBlocks(markdown);
   const assetBlocks = parseCorpusAssetBlocks(markdown, availableToolIds);
   const firstBlock = assetBlocks[0];
   const lastBlock = assetBlocks.at(-1);
@@ -317,6 +318,24 @@ type MarkerMatch = {
   index: number;
   endIndex: number;
 };
+
+/** Read boundary: records compiled while Knowledge existed carry `layer: knowledge` blocks, which are dropped. */
+function dropRetiredKnowledgeBlocks(markdown: string): string {
+  const markers = [...markdown.matchAll(/^<!-- HATCH_CORPUS_ASSET_(BEGIN|CONTENT|END) -->\r?$/gm)];
+  if (markers.length % 3 !== 0) return markdown;
+  let result = "";
+  let cursor = 0;
+  for (let index = 0; index < markers.length; index += 3) {
+    const [begin, content, end] = [markers[index]!, markers[index + 1]!, markers[index + 2]!];
+    if (begin[1] !== "BEGIN" || content[1] !== "CONTENT" || end[1] !== "END") return markdown;
+    const header = markdown.slice(begin.index! + begin[0].length, content.index);
+    if (!/^layer:[ \t]*knowledge[ \t]*\r?$/m.test(header)) continue;
+    const stop = end.index! + end[0].length;
+    result += markdown.slice(cursor, begin.index);
+    cursor = markdown[stop] === "\n" ? stop + 1 : stop;
+  }
+  return result + markdown.slice(cursor);
+}
 
 function parseCorpusAssetBlocks(markdown: string, availableToolIds: Set<string>): ParsedCorpusAssetBlock[] {
   const markerExpression = /^<!-- HATCH_CORPUS_ASSET_(BEGIN|CONTENT|END) -->\r?$/gm;

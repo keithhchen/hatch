@@ -60,12 +60,12 @@ async function installRelease(corpusRoot: string): Promise<void> {
     contract_version: "1", creator: { id: CREATOR_ID, name: "E2E Creator" },
     product: { id: PRODUCT_ID, name: "E2E Expert", promise: "Answers in a test.", brief_spec: BRIEF_SPEC, boundaries: [], presentation: {} },
     instructions: { system: { id: "system", path: "instructions/system.md", sha256: sha(system) } },
-    skills: [], tools: [{ id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }],
+    skills: [], knowledge: { documents: [] }, tools: [{ id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }],
     evaluations: { synthetic_qa: [], held_out: [] }
   }));
   await writeFile(path.join(root, "runtime/manifest.json"), JSON.stringify({
     contract_version: "1", creator: { id: CREATOR_ID }, product: { id: PRODUCT_ID, name: "E2E Expert", promise: "Answers in a test." },
-    corpus_digest: CORPUS_DIGEST, system_ref: { path: "runtime/instructions/system.md", sha256: sha(system) }, skills: [], brief_spec: BRIEF_SPEC
+    corpus_digest: CORPUS_DIGEST, system_ref: { path: "runtime/instructions/system.md", sha256: sha(system) }, skills: [], knowledge: [], brief_spec: BRIEF_SPEC
   }));
 }
 

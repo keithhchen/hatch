@@ -990,6 +990,8 @@ function validateFailureTelemetry(value: unknown): asserts value is FactoryPromp
     "finalizerPosition",
     "transaction"
   ]);
+  // Telemetry written while `submit_knowledge` existed still names it; the retired tool is ignored on read.
+  const toolNames = Array.isArray(last.toolNames) ? last.toolNames.filter((name) => name !== "submit_knowledge") : last.toolNames;
   const lastCounters = [last.callsRequested, last.results, last.errors, last.accepted, last.idempotent, last.rejected];
   if (
     Object.keys(last).some((key) => !allowedLast.has(key))
@@ -997,10 +999,10 @@ function validateFailureTelemetry(value: unknown): asserts value is FactoryPromp
     || Number(last.results) > Number(last.callsRequested)
     || Number(last.errors) > Number(last.results)
     || Number(last.accepted) + Number(last.idempotent) + Number(last.rejected) > Number(last.results)
-    || !Array.isArray(last.toolNames)
-    || last.toolNames.length > SUBMISSION_TOOL_NAMES.size
-    || new Set(last.toolNames).size !== last.toolNames.length
-    || last.toolNames.some((name) => typeof name !== "string" || !SUBMISSION_TOOL_NAMES.has(name))
+    || !Array.isArray(toolNames)
+    || toolNames.length > SUBMISSION_TOOL_NAMES.size
+    || new Set(toolNames).size !== toolNames.length
+    || toolNames.some((name) => typeof name !== "string" || !SUBMISSION_TOOL_NAMES.has(name))
     || !["absent", "accepted", "rejected", "error"].includes(String(last.finalizerOutcome))
     || (last.finalizerValidationCode !== undefined
       && !/^[A-Z][A-Z0-9_]{0,63}$/.test(String(last.finalizerValidationCode)))

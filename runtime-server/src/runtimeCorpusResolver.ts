@@ -12,7 +12,7 @@ import {
   type ResolvedAgentCorpus
 } from "./agentCorpus.js";
 import { requireUuidV4 } from "./identity.js";
-import { parseRuntimeCorpusManifest, type RuntimeCorpusManifest } from "./runtimeReleaseContract.js";
+import { runtimeCorpusManifestSchema, type RuntimeCorpusManifest } from "./runtimeReleaseContract.js";
 
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 
@@ -137,7 +137,7 @@ export class RuntimeReleaseAgentCorpusResolver implements AgentCorpusResolverLik
     try {
       const manifestBytes = await readFile(path.join(root, "runtime", "manifest.json"), signal ? { signal } : undefined);
       if (manifestBytes.byteLength > 1_048_576) throw new Error("Runtime Corpus manifest is too large");
-      const manifest = parseRuntimeCorpusManifest(JSON.parse(manifestBytes.toString("utf8")));
+      const manifest = runtimeCorpusManifestSchema.parse(JSON.parse(manifestBytes.toString("utf8")));
       if (manifest.creator.id !== creatorId || manifest.product.id !== agentId || manifest.corpus_digest !== release.corpus_digest) {
         throw new Error("Runtime manifest binding does not match the Registry release");
       }

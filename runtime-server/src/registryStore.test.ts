@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import fsPromises from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { strToU8, zipSync } from "fflate";
@@ -23,7 +25,7 @@ function digest(text: string): string { return `sha256:${createHash("sha256").up
 
 function bundle(
   agentName = "Signal Review",
-  options: { systemPath?: string; system?: string; retiredKnowledge?: boolean } = {},
+  options: { systemPath?: string; system?: string } = {},
 ): Uint8Array {
   const system = options.system ?? "Use the creator method.\n";
   const systemPath = options.systemPath ?? "instructions/system.md";
@@ -42,11 +44,8 @@ function bundle(
     },
     instructions: { system: asset("system", systemPath, system) },
     skills: [],
-    // Releases published while knowledge retrieval existed still carry these.
-    ...(options.retiredKnowledge ? { knowledge: { documents: [] } } : {}),
     tools: [
-      { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
-      ...(options.retiredKnowledge ? [{ id: "hatch.file_search", kind: "hatch_builtin", capability: "file_search" }] : [])
+      { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }
     ],
     evaluations: {
       synthetic_qa: [asset("synthetic", "evals/synthetic.json", synthetic)],
@@ -249,15 +248,6 @@ test("TypeScript Registry publishes a clean Corpus", async () => {
   assert.equal((await reopened.listAgentAccess("77777777-7777-4777-8777-777777777777"))[0]?.entitlement_id, concurrent[0].entitlement_id);
 });
 
-test("Registry accepts a pre-cutover Corpus and drops the retired knowledge layer and hatch.file_search", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-registry-retired-knowledge-"));
-  await extractAgentCorpusBundle(bundle("Legacy", { retiredKnowledge: true }), root);
-  const verified = await verifyAgentCorpus(root, "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222");
-  assert.equal("knowledge" in verified.corpus, false);
-  assert.deepEqual(verified.corpus.tools.map((tool) => tool.id), ["hatch.web_search"]);
-  await rm(root, { recursive: true, force: true });
-});
-
 test("every Registry-accepted corpus must satisfy the Runtime loader contract", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-registry-runtime-contract-"));
   const store = await RegistryStoreTs.open({ corpusRoot: path.join(root, "corpora"), environment: {} });
@@ -377,6 +367,66 @@ test("state-file persist failure does not expose new metadata or leave the new f
   internals.persistState = persistState;
   const reopened = await RegistryStoreTs.open({ corpusRoot, statePath, environment: {} });
   assert.equal(reopened.getAgentCorpus("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")?.corpus_digest, original.corpus_digest);
+});
+
+test("filesystem commit failure restores the old current corpus", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-registry-file-rollback-"));
+  const corpusRoot = path.join(root, "corpora");
+  const statePath = path.join(root, "state.json");
+  const store = await RegistryStoreTs.open({ corpusRoot, statePath, environment: {} });
+  const original = await store.publishAgentCorpusBundle("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", bundle("Original Review"));
+
+  const realRename = fsPromises.rename;
+  fsPromises.rename = (async (from: Parameters<typeof realRename>[0], to: Parameters<typeof realRename>[1]) => {
+    if (String(from).endsWith(".prepared")) throw Object.assign(new Error("ENOENT: injected commit rename failure"), { code: "ENOENT" });
+    return realRename(from, to);
+  }) as typeof realRename;
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(
+      store.publishAgentCorpusBundle("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", bundle("Broken Rename Review")),
+      /ENOENT|no such file/i,
+    );
+  } finally {
+    fsPromises.rename = realRename;
+    syncBuiltinESMExports();
+  }
+
+  assert.equal(store.getAgentCorpus("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")?.corpus_digest, original.corpus_digest);
+  assert.equal((await new AgentCorpusResolver(corpusRoot).resolve("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")).digest, original.corpus_digest);
+  const reopened = await RegistryStoreTs.open({ corpusRoot, statePath, environment: {} });
+  assert.equal(reopened.getAgentCorpus("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")?.corpus_digest, original.corpus_digest);
+});
+
+test("publish hard deadline rolls back current and releases the Registry mutation turn", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-registry-publish-timeout-"));
+  const corpusRoot = path.join(root, "corpora");
+  const statePath = path.join(root, "state.json");
+  // Leave enough headroom for the initial filesystem setup on a shared CI
+  // runner; the stalled state write below still exercises the hard deadline
+  // path and the test remains bounded by the <1.5s assertion.
+  const store = await RegistryStoreTs.open({ corpusRoot, statePath, publishTimeoutMs: 500, environment: {} });
+  const original = await store.publishAgentCorpusBundle("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", bundle("Timeout Original"));
+
+  const internals = store as unknown as { persistState(options: { signal?: AbortSignal }): Promise<void> };
+  const persistState = internals.persistState.bind(store);
+  // A metadata write that never finishes on its own and ends only when the publish aborts it.
+  internals.persistState = (options) => new Promise<void>((_, reject) => {
+    options.signal?.addEventListener("abort", () => reject(options.signal!.reason), { once: true });
+  });
+  const startedAt = Date.now();
+  await assert.rejects(
+    store.publishAgentCorpusBundle("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", bundle("Timeout Candidate")),
+    (error) => (error as { code?: string }).code === "registry_publish_timeout",
+  );
+  assert.ok(Date.now() - startedAt < 1_500);
+  assert.equal(store.getAgentCorpus("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")?.corpus_digest, original.corpus_digest);
+  assert.equal((await new AgentCorpusResolver(corpusRoot).resolve("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")).digest, original.corpus_digest);
+
+  // The timed-out operation must release the Registry's unique mutation turn.
+  internals.persistState = persistState;
+  const recovered = await store.publishAgentCorpusBundle("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", bundle("Timeout Candidate"));
+  assert.equal(store.getAgentCorpus("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")?.corpus_digest, recovered.corpus_digest);
 });
 
 test("Registry caps agents per Creator and pages the public catalog", async () => {

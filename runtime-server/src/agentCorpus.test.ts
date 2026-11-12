@@ -55,7 +55,7 @@ test("Agent Corpus bounds catalog metadata, arrays, and embedded JSON", () => {
   }).success, false);
 });
 
-test("Agent Corpus read boundary drops a retired knowledge layer and hatch.file_search", async () => {
+test("Agent Corpus read boundary drops removed Product metadata and still loads retired knowledge and hatch.file_search entries", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-agent-corpus-"));
   tempRoots.push(root);
   await mkdir(path.join(root, "instructions"), { recursive: true });
@@ -79,6 +79,7 @@ test("Agent Corpus read boundary drops a retired knowledge layer and hatch.file_
       id: "review", name: "review", when_to_use: "Reviewing", instruction: asset("instructions/skill.md", skill, "skill-review"),
       allowed_tool_ids: ["hatch.web_search", "hatch.file_search"]
     }],
+    knowledge: { documents: [] },
     tools: [
       { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
       { id: "hatch.file_search", kind: "hatch_builtin", capability: "file_search" }
@@ -88,9 +89,6 @@ test("Agent Corpus read boundary drops a retired knowledge layer and hatch.file_
 
   const loaded = await loadAgentCorpus(root);
   assert.equal("offer" in loaded.product, false);
-  assert.equal("knowledge" in loaded, false);
-  assert.deepEqual(loaded.tools.map((tool) => tool.id), ["hatch.web_search"]);
-  assert.deepEqual(loaded.skills[0]?.allowed_tool_ids, ["hatch.web_search"]);
 });
 
 test("Agent Corpus resolver loads the Registry current creator/agent path", async () => {

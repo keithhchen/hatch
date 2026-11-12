@@ -5,7 +5,6 @@ import { unzipSync } from "fflate";
 import {
   AGENT_CORPUS_MANIFEST_MAX_BYTES,
   AgentCorpusSchema,
-  stripRetiredManifestFields,
   loadAgentCorpus,
   type AgentCorpus,
 } from "./agentCorpus.js";
@@ -125,7 +124,7 @@ export async function verifyAgentCorpus(
     if (error instanceof AgentCorpusVerificationError) throw error;
     throw new AgentCorpusVerificationError(`Agent Corpus agent.json is not valid JSON: ${String(error)}`);
   }
-  const parsed = AgentCorpusSchema.safeParse(stripRetiredManifestFields(raw));
+  const parsed = AgentCorpusSchema.safeParse(raw);
   if (!parsed.success) throw new AgentCorpusVerificationError(`Agent Corpus manifest is invalid: ${parsed.error.message}`);
   let corpus: AgentCorpus;
   try {

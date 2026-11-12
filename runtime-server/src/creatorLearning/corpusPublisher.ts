@@ -353,7 +353,7 @@ async function writeRuntimeReleaseAssets(input: {
   const manifest = {
     contract_version: "1", creator: { id: input.creatorId },
     product: { id: input.productId, name: input.productName, promise: input.productPromise },
-    corpus_digest: input.sourceDigest, system_ref: system, skills,
+    corpus_digest: input.sourceDigest, system_ref: system, skills, knowledge: [],
     tools: input.corpus.tools,
     brief_spec: input.briefSpec ?? null
   };
