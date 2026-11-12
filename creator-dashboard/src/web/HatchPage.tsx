@@ -805,8 +805,9 @@ export default function HatchPage() {
           <span>{t.heroTitleA[0]}<FlipWords words={t.heroWords} />{t.heroTitleA[1]}</span>
           <em>{t.heroTitleB}</em>
         </h1>
-        <p className="hero-body">{t.heroBody}</p>
+        <p className="hero-body hero-manifesto">{t.heroManifesto[0]}<strong>{t.heroManifesto[1]}</strong></p>
         <FieldPicker t={t} value={field} onChange={setField} />
+        <p className="hero-body hero-after">{t.heroBody}</p>
       </section>
 
       <Story key={`${lang}-${field}`} t={t} s={s} />
