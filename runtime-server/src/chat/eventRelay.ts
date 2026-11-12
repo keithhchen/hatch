@@ -1,3 +1,4 @@
+import { reported } from "../observability/reported.js";
 import { randomUUID } from "node:crypto";
 
 type Deliver = (conversationId: string, event: Record<string, unknown>) => void;
@@ -47,7 +48,7 @@ export class PostgresEventRelay implements EventRelay {
         const batch = this.queue.splice(0);
         await this.pool.query("SELECT pg_notify($1, p) FROM (SELECT p FROM unnest($2::text[]) WITH ORDINALITY AS t(p, n) ORDER BY n) AS ordered", [this.channel, batch]);
       }
-    } catch { /* dropped: observers recover by cursor */ } finally { this.sending = false; }
+    } catch (error) { reported("run_event_publish_failed")(error); /* dropped: observers recover by cursor */ } finally { this.sending = false; }
   }
 
   async subscribe(deliver: Deliver): Promise<() => Promise<void>> {

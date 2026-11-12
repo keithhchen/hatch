@@ -6,6 +6,7 @@ import { RunFenced } from "./runFence.js";
 import type { RunTerminators } from "./runTerminator.js";
 import { currentContext, newRequestId, runInContext } from "../observability/context.js";
 import { log } from "../observability/log.js";
+import { reported } from "../observability/reported.js";
 
 /** The side of the client tool broker that outside callers reach: results in, cancellation out. */
 export interface ToolSession {
@@ -59,7 +60,7 @@ const TERMINAL = new Set(["completed", "failed", "cancelled", "interrupted"]);
 
 /** A rejection handler that reports the failure with its context, then yields what the caller continues with. */
 const logged = <T>(event: string, fallback: T, fields: Record<string, unknown> = {}) => (error: unknown): T => {
-  log.error(event, { ...fields, error });
+  reported(event, fields)(error);
   return fallback;
 };
 
@@ -143,7 +144,11 @@ export class RunSupervisor {
    * the Run over, finds it; the instance that holds the call here gets it straight away.
    */
   async deliverToolResult(conversationId: string, runId: string, result: ToolResult): Promise<boolean> {
-    const recorded = await this.repository.answerToolCall(conversationId, runId, result.tool_call_id, outcomeOf(result)).catch(logged("tool_result_record_failed", false, { run_id: runId, tool_call_id: result.tool_call_id }));
+    // A storage failure is an internal error for the caller, not "no such tool call".
+    const recorded = await this.repository.answerToolCall(conversationId, runId, result.tool_call_id, outcomeOf(result)).catch((error) => {
+      reported("tool_result_record_failed", { run_id: runId, tool_call_id: result.tool_call_id })(error);
+      throw error;
+    });
     // A Run is answered only through its own conversation, never by run id alone.
     const owned = this.owned.get(runId);
     const local = owned?.conversationId === conversationId ? await owned.session?.handleResult(result) ?? false : false;

@@ -51,8 +51,10 @@ export class LineChannel implements ChannelAdapter {
     const messages = [{ type: "text", text: message.text, ...(quickReply ? { quickReply } : {}) }];
     const [replyToken, at] = message.replyTo?.split("|") ?? [];
     if (replyToken && Date.now() - Number(at) < REPLY_WINDOW_MS) {
-      // A failed reply sends nothing, and a token works only once.
-      try { return await this.call("reply", { replyToken, messages }); } catch { /* push below reports any real failure */ }
+      // A token works only once. Fall back to push only when LINE refused the reply outright; an ambiguous failure may have sent it, so it is rethrown for the outbox to record as unknown.
+      try { return await this.call("reply", { replyToken, messages }); } catch (error) {
+        if (!(error instanceof ChannelSendError) || error.failure === "ambiguous") throw error;
+      }
     }
     await this.call("push", { to: to.threadId, messages }, { "x-line-retry-key": idempotencyId(key) });
   }

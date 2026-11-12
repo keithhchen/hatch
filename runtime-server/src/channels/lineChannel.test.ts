@@ -218,3 +218,13 @@ test("a voice message is an m4a, fetched by its message id like an image", async
   assert.equal((await line.download({ ref: "468789577898262530", name: "voice.m4a" })).toString(), "m4a-bytes");
   assert.equal(calls[0]!.url, "https://api-data.line.me/v2/bot/message/468789577898262530/content");
 });
+
+test("an ambiguous reply failure is rethrown and never followed by a push that could duplicate it", async () => {
+  for (const respond of [() => new Response("{}", { status: 500 }), () => { throw new Error("timeout"); }]) {
+    const { line, calls } = channel(respond as () => Response);
+    const error = await line.send(TO, { text: "hello", replyTo: fresh() }, "k:0").then(() => undefined, (e: unknown) => e);
+    assert.ok(error instanceof ChannelSendError);
+    assert.equal(error.failure, "ambiguous");
+    assert.deepEqual(calls.map(call => call.url), [REPLY]);
+  }
+});

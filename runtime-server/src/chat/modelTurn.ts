@@ -1,3 +1,4 @@
+import { reported } from "../observability/reported.js";
 import path from "node:path";
 import { ZodError } from "zod";
 import { isContextOverflow, type AssistantMessage } from "@earendil-works/pi-ai";
@@ -591,7 +592,7 @@ async function recordFailure(
   error: unknown,
   state: RunStateMachine
 ): Promise<void> {
-  await state.fail(failures.translate(error, scope)).catch(() => undefined);
+  await state.fail(failures.translate(error, scope)).catch(reported("run_fail_unrecorded", { run_id: scope.run, conversation_id: scope.conversation }));
 }
 
 export async function failRun(turn: Pick<Turn<unknown>, "run" | "conversation" | "signal" | "state">, error: unknown): Promise<void> {

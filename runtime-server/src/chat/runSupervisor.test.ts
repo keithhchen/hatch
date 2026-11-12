@@ -174,3 +174,10 @@ test("a message that joins on another instance wakes the instance that executes 
   await other.stop();
   assert.equal((await repository.getRun(conversationId, started.run.id))!.status, "cancelled");
 });
+
+test("a storage failure while recording a tool result is an error for the caller, not an unknown tool call", async () => {
+  const { repository } = await setup({ execute: async () => undefined });
+  const failing = Object.assign(Object.create(repository), { answerToolCall: async () => { throw new Error("database down"); } }) as typeof repository;
+  const instance = new RunSupervisor(failing, { execute: async () => undefined }, async () => undefined, { executorId: "a", leaseMs: 60_000, sweepMs: 60_000 }, runTerminators(repository, new RunEventHub(), "a"));
+  await assert.rejects(instance.deliverToolResult(conversationId, "run-0", { type: "tool_call.result", run_id: "run-0", tool_call_id: "t1", status: "ok", result: {} } as never), /database down/);
+});
