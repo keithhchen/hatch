@@ -18,7 +18,7 @@ const zh = {
   heroTitleA: ["忙不过来的", "，"] as [string, string],
   heroWords: ["提问", "咨询", "客户", "订单", "交付"],
   heroTitleB: "交给你的 AI 分身。",
-  heroManifesto: ["答案会变得免费。你的品味、判断与良知，永远不会。", ["Hatch 让人", "不可替代", "。"]] as [string, [string, string, string]],
+  heroManifesto: ["答案会变得免费。你的品味、判断与分寸，永远不会。", ["Hatch 让人", "不可替代", "。"]] as [string, [string, string, string]],
   heroBody: "Hatch 替专家回咨询、谈成交、做交付。按你的方法，用你的口吻。",
   pickLabel: "你是做什么的？",
   roles: ["销售", "顾问", "教练", "老师"],
