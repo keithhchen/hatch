@@ -11,16 +11,12 @@ import { type RuntimeCompactionMessage } from "./compaction.js";
 import { createAgentRuntime, type AgentRuntime, type RunContext, type RuntimeSessionSkills } from "./agentRuntime.js";
 import { ThinkingPartJournal } from "./thinkingPartJournal.js";
 import {
-  clientMessageInputDigest,
   MAX_RICH_TOOL_RESULT_BYTES,
   parseInboundMessage,
-  TASK_START_MESSAGE_CONTENT,
-  type ConversationMessage,
   type BoundRunStart,
   type ClientHello,
   type OutboundMessage,
-  type OutputFinishReason,
-  type RunStart
+  type OutputFinishReason
 } from "./protocol.js";
 import { RunStateMachine } from "./runState.js";
 import { failures } from "./errors/failures.js";
@@ -89,8 +85,8 @@ import { ChatRuntime, type ChatRuntimeOptions } from "./chat/chatRuntime.js";
 import { PostgresEventRelay } from "./chat/eventRelay.js";
 import { PostgresStopRelay } from "./chat/stopRelay.js";
 import { publicJournalPayload } from "./chat/messageLedger.js";
-import { ChatError, principalKey, accountPrincipal } from "./chat/principal.js";
-import type { PrincipalLimits, Retried, RunAdmission, Submission } from "./chat/chatService.js";
+import { ChatError, principalKey } from "./chat/principal.js";
+import type { PrincipalLimits, RunAdmission, Submission } from "./chat/chatService.js";
 import { ContactBinder, SentMessageLimits, type ConnectionDirectory } from "./chat/contactBinding.js";
 import { SelfBinder } from "./chat/selfBinding.js";
 import type { ChatGateway } from "./chat/gateway.js";
@@ -98,8 +94,7 @@ import { checkUpgrade, sessionTokenFromCookie } from "./chat/originPolicy.js";
 import { RunHandoff } from "./chat/runSupervisor.js";
 import { ServiceChatGateway } from "./chat/serviceGateway.js";
 import { ChatServiceApi } from "./chat/serviceApi.js";
-import { prepareSocketMessage } from "./chat/socketAttachments.js";
-import { ChatAssets, TextPartsReader, type PartsReader, type PreparedMessage } from "./chat/assets.js";
+import { ChatAssets, TextPartsReader, type PartsReader } from "./chat/assets.js";
 import { attachmentToolDefinitions } from "./chat/attachmentTools.js";
 import { errorMessage, failRun, runModelTurn } from "./chat/modelTurn.js";
 import { publicRun } from "./chat/publicRun.js";
@@ -130,13 +125,24 @@ import {
 
 export { clientToolTimeoutMs, legacyHmacAuthEnabled, runtimeClientHelloTimeoutMs };
 import {
-  assertEntitlementMatchesIdentity, controlledTurnAuthorizationError, conversationBinding, durableConversationId,
-  legacyAuthClaims, privateBoundaryProjection, protectPrivateAgentBoundary, resolveAuthIdentity,
-  resolveHelloAuthClaims, resolveSessionBinding, resolveTurnAgentBinding, revalidateTurnAuthorization,
-  runtimeNotConfiguredError, sanitizeBoundHistory, scopedConversationId,
-  unconfiguredAgentCorpusResolver, unconfiguredEntitlementResolver,
-  type LegacyHmacAuth, type SessionBinding
+  assertEntitlementMatchesIdentity,
+  conversationBinding,
+  durableConversationId,
+  legacyAuthClaims,
+  privateBoundaryProjection,
+  protectPrivateAgentBoundary,
+  resolveAuthIdentity,
+  resolveHelloAuthClaims,
+  resolveSessionBinding,
+  runtimeNotConfiguredError,
+  sanitizeBoundHistory,
+  scopedConversationId,
+  unconfiguredAgentCorpusResolver,
+  unconfiguredEntitlementResolver,
+  type LegacyHmacAuth,
+  type SessionBinding
 } from "./chat/sessionBinding.js";
+import { chatFailure, submitUserMessage, retryRun, type ChatEdge } from "./chat/turnSubmission.js";
 
 export { durableConversationId, privateBoundaryProjection, protectPrivateAgentBoundary, scopedConversationId };
 
@@ -1811,148 +1817,6 @@ function writeJsonBounded(
     "content-length": Buffer.byteLength(serialized, "utf8")
   });
   res.end(serialized);
-}
-
-/** What both transports need to turn an authenticated user message into a Run or a steer. */
-type ChatEdge = {
-  /** What a Chat event consumer may leave unsent before it is disconnected. */
-  consumerBufferedBytes: number;
-  chat: ChatRuntime<SessionBinding>;
-  parts: PartsReader;
-  chatAssets?: ChatAssets;
-  /** The channel layer's door into Chat from another process. */
-  serviceApi?: ChatServiceApi;
-  turnAuthorizationGate: CapacityGate;
-  turnAuthorizationPerUserGate: KeyedCapacityGate;
-  entitlementResolver?: EntitlementResolver;
-  authIdentityResolver?: AuthIdentityResolver;
-  agentCorpusResolver?: AgentCorpusResolver;
-  creatorToolControlPlane?: CreatorToolControlPlane;
-};
-
-type ChatSession = {
-  authToken: string | undefined;
-  binding: SessionBinding;
-  conversation: ConversationRecord;
-};
-
-type ChatMessageRequest = {
-  /** Parts a client sent, already resolved: the canonical message and digest come from them. */
-  prepared?: PreparedMessage;
-  runId: string;
-  clientMessageId: string;
-  message: RunStart["message"];
-  taskStart: boolean;
-  client: ClientAttributes;
-  timeZone?: string;
-};
-
-/** Access is verified again before any Run starts, for a message and for an answer again alike: what the user may use now. */
-async function authorizedBinding(edge: ChatEdge, session: ChatSession, signal?: AbortSignal): Promise<SessionBinding> {
-  const releaseAuthorization = edge.turnAuthorizationGate.tryAcquire();
-  if (!releaseAuthorization) {
-    throw new ChatError("authorization_busy", "Hatch is already verifying the maximum number of turns. Try again shortly.", 429);
-  }
-  const releaseUserAuthorization = edge.turnAuthorizationPerUserGate.tryAcquire(session.binding.userId);
-  if (!releaseUserAuthorization) {
-    releaseAuthorization();
-    throw new ChatError("user_authorization_busy", "This account is already verifying the maximum number of turns. Try again shortly.", 429);
-  }
-  let binding = session.binding;
-  try {
-    await revalidateTurnAuthorization({ auth_token: session.authToken }, binding, edge.entitlementResolver, edge.authIdentityResolver, signal);
-    if (binding.agentCorpus) {
-      binding = await resolveTurnAgentBinding(binding, edge.agentCorpusResolver, signal);
-      // A disabled binding blocks the message here, before any Run exists.
-      binding = {
-        ...binding,
-        creatorTools: await resolveCreatorTools(edge.creatorToolControlPlane, binding.creatorId, binding.productId, binding.agentCorpus!, signal)
-      };
-    }
-  } catch (error) {
-    if (error instanceof EntitlementError) throw error;
-    throw new EntitlementError("authorization_unavailable", errorMessage(error));
-  } finally {
-    releaseAuthorization();
-    releaseUserAuthorization();
-  }
-  return binding;
-}
-
-/**
- * The one path a user message takes, from WebSocket or HTTP: re-verify access,
- * make the message canonical, then steer the active Run or start one.
- */
-async function submitUserMessage(
-  edge: ChatEdge,
-  session: ChatSession,
-  request: ChatMessageRequest,
-  signal?: AbortSignal
-): Promise<{ submission: Submission; binding: SessionBinding }> {
-  const binding = await authorizedBinding(edge, session, signal);
-  if (request.taskStart && binding.briefSpec && !session.conversation.briefSnapshot) {
-    throw new ChatError("conversation_brief_required", "A Brief is required before starting this task.", 409);
-  }
-  const prepared = request.taskStart ? undefined
-    : request.prepared ?? await prepareSocketMessage(edge, request.message, session.conversation, request.clientMessageId);
-  const canonicalMessage = prepared?.message ?? (async (): Promise<ConversationMessage> => ({ role: "user", content: TASK_START_MESSAGE_CONTENT, kind: "task_start" }));
-  signal?.throwIfAborted();
-  const submission = await edge.chat.service.submit({
-    principal: accountPrincipal(binding.userId),
-    conversation: session.conversation,
-    scope: binding,
-    client: request.client,
-    clientMessageId: request.clientMessageId,
-    message: canonicalMessage,
-    ...(prepared?.bind ? { bind: prepared.bind } : {}),
-    digest: prepared?.digest ?? clientMessageInputDigest({ ...request.message, task_start: true }),
-    runId: request.runId,
-    corpusDigest: binding.corpusDigest,
-    requiresLocalTools: binding.agentCorpus ? productRequiresLocalTools(binding.agentCorpus) : false,
-    ...(request.timeZone ? { timeZone: request.timeZone } : {})
-  });
-  return { submission, binding };
-}
-
-/**
- * Answers a conversation again after a Run that failed or was interrupted, with no new message: re-verify access,
- * then start a Run over the same transcript, or replay the one this key started.
- */
-async function retryRun(
-  edge: ChatEdge,
-  session: ChatSession,
-  request: { runId: string; key: string; client: ClientAttributes; timeZone?: string },
-  signal?: AbortSignal
-): Promise<Retried> {
-  const binding = await authorizedBinding(edge, session, signal);
-  signal?.throwIfAborted();
-  return edge.chat.service.retry({
-    principal: accountPrincipal(binding.userId),
-    conversation: session.conversation,
-    scope: binding,
-    client: request.client,
-    key: request.key,
-    runId: request.runId,
-    corpusDigest: binding.corpusDigest,
-    requiresLocalTools: binding.agentCorpus ? productRequiresLocalTools(binding.agentCorpus) : false,
-    ...(request.timeZone ? { timeZone: request.timeZone } : {})
-  });
-}
-
-/** A failure a client can act on, whichever way it arrived. */
-function chatFailure(error: unknown): { code: string; message: string } {
-  if (error instanceof EntitlementError) return controlledTurnAuthorizationError(error);
-  if (error instanceof ChatError) return { code: error.code, message: error.message };
-  if (error instanceof ConversationRepositoryError) {
-    return {
-      code: error.code,
-      message: error.code === "client_message_conflict"
-        ? "This client_message_id was already used with different message or attachment content."
-        : error.code === "conversation_not_found" ? "Create the task before starting a run." : error.message
-    };
-  }
-  log.error("socket_message_failed", { error });
-  return { code: "protocol_error", message: toProblem(error).message };
 }
 
 async function handleRuntimeSocket(
