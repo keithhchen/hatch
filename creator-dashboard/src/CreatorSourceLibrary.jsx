@@ -4,9 +4,10 @@ import { createCreatorTranslator } from "./creatorI18n.js";
 import { creatorFactoryPath } from "./creatorRoutes.js";
 import { createProduct } from "./creatorFactory.js";
 import { StudioPathCards } from "./studioPathCards.jsx";
+import { FirstBuildIntro } from "./FirstBuildDialog.jsx";
 
 /** New Agent: two sentences create the real Product, then the guided path starts. */
-export function CreatorProductFiles({ token, navigate, locale = "en" }) {
+export function CreatorProductFiles({ token, request, profile, navigate, locale = "en" }) {
   const t = useMemo(() => createCreatorTranslator(locale), [locale]);
   const [draft, setDraft] = useState({ name: "", promise: "" });
   const [busy, setBusy] = useState(false);
@@ -32,6 +33,7 @@ export function CreatorProductFiles({ token, navigate, locale = "en" }) {
             <h1>{t("newTitle")}</h1>
             <p>{t("newBody")}</p>
           </div>
+          <FirstBuildIntro request={request} profile={profile} locale={locale} navigate={navigate} />
         </header>
         {error ? <InlineAlert tone="error" title={t("productCouldNotBeCreated")}>{error}</InlineAlert> : null}
         <form onSubmit={create} className="cpv2-new__form sx-card">

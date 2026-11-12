@@ -15,7 +15,7 @@
 | P4a | 助理说话简短、直击要点、有情绪价值：先接住专家（认可、好奇），再说一件事。不写报告，不列清单，不说术语。 |
 | P5 | 主动性从第一天就是真的：助理主动戳一戳、主动补访谈，不设"只记录"模式，也没有开关。克制靠频率规则和说话方式，不靠关掉。 |
 | P6 | 入口：Studio 网页 + Telegram，同一个助理、同一段对话。LINE、WhatsApp 以后作为新的 Source 接入，不改模型。 |
-| P7 | 助理不实现 voice。专家在 Telegram 和 Studio 发来的文档（txt、md、docx、pptx、xlsx、pdf）作为他的资料收下；语音和图片回复暂不支持。现有 Studio 的语音访谈不动。 |
+| P7 | 助理不实现 voice。专家在 Telegram 和 Studio 发来的文档（txt、md、docx、pptx、xlsx、pdf）作为他的资料收下；语音和图片回复暂不支持。现有 Studio 的访谈不动。 |
 | P7a | 先要资料，再开口：第一句话只要一样东西（名字、链接或现成资料）。资料只有两种来源：专家传的、公共互联网搜到的。搜到后先用"是这位……吗"确认身份，确认后在后台阅读，不让专家等，同时建草稿 Agent 并开始访谈。资料里有的绝不再问，最值得问的是资料和本人之间的落差。网上没有就由访谈从他最近一件真实的事开始。助理不做访谈：关于专家经历和判断的问题都交给访谈，访谈先列大纲（存在访谈会话的 todo 里），告诉专家要聊什么，聊完才交回。助理看着大纲进度决定下一步：没聊完就接着派访谈，聊完就更新 Agent 或写内容。负面内容不主动提，不写进公开内容，除非他自己提起。告诉专家看过哪些来源，他可以说"这篇不算数"。 |
 | P8 | 所有 LLM 角色统一用 kimi-k2.6。 |
 | P9 | 三代 factory 只保留 Factory Agents workbench。旧 CreatorFactory 引擎与 Factory Nodes 在本次改动中删除，前提是不影响现有 Studio UI（见第 6 节）。 |
@@ -157,7 +157,7 @@ Telegram、LINE、Lark、iMessage 都实现同一个 `ChannelAdapter` port，助
 ## 5. 模型
 
 - 所有角色（助理、全部 worker）用 `kimi-k2.6`：`HATCH_FACTORY_LLM_PROFILE=kimi-k2.6`，`compose.app.yml:49, 139` 改掉 `gemini-api`；`factoryAgents/runtime.ts:30`、`server.ts:21` 的默认值改为 `kimi-k2.6`。
-- 语音访谈（Gemini Live、Qwen STT）是现有 Studio 功能，保持原样。
+- 实时语音对话（Gemini Live）已移除；访谈只用文字，听写（Qwen STT）保留。
 
 ## 6. 删除清单（FAST FORWARD）
 
@@ -166,7 +166,7 @@ Telegram、LINE、Lark、iMessage 都实现同一个 `ChannelAdapter` port，助
 - **旧 CreatorFactory 引擎**：`creatorLearning/engine.ts`、`worker.ts`、`httpApi.ts` 的 factory-runs 路由、`creatorFactoryCli.ts`、`compose.app.yml` 的 `factory-worker` 服务、registry 的 `immediateFactoryWorker`、dashboard 对 `/v1/creator/factory-runs*` 的残留引用（`server.mjs:1541, 1619-1625`，dashboard 已对这些路由返回 404）。租约写法先搬到任务执行器。
 - **Factory Nodes**：`nodeService.ts`、`nodeRegistry.ts`、`/nodes/(about-you|corpus)/executions` 路由（`registryServer.ts:746-830`）。**例外**：现有 candidate 审核页（`/studio/products/:id/candidates/:cid` → `CreatorProductWorkspace`）仍依赖它；实现前先确认这个页面是否还有真实入口，有则保留 Nodes 中它用到的部分。
 - **孤立文件**：`CreatorFactoryRuns.jsx`、`CreatorReviewPage.jsx`、`CreatorProductOverview`，没有任何页面引用，删除不影响功能。
-- 保留：Studio 全部现有页面、语音访谈、`CorpusPublisher`、`ProductLiveService`、`corpus_upload`、release/live 表。
+- 保留：Studio 全部现有页面、访谈、`CorpusPublisher`、`ProductLiveService`、`corpus_upload`、release/live 表。
 - 旧表不再读写；删表另起一次明确的 migration。
 
 ## 7. 工作流
@@ -188,5 +188,5 @@ A、B 可并行；C 依赖 A、B；D、E 依赖 C。
   4. 构建后经确认发布，消费者端拿到新 release；
 - 服务重启后，`working` 任务被接回并完成。
 - 戳一戳遵守频率规则：安静时段不发、每天至多一次、连续 3 次未回后降频。
-- Studio 现有页面（Overview、Agents、Build、Publish、Orders、Earnings、Settings、语音访谈）回归通过，行为不变。
+- Studio 现有页面（Overview、Agents、Build、Publish、Orders、Earnings、Settings、访谈）回归通过，行为不变。
 - 区分 unit/component test、真实集成测试、真实 UAT；缺账号或依赖时标为未验收。

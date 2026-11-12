@@ -169,7 +169,7 @@ function CreatorRoute({ route, request, navigate, locale, t, profile }) {
   if (route.kind === "home") return <CreatorHome request={request} navigate={navigate} t={t} locale={locale} />;
   if (route.kind === "assistant") return lazy(<StudioAssistant request={request} t={t} />);
   if (route.kind === "products") return <ProductsPage request={request} navigate={navigate} t={t} locale={locale} />;
-  if (route.kind === "product-create") return lazy(<CreatorProductFiles navigate={navigate} locale={locale} />);
+  if (route.kind === "product-create") return lazy(<CreatorProductFiles request={request} profile={profile} navigate={navigate} locale={locale} />);
   if (route.kind === "agent") return lazy(<StudioAgentWorkspace key={route.productId} route={route} request={request} navigate={navigate} locale={locale} t={t} profile={profile} renderBuild={(product) => <FactoryAgents productId={route.productId} section={route.factorySection} agent={route.factoryAgent} navigate={navigate} locale={locale} />} />);
   if (route.kind === "orders") return lazy(<StudioOrdersPage {...ops} />);
   if (route.kind === "order") return lazy(<StudioOrderDetailPage {...ops} orderId={route.orderId} />);

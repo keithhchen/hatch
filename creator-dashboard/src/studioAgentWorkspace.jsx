@@ -36,6 +36,7 @@ export function StudioAgentWorkspace({ route, request, navigate, locale, t, prof
         <div className="sx-agent__title">
           <h1>{product ? productName(product, t) : "…"}</h1>
           {product ? <StatusPill live={live} t={t} /> : null}
+          <FirstBuildIntro request={request} productId={productId} profile={profile} locale={locale} navigate={navigate} />
         </div>
         {product ? <AgentHeaderActions product={product} live={live} t={t} /> : null}
       </div>
@@ -46,7 +47,6 @@ export function StudioAgentWorkspace({ route, request, navigate, locale, t, prof
       </nav>
     </header>
     <div className="sx-agent__body">
-      {tab === "build" ? <FirstBuildIntro request={request} productId={productId} profile={profile} locale={locale} navigate={navigate} /> : null}
       {tab === "build" ? renderBuild(product)
         : !product ? <LoadingState t={t} />
         : <PublishTab {...ctx} />}

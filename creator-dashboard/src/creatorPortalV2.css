@@ -221,6 +221,7 @@
 .sx-icon-btn { display: grid; width: 36px; height: 36px; place-items: center; border: 0; border-radius: 10px; background: none; color: var(--web-muted); cursor: pointer; }
 .sx-icon-btn:hover:not(:disabled) { background: var(--web-panel); color: var(--web-fail); }
 .sx-icon-btn svg { width: 16px; height: 16px; }
+.sx-icon-btn--quiet:hover:not(:disabled) { color: var(--web-ink); }
 .sx-linkbox { display: flex; gap: 8px; }
 .sx-linkbox > :first-child { flex: 1; min-width: 0; }
 .sx-preview-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }

@@ -2,7 +2,7 @@
 
 日期：2026-09-09
 状态：实施中；定义目标行为，实际验证见 docs/uat/factory-workbench-20260909.md，完整线上链路尚未验收。
-范围：Research、Agent Generation、Case Generation、Evaluator。Voice Agent 是已有上游，本规格不改动它。
+范围：Research、Agent Generation、Case Generation、Evaluator。Interview Agent 是已有上游，本规格不改动它。
 
 ## 1. 产品目标与工程原则
 
@@ -36,7 +36,7 @@ System Prompt + Tools + Context
 默认顺序：
 
 ```text
-已有 Voice Agent
+已有 Interview Agent
     ↓ 已有访谈产物
 Research
     ↓ 公开资料与研究结果
@@ -108,11 +108,11 @@ Agent 的聊天回复应简短，指出做了什么、最重要的发现和可�
 
 没有某类内容时，主文件明确记载原因；不能填充虚构内容。Skill 和 Reference 按实际需要创建，不设凑数要求。
 
-## 5. Voice Agent
+## 5. Interview Agent
 
 Voice 是第一个 Tab。可见的 Interviewer 负责建立信任、追问具体经历、复述并检验理解；后台 Scribe 在每个完成的访谈轮次后读取原始对话和现有 Persona，维护 `CREATOR_PERSONA.md`。Scribe 不向 Creator 发言，也不把逐轮摘要机械追加到文件。
 
-语音层复用 pi-runtime-lab 已验证的 ElevenLabs realtime STT/TTS：浏览器发送 16 kHz mono PCM；最终转写进入与文字输入相同的 Factory turn；回复按句合成语音；用户开始说话时中止仍在播放或生成的回复。语音不可用时，同一 Agent 仍可通过普通聊天使用。
+听写（麦克风转文字）使用 Qwen/ElevenLabs STT，转写进入输入框；不再有实时语音对话。
 
 Interviewer 和 Scribe 使用同一个会话文件区，但分别保存模型 context。主要输出文件名是 `CREATOR_PERSONA.md`。它由 Scribe 通过普通 `read` / `write` 工具维护，可被用户像其他 Markdown 一样阅读、编辑和手动交给 Research。
 
@@ -125,7 +125,7 @@ Interviewer 和 Scribe 使用同一个会话文件区，但分别保存模型 co
 ### 5.2 Context
 
 - Creator 身份线索、官方主页与已知账号。
-- Voice Agent 已有访谈产物；具体采用其现有文件，不要求 Voice 改名或增加输出。
+- Interview Agent 已有访谈产物；具体采用其现有文件，不要求 Voice 改名或增加输出。
 - 产品服务谁、解决什么工作、交付什么成果；未确定时保留探索空间。
 - 用户提供的文档、链接、明确授权的非公开材料。
 - 本次研究的原始来源、已有发现、未解决问题和剩余预算。

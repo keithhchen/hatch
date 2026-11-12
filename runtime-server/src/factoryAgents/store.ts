@@ -35,7 +35,6 @@ export type Session = {
   messages: AgentMessage[]; context: AgentMessage[]; scribeContext?: AgentMessage[]; todos: Todo[];
   product?: Pick<FactoryProductScope, "creatorId" | "productId">;
   hatch?: { conversationId: string; lastRunId?: string; pending?: boolean };
-  voiceLive?: { resumptionHandle?: string };
   /** Set while the Assistant drives this session for one of its tasks. */
   assistantTaskId?: string;
   corpus?: { product_id: string; corpus_ref: string; corpus_digest: string; release_digest: string; status: "published"; published_at: string; files: string[] };

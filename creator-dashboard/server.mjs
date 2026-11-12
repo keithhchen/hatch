@@ -82,7 +82,7 @@ export async function createDashboardApp(options = {}) {
       .map(origin => new URL(origin).origin)
   ]);
   if (process.env.NODE_ENV !== "production") allowedPublicOrigins.add("http://127.0.0.1:8510");
-  const voiceWss = new WebSocketServer({ noServer: true, maxPayload: 128 * 1024 });
+  const studioWss = new WebSocketServer({ noServer: true, maxPayload: 128 * 1024 });
   const chatWss = new WebSocketServer({ noServer: true, maxPayload: 160 * 1024 * 1024 });
   // Set once shutdown begins: readiness fails so the proxy sends nothing new.
   let draining = false;
@@ -803,7 +803,7 @@ export async function createDashboardApp(options = {}) {
       if (url.pathname === "/portal" || url.pathname.startsWith("/portal/") || url.pathname === "/agents" || url.pathname.startsWith("/agents/")) {
         return send(response, 404, { error: { code: "route_not_found", message: "That route is no longer available." } });
       }
-      if (request.method === "GET" && (url.pathname === "/favicon.svg" || url.pathname === "/factory-voice-capture-worklet.js" || url.pathname === "/factory-voice-playback-worklet.js" || url.pathname === "/assets" || url.pathname.startsWith("/assets/") || url.pathname === HATCH_CLI_DOWNLOAD)) {
+      if (request.method === "GET" && (url.pathname === "/favicon.svg" || url.pathname === "/assets" || url.pathname.startsWith("/assets/") || url.pathname === HATCH_CLI_DOWNLOAD)) {
         return servePortalAsset(url.pathname, response);
       }
       const retiredRedirect = request.method === "GET" ? retiredPortalRedirect(url.pathname) : null;
@@ -2314,7 +2314,7 @@ export async function createDashboardApp(options = {}) {
       return;
     }
     const studio = url.pathname === "/v1/creator/studio/ws";
-    if (!studio && !/^\/v1\/creator\/products\/[^/]+\/factory-agents\/sessions\/[0-9a-f-]{36}\/voice\/live$/.test(url.pathname)) {
+    if (!studio) {
       throw Object.assign(new Error("Unknown WebSocket route"), { status: 404 });
     }
     let requestOrigin;
@@ -2328,7 +2328,7 @@ export async function createDashboardApp(options = {}) {
       ? {}
       : await authenticate(request, registryUrl, fetchImpl, portalState);
     if (authentication.error) throw Object.assign(new Error(authentication.error.body?.error?.message || "Sign in to continue."), { status: authentication.error.status });
-    voiceWss.handleUpgrade(request, socket, head, browser => {
+    studioWss.handleUpgrade(request, socket, head, browser => {
       browser.on("error", () => undefined);
       const upstreamUrl = new URL(url.pathname + url.search, registryUrl);
       upstreamUrl.protocol = upstreamUrl.protocol === "https:" ? "wss:" : "ws:";
@@ -2339,7 +2339,7 @@ export async function createDashboardApp(options = {}) {
       });
       const pending = [];
       let pendingBytes = 0;
-      const close = (code = 1000, reason = "Voice session ended") => {
+      const close = (code = 1000, reason = "Studio session ended") => {
         if (browser.readyState === WebSocket.OPEN) browser.close(code, reason);
         else if (browser.readyState === WebSocket.CONNECTING) browser.terminate();
         if (upstream.readyState === WebSocket.OPEN) upstream.close(code, reason);
@@ -2349,7 +2349,7 @@ export async function createDashboardApp(options = {}) {
         const bytes = data.byteLength;
         if (upstream.readyState === WebSocket.OPEN) { upstream.send(data, { binary }); return; }
         pendingBytes += bytes;
-        if (pendingBytes > 512 * 1024) { close(1009, "Voice input buffer exceeded"); return; }
+        if (pendingBytes > 512 * 1024) { close(1009, "Studio input buffer exceeded"); return; }
         pending.push({ data, binary });
       });
       upstream.once("open", () => {
@@ -2360,10 +2360,10 @@ export async function createDashboardApp(options = {}) {
         if (browser.readyState === WebSocket.OPEN) browser.send(data, { binary });
       });
       upstream.on("error", error => {
-        if (browser.readyState === WebSocket.OPEN) browser.send(JSON.stringify({ type: "voice.error", message: error.message }));
-        close(1011, "Voice upstream failed");
+        if (browser.readyState === WebSocket.OPEN) browser.send(JSON.stringify({ type: "error", message: error.message }));
+        close(1011, "Studio upstream failed");
       });
-      upstream.on("close", (code, reason) => close(code || 1000, reason.toString() || "Voice upstream closed"));
+      upstream.on("close", (code, reason) => close(code || 1000, reason.toString() || "Studio upstream closed"));
       browser.on("close", (code, reason) => {
         if (upstream.readyState === WebSocket.OPEN) upstream.close(code || 1000, reason.toString());
         else upstream.terminate();
@@ -2376,12 +2376,12 @@ export async function createDashboardApp(options = {}) {
     handleUpgrade,
     beginDrain: () => { draining = true; },
     // A clean close first: the browser reconnects to the next instance. A peer that does not answer is cut after a second.
-    closeVoiceSockets: () => {
-      for (const socket of [...voiceWss.clients, ...chatWss.clients]) {
+    closeSockets: () => {
+      for (const socket of [...studioWss.clients, ...chatWss.clients]) {
         socket.close(1001, "server restarting: reconnect");
         setTimeout(() => socket.terminate(), 1_000).unref();
       }
-      voiceWss.close();
+      studioWss.close();
       chatWss.close();
     },
     ledger,
@@ -2434,7 +2434,7 @@ export async function startDashboardServer(options = {}) {
   let released;
   const release = () => released ??= (async () => {
     stopTimers();
-    app.closeVoiceSockets();
+    app.closeSockets();
     await Promise.allSettled([app.ledger.close?.(), app.portalState.close?.(), app.telemetry.close?.()]);
   })();
   server.once("close", () => void release());
@@ -2448,7 +2448,7 @@ export async function startDashboardServer(options = {}) {
     markUnready: app.beginDrain,
     stopIntake,
     drain: () => inflight.requestsDone(),
-    closeConnections: async () => { inflight.endAll(); app.closeVoiceSockets(); },
+    closeConnections: async () => { inflight.endAll(); app.closeSockets(); },
     closeStorage: async () => { server.closeAllConnections(); await serverClosed; await release(); },
     onError: (step, error) => logEvent("error", "shutdown_step_failed", { message: `${step}: ${error instanceof Error ? error.message : String(error)}` })
   });
@@ -4622,8 +4622,6 @@ async function servePortalAsset(requestPath, response) {
   try {
     if (requestPath === "/favicon.svg") {
       relativePath = "favicon.svg";
-    } else if (requestPath === "/factory-voice-capture-worklet.js" || requestPath === "/factory-voice-playback-worklet.js") {
-      relativePath = requestPath.slice(1);
     } else if (requestPath === "/assets" || !path.extname(requestPath)) {
       relativePath = "index.html";
     } else if (requestPath === HATCH_CLI_DOWNLOAD) {

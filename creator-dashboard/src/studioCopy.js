@@ -96,7 +96,7 @@ export const STUDIO_COPY = {
     factoryYouDoRole: (role) => ({
       uploads: "Upload existing material such as articles, slides, past cases and transcripts.",
       research: "Provide your background and where your public work is published. The Agent reads it and asks when something is unclear.",
-      voice: "Describe your experience and how you make decisions. Voice and text are both supported.",
+      voice: "Describe your experience and how you make decisions.",
       generation: "The Agent is generated from your sources and interview. Review the result and mark what needs to change.",
       "case-generation": "A realistic client case is generated to test the Agent. Confirm that it reflects real situations.",
       evaluator: "After the Agent handles the case, the 1–3 most important decisions are listed for you to confirm."
@@ -201,7 +201,7 @@ export const STUDIO_COPY = {
     factoryYouDoRole: (role) => ({
       uploads: "上传已有资料，例如文章、课件、过往案例和录音转写稿。",
       research: "提供你的背景信息和公开内容的位置。Agent 会自动阅读，有疑问时向你确认。",
-      voice: "介绍你的经验和判断方式。支持语音或文字输入。",
+      voice: "介绍你的经验和判断方式。",
       generation: "根据资料和访谈生成 Agent。请检查结果并标注需要修改的内容。",
       "case-generation": "生成一个真实的客户案例，用于测试 Agent。请确认案例是否符合实际情况。",
       evaluator: "Agent 处理案例后，会列出 1–3 个最关键的判断点，由你确认。"
@@ -304,7 +304,7 @@ export const STUDIO_COPY = {
     factoryYouDoRole: (role) => ({
       uploads: "記事、スライド、過去の事例、文字起こしなどの既存資料をアップロードします。",
       research: "経歴と公開コンテンツの所在を入力します。Agent が内容を読み、不明点があれば確認します。",
-      voice: "経験と判断の方法について説明します。音声とテキストのどちらでも入力できます。",
+      voice: "経験と判断の方法について説明します。",
       generation: "資料とインタビューをもとに Agent を生成します。結果を確認し、修正が必要な箇所を指摘してください。",
       "case-generation": "Agent をテストするための現実的な顧客ケースを生成します。実際の状況に即しているか確認してください。",
       evaluator: "Agent がケースを処理した後、特に重要な 1〜3 点の判断を提示します。内容を確認してください。"
