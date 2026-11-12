@@ -94,3 +94,11 @@ test("creator navigation is a sidebar that becomes a drawer on narrow screens", 
   assert.doesNotMatch(source, /Skip to content/);
   assert.doesNotMatch(styles, /cpv2-skip/);
 });
+
+test("Task brief panel wraps long labels and values so it never scrolls sideways", () => {
+  const css = read("packages/chat/src/presentation/chat.css");
+
+  for (const part of ["dt", "dd"]) {
+    assert.match(css, new RegExp(`\\.web-chat__task-brief-field ${part} \\{[^}]*overflow-wrap: anywhere`));
+  }
+});
