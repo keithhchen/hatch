@@ -1,7 +1,7 @@
 // API keys page copy, merged into the Studio shell copy (same keys in en / zh / ja).
 export const API_KEYS_COPY = {
   en: {
-    sxNavApiKeys: "API Keys", sxakDevelopers: "Developer docs",
+    sxNavApiKeys: "API Keys", sxakDevelopers: "API Documentation",
     sxakCreate: "Create Key", sxakNameLabel: "Key name", sxakNamePlaceholder: "e.g. My laptop CLI", sxakCreating: "Creating…",
     sxakCreatedTitle: "Your New Key", sxakCreatedWarn: "Copy it now. You won't see this key again.", sxakCopy: "Copy", sxakCopied: "Copied", sxakDone: "Done",
     sxakTokenLabel: "API key",
