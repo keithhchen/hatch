@@ -8,19 +8,6 @@ import { landingCopy, type Lang, type LandingCopy, type Scenario } from "./landi
 const SHOW_PRICING = false;
 const LOCKUP = "/assets/web/hatch-lockup.svg";
 const LANG_NAMES: Record<Lang, string> = { zh: "中文", en: "English", ja: "日本語" };
-const PLATFORMS: [string, string, string][] = [
-  ["xiaohongshu", "小红书", "Xiaohongshu"],
-  ["wechat", "微信", "WeChat"],
-  ["tiktok", "抖音", "TikTok"],
-  ["line", "LINE", "LINE"],
-  ["whatsapp", "WhatsApp", "WhatsApp"],
-  ["instagram", "Instagram", "Instagram"],
-  ["youtube", "YouTube", "YouTube"],
-  ["x", "X", "X"],
-  ["stripe", "Stripe", "Stripe"],
-  ["alipay", "支付宝", "Alipay"],
-];
-
 function Egg({ size = 22 }: { size?: number }) {
   return (
     <svg viewBox="0 0 36 44" width={size * 0.82} height={size} aria-hidden="true">
@@ -43,16 +30,6 @@ function Typed({ text }: { text: string }) {
       {text.slice(0, n)}
       {n < text.length && <span className="caret" />}
     </>
-  );
-}
-
-function Logo({ slug, name }: { slug: string; name: string }) {
-  const [ok, setOk] = useState(true);
-  return (
-    <span className="logo">
-      {ok && <img src={`https://cdn.simpleicons.org/${slug}`} alt="" width={22} height={22} loading="lazy" onError={() => setOk(false)} />}
-      {name}
-    </span>
   );
 }
 
@@ -839,18 +816,6 @@ export default function HatchPage() {
       <Proactive t={t} />
 
       <Asset t={t} />
-
-      <section className="where">
-        <span className="pill">{t.whereLabel}</span>
-        <div className="marquee">
-          <div className="logos">
-            {[...PLATFORMS, ...PLATFORMS].map(([slug, zhName, name], i) => (
-              <Logo key={`${slug}-${i}`} slug={slug} name={lang === "zh" ? zhName : name} />
-            ))}
-          </div>
-        </div>
-        <p className="fine">{t.whereNote}</p>
-      </section>
 
       <Learn t={t} s={s} />
 
