@@ -1,4 +1,4 @@
-import type { WorkbenchRuntime } from "../factoryAgents/runtime.js";
+import { MessageAlreadyAccepted, type WorkbenchRuntime } from "../factoryAgents/runtime.js";
 import { BuildNotReadyError, type AgentEntry } from "../factoryAgents/definitions.js";
 import { userMessage } from "../factoryAgents/imageRefs.js";
 import type { MessageOrigin, Role, Session, WorkbenchStore } from "../factoryAgents/store.js";
@@ -11,22 +11,14 @@ import { blockedBy, blockedMessage, WORKERS, type Worker, type WorkerRegistry } 
 
 /** The part of a Product workspace a worker conversation needs. */
 export interface WorkerWorkspace {
-  store: Pick<WorkbenchStore, "list" | "create"> & { backend: Pick<WorkbenchStore["backend"], "writeManual"> };
-  runtime: Pick<WorkbenchRuntime, "send" | "stop" | "events" | "runId" | "queued">;
+  store: Pick<WorkbenchStore, "list" | "getOrCreate"> & { backend: Pick<WorkbenchStore["backend"], "writeManual"> };
+  runtime: Pick<WorkbenchRuntime, "send" | "stop" | "events" | "runId">;
   entries(): Promise<AgentEntry[]>;
   /** Throws BuildNotReadyError when Build has neither uploads nor interview output. */
   assertRoleAvailable(role: Role): Promise<void>;
 }
 
 const originOf = (message: AgentMessage) => (message as { origin?: MessageOrigin }).origin;
-
-/** Sends under one session do not interleave: a repeat of a message waits for the first and finds it. */
-const sending = new Map<string, Promise<unknown>>();
-async function inTurn<T>(key: string, step: () => Promise<T>): Promise<T> {
-  const run = (sending.get(key) ?? Promise.resolve()).catch(() => undefined).then(step);
-  sending.set(key, run);
-  try { return await run; } finally { if (sending.get(key) === run) sending.delete(key); }
-}
 
 const statusOf = (session: Session | undefined, runId?: string): ConversationStatus =>
   session?.status === "running" ? { state: "running", ...(runId ? { runId } : {}) } : session?.status === "failed" ? { state: "failed", error: failureOf(session) } : { state: "idle" };
@@ -50,7 +42,7 @@ export class WorkerConversation implements Conversation {
   /** The message the session already holds under this id, as it was sent. Its own record is the only one: there is no ledger beside it. */
   async replay(input: SendInput): Promise<Sent | undefined> {
     const session = await this.session();
-    const earlier = session && (session.messages.find(message => originOf(message)?.itemId === input.id) ?? this.workspace.runtime.queued(session.id, input.id));
+    const earlier = session && (session.messages.find(message => originOf(message)?.itemId === input.id) ?? session.queue?.find(message => originOf(message)?.itemId === input.id));
     if (!session || !earlier) return undefined;
     const origin = originOf(earlier);
     const assets = (origin?.attachments ?? []).map(asset => asset.assetId);
@@ -67,8 +59,8 @@ export class WorkerConversation implements Conversation {
   /** The runtime decides atomically whether this steers the running turn or starts one; a message already accepted under this id is returned as it was. */
   async send(input: SendInput): Promise<Sent> {
     await this.assertAvailable();
-    const session = await this.session() ?? await this.workspace.store.create(this.worker.role);
-    return inTurn(session.id, async () => (await this.replay(input)) ?? this.deliver(session, input));
+    const { session } = await this.workspace.store.getOrCreate(this.worker.role);
+    return (await this.replay(input)) ?? this.deliver(session, input);
   }
 
   private async deliver(session: Session, input: SendInput): Promise<Sent> {
@@ -76,7 +68,10 @@ export class WorkerConversation implements Conversation {
     const lines = attachmentLines(input.attachments);
     const attachments = input.attachments.map(({ kind, name, id }) => ({ type: kind, name, assetId: id }));
     const message = userMessage([input.text, ...lines].filter(Boolean).join("\n"), images, { kind: "expert", itemId: input.id, text: input.text, attachments });
-    const { queued, runId } = await this.workspace.runtime.send(session.id, message, input.client);
+    // The session's own record decides a repeat, across instances: the runtime refuses an item id it already holds.
+    const delivered = await this.workspace.runtime.send(session.id, message, input.client).catch(error => { if (error instanceof MessageAlreadyAccepted) return undefined; throw error; });
+    if (!delivered) return (await this.replay(input))!;
+    const { queued, runId } = delivered;
     return {
       conversationId: session.id, queued, runId,
       message: { id: input.id, role: "user", text: input.text, created_at: new Date().toISOString(), ...(attachments.length ? { attachments: attachments.map(({ type, name, assetId }) => ({ type, name, asset_id: assetId })) } : {}) },

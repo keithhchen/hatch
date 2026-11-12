@@ -11,7 +11,7 @@ import { createFactoryLlmModel, createFactoryPiAgent, createFactoryPiModels, typ
 import { failures } from "../errors/failures.js";
 import { UpstreamError } from "../errors/upstream.js";
 import type { RunFailure } from "./runFailure.js";
-import { INPUT_ROLES, RUN_HEARTBEAT_MS, WorkbenchStore, isAssistantRole, type AgentDefinitionSource, type AnyRole, type Session } from "./store.js";
+import { INPUT_ROLES, RUN_HEARTBEAT_MS, WorkbenchStore, isAssistantRole, itemIdOf, settleMessage, type AgentDefinitionSource, type AnyRole, type Session } from "./store.js";
 import { factoryAgentTools } from "./factoryTools.js";
 import { fileTools } from "./tools.js";
 import { traceAgentTools, withLangfuseTurn, type LangfuseTurnIdentifiers } from "../langfuse.js";
@@ -40,6 +40,9 @@ export type WorkbenchRuntimeOptions = {
 /** Studio output budget passed to the factory model; the policy reserves it. */
 const OUTPUT_TOKENS = 32768;
 
+/** The session already holds a message under this item id: a repeat, not a new message. */
+export class MessageAlreadyAccepted extends Error { constructor() { super("This message was already accepted"); } }
+
 export class WorkbenchRuntime {
   readonly events = new EventEmitter();
   private active = new Map<string, AbortController>();
@@ -48,8 +51,8 @@ export class WorkbenchRuntime {
   private scribeControllers = new Set<AbortController>();
   private runIds = new Map<string, string>();
   private liveAgents = new Map<string, Agent>();
-  /** Messages that arrived while the run could not take them: before its model loop starts, or during compaction. */
-  private held = new Map<string, AgentMessage[]>();
+  /** Which queued item ids this run has taken (started with or steered in). The queue itself lives on the session. */
+  private delivered = new Map<string, Set<string>>();
   private compacting = new Set<string>();
   private background = new BackgroundCompactor<string>();
   /** When each conversation's prefix last reached the provider: the cache is alive for the policy's ttl after. */
@@ -57,8 +60,6 @@ export class WorkbenchRuntime {
   private strategyCache?: CompactionStrategy<AgentMessage>;
   /** The client of the latest message of each running conversation. */
   private clients = new Map<string, ClientAttributes>();
-  /** Messages steered into a running agent that its history does not hold yet. A failed run writes them down: an accepted message is never lost. */
-  private steered = new Map<string, Set<AgentMessage>>();
   private closing = false;
   private readonly env: NodeJS.ProcessEnv;
   constructor(readonly store: WorkbenchStore, private options: WorkbenchRuntimeOptions = {}) {
@@ -116,43 +117,53 @@ export class WorkbenchRuntime {
     void run.finally(() => { clearInterval(beat); if (this.runs.get(id) === run) this.runs.delete(id); });
   }
   stop(id: string): void { this.active.get(id)?.abort(); }
-  isRunning(id: string): boolean { return this.active.has(id); }  /**
-   * Steer a running turn: the message joins the context before the next model
-   * call and the turn goes on. Returns false when no turn is running, or when
-   * it has not reached its model loop yet; the caller then starts a new turn.
-   */
-  steer(id: string, input: string | AgentMessage, images: string[] = []): boolean {
-    const agent = this.liveAgents.get(id);
-    if (!agent || (typeof input === "string" && !input.trim())) return false;
-    agent.steer(typeof input !== "string" ? input : images.length ? userMessage(input, images) : { role: "user", content: input, timestamp: Date.now() });
-    return true;
-  }
+  isRunning(id: string): boolean { return this.active.has(id); }
   /**
-   * Deliver a message: it steers the running turn or starts one. The check and the act share one
-   * synchronous step, so a message is never refused, never lost, and never starts a second run.
-   * Until the run's model loop can take it (or while it compacts) the message waits and joins after.
+   * Deliver a message. It is written to the session's queue first, so it survives a crash and a replay finds it;
+   * only then does it start a run or reach the running one. The check and the act share one synchronous step,
+   * so a message never starts a second run. A message under an item id the session already holds is refused.
    */
   async send(id: string, message: AgentMessage, client: ClientAttributes = WEB): Promise<{ queued: boolean; runId: string }> {
+    const text = messageText(message);
+    if (!text.trim() || text.length > 100000) throw new Error("Provide a message of 1–100000 characters");
+    const queue = await this.store.enqueue(id, message);
+    if (!queue) throw new MessageAlreadyAccepted();
     this.clients.set(id, client);
-    if (!this.active.has(id)) { await this.start(id, [message]); return { queued: false, runId: this.runIds.get(id)! }; }
-    const agent = this.liveAgents.get(id);
-    if (agent && !this.compacting.has(id)) { this.steered.set(id, (this.steered.get(id) ?? new Set()).add(message)); agent.steer(message); }
-    else this.held.set(id, [...(this.held.get(id) ?? []), message]);
-    return { queued: true, runId: this.runIds.get(id)! };
+    if (this.active.has(id)) { this.release(id); return { queued: true, runId: this.runIds.get(id)! }; }
+    try { await this.start(id, queue.filter(queued => this.claim(id, queued))); } catch (error) {
+      this.delivered.delete(id);
+      await this.store.dequeue(id, itemIdOf(message)!).catch(() => undefined);
+      throw error;
+    }
+    return { queued: false, runId: this.runIds.get(id)! };
   }
-  /** The message with this item id, when the run has it waiting and its history does not hold it yet. */
-  queued(id: string, itemId: string): AgentMessage | undefined {
-    return [...this.held.get(id) ?? [], ...this.steered.get(id) ?? []].find(message => (message as { origin?: { itemId?: string } }).origin?.itemId === itemId);
+  private claim(id: string, message: AgentMessage): boolean {
+    const taken = this.delivered.get(id) ?? new Set<string>();
+    this.delivered.set(id, taken);
+    const item = itemIdOf(message)!;
+    return !taken.has(item) && !!taken.add(item);
   }
-  /** Gives the model loop what waited for it. */
+  /** What the session's queue holds that this run has not taken. */
+  private async waiting(id: string): Promise<AgentMessage[]> { return ((await this.store.get(id)).queue ?? []).filter(message => !this.delivered.get(id)?.has(itemIdOf(message)!)); }
+  /** Gives the model loop what waited for it: before its loop started, or during compaction. */
   private release(id: string): void {
-    const agent = this.liveAgents.get(id);
-    if (agent && !this.compacting.has(id)) for (const message of this.take(id) ?? []) agent.steer(message);
+    void (async () => {
+      for (const message of await this.waiting(id)) {
+        const agent = this.liveAgents.get(id);
+        if (agent && !this.compacting.has(id) && this.claim(id, message)) agent.steer(message);
+      }
+    })().catch(() => undefined);
   }
-  private take(id: string): AgentMessage[] | undefined {
-    const waiting = this.held.get(id);
-    this.held.delete(id);
-    return waiting?.length ? waiting : undefined;
+  /** Takes what is queued and untaken, for the same run's next pass. */
+  private async take(id: string): Promise<AgentMessage[] | undefined> {
+    const taken = (await this.waiting(id)).filter(message => this.claim(id, message));
+    return taken.length ? taken : undefined;
+  }
+  /** A message that landed as the run ended starts the next one. */
+  private async resume(id: string): Promise<void> {
+    const waiting = await this.waiting(id);
+    if (!waiting.length || this.active.has(id) || this.closing) return;
+    await this.start(id, waiting.filter(message => this.claim(id, message)));
   }
   /** Studio has no memory layer for conversations, so the strategy gets no CompactionMemory. */
   private strategy(): CompactionStrategy<AgentMessage> {
@@ -268,7 +279,7 @@ export class WorkbenchRuntime {
       // Messages that arrived while the loop could not take them start the next pass of this same run.
       for (;;) {
         const visibleMessages = await this.run(id, system, history, input, tools, controller, "visible", attachedImages);
-        const waiting = controller.signal.aborted ? undefined : this.take(id);
+        const waiting = controller.signal.aborted ? undefined : await this.take(id);
         if (waiting) { history = (await this.store.get(id)).context; input = waiting; attachedImages = []; continue; }
         if (s.role === "voice" && !controller.signal.aborted && !hasTrailingAskUser(visibleMessages)) {
           const latest = await this.store.get(id);
@@ -276,17 +287,13 @@ export class WorkbenchRuntime {
           this.triggerScribeVoiceEvidence(id, evidence);
         }
         await this.store.update(id, state => { state.status = controller.signal.aborted ? "interrupted" : "completed"; delete state.activeTool; });
-        const late = controller.signal.aborted ? undefined : this.take(id);
-        if (!late) break;
-        await this.store.update(id, state => { state.status = "running"; });
-        history = (await this.store.get(id)).context; input = late; attachedImages = [];
+        break;
       }
       ended = controller.signal.aborted ? "interrupted" : "completed";
       this.emit(id, controller.signal.aborted ? "voice.run_interrupted" : "voice.run_completed", { runId: this.runIds.get(id) });
     } catch (error) {
       // Messages acknowledged to clients stay in history even when the run did not take them.
-      const lost = [...this.take(id) ?? [], ...this.steered.get(id) ?? []];
-      for (const message of lost) await this.commit(id, () => this.store.update(id, state => { state.messages.push(message); state.context.push(message); })).catch(() => undefined);
+      for (const message of (await this.store.get(id).catch(() => undefined))?.queue ?? []) await this.commit(id, () => this.store.update(id, state => settleMessage(state, message))).catch(() => undefined);
       ended = controller.signal.aborted ? "interrupted" : "failed";
       if (!controller.signal.aborted) failure = failures.translate(error, { run: this.runIds.get(id), session: id });
       await this.store.update(id, s => {
@@ -306,10 +313,10 @@ export class WorkbenchRuntime {
       if (ended === "completed") this.scheduleBackground(id);
       this.runIds.delete(id);
       this.clients.delete(id);
-      this.held.delete(id);
-      this.steered.delete(id);
+      this.delivered.delete(id);
       this.emit(id, "run_end", { status: ended, ...(failure ? { error: failure } : {}) });
       this.emit(id, "state");
+      if (ended === "completed") void this.resume(id).catch(() => undefined);
     }
   }
   private async run(id: string, systemPrompt: string, history: AgentMessage[], userText: string | AgentMessage[], tools: AgentTool[], controller: AbortController, channel: "visible" | "scribe" = "visible", images: string[] = []): Promise<AgentMessage[]> {
@@ -368,8 +375,7 @@ export class WorkbenchRuntime {
         if (channel === "visible") this.emit(id, "message_end");
         persistence = persistence.then(async () => {
           if (channel === "visible") {
-            await this.commit(id, () => this.store.update(id, s => { s.messages.push(event.message); s.context.push(event.message); }));
-            this.steered.get(id)?.delete(event.message);
+            await this.commit(id, () => this.store.update(id, s => settleMessage(s, event.message)));
           } else await this.store.update(id, s => { s.scribeContext ??= []; s.scribeContext.push(event.message); });
         }).catch(error => { persistenceError = error; controller.abort(); });
       }

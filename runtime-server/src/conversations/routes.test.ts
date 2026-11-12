@@ -5,7 +5,8 @@ import http from "node:http";
 import test from "node:test";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { agentEntries, assertAgentAvailable, initialAgentDefinitions } from "../factoryAgents/definitions.js";
-import type { Role, Session } from "../factoryAgents/store.js";
+import { itemIdOf, type Role, type Session } from "../factoryAgents/store.js";
+import { MessageAlreadyAccepted } from "../factoryAgents/runtime.js";
 import type { AssistantHost } from "./assistantConversation.js";
 import type { AssetScope } from "../assets/domain.js";
 import type { AssetDesk } from "./assets.js";
@@ -42,12 +43,14 @@ class FakeWorkspace implements WorkerWorkspace {
   store = {
     backend: { writeManual: async (name: string, bytes: Buffer) => { this.manual.set(name, bytes); } },
     list: async () => this.sessions,
-    create: async (role: Role) => { const created = session(role); this.sessions.push(created); return created; },
+    getOrCreate: async (role: Role) => { const existing = this.sessions.find(s => s.role === role); const made = existing ?? session(role); if (!existing) this.sessions.push(made); return { session: made, created: !existing }; },
   };
   runtime = {
     events: this.events,
     send: async (id: string, message: AgentMessage) => {
       const target = this.sessions.find(s => s.id === id)!;
+      // Like the real runtime: the session's record is the one place that refuses a repeat.
+      if (target.messages.some(known => itemIdOf(known) === itemIdOf(message))) throw new MessageAlreadyAccepted();
       const queued = target.status === "running";
       target.messages.push(message);
       if (queued) this.steered.push(id);
@@ -60,7 +63,6 @@ class FakeWorkspace implements WorkerWorkspace {
       return { queued, runId: this.runs.get(id)! };
     },
     runId: (id: string) => this.runs.get(id),
-    queued: (_id: string, _itemId: string) => undefined,
     stop: (id: string) => { this.stopped.push(id); },
   };
   entries = async () => agentEntries(await this.definitions, this.sessions, [...this.manual.keys()]);
