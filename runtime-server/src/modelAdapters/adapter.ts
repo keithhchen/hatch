@@ -53,6 +53,17 @@ export interface ModelAdapter {
   resolve(profile: LlmProfile, options: AdapterOptions): ResolvedModelOptions;
 }
 
+/**
+ * What Creator Factory needs beyond a model call: its own request rules live on the adapter,
+ * next to the family's other rules, instead of in name checks at the call sites.
+ */
+export interface FactoryModelAdapter extends ModelAdapter {
+  /** Rewrites a request body so the model must answer with a tool call, where the family can be made to. */
+  requireToolChoice(profile: LlmProfile, payload: unknown): unknown;
+  /** The provider label Factory records with its work. */
+  recordedProvider(profile: LlmProfile): string;
+}
+
 export function nonNegativeIntegerOption(name: string, value: number | undefined): number | undefined {
   if (value === undefined) return undefined;
   if (!Number.isInteger(value) || value < 0) {

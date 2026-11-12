@@ -1,4 +1,6 @@
-export const KIMI_MODEL = "kimi-k2.6";
+import { KIMI_K26_MODEL } from "./llmProfiles.js";
+
+export const KIMI_MODEL = KIMI_K26_MODEL;
 // Keep the provider profile in one place so Factory, Runtime, and audits all
 // use the same thinking-enabled Kimi contract.
 // Kimi K2.6 currently accepts only temperature=1. Thinking remains enabled;

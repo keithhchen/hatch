@@ -74,6 +74,20 @@ test("GeminiAdapter leaves the payload to pi-ai", () => {
   assert.equal(new GeminiAdapter().model(profile, { baseUrl: profile.baseUrl, provider: profile.provider }).api, "google-generative-ai");
 });
 
+test("Factory adapters are chosen by the profile's factoryFamily and own the tool-call requirement", async () => {
+  const { factoryAdapterFor } = await import("./factory.js");
+  const body = { model: "m", tool_choice: "auto" };
+  const flash = llmProfile("deepseek-v4-flash");
+  const k26 = llmProfile("kimi-k2.6");
+  const k3 = llmProfile("kimi-k3.1-pro");
+  assert.deepEqual(factoryAdapterFor(flash).requireToolChoice(flash, body), { ...body, tool_choice: "required" });
+  assert.equal(factoryAdapterFor(k26).requireToolChoice(k26, body), body);
+  // Factory runs K3.1 as a plain provider: thinking disabled, not Moonshot's enabled.
+  assert.deepEqual((factoryAdapterFor(k3).normalizePayload(k3, body) as { thinking: unknown }).thinking, { type: "disabled" });
+  assert.equal(factoryAdapterFor(k3).recordedProvider(k3), "moonshotai-cn");
+  assert.equal(factoryAdapterFor(k26).recordedProvider(k26), "moonshot");
+});
+
 test("adapters refuse to turn off thinking when the profile requires it", () => {
   assert.throws(
     () => adapterFor(llmProfile("kimi-k2.6")).resolve(llmProfile("kimi-k2.6"), { apiKey: "k", thinkingLevel: "off" as never }),

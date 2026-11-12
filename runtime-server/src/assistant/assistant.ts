@@ -6,7 +6,8 @@ import { WorkbenchStore, type AgentDefinitionSource, type AssistantRole, type Ro
 import { WorkbenchRuntime, safeError, type WorkbenchRuntimeOptions } from "../factoryAgents/runtime.js";
 import type { FactoryWorkspace } from "../factoryAgents/service.js";
 import type { AgentCatalog, AgentChange } from "./catalog.js";
-import { FirecrawlSearchProvider, scrapeProviderFrom } from "../factoryAgents/webProviders.js";
+import { scrapeProviderFrom } from "../factoryAgents/webProviders.js";
+import type { WebSearchProvider } from "../factoryAgents/webTypes.js";
 import { CHANNEL_KINDS, type ChannelKind, type OutboundMessage } from "../channels/types.js";
 import type { AssistantChannels } from "../channels/ports.js";
 import { localDate, localHour, type AccountReach } from "./reach.js";
@@ -78,6 +79,8 @@ export type AssistantDependencies = {
   deliveries: DeliveryRepository;
   /** Runs fn only if this process holds the named cluster-wide lock. */
   exclusive: (name: string, fn: () => Promise<void>) => Promise<void>;
+  /** Where its public web searches go. */
+  search: WebSearchProvider;
   env: NodeJS.ProcessEnv;
   runtime?: Pick<WorkbenchRuntimeOptions, "agentFactory" | "deadlineMs" | "maxTurns">;
   ingest?: AssistantIngest;
@@ -598,7 +601,7 @@ export class AssistantService implements StudioOperations {
 
   /** Public web evidence for the Assistant, from the provider the Registry is configured with. */
   searchWeb(input: { query: string; max_results?: number; domains?: string[]; topic?: "general" | "news" }, signal?: AbortSignal): Promise<unknown> {
-    return new FirecrawlSearchProvider({ apiKey: this.deps.env.FIRECRAWL_API_KEY }).search(
+    return this.deps.search.search(
       { query: input.query, maxResults: input.max_results ?? 6, includeDomains: input.domains, topic: input.topic, searchDepth: "advanced" },
       AbortSignal.any([signal ?? new AbortController().signal, AbortSignal.timeout(90_000)])
     );
