@@ -26,7 +26,7 @@ test("the help button always opens the intro: on the New Agent page and in the A
   const workspace = await read("./studioAgentWorkspace.jsx");
   const create = await read("./CreatorSourceLibrary.jsx");
   const portal = await read("./CreatorPortalV2.jsx");
-  assert.match(dialog, /aria-label=\{copy\.help\} onClick=\{\(\) => setOpen\(true\)\}><HelpCircle/);
+  assert.match(dialog, /className="sx-help-btn" aria-label=\{copy\.help\} onClick=\{\(\) => setOpen\(true\)\}><HelpCircle aria-hidden="true" \/><span>\{copy\.helpLabel\}/);
   assert.match(dialog, /navigate\(creatorFactoryPath\(productId, "sources", "uploads"\)\)/);
   assert.match(dialog, /if \(!onNewPage\) navigate/);
   assert.match(dialog, /import \{ TrialScene \} from "\.\/web\/TrialScenes\.tsx"/);
