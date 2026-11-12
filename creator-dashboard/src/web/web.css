@@ -61,6 +61,7 @@ button { font: inherit; color: inherit; }
 @keyframes flipin { from { opacity: 0; transform: rotateX(-90deg) translateY(0.3em); filter: blur(4px); } to { opacity: 1; transform: none; filter: none; } }
 .hero-body { max-width: 720px; margin: 28px auto 0; font-size: clamp(17px, 1.5vw, 21px); line-height: 1.65; color: var(--muted); }
 .hero-manifesto strong { display: block; margin-top: 6px; color: var(--ink); font-weight: 700; }
+.hero-manifesto mark { padding: 0 2px; background: linear-gradient(transparent 58%, var(--yolk) 58%, var(--yolk) 92%, transparent 92%); color: inherit; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
 .hero-after { margin-top: 32px; }
 
 /* Field picker */
