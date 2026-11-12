@@ -24,10 +24,10 @@ import { AccountAvatarSettings } from "./AccountAvatarSettings.jsx";
 import "./buyerPortalV2.css";
 
 const EXPLORE_ROOT = "/explore";
+const STUDIO_ROOT = "/studio";
 const ORDERS_ROOT = "/explore/orders";
 const CHECKOUT_ROOT = "/checkout";
 const ACCOUNT_ROOT = "/account";
-const STUDIO_ROOT = "/studio";
 const PUBLIC_ROUTE_NAMES = new Set(["catalog", "creator", "product", "sign-in", "sign-up", "account-help", "not-found"]);
 const PHOTO = (id) => `/assets/web/photos/${id}.jpg`;
 
@@ -177,7 +177,7 @@ function BuyerShell({ route, navigate, session, children }) {
     <div className="buyer-v2">
       <header className="buyer-v2__header">
         <div className="buyer-v2__header-inner">
-          <WebBrand as={RouterLink} className="buyer-v2__brand" to={EXPLORE_ROOT} navigate={navigate} aria-label={t("Hatch home")} />
+          <WebBrand as={RouterLink} className="buyer-v2__brand" to="/" navigate={navigate} aria-label={t("Hatch home")} />
           <nav className="buyer-v2__nav" aria-label={t("Buyer navigation")}>
             <RouterLink to={EXPLORE_ROOT} navigate={navigate} aria-current={exploring ? "page" : undefined}>{t("Explore")}</RouterLink>
             <RouterLink to={STUDIO_ROOT} navigate={navigate}>{t("Studio")}</RouterLink>
@@ -670,7 +670,7 @@ function AuthPage({ mode, search, request, navigate, session }) {
   const t = useBuyerCopy();
   const signingUp = mode === "sign-up";
   const params = new URLSearchParams(search);
-  const returnTo = safeReturnTo(params.get("returnTo") || EXPLORE_ROOT);
+  const returnTo = safeReturnTo(params.get("returnTo") || STUDIO_ROOT);
   const intentRoute = matchBuyerRoute(returnTo.split("?")[0]);
   const productIntent = intentRoute.name === "product";
   const presentation = createAuthPagePresentation(t)({ signingUp, productIntent });
@@ -709,7 +709,7 @@ function AuthPage({ mode, search, request, navigate, session }) {
   return (
     <main className="buyer-v2 buyer-v2__auth-page">
       <header className="buyer-v2__auth-navbar">
-        <WebBrand as={RouterLink} className={authBrandClassName} to={EXPLORE_ROOT} navigate={navigate} aria-label={t("Hatch home")} />
+        <WebBrand as={RouterLink} className={authBrandClassName} to="/" navigate={navigate} aria-label={t("Hatch home")} />
         <BuyerLanguageMenu className="buyer-v2__auth-language" />
       </header>
       <section className="buyer-v2__auth-context" aria-hidden="true">
@@ -1295,9 +1295,9 @@ function normalizeSearch(value) {
 
 function safeReturnTo(value) {
   const candidate = String(value || "");
-  if (!candidate.startsWith("/") || candidate.startsWith("//") || candidate.includes("\\") || /[\u0000-\u001f]/.test(candidate)) return EXPLORE_ROOT;
+  if (!candidate.startsWith("/") || candidate.startsWith("//") || candidate.includes("\\") || /[\u0000-\u001f]/.test(candidate)) return STUDIO_ROOT;
   const destination = new URL(candidate, "https://hatch.invalid");
-  if (destination.origin !== "https://hatch.invalid") return EXPLORE_ROOT;
+  if (destination.origin !== "https://hatch.invalid") return STUDIO_ROOT;
   return `${destination.pathname}${destination.search}${destination.hash}`;
 }
 
@@ -1363,7 +1363,7 @@ function orderIdFor(value) { return value?.order_id || value?.id; }
 
 function productPath(value) {
   const product = productId(value);
-  return product ? `/products/${encodeURIComponent(product)}` : EXPLORE_ROOT;
+  return product ? `/products/${encodeURIComponent(product)}` : STUDIO_ROOT;
 }
 
 function productKey(value) { return productId(value) || "product"; }

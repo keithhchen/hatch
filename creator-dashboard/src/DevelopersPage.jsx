@@ -19,7 +19,7 @@ export function DevelopersPage({ tab, navigate }) {
   return (
     <div className="developers-page">
       <header className="developers-page__header">
-        <WebBrand className="developers-page__brand" href="/explore" aria-label={guide.copy.homeLabel} />
+        <WebBrand className="developers-page__brand" href="/" aria-label={guide.copy.homeLabel} />
         <LanguageSwitcher className="developers-page__language" />
       </header>
       <main className="developers-page__main">
