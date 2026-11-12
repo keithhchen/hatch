@@ -21,7 +21,7 @@ import { declareTools, studioToolSupport, type ClientSupport } from "./toolSurfa
 import { modelRole } from "../modelRoles.js";
 import { log } from "../observability/log.js";
 import { usageSink, type UsageRecorder, type UsageSink } from "../usage/usage.js";
-import type { UsageCap } from "../usage/usageCap.js";
+import { UsageCapExceeded, type UsageCap } from "../usage/usageCap.js";
 
 const WEB: ClientAttributes = { client: "web" };
 
@@ -176,7 +176,13 @@ export class WorkbenchRuntime {
   private async resume(id: string): Promise<void> {
     const waiting = await this.waiting(id);
     if (!waiting.length || this.active.has(id) || this.closing) return;
-    await this.start(id, waiting.filter(message => this.claim(id, message)));
+    try { await this.start(id, waiting.filter(message => this.claim(id, message))); } catch (error) {
+      // A message that cannot start its Run is never left quietly queued: the session says why, and the message stays for the next send.
+      this.delivered.delete(id);
+      if (!(error instanceof UsageCapExceeded)) throw error;
+      await this.store.update(id, s => { s.status = "failed"; s.error = error.message; s.errorCode = error.code; delete s.errorRef; });
+      this.emit(id, "state");
+    }
   }
   /** Studio has no memory layer for conversations, so the strategy gets no CompactionMemory. */
   private strategy(): CompactionStrategy<AgentMessage> {
