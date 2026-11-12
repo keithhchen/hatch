@@ -964,9 +964,7 @@ export default function HatchPage() {
         <div className="footer-cols">
           <div>
             <p className="eyebrow">{t.footer.product}</p>
-            <a href="/explore">{t.footer.explore}</a>
             <a href="/studio">{t.footer.login}</a>
-            <a href="/download">{t.footer.download}</a>
             <a href="/developers">{t.footer.developers}</a>
           </div>
           <div>
