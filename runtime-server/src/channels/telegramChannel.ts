@@ -12,6 +12,8 @@ type TelegramUpdate = {
     video?: { file_id: string; file_name?: string; file_size?: number }; video_note?: { file_id: string; file_size?: number }; animation?: { file_id: string; file_name?: string; file_size?: number };
     voice?: { file_id: string; file_size?: number }; audio?: { file_id: string; file_name?: string; file_size?: number };
   };
+  /** The user blocked the bot (`kicked`) or unblocked it. In a private chat only: a group member change is not a binding. */
+  my_chat_member?: { chat: { id: number; type: string }; from: { id: number }; new_chat_member: { status: string } };
   callback_query?: { id: string; from: { id: number }; data?: string; message?: { message_id: number; chat: { id: number; type?: string } } };
 };
 
@@ -42,6 +44,8 @@ export class TelegramChannel implements ChannelAdapter {
     // update_id grows with every update the bot gets: it is the order Telegram means, which deliveries do not keep.
     const eventId = String(update.update_id);
     const sequence = update.update_id;
+    const membership = update.my_chat_member;
+    if (membership) return { events: membership.chat.type === "private" && membership.new_chat_member.status === "kicked" ? [{ eventId, sequence, address: { threadId: String(membership.chat.id), senderId: String(membership.from.id) }, unbound: true as const }] : [] };
     const query = update.callback_query;
     if (query) {
       const match = query.data?.match(/^t:([0-9a-f-]{36}):(approve|decline)$/);
@@ -109,7 +113,7 @@ export class TelegramChannel implements ChannelAdapter {
    * nothing and reorder. The inbox still orders a thread by update_id for what one connection cannot prevent: a retried update.
    */
   async setWebhook(url: string, secret: string): Promise<void> {
-    await this.call("setWebhook", { url, secret_token: secret, allowed_updates: ["message", "callback_query"], max_connections: WEBHOOK_MAX_CONNECTIONS });
+    await this.call("setWebhook", { url, secret_token: secret, allowed_updates: ["message", "callback_query", "my_chat_member"], max_connections: WEBHOOK_MAX_CONNECTIONS });
   }
   async deleteWebhook(): Promise<void> { await this.call("deleteWebhook", {}); }
   async download(file: InboundFile): Promise<Buffer> {

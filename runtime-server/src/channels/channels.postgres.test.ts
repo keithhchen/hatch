@@ -127,7 +127,7 @@ async function stack(pool: Pool, config: { adapters?: FakeAdapter[]; gateway?: C
       await new Promise(resolve => setTimeout(resolve, 20));
     }
   };
-  return { ...stores, service, settle, adapter: adapters[0]!, target, clock, errors, advance: (ms: number) => { clock.at = new Date(clock.at.getTime() + ms); } };
+  return { ...stores, service, dispatcher: (service as unknown as { dispatcher: Dispatcher }).dispatcher, settle, adapter: adapters[0]!, target, clock, errors, advance: (ms: number) => { clock.at = new Date(clock.at.getTime() + ms); } };
 }
 
 /** Links `sender` as the owner of a new account on the shared platform. */
@@ -160,10 +160,11 @@ test("A one-time code links a sender to an account; the sender can move, and rev
   assert.equal((await env.connections.linked(owner)).length, 0);
   assert.equal(await env.connections.redeem("telegram", "", code, address("43")), undefined, "the code was used");
 
-  await env.connections.revoke(other, "telegram");
+  await env.connections.unbind(other, "telegram");
   assert.equal(await env.connections.resolveConnection({ channel: "telegram", scope: "", senderId: "42" }), undefined);
-  assert.equal((await env.connections.owned(other))[0]?.state, "revoked");
-  // Relinking brings it back.
+  assert.deepEqual(await env.connections.owned(other), [], "an unbound Connection is gone, not kept as revoked");
+  await env.connections.unbind(other, "telegram");
+  // Binding again is binding anew.
   const fresh = await env.connections.issueCode(other, "telegram");
   assert.equal((await env.connections.redeem("telegram", "", fresh, address("44")))?.state, "active");
 }));
@@ -201,7 +202,7 @@ test("An account binds its Assistant and each Product separately: each chat reac
   assert.deepEqual((await connections.linked(owner)).map(entry => entry.identity?.senderId), ["1"], "the Assistant reaches the account only where the Assistant is bound");
   assert.deepEqual((await connections.owned(owner)).map(entry => [entry.target.kind, entry.senderId]).sort(), [["assistant", "1"], ["product", "2"], ["product", "3"]]);
 
-  await connections.revoke(owner, "telegram", product("pa"));
+  await connections.unbind(owner, "telegram", product("pa"));
   assert.equal(await reach("2"), undefined);
   assert.ok(await reach("1") && await reach("3") && await reach("4"));
   // A chat holds one binding: binding it again moves it.
@@ -452,16 +453,82 @@ test("A refused send is retried a bounded number of times, then failed", options
   assert.equal(row.attempts, 5);
 }));
 
-test("Lost access marks the Connection degraded; a later send that works restores it", options, async () => isolated(async pool => {
-  const env = await stack(pool);
-  const owner = await pushOne(env);
-  env.adapter.failures = [new ChannelSendError("forbidden", "permanent", { access: true })];
+/** A Product's Connection on an Expert's own bot (scope `page-1`), which serves anyone who writes to it. */
+async function publicConnection(pool: Pool, owner: string): Promise<string> {
+  return (await pool.query("INSERT INTO hatch_connections (owner_account_id, channel, scope, target, target_key, audience) VALUES ($1, 'telegram', 'page-1', $2, 'product:p1', 'public') RETURNING id", [owner, JSON.stringify({ kind: "product", productId: "p1" })])).rows[0].id;
+}
+
+test("Lost access on a Connection that serves others marks it degraded; a later send that works restores it", options, async () => isolated(async pool => {
+  const adapter = new FakeAdapter("telegram", "page-1");
+  const env = await stack(pool, { adapters: [adapter] });
+  const owner = randomUUID();
+  const connectionId = await publicConnection(pool, owner);
+  const send = () => env.dispatcher.send({ connectionId, channel: "telegram", scope: "page-1", address: address("stranger"), kind: "reply", message: { text: "hi" } });
+  adapter.failures = [new ChannelSendError("forbidden", "permanent", { access: true })];
+  await send();
   await env.service.drain();
-  assert.equal((await env.connections.owned(owner))[0]?.state, "degraded");
+  assert.equal((await env.connections.owned(owner))[0]?.state, "degraded", "one contact blocking the bot, or a bad token: the Connection stays, degraded");
   assert.equal((await pool.query("SELECT state FROM hatch_channel_outbox ORDER BY seq DESC LIMIT 1")).rows[0].state, "failed");
-  await env.service.push(owner, { text: "again" });
+  await send();
   await env.service.drain();
   assert.equal((await env.connections.owned(owner))[0]?.state, "active");
+}));
+
+test("Lost access on a person's own binding means they unbound it from their side: it is gone, and nothing more is queued for it", options, async () => isolated(async pool => {
+  const env = await stack(pool);
+  const owner = await pushOne(env);
+  env.adapter.failures = [new ChannelSendError("Forbidden: bot was blocked by the user", "permanent", { access: true })];
+  await env.service.drain();
+  assert.deepEqual(await env.connections.owned(owner), []);
+  assert.equal((await pool.query("SELECT count(*)::int AS n FROM hatch_channel_identities")).rows[0].n, 0);
+  assert.equal(await env.service.push(owner, { text: "again" }), false);
+  assert.equal(await env.connections.unbindPersonal("00000000-0000-4000-8000-000000000000"), false, "twice is fine");
+}));
+
+test("Unbinding in Studio deletes the Connection and its identities, and a message still queued for it is never sent; unbinding twice is fine", options, async () => isolated(async pool => {
+  const env = await stack(pool);
+  const owner = await pushOne(env, "queued before the unbind");
+  await env.service.disconnect(owner, "telegram");
+  await env.service.disconnect(owner, "telegram");
+  await env.service.drain();
+  assert.deepEqual(env.adapter.texts, [], "the queued message was not sent");
+  assert.deepEqual((await pool.query("SELECT state, connection_id FROM hatch_channel_outbox ORDER BY seq DESC LIMIT 1")).rows, [{ state: "cancelled", connection_id: null }]);
+  assert.deepEqual(await env.connections.owned(owner), []);
+  assert.equal((await pool.query("SELECT count(*)::int AS n FROM hatch_connections")).rows[0].n, 0);
+  assert.equal((await pool.query("SELECT count(*)::int AS n FROM hatch_channel_identities")).rows[0].n, 0);
+  assert.equal(await env.service.push(owner, { text: "later" }), false);
+  // A late reply to a Connection that is gone is not queued at all.
+  assert.equal(await env.dispatcher.send({ connectionId: "00000000-0000-4000-8000-000000000000", channel: "telegram", scope: "", address: address("42"), kind: "reply", message: { text: "late" } }), undefined);
+}));
+
+test("A user blocking the bot unbinds their own binding at once; a contact blocking an Expert's bot only forgets the contact", options, async () => isolated(async pool => {
+  const env = await stack(pool);
+  const owner = await link(env, "42");
+  await env.service.accept(env.adapter, [{ eventId: "blocked-1", address: address("42"), unbound: true }]);
+  await env.service.drain();
+  assert.deepEqual(await env.connections.owned(owner), []);
+  assert.equal(await env.connections.resolveConnection({ channel: "telegram", scope: "", senderId: "42" }), undefined);
+  assert.equal(env.target.handled.length, 0, "an unbound event reaches no Agent");
+
+  const adapter = new FakeAdapter("telegram", "page-1");
+  const bot = await stack(pool, { adapters: [adapter] });
+  const botOwner = randomUUID();
+  const connectionId = await publicConnection(pool, botOwner);
+  await bot.connections.meet((await bot.connections.get(connectionId))!, address("stranger"));
+  await bot.service.accept(adapter, [{ eventId: "blocked-2", address: address("stranger"), unbound: true }]);
+  await bot.service.drain();
+  assert.equal((await bot.connections.owned(botOwner)).length, 1, "the Product's bot keeps serving everyone else");
+  assert.equal((await bot.connections.resolveConnection({ channel: "telegram", scope: "page-1", senderId: "stranger" }))?.identity, undefined);
+}));
+
+test("Revoked Connections that an older version left are deleted on boot, and the state no longer allows `revoked`", options, async () => isolated(async pool => {
+  await stack(pool);
+  const insert = "INSERT INTO hatch_connections (owner_account_id, channel, target, target_key, audience, state) VALUES ($1, 'telegram', '{\"kind\":\"assistant\"}', 'assistant', 'self', 'revoked')";
+  await pool.query("ALTER TABLE hatch_connections DROP CONSTRAINT hatch_connections_state_check; ALTER TABLE hatch_connections ADD CONSTRAINT hatch_connections_state_check CHECK (state IN ('active', 'degraded', 'revoked'))");
+  await pool.query(insert, [randomUUID()]);
+  for (let boot = 0; boot < 2; boot += 1) await stack(pool);
+  assert.equal((await pool.query("SELECT count(*)::int AS n FROM hatch_connections")).rows[0].n, 0);
+  await assert.rejects(pool.query(insert, [randomUUID()]), /check/i);
 }));
 
 test("After a partial failure only the unsent parts are sent", options, async () => isolated(async pool => {

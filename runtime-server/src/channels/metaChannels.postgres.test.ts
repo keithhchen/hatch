@@ -220,7 +220,7 @@ test("An uninstall revokes the tenant's Connections at once: nobody stays linked
   assert.ok(await env.connections.credentialsOf("slack", "T1"));
   await accept(env, slackEvent({ type: "app_uninstalled" }, "Ev2"));
   assert.equal((await env.connections.linked(owner)).length, 0);
-  assert.equal((await env.connections.owned(owner))[0]?.state, "revoked");
+  assert.deepEqual(await env.connections.owned(owner), [], "the uninstalled app's Connection is gone");
   assert.equal(await env.connections.credentialsOf("slack", "T1"), undefined);
   assert.equal(await env.connections.resolveConnection({ channel: "slack", scope: "T1", senderId: "U1" }), undefined);
   await assert.rejects(env.adapter.send({ threadId: "T1:D1", senderId: "U1" }, { text: "hi" }, "k"), (error: unknown) => error instanceof ChannelSendError && error.options.access === true);
@@ -258,6 +258,6 @@ test("An Instagram token that ran out cannot be renewed: its Connection is revok
   const owner = randomUUID();
   await env.connections.saveCredentials(owner, "instagram", seal.seal({ token: "long-1", userId: "IG1", expiresAt: 60 * DAY, refreshedAt: 0 }), "IG1");
   await refresher(env, new Date(61 * DAY)).run();
-  assert.equal((await env.connections.owned(owner))[0]?.state, "revoked");
+  assert.deepEqual(await env.connections.owned(owner), [], "a token that no longer works is an unbound Connection, credentials and all");
   assert.equal(await env.connections.credentialsOf("instagram", "IG1"), undefined);
 }));

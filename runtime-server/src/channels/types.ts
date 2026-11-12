@@ -27,8 +27,10 @@ export type InboundEvent = {
   address: PlatformAddress;
   /** The platform tenant the event belongs to. Absent: the adapter's own scope. A platform whose one endpoint serves many tenants sets it per event. */
   scope?: string;
-  /** The platform ended this tenant's access (an uninstall, a revoked token): no message. Its Connections are revoked at once. */
+  /** The platform ended this tenant's access (an uninstall, a revoked token): no message. Its Connections are unbound at once. */
   revoked?: true;
+  /** This sender took themselves away from the bot (blocked or removed it): their binding is unbound, with no message. */
+  unbound?: true;
   /** The platform refuses any message to this thread (such as another tenant's one-to-one chat): stored, never routed, never answered. */
   unreachable?: true;
   /** A group thread. Group messages reach us only when they address the bot (a mention, or a reply to it). */

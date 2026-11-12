@@ -159,7 +159,7 @@ export class ChannelService implements AssistantChannels {
     return { code, ...(url ? { url } : {}) };
   }
 
-  disconnect(accountId: string, kind: ChannelKind, target: AgentTarget = STUDIO_TARGET): Promise<void> { return this.connections.revoke(accountId, kind, target); }
+  disconnect(accountId: string, kind: ChannelKind, target: AgentTarget = STUDIO_TARGET): Promise<void> { return this.connections.unbind(accountId, kind, target); }
 
   /** The Connection the account holds on a platform for a target: the Expert's own, or a Product's public one where it has a bot of its own. */
   private ownedFor(owned: OwnedConnection[], kind: ChannelKind, target: AgentTarget): OwnedConnection | undefined {
@@ -179,7 +179,7 @@ export class ChannelService implements AssistantChannels {
       const own = this.ownedFor(owned, kind, target);
       const adapter = await this.deps.hub.get(kind, own?.hasCredentials ? own.scope : this.deps.scopeOf(accountId, kind));
       return {
-        kind, available: Boolean(adapter), linked: Boolean(own?.linked && own.state !== "revoked"), configured: Boolean(own?.hasCredentials && own.state !== "revoked"),
+        kind, available: Boolean(adapter), linked: Boolean(own?.linked), configured: Boolean(own?.hasCredentials),
         ...(adapter?.handle ? { handle: adapter.handle } : {}),
         ...(own ? { state: own.state } : {}), ...(own?.lastEventAt ? { lastEventAt: own.lastEventAt } : {}), ...(own?.linked && own.senderId ? { senderId: own.senderId } : {}),
       };

@@ -25,7 +25,7 @@ export type Send = { connectionId?: string; channel: ChannelKind; scope: string;
  */
 export class Dispatcher {
   constructor(private deps: {
-    outbox: Outbox; hub: ChannelHub; limiter: RateLimiter; connections: Pick<ConnectionRepository, "setState">; inbox: Pick<Inbox, "lastInbound">;
+    outbox: Outbox; hub: ChannelHub; limiter: RateLimiter; connections: Pick<ConnectionRepository, "setState" | "unbindPersonal">; inbox: Pick<Inbox, "lastInbound">;
     now?: () => Date; rates?: { chat: Rate; connection: Rate }; maxAttempts?: number; onQueued?: () => void; onError?: (error: unknown) => void;
   }) {}
 
@@ -101,6 +101,7 @@ export class Dispatcher {
     const next = deliveryAfterFailure({ failure: sendError.failure, idempotent: capabilities.idempotentSend });
     if (next === "pending") await this.retry(delivery, sendError.message, sendError.options.retryAfterMs);
     else await this.deps.outbox.settle(delivery.id, next, sendError.message);
-    if (sendError.options.access && delivery.connectionId) await this.deps.connections.setState(delivery.connectionId, "degraded");
+    // A person's own binding that the platform refuses has been unbound from their side, and is gone. A Connection that serves others, or an Expert's own bot, is only degraded: one contact blocking it is not the token failing.
+    if (sendError.options.access && delivery.connectionId && !await this.deps.connections.unbindPersonal(delivery.connectionId)) await this.deps.connections.setState(delivery.connectionId, "degraded");
   }
 }

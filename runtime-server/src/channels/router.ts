@@ -29,7 +29,8 @@ export class ChannelRouter {
     // A scope nobody serves any more is refused: whatever it asked would be answered by another tenant's bot.
     if (!await this.deps.hub.get(channel, scope)) { this.deps.onError?.(new Error(`Refused an inbound ${channel} event for unknown scope "${scope}"`)); return { replied: true }; }
     if (event.unreachable) return { replied: true };
-    if (event.revoked) { await connections.revokeTenant(channel, scope); return { replied: true }; }
+    if (event.revoked) { await connections.unbindTenant(channel, scope); return { replied: true }; }
+    if (event.unbound) { await connections.unbindSender(channel, scope, event.address.senderId); return { replied: true }; }
     const say = (text: string, connectionId?: string, link?: { label: string; url: string }) => this.deps.notify({ ...(connectionId ? { connectionId } : {}), channel, scope, address: event.address }, text, event.messageRef, link);
     /** The sign-in button for a sender we do not know, or false where there is none. */
     const offerSignIn = async (): Promise<boolean> => {
