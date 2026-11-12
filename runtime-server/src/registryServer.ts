@@ -237,7 +237,8 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       nodePersistence,
       { objectStore: nodeObjectStore },
       productFileStore,
-      environment.HATCH_CREATOR_PRODUCT_FILES_PREFIX?.trim() || "creator-products"
+      environment.HATCH_CREATOR_PRODUCT_FILES_PREFIX?.trim() || "creator-products",
+      { recorder: usage, cap: usageCap }
     )
     : undefined;
   const graphPool = store.databasePool();
@@ -286,6 +287,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     ),
     {
       workerId: `factory-http-${process.pid}-${randomUUID()}`,
+      usage,
       // The direct HTTP starter and the durable recovery worker share this
       // lease. It must exceed the Factory LLM's 15-minute hard deadline so a
       // slow prompt is not reclaimed while the request is still executing.
@@ -301,7 +303,8 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     objectStore,
     graphStore,
     productFileStore,
-    (runId) => immediateFactoryWorker.startRun(runId, immediateFactoryStop.signal)
+    (runId) => immediateFactoryWorker.startRun(runId, immediateFactoryStop.signal),
+    usageCap
   );
   const publishToken = environment.HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN?.trim() || "";
   const runtimeServiceToken = environment.HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN?.trim() || "";
@@ -419,6 +422,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       },
       productPrefix: (accountId, productId) => `${productsPrefix}/${accountId}/${productId}`,
       owns: ownsProduct,
+      usageCap,
     });
     const assistant = new AssistantService({
       tasks, reach, channels,
@@ -1125,13 +1129,13 @@ async function route(
     };
 
     if (request.method === "GET" && executionId && !isAnswers) {
-      const execution = await context.factoryNodeService.getExecution(productId, node, executionId);
+      const execution = await context.factoryNodeService.getExecution(productId, node, executionId, account.id);
       if (!execution) { sendJson(response, 404, { error: { code: "execution_not_found", message: "Node execution was not found." } }); return; }
       sendJson(response, 200, publicFactoryNodeExecution(execution));
       return;
     }
     if (request.method === "GET" && !executionId && !isAnswers) {
-      const execution = await context.factoryNodeService.getLatestExecution(productId, node);
+      const execution = await context.factoryNodeService.getLatestExecution(productId, node, account.id);
       sendJson(response, 200, execution
         ? publicFactoryNodeExecution(execution)
         : { node, product_id: productId, status: "not_started" });
@@ -1403,7 +1407,7 @@ async function route(
         job => sendJson(response, 202, { job: publicJob(job) }),
         error => {
           const failure = error instanceof IdempotencyKeyReused ? new IngestError(422, "idempotency_key_reused", error.message) : error;
-          if (!(failure instanceof IngestError)) throw failure;
+          if (!(failure instanceof IngestError || failure instanceof ChatError)) throw failure;
           sendJson(response, failure.status, { error: { code: failure.code, message: failure.message }, detail: failure.message });
         });
       return;

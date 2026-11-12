@@ -13,6 +13,9 @@ import { ProductFileStore } from "./productFiles.js";
 import type { NodeScope } from "../node.js";
 import { normalizeNodeObjectPath } from "../node.js";
 import { NodeRuntime } from "../nodeRuntime.js";
+import { usageSink, type UsageRecorder, type UsageSink } from "../usage/usage.js";
+import type { UsageCap } from "../usage/usageCap.js";
+import { log } from "../observability/log.js";
 import {
   NodeOssStore,
   type NodeStorage
@@ -89,10 +92,20 @@ export class FactoryNodeService {
     private readonly executionStore: NodeExecutionStore,
     private readonly storage: NodeStorage,
     private readonly productFiles: ProductFileStore,
-    productObjectPrefix = "creator-products"
+    productObjectPrefix = "creator-products",
+    /** Each model call of a Node is the Expert's Studio usage; a Node is not started once the Expert has spent the month. */
+    private readonly usage?: { recorder: UsageRecorder; cap?: UsageCap }
   ) {
     this.nodeStore = new NodeOssStore(storage);
     this.productObjectPrefix = normalizeNodeObjectPath(productObjectPrefix);
+  }
+
+  private sinkFor(creatorId: string, productId: string): UsageSink | undefined {
+    return this.usage && usageSink(this.usage.recorder, { accountId: creatorId, surface: "studio", productId }, log);
+  }
+
+  private assertWithinCap(creatorId: string): Promise<void> {
+    return this.usage?.cap?.assertWithinCap(creatorId) ?? Promise.resolve();
   }
 
   async runAboutYou(input: {
@@ -103,6 +116,7 @@ export class FactoryNodeService {
     executionId?: string;
     signal?: AbortSignal;
   }): Promise<FactoryNodeRunView> {
+    await this.assertWithinCap(input.creatorId);
     const executionId = executionIdFor("about-you", input.executionId);
     const nodeInput: AboutYouInput = {
       files: await this.resolveFilePaths(input.creatorId, input.product.productId, input.fileIds, input.filePaths),
@@ -112,7 +126,8 @@ export class FactoryNodeService {
       aboutYouNode,
       scope(input.product.productId, "about-you", executionId),
       nodeInput,
-      input.signal
+      input.signal,
+      this.sinkFor(input.creatorId, input.product.productId)
     );
     const state = await this.executionStore.load({ scope: scope(input.product.productId, "about-you", executionId) });
     return {
@@ -137,12 +152,13 @@ export class FactoryNodeService {
     filePaths?: string[];
     executionId?: string;
   }): Promise<FactoryNodeExecutionView> {
+    await this.assertWithinCap(input.creatorId);
     const executionId = executionIdFor("about-you", input.executionId);
     const nodeInput: AboutYouInput = {
       files: await this.resolveFilePaths(input.creatorId, input.product.productId, input.fileIds, input.filePaths),
       product: await this.writeProductArtifact(input.creatorId, input.product)
     };
-    return this.enqueue("about-you", input.product.productId, executionId, nodeInput);
+    return this.enqueue("about-you", input.product.productId, executionId, nodeInput, input.creatorId);
   }
 
   /**
@@ -200,6 +216,7 @@ export class FactoryNodeService {
     filePaths?: string[];
     executionId?: string;
   }): Promise<FactoryNodeExecutionView> {
+    await this.assertWithinCap(input.creatorId);
     const aboutYouRef = await this.validateAboutYouReference(input.product.productId, input.aboutYouRef);
     const executionId = executionIdFor("corpus", input.executionId);
     const nodeInput: CorpusInput = corpusInputSchema.parse({
@@ -207,7 +224,7 @@ export class FactoryNodeService {
       product: await this.writeProductArtifact(input.creatorId, input.product),
       about_you: aboutYouRef
     });
-    return this.enqueue("corpus", input.product.productId, executionId, nodeInput);
+    return this.enqueue("corpus", input.product.productId, executionId, nodeInput, input.creatorId);
   }
 
   async runCorpus(input: {
@@ -219,6 +236,7 @@ export class FactoryNodeService {
     executionId?: string;
     signal?: AbortSignal;
   }): Promise<FactoryNodeRunView> {
+    await this.assertWithinCap(input.creatorId);
     const aboutYouRef = await this.validateAboutYouReference(input.product.productId, input.aboutYouRef);
     const executionId = executionIdFor("corpus", input.executionId);
     const nodeInput: CorpusInput = corpusInputSchema.parse({
@@ -230,7 +248,8 @@ export class FactoryNodeService {
       corpusNode,
       scope(input.product.productId, "corpus", executionId),
       nodeInput,
-      input.signal
+      input.signal,
+      this.sinkFor(input.creatorId, input.product.productId)
     );
     const state = await this.executionStore.load({ scope: scope(input.product.productId, "corpus", executionId) });
     return {
@@ -250,13 +269,15 @@ export class FactoryNodeService {
   async getExecution(
     productId: string,
     node: "about-you" | "corpus",
-    executionId: string
+    executionId: string,
+    /** Who is asking. An unfinished execution is only picked back up for the Expert who pays for it. */
+    creatorId?: string
   ): Promise<FactoryNodeExecutionView | undefined> {
     const executionScope = scope(productId, node, executionId);
     const state = await this.executionStore.load({ scope: executionScope });
     if (!state) return undefined;
-    if ((state.status === "queued" || state.status === "running") && state.inputRef) {
-      this.resumeIfNeeded(node, executionScope, state.inputRef);
+    if (creatorId && (state.status === "queued" || state.status === "running") && state.inputRef) {
+      this.resumeIfNeeded(node, executionScope, state.inputRef, creatorId);
     }
     let output: unknown;
     if (state.outputRef) {
@@ -281,11 +302,12 @@ export class FactoryNodeService {
 
   async getLatestExecution(
     productId: string,
-    node: "about-you" | "corpus"
+    node: "about-you" | "corpus",
+    creatorId?: string
   ): Promise<FactoryNodeExecutionView | undefined> {
     const latest = await this.executionStore.latest?.(productId, node);
     if (!latest) return undefined;
-    return this.getExecution(productId, node, latest.scope.executionId);
+    return this.getExecution(productId, node, latest.scope.executionId, creatorId);
   }
 
   /** The only hand-off lookup that may feed Publish: completed output only. */
@@ -306,7 +328,8 @@ export class FactoryNodeService {
     node: "about-you" | "corpus",
     productId: string,
     executionId: string,
-    input: AboutYouInput | CorpusInput
+    input: AboutYouInput | CorpusInput,
+    creatorId: string
   ): Promise<FactoryNodeExecutionView> {
     const executionScope = scope(productId, node, executionId);
     const existing = await this.executionStore.load({ scope: executionScope });
@@ -336,7 +359,7 @@ export class FactoryNodeService {
         };
     await this.executionStore.save({ scope: executionScope }, state);
     if (!this.activeExecutions.has(executionKey(executionScope))) {
-      const task = this.execute(node, executionScope, input)
+      const task = this.execute(node, executionScope, input, creatorId)
         .catch(() => undefined)
         .finally(() => this.activeExecutions.delete(executionKey(executionScope)));
       this.activeExecutions.set(executionKey(executionScope), task);
@@ -346,11 +369,11 @@ export class FactoryNodeService {
     return view;
   }
 
-  private resumeIfNeeded(node: "about-you" | "corpus", executionScope: NodeScope, inputRef: string): void {
+  private resumeIfNeeded(node: "about-you" | "corpus", executionScope: NodeScope, inputRef: string, creatorId: string): void {
     const key = executionKey(executionScope);
     if (this.activeExecutions.has(key)) return;
     const task = this.nodeStore.readJson(executionScope, inputRef)
-      .then((input) => this.execute(node, executionScope, input as AboutYouInput | CorpusInput))
+      .then((input) => this.execute(node, executionScope, input as AboutYouInput | CorpusInput, creatorId))
       .catch(async (error) => {
         await this.markExecutionFailed(executionScope, error);
       })
@@ -361,18 +384,20 @@ export class FactoryNodeService {
   private async execute(
     node: "about-you" | "corpus",
     executionScope: NodeScope,
-    input: AboutYouInput | CorpusInput
+    input: AboutYouInput | CorpusInput,
+    creatorId: string
   ): Promise<void> {
+    const usage = this.sinkFor(creatorId, executionScope.productId);
     try {
       if (node === "about-you") {
-        await this.runtime.run(aboutYouNode, executionScope, aboutYouInputSchema.parse(input));
+        await this.runtime.run(aboutYouNode, executionScope, aboutYouInputSchema.parse(input), undefined, usage);
         const state = await this.executionStore.load({ scope: executionScope });
         if (state?.status === "completed") {
           await this.executionStore.save({ scope: executionScope }, { ...state, status: "waiting_for_creator" });
         }
         return;
       }
-      await this.runtime.run(corpusNode, executionScope, corpusInputSchema.parse(input));
+      await this.runtime.run(corpusNode, executionScope, corpusInputSchema.parse(input), undefined, usage);
     } catch (error) {
       // NodeRuntime persists failures that happen inside its loop. This
       // second boundary covers failures before Runtime can create its first

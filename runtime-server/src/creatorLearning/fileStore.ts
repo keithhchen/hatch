@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, writeFile, appendFile, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { isObjectStoreNotFound, type ArtifactObjectStore } from "./objectStore.js";
+import type { UsageSink } from "../usage/usage.js";
 import { graphEventKey, newGraphEventId, type DistillationGraphStore, type DistillationEventType, type DistillationNodeKind } from "./distillationGraph.js";
 import type {
   ArtifactRef,
@@ -15,6 +16,8 @@ import type {
 export class FactoryFileStore {
   private static readonly activeInitializationLeases = new Map<string, string>();
   readonly runId: string;
+  /** Where this run's model calls are recorded as the Expert's usage. */
+  readonly usage?: UsageSink;
   private readonly runDirectory: string;
   private readonly initializationLeasePath: string;
   private readonly initializationToken = randomUUID();
@@ -33,8 +36,10 @@ export class FactoryFileStore {
       objectPrefix?: string;
       graphStore?: DistillationGraphStore;
       graphContext?: { productId?: string; runId?: string; revisionId?: string };
+      usage?: UsageSink;
     } = {}
   ) {
+    this.usage = options.usage;
     this.runId = runId ?? randomUUID();
     this.runDirectory = containedPath(root, this.runId);
     this.initializationLeasePath = path.join(this.runDirectory, ".initializing");

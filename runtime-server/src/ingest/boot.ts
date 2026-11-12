@@ -15,6 +15,7 @@ import { ProductWorkspaceSink, type ManualFiles } from "./sink.js";
 import { IngestService, STALE_MS } from "./service.js";
 import { log } from "../observability/log.js";
 import { modelRole } from "../modelRoles.js";
+import type { UsageCap } from "../usage/usageCap.js";
 
 /** A deployment without a profile seal has no stored logins: links run anonymously. */
 export class NoBrowserProfiles implements BrowserProfileStore {
@@ -50,9 +51,11 @@ export const createIngestService = async (deps: {
   productPrefix: (accountId: string, productId: string) => string;
   /** Whether the account owns the Product. */
   owns: (accountId: string, productId: string) => Promise<boolean>;
+  usageCap?: UsageCap;
 }): Promise<IngestService> => {
   const service = new IngestService({
     owns: deps.owns,
+    usageCap: deps.usageCap,
     jobs: await PostgresIngestJobs.open(deps.pool),
     engine: new RoutingEngine([new PlainTextEngine(), await hostedEngineFromEnvironment(deps.environment, deps.pool, deps.seal)]),
     sink: new ProductWorkspaceSink(deps.manual, deps.objects, deps.productPrefix),

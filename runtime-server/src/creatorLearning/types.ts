@@ -1,3 +1,5 @@
+import type { UsageSink } from "../usage/usage.js";
+
 export type FactoryStage =
   | "extracting_evidence"
   | "awaiting_creator_answers"
@@ -500,6 +502,8 @@ export type FactoryPromptCall = {
   reportFailureTelemetry?: (telemetry: FactoryPromptFailureTelemetry) => void;
   /** Execution cancellation only; never part of a persisted prompt contract. */
   signal?: AbortSignal;
+  /** Host-only: told of each completed model call so the Expert's Studio usage is recorded. */
+  onModelCall?: UsageSink;
 };
 
 export type FactoryPromptRunner = (call: FactoryPromptCall) => Promise<string>;
@@ -542,4 +546,6 @@ export type FactoryExecutionControl = {
   signal?: AbortSignal;
   /** Fence every durable file commit against the current lease owner/token. */
   beforeCommit?: () => Promise<void>;
+  /** Records each model call of this run as the Expert's Studio usage. */
+  usage?: UsageSink;
 };

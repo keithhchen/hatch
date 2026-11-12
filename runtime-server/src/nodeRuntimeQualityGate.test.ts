@@ -8,6 +8,8 @@ import { corpusNode, type CorpusInput, type CorpusOutput } from "./creatorLearni
 import { LocalArtifactObjectStore } from "./creatorLearning/objectStore.js";
 import { NodeRuntime, type NodeAgentFactory } from "./nodeRuntime.js";
 import type { NodeScope } from "./node.js";
+import { InMemoryUsageLedger } from "./usage/memoryUsage.js";
+import { usageSink, type UsageEvent } from "./usage/usage.js";
 import type { NodeExecutionRef, NodeExecutionState, NodeExecutionStore, NodeSessionRef, NodeSessionStore } from "./nodeSession.js";
 
 test("NodeRuntime applies a host quality gate before Critic review", async (t) => {
@@ -37,6 +39,34 @@ test("NodeRuntime applies a host quality gate before Critic review", async (t) =
   assert.equal(result.output.system_instructions, result.rounds[1]?.candidate.system_instructions);
   assert.equal(executionStore.require(scope).status, "completed");
   assert.equal(executionStore.require(scope).round, 2);
+});
+
+test("NodeRuntime reports each model call of an execution to the usage sink", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-node-usage-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const runtime = new NodeRuntime({
+    storage: { objectStore: new LocalArtifactObjectStore(root) },
+    executionStore: new MemoryExecutionStore(),
+    sessionStore: new MemorySessionStore(),
+    maxRounds: 3,
+    agentFactory: scriptedAgentFactory([shortCorpus(), denseCorpus()], [{ decision: "done" }])
+  });
+  const ledger = new InMemoryUsageLedger();
+  const events: UsageEvent[] = [];
+  const recorder = { record: async (event: UsageEvent) => { events.push(event); await ledger.record(event); } };
+  const sink = usageSink(recorder, { accountId: "creator-one", surface: "studio", productId: "product-one" }, { error: () => undefined });
+  const scope: NodeScope = { productId: "product-one", nodeName: "corpus", executionId: "corpus-usage" };
+
+  await runtime.run(corpusNode, scope, input, undefined, sink);
+
+  // Two actor calls and one critic call, each its own event.
+  assert.equal(events.length, 3);
+  assert.equal(new Set(events.map((event) => event.id)).size, 3);
+  assert.ok(events.every((event) => event.id.startsWith("corpus:corpus-usage:") && event.accountId === "creator-one" && event.productId === "product-one" && event.surface === "studio" && event.model === "scripted-model"));
+  assert.deepEqual((await ledger.monthToDate("creator-one")).studio, { input: 90, cachedInput: 0, output: 15, reasoning: 0 });
+  // Writing a call again, as a retried write would, counts nothing more.
+  await recorder.record(events[0]!);
+  assert.deepEqual((await ledger.monthToDate("creator-one")).studio, { input: 90, cachedInput: 0, output: 15, reasoning: 0 });
 });
 
 const input: CorpusInput = {
@@ -104,7 +134,7 @@ class ScriptedAgent {
     const finalizer = this.tools.find((tool) => tool.name === "submit_output");
     assert.ok(finalizer, "submit_output tool is registered");
     await finalizer.execute("submit-scripted-output", output, new AbortController().signal);
-    const message = { role: "assistant", content: [], timestamp: new Date().toISOString() } as unknown as AgentMessage;
+    const message = { role: "assistant", content: [], model: "scripted-model", timestamp: 1700000000000 + this.state.messages.length, usage: { input: 30, output: 5, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 35 } } as unknown as AgentMessage;
     this.state.messages.push(message);
     await this.emit({ type: "message_end", message });
   }

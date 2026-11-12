@@ -1498,7 +1498,9 @@ export class CreatorFactory {
           failureTelemetry = structuredClone(telemetry);
           call.reportFailureTelemetry?.(telemetry);
         },
-        ...(store.signal ? { signal: store.signal } : {})
+        ...(store.signal ? { signal: store.signal } : {}),
+        // Each attempt is its own execution, so its calls never collide with an earlier attempt's.
+        ...(store.usage ? { onModelCall: model => store.usage!({ ...model, id: `${timing.executionId}:${model.id}` }) } : {})
       });
       await store.settleExecution(timing, {
         status: "completed",
@@ -1652,6 +1654,7 @@ export class CreatorFactory {
     return new FactoryFileStore(this.root, runId, control.beforeCommit, control.signal, {
       objectStore: this.options.objectStore,
       graphStore: this.options.graphStore,
+      ...(control.usage ? { usage: control.usage } : {}),
       ...(graphContext ? { graphContext } : {})
     });
   }

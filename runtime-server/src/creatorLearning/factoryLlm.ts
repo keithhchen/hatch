@@ -82,8 +82,12 @@ export function createFactoryLlmPromptRunner(
       wallClockTimedOut = true;
       agent.abort();
     }, wallClockTimeoutMs);
+    let modelCalls = 0;
     const unsubscribe = agent.subscribe((event) => {
       submission.observeAgentEvent(event);
+      if (event.type === "message_end" && event.message.role === "assistant" && event.message.usage?.totalTokens > 0) {
+        void options.onModelCall?.({ id: String(modelCalls++), model: event.message.model, usage: event.message.usage });
+      }
       if (
         event.type === "message_update"
         && event.assistantMessageEvent.type === "done"
