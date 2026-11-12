@@ -48,3 +48,12 @@ test("Overview is a top tab, Advanced is a separate rail control, Start Agent an
   assert.doesNotMatch(web, /pro-tasks[^\n]*line-through/);
   assert.match(css, /\.factory-rail__advanced[^}]*margin: 0 0 0 auto/);
 });
+
+test("Publish header offers Try the chat beside View page, same live condition, in en/zh/ja", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("./studioAgentWorkspace.jsx", import.meta.url), "utf8");
+  const copy = await readFile(new URL("./studioShellCopy.js", import.meta.url), "utf8");
+  assert.match(source, /return href \? <div className="sx-agent__actions">[^]*sxOpenPublic[^]*sxTryChat/);
+  assert.match(source, /WebChatRoute\.productPath/);
+  assert.equal(copy.match(/sxTryChat: "(Try the chat|体验产品聊天|チャットを試す)"/g).length, 3);
+});

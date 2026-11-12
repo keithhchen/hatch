@@ -8,6 +8,7 @@ import { FirstBuildIntro } from "./FirstBuildDialog.jsx";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
 import { creatorFactoryPath, creatorProductPath } from "./creatorRoutes.js";
 import { isProductLive } from "./studioPath.js";
+import { WebChatRoute } from "./webChatRoute.js";
 import {
   InlineError, LoadingState, PageBoundary, RouteProblem, SectionHead, StatusPill, SuccessNotice, STUDIO_ROOT,
   absoluteUrl, arrayOf, dateTime, friendlyError, idOf, mutationKey, productName, publicPathOf, safePublicUrl, unwrap, useCopy, useRemote
@@ -55,12 +56,15 @@ export function StudioAgentWorkspace({ route, request, navigate, locale, t, prof
   </div>;
 }
 
+const chatPathOf = (product) => WebChatRoute.productPath(idOf(product, "product"));
+
 function AgentHeaderActions({ product, live, t }) {
   const { copied, copy } = useCopy();
   const href = live ? safePublicUrl(publicPathOf(product)) : null;
   return href ? <div className="sx-agent__actions">
     <Button variant="secondary" type="button" leading={<Copy aria-hidden="true" />} onClick={() => void copy(href)}>{copied ? t("copied") : t("copyLink")}</Button>
     <Button asChild variant="secondary" trailing={<ExternalLink aria-hidden="true" />}><a href={href} target="_blank" rel="noreferrer">{t("sxOpenPublic")}</a></Button>
+    <Button asChild variant="secondary" trailing={<ExternalLink aria-hidden="true" />}><a href={chatPathOf(product)} target="_blank" rel="noreferrer">{t("sxTryChat")}</a></Button>
   </div> : null;
 }
 
