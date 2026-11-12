@@ -63,7 +63,7 @@ let tempDirs: string[] = [];
 const initialCodexHome = process.env.CODEX_HOME;
 
 function createDeterministicRuntimeServer(): RuntimeServer {
-  return createRuntimeServer({
+  return createRuntimeServer({ insecureLocalMode: true,
     createRuntime: () => new DeterministicAgentRuntime()
   });
 }
@@ -425,7 +425,7 @@ test("task_start persists a model turn, assembles it, and hides it only from vis
       yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
     }
   };
-  runtimeServer = createRuntimeServer({
+  runtimeServer = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: store,
     conversationRepository: await seedLocalConversations(store, ["task-start-history"]),
     createRuntime: () => runtime
@@ -522,7 +522,7 @@ test(`visible history preserves text and tool interleave order (guard=${guardEna
       yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
     }
   };
-  runtimeServer = createRuntimeServer({
+  runtimeServer = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: store,
     conversationRepository: await seedLocalConversations(store, ["ordered-history"]),
     ...(guardEnabled ? { outputGuard: { async check() { return "pass" as const; } } } : {}),
@@ -599,7 +599,7 @@ test("Output Guard releases passed segments but commits only a blocked terminal 
       yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
     }
   };
-  runtimeServer = createRuntimeServer({
+  runtimeServer = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: store,
     conversationRepository: await seedLocalConversations(store, ["guard-conversation"]),
     createRuntime: () => runtime,
@@ -704,7 +704,7 @@ test("thinking deltas stream with Pi indexes and persist the same ordered snapsh
       yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
     }
   };
-  runtimeServer = createRuntimeServer({
+  runtimeServer = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: store,
     conversationRepository: await seedLocalConversations(store, ["thinking-conversation"]),
     createRuntime: () => runtime
@@ -775,7 +775,7 @@ test("Output Guard provider errors degrade to a normal committed response", asyn
       yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
     }
   };
-  runtimeServer = createRuntimeServer({
+  runtimeServer = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: store,
     conversationRepository: await seedLocalConversations(store, ["guard-error-conversation"]),
     createRuntime: () => runtime,
@@ -2217,7 +2217,7 @@ test("server rejects protocol 0.7 and a missing conversation before accepting bo
     productId: "local-product",
     corpusDigest: `sha256:${"0".repeat(64)}`
   });
-  runtimeServer = createRuntimeServer({ conversationStore: store, conversationRepository: repository });
+  runtimeServer = createRuntimeServer({ insecureLocalMode: true, conversationStore: store, conversationRepository: repository });
   const serverUrl = await listen(runtimeServer);
   const socket = new WebSocket(serverUrl);
   const messages: OutboundMessage[] = [];
@@ -2293,7 +2293,7 @@ test("server rejects duplicate client hello on the same connection", async () =>
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
 
   const store = new RuntimeStore(dataDir);
-  runtimeServer = createRuntimeServer({
+  runtimeServer = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: store,
     conversationRepository: await seedLocalConversations(store, ["duplicate-hello"])
   });
@@ -2340,7 +2340,7 @@ test("server requires client hello before tool results", async () => {
   const dataDir = await tempWorkspace();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
 
-  runtimeServer = createRuntimeServer();
+  runtimeServer = createRuntimeServer({ insecureLocalMode: true });
   const serverUrl = await listen(runtimeServer);
   const socket = new WebSocket(serverUrl);
   const messages: OutboundMessage[] = [];
@@ -2395,7 +2395,7 @@ test("a second window's message joins the active run in the same conversation in
   await writeFile(path.join(workspace, "notes.txt"), "Hatch concurrent run guard test.\n", "utf8");
 
   const store = new RuntimeStore(dataDir);
-  runtimeServer = createRuntimeServer({
+  runtimeServer = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: store,
     conversationRepository: await seedLocalConversations(store, ["conv_busy"]),
     createRuntime: () => new DeterministicAgentRuntime()
@@ -2440,7 +2440,7 @@ test("a client that disconnects mid-run leaves the run waiting for its tool, and
   await writeFile(path.join(workspace, "notes.txt"), "Hatch reconnect test.\n", "utf8");
 
   const store = new RuntimeStore(dataDir);
-  runtimeServer = createRuntimeServer({
+  runtimeServer = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: store,
     conversationRepository: await seedLocalConversations(store, ["conv_disconnect_lock"]),
     createRuntime: () => new DeterministicAgentRuntime()
@@ -2481,7 +2481,7 @@ test("run cancel for an unknown run does not cancel the active run", async () =>
   await writeFile(path.join(workspace, "notes.txt"), "Hatch targeted cancellation test.\n", "utf8");
 
   const store = new RuntimeStore(dataDir);
-  runtimeServer = createRuntimeServer({
+  runtimeServer = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: store,
     conversationRepository: await seedLocalConversations(store, ["conv_cancel_targeted"]),
     createRuntime: () => new DeterministicAgentRuntime()

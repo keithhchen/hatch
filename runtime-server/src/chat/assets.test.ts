@@ -67,7 +67,7 @@ async function httpFixture(withAssets: boolean) {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-chat-http-"));
   const kit = await harness();
   const seen: ConversationMessage[] = [];
-  const runtime: RuntimeServer = createRuntimeServer({
+  const runtime: RuntimeServer = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: new RuntimeStore(dataDir),
     conversationRepository: new InMemoryConversationRepository(localRuntimeAuthority(dataDir)),
     ...(withAssets ? { chatAssets: new ChatAssets({ pipeline: kit.pipeline, blobs: kit.blobs, files: new AttachmentFiles(kit.repository, kit.blobs) }) } : {}),

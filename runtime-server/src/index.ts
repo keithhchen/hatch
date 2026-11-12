@@ -163,6 +163,11 @@ export type RuntimeServerOptions = {
   /** Durable Conversation/Run control-plane. Defaults to Postgres or local app-data. */
   conversationRepository?: ConversationRepository;
   entitlementResolver?: EntitlementResolver;
+  /**
+   * Explicit local-development mode (HATCH_ALLOW_INSECURE_LOCAL_MODE). Without resolvers and without this
+   * flag every session fails with runtime_not_configured instead of receiving invented local ids.
+   */
+  insecureLocalMode?: boolean;
   /** Production identity verifier owned by the Registry. */
   authIdentityResolver?: AuthIdentityResolver;
   /** Registry-installed current Agent Corpus root, keyed by creator/agent. */
@@ -440,6 +445,7 @@ export async function createRuntimeServerFromEnvironment(
     } : {}),
     creatorToolControlPlane: creatorToolControlPlaneFromEnvironment(environment),
     entitlementResolver: registryAuth ?? fileEntitlements,
+    insecureLocalMode,
     authIdentityResolver: registryAuth,
     agentCorpusResolver: runtimeRegistryToken && registryUrl
       ? new RuntimeReleaseAgentCorpusResolver({
@@ -630,13 +636,24 @@ type RuntimeReadiness = {
   repository: ReadinessCheck;
   deliveryAccounting: ReadinessCheck | "disabled";
 };
+const runtimeNotConfiguredError = () => new EntitlementError(
+  "runtime_not_configured",
+  "This Runtime has no entitlement or Agent Corpus resolver; set HATCH_ALLOW_INSECURE_LOCAL_MODE=true only for local development."
+);
+const runtimeNotConfigured = () => Promise.reject(runtimeNotConfiguredError());
+const unconfiguredEntitlementResolver: EntitlementResolver = { list: runtimeNotConfigured, resolve: runtimeNotConfigured };
+const unconfiguredAgentCorpusResolver: AgentCorpusResolver = {
+  resolve: runtimeNotConfigured, resolveByProduct: runtimeNotConfigured, list: runtimeNotConfigured
+};
+
 export function createRuntimeServer(options: RuntimeServerOptions = {}): RuntimeServer {
   const connectionTasks = new Set<Promise<void>>();
   const createRuntime = options.createRuntime ?? createAgentRuntime;
-  const entitlementResolver = options.entitlementResolver;
+  const unconfigured = !options.entitlementResolver && !options.agentCorpusResolver && options.insecureLocalMode !== true;
+  const entitlementResolver = unconfigured ? unconfiguredEntitlementResolver : options.entitlementResolver;
   const authIdentityResolver = options.authIdentityResolver
     ?? (entitlementResolver instanceof RegistryEntitlementResolver ? entitlementResolver : undefined);
-  const agentCorpusResolver = options.agentCorpusResolver;
+  const agentCorpusResolver = unconfigured ? unconfiguredAgentCorpusResolver : options.agentCorpusResolver;
   const legacyHmacSecret = options.legacyHmacSecret?.trim() || undefined;
   if (options.enableLegacyHmacAuth === true && !legacyHmacSecret) {
     throw new Error("legacyHmacSecret is required when legacy HMAC auth is enabled");
@@ -1795,7 +1812,7 @@ async function requireBoundConversation(
 
 function conversationBinding(binding: SessionBinding): ConversationBinding {
   if (!binding.explicit) {
-    // Resolver-free mode is an intentionally local fixture mode. It preserves
+    // Reachable only with explicit insecureLocalMode (otherwise resolvers always exist). It preserves
     // the historic raw conversation-id behavior across local installations;
     // production bindings always use the server-verified values below.
     return {
@@ -2771,6 +2788,7 @@ async function resolveSessionBinding(
     };
   }
   const productMode = Boolean(entitlementResolver || agentCorpusResolver);
+  if (entitlementResolver === unconfiguredEntitlementResolver) throw runtimeNotConfiguredError();
   if (productMode) {
     if (!entitlementResolver || !agentCorpusResolver) {
       throw new EntitlementError(
@@ -3007,6 +3025,7 @@ async function bindingFromHistoryRequest(
   // Owner REST requests use the same owned-Product authorization as client.hello.
   const selectedProduct = url.searchParams.get("product_id");
   const productMode = Boolean(entitlementResolver || agentCorpusResolver);
+  if (entitlementResolver === unconfiguredEntitlementResolver) throw runtimeNotConfiguredError();
   if (productMode && selectedProduct && !entitlementId) {
     return resolveSessionBinding({
       auth_token: authToken,
