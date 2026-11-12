@@ -15,15 +15,15 @@ export type Scenario = {
 
 const zh = {
   nav: { story: "它怎么接客户", learn: "它怎么学会你", pricing: "价格", faq: "常见问题", login: "登录", try: "免费试试" },
-  heroEyebrow: "为专家打造的私有智能",
   heroTitleA: ["忙不过来的", "，"] as [string, string],
   heroWords: ["提问", "咨询", "客户", "订单", "交付"],
   heroTitleB: "交给你的 AI 分身。",
+  heroManifesto: ["答案会变得免费。你的品味、判断与良知，永远不会。", ["Hatch 让人", "不可替代", "。"]] as [string, [string, string, string]],
   heroBody: "Hatch 替专家回咨询、谈成交、做交付。按你的方法，用你的口吻。",
   pickLabel: "你是做什么的？",
   roles: ["销售", "顾问", "教练", "老师"],
   tryCta: "免费试试",
-  trial: { title: "三步，拥有你的专属分身", steps: [{ title: "提交你的素材", body: "课程、文章、录音、聊天记录皆可，无需整理。" }, { title: "深度理解，专访追问", body: "提炼只存在于你经验中的判断。" }, { title: "获得你的分身链接", body: "经你确认后上线，分享给用户，由它代你解答。" }], cta: "前往 Studio", mini: { pdf: "课程讲义.pdf", link: "文章", voice: "0:42", chatA: "这个方案怎么选？", chatB: "先看预算", ask: "那次你为什么没接这个客户？", noted: "已记录", outline: ["人格与语气", "判断方式", "底线"], name: "你的分身", url: "hatch.ai/你的名字", copy: "复制", userQ: "我该先做哪一步？", aiA: "先看你的预算，再…" } },
+  trial: { title: "三步，拥有你的专属分身", steps: [{ title: "提交你的素材", body: "课程、文章、录音、聊天记录皆可，无需整理。" }, { title: "深度理解，专访追问", body: "提炼只存在于你经验中的判断。" }, { title: "获得你的分身链接", body: "经你确认后上线，分享给用户，由它代你解答。" }], cta: "前往 Studio", mini: { pdf: "课程讲义.pdf", link: "文章", voice: "0:42", chatA: "这个方案怎么选？", chatB: "先看预算", ask: "那次你为什么没接这个客户？", noted: "已记录", outline: ["人格与语气", "判断方式", "底线"], name: "你的分身", url: "gethatchapp.com/你的名字", copy: "复制", userQ: "我该先做哪一步？", aiA: "先看你的预算，再…" } },
   storyTitle: (field: string) => `一位${field}客户，从咨询到成交。`,
   storySteps: [
     { title: "客户从你的主页点进来", body: "放一个链接就行，不用换平台。", soon: false },
@@ -160,15 +160,15 @@ export type LandingCopy = typeof zh;
 
 const en: LandingCopy = {
   nav: { story: "How it takes clients", learn: "How it learns you", pricing: "Pricing", faq: "FAQ", login: "Log in", try: "Try it free" },
-  heroEyebrow: "Private Intelligence for Experts",
   heroTitleA: ["Too many ", "?"] as [string, string],
   heroWords: ["questions", "inquiries", "clients", "orders", "deliverables"],
   heroTitleB: "Hand them to your AI persona.",
+  heroManifesto: ["Answers will be free. Your taste, judgment and conscience should never be.", ["Hatch makes people ", "irreplaceable", "."]],
   heroBody: "Hatch answers inquiries, closes sales, and delivers the work for experts. Your method, your voice.",
   pickLabel: "What do you do?",
-  roles: ["Sales", "Consulting", "Coaching", "Teaching"],
+  roles: ["Sales", "Advisory", "Coaching", "Teaching"],
   tryCta: "Try it free",
-  trial: { title: "Keep being you. We'll do the rest.", steps: [{ title: "Hand us what you already have", body: "Talks, posts, voice notes, client chats. No tidying up." }, { title: "We read you, then ask you", body: "We dig for the calls that only live in your head." }, { title: "Get a link to your AI", body: "It goes live only when you say so. Share it, and it answers for you." }], cta: "Start in Studio", mini: { pdf: "Course notes.pdf", link: "Article", voice: "0:42", chatA: "Which plan fits me?", chatB: "Start with budget", ask: "Why did you turn that client down?", noted: "Noted", outline: ["Voice", "How you judge", "Lines you hold"], name: "Your AI", url: "hatch.ai/you", copy: "Copy", userQ: "Where should I start?", aiA: "Start with your budget, then…" } },
+  trial: { title: "Keep being you. We'll do the rest.", steps: [{ title: "Hand us what you already have", body: "Talks, posts, voice notes, client chats. No tidying up." }, { title: "We read you, then ask you", body: "We dig for the calls that only live in your head." }, { title: "Get a link to your AI", body: "It goes live only when you say so. Share it, and it answers for you." }], cta: "Start in Studio", mini: { pdf: "Course notes.pdf", link: "Article", voice: "0:42", chatA: "Which plan fits me?", chatB: "Start with budget", ask: "Why did you turn that client down?", noted: "Noted", outline: ["Voice", "How you judge", "Lines you hold"], name: "Your AI", url: "gethatchapp.com/you", copy: "Copy", userQ: "Where should I start?", aiA: "Start with your budget, then…" } },
   storyTitle: (field: string) => `One ${field.toLowerCase()} client, from question to sale.`,
   storySteps: [
     { title: "A client taps the link in your bio", body: "One link. No new platform.", soon: false },
@@ -225,7 +225,7 @@ const en: LandingCopy = {
   memMethod: ["Ask what they cared about most", "Don't wait for perfect material", "Keep it under 15 schools"],
   memClientsTag: "Key clients",
   memClients: [{ name: "Lily", meta: "Senior · ED in two months" }, { name: "Mrs. Wang", meta: "Aiming for Ivies · budget set" }, { name: "Mia", meta: "Transfer · waiting on you" }],
-  memPeople: [{ name: "Lin", role: "Math tutor", prompt: "Square portrait, soft daylight, a Chinese man in his 30s, IELTS teacher, white shirt, warm neutral background, friendly, editorial." }, { name: "Kenji", role: "Cram school head", prompt: "Square portrait, a Japanese man in his 40s, cram school principal, navy cardigan, bookshelf softly blurred behind, warm light." }, { name: "Grace", role: "Insurance advisor", prompt: "Square portrait, a Hong Kong woman in her 30s, insurance advisor, cream blazer, bright office softly blurred, confident smile." }],
+  memPeople: [{ name: "Lin", role: "Math tutor", prompt: "Square portrait, soft daylight, a Chinese man in his 30s, IELTS teacher, white shirt, warm neutral background, friendly, editorial." }, { name: "Kenji", role: "Prep school founder", prompt: "Square portrait, a Japanese man in his 40s, cram school principal, navy cardigan, bookshelf softly blurred behind, warm light." }, { name: "Grace", role: "Insurance advisor", prompt: "Square portrait, a Hong Kong woman in her 30s, insurance advisor, cream blazer, bright office softly blurred, confident smile." }],
   proLabel: "Proactive",
   proTitle: "Handled before you ask.",
   proBody: "It knows what's worth telling you and when to hand over to you, and shows up only when you're needed.",
@@ -240,7 +240,7 @@ const en: LandingCopy = {
     { who: "fitness coach", what: "Selling plans while asleep", prompt: "Vertical 3:4 photo. A fitness coach in his 20s stretching in an empty sunlit studio, soft shadows on a plain wall, calm mood." },
     { who: "insurance advisor", what: "New parents answered at 2 am", prompt: "Vertical 3:4 photo. An insurance advisor in her 40s talking with a young couple holding a baby at a kitchen table, natural light, candid." },
     { who: "restaurant consultant", what: "Ten venues at once", prompt: "Vertical 3:4 photo. A restaurant consultant in an apron tasting a dish in a small open kitchen, motion blur of a cook behind, warm light." },
-    { who: "cram school head", what: "School strategy, always on", prompt: "Vertical 3:4 photo. A Japanese cram-school teacher writing on a whiteboard in an empty classroom at dusk, warm window light." },
+    { who: "prep school founder", what: "School strategy, always on", prompt: "Vertical 3:4 photo. A Japanese cram-school teacher writing on a whiteboard in an empty classroom at dusk, warm window light." },
     { who: "career coach", what: "No more fiftieth 'is it too late?'", prompt: "Vertical 3:4 photo. A career coach walking through a city street with a coffee, slight motion blur, golden hour, editorial." },
   ],
   storyPrefix: "For a",
@@ -303,15 +303,15 @@ const en: LandingCopy = {
 
 const ja: LandingCopy = {
   nav: { story: "お客様の受け方", learn: "あなたの学び方", pricing: "料金", faq: "よくある質問", login: "ログイン", try: "無料で試す" },
-  heroEyebrow: "専門家のためのプライベート・インテリジェンス",
   heroTitleA: ["手が回らない", "は、"] as [string, string],
   heroWords: ["質問", "相談", "お客様", "注文", "納品"],
   heroTitleB: "あなたのAI分身に。",
+  heroManifesto: ["答えは無料になる。あなたの美意識、判断、良心は、決してそうなってはならない。", ["Hatchは、人を", "かけがえのない存在", "にする。"]],
   heroBody: "Hatchは専門家に代わって、相談に答え、成約し、納品まで担います。あなたのやり方、あなたの言葉で。",
   pickLabel: "あなたのお仕事は？",
   roles: ["営業", "コンサル", "コーチ", "先生"],
   tryCta: "無料で試す",
-  trial: { title: "あなたはそのままで。あとは任せて。", steps: [{ title: "手元にあるものを渡す", body: "講義、記事、録音、お客様とのチャット。整理は不要。" }, { title: "読み込んで、問いかける", body: "あなたの頭の中にしかない判断を、掘り起こします。" }, { title: "あなたのAIのリンクが届く", body: "公開はあなたの承認後。リンクを送れば、あなたの代わりに答えます。" }], cta: "Studioではじめる", mini: { pdf: "講義資料.pdf", link: "記事", voice: "0:42", chatA: "どのプランが合う？", chatB: "まず予算から", ask: "なぜあの依頼を断ったのですか？", noted: "記録しました", outline: ["人柄と語り口", "判断の仕方", "譲れない線"], name: "あなたのAI", url: "hatch.ai/you", copy: "コピー", userQ: "何から始めればいい？", aiA: "まず予算を見て、それから…" } },
+  trial: { title: "あなたはそのままで。あとは任せて。", steps: [{ title: "手元にあるものを渡す", body: "講義、記事、録音、お客様とのチャット。整理は不要。" }, { title: "読み込んで、問いかける", body: "あなたの頭の中にしかない判断を、掘り起こします。" }, { title: "あなたのAIのリンクが届く", body: "公開はあなたの承認後。リンクを送れば、あなたの代わりに答えます。" }], cta: "Studioではじめる", mini: { pdf: "講義資料.pdf", link: "記事", voice: "0:42", chatA: "どのプランが合う？", chatB: "まず予算から", ask: "なぜあの依頼を断ったのですか？", noted: "記録しました", outline: ["人柄と語り口", "判断の仕方", "譲れない線"], name: "あなたのAI", url: "gethatchapp.com/you", copy: "コピー", userQ: "何から始めればいい？", aiA: "まず予算を見て、それから…" } },
   storyTitle: (field: string) => `${field}のお客様、相談から成約まで。`,
   storySteps: [
     { title: "プロフィールのリンクから来る", body: "リンク一つ。新しいサービスは不要。", soon: false },
