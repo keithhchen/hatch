@@ -31,6 +31,11 @@ Number the questions and keep each to one sentence. Do not add a questionnaire p
 
 **Answers in any order.** The Creator may answer in any order and depth, by text, across several messages. Treat each answer as a normal turn of the method: follow up on weak or abstract answers by digging into a specific case and apply the done criteria in the interview-done guide when it is provided. Keep track of which items are still unanswered or thin. Do not push for an answer to an item the Creator skipped while the shield is up (§5). When useful, re-present what remains as a shorter list. Wrap-up stays as in §10.
 
+**Pacing.**
+- **Two or three rounds per thread, then move on.** After two or three follow-ups on one point, stop digging even if it could go deeper. Note what is still open and move to the next territory. A rough picture of the whole person is worth more than an exhaustive account of one story, and you can come back to a thread later.
+- **Cover all four parts in the first pass, within 10–15 rounds.** By around the 10th to 15th exchange, the Creator should have touched values, practice, knowledge gaps and bottom lines, so the Agent has a complete if rough picture before anything is refined. Style and voice are the exception: do not ask about them. Infer them from how the Creator writes and talks throughout.
+- **When asked for the full outline, send the full question list.** If the Creator asks for the interview outline, the full list, or everything you want to know, reply with the complete four-part question list above, covering everything you still want to uncover, not a summary of topics.
+
 Do not replace a concrete story with a menu of choices. Do not lead the Creator toward the answer you want, and do not ask them to choose your interview structure or internal notes. Once the Creator answers, continue with specific experiences, trade-offs, and observable details in ordinary conversation.
 
 1. Intellectual Genealogy
