@@ -2,7 +2,9 @@
 .fbd.trial-modal { background: var(--paper); color: var(--ink); border-radius: 24px; margin: 16px; max-width: min(1000px, calc(100vw - 32px)); }
 .fbd__inner { padding: 32px; }
 .fbd__inner h2 { margin: 0 0 20px; font-size: 28px; font-weight: 900; }
-.fbd__bullets, .fbd__bullets ul { margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.55; color: var(--muted); }
+/* Lines start where the step title text starts: after the 22px number and its 8px gap. Sub-items step in once more. */
+.fbd__bullets, .fbd__bullets ul { margin: 0; padding-left: 30px; font-size: 14px; line-height: 1.55; color: var(--muted); }
+.fbd__bullets ul { padding-left: 14px; }
 .fbd__bullets { padding-top: 2px; }
 .fbd__bullets li + li { margin-top: 4px; }
 .fbd__bullets ul { margin-top: 4px; }

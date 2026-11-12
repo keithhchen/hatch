@@ -20,7 +20,7 @@
 .factory-app { display: grid; grid-template-columns: 188px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 10px 20px; }
 .factory-rail { grid-column: 1; grid-row: 1 / span 2; min-width: 0; }
 .factory-rail { display: flex; flex-direction: column; gap: 14px; }
-.factory-advanced { grid-column: 2; grid-row: 1; justify-self: end; display: flex; min-height: 36px; align-items: center; white-space: nowrap; padding: 0 14px; border: 1px solid var(--web-rule); border-radius: 999px; background: none; color: var(--web-muted); font-family: inherit; font-size: 14px; font-weight: 650; cursor: pointer; transition: background 160ms ease, box-shadow 160ms ease, color 160ms ease; }
+.factory-app .factory-advanced { grid-column: 2; grid-row: 1; justify-self: end; align-self: start; display: flex; height: 44px; align-items: center; white-space: nowrap; padding: 0 14px; border: 1px solid var(--web-rule); border-radius: 999px; background: none; color: var(--web-muted); font-family: inherit; font-size: 14px; font-weight: 650; cursor: pointer; transition: background 160ms ease, box-shadow 160ms ease, color 160ms ease; }
 .factory-advanced:hover { background: color-mix(in srgb, var(--web-card) 80%, transparent); color: var(--web-ink); }
 .factory-advanced.is-current { border-color: var(--web-rule); background: var(--web-card); color: var(--web-ink); box-shadow: none; }
 .factory-stepper { display: flex; flex-direction: column; gap: 0; margin: 0; padding: 0; list-style: none; }
