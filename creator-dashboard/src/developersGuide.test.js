@@ -11,6 +11,7 @@ test("/developers is a public route with one tab per method", () => {
   assert.deepEqual(parseDevelopersRoute("/developers/"), { tab: "cli" });
   assert.deepEqual(parseDevelopersRoute("/developers/api?x=1"), { tab: "api" });
   assert.deepEqual(parseDevelopersRoute("/developers/mcp"), { tab: "mcp" });
+  assert.deepEqual(parseDevelopersRoute("/developers/responses"), { tab: "responses" });
   assert.equal(parseDevelopersRoute("/developers/other"), null);
   assert.equal(parseDevelopersRoute("/developers/cli/extra"), null);
   assert.equal(parseDevelopersRoute("/developer"), null);
@@ -22,7 +23,10 @@ test("every locale titles every step of every method", () => {
   assert.deepEqual([...DEVELOPER_LOCALES].sort(), ["en", "ja", "zh"]);
   for (const locale of DEVELOPER_LOCALES) {
     const guide = DevelopersGuide.forLocale(locale);
-    assert.deepEqual(guide.tabs.map((tab) => tab.id), ["cli", "api", "mcp"]);
+    assert.deepEqual(guide.tabs.map((tab) => tab.id), ["cli", "api", "mcp", "responses"]);
+    assert.deepEqual(guide.groups.map((group) => [group.id, group.path]), [["studio", "/developers/cli"], ["responses", "/developers/responses"]]);
+    for (const group of guide.groups) assert.ok(group.label);
+    assert.match(guide.copy.scope, /Responses API/);
     for (const tab of guide.tabs) {
       assert.ok(tab.label);
       tab.steps.forEach((step, index) => {
@@ -45,7 +49,7 @@ test("code is shared across locales and an unknown locale or tab falls back", ()
 test("snippets target production and the documented endpoints", () => {
   const all = DevelopersGuide.forLocale("en").tabs.flatMap((tab) => tab.steps.flatMap((step) => step.code.map((block) => block.text))).join("\n");
   assert.ok(all.includes(`npm install -g ${ORIGIN}/downloads/hatch-cli.tgz`));
-  for (const fragment of ["/v1/auth/me", "/v1/creator/products", "/listing", "/ingest", "expected_updated_at", "content_base64", "base64 -i notes.pdf | tr -d '\\n'", "/workers/research/messages?wait=60", "/workers/research/events", "/v1/creator/assistant/conversation/messages", "hatch chat <product-id> research", "worker_send", "hatch login --api-key-stdin", "claude mcp add hatch -- hatch mcp", "[mcp_servers.hatch]"]) {
+  for (const fragment of ["/responses/v1", "OpenAI(base_url=", "pip install openai", "npm i openai", "hatch:<product_id>", "task_brief", "previous_response_id", "stream=True", "response.output_text.delta", "Idempotency-Key", "hatch.tool_calls", "input_image", "input_file", "conversation_busy", "insufficient_quota", "/v1/auth/me", "/v1/creator/products", "/listing", "/ingest", "expected_updated_at", "content_base64", "base64 -i notes.pdf | tr -d '\\n'", "/workers/research/messages?wait=60", "/workers/research/events", "/v1/creator/assistant/conversation/messages", "hatch chat <product-id> research", "worker_send", "hatch login --api-key-stdin", "claude mcp add hatch -- hatch mcp", "[mcp_servers.hatch]"]) {
     assert.ok(all.includes(fragment), `missing ${fragment}`);
   }
   assert.doesNotMatch(all, /localhost|127\.0\.0\.1/);

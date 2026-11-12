@@ -333,3 +333,281 @@ Teaches coding agents to use the CLI.
 ```sh
 hatch install-skill -g
 ```
+
+## Responses API
+
+Chat with your live products from your own code through the OpenAI SDKs. Base URL: https://gethatchapp.com/responses/v1
+
+### 1. Get an API key
+
+The same Hatch API key as the Studio API. Create one in Studio Settings, API keys.
+
+API keys: https://gethatchapp.com/studio/settings#api-keys
+
+```sh
+export HATCH_API_KEY=...
+```
+
+### 2. Install the SDK and set the base URL
+
+The official OpenAI SDKs work unchanged. Base URL: `https://gethatchapp.com/responses/v1`.
+
+```sh
+pip install openai
+```
+
+```python
+import os
+from openai import OpenAI
+
+client = OpenAI(base_url="https://gethatchapp.com/responses/v1", api_key=os.environ["HATCH_API_KEY"])
+```
+
+```sh
+npm i openai
+```
+
+```javascript
+import OpenAI from "openai";
+
+const client = new OpenAI({ baseURL: "https://gethatchapp.com/responses/v1", apiKey: process.env.HATCH_API_KEY });
+```
+
+### 3. List models
+
+Each of your live products is a model, `hatch:<product_id>`. `task_brief.fields` lists the Task Brief fields the product asks for.
+
+```python
+for model in client.models.list():
+    print(model.id)
+```
+
+```javascript
+for await (const model of client.models.list()) console.log(model.id);
+```
+
+```sh
+curl -s https://gethatchapp.com/responses/v1/models -H "Authorization: Bearer $HATCH_API_KEY" \
+  | jq '.data[] | {id, task_brief}'
+```
+
+```json
+{
+  "id": "hatch:<product_id>",
+  "object": "model",
+  "task_brief": { "fields": [{ "id": "goal", "label": "Goal", "required": true }] }
+}
+```
+
+### 4. Start a conversation with the Task Brief
+
+`task_brief` maps field ids to values; a missing required field returns 400 `task_brief_required`. Only `metadata.title` is supported. A conversation id is all you need afterwards. You can also list conversations, read items, rename (POST) and archive (DELETE).
+
+```python
+conversation = client.conversations.create(
+    metadata={"title": "Launch plan"},
+    extra_body={"model": "hatch:<product_id>", "task_brief": {"goal": "Plan a launch"}},
+)
+print(conversation.id)
+```
+
+```javascript
+const conversation = await client.conversations.create({
+  model: "hatch:<product_id>",
+  task_brief: { goal: "Plan a launch" },
+  metadata: { title: "Launch plan" },
+});
+```
+
+```sh
+CONVERSATION_ID=$(curl -s -X POST https://gethatchapp.com/responses/v1/conversations -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" \
+  -d '{"model":"hatch:<product_id>","task_brief":{"goal":"Plan a launch"},"metadata":{"title":"Launch plan"}}' \
+  | jq -r '.id')
+```
+
+```sh
+curl -s https://gethatchapp.com/responses/v1/conversations/$CONVERSATION_ID -H "Authorization: Bearer $HATCH_API_KEY"
+curl -s "https://gethatchapp.com/responses/v1/conversations?model=hatch:<product_id>&limit=20" -H "Authorization: Bearer $HATCH_API_KEY"
+curl -s https://gethatchapp.com/responses/v1/conversations/$CONVERSATION_ID/items -H "Authorization: Bearer $HATCH_API_KEY"
+curl -s -X DELETE https://gethatchapp.com/responses/v1/conversations/$CONVERSATION_ID -H "Authorization: Bearer $HATCH_API_KEY"
+```
+
+### 5. Send a response
+
+Without `stream` the request waits up to 90 seconds; if the run is still going it returns `status: in_progress`, so poll `GET /responses/{id}`. `background: true` returns immediately. `include: ["hatch.tool_calls"]` adds the Agent's server-side tool calls as `hatch_tool_call` items. An approval appears as `mcp_approval_request`; only denial is supported now. SDKs do not send an Idempotency-Key by default; pass one to make retries safe. A second response while one is running returns 409 `conversation_busy`. Every response carries `usage`; usage is counted per account in Studio, Settings, Usage, and a monthly cap may return 429 `insufficient_quota`.
+
+```python
+response = client.responses.create(
+    model="hatch:<product_id>",
+    conversation=conversation.id,
+    input="Draft the announcement",
+)
+print(response.status, response.output_text, response.usage.total_tokens)
+```
+
+```javascript
+const response = await client.responses.create({
+  model: "hatch:<product_id>",
+  conversation: conversation.id,
+  input: "Draft the announcement",
+});
+console.log(response.status, response.output_text, response.usage.total_tokens);
+```
+
+```sh
+curl -s -X POST https://gethatchapp.com/responses/v1/responses -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" -H "Idempotency-Key: $(uuidgen)" \
+  -d '{"model":"hatch:<product_id>","conversation":"'"$CONVERSATION_ID"'","input":"Draft the announcement"}' \
+  | jq '{id, status, output_text, usage}'
+```
+
+```python
+client.responses.create(
+    model="hatch:<product_id>",
+    conversation=conversation.id,
+    input="Draft the announcement",
+    extra_headers={"Idempotency-Key": "launch-1"},
+)
+```
+
+```sh
+curl -s -X POST https://gethatchapp.com/responses/v1/responses -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" \
+  -d '{"model":"hatch:<product_id>","conversation":"'"$CONVERSATION_ID"'","input":"Draft the announcement","background":true,"include":["hatch.tool_calls"]}'
+curl -s https://gethatchapp.com/responses/v1/responses/$RESPONSE_ID -H "Authorization: Bearer $HATCH_API_KEY"
+curl -s -X POST https://gethatchapp.com/responses/v1/responses/$RESPONSE_ID/cancel -H "Authorization: Bearer $HATCH_API_KEY"
+```
+
+### 6. Stream the response
+
+Server-sent events, with a keep-alive comment every 15 seconds. `GET /responses/{id}?stream=true` re-streams a response.
+
+```python
+stream = client.responses.create(
+    model="hatch:<product_id>",
+    conversation=conversation.id,
+    input="Draft the announcement",
+    stream=True,
+)
+for event in stream:
+    if event.type == "response.output_text.delta":
+        print(event.delta, end="", flush=True)
+```
+
+```javascript
+const stream = await client.responses.create({
+  model: "hatch:<product_id>",
+  conversation: conversation.id,
+  input: "Draft the announcement",
+  stream: true,
+});
+for await (const event of stream) {
+  if (event.type === "response.output_text.delta") process.stdout.write(event.delta);
+}
+```
+
+```sh
+curl -N -X POST https://gethatchapp.com/responses/v1/responses -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" \
+  -d '{"model":"hatch:<product_id>","conversation":"'"$CONVERSATION_ID"'","input":"Draft the announcement","stream":true}'
+curl -N "https://gethatchapp.com/responses/v1/responses/$RESPONSE_ID?stream=true" -H "Authorization: Bearer $HATCH_API_KEY"
+```
+
+```text
+response.created  response.in_progress
+response.output_item.added  response.content_part.added
+response.output_text.delta  response.output_text.done
+response.content_part.done  response.output_item.done
+response.completed | response.failed | response.incomplete
+error
+```
+
+### 7. Send images and files
+
+`input_image` takes a `data:` or `https:` URL. `input_file` takes `file_data` (a data URL) with `filename`, or `file_url`. `file_id` is not supported yet; the Files API is coming soon.
+
+```python
+import base64
+
+photo = base64.b64encode(open("photo.png", "rb").read()).decode()
+notes = base64.b64encode(open("notes.pdf", "rb").read()).decode()
+response = client.responses.create(
+    model="hatch:<product_id>",
+    conversation=conversation.id,
+    input=[{
+        "role": "user",
+        "content": [
+            {"type": "input_text", "text": "Compare these"},
+            {"type": "input_image", "image_url": f"data:image/png;base64,{photo}"},
+            {"type": "input_file", "filename": "notes.pdf", "file_data": f"data:application/pdf;base64,{notes}"},
+            {"type": "input_file", "file_url": "https://example.com/report.pdf"},
+        ],
+    }],
+)
+```
+
+```javascript
+import { readFileSync } from "node:fs";
+
+const photo = readFileSync("photo.png").toString("base64");
+const response = await client.responses.create({
+  model: "hatch:<product_id>",
+  conversation: conversation.id,
+  input: [{
+    role: "user",
+    content: [
+      { type: "input_text", text: "Compare these" },
+      { type: "input_image", image_url: "data:image/png;base64," + photo },
+      { type: "input_file", file_url: "https://example.com/report.pdf" },
+    ],
+  }],
+});
+```
+
+```sh
+curl -s -X POST https://gethatchapp.com/responses/v1/responses -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" \
+  -d '{"model":"hatch:<product_id>","conversation":"'"$CONVERSATION_ID"'","input":[{"role":"user","content":[{"type":"input_text","text":"Describe this"},{"type":"input_image","image_url":"https://example.com/photo.png"}]}]}'
+```
+
+### 8. Continue a conversation
+
+Pass `conversation`, or `previous_response_id` of the latest response in that conversation. An empty `input` on a new conversation starts the run from the Task Brief alone; `task_brief` is only accepted when a new conversation is created.
+
+```python
+followup = client.responses.create(
+    model="hatch:<product_id>",
+    previous_response_id=response.id,
+    input="Shorter, please",
+)
+items = client.conversations.items.list(conversation.id)
+```
+
+```javascript
+const followup = await client.responses.create({
+  model: "hatch:<product_id>",
+  previous_response_id: response.id,
+  input: "Shorter, please",
+});
+```
+
+```sh
+curl -s -X POST https://gethatchapp.com/responses/v1/responses -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" \
+  -d '{"model":"hatch:<product_id>","task_brief":{"goal":"Plan a launch"},"input":""}'
+```
+
+### 9. Errors and limits
+
+Errors use the OpenAI shape. Not supported, returning 400 `unsupported_parameter` with `param`: `instructions`, `tools`, `tool_choice` other than auto, `text.format`, `reasoning`, `max_output_tokens`, system, developer or assistant input roles, `store: false`, `file_id`, and `metadata` other than `title`. Ignored: `temperature`, `top_p`, `user`, `service_tier`.
+
+```json
+{ "error": { "message": "…", "type": "conflict_error", "param": null, "code": "conversation_busy" } }
+```
+
+```text
+401  invalid_api_key
+404  model_not_found  conversation_not_found  response_not_found
+409  conversation_busy  idempotency_key_reused
+400  task_brief_required  unsupported_parameter
+413  file_too_large
+415  unsupported_file_type
+429  rate_limit_exceeded  insufficient_quota (usage_cap_exceeded)
+500  internal_error
+503  service_unavailable
+```

@@ -9,6 +9,7 @@ export function DevelopersPage({ tab, navigate }) {
   const { locale } = useLocale();
   const guide = useMemo(() => DevelopersGuide.forLocale(locale), [locale]);
   const active = guide.tab(tab);
+  const siblings = guide.tabs.filter((item) => item.group === active.group);
 
   useEffect(() => {
     const previous = document.title;
@@ -26,8 +27,14 @@ export function DevelopersPage({ tab, navigate }) {
         <h1>{guide.copy.title}</h1>
         <p className="developers-page__scope">{guide.copy.scope}</p>
         <a className="developers-page__link developers-page__keys" href={KEYS_PATH}>{guide.copy.createKey}</a>
-        <nav className="developers-page__tabs" aria-label={guide.copy.methodsLabel}>
-          {guide.tabs.map((item) => (
+        <nav className="developers-page__tabs" aria-label={guide.copy.apiLabel}>
+          {guide.groups.map((item) => (
+            <a key={item.id} href={item.path} aria-current={item.id === active.group ? "page" : undefined}
+              onClick={(event) => { event.preventDefault(); navigate(item.path); }}>{item.label}</a>
+          ))}
+        </nav>
+        <nav className="developers-page__tabs developers-page__tabs--methods" aria-label={guide.copy.methodsLabel} hidden={siblings.length < 2}>
+          {siblings.map((item) => (
             <a key={item.id} href={item.path} aria-current={item.id === active.id ? "page" : undefined}
               onClick={(event) => { event.preventDefault(); navigate(item.path); }}>{item.label}</a>
           ))}
