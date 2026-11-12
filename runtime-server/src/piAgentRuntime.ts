@@ -609,6 +609,7 @@ export class PiAgentRuntime implements AgentRuntime {
         const assistant = event.message as AssistantMessage;
         const converted = fromPiMessage(assistant);
         transcriptMessages.push(converted);
+        if (assistant.usage.totalTokens > 0) await ctx.usage?.({ id: `${input.run_id}:${assistant.timestamp}`, model: assistant.model, usage: assistant.usage });
         const hasToolCall = assistant.content.some((block) => block.type === "toolCall");
         const hasText = assistant.content.some((block) => block.type === "text" && block.text.trim().length > 0);
         if (hasToolCall) {

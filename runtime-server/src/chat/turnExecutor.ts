@@ -11,6 +11,8 @@ import type { RunEventHub } from "./runEventHub.js";
 import type { RunTerminator } from "./runTerminator.js";
 import { type RunControl, type RunExecutor } from "./runSupervisor.js";
 import { CLIENT_TOOL_NAMES } from "./toolSurface.js";
+import { log } from "../observability/log.js";
+import { usageSink, type UsageRecording, type UsageSink } from "../usage/usage.js";
 
 /** Everything one execution of a Run needs, with no transport in it. */
 export type Turn<Scope> = {
@@ -35,6 +37,8 @@ export type Turn<Scope> = {
   onSteer: (listener: () => void) => () => void;
   /** Compaction of this Run's conversation: before the turn, between tool steps, after an overflow. */
   compaction: TurnCompaction;
+  /** Records each model call of this Run against whoever pays for it. */
+  usage?: UsageSink;
 };
 
 /** Runs one turn of the Agent. The adapter wraps the existing per-turn pipeline. */
@@ -67,6 +71,7 @@ export class TurnExecutor<Scope> implements RunExecutor {
     runner: TurnRunner<Scope>;
     compactions: RunCompactions;
     toolTimeoutMs: number;
+    usage?: UsageRecording<Scope>;
   }) {}
 
   async execute(run: ConversationRunRecord, control: RunControl): Promise<void> {
@@ -115,12 +120,15 @@ export class TurnExecutor<Scope> implements RunExecutor {
         ...(registry.timeZoneOf(conversation.id) ? { time_zone: registry.timeZoneOf(conversation.id) } : {}),
         ...(continuing ? { task_start: true as const } : {})
       };
+      const recording = this.deps.usage;
+      const usage = recording ? usageSink(recording.recorder, recording.attribute(scope, run), log) : undefined;
       await this.deps.runner.run({
         run, conversation, scope, input, persistedUser: last, state, broker, publish, signal: control.signal,
         clientOf: () => registry.clientOf(conversation.id) ?? (() => { throw new RunClientMissing(conversation.id); })(),
         claimSteered,
         onSteer: control.onSteer,
-        compaction: this.deps.compactions.forRun({ run, conversation, state, publish, signal: control.signal })
+        compaction: this.deps.compactions.forRun({ run, conversation, state, publish, signal: control.signal, usage }),
+        usage
       });
     } finally {
       control.signal.removeEventListener("abort", releaseTools);

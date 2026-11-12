@@ -360,6 +360,21 @@
 .sxa-channel__form input, .sxa-channel__form select { padding: 6px 8px; border: 1px solid var(--web-rule); border-radius: 8px; font: inherit; }
 
 /* API keys */
+.sx-usage { display: flex; flex-direction: column; }
+.sx-usage__card { display: flex; flex-direction: column; gap: 16px; }
+.sx-usage__total { display: flex; align-items: baseline; gap: 10px; }
+.sx-usage__total strong { font-size: 32px; font-weight: 700; letter-spacing: -0.02em; color: var(--web-ink); }
+.sx-usage__total span, .sx-usage__cap > span, .sx-usage__axis { color: var(--web-muted); font-size: 13px; }
+.sx-usage__cap { display: flex; flex-direction: column; gap: 6px; }
+.sx-usage__track { height: 8px; overflow: hidden; border-radius: 999px; background: var(--web-panel); }
+.sx-usage__track span { display: block; height: 100%; border-radius: inherit; background: var(--web-yolk); }
+.sx-usage__track span[data-over="true"] { background: var(--web-fail); }
+.sx-usage__surfaces { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 0; padding: 0; list-style: none; }
+.sx-usage__surfaces li { display: flex; align-items: center; gap: 8px; color: var(--web-body); font-size: 14px; }
+.sx-usage__surfaces i { width: 10px; height: 10px; border-radius: 3px; }
+.sx-usage__surfaces strong { color: var(--web-ink); }
+.sx-usage__chart { display: block; width: 100%; height: 96px; }
+.sx-usage__axis { display: flex; justify-content: space-between; }
 .sx-apikeys { display: flex; flex-direction: column; gap: 20px; }
 .sx-apikeys-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; margin-bottom: 20px; padding: 14px 18px; }
 .sx-apikeys-banner p { flex: 1 1 260px; margin: 0; color: var(--web-body); font-size: 14px; line-height: 1.55; }

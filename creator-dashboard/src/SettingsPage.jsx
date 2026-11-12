@@ -2,10 +2,11 @@ import React, { useEffect, useState } from "react";
 import { InlineAlert, Switch } from "@hatch/ui";
 import { ApiKeysPage } from "./ApiKeysPage.jsx";
 import { ChannelBindings } from "./ChannelBindings.jsx";
+import { UsageSection } from "./UsageSection.jsx";
 import { EarlyAccessClient, isEarlyAccess } from "./earlyAccess.js";
 import { PageHeader, friendlyError } from "./studioShellKit.jsx";
 
-/** Studio settings: early access, the Expert's messaging apps and API keys. */
+/** Studio settings: early access, the Expert's messaging apps, usage and API keys. */
 export function SettingsPage({ request, t, locale, profile, onProfileChange }) {
   const earlyAccess = isEarlyAccess(profile);
   const [error, setError] = useState(null);
@@ -35,6 +36,7 @@ export function SettingsPage({ request, t, locale, profile, onProfileChange }) {
       <h2 id="sx-messaging-title">{t("sxaReachMe")}</h2>
       <ChannelBindings request={request} t={t} />
     </section> : null}
+    <UsageSection request={request} t={t} locale={locale} />
     <ApiKeysPage request={request} t={t} locale={locale} />
   </div>;
 }

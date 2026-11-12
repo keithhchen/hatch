@@ -44,6 +44,7 @@ import { briefSnapshotPromptBlock, type BriefSnapshot } from "./brief.js";
 import type { RuntimeAssetStore } from "./assetStore.js";
 import { orderTools, type ClientAttributes } from "./surfaces/contract.js";
 import { describeLocalTool } from "./chat/toolSurface.js";
+import type { UsageSink } from "./usage/usage.js";
 
 export type RuntimeSessionSkills = {
   records: SkillRecord[];
@@ -72,6 +73,8 @@ export type RunContext = {
     input_schema?: Record<string, unknown>;
   }>;
   persistModelMessage?: (message: ConversationMessage) => Promise<void>;
+  /** Told of every completed model call, with the Run's attribution already bound. */
+  usage?: UsageSink;
   compactMessagesIfNeeded?: (messages: RuntimeCompactionMessage[], phase: "mid_turn") => Promise<ConversationMessage[] | undefined>;
   toolBridge?: ToolBridge;
   skillRuntime?: SkillRuntime;
