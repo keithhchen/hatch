@@ -192,6 +192,7 @@ function App() {
           navigate={location.navigate}
           request={dashboardRequest}
           profile={profile}
+          onProfileChange={setProfile}
           onLogout={async () => {
             await signOut();
             location.navigate("/studio", { replace: true });
