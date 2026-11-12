@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -9,10 +10,11 @@ import { MemoryBrowserProfiles } from "../hostedAgents/browserProfiles.js";
 import type { HostedAgentProvider, HostedTask } from "../hostedAgents/ports.js";
 import { HostedEngine, PlainTextEngine, RoutingEngine, UnavailableEngine } from "./engines.js";
 import { fail, finish, interrupt, queuedJob, start, publicJob } from "./job.js";
+import { IdempotencyKeyReused } from "../idempotency.js";
 import { MemoryIngestJobs } from "./jobs.js";
 import { safeName } from "./names.js";
 import type { IngestEngine, Result, Source } from "./ports.js";
-import { IngestService, MAX_INLINE_BYTES, type InBackground } from "./service.js";
+import { IngestService, MAX_FILE_BYTES, type InBackground } from "./service.js";
 import { ProductWorkspaceSink, placeManual, type ManualFiles } from "./sink.js";
 
 const ACCOUNT = "11111111-1111-4111-8111-111111111111";
@@ -61,7 +63,7 @@ async function harness(options: { hosted?: IngestEngine; sink?: ProductWorkspace
 // ---- domain ----
 
 test("A job moves queued, running, then done; illegal moves throw", () => {
-  const queued = queuedJob("j", ACCOUNT, PRODUCT, [{ url: "https://a.test/" }, { name: "n.md", bytes: 3 }], "", "t0");
+  const queued = queuedJob("j", ACCOUNT, PRODUCT, [{ url: "https://a.test/" }, { name: "n.md", bytes: 3, sha256: "h" }], "", "t0");
   assert.deepEqual(queued.items.map(item => [item.id, item.status]), [["i1", "pending"], ["i2", "pending"]]);
   assert.throws(() => finish(queued, new Map(), "t1"), /Only a running ingest job can finish/);
   const running = start(queued, "t1");
@@ -181,8 +183,12 @@ test("Submit validates count, size, URLs, names and shape", async () => {
   await rejects([{}], 400, /url, or a name/);
   await rejects(["x"], 400, /object/);
   await rejects([{ url: "https://a.test/" }], 400, /context/, 5);
-  const big = Buffer.alloc(MAX_INLINE_BYTES / 2 + 1).toString("base64");
-  await rejects([{ name: "a.bin", content_base64: big }, { name: "b.bin", content_base64: big }], 413, /30 MB/);
+  const big = Buffer.alloc(MAX_FILE_BYTES + 1).toString("base64");
+  await assert.rejects(service.submit(ACCOUNT, PRODUCT, [{ url: "https://a.test/" }, { name: "huge.bin", content_base64: big }]),
+    (error: any) => error.status === 413 && error.code === "file_too_large" && /huge\.bin/.test(error.message));
+  assert.equal((await service.recent(ACCOUNT, PRODUCT)).length, 0, "no job was created");
+  const exact = Buffer.alloc(MAX_FILE_BYTES, 1).toString("base64");
+  assert.equal((await service.submit(ACCOUNT, PRODUCT, [{ name: "ok.bin", content_base64: exact }])).items.length, 1, "a file of exactly 50 MB is accepted");
 });
 
 test("Submit persists a queued job and returns it before the work runs; completion writes items and status", async () => {
@@ -190,7 +196,7 @@ test("Submit persists a queued job and returns it before the work runs; completi
   const job = await service.submit(ACCOUNT, PRODUCT, [{ name: "../a.txt", content_base64: b64("alpha") }], "  about alpha ");
   assert.equal(job.status, "queued");
   assert.equal(job.context, "about alpha");
-  assert.deepEqual(job.items[0]!.input, { name: "a.txt", bytes: 5 });
+  assert.deepEqual(job.items[0]!.input, { name: "a.txt", bytes: 5, sha256: createHash("sha256").update("alpha").digest("hex") });
   assert.equal(jobs.jobs.get(job.id)!.status === "done", false, "returned before it finished");
   await settle();
   const done = (await service.get(ACCOUNT, PRODUCT, job.id))!;
@@ -277,4 +283,28 @@ test("Originals keep the name the user gave, with the stored file's extension", 
   assert.equal(originalName("paulgraham.com-greatwork.html", "i2.original.pdf"), "paulgraham.com-greatwork.pdf");
   assert.equal(originalName("讲座 录音.mov", "i1.original.mp4"), "讲座-录音.mp4");
   assert.equal(originalName("notes.md", "notes.md"), "notes.md");
+});
+
+test("An Idempotency-Key makes a repeated submit return the first job; a different request under the same key is refused", async () => {
+  const { service, jobs, settle } = await harness();
+  const items = [{ url: "https://a.test/" }, { name: "a.txt", content_base64: b64("alpha") }];
+  const first = await service.submit(ACCOUNT, PRODUCT, items, "ctx", "key-1");
+  const [again, concurrent] = await Promise.all([service.submit(ACCOUNT, PRODUCT, items, "ctx", "key-1"), service.submit(ACCOUNT, PRODUCT, items, "ctx", "key-1")]);
+  assert.equal(again.id, first.id);
+  assert.equal(concurrent.id, first.id);
+  assert.equal(jobs.jobs.size, 1, "one job");
+  await assert.rejects(service.submit(ACCOUNT, PRODUCT, items, "other context", "key-1"), IdempotencyKeyReused);
+  await assert.rejects(service.submit(ACCOUNT, PRODUCT, [{ url: "https://b.test/" }], "ctx", "key-1"), IdempotencyKeyReused);
+  await assert.rejects(service.submit(ACCOUNT, PRODUCT, [items[0]!, { name: "a.txt", content_base64: b64("ALPHA") }], "ctx", "key-1"), IdempotencyKeyReused, "same size, different content");
+  assert.notEqual((await service.submit(ACCOUNT, PRODUCT, items, "ctx", "key-2")).id, first.id, "another key is another job");
+  assert.notEqual((await service.submit(OTHER, PRODUCT, items, "ctx", "key-1")).id, first.id, "keys are per account");
+  await settle();
+  assert.equal(jobs.jobs.size, 3);
+});
+
+test("Without an Idempotency-Key every submit is its own job", async () => {
+  const { service, jobs } = await harness();
+  const items = [{ url: "https://a.test/" }];
+  assert.notEqual((await service.submit(ACCOUNT, PRODUCT, items)).id, (await service.submit(ACCOUNT, PRODUCT, items)).id);
+  assert.equal(jobs.jobs.size, 2);
 });

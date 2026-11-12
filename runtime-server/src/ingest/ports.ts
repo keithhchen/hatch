@@ -19,7 +19,8 @@ export interface IngestSink {
 }
 
 export interface IngestJobRepository {
-  create(job: IngestJob): Promise<void>;
+  /** False when a job with this id already exists; nothing is written then. */
+  create(job: IngestJob): Promise<boolean>;
   save(job: IngestJob): Promise<void>;
   get(accountId: string, productId: string, id: string): Promise<IngestJob | undefined>;
   recent(accountId: string, productId: string, limit: number): Promise<IngestJob[]>;

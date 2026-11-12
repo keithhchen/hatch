@@ -1,6 +1,6 @@
 /** Domain: an ingest job and its legal transitions. Pure functions; nothing here touches I/O. */
 
-export type IngestInput = { url: string } | { name: string; media_type?: string; bytes: number };
+export type IngestInput = { url: string } | { name: string; media_type?: string; bytes: number; sha256?: string };
 /** The run on an outside provider that handled an item: where to read what happened. */
 export type ProviderSession = { provider: "kimi_hosted_agents"; id: string };
 export type ItemStatus = "pending" | "ok" | "partial" | "failed";

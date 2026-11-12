@@ -1,11 +1,14 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { deterministicId, idempotent } from "../idempotency.js";
 import { fail, finish, interrupt, queuedJob, start, type IngestInput, type IngestJob, type ItemOutcome } from "./job.js";
 import { labelOfUrl, safeName, stemOf } from "./names.js";
 import type { IngestEngine, IngestJobRepository, IngestSink, Result, Source } from "./ports.js";
 import { log } from "../observability/log.js";
 
 export const MAX_ITEMS = 50;
-export const MAX_INLINE_BYTES = 30 * 1024 * 1024;
+export const MAX_FILE_BYTES = 50 * 1024 * 1024;
+/** The request body that can carry a file of MAX_FILE_BYTES as base64 inside JSON. */
+export const INGEST_BODY_MAX_BYTES = Math.ceil(MAX_FILE_BYTES * 4 / 3) + 1024 * 1024;
 const MAX_CONTEXT = 4000;
 const RECENT = 20;
 const HEARTBEAT_MS = 30_000;
@@ -41,10 +44,11 @@ const accept = (raw: unknown, id: string): { source: Source; input: IngestInput 
     if (!BASE64.test(item.content_base64)) throw invalid(`${name}: content_base64 is not valid base64`);
     const bytes = Buffer.from(item.content_base64, "base64");
     if (!bytes.length) throw invalid(`${name}: the file is empty`);
+    if (bytes.length > MAX_FILE_BYTES) throw new IngestError(413, "file_too_large", `${name} is larger than ${MAX_FILE_BYTES / 1024 / 1024} MB`);
     const declared = typeof item.media_type === "string" && item.media_type.trim() ? item.media_type.trim().slice(0, 200) : undefined;
     return {
       source: { id, kind: "file", name, bytes, ...(declared ? { mimeType: declared } : {}) },
-      input: { name, bytes: bytes.length, ...(declared ? { media_type: declared } : {}) },
+      input: { name, bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), ...(declared ? { media_type: declared } : {}) },
     };
   }
   throw invalid("Each item needs a url, or a name with content_base64");
@@ -60,8 +64,6 @@ const parse = (items: unknown): Array<{ source: Source; input: IngestInput }> =>
       throw invalid(`Item ${index + 1} is not a valid url`);
     }
   });
-  const total = accepted.reduce((sum, { source }) => sum + (source.kind === "file" ? source.bytes.length : 0), 0);
-  if (total > MAX_INLINE_BYTES) throw new IngestError(413, "ingest_too_large", `Inline files may total at most ${MAX_INLINE_BYTES / 1024 / 1024} MB`);
   return accepted;
 };
 
@@ -86,15 +88,22 @@ export class IngestService {
 
   private now() { return this.deps.now?.() ?? new Date().toISOString(); }
 
-  async submit(accountId: string, productId: string, items: unknown, context?: unknown): Promise<IngestJob> {
+  /** With an Idempotency-Key the job id comes from the key, so a repeat finds the first job instead of making another. */
+  async submit(accountId: string, productId: string, items: unknown, context?: unknown, idempotencyKey?: string): Promise<IngestJob> {
     if (context !== undefined && typeof context !== "string") throw invalid("context must be text");
     if ((context ?? "").length > MAX_CONTEXT) throw invalid(`context may be at most ${MAX_CONTEXT} characters`);
     const accepted = parse(items);
-    const job = queuedJob(this.deps.newId?.() ?? randomUUID(), accountId, productId, accepted.map(entry => entry.input), context?.trim() ?? "", this.now());
-    await this.deps.jobs.create(job);
+    const id = idempotencyKey ? deterministicId(accountId, productId, "ingest", idempotencyKey) : this.deps.newId?.() ?? randomUUID();
+    const fresh = queuedJob(id, accountId, productId, accepted.map(entry => entry.input), context?.trim() ?? "", this.now());
+    const { value: job, replayed } = await this.once(fresh);
+    if (replayed) return job;
     (this.deps.inBackground ?? detached)(() => this.track(this.run(job, accepted.map(entry => entry.source))));
     return job;
   }
+
+  private readonly once = idempotent<IngestJob>(
+    { create: job => this.deps.jobs.create(job), find: job => this.deps.jobs.get(job.accountId, job.productId, job.id) },
+    (stored, fresh) => stored.context === fresh.context && JSON.stringify(stored.items.map(item => item.input)) === JSON.stringify(fresh.items.map(item => item.input)));
 
   get(accountId: string, productId: string, id: string) { return this.deps.jobs.get(accountId, productId, id); }
   recent(accountId: string, productId: string) { return this.deps.jobs.recent(accountId, productId, RECENT); }

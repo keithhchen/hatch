@@ -23,11 +23,12 @@ export class PostgresIngestJobs implements IngestJobRepository {
     return new PostgresIngestJobs(pool);
   }
   async create(job: IngestJob) {
-    await this.pool.query(
+    const { rowCount } = await this.pool.query(
       `INSERT INTO hatch_ingest_jobs (id, account_id, product_id, status, context, items, error, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9)`,
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9) ON CONFLICT (id) DO NOTHING`,
       [job.id, job.accountId, job.productId, job.status, job.context, JSON.stringify(job.items), job.error ?? null, job.createdAt, job.updatedAt],
     );
+    return rowCount === 1;
   }
   async save(job: IngestJob) {
     await this.pool.query(
@@ -54,7 +55,11 @@ export class PostgresIngestJobs implements IngestJobRepository {
 /** Explicit test dependency; the product never constructs this store. */
 export class MemoryIngestJobs implements IngestJobRepository {
   readonly jobs = new Map<string, IngestJob>();
-  async create(job: IngestJob) { this.jobs.set(job.id, structuredClone(job)); }
+  async create(job: IngestJob) {
+    if (this.jobs.has(job.id)) return false;
+    this.jobs.set(job.id, structuredClone(job));
+    return true;
+  }
   async save(job: IngestJob) { this.jobs.set(job.id, structuredClone(job)); }
   async get(accountId: string, productId: string, id: string) {
     const job = this.jobs.get(id);
