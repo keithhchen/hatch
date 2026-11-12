@@ -73,6 +73,23 @@ export function decisionConformance(name: string, make: () => Promise<{ tasks: T
     assert.ok(race.some(result => result.status === "rejected" && result.reason instanceof TaskRefused), "the loser is told why");
   }));
 
+  it(`${name}: concurrent updates of one task each land: payload keys merge, attempts add up, nothing is overwritten`, () => run(async (tasks, waiting) => {
+    const task = await waiting();
+    await tasks.update(task.id, { payload: { instruction: "keep" } });
+    await Promise.all([
+      tasks.update(task.id, { payload: { step: "generation" } }),
+      tasks.update(task.id, { payload: { run: "run_1" } }),
+      tasks.update(task.id, { payload: { questions: ["q"] } }),
+      tasks.update(task.id, { attempted: true }),
+      tasks.update(task.id, { attempted: true }),
+      tasks.update(task.id, { summary: "s" }),
+    ]);
+    const stored = (await tasks.get(task.id))!;
+    assert.deepEqual(stored.payload, { instruction: "keep", step: "generation", run: "run_1", questions: ["q"] });
+    assert.equal(stored.attempts, 2);
+    assert.equal(stored.summary, "s");
+  }));
+
   it(`${name}: only a task waiting for review is approved; a task waiting for anything is declined; a missing task is not found`, () => run(async (tasks) => {
     const asking = await tasks.create({ accountId: ACCOUNT, kind: "poke", origin: { source: "web" }, status: "needs_you", needs: "answer", payload: {} });
     const { effects, effect } = counted();
