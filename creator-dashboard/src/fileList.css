@@ -24,9 +24,13 @@
 .fv__raw { box-sizing: border-box; width: 100%; min-height: 320px; resize: vertical; border: 0; background: transparent; color: var(--web-ink); font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; outline: none; }
 .fv__copy { max-width: 360px; }
 
-.factory-upload-text { display: grid; gap: 10px; width: 100%; }
-.factory-upload-text .hui-textarea { min-height: 96px; border-radius: 18px; background: var(--web-card); }
-.factory-upload-text > button { justify-self: start; }
+.factory-import { width: min(520px, calc(100vw - 24px)); }
+.factory-import .hui-dialog__body { display: grid; gap: 12px; justify-items: start; }
+.factory-import p { margin: 0; color: var(--web-ink); }
+.factory-import .hui-textarea { min-height: 120px; width: 100%; border-radius: 18px; background: var(--web-card); }
+.factory-import__links { display: flex; flex-wrap: wrap; gap: 8px; }
+.factory-import__links a { padding: 6px 14px; border: 1px solid var(--web-rule); border-radius: 999px; color: var(--web-ink); font-size: 13px; text-decoration: none; }
+.factory-import__links a:hover { background: var(--web-card); }
 
 .fl-panel { display: grid; gap: 10px; margin-bottom: 12px; }
 .fl-panel__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
