@@ -24,10 +24,20 @@
 .fv__raw { box-sizing: border-box; width: 100%; min-height: 320px; resize: vertical; border: 0; background: transparent; color: var(--web-ink); font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; outline: none; }
 .fv__copy { max-width: 360px; }
 
-.factory-upload-text { display: grid; gap: 10px; width: 100%; }
-.factory-upload-text .hui-textarea { min-height: 96px; border-radius: 18px; background: var(--web-card); }
-.factory-upload-text > button { justify-self: start; }
+.factory-import { width: min(520px, calc(100vw - 24px)); }
+.factory-import .hui-dialog__body { display: grid; gap: 12px; justify-items: start; }
+.factory-import p { margin: 0; color: var(--web-ink); font-size: 14px; line-height: 1.5; }
+.factory-import .factory-import__agents { font-size: 13px; color: var(--web-muted); }
+.factory-import .hui-textarea { min-height: 120px; width: 100%; border-radius: 18px; background: var(--web-card); }
+.factory-import__links { display: flex; flex-wrap: wrap; gap: 18px; }
+.factory-import__links a { display: inline-flex; align-items: center; gap: 2px; color: var(--web-ink); font-size: 13px; font-weight: 600; text-decoration: underline; text-decoration-color: var(--web-rule); text-underline-offset: 3px; }
+.factory-import__links a svg { width: 14px; height: 14px; }
+.factory-import__links a:hover { text-decoration-color: currentColor; }
 
 .fl-panel { display: grid; gap: 10px; margin-bottom: 12px; }
 .fl-panel__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
 .fv-dialog { width: min(720px, calc(100vw - 24px)); }
+.factory-upload-page .factory-import__open { height: 36px; padding: 0 15px; font-size: 14px; }
+.factory-import__open svg { width: 16px; height: 16px; }
+.factory-import__rule { width: 100%; margin: 4px 0; border: 0; border-top: 1px solid var(--web-rule); }
+.factory-import__paste { font-size: 14px; font-weight: 600; color: var(--web-ink); }
