@@ -71,8 +71,8 @@ function AgentHeaderActions({ product, live, t }) {
       items={[
         { value: "copy", label: t("sxCopyProductLink"), icon: <Copy aria-hidden="true" />, onSelect: copyLink(href) },
         { value: "page", label: t("sxOpenProductPage"), icon: <ExternalLink aria-hidden="true" />, onSelect: () => open(href) },
-        { value: "chat", label: t("sxTryProductChat"), icon: <ExternalLink aria-hidden="true" />, onSelect: () => open(chatPathOf(product)) },
-        { value: "copy-chat", label: t("sxCopyChatLink"), icon: <Copy aria-hidden="true" />, onSelect: copyLink(chatPathOf(product)) }
+        { value: "copy-chat", label: t("sxCopyChatLink"), icon: <Copy aria-hidden="true" />, onSelect: copyLink(chatPathOf(product)) },
+        { value: "chat", label: t("sxTryProductChat"), icon: <ExternalLink aria-hidden="true" />, onSelect: () => open(chatPathOf(product)) }
       ]}
     />
     {failed ? <InlineError>{t("copyFailed")}</InlineError> : null}
