@@ -43,7 +43,7 @@ import { CHANNEL_KINDS, CHANNEL_LABELS, isChannelKind, type ChannelAdapter, type
 import { ChannelListeners } from "./channels/listeners.js";
 import { CredentialRefresher } from "./channels/credentialRefresh.js";
 import { ChannelHub } from "./channels/hub.js";
-import { ChannelService, openChannelStores } from "./channels/service.js";
+import { ChannelService } from "./channels/service.js";
 import { GuardedTarget, liveOwnProduct } from "./channels/guardedTarget.js";
 import { ChatFlow } from "./channels/chatTarget.js";
 import { ProductTarget } from "./channels/productTarget.js";
@@ -55,6 +55,7 @@ import { CREDENTIAL_FORMS, isPerProduct, isTenantForm, readCredentials } from ".
 import { LineChannel } from "./channels/lineChannel.js";
 import { guarded } from "./channels/eligibility.js";
 import { STUDIO_TARGET } from "./channels/connections.js";
+import { openChannelStores } from "./channels/postgres/stores.js";
 import type { AgentTarget } from "./surfaces/contract.js";
 import { InstagramChannel } from "./channels/instagramChannel.js";
 import { MessengerChannel } from "./channels/messengerChannel.js";
@@ -360,12 +361,14 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     }, kind => { const form = CREDENTIAL_FORMS[kind]; return Boolean(form && isTenantForm(form)); });
     // Each platform's own sign-in: one Hatch account per platform id. A chat that started it is bound to the Assistant once the sign-in names the same sender.
     const clientOf = (prefix: string) => { const clientId = env(`${prefix}_CLIENT_ID`); const clientSecret = env(`${prefix}_CLIENT_SECRET`); return clientId && clientSecret ? { clientId, clientSecret } : undefined; };
-    const [telegramClient, lineClient, discordClient] = [clientOf("HATCH_TELEGRAM_LOGIN"), clientOf("HATCH_LINE_LOGIN"), clientOf("HATCH_DISCORD")];
-    const providers: Partial<Record<ChannelKind, IdentityProvider>> = {
-      ...(telegramClient ? { telegram: telegramIdentity(new OidcClient(telegramOidc(telegramClient, env("HATCH_TELEGRAM_LOGIN_BASE")))) } : {}),
-      ...(lineClient ? { line: lineIdentity(new OidcClient(lineOidc(lineClient))) } : {}),
-      ...(discordClient ? { discord: new DiscordIdentity(discordClient) } : {}),
+    // The platforms that are identity providers on our shared bot, each with how its provider is built from the environment.
+    const identityProviders: Partial<Record<ChannelKind, () => IdentityProvider | undefined>> = {
+      telegram: () => { const client = clientOf("HATCH_TELEGRAM_LOGIN"); return client && telegramIdentity(new OidcClient(telegramOidc(client, env("HATCH_TELEGRAM_LOGIN_BASE")))); },
+      line: () => { const client = clientOf("HATCH_LINE_LOGIN"); return client && lineIdentity(new OidcClient(lineOidc(client))); },
+      discord: () => { const client = clientOf("HATCH_DISCORD"); return client && new DiscordIdentity(client); },
     };
+    const providers: Partial<Record<ChannelKind, IdentityProvider>> = {};
+    for (const [kind, build] of Object.entries(identityProviders)) { const provider = build(); if (provider) providers[kind as ChannelKind] = provider; }
     let channels!: ChannelService;
     // Signing in with a platform is closed for now: on its own it creates a Hatch account per platform id, and an account that
     // later unbinds the platform has no way back in yet, which leaves ghost accounts and platform ids that cannot be bound.
@@ -388,7 +391,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       audienceOf: (kind, target) => target.kind === "product" && isPerProduct(CREDENTIAL_FORMS[kind]) ? "public" : "self",
       signIn: (kind, senderId) => platformLogin.claimLink(kind, senderId),
       // A platform id on our shared bot belongs to one Hatch account: linking from an account that is not its own is refused.
-      claim: async (kind, scope, accountId, senderId) => !["telegram", "line", "discord"].includes(kind) || scope !== "" || await accounts.linkIdentity(accountId, kind, senderId),
+      claim: async (kind, scope, accountId, senderId) => !Object.hasOwn(identityProviders, kind) || scope !== "" || await accounts.linkIdentity(accountId, kind, senderId),
     });
     const assistantState = await PostgresAssistantState.open(registryPool);
     const productsPrefix = environment.HATCH_CREATOR_PRODUCT_FILES_PREFIX?.trim() || "creator-products";
