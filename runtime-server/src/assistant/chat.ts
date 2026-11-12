@@ -9,6 +9,7 @@ import { failureOfReason } from "../errors/failures.js";
 import { ChatAssets, attachmentMessageId } from "../chat/assets.js";
 import type { ChatGateway, ConversationRef, SentMessage, UploadedRef } from "../chat/gateway.js";
 import { ChatRuntime } from "../chat/chatRuntime.js";
+import { attributeByScope, type UsageRecorder } from "../usage/usage.js";
 import { NO_SKILLS, failRun, runModelTurn, type TurnBinding } from "../chat/modelTurn.js";
 import { ChatError, accountPrincipal } from "../chat/principal.js";
 import type { Retried } from "../chat/chatService.js";
@@ -63,6 +64,8 @@ export type AssistantChatDeps = {
   leaseMs?: number;
   sweepMs?: number;
   report?: (accountId: string, error: unknown) => void;
+  /** Where the Assistant's model calls are recorded, as Studio usage of the Expert. */
+  usage?: UsageRecorder;
 };
 
 /** The Assistant's one conversation per account is the account's own: nothing else binds to it. */
@@ -77,7 +80,7 @@ class AssistantBinder implements PrincipalBinder<AssistantScope> {
 }
 
 const scopeOfConversation = (conversation: Pick<ConversationRecord, "ownerAccountId">): AssistantScope => ({
-  creatorId: conversation.ownerAccountId, userId: conversation.ownerAccountId, productId: ASSISTANT_AGENT_ID, corpusDigest: ASSISTANT_AGENT_ID, accountId: conversation.ownerAccountId
+  creatorId: conversation.ownerAccountId, userId: conversation.ownerAccountId, productId: ASSISTANT_AGENT_ID, corpusDigest: ASSISTANT_AGENT_ID, accountId: conversation.ownerAccountId, usageSurface: "studio"
 });
 
 /**
@@ -102,7 +105,8 @@ export class AssistantChat implements AssistantHost {
       admission: { reserve: () => () => undefined },
       toolTimeoutMs: deps.toolTimeoutMs ?? 120_000,
       leaseMs: deps.leaseMs, sweepMs: deps.sweepMs,
-      ...(deps.compactionStrategy ? { compactionStrategy: deps.compactionStrategy } : {})
+      ...(deps.compactionStrategy ? { compactionStrategy: deps.compactionStrategy } : {}),
+      ...(deps.usage ? { usage: { recorder: deps.usage, attribute: attributeByScope } } : {})
     });
     this.feed = new JournalFeed({ repository: deps.repository, hub: this.runtime.hub });
     this.gateway = new ServiceChatGateway<AssistantScope>({
@@ -171,7 +175,7 @@ export class AssistantChat implements AssistantHost {
           {
             agent: { systemPrompt: await this.systemPrompt(), localTools: [], externalTools: studioToolNames(deps.tools), externalToolDefinitions: [] },
             liveState: () => deps.liveState(accountId).catch(error => { this.report(accountId, error); return "<当前状态>\n这次没有读到当前状态，需要时用 list_agents 和 list_tasks 查。\n</当前状态>"; }),
-            ownPrompt: true, mayStaySilent: true
+            ownPrompt: true, mayStaySilent: true, usage: turn.usage
           }
         );
       } catch (error) { await failRun(turn, error); }

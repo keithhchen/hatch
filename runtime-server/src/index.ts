@@ -56,6 +56,8 @@ import { ChatAssets, TextPartsReader, type PartsReader } from "./chat/assets.js"
 import { attachmentToolDefinitions } from "./chat/attachmentTools.js";
 import { failRun, runModelTurn } from "./chat/modelTurn.js";
 import { toolRegistry } from "./tools.js";
+import { attributeByScope, type UsageRecorder } from "./usage/usage.js";
+import { PostgresUsageLedger } from "./usage/postgresUsage.js";
 import { RegistryConnectionDirectory } from "./chat/registryConnections.js";
 import { openChatAssets } from "./chat/openChatAssets.js";
 import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
@@ -109,6 +111,8 @@ export type RuntimeServerOptions = {
   /** Chat's compaction strategy; tests inject one with a test-only summarizer. */
   compactionStrategy?: ChatRuntimeOptions<SessionBinding>["compactionStrategy"];
   conversationStore?: RuntimeStore;
+  /** Where model calls are recorded for the account that pays for them. Without one nothing is metered. */
+  usage?: UsageRecorder;
   /** Optional injected store for tests; production defaults beside transcripts. */
   assetStore?: RuntimeAssetStore;
   /** Durable Conversation/Run control-plane. Defaults to Postgres or local app-data. */
@@ -294,6 +298,7 @@ export async function createRuntimeServerFromEnvironment(
         ? new FilesystemAgentCorpusResolver(runtimeCorpusRoot)
         : undefined,
     conversationStore,
+    ...(conversationStore instanceof PostgresStore ? { usage: new PostgresUsageLedger(conversationStore.pool as never) } : {}),
     ...(chatAssets ? { chatAssets } : {}),
     assetStore: runtimeAssetStoreFromEnvironment(environment, runtimeDataDir),
     chatServiceToken: config.chatServiceToken,
@@ -500,7 +505,8 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
           createRuntime(), conversationStore, conversationRepository, assetStore, turn.state,
           async (message) => turn.publish(message), outputGuard, turn.signal,
           commerceEventSink, deliveryAccountingOutbox, scheduleDeliveryReconciliation,
-          turn.clientOf, turn.claimSteered, turn.onSteer, turn.compaction
+          turn.clientOf, turn.claimSteered, turn.onSteer, turn.compaction,
+          { usage: turn.usage }
         );
       } catch (error) {
         await failRun(turn, error);
@@ -516,6 +522,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     limits: options.principalLimits ?? new SentMessageLimits(conversationRepository, options.maxContactMessages ?? DEFAULT_MAX_CONTACT_MESSAGES),
     toolTimeoutMs: options.clientToolTimeoutMs ?? clientToolTimeoutMs(),
     compactionStrategy: options.compactionStrategy,
+    ...(options.usage ? { usage: { recorder: options.usage, attribute: attributeByScope } } : {}),
     // With a shared database every instance sees every Run's live events.
     ...(conversationStore instanceof PostgresStore ? { relay: new PostgresEventRelay(conversationStore.pool as never), stops: new PostgresStopRelay(conversationStore.pool as never), steers: new PostgresStopRelay(conversationStore.pool as never, { channel: "hatch_run_steers" }) } : {})
   });

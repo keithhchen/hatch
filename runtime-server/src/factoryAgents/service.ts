@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createFactoryHandler } from "./server.js";
+import type { UsageRecorder } from "../usage/usage.js";
 import type { AgentDefinitionRepository } from "./definitions.js";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { Journal } from "./journal.js";
@@ -13,7 +14,7 @@ export class FactoryAgentsService {
   private withheldTools?: (scope: { creatorId: string; productId: string }, session: Session) => Promise<string[]>;
   private opened = new Set<(scope: { creatorId: string; productId: string }, workspace: FactoryWorkspace) => void>();
   /** `journal` gives each Product workspace its own record of Runs, so every Run is recorded from its start, however it was started. */
-  constructor(private root: string, private env: NodeJS.ProcessEnv, private definitions?: AgentDefinitionRepository, private journal?: () => Journal) {}
+  constructor(private root: string, private env: NodeJS.ProcessEnv, private definitions?: AgentDefinitionRepository, private journal?: () => Journal, private usage?: UsageRecorder) {}
   /** The Assistant observes every Product workspace it opens. */
   attachAssistant(hooks: { withheldTools: (scope: { creatorId: string; productId: string }, session: Session) => Promise<string[]>; opened: (scope: { creatorId: string; productId: string }, workspace: FactoryWorkspace) => void }): void {
     this.withheldTools = hooks.withheldTools;
@@ -29,7 +30,7 @@ export class FactoryAgentsService {
     const key = `${creatorId}/${productId}`;
     let pending = this.products.get(key);
     if (!pending) {
-      pending = createFactoryHandler({ root: path.join(this.root, creatorId, productId), scope, definitions: this.definitions, runtime: this.journal ? { journal: this.journal() } : undefined, withheldTools: async session => await this.withheldTools?.({ creatorId, productId }, session) ?? [], env: {
+      pending = createFactoryHandler({ root: path.join(this.root, creatorId, productId), scope, definitions: this.definitions, runtime: { ...(this.journal ? { journal: this.journal() } : {}), ...(this.usage ? { usage: { recorder: this.usage, accountId: creatorId } } : {}) }, withheldTools: async session => await this.withheldTools?.({ creatorId, productId }, session) ?? [], env: {
         ...this.env,
         HATCH_FACTORY_AUTH_TOKEN: undefined,
         HATCH_FACTORY_CREATOR_TOKEN: token,

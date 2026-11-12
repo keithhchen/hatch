@@ -1,4 +1,5 @@
 import { createCompactionSummaryMessage, estimateTokens, generateSummaryWithUsage, type AgentMessage } from "@earendil-works/pi-agent-core";
+import { randomUUID } from "node:crypto";
 import type { Model, Models } from "@earendil-works/pi-ai";
 import type { Entry, SummarizeInput } from "./compactionStrategy.js";
 import { traceObservation } from "./langfuse.js";
@@ -57,7 +58,7 @@ export function summarizeWithPi<M>(
   models: () => { models: Models; model: Model<any> },
   reserveTokens = 10_000
 ): (input: SummarizeInput<M>) => Promise<string> {
-  return async ({ messages, previous, instructions, signal }) => {
+  return async ({ messages, previous, instructions, signal, usage }) => {
     const { models: registry, model } = models();
     const asText = messages.map(toPi).filter((message) => !textOf(message).startsWith("<system-reminder>"));
     // A span, not a generation: the summary request is already a generation underneath, and cost counts once.
@@ -70,6 +71,7 @@ export function summarizeWithPi<M>(
         : { failed: outcome.error.message }
     );
     if (!result.ok) throw result.error;
+    await usage?.({ id: randomUUID(), model: model.id, usage: result.value.usage });
     return result.value.text;
   };
 }

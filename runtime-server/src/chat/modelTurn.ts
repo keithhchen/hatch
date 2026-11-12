@@ -49,6 +49,7 @@ import { withinImageBudget } from "./imageBudget.js";
 import type { Turn } from "./turnExecutor.js";
 import { RunHandoff } from "./runSupervisor.js";
 import type { TurnCompaction } from "./chatCompaction.js";
+import type { UsageSink, UsageSurface } from "../usage/usage.js";
 
 /** What a model turn needs to know about the conversation it serves: who, which Product, and what it may deliver. */
 export type TurnBinding = {
@@ -64,6 +65,9 @@ export type TurnBinding = {
   agentCorpusRoot?: string;
   entitlementId?: string;
   orderId?: string;
+  /** Where the Run's tokens are counted. Absent is app or channel chat; the Responses API says `chat_api` and its key. */
+  usageSurface?: UsageSurface;
+  apiKeyId?: string;
 };
 
 /** The agent a turn runs as: its instructions and tools. A Product's comes from its Corpus; another host supplies its own. */
@@ -79,6 +83,8 @@ export type TurnProfile = {
   ownPrompt?: boolean;
   /** A Run may end having said nothing. */
   mayStaySilent?: boolean;
+  /** Records each model call against whoever pays for the Run. */
+  usage?: UsageSink;
 };
 
 export async function runModelTurn(...args: Parameters<typeof runModelTurnInternal>): Promise<void> {
@@ -380,6 +386,7 @@ async function runModelTurnInternal(
       clientTools: materializedAgent?.localTools ?? input.local_tools,
       allowedExternalTools: materializedAgent?.externalTools,
       externalToolDefinitions: materializedAgent?.externalToolDefinitions,
+      usage: profile?.usage,
       persistModelMessage: async (message) => {
         await store.append({
           type: "conversation.model_message",

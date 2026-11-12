@@ -9,6 +9,7 @@ import type { RunStateMachine } from "../runState.js";
 import type { RuntimeStore } from "../store.js";
 import type { RunEventHub } from "./runEventHub.js";
 import { log } from "../observability/log.js";
+import type { UsageSink } from "../usage/usage.js";
 
 /** What the rest of the system learns about a compaction: its id, and how it ended. */
 export type CompactionNotice = {
@@ -30,7 +31,7 @@ export interface TurnCompaction {
 }
 
 export interface RunCompactions {
-  forRun(run: { run: ConversationRunRecord; conversation: ConversationRecord; state: RunStateMachine; publish: (message: OutboundMessage) => void; signal: AbortSignal }): TurnCompaction;
+  forRun(run: { run: ConversationRunRecord; conversation: ConversationRecord; state: RunStateMachine; publish: (message: OutboundMessage) => void; signal: AbortSignal; usage?: UsageSink }): TurnCompaction;
 }
 
 type Repository = Pick<ConversationRepository, "appendEvent" | "beginCompaction" | "requestCompactionPreempt" | "compactionStopped" | "runningCompaction" | "endCompaction" | "commitCompaction">;
@@ -48,6 +49,8 @@ const messageOf = (outcome: Exclude<CompactionOutcome<RuntimeCompactionMessage>,
 export class ChatCompaction implements RunCompactions {
   private readonly background = new BackgroundCompactor<string>();
   private readonly listeners = new Set<(notice: CompactionNotice) => void>();
+  /** Who pays for a conversation's compaction after a reply: whoever paid for its latest Run. */
+  private readonly sinks = new Map<string, UsageSink>();
 
   constructor(private readonly deps: {
     repository: Repository;
@@ -86,8 +89,9 @@ export class ChatCompaction implements RunCompactions {
 
   async drain(): Promise<void> { await this.background.drain(); }
 
-  forRun({ run, conversation, state, publish, signal }: Parameters<RunCompactions["forRun"]>[0]): TurnCompaction {
+  forRun({ run, conversation, state, publish, signal, usage }: Parameters<RunCompactions["forRun"]>[0]): TurnCompaction {
     const { store } = this.deps;
+    if (usage) this.sinks.set(conversation.id, usage);
     let overflows = 0;
     const compact = async (messages: RuntimeCompactionMessage[], request: Request): Promise<CompactionCheckpoint | undefined> => {
       const strategy = this.deps.strategy();
@@ -96,7 +100,7 @@ export class ChatCompaction implements RunCompactions {
       const now = (this.deps.now ?? Date.now)();
       // Between tool steps the provider has just seen this prefix; before a turn it has not been seen since the last event.
       const cacheTouchedAt = request.phase === "mid_turn" ? now : await store.lastActivityAt(conversation.id);
-      const strategyRequest = { now, cacheTouchedAt, signal, force: request.force, turnWaiting: request.turnWaiting, tailScale: request.tailScale, onFailure: request.trigger === "manual" ? "throw" as const : "degrade" as const };
+      const strategyRequest = { now, cacheTouchedAt, signal, force: request.force, turnWaiting: request.turnWaiting, tailScale: request.tailScale, onFailure: request.trigger === "manual" ? "throw" as const : "degrade" as const, usage };
       if (!strategy.wants(messages, strategyRequest)) return undefined;
       const compactionId = newCompactionId();
       await state.compact(request.phase);
@@ -142,7 +146,7 @@ export class ChatCompaction implements RunCompactions {
       const now = (this.deps.now ?? Date.now)();
       const messages = await store.readConversation(run.conversationId);
       const cacheTouchedAt = await store.lastActivityAt(run.conversationId);
-      const request = { now, cacheTouchedAt, signal: AbortSignal.any([signal, stopped.signal]) };
+      const request = { now, cacheTouchedAt, signal: AbortSignal.any([signal, stopped.signal]), usage: this.sinks.get(run.conversationId) };
       if (!strategy.wants(messages, request)) {
         // Large but under the summary trigger: old tool results can go once the provider's cache has expired.
         const waitMs = strategy.policy.cacheTtlMs - (now - (cacheTouchedAt ?? 0)) + 1_000;

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { CompactionStrategy } from "../compactionStrategy.js";
 import { chatCompactionStrategy, type RuntimeCompactionMessage } from "../compaction.js";
+import type { UsageRecording } from "../usage/usage.js";
 import type { ConversationRepository } from "../conversationRepository.js";
 import type { ClientToolName, ToolRequest, ToolResult } from "../protocol.js";
 import type { ClientGroup } from "../surfaces/contract.js";
@@ -47,6 +48,8 @@ export type ChatRuntimeOptions<Scope> = {
   hub?: RunEventHub;
   /** The compaction strategy; by default Chat's, built from the model's window on first use. */
   compactionStrategy?: () => CompactionStrategy<RuntimeCompactionMessage>;
+  /** Where each Run's model calls are recorded, and who pays for them. */
+  usage?: UsageRecording<Scope>;
 };
 
 /**
@@ -82,7 +85,7 @@ export class ChatRuntime<Scope> {
         store: fenced(store, executorId, { append: 1 }),
         terminator: terminators.executing,
         hub: this.hub, registry: this.registry, scopes: options.scopes, runner: options.runner,
-        compactions: this.compaction, toolTimeoutMs: options.toolTimeoutMs
+        compactions: this.compaction, toolTimeoutMs: options.toolTimeoutMs, usage: options.usage
       }),
       (run) => closeDanglingCalls(store, run),
       { executorId, leaseMs: options.leaseMs ?? DEFAULT_RUN_LEASE_MS, sweepMs: options.sweepMs ?? 5_000, toolPollMs: options.toolPollMs, afterReply: (run) => this.compaction.afterReply(run), stops: options.stops, steers: options.steers },

@@ -16,6 +16,7 @@ import type { OutboundMessage } from "../protocol.js";
 import type { RuntimeStore } from "../store.js";
 import { errorMessage } from "./modelTurn.js";
 import type { EventProjection } from "./sinks.js";
+import type { UsageSurface } from "../usage/usage.js";
 
 export type SessionBinding = {
   creatorId: string;
@@ -35,6 +36,9 @@ export type SessionBinding = {
   creatorTools?: RuntimeCreatorTool[];
   entitlementId?: string;
   orderId?: string;
+  /** Where the Run's tokens are counted; see TurnBinding. */
+  usageSurface?: UsageSurface;
+  apiKeyId?: string;
   explicit: boolean;
 };
 
