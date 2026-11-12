@@ -168,7 +168,8 @@ export function llmProfile(name: LlmProfileName): LlmProfile {
 }
 
 export function resolveLlmProfile(env: NodeJS.ProcessEnv = process.env): LlmProfile {
-  const configured = (env.HATCH_LLM_PROFILE?.trim() || "kimi-k2.6-no-thinking") as RuntimeLlmProfileName;
+  const configured = env.HATCH_LLM_PROFILE?.trim() as RuntimeLlmProfileName | undefined;
+  if (!configured) throw new Error(`HATCH_LLM_PROFILE is not set. Expected one of: ${RUNTIME_LLM_PROFILE_NAMES.join(", ")}`);
   const profile = PROFILES[configured];
   if (!profile || !RUNTIME_LLM_PROFILE_NAMES.includes(configured)) {
     throw new Error(`Unknown Runtime HATCH_LLM_PROFILE: ${configured}. Expected one of: ${RUNTIME_LLM_PROFILE_NAMES.join(", ")}`);

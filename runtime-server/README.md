@@ -261,7 +261,7 @@ selected contract. Pi owns the model profile, context estimate, compaction
 policy, retries, and output behavior. Use `LLM_API_KEY` for Kimi or
 `DEEPSEEK_API_KEY` for the explicit DeepSeek Factory profile.
 Corpus Evals are the default Creator quality gate. Ordinary Creator products stream Kimi's actual response to the Consumer Desktop. `HATCH_RUNTIME_DELIVERY_AUDIT=enforce` is an optional regulated-deployment override: it performs a second Kimi claim audit before delivery and intentionally withholds text streaming until that audit finishes.
-`HATCH_LLM_PROFILE` defaults to `kimi-k2.6-no-thinking`; set it explicitly to
+`HATCH_LLM_PROFILE` has no default and must be set (an unset or unknown value fails at startup); set it to
 `deepseek-v4-flash` only when the deployment has a valid `DEEPSEEK_API_KEY`.
 There is no implicit provider fallback. For the Kimi profile,
 `OPENAI_BASE_URL` falls back to `https://api.moonshot.cn/v1` and is restricted
