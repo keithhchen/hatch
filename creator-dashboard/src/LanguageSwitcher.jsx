@@ -1,23 +1,19 @@
 import React from "react";
+import { Check, ChevronDown, Globe } from "lucide-react";
+import { DropdownMenu } from "@hatch/ui";
 import { LOCALES, useLocale } from "./locale.jsx";
 import "./languageSwitcher.css";
 
-const DEFAULT_LABELS = { zh: "中文", en: "English", ja: "日本語" };
-const SHORT_LABELS = { en: "EN", zh: "中", ja: "日" };
+const LABELS = { zh: "中文", en: "English", ja: "日本語" };
 
-export function LanguageSwitcher({ className = "", labels = DEFAULT_LABELS, compact = false }) {
+/** The page's language as a dropdown menu: a plain trigger with the current language, a menu of the others. */
+export function LanguageSwitcher({ className = "" }) {
   const { locale, setLocale } = useLocale();
-  const visibleLabels = compact ? SHORT_LABELS : labels;
   return (
-    <div className={`hatch-language-switcher ${compact ? "is-compact" : ""} ${className}`.trim()} role="group" aria-label={labels.language ?? "Language"}>
-      {LOCALES.map((value, index) => (
-        <React.Fragment key={value}>
-          {index ? <span aria-hidden="true">/</span> : null}
-          <button type="button" className={locale === value ? "active" : ""} aria-pressed={locale === value} onClick={() => setLocale(value)}>
-            {visibleLabels[value]}
-          </button>
-        </React.Fragment>
-      ))}
-    </div>
+    <DropdownMenu
+      label="Language"
+      trigger={<button type="button" className={`hatch-language-switcher ${className}`.trim()} aria-label="Language"><Globe aria-hidden="true" /><span>{LABELS[locale]}</span><ChevronDown aria-hidden="true" /></button>}
+      items={LOCALES.map((value) => ({ value, label: LABELS[value], active: value === locale, icon: <Check aria-hidden="true" className={value === locale ? undefined : "hatch-language-switcher__unchecked"} />, onSelect: () => setLocale(value) }))}
+    />
   );
 }
