@@ -15,6 +15,9 @@ import { chatCompactionAdapter } from "./compaction.js";
 import { CompactionStrategy, policyFor } from "./compactionStrategy.js";
 import type { AuthIdentityResolver, EntitlementBinding, EntitlementResolver } from "./entitlements.js";
 import { RuntimeAssetStore } from "./assetStore.js";
+import { AttachmentFiles } from "./assets/files.js";
+import { harness, png } from "./assets/kit.test.js";
+import { ChatAssets } from "./chat/assets.js";
 import { createRuntimeServer, durableConversationId, type RuntimeServer } from "./index.js";
 import { PROTOCOL_VERSION, type OutboundMessage } from "./protocol.js";
 import { RuntimeStore, localRuntimeAuthority } from "./store.js";
@@ -1047,23 +1050,31 @@ test("WebSocket subscribe: stream false gets durable events only, stream true al
   for (const socket of [starter, quiet, loud, resumed]) socket.close();
 });
 
-test("missing image fails before accepting, and retry uses fixed committed bytes without materializing again", async (t) => {
+test("a WebSocket image goes through the shared pipeline: a failed submit leaves no link, a retry reuses the same asset, and HTTP finds it too", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-atomic-image-"));
   const store = new RuntimeStore(root);
   const repository = new InMemoryConversationRepository(store.localAuthority);
-  const assetStore = new RuntimeAssetStore(path.join(root, "assets"));
-  const bytes = Buffer.from("immutable model image");
+  const kit = await harness();
+  const chatAssets = new ChatAssets({ pipeline: kit.pipeline, blobs: kit.blobs, files: new AttachmentFiles(kit.repository, kit.blobs) });
+  const bytes = await png(12, 12);
   const attachment = { kind: "asset" as const, attachment_id: "image", asset_id: "image", display_name: "image.png",
-    media_type: "image/png", source_bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") };
+    media_type: "image/png", source_bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), data_base64: bytes.toString("base64") };
   let executions = 0;
   await repository.initialize();
-  await repository.createConversation({ id: "atomic-image", publicId: "atomic-image",
+  const { conversation } = await repository.createConversation({ id: "atomic-image", publicId: "atomic-image",
     ownerAccountId: "local-development", creatorId: "local-development", agentId: "local-agent",
     productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}` });
-  runtime = createRuntimeServer({ insecureLocalMode: true, conversationStore: store, conversationRepository: repository, assetStore,
+  const original = repository.acceptSubmission.bind(repository);
+  let failNext = true;
+  repository.acceptSubmission = async (input, also) => {
+    if (failNext) { failNext = false; throw new Error("injected pre-commit failure"); }
+    return original(input, also);
+  };
+  runtime = createRuntimeServer({ insecureLocalMode: true, conversationStore: store, conversationRepository: repository, chatAssets,
     createRuntime: () => ({ async *run(input, context) {
       executions += 1;
-      assert.deepEqual(context.messages[0]?.model_images, [{ type: "image", data: bytes.toString("base64"), mimeType: "image/png" }]);
+      assert.equal(context.messages[0]?.model_images?.length, 1);
+      assert.match(context.messages[0]!.content!, /^look\n\[image: \/attachments\/msg_[0-9a-f]{16}\/image\.png\]$/);
       yield { type: "turn.completed" as const, run_id: input.run_id, finish_reason: "stop" as const };
     } }) });
   const messages: OutboundMessage[] = [];
@@ -1071,24 +1082,48 @@ test("missing image fails before accepting, and retry uses fixed committed bytes
   const request = { type: "client.message", conversation_id: "atomic-image", run_id: "image-run", client_message_id: "image-message",
     local_tools: [],
     message: { role: "user", content: "look", attachments: [attachment] } };
+  const storedAssets = () => (kit.repository as unknown as { rows: Map<string, unknown> }).rows.size;
   try {
     socket.send(JSON.stringify(request));
     await waitForSocket(messages, (message) => message.type === "turn.failed");
     assert.deepEqual(await repository.listRuns("atomic-image"), []);
-    assert.equal(await store.readSubmissionReceipt("atomic-image", "image-run"), undefined);
-    assert.equal(messages.some((message) => message.type === "message.accepted"), false);
     assert.equal(executions, 0);
-    await assetStore.put({ ...attachment, data_base64: bytes.toString("base64") });
+    assert.deepEqual(await chatAssets.attachments(conversation), [], "a message that was not accepted links nothing");
+    assert.equal(storedAssets(), 1, "the upload is one ready asset, as after an HTTP upload");
     socket.send(JSON.stringify(request));
     await waitForSocket(messages, (message) => message.type === "turn.completed");
-    const read = t.mock.method(assetStore, "readBase64", async () => { throw new Error("image store offline after acceptance"); });
-    const put = t.mock.method(assetStore, "put", async () => { throw new Error("image store offline after acceptance"); });
+    assert.equal(storedAssets(), 1, "the retry reuses it");
+    assert.equal((await chatAssets.attachments(conversation)).length, 1);
     socket.send(JSON.stringify({ ...request, run_id: "image-retry" }));
     await waitForSocket(messages, (message) => message.type === "turn.state" && message.reason === "Idempotent client message replay");
-    assert.equal(read.mock.callCount(), 0);
-    assert.equal(put.mock.callCount(), 0);
     assert.equal(executions, 1);
+    assert.equal(storedAssets(), 1);
+    assert.equal((await chatAssets.attachments(conversation)).length, 1);
     assert.equal((await store.readConversation("atomic-image")).filter((message) => message.role === "user").length, 1);
+    // The same bytes uploaded over HTTP are the same asset.
+    const [{ asset }] = await chatAssets.attachments(conversation);
+    assert.equal((await chatAssets.upload(conversation, { name: "image.png", bytes })).asset_id, asset.id);
+  } finally { socket.terminate(); }
+});
+
+test("a WebSocket attachment without bytes is refused before anything is accepted", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-socket-nobytes-"));
+  const store = new RuntimeStore(root);
+  const repository = new InMemoryConversationRepository(store.localAuthority);
+  const kit = await harness();
+  const chatAssets = new ChatAssets({ pipeline: kit.pipeline, blobs: kit.blobs, files: new AttachmentFiles(kit.repository, kit.blobs) });
+  await repository.initialize();
+  await repository.createConversation({ id: "nobytes", publicId: "nobytes", ownerAccountId: "local-development", creatorId: "local-development",
+    agentId: "local-agent", productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}` });
+  runtime = createRuntimeServer({ insecureLocalMode: true, conversationStore: store, conversationRepository: repository, chatAssets });
+  const messages: OutboundMessage[] = [];
+  const socket = await openRuntimeSocket(await listen(runtime.server), "nobytes", messages);
+  try {
+    socket.send(JSON.stringify({ type: "client.message", conversation_id: "nobytes", run_id: "r", client_message_id: "m", local_tools: [],
+      message: { role: "user", content: "look", attachments: [{ kind: "asset", attachment_id: "a", asset_id: "a", display_name: "a.png", media_type: "image/png", source_bytes: 1, sha256: "0".repeat(64) }] } }));
+    const failed = await waitForSocket(messages, (message) => message.type === "turn.failed");
+    assert.equal((failed as { error: { code: string } }).error.code, "attachment_bytes_required");
+    assert.deepEqual(await repository.listRuns("nobytes"), []);
   } finally { socket.terminate(); }
 });
 
