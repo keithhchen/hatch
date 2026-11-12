@@ -39,10 +39,11 @@ import { ChatProvider } from "@mui/x-chat/headless";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button as HatchButton, Dialog, DialogContent, IconButton as HatchIconButton, InlineAlert, SegmentedControl, Textarea, hatchMuiThemeOptions } from "@hatch/ui";
-import { ArrowRight, ChevronLeft as PrevIcon, ChevronRight as NextIcon, Download as DownloadIcon, Plus, Send as SendIcon } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Sparkles, ChevronLeft as PrevIcon, ChevronRight as NextIcon, Download as DownloadIcon, Plus, Send as SendIcon } from "lucide-react";
 import { MicButton, RecordingActions, RecordingWave, canRecord, useVoiceInput } from "@hatch/chat/react";
 import { dashboardRequest } from "./data.js";
 import { FileList } from "./FileList.jsx";
+import { AI_LINKS, copyImportPrompt } from "./importDialog.js";
 import { createIngestPort, createJobStore, ingestFile, settleJob, tooLarge } from "./ingestPort.js";
 import { neighbour, orderedPaths } from "./fileListModel.js";
 import { browserDictation } from "./webChatClient.js";
@@ -120,7 +121,7 @@ export function FactoryAgents({ productId, section, agent, navigate, locale = "e
   const researchTransport = async () => agentSession("research") ?? await api(`${root}/sessions`, { method: "POST", body: { role: "research" } });
   const [preview, setPreview] = useState(null);
   const previewFile = async path => { try { setPreview({ id: (await researchTransport()).id, path }); } catch (e) { setError(factoryError(e, t, agentName)); } };
-  const saveManualText = async text => { const transport = await researchTransport(); await api(endpoint(root, transport.id, "files"), { method: "POST", body: { path: `input/manual/note-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}.md`, base64: textBase64(text) } }); await refreshConfig(); };
+  const saveManualText = async text => { const transport = await researchTransport(); await api(endpoint(root, transport.id, "files"), { method: "POST", body: { path: `input/manual/imported-from-ai-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}.md`, base64: textBase64(text) } }); await refreshConfig(); };
   const dismissUpload = id => setUploadItems(previous => previous.filter(item => item.id !== id));
   const deleteManualFile = async record => { const transport = agentSession("research"); if (!transport) return; try { await api(endpoint(root, transport.id, "files"), { method: "DELETE", body: { path: record.path } }); setManualFiles(previous => previous.filter(file => file.path !== record.path)); setUploadItems(previous => previous.filter(item => item.path !== record.path)); } catch (e) { setError(factoryError(e, t, agentName)); } };
   const states = studioPathStates(agents, product, manualFiles);
@@ -137,7 +138,7 @@ export function FactoryAgents({ productId, section, agent, navigate, locale = "e
     {selected === "uploads" && preview && manualFiles.some(file => file.path === preview.path) ? <FileViewer key={preview.path} root={root} running={false} id={preview.id} record={manualFiles.find(file => file.path === preview.path)} siblings={manualFiles} onOpenFile={path => setPreview({ ...preview, path })} onClose={() => setPreview(null)} t={t} perform={async fn => { try { await fn(); refreshConfig(); } catch (e) { setError(factoryError(e, t, agentName)); } }} /> : null}
     {step ? <div className="factory-step">
       {step.items.length > 1 ? <nav className="factory-tasks" aria-label={t("factoryTasksLabel")}>{step.items.map(([itemSection, page]) => <button key={page} type="button" className={page === selected ? "is-active" : ""} aria-current={page === selected ? "page" : undefined} onClick={() => goToFactory(itemSection, page)}>{page === "uploads" ? t("uploadSources") : agentName(page) || t("loadingAgentState")}{page !== "uploads" && agentEntry(page) ? <span className={`factory-dot is-${agentEntry(page).state}`} aria-hidden="true" /> : null}</button>)}</nav> : null}
-      {selected === "uploads" ? <SourceUploadWorkspace manualFiles={manualFiles} uploadItems={uploadItems} importPicker={importPicker} uploadProjectFiles={uploadProjectFiles} saveManualText={saveManualText} onOpenFile={previewFile} deleteManualFile={deleteManualFile} dismissUpload={dismissUpload} onOpenAgent={openAgent} t={t} /> : selectedSession ? <Workspace key={selectedSession.id} uploads={{ items: uploadItems, ingestedAt, add: uploadProjectFiles, dismiss: dismissUpload }} root={root} id={selectedSession.id} entry={selectedEntry} agents={agents} config={config} onChanged={() => undefined} onOpenAgent={openAgent} agentName={agentName} t={t} /> : <AgentIntro entry={selectedEntry} agents={agents} onOpenAgent={openAgent} agentName={agentName} locale={locale} t={t} />}
+      {selected === "uploads" ? <SourceUploadWorkspace manualFiles={manualFiles} uploadItems={uploadItems} importPicker={importPicker} uploadProjectFiles={uploadProjectFiles} saveManualText={saveManualText} locale={locale} onOpenFile={previewFile} deleteManualFile={deleteManualFile} dismissUpload={dismissUpload} onOpenAgent={openAgent} t={t} /> : selectedSession ? <Workspace key={selectedSession.id} uploads={{ items: uploadItems, ingestedAt, add: uploadProjectFiles, dismiss: dismissUpload }} root={root} id={selectedSession.id} entry={selectedEntry} agents={agents} config={config} onChanged={() => undefined} onOpenAgent={openAgent} agentName={agentName} t={t} /> : <AgentIntro entry={selectedEntry} agents={agents} onOpenAgent={openAgent} agentName={agentName} locale={locale} t={t} />}
     </div> : <FactoryOverview product={product} states={states} agentEntry={agentEntry} agentName={agentName} goToStep={goToStep} t={t} />}
   </div></ThemeProvider>;
 }
@@ -180,10 +181,9 @@ function AgentIntro({ entry, agents, onOpenAgent, agentName, locale, t }) {
 
 const uploadStatusLabel = t => record => t({ uploading: "uploadProcessing", ingesting: "ingesting", failed: "uploadFailed", partial: "ingestPartial", unsupported: "fileTooLarge" }[record.status]);
 
-function SourceUploadWorkspace({ onOpenFile, manualFiles, uploadItems, importPicker, uploadProjectFiles, saveManualText, deleteManualFile, dismissUpload, onOpenAgent, t }) {
-  const [dragging, setDragging] = useState(false); const [text, setText] = useState(""); const [saving, setSaving] = useState(false); const [textError, setTextError] = useState("");
+function SourceUploadWorkspace({ onOpenFile, manualFiles, uploadItems, importPicker, uploadProjectFiles, saveManualText, locale, deleteManualFile, dismissUpload, onOpenAgent, t }) {
+  const [dragging, setDragging] = useState(false);
   const records = [...(uploadItems || []), ...(manualFiles || [])];
-  const saveText = async () => { setSaving(true); setTextError(""); try { await saveManualText(text); setText(""); } catch (e) { setTextError(e.message); } finally { setSaving(false); } };
   const statusLabel = uploadStatusLabel(t);
   return <section className="factory-upload-page">
     <div className="factory-upload-intro"><h2>{t("uploadSources")}</h2><p>{t("factoryYouDoRole", "uploads")}</p></div>
@@ -191,14 +191,30 @@ function SourceUploadWorkspace({ onOpenFile, manualFiles, uploadItems, importPic
       <UploadFile aria-hidden="true" /><strong>{t("factoryUploadDrop")}</strong>
     </button>
     <input ref={importPicker} hidden type="file" multiple aria-label={t("uploadInputFiles")} onChange={event => { uploadProjectFiles([...event.target.files]); event.target.value = ""; }} />
-    <div className="factory-upload-text">
-      <Textarea value={text} onChange={event => setText(event.target.value)} aria-label={t("manualTextLabel")} placeholder={t("manualTextLabel")} />
-      <HatchButton variant="secondary" size="small" loading={saving} disabled={!text.trim()} onClick={saveText}>{t("saveText")}</HatchButton>
-      {textError ? <InlineAlert tone="error">{textError}</InlineAlert> : null}
-    </div>
+    <ImportFromAi saveManualText={saveManualText} locale={locale} t={t} />
     <FileList title={t("factoryUploadedTitle")} records={records} onOpen={onOpenFile} onDelete={record => record.id ? dismissUpload(record.id) : deleteManualFile(record)} statusLabel={statusLabel} t={t} />
     <HatchButton variant="secondary" trailing={<ArrowRight aria-hidden="true" />} onClick={() => onOpenAgent("voice")}>{t("factoryUploadNext")}</HatchButton>
   </section>;
+}
+
+function ImportFromAi({ saveManualText, locale, t }) {
+  const [open, setOpen] = useState(false); const [copy, setCopy] = useState("idle"); const [text, setText] = useState(""); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
+  const copyPrompt = async () => { const result = await copyImportPrompt(locale); setCopy(result); if (result === "copied") setTimeout(() => setCopy("idle"), 2000); };
+  const save = async () => { setSaving(true); setError(""); try { await saveManualText(text); setText(""); setOpen(false); } catch (e) { setError(e.message); } finally { setSaving(false); } };
+  return <>
+    <HatchButton variant="secondary" className="factory-import__open" leading={<Sparkles aria-hidden="true" />} onClick={() => setOpen(true)}>{t("importFromAi")}</HatchButton>
+    <Dialog open={open} onOpenChange={setOpen}><DialogContent title={t("importFromAi")} className="factory-import" aria-describedby={undefined}>
+      <p>{t("importIntro")}</p>
+      <HatchButton variant="secondary" size="small" onClick={copyPrompt}>{t({ idle: "importCopy", copied: "importCopied", failed: "importCopyFailed" }[copy])}</HatchButton>
+      <div className="factory-import__links">{AI_LINKS.map(link => <a key={link.name} href={link.href} target="_blank" rel="noopener noreferrer">{link.name}<ArrowUpRight aria-hidden="true" /></a>)}</div>
+      <p className="factory-import__agents">{t("importOrAgent")}</p>
+      <hr className="factory-import__rule" />
+      <label className="factory-import__paste" htmlFor="factory-import-paste">{t("importPasteLabel")}</label>
+      <Textarea id="factory-import-paste" value={text} onChange={event => setText(event.target.value)} />
+      {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
+      <HatchButton size="small" loading={saving} disabled={!text.trim() || saving} onClick={save}>{t("importSave")}</HatchButton>
+    </DialogContent></Dialog>
+  </>;
 }
 
 function Workspace({ root, id, entry, agents, config, uploads, onChanged, onOpenAgent, agentName, t }) {
@@ -209,13 +225,15 @@ function Workspace({ root, id, entry, agents, config, uploads, onChanged, onOpen
   useEffect(() => { if (uploads.ingestedAt) refresh(); }, [uploads.ingestedAt]);
   const perform = async fn => { setError(""); setBusy(true); try { await fn(); await refresh(); onChanged(); } catch (e) { setError(factoryError(e, t, agentName)); } finally { setBusy(false); } };
   const dictation = useMemo(() => browserDictation(dashboardRequest), []);
+  // One key per message the user sends: the composer's retry of the same message sends the same key.
+  const sendKeys = useRef(new Map()); const sendKey = messageId => { if (messageId === undefined) return crypto.randomUUID(); if (!sendKeys.current.has(messageId)) sendKeys.current.set(messageId, crypto.randomUUID()); return sendKeys.current.get(messageId); };
   const composerAdapter = useMemo(() => ({
     sendMessage: async ({ message, signal }) => {
       const content = (message.parts || []).filter(part => part.type === "text").map(part => part.text).join("\n").trim();
       if (!content) return new ReadableStream({ start(controller) { controller.close(); } });
       setError(""); setActivityVisible(true); setActivity(t("thinking"));
       try {
-        await api(endpoint(root, id, "message"), { method: "POST", body: { content }, signal });
+        await api(endpoint(root, id, "message"), { method: "POST", headers: { "Idempotency-Key": sendKey(message.id) }, body: { content }, signal });
         onChanged();
         return new ReadableStream({ start(controller) { controller.close(); } });
       } catch (e) {
@@ -227,7 +245,7 @@ function Workspace({ root, id, entry, agents, config, uploads, onChanged, onOpen
   }), [root, id, t, agentName, onChanged]);
   if (!session) return <Stack className="factory-workspace-loading" spacing={1}><Skeleton width="35%" /><Skeleton width="80%" /><Skeleton width="70%" /><ErrorNotice error={error} onClose={() => setError("")} /></Stack>;
   const running = session.status === "running"; const locked = entry?.state === "locked"; const visibleSession = { ...session, files: session.files.filter(record => !record.path.startsWith("input/handoff/")) };
-  const openFile = path => setFile(path); const addToChat = (path, quote) => { const reference = `${t("fileReference", path)}${quote ? `\n\n${quote.split("\n").map(line => `> ${line}`).join("\n")}` : ""}`; setDraft(previous => `${previous}${previous.trim() ? "\n\n" : ""}${reference}\n\n`); requestAnimationFrame(() => composer.current?.focus()); }; const useLatest = () => { setActivityVisible(true); return perform(async () => { await api(endpoint(root, id, "message"), { method: "POST", body: { content: t("useLatestMessage", session.role) } }); setActivity(t("thinking")); }); };
+  const openFile = path => setFile(path); const addToChat = (path, quote) => { const reference = `${t("fileReference", path)}${quote ? `\n\n${quote.split("\n").map(line => `> ${line}`).join("\n")}` : ""}`; setDraft(previous => `${previous}${previous.trim() ? "\n\n" : ""}${reference}\n\n`); requestAnimationFrame(() => composer.current?.focus()); }; const useLatest = () => { setActivityVisible(true); return perform(async () => { await api(endpoint(root, id, "message"), { method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() }, body: { content: t("useLatestMessage", session.role) } }); setActivity(t("thinking")); }); };
   return <div className="factory-workspace"><div className="factory-workspace-pane factory-workspace-main"><ChatPanel dictation={dictation} session={visibleSession} entry={entry} agents={agents} root={root} id={id} config={config} busy={busy} draft={draft} setDraft={setDraft} stream={stream} settled={settled} activity={activity} activityVisible={activityVisible} composer={composer} composerAdapter={composerAdapter} chat={chat} stick={stick} running={running} locked={locked} error={error} setError={setError} perform={perform} onOpenFile={openFile} onUseLatest={useLatest} agentName={agentName} t={t} /></div><div className="factory-workspace-pane factory-workspace-side"><InspectorPanel entry={entry} agents={agents} session={visibleSession} root={root} id={id} running={running} busy={busy} file={file} setFile={setFile} uploads={uploads} addToChat={addToChat} agentName={agentName} onOpenAgent={onOpenAgent} t={t} perform={perform} /></div></div>;
 }
 

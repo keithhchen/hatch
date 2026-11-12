@@ -1,6 +1,8 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { z } from "zod";
+import { IdempotencyKeyReused, idempotencyKey, idempotent } from "../idempotency.js";
 import { WorkbenchStore, ROLES, isAssistantRole, type Comment, type FactoryProductScope, type Session } from "./store.js";
 import { WorkbenchRuntime, safeError, type WorkbenchRuntimeOptions } from "./runtime.js";
 import { hatchTool } from "./hatchTool.js";
@@ -11,7 +13,9 @@ import { factoryAgentTools } from "./factoryTools.js";
 import { convertUpload } from "./markdownConverter.js";
 import { modelRole } from "../modelRoles.js";
 
-export function publicSession(s: Session) { const { context, ...publicData } = s; return publicData; }
+/** How many message keys a session remembers. */
+const MESSAGE_KEYS_KEPT = 100;
+export function publicSession(s: Session) { const { context, messageKeys, ...publicData } = s; return publicData; }
 
 export async function createFactoryHandler(options: { root: string; scope: FactoryProductScope; definitions: AgentDefinitionRepository; env?: NodeJS.ProcessEnv; runtime?: WorkbenchRuntimeOptions; withheldTools?: (session: Session) => Promise<string[]> }) {
   const source = options.env ?? process.env;
@@ -55,6 +59,17 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
   runtime.events.on("event", (event: any) => {
     if (["state", "files", "todos", "message", "comments"].includes(event?.type)) void enqueueFactorySnapshot();
   });
+  /** A message sent under an Idempotency-Key starts one turn: the key and a digest of the content are kept on the session, so a retry (even after the turn ended) starts nothing. */
+  const sendOnce = async (id: string, key: string, content: string) => {
+    const digest = createHash("sha256").update(content).digest("hex");
+    const { replayed } = await idempotent<{ key: string; digest: string }>({
+      create: fresh => store.update(id, s => { const keys = s.messageKeys ?? []; if (keys.some(([known]) => known === fresh.key)) return false; s.messageKeys = [...keys, [fresh.key, fresh.digest] as [string, string]].slice(-MESSAGE_KEYS_KEPT); return true; }),
+      find: async fresh => { const found = (await store.get(id)).messageKeys?.find(([known]) => known === fresh.key); return found && { key: found[0], digest: found[1] }; }
+    }, (stored, fresh) => stored.digest === fresh.digest)({ key, digest });
+    if (replayed) return;
+    // The key is only held for a turn that started: a refused send (already running) can be sent again.
+    await runtime.start(id, content).catch(async error => { await store.update(id, s => { s.messageKeys = s.messageKeys?.filter(([known]) => known !== key); }); throw error; });
+  };
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     try {
       const url = new URL(req.url ?? "/", "http://factory.internal");
@@ -99,7 +114,7 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
         const id = match[1]!; const action = match[2] ?? "";
         if (!action && req.method === "GET") { const session = await store.get(id); return json(res, 200, { ...publicSession(session), agent: (await entries()).find(entry => entry.role === session.role), files: await store.contextFiles(id) }); }
         if (action === "prompt" && req.method === "GET") return json(res, 200, { content: await runtime.prompt((await store.get(id)).role) });
-        if (action === "message" && req.method === "POST") { const session = await store.get(id); await assertRoleAvailable(session.role); const b = z.object({ content: z.string().min(1).max(100000) }).parse(await body(req)); await runtime.start(id, b.content); return json(res, 202, { accepted: true }); }
+        if (action === "message" && req.method === "POST") { const session = await store.get(id); await assertRoleAvailable(session.role); const b = z.object({ content: z.string().min(1).max(100000) }).parse(await body(req)); const key = idempotencyKey(req.headers["idempotency-key"]); if (key === undefined) await runtime.start(id, b.content); else await sendOnce(id, key, b.content); return json(res, 202, { accepted: true }); }
         if (action === "stop" && req.method === "POST") { await body(req); runtime.stop(id); return json(res, 202, { requested: true }); }
         if (action === "files" && req.method === "POST") {
           const b = z.object({ path: z.string(), base64: z.string(), mimeType: z.string().optional() }).parse(await body(req));
@@ -129,6 +144,7 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
       }
       return json(res, 404, { error: "Unknown API route" });
     } catch (error) {
+      if (error instanceof IdempotencyKeyReused) return json(res, 422, { error: { code: "idempotency_key_reused", message: error.message }, detail: error.message });
       const structured = error && typeof error === "object" ? error as { code?: unknown; status?: unknown; details?: unknown } : undefined;
       const status = typeof structured?.status === "number" ? structured.status : 400;
       const message = safeError(error);
