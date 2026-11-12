@@ -12,10 +12,15 @@ export const MODEL_ROLES = {
   ingest: "kimi-k3.1-pro"
 } as const;
 
-/** The environment variable that overrides each role. */
-const ROLE_ENV = { assistant: "HATCH_LLM_PROFILE", worker: "HATCH_FACTORY_LLM_PROFILE", factory: "HATCH_FACTORY_LLM_PROFILE", ingest: "HATCH_INGEST_MODEL" } as const satisfies Record<keyof typeof MODEL_ROLES, string>;
+/**
+ * Roles a deployment may override, and the variable that does it. The Assistant and worker are fixed:
+ * compose always sets HATCH_LLM_PROFILE / HATCH_FACTORY_LLM_PROFILE for other services, so letting them
+ * override these roles would silently swap the Assistant's model.
+ */
+const ROLE_ENV: Partial<Record<keyof typeof MODEL_ROLES, string>> = { factory: "HATCH_FACTORY_LLM_PROFILE", ingest: "HATCH_INGEST_MODEL" };
 
-/** The one rule: a non-empty environment override wins over the MODEL_ROLES default. Every use of a role goes through here. */
+/** The one rule: an overridable role takes its non-empty environment override, otherwise the MODEL_ROLES default. Every use of a role goes through here. */
 export function modelRole(role: keyof typeof MODEL_ROLES, env: NodeJS.ProcessEnv = process.env): string {
-  return env[ROLE_ENV[role]]?.trim() || MODEL_ROLES[role];
+  const variable = ROLE_ENV[role];
+  return (variable && env[variable]?.trim()) || MODEL_ROLES[role];
 }
