@@ -103,7 +103,7 @@ export class StudioApi extends HttpApi {
   messagesAssistant(after) { return this.call("GET", `/v1/creator/assistant/conversation/messages${after ? `?after=${after}` : ""}`); }
   snapshotAssistant() { return this.call("GET", "/v1/creator/assistant/conversation/snapshot"); }
   eventsAssistant({ after, signal } = {}) { return this.stream("GET", `/v1/creator/assistant/conversation/events${after ? `?after=${encodeURIComponent(after)}` : ""}`, { signal }); }
-  assistantView() { return this.call("GET", "/v1/creator/assistant"); }
+  assistantView() { return this.call("GET", "/v1/creator/assistant/conversation/view"); }
   approveTask(taskId) { return this.call("POST", `/v1/creator/assistant/tasks/${taskId}/approve`, { body: {}, headers: { "idempotency-key": randomUUID() } }); }
 }
 

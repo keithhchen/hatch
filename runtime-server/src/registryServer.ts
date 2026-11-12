@@ -38,7 +38,8 @@ import { InflightResponses, drainMsFromEnvironment, exitOnSignal, gracefulShutdo
 import { INGEST_BODY_MAX_BYTES, IngestError, IngestService } from "./ingest/service.js";
 import { publicJob } from "./ingest/job.js";
 import { IdempotencyKeyReused, idempotencyKey } from "./idempotency.js";
-import { AccountReach } from "./assistant/reach.js";
+import { AccountReach, validTimezone } from "./assistant/reach.js";
+import { StudioPanel } from "./conversations/panel.js";
 import { AssistantTarget } from "./assistant/assistantTarget.js";
 import { CHANNEL_KINDS, CHANNEL_LABELS, isChannelKind, type ChannelAdapter, type ChannelKind } from "./channels/types.js";
 import { ChannelListeners } from "./channels/listeners.js";
@@ -2144,9 +2145,14 @@ function studioDeps(context: RegistryContext): StudioDeps {
     product: async (accountId, productId) => productForCreator(context, accountId, productId),
     workspace: (scope, token) => context.factoryAgents.workspace(scope, token),
     assistant: () => context.assistantChat,
+    panel: () => context.assistant && context.channels && context.reach ? studioPanel(context, context.assistant, context.channels, context.reach) : undefined,
     ...context.conversationPorts,
     assets: context.studioAssets,
   };
+}
+
+function studioPanel(context: RegistryContext, assistant: AssistantService, channels: ChannelService, reach: AccountReach): StudioPanel {
+  return new StudioPanel({ tasks: { open: accountId => assistant.openTasks(accountId) }, channels: accountId => channelsOf(context, channels, accountId), timezones: { valid: validTimezone, set: (accountId, timezone) => reach.setTimezone(accountId, timezone) } });
 }
 
 function conversationDeps(response: http.ServerResponse, context: RegistryContext): ConversationRouteDeps {
@@ -2165,6 +2171,23 @@ async function identifyToken(context: RegistryContext, token: string): Promise<{
   const claims = verifyAuthToken(token, context.authSecret);
   const account = (await context.accounts.resolveSession(token))?.account ?? (claims ? await context.accounts.getById(claims.sub) : undefined);
   return account ? { accountId: account.id, token } : undefined;
+}
+
+/** A platform where a Product has a bot of its own: its Product page holds a bot, not a link to ours. */
+const botKind = (kind: ChannelKind, target: AgentTarget) => target.kind === "product" && isPerProduct(CREDENTIAL_FORMS[kind]);
+
+/** The chat platforms an account's Assistant, or one of its Products, can be reached on, as Studio lists them. */
+async function channelsOf(context: RegistryContext, channels: ChannelService, accountId: string, target: AgentTarget = STUDIO_TARGET) {
+  return (await channels.view(accountId, target)).map(status => botKind(status.kind, target)
+    ? { kind: status.kind, bot: true, available: Boolean(context.ownApps), configured: status.configured, ...(status.handle ? { handle: status.handle } : {}), ...(status.state ? { state: status.state } : {}) }
+    : {
+      kind: status.kind, available: status.available, linked: status.linked,
+      ...(status.senderId ? { sender_id: status.senderId } : {}),
+      ...(status.state ? { state: status.state } : {}),
+      ...(status.handle ? { handle: status.handle } : {}),
+      ...(CREDENTIAL_FORMS[status.kind] && !isTenantForm(CREDENTIAL_FORMS[status.kind]!) && !isPerProduct(CREDENTIAL_FORMS[status.kind]) && context.credentialSeal ? { own_app: true, webhook_url: `${context.publicOrigin}/v1/channels/${status.kind}/${accountId}/webhook` } : {}),
+      ...(status.lastEventAt ? { last_event_at: status.lastEventAt } : {}),
+    });
 }
 
 async function assistantRoute(request: http.IncomingMessage, response: http.ServerResponse, url: URL, context: RegistryContext): Promise<void> {
@@ -2218,101 +2241,7 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
   if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
   /** Where the account's chats are bound: to the Assistant (Studio), or to one Product when the request names it. */
   const bindingTarget = (productId: string | null | undefined): AgentTarget => productId ? { kind: "product", productId } : STUDIO_TARGET;
-  /** A platform where a Product has a bot of its own: its Product page holds a bot, not a link to ours. */
-  const botKind = (kind: ChannelKind, target: AgentTarget) => target.kind === "product" && isPerProduct(CREDENTIAL_FORMS[kind]);
-  const channelsView = async (target: AgentTarget = STUDIO_TARGET) => (await channels.view(account.id, target)).map(status => botKind(status.kind, target)
-    ? { kind: status.kind, bot: true, available: Boolean(context.ownApps), configured: status.configured, ...(status.handle ? { handle: status.handle } : {}), ...(status.state ? { state: status.state } : {}) }
-    : {
-      kind: status.kind, available: status.available, linked: status.linked,
-      ...(status.senderId ? { sender_id: status.senderId } : {}),
-      ...(status.state ? { state: status.state } : {}),
-      ...(status.handle ? { handle: status.handle } : {}),
-      ...(CREDENTIAL_FORMS[status.kind] && !isTenantForm(CREDENTIAL_FORMS[status.kind]!) && !isPerProduct(CREDENTIAL_FORMS[status.kind]) && context.credentialSeal ? { own_app: true, webhook_url: `${context.publicOrigin}/v1/channels/${status.kind}/${account.id}/webhook` } : {}),
-      ...(status.lastEventAt ? { last_event_at: status.lastEventAt } : {}),
-    });
-  if (url.pathname === "/v1/creator/assistant" && request.method === "GET") {
-    const timezone = url.searchParams.get("tz");
-    if (timezone) await context.reach.setTimezone(account.id, timezone);
-    // The latest messages, or with `before_cursor` the page before them: the page asks for earlier ones as the Expert scrolls back.
-    const limit = Number(url.searchParams.get("limit"));
-    let view: Awaited<ReturnType<typeof assistant.view>> & { cursor?: string; partial?: string };
-    const options = { limit: Number.isInteger(limit) && limit > 0 ? Math.min(limit, 200) : 200, beforeCursor: url.searchParams.get("before_cursor") ?? undefined };
-    try {
-      // The newest page names the journal cursor it is consistent with (a message is in it or in the events after it, never both,
-      // never neither) and what the running turn has said so far, so a client resumes the stream from `cursor` and joins `partial` by offset.
-      view = options.beforeCursor !== undefined ? await assistant.view(account.id, options)
-        : await context.conversationPorts.eventLog.consistent(`assistant:${account.id}`, async cursor => {
-          const page = await assistant.view(account.id, options);
-          return { ...page, cursor, ...(page.running && context.assistantChat ? { partial: await context.assistantChat.partial(account.id) } : {}) };
-        });
-    } catch (error) {
-      if (error instanceof HistoryCursorError) { sendJson(response, 400, { error: { code: "history_cursor_invalid", message: "Invalid conversation history cursor." } }); return; }
-      throw error;
-    }
-    sendJson(response, 200, { ...view, channels: await channelsView() }, { "cache-control": "no-store" });
-    return;
-  }
-  if (url.pathname === "/v1/creator/assistant/messages" && request.method === "POST") {
-    const body = await readJson(request);
-    const content = typeof body.content === "string" ? body.content.trim() : "";
-    // One message, many parts: the text and the files uploaded for it, each named by the id the upload returned.
-    const attached = (Array.isArray(body.attachments) ? body.attachments : []).flatMap((item: { asset_id?: unknown; type?: unknown }) => typeof item?.asset_id === "string" && (item.type === "image" || item.type === "file") ? [{ type: item.type as "image" | "file", assetId: item.asset_id }] : []);
-    if ((!content && !attached.length) || content.length > 20_000) { sendJson(response, 400, { error: { code: "invalid_message", message: "Message must contain 1–20000 characters." } }); return; }
-    // The page's own key is the message's id, as it is for the API: a retried send is one message.
-    let sent: Awaited<ReturnType<typeof assistant.hear>>;
-    try { sent = await assistant.hear(account.id, { id: keyOrNew(request.headers["idempotency-key"]), source: "web", parts: [...(content ? [{ type: "text" as const, text: content }] : []), ...attached] }); }
-    catch (error) { if (!(error instanceof ChatError)) throw error; sendJson(response, error.status, { error: { code: error.code, message: error.message } }); return; }
-    // The receipt: which Run took the message, and whether it started it or joined it (queued until the Run takes it up).
-    sendJson(response, 202, { accepted: true, message_id: sent.messageId, run_id: sent.runId, outcome: sent.outcome, accepted_at: sent.acceptedAt });
-    return;
-  }
-  if (url.pathname === "/v1/creator/assistant/retry" && request.method === "POST") {
-    // Answers the Expert's unanswered messages again after a Run that failed. The page's key makes a repeat the same Run.
-    if (!context.assistantChat) { sendJson(response, 503, { error: { code: "assistant_unavailable", message: "The Assistant requires the Registry database." } }); return; }
-    try {
-      const { run, outcome } = await context.assistantChat.retry(account.id, { id: keyOrNew(request.headers["idempotency-key"]), client: { client: "web" } });
-      sendJson(response, 202, { accepted: true, run_id: run.id, outcome });
-    } catch (error) { if (!(error instanceof ChatError)) throw error; sendJson(response, error.status, { error: { code: error.code, message: error.message } }); }
-    return;
-  }
-  if (url.pathname === "/v1/creator/assistant/files" && request.method === "POST") {
-    const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
-    const name = typeof body.name === "string" ? body.name : ""; const bytes = Buffer.from(typeof body.base64 === "string" ? body.base64 : "", "base64");
-    if (!name || !bytes.length || bytes.length > 20 * 1024 * 1024) { sendJson(response, 400, { error: { code: "invalid_file", message: "A file of 1 byte to 20 MiB is required." } }); return; }
-    // Only an upload: the file joins a message when the page sends one that names it.
-    try { const { assetId, kind } = await assistant.upload(account.id, name, bytes); sendJson(response, 201, { name, asset_id: assetId, type: kind }); }
-    catch (error) { if (!(error instanceof ChatError)) throw error; sendJson(response, error.status, { error: { code: error.code, message: error.message } }); }
-    return;
-  }
-  const imageMatch = url.pathname.match(/^\/v1\/creator\/assistant\/images\/([0-9a-f-]{36}\.(?:jpg|jpeg|png|webp|gif))$/);
-  if (imageMatch && request.method === "GET") {
-    const image = await assistant.image(account.id, imageMatch[1]!.replace(/\.[a-z]+$/, "")).catch(() => undefined);
-    if (!image) { sendJson(response, 404, { error: { code: "image_not_found", message: "Image was not found." } }); return; }
-    response.writeHead(200, { "content-type": image.mime, "content-length": image.bytes.length, "cache-control": "private, max-age=86400" });
-    response.end(image.bytes);
-    return;
-  }
-  if (url.pathname === "/v1/creator/assistant/events" && request.method === "GET") {
-    const feed = `assistant:${account.id}`;
-    // From the cursor the page last heard (`after_cursor`, or the Last-Event-ID the browser echoes on reconnect), else from now. A cursor the feed never issued is refused before the stream opens.
-    let from: string;
-    try { from = await resumePoint(context.conversationPorts.eventLog, feed, url.searchParams.get("after_cursor") ?? (request.headers["last-event-id"] as string | undefined)); }
-    catch (error) {
-      if (error instanceof ConversationError) { sendJson(response, error.status, { error: { code: error.code, message: error.message } }); return; }
-      throw error;
-    }
-    response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
-    response.write(": connected\n\n");
-    // The page hears the same events every Studio client does, in the words it knows: a finished message or Run is something to reload.
-    const stop = new AbortController();
-    response.once("close", () => stop.abort());
-    const heartbeat = setInterval(() => { if (!response.writableEnded) response.write(": heartbeat\n\n"); }, 15_000);
-    await follow(context.conversationPorts.eventLog, feed, from, ({ cursor, event }) => {
-      if (!response.writableEnded) response.write(`id: ${cursor}\ndata: ${JSON.stringify(event)}\n\n`);
-    }, { signal: stop.signal });
-    clearInterval(heartbeat);
-    return;
-  }
+  const channelsView = (target: AgentTarget = STUDIO_TARGET) => channelsOf(context, channels, account.id, target);
   const taskAction = url.pathname.match(/^\/v1\/creator\/assistant\/tasks\/([0-9a-f-]{36})\/(approve|decline|answer)$/);
   if (taskAction && request.method === "POST") {
     const [, taskId, action] = taskAction;

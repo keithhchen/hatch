@@ -3,9 +3,13 @@
  * Outside agents see every conversation through this one port and this one message shape.
  */
 import type { RunFailure } from "../factoryAgents/runFailure.js";
+import type { VisibleConversationMessage } from "../store.js";
 import type { ClientAttributes } from "../surfaces/contract.js";
 
 export type { RunFailure };
+
+/** The steps inside one reply, in the shape Chat's history keeps them: where each sits among the words, and what it was. Never a tool's arguments or result. */
+export type ReplySteps = { parts?: VisibleConversationMessage["parts"]; tool_calls: Array<{ tool_call_id: string; name: string; status: string; activity_message?: string }> };
 
 export type PublicMessage = {
   id: string;
@@ -15,7 +19,12 @@ export type PublicMessage = {
   /** "queued": the message joined a running turn and is not yet read by the model. Absent once it is. */
   state?: "queued";
   attachments?: Array<{ type: "image" | "file" | "audio"; name: string; asset_id?: string; bytes?: number }>;
+  /** What the Assistant did inside a reply, when the conversation keeps it. */
+  steps?: ReplySteps;
 };
+
+/** One page of history read backwards. `before_cursor` names the page before this one; it is opaque, and absent when there is none. */
+export type HistoryPage = { messages: PublicMessage[]; has_more: boolean; before_cursor?: string };
 
 /** An asset the upload side has finished with. Bytes live in the workspace at `path`; the model reads them there. */
 export type ReadyAsset = { id: string; kind: "image" | "file" | "audio"; name: string; mimeType: string; bytes: number; sha256: string; path: string; transcript?: string };
@@ -41,6 +50,8 @@ export interface Conversation {
   status(): Promise<ConversationStatus>;
   /** Oldest first. Without `after`, the latest `limit`; with it, the first `limit` messages after that id. */
   messages(after?: string, limit?: number): Promise<{ status: ConversationStatus; messages: PublicMessage[] }>;
+  /** The latest `limit` messages, or with `before` (a `before_cursor` from an earlier page) the page before it. Nothing for a conversation that cannot page back. */
+  history?(options: { limit?: number; before?: string }): Promise<HistoryPage>;
   /** Atomic: the message steers the running turn or starts one, and is never lost. */
   send(input: SendInput): Promise<Sent>;
   /**

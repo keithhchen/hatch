@@ -107,4 +107,17 @@ for (const [name, run, skip] of adapters) {
       assert.equal(unknown.state, "ready", "a file of a type we do not know is passed through, not refused");
     } finally { await d.close(); }
   }));
+
+  test(`${name}: view shows an image as its resized form to its own account; a file, a stranger and an unknown id show nothing`, { skip }, () => run(async repository => {
+    const d = await desk(repository, allow);
+    try {
+      const image = await d.assets.upload(mine, { name: "dot.png", bytes: await sharp({ create: { width: 8, height: 8, channels: 3, background: "#fff" } }).png().toBuffer() });
+      const file = await d.assets.upload(mine, { name: "notes.txt", bytes: Buffer.from("alpha") });
+      const shown = await d.assets.view(mine, image.asset_id);
+      assert.ok(shown && shown.bytes.length > 0 && shown.mime.startsWith("image/"));
+      assert.equal(await d.assets.view(mine, file.asset_id), undefined);
+      assert.equal(await d.assets.view(theirs, image.asset_id), undefined);
+      assert.equal(await d.assets.view(mine, "nope"), undefined);
+    } finally { await d.close(); }
+  }));
 }

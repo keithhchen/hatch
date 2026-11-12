@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import type http from "node:http";
-import { MAX_CONSUMER_BUFFERED_BYTES as MAX_BUFFERED_BYTES } from "../chat/sinks.js";
 import { normalizeClientAttributes, type ClientAttributes } from "../surfaces/contract.js";
 import { parseContent, resolveContent } from "./assets.js";
 import { awaitTurn } from "./awaitTurn.js";
@@ -11,7 +10,8 @@ import { ChatError } from "../chat/principal.js";
 import { toProblem } from "../errors/problem.js";
 import { START } from "./eventLog.js";
 import { follow, resumePoint } from "./follow.js";
-import { snapshotOf } from "./snapshot.js";
+import { EventStream } from "./sse.js";
+import { snapshotOf, viewOf } from "./snapshot.js";
 import { Studio, type StudioDeps, type Target, type TargetSpec } from "./studio.js";
 
 export const MAX_WAIT_SECONDS = 120;
@@ -30,11 +30,14 @@ export type ConversationRouteDeps = StudioDeps & {
   pace?: { pollMs?: number; sleep?: (ms: number) => Promise<void>; now?: () => number };
 };
 
-type Action = "messages" | "events" | "stop" | "snapshot" | "assets" | "retry";
+type Action = "messages" | "events" | "stop" | "snapshot" | "assets" | "retry" | "view" | "timezone" | "asset";
 
 const WORKERS_ROUTE = /^\/v1\/creator\/products\/([^/]+)\/workers(?:\/([^/]+)\/(messages|events|stop|snapshot|assets))?$/;
-const ASSISTANT_ROUTE = /^\/v1\/creator\/assistant\/conversation\/(messages|events|stop|snapshot|assets|retry)$/;
-const METHODS: Record<Action, string[]> = { messages: ["GET", "POST"], events: ["GET"], stop: ["POST"], snapshot: ["GET"], assets: ["POST"], retry: ["POST"] };
+const ASSISTANT_ROUTE = /^\/v1\/creator\/assistant\/conversation\/(messages|events|stop|snapshot|assets|retry|view|timezone)$/;
+const ASSISTANT_ASSET_ROUTE = /^\/v1\/creator\/assistant\/conversation\/assets\/([^/]+)$/;
+const METHODS: Record<Action, string[]> = { messages: ["GET", "POST"], events: ["GET"], stop: ["POST"], snapshot: ["GET"], assets: ["POST"], retry: ["POST"], view: ["GET"], timezone: ["PUT"], asset: ["GET"] };
+/** The newest messages the Studio view holds, and the most it is asked for. */
+const VIEW_PAGE = 200;
 
 function clientOf(body: Record<string, unknown>): ClientAttributes {
   const raw = body.client;
@@ -51,21 +54,6 @@ function keyOf(request: http.IncomingMessage, body: Record<string, unknown>): st
   catch (error) { if (error instanceof ChatError) throw new ConversationError(error.status, error.code, error.message); throw error; }
 }
 
-/** Server-Sent Events whose ids are log cursors, so Last-Event-ID resumes exactly. */
-class EventStream {
-  constructor(private response: http.ServerResponse) {
-    response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive", "x-accel-buffering": "no" });
-    response.write(": connected\n\n");
-  }
-  frame(data: unknown, options: { id?: string; name?: string } = {}): void {
-    if (this.response.writableEnded || this.response.destroyed) return;
-    this.response.write(`${options.id ? `id: ${options.id}\n` : ""}${options.name ? `event: ${options.name}\n` : ""}data: ${JSON.stringify(data)}\n\n`);
-  }
-  heartbeat(): void { if (!this.response.writableEnded) this.response.write(": heartbeat\n\n"); }
-  get lagging(): boolean { return this.response.writableLength > MAX_BUFFERED_BYTES; }
-  end(): void { if (!this.response.writableEnded) this.response.end(); }
-}
-
 /**
  * Conversation API over HTTP: Product workers and the account's Assistant behind one set of verbs.
  * Only knows the Conversation port, the event log and the Studio that finds conversations.
@@ -77,8 +65,9 @@ export class ConversationRoutes {
   /** Handles the request when the path is a conversation path; false when it is not. */
   async handle(request: http.IncomingMessage, response: http.ServerResponse, url: URL): Promise<boolean> {
     const workers = url.pathname.match(WORKERS_ROUTE);
-    const assistant = url.pathname.match(ASSISTANT_ROUTE);
-    if (!workers && !assistant) return false;
+    const asset = url.pathname.match(ASSISTANT_ASSET_ROUTE);
+    const assistant = asset ? undefined : url.pathname.match(ASSISTANT_ROUTE);
+    if (!workers && !assistant && !asset) return false;
     const account = await this.deps.authenticate(request);
     if (!account) { this.deps.json(response, 401, { detail: "A valid account token is required." }); return true; }
     try {
@@ -87,7 +76,7 @@ export class ConversationRoutes {
         this.deps.json(response, 200, { workers: await (await this.studio.directory(account.id, this.deps.token(request)!, decodeURIComponent(workers[1]!))).list() });
       } else {
         const spec: TargetSpec = workers ? { kind: "worker", productId: decodeURIComponent(workers[1]!), workerId: decodeURIComponent(workers[2]!) } : { kind: "assistant" };
-        await this.serve(await this.studio.target(account.id, this.deps.token(request)!, spec), (workers?.[3] ?? assistant![1]) as Action, request, response, url);
+        await this.serve(await this.studio.target(account.id, this.deps.token(request)!, spec), (workers?.[3] ?? assistant?.[1] ?? "asset") as Action, request, response, url, asset ? decodeURIComponent(asset[1]!) : undefined);
       }
     } catch (error) {
       if (!(error instanceof ConversationError)) throw error;
@@ -97,21 +86,60 @@ export class ConversationRoutes {
     return true;
   }
 
-  private async serve(target: Target, action: Action, request: http.IncomingMessage, response: http.ServerResponse, url: URL): Promise<void> {
+  private async serve(target: Target, action: Action, request: http.IncomingMessage, response: http.ServerResponse, url: URL, assetId?: string): Promise<void> {
     const { conversation } = target;
     if (!METHODS[action].includes(request.method ?? "")) throw new ConversationError(405, "method_not_allowed", "Method not allowed.");
     if (action === "stop") { await conversation.stop(); this.deps.json(response, 202, { requested: true }); return; }
     if (action === "retry") { await this.retry(conversation, request, response); return; }
     if (action === "assets") { await this.upload(target, request, response, url); return; }
+    if (action === "asset") { await this.show(target, assetId!, response); return; }
+    if (action === "view") { await this.view(target, url, response); return; }
+    if (action === "timezone") { await this.timezone(target, request, response); return; }
     if (action === "snapshot") { this.deps.json(response, 200, await snapshotOf(conversation, this.studio.eventLog)); return; }
     if (action === "events") { await this.events(conversation, request, response, url); return; }
     if (request.method === "GET") {
       const limit = url.searchParams.get("limit");
+      const before = url.searchParams.get("before");
+      if (before) { await this.earlier(conversation, before, limit ? Number(limit) : undefined, url.searchParams.has("after"), response); return; }
       const { status, messages } = await conversation.messages(url.searchParams.get("after") || undefined, limit ? Number(limit) : undefined);
       this.deps.json(response, 200, { status: status.state, ...(status.error ? { error: status.error } : {}), messages });
       return;
     }
     await this.send(target, request, response, url);
+  }
+
+  /** The page of messages before `before`, a `before_cursor` an earlier page named. */
+  private async earlier(conversation: Conversation, before: string, limit: number | undefined, withAfter: boolean, response: http.ServerResponse): Promise<void> {
+    if (withAfter) throw new ConversationError(400, "invalid_cursor", "Use either after or before, not both.");
+    if (!conversation.history) throw new ConversationError(501, "history_unavailable", "This conversation cannot be read backwards.");
+    const [status, page] = await Promise.all([conversation.status(), conversation.history({ limit, before })]);
+    this.deps.json(response, 200, { status: status.state, ...(status.error ? { error: status.error } : {}), ...page });
+  }
+
+  /** What Studio's Assistant page shows: the snapshot of the newest messages, with where earlier ones begin, and what waits on the Expert. */
+  private async view(target: Target, url: URL, response: http.ServerResponse): Promise<void> {
+    const { panel } = this.studio;
+    const limit = Number(url.searchParams.get("limit"));
+    const view = await viewOf(target.conversation, this.studio.eventLog, Number.isInteger(limit) && limit > 0 ? Math.min(limit, VIEW_PAGE) : VIEW_PAGE);
+    const [tasks, channels] = await Promise.all([panel.tasks(target.accountId), panel.channels(target.accountId)]);
+    this.deps.json(response, 200, { ...view, tasks, channels });
+  }
+
+  /** The Expert's timezone, set on purpose: reading the conversation changes nothing. */
+  private async timezone(target: Target, request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+    const { timezone } = await this.deps.readJson(request);
+    if (typeof timezone !== "string" || !timezone) throw new ConversationError(400, "invalid_timezone", "timezone is an IANA name such as Asia/Shanghai.");
+    await this.studio.panel.setTimezone(target.accountId, timezone);
+    this.deps.json(response, 200, { timezone });
+  }
+
+  /** An uploaded picture, as the page shows it. */
+  private async show(target: Target, assetId: string, response: http.ServerResponse): Promise<void> {
+    if (!target.assets) throw new ConversationError(501, "attachments_unavailable", "This conversation cannot take attachments.");
+    const image = await target.assets.desk.view(target.assets.scope, assetId);
+    if (!image) throw new ConversationError(404, "asset_not_found", `No image ${assetId}.`);
+    response.writeHead(200, { "content-type": image.mime, "content-length": image.bytes.length, "cache-control": "private, max-age=86400" });
+    response.end(image.bytes);
   }
 
   /** Answers the conversation again after a failed Run: no new message; the Idempotency-Key makes a repeat the same Run. */

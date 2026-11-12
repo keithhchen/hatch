@@ -74,7 +74,7 @@ The Assistant is one conversation per account on Chat's runtime: the same Runs, 
 
 - The Registry hosts it, because it holds the Products and tasks the tools operate. Its transcript, Runs and journal are in the Registry database; no other conversation lives there, and no part of the old factory-agent conversation runtime serves it.
 - The Studio tools are declared once as `studio.*` (`supportedClients`: web, cli, mcp, im). A Product's conversation never declares them. Search, `ls`, `grep` and `read` are the same tools every conversation has.
-- Studio's API for it (`/v1/creator/assistant/conversation/**`, the socket target `{assistant: true}`, the page's `/v1/creator/assistant`) is unchanged. Its event log is a projection of the Run's events in Studio's vocabulary; Chat's journal is the record.
+- Studio's API for it (`/v1/creator/assistant/conversation/**`, including its `view`, `before` paging, image `assets/:id` and `timezone` additions, and the socket target `{assistant: true}`) is the one surface; the page's own `/v1/creator/assistant` routes are gone, task routes aside. Its event log is a projection of the Run's events in Studio's vocabulary; Chat's journal is the record.
 - Work it starts (interview, content, research, build, evaluate) still runs on the factory-agent runtime as workers; their news reaches the Assistant as messages whose client message id starts with `sys:`, which the chat never shows as the Expert's.
 - An interview holds the conversation by relay: the Expert's messages go to the interview, and its words come back as the Assistant's reply. News waits until it hands back.
 - A reply to a Run the Assistant started on its own is owed to the Expert and is sent once, unless they are in Studio.

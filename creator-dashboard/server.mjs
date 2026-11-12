@@ -1699,15 +1699,17 @@ export async function createDashboardApp(options = {}) {
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const abort = new AbortController();
         response.once("close", () => abort.abort());
+        // An upload is the file itself, as the conversation API takes it; every other body is JSON.
+        const upload = request.method === "POST" && CONVERSATION_UPLOAD_PATH.test(url.pathname);
         try {
           const upstream = await fetchImpl(new URL(url.pathname + url.search, registryUrl), {
             method: request.method,
             headers: {
-              authorization: `Bearer ${authentication.token}`, "content-type": "application/json",
+              authorization: `Bearer ${authentication.token}`, "content-type": upload ? request.headers["content-type"] ?? "application/octet-stream" : "application/json",
               // The conversation API's resume and idempotency contracts travel in headers.
               ...Object.fromEntries(["accept", "last-event-id", "idempotency-key"].flatMap(name => request.headers[name] ? [[name, String(request.headers[name])]] : [])),
             },
-            ...(request.method === "GET" ? {} : { body: JSON.stringify(await readJson(request, factoryRequestMaxBytes)) }),
+            ...(request.method === "GET" ? {} : { body: upload ? await readRawBody(request, factoryRequestMaxBytes) : JSON.stringify(await readJson(request, factoryRequestMaxBytes)) }),
             signal: abort.signal,
             redirect: "error"
           });
@@ -2767,7 +2769,8 @@ function decryptOAuthSecret(value, key) {
 }
 
 /** Conversation API: a Product's workers and the Assistant's conversation. Streamed through to Registry as is. */
-const CONVERSATION_PATH = /^\/v1\/creator\/(?:products\/[^/]+\/workers(?:\/[^/]+\/(?:messages|events|stop|snapshot))?|assistant\/conversation\/(?:messages|events|stop|snapshot))$/;
+const CONVERSATION_PATH = /^\/v1\/creator\/(?:products\/[^/]+\/workers(?:\/[^/]+\/(?:messages|events|stop|snapshot))?|assistant\/conversation\/(?:messages|events|stop|snapshot|retry|view|timezone|assets(?:\/[^/]+)?))$/;
+const CONVERSATION_UPLOAD_PATH = /^\/v1\/creator\/assistant\/conversation\/assets$/;
 
 function oauthEndpointScope(request) {
   const method = String(request.method ?? "GET").toUpperCase();
@@ -2785,7 +2788,7 @@ function oauthEndpointScope(request) {
     return undefined;
   }
   if (pathname === "/v1/creator/studio/ws") return "creator:products:read";
-  if (CONVERSATION_PATH.test(pathname)) return method === "GET" ? "creator:products:read" : method === "POST" ? "creator:products:write" : undefined;
+  if (CONVERSATION_PATH.test(pathname)) return method === "GET" ? "creator:products:read" : method === "POST" || method === "PUT" ? "creator:products:write" : undefined;
   const ingestMatch = pathname.match(/^\/v1\/creator\/products\/[^/]+\/ingest(?:\/[^/]+)?$/);
   if (ingestMatch) {
     if (method === "GET") return "creator:files:read";

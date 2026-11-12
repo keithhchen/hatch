@@ -70,7 +70,7 @@ class FakeWorkspace implements WorkerWorkspace {
 }
 
 class FakeAssistant implements AssistantHost {
-  history: PublicMessage[] = [{ id: "m1", role: "assistant", text: "Hello", created_at: "2026-01-01T00:00:00.000Z" }];
+  said: PublicMessage[] = [{ id: "m1", role: "assistant", text: "Hello", created_at: "2026-01-01T00:00:00.000Z" }];
   running = false;
   ingested: SendInput[] = [];
   stopped = 0;
@@ -78,12 +78,19 @@ class FakeAssistant implements AssistantHost {
   /** Looks at the world the moment a message is delivered. */
   onDelivery: () => void = () => undefined;
   status = async (): Promise<ConversationStatus> => this.running ? { state: "running", runId: "arun-1" } : { state: "idle" };
-  lines = async (_account: string, after?: string, limit?: number) => page(this.history, after, limit);
+  lines = async (_account: string, after?: string, limit?: number) => page(this.said, after, limit);
+  /** Pages of two, newest first; the cursor is how many messages are older than the page. */
+  history = async (_account: string, options: { limit?: number; before?: string }) => {
+    if (options.before !== undefined && !/^\d+$/.test(options.before)) throw new ConversationError(400, "history_cursor_invalid", "Invalid conversation history cursor.");
+    const end = options.before === undefined ? this.said.length : Number(options.before);
+    const start = Math.max(0, end - Math.min(options.limit ?? 2, 2));
+    return { messages: this.said.slice(start, end), has_more: start > 0, ...(start > 0 ? { before_cursor: String(start) } : {}) };
+  };
   send = async (_account: string, input: SendInput): Promise<Sent> => {
     this.onDelivery();
     this.ingested.push(input);
     this.running = true;
-    setTimeout(() => { this.history.push({ id: input.id, role: "user", text: input.text, created_at: "t" }, { id: "m9", role: "assistant", text: "Noted.", created_at: "t" }); this.running = false; }, 20);
+    setTimeout(() => { this.said.push({ id: input.id, role: "user", text: input.text, created_at: "t" }, { id: "m9", role: "assistant", text: "Noted.", created_at: "t" }); this.running = false; }, 20);
     const attachments = input.attachments.map(asset => ({ type: asset.kind, name: asset.name, asset_id: asset.id }));
     return { conversationId: "a1", queued: false, runId: "arun-1", message: { id: input.id, role: "user", text: input.text, created_at: "t", ...(attachments.length ? { attachments } : {}) } };
   };
@@ -112,6 +119,7 @@ class FakeDesk implements AssetDesk {
   stage = async (_scope: unknown, assets: readonly ReadyAsset[]) => { for (const asset of assets) { this.staged.push(asset.path); this.files.set(asset.path, Buffer.from("bytes")); } };
   attach = async (_scope: unknown, assets: readonly ReadyAsset[], messageId: string) => { this.attached.push({ ids: assets.map(asset => asset.id), messageId }); };
   release = async (_scope: unknown, assets: readonly ReadyAsset[], messageId: string) => { this.attached = this.attached.filter(entry => entry.messageId !== messageId || !assets.some(asset => entry.ids.includes(asset.id))); };
+  view = async (scope: AssetScope, id: string) => scope.kind === "account" && scope.accountId === "a1" && id === "a-img" ? { bytes: Buffer.from("pixels"), mime: "image/jpeg" } : undefined;
   upload = async (_scope: unknown, input: { name: string; bytes: Buffer }) => {
     if (input.name === "bad.exe") throw new ConversationError(415, "unsupported_type", "Not a supported file type.");
     this.uploads.push({ name: input.name, bytes: input.bytes.length });
@@ -125,12 +133,14 @@ async function harness(options: { assistant?: boolean } = { assistant: true }) {
   const assistant = new FakeAssistant();
   const desk = new FakeDesk(workspace.manual);
   assistant.desk = desk;
+  const panel = { timezones: [] as string[], tasks: async () => [{ id: "task-1", status: "needs_you", needs: "review" }], channels: async () => [{ kind: "telegram", available: true, linked: false }], setTimezone: async (_account: string, timezone: string) => { if (timezone === "Mars/Base") throw new ConversationError(400, "invalid_timezone", "bad"); panel.timezones.push(timezone); } };
   const routes = new ConversationRoutes({
     authenticate: async request => { const token = request.headers.authorization?.replace(/^Bearer /, ""); return token && TOKENS[token] ? { id: TOKENS[token]! } : undefined; },
     token: request => request.headers.authorization?.replace(/^Bearer /, ""),
     product: async (account, id) => account === "a1" && id === PRODUCT ? {} : undefined,
     workspace: async () => workspace,
     assistant: () => options.assistant === false ? undefined : assistant,
+    panel: () => options.assistant === false ? undefined : panel,
     json: (response, status, payload) => { response.writeHead(status, { "content-type": "application/json" }); response.end(JSON.stringify(payload)); },
     readJson: async request => { let body = ""; for await (const chunk of request) body += chunk; return JSON.parse(body || "{}"); },
     readBytes: async request => { const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(chunk as Buffer); return Buffer.concat(chunks); },
@@ -145,7 +155,7 @@ async function harness(options: { assistant?: boolean } = { assistant: true }) {
     headers: { ...(init.token === null ? {} : { authorization: `Bearer ${init.token ?? "owner"}` }), "content-type": "application/json", ...(init.method === "POST" && !init.keyless ? { "idempotency-key": randomUUID() } : {}) },
     ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
   });
-  return { workspace, assistant, desk, call, base, close: () => { workspace.replies.forEach(clearTimeout); server.closeAllConnections(); return new Promise<void>(resolve => server.close(() => resolve())); } };
+  return { workspace, assistant, desk, panel, call, base, close: () => { workspace.replies.forEach(clearTimeout); server.closeAllConnections(); return new Promise<void>(resolve => server.close(() => resolve())); } };
 }
 const root = `/v1/creator/products/${PRODUCT}/workers`;
 
@@ -459,6 +469,65 @@ test("upload: the body is the file, the name is a query parameter; refusals say 
     assert.deepEqual([refused.status, ((await refused.json()) as { error: { code: string } }).error.code], [415, "unsupported_type"]);
     assert.equal((await fetch(`${h.base}${root}/research/assets?name=a.txt`, { method: "POST", body: "x" })).status, 401);
     assert.equal((await fetch(`${h.base}${root}/research/assets?name=a.txt`, { headers: { authorization: "Bearer owner" } })).status, 405);
+  } finally { await h.close(); }
+});
+
+test("view: the snapshot of the newest page with where earlier ones begin, the tasks and the channels", async () => {
+  const h = await harness();
+  try {
+    h.assistant.said.push({ id: "m2", role: "user", text: "hi", created_at: "t" }, { id: "m3", role: "assistant", text: "hey", created_at: "t" });
+    const view = await (await h.call("/v1/creator/assistant/conversation/view")).json() as Record<string, any>;
+    assert.deepEqual(view.messages.map((message: { id: string }) => message.id), ["m2", "m3"]);
+    assert.deepEqual([view.has_more, view.before_cursor, view.status, view.partial], [true, "1", { state: "idle" }, ""]);
+    assert.equal(view.cursor, "0");
+    assert.deepEqual(view.tasks, [{ id: "task-1", status: "needs_you", needs: "review" }]);
+    assert.deepEqual(view.channels, [{ kind: "telegram", available: true, linked: false }]);
+    assert.equal((await h.call("/v1/creator/assistant/conversation/view", { token: null })).status, 401);
+  } finally { await h.close(); }
+});
+
+test("messages read backwards with before and has_more; steps ride on the reply; a bad cursor is the caller's mistake", async () => {
+  const h = await harness();
+  try {
+    h.assistant.said[0]!.steps = { tool_calls: [{ tool_call_id: "t1", name: "list_agents", status: "completed" }] };
+    h.assistant.said.push({ id: "m2", role: "user", text: "hi", created_at: "t" });
+    const path = "/v1/creator/assistant/conversation/messages";
+    const newest = await (await h.call(`${path}?before=2`)).json() as { messages: Array<{ id: string }>; has_more: boolean; before_cursor?: string };
+    assert.deepEqual([newest.messages.map(message => message.id), newest.has_more, newest.before_cursor], [["m1", "m2"], false, undefined]);
+    const older = await (await h.call(`${path}?before=1`)).json() as { messages: Array<{ id: string; steps?: unknown }>; has_more: boolean };
+    assert.deepEqual([older.messages.map(message => message.id), older.has_more], [["m1"], false]);
+    assert.deepEqual(older.messages[0]!.steps, { tool_calls: [{ tool_call_id: "t1", name: "list_agents", status: "completed" }] });
+    const bad = await h.call(`${path}?before=nope`);
+    assert.deepEqual([bad.status, ((await bad.json()) as { error: { code: string } }).error.code], [400, "history_cursor_invalid"]);
+    assert.equal((await h.call(`${path}?before=1&after=m1`)).status, 400);
+    const workers = await h.call(`${root}/research/messages?before=1`);
+    assert.equal(workers.status, 501, "a worker cannot be read backwards");
+  } finally { await h.close(); }
+});
+
+test("an uploaded picture is served at assets/:id; anything else is not found", async () => {
+  const h = await harness();
+  try {
+    const path = "/v1/creator/assistant/conversation/assets";
+    const image = await h.call(`${path}/a-img`);
+    assert.deepEqual([image.status, image.headers.get("content-type"), await image.text()], [200, "image/jpeg", "pixels"]);
+    assert.equal((await h.call(`${path}/a-doc`)).status, 404);
+    assert.equal((await h.call(`${path}/a-img`, { token: null })).status, 401);
+    assert.equal((await h.call(`${path}/a-img`, { token: "stranger" })).status, 404, "another account has no such image");
+  } finally { await h.close(); }
+});
+
+test("timezone is set on purpose with PUT, never by reading", async () => {
+  const h = await harness();
+  try {
+    const path = "/v1/creator/assistant/conversation";
+    await h.call(`${path}/view?tz=Asia/Tokyo`);
+    assert.deepEqual(h.panel.timezones, [], "a read changes nothing");
+    assert.equal((await h.call(`${path}/timezone`, { method: "PUT", body: { timezone: "Asia/Shanghai" } })).status, 200);
+    assert.deepEqual(h.panel.timezones, ["Asia/Shanghai"]);
+    assert.equal((await h.call(`${path}/timezone`, { method: "PUT", body: { timezone: "Mars/Base" } })).status, 400);
+    assert.equal((await h.call(`${path}/timezone`, { method: "PUT", body: {} })).status, 400);
+    assert.equal((await h.call(`${path}/timezone`)).status, 405);
   } finally { await h.close(); }
 });
 

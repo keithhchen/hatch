@@ -26,7 +26,12 @@ export interface AssetUploader {
   upload(scope: AssetScope, input: { name: string; bytes: Buffer }): Promise<UploadedAsset>;
 }
 
-export type AssetDesk = AssetResolver & AssetUploader;
+/** Shows a client what it uploaded: the form made for viewing, which only an image has. */
+export interface AssetViewer {
+  view(scope: AssetScope, assetId: string): Promise<{ bytes: Buffer; mime: string } | undefined>;
+}
+
+export type AssetDesk = AssetResolver & AssetUploader & AssetViewer;
 
 /** What a conversation offers for attachments: the scope they live in and the desk that handles them. */
 export type AssetShelf = { scope: AssetScope; desk: AssetDesk };
