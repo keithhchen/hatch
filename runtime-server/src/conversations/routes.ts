@@ -8,6 +8,7 @@ import { MAX_BYTES } from "../assets/pipeline.js";
 import { ConversationError, type Conversation, type SendInput } from "./conversation.js";
 import { messageKey } from "../chat/messageKey.js";
 import { ChatError } from "../chat/principal.js";
+import { toProblem } from "../errors/problem.js";
 import { START } from "./eventLog.js";
 import { follow, resumePoint } from "./follow.js";
 import { snapshotOf } from "./snapshot.js";
@@ -90,7 +91,8 @@ export class ConversationRoutes {
       }
     } catch (error) {
       if (!(error instanceof ConversationError)) throw error;
-      this.deps.json(response, error.status, { error: { code: error.code, message: error.message, ...(error.details === undefined ? {} : { details: error.details }) }, detail: error.message });
+      const { status, code, message, details } = toProblem(error);
+      this.deps.json(response, status, { error: { code, message, ...(details === undefined ? {} : { details }) }, detail: message });
     }
     return true;
   }

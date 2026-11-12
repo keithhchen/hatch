@@ -80,7 +80,7 @@ import {
   visibleSkillsForSession
 } from "./skills.js";
 import { verifyHatchAuthToken } from "./authToken.js";
-import { BriefValidationError, createBriefSnapshot, type BriefSnapshot, type BriefSpec } from "./brief.js";
+import { createBriefSnapshot, type BriefSnapshot, type BriefSpec } from "./brief.js";
 import {
   createOutputGuardFromEnvironment,
   GuardedAssistantOutput,
@@ -116,18 +116,19 @@ import { RegistryConnectionDirectory } from "./chat/registryConnections.js";
 import { openChatAssets } from "./chat/openChatAssets.js";
 import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
 import { MAX_CONSUMER_BUFFERED_BYTES, SocketSink, SseSink, projecting, type EventProjection } from "./chat/sinks.js";
-import { authorizeLocalToolCall, productRequiresLocalTools } from "./chat/toolSurface.js";
+import { productRequiresLocalTools } from "./chat/toolSurface.js";
 import type { ScopeResolver, TurnRunner } from "./chat/turnExecutor.js";
 import type { TurnCompaction } from "./chat/chatCompaction.js";
 import { isContextOverflow, type AssistantMessage } from "@earendil-works/pi-ai";
 import { waitForTerminalRun, finalAssistantText, TERMINAL_STATUSES } from "./chat/runResult.js";
 import { clientAttributesOf, MAX_USER_MESSAGE_CHARS, ToolCallResultSchema } from "./protocol.js";
-import type { ClientToolName } from "./protocol.js";
 import type { ClientAttributes, ContentPart } from "./surfaces/contract.js";
 import { bindContext } from "./observability/context.js";
 import { observed } from "./observability/http.js";
 import { InflightResponses, drainMsFromEnvironment, exitOnSignal, gracefulShutdown } from "./gracefulShutdown.js";
 import { log } from "./observability/log.js";
+import { toProblem } from "./errors/problem.js";
+import { ConversationError as ConversationHttpError } from "./conversations/conversation.js";
 import { startObservability } from "./observability/start.js";
 
 type AgentCorpusResolver = AgentCorpusResolverLike;
@@ -1207,7 +1208,7 @@ async function handleHttpRequest(
       await repositoryReady;
       if (!await edge?.serviceApi?.handle(req, res, url)) throw new ConversationHttpError(404, "not_found", "Route was not found.");
     } catch (error) {
-      writeConversationHttpError(res, error);
+      writeConversationHttpError(req, res, error);
     }
     return;
   }
@@ -1236,7 +1237,7 @@ async function handleHttpRequest(
         allowedOrigins
       );
     } catch (error) {
-      writeConversationHttpError(res, error);
+      writeConversationHttpError(req, res, error);
     }
     return;
   }
@@ -1334,7 +1335,7 @@ async function handleHttpRequest(
         decodeURIComponent(legacyAssetMatch[2] ?? "")
       );
     } catch (error) {
-      writeConversationHttpError(res, error);
+      writeConversationHttpError(req, res, error);
     }
     return;
   }
@@ -1401,13 +1402,6 @@ function isMissingAssetError(error: unknown): boolean {
       || ("status" in error && Number((error as { status?: unknown }).status) === 404)
       || ("statusCode" in error && Number((error as { statusCode?: unknown }).statusCode) === 404))
   );
-}
-
-class ConversationHttpError extends Error {
-  constructor(readonly status: number, readonly code: string, message: string) {
-    super(message);
-    this.name = "ConversationHttpError";
-  }
 }
 
 /**
@@ -1714,12 +1708,8 @@ async function handleConversationHttpRequest(
     const { client: clientField, ...resultBody } = await readJsonObject(req);
     const result = ToolCallResultSchema.parse({ type: "tool_call.result", ...resultBody });
     const client = clientAttributesOf({ client: typeof clientField === "string" ? clientField : "cli" });
-    const request = (await chatEdge.chat.pendingToolRequests(conversation.id)).find((pending) => pending.run_id === result.run_id && pending.tool_call_id === result.tool_call_id);
-    const authorization = request ? authorizeLocalToolCall(request.name as ClientToolName, client.client) : undefined;
-    if (authorization && !authorization.allowed) throw new ConversationHttpError(403, authorization.error.code, authorization.error.message);
-    if (!await chatEdge.chat.supervisor.deliverToolResult(conversation.id, result.run_id, result)) {
-      throw new ConversationHttpError(404, "unknown_tool_call", `No pending tool request for ${result.tool_call_id}`);
-    }
+    const answer = await chatEdge.chat.answerTool(conversation.id, result, client.client);
+    if (answer.outcome !== "accepted") throw new ConversationHttpError(answer.outcome === "forbidden" ? 403 : 404, answer.error.code, answer.error.message);
     writeResponse(200, { accepted: true });
     return;
   }
@@ -2004,40 +1994,10 @@ function rejectUnknownFields(body: Record<string, unknown>, allowed: string[]): 
   }
 }
 
-function writeConversationHttpError(res: http.ServerResponse, error: unknown): void {
-  if (error instanceof RangeError) {
-    writeJson(res, 400, { error: { code: "invalid_request", message: error.message } });
-    return;
-  }
-  if (error && typeof error === "object" && "code" in error && error.code === "history_cursor_invalid") {
-    writeJson(res, 400, { error: { code: "history_cursor_invalid", message: "The history cursor does not belong to this conversation or is invalid." } });
-    return;
-  }
-  if (error instanceof ConversationHttpError) {
-    writeJson(res, error.status, { error: { code: error.code, message: error.message } });
-    return;
-  }
-  if (error instanceof BriefValidationError) {
-    writeJson(res, 422, { error: { code: error.code, message: error.message } });
-    return;
-  }
-  if (error instanceof ChatError) {
-    writeJson(res, error.status, { error: { code: error.code, message: error.message } });
-    return;
-  }
-  if (error instanceof EntitlementError) {
-    writeHttpAuthorizationFailure(res, error, "entitlement_required");
-    return;
-  }
-  if (error instanceof ConversationRepositoryError) {
-    const status = error.code === "conversation_not_found" || error.code === "run_not_found" ? 404
-      : error.code === "conversation_busy" || error.code === "version_conflict" ? 409
-        : error.code === "conversation_binding_mismatch" ? 403
-          : 400;
-    writeJson(res, status, { error: { code: error.code, message: error.message } });
-    return;
-  }
-  writeJson(res, 500, { error: { code: "conversation_request_failed", message: errorMessage(error) } });
+function writeConversationHttpError(req: http.IncomingMessage, res: http.ServerResponse, error: unknown): void {
+  const { status, code, message, internal } = toProblem(error);
+  if (internal) log.error("conversation_request_failed", { method: req.method, path: req.url?.split("?")[0], error });
+  writeJson(res, status, { error: { code, message } });
 }
 
 function setCorsHeaders(res: http.ServerResponse): void {
@@ -2306,8 +2266,8 @@ async function retryRun(
 
 /** A failure a client can act on, whichever way it arrived. */
 function chatFailure(error: unknown): { code: string; message: string } {
-  if (error instanceof ChatError) return { code: error.code, message: error.message };
   if (error instanceof EntitlementError) return controlledTurnAuthorizationError(error);
+  if (error instanceof ChatError) return { code: error.code, message: error.message };
   if (error instanceof ConversationRepositoryError) {
     return {
       code: error.code,
@@ -2316,7 +2276,8 @@ function chatFailure(error: unknown): { code: string; message: string } {
         : error.code === "conversation_not_found" ? "Create the task before starting a run." : error.message
     };
   }
-  return { code: "protocol_error", message: errorMessage(error) };
+  log.error("socket_message_failed", { error });
+  return { code: "protocol_error", message: toProblem(error).message };
 }
 
 async function handleRuntimeSocket(
@@ -2577,22 +2538,8 @@ async function handleRuntimeSocket(
         }
 
         if (message.type === "tool_call.result") {
-          const request = (await chat.pendingToolRequests(conversation.id)).find((pending) => pending.run_id === message.run_id && pending.tool_call_id === message.tool_call_id);
-          const authorization = request ? authorizeLocalToolCall(request.name as ClientToolName, client.client) : undefined;
-          if (authorization && !authorization.allowed) {
-            await send({ type: "turn.failed", run_id: message.run_id, error: authorization.error });
-            return;
-          }
-          if (!await chat.supervisor.deliverToolResult(conversation.id, message.run_id, message)) {
-            await send({
-              type: "turn.failed",
-              run_id: message.run_id,
-              error: {
-                code: "unknown_tool_call",
-                message: `No pending tool request for ${message.tool_call_id}`
-              }
-            });
-          }
+          const answer = await chat.answerTool(conversation.id, message, client.client);
+          if (answer.outcome !== "accepted") await send({ type: "turn.failed", run_id: message.run_id, error: answer.error });
           return;
         }
 
@@ -2604,9 +2551,8 @@ async function handleRuntimeSocket(
             await send({ type: "turn.failed", run_id: message.run_id, error: { code: "run_cancelled", message: reason } });
             return;
           }
-          if (!await chat.cancel(conversation.id, message.run_id, reason)) {
-            await send({ type: "turn.failed", run_id: message.run_id, error: { code: "unknown_run", message: `No active run for ${message.run_id}` } });
-          }
+          const cancelled = await chat.cancel(conversation.id, message.run_id, reason);
+          if (cancelled.outcome !== "cancelled") await send({ type: "turn.failed", run_id: message.run_id, error: cancelled.error });
           return;
         }
 

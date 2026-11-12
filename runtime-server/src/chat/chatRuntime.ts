@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import type { CompactionStrategy } from "../compactionStrategy.js";
 import { chatCompactionStrategy, type RuntimeCompactionMessage } from "../compaction.js";
 import type { ConversationRepository } from "../conversationRepository.js";
-import type { ToolRequest } from "../protocol.js";
+import type { ClientToolName, ToolRequest, ToolResult } from "../protocol.js";
+import type { ClientGroup } from "../surfaces/contract.js";
 import { DEFAULT_RUN_LEASE_MS } from "../conversationRepository.js";
 import type { RuntimeStore } from "../store.js";
 import { ChatCompaction } from "./chatCompaction.js";
@@ -15,7 +16,14 @@ import { RunEventHub } from "./runEventHub.js";
 import { RunSupervisor } from "./runSupervisor.js";
 import { runTerminators } from "./runTerminator.js";
 import { closeDanglingCalls } from "./toolRecovery.js";
+import { authorizeLocalToolCall } from "./toolSurface.js";
 import { TurnExecutor, type ScopeResolver, type TurnRunner } from "./turnExecutor.js";
+
+type Failure = { code: string; message: string };
+
+/** `forbidden`: this client may not answer the tool. `unknown`: nothing waits for the answer. The status, if any, is the transport's to choose. */
+export type ToolAnswer = { outcome: "accepted" } | { outcome: "forbidden" | "unknown"; error: Failure };
+export type Cancellation = { outcome: "cancelled" } | { outcome: "unknown"; error: Failure };
 
 export type ChatRuntimeOptions<Scope> = {
   repository: ConversationRepository;
@@ -100,8 +108,20 @@ export class ChatRuntime<Scope> {
   }
 
   /** An explicit stop: the only thing that ends a Run early. */
-  async cancel(conversationId: string, runId: string, reason: string): Promise<boolean> {
-    return this.supervisor.cancel(conversationId, runId, reason);
+  async cancel(conversationId: string, runId: string, reason: string): Promise<Cancellation> {
+    return await this.supervisor.cancel(conversationId, runId, reason)
+      ? { outcome: "cancelled" }
+      : { outcome: "unknown", error: { code: "unknown_run", message: `No active run for ${runId}` } };
+  }
+
+  /** A client's answer to a local-tool call, authorized against the client that sends it. */
+  async answerTool(conversationId: string, result: ToolResult, client: ClientGroup): Promise<ToolAnswer> {
+    const request = (await this.pendingToolRequests(conversationId)).find((pending) => pending.run_id === result.run_id && pending.tool_call_id === result.tool_call_id);
+    const authorization = request ? authorizeLocalToolCall(request.name as ClientToolName, client) : undefined;
+    if (authorization && !authorization.allowed) return { outcome: "forbidden", error: authorization.error };
+    return await this.supervisor.deliverToolResult(conversationId, result.run_id, result)
+      ? { outcome: "accepted" }
+      : { outcome: "unknown", error: { code: "unknown_tool_call", message: `No pending tool request for ${result.tool_call_id}` } };
   }
 
   /**

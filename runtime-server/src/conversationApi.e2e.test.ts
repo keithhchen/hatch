@@ -427,6 +427,10 @@ test("HTTP answers a failed Run again with POST retry: one new Run over the same
   assert.equal((await json(base, `${prefix}/retry?${scope}`, { method: "GET" })).response.status, 405);
   assert.equal((await json(base, `${prefix}/retry?${scope}`, { method: "POST", body: {} })).response.status, 400);
   assert.equal((await statuses()).length, 2);
+  // Pinned contract: a malformed tool result is a 500 with a generic message, never the validator's text.
+  const malformed = await json(base, `${prefix}/tool-results?${scope}`, { method: "POST", body: {} });
+  assert.equal(malformed.response.status, 500);
+  assert.deepEqual(malformed.body, { error: { code: "conversation_request_failed", message: "The Runtime could not complete this request." } });
 });
 
 test("HTTP without wait returns 202 with the run id, and a stream delivers the Run's events then ends", async () => {

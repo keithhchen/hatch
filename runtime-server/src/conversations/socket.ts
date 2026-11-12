@@ -2,6 +2,7 @@ import type http from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer } from "ws";
 import { MAX_CONSUMER_BUFFERED_BYTES as MAX_BUFFERED_BYTES } from "../chat/sinks.js";
+import { toProblem } from "../errors/problem.js";
 import { ConversationError } from "./conversation.js";
 import { follow, resumePoint, withoutPartials } from "./follow.js";
 import { log } from "../observability/log.js";
@@ -56,9 +57,11 @@ export class StudioSockets {
       if (ws.bufferedAmount > MAX_BUFFERED_BYTES) ws.close(1013, "slow consumer: resume from your last cursor");
     };
     const fail = (id: string | undefined, error: unknown) => {
-      if (!(error instanceof ConversationError)) log.error("socket_request_failed", { ...(id ? { subscription_id: id } : {}), error });
-      const known = error instanceof ConversationError ? error : new ConversationError(500, "internal_error", "Request failed.");
-      send({ type: "error", ...(id ? { id } : {}), error: { code: known.code, message: known.message } });
+      // Only a ConversationError is the client's to read; anything else is a generic internal_error.
+      const known = error instanceof ConversationError;
+      if (!known) log.error("socket_request_failed", { ...(id ? { subscription_id: id } : {}), error });
+      const { code, message } = known ? toProblem(error) : { code: "internal_error", message: "Request failed." };
+      send({ type: "error", ...(id ? { id } : {}), error: { code, message } });
     };
     const authTimer = identity ? undefined : setTimeout(() => ws.close(4401, "authentication required"), AUTH_TIMEOUT_MS);
     if (identity) send({ type: "ready" });
