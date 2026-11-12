@@ -46,7 +46,7 @@ test("dialog copy exists in en, zh and ja", () => {
   const keys = ["importFromAi", "importIntro", "importCopy", "importCopied", "importCopyFailed", "importOrAgent", "importPasteLabel", "importSave"];
   const en = createFactoryAgentTranslator("en");
   for (const locale of ["zh", "ja"]) { const t = createFactoryAgentTranslator(locale); for (const key of keys) assert.notEqual(t(key), en(key), `${locale}.${key}`); }
-  assert.equal(en("importFromAi"), "Import from other AI");
+  assert.equal(en("importFromAi"), "Import from Other AI");
   assert.equal(createFactoryAgentTranslator("zh")("importFromAi"), "从其他 AI 导入");
   assert.equal(createFactoryAgentTranslator("ja")("importSave"), "取り込んで保存");
 });
