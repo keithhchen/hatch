@@ -39,6 +39,8 @@
 .buyer-v2 button:disabled { cursor: default; }
 .buyer-v2 a { color: inherit; }
 .buyer-v2 :focus-visible { outline: 3px solid var(--web-yolk-soft); outline-offset: 3px; }
+/* The search field shows its focus ring on the rounded field; its inner input needs none. */
+.buyer-v2 .hui-search input:focus-visible { outline: none; box-shadow: none; }
 .buyer-v2 h1:focus { outline: none; }
 .buyer-v2 .hui-button { border-radius: 999px; }
 .buyer-v2 .web-btn-yolk:hover { box-shadow: 0 10px 24px rgba(245, 183, 0, 0.32); }

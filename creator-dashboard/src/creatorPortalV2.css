@@ -15,6 +15,8 @@
 .cpv2 button, .cpv2 input, .cpv2 select, .cpv2 textarea { font: inherit; }
 .cpv2 button, .cpv2 a { -webkit-tap-highlight-color: transparent; }
 .cpv2 :focus-visible { outline: 3px solid var(--web-yolk-soft); outline-offset: 2px; }
+/* The search field shows its focus ring on the rounded field; its inner input needs none. */
+.cpv2 .hui-search input:focus-visible { outline: none; box-shadow: none; }
 .cpv2 h1, .cpv2 h2, .cpv2 h3 { font-family: var(--web-sans); font-weight: 700; letter-spacing: -0.02em; color: var(--web-ink); text-wrap: balance; }
 .cpv2 h1:focus { outline: none; }
 .cpv2 h1, .cpv2 h2 { word-break: keep-all; overflow-wrap: anywhere; }
