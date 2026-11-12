@@ -55,7 +55,6 @@ function shortCorpus(): CorpusOutput {
       instruction: "Make a good decision.",
       references: [{ id: "note", kind: "method", content: "Short note." }]
     }],
-    knowledge: [],
     tools: []
   };
 }
@@ -73,7 +72,6 @@ function denseCorpus(): CorpusOutput {
         { id: `example-${index + 1}`, kind: "example" as const, content: paragraph(`example ${index + 1}`, 180) }
       ]
     })),
-    knowledge: [{ source: input.files[0]!, title: "Source file" }],
     tools: []
   };
 }

@@ -267,7 +267,6 @@ test("Conversation HTTP creation carries the published corpus BriefSpec into an 
           brief_spec: briefSpec,
           presentation: {}
         },
-        knowledge: { documents: [] },
         tools: []
       } as unknown as AgentCorpus
     })

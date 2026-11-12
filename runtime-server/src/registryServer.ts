@@ -126,7 +126,6 @@ import { imageMime } from "./factoryAgents/imageRefs.js";
 import { createProductLive, ExpertProduct, SystemMissing, type ProductLiveService } from "./creatorLearning/productLive/index.js";
 import { CreatorRegistryReleaseStore, type CreatorRegistryRelease } from "./creatorLearning/creatorRegistryRelease.js";
 import { corpusOutputSchema } from "./creatorLearning/corpusNode.js";
-import { QdrantKnowledgeIndexer } from "./qdrantIndexer.js";
 import { flushLangfuseObservability, initializeLangfuseObservability } from "./langfuse.js";
 import { accountAvatarApplicationServiceFromEnvironment, MAX_ACCOUNT_AVATAR_BYTES } from "./accountAvatar.js";
 import {
@@ -207,7 +206,6 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     environment.HATCH_CREATOR_PRODUCT_FILES_PREFIX?.trim() || "creator-products"
   );
   const nodeObjectStore = objectStore ?? productObjectStore;
-  const knowledgeIndexer = QdrantKnowledgeIndexer.fromEnvironment(environment);
   const nodePool = registryPool;
   const nodePersistence = nodePool ? new PostgresNodeStore({ pool: nodePool }) : undefined;
   const factoryNodeService = nodePersistence && nodeObjectStore
@@ -245,7 +243,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const releaseStore = new CreatorRegistryReleaseStore(releasePool);
   await releaseStore.ensureSchema();
   const corpusPublisher = nodeObjectStore
-    ? new CorpusPublisher(factoryNodeService, nodeObjectStore, store, releaseStore, environment.HATCH_RUNTIME_CORPUS_ROOT?.trim() || "runtime-corpora", knowledgeIndexer)
+    ? new CorpusPublisher(factoryNodeService, nodeObjectStore, store, releaseStore, environment.HATCH_RUNTIME_CORPUS_ROOT?.trim() || "runtime-corpora")
     : undefined;
   const studioUrl = environment.HATCH_STUDIO_ASSISTANT_URL?.trim() || "https://gethatchapp.com/studio/assistant";
   // The site its users know: the alias domain. Products and the Telegram bots are reached here.
@@ -686,15 +684,12 @@ async function route(
         briefSpec: body.brief_spec ?? product.brief_spec
       };
       if (!Object.prototype.hasOwnProperty.call(body, "corpus")) {
-        throw new CorpusPublishError("corpus_required", "Agent Generation must submit its System, Skills and Knowledge as corpus.", 422);
+        throw new CorpusPublishError("corpus_required", "Agent Generation must submit its System and Skills as corpus.", 422);
       }
-      // Only this authenticated Product's real uploaded files can be Knowledge.
       // Publication never runs a Factory Node or selects an older generated candidate.
-      const files = await context.productFileStore.listFiles(account.id, productId);
       result = await context.corpusPublisher.publishUploaded({
         ...publishInput,
         corpus: body.corpus,
-        sourceFiles: files.map(file => file.projection.contentRef),
       });
     } catch (error) {
       if (error instanceof CorpusPublishError) throw error;
@@ -718,7 +713,7 @@ async function route(
   }
 
   // Expert publish: GET = live status, POST = publish System + Skills from the
-  // Agent Builder workspace. Only SYSTEM.md is required; Knowledge stays empty.
+  // Agent Builder workspace. Only SYSTEM.md is required.
   // Legacy /registry (Agent Builder corpus upload) is left unchanged.
   const productLiveMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/live$/);
   if (productLiveMatch && (request.method === "GET" || request.method === "POST")) {

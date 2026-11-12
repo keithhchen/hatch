@@ -114,9 +114,8 @@ Creator-authored material.
 After expansion, classify only the high-signal examples that should shape live
 behavior. A global judgment becomes a short system-prompt few-shot; a judgment
 that belongs to one execution unit becomes a few-shot in that Skill's
-reference. Keep broad factual examples in Knowledge and keep boundary tests
-out of runtime context. Few-shots are demonstrations of behavior, not a second
-Knowledge base and not a substitute for the product promise.
+reference. Keep boundary tests out of runtime context. Few-shots are demonstrations of
+behavior, not a substitute for the product promise.
 
 ## 6. Create isolated held-outs
 

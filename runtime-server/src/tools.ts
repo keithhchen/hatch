@@ -5,7 +5,7 @@ import type { ClientGroup } from "./surfaces/contract.js";
 export type ToolLocality = "server" | "client";
 export type ToolApproval = "none" | "auto" | "ask";
 export type ModelToolLocality = "server" | "client" | "hybrid";
-export type ModelToolAvailability = "always" | "client_capability" | "mcp_configured" | "knowledge_configured";
+export type ModelToolAvailability = "always" | "client_capability" | "mcp_configured";
 
 export type ModelToolSpec = {
   name: string;
@@ -82,25 +82,6 @@ export const toolRegistry = new Map<string, ToolDefinition>([
       },
       required: ["query"],
       availability: "always"
-    }
-  }],
-  ["hatch.file_search", {
-    name: "hatch.file_search",
-    locality: "server",
-    approval: "none",
-    readOnly: true,
-    description: "Search the current Expert Agent's retrieval-only knowledge space.",
-    schema: z.object({ query: z.string(), limit: z.number().int().min(1).max(6).default(6) }).strict(),
-    model: {
-      name: "hatch_file_search",
-      locality: "server",
-      description: "Search the current Expert Agent knowledge space when the answer requires long-tail reference material.",
-      properties: {
-        query: stringSchema("Search query."),
-        limit: numberSchema("Maximum number of knowledge hits, from 1 to 6.")
-      },
-      required: ["query"],
-      availability: "knowledge_configured"
     }
   }],
   ["web.search", {
@@ -353,7 +334,7 @@ export function requireTool(name: string): ToolDefinition {
 
 export function modelToolSpecsForRun(
   clientTools: ClientToolName[],
-  options: { hasMcpServers: boolean; hasKnowledge?: boolean }
+  options: { hasMcpServers: boolean }
 ): ModelToolSpec[] {
   return [...toolRegistry.values()]
     .flatMap((tool) => tool.model ? [toModelToolSpec(tool)] : [])
@@ -433,10 +414,9 @@ function toModelToolSpec(tool: ToolDefinition): ModelToolSpec {
 function modelToolAvailable(
   spec: ModelToolSpec,
   clientTools: ClientToolName[],
-  options: { hasMcpServers: boolean; hasKnowledge?: boolean }
+  options: { hasMcpServers: boolean }
 ): boolean {
   if (spec.availability === "mcp_configured") return options.hasMcpServers;
-  if (spec.availability === "knowledge_configured") return Boolean(options.hasKnowledge);
   if (spec.availability === "client_capability") {
     return Boolean(spec.clientTool && clientTools.includes(spec.clientTool));
   }

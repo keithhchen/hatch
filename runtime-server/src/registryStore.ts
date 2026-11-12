@@ -15,12 +15,6 @@ import {
   type VerifiedAgentCorpus,
 } from "./registryCorpus.js";
 import { loadAgentCorpus } from "./agentCorpus.js";
-import {
-  ingestAgentCorpusKnowledge,
-  removeAgentCorpusKnowledge,
-  QdrantKnowledgeIndexer,
-  type AgentKnowledgeIndexer,
-} from "./qdrantIndexer.js";
 import { isUuidV4, requireUuidV4 } from "./identity.js";
 import { mapLegacyAuthorityId, migrateUuidAuthorityIds } from "./uuidIdentityMigration.js";
 import { normalizeBriefSpec, type BriefSpec } from "./brief.js";
@@ -38,7 +32,6 @@ export type PublishedAgentCorpus = {
   /** Creator-confirmed buyer intake contract for this published release. */
   brief_spec?: BriefSpec;
   presentation: Record<string, unknown>;
-  knowledge_namespace: string;
   status: "published";
   published_at: string;
 };
@@ -132,19 +125,16 @@ export class RegistryStoreTs {
   private readonly pool?: Pool;
   private readonly statePath?: string;
   private readonly publishTimeoutMs: number;
-  private indexer?: AgentKnowledgeIndexer;
   private publishOutcomeUnknown?: Error;
 
   private constructor(private readonly corpusRoot: string, options: {
     databaseUrl?: string;
     databaseTimeoutMs: number;
     statePath?: string;
-    indexer?: AgentKnowledgeIndexer;
     pool?: Pool;
     publishTimeoutMs: number;
   }) {
     this.statePath = options.statePath;
-    this.indexer = options.indexer;
     this.publishTimeoutMs = options.publishTimeoutMs;
     if (options.pool && options.databaseUrl) throw new Error("RegistryStoreTs.open cannot accept both pool and databaseUrl");
     if (options.pool) this.pool = options.pool;
@@ -162,7 +152,6 @@ export class RegistryStoreTs {
     corpusRoot?: string;
     databaseUrl?: string;
     statePath?: string;
-    indexer?: AgentKnowledgeIndexer;
     pool?: Pool;
     publishTimeoutMs?: number;
     environment?: NodeJS.ProcessEnv;
@@ -174,7 +163,6 @@ export class RegistryStoreTs {
         databaseUrl: options.databaseUrl ?? (environment.HATCH_REGISTRY_DATABASE_URL?.trim() || undefined),
         databaseTimeoutMs: registryDatabaseTimeoutMs(environment),
         statePath: options.statePath ?? (environment.HATCH_REGISTRY_STATE_PATH?.trim() || undefined),
-        indexer: options.indexer ?? QdrantKnowledgeIndexer.fromEnvironment(environment),
         pool: options.pool,
         publishTimeoutMs: options.publishTimeoutMs ?? registryPublishTimeoutMs(environment),
       },
@@ -185,7 +173,6 @@ export class RegistryStoreTs {
     await store.load();
     await store.recoverPendingCorpusInstalls();
     await store.loadCorpusByteAccounting();
-    await store.resumePendingIndexCleanup();
     return store;
   }
 
@@ -232,11 +219,9 @@ export class RegistryStoreTs {
     const staging = path.join(path.dirname(this.corpusRoot), `.agent-corpus-upload-${randomUUID()}`);
     await mkdir(staging, { recursive: true });
     let install: CurrentCorpusInstallTransaction | undefined;
-    let indexAttempted = false;
     let metadataCommitted = false;
     let verifiedDigest: string | undefined;
     let priorCorpus: PublishedAgentCorpus | undefined;
-    let stagedDigestCleanupMarker: string | undefined;
     let installJournal: string | undefined;
     let preserveInstallForRecovery = false;
     try {
@@ -277,10 +262,6 @@ export class RegistryStoreTs {
       ) {
         throw new AgentCorpusVerificationError(`An Expert may publish at most ${MAX_AGENT_CORPORA_PER_CREATOR} Agents`);
       }
-      const knowledgeDocuments = verified.corpus.knowledge.documents;
-      if (knowledgeDocuments.length > 0 && !this.indexer) {
-        throw new Error("Agent Corpus includes knowledge documents but Qdrant knowledge index is not configured");
-      }
       install = await prepareCurrentCorpusInstall(verified, this.corpusRoot, { signal: deadline.signal });
       installJournal = await this.createCorpusInstallJournal(
         verified.creator.id,
@@ -289,21 +270,6 @@ export class RegistryStoreTs {
         priorCorpus?.corpus_digest,
         install,
       );
-      if (this.indexer) {
-        if (priorCorpus?.corpus_digest !== verified.digest) {
-          stagedDigestCleanupMarker = await this.createIndexCleanupMarker(
-            verified.creator.id,
-            verified.agentId,
-            verified.digest,
-          );
-        }
-        indexAttempted = true;
-        await deadline.wait(ingestAgentCorpusKnowledge(this.indexer, {
-          corpus: verified.corpus,
-          path: install.preparedPath,
-          digest: verified.digest,
-        }, deadline.signal));
-      }
       const published: PublishedAgentCorpus = {
         creator_id: verified.creator.id,
         agent_id: verified.agentId,
@@ -320,7 +286,6 @@ export class RegistryStoreTs {
             ? { brief_spec: normalizeBriefSpec(verified.product.brief_spec) }
             : {}),
         presentation: verified.product.presentation,
-        knowledge_namespace: `${verified.creator.id}:${verified.agentId}`,
         status: "published",
         published_at: new Date().toISOString(),
       };
@@ -356,26 +321,6 @@ export class RegistryStoreTs {
       if (finalized && installJournal) {
         await rm(installJournal, { force: true }).catch(() => undefined);
       }
-      if (stagedDigestCleanupMarker) {
-        await rm(stagedDigestCleanupMarker, { force: true }).catch(() => undefined);
-      }
-      if (this.indexer && priorCorpus && priorCorpus.corpus_digest !== verified.digest) {
-        const oldDigestCleanupMarker = await this.createIndexCleanupMarker(
-          verified.creator.id,
-          verified.agentId,
-          priorCorpus.corpus_digest,
-        ).catch(() => undefined);
-        if (oldDigestCleanupMarker) {
-        await cleanIndexDigestBestEffort(
-          this.indexer,
-          verified.creator.id,
-          verified.agentId,
-          priorCorpus.corpus_digest,
-          oldDigestCleanupMarker,
-          deadline,
-        );
-        }
-      }
       return published;
     } catch (error) {
       if (!metadataCommitted && install && !preserveInstallForRecovery) {
@@ -385,24 +330,6 @@ export class RegistryStoreTs {
         } catch (rollbackError) {
           throw new AggregateError([error, rollbackError], "Agent Corpus publish failed and filesystem rollback did not complete");
         }
-      }
-      if (
-        !metadataCommitted
-        && !preserveInstallForRecovery
-        && indexAttempted
-        && this.indexer
-        && verifiedDigest
-        && verifiedDigest !== priorCorpus?.corpus_digest
-        && stagedDigestCleanupMarker
-      ) {
-        await cleanIndexDigestBestEffort(
-          this.indexer,
-          creatorId,
-          agentId,
-          verifiedDigest,
-          stagedDigestCleanupMarker,
-          deadline,
-        );
       }
       throw error;
     } finally {
@@ -451,19 +378,11 @@ export class RegistryStoreTs {
     corpusRoot: string,
     expectedDigest?: string,
     briefSpec?: BriefSpec,
-    options: { indexKnowledge?: boolean } = {},
   ): Promise<PublishedAgentCorpus> {
     const normalizedBriefSpec = briefSpec ? normalizeBriefSpec(briefSpec) : undefined;
     const verified = await verifyAgentCorpus(corpusRoot, creatorId, agentId);
     if (expectedDigest !== undefined && verified.digest !== expectedDigest) throw new Error("candidate_changed");
-    const immutableRoot = await materializeAgentCorpusRelease(verified, this.corpusRoot);
-    if (this.indexer && options.indexKnowledge !== false) {
-      await ingestAgentCorpusKnowledge(this.indexer, {
-        corpus: verified.corpus,
-        path: immutableRoot,
-        digest: verified.digest
-      });
-    }
+    await materializeAgentCorpusRelease(verified, this.corpusRoot);
     const staged = publishedCorpusFromVerified(verified);
     if (normalizedBriefSpec) {
       staged.brief_spec = normalizedBriefSpec;
@@ -1026,13 +945,13 @@ export class RegistryStoreTs {
         await executor.query(
           `INSERT INTO agent_corpora
              (creator_id, agent_id, corpus_digest, creator_name, product_id, product_name,
-              product_description, product_json, knowledge_namespace, status, published_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+              product_description, product_json, status, published_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
            ON CONFLICT (creator_id, agent_id) DO UPDATE SET
              corpus_digest=EXCLUDED.corpus_digest, creator_name=EXCLUDED.creator_name,
              product_id=EXCLUDED.product_id, product_name=EXCLUDED.product_name,
              product_description=EXCLUDED.product_description, product_json=EXCLUDED.product_json,
-             knowledge_namespace=EXCLUDED.knowledge_namespace, status=EXCLUDED.status,
+             status=EXCLUDED.status,
              published_at=EXCLUDED.published_at`,
           [
             creatorId,
@@ -1047,7 +966,6 @@ export class RegistryStoreTs {
             text(row.product_name, String(productLegacy)),
             row.product_description ?? null,
             productJson,
-            `${creatorId}:${productId}`,
             text(row.status, "published"),
             timestamp(row.published_at),
           ],
@@ -1134,7 +1052,6 @@ export class RegistryStoreTs {
         product_name TEXT NOT NULL,
         product_description TEXT,
         product_json TEXT,
-        knowledge_namespace TEXT NOT NULL,
         status TEXT NOT NULL,
         published_at TIMESTAMPTZ NOT NULL,
         PRIMARY KEY (creator_id, agent_id)
@@ -1170,6 +1087,7 @@ export class RegistryStoreTs {
       );
       ALTER TABLE tool_connections ADD COLUMN IF NOT EXISTS secret_value TEXT;
       ALTER TABLE agent_corpora ADD COLUMN IF NOT EXISTS product_json TEXT;
+      ALTER TABLE agent_corpora DROP COLUMN IF EXISTS knowledge_namespace;
       ALTER TABLE agent_access ADD COLUMN IF NOT EXISTS order_id TEXT;
       ALTER TABLE agent_access ADD COLUMN IF NOT EXISTS purchased_corpus_digest TEXT;
       ALTER TABLE agent_access ADD COLUMN IF NOT EXISTS version_policy TEXT NOT NULL DEFAULT 'pinned';
@@ -1186,7 +1104,7 @@ export class RegistryStoreTs {
   private async load(): Promise<void> {
     if (this.pool) {
       try {
-      const corpora = await this.pool.query("SELECT creator_id, agent_id, corpus_digest, creator_name, product_id, product_name, product_description, product_json, knowledge_namespace, status, published_at FROM agent_corpora");
+      const corpora = await this.pool.query("SELECT creator_id, agent_id, corpus_digest, creator_name, product_id, product_name, product_description, product_json, status, published_at FROM agent_corpora");
       for (const row of corpora.rows) {
         requireUuidV4(row.creator_id, "creator_id");
         requireUuidV4(row.agent_id, "product_id");
@@ -1400,81 +1318,6 @@ export class RegistryStoreTs {
     return parsed as CorpusInstallJournal;
   }
 
-  private async createIndexCleanupMarker(
-    creatorId: string,
-    agentId: string,
-    corpusDigest: string,
-  ): Promise<string> {
-    const directory = path.join(this.corpusRoot, ".index-gc");
-    const marker = path.join(directory, `${creatorId}--${agentId}--${corpusDigest.slice("sha256:".length)}.json`);
-    await writeDurableJsonFile(marker, {
-      creator_id: creatorId,
-      agent_id: agentId,
-      corpus_digest: corpusDigest,
-    });
-    return marker;
-  }
-
-  private async resumePendingIndexCleanup(): Promise<void> {
-    if (!this.indexer) return;
-    const directory = path.join(this.corpusRoot, ".index-gc");
-    let entries;
-    try {
-      entries = await readdir(directory, { withFileTypes: true });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-      throw error;
-    }
-    // Bound startup repair work. Remaining markers stay durable for the next
-    // process start instead of making Registry availability depend on Qdrant.
-    for (const entry of entries.filter((candidate) => candidate.isFile() && candidate.name.endsWith(".json")).slice(0, 20)) {
-      const markerPath = path.join(directory, entry.name);
-      let marker: { creator_id: string; agent_id: string; corpus_digest: string };
-      try {
-        const metadata = await stat(markerPath);
-        if (metadata.size > 4_096) throw new Error("cleanup marker is oversized");
-        marker = JSON.parse(await readFile(markerPath, "utf8")) as typeof marker;
-        if (
-          !isUuidV4(marker.creator_id)
-          || !isUuidV4(marker.agent_id)
-          || !/^sha256:[a-f0-9]{64}$/.test(marker.corpus_digest)
-        ) throw new Error("cleanup marker is invalid");
-      } catch {
-        continue;
-      }
-      const currentDigest = await this.readCanonicalCorpusDigest(marker.creator_id, marker.agent_id);
-      if (currentDigest === marker.corpus_digest) {
-        await rm(markerPath, { force: true });
-        continue;
-      }
-      try {
-        const latestDigest = await this.readCanonicalCorpusDigest(marker.creator_id, marker.agent_id);
-        if (latestDigest === marker.corpus_digest) {
-          await rm(markerPath, { force: true });
-          continue;
-        }
-        await removeAgentCorpusKnowledge(
-          this.indexer,
-          marker.creator_id,
-          marker.agent_id,
-          marker.corpus_digest,
-        );
-        const digestAfterDelete = await this.readCanonicalCorpusDigest(marker.creator_id, marker.agent_id);
-        if (digestAfterDelete === marker.corpus_digest) {
-          const current = await verifyAgentCorpus(
-            path.join(this.corpusRoot, marker.creator_id, marker.agent_id),
-            marker.creator_id,
-            marker.agent_id,
-          );
-          await ingestAgentCorpusKnowledge(this.indexer, current);
-        }
-        await rm(markerPath, { force: true });
-      } catch {
-        // Keep the marker so a later Registry process can retry.
-      }
-    }
-  }
-
   private async readCanonicalCorpusDigest(creatorId: string, agentId: string): Promise<string | undefined> {
     if (!this.pool) return this.corpora.get(key(creatorId, agentId))?.corpus_digest;
     const result = await this.pool.query(
@@ -1502,10 +1345,10 @@ export class RegistryStoreTs {
         [corpus.product_id, corpus.creator_id, corpus.product_name, corpus.product_description ?? corpus.product_name, corpus.status],
       );
       const query: QueryConfig & { query_timeout: number } = {
-        text: `INSERT INTO agent_corpora (creator_id, agent_id, corpus_digest, creator_name, product_id, product_name, product_description, product_json, knowledge_namespace, status, published_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-        ON CONFLICT (creator_id, agent_id) DO UPDATE SET corpus_digest=EXCLUDED.corpus_digest, creator_name=EXCLUDED.creator_name, product_id=EXCLUDED.product_id, product_name=EXCLUDED.product_name, product_description=EXCLUDED.product_description, product_json=EXCLUDED.product_json, knowledge_namespace=EXCLUDED.knowledge_namespace, status=EXCLUDED.status, published_at=EXCLUDED.published_at`,
-        values: [corpus.creator_id, corpus.agent_id, corpus.corpus_digest, corpus.creator_name, corpus.product_id, corpus.product_name, corpus.product_description ?? null, JSON.stringify({ promise: corpus.product_promise, boundaries: corpus.product_boundaries, ...(corpus.brief_spec ? { brief_spec: corpus.brief_spec } : {}), presentation: corpus.presentation }), corpus.knowledge_namespace, corpus.status, corpus.published_at],
+        text: `INSERT INTO agent_corpora (creator_id, agent_id, corpus_digest, creator_name, product_id, product_name, product_description, product_json, status, published_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        ON CONFLICT (creator_id, agent_id) DO UPDATE SET corpus_digest=EXCLUDED.corpus_digest, creator_name=EXCLUDED.creator_name, product_id=EXCLUDED.product_id, product_name=EXCLUDED.product_name, product_description=EXCLUDED.product_description, product_json=EXCLUDED.product_json, status=EXCLUDED.status, published_at=EXCLUDED.published_at`,
+        values: [corpus.creator_id, corpus.agent_id, corpus.corpus_digest, corpus.creator_name, corpus.product_id, corpus.product_name, corpus.product_description ?? null, JSON.stringify({ promise: corpus.product_promise, boundaries: corpus.product_boundaries, ...(corpus.brief_spec ? { brief_spec: corpus.brief_spec } : {}), presentation: corpus.presentation }), corpus.status, corpus.published_at],
         query_timeout: deadline.remainingMs(),
       };
       await this.pool.query(query);
@@ -1685,7 +1528,6 @@ function publishedCorpusFromVerified(verified: VerifiedAgentCorpus): PublishedAg
     product_boundaries: verified.product.boundaries,
     ...(verified.product.brief_spec ? { brief_spec: normalizeBriefSpec(verified.product.brief_spec) } : {}),
     presentation: verified.product.presentation,
-    knowledge_namespace: `${verified.creator.id}:${verified.agentId}:${verified.digest}`,
     status: "published",
     published_at: new Date().toISOString()
   };
@@ -1737,7 +1579,6 @@ function rowToCorpus(row: Record<string, any>): PublishedAgentCorpus {
     product_boundaries: Array.isArray(product.boundaries) ? product.boundaries.map(String) : [],
     ...(product.brief_spec ? { brief_spec: normalizeBriefSpec(product.brief_spec) } : {}),
     presentation: product.presentation && typeof product.presentation === "object" ? product.presentation : {},
-    knowledge_namespace: String(row.knowledge_namespace),
     status: "published",
     published_at: new Date(row.published_at).toISOString(),
   };
@@ -1857,51 +1698,6 @@ function validateConnectionConfig(config: Record<string, unknown>): void {
 function throwIfAborted(signal?: AbortSignal): void {
   if (!signal?.aborted) return;
   throw signal.reason instanceof Error ? signal.reason : new Error("Registry operation was aborted");
-}
-
-async function cleanIndexDigestBestEffort(
-  indexer: AgentKnowledgeIndexer,
-  creatorId: string,
-  agentId: string,
-  corpusDigest: string,
-  markerPath: string,
-  deadline: PublishDeadline,
-): Promise<void> {
-  // Cleanup receives a fresh indexer-level timeout instead of the already
-  // aborted publish signal. If the hard publish deadline has elapsed, cleanup
-  // continues in the background but cannot delay the caller's timeout result.
-  const cleanupSignal = AbortSignal.timeout(5_000);
-  const cleanup = waitForAbort(
-    removeAgentCorpusKnowledge(indexer, creatorId, agentId, corpusDigest, cleanupSignal),
-    cleanupSignal,
-  ).then(
-    () => rm(markerPath, { force: true }).then(() => undefined),
-    () => undefined,
-  );
-  deadline.defer(cleanup);
-  if (deadline.signal.aborted) {
-    void cleanup;
-    return;
-  }
-  await deadline.wait(cleanup).catch(() => undefined);
-}
-
-async function waitForAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) throw signal.reason;
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = () => reject(signal.reason);
-    signal.addEventListener("abort", onAbort, { once: true });
-    operation.then(
-      (value) => {
-        signal.removeEventListener("abort", onAbort);
-        resolve(value);
-      },
-      (error) => {
-        signal.removeEventListener("abort", onAbort);
-        reject(error);
-      },
-    );
-  });
 }
 
 async function writeDurableJsonFile(filePath: string, value: Record<string, unknown>): Promise<void> {

@@ -1,5 +1,4 @@
 import { requireTool } from "./tools.js";
-import type { KnowledgeProvider } from "./agentCorpus.js";
 import type { RuntimeCreatorTool } from "./creatorTools.js";
 import { assertBoundedJsonValue, readBoundedJsonObject, readBoundedResponseText } from "./boundedResponse.js";
 
@@ -8,28 +7,16 @@ type McpServerConfig = {
   headers?: Record<string, string>;
 };
 
-type KnowledgeScope = {
-  provider: KnowledgeProvider;
-  creatorId: string;
-  agentId: string;
-  corpusDigest: string;
-};
-
 type AttachmentRunner = { run(name: string, args: unknown): Promise<string> };
 /** A host's own tools, already bound to the conversation they serve: a call never names whose data it touches. */
 export type HostToolRunner = { run(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown>> };
 
 export class ServerToolExecutor {
-  private knowledgeScope?: KnowledgeScope;
   private resolvedCreatorTools = new Map<string, RuntimeCreatorTool>();
   private attachments?: AttachmentRunner;
   private studio?: HostToolRunner;
 
   constructor(private readonly timeoutMs = 120000) {}
-
-  setKnowledgeScope(scope: KnowledgeScope | undefined): void {
-    this.knowledgeScope = scope;
-  }
 
   /** The conversation's attachment tools, already bound to its scope: a call never names a scope. */
   setAttachments(runner: AttachmentRunner | undefined): void {
@@ -86,12 +73,6 @@ export class ServerToolExecutor {
 
     if (name === "web.search" || name === "hatch.web_search") {
       const result = await this.webSearch(parsedArgs, requestSignal);
-      assertBoundedJsonValue(result);
-      return result;
-    }
-
-    if (name === "hatch.file_search") {
-      const result = await this.fileSearch(parsedArgs, requestSignal);
       assertBoundedJsonValue(result);
       return result;
     }
@@ -194,24 +175,6 @@ export class ServerToolExecutor {
         }))
       : [];
     return { query, results };
-  }
-
-  private async fileSearch(args: Record<string, unknown>, signal: AbortSignal): Promise<Record<string, unknown>> {
-    if (!this.knowledgeScope) {
-      throw new Error("hatch.file_search is unavailable because this Agent has no knowledge provider");
-    }
-    const hits = await this.knowledgeScope.provider.search({
-      creatorId: this.knowledgeScope.creatorId,
-      agentId: this.knowledgeScope.agentId,
-      corpusDigest: this.knowledgeScope.corpusDigest,
-      query: String(args.query),
-      limit: Number(args.limit ?? 6),
-      signal
-    });
-    return {
-      query: String(args.query),
-      hits: hits.map((hit) => ({ text: hit.text, score: hit.score }))
-    };
   }
 
   private async apiRequest(args: Record<string, unknown>): Promise<Record<string, unknown>> {

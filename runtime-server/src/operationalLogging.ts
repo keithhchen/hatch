@@ -19,7 +19,6 @@ const SAFE_ERROR_NAMES = new Set([
   "EntitlementError",
   "Error",
   "EvalError",
-  "KnowledgeIndexUnavailable",
   "NonError",
   "RangeError",
   "ReferenceError",

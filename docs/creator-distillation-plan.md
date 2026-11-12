@@ -78,7 +78,7 @@ LLM 可以提出内容和判断建议，但不能拥有状态、digest、工具�
 | Evidence | 材料理解状态、缺失信息摘要、带出处链的 provenance hypotheses | 抽取 prompt 与中间链 |
 | Question Generation | 行为题，以及明确标记为 `provenance confirmation` 的源头推断确认题 | 生成过程 |
 | Creator Reference | 自己填写的标准答案；对 hypothesis 可确认、修正、否定或补充来源 | — |
-| Corpus Compile | Building candidate、真实错误；Candidate Review 中可读完整 runtime Corpus（System、Skills、References、Knowledge） | LLM 草稿与资产图 |
+| Corpus Compile | Building candidate、真实错误；Candidate Review 中可读完整 runtime Corpus（System、Skills、References） | LLM 草稿与资产图 |
 | Candidate Runtime | Candidate 版本与是否生成；完整 Corpus 的 immutable digest 与逐资产内容 | worker checkpoint |
 | Eval | Known 通过/失败数量、诊断、低置信度提示 | Judge prompt；Blind 内容 |
 | Creator Review | reference、candidate output、Eval verdict/diagnosis、Accept / Correct / Reject / Eval dispute | 原始文件与 sealed case |

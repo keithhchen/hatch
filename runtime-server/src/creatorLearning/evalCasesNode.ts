@@ -38,7 +38,7 @@ const EVAL_CASES_INPUT_PROTOCOL = `Input and read protocol:
 This Node receives a flat manifest of complete OSS object paths. The Runtime has already resolved the references; use the exact paths shown in the input.
 
 - product: one OSS path to the Product brief. It defines the customer job, intended user, deliverable, and boundary that the cases must exercise.
-- corpus: one OSS path to the upstream Corpus candidate. It contains the Creator-derived instructions, reusable skills, and knowledge that the cases must test.
+- corpus: one OSS path to the upstream Corpus candidate. It contains the Creator-derived instructions and reusable skills that the cases must test.
 
 Read both paths before designing or judging cases. On an Actor revision, first read previous_candidate_ref and feedback_ref, then reread product and corpus as needed.`;
 

@@ -97,7 +97,7 @@ export function corpusTools(store: WorkbenchStore, id: string, changed: () => vo
       let corpus: CorpusOutput;
       let reply: z.infer<typeof corpusReceiptSchema>;
       try {
-        corpus = corpusOutputSchema.parse({ system_instructions: system, skills, knowledge: [], tools: JSON.parse(env.HATCH_FACTORY_TARGET_TOOLS_JSON ?? "[]") });
+        corpus = corpusOutputSchema.parse({ system_instructions: system, skills, tools: JSON.parse(env.HATCH_FACTORY_TARGET_TOOLS_JSON ?? "[]") });
         reply = corpusReceiptSchema.parse(await registryRequest(env, `/v1/creator/products/${encodeURIComponent(product.productId)}/registry`, { corpus }, signal));
       } catch (error) {
         throw new Error(error instanceof Error ? error.message : "Corpus publication failed");

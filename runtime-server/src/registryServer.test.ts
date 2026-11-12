@@ -85,7 +85,6 @@ test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () =
     HATCH_AUTH_SIGNING_SECRET: "test-secret",
     HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN: "deployment-test-token",
     HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN: "runtime-test-token",
-    HATCH_QDRANT_URL: "",
     DASHSCOPE_API_KEY: ""
   });
   try {
@@ -210,7 +209,6 @@ test("TypeScript Registry mints typed sessions and API keys only from interactiv
     HATCH_AGENT_CORPUS_ROOT: path.join(root, "corpora"),
     HATCH_REGISTRY_STATE_PATH: path.join(root, "state.json"),
     HATCH_AUTH_SIGNING_SECRET: "test-secret",
-    HATCH_QDRANT_URL: "",
     DASHSCOPE_API_KEY: ""
   });
   try {
@@ -275,7 +273,6 @@ test("TypeScript Registry enables legacy HMAC only for explicit migration mode",
     HATCH_REGISTRY_STATE_PATH: path.join(root, "state.json"),
     HATCH_ENABLE_LEGACY_HMAC_AUTH: "true",
     HATCH_AUTH_SIGNING_SECRET: "migration-secret",
-    HATCH_QDRANT_URL: "",
     DASHSCOPE_API_KEY: ""
   });
   try {

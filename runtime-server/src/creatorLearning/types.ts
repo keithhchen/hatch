@@ -72,12 +72,6 @@ export type FactoryAgentTool =
       description?: string;
     }
   | {
-      id: "hatch.file_search";
-      kind: "hatch_builtin";
-      capability: "file_search";
-      description?: string;
-    }
-  | {
       id: string;
       kind: "local_harness";
       capability: "filesystem" | "shell" | "git";
@@ -202,7 +196,6 @@ export type MaterializedAgentCorpus = {
       instruction: ArtifactRef;
       references: Array<{ id: string; kind: "method" | "style" | "example" | "few_shots"; asset: ArtifactRef }>;
     }>;
-    knowledge: Array<{ id: string; asset: ArtifactRef }>;
   };
   syntheticQa: ArtifactRef;
   heldOut: ArtifactRef;
@@ -412,7 +405,6 @@ export type FactorySubmissionToolName =
   | "submit_system_instructions"
   | "submit_skill"
   | "submit_reference"
-  | "submit_knowledge"
   | "submit_corpus_audit_section"
   | "finalize_corpus";
 

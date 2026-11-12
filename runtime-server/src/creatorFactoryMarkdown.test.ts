@@ -21,7 +21,7 @@ import {
   questionPrompt
 } from "./creatorLearning/prompts.js";
 
-test("layered Corpus parser returns multiple typed Skills, references, and knowledge without consuming nested headings", () => {
+test("layered Corpus parser returns multiple typed Skills and references without consuming nested headings", () => {
   const system = [
     "# Creator operating system",
     "## Role",
@@ -33,8 +33,6 @@ test("layered Corpus parser returns multiple typed Skills, references, and knowl
   const skillTwo = "# Research a market\n## Stop condition\nStop when evidence is sufficient.";
   const referenceOne = "# Decision grid\n## Axis A\nSpecificity\n# Compilation complete\nA valid nested heading.";
   const referenceTwo = "# Voice examples\n## Strong\nConcrete before clever.";
-  const knowledgeOne = "# Market cases\n## Narrow category\nA purified case and its applicability.";
-  const knowledgeTwo = "# Objection patterns\n## Risk reversal\nA searchable, synthesized pattern.";
   const markdown = corpusCompilation([
     corpusAsset(["layer: system", "id: system"], system),
     corpusAsset([
@@ -62,19 +60,7 @@ test("layered Corpus parser returns multiple typed Skills, references, and knowl
       "id: voice-examples",
       "parent_skill_id: offer-positioning",
       "reference_kind: example"
-    ], referenceTwo),
-    corpusAsset([
-      "layer: knowledge",
-      "id: market-cases",
-      "title: Purified Creator-authorized market cases.",
-      "retrieval_only: true"
-    ], knowledgeOne),
-    corpusAsset([
-      "layer: knowledge",
-      "id: objection-patterns",
-      "title: Synthesized objection patterns from authorized material.",
-      "retrieval_only: true"
-    ], knowledgeTwo)
+    ], referenceTwo)
   ]);
 
   const options = { availableToolIds: ["hatch.web_search", "creator.crm_lookup"] };
@@ -110,19 +96,6 @@ test("layered Corpus parser returns multiple typed Skills, references, and knowl
     kind: "example",
     content: referenceTwo
   }]);
-  assert.deepEqual(parsed.knowledge, [{
-    id: "market-cases",
-    path: "knowledge/market-cases.md",
-    title: "Purified Creator-authorized market cases.",
-    retrievalOnly: true,
-    content: knowledgeOne
-  }, {
-    id: "objection-patterns",
-    path: "knowledge/objection-patterns.md",
-    title: "Synthesized objection patterns from authorized material.",
-    retrievalOnly: true,
-    content: knowledgeTwo
-  }]);
   assert.match(parsed.requirementsTraceability, /instructions\/system\.md/);
 });
 
@@ -133,7 +106,6 @@ test("layered Corpus permits empty optional layers and rejects legacy production
   const parsed = parseCorpusCompilation(markdown);
   assert.deepEqual(parsed.skills, []);
   assert.deepEqual(parsed.references, []);
-  assert.deepEqual(parsed.knowledge, []);
 
   assert.throws(() => parseCorpusCompilation([
     "# Corpus",
@@ -195,11 +167,12 @@ test("layered Corpus rejects duplicate assets, unknown reference parents, and in
       "allowed_tool_ids: []"
     ], "Review once."),
     corpusAsset([
-      "layer: knowledge",
+      "layer: skill",
       "id: review",
-      "title: Purified review cases.",
-      "retrieval_only: true"
-    ], "# Cases\nOne case.")
+      "name: Review again",
+      "when_to_use: When reviewing twice.",
+      "allowed_tool_ids: []"
+    ], "Review twice.")
   ]);
   assert.throws(() => parseCorpusCompilation(duplicate), /repeats asset id: review/i);
 
@@ -250,11 +223,12 @@ test("Corpus prompt compiles lossless full-layer replacements with concrete dest
   const previousCompilation = corpusCompilation([
     corpusAsset(["layer: system", "id: system"], "PREVIOUS_SYSTEM_BOUNDARY"),
     corpusAsset([
-      "layer: knowledge",
+      "layer: skill",
       "id: prior-cases",
-      "title: Purified prior cases.",
-      "retrieval_only: true"
-    ], "PREVIOUS_KNOWLEDGE_ITEM")
+      "name: Prior cases",
+      "when_to_use: When prior cases apply.",
+      "allowed_tool_ids: []"
+    ], "PREVIOUS_SKILL_ITEM")
   ]);
   const call = corpusPrompt({
     creatorName: "Creator",
@@ -272,7 +246,7 @@ test("Corpus prompt compiles lossless full-layer replacements with concrete dest
 
   assert.match(call.systemPrompt, /complete set of supported cognitive assets/i);
   assert.match(call.systemPrompt, /full, self-contained replacement of ALL layers and ALL assets/i);
-  assert.match(call.systemPrompt, /Re-emit every retained System, Skill, reference, and knowledge asset in full/i);
+  assert.match(call.systemPrompt, /Re-emit every retained System, Skill, and reference asset in full/i);
   assert.match(call.systemPrompt, /long-term product editor-in-chief and system designer/i);
   assert.match(call.systemPrompt, /when brevity conflicts with retained capability, preserve the capability/i);
   assert.match(call.systemPrompt, /requirement-to-asset matrix/i);
@@ -280,8 +254,7 @@ test("Corpus prompt compiles lossless full-layer replacements with concrete dest
   assert.match(call.systemPrompt, /never include any of those `#` headings/i);
   assert.match(call.systemPrompt, /Every supported runtime requirement must have a real destination in an asset emitted/i);
   assert.match(call.systemPrompt, /routing suggestion without the destination asset's complete content.*failure/i);
-  assert.match(call.systemPrompt, /Knowledge is not an archive of inputs/i);
-  assert.match(call.systemPrompt, /purified, self-contained, searchable long-tail content/i);
+  assert.match(call.systemPrompt, /Published assets are not an archive of inputs/i);
   assert.match(call.systemPrompt, /Source-to-Corpus transformation is a hard release boundary/i);
   assert.match(call.systemPrompt, /Publishable content must be an original synthesis/i);
   assert.match(call.systemPrompt, /Never quote, transcribe, lightly edit, sentence-by-sentence paraphrase, or split a source passage across assets/i);
@@ -306,7 +279,7 @@ test("Corpus prompt compiles lossless full-layer replacements with concrete dest
   assert.match(call.systemPrompt, /Keep the final answer in the requested output language/i);
   assert.match(call.prompt, /Previous accepted complete compilation/);
   assert.match(call.prompt, /PREVIOUS_SYSTEM_BOUNDARY/);
-  assert.match(call.prompt, /PREVIOUS_KNOWLEDGE_ITEM/);
+  assert.match(call.prompt, /PREVIOUS_SKILL_ITEM/);
   assert.match(call.prompt, /hatch\.web_search/);
   assert.match(call.prompt, /Boundary: no guaranteed revenue/);
 
@@ -377,13 +350,7 @@ test("Corpus completeness prompt audits all candidate assets, metadata, paths, a
       "id: rubric",
       "parent_skill_id: review",
       "reference_kind: method"
-    ], "CANDIDATE_REFERENCE"),
-    corpusAsset([
-      "layer: knowledge",
-      "id: cases",
-      "title: Purified cases.",
-      "retrieval_only: true"
-    ], "CANDIDATE_KNOWLEDGE")
+    ], "CANDIDATE_REFERENCE")
   ]);
   const call = corpusCompletenessPrompt({
     creatorName: "Creator",
@@ -398,15 +365,14 @@ test("Corpus completeness prompt audits all candidate assets, metadata, paths, a
     candidateCompilation
   });
 
-  assert.match(call.systemPrompt, /whole cognitive asset set: System, optional Skills, Skill-local references, and retrieval-only knowledge/i);
+  assert.match(call.systemPrompt, /whole cognitive asset set: System, optional Skills, and Skill-local references/i);
   assert.match(call.systemPrompt, /Audit every candidate asset block and its metadata, not only System/i);
   assert.match(call.systemPrompt, /required item with only a routing recommendation and no complete destination asset is a failure/i);
   assert.match(call.systemPrompt, /complete replacement of every retained layer and asset/i);
   assert.match(call.systemPrompt, /every old\/new asset ID, derived path, and layer/i);
-  assert.match(call.systemPrompt, /Knowledge must be purified, self-contained, searchable long-tail content—not raw evidence/i);
+  assert.match(call.systemPrompt, /Published assets must not contain raw evidence/i);
   assert.match(call.prompt, /OLD_SKILL/);
   assert.match(call.prompt, /CANDIDATE_REFERENCE/);
-  assert.match(call.prompt, /CANDIDATE_KNOWLEDGE/);
   assert.match(call.prompt, /never guarantee outcomes/);
 });
 
@@ -422,7 +388,7 @@ test("Evidence and evaluation prompts make layer routing directional and keep ev
   assert.match(evidence.systemPrompt, /provenance hypothesis/i);
   assert.match(evidence.systemPrompt, /cue, confidence, alternative explanation/i);
   assert.match(evidence.systemPrompt, /what must wait for Creator confirmation/i);
-  assert.match(evidence.systemPrompt, /always-on System, optional Skill, Skill-local reference, retrieval-only knowledge, or evaluation-only/i);
+  assert.match(evidence.systemPrompt, /always-on System, optional Skill, Skill-local reference, or evaluation-only/i);
   assert.match(evidence.systemPrompt, /Raw source material.*must never enter the published Agent Corpus or bundle/is);
 
   const question = questionPrompt({
@@ -453,7 +419,7 @@ test("Evidence and evaluation prompts make layer routing directional and keep ev
   assert.match(evaluation.systemPrompt, /Creator answer is the human behavioral reference/i);
   assert.match(evaluation.systemPrompt, /evaluation-only artifacts, not live prompt text/i);
   assert.match(evaluation.systemPrompt, /Judge behavior, not surface fluency/i);
-  assert.match(evaluation.systemPrompt, /System, optional Skill, Skill-local reference, retrieval-only knowledge, or evaluation-only/i);
+  assert.match(evaluation.systemPrompt, /System, optional Skill, Skill-local reference, or evaluation-only/i);
   assert.match(evaluation.prompt, /Creator answer \(human reference\)/);
 });
 

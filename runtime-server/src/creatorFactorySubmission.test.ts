@@ -700,11 +700,6 @@ test("Corpus tools derive paths and canonical-render every layer in one accepted
         }
       },
       {
-        id: "knowledge",
-        name: "submit_knowledge",
-        arguments: { id: "case-library", title: "Creator-authorized cases", content: "# Cases\nA bootstrapped launch." }
-      },
-      {
         id: "rationale",
         name: "submit_corpus_audit_section",
         arguments: { section: "change_rationale", markdown: "Initial complete compilation." }
@@ -726,7 +721,6 @@ test("Corpus tools derive paths and canonical-render every layer in one accepted
   const corpus = parseCorpusCompilation(output, { availableToolIds: ["hatch.web_search"] });
   assert.equal(corpus.skills[0]!.path, "skills/offer-builder/SKILL.md");
   assert.equal(corpus.references[0]!.path, "skills/offer-builder/references/offer-method.md");
-  assert.equal(corpus.knowledge[0]!.path, "knowledge/case-library.md");
   assert.equal(requests.length, 1, "the complete Corpus handoff and accepted finalizer must terminate the first tool turn");
   const offeredSchemas = JSON.stringify((requests[0].tools as unknown[]) ?? []);
   assert.doesNotMatch(offeredSchemas, /\"path\"/);

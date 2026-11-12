@@ -26,7 +26,7 @@ System Prompt + Tools + Context
 - Single agent 可以连续多轮调用工具、搜索、写文件和修订，不等于一次 LLM completion。
 - 复杂需求优先落在 Prompt、Tool、Context 上。计划、发现和未解决问题可写入普通 Markdown，无需创造新的流程概念。
 - Markdown 是实际内容资产。模型逐份写文件，不提交一个包含全部正文的大 JSON。
-- 工具参数、运行状态、文档索引等机器数据仍可使用普通结构化数据；不要求机器协议也变成 Markdown。
+- 工具参数、运行状态等机器数据仍可使用普通结构化数据；不要求机器协议也变成 Markdown。
 - 文件真实存在不代表内容正确。区分生成完成、自动评估结论和 Creator 的实际认可。
 
 四个 Agent 直接集成进现有 Creator Dashboard 的 Factory 页面（/studio/factory），复用 Dashboard 的 Creator 登录与导航。无独立 Portal、节点登录、Project 或版本管理。聊天、文件和运行状态按 Creator 与会话分别隔离。Generation 通过既有 Corpus API 发布 Agent；HTool 复用现有 Runtime。
@@ -100,13 +100,13 @@ Agent 的聊天回复应简短，指出做了什么、最重要的发现和可�
 | Agent | 必需的主要文件 | 其他按需材料 |
 |---|---|---|
 | Research | `RESEARCH.md` | `sources/*.md`、研究笔记、工具保存的原始附件 |
-| Agent Generation | `SYSTEM.md`、`TOOLS.md`、`KNOWLEDGE.md` | `skills/<name>/SKILL.md`、`skills/<name>/references/*.md` |
+| Agent Generation | `SYSTEM.md`、`TOOLS.md` | `skills/<name>/SKILL.md`、`skills/<name>/references/*.md` |
 | Case Generation | `CASE.md`、`CLIENT_STATE.md`、`RUBRIC.md` | `materials/*.md`、已有客户附件引用 |
 | Evaluator | `RESULT.md`、`EVALUATION.md` | `results/*.md`、运行记录、专家评论 |
 
 `RESULT.md` 是特例：由 HTool／宿主保存实际运行结果，Evaluator 只读。未获得实际结果时不能生成伪结果来满足文件清单。
 
-没有某类内容时，如没有可上传的 Knowledge，主文件明确记载原因；不能填充虚构内容。Skill 和 Reference 按实际需要创建，不设凑数要求。
+没有某类内容时，主文件明确记载原因；不能填充虚构内容。Skill 和 Reference 按实际需要创建，不设凑数要求。
 
 ## 5. Voice Agent
 
@@ -195,8 +195,6 @@ Research 的完成标准是关键判断有原始证据、具体应用与条件�
 
 将 Creator 的材料变成能实际完成客户工作的 Agent 定义。重点工作是编写 System instructions 与 Skills，使隐含判断变成有条件、有行动、有完成标准的指令。
 
-Knowledge 工作限定为选择原始文档并上传，不进行模型改写。
-
 ### 6.2 Context
 
 - 产品范围、客户目标和交付要求。
@@ -209,11 +207,9 @@ Knowledge 工作限定为选择原始文档并上传，不进行模型改写。
 
 - `list`、`read`、`write`：编写 System、Skills、工具说明和上传记录。
 - `corpus_upload`：读取已写入的 System、Skills 与 References，按现有 `corpusOutputSchema` 装配，提交现有 Product Registry API，保存 `CORPUS.md`。JSON 正文与哈希由程序生成。
-- 上传返回原件 ID、digest、投影路径和 Corpus 发布凭据；同步完成索引才算发布成功。
+- 上传返回 digest、投影路径和 Corpus 发布凭据。
 
-`corpus_upload` 不接受模型重新生成的全文作为替代 Knowledge 原件。首次调用通过现有 Creator API 创建当前聊天的 Agent Product；后续使用同一真实身份。Product 创建和原件上传均使用幂等键，重试不重复创建。
-
-服务自身需要的解析、切块和索引继续由现有 Knowledge 服务负责。Agent 不自行裁剪、合并、总结或重新排版源文档再上传。
+首次调用通过现有 Creator API 创建当前聊天的 Agent Product；后续使用同一真实身份。Product 创建和原件上传均使用幂等键，重试不重复创建。
 
 ### 6.4 输出内容
 
@@ -236,8 +232,6 @@ Knowledge 工作限定为选择原始文档并上传，不进行模型改写。
 
 `TOOLS.md`：记录目标 Agent 所用的现有工具及用途、调用条件、限制和失败处理。工具说明不会凭空创建连接、授权或能力；运行时绑定由既有系统完成。
 
-`KNOWLEDGE.md`：选中的原始文件、选择理由、来源、文档 ID、上传和索引状态。没有合适文档时明确说明，不为了完整性上传研究者摘要来替代原文。
-
 ### 6.5 编写质量
 
 不断用具体客户情境检查指令：给定这些材料，目标 Agent 下一步做什么，为什么，何时换一种做法，怎样看出完成了。
@@ -256,7 +250,7 @@ Knowledge 工作限定为选择原始文档并上传，不进行模型改写。
 长文件继续读取到末尾；新加入的输入先读再使用。读取失败如实说明，
 不要把文件名、摘要或部分内容当作已经读完的文件。
 
-主要输出是 SYSTEM.md、TOOLS.md、KNOWLEDGE.md。
+主要输出是 SYSTEM.md、TOOLS.md。
 按实际需要创建 skills/<name>/SKILL.md 与 references/*.md。
 这些是你生成的目标 Agent 文件，不是你自己的系统指令。
 
@@ -264,15 +258,12 @@ Knowledge 工作限定为选择原始文档并上传，不进行模型改写。
 反复代入具体客户情境检查说明是否足够执行。案例和关键细节不能因为
 缩短篇幅而丢失。不得将未经确认的推断冒充 Creator 的明确规则。
 
-Knowledge 只做选择和上传：选中值得保留的原始文档，调用上传工具，
-记录实际文档 ID 与状态。不改写、摘要、拼接或重新生成原文。
-
 只依据宿主提供的真实工具能力编写 TOOLS.md。声明不等于已接通。
 使用文件工具逐份写入并核对；普通聊天用于解释重要决定和剩余缺口。
 不生成评测答案，不擅自修改原始材料。定义完成后调用 `corpus_upload`，保存真实上传凭据到 `CORPUS.md`。
 ```
 
-生成文件转为 Runtime 可加载资产时，复用既有 Corpus 格式与装配代码。JSON manifest 和 digest 由程序生成，不让模型手写伪 ID、哈希或另一种 Agent 格式。装配、上传和可执行状态必须分别显示。发布入口 `/v1/creator/products/:id/registry` 只接受 Agent Generation 的 System、Skills 提交；缺少 corpus 时明确拒绝，不读取旧 Node 最新结果。装配、索引和发布复用 CorpusPublisher，`CORPUS.md` 记录已发布 Agent 与文件的实际上传状态。既有 API 必需的摘要与发布标识只留在内部调用中，不成为 Factory 版本功能。
+生成文件转为 Runtime 可加载资产时，复用既有 Corpus 格式与装配代码。JSON manifest 和 digest 由程序生成，不让模型手写伪 ID、哈希或另一种 Agent 格式。装配、上传和可执行状态必须分别显示。发布入口 `/v1/creator/products/:id/registry` 只接受 Agent Generation 的 System、Skills 提交；缺少 corpus 时明确拒绝，不读取旧 Node 最新结果。装配和发布复用 CorpusPublisher，`CORPUS.md` 记录已发布 Agent 与文件的实际上传状态。既有 API 必需的摘要与发布标识只留在内部调用中，不成为 Factory 版本功能。
 
 ## 7. Case Generation Agent
 
@@ -295,7 +286,7 @@ Tools：现有材料读取与 Markdown 写入工具。**不提供 HTool。**
 - 可以有自然的信息缺失、目标冲突和时间压力，不堆无关陷阱。
 - 客户请求不能提示被考察的方法或泄漏评分点。
 - 优先改编授权案例；合成或改编部分明确标记，不能冒充真实客户。
-- 任务适合不带本地工具扩展的 Runtime：诊断、方案、文本批改、建议、服务端检索等。
+- 任务适合不带本地工具扩展的 Runtime：诊断、方案、文本批改、建议等。
 - 不以修改本地 PPT、运行本地脚本或操作客户电脑为通过条件。
 - 客户材料提供完整内容或实际可访问引用，不留“此处放资料”占位符。
 
@@ -368,7 +359,7 @@ Tools：
 
 整体结论说明可交付、需要修改、执行阻塞或证据不足。自动结论不等于 Creator 本人认可。
 
-区分 Agent 错误、工具／服务故障、案例缺陷和标准含糊。没有观察到 RAG 轨迹时不假定使用了 RAG；任务不需要检索时不因没有调用而扣分。
+区分 Agent 错误、工具／服务故障、案例缺陷和标准含糊。
 
 不自动重跑直到得到满意结果。用户要求重跑时保留所有尝试的原始成果，不只展示最好的一次。
 
@@ -421,12 +412,12 @@ HTool 是 Evaluator 对现有 Hatch 服务端 Runtime 的薄调用入口，不�
 - 身份认证、Agent 访问权限和定义加载。
 - Corpus／System 加载、Skills 发现与读取。
 - Conversation、消息历史、持久化与运行状态。
-- pi 模型执行、服务端工具、RAG 和现有失败处理。
+- pi 模型执行、服务端工具和现有失败处理。
 - 既有停止、取消和输出机制。
 
 唯一约定的能力差异：不注册 Desktop 本地工具扩展，不启动 LocalRunner，不暴露本地文件、shell、git 等执行能力。不能通过其他工具重新绕开这个边界。
 
-禁止复制一份 pi prompt 拼装、Skill 加载、RAG 或目标模型调用代码给评测专用。禁止使用旧的纯指令 harness、假 entitlement、伪会话 ID 或伪造成功状态补齐依赖。
+禁止复制一份 pi prompt 拼装、Skill 加载或目标模型调用代码给评测专用。禁止使用旧的纯指令 harness、假 entitlement、伪会话 ID 或伪造成功状态补齐依赖。
 
 HTool 需要支持的操作语义：
 
@@ -439,7 +430,7 @@ HTool 需要支持的操作语义：
 
 目标身份与凭据由宿主设置，模型不自由选择另一个 Agent 或授权范围。每次评估保留真实会话和运行成果；不增加版本选择或哈希核验流程。
 
-HTool 只接收明确指定的客户材料。Factory 文件区不作为被测 Agent 的共享文件系统，私有客户信息与 rubric 不进入其 Context 或 RAG。
+HTool 只接收明确指定的客户材料。Factory 文件区不作为被测 Agent 的共享文件系统，私有客户信息与 rubric 不进入其 Context。
 
 未上传的定义不能作为已发布 Agent 运行。Evaluator 让用户从真实 Agent 列表中选择；调用既有服务端授权与加载机制。
 
@@ -518,7 +509,6 @@ factory-agents/
 ### Agent Generation
 
 - 输出可由既有格式加载的 System／Skills，并能体现有依据的判断条件。
-- 上传前后原始文件内容一致；记录真实文档 ID 和索引状态。
 - 不生成虚构工具连接，不静默丢失关键例外或已有的有效方法。
 
 ### Case Generation
@@ -530,7 +520,7 @@ factory-agents/
 ### Evaluator / HTool
 
 - 调用现有服务端 Runtime，加载用户选择的真实目标 Agent。
-- 不启动 LocalRunner，不注册本地工具；Skills／RAG 等仍走既有代码。
+- 不启动 LocalRunner，不注册本地工具；Skills 等仍走既有代码。
 - 支持同一客户案例的多轮问答，保留真实输出和可访问证据。
 - 私有标准不进入目标会话；运行失败与行为失败分别报告。
 - 专家可对实际成果逐行评论，批注在重开后仍关联对应的原始成果与选中文字。
@@ -544,7 +534,6 @@ factory-agents/
 - 搜索停留在泛泛简介：修改追踪问题和来源选择指令。
 - 漏读长文：改善读取工具的继续读取提示和文件可访问性。
 - 生成器只写口号：用具体输入、判断与成果示例改进 Prompt。
-- Knowledge 被改写：收紧上传工具接口，使用原件引用。
 - 案例泄题或失真：改进案例 Prompt 与输入材料。
 - Evaluator 只匹配措辞：增加有效替代路径和真实错误的对比示例。
 
@@ -552,12 +541,11 @@ factory-agents/
 
 ## 14. 已确认与待核实
 
-已确认：四个 single agents；独立聊天、input 窗口和 output 文件区；用户手动推入文件完成交接；启动后自行读取所有输入的要求写在 System Prompt 中；Markdown 主要文件名写入 System Prompt；Voice 不改；Knowledge 原件上传；只有 Evaluator 调用 HTool；HTool 复用服务端 Runtime 且无本地工具扩展；专家可以逐行批改成果。
+已确认：四个 single agents；独立聊天、input 窗口和 output 文件区；用户手动推入文件完成交接；启动后自行读取所有输入的要求写在 System Prompt 中；Markdown 主要文件名写入 System Prompt；Voice 不改；只有 Evaluator 调用 HTool；HTool 复用服务端 Runtime 且无本地工具扩展；专家可以逐行批改成果。
 
 实施前需核实的现有能力：
 
 - 搜索／网页读取凭据的实际连通性及 YouTube 字幕／转写支持。
-- 现有 Knowledge 上传与索引状态接口。
 - 现有服务端已发布 Agent 的授权执行入口，以及无本地工具时的真实行为。
 - 独立聊天界面可以复用的组件与文件事件。
 

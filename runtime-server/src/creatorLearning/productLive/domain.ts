@@ -3,7 +3,7 @@ import { corpusOutputSchema, type CorpusOutput } from "../corpusNode.js";
 /**
  * Product Live domain. An Expert's Product goes live by publishing the Agent
  * definition the Builder saved. The only rule: SYSTEM.md must exist.
- * Knowledge stays empty until retrieval is rebuilt; Tools are none.
+ * Tools are none.
  */
 
 export type Skill = CorpusOutput["skills"][number];
@@ -52,7 +52,7 @@ export class AgentDefinition {
   }
 
   toCorpus(): Corpus {
-    return Corpus.parse({ system_instructions: this.system, skills: this.skills, knowledge: [], tools: [] });
+    return Corpus.parse({ system_instructions: this.system, skills: this.skills, tools: [] });
   }
 }
 

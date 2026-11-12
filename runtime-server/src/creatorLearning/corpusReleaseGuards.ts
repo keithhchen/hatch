@@ -898,8 +898,7 @@ function cognitiveAssets(compilation: CorpusCompilation): Array<{ path: string; 
   return [
     { path: "instructions/system.md", content: compilation.systemInstructions },
     ...compilation.skills.map(({ path, content }) => ({ path, content })),
-    ...compilation.references.map(({ path, content }) => ({ path, content })),
-    ...compilation.knowledge.map(({ path, content }) => ({ path, content }))
+    ...compilation.references.map(({ path, content }) => ({ path, content }))
   ];
 }
 
@@ -913,11 +912,7 @@ function publishableLlmFields(compilation: CorpusCompilation): Array<{ path: str
       { path: `agent.json#skills/${skill.id}/name`, content: skill.name },
       { path: `agent.json#skills/${skill.id}/when_to_use`, content: skill.whenToUse }
     ]),
-    ...compilation.references.map(({ path, content }) => ({ path, content })),
-    ...compilation.knowledge.flatMap((document) => [
-      { path: document.path, content: document.content },
-      { path: `agent.json#knowledge/${document.id}/title`, content: document.title }
-    ])
+    ...compilation.references.map(({ path, content }) => ({ path, content }))
   ];
 }
 

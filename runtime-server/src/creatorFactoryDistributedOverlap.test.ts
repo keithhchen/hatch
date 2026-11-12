@@ -28,8 +28,8 @@ test("raw source split verbatim across four sub-80-character assets fails closed
   assert.equal(violations[0]!.sourceId, RAW_SOURCE_ID);
   assert.deepEqual(violations[0]!.assetPath.split(", "), [
     "instructions/system.md",
-    "knowledge/slice-four.md",
     "skills/slice-two/SKILL.md",
+    "skills/slice-two/references/slice-four.md",
     "skills/slice-two/references/slice-three.md"
   ]);
   assert.match(violations[0]!.detail, /witness: distributed_exact_16_character_fragments/);
@@ -146,11 +146,6 @@ test("raw prose in every LLM-authored manifest metadata kind is protected", asyn
       name: "skill when-to-use",
       expectedPath: "agent.json#skills/metadata-skill/when_to_use",
       compilation: compilationWithMetadata({ whenToUse: PROTECTED_SOURCE })
-    },
-    {
-      name: "knowledge title",
-      expectedPath: "agent.json#knowledge/metadata-knowledge/title",
-      compilation: compilationWithMetadata({ title: PROTECTED_SOURCE })
     }
   ];
 
@@ -237,7 +232,7 @@ test("overlapping maximal matches are trimmed instead of hiding position-unique 
   assert.equal(violations[0]!.code, "raw_source_overlap");
   assert.deepEqual(violations[0]!.assetPath.split(", "), [
     "instructions/system.md",
-    "knowledge/slice-2.md"
+    "skills/slice-parent/references/slice-2.md"
   ]);
 });
 
@@ -347,12 +342,11 @@ function compilationWithFourAssets(contents: readonly string[]): CorpusCompilati
       parentSkillId: "slice-two",
       kind: "method",
       content: contents[2]!
-    }],
-    knowledge: [{
+    }, {
       id: "slice-four",
-      path: "knowledge/slice-four.md",
-      title: "Creator-authorized material",
-      retrievalOnly: true,
+      path: "skills/slice-two/references/slice-four.md",
+      parentSkillId: "slice-two",
+      kind: "method",
       content: contents[3]!
     }],
     changeRationale: "Test fixture",
@@ -367,12 +361,11 @@ function compilationWithContentAssets(contents: readonly string[]): CorpusCompil
     format: "layered-assets",
     systemInstructions: contents[0]!,
     skills: [],
-    references: [],
-    knowledge: contents.slice(1).map((content, index) => ({
+    references: contents.slice(1).map((content, index) => ({
       id: `slice-${index + 2}`,
-      path: `knowledge/slice-${index + 2}.md`,
-      title: `Synthesized summary ${index + 2}`,
-      retrievalOnly: true,
+      path: `skills/slice-parent/references/slice-${index + 2}.md`,
+      parentSkillId: "slice-parent",
+      kind: "method" as const,
       content
     })),
     changeRationale: "Test fixture",
@@ -384,7 +377,6 @@ function compilationWithContentAssets(contents: readonly string[]): CorpusCompil
 function compilationWithMetadata(overrides: {
   skillName?: string;
   whenToUse?: string;
-  title?: string;
 }): CorpusCompilation {
   return {
     format: "layered-assets",
@@ -398,13 +390,6 @@ function compilationWithMetadata(overrides: {
       content: "Apply evidence, make the tradeoff explicit, and deliver the result."
     }],
     references: [],
-    knowledge: [{
-      id: "metadata-knowledge",
-      path: "knowledge/metadata-knowledge.md",
-      title: overrides.title ?? "A synthesized decision method",
-      retrievalOnly: true,
-      content: "Retrieve this when the user needs a grounded example."
-    }],
     changeRationale: "Test fixture",
     requirementsTraceability: "Test fixture",
     preservationAudit: "Test fixture"
@@ -417,12 +402,11 @@ function compilationWithRepeatedContentAssets(count: number, content: string): C
     format: "layered-assets",
     systemInstructions: content,
     skills: [],
-    references: [],
-    knowledge: Array.from({ length: count - 1 }, (_, index) => ({
+    references: Array.from({ length: count - 1 }, (_, index) => ({
       id: `repeated-${index + 2}`,
-      path: `knowledge/repeated-${index + 2}.md`,
-      title: "safe",
-      retrievalOnly: true,
+      path: `skills/slice-parent/references/repeated-${index + 2}.md`,
+      parentSkillId: "slice-parent",
+      kind: "method" as const,
       content
     })),
     changeRationale: "Test fixture",

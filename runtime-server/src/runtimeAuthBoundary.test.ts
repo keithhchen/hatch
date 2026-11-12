@@ -745,7 +745,6 @@ function revocableTestCorpus(entitlement: EntitlementBinding): AgentCorpus {
       boundaries: [],
       presentation: {}
     },
-    knowledge: { documents: [] },
     tools: [{ id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }]
   } as unknown as AgentCorpus;
 }

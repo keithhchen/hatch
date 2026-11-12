@@ -106,11 +106,11 @@ renewable lease/fencing protocol. A new user action with a new
 `agent-corpus.schema.json`. It describes one current, publishable Creator
 Agent. The Corpus is deliberately runtime-free: it contains the Agent's
 product identity and description, global instructions, optional local Skills,
-retrieval-only knowledge, declarative tools, and non-runtime evaluation assets. It contains
-no model/provider choice, vector-store ID, endpoint, credential, raw Creator
+declarative tools, and non-runtime evaluation assets. It contains
+no model/provider choice, endpoint, credential, raw Creator
 material, Factory trace, or version history.
 
-The files referenced by a Corpus have four different jobs. They are not
+The files referenced by a Corpus have different jobs. They are not
 interchangeable:
 
 ```text
@@ -121,11 +121,7 @@ skills/<skill-id>/SKILL.md         One optional, independently reusable local ex
                                    unit. Loaded only when that unit is needed.
 
 skills/<skill-id>/references/*.md  Local method, style, or example material for that
-                                   Skill only. Never a RAG document.
-
-knowledge/*.md                     Long-tail material to retrieve only when needed.
-                                   Never global instruction, Skill instruction/reference,
-                                   canonical few-shot, or evaluation.
+                                   Skill only.
 
 evals/*.json                       Synthetic QA and held-out validation only. Never
                                    automatic Runtime context.
@@ -136,12 +132,11 @@ is not the entire delivery workflow. It exists only when a local execution
 unit is independently reusable and needs its own instruction, method,
 reference, or scoped tool permission. Global rules belong in `system.md`;
 rules that matter only while performing one local unit belong in that Skill or
-its references; long-tail evidence belongs in `knowledge/`.
+its references.
 
 Synthetic QA is a Factory input to this placement decision. A high-frequency
 example which changes global behavior is distilled into `system.md`; a local
-example belongs with the relevant Skill reference; broad fallback material may
-become retrieval knowledge. The retained `evals/` assets are for validation,
+example belongs with the relevant Skill reference; The retained `evals/` assets are for validation,
 not an instruction channel.
 
 `tools` is declarative. `hatch.web_search` is mandatory for every Agent.
@@ -150,10 +145,6 @@ local tool set declared by Desktop. `creator.*` HTTP
 and MCP tools carry only a `connection_ref` plus the allowed operation or tool;
 their endpoints and credentials live in Hatch Control Plane, outside the
 Corpus.
-
-At publish time Registry binds one `creator_id + agent_id` to its own isolated
-knowledge space. A Runtime turns that binding into `hatch.file_search`; neither
-the Corpus nor the Desktop carries a knowledge-base/vector-store identifier.
 
 Registry publishes exactly one current Corpus per `creator_id + agent_id` and
 records its computed `corpus_digest`. Runtime loads protected instructions and

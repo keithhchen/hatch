@@ -69,7 +69,7 @@ on Development, rerun the complete Regression Set after every Corpus change,
 materialize and verify a complete provisional Agent Corpus before every candidate
 execution, and invoke Hatch's existing full Runtime through an isolated one-shot
 CLI. Corpus compilation is genuinely layered: every evidence-justified System,
-Skill, Skill reference, and retrieval-only knowledge asset is emitted in full,
+Skill, and Skill reference asset is emitted in full,
 hashed, declared in `agent.json`, and preserved across revisions. Optional layers
 may be empty only when the evidence does not require them; routing a requirement
 to an asset that was not materialized fails the run. The Creator Dashboard
@@ -87,7 +87,7 @@ The Registry catalog keeps the current `(creator_id, agent_id)` metadata row;
 the separate Creator Factory run table durably stores its authorized input and
 minimal control state so work can resume after a restart. Both that table and
 the private Factory artifact volume must therefore be protected as Creator
-source data. Credentials and vector contents do not enter Factory artifacts.
+source data. Credentials do not enter Factory artifacts.
 The old `platform-registry/` Python service is migration-only and is not the
 production entrypoint.
 
@@ -121,8 +121,7 @@ docs/                    product contracts and proof artifacts
 
 The TypeScript Runtime loads the Registry-installed Corpus directly. It always
 loads `instructions/system.md`, activates only the relevant local Skill and its
-references, queries the Agent-scoped knowledge provider when configured, and
-merges Hatch built-ins with declared Creator tools. Evals never enter the live
+references, and merges Hatch built-ins with declared Creator tools. Evals never enter the live
 context. Protected Creator Skills run inside the TypeScript Runtime.
 
 ## Local development

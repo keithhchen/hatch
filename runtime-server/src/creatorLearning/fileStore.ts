@@ -904,7 +904,6 @@ const SUBMISSION_TOOL_NAMES = new Set([
   "submit_system_instructions",
   "submit_skill",
   "submit_reference",
-  "submit_knowledge",
   "submit_corpus_audit_section",
   "finalize_corpus"
 ]);

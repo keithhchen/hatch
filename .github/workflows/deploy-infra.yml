@@ -48,8 +48,8 @@ jobs:
             grep -Eq "^${key}=[^[:space:]]+" .env || { echo "Missing non-empty $key in GitHub production environment"; exit 1; }
           done
           docker network inspect hatch_internal >/dev/null 2>&1 || docker network create hatch_internal
-          docker compose --env-file .env -f compose.infra.yml up -d postgres qdrant
-          docker compose --env-file .env -f compose.infra.yml ps --status running postgres qdrant
+          docker compose --env-file .env -f compose.infra.yml up -d postgres
+          docker compose --env-file .env -f compose.infra.yml ps --status running postgres
           if grep -Eq '^HATCH_AXIOM_TOKEN=[^[:space:]]+' .env; then
             docker compose --env-file .env -f compose.infra.yml run --rm --no-deps vector validate --no-environment /etc/vector/vector.yaml || { echo "vector/vector.yaml failed validation; not starting vector" >&2; exit 1; }
             docker compose --env-file .env -f compose.infra.yml up -d vector

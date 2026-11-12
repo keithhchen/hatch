@@ -73,23 +73,6 @@ test("Creator Factory materializes every Agent Corpus layer with exact bytes and
     "    - 限制",
     ""
   ].join("\n");
-  const knowledgeDocument = [
-    "# Source ledger",
-    "",
-    "## 2026",
-    "",
-    "### Filing A",
-    "",
-    "- Revenue",
-    "  - Reported: 42",
-    "    - Unit: CNY million",
-    "",
-    "```text",
-    "line one",
-    "  line two",
-    "```",
-    ""
-  ].join("\n");
   const syntheticQa = [
     { id: "D.Q1", question: "What evidence should lead?", answer: "The strongest verified evidence." }
   ];
@@ -120,15 +103,8 @@ test("Creator Factory materializes every Agent Corpus layer with exact bytes and
         { id: "review-examples", kind: "few_shots", content: fewShotsReference }
       ]
     }],
-    knowledge: [{
-      id: "source-ledger",
-      content: knowledgeDocument,
-      title: "Creator-supplied filing ledger.",
-      description: "Long-tail facts for retrieval."
-    }],
     tools: [
       { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search", description: "Search public evidence." },
-      { id: "hatch.file_search", kind: "hatch_builtin", capability: "file_search" },
       {
         id: "creator.signal.lookup",
         kind: "http_function",
@@ -165,7 +141,6 @@ test("Creator Factory materializes every Agent Corpus layer with exact bytes and
     `${materialized.bundleRoot}/skills/claim-audit/references/method-map.md`,
     `${materialized.bundleRoot}/skills/claim-audit/references/review-examples.md`
   ]);
-  assert.equal(materialized.assets.knowledge[0]?.asset.path, `${materialized.bundleRoot}/knowledge/source-ledger.md`);
   assert.equal(materialized.assets.syntheticQa.path, `${materialized.bundleRoot}/evals/synthetic-qa.json`);
   assert.equal(materialized.assets.heldOut.path, `${materialized.bundleRoot}/evals/held-out.json`);
 
@@ -180,20 +155,8 @@ test("Creator Factory materializes every Agent Corpus layer with exact bytes and
     ["review-examples", "skills/claim-audit/references/review-examples.md", "few_shots"]
   ]);
   assert.deepEqual(verified.corpus.skills[0]?.allowed_tool_ids, ["hatch.web_search", "creator.signal.lookup"]);
-  assert.deepEqual(verified.corpus.knowledge.documents.map((document) => ({
-    id: document.id,
-    path: document.path,
-    retrievalOnly: document.retrieval_only,
-    title: document.title
-  })), [{
-    id: "source-ledger",
-    path: "knowledge/source-ledger.md",
-    retrievalOnly: true,
-    title: "Creator-supplied filing ledger."
-  }]);
   assert.deepEqual(verified.corpus.tools.map((tool) => tool.id), [
     "hatch.web_search",
-    "hatch.file_search",
     "creator.signal.lookup",
     "creator.signal.citations",
     "hatch.local.audit-files"
@@ -220,7 +183,6 @@ test("Creator Factory materializes every Agent Corpus layer with exact bytes and
   assert.equal(loadedSkill.instructions, skillInstructions.trim());
   assert.equal(await readFile(path.join(bundlePath, "skills/claim-audit/references/method-map.md"), "utf8"), methodReference);
   assert.equal(await readFile(path.join(bundlePath, "skills/claim-audit/references/review-examples.md"), "utf8"), fewShotsReference);
-  assert.equal(await readFile(path.join(bundlePath, "knowledge/source-ledger.md"), "utf8"), knowledgeDocument);
 
   const manifestText = await readFile(path.join(bundlePath, "agent.json"), "utf8");
   const syntheticText = await readFile(path.join(bundlePath, SYNTHETIC_QA_PATH), "utf8");
@@ -234,7 +196,6 @@ test("Creator Factory materializes every Agent Corpus layer with exact bytes and
       instruction: { sha256: string };
       references: Array<{ asset: { sha256: string; description?: string } }>;
     }>;
-    knowledge: { documents: Array<{ sha256: string; description?: string }> };
     evaluations: {
       synthetic_qa: Array<{ sha256: string }>;
       held_out: Array<{ sha256: string }>;
@@ -247,9 +208,6 @@ test("Creator Factory materializes every Agent Corpus layer with exact bytes and
   assert.equal(manifest.skills[0]?.references[0]?.asset.sha256, digest(methodReference));
   assert.equal(manifest.skills[0]?.references[0]?.asset.sha256, materialized.assets.skills[0]?.references[0]?.asset.sha256);
   assert.equal(manifest.skills[0]?.references[0]?.asset.description, "Evidence ranking method.");
-  assert.equal(manifest.knowledge.documents[0]?.sha256, digest(knowledgeDocument));
-  assert.equal(manifest.knowledge.documents[0]?.sha256, materialized.assets.knowledge[0]?.asset.sha256);
-  assert.equal(manifest.knowledge.documents[0]?.description, "Long-tail facts for retrieval.");
   assert.equal(manifest.evaluations.synthetic_qa[0]?.sha256, digest(syntheticText));
   assert.equal(manifest.evaluations.held_out[0]?.sha256, digest(heldOutText));
   assert.notEqual(materialized.digest, materialized.assets.system.sha256);
@@ -260,7 +218,6 @@ test("Creator Factory materializes every Agent Corpus layer with exact bytes and
     "evals/held-out.json",
     "evals/synthetic-qa.json",
     "instructions/system.md",
-    "knowledge/source-ledger.md",
     "skills/claim-audit/SKILL.md",
     "skills/claim-audit/references/method-map.md",
     "skills/claim-audit/references/review-examples.md"
@@ -278,7 +235,7 @@ test("Creator Factory materializes every Agent Corpus layer with exact bytes and
   }
 });
 
-test("Creator Factory keeps empty optional layers valid and injects both canonical built-ins", async () => {
+test("Creator Factory keeps empty optional layers valid and injects the canonical web_search built-in", async () => {
   const root = await temporaryRoot("hatch-factory-empty-corpus-");
   const store = new FactoryFileStore(root, "factory-empty-corpus-run");
   await store.initialize();
@@ -288,13 +245,10 @@ test("Creator Factory keeps empty optional layers valid and injects both canonic
   const verified = await verifyAgentCorpus(bundlePath, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "cccccccc-cccc-4ccc-8ccc-cccccccccccc");
 
   assert.deepEqual(verified.corpus.skills, []);
-  assert.deepEqual(verified.corpus.knowledge.documents, []);
   assert.deepEqual(verified.corpus.tools, [
-    { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
-    { id: "hatch.file_search", kind: "hatch_builtin", capability: "file_search" }
+    { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }
   ]);
   assert.deepEqual(materialized.assets.skills, []);
-  assert.deepEqual(materialized.assets.knowledge, []);
   assert.deepEqual(await filesUnder(bundlePath), [
     "agent.json",
     "evals/held-out.json",
@@ -395,11 +349,11 @@ test("Creator Factory rejects unknown, duplicate, unsafe, and path-controlling l
       name: "Audit",
       whenToUse: "For audits.",
       instruction: "# Audit\n"
-    }],
-    knowledge: [{
+    }, {
       id: "shared-id",
-      content: "# Facts\n",
-      title: "Creator notes."
+      name: "Audit again",
+      whenToUse: "For second audits.",
+      instruction: "# Audit\n"
     }]
   }), /id shared-id is duplicated/);
 
@@ -420,18 +374,19 @@ test("Creator Factory rejects unknown, duplicate, unsafe, and path-controlling l
       name: "Audit",
       whenToUse: "For audits.",
       instruction: "# Audit\n",
-      references: [{ id: "reference", kind: "retrieval" as "method", content: "# Wrong layer\n" }]
+      references: [{ id: "reference", kind: "summary" as "method", content: "# Wrong layer\n" }]
     }]
   }), /kind must be method, style, example, or few_shots/);
 
   await assert.rejects(materializeAgentCorpusBundle(store, {
     ...baseInput("invalid/caller-path"),
-    knowledge: [{
-      id: "facts",
-      content: "# Facts\n",
-      title: "Creator notes.",
-      path: "../model-controlled.md"
-    } as never]
+    skills: [{
+      id: "audit",
+      name: "Audit",
+      whenToUse: "For audits.",
+      instruction: "# Audit\n",
+      references: [{ id: "facts", kind: "method", content: "# Facts\n", path: "../model-controlled.md" } as never]
+    }]
   }), /unsupported fields: path/);
 
   assert.deepEqual(await readdir(path.join(store.directory, "candidate")), []);

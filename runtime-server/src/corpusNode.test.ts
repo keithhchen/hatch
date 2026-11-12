@@ -24,7 +24,6 @@ test("Corpus quality gate rejects card-like candidates before Critic review", as
       instruction: "Find the strongest point and explain it clearly.",
       references: [{ id: "note", kind: "method", content: "Lead with the strongest proof." }]
     }],
-    knowledge: [],
     tools: []
   };
 
@@ -79,7 +78,6 @@ function denseCorpus(): CorpusOutput {
         { id: `example-${index + 1}`, kind: "example" as const, content: paragraph(`example ${index + 1}`, 180) }
       ]
     })),
-    knowledge: [{ source: input.files[0]!, title: "Source file" }],
     tools: []
   };
 }

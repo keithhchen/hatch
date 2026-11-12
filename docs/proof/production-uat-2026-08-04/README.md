@@ -25,7 +25,7 @@
 - 生产入口：[https://hatch.tokenquadrant.cn/portal/](https://hatch.tokenquadrant.cn/portal/)
 - Runtime WebSocket：`wss://hatch.tokenquadrant.cn/v1/runtime`
 - 发布提交：`2ec9b7a fix: disable kimi thinking for bounded delivery`
-- Compose 服务：`caddy`、`registry`、`runtime`、`dashboard`、`postgres`、`qdrant`
+- Compose 服务：`caddy`、`registry`、`runtime`、`dashboard`、`postgres`
 - 当前生产健康检查：`/healthz`、`/api/health` 均返回 200
 - GitHub Actions CI：`30906368448`，成功
 - GitHub Actions CD：`30906367877`，成功

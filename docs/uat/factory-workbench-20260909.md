@@ -22,7 +22,7 @@
 - 既有 Registry/Corpus/Runtime resolver 27 项测试通过。
 - 新增上传失败保留真实原件记录的断言通过。
 
-Corpus 测试运行实际本地 HTTP handler、认证、存储和装配器；不调用真实 Qdrant。Hatch Tool 的 HTTP/WS 服务仅为明确测试替身，不能证明真实运行服务连通。
+Corpus 测试运行实际本地 HTTP handler、认证、存储和装配器。Hatch Tool 的 HTTP/WS 服务仅为明确测试替身，不能证明真实运行服务连通。
 
 ## 未完成的验收
 

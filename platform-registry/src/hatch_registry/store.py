@@ -9,8 +9,7 @@ from pathlib import Path
 from typing import Mapping
 
 from hatch_registry.corpus_resolver import AgentCorpusResolver
-from hatch_registry.knowledge_binding import AgentKnowledgeBindingStore, KnowledgePublicationProvider
-from hatch_registry.models import AgentCorpusPublishRequest, AgentRagBinding, PublishedAgentCorpus
+from hatch_registry.models import AgentCorpusPublishRequest, PublishedAgentCorpus
 
 
 class RegistryStore:
@@ -19,13 +18,9 @@ class RegistryStore:
     def __init__(
         self,
         corpus_resolver: AgentCorpusResolver | None = None,
-        knowledge_binding_store: AgentKnowledgeBindingStore | None = None,
-        knowledge_provider: KnowledgePublicationProvider | None = None,
         state_path: Path | None = None,
     ) -> None:
         self._corpus_resolver = corpus_resolver
-        self._knowledge_binding_store = knowledge_binding_store
-        self._knowledge_provider = knowledge_provider
         self._state_path = state_path
         self._lock = threading.RLock()
         self._agent_corpora = self._load_agent_corpora()
@@ -36,16 +31,6 @@ class RegistryStore:
     ) -> PublishedAgentCorpus:
         if self._corpus_resolver is None:
             raise ValueError("Agent Corpus resolver is not configured")
-        if self._knowledge_binding_store is None:
-            raise ValueError("Agent knowledge binding store is not configured")
-        # Verify and index the clean source before switching the one current
-        # Registry pointer. A failed upload therefore never replaces a working
-        # Agent with a Corpus whose RAG space is missing or stale.
-        source = self._corpus_resolver.verify(Path(request.corpus_path))
-        rag_binding = self._knowledge_binding_store.bind(source)
-        if self._knowledge_provider is None:
-            raise ValueError("Agent knowledge provider is not configured")
-        self._knowledge_provider.publish(binding=rag_binding, corpus=source)
         verified = self._corpus_resolver.publish(Path(request.corpus_path))
         key = f"{verified.creator_id}:{verified.agent_id}"
         published = PublishedAgentCorpus(
@@ -53,10 +38,6 @@ class RegistryStore:
             creator_id=verified.creator_id,
             product=verified.product,
             corpus_digest=verified.corpus_digest,
-            rag=AgentRagBinding(
-                backend=rag_binding.backend,
-                namespace=rag_binding.namespace,
-            ),
             status="published",
             published_at=datetime.now(UTC),
         )

@@ -114,7 +114,6 @@ function release(digest: string, predecessor?: string): ResolvedAgentCorpus {
         system: { id: "system", path: "instructions/system.md", sha256: A }
       },
       skills: [],
-      knowledge: { documents: [] },
       tools: [{ id: "hatch.web_search", kind: "hatch_builtin" }],
       evaluations: {
         synthetic_qa: [{ id: "synthetic", path: "evals/synthetic.json", sha256: A }],

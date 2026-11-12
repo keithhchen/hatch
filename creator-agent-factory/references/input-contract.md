@@ -56,12 +56,6 @@ The heading is context; the first non-empty paragraph after it is the exact clai
   no Skill is needed. Do not make one Skill whose instruction is the entire
   product workflow; the Factory Agent decides whether a unit is independently
   reusable before emitting it.
-- required `runtime_knowledge_source_ids`: source IDs selected by the Factory
-  Agent as retrieval-only long-tail material. Use `[]` when no retrieval-only
-  material is needed. Only these documents enter the published `knowledge/`
-  space; behavior that must always affect the Agent belongs in `system.md` or a
-  Skill instead. Legacy compiler tests may omit this field, but the production
-  Factory Skill executor fails closed rather than guessing.
 - `tool_needs`: private implementation records with exactly `name`, `kind`
   (`local`, `external`, `dataset`, or `unresolved`), boolean `required`,
   non-empty `reason`, and `support` (`intent`, `detected_capability`,

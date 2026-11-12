@@ -19,7 +19,7 @@ import { draftBriefSpecForProduct, normalizeBriefSpec, type BriefSpec } from "..
 import { normalizeProductPricing } from "./pricing.js";
 import { log } from "../observability/log.js";
 
-export type CreatorCorpusAssetLayer = "manifest" | "system" | "skill" | "reference" | "knowledge";
+export type CreatorCorpusAssetLayer = "manifest" | "system" | "skill" | "reference";
 
 export type CreatorCorpusAsset = {
   id: string;
@@ -54,7 +54,6 @@ type CreatorCorpusAssetRefs = {
     instruction: ArtifactRef;
     references: Array<{ id: string; kind: "method" | "style" | "example" | "few_shots"; asset: ArtifactRef }>;
   }>;
-  knowledge: Array<{ id: string; asset: ArtifactRef }>;
 };
 
 async function recoverCorpusAssetRefs(store: FactoryFileStore, corpus: MaterializedAgentCorpus): Promise<CreatorCorpusAssetRefs> {
@@ -96,18 +95,9 @@ async function recoverCorpusAssetRefs(store: FactoryFileStore, corpus: Materiali
       references
     };
   }) : [];
-  const knowledge = requirePlainObject(manifest.knowledge, "Agent Corpus manifest.knowledge");
-  const documents = Array.isArray(knowledge.documents) ? knowledge.documents.map((value, index) => {
-    const document = requirePlainObject(value, `Agent Corpus manifest.knowledge.documents[${index}]`);
-    return {
-      id: requireText(document.id, `Agent Corpus knowledge id ${index}`),
-      asset: refFor(document, `Agent Corpus manifest.knowledge.documents[${index}]`)
-    };
-  }) : [];
   return {
     system: refFor(system, "Agent Corpus manifest.instructions.system"),
-    skills,
-    knowledge: documents
+    skills
   };
 }
 
@@ -1301,9 +1291,6 @@ export class CreatorFactoryService {
           );
         }
       }
-      for (const document of assetRefs.knowledge) {
-        await push(document.id, "knowledge", document.asset);
-      }
       return {
         available: true,
         version: candidate.version,
@@ -1641,8 +1628,7 @@ function validateCreateRequest(
 }
 
 const BUILTIN_TOOLS = [
-  { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
-  { id: "hatch.file_search", kind: "hatch_builtin", capability: "file_search" }
+  { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }
 ] as const satisfies readonly FactoryAgentTool[];
 
 const PRODUCT_KEYS = new Set(["id", "name", "description", "promise", "boundaries", "presentation"]);
@@ -1685,8 +1671,7 @@ function validateTools(value: FactoryAgentTool[] | undefined): FactoryAgentTool[
     byId.set(tool.id, tool);
   }
   const web = byId.get("hatch.web_search") ?? { ...BUILTIN_TOOLS[0] };
-  const file = byId.get("hatch.file_search") ?? { ...BUILTIN_TOOLS[1] };
-  return [web, file, ...explicit.filter((tool) => tool.id !== web.id && tool.id !== file.id)];
+  return [web, ...explicit.filter((tool) => tool.id !== web.id)];
 }
 
 function validateTool(value: unknown, index: number): FactoryAgentTool {
@@ -1705,10 +1690,7 @@ function validateTool(value: unknown, index: number): FactoryAgentTool {
     if (id === "hatch.web_search" && capability === "web_search") {
       return { id, kind, capability, ...description };
     }
-    if (id === "hatch.file_search" && capability === "file_search") {
-      return { id, kind, capability, ...description };
-    }
-    throw new Error(`${field} must be the canonical hatch.web_search or hatch.file_search built-in`);
+    throw new Error(`${field} must be the canonical hatch.web_search built-in`);
   }
 
   if (kind === "local_harness") {

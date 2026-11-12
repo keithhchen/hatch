@@ -1126,8 +1126,7 @@ export class CreatorFactory {
         manifest: materialized.manifestRef,
         assets: {
           system: materialized.assets.system,
-          skills: materialized.assets.skills,
-          knowledge: materialized.assets.knowledge
+          skills: materialized.assets.skills
         },
         syntheticQa: materialized.assets.syntheticQa,
         heldOut: materialized.assets.heldOut,
@@ -1401,8 +1400,7 @@ export class CreatorFactory {
       manifest: materialized.manifestRef,
       assets: {
         system: materialized.assets.system,
-        skills: materialized.assets.skills,
-        knowledge: materialized.assets.knowledge
+        skills: materialized.assets.skills
       },
       syntheticQa: materialized.assets.syntheticQa,
       heldOut: materialized.assets.heldOut,
@@ -1417,7 +1415,7 @@ export class CreatorFactory {
     store: FactoryFileStore,
     state: FactoryRunState,
     candidate: FactoryRunState["artifacts"]["corpusCandidates"][number]
-  ): Promise<Pick<Parameters<typeof materializeAgentCorpusBundle>[1], "skills" | "knowledge">> {
+  ): Promise<Pick<Parameters<typeof materializeAgentCorpusBundle>[1], "skills">> {
     const compilation = parseCorpusCompilation(await store.readArtifact(candidate.compileRecord), {
       availableToolIds: factoryTools(state).map((tool) => tool.id)
     });
@@ -1440,11 +1438,6 @@ export class CreatorFactory {
           kind: reference.kind,
           content: reference.content
         }))
-      })),
-      knowledge: compilation.knowledge.map((document) => ({
-        id: document.id,
-        content: document.content,
-        title: document.title
       }))
     };
   }
@@ -2288,8 +2281,7 @@ function requireCorpusIdentifier(value: string, field: string): void {
 }
 
 const DEFAULT_FACTORY_TOOLS: readonly FactoryAgentTool[] = [
-  { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
-  { id: "hatch.file_search", kind: "hatch_builtin", capability: "file_search" }
+  { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }
 ];
 
 function normalizeFactoryTools(input: FactoryAgentTool[] | undefined): FactoryAgentTool[] {
@@ -2307,7 +2299,8 @@ function normalizeFactoryTools(input: FactoryAgentTool[] | undefined): FactoryAg
 }
 
 function factoryTools(state: Pick<FactoryRunState, "tools">): FactoryAgentTool[] {
-  return normalizeFactoryTools(state.tools);
+  // Runs persisted while hatch.file_search existed still list it; the tool is retired.
+  return normalizeFactoryTools(state.tools?.filter((tool) => tool.id !== "hatch.file_search"));
 }
 
 function renderProductContract(product: FactoryRunState["product"]): string {

@@ -25,7 +25,7 @@ const PRESERVATION_AUDIT_SECTIONS = [
   "Asset identity, path, or layer changes"
 ] as const;
 
-const CORPUS_ASSET_LAYERS = ["system", "skill", "reference", "knowledge"] as const;
+const CORPUS_ASSET_LAYERS = ["system", "skill", "reference"] as const;
 const REFERENCE_KINDS = ["method", "style", "example", "few_shots"] as const;
 const CORPUS_IDENTIFIER = /^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/;
 const TOOL_IDENTIFIER = /^(?:hatch|creator)\.[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
@@ -49,20 +49,11 @@ export type CorpusSkillReference = {
   content: string;
 };
 
-export type CorpusKnowledgeDocument = {
-  id: string;
-  path: string;
-  title: string;
-  retrievalOnly: true;
-  content: string;
-};
-
 export type CorpusCompilation = {
   format: "layered-assets";
   systemInstructions: string;
   skills: CorpusSkill[];
   references: CorpusSkillReference[];
-  knowledge: CorpusKnowledgeDocument[];
   changeRationale: string;
   requirementsTraceability: string;
   preservationAudit: string;
@@ -229,7 +220,7 @@ export function extractCorpus(markdown: string, options: ParseCorpusCompilationO
 /**
  * Parses the complete cognitive-asset compiler envelope. Asset contents are
  * delimited by reserved exact marker lines, so any Markdown heading is valid
- * inside System, Skill, reference, and knowledge documents.
+ * inside System, Skill, and reference documents.
  */
 export function parseCorpusCompilation(
   markdown: string,
@@ -286,14 +277,12 @@ export function parseCorpusCompilation(
   }
   const skills = assetBlocks.filter((asset): asset is ParsedSkillBlock => asset.layer === "skill");
   const references = assetBlocks.filter((asset): asset is ParsedReferenceBlock => asset.layer === "reference");
-  const knowledge = assetBlocks.filter((asset): asset is ParsedKnowledgeBlock => asset.layer === "knowledge");
 
   return {
     format: "layered-assets",
     systemInstructions: systemAssets[0]!.content,
     skills: skills.map(({ beginIndex: _beginIndex, endIndex: _endIndex, layer: _layer, ...skill }) => skill),
     references: references.map(({ beginIndex: _beginIndex, endIndex: _endIndex, layer: _layer, ...reference }) => reference),
-    knowledge: knowledge.map(({ beginIndex: _beginIndex, endIndex: _endIndex, layer: _layer, ...document }) => document),
     changeRationale: changeRationale!,
     requirementsTraceability: requirementsTraceability!,
     preservationAudit: preservationAudit!
@@ -321,13 +310,7 @@ type ParsedReferenceBlock = CorpusSkillReference & {
   endIndex: number;
 };
 
-type ParsedKnowledgeBlock = CorpusKnowledgeDocument & {
-  layer: "knowledge";
-  beginIndex: number;
-  endIndex: number;
-};
-
-type ParsedCorpusAssetBlock = ParsedSystemBlock | ParsedSkillBlock | ParsedReferenceBlock | ParsedKnowledgeBlock;
+type ParsedCorpusAssetBlock = ParsedSystemBlock | ParsedSkillBlock | ParsedReferenceBlock;
 
 type MarkerMatch = {
   kind: "begin" | "content" | "end";
@@ -379,7 +362,7 @@ function parseCorpusAssetBlocks(markdown: string, availableToolIds: Set<string>)
   const layerOrder = new Map(CORPUS_ASSET_LAYERS.map((layer, index) => [layer, index]));
   for (let index = 1; index < assets.length; index += 1) {
     if (layerOrder.get(assets[index]!.layer)! < layerOrder.get(assets[index - 1]!.layer)!) {
-      throw new Error("Corpus assets must be ordered as system, skills, references, then knowledge");
+      throw new Error("Corpus assets must be ordered as system, skills, then references");
     }
   }
 
@@ -443,39 +426,21 @@ function buildCorpusAsset(
     };
   }
 
-  if (layer === "reference") {
-    requireExactMetadataFields(metadata, ["layer", "id", "parent_skill_id", "reference_kind"]);
-    const parentSkillId = requireCorpusIdentifier(
-      requireMetadata(metadata, "parent_skill_id"),
-      `reference ${id} parent_skill_id`
-    );
-    const kind = requireMetadata(metadata, "reference_kind");
-    if (!REFERENCE_KINDS.includes(kind as CorpusReferenceKind)) {
-      throw new Error(`Corpus reference ${id} has invalid reference kind: ${kind}`);
-    }
-    return {
-      layer,
-      id,
-      path: `skills/${parentSkillId}/references/${id}.md`,
-      parentSkillId,
-      kind: kind as CorpusReferenceKind,
-      content,
-      beginIndex,
-      endIndex
-    };
-  }
-
-  requireExactMetadataFields(metadata, ["layer", "id", "title", "retrieval_only"]);
-  const title = requireMetadata(metadata, "title");
-  if (metadata.retrieval_only !== "true") {
-    throw new Error(`Corpus knowledge ${id} must declare retrieval_only: true`);
+  requireExactMetadataFields(metadata, ["layer", "id", "parent_skill_id", "reference_kind"]);
+  const parentSkillId = requireCorpusIdentifier(
+    requireMetadata(metadata, "parent_skill_id"),
+    `reference ${id} parent_skill_id`
+  );
+  const kind = requireMetadata(metadata, "reference_kind");
+  if (!REFERENCE_KINDS.includes(kind as CorpusReferenceKind)) {
+    throw new Error(`Corpus reference ${id} has invalid reference kind: ${kind}`);
   }
   return {
-    layer: "knowledge",
+    layer: "reference",
     id,
-    path: `knowledge/${id}.md`,
-    title,
-    retrievalOnly: true,
+    path: `skills/${parentSkillId}/references/${id}.md`,
+    parentSkillId,
+    kind: kind as CorpusReferenceKind,
     content,
     beginIndex,
     endIndex

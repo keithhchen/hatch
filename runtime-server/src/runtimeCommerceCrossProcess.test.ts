@@ -293,7 +293,6 @@ async function writeCorpus(directory: string, systemText: string, compatibleWith
     },
     instructions: { system: asset("system", "instructions/system.md", systemText) },
     skills: [],
-    knowledge: { documents: [] },
     tools: [{ id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }],
     evaluations: {
       synthetic_qa: [asset("synthetic", "evals/synthetic.json", synthetic)],

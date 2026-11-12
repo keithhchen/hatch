@@ -14,7 +14,6 @@ test("Product Creator API owns Files and routes Node workflow through the new bo
     HATCH_REGISTRY_STATE_PATH: path.join(root, "registry.json"),
     HATCH_CREATOR_FACTORY_ROOT: path.join(root, "factory-runs"),
     HATCH_AUTH_SIGNING_SECRET: "product-http-secret",
-    HATCH_QDRANT_URL: "",
     DASHSCOPE_API_KEY: ""
   });
   t.after(async () => {

@@ -566,8 +566,8 @@ schema-evolution cost outside this bounded lifecycle.
 - Compilation input is one current Agent Corpus digest plus one immutable
   development dataset version.
 - The Factory continues to route behavior according to the existing Agent Corpus
-  boundaries: global instruction, local Skill/reference, retrieval-only
-  knowledge, tools, and non-runtime eval assets.
+  boundaries: global instruction, local Skill/reference, tools,
+  and non-runtime eval assets.
 - A post-edit is not copied verbatim into always-loaded instructions by default.
   The Factory must determine whether it is a supported demonstration, a local
   example, a boundary regression, or insufficient evidence.
@@ -1036,7 +1036,6 @@ eligible example into one of the existing Corpus destinations:
 
 - global behavior supported across contexts -> `instructions/system.md`;
 - local procedure or example -> Skill/reference;
-- long-tail factual material -> retrieval-only knowledge;
 - bug or boundary case -> regression/held-out eval;
 - ambiguous one-off edit -> retained as feedback but not compiled.
 
@@ -1288,7 +1287,7 @@ flowchart TB
 | Existing component | Reuse |
 | --- | --- |
 | `creator-agent-factory/` | Corpus compilation rules, evidence provenance, synthetic QA, held-out generation, adversarial audit |
-| `packages/protocol/AGENT_CORPUS.md` and schema | Runtime-free Agent definition and strict separation of instructions, Skills, knowledge, tools, and evals |
+| `packages/protocol/AGENT_CORPUS.md` and schema | Runtime-free Agent definition and strict separation of instructions, Skills, tools, and evals |
 | `runtime-server/` model/runtime adapters | Run current and candidate Corpora with the same tools and audits |
 | `runtime-server/src/store.ts` | Append-only runtime-event conventions; do not put Creator learning content into this conversation store |
 | `runtime-server/src/postgresStore.ts` | Postgres operational pattern; add separate Creator-learning tables and retention policy |

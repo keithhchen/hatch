@@ -277,7 +277,6 @@ async function productFixture(): Promise<ProductFixture> {
     product: { id: productId, name: "Commerce Product" },
     instructions: { system: asset("instructions/system.md", system, "system") },
     skills: [],
-    knowledge: { documents: [] },
     tools: [{ id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }],
     evaluations: {
       synthetic_qa: [asset("evals/evals.json", evaluations, "synthetic")],

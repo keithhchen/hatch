@@ -198,7 +198,6 @@ function guardSourceRedactions(
     systemInstructions: evidence,
     skills: [],
     references: [],
-    knowledge: [],
     changeRationale: "projection-only",
     requirementsTraceability: "projection-only",
     preservationAudit: "projection-only"

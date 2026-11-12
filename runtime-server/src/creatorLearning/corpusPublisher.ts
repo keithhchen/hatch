@@ -15,7 +15,6 @@ import {
   verifyAgentCorpus
 } from "../registryCorpus.js";
 import { CreatorRegistryReleaseStore, type CreatorRegistryRelease } from "./creatorRegistryRelease.js";
-import type { AgentKnowledgeIndexer, KnowledgeDocument } from "../qdrantIndexer.js";
 
 export class CorpusPublishError extends Error {
   readonly status: number;
@@ -45,7 +44,6 @@ export class CorpusPublisher {
     private readonly registry: RegistryStoreTs,
     private readonly releases: CreatorRegistryReleaseStore,
     private readonly runtimeRoot: string,
-    private readonly knowledgeIndexer?: AgentKnowledgeIndexer,
   ) {}
 
   async publishLatest(input: {
@@ -68,7 +66,6 @@ export class CorpusPublisher {
     const corpus = parseCorpusOutput(bytes);
     outerStage = "read_corpus_input";
     const corpusInput = await readCorpusInput(this.objectStore, execution.inputRef);
-    validateKnowledgeSelection(corpus, corpusInput);
     return await this.publishDefinition({ ...input, corpus, bytes, executionId: execution.executionId, outputRef: execution.outputRef });
     } catch (error) {
       if (error instanceof CorpusPublishError) throw error;
@@ -79,10 +76,9 @@ export class CorpusPublisher {
   /** File-based Factory uses the same schema/materializer/indexer/release pointer. */
   async publishUploaded(input: {
     creatorId: string; productId: string; productName: string; productPromise: string;
-    corpus: unknown; sourceFiles: string[]; briefSpec?: unknown;
+    corpus: unknown; briefSpec?: unknown;
   }): Promise<PublishResult> {
     const corpus = corpusOutputSchema.parse(input.corpus);
-    validateKnowledgeSelection(corpus, { files: input.sourceFiles });
     const bytes = Buffer.from(JSON.stringify(corpus), "utf8");
     const hash = createHash("sha256").update(bytes).digest("hex");
     const outputRef = `${input.productId}/corpus/uploads/${hash}/output.json`;
@@ -137,7 +133,6 @@ export class CorpusPublisher {
         staging,
         undefined,
         input.briefSpec as never,
-        { indexKnowledge: false },
       );
     } catch (error) {
       if (error instanceof AgentCorpusVerificationError) {
@@ -174,43 +169,6 @@ export class CorpusPublisher {
       const existing = await readFile(path.join(releaseRoot, "source-corpus.json"));
       if (!existing.equals(bytes)) throw new Error("Runtime release already contains different Corpus bytes");
     });
-    if (corpus.knowledge.length > 0) {
-      publishStage = "qdrant_knowledge_index";
-      if (!this.knowledgeIndexer) {
-        throw new CorpusPublishError(
-          "knowledge_index_unavailable",
-          "Knowledge indexing is not configured for this Registry.",
-          503,
-        );
-      }
-      try {
-        await this.knowledgeIndexer.stageAgentDocuments(
-          input.creatorId,
-          input.productId,
-          sourceDigest,
-          releaseRoot,
-          await Promise.all(corpus.knowledge.map(async (document): Promise<KnowledgeDocument> => {
-            const id = knowledgeId(document.source);
-            const relativePath = `knowledge/${id}.md`;
-            const raw = await readFile(path.join(releaseRoot, relativePath));
-            return {
-              id,
-              title: document.title,
-              path: relativePath,
-              sha256: digestBytes(raw),
-              retrieval_only: true,
-            };
-          })),
-        );
-      } catch (error) {
-        throw new CorpusPublishError(
-          "knowledge_index_unavailable",
-          "Knowledge indexing failed. Check Qdrant and DashScope embedding availability, credentials, and quota.",
-          503,
-          { cause: error },
-        );
-      }
-    }
     const releaseDigest = staged.corpus_digest;
     const releaseRef = `registry/${input.productId}/releases/${releaseDigest.slice("sha256:".length)}`;
     const releaseCorpusRef = `${releaseRef}/corpus.json`;
@@ -284,9 +242,6 @@ export async function prepareProductCreatorTransferRelease(input: {
     throw new Error("Current Registry Corpus digest does not match its immutable object");
   }
   const corpus = parseCorpusOutput(sourceBytes);
-  if (corpus.knowledge.length > 0) {
-    throw new Error("Product File knowledge must be rehomed before preparing a Creator transfer release");
-  }
 
   const bundle = await makeRuntimeBundle({
     objectStore: input.objectStore,
@@ -395,14 +350,10 @@ async function writeRuntimeReleaseAssets(input: {
     })));
     return { id, name: id, description: skill.when_to_use, ref: instruction, references };
   }));
-  const knowledge = await Promise.all(input.corpus.knowledge.map(async (doc) => {
-    const id = knowledgeId(doc.source);
-    return { id, title: doc.title, ref: await copyAndDescribe(`knowledge/${id}.md`, `knowledge/${id}.md`) };
-  }));
   const manifest = {
     contract_version: "1", creator: { id: input.creatorId },
     product: { id: input.productId, name: input.productName, promise: input.productPromise },
-    corpus_digest: input.sourceDigest, system_ref: system, skills, knowledge,
+    corpus_digest: input.sourceDigest, system_ref: system, skills,
     tools: input.corpus.tools,
     brief_spec: input.briefSpec ?? null
   };
@@ -417,7 +368,9 @@ async function writeRuntimeReleaseAssets(input: {
 
 function parseCorpusOutput(bytes: Buffer): CorpusOutput {
   try {
-    return corpusOutputSchema.parse(JSON.parse(bytes.toString("utf8")));
+    // Outputs stored while Knowledge existed carry a retired `knowledge` list; it is dropped here.
+    const { knowledge: _retired, ...output } = JSON.parse(bytes.toString("utf8")) as Record<string, unknown>;
+    return corpusOutputSchema.parse(output);
   } catch (error) {
     throw new Error(`Corpus output does not match the Corpus Node contract: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -450,24 +403,14 @@ async function makeRuntimeBundle(input: {
     });
     return { id, name: id, when_to_use: skill.when_to_use, instruction: assets[instructionId]!, references, allowed_tool_ids: [] };
   });
-  const knowledge: Array<Record<string, unknown>> = [];
-  for (const doc of input.corpus.knowledge) {
-    const id = knowledgeId(doc.source);
-    const assetId = `knowledge-${id}`;
-    const sourceBytes = await input.objectStore.get(doc.source);
-    addAsset(assetId, `knowledge/${id}.md`, sourceBytes, doc.title);
-    knowledge.push({ id, path: assets[assetId]!.path, sha256: assets[assetId]!.sha256, retrieval_only: true, title: doc.title });
-  }
   const manifest = {
     contract_version: "1",
     creator: { id: input.creatorId, name: input.creatorName ?? "Creator" },
     product: { id: input.productId, name: input.productName, promise: input.productPromise, boundaries: [], ...(input.briefSpec !== undefined ? { brief_spec: input.briefSpec } : {}), presentation: {} },
     instructions: { system: assets.system! },
     skills,
-    knowledge: { documents: knowledge },
     tools: [
       { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
-      ...(knowledge.length ? [{ id: "hatch.file_search", kind: "hatch_builtin", capability: "file_search" }] : []),
       ...input.corpus.tools
     ],
     evaluations: { synthetic_qa: [], held_out: [] }
@@ -483,26 +426,6 @@ async function readCorpusInput(objectStore: ArtifactObjectStore, reference: stri
   } catch (error) {
     throw new Error(`Corpus input is unavailable or invalid: ${error instanceof Error ? error.message : String(error)}`);
   }
-}
-
-function validateKnowledgeSelection(corpus: CorpusOutput, input: Pick<CorpusInput, "files">): void {
-  const declared = new Set(input.files);
-  const selected = new Set<string>();
-  for (const document of corpus.knowledge) {
-    if (!declared.has(document.source)) {
-      throw new Error(`Corpus Knowledge source is not declared in input.files: ${document.source}`);
-    }
-    if (selected.has(document.source)) {
-      throw new Error(`Corpus Knowledge source is selected more than once: ${document.source}`);
-    }
-    selected.add(document.source);
-  }
-}
-
-function knowledgeId(source: string): string {
-  const match = source.match(/\/files\/(file_[A-Za-z0-9_-]+)\/projection\.md$/);
-  if (!match?.[1]) throw new Error(`Corpus Knowledge source is not a Product File projection: ${source}`);
-  return safeId(match[1]);
 }
 
 function digestBytes(content: Uint8Array): string {

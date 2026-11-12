@@ -17,8 +17,7 @@ const CREATOR_TOOL_IDENTIFIER = /^creator\.[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
 const REFERENCE_KINDS = new Set<AgentCorpusBundleReferenceKind>(["method", "style", "example", "few_shots"]);
 const PLACEHOLDER_DIGEST = `sha256:${"0".repeat(64)}`;
 const CANONICAL_TOOLS: readonly FactoryAgentTool[] = [
-  { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
-  { id: "hatch.file_search", kind: "hatch_builtin", capability: "file_search" }
+  { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }
 ];
 
 export type AgentCorpusBundleProduct = {
@@ -48,13 +47,6 @@ export type AgentCorpusBundleSkillInput = {
   references?: AgentCorpusBundleReferenceInput[];
 };
 
-export type AgentCorpusBundleKnowledgeInput = {
-  id: string;
-  content: string;
-  title: string;
-  description?: string;
-};
-
 export type AgentCorpusBundleInput = {
   /** Relative to FactoryFileStore's candidate/ namespace. */
   candidateRoot: string;
@@ -63,8 +55,7 @@ export type AgentCorpusBundleInput = {
   product: AgentCorpusBundleProduct;
   systemInstructions: string;
   skills?: AgentCorpusBundleSkillInput[];
-  knowledge?: AgentCorpusBundleKnowledgeInput[];
-  /** Complete caller declaration. The two canonical Hatch built-ins are added when absent. */
+  /** Complete caller declaration. The canonical hatch.web_search built-in is added when absent. */
   tools?: FactoryAgentTool[];
   syntheticQa: unknown;
   heldOut: unknown;
@@ -81,7 +72,6 @@ export type MaterializedAgentCorpusBundle = {
       instruction: ArtifactRef;
       references: Array<{ id: string; kind: AgentCorpusBundleReferenceKind; asset: ArtifactRef }>;
     }>;
-    knowledge: Array<{ id: string; asset: ArtifactRef }>;
     syntheticQa: ArtifactRef;
     heldOut: ArtifactRef;
   };
@@ -107,7 +97,6 @@ type BundlePlan = {
   product: ValidatedProduct;
   systemInstructions: string;
   skills: ValidatedSkill[];
-  knowledge: AgentCorpusBundleKnowledgeInput[];
   tools: FactoryAgentTool[];
   syntheticQaDocument: string;
   heldOutDocument: string;
@@ -171,10 +160,6 @@ export async function materializeAgentCorpusBundle(
             kind: reference.kind,
             asset: assetRef(skillReferencePath(skill.id, reference.id))
           }))
-        })),
-        knowledge: plan.knowledge.map((document) => ({
-          id: document.id,
-          asset: assetRef(knowledgePath(document.id))
         })),
         syntheticQa: assetRef(SYNTHETIC_QA_PATH),
         heldOut: assetRef(HELD_OUT_PATH)
@@ -285,20 +270,6 @@ function validateBundleInput(input: AgentCorpusBundleInput): BundlePlan {
     };
   });
 
-  const knowledge = validateArray(input.knowledge, "knowledge").map((rawDocument, documentIndex) => {
-    const label = `knowledge[${documentIndex}]`;
-    const record = strictRecord(rawDocument, label, ["id", "content", "title", "description"]);
-    const id = canonicalIdentifier(record.id, `${label}.id`);
-    claimUnique(logicalAssetIds, id, `Knowledge document ${id}`);
-    assertCanonicalAssetPath(knowledgePath(id), `Knowledge document ${id}`);
-    return {
-      id,
-      content: markdown(record.content, `${label}.content`),
-      title: requiredText(record.title, `${label}.title`),
-      ...optionalTextProperty(record, "description", label)
-    };
-  });
-
   const syntheticQaDocument = jsonDocument(input.syntheticQa, "synthetic QA");
   const heldOutDocument = jsonDocument(input.heldOut, "held-out evaluation");
   const plan = {
@@ -308,7 +279,6 @@ function validateBundleInput(input: AgentCorpusBundleInput): BundlePlan {
     product,
     systemInstructions,
     skills,
-    knowledge,
     tools,
     syntheticQaDocument,
     heldOutDocument
@@ -355,12 +325,8 @@ function validateTools(value: FactoryAgentTool[] | undefined): FactoryAgentTool[
   }
   const tools = [
     requiredMapValue(byId, "hatch.web_search"),
-    requiredMapValue(byId, "hatch.file_search"),
     ...callerOrder.map((id) => requiredMapValue(byId, id))
   ];
-  if (!tools.some((tool) => tool.id === "hatch.web_search") || !tools.some((tool) => tool.id === "hatch.file_search")) {
-    throw new Error("Agent Corpus tools must include canonical hatch.web_search and hatch.file_search");
-  }
   return tools;
 }
 
@@ -371,19 +337,14 @@ function validateTool(value: unknown, label: string): FactoryAgentTool {
   if (kind === "hatch_builtin") {
     const record = strictRecord(value, label, ["id", "kind", "capability", "description"]);
     const id = canonicalToolIdentifier(record.id, `${label}.id`);
-    const expectedCapability = id === "hatch.web_search"
-      ? "web_search"
-      : id === "hatch.file_search"
-        ? "file_search"
-        : undefined;
-    if (!expectedCapability) throw new Error(`Agent Corpus ${label} declares unknown Hatch built-in tool: ${id}`);
-    if (record.capability !== expectedCapability) {
-      throw new Error(`Agent Corpus ${label} must use capability ${expectedCapability}`);
+    if (id !== "hatch.web_search") throw new Error(`Agent Corpus ${label} declares unknown Hatch built-in tool: ${id}`);
+    if (record.capability !== "web_search") {
+      throw new Error(`Agent Corpus ${label} must use capability web_search`);
     }
     return {
-      id: id as "hatch.web_search" | "hatch.file_search",
+      id,
       kind,
-      capability: expectedCapability,
+      capability: "web_search",
       ...optionalDescription(record, label)
     } as FactoryAgentTool;
   }
@@ -435,10 +396,6 @@ function buildPlannedAssets(plan: BundlePlan): PlannedAsset[] {
         content: reference.content
       }))
     ]),
-    ...plan.knowledge.map((document) => ({
-      relativePath: knowledgePath(document.id),
-      content: document.content
-    })),
     { relativePath: SYNTHETIC_QA_PATH, content: plan.syntheticQaDocument },
     { relativePath: HELD_OUT_PATH, content: plan.heldOutDocument }
   ];
@@ -496,16 +453,6 @@ function buildManifest(plan: BundlePlan, digestFor: (relativePath: string) => st
       })),
       allowed_tool_ids: [...skill.allowedToolIds]
     })),
-    knowledge: {
-      documents: plan.knowledge.map((document) => ({
-        id: document.id,
-        path: knowledgePath(document.id),
-        sha256: digestFor(knowledgePath(document.id)),
-        ...(document.description === undefined ? {} : { description: document.description }),
-        retrieval_only: true as const,
-        title: document.title
-      }))
-    },
     tools: plan.tools,
     evaluations: {
       synthetic_qa: [{ id: "synthetic-qa", path: SYNTHETIC_QA_PATH, sha256: digestFor(SYNTHETIC_QA_PATH) }],
@@ -565,10 +512,6 @@ function skillInstructionPath(skillId: string): string {
 
 function skillReferencePath(skillId: string, referenceId: string): string {
   return `skills/${skillId}/references/${referenceId}.md`;
-}
-
-function knowledgePath(documentId: string): string {
-  return `knowledge/${documentId}.md`;
 }
 
 function assertCanonicalAssetPath(value: string, label: string): void {
