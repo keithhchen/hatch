@@ -29,6 +29,7 @@ export const runFactoryPromptWithPi: FactoryPromptRunner = async (call) => {
     ...(call.images ? { images: call.images } : {}),
     ...(call.outputContract ? { outputContract: call.outputContract } : {}),
     ...(call.reportFailureTelemetry ? { reportFailureTelemetry: call.reportFailureTelemetry } : {}),
-    ...(call.signal ? { signal: call.signal } : {})
+    ...(call.signal ? { signal: call.signal } : {}),
+    ...(call.onModelCall ? { onModelCall: call.onModelCall } : {})
   });
 };

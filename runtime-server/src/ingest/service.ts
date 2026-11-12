@@ -4,6 +4,7 @@ import { fail, finish, interrupt, queuedJob, start, type IngestInput, type Inges
 import { labelOfUrl, safeName, stemOf } from "./names.js";
 import type { IngestEngine, IngestJobRepository, IngestSink, Result, Source } from "./ports.js";
 import { log } from "../observability/log.js";
+import type { UsageCap } from "../usage/usageCap.js";
 
 export const MAX_ITEMS = 50;
 export const MAX_FILE_BYTES = 50 * 1024 * 1024;
@@ -78,6 +79,8 @@ export class IngestService {
     sink: IngestSink;
     /** Whether the account owns the Product. Jobs are only made for, and read from, a Product the account owns. */
     owns: (accountId: string, productId: string) => Promise<boolean>;
+    /** A job is not started when the account has spent its month: the hosted agent's model calls are the Expert's. */
+    usageCap?: UsageCap;
     inBackground?: InBackground;
     newId?: () => string;
     now?: () => string;
@@ -97,6 +100,7 @@ export class IngestService {
   /** With an Idempotency-Key the job id comes from the key, so a repeat finds the first job instead of making another. */
   async submit(accountId: string, productId: string, items: unknown, context?: unknown, idempotencyKey?: string): Promise<IngestJob> {
     await this.assertOwns(accountId, productId);
+    await this.deps.usageCap?.assertWithinCap(accountId);
     if (context !== undefined && typeof context !== "string") throw invalid("context must be text");
     if ((context ?? "").length > MAX_CONTEXT) throw invalid(`context may be at most ${MAX_CONTEXT} characters`);
     const accepted = parse(items);

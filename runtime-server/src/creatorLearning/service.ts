@@ -18,6 +18,7 @@ import type { ArtifactRef, CreatorQuestion, FactoryAgentProduct, FactoryAgentToo
 import { draftBriefSpecForProduct, normalizeBriefSpec, type BriefSpec } from "../brief.js";
 import { normalizeProductPricing } from "./pricing.js";
 import { log } from "../observability/log.js";
+import type { UsageCap } from "../usage/usageCap.js";
 
 export type CreatorCorpusAssetLayer = "manifest" | "system" | "skill" | "reference";
 
@@ -254,7 +255,9 @@ export class CreatorFactoryService {
     private readonly objectStore?: ArtifactObjectStore,
     private readonly graphStore?: DistillationGraphStore,
     private readonly productFileStore?: ProductFileStore,
-    private readonly startRun?: CreatorFactoryImmediateStarter
+    private readonly startRun?: CreatorFactoryImmediateStarter,
+    /** A run, or work on one, is not started when the Expert has spent the month. */
+    private readonly usageCap?: UsageCap
   ) {
     this.sourceLibrary = sourceLibrary ?? new CreatorSourceLibrary(path.join(factoryRoot, "source-library"), objectStore, graphStore);
   }
@@ -417,6 +420,7 @@ export class CreatorFactoryService {
     idempotencyKey: string
   ): Promise<{ run: CreatorFactoryRunView; created: boolean }> {
     const normalized = validateCreateRequest(request);
+    await this.usageCap?.assertWithinCap(creator.id);
     // Validate the run command before creating any Product Snapshot. This
     // keeps an invalid request from leaving an unreferenced immutable object.
     const requestIdempotencyKey = requireText(idempotencyKey, "Idempotency-Key");
@@ -808,6 +812,7 @@ export class CreatorFactoryService {
     request: SubmitFactoryAnswersRequest
   ): Promise<CreatorFactoryRunView> {
     const run = await this.requireRun(creatorId, runId);
+    await this.usageCap?.assertWithinCap(creatorId);
     if (!Array.isArray(request.answers)) throw new Error("answers must be an array");
     const answers = new Map<string, string>();
     for (const item of request.answers) {
@@ -921,6 +926,7 @@ export class CreatorFactoryService {
 
   async retry(creatorId: string, runId: string, expectedVersion?: number): Promise<CreatorFactoryRunView> {
     const current = await this.requireRun(creatorId, runId);
+    await this.usageCap?.assertWithinCap(creatorId);
     if (current.status !== "needs_attention" || !current.state?.retryStage) {
       throw new CreatorFactoryRepositoryError("invalid_status", `Factory run ${runId} has no retryable failed stage`);
     }

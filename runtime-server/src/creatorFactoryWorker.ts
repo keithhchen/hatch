@@ -9,6 +9,7 @@ import { CreatorFactoryWorker } from "./creatorLearning/worker.js";
 import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
 import { PostgresDistillationGraphStore } from "./creatorLearning/distillationGraphStore.js";
 import { writeOperationalError } from "./operationalLogging.js";
+import { PostgresUsageLedger } from "./usage/postgresUsage.js";
 
 export async function runCreatorFactoryWorker(environment: NodeJS.ProcessEnv = process.env): Promise<void> {
   const repository = new PostgresCreatorFactoryRepository({ environment });
@@ -32,7 +33,8 @@ export async function runCreatorFactoryWorker(environment: NodeJS.ProcessEnv = p
     // recovery worker must not reclaim a live direct execution merely because
     // one provider turn is slow.
     leaseMs: integerEnvironment(environment.HATCH_CREATOR_FACTORY_LEASE_MS, 20 * 60_000),
-    heartbeatMs: integerEnvironment(environment.HATCH_CREATOR_FACTORY_HEARTBEAT_MS, 60_000)
+    heartbeatMs: integerEnvironment(environment.HATCH_CREATOR_FACTORY_HEARTBEAT_MS, 60_000),
+    usage: new PostgresUsageLedger(repository.pool as never)
   });
   const controller = new AbortController();
   const stop = (): void => controller.abort();

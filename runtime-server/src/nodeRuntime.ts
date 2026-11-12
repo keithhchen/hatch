@@ -3,6 +3,7 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { createFactoryPiAgent } from "./creatorLearning/factoryPi.js";
+import type { UsageSink } from "./usage/usage.js";
 import {
   defaultAgentInput,
   type AgentConfig,
@@ -93,7 +94,9 @@ export class NodeRuntime {
     node: NodeDefinition<Input, Candidate, Feedback>,
     scope: NodeScope,
     rawInput: unknown,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    /** Records each model call of this execution as the Expert's Studio usage. */
+    usage?: UsageSink
   ): Promise<NodeRunResult<Candidate, Feedback>> {
     signal?.throwIfAborted();
     let checkedScope: NodeScope;
@@ -204,7 +207,7 @@ export class NodeRuntime {
           sessionId(checkedScope, "actor", node.actor.sessionPolicy),
           checkedScope,
           actorToolInput,
-          signal
+          signal, usage
         );
         actorSessionIds.push(persistentActor.sessionId);
       }
@@ -214,7 +217,7 @@ export class NodeRuntime {
           sessionId(checkedScope, "critic", node.critic.sessionPolicy),
           checkedScope,
           criticToolInput,
-          signal
+          signal, usage
         );
         criticSessionIds.push(persistentCritic.sessionId);
       }
@@ -254,7 +257,7 @@ export class NodeRuntime {
               sessionId(checkedScope, "actor", node.actor.sessionPolicy, round),
               checkedScope,
               actorToolInput,
-              signal
+              signal, usage
             );
             if (node.actor.sessionPolicy === "spawn") actorSessionIds.push(actor.sessionId);
             try {
@@ -312,7 +315,7 @@ export class NodeRuntime {
           sessionId(checkedScope, "critic", node.critic.sessionPolicy, round),
           checkedScope,
           criticToolInput,
-          signal
+          signal, usage
         );
         if (node.critic.sessionPolicy === "spawn") criticSessionIds.push(critic.sessionId);
         let verdict: CriticVerdict<Feedback>;
@@ -389,7 +392,8 @@ export class NodeRuntime {
     sessionIdValue: string,
     scope: NodeScope,
     input: NodeInput,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    usage?: UsageSink
   ): Promise<LiveAgent> {
     signal?.throwIfAborted();
     if (!config.systemPrompt.trim()) throw new Error(`Node agent ${sessionIdValue} requires a system prompt`);
@@ -421,6 +425,9 @@ export class NodeRuntime {
     let pendingPersistence = Promise.resolve();
     const unsubscribe = agent.subscribe(async (event) => {
       if (event.type === "message_end") {
+        if (event.message.role === "assistant" && event.message.usage?.totalTokens > 0) {
+          void usage?.({ id: `${scope.nodeName}:${scope.executionId}:${sessionIdValue}:${event.message.timestamp}`, model: event.message.model, usage: event.message.usage });
+        }
         pendingPersistence = pendingPersistence.then(() => this.sessionStore.appendMessage(sessionRef, event.message));
         await pendingPersistence;
       }
