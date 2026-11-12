@@ -11,12 +11,16 @@ export type Role = typeof ROLES[number];
 export const ASSISTANT_ROLES = ["assistant", "content", "profile-research"] as const;
 export type AssistantRole = typeof ASSISTANT_ROLES[number];
 export type AnyRole = Role | AssistantRole;
+/** Upstream outputs an Agent may read as input/<role>/. Reading never gates or updates anything. */
+export const INPUT_ROLES: Record<Role, readonly Role[]> = {
+  research: [], voice: [], generation: ["voice"], "case-generation": ["generation"], evaluator: ["generation", "case-generation"],
+};
 export const isAssistantRole = (role: string): role is AssistantRole => (ASSISTANT_ROLES as readonly string[]).includes(role);
 export type Todo = { title: string; status: "pending" | "in_progress" | "completed" };
 export type FileRecord = { path: string; bytes: number; mimeType: string; origin?: { sessionId: string; path: string }; readonly?: boolean };
 export type Comment = { id: string; path: string; start: number; end: number; quote: string; text: string; replacement?: string; createdAt: string };
 export type FactoryProductScope = { creatorId: string; productId: string; briefSpec?: unknown };
-export type AgentDefinitionSource = { list(): Promise<Array<{ role: AnyRole; systemPrompt: string; tools: string[]; dependencies: { required: Role[]; normal: Role[]; updates: Role[] } }>> };
+export type AgentDefinitionSource = { list(): Promise<Array<{ role: AnyRole; systemPrompt: string; tools: string[] }>> };
 /** Where a user message in history came from. The model reads its text; the chat shows only what the Expert said. */
 export type MessageOrigin = { kind: "expert" | "system"; itemId: string; text?: string; images?: string[];
   /** Assets the client sent with the message. */
@@ -222,9 +226,6 @@ export class WorkbenchStore {
     if (!definition) throw Object.assign(new Error(`Factory Agent definition is missing: ${role}`), { code: "agent_definitions_invalid", status: 503 });
     return definition;
   }
-  async dependencies(role: AnyRole): Promise<{ required: Role[]; normal: Role[]; updates: Role[] }> {
-    return (await this.definition(role)).dependencies;
-  }
   async listManualFiles(): Promise<FileRecord[]> { return this.backend.listManual(); }
   async create(role: AnyRole, title?: string): Promise<Session> {
     if (!(ROLES as readonly string[]).includes(role) && !isAssistantRole(role)) throw new Error("Unknown agent role");
@@ -248,7 +249,7 @@ export class WorkbenchStore {
     const names = await this.backend.listIds();
     return (await Promise.all(names.map(s => this.get(s)))).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
-  private async upstream(id: string): Promise<Array<{ role: Role; session: Session }>> { if (!this.definitions) return []; const current = await this.get(id); const dependencies = await this.dependencies(current.role); const allowed = [...dependencies.required, ...dependencies.normal, ...dependencies.updates]; if (!allowed.length) return []; const sessions = await this.list(); return allowed.flatMap(role => { const session = sessions.filter(candidate => candidate.role === role && candidate.id !== id).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]; return session ? [{ role, session }] : []; }); }
+  private async upstream(id: string): Promise<Array<{ role: Role; session: Session }>> { if (!this.definitions) return []; const current = await this.get(id); const allowed = isAssistantRole(current.role) ? [] : INPUT_ROLES[current.role]; if (!allowed.length) return []; const sessions = await this.list(); return allowed.flatMap(role => { const session = sessions.filter(candidate => candidate.role === role && candidate.id !== id).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]; return session ? [{ role, session }] : []; }); }
   async contextFiles(id: string): Promise<FileRecord[]> { const current = await this.get(id); const manual = await this.backend.listManual(); const inherited = (await this.upstream(id)).flatMap(({ role, session }) => session.files.filter(file => file.path.startsWith("output/")).map(file => ({ ...file, path: `input/${role}/${file.path.slice(7)}`, origin: { sessionId: session.id, path: file.path }, readonly: true }))); return [...current.files.filter(file => !file.path.startsWith("input/manual/") && !file.path.startsWith("input/handoff/")), ...manual, ...inherited]; }
   async update<T>(id: string, change: (session: Session) => T | Promise<T>): Promise<T> {
     const previous = this.queues.get(id) ?? Promise.resolve();

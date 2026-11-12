@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { agentEntries, initialAgentDefinitions } from "../factoryAgents/definitions.js";
 import { ROLES } from "../factoryAgents/store.js";
-import { blocked, blockedBy, blockedMessage, unmappedRoles, WORKERS, WorkerRegistry } from "./workers.js";
+import { blockedBy, blockedMessage, unmappedRoles, WORKERS, WorkerRegistry } from "./workers.js";
 
 test("public worker ids map to internal roles", () => {
   assert.deepEqual(WORKERS.all.map(w => [w.id, w.role]), [
@@ -20,13 +20,10 @@ test("every role has exactly one worker and ids are unique", () => {
   assert.deepEqual(unmappedRoles(new WorkerRegistry([{ id: "research", role: "research" }])), ["voice", "generation", "case-generation", "evaluator"]);
 });
 
-test("a locked worker reports what blocks it in public ids", async () => {
-  const entries = agentEntries(await initialAgentDefinitions(), []);
-  const entry = (role: string) => entries.find(e => e.role === role)!;
-  assert.equal(blockedBy(entry("research")), undefined);
-  assert.deepEqual(blockedBy(entry("case-generation")), { missing_required: ["builder"], needs_one_of: [] });
-  assert.deepEqual(blockedBy(entry("evaluator")), { missing_required: ["builder", "cases"], needs_one_of: [] });
-  assert.deepEqual(blockedBy(entry("generation")), { missing_required: [], needs_one_of: ["research", "interview"] });
-  assert.deepEqual(blocked({ missingRequired: [], normalCandidates: ["research"], normalSatisfied: true }), { missing_required: [], needs_one_of: [] });
-  assert.equal(blockedMessage("cases", { missing_required: ["builder"], needs_one_of: [] }), "cases cannot start yet: builder must produce output first.");
+test("only the builder is ever blocked, by missing uploads and interview", async () => {
+  const entries = agentEntries(await initialAgentDefinitions(), [], []);
+  const blocked = entries.filter(entry => blockedBy(entry));
+  assert.deepEqual(blocked.map(entry => entry.role), ["generation"]);
+  assert.deepEqual(blockedBy(blocked[0]!), { needs_one_of: ["uploads", "interview"] });
+  assert.equal(blockedMessage("builder"), "builder cannot start yet: upload material or do the interview first.");
 });

@@ -23,16 +23,16 @@ import { chatEntries, describeToolCall, groupToolEntries, toolDetailRows, toolRe
 import { subscribeFactoryEvents } from "./factoryEvents.js";
 import { FactoryVoicePlayer } from "./factoryVoicePlayer.js";
 import { createFactoryAgentTranslator } from "./factoryAgentsI18n.js";
-import { agentDependencyGaps, agentStateKey, changedDependencies, localizeAgentText } from "./factoryAgentState.js";
+import { BUILD_NEEDS, agentStateKey, localizeAgentText, updatedSources } from "./factoryAgentState.js";
 import { creatorFactoryPath, creatorProductPath, factorySectionForAgent } from "./creatorRoutes.js";
-import { STUDIO_PATH, studioNextStep, studioPathStates, studioStepForRoute } from "./studioPath.js";
+import { ADVANCED_STEP, STUDIO_PATH, studioNextStep, studioPathStates, studioStepForRoute } from "./studioPath.js";
 import "./factoryAgents.css";
 
 const api = (route, options = {}) => dashboardRequest(route, { ...options, body: options.body === undefined ? undefined : JSON.stringify(options.body) });
 const factoryRoot = productId => `/v1/creator/products/${encodeURIComponent(productId)}/factory-agents`;
 const endpoint = (root, id, action = "") => `${root}/sessions/${id}${action ? `/${action}` : ""}`;
 // A section URL without a page opens the first task of that step.
-const FIRST_PAGE = { sources: "research", build: "generation", evaluate: "case-generation" };
+const FIRST_PAGE = { sources: "uploads", build: "generation", evaluate: "case-generation" };
 const STEP_STATE_KEY = { done: "stepDone", running: "stepRunning", todo: "stepReady", locked: "stepLocked" };
 
 const theme = createTheme({ ...hatchMuiThemeOptions, components: { ...hatchMuiThemeOptions.components, MuiTextField: { defaultProps: { size: "small" } } } });
@@ -69,12 +69,12 @@ export function FactoryAgents({ productId, section, agent, navigate, locale = "e
   const agentEntry = role => agents.find(item => item.role === role);
   const agentName = role => localizeAgentText(agentEntry(role)?.name, locale);
   const agentSession = role => sessions.filter(item => item.role === role).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
-  const openAgent = async role => { try { const targetStage = factorySectionForAgent(role); if (!targetStage) throw new Error(t("agentStateUnavailable")); const entry = agentEntry(role); if (!entry) throw new Error(t("agentStateUnavailable")); if (entry.state === "locked") { goToFactory(targetStage, role); return; } if (!agentSession(role)) await api(`${root}/sessions`, { method: "POST", body: { role } }); goToFactory(targetStage, role); } catch (e) { setError(factoryError(e, t, agentName)); } };
+  const openAgent = async role => { try { if (role === "uploads") { goToFactory("sources", "uploads"); return; } const targetStage = factorySectionForAgent(role); if (!targetStage) throw new Error(t("agentStateUnavailable")); const entry = agentEntry(role); if (!entry) throw new Error(t("agentStateUnavailable")); if (entry.state === "locked") { goToFactory(targetStage, role); return; } if (!agentSession(role)) await api(`${root}/sessions`, { method: "POST", body: { role } }); goToFactory(targetStage, role); } catch (e) { setError(factoryError(e, t, agentName)); } };
   const uploadProjectFiles = async files => { const accepted = /\.(txt|md|docx|pptx|xlsx|pdf)$/i; const items = files.map(file => ({ id: `${file.name}-${file.lastModified}-${Math.random()}`, file, path: `input/manual/${file.name}`, status: accepted.test(file.name) && file.size <= 20 * 1024 * 1024 ? "uploading" : "failed", error: accepted.test(file.name) ? file.size > 20 * 1024 * 1024 ? t("fileTooLarge", file.name) : "" : t("unsupportedFileType", file.name) })); setUploadItems(previous => [...items, ...previous]); let transport = agentSession("research"); try { if (!transport) transport = await api(`${root}/sessions`, { method: "POST", body: { role: "research" } }); } catch (e) { setUploadItems(previous => previous.map(item => item.status === "uploading" ? { ...item, status: "failed", error: e.message } : item)); return; } await Promise.all(items.filter(item => item.status === "uploading").map(async item => { try { const bytes = new Uint8Array(await item.file.arrayBuffer()); let binary = ""; for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192)); const record = await api(endpoint(root, transport.id, "files"), { method: "POST", body: { path: item.path, base64: btoa(binary), mimeType: item.file.type || undefined } }); setUploadItems(previous => previous.map(current => current.id === item.id ? { ...current, path: record.path, status: "completed" } : current)); } catch (e) { setUploadItems(previous => previous.map(current => current.id === item.id ? { ...current, status: "failed", error: e.message } : current)); } })); };
   const deleteManualFile = async record => { const transport = agentSession("research"); if (!transport) return; try { await api(endpoint(root, transport.id, "files"), { method: "DELETE", body: { path: record.path } }); setManualFiles(previous => previous.filter(file => file.path !== record.path)); setUploadItems(previous => previous.filter(item => item.path !== record.path)); } catch (e) { setError(factoryError(e, t, agentName)); } };
-  const states = studioPathStates(agents, product);
+  const states = studioPathStates(agents, product, manualFiles);
   const currentStep = studioStepForRoute(stage, selected);
-  const step = STUDIO_PATH.find(item => item.id === currentStep);
+  const step = [...STUDIO_PATH, ADVANCED_STEP].find(item => item.id === currentStep);
   const selectedEntry = selected ? agentEntry(selected) : null; const selectedSession = selected ? agentSession(selected) : null;
   const workbench = Boolean(selected && selected !== "uploads" && selectedSession);
   return <ThemeProvider theme={theme}><div className={`factory-app${workbench ? " factory-app--workbench" : ""}`} aria-label={t("factory")}>
@@ -92,7 +92,7 @@ export function FactoryAgents({ productId, section, agent, navigate, locale = "e
 
 function FactoryStepper({ states, current, onStep, t }) {
   const next = studioNextStep(states);
-  return <ol className="factory-stepper" aria-label={t("factoryStepsLabel")}>{states.map(({ step, state }) => <li key={step.id}><button type="button" className={`is-${state}${current === step.id ? " is-current" : ""}${next?.step.id === step.id ? " is-next" : ""}`} aria-current={current === step.id ? "step" : undefined} onClick={() => onStep(step)}><span className="factory-stepper__n" aria-hidden="true">{state === "done" ? "✓" : ""}</span><span className="factory-stepper__text"><span>{t(step.title)}</span><small>{t(next?.step.id === step.id && state === "todo" ? "stepNow" : STEP_STATE_KEY[state])}</small></span></button></li>)}</ol>;
+  return <ol className="factory-stepper" aria-label={t("factoryStepsLabel")}>{states.map(({ step, state }) => <li key={step.id}><button type="button" className={`is-${state}${current === step.id ? " is-current" : ""}${next?.step.id === step.id ? " is-next" : ""}`} aria-current={current === step.id ? "step" : undefined} onClick={() => onStep(step)}><span className="factory-stepper__n" aria-hidden="true">{state === "done" ? "✓" : ""}</span><span className="factory-stepper__text"><span>{t(step.title)}</span><small>{t(next?.step.id === step.id && state === "todo" ? "stepNow" : STEP_STATE_KEY[state])}</small></span></button></li>)}<li><button type="button" className={`factory-stepper__advanced${current === ADVANCED_STEP.id ? " is-current" : ""}`} aria-current={current === ADVANCED_STEP.id ? "step" : undefined} onClick={() => onStep(ADVANCED_STEP)}><span className="factory-stepper__text"><span>{t(ADVANCED_STEP.title)}</span></span></button></li></ol>;
 }
 
 function FactoryOverview({ product, states, agentEntry, agentName, goToStep, t }) {
@@ -113,16 +113,14 @@ function FactoryOverview({ product, states, agentEntry, agentName, goToStep, t }
 
 function AgentIntro({ entry, agents, onOpenAgent, agentName, locale, t }) {
   if (!entry) return <div className="factory-agent-intro"><div className="factory-agent-intro__card web-card"><Skeleton width="40%" /><Skeleton width="70%" height={48} /><Skeleton width="90%" /></div></div>;
-  const gaps = agentDependencyGaps(entry);
   const locked = entry.state === "locked";
-  const dependencies = [...gaps.required, ...gaps.alternatives];
   return <section className="factory-agent-intro">
     <div className="factory-agent-intro__card web-card">
       <span className={`factory-state is-${entry.state}`}>{t(agentStateKey(entry))}</span>
       <h2>{agentName(entry.role)}</h2>
       <p className="factory-agent-intro__hint">{localizeAgentText(entry.hint, locale)}</p>
       <div className="factory-youdo"><strong>{t("factoryYouDo")}</strong><p>{t("factoryYouDoRole", entry.role)}</p></div>
-      {locked ? <div className="factory-needs"><strong>{gaps.alternatives.length && !gaps.required.length ? t("finishOneAgentFirst", gaps.alternatives.map(agentName).join(t("roleSeparator"))) : t("factoryNeedsFirst")}</strong><div>{dependencies.map(role => <Button key={role} variant="outlined" size="small" onClick={() => onOpenAgent(role)} endIcon={<ArrowForward />}>{agentName(role)}</Button>)}</div></div>
+      {locked ? <div className="factory-needs"><strong>{t("finishOneAgentFirst", BUILD_NEEDS.map(need => need === "uploads" ? t("uploadSources") : agentName(need)).join(t("roleSeparator")))}</strong><div>{BUILD_NEEDS.map(need => <Button key={need} variant="outlined" size="small" onClick={() => onOpenAgent(need)} endIcon={<ArrowForward />}>{need === "uploads" ? t("uploadSources") : agentName(need)}</Button>)}</div></div>
         : <Button className="factory-cta" variant="contained" startIcon={<PlayArrow />} onClick={() => onOpenAgent(entry.role)}>{t(entry.state === "failed" ? "tryAgain" : "factoryStart")}</Button>}
     </div>
   </section>;
@@ -179,7 +177,7 @@ function Workspace({ root, id, entry, agents, config, onChanged, onOpenAgent, ag
 function ChatPanel({ session, entry, agents, root, id, config, busy, draft, setDraft, stream, settled, activity, activityVisible, composer, composerAdapter, chat, stick, running, locked, error, setError, perform, onOpenFile, onUseLatest, agentName, voiceHandler, speaking, setSpeaking, t }) {
   const entries = groupToolEntries(chatEntries(session.messages));
   const pendingAskUser = [...entries].reverse().find(item => item.type === "askUser" && item.pending);
-  const updatedDependencies = entry?.state === "update_available" ? changedDependencies(entry, agents) : [];
+  const updatedDependencies = updatedSources(entry);
   const composerDisabled = locked || busy || Boolean(pendingAskUser) || !config?.services.model;
   const sendDisabled = composerDisabled || !(draft || "").trim();
   const stopResponse = () => perform(() => api(endpoint(root, id, "stop"), { method: "POST", body: {} }));
@@ -240,12 +238,9 @@ function FileViewer({ root, running, id, record, files, onOpenFile, onClose, onA
   return <Dialog open onClose={onClose} fullWidth maxWidth="md" scroll="paper" aria-labelledby={`factory-file-dialog-${id}`}><DialogTitle id={`factory-file-dialog-${id}`} sx={{ p: 0 }}><Toolbar variant="dense" sx={{ minHeight: 52 }}><Description fontSize="small" sx={{ mr: 1 }} /><Typography variant="body2" fontWeight={700} noWrap sx={{ flex: 1 }} title={record.path}>{record.path.split("/").at(-1)}</Typography><Tooltip title={t("addToChat")}><IconButton size="small" onClick={() => onAddToChat(record.path)}><Send fontSize="small" /></IconButton></Tooltip><Tooltip title={t("download")}><IconButton component="a" size="small" href={`${endpoint(root, id, "files")}?path=${encodeURIComponent(record.path)}&download=1`}><Download fontSize="small" /></IconButton></Tooltip></Toolbar></DialogTitle><DialogContent dividers sx={{ p: 0 }}>{!file ? <Box sx={{ p: 2 }}><Stack spacing={1} alignItems="center"><CircularProgress size={18} /><Typography variant="caption" color="text.secondary">{readError || t("loadingFile")}</Typography></Stack></Box> : <><Box sx={{ p: 2, maxHeight: 520, overflow: "auto" }}>{readError && <ErrorNotice error={readError} onClose={() => setReadError("")} />}{file.content === null ? <Typography variant="body2">{t("downloadToView")}</Typography> : <Stack spacing={1.5}><TextField multiline minRows={16} fullWidth value={edit} onChange={event => setEdit(event.target.value)} aria-label={t("markdownEditor")} />{requiresCopyName && <TextField label={t("revisionFilename")} placeholder={t("revisionFilenamePlaceholder")} value={copyName} onChange={event => setCopyName(event.target.value)} />}</Stack>}</Box>{file.content !== null && <Stack direction="row" spacing={1} sx={{ px: 2, pb: 2 }}><Button size="small" variant="contained" disabled={saveDisabled} onClick={save}>{t("save")}</Button><Button size="small" variant="outlined" disabled={!dirty} onClick={() => { setEdit(file.content || ""); sessionStorage.removeItem(draftKey); }}>{t("discardEdits")}</Button></Stack>}</>}</DialogContent><DialogActions><Button onClick={onClose}>{t("close")}</Button></DialogActions></Dialog>;
 }
 
-function AgentState({ entry, agentName, t, compact = false }) { if (entry?.state === "complete" || entry?.state === "update_available") return null; const gaps = agentDependencyGaps(entry); let text = t(agentStateKey(entry)); if (entry?.state === "locked" && gaps.required.length) text = t("finishAgentsFirst", gaps.required.map(agentName).join(t("roleSeparator"))); else if (entry?.state === "locked" && gaps.alternatives.length) text = t("finishOneAgentFirst", gaps.alternatives.map(agentName).join(t("roleSeparator"))); return <Chip size="small" icon={entry?.state === "locked" ? <Lock /> : undefined} label={compact ? undefined : text} color={entry?.state === "failed" ? "error" : entry?.state === "running" ? "primary" : "default"} variant={entry?.state === "running" ? "filled" : "outlined"} sx={compact ? { width: 10, height: 10, "& .MuiChip-icon": { display: "none" }, "& .MuiChip-label": { display: "none" } } : undefined} />; }
-function DependencyBadges({ entry, agents, agentName, t, compact = false }) { const roles = changedDependencies(entry, agents); if (!roles.length) return null; return <Stack direction="row" spacing={.5} sx={{ flexWrap: "wrap", justifyContent: "flex-end" }}>{roles.map(role => <Chip key={role} size="small" color="warning" variant="outlined" label={compact ? agentName(role) : t("dependencyUpdated", agentName(role))} title={t("dependencyUpdated", agentName(role))} sx={compact ? { maxWidth: 76, height: 18, fontSize: 10, "& .MuiChip-label": { px: .5, overflow: "hidden", textOverflow: "ellipsis" } } : undefined} />)}</Stack>; }
+function AgentState({ entry, agentName, t, compact = false }) { if (entry?.state === "complete" || entry?.state === "update_available") return null; let text = t(agentStateKey(entry)); if (entry?.state === "locked") text = t("finishOneAgentFirst", BUILD_NEEDS.map(need => need === "uploads" ? t("uploadSources") : agentName(need)).join(t("roleSeparator"))); return <Chip size="small" icon={entry?.state === "locked" ? <Lock /> : undefined} label={compact ? undefined : text} color={entry?.state === "failed" ? "error" : entry?.state === "running" ? "primary" : "default"} variant={entry?.state === "running" ? "filled" : "outlined"} sx={compact ? { width: 10, height: 10, "& .MuiChip-icon": { display: "none" }, "& .MuiChip-label": { display: "none" } } : undefined} />; }
 function NextSteps({ entry, agents, todos, onOpenAgent, agentName, t }) {
-  const gaps = agentDependencyGaps(entry);
   const locked = entry?.state === "locked";
-  const dependencies = [...gaps.required, ...gaps.alternatives];
   if (!locked && !todos.length) return null;
   return <Stack spacing={1} sx={{ mb: 1.5 }}>
     {locked && <Alert severity="warning" variant="outlined" sx={{ alignItems: "flex-start", "& .MuiAlert-message": { width: "100%", minWidth: 0 } }}>
@@ -255,7 +250,7 @@ function NextSteps({ entry, agents, todos, onOpenAgent, agentName, t }) {
           <Typography variant="caption" component="p" sx={{ mt: .35, mb: 0, lineHeight: 1.5 }}>{t("completeUpstreamWork")}</Typography>
         </Box>
         <Stack direction="row" spacing={.75} useFlexGap sx={{ flexWrap: "wrap" }}>
-          {dependencies.map(role => <Button key={role} variant="outlined" size="small" onClick={() => onOpenAgent(role)} endIcon={<ArrowForward />}>{agentName(role)}</Button>)}
+          {BUILD_NEEDS.map(need => <Button key={need} variant="outlined" size="small" onClick={() => onOpenAgent(need)} endIcon={<ArrowForward />}>{need === "uploads" ? t("uploadSources") : agentName(need)}</Button>)}
         </Stack>
       </Stack>
     </Alert>}
@@ -322,4 +317,4 @@ function VoiceControls({ root, id, enabled, handler, onSpeaking, onError, t }) {
   useEffect(() => () => { void stop(); }, [id]);
   return <Stack className="factory-voice-controls" direction="row" spacing={1} alignItems="center"><Button size="small" variant={active ? "outlined" : "contained"} disabled={!enabled} onClick={active ? stop : start}>{t(active ? "stopVoice" : "startVoice")}</Button><Typography variant="caption" color="text.secondary">{partial || (enabled ? (active ? t("listening") : "") : t("voiceUnavailable"))}</Typography></Stack>;
 }
-function factoryError(error, t, agentName) { if (error?.code === "agent_dependencies_not_ready") { const required = error.details?.missingRequired || []; const alternatives = error.details?.normalCandidates || []; if (required.length) return t("finishAgentsFirst", required.map(agentName).join(t("roleSeparator"))); if (alternatives.length) return t("finishOneAgentFirst", alternatives.map(agentName).join(t("roleSeparator"))); return t("agentNeedsPreparation"); } if (error?.code === "agent_definitions_unavailable" || error?.code === "agent_definitions_invalid") return t("agentSetupUnavailable"); return error?.message || t("unknownFactoryError"); }
+function factoryError(error, t, agentName) { if (error?.code === "build_not_ready") return t("finishOneAgentFirst", [t("uploadSources"), agentName("voice")].join(t("roleSeparator"))); if (error?.code === "agent_definitions_unavailable" || error?.code === "agent_definitions_invalid") return t("agentSetupUnavailable"); return error?.message || t("unknownFactoryError"); }

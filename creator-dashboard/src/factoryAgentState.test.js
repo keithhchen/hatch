@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { agentDependencyGaps, agentStateKey, changedDependencies, localizeAgentText } from './factoryAgentState.js';
+import { BUILD_NEEDS, agentStateKey, localizeAgentText, updatedSources } from './factoryAgentState.js';
 
 test('Agent state presentation follows the server state without inventing readiness', () => {
   assert.equal(agentStateKey(undefined), 'loadingAgentState');
@@ -9,11 +9,8 @@ test('Agent state presentation follows the server state without inventing readin
   }
 });
 
-test('locked Agent guidance preserves required work and normal alternatives', () => {
-  assert.deepEqual(agentDependencyGaps({
-    dependencies: { normal: ['voice', 'evaluator'] },
-    availability: { missingRequired: ['research', 'research'], normal: { required: true, satisfied: false } }
-  }), { required: ['research'], alternatives: ['voice', 'evaluator'] });
+test('a locked Build asks for uploads or the interview', () => {
+  assert.deepEqual([...BUILD_NEEDS], ['uploads', 'voice']);
 });
 
 test('database Agent copy uses current locale and falls back only to English', () => {
@@ -23,15 +20,7 @@ test('database Agent copy uses current locale and falls back only to English', (
   assert.equal(localizeAgentText({ zh: '研究' }, 'ja'), '');
 });
 
-test('dependency badges are derived separately from upstream output timestamps', () => {
-  const generation = { role: 'generation', outputUpdatedAt: '2026-09-10T03:00:00.000Z', dependencies: { required: [], normal: ['research', 'voice'], updates: ['evaluator'] } };
-  const agents = [
-    { role: 'research', outputUpdatedAt: '2026-09-10T04:00:00.000Z' },
-    { role: 'voice', outputUpdatedAt: '2026-09-10T05:00:00.000Z' },
-    { role: 'evaluator', outputUpdatedAt: '2026-09-10T06:00:00.000Z' },
-    generation,
-  ];
-  assert.deepEqual(changedDependencies(generation, agents), ['research', 'voice', 'evaluator']);
-  generation.outputUpdatedAt = '2026-09-10T07:00:00.000Z';
-  assert.deepEqual(changedDependencies(generation, agents), []);
+test('only an updated interview makes Build stale', () => {
+  assert.deepEqual(updatedSources({ state: 'update_available' }), ['voice']);
+  assert.deepEqual(updatedSources({ state: 'complete' }), []);
 });

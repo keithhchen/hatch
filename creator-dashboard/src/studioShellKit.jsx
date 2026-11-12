@@ -27,7 +27,7 @@ export function useAgentPath(request, product) {
   const productId = idOf(product, "product");
   const factory = useRemote(request, productId ? `/v1/creator/products/${encodeURIComponent(productId)}/factory-agents/config` : null);
   if (factory.state !== "ready" && factory.state !== "refreshing") return { state: factory.state, states: null, next: null };
-  const states = studioPathStates(arrayOf(factory.data?.agents), product);
+  const states = studioPathStates(arrayOf(factory.data?.agents), product, arrayOf(factory.data?.manualFiles));
   return { state: "ready", states, next: studioNextStep(states) };
 }
 

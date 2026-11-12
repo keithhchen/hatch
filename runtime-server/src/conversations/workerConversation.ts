@@ -1,5 +1,5 @@
 import type { WorkbenchRuntime } from "../factoryAgents/runtime.js";
-import { AgentDependenciesNotReadyError, type AgentEntry } from "../factoryAgents/definitions.js";
+import { BuildNotReadyError, type AgentEntry } from "../factoryAgents/definitions.js";
 import { userMessage } from "../factoryAgents/imageRefs.js";
 import type { MessageOrigin, Role, Session, WorkbenchStore } from "../factoryAgents/store.js";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -7,14 +7,14 @@ import { attachmentLines } from "./assets.js";
 import { failureOf } from "../factoryAgents/runFailure.js";
 import { ConversationError, page, type Conversation, type ConversationStatus, type SendInput, type Sent } from "./conversation.js";
 import { projectMessages } from "./project.js";
-import { blocked, blockedBy, blockedMessage, WORKERS, type Worker, type WorkerRegistry } from "./workers.js";
+import { blockedBy, blockedMessage, WORKERS, type Worker, type WorkerRegistry } from "./workers.js";
 
 /** The part of a Product workspace a worker conversation needs. */
 export interface WorkerWorkspace {
   store: Pick<WorkbenchStore, "list" | "create"> & { backend: Pick<WorkbenchStore["backend"], "writeManual"> };
   runtime: Pick<WorkbenchRuntime, "send" | "stop" | "events" | "runId" | "queued">;
   entries(): Promise<AgentEntry[]>;
-  /** Throws AgentDependenciesNotReadyError when the worker's dependencies have no output yet. */
+  /** Throws BuildNotReadyError when Build has neither uploads nor interview output. */
   assertRoleAvailable(role: Role): Promise<void>;
 }
 
@@ -89,9 +89,9 @@ export class WorkerConversation implements Conversation {
 
   private async assertAvailable(): Promise<void> {
     try { await this.workspace.assertRoleAvailable(this.worker.role); } catch (error) {
-      if (!(error instanceof AgentDependenciesNotReadyError)) throw error;
-      const reason = blocked(error.details, this.registry);
-      throw new ConversationError(409, "worker_unavailable", blockedMessage(this.worker.id, reason), { worker: this.worker.id, ...reason });
+      if (!(error instanceof BuildNotReadyError)) throw error;
+      const reason = { needs_one_of: ["uploads", "interview"] };
+      throw new ConversationError(409, "worker_unavailable", blockedMessage(this.worker.id), { worker: this.worker.id, ...reason });
     }
   }
 }
@@ -110,7 +110,7 @@ export class WorkerDirectory {
     return this.registry.all.map(worker => {
       const entry = entries.find(candidate => candidate.role === worker.role);
       const session = sessions.find(candidate => candidate.role === worker.role);
-      const reason = entry && blockedBy(entry, this.registry);
+      const reason = entry && blockedBy(entry);
       return {
         id: worker.id,
         name: entry?.name.en ?? worker.id,
