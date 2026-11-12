@@ -6,6 +6,8 @@
 .developers-page__tabs { display: flex; gap: 8px; margin-top: 28px; }
 .developers-page__tabs a { padding: 8px 18px; border-radius: 999px; color: var(--web-body); font-size: var(--hatch-type-ui); font-weight: var(--hatch-weight-strong); text-decoration: none; }
 .developers-page__tabs a[aria-current="page"] { background: var(--web-ink); color: var(--web-paper); }
+.developers-page__tabs[hidden] { display: none; }
+.developers-page__tabs--methods { margin-top: 8px; }
 .developers-page__steps { display: grid; gap: 28px; margin: 36px 0 0; padding: 0; list-style: none; counter-reset: step; }
 .developers-page__step { counter-increment: step; min-width: 0; }
 .developers-page__step h2 { margin: 0; font-size: var(--hatch-type-subheading); font-weight: var(--hatch-weight-bold); }

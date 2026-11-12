@@ -16,6 +16,83 @@ const WORKER_URL = `${PRODUCT_URL}/workers/research`;
 
 const INSTALL = sh(`npm install -g ${TARBALL_URL}`);
 
+const RESPONSES_URL = `${ORIGIN}/responses/v1`;
+const py = (text) => ({ lang: "python", text });
+const js = (text) => ({ lang: "javascript", text });
+const plain = (text) => ({ lang: "text", text });
+const CLIENT_PY = `import os\nfrom openai import OpenAI\n\nclient = OpenAI(base_url="${RESPONSES_URL}", api_key=os.environ["HATCH_API_KEY"])`;
+const CLIENT_JS = `import OpenAI from "openai";\n\nconst client = new OpenAI({ baseURL: "${RESPONSES_URL}", apiKey: process.env.HATCH_API_KEY });`;
+
+const RESPONSES = {
+  id: "responses",
+  group: "responses",
+  path: "/developers/responses",
+  steps: [
+    { id: "key", code: [sh("export HATCH_API_KEY=...")], link: KEYS_PATH },
+    { id: "sdk", code: [sh("pip install openai"), py(CLIENT_PY), sh("npm i openai"), js(CLIENT_JS)] },
+    {
+      id: "models",
+      code: [
+        py(`for model in client.models.list():\n    print(model.id)`),
+        js(`for await (const model of client.models.list()) console.log(model.id);`),
+        sh(`curl -s ${RESPONSES_URL}/models ${AUTH} \\\n  | jq '.data[] | {id, task_brief}'`),
+        json(`{\n  "id": "hatch:<product_id>",\n  "object": "model",\n  "task_brief": { "fields": [{ "id": "goal", "label": "Goal", "required": true }] }\n}`)
+      ]
+    },
+    {
+      id: "conversation",
+      code: [
+        py(`conversation = client.conversations.create(\n    metadata={"title": "Launch plan"},\n    extra_body={"model": "hatch:<product_id>", "task_brief": {"goal": "Plan a launch"}},\n)\nprint(conversation.id)`),
+        js(`const conversation = await client.conversations.create({\n  model: "hatch:<product_id>",\n  task_brief: { goal: "Plan a launch" },\n  metadata: { title: "Launch plan" },\n});`),
+        sh(`CONVERSATION_ID=$(curl -s -X POST ${RESPONSES_URL}/conversations ${AUTH} ${JSON_HEADER} \\\n  -d '{"model":"hatch:<product_id>","task_brief":{"goal":"Plan a launch"},"metadata":{"title":"Launch plan"}}' \\\n  | jq -r '.id')`),
+        sh(`curl -s ${RESPONSES_URL}/conversations/$CONVERSATION_ID ${AUTH}\ncurl -s "${RESPONSES_URL}/conversations?model=hatch:<product_id>&limit=20" ${AUTH}\ncurl -s ${RESPONSES_URL}/conversations/$CONVERSATION_ID/items ${AUTH}\ncurl -s -X DELETE ${RESPONSES_URL}/conversations/$CONVERSATION_ID ${AUTH}`)
+      ]
+    },
+    {
+      id: "respond",
+      code: [
+        py(`response = client.responses.create(\n    model="hatch:<product_id>",\n    conversation=conversation.id,\n    input="Draft the announcement",\n)\nprint(response.status, response.output_text, response.usage.total_tokens)`),
+        js(`const response = await client.responses.create({\n  model: "hatch:<product_id>",\n  conversation: conversation.id,\n  input: "Draft the announcement",\n});\nconsole.log(response.status, response.output_text, response.usage.total_tokens);`),
+        sh(`curl -s -X POST ${RESPONSES_URL}/responses ${AUTH} ${JSON_HEADER} -H "Idempotency-Key: $(uuidgen)" \\\n  -d '{"model":"hatch:<product_id>","conversation":"'"$CONVERSATION_ID"'","input":"Draft the announcement"}' \\\n  | jq '{id, status, output_text, usage}'`),
+        py(`client.responses.create(\n    model="hatch:<product_id>",\n    conversation=conversation.id,\n    input="Draft the announcement",\n    extra_headers={"Idempotency-Key": "launch-1"},\n)`),
+        sh(`curl -s -X POST ${RESPONSES_URL}/responses ${AUTH} ${JSON_HEADER} \\\n  -d '{"model":"hatch:<product_id>","conversation":"'"$CONVERSATION_ID"'","input":"Draft the announcement","background":true,"include":["hatch.tool_calls"]}'\ncurl -s ${RESPONSES_URL}/responses/$RESPONSE_ID ${AUTH}\ncurl -s -X POST ${RESPONSES_URL}/responses/$RESPONSE_ID/cancel ${AUTH}`)
+      ]
+    },
+    {
+      id: "stream",
+      code: [
+        py(`stream = client.responses.create(\n    model="hatch:<product_id>",\n    conversation=conversation.id,\n    input="Draft the announcement",\n    stream=True,\n)\nfor event in stream:\n    if event.type == "response.output_text.delta":\n        print(event.delta, end="", flush=True)`),
+        js(`const stream = await client.responses.create({\n  model: "hatch:<product_id>",\n  conversation: conversation.id,\n  input: "Draft the announcement",\n  stream: true,\n});\nfor await (const event of stream) {\n  if (event.type === "response.output_text.delta") process.stdout.write(event.delta);\n}`),
+        sh(`curl -N -X POST ${RESPONSES_URL}/responses ${AUTH} ${JSON_HEADER} \\\n  -d '{"model":"hatch:<product_id>","conversation":"'"$CONVERSATION_ID"'","input":"Draft the announcement","stream":true}'\ncurl -N "${RESPONSES_URL}/responses/$RESPONSE_ID?stream=true" ${AUTH}`),
+        plain(`response.created  response.in_progress\nresponse.output_item.added  response.content_part.added\nresponse.output_text.delta  response.output_text.done\nresponse.content_part.done  response.output_item.done\nresponse.completed | response.failed | response.incomplete\nerror`)
+      ]
+    },
+    {
+      id: "attachments",
+      code: [
+        py(`import base64\n\nphoto = base64.b64encode(open("photo.png", "rb").read()).decode()\nnotes = base64.b64encode(open("notes.pdf", "rb").read()).decode()\nresponse = client.responses.create(\n    model="hatch:<product_id>",\n    conversation=conversation.id,\n    input=[{\n        "role": "user",\n        "content": [\n            {"type": "input_text", "text": "Compare these"},\n            {"type": "input_image", "image_url": f"data:image/png;base64,{photo}"},\n            {"type": "input_file", "filename": "notes.pdf", "file_data": f"data:application/pdf;base64,{notes}"},\n        ],\n    }],\n)`),
+        js(`import { readFileSync } from "node:fs";\n\nconst photo = readFileSync("photo.png").toString("base64");\nconst notes = readFileSync("notes.pdf").toString("base64");\nconst response = await client.responses.create({\n  model: "hatch:<product_id>",\n  conversation: conversation.id,\n  input: [{\n    role: "user",\n    content: [\n      { type: "input_text", text: "Compare these" },\n      { type: "input_image", image_url: "data:image/png;base64," + photo },\n      { type: "input_file", filename: "notes.pdf", file_data: "data:application/pdf;base64," + notes },\n    ],\n  }],\n});`),
+        sh(`curl -s -X POST ${RESPONSES_URL}/responses ${AUTH} ${JSON_HEADER} \\\n  -d '{"model":"hatch:<product_id>","conversation":"'"$CONVERSATION_ID"'","input":[{"role":"user","content":[{"type":"input_text","text":"Describe this"},{"type":"input_image","image_url":"data:image/png;base64,'"$(base64 < photo.png | tr -d '\\n')"'"}]}]}'`)
+      ]
+    },
+    {
+      id: "continue",
+      code: [
+        py(`followup = client.responses.create(\n    model="hatch:<product_id>",\n    previous_response_id=response.id,\n    input="Shorter, please",\n)\nitems = client.conversations.items.list(conversation.id)`),
+        js(`const followup = await client.responses.create({\n  model: "hatch:<product_id>",\n  previous_response_id: response.id,\n  input: "Shorter, please",\n});`),
+        sh(`curl -s -X POST ${RESPONSES_URL}/responses ${AUTH} ${JSON_HEADER} \\\n  -d '{"model":"hatch:<product_id>","task_brief":{"goal":"Plan a launch"},"input":""}'`)
+      ]
+    },
+    {
+      id: "errors",
+      code: [
+        json(`{ "error": { "message": "…", "type": "conflict_error", "param": null, "code": "conversation_busy" } }`),
+        plain(`401  invalid_api_key\n404  model_not_found  conversation_not_found  response_not_found\n409  conversation_busy  idempotency_key_reused\n400  task_brief_required  unsupported_parameter\n413  file_too_large\n415  unsupported_file_type\n429  rate_limit_exceeded  insufficient_quota (usage_cap_exceeded)\n500  internal_error\n503  service_unavailable`)
+      ]
+    }
+  ]
+};
+
 export const METHODS = Object.freeze([
   {
     id: "cli",
@@ -77,7 +154,8 @@ export const METHODS = Object.freeze([
       { id: "workers", code: [sh("workers_list  worker_send  worker_history  worker_stop\nassistant_send  assistant_history")] },
       { id: "skill", code: [sh("hatch install-skill -g")] }
     ]
-  }
+  },
+  RESPONSES
 ]);
 
 const STEPS = (entries) => Object.freeze(Object.fromEntries(entries.map(([id, title, note]) => [id, Object.freeze({ title, note })])));
@@ -87,9 +165,11 @@ const COPY = Object.freeze({
     documentTitle: "Developers · Hatch",
     homeLabel: "Hatch home",
     title: "Developers",
-    scope: "This is the Hatch Studio API, for creating and managing your products. An API for the Agent products you create is coming soon.",
+    scope: "Hatch has two APIs. The Studio API creates and manages your products. The Responses API chats with your live products from your own code, through the OpenAI SDKs.",
+    apiLabel: "API",
     methodsLabel: "Integration method",
-    tabs: { cli: "CLI", api: "HTTP API", mcp: "MCP" },
+    tabs: { cli: "CLI", api: "HTTP API", mcp: "MCP", responses: "Responses API" },
+    groups: { studio: "Studio API", responses: "Responses API" },
     copy: "Copy", copied: "Copied", keys: "Open API keys", createKey: "Create an API key in Studio Settings",
     steps: {
       cli: STEPS([
@@ -128,6 +208,17 @@ const COPY = Object.freeze({
         ["tools", "Tools", "Sign-in, sign-out and API keys stay human actions in the CLI. There is no remote (HTTP) MCP yet, so chat apps without a terminal cannot connect; use the HTTP API."],
         ["workers", "Talk to workers"],
         ["skill", "Agent skill", "Teaches coding agents to use the CLI."]
+      ]),
+      responses: STEPS([
+        ["key", "Get an API key", "The same Hatch API key as the Studio API. Create one in Studio Settings, API keys."],
+        ["sdk", "Install the SDK and set the base URL", "The official OpenAI SDKs work unchanged. Base URL: `https://gethatchapp.com/responses/v1`."],
+        ["models", "List models", "Each of your live products is a model, `hatch:<product_id>`. `task_brief.fields` lists the Task Brief fields the product asks for."],
+        ["conversation", "Start a conversation with the Task Brief", "`task_brief` maps field ids to values; a missing required field returns 400 `task_brief_required`. Only `metadata.title` is supported. A conversation id is all you need afterwards. You can also list conversations, read items, rename (POST) and archive (DELETE)."],
+        ["respond", "Send a response", "Without `stream` the request waits up to 90 seconds; if the run is still going it returns `status: in_progress`, so poll `GET /responses/{id}`. `background: true` returns immediately. `include: [\"hatch.tool_calls\"]` adds the Agent's server-side tool calls as `hatch_tool_call` items. An approval appears as `mcp_approval_request`; only denial is supported now. SDKs do not send an Idempotency-Key by default; pass one to make retries safe. A second response while one is running returns 409 `conversation_busy`. Every response carries `usage`; usage is counted per account in Studio, Settings, Usage, and a monthly cap may return 429 `insufficient_quota`."],
+        ["stream", "Stream the response", "Server-sent events, with a keep-alive comment every 15 seconds. `GET /responses/{id}?stream=true` re-streams a response."],
+        ["attachments", "Send images and files", "`input_image` takes a `data:` or `https:` URL. `input_file` takes `file_data` (a data URL) with `filename`; or pass a public https URL as `file_url`. `file_id` is not supported yet; the Files API is coming soon."],
+        ["continue", "Continue a conversation", "Pass `conversation`, or `previous_response_id` of the latest response in that conversation. An empty `input` on a new conversation starts the run from the Task Brief alone; `task_brief` is only accepted when a new conversation is created."],
+        ["errors", "Errors and limits", "Errors use the OpenAI shape. Not supported, returning 400 `unsupported_parameter` with `param`: `instructions`, `tools`, `tool_choice` other than auto, `text.format`, `reasoning`, `max_output_tokens`, system, developer or assistant input roles, `store: false`, `file_id`, and `metadata` other than `title`. Ignored: `temperature`, `top_p`, `user`, `service_tier`."]
       ])
     }
   },
@@ -135,9 +226,11 @@ const COPY = Object.freeze({
     documentTitle: "开发者 · Hatch",
     homeLabel: "Hatch 首页",
     title: "开发者",
-    scope: "当前是 Hatch Studio API，用于创建和管理你的产品。你创建的 Agent 产品的 API 即将推出。",
+    scope: "Hatch 有两套 API。Studio API 用于创建和管理你的产品；Responses API 让你在自己的代码里通过 OpenAI SDK 与已上线的产品对话。",
+    apiLabel: "API",
     methodsLabel: "接入方式",
-    tabs: { cli: "CLI", api: "HTTP API", mcp: "MCP" },
+    tabs: { cli: "CLI", api: "HTTP API", mcp: "MCP", responses: "Responses API" },
+    groups: { studio: "Studio API", responses: "Responses API" },
     copy: "复制", copied: "已复制", keys: "打开 API 密钥", createKey: "在 Studio 设置里创建 API 密钥",
     steps: {
       cli: STEPS([
@@ -176,6 +269,17 @@ const COPY = Object.freeze({
         ["tools", "工具", "登录、登出和 API 密钥仍需由人在 CLI 中操作。目前没有远程（HTTP）MCP，没有终端的聊天应用无法连接；请使用 HTTP API。"],
         ["workers", "和 Worker 对话"],
         ["skill", "Agent skill", "让编程 Agent 学会使用 CLI。"]
+      ]),
+      responses: STEPS([
+        ["key", "获取 API 密钥", "与 Studio API 使用同一个 Hatch API 密钥。在 Studio 设置的 API 密钥里创建。"],
+        ["sdk", "安装 SDK 并设置 base URL", "官方 OpenAI SDK 无需修改即可使用。Base URL：`https://gethatchapp.com/responses/v1`。"],
+        ["models", "列出模型", "你每个已上线的产品都是一个模型，`hatch:<product_id>`。`task_brief.fields` 列出该产品需要的 Task Brief 字段。"],
+        ["conversation", "用 Task Brief 开始对话", "`task_brief` 是字段 id 到值的映射；缺少必填字段会返回 400 `task_brief_required`。只支持 `metadata.title`。之后只需要对话 id。你还可以列出对话、读取 items、改名（POST）和归档（DELETE）。"],
+        ["respond", "发送 response", "不带 `stream` 时请求最多等待 90 秒；若运行仍在进行，返回 `status: in_progress`，此时轮询 `GET /responses/{id}`。`background: true` 会立即返回。`include: [\"hatch.tool_calls\"]` 会把 Agent 在服务端的工具调用以 `hatch_tool_call` item 返回。审批以 `mcp_approval_request` 出现；目前只支持拒绝。SDK 默认不发送 Idempotency-Key；传入后重试才安全。运行中再发 response 会返回 409 `conversation_busy`。每个 response 都带 `usage`；用量按账号统计，见 Studio 设置的用量页，月度上限可能返回 429 `insufficient_quota`。"],
+        ["stream", "流式输出", "Server-sent events，每 15 秒一条 keep-alive 注释。`GET /responses/{id}?stream=true` 可重新流式读取某个 response。"],
+        ["attachments", "发送图片和文件", "`input_image` 接受 `data:` 或 `https:` URL。`input_file` 接受带 `filename` 的 `file_data`（data URL）；也可以把公开的 https URL 作为 `file_url` 传入。暂不支持 `file_id`；Files API 即将推出。"],
+        ["continue", "继续对话", "传入 `conversation`，或该对话最新 response 的 `previous_response_id`。新对话的 `input` 为空时，仅凭 Task Brief 启动运行；`task_brief` 只在创建新对话时接受。"],
+        ["errors", "错误与限制", "错误采用 OpenAI 格式。不支持的参数返回 400 `unsupported_parameter` 并带 `param`：`instructions`、`tools`、非 auto 的 `tool_choice`、`text.format`、`reasoning`、`max_output_tokens`、system/developer/assistant 输入角色、`store: false`、`file_id`，以及 `title` 以外的 `metadata`。会被忽略：`temperature`、`top_p`、`user`、`service_tier`。"]
       ])
     }
   },
@@ -183,9 +287,11 @@ const COPY = Object.freeze({
     documentTitle: "開発者 · Hatch",
     homeLabel: "Hatch ホーム",
     title: "開発者",
-    scope: "これは Hatch Studio API です。プロダクトの作成と管理に使います。あなたが作った Agent プロダクトの API は近日公開予定です。",
+    scope: "Hatch には 2 つの API があります。Studio API はプロダクトの作成と管理に、Responses API は公開中のプロダクトと自分のコードから OpenAI SDK で会話するために使います。",
+    apiLabel: "API",
     methodsLabel: "連携方法",
-    tabs: { cli: "CLI", api: "HTTP API", mcp: "MCP" },
+    tabs: { cli: "CLI", api: "HTTP API", mcp: "MCP", responses: "Responses API" },
+    groups: { studio: "Studio API", responses: "Responses API" },
     copy: "コピー", copied: "コピーしました", keys: "API キーを開く", createKey: "Studio の設定で API キーを作成",
     steps: {
       cli: STEPS([
@@ -224,6 +330,17 @@ const COPY = Object.freeze({
         ["tools", "ツール", "ログイン、ログアウト、API キーは引き続き人が CLI で操作します。リモート（HTTP）MCP はまだなく、ターミナルのないチャットアプリからは接続できません。HTTP API を使ってください。"],
         ["workers", "ワーカーと話す"],
         ["skill", "エージェントスキル", "コーディングエージェントに CLI の使い方を教えます。"]
+      ]),
+      responses: STEPS([
+        ["key", "API キーを取得", "Studio API と同じ Hatch API キーです。Studio の設定、API キーで作成します。"],
+        ["sdk", "SDK をインストールして base URL を設定", "公式の OpenAI SDK がそのまま使えます。Base URL: `https://gethatchapp.com/responses/v1`。"],
+        ["models", "モデルを一覧表示", "公開中の各プロダクトがモデル `hatch:<product_id>` になります。`task_brief.fields` にそのプロダクトが求める Task Brief の項目が並びます。"],
+        ["conversation", "Task Brief で会話を始める", "`task_brief` は項目 id から値へのマップです。必須項目が欠けると 400 `task_brief_required` を返します。サポートするのは `metadata.title` のみです。以降は会話 id だけで足ります。会話の一覧、items の取得、名前変更（POST）、アーカイブ（DELETE）もできます。"],
+        ["respond", "response を送る", "`stream` なしの場合、リクエストは最大 90 秒待ちます。まだ実行中なら `status: in_progress` を返すので、`GET /responses/{id}` をポーリングします。`background: true` はすぐに返ります。`include: [\"hatch.tool_calls\"]` で Agent のサーバー側ツール呼び出しが `hatch_tool_call` item として含まれます。承認は `mcp_approval_request` として現れ、現在は拒否のみ対応です。SDK は既定で Idempotency-Key を送りません。渡すとリトライが安全になります。実行中にもう 1 つ response を送ると 409 `conversation_busy` を返します。すべての response に `usage` が付きます。使用量はアカウント単位で、Studio の設定、使用量で確認でき、月間上限に達すると 429 `insufficient_quota` を返すことがあります。"],
+        ["stream", "ストリーミング", "Server-sent events で、15 秒ごとに keep-alive コメントが届きます。`GET /responses/{id}?stream=true` で response を再ストリームできます。"],
+        ["attachments", "画像とファイルを送る", "`input_image` は `data:` または `https:` の URL を受け付けます。`input_file` は `filename` 付きの `file_data`（data URL）を受け付けます。公開された https URL を `file_url` として渡すこともできます。`file_id` はまだ未対応です。Files API は近日公開予定です。"],
+        ["continue", "会話を続ける", "`conversation` か、その会話の最新 response の `previous_response_id` を渡します。新しい会話で `input` が空なら、Task Brief だけで実行を開始します。`task_brief` は新しい会話を作るときだけ受け付けます。"],
+        ["errors", "エラーと制限", "エラーは OpenAI 形式です。未対応のパラメータは 400 `unsupported_parameter` と `param` を返します。対象: `instructions`、`tools`、auto 以外の `tool_choice`、`text.format`、`reasoning`、`max_output_tokens`、system / developer / assistant の入力ロール、`store: false`、`file_id`、`title` 以外の `metadata`。無視されるもの: `temperature`、`top_p`、`user`、`service_tier`。"]
       ])
     }
   }
@@ -246,9 +363,17 @@ export class DevelopersGuide {
     return this.methods.map((method) => ({
       id: method.id,
       path: method.path,
+      group: method.group ?? "studio",
       label: this.copy.tabs[method.id],
       steps: method.steps.map((step, index) => ({ ...step, number: index + 1, ...this.copy.steps[method.id][step.id] }))
     }));
+  }
+
+  /** The top-level switch: one entry per API, linking to its first tab. */
+  get groups() {
+    const seen = [];
+    for (const tab of this.tabs) if (!seen.some((group) => group.id === tab.group)) seen.push({ id: tab.group, path: tab.path, label: this.copy.groups[tab.group] });
+    return seen;
   }
 
   tab(id) {
