@@ -12,7 +12,6 @@ import { createAgentRuntime, type AgentRuntime, type RunContext, type RuntimeSes
 import { ThinkingPartJournal } from "./thinkingPartJournal.js";
 import {
   clientMessageInputDigest,
-  persistedAttachment,
   MAX_RICH_TOOL_RESULT_BYTES,
   parseInboundMessage,
   TASK_START_MESSAGE_CONTENT,
@@ -105,6 +104,7 @@ import { checkUpgrade, sessionTokenFromCookie } from "./chat/originPolicy.js";
 import { RunHandoff } from "./chat/runSupervisor.js";
 import { ServiceChatGateway } from "./chat/serviceGateway.js";
 import { ChatServiceApi } from "./chat/serviceApi.js";
+import { prepareSocketMessage } from "./chat/socketAttachments.js";
 import { ChatAssets, TextPartsReader, type PartsReader, type PreparedMessage } from "./chat/assets.js";
 import { attachmentToolDefinitions } from "./chat/attachmentTools.js";
 import { errorMessage, failRun, runModelTurn } from "./chat/modelTurn.js";
@@ -849,7 +849,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   });
   void repositoryReady.then(() => chat.start()).catch(() => undefined);
   const edge: ChatEdge = {
-    chat, assetStore, parts, chatAssets, turnAuthorizationGate, turnAuthorizationPerUserGate,
+    chat, parts, chatAssets, turnAuthorizationGate, turnAuthorizationPerUserGate,
     entitlementResolver, authIdentityResolver, agentCorpusResolver,
     creatorToolControlPlane: options.creatorToolControlPlane,
     consumerBufferedBytes: options.maxConsumerBufferedBytes ?? MAX_CONSUMER_BUFFERED_BYTES
@@ -2105,44 +2105,11 @@ function writeJsonBounded(
   res.end(serialized);
 }
 
-async function materializeUserMessageAssets(
-  message: RunStart["message"],
-  assetStore: RuntimeAssetStore
-): Promise<ConversationMessage> {
-  const attachments = [];
-  const modelImages: NonNullable<ConversationMessage["model_images"]> = [];
-  for (const attachment of message.attachments ?? []) {
-    if ("kind" in attachment && attachment.kind === "local_file") {
-      attachments.push(persistedAttachment(attachment));
-      if (attachment.media_type.startsWith("image/")) {
-        if (!attachment.data_base64) throw new Error("Image bytes are required before message acceptance");
-        modelImages.push({ type: "image", mimeType: attachment.media_type, data: attachment.data_base64 });
-      }
-      continue;
-    }
-    const persisted = "kind" in attachment && attachment.kind === "asset"
-      ? await assetStore.put(attachment)
-      : attachment;
-    attachments.push(persisted);
-    if ("kind" in persisted && persisted.kind === "asset" && persisted.media_type.startsWith("image/")) {
-      modelImages.push({ type: "image", mimeType: persisted.media_type,
-        data: await assetStore.readBase64(persisted.asset_id, "storage_ref" in persisted ? persisted.storage_ref : undefined) });
-    }
-  }
-  return {
-    role: "user",
-    content: message.content,
-    model_images: modelImages,
-    ...(attachments.length > 0 ? { attachments } : {})
-  };
-}
-
 /** What both transports need to turn an authenticated user message into a Run or a steer. */
 type ChatEdge = {
   /** What a Chat event consumer may leave unsent before it is disconnected. */
   consumerBufferedBytes: number;
   chat: ChatRuntime<SessionBinding>;
-  assetStore: RuntimeAssetStore;
   parts: PartsReader;
   chatAssets?: ChatAssets;
   /** The channel layer's door into Chat from another process. */
@@ -2218,9 +2185,9 @@ async function submitUserMessage(
   if (request.taskStart && binding.briefSpec && !session.conversation.briefSnapshot) {
     throw new ChatError("conversation_brief_required", "A Brief is required before starting this task.", 409);
   }
-  const canonicalMessage = request.prepared?.message ?? (async (): Promise<ConversationMessage> => request.taskStart
-    ? { role: "user", content: TASK_START_MESSAGE_CONTENT, kind: "task_start" }
-    : materializeUserMessageAssets(request.message, edge.assetStore));
+  const prepared = request.taskStart ? undefined
+    : request.prepared ?? await prepareSocketMessage(edge, request.message, session.conversation, request.clientMessageId);
+  const canonicalMessage = prepared?.message ?? (async (): Promise<ConversationMessage> => ({ role: "user", content: TASK_START_MESSAGE_CONTENT, kind: "task_start" }));
   signal?.throwIfAborted();
   const submission = await edge.chat.service.submit({
     principal: accountPrincipal(binding.userId),
@@ -2229,8 +2196,8 @@ async function submitUserMessage(
     client: request.client,
     clientMessageId: request.clientMessageId,
     message: canonicalMessage,
-    ...(request.prepared?.bind ? { bind: request.prepared.bind } : {}),
-    digest: request.prepared?.digest ?? clientMessageInputDigest({ ...request.message, ...(request.taskStart ? { task_start: true } : {}) }),
+    ...(prepared?.bind ? { bind: prepared.bind } : {}),
+    digest: prepared?.digest ?? clientMessageInputDigest({ ...request.message, task_start: true }),
     runId: request.runId,
     corpusDigest: binding.corpusDigest,
     requiresLocalTools: binding.agentCorpus ? productRequiresLocalTools(binding.agentCorpus) : false,
@@ -2640,6 +2607,11 @@ export function privateBoundaryProjection(current: () => { agentCorpusRoot?: str
   };
 }
 
+const protectedSkillPath = (agentId: string, name: string): string =>
+  `agent://${encodeURIComponent(agentId)}/protected-skill/${encodeURIComponent(name)}`;
+const redactedTrigger = <T extends { path?: string }>(trigger: T): T => ({ ...trigger, path: trigger.path ? "agent://private" : undefined });
+const redactedToolOutput = (result: unknown) => ({ arguments: {}, result: result !== undefined ? { private_result_redacted: true } : undefined });
+
 export function protectPrivateAgentBoundary(
   message: OutboundMessage,
   agentCorpusRoot?: string,
@@ -2649,16 +2621,14 @@ export function protectPrivateAgentBoundary(
   if (message.type === "skill.activated" || message.type === "skill.invoked") {
     return {
       ...message,
-      path: `agent://${encodeURIComponent(agentId)}/protected-skill/${encodeURIComponent(message.name)}`,
+      path: protectedSkillPath(agentId, message.name),
       ...(message.type === "skill.activated" ? { resource_paths: [], resource_manifest_truncated: false } : {}),
-      ...(message.type === "skill.invoked" ? { trigger: { ...message.trigger, path: message.trigger.path ? "agent://private" : undefined } } : {})
+      ...(message.type === "skill.invoked" ? { trigger: redactedTrigger(message.trigger) } : {})
     } as OutboundMessage;
   }
   if (message.type === "tool_call.delta" && message.locality === "server") {
     const serializedArguments = JSON.stringify(message.arguments ?? {});
-    if (serializedArguments.includes(agentCorpusRoot)) {
-      return { ...message, arguments: {}, result: message.result ? { private_result_redacted: true } : undefined };
-    }
+    if (serializedArguments.includes(agentCorpusRoot)) return { ...message, ...redactedToolOutput(message.result) };
   }
   return message;
 }
@@ -3046,15 +3016,15 @@ function sanitizeBoundHistory<T extends Awaited<ReturnType<RuntimeStore["readVis
     ...(message.skill_events ? {
       skill_events: message.skill_events.map((event) => ({
         ...event,
-        path: `agent://${encodeURIComponent(productId)}/protected-skill/${encodeURIComponent(event.name)}`,
+        path: protectedSkillPath(productId, event.name),
         resource_paths: event.resource_paths ? [] : undefined,
         resource_manifest_truncated: event.resource_manifest_truncated === undefined ? undefined : false,
-        trigger: event.trigger ? { ...event.trigger, path: event.trigger.path ? "agent://private" : undefined } : undefined
+        trigger: event.trigger ? redactedTrigger(event.trigger) : undefined
       }))
     } : {}),
     ...(message.tool_calls ? {
       tool_calls: message.tool_calls.map((tool) => tool.locality === "server" && /^file[._]/.test(tool.name)
-        ? { ...tool, arguments: {}, result: tool.result === undefined ? undefined : { private_result_redacted: true } }
+        ? { ...tool, ...redactedToolOutput(tool.result) }
         : tool)
     } : {})
   }));
