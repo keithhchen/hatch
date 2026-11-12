@@ -4,71 +4,43 @@ import http from "node:http";
 import { stat } from "node:fs/promises";
 import path from "node:path";
 import { WebSocketServer } from "ws";
-import { ZodError } from "zod";
-import { ClientToolBroker } from "./clientBroker.js";
-import { type RuntimeCompactionMessage } from "./compaction.js";
-import { createAgentRuntime, type AgentRuntime, type RunContext, type RuntimeSessionSkills } from "./agentRuntime.js";
-import { ThinkingPartJournal } from "./thinkingPartJournal.js";
-import { MAX_RICH_TOOL_RESULT_BYTES, type BoundRunStart, type OutputFinishReason } from "./protocol.js";
-import { RunStateMachine } from "./runState.js";
+import { createAgentRuntime, type AgentRuntime, type RuntimeSessionSkills } from "./agentRuntime.js";
+import { MAX_RICH_TOOL_RESULT_BYTES } from "./protocol.js";
 import { failures } from "./errors/failures.js";
 import { PostgresFailureLedger } from "./errors/postgresFailureLedger.js";
 import { ServerToolExecutor } from "./serverTools.js";
-import { RuntimeStore, type VisibleConversationPart } from "./store.js";
+import { RuntimeStore } from "./store.js";
 import { PostgresStore } from "./postgresStore.js";
 import {
   InMemoryConversationRepository,
   PostgresConversationRepository,
-  type ConversationRepository,
-  type ConversationRunRecord
+  type ConversationRepository
 } from "./conversationRepository.js";
 import { ToolBridge } from "./toolBridge.js";
 import {
-  EntitlementError,
   FileEntitlementResolver,
   RegistryEntitlementResolver,
   registryAuthorizationTimeoutMs,
-  type AuthIdentity,
   type AuthIdentityResolver,
-  type EntitlementBinding,
   type EntitlementResolver
 } from "./entitlements.js";
-import {
-  deliveryReceiptFromMetadata,
-  findCompletedDelivery,
-  prepareDelivery,
-  recordPreparedDelivery,
-  releaseDeliveryUnit,
-  reserveDeliveryUnit,
-  type CommerceEventSink,
-  type DeliveryArtifact,
-  type DeliveryBinding,
-  type DeliveryUnitReservation
-} from "./delivery.js";
+import { deliveryReceiptFromMetadata, recordPreparedDelivery, type CommerceEventSink } from "./delivery.js";
 import { HttpCommerceEventSink } from "./commerceHttpSink.js";
-import { DeliveryAccountingOutbox, type DeliveryAccountingCommand } from "./deliveryOutbox.js";
-import { materializeAgentCorpus } from "./agentCorpusMaterialization.js";
+import { DeliveryAccountingOutbox } from "./deliveryOutbox.js";
 import { creatorToolControlPlaneFromEnvironment, resolveCreatorTools, type CreatorToolControlPlane } from "./creatorTools.js";
 import { AgentCorpusResolver as FilesystemAgentCorpusResolver, type AgentCorpusResolverLike } from "./agentCorpus.js";
-import { AgentReleaseUnavailableError, RuntimeReleaseAgentCorpusResolver } from "./runtimeCorpusResolver.js";
+import { RuntimeReleaseAgentCorpusResolver } from "./runtimeCorpusResolver.js";
 import {
   discoverSkills,
   includeSkillInstructions,
   renderSkillsSection,
   visibleSkillsForSession
 } from "./skills.js";
-import { type BriefSnapshot, type BriefSpec } from "./brief.js";
-import {
-  createOutputGuardFromEnvironment,
-  GuardedAssistantOutput,
-  OUTPUT_GUARD_BLOCKED_MODEL_MESSAGE,
-  PassThroughOutputGuard,
-  type GuardedOutputResult,
-  type OutputGuard
-} from "./outputGuard.js";
+import { type BriefSpec } from "./brief.js";
+import { createOutputGuardFromEnvironment, PassThroughOutputGuard, type OutputGuard } from "./outputGuard.js";
 import { writeOperationalError } from "./operationalLogging.js";
 import { RuntimeAssetStore, runtimeAssetStoreFromEnvironment } from "./assetStore.js";
-import { flushLangfuseObservability, initializeLangfuseObservability, withLangfuseTurn } from "./langfuse.js";
+import { flushLangfuseObservability, initializeLangfuseObservability } from "./langfuse.js";
 import { ChatRuntime, type ChatRuntimeOptions } from "./chat/chatRuntime.js";
 import { PostgresEventRelay } from "./chat/eventRelay.js";
 import { PostgresStopRelay } from "./chat/stopRelay.js";
@@ -78,12 +50,11 @@ import { ContactBinder, SentMessageLimits, type ConnectionDirectory } from "./ch
 import { SelfBinder } from "./chat/selfBinding.js";
 import type { ChatGateway } from "./chat/gateway.js";
 import { checkUpgrade } from "./chat/originPolicy.js";
-import { RunHandoff } from "./chat/runSupervisor.js";
 import { ServiceChatGateway } from "./chat/serviceGateway.js";
 import { ChatServiceApi } from "./chat/serviceApi.js";
 import { ChatAssets, TextPartsReader, type PartsReader } from "./chat/assets.js";
 import { attachmentToolDefinitions } from "./chat/attachmentTools.js";
-import { errorMessage, failRun, runModelTurn } from "./chat/modelTurn.js";
+import { failRun, runModelTurn } from "./chat/modelTurn.js";
 import { toolRegistry } from "./tools.js";
 import { RegistryConnectionDirectory } from "./chat/registryConnections.js";
 import { openChatAssets } from "./chat/openChatAssets.js";
@@ -91,43 +62,30 @@ import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
 import { MAX_CONSUMER_BUFFERED_BYTES } from "./chat/sinks.js";
 import { productRequiresLocalTools } from "./chat/toolSurface.js";
 import type { ScopeResolver, TurnRunner } from "./chat/turnExecutor.js";
-import type { TurnCompaction } from "./chat/chatCompaction.js";
-import { isContextOverflow, type AssistantMessage } from "@earendil-works/pi-ai";
 import { observed } from "./observability/http.js";
 import { InflightResponses, drainMsFromEnvironment, exitOnSignal, gracefulShutdown } from "./gracefulShutdown.js";
 import { log } from "./observability/log.js";
-import { ConversationError as ConversationHttpError } from "./conversations/conversation.js";
 import { startObservability } from "./observability/start.js";
 import {
   CapacityGate, KeyedCapacityGate, combineCapacityReleases, once, readRuntimeConfig,
-  DEFAULT_MAX_CONTACT_MESSAGES, clientToolTimeoutMs, legacyHmacAuthEnabled, runtimeClientHelloTimeoutMs
+  DEFAULT_MAX_CONTACT_MESSAGES, clientToolTimeoutMs
 } from "./runtimeConfig.js";
-
-export { clientToolTimeoutMs, legacyHmacAuthEnabled, runtimeClientHelloTimeoutMs };
 import {
-  assertEntitlementMatchesIdentity,
-  durableConversationId,
-  legacyAuthClaims,
-  privateBoundaryProjection,
-  protectPrivateAgentBoundary,
-  resolveAuthIdentity,
-  sanitizeBoundHistory,
-  scopedConversationId,
   unconfiguredAgentCorpusResolver,
   unconfiguredEntitlementResolver,
   type LegacyHmacAuth,
   type SessionBinding
 } from "./chat/sessionBinding.js";
-import {
-  bearerToken, handleHttpRequestFailure, httpDeadlineMs, setCorsHeaders, writeConversationHttpError,
-  writeHttpAuthorizationFailure, writeJson, writeJsonBounded
-} from "./http/httpSupport.js";
-import { bindingFromHistoryRequest } from "./http/requestBinding.js";
-import { handleConversationHttpRequest, serveConversationAsset } from "./http/conversationRoutes.js";
+import type { ChatEdge } from "./chat/turnSubmission.js";
+import { bearerToken, handleHttpRequestFailure, httpDeadlineMs, writeJson } from "./http/httpSupport.js";
+import { handleHttpRequest, type RuntimeReadiness } from "./http/runtimeRouter.js";
 import { handleRuntimeSocket } from "./ws/runtimeSocket.js";
-import { type ChatEdge } from "./chat/turnSubmission.js";
 
-export { durableConversationId, privateBoundaryProjection, protectPrivateAgentBoundary, scopedConversationId };
+// The Runtime's public surface stays here: callers import these from index.js.
+export { clientToolTimeoutMs, legacyHmacAuthEnabled, runtimeClientHelloTimeoutMs } from "./runtimeConfig.js";
+export {
+  durableConversationId, privateBoundaryProjection, protectPrivateAgentBoundary, scopedConversationId
+} from "./chat/sessionBinding.js";
 
 type AgentCorpusResolver = AgentCorpusResolverLike;
 
@@ -361,13 +319,6 @@ export async function createRuntimeServerFromEnvironment(
   });
 }
 
-type ReadinessCheck = "starting" | "ready" | "failed";
-type RuntimeReadiness = {
-  /** Set once shutdown begins, so the proxy sends nothing new. */
-  draining?: boolean;
-  repository: ReadinessCheck;
-  deliveryAccounting: ReadinessCheck | "disabled";
-};
 export function createRuntimeServer(options: RuntimeServerOptions = {}): RuntimeServer {
   const connectionTasks = new Set<Promise<void>>();
   const createRuntime = options.createRuntime ?? createAgentRuntime;
@@ -602,24 +553,20 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       }
     }, requestDeadlineMs);
     requestDeadline?.unref();
-    const requestTask = handleHttpRequest(
-      req,
-      res,
+    const requestTask = handleHttpRequest(req, res, {
       entitlementResolver,
       agentCorpusResolver,
       conversationStore,
       assetStore,
       authIdentityResolver,
       legacyHmacAuth,
-      requestAbortController.signal,
       maxHttpResponseBytes,
       conversationRepository,
       repositoryReady,
       edge,
-      commerceEventSink,
       readiness,
       allowedOrigins
-    );
+    }, requestAbortController.signal);
     void requestTask.catch((error) => {
       if (!res.destroyed && !res.writableEnded) handleHttpRequestFailure(res, error);
     }).finally(() => {
@@ -766,284 +713,6 @@ function chatGatewayFor(
       }
     }
   });
-}
-
-async function handleHttpRequest(
-  req: http.IncomingMessage,
-  res: http.ServerResponse,
-  entitlementResolver?: EntitlementResolver,
-  agentCorpusResolver?: AgentCorpusResolver,
-  conversationStore?: RuntimeStore,
-  assetStore?: RuntimeAssetStore,
-  authIdentityResolver?: AuthIdentityResolver,
-  legacyHmacAuth: LegacyHmacAuth = { enabled: false },
-  signal?: AbortSignal,
-  maxHttpResponseBytes = 64 * 1024 * 1024,
-  conversationRepository?: ConversationRepository,
-  repositoryReady?: Promise<unknown>,
-  edge?: ChatEdge,
-  commerceEventSink?: CommerceEventSink,
-  readiness?: RuntimeReadiness,
-  allowedOrigins: readonly string[] = []
-): Promise<void> {
-  setCorsHeaders(res);
-  if (req.method === "OPTIONS") {
-    res.writeHead(204);
-    res.end();
-    return;
-  }
-
-  const url = new URL(req.url ?? "/", "http://127.0.0.1");
-  if (req.method === "GET" && url.pathname === "/healthz") {
-    writeJson(res, 200, { ok: true });
-    return;
-  }
-  if (req.method === "GET" && url.pathname === "/readyz") {
-    const repository = readiness?.repository ?? "failed";
-    const deliveryAccounting = readiness?.deliveryAccounting ?? "disabled";
-    const ready = !readiness?.draining && repository === "ready"
-      && (deliveryAccounting === "ready" || deliveryAccounting === "disabled");
-    writeJson(res, ready ? 200 : 503, {
-      ok: ready,
-      checks: {
-        conversation_repository: repository,
-        delivery_accounting: deliveryAccounting
-      }
-    });
-    return;
-  }
-
-  if (req.method === "GET" && url.pathname === "/v1/me/creator-agents") {
-    const authToken = bearerToken(req);
-    if (!authToken) {
-      writeJson(res, 401, { error: { code: "authentication_required", message: "Sign in to view purchased Expert Agents." } });
-      return;
-    }
-    let identity: AuthIdentity | undefined;
-    try {
-      identity = await resolveAuthIdentity(authToken, authIdentityResolver, signal);
-    } catch (error) {
-      writeJson(res, 503, { error: { code: error instanceof EntitlementError ? error.code : "authentication_unavailable", message: errorMessage(error) } });
-      return;
-    }
-    const claims = identity ?? legacyAuthClaims(authToken, authIdentityResolver, legacyHmacAuth);
-    if (authIdentityResolver && !identity) {
-      writeJson(res, 401, { error: { code: "authentication_required", message: "Your Hatch session is no longer valid." } });
-      return;
-    }
-    if (!claims && !entitlementResolver) {
-      writeJson(res, 503, { error: { code: "entitlements_unavailable", message: "Expert Agent purchases are temporarily unavailable." } });
-      return;
-    }
-    try {
-      // Access is relational: owned rows are the account's own published
-      // Products (addressed by product_id, no entitlement_id); every other
-      // row is an entitlement grant.
-      const creatorAgents: Array<Record<string, unknown>> = claims && agentCorpusResolver
-        ? (await agentCorpusResolver.list(claims.sub, signal)).map(({ corpus, digest }) => ({
-          creator_id: corpus.creator.id,
-          product_id: corpus.product.id,
-          corpus_digest: digest,
-          effective_corpus_digest: digest,
-          creator: corpus.creator,
-          product: {
-            id: corpus.product.id,
-            name: corpus.product.name,
-            description: corpus.product.description ?? "",
-            ...(corpus.product.brief_spec ? { brief_spec: corpus.product.brief_spec } : {}),
-            ...(corpus.product.promise ? { promise: corpus.product.promise } : {}),
-            ...(corpus.product.boundaries.length ? { boundaries: corpus.product.boundaries } : {})
-          },
-          presentation: corpus.product.presentation
-        }))
-        : [];
-      if (entitlementResolver) {
-        const entitlements = await entitlementResolver.list({
-          authToken,
-          licenseToken: authToken,
-          signal
-        });
-        // Resolve Corpus digests sequentially. A buyer can own many grants and
-        // each digest walks bounded assets; unbounded Promise.all multiplies
-        // transient memory by the full grant count.
-        for (const entitlement of entitlements) {
-          signal?.throwIfAborted();
-          assertEntitlementMatchesIdentity(claims, entitlement);
-          if (!agentCorpusResolver) throw new Error("Current Agent Corpus resolver is unavailable");
-          let resolved: Awaited<ReturnType<AgentCorpusResolver["resolve"]>>;
-          try {
-            resolved = await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.product_id, signal);
-          } catch (error) {
-            // A withdrawn Agent is not chat-able; it leaves the list like it
-            // leaves the Web library. Every other failure still fails the call.
-            if (error instanceof AgentReleaseUnavailableError) continue;
-            throw error;
-          }
-          if (resolved.corpus.product.id !== entitlement.product_id || resolved.corpus.creator.id !== entitlement.creator_id) {
-            throw new Error(`Entitlement ${entitlement.entitlement_id} does not match its current Agent Corpus`);
-          }
-          creatorAgents.push({
-            entitlement_id: entitlement.entitlement_id,
-            creator_id: entitlement.creator_id,
-            product_id: entitlement.product_id,
-            corpus_digest: resolved.digest,
-            purchased_corpus_digest: entitlement.purchased_corpus_digest ?? resolved.digest,
-            effective_corpus_digest: resolved.digest,
-            creator: resolved.corpus.creator,
-            product: {
-              id: resolved.corpus.product.id,
-              name: resolved.corpus.product.name,
-              description: resolved.corpus.product.description ?? "",
-              ...(resolved.corpus.product.brief_spec ? { brief_spec: resolved.corpus.product.brief_spec } : {}),
-              ...(resolved.corpus.product.promise ? { promise: resolved.corpus.product.promise } : {}),
-              ...(resolved.corpus.product.boundaries.length ? { boundaries: resolved.corpus.product.boundaries } : {})
-            },
-            presentation: resolved.corpus.product.presentation
-          });
-        }
-      }
-      writeJsonBounded(res, 200, { creator_agents: creatorAgents }, maxHttpResponseBytes);
-    } catch (error) {
-      writeHttpAuthorizationFailure(res, error, "entitlement_lookup_failed");
-    }
-    return;
-  }
-
-  if (url.pathname.startsWith("/v1/service/chat/")) {
-    try {
-      await repositoryReady;
-      if (!await edge?.serviceApi?.handle(req, res, url)) throw new ConversationHttpError(404, "not_found", "Route was not found.");
-    } catch (error) {
-      writeConversationHttpError(req, res, error);
-    }
-    return;
-  }
-
-  if (url.pathname === "/v1/conversations" || url.pathname.startsWith("/v1/conversations/")) {
-    if (!conversationRepository) {
-      writeJson(res, 503, { error: { code: "conversation_repository_unavailable", message: "Conversation storage is unavailable." } });
-      return;
-    }
-    try {
-      await repositoryReady;
-      await handleConversationHttpRequest(req, res, url, {
-        repository: conversationRepository,
-        store: conversationStore,
-        assetStore,
-        entitlementResolver,
-        agentCorpusResolver,
-        authIdentityResolver,
-        legacyHmacAuth,
-        edge,
-        maxHttpResponseBytes,
-        allowedOrigins
-      }, signal);
-    } catch (error) {
-      writeConversationHttpError(req, res, error);
-    }
-    return;
-  }
-
-  const match = url.pathname.match(/^\/conversations\/([^/]+)\/messages$/);
-  if (req.method === "GET" && match) {
-    const conversationId = decodeURIComponent(match[1] ?? "");
-    let binding: SessionBinding | undefined;
-    try {
-      binding = await bindingFromHistoryRequest(
-        req,
-        url,
-        entitlementResolver,
-        agentCorpusResolver,
-        authIdentityResolver,
-        legacyHmacAuth,
-        signal
-      );
-    } catch (error) {
-      writeHttpAuthorizationFailure(res, error, "entitlement_required");
-      return;
-    }
-    if (!binding) {
-      writeJson(res, 400, { error: { code: "binding_required", message: "A signed-in entitlement binding is required." } });
-      return;
-    }
-    const store = conversationStore ?? createConversationStore();
-    const durableHistoryId = durableConversationId(binding, conversationId);
-    const durableMessages = await store.readVisibleConversation(durableHistoryId);
-    // Keep old Desktop builds readable during the migration from the
-    // corpus-digest-scoped transcript key. New WS runs always write to the
-    // durable identity so an Agent Corpus update cannot orphan history.
-    const legacyHistoryId = scopedConversationId(binding, conversationId);
-    const storageConversationId = durableMessages.length > 0 || durableHistoryId === legacyHistoryId
-      ? durableHistoryId
-      : legacyHistoryId;
-    const messages = durableMessages.length > 0 || durableHistoryId === legacyHistoryId
-      ? durableMessages
-      : await store.readVisibleConversation(legacyHistoryId);
-    const historyTruncated = typeof (store as RuntimeStore & {
-      visibleConversationTruncated?: (id: string) => Promise<boolean>;
-    }).visibleConversationTruncated === "function"
-      ? await (store as RuntimeStore & {
-        visibleConversationTruncated: (id: string) => Promise<boolean>;
-      }).visibleConversationTruncated(storageConversationId)
-      : false;
-    writeJsonBounded(res, 200, {
-      conversation_id: conversationId,
-      product_id: binding.productId,
-      creator_id: binding.creatorId,
-      messages: sanitizeBoundHistory(
-        messages,
-        binding.productId
-      ),
-      history_truncated: historyTruncated
-    }, maxHttpResponseBytes);
-    return;
-  }
-
-  const legacyAssetMatch = url.pathname.match(/^\/conversations\/([^/]+)\/assets\/([^/]+)$/);
-  if (req.method === "GET" && legacyAssetMatch) {
-    const conversationId = decodeURIComponent(legacyAssetMatch[1] ?? "");
-    let binding: SessionBinding | undefined;
-    try {
-      binding = await bindingFromHistoryRequest(
-        req,
-        url,
-        entitlementResolver,
-        agentCorpusResolver,
-        authIdentityResolver,
-        legacyHmacAuth,
-        signal
-      );
-    } catch (error) {
-      writeHttpAuthorizationFailure(res, error, "entitlement_required");
-      return;
-    }
-    if (!binding) {
-      writeJson(res, 400, { error: { code: "binding_required", message: "A signed-in entitlement binding is required." } });
-      return;
-    }
-    const store = conversationStore ?? createConversationStore();
-    const durableHistoryId = durableConversationId(binding, conversationId);
-    const durableMessages = await store.readVisibleConversation(durableHistoryId);
-    const legacyHistoryId = scopedConversationId(binding, conversationId);
-    const storageConversationId = durableMessages.length > 0 || durableHistoryId === legacyHistoryId
-      ? durableHistoryId
-      : legacyHistoryId;
-    try {
-      await serveConversationAsset(
-        res,
-        store,
-        assetStore,
-        storageConversationId,
-        decodeURIComponent(legacyAssetMatch[2] ?? "")
-      );
-    } catch (error) {
-      writeConversationHttpError(req, res, error);
-    }
-    return;
-  }
-
-  res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
-  res.end("not found");
 }
 
 function createConversationStore(environment: NodeJS.ProcessEnv = process.env): RuntimeStore {

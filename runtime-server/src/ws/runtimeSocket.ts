@@ -6,6 +6,7 @@ import {
   type ConversationRepository
 } from "../conversationRepository.js";
 import { EntitlementError } from "../entitlements.js";
+import { creatorAgentView } from "../chat/creatorAgentCatalog.js";
 import { errorMessage } from "../chat/modelTurn.js";
 import { SocketSink, projecting } from "../chat/sinks.js";
 import {
@@ -238,20 +239,7 @@ export async function handleRuntimeSocket(
               } : {}),
               ...(binding.entitlementId ? { access_mode: binding.accessMode ?? "unmetered" } : {}),
               ...(binding.entitlementId ? { entitlement_id: binding.entitlementId } : {}),
-              ...(binding.agentCorpus ? {
-                creator_agent: {
-                  creator: binding.agentCorpus.creator,
-                  product: {
-                    id: binding.agentCorpus.product.id,
-                    name: binding.agentCorpus.product.name,
-                    description: binding.agentCorpus.product.description ?? "",
-                    ...(binding.briefSpec ? { brief_spec: binding.briefSpec } : {}),
-                    ...(binding.agentCorpus.product.promise ? { promise: binding.agentCorpus.product.promise } : {}),
-                    ...(binding.agentCorpus.product.boundaries.length ? { boundaries: binding.agentCorpus.product.boundaries } : {})
-                  },
-                  presentation: binding.agentCorpus.product.presentation
-                }
-              } : {})
+              ...(binding.agentCorpus ? { creator_agent: creatorAgentView(binding.agentCorpus) } : {})
             });
             // A connection sees its conversation's live events, whoever started the Run.
             // Subscribed before the ready frame is awaited: a client that answers it at once cannot outrun its own subscription.
