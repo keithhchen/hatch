@@ -4384,6 +4384,9 @@ function decodeCursor(value) {
 
 function send(response, status, body) {
   response.statusCode = status;
+  // An error is never cached: Cloudflare gives an uncached response a 4-hour browser TTL, so a missing asset during a
+  // deploy's handover would stay missing in that browser for hours.
+  if (status >= 400 && !response.hasHeader("cache-control")) response.setHeader("cache-control", "no-store");
   const corsOrigin = response.__hatchCorsOrigin ?? "http://127.0.0.1:8510";
   response.setHeader("access-control-allow-origin", corsOrigin);
   if (corsOrigin !== "*") response.setHeader("access-control-allow-credentials", "true");
