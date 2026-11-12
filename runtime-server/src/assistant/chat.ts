@@ -22,7 +22,7 @@ import type { RuntimeStore, VisibleConversationMessage } from "../store.js";
 import { ToolBridge } from "../toolBridge.js";
 import type { ClientAttributes, ContentPart } from "../surfaces/contract.js";
 import { isSystemMessageId, SYSTEM_MESSAGE_PREFIX } from "./systemMessage.js";
-import type { AssistantStateRepository } from "./state.js";
+import type { AssistantStateRepository, LastExpert } from "./state.js";
 import { JournalFeed } from "./journalFeed.js";
 import { accountOfConversation, assistantConversationId, assistantFeedKey } from "./studioVocabulary.js";
 import { StudioToolRunner, studioToolNames, type StudioTool } from "./studioTools.js";
@@ -182,9 +182,22 @@ export class AssistantChat implements AssistantHost {
 
   // ── Saying and reading ─────────────────────────────────────────────────
 
-  /** Steers the Assistant's active Run with this message or starts one, atomically. `id` is the key a retry reuses. */
-  async say(accountId: string, input: { id: string; parts: ContentPart[]; client: ClientAttributes }): Promise<SentMessage> {
-    return this.gateway.send(accountPrincipal(accountId), { kind: "conversation", id: accountId }, input.client, input.id, input.parts);
+  /**
+   * The one way the Expert's words reach the Assistant, from Studio or from a chat: steers the active Run with this message or
+   * starts one, atomically. `id` is the key a retry reuses. Where the Expert last spoke is recorded once Chat has accepted the
+   * message, at the time it accepted it; a replay or a refusal moves nothing.
+   */
+  async say(accountId: string, input: { id: string; parts: ContentPart[]; origin: { source: LastExpert["source"]; messageRef?: string; client: ClientAttributes } }): Promise<SentMessage> {
+    // `sys:` ids are the Assistant's own to itself: a client's key cannot be one, or its message would be hidden as news.
+    if (isSystemMessageId(input.id)) throw new ChatError("invalid_message_id", `A message id cannot start with ${SYSTEM_MESSAGE_PREFIX}.`, 400);
+    const { source, messageRef, client } = input.origin;
+    const sent = await this.submit(accountId, input.id, input.parts, client);
+    if (sent.outcome !== "replayed") await this.deps.state.expertSpoke(accountId, { source, at: sent.acceptedAt, ...(messageRef ? { messageRef } : {}) });
+    return sent;
+  }
+
+  private submit(accountId: string, id: string, parts: ContentPart[], client: ClientAttributes): Promise<SentMessage> {
+    return this.gateway.send(accountPrincipal(accountId), { kind: "conversation", id: accountId }, client, id, parts);
   }
 
   /**
@@ -201,7 +214,7 @@ export class AssistantChat implements AssistantHost {
 
   /** The Assistant's own words to itself: news from its workers, the daily check, Never shown as the Expert's. */
   sayAsSystem(accountId: string, text: string, key: string): Promise<SentMessage> {
-    return this.say(accountId, { id: `${SYSTEM_MESSAGE_PREFIX}${key}`, parts: [{ type: "text", text }], client: { client: "web" } });
+    return this.submit(accountId, `${SYSTEM_MESSAGE_PREFIX}${key}`, [{ type: "text", text }], { client: "web" });
   }
 
   upload(accountId: string, name: string, bytes: Buffer): Promise<UploadedRef> {
@@ -298,9 +311,7 @@ export class AssistantChat implements AssistantHost {
     const text = transcripts.reduce((rest, transcript) => rest.replace(transcript, ""), input.text).trim();
     const parts: ContentPart[] = [...(text ? [{ type: "text" as const, text }] : []), ...input.attachments.map(asset => ({ type: asset.kind, assetId: asset.id }))];
     try {
-      if (isSystemMessageId(input.id)) throw new ChatError("invalid_message_id", `A message id cannot start with ${SYSTEM_MESSAGE_PREFIX}.`, 400);
-      await this.deps.state.expertSpoke(accountId, { source: "web", at: new Date().toISOString() });
-      const sent = await this.say(accountId, { id: input.id, parts, client: input.client });
+      const sent = await this.say(accountId, { id: input.id, parts, origin: { source: "web", client: input.client } });
       return {
         conversationId: accountId, queued: Boolean(before), runId: sent.runId,
         message: { id: input.id, role: "user", text: input.text, created_at: sent.acceptedAt, ...(input.attachments.length ? { attachments: input.attachments.map(asset => ({ type: asset.kind, name: asset.name, asset_id: asset.id })) } : {}) }

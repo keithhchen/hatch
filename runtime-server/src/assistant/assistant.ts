@@ -18,8 +18,6 @@ import type { AssistantTask, TaskDecision, TaskKind, TaskOrigin, TaskRepository 
 import type { AssistantChat, ReplySteps } from "./chat.js";
 import type { DeliveryRepository } from "./deliveries.js";
 import type { ExpertMaterials } from "./materials.js";
-import { SYSTEM_MESSAGE_PREFIX, isSystemMessageId } from "./systemMessage.js";
-import { ChatError } from "../chat/principal.js";
 import type { AssistantStateRepository } from "./state.js";
 import type { Material } from "./materials.js";
 import type { IngestJob } from "../ingest/job.js";
@@ -192,11 +190,9 @@ export class AssistantService implements StudioOperations {
    * reuses, so a platform event delivered twice is one message. `system` is for what the Expert did without typing it, such as a button.
    */
   async hear(accountId: string, input: { id: string; source: ExpertSource; parts: ContentPart[]; messageRef?: string; system?: boolean }): Promise<SentMessage> {
-    // `sys:` ids are the Assistant's own to itself: a client's key cannot be one, or its message would be hidden as news.
-    if (!input.system && isSystemMessageId(input.id)) throw new ChatError("invalid_message_id", `A message id cannot start with ${SYSTEM_MESSAGE_PREFIX}.`, 400);
-    if (!input.system) await this.deps.state.expertSpoke(accountId, { source: input.source, at: new Date().toISOString(), ...(input.messageRef ? { messageRef: input.messageRef } : {}) });
+    if (input.system) return this.chat.sayAsSystem(accountId, textOf(input.parts), input.id);
     const client = { client: input.source === "web" ? "web" as const : "im" as const };
-    return input.system ? this.chat.sayAsSystem(accountId, textOf(input.parts), input.id).then(sent => sent) : this.chat.say(accountId, { id: input.id, parts: input.parts, client });
+    return this.chat.say(accountId, { id: input.id, parts: input.parts, origin: { source: input.source, ...(input.messageRef ? { messageRef: input.messageRef } : {}), client } });
   }
 
   /** A file or a picture the Expert sends becomes an attachment of the conversation, and a message may then refer to it. */

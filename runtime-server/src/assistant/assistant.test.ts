@@ -183,7 +183,7 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
     }
     return handled;
   };
-  const say = (text: string, id = `m-${Math.random().toString(36).slice(2)}`) => chat.say(ACCOUNT, { id, parts: [{ type: "text", text }], client: { client: "web" } });
+  const say = (text: string, id = `m-${Math.random().toString(36).slice(2)}`) => chat.say(ACCOUNT, { id, parts: [{ type: "text", text }], origin: { source: "web", client: { client: "web" } } });
   const idle = async () => { await sleep(30); await chat.idle(ACCOUNT, 20_000); await sleep(30); };
   return {
     root, tasks, state, deliveries, pushed, notices, log, applied, telegramCalls, telegramUpdate, assistant, chat, target, model, productStore, productRuntime, say, idle, legacy, store, kit, tools, chatAssets, materials,
@@ -242,7 +242,7 @@ test("The Assistant's tools are its own: declared once, absent from a Product's 
     await env.idle();
     assert.equal((await env.chat.status(ACCOUNT)).state, "idle");
     // The client of the latest message authorizes the call.
-    await env.chat.say(ACCOUNT, { id: "from-dm", parts: [{ type: "text", text: "dm" }], client: { client: "dm" } });
+    await env.chat.say(ACCOUNT, { id: "from-dm", parts: [{ type: "text", text: "dm" }], origin: { source: "web", client: { client: "dm" } } });
     await env.idle();
     assert.equal((await env.chat.status(ACCOUNT)).state, "failed", "tool_unsupported_on_client ended the Run");
   } finally { await env.close(); }
@@ -776,6 +776,35 @@ test("The receipt of a sent message carries the time Chat accepted it", async ()
   } finally { await env.close(); }
 });
 
+test("Studio and channels say through one entry; where the Expert last spoke follows acceptance only, at the accepted time", async () => {
+  const env = await setup({ model: () => ({ text: "好" }) });
+  try {
+    const clients: string[] = [];
+    const send = env.chat.gateway.send.bind(env.chat.gateway);
+    (env.chat.gateway as { send: typeof send }).send = async (principal, conversation, client, ...rest) => { clients.push(client.client); return send(principal, conversation, client, ...rest); };
+    const said: string[] = [];
+    const say = env.chat.say.bind(env.chat);
+    env.chat.say = async (...args) => { said.push(args[1].id); return say(...args); };
+    // Studio: the client it sent stands, and the time is Chat's.
+    const studio = await env.chat.send(ACCOUNT, { id: "st-1", text: "你好", attachments: [], client: { client: "cli" } });
+    await env.idle();
+    assert.deepEqual(await env.state.lastExpert(ACCOUNT), { source: "web", at: studio.message.created_at });
+    // A channel event: same entry, its own client, its ref.
+    const heard = await env.assistant.hear(ACCOUNT, { id: "tg-1", source: "telegram", messageRef: "7", parts: [{ type: "text", text: "在吗" }] });
+    await env.idle();
+    assert.deepEqual(said, ["st-1", "tg-1"]);
+    assert.deepEqual(clients, ["cli", "im"]);
+    assert.deepEqual(await env.state.lastExpert(ACCOUNT), { source: "telegram", at: heard.acceptedAt, messageRef: "7" });
+    // The platform delivers it again, later and with another ref: nothing moves.
+    await env.assistant.hear(ACCOUNT, { id: "tg-1", source: "telegram", messageRef: "8", parts: [{ type: "text", text: "在吗" }] });
+    assert.deepEqual(await env.state.lastExpert(ACCOUNT), { source: "telegram", at: heard.acceptedAt, messageRef: "7" });
+    // A refused submit moves nothing either.
+    await assert.rejects(env.chat.say(ACCOUNT, { id: "bad-1", parts: [{ type: "image", assetId: "no-such-asset" }], origin: { source: "web", client: { client: "web" } } }));
+    await assert.rejects(env.assistant.hear(ACCOUNT, { id: "sys:forged", source: "web", parts: [{ type: "text", text: "假装" }] }), { code: "invalid_message_id" });
+    assert.deepEqual(await env.state.lastExpert(ACCOUNT), { source: "telegram", at: heard.acceptedAt, messageRef: "7" });
+  } finally { await env.close(); }
+});
+
 test("A message sent twice with one key is one message, and another body under the key is refused", async () => {
   const env = await setup({ model: () => ({ text: "好" }) });
   try {
@@ -889,7 +918,7 @@ test("One key is one message whichever way it arrives: the page and the API shar
     assert.equal(messageKey(`  ${"k".repeat(256)} `)?.length, 256);
     await assert.rejects(env.chat.send(ACCOUNT, { id: "sys:forged", text: "假装是系统", attachments: [], client: { client: "cli" } }), { status: 400, code: "invalid_message_id" });
     // A send that fails before it is accepted never stands for anything: the retry is delivered, not answered with a stranded "sent".
-    await assert.rejects(env.chat.say(ACCOUNT, { id: "key-2", parts: [{ type: "image", assetId: "no-such-asset" }], client: { client: "web" } }));
+    await assert.rejects(env.chat.say(ACCOUNT, { id: "key-2", parts: [{ type: "image", assetId: "no-such-asset" }], origin: { source: "web", client: { client: "web" } } }));
     const retried = await env.chat.send(ACCOUNT, { id: "key-2", text: "再来一次", attachments: [], client: { client: "web" } });
     await env.idle();
     assert.equal(retried.message.id, "key-2");
