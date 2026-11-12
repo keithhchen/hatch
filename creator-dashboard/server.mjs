@@ -44,6 +44,8 @@ const SELF_PURCHASE_ERROR = Object.freeze({
 });
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export const CREATOR_FACTORY_JSON_BODY_MAX_BYTES = 32 * 1024 * 1024;
+/** An ingest submit carries one file of up to 50 MB as base64 in JSON; the Registry enforces the 50 MB file cap itself. */
+export const CREATOR_INGEST_JSON_BODY_MAX_BYTES = 68 * 1024 * 1024;
 
 // Browser OAuth is deliberately an authorization-code + PKCE bridge to the
 // existing Hatch web session. OAuth records live in PortalStateStore, which is
@@ -1583,7 +1585,7 @@ export async function createDashboardApp(options = {}) {
         requireOAuthScope(request, requiredScope, url.pathname);
         const body = request.method === "GET" || request.method === "DELETE"
           ? undefined
-          : JSON.stringify(await readJson(request, factoryRequestMaxBytes));
+          : JSON.stringify(await readJson(request, url.pathname.endsWith("/ingest") ? Math.max(factoryRequestMaxBytes, CREATOR_INGEST_JSON_BODY_MAX_BYTES) : factoryRequestMaxBytes));
         const payload = await registryRequest(registryUrl, `${url.pathname}${url.search}`, {
           method: request.method,
           ...(body === undefined ? {} : { body }),
