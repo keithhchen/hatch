@@ -196,16 +196,6 @@ export class ChannelService implements AssistantChannels {
 
   // ── The Assistant ──────────────────────────────────────────────────────
 
-  async reply(inboundId: string, message: { text: string; buttons?: Send["message"]["buttons"] }): Promise<boolean> {
-    const item = await this.inbox.get(inboundId);
-    if (!item) return false;
-    const connectionId = item.connectionId ?? (await this.connections.resolveConnection({ channel: item.channel, scope: item.scope, senderId: item.event.address.senderId }))?.connection.id;
-    if (!connectionId) return false;
-    await this.dispatcher.send({ connectionId, channel: item.channel, scope: item.scope, address: item.event.address, kind: "reply", message: { ...message, ...(item.event.messageRef ? { replyTo: item.event.messageRef } : {}) } });
-    await this.inbox.markReplied([item.id]);
-    return true;
-  }
-
   async push(accountId: string, message: { text: string; buttons?: Send["message"]["buttons"] }, prefer?: ChannelKind, sourceKey?: string): Promise<boolean> {
     const linked = await this.connections.linked(accountId);
     const target = linked.find(candidate => candidate.connection.channel === prefer) ?? linked[0];

@@ -5,6 +5,7 @@ import { Pool } from "pg";
 import type { ChannelCapabilities, ClientAttributes, ContentPart, Principal } from "../surfaces/contract.js";
 import { ChannelHub } from "./hub.js";
 import { Dispatcher } from "./dispatch.js";
+import { replyToInbound } from "./recorder.testkit.js";
 import type { Claim, SignIn } from "./router.js";
 import { OwnApps } from "./ownApps.js";
 import { CREDENTIAL_FORMS } from "./credentialForms.js";
@@ -390,7 +391,7 @@ test("Long replies go as several messages in order with buttons last, and nothin
   const env = await stack(pool);
   await link(env, "42");
   const text = Array.from({ length: 30 }, (_, index) => `Paragraph ${index}: ${"word ".repeat(150)}`).join("\n\n");
-  await env.service.reply((await pool.query("SELECT id FROM hatch_channel_inbox ORDER BY seq LIMIT 1")).rows[0].id, { text, buttons: [{ label: "OK", taskId: randomUUID(), action: "approve" }] });
+  await replyToInbound(env, (await pool.query("SELECT id FROM hatch_channel_inbox ORDER BY seq LIMIT 1")).rows[0].id, { text, buttons: [{ label: "OK", taskId: randomUUID(), action: "approve" }] });
   await env.service.drain();
   const parts = env.adapter.sent.slice(1).map(entry => entry.message);
   assert.ok(parts.length > 3);
@@ -1005,8 +1006,7 @@ test("Telegram: a mention in a group reaches the Assistant of the sender who lin
   await service.accept(telegram, [...update(2, 42, "@hatch_bot publish it", -100, "supergroup"), ...update(3, 42, "chatter", -100, "supergroup"), ...update(4, 99, "@hatch_bot hi", -100, "supergroup")]);
   await service.drain();
   assert.deepEqual(target.handled.map(inbound => [inbound.event.text, inbound.address.threadId, inbound.address.senderId]), [["publish it", "-100", "42"]]);
-  const reply = await service.reply(target.handled[0]!.id, { text: "published" });
-  assert.equal(reply, true);
+  await replyToInbound({ ...stores, dispatcher: (service as unknown as { dispatcher: Dispatcher }).dispatcher }, target.handled[0]!.id, { text: "published" });
   await service.drain();
   const last = sent.at(-1)!;
   assert.equal(last.chat_id, -100);
