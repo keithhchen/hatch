@@ -38,14 +38,14 @@ test("a row that still carries an old interview and held news is inert: Expert s
   assert.equal((await state.lastExpert(ACCOUNT))?.source, "telegram");
 }));
 
-test("of any number of instances, exactly one takes the reply a Run owes", options, () => isolated(async (pool) => {
+test("A reply a Run owes stays open until it is closed, and closing twice is closing once", options, () => isolated(async (pool) => {
   const deliveries = await PostgresDeliveries.open(pool);
   await deliveries.owe("run_1", ACCOUNT);
   await deliveries.owe("run_1", ACCOUNT);
   await deliveries.owe("run_2", ACCOUNT);
   assert.deepEqual((await deliveries.open(10)).map(row => row.runId), ["run_1", "run_2"]);
-  const takes = await Promise.all(Array.from({ length: 8 }, () => deliveries.take("run_1")));
-  assert.equal(takes.filter(Boolean).length, 1);
+  assert.deepEqual((await deliveries.open(10)).map(row => row.runId), ["run_1", "run_2"], "reading it closes nothing");
+  await Promise.all(Array.from({ length: 8 }, () => deliveries.done("run_1")));
   assert.deepEqual((await deliveries.open(10)).map(row => row.runId), ["run_2"]);
 }));
 
