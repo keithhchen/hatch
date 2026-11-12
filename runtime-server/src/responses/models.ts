@@ -54,10 +54,12 @@ export class ModelCatalog {
     const productId = productIdOf(model);
     if (!productId) throw this.missing(model);
     try {
-      return await resolveSessionBinding(
+      const binding = await resolveSessionBinding(
         { auth_token: caller.token, product_id: productId }, undefined, this.corpora(), this.deps.identities,
         { sub: caller.accountId }, signal
       );
+      // The run's model calls are the Chat API's, billed to the owner, and to the key that made the request.
+      return { ...binding, usageSurface: "chat_api", ...(caller.clientType === "api_key" && caller.sessionId ? { apiKeyId: caller.sessionId } : {}) };
     } catch (error) {
       const gone = error instanceof AgentReleaseUnavailableError
         || (error instanceof EntitlementError && error.code === "entitlement_required")

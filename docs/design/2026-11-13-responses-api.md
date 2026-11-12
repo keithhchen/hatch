@@ -86,5 +86,14 @@ Delivery modes:
 - **Caps**: monthly token cap per account (`HATCH_MONTHLY_TOKEN_CAP`, default generous; per-account override later). Checked before starting any run on any surface from the rollup (month-to-date total). Over cap → 429 `insufficient_quota` / `usage_cap_exceeded` on the APIs and a real "monthly usage limit reached" state in the web UI. A run already in flight finishes.
 - **Dashboard**: Studio → Settings → Usage: this month's tokens by surface (Studio, Chat API, Chat web), a small daily chart for the last 30 days, and cap progress. Endpoint `GET /v1/creator/usage?from&to` (owner). Responses API responses carry `usage`.
 
+## Implementation notes (phase 1, where the code differs from the text above)
+- `metadata` supports `title` only (conversation `metadata.title`); any other key, and any metadata on a response, is 400 `unsupported_parameter`. The domain keeps no other metadata and no column was added for it.
+- Empty `input` also starts a task for an existing conversation that has a Task Brief and no run yet (the natural `POST /conversations` then `POST /responses` flow).
+- `previous_response_id` must be the latest response of its conversation (conversations are linear), otherwise 400 `invalid_request`; a retry of the request that made a later response is replayed, not refused.
+- `created` of a model is 0 (a Corpus carries no release time). `GET /conversations?after=` takes a conversation id.
+- Approvals: a pending approval surfaces as `mcp_approval_request`. Only denying is supported (400 `unsupported_parameter` for `approve: true`): approving runs a tool on the caller's machine, and the API has none. The `mcp` client cannot reach local tools, so in practice no approval arises yet.
+- The Files API (`/files`, `file_id`) is not implemented: `file_id` is 400 `unsupported_parameter`, `/files*` is 404. Inline data URLs and https URLs (public addresses only, no redirects, 10 s, 20/50 MB by kind) work.
+- Usage on a response is summed from the persisted per-call usage and is present once the run has ended. The run is billed to the owner on the `chat_api` surface under the API key's session id.
+
 ## Docs
 - Developers page gets a "Responses API" (Chat API) section next to the Studio API: base URL, SDK snippet (Python, Node, curl), models, conversations with Task Brief, streaming, files, errors table, limits. `docs/unified-api-guide.md` gets the same.

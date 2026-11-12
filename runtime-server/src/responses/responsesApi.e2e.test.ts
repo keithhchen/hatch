@@ -13,6 +13,7 @@ import { AttachmentFiles } from "../assets/files.js";
 import { harness, png } from "../assets/kit.test.js";
 import { ChatAssets } from "../chat/assets.js";
 import { InMemoryConversationRepository } from "../conversationRepository.js";
+import type { UsageEvent } from "../usage/usage.js";
 import type { AuthIdentity, AuthIdentityResolver } from "../entitlements.js";
 import { createRuntimeServer, type RuntimeServer } from "../index.js";
 import { RuntimeStore } from "../store.js";
@@ -67,12 +68,14 @@ async function fixture(options: { holdMs?: number; keepAliveMs?: number; assets?
   };
   const kit = options.assets ? await harness() : undefined;
   const chatAssets = kit ? new ChatAssets({ pipeline: kit.pipeline, blobs: kit.blobs, files: new AttachmentFiles(kit.repository, kit.blobs) }) : undefined;
+  const usage: UsageEvent[] = [];
   const control = { held: undefined as Gate | undefined, seen: [] as string[] };
   const model: AgentRuntime = {
     async *run(input, ctx) {
       const said = ctx.messages.filter((message) => message.role === "user").at(-1)?.content ?? "";
       control.seen.push(said);
       if (said.includes("hold") && control.held) { await control.held.wait; ctx.abortSignal?.throwIfAborted(); }
+      await ctx.usage?.({ id: `${input.run_id}:1`, model: "test-model", usage: { input: 100, output: 20, cacheRead: 30, cacheWrite: 0, totalTokens: 150, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
       await ctx.persistModelMessage!({ role: "assistant", content: "turn", usage: { input: 100, output: 20, cacheRead: 30, cacheWrite: 0, totalTokens: 150, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
       await ctx.persistModelMessage!({ role: "assistant", content: "turn", usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
       yield { type: "assistant.delta" as const, run_id: input.run_id, delta: { kind: "text" as const, content: "Hello " } };
@@ -82,14 +85,14 @@ async function fixture(options: { holdMs?: number; keepAliveMs?: number; assets?
   };
   const runtime = createRuntimeServer({
     conversationStore: store, conversationRepository: repository, authIdentityResolver: identities, agentCorpusResolver: corpora,
-    createRuntime: () => model, ...(chatAssets ? { chatAssets } : {}),
+    createRuntime: () => model, usage: { record: async (event) => { usage.push(event); } }, ...(chatAssets ? { chatAssets } : {}),
     responsesApi: { ...(options.holdMs ? { holdMs: options.holdMs } : {}), ...(options.keepAliveMs ? { keepAliveMs: options.keepAliveMs } : {}) }
   });
   runtimes.push(runtime);
   await new Promise<void>((resolve) => (runtime.server as http.Server).listen(0, "127.0.0.1", () => resolve()));
   const origin = `http://127.0.0.1:${((runtime.server as http.Server).address() as { port: number }).port}`;
   const client = (apiKey = KEY) => new OpenAI({ baseURL: `${origin}/responses/v1`, apiKey, maxRetries: 0 });
-  return { origin, client, store, repository, control, verifications: () => verifications, openai: client() };
+  return { origin, client, usage, store, repository, control, verifications: () => verifications, openai: client() };
 }
 
 /** The error the SDK raises for a refused request, as the shape the API promises. */
@@ -371,4 +374,14 @@ test("an inline image goes through the shared asset path; without an asset servi
 
   const plain = await fixture();
   assert.equal((await refused(plain.openai.responses.create({ model: `hatch:${PRODUCT}`, input: [{ role: "user", content: [{ type: "input_image", image_url: image, detail: "auto" }] }] }))).status, 501);
+});
+
+test("a Responses API run is billed to the owner on the chat_api surface, under the key that made it", async () => {
+  const { openai, usage } = await fixture();
+  const response = await openai.responses.create({ model: `hatch:${PRODUCT}`, input: "count this" });
+  assert.equal(usage.length, 1);
+  assert.deepEqual(
+    { accountId: usage[0]!.accountId, surface: usage[0]!.surface, apiKeyId: usage[0]!.apiKeyId, productId: usage[0]!.productId, runId: `resp_${usage[0]!.runId!.replace(/^run_/, "")}`, input: usage[0]!.inputTokens, cached: usage[0]!.cachedInputTokens, output: usage[0]!.outputTokens },
+    { accountId: OWNER, surface: "chat_api", apiKeyId: "session-1", productId: PRODUCT, runId: response.id, input: 130, cached: 30, output: 20 }
+  );
 });
