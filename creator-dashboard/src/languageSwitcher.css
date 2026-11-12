@@ -1,8 +1,5 @@
-/* Compact @hatch/ui Select on the web paper tokens. */
-.hatch-language-switcher {
-  width: auto;
-  min-width: 112px;
-  border-color: var(--web-rule, #e8e2d4);
-  background: var(--web-card, #fffdf8);
-  color: var(--web-ink, #17150f);
-}
+.hatch-language-switcher { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: var(--web-ink); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.hatch-language-switcher:hover, .hatch-language-switcher[data-state="open"] { background: var(--web-card); }
+.hatch-language-switcher:focus-visible { outline: 2px solid var(--web-ink); outline-offset: 2px; }
+.hatch-language-switcher svg { width: 16px; height: 16px; flex: none; }
+.hatch-language-switcher__unchecked { visibility: hidden; }
