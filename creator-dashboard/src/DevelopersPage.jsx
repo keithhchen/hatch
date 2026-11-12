@@ -25,6 +25,7 @@ export function DevelopersPage({ tab, navigate }) {
       <main className="developers-page__main">
         <h1>{guide.copy.title}</h1>
         <p className="developers-page__scope">{guide.copy.scope}</p>
+        <a className="developers-page__link developers-page__keys" href={KEYS_PATH}>{guide.copy.createKey}</a>
         <nav className="developers-page__tabs" aria-label={guide.copy.methodsLabel}>
           {guide.tabs.map((item) => (
             <a key={item.id} href={item.path} aria-current={item.id === active.id ? "page" : undefined}

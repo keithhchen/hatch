@@ -20,3 +20,4 @@
 .developers-page__code button:hover { background: rgba(255, 255, 255, 0.24); }
 .developers-page { --developers-code-font: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
 .developers-page__scope { text-wrap: pretty; margin: 10px 0 20px; color: var(--web-muted); font-size: 15px; line-height: 1.6; }
+.developers-page__keys { display: inline-block; margin: -8px 0 20px; }
