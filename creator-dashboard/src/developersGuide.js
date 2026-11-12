@@ -2,7 +2,7 @@
 // code, and one copy table per locale. DevelopersGuide joins them for a locale;
 // DevelopersPage renders any guide, so adding a method or a language adds data only.
 export const ORIGIN = "https://gethatchapp.com";
-export const KEYS_PATH = "/studio/settings";
+export const KEYS_PATH = "/studio/settings#api-keys";
 export const TARBALL_URL = `${ORIGIN}/downloads/hatch-cli.tgz`;
 
 const sh = (text) => ({ lang: "sh", text });
@@ -90,7 +90,7 @@ const COPY = Object.freeze({
     scope: "This is the Hatch Studio API, for creating and managing your products. An API for the Agent products you create is coming soon.",
     methodsLabel: "Integration method",
     tabs: { cli: "CLI", api: "HTTP API", mcp: "MCP" },
-    copy: "Copy", copied: "Copied", keys: "Open API keys",
+    copy: "Copy", copied: "Copied", keys: "Open API keys", createKey: "Create an API key in Studio Settings",
     steps: {
       cli: STEPS([
         ["install", "Install the CLI", "Node 20 or newer."],
@@ -138,7 +138,7 @@ const COPY = Object.freeze({
     scope: "当前是 Hatch Studio API，用于创建和管理你的产品。你创建的 Agent 产品的 API 即将推出。",
     methodsLabel: "接入方式",
     tabs: { cli: "CLI", api: "HTTP API", mcp: "MCP" },
-    copy: "复制", copied: "已复制", keys: "打开 API 密钥",
+    copy: "复制", copied: "已复制", keys: "打开 API 密钥", createKey: "在 Studio 设置里创建 API 密钥",
     steps: {
       cli: STEPS([
         ["install", "安装 CLI", "需要 Node 20 或更高版本。"],
@@ -186,7 +186,7 @@ const COPY = Object.freeze({
     scope: "これは Hatch Studio API です。プロダクトの作成と管理に使います。あなたが作った Agent プロダクトの API は近日公開予定です。",
     methodsLabel: "連携方法",
     tabs: { cli: "CLI", api: "HTTP API", mcp: "MCP" },
-    copy: "コピー", copied: "コピーしました", keys: "API キーを開く",
+    copy: "コピー", copied: "コピーしました", keys: "API キーを開く", createKey: "Studio の設定で API キーを作成",
     steps: {
       cli: STEPS([
         ["install", "CLI をインストール", "Node 20 以上が必要です。"],
