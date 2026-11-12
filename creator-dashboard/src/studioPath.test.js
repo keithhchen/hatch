@@ -42,11 +42,12 @@ test("Overview is a top tab, Advanced is a separate rail control, Start Agent an
   const [workspace, factory, css, web] = await Promise.all([read("./studioAgentWorkspace.jsx"), read("./FactoryAgents.jsx"), read("./factoryAgents.css"), read("./web/web.css")]);
   assert.match(workspace, /\{ value: "overview", label: "sxNavOverview" \},\s*\{ value: "build"[^}]*\},\s*\{ value: "publish"/);
   assert.doesNotMatch(factory, /factory-rail__overview|factory-stepper__advanced/);
-  assert.match(factory, /className=\{`factory-rail__advanced/);
+  assert.match(factory, /className=\{`factory-advanced/);
   assert.match(factory, /<HatchButton type="button" size="small" variant="secondary" leading=\{<Play/);
   assert.doesNotMatch(factory, /line-through/);
   assert.doesNotMatch(web, /pro-tasks[^\n]*line-through/);
-  assert.match(css, /\.factory-rail__advanced[^}]*margin: 0 0 0 auto/);
+  assert.match(css, /\.factory-advanced \{[^}]*justify-self: end/);
+  assert.doesNotMatch(factory.match(/<nav className="factory-rail"[^]*?<\/nav>/)[0], /factory-advanced/);
 });
 
 test("Publish header offers Try the chat beside View page, same live condition, in en/zh/ja", async () => {
