@@ -4,20 +4,16 @@ import type { RuntimeAssetStore } from "../assetStore.js";
 import { listCreatorAgents } from "../chat/creatorAgentCatalog.js";
 import { errorMessage } from "../chat/modelTurn.js";
 import {
-  durableConversationId,
   legacyAuthClaims,
   resolveAuthIdentity,
-  sanitizeBoundHistory,
-  scopedConversationId,
-  type LegacyHmacAuth,
-  type SessionBinding
+  type LegacyHmacAuth
 } from "../chat/sessionBinding.js";
 import type { ChatEdge } from "../chat/turnSubmission.js";
 import { ConversationError as ConversationHttpError } from "../conversations/conversation.js";
 import type { ConversationRepository } from "../conversationRepository.js";
 import { EntitlementError, type AuthIdentity, type AuthIdentityResolver, type EntitlementResolver } from "../entitlements.js";
 import type { RuntimeStore } from "../store.js";
-import { handleConversationHttpRequest, serveConversationAsset } from "./conversationRoutes.js";
+import { handleConversationHttpRequest } from "./conversationRoutes.js";
 import {
   bearerToken,
   setCorsHeaders,
@@ -26,7 +22,6 @@ import {
   writeJson,
   writeJsonBounded
 } from "./httpSupport.js";
-import { bindingFromHistoryRequest } from "./requestBinding.js";
 
 export type ReadinessCheck = "starting" | "ready" | "failed";
 export type RuntimeReadiness = {
@@ -149,104 +144,6 @@ export async function handleHttpRequest(
         maxHttpResponseBytes,
         allowedOrigins
       }, signal);
-    } catch (error) {
-      writeConversationHttpError(req, res, error);
-    }
-    return;
-  }
-
-  const match = url.pathname.match(/^\/conversations\/([^/]+)\/messages$/);
-  if (req.method === "GET" && match) {
-    const conversationId = decodeURIComponent(match[1] ?? "");
-    let binding: SessionBinding | undefined;
-    try {
-      binding = await bindingFromHistoryRequest(
-        req,
-        url,
-        entitlementResolver,
-        agentCorpusResolver,
-        authIdentityResolver,
-        legacyHmacAuth,
-        signal
-      );
-    } catch (error) {
-      writeHttpAuthorizationFailure(res, error, "entitlement_required");
-      return;
-    }
-    if (!binding) {
-      writeJson(res, 400, { error: { code: "binding_required", message: "A signed-in entitlement binding is required." } });
-      return;
-    }
-    const store = conversationStore;
-    const durableHistoryId = durableConversationId(binding, conversationId);
-    const durableMessages = await store.readVisibleConversation(durableHistoryId);
-    // Keep old Desktop builds readable during the migration from the
-    // corpus-digest-scoped transcript key. New WS runs always write to the
-    // durable identity so an Agent Corpus update cannot orphan history.
-    const legacyHistoryId = scopedConversationId(binding, conversationId);
-    const storageConversationId = durableMessages.length > 0 || durableHistoryId === legacyHistoryId
-      ? durableHistoryId
-      : legacyHistoryId;
-    const messages = durableMessages.length > 0 || durableHistoryId === legacyHistoryId
-      ? durableMessages
-      : await store.readVisibleConversation(legacyHistoryId);
-    const historyTruncated = typeof (store as RuntimeStore & {
-      visibleConversationTruncated?: (id: string) => Promise<boolean>;
-    }).visibleConversationTruncated === "function"
-      ? await (store as RuntimeStore & {
-        visibleConversationTruncated: (id: string) => Promise<boolean>;
-      }).visibleConversationTruncated(storageConversationId)
-      : false;
-    writeJsonBounded(res, 200, {
-      conversation_id: conversationId,
-      product_id: binding.productId,
-      creator_id: binding.creatorId,
-      messages: sanitizeBoundHistory(
-        messages,
-        binding.productId
-      ),
-      history_truncated: historyTruncated
-    }, maxHttpResponseBytes);
-    return;
-  }
-
-  const legacyAssetMatch = url.pathname.match(/^\/conversations\/([^/]+)\/assets\/([^/]+)$/);
-  if (req.method === "GET" && legacyAssetMatch) {
-    const conversationId = decodeURIComponent(legacyAssetMatch[1] ?? "");
-    let binding: SessionBinding | undefined;
-    try {
-      binding = await bindingFromHistoryRequest(
-        req,
-        url,
-        entitlementResolver,
-        agentCorpusResolver,
-        authIdentityResolver,
-        legacyHmacAuth,
-        signal
-      );
-    } catch (error) {
-      writeHttpAuthorizationFailure(res, error, "entitlement_required");
-      return;
-    }
-    if (!binding) {
-      writeJson(res, 400, { error: { code: "binding_required", message: "A signed-in entitlement binding is required." } });
-      return;
-    }
-    const store = conversationStore;
-    const durableHistoryId = durableConversationId(binding, conversationId);
-    const durableMessages = await store.readVisibleConversation(durableHistoryId);
-    const legacyHistoryId = scopedConversationId(binding, conversationId);
-    const storageConversationId = durableMessages.length > 0 || durableHistoryId === legacyHistoryId
-      ? durableHistoryId
-      : legacyHistoryId;
-    try {
-      await serveConversationAsset(
-        res,
-        store,
-        assetStore,
-        storageConversationId,
-        decodeURIComponent(legacyAssetMatch[2] ?? "")
-      );
     } catch (error) {
       writeConversationHttpError(req, res, error);
     }

@@ -84,7 +84,7 @@ import { handleRuntimeSocket } from "./ws/runtimeSocket.js";
 // The Runtime's public surface stays here: callers import these from index.js.
 export { clientToolTimeoutMs, legacyHmacAuthEnabled, runtimeClientHelloTimeoutMs } from "./runtimeConfig.js";
 export {
-  durableConversationId, privateBoundaryProjection, protectPrivateAgentBoundary, scopedConversationId
+  durableConversationId, privateBoundaryProjection, protectPrivateAgentBoundary
 } from "./chat/sessionBinding.js";
 
 type AgentCorpusResolver = AgentCorpusResolverLike;

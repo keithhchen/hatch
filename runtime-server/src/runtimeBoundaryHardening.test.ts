@@ -1159,7 +1159,7 @@ test("HTTP malformed paths and async store failures are controlled without unhan
   const store = {
     localAuthority: new LocalRuntimeAuthority(),
     append: async () => undefined,
-    readVisibleConversation: async () => { throw new Error("simulated store outage"); },
+    readVisibleConversationPage: async () => { throw new Error("simulated store outage"); },
     close: async () => undefined
   } as unknown as RuntimeStore;
   const runtime = createRuntimeServer({ insecureLocalMode: true, conversationStore: store });
@@ -1168,19 +1168,14 @@ test("HTTP malformed paths and async store failures are controlled without unhan
   const onUnhandled = (error: unknown) => unhandled.push(error);
   process.on("unhandledRejection", onUnhandled);
   try {
-    const malformed = await fetch(`http://127.0.0.1:${port}/conversations/%E0%A4%A/messages`);
+    const malformed = await fetch(`http://127.0.0.1:${port}/v1/conversations/%E0%A4%A/history?${localScope}`);
     assert.equal(malformed.status, 400);
     assert.equal(((await malformed.json()) as { error: { code: string } }).error.code, "invalid_request_path");
 
-    const history = new URL(`http://127.0.0.1:${port}/conversations/conversation/messages`);
-    history.searchParams.set("creator_id", "creator");
-    history.searchParams.set("user_id", "user");
-    history.searchParams.set("agent_id", "agent");
-    history.searchParams.set("product_id", "product");
-    history.searchParams.set("corpus_digest", `sha256:${"0".repeat(64)}`);
-    const failed = await fetch(history);
+    const conversationId = await createLocalConversation(port);
+    const failed = await fetch(`http://127.0.0.1:${port}/v1/conversations/${conversationId}/history?${localScope}`);
     assert.equal(failed.status, 500);
-    assert.equal(((await failed.json()) as { error: { code: string } }).error.code, "internal_error");
+    assert.equal(((await failed.json()) as { error: { code: string } }).error.code, "conversation_request_failed");
     await new Promise<void>((resolve) => setImmediate(resolve));
     assert.deepEqual(unhandled, []);
   } finally {
@@ -1192,12 +1187,16 @@ test("HTTP malformed paths and async store failures are controlled without unhan
 test("HTTP history responses are rejected before writing beyond the configured byte cap", async () => {
   const store = {
     localAuthority: new LocalRuntimeAuthority(),
-    readVisibleConversation: async () => [{
-      run_id: "large-history-run",
-      role: "assistant",
-      content: "x".repeat(2_000),
-      timestamp: new Date().toISOString()
-    }],
+    readVisibleConversationPage: async () => ({
+      messages: [{
+        id: "large-history-run:0",
+        run_id: "large-history-run",
+        role: "assistant",
+        content: "x".repeat(2_000),
+        timestamp: new Date().toISOString()
+      }],
+      has_more: false
+    }),
     close: async () => undefined
   } as unknown as RuntimeStore;
   const runtime = createRuntimeServer({ insecureLocalMode: true,
@@ -1206,13 +1205,8 @@ test("HTTP history responses are rejected before writing beyond the configured b
   });
   const port = await listen(runtime);
   try {
-    const history = new URL(`http://127.0.0.1:${port}/conversations/large/messages`);
-    history.searchParams.set("creator_id", "creator");
-    history.searchParams.set("user_id", "user");
-    history.searchParams.set("agent_id", "agent");
-    history.searchParams.set("product_id", "product");
-    history.searchParams.set("corpus_digest", `sha256:${"0".repeat(64)}`);
-    const response = await fetch(history);
+    const conversationId = await createLocalConversation(port);
+    const response = await fetch(`http://127.0.0.1:${port}/v1/conversations/${conversationId}/history?${localScope}`);
     assert.equal(response.status, 413);
     assert.equal(((await response.json()) as { error: { code: string } }).error.code, "response_too_large");
   } finally {
@@ -1248,7 +1242,7 @@ test("HTTP Registry authorization failures return controlled 503 responses", asy
       }
     });
 
-    const history = new URL(`http://127.0.0.1:${port}/conversations/conversation/messages`);
+    const history = new URL(`http://127.0.0.1:${port}/v1/conversations/conversation/history`);
     history.searchParams.set("entitlement_id", entitlement.entitlement_id);
     history.searchParams.set("creator_id", entitlement.creator_id);
     history.searchParams.set("agent_id", entitlement.agent_id);
@@ -1434,7 +1428,7 @@ test("entitlement-backed turns reject a grant for another account even with a pe
     assert.equal(((await rejected).error as { code?: string }).code, "entitlement_required");
     assert.equal(runCalls, 0);
 
-    const history = new URL(`http://127.0.0.1:${port}/conversations/grant-change-conversation/messages`);
+    const history = new URL(`http://127.0.0.1:${port}/v1/conversations/grant-change-conversation/history`);
     history.searchParams.set("entitlement_id", entitlement.entitlement_id);
     history.searchParams.set("creator_id", entitlement.creator_id);
     history.searchParams.set("agent_id", entitlement.agent_id);
@@ -1639,6 +1633,23 @@ function corpusAsset(id: string, assetPath: string, content: string): { id: stri
     path: assetPath,
     sha256: `sha256:${createHash("sha256").update(content).digest("hex")}`
   };
+}
+
+const localScope = new URLSearchParams({
+  creator_id: "creator",
+  user_id: "user",
+  agent_id: "agent",
+  product_id: "product",
+  corpus_digest: `sha256:${"0".repeat(64)}`
+}).toString();
+
+async function createLocalConversation(port: number): Promise<string> {
+  const created = await fetch(`http://127.0.0.1:${port}/v1/conversations?${localScope}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title: "history" })
+  });
+  return ((await created.json()) as { conversation: { id: string } }).conversation.id;
 }
 
 async function authBoundaryConversations(
