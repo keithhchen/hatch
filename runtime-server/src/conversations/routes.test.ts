@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import http from "node:http";
 import test from "node:test";
@@ -137,9 +138,9 @@ async function harness(options: { assistant?: boolean } = { assistant: true }) {
   const server = http.createServer((req, res) => { void routes.handle(req, res, new URL(req.url!, "http://x")).then(handled => { if (!handled) { res.writeHead(404); res.end(); } }); });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-  const call = (path: string, init: { method?: string; token?: string | null; body?: unknown; signal?: AbortSignal } = {}) => fetch(`${base}${path}`, {
+  const call = (path: string, init: { method?: string; token?: string | null; body?: unknown; signal?: AbortSignal; keyless?: boolean } = {}) => fetch(`${base}${path}`, {
     method: init.method ?? "GET", signal: init.signal,
-    headers: { ...(init.token === null ? {} : { authorization: `Bearer ${init.token ?? "owner"}` }), "content-type": "application/json" },
+    headers: { ...(init.token === null ? {} : { authorization: `Bearer ${init.token ?? "owner"}` }), "content-type": "application/json", ...(init.method === "POST" && !init.keyless ? { "idempotency-key": randomUUID() } : {}) },
     ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
   });
   return { workspace, assistant, desk, call, base, close: () => { workspace.replies.forEach(clearTimeout); server.closeAllConnections(); return new Promise<void>(resolve => server.close(() => resolve())); } };
@@ -276,6 +277,8 @@ test("assistant: same shape and verbs, over the existing Assistant", async () =>
     assert.equal((await h.call(`${path}/messages`, { token: null })).status, 401);
     const history = await (await h.call(`${path}/messages`)).json() as { status: string; messages: Array<Record<string, unknown>> };
     assert.deepEqual(history, { status: "idle", messages: [{ id: "m1", role: "assistant", text: "Hello", created_at: "2026-01-01T00:00:00.000Z" }] });
+    assert.equal((await h.call(`${path}/messages`, { method: "POST", keyless: true, body: { content: "Remind me tomorrow" } })).status, 400, "a send without a key is refused");
+    assert.equal(h.assistant.ingested.length, 0);
     const sent = await h.call(`${path}/messages?wait=30`, { method: "POST", body: { content: "Remind me tomorrow" } });
     assert.equal(sent.status, 200);
     const body = await sent.json() as { message: { id: string; role: string }; reply: { text: string }; status: string };
@@ -293,7 +296,11 @@ test("assistant: same shape and verbs, over the existing Assistant", async () =>
 test("assistant: retry answers again under the client's key", async () => {
   const h = await harness();
   try {
-    const retried = await h.call("/v1/creator/assistant/conversation/retry", { method: "POST", body: { idempotency_key: "k-1" } });
+    const keyless = await h.call("/v1/creator/assistant/conversation/retry", { method: "POST", keyless: true, body: {} });
+    assert.equal(keyless.status, 400);
+    assert.equal(((await keyless.json()) as { error: { code: string } }).error.code, "idempotency_key_required");
+    assert.deepEqual(h.assistant.retried, []);
+    const retried = await h.call("/v1/creator/assistant/conversation/retry", { method: "POST", keyless: true, body: { idempotency_key: "k-1" } });
     assert.equal(retried.status, 202);
     assert.deepEqual(await retried.json(), { run_id: "arun-2", outcome: "started" });
     assert.deepEqual(h.assistant.retried, ["k-1"]);
@@ -311,7 +318,7 @@ test("assistant: 503 when the Registry has no database", async () => {
 });
 
 const post = (h: Awaited<ReturnType<typeof harness>>, body: unknown, query = "", headers: Record<string, string> = {}) =>
-  fetch(`${h.base}${root}/research/messages${query}`, { method: "POST", headers: { authorization: "Bearer owner", "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
+  fetch(`${h.base}${root}/research/messages${query}`, { method: "POST", headers: { authorization: "Bearer owner", "content-type": "application/json", ...(headers.keyless ? {} : { "idempotency-key": randomUUID() }), ...headers }, body: JSON.stringify(body) });
 
 test("idempotency: same key and content is one message, other content is 409", async () => {
   const h = await harness();
@@ -325,9 +332,11 @@ test("idempotency: same key and content is one message, other content is 409", a
     const conflict = await post(h, { content: "Something else" }, "", key);
     assert.equal(conflict.status, 409);
     assert.equal(((await conflict.json()) as { error: { code: string } }).error.code, "idempotency_conflict");
-    assert.equal(((await (await post(h, { content: "Look into Alice", idempotency_key: "client-1" })).json()) as { message: { id: string } }).message.id, first.message.id, "the key may travel in the body");
-    const unkeyed = await (await post(h, { content: "Look into Alice" })).json() as { message: { id: string } };
-    assert.notEqual(unkeyed.message.id, first.message.id, "without a key a repeat is a new message");
+    assert.equal(((await (await h.call(`${root}/research/messages`, { method: "POST", keyless: true, body: { content: "Look into Alice", idempotency_key: "client-1" } })).json()) as { message: { id: string } }).message.id, first.message.id, "the key may travel in the body");
+    const unkeyed = await h.call(`${root}/research/messages`, { method: "POST", keyless: true, body: { content: "Look into Alice" } });
+    assert.equal(unkeyed.status, 400, "without a key the send is refused, never given a random one");
+    assert.equal(((await unkeyed.json()) as { error: { code: string } }).error.code, "idempotency_key_required");
+    assert.equal(h.workspace.started.length, 1, "and nothing was delivered");
   } finally { await h.close(); }
 });
 

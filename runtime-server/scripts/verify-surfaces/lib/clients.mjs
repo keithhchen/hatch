@@ -94,17 +94,17 @@ export class ChatApi extends HttpApi {
 export class StudioApi extends HttpApi {
   workerPath(productId, worker) { return `/v1/creator/products/${productId}/workers/${worker}`; }
   workers(productId) { return this.call("GET", `/v1/creator/products/${productId}/workers`); }
-  sendWorker(productId, worker, { content, key, client, wait, accept }) { return this.call("POST", `${this.workerPath(productId, worker)}/messages${wait ? `?wait=${wait}` : ""}`, { body: { content, ...(client ? { client } : {}) }, headers: { ...(key ? { "idempotency-key": key } : {}) } }); }
+  sendWorker(productId, worker, { content, key, client, wait, accept }) { return this.call("POST", `${this.workerPath(productId, worker)}/messages${wait ? `?wait=${wait}` : ""}`, { body: { content, ...(client ? { client } : {}) }, headers: { "idempotency-key": key ?? randomUUID() } }); }
   messagesWorker(productId, worker, after) { return this.call("GET", `${this.workerPath(productId, worker)}/messages${after ? `?after=${after}` : ""}`); }
   snapshotWorker(productId, worker) { return this.call("GET", `${this.workerPath(productId, worker)}/snapshot`); }
   eventsWorker(productId, worker, { after, signal } = {}) { return this.stream("GET", `${this.workerPath(productId, worker)}/events${after ? `?after=${encodeURIComponent(after)}` : ""}`, { signal }); }
   stopWorker(productId, worker) { return this.call("POST", `${this.workerPath(productId, worker)}/stop`, { body: {} }); }
-  sendAssistant({ content, key, client, wait }) { return this.call("POST", `/v1/creator/assistant/conversation/messages${wait ? `?wait=${wait}` : ""}`, { body: { content, ...(client ? { client } : {}) }, headers: key ? { "idempotency-key": key } : {} }); }
+  sendAssistant({ content, key, client, wait }) { return this.call("POST", `/v1/creator/assistant/conversation/messages${wait ? `?wait=${wait}` : ""}`, { body: { content, ...(client ? { client } : {}) }, headers: { "idempotency-key": key ?? randomUUID() } }); }
   messagesAssistant(after) { return this.call("GET", `/v1/creator/assistant/conversation/messages${after ? `?after=${after}` : ""}`); }
   snapshotAssistant() { return this.call("GET", "/v1/creator/assistant/conversation/snapshot"); }
   eventsAssistant({ after, signal } = {}) { return this.stream("GET", `/v1/creator/assistant/conversation/events${after ? `?after=${encodeURIComponent(after)}` : ""}`, { signal }); }
   assistantView() { return this.call("GET", "/v1/creator/assistant"); }
-  approveTask(taskId) { return this.call("POST", `/v1/creator/assistant/tasks/${taskId}/approve`, { body: {} }); }
+  approveTask(taskId) { return this.call("POST", `/v1/creator/assistant/tasks/${taskId}/approve`, { body: {}, headers: { "idempotency-key": randomUUID() } }); }
 }
 
 /** A WebSocket client that records every frame with its arrival time. */

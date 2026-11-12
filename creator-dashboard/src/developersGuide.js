@@ -53,7 +53,7 @@ export const METHODS = Object.freeze([
         ]
       },
       { id: "workers", code: [sh(`curl -s ${PRODUCT_URL}/workers ${AUTH} \\\n  | jq '.workers[] | {id, availability, status}'`)] },
-      { id: "chat", code: [sh(`curl -s -X POST "${WORKER_URL}/messages?wait=60" ${AUTH} ${JSON_HEADER} \\\n  -d '{"content":"Summarize what we know about the expert"}' \\\n  | jq '{status, reply}'`)] },
+      { id: "chat", code: [sh(`curl -s -X POST "${WORKER_URL}/messages?wait=60" ${AUTH} ${JSON_HEADER} -H "Idempotency-Key: $(uuidgen)" \\\n  -d '{"content":"Summarize what we know about the expert"}' \\\n  | jq '{status, reply}'`)] },
       {
         id: "history",
         code: [
@@ -63,7 +63,7 @@ export const METHODS = Object.freeze([
       },
       { id: "events", code: [sh(`curl -N ${WORKER_URL}/events ${AUTH}`)] },
       { id: "stop", code: [sh(`curl -s -X POST ${WORKER_URL}/stop ${AUTH} ${JSON_HEADER} -d '{}'`)] },
-      { id: "assistant", code: [sh(`curl -s -X POST "${ORIGIN}/v1/creator/assistant/conversation/messages?wait=60" ${AUTH} ${JSON_HEADER} \\\n  -d '{"content":"What needs my attention?","client_message_id":"'"$(uuidgen)"'"}'`)] }
+      { id: "assistant", code: [sh(`curl -s -X POST "${ORIGIN}/v1/creator/assistant/conversation/messages?wait=60" ${AUTH} ${JSON_HEADER} -H "Idempotency-Key: $(uuidgen)" \\\n  -d '{"content":"What needs my attention?"}'`)] }
     ]
   },
   {

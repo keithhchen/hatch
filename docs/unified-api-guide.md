@@ -210,7 +210,7 @@ curl -s https://gethatchapp.com/v1/creator/products/$PRODUCT_ID/workers -H "Auth
 ### 10. Send a message
 
 ```sh
-curl -s -X POST "https://gethatchapp.com/v1/creator/products/$PRODUCT_ID/workers/research/messages?wait=60" -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" \
+curl -s -X POST "https://gethatchapp.com/v1/creator/products/$PRODUCT_ID/workers/research/messages?wait=60" -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" -H "Idempotency-Key: $(uuidgen)" \
   -d '{"content":"Summarize what we know about the expert"}' \
   | jq '{status, reply}'
 ```
@@ -245,11 +245,11 @@ curl -s -X POST https://gethatchapp.com/v1/creator/products/$PRODUCT_ID/workers/
 ### 14. Talk to the Assistant
 
 ```sh
-curl -s -X POST "https://gethatchapp.com/v1/creator/assistant/conversation/messages?wait=60" -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" \
-  -d '{"content":"What needs my attention?","client_message_id":"'"$(uuidgen)"'"}'
+curl -s -X POST "https://gethatchapp.com/v1/creator/assistant/conversation/messages?wait=60" -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" -H "Idempotency-Key: $(uuidgen)" \
+  -d '{"content":"What needs my attention?"}'
 ```
 
-Send `client_message_id` (and the same value as `Idempotency-Key`) so a retry does not send twice. `Accept: text/event-stream` on the POST streams the reply; `GET .../events?after_cursor=<cursor>` resumes it.
+Every write to a worker or the Assistant (`messages`, `retry`, task `approve`/`decline`/`answer`) requires an `Idempotency-Key`; without one the answer is `400 idempotency_key_required`. Use one new UUID per action and the same one on a retry, so a retry does not send twice. `Accept: text/event-stream` on the POST streams the reply; `GET .../events?after_cursor=<cursor>` resumes it.
 
 ### 15. Chat with a published product
 
