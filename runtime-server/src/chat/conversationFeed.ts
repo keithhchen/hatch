@@ -1,3 +1,4 @@
+import { reported } from "../observability/reported.js";
 import type { ConversationJournalEvent, ConversationJournalPage } from "../conversationRepository.js";
 import { publicJournalPayload } from "./messageLedger.js";
 import type { EventSink, RunEventHub } from "./runEventHub.js";
@@ -39,6 +40,8 @@ export class ConversationFeed {
     let cursor = options.afterCursor;
     let stopped = false;
     let timer: NodeJS.Timeout | undefined;
+    let lastFailure: string | undefined;
+    let lastFailureAt = 0;
     const drop = (): void => { stopped = true; clearTimeout(timer); unsubscribe(); };
     const guarded = (event: Record<string, unknown>): void => {
       try { sink.push(event); } catch { drop(); }
@@ -55,7 +58,11 @@ export class ConversationFeed {
           cursor = page.cursor;
           if (!page.has_more || stopped) break;
         }
-      } catch { /* the next poll retries; a vanished conversation simply yields nothing */ }
+      } catch (error) {
+        // The next poll retries; the same failure is logged once a minute, not every poll.
+        const message = error instanceof Error ? error.message : String(error);
+        if (message !== lastFailure || Date.now() - lastFailureAt > 60_000) { reported("conversation_feed_poll_failed", { conversation_id: conversationId })(error); lastFailure = message; lastFailureAt = Date.now(); }
+      }
       if (!stopped) timer = setTimeout(() => void poll(), this.pollMs);
     };
     void poll();

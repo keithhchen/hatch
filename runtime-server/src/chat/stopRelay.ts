@@ -1,3 +1,4 @@
+import { reported } from "../observability/reported.js";
 type Listener = { query(text: string): Promise<unknown>; on(event: string, handler: (...args: any[]) => void): unknown; release(error?: Error | boolean): void };
 type Pool = { query(text: string, values?: unknown[]): Promise<unknown>; connect(): Promise<Listener> };
 
@@ -29,7 +30,7 @@ export class PostgresStopRelay implements StopRelay {
   private get channel(): string { return this.options.channel ?? "hatch_run_stops"; }
 
   publish(runId: string): void {
-    this.pool.query("SELECT pg_notify($1, $2)", [this.channel, runId]).catch(() => undefined);
+    this.pool.query("SELECT pg_notify($1, $2)", [this.channel, runId]).catch(reported("run_stop_publish_failed", { run_id: runId }));
   }
 
   async subscribe(onStop: (runId: string) => void): Promise<() => Promise<void>> {

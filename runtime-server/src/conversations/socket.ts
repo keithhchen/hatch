@@ -4,6 +4,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import { MAX_CONSUMER_BUFFERED_BYTES as MAX_BUFFERED_BYTES } from "../chat/sinks.js";
 import { ConversationError } from "./conversation.js";
 import { follow, resumePoint, withoutPartials } from "./follow.js";
+import { log } from "../observability/log.js";
 import { snapshotOf } from "./snapshot.js";
 import type { Studio, TargetSpec } from "./studio.js";
 
@@ -55,6 +56,7 @@ export class StudioSockets {
       if (ws.bufferedAmount > MAX_BUFFERED_BYTES) ws.close(1013, "slow consumer: resume from your last cursor");
     };
     const fail = (id: string | undefined, error: unknown) => {
+      if (!(error instanceof ConversationError)) log.error("socket_request_failed", { ...(id ? { subscription_id: id } : {}), error });
       const known = error instanceof ConversationError ? error : new ConversationError(500, "internal_error", "Request failed.");
       send({ type: "error", ...(id ? { id } : {}), error: { code: known.code, message: known.message } });
     };
