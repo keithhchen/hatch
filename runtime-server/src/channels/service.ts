@@ -191,7 +191,7 @@ export class ChannelService implements AssistantChannels {
     if (adapter.directThread) who = { ...who, threadId: await adapter.directThread(who.senderId) };
     const linked = await this.connections.redeem(kind, adapter.scope, code, who, this.deps.now?.());
     if (!linked) throw Object.assign(new Error("This link code has expired."), { status: 410, code: "link_expired" });
-    await this.dispatcher.send({ connectionId: linked.id, channel: kind, scope: linked.scope, address: who, kind: "notice", message: { text: await this.router.greeting(linked) } });
+    await this.dispatcher.send({ connectionId: linked.id, channel: kind, scope: linked.scope, address: who, kind: "notice", message: { text: await this.router.greeting(linked) }, sourceKey: `admit:${linked.id}` });
   }
 
   // ── The Assistant ──────────────────────────────────────────────────────
