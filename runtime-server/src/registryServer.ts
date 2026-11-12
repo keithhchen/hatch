@@ -932,7 +932,7 @@ async function route(
     const token = bearer(request);
     const session = await context.accounts.resolveSession(token);
     if (session) {
-      sendAuthJson(response, 200, { ...accountPublic(session.account), session_expires_at: session.session.absolute_expires_at });
+      sendAuthJson(response, 200, { ...accountPublic(session.account), session_expires_at: session.session.absolute_expires_at, session_id: session.session.id, client_type: session.session.client_type });
       return;
     }
     const account = await authenticateLegacy(token, context.accounts, context.authSecret);

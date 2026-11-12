@@ -56,7 +56,7 @@ import { ChatAssets, TextPartsReader, type PartsReader } from "./chat/assets.js"
 import { attachmentToolDefinitions } from "./chat/attachmentTools.js";
 import { failRun, runModelTurn } from "./chat/modelTurn.js";
 import { toolRegistry } from "./tools.js";
-import { attributeByScope, type UsageRecorder } from "./usage/usage.js";
+import { attributeByScope, type UsageReader, type UsageRecorder } from "./usage/usage.js";
 import { PostgresUsageLedger } from "./usage/postgresUsage.js";
 import { RegistryConnectionDirectory } from "./chat/registryConnections.js";
 import { openChatAssets } from "./chat/openChatAssets.js";
@@ -81,6 +81,7 @@ import {
 import type { ChatEdge } from "./chat/turnSubmission.js";
 import { bearerToken, handleHttpRequestFailure, httpDeadlineMs, writeJson } from "./http/httpSupport.js";
 import { handleHttpRequest, type RuntimeReadiness } from "./http/runtimeRouter.js";
+import { ResponsesHttpApi } from "./responses/router.js";
 import { handleRuntimeSocket } from "./ws/runtimeSocket.js";
 
 // The Runtime's public surface stays here: callers import these from index.js.
@@ -181,6 +182,8 @@ export type RuntimeServerOptions = {
   httpRequestTimeoutMs?: number;
   /** Maximum serialized JSON response size for discovery and history. */
   maxHttpResponseBytes?: number;
+  /** Test seams of the Responses API: how URLs are fetched, how long a request is held, the keep-alive interval. */
+  responsesApi?: Pick<ConstructorParameters<typeof ResponsesHttpApi>[0], "urls" | "holdMs" | "keepAliveMs">;
 };
 
 /**
@@ -535,6 +538,12 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   };
   const gateway = chatGatewayFor(options, chat, scopes, conversationRepository, conversationStore, agentCorpusResolver, parts, chatAssets);
   edge.serviceApi = new ChatServiceApi({ token: options.chatServiceToken, gateway });
+  const responses = new ResponsesHttpApi({
+    repository: conversationRepository, store: conversationStore, edge,
+    corpora: agentCorpusResolver, identities: authIdentityResolver, ready: repositoryReady,
+    ...(options.usage && "forRun" in options.usage ? { usage: options.usage as unknown as Pick<UsageReader, "forRun"> } : {}),
+    ...(options.responsesApi ?? {})
+  });
 
   const inflight = new InflightResponses();
   const server = http.createServer(observed((req, res) => {
@@ -571,6 +580,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       conversationRepository,
       repositoryReady,
       edge,
+      responses,
       readiness,
       allowedOrigins
     }, requestAbortController.signal);

@@ -70,6 +70,27 @@ for (const backend of ["memory", "file", "postgres"] as const) {
     assert.ok(results.every((row) => row.run.id === runs[0]!.id));
   }));
 
+  test(`${backend}: start_only racing messages start exactly one Run and refuse every other with conversation_busy`, options, async () => withBackend(backend, async ({ repository }) => {
+    const settled = await Promise.allSettled(Array.from({ length: 8 }, (_, n) => repository.acceptSubmission({ ...message(n), mode: "start_only" })));
+    assert.equal(settled.filter((row) => row.status === "fulfilled").length, 1);
+    const refused = settled.filter((row): row is PromiseRejectedResult => row.status === "rejected");
+    assert.equal(refused.length, 7);
+    assert.ok(refused.every((row) => (row.reason as { code?: string }).code === "conversation_busy"));
+    const runs = await repository.listRuns(id);
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0]!.steeredCount, 0);
+  }));
+
+  test(`${backend}: start_only still replays its own key while the Run is active, and an owner finds the conversation by its public id`, options, async () => withBackend(backend, async ({ repository }) => {
+    const first = await repository.acceptSubmission({ ...message(0), mode: "start_only" });
+    const replay = await repository.acceptSubmission({ ...message(0), mode: "start_only", run: { ...message(0).run, id: "other-run" } });
+    assert.deepEqual([replay.created, replay.run.id], [false, first.run.id]);
+    const owner = { ownerAccountId: "owner", creatorId: "creator" };
+    assert.equal((await repository.findOwnedConversation(owner, "steer"))?.id, id);
+    assert.equal(await repository.findOwnedConversation({ ownerAccountId: "someone", creatorId: "creator" }, "steer"), undefined);
+    assert.equal((await repository.listConversations(owner)).conversations.length, 1);
+  }));
+
   test(`${backend}: a steered message is idempotent per message and conflicts on a different digest`, options, async () => withBackend(backend, async ({ repository }) => {
     await repository.acceptSubmission(message(0));
     const first = await repository.acceptSubmission(message(1));

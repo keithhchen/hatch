@@ -36,6 +36,8 @@ export type SubmitCommand<Scope> = {
   corpusDigest: string;
   requiresLocalTools: boolean;
   timeZone?: string;
+  /** `start_only`: the message never joins an active Run; it is refused with `conversation_busy` (409). Default: it steers. */
+  mode?: "start_or_steer" | "start_only";
 };
 
 /** Answering the transcript again after a Run that failed or was interrupted: no new message, so no digest or assets. */
@@ -129,7 +131,7 @@ export class ChatService<Scope> {
     await limits?.check(command.principal, command.conversation);
     // A message that joins a Run adds no work, so capacity is only reserved for one that may start a Run.
     const known = await repository.hasAcceptedMessage(command.conversation.id, command.clientMessageId);
-    const joining = await repository.getActiveRun(command.conversation.id);
+    const joining = command.mode === "start_only" ? undefined : await repository.getActiveRun(command.conversation.id);
     // A cancelled Run whose executor is still winding down must not overlap the next one in the same conversation.
     if (!joining && supervisor.holdsConversation(command.conversation.id)) {
       throw new ChatError("conversation_busy", "The previous run is still stopping. Try again in a moment.", 409);
@@ -148,7 +150,8 @@ export class ChatService<Scope> {
           corpusDigest: command.corpusDigest,
           executorId: supervisor.executorId
         },
-        canonicalUser: known ? { role: "user", content: "" } : await command.message()
+        canonicalUser: known ? { role: "user", content: "" } : await command.message(),
+        ...(command.mode ? { mode: command.mode } : {})
       }, known ? undefined : command.bind);
       const outcome = accepted.created ? "started" : accepted.steered ? "steered" : "replayed";
       if (outcome === "started" && joining) {

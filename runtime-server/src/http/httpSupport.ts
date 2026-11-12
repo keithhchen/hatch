@@ -12,6 +12,8 @@ export const MAX_WAIT_SECONDS = 60;
 export function httpDeadlineMs(req: http.IncomingMessage, requestTimeoutMs: number): number | undefined {
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
   if (String(req.headers.accept ?? "").includes("text/event-stream")) return undefined;
+  // The Responses API holds a request up to 90 s and streams on a plain Accept header: the API bounds itself.
+  if (url.pathname.startsWith("/responses/v1/")) return undefined;
   const wait = Number(url.searchParams.get("wait") ?? 0);
   return requestTimeoutMs + (Number.isFinite(wait) && wait > 0 ? Math.min(wait, MAX_WAIT_SECONDS) * 1000 : 0);
 }

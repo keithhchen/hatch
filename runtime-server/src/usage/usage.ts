@@ -33,6 +33,8 @@ export type DailyUsage = { day: string; usage: SurfaceTokens };
 export interface UsageReader {
   monthToDate(accountId: string, now?: Date): Promise<SurfaceTokens>;
   daily(accountId: string, from: string, to: string): Promise<DailyUsage[]>;
+  /** Every model call of one Run, summed: what the Run spent. */
+  forRun(runId: string): Promise<TokenCount>;
 }
 
 export const emptyTokens = (): TokenCount => ({ input: 0, cachedInput: 0, output: 0, reasoning: 0 });

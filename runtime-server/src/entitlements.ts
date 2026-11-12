@@ -32,6 +32,9 @@ const BriefSpecSchema = z.object({
 export type AuthIdentity = {
   sub: string;
   exp?: number;
+  /** The verified Registry session (an API key is one) and what kind of client holds it; absent for a legacy token. */
+  sessionId?: string;
+  clientType?: string;
 };
 
 export type AuthorizationRequestOptions = { signal?: AbortSignal };
@@ -325,7 +328,9 @@ export class RegistryEntitlementResolver implements EntitlementResolver, AuthIde
     const expiresAt = typeof payload.session_expires_at === "string" ? Date.parse(payload.session_expires_at) : Number.NaN;
     return {
       sub: payload.id,
-      ...(Number.isFinite(expiresAt) ? { exp: Math.floor(expiresAt / 1000) } : {})
+      ...(Number.isFinite(expiresAt) ? { exp: Math.floor(expiresAt / 1000) } : {}),
+      ...(typeof payload.session_id === "string" ? { sessionId: payload.session_id } : {}),
+      ...(typeof payload.client_type === "string" ? { clientType: payload.client_type } : {})
     };
   }
 

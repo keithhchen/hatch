@@ -46,6 +46,7 @@
     "@types/node": "^24.0.0",
     "@types/pg": "^8.20.3",
     "@types/ws": "^8.5.0",
+    "openai": "^7.55.0",
     "typescript": "^5.9.0"
   }
 }
