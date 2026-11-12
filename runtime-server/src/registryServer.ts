@@ -900,9 +900,13 @@ async function route(
     const account = await authenticate(request, response, context);
     if (!account) { sendAuthJson(response, 401, { detail: "A valid account token is required." }); return; }
     const body = await readJson(request);
-    let updated: Account;
+    let updated: Account = account;
     try {
-      updated = await context.accounts.setDisplayName(account.id, String(body.display_name ?? ""));
+      if (body.early_access !== undefined) {
+        if (typeof body.early_access !== "boolean") throw new Error("early_access_invalid");
+        updated = await context.accounts.setEarlyAccess(account.id, body.early_access);
+      }
+      if (body.display_name !== undefined) updated = await context.accounts.setDisplayName(account.id, String(body.display_name));
     } catch (error) {
       sendAuthInputError(response, error);
       return;
@@ -2008,7 +2012,8 @@ function sendAuthInputError(response: http.ServerResponse, error: unknown): void
     password_too_short: "Password must contain at least 8 characters.",
     password_too_long: "Password must not exceed 1024 UTF-8 bytes.",
     display_name_required: "Display name is required.",
-    display_name_too_long: "Display name must not exceed 128 characters."
+    display_name_too_long: "Display name must not exceed 128 characters.",
+    early_access_invalid: "early_access must be true or false."
   };
   const code = error instanceof Error ? error.message : "auth_input_invalid";
   sendAuthJson(response, 400, { detail: details[code] ?? "Authentication input is invalid." });

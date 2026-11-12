@@ -984,9 +984,11 @@ export async function createDashboardApp(options = {}) {
           method: "PATCH",
           fetchImpl,
           headers: { authorization: `Bearer ${authentication.token}` },
-          body: JSON.stringify({ display_name: body.display_name })
+          // Forward only the account fields the Registry accepts and the client actually sent.
+          body: JSON.stringify(Object.fromEntries(["display_name", "early_access"].filter((key) => key in body).map((key) => [key, body[key]])))
         });
-        return send(response, 200, publicProfile(account));
+        // The same account shape as GET /v1/auth/me: the Registry's account plus the web's presentation fields.
+        return send(response, 200, { ...account, ...publicProfile(account) });
       }
       if (request.method === "GET" && url.pathname === "/v1/auth/me") {
         const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);

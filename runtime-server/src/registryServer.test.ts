@@ -113,7 +113,12 @@ test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () =
     const rename = (body: unknown, token = auth.session.token) => fetch(`${base}/v1/auth/me`, { method: "PATCH", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body) });
     const renamed = await rename({ display_name: "  New   Name " });
     assert.equal(renamed.status, 200);
-    assert.deepEqual(await renamed.json(), { id: mePayload.id, email: "user@example.com", display_name: "New Name", avatar_url: null });
+    assert.deepEqual(await renamed.json(), { id: mePayload.id, email: "user@example.com", display_name: "New Name", avatar_url: null, early_access: false });
+    const earlyOn = await rename({ early_access: true });
+    assert.equal(((await earlyOn.json()) as { early_access: boolean }).early_access, true);
+    assert.equal(((await (await fetch(`${base}/v1/auth/me`, { headers: { authorization: `Bearer ${auth.session.token}` } })).json()) as { early_access: boolean }).early_access, true);
+    assert.equal((await rename({ early_access: "yes" })).status, 400);
+    assert.equal(((await (await rename({ early_access: false })).json()) as { early_access: boolean }).early_access, false);
     assert.equal(((await (await fetch(`${base}/v1/auth/me`, { headers: { authorization: `Bearer ${auth.session.token}` } })).json()) as { display_name: string }).display_name, "New Name");
     assert.equal((await rename({ display_name: "   " })).status, 400);
     assert.equal((await rename({ display_name: "x".repeat(129) })).status, 400);

@@ -8,6 +8,7 @@ import { AccountAvatar } from "./AccountAvatar.jsx";
 import { WebBrand } from "./WebBrand.jsx";
 import { creatorProductPath, parseCreatorRoute } from "./creatorRoutes.js";
 import { createCreatorTranslator } from "./creatorI18n.js";
+import { isEarlyAccess, studioNavItems } from "./earlyAccess.js";
 import { isProductLive } from "./studioPath.js";
 import { StudioPathCards } from "./studioPathCards.jsx";
 import { useLocale } from "./locale.jsx";
@@ -44,6 +45,7 @@ export function CreatorPortalV2({
   navigate = defaultNavigate,
   request,
   profile,
+  onProfileChange,
   onLogout
 }) {
   const route = useMemo(() => parseCreatorRoute(pathname), [pathname]);
@@ -77,6 +79,8 @@ export function CreatorPortalV2({
 
   const accountMenuOpen = Boolean(accountAnchorEl);
   const closeAccountMenu = () => setAccountAnchorEl(null);
+  const earlyAccess = isEarlyAccess(profile);
+  const navItems = studioNavItems(NAV_ITEMS, earlyAccess);
   const displayName = profile?.display_name || t("creator");
   const workbench = route.kind === "agent" && route.tab === "build";
 
@@ -88,7 +92,7 @@ export function CreatorPortalV2({
     </div>
     <button type="button" className="sx-search" onClick={() => setPaletteOpen(true)}><Search aria-hidden="true" /><span>{t("sxSearch")}</span><kbd>⌘K</kbd></button>
     <nav className="sx-nav" aria-label={t("creatorNavigation")}>
-      {NAV_ITEMS.map(({ section, href, label, Icon }) => <NavLink key={section} href={href} navigate={go} active={route.section === section}><Icon aria-hidden="true" /><span>{t(label)}</span></NavLink>)}
+      {navItems.map(({ section, href, label, Icon }) => <NavLink key={section} href={href} navigate={go} active={route.section === section}><Icon aria-hidden="true" /><span>{t(label)}</span></NavLink>)}
     </nav>
     <Button className="sx-new" variant="secondary" type="button" leading={<Plus aria-hidden="true" />} onClick={() => go(`${ROOT}/products/new`)}>{t("newAgent")}</Button>
     <ButtonBase
@@ -131,9 +135,9 @@ export function CreatorPortalV2({
           {onLogout ? <><MuiDivider /><MuiMenuItem onClick={() => { closeAccountMenu(); void onLogout(); }}><ListItemIcon><LogOut size={18} /></ListItemIcon><ListItemText primary={t("signOut")} /></MuiMenuItem></> : null}
         </MuiMenu>
         <main id="creator-main" className={`cpv2-main${workbench ? " cpv2-main--workbench" : ""}`} ref={mainRef}>
-          <CreatorRoute route={route} request={request} navigate={go} locale={locale} t={t} profile={profile} />
+          <CreatorRoute route={route} request={request} navigate={go} locale={locale} t={t} profile={profile} onProfileChange={onProfileChange} />
         </main>
-        <StudioCommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} request={request} navigate={go} t={t} />
+        <StudioCommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} request={request} navigate={go} t={t} navItems={navItems} />
       </div>
     </ThemeProvider>
   );
@@ -149,18 +153,18 @@ function NavLink({ href, navigate, active = false, children }) {
 }
 
 /** ⌘K: jump to a section, an Agent (live list), or create one. */
-function StudioCommandPalette({ open, onOpenChange, request, navigate, t }) {
+function StudioCommandPalette({ open, onOpenChange, request, navigate, t, navItems }) {
   const products = useRemote(request, open ? "/v1/creator/products" : null);
   const agents = arrayOf(unwrap(products.data, "products"));
   const groups = [
     { label: t("sxPaletteActions"), items: [{ value: "new", label: t("newAgent"), icon: <Plus aria-hidden="true" />, onSelect: () => navigate(`${ROOT}/products/new`) }] },
-    { label: t("sxPaletteGoTo"), items: NAV_ITEMS.map(({ section, href, label, Icon }) => ({ value: section, label: t(label), icon: <Icon aria-hidden="true" />, onSelect: () => navigate(href) })) },
+    { label: t("sxPaletteGoTo"), items: navItems.map(({ section, href, label, Icon }) => ({ value: section, label: t(label), icon: <Icon aria-hidden="true" />, onSelect: () => navigate(href) })) },
     ...(agents.length ? [{ label: t("navAgents"), items: agents.map((product) => ({ value: idOf(product, "product"), label: productName(product, t), keywords: product.promise ?? "", icon: <Bot aria-hidden="true" />, onSelect: () => navigate(creatorProductPath(idOf(product, "product"))) })) }] : [])
   ];
   return <CommandMenu open={open} onOpenChange={onOpenChange} groups={groups} title={t("sxSearch")} placeholder={t("sxPalettePlaceholder")} empty={products.state === "loading" ? t("loadingCreatorPage") : t("sxPaletteEmpty")} />;
 }
 
-function CreatorRoute({ route, request, navigate, locale, t, profile }) {
+function CreatorRoute({ route, request, navigate, locale, t, profile, onProfileChange }) {
   if (typeof request !== "function") {
     return <RouteProblem title={t("creatorPortalUnavailable")} body={t("creatorPortalUnavailableBody")} />;
   }
@@ -168,13 +172,13 @@ function CreatorRoute({ route, request, navigate, locale, t, profile }) {
   const lazy = (node) => <Suspense fallback={<LoadingState t={t} />}>{node}</Suspense>;
   if (route.kind === "redirect") return <Redirect to={route.to} navigate={navigate} />;
   if (route.kind === "home") return <CreatorHome request={request} navigate={navigate} t={t} locale={locale} />;
-  if (route.kind === "assistant") return lazy(<StudioAssistant request={request} t={t} />);
+  if (route.kind === "assistant") return isEarlyAccess(profile) ? lazy(<StudioAssistant request={request} t={t} />) : <Redirect to={ROOT} navigate={navigate} />;
   if (route.kind === "products") return <ProductsPage request={request} navigate={navigate} t={t} locale={locale} />;
   if (route.kind === "product-create") return lazy(<CreatorProductFiles request={request} profile={profile} navigate={navigate} locale={locale} />);
   if (route.kind === "agent") return lazy(<StudioAgentWorkspace key={route.productId} route={route} request={request} navigate={navigate} locale={locale} t={t} profile={profile} renderBuild={(product) => <FactoryAgents productId={route.productId} section={route.factorySection} agent={route.factoryAgent} navigate={navigate} locale={locale} />} />);
   if (route.kind === "orders") return lazy(<StudioOrdersPage {...ops} />);
   if (route.kind === "order") return lazy(<StudioOrderDetailPage {...ops} orderId={route.orderId} />);
-  if (route.kind === "settings") return lazy(<SettingsPage request={request} t={t} locale={locale} />);
+  if (route.kind === "settings") return lazy(<SettingsPage request={request} t={t} locale={locale} profile={profile} onProfileChange={onProfileChange} />);
   if (route.kind === "earnings") return lazy(<StudioEarningsPage {...ops} />);
   return <RouteProblem title={t("pageNotFound")} body={t("pageNotFoundBody")} action={t("backToProducts")} onAction={() => navigate(`${ROOT}/products`)} />;
 }

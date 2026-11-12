@@ -2,8 +2,8 @@ import { createHash, createHmac, randomBytes, randomUUID, scrypt, timingSafeEqua
 import { Pool } from "pg";
 
 /** An account made by an identity provider alone (Telegram) has no email and no password. */
-export type Account = { id: string; email: string | null; display_name: string; avatar_url: string | null; password_salt: string | null; password_hash: string | null; created_at: string };
-export type AccountPublic = Pick<Account, "id" | "email" | "display_name" | "avatar_url">;
+export type Account = { id: string; email: string | null; display_name: string; avatar_url: string | null; early_access: boolean; password_salt: string | null; password_hash: string | null; created_at: string };
+export type AccountPublic = Pick<Account, "id" | "email" | "display_name" | "avatar_url" | "early_access">;
 export type CreatorAccountPublic = Pick<Account, "id" | "display_name">;
 export type ClientType = "desktop" | "cli" | "api_key";
 export const CLIENT_TYPES: readonly ClientType[] = ["desktop", "cli", "api_key"];
@@ -146,6 +146,7 @@ export class AccountStoreTs {
     );
     CREATE INDEX IF NOT EXISTS account_identities_account_idx ON account_identities(account_id);
     ALTER TABLE accounts ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+    ALTER TABLE accounts ADD COLUMN IF NOT EXISTS early_access BOOLEAN NOT NULL DEFAULT FALSE;
     -- role is historical only: never written or read by any decision.
     ALTER TABLE accounts ALTER COLUMN role DROP NOT NULL;
     ALTER TABLE accounts DROP CONSTRAINT IF EXISTS accounts_role_check;
@@ -172,13 +173,13 @@ export class AccountStoreTs {
   async getByEmail(email: string): Promise<Account | undefined> {
     const normalized = normalizeAccountIdentity(email);
     if (!this.pool) return [...this.accounts.values()].find((account) => account.email === normalized);
-    const result = await this.pool.query("SELECT id, email, display_name, avatar_url, password_salt, password_hash, created_at FROM accounts WHERE email=$1", [normalized]);
+    const result = await this.pool.query("SELECT id, email, display_name, avatar_url, early_access, password_salt, password_hash, created_at FROM accounts WHERE email=$1", [normalized]);
     return result.rows[0] ? rowToAccount(result.rows[0]) : undefined;
   }
 
   async getById(id: string): Promise<Account | undefined> {
     if (!this.pool) return this.accounts.get(id);
-    const result = await this.pool.query("SELECT id, email, display_name, avatar_url, password_salt, password_hash, created_at FROM accounts WHERE id=$1", [id]);
+    const result = await this.pool.query("SELECT id, email, display_name, avatar_url, early_access, password_salt, password_hash, created_at FROM accounts WHERE id=$1", [id]);
     return result.rows[0] ? rowToAccount(result.rows[0]) : undefined;
   }
 
@@ -224,6 +225,7 @@ export class AccountStoreTs {
       email: normalizedEmail,
       display_name: normalizedDisplayName,
       avatar_url: null,
+      early_access: false,
       password_salt: salt.toString("base64url"),
       password_hash: await this.passwordHasher.derive(password, salt),
       created_at: new Date().toISOString(),
@@ -245,7 +247,7 @@ export class AccountStoreTs {
   async signInWithIdentity(provider: string, subject: string, displayName: string): Promise<{ account: Account; created: boolean }> {
     const known = await this.accountOfIdentity(provider, subject);
     if (known) return { account: known, created: false };
-    const account: Account = { id: randomUUID(), email: null, display_name: normalizeDisplayName(displayName.slice(0, MAX_DISPLAY_NAME_LENGTH)), avatar_url: null, password_salt: null, password_hash: null, created_at: new Date().toISOString() };
+    const account: Account = { id: randomUUID(), email: null, display_name: normalizeDisplayName(displayName.slice(0, MAX_DISPLAY_NAME_LENGTH)), avatar_url: null, early_access: false, password_salt: null, password_hash: null, created_at: new Date().toISOString() };
     if (!this.pool) {
       const raced = this.identities.get(`${provider}:${subject}`);
       if (raced) return { account: this.accounts.get(raced)!, created: false };
@@ -366,7 +368,7 @@ export class AccountStoreTs {
       RETURNING
         s.id, s.account_id, s.token_hash, s.client_type, s.name, s.created_at, s.last_seen_at,
         s.idle_expires_at, s.absolute_expires_at, s.revoked_at,
-        a.id AS account_id_value, a.email, a.display_name, a.avatar_url,
+        a.id AS account_id_value, a.email, a.display_name, a.avatar_url, a.early_access,
         a.password_salt, a.password_hash, a.created_at AS account_created_at`, [
       tokenHash,
       nowIso,
@@ -380,6 +382,7 @@ export class AccountStoreTs {
       email: row.email == null ? null : String(row.email),
       display_name: String(row.display_name),
       avatar_url: row.avatar_url == null ? null : String(row.avatar_url),
+      early_access: row.early_access === true,
       password_salt: row.password_salt == null ? null : String(row.password_salt),
       password_hash: row.password_hash == null ? null : String(row.password_hash),
       created_at: new Date(row.account_created_at).toISOString()
@@ -434,7 +437,11 @@ export class AccountStoreTs {
     return this.updateProfileField(id, "display_name", normalizeDisplayName(displayName));
   }
 
-  private async updateProfileField(id: string, field: "avatar_url" | "display_name", value: string | null): Promise<Account> {
+  async setEarlyAccess(id: string, enabled: boolean): Promise<Account> {
+    return this.updateProfileField(id, "early_access", enabled);
+  }
+
+  private async updateProfileField(id: string, field: "avatar_url" | "display_name" | "early_access", value: string | boolean | null): Promise<Account> {
     const account = await this.getById(id);
     if (!account) throw new Error("account_not_found");
     if (!this.pool) {
@@ -443,7 +450,7 @@ export class AccountStoreTs {
       return updated;
     }
     const result = await this.pool.query(
-      `UPDATE accounts SET ${field}=$2 WHERE id=$1 RETURNING id, email, display_name, avatar_url, password_salt, password_hash, created_at`,
+      `UPDATE accounts SET ${field}=$2 WHERE id=$1 RETURNING id, email, display_name, avatar_url, early_access, password_salt, password_hash, created_at`,
       [id, value]
     );
     if (!result.rows[0]) throw new Error("account_not_found");
@@ -457,7 +464,7 @@ export class AccountStoreTs {
 }
 
 export function accountPublic(account: Account): AccountPublic {
-  return { id: account.id, email: account.email, display_name: account.display_name, avatar_url: account.avatar_url };
+  return { id: account.id, email: account.email, display_name: account.display_name, avatar_url: account.avatar_url, early_access: account.early_access };
 }
 
 export function normalizeAccountIdentity(email: string): string {
@@ -571,6 +578,7 @@ function rowToAccount(row: Record<string, any>): Account {
     email: row.email == null ? null : String(row.email),
     display_name: String(row.display_name),
     avatar_url: row.avatar_url == null ? null : String(row.avatar_url),
+    early_access: row.early_access === true,
     password_salt: row.password_salt == null ? null : String(row.password_salt),
     password_hash: row.password_hash == null ? null : String(row.password_hash),
     created_at: new Date(row.created_at).toISOString(),
