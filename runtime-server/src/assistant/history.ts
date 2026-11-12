@@ -1,7 +1,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ChannelKind } from "../channels/types.js";
 import type { MessageOrigin, WorkbenchBackend } from "../factoryAgents/store.js";
-import type { RuntimeStore } from "../store.js";
+import { persistedMessageId, type RuntimeStore } from "../store.js";
 import { SYSTEM_MESSAGE_PREFIX } from "./systemMessage.js";
 import type { AssistantStateRepository, LastExpert } from "./state.js";
 
@@ -29,7 +29,7 @@ export class LegacyAssistantHistory {
   constructor(private readonly deps: {
     backend: (accountId: string) => WorkbenchBackend;
     state: AssistantStateRepository;
-    store: Pick<RuntimeStore, "append" | "readConversation">;
+    store: Pick<RuntimeStore, "append" | "readEvents">;
   }) {}
 
   async importInto(accountId: string, conversationId: string): Promise<void> {
@@ -39,14 +39,20 @@ export class LegacyAssistantHistory {
     if (!id) return;
     const { messages } = id.loaded.session;
     const assistantDesk = (id.loaded.session as { assistantDesk?: LegacyDesk }).assistantDesk;
-    const imported = (await this.deps.store.readConversation(conversationId)).length > 0;
-    if (!imported) await this.append(conversationId, messages);
+    await this.append(conversationId, messages);
     if (assistantDesk?.lastExpert) await this.deps.state.expertSpoke(accountId, assistantDesk.lastExpert);
     if (messages.length || assistantDesk) await backend.transact(id.id, session => { session.messages = []; session.context = []; delete (session as { assistantDesk?: LegacyDesk }).assistantDesk; });
   }
 
+  /** Every imported message has a deterministic id, and one already stored is skipped: a re-run after a crash appends exactly the missing tail, and the old session is wiped only after this returns. */
   private async append(conversationId: string, messages: AgentMessage[]): Promise<void> {
+    const stored = new Set((await this.deps.store.readEvents()).flatMap(event => {
+      if (event.type !== "conversation.model_message" || event.conversation_id !== conversationId) return [];
+      const id = persistedMessageId(event, event.message.role === "user" ? "user" : "assistant");
+      return id ? [id] : [];
+    }));
     let turn = 0;
+    let replies = 0;
     for (const message of messages) {
       const timestamp = new Date(message.timestamp ?? Date.now()).toISOString();
       if (message.role === "user") {
@@ -55,11 +61,14 @@ export class LegacyAssistantHistory {
         const text = expert ? origin.text?.trim() || (origin.images?.length ? "（发了一张图片）" : "") : textOf(message).trim();
         if (!text) continue;
         turn += 1;
+        replies = 0;
         const key = `legacy:${origin?.itemId ?? turn}`;
-        await this.deps.store.append({ type: "conversation.model_message", conversation_id: conversationId, run_id: `legacy-${turn}`, client_message_id: expert ? key : `${SYSTEM_MESSAGE_PREFIX}${key}`, message: { role: "user", content: text }, timestamp });
+        const clientMessageId = expert ? key : `${SYSTEM_MESSAGE_PREFIX}${key}`;
+        if (!stored.has(clientMessageId)) await this.deps.store.append({ type: "conversation.model_message", conversation_id: conversationId, run_id: `legacy-${turn}`, client_message_id: clientMessageId, message: { role: "user", content: text }, timestamp });
       } else if (message.role === "assistant" && !hasToolCall(message) && turn > 0) {
         const text = textOf(message).trim();
-        if (text) await this.deps.store.append({ type: "conversation.model_message", conversation_id: conversationId, run_id: `legacy-${turn}`, message: { role: "assistant", content: text }, finish_reason: "stop", timestamp });
+        const messageId = `legacy-${turn}:${replies += 1}`;
+        if (text && !stored.has(messageId)) await this.deps.store.append({ type: "conversation.model_message", conversation_id: conversationId, run_id: `legacy-${turn}`, message_id: messageId, message: { role: "assistant", content: text }, finish_reason: "stop", timestamp });
       }
     }
   }
