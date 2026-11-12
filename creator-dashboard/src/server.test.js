@@ -1798,3 +1798,18 @@ test("Studio's unlisted toggle reaches the Registry listing route", async (conte
   assert.equal(response.status, 200);
   assert.equal((await response.json()).listed, false);
 });
+
+test("a missing asset and an error are never cached, so a deploy's handover cannot stick in a browser", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-nocache-"));
+  const registry = registryFixture({ signedIn: "buyer" });
+  await listen(registry);
+  context.after(() => registry.close());
+  const dashboard = await createDashboardApp({ ledgerPath: path.join(directory, "ledger.jsonl"), registryUrl: serverUrl(registry) });
+  const api = createServer(dashboard.handler);
+  await listen(api);
+  context.after(() => api.close());
+
+  const missing = await fetch(`${serverUrl(api)}/assets/WebPage-missing.css`);
+  assert.equal(missing.status, 404);
+  assert.equal(missing.headers.get("cache-control"), "no-store");
+});
