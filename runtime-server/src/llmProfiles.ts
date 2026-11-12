@@ -8,12 +8,17 @@ export const LLM_PROFILE_NAMES = RUNTIME_LLM_PROFILE_NAMES;
 export type LlmProfileName = RuntimeLlmProfileName | FactoryLlmProfileName;
 export type RuntimeLlmProfileName = (typeof RUNTIME_LLM_PROFILE_NAMES)[number];
 
+/** The model the Kimi K2.6 profiles run; the one place its name is spelled outside the profile table. */
+export const KIMI_K26_MODEL = "kimi-k2.6" as const;
+
 /** Which provider adapter owns a profile's endpoint, model object and request normalization. */
 export type ModelFamily = "kimi" | "openai-compatible" | "gemini";
 
 export type LlmProfile = {
   name: LlmProfileName;
   family: ModelFamily;
+  /** The family Creator Factory's rules follow when they differ from `family` (Factory runs this model as a plain provider). */
+  factoryFamily?: ModelFamily;
   provider: string;
   providerName: string;
   api: "openai-completions" | "google-generative-ai";
@@ -123,6 +128,7 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
   "kimi-k3.1-pro": {
     name: "kimi-k3.1-pro",
     family: "kimi",
+    factoryFamily: "openai-compatible",
     provider: "moonshotai-cn",
     providerName: "Moonshot Kimi",
     api: "openai-completions",

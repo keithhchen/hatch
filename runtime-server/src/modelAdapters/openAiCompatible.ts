@@ -56,6 +56,9 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
     return { ...(payload as Record<string, unknown>), thinking: { type: profile.thinkingType } };
   }
 
+  /** Whether the profile's thinking level is sent with every request; by default only when the provider requires it. */
+  protected sendsReasoning(profile: LlmProfile): boolean { return profile.thinkingRequired === true; }
+
   streamFn(profile: LlmProfile, config: ResolvedModelOptions): StreamFn {
     const api = openAICompletionsApi();
     return (model, context, options?: SimpleStreamOptions) => {
@@ -78,7 +81,7 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
           const transformed = await options?.onPayload?.(normalized, payloadModel);
           return transformed === undefined ? normalized : transformed;
         },
-        ...(profile.thinkingRequired
+        ...(this.sendsReasoning(profile)
           ? { reasoning: options?.reasoning === ("off" as string) ? config.thinkingLevel : options?.reasoning ?? config.thinkingLevel }
           : {}),
         timeoutMs: options?.timeoutMs ?? config.timeoutMs

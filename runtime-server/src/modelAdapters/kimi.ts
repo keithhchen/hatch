@@ -1,12 +1,12 @@
 import type { Agent, AgentOptions, StreamFn } from "@earendil-works/pi-agent-core";
 import type { Models, Model } from "@earendil-works/pi-ai";
 import type { LlmProfile } from "../llmProfiles.js";
-import { llmProfile } from "../llmProfiles.js";
+import { KIMI_K26_MODEL, llmProfile } from "../llmProfiles.js";
 import { OpenAICompatibleAdapter } from "./openAiCompatible.js";
 import type { AdapterOptions, AgentAdapterOptions, Endpoint } from "./adapter.js";
 import { agentFor, agentOptionsFor, modelFor, modelsFor, streamFnFor } from "./assemble.js";
 
-export const KIMI_MODEL = "kimi-k2.6" as const;
+export const KIMI_MODEL = KIMI_K26_MODEL;
 export const KIMI_DEFAULT_BASE_URL = "https://api.moonshot.cn/v1";
 
 const KIMI_PROVIDER_CN = "moonshotai-cn" as const;

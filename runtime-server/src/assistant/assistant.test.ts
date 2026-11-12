@@ -144,6 +144,7 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
     products: { workspace: async () => { opened?.({ creatorId: ACCOUNT, productId: PRODUCT }, workspace); return workspace; }, attachAssistant: hooks => { opened = hooks.opened; withheldTools = hooks.withheldTools; } },
     backend: () => legacy,
     exclusive: async (_name, fn) => fn(),
+    search: { search: async () => { throw new Error("no web search in tests"); } },
     env: { HATCH_FACTORY_LLM_PROFILE: "kimi-k2.6" },
     runtime: { agentFactory },
     ...(options.ingest ? { ingest: options.ingest } : {}),
@@ -188,7 +189,7 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
     root, tasks, state, deliveries, pushed, notices, log, applied, telegramCalls, telegramUpdate, assistant, chat, target, model, productStore, productRuntime, say, idle, legacy, store, kit, tools, chatAssets, materials,
     setReachable: (value: boolean) => { reachable = value; },
     failPushes: (count: number) => { pushFailures = count; },
-    close: async () => { await assistant.close(); await chat.close(); await productRuntime.close(); await rm(root, { recursive: true, force: true, maxRetries: 5 }); },
+    close: async () => { await assistant.close(); await chat.close(); await store.close(); await repository.close(); await productRuntime.close(); await rm(root, { recursive: true, force: true, maxRetries: 5 }); },
   };
 }
 
