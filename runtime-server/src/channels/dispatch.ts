@@ -57,31 +57,46 @@ export class Dispatcher {
 
   private async deliver(delivery: Delivery): Promise<void> {
     const { outbox } = this.deps;
+    const now = () => this.now();
     const adapter = await this.deps.hub.get(delivery.channel, delivery.scope);
     if (!adapter) {
       // Nothing may send this: its tenant is gone, and no other tenant's bot speaks for it.
       const reason = `No ${delivery.channel} adapter for scope "${delivery.scope}"`;
       this.deps.onError?.(new Error(`${reason}: delivery ${delivery.id} failed`));
-      return outbox.settle(delivery.id, "failed", reason);
+      await outbox.settle(delivery, "failed", reason, now());
+      return;
     }
     const capabilities = adapter.capabilities();
     // The lease ran out in the middle of a send: the platform may already have it.
-    if (delivery.inFlight && deliveryAfterFailure({ failure: "ambiguous", idempotent: capabilities.idempotentSend }) === "unknown") return outbox.settle(delivery.id, "unknown", "Lease expired while sending");
+    if (delivery.inFlight && deliveryAfterFailure({ failure: "ambiguous", idempotent: capabilities.idempotentSend }) === "unknown") { await outbox.settle(delivery, "unknown", "Lease expired while sending", now()); return; }
     const lastInbound = await this.deps.inbox.lastInbound(delivery.channel, delivery.scope, delivery.address.threadId);
-    if (!replyWindowOpen(capabilities, lastInbound, this.now())) return outbox.settle(delivery.id, "undelivered");
+    if (!replyWindowOpen(capabilities, lastInbound, now())) { await outbox.settle(delivery, "undelivered", undefined, now()); return; }
     // The allowance restarts with each inbound message. Parts this delivery already sent are in the count.
     let allowed = capabilities.replyAllowance === undefined ? Infinity
       : capabilities.replyAllowance - (lastInbound ? await outbox.sentSince(delivery.channel, delivery.scope, delivery.address.threadId, lastInbound) : 0);
     for (let index = delivery.sentParts; index < delivery.parts.length; index += 1) {
-      if (allowed-- < 1) return outbox.settle(delivery.id, "undelivered", "Reply allowance spent");
+      if (allowed-- < 1) { await outbox.settle(delivery, "undelivered", "Reply allowance spent", now()); return; }
       const wait = await this.throttle(delivery);
-      if (wait > 0) return outbox.defer(delivery.id, wait, this.now());
-      await outbox.begin(delivery.id);
-      try { await adapter.send(delivery.address, delivery.parts[index]!, `${delivery.id}:${index}`); } catch (error) { return this.fail(delivery, capabilities, error); }
-      await outbox.progress(delivery.id, index + 1, LEASE_MS, this.now());
+      if (wait > 0) { await outbox.defer(delivery, wait, now()); return; }
+      if (!await outbox.begin(delivery, now())) return;
+      // From here the platform may have the part. Whatever then fails, even bookkeeping, is not "nothing was sent".
+      try {
+        try { await adapter.send(delivery.address, delivery.parts[index]!, `${delivery.id}:${index}`); } catch (error) { return await this.fail(delivery, capabilities, error); }
+        if (!await outbox.progress(delivery, index + 1, LEASE_MS, now())) return;
+      } catch (error) { return this.afterSend(delivery, capabilities, error); }
     }
-    await outbox.settle(delivery.id, "sent");
+    if (!await outbox.settle(delivery, "sent", undefined, now())) return;
     if (delivery.connectionId) await this.deps.connections.setState(delivery.connectionId, "active");
+  }
+
+  /**
+   * Bookkeeping failed once a part may have gone out. Where a resend would be a duplicate the delivery is `unknown`; if that cannot be
+   * written either, it stays in flight and its expired lease says the same. Where the send is keyed, trying again is safe.
+   */
+  private async afterSend(delivery: Delivery, capabilities: ChannelCapabilities, error: unknown): Promise<void> {
+    if (deliveryAfterFailure({ failure: "ambiguous", idempotent: capabilities.idempotentSend }) !== "unknown") throw error;
+    this.deps.onError?.(error);
+    await this.deps.outbox.settle(delivery, "unknown", (error as Error).message, this.now()).catch(this.deps.onError);
   }
 
   /** Per chat first, then for the whole Connection. Milliseconds to wait, or zero. */
@@ -93,14 +108,14 @@ export class Dispatcher {
 
   /** Something other than the platform went wrong before a send: try again, a bounded number of times. */
   private async retry(delivery: Delivery, message: string, delayMs = backoffMs(delivery.attempts + 1)): Promise<void> {
-    await this.deps.outbox.retry(delivery.id, message, delayMs, this.deps.maxAttempts ?? MAX_ATTEMPTS, this.now());
+    await this.deps.outbox.retry(delivery, message, delayMs, this.deps.maxAttempts ?? MAX_ATTEMPTS, this.now());
   }
 
   private async fail(delivery: Delivery, capabilities: ChannelCapabilities, error: unknown): Promise<void> {
     const sendError = error instanceof ChannelSendError ? error : new ChannelSendError((error as Error).message, "ambiguous");
     const next = deliveryAfterFailure({ failure: sendError.failure, idempotent: capabilities.idempotentSend });
     if (next === "pending") await this.retry(delivery, sendError.message, sendError.options.retryAfterMs);
-    else await this.deps.outbox.settle(delivery.id, next, sendError.message);
+    else await this.deps.outbox.settle(delivery, next, sendError.message, this.now());
     // A person's own binding that the platform refuses has been unbound from their side, and is gone. A Connection that serves others, or an Expert's own bot, is only degraded: one contact blocking it is not the token failing.
     if (sendError.options.access && delivery.connectionId && !await this.deps.connections.unbindPersonal(delivery.connectionId)) await this.deps.connections.setState(delivery.connectionId, "degraded");
   }

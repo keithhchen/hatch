@@ -39,8 +39,11 @@ export type { ChatGateway } from "../chat/gateway.js";
  * not here: that is a Run's reply, which the channel layer sends when the Run ends.
  */
 export interface AssistantChannels {
-  /** A message the Assistant starts, to the Expert's linked chat; on `prefer` if linked there. False when no chat can take it. */
-  push(accountId: string, message: Pick<OutboundMessage, "text" | "buttons">, prefer?: ChannelKind): Promise<boolean>;
+  /**
+   * A message the Assistant starts, to the Expert's linked chat; on `prefer` if linked there. False when no chat can take it.
+   * True once it is queued: pushing the same `sourceKey` again queues nothing more, so a caller that is not sure may push again.
+   */
+  push(accountId: string, message: Pick<OutboundMessage, "text" | "buttons">, prefer?: ChannelKind, sourceKey?: string): Promise<boolean>;
   /** Whether a message started now could reach the Expert, so a model call for it is not wasted. */
   canReach(accountId: string): Promise<boolean>;
 }

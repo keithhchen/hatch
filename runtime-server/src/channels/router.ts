@@ -4,7 +4,8 @@ import type { ChannelHub } from "./hub.js";
 import type { InboxItem } from "./inbox.js";
 import type { Handled, Inbound, ReplyPolicy, TargetHandler, TargetKind } from "./ports.js";
 
-export type Notify = (to: { connectionId?: string; channel: ChannelKind; scope: string; address: InboxItem["event"]["address"] }, text: string, replyTo?: string, link?: { label: string; url: string }) => Promise<void>;
+/** `sourceKey` names the notice for good: saying it again, as a retry of the event does, sends nothing more. */
+export type Notify = (to: { connectionId?: string; channel: ChannelKind; scope: string; address: InboxItem["event"]["address"] }, text: string, sourceKey: string, replyTo?: string, link?: { label: string; url: string }) => Promise<void>;
 
 /** Port: how a sender the platform vouches for but we do not know signs in to Hatch from their chat. Undefined: not here, or asked too often. */
 export type SignIn = (channel: ChannelKind, senderId: string) => Promise<string | undefined>;
@@ -31,7 +32,9 @@ export class ChannelRouter {
     if (event.unreachable) return { replied: true };
     if (event.revoked) { await connections.unbindTenant(channel, scope); return { replied: true }; }
     if (event.unbound) { await connections.unbindSender(channel, scope, event.address.senderId); return { replied: true }; }
-    const say = (text: string, connectionId?: string, link?: { label: string; url: string }) => this.deps.notify({ ...(connectionId ? { connectionId } : {}), channel, scope, address: event.address }, text, event.messageRef, link);
+    // What the router says to one event is numbered in the order it says it, so a retried event says each thing under the same key.
+    let said = 0;
+    const say = (text: string, connectionId?: string, link?: { label: string; url: string }) => this.deps.notify({ ...(connectionId ? { connectionId } : {}), channel, scope, address: event.address }, text, `inbox:${item.id}:${said++}`, event.messageRef, link);
     /** The sign-in button for a sender we do not know, or false where there is none. */
     const offerSignIn = async (): Promise<boolean> => {
       const url = await this.deps.signIn?.(channel, event.address.senderId);

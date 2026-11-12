@@ -549,7 +549,7 @@ test("A lease that ran out mid-send is unknown on a platform without idempotency
     const env = await stack(pool, { adapters: [new FakeAdapter("telegram", "", { idempotentSend })] });
     await pushOne(env);
     const [delivery] = await env.outbox.claim(10, 1_000, env.clock.at);
-    await env.outbox.begin(delivery!.id);
+    await env.outbox.begin(delivery!, env.clock.at);
     env.advance(5_000);
     await env.service.drain();
     const state = (await env.outbox.get(delivery!.id))!.state;
@@ -1239,4 +1239,86 @@ test("Removing a bot ends its webhook, its credentials and its conversations", o
   assert.equal(await env.service.hub.get("telegram", bot.scope), undefined);
   await env.apps.save(owner, "telegram", "p1", { token: "111:aaa" });
   assert.equal((await botOf(env, owner, "p1"))!.state, "active", "a bot can be added again");
+}));
+
+// ── Effects: no lost or duplicated messages ──
+
+test("Pushing under a source key twice queues one message", options, async () => isolated(async pool => {
+  const env = await stack(pool);
+  const owner = await link(env, "42");
+  env.adapter.sent.length = 0;
+  assert.equal(await env.service.push(owner, { text: "once" }, undefined, "assistant-run:r1"), true);
+  assert.equal(await env.service.push(owner, { text: "once" }, undefined, "assistant-run:r1"), true, "queued already counts as queued");
+  await env.service.drain();
+  assert.deepEqual(env.adapter.texts, ["once"]);
+  assert.equal((await pool.query("SELECT 1 FROM hatch_channel_outbox WHERE source_key = 'assistant-run:r1'")).rowCount, 1);
+}));
+
+test("Bookkeeping that fails after the platform took a message is never a resend, except on a platform with idempotent sends", options, async () => isolated(async pool => {
+  for (const idempotentSend of [false, true]) {
+    const env = await stack(pool, { adapters: [new FakeAdapter("telegram", "", { idempotentSend })] });
+    const owner = await pushOne(env);
+    const progress = env.outbox.progress.bind(env.outbox);
+    let failures = 1;
+    env.outbox.progress = async (...args) => { if (failures-- > 0) throw new Error("connection reset"); return progress(...args); };
+    await env.service.drain();
+    env.advance(120_000);
+    await env.service.drain();
+    const [row] = (await pool.query("SELECT state FROM hatch_channel_outbox WHERE kind = 'reply' AND thread_id = '42'")).rows;
+    assert.equal(env.adapter.sent.length, idempotentSend ? 2 : 1, idempotentSend ? "the same key is sent again" : "the platform has it: not sent again");
+    assert.equal(row.state, idempotentSend ? "sent" : "unknown");
+    if (idempotentSend) assert.equal(env.adapter.sent[0]!.key, env.adapter.sent[1]!.key);
+    assert.ok(owner);
+    await pool.query("DELETE FROM hatch_channel_outbox");
+  }
+}));
+
+test("A worker whose lease ran out, or was claimed by another, can no longer write the delivery", options, async () => isolated(async pool => {
+  const env = await stack(pool);
+  await pushOne(env);
+  const [first] = await env.outbox.claim(10, 1_000, env.clock.at);
+  assert.ok(first);
+  assert.equal(await env.outbox.begin(first, env.clock.at), true);
+  env.advance(5_000);
+  assert.equal(await env.outbox.progress(first, 1, 1_000, env.clock.at), false, "its lease has expired");
+  const [second] = await env.outbox.claim(10, 60_000, env.clock.at);
+  assert.equal(second!.id, first.id);
+  assert.equal(await env.outbox.settle(first, "sent", undefined, env.clock.at), false, "another claim holds it now");
+  assert.equal(await env.outbox.retry(first, "late", 0, 5, env.clock.at), undefined);
+  assert.equal(await env.outbox.defer(first, 0, env.clock.at), false);
+  assert.equal((await env.outbox.get(first.id))!.state, "sending");
+  assert.equal(await env.outbox.settle(second!, "sent", undefined, env.clock.at), true);
+  assert.equal(await env.outbox.settle(second!, "failed", undefined, env.clock.at), false, "a settled delivery is not rewritten");
+  assert.equal((await env.outbox.get(first.id))!.state, "sent");
+}));
+
+test("An event retried after the router spoke does not make it speak twice", options, async () => isolated(async pool => {
+  const env = await stack(pool);
+  const complete = env.inbox.complete.bind(env.inbox);
+  let failures = 1;
+  env.inbox.complete = async (...args) => { if (failures-- > 0) throw new Error("connection reset"); return complete(...args); };
+  await env.service.accept(env.adapter, [message("77", "你好")]);
+  await env.service.drain();
+  env.advance(120_000);
+  await env.service.drain();
+  assert.equal(env.adapter.texts.length, 1, "one notice, though the event ran twice");
+  assert.match((await pool.query("SELECT source_key FROM hatch_channel_outbox")).rows[0].source_key, /^inbox:[0-9a-f-]{36}:0$/);
+}));
+
+test("A link code redeemed by a sender whose event is then retried is still a success, said once", options, async () => isolated(async pool => {
+  const env = await stack(pool);
+  const owner = randomUUID();
+  const { code } = await env.service.connect(owner, "telegram");
+  const complete = env.inbox.complete.bind(env.inbox);
+  let failures = 1;
+  env.inbox.complete = async (...args) => { if (failures-- > 0) throw new Error("connection reset"); return complete(...args); };
+  await env.service.accept(env.adapter, [{ eventId: "link-retry", address: address("55"), text: code }]);
+  await env.service.drain();
+  env.advance(120_000);
+  await env.service.drain();
+  assert.deepEqual(env.adapter.texts, ["linked"], "no \"expired\" notice, and the greeting once");
+  assert.equal((await env.service.connections.resolveConnection({ channel: "telegram", scope: "", senderId: "55" }))?.connection.ownerAccountId, owner);
+  await env.service.accept(env.adapter, [{ eventId: "link-other", address: address("56"), text: code }]);
+  await env.service.drain();
+  assert.match(env.adapter.texts.at(-1)!, /已失效/, "another sender cannot use it");
 }));
