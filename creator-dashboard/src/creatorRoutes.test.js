@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { creatorFactoryPath, creatorProductPath, creatorRouteTitle, factorySectionForAgent, parseCreatorRoute } from "./creatorRoutes.js";
+import { AGENT_TABS, creatorFactoryPath, creatorProductPath, creatorRouteTitle, factorySectionForAgent, parseCreatorRoute } from "./creatorRoutes.js";
 
 test("Factory has its own Product-scoped URL namespace", () => {
   assert.deepEqual(parseCreatorRoute("/studio/factory/product-a"), {
-    kind: "agent", section: "products", productId: "product-a", tab: "build"
+    kind: "agent", section: "products", productId: "product-a", tab: "overview"
   });
   assert.deepEqual(parseCreatorRoute("/studio/factory/product-a/sources"), {
     kind: "agent", section: "products", productId: "product-a", tab: "build", factorySection: "sources"
@@ -65,7 +65,9 @@ test("Agent workspace tabs and the create page have their own URLs", () => {
   assert.deepEqual(parseCreatorRoute("/studio/products/p1/publish"), { kind: "agent", section: "products", productId: "p1", tab: "publish" });
   assert.equal(creatorProductPath("p1", "publish"), "/studio/products/p1/publish");
   for (const tab of ["storefront", "readiness", "versions"]) assert.throws(() => creatorProductPath("p1", tab), RangeError);
-  assert.equal(creatorProductPath("p1", "build"), "/studio/factory/p1");
+  assert.equal(creatorProductPath("p1", "build"), "/studio/factory/p1/sources/uploads");
+  assert.equal(creatorProductPath("p1", "overview"), "/studio/factory/p1");
+  assert.deepEqual(AGENT_TABS, ["overview", "build", "publish"]);
   assert.equal(parseCreatorRoute("/studio/products/p1/candidates/c2").kind, "not-found");
 });
 

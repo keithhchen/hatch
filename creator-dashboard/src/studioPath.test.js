@@ -35,3 +35,41 @@ test("Factory routes map onto the guided steps and the advanced tab", () => {
   for (const [section, page] of ADVANCED_STEP.items) assert.equal(studioStepForRoute(section, page), "advanced");
   assert.equal(studioStepForRoute(null, null), null);
 });
+
+test("Overview is a top tab, Advanced is a separate rail control, Start Agent and todos use the product style", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const read = (name) => readFile(new URL(name, import.meta.url), "utf8");
+  const [workspace, factory, css, web] = await Promise.all([read("./studioAgentWorkspace.jsx"), read("./FactoryAgents.jsx"), read("./factoryAgents.css"), read("./web/web.css")]);
+  assert.match(workspace, /\{ value: "overview", label: "sxNavOverview" \},\s*\{ value: "build"[^}]*\},\s*\{ value: "publish"/);
+  assert.doesNotMatch(factory, /factory-rail__overview|factory-stepper__advanced/);
+  assert.match(factory, /className=\{`factory-advanced/);
+  assert.match(factory, /<HatchButton type="button" size="small" variant="secondary" leading=\{<Play/);
+  assert.doesNotMatch(factory, /line-through/);
+  assert.doesNotMatch(web, /pro-tasks[^\n]*line-through/);
+  assert.match(css, /\.factory-advanced \{[^}]*justify-self: end/);
+  assert.doesNotMatch(factory.match(/<nav className="factory-rail"[^]*?<\/nav>/)[0], /factory-advanced/);
+});
+
+test("Agent header has one Product links dropdown: copy, open page, open chat; en/zh/ja", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("./studioAgentWorkspace.jsx", import.meta.url), "utf8");
+  const copy = await readFile(new URL("./studioShellCopy.js", import.meta.url), "utf8");
+  assert.match(source, /return href \? <div className="sx-agent__actions">[^]*<DropdownMenu[^]*sxCopyProductLink[^]*sxOpenProductPage[^]*sxTryProductChat/);
+  assert.match(source, /WebChatRoute\.productPath/);
+  assert.match(source, /copyLink\(chatPathOf\(product\)\)/);
+  assert.match(source, /copy\(url\)\.catch\(\(\) => setFailed\(true\)\)/);
+  assert.doesNotMatch(source, /sxOpenPublic|sxTryChat|variant="secondary" leading=\{<Copy/);
+  for (const key of ["sxProductLinks", "sxCopyProductLink", "sxOpenProductPage", "sxTryProductChat", "sxCopyChatLink"]) assert.equal(copy.match(new RegExp(`${key}: "`, "g")).length, 3);
+  assert.match(copy, /sxProductLinks: "查看产品链接"/);
+  assert.match(copy, /sxProductLinks: "プロダクトのリンク"/);
+});
+
+test("Advanced pill matches step pill type and shows the same selected state with aria-current=page", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const css = await readFile(new URL("./factoryAgents.css", import.meta.url), "utf8");
+  const factory = await readFile(new URL("./FactoryAgents.jsx", import.meta.url), "utf8");
+  const rule = (selector) => css.match(new RegExp(`^${selector.replace(/[.]/g, "\\.")} \\{([^}]*)\\}`, "m"))[1];
+  assert.match(rule(".factory-advanced"), /font-size: 14px; font-weight: 650/);
+  assert.equal(rule(".factory-advanced.is-current"), rule(".factory-stepper .is-current"));
+  assert.match(factory, /factory-advanced\$\{currentStep === ADVANCED_STEP\.id \? " is-current" : ""\}`\} aria-current=\{currentStep === ADVANCED_STEP\.id \? "page"/);
+});

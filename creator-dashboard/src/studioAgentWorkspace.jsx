@@ -1,19 +1,21 @@
-// One workspace per Agent: header (name, status, public link) and two tabs —
-// Build (Factory path) and Publish. Studio shows no version history.
+// One workspace per Agent: header (name, status, public link) and three tabs —
+// Overview, Build (Factory path) and Publish. Studio shows no version history.
 // Every control calls an existing Creator endpoint; nothing is simulated.
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Copy, ExternalLink, Plus, Trash2 } from "lucide-react";
-import { Button, Checkbox, FormField, Input, Textarea } from "@hatch/ui";
+import { ArrowLeft, ChevronDown, Copy, ExternalLink, Plus, Trash2 } from "lucide-react";
+import { Button, Checkbox, DropdownMenu, FormField, Input, Textarea } from "@hatch/ui";
 import { FirstBuildIntro } from "./FirstBuildDialog.jsx";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
 import { creatorFactoryPath, creatorProductPath } from "./creatorRoutes.js";
 import { isProductLive } from "./studioPath.js";
+import { WebChatRoute } from "./webChatRoute.js";
 import {
   InlineError, LoadingState, PageBoundary, RouteProblem, SectionHead, StatusPill, SuccessNotice, STUDIO_ROOT,
   absoluteUrl, arrayOf, dateTime, friendlyError, idOf, mutationKey, productName, publicPathOf, safePublicUrl, unwrap, useCopy, useRemote
 } from "./studioShellKit.jsx";
 
 const TABS = [
+  { value: "overview", label: "sxNavOverview" },
   { value: "build", label: "sxTabBuild" },
   { value: "publish", label: "sxTabPublish" }
 ];
@@ -23,7 +25,7 @@ export function StudioAgentWorkspace({ route, request, navigate, locale, t, prof
   const productPath = `/v1/creator/products/${encodeURIComponent(productId)}`;
   const resource = useRemote(request, productPath);
   const product = resource.data ? unwrap(resource.data, "product") : null;
-  const tab = route.tab ?? "build";
+  const tab = route.tab ?? "overview";
 
   if (resource.state === "error") return <RouteProblem title={t("workspaceLoadError")} body={friendlyError(resource.error, t)} action={t("retry")} onAction={resource.retry} />;
   const live = isProductLive(product);
@@ -47,19 +49,33 @@ export function StudioAgentWorkspace({ route, request, navigate, locale, t, prof
       </nav>
     </header>
     <div className="sx-agent__body">
-      {tab === "build" ? renderBuild(product)
+      {tab === "build" || tab === "overview" ? renderBuild(product, tab)
         : !product ? <LoadingState t={t} />
         : <PublishTab {...ctx} />}
     </div>
   </div>;
 }
 
+const chatPathOf = (product) => WebChatRoute.productPath(idOf(product, "product"));
+
 function AgentHeaderActions({ product, live, t }) {
   const { copied, copy } = useCopy();
+  const [failed, setFailed] = useState(false);
   const href = live ? safePublicUrl(publicPathOf(product)) : null;
+  const copyLink = (url) => () => { setFailed(false); copy(url).catch(() => setFailed(true)); };
+  const open = (url) => window.open(url, "_blank", "noopener,noreferrer");
   return href ? <div className="sx-agent__actions">
-    <Button variant="secondary" type="button" leading={<Copy aria-hidden="true" />} onClick={() => void copy(href)}>{copied ? t("copied") : t("copyLink")}</Button>
-    <Button asChild variant="secondary" trailing={<ExternalLink aria-hidden="true" />}><a href={href} target="_blank" rel="noreferrer">{t("sxOpenPublic")}</a></Button>
+    <DropdownMenu
+      label={t("sxProductLinks")}
+      trigger={<Button variant="secondary" type="button" trailing={<ChevronDown aria-hidden="true" />}>{copied ? t("copied") : t("sxProductLinks")}</Button>}
+      items={[
+        { value: "copy", label: t("sxCopyProductLink"), icon: <Copy aria-hidden="true" />, onSelect: copyLink(href) },
+        { value: "page", label: t("sxOpenProductPage"), icon: <ExternalLink aria-hidden="true" />, onSelect: () => open(href) },
+        { value: "copy-chat", label: t("sxCopyChatLink"), icon: <Copy aria-hidden="true" />, onSelect: copyLink(chatPathOf(product)) },
+        { value: "chat", label: t("sxTryProductChat"), icon: <ExternalLink aria-hidden="true" />, onSelect: () => open(chatPathOf(product)) }
+      ]}
+    />
+    {failed ? <InlineError>{t("copyFailed")}</InlineError> : null}
   </div> : null;
 }
 

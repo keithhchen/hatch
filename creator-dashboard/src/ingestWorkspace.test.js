@@ -48,9 +48,11 @@ test("blocked sessionStorage only costs the resume", () => {
   assert.deepEqual(store.list(), []);
 });
 
-test("the workspace Add files goes through the ingest port with no client size limit", async () => {
+test("the workspace Add files opens the Upload page; only the Upload page ingests", async () => {
   const source = await readFile(new URL("./FactoryAgents.jsx", import.meta.url), "utf8");
-  assert.match(source, /uploads\.add\(\[\.\.\.event\.target\.files\]\)/);
-  assert.doesNotMatch(source, /20 \* 1024 \* 1024/);
-  assert.doesNotMatch(source, /f\.arrayBuffer\(\)/);
+  assert.match(source, /onClick=\{\(\) => onOpenAgent\("uploads"\)\}>\{t\("addFiles"\)\}/);
+  assert.doesNotMatch(source, /uploads\.add|uploads\.items|uploads\.ingestedAt|ingestedAt/);
+  assert.doesNotMatch(source, /<Workspace[^>]*uploads=/);
+  assert.match(source, /tooLarge\(file\)/);
+  assert.match(source, /jobs\.list\(\)/);
 });

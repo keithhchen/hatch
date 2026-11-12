@@ -1,7 +1,7 @@
 const ROOT = "/studio";
-// Agent workspace tabs. Build keeps the Factory namespace (/studio/factory/:id/...);
-// the others live under /studio/products/:id/<tab>.
-export const AGENT_TABS = Object.freeze(["build", "publish"]);
+// Agent workspace tabs. Overview is the bare Factory URL (/studio/factory/:id) and Build keeps the
+// Factory namespace (/studio/factory/:id/...); Publish lives under /studio/products/:id/publish.
+export const AGENT_TABS = Object.freeze(["overview", "build", "publish"]);
 const PRODUCT_TABS = new Set(["publish"]);
 // Retired Product tabs whose content now lives in Publish.
 const PUBLISH_ALIASES = new Set(["storefront", "readiness", "preview", "versions"]);
@@ -32,9 +32,10 @@ export function creatorFactoryPath(productId, factorySection, factoryAgent) {
   return `${sectionPath}/${factoryAgent}`;
 }
 
-/** The canonical URL of one Agent workspace tab. Build is the Factory path. */
+/** The canonical URL of one Agent workspace tab. Overview is the Factory root; Build opens its first step, Upload. */
 export function creatorProductPath(productId, tab) {
-  if (tab === undefined || tab === null || tab === "build") return creatorFactoryPath(productId);
+  if (tab === undefined || tab === null || tab === "overview") return creatorFactoryPath(productId);
+  if (tab === "build") return creatorFactoryPath(productId, "sources", "uploads");
   if (!PRODUCT_TABS.has(tab)) throw new RangeError("Unknown Agent tab");
   return `${ROOT}/products/${encodeURIComponent(productId)}/${tab}`;
 }
@@ -52,7 +53,7 @@ export function parseCreatorRoute(pathname) {
   if (head === "factory") {
     if (segments.length === 1) return redirect(`${ROOT}/products`, "products");
     const productId = second;
-    if (segments.length === 2) return page("agent", "products", { productId, tab: "build" });
+    if (segments.length === 2) return page("agent", "products", { productId, tab: "overview" });
     if (!Object.hasOwn(FACTORY_SECTION_AGENTS, third)) return page("not-found", "products");
     if (segments.length === 3) return page("agent", "products", { productId, tab: "build", factorySection: third });
     if (segments.length === 4 && (FACTORY_SECTION_AGENTS[third].includes(fourth) || FACTORY_SECTION_PAGES[third].includes(fourth))) {
