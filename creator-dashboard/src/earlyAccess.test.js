@@ -37,5 +37,5 @@ test("the Assistant route redirects to /studio when off; messaging apps are hidd
 });
 
 test("Early access label exists in every locale", () => {
-  assert.deepEqual(["en", "zh", "ja"].map((locale) => createCreatorTranslator(locale)("sxEarlyAccess")), ["Early access", "抢先体验", "先行アクセス"]);
+  assert.deepEqual(["en", "zh", "ja"].map((locale) => createCreatorTranslator(locale)("sxEarlyAccess")), ["Early Access", "抢先体验", "先行アクセス"]);
 });
