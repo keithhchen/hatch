@@ -32,7 +32,11 @@ export class ImageProcessor implements AssetProcessor {
         .toFormat(target.format).toBuffer();
       return { outputs: [{ role: "resized", bytes: resized, mime: target.mime }], moderate: { type: "image", bytes: resized, mime: target.mime } };
     } catch (error) {
-      throw new AssetError("malformed", `Unreadable image: ${error instanceof Error ? error.message : String(error)}`);
+      // Only a library that cannot run is our fault; whatever sharp says about the bytes stays in the log.
+      const broken = /Could not load the|installing the .?sharp|Cannot find (module|package)|ENOMEM/.test(error instanceof Error ? error.message : String(error));
+      throw broken
+        ? new AssetError("unavailable", "Images cannot be processed right now. Please try again later.", error)
+        : new AssetError("malformed", "This image could not be read. Check that it is a valid PNG, JPEG, WebP or GIF file.", error);
     }
   }
 }

@@ -97,6 +97,14 @@ test("a converter crash is unavailable and an unreadable file is malformed, and 
   }
 });
 
+test("an unreadable image fails malformed with a fixed message, never the library's words", async () => {
+  const { pipeline } = await harness();
+  const good = await png();
+  const asset = await pipeline.accept(scopeA, { name: "broken.png", bytes: Buffer.concat([good.subarray(0, 40), Buffer.alloc(60, 7)]) });
+  assert.equal(asset.record.failure?.code, "malformed");
+  assert.equal(asset.record.failure?.message, "This image could not be read. Check that it is a valid PNG, JPEG, WebP or GIF file.");
+});
+
 test("a zip bomb is never inflated: it is passed through as a plain zip, never converted", async () => {
   const { pipeline, repository } = await harness();
   const bomb = Buffer.from(zipSync({ "word/document.xml": new Uint8Array(120 * 1024 * 1024) }));
