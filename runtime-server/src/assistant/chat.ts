@@ -118,11 +118,9 @@ export class AssistantChat implements AssistantHost {
 
   drain(): Promise<void> { return this.runtime.drain(); }
 
-  /** Hands the Assistant's Runs to another instance, and lets go of its storage. */
+  /** Hands the Assistant's Runs to another instance. The store and repository belong to whoever made them. */
   async close(): Promise<void> {
     await this.runtime.stop();
-    await this.deps.store.close();
-    await this.deps.repository.close();
   }
 
   scopeOf(conversation: ConversationRecord): AssistantScope { return scopeOfConversation(conversation); }

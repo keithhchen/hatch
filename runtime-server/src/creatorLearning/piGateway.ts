@@ -1,5 +1,6 @@
 import { FACTORY_LLM_MODEL, runFactoryLlmPrompt } from "./factoryLlm.js";
 import { resolveFactoryLlmProfile } from "../llmProfiles.js";
+import { factoryAdapterFor } from "../modelAdapters/factory.js";
 import type { FactoryPromptRunner } from "./types.js";
 
 export const PI_FACTORY_MODEL = {
@@ -11,7 +12,7 @@ export const PI_FACTORY_MODEL = {
 export function factoryModelForEnvironment(environment: NodeJS.ProcessEnv = process.env): { provider: string; model: string } {
   const profile = resolveFactoryLlmProfile(environment);
   return {
-    provider: profile.name === "kimi-k2.6" ? "moonshot" : profile.provider,
+    provider: factoryAdapterFor(profile).recordedProvider(profile),
     model: profile.model
   };
 }

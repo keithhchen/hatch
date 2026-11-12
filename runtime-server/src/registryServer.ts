@@ -2,6 +2,7 @@ import { HistoryCursorError } from "./conversationHistory.js";
 import { FactoryAgentsService } from "./factoryAgents/service.js";
 import { PostgresAgentDefinitionRepository } from "./factoryAgents/definitions.js";
 import { PostgresWorkbenchBackend } from "./factoryAgents/store.js";
+import { FirecrawlSearchProvider } from "./factoryAgents/webProviders.js";
 import { AssistantService, assistantPrompt } from "./assistant/assistant.js";
 import { AssistantChat } from "./assistant/chat.js";
 import { studioTools, studioToolDefinitions } from "./assistant/studioTools.js";
@@ -151,6 +152,8 @@ type RegistryContext = {
   assistant?: AssistantService;
   /** The Assistant's conversation, on Chat's runtime. */
   assistantChat?: AssistantChat;
+  /** What the Assistant's conversation reads and writes: made here, so closed here once the conversation has stopped. */
+  assistantStorage?: Array<{ close(): Promise<void> }>;
   /** Speech to text for the composers of Studio and web chat. */
   dictation: Dictation;
   ingest?: IngestService;
@@ -411,6 +414,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       state: assistantState,
       deliveries: await PostgresDeliveries.open(registryPool),
       exclusive: postgresExclusive(registryPool),
+      search: new FirecrawlSearchProvider({ apiKey: environment.FIRECRAWL_API_KEY }),
       env: environment, ingest,
     });
     ingest.onSettled(job => assistant.ingested(job));
@@ -439,7 +443,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     // Without a Chat gateway Product Connections have no handler, and their events wait in the inbox.
     if (gateway) channels.register("product", guarded(new GuardedTarget(new ChatFlow(new ProductTarget({ gateway, limiter: stores.limiter })), [liveOwnProduct(releaseStore)]), eligibility));
     channels.start();
-    Object.assign(registryContext, { assistant, assistantChat, ingest, channels, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin, studioUrl, platformLogin,...(seal ? { ownApps: new OwnApps({ connections: stores.connections, seal, forms: CREDENTIAL_FORMS, origin: telegramOrigin, ownsProduct }) } : {}) });
+    Object.assign(registryContext, { assistant, assistantChat, assistantStorage: [transcripts, conversations], ingest, channels, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin, studioUrl, platformLogin,...(seal ? { ownApps: new OwnApps({ connections: stores.connections, seal, forms: CREDENTIAL_FORMS, origin: telegramOrigin, ownsProduct }) } : {}) });
     // A platform that pushes over its own connection runs here, in one process at a time. A dropped connection comes back; credentials added or removed are picked up.
     channelListeners = new ChannelListeners({
       hub, connections: stores.connections, exclusive: postgresExclusive(registryPool),
@@ -567,6 +571,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     await stopIntake();
     await registryContext.assistant?.close();
     await registryContext.assistantChat?.close();
+    for (const storage of registryContext.assistantStorage ?? []) await storage.close();
     immediateFactoryStop.abort();
     await factoryAgents.close();
     inflight.endAll();

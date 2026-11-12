@@ -1,10 +1,7 @@
 import type { ImageContent } from "@earendil-works/pi-ai";
-import {
-  createFactoryPiAgent,
-  requireFactoryToolChoice,
-  type FactoryPiAdapterOptions
-} from "./factoryPi.js";
-import { resolveFactoryLlmProfile, type FactoryLlmProfileName, type LlmProfile } from "../llmProfiles.js";
+import { createFactoryPiAgent, type FactoryPiAdapterOptions } from "./factoryPi.js";
+import { resolveFactoryLlmProfile } from "../llmProfiles.js";
+import { factoryAdapterFor } from "../modelAdapters/factory.js";
 import { UpstreamError } from "../errors/upstream.js";
 import { createFactorySubmissionProtocol } from "./factorySubmission.js";
 import type { FactoryPromptFailureTelemetry, FactoryPromptRunner } from "./types.js";
@@ -57,7 +54,8 @@ export function createFactoryLlmPromptRunner(
   adapterOptions: FactoryLlmAdapterOptions = {}
 ): FactoryPromptRunner {
   return async (options): Promise<string> => {
-    const selected = resolveFactoryLlmProfile(adapterOptions.env ?? process.env) as LlmProfile & { name: FactoryLlmProfileName };
+    const selected = resolveFactoryLlmProfile(adapterOptions.env ?? process.env);
+    const adapter = factoryAdapterFor(selected);
     const submission = createFactorySubmissionProtocol(options.purpose, options.outputContract);
     const agent = createFactoryPiAgent({
       ...adapterOptions,
@@ -67,7 +65,7 @@ export function createFactoryLlmPromptRunner(
         tools: submission.tools
       },
       agentOptions: {
-        onPayload: async (payload) => requireFactoryToolChoice(payload, selected.name),
+        onPayload: async (payload) => adapter.requireToolChoice(selected, payload),
         transformContext: async (messages) => submission.sanitizeContext(messages),
         toolExecution: "sequential",
         beforeToolCall: (context) => submission.beforeToolCall(context),
