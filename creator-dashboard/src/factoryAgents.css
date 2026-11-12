@@ -116,7 +116,7 @@
 .factory-workspace { display: grid; flex: 1; min-height: 0; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; }
 .factory-workspace-pane { min-width: 0; min-height: 0; }
 .factory-workspace-loading { padding: 32px; }
-.factory-chat-panel { overflow: hidden; border-radius: 24px; background: var(--web-card) !important; box-shadow: var(--web-shadow); }
+.factory-chat-panel { height: 100%; overflow: hidden; border-radius: 24px; background: var(--web-card) !important; box-shadow: var(--web-shadow); }
 .factory-chat-scroll { min-height: 0; padding: 24px clamp(16px, 3vw, 32px) !important; overscroll-behavior: contain; scrollbar-gutter: stable; background: var(--web-card); }
 .factory-chat-empty { max-width: 520px; margin: 6vh auto; text-align: center; }
 .factory-chat-empty svg { width: 34px; height: 34px; color: var(--web-yolk); }
