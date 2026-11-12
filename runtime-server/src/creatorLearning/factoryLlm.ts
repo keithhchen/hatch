@@ -8,8 +8,9 @@ import { resolveFactoryLlmProfile, type FactoryLlmProfileName, type LlmProfile }
 import { UpstreamError } from "../errors/upstream.js";
 import { createFactorySubmissionProtocol } from "./factorySubmission.js";
 import type { FactoryPromptFailureTelemetry, FactoryPromptRunner } from "./types.js";
+import { MODEL_ROLES } from "../modelRoles.js";
 
-const FACTORY_LLM_PROFILE = resolveFactoryLlmProfile({ HATCH_FACTORY_LLM_PROFILE: "kimi-k2.6" });
+const FACTORY_LLM_PROFILE = resolveFactoryLlmProfile({ HATCH_FACTORY_LLM_PROFILE: MODEL_ROLES.factory });
 /** A single Factory turn must not hold a worker lease indefinitely. */
 export const FACTORY_LLM_WALL_CLOCK_TIMEOUT_MS = 15 * 60_000;
 /** Total input + preserved multi-turn history + output capacity. */

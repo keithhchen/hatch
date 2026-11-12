@@ -31,10 +31,11 @@ import type { LegacyAssistantHistory } from "./history.js";
 import type { AssistantHost } from "../conversations/assistantConversation.js";
 import type { AssetDesk } from "../conversations/assets.js";
 import { log } from "../observability/log.js";
+import { memoizeSuccess } from "../memoizeSuccess.js";
+import { MODEL_ROLES } from "../modelRoles.js";
 
 /** The Assistant is one Agent, not a Product: its conversation is bound to the account, under this id. A UUID, as every Agent id is once the identity migration has run. */
 export const ASSISTANT_AGENT_ID = "a5515700-0000-4000-8000-000000000001";
-const ASSISTANT_PROFILE = "kimi-k3.1-pro";
 const ACTIVE = new Set(["queued", "running", "waiting_for_tool", "compacting"]);
 
 /** The steps inside one reply, in the shape Chat's history keeps them: where each sits among the words, and what it was. */
@@ -93,7 +94,7 @@ export class AssistantChat implements AssistantHost {
   private readonly readModel: ConversationReadModel;
   /** The Assistant's events for Studio observers: Chat's own journal in Studio's words, with the live steps beside it. */
   readonly feed: JournalFeed;
-  private prompt?: Promise<string>;
+  private readonly systemPrompt = memoizeSuccess(() => this.deps.prompt());
 
   constructor(private readonly deps: AssistantChatDeps) {
     this.readModel = new ChatConversationReadModel({ history: deps.store, repository: deps.repository });
@@ -147,10 +148,9 @@ export class AssistantChat implements AssistantHost {
 
   // ── The model's side ───────────────────────────────────────────────────
 
-  private systemPrompt(): Promise<string> { return this.prompt ??= this.deps.prompt(); }
 
   private agentRuntime(): AgentRuntime {
-    return this.deps.createRuntime?.() ?? new PiAgentRuntime({ env: { ...this.deps.env, HATCH_LLM_PROFILE: ASSISTANT_PROFILE } });
+    return this.deps.createRuntime?.() ?? new PiAgentRuntime({ env: { ...this.deps.env, HATCH_LLM_PROFILE: MODEL_ROLES.assistant } });
   }
 
   /** Where the Expert last spoke: the origin of what the Assistant starts. */
