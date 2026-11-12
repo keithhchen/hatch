@@ -11,3 +11,11 @@ export const MODEL_ROLES = {
   /** Hosted ingest's Kimi agent model (`HATCH_INGEST_MODEL`). */
   ingest: "kimi-k3.1-pro"
 } as const;
+
+/** The environment variable that overrides each role. */
+const ROLE_ENV = { assistant: "HATCH_LLM_PROFILE", worker: "HATCH_FACTORY_LLM_PROFILE", factory: "HATCH_FACTORY_LLM_PROFILE", ingest: "HATCH_INGEST_MODEL" } as const satisfies Record<keyof typeof MODEL_ROLES, string>;
+
+/** The one rule: a non-empty environment override wins over the MODEL_ROLES default. Every use of a role goes through here. */
+export function modelRole(role: keyof typeof MODEL_ROLES, env: NodeJS.ProcessEnv = process.env): string {
+  return env[ROLE_ENV[role]]?.trim() || MODEL_ROLES[role];
+}

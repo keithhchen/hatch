@@ -9,12 +9,13 @@ import { agentEntries, assertAgentAvailable, type AgentDefinitionRepository } fr
 import { resolveFactoryLlmProfile } from "../llmProfiles.js";
 import { factoryAgentTools } from "./factoryTools.js";
 import { convertUpload } from "./markdownConverter.js";
-import { MODEL_ROLES } from "../modelRoles.js";
+import { modelRole } from "../modelRoles.js";
 
 export function publicSession(s: Session) { const { context, ...publicData } = s; return publicData; }
 
 export async function createFactoryHandler(options: { root: string; scope: FactoryProductScope; definitions: AgentDefinitionRepository; env?: NodeJS.ProcessEnv; runtime?: WorkbenchRuntimeOptions; withheldTools?: (session: Session) => Promise<string[]> }) {
-  const env: NodeJS.ProcessEnv = { HATCH_FACTORY_LLM_PROFILE: MODEL_ROLES.factory, ...(options.env ?? process.env) };
+  const source = options.env ?? process.env;
+  const env: NodeJS.ProcessEnv = { ...source, HATCH_FACTORY_LLM_PROFILE: modelRole("factory", source) };
   const store = new WorkbenchStore(options.root, options.scope, options.definitions);
   await store.recover();
   const runtime = new WorkbenchRuntime(store, { env, ...options.runtime, withheldTools: options.runtime?.withheldTools ?? options.withheldTools, extraTools: options.runtime?.extraTools ?? (async (s, _signal, changed) => [...corpusTools(store, s.id, changed, options.scope, env), hatchTool(store, s.id, changed, options.scope, env)]) });

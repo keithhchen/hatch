@@ -26,7 +26,7 @@ import type { Material } from "./materials.js";
 import type { IngestJob } from "../ingest/job.js";
 import { readPage, type AgentOverview, type StudioOperations, type WorkerKind } from "./studioTools.js";
 import { log } from "../observability/log.js";
-import { MODEL_ROLES } from "../modelRoles.js";
+import { modelRole } from "../modelRoles.js";
 
 const WORKER_LEASE_MS = 35 * 60_000;
 const RUN_END = new Set(["voice.run_completed", "voice.run_failed", "voice.run_interrupted"]);
@@ -662,7 +662,7 @@ export class AssistantService implements StudioOperations {
     await store.recover();
     const sessions = await store.list();
     const notes = sessions.find(candidate => candidate.role === "assistant") ?? await store.create("assistant", "Hatch 助理");
-    const runtime = new WorkbenchRuntime(store, { ...this.deps.runtime, env: { ...this.deps.env, HATCH_FACTORY_LLM_PROFILE: MODEL_ROLES.worker } });
+    const runtime = new WorkbenchRuntime(store, { ...this.deps.runtime, env: { ...this.deps.env, HATCH_FACTORY_LLM_PROFILE: modelRole("worker", this.deps.env) } });
     const desk: Desk = { accountId, store, runtime, sessionId: notes.id };
     runtime.events.on("event", (event: { sessionId?: string; type?: string }) => {
       if (!event.sessionId || !event.type || !RUN_END.has(event.type)) return;
