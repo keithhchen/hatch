@@ -1,7 +1,8 @@
 import type { ConversationMessage } from "../protocol.js";
-import type { AlsoCommit, ConversationRecord, ConversationRepository, ConversationRunRecord } from "../conversationRepository.js";
+import { ConversationRepositoryError, type AlsoCommit, type ConversationRecord, type ConversationRepository, type ConversationRunRecord } from "../conversationRepository.js";
 import type { ClientAttributes, Principal } from "../surfaces/contract.js";
 import { failures } from "../errors/failures.js";
+import { toProblem } from "../errors/problem.js";
 import type { RunEventHub } from "./runEventHub.js";
 import type { RunTerminator } from "./runTerminator.js";
 import type { RunSupervisor } from "./runSupervisor.js";
@@ -182,9 +183,5 @@ export class ChatService<Scope> {
 
 /** A refusal of the repository, as the Chat API tells it. */
 function refused(error: unknown): unknown {
-  if (error instanceof Error && "code" in error && error.name === "ConversationRepositoryError") {
-    const code = (error as { code: string }).code;
-    return new ChatError(code, error.message, ["client_message_conflict", "conversation_archived", "conversation_busy", "run_not_retryable"].includes(code) ? 409 : 400);
-  }
-  return error;
+  return error instanceof ConversationRepositoryError ? new ChatError(error.code, error.message, toProblem(error).status) : error;
 }
