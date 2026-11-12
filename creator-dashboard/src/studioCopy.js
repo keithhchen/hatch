@@ -31,7 +31,7 @@ export const STUDIO_COPY = {
     // Home
     homeEmptyPill: "Studio",
     homeEmptyTitle: "Create your first Agent",
-    homeEmptyBody: "An Agent is built from your sources and an interview. After evaluation, you can publish it to clients.",
+    homeEmptyBody: "An Agent is built from your sources and an interview. Try it yourself, then publish it to clients.",
     homeStartFirst: "New Agent",
     homePathTitle: "How it works",
     homePill: "Studio",
@@ -92,11 +92,11 @@ export const STUDIO_COPY = {
     factoryUploadDrop: "Drag files here or click to select",
     factoryUploadTypes: "txt, md, docx, pptx, xlsx or pdf, up to 20 MB each.",
     factoryUploadedTitle: "Uploaded files",
-    factoryUploadNext: "Next: Deep Research",
+    factoryUploadNext: "Next: Interview",
     factoryYouDoRole: (role) => ({
       uploads: "Upload existing material such as articles, slides, past cases and transcripts.",
       research: "Provide your background and where your public work is published. The Agent reads it and asks when something is unclear.",
-      voice: "Describe your experience and how you make decisions. Voice and text are both supported.",
+      voice: "Describe your experience and how you make decisions.",
       generation: "The Agent is generated from your sources and interview. Review the result and mark what needs to change.",
       "case-generation": "A realistic client case is generated to test the Agent. Confirm that it reflects real situations.",
       evaluator: "After the Agent handles the case, the 1–3 most important decisions are listed for you to confirm."
@@ -139,7 +139,7 @@ export const STUDIO_COPY = {
     stepNumber: (n) => `步骤 ${n}`,
     homeEmptyPill: "工作室",
     homeEmptyTitle: "创建第一个 Agent",
-    homeEmptyBody: "Agent 基于你的资料和访谈构建，评估完成后可发布给客户。",
+    homeEmptyBody: "Agent 基于你的资料和访谈构建，自己体验满意后即可发布给客户。",
     homeStartFirst: "新建 Agent",
     homePathTitle: "创建流程",
     homePill: "工作室",
@@ -197,11 +197,11 @@ export const STUDIO_COPY = {
     factoryUploadDrop: "将文件拖到此处，或点击选择",
     factoryUploadTypes: "支持 txt、md、docx、pptx、xlsx、pdf，单个文件不超过 20 MB。",
     factoryUploadedTitle: "已上传的文件",
-    factoryUploadNext: "下一步：深度研究",
+    factoryUploadNext: "下一步：访谈",
     factoryYouDoRole: (role) => ({
       uploads: "上传已有资料，例如文章、课件、过往案例和录音转写稿。",
       research: "提供你的背景信息和公开内容的位置。Agent 会自动阅读，有疑问时向你确认。",
-      voice: "介绍你的经验和判断方式。支持语音或文字输入。",
+      voice: "介绍你的经验和判断方式。",
       generation: "根据资料和访谈生成 Agent。请检查结果并标注需要修改的内容。",
       "case-generation": "生成一个真实的客户案例，用于测试 Agent。请确认案例是否符合实际情况。",
       evaluator: "Agent 处理案例后，会列出 1–3 个最关键的判断点，由你确认。"
@@ -242,7 +242,7 @@ export const STUDIO_COPY = {
     stepNumber: (n) => `ステップ ${n}`,
     homeEmptyPill: "スタジオ",
     homeEmptyTitle: "最初の Agent を作成",
-    homeEmptyBody: "Agent は資料とインタビューをもとに構築されます。評価の完了後、顧客向けに公開できます。",
+    homeEmptyBody: "Agent は資料とインタビューをもとに構築されます。自分で試してから、顧客向けに公開できます。",
     homeStartFirst: "新規 Agent",
     homePathTitle: "作成の流れ",
     homePill: "スタジオ",
@@ -300,11 +300,11 @@ export const STUDIO_COPY = {
     factoryUploadDrop: "ここにファイルをドラッグ、またはクリックして選択",
     factoryUploadTypes: "txt・md・docx・pptx・xlsx・pdf、1 ファイル 20 MB まで。",
     factoryUploadedTitle: "アップロード済みのファイル",
-    factoryUploadNext: "次のステップ：深掘り調査",
+    factoryUploadNext: "次のステップ：インタビュー",
     factoryYouDoRole: (role) => ({
       uploads: "記事、スライド、過去の事例、文字起こしなどの既存資料をアップロードします。",
       research: "経歴と公開コンテンツの所在を入力します。Agent が内容を読み、不明点があれば確認します。",
-      voice: "経験と判断の方法について説明します。音声とテキストのどちらでも入力できます。",
+      voice: "経験と判断の方法について説明します。",
       generation: "資料とインタビューをもとに Agent を生成します。結果を確認し、修正が必要な箇所を指摘してください。",
       "case-generation": "Agent をテストするための現実的な顧客ケースを生成します。実際の状況に即しているか確認してください。",
       evaluator: "Agent がケースを処理した後、特に重要な 1〜3 点の判断を提示します。内容を確認してください。"

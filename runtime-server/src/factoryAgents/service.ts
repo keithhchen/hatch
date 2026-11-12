@@ -1,6 +1,5 @@
 import path from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { Duplex } from "node:stream";
 import { createFactoryHandler } from "./server.js";
 import type { AgentDefinitionRepository } from "./definitions.js";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
@@ -53,12 +52,6 @@ export class FactoryAgentsService {
     const original = request.url;
     request.url = original?.replace(/^\/v1\/creator\/products\/[^/]+\/factory-agents(?=\/|$)/, "/api");
     try { await app.handle(request, response); } finally { request.url = original; }
-  }
-  async handleUpgrade(scope: { creatorId: string; productId: string; briefSpec?: unknown }, token: string, request: IncomingMessage, socket: Duplex, head: Buffer) {
-    const app = await this.app(scope, token);
-    const original = request.url;
-    request.url = original?.replace(/^\/v1\/creator\/products\/[^/]+\/factory-agents(?=\/|$)/, "/api");
-    try { await app.handleUpgrade(request, socket, head); } finally { request.url = original; }
   }
   async drain() { await Promise.all([...this.products.values()].map(async app => (await app).runtime.drain())); }
   async close() { await Promise.all([...this.products.values()].map(async app => (await app).close())); }

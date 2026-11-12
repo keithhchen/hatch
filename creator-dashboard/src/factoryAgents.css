@@ -122,9 +122,9 @@
 .factory-chat-empty svg { width: 34px; height: 34px; color: var(--web-yolk); }
 .factory-chat-empty h3 { margin: 10px 0 0; font-size: 22px; }
 .factory-chat-empty p { margin: 10px 0 0; color: var(--web-body); font-size: 16px; line-height: 1.6; }
-.factory-voice-controls,
 .factory-composer-toolbar,
 .factory-chat-composer { background: var(--web-card); }
+.factory-chat-composer { --chat-ink: var(--web-ink); --chat-muted: var(--web-muted); --chat-panel: var(--web-panel); }
 .factory-chat-composer { border-top: 1px solid var(--web-rule) !important; }
 .factory-composer-toolbar { flex-wrap: wrap; row-gap: 8px; padding-top: 8px; }
 .factory-app .factory-composer-toolbar .MuiButton-root { border-radius: 999px; text-transform: none; }

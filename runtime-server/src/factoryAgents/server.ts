@@ -1,19 +1,14 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
-import type { Duplex } from "node:stream";
 import path from "node:path";
 import { z } from "zod";
-import { WebSocket, WebSocketServer } from "ws";
 import { WorkbenchStore, ROLES, isAssistantRole, type Comment, type FactoryProductScope, type Session } from "./store.js";
 import { WorkbenchRuntime, safeError, type WorkbenchRuntimeOptions } from "./runtime.js";
 import { hatchTool } from "./hatchTool.js";
 import { corpusTools } from "./corpusTools.js";
 import { agentEntries, assertAgentAvailable, type AgentDefinitionRepository } from "./definitions.js";
 import { resolveFactoryLlmProfile } from "../llmProfiles.js";
-import { VoiceSession, type VoiceServerEvent } from "./voice.js";
-import { GeminiVoiceSession } from "./geminiVoice.js";
 import { factoryAgentTools } from "./factoryTools.js";
 import { convertUpload } from "./markdownConverter.js";
-import type { AgentMessage, AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { MODEL_ROLES } from "../modelRoles.js";
 
 export function publicSession(s: Session) { const { context, ...publicData } = s; return publicData; }
@@ -25,16 +20,6 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
   const runtime = new WorkbenchRuntime(store, { env, ...options.runtime, withheldTools: options.runtime?.withheldTools ?? options.withheldTools, extraTools: options.runtime?.extraTools ?? (async (s, _signal, changed) => [...corpusTools(store, s.id, changed, options.scope, env), hatchTool(store, s.id, changed, options.scope, env)]) });
   const streams = new Set<ServerResponse>();
   const chatStreams = new Set<ServerResponse>();
-  const liveSockets = new Map<string, Set<WebSocket>>();
-  const liveWss = new WebSocketServer({ noServer: true, maxPayload: 128 * 1024 });
-  type VoiceConnection = {
-    start(conversationId: string): Promise<void>;
-    stop(): Promise<void>;
-    audio(chunk: Buffer): void;
-    handleRuntimeEvent(event: any): void;
-  };
-  const voices = new Map<string, VoiceConnection>();
-  const liveStartCounts = new Map<string, number>();
   const entries = async () => agentEntries(await options.definitions.list(), await store.list(), await store.listManualFiles());
   const assertRoleAvailable = async (role: Session["role"]) => { if (isAssistantRole(role)) throw new Error("Assistant sessions are not part of a Product workspace"); return assertAgentAvailable(await entries(), role); };
   const factorySnapshot = async () => {
@@ -66,102 +51,6 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
     }).catch(() => undefined);
     return snapshotQueue;
   };
-  const voiceFor = (id: string) => {
-    let voice = voices.get(id);
-    if (!voice) {
-      const emit = (event: VoiceServerEvent) => {
-        const sockets = liveSockets.get(id);
-        if (!sockets?.size) runtime.events.emit("event", { sessionId: id, ...event });
-        const payload = JSON.stringify(event);
-        for (const socket of sockets ?? []) {
-          if (socket.readyState === WebSocket.OPEN) socket.send(payload);
-        }
-      };
-      const provider = (env.HATCH_FACTORY_VOICE_PROVIDER?.trim() || "gemini-live").toLowerCase();
-      if (provider === "gemini-live") {
-        voice = new GeminiVoiceSession({
-          emit,
-          environment: env,
-          prepare: async () => {
-            await assertRoleAvailable("voice");
-            const session = await store.get(id);
-            const definition = await store.definition("voice");
-            const changed = () => runtime.emit(id, "files");
-            const todosChanged = () => runtime.emit(id, "todos");
-            const tools = await factoryAgentTools({
-              store,
-              id,
-              definition,
-              signal: new AbortController().signal,
-              changed,
-              todosChanged,
-              env,
-              extraTools: [...corpusTools(store, id, changed, options.scope, env), hatchTool(store, id, changed, options.scope, env)],
-            });
-            liveStartCounts.set(id, session.messages.length);
-            await store.update(id, state => {
-              state.status = "running";
-              state.lastRunAt = new Date().toISOString();
-              delete state.error;
-            });
-            runtime.emit(id, "state");
-            return { systemPrompt: await runtime.prompt("voice", definition), tools, resumptionHandle: session.voiceLive?.resumptionHandle };
-          },
-          onUserTranscript: async (_conversationId, text) => appendLiveMessage(store, runtime, id, { role: "user", content: text, timestamp: Date.now() }),
-          onAssistantTranscript: async (_conversationId, text) => appendLiveMessage(store, runtime, id, liveAssistantMessage(text, env.HATCH_FACTORY_LIVE_MODEL)),
-          onToolStart: async (_conversationId, value) => {
-            await runtime.commit(id, () => store.update(id, state => {
-              state.activeTool = value.name;
-              state.messages.push(liveToolCallMessage(value.id, value.name, value.args, env.HATCH_FACTORY_LIVE_MODEL));
-              state.context.push(state.messages.at(-1)!);
-            }));
-            runtime.emit(id, "tool", { name: value.name });
-          },
-          onToolEnd: async (_conversationId, value) => {
-            await appendLiveMessage(store, runtime, id, liveToolResultMessage(value.id, value.name, value.result, value.isError));
-            await store.update(id, state => { delete state.activeTool; });
-            runtime.emit(id, "tool_end", { name: value.name, isError: value.isError });
-          },
-          onResumptionHandle: async (_conversationId, handle) => {
-            await store.update(id, state => { state.voiceLive = { resumptionHandle: handle }; });
-          },
-          onStopped: async () => {
-            const session = await store.get(id);
-            const evidence = session.messages.slice(liveStartCounts.get(id) ?? session.messages.length);
-            liveStartCounts.delete(id);
-            // A cleanly stopped Live session must not seed the next start with
-            // a handle that belongs to the previous connection.
-            await store.update(id, state => { delete state.voiceLive; });
-            if (evidence.length) runtime.triggerScribeVoiceEvidence(id, evidence);
-            else { await store.update(id, state => { state.status = "completed"; }); runtime.emit(id, "state"); }
-          },
-        });
-      } else if (provider === "legacy") {
-        voice = new VoiceSession({
-          emit,
-          onFinalTranscript: async (_conversationId, content) => { await assertRoleAvailable("voice"); await runtime.start(id, content); },
-          onInterrupt: async () => { runtime.stop(id); },
-          environment: env
-        });
-      } else {
-        throw new Error(`Unsupported Factory voice provider: ${provider}`);
-      }
-      voices.set(id, voice);
-    }
-    return voice;
-  };
-  runtime.events.on("event", (event: any) => {
-    const voice = event?.sessionId ? voices.get(event.sessionId) : undefined;
-    if (!voice || !event.type?.startsWith("voice.")) return;
-    const base = { agent: "interviewer" as const, conversationId: event.sessionId, runId: event.runId || "" };
-    if (event.type === "voice.run_started") voice.handleRuntimeEvent({ ...base, type: "run.started" });
-    if (event.type === "voice.delta") voice.handleRuntimeEvent({ ...base, type: "assistant.delta", content: event.text || "" });
-    if (event.type === "voice.tool") voice.handleRuntimeEvent({ ...base, type: "tool.call" });
-    if (event.type === "voice.tool_end") voice.handleRuntimeEvent({ ...base, type: "tool.result" });
-    if (event.type === "voice.run_completed") voice.handleRuntimeEvent({ ...base, type: "run.completed" });
-    if (event.type === "voice.run_interrupted") voice.handleRuntimeEvent({ ...base, type: "run.interrupted" });
-    if (event.type === "voice.run_failed") voice.handleRuntimeEvent({ ...base, type: "run.failed" });
-  });
   runtime.events.on("event", (event: any) => {
     if (["state", "files", "todos", "message", "comments"].includes(event?.type)) void enqueueFactorySnapshot();
   });
@@ -192,13 +81,7 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
         return;
       }
       if (url.pathname === "/api/config" && req.method === "GET") {
-        const voiceProvider = (env.HATCH_FACTORY_VOICE_PROVIDER?.trim() || "gemini-live").toLowerCase();
-        const voiceReady = voiceProvider === "gemini-live"
-          ? Boolean(env.GEMINI_API_KEY?.trim())
-          : voiceProvider === "legacy"
-            ? Boolean(env.ELEVENLABS_API_KEY?.trim() && env.ELEVENLABS_VOICE_ID?.trim())
-            : false;
-        return json(res, 200, { roles: ROLES, agents: await entries(), manualFiles: await store.listManualFiles(), runtimeUrl: env.HATCH_FACTORY_RUNTIME_URL ?? "", services: { model: Boolean(env[resolveFactoryLlmProfile(env).apiKeyEnv]?.trim()), search: Boolean(env.FIRECRAWL_API_KEY?.trim()), scrape: Boolean(env.HATCH_FACTORY_SCRAPE_PROVIDER === "firecrawl" ? env.FIRECRAWL_API_KEY : env.TAVILY_API_KEY), hatch: Boolean(env.HATCH_FACTORY_RUNTIME_URL && env.HATCH_FACTORY_CREATOR_TOKEN), corpus: Boolean(env.HATCH_FACTORY_REGISTRY_URL && env.HATCH_FACTORY_CREATOR_TOKEN), voice: voiceReady } });
+        return json(res, 200, { roles: ROLES, agents: await entries(), manualFiles: await store.listManualFiles(), runtimeUrl: env.HATCH_FACTORY_RUNTIME_URL ?? "", services: { model: Boolean(env[resolveFactoryLlmProfile(env).apiKeyEnv]?.trim()), search: Boolean(env.FIRECRAWL_API_KEY?.trim()), scrape: Boolean(env.HATCH_FACTORY_SCRAPE_PROVIDER === "firecrawl" ? env.FIRECRAWL_API_KEY : env.TAVILY_API_KEY), hatch: Boolean(env.HATCH_FACTORY_RUNTIME_URL && env.HATCH_FACTORY_CREATOR_TOKEN), corpus: Boolean(env.HATCH_FACTORY_REGISTRY_URL && env.HATCH_FACTORY_CREATOR_TOKEN) } });
       }
 
       if (url.pathname === "/api/sessions" && req.method === "GET") { const sessions = await store.list(); const manualFiles = await store.listManualFiles(); return json(res, 200, { sessions: sessions.map(s => ({ ...publicSession(s), messages: undefined })), agents: agentEntries(await options.definitions.list(), sessions, manualFiles), manualFiles }); }
@@ -217,9 +100,6 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
         if (action === "prompt" && req.method === "GET") return json(res, 200, { content: await runtime.prompt((await store.get(id)).role) });
         if (action === "message" && req.method === "POST") { const session = await store.get(id); await assertRoleAvailable(session.role); const b = z.object({ content: z.string().min(1).max(100000) }).parse(await body(req)); await runtime.start(id, b.content); return json(res, 202, { accepted: true }); }
         if (action === "stop" && req.method === "POST") { await body(req); runtime.stop(id); return json(res, 202, { requested: true }); }
-        if (action === "voice/start" && req.method === "POST") { const s = await store.get(id); if (s.role !== "voice") throw new Error("Voice is only available in the Voice Agent"); await assertRoleAvailable(s.role); await body(req); await voiceFor(id).start(id); return json(res, 200, { started: true }); }
-        if (action === "voice/audio" && req.method === "POST") { const b = z.object({ base64: z.string().min(1) }).parse(await body(req)); voiceFor(id).audio(Buffer.from(b.base64, "base64")); return json(res, 202, { accepted: true }); }
-        if (action === "voice/stop" && req.method === "POST") { await body(req); await voices.get(id)?.stop(); voices.delete(id); return json(res, 200, { stopped: true }); }
         if (action === "files" && req.method === "POST") {
           const b = z.object({ path: z.string(), base64: z.string(), mimeType: z.string().optional() }).parse(await body(req));
           const bytes = Buffer.from(b.base64, "base64");
@@ -254,72 +134,7 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
       json(res, status, typeof structured?.code === "string" ? { error: { code: structured.code, message, ...(structured.details === undefined ? {} : { details: structured.details }) }, detail: message } : { error: message });
     }
   };
-  const handleUpgrade = async (req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> => {
-    const url = new URL(req.url ?? "/", "http://factory.internal");
-    const match = url.pathname.match(/^\/api\/sessions\/([0-9a-f-]{36})\/voice\/live$/);
-    if (!match) throw Object.assign(new Error("Unknown WebSocket route"), { status: 404 });
-    const id = match[1]!;
-    const session = await store.get(id);
-    if (session.role !== "voice") throw Object.assign(new Error("Voice is only available in the Voice Agent"), { status: 409 });
-    await assertRoleAvailable("voice");
-    liveWss.handleUpgrade(req, socket, head, ws => {
-      const sockets = liveSockets.get(id) ?? new Set<WebSocket>();
-      sockets.add(ws);
-      liveSockets.set(id, sockets);
-      ws.on("error", () => undefined);
-      ws.on("message", (data, binary) => {
-        if (!binary) {
-          try {
-            const message = JSON.parse(data.toString()) as { type?: string };
-            if (message.type === "audio.end") voices.get(id)?.stop().catch(error => {
-              if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "voice.error", conversationId: id, message: safeError(error) }));
-            });
-          } catch {
-            if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "voice.error", conversationId: id, message: "Invalid voice control message" }));
-          }
-          return;
-        }
-        try {
-          voices.get(id)?.audio(Buffer.from(data as Buffer));
-        } catch (error) {
-          if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "voice.error", conversationId: id, message: safeError(error) }));
-          ws.close(1009, "Voice input rejected");
-        }
-      });
-      ws.once("close", () => {
-        sockets.delete(ws);
-        if (!sockets.size) {
-          liveSockets.delete(id);
-          const voice = voices.get(id);
-          voices.delete(id);
-          void voice?.stop().catch(() => undefined);
-        }
-      });
-      void voiceFor(id).start(id).catch(error => {
-        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "voice.error", conversationId: id, message: safeError(error) }));
-        ws.close(1011, "Voice session failed");
-      });
-    });
-  };
-  return { handle, handleUpgrade, store, runtime, entries, assertRoleAvailable, setScope: (scope: FactoryProductScope) => { if (scope.creatorId !== options.scope.creatorId || scope.productId !== options.scope.productId) throw new Error("Cannot retarget a Product workspace"); options.scope.briefSpec = scope.briefSpec; }, setCreatorToken: (token: string) => { env.HATCH_FACTORY_CREATOR_TOKEN = token; }, close: async () => { for (const response of streams) response.end(); for (const response of chatStreams) response.end(); for (const sockets of liveSockets.values()) for (const socket of sockets) socket.terminate(); liveWss.close(); await Promise.allSettled([...voices.values()].map(voice => voice.stop())); await runtime.close(); } };
-}
-
-const ZERO_USAGE = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } as const;
-
-async function appendLiveMessage(store: WorkbenchStore, runtime: WorkbenchRuntime, id: string, message: AgentMessage): Promise<void> {
-  await runtime.commit(id, () => store.update(id, state => { state.messages.push(message); state.context.push(message); }));
-}
-
-function liveAssistantMessage(text: string, model = "gemini-3.8-live"): AgentMessage {
-  return { role: "assistant", content: [{ type: "text", text }], api: "google-generative-ai", provider: "google", model, usage: { ...ZERO_USAGE, cost: { ...ZERO_USAGE.cost } }, stopReason: "stop", timestamp: Date.now() };
-}
-
-function liveToolCallMessage(id: string, name: string, args: Record<string, unknown>, model = "gemini-3.8-live"): AgentMessage {
-  return { role: "assistant", content: [{ type: "toolCall", id, name, arguments: args }], api: "google-generative-ai", provider: "google", model, usage: { ...ZERO_USAGE, cost: { ...ZERO_USAGE.cost } }, stopReason: "toolUse", timestamp: Date.now() };
-}
-
-function liveToolResultMessage(id: string, name: string, result: AgentToolResult<unknown>, isError: boolean): AgentMessage {
-  return { role: "toolResult", toolCallId: id, toolName: name, content: result.content, details: result.details, isError, timestamp: Date.now() };
+  return { handle, store, runtime, entries, assertRoleAvailable, setScope: (scope: FactoryProductScope) => { if (scope.creatorId !== options.scope.creatorId || scope.productId !== options.scope.productId) throw new Error("Cannot retarget a Product workspace"); options.scope.briefSpec = scope.briefSpec; }, setCreatorToken: (token: string) => { env.HATCH_FACTORY_CREATOR_TOKEN = token; }, close: async () => { for (const response of streams) response.end(); for (const response of chatStreams) response.end(); await runtime.close(); } };
 }
 
 const reviewCopy = {
@@ -342,17 +157,6 @@ export async function createWorkbenchServer(options: Parameters<typeof createFac
     const allowed = new Set([`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`]);
     if (!req.headers.host || !allowed.has(req.headers.host) || req.headers.origin && !allowed.has(new URL(req.headers.origin).host)) { json(res, 403, { error: "Cross-origin request rejected" }); return; }
     void app.handle(req, res);
-  });
-  server.on("upgrade", (req, socket, head) => {
-    const address = server.address();
-    const port = address && typeof address !== "string" ? address.port : 0;
-    const allowed = new Set([`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`]);
-    if (!req.headers.host || !allowed.has(req.headers.host) || req.headers.origin && !allowed.has(new URL(req.headers.origin).host)) {
-      socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"); socket.destroy(); return;
-    }
-    void app.handleUpgrade(req, socket, head).catch(error => {
-      if (!socket.destroyed) { socket.write(`HTTP/1.1 ${(error as any)?.status ?? 400} Bad Request\r\nConnection: close\r\n\r\n`); socket.destroy(); }
-    });
   });
   return { ...app, server, close: async () => { await app.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } };
 }
