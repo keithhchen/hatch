@@ -36,8 +36,9 @@ import { Studio, type StudioDeps } from "./conversations/studio.js";
 import { StudioSockets, STUDIO_SOCKET_PATH } from "./conversations/socket.js";
 import { createIngestService } from "./ingest/boot.js";
 import { InflightResponses, drainMsFromEnvironment, exitOnSignal, gracefulShutdown } from "./gracefulShutdown.js";
-import { IngestError, IngestService } from "./ingest/service.js";
+import { INGEST_BODY_MAX_BYTES, IngestError, IngestService } from "./ingest/service.js";
 import { publicJob } from "./ingest/job.js";
+import { IdempotencyKeyReused, idempotencyKey } from "./idempotency.js";
 import { AccountReach } from "./assistant/reach.js";
 import { AssistantTarget } from "./assistant/assistantTarget.js";
 import { CHANNEL_KINDS, CHANNEL_LABELS, isChannelKind, type ChannelAdapter, type ChannelKind } from "./channels/types.js";
@@ -1364,12 +1365,14 @@ async function route(
     if (!await productForCreator(context, account.id, productId)) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
     if (!context.ingest) { sendJson(response, 503, { error: { code: "ingest_unavailable", message: "Ingest requires the Registry database." } }); return; }
     if (request.method === "POST" && !jobId) {
-      const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
-      await context.ingest.submit(account.id, productId, body.items, body.context).then(
+      const body = await readJson(request, INGEST_BODY_MAX_BYTES);
+      const key = idempotencyKey(request.headers["idempotency-key"]);
+      await context.ingest.submit(account.id, productId, body.items, body.context, key).then(
         job => sendJson(response, 202, { job: publicJob(job) }),
         error => {
-          if (!(error instanceof IngestError)) throw error;
-          sendJson(response, error.status, { error: { code: error.code, message: error.message }, detail: error.message });
+          const failure = error instanceof IdempotencyKeyReused ? new IngestError(422, "idempotency_key_reused", error.message) : error;
+          if (!(failure instanceof IngestError)) throw failure;
+          sendJson(response, failure.status, { error: { code: failure.code, message: failure.message }, detail: failure.message });
         });
       return;
     }
