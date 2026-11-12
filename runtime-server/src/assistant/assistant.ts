@@ -310,9 +310,9 @@ export class AssistantService implements StudioOperations {
   private async interviewTurnEnded(task: AssistantTask, workspace: FactoryWorkspace, type: string): Promise<void> {
     const voice = await workspace.store.get(task.session!.sessionId);
     await workspace.store.update(voice.id, s => { if (s.assistantTaskId === task.id) delete s.assistantTaskId; });
-    if (type !== "voice.run_completed") return this.block(task, voice.error ?? "访谈大纲没写成");
+    if (type !== "voice.run_completed") return this.block(task, voice.error ?? "访谈大纲没写成", voice.messages.length);
     await this.deps.tasks.update(task.id, { status: "done", leaseExpiresAt: undefined });
-    await this.news(task.accountId, task.id, `访谈大纲写好了。接下来你自己在对话里一个一个问专家，用 tick_outline 勾掉聊完的项。${outlineText(voice.todos)}`, "finished");
+    await this.news(task.accountId, task.id, `访谈大纲写好了。接下来你自己在对话里一个一个问专家，用 tick_outline 勾掉聊完的项。${outlineText(voice.todos)}`, `finished:${voice.messages.length}`);
   }
 
   // ── Tasks ──────────────────────────────────────────────────────────────
@@ -486,7 +486,7 @@ export class AssistantService implements StudioOperations {
     if (this.closing) return;
     if (task.kind === "interview" && workspace) return this.interviewTurnEnded(task, workspace, type);
     const session = await store.get(task.session!.sessionId);
-    if (type !== "voice.run_completed") return void await this.block(task, session.error ?? "被中断了");
+    if (type !== "voice.run_completed") return void await this.block(task, session.error ?? "被中断了", session.messages.length);
     const questions = trailingQuestions(session.messages);
     if (questions.length) {
       await this.deps.tasks.update(task.id, { status: "needs_you", needs: "answer", leaseExpiresAt: undefined, payload: { ...task.payload, questions } });
@@ -495,7 +495,7 @@ export class AssistantService implements StudioOperations {
       return;
     }
     const worker = this.workers[task.kind as WorkerKind];
-    if (!worker) return void await this.block(task, `不认识的任务类型：${task.kind}`);
+    if (!worker) return void await this.block(task, `不认识的任务类型：${task.kind}`, session.messages.length);
     const next = worker.steps?.[worker.steps.indexOf(task.payload.step as Role) + 1];
     if (next) return void await this.runStep(task, next);
     await worker.finish(task, session, store);
@@ -505,9 +505,9 @@ export class AssistantService implements StudioOperations {
   private review(file: string, lead: string): WorkerFinish {
     return async (task, session, store) => {
       const body = await outputText(store, session.id, file);
-      if (!body) return this.block(task, `没有写出 ${file}`);
+      if (!body) return this.block(task, `没有写出 ${file}`, session.messages.length);
       await this.deps.tasks.update(task.id, { status: "needs_you", needs: "review", leaseExpiresAt: undefined, outputRef: `assistant:${session.id}:${file}` });
-      await this.news(task.accountId, task.id, `${lead}\n${excerpt(body)}`, "finished");
+      await this.news(task.accountId, task.id, `${lead}\n${excerpt(body)}`, `finished:${session.messages.length}`);
     };
   }
 
@@ -516,7 +516,7 @@ export class AssistantService implements StudioOperations {
     return async (task, session, store) => {
       const body = file ? await outputText(store, session.id, file) : "";
       await this.deps.tasks.update(task.id, { status: "done", leaseExpiresAt: undefined, ...(file ? { outputRef: `product:${session.id}:${file}` } : {}) });
-      await this.news(task.accountId, task.id, `${lead}\n${excerpt(body || finalText(session.messages))}`, "finished");
+      await this.news(task.accountId, task.id, `${lead}\n${excerpt(body || finalText(session.messages))}`, `finished:${session.messages.length}`);
     };
   }
 
@@ -525,17 +525,18 @@ export class AssistantService implements StudioOperations {
     const profile = await outputText(store, session.id, "output/PUBLIC_PROFILE.md");
     if (!profile.trim()) {
       await this.deps.tasks.update(task.id, { status: "done", leaseExpiresAt: undefined, summary: "没有读到公开资料" });
-      await this.news(task.accountId, task.id, `没有读到公开资料。它的说明：${finalText(session.messages)}\n如实告诉专家是什么情况：搜索失败不等于网上没有。`, "finished");
+      await this.news(task.accountId, task.id, `没有读到公开资料。它的说明：${finalText(session.messages)}\n如实告诉专家是什么情况：搜索失败不等于网上没有。`, `finished:${session.messages.length}`);
       return;
     }
     await desk.store.put(desk.sessionId, `${MATERIALS}公开资料.md`, Buffer.from(profile), { actor: "host" });
     await this.deps.tasks.update(task.id, { status: "done", leaseExpiresAt: undefined, outputRef: `assistant:${desk.sessionId}:${MATERIALS}公开资料.md` });
-    await this.news(task.accountId, task.id, `公开资料读完了：\n${excerpt(profile)}\n\n把发现自然地接进对话，告诉专家你看过哪些来源，他可以说哪篇不算数。`, "finished");
+    await this.news(task.accountId, task.id, `公开资料读完了：\n${excerpt(profile)}\n\n把发现自然地接进对话，告诉专家你看过哪些来源，他可以说哪篇不算数。`, `finished:${session.messages.length}`);
   }
 
-  private async block(task: AssistantTask, reason: string): Promise<void> {
+  /** `turn` is what tells one block from the next: the worker's session length when its turn ended, or the attempt count. A retry of the same block has the same one. */
+  private async block(task: AssistantTask, reason: string, turn: number): Promise<void> {
     await this.deps.tasks.update(task.id, { status: "needs_you", needs: "blocked", lastError: reason, leaseExpiresAt: undefined });
-    await this.news(task.accountId, task.id, `卡住了：${reason}`, "blocked");
+    await this.news(task.accountId, task.id, `卡住了：${reason}`, `blocked:${turn}`);
   }
 
   // ── Tick: recovery and the daily check ─────────────────────────────────
@@ -548,7 +549,7 @@ export class AssistantService implements StudioOperations {
   }
 
   private async recover(task: AssistantTask): Promise<void> {
-    if (task.attempts >= 3) return this.block(task, "多次中断，没能完成");
+    if (task.attempts >= 3) return this.block(task, "多次中断，没能完成", task.attempts);
     const runtime = await this.sessionRuntime(task);
     await this.deps.tasks.update(task.id, { attempts: task.attempts + 1, leaseExpiresAt: lease() });
     if (runtime.isRunning(task.session!.sessionId)) return;

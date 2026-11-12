@@ -706,6 +706,22 @@ test("News told again is one message and one owed reply, even when the first tel
   } finally { await env.close(); }
 });
 
+test("Two blocks of one task are two messages; a retry of one block is one", async () => {
+  const env = await setup({ model: () => ({ text: "" }) });
+  try {
+    const task = await env.tasks.create({ accountId: ACCOUNT, kind: "build", origin: { source: "web" }, status: "working", payload: {} });
+    const block = (reason: string, turn: number) => (env.assistant as unknown as { block(task: unknown, reason: string, turn: number): Promise<void> }).block(task, reason, turn);
+    await block("第一次卡住", 4);
+    await block("第一次卡住", 4);
+    await env.idle();
+    assert.equal(env.model.state.calls, 1, "a retry of the same block is heard once");
+    await block("第二次卡住", 7);
+    await env.idle();
+    assert.equal(env.model.state.calls, 2, "a later block of the same task is heard too");
+    assert.deepEqual(env.model.state.turns.map(turn => /第.次卡住/.exec(turn.input.message.content)?.[0]), ["第一次卡住", "第二次卡住"]);
+  } finally { await env.close(); }
+});
+
 test("The daily check skips a model call when the Expert's chats cannot take the message", async () => {
   const env = await setup({ model: () => ({ text: "" }) });
   try {
