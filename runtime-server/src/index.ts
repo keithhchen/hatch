@@ -82,6 +82,7 @@ import {
 import type { ChatEdge } from "./chat/turnSubmission.js";
 import { bearerToken, handleHttpRequestFailure, httpDeadlineMs, writeJson } from "./http/httpSupport.js";
 import { handleHttpRequest, type RuntimeReadiness } from "./http/runtimeRouter.js";
+import { DEFAULT_ACCOUNT_FILES_QUOTA_BYTES, PostgresAccountFiles } from "./responses/accountFiles.js";
 import { ResponsesHttpApi } from "./responses/router.js";
 import { handleRuntimeSocket } from "./ws/runtimeSocket.js";
 
@@ -186,7 +187,7 @@ export type RuntimeServerOptions = {
   /** Maximum serialized JSON response size for discovery and history. */
   maxHttpResponseBytes?: number;
   /** Test seams of the Responses API: how URLs are fetched, how long a request is held, the keep-alive interval. */
-  responsesApi?: Pick<ConstructorParameters<typeof ResponsesHttpApi>[0], "urls" | "holdMs" | "keepAliveMs">;
+  responsesApi?: Pick<ConstructorParameters<typeof ResponsesHttpApi>[0], "urls" | "accountFiles" | "holdMs" | "keepAliveMs">;
 };
 
 /**
@@ -281,6 +282,9 @@ export async function createRuntimeServerFromEnvironment(
   const chatAssets = conversationStore instanceof PostgresStore
     ? await openChatAssets({ pool: conversationStore.pool, blobs: objectStoreFromEnvironment(environment, path.join(runtimeDataDir, "chat-assets"))!, environment })
     : undefined;
+  // The Files API stores an account's files in the same database; without one it answers 501.
+  const accountFiles = conversationStore instanceof PostgresStore ? new PostgresAccountFiles(conversationStore.pool as never, Number(environment.HATCH_ACCOUNT_FILES_QUOTA_BYTES) || DEFAULT_ACCOUNT_FILES_QUOTA_BYTES) : undefined;
+  await accountFiles?.initialize();
   return createRuntimeServer({
     outputGuard: createOutputGuardFromEnvironment(environment),
     commerceEventSink,
@@ -306,6 +310,7 @@ export async function createRuntimeServerFromEnvironment(
     conversationStore,
     ...(conversationStore instanceof PostgresStore ? (() => { const ledger = new PostgresUsageLedger(conversationStore.pool as never); return { usage: ledger, usageCap: new UsageCap(ledger, monthlyTokenCap(environment)) }; })() : {}),
     ...(chatAssets ? { chatAssets } : {}),
+    ...(accountFiles ? { responsesApi: { accountFiles } } : {}),
     assetStore: runtimeAssetStoreFromEnvironment(environment, runtimeDataDir),
     chatServiceToken: config.chatServiceToken,
     maxContactMessages: config.maxContactMessages,

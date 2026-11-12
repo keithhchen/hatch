@@ -6,10 +6,12 @@ import type { ChatEdge } from "../chat/turnSubmission.js";
 import { log } from "../observability/log.js";
 import { bindContext, currentContext } from "../observability/context.js";
 import type { RuntimeStore } from "../store.js";
+import type { AccountFiles } from "./accountFiles.js";
 import { InlineAttachments, PublicHttpsFetcher, type UrlFetcher } from "./attachments.js";
 import { ApiAuthenticator, cachingIdentityResolver, type ApiCaller } from "./auth.js";
 import { ConversationsApi } from "./conversations.js";
 import { ApiError, errorBody, invalidRequest, notFound, toApiError, unsupported } from "./errors.js";
+import { FilesApi } from "./files.js";
 import type { Json } from "./mapping.js";
 import { ModelCatalog } from "./models.js";
 import { ResponsesApi, type Delivery } from "./responses.js";
@@ -29,6 +31,8 @@ export type ResponsesHttpDeps = {
   corpora: AgentCorpusResolverLike | undefined;
   identities: AuthIdentityResolver | undefined;
   urls?: UrlFetcher;
+  /** Where the Files API keeps an account's files; without it the Files API answers 501. */
+  accountFiles?: AccountFiles;
   /** The usage ledger's reader: what a response reports as its usage. */
   usage?: Pick<UsageReader, "forRun">;
   /** Resolves once the repository can be used. */
@@ -45,8 +49,10 @@ export class ResponsesHttpApi {
   private readonly conversations: ConversationsApi;
   private readonly responses: ResponsesApi;
   private readonly views: RunViews;
+  private readonly files: FilesApi;
 
   constructor(private readonly deps: ResponsesHttpDeps) {
+    this.files = new FilesApi(deps.accountFiles, deps.edge.chatAssets);
     const identities = deps.identities ? cachingIdentityResolver(deps.identities) : undefined;
     this.authenticator = new ApiAuthenticator(identities);
     this.models = new ModelCatalog({ corpora: deps.corpora, identities });
@@ -54,7 +60,7 @@ export class ResponsesHttpApi {
     this.conversations = new ConversationsApi({ repository: deps.repository, store: deps.store, catalog: this.models, views: this.views });
     this.responses = new ResponsesApi({
       repository: deps.repository, store: deps.store, edge: deps.edge, catalog: this.models, conversations: this.conversations,
-      attachments: new InlineAttachments({ assets: deps.edge.chatAssets, urls: deps.urls ?? new PublicHttpsFetcher() }),
+      attachments: new InlineAttachments({ assets: deps.edge.chatAssets, urls: deps.urls ?? new PublicHttpsFetcher(), files: this.files }),
       views: this.views, ...(identities ? { identities } : {}), ...(deps.holdMs ? { holdMs: deps.holdMs } : {})
     });
   }
@@ -70,6 +76,7 @@ export class ResponsesHttpApi {
       bindContext({ account_id: caller.accountId });
       const delivery = await this.route(caller, req, url, signal);
       if (delivery.kind === "json") return json(res, delivery.status, delivery.body);
+      if (delivery.kind === "bytes") { res.writeHead(200, { "content-type": "application/octet-stream", "content-length": delivery.body.length }); return void res.end(delivery.body); }
       await streamResponse({
         res, edge: this.deps.edge, repository: this.deps.repository, views: this.views, signal,
         conversation: delivery.conversation, run: delivery.run, includeToolCalls: delivery.includeToolCalls, afterCursor: delivery.afterCursor,
@@ -88,7 +95,7 @@ export class ResponsesHttpApi {
     json(res, apiError.status, errorBody(apiError), apiError.retryAfterSeconds ? { "retry-after": String(apiError.retryAfterSeconds) } : {});
   }
 
-  private async route(caller: ApiCaller, req: http.IncomingMessage, url: URL, signal?: AbortSignal): Promise<Delivery> {
+  private async route(caller: ApiCaller, req: http.IncomingMessage, url: URL, signal?: AbortSignal): Promise<Delivery | { kind: "bytes"; body: Buffer }> {
     const method = req.method ?? "GET";
     const path = url.pathname.slice(RESPONSES_BASE.length).replace(/\/+$/, "");
     const parts = path.split("/").slice(1).map(decodeURIComponent);
@@ -126,7 +133,16 @@ export class ResponsesHttpApi {
         if (parts.length === 3 && parts[2] === "input_items") { only("GET"); return ok(await this.responses.inputItems(caller, parts[1]!)); }
         break;
       case "files":
-        throw notFound("not_found", "The Files API is not available yet: send files inline as data URLs or https URLs.");
+        if (parts.length === 1) {
+          only("GET", "POST");
+          return ok(method === "GET" ? await this.files.list(caller, url.searchParams) : await this.files.create(caller, await readForm(req)));
+        }
+        if (parts.length === 2) {
+          only("GET", "DELETE");
+          return ok(method === "GET" ? await this.files.get(caller, parts[1]!) : await this.files.delete(caller, parts[1]!));
+        }
+        if (parts.length === 3 && parts[2] === "content") { only("GET"); return { kind: "bytes", body: await this.files.content(caller, parts[1]!) }; }
+        break;
       default:
     }
     throw notFound("not_found", `Unknown route: ${method} ${RESPONSES_BASE}${path}.`);
@@ -139,18 +155,31 @@ function json(res: http.ServerResponse, status: number, body: unknown, headers: 
   res.end(serialized);
 }
 
-async function readBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
+async function readRaw(req: http.IncomingMessage, limit: number, code: string): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let total = 0;
   for await (const chunk of req) {
     const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     total += value.byteLength;
-    if (total > MAX_BODY_BYTES) throw new ApiError(413, "invalid_request_error", "request_too_large", `The request body is limited to ${MAX_BODY_BYTES} bytes.`);
+    if (total > limit) throw new ApiError(413, "invalid_request_error", code, `The request body is limited to ${limit} bytes.`);
     chunks.push(value);
   }
-  if (!chunks.length) return {};
+  return Buffer.concat(chunks);
+}
+
+/** A multipart/form-data body, as the official SDKs send a file. The largest file is 50 MB; the rest is framing. */
+async function readForm(req: http.IncomingMessage): Promise<FormData> {
+  const contentType = req.headers["content-type"] ?? "";
+  if (!/^multipart\/form-data\s*;/i.test(contentType)) throw invalidRequest("invalid_request", "The request must be multipart/form-data.");
+  const body = await readRaw(req, 51 * 1024 * 1024, "file_too_large");
+  try { return await new Response(new Uint8Array(body), { headers: { "content-type": contentType } }).formData(); } catch { throw invalidRequest("invalid_request", "The multipart body could not be read."); }
+}
+
+async function readBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
+  const body = await readRaw(req, MAX_BODY_BYTES, "request_too_large");
+  if (!body.length) return {};
   let parsed: unknown;
-  try { parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { throw invalidRequest("invalid_json", "The request body must be JSON."); }
+  try { parsed = JSON.parse(body.toString("utf8")); } catch { throw invalidRequest("invalid_json", "The request body must be JSON."); }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw invalidRequest("invalid_json", "The request body must be a JSON object.");
   return parsed as Record<string, unknown>;
 }

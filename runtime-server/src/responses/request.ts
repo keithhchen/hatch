@@ -1,7 +1,7 @@
 import { invalidRequest, unsupported } from "./errors.js";
 
-/** Where an inline attachment's bytes come from: the request itself (a data URL) or an https URL the server fetches. */
-export type AttachmentSource = { kind: "data"; mediaType: string; base64: string } | { kind: "url"; url: string };
+/** Where an attachment's bytes come from: the request itself (a data URL), an https URL the server fetches, or a file the account uploaded to the Files API. */
+export type AttachmentSource = { kind: "data"; mediaType: string; base64: string } | { kind: "url"; url: string } | { kind: "file"; id: string };
 
 export type InputPart =
   | { type: "text"; text: string }
@@ -69,7 +69,12 @@ function includeToolCalls(value: unknown): boolean {
   return tools;
 }
 
-/** One attachment source from `image_url`, `file_data` or `file_url`. A `file_id` is the Files API, which is not available yet. */
+const fileSource = (value: unknown, param: string): AttachmentSource => {
+  if (typeof value !== "string" || !value) throw invalidRequest("invalid_request", `${param} must be a string.`, param);
+  return { kind: "file", id: value };
+};
+
+/** One attachment source from `image_url`, `file_data` or `file_url`. */
 function sourceOf(value: unknown, param: string, kind: "image" | "file"): AttachmentSource {
   if (typeof value !== "string" || !value) throw invalidRequest("invalid_request", `${param} must be a string.`, param);
   if (value.startsWith("data:")) {
@@ -89,11 +94,11 @@ function partOf(part: unknown, param: string): InputPart {
     return { type: "text", text: part.text };
   }
   if (part.type === "input_image") {
-    if (present(part.file_id)) throw unsupported(`${param}.file_id`, "file_id (the Files API) is not available yet: send image_url as a data URL or an https URL.");
+    if (present(part.file_id)) return { type: "image", source: fileSource(part.file_id, `${param}.file_id`) };
     return { type: "image", source: sourceOf(part.image_url, `${param}.image_url`, "image") };
   }
   if (part.type === "input_file") {
-    if (present(part.file_id)) throw unsupported(`${param}.file_id`, "file_id (the Files API) is not available yet: send file_data as a data URL or file_url as an https URL.");
+    if (present(part.file_id)) return { type: "file", source: fileSource(part.file_id, `${param}.file_id`) };
     const filename = typeof part.filename === "string" && part.filename ? part.filename : undefined;
     const raw = present(part.file_data) ? part.file_data : part.file_url;
     return { type: "file", source: sourceOf(raw, present(part.file_data) ? `${param}.file_data` : `${param}.file_url`, "file"), ...(filename ? { filename } : {}) };

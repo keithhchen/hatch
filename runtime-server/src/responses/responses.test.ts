@@ -54,7 +54,7 @@ test("request: unsupported parameters name themselves; ignored ones pass", () =>
   assert.equal(refusal({ text: { format: { type: "json_schema" } } }), "text.format");
   assert.equal(refusal({ temperature: 1, top_p: 1, user: "u", service_tier: "auto", prompt_cache_key: "k", safety_identifier: "s" }), "accepted");
   assert.equal(refusal({ input: [{ role: "developer", content: "x" }] }), "input[0].role");
-  assert.equal(refusal({ input: [{ role: "user", content: [{ type: "input_image", file_id: "file_1" }] }] }), "input[0].content[0].file_id");
+  assert.equal(refusal({ input: [{ role: "user", content: [{ type: "input_image", file_id: 7 }] }] }), "input[0].content[0].file_id");
   assert.equal(refusal({ conversation: "conv_1", previous_response_id: "resp_1" }), "previous_response_id");
   assert.equal(refusal({ include: ["hatch.tool_calls"] }), "accepted");
   assert.equal(refusal({ include: ["file_search_call.results"] }), "include[0]");

@@ -10,8 +10,11 @@ import OpenAI from "openai";
 import type { AgentCorpus, AgentCorpusResolverLike } from "../agentCorpus.js";
 import type { AgentRuntime } from "../agentRuntime.js";
 import { AttachmentFiles } from "../assets/files.js";
-import { harness, png } from "../assets/kit.test.js";
+import { allow, harness, png, wav } from "../assets/kit.test.js";
+import { AssetPipeline } from "../assets/pipeline.js";
+import { FileProcessor, ImageProcessor } from "../assets/processors.js";
 import { ChatAssets } from "../chat/assets.js";
+import { InMemoryAccountFiles } from "./accountFiles.js";
 import { InMemoryConversationRepository } from "../conversationRepository.js";
 import { InMemoryUsageLedger } from "../usage/memoryUsage.js";
 import type { UsageEvent } from "../usage/usage.js";
@@ -54,7 +57,7 @@ afterEach(async () => { await Promise.all(runtimes.splice(0).map((server) => ser
 type Gate = { open(): void; wait: Promise<void> };
 const gate = (): Gate => { let open!: () => void; const wait = new Promise<void>((resolve) => { open = resolve; }); return { open, wait }; };
 
-async function fixture(options: { holdMs?: number; keepAliveMs?: number; assets?: boolean } = {}) {
+async function fixture(options: { holdMs?: number; keepAliveMs?: number; assets?: boolean; quota?: number; withoutAudio?: boolean } = {}) {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-responses-api-"));
   const store = new RuntimeStore(dataDir);
   const repository = new InMemoryConversationRepository(store.localAuthority);
@@ -68,7 +71,9 @@ async function fixture(options: { holdMs?: number; keepAliveMs?: number; assets?
     }
   };
   const kit = options.assets ? await harness() : undefined;
-  const chatAssets = kit ? new ChatAssets({ pipeline: kit.pipeline, blobs: kit.blobs, files: new AttachmentFiles(kit.repository, kit.blobs) }) : undefined;
+  // `withoutAudio` is a Runtime that has no processor for voice: a kind its pipeline refuses.
+  const pipeline = kit && options.withoutAudio ? new AssetPipeline(kit.repository, kit.blobs, allow, [new ImageProcessor(), new FileProcessor()]) : kit?.pipeline;
+  const chatAssets = kit ? new ChatAssets({ pipeline: pipeline!, blobs: kit.blobs, files: new AttachmentFiles(kit.repository, kit.blobs) }) : undefined;
   const usage: UsageEvent[] = [];
   const ledger = new InMemoryUsageLedger();
   const recorder = { record: async (event: UsageEvent) => { usage.push(event); await ledger.record(event); }, forRun: (runId: string) => ledger.forRun(runId) };
@@ -89,7 +94,7 @@ async function fixture(options: { holdMs?: number; keepAliveMs?: number; assets?
   const runtime = createRuntimeServer({
     conversationStore: store, conversationRepository: repository, authIdentityResolver: identities, agentCorpusResolver: corpora,
     createRuntime: () => model, usage: recorder, ...(chatAssets ? { chatAssets } : {}),
-    responsesApi: { ...(options.holdMs ? { holdMs: options.holdMs } : {}), ...(options.keepAliveMs ? { keepAliveMs: options.keepAliveMs } : {}) }
+    responsesApi: { accountFiles: new InMemoryAccountFiles(options.quota), ...(options.holdMs ? { holdMs: options.holdMs } : {}), ...(options.keepAliveMs ? { keepAliveMs: options.keepAliveMs } : {}) }
   });
   runtimes.push(runtime);
   await new Promise<void>((resolve) => (runtime.server as http.Server).listen(0, "127.0.0.1", () => resolve()));
@@ -352,8 +357,6 @@ test("parameters the Agent owns are refused by name, and the ones that change no
   await expectUnsupported({ text: { format: { type: "json_object" } } }, "text.format");
   await expectUnsupported({ input: [{ role: "system", content: "x" }] }, "input[0].role");
   await expectUnsupported({ input: [{ role: "user", content: "ok" }, { role: "assistant", content: "x" }] }, "input[1].role");
-  await expectUnsupported({ input: [{ role: "user", content: [{ type: "input_image", file_id: "file_123" }] }] }, "input[0].content[0].file_id");
-  await expectUnsupported({ input: [{ role: "user", content: [{ type: "input_file", file_id: "file_123" }] }] }, "input[0].content[0].file_id");
   await expectUnsupported({ include: ["reasoning.encrypted_content"] }, "include[0]");
   assert.deepEqual(await refused(create({ colour: "red" })), { status: 400, code: "unknown_parameter", param: "colour", type: "invalid_request_error" });
   assert.deepEqual(await refused(openai.delete("/responses/resp_x")), { status: 400, code: "unsupported_parameter", param: "response_id", type: "invalid_request_error" });
@@ -389,4 +392,75 @@ test("a Responses API run is billed to the owner on the chat_api surface, under 
     { accountId: usage[0]!.accountId, surface: usage[0]!.surface, apiKeyId: usage[0]!.apiKeyId, productId: usage[0]!.productId, runId: `resp_${usage[0]!.runId!.replace(/^run_/, "")}`, input: usage[0]!.inputTokens, cached: usage[0]!.cachedInputTokens, output: usage[0]!.outputTokens },
     { accountId: OWNER, surface: "chat_api", apiKeyId: "session-1", productId: PRODUCT, runId: response.id, input: 130, cached: 30, output: 20 }
   );
+});
+
+test("Files API: files.create (multipart) then file_id in input_file and input_image reaches the run; private to the account; delete ends use", async () => {
+  const { openai, client, control } = await fixture({ assets: true });
+  const stranger = client("hatch_test_key_stranger");
+  const notes = await openai.files.create({ file: new File(["quarterly notes"], "notes.txt", { type: "text/plain" }), purpose: "user_data" });
+  assert.match(notes.id, /^file_/);
+  assert.deepEqual({ object: notes.object, bytes: notes.bytes, filename: notes.filename, purpose: notes.purpose, status: notes.status }, { object: "file", bytes: 15, filename: "notes.txt", purpose: "user_data", status: "processed" });
+  const picture = await openai.files.create({ file: new File([new Uint8Array(await png(12, 12))], "chart.png", { type: "image/png" }), purpose: "vision" });
+
+  const response = await openai.responses.create({
+    model: `hatch:${PRODUCT}`,
+    input: [{ role: "user", content: [{ type: "input_text", text: "read these" }, { type: "input_file", file_id: notes.id }, { type: "input_image", file_id: picture.id, detail: "auto" }] }]
+  });
+  assert.equal(response.status, "completed");
+  const said = control.seen.at(-1)!;
+  assert.match(said, /^read these/);
+  assert.match(said, /notes\.txt/);
+  assert.match(said, /chart\.png/);
+  const inputs = await openai.responses.inputItems.list(response.id);
+  assert.deepEqual((inputs.data[0] as unknown as { content: Array<{ type: string }> }).content.map((part) => part.type), ["input_text", "input_file", "input_image"]);
+
+  assert.deepEqual((await openai.files.list()).data.map((file) => file.id).sort(), [notes.id, picture.id].sort());
+  assert.equal((await openai.files.retrieve(notes.id)).filename, "notes.txt");
+  assert.equal(await (await openai.files.content(notes.id)).text(), "quarterly notes");
+
+  assert.deepEqual(await refused(stranger.files.retrieve(notes.id)), { status: 404, code: "file_not_found", param: null, type: "not_found_error" });
+  assert.equal((await refused(stranger.files.content(notes.id))).code, "file_not_found");
+  assert.equal((await refused(stranger.files.delete(notes.id))).code, "file_not_found");
+  assert.equal((await stranger.files.list()).data.length, 0);
+  assert.deepEqual(await refused(stranger.responses.create({ model: `hatch:${FOREIGN}`, input: [{ role: "user", content: [{ type: "input_file", file_id: notes.id }] }] })), { status: 404, code: "file_not_found", param: null, type: "not_found_error" });
+
+  assert.deepEqual(await openai.files.delete(notes.id), { id: notes.id, object: "file", deleted: true });
+  assert.equal((await refused(openai.files.retrieve(notes.id))).status, 404);
+  assert.equal((await refused(openai.responses.create({ model: `hatch:${PRODUCT}`, input: [{ role: "user", content: [{ type: "input_file", file_id: notes.id }] }] }))).code, "file_not_found");
+  assert.equal((await refused(openai.responses.create({ model: `hatch:${PRODUCT}`, input: [{ role: "user", content: [{ type: "input_image", file_id: notes.id, detail: "auto" }] }] }))).code, "file_not_found");
+});
+
+test("Files API: a missing file part is 400, an oversized file 413, no asset service 501", async () => {
+  const { openai, origin } = await fixture({ assets: true });
+  const form = new FormData();
+  form.set("purpose", "user_data");
+  const missing = await fetch(`${origin}/responses/v1/files`, { method: "POST", headers: { authorization: `Bearer ${KEY}` }, body: form });
+  assert.equal(missing.status, 400);
+  assert.deepEqual(await missing.json(), { error: { message: "A multipart `file` part is required.", type: "invalid_request_error", param: "file", code: "invalid_request" } });
+  const big = Buffer.concat([Buffer.from("\x89PNG\r\n\x1a\n", "latin1"), Buffer.alloc(21 * 1024 * 1024)]);
+  assert.deepEqual(await refused(openai.files.create({ file: new File([new Uint8Array(big)], "big.png", { type: "image/png" }), purpose: "user_data" })), { status: 413, code: "file_too_large", param: null, type: "invalid_request_error" });
+
+  const plain = await fixture();
+  assert.equal((await refused(plain.openai.files.create({ file: new File(["hello"], "a.txt"), purpose: "user_data" }))).status, 501);
+});
+
+test("Files API: a type the pipeline has no processor for is refused at upload with 415", async () => {
+  const { openai } = await fixture({ assets: true, withoutAudio: true });
+  assert.deepEqual(await refused(openai.files.create({ file: new File([new Uint8Array(wav())], "voice.wav"), purpose: "user_data" })), { status: 415, code: "unsupported_file_type", param: null, type: "invalid_request_error" });
+  assert.equal((await openai.files.list()).data.length, 0);
+  // A corrupt file of a supported type is only found out when it is used.
+  const corrupt = await openai.files.create({ file: new File([Buffer.concat([Buffer.from("\x89PNG\r\n\x1a\n", "latin1"), Buffer.from("not really")])], "broken.png"), purpose: "user_data" });
+  assert.match(corrupt.id, /^file_/);
+});
+
+test("Files API: an account's storage is capped; going over is 400 storage_quota_exceeded and deleting frees space", async () => {
+  const { openai, client } = await fixture({ assets: true, quota: 100 });
+  const upload = (client_: OpenAI, size: number) => client_.files.create({ file: new File(["x".repeat(size)], "f.txt"), purpose: "user_data" });
+  const first = await upload(openai, 60);
+  const over = await refused(upload(openai, 41));
+  assert.deepEqual(over, { status: 400, code: "storage_quota_exceeded", param: null, type: "invalid_request_error" });
+  await upload(openai, 40);
+  await upload(client("hatch_test_key_stranger"), 100);
+  await openai.files.delete(first.id);
+  await upload(openai, 60);
 });

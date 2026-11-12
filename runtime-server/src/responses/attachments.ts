@@ -6,6 +6,7 @@ import type { ConversationRecord } from "../conversationRepository.js";
 import { MAX_BYTES } from "../assets/pipeline.js";
 import type { ContentPart } from "../surfaces/contract.js";
 import { ApiError, invalidRequest } from "./errors.js";
+import type { FilesApi } from "./files.js";
 import type { AttachmentSource, InputPart } from "./request.js";
 
 /** How an https URL becomes bytes. The production one refuses anything that is not the public internet. */
@@ -87,11 +88,11 @@ function nameOf(part: Extract<InputPart, { type: "image" | "file" }>, mediaType:
 }
 
 /**
- * Inline attachments of a request (data URLs, https URLs) put through the same door as every client's upload: a ready
- * asset of the conversation, referenced by the message. The Files API is a separate, account-scoped door.
+ * Attachments of a request (data URLs, https URLs, Files API files) put through the same door as every client's upload:
+ * a ready asset of the conversation, referenced by the message.
  */
 export class InlineAttachments {
-  constructor(private readonly deps: { assets: ChatAssets | undefined; urls: UrlFetcher }) {}
+  constructor(private readonly deps: { assets: ChatAssets | undefined; urls: UrlFetcher; files: FilesApi }) {}
 
   async contentParts(parts: readonly InputPart[], conversation: ConversationRecord, signal?: AbortSignal): Promise<ContentPart[]> {
     const out: ContentPart[] = [];
@@ -99,16 +100,18 @@ export class InlineAttachments {
       if (part.type === "text") { out.push({ type: "text", text: part.text }); continue; }
       const assets = this.deps.assets;
       if (!assets) throw new ApiError(501, "server_error", "attachments_unavailable", "This Runtime cannot take attachments.");
-      const { bytes, mediaType } = await this.read(part.source, signal);
+      const { bytes, mediaType, filename } = await this.read(part.source, conversation.ownerAccountId, signal);
       if (!bytes.length) throw invalidRequest("invalid_request", "An attachment is empty.");
-      const uploaded = await assets.upload(conversation, { name: nameOf(part, mediaType, index), bytes });
+      const uploaded = await assets.upload(conversation, { name: filename ?? nameOf(part, mediaType, index), bytes });
       if (part.type === "image" && uploaded.kind !== "image") throw new ApiError(415, "invalid_request_error", "unsupported_file_type", "input_image must be an image.");
       out.push({ type: uploaded.kind, assetId: uploaded.asset_id });
     }
     return out;
   }
 
-  private async read(source: AttachmentSource, signal?: AbortSignal): Promise<{ bytes: Buffer; mediaType?: string }> {
+  /** A Files API file is read as its account's, the conversation's owner: another account's id is not found. */
+  private async read(source: AttachmentSource, accountId: string, signal?: AbortSignal): Promise<{ bytes: Buffer; mediaType?: string; filename?: string }> {
+    if (source.kind === "file") return this.deps.files.read(accountId, source.id);
     if (source.kind === "data") return { bytes: Buffer.from(source.base64, "base64"), mediaType: source.mediaType };
     const fetched = await this.deps.urls.fetch(source.url, Math.max(...Object.values(MAX_BYTES)), signal);
     return { bytes: fetched.bytes, ...(fetched.contentType ? { mediaType: fetched.contentType } : {}) };

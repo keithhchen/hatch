@@ -79,6 +79,9 @@ export class ChatAssets implements PartsReader {
     } catch (error) { throw refusal(error); }
   }
 
+  /** Refuses, with the reason, a file the pipeline would never take (too large, no processor for its type), without storing or processing it. */
+  detect(name: string, bytes: Buffer): void { this.deps.pipeline.detect(name, bytes); }
+
   async prepare(parts: ContentPart[], conversation: ConversationRecord, clientMessageId: string): Promise<PreparedMessage> {
     const scope = assetScopeOf(conversation);
     const referenced = parts.filter((part) => part.type !== "text") as Array<Exclude<ContentPart, { type: "text" }>>;
