@@ -1,14 +1,13 @@
-import type { Pool } from "pg";
 import type { AgentTarget } from "../surfaces/contract.js";
-import { PostgresConnections, STUDIO_TARGET, targetKey, type ConnectionRepository, type OwnedConnection } from "./connections.js";
+import { STUDIO_TARGET, targetKey, type ConnectionRepository, type OwnedConnection } from "./connections.js";
 import { Dispatcher, type Send } from "./dispatch.js";
 import type { ChannelHub } from "./hub.js";
-import { PostgresInbox, type Inbox, type InboxItem } from "./inbox.js";
+import { type Inbox, type InboxItem } from "./inbox.js";
 import { backoffMs, pollLoop } from "./loop.js";
-import { PostgresOutbox, type Outbox } from "./outbox.js";
+import { type Outbox } from "./outbox.js";
 import type { AssistantChannels, ChatGateway, TargetHandler, TargetKind } from "./ports.js";
 import { ChatReplies, FAILED } from "./productTarget.js";
-import { PostgresRateLimiter, type RateLimiter } from "./rateLimiter.js";
+import { type RateLimiter } from "./rateLimiter.js";
 import { keepTyping } from "./typing.js";
 import { ChannelRouter, type Claim, type SignIn } from "./router.js";
 import { CHANNEL_KINDS, mergeAlbum, type ChannelAdapter, type ChannelKind, type InboundEvent, type PullNotice } from "./types.js";
@@ -21,12 +20,6 @@ const TYPING = { everyMs: 4_000, maxMs: 3 * 60_000 };
 const COMPACTING = "正在整理对话，稍等一下。\nTidying up our conversation, one moment.";
 
 export type ChannelStores = { connections: ConnectionRepository; inbox: Inbox; outbox: Outbox; limiter: RateLimiter };
-
-export async function openChannelStores(pool: Pool, scopeOf: (ownerAccountId: string, channel: ChannelKind) => string): Promise<ChannelStores> {
-  const connections = await PostgresConnections.open(pool, scopeOf);
-  // Each table references hatch_connections, so it exists first.
-  return { connections, inbox: await PostgresInbox.open(pool), outbox: await PostgresOutbox.open(pool), limiter: await PostgresRateLimiter.open(pool) };
-}
 
 export type ChannelStatus = {
   kind: ChannelKind; available: boolean; linked: boolean; state?: OwnedConnection["state"]; lastEventAt?: string; senderId?: string;

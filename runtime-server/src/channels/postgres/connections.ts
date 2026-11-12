@@ -1,0 +1,232 @@
+import type { Pool, PoolClient } from "pg";
+import type { AgentTarget, Audience, ConnectionState } from "../../surfaces/contract.js";
+import { newLinkCode, STUDIO_TARGET, targetKey, type ChannelConnection, type ConnectionRepository, type Identity, type Linked, type OwnedConnection, type Resolved } from "../connections.js";
+import type { ChannelKind } from "../types.js";
+
+const LINK_CODE_MS = 15 * 60_000;
+
+const COLUMNS = "id, owner_account_id, channel, scope, client, target, audience, task_specific, state";
+const IDENTITY_COLUMNS = "i.id AS identity_id, i.sender_id, i.thread_id";
+const connectionOf = (row: Record<string, any>): ChannelConnection => ({
+  id: row.id, ownerAccountId: row.owner_account_id, channel: row.channel, scope: row.scope, client: row.client, target: row.target, audience: row.audience as Audience, taskSpecific: row.task_specific, state: row.state as ConnectionState,
+});
+const identityOf = (row: Record<string, any>): Identity => ({ id: row.identity_id ?? row.id, connectionId: row.connection_id ?? row.id, senderId: row.sender_id, threadId: row.thread_id });
+
+export class PostgresConnections implements ConnectionRepository {
+  private constructor(private pool: Pool, private scopeOf: (ownerAccountId: string, channel: ChannelKind) => string) {}
+
+  /** Creates the schema, then moves the old per-account channel rows over once. That table is read nowhere else. */
+  static async open(pool: Pool, scopeOf: (ownerAccountId: string, channel: ChannelKind) => string): Promise<PostgresConnections> {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS hatch_connections (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        owner_account_id UUID NOT NULL,
+        channel TEXT NOT NULL,
+        scope TEXT NOT NULL DEFAULT '',
+        client TEXT NOT NULL DEFAULT 'im' CHECK (client IN ('im', 'dm')),
+        target JSONB NOT NULL,
+        target_key TEXT NOT NULL,
+        audience TEXT NOT NULL CHECK (audience IN ('self', 'org', 'public')),
+        task_specific BOOLEAN NOT NULL DEFAULT false,
+        state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ('active', 'degraded')),
+        credentials TEXT,
+        link_code TEXT,
+        link_expires_at TIMESTAMPTZ,
+        last_event_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CHECK (audience = 'self' OR target_key <> 'assistant'),
+        UNIQUE (owner_account_id, channel, audience, target_key)
+      );
+      ALTER TABLE hatch_connections ADD COLUMN IF NOT EXISTS task_specific BOOLEAN NOT NULL DEFAULT false;
+      ALTER TABLE hatch_connections DROP COLUMN IF EXISTS start_code;
+      ALTER TABLE hatch_connections ADD COLUMN IF NOT EXISTS redeemed_by TEXT;
+      CREATE UNIQUE INDEX IF NOT EXISTS hatch_connections_code_idx ON hatch_connections (link_code) WHERE link_code IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS hatch_connections_scope_idx ON hatch_connections (channel, scope) WHERE scope <> '';
+      CREATE TABLE IF NOT EXISTS hatch_channel_identities (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        connection_id UUID NOT NULL REFERENCES hatch_connections (id) ON DELETE CASCADE,
+        channel TEXT NOT NULL,
+        scope TEXT NOT NULL DEFAULT '',
+        sender_id TEXT NOT NULL,
+        thread_id TEXT NOT NULL,
+        UNIQUE (channel, scope, sender_id)
+      );
+      CREATE INDEX IF NOT EXISTS hatch_channel_identities_connection_idx ON hatch_channel_identities (connection_id);
+      -- Rows that an earlier version stored as role 'guest' stay in place and are never read: only 'owner' rows are admitted.
+      ALTER TABLE hatch_channel_identities ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'owner' CHECK (role IN ('owner', 'guest'));
+    `);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      // One migration at a time; a second process finds the old table already renamed.
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('hatch_connections_migration'))");
+      // A revoked Connection is gone: unbinding deletes it now. What older versions left behind goes, and `revoked` with it.
+      await client.query(`
+        DELETE FROM hatch_connections WHERE state = 'revoked';
+        DO $$ BEGIN
+          IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'hatch_connections'::regclass AND conname = 'hatch_connections_state_check' AND pg_get_constraintdef(oid) LIKE '%revoked%') THEN
+            ALTER TABLE hatch_connections DROP CONSTRAINT hatch_connections_state_check;
+            ALTER TABLE hatch_connections ADD CONSTRAINT hatch_connections_state_check CHECK (state IN ('active', 'degraded'));
+          END IF;
+        END $$;
+      `);
+      if ((await client.query("SELECT to_regclass('hatch_assistant_channels') AS old")).rows[0].old) {
+        await client.query(`
+          INSERT INTO hatch_connections (owner_account_id, channel, scope, target, target_key, audience, credentials, link_code, link_expires_at, last_event_at)
+          SELECT account_id, kind, scope, '{"kind":"assistant"}'::jsonb, 'assistant', 'self', credentials, link_code, link_expires_at, last_event_at FROM hatch_assistant_channels
+          ON CONFLICT DO NOTHING;
+          INSERT INTO hatch_channel_identities (connection_id, channel, scope, sender_id, thread_id)
+          SELECT c.id, o.kind, o.scope, o.peer_id, o.peer_id FROM hatch_assistant_channels o
+          JOIN hatch_connections c ON c.owner_account_id = o.account_id AND c.channel = o.kind AND c.audience = 'self' AND c.target_key = 'assistant'
+          WHERE o.peer_id IS NOT NULL
+          ON CONFLICT DO NOTHING;
+          ALTER TABLE hatch_assistant_channels RENAME TO hatch_assistant_channels_migrated;
+        `);
+      }
+      await client.query("COMMIT");
+    } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; } finally { client.release(); }
+    return new PostgresConnections(pool, scopeOf);
+  }
+
+  async issueCode(ownerAccountId: string, channel: ChannelKind, target: AgentTarget = STUDIO_TARGET, now = new Date()): Promise<string> {
+    const code = newLinkCode();
+    await this.pool.query(`INSERT INTO hatch_connections (owner_account_id, channel, scope, target, target_key, audience, link_code, link_expires_at)
+      VALUES ($1, $2, $3, $6, $7, 'self', $4, $5)
+      ON CONFLICT (owner_account_id, channel, audience, target_key) DO UPDATE SET scope = CASE WHEN hatch_connections.credentials IS NOT NULL THEN hatch_connections.scope ELSE $3 END, link_code = $4, link_expires_at = $5, redeemed_by = NULL`,
+    [ownerAccountId, channel, this.scopeOf(ownerAccountId, channel), code, new Date(now.getTime() + LINK_CODE_MS), JSON.stringify(target), targetKey(target)]);
+    return code;
+  }
+
+  async redeem(channel: ChannelKind, scope: string, code: string, who: { senderId: string; threadId: string }, now = new Date()): Promise<Linked | undefined> {
+    return this.transaction(async client => {
+      const row = (await client.query(`SELECT ${COLUMNS} FROM hatch_connections WHERE link_code = $1 AND channel = $2 AND scope = $3 AND link_expires_at > $4 FOR UPDATE`, [code, channel, scope, now])).rows[0];
+      // A code redeemed by this same sender is still theirs: asking again, as a retry of the event does, is the same success.
+      if (!row) {
+        const again = (await client.query(`SELECT ${COLUMNS} FROM hatch_connections c WHERE link_code = $1 AND channel = $2 AND scope = $3 AND redeemed_by = $4
+          AND EXISTS (SELECT 1 FROM hatch_channel_identities i WHERE i.connection_id = c.id AND i.sender_id = $4)`, [code, channel, scope, who.senderId])).rows[0];
+        return again && connectionOf(again);
+      }
+      const connection = connectionOf(row);
+      // The sender moves away from any earlier Connection. A self Connection has one owner: the new one replaces the old.
+      await client.query("DELETE FROM hatch_channel_identities WHERE channel = $1 AND scope = $2 AND sender_id = $3", [channel, scope, who.senderId]);
+      if (connection.audience === "self") await client.query("DELETE FROM hatch_channel_identities WHERE connection_id = $1 AND role = 'owner'", [connection.id]);
+      await client.query("INSERT INTO hatch_channel_identities (connection_id, channel, scope, sender_id, thread_id) VALUES ($1, $2, $3, $4, $5)", [connection.id, channel, scope, who.senderId, who.threadId]);
+      await client.query("UPDATE hatch_connections SET link_expires_at = $2, redeemed_by = $3, state = 'active', last_event_at = $2 WHERE id = $1", [connection.id, now, who.senderId]);
+      return { ...connection, state: "active" as const };
+    });
+  }
+
+  async peekCode(channel: ChannelKind, scope: string, code: string, now = new Date()): Promise<{ ownerAccountId: string } | undefined> {
+    const owner = (await this.pool.query("SELECT owner_account_id FROM hatch_connections WHERE channel = $1 AND scope = $2 AND link_code = $3 AND link_expires_at > $4", [channel, scope, code, now])).rows[0];
+    return owner && { ownerAccountId: owner.owner_account_id };
+  }
+
+  async resolveConnection(payload: { channel: ChannelKind; scope: string; senderId: string }): Promise<Resolved | undefined> {
+    const known = (await this.pool.query(`SELECT c.id, c.owner_account_id, c.channel, c.scope, c.client, c.target, c.audience, c.task_specific, c.state, ${IDENTITY_COLUMNS}
+      FROM hatch_channel_identities i JOIN hatch_connections c ON c.id = i.connection_id
+      WHERE i.channel = $1 AND i.scope = $2 AND i.sender_id = $3 AND i.role = 'owner'`, [payload.channel, payload.scope, payload.senderId])).rows[0];
+    if (known) return { connection: connectionOf(known), identity: identityOf(known) };
+    if (!payload.scope) return undefined;
+    const tenant = (await this.pool.query(`SELECT ${COLUMNS} FROM hatch_connections WHERE channel = $1 AND scope = $2 ORDER BY (audience = 'public') DESC, created_at LIMIT 1`, [payload.channel, payload.scope])).rows[0];
+    return tenant ? { connection: connectionOf(tenant) } : undefined;
+  }
+
+  async meet(connection: ChannelConnection, who: { senderId: string; threadId: string }): Promise<Identity> {
+    const row = (await this.pool.query(`INSERT INTO hatch_channel_identities (connection_id, channel, scope, sender_id, thread_id) VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (channel, scope, sender_id) DO UPDATE SET thread_id = EXCLUDED.thread_id WHERE hatch_channel_identities.connection_id = EXCLUDED.connection_id
+      RETURNING id, connection_id, sender_id, thread_id`, [connection.id, connection.channel, connection.scope, who.senderId, who.threadId])).rows[0];
+    // The sender already belongs to another Connection: a contact is never shared between them.
+    if (!row) throw new Error("This sender belongs to another Connection");
+    return identityOf(row);
+  }
+
+  async linked(ownerAccountId: string): Promise<Resolved[]> {
+    const rows = (await this.pool.query(`SELECT c.id, c.owner_account_id, c.channel, c.scope, c.client, c.target, c.audience, c.task_specific, c.state, ${IDENTITY_COLUMNS}
+      FROM hatch_connections c JOIN hatch_channel_identities i ON i.connection_id = c.id
+      WHERE c.owner_account_id = $1 AND c.audience = 'self' AND c.target_key = 'assistant' AND i.role = 'owner' ORDER BY c.last_event_at DESC NULLS LAST`, [ownerAccountId])).rows;
+    return rows.map(row => ({ connection: connectionOf(row), identity: identityOf(row) }));
+  }
+
+  async owned(ownerAccountId: string): Promise<OwnedConnection[]> {
+    return (await this.pool.query(`SELECT ${COLUMNS}, credentials IS NOT NULL AS has_credentials, last_event_at, EXISTS (SELECT 1 FROM hatch_channel_identities i WHERE i.connection_id = c.id AND i.role = 'owner') AS linked,
+      (SELECT i.sender_id FROM hatch_channel_identities i WHERE i.connection_id = c.id AND i.role = 'owner' LIMIT 1) AS sender_id
+      FROM hatch_connections c WHERE owner_account_id = $1 ORDER BY created_at`, [ownerAccountId])).rows.map(row => ({
+      ...connectionOf(row), linked: row.linked, hasCredentials: row.has_credentials, ...(row.sender_id ? { senderId: row.sender_id } : {}), ...(row.last_event_at ? { lastEventAt: new Date(row.last_event_at).toISOString() } : {}),
+    }));
+  }
+
+  async get(id: string): Promise<ChannelConnection | undefined> {
+    if (!/^[0-9a-f-]{36}$/.test(id)) return undefined;
+    const row = (await this.pool.query(`SELECT ${COLUMNS} FROM hatch_connections WHERE id = $1`, [id])).rows[0];
+    return row && connectionOf(row);
+  }
+
+  async touch(id: string): Promise<void> { await this.pool.query("UPDATE hatch_connections SET last_event_at = now() WHERE id = $1", [id]); }
+
+  async setState(id: string, state: ConnectionState): Promise<void> {
+    await this.pool.query("UPDATE hatch_connections SET state = $2 WHERE id = $1 AND state = $3", [id, state, state === "degraded" ? "active" : "degraded"]);
+  }
+
+  async unbind(ownerAccountId: string, channel: ChannelKind, target: AgentTarget = STUDIO_TARGET): Promise<void> {
+    await this.pool.query("DELETE FROM hatch_connections WHERE owner_account_id = $1 AND channel = $2 AND audience = 'self' AND target_key = $3", [ownerAccountId, channel, targetKey(target)]);
+  }
+
+  async unbindPersonal(id: string): Promise<boolean> {
+    return (await this.pool.query("DELETE FROM hatch_connections WHERE id = $1 AND audience = 'self'", [id])).rowCount! > 0;
+  }
+
+  async unbindSender(channel: ChannelKind, scope: string, senderId: string): Promise<void> {
+    await this.transaction(async client => {
+      await client.query("DELETE FROM hatch_connections WHERE audience = 'self' AND id IN (SELECT connection_id FROM hatch_channel_identities WHERE channel = $1 AND scope = $2 AND sender_id = $3)", [channel, scope, senderId]);
+      await client.query("DELETE FROM hatch_channel_identities WHERE channel = $1 AND scope = $2 AND sender_id = $3", [channel, scope, senderId]);
+    });
+  }
+
+  async saveCredentials(ownerAccountId: string, channel: ChannelKind, sealed: string, scope = this.scopeOf(ownerAccountId, channel), target: AgentTarget = STUDIO_TARGET): Promise<void> {
+    await this.transaction(async client => {
+      const audience = target.kind === "assistant" ? "self" : "public";
+      const before = (await client.query("SELECT scope FROM hatch_connections WHERE owner_account_id = $1 AND channel = $2 AND audience = $3 AND target_key = $4 FOR UPDATE", [ownerAccountId, channel, audience, targetKey(target)])).rows[0];
+      const id = (await client.query(`INSERT INTO hatch_connections (owner_account_id, channel, scope, target, target_key, audience, credentials)
+        VALUES ($1, $2, $3, $5, $6, $7, $4)
+        ON CONFLICT (owner_account_id, channel, audience, target_key) DO UPDATE SET credentials = $4, scope = $3, state = 'active' RETURNING id`,
+      [ownerAccountId, channel, scope, sealed, JSON.stringify(target), targetKey(target), audience])).rows[0].id;
+      // Under a new scope nobody who was bound under the old one is known any more.
+      if (before && before.scope !== scope) {
+        await client.query("DELETE FROM hatch_channel_identities WHERE connection_id = $1", [id]);
+      }
+    });
+  }
+
+  async credentials(ownerAccountId: string, channel: ChannelKind): Promise<string | undefined> {
+    return (await this.pool.query("SELECT credentials FROM hatch_connections WHERE owner_account_id = $1 AND channel = $2 AND audience = 'self' AND target_key = 'assistant'", [ownerAccountId, channel])).rows[0]?.credentials ?? undefined;
+  }
+
+  async credentialsOf(channel: ChannelKind, scope: string): Promise<string | undefined> {
+    if (!scope) return undefined;
+    return (await this.pool.query("SELECT credentials FROM hatch_connections WHERE channel = $1 AND scope = $2 AND credentials IS NOT NULL ORDER BY created_at LIMIT 1", [channel, scope])).rows[0]?.credentials ?? undefined;
+  }
+
+  async ownerOfCode(channel: ChannelKind, code: string, now = new Date()): Promise<string | undefined> {
+    return (await this.pool.query("SELECT owner_account_id FROM hatch_connections WHERE channel = $1 AND link_code = $2 AND link_expires_at > $3", [channel, code, now])).rows[0]?.owner_account_id ?? undefined;
+  }
+
+  async unbindTenant(channel: ChannelKind, scope: string): Promise<void> {
+    if (!scope) return;
+    await this.pool.query("DELETE FROM hatch_connections WHERE channel = $1 AND scope = $2", [channel, scope]);
+  }
+
+  async listening(): Promise<Array<{ ownerAccountId: string; channel: ChannelKind; scope: string }>> {
+    return (await this.pool.query("SELECT DISTINCT owner_account_id, channel, scope FROM hatch_connections WHERE credentials IS NOT NULL")).rows
+      .map(row => ({ ownerAccountId: row.owner_account_id, channel: row.channel, scope: row.scope }));
+  }
+
+  private async transaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await work(client);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; } finally { client.release(); }
+  }
+}
