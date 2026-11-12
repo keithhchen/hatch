@@ -197,7 +197,7 @@ export const webChatCopy = Object.freeze({
     paywallBody: "选择继续和 {name} 交流的方式：",
     paywallHuman: "约 {name} 真人咨询",
     paywallHumanPrice: "{price} / 小时",
-    paywallAgent: "订阅完整 agent",
+    paywallAgent: "订阅完整 Agent",
     paywallAgentPrice: "{price} / 月",
     paywallUnavailable: "在线支付暂未开通，请稍后再来。",
     unavailablePill: "专家 AI",
