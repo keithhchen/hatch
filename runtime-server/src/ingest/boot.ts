@@ -48,8 +48,11 @@ export const createIngestService = async (deps: {
   manual: (accountId: string, productId: string) => Promise<ManualFiles>;
   /** `<prefix>/<account>/<product>`: where the Product's objects live. */
   productPrefix: (accountId: string, productId: string) => string;
+  /** Whether the account owns the Product. */
+  owns: (accountId: string, productId: string) => Promise<boolean>;
 }): Promise<IngestService> => {
   const service = new IngestService({
+    owns: deps.owns,
     jobs: await PostgresIngestJobs.open(deps.pool),
     engine: new RoutingEngine([new PlainTextEngine(), await hostedEngineFromEnvironment(deps.environment, deps.pool, deps.seal)]),
     sink: new ProductWorkspaceSink(deps.manual, deps.objects, deps.productPrefix),

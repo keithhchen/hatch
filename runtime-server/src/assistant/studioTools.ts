@@ -62,13 +62,6 @@ const text = (min: number, max: number) => z.string().min(min).max(max);
 
 const taskView = (task: AssistantTask) => ({ id: task.id, kind: task.kind, status: task.status, needs: task.needs, agent: task.productId, summary: task.summary, questions: task.payload.questions, error: task.lastError, updated_at: task.updatedAt });
 
-/** Why an Agent may not be built yet, or undefined when its interview is finished and confirmed (every outline item ✓). */
-const notReadyToBuild = (agent: AgentOverview): string | undefined => {
-  const open = agent.interview_outline.filter(item => item.status !== "completed").map(item => item.title);
-  if (!agent.interview_outline.length) return `「${agent.name}」还没有访谈大纲，不能构建。先派 interview 写大纲，再去问专家。`;
-  if (open.length) return `「${agent.name}」的访谈大纲还有没聊完的：${open.join("、")}。构建只依据专家确认过的访谈：接着问专家，聊完一项勾一项（tick_outline）。`;
-};
-
 /** The Agent a task is about: the one named (by id or by name), else the only one the Expert has. */
 const targetAgent = (agents: AgentOverview[], agentId: string | undefined): { agent?: AgentOverview; refusal?: string } => {
   const named = agentId?.trim();
@@ -137,8 +130,6 @@ export function studioTools(ops: StudioOperations): StudioTool[] {
           const { agent, refusal } = targetAgent(agents, agentId);
           if (refusal) throw new Error(refusal);
           agentId = agent?.productId ?? agentId;
-          const unready = input.kind === "build" && agent ? notReadyToBuild(agent) : undefined;
-          if (unready) throw new Error(unready);
         }
         const task = await ops.dispatch(call.accountId, input.kind, agentId, input.instruction, await call.origin());
         return done(await created(call, task));

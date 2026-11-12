@@ -40,15 +40,6 @@ test("research needs no Agent", async () => {
   assert.deepEqual(dispatched, [{ kind: "research", productId: undefined }]);
 });
 
-test("build refuses until the interview outline is all done", async () => {
-  const open = [{ title: "案例", status: "completed" as const }, { title: "例外", status: "pending" as const }];
-  const { dispatched, run } = startTask([agent("p1", "文书顾问", open), agent("p2", "没访谈过", [])]);
-  await assert.rejects(run({ kind: "build", agent_id: "p1", instruction: "构建" }), /还有没聊完的：例外/);
-  await assert.rejects(run({ kind: "build", agent_id: "p2", instruction: "构建" }), /还没有访谈大纲/);
-  await run({ kind: "interview", agent_id: "p1", instruction: "接着聊" });
-  assert.deepEqual(dispatched, [{ kind: "interview", productId: "p1" }], "interview is never gated");
-});
-
 test("with two Agents, agent_id may be the Agent's name, and an unknown one lists the choices", async () => {
   const { dispatched, run } = startTask([agent("p1", "美本顾问", done), agent("p2", "UCAS 顾问", done)]);
   await run({ kind: "build", agent_id: "UCAS 顾问", instruction: "构建" });

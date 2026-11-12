@@ -4,7 +4,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { WorkbenchStore, type AgentDefinitionSource, type AssistantRole, type Role, type Session, type Todo, type WorkbenchBackend } from "../factoryAgents/store.js";
 import { WorkbenchRuntime, safeError, type WorkbenchRuntimeOptions } from "../factoryAgents/runtime.js";
 import type { FactoryWorkspace } from "../factoryAgents/service.js";
-import type { AgentCatalog, AgentChange } from "./catalog.js";
+import type { AgentCatalog, AgentChange, CatalogAgent } from "./catalog.js";
 import { scrapeProviderFrom } from "../factoryAgents/webProviders.js";
 import type { WebSearchProvider } from "../factoryAgents/webTypes.js";
 import { CHANNEL_KINDS, type ChannelKind, type OutboundMessage } from "../channels/types.js";
@@ -52,7 +52,7 @@ type WorkerSpec = {
 };
 
 export type ProductWorkspaces = {
-  workspace(scope: { creatorId: string; productId: string }, token: string): Promise<FactoryWorkspace>;
+  workspace(scope: { creatorId: string; productId: string; briefSpec?: unknown }, token: string): Promise<FactoryWorkspace>;
   attachAssistant(hooks: { withheldTools: (scope: { creatorId: string; productId: string }, session: Session) => Promise<string[]>; opened: (scope: { creatorId: string; productId: string }, workspace: FactoryWorkspace) => void }): void;
 };
 
@@ -81,6 +81,13 @@ export type AssistantDependencies = {
   env: NodeJS.ProcessEnv;
   runtime?: Pick<WorkbenchRuntimeOptions, "agentFactory" | "deadlineMs" | "maxTurns">;
   ingest?: AssistantIngest;
+};
+
+/** Why an Agent may not be built yet, or undefined when its interview is finished and confirmed (every outline item ✓). */
+const notReadyToBuild = (name: string, outline: Todo[]): string | undefined => {
+  const open = outline.filter(item => item.status !== "completed").map(item => item.title);
+  if (!outline.length) return `「${name}」还没有访谈大纲，不能构建。先派 interview 写大纲，再去问专家。`;
+  if (open.length) return `「${name}」的访谈大纲还有没聊完的：${open.join("、")}。构建只依据专家确认过的访谈：接着问专家，聊完一项勾一项（tick_outline）。`;
 };
 
 /** One workspace per account: where the Assistant's workers run, and its notes. The conversation is Chat's. */
@@ -324,6 +331,10 @@ export class AssistantService implements StudioOperations {
     if (worker.needsAgent && !productId) throw new Error("这件事要指定 Agent");
     const agent = productId ? await this.deps.catalog.get(accountId, productId) : undefined;
     if (productId && !agent) throw Object.assign(new Error("没有找到这个 Agent"), { status: 404 });
+    if (kind === "build" && agent) {
+      const unready = notReadyToBuild(agent.name, await this.interviewOutline(accountId, agent));
+      if (unready) throw new Error(unready);
+    }
     if (agent) await this.shareMaterials(accountId, agent.productId);
     return worker.start({ accountId, kind, productId: agent?.productId, agentName: agent?.name, instruction, origin });
   }
@@ -352,8 +363,8 @@ export class AssistantService implements StudioOperations {
   }
 
   /** The interview outline is the interview session's todo list: one source, read wherever it is needed. */
-  private async interviewOutline(accountId: string, productId: string): Promise<Todo[]> {
-    const workspace = await this.workspace(accountId, productId);
+  private async interviewOutline(accountId: string, agent: CatalogAgent): Promise<Todo[]> {
+    const workspace = await this.workspace(accountId, agent.productId, agent);
     return (await workspace.store.list()).find(session => session.role === "voice")?.todos ?? [];
   }
 
@@ -448,7 +459,7 @@ export class AssistantService implements StudioOperations {
 
   /** Everything the Assistant knows of the Expert's Agents: what they promise, whether they are live, and how far their interview has got. */
   async agents(accountId: string): Promise<AgentOverview[]> {
-    return Promise.all((await this.deps.catalog.list(accountId)).map(async agent => ({ ...agent, live: await this.deps.catalog.live(accountId, agent.productId), interview_outline: await this.interviewOutline(accountId, agent.productId) })));
+    return Promise.all((await this.deps.catalog.list(accountId)).map(async agent => ({ ...agent, live: await this.deps.catalog.live(accountId, agent.productId), interview_outline: await this.interviewOutline(accountId, agent) })));
   }
 
   createAgent(accountId: string, name: string, promise: string): Promise<unknown> { return this.deps.catalog.create(accountId, name, promise); }
@@ -613,7 +624,7 @@ export class AssistantService implements StudioOperations {
     const agents = await this.deps.catalog.list(accountId);
     const lines = await Promise.all(agents.map(async agent => {
       const live = await this.deps.catalog.live(accountId, agent.productId) as { is_live?: boolean; pending_changes?: string[]; public_url?: string; chat_url?: string; telegram_url?: string } | null;
-      const outline = await this.interviewOutline(accountId, agent.productId);
+      const outline = await this.interviewOutline(accountId, agent);
       const links = live?.is_live ? [["主页", live.public_url], ["聊天页", live.chat_url], ["Telegram", live.telegram_url]].filter(([, url]) => url).map(([label, url]) => `${label} ${url}`) : [];
       return [`- 「${agent.name}」（${agent.productId}）：${live?.is_live ? "在线" : "未上线"}${live?.pending_changes?.length ? `，待发布：${live.pending_changes.join("、")}` : ""}${links.length ? `，${links.join("，")}` : ""}`, ...outline.map(todo => `  ${todo.status === "completed" ? "✓" : "○"} ${todo.title}`)].join("\n");
     }));
@@ -679,8 +690,11 @@ export class AssistantService implements StudioOperations {
     });
   }
 
-  private async workspace(accountId: string, productId: string): Promise<FactoryWorkspace> {
-    return this.deps.products.workspace({ creatorId: accountId, productId }, await this.deps.catalog.token(accountId));
+  /** The Product's workspace, for an Agent this account owns (a stranger's or unknown id is refused), with its BriefSpec as Studio's routes give it. */
+  private async workspace(accountId: string, productId: string, known?: CatalogAgent): Promise<FactoryWorkspace> {
+    const agent = known ?? await this.deps.catalog.get(accountId, productId);
+    if (!agent) throw Object.assign(new Error("没有找到这个 Agent"), { status: 404 });
+    return this.deps.products.workspace({ creatorId: accountId, productId, briefSpec: agent.briefSpec }, await this.deps.catalog.token(accountId));
   }
 
   private async sessionRuntime(task: AssistantTask): Promise<WorkbenchRuntime> {

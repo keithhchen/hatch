@@ -97,6 +97,8 @@ function scriptedWorkers(script: (context: Context, call: number) => WorkerStep)
 
 const userTexts = (context: Context) => context.messages.filter(message => message.role === "user").map(message => typeof message.content === "string" ? message.content : message.content.map(block => block.type === "text" ? block.text : "").join("")).filter(text => !text.startsWith("<system-reminder>"));
 
+const BRIEF_SPEC = { opening_questions: ["你在哪个城市？"] };
+
 async function setup(options: { model: Parameters<typeof scriptedModel>[0]; worker?: Parameters<typeof scriptedWorkers>[0]; legacy?: boolean; live?: unknown; ingest?: AssistantIngest; transcriber?: Parameters<typeof harness>[0] extends infer H ? H extends { transcriber?: infer T } ? T : never : never }) {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-assistant-"));
   const tasks = new MemoryTaskRepository();
@@ -129,10 +131,11 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
   const agentFactory = scriptedWorkers(options.worker ?? (() => ({ text: "完成" })));
   const productRuntime = new WorkbenchRuntime(productStore, { env: { HATCH_FACTORY_LLM_PROFILE: "kimi-k2.6" }, agentFactory, maxTurns: 6, withheldTools: async session => await withheldTools?.({ creatorId: ACCOUNT, productId: PRODUCT }, session) ?? [] });
   const workspace = { store: productStore, runtime: productRuntime } as unknown as FactoryWorkspace;
+  const scopes: Array<{ creatorId: string; productId: string; briefSpec?: unknown }> = [];
   let opened: ((scope: { creatorId: string; productId: string }, workspace: FactoryWorkspace) => void) | undefined;
   const catalog: AgentCatalog = {
     list: async () => [{ productId: PRODUCT, name: "选址顾问", promise: "帮餐厅老板选址", status: "published" }],
-    get: async (_account, productId) => productId === PRODUCT ? { productId, name: "选址顾问", promise: "帮餐厅老板选址", status: "published" } : undefined,
+    get: async (account, productId) => account === ACCOUNT && productId === PRODUCT ? { productId, name: "选址顾问", promise: "帮餐厅老板选址", status: "published", briefSpec: BRIEF_SPEC } : undefined,
     create: async () => { throw new Error("unused"); },
     apply: async (_account, _product, change) => { applied.push(change); },
     live: async () => options.live ?? ({ is_live: false, pending_changes: [] }),
@@ -141,7 +144,7 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
   const legacy = new FileWorkbenchBackend(path.join(root, "assistant"));
   const assistant = new AssistantService({
     tasks, reach, catalog, channels, state, deliveries,
-    products: { workspace: async () => { opened?.({ creatorId: ACCOUNT, productId: PRODUCT }, workspace); return workspace; }, attachAssistant: hooks => { opened = hooks.opened; withheldTools = hooks.withheldTools; } },
+    products: { workspace: async scope => { scopes.push(scope); opened?.({ creatorId: ACCOUNT, productId: PRODUCT }, workspace); return workspace; }, attachAssistant: hooks => { opened = hooks.opened; withheldTools = hooks.withheldTools; } },
     backend: () => legacy,
     exclusive: async (_name, fn) => fn(),
     search: { search: async () => { throw new Error("no web search in tests"); } },
@@ -186,7 +189,7 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
   const say = (text: string, id = `m-${Math.random().toString(36).slice(2)}`) => chat.say(ACCOUNT, { id, parts: [{ type: "text", text }], origin: { source: "web", client: { client: "web" } } });
   const idle = async () => { await sleep(30); await chat.idle(ACCOUNT, 20_000); await sleep(30); };
   return {
-    root, tasks, state, deliveries, pushed, notices, log, applied, telegramCalls, telegramUpdate, assistant, chat, target, model, productStore, productRuntime, say, idle, legacy, store, kit, tools, chatAssets, materials,
+    root, scopes, tasks, state, deliveries, pushed, notices, log, applied, telegramCalls, telegramUpdate, assistant, chat, target, model, productStore, productRuntime, say, idle, legacy, store, kit, tools, chatAssets, materials,
     setReachable: (value: boolean) => { reachable = value; },
     failPushes: (count: number) => { pushFailures = count; },
     close: async () => { await assistant.close(); await chat.close(); await store.close(); await repository.close(); await productRuntime.close(); await rm(root, { recursive: true, force: true, maxRetries: 5 }); },
@@ -363,7 +366,7 @@ test("A Telegram document is an attachment of the conversation; starting work co
     assert.equal(lines[0]!.attachments?.[0]?.name, "notes.md");
     await send(2, 11, "other.md");
     await env.idle();
-    await env.assistant.dispatch(ACCOUNT, "build", PRODUCT, "更新", { source: "web" });
+    await env.assistant.dispatch(ACCOUNT, "evaluate", PRODUCT, "更新", { source: "web" });
     const manual = await env.productStore.listManualFiles();
     assert.equal(manual.length, 1, "the file nobody added did not appear");
     assert.match(manual[0]!.path, /^input\/manual\/[0-9a-f]{8}-notes\.md\.md$/);
@@ -923,5 +926,43 @@ test("One key is one message whichever way it arrives: the page and the API shar
     await env.idle();
     assert.equal(retried.message.id, "key-2");
     assert.ok((await env.chat.lines(ACCOUNT)).some(line => line.id === "key-2" && line.text === "再来一次"), "it was really sent");
+  } finally { await env.close(); }
+});
+
+// Studio's HTTP routes and the Assistant call the same services. These are the rules the Assistant's own path enforces, whatever the tool layer in front of it does.
+test("A build is refused by the service until the interview outline is all ticked, whoever asks", async () => {
+  const env = await setup({ model: () => ({ text: "好" }) });
+  try {
+    await assert.rejects(env.assistant.dispatch(ACCOUNT, "build", PRODUCT, "构建", { source: "web" }), /还没有访谈大纲/);
+    await env.productStore.update((await env.productStore.create("voice")).id, session => { session.todos = [{ title: "底线", status: "pending" }]; });
+    await assert.rejects(env.assistant.dispatch(ACCOUNT, "build", PRODUCT, "构建", { source: "web" }), /还有没聊完的：底线/);
+    assert.equal((await env.productStore.list()).some(session => session.role === "generation"), false, "no builder session was made");
+    assert.deepEqual(await env.tasks.open(ACCOUNT), []);
+  } finally { await env.close(); }
+});
+
+test("The Assistant touches only Agents the account owns: an unknown or another account's id changes nothing", async () => {
+  const { submitted, ingest } = ingestRecorder();
+  const env = await setup({ ingest, model: () => ({ text: "好" }) });
+  try {
+    const STRANGER = "33333333-3333-4333-8333-333333333333";
+    const refused = /没有找到这个 Agent/;
+    await assert.rejects(env.assistant.tickOutline(ACCOUNT, STRANGER, "x"), refused);
+    await assert.rejects(env.assistant.addToAgent(ACCOUNT, STRANGER, { files: [], links: ["https://example.com/a"] }), refused);
+    await assert.rejects(env.assistant.dispatch(ACCOUNT, "interview", STRANGER, "聊", { source: "web" }), refused);
+    await assert.rejects(env.assistant.propose(ACCOUNT, STRANGER, { name: "改名" }, { source: "web" }), refused);
+    await assert.rejects(env.assistant.tickOutline("44444444-4444-4444-8444-444444444444", PRODUCT, "x"), refused, "the right id under another account");
+    assert.deepEqual(submitted, [], "nothing was sent to Ingest");
+    assert.deepEqual(env.scopes, [], "no workspace was opened");
+    assert.deepEqual(await env.productStore.list(), []);
+    assert.deepEqual(await env.tasks.open(ACCOUNT), []);
+  } finally { await env.close(); }
+});
+
+test("A Product workspace the Assistant opens carries the Agent's BriefSpec, as Studio's routes give it", async () => {
+  const env = await setup({ model: () => ({ text: "好" }) });
+  try {
+    await assert.rejects(env.assistant.tickOutline(ACCOUNT, PRODUCT, "x"), /大纲里没有这一项/);
+    assert.deepEqual(env.scopes, [{ creatorId: ACCOUNT, productId: PRODUCT, briefSpec: BRIEF_SPEC }]);
   } finally { await env.close(); }
 });
