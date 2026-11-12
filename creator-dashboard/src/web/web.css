@@ -178,8 +178,68 @@ button { font: inherit; color: inherit; }
 .contact-inner { padding: 32px; }
 .contact-heading { display: flex; justify-content: space-between; align-items: center; }
 .contact-close { border: 0; background: none; font-size: 28px; cursor: pointer; }
-.apply-body { margin: -8px 0 20px; font-size: 16px; line-height: 1.6; color: var(--body); }
-.contact-heading .pill { margin: 0; }
+/* Try it for free: three steps, each a small loose scene of the product in two tones (yolk and ink), pieces tilted,
+   overlapping and spilling past their panel. */
+.trial-dialog { width: min(920px, calc(100vw - 32px)); }
+.trial-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; margin: 8px 0 30px; padding: 0; list-style: none; }
+.trial-steps li { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.trial-steps strong { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 17px; line-height: 1.35; }
+.trial-steps p { margin: 0; font-size: 14px; line-height: 1.55; color: var(--muted); }
+.trial-step__number { display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--ink); color: var(--paper); font-size: 12px; font-weight: 800; }
+.trial-cta { display: inline-flex; text-decoration: none; }
+
+.tm { position: relative; height: 176px; border-radius: 22px 30px 18px 34px; background: var(--panel); font-size: 11px; line-height: 1.35; }
+.tm > *:not(.tm-blob) { position: absolute; animation: tm-in 420ms ease both; }
+@keyframes tm-in { from { opacity: 0; translate: 0 10px; } to { opacity: 1; translate: 0 0; } }
+.tm-blob { position: absolute; inset: auto; border-radius: 58% 42% 63% 37% / 46% 58% 42% 54%; background: var(--yolk); opacity: 0.9; }
+.tm-b { margin: 0; padding: 7px 10px; border-radius: 13px; max-width: 78%; }
+.tm-b.in { background: var(--card); color: var(--ink); border-bottom-left-radius: 4px; box-shadow: 0 6px 16px rgba(23, 21, 15, 0.08); }
+.tm-b.out { background: var(--ink); color: var(--paper); border-bottom-right-radius: 4px; }
+.tm .wave { height: 14px; }
+.tm .wave i { width: 2px; }
+.tm-b.out .wave i { background: var(--yolk); }
+
+/* 1 · material: a document, a link, a voice note and a chat, dropped in a loose pile */
+.tm-material .tm-blob { width: 120px; height: 104px; right: -14px; top: -16px; }
+.tm-doc { left: 14px; top: 16px; width: 112px; padding: 10px; border-radius: 12px; background: var(--card); box-shadow: 0 10px 24px rgba(23, 21, 15, 0.12); transform: rotate(-5deg); animation-delay: 0ms; }
+.tm-doc b { display: inline-block; padding: 1px 6px; border-radius: 6px; background: var(--ink); color: var(--yolk); font-size: 10px; }
+.tm-doc span { display: block; margin: 6px 0; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tm-doc i { display: block; height: 5px; margin-top: 5px; border-radius: 3px; background: var(--rule); }
+.tm-doc i:nth-of-type(2) { width: 82%; } .tm-doc i:nth-of-type(3) { width: 58%; }
+.tm-pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; border-radius: 999px; font-weight: 700; white-space: nowrap; box-shadow: 0 8px 18px rgba(23, 21, 15, 0.1); }
+.tm-link { right: -12px; top: 30px; background: var(--ink); color: var(--paper); transform: rotate(4deg); animation-delay: 140ms; }
+.tm-voice { left: 46px; bottom: 18px; background: var(--card); transform: rotate(-2deg); animation-delay: 280ms; }
+.tm-voice small { color: var(--muted); font-weight: 600; }
+.tm-chat { right: 10px; bottom: -14px; display: flex; flex-direction: column; gap: 4px; width: 112px; padding: 8px; border-radius: 14px; background: var(--yolk-soft); box-shadow: 0 10px 22px rgba(23, 21, 15, 0.12); transform: rotate(3deg); animation-delay: 420ms; }
+.tm-chat .tm-b { max-width: 100%; padding: 5px 8px; font-size: 10px; }
+.tm-chat .tm-b.out { align-self: flex-end; }
+
+/* 2 · interview: a question that digs, a spoken answer, and the outline ticking over */
+.tm-interview { background: var(--yolk-soft); border-radius: 30px 18px 34px 22px; }
+.tm-interview .tm-blob { width: 58px; height: 52px; left: -12px; bottom: -14px; background: var(--ink); opacity: 1; border-radius: 44% 56% 38% 62% / 55% 41% 59% 45%; }
+.tm-ask { left: 12px; top: 14px; max-width: 70%; font-weight: 600; transform: rotate(-2deg); }
+.tm-reply { right: 14px; top: 64px; display: flex; align-items: center; padding: 9px 14px; transform: rotate(2deg); animation-delay: 420ms; }
+.tm-outline { right: -14px; bottom: -16px; display: flex; flex-direction: column; gap: 4px; width: 128px; padding: 10px 10px 10px 12px; border-radius: 16px 10px 18px 12px; background: var(--card); box-shadow: 0 12px 26px rgba(23, 21, 15, 0.14); transform: rotate(-3deg); animation-delay: 760ms; }
+.tm-outline div { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.tm-outline b { display: grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--rule); font-size: 9px; color: var(--paper); }
+.tm-outline b.done { border-color: var(--ink); background: var(--ink); color: var(--yolk); }
+.tm-noted { position: absolute; top: -10px; right: 12px; padding: 2px 8px; border-radius: 999px; background: var(--yolk); color: var(--on-yolk); font-size: 10px; font-weight: 800; }
+
+/* 3 · the link: a share card with its address, and the AI already answering someone */
+.tm-link-card .tm-blob { width: 140px; height: 70px; left: -16px; top: -14px; border-radius: 62% 38% 54% 46% / 60% 52% 48% 40%; }
+.tm-share { left: 12px; right: 18px; top: 22px; padding: 10px 12px; border-radius: 16px; background: var(--ink); color: var(--paper); box-shadow: 0 14px 28px rgba(23, 21, 15, 0.22); transform: rotate(-2.5deg); }
+.tm-share-head { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.tm-avatar { width: 22px; height: 22px; border-radius: 50% 45% 55% 50%; background: var(--yolk); }
+.tm-url { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; padding: 5px 5px 5px 9px; border-radius: 999px; background: rgba(250, 248, 242, 0.12); }
+.tm-url span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--yolk); font-weight: 700; }
+.tm-url em { flex: none; padding: 3px 9px; border-radius: 999px; background: var(--yolk); color: var(--on-yolk); font-style: normal; font-weight: 800; }
+.tm-q { right: -10px; top: 104px; transform: rotate(3deg); animation-delay: 380ms; }
+.tm-a { left: 16px; bottom: -12px; transform: rotate(-1.5deg); animation-delay: 700ms; }
+
+@media (max-width: 720px) {
+  .trial-steps { grid-template-columns: 1fr; gap: 26px; }
+  .tm { height: 160px; margin: 0 10px; }
+}
 .contact-inner h3 { margin: 12px 0 20px; font-size: 32px; font-weight: 900; }
 .contact-form { display: grid; gap: 14px; }
 .contact-form label { display: grid; gap: 6px; font-size: 14px; color: var(--muted); }

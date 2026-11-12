@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Link2 } from "lucide-react";
 import { LOCALES, useLocale } from "../locale.jsx";
 import { landingCopy, type Lang, type LandingCopy, type Scenario } from "./landingCopy";
 
@@ -656,45 +657,58 @@ function Stories({ t }: { t: LandingCopy }) {
   );
 }
 
-function ApplyDialog({ t, lang, open, onClose }: { t: LandingCopy; lang: Lang; open: boolean; onClose: () => void }) {
+/** Three small scenes, one per step: loose, overlapping pieces of the product in yolk and ink. */
+function TrialScene({ index, m }: { index: number; m: LandingCopy["trial"]["mini"] }) {
+  const wave = <span className="wave">{Array.from({ length: 12 }, (_, i) => <i key={i} style={{ animationDelay: `${i * 70}ms` }} />)}</span>;
+  if (index === 0) return (
+    <div className="tm tm-material" aria-hidden="true">
+      <div className="tm-blob" />
+      <div className="tm-doc"><b>PDF</b><span>{m.pdf}</span><i /><i /><i /></div>
+      <div className="tm-pill tm-link"><Link2 size={14} />{m.link}</div>
+      <div className="tm-pill tm-voice">{wave}<small>{m.voice}</small></div>
+      <div className="tm-chat"><p className="tm-b in">{m.chatA}</p><p className="tm-b out">{m.chatB}</p></div>
+    </div>
+  );
+  if (index === 1) return (
+    <div className="tm tm-interview" aria-hidden="true">
+      <div className="tm-blob" />
+      <p className="tm-b in tm-ask">{m.ask}</p>
+      <div className="tm-b out tm-reply">{wave}</div>
+      <div className="tm-outline">
+        <span className="tm-noted">{m.noted}</span>
+        {m.outline.map((item, i) => <div key={item}><b className={i < 2 ? "done" : ""}>{i < 2 ? "✓" : ""}</b>{item}</div>)}
+      </div>
+    </div>
+  );
+  return (
+    <div className="tm tm-link-card" aria-hidden="true">
+      <div className="tm-blob" />
+      <div className="tm-share">
+        <div className="tm-share-head"><span className="tm-avatar" /><b>{m.name}</b></div>
+        <div className="tm-url"><span>{m.url}</span><em>{m.copy}</em></div>
+      </div>
+      <p className="tm-b out tm-q">{m.userQ}</p>
+      <p className="tm-b in tm-a">{m.aiA}</p>
+    </div>
+  );
+}
+
+function TrialDialog({ t, open, onClose }: { t: LandingCopy; open: boolean; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
-  const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
-  const a = t.apply;
+  const a = t.trial;
 
   useEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
-    if (open && !dialog.open) {
-      setStatus("idle");
-      dialog.showModal();
-    }
+    if (open && !dialog.open) dialog.showModal();
     if (!open && dialog.open) dialog.close();
   }, [open]);
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const data = new FormData(form);
-    setStatus("submitting");
-    try {
-      const response = await fetch("/api/apply", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: data.get("url"), contact: data.get("contact"), website: data.get("website"), language: lang }),
-      });
-      if (!response.ok) throw new Error("Application submission failed");
-      form.reset();
-      setStatus("success");
-    } catch {
-      setStatus("error");
-    }
-  }
-
   return (
     <dialog
-      className="contact-dialog"
+      className="contact-dialog trial-dialog"
       ref={ref}
-      aria-labelledby="apply-dialog-title"
+      aria-labelledby="trial-dialog-title"
       onClose={onClose}
       onClick={(event) => {
         if (event.target === event.currentTarget) event.currentTarget.close();
@@ -705,35 +719,22 @@ function ApplyDialog({ t, lang, open, onClose }: { t: LandingCopy; lang: Lang; o
           <span />
           <button className="contact-close" type="button" onClick={() => ref.current?.close()} aria-label={t.contactClose}>×</button>
         </div>
-        <h3 id="apply-dialog-title">{status === "success" ? a.doneTitle : a.title}</h3>
-        {status === "success" ? (
-          <>
-            <p className="apply-body">{a.doneBody}</p>
-            <button className="btn btn-ink" type="button" onClick={() => ref.current?.close()}>{a.close}</button>
-          </>
-        ) : (
-          <>
-            <p className="apply-body">{a.body}</p>
-            <form className="contact-form" onSubmit={submit}>
-              <label>
-                <span>{a.url}</span>
-                <input name="url" required maxLength={500} placeholder={a.urlHint} autoComplete="url" />
-              </label>
-              <label>
-                <span>{a.contact}</span>
-                <input name="contact" required minLength={3} maxLength={200} placeholder={a.contactHint} />
-              </label>
-              <input className="contact-honeypot" name="website" type="text" tabIndex={-1} autoComplete="off" aria-hidden="true" />
-              <div className="contact-actions">
-                <button className="btn btn-yolk" type="submit" disabled={status === "submitting"}>
-                  {status === "submitting" ? a.sending : a.submit}
-                  <span className="cta-arrow" aria-hidden="true">→</span>
-                </button>
-                <p className={`contact-status ${status}`} aria-live="polite">{status === "error" ? a.error : ""}</p>
-              </div>
-            </form>
-          </>
-        )}
+        <h3 id="trial-dialog-title">{a.title}</h3>
+        <ol className="trial-steps">
+          {a.steps.map((step, index) => {
+            return (
+              <li key={step.title}>
+                <TrialScene index={index} m={a.mini} />
+                <strong><span className="trial-step__number" aria-hidden="true">{index + 1}</span>{step.title}</strong>
+                {step.body ? <p>{step.body}</p> : null}
+              </li>
+            );
+          })}
+        </ol>
+        <a className="btn btn-yolk trial-cta" href="/studio">
+          {a.cta}
+          <span className="cta-arrow" aria-hidden="true">→</span>
+        </a>
       </div>
     </dialog>
   );
@@ -747,7 +748,7 @@ export default function HatchPage() {
   const s = t.scenarios[field];
   const [contactStatus, setContactStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
   const [isContactDialogOpen, setIsContactDialogOpen] = useState(false);
-  const [isApplyOpen, setIsApplyOpen] = useState(false);
+  const [isTrialOpen, setIsTrialOpen] = useState(false);
   const contactDialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -797,7 +798,7 @@ export default function HatchPage() {
   }
 
   const tryButton = (
-    <button className="btn btn-yolk" type="button" onClick={() => setIsApplyOpen(true)}>
+    <button className="btn btn-yolk" type="button" onClick={() => setIsTrialOpen(true)}>
       {t.tryCta}
       <span className="cta-arrow" aria-hidden="true">→</span>
     </button>
@@ -817,7 +818,7 @@ export default function HatchPage() {
             {LOCALES.map((l: Lang) => <option key={l} value={l}>{LANG_NAMES[l]}</option>)}
           </select></label>
           <a className="nav-login" href="/studio">{t.footer.studio}</a>
-          <button className="btn btn-ink btn-sm" type="button" onClick={() => setIsApplyOpen(true)}>{t.nav.try}</button>
+          <button className="btn btn-ink btn-sm" type="button" onClick={() => setIsTrialOpen(true)}>{t.nav.try}</button>
         </div>
       </header>
 
@@ -896,7 +897,7 @@ export default function HatchPage() {
         {tryButton}
       </section>
 
-      <ApplyDialog t={t} lang={lang} open={isApplyOpen} onClose={() => setIsApplyOpen(false)} />
+      <TrialDialog t={t} open={isTrialOpen} onClose={() => setIsTrialOpen(false)} />
 
       <dialog
         className="contact-dialog"
