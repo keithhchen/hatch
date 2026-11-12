@@ -14,7 +14,9 @@
 }
 
 (hatch_routes) {
-    encode gzip
+    # Not the Responses API: its server-sent events must reach the client as they are written, not once a gzip buffer fills.
+    @compressible not path /responses/v1/*
+    encode @compressible gzip
 
     # One correlation id per request: keep the caller's, else mint one. Every backend reads and echoes it.
     @no_request_id not header X-Request-Id *
@@ -59,6 +61,12 @@
     # that do not use the public /v1 compatibility prefix.
     @runtime_native path /runtime*
     handle @runtime_native {
+        import upstream runtime 8400
+    }
+
+    # The Responses API (OpenAI-compatible: base URL https://<host>/responses/v1), owned by Runtime.
+    @responses_api path /responses/v1 /responses/v1/*
+    handle @responses_api {
         import upstream runtime 8400
     }
 

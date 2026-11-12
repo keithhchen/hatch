@@ -79,6 +79,7 @@ import {
 import type { ChatEdge } from "./chat/turnSubmission.js";
 import { bearerToken, handleHttpRequestFailure, httpDeadlineMs, writeJson } from "./http/httpSupport.js";
 import { handleHttpRequest, type RuntimeReadiness } from "./http/runtimeRouter.js";
+import { ResponsesHttpApi } from "./responses/router.js";
 import { handleRuntimeSocket } from "./ws/runtimeSocket.js";
 
 // The Runtime's public surface stays here: callers import these from index.js.
@@ -177,6 +178,8 @@ export type RuntimeServerOptions = {
   httpRequestTimeoutMs?: number;
   /** Maximum serialized JSON response size for discovery and history. */
   maxHttpResponseBytes?: number;
+  /** Test seams of the Responses API: how URLs are fetched, how long a request is held, the keep-alive interval. */
+  responsesApi?: Pick<ConstructorParameters<typeof ResponsesHttpApi>[0], "urls" | "holdMs" | "keepAliveMs">;
 };
 
 /**
@@ -528,6 +531,11 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   };
   const gateway = chatGatewayFor(options, chat, scopes, conversationRepository, conversationStore, agentCorpusResolver, parts, chatAssets);
   edge.serviceApi = new ChatServiceApi({ token: options.chatServiceToken, gateway });
+  const responses = new ResponsesHttpApi({
+    repository: conversationRepository, store: conversationStore, edge,
+    corpora: agentCorpusResolver, identities: authIdentityResolver, ready: repositoryReady,
+    ...(options.responsesApi ?? {})
+  });
 
   const inflight = new InflightResponses();
   const server = http.createServer(observed((req, res) => {
@@ -564,6 +572,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       conversationRepository,
       repositoryReady,
       edge,
+      responses,
       readiness,
       allowedOrigins
     }, requestAbortController.signal);

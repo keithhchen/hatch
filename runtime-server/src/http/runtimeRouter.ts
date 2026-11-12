@@ -13,6 +13,7 @@ import { ConversationError as ConversationHttpError } from "../conversations/con
 import type { ConversationRepository } from "../conversationRepository.js";
 import { EntitlementError, type AuthIdentity, type AuthIdentityResolver, type EntitlementResolver } from "../entitlements.js";
 import type { RuntimeStore } from "../store.js";
+import { ResponsesHttpApi } from "../responses/router.js";
 import { handleConversationHttpRequest } from "./conversationRoutes.js";
 import {
   bearerToken,
@@ -43,6 +44,8 @@ export type RuntimeHttpDeps = {
   conversationRepository?: ConversationRepository;
   repositoryReady?: Promise<unknown>;
   edge?: ChatEdge;
+  /** The Responses API (`/responses/v1`), an OpenAI-shaped adapter over the same chat domain. */
+  responses?: ResponsesHttpApi;
   readiness?: RuntimeReadiness;
   allowedOrigins: readonly string[];
 };
@@ -55,7 +58,7 @@ export async function handleHttpRequest(
 ): Promise<void> {
   const {
     entitlementResolver, agentCorpusResolver, conversationStore, assetStore, authIdentityResolver,
-    legacyHmacAuth, maxHttpResponseBytes, conversationRepository, repositoryReady, edge, readiness, allowedOrigins
+    legacyHmacAuth, maxHttpResponseBytes, conversationRepository, repositoryReady, edge, readiness, allowedOrigins, responses
   } = deps;
   setCorsHeaders(res);
   if (req.method === "OPTIONS") {
@@ -122,6 +125,15 @@ export async function handleHttpRequest(
     } catch (error) {
       writeConversationHttpError(req, res, error);
     }
+    return;
+  }
+
+  if (ResponsesHttpApi.handles(url)) {
+    if (!responses) {
+      writeJson(res, 503, { error: { message: "The Responses API is unavailable.", type: "service_unavailable", param: null, code: "service_unavailable" } });
+      return;
+    }
+    await responses.handle(req, res, url, signal);
     return;
   }
 

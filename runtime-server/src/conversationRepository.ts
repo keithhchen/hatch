@@ -2251,6 +2251,9 @@ function boundedLimit(value: number | undefined): number {
 
 type ListCursor = { createdAt: string; id: string };
 
+/** The list cursor that continues after this conversation (millisecond precision, as the record carries it). */
+export const listCursorAfter = (conversation: Pick<ConversationRecord, "createdAt" | "id">): string => encodeListCursor(conversation);
+
 function encodeListCursor(conversation: ListCursor): string {
   return Buffer.from(JSON.stringify({ createdAt: conversation.createdAt, id: conversation.id }), "utf8").toString("base64url");
 }
