@@ -68,11 +68,6 @@
         import upstream runtime 8400
     }
 
-    @runtime_history path /conversations/*
-    handle @runtime_history {
-        import upstream runtime 8400
-    }
-
     # Expose only the Registry readiness check. Never bridge a broad public
     # prefix to Registry command routes.
     @registry_health path /health/registry
