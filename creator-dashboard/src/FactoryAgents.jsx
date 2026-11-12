@@ -1,25 +1,50 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Alert, Accordion, AccordionDetails, AccordionSummary, Box, Button, Chip,
-  Checkbox, FormControl, FormControlLabel, FormGroup, FormLabel,
-  CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, LinearProgress,
-  IconButton, List, ListItemButton, ListItemIcon, ListItemText,
-  Paper, Radio, RadioGroup, Skeleton, Snackbar, Stack, TextField, Toolbar, Tooltip,
+  Alert,
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
+  Box,
+  Button,
+  Chip,
+  Checkbox,
+  FormControl,
+  FormControlLabel,
+  FormGroup,
+  FormLabel,
+  CircularProgress,
+  IconButton,
+  Paper,
+  Radio,
+  RadioGroup,
+  Skeleton,
+  Snackbar,
+  Stack,
+  TextField,
   Typography
 } from "@mui/material";
 import {
-  ArrowForward, AutoAwesome, ChevronRight, DeleteOutlineOutlined,
-  Description, Download, ExpandMore, FolderOpen, Lock,
-  PlayArrow, Send, Stop, UploadFile
+  ArrowForward,
+  AutoAwesome,
+  ExpandMore,
+  Lock,
+  PlayArrow,
+  Send,
+  Stop,
+  UploadFile
 } from "@mui/icons-material";
 import { createTheme, ThemeProvider } from "@mui/material/styles";
 import { ChatComposer, ChatComposerTextArea, ChatComposerToolbar } from "@mui/x-chat";
 import { ChatProvider } from "@mui/x-chat/headless";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { hatchMuiThemeOptions } from "@hatch/ui";
+import { Button as HatchButton, Dialog, DialogContent, IconButton as HatchIconButton, InlineAlert, SegmentedControl, Textarea, hatchMuiThemeOptions } from "@hatch/ui";
+import { ArrowRight, ChevronLeft as PrevIcon, ChevronRight as NextIcon, Download as DownloadIcon, Plus, Send as SendIcon } from "lucide-react";
 import { MicButton, RecordingActions, RecordingWave, canRecord, useVoiceInput } from "@hatch/chat/react";
 import { dashboardRequest } from "./data.js";
+import { FileList } from "./FileList.jsx";
+import { createIngestPort, ingestFile } from "./ingestPort.js";
+import { neighbour, orderedPaths } from "./fileListModel.js";
 import { browserDictation } from "./webChatClient.js";
 import { chatEntries, describeToolCall, groupToolEntries, toolDetailRows, toolResultRows } from "./factoryMessages.js";
 import { subscribeFactoryEvents } from "./factoryEvents.js";
@@ -30,6 +55,7 @@ import { ADVANCED_STEP, STUDIO_PATH, studioNextStep, studioPathStates, studioSte
 import "./factoryAgents.css";
 
 const api = (route, options = {}) => dashboardRequest(route, { ...options, body: options.body === undefined ? undefined : JSON.stringify(options.body) });
+const textBase64 = text => { const bytes = new TextEncoder().encode(text); let binary = ""; for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192)); return btoa(binary); };
 const factoryRoot = productId => `/v1/creator/products/${encodeURIComponent(productId)}/factory-agents`;
 const endpoint = (root, id, action = "") => `${root}/sessions/${id}${action ? `/${action}` : ""}`;
 // A section URL without a page opens the first task of that step.
@@ -64,14 +90,25 @@ export function FactoryAgents({ productId, section, agent, navigate, locale = "e
   const goToFactory = (nextStage, nextAgent) => navigate(creatorFactoryPath(productId, nextStage, nextAgent));
   const goToStep = step => step.id === "ship" ? navigate(creatorProductPath(productId, "publish")) : goToFactory(...step.items[0]);
   const applyNavigation = value => { setSessions(value.sessions || []); setAgents(value.agents || []); setManualFiles(value.manualFiles || []); };
-  const refreshConfig = () => api(`${root}/config`).then(value => { setConfig(value); if (value.agents) setAgents(value.agents); }).catch(e => setError(e.message));
+  const refreshConfig = () => api(`${root}/config`).then(value => { setConfig(value); if (value.agents) setAgents(value.agents); if (value.manualFiles) setManualFiles(value.manualFiles); }).catch(e => setError(e.message));
   const refreshProduct = () => api(`/v1/creator/products/${encodeURIComponent(productId)}`).then(value => setProduct(value.product ?? value)).catch(e => setError(e.message));
   useEffect(() => { refreshConfig(); refreshProduct(); return subscribeFactoryEvents({ url: `${root}/events`, onMessage: event => { const value = JSON.parse(event.data); if (value.type === "snapshot") applyNavigation(value); }, onError: () => setError(t("workspaceConnectionLost")), onOpen: () => { setError(""); refreshConfig(); refreshProduct(); } }); }, [productId, root, t]);
   const agentEntry = role => agents.find(item => item.role === role);
   const agentName = role => localizeAgentText(agentEntry(role)?.name, locale);
   const agentSession = role => sessions.filter(item => item.role === role).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
   const openAgent = async role => { try { if (role === "uploads") { goToFactory("sources", "uploads"); return; } const targetStage = factorySectionForAgent(role); if (!targetStage) throw new Error(t("agentStateUnavailable")); const entry = agentEntry(role); if (!entry) throw new Error(t("agentStateUnavailable")); if (entry.state === "locked") { goToFactory(targetStage, role); return; } if (!agentSession(role)) await api(`${root}/sessions`, { method: "POST", body: { role } }); goToFactory(targetStage, role); } catch (e) { setError(factoryError(e, t, agentName)); } };
-  const uploadProjectFiles = async files => { const accepted = /\.(txt|md|docx|pptx|xlsx|pdf)$/i; const items = files.map(file => ({ id: `${file.name}-${file.lastModified}-${Math.random()}`, file, path: `input/manual/${file.name}`, status: accepted.test(file.name) && file.size <= 20 * 1024 * 1024 ? "uploading" : "failed", error: accepted.test(file.name) ? file.size > 20 * 1024 * 1024 ? t("fileTooLarge", file.name) : "" : t("unsupportedFileType", file.name) })); setUploadItems(previous => [...items, ...previous]); let transport = agentSession("research"); try { if (!transport) transport = await api(`${root}/sessions`, { method: "POST", body: { role: "research" } }); } catch (e) { setUploadItems(previous => previous.map(item => item.status === "uploading" ? { ...item, status: "failed", error: e.message } : item)); return; } await Promise.all(items.filter(item => item.status === "uploading").map(async item => { try { const bytes = new Uint8Array(await item.file.arrayBuffer()); let binary = ""; for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192)); const record = await api(endpoint(root, transport.id, "files"), { method: "POST", body: { path: item.path, base64: btoa(binary), mimeType: item.file.type || undefined } }); setUploadItems(previous => previous.map(current => current.id === item.id ? { ...current, path: record.path, status: "completed" } : current)); } catch (e) { setUploadItems(previous => previous.map(current => current.id === item.id ? { ...current, status: "failed", error: e.message } : current)); } })); };
+  const ingest = useMemo(() => createIngestPort(dashboardRequest), []);
+  const patchUpload = (id, change) => setUploadItems(previous => previous.map(item => item.id === id ? { ...item, ...change } : item));
+  const uploadProjectFiles = files => Promise.all(files.map(file => {
+    const id = `${file.name}-${file.lastModified}-${Math.random()}`;
+    setUploadItems(previous => [{ id, path: `input/manual/${file.name}`, status: "uploading" }, ...previous]);
+    return ingestFile(ingest, productId, file, state => { if (state.status !== "completed") { patchUpload(id, state); return; } setUploadItems(previous => previous.filter(item => item.id !== id)); refreshConfig(); });
+  }));
+  const researchTransport = async () => agentSession("research") ?? await api(`${root}/sessions`, { method: "POST", body: { role: "research" } });
+  const [preview, setPreview] = useState(null);
+  const previewFile = async path => { try { setPreview({ id: (await researchTransport()).id, path }); } catch (e) { setError(factoryError(e, t, agentName)); } };
+  const saveManualText = async text => { const transport = await researchTransport(); await api(endpoint(root, transport.id, "files"), { method: "POST", body: { path: `input/manual/note-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}.md`, base64: textBase64(text) } }); await refreshConfig(); };
+  const dismissUpload = id => setUploadItems(previous => previous.filter(item => item.id !== id));
   const deleteManualFile = async record => { const transport = agentSession("research"); if (!transport) return; try { await api(endpoint(root, transport.id, "files"), { method: "DELETE", body: { path: record.path } }); setManualFiles(previous => previous.filter(file => file.path !== record.path)); setUploadItems(previous => previous.filter(item => item.path !== record.path)); } catch (e) { setError(factoryError(e, t, agentName)); } };
   const states = studioPathStates(agents, product, manualFiles);
   const currentStep = studioStepForRoute(stage, selected);
@@ -84,9 +121,10 @@ export function FactoryAgents({ productId, section, agent, navigate, locale = "e
       <FactoryStepper states={states} current={currentStep} onStep={goToStep} t={t} />
     </nav>
     <ErrorNotice error={error} onClose={() => setError("")} />
+    {selected === "uploads" && preview && manualFiles.some(file => file.path === preview.path) ? <FileViewer key={preview.path} root={root} running={false} id={preview.id} record={manualFiles.find(file => file.path === preview.path)} siblings={manualFiles} onOpenFile={path => setPreview({ ...preview, path })} onClose={() => setPreview(null)} t={t} perform={async fn => { try { await fn(); refreshConfig(); } catch (e) { setError(factoryError(e, t, agentName)); } }} /> : null}
     {step ? <div className="factory-step">
       {step.items.length > 1 ? <nav className="factory-tasks" aria-label={t("factoryTasksLabel")}>{step.items.map(([itemSection, page]) => <button key={page} type="button" className={page === selected ? "is-active" : ""} aria-current={page === selected ? "page" : undefined} onClick={() => goToFactory(itemSection, page)}>{page === "uploads" ? t("uploadSources") : agentName(page) || t("loadingAgentState")}{page !== "uploads" && agentEntry(page) ? <span className={`factory-dot is-${agentEntry(page).state}`} aria-hidden="true" /> : null}</button>)}</nav> : null}
-      {selected === "uploads" ? <SourceUploadWorkspace manualFiles={manualFiles} uploadItems={uploadItems} importPicker={importPicker} uploadProjectFiles={uploadProjectFiles} deleteManualFile={deleteManualFile} onOpenAgent={openAgent} t={t} /> : selectedSession ? <Workspace key={selectedSession.id} root={root} id={selectedSession.id} entry={selectedEntry} agents={agents} config={config} onChanged={() => undefined} onOpenAgent={openAgent} agentName={agentName} t={t} /> : <AgentIntro entry={selectedEntry} agents={agents} onOpenAgent={openAgent} agentName={agentName} locale={locale} t={t} />}
+      {selected === "uploads" ? <SourceUploadWorkspace manualFiles={manualFiles} uploadItems={uploadItems} importPicker={importPicker} uploadProjectFiles={uploadProjectFiles} saveManualText={saveManualText} onOpenFile={previewFile} deleteManualFile={deleteManualFile} dismissUpload={dismissUpload} onOpenAgent={openAgent} t={t} /> : selectedSession ? <Workspace key={selectedSession.id} root={root} id={selectedSession.id} entry={selectedEntry} agents={agents} config={config} onChanged={() => undefined} onOpenAgent={openAgent} agentName={agentName} t={t} /> : <AgentIntro entry={selectedEntry} agents={agents} onOpenAgent={openAgent} agentName={agentName} locale={locale} t={t} />}
     </div> : <FactoryOverview product={product} states={states} agentEntry={agentEntry} agentName={agentName} goToStep={goToStep} t={t} />}
   </div></ThemeProvider>;
 }
@@ -127,22 +165,24 @@ function AgentIntro({ entry, agents, onOpenAgent, agentName, locale, t }) {
   </section>;
 }
 
-function SourceUploadWorkspace({ manualFiles, uploadItems, importPicker, uploadProjectFiles, deleteManualFile, onOpenAgent, t }) {
-  const [dragging, setDragging] = useState(false);
-  const pending = new Map((uploadItems || []).map(item => [item.path, item]));
-  const records = [...(manualFiles || [])];
-  for (const item of uploadItems || []) if (item.status !== "completed" || !records.some(record => record.path === item.path)) records.unshift({ path: item.path, uploadItem: item });
+function SourceUploadWorkspace({ onOpenFile, manualFiles, uploadItems, importPicker, uploadProjectFiles, saveManualText, deleteManualFile, dismissUpload, onOpenAgent, t }) {
+  const [dragging, setDragging] = useState(false); const [text, setText] = useState(""); const [saving, setSaving] = useState(false); const [textError, setTextError] = useState("");
+  const records = [...(uploadItems || []), ...(manualFiles || [])];
+  const saveText = async () => { setSaving(true); setTextError(""); try { await saveManualText(text); setText(""); } catch (e) { setTextError(e.message); } finally { setSaving(false); } };
+  const statusLabel = record => t({ uploading: "uploadProcessing", ingesting: "ingesting", failed: "uploadFailed", partial: "ingestPartial" }[record.status]);
   return <section className="factory-upload-page">
     <div className="factory-upload-intro"><h2>{t("uploadSources")}</h2><p>{t("factoryYouDoRole", "uploads")}</p></div>
     <button type="button" className={`factory-dropzone${dragging ? " is-dragging" : ""}`} onClick={() => importPicker.current?.click()} onDragOver={event => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={event => { event.preventDefault(); setDragging(false); uploadProjectFiles([...event.dataTransfer.files]); }}>
-      <UploadFile aria-hidden="true" /><strong>{t("factoryUploadDrop")}</strong><small>{t("factoryUploadTypes")}</small>
+      <UploadFile aria-hidden="true" /><strong>{t("factoryUploadDrop")}</strong>
     </button>
-    <input ref={importPicker} hidden type="file" accept=".txt,.md,.docx,.pdf,.pptx,.xlsx" multiple aria-label={t("uploadInputFiles")} onChange={event => { uploadProjectFiles([...event.target.files]); event.target.value = ""; }} />
-    <div className="factory-files web-card">
-      <div className="factory-files__head"><strong>{t("factoryUploadedTitle")}</strong><span>{t("fileCount", manualFiles?.length || 0)}</span></div>
-      {records.length ? <List dense disablePadding>{records.map(record => { const item = record.uploadItem || pending.get(record.path); const status = item?.status || "completed"; return <ListItemButton key={record.path} onClick={() => status === "completed" && onOpenAgent("research")}><ListItemIcon><Description fontSize="small" /></ListItemIcon><ListItemText primary={record.path.replace("input/manual/", "")} secondary={item?.error || t(status === "completed" ? "uploadComplete" : status === "failed" ? "uploadFailed" : "uploadProcessing")} primaryTypographyProps={{ noWrap: true }} /><Box sx={{ width: 110, ml: 2, display: "flex", justifyContent: "flex-end" }}>{status === "uploading" ? <LinearProgress sx={{ width: 90 }} /> : status === "completed" ? <IconButton size="small" aria-label={t("deleteFile")} onClick={event => { event.stopPropagation(); deleteManualFile(record); }}><DeleteOutlineOutlined fontSize="small" /></IconButton> : <Typography variant="caption" color="error.main">{t("uploadFailed")}</Typography>}</Box></ListItemButton>; })}</List> : <p className="factory-files__empty">{t("noFiles")}</p>}
+    <input ref={importPicker} hidden type="file" multiple aria-label={t("uploadInputFiles")} onChange={event => { uploadProjectFiles([...event.target.files]); event.target.value = ""; }} />
+    <div className="factory-upload-text">
+      <Textarea value={text} onChange={event => setText(event.target.value)} aria-label={t("manualTextLabel")} placeholder={t("manualTextLabel")} />
+      <HatchButton variant="secondary" size="small" loading={saving} disabled={!text.trim()} onClick={saveText}>{t("saveText")}</HatchButton>
+      {textError ? <InlineAlert tone="error">{textError}</InlineAlert> : null}
     </div>
-    <Button variant="outlined" endIcon={<ArrowForward />} onClick={() => onOpenAgent("voice")}>{t("factoryUploadNext")}</Button>
+    <FileList title={t("factoryUploadedTitle")} records={records} onOpen={onOpenFile} onDelete={record => record.id ? dismissUpload(record.id) : deleteManualFile(record)} statusLabel={statusLabel} t={t} />
+    <HatchButton variant="secondary" trailing={<ArrowRight aria-hidden="true" />} onClick={() => onOpenAgent("voice")}>{t("factoryUploadNext")}</HatchButton>
   </section>;
 }
 
@@ -229,20 +269,35 @@ function StartAgentButton({ role, draft, setDraft, composer, disabled, t }) {
 
 function InspectorPanel({ entry, agents, session, root, id, running, busy, file, setFile, upload, addToChat, agentName, onOpenAgent, t, perform }) {
   const inputFiles = session.files.filter(record => record.path.startsWith("input/") && !record.path.startsWith("input/handoff/")); const outputFiles = session.files.filter(record => record.path.startsWith("output/"));
-  const selectedFile = file ? session.files.find(record => record.path === file) : null;
-  return <Box component="aside" className="factory-inspector" aria-label={t("nextSteps")} sx={{ height: "100%", minWidth: 0, display: "flex", flexDirection: "column", bgcolor: "var(--hatch-ui-surface-sidebar)" }}>{entry && entry.state !== "complete" ? <div className="factory-inspector-status"><AgentState entry={entry} agentName={agentName} t={t} /></div> : null}<Box className="factory-inspector-scroll" sx={{ overflow: "auto", flex: 1, minHeight: 0, p: 1.5 }}><Binding s={session} t={t} />{entry && <NextSteps entry={entry} agents={agents} todos={session.todos || []} onOpenAgent={onOpenAgent} agentName={agentName} t={t} />}<Paper variant="outlined" sx={{ mb: 1.5, overflow: "hidden" }}><Box sx={{ px: 1.5, py: 1, borderBottom: 1, borderColor: "divider", display: "flex", alignItems: "center", gap: 1 }}><FolderOpen fontSize="small" /><Typography variant="caption" fontWeight={750}>{t("files")}</Typography><Chip size="small" label={session.files.length} sx={{ ml: "auto" }} /><Button component="label" size="small" startIcon={<UploadFile />} disabled={running || busy}>{t("addFiles")}<input hidden type="file" multiple onChange={event => { upload([...event.target.files]); event.target.value = ""; }} /></Button></Box><Box sx={{ p: 1.5 }}><FileSection title={t("attachments")} records={inputFiles} onOpen={setFile} onDelete={path => perform(() => api(endpoint(root, id, "files"), { method: "DELETE", body: { path } }))} canDelete={!running} t={t} /><FileSection title={t("outputs")} records={outputFiles} onOpen={setFile} t={t} /></Box></Paper>{selectedFile && <FileViewer key={file} root={root} running={running} id={id} record={selectedFile} files={session.files} onOpenFile={setFile} onAddToChat={addToChat} onClose={() => setFile(null)} t={t} perform={perform} />}</Box></Box>;
+  const picker = useRef(null); const selectedFile = file ? session.files.find(record => record.path === file) : null;
+  return <Box component="aside" className="factory-inspector" aria-label={t("nextSteps")} sx={{ height: "100%", minWidth: 0, display: "flex", flexDirection: "column", bgcolor: "var(--hatch-ui-surface-sidebar)" }}>{entry && entry.state !== "complete" ? <div className="factory-inspector-status"><AgentState entry={entry} agentName={agentName} t={t} /></div> : null}<Box className="factory-inspector-scroll" sx={{ overflow: "auto", flex: 1, minHeight: 0, p: 1.5 }}><Binding s={session} t={t} />{entry && <NextSteps entry={entry} agents={agents} todos={session.todos || []} onOpenAgent={onOpenAgent} agentName={agentName} t={t} />}<div className="fl-panel"><div className="fl-panel__head"><strong>{t("files")}</strong><HatchButton size="small" variant="secondary" disabled={running || busy} onClick={() => picker.current?.click()}>{t("addFiles")}</HatchButton><input ref={picker} hidden type="file" multiple onChange={event => { upload([...event.target.files]); event.target.value = ""; }} /></div><FileList title={t("attachments")} records={inputFiles} onOpen={setFile} onDelete={record => perform(() => api(endpoint(root, id, "files"), { method: "DELETE", body: { path: record.path } }))} deletable={record => !running && /^input\/manual\//.test(record.path)} t={t} /><FileList title={t("outputs")} records={outputFiles} onOpen={setFile} t={t} /></div>{selectedFile && <FileViewer key={file} root={root} running={running} id={id} record={selectedFile} siblings={selectedFile.path.startsWith("output/") ? outputFiles : inputFiles} onOpenFile={setFile} onAddToChat={addToChat} onClose={() => setFile(null)} t={t} perform={perform} />}</Box></Box>;
 }
 
-function FileSection({ title, records, onOpen, onDelete, canDelete, t }) {
-  return <Paper variant="outlined" sx={{ mb: 1.5, overflow: "hidden" }}><Box sx={{ px: 1.5, py: 1, borderBottom: 1, borderColor: "divider" }}><Typography variant="caption" fontWeight={750}>{title}</Typography></Box>{records.length ? <List dense disablePadding>{records.map(record => <ListItemButton key={record.path} onClick={() => onOpen(record.path)} sx={{ py: .65, px: 1.5 }}><ListItemIcon sx={{ minWidth: 28 }}><Description fontSize="small" color="action" /></ListItemIcon><ListItemText primary={record.path.replace(/^(input|output)\//, "")} primaryTypographyProps={{ noWrap: true, fontSize: 12 }} />{canDelete && /^(input\/manual)\//.test(record.path) && <IconButton size="small" aria-label={t("removeFile", record.path)} onClick={event => { event.stopPropagation(); onDelete(record.path); }}><DeleteOutlineOutlined fontSize="small" /></IconButton>}<ChevronRight fontSize="small" color="disabled" /></ListItemButton>)}</List> : <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 1.5, py: 2 }}>{t("noFiles")}</Typography>}</Paper>;
-}
-
-function FileViewer({ root, running, id, record, files, onOpenFile, onClose, onAddToChat, t, perform }) {
-  const draftKey = `factory-file-draft:${id}:${record.path}`; const [savedDraft] = useState(() => { try { return JSON.parse(sessionStorage.getItem(draftKey) || "null"); } catch { return null; } }); const [file, setFile] = useState(savedDraft?.file || null); const [edit, setEdit] = useState(savedDraft?.edit || ""); const [copyName, setCopyName] = useState(savedDraft?.copyName || ""); const [readError, setReadError] = useState(""); const dirty = Boolean(file && file.content !== null && edit !== file.content);
+function FileViewer({ root, running, id, record, siblings, onOpenFile, onClose, onAddToChat, t, perform }) {
+  const draftKey = `factory-file-draft:${id}:${record.path}`; const [savedDraft] = useState(() => { try { return JSON.parse(sessionStorage.getItem(draftKey) || "null"); } catch { return null; } }); const [file, setFile] = useState(savedDraft?.file || null); const [edit, setEdit] = useState(savedDraft?.edit || ""); const [copyName, setCopyName] = useState(savedDraft?.copyName || ""); const [readError, setReadError] = useState(""); const [mode, setMode] = useState(/\.(md|markdown)$/i.test(record.path) ? "rendered" : "raw"); const dirty = Boolean(file && file.content !== null && edit !== file.content);
   useEffect(() => { if (!file) return; if (dirty) sessionStorage.setItem(draftKey, JSON.stringify({ file, edit, copyName })); else sessionStorage.removeItem(draftKey); }, [draftKey, file, edit, copyName, dirty]); useEffect(() => { api(`${endpoint(root, id, "files")}?path=${encodeURIComponent(record.path)}`).then(value => { setReadError(""); if (!dirty) { setFile(value); setEdit(value.content || ""); } }).catch(e => setReadError(e.message)); }, [root, id, record.path]);
   const requiresCopyName = record.readonly || record.path.startsWith("input/"); const saveDisabled = running || !dirty || (requiresCopyName && !copyName.trim());
-  const save = () => perform(async () => { const target = requiresCopyName ? `output/${copyName}` : record.path; if (!target.endsWith(".md") || target.includes("..")) throw new Error(t("markdownFilenameRequired")); const bytes = new TextEncoder().encode(edit); let binary = ""; for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192)); await api(endpoint(root, id, "files"), { method: "POST", body: { path: target, base64: btoa(binary) } }); sessionStorage.removeItem(draftKey); setFile({ ...file, content: edit }); });
-  return <Dialog open onClose={onClose} fullWidth maxWidth="md" scroll="paper" aria-labelledby={`factory-file-dialog-${id}`}><DialogTitle id={`factory-file-dialog-${id}`} sx={{ p: 0 }}><Toolbar variant="dense" sx={{ minHeight: 52 }}><Description fontSize="small" sx={{ mr: 1 }} /><Typography variant="body2" fontWeight={700} noWrap sx={{ flex: 1 }} title={record.path}>{record.path.split("/").at(-1)}</Typography><Tooltip title={t("addToChat")}><IconButton size="small" onClick={() => onAddToChat(record.path)}><Send fontSize="small" /></IconButton></Tooltip><Tooltip title={t("download")}><IconButton component="a" size="small" href={`${endpoint(root, id, "files")}?path=${encodeURIComponent(record.path)}&download=1`}><Download fontSize="small" /></IconButton></Tooltip></Toolbar></DialogTitle><DialogContent dividers sx={{ p: 0 }}>{!file ? <Box sx={{ p: 2 }}><Stack spacing={1} alignItems="center"><CircularProgress size={18} /><Typography variant="caption" color="text.secondary">{readError || t("loadingFile")}</Typography></Stack></Box> : <><Box sx={{ p: 2, maxHeight: 520, overflow: "auto" }}>{readError && <ErrorNotice error={readError} onClose={() => setReadError("")} />}{file.content === null ? <Typography variant="body2">{t("downloadToView")}</Typography> : <Stack spacing={1.5}><TextField multiline minRows={16} fullWidth value={edit} onChange={event => setEdit(event.target.value)} aria-label={t("markdownEditor")} />{requiresCopyName && <TextField label={t("revisionFilename")} placeholder={t("revisionFilenamePlaceholder")} value={copyName} onChange={event => setCopyName(event.target.value)} />}</Stack>}</Box>{file.content !== null && <Stack direction="row" spacing={1} sx={{ px: 2, pb: 2 }}><Button size="small" variant="contained" disabled={saveDisabled} onClick={save}>{t("save")}</Button><Button size="small" variant="outlined" disabled={!dirty} onClick={() => { setEdit(file.content || ""); sessionStorage.removeItem(draftKey); }}>{t("discardEdits")}</Button></Stack>}</>}</DialogContent><DialogActions><Button onClick={onClose}>{t("close")}</Button></DialogActions></Dialog>;
+  const save = () => perform(async () => { const target = requiresCopyName ? `output/${copyName}` : record.path; if (!target.endsWith(".md") || target.includes("..")) throw new Error(t("markdownFilenameRequired")); await api(endpoint(root, id, "files"), { method: "POST", body: { path: target, base64: textBase64(edit) } }); sessionStorage.removeItem(draftKey); setFile({ ...file, content: edit }); });
+  const paths = orderedPaths(siblings); const previous = neighbour(paths, record.path, -1); const next = neighbour(paths, record.path, 1); const name = record.path.split("/").at(-1); const fileUrl = `${endpoint(root, id, "files")}?path=${encodeURIComponent(record.path)}`;
+  return <Dialog open onOpenChange={open => { if (!open) onClose(); }}><DialogContent title={<span title={record.path}>{name}</span>} className="fv-dialog" aria-describedby={undefined} footer={file && file.content !== null ? <><HatchButton size="small" disabled={saveDisabled} onClick={save}>{t("save")}</HatchButton><HatchButton size="small" variant="secondary" disabled={!dirty} onClick={() => { setEdit(file.content || ""); sessionStorage.removeItem(draftKey); }}>{t("discardEdits")}</HatchButton></> : undefined}>
+    <div className="fv">
+      <div className="fv__bar">
+        <HatchIconButton label={t("previousFile")} size="small" disabled={!previous} onClick={() => onOpenFile(previous)}><PrevIcon aria-hidden="true" /></HatchIconButton>
+        <span className="fv__pos">{paths.indexOf(record.path) + 1} / {paths.length}</span>
+        <HatchIconButton label={t("nextFile")} size="small" disabled={!next} onClick={() => onOpenFile(next)}><NextIcon aria-hidden="true" /></HatchIconButton>
+        {file && file.content !== null ? <SegmentedControl value={mode} onValueChange={setMode} ariaLabel={t("markdownEditor")} items={[{ value: "rendered", label: t("viewRendered") }, { value: "raw", label: t("viewRaw") }]} /> : null}
+        <div className="fv__bar-end">
+          {onAddToChat ? <HatchIconButton label={t("addToChat")} size="small" onClick={() => onAddToChat(record.path)}><SendIcon aria-hidden="true" /></HatchIconButton> : null}
+          <HatchIconButton asChild label={t("download")} size="small"><a href={`${fileUrl}&download=1`}><DownloadIcon aria-hidden="true" /></a></HatchIconButton>
+        </div>
+      </div>
+      {readError ? <InlineAlert tone="error">{readError}</InlineAlert> : null}
+      {!file ? <p className="fl__empty">{readError ? "" : t("loadingFile")}</p> : file.content === null ? <p className="fl__empty">{t("downloadToView")}</p> : <>
+        <div className="fv__body">{mode === "rendered" ? <Markdown filePath={record.path} files={siblings} onOpenFile={onOpenFile} t={t}>{edit}</Markdown> : <textarea className="fv__raw" value={edit} onChange={event => setEdit(event.target.value)} aria-label={t("markdownEditor")} />}</div>
+        {requiresCopyName ? <input className="hui-input fv__copy" value={copyName} onChange={event => setCopyName(event.target.value)} placeholder={t("revisionFilenamePlaceholder")} aria-label={t("revisionFilename")} /> : null}
+      </>}
+    </div>
+  </DialogContent></Dialog>;
 }
 
 function AgentState({ entry, agentName, t, compact = false }) { if (entry?.state === "complete" || entry?.state === "update_available") return null; let text = t(agentStateKey(entry)); if (entry?.state === "locked") text = t("finishOneAgentFirst", BUILD_NEEDS.map(need => need === "uploads" ? t("uploadSources") : agentName(need)).join(t("roleSeparator"))); return <Chip size="small" icon={entry?.state === "locked" ? <Lock /> : undefined} label={compact ? undefined : text} color={entry?.state === "failed" ? "error" : entry?.state === "running" ? "primary" : "default"} variant={entry?.state === "running" ? "filled" : "outlined"} sx={compact ? { width: 10, height: 10, "& .MuiChip-icon": { display: "none" }, "& .MuiChip-label": { display: "none" } } : undefined} />; }

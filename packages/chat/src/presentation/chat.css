@@ -26,7 +26,7 @@
 .web-chat__task-brief-fields { margin: 0; }
 .web-chat__task-brief-field { padding: 14px 0; }
 .web-chat__task-brief-field + .web-chat__task-brief-field { border-top: 1px solid var(--chat-border); }
-.web-chat__task-brief-field dt { color: var(--chat-muted); font-size: 13px; font-weight: 600; }
+.web-chat__task-brief-field dt { color: var(--chat-muted); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .web-chat__task-brief-field dd { margin: 4px 0 0; color: var(--chat-ink); font-size: 15px; line-height: 1.6; overflow-wrap: anywhere; white-space: pre-wrap; }
 
 .web-chat, .web-chat *, .web-chat *::before, .web-chat *::after { box-sizing: border-box; }
