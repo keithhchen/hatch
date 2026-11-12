@@ -1,6 +1,6 @@
-import { MAX_BYTES } from "../assets/pipeline.js";
-import { sniff } from "../assets/sniff.js";
-import type { AccountFile, AccountFiles } from "./accountFiles.js";
+import { refusal } from "../chat/assets.js";
+import type { ChatAssets } from "../chat/assets.js";
+import { StorageQuotaExceeded, type AccountFile, type AccountFiles } from "./accountFiles.js";
 import type { ApiCaller } from "./auth.js";
 import { ApiError, invalidRequest, notFound } from "./errors.js";
 
@@ -17,10 +17,11 @@ export const fileNotFound = (id: string): ApiError => notFound("file_not_found",
  * (see InlineAttachments), through the same asset path as an inline attachment.
  */
 export class FilesApi {
-  constructor(private readonly files: AccountFiles | undefined) {}
+  /** `assets` decides which types and sizes are accepted: the same detection the conversation upload uses. */
+  constructor(private readonly files: AccountFiles | undefined, private readonly assets: ChatAssets | undefined) {}
 
   private store(): AccountFiles {
-    if (!this.files) throw new ApiError(501, "server_error", "files_unavailable", "This Runtime cannot store files.");
+    if (!this.files || !this.assets) throw new ApiError(501, "server_error", "files_unavailable", "This Runtime cannot store files.");
     return this.files;
   }
 
@@ -31,10 +32,16 @@ export class FilesApi {
     const content = Buffer.from(await file.arrayBuffer());
     if (!content.length) throw invalidRequest("invalid_request", "The file is empty.", "file");
     const filename = file.name || "file";
-    const kind = sniff(content, filename).kind;
-    if (content.length > MAX_BYTES[kind]) throw new ApiError(413, "invalid_request_error", "file_too_large", `That file is too large (${kind} limit ${MAX_BYTES[kind]} bytes).`, "file");
+    const store = this.store();
+    try { this.assets!.detect(filename, content); } catch (error) { throw refusal(error); }
     const purpose = form.get("purpose");
-    return fileObject(await this.store().put(caller.accountId, { filename, purpose: typeof purpose === "string" && purpose ? purpose : "user_data", content }));
+    try {
+      return fileObject(await store.put(caller.accountId, { filename, purpose: typeof purpose === "string" && purpose ? purpose : "user_data", content }));
+    } catch (error) {
+      if (!(error instanceof StorageQuotaExceeded)) throw error;
+      const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+      throw invalidRequest("storage_quota_exceeded", `File storage is ${mb(error.used)} of ${mb(error.quota)} used and this file does not fit. Delete files to free space.`);
+    }
   }
 
   async list(caller: ApiCaller, query: URLSearchParams) {

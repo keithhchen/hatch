@@ -568,7 +568,7 @@ curl -s -X POST https://gethatchapp.com/responses/v1/responses -H "Authorization
 
 ### 8. Upload a file once, use it by id
 
-`client.files.create` sends the file as multipart (`purpose` is accepted and ignored). Use the returned `file_id` in `input_image` or `input_file`. Files are private to your account: images up to 20 MB, other files up to 50 MB. List with `GET /files`, read with `GET /files/{id}` and `GET /files/{id}/content`, remove with `DELETE /files/{id}`. An unknown or deleted id returns 404 `file_not_found`; a larger file returns 413 `file_too_large`.
+`client.files.create` sends the file as multipart (`purpose` is accepted and ignored). Use the returned `file_id` in `input_image` or `input_file`. Files are private to your account: images up to 20 MB, other files up to 50 MB. List with `GET /files`, read with `GET /files/{id}` and `GET /files/{id}/content`, remove with `DELETE /files/{id}`. An unknown or deleted id returns 404 `file_not_found`; a larger file returns 413 `file_too_large`, and a type Hatch cannot take returns 415 `unsupported_file_type` right away (a corrupt file of a supported type fails when it is used). Each account can store 500 MB; beyond that, 400 `storage_quota_exceeded`, and deleting files frees space.
 
 ```python
 file = client.files.create(file=open("notes.pdf", "rb"), purpose="user_data")
@@ -636,7 +636,7 @@ curl -s -X POST https://gethatchapp.com/responses/v1/responses -H "Authorization
 
 ### 10. Errors and limits
 
-Errors use the OpenAI shape. Not supported, returning 400 `unsupported_parameter` with `param`: `instructions`, `tools`, `tool_choice` other than auto, `text.format`, `reasoning`, `max_output_tokens`, system, developer or assistant input roles, `store: false`, and `metadata` other than `title`. Ignored: `temperature`, `top_p`, `user`, `service_tier`.
+Errors use the OpenAI shape. Not supported, returning 400 `unsupported_parameter` with `param`: `instructions`, `tools`, `tool_choice` other than auto, `text.format`, `reasoning`, `max_output_tokens`, system, developer or assistant input roles, `store: false`, and `metadata` other than `title`. Ignored: `temperature`, `top_p`, `user`, `service_tier`. Files: 413 `file_too_large`, 415 `unsupported_file_type`, 404 `file_not_found`, 400 `storage_quota_exceeded` (500 MB per account).
 
 ```json
 { "error": { "message": "…", "type": "conflict_error", "param": null, "code": "conversation_busy" } }

@@ -5,7 +5,7 @@ import {
 import { failures } from "../errors/failures.js";
 import { UpstreamError } from "../errors/upstream.js";
 import type { AssetProcessor } from "./processors.js";
-import { sniff } from "./sniff.js";
+import { sniff, type Sniffed } from "./sniff.js";
 import { log } from "../observability/log.js";
 
 export const MAX_BYTES: Record<AssetKind, number> = { image: 20 * 1024 * 1024, file: 50 * 1024 * 1024, audio: 20 * 1024 * 1024 };
@@ -37,12 +37,18 @@ export class AssetPipeline implements ReadyAssetResolver {
     this.processors = new Map(processors.map(p => [p.kind, p]));
   }
 
-  async accept(scope: AssetScope, input: { name: string; bytes: Buffer }): Promise<Asset> {
-    const name = displayName(input.name);
-    const sniffed = sniff(input.bytes, name);
-    if (input.bytes.length > MAX_BYTES[sniffed.kind]) throw new AssetError("too_large", `这个文件太大了。\nThat file is too large (${sniffed.kind} limit ${MAX_BYTES[sniffed.kind]} bytes).`);
+  /** What accept() decides before it stores anything: the type by magic bytes, whether it is small enough, whether a processor takes its kind. No processing. */
+  detect(rawName: string, bytes: Buffer): { name: string; sniffed: Sniffed; processor: AssetProcessor } {
+    const name = displayName(rawName);
+    const sniffed = sniff(bytes, name);
+    if (bytes.length > MAX_BYTES[sniffed.kind]) throw new AssetError("too_large", `这个文件太大了。\nThat file is too large (${sniffed.kind} limit ${MAX_BYTES[sniffed.kind]} bytes).`);
     const processor = this.processors.get(sniffed.kind);
     if (!processor) throw new AssetError("unsupported_type", `No processor for ${sniffed.kind}`);
+    return { name, sniffed, processor };
+  }
+
+  async accept(scope: AssetScope, input: { name: string; bytes: Buffer }): Promise<Asset> {
+    const { name, sniffed, processor } = this.detect(input.name, input.bytes);
 
     const sha256 = createHash("sha256").update(input.bytes).digest("hex");
     const { asset, created } = await this.repository.insertIfAbsent(Asset.received({ scope, sha256, kind: sniffed.kind, mime: sniffed.mime, name, bytes: input.bytes.length }));

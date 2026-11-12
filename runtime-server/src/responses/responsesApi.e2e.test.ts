@@ -10,7 +10,9 @@ import OpenAI from "openai";
 import type { AgentCorpus, AgentCorpusResolverLike } from "../agentCorpus.js";
 import type { AgentRuntime } from "../agentRuntime.js";
 import { AttachmentFiles } from "../assets/files.js";
-import { harness, png } from "../assets/kit.test.js";
+import { allow, harness, png, wav } from "../assets/kit.test.js";
+import { AssetPipeline } from "../assets/pipeline.js";
+import { FileProcessor, ImageProcessor } from "../assets/processors.js";
 import { ChatAssets } from "../chat/assets.js";
 import { InMemoryAccountFiles } from "./accountFiles.js";
 import { InMemoryConversationRepository } from "../conversationRepository.js";
@@ -55,7 +57,7 @@ afterEach(async () => { await Promise.all(runtimes.splice(0).map((server) => ser
 type Gate = { open(): void; wait: Promise<void> };
 const gate = (): Gate => { let open!: () => void; const wait = new Promise<void>((resolve) => { open = resolve; }); return { open, wait }; };
 
-async function fixture(options: { holdMs?: number; keepAliveMs?: number; assets?: boolean } = {}) {
+async function fixture(options: { holdMs?: number; keepAliveMs?: number; assets?: boolean; quota?: number; withoutAudio?: boolean } = {}) {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-responses-api-"));
   const store = new RuntimeStore(dataDir);
   const repository = new InMemoryConversationRepository(store.localAuthority);
@@ -69,7 +71,9 @@ async function fixture(options: { holdMs?: number; keepAliveMs?: number; assets?
     }
   };
   const kit = options.assets ? await harness() : undefined;
-  const chatAssets = kit ? new ChatAssets({ pipeline: kit.pipeline, blobs: kit.blobs, files: new AttachmentFiles(kit.repository, kit.blobs) }) : undefined;
+  // `withoutAudio` is a Runtime that has no processor for voice: a kind its pipeline refuses.
+  const pipeline = kit && options.withoutAudio ? new AssetPipeline(kit.repository, kit.blobs, allow, [new ImageProcessor(), new FileProcessor()]) : kit?.pipeline;
+  const chatAssets = kit ? new ChatAssets({ pipeline: pipeline!, blobs: kit.blobs, files: new AttachmentFiles(kit.repository, kit.blobs) }) : undefined;
   const usage: UsageEvent[] = [];
   const ledger = new InMemoryUsageLedger();
   const recorder = { record: async (event: UsageEvent) => { usage.push(event); await ledger.record(event); }, forRun: (runId: string) => ledger.forRun(runId) };
@@ -90,7 +94,7 @@ async function fixture(options: { holdMs?: number; keepAliveMs?: number; assets?
   const runtime = createRuntimeServer({
     conversationStore: store, conversationRepository: repository, authIdentityResolver: identities, agentCorpusResolver: corpora,
     createRuntime: () => model, usage: recorder, ...(chatAssets ? { chatAssets } : {}),
-    responsesApi: { accountFiles: new InMemoryAccountFiles(), ...(options.holdMs ? { holdMs: options.holdMs } : {}), ...(options.keepAliveMs ? { keepAliveMs: options.keepAliveMs } : {}) }
+    responsesApi: { accountFiles: new InMemoryAccountFiles(options.quota), ...(options.holdMs ? { holdMs: options.holdMs } : {}), ...(options.keepAliveMs ? { keepAliveMs: options.keepAliveMs } : {}) }
   });
   runtimes.push(runtime);
   await new Promise<void>((resolve) => (runtime.server as http.Server).listen(0, "127.0.0.1", () => resolve()));
@@ -426,7 +430,7 @@ test("Files API: files.create (multipart) then file_id in input_file and input_i
   assert.equal((await refused(openai.responses.create({ model: `hatch:${PRODUCT}`, input: [{ role: "user", content: [{ type: "input_image", file_id: notes.id, detail: "auto" }] }] }))).code, "file_not_found");
 });
 
-test("Files API: a missing file part is 400, an oversized file 413, no asset service 501 on use", async () => {
+test("Files API: a missing file part is 400, an oversized file 413, no asset service 501", async () => {
   const { openai, origin } = await fixture({ assets: true });
   const form = new FormData();
   form.set("purpose", "user_data");
@@ -434,9 +438,29 @@ test("Files API: a missing file part is 400, an oversized file 413, no asset ser
   assert.equal(missing.status, 400);
   assert.deepEqual(await missing.json(), { error: { message: "A multipart `file` part is required.", type: "invalid_request_error", param: "file", code: "invalid_request" } });
   const big = Buffer.concat([Buffer.from("\x89PNG\r\n\x1a\n", "latin1"), Buffer.alloc(21 * 1024 * 1024)]);
-  assert.deepEqual(await refused(openai.files.create({ file: new File([new Uint8Array(big)], "big.png", { type: "image/png" }), purpose: "user_data" })), { status: 413, code: "file_too_large", param: "file", type: "invalid_request_error" });
+  assert.deepEqual(await refused(openai.files.create({ file: new File([new Uint8Array(big)], "big.png", { type: "image/png" }), purpose: "user_data" })), { status: 413, code: "file_too_large", param: null, type: "invalid_request_error" });
 
   const plain = await fixture();
-  const file = await plain.openai.files.create({ file: new File(["hello"], "a.txt"), purpose: "user_data" });
-  assert.equal((await refused(plain.openai.responses.create({ model: `hatch:${PRODUCT}`, input: [{ role: "user", content: [{ type: "input_file", file_id: file.id }] }] }))).status, 501);
+  assert.equal((await refused(plain.openai.files.create({ file: new File(["hello"], "a.txt"), purpose: "user_data" }))).status, 501);
+});
+
+test("Files API: a type the pipeline has no processor for is refused at upload with 415", async () => {
+  const { openai } = await fixture({ assets: true, withoutAudio: true });
+  assert.deepEqual(await refused(openai.files.create({ file: new File([new Uint8Array(wav())], "voice.wav"), purpose: "user_data" })), { status: 415, code: "unsupported_file_type", param: null, type: "invalid_request_error" });
+  assert.equal((await openai.files.list()).data.length, 0);
+  // A corrupt file of a supported type is only found out when it is used.
+  const corrupt = await openai.files.create({ file: new File([Buffer.concat([Buffer.from("\x89PNG\r\n\x1a\n", "latin1"), Buffer.from("not really")])], "broken.png"), purpose: "user_data" });
+  assert.match(corrupt.id, /^file_/);
+});
+
+test("Files API: an account's storage is capped; going over is 400 storage_quota_exceeded and deleting frees space", async () => {
+  const { openai, client } = await fixture({ assets: true, quota: 100 });
+  const upload = (client_: OpenAI, size: number) => client_.files.create({ file: new File(["x".repeat(size)], "f.txt"), purpose: "user_data" });
+  const first = await upload(openai, 60);
+  const over = await refused(upload(openai, 41));
+  assert.deepEqual(over, { status: 400, code: "storage_quota_exceeded", param: null, type: "invalid_request_error" });
+  await upload(openai, 40);
+  await upload(client("hatch_test_key_stranger"), 100);
+  await openai.files.delete(first.id);
+  await upload(openai, 60);
 });

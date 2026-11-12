@@ -81,7 +81,7 @@ import {
 import type { ChatEdge } from "./chat/turnSubmission.js";
 import { bearerToken, handleHttpRequestFailure, httpDeadlineMs, writeJson } from "./http/httpSupport.js";
 import { handleHttpRequest, type RuntimeReadiness } from "./http/runtimeRouter.js";
-import { PostgresAccountFiles } from "./responses/accountFiles.js";
+import { DEFAULT_ACCOUNT_FILES_QUOTA_BYTES, PostgresAccountFiles } from "./responses/accountFiles.js";
 import { ResponsesHttpApi } from "./responses/router.js";
 import { handleRuntimeSocket } from "./ws/runtimeSocket.js";
 
@@ -280,7 +280,7 @@ export async function createRuntimeServerFromEnvironment(
     ? await openChatAssets({ pool: conversationStore.pool, blobs: objectStoreFromEnvironment(environment, path.join(runtimeDataDir, "chat-assets"))!, environment })
     : undefined;
   // The Files API stores an account's files in the same database; without one it answers 501.
-  const accountFiles = conversationStore instanceof PostgresStore ? new PostgresAccountFiles(conversationStore.pool as never) : undefined;
+  const accountFiles = conversationStore instanceof PostgresStore ? new PostgresAccountFiles(conversationStore.pool as never, Number(environment.HATCH_ACCOUNT_FILES_QUOTA_BYTES) || DEFAULT_ACCOUNT_FILES_QUOTA_BYTES) : undefined;
   await accountFiles?.initialize();
   return createRuntimeServer({
     outputGuard: createOutputGuardFromEnvironment(environment),

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { Pool } from "pg";
-import { PostgresAccountFiles } from "./accountFiles.js";
+import { PostgresAccountFiles, StorageQuotaExceeded } from "./accountFiles.js";
 
 // Opt-in integration test. It owns a random schema, never a database.
 const connectionString = process.env.HATCH_TEST_DATABASE_URL;
@@ -29,6 +29,32 @@ test("account files: stored per account, listed newest first, deleted, never sho
     assert.deepEqual(await files.list("b"), []);
     assert.equal(await files.delete("a", first.id), true);
     assert.equal(await files.get("a", first.id), undefined);
+  } finally {
+    await pool?.end();
+    await admin.query(`DROP SCHEMA "${schema}" CASCADE`);
+    await admin.end();
+  }
+});
+
+test("account files: concurrent uploads near the quota never exceed it, and another account is unaffected", { skip: !connectionString, timeout: 60_000 }, async () => {
+  const schema = `account_files_quota_${randomUUID().replaceAll("-", "")}`;
+  const admin = new Pool({ connectionString });
+  let pool: Pool | undefined;
+  try {
+    await admin.query(`CREATE SCHEMA "${schema}"`);
+    pool = new Pool({ connectionString, options: `-c search_path=${schema}`, max: 20 });
+    const files = new PostgresAccountFiles(pool, 1000);
+    await files.initialize();
+    const attempts = await Promise.allSettled(Array.from({ length: 30 }, () => files.put("a", { filename: "f.bin", purpose: "user_data", content: Buffer.alloc(100) })));
+    const stored = attempts.filter((attempt) => attempt.status === "fulfilled").length;
+    assert.equal(stored, 10);
+    for (const attempt of attempts) if (attempt.status === "rejected") assert.ok(attempt.reason instanceof StorageQuotaExceeded);
+    assert.equal((await files.list("a")).reduce((sum, file) => sum + file.bytes, 0), 1000);
+    await files.put("b", { filename: "f.bin", purpose: "user_data", content: Buffer.alloc(1000) });
+    const [first] = await files.list("a");
+    await files.delete("a", first!.id);
+    await files.put("a", { filename: "g.bin", purpose: "user_data", content: Buffer.alloc(100) });
+    await assert.rejects(files.put("a", { filename: "h.bin", purpose: "user_data", content: Buffer.alloc(1) }), StorageQuotaExceeded);
   } finally {
     await pool?.end();
     await admin.query(`DROP SCHEMA "${schema}" CASCADE`);

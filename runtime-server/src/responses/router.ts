@@ -52,7 +52,7 @@ export class ResponsesHttpApi {
   private readonly files: FilesApi;
 
   constructor(private readonly deps: ResponsesHttpDeps) {
-    this.files = new FilesApi(deps.accountFiles);
+    this.files = new FilesApi(deps.accountFiles, deps.edge.chatAssets);
     const identities = deps.identities ? cachingIdentityResolver(deps.identities) : undefined;
     this.authenticator = new ApiAuthenticator(identities);
     this.models = new ModelCatalog({ corpora: deps.corpora, identities });
