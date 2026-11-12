@@ -1682,7 +1682,7 @@ export class PostgresConversationRepository implements ConversationRepository {
     const result = await this.pool.query<ConversationRow & { list_created_at: string }>(`
       SELECT *, to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS list_created_at
       FROM hatch_conversations
-      WHERE owner_account_id = $1 AND creator_id = $2 AND ($3::text IS NULL OR agent_id = $3)
+      WHERE owner_account_id = $1 AND creator_id = $2 AND ($3::text IS NULL OR agent_id::text = $3)
         AND ($4::text IS NULL OR status = $4)${pagination}
       ORDER BY created_at DESC, id COLLATE "C" DESC
       LIMIT $${values.length}
