@@ -39,7 +39,7 @@ import { ChatProvider } from "@mui/x-chat/headless";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button as HatchButton, Dialog, DialogContent, IconButton as HatchIconButton, InlineAlert, SegmentedControl, Textarea, hatchMuiThemeOptions } from "@hatch/ui";
-import { ArrowRight, ChevronLeft as PrevIcon, ChevronRight as NextIcon, Download as DownloadIcon, Plus, Send as SendIcon } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Sparkles, ChevronLeft as PrevIcon, ChevronRight as NextIcon, Download as DownloadIcon, Plus, Send as SendIcon } from "lucide-react";
 import { MicButton, RecordingActions, RecordingWave, canRecord, useVoiceInput } from "@hatch/chat/react";
 import { dashboardRequest } from "./data.js";
 import { FileList } from "./FileList.jsx";
@@ -202,13 +202,15 @@ function ImportFromAi({ saveManualText, locale, t }) {
   const copyPrompt = async () => { const result = await copyImportPrompt(locale); setCopy(result); if (result === "copied") setTimeout(() => setCopy("idle"), 2000); };
   const save = async () => { setSaving(true); setError(""); try { await saveManualText(text); setText(""); setOpen(false); } catch (e) { setError(e.message); } finally { setSaving(false); } };
   return <>
-    <HatchButton variant="secondary" size="small" className="factory-import__open" onClick={() => setOpen(true)}>{t("importFromAi")}</HatchButton>
+    <HatchButton variant="secondary" className="factory-import__open" leading={<Sparkles aria-hidden="true" />} onClick={() => setOpen(true)}>{t("importFromAi")}</HatchButton>
     <Dialog open={open} onOpenChange={setOpen}><DialogContent title={t("importFromAi")} className="factory-import" aria-describedby={undefined}>
       <p>{t("importIntro")}</p>
       <HatchButton variant="secondary" size="small" onClick={copyPrompt}>{t({ idle: "importCopy", copied: "importCopied", failed: "importCopyFailed" }[copy])}</HatchButton>
-      <div className="factory-import__links">{AI_LINKS.map(link => <a key={link.name} href={link.href} target="_blank" rel="noopener noreferrer">{link.name}</a>)}</div>
-      <p>{t("importOrAgent")}</p>
-      <Textarea value={text} onChange={event => setText(event.target.value)} aria-label={t("importPasteLabel")} />
+      <div className="factory-import__links">{AI_LINKS.map(link => <a key={link.name} href={link.href} target="_blank" rel="noopener noreferrer">{link.name}<ArrowUpRight aria-hidden="true" /></a>)}</div>
+      <p className="factory-import__agents">{t("importOrAgent")}</p>
+      <hr className="factory-import__rule" />
+      <label className="factory-import__paste" htmlFor="factory-import-paste">{t("importPasteLabel")}</label>
+      <Textarea id="factory-import-paste" value={text} onChange={event => setText(event.target.value)} />
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
       <HatchButton size="small" loading={saving} disabled={!text.trim() || saving} onClick={save}>{t("importSave")}</HatchButton>
     </DialogContent></Dialog>
