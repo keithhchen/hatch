@@ -1,4 +1,7 @@
-import * as Sentry from "@sentry/react";
+import { addBreadcrumb, browserTracingIntegration, captureException, init, withScope } from "@sentry/react";
+
+// Named imports, not `import *`: a namespace object keeps Replay and Feedback in the entry bundle.
+const Sentry = { addBreadcrumb, browserTracingIntegration, captureException, init, withScope };
 
 let active = null;
 

@@ -1,7 +1,7 @@
 import React, { useEffect } from "react";
 import { AtmosphericPaper } from "./AtmosphericPaper.jsx";
 import { ToastViewport } from "./Feedback.jsx";
-import { TooltipProvider } from "./Overlays.jsx";
+import { TooltipProvider } from "./Tooltip.jsx";
 import { cn } from "./utils.js";
 
 export function HatchUIProvider({

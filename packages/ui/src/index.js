@@ -11,5 +11,6 @@ export * from "./HatchUIProvider.jsx";
 export * from "./Layout.jsx";
 export * from "./Navigation.jsx";
 export * from "./Overlays.jsx";
+export * from "./Tooltip.jsx";
 export * from "./utils.js";
 export * from "./muiTheme.js";
