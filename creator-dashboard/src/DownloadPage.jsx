@@ -33,7 +33,7 @@ export function DownloadPage() {
   return (
     <div className="download-page">
       <header className="download-page__header">
-        <WebBrand className="download-page__brand" href="/explore" aria-label={copy.homeLabel} />
+        <WebBrand className="download-page__brand" href="/" aria-label={copy.homeLabel} />
         <LanguageSwitcher className="download-page__language" />
       </header>
       <main className="download-page__main">
@@ -50,7 +50,7 @@ export function DownloadPage() {
               </div>
             )}
           </div>
-          <a className="download-page__web" href="/explore">
+          <a className="download-page__web" href="/studio">
             <span><strong>{copy.webTitle}</strong><small>{copy.webBody}</small></span>
             <em>{copy.webAction}<ArrowRight aria-hidden="true" /></em>
           </a>

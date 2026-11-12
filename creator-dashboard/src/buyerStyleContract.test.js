@@ -36,13 +36,13 @@ test("Studio opens for any signed-in account; signed-out visitors go to the one 
   assert.doesNotMatch(appSource, /\brole\b|RoleBoundary|WebChatRoleGate|creator-signup/);
   assert.match(appSource, /if \(sessionStatus !== "authenticated"\) \{\s+return <RouteRedirect to=\{`\/sign-up\?returnTo=/);
   assert.doesNotMatch(source, /creatorIntent|creator-signup|isExpert|\.role\b/);
-  assert.match(source, /params\.get\("returnTo"\) \|\| EXPLORE_ROOT/);
+  assert.match(source, /params\.get\("returnTo"\) \|\| STUDIO_ROOT/);
 });
 
 test("buyer navigation is two tabs, Explore and Studio, with orders/settings in the avatar menu and no search", () => {
   const nav = source.match(/<nav className="buyer-v2__nav"[\s\S]*?<\/nav>/)[0];
   assert.deepEqual([...nav.matchAll(/<RouterLink to=\{(\w+)\}/g)].map((match) => match[1]), ["EXPLORE_ROOT", "STUDIO_ROOT"]);
-  assert.match(source, /<WebBrand as=\{RouterLink\} className="buyer-v2__brand" to=\{EXPLORE_ROOT\}/);
+  assert.match(source, /<WebBrand as=\{RouterLink\} className="buyer-v2__brand" to="\/"/);
   assert.doesNotMatch(source, /buyer-v2__mobile-nav|buyer-v2__studio-link|HOME_ROOT|LIBRARY_ROOT|type="search"/);
   assert.match(accountSource, /href: "\/explore\/orders"[\s\S]*href: "\/account"/);
   assert.doesNotMatch(source, /github\.com\/keithhchen\/hatch-releases\/releases\/latest/);

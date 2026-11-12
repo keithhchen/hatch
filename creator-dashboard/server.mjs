@@ -4565,9 +4565,9 @@ function ageMs(value, nowMs) {
   return Number.isFinite(timestamp) ? Math.max(0, nowMs - timestamp) : 0;
 }
 
-// Retired buyer routes. /explore is the one home; orders live under it.
+// Retired buyer routes. /home and /library go to Studio; buyer orders live under /explore.
 export function retiredPortalRedirect(pathname) {
-  if (pathname === "/home" || pathname === "/library" || pathname.startsWith("/library/")) return "/explore";
+  if (pathname === "/home" || pathname === "/library" || pathname.startsWith("/library/")) return "/studio";
   if (pathname === "/orders" || pathname.startsWith("/orders/")) return `/explore${pathname}`;
   return null;
 }

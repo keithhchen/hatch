@@ -164,10 +164,10 @@ function WebChatWorkspace({ controller, dictate, access, productId, navigate, pr
     {mobileSidebarOpen ? <button type="button" className="web-chat__sidebar-backdrop" aria-label={t("closeMenu")} onClick={closeSidebar} /> : null}
     <aside id="web-chat-mobile-sidebar" ref={mobileSidebarRef} className={`web-chat__sidebar${mobileSidebarOpen ? " web-chat__sidebar--mobile-open" : ""}`} role={mobileSidebarOpen ? "dialog" : undefined} aria-modal={mobileSidebarOpen || undefined} aria-label={t("conversationHistory")} inert={briefOpen}>
       <div className="web-chat__sidebar-top">
-        <WebBrand href="/explore" className="web-chat__brand" />
+        <WebBrand href="/" className="web-chat__brand" />
         {mobileSidebarOpen ? <button type="button" className="web-chat__icon-button" aria-label={t("closeMenu")} onClick={closeSidebar}><X aria-hidden="true" /></button> : null}
       </div>
-      <a href="/explore" className="web-chat__back"><ArrowLeft aria-hidden="true" /><span>{t("backToMyAgents")}</span></a>
+      <a href="/studio" className="web-chat__back"><ArrowLeft aria-hidden="true" /><span>{t("backToMyAgents")}</span></a>
       <button type="button" className="web-chat__new" onClick={newConversation}>
         <Plus aria-hidden="true" /><span>{t("newChat")}</span>
       </button>
@@ -259,7 +259,7 @@ export default function WebChatPage({ productId, conversationId: routedConversat
   if (workspace) return <WebChatWorkspace {...workspace} productId={productId} navigate={navigate} profile={profile} onSignOut={onSignOut} t={t} locale={locale} />;
 
   const identity = resolveCreatorIdentity({ product: publicProduct });
-  const myAgentsLink = <a href="/explore" className="web-chat__button">{t("backToMyAgents")}</a>;
+  const myAgentsLink = <a href="/studio" className="web-chat__button">{t("backToMyAgents")}</a>;
   const account = <WebChatAccountControls profile={profile} onSignOut={onSignOut} />;
   if (error) return <div className="web-chat web-chat--gate">
     <WebChatGate alert account={account} pill={t("unavailablePill")} title={t("unableToOpenChat")} body={webChatErrorText(error, locale)} actions={<>

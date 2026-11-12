@@ -80,7 +80,7 @@ export function CreatorPortalV2({
   const workbench = route.kind === "agent" && route.tab === "build";
 
   const sidebar = <aside className={`sx-sidebar${drawerOpen ? " is-open" : ""}`} aria-label={t("hatchNavigation")}>
-    <a className="sx-back" href="/explore" onClick={(event) => { event.preventDefault(); go("/explore"); }}><ArrowLeft aria-hidden="true" /><span>{t("sxBackToHatch")}</span></a>
+    <a className="sx-back" href="/" onClick={(event) => { event.preventDefault(); go("/"); }}><ArrowLeft aria-hidden="true" /><span>{t("sxBackToHatch")}</span></a>
     <div className="sx-sidebar__top">
       <WebBrand className="cpv2-brand" label={t("studio")} href={ROOT} aria-label={t("hatchCreatorHome")} onClick={(event) => { event.preventDefault(); go(ROOT); }} />
       <IconButton className="sx-sidebar__close" label={t("sxCloseMenu")} variant="ghost" size="small" onClick={() => setDrawerOpen(false)}><X aria-hidden="true" /></IconButton>
