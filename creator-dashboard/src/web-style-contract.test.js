@@ -70,7 +70,9 @@ test("Web home speaks to experts with one try CTA", () => {
   const page = read("creator-dashboard/src/web/HatchPage.tsx");
 
   assert.match(page, /id=\"top\"/);
-  assert.match(page, /fetch\("\/api\/apply"/);
+  assert.match(page, /className="contact-dialog trial-dialog"/);
+  assert.match(page, /className="btn btn-yolk trial-cta" href="\/studio"/);
+  assert.doesNotMatch(page, /\/api\/apply/);
   assert.doesNotMatch(page, /href="\/(explore|download)"/);
   assert.match(page, /fetch\(\"\/api\/contact\"/);
   assert.match(page, /<FieldPicker/);
