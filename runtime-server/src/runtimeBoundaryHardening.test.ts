@@ -74,6 +74,7 @@ test("legacy HMAC auth is inert by default and uses only an explicit Runtime env
     const disabledStore = new RuntimeStore(disabledDataDir);
     await seedLocalConversations(disabledStore, ["legacy-install-disabled"]);
     disabled = await createRuntimeServerFromEnvironment({
+      HATCH_ALLOW_INSECURE_LOCAL_MODE: "true",
       HATCH_AUTH_SIGNING_SECRET: explicitSecret,
       HATCH_RUNTIME_DATA_DIR: disabledDataDir
     });
@@ -90,6 +91,7 @@ test("legacy HMAC auth is inert by default and uses only an explicit Runtime env
     const enabledStore = new RuntimeStore(enabledDataDir);
     await seedLocalConversations(enabledStore, ["legacy-install-enabled"]);
     enabled = await createRuntimeServerFromEnvironment({
+      HATCH_ALLOW_INSECURE_LOCAL_MODE: "true",
       HATCH_ENABLE_LEGACY_HMAC_AUTH: "true",
       HATCH_AUTH_SIGNING_SECRET: explicitSecret,
       HATCH_RUNTIME_DATA_DIR: enabledDataDir
@@ -105,7 +107,7 @@ test("legacy HMAC auth is inert by default and uses only an explicit Runtime env
       /HATCH_AUTH_SIGNING_SECRET/
     );
     assert.throws(
-      () => createRuntimeServer({ enableLegacyHmacAuth: true }),
+      () => createRuntimeServer({ insecureLocalMode: true, enableLegacyHmacAuth: true }),
       /legacyHmacSecret/
     );
   } finally {
@@ -142,6 +144,7 @@ test("environment Runtime never treats the Registry database secret as its conve
   const seededStore = new RuntimeStore(root);
   await seedLocalConversations(seededStore, ["database-isolation-install"]);
   const runtime = await createRuntimeServerFromEnvironment({
+    HATCH_ALLOW_INSECURE_LOCAL_MODE: "true",
     HATCH_REGISTRY_DATABASE_URL: "postgres://registry-only.invalid/registry",
     HATCH_RUNTIME_DATA_DIR: root
   });
@@ -163,7 +166,7 @@ test("unauthenticated WebSocket is terminated when the client hello deadline exp
     localAuthority: new LocalRuntimeAuthority(),
     close: async () => { storeClosed = true; }
   } as unknown as RuntimeStore;
-  const runtime = createRuntimeServer({
+  const runtime = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: store,
     clientHelloTimeoutMs: 25
   });
@@ -187,7 +190,7 @@ test("unauthenticated WebSocket is terminated when the client hello deadline exp
 });
 
 test("runtime does not cap open sockets by source or total count", async () => {
-  const runtime = createRuntimeServer({
+  const runtime = createRuntimeServer({ insecureLocalMode: true,
     clientHelloTimeoutMs: 2_000
   });
   const port = await listen(runtime);
@@ -213,7 +216,7 @@ test("hello authorization accepts concurrent sessions without a count ceiling", 
       return new Promise<undefined>((resolve) => releases.push(resolve));
     }
   };
-  const runtime = createRuntimeServer({
+  const runtime = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-hello-capacity-"))),
     authIdentityResolver,
     clientHelloTimeoutMs: 2_000,
@@ -548,7 +551,7 @@ test("global active-run capacity rejects excess model work and releases on compl
   };
   const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-active-capacity-")));
   const conversationIds = ["active-conversation-one", "active-conversation-two", "active-conversation-three"];
-  const runtime = createRuntimeServer({
+  const runtime = createRuntimeServer({ insecureLocalMode: true,
     createRuntime: () => agentRuntime,
     conversationStore: store,
     conversationRepository: await seedLocalConversations(store, conversationIds),
@@ -607,7 +610,7 @@ test("per-user active-run capacity preserves room for another account", async ()
     "fair-run-conversation-same-user",
     "fair-run-conversation-other-user"
   ];
-  const runtime = createRuntimeServer({
+  const runtime = createRuntimeServer({ insecureLocalMode: true,
     createRuntime: () => agentRuntime,
     conversationStore: store,
     conversationRepository: await seedLocalConversations(store, conversationIds),
@@ -666,7 +669,7 @@ test("socket close retains global run capacity until an abort-ignoring Runtime s
   };
   const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-close-capacity-")));
   const conversationIds = ["close-capacity-conversation-first", "close-capacity-conversation-overflow"];
-  const runtime = createRuntimeServer({
+  const runtime = createRuntimeServer({ insecureLocalMode: true,
     createRuntime: () => agentRuntime,
     conversationStore: store,
     conversationRepository: await seedLocalConversations(store, conversationIds),
@@ -719,7 +722,7 @@ test("turn.cancel retains the conversation lease until an abort-ignoring Runtime
     }
   };
   const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-cancel-conversation-")));
-  const runtime = createRuntimeServer({
+  const runtime = createRuntimeServer({ insecureLocalMode: true,
     createRuntime: () => agentRuntime,
     conversationStore: store,
     conversationRepository: await seedLocalConversations(store, ["cancel-conversation-shared"]),
@@ -805,7 +808,7 @@ test("network-tool cancellation and timeout settle the run before releasing glob
       };
       const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), `hatch-runtime-tool-${mode}-`)));
       const conversationIds = [`${mode}-tool-conversation-first`, `${mode}-tool-conversation-second`];
-      const runtime = createRuntimeServer({
+      const runtime = createRuntimeServer({ insecureLocalMode: true,
         createRuntime: () => agentRuntime,
         conversationStore: store,
         conversationRepository: await seedLocalConversations(store, conversationIds),
@@ -857,7 +860,7 @@ test("network-tool cancellation and timeout settle the run before releasing glob
 test("one account can keep more than eight ready connections", async () => {
   const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-connections-")));
   const conversationIds = Array.from({ length: 10 }, (_, index) => `connection-${index + 1}`);
-  const runtime = createRuntimeServer({
+  const runtime = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: store,
     conversationRepository: await seedLocalConversations(store, conversationIds),
     authIdentityResolver: {
@@ -882,7 +885,7 @@ test("one account can keep more than eight ready connections", async () => {
 
 test("ready connections receive heartbeats and are reaped after the idle deadline", async () => {
   const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-heartbeat-")));
-  const runtime = createRuntimeServer({
+  const runtime = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: store,
     conversationRepository: await seedLocalConversations(store, ["heartbeat-user"]),
     connectionHeartbeatMs: 10,
@@ -1014,7 +1017,7 @@ test("one connection rejects a message for a different conversation before run-i
     }
   };
   const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-run-id-")));
-  const runtime = createRuntimeServer({
+  const runtime = createRuntimeServer({ insecureLocalMode: true,
     createRuntime: () => agentRuntime,
     conversationStore: store,
     conversationRepository: await seedLocalConversations(store, ["conversation-one", "conversation-two"])
@@ -1041,7 +1044,7 @@ test("one connection rejects a message for a different conversation before run-i
 });
 
 test("Runtime closes oversized WebSocket frames safely and remains healthy", async () => {
-  const runtime = createRuntimeServer({
+  const runtime = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-max-payload-")))
   });
   const port = await listen(runtime);
@@ -1083,7 +1086,7 @@ test("outbound WebSocket byte pressure terminates the consumer and releases the 
     }
   };
   const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-outbound-pressure-")));
-  const runtime = createRuntimeServer({
+  const runtime = createRuntimeServer({ insecureLocalMode: true,
     createRuntime: () => agentRuntime,
     conversationStore: store,
     conversationRepository: await seedLocalConversations(store, ["outbound-pressure-conversation"]),
@@ -1129,7 +1132,7 @@ test("outbound WebSocket byte pressure terminates the consumer and releases the 
 
 test("oversized protocol fields fail as controlled messages without consuming hello", async () => {
   const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-field-bounds-")));
-  const runtime = createRuntimeServer({
+  const runtime = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: store,
     conversationRepository: await seedLocalConversations(store, ["bounded-installation"])
   });
@@ -1159,7 +1162,7 @@ test("HTTP malformed paths and async store failures are controlled without unhan
     readVisibleConversation: async () => { throw new Error("simulated store outage"); },
     close: async () => undefined
   } as unknown as RuntimeStore;
-  const runtime = createRuntimeServer({ conversationStore: store });
+  const runtime = createRuntimeServer({ insecureLocalMode: true, conversationStore: store });
   const port = await listen(runtime);
   const unhandled: unknown[] = [];
   const onUnhandled = (error: unknown) => unhandled.push(error);
@@ -1197,7 +1200,7 @@ test("HTTP history responses are rejected before writing beyond the configured b
     }],
     close: async () => undefined
   } as unknown as RuntimeStore;
-  const runtime = createRuntimeServer({
+  const runtime = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: store,
     maxHttpResponseBytes: 1_024
   });
@@ -1376,7 +1379,7 @@ test("disconnect cleanup finishes when cancellation persistence fails", async ()
       yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
     }
   };
-  const runtime = createRuntimeServer({
+  const runtime = createRuntimeServer({ insecureLocalMode: true,
     createRuntime: () => agentRuntime,
     conversationStore: store,
     conversationRepository: await seedLocalConversations(store, [conversationId])

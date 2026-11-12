@@ -20,7 +20,7 @@ const frames = (text: string) => text.split("\n\n").filter(Boolean).map((frame) 
 
 test("a replayed send of a finished Run streams its result and ends, instead of waiting for an end that already happened", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-replay-stream-"));
-  const runtime = createRuntimeServer({
+  const runtime = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: new RuntimeStore(dataDir),
     conversationRepository: new InMemoryConversationRepository(localRuntimeAuthority(dataDir)),
     createRuntime: () => ({ async *run(input) {

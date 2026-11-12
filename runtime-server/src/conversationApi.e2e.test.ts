@@ -38,7 +38,7 @@ afterEach(async () => {
 
 test("Conversation HTTP API owns metadata, pagination, versions, and cursor snapshots", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-api-"));
-  runtime = createRuntimeServer({ conversationStore: new RuntimeStore(dataDir) });
+  runtime = createRuntimeServer({ insecureLocalMode: true, conversationStore: new RuntimeStore(dataDir) });
   const base = await listen(runtime.server);
   const scope = new URLSearchParams(binding).toString();
 
@@ -114,7 +114,7 @@ test("Conversation HTTP API owns metadata, pagination, versions, and cursor snap
 
 test("paged history keeps stable complete turns while new messages arrive", async () => {
   const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-history-pages-")));
-  runtime = createRuntimeServer({ conversationStore: store });
+  runtime = createRuntimeServer({ insecureLocalMode: true, conversationStore: store });
   const base = await listen(runtime.server);
   const scope = new URLSearchParams(binding).toString();
   const created = await json(base, `/v1/conversations?${scope}`, {
@@ -171,7 +171,7 @@ test("Conversation snapshot preserves attachment references and serves only boun
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-api-assets-"));
   const store = new RuntimeStore(dataDir);
   const assetStore = new RuntimeAssetStore(dataDir);
-  runtime = createRuntimeServer({ conversationStore: store, assetStore });
+  runtime = createRuntimeServer({ insecureLocalMode: true, conversationStore: store, assetStore });
   const base = await listen(runtime.server);
   const scope = new URLSearchParams(binding).toString();
   const created = await json(base, `/v1/conversations?${scope}`, {
@@ -302,7 +302,7 @@ test("Conversation HTTP creation carries the published corpus BriefSpec into an 
 
 test("Conversation Library keeps three Agent A and two Agent B conversations in separate scopes", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-library-hierarchy-"));
-  runtime = createRuntimeServer({ conversationStore: new RuntimeStore(dataDir) });
+  runtime = createRuntimeServer({ insecureLocalMode: true, conversationStore: new RuntimeStore(dataDir) });
   const base = await listen(runtime.server);
   const agentA = new URLSearchParams(binding).toString();
   const agentBBinding = {
@@ -352,7 +352,7 @@ test("Conversation Library keeps three Agent A and two Agent B conversations in 
 
 test("HTTP starts a Run with POST messages; the old POST runs reservation is gone", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-runs-"));
-  runtime = createRuntimeServer({
+  runtime = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: new RuntimeStore(dataDir),
     createRuntime: () => ({ async *run(input) {
       yield { type: "assistant.delta" as const, run_id: input.run_id, delta: { kind: "text" as const, content: `echo: ${input.message.content}` } };
@@ -392,7 +392,7 @@ test("HTTP starts a Run with POST messages; the old POST runs reservation is gon
 test("HTTP answers a failed Run again with POST retry: one new Run over the same transcript, idempotent by retry_id, refused when there is nothing to answer", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-retry-"));
   let calls = 0;
-  runtime = createRuntimeServer({
+  runtime = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: new RuntimeStore(dataDir),
     createRuntime: () => ({ async *run(input) {
       if (++calls === 1) throw new Error("fetch failed");
@@ -433,7 +433,7 @@ test("HTTP without wait returns 202 with the run id, and a stream delivers the R
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-stream-"));
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
-  runtime = createRuntimeServer({
+  runtime = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: new RuntimeStore(dataDir),
     createRuntime: () => ({ async *run(input) {
       await gate;
@@ -478,7 +478,7 @@ test("GET run returns canonical submission receipts or null without writing on r
   const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-run-receipt-http-")));
   const repository = new InMemoryConversationRepository(store.localAuthority);
   await repository.initialize();
-  runtime = createRuntimeServer({ conversationStore: store, conversationRepository: repository });
+  runtime = createRuntimeServer({ insecureLocalMode: true, conversationStore: store, conversationRepository: repository });
   const base = await listen(runtime.server);
   const scope = new URLSearchParams(binding).toString();
   const created = await json(base, `/v1/conversations?${scope}`, {
@@ -545,7 +545,7 @@ test("WebSocket retries use client_message_id without creating a second run or r
     productId: "local-product",
     corpusDigest: `sha256:${"0".repeat(64)}`
   });
-  runtime = createRuntimeServer({
+  runtime = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: store,
     conversationRepository: repository,
     createRuntime: () => new DeterministicAgentRuntime()
@@ -625,7 +625,7 @@ test("a conversation-bound socket rejects a mismatched message before persistenc
       corpusDigest: `sha256:${"0".repeat(64)}`
     });
   }
-  runtime = createRuntimeServer({
+  runtime = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: store,
     conversationRepository: repository,
     createRuntime: () => ({
@@ -673,7 +673,7 @@ test("local attachments commit references and fixed image bytes without using th
   await repository.createConversation({ id: conversationId, publicId: conversationId,
     ownerAccountId: "local-development", creatorId: "local-development", agentId: "local-agent",
     productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}` });
-  runtime = createRuntimeServer({ conversationStore: store, conversationRepository: repository, assetStore,
+  runtime = createRuntimeServer({ insecureLocalMode: true, conversationStore: store, conversationRepository: repository, assetStore,
     createRuntime: () => ({ async *run(input) {
       yield { type: "turn.completed" as const, run_id: input.run_id, finish_reason: "stop" as const };
     } }) });
@@ -716,7 +716,7 @@ test("completed assistant body is stored once and journal carries only one notif
   await repository.createConversation({ id: conversationId, publicId: conversationId,
     ownerAccountId: "local-development", creatorId: "local-development", agentId: "local-agent",
     productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}` });
-  runtime = createRuntimeServer({ conversationStore: store, conversationRepository: repository,
+  runtime = createRuntimeServer({ insecureLocalMode: true, conversationStore: store, conversationRepository: repository,
     createRuntime: () => ({ async *run(input) {
       yield { type: "assistant.delta" as const, run_id: input.run_id,
         delta: { kind: "text" as const, content: "The document is ready for review." } };
@@ -752,7 +752,7 @@ test("a failed manual compaction does not lose the already accepted user command
   await repository.createConversation({ id: conversationId, publicId: conversationId,
     ownerAccountId: "local-development", creatorId: "local-development", agentId: "local-agent",
     productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}` });
-  runtime = createRuntimeServer({ conversationStore: store, conversationRepository: repository,
+  runtime = createRuntimeServer({ insecureLocalMode: true, conversationStore: store, conversationRepository: repository,
     createRuntime: () => new DeterministicAgentRuntime() });
   const base = await listen(runtime.server);
   const messages: OutboundMessage[] = [];
@@ -788,7 +788,7 @@ test("a provider overflow is answered by compacting and continuing, once, and th
   await store.append({ type: "conversation.model_message", conversation_id: conversationId, run_id: "earlier", message: { role: "assistant", content: "an earlier answer" } });
   const summarized: string[] = [];
   let attempts = 0;
-  runtime = createRuntimeServer({
+  runtime = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: store, conversationRepository: repository,
     // A test-only summarizer: no real model is called.
     compactionStrategy: () => new CompactionStrategy(chatCompactionAdapter(async () => { summarized.push("asked"); return "## Goal\nan earlier question"; }), policyFor(262_144)),
@@ -845,7 +845,7 @@ test("Runtime startup ends a Run whose owner's lease lapsed as interrupted, keep
   await repository.transitionRun(waiting.run.id, "waiting_for_tool");
 
   const executed: string[] = [];
-  runtime = createRuntimeServer({
+  runtime = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: new RuntimeStore(dataDir),
     conversationRepository: repository,
     createRuntime: () => ({ async *run(input) {
@@ -874,7 +874,7 @@ test("closing every client never stops a Run: it waits for its local tool and a 
     id: conversationId, publicId: conversationId, ownerAccountId: "local-development", creatorId: "local-development",
     agentId: "local-agent", productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}`
   });
-  runtime = createRuntimeServer({
+  runtime = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: new RuntimeStore(dataDir),
     conversationRepository: repository,
     createRuntime: () => new DeterministicAgentRuntime()
@@ -913,7 +913,7 @@ test("a tool result sent through another conversation never reaches the Run that
       agentId: "local-agent", productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}`
     });
   }
-  runtime = createRuntimeServer({ conversationStore: new RuntimeStore(dataDir), conversationRepository: repository, createRuntime: () => new DeterministicAgentRuntime() });
+  runtime = createRuntimeServer({ insecureLocalMode: true, conversationStore: new RuntimeStore(dataDir), conversationRepository: repository, createRuntime: () => new DeterministicAgentRuntime() });
   const base = await listen(runtime.server);
 
   const messages: OutboundMessage[] = [];
@@ -944,7 +944,7 @@ test("a message sent during a Run joins it, from any client, and is idempotent p
     id: conversationId, publicId: conversationId, ownerAccountId: "local-development", creatorId: "local-development",
     agentId: "local-agent", productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}`
   });
-  runtime = createRuntimeServer({
+  runtime = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: new RuntimeStore(dataDir),
     conversationRepository: repository,
     createRuntime: () => new DeterministicAgentRuntime()
@@ -1002,7 +1002,7 @@ test("WebSocket subscribe: stream false gets durable events only, stream true al
     id: conversationId, publicId: conversationId, ownerAccountId: "local-development", creatorId: "local-development",
     agentId: "local-agent", productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}`
   });
-  runtime = createRuntimeServer({
+  runtime = createRuntimeServer({ insecureLocalMode: true,
     conversationStore: new RuntimeStore(dataDir),
     conversationRepository: repository,
     createRuntime: () => ({ async *run(input) {
@@ -1056,7 +1056,7 @@ test("missing image fails before accepting, and retry uses fixed committed bytes
   await repository.createConversation({ id: "atomic-image", publicId: "atomic-image",
     ownerAccountId: "local-development", creatorId: "local-development", agentId: "local-agent",
     productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}` });
-  runtime = createRuntimeServer({ conversationStore: store, conversationRepository: repository, assetStore,
+  runtime = createRuntimeServer({ insecureLocalMode: true, conversationStore: store, conversationRepository: repository, assetStore,
     createRuntime: () => ({ async *run(input, context) {
       executions += 1;
       assert.deepEqual(context.messages[0]?.model_images, [{ type: "image", data: bytes.toString("base64"), mimeType: "image/png" }]);
@@ -1116,7 +1116,7 @@ for (const boundary of ["before", "after"] as const) {
       await gate;
       return committed;
     };
-    runtime = createRuntimeServer({ conversationStore: store, conversationRepository: repository,
+    runtime = createRuntimeServer({ insecureLocalMode: true, conversationStore: store, conversationRepository: repository,
       createRuntime: () => ({ async *run(input, context) {
         executions += 1;
         assert.equal(context.messages.filter((message) => message.role === "user").length, 1);
