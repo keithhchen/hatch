@@ -93,8 +93,8 @@ class Matrix extends Scenario {
   async codingAgentToStudio(stack, rec, matrix, hasKimi) {
     if (!hasKimi) { for (const id of ["1a", "1b"]) matrix[id] = { status: "BLOCKED", reason: "LLM_API_KEY (kimi-k2.6) is absent, the Studio Assistant cannot run" }; return; }
     const httpDecision = (studio) => ({
-      approve: async (id) => { const r = await studio.call("POST", `/v1/creator/assistant/tasks/${id}/approve`, { body: {} }); return { ok: r.status === 200, detail: { status: r.status, body: r.text.slice(0, 160) } }; },
-      decline: async (id) => { const r = await studio.call("POST", `/v1/creator/assistant/tasks/${id}/decline`, { body: {} }); return { ok: r.status === 200, detail: { status: r.status, body: r.text.slice(0, 160) } }; }
+      approve: async (id) => { const r = await studio.call("POST", `/v1/creator/assistant/tasks/${id}/approve`, { body: {}, headers: { "idempotency-key": randomUUID() } }); return { ok: r.status === 200, detail: { status: r.status, body: r.text.slice(0, 160) } }; },
+      decline: async (id) => { const r = await studio.call("POST", `/v1/creator/assistant/tasks/${id}/decline`, { body: {}, headers: { "idempotency-key": randomUUID() } }); return { ok: r.status === 200, detail: { status: r.status, body: r.text.slice(0, 160) } }; }
     });
 
     await walk(matrix, rec, "1a", "coding agent (CLI) -> Studio: create a Product, ask the Assistant to change its price, confirm", async (cell) => {

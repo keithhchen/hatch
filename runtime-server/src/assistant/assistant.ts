@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { Type } from "@earendil-works/pi-ai";
@@ -204,11 +203,11 @@ export class AssistantService implements StudioOperations {
   upload(accountId: string, name: string, bytes: Buffer): Promise<UploadedRef> { return this.chat.upload(accountId, name, bytes); }
 
   /** The Expert sent a file or a picture from Studio's page. It becomes an attachment of the conversation, and the Assistant is told. */
-  async receive(accountId: string, name: string, bytes: Buffer, source: ExpertSource, ref: { id?: string; messageRef?: string; caption?: string } = {}): Promise<{ name: string; sent: SentMessage }> {
+  async receive(accountId: string, name: string, bytes: Buffer, source: ExpertSource, ref: { id: string; messageRef?: string; caption?: string }): Promise<{ name: string; sent: SentMessage }> {
     const { assetId, kind } = await this.upload(accountId, name, bytes);
     const caption = ref.caption?.trim();
     const sent = await this.hear(accountId, {
-      id: ref.id ?? randomUUID(), source, ...(ref.messageRef ? { messageRef: ref.messageRef } : {}),
+      id: ref.id, source, ...(ref.messageRef ? { messageRef: ref.messageRef } : {}),
       parts: [...(caption ? [{ type: "text" as const, text: caption }] : []), { type: kind, assetId }]
     });
     return { name, sent };
@@ -228,7 +227,7 @@ export class AssistantService implements StudioOperations {
     await this.hearSystem(job.accountId, `[资料 ${job.id} · Agent ${job.productId}] Ingest ${job.status === "failed" ? "没做成" : "做完了"}：\n${items.join("\n")}`, undefined, `ingested:${job.id}`);
   }
 
-  private async hearSystem(accountId: string, text: string, taskId?: string, key?: string): Promise<void> {
+  private async hearSystem(accountId: string, text: string, taskId: string | undefined, key: string): Promise<void> {
     const sent = await this.chat.sayAsSystem(accountId, text, key);
     // The reply to news is the Assistant's own to send, unless the news joined a Run that has its own reply path.
     // A replay owes it too: the first try may have stopped between saying and owing, and owing twice is one debt.
@@ -437,14 +436,16 @@ export class AssistantService implements StudioOperations {
 
   async decline(accountId: string, taskId: string, key: string): Promise<AssistantTask> { return (await this.decide(accountId, taskId, "decline", key)).task; }
 
-  /** Give a waiting task the Expert's answer. */
-  async answer(accountId: string, taskId: string, text: string): Promise<AssistantTask> {
+  /** Give a waiting task the Expert's answer. `key` is the answerer's own, as for `decide`: the same answer again is a replay, and nothing runs twice. */
+  async answer(accountId: string, taskId: string, text: string, key: string): Promise<AssistantTask> {
     const task = await this.ownedTask(accountId, taskId);
+    if (task.payload.answerKey === key) return task;
     if (task.status !== "needs_you" || task.needs !== "answer") throw new Error("这件事现在不需要回答");
-    if (task.kind === "poke") return this.deps.tasks.update(task.id, { status: "done", answeredAt: new Date().toISOString() });
+    const answerKey = { answerKey: key };
+    if (task.kind === "poke") return this.deps.tasks.update(task.id, { status: "done", answeredAt: new Date().toISOString(), payload: answerKey });
     const runtime = await this.sessionRuntime(task);
     await runtime.start(task.session!.sessionId, text);
-    return this.deps.tasks.update(task.id, { status: "working", leaseExpiresAt: lease() });
+    return this.deps.tasks.update(task.id, { status: "working", leaseExpiresAt: lease(), payload: answerKey });
   }
 
   async openTasks(accountId: string): Promise<AssistantTask[]> { return this.deps.tasks.open(accountId); }

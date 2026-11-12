@@ -30,7 +30,7 @@ export interface StudioOperations {
   /** Marks one item of an Agent's interview outline done. Returns the outline. */
   tickOutline(accountId: string, productId: string, item: string): Promise<Todo[]>;
   excludeSource(accountId: string, source: string, reason?: string): Promise<void>;
-  answer(accountId: string, taskId: string, text: string): Promise<AssistantTask>;
+  answer(accountId: string, taskId: string, text: string, key: string): Promise<AssistantTask>;
   /** `key` is the decider's: the same decision under it again is the same decision, not a second one. */
   approve(accountId: string, taskId: string, key: string): Promise<AssistantTask>;
   decline(accountId: string, taskId: string, key: string): Promise<AssistantTask>;
@@ -160,7 +160,7 @@ export function studioTools(ops: StudioOperations): StudioTool[] {
       run: async (call, args) => { await ops.excludeSource(call.accountId, String(args.source), args.reason as string | undefined); return done("已记下"); } },
     { name: "answer_task", readOnly: false, schema: z.object({ task_id: z.string(), answer: text(1, 20000) }).strict(),
       description: "把专家对某件事的回答原样交回给它。",
-      run: async (call, args) => done(taskView(await ops.answer(call.accountId, String(args.task_id), String(args.answer)))) },
+      run: async (call, args) => done(taskView(await ops.answer(call.accountId, String(args.task_id), String(args.answer), `run:${call.runId}:answer:${args.task_id}`))) },
     { name: "approve_task", readOnly: false, schema: z.object({ task_id: z.string() }).strict(),
       description: "专家在对话里同意了某件需要确认的事。",
       run: async (call, args) => done(taskView(await ops.approve(call.accountId, String(args.task_id), `run:${call.runId}:approve:${args.task_id}`))) },

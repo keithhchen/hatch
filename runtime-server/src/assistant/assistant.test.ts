@@ -284,7 +284,8 @@ test("A worker question becomes a task waiting for the Expert, and the Assistant
     assert.ok(heard.some(text => text.startsWith(`[任务 ${task.id}]`)));
     await env.idle();
     assert.deepEqual((await env.chat.lines(ACCOUNT)).filter(line => line.role === "user"), [], "news is not the Expert speaking");
-    await env.assistant.answer(ACCOUNT, task.id, "第二条最不像我");
+    await env.assistant.answer(ACCOUNT, task.id, "第二条最不像我", "answer-1");
+    await env.assistant.answer(ACCOUNT, task.id, "第二条最不像我", "answer-1");
     await waitFor(async () => (await env.tasks.get(task.id))!.status === "done");
     const answered = (await env.productStore.get(evaluator.id)).messages.filter(message => message.role === "user").map(message => JSON.stringify(message.content));
     assert.ok(answered.some(text => text.includes("第二条最不像我")), "the answer reached the worker");

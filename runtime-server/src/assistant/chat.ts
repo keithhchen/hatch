@@ -200,7 +200,7 @@ export class AssistantChat implements AssistantHost {
   }
 
   /** The Assistant's own words to itself: news from its workers, the daily check, Never shown as the Expert's. */
-  sayAsSystem(accountId: string, text: string, key: string = randomUUID()): Promise<SentMessage> {
+  sayAsSystem(accountId: string, text: string, key: string): Promise<SentMessage> {
     return this.say(accountId, { id: `${SYSTEM_MESSAGE_PREFIX}${key}`, parts: [{ type: "text", text }], client: { client: "web" } });
   }
 

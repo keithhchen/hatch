@@ -41,9 +41,12 @@ function clientOf(body: Record<string, unknown>): ClientAttributes {
   try { return normalizeClientAttributes(spec); } catch (error) { throw new ConversationError(400, "invalid_client", (error as Error).message); }
 }
 
+/** The public API's key is optional, as is usual: with one a retry replays; without one the request stands alone and a retry of it is new. */
+export function keyOrNew(raw: unknown): string { return messageKey(raw) ?? randomUUID(); }
+
 /** The client's key is the message's id: the same one the page and the Chat API mean by it. */
-function keyOf(request: http.IncomingMessage, body: Record<string, unknown>): string | undefined {
-  try { return messageKey(request.headers["idempotency-key"] ?? body.idempotency_key); }
+function keyOf(request: http.IncomingMessage, body: Record<string, unknown>): string {
+  try { return keyOrNew(request.headers["idempotency-key"] ?? body.idempotency_key); }
   catch (error) { if (error instanceof ChatError) throw new ConversationError(error.status, error.code, error.message); throw error; }
 }
 
@@ -113,7 +116,7 @@ export class ConversationRoutes {
   private async retry(conversation: Conversation, request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
     if (!conversation.retry) throw new ConversationError(501, "retry_unavailable", "This conversation cannot answer again.");
     const body = await this.deps.readJson(request);
-    const { runId, outcome } = await conversation.retry(keyOf(request, body) ?? randomUUID(), clientOf(body));
+    const { runId, outcome } = await conversation.retry(keyOf(request, body), clientOf(body));
     this.deps.json(response, 202, { run_id: runId, outcome });
   }
 
@@ -121,7 +124,7 @@ export class ConversationRoutes {
     const body = await this.deps.readJson(request);
     const { text, attachments } = await resolveContent(parseContent(body.content), target.assets);
     if ((!text && !attachments.length) || text.length > target.maxContent) throw new ConversationError(400, "invalid_message", `Message must contain 1–${target.maxContent} characters.`);
-    return { id: keyOf(request, body) ?? randomUUID(), text, attachments, client: clientOf(body) };
+    return { id: keyOf(request, body), text, attachments, client: clientOf(body) };
   }
 
   /** The file is the request body and its name is `?name=`; it is a ready asset, or refused with the reason, before any message is sent. */
