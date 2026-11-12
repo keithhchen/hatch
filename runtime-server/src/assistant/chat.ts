@@ -9,7 +9,8 @@ import { failureOfReason } from "../errors/failures.js";
 import { ChatAssets, attachmentMessageId } from "../chat/assets.js";
 import type { ChatGateway, ConversationRef, SentMessage, UploadedRef } from "../chat/gateway.js";
 import { ChatRuntime } from "../chat/chatRuntime.js";
-import { attributeByScope, type UsageRecorder } from "../usage/usage.js";
+import { attributeByScope, payerByScope, type UsageRecorder } from "../usage/usage.js";
+import type { UsageCap } from "../usage/usageCap.js";
 import { NO_SKILLS, failRun, runModelTurn, type TurnBinding } from "../chat/modelTurn.js";
 import { ChatError, accountPrincipal } from "../chat/principal.js";
 import type { Retried } from "../chat/chatService.js";
@@ -66,6 +67,8 @@ export type AssistantChatDeps = {
   report?: (accountId: string, error: unknown) => void;
   /** Where the Assistant's model calls are recorded, as Studio usage of the Expert. */
   usage?: UsageRecorder;
+  /** Refuses a new Assistant Run when the Expert has spent their month. */
+  usageCap?: UsageCap;
 };
 
 /** The Assistant's one conversation per account is the account's own: nothing else binds to it. */
@@ -106,7 +109,8 @@ export class AssistantChat implements AssistantHost {
       toolTimeoutMs: deps.toolTimeoutMs ?? 120_000,
       leaseMs: deps.leaseMs, sweepMs: deps.sweepMs,
       ...(deps.compactionStrategy ? { compactionStrategy: deps.compactionStrategy } : {}),
-      ...(deps.usage ? { usage: { recorder: deps.usage, attribute: attributeByScope } } : {})
+      ...(deps.usage ? { usage: { recorder: deps.usage, attribute: attributeByScope } } : {}),
+      ...(deps.usageCap ? { cap: deps.usageCap.guard(payerByScope) } : {})
     });
     this.feed = new JournalFeed({ repository: deps.repository, hub: this.runtime.hub });
     this.gateway = new ServiceChatGateway<AssistantScope>({

@@ -20,7 +20,7 @@ export class AssistantTarget implements ChatTarget {
     return { quietWhenEmpty: true, ...(buttons.length ? { buttons } : {}) };
   };
 
-  wording = { tooLarge: ({ connection }: Inbound) => `这个文件太大，${CHANNEL_LABELS[connection.channel as ChannelKind]} 传不过来。可以放到 Studio 里传。`, unreadable: "这种消息我还读不了，可以发文字、图片或文档。" };
+  wording = { tooLarge: ({ connection }: Inbound) => `这个文件太大，${CHANNEL_LABELS[connection.channel as ChannelKind]} 传不过来。可以放到 Studio 里传。`, unreadable: "这种消息我还读不了，可以发文字、图片或文档。", capReached: "你本月的使用额度已用完，下月初恢复。\nYour monthly limit is reached; it resets next month.\n今月の利用上限に達しました。来月リセットされます。" };
 
   /** The router admits only the owner. Studio actions never depend on that alone. */
   async admit({ connection, principal }: Inbound): Promise<undefined> {

@@ -21,6 +21,7 @@ import { declareTools, studioToolSupport, type ClientSupport } from "./toolSurfa
 import { modelRole } from "../modelRoles.js";
 import { log } from "../observability/log.js";
 import { usageSink, type UsageRecorder, type UsageSink } from "../usage/usage.js";
+import { UsageCapExceeded, type UsageCap } from "../usage/usageCap.js";
 
 const WEB: ClientAttributes = { client: "web" };
 
@@ -34,7 +35,7 @@ export type WorkbenchRuntimeOptions = {
   /** Where public events are recorded from the first Run, and where a message is persisted together with its event. */
   journal?: Journal;
   /** Whose Studio usage this workspace's model calls are, and where they are recorded. */
-  usage?: { recorder: UsageRecorder; accountId: string };
+  usage?: { recorder: UsageRecorder; accountId: string; /** A Run is not started when the account has spent its month. */ cap?: UsageCap };
   deadlineMs?: number;
   maxTurns?: number;
   /** One strategy with Chat; this is Studio's adapter. Tests inject a test-only summarizer and a small window. */
@@ -107,6 +108,8 @@ export class WorkbenchRuntime {
     const message = typeof input === "string" ? input : input.map(messageText).join("\n\n");
     if (!message.trim() || message.length > 100000) throw new Error("Provide a message of 1–100000 characters");
     if (this.active.has(id)) throw new Error("This conversation is already running");
+    // Only a new Run is asked; steering into a running one goes through send() and never reaches here.
+    await this.options.usage?.cap?.assertWithinCap(this.options.usage.accountId);
     const controller = new AbortController();
     const runId = `run_${randomUUID()}`;
     this.active.set(id, controller);
@@ -173,7 +176,13 @@ export class WorkbenchRuntime {
   private async resume(id: string): Promise<void> {
     const waiting = await this.waiting(id);
     if (!waiting.length || this.active.has(id) || this.closing) return;
-    await this.start(id, waiting.filter(message => this.claim(id, message)));
+    try { await this.start(id, waiting.filter(message => this.claim(id, message))); } catch (error) {
+      // A message that cannot start its Run is never left quietly queued: the session says why, and the message stays for the next send.
+      this.delivered.delete(id);
+      if (!(error instanceof UsageCapExceeded)) throw error;
+      await this.store.update(id, s => { s.status = "failed"; s.error = error.message; s.errorCode = error.code; delete s.errorRef; });
+      this.emit(id, "state");
+    }
   }
   /** Studio has no memory layer for conversations, so the strategy gets no CompactionMemory. */
   private strategy(): CompactionStrategy<AgentMessage> {

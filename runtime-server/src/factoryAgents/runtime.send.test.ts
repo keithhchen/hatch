@@ -12,16 +12,19 @@ import { MessageAlreadyAccepted, WorkbenchRuntime } from "./runtime.js";
 import { WorkerConversation } from "../conversations/workerConversation.js";
 import { WORKERS } from "../conversations/workers.js";
 import { WorkbenchStore } from "./store.js";
+import { emptySurfaces } from "../usage/usage.js";
+import { UsageCap, UsageCapExceeded } from "../usage/usageCap.js";
 
 type Call = { tools: Array<{ name: string; description: string }>; last: string };
 
 /** Real store and runtime; only the model is scripted. `plan(call)` is the tool the model calls, if any. */
-async function harness(options: { plan?: (call: number) => string | undefined; toolSupport?: (name: string) => readonly ("web" | "cli")[] | "*"; delayMs?: number; fail?: (call: number) => boolean } = {}) {
+async function harness(options: { plan?: (call: number) => string | undefined; toolSupport?: (name: string) => readonly ("web" | "cli")[] | "*"; delayMs?: number; fail?: (call: number) => boolean; cap?: UsageCap } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-send-"));
   const store = new WorkbenchStore(root, { creatorId: "c1", productId: "p1" }, new MemoryAgentDefinitionRepository(await initialAgentDefinitions()));
   const calls: Call[] = [];
   const build = () => new WorkbenchRuntime(store, {
     env: { HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash" },
+    ...(options.cap ? { usage: { recorder: { record: async () => undefined }, accountId: "c1", cap: options.cap } } : {}),
     toolSupport: options.toolSupport as never,
     agentFactory: factory => new Agent({ ...factory.agentOptions, initialState: { ...factory.initialState, model: createFactoryLlmModel({ env: factory.env }) }, streamFn: (_model, context, streamOptions) => {
       const call = calls.length + 1;
@@ -235,5 +238,45 @@ test("send: a message steered into a run that is stopped is still in history", a
     h.runtime.stop(h.session.id);
     await h.idle();
     assert.deepEqual(userTexts((await h.store.get(h.session.id)).messages), ["one", "two"]);
+  } finally { await h.close(); }
+});
+
+test("send: a Run starts only while the account is within its cap; one in flight finishes and takes steered messages", async () => {
+  const month = emptySurfaces();
+  const cap = new UsageCap({ monthToDate: async () => month }, 100, { ttlMs: 0 });
+  const h = await harness({ cap, delayMs: 60 });
+  try {
+    await h.runtime.send(h.session.id, h.say("one"));
+    month.studio.input = 100; // the month is spent while the Run is in flight
+    assert.equal((await h.runtime.send(h.session.id, h.say("steer"))).queued, true, "steering into a Run is allowed");
+    await h.idle();
+    assert.equal((await h.store.get(h.session.id)).status, "completed", "the Run in flight finished");
+    assert.deepEqual(userTexts((await h.store.get(h.session.id)).messages), ["one", "steer"]);
+    await assert.rejects(h.runtime.send(h.session.id, h.say("next")), (error: unknown) => error instanceof UsageCapExceeded && error.status === 429 && error.code === "usage_cap_exceeded");
+    assert.equal(h.runtime.isRunning(h.session.id), false);
+    assert.equal(((await h.store.get(h.session.id)).queue ?? []).length, 0, "a refused message is not left queued");
+  } finally { await h.close(); }
+});
+
+test("send: a message that lands as a Run ends, over the cap, settles the session as failed usage_cap_exceeded and stays for the next send", async () => {
+  const month = emptySurfaces();
+  const cap = new UsageCap({ monthToDate: async () => month }, 100, { ttlMs: 0 });
+  const h = await harness({ cap });
+  try {
+    await h.runtime.send(h.session.id, h.say("one"));
+    await h.idle();
+    month.studio.input = 100;
+    await h.store.enqueue(h.session.id, h.say("late")); // landed as the Run ended
+    await (h.runtime as unknown as { resume(id: string): Promise<void> }).resume(h.session.id);
+    const session = await h.store.get(h.session.id);
+    assert.deepEqual([session.status, session.errorCode, h.runtime.isRunning(h.session.id)], ["failed", "usage_cap_exceeded", false]);
+    assert.equal((session.queue ?? []).length, 1, "the message is not lost");
+    assert.equal(h.events.at(-1)?.type, "state");
+    month.studio.input = 0; // the cap was raised or the month reset
+    await h.runtime.send(h.session.id, h.say("again"));
+    await h.idle();
+    const done = await h.store.get(h.session.id);
+    assert.equal(done.status, "completed");
+    assert.deepEqual(userTexts(done.messages), ["one", "late", "again"], "the held message is answered with the resend");
   } finally { await h.close(); }
 });
