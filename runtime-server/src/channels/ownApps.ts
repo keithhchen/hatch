@@ -57,6 +57,6 @@ export class OwnApps {
     const current = await this.current(accountId, kind, { kind: "product", productId });
     if (!current) return;
     await form.release?.(form.build(current.credentials, current.scope)).catch(() => undefined);
-    await this.deps.connections.revokeTenant(kind, current.scope);
+    await this.deps.connections.unbindTenant(kind, current.scope);
   }
 }

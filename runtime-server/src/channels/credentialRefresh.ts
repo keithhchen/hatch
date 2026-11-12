@@ -4,13 +4,13 @@ import { CredentialsExpired } from "./types.js";
 
 /**
  * Renews credentials that expire, such as Instagram's 60-day tokens, before they do. What to renew and when is the adapter's
- * (`refresh`); this only walks the tenants. Credentials that can no longer be renewed revoke their Connection, so the Expert installs again.
+ * (`refresh`); this only walks the tenants. Credentials that can no longer be renewed unbind their Connection, credentials and all, so the Expert installs again.
  */
 export class CredentialRefresher {
   private timer?: NodeJS.Timeout;
   constructor(private deps: {
     hub: ChannelHub;
-    connections: Pick<ConnectionRepository, "listening" | "credentials" | "saveCredentials" | "revoke">;
+    connections: Pick<ConnectionRepository, "listening" | "credentials" | "saveCredentials" | "unbind">;
     seal: { seal(value: unknown): string; open<T>(sealed: string): T };
     onError: (key: string, error: unknown) => void;
     now?: () => Date;
@@ -34,7 +34,7 @@ export class CredentialRefresher {
         const next = await adapter.refresh(seal.open(sealed), this.deps.now?.() ?? new Date());
         if (next) await connections.saveCredentials(ownerAccountId, channel, seal.seal(next), scope);
       } catch (error) {
-        if (error instanceof CredentialsExpired) await connections.revoke(ownerAccountId, channel);
+        if (error instanceof CredentialsExpired) await connections.unbind(ownerAccountId, channel);
         this.deps.onError(`${channel}:${scope}`, error);
       }
     }

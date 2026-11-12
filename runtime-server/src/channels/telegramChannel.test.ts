@@ -48,6 +48,13 @@ test("verify checks the secret header", () => {
   assert.equal(channel(undefined, { webhookSecret: undefined }).telegram.verify(raw, { "x-telegram-bot-api-secret-token": "s3cret" }), false);
 });
 
+test("a user blocking the bot in a private chat is an unbound event; unblocking, or a group change, is nothing", () => {
+  const change = (chat: { id: number; type: string }, status: string) => ({ update_id: 9, my_chat_member: { chat, from: { id: 42 }, new_chat_member: { status } } });
+  assert.deepEqual(parse(change({ id: 42, type: "private" }, "kicked")), [{ eventId: "9", sequence: 9, address: TO, unbound: true }]);
+  assert.deepEqual(parse(change({ id: 42, type: "private" }, "member")), []);
+  assert.deepEqual(parse(change({ id: -100, type: "supergroup" }, "kicked")), []);
+});
+
 test("private text, photo and document parse with thread and sender the same", () => {
   assert.deepEqual(parse(privateMessage({ text: "hi" })), [{ eventId: "1", sequence: 1, address: TO, messageRef: "10", text: "hi" }]);
   assert.deepEqual(parse(privateMessage({ photo: [{ file_id: "small" }, { file_id: "big", file_size: 99 }], caption: " look " })), [{ eventId: "1", sequence: 1, address: TO, messageRef: "10", text: "look", file: { ref: "big", name: "photo.jpg", size: 99 } }]);
@@ -192,7 +199,7 @@ test("a link goes out as a URL button; the bot, its scope and webhook are manage
   assert.deepEqual(calls[0]!.body.reply_markup, { inline_keyboard: [[{ text: "Log in", url: "https://site.test/v1/auth/telegram/start?claim=c" }]] });
   assert.equal(await telegram.probe(), "shop_bot");
   await telegram.setWebhook("https://site.test/hook", "sec");
-  assert.deepEqual(calls.at(-1)!.body, { url: "https://site.test/hook", secret_token: "sec", allowed_updates: ["message", "callback_query"], max_connections: 1 }, "one connection: Telegram delivers in update_id order");
+  assert.deepEqual(calls.at(-1)!.body, { url: "https://site.test/hook", secret_token: "sec", allowed_updates: ["message", "callback_query", "my_chat_member"], max_connections: 1 }, "one connection: Telegram delivers in update_id order");
   await telegram.deleteWebhook();
   assert.deepEqual(calls.map(call => call.url.split("/").pop()), ["sendMessage", "getMe", "setWebhook", "deleteWebhook"]);
   const bot = new TelegramChannel({ token: "t", username: "shop_bot", webhookSecret: "s" }, "scope-1");

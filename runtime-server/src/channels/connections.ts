@@ -57,23 +57,30 @@ export interface ConnectionRepository {
   owned(ownerAccountId: string): Promise<OwnedConnection[]>;
   get(id: string): Promise<ChannelConnection | undefined>;
   touch(id: string): Promise<void>;
-  /** `degraded` only from `active`; back to `active` only from `degraded`. A revoked Connection stays revoked. */
-  setState(id: string, state: Exclude<ConnectionState, "revoked">): Promise<void>;
-  /** The account unbinds its self Connection to `target`: nobody is linked and nothing is processed. Credentials stay, sealed, for a later link. */
-  revoke(ownerAccountId: string, channel: ChannelKind, target?: AgentTarget): Promise<void>;
+  /** `degraded` only from `active`; back to `active` only from `degraded`. */
+  setState(id: string, state: ConnectionState): Promise<void>;
+  /**
+   * Unbinding ends the binding: the account's self Connection to `target` is deleted with its identities and credentials, and nothing
+   * still queued for it is sent. Idempotent. To bind again is to bind anew.
+   */
+  unbind(ownerAccountId: string, channel: ChannelKind, target?: AgentTarget): Promise<void>;
+  /** The platform says this Connection can no longer reach its person (they blocked or removed the bot): a self Connection is unbound; any other keeps serving. False when it was not self or is already gone. */
+  unbindPersonal(id: string): Promise<boolean>;
+  /** A sender took themselves away from our account on the platform. Their self Connection is unbound; for a contact only their identity goes, and the Connection keeps serving everyone else. */
+  unbindSender(channel: ChannelKind, scope: string, senderId: string): Promise<void>;
   /**
    * `scope` names the platform tenant the credentials belong to, where that is known only from them (a Slack workspace, a Page, a bot).
    * They go on the Assistant's Connection, or on a Product's public one. A new scope drops everyone bound under the old one.
    */
   saveCredentials(ownerAccountId: string, channel: ChannelKind, sealed: string, scope?: string, target?: AgentTarget): Promise<void>;
   credentials(ownerAccountId: string, channel: ChannelKind): Promise<string | undefined>;
-  /** The sealed credentials of a platform tenant on a shared app, whoever owns its Connection. Absent once access is revoked. */
+  /** The sealed credentials of a platform tenant on a shared app, whoever owns its Connection. Absent once access is gone. */
   credentialsOf(channel: ChannelKind, scope: string): Promise<string | undefined>;
   /** Who a still-valid link code was issued to, for a platform's install redirect that carries it as `state`. */
   ownerOfCode(channel: ChannelKind, code: string, now?: Date): Promise<string | undefined>;
-  /** The platform took a tenant's access away: its Connections are revoked, nobody stays linked, and its credentials are dropped. */
-  revokeTenant(channel: ChannelKind, scope: string): Promise<void>;
-  /** Tenants that bring their own app: Connections holding credentials that are not revoked. */
+  /** The platform took a tenant's access away: its Connections are unbound, with everyone bound to them and their credentials. */
+  unbindTenant(channel: ChannelKind, scope: string): Promise<void>;
+  /** Tenants that bring their own app: Connections holding credentials. */
   listening(): Promise<Array<{ ownerAccountId: string; channel: ChannelKind; scope: string }>>;
 }
 
@@ -100,7 +107,7 @@ export class PostgresConnections implements ConnectionRepository {
         target_key TEXT NOT NULL,
         audience TEXT NOT NULL CHECK (audience IN ('self', 'org', 'public')),
         task_specific BOOLEAN NOT NULL DEFAULT false,
-        state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ('active', 'degraded', 'revoked')),
+        state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ('active', 'degraded')),
         credentials TEXT,
         link_code TEXT,
         link_expires_at TIMESTAMPTZ,
@@ -131,6 +138,16 @@ export class PostgresConnections implements ConnectionRepository {
       await client.query("BEGIN");
       // One migration at a time; a second process finds the old table already renamed.
       await client.query("SELECT pg_advisory_xact_lock(hashtext('hatch_connections_migration'))");
+      // A revoked Connection is gone: unbinding deletes it now. What older versions left behind goes, and `revoked` with it.
+      await client.query(`
+        DELETE FROM hatch_connections WHERE state = 'revoked';
+        DO $$ BEGIN
+          IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'hatch_connections'::regclass AND conname = 'hatch_connections_state_check' AND pg_get_constraintdef(oid) LIKE '%revoked%') THEN
+            ALTER TABLE hatch_connections DROP CONSTRAINT hatch_connections_state_check;
+            ALTER TABLE hatch_connections ADD CONSTRAINT hatch_connections_state_check CHECK (state IN ('active', 'degraded'));
+          END IF;
+        END $$;
+      `);
       if ((await client.query("SELECT to_regclass('hatch_assistant_channels') AS old")).rows[0].old) {
         await client.query(`
           INSERT INTO hatch_connections (owner_account_id, channel, scope, target, target_key, audience, credentials, link_code, link_expires_at, last_event_at)
@@ -180,10 +197,10 @@ export class PostgresConnections implements ConnectionRepository {
   async resolveConnection(payload: { channel: ChannelKind; scope: string; senderId: string }): Promise<Resolved | undefined> {
     const known = (await this.pool.query(`SELECT c.id, c.owner_account_id, c.channel, c.scope, c.client, c.target, c.audience, c.task_specific, c.state, ${IDENTITY_COLUMNS}
       FROM hatch_channel_identities i JOIN hatch_connections c ON c.id = i.connection_id
-      WHERE i.channel = $1 AND i.scope = $2 AND i.sender_id = $3 AND i.role = 'owner' AND c.state <> 'revoked'`, [payload.channel, payload.scope, payload.senderId])).rows[0];
+      WHERE i.channel = $1 AND i.scope = $2 AND i.sender_id = $3 AND i.role = 'owner'`, [payload.channel, payload.scope, payload.senderId])).rows[0];
     if (known) return { connection: connectionOf(known), identity: identityOf(known) };
     if (!payload.scope) return undefined;
-    const tenant = (await this.pool.query(`SELECT ${COLUMNS} FROM hatch_connections WHERE channel = $1 AND scope = $2 AND state <> 'revoked' ORDER BY (audience = 'public') DESC, created_at LIMIT 1`, [payload.channel, payload.scope])).rows[0];
+    const tenant = (await this.pool.query(`SELECT ${COLUMNS} FROM hatch_connections WHERE channel = $1 AND scope = $2 ORDER BY (audience = 'public') DESC, created_at LIMIT 1`, [payload.channel, payload.scope])).rows[0];
     return tenant ? { connection: connectionOf(tenant) } : undefined;
   }
 
@@ -199,7 +216,7 @@ export class PostgresConnections implements ConnectionRepository {
   async linked(ownerAccountId: string): Promise<Resolved[]> {
     const rows = (await this.pool.query(`SELECT c.id, c.owner_account_id, c.channel, c.scope, c.client, c.target, c.audience, c.task_specific, c.state, ${IDENTITY_COLUMNS}
       FROM hatch_connections c JOIN hatch_channel_identities i ON i.connection_id = c.id
-      WHERE c.owner_account_id = $1 AND c.audience = 'self' AND c.target_key = 'assistant' AND c.state <> 'revoked' AND i.role = 'owner' ORDER BY c.last_event_at DESC NULLS LAST`, [ownerAccountId])).rows;
+      WHERE c.owner_account_id = $1 AND c.audience = 'self' AND c.target_key = 'assistant' AND i.role = 'owner' ORDER BY c.last_event_at DESC NULLS LAST`, [ownerAccountId])).rows;
     return rows.map(row => ({ connection: connectionOf(row), identity: identityOf(row) }));
   }
 
@@ -219,14 +236,22 @@ export class PostgresConnections implements ConnectionRepository {
 
   async touch(id: string): Promise<void> { await this.pool.query("UPDATE hatch_connections SET last_event_at = now() WHERE id = $1", [id]); }
 
-  async setState(id: string, state: Exclude<ConnectionState, "revoked">): Promise<void> {
+  async setState(id: string, state: ConnectionState): Promise<void> {
     await this.pool.query("UPDATE hatch_connections SET state = $2 WHERE id = $1 AND state = $3", [id, state, state === "degraded" ? "active" : "degraded"]);
   }
 
-  async revoke(ownerAccountId: string, channel: ChannelKind, target: AgentTarget = STUDIO_TARGET): Promise<void> {
+  async unbind(ownerAccountId: string, channel: ChannelKind, target: AgentTarget = STUDIO_TARGET): Promise<void> {
+    await this.pool.query("DELETE FROM hatch_connections WHERE owner_account_id = $1 AND channel = $2 AND audience = 'self' AND target_key = $3", [ownerAccountId, channel, targetKey(target)]);
+  }
+
+  async unbindPersonal(id: string): Promise<boolean> {
+    return (await this.pool.query("DELETE FROM hatch_connections WHERE id = $1 AND audience = 'self'", [id])).rowCount! > 0;
+  }
+
+  async unbindSender(channel: ChannelKind, scope: string, senderId: string): Promise<void> {
     await this.transaction(async client => {
-      const ids = (await client.query("UPDATE hatch_connections SET state = 'revoked', link_code = NULL, link_expires_at = NULL WHERE owner_account_id = $1 AND channel = $2 AND audience = 'self' AND target_key = $3 RETURNING id", [ownerAccountId, channel, targetKey(target)])).rows.map(row => row.id);
-      await client.query("DELETE FROM hatch_channel_identities WHERE connection_id = ANY($1::uuid[])", [ids]);
+      await client.query("DELETE FROM hatch_connections WHERE audience = 'self' AND id IN (SELECT connection_id FROM hatch_channel_identities WHERE channel = $1 AND scope = $2 AND sender_id = $3)", [channel, scope, senderId]);
+      await client.query("DELETE FROM hatch_channel_identities WHERE channel = $1 AND scope = $2 AND sender_id = $3", [channel, scope, senderId]);
     });
   }
 
@@ -251,23 +276,20 @@ export class PostgresConnections implements ConnectionRepository {
 
   async credentialsOf(channel: ChannelKind, scope: string): Promise<string | undefined> {
     if (!scope) return undefined;
-    return (await this.pool.query("SELECT credentials FROM hatch_connections WHERE channel = $1 AND scope = $2 AND credentials IS NOT NULL AND state <> 'revoked' ORDER BY created_at LIMIT 1", [channel, scope])).rows[0]?.credentials ?? undefined;
+    return (await this.pool.query("SELECT credentials FROM hatch_connections WHERE channel = $1 AND scope = $2 AND credentials IS NOT NULL ORDER BY created_at LIMIT 1", [channel, scope])).rows[0]?.credentials ?? undefined;
   }
 
   async ownerOfCode(channel: ChannelKind, code: string, now = new Date()): Promise<string | undefined> {
     return (await this.pool.query("SELECT owner_account_id FROM hatch_connections WHERE channel = $1 AND link_code = $2 AND link_expires_at > $3", [channel, code, now])).rows[0]?.owner_account_id ?? undefined;
   }
 
-  async revokeTenant(channel: ChannelKind, scope: string): Promise<void> {
+  async unbindTenant(channel: ChannelKind, scope: string): Promise<void> {
     if (!scope) return;
-    await this.transaction(async client => {
-      const ids = (await client.query("UPDATE hatch_connections SET state = 'revoked', credentials = NULL, link_code = NULL, link_expires_at = NULL WHERE channel = $1 AND scope = $2 RETURNING id", [channel, scope])).rows.map(row => row.id);
-      await client.query("DELETE FROM hatch_channel_identities WHERE connection_id = ANY($1::uuid[])", [ids]);
-    });
+    await this.pool.query("DELETE FROM hatch_connections WHERE channel = $1 AND scope = $2", [channel, scope]);
   }
 
   async listening(): Promise<Array<{ ownerAccountId: string; channel: ChannelKind; scope: string }>> {
-    return (await this.pool.query("SELECT DISTINCT owner_account_id, channel, scope FROM hatch_connections WHERE credentials IS NOT NULL AND state <> 'revoked'")).rows
+    return (await this.pool.query("SELECT DISTINCT owner_account_id, channel, scope FROM hatch_connections WHERE credentials IS NOT NULL")).rows
       .map(row => ({ ownerAccountId: row.owner_account_id, channel: row.channel, scope: row.scope }));
   }
 

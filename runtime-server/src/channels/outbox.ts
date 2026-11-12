@@ -83,12 +83,29 @@ export class PostgresOutbox implements Outbox {
       CREATE INDEX IF NOT EXISTS hatch_channel_outbox_due_idx ON hatch_channel_outbox (seq) WHERE state IN ('pending', 'sending');
       CREATE INDEX IF NOT EXISTS hatch_channel_outbox_undelivered_idx ON hatch_channel_outbox (connection_id, created_at DESC) WHERE state = 'undelivered';
     `);
+    // Whatever way a Connection is deleted, what it still owes the platform is cancelled in the same transaction, not sent to a binding that no longer exists.
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('hatch_channel_outbox_unbind'))");
+      await client.query(`
+        CREATE OR REPLACE FUNCTION hatch_cancel_outbox_of_connection() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+          UPDATE hatch_channel_outbox SET state = 'cancelled', in_flight = false, lease_until = NULL WHERE connection_id = OLD.id AND state IN ('pending', 'sending');
+          RETURN OLD;
+        END $$;
+        DROP TRIGGER IF EXISTS hatch_connection_unbound ON hatch_connections;
+        CREATE TRIGGER hatch_connection_unbound BEFORE DELETE ON hatch_connections FOR EACH ROW EXECUTE FUNCTION hatch_cancel_outbox_of_connection();
+      `);
+      await client.query("COMMIT");
+    } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; } finally { client.release(); }
     return new PostgresOutbox(pool);
   }
 
   async enqueue(input: NewDelivery): Promise<Delivery | undefined> {
+    // Nothing is queued for a Connection that is gone (unbound).
     const row = (await this.pool.query(`INSERT INTO hatch_channel_outbox (connection_id, channel, scope, thread_id, sender_id, kind, source_key, parts, state)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (source_key) DO NOTHING RETURNING *`,
+      SELECT $1::uuid, $2, $3, $4, $5, $6, $7, $8::jsonb, $9 WHERE $1::uuid IS NULL OR EXISTS (SELECT 1 FROM hatch_connections WHERE id = $1::uuid)
+      ON CONFLICT (source_key) DO NOTHING RETURNING *`,
     [input.connectionId ?? null, input.channel, input.scope, input.address.threadId, input.address.senderId, input.kind, input.sourceKey ?? null, JSON.stringify(input.parts), input.state])).rows[0];
     return row && deliveryOf(row);
   }

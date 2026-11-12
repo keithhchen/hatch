@@ -53,7 +53,7 @@ export function authorizeToolCall(tool: SurfaceTool, client: ClientGroup): ToolA
 export type Principal = { kind: "account"; accountId: string } | { kind: "contact"; connectionId: string; contactId: string };
 
 export type Audience = "self" | "org" | "public";
-export type ConnectionState = "active" | "degraded" | "revoked";
+export type ConnectionState = "active" | "degraded";
 export type AgentTarget = { kind: "assistant" } | { kind: "product"; productId: string };
 
 /** One authorization of one platform: who owns it, which Agent answers, and for whom. */
