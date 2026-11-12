@@ -305,6 +305,33 @@ test("TypeScript Registry enables legacy HMAC only for explicit migration mode",
   }
 });
 
+// Needs a throwaway Postgres: set HATCH_TEST_REGISTRY_DATABASE_URL.
+const testDatabase = process.env.HATCH_TEST_REGISTRY_DATABASE_URL;
+test("without the Runtime chat connection, readiness and Product webhooks say so", { skip: !testDatabase }, async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-product-channels-"));
+  const registry = await createRegistryServerFromEnvironment({
+    REGISTRY_HOST: "127.0.0.1", REGISTRY_PORT: "0",
+    HATCH_AGENT_CORPUS_ROOT: path.join(root, "corpora"), HATCH_REGISTRY_STATE_PATH: path.join(root, "state.json"),
+    HATCH_REGISTRY_DATABASE_URL: testDatabase!,
+    HATCH_AUTH_SIGNING_SECRET: "test-secret", HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN: "deployment-test-token", HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN: "runtime-test-token",
+    DASHSCOPE_API_KEY: ""
+  });
+  try {
+    const address = registry.server.address();
+    assert.ok(address && typeof address !== "string");
+    const base = `http://127.0.0.1:${address.port}`;
+    const ready = await fetch(`${base}/readyz`);
+    assert.equal(ready.status, 503);
+    const checks = ((await ready.json()) as { checks: { product_channels: string } }).checks;
+    assert.match(checks.product_channels, /HATCH_RUNTIME_CHAT_URL/);
+    assert.match(checks.product_channels, /HATCH_RUNTIME_CHAT_SERVICE_TOKEN/);
+    const webhook = await fetch(`${base}/v1/channels/telegram/${PRODUCT_ID}/webhook`, { method: "POST", body: "{}" });
+    assert.equal(webhook.status, 503);
+  } finally {
+    await registry.close();
+  }
+});
+
 function legacyAuthToken(sub: string, secret: string): string {
   const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "HATCH" })).toString("base64url");
   const payload = Buffer.from(JSON.stringify({
