@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ApiKeysClient, dateFormatter, keyRow, sortNewestFirst } from "./apiKeys.js";
+import { API_KEYS_PATH, hasNoApiKeys, ApiKeysClient, dateFormatter, keyRow, sortNewestFirst } from "./apiKeys.js";
 import { parseCreatorRoute, creatorRouteTitle } from "./creatorRoutes.js";
 import { createCreatorTranslator } from "./creatorI18n.js";
 
@@ -46,5 +46,25 @@ test("settings route, the api-keys redirect and copy exist in every locale", () 
     const t = createCreatorTranslator(locale);
     for (const key of ["sxNavSettings", "sxaReachMe", "sxNavApiKeys", "sxakCreate", "sxakCreatedWarn", "sxakNever", "sxakRevoke", "sxakEmpty"]) assert.notEqual(t(key), key, `${locale}.${key}`);
     assert.match(t("sxakRevokeTitle", "k"), /k/);
+  }
+});
+
+test("banner shows only when the list loads and is empty", async () => {
+  assert.equal(await hasNoApiKeys(async () => ({ api_keys: [] })), true);
+  assert.equal(await hasNoApiKeys(async () => ({ api_keys: [{ id: "a" }] })), false);
+  assert.equal(await hasNoApiKeys(async () => { throw new Error("down"); }), false);
+});
+
+test("banner button targets the API keys section of Studio Settings", () => {
+  const [path, hash] = API_KEYS_PATH.split("#");
+  assert.equal(parseCreatorRoute(path).kind, "settings");
+  assert.equal(hash, "api-keys");
+});
+
+test("banner copy exists in en, zh and ja", () => {
+  for (const locale of ["en", "zh", "ja"]) {
+    const t = createCreatorTranslator(locale);
+    assert.notEqual(t("sxakBanner"), "sxakBanner");
+    assert.notEqual(t("sxakBannerCta"), "sxakBannerCta");
   }
 });

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { InlineAlert, Switch } from "@hatch/ui";
 import { ApiKeysPage } from "./ApiKeysPage.jsx";
 import { ChannelBindings } from "./ChannelBindings.jsx";
@@ -23,6 +23,8 @@ export function SettingsPage({ request, t, locale, profile, onProfileChange }) {
       setSaving(false);
     }
   };
+  // Deep link from the Agent Overview banner: /studio/settings#api-keys.
+  useEffect(() => { if (window.location.hash === "#api-keys") document.getElementById("api-keys")?.scrollIntoView(); }, []);
   return <div className="sx-settings">
     <PageHeader title={t("sxNavSettings")} />
     <section className="sx-settings__section">

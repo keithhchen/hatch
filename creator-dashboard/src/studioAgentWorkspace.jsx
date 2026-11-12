@@ -4,6 +4,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ChevronDown, Copy, ExternalLink, Plus, Trash2 } from "lucide-react";
 import { Button, Checkbox, DropdownMenu, FormField, Input, Textarea } from "@hatch/ui";
+import { ApiKeysBanner } from "./ApiKeysBanner.jsx";
 import { FirstBuildIntro } from "./FirstBuildDialog.jsx";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
 import { creatorFactoryPath, creatorProductPath } from "./creatorRoutes.js";
@@ -49,6 +50,7 @@ export function StudioAgentWorkspace({ route, request, navigate, locale, t, prof
       </nav>
     </header>
     <div className="sx-agent__body">
+      {tab === "overview" ? <ApiKeysBanner request={request} navigate={navigate} t={t} /> : null}
       {tab === "build" || tab === "overview" ? renderBuild(product, tab)
         : !product ? <LoadingState t={t} />
         : <PublishTab {...ctx} />}
