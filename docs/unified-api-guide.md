@@ -249,7 +249,7 @@ curl -s -X POST "https://gethatchapp.com/v1/creator/assistant/conversation/messa
   -d '{"content":"What needs my attention?"}'
 ```
 
-Every write to a worker or the Assistant (`messages`, `retry`, task `approve`/`decline`/`answer`) requires an `Idempotency-Key`; without one the answer is `400 idempotency_key_required`. Use one new UUID per action and the same one on a retry, so a retry does not send twice. `Accept: text/event-stream` on the POST streams the reply; `GET .../events?after_cursor=<cursor>` resumes it.
+Send an Idempotency-Key to make retries safe; without it a retry may create a duplicate. This holds for every write to a worker or the Assistant (`messages`, `retry`, task `approve`/`decline`/`answer`): use one new UUID per action and the same one on a retry. `Accept: text/event-stream` on the POST streams the reply; `GET .../events?after_cursor=<cursor>` resumes it.
 
 ### 15. Chat with a published product
 

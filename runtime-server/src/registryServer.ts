@@ -27,7 +27,7 @@ import { FfmpegAudioNormalizer, transcriberFromEnvironment } from "./assets/adap
 import { AssetError } from "./assets/domain.js";
 import { VoiceProcessor } from "./assets/processors.js";
 import { PostgresFailureLedger } from "./errors/postgresFailureLedger.js";
-import { ConversationRoutes, requiredKey, type ConversationRouteDeps } from "./conversations/routes.js";
+import { ConversationRoutes, keyOrNew, type ConversationRouteDeps } from "./conversations/routes.js";
 import { EventLogJournal } from "./conversations/journal.js";
 import { openProductAssets } from "./conversations/productAssets.js";
 import { openConversationPorts, type ConversationPorts } from "./conversations/ports.js";
@@ -2244,7 +2244,7 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
     if ((!content && !attached.length) || content.length > 20_000) { sendJson(response, 400, { error: { code: "invalid_message", message: "Message must contain 1–20000 characters." } }); return; }
     // The page's own key is the message's id, as it is for the API: a retried send is one message.
     let sent: Awaited<ReturnType<typeof assistant.hear>>;
-    try { sent = await assistant.hear(account.id, { id: requiredKey(request.headers["idempotency-key"]), source: "web", parts: [...(content ? [{ type: "text" as const, text: content }] : []), ...attached] }); }
+    try { sent = await assistant.hear(account.id, { id: keyOrNew(request.headers["idempotency-key"]), source: "web", parts: [...(content ? [{ type: "text" as const, text: content }] : []), ...attached] }); }
     catch (error) { if (!(error instanceof ChatError)) throw error; sendJson(response, error.status, { error: { code: error.code, message: error.message } }); return; }
     // The receipt: which Run took the message, and whether it started it or joined it (queued until the Run takes it up).
     sendJson(response, 202, { accepted: true, message_id: sent.messageId, run_id: sent.runId, outcome: sent.outcome, accepted_at: sent.acceptedAt });
@@ -2254,7 +2254,7 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
     // Answers the Expert's unanswered messages again after a Run that failed. The page's key makes a repeat the same Run.
     if (!context.assistantChat) { sendJson(response, 503, { error: { code: "assistant_unavailable", message: "The Assistant requires the Registry database." } }); return; }
     try {
-      const { run, outcome } = await context.assistantChat.retry(account.id, { id: requiredKey(request.headers["idempotency-key"]), client: { client: "web" } });
+      const { run, outcome } = await context.assistantChat.retry(account.id, { id: keyOrNew(request.headers["idempotency-key"]), client: { client: "web" } });
       sendJson(response, 202, { accepted: true, run_id: run.id, outcome });
     } catch (error) { if (!(error instanceof ChatError)) throw error; sendJson(response, error.status, { error: { code: error.code, message: error.message } }); }
     return;
@@ -2303,7 +2303,7 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
     const body = await readJson(request);
     // A click retried, or clicked twice, is one decision: the page's key names it, and the Assistant hears it once.
     let key: string;
-    try { key = requiredKey(request.headers["idempotency-key"]); }
+    try { key = keyOrNew(request.headers["idempotency-key"]); }
     catch (error) { if (!(error instanceof ChatError)) throw error; sendJson(response, error.status, { error: { code: error.code, message: error.message } }); return; }
     const task = action === "answer"
       ? await assistant.answer(account.id, taskId!, String(body.answer ?? "").trim() || (() => { throw Object.assign(new Error("answer is required"), { status: 400 }); })(), key)

@@ -277,8 +277,6 @@ test("assistant: same shape and verbs, over the existing Assistant", async () =>
     assert.equal((await h.call(`${path}/messages`, { token: null })).status, 401);
     const history = await (await h.call(`${path}/messages`)).json() as { status: string; messages: Array<Record<string, unknown>> };
     assert.deepEqual(history, { status: "idle", messages: [{ id: "m1", role: "assistant", text: "Hello", created_at: "2026-01-01T00:00:00.000Z" }] });
-    assert.equal((await h.call(`${path}/messages`, { method: "POST", keyless: true, body: { content: "Remind me tomorrow" } })).status, 400, "a send without a key is refused");
-    assert.equal(h.assistant.ingested.length, 0);
     const sent = await h.call(`${path}/messages?wait=30`, { method: "POST", body: { content: "Remind me tomorrow" } });
     assert.equal(sent.status, 200);
     const body = await sent.json() as { message: { id: string; role: string }; reply: { text: string }; status: string };
@@ -297,13 +295,12 @@ test("assistant: retry answers again under the client's key", async () => {
   const h = await harness();
   try {
     const keyless = await h.call("/v1/creator/assistant/conversation/retry", { method: "POST", keyless: true, body: {} });
-    assert.equal(keyless.status, 400);
-    assert.equal(((await keyless.json()) as { error: { code: string } }).error.code, "idempotency_key_required");
-    assert.deepEqual(h.assistant.retried, []);
+    assert.equal(keyless.status, 202, "without a key the retry is processed, with no replay guarantee");
+    assert.equal(h.assistant.retried.length, 1);
     const retried = await h.call("/v1/creator/assistant/conversation/retry", { method: "POST", keyless: true, body: { idempotency_key: "k-1" } });
     assert.equal(retried.status, 202);
     assert.deepEqual(await retried.json(), { run_id: "arun-2", outcome: "started" });
-    assert.deepEqual(h.assistant.retried, ["k-1"]);
+    assert.equal(h.assistant.retried[1], "k-1");
     assert.equal((await h.call("/v1/creator/assistant/conversation/retry", { method: "GET" })).status, 405);
   } finally { await h.close(); }
 });
@@ -334,9 +331,8 @@ test("idempotency: same key and content is one message, other content is 409", a
     assert.equal(((await conflict.json()) as { error: { code: string } }).error.code, "idempotency_conflict");
     assert.equal(((await (await h.call(`${root}/research/messages`, { method: "POST", keyless: true, body: { content: "Look into Alice", idempotency_key: "client-1" } })).json()) as { message: { id: string } }).message.id, first.message.id, "the key may travel in the body");
     const unkeyed = await h.call(`${root}/research/messages`, { method: "POST", keyless: true, body: { content: "Look into Alice" } });
-    assert.equal(unkeyed.status, 400, "without a key the send is refused, never given a random one");
-    assert.equal(((await unkeyed.json()) as { error: { code: string } }).error.code, "idempotency_key_required");
-    assert.equal(h.workspace.started.length, 1, "and nothing was delivered");
+    assert.equal(unkeyed.status, 202, "without a key the send is processed, with no replay guarantee");
+    assert.equal(((await unkeyed.json()) as { message: { id: string } }).message.id === first.message.id, false, "and it is its own message");
   } finally { await h.close(); }
 });
 

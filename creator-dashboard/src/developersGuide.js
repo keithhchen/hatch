@@ -118,7 +118,7 @@ const COPY = Object.freeze({
         ["history", "Read the history"],
         ["events", "Watch events"],
         ["stop", "Stop a worker"],
-        ["assistant", "Talk to the Assistant"]
+        ["assistant", "Talk to the Assistant", "Send an Idempotency-Key to make retries safe; without it a retry may create a duplicate."]
       ]),
       mcp: STEPS([
         ["install", "Install the CLI and sign in", "The MCP server runs locally over stdio and uses the CLI's sign-in."],
@@ -165,7 +165,7 @@ const COPY = Object.freeze({
         ["history", "读取历史"],
         ["events", "订阅事件"],
         ["stop", "停止 Worker"],
-        ["assistant", "和助理对话"]
+        ["assistant", "和助理对话", "发送 Idempotency-Key 可让重试安全；不带它，重试可能产生重复。"]
       ]),
       mcp: STEPS([
         ["install", "安装 CLI 并登录", "MCP 服务在本机通过 stdio 运行，使用 CLI 的登录状态。"],
@@ -212,7 +212,7 @@ const COPY = Object.freeze({
         ["history", "履歴を読む"],
         ["events", "イベントを購読"],
         ["stop", "ワーカーを停止"],
-        ["assistant", "アシスタントと話す"]
+        ["assistant", "アシスタントと話す", "Idempotency-Key を送るとリトライが安全になります。送らない場合、リトライで重複する可能性があります。"]
       ]),
       mcp: STEPS([
         ["install", "CLI をインストールしてログイン", "MCP サーバーはローカルで stdio 経由で動作し、CLI のログイン状態を使います。"],

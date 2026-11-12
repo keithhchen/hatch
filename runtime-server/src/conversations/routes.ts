@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type http from "node:http";
 import { MAX_CONSUMER_BUFFERED_BYTES as MAX_BUFFERED_BYTES } from "../chat/sinks.js";
 import { normalizeClientAttributes, type ClientAttributes } from "../surfaces/contract.js";
@@ -40,16 +41,12 @@ function clientOf(body: Record<string, unknown>): ClientAttributes {
   try { return normalizeClientAttributes(spec); } catch (error) { throw new ConversationError(400, "invalid_client", (error as Error).message); }
 }
 
-/** A write without a key is refused, never given a random one: a retry of it would be a second message or Run. */
-export function requiredKey(raw: unknown): string {
-  const key = messageKey(raw);
-  if (!key) throw new ChatError("idempotency_key_required", "An Idempotency-Key header is required; reuse it when retrying.", 400);
-  return key;
-}
+/** The public API's key is optional, as is usual: with one a retry replays; without one the request stands alone and a retry of it is new. */
+export function keyOrNew(raw: unknown): string { return messageKey(raw) ?? randomUUID(); }
 
 /** The client's key is the message's id: the same one the page and the Chat API mean by it. */
 function keyOf(request: http.IncomingMessage, body: Record<string, unknown>): string {
-  try { return requiredKey(request.headers["idempotency-key"] ?? body.idempotency_key); }
+  try { return keyOrNew(request.headers["idempotency-key"] ?? body.idempotency_key); }
   catch (error) { if (error instanceof ChatError) throw new ConversationError(error.status, error.code, error.message); throw error; }
 }
 
