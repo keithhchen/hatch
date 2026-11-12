@@ -2,13 +2,17 @@ name: Hatch factory definitions sync
 
 # Factory Agent definitions live in the Postgres table
 # hatch_factory_agent_definitions (seeded once from prompts/factory-agents/*).
-# Editing the prompt files does not update existing rows, so after a prompt
-# change is deployed, refresh the definitions from the deployed image.
+# Editing the prompt files does not update existing rows, so every successful
+# application deploy refreshes the definitions from the deployed image (it can
+# also be run by hand).
 # Runs entirely inside the registry container: the image already carries the
 # compiled definitions module and the prompt sources, and the production
 # runner has no usable Node toolchain on the host.
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: ["Hatch application CD"]
+    types: [completed]
 
 permissions:
   contents: read
@@ -17,6 +21,7 @@ jobs:
   sync:
     name: Sync Factory Agent definitions on production
     runs-on: [self-hosted, linux, x64, hatch-prod]
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     steps:
       - name: Refresh registry definitions from the deployed image
         working-directory: /opt/hatch
