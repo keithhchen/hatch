@@ -3,6 +3,7 @@ import type { AssetDesk, AssetShelf, Workshop } from "./assets.js";
 import { AttachedConversation } from "./attachedConversation.js";
 import { ConversationError, type Conversation } from "./conversation.js";
 import type { EventLog } from "./eventLog.js";
+import type { AssistantPanel } from "./panel.js";
 import { productPlacement } from "./pipelineAssets.js";
 import { WorkerDirectory, type WorkerWorkspace } from "./workerConversation.js";
 
@@ -12,6 +13,8 @@ export type StudioDeps = {
   workspace(scope: { creatorId: string; productId: string; briefSpec?: unknown }, token: string): Promise<WorkerWorkspace>;
   assistant(): AssistantHost | undefined;
   eventLog: EventLog;
+  /** What Studio's Assistant page shows beside the conversation. */
+  panel?: () => AssistantPanel | undefined;
   /** Attachments for a conversation, over the files its workspace keeps. Without it, conversations take none. */
   assets?: (workshop: Workshop) => AssetDesk;
 };
@@ -59,6 +62,12 @@ export class Studio {
   private shelved(conversation: Conversation, maxContent: number, accountId: string, conversationId: string, desk?: AssetDesk): Target {
     const assets = desk && { desk, scope: { kind: "account" as const, accountId, conversationId } };
     return { conversation: assets ? new AttachedConversation(conversation, assets) : conversation, maxContent, accountId, ...(assets ? { assets } : {}) };
+  }
+
+  get panel(): AssistantPanel {
+    const panel = this.deps.panel?.();
+    if (!panel) throw new ConversationError(503, "assistant_unavailable", "The Assistant requires the Registry database.");
+    return panel;
   }
 
   private assistantHost(): AssistantHost {

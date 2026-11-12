@@ -1,13 +1,15 @@
 import type { AssetDesk } from "./assets.js";
 import type { ClientAttributes } from "../surfaces/contract.js";
 import { ChatError } from "../chat/principal.js";
-import { ConversationError, type Conversation, type ConversationStatus, type PublicMessage, type SendInput, type Sent } from "./conversation.js";
+import { ConversationError, type Conversation, type ConversationStatus, type HistoryPage, type PublicMessage, type SendInput, type Sent } from "./conversation.js";
 
 /** The part of the Assistant an account-level conversation needs: its conversation on Chat, and where uploads for it go. */
 export interface AssistantHost {
   status(accountId: string): Promise<ConversationStatus>;
   /** What the Expert and the Assistant said, oldest first: the latest `limit`, or the first `limit` after message `after`. */
   lines(accountId: string, after?: string, limit?: number): Promise<PublicMessage[]>;
+  /** The newest page of the conversation, or the one before `before`. */
+  history(accountId: string, options: { limit?: number; before?: string }): Promise<HistoryPage>;
   /** Steers the running turn with the message or starts one, atomically, and says which Run took it. */
   send(accountId: string, input: SendInput): Promise<Sent>;
   stop(accountId: string): Promise<void>;
@@ -32,6 +34,8 @@ export class AssistantConversation implements Conversation {
     const [status, messages] = await Promise.all([this.status(), this.assistant.lines(this.accountId, after, limit)]);
     return { status, messages };
   }
+
+  history(options: { limit?: number; before?: string }): Promise<HistoryPage> { return this.assistant.history(this.accountId, options); }
 
   send(input: SendInput): Promise<Sent> { return this.assistant.send(this.accountId, input); }
 

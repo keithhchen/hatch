@@ -15,7 +15,7 @@ import type { PublicMessage } from "../conversations/conversation.js";
 import type { ContentPart } from "../surfaces/contract.js";
 import type { SentMessage, UploadedRef } from "../chat/gateway.js";
 import type { AssistantTask, TaskDecision, TaskKind, TaskOrigin, TaskRepository } from "./tasks.js";
-import type { AssistantChat, ReplySteps } from "./chat.js";
+import type { AssistantChat } from "./chat.js";
 import type { DeliveryRepository } from "./deliveries.js";
 import type { ExpertMaterials } from "./materials.js";
 import type { AssistantStateRepository } from "./state.js";
@@ -577,24 +577,6 @@ export class AssistantService implements StudioOperations {
   }
 
   // ── Studio and channel surfaces ───────────────────────────────────────
-
-  /** What the chat shows: what the Expert said and what the Assistant said. System messages stay out. */
-  async view(accountId: string, options: { limit?: number; beforeCursor?: string } = {}): Promise<{ has_more: boolean; before_cursor?: string; messages: Array<{ id: string; role: "expert" | "assistant"; text: string; at: string; state?: "queued"; images?: string[]; attachments?: NonNullable<PublicMessage["attachments"]>; /** What the Assistant did inside a reply, in order. */ steps?: ReplySteps }>; tasks: AssistantTask[]; running: boolean; runId?: string; /** Why the last turn failed, until the next one starts. */ failure?: RunFailure }> {
-    const [{ messages: lines, has_more, before_cursor }, status] = await Promise.all([this.chat.shown(accountId, options), this.chat.status(accountId)]);
-    return {
-      has_more, ...(before_cursor ? { before_cursor } : {}),
-      messages: lines.map(line => {
-        const images = line.attachments?.filter(attachment => attachment.type === "image").map(attachment => `${attachment.asset_id}.jpg`);
-        return { id: line.id, role: line.role === "user" ? "expert" as const : "assistant" as const, text: line.text, at: line.created_at, ...(line.state ? { state: line.state } : {}), ...(images?.length ? { images } : {}), ...(line.attachments?.length ? { attachments: line.attachments } : {}), ...(line.steps ? { steps: line.steps } : {}) };
-      }),
-      tasks: await this.deps.tasks.open(accountId),
-      running: status.state === "running", ...(status.runId ? { runId: status.runId } : {}),
-      ...(status.state === "failed" && status.error ? { failure: status.error } : {}),
-    };
-  }
-
-  /** A picture the Expert sent, for the chat page. */
-  image(accountId: string, assetId: string): Promise<{ bytes: Buffer; mime: string } | undefined> { return this.chat.image(accountId, assetId); }
 
   /** Public web evidence for the Assistant, from the provider the Registry is configured with. */
   searchWeb(input: { query: string; max_results?: number; domains?: string[]; topic?: "general" | "news" }, signal?: AbortSignal): Promise<unknown> {

@@ -29,7 +29,7 @@ import { LegacyAssistantHistory } from "./history.js";
 import { ExpertMaterials } from "./materials.js";
 import type { AccountReach } from "./reach.js";
 import { MemoryAssistantState } from "./state.js";
-import { assistantFeedKey } from "./studioVocabulary.js";
+import { assistantConversationId, assistantFeedKey } from "./studioVocabulary.js";
 import { messageKey } from "../chat/messageKey.js";
 import { studioToolDefinitions, studioTools } from "./studioTools.js";
 import { ChatFlow } from "../channels/chatTarget.js";
@@ -43,6 +43,12 @@ import { MemoryTaskRepository } from "./tasks.js";
 import type { AgentCatalog, AgentChange } from "./catalog.js";
 
 const ACCOUNT = "11111111-1111-4111-8111-111111111111";
+
+/** What the Studio page reads: the newest page of the conversation, in the Expert/Assistant words of the old view, with why the last Run failed. */
+async function viewOf(env: { chat: AssistantChat }, options: { limit?: number; beforeCursor?: string } = {}) {
+  const [page, status] = await Promise.all([env.chat.history(ACCOUNT, { limit: options.limit, before: options.beforeCursor }), env.chat.status(ACCOUNT)]);
+  return { ...page, messages: page.messages.map(message => ({ ...message, role: message.role === "user" ? "expert" as const : "assistant" as const })), failure: status.state === "failed" ? status.error : undefined };
+}
 const PRODUCT = "22222222-2222-4222-8222-222222222222";
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -412,7 +418,7 @@ test("Text and a file are one message; the model reads the file line and history
     assert.equal(experts[0]!.text, "你看看", "history keeps what was typed");
     assert.deepEqual(experts[0]!.attachments?.map(({ type, name }) => ({ type, name })), [{ type: "file", name: "notes.md" }]);
     assert.ok((experts[0]!.attachments?.[0]?.bytes ?? 0) > 0);
-    assert.doesNotMatch(JSON.stringify(await env.assistant.view(ACCOUNT)), /\[file:/);
+    assert.doesNotMatch(JSON.stringify(await viewOf(env)), /\[file:/);
   } finally { await env.close(); }
 });
 
@@ -532,9 +538,9 @@ test("A picture reaches the model as pixels with a path label, and the page show
     const content = env.model.state.turns[0]!.ctx.messages.at(-1)!;
     assert.equal(content.model_images?.length, 1);
     assert.match(content.content ?? "", /\[image: \/attachments\//);
-    const view = await env.assistant.view(ACCOUNT);
-    assert.equal(view.messages[0]!.images?.length, 1);
-    assert.equal((await env.chat.image(ACCOUNT, upload.assetId))?.mime, "image/png");
+    const view = await viewOf(env);
+    assert.equal(view.messages[0]!.attachments?.filter(file => file.type === "image").length, 1);
+    assert.equal((await env.chat.assets().view({ kind: "account", accountId: ACCOUNT, conversationId: assistantConversationId(ACCOUNT) }, upload.assetId))?.mime, "image/png");
   } finally { await env.close(); }
 });
 
@@ -564,7 +570,7 @@ test("The chat shows only what was said; live state reaches the model but never 
     await env.assistant.news(ACCOUNT, "t1", "构建好了", "finished");
     await waitFor(() => env.model.state.calls === 2);
     await env.idle();
-    const { messages } = await env.assistant.view(ACCOUNT);
+    const { messages } = await viewOf(env);
     assert.deepEqual(messages.filter(line => line.role === "expert").map(line => line.text), ["[任务 看起来像通知] 其实是我说的"], "the Expert's words show, whatever they look like");
     assert.ok(!JSON.stringify(messages).includes("构建好了"), "system messages stay out of the chat");
     const transcript = JSON.stringify(await env.store.readConversation((await env.chat.conversation(ACCOUNT)).id));
@@ -747,7 +753,7 @@ test("A Run the provider refuses is a failed Assistant with a code, in the statu
   try {
     await env.say("你好");
     await env.idle();
-    const view = await env.assistant.view(ACCOUNT);
+    const view = await viewOf(env);
     assert.equal(view.failure?.code, "upstream_error");
     assert.match(view.failure?.message ?? "", /not a problem with your account. Reference: err_[0-9a-f]{12}\./);
     assert.equal(view.failure?.reference !== undefined && view.failure.message.includes(view.failure.reference), true);
@@ -757,7 +763,7 @@ test("A Run the provider refuses is a failed Assistant with a code, in the statu
     assert.doesNotMatch(JSON.stringify([view.failure, end]), /org-abc123|ak-secret9|suspended|insufficient balance/);
     await env.say("再试");
     await env.idle();
-    assert.equal((await env.assistant.view(ACCOUNT)).failure, undefined, "a new turn that succeeds clears it");
+    assert.equal((await viewOf(env)).failure, undefined, "a new turn that succeeds clears it");
   } finally { console.error = consoleError; await env.close(); }
 });
 
@@ -887,18 +893,18 @@ test("The Expert's page reads the conversation by page: never the whole of it, a
     await sleep(60);
     await env.say("第二句", "m-second");
     // Another reader, while the first reply is still being made: the second message is the conversation's already.
-    const during = await env.assistant.view(ACCOUNT);
+    const during = await viewOf(env);
     assert.deepEqual(during.messages.map(message => [message.id, message.state]), [["m-first", undefined], ["m-second", "queued"]]);
     await env.idle();
-    const after = await env.assistant.view(ACCOUNT);
+    const after = await viewOf(env);
     assert.deepEqual(after.messages.filter(message => message.role === "expert").map(message => [message.id, message.state]), [["m-first", undefined], ["m-second", undefined]]);
     assert.ok(after.messages.every(message => message.role === "expert" || /^run_[0-9a-f]+:[0-9]+$/.test(message.id)), "a reply is named <run_id>:<n>");
-    assert.deepEqual((await env.assistant.view(ACCOUNT)).messages.map(message => message.id), after.messages.map(message => message.id), "ids do not change on a refresh");
+    assert.deepEqual((await viewOf(env)).messages.map(message => message.id), after.messages.map(message => message.id), "ids do not change on a refresh");
     await env.say("第三句", "m-third");
     await env.idle();
-    const earlier = await env.assistant.view(ACCOUNT, { limit: 1 });
+    const earlier = await viewOf(env, { limit: 1 });
     assert.equal(earlier.has_more, true, "the first Run is a page of its own");
-    assert.ok((await env.assistant.view(ACCOUNT, { limit: 200, beforeCursor: earlier.before_cursor })).messages.length > 0);
+    assert.ok((await viewOf(env, { limit: 200, beforeCursor: earlier.before_cursor })).messages.length > 0);
   } finally { await env.close(); }
 });
 

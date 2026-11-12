@@ -1,6 +1,6 @@
 import { Asset, AssetError, type AssetBlobs, type AssetScope, type ContentModerator, type Moderated } from "../assets/domain.js";
 import type { AssetPipeline } from "../assets/pipeline.js";
-import type { AssetResolver, AssetUploader, UploadedAsset, Workshop } from "./assets.js";
+import type { AssetResolver, AssetUploader, AssetViewer, UploadedAsset, Workshop } from "./assets.js";
 import { ConversationError, type ReadyAsset } from "./conversation.js";
 
 const STATUS: Record<AssetError["code"], number> = {
@@ -26,11 +26,25 @@ const ready = (asset: Asset, place: Workshop["place"]): ReadyAsset => ({
 });
 
 /** Assets as conversations see them, over the upload pipeline: nothing is ready until the pipeline says so. */
-export class PipelineAssets implements AssetResolver, AssetUploader {
+export class PipelineAssets implements AssetResolver, AssetUploader, AssetViewer {
   constructor(private pipeline: AssetPipeline, private blobs: AssetBlobs, private workshop: Workshop) {}
 
   async resolve(scope: AssetScope, assetId: string): Promise<ReadyAsset | undefined> {
     try { return ready(await this.pipeline.resolveReadyAsset(scope, assetId), this.workshop.place); } catch (error) {
+      if (!(error instanceof AssetError)) throw error;
+      if (error.code === "not_found") return undefined;
+      throw refusal(error.code, error.message);
+    }
+  }
+
+  async view(scope: AssetScope, assetId: string): Promise<{ bytes: Buffer; mime: string } | undefined> {
+    const asset = await this.resolveReady(scope, assetId);
+    const resized = asset?.record.kind === "image" ? asset.derivative("resized") : undefined;
+    return resized ? { bytes: await this.blobs.get(resized.key), mime: resized.mime } : undefined;
+  }
+
+  private async resolveReady(scope: AssetScope, assetId: string): Promise<Asset | undefined> {
+    try { return await this.pipeline.resolveReadyAsset(scope, assetId); } catch (error) {
       if (!(error instanceof AssetError)) throw error;
       if (error.code === "not_found") return undefined;
       throw refusal(error.code, error.message);

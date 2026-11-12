@@ -14,11 +14,12 @@ import { ChatError, accountPrincipal } from "../chat/principal.js";
 import type { Retried } from "../chat/chatService.js";
 import { ServiceChatGateway, type PrincipalBinder } from "../chat/serviceGateway.js";
 import type { ScopeResolver, TurnRunner } from "../chat/turnExecutor.js";
-import { ConversationError, DEFAULT_PAGE, MAX_PAGE, type ConversationStatus, type PublicMessage, type SendInput, type Sent } from "../conversations/conversation.js";
+import { ConversationError, DEFAULT_PAGE, MAX_PAGE, type ConversationStatus, type HistoryPage, type PublicMessage, type SendInput, type Sent } from "../conversations/conversation.js";
 import { ChatConversationReadModel, type ConversationReadModel } from "../chat/conversationReadModel.js";
 import { PassThroughOutputGuard, type OutputGuard } from "../outputGuard.js";
 import { ServerToolExecutor } from "../serverTools.js";
-import type { RuntimeStore, VisibleConversationMessage } from "../store.js";
+import type { RuntimeStore } from "../store.js";
+import { HistoryCursorError } from "../conversationHistory.js";
 import { ToolBridge } from "../toolBridge.js";
 import type { ClientAttributes, ContentPart } from "../surfaces/contract.js";
 import { isSystemMessageId, SYSTEM_MESSAGE_PREFIX } from "./systemMessage.js";
@@ -37,9 +38,6 @@ import { modelRole } from "../modelRoles.js";
 /** The Assistant is one Agent, not a Product: its conversation is bound to the account, under this id. A UUID, as every Agent id is once the identity migration has run. */
 export const ASSISTANT_AGENT_ID = "a5515700-0000-4000-8000-000000000001";
 const ACTIVE = new Set(["queued", "running", "waiting_for_tool", "compacting"]);
-
-/** The steps inside one reply, in the shape Chat's history keeps them: where each sits among the words, and what it was. */
-export type ReplySteps = { parts?: VisibleConversationMessage["parts"]; tool_calls: Array<{ tool_call_id: string; name: string; status: string; activity_message?: string }> };
 
 /** What a Run of the Assistant needs beyond the binding every Chat Run has. */
 export type AssistantScope = TurnBinding & { accountId: string };
@@ -261,7 +259,7 @@ export class AssistantChat implements AssistantHost {
     let before: string | undefined;
     for (;;) {
       const page = await this.shown(accountId, { limit: 200, beforeCursor: before });
-      lines = [...page.messages.map(({ steps: _steps, ...line }) => line), ...lines];
+      lines = [...page.messages, ...lines];
       const found = after === undefined ? lines.length >= size : lines.some(line => line.id === after);
       if (found || !page.has_more) break;
       before = page.before_cursor;
@@ -277,7 +275,7 @@ export class AssistantChat implements AssistantHost {
    * page needs to show a reply as it happened. A step is what Chat shows of a tool call, never its arguments or result.
    * The Assistant's own messages to itself and its silences are not part of the chat.
    */
-  async shown(accountId: string, options: { limit?: number; beforeCursor?: string } = {}): Promise<{ messages: Array<PublicMessage & { steps?: ReplySteps }>; has_more: boolean; before_cursor?: string }> {
+  async shown(accountId: string, options: { limit?: number; beforeCursor?: string } = {}): Promise<HistoryPage> {
     const conversation = await this.conversation(accountId);
     const { messages: history, ...paging } = await this.readModel.page(conversation.id, options);
     // Only what this page's messages carried: a long conversation costs what one page does.
@@ -286,7 +284,7 @@ export class AssistantChat implements AssistantHost {
     for (const { asset, messageId } of attached) byMessage.set(messageId, [...byMessage.get(messageId) ?? [], { type: asset.record.kind, name: asset.record.name, asset_id: asset.id, bytes: asset.record.bytes }]);
     const lastOfRun = new Map<string, (typeof history)[number]>();
     for (const message of history) if (message.role === "assistant") lastOfRun.set(message.run_id, message);
-    const messages = history.flatMap((message): Array<PublicMessage & { steps?: ReplySteps }> => {
+    const messages = history.flatMap((message): PublicMessage[] => {
       if (message.role === "user") {
         if (isSystemMessageId(message.id)) return [];
         const attachments = byMessage.get(attachmentMessageId(message.id));
@@ -300,7 +298,13 @@ export class AssistantChat implements AssistantHost {
       const steps = tools.length || reasoned ? { parts: message.parts, tool_calls: tools.map(({ tool_call_id, name, status, activity_message }) => ({ tool_call_id, name, status, activity_message })) } : undefined;
       return [{ id: message.id, role: "assistant", text: message.content, created_at: message.accepted_at, ...(steps ? { steps } : {}) }];
     });
-    return { messages, ...paging };
+    return { messages, has_more: paging.has_more, ...(paging.before_cursor ? { before_cursor: paging.before_cursor } : {}) };
+  }
+
+  /** The newest `limit` messages (at most 200), or the page before `before`: how the Expert's page reads back through a long conversation. */
+  async history(accountId: string, { limit, before }: { limit?: number; before?: string } = {}): Promise<HistoryPage> {
+    try { return await this.shown(accountId, { limit: Number.isInteger(limit) && limit! > 0 ? Math.min(limit!, 200) : 200, beforeCursor: before }); }
+    catch (error) { throw error instanceof HistoryCursorError ? new ConversationError(400, "history_cursor_invalid", "Invalid conversation history cursor.") : error; }
   }
 
   async send(accountId: string, input: SendInput): Promise<Sent> {
@@ -333,15 +337,6 @@ export class AssistantChat implements AssistantHost {
     const conversation = await this.conversation(accountId);
     const live = this.runtime.hub.catchUp(conversation.id)?.delta as { content?: string } | undefined;
     return live?.content ?? (await this.deps.repository.getActiveRun(conversation.id))?.partialOutput ?? "";
-  }
-
-  /** The pixels of a picture the Expert sent, for the chat page. */
-  async image(accountId: string, assetId: string): Promise<{ bytes: Buffer; mime: string } | undefined> {
-    const conversation = await this.conversation(accountId);
-    const found = (await this.deps.chatAssets.attachments(conversation)).find(({ asset }) => asset.id === assetId && asset.record.kind === "image");
-    const resized = found?.asset.derivative("resized");
-    const bytes = found && resized ? await this.deps.chatAssets.derivative(found.asset, "resized") : undefined;
-    return bytes && resized ? { bytes, mime: resized.mime } : undefined;
   }
 
   accountOf(conversationId: string): string | undefined { return accountOfConversation(conversationId); }

@@ -12,6 +12,7 @@ export class AttachedConversation implements Conversation {
 
   status() { return this.inner.status(); }
   messages(after?: string, limit?: number) { return this.inner.messages(after, limit); }
+  get history() { return this.inner.history?.bind(this.inner); }
   feedKey() { return this.inner.feedKey(); }
   get partial() { return this.inner.partial?.bind(this.inner); }
   get retry() { return this.inner.retry?.bind(this.inner); }
