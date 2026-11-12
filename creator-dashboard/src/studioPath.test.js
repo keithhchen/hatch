@@ -69,7 +69,7 @@ test("Advanced pill matches step pill type and shows the same selected state wit
   const css = await readFile(new URL("./factoryAgents.css", import.meta.url), "utf8");
   const factory = await readFile(new URL("./FactoryAgents.jsx", import.meta.url), "utf8");
   const rule = (selector) => css.match(new RegExp(`^${selector.replace(/[.]/g, "\\.")} \\{([^}]*)\\}`, "m"))[1];
-  assert.match(rule(".factory-advanced"), /font-size: 14px; font-weight: 650/);
+  assert.match(rule(".factory-app .factory-advanced"), /align-self: start;[^}]*font-size: 14px; font-weight: 650/);
   assert.equal(rule(".factory-advanced.is-current"), rule(".factory-stepper .is-current"));
   assert.match(factory, /factory-advanced\$\{currentStep === ADVANCED_STEP\.id \? " is-current" : ""\}`\} aria-current=\{currentStep === ADVANCED_STEP\.id \? "page"/);
 });
