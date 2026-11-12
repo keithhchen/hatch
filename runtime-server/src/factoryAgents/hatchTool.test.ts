@@ -4,49 +4,37 @@ import { mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import test from "node:test";
-import { WebSocketServer } from "ws";
 import { hatchTool } from "./hatchTool.js";
 import { WorkbenchStore } from "./store.js";
-import { ClientHelloSchema, PROTOCOL_VERSION } from "../protocol.js";
 
 // Explicit transport test fixture, not evidence of a real Runtime/model execution.
-test("HTool uses the shared Runtime for its host Product, isolates private files and saves original assets", async () => {
+test("HTool talks HTTP to the shared Runtime for its host Product, isolates private files and saves original assets", async () => {
   const token = "test-creator-token";
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-transport-unit-"));
-  let created = 0; let messages = 0; let mismatch = false; let wrongConversation = false; let cancelled = 0;
-  const hellos: Array<Record<string, unknown>> = [];
-  let receivedCancel!: () => void;
-  const cancelReceived = new Promise<void>(resolve => { receivedCancel = resolve; });
+  let created = 0; let cancelled = 0; let reject = false;
+  const sent: Array<{ id: string; content: string }> = [];
+  const runs = new Map<string, string>();
   const creatorId = "11111111-1111-4111-8111-111111111111";
   const productId = "22222222-2222-4222-8222-222222222222";
-  const version = `sha256:${"a".repeat(64)}`;
   const server = http.createServer(async (req, res) => {
     assert.equal(req.headers.authorization, `Bearer ${token}`);
-    const scope = new URL(req.url!, "http://localhost").searchParams;
-    assert.equal(scope.get("product_id"), productId);
-    assert.equal(scope.has("entitlement_id"), false);
-    if (req.method === "POST") { for await (const _chunk of req) {} created++; res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ conversation: { id: "conv_test" } })); }
-    else if (req.url?.includes("/assets/")) { res.setHeader("content-type", "text/markdown"); res.end("# Actual asset fixture\r\nOriginal bytes.\r\n"); }
-    else { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ conversation: { id: "conv_test" }, messages: [] })); }
+    const requestUrl = new URL(req.url!, "http://localhost");
+    assert.equal(requestUrl.searchParams.get("product_id"), productId);
+    assert.equal(requestUrl.searchParams.has("entitlement_id"), false);
+    let body: Record<string, any> = {};
+    if (req.method === "POST") { const chunks: Buffer[] = []; for await (const chunk of req) chunks.push(chunk); body = JSON.parse(Buffer.concat(chunks).toString() || "{}"); }
+    res.setHeader("content-type", "application/json");
+    if (req.method === "POST" && requestUrl.pathname === "/v1/conversations") { created++; res.end(JSON.stringify({ conversation: { id: "conv_test" } })); }
+    else if (requestUrl.pathname === "/v1/conversations/conv_test/messages") {
+      if (reject) { res.statusCode = 409; res.end(JSON.stringify({ error: { code: "busy", message: "Conversation busy" } })); return; }
+      assert.equal(requestUrl.searchParams.get("wait"), "60");
+      if (!runs.has(body.client_message_id)) { runs.set(body.client_message_id, `run_${runs.size + 1}`); sent.push({ id: body.client_message_id, content: body.content }); }
+      res.end(JSON.stringify({ run: { id: runs.get(body.client_message_id), status: "completed" }, outcome: "accepted", reply: `# Fixture response ${sent.length}\n` }));
+    }
+    else if (requestUrl.pathname.endsWith("/cancel")) { cancelled++; res.end("{}"); }
+    else if (requestUrl.pathname.includes("/assets/")) { res.setHeader("content-type", "text/markdown"); res.end("# Actual asset fixture\r\nOriginal bytes.\r\n"); }
+    else res.end(JSON.stringify({ conversation: { id: "conv_test" }, messages: [] }));
   });
-  const ws = new WebSocketServer({ server });
-  ws.on("connection", (socket, request) => { assert.equal(request.url, "/v1/runtime"); socket.on("message", data => {
-    const message = JSON.parse(String(data));
-    if (message.type === "client.hello") {
-      ClientHelloSchema.parse(message);
-      assert.equal(message.conversation_id, "conv_test");
-      hellos.push(message);
-      socket.send(JSON.stringify({ type: "session.ready", accepted_protocol_version: PROTOCOL_VERSION, conversation_id: wrongConversation ? "conv_wrong" : message.conversation_id, creator_id: creatorId, product_id: mismatch ? "wrong-product" : productId, corpus_digest: version }));
-    }
-    if (message.type === "turn.cancel") { cancelled++; receivedCancel(); }
-    if (message.type === "client.message") {
-      assert.equal(message.conversation_id, "conv_test");
-      messages++;
-      socket.send(JSON.stringify({ type: "assistant.delta", run_id: message.run_id, delta: { kind: "text", content: `# Fixture response ${messages}\n` } }));
-      socket.send(JSON.stringify({ type: "turn.completed", run_id: message.run_id, finish_reason: "stop" }));
-      socket.send(JSON.stringify({ type: "turn.state", run_id: message.run_id, status: "completed" }));
-    }
-  }); });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   try {
     const address = server.address(); assert.ok(address && typeof address !== "string");
@@ -63,38 +51,25 @@ test("HTool uses the shared Runtime for its host Product, isolates private files
     await tool.execute("second", { operation: "continue", message: "Customer answer" });
     await tool.execute("read", { operation: "read" });
     await tool.execute("cancel", { operation: "cancel" });
-    await cancelReceived;
-    assert.equal(created, 1); assert.equal(messages, 2);
-    assert.equal(cancelled, 1);
-    wrongConversation = true;
-    await assert.rejects(tool.execute("wrong-conversation", { operation: "continue", message: "Must not execute" }), /different Agent or conversation/);
-    await assert.rejects(tool.execute("wrong-cancel", { operation: "cancel" }), /different Agent or conversation/);
-    assert.equal(messages, 2); assert.equal(cancelled, 1);
-    wrongConversation = false;
-    assert.ok(hellos.every(h => h.product_id === productId && h.entitlement_id === undefined));
-    assert.ok(hellos.every(h => Array.isArray(h.local_tools) && h.local_tools.length === 0 && h.auth_token === token));
+    assert.equal(created, 1); assert.equal(cancelled, 1);
+    assert.deepEqual(sent, [{ id: `factory-${s.id}-first`, content: "Customer task" }, { id: `factory-${s.id}-second`, content: "Customer answer" }]);
     assert.equal((await store.read(s.id, "output/RESULT.md")).bytes.toString(), "# Fixture response 2\n");
     const records = (await store.get(s.id)).files;
     assert.equal(records.filter(f => /results\/[^/]+\.md$/.test(f.path) && !f.path.endsWith("-trace.md")).length, 2);
-    const outbound = [];
     for (const record of records.filter(f => f.path.endsWith("-trace.md"))) {
       const trace = (await store.read(s.id, record.path)).bytes.toString();
       assert.ok(!trace.includes(token) && !trace.includes("Private grading criteria"));
-      const events = JSON.parse(trace.split("```json\n")[1].split("\n```")[0]);
-      outbound.push(...events.filter((event: { type: string }) => event.type === "client.message"));
     }
-    assert.deepEqual(outbound.map(event => event.message.content), ["Customer task", "Customer answer"]);
-    assert.ok(outbound.every(event => event.conversation_id === "conv_test" && event.run_id));
-    assert.ok(outbound.every(event => Array.isArray(event.local_tools) && event.local_tools.length === 0));
+    // A retried tool call carries the same message ID, so the Runtime replays the Run rather than duplicating it.
+    await store.update(s.id, x => { x.hatch!.pending = false; });
+    await tool.execute("second", { operation: "continue", message: "Customer answer" });
+    assert.equal(sent.length, 2);
     await tool.execute("asset", { operation: "read_asset", asset_id: "asset_test" });
     assert.equal((await store.read(s.id, "output/RESULT.md")).bytes.toString(), "# Actual asset fixture\r\nOriginal bytes.\r\n");
-    mismatch = true;
-    await assert.rejects(tool.execute("wrong-version", { operation: "continue", message: "Must not execute" }), /different Agent/);
-    assert.equal(messages, 2); assert.equal((await store.get(s.id)).hatch?.pending, false);
-    assert.equal((await store.read(s.id, "output/RESULT.md")).bytes.toString(), "# Actual asset fixture\r\nOriginal bytes.\r\n");
+    reject = true;
+    await assert.rejects(tool.execute("refused", { operation: "continue", message: "Must not execute" }), /busy/);
+    assert.equal((await store.get(s.id)).hatch?.pending, false);
   } finally {
-    for (const client of ws.clients) client.terminate();
-    await new Promise<void>(resolve => ws.close(() => resolve()));
     server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
     await rm(root, { recursive: true, force: true });
   }
