@@ -130,6 +130,12 @@ import { log } from "./observability/log.js";
 import { toProblem } from "./errors/problem.js";
 import { ConversationError as ConversationHttpError } from "./conversations/conversation.js";
 import { startObservability } from "./observability/start.js";
+import {
+  CapacityGate, KeyedCapacityGate, combineCapacityReleases, once, readRuntimeConfig,
+  DEFAULT_MAX_CONTACT_MESSAGES, clientToolTimeoutMs, legacyHmacAuthEnabled, runtimeClientHelloTimeoutMs
+} from "./runtimeConfig.js";
+
+export { clientToolTimeoutMs, legacyHmacAuthEnabled, runtimeClientHelloTimeoutMs };
 
 type AgentCorpusResolver = AgentCorpusResolverLike;
 
@@ -285,122 +291,12 @@ export async function commerceEventSinkFromEnvironment(
   };
 }
 
-/** What one contact may send to one Product, in all; the Registry's rate limit bounds how fast. */
-const DEFAULT_MAX_CONTACT_MESSAGES = 1_000;
-
 export async function createRuntimeServerFromEnvironment(
   environment: NodeJS.ProcessEnv = process.env
 ): Promise<RuntimeServer> {
   initializeLangfuseObservability(environment);
-  const registryUrl = environment.HATCH_REGISTRY_URL?.trim();
-  const runtimeCorpusRoot = environment.HATCH_RUNTIME_CORPUS_ROOT?.trim();
-  const runtimeDataDir = environment.HATCH_RUNTIME_DATA_DIR?.trim() || path.resolve(".hatch-runtime");
-  const runtimeRegistryToken = environment.HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN?.trim();
-  const runtimeDatabaseUrl = environment.HATCH_RUNTIME_DATABASE_URL?.trim();
-  const runtimeHost = environment.HATCH_RUNTIME_HOST?.trim() || "127.0.0.1";
-  const helloTimeoutMs = runtimeClientHelloTimeoutMs(environment.HATCH_RUNTIME_HELLO_TIMEOUT_MS);
-  const maxPendingTurnAuthorizations = runtimeCapacityLimit(
-    "HATCH_RUNTIME_MAX_PENDING_TURN_AUTHORIZATIONS",
-    environment.HATCH_RUNTIME_MAX_PENDING_TURN_AUTHORIZATIONS,
-    16
-  );
-  const maxPendingTurnAuthorizationsPerUser = runtimeCapacityLimit(
-    "HATCH_RUNTIME_MAX_PENDING_TURN_AUTHORIZATIONS_PER_USER",
-    environment.HATCH_RUNTIME_MAX_PENDING_TURN_AUTHORIZATIONS_PER_USER,
-    4
-  );
-  const maxActiveRunsGlobal = runtimeCapacityLimit(
-    "HATCH_RUNTIME_MAX_ACTIVE_RUNS_GLOBAL",
-    environment.HATCH_RUNTIME_MAX_ACTIVE_RUNS_GLOBAL,
-    16,
-    10_000
-  );
-  const maxActiveRunsPerUser = runtimeCapacityLimit(
-    "HATCH_RUNTIME_MAX_ACTIVE_RUNS_PER_USER",
-    environment.HATCH_RUNTIME_MAX_ACTIVE_RUNS_PER_USER,
-    2,
-    10_000
-  );
-  const maxSocketBufferedBytes = runtimeCapacityLimit(
-    "HATCH_RUNTIME_MAX_SOCKET_BUFFERED_BYTES",
-    environment.HATCH_RUNTIME_MAX_SOCKET_BUFFERED_BYTES,
-    160 * 1024 * 1024,
-    256 * 1024 * 1024
-  );
-  const maxConsumerBufferedBytes = runtimeCapacityLimit(
-    "HATCH_RUNTIME_MAX_CONSUMER_BUFFERED_BYTES",
-    environment.HATCH_RUNTIME_MAX_CONSUMER_BUFFERED_BYTES,
-    MAX_CONSUMER_BUFFERED_BYTES,
-    256 * 1024 * 1024
-  );
-  const connectionHeartbeatMs = runtimeDurationMs(
-    "HATCH_RUNTIME_CONNECTION_HEARTBEAT_MS",
-    environment.HATCH_RUNTIME_CONNECTION_HEARTBEAT_MS,
-    30_000,
-    1_000,
-    300_000
-  );
-  const connectionIdleTimeoutMs = runtimeDurationMs(
-    "HATCH_RUNTIME_CONNECTION_IDLE_TIMEOUT_MS",
-    environment.HATCH_RUNTIME_CONNECTION_IDLE_TIMEOUT_MS,
-    1_800_000,
-    60_000,
-    86_400_000
-  );
-  const serverToolTimeoutMs = runtimeDurationMs(
-    "HATCH_RUNTIME_SERVER_TOOL_TIMEOUT_MS",
-    environment.HATCH_RUNTIME_SERVER_TOOL_TIMEOUT_MS,
-    120_000,
-    1_000,
-    300_000
-  );
-  const httpHeadersTimeoutMs = runtimeDurationMs(
-    "HATCH_RUNTIME_HTTP_HEADERS_TIMEOUT_MS",
-    environment.HATCH_RUNTIME_HTTP_HEADERS_TIMEOUT_MS,
-    5_000,
-    1_000,
-    60_000
-  );
-  const httpRequestTimeoutMs = runtimeDurationMs(
-    "HATCH_RUNTIME_HTTP_REQUEST_TIMEOUT_MS",
-    environment.HATCH_RUNTIME_HTTP_REQUEST_TIMEOUT_MS,
-    10_000,
-    1_000,
-    120_000
-  );
-  const maxHttpResponseBytes = runtimeCapacityLimit(
-    "HATCH_RUNTIME_MAX_HTTP_RESPONSE_BYTES",
-    environment.HATCH_RUNTIME_MAX_HTTP_RESPONSE_BYTES,
-    64 * 1024 * 1024,
-    64 * 1024 * 1024
-  );
-  const insecureLocalMode = explicitBooleanEnvironmentFlag(
-    "HATCH_ALLOW_INSECURE_LOCAL_MODE",
-    environment.HATCH_ALLOW_INSECURE_LOCAL_MODE
-  );
-  if (registryUrl) {
-    const parsedRegistryUrl = new URL(registryUrl);
-    if (parsedRegistryUrl.protocol !== "http:" && parsedRegistryUrl.protocol !== "https:") {
-      throw new Error("HATCH_REGISTRY_URL must use http or https");
-    }
-  }
-  if (registryUrl && !runtimeRegistryToken && environment.NODE_ENV === "production") {
-    throw new Error("HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN is required when HATCH_REGISTRY_URL is configured");
-  }
-  if (!isLoopbackRuntimeHost(runtimeHost)
-    && !insecureLocalMode
-    && (!registryUrl || !runtimeRegistryToken || !runtimeCorpusRoot || !runtimeDatabaseUrl)) {
-    throw new Error(
-      "A non-loopback Runtime requires HATCH_REGISTRY_URL, HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN, "
-      + "HATCH_RUNTIME_CORPUS_ROOT, and HATCH_RUNTIME_DATABASE_URL; "
-      + "set HATCH_ALLOW_INSECURE_LOCAL_MODE=true only for an intentional local fixture"
-    );
-  }
-  const legacyHmacEnabled = legacyHmacAuthEnabled(environment.HATCH_ENABLE_LEGACY_HMAC_AUTH);
-  const legacyHmacSecret = environment.HATCH_AUTH_SIGNING_SECRET?.trim() || undefined;
-  if (legacyHmacEnabled && !legacyHmacSecret) {
-    throw new Error("HATCH_AUTH_SIGNING_SECRET is required when legacy HMAC auth is enabled");
-  }
+  const config = readRuntimeConfig(environment);
+  const { registryUrl, registryToken: runtimeRegistryToken, corpusRoot: runtimeCorpusRoot, dataDir: runtimeDataDir } = config;
   const registryAuth = registryUrl
     ? new RegistryEntitlementResolver(
       registryUrl,
@@ -414,10 +310,10 @@ export async function createRuntimeServerFromEnvironment(
     )
     : undefined;
   const entitlementFile = environment.HATCH_ENTITLEMENTS_FILE?.trim();
-  const fileEntitlements = legacyHmacEnabled && entitlementFile
+  const fileEntitlements = config.legacyHmacEnabled && entitlementFile
     ? new FileEntitlementResolver(entitlementFile, {
       enableLegacyHmacAuth: true,
-      hmacSecret: legacyHmacSecret!
+      hmacSecret: config.legacyHmacSecret!
     })
     : undefined;
   const commerceEventSink = await commerceEventSinkFromEnvironment(environment);
@@ -446,7 +342,7 @@ export async function createRuntimeServerFromEnvironment(
     } : {}),
     creatorToolControlPlane: creatorToolControlPlaneFromEnvironment(environment),
     entitlementResolver: registryAuth ?? fileEntitlements,
-    insecureLocalMode,
+    insecureLocalMode: config.insecureLocalMode,
     authIdentityResolver: registryAuth,
     agentCorpusResolver: runtimeRegistryToken && registryUrl
       ? new RuntimeReleaseAgentCorpusResolver({
@@ -461,92 +357,27 @@ export async function createRuntimeServerFromEnvironment(
     conversationStore,
     ...(chatAssets ? { chatAssets } : {}),
     assetStore: runtimeAssetStoreFromEnvironment(environment, runtimeDataDir),
-    chatServiceToken: environment.HATCH_RUNTIME_CHAT_SERVICE_TOKEN?.trim() || undefined,
-    maxContactMessages: runtimeCapacityLimit("HATCH_RUNTIME_MAX_CONTACT_MESSAGES", environment.HATCH_RUNTIME_MAX_CONTACT_MESSAGES, DEFAULT_MAX_CONTACT_MESSAGES, 10_000_000),
+    chatServiceToken: config.chatServiceToken,
+    maxContactMessages: config.maxContactMessages,
     ...(registryUrl && runtimeRegistryToken ? { connectionDirectory: new RegistryConnectionDirectory({ registryUrl, serviceToken: runtimeRegistryToken, timeoutMs: registryAuthorizationTimeoutMs(environment) }) } : {}),
-    clientToolTimeoutMs: clientToolTimeoutMs(environment.HATCH_CLIENT_TOOL_TIMEOUT_MS),
-    clientHelloTimeoutMs: helloTimeoutMs,
-    maxPendingTurnAuthorizations,
-    maxPendingTurnAuthorizationsPerUser,
-    allowedOrigins: (environment.HATCH_RUNTIME_ALLOWED_ORIGINS ?? "").split(",").map((origin) => origin.trim()).filter(Boolean),
-    maxActiveRunsPerUser,
-    maxActiveRunsGlobal,
-    maxSocketBufferedBytes,
-    maxConsumerBufferedBytes,
-    connectionHeartbeatMs,
-    connectionIdleTimeoutMs,
-    serverToolTimeoutMs,
-    httpHeadersTimeoutMs,
-    httpRequestTimeoutMs,
-    maxHttpResponseBytes,
-    enableLegacyHmacAuth: legacyHmacEnabled,
-    legacyHmacSecret
+    clientToolTimeoutMs: config.clientToolTimeoutMs,
+    clientHelloTimeoutMs: config.helloTimeoutMs,
+    maxPendingTurnAuthorizations: config.maxPendingTurnAuthorizations,
+    maxPendingTurnAuthorizationsPerUser: config.maxPendingTurnAuthorizationsPerUser,
+    allowedOrigins: config.allowedOrigins,
+    maxActiveRunsPerUser: config.maxActiveRunsPerUser,
+    maxActiveRunsGlobal: config.maxActiveRunsGlobal,
+    maxSocketBufferedBytes: config.maxSocketBufferedBytes,
+    maxConsumerBufferedBytes: config.maxConsumerBufferedBytes,
+    connectionHeartbeatMs: config.connectionHeartbeatMs,
+    connectionIdleTimeoutMs: config.connectionIdleTimeoutMs,
+    serverToolTimeoutMs: config.serverToolTimeoutMs,
+    httpHeadersTimeoutMs: config.httpHeadersTimeoutMs,
+    httpRequestTimeoutMs: config.httpRequestTimeoutMs,
+    maxHttpResponseBytes: config.maxHttpResponseBytes,
+    enableLegacyHmacAuth: config.legacyHmacEnabled,
+    legacyHmacSecret: config.legacyHmacSecret
   });
-}
-
-export function legacyHmacAuthEnabled(raw: string | undefined): boolean {
-  return explicitBooleanEnvironmentFlag("HATCH_ENABLE_LEGACY_HMAC_AUTH", raw);
-}
-
-function explicitBooleanEnvironmentFlag(name: string, raw: string | undefined): boolean {
-  const value = raw?.trim();
-  if (!value || value === "false") return false;
-  if (value === "true") return true;
-  throw new Error(`${name} must be exactly true or false`);
-}
-
-function isLoopbackRuntimeHost(host: string): boolean {
-  return host === "127.0.0.1" || host === "::1" || host === "localhost";
-}
-
-export function clientToolTimeoutMs(raw = process.env.HATCH_CLIENT_TOOL_TIMEOUT_MS): number {
-  // The Desktop keeps a pending write visible while the buyer reviews it.
-  // Two minutes is shorter than a normal interruption, while an unbounded
-  // pending call would retain a dead browser connection forever.
-  if (raw === undefined || raw === "") return 300_000;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed < 30_000 || parsed > 1_800_000) {
-    throw new Error("HATCH_CLIENT_TOOL_TIMEOUT_MS must be an integer between 30000 and 1800000");
-  }
-  return parsed;
-}
-
-export function runtimeClientHelloTimeoutMs(raw: string | undefined): number {
-  if (raw === undefined || raw.trim() === "") return 10_000;
-  const parsed = Number(raw);
-  if (!Number.isSafeInteger(parsed) || parsed < 1_000 || parsed > 60_000) {
-    throw new Error("HATCH_RUNTIME_HELLO_TIMEOUT_MS must be an integer between 1000 and 60000");
-  }
-  return parsed;
-}
-
-function runtimeCapacityLimit(
-  name: string,
-  raw: string | undefined,
-  defaultValue: number,
-  maximum = 1_024
-): number {
-  if (raw === undefined || raw.trim() === "") return defaultValue;
-  const parsed = Number(raw);
-  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > maximum) {
-    throw new Error(`${name} must be an integer between 1 and ${maximum}`);
-  }
-  return parsed;
-}
-
-function runtimeDurationMs(
-  name: string,
-  raw: string | undefined,
-  defaultValue: number,
-  minimum: number,
-  maximum: number
-): number {
-  if (raw === undefined || raw.trim() === "") return defaultValue;
-  const parsed = Number(raw);
-  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
-    throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`);
-  }
-  return parsed;
 }
 
 type SessionBinding = {
@@ -578,57 +409,6 @@ type SessionBindingRequest = {
   user_id?: string;
   product_id?: string;
 };
-
-class CapacityGate {
-  private pending = 0;
-
-  constructor(private readonly capacity: number, optionName: string) {
-    if (!Number.isSafeInteger(capacity) || capacity < 1) {
-      throw new Error(`${optionName} must be a positive safe integer`);
-    }
-  }
-
-  tryAcquire(): (() => void) | undefined {
-    if (this.pending >= this.capacity) return undefined;
-    this.pending += 1;
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      this.pending -= 1;
-    };
-  }
-}
-
-class KeyedCapacityGate {
-  private readonly pending = new Map<string, number>();
-
-  constructor(private readonly capacityPerKey: number, optionName: string) {
-    if (!Number.isSafeInteger(capacityPerKey) || capacityPerKey < 1) {
-      throw new Error(`${optionName} must be a positive safe integer`);
-    }
-  }
-
-  tryAcquire(key: string): (() => void) | undefined {
-    const current = this.pending.get(key) ?? 0;
-    if (current >= this.capacityPerKey) return undefined;
-    this.pending.set(key, current + 1);
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      const next = (this.pending.get(key) ?? 1) - 1;
-      if (next <= 0) this.pending.delete(key);
-      else this.pending.set(key, next);
-    };
-  }
-}
-
-function combineCapacityReleases(...releases: Array<() => void>): () => void {
-  return () => {
-    for (const release of releases) release();
-  };
-}
 
 type ReadinessCheck = "starting" | "ready" | "failed";
 type RuntimeReadiness = {
@@ -1007,11 +787,6 @@ function httpDeadlineMs(req: http.IncomingMessage, requestTimeoutMs: number): nu
   if (String(req.headers.accept ?? "").includes("text/event-stream")) return undefined;
   const wait = Number(url.searchParams.get("wait") ?? 0);
   return requestTimeoutMs + (Number.isFinite(wait) && wait > 0 ? Math.min(wait, MAX_WAIT_SECONDS) * 1000 : 0);
-}
-
-function once(release: () => void): () => void {
-  let released = false;
-  return () => { if (!released) { released = true; release(); } };
 }
 
 /** The gateway the channel layer calls: contacts through their Connection, accounts through their conversation. */
