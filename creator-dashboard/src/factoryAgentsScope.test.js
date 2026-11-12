@@ -249,6 +249,7 @@ test('Factory uses the MUI X Chat Composer for the real session message endpoint
   assert.match(source, /from "@mui\/x-chat\/headless"/);
   assert.match(source, /<ChatProvider adapter=\{composerAdapter\}/);
   assert.match(source, /await api\(endpoint\(root, id, "message"\)/);
+  assert.match(source, /"Idempotency-Key": sendKey\(message\.id\)/);
   assert.match(source, /features=\{\{ attachments: false \}\}/);
   assert.doesNotMatch(source, /<TextField fullWidth multiline minRows=\{2\}/);
 });
