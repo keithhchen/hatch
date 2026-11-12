@@ -32,7 +32,11 @@ export class ImageProcessor implements AssetProcessor {
         .toFormat(target.format).toBuffer();
       return { outputs: [{ role: "resized", bytes: resized, mime: target.mime }], moderate: { type: "image", bytes: resized, mime: target.mime } };
     } catch (error) {
-      throw new AssetError("malformed", `Unreadable image: ${error instanceof Error ? error.message : String(error)}`);
+      // Only a library that cannot run is our fault; whatever sharp says about the bytes stays in the log.
+      const broken = /Could not load the|installing the .?sharp|Cannot find (module|package)|ENOMEM/.test(error instanceof Error ? error.message : String(error));
+      throw broken
+        ? new AssetError("unavailable", "Images cannot be processed right now. Please try again later.", error)
+        : new AssetError("malformed", "This image could not be read. Check that it is a valid PNG, JPEG, WebP or GIF file.", error);
     }
   }
 }
@@ -57,8 +61,12 @@ export class FileProcessor implements AssetProcessor {
   private async convertDocument(bytes: Buffer, sniffed: Sniffed): Promise<string> {
     try { return (await this.convert(`document${sniffed.ext}`, bytes)).bytes.toString("utf8"); }
     catch (error) {
-      const missing = (error as { code?: string }).code === "ENOENT";
-      throw new AssetError(missing ? "unavailable" : "malformed", missing ? "Document converter is not installed" : `Unreadable document: ${error instanceof Error ? error.message : String(error)}`);
+      // The caller hears what to do, never the command, paths or traceback: the cause is logged by the pipeline.
+      const { code, killed, message } = error as { code?: string; killed?: boolean; message?: string };
+      const broken = code === "ENOENT" || killed === true || /ModuleNotFoundError|ImportError/.test(message ?? "");
+      throw broken
+        ? new AssetError("unavailable", "Documents cannot be read right now. Please try again later.", error)
+        : new AssetError("malformed", "This document could not be read. Check that it is a valid, unencrypted PDF, DOCX, PPTX or XLSX file.", error);
     }
   }
 }

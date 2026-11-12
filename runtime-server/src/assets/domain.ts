@@ -28,9 +28,10 @@ export type AssetFailure = { code: string; message: string };
 export class AssetError extends Error {
   constructor(
     readonly code: "too_large" | "unsupported_type" | "unsafe_archive" | "malformed" | "moderation_blocked" | "unavailable" | "not_found" | "not_ready" | "conflict",
-    message: string
+    message: string,
+    cause?: unknown
   ) {
-    super(message);
+    super(message, cause === undefined ? undefined : { cause });
   }
 }
 

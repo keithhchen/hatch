@@ -6,6 +6,7 @@ import { failures } from "../errors/failures.js";
 import { UpstreamError } from "../errors/upstream.js";
 import type { AssetProcessor } from "./processors.js";
 import { sniff } from "./sniff.js";
+import { log } from "../observability/log.js";
 
 export const MAX_BYTES: Record<AssetKind, number> = { image: 20 * 1024 * 1024, file: 50 * 1024 * 1024, audio: 20 * 1024 * 1024 };
 
@@ -61,6 +62,7 @@ export class AssetPipeline implements ReadyAssetResolver {
       }
       return await this.finish(asset, a => a.ready(derivatives, processed.transcript));
     } catch (error) {
+      log.error("asset_processing_failed", { assetId: asset.record.id, scope: scopeKey(scope), kind: sniffed.kind, name, error: error instanceof Error ? error.cause ?? error : error });
       return this.finish(asset, a => a.failed(failure(error)));
     }
   }

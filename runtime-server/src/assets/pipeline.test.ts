@@ -86,6 +86,25 @@ test("a converter that fails ends the asset failed with its reason", async () =>
   assert.equal(asset.record.failure?.code, "unavailable");
 });
 
+test("a converter crash is unavailable and an unreadable file is malformed, and neither message leaks paths or tracebacks", async () => {
+  const leak = "Command failed: python3 /srv/runtime-server/scripts/convert_to_markdown.py /var/folders/x/hatch-markitdown-1/a.pdf\nTraceback (most recent call last):\n";
+  const cases: [string, string][] = [[leak + "ModuleNotFoundError: No module named 'markitdown'", "unavailable"], [leak + "ValueError: bad pdf", "malformed"]];
+  for (const [message, expected] of cases) {
+    const { pipeline } = await harness({ convert: async () => { throw new Error(message); } });
+    const asset = await pipeline.accept(scopeA, { name: "x.docx", bytes: docx() });
+    assert.equal(asset.record.failure?.code, expected);
+    assert.doesNotMatch(asset.record.failure!.message, /Traceback|\/var\/|\.py|python/);
+  }
+});
+
+test("an unreadable image fails malformed with a fixed message, never the library's words", async () => {
+  const { pipeline } = await harness();
+  const good = await png();
+  const asset = await pipeline.accept(scopeA, { name: "broken.png", bytes: Buffer.concat([good.subarray(0, 40), Buffer.alloc(60, 7)]) });
+  assert.equal(asset.record.failure?.code, "malformed");
+  assert.equal(asset.record.failure?.message, "This image could not be read. Check that it is a valid PNG, JPEG, WebP or GIF file.");
+});
+
 test("a zip bomb is never inflated: it is passed through as a plain zip, never converted", async () => {
   const { pipeline, repository } = await harness();
   const bomb = Buffer.from(zipSync({ "word/document.xml": new Uint8Array(120 * 1024 * 1024) }));
