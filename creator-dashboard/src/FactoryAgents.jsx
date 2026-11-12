@@ -209,13 +209,15 @@ function Workspace({ root, id, entry, agents, config, uploads, onChanged, onOpen
   useEffect(() => { if (uploads.ingestedAt) refresh(); }, [uploads.ingestedAt]);
   const perform = async fn => { setError(""); setBusy(true); try { await fn(); await refresh(); onChanged(); } catch (e) { setError(factoryError(e, t, agentName)); } finally { setBusy(false); } };
   const dictation = useMemo(() => browserDictation(dashboardRequest), []);
+  // One key per message the user sends: the composer's retry of the same message sends the same key.
+  const sendKeys = useRef(new Map()); const sendKey = messageId => { if (messageId === undefined) return crypto.randomUUID(); if (!sendKeys.current.has(messageId)) sendKeys.current.set(messageId, crypto.randomUUID()); return sendKeys.current.get(messageId); };
   const composerAdapter = useMemo(() => ({
     sendMessage: async ({ message, signal }) => {
       const content = (message.parts || []).filter(part => part.type === "text").map(part => part.text).join("\n").trim();
       if (!content) return new ReadableStream({ start(controller) { controller.close(); } });
       setError(""); setActivityVisible(true); setActivity(t("thinking"));
       try {
-        await api(endpoint(root, id, "message"), { method: "POST", body: { content }, signal });
+        await api(endpoint(root, id, "message"), { method: "POST", headers: { "Idempotency-Key": sendKey(message.id) }, body: { content }, signal });
         onChanged();
         return new ReadableStream({ start(controller) { controller.close(); } });
       } catch (e) {
@@ -227,7 +229,7 @@ function Workspace({ root, id, entry, agents, config, uploads, onChanged, onOpen
   }), [root, id, t, agentName, onChanged]);
   if (!session) return <Stack className="factory-workspace-loading" spacing={1}><Skeleton width="35%" /><Skeleton width="80%" /><Skeleton width="70%" /><ErrorNotice error={error} onClose={() => setError("")} /></Stack>;
   const running = session.status === "running"; const locked = entry?.state === "locked"; const visibleSession = { ...session, files: session.files.filter(record => !record.path.startsWith("input/handoff/")) };
-  const openFile = path => setFile(path); const addToChat = (path, quote) => { const reference = `${t("fileReference", path)}${quote ? `\n\n${quote.split("\n").map(line => `> ${line}`).join("\n")}` : ""}`; setDraft(previous => `${previous}${previous.trim() ? "\n\n" : ""}${reference}\n\n`); requestAnimationFrame(() => composer.current?.focus()); }; const useLatest = () => { setActivityVisible(true); return perform(async () => { await api(endpoint(root, id, "message"), { method: "POST", body: { content: t("useLatestMessage", session.role) } }); setActivity(t("thinking")); }); };
+  const openFile = path => setFile(path); const addToChat = (path, quote) => { const reference = `${t("fileReference", path)}${quote ? `\n\n${quote.split("\n").map(line => `> ${line}`).join("\n")}` : ""}`; setDraft(previous => `${previous}${previous.trim() ? "\n\n" : ""}${reference}\n\n`); requestAnimationFrame(() => composer.current?.focus()); }; const useLatest = () => { setActivityVisible(true); return perform(async () => { await api(endpoint(root, id, "message"), { method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() }, body: { content: t("useLatestMessage", session.role) } }); setActivity(t("thinking")); }); };
   return <div className="factory-workspace"><div className="factory-workspace-pane factory-workspace-main"><ChatPanel dictation={dictation} session={visibleSession} entry={entry} agents={agents} root={root} id={id} config={config} busy={busy} draft={draft} setDraft={setDraft} stream={stream} settled={settled} activity={activity} activityVisible={activityVisible} composer={composer} composerAdapter={composerAdapter} chat={chat} stick={stick} running={running} locked={locked} error={error} setError={setError} perform={perform} onOpenFile={openFile} onUseLatest={useLatest} agentName={agentName} t={t} /></div><div className="factory-workspace-pane factory-workspace-side"><InspectorPanel entry={entry} agents={agents} session={visibleSession} root={root} id={id} running={running} busy={busy} file={file} setFile={setFile} uploads={uploads} addToChat={addToChat} agentName={agentName} onOpenAgent={onOpenAgent} t={t} perform={perform} /></div></div>;
 }
 
