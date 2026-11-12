@@ -37,6 +37,8 @@ const REVIEW_LABELS: Partial<Record<TaskKind, [string, string]>> = {
 /** How long after the Expert last spoke in Studio the Assistant does not also message them elsewhere. */
 const STUDIO_ACTIVE_MS = 10 * 60_000;
 const DELIVERY_POLL_MS = 2_000;
+const OWED_MS = 24 * 3600_000;
+const OWED_BATCH = 100;
 
 export type { WorkerKind };
 type WorkerStart = { accountId: string; kind: WorkerKind; productId?: string; agentName?: string; instruction: string; origin: TaskOrigin };
@@ -209,9 +211,12 @@ export class AssistantService implements StudioOperations {
     return { name, sent };
   }
 
-  /** Task news the Assistant hears: what a worker finished, asked, or got stuck on. */
-  async news(accountId: string, taskId: string, text: string, kind: "task" | "tick" = "task", key: string = randomUUID()): Promise<void> {
-    await this.hearSystem(accountId, kind === "tick" ? `[日常检查 · 任务 ${taskId}] ${text}` : `[任务 ${taskId}] ${text}`, taskId, key);
+  /**
+   * Task news the Assistant hears: what a worker finished, asked, or got stuck on. `event` names what happened to the task, so the
+   * same news told again, as a replay does, is one message and one owed reply.
+   */
+  async news(accountId: string, taskId: string, text: string, event: string, kind: "task" | "tick" = "task"): Promise<void> {
+    await this.hearSystem(accountId, kind === "tick" ? `[日常检查 · 任务 ${taskId}] ${text}` : `[任务 ${taskId}] ${text}`, taskId, `task:${taskId}:${event}`);
   }
 
   /** Ingest settled a job for one of the Expert's Agents, whoever submitted it: the Assistant hears what came of each item. */
@@ -223,7 +228,8 @@ export class AssistantService implements StudioOperations {
   private async hearSystem(accountId: string, text: string, taskId?: string, key?: string): Promise<void> {
     const sent = await this.chat.sayAsSystem(accountId, text, key);
     // The reply to news is the Assistant's own to send, unless the news joined a Run that has its own reply path.
-    if (sent.outcome === "started") await this.deps.deliveries.owe(sent.runId, accountId);
+    // A replay owes it too: the first try may have stopped between saying and owing, and owing twice is one debt.
+    if (sent.outcome === "started" || sent.outcome === "replayed") await this.deps.deliveries.owe(sent.runId, accountId);
     const task = taskId ? await this.deps.tasks.get(taskId) : undefined;
     if (task) await this.inRun(task, sent.runId);
   }
@@ -241,23 +247,27 @@ export class AssistantService implements StudioOperations {
 
   /**
    * The reply to a Run the Assistant started on its own goes where the Expert was last, unless they are in Studio now,
-   * where it is already on the page. Exactly one instance takes each reply.
+   * where it is already on the page. The reply is queued under the Run's own key, so any number of instances, and any retry
+   * after a crash, queue it once; the debt is closed only after it is queued. With no chat to take it, it stays owed.
    */
   async settleDeliveries(): Promise<void> {
     if (this.closing || !this.conversation) return;
-    for (const { runId, accountId } of await this.deps.deliveries.open(20)) {
-      const progress = await this.chat.gateway.progress(runId);
-      if (progress && !progress.ended) continue;
-      if (!await this.deps.deliveries.take(runId)) continue;
-      if (!progress) continue;
-      const { status, text, reason } = progress.reply;
-      const message = status === "completed" ? text.trim() : status === "failed" ? `我这边出了点问题，刚才那条没处理完：${reason ?? "未知错误"}` : "";
-      if (!message) continue;
-      const last = await this.deps.state.lastExpert(accountId);
-      if (last?.source === "web" && Date.now() - Date.parse(last.at) < STUDIO_ACTIVE_MS) continue;
-      const buttons = await this.reviewButtons(runId);
-      await this.deps.channels.push(accountId, { text: message, ...(buttons.length ? { buttons } : {}) }, last && isChannel(last.source) ? last.source : undefined);
-    }
+    for (const owed of await this.deps.deliveries.open(OWED_BATCH)) await this.settleDelivery(owed).catch(error => this.report(owed.accountId, error));
+  }
+
+  private async settleDelivery({ runId, accountId, createdAt }: { runId: string; accountId: string; createdAt: string }): Promise<void> {
+    const { deliveries } = this.deps;
+    const progress = await this.chat.gateway.progress(runId);
+    if (progress && !progress.ended) return;
+    if (!progress) return deliveries.done(runId);
+    const { status, text, reason } = progress.reply;
+    const message = status === "completed" ? text.trim() : status === "failed" ? `我这边出了点问题，刚才那条没处理完：${reason ?? "未知错误"}` : "";
+    const last = await this.deps.state.lastExpert(accountId);
+    if (!message || (last?.source === "web" && Date.now() - Date.parse(last.at) < STUDIO_ACTIVE_MS)) return deliveries.done(runId);
+    const buttons = await this.reviewButtons(runId);
+    const queued = await this.deps.channels.push(accountId, { text: message, ...(buttons.length ? { buttons } : {}) }, last && isChannel(last.source) ? last.source : undefined, `assistant-run:${runId}`);
+    // No chat can take it yet: it stays owed for a day, then it is old news.
+    if (queued || Date.now() - Date.parse(createdAt) > OWED_MS) await deliveries.done(runId);
   }
 
   /** A file's text in the Agent's manual input: where plain text goes. */
@@ -300,9 +310,9 @@ export class AssistantService implements StudioOperations {
   private async interviewTurnEnded(task: AssistantTask, workspace: FactoryWorkspace, type: string): Promise<void> {
     const voice = await workspace.store.get(task.session!.sessionId);
     await workspace.store.update(voice.id, s => { if (s.assistantTaskId === task.id) delete s.assistantTaskId; });
-    if (type !== "voice.run_completed") return this.block(task, voice.error ?? "访谈大纲没写成");
+    if (type !== "voice.run_completed") return this.block(task, voice.error ?? "访谈大纲没写成", voice.messages.length);
     await this.deps.tasks.update(task.id, { status: "done", leaseExpiresAt: undefined });
-    await this.news(task.accountId, task.id, `访谈大纲写好了。接下来你自己在对话里一个一个问专家，用 tick_outline 勾掉聊完的项。${outlineText(voice.todos)}`);
+    await this.news(task.accountId, task.id, `访谈大纲写好了。接下来你自己在对话里一个一个问专家，用 tick_outline 勾掉聊完的项。${outlineText(voice.todos)}`, `finished:${voice.messages.length}`);
   }
 
   // ── Tasks ──────────────────────────────────────────────────────────────
@@ -476,15 +486,16 @@ export class AssistantService implements StudioOperations {
     if (this.closing) return;
     if (task.kind === "interview" && workspace) return this.interviewTurnEnded(task, workspace, type);
     const session = await store.get(task.session!.sessionId);
-    if (type !== "voice.run_completed") return void await this.block(task, session.error ?? "被中断了");
+    if (type !== "voice.run_completed") return void await this.block(task, session.error ?? "被中断了", session.messages.length);
     const questions = trailingQuestions(session.messages);
     if (questions.length) {
       await this.deps.tasks.update(task.id, { status: "needs_you", needs: "answer", leaseExpiresAt: undefined, payload: { ...task.payload, questions } });
-      await this.news(task.accountId, task.id, `想问专家：\n${questions.map((question, index) => `${index + 1}. ${question}`).join("\n")}`);
+      // Each question the worker asks is a turn of its own: the length of its session tells them apart, and tells a replay of one from the next.
+      await this.news(task.accountId, task.id, `想问专家：\n${questions.map((question, index) => `${index + 1}. ${question}`).join("\n")}`, `asked:${session.messages.length}`);
       return;
     }
     const worker = this.workers[task.kind as WorkerKind];
-    if (!worker) return void await this.block(task, `不认识的任务类型：${task.kind}`);
+    if (!worker) return void await this.block(task, `不认识的任务类型：${task.kind}`, session.messages.length);
     const next = worker.steps?.[worker.steps.indexOf(task.payload.step as Role) + 1];
     if (next) return void await this.runStep(task, next);
     await worker.finish(task, session, store);
@@ -494,9 +505,9 @@ export class AssistantService implements StudioOperations {
   private review(file: string, lead: string): WorkerFinish {
     return async (task, session, store) => {
       const body = await outputText(store, session.id, file);
-      if (!body) return this.block(task, `没有写出 ${file}`);
+      if (!body) return this.block(task, `没有写出 ${file}`, session.messages.length);
       await this.deps.tasks.update(task.id, { status: "needs_you", needs: "review", leaseExpiresAt: undefined, outputRef: `assistant:${session.id}:${file}` });
-      await this.news(task.accountId, task.id, `${lead}\n${excerpt(body)}`);
+      await this.news(task.accountId, task.id, `${lead}\n${excerpt(body)}`, `finished:${session.messages.length}`);
     };
   }
 
@@ -505,7 +516,7 @@ export class AssistantService implements StudioOperations {
     return async (task, session, store) => {
       const body = file ? await outputText(store, session.id, file) : "";
       await this.deps.tasks.update(task.id, { status: "done", leaseExpiresAt: undefined, ...(file ? { outputRef: `product:${session.id}:${file}` } : {}) });
-      await this.news(task.accountId, task.id, `${lead}\n${excerpt(body || finalText(session.messages))}`);
+      await this.news(task.accountId, task.id, `${lead}\n${excerpt(body || finalText(session.messages))}`, `finished:${session.messages.length}`);
     };
   }
 
@@ -514,17 +525,18 @@ export class AssistantService implements StudioOperations {
     const profile = await outputText(store, session.id, "output/PUBLIC_PROFILE.md");
     if (!profile.trim()) {
       await this.deps.tasks.update(task.id, { status: "done", leaseExpiresAt: undefined, summary: "没有读到公开资料" });
-      await this.news(task.accountId, task.id, `没有读到公开资料。它的说明：${finalText(session.messages)}\n如实告诉专家是什么情况：搜索失败不等于网上没有。`);
+      await this.news(task.accountId, task.id, `没有读到公开资料。它的说明：${finalText(session.messages)}\n如实告诉专家是什么情况：搜索失败不等于网上没有。`, `finished:${session.messages.length}`);
       return;
     }
     await desk.store.put(desk.sessionId, `${MATERIALS}公开资料.md`, Buffer.from(profile), { actor: "host" });
     await this.deps.tasks.update(task.id, { status: "done", leaseExpiresAt: undefined, outputRef: `assistant:${desk.sessionId}:${MATERIALS}公开资料.md` });
-    await this.news(task.accountId, task.id, `公开资料读完了：\n${excerpt(profile)}\n\n把发现自然地接进对话，告诉专家你看过哪些来源，他可以说哪篇不算数。`);
+    await this.news(task.accountId, task.id, `公开资料读完了：\n${excerpt(profile)}\n\n把发现自然地接进对话，告诉专家你看过哪些来源，他可以说哪篇不算数。`, `finished:${session.messages.length}`);
   }
 
-  private async block(task: AssistantTask, reason: string): Promise<void> {
+  /** `turn` is what tells one block from the next: the worker's session length when its turn ended, or the attempt count. A retry of the same block has the same one. */
+  private async block(task: AssistantTask, reason: string, turn: number): Promise<void> {
     await this.deps.tasks.update(task.id, { status: "needs_you", needs: "blocked", lastError: reason, leaseExpiresAt: undefined });
-    await this.news(task.accountId, task.id, `卡住了：${reason}`);
+    await this.news(task.accountId, task.id, `卡住了：${reason}`, `blocked:${turn}`);
   }
 
   // ── Tick: recovery and the daily check ─────────────────────────────────
@@ -537,7 +549,7 @@ export class AssistantService implements StudioOperations {
   }
 
   private async recover(task: AssistantTask): Promise<void> {
-    if (task.attempts >= 3) return this.block(task, "多次中断，没能完成");
+    if (task.attempts >= 3) return this.block(task, "多次中断，没能完成", task.attempts);
     const runtime = await this.sessionRuntime(task);
     await this.deps.tasks.update(task.id, { attempts: task.attempts + 1, leaseExpiresAt: lease() });
     if (runtime.isRunning(task.session!.sessionId)) return;
@@ -561,7 +573,7 @@ export class AssistantService implements StudioOperations {
     for (const poke of pokes) if (poke.status !== "done") await this.deps.tasks.update(poke.id, { status: "done" });
     const task = await this.deps.tasks.create({ accountId, kind: "poke", origin: { source: "tick" }, summary: "日常检查" });
     const clock = new Intl.DateTimeFormat("zh-CN", { timeZone: timezone, weekday: "short", hour: "2-digit", minute: "2-digit" }).format(now);
-    await this.news(accountId, task.id, `专家当地时间 ${clock}。看看他的 Agent 和最近的事，决定今天要不要戳一戳他。`, "tick");
+    await this.news(accountId, task.id, `专家当地时间 ${clock}。看看他的 Agent 和最近的事，决定今天要不要戳一戳他。`, "tick", "tick");
   }
 
   // ── Studio and channel surfaces ───────────────────────────────────────

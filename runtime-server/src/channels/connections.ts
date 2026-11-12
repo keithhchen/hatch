@@ -118,6 +118,7 @@ export class PostgresConnections implements ConnectionRepository {
       );
       ALTER TABLE hatch_connections ADD COLUMN IF NOT EXISTS task_specific BOOLEAN NOT NULL DEFAULT false;
       ALTER TABLE hatch_connections DROP COLUMN IF EXISTS start_code;
+      ALTER TABLE hatch_connections ADD COLUMN IF NOT EXISTS redeemed_by TEXT;
       CREATE UNIQUE INDEX IF NOT EXISTS hatch_connections_code_idx ON hatch_connections (link_code) WHERE link_code IS NOT NULL;
       CREATE INDEX IF NOT EXISTS hatch_connections_scope_idx ON hatch_connections (channel, scope) WHERE scope <> '';
       CREATE TABLE IF NOT EXISTS hatch_channel_identities (
@@ -170,7 +171,7 @@ export class PostgresConnections implements ConnectionRepository {
     const code = newLinkCode();
     await this.pool.query(`INSERT INTO hatch_connections (owner_account_id, channel, scope, target, target_key, audience, link_code, link_expires_at)
       VALUES ($1, $2, $3, $6, $7, 'self', $4, $5)
-      ON CONFLICT (owner_account_id, channel, audience, target_key) DO UPDATE SET scope = CASE WHEN hatch_connections.credentials IS NOT NULL THEN hatch_connections.scope ELSE $3 END, link_code = $4, link_expires_at = $5`,
+      ON CONFLICT (owner_account_id, channel, audience, target_key) DO UPDATE SET scope = CASE WHEN hatch_connections.credentials IS NOT NULL THEN hatch_connections.scope ELSE $3 END, link_code = $4, link_expires_at = $5, redeemed_by = NULL`,
     [ownerAccountId, channel, this.scopeOf(ownerAccountId, channel), code, new Date(now.getTime() + LINK_CODE_MS), JSON.stringify(target), targetKey(target)]);
     return code;
   }
@@ -178,13 +179,18 @@ export class PostgresConnections implements ConnectionRepository {
   async redeem(channel: ChannelKind, scope: string, code: string, who: { senderId: string; threadId: string }, now = new Date()): Promise<Linked | undefined> {
     return this.transaction(async client => {
       const row = (await client.query(`SELECT ${COLUMNS} FROM hatch_connections WHERE link_code = $1 AND channel = $2 AND scope = $3 AND link_expires_at > $4 FOR UPDATE`, [code, channel, scope, now])).rows[0];
-      if (!row) return undefined;
+      // A code redeemed by this same sender is still theirs: asking again, as a retry of the event does, is the same success.
+      if (!row) {
+        const again = (await client.query(`SELECT ${COLUMNS} FROM hatch_connections c WHERE link_code = $1 AND channel = $2 AND scope = $3 AND redeemed_by = $4
+          AND EXISTS (SELECT 1 FROM hatch_channel_identities i WHERE i.connection_id = c.id AND i.sender_id = $4)`, [code, channel, scope, who.senderId])).rows[0];
+        return again && connectionOf(again);
+      }
       const connection = connectionOf(row);
       // The sender moves away from any earlier Connection. A self Connection has one owner: the new one replaces the old.
       await client.query("DELETE FROM hatch_channel_identities WHERE channel = $1 AND scope = $2 AND sender_id = $3", [channel, scope, who.senderId]);
       if (connection.audience === "self") await client.query("DELETE FROM hatch_channel_identities WHERE connection_id = $1 AND role = 'owner'", [connection.id]);
       await client.query("INSERT INTO hatch_channel_identities (connection_id, channel, scope, sender_id, thread_id) VALUES ($1, $2, $3, $4, $5)", [connection.id, channel, scope, who.senderId, who.threadId]);
-      await client.query("UPDATE hatch_connections SET link_code = NULL, link_expires_at = NULL, state = 'active', last_event_at = $2 WHERE id = $1", [connection.id, now]);
+      await client.query("UPDATE hatch_connections SET link_expires_at = $2, redeemed_by = $3, state = 'active', last_event_at = $2 WHERE id = $1", [connection.id, now, who.senderId]);
       return { ...connection, state: "active" as const };
     });
   }

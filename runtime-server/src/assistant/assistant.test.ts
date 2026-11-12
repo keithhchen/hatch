@@ -102,12 +102,19 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
   const tasks = new MemoryTaskRepository();
   const state = new MemoryAssistantState();
   const deliveries = new MemoryDeliveries();
-  const pushed: Array<{ text: string; buttons?: ChannelMessage["buttons"]; prefer?: string }> = [];
+  const pushed: Array<{ text: string; key: string | undefined; buttons?: ChannelMessage["buttons"]; prefer?: string }> = [];
+  let pushFailures = 0;
   const applied: AgentChange[] = [];
   let reachable = true;
   const reach = { assistantAccounts: async () => [{ accountId: ACCOUNT, timezone: "UTC" }] } as unknown as AccountReach;
   const channels: Pick<AssistantChannels, "push" | "canReach"> = {
-    push: async (_account, message, prefer) => { pushed.push({ text: message.text, ...(message.buttons ? { buttons: message.buttons } : {}), ...(prefer ? { prefer } : {}) }); return true; },
+    push: async (_account, message, prefer, key) => {
+      if (!reachable) return false;
+      if (pushFailures-- > 0) throw new Error("channel down");
+      // Like the channel layer, a key already queued is queued once.
+      if (!key || !pushed.some(sent => sent.key === key)) pushed.push({ text: message.text, key, ...(message.buttons ? { buttons: message.buttons } : {}), ...(prefer ? { prefer } : {}) });
+      return true;
+    },
     canReach: async () => reachable,
   };
   const telegramCalls: Array<{ method: string; body: any }> = [];
@@ -180,6 +187,7 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
   return {
     root, tasks, state, deliveries, pushed, notices, log, applied, telegramCalls, telegramUpdate, assistant, chat, target, model, productStore, productRuntime, say, idle, legacy, store, kit, tools, chatAssets, materials,
     setReachable: (value: boolean) => { reachable = value; },
+    failPushes: (count: number) => { pushFailures = count; },
     close: async () => { await assistant.close(); await chat.close(); await productRuntime.close(); await rm(root, { recursive: true, force: true, maxRetries: 5 }); },
   };
 }
@@ -551,7 +559,7 @@ test("The chat shows only what was said; live state reaches the model but never 
     await env.say("[任务 看起来像通知] 其实是我说的");
     await env.idle();
     assert.match(env.model.state.turns[0]!.live ?? "", /^<当前状态>[\s\S]*选址顾问/);
-    await env.assistant.news(ACCOUNT, "t1", "构建好了");
+    await env.assistant.news(ACCOUNT, "t1", "构建好了", "finished");
     await waitFor(() => env.model.state.calls === 2);
     await env.idle();
     const { messages } = await env.assistant.view(ACCOUNT);
@@ -614,7 +622,7 @@ test("The page's approve and decline are the same decision: a click retried or t
     const task = await env.assistant.propose(ACCOUNT, PRODUCT, { release: "publish" }, { source: "web" });
     const click = async (action: "approve" | "decline", key: string) => {
       const { task: decided } = await env.assistant.decide(ACCOUNT, task.id, action, key);
-      await env.assistant.news(ACCOUNT, decided.id, "专家在 Studio 里确认了这件事。", "task", `decided:${decided.id}`);
+      await env.assistant.news(ACCOUNT, decided.id, "专家在 Studio 里确认了这件事。", "decided");
     };
     await click("approve", "click-1");
     await click("approve", "click-1");
@@ -644,16 +652,73 @@ test("News the Assistant answers on its own is owed to the Expert once, unless t
   try {
     await env.state.expertSpoke(ACCOUNT, { source: "telegram", at: new Date(Date.now() - 3600_000).toISOString() });
     const task = await env.tasks.create({ accountId: ACCOUNT, kind: "build", origin: { source: "telegram" }, status: "needs_you", needs: "review", payload: {} });
-    await env.assistant.news(ACCOUNT, task.id, "构建好了");
+    await env.assistant.news(ACCOUNT, task.id, "构建好了", "finished");
     await env.idle();
     await env.assistant.settleDeliveries();
     await env.assistant.settleDeliveries();
     assert.deepEqual(env.pushed.map(message => [message.text, message.prefer]), [["构建好了，要发布吗？", "telegram"]], "pushed once, where the Expert was last");
     await env.state.expertSpoke(ACCOUNT, { source: "web", at: new Date().toISOString() });
-    await env.assistant.news(ACCOUNT, task.id, "又好了");
+    await env.assistant.news(ACCOUNT, task.id, "又好了", "finished-again");
     await env.idle();
     await env.assistant.settleDeliveries();
     assert.equal(env.pushed.length, 1, "in Studio the reply is already on the page");
+  } finally { await env.close(); }
+});
+
+test("A reply no chat could take yet, or that the channel failed to queue, stays owed and goes out once", async () => {
+  const env = await setup({ model: () => ({ text: "构建好了，要发布吗？" }) });
+  const consoleError = console.error;
+  console.error = () => undefined;
+  try {
+    await env.state.expertSpoke(ACCOUNT, { source: "telegram", at: new Date(Date.now() - 3600_000).toISOString() });
+    const task = await env.tasks.create({ accountId: ACCOUNT, kind: "build", origin: { source: "telegram" }, status: "needs_you", needs: "review", payload: {} });
+    env.setReachable(false);
+    await env.assistant.news(ACCOUNT, task.id, "构建好了", "finished");
+    await env.idle();
+    await env.assistant.settleDeliveries();
+    assert.equal(env.pushed.length, 0, "no chat can take it");
+    env.setReachable(true);
+    env.failPushes(1);
+    await env.assistant.settleDeliveries();
+    assert.equal(env.pushed.length, 0, "the channel failed to queue it");
+    await env.assistant.settleDeliveries();
+    await env.assistant.settleDeliveries();
+    assert.deepEqual(env.pushed.map(message => [message.text, message.key?.startsWith("assistant-run:")]), [["构建好了，要发布吗？", true]], "queued once, under the Run's own key");
+    assert.deepEqual(await env.deliveries.open(10), [], "closed after it was queued");
+  } finally { console.error = consoleError; await env.close(); }
+});
+
+test("News told again is one message and one owed reply, even when the first telling stopped before the debt was written", async () => {
+  const env = await setup({ model: () => ({ text: "构建好了，要发布吗？" }) });
+  try {
+    await env.state.expertSpoke(ACCOUNT, { source: "telegram", at: new Date(Date.now() - 3600_000).toISOString() });
+    const task = await env.tasks.create({ accountId: ACCOUNT, kind: "build", origin: { source: "telegram" }, status: "needs_you", needs: "review", payload: {} });
+    const owe = env.deliveries.owe.bind(env.deliveries);
+    env.deliveries.owe = async () => { throw new Error("database down"); };
+    await assert.rejects(env.assistant.news(ACCOUNT, task.id, "构建好了", "finished"), /database down/);
+    env.deliveries.owe = owe;
+    await env.assistant.news(ACCOUNT, task.id, "构建好了", "finished");
+    await env.assistant.news(ACCOUNT, task.id, "构建好了", "finished");
+    await env.idle();
+    await env.assistant.settleDeliveries();
+    assert.equal(env.model.state.calls, 1, "the Assistant heard it once");
+    assert.deepEqual(env.pushed.map(message => message.text), ["构建好了，要发布吗？"], "and its reply was owed, though the second telling was a replay");
+  } finally { await env.close(); }
+});
+
+test("Two blocks of one task are two messages; a retry of one block is one", async () => {
+  const env = await setup({ model: () => ({ text: "" }) });
+  try {
+    const task = await env.tasks.create({ accountId: ACCOUNT, kind: "build", origin: { source: "web" }, status: "working", payload: {} });
+    const block = (reason: string, turn: number) => (env.assistant as unknown as { block(task: unknown, reason: string, turn: number): Promise<void> }).block(task, reason, turn);
+    await block("第一次卡住", 4);
+    await block("第一次卡住", 4);
+    await env.idle();
+    assert.equal(env.model.state.calls, 1, "a retry of the same block is heard once");
+    await block("第二次卡住", 7);
+    await env.idle();
+    assert.equal(env.model.state.calls, 2, "a later block of the same task is heard too");
+    assert.deepEqual(env.model.state.turns.map(turn => /第.次卡住/.exec(turn.input.message.content)?.[0]), ["第一次卡住", "第二次卡住"]);
   } finally { await env.close(); }
 });
 

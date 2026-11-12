@@ -2314,7 +2314,7 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
     const task = action === "answer"
       ? await assistant.answer(account.id, taskId!, String(body.answer ?? "").trim() || (() => { throw Object.assign(new Error("answer is required"), { status: 400 }); })())
       : (await assistant.decide(account.id, taskId!, action as "approve" | "decline", key)).task;
-    await assistant.news(account.id, task.id, `专家在 Studio 里${action === "approve" ? "确认了" : action === "decline" ? "取消了" : "回答了"}这件事。`, "task", action === "answer" ? undefined : `decided:${task.id}`);
+    await assistant.news(account.id, task.id, `专家在 Studio 里${action === "approve" ? "确认了" : action === "decline" ? "取消了" : "回答了"}这件事。`, action === "answer" ? `answered:${key}` : "decided");
     sendJson(response, 200, { task });
     return;
   }

@@ -58,7 +58,7 @@ export class ChannelService implements AssistantChannels {
     this.dispatcher = new Dispatcher({ outbox: deps.outbox, hub: deps.hub, limiter: deps.limiter, connections: deps.connections, inbox: deps.inbox, ...(deps.now ? { now: deps.now } : {}), ...(deps.rates ? { rates: deps.rates } : {}), onQueued: () => this.outboxLoop?.wake(), onError: this.report });
     this.router = new ChannelRouter({
       hub: deps.hub, connections: deps.connections, onError: this.report, ...(deps.signIn ? { signIn: deps.signIn } : {}), ...(deps.claim ? { claim: deps.claim } : {}),
-      notify: async (to, text, replyTo, link) => { await this.dispatcher.send({ ...to, kind: "notice", message: { text, ...(replyTo ? { replyTo } : {}), ...(link ? { link } : {}) } }); },
+      notify: async (to, text, sourceKey, replyTo, link) => { await this.dispatcher.send({ ...to, kind: "notice", message: { text, ...(replyTo ? { replyTo } : {}), ...(link ? { link } : {}) }, sourceKey }); },
     });
     if (deps.gateway) this.replies = new ChatReplies({
       gateway: deps.gateway, inbox: deps.inbox, dispatcher: this.dispatcher, compacting: (runId, compactionId) => this.compaction({ runId, compactionId }),
@@ -213,12 +213,12 @@ export class ChannelService implements AssistantChannels {
     return true;
   }
 
-  async push(accountId: string, message: { text: string; buttons?: Send["message"]["buttons"] }, prefer?: ChannelKind): Promise<boolean> {
+  async push(accountId: string, message: { text: string; buttons?: Send["message"]["buttons"] }, prefer?: ChannelKind, sourceKey?: string): Promise<boolean> {
     const linked = await this.connections.linked(accountId);
     const target = linked.find(candidate => candidate.connection.channel === prefer) ?? linked[0];
     if (!target?.identity) return false;
     const { connection, identity } = target;
-    await this.dispatcher.send({ connectionId: connection.id, channel: connection.channel as ChannelKind, scope: connection.scope, address: { threadId: identity.threadId, senderId: identity.senderId }, kind: "reply", message });
+    await this.dispatcher.send({ connectionId: connection.id, channel: connection.channel as ChannelKind, scope: connection.scope, address: { threadId: identity.threadId, senderId: identity.senderId }, kind: "reply", message, ...(sourceKey ? { sourceKey } : {}) });
     return true;
   }
 

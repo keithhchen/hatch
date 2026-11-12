@@ -7,10 +7,10 @@ import type { Pool } from "pg";
 export interface DeliveryRepository {
   /** Remembers that this Run's reply is owed to the account. Repeating a Run keeps one record. */
   owe(runId: string, accountId: string): Promise<void>;
-  /** Runs whose reply nobody has taken yet, oldest first. */
-  open(limit: number): Promise<Array<{ runId: string; accountId: string }>>;
-  /** True for the one caller that takes the reply: of any number of instances, exactly one delivers it. */
-  take(runId: string): Promise<boolean>;
+  /** Runs whose reply is still owed, oldest first. */
+  open(limit: number): Promise<Array<{ runId: string; accountId: string; createdAt: string }>>;
+  /** The reply is queued, or there is none to queue. Closing twice is closing once. */
+  done(runId: string): Promise<void>;
 }
 
 export class PostgresDeliveries implements DeliveryRepository {
@@ -32,20 +32,20 @@ export class PostgresDeliveries implements DeliveryRepository {
     await this.pool.query("INSERT INTO hatch_assistant_deliveries (run_id, account_id) VALUES ($1, $2) ON CONFLICT (run_id) DO NOTHING", [runId, accountId]);
   }
 
-  async open(limit: number): Promise<Array<{ runId: string; accountId: string }>> {
-    return (await this.pool.query("SELECT run_id, account_id FROM hatch_assistant_deliveries WHERE taken_at IS NULL ORDER BY created_at LIMIT $1", [limit])).rows
-      .map(row => ({ runId: row.run_id, accountId: row.account_id }));
+  async open(limit: number): Promise<Array<{ runId: string; accountId: string; createdAt: string }>> {
+    return (await this.pool.query("SELECT run_id, account_id, created_at FROM hatch_assistant_deliveries WHERE taken_at IS NULL ORDER BY created_at LIMIT $1", [limit])).rows
+      .map(row => ({ runId: row.run_id, accountId: row.account_id, createdAt: new Date(row.created_at).toISOString() }));
   }
 
-  async take(runId: string): Promise<boolean> {
-    return (await this.pool.query("UPDATE hatch_assistant_deliveries SET taken_at = now() WHERE run_id = $1 AND taken_at IS NULL RETURNING run_id", [runId])).rowCount === 1;
+  async done(runId: string): Promise<void> {
+    await this.pool.query("UPDATE hatch_assistant_deliveries SET taken_at = COALESCE(taken_at, now()) WHERE run_id = $1", [runId]);
   }
 }
 
 /** Explicit test dependency; the product never constructs this repository. */
 export class MemoryDeliveries implements DeliveryRepository {
-  private readonly rows = new Map<string, { accountId: string; taken: boolean }>();
-  async owe(runId: string, accountId: string) { if (!this.rows.has(runId)) this.rows.set(runId, { accountId, taken: false }); }
-  async open(limit: number) { return [...this.rows].filter(([, row]) => !row.taken).slice(0, limit).map(([runId, row]) => ({ runId, accountId: row.accountId })); }
-  async take(runId: string) { const row = this.rows.get(runId); if (!row || row.taken) return false; row.taken = true; return true; }
+  private readonly rows = new Map<string, { accountId: string; createdAt: string; taken: boolean }>();
+  async owe(runId: string, accountId: string) { if (!this.rows.has(runId)) this.rows.set(runId, { accountId, createdAt: new Date().toISOString(), taken: false }); }
+  async open(limit: number) { return [...this.rows].filter(([, row]) => !row.taken).slice(0, limit).map(([runId, row]) => ({ runId, accountId: row.accountId, createdAt: row.createdAt })); }
+  async done(runId: string) { const row = this.rows.get(runId); if (row) row.taken = true; }
 }
