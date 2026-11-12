@@ -1,7 +1,8 @@
 import { AttachmentSource, ConversationTransport, PendingStore, RuntimeConnection } from "@hatch/chat";
-import { BrowserImageAttachments, base64Of } from "./webChatClient.js";
+import { BrowserImageAttachments } from "./webChatClient.js";
 
-const ROOT = "/v1/creator/assistant";
+/** The conversation API, the same one the Hatch CLI and every outside client use. */
+const ROOT = "/v1/creator/assistant/conversation";
 /** The Assistant is one conversation per Expert; the page names it, the server knows it by the account. */
 export const ASSISTANT_CONVERSATION = "assistant";
 
@@ -32,14 +33,14 @@ export function wireEventsOf(event) {
 
 const isImage = mediaType => String(mediaType ?? "").startsWith("image/");
 
-/** A message of the Assistant's page, as the shared chat reads a message. The id of a reply is `<run_id>:<n>`. */
+/** A message of the conversation API, as the shared chat reads a message. The id of a reply is `<run_id>:<n>`. */
 function messageOf(line) {
   const attachments = (line.attachments ?? []).map(file => ({
     attachment_id: file.asset_id ?? file.name, asset_id: file.asset_id, display_name: file.name,
     media_type: file.type === "image" ? "image/jpeg" : "application/octet-stream", ...(file.bytes ? { source_bytes: file.bytes } : {})
   }));
   return {
-    id: line.id, role: line.role === "expert" ? "user" : "assistant", content: line.text, timestamp: line.at,
+    id: line.id, role: line.role, content: line.text, timestamp: line.created_at,
     ...(line.role === "assistant" ? { run_id: line.id.split(":")[0] } : {}),
     ...(line.state ? { state: line.state } : {}),
     ...(attachments.length ? { attachments } : {}),
@@ -47,10 +48,15 @@ function messageOf(line) {
   };
 }
 
+/** What a message says to the API: its text, then each file by the id the upload returned. */
+const contentOf = (content, attachments) => attachments.length
+  ? [...(content ? [{ type: "text", text: content }] : []), ...attachments.map(({ asset_id, type }) => ({ type, assetId: asset_id }))]
+  : content;
+
 /**
- * The Studio Assistant as a Conversation: the page's snapshot (with the journal cursor and the running turn's partial text),
- * older pages, the event stream resumed by cursor, and a send that carries the message's key as its Idempotency-Key.
- * `view` is what the page shows beside the chat (tasks, channels, failure); it changes with every snapshot.
+ * The Studio Assistant as a Conversation, over the conversation API: the page's view (with the journal cursor and the running
+ * turn's partial text), older pages, the event stream resumed by cursor, and a send that carries the message's key as its Idempotency-Key.
+ * `view` is what the page shows beside the chat (tasks, channels); it changes with every snapshot.
  */
 export class StudioAssistantTransport extends ConversationTransport {
   /** @param {(path: string, init?: object) => Promise<any>} request @param {{stream?: (url: string) => EventSource, timeZone?: string}} [options] */
@@ -82,31 +88,39 @@ export class StudioAssistantTransport extends ConversationTransport {
     if (Number.isSafeInteger(next) && next > this.cursor) this.cursor = next;
   }
 
+  /** The Expert's timezone, told once per page and never by reading. A refusal is not the page's problem. */
+  announceTimeZone() {
+    this.timeZoneSent ??= this.request(`${ROOT}/timezone`, { method: "PUT", body: JSON.stringify({ timezone: this.timeZone }) }).catch(() => undefined);
+  }
+
   async snapshot() {
-    const view = await this.request(`${ROOT}?tz=${encodeURIComponent(this.timeZone)}`);
+    this.announceTimeZone();
+    const view = await this.request(`${ROOT}/view`);
     this.view = view;
     this.advance(view.cursor);
     for (const listener of this.listeners) listener();
+    const failed = view.status?.state === "failed" && view.status.runId;
     return {
       conversation: { id: ASSISTANT_CONVERSATION },
       messages: view.messages.map(messageOf), events: [], cursor: Number(view.cursor),
       has_more: view.has_more, ...(view.before_cursor ? { before_cursor: view.before_cursor } : {}),
       // The page lists the Run in progress, or the last one when it failed; a Run it does not list has ended well.
-      runs: view.running ? [{ id: view.runId, status: "running", ...(view.partial ? { partial_output: view.partial } : {}) }]
-        : view.failure && view.runId ? [{ id: view.runId, status: "failed", failure: view.failure }] : []
+      runs: view.status?.state === "running" ? [{ id: view.run_id, status: "running", ...(view.partial ? { partial_output: view.partial } : {}) }]
+        : failed ? [{ id: view.status.runId, status: "failed", failure: view.status.error }] : []
     };
   }
 
   async history(_conversationId, { beforeCursor }) {
-    const page = await this.request(`${ROOT}?before_cursor=${encodeURIComponent(beforeCursor)}`);
+    const page = await this.request(`${ROOT}/messages?before=${encodeURIComponent(beforeCursor)}`);
     return { messages: page.messages.map(messageOf), has_more: page.has_more, ...(page.before_cursor ? { before_cursor: page.before_cursor } : {}) };
   }
 
   run(_conversationId, runId) {
-    return Promise.resolve({ id: runId, status: this.view?.failure ? "failed" : "completed", ...(this.view?.failure ? { failure: this.view.failure } : {}) });
+    const failure = this.view?.status?.state === "failed" ? this.view.status.error : undefined;
+    return Promise.resolve({ id: runId, status: failure ? "failed" : "completed", ...(failure ? { failure } : {}) });
   }
 
-  assetUrl(_conversationId, assetId) { return `${ROOT}/images/${encodeURIComponent(assetId)}.jpg`; }
+  assetUrl(_conversationId, assetId) { return `${ROOT}/assets/${encodeURIComponent(assetId)}`; }
 
   connect(conversationId, handlers) { return new StudioConnection(this, conversationId, handlers); }
 }
@@ -133,10 +147,10 @@ export class StudioConnection extends RuntimeConnection {
 
   async send({ runId, clientMessageId, content = "", attachments = [] }) {
     const receipt = await this.transport.request(`${ROOT}/messages`, {
-      method: "POST", headers: { "idempotency-key": clientMessageId },
-      body: JSON.stringify({ content, attachments: attachments.map(({ asset_id, type }) => ({ asset_id, type })) })
+      method: "POST", headers: { "idempotency-key": clientMessageId }, body: JSON.stringify({ content: contentOf(content, attachments) })
     });
-    this.onEvent({ type: "message.accepted", conversation_id: this.conversationId, run_id: receipt.run_id ?? runId, client_message_id: clientMessageId, outcome: receipt.outcome });
+    // A message that joined the running turn is queued until the turn takes it up.
+    this.onEvent({ type: "message.accepted", conversation_id: this.conversationId, run_id: receipt.run_id ?? runId, client_message_id: clientMessageId, outcome: receipt.queued ? "steered" : "started" });
   }
 
   toolResult() {}
@@ -160,9 +174,9 @@ export class StudioAttachments extends AttachmentSource {
 
   async upload(file) {
     const ready = isImage(file.type) ? await BrowserImageAttachments.compress(file) : file;
-    const bytes = new Uint8Array(await ready.arrayBuffer());
-    const { asset_id, type } = await this.request(`${ROOT}/files`, { method: "POST", body: JSON.stringify({ name: ready.name, base64: base64Of(bytes) }) });
-    return { attachment_id: asset_id, asset_id, type, display_name: ready.name, media_type: ready.type, source_bytes: ready.size };
+    // The file is the request body, as it is; its name is the query.
+    const { asset_id, kind } = await this.request(`${ROOT}/assets?name=${encodeURIComponent(ready.name)}`, { method: "POST", headers: { "content-type": ready.type || "application/octet-stream" }, body: ready });
+    return { attachment_id: asset_id, asset_id, type: kind, display_name: ready.name, media_type: ready.type, source_bytes: ready.size };
   }
 }
 

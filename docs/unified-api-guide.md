@@ -251,6 +251,17 @@ curl -s -X POST "https://gethatchapp.com/v1/creator/assistant/conversation/messa
 
 Send an Idempotency-Key to make retries safe; without it a retry may create a duplicate. This holds for every write to a worker or the Assistant (`messages`, `retry`, task `approve`/`decline`/`answer`): use one new UUID per action and the same one on a retry. `Accept: text/event-stream` on the POST streams the reply; `GET .../events?after_cursor=<cursor>` resumes it.
 
+Beyond the shared verbs, the Assistant conversation has additions that Studio's own page uses. They only add fields and routes: nothing above changes. All are under `/v1/creator/assistant/conversation`.
+
+| Route | What it does |
+|---|---|
+| `GET /view?limit=` | `snapshot` of the newest messages (default and most 200), plus `has_more`, `before_cursor`, `tasks` (what waits on you) and `channels` (the chat platforms you can reach the Assistant on). |
+| `GET /messages?before=<before_cursor>&limit=` | The page of messages before that cursor, newest page last: `{ status, messages, has_more, before_cursor }`. The cursor is opaque. Not with `after`. A worker answers `501 history_unavailable`. |
+| `GET /assets/<asset_id>` | The picture you uploaded, as an image. `404 asset_not_found` for anything else. |
+| `PUT /timezone` | `{"timezone":"Asia/Shanghai"}` tells the Assistant your hours. `400 invalid_timezone` for anything that is not an IANA name. Reading never sets it. |
+
+An Assistant reply may carry `steps`: `{ "parts": [...], "tool_calls": [{ "tool_call_id", "name", "status", "activity_message" }] }`, what the Assistant did inside that reply. Why the last Run failed is `status.error` on `snapshot`, `view` and `messages` (`status` is `failed`). Upload a file as the raw request body: `POST /assets?name=<file name>`.
+
 ### 15. Chat with a published product
 
 The Chat API is described in `docs/spec-surfaces-v1.md`. Same API key or browser session.

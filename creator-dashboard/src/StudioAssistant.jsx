@@ -9,7 +9,8 @@ import { useLocale } from "./locale.jsx";
 import { webChatErrorText, webChatT } from "./webChatI18n.js";
 import "./webChat.css";
 
-const ROOT = "/v1/creator/assistant";
+/** Tasks are the Assistant's own resource, not part of the conversation API. */
+const TASKS = "/v1/creator/assistant/tasks";
 const CONNECTIONS = "/v1/creator/connections";
 const CHANNEL_NAMES = { telegram: "Telegram", line: "LINE", lark: "Lark", feishu: "飞书", wecom: "WeCom", wechatkf: "WeChat", slack: "Slack", imessage: "iMessage" };
 // Thinking and tool steps, as Product web chat shows them.
@@ -56,7 +57,7 @@ function Assistant({ transport, controller, dictate, request, t, chatT, errorTex
   const post = useCallback((path, body) => request(path, { method: "POST", headers: { "idempotency-key": mutationKey() }, body: JSON.stringify(body ?? {}) }), [request]);
   const refresh = () => controller.refresh(ASSISTANT_CONVERSATION).catch(cause => setError(friendlyError(cause, t)));
   const act = async (task, action) => {
-    try { await post(`${ROOT}/tasks/${task.id}/${action}`); await refresh(); }
+    try { await post(`${TASKS}/${task.id}/${action}`); await refresh(); }
     catch (cause) { setError(friendlyError(cause, t)); }
   };
   const saveLark = async event => {
