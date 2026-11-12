@@ -1,6 +1,6 @@
 ---
 name: hatch
-description: Use the `hatch` CLI (or its MCP tools) to manage Hatch products, ingest links and files into a product, and talk to a product's workers and the Assistant. Use when the user asks to create, list, update, unlist or withdraw a Hatch product, to feed URLs, documents, audio or video into a product's knowledge, or to ask a worker (research, interview, builder, cases, evaluator) or the Assistant to do something.
+description: Use the `hatch` CLI (or its MCP tools) to manage Hatch products, ingest links and files into a product, and talk to a product's workers and the Assistant. Use when the user asks to create, list, update, unlist or withdraw a Hatch product, to feed URLs, documents, audio or video into a product, or to ask a worker (research, interview, builder, cases, evaluator) or the Assistant to do something.
 ---
 
 # Hatch

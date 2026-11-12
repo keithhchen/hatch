@@ -23,22 +23,7 @@ The current publish path can resolve a runtime-free Corpus directly from
 `creator_id` and `agent_id` loads that current Corpus directly. The server
 always loads `instructions/system.md`, activates
 only the matching local Skill and its references, and never puts Evals into the
-runtime context. The Corpus declares `hatch.web_search`; the retrieval tool is
-exposed as `hatch.file_search` only when a knowledge provider is configured.
-
-The retrieval provider is Qdrant plus DashScope. Run Qdrant from
-`infra/docker-compose.rag.yml` and configure `HATCH_QDRANT_URL` (use
-`http://127.0.0.1:6333` when Runtime runs as a host service; use
-`http://qdrant:6333` when it shares the Compose network),
-`HATCH_QDRANT_API_KEY`, `HATCH_QDRANT_COLLECTION`, and `DASHSCOPE_API_KEY`.
-Registry indexes only `knowledge/*.md` at Corpus publication time. Runtime
-exposes `hatch.file_search` only for an Agent with knowledge and calls Qdrant
-on demand, then reranks candidates with `qwen3-rerank`; it never eagerly puts
-retrieved knowledge in the system prompt. Every staged vector carries the
-Corpus digest, and Runtime queries only the digest bound to the current
-session, so an incomplete republish cannot leak into the active Agent.
-`HATCH_KNOWLEDGE_MODE=corpus-test`
-remains reserved for explicit contract tests.
+runtime context. The Corpus declares `hatch.web_search`.
 
 ## Install
 
@@ -241,7 +226,7 @@ client. The Runtime-side protocol boundary is `client.hello` plus
 The Registry is now also implemented in TypeScript in this package. Run it
 separately from the Agent Runtime with `npm run serve:registry`; it owns Corpus
 publish, current POSIX Corpus state, Postgres metadata, account access, and the
-publish-time Qdrant ingestion hook. The two services share the TypeScript
+Corpus publish pipeline. The two services share the TypeScript
 Corpus contract but keep their HTTP processes separate.
 
 Set the model and credentials in `.env`:
@@ -369,5 +354,4 @@ Execution surface:
 model-visible: Pi tools serialized through the OpenAI-compatible provider transport
 server tools: web_search, api_request, mcp_call
 canonical model + Runtime + events + persistence + wire: file_list/file_search/file_read/file_write/file_patch/shell_exec/git_diff
-Creator knowledge search remains separate: hatch_file_search (model) -> hatch.file_search (server Runtime)
 ```

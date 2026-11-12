@@ -40,8 +40,6 @@ export async function materializeAgentCorpus(
   // Skill bodies and references are not eagerly materialized into the system
   // prompt. The session catalog is metadata-only, and the registered Skill
   // tool loads the selected bundle in the same Agent loop.
-  // Retrieval-only knowledge is also never eagerly injected. hatch.file_search
-  // performs an Agent-scoped lookup only when the model needs long-tail facts.
   const protectedKnowledge = `${hatchPlatformPrompt()}\n\n${system}`;
   if (Buffer.byteLength(protectedKnowledge, "utf8") > MAX_MATERIALIZED_AGENT_PROMPT_BYTES) {
     throw new Error(`Materialized Agent prompt exceeds the ${MAX_MATERIALIZED_AGENT_PROMPT_BYTES} byte limit`);

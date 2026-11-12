@@ -99,7 +99,7 @@ Desktop
 - rendering the server's conversation projection;
 - stopping the current live run.
 
-Desktop does not own model context, Agent instructions, RAG retrieval, or canonical
+Desktop does not own model context, Agent instructions, or canonical
 conversation history.
 
 ### Registry owns
@@ -191,7 +191,7 @@ For `client.message`:
 1. Runtime authenticates the account and confirms entitlement to the bound Agent.
 2. Runtime inserts the account message and a `running` run.
 3. Runtime loads the latest checkpoint plus completed messages after it.
-4. Runtime resolves the current Agent Corpus, system prompt, skills, knowledge, and tool list.
+4. Runtime resolves the current Agent Corpus, system prompt, skills, and tool list.
 5. Runtime constructs Pi `Agent` with Kimi, thinking enabled, and remote tool adapters.
 6. Runtime subscribes to Pi lifecycle events.
 7. Runtime calls `Agent.prompt()` with the new account message.
@@ -265,11 +265,7 @@ Every supported Desktop advertises its local capability set in
 `file_patch`, `shell_exec`, and `git_diff`. Agent Corpus metadata and the selected
 change policy must not remove tools from that list. These exact underscore names
 are used at the model, Runtime, protocol, event, persistence, and Desktop
-boundaries; there is no parallel `fs.*` family or provider-only rename. The
-server-owned Creator knowledge tool remains explicitly namespaced as
-`hatch.file_search` (model function `hatch_file_search`) and is not the local
-Workspace `file_search` tool.
-Browser hello and messages declare `local_tools: []`. Runtime uses the current
+boundaries; there is no parallel `fs.*` family or provider-only rename. Browser hello and messages declare `local_tools: []`. Runtime uses the current
 message's declaration when present and otherwise uses the hello declaration.
 
 Required request fields:

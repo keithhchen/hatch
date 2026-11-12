@@ -307,7 +307,7 @@ Output: `task_method.v1`
 最后输出 contradiction_register 和 elicitation_questions。问题必须针对具体 case、cue、alternative 或条件变化，禁止泛泛询问“请介绍你的方法论”。
 ```
 
-### P05 — Route knowledge and determine tool needs
+### P05 — Route placement and determine tool needs
 
 Node ID: `plan_corpus_placement`
 Established method: Modular instructional architecture / capability analysis
@@ -322,7 +322,6 @@ placement 规则：
 - 几乎每次交付都应影响行为的 worldview、priority、quality bar、boundary、missing-input policy → instructions/system.md。
 - 独立、可重复、在特定条件下调用的局部执行单元 → 一个小型 Skill。
 - 只服务于某个 Skill 的 framework、方法细节或局部示例 → 该 Skill 的 references。
-- 体量大、偶尔查询、不会直接改变行为的长尾事实与案例库 → knowledge/。
 - boundary、out_of_scope、regression 和 held-out cases → eval assets，不进入 Runtime context。
 - 无充分证据、一次性偏好或未确认推断 → unresolved/private Factory records。
 
@@ -345,11 +344,10 @@ tool 判断：
 
 - placement_items，每项含 target、reason、support_ids、scope；
 - proposed_skill_units，含 when_to_use、procedure_scope、stop_conditions、allowed_tool_ids；
-- runtime_knowledge_source_ids；
 - tool_needs，严格区分以上五类；
 - rejected_placements；
 - unresolved_dependencies；
-- placement_audit，检查 mandatory behavior 是否被错误藏进 knowledge。
+- placement_audit，检查 placement 是否与证据和 scope 一致。
 ```
 
 ### P06 — Construct the task rubric
@@ -522,7 +520,6 @@ Output: `candidate_change_plan.v1`
    - global_behavior_candidate；
    - local_method_or_skill_candidate；
    - local_example_candidate；
-   - knowledge_candidate；
    - regression_case；
    - rubric_evidence；
    - ambiguous_feedback_no_compile。
@@ -558,9 +555,9 @@ Output: candidate Corpus files plus `candidate_build_manifest.v1`
 
 编译规则：
 
-1. 先读取 current Corpus 的 manifest、system instructions、Skills、references、knowledge pointers 和 runtime tool declarations。
+1. 先读取 current Corpus 的 manifest、system instructions、Skills、references 和 runtime tool declarations。
 2. 对 change plan 中每项变更重新验证 support IDs、scope 和 target placement；若与实际输入不一致，拒绝该项并记录 build_warning。
-3. 全局 behavior 只进入 instructions/system.md；局部可复用 procedure 才进入 Skill；局部 framework/example 进入 Skill reference；长尾事实进入 knowledge；eval 不进入 runtime context。
+3. 全局 behavior 只进入 instructions/system.md；局部可复用 procedure 才进入 Skill；局部 framework/example 进入 Skill reference；eval 不进入 runtime context。
 4. 不将 post-edit 原文默认复制到 system prompt。只有已批准的 demonstration 或局部 example 才可进入相应位置。
 5. 保留 missing-input path、abstention、boundary 和 escalation 行为。
 6. 不新增未声明 tool、外部 endpoint、secret、price、tenant identity 或 provider-specific product behavior。
@@ -574,7 +571,6 @@ Output: candidate Corpus files plus `candidate_build_manifest.v1`
 - system.md 足以表达跨任务必须遵守的全局行为，但不变成课程总结；
 - Skills 小而独立，不承载整个产品；
 - references 只服务所属 Skill；
-- knowledge 是真实长材料，而非 claim 列表；
 - eval assets 不被 runtime manifest 加载；
 - tools 最小且无 secret；
 - 每个变更都可撤销并能与 current release 比较。
@@ -610,18 +606,17 @@ Pass A — Completeness：
 
 1. 验证任务承诺需要的 sequence、priorities、quality bars、omissions、boundaries、missing-input path 和 deliverable contract 是否有对应实现。
 2. 检查每个 Corpus asset 是否有明确作用，是否遗漏关键 Creator-supported behavior。
-3. 检查 tools 和 knowledge 是否满足任务但没有越界。
+3. 检查 tools 是否满足任务但没有越界。
 
 Pass B — Adversarial：
 
 1. 尝试找出所有 unsupported Creator authority、过度推广的单次偏好、虚构方法、通用知识伪装、未经支持的 guarantee。
 2. 检查 exact excerpts、source IDs、derived-rule supports 和 provenance 是否可解析；exact substring 的最终验证由代码完成。
 3. 检查 local preference 是否错误进入 global system behavior。
-4. 检查 mandatory behavior 是否错误藏入 retrieval-only knowledge。
-5. 检查 giant Skill、重复规则、冲突规则、未声明工具和 secret 风险。
-6. 检查 development、few-shot、validation、heldout 和 regression 的隔离是否被破坏。
-7. 检查 synthetic 内容是否冒充 Creator quotation、真实客户结果或个人经历。
-8. 检查缺失输入时是否会胡编 deliverable、返回泛化答案或无法给出 bounded next step。
+4. 检查 giant Skill、重复规则、冲突规则、未声明工具和 secret 风险。
+5. 检查 development、few-shot、validation、heldout 和 regression 的隔离是否被破坏。
+6. 检查 synthetic 内容是否冒充 Creator quotation、真实客户结果或个人经历。
+7. 检查缺失输入时是否会胡编 deliverable、返回泛化答案或无法给出 bounded next step。
 
 每项 finding 必须包含 severity、asset_path、observable_problem、support_or_policy_reference、recommended_repair 和 blocking。不要输出笼统的“建议改进 Prompt”。
 

@@ -215,7 +215,6 @@ export class PiAgentRuntime implements AgentRuntime {
     const toolDefinitions = (this.options.toolDefinitions ?? chatToolsForRun(
       ctx.clientTools,
       ctx.allowedExternalTools,
-      ctx.knowledgeAvailable,
       ctx.externalToolDefinitions
     )).map(withActivityMessage);
     const toolCallBudget = { used: 0 };

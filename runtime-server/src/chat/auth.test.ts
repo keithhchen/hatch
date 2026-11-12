@@ -33,7 +33,7 @@ test("a browser session and an API key both authenticate HTTP and WebSocket agai
     REGISTRY_HOST: "127.0.0.1", REGISTRY_PORT: "0",
     HATCH_AGENT_CORPUS_ROOT: path.join(root, "corpora"),
     HATCH_REGISTRY_STATE_PATH: path.join(root, "state.json"),
-    HATCH_AUTH_SIGNING_SECRET: "test-secret", HATCH_QDRANT_URL: "", DASHSCOPE_API_KEY: ""
+    HATCH_AUTH_SIGNING_SECRET: "test-secret", DASHSCOPE_API_KEY: ""
   });
   const registryBase = `http://127.0.0.1:${(registry.server.address() as { port: number }).port}`;
   let runtime: Awaited<ReturnType<typeof createRuntimeServer>> | undefined;
@@ -55,7 +55,7 @@ test("a browser session and an API key both authenticate HTTP and WebSocket agai
 
     const resolved = () => ({
       root: "", digest: `sha256:${"b".repeat(64)}`,
-      corpus: { agent_id: productId, creator: { id: accountId, name: "Owner" }, product: { id: productId, name: "P", boundaries: [], presentation: {} }, knowledge: { documents: [] }, tools: [] } as unknown as AgentCorpus
+      corpus: { agent_id: productId, creator: { id: accountId, name: "Owner" }, product: { id: productId, name: "P", boundaries: [], presentation: {} }, tools: [] } as unknown as AgentCorpus
     });
     const agentCorpusResolver = {
       resolve: async () => resolved(),

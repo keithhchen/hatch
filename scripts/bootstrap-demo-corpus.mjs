@@ -55,16 +55,6 @@ const method = await install(
   "skills/signal-resume-review/references/method.md",
   path.join(source, "03-workshop-notes.md")
 );
-const signalLesson = await install(
-  "signal-before-language",
-  "knowledge/signal-before-language.md",
-  path.join(source, "01-lesson-signal-before-language.md")
-);
-const evidenceLesson = await install(
-  "ownership-and-evidence",
-  "knowledge/ownership-and-evidence.md",
-  path.join(source, "02-lesson-ownership-and-evidence.md")
-);
 const synthetic = await installText("synthetic-qa", "evals/synthetic-qa.json", JSON.stringify([{
   id: "missing-target-role",
   input: "Please review my resume.",
@@ -94,15 +84,10 @@ const manifest = {
     when_to_use: "Use when reviewing a resume against a chosen target role.",
     instruction: skill,
     references: [{ asset: method, kind: "method" }],
-    allowed_tool_ids: ["hatch.web_search", "hatch.file_search", "hatch.local.files", "hatch.local.shell"]
+    allowed_tool_ids: ["hatch.web_search", "hatch.local.files", "hatch.local.shell"]
   }],
-  knowledge: { documents: [
-    { ...signalLesson, retrieval_only: true, title: "Maya's signal-before-language lesson." },
-    { ...evidenceLesson, retrieval_only: true, title: "Maya's ownership-and-evidence lesson." }
-  ] },
   tools: [
     { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
-    { id: "hatch.file_search", kind: "hatch_builtin", capability: "file_search" },
     { id: "hatch.local.files", kind: "local_harness", capability: "filesystem" },
     { id: "hatch.local.shell", kind: "local_harness", capability: "shell" }
   ],

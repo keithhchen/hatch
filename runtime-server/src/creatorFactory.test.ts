@@ -218,7 +218,7 @@ test("Development and held-out never split questions from the same leakage group
   assert.equal(regression.length, 2);
 });
 
-test("Creator Factory carries compiled Skills, references, and knowledge through every verified candidate", async (t) => {
+test("Creator Factory carries compiled Skills and references through every verified candidate", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-layered-assets-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const run = async (call: FactoryPromptCall): Promise<string> => {
@@ -231,7 +231,7 @@ test("Creator Factory carries compiled Skills, references, and knowledge through
         `layered-${index + 1}`
       )).join("\n\n");
     }
-    if (call.purpose === "corpus.compile") return layeredCorpusWithOptionalAssets();
+    if (call.purpose === "corpus.compile") return layeredCorpusWithSkillAndReference();
     return "## Verdict\nPASS\n## Diagnosis\nAligned.\n## Few-shot candidate\nNone\n## Corpus reflection\nNo change.";
   };
   let candidateExecutions = 0;
@@ -239,23 +239,9 @@ test("Creator Factory carries compiled Skills, references, and knowledge through
     candidateExecutions += 1;
     const manifest = JSON.parse(await readFile(path.join(execution.agentCorpusRoot, "agent.json"), "utf8")) as {
       skills: Array<{ id: string; references: Array<{ asset: { path: string } }> }>;
-      knowledge: { documents: Array<{
-        id: string;
-        path: string;
-        sha256: string;
-        retrieval_only: boolean;
-        title: string;
-      }> };
     };
     assert.equal(manifest.skills[0]?.id, "offer-audit");
     assert.equal(manifest.skills[0]?.references[0]?.asset.path, "skills/offer-audit/references/decision-checklist.md");
-    assert.deepEqual(manifest.knowledge.documents[0], {
-      id: "market-cases",
-      path: "knowledge/market-cases.md",
-      sha256: manifest.knowledge.documents[0]!.sha256,
-      retrieval_only: true,
-      title: "Creator-authorized market cases"
-    });
     return `Layered result for ${execution.question}`;
   });
   const waiting = await factory.start(sampleInput("run-layered-assets"));
@@ -273,9 +259,8 @@ test("Creator Factory carries compiled Skills, references, and knowledge through
   const finalManifest = JSON.parse(await readFile(
     path.join(store.directory, ...latest.agentCorpus!.rootPath.split("/"), "agent.json"),
     "utf8"
-  )) as { skills: unknown[]; knowledge: { documents: unknown[] } };
+  )) as { skills: unknown[] };
   assert.equal(finalManifest.skills.length, 1);
-  assert.equal(finalManifest.knowledge.documents.length, 1);
 });
 
 test("a false Retained claim cannot authorize deleting a previously accepted Skill", async (t) => {
@@ -295,7 +280,7 @@ test("a false Retained claim cannot authorize deleting a previously accepted Ski
     }
     if (call.purpose === "corpus.compile") {
       corpusCalls += 1;
-      if (corpusCalls === 1) return layeredCorpusWithOptionalAssets().replace(
+      if (corpusCalls === 1) return layeredCorpusWithSkillAndReference().replace(
         "Use the bounded offer-audit method and return a publishable result.",
         stableSystem
       );
@@ -749,7 +734,6 @@ test("Evidence projection removes near-verbatim source prose while retaining sem
     systemInstructions: projection,
     skills: [],
     references: [],
-    knowledge: [],
     changeRationale: "projection",
     requirementsTraceability: "projection",
     preservationAudit: "projection"
@@ -1127,7 +1111,7 @@ function layeredCorpusFixture(system: string, rationale = "Initial compilation."
   ].join("\n");
 }
 
-function layeredCorpusWithOptionalAssets(): string {
+function layeredCorpusWithSkillAndReference(): string {
   const base = layeredCorpusFixture("Use the bounded offer-audit method and return a publishable result.");
   const insertion = [
     CORPUS_ASSET_BEGIN_MARKER,
@@ -1135,7 +1119,7 @@ function layeredCorpusWithOptionalAssets(): string {
     "id: offer-audit",
     "name: Offer audit",
     "when_to_use: Audit an offer or produce a decisive offer recommendation",
-    "allowed_tool_ids: hatch.file_search",
+    "allowed_tool_ids: hatch.web_search",
     CORPUS_ASSET_CONTENT_MARKER,
     "# Offer audit\n\nApply the Creator's bounded decision sequence and finish the deliverable.",
     CORPUS_ASSET_END_MARKER,
@@ -1146,14 +1130,6 @@ function layeredCorpusWithOptionalAssets(): string {
     "reference_kind: method",
     CORPUS_ASSET_CONTENT_MARKER,
     "# Decision checklist\n\nChoose one material tradeoff and explain why it wins.",
-    CORPUS_ASSET_END_MARKER,
-    CORPUS_ASSET_BEGIN_MARKER,
-    "layer: knowledge",
-    "id: market-cases",
-    "title: Creator-authorized market cases",
-    "retrieval_only: true",
-    CORPUS_ASSET_CONTENT_MARKER,
-    "# Market cases\n\nLong-tail examples used only when a matching market is requested.",
     CORPUS_ASSET_END_MARKER
   ].join("\n");
   return base.replace(`${CORPUS_ASSET_END_MARKER}\n# Change rationale`, `${CORPUS_ASSET_END_MARKER}\n${insertion}\n# Change rationale`);

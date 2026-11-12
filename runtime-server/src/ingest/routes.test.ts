@@ -13,7 +13,7 @@ test("Ingest routes authenticate, check product ownership, and say so when inges
     REGISTRY_HOST: "127.0.0.1", REGISTRY_PORT: "0",
     HATCH_AGENT_CORPUS_ROOT: path.join(root, "corpora"), HATCH_REGISTRY_STATE_PATH: path.join(root, "state.json"),
     HATCH_AUTH_SIGNING_SECRET: "test-secret", HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN: "d", HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN: "r",
-    HATCH_CREATOR_FACTORY_ROOT: path.join(root, "factory"), HATCH_QDRANT_URL: "", DASHSCOPE_API_KEY: "",
+    HATCH_CREATOR_FACTORY_ROOT: path.join(root, "factory"), DASHSCOPE_API_KEY: "",
   });
   try {
     const address = registry.server.address();

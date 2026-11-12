@@ -65,7 +65,7 @@ class AgentCorpusResolver:
         if not root.is_dir():
             raise AgentCorpusVerificationError("Agent Corpus directory does not exist")
 
-        agent = _read_object(root / "agent.json")
+        agent = _retire_knowledge(_read_object(root / "agent.json"))
         errors = sorted(self._validator.iter_errors(agent), key=lambda error: list(error.path))
         if errors:
             detail = "; ".join(error.message for error in errors[:4])
@@ -134,12 +134,25 @@ def _declared_assets(agent: dict[str, Any]) -> Iterable[dict[str, Any]]:
         yield skill["instruction"]
         for reference in skill.get("references", []):
             yield reference["asset"]
-    for document in agent.get("knowledge", {}).get("documents", []):
-        yield document
     for evaluation in agent["evaluations"]["synthetic_qa"]:
         yield evaluation
     for evaluation in agent["evaluations"]["held_out"]:
         yield evaluation
+
+
+def _retire_knowledge(agent: dict[str, Any]) -> dict[str, Any]:
+    """Ignore the retired vector-knowledge fields of older published agent.json."""
+
+    agent.pop("knowledge", None)
+    agent["tools"] = [tool for tool in agent.get("tools", []) if tool.get("id") != "hatch.file_search"]
+    for skill in agent.get("skills", []):
+        if "allowed_tool_ids" in skill:
+            skill["allowed_tool_ids"] = [tool_id for tool_id in skill["allowed_tool_ids"] if tool_id != "hatch.file_search"]
+    return agent
+
+
+def _is_retired_knowledge(path: Path, root: Path) -> bool:
+    return path.relative_to(root).parts[0] == "knowledge"
 
 
 def _verify_assets(root: Path, assets: list[dict[str, Any]]) -> None:
@@ -182,7 +195,7 @@ def _corpus_files(root: Path) -> set[str]:
     for child in root.rglob("*"):
         if child.is_symlink():
             raise AgentCorpusVerificationError(f"Agent Corpus cannot contain symlinks: {child.relative_to(root)}")
-        if child.is_file():
+        if child.is_file() and not _is_retired_knowledge(child, root):
             files.add(child.relative_to(root).as_posix())
     return files
 

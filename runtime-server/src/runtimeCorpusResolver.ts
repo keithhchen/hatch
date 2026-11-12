@@ -48,9 +48,8 @@ export type RuntimeReleaseAgentCorpusResolverOptions = {
  * Resolves the live Registry pointer and reads the already-published Corpus
  * from the shared Runtime volume.
  *
- * Publish owns the expensive work: OSS -> shared disk, OSS -> Qdrant, then
- * Postgres live pointer. Runtime never downloads Corpus assets or creates a
- * Knowledge index while serving a request.
+ * Publish owns the expensive work: OSS -> shared disk, then the Postgres live
+ * pointer. Runtime never downloads Corpus assets while serving a request.
  */
 /** The Product has no live published release (withdrawn or never published). */
 export class AgentReleaseUnavailableError extends Error {
@@ -248,18 +247,8 @@ function runtimeManifestToAgentCorpus(manifest: RuntimeCorpusManifest): AgentCor
       })),
       allowed_tool_ids: []
     })),
-    knowledge: {
-      documents: manifest.knowledge.map((document) => ({
-        id: document.id,
-        path: document.ref.path,
-        sha256: document.ref.sha256,
-        retrieval_only: true,
-        title: document.title
-      }))
-    },
     tools: [
       { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
-      ...(manifest.knowledge.length > 0 ? [{ id: "hatch.file_search", kind: "hatch_builtin", capability: "file_search" }] : []),
       ...manifest.tools
     ],
     evaluations: { synthetic_qa: [], held_out: [] }
@@ -269,8 +258,7 @@ function runtimeManifestToAgentCorpus(manifest: RuntimeCorpusManifest): AgentCor
 async function verifyRuntimeManifestAssets(root: string, corpus: AgentCorpus, signal?: AbortSignal): Promise<void> {
   const assets = [
     corpus.instructions.system,
-    ...corpus.skills.flatMap((skill) => [skill.instruction, ...skill.references.map((reference) => reference.asset)]),
-    ...corpus.knowledge.documents
+    ...corpus.skills.flatMap((skill) => [skill.instruction, ...skill.references.map((reference) => reference.asset)])
   ];
   for (const asset of assets) {
     signal?.throwIfAborted();

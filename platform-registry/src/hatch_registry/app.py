@@ -10,21 +10,10 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 from hatch_registry.corpus_resolver import AgentCorpusResolver, AgentCorpusVerificationError
-from hatch_registry.bailian_rag import BailianKnowledgeProvider
 from hatch_registry.control_plane import ControlPlaneError, ControlPlaneStore
-from hatch_registry.knowledge_binding import (
-    AgentKnowledgeBinding,
-    AgentKnowledgeBindingStore,
-    KnowledgePublicationProvider,
-    KnowledgeSearchUnavailable,
-    UnavailableKnowledgeSearchProvider,
-)
 from hatch_registry.models import (
     AgentCorpusPublishRequest,
     AgentToolBindingUpsertRequest,
-    KnowledgeSearchRequest,
-    KnowledgeSearchResult,
-    KnowledgeSearchResponse,
     PublishedAgentCorpus,
     ResolvedToolConnection,
     ToolConnectionUpsertRequest,
@@ -36,7 +25,6 @@ def create_app(
     store: RegistryStore | None = None,
     publish_service_token: str | None = None,
     control_plane: ControlPlaneStore | None = None,
-    knowledge_search: KnowledgePublicationProvider | None = None,
 ) -> FastAPI:
     # The Registry is installed as a Python package in production, while the
     # Agent Corpus schema remains a source asset next to `platform-registry/`.
@@ -44,23 +32,15 @@ def create_app(
     # from this module's site-packages location.
     repo_root = Path(os.environ.get("HATCH_REGISTRY_REPO_ROOT", Path.cwd().parent)).resolve()
     corpus_root = Path(os.environ.get("HATCH_AGENT_CORPUS_ROOT", repo_root / "agent-corpora"))
-    rag_backend = os.environ.get("HATCH_RAG_BACKEND", "bailian")
     configured_state_path = os.environ.get("HATCH_REGISTRY_STATE_PATH", "").strip()
     state_path = Path(configured_state_path).expanduser() if configured_state_path else None
     configured_control_plane_path = os.environ.get("HATCH_CONTROL_PLANE_DB_PATH", "").strip()
     control_plane_path = Path(configured_control_plane_path).expanduser() if configured_control_plane_path else (repo_root / "control-plane.sqlite3")
-    knowledge_search_provider = (
-        knowledge_search
-        or BailianKnowledgeProvider.from_environment()
-        or UnavailableKnowledgeSearchProvider()
-    )
     registry_store = store or RegistryStore(
         corpus_resolver=AgentCorpusResolver(
             corpus_root=corpus_root,
             schema_path=repo_root / "packages/protocol/schemas/creator-agent.schema.json",
         ),
-        knowledge_binding_store=AgentKnowledgeBindingStore(backend=rag_backend),
-        knowledge_provider=knowledge_search_provider,
         state_path=state_path,
     )
     control_plane_store = control_plane
@@ -135,39 +115,6 @@ def create_app(
                 detail=f"Agent Corpus not found for creator={creator_id} agent={agent_id}",
             )
         return corpus
-
-    @api.post(
-        "/v1/runtime/creators/{creator_id}/agents/{agent_id}/knowledge/search",
-        response_model=KnowledgeSearchResponse,
-    )
-    def search_agent_knowledge(
-        creator_id: str,
-        agent_id: str,
-        request: KnowledgeSearchRequest,
-        authorization: Annotated[str | None, Header()] = None,
-    ) -> KnowledgeSearchResponse:
-        require_internal_service_auth(authorization, configured_publish_service_token)
-        corpus = registry_store.get_agent_corpus(creator_id, agent_id)
-        if corpus is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent Corpus is not published")
-        try:
-            rows = knowledge_search_provider.search(
-                binding=AgentKnowledgeBinding(
-                    creator_id=corpus.creator_id,
-                    agent_id=corpus.agent_id,
-                    corpus_digest=corpus.corpus_digest,
-                    backend=corpus.rag.backend,
-                    namespace=corpus.rag.namespace,
-                ),
-                query=request.query,
-                max_num_results=request.max_num_results,
-            )
-        except KnowledgeSearchUnavailable as exc:
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
-        return KnowledgeSearchResponse(data=[
-            KnowledgeSearchResult(text=row.text, metadata=row.metadata, score=row.score)
-            for row in rows
-        ])
 
     @api.put("/v1/control-plane/connections/{connection_id}", response_model=ResolvedToolConnection)
     def upsert_tool_connection(

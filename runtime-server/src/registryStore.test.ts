@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import fsPromises from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { strToU8, zipSync } from "fflate";
@@ -23,11 +25,10 @@ function digest(text: string): string { return `sha256:${createHash("sha256").up
 
 function bundle(
   agentName = "Signal Review",
-  options: { systemPath?: string; knowledge?: string } = {},
+  options: { systemPath?: string; system?: string } = {},
 ): Uint8Array {
-  const system = "Use the creator method.\n";
+  const system = options.system ?? "Use the creator method.\n";
   const systemPath = options.systemPath ?? "instructions/system.md";
-  const knowledge = options.knowledge ?? "# Cases\n\nLong reference material.\n";
   const synthetic = "[]\n";
   const asset = (id: string, assetPath: string, text: string) => ({ id, path: assetPath, sha256: digest(text) });
   const manifest = {
@@ -43,10 +44,8 @@ function bundle(
     },
     instructions: { system: asset("system", systemPath, system) },
     skills: [],
-    knowledge: { documents: [{ ...asset("cases", "knowledge/cases.md", knowledge), retrieval_only: true, title: "Cases" }] },
     tools: [
-      { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
-      { id: "hatch.file_search", kind: "hatch_builtin", capability: "file_search" }
+      { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }
     ],
     evaluations: {
       synthetic_qa: [asset("synthetic", "evals/synthetic.json", synthetic)],
@@ -56,7 +55,6 @@ function bundle(
   return zipSync({
     "agent.json": strToU8(JSON.stringify(manifest)),
     [systemPath]: strToU8(system),
-    "knowledge/cases.md": strToU8(knowledge),
     "evals/synthetic.json": strToU8(synthetic),
     "evals/held-out.json": strToU8(synthetic)
   });
@@ -100,12 +98,11 @@ test("staged releases stay immutable until CAS activation and Commerce grants pr
   const corpusRoot = path.join(root, "corpora");
   const source = path.join(root, "candidate");
   await mkdir(source, { recursive: true });
-  await extractAgentCorpusBundle(bundle("Deployment Candidate", { knowledge: "# Candidate\n\nVersion one.\n" }), source);
+  await extractAgentCorpusBundle(bundle("Deployment Candidate", { system: "Version one.\n" }), source);
   const verified = await verifyAgentCorpus(source, "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222");
   const store = await RegistryStoreTs.open({
     corpusRoot,
     statePath: path.join(root, "registry.json"),
-    indexer: undefined,
     environment: {}
   });
   try {
@@ -155,11 +152,9 @@ test("a legacy access row without an order is rebound to the next real Commerce 
   const creatorId = "11111111-1111-4111-8111-111111111111";
   const productId = "22222222-2222-4222-8222-222222222222";
   const userId = "33333333-3333-4333-8333-333333333333";
-  const indexer = { stageAgentDocuments: async () => undefined, deleteAgentDocuments: async () => undefined };
   const store = await RegistryStoreTs.open({
     corpusRoot: path.join(root, "corpora"),
     statePath,
-    indexer: indexer as never,
     environment: {}
   });
   try {
@@ -176,7 +171,6 @@ test("a legacy access row without an order is rebound to the next real Commerce 
     const reopened = await RegistryStoreTs.open({
       corpusRoot: path.join(root, "corpora"),
       statePath,
-      indexer: indexer as never,
       environment: {}
     });
     try {
@@ -203,11 +197,9 @@ test("a Commerce grant repairs an access row that kept the old entitlement id fo
   const productId = "22222222-2222-4222-8222-222222222222";
   const userId = "33333333-3333-4333-8333-333333333333";
   const orderId = "77777777-7777-4777-8777-777777777777";
-  const indexer = { stageAgentDocuments: async () => undefined, deleteAgentDocuments: async () => undefined };
   const store = await RegistryStoreTs.open({
     corpusRoot: path.join(root, "corpora"),
     statePath,
-    indexer: indexer as never,
     environment: {}
   });
   try {
@@ -225,22 +217,16 @@ test("a Commerce grant repairs an access row that kept the old entitlement id fo
   }
 });
 
-test("TypeScript Registry publishes a clean Corpus and indexes knowledge only", async () => {
+test("TypeScript Registry publishes a clean Corpus", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-ts-registry-"));
   const statePath = path.join(root, "registry.json");
-  const calls: unknown[] = [];
-  const indexer = {
-    stageAgentDocuments: async (...args: unknown[]) => { calls.push(args); },
-    deleteAgentDocuments: async () => undefined,
-  };
-  const store = await RegistryStoreTs.open({ corpusRoot: path.join(root, "corpora"), statePath, indexer: indexer as never, environment: {} });
+  const store = await RegistryStoreTs.open({ corpusRoot: path.join(root, "corpora"), statePath, environment: {} });
   const published = await store.publishAgentCorpusBundle("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", bundle());
   assert.equal(published.creator_id, "11111111-1111-4111-8111-111111111111");
   assert.equal(published.agent_id, "22222222-2222-4222-8222-222222222222");
-  assert.equal(calls.length, 1);
   const runtimeResolution = await new AgentCorpusResolver(path.join(root, "corpora")).resolve("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222");
   assert.equal(runtimeResolution.digest, published.corpus_digest);
-  const restored = await RegistryStoreTs.open({ corpusRoot: path.join(root, "corpora"), statePath, indexer: indexer as never, environment: {} });
+  const restored = await RegistryStoreTs.open({ corpusRoot: path.join(root, "corpora"), statePath, environment: {} });
   const restoredCorpus = restored.getAgentCorpus("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222");
   assert.equal(restoredCorpus?.corpus_digest, published.corpus_digest);
   assert.equal(restoredCorpus?.product_promise, "Turn a resume into a signal map.");
@@ -257,29 +243,14 @@ test("TypeScript Registry publishes a clean Corpus and indexes knowledge only", 
     restored.grantAgentAccess("77777777-7777-4777-8777-777777777777", "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "88888888-8888-4888-8888-888888888888")
   ]);
   assert.equal(concurrent[0].entitlement_id, concurrent[1].entitlement_id);
-  const reopened = await RegistryStoreTs.open({ corpusRoot: path.join(root, "corpora"), statePath, indexer: indexer as never, environment: {} });
+  const reopened = await RegistryStoreTs.open({ corpusRoot: path.join(root, "corpora"), statePath, environment: {} });
   assert.equal((await reopened.listAgentAccess("33333333-3333-4333-8333-333333333333"))[0]?.order_id, "55555555-5555-4555-8555-555555555555");
   assert.equal((await reopened.listAgentAccess("77777777-7777-4777-8777-777777777777"))[0]?.entitlement_id, concurrent[0].entitlement_id);
-  const installed = await readFile(path.join(root, "corpora/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/knowledge/cases.md"), "utf8");
-  assert.match(installed, /Long reference material/);
-});
-
-test("TypeScript Registry requires Qdrant when a Corpus contains knowledge", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-ts-registry-no-index-"));
-  const store = await RegistryStoreTs.open({ corpusRoot: path.join(root, "corpora"), environment: {} });
-  await assert.rejects(
-    store.publishAgentCorpusBundle("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", bundle()),
-    /Qdrant knowledge index is not configured/
-  );
 });
 
 test("every Registry-accepted corpus must satisfy the Runtime loader contract", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-registry-runtime-contract-"));
-  const indexer = {
-    async stageAgentDocuments(): Promise<void> {},
-    async deleteAgentDocuments(): Promise<void> {},
-  };
-  const store = await RegistryStoreTs.open({ corpusRoot: path.join(root, "corpora"), indexer, environment: {} });
+  const store = await RegistryStoreTs.open({ corpusRoot: path.join(root, "corpora"), environment: {} });
 
   await assert.rejects(
     store.publishAgentCorpusBundle(
@@ -293,61 +264,18 @@ test("every Registry-accepted corpus must satisfy the Runtime loader contract", 
     store.publishAgentCorpusBundle(
       "11111111-1111-4111-8111-111111111111",
       "22222222-2222-4222-8222-222222222222",
-      bundle("Oversized Knowledge", { knowledge: "x".repeat(4 * 1024 * 1024 + 1) }),
+      bundle("Oversized System", { system: "x".repeat(4 * 1024 * 1024 + 1) }),
     ),
     /runtime-loadable.*asset exceeds/,
   );
   assert.equal(store.getAgentCorpus("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"), undefined);
 });
 
-test("filesystem commit failure restores the old current corpus and never deletes its index", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-registry-file-rollback-"));
-  const corpusRoot = path.join(root, "corpora");
-  const statePath = path.join(root, "state.json");
-  const stagedDigests: string[] = [];
-  const deletedDigests: string[] = [];
-  let stageCount = 0;
-  const indexer = {
-    async stageAgentDocuments(_creatorId: string, _agentId: string, corpusDigest: string, preparedPath: string): Promise<void> {
-      stagedDigests.push(corpusDigest);
-      stageCount += 1;
-      if (stageCount === 2) await rm(preparedPath, { recursive: true, force: true });
-    },
-    async deleteAgentDocuments(_creatorId: string, _agentId: string, corpusDigest: string): Promise<void> {
-      deletedDigests.push(corpusDigest);
-    },
-  };
-  const store = await RegistryStoreTs.open({ corpusRoot, statePath, indexer, environment: {} });
-  const original = await store.publishAgentCorpusBundle("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", bundle("Original Review"));
-
-  await assert.rejects(
-    store.publishAgentCorpusBundle("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", bundle("Broken Rename Review")),
-    /ENOENT|no such file/i,
-  );
-
-  assert.equal(store.getAgentCorpus("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")?.corpus_digest, original.corpus_digest);
-  assert.equal((await new AgentCorpusResolver(corpusRoot).resolve("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")).digest, original.corpus_digest);
-  assert.equal(deletedDigests.includes(original.corpus_digest), false);
-  assert.equal(deletedDigests.includes(stagedDigests[1]!), true);
-  const reopened = await RegistryStoreTs.open({ corpusRoot, statePath, indexer, environment: {} });
-  assert.equal(reopened.getAgentCorpus("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")?.corpus_digest, original.corpus_digest);
-});
-
 test("Postgres persist failure leaves metadata, current corpus, and old index authoritative", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-registry-db-rollback-"));
   const corpusRoot = path.join(root, "corpora");
   const database = fakeRegistryPool();
-  const stagedDigests: string[] = [];
-  const deletedDigests: string[] = [];
-  const indexer = {
-    async stageAgentDocuments(_creatorId: string, _agentId: string, corpusDigest: string): Promise<void> {
-      stagedDigests.push(corpusDigest);
-    },
-    async deleteAgentDocuments(_creatorId: string, _agentId: string, corpusDigest: string): Promise<void> {
-      deletedDigests.push(corpusDigest);
-    },
-  };
-  const store = await RegistryStoreTs.open({ corpusRoot, pool: database.pool, indexer, environment: {} });
+  const store = await RegistryStoreTs.open({ corpusRoot, pool: database.pool, environment: {} });
   const original = await store.publishAgentCorpusBundle("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", bundle("Database Original"));
   database.failCorpusUpsert = true;
 
@@ -359,19 +287,13 @@ test("Postgres persist failure leaves metadata, current corpus, and old index au
   assert.equal(database.corpusRow?.corpus_digest, original.corpus_digest);
   assert.equal(store.getAgentCorpus("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")?.corpus_digest, original.corpus_digest);
   assert.equal((await new AgentCorpusResolver(corpusRoot).resolve("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")).digest, original.corpus_digest);
-  assert.equal(deletedDigests.includes(original.corpus_digest), false);
-  assert.equal(deletedDigests.includes(stagedDigests[1]!), true);
 });
 
 test("unknown Postgres commit outcome preserves its journal and restart completes the canonical commit", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-registry-db-ambiguous-"));
   const corpusRoot = path.join(root, "corpora");
   const database = fakeRegistryPool();
-  const indexer = {
-    async stageAgentDocuments(): Promise<void> {},
-    async deleteAgentDocuments(): Promise<void> {},
-  };
-  const store = await RegistryStoreTs.open({ corpusRoot, pool: database.pool, indexer, environment: {} });
+  const store = await RegistryStoreTs.open({ corpusRoot, pool: database.pool, environment: {} });
   await store.publishAgentCorpusBundle("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", bundle("Before Ambiguous Commit"));
   database.failCorpusUpsertAfterApply = true;
   database.failNextDigestRead = true;
@@ -388,7 +310,7 @@ test("unknown Postgres commit outcome preserves its journal and restart complete
     /commit outcome is unknown/,
   );
 
-  const reopened = await RegistryStoreTs.open({ corpusRoot, pool: database.pool, indexer, environment: {} });
+  const reopened = await RegistryStoreTs.open({ corpusRoot, pool: database.pool, environment: {} });
   assert.equal(reopened.getAgentCorpus("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")?.corpus_digest, committedDigest);
   assert.equal((await new AgentCorpusResolver(corpusRoot).resolve("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")).digest, committedDigest);
   assert.equal((await readdir(path.join(corpusRoot, ".install-journal"))).some((name) => name.endsWith(".json")), false);
@@ -398,14 +320,7 @@ test("startup journal recovery restores the old current after a crash between fi
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-registry-crash-recovery-"));
   const corpusRoot = path.join(root, "corpora");
   const statePath = path.join(root, "registry.json");
-  const deletedDigests: string[] = [];
-  const indexer = {
-    async stageAgentDocuments(): Promise<void> {},
-    async deleteAgentDocuments(_creatorId: string, _agentId: string, corpusDigest: string): Promise<void> {
-      deletedDigests.push(corpusDigest);
-    },
-  };
-  const store = await RegistryStoreTs.open({ corpusRoot, statePath, indexer, environment: {} });
+  const store = await RegistryStoreTs.open({ corpusRoot, statePath, environment: {} });
   const original = await store.publishAgentCorpusBundle("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", bundle("Before Crash"));
 
   const upload = path.join(root, "crash-upload");
@@ -413,9 +328,7 @@ test("startup journal recovery restores the old current after a crash between fi
   const verified = await verifyAgentCorpus(upload, "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222");
   const install = await prepareCurrentCorpusInstall(verified, corpusRoot);
   const journalDirectory = path.join(corpusRoot, ".install-journal");
-  const cleanupDirectory = path.join(corpusRoot, ".index-gc");
   await mkdir(journalDirectory, { recursive: true });
-  await mkdir(cleanupDirectory, { recursive: true });
   await writeFile(path.join(journalDirectory, "simulated-crash.json"), JSON.stringify({
     creator_id: "11111111-1111-4111-8111-111111111111",
     agent_id: "22222222-2222-4222-8222-222222222222",
@@ -425,19 +338,12 @@ test("startup journal recovery restores the old current after a crash between fi
     prepared_path: install.preparedPath,
     backup_path: install.backupPath,
   }), "utf8");
-  await writeFile(
-    path.join(cleanupDirectory, `11111111-1111-4111-8111-111111111111--22222222-2222-4222-8222-222222222222--${verified.digest.slice("sha256:".length)}.json`),
-    JSON.stringify({ creator_id: "11111111-1111-4111-8111-111111111111", agent_id: "22222222-2222-4222-8222-222222222222", corpus_digest: verified.digest }),
-    "utf8",
-  );
   await install.commit();
   assert.equal((await new AgentCorpusResolver(corpusRoot).resolve("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")).digest, verified.digest);
 
-  const reopened = await RegistryStoreTs.open({ corpusRoot, statePath, indexer, environment: {} });
+  const reopened = await RegistryStoreTs.open({ corpusRoot, statePath, environment: {} });
   assert.equal(reopened.getAgentCorpus("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")?.corpus_digest, original.corpus_digest);
   assert.equal((await new AgentCorpusResolver(corpusRoot).resolve("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")).digest, original.corpus_digest);
-  assert.equal(deletedDigests.includes(verified.digest), true);
-  assert.equal(deletedDigests.includes(original.corpus_digest), false);
   assert.equal((await readdir(journalDirectory)).some((name) => name.endsWith(".json")), false);
 });
 
@@ -445,17 +351,7 @@ test("state-file persist failure does not expose new metadata or leave the new f
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-registry-state-rollback-"));
   const corpusRoot = path.join(root, "corpora");
   const statePath = path.join(root, "registry.json");
-  const stagedDigests: string[] = [];
-  const deletedDigests: string[] = [];
-  const indexer = {
-    async stageAgentDocuments(_creatorId: string, _agentId: string, corpusDigest: string): Promise<void> {
-      stagedDigests.push(corpusDigest);
-    },
-    async deleteAgentDocuments(_creatorId: string, _agentId: string, corpusDigest: string): Promise<void> {
-      deletedDigests.push(corpusDigest);
-    },
-  };
-  const store = await RegistryStoreTs.open({ corpusRoot, statePath, indexer, environment: {} });
+  const store = await RegistryStoreTs.open({ corpusRoot, statePath, environment: {} });
   const original = await store.publishAgentCorpusBundle("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", bundle("State Original"));
   const internals = store as unknown as { persistState(): Promise<void> };
   const persistState = internals.persistState.bind(store);
@@ -467,57 +363,68 @@ test("state-file persist failure does not expose new metadata or leave the new f
   );
   assert.equal(store.getAgentCorpus("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")?.corpus_digest, original.corpus_digest);
   assert.equal((await new AgentCorpusResolver(corpusRoot).resolve("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")).digest, original.corpus_digest);
-  assert.equal(deletedDigests.includes(original.corpus_digest), false);
-  assert.equal(deletedDigests.includes(stagedDigests[1]!), true);
 
   internals.persistState = persistState;
-  const reopened = await RegistryStoreTs.open({ corpusRoot, statePath, indexer, environment: {} });
+  const reopened = await RegistryStoreTs.open({ corpusRoot, statePath, environment: {} });
   assert.equal(reopened.getAgentCorpus("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")?.corpus_digest, original.corpus_digest);
 });
 
-test("publish hard deadline rolls back current and independently cleans a partially staged digest", async () => {
+test("filesystem commit failure restores the old current corpus", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-registry-file-rollback-"));
+  const corpusRoot = path.join(root, "corpora");
+  const statePath = path.join(root, "state.json");
+  const store = await RegistryStoreTs.open({ corpusRoot, statePath, environment: {} });
+  const original = await store.publishAgentCorpusBundle("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", bundle("Original Review"));
+
+  const realRename = fsPromises.rename;
+  fsPromises.rename = (async (from: Parameters<typeof realRename>[0], to: Parameters<typeof realRename>[1]) => {
+    if (String(from).endsWith(".prepared")) throw Object.assign(new Error("ENOENT: injected commit rename failure"), { code: "ENOENT" });
+    return realRename(from, to);
+  }) as typeof realRename;
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(
+      store.publishAgentCorpusBundle("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", bundle("Broken Rename Review")),
+      /ENOENT|no such file/i,
+    );
+  } finally {
+    fsPromises.rename = realRename;
+    syncBuiltinESMExports();
+  }
+
+  assert.equal(store.getAgentCorpus("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")?.corpus_digest, original.corpus_digest);
+  assert.equal((await new AgentCorpusResolver(corpusRoot).resolve("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")).digest, original.corpus_digest);
+  const reopened = await RegistryStoreTs.open({ corpusRoot, statePath, environment: {} });
+  assert.equal(reopened.getAgentCorpus("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")?.corpus_digest, original.corpus_digest);
+});
+
+test("publish hard deadline rolls back current and releases the Registry mutation turn", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-registry-publish-timeout-"));
   const corpusRoot = path.join(root, "corpora");
   const statePath = path.join(root, "state.json");
-  const stagedDigests: string[] = [];
-  const deletedDigests: string[] = [];
-  let shouldStall = false;
-  const indexer = {
-    async stageAgentDocuments(_creatorId: string, _agentId: string, corpusDigest: string): Promise<void> {
-      stagedDigests.push(corpusDigest);
-      if (shouldStall) await new Promise<void>(() => undefined);
-    },
-    async deleteAgentDocuments(_creatorId: string, _agentId: string, corpusDigest: string): Promise<void> {
-      deletedDigests.push(corpusDigest);
-    },
-  };
-  const store = await RegistryStoreTs.open({
-    corpusRoot,
-    statePath,
-    indexer,
-    // Leave enough headroom for the initial filesystem/index setup on a
-    // shared CI runner; the stalled indexer below still exercises the hard
-    // deadline path and the test remains bounded by the <1s assertion.
-    publishTimeoutMs: 500,
-    environment: {},
-  });
+  // Leave enough headroom for the initial filesystem setup on a shared CI
+  // runner; the stalled state write below still exercises the hard deadline
+  // path and the test remains bounded by the <1.5s assertion.
+  const store = await RegistryStoreTs.open({ corpusRoot, statePath, publishTimeoutMs: 500, environment: {} });
   const original = await store.publishAgentCorpusBundle("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", bundle("Timeout Original"));
-  shouldStall = true;
+
+  const internals = store as unknown as { persistState(options: { signal?: AbortSignal }): Promise<void> };
+  const persistState = internals.persistState.bind(store);
+  // A metadata write that never finishes on its own and ends only when the publish aborts it.
+  internals.persistState = (options) => new Promise<void>((_, reject) => {
+    options.signal?.addEventListener("abort", () => reject(options.signal!.reason), { once: true });
+  });
   const startedAt = Date.now();
   await assert.rejects(
     store.publishAgentCorpusBundle("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", bundle("Timeout Candidate")),
     (error) => (error as { code?: string }).code === "registry_publish_timeout",
   );
-  assert.ok(Date.now() - startedAt < 1_000);
-  const failedDigest = stagedDigests.at(-1)!;
-  await waitFor(() => deletedDigests.includes(failedDigest));
-  assert.equal(deletedDigests.includes(original.corpus_digest), false);
+  assert.ok(Date.now() - startedAt < 1_500);
   assert.equal(store.getAgentCorpus("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")?.corpus_digest, original.corpus_digest);
   assert.equal((await new AgentCorpusResolver(corpusRoot).resolve("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")).digest, original.corpus_digest);
 
-  // The timed-out operation must release the Registry's unique mutation turn
-  // after its independent cleanup settles.
-  shouldStall = false;
+  // The timed-out operation must release the Registry's unique mutation turn.
+  internals.persistState = persistState;
   const recovered = await store.publishAgentCorpusBundle("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", bundle("Timeout Candidate"));
   assert.equal(store.getAgentCorpus("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")?.corpus_digest, recovered.corpus_digest);
 });
@@ -534,7 +441,6 @@ test("Registry caps agents per Creator and pages the public catalog", async () =
     product_name: `Product ${index}`,
     product_boundaries: [],
     presentation: {},
-    knowledge_namespace: `11111111-1111-4111-8111-111111111111:${String(index).padStart(12, "0")}`,
     status: "published",
     published_at: new Date(1_700_000_000_000 + index).toISOString(),
   }));
@@ -542,10 +448,6 @@ test("Registry caps agents per Creator and pages the public catalog", async () =
   const store = await RegistryStoreTs.open({
     corpusRoot: path.join(root, "corpora"),
     statePath,
-    indexer: {
-      stageAgentDocuments: async () => undefined,
-      deleteAgentDocuments: async () => undefined,
-    },
     environment: {},
   });
   try {
@@ -577,7 +479,6 @@ test("Registry refuses unmigrated split Agent/Product identities at startup", as
     product_name: "Signal Review",
     product_boundaries: [],
     presentation: {},
-    knowledge_namespace: `${creatorId}:${productId}`,
     status: "published",
     published_at: "2026-08-03T00:00:00.000Z"
   };
@@ -619,7 +520,6 @@ test("Postgres reads access revocation and tool rotation from the canonical data
     product_name: "Signal Review",
     product_description: "Review work",
     product_json: JSON.stringify({ presentation: { accent: "orange" } }),
-    knowledge_namespace: "maya:signal",
     status: "published",
     published_at: "2026-08-03T00:00:00.000Z",
   };
@@ -645,10 +545,6 @@ test("Postgres reads access revocation and tool rotation from the canonical data
   const store = await RegistryStoreTs.open({
     corpusRoot: path.join(root, "corpora"),
     pool: database.pool,
-    indexer: {
-      async stageAgentDocuments(): Promise<void> {},
-      async deleteAgentDocuments(): Promise<void> {},
-    },
     environment: {},
   });
 
@@ -695,7 +591,6 @@ test("Registry access projection respects status and joins current presentation"
       product_description: "Review work",
       product_boundaries: [],
       presentation: { accent: "orange" },
-      knowledge_namespace: "maya:signal",
       status: "published",
       published_at: "2026-08-03T00:00:00.000Z"
     }],
@@ -833,9 +728,8 @@ function fakeRegistryPool(): FakeRegistryDatabase {
           product_name: values?.[5],
           product_description: values?.[6],
           product_json: values?.[7],
-          knowledge_namespace: values?.[8],
-          status: values?.[9],
-          published_at: values?.[10],
+          status: values?.[8],
+          published_at: values?.[9],
         };
         if (database.failCorpusUpsertAfterApply) {
           database.failCorpusUpsertAfterApply = false;

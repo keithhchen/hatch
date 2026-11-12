@@ -114,12 +114,7 @@ services:
       HATCH_OUTPUT_GUARD_SERVICE: ${HATCH_OUTPUT_GUARD_SERVICE:-response_security_check_pro}
       ALIBABA_CLOUD_ECS_METADATA: ${ALIBABA_CLOUD_ECS_METADATA:-HatchRuntimeRole}
       ALIBABA_CLOUD_IMDSV1_DISABLE: ${ALIBABA_CLOUD_IMDSV1_DISABLE:-true}
-      HATCH_QDRANT_URL: http://qdrant:6333
-      HATCH_QDRANT_API_KEY: ${HATCH_QDRANT_API_KEY:-}
-      HATCH_QDRANT_COLLECTION: ${HATCH_QDRANT_COLLECTION:-hatch_knowledge_text_v4_1024}
-      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:?set DASHSCOPE_API_KEY in /opt/hatch/.env}
-      DASHSCOPE_EMBEDDING_BASE_URL: ${DASHSCOPE_EMBEDDING_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
-      DASHSCOPE_RERANK_BASE_URL: ${DASHSCOPE_RERANK_BASE_URL:-https://dashscope.aliyuncs.com/compatible-api/v1}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
       HATCH_ENABLE_LEGACY_HMAC_AUTH: "false"
       HATCH_AUTH_SCRYPT_CONCURRENCY: ${HATCH_AUTH_SCRYPT_CONCURRENCY:-4}
       HATCH_AUTH_SCRYPT_MAX_QUEUE: ${HATCH_AUTH_SCRYPT_MAX_QUEUE:-64}
@@ -127,8 +122,6 @@ services:
       HATCH_REGISTRY_HTTP_REQUEST_TIMEOUT_MS: ${HATCH_REGISTRY_HTTP_REQUEST_TIMEOUT_MS:-30000}
       HATCH_REGISTRY_DB_TIMEOUT_MS: ${HATCH_REGISTRY_DB_TIMEOUT_MS:-5000}
       HATCH_REGISTRY_PUBLISH_TIMEOUT_MS: ${HATCH_REGISTRY_PUBLISH_TIMEOUT_MS:-60000}
-      HATCH_KNOWLEDGE_INDEX_REQUEST_TIMEOUT_MS: ${HATCH_KNOWLEDGE_INDEX_REQUEST_TIMEOUT_MS:-10000}
-      HATCH_KNOWLEDGE_INDEX_MAX_RESPONSE_BYTES: ${HATCH_KNOWLEDGE_INDEX_MAX_RESPONSE_BYTES:-4194304}
       # Registry is not published on the host. Only peers on the dedicated
       # Docker network may supply Caddy's sanitized X-Forwarded-For value.
       # Non-Compose deployments should replace this with their exact proxy CIDR.
@@ -259,12 +252,7 @@ services:
       # Runtime is reachable only through Caddy on the private Docker network.
       # Trust forwarded client IPs only from that sanitizing proxy boundary.
       HATCH_AUTH_TRUSTED_PROXY_CIDRS: ${HATCH_AUTH_TRUSTED_PROXY_CIDRS:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fd00::/8}
-      HATCH_QDRANT_URL: http://qdrant:6333
-      HATCH_QDRANT_API_KEY: ${HATCH_QDRANT_API_KEY:-}
-      HATCH_QDRANT_COLLECTION: ${HATCH_QDRANT_COLLECTION:-hatch_knowledge_text_v4_1024}
-      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:?set DASHSCOPE_API_KEY in /opt/hatch/.env}
-      DASHSCOPE_EMBEDDING_BASE_URL: ${DASHSCOPE_EMBEDDING_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
-      DASHSCOPE_RERANK_BASE_URL: ${DASHSCOPE_RERANK_BASE_URL:-https://dashscope.aliyuncs.com/compatible-api/v1}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
       LLM_API_KEY: ${LLM_API_KEY:?set LLM_API_KEY in /opt/hatch/.env}
       LANGFUSE_ENABLED: ${LANGFUSE_ENABLED:-false}
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}

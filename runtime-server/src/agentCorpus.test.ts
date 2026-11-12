@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import http from "node:http";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, test } from "node:test";
 import { WebSocket } from "ws";
-import { AgentCorpusResolver, AgentCorpusSchema, CorpusKnowledgeProvider, HttpKnowledgeProvider, loadAgentCorpus, QdrantKnowledgeProvider } from "./agentCorpus.js";
+import { AgentCorpusResolver, AgentCorpusSchema, loadAgentCorpus } from "./agentCorpus.js";
 import { DeterministicAgentRuntime } from "./agentRuntime.js";
 import { InMemoryConversationRepository } from "./conversationRepository.js";
 import { createRuntimeServer, durableConversationId } from "./index.js";
@@ -31,7 +30,6 @@ test("Agent Corpus bounds catalog metadata, arrays, and embedded JSON", () => {
     product: { id: PRODUCT_ID, name: "Bounded Product", presentation: {} },
     instructions: { system: { ...asset, id: "system", path: "instructions/system.md" } },
     skills: [],
-    knowledge: { documents: [] },
     tools: [{ id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }],
     evaluations: { synthetic_qa: [{ ...asset, id: "synthetic" }], held_out: [{ ...asset, id: "held-out" }] },
   };
@@ -57,38 +55,15 @@ test("Agent Corpus bounds catalog metadata, arrays, and embedded JSON", () => {
   }).success, false);
 });
 
-test("Agent Corpus requires the canonical Knowledge title field", () => {
-  const asset = { id: "knowledge-1", path: "knowledge/one.md", sha256: `sha256:${"a".repeat(64)}`, retrieval_only: true };
-  const base = {
-    contract_version: "1",
-    creator: { id: CREATOR_ID, name: "Creator" },
-    product: { id: PRODUCT_ID, name: "Product", presentation: {} },
-    instructions: { system: { id: "system", path: "instructions/system.md", sha256: `sha256:${"b".repeat(64)}` } },
-    skills: [],
-    knowledge: { documents: [{ ...asset, title: "Canonical title" }] },
-    tools: [{ id: "hatch.web_search", kind: "hatch_builtin" }],
-    evaluations: { synthetic_qa: [], held_out: [] },
-  };
-  assert.equal(AgentCorpusSchema.safeParse(base).success, true);
-  assert.equal(AgentCorpusSchema.safeParse({
-    ...base,
-    knowledge: { documents: [{ ...asset, source_summary: "Legacy summary" }] },
-  }).success, false);
-});
-
-test("Agent Corpus loads clean assets and scopes knowledge by creator and agent", async () => {
+test("Agent Corpus read boundary drops removed Product metadata and still loads retired knowledge and hatch.file_search entries", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-agent-corpus-"));
   tempRoots.push(root);
   await mkdir(path.join(root, "instructions"), { recursive: true });
-  await mkdir(path.join(root, "knowledge"), { recursive: true });
-  await mkdir(path.join(root, "evals"), { recursive: true });
   const system = "Follow the creator's global method.\n";
-  const knowledge = "A resume should lead with the strongest evidence.\n\nUse concise bullets.\n";
+  const skill = "---\nname: review\n---\nReview.\n";
   await writeFile(path.join(root, "instructions/system.md"), system, "utf8");
-  await writeFile(path.join(root, "knowledge/method.md"), knowledge, "utf8");
+  await writeFile(path.join(root, "instructions/skill.md"), skill, "utf8");
   const asset = (assetPath: string, content: string, id: string) => ({ id, path: assetPath, sha256: digest(content) });
-  const evals = "[]";
-  await writeFile(path.join(root, "evals/evals.json"), evals, "utf8");
   const corpus = {
     contract_version: "1",
     creator: { id: CREATOR_ID, name: "Maya Chen" },
@@ -100,119 +75,20 @@ test("Agent Corpus loads clean assets and scopes knowledge by creator and agent"
       offer: { model: "per_delivery", amount_minor: 0, currency: "USD" }
     },
     instructions: { system: asset("instructions/system.md", system, "instructions-system") },
-    skills: [],
-    knowledge: { documents: [{ ...asset("knowledge/method.md", knowledge, "knowledge-001"), retrieval_only: true, title: "Resume method" }] },
+    skills: [{
+      id: "review", name: "review", when_to_use: "Reviewing", instruction: asset("instructions/skill.md", skill, "skill-review"),
+      allowed_tool_ids: ["hatch.web_search", "hatch.file_search"]
+    }],
+    knowledge: { documents: [] },
     tools: [
       { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
       { id: "hatch.file_search", kind: "hatch_builtin", capability: "file_search" }
-    ],
-    evaluations: {
-      synthetic_qa: [asset("evals/evals.json", evals, "evals-synthetic")],
-      held_out: [asset("evals/evals.json", evals, "evals-held-out")]
-    }
-  } as const;
+    ]
+  };
   await writeFile(path.join(root, "agent.json"), JSON.stringify(corpus), "utf8");
 
   const loaded = await loadAgentCorpus(root);
   assert.equal("offer" in loaded.product, false);
-  const provider = new CorpusKnowledgeProvider(root, loaded);
-  const hits = await provider.search({ creatorId: CREATOR_ID, agentId: PRODUCT_ID, corpusDigest: `sha256:${"1".repeat(64)}`, query: "strongest evidence", limit: 4 });
-  assert.equal(hits.length, 1);
-  assert.match(hits[0]!.text, /strongest evidence/);
-  await assert.rejects(
-    provider.search({ creatorId: OTHER_CREATOR_ID, agentId: PRODUCT_ID, corpusDigest: `sha256:${"1".repeat(64)}`, query: "evidence", limit: 4 }),
-    /creator scope/
-  );
-});
-
-test("remote KnowledgeProvider always sends the current creator and agent scope", async () => {
-  let received: Record<string, unknown> | undefined;
-  const gateway = http.createServer(async (request, response) => {
-    const chunks: Buffer[] = [];
-    for await (const chunk of request) chunks.push(Buffer.from(chunk));
-    received = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ hits: [{ id: "kb-1", text: "scoped method", score: 1 }] }));
-  });
-  await new Promise<void>((resolve) => gateway.listen(0, "127.0.0.1", resolve));
-  const address = gateway.address();
-  assert.ok(address && typeof address === "object");
-  try {
-    const hits = await new HttpKnowledgeProvider(`http://127.0.0.1:${address.port}/search`).search({
-      creatorId: CREATOR_ID,
-      agentId: PRODUCT_ID,
-      corpusDigest: `sha256:${"1".repeat(64)}`,
-      query: "evidence",
-      limit: 4
-    });
-    assert.deepEqual(received, {
-      creator_id: CREATOR_ID,
-      agent_id: PRODUCT_ID,
-      corpus_digest: `sha256:${"1".repeat(64)}`,
-      query: "evidence",
-      top_k: 4
-    });
-    assert.equal(hits[0]?.id, "kb-1");
-  } finally {
-    await new Promise<void>((resolve, reject) => gateway.close((error) => error ? reject(error) : resolve()));
-  }
-});
-
-test("Qdrant KnowledgeProvider embeds, scopes, reranks, and returns source metadata", async () => {
-  let qdrantQuery: Record<string, unknown> | undefined;
-  const gateway = http.createServer(async (request, response) => {
-    const chunks: Buffer[] = [];
-    for await (const chunk of request) chunks.push(Buffer.from(chunk));
-    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown> : {};
-    response.setHeader("content-type", "application/json");
-    if (request.url?.includes("/points/query")) {
-      qdrantQuery = body;
-      response.end(JSON.stringify({ result: { points: [
-        { id: "p1", score: 0.9, payload: { text: "first candidate", document_id: "doc-1", source_path: "knowledge/first.md", heading: "First" } },
-        { id: "p2", score: 0.8, payload: { text: "second candidate", document_id: "doc-2", source_path: "knowledge/second.md", heading: "Second" } }
-      ] } }));
-      return;
-    }
-    if (request.url?.endsWith("/embeddings")) {
-      response.end(JSON.stringify({ data: [{ embedding: Array.from({ length: 1024 }, (_, index) => index === 0 ? 0.1 : 0) }] }));
-      return;
-    }
-    if (request.url?.endsWith("/reranks")) {
-      response.end(JSON.stringify({ results: [
-        { index: 1, relevance_score: 0.97 },
-        { index: 0, relevance_score: 0.44 }
-      ] }));
-      return;
-    }
-    response.statusCode = 404;
-    response.end(JSON.stringify({ error: "not found" }));
-  });
-  await new Promise<void>((resolve) => gateway.listen(0, "127.0.0.1", resolve));
-  const address = gateway.address();
-  assert.ok(address && typeof address === "object");
-  const base = `http://127.0.0.1:${address.port}`;
-  try {
-    const provider = new QdrantKnowledgeProvider(base, "qdrant-test", "dashscope-test", {
-      collection: "hatch_knowledge_text_v4_1024",
-      embeddingBaseUrl: base,
-      rerankBaseUrl: base
-    });
-    const hits = await provider.search({ creatorId: "maya-chen", agentId: "signal-resume-review", corpusDigest: `sha256:${"1".repeat(64)}`, query: "evidence", limit: 1 });
-    assert.deepEqual((qdrantQuery?.filter as Record<string, unknown>)?.must, [
-      { key: "creator_id", match: { value: "maya-chen" } },
-      { key: "agent_id", match: { value: "signal-resume-review" } },
-      { key: "corpus_digest", match: { value: `sha256:${"1".repeat(64)}` } }
-    ]);
-    assert.equal(qdrantQuery?.limit, 30);
-    assert.equal(hits.length, 1);
-    assert.equal(hits[0]?.id, "p2");
-    assert.equal(hits[0]?.document_id, "doc-2");
-    assert.equal(hits[0]?.source_path, "knowledge/second.md");
-    assert.equal(hits[0]?.heading, "Second");
-    assert.equal(hits[0]?.source, "knowledge/second.md · Second");
-  } finally {
-    await new Promise<void>((resolve, reject) => gateway.close((error) => error ? reject(error) : resolve()));
-  }
 });
 
 test("Agent Corpus resolver loads the Registry current creator/agent path", async () => {
@@ -235,7 +111,6 @@ test("Agent Corpus resolver loads the Registry current creator/agent path", asyn
     },
     instructions: { system: asset("instructions/system.md", system, "instructions-system") },
     skills: [],
-    knowledge: { documents: [] },
     tools: [{ id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }],
     evaluations: { synthetic_qa: [asset("evals/evals.json", evals, "synthetic")], held_out: [asset("evals/evals.json", evals, "held-out")] }
   }), "utf8");
@@ -267,7 +142,6 @@ test("current Agent Corpus entitlements are discoverable and bind the Desktop se
     },
     instructions: { system: asset("instructions/system.md", system, "instructions-system") },
     skills: [],
-    knowledge: { documents: [] },
     tools: [{ id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }],
     evaluations: { synthetic_qa: [asset("evals/evals.json", evals, "synthetic")], held_out: [asset("evals/evals.json", evals, "held-out")] }
   }), "utf8");

@@ -6,15 +6,8 @@ from pathlib import Path
 import httpx
 
 from hatch_registry.app import create_app
-from hatch_registry.bailian_rag import BailianKnowledgeProvider
 from hatch_registry.control_plane import ControlPlaneStore
 from hatch_registry.corpus_resolver import AgentCorpusResolver
-from hatch_registry.knowledge_binding import (
-    AgentKnowledgeBinding,
-    AgentKnowledgeBindingStore,
-    KnowledgeSearchResult,
-    UnavailableKnowledgeSearchProvider,
-)
 from hatch_registry.store import RegistryStore
 
 
@@ -48,10 +41,8 @@ def write_corpus(
     include_skill: bool = True,
 ) -> None:
     (root / "instructions").mkdir(parents=True, exist_ok=True)
-    (root / "knowledge").mkdir(parents=True, exist_ok=True)
     (root / "evals").mkdir(parents=True, exist_ok=True)
     (root / "instructions/system.md").write_text("Follow the creator method.\n", encoding="utf-8")
-    (root / "knowledge/method.md").write_text("# Creator method\n\nPrioritize evidence before language.\n", encoding="utf-8")
     (root / "evals/synthetic-qa.json").write_text(json.dumps({
         "cases": [{"input": "Review this CV", "answer": "A bounded review."}],
     }), encoding="utf-8")
@@ -61,9 +52,8 @@ def write_corpus(
 
     tools: list[dict[str, object]] = [
         {"id": "hatch.web_search", "kind": "hatch_builtin", "capability": "web_search"},
-        {"id": "hatch.file_search", "kind": "hatch_builtin", "capability": "file_search"},
     ]
-    allowed_tool_ids = ["hatch.web_search", "hatch.file_search"]
+    allowed_tool_ids = ["hatch.web_search"]
     if with_creator_http_tool:
         tools.append({
             "id": "creator.market_data", "kind": "http_function", "connection_ref": "market-api",
@@ -105,9 +95,6 @@ def write_corpus(
         },
         "instructions": {"system": asset(root, "system", "instructions/system.md")},
         "skills": skills,
-        "knowledge": {"documents": [asset(
-            root, "method", "knowledge/method.md", retrieval_only=True, title="Purified long-tail creator method."
-        )]},
         "tools": tools,
         "evaluations": {
             "synthetic_qa": [asset(root, "synthetic-qa", "evals/synthetic-qa.json")],
@@ -117,31 +104,7 @@ def write_corpus(
     (root / "agent.json").write_text(json.dumps(agent), encoding="utf-8")
 
 
-class CapturingKnowledgeSearch:
-    def __init__(self) -> None:
-        self.bindings: list[AgentKnowledgeBinding] = []
-        self.published: list[AgentKnowledgeBinding] = []
-
-    def publish(self, *, binding: AgentKnowledgeBinding, corpus) -> None:
-        self.published.append(binding)
-
-    def search(
-        self,
-        *,
-        binding: AgentKnowledgeBinding,
-        query: str,
-        max_num_results: int,
-    ) -> list[KnowledgeSearchResult]:
-        self.bindings.append(binding)
-        return [KnowledgeSearchResult(
-            text=f"Evidence for: {query}",
-            metadata={"namespace": binding.namespace, "limit": max_num_results},
-            score=0.92,
-        )]
-
-
-def configured_app(tmp_path: Path, *, knowledge_search: CapturingKnowledgeSearch | None = None):
-    provider = knowledge_search or CapturingKnowledgeSearch()
+def configured_app(tmp_path: Path):
     repo_root = Path(__file__).resolve().parents[2]
     resolver = AgentCorpusResolver(
         tmp_path / "registry-corpora",
@@ -150,13 +113,10 @@ def configured_app(tmp_path: Path, *, knowledge_search: CapturingKnowledgeSearch
     return create_app(
         RegistryStore(
             corpus_resolver=resolver,
-            knowledge_binding_store=AgentKnowledgeBindingStore(backend="bailian"),
-            knowledge_provider=provider,
             state_path=tmp_path / "registry-state.json",
         ),
         publish_service_token=TOKEN,
         control_plane=ControlPlaneStore(tmp_path / "control-plane.sqlite3"),
-        knowledge_search=provider,
     ), resolver
 
 
@@ -167,7 +127,7 @@ def headers(creator_id: str | None = None) -> dict[str, str]:
     return values
 
 
-def test_registry_promotes_exact_current_corpus_and_exposes_rag_namespace(tmp_path: Path) -> None:
+def test_registry_promotes_exact_current_corpus(tmp_path: Path) -> None:
     source = tmp_path / "factory-output/agent-corpus"
     write_corpus(source)
     app, resolver = configured_app(tmp_path)
@@ -178,117 +138,14 @@ def test_registry_promotes_exact_current_corpus_and_exposes_rag_namespace(tmp_pa
     published = response.json()
     assert published["agent_id"] == "resume-review"
     assert "artifact_path" not in published
-    assert published["rag"] == {"backend": "bailian", "namespace": "maya/resume-review"}
+    assert "rag" not in published
     assert published["product"] == {"id": "resume-review", "name": "Resume Review", "description": "Review a resume."}
     resolved = resolver.resolve("maya", "resume-review")
     assert resolved.corpus_digest == published["corpus_digest"]
-    assert not (tmp_path / "registry-corpora/maya/resume-review/knowledge/index.json").exists()
     restarted, _ = configured_app(tmp_path)
     listed = request(restarted, "GET", "/v1/creators/maya/agent-corpora")
     assert listed.status_code == 200
     assert listed.json()[0]["corpus_digest"] == published["corpus_digest"]
-
-
-def test_runtime_knowledge_endpoint_uses_only_current_agent_scoped_binding(tmp_path: Path) -> None:
-    source = tmp_path / "factory-output/agent-corpus"
-    write_corpus(source)
-    provider = CapturingKnowledgeSearch()
-    app, _ = configured_app(tmp_path, knowledge_search=provider)
-    assert request(app, "POST", "/v1/agent-corpora", json={"corpus_path": str(source)}, headers=headers()).status_code == 201
-
-    response = request(
-        app,
-        "POST",
-        "/v1/runtime/creators/maya/agents/resume-review/knowledge/search",
-        json={"query": "Which achievement should remain?", "max_num_results": 3},
-        headers=headers(),
-    )
-
-    assert response.status_code == 200
-    assert response.json() == {"data": [{
-        "text": "Evidence for: Which achievement should remain?",
-        "metadata": {"namespace": "maya/resume-review", "limit": 3},
-        "score": 0.92,
-    }]}
-    assert len(provider.bindings) == 1
-    binding = provider.bindings[0]
-    assert binding.creator_id == "maya"
-    assert binding.agent_id == "resume-review"
-    assert binding.backend == "bailian"
-    assert binding.namespace == "maya/resume-review"
-    other_creator = request(
-        app,
-        "POST",
-        "/v1/runtime/creators/other/agents/resume-review/knowledge/search",
-        json={"query": "blocked"},
-        headers=headers(),
-    )
-    assert other_creator.status_code == 404
-
-
-def test_runtime_knowledge_endpoint_fails_closed_without_managed_rag(tmp_path: Path) -> None:
-    source = tmp_path / "factory-output/agent-corpus"
-    write_corpus(source)
-    published_app, resolver = configured_app(tmp_path)
-    assert request(published_app, "POST", "/v1/agent-corpora", json={"corpus_path": str(source)}, headers=headers()).status_code == 201
-    unavailable = UnavailableKnowledgeSearchProvider()
-    app = create_app(
-        RegistryStore(
-            corpus_resolver=resolver,
-            knowledge_binding_store=AgentKnowledgeBindingStore(backend="bailian"),
-            knowledge_provider=unavailable,
-            state_path=tmp_path / "registry-state.json",
-        ),
-        publish_service_token=TOKEN,
-        control_plane=ControlPlaneStore(tmp_path / "control-plane.sqlite3"),
-        knowledge_search=unavailable,
-    )
-    response = request(
-        app,
-        "POST",
-        "/v1/runtime/creators/maya/agents/resume-review/knowledge/search",
-        json={"query": "a relevant fact"},
-        headers=headers(),
-    )
-    assert response.status_code == 503
-
-
-def test_bailian_provider_persists_only_private_agent_scoped_index_binding(tmp_path: Path) -> None:
-    source = tmp_path / "factory-output/agent-corpus"
-    write_corpus(source)
-    repo_root = Path(__file__).resolve().parents[2]
-    resolver = AgentCorpusResolver(
-        tmp_path / "registry-corpora",
-        repo_root / "packages/protocol/schemas/creator-agent.schema.json",
-    )
-    verified = resolver.verify(source)
-    binding = AgentKnowledgeBindingStore(backend="bailian").bind(verified)
-
-    class FakeBailianApi:
-        def __init__(self) -> None:
-            self.documents: list[Path] = []
-            self.queries: list[tuple[str, str, int]] = []
-
-        def create_index(self, *, namespace: str, documents: list[Path]) -> str:
-            assert namespace == "maya/resume-review"
-            self.documents = documents
-            return "private-index-id"
-
-        def retrieve(self, *, index_id: str, query: str, max_num_results: int) -> list[KnowledgeSearchResult]:
-            self.queries.append((index_id, query, max_num_results))
-            return [KnowledgeSearchResult(text="Creator evidence", metadata={"title": "Method"}, score=0.8)]
-
-    api = FakeBailianApi()
-    provider = BailianKnowledgeProvider(api=api, state_path=tmp_path / "private-rag-state.json")
-    provider.publish(binding=binding, corpus=verified)
-
-    assert api.documents == [source / "knowledge/method.md"]
-    assert provider.search(binding=binding, query="keep which result", max_num_results=2) == [
-        KnowledgeSearchResult(text="Creator evidence", metadata={"title": "Method"}, score=0.8)
-    ]
-    private_state = (tmp_path / "private-rag-state.json").read_text(encoding="utf-8")
-    assert "private-index-id" in private_state
-    assert "private-index-id" not in (source / "agent.json").read_text(encoding="utf-8")
 
 
 def test_registry_replaces_current_corpus_for_same_creator_agent(tmp_path: Path) -> None:
@@ -324,6 +181,24 @@ def test_registry_rejects_bad_hash_and_non_corpus_files(tmp_path: Path) -> None:
     assert bad_hash.status_code == 422
 
 
+def test_registry_ignores_retired_knowledge_and_file_search(tmp_path: Path) -> None:
+    source = tmp_path / "factory-output/agent-corpus"
+    write_corpus(source)
+    (source / "knowledge").mkdir()
+    (source / "knowledge/method.md").write_text("# Old method\n", encoding="utf-8")
+    agent = json.loads((source / "agent.json").read_text(encoding="utf-8"))
+    agent["knowledge"] = {"documents": [asset(source, "method", "knowledge/method.md")]}
+    agent["tools"].append({"id": "hatch.file_search", "kind": "hatch_builtin", "capability": "file_search"})
+    agent["skills"][0]["allowed_tool_ids"].append("hatch.file_search")
+    (source / "agent.json").write_text(json.dumps(agent), encoding="utf-8")
+    app, resolver = configured_app(tmp_path)
+    response = request(app, "POST", "/v1/agent-corpora", json={"corpus_path": str(source)}, headers=headers())
+    assert response.status_code == 201
+    resolved = resolver.resolve("maya", "resume-review").agent
+    assert "knowledge" not in resolved
+    assert all(tool["id"] != "hatch.file_search" for tool in resolved["tools"])
+
+
 def test_registry_allows_zero_skills(tmp_path: Path) -> None:
     source = tmp_path / "factory-output/agent-corpus"
     write_corpus(source, include_skill=False)
@@ -332,7 +207,7 @@ def test_registry_allows_zero_skills(tmp_path: Path) -> None:
     assert response.status_code == 201
 
 
-def test_registry_rejects_runtime_scope_and_missing_file_search_from_corpus(tmp_path: Path) -> None:
+def test_registry_rejects_runtime_scope(tmp_path: Path) -> None:
     source = tmp_path / "factory-output/agent-corpus"
     write_corpus(source)
     app, _ = configured_app(tmp_path)
@@ -342,12 +217,6 @@ def test_registry_rejects_runtime_scope_and_missing_file_search_from_corpus(tmp_
     (source / "agent.json").write_text(json.dumps(agent), encoding="utf-8")
     scoped = request(app, "POST", "/v1/agent-corpora", json={"corpus_path": str(source)}, headers=headers())
     assert scoped.status_code == 422
-
-    agent.pop("tenant_id")
-    agent["tools"] = [tool for tool in agent["tools"] if tool["id"] != "hatch.file_search"]
-    (source / "agent.json").write_text(json.dumps(agent), encoding="utf-8")
-    missing_file_search = request(app, "POST", "/v1/agent-corpora", json={"corpus_path": str(source)}, headers=headers())
-    assert missing_file_search.status_code == 422
 
 
 def test_control_plane_binds_declared_http_and_mcp_tools_without_credential_in_corpus(tmp_path: Path) -> None:

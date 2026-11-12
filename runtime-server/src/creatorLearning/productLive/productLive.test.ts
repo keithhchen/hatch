@@ -42,16 +42,16 @@ test("publishing requires only SYSTEM.md", async () => {
   assert.equal(AgentDefinition.whenPresent("  \n", [skill]), null);
 });
 
-test("the corpus is System and Skills; Knowledge and Tools stay empty", async () => {
+test("the corpus is System and Skills; Tools stay empty", async () => {
   const releaser = new RecordingReleaser();
   const result = await service(definition, undefined, releaser).publish(product);
   assert.deepEqual(result, { product_id: "p1", status: "published", published_at: "2026-10-21T00:00:00.000Z", corpus_digest: "sha256:x", public_url: "https://hatch.test/products/p1", chat_url: "https://hatch.test/chat/product/p1" });
-  assert.deepEqual(releaser.released[0]!.value, { system_instructions: "# SYSTEM", skills: [skill], knowledge: [], tools: [] });
+  assert.deepEqual(releaser.released[0]!.value, { system_instructions: "# SYSTEM", skills: [skill], tools: [] });
 });
 
 test("status reports publishability, live state and pending changes", async () => {
   assert.deepEqual((await service(null).status(product)).toJSON(), { product_id: "p1", can_publish: false, is_live: false, pending_changes: [], public_url: null, chat_url: null, published_at: null });
-  const stale = new LiveRelease(Corpus.parse({ system_instructions: "old", skills: [], knowledge: [], tools: [] }), { questions: [] }, "2026-10-01T00:00:00.000Z");
+  const stale = new LiveRelease(Corpus.parse({ system_instructions: "old", skills: [], tools: [] }), { questions: [] }, "2026-10-01T00:00:00.000Z");
   assert.deepEqual((await service(definition, stale).status(product)).toJSON().pending_changes, ["corpus", "brief"]);
   const current = new LiveRelease(definition.toCorpus(), product.briefSpec, "2026-10-01T00:00:00.000Z");
   assert.deepEqual((await service(definition, current).status(product)).toJSON(), { product_id: "p1", can_publish: true, is_live: true, pending_changes: [], public_url: "https://hatch.test/products/p1", chat_url: "https://hatch.test/chat/product/p1", published_at: "2026-10-01T00:00:00.000Z" });

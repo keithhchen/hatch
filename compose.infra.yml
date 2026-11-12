@@ -18,19 +18,6 @@ services:
       timeout: 5s
       retries: 6
 
-  qdrant:
-    image: ${QDRANT_IMAGE:-qdrant/qdrant:v1.14.1}
-    restart: unless-stopped
-    volumes:
-      - qdrant_data:/qdrant/storage
-    networks:
-      - hatch_internal
-    healthcheck:
-      test: ["CMD-SHELL", "kill -0 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-
   vector:
     image: ${VECTOR_IMAGE:-timberio/vector:0.61.0-alpine}
     restart: unless-stopped
@@ -50,8 +37,6 @@ volumes:
     name: hatch_vector_data
   postgres_data:
     name: hatch_postgres_data
-  qdrant_data:
-    name: hatch_qdrant_data
 
 networks:
   hatch_internal:

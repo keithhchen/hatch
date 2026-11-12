@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { chmod, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
-import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -30,7 +29,6 @@ test("one-shot harness binds a verified Corpus and traverses the full Hatch Runt
   const system = "SYSTEM_FROM_VERIFIED_AGENT_CORPUS";
   const skillInstruction = "SKILL_FROM_VERIFIED_AGENT_CORPUS";
   const skillReference = "REFERENCE_FROM_VERIFIED_AGENT_CORPUS";
-  const retrievalOnlyKnowledge = "KNOWLEDGE_MUST_NOT_BE_EAGERLY_INJECTED";
   const heldoutSecret = "SEALED_CREATOR_REFERENCE_MUST_NEVER_BE_MODEL_VISIBLE";
   const bundle = await materializeAgentCorpusBundle(store, {
     candidateRoot: "v1-fixed/agent-corpus",
@@ -43,13 +41,8 @@ test("one-shot harness binds a verified Corpus and traverses the full Hatch Runt
       name: "Offer critique",
       whenToUse: "Make a decisive recommendation",
       instruction: skillInstruction,
-      allowedToolIds: ["hatch.file_search"],
+      allowedToolIds: ["hatch.web_search"],
       references: [{ id: "decision-method", kind: "method", content: skillReference }]
-    }],
-    knowledge: [{
-      id: "pricing-cases",
-      content: retrievalOnlyKnowledge,
-      title: "Creator-authorized pricing cases"
     }],
     syntheticQa: [{ question: "development", answer: "creator reference" }],
     heldOut: [{ question: "heldout", answer: heldoutSecret }]
@@ -67,8 +60,6 @@ test("one-shot harness binds a verified Corpus and traverses the full Hatch Runt
       assert.equal((context.agentSystemPrompt ?? "").includes(skillInstruction), false);
       assert.equal((context.agentSystemPrompt ?? "").includes(skillReference), false);
       assert.ok(context.sessionSkills.visibleRecords.some((skill) => skill.name === "offer-critique"));
-      assert.equal((context.agentSystemPrompt ?? "").includes(retrievalOnlyKnowledge), false);
-      assert.equal(context.knowledgeAvailable, true);
       assert.notEqual(context.allowSkillRun, true);
       assert.deepEqual(context.clientTools, CANONICAL_LOCAL_TOOLS);
       const modelVisible = JSON.stringify({
@@ -87,12 +78,6 @@ test("one-shot harness binds a verified Corpus and traverses the full Hatch Runt
       yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
     }
   };
-  const previousKnowledgeMode = process.env.HATCH_KNOWLEDGE_MODE;
-  process.env.HATCH_KNOWLEDGE_MODE = "corpus-test";
-  t.after(() => {
-    if (previousKnowledgeMode === undefined) delete process.env.HATCH_KNOWLEDGE_MODE;
-    else process.env.HATCH_KNOWLEDGE_MODE = previousKnowledgeMode;
-  });
   const result = await runHatchHarness({
     corpusRoot,
     creatorId: "11111111-1111-4111-8111-111111111111",
@@ -311,24 +296,6 @@ test("Factory candidate child cannot inherit or dotenv-load deployment control-p
   const root = await mkdtemp(path.join(packageRoot, ".hatch-child-env-test-"));
   t.after(() => rm(root, { recursive: true, force: true }));
 
-  const registryRequests: string[] = [];
-  const registry = http.createServer((request, response) => {
-    registryRequests.push(request.url ?? "");
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ data: [] }));
-  });
-  await new Promise<void>((resolve, reject) => {
-    registry.once("error", reject);
-    registry.listen(0, "127.0.0.1", () => {
-      registry.removeListener("error", reject);
-      resolve();
-    });
-  });
-  t.after(() => new Promise<void>((resolve) => registry.close(() => resolve())));
-  const address = registry.address();
-  assert.ok(address && typeof address !== "string");
-  const registryUrl = `http://127.0.0.1:${address.port}`;
-
   const isolatedNames = [
     "DATABASE_URL",
     "HATCH_FACTORY_DATABASE_URL",
@@ -351,13 +318,6 @@ test("Factory candidate child cannot inherit or dotenv-load deployment control-p
     "HATCH_DELIVERY_OUTBOX_FILE",
     "HATCH_CREATOR_FACTORY_ROOT",
     "HATCH_CREATOR_FACTORY_WORKER_ID",
-    "HATCH_QDRANT_URL",
-    "HATCH_QDRANT_API_KEY",
-    "HATCH_QDRANT_COLLECTION",
-    "HATCH_DASHSCOPE_API_KEY",
-    "DASHSCOPE_API_KEY",
-    "DASHSCOPE_EMBEDDING_BASE_URL",
-    "DASHSCOPE_RERANK_BASE_URL",
     "HATCH_AUTH_SIGNING_SECRET",
     "HATCH_CREATOR_MODEL",
     "HATCH_REVIEWER_MODEL",
@@ -366,7 +326,6 @@ test("Factory candidate child cannot inherit or dotenv-load deployment control-p
   const maliciousValues = Object.fromEntries(
     isolatedNames.map((name) => [name, `malicious-${name.toLowerCase()}`])
   ) as NodeJS.ProcessEnv;
-  maliciousValues.HATCH_REGISTRY_URL = registryUrl;
   maliciousValues.HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN = "malicious-runtime-token";
   maliciousValues.DATABASE_URL = "postgresql://attacker:secret@127.0.0.1:5432/hatch";
   maliciousValues.HATCH_FACTORY_DATABASE_URL = maliciousValues.DATABASE_URL;
@@ -382,22 +341,12 @@ test("Factory candidate child cannot inherit or dotenv-load deployment control-p
   ].join("\n"), "utf8");
   await writeFile(path.join(root, "inspect-child.mjs"), [
     "import 'dotenv/config';",
-    "import { registryAgentKnowledgeSearchFromEnvironment } from '../dist/agentKnowledge.js';",
     `const isolatedNames = ${JSON.stringify(isolatedNames)};`,
     "const chunks = [];",
     "for await (const chunk of process.stdin) chunks.push(chunk);",
     "const input = JSON.parse(Buffer.concat(chunks).toString('utf8'));",
-    "let registryConfigured = false;",
-    "let registryError;",
-    "try {",
-    "  const resolver = registryAgentKnowledgeSearchFromEnvironment(process.env);",
-    "  if (resolver) {",
-    "    registryConfigured = true;",
-    "    await resolver.forAgent('malicious-tenant', 'malicious-agent').search({ query: 'isolation probe' });",
-    "  }",
-    "} catch (error) { registryError = error instanceof Error ? error.message : String(error); }",
     "const leaked = Object.fromEntries(isolatedNames.filter((name) => process.env[name] !== undefined).map((name) => [name, process.env[name]]));",
-    "const observation = {cwd:process.cwd(),pwd:process.env.PWD,dotenvConfigPath:process.env.DOTENV_CONFIG_PATH,dotenvCanary:process.env.HATCH_DOTENV_ATTACK_CANARY,registryConfigured,registryError,leaked,llmApiKey:process.env.LLM_API_KEY,openaiBaseUrl:process.env.OPENAI_BASE_URL,knowledgeMode:process.env.HATCH_KNOWLEDGE_MODE,outputGuard:process.env.HATCH_OUTPUT_GUARD};",
+    "const observation = {cwd:process.cwd(),pwd:process.env.PWD,dotenvConfigPath:process.env.DOTENV_CONFIG_PATH,dotenvCanary:process.env.HATCH_DOTENV_ATTACK_CANARY,leaked,llmApiKey:process.env.LLM_API_KEY,openaiBaseUrl:process.env.OPENAI_BASE_URL,outputGuard:process.env.HATCH_OUTPUT_GUARD};",
     "process.stdout.write(JSON.stringify({ok:true,output:JSON.stringify(observation),runId:'isolated-child-run',corpusDigest:input.corpusDigest,finishReason:'stop',terminalStatus:'completed',protocolEvents:[{type:'turn.completed'},{type:'turn.state',status:'completed'}],protocolTraceTruncated:false}));"
   ].join("\n"), "utf8");
 
@@ -438,18 +387,12 @@ test("Factory candidate child cannot inherit or dotenv-load deployment control-p
     pwd?: string;
     dotenvConfigPath?: string;
     dotenvCanary?: string;
-    registryConfigured: boolean;
-    registryError?: string;
     leaked: Record<string, string>;
     llmApiKey?: string;
     openaiBaseUrl?: string;
-    knowledgeMode?: string;
     outputGuard?: string;
   };
   assert.deepEqual(observation.leaked, {});
-  assert.equal(observation.registryConfigured, false);
-  assert.equal(observation.registryError, undefined);
-  assert.deepEqual(registryRequests, []);
   assert.equal(observation.dotenvCanary, undefined);
   assert.notEqual(observation.cwd, root);
   // macOS canonicalizes /var to /private/var for process.cwd(), while PWD
@@ -458,7 +401,6 @@ test("Factory candidate child cannot inherit or dotenv-load deployment control-p
   assert.equal(path.basename(observation.pwd ?? ""), path.basename(observation.cwd));
   assert.equal(observation.llmApiKey, "runtime-llm-key");
   assert.equal(observation.openaiBaseUrl, "https://api.moonshot.cn/v1");
-  assert.equal(observation.knowledgeMode, "corpus-test");
   assert.equal(observation.outputGuard, "off");
 });
 

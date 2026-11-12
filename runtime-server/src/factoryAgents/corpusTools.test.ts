@@ -11,7 +11,7 @@ import { corpusTools, registryRequest } from "./corpusTools.js";
 import { digest } from "./files.js";
 
 // Automated local integration: actual HTTP handlers, auth, storage, bundle validation and Runtime resolver.
-// No model, Qdrant or production-service UAT is claimed by these tests.
+// No model or production-service UAT is claimed by these tests.
 test("Generation uploads canonical files through Registry and the existing Runtime resolver loads the same version", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-corpus-test-"));
   const runtimeRoot = path.join(root, "runtime");
@@ -21,7 +21,7 @@ test("Generation uploads canonical files through Registry and the existing Runti
     HATCH_REGISTRY_STATE_PATH: path.join(root, "registry.json"),
     HATCH_CREATOR_FACTORY_ROOT: path.join(root, "factory"),
     HATCH_AUTH_SIGNING_SECRET: "unit-test-secret", HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN: "unit-test-runtime",
-    HATCH_QDRANT_URL: "", DASHSCOPE_API_KEY: "",
+    DASHSCOPE_API_KEY: "",
   });
   try {
     const address = server.server.address(); assert.ok(address && typeof address !== "string");

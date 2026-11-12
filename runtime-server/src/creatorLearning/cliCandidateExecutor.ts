@@ -167,7 +167,7 @@ function isolatedChildEnvironment(
   // The candidate receives its binding, Corpus snapshot, transcript store,
   // and conversation repository explicitly. Never let inherited deployment
   // state redirect an eval into Registry, shared databases, commerce, or a
-  // Creator tool/knowledge control plane. Runtime model and ordinary Hatch
+  // Creator tool control plane. Runtime model and ordinary Hatch
   // server-tool credentials remain product-owned and intact. The output guard
   // is set below to off for this private, non-delivery evaluation boundary.
   const isolatedKeys = new Set([
@@ -176,8 +176,6 @@ function isolatedChildEnvironment(
     "HATCH_RUNTIME_DATA_DIR",
     "HATCH_DELIVERY_OUTBOX_FILE",
     "HATCH_AUTH_SIGNING_SECRET",
-    "HATCH_KNOWLEDGE_MODE",
-    "HATCH_DASHSCOPE_API_KEY",
     "HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN",
     // Remove the obsolete near-match too; it must not hide a regression back
     // to filtering this name instead of the Registry credential above.
@@ -197,8 +195,6 @@ function isolatedChildEnvironment(
       || key.startsWith("HATCH_REGISTRY_")
       || key.startsWith("HATCH_COMMERCE_")
       || key.startsWith("HATCH_CREATOR_FACTORY_")
-      || key.startsWith("HATCH_QDRANT_")
-      || key.startsWith("DASHSCOPE_")
       || key === "DOTENV_KEY"
       || key.startsWith("DOTENV_CONFIG_")
     ) delete child[key];
@@ -215,11 +211,6 @@ function isolatedChildEnvironment(
   // Keep the full Runtime transport, model, state machine, and Corpus path,
   // but do not let delivery-only filtering become a quality gate.
   child.HATCH_OUTPUT_GUARD = "off";
-  // Candidate knowledge has not been published or indexed yet. Exercise the
-  // existing full Runtime against the verified staged Corpus through its
-  // explicit corpus-backed knowledge adapter, without touching production
-  // Qdrant namespaces or changing Runtime code.
-  child.HATCH_KNOWLEDGE_MODE = "corpus-test";
   return child;
 }
 

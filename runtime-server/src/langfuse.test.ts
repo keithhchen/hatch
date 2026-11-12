@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
-import http from "node:http";
 import test, { after, before, beforeEach } from "node:test";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { createAssistantMessageEventStream, createModels, createProvider, envApiKeyAuth, type AssistantMessage, type AssistantMessageEvent } from "@earendil-works/pi-ai";
-import { QdrantKnowledgeProvider } from "./agentCorpus.js";
 import { TracedTranscriber } from "./assets/adapters.js";
 import { TracedStreamingStt } from "./factoryAgents/stt.js";
 import { TracedHostedAgent } from "./hostedAgents/kimiHostedAgent.js";
@@ -133,30 +131,6 @@ test("compaction is a labelled observation with the summarizing model", async ()
   assert.equal(attr(span!, "model.name"), model.id);
   assert.equal(meta(span!, "provider"), model.provider);
   assert.equal(meta(span!, "messages"), "1");
-});
-
-test("embedding and rerank calls are generations with DashScope usage", async () => {
-  const gateway = http.createServer((request, response) => {
-    let body = "";
-    request.on("data", chunk => { body += chunk; });
-    request.on("end", () => {
-      response.setHeader("content-type", "application/json");
-      if (request.url?.endsWith("/embeddings")) response.end(JSON.stringify({ data: [{ embedding: Array(1024).fill(0.1) }], usage: { prompt_tokens: 7, total_tokens: 7 } }));
-      else if (request.url?.endsWith("/reranks")) response.end(JSON.stringify({ results: [{ index: 0, relevance_score: 0.9 }], usage: { total_tokens: 11 } }));
-      else response.end(JSON.stringify({ result: { points: [{ id: "p1", score: 0.5, payload: { text: "chunk" } }] } }));
-    });
-  });
-  await new Promise<void>(resolve => gateway.listen(0, "127.0.0.1", resolve));
-  const base = `http://127.0.0.1:${(gateway.address() as { port: number }).port}`;
-  try {
-    await new QdrantKnowledgeProvider(base, "q", "d", { embeddingBaseUrl: base, rerankBaseUrl: base }).search({ creatorId: "c", agentId: "a", corpusDigest: "sha256:x", query: "q", limit: 1 });
-  } finally { await new Promise(resolve => gateway.close(resolve)); }
-  const [embed] = await spansNamed("embed");
-  assert.equal(attr(embed!, "model.name"), "text-embedding-v4");
-  assert.match(String(attr(embed!, "usage_details")), /"input":7/);
-  const [rerank] = await spansNamed("rerank");
-  assert.equal(attr(rerank!, "model.name"), "qwen3-rerank");
-  assert.match(String(attr(rerank!, "usage_details")), /"total":11/);
 });
 
 test("a failed export is one warning line, not one per batch", () => {

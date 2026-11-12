@@ -33,7 +33,7 @@ import {
 } from "../delivery.js";
 import type { DeliveryAccountingCommand, DeliveryAccountingOutbox } from "../deliveryOutbox.js";
 import { materializeAgentCorpus, type MaterializedAgentCorpus } from "../agentCorpusMaterialization.js";
-import { knowledgeProviderConfigured, type AgentCorpus } from "../agentCorpus.js";
+import type { AgentCorpus } from "../agentCorpus.js";
 import {
   GuardedAssistantOutput,
   OUTPUT_GUARD_BLOCKED_MODEL_MESSAGE,
@@ -396,10 +396,6 @@ async function runModelTurnInternal(
       ...(profile?.mayStaySilent ? { mayStaySilent: true } : {}),
       briefSnapshot,
       deliveryAuditContext: materializedAgent?.deliveryAuditContext,
-      knowledgeAvailable: Boolean(
-        binding.agentCorpus?.knowledge.documents.length
-        && knowledgeProviderConfigured()
-      ),
       abortSignal,
       clientAttributes: clientOf,
       claimSteered,

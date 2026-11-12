@@ -42,19 +42,6 @@ this execution unit. Do not make the entire presentation service one Skill.
 Put this in `skills/deck-structure/references/pyramid-principle.md`. It matters
 when that Skill runs; it is not a global rule for every Creator product.
 
-## Long-tail material belongs in Knowledge
-
-**Material**
-
-> A 2024 industry report lists the market terms, companies, and historical
-> examples used in this sector.
-
-**Factory decision**
-
-Put the report in `knowledge/` for retrieval. Do not turn its facts into
-behavior rules or few-shots unless the Creator explicitly teaches a judgment
-that should change the Agent's behavior.
-
 ## Scope decides ambiguous placement
 
 **Material**
@@ -72,6 +59,5 @@ without evidence of global scope.
 
 An example that demonstrates a global judgment belongs in the system
 instructions. An example that demonstrates one Skill's execution belongs in
-that Skill's reference. A rare factual or edge-case example belongs in
-Knowledge, while held-out examples remain evaluation inputs and never enter
-runtime context.
+that Skill's reference. A rare factual or edge-case example is evaluation material, as are held-out
+examples; neither enters runtime context.

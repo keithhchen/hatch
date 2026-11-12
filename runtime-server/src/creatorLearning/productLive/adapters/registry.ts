@@ -30,7 +30,6 @@ export class CorpusPublisherReleaser implements CorpusReleaser {
       productPromise: product.promise,
       briefSpec: product.briefSpec,
       corpus: corpus.value,
-      sourceFiles: [],
     });
     return { publishedAt: result.published.published_at, corpusDigest: result.corpus_digest };
   }

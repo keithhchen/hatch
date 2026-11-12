@@ -126,7 +126,7 @@ export class CreatorRegistryReleaseStore {
         published.published_at,
       ]);
       // This is the only current-version mutation. It happens after all
-      // immutable assets and the Qdrant stage have succeeded.
+      // immutable assets have succeeded.
       await client.query(`
         INSERT INTO hatch_creator_registry_live(product_id, creator_id, release_digest, updated_at)
         VALUES ($1,$2,$3,$4)

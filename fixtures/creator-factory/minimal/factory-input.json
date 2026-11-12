@@ -19,11 +19,6 @@
       "id": "hatch.web_search",
       "kind": "hatch_builtin",
       "capability": "web_search"
-    },
-    {
-      "id": "hatch.file_search",
-      "kind": "hatch_builtin",
-      "capability": "file_search"
     }
   ],
   "taskName": "Publishable offer critique",

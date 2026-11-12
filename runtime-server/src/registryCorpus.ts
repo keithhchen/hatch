@@ -143,9 +143,6 @@ export async function verifyAgentCorpus(
   if (!corpus.tools.some((tool) => tool.id === "hatch.web_search")) {
     throw new AgentCorpusVerificationError("Agent Corpus must declare hatch.web_search");
   }
-  if (corpus.knowledge.documents.length > 0 && !corpus.tools.some((tool) => tool.id === "hatch.file_search")) {
-    throw new AgentCorpusVerificationError("Agent Corpus with knowledge documents must declare hatch.file_search");
-  }
   const forbidden = new Set(["provider", "api_key", "credential", "credentials", "endpoint", "vector_store_id", "raw_material", "factory_trace"]);
   const leaked: string[] = [];
   findForbiddenKeys(raw, forbidden, "", leaked);
@@ -402,7 +399,6 @@ function assetDescriptors(corpus: AgentCorpus): Array<{ path: string; sha256: st
     result.push({ path: skill.instruction.path, sha256: skill.instruction.sha256 });
     for (const reference of skill.references) result.push({ path: reference.asset.path, sha256: reference.asset.sha256 });
   }
-  for (const document of corpus.knowledge.documents) result.push({ path: document.path, sha256: document.sha256 });
   for (const rows of Object.values(corpus.evaluations)) for (const asset of rows) result.push({ path: asset.path, sha256: asset.sha256 });
   return result;
 }

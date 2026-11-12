@@ -60,17 +60,10 @@ type CorpusReferenceSubmission = {
   content: string;
 };
 
-type CorpusKnowledgeSubmission = {
-  id: string;
-  title: string;
-  content: string;
-};
-
 type CorpusSubmission = {
   systemInstructions?: string;
   skills: CorpusSkillSubmission[];
   references: CorpusReferenceSubmission[];
-  knowledge: CorpusKnowledgeSubmission[];
   auditSections: Partial<Record<"change_rationale" | "requirements_traceability" | "preservation_audit", string>>;
 };
 
@@ -135,7 +128,7 @@ function emptyDraft(): Draft {
   return {
     evidenceSections: {},
     questions: [],
-    corpus: { skills: [], references: [], knowledge: [], auditSections: {} },
+    corpus: { skills: [], references: [], auditSections: {} },
     finalized: false
   };
 }
@@ -195,7 +188,7 @@ const PRESERVATION_AUDIT_TOOL_DESCRIPTION = [
 const PUBLISHABLE_CONTENT_TOOL_DESCRIPTION = [
   "All submitted asset content and LLM-authored metadata must be an original synthesis of supported meaning.",
   "Never quote, transcribe, lightly edit, sentence-by-sentence paraphrase, or split authorized source prose across assets.",
-  "Rewrite source-derived knowledge in fresh wording; raw excerpts belong only in Factory evidence or non-runtime audit artifacts."
+  "Rewrite source-derived material in fresh wording; raw excerpts belong only in Factory evidence or non-runtime audit artifacts."
 ].join(" ");
 
 function safeCorpusParserFailure(error: unknown): SubmissionValidationError {
@@ -238,8 +231,8 @@ function safeCorpusParserFailure(error: unknown): SubmissionValidationError {
       ["CORPUS_SYSTEM_ORDER", "The system asset must be first"]
     ],
     [
-      "Corpus assets must be ordered as system, skills, references, then knowledge",
-      ["CORPUS_LAYER_ORDER", "Corpus assets must be ordered as system, skills, references, then knowledge"]
+      "Corpus assets must be ordered as system, skills, then references",
+      ["CORPUS_LAYER_ORDER", "Corpus assets must be ordered as system, skills, then references"]
     ],
     [
       "Corpus system asset id must be system",
@@ -270,7 +263,7 @@ function safeCorpusParserFailure(error: unknown): SubmissionValidationError {
       `Corpus envelope section has no content: # ${emptyAuditSection[1]}`
     );
   }
-  const emptyAsset = /^Corpus (system|skill|reference|knowledge|unknown) asset has empty content$/.exec(message);
+  const emptyAsset = /^Corpus (system|skill|reference|unknown) asset has empty content$/.exec(message);
   if (emptyAsset) {
     return new SubmissionValidationError(
       "CORPUS_ASSET_CONTENT_EMPTY",
@@ -335,13 +328,6 @@ function safeCorpusParserFailure(error: unknown): SubmissionValidationError {
     return new SubmissionValidationError(
       "CORPUS_REFERENCE_KIND_INVALID",
       `Reference ${invalidReferenceKind[1]} has an invalid reference kind`
-    );
-  }
-  const retrievalFlag = /^Corpus knowledge ([a-z][a-z0-9_-]*) must declare retrieval_only: true$/.exec(message);
-  if (retrievalFlag) {
-    return new SubmissionValidationError(
-      "CORPUS_KNOWLEDGE_RETRIEVAL_FLAG",
-      `Knowledge ${retrievalFlag[1]} must be retrieval-only`
     );
   }
   const unknownMetadata = /^Corpus asset metadata has unknown field: ([a-z_]+)$/.exec(message);
@@ -530,18 +516,11 @@ function renderCorpus(value: CorpusSubmission): string {
     `parent_skill_id: ${item.parentSkillId}`,
     `reference_kind: ${item.referenceKind}`
   ], item.content));
-  const knowledge = value.knowledge.map((item) => renderAsset([
-    "layer: knowledge",
-    `id: ${item.id}`,
-    `title: ${item.title}`,
-    "retrieval_only: true"
-  ], item.content));
   return [
     "# Compiled cognitive assets",
     system,
     ...skills,
     ...references,
-    ...knowledge,
     "# Change rationale",
     value.auditSections.change_rationale!,
     "# Requirements traceability",
@@ -608,7 +587,7 @@ function instructionsFor(contract: FactoryOutputContract): string {
     return "Your output is accepted only through the local Corpus audit submission tools supplied with this call. Do not print the verdict as assistant prose. Submit one complete verdict with submit_corpus_audit. A submit-only turn is allowed and its receipt commits the staged verdict; then call finalize_corpus_audit in a subsequent tool turn. The finalizer must be the only call in that turn and is accepted only when the complete verdict is present. If the finalizer is rejected, correct the verdict and submit it again before finalizing. After FINALIZED, stop immediately.";
   }
   if (contract.kind === "corpus_compilation") {
-    return `Your output is accepted only through the local Corpus submission tools supplied with this call. Use only the available local submission tools; tool calls are a typed handoff to the host, not external actions. Do not print the Corpus as assistant prose and do not wrap tool arguments in code fences. First reason through the complete requirement inventory, layer boundaries, asset IDs, dependencies, and preservation obligations. Do not privately draft every asset before the first tool turn. Build one host-retained draft over multiple bounded turns: author and submit the System first, then coherent tranches of roughly one to four related assets, then the audit sections. A successful submit-only turn commits its submitted assets to that draft; receipts report the retained inventory. Re-submitting the same asset ID replaces that asset in the retained draft; use this for precise corrections. An optional restart_submission discards the whole retained draft and must be first if used. Any tool error rolls back only that turn and preserves the prior retained draft. Call finalize_corpus as the last call only when the retained draft is complete. A rejected finalizer preserves the draft: correct only the reported problem, then finalize again. FINALIZED means the complete Corpus passed host validation; stop immediately after it. Paths, manifests, and digests are host-derived: never submit them. The final draft must contain the complete System and every retained Skill/reference/knowledge asset plus all three audit sections. Allowed runtime tool IDs are exactly: ${contract.availableToolIds.length > 0 ? contract.availableToolIds.join(", ") : "none"}.`;
+    return `Your output is accepted only through the local Corpus submission tools supplied with this call. Use only the available local submission tools; tool calls are a typed handoff to the host, not external actions. Do not print the Corpus as assistant prose and do not wrap tool arguments in code fences. First reason through the complete requirement inventory, layer boundaries, asset IDs, dependencies, and preservation obligations. Do not privately draft every asset before the first tool turn. Build one host-retained draft over multiple bounded turns: author and submit the System first, then coherent tranches of roughly one to four related assets, then the audit sections. A successful submit-only turn commits its submitted assets to that draft; receipts report the retained inventory. Re-submitting the same asset ID replaces that asset in the retained draft; use this for precise corrections. An optional restart_submission discards the whole retained draft and must be first if used. Any tool error rolls back only that turn and preserves the prior retained draft. Call finalize_corpus as the last call only when the retained draft is complete. A rejected finalizer preserves the draft: correct only the reported problem, then finalize again. FINALIZED means the complete Corpus passed host validation; stop immediately after it. Paths, manifests, and digests are host-derived: never submit them. The final draft must contain the complete System and every retained Skill/reference asset plus all three audit sections. Allowed runtime tool IDs are exactly: ${contract.availableToolIds.length > 0 ? contract.availableToolIds.join(", ") : "none"}.`;
   }
   return shared;
 }
@@ -669,7 +648,6 @@ export function createFactorySubmissionProtocol(
       `system=${draft.corpus.systemInstructions ? 1 : 0}/1`,
       `skills=${draft.corpus.skills.length}`,
       `references=${draft.corpus.references.length}`,
-      `knowledge=${draft.corpus.knowledge.length}`,
       `audit_sections=${auditCount}/3`,
       `next=${finalizerName}`
     ].join("; ");
@@ -1000,22 +978,6 @@ export function createFactorySubmissionProtocol(
       }
     ));
     tools.push(makeTool(
-      "submit_knowledge",
-      `Submit one complete purified retrieval-only knowledge document. The host derives knowledge/<id>.md. ${PUBLISHABLE_CONTENT_TOOL_DESCRIPTION}`,
-      Type.Object({ id: text, title: text, content: text }, { additionalProperties: false }),
-      (draft, params) => {
-        const id = metadata(params.id, "id");
-        if (!IDENTIFIER.test(id)) throw new Error(`Invalid knowledge id: ${id}`);
-        const candidate: CorpusKnowledgeSubmission = {
-          id,
-          title: metadata(params.title, "title"),
-          content: body(params.content, "content")
-        };
-        const status = upsertById(draft.corpus.knowledge, candidate, (item) => item.id);
-        return staged("submit_knowledge", status, "knowledge", draft);
-      }
-    ));
-    tools.push(makeTool(
       "submit_corpus_audit_section",
       `${PRESERVATION_AUDIT_TOOL_DESCRIPTION} The host owns all four top-level envelope headings; submit all three bodies before finalizing.`,
       Type.Object({
@@ -1055,8 +1017,7 @@ export function createFactorySubmissionProtocol(
         }
         const ids = [
           ...draft.corpus.skills.map((item) => item.id),
-          ...draft.corpus.references.map((item) => item.id),
-          ...draft.corpus.knowledge.map((item) => item.id)
+          ...draft.corpus.references.map((item) => item.id)
         ];
         if (new Set(ids).size !== ids.length) {
           throw new SubmissionValidationError(

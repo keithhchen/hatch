@@ -24,7 +24,7 @@ Browser sessions use same-origin `HttpOnly` cookies plus CSRF tokens. Runtime's
 internal Access commands are not exposed by Caddy, and production containers
 receive explicit environment allowlists instead of the shared server `.env`.
 
-Protected instructions, Skills, knowledge, Evals, and Factory traces never
+Protected instructions, Skills, Evals, and Factory traces never
 enter Portal or Access state. Public storefront projections contain only
 client-safe Product, Creator, and release fields.
 

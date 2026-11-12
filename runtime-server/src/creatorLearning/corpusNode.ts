@@ -30,11 +30,6 @@ const corpusSkillSchema = z.object({
   references: z.array(corpusReferenceSchema)
 }).strict();
 
-const corpusKnowledgeSchema = z.object({
-  source: productFileProjectionPathSchema,
-  title: z.string().min(1).max(256),
-}).strict();
-
 // Creator-owned tools are declarations, not connection details.  The
 // connection_ref is resolved by Registry/Runtime after publication.
 const corpusToolSchema = z.object({
@@ -51,7 +46,6 @@ const corpusToolSchema = z.object({
 export const corpusOutputSchema = z.object({
   system_instructions: z.string().min(1),
   skills: z.array(corpusSkillSchema),
-  knowledge: z.array(corpusKnowledgeSchema),
   tools: z.array(corpusToolSchema).default([])
 }).strict();
 
@@ -159,18 +153,8 @@ const CORPUS_LAYERING = `Translate meaning into the narrowest durable layer:
 - system_instructions: global behavior that should affect every run—identity, product boundary, priorities, refusal conditions, quality bar, and cross-cutting ways of deciding.
 - skills: reusable procedures with a clear trigger and a sequence of judgment or action. A Skill should teach the Agent how to do a recurring kind of work, not merely state a principle.
 - references: local method, style, example, or few-shot detail that helps one Skill without becoming a global rule.
-- knowledge: selected source files that are useful when relevant; Knowledge carries the original file, not a generated explanation or mandatory behavior.
 
 Do not force every source into an asset. Do not put the whole Product workflow into one giant Skill. If a distinction is global, keep it global; if it is local, keep it local.`;
-
-const CORPUS_SOURCE_BOUNDARY = `Knowledge is a selection of whole source files, not a generated summary.
-
-For Knowledge only:
-- Select a file when it is Creator-authorized or otherwise explicitly trusted, stable enough to remain useful, relevant to the Product, and worth opening as a reference in a future run.
-- Exclude temporary notes, logs, evaluation traces, duplicate or superseded drafts, unsupported inference, and generic background that is not an authorized reference for this Product.
-- A source file is either selected as a whole or not selected. Do not rewrite, compress, summarize, merge, split, or copy its contents into the Corpus candidate.
-- The selected source must be one of the declared input.files. The title may organize or rename the file; it must not describe new content.
-- Product and About You help judge eligibility, but they are not automatically Knowledge files. System instructions and Skills may still translate their supported judgments into behavior.`;
 
 const CORPUS_COMPILER_PRINCIPLES = `Compiler principles:
 - Build a durable judgment system for new cases, not a polished answer to one case.
@@ -185,7 +169,7 @@ const CORPUS_DENSITY_BAR = `Operational density bar:
 - The Corpus is an operating manual for a downstream Agent, not a table of contents, catalog card, or executive summary.
 - A useful Skill instruction teaches a recurring procedure. It should include trigger conditions, required inputs, inspection steps, decision criteria, output structure, quality bar, exception handling, and when to ask the buyer or refuse.
 - A useful Reference carries source-grounded detail that would be too local for system_instructions but still changes behavior: method notes, style constraints, examples, counterexamples, edge cases, or few-shot patterns.
-- Do not create one-sentence Skills or one-sentence References. If a distinction is not deep enough to support a reusable procedure, merge it into a richer Skill, route it to system_instructions, or leave it as Knowledge.
+- Do not create one-sentence Skills or one-sentence References. If a distinction is not deep enough to support a reusable procedure, merge it into a richer Skill, or route it to system_instructions.
 - Do not pad. More text is valuable only when it preserves source-supported judgments, trade-offs, examples, failure modes, and product-specific operating detail.
 - For any non-trivial source packet, a candidate whose Skills read like short labels or whose References are only brief reminders is incomplete even if it is faithful.`;
 
@@ -203,8 +187,6 @@ ${CORPUS_DENSITY_BAR}
 
 ${CORPUS_LAYERING}
 
-${CORPUS_SOURCE_BOUNDARY}
-
 The relationship between the inputs matters:
 - Files tell you what the Creator has actually said, done, taught, built, or repeatedly chosen.
 - About You's question-and-answer pairs tell you which ambiguity or judgment boundary was surfaced and how the Creator answered it: formation, genealogy, influences and their effect, worldview, persona, thinking, values, and trade-offs.
@@ -216,16 +198,15 @@ Work in this order:
 1. Read the Product, every declared source file, and every About You question-and-answer pair.
 2. Separate observed material, Creator-confirmed context, reasonable interpretation, and unresolved uncertainty.
 3. Identify the Creator's reusable distinctions and the Product decisions those distinctions should affect.
-4. Route each supported distinction to the narrowest useful Corpus layer. For Knowledge, this means selecting source files only; it does not mean writing Knowledge prose.
-5. Write a fresh, complete candidate for system_instructions and skills, and a source-selection manifest for knowledge.
-6. Re-read the candidate against the Product and the source packet. Check that it preserves qualifiers, exceptions, boundaries, and the Creator's actual trade-offs, and that every selected Knowledge source is eligible.
+4. Route each supported distinction to the narrowest useful Corpus layer.
+5. Write a fresh, complete candidate for system_instructions and skills.
+6. Re-read the candidate against the Product and the source packet. Check that it preserves qualifiers, exceptions, boundaries, and the Creator's actual trade-offs.
 
-Return the complete corpus candidate as JSON matching the output schema. The candidate has three parts:
+Return the complete corpus candidate as JSON matching the output schema. The candidate has two parts:
 - system_instructions: the stable operating principles the downstream agent should follow;
-- skills: reusable methods, each with a clear use condition, instruction, and source-grounded references;
-- knowledge: the selected source files, each represented by its input path and an organizing title.
+- skills: reusable methods, each with a clear use condition, instruction, and source-grounded references.
 
-Preserve the Creator's actual judgment and examples in system_instructions and skills without copying their source wording. For knowledge, return only whole-file selections from input.files; do not return file contents, summaries, or generated prose. Do not invent facts, answer unanswered About You questions, add evaluation cases, add runtime or tool configuration, or add audit metadata. When revising, produce a complete replacement, not a patch. If the sources do not support a conclusion, preserve the uncertainty instead of manufacturing completeness.`;
+Preserve the Creator's actual judgment and examples in system_instructions and skills without copying their source wording. Do not invent facts, answer unanswered About You questions, add evaluation cases, add runtime or tool configuration, or add audit metadata. When revising, produce a complete replacement, not a patch. If the sources do not support a conclusion, preserve the uncertainty instead of manufacturing completeness.`;
 
 export const CORPUS_CRITIC_SYSTEM_PROMPT = `You are the Corpus Critic: the long-term editor responsible for deciding whether the compiled judgment can serve the Product beyond the examples that produced it.
 
@@ -241,8 +222,6 @@ ${CORPUS_DENSITY_BAR}
 
 ${CORPUS_LAYERING}
 
-${CORPUS_SOURCE_BOUNDARY}
-
 Read candidate_ref first, then read the Product, every About You question-and-answer pair, and every declared source attachment. A source or reference that cannot be read makes the candidate incomplete; do not silently judge around missing evidence.
 
 Judge the candidate on these questions:
@@ -251,10 +230,8 @@ Judge the candidate on these questions:
 - Product usefulness: Would these instructions help the Agent perform the specified customer job and produce something usable, publishable, sellable, or otherwise worth the Product's promise?
 - Operational density: Are system_instructions, Skills, and References detailed enough to change behavior in new cases, or are they merely short labels, slogans, summaries, or reminders?
 - Durability: Does the candidate teach distinctions that transfer to new cases, or does it overfit one source, one question, or one observed failure?
-- Layering: Is each item in the narrowest useful layer, with global rules global, reusable procedures in Skills, local detail in References, and long-tail information in Knowledge?
-- Knowledge selection: Does every selected source come from input.files, have clear authority, remain stable and relevant to the Product, and deserve to be opened as a whole reference? Are temporary, duplicate, superseded, generic, or unsupported files excluded?
-- Knowledge integrity: Is each selected file represented only by its source path and organizing title, with no copied, compressed, summarized, or invented content in the candidate?
-- Integrity: Is the synthesis original and epistemically honest, with no unsupported Creator claims, hidden mandatory behavior in Knowledge, or invented facts?
+- Layering: Is each item in the narrowest useful layer, with global rules global, reusable procedures in Skills, and local detail in References?
+- Integrity: Is the synthesis original and epistemically honest, with no unsupported Creator claims, or invented facts?
 - Preservation: On revision, are still-valid capabilities retained, including their qualifiers and reasons, rather than being shortened away?
 
 Return exactly one JSON verdict:

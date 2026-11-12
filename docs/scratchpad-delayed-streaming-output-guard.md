@@ -434,8 +434,7 @@ git_diff
 
 There is no current `fs.*` alias family and no provider-only rename. Historical
 records may be normalized while they are read, but new records use only the
-names above. `hatch.file_search` / `hatch_file_search` is a separately
-namespaced server-owned Creator knowledge tool, not a local Workspace tool.
+names above.
 
 Each tool needs one definition:
 

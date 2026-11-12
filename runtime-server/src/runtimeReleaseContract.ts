@@ -33,6 +33,7 @@ export const runtimeCorpusManifestSchema = z.object({
       }).strict()
     }).strict())
   }).strict()),
+  // Retired: no longer used, still accepted and emitted as [] so every Registry/Runtime version reads the same manifest.
   knowledge: z.array(z.object({
     id: z.string().min(1),
     title: z.string().min(1),
@@ -46,20 +47,3 @@ export const runtimeCorpusManifestSchema = z.object({
 }).strict();
 
 export type RuntimeCorpusManifest = z.infer<typeof runtimeCorpusManifestSchema>;
-
-export type RuntimeKnowledgeDocument = {
-  id: string;
-  title: string;
-  path: string;
-  content: string;
-};
-
-export interface RuntimeKnowledgeIndexer {
-  stageRuntimeDocuments(input: {
-    creatorId: string;
-    productId: string;
-    corpusDigest: string;
-    documents: RuntimeKnowledgeDocument[];
-    signal?: AbortSignal;
-  }): Promise<void>;
-}

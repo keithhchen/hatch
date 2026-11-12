@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { ServerToolExecutor } from "./serverTools.js";
-import type { KnowledgeProvider } from "./agentCorpus.js";
 import type { RuntimeCreatorTool } from "./creatorTools.js";
 
 const originalFetch = globalThis.fetch;
@@ -109,34 +108,7 @@ test("Runtime-owned network tools honor run cancellation and a hard timeout", as
   assert.ok(Date.now() - started < 500);
 });
 
-test("Knowledge and Creator tools receive the bounded owning-run signal", async () => {
-  let knowledgeSignal: AbortSignal | undefined;
-  const knowledge: KnowledgeProvider = {
-    search: async (request) => {
-      knowledgeSignal = request.signal;
-      return new Promise((_resolve, reject) => {
-        request.signal?.addEventListener("abort", () => reject(request.signal?.reason), { once: true });
-      });
-    }
-  };
-  const knowledgeTools = new ServerToolExecutor(20);
-  knowledgeTools.setKnowledgeScope({
-    provider: knowledge,
-    creatorId: "creator",
-    agentId: "agent",
-    corpusDigest: `sha256:${"1".repeat(64)}`
-  });
-  const keepAlive = setTimeout(() => undefined, 500);
-  try {
-    await assert.rejects(
-      knowledgeTools.execute("hatch.file_search", { query: "bounded", limit: 1 }),
-      (error: Error) => /timeout/i.test(error.name) || /timeout/i.test(error.message)
-    );
-  } finally {
-    clearTimeout(keepAlive);
-  }
-  assert.equal(knowledgeSignal?.aborted, true);
-
+test("Creator tools receive the bounded owning-run signal", async () => {
   let creatorSignal: AbortSignal | undefined;
   const creatorTools = new ServerToolExecutor(10_000);
   creatorTools.setResolvedCreatorTools([{
@@ -153,35 +125,6 @@ test("Knowledge and Creator tools receive the bounded owning-run signal", async 
   controller.abort(new Error("creator run cancelled"));
   await assert.rejects(pending, /creator run cancelled/);
   assert.equal(creatorSignal?.aborted, true);
-});
-
-test("Knowledge search hides internal corpus paths from the model", async () => {
-  const knowledgeTools = new ServerToolExecutor();
-  knowledgeTools.setKnowledgeScope({
-    provider: {
-      search: async () => [{
-        id: "hit-1",
-        text: "A retrieved knowledge excerpt.",
-        score: 0.9,
-        document_id: "doc-1",
-        source_path: "knowledge/private.md",
-        heading: "Private heading",
-        source: "knowledge/private.md · Private heading"
-      }]
-    },
-    creatorId: "creator",
-    agentId: "agent",
-    corpusDigest: `sha256:${"1".repeat(64)}`
-  });
-
-  const result = await knowledgeTools.execute("hatch.file_search", { query: "excerpt", limit: 1 });
-  assert.deepEqual(result, {
-    query: "excerpt",
-    hits: [{
-      text: "A retrieved knowledge excerpt.",
-      score: 0.9
-    }]
-  });
 });
 
 test("Creator tool results are rejected before a multi-megabyte value reaches the model", async () => {

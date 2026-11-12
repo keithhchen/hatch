@@ -17,7 +17,7 @@ test("Generation publishes a direct definition without a Corpus Node and Runtime
     HATCH_REGISTRY_STATE_PATH: path.join(root, "registry.json"),
     HATCH_CREATOR_FACTORY_ROOT: path.join(root, "factory"),
     HATCH_AUTH_SIGNING_SECRET: "unit-test-secret", HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN: "unit-test-runtime",
-    HATCH_QDRANT_URL: "", DASHSCOPE_API_KEY: "",
+    DASHSCOPE_API_KEY: "",
   });
   try {
     const address = server.server.address(); assert.ok(address && typeof address !== "string");
@@ -35,7 +35,7 @@ test("Generation publishes a direct definition without a Corpus Node and Runtime
     let productId = product.product.product_id;
     await assert.rejects(request(`/v1/creator/products/${productId}/registry`, {}), /422.*corpus_required/);
     const system = "Review the customer's evidence. Ask for missing facts. Never invent citations.\n";
-    const corpus = { system_instructions: system, skills: [{ id: "review", title: "Evidence review", when_to_use: "Review an argument", instruction: "Read references/evidence.md and explain which claims the evidence supports.", references: [{ id: "evidence", kind: "method", content: "Check whether evidence supports the exact claim." }] }], knowledge: [], tools: [] };
+    const corpus = { system_instructions: system, skills: [{ id: "review", title: "Evidence review", when_to_use: "Review an argument", instruction: "Read references/evidence.md and explain which claims the evidence supports.", references: [{ id: "evidence", kind: "method", content: "Check whether evidence supports the exact claim." }] }], tools: [] };
     const receipt = await request(`/v1/creator/products/${productId}/registry`, { corpus });
     assert.equal(receipt.status, "published");
     assert.equal(receipt.execution_id, undefined);
@@ -46,7 +46,6 @@ test("Generation publishes a direct definition without a Corpus Node and Runtime
     assert.equal(await readFile(path.join(resolved.root, "instructions/system.md"), "utf8"), system);
     const retry = await request(`/v1/creator/products/${productId}/registry`, { corpus });
     assert.equal(retry.release_digest, receipt.release_digest);
-    await assert.rejects(request(`/v1/creator/products/${productId}/registry`, { corpus: { ...corpus, knowledge: [{ source: `creator-products/${auth.account.id}/${productId}/files/missing/projection.md`, title: "Unowned source" }] } }), /422/);
     assert.equal((await resolver.resolve(auth.account.id, productId, receipt.corpus_digest)).corpus.skills[0]?.id, "review");
   } finally { await server.close(); await rm(root, { recursive: true, force: true }); }
 });

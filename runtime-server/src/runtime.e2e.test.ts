@@ -1981,15 +1981,10 @@ test("tool registry owns model tool dispatch locality and event-name mapping", (
   assert.ok(shellSpec);
   assert.ok("justification" in shellSpec.properties);
 
-  const configuredWithoutKnowledge = modelToolSpecsForRun([], { hasMcpServers: false, hasKnowledge: false });
-  assert.ok(configuredWithoutKnowledge.some((tool) => tool.name === "hatch_web_search"));
-  assert.ok(!configuredWithoutKnowledge.some((tool) => tool.name === "hatch_file_search"));
-  const configuredWithKnowledge = modelToolSpecsForRun([], { hasMcpServers: false, hasKnowledge: true });
-  assert.ok(configuredWithKnowledge.some((tool) => tool.name === "hatch_file_search"));
-  const knowledgeSearch = requireModelToolDispatch("hatch_file_search");
-  assert.equal(knowledgeSearch.target, "server");
-  assert.equal(knowledgeSearch.runtimeName, "hatch.file_search");
-  assert.equal(knowledgeSearch.eventName, "hatch.file_search");
+  const configured = modelToolSpecsForRun([], { hasMcpServers: false });
+  assert.ok(configured.some((tool) => tool.name === "hatch_web_search"));
+  assert.ok(!configured.some((tool) => tool.name === "hatch_file_search"));
+  assert.throws(() => requireModelToolDispatch("hatch_file_search"));
 });
 
 

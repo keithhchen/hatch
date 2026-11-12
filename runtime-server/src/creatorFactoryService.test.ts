@@ -67,7 +67,6 @@ test("Creator Factory service persists complete product metadata and canonical d
   assert.deepEqual(created.run.product, product);
   assert.deepEqual(created.run.declaredToolIds, [
     "hatch.web_search",
-    "hatch.file_search",
     ...tools.map((tool) => tool.id)
   ]);
 
@@ -75,7 +74,6 @@ test("Creator Factory service persists complete product metadata and canonical d
   assert.deepEqual(stored?.input.product, product);
   assert.deepEqual(stored?.input.tools, [
     { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
-    { id: "hatch.file_search", kind: "hatch_builtin", capability: "file_search" },
     ...tools
   ]);
 
@@ -87,8 +85,7 @@ test("Creator Factory service persists complete product metadata and canonical d
   assert.deepEqual(
     (await repository.getForCreator("11111111-1111-4111-8111-111111111111", defaulted.run.id))?.input.tools,
     [
-      { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
-      { id: "hatch.file_search", kind: "hatch_builtin", capability: "file_search" }
+      { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }
     ]
   );
 });
@@ -138,7 +135,7 @@ test("Creator Factory service rejects non-canonical or secret-bearing tool decla
     },
     {
       label: "wrong built-in capability",
-      tools: [{ id: "hatch.web_search", kind: "hatch_builtin", capability: "file_search" }],
+      tools: [{ id: "hatch.web_search", kind: "hatch_builtin", capability: "other" }],
       error: /canonical hatch\.web_search/
     },
     {

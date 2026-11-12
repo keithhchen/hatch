@@ -80,7 +80,6 @@ export function createHatchCandidateRuntimeExecutor(): HatchCandidateExecutor {
           allowedExternalTools: [],
           externalToolDefinitions: [],
           allowSkillRun: false,
-          knowledgeAvailable: false,
           agentSystemPrompt: execution.systemInstructions
         })) {
           if (event.type === "assistant.delta" && event.delta.kind === "text") chunks.push(event.delta.content);

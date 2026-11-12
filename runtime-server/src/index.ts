@@ -69,8 +69,6 @@ import { materializeAgentCorpus } from "./agentCorpusMaterialization.js";
 import { creatorToolControlPlaneFromEnvironment, resolveCreatorTools, type CreatorToolControlPlane, type RuntimeCreatorTool } from "./creatorTools.js";
 import {
   AgentCorpusResolver as FilesystemAgentCorpusResolver,
-  createKnowledgeProvider,
-  knowledgeProviderConfigured,
   type AgentCorpus,
   type AgentCorpusResolverLike
 } from "./agentCorpus.js";
@@ -796,12 +794,6 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       try {
         const serverTools = new ServerToolExecutor(serverToolTimeoutMs);
         if (binding.agentCorpus && binding.agentCorpusRoot) {
-          serverTools.setKnowledgeScope({
-            provider: createKnowledgeProvider(binding.agentCorpusRoot, binding.agentCorpus, binding.corpusDigest),
-            creatorId: binding.creatorId,
-            agentId: binding.productId,
-            corpusDigest: binding.corpusDigest
-          });
           serverTools.setResolvedCreatorTools(binding.creatorTools ?? await resolveCreatorTools(
             options.creatorToolControlPlane,
             binding.creatorId,
