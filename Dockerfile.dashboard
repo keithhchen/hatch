@@ -1,3 +1,8 @@
+# The previously published Dashboard image (CI passes it; `scratch` when there is none). Its assets stay servable so a tab
+# opened before a deploy, or a request that lands on the old container during a rolling deploy, still finds its chunks.
+ARG PREVIOUS_DASHBOARD_IMAGE=scratch
+FROM ${PREVIOUS_DASHBOARD_IMAGE} AS previous
+
 FROM node:22-slim AS build
 
 # sentry-cli (source map upload) uses the system trust store, which the slim image does not ship.
@@ -36,6 +41,21 @@ RUN mkdir -p dist/downloads \
   && npm pack --silent --pack-destination /workspace/creator-dashboard/dist/downloads \
   && mv /workspace/creator-dashboard/dist/downloads/*.tgz /workspace/creator-dashboard/dist/downloads/hatch-cli.tgz
 
+# Add only the previous release's own assets (never overwrite a new file, never the releases before it) to this release.
+FROM build AS release
+WORKDIR /workspace/creator-dashboard
+RUN --mount=type=bind,from=previous,source=/,target=/previous \
+  (cd dist/assets && find . -type f | sort) > own-assets.txt \
+  && prev=/previous/app/creator-dashboard \
+  && if [ ! -d "$prev/dist/assets" ]; then echo "No previous Dashboard assets to carry"; \
+     else \
+       list="$prev/own-assets.txt"; \
+       if [ ! -f "$list" ]; then list=/tmp/previous-assets.txt; (cd "$prev/dist/assets" && find . -type f | sort) > "$list"; fi; \
+       grep -vxFf own-assets.txt "$list" > /tmp/carry.txt || true; \
+       (cd "$prev/dist/assets" && xargs -a /tmp/carry.txt -r cp -a --parents -t /workspace/creator-dashboard/dist/assets); \
+       echo "Carried $(wc -l < /tmp/carry.txt) previous assets"; \
+     fi
+
 FROM node:22-slim AS production
 
 ENV NODE_ENV=production
@@ -51,7 +71,8 @@ COPY --from=build /workspace/creator-dashboard/*.mjs ./
 # The production server imports its own .mjs modules and serves the bundled
 # browser output. Keep tests, stories, and client source out of the runtime
 # image; they are built and verified in the Web CI job above.
-COPY --from=build /workspace/creator-dashboard/dist ./dist
+COPY --from=release /workspace/creator-dashboard/dist ./dist
+COPY --from=release /workspace/creator-dashboard/own-assets.txt ./own-assets.txt
 COPY --from=build /workspace/creator-dashboard/public ./public
 COPY packages/commerce /app/packages/commerce
 

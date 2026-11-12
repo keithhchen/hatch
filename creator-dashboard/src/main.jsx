@@ -10,19 +10,19 @@ import { WebBrand } from "./WebBrand.jsx";
 import "./styles.css";
 import "./webTheme.css";
 import { captureRenderError, initSentry } from "./sentry.js";
-import { reloadOnStaleBuild } from "./staleBuild.js";
+import { lazyWithReload, reloadOnStaleBuild } from "./staleBuild.js";
 
 initSentry(import.meta.env);
 reloadOnStaleBuild();
 
 const CREATOR_ROOT = "/studio";
-const BuyerPortalV2 = React.lazy(() => import("./BuyerPortalV2.jsx").then(({ BuyerPortalV2: Component }) => ({ default: Component })));
-const CreatorPortalV2 = React.lazy(() => import("./CreatorPortalV2.jsx").then(({ CreatorPortalV2: Component }) => ({ default: Component })));
-const DownloadPage = React.lazy(() => import("./DownloadPage.jsx").then(({ DownloadPage: Component }) => ({ default: Component })));
-const DevelopersPage = React.lazy(() => import("./DevelopersPage.jsx"));
-const WebPage = React.lazy(() => import("./web/WebPage.jsx"));
-const WebChatPage = React.lazy(() => import("./WebChatPage.jsx"));
-const DesktopSignInPage = React.lazy(() => import("./DesktopSignInPage.jsx"));
+const BuyerPortalV2 = lazyWithReload(() => import("./BuyerPortalV2.jsx").then(({ BuyerPortalV2: Component }) => ({ default: Component })));
+const CreatorPortalV2 = lazyWithReload(() => import("./CreatorPortalV2.jsx").then(({ CreatorPortalV2: Component }) => ({ default: Component })));
+const DownloadPage = lazyWithReload(() => import("./DownloadPage.jsx").then(({ DownloadPage: Component }) => ({ default: Component })));
+const DevelopersPage = lazyWithReload(() => import("./DevelopersPage.jsx"));
+const WebPage = lazyWithReload(() => import("./web/WebPage.jsx"));
+const WebChatPage = lazyWithReload(() => import("./WebChatPage.jsx"));
+const DesktopSignInPage = lazyWithReload(() => import("./DesktopSignInPage.jsx"));
 
 class AppErrorBoundary extends React.Component {
   constructor(props) {

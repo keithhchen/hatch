@@ -1,7 +1,7 @@
-import { addBreadcrumb, browserTracingIntegration, captureException, init, withScope } from "@sentry/react";
+import { addBreadcrumb, browserTracingIntegration, captureException, captureMessage, init, withScope } from "@sentry/react";
 
 // Named imports, not `import *`: a namespace object keeps Replay and Feedback in the entry bundle.
-const Sentry = { addBreadcrumb, browserTracingIntegration, captureException, init, withScope };
+const Sentry = { addBreadcrumb, browserTracingIntegration, captureException, captureMessage, init, withScope };
 
 let active = null;
 
@@ -40,4 +40,9 @@ export function reportRequestFailure(error, { method, path, capture }) {
 
 export function captureRenderError(error, details) {
   active?.captureException(error, { contexts: { react: { componentStack: details?.componentStack } } });
+}
+
+// A tab on an older build hit a missing chunk; reported so deploy-time recovery frequency is visible.
+export function reportStaleBuild({ build, reloading }) {
+  active?.captureMessage("Stale build chunk failed to load", { level: "warning", tags: { stale_build_reloading: String(reloading) }, extra: { build } });
 }
