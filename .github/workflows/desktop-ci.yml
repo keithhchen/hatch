@@ -45,6 +45,11 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same pull request replaces the older run. Master runs are left alone: they publish releases.
+concurrency:
+  group: desktop-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   desktop-renderer:
     name: Desktop renderer tests and web build
