@@ -1,3 +1,4 @@
+import { ZodError } from "zod";
 import { BriefValidationError } from "../brief.js";
 import { ChatError } from "../chat/principal.js";
 import { ConversationRepositoryError } from "../conversationRepository.js";
@@ -13,7 +14,7 @@ const DENIED = new Set(["authentication_required", "auth_invalid", "entitlement_
 /** The status of a repository refusal on the Conversation HTTP routes. */
 export const repositoryStatus = (code: string): number =>
   code === "conversation_not_found" || code === "run_not_found" ? 404
-    : code === "conversation_busy" || code === "version_conflict" ? 409
+    : ["conversation_busy", "version_conflict", "conversation_archived", "client_message_conflict", "run_not_retryable"].includes(code) ? 409
       : code === "conversation_binding_mismatch" ? 403 : 400;
 
 /** The status of a repository refusal raised while a message or retry is admitted (ChatService). */
@@ -34,6 +35,7 @@ export function toProblem(error: unknown): Problem {
     return { status: 500, code: "internal_error", message: "The Runtime could not complete this request.", internal: true };
   }
   if (error instanceof ConversationRepositoryError) return { status: repositoryStatus(error.code), code: error.code, message: error.message };
+  if (error instanceof ZodError) return { status: 400, code: "invalid_request", message: error.issues.map((issue) => `${issue.path.join(".") || "body"}: ${issue.message}`).join("; ") };
   if (error instanceof RangeError) return { status: 400, code: "invalid_request", message: error.message };
   if (error && typeof error === "object" && "code" in error && error.code === "history_cursor_invalid") {
     return { status: 400, code: "history_cursor_invalid", message: "The history cursor does not belong to this conversation or is invalid." };

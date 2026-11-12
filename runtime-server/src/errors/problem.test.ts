@@ -16,12 +16,12 @@ test("typed errors keep their own status and code", () => {
   assert.deepEqual(shape(new BriefValidationError("brief_spec_invalid", "bad")), [422, "brief_spec_invalid"]);
 });
 
-test("pinned: a raw repository refusal on the HTTP routes", () => {
+test("a raw repository refusal on the HTTP routes", () => {
   const status = (code: ConstructorParameters<typeof ConversationRepositoryError>[0]) => toProblem(new ConversationRepositoryError(code, "m")).status;
   for (const code of ["conversation_not_found", "run_not_found"] as const) assert.equal(status(code), 404);
-  for (const code of ["conversation_busy", "version_conflict"] as const) assert.equal(status(code), 409);
+  for (const code of ["conversation_busy", "version_conflict", "conversation_archived", "client_message_conflict", "run_not_retryable"] as const) assert.equal(status(code), 409);
   assert.equal(status("conversation_binding_mismatch"), 403);
-  for (const code of ["conversation_archived", "client_message_conflict", "run_not_retryable", "run_id_conflict", "submission_not_accepted"] as const) assert.equal(status(code), 400);
+  for (const code of ["run_id_conflict", "submission_not_accepted"] as const) assert.equal(status(code), 400);
 });
 
 test("pinned: a refusal while a message or retry is admitted", () => {
@@ -40,8 +40,7 @@ test("entitlement failures say 403 for access and 503 for an unavailable verifie
 test("malformed requests", () => {
   assert.deepEqual(shape(new RangeError("limit out of range")), [400, "invalid_request"]);
   assert.deepEqual(shape(Object.assign(new Error("x"), { code: "history_cursor_invalid" })), [400, "history_cursor_invalid"]);
-  // Pinned: a schema failure is a 500, as it is today.
-  assert.deepEqual(shape(z.object({ run_id: z.string() }).safeParse({}).error), [500, "conversation_request_failed"]);
+  assert.deepEqual(shape(z.object({ run_id: z.string() }).safeParse({}).error), [400, "invalid_request"]);
 });
 
 test("an unknown error is a generic 500 that never carries its text", () => {
