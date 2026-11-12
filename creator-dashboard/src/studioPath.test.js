@@ -50,11 +50,16 @@ test("Overview is a top tab, Advanced is a separate rail control, Start Agent an
   assert.doesNotMatch(factory.match(/<nav className="factory-rail"[^]*?<\/nav>/)[0], /factory-advanced/);
 });
 
-test("Publish header offers Try the chat beside View page, same live condition, in en/zh/ja", async () => {
+test("Agent header has one Product links dropdown: copy, open page, open chat; en/zh/ja", async () => {
   const { readFile } = await import("node:fs/promises");
   const source = await readFile(new URL("./studioAgentWorkspace.jsx", import.meta.url), "utf8");
   const copy = await readFile(new URL("./studioShellCopy.js", import.meta.url), "utf8");
-  assert.match(source, /return href \? <div className="sx-agent__actions">[^]*sxOpenPublic[^]*sxTryChat/);
+  assert.match(source, /return href \? <div className="sx-agent__actions">[^]*<DropdownMenu[^]*sxCopyProductLink[^]*sxOpenProductPage[^]*sxTryProductChat/);
   assert.match(source, /WebChatRoute\.productPath/);
-  assert.equal(copy.match(/sxTryChat: "(Try the chat|体验产品聊天|チャットを試す)"/g).length, 3);
+  assert.match(source, /copyLink\(chatPathOf\(product\)\)/);
+  assert.match(source, /copy\(url\)\.catch\(\(\) => setFailed\(true\)\)/);
+  assert.doesNotMatch(source, /sxOpenPublic|sxTryChat|variant="secondary" leading=\{<Copy/);
+  for (const key of ["sxProductLinks", "sxCopyProductLink", "sxOpenProductPage", "sxTryProductChat", "sxCopyChatLink"]) assert.equal(copy.match(new RegExp(`${key}: "`, "g")).length, 3);
+  assert.match(copy, /sxProductLinks: "查看产品链接"/);
+  assert.match(copy, /sxProductLinks: "プロダクトのリンク"/);
 });

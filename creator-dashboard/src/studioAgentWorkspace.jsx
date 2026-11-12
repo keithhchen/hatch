@@ -2,8 +2,8 @@
 // Overview, Build (Factory path) and Publish. Studio shows no version history.
 // Every control calls an existing Creator endpoint; nothing is simulated.
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Copy, ExternalLink, Plus, Trash2 } from "lucide-react";
-import { Button, Checkbox, FormField, Input, Textarea } from "@hatch/ui";
+import { ArrowLeft, ChevronDown, Copy, ExternalLink, Plus, Trash2 } from "lucide-react";
+import { Button, Checkbox, DropdownMenu, FormField, Input, Textarea } from "@hatch/ui";
 import { FirstBuildIntro } from "./FirstBuildDialog.jsx";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
 import { creatorFactoryPath, creatorProductPath } from "./creatorRoutes.js";
@@ -60,11 +60,22 @@ const chatPathOf = (product) => WebChatRoute.productPath(idOf(product, "product"
 
 function AgentHeaderActions({ product, live, t }) {
   const { copied, copy } = useCopy();
+  const [failed, setFailed] = useState(false);
   const href = live ? safePublicUrl(publicPathOf(product)) : null;
+  const copyLink = (url) => () => { setFailed(false); copy(url).catch(() => setFailed(true)); };
+  const open = (url) => window.open(url, "_blank", "noopener,noreferrer");
   return href ? <div className="sx-agent__actions">
-    <Button variant="secondary" type="button" leading={<Copy aria-hidden="true" />} onClick={() => void copy(href)}>{copied ? t("copied") : t("copyLink")}</Button>
-    <Button asChild variant="secondary" trailing={<ExternalLink aria-hidden="true" />}><a href={href} target="_blank" rel="noreferrer">{t("sxOpenPublic")}</a></Button>
-    <Button asChild variant="secondary" trailing={<ExternalLink aria-hidden="true" />}><a href={chatPathOf(product)} target="_blank" rel="noreferrer">{t("sxTryChat")}</a></Button>
+    <DropdownMenu
+      label={t("sxProductLinks")}
+      trigger={<Button variant="secondary" type="button" trailing={<ChevronDown aria-hidden="true" />}>{copied ? t("copied") : t("sxProductLinks")}</Button>}
+      items={[
+        { value: "copy", label: t("sxCopyProductLink"), icon: <Copy aria-hidden="true" />, onSelect: copyLink(href) },
+        { value: "page", label: t("sxOpenProductPage"), icon: <ExternalLink aria-hidden="true" />, onSelect: () => open(href) },
+        { value: "chat", label: t("sxTryProductChat"), icon: <ExternalLink aria-hidden="true" />, onSelect: () => open(chatPathOf(product)) },
+        { value: "copy-chat", label: t("sxCopyChatLink"), icon: <Copy aria-hidden="true" />, onSelect: copyLink(chatPathOf(product)) }
+      ]}
+    />
+    {failed ? <InlineError>{t("copyFailed")}</InlineError> : null}
   </div> : null;
 }
 
