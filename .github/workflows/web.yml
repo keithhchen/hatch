@@ -180,14 +180,33 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/setup-buildx-action@v3
+      # The image carries the previous release's /assets so tabs opened before a deploy, and requests that land on the old
+      # container while a rolling deploy overlaps, still find their chunks. The previous release is the last published `master` tag.
+      - name: Resolve previous Dashboard image
+        id: previous
+        run: |
+          previous="${IMAGE%:*}:master"
+          echo "tag=$previous" >> "$GITHUB_OUTPUT"
+          if docker buildx imagetools inspect "$previous" >/dev/null 2>&1; then
+            echo "Carrying assets from $previous"
+            echo "ref=$previous" >> "$GITHUB_OUTPUT"
+          else
+            echo "No previous Dashboard image ($previous); building without carried assets"
+            echo "ref=scratch" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          IMAGE: ${{ steps.image.outputs.ref }}
       - name: Build and push Dashboard
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.dashboard
           push: true
-          tags: ${{ steps.image.outputs.ref }}
+          tags: |
+            ${{ steps.image.outputs.ref }}
+            ${{ steps.previous.outputs.tag }}
           build-args: |
+            PREVIOUS_DASHBOARD_IMAGE=${{ steps.previous.outputs.ref }}
             VITE_HATCH_DESKTOP_DOWNLOAD_BASE_URL=${{ vars.HATCH_DESKTOP_DOWNLOAD_BASE_URL }}
             VITE_HATCH_WEB_MEDIA_BASE_URL=${{ vars.HATCH_OSS_PUBLIC_BASE_URL }}/desktop/web/${{ github.sha }}
             VITE_SENTRY_DSN=${{ secrets.HATCH_SENTRY_WEB_DSN }}

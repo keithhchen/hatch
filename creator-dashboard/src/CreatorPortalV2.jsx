@@ -17,13 +17,14 @@ import {
   StepProgress,
 } from "./studioShellKit.jsx";
 import "./creatorPortalV2.css";
+import { lazyWithReload } from "./staleBuild.js";
 
-const FactoryAgents = React.lazy(() => import("./FactoryAgents.jsx").then(({ FactoryAgents: Component }) => ({ default: Component })));
-const CreatorProductFiles = React.lazy(() => import("./CreatorSourceLibrary.jsx").then(({ CreatorProductFiles: Component }) => ({ default: Component })));
-const SettingsPage = React.lazy(() => import("./SettingsPage.jsx").then(({ SettingsPage: Component }) => ({ default: Component })));
-const StudioAssistant = React.lazy(() => import("./StudioAssistant.jsx").then(({ StudioAssistant: Component }) => ({ default: Component })));
-const StudioAgentWorkspace = React.lazy(() => import("./studioAgentWorkspace.jsx").then(({ StudioAgentWorkspace: Component }) => ({ default: Component })));
-const opsPage = (name) => React.lazy(() => import("./studioOps.jsx").then((module) => ({ default: module[name] })));
+const FactoryAgents = lazyWithReload(() => import("./FactoryAgents.jsx").then(({ FactoryAgents: Component }) => ({ default: Component })));
+const CreatorProductFiles = lazyWithReload(() => import("./CreatorSourceLibrary.jsx").then(({ CreatorProductFiles: Component }) => ({ default: Component })));
+const SettingsPage = lazyWithReload(() => import("./SettingsPage.jsx").then(({ SettingsPage: Component }) => ({ default: Component })));
+const StudioAssistant = lazyWithReload(() => import("./StudioAssistant.jsx").then(({ StudioAssistant: Component }) => ({ default: Component })));
+const StudioAgentWorkspace = lazyWithReload(() => import("./studioAgentWorkspace.jsx").then(({ StudioAgentWorkspace: Component }) => ({ default: Component })));
+const opsPage = (name) => lazyWithReload(() => import("./studioOps.jsx").then((module) => ({ default: module[name] })));
 const StudioOrdersPage = opsPage("StudioOrdersPage");
 const StudioOrderDetailPage = opsPage("StudioOrderDetailPage");
 const StudioEarningsPage = opsPage("StudioEarningsPage");
