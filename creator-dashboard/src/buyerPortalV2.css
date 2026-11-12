@@ -184,6 +184,9 @@
 .buyer-v2__auth-form { display: grid; gap: 18px; margin-top: 28px; padding: 28px; }
 .buyer-v2__auth-form .hui-input { min-height: 50px; border-radius: 14px; }
 .buyer-v2__button--wide { width: 100%; min-height: 52px; justify-content: center; font-size: var(--hatch-type-body); }
+.buyer-v2__platform-logins { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+.buyer-v2__platform-login > span { display: inline-flex; align-items: center; gap: 10px; }
+.buyer-v2__platform-glyph { flex: none; }
 .buyer-v2__field { display: grid; gap: 8px; }
 .buyer-v2__field > span { color: var(--buyer-body); font-size: var(--hatch-type-ui); font-weight: var(--hatch-weight-strong); }
 .buyer-v2__field > small { color: var(--buyer-muted); font-size: var(--hatch-type-meta); }

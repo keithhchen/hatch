@@ -661,10 +661,22 @@ function SubscriptionsPage({ navigate }) {
 
 /** How each platform sign-in reads; the Registry decides which of them are offered. */
 const PLATFORM_LOGINS = {
-  telegram: { action: "Log in with Telegram", failed: "Telegram login failed. Try again." },
-  line: { action: "Log in with LINE", failed: "LINE login failed. Try again." },
-  discord: { action: "Log in with Discord", failed: "Discord login failed. Try again." },
+  telegram: { action: "Log in with Telegram", label: "Telegram", failed: "Telegram login failed. Try again." },
+  line: { action: "Log in with LINE", label: "LINE", failed: "LINE login failed. Try again." },
+  discord: { action: "Log in with Discord", label: "Discord", failed: "Discord login failed. Try again." },
 };
+
+/** Each platform's mark (Simple Icons, CC0), drawn in the platform's own color. */
+const PLATFORM_GLYPHS = {
+  telegram: { color: "#26A5E4", path: "M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" },
+  discord: { color: "#5865F2", path: "M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z" },
+  line: { color: "#00C300", path: "M19.365 9.863c.349 0 .63.285.63.631 0 .345-.281.63-.63.63H17.61v1.125h1.755c.349 0 .63.283.63.63 0 .344-.281.629-.63.629h-2.386c-.345 0-.627-.285-.627-.629V8.108c0-.345.282-.63.63-.63h2.386c.346 0 .627.285.627.63 0 .349-.281.63-.63.63H17.61v1.125h1.755zm-3.855 3.016c0 .27-.174.51-.432.596-.064.021-.133.031-.199.031-.211 0-.391-.09-.51-.25l-2.443-3.317v2.94c0 .344-.279.629-.631.629-.346 0-.626-.285-.626-.629V8.108c0-.27.173-.51.43-.595.06-.023.136-.033.194-.033.195 0 .375.104.495.254l2.462 3.33V8.108c0-.345.282-.63.63-.63.345 0 .63.285.63.63v4.771zm-5.741 0c0 .344-.282.629-.631.629-.345 0-.627-.285-.627-.629V8.108c0-.345.282-.63.63-.63.346 0 .628.285.628.63v4.771zm-2.466.629H4.917c-.345 0-.63-.285-.63-.629V8.108c0-.345.285-.63.63-.63.348 0 .63.285.63.63v4.141h1.756c.348 0 .629.283.629.63 0 .344-.282.629-.629.629M24 10.314C24 4.943 18.615.572 12 .572S0 4.943 0 10.314c0 4.811 4.27 8.842 10.035 9.608.391.082.923.258 1.058.59.12.301.079.766.038 1.08l-.164 1.02c-.045.301-.24 1.186 1.049.645 1.291-.539 6.916-4.078 9.436-6.975C23.176 14.393 24 12.458 24 10.314" },
+};
+
+function PlatformGlyph({ kind }) {
+  const glyph = PLATFORM_GLYPHS[kind];
+  return glyph ? <svg className="buyer-v2__platform-glyph" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill={glyph.color} d={glyph.path} /></svg> : null;
+}
 
 function AuthPage({ mode, search, request, navigate, session }) {
   const t = useBuyerCopy();
@@ -729,7 +741,9 @@ function AuthPage({ mode, search, request, navigate, session }) {
           {submission.error ? <InlineError error={submission.error} /> : null}
           <Button type="submit" className="buyer-v2__button--wide web-btn-yolk" loading={submission.status === "pending"}>{presentation.action}</Button>
           {failedLogin ? <InlineError error={new Error(t(PLATFORM_LOGINS[failedLogin].failed))} /> : null}
-          {(logins.data?.providers ?? []).filter((kind) => PLATFORM_LOGINS[kind]).map((kind) => <Button key={kind} asChild variant="secondary" className="buyer-v2__button--wide"><a href={`/v1/auth/${kind}/start?returnTo=${encodeURIComponent(returnTo)}`}>{t(PLATFORM_LOGINS[kind].action)}</a></Button>)}
+          {(logins.data?.providers ?? []).some((kind) => PLATFORM_LOGINS[kind]) ? <div className="buyer-v2__platform-logins">
+            {(logins.data?.providers ?? []).filter((kind) => PLATFORM_LOGINS[kind]).map((kind) => <Button key={kind} asChild variant="secondary" className="buyer-v2__button--wide buyer-v2__platform-login"><a href={`/v1/auth/${kind}/start?returnTo=${encodeURIComponent(returnTo)}`} aria-label={t(PLATFORM_LOGINS[kind].action)}><PlatformGlyph kind={kind} />{PLATFORM_LOGINS[kind].label}</a></Button>)}
+          </div> : null}
         </form>
         <nav className="buyer-v2__auth-links" aria-label={presentation.switchAction}>
           <RouterLink className="buyer-v2__auth-switch" to={`${signingUp ? "/sign-in" : "/sign-up"}?returnTo=${encodeURIComponent(returnTo)}`} navigate={navigate}>{presentation.switchAction}</RouterLink>
