@@ -35,6 +35,8 @@
 :where(.web-chat) button { color: inherit; }
 .web-chat button, .web-chat a, .web-chat label { -webkit-tap-highlight-color: transparent; }
 .web-chat :focus-visible { outline: 3px solid var(--web-yolk-soft); outline-offset: 2px; box-shadow: 0 0 0 1px var(--web-yolk); }
+/* The search field shows its focus ring on the rounded field; its inner input needs none. */
+.web-chat .hui-search input:focus-visible { outline: none; box-shadow: none; }
 .web-chat svg { flex: 0 0 auto; }
 
 /* Shared controls */
