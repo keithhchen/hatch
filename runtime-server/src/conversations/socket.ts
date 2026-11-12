@@ -57,8 +57,10 @@ export class StudioSockets {
       if (ws.bufferedAmount > MAX_BUFFERED_BYTES) ws.close(1013, "slow consumer: resume from your last cursor");
     };
     const fail = (id: string | undefined, error: unknown) => {
-      const { code, message, internal } = toProblem(error);
-      if (internal) log.error("socket_request_failed", { ...(id ? { subscription_id: id } : {}), error });
+      // Only a ConversationError is the client's to read; anything else is a generic internal_error.
+      const known = error instanceof ConversationError;
+      if (!known) log.error("socket_request_failed", { ...(id ? { subscription_id: id } : {}), error });
+      const { code, message } = known ? toProblem(error) : { code: "internal_error", message: "Request failed." };
       send({ type: "error", ...(id ? { id } : {}), error: { code, message } });
     };
     const authTimer = identity ? undefined : setTimeout(() => ws.close(4401, "authentication required"), AUTH_TIMEOUT_MS);

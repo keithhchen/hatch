@@ -2,7 +2,7 @@ import type { ConversationMessage } from "../protocol.js";
 import { ConversationRepositoryError, type AlsoCommit, type ConversationRecord, type ConversationRepository, type ConversationRunRecord } from "../conversationRepository.js";
 import type { ClientAttributes, Principal } from "../surfaces/contract.js";
 import { failures } from "../errors/failures.js";
-import { toProblem } from "../errors/problem.js";
+import { admissionStatus } from "../errors/problem.js";
 import type { RunEventHub } from "./runEventHub.js";
 import type { RunTerminator } from "./runTerminator.js";
 import type { RunSupervisor } from "./runSupervisor.js";
@@ -183,5 +183,5 @@ export class ChatService<Scope> {
 
 /** A refusal of the repository, as the Chat API tells it. */
 function refused(error: unknown): unknown {
-  return error instanceof ConversationRepositoryError ? new ChatError(error.code, error.message, toProblem(error).status) : error;
+  return error instanceof ConversationRepositoryError ? new ChatError(error.code, error.message, admissionStatus(error.code)) : error;
 }

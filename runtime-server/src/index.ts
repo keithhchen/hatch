@@ -2267,9 +2267,17 @@ async function retryRun(
 /** A failure a client can act on, whichever way it arrived. */
 function chatFailure(error: unknown): { code: string; message: string } {
   if (error instanceof EntitlementError) return controlledTurnAuthorizationError(error);
-  const { code, message, internal } = toProblem(error);
-  if (internal) log.error("socket_message_failed", { error });
-  return { code, message: code === "conversation_not_found" ? "Create the task before starting a run." : message };
+  if (error instanceof ChatError) return { code: error.code, message: error.message };
+  if (error instanceof ConversationRepositoryError) {
+    return {
+      code: error.code,
+      message: error.code === "client_message_conflict"
+        ? "This client_message_id was already used with different message or attachment content."
+        : error.code === "conversation_not_found" ? "Create the task before starting a run." : error.message
+    };
+  }
+  log.error("socket_message_failed", { error });
+  return { code: "protocol_error", message: toProblem(error).message };
 }
 
 async function handleRuntimeSocket(

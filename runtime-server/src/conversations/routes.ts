@@ -9,7 +9,6 @@ import { ConversationError, type Conversation, type SendInput } from "./conversa
 import { messageKey } from "../chat/messageKey.js";
 import { ChatError } from "../chat/principal.js";
 import { toProblem } from "../errors/problem.js";
-import { log } from "../observability/log.js";
 import { START } from "./eventLog.js";
 import { follow, resumePoint } from "./follow.js";
 import { snapshotOf } from "./snapshot.js";
@@ -91,8 +90,8 @@ export class ConversationRoutes {
         await this.serve(await this.studio.target(account.id, this.deps.token(request)!, spec), (workers?.[3] ?? assistant![1]) as Action, request, response, url);
       }
     } catch (error) {
-      const { status, code, message, details, internal } = toProblem(error);
-      if (internal) log.error("conversation_request_failed", { method: request.method, path: url.pathname, error });
+      if (!(error instanceof ConversationError)) throw error;
+      const { status, code, message, details } = toProblem(error);
       this.deps.json(response, status, { error: { code, message, ...(details === undefined ? {} : { details }) }, detail: message });
     }
     return true;
