@@ -1,34 +1,24 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { dismissIntro, introDismissed, shouldShowFirstBuildIntro } from "./firstBuildIntro.js";
+import { shouldShowFirstBuildIntro } from "./firstBuildIntro.js";
 
-const memory = () => { const data = new Map(); return { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => data.set(key, value) }; };
-const broken = { getItem() { throw new Error("blocked"); }, setItem() { throw new Error("blocked"); } };
-const facts = (over = {}) => ({ accountId: "acct-1", products: [], storage: memory(), ...over });
+const facts = (over = {}) => ({ accountId: "acct-1", products: [], ...over });
 const read = (name) => readFile(new URL(name, import.meta.url), "utf8");
 
 test("the intro shows for an account with no Agents", () => {
   assert.equal(shouldShowFirstBuildIntro(facts()), true);
 });
 
-test("the intro does not show once dismissed, for that account only", () => {
-  const storage = memory();
-  dismissIntro("acct-1", storage);
-  assert.equal(introDismissed("acct-1", storage), true);
-  assert.equal(shouldShowFirstBuildIntro(facts({ storage })), false);
-  assert.equal(shouldShowFirstBuildIntro(facts({ storage, accountId: "acct-2" })), true);
+test("closing the intro does not stop it showing on the next visit", () => {
+  assert.equal(shouldShowFirstBuildIntro(facts()), true);
+  assert.equal(shouldShowFirstBuildIntro(facts()), true);
 });
 
 test("the intro is not auto-shown when the account has Agents, or before the list has loaded", () => {
   assert.equal(shouldShowFirstBuildIntro(facts({ products: [{ product_id: "p1" }] })), false);
   assert.equal(shouldShowFirstBuildIntro(facts({ products: null })), false);
   assert.equal(shouldShowFirstBuildIntro(facts({ accountId: "" })), false);
-});
-
-test("unavailable browser storage never throws", () => {
-  assert.equal(introDismissed("acct-1", broken), false);
-  assert.doesNotThrow(() => dismissIntro("acct-1", broken));
 });
 
 test("the help button always opens the intro: on the New Agent page and in the Agent workspace, not in the Build tab body", async () => {

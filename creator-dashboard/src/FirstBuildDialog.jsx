@@ -5,7 +5,7 @@ import { Button } from "@hatch/ui";
 import { TrialScene } from "./web/TrialScenes.tsx";
 import { landingCopy } from "./web/landingCopy.ts";
 import { creatorFactoryPath } from "./creatorRoutes.js";
-import { dismissIntro, shouldShowFirstBuildIntro } from "./firstBuildIntro.js";
+import { shouldShowFirstBuildIntro } from "./firstBuildIntro.js";
 import { arrayOf, unwrap, useRemote } from "./studioShellKit.jsx";
 import "./firstBuildDialog.css";
 
@@ -59,7 +59,7 @@ export function FirstBuildIntro({ request, productId, profile, locale, navigate 
 
   const copy = COPY[locale] ?? COPY.en;
   const lang = landingCopy[locale] ? locale : "en";
-  const close = () => { dismissIntro(accountId); setOpen(false); };
+  const close = () => setOpen(false);
   const start = () => { close(); if (!onNewPage) navigate(creatorFactoryPath(productId, "sources", "uploads")); };
   return <>
     <button type="button" className="sx-icon-btn sx-icon-btn--quiet" aria-label={copy.help} onClick={() => setOpen(true)}><HelpCircle aria-hidden="true" /></button>

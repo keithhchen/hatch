@@ -11,7 +11,7 @@ export const API_KEYS_COPY = {
     sxakEmpty: "No Keys Yet", sxakLoadError: "Could not load your API keys"
   },
   zh: {
-    sxakBanner: "Hatch Studio 也能在 Codex 或 Claude Code 里使用。用 Hatch CLI/MCP 构建你的 Agent。", sxakBannerCta: "创建 API 密钥",
+    sxakBanner: "Hatch Studio 也能在 Codex 或 Claude Code 里运行。用 Hatch CLI/MCP 构建你的 Agent。", sxakBannerCta: "创建 API 密钥",
     sxNavApiKeys: "API 密钥", sxakDevelopers: "开发者文档",
     sxakCreate: "创建密钥", sxakNameLabel: "密钥名称", sxakNamePlaceholder: "例如：我的笔记本 CLI", sxakCreating: "创建中…",
     sxakCreatedTitle: "你的新密钥", sxakCreatedWarn: "请现在复制。之后不会再显示这个密钥。", sxakCopy: "复制", sxakCopied: "已复制", sxakDone: "完成",
