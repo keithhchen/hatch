@@ -8,8 +8,12 @@ export const LLM_PROFILE_NAMES = RUNTIME_LLM_PROFILE_NAMES;
 export type LlmProfileName = RuntimeLlmProfileName | FactoryLlmProfileName;
 export type RuntimeLlmProfileName = (typeof RUNTIME_LLM_PROFILE_NAMES)[number];
 
+/** Which provider adapter owns a profile's endpoint, model object and request normalization. */
+export type ModelFamily = "kimi" | "openai-compatible" | "gemini";
+
 export type LlmProfile = {
   name: LlmProfileName;
+  family: ModelFamily;
   provider: string;
   providerName: string;
   api: "openai-completions" | "google-generative-ai";
@@ -21,8 +25,13 @@ export type LlmProfile = {
   reasoning: boolean;
   thinkingLevel: ThinkingLevel;
   temperature?: number;
+  /** The thinking level is part of the provider contract: a caller may not turn it off. */
+  thinkingRequired?: boolean;
+  /** Env var that may override baseUrl (validated by the adapter). */
+  endpointEnv?: string;
+  displayName?: string;
+  cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
   thinkingType?: "enabled" | "disabled";
-  normalizeEmptyToolCallContent: boolean;
   /** How long a call may stay silent; the default of providerStall when absent. */
   stall?: StallLimits;
 };
@@ -30,6 +39,7 @@ export type LlmProfile = {
 const PROFILES: Record<LlmProfileName, LlmProfile> = {
   "kimi-k2.6": {
     name: "kimi-k2.6",
+    family: "kimi",
     provider: "moonshotai-cn",
     providerName: "Moonshot Kimi",
     api: "openai-completions",
@@ -41,10 +51,14 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     reasoning: true,
     thinkingLevel: "high",
     temperature: 1,
-    normalizeEmptyToolCallContent: true
+    thinkingRequired: true,
+    endpointEnv: "OPENAI_BASE_URL",
+    displayName: "Kimi K2.6",
+    cost: { input: 0.95, output: 4, cacheRead: 0.16, cacheWrite: 0 }
   },
   "kimi-k2.6-no-thinking": {
     name: "kimi-k2.6-no-thinking",
+    family: "kimi",
     provider: "moonshotai-cn",
     providerName: "Moonshot Kimi",
     api: "openai-completions",
@@ -56,10 +70,10 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     reasoning: false,
     thinkingLevel: "minimal",
     thinkingType: "disabled",
-    normalizeEmptyToolCallContent: true
   },
   "deepseek-v4-flash": {
     name: "deepseek-v4-flash",
+    family: "openai-compatible",
     provider: "deepseek",
     providerName: "DeepSeek",
     api: "openai-completions",
@@ -71,12 +85,12 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     reasoning: false,
     thinkingLevel: "minimal",
     thinkingType: "disabled",
-    normalizeEmptyToolCallContent: false
   },
   // DeepSeek's flagship, run without thinking: on the Assistant's real request (58k tokens, 21 tools) its first token comes
   // in about 1-2 s once the prefix is cached, against 3-5 s for Kimi K3.1, and it chose the same tools with valid arguments.
   "deepseek-v4-pro": {
     name: "deepseek-v4-pro",
+    family: "openai-compatible",
     provider: "deepseek",
     providerName: "DeepSeek",
     api: "openai-completions",
@@ -88,10 +102,10 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     reasoning: false,
     thinkingLevel: "minimal",
     thinkingType: "disabled",
-    normalizeEmptyToolCallContent: false
   },
   "gemini-api": {
     name: "gemini-api",
+    family: "gemini",
     provider: "google",
     providerName: "Google Gemini API",
     api: "google-generative-ai",
@@ -102,13 +116,13 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     maxTokens: 65_536,
     reasoning: true,
     thinkingLevel: "low",
-    normalizeEmptyToolCallContent: false
   },
   // The plain pro, not -highspeed: that is the variant the user picked. K3.1 reasons either way: with `thinking: disabled` and
   // a tool-heavy prompt it writes thousands of characters of reasoning into `content`, which the chat shows as the reply.
   // Enabled, the reasoning goes to `reasoning_content` (rendered as thinking) and stays short.
   "kimi-k3.1-pro": {
     name: "kimi-k3.1-pro",
+    family: "kimi",
     provider: "moonshotai-cn",
     providerName: "Moonshot Kimi",
     api: "openai-completions",
@@ -120,11 +134,11 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     reasoning: true,
     thinkingLevel: "low",
     thinkingType: "enabled",
-    normalizeEmptyToolCallContent: true,
     stall: { firstEventMs: 45_000, silenceMs: 60_000, restarts: 2, backoffMs: 1_000 }
   },
   "gemini-3.1-pro": {
     name: "gemini-3.1-pro",
+    family: "gemini",
     provider: "google",
     providerName: "Google Gemini API",
     api: "google-generative-ai",
@@ -135,7 +149,6 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     maxTokens: 65_536,
     reasoning: true,
     thinkingLevel: "low",
-    normalizeEmptyToolCallContent: false,
     // Real Assistant path, about 100 calls: first event 3-15s (thought summaries arrive as one chunk, so the first event ends the
     // thinking). Three simultaneous first calls once got nothing for 120s+ while a new call at that moment answered in 11s: a hung
     // request does not recover, so wait 45s and ask again instead of waiting longer.
@@ -143,6 +156,10 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     stall: { firstEventMs: 45_000, silenceMs: 60_000, restarts: 2, backoffMs: 1_000 }
   }
 };
+
+export function llmProfile(name: LlmProfileName): LlmProfile {
+  return { ...PROFILES[name] };
+}
 
 export function resolveLlmProfile(env: NodeJS.ProcessEnv = process.env): LlmProfile {
   const configured = (env.HATCH_LLM_PROFILE?.trim() || "kimi-k2.6-no-thinking") as RuntimeLlmProfileName;
