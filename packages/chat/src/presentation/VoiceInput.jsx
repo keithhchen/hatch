@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Check, Loader2, Mic, MicOff, X } from "lucide-react";
+import "./chat.css";
 
 /** The longest recording a voice message may be; the server refuses more. */
 export const MAX_RECORDING_SECONDS = 300;
@@ -104,4 +106,23 @@ export function Waveform({ analyser }) {
     return () => cancelAnimationFrame(frame);
   }, [analyser]);
   return <canvas ref={canvas} className="web-chat__waveform" aria-hidden="true" />;
+}
+
+/** The one speech-to-text microphone. Every composer renders this; nothing forks its look or states. */
+export function MicButton({ voice, t, disabled = false }) {
+  return <button type="button" className="web-chat__voice-button" aria-label={t(voice.phase === "denied" ? "voiceDenied" : "voiceStart")} data-phase={voice.phase} disabled={disabled || voice.phase === "transcribing"} onClick={voice.start}>
+    {voice.phase === "transcribing" ? <Loader2 className="web-chat__spin" aria-hidden="true" /> : voice.phase === "denied" ? <MicOff aria-hidden="true" /> : <Mic aria-hidden="true" />}
+  </button>;
+}
+
+/** While recording: the level strip in place of the text box, and these two buttons in place of the actions. */
+export function RecordingWave({ voice }) {
+  return <div className="web-chat__voice" role="status"><Waveform analyser={voice.analyser} /></div>;
+}
+
+export function RecordingActions({ voice, t }) {
+  return <div className="web-chat__actions web-chat__actions--voice">
+    <button type="button" className="web-chat__voice-button" aria-label={t("voiceCancel")} onClick={voice.cancel}><X aria-hidden="true" /></button>
+    <button type="button" className="web-chat__send" aria-label={t("voiceStop")} onClick={voice.confirm}><Check aria-hidden="true" /></button>
+  </div>;
 }

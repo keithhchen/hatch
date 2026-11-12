@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { ArrowUp, Check, ChevronDown, ChevronUp, CircleAlert, Loader2, Mic, MicOff, Paperclip, Plus, RotateCw, Square, X } from "lucide-react";
+import { ArrowUp, ChevronDown, ChevronUp, CircleAlert, Paperclip, Plus, RotateCw, Square, X } from "lucide-react";
 import { Avatar } from "@hatch/ui";
 import { approvalDecision, partitionAttachments } from "../domain/activity.js";
 import { ACTIVITY_KINDS, ChatTimeline, groupTimelineEntries, withoutRepeatedSteps } from "../domain/timeline.js";
@@ -10,7 +10,7 @@ import { ImageViewer } from "./ImageViewer.jsx";
 import { MessageResponse } from "./MessageResponse.jsx";
 import { Shimmer } from "./Shimmer.jsx";
 import { AttachButton } from "./AttachButton.jsx";
-import { Waveform, canRecord, useVoiceInput } from "./VoiceInput.jsx";
+import { MicButton, RecordingActions, RecordingWave, canRecord, useVoiceInput } from "./VoiceInput.jsx";
 import { FreeChatPaywall } from "./FreeChatPaywall.jsx";
 import "./chat.css";
 
@@ -177,16 +177,11 @@ export function Composer({ controller, state, snapshotPending = false, agentName
 
   return <form className="web-chat__composer" aria-busy={snapshotPending} onSubmit={submit}>
     {images.length ? <div className="web-chat__images" aria-label={t("imagesToSend")}>{images.map(file => <span className="web-chat__image-chip" key={fileKey(file)}><Paperclip aria-hidden="true" /><span title={file.name}>{file.name}</span><button type="button" aria-label={t("removeImage", { name: file.name })} onClick={() => controller.removeImage(file)} disabled={snapshotPending}><X aria-hidden="true" /></button></span>)}</div> : null}
-    {recording ? <div className="web-chat__voice" role="status"><Waveform analyser={voice.analyser} /></div> : <textarea ref={draftRef} aria-label={t("messageAgent", { agent: agentName })} value={draft} onChange={event => controller.setDraft(event.target.value)} placeholder={t("messagePlaceholder")} disabled={busy} onPaste={onPaste} onKeyDown={event => { if (event.key !== "Enter" || event.shiftKey || isImeConfirmation(event)) return; submit(event); }} />}
-    {recording ? <div className="web-chat__actions web-chat__actions--voice">
-      <button type="button" className="web-chat__voice-button" aria-label={t("voiceCancel")} onClick={voice.cancel}><X aria-hidden="true" /></button>
-      <button type="button" className="web-chat__send" aria-label={t("voiceStop")} onClick={voice.confirm}><Check aria-hidden="true" /></button>
-    </div> : <div className="web-chat__actions">
+    {recording ? <RecordingWave voice={voice} /> : <textarea ref={draftRef} aria-label={t("messageAgent", { agent: agentName })} value={draft} onChange={event => controller.setDraft(event.target.value)} placeholder={t("messagePlaceholder")} disabled={busy} onPaste={onPaste} onKeyDown={event => { if (event.key !== "Enter" || event.shiftKey || isImeConfirmation(event)) return; submit(event); }} />}
+    {recording ? <RecordingActions voice={voice} t={t} /> : <div className="web-chat__actions">
       {attachControl ?? <AttachButton accept={accept} disabled={busy} onFiles={files => controller.addImages(files)} t={t} />}
       {accessory}
-      {dictate && canRecord() ? <button type="button" className="web-chat__voice-button" aria-label={t(voice.phase === "denied" ? "voiceDenied" : "voiceStart")} data-phase={voice.phase} disabled={busy || voice.phase === "transcribing"} onClick={voice.start}>
-        {voice.phase === "transcribing" ? <Loader2 className="web-chat__spin" aria-hidden="true" /> : voice.phase === "denied" ? <MicOff aria-hidden="true" /> : <Mic aria-hidden="true" />}
-      </button> : null}
+      {dictate && canRecord() ? <MicButton voice={voice} t={t} disabled={busy} /> : null}
       {activeRun && !steer
         ? <button type="button" className="web-chat__stop" aria-label={t("stopReply")} onClick={() => controller.cancel()}><Square aria-hidden="true" /><span>{t("stopReply")}</span></button>
         : <button type="submit" className="web-chat__send" aria-label={t("sendMessage")} disabled={snapshotPending || (!draft.trim() && !images.length)}><ArrowUp aria-hidden="true" /></button>}

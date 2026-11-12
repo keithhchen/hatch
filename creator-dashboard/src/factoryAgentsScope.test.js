@@ -101,7 +101,7 @@ test('Deep Research starts from Creator identity and public evidence, not manual
   assert.match(prompt, /不要一开始就要求用户上传文件/);
 });
 
-test('Voice Interview is a whole-person interview rather than a single-judgment prompt', async () => {
+test('The Interview is a whole-person interview rather than a single-judgment prompt', async () => {
   const i18n = await readFile(new URL('./factoryAgentsI18n.js', import.meta.url), 'utf8');
   const prompt = await readFile(new URL('../../runtime-server/prompts/factory-agents/voice/SYSTEM.md', import.meta.url), 'utf8');
   assert.match(i18n, /voice: '从你的经历、影响、价值取舍、审美和矛盾讲起/);
@@ -210,12 +210,11 @@ test('Factory chat keeps scrolling inside the workbench pane', async () => {
   assert.doesNotMatch(factoryStyles, /\.factory-app\s*\{[^}]*overflow:\s*auto/);
 });
 
-test('Factory voice controls and Composer share the Hatch chat surface', async () => {
+test('Factory Composer toolbar shares the Hatch chat surface', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   const styles = await readFile(new URL('./factoryAgents.css', import.meta.url), 'utf8');
-  assert.match(source, /className="factory-voice-controls"/);
   assert.match(source, /className="factory-composer-toolbar"/);
-  assert.match(styles, /\.factory-voice-controls,[\s\S]*\.factory-composer-toolbar,[\s\S]*\.factory-chat-composer\s*\{[^}]*var\(--web-card/s);
+  assert.match(styles, /\.factory-composer-toolbar,[\s\S]*\.factory-chat-composer\s*\{[^}]*var\(--web-card/s);
 });
 
 test('Factory workbench is a two-pane chat grid inside the Studio shell', async () => {
@@ -282,7 +281,7 @@ test('Factory renders grouped tool calls as ToolGroup instead of treating them a
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
     assert.match(source, /item\.type === "toolGroup" \? <ToolGroup key=\{item\.key\} items=\{item\.items\}/);
     assert.match(source, /item\.type === "tool" \? <ToolMessage/);
-    assert.match(source, /function Message\(\{ message, files, onOpenFile, speaking, t \}\) \{ if \(!message\) return null;/);
+    assert.match(source, /function Message\(\{ message, files, onOpenFile, t \}\) \{ if \(!message\) return null;/);
   });
 
 test('Factory consumes the shared Hatch UI theme instead of an indigo local theme', async () => {

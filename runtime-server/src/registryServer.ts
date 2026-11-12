@@ -530,20 +530,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
         studioSockets.upgrade(request, socket, head, identity);
         return;
       }
-      const match = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/factory-agents\/sessions\/([0-9a-f-]{36})\/voice\/live$/);
-      if (!match) throw Object.assign(new Error("Unknown WebSocket route"), { status: 404 });
-      const token = bearer(request);
-      const session = await accounts.resolveSession(token);
-      let account = session?.account;
-      if (!account) {
-        const claims = verifyAuthToken(token, authSecret);
-        account = claims ? await accounts.getById(claims.sub) : undefined;
-      }
-      if (!account) throw Object.assign(new Error("A valid account token is required."), { status: 401 });
-      const productId = decodeURIComponent(match[1]!);
-      const product = await productForCreator(registryContext, account.id, productId);
-      if (!product) throw Object.assign(new Error("Product was not found."), { status: 404 });
-      await factoryAgents.handleUpgrade({ creatorId: account.id, productId, briefSpec: product.brief_spec }, token!, request, socket, head);
+      throw Object.assign(new Error("Unknown WebSocket route"), { status: 404 });
     })().catch(error => {
       if (socket.destroyed) return;
       const status = errorStatus(error);
