@@ -1,5 +1,5 @@
-// One workspace per Agent: header (name, status, public link) and two tabs —
-// Build (Factory path) and Publish. Studio shows no version history.
+// One workspace per Agent: header (name, status, public link) and three tabs —
+// Overview, Build (Factory path) and Publish. Studio shows no version history.
 // Every control calls an existing Creator endpoint; nothing is simulated.
 import React, { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Copy, ExternalLink, Plus, Trash2 } from "lucide-react";
@@ -14,6 +14,7 @@ import {
 } from "./studioShellKit.jsx";
 
 const TABS = [
+  { value: "overview", label: "sxNavOverview" },
   { value: "build", label: "sxTabBuild" },
   { value: "publish", label: "sxTabPublish" }
 ];
@@ -23,7 +24,7 @@ export function StudioAgentWorkspace({ route, request, navigate, locale, t, prof
   const productPath = `/v1/creator/products/${encodeURIComponent(productId)}`;
   const resource = useRemote(request, productPath);
   const product = resource.data ? unwrap(resource.data, "product") : null;
-  const tab = route.tab ?? "build";
+  const tab = route.tab ?? "overview";
 
   if (resource.state === "error") return <RouteProblem title={t("workspaceLoadError")} body={friendlyError(resource.error, t)} action={t("retry")} onAction={resource.retry} />;
   const live = isProductLive(product);
@@ -47,7 +48,7 @@ export function StudioAgentWorkspace({ route, request, navigate, locale, t, prof
       </nav>
     </header>
     <div className="sx-agent__body">
-      {tab === "build" ? renderBuild(product)
+      {tab === "build" || tab === "overview" ? renderBuild(product, tab)
         : !product ? <LoadingState t={t} />
         : <PublishTab {...ctx} />}
     </div>

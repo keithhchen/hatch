@@ -242,7 +242,7 @@ button { font: inherit; color: inherit; }
 .pro-card-2 { box-shadow: 0 -20px 60px rgba(23, 21, 15, 0.18); }
 .pro-cards { overflow: hidden; border-radius: 36px; }
 .pro-tasks p.done .ring { border-color: var(--pass); background: var(--pass); box-shadow: inset 0 0 0 3px #fff; }
-.pro-tasks p.done b { text-decoration: line-through; color: var(--muted); }
+.pro-tasks p.done b { color: var(--muted); }
 .ring { transition: all 300ms ease; }
 .pro-dots { position: absolute; left: 50%; bottom: 16px; z-index: 3; display: flex; gap: 8px; transform: translateX(-50%); }
 .pro-dots i { width: 8px; height: 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.6); transition: width 300ms ease, background 300ms ease; }

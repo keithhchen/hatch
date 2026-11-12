@@ -19,8 +19,9 @@
 /* Step rail: the five steps beside the step content on wide screens. */
 .factory-app { display: grid; grid-template-columns: 188px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 0 20px; }
 .factory-rail { grid-column: 1; min-width: 0; }
-.factory-rail__overview { display: flex; width: 100%; min-height: 36px; align-items: center; margin-bottom: 6px; padding: 0 12px; border: 0; border-radius: 10px; background: none; color: var(--web-muted); font-size: 13px; font-weight: 700; text-align: left; cursor: pointer; }
-.factory-rail__overview:hover, .factory-rail__overview.is-current { background: var(--web-card); color: var(--web-ink); }
+.factory-rail { display: flex; flex-direction: column; gap: 14px; }
+.factory-rail__advanced { display: flex; min-height: 36px; align-items: center; margin-top: 6px; padding: 0 14px; border: 1px solid var(--web-rule); border-radius: 999px; background: none; color: var(--web-muted); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; transition: background 160ms ease, color 160ms ease; }
+.factory-rail__advanced:hover, .factory-rail__advanced.is-current { background: var(--web-card); color: var(--web-ink); }
 .factory-stepper { display: flex; flex-direction: column; gap: 0; margin: 0; padding: 0; list-style: none; }
 .factory-stepper li { display: flex; flex-direction: column; }
 .factory-stepper li + li::before { width: 2px; height: 14px; margin-left: 18px; border-radius: 2px; background: var(--web-rule); content: ""; }
@@ -34,7 +35,8 @@
 .factory-stepper .is-next .factory-stepper__n { border-color: var(--web-yolk); background: var(--web-yolk); }
 .factory-stepper .is-running .factory-stepper__n { border-color: var(--web-yolk); background: var(--web-yolk-soft); animation: factory-pulse 1.6s ease-in-out infinite; }
 .factory-stepper .is-current { border-color: var(--web-rule); background: var(--web-card); color: var(--web-ink); box-shadow: 0 6px 18px rgba(23, 21, 15, 0.06); }
-.factory-app > .factory-step, .factory-app > .factory-overview { grid-column: 2; grid-row: 1; }
+.factory-app > .factory-step { grid-column: 2; grid-row: 1; }
+.factory-app > .factory-overview { grid-column: 1 / -1; grid-row: 1; }
 
 /* Overview */
 .factory-overview { min-height: 0; overflow: auto; padding: 0 0 48px; }
@@ -215,9 +217,10 @@
 /* Medium widths: the rail becomes a horizontal stepper above the content. */
 @media (max-width: 1180px) {
   .factory-app { display: flex; flex-direction: column; gap: 14px; }
-  .factory-rail { display: flex; align-items: center; gap: 8px; overflow-x: auto; scrollbar-width: none; }
-  .factory-rail::-webkit-scrollbar { display: none; }
-  .factory-rail__overview { width: auto; flex: 0 0 auto; margin: 0; }
+  .factory-rail { flex-direction: row; align-items: center; gap: 8px; }
+  .factory-stepper { min-width: 0; flex: 1 1 auto; overflow-x: auto; scrollbar-width: none; }
+  .factory-stepper::-webkit-scrollbar { display: none; }
+  .factory-rail__advanced { flex: 0 0 auto; margin: 0 0 0 auto; white-space: nowrap; }
   .factory-stepper { flex-direction: row; gap: 6px; }
   .factory-stepper li { flex-direction: row; align-items: center; }
   .factory-stepper li + li::before { width: 14px; height: 2px; margin: 0 6px 0 0; }

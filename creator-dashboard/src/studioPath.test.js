@@ -35,3 +35,16 @@ test("Factory routes map onto the guided steps and the advanced tab", () => {
   for (const [section, page] of ADVANCED_STEP.items) assert.equal(studioStepForRoute(section, page), "advanced");
   assert.equal(studioStepForRoute(null, null), null);
 });
+
+test("Overview is a top tab, Advanced is a separate rail control, Start Agent and todos use the product style", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const read = (name) => readFile(new URL(name, import.meta.url), "utf8");
+  const [workspace, factory, css, web] = await Promise.all([read("./studioAgentWorkspace.jsx"), read("./FactoryAgents.jsx"), read("./factoryAgents.css"), read("./web/web.css")]);
+  assert.match(workspace, /\{ value: "overview", label: "sxNavOverview" \},\s*\{ value: "build"[^}]*\},\s*\{ value: "publish"/);
+  assert.doesNotMatch(factory, /factory-rail__overview|factory-stepper__advanced/);
+  assert.match(factory, /className=\{`factory-rail__advanced/);
+  assert.match(factory, /<HatchButton type="button" size="small" variant="secondary" leading=\{<Play/);
+  assert.doesNotMatch(factory, /line-through/);
+  assert.doesNotMatch(web, /pro-tasks[^\n]*line-through/);
+  assert.match(css, /\.factory-rail__advanced[^}]*margin: 0 0 0 auto/);
+});

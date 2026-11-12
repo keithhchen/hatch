@@ -28,7 +28,6 @@ import {
   AutoAwesome,
   ExpandMore,
   Lock,
-  PlayArrow,
   Send,
   Stop,
   UploadFile
@@ -39,7 +38,7 @@ import { ChatProvider } from "@mui/x-chat/headless";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button as HatchButton, Dialog, DialogContent, IconButton as HatchIconButton, InlineAlert, SegmentedControl, Textarea, hatchMuiThemeOptions } from "@hatch/ui";
-import { ArrowRight, ArrowUpRight, Sparkles, ChevronLeft as PrevIcon, ChevronRight as NextIcon, Download as DownloadIcon, Plus, Send as SendIcon } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Play, Sparkles, ChevronLeft as PrevIcon, ChevronRight as NextIcon, Download as DownloadIcon, Plus, Send as SendIcon } from "lucide-react";
 import { MicButton, RecordingActions, RecordingWave, canRecord, useVoiceInput } from "@hatch/chat/react";
 import { dashboardRequest } from "./data.js";
 import { FileList } from "./FileList.jsx";
@@ -82,7 +81,7 @@ function ErrorNotice({ error, onClose }) {
   </Snackbar>;
 }
 
-export function FactoryAgents({ productId, section, agent, navigate, locale = "en" }) {
+export function FactoryAgents({ productId, tab = "build", section, agent, navigate, locale = "en" }) {
   const t = useMemo(() => createFactoryAgentTranslator(locale), [locale]);
   const [sessions, setSessions] = useState([]); const [agents, setAgents] = useState([]); const [manualFiles, setManualFiles] = useState([]); const [uploadItems, setUploadItems] = useState([]); const [config, setConfig] = useState(null); const [product, setProduct] = useState(null); const [error, setError] = useState(""); const importPicker = useRef(null);
   const root = useMemo(() => factoryRoot(productId), [productId]);
@@ -101,11 +100,10 @@ export function FactoryAgents({ productId, section, agent, navigate, locale = "e
   const ingest = useMemo(() => createIngestPort(dashboardRequest), []);
   const patchUpload = (id, change) => setUploadItems(previous => previous.map(item => item.id === id ? { ...item, ...change } : item));
   const jobs = useMemo(() => createJobStore(productId), [productId]);
-  const [ingestedAt, setIngestedAt] = useState(0);
   const rowState = (id, jobId) => state => {
     if (state.status !== "ingesting" && jobId()) jobs.remove(jobId());
     if (state.status !== "completed") { patchUpload(id, state); return; }
-    setUploadItems(previous => previous.filter(item => item.id !== id)); setIngestedAt(Date.now()); refreshConfig();
+    setUploadItems(previous => previous.filter(item => item.id !== id)); refreshConfig();
   };
   const uploadProjectFiles = files => Promise.all(files.map(file => {
     const id = `${file.name}-${file.lastModified}-${Math.random()}`; let jobId = "";
@@ -126,26 +124,26 @@ export function FactoryAgents({ productId, section, agent, navigate, locale = "e
   const deleteManualFile = async record => { const transport = agentSession("research"); if (!transport) return; try { await api(endpoint(root, transport.id, "files"), { method: "DELETE", body: { path: record.path } }); setManualFiles(previous => previous.filter(file => file.path !== record.path)); setUploadItems(previous => previous.filter(item => item.path !== record.path)); } catch (e) { setError(factoryError(e, t, agentName)); } };
   const states = studioPathStates(agents, product, manualFiles);
   const currentStep = studioStepForRoute(stage, selected);
-  const step = [...STUDIO_PATH, ADVANCED_STEP].find(item => item.id === currentStep);
+  const step = tab === "overview" ? null : [...STUDIO_PATH, ADVANCED_STEP].find(item => item.id === currentStep);
   const selectedEntry = selected ? agentEntry(selected) : null; const selectedSession = selected ? agentSession(selected) : null;
   const workbench = Boolean(selected && selected !== "uploads" && selectedSession);
   return <ThemeProvider theme={theme}><div className={`factory-app${workbench ? " factory-app--workbench" : ""}`} aria-label={t("factory")}>
-    <nav className="factory-rail" aria-label={t("factoryStepsLabel")}>
-      <button type="button" className={`factory-rail__overview${step ? "" : " is-current"}`} aria-current={step ? undefined : "page"} onClick={() => goToFactory()}>{t("sxNavOverview")}</button>
+    {tab === "overview" ? null : <nav className="factory-rail" aria-label={t("factoryStepsLabel")}>
       <FactoryStepper states={states} current={currentStep} onStep={goToStep} t={t} />
-    </nav>
+      <button type="button" className={`factory-rail__advanced${currentStep === ADVANCED_STEP.id ? " is-current" : ""}`} aria-current={currentStep === ADVANCED_STEP.id ? "step" : undefined} onClick={() => goToStep(ADVANCED_STEP)}>{t(ADVANCED_STEP.title)}</button>
+    </nav>}
     <ErrorNotice error={error} onClose={() => setError("")} />
     {selected === "uploads" && preview && manualFiles.some(file => file.path === preview.path) ? <FileViewer key={preview.path} root={root} running={false} id={preview.id} record={manualFiles.find(file => file.path === preview.path)} siblings={manualFiles} onOpenFile={path => setPreview({ ...preview, path })} onClose={() => setPreview(null)} t={t} perform={async fn => { try { await fn(); refreshConfig(); } catch (e) { setError(factoryError(e, t, agentName)); } }} /> : null}
     {step ? <div className="factory-step">
       {step.items.length > 1 ? <nav className="factory-tasks" aria-label={t("factoryTasksLabel")}>{step.items.map(([itemSection, page]) => <button key={page} type="button" className={page === selected ? "is-active" : ""} aria-current={page === selected ? "page" : undefined} onClick={() => goToFactory(itemSection, page)}>{page === "uploads" ? t("uploadSources") : agentName(page) || t("loadingAgentState")}{page !== "uploads" && agentEntry(page) ? <span className={`factory-dot is-${agentEntry(page).state}`} aria-hidden="true" /> : null}</button>)}</nav> : null}
-      {selected === "uploads" ? <SourceUploadWorkspace manualFiles={manualFiles} uploadItems={uploadItems} importPicker={importPicker} uploadProjectFiles={uploadProjectFiles} saveManualText={saveManualText} locale={locale} onOpenFile={previewFile} deleteManualFile={deleteManualFile} dismissUpload={dismissUpload} onOpenAgent={openAgent} t={t} /> : selectedSession ? <Workspace key={selectedSession.id} uploads={{ items: uploadItems, ingestedAt, add: uploadProjectFiles, dismiss: dismissUpload }} root={root} id={selectedSession.id} entry={selectedEntry} agents={agents} config={config} onChanged={() => undefined} onOpenAgent={openAgent} agentName={agentName} t={t} /> : <AgentIntro entry={selectedEntry} agents={agents} onOpenAgent={openAgent} agentName={agentName} locale={locale} t={t} />}
+      {selected === "uploads" ? <SourceUploadWorkspace manualFiles={manualFiles} uploadItems={uploadItems} importPicker={importPicker} uploadProjectFiles={uploadProjectFiles} saveManualText={saveManualText} locale={locale} onOpenFile={previewFile} deleteManualFile={deleteManualFile} dismissUpload={dismissUpload} onOpenAgent={openAgent} t={t} /> : selectedSession ? <Workspace key={selectedSession.id} root={root} id={selectedSession.id} entry={selectedEntry} agents={agents} config={config} onChanged={() => undefined} onOpenAgent={openAgent} agentName={agentName} t={t} /> : <AgentIntro entry={selectedEntry} agents={agents} onOpenAgent={openAgent} agentName={agentName} locale={locale} t={t} />}
     </div> : <FactoryOverview product={product} states={states} agentEntry={agentEntry} agentName={agentName} goToStep={goToStep} t={t} />}
   </div></ThemeProvider>;
 }
 
 function FactoryStepper({ states, current, onStep, t }) {
   const next = studioNextStep(states);
-  return <ol className="factory-stepper" aria-label={t("factoryStepsLabel")}>{states.map(({ step, state }) => <li key={step.id}><button type="button" className={`is-${state}${current === step.id ? " is-current" : ""}${next?.step.id === step.id ? " is-next" : ""}`} aria-current={current === step.id ? "step" : undefined} onClick={() => onStep(step)}><span className="factory-stepper__n" aria-hidden="true">{state === "done" ? "✓" : ""}</span><span className="factory-stepper__text"><span>{t(step.title)}</span><small>{t(next?.step.id === step.id && state === "todo" ? "stepNow" : STEP_STATE_KEY[state])}</small></span></button></li>)}<li><button type="button" className={`factory-stepper__advanced${current === ADVANCED_STEP.id ? " is-current" : ""}`} aria-current={current === ADVANCED_STEP.id ? "step" : undefined} onClick={() => onStep(ADVANCED_STEP)}><span className="factory-stepper__text"><span>{t(ADVANCED_STEP.title)}</span></span></button></li></ol>;
+  return <ol className="factory-stepper" aria-label={t("factoryStepsLabel")}>{states.map(({ step, state }) => <li key={step.id}><button type="button" className={`is-${state}${current === step.id ? " is-current" : ""}${next?.step.id === step.id ? " is-next" : ""}`} aria-current={current === step.id ? "step" : undefined} onClick={() => onStep(step)}><span className="factory-stepper__n" aria-hidden="true">{state === "done" ? "✓" : ""}</span><span className="factory-stepper__text"><span>{t(step.title)}</span><small>{t(next?.step.id === step.id && state === "todo" ? "stepNow" : STEP_STATE_KEY[state])}</small></span></button></li>)}</ol>;
 }
 
 function FactoryOverview({ product, states, agentEntry, agentName, goToStep, t }) {
@@ -174,7 +172,7 @@ function AgentIntro({ entry, agents, onOpenAgent, agentName, locale, t }) {
       <p className="factory-agent-intro__hint">{localizeAgentText(entry.hint, locale)}</p>
       <div className="factory-youdo"><strong>{t("factoryYouDo")}</strong><p>{t("factoryYouDoRole", entry.role)}</p></div>
       {locked ? <div className="factory-needs"><strong>{t("finishOneAgentFirst", BUILD_NEEDS.map(need => need === "uploads" ? t("uploadSources") : agentName(need)).join(t("roleSeparator")))}</strong><div>{BUILD_NEEDS.map(need => <Button key={need} variant="outlined" size="small" onClick={() => onOpenAgent(need)} endIcon={<ArrowForward />}>{need === "uploads" ? t("uploadSources") : agentName(need)}</Button>)}</div></div>
-        : <Button className="factory-cta" variant="contained" startIcon={<PlayArrow />} onClick={() => onOpenAgent(entry.role)}>{t(entry.state === "failed" ? "tryAgain" : "factoryStart")}</Button>}
+        : <Button className="factory-cta" variant="contained" startIcon={<Play size={18} strokeLinejoin="round" aria-hidden="true" />} onClick={() => onOpenAgent(entry.role)}>{t(entry.state === "failed" ? "tryAgain" : "factoryStart")}</Button>}
     </div>
   </section>;
 }
@@ -217,12 +215,11 @@ function ImportFromAi({ saveManualText, locale, t }) {
   </>;
 }
 
-function Workspace({ root, id, entry, agents, config, uploads, onChanged, onOpenAgent, agentName, t }) {
+function Workspace({ root, id, entry, agents, config, onChanged, onOpenAgent, agentName, t }) {
   const [session, setSession] = useState(null); const [error, setError] = useState(""); const [draft, setDraft] = useState(() => sessionStorage.getItem(`factory-draft:${id}`) || ""); const [stream, setStream] = useState(""); const [settled, setSettled] = useState([]); const [activity, setActivity] = useState(""); const [activityVisible, setActivityVisible] = useState(true); const [file, setFile] = useState(null); const [busy, setBusy] = useState(false);
   const composer = useRef(null); const chat = useRef(null); const stick = useRef(true); const refresh = () => api(endpoint(root, id)).then(setSession);
   useEffect(() => { let live = true; let seq = 0; const load = () => { const mine = ++seq; return api(endpoint(root, id)).then(value => { if (!live || mine !== seq) return; setSession(value); setError(""); const saved = savedReplyTexts(value); setSettled(previous => previous.filter(text => !saved.has(replyKey(text)))); }).catch(e => { if (live && mine === seq) setError(e.message); }); }; load(); const unsubscribe = subscribeFactoryEvents({ url: `${root}/sessions/${id}/events`, onMessage: event => { const value = JSON.parse(event.data); if (!value?.type) return; if (value.type === "delta") { setActivityVisible(false); setStream(previous => previous + value.text); } if (value.type === "message_end") { setStream(previous => { if (previous) setSettled(list => [...list, previous]); return ""; }); setActivityVisible(false); } if (value.type === "message") load(); if (value.type === "state") load(); if (value.type === "tool") { setActivityVisible(true); setActivity(t("callingTool", t(toolActionKey(value.name)))); } if (value.type === "thinking") { setActivityVisible(true); setActivity(t("thinking")); } if (value.type === "compacting") { setActivityVisible(true); setActivity(t("compacting")); } if (value.type === "tool_end") { setActivityVisible(true); setActivity(value.isError ? t("toolErrorContinuing") : t("continuing")); } if (["files", "todos"].includes(value.type)) load(); }, onError: () => { if (live) setActivity(t("reconnecting")); }, onOpen: () => { if (live) { setActivity(""); setStream(""); setSettled([]); load(); } } }); return () => { live = false; unsubscribe(); }; }, [root, id, t]);
   useEffect(() => { sessionStorage.setItem(`factory-draft:${id}`, draft); }, [id, draft]); useEffect(() => { if (stick.current && chat.current) chat.current.scrollTop = chat.current.scrollHeight; }, [stream, session?.messages.length]);
-  useEffect(() => { if (uploads.ingestedAt) refresh(); }, [uploads.ingestedAt]);
   const perform = async fn => { setError(""); setBusy(true); try { await fn(); await refresh(); onChanged(); } catch (e) { setError(factoryError(e, t, agentName)); } finally { setBusy(false); } };
   const dictation = useMemo(() => browserDictation(dashboardRequest), []);
   // One key per message the user sends: the composer's retry of the same message sends the same key.
@@ -246,7 +243,7 @@ function Workspace({ root, id, entry, agents, config, uploads, onChanged, onOpen
   if (!session) return <Stack className="factory-workspace-loading" spacing={1}><Skeleton width="35%" /><Skeleton width="80%" /><Skeleton width="70%" /><ErrorNotice error={error} onClose={() => setError("")} /></Stack>;
   const running = session.status === "running"; const locked = entry?.state === "locked"; const visibleSession = { ...session, files: session.files.filter(record => !record.path.startsWith("input/handoff/")) };
   const openFile = path => setFile(path); const addToChat = (path, quote) => { const reference = `${t("fileReference", path)}${quote ? `\n\n${quote.split("\n").map(line => `> ${line}`).join("\n")}` : ""}`; setDraft(previous => `${previous}${previous.trim() ? "\n\n" : ""}${reference}\n\n`); requestAnimationFrame(() => composer.current?.focus()); }; const useLatest = () => { setActivityVisible(true); return perform(async () => { await api(endpoint(root, id, "message"), { method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() }, body: { content: t("useLatestMessage", session.role) } }); setActivity(t("thinking")); }); };
-  return <div className="factory-workspace"><div className="factory-workspace-pane factory-workspace-main"><ChatPanel dictation={dictation} session={visibleSession} entry={entry} agents={agents} root={root} id={id} config={config} busy={busy} draft={draft} setDraft={setDraft} stream={stream} settled={settled} activity={activity} activityVisible={activityVisible} composer={composer} composerAdapter={composerAdapter} chat={chat} stick={stick} running={running} locked={locked} error={error} setError={setError} perform={perform} onOpenFile={openFile} onUseLatest={useLatest} agentName={agentName} t={t} /></div><div className="factory-workspace-pane factory-workspace-side"><InspectorPanel entry={entry} agents={agents} session={visibleSession} root={root} id={id} running={running} busy={busy} file={file} setFile={setFile} uploads={uploads} addToChat={addToChat} agentName={agentName} onOpenAgent={onOpenAgent} t={t} perform={perform} /></div></div>;
+  return <div className="factory-workspace"><div className="factory-workspace-pane factory-workspace-main"><ChatPanel dictation={dictation} session={visibleSession} entry={entry} agents={agents} root={root} id={id} config={config} busy={busy} draft={draft} setDraft={setDraft} stream={stream} settled={settled} activity={activity} activityVisible={activityVisible} composer={composer} composerAdapter={composerAdapter} chat={chat} stick={stick} running={running} locked={locked} error={error} setError={setError} perform={perform} onOpenFile={openFile} onUseLatest={useLatest} agentName={agentName} t={t} /></div><div className="factory-workspace-pane factory-workspace-side"><InspectorPanel entry={entry} agents={agents} session={visibleSession} root={root} id={id} running={running} busy={busy} file={file} setFile={setFile} addToChat={addToChat} agentName={agentName} onOpenAgent={onOpenAgent} t={t} perform={perform} /></div></div>;
 }
 
 function ChatPanel({ dictation, session, entry, agents, root, id, config, busy, draft, setDraft, stream, settled, activity, activityVisible, composer, composerAdapter, chat, stick, running, locked, error, setError, perform, onOpenFile, onUseLatest, agentName, t }) {
@@ -297,13 +294,13 @@ function StartAgentButton({ role, draft, setDraft, composer, disabled, t }) {
     setDraft(current => current.trim() ? current : message);
     requestAnimationFrame(() => composer.current?.focus());
   };
-  return <Button type="button" size="small" variant="outlined" startIcon={<PlayArrow />} disabled={disabled || Boolean(draft.trim())} onClick={start}>{t("startAgentLabel", role)}</Button>;
+  return <HatchButton type="button" size="small" variant="secondary" leading={<Play aria-hidden="true" />} disabled={disabled || Boolean(draft.trim())} onClick={start}>{t("startAgentLabel", role)}</HatchButton>;
 }
 
-function InspectorPanel({ entry, agents, session, root, id, running, busy, file, setFile, uploads, addToChat, agentName, onOpenAgent, t, perform }) {
+function InspectorPanel({ entry, agents, session, root, id, running, busy, file, setFile, addToChat, agentName, onOpenAgent, t, perform }) {
   const inputFiles = session.files.filter(record => record.path.startsWith("input/") && !record.path.startsWith("input/handoff/")); const outputFiles = session.files.filter(record => record.path.startsWith("output/"));
-  const picker = useRef(null); const selectedFile = file ? session.files.find(record => record.path === file) : null;
-  return <Box component="aside" className="factory-inspector" aria-label={t("nextSteps")} sx={{ height: "100%", minWidth: 0, display: "flex", flexDirection: "column", bgcolor: "var(--hatch-ui-surface-sidebar)" }}>{entry && entry.state !== "complete" ? <div className="factory-inspector-status"><AgentState entry={entry} agentName={agentName} t={t} /></div> : null}<Box className="factory-inspector-scroll" sx={{ overflow: "auto", flex: 1, minHeight: 0, p: 1.5 }}><Binding s={session} t={t} />{entry && <NextSteps entry={entry} agents={agents} todos={session.todos || []} onOpenAgent={onOpenAgent} agentName={agentName} t={t} />}<div className="fl-panel"><div className="fl-panel__head"><strong>{t("files")}</strong><HatchButton size="small" variant="secondary" disabled={running || busy} onClick={() => picker.current?.click()}>{t("addFiles")}</HatchButton><input ref={picker} hidden type="file" multiple onChange={event => { uploads.add([...event.target.files]); event.target.value = ""; }} /></div><FileList title={t("attachments")} records={[...uploads.items, ...inputFiles]} onOpen={setFile} onDelete={record => record.id ? uploads.dismiss(record.id) : perform(() => api(endpoint(root, id, "files"), { method: "DELETE", body: { path: record.path } }))} deletable={record => record.id || (!running && /^input\/manual\//.test(record.path))} statusLabel={uploadStatusLabel(t)} t={t} /><FileList title={t("outputs")} records={outputFiles} onOpen={setFile} t={t} /></div>{selectedFile && <FileViewer key={file} root={root} running={running} id={id} record={selectedFile} siblings={selectedFile.path.startsWith("output/") ? outputFiles : inputFiles} onOpenFile={setFile} onAddToChat={addToChat} onClose={() => setFile(null)} t={t} perform={perform} />}</Box></Box>;
+  const selectedFile = file ? session.files.find(record => record.path === file) : null;
+  return <Box component="aside" className="factory-inspector" aria-label={t("nextSteps")} sx={{ height: "100%", minWidth: 0, display: "flex", flexDirection: "column", bgcolor: "var(--hatch-ui-surface-sidebar)" }}>{entry && entry.state !== "complete" ? <div className="factory-inspector-status"><AgentState entry={entry} agentName={agentName} t={t} /></div> : null}<Box className="factory-inspector-scroll" sx={{ overflow: "auto", flex: 1, minHeight: 0, p: 1.5 }}><Binding s={session} t={t} />{entry && <NextSteps entry={entry} agents={agents} todos={session.todos || []} onOpenAgent={onOpenAgent} agentName={agentName} t={t} />}<div className="fl-panel"><div className="fl-panel__head"><strong>{t("files")}</strong><HatchButton size="small" variant="secondary" onClick={() => onOpenAgent("uploads")}>{t("addFiles")}</HatchButton></div><FileList title={t("attachments")} records={inputFiles} onOpen={setFile} onDelete={record => perform(() => api(endpoint(root, id, "files"), { method: "DELETE", body: { path: record.path } }))} deletable={record => !running && /^input\/manual\//.test(record.path)} t={t} /><FileList title={t("outputs")} records={outputFiles} onOpen={setFile} t={t} /></div>{selectedFile && <FileViewer key={file} root={root} running={running} id={id} record={selectedFile} siblings={selectedFile.path.startsWith("output/") ? outputFiles : inputFiles} onOpenFile={setFile} onAddToChat={addToChat} onClose={() => setFile(null)} t={t} perform={perform} />}</Box></Box>;
 }
 
 function FileViewer({ root, running, id, record, siblings, onOpenFile, onClose, onAddToChat, t, perform }) {
@@ -349,7 +346,7 @@ function NextSteps({ entry, agents, todos, onOpenAgent, agentName, t }) {
         </Stack>
       </Stack>
     </Alert>}
-    {todos.length > 0 && <Paper variant="outlined" sx={{ p: 1.25 }}><Stack direction="row" justifyContent="space-between"><Typography variant="caption" fontWeight={750}>{t("todo")}</Typography><Typography variant="caption" color="text.secondary">{todos.filter(todo => todo.status === "completed").length}/{todos.length}</Typography></Stack><Box className="factory-todo-list" sx={{ maxHeight: 220, overflowY: "auto", pr: 0.5 }}><Stack spacing={0.75}>{todos.map((todo, index) => <Box key={`${todo.title}-${index}`} className="factory-todo-row"><Typography component="span" variant="caption" className="factory-todo-marker" aria-hidden="true">{todo.status === "completed" ? "✓" : "○"}</Typography><Typography component="span" variant="caption" className="factory-todo-title" sx={{ color: todo.status === "completed" ? "text.secondary" : "text.primary", textDecoration: todo.status === "completed" ? "line-through" : "none" }}>{todo.title}</Typography></Box>)}</Stack></Box></Paper>}
+    {todos.length > 0 && <Paper variant="outlined" sx={{ p: 1.25 }}><Stack direction="row" justifyContent="space-between"><Typography variant="caption" fontWeight={750}>{t("todo")}</Typography><Typography variant="caption" color="text.secondary">{todos.filter(todo => todo.status === "completed").length}/{todos.length}</Typography></Stack><Box className="factory-todo-list" sx={{ maxHeight: 220, overflowY: "auto", pr: 0.5 }}><Stack spacing={0.75}>{todos.map((todo, index) => <Box key={`${todo.title}-${index}`} className="factory-todo-row"><Typography component="span" variant="caption" className="factory-todo-marker" aria-hidden="true">{todo.status === "completed" ? "✓" : "○"}</Typography><Typography component="span" variant="caption" className="factory-todo-title" sx={{ color: todo.status === "completed" ? "text.secondary" : "text.primary" }}>{todo.title}</Typography></Box>)}</Stack></Box></Paper>}
   </Stack>;
 }
 const toolActionKey = name => { const value = String(name || "").toLowerCase(); if (value.includes("update_todo")) return "toolActionUpdateTodo"; if (value.includes("corpus_upload")) return "toolActionCorpusUpload"; if (value.includes("evaluate")) return "toolActionEvaluate"; if (value.includes("search")) return "toolActionSearch"; if (value.includes("write")) return "toolActionWrite"; if (value.includes("read")) return "toolActionRead"; if (value.includes("list")) return "toolActionList"; return "toolActionUnknown"; };

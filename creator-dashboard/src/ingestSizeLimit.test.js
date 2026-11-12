@@ -9,12 +9,12 @@ test("one 50 MB limit decides which files are refused before any ingest request"
   assert.equal(tooLarge({ size: MAX_INGEST_BYTES + 1 }), true);
 });
 
-test("an oversize file becomes an unsupported row and never reaches ingest, from both entry points", async () => {
+test("an oversize file becomes an unsupported row and never reaches ingest, on the Upload page", async () => {
   const source = await readFile(new URL("./FactoryAgents.jsx", import.meta.url), "utf8");
   assert.match(source, /if \(tooLarge\(file\)\) \{.*status: "unsupported".*return; \}/);
   const gate = source.indexOf("tooLarge(file)");
   assert.ok(gate > 0 && gate < source.indexOf("return ingestFile("));
-  assert.equal(source.split("uploadProjectFiles(").length > 1 && source.includes("add: uploadProjectFiles"), true);
+  assert.match(source, /uploadProjectFiles=\{uploadProjectFiles\}/);
 });
 
 test("the not-supported label exists in every language", async () => {
