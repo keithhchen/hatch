@@ -20,7 +20,7 @@ hatch --help
 
 `hatch login` opens the browser. Or create an API key and pipe it in; the key is shown once.
 
-API keys: https://gethatchapp.com/studio/api-keys
+API keys: https://gethatchapp.com/studio/settings#api-keys
 
 ```sh
 hatch login
@@ -112,7 +112,7 @@ The Run belongs to the server. Closing the CLI or losing the connection never st
 
 The key is shown once. Send it as a Bearer token.
 
-API keys: https://gethatchapp.com/studio/api-keys
+API keys: https://gethatchapp.com/studio/settings#api-keys
 
 ```sh
 export HATCH_API_KEY=...
@@ -521,7 +521,7 @@ error
 
 ### 7. Send images and files
 
-`input_image` takes a `data:` or `https:` URL. `input_file` takes `file_data` (a data URL) with `filename`, or `file_url`. `file_id` is not supported yet; the Files API is coming soon.
+`input_image` takes a `data:` or `https:` URL. `input_file` takes `file_data` (a data URL) with `filename`; or pass a public https URL as `file_url`. `file_id` is not supported yet; the Files API is coming soon.
 
 ```python
 import base64
@@ -537,7 +537,6 @@ response = client.responses.create(
             {"type": "input_text", "text": "Compare these"},
             {"type": "input_image", "image_url": f"data:image/png;base64,{photo}"},
             {"type": "input_file", "filename": "notes.pdf", "file_data": f"data:application/pdf;base64,{notes}"},
-            {"type": "input_file", "file_url": "https://example.com/report.pdf"},
         ],
     }],
 )
@@ -547,6 +546,7 @@ response = client.responses.create(
 import { readFileSync } from "node:fs";
 
 const photo = readFileSync("photo.png").toString("base64");
+const notes = readFileSync("notes.pdf").toString("base64");
 const response = await client.responses.create({
   model: "hatch:<product_id>",
   conversation: conversation.id,
@@ -555,7 +555,7 @@ const response = await client.responses.create({
     content: [
       { type: "input_text", text: "Compare these" },
       { type: "input_image", image_url: "data:image/png;base64," + photo },
-      { type: "input_file", file_url: "https://example.com/report.pdf" },
+      { type: "input_file", filename: "notes.pdf", file_data: "data:application/pdf;base64," + notes },
     ],
   }],
 });
@@ -563,7 +563,7 @@ const response = await client.responses.create({
 
 ```sh
 curl -s -X POST https://gethatchapp.com/responses/v1/responses -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" \
-  -d '{"model":"hatch:<product_id>","conversation":"'"$CONVERSATION_ID"'","input":[{"role":"user","content":[{"type":"input_text","text":"Describe this"},{"type":"input_image","image_url":"https://example.com/photo.png"}]}]}'
+  -d '{"model":"hatch:<product_id>","conversation":"'"$CONVERSATION_ID"'","input":[{"role":"user","content":[{"type":"input_text","text":"Describe this"},{"type":"input_image","image_url":"data:image/png;base64,'"$(base64 < photo.png | tr -d '\n')"'"}]}]}'
 ```
 
 ### 8. Continue a conversation
