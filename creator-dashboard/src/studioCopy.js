@@ -31,7 +31,7 @@ export const STUDIO_COPY = {
     // Home
     homeEmptyPill: "Studio",
     homeEmptyTitle: "Create your first Agent",
-    homeEmptyBody: "An Agent is built from your sources and an interview. After evaluation, you can publish it to clients.",
+    homeEmptyBody: "An Agent is built from your sources and an interview. Try it yourself, then publish it to clients.",
     homeStartFirst: "New Agent",
     homePathTitle: "How it works",
     homePill: "Studio",
@@ -92,7 +92,7 @@ export const STUDIO_COPY = {
     factoryUploadDrop: "Drag files here or click to select",
     factoryUploadTypes: "txt, md, docx, pptx, xlsx or pdf, up to 20 MB each.",
     factoryUploadedTitle: "Uploaded files",
-    factoryUploadNext: "Next: Deep Research",
+    factoryUploadNext: "Next: Interview",
     factoryYouDoRole: (role) => ({
       uploads: "Upload existing material such as articles, slides, past cases and transcripts.",
       research: "Provide your background and where your public work is published. The Agent reads it and asks when something is unclear.",
@@ -139,7 +139,7 @@ export const STUDIO_COPY = {
     stepNumber: (n) => `步骤 ${n}`,
     homeEmptyPill: "工作室",
     homeEmptyTitle: "创建第一个 Agent",
-    homeEmptyBody: "Agent 基于你的资料和访谈构建，评估完成后可发布给客户。",
+    homeEmptyBody: "Agent 基于你的资料和访谈构建，自己体验满意后即可发布给客户。",
     homeStartFirst: "新建 Agent",
     homePathTitle: "创建流程",
     homePill: "工作室",
@@ -197,7 +197,7 @@ export const STUDIO_COPY = {
     factoryUploadDrop: "将文件拖到此处，或点击选择",
     factoryUploadTypes: "支持 txt、md、docx、pptx、xlsx、pdf，单个文件不超过 20 MB。",
     factoryUploadedTitle: "已上传的文件",
-    factoryUploadNext: "下一步：深度研究",
+    factoryUploadNext: "下一步：访谈",
     factoryYouDoRole: (role) => ({
       uploads: "上传已有资料，例如文章、课件、过往案例和录音转写稿。",
       research: "提供你的背景信息和公开内容的位置。Agent 会自动阅读，有疑问时向你确认。",
@@ -242,7 +242,7 @@ export const STUDIO_COPY = {
     stepNumber: (n) => `ステップ ${n}`,
     homeEmptyPill: "スタジオ",
     homeEmptyTitle: "最初の Agent を作成",
-    homeEmptyBody: "Agent は資料とインタビューをもとに構築されます。評価の完了後、顧客向けに公開できます。",
+    homeEmptyBody: "Agent は資料とインタビューをもとに構築されます。自分で試してから、顧客向けに公開できます。",
     homeStartFirst: "新規 Agent",
     homePathTitle: "作成の流れ",
     homePill: "スタジオ",
@@ -300,7 +300,7 @@ export const STUDIO_COPY = {
     factoryUploadDrop: "ここにファイルをドラッグ、またはクリックして選択",
     factoryUploadTypes: "txt・md・docx・pptx・xlsx・pdf、1 ファイル 20 MB まで。",
     factoryUploadedTitle: "アップロード済みのファイル",
-    factoryUploadNext: "次のステップ：深掘り調査",
+    factoryUploadNext: "次のステップ：インタビュー",
     factoryYouDoRole: (role) => ({
       uploads: "記事、スライド、過去の事例、文字起こしなどの既存資料をアップロードします。",
       research: "経歴と公開コンテンツの所在を入力します。Agent が内容を読み、不明点があれば確認します。",

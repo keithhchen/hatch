@@ -141,7 +141,7 @@ function SourceUploadWorkspace({ manualFiles, uploadItems, importPicker, uploadP
       <div className="factory-files__head"><strong>{t("factoryUploadedTitle")}</strong><span>{t("fileCount", manualFiles?.length || 0)}</span></div>
       {records.length ? <List dense disablePadding>{records.map(record => { const item = record.uploadItem || pending.get(record.path); const status = item?.status || "completed"; return <ListItemButton key={record.path} onClick={() => status === "completed" && onOpenAgent("research")}><ListItemIcon><Description fontSize="small" /></ListItemIcon><ListItemText primary={record.path.replace("input/manual/", "")} secondary={item?.error || t(status === "completed" ? "uploadComplete" : status === "failed" ? "uploadFailed" : "uploadProcessing")} primaryTypographyProps={{ noWrap: true }} /><Box sx={{ width: 110, ml: 2, display: "flex", justifyContent: "flex-end" }}>{status === "uploading" ? <LinearProgress sx={{ width: 90 }} /> : status === "completed" ? <IconButton size="small" aria-label={t("deleteFile")} onClick={event => { event.stopPropagation(); deleteManualFile(record); }}><DeleteOutlineOutlined fontSize="small" /></IconButton> : <Typography variant="caption" color="error.main">{t("uploadFailed")}</Typography>}</Box></ListItemButton>; })}</List> : <p className="factory-files__empty">{t("noFiles")}</p>}
     </div>
-    <Button variant="outlined" endIcon={<ArrowForward />} onClick={() => onOpenAgent("research")}>{t("factoryUploadNext")}</Button>
+    <Button variant="outlined" endIcon={<ArrowForward />} onClick={() => onOpenAgent("voice")}>{t("factoryUploadNext")}</Button>
   </section>;
 }
 
