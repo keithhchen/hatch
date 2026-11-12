@@ -36,6 +36,7 @@ export function toProblem(error: unknown): Problem {
   }
   if (error instanceof ConversationRepositoryError) return { status: repositoryStatus(error.code), code: error.code, message: error.message };
   if (error instanceof ZodError) return { status: 400, code: "invalid_request", message: error.issues.map((issue) => `${issue.path.join(".") || "body"}: ${issue.message}`).join("; ") };
+  if (error instanceof URIError) return { status: 400, code: "invalid_request_path", message: "The request path contains invalid encoding." };
   if (error instanceof RangeError) return { status: 400, code: "invalid_request", message: error.message };
   if (error && typeof error === "object" && "code" in error && error.code === "history_cursor_invalid") {
     return { status: 400, code: "history_cursor_invalid", message: "The history cursor does not belong to this conversation or is invalid." };

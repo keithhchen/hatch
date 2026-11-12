@@ -807,10 +807,6 @@ export class PostgresStore extends RuntimeStore {
       });
   }
 
-  async visibleConversationTruncated(conversationId: string): Promise<boolean> {
-    return false;
-  }
-
   override async lastActivityAt(conversationId: string): Promise<number | undefined> {
     await this.waitForConversationAppends(conversationId);
     await this.ensureSchema();

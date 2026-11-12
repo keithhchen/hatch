@@ -333,15 +333,8 @@ export function controlledTurnAuthorizationError(error: unknown): { code: string
   };
 }
 
-export function scopedConversationId(binding: Pick<SessionBinding, "creatorId" | "userId" | "productId" | "corpusDigest">, conversationId: string): string {
-  // Keep the historical hash shape while the repository still stores the
-  // legacy agent_id column. Both values represented the same Product UUID.
-  return `scope:${shortHash([binding.creatorId, binding.userId, binding.productId, binding.productId, binding.corpusDigest].join("\u0000"))}:${conversationId}`;
-}
-
 /**
- * P2 durable Conversation identity. Unlike the legacy transcript scope above,
- * this intentionally excludes corpusDigest: corpus revision is recorded on
+ * P2 durable Conversation identity. It intentionally excludes corpusDigest: corpus revision is recorded on
  * each Run, while a Conversation remains bound to the same Account and Creator
  * Agent across Agent Corpus updates.
  */

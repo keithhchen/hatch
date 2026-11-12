@@ -19,6 +19,7 @@ import {
   type ConversationRepository
 } from "../conversationRepository.js";
 import { EntitlementError, type AuthIdentityResolver, type EntitlementResolver } from "../entitlements.js";
+import { toProblem } from "../errors/problem.js";
 import { bearerToken } from "./httpSupport.js";
 
 export async function bindingFromHistoryRequest(
@@ -98,6 +99,8 @@ export async function requireConversationBinding(
     return binding;
   } catch (error) {
     if (error instanceof ConversationHttpError) throw error;
+    // A Registry outage is a 503, not a refusal of access.
+    if (error instanceof EntitlementError && toProblem(error).status === 503) throw error;
     throw new ConversationHttpError(403, "entitlement_required", errorMessage(error));
   }
 }

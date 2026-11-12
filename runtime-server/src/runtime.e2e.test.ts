@@ -9,7 +9,7 @@ import { WebSocket } from "ws";
 import { DeterministicAgentRuntime, type AgentRuntime } from "./agentRuntime.js";
 import { useSearchFixture } from "./searchFixture.testkit.js";
 import { buildCompactedHistory, RUNTIME_CONTEXT_PREFIX, runtimeMessagesTranscript, SUMMARY_PREFIX } from "./compaction.js";
-import { clientToolTimeoutMs, createRuntimeServer, scopedConversationId, type RuntimeServer } from "./index.js";
+import { clientToolTimeoutMs, createRuntimeServer, durableConversationId, type RuntimeServer } from "./index.js";
 import {
   TASK_START_MESSAGE_CONTENT,
   type ConversationMessage,
@@ -243,7 +243,22 @@ test("runtime server exposes visible conversation history for client hydration",
     agentId: "22222222-2222-4222-8222-222222222222",
     corpusDigest: `sha256:${"1".repeat(64)}`
   };
-  const storedConversationId = scopedConversationId(historyBinding, "desktop-chat");
+  runtimeServer = createDeterministicRuntimeServer();
+  const serverUrl = (await listen(runtimeServer)).replace(/^ws:/, "http:").replace(/\/runtime$/, "");
+  const scope = new URLSearchParams({
+    creator_id: historyBinding.creatorId,
+    user_id: historyBinding.userId,
+    agent_id: historyBinding.agentId,
+    product_id: historyBinding.productId,
+    corpus_digest: historyBinding.corpusDigest
+  }).toString();
+  const created = await fetch(`${serverUrl}/v1/conversations?${scope}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title: "Desktop chat" })
+  });
+  const conversationId = ((await created.json()) as { conversation: { id: string } }).conversation.id;
+  const storedConversationId = durableConversationId(historyBinding, conversationId);
   await store.append({
     type: "message.created",
     conversation_id: storedConversationId,
@@ -326,21 +341,9 @@ test("runtime server exposes visible conversation history for client hydration",
     ]
   });
 
-  runtimeServer = createDeterministicRuntimeServer();
-  const serverUrl = await listen(runtimeServer);
-  const historyUrl = new URL(serverUrl);
-  historyUrl.protocol = "http:";
-  historyUrl.pathname = "/conversations/desktop-chat/messages";
-  historyUrl.search = new URLSearchParams({
-    creator_id: historyBinding.creatorId,
-    user_id: historyBinding.userId,
-    product_id: historyBinding.productId,
-    corpus_digest: historyBinding.corpusDigest
-  }).toString();
-  const response = await fetch(historyUrl);
+  const response = await fetch(`${serverUrl}/v1/conversations/${conversationId}/history?${scope}`);
   assert.equal(response.status, 200);
   const payload = await response.json() as {
-    conversation_id: string;
     messages: Array<{
       role: string;
       content: string;
@@ -368,7 +371,6 @@ test("runtime server exposes visible conversation history for client hydration",
       }>;
     }>;
   };
-  assert.equal(payload.conversation_id, "desktop-chat");
   assert.deepEqual(payload.messages.map((message) => [message.role, message.content]), [
     ["user", "Read the birthday dinner sheet."],
     ["assistant", `${beforeTool}${afterTool}`]
@@ -380,16 +382,18 @@ test("runtime server exposes visible conversation history for client hydration",
     toolCall.name,
     toolCall.status,
     toolCall.locality,
-    toolCall.approval,
-    toolCall.result?.content
+    toolCall.approval
   ]), [[
     "call_file_read",
     "file_read",
     "completed",
     "client",
-    "auto",
-    "birthday dinner rows"
+    "auto"
   ]]);
+  // The page carries no tool output; the tool's own route does.
+  const detail = await fetch(`${serverUrl}/v1/conversations/${conversationId}/tools/run_old_1/call_file_read?${scope}`);
+  assert.equal(detail.status, 200);
+  assert.equal(((await detail.json()) as { tool: { result: { content: string } } }).tool.result.content, "birthday dinner rows");
   assert.deepEqual(payload.messages[1]?.parts, [
     { type: "text", start: 0, end: beforeTool.length },
     { type: "tool_call", tool_call_id: "call_file_read" },
