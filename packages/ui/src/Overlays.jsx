@@ -4,7 +4,6 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import * as PopoverPrimitive from "@radix-ui/react-popover";
 import * as SelectPrimitive from "@radix-ui/react-select";
-import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { Command as CommandPrimitive } from "cmdk";
 import { Drawer as DrawerPrimitive } from "vaul";
 import { Check, ChevronDown, ChevronRight, Search, X } from "lucide-react";
@@ -19,14 +18,6 @@ export const PopoverAnchor = PopoverPrimitive.Anchor;
 export const PopoverContent = React.forwardRef(function PopoverContent({ className, align = "center", sideOffset = 7, ...props }, ref) {
   return <PopoverPrimitive.Portal><PopoverPrimitive.Content ref={ref} className={cn("hui-popover", className)} align={align} sideOffset={sideOffset} {...props} /></PopoverPrimitive.Portal>;
 });
-
-export function TooltipProvider({ children, delayDuration = 380 }) {
-  return <TooltipPrimitive.Provider delayDuration={delayDuration}>{children}</TooltipPrimitive.Provider>;
-}
-
-export function Tooltip({ children, content, side = "top" }) {
-  return <TooltipPrimitive.Root><TooltipPrimitive.Trigger asChild>{children}</TooltipPrimitive.Trigger><TooltipPrimitive.Portal><TooltipPrimitive.Content className="hui-tooltip" side={side} sideOffset={7}>{content}<TooltipPrimitive.Arrow className="hui-tooltip__arrow" /></TooltipPrimitive.Content></TooltipPrimitive.Portal></TooltipPrimitive.Root>;
-}
 
 export function DropdownMenu({ trigger, items, align = "end", label = "Actions" }) {
   return (
