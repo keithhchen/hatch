@@ -297,18 +297,6 @@ export class ClientToolBroker {
     return true;
   }
 
-  /**
-   * This process lets go of its waiting calls without telling anyone they ended: another instance continues the Run
-   * and the calls stay recorded for it. Nothing is persisted and no client sees a cancellation.
-   */
-  abandon(reason = "Run handed off"): void {
-    for (const [key, pending] of this.pending) {
-      this.pending.delete(key);
-      clearTimeout(pending.timeout);
-      pending.reject(new Error(reason));
-    }
-  }
-
   async cancelAll(reason = "Client broker canceled"): Promise<void> {
     const claimed = this.claimPendingCalls(() => true, reason);
     await Promise.allSettled(claimed.map((pending) => this.observeCancellation(pending, reason)));

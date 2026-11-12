@@ -2,7 +2,7 @@ import { endingOf } from "../testSupport.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { InMemoryConversationRepository, type AcceptSubmissionInput } from "../conversationRepository.js";
-import { RunHandoff, RunSupervisor, type ResumeDecision, type RunControl, type RunExecutor } from "./runSupervisor.js";
+import { RunHandoff, RunSupervisor, type RunControl, type RunExecutor } from "./runSupervisor.js";
 import { runTerminators } from "./runTerminator.js";
 import { RunEventHub } from "./runEventHub.js";
 import { InProcessStopRelay } from "./stopRelay.js";
@@ -15,11 +15,11 @@ const message = (n: number, lease?: string): AcceptSubmissionInput => ({
   canonicalUser: { role: "user", content: `q${n}` }
 });
 
-async function setup(executor: RunExecutor, decide: () => ResumeDecision = () => "restart") {
+async function setup(executor: RunExecutor) {
   const repository = new InMemoryConversationRepository();
   const hub = new RunEventHub();
   await repository.createConversation({ ...binding, id: conversationId, publicId: "supervisor" });
-  const supervisor = (executorId: string) => new RunSupervisor(repository, executor, { decide: async () => decide() }, { executorId, leaseMs: 60_000, sweepMs: 60_000 }, runTerminators(repository, hub, executorId));
+  const supervisor = (executorId: string) => new RunSupervisor(repository, executor, async () => undefined, { executorId, leaseMs: 60_000, sweepMs: 60_000 }, runTerminators(repository, hub, executorId));
   return { repository, supervisor, hub };
 }
 
@@ -36,19 +36,25 @@ test("a Run is executed by the supervisor with no client attached and completes 
   await settled(async () => (await repositoryRef.getRun(conversationId, started.run.id))!.status === "completed");
 });
 
-test("two instances sweeping an orphaned Run execute it once", async () => {
-  const executed: string[] = [];
-  const { repository, supervisor } = await setup({ execute: async (run, control) => {
-    executed.push(run.id);
-    await new Promise<void>((resolve) => control.signal.addEventListener("abort", () => resolve()));
-  } });
+test("two instances sweeping an orphaned Run end it interrupted once and never execute it", async () => {
+  const { repository, supervisor } = await setup({ execute: async () => assert.fail("must not run") });
   const started = await repository.acceptSubmission(message(0, new Date(Date.now() - 1000).toISOString()));
   const [a, b] = [supervisor("a"), supervisor("b")];
   await Promise.all([a.sweep(), b.sweep()]);
-  await settled(() => executed.length === 1);
-  assert.equal(a.owns(started.run.id) !== b.owns(started.run.id), true);
-  await Promise.all([a.stop(), b.stop()]);
-  // Shutdown is a handoff, not a failure: the Run stays active for the next instance.
+  const run = (await repository.getRun(conversationId, started.run.id))!;
+  assert.deepEqual([run.status, run.failure?.code], ["interrupted", "run_interrupted"]);
+  assert.equal(a.owns(run.id) || b.owns(run.id), false);
+});
+
+test("shutting down leaves a Run held here for the next sweep to interrupt, never a failure", async () => {
+  const { repository, supervisor } = await setup({ execute: async (_run, control) => {
+    await new Promise<void>((resolve) => control.signal.addEventListener("abort", () => resolve()));
+  } });
+  const started = await repository.acceptSubmission(message(0));
+  const instance = supervisor("a");
+  instance.adopt(started.run);
+  await settled(() => instance.owns(started.run.id));
+  await instance.stop();
   assert.equal((await repository.getRun(conversationId, started.run.id))!.status, "queued");
 });
 
@@ -73,14 +79,6 @@ test("draining waits for a Run held here and stops claiming other instances' Run
   await drain;
   assert.equal((await repository.getRun(conversationId, started.run.id))!.status, "completed");
   await draining.stop();
-});
-
-test("the resume policy can interrupt an orphaned Run instead of restarting it", async () => {
-  const { repository, supervisor } = await setup({ execute: async () => assert.fail("must not run") }, () => ({ interrupt: "used a local tool" }));
-  const started = await repository.acceptSubmission(message(0, new Date(Date.now() - 1000).toISOString()));
-  await supervisor("a").sweep();
-  const run = (await repository.getRun(conversationId, started.run.id))!;
-  assert.deepEqual([run.status, run.failure?.message], ["interrupted", "used a local tool"]);
 });
 
 test("a message that joins after the executor's last claim makes the supervisor execute again", async () => {
@@ -134,7 +132,7 @@ test("a local-tool result reaches the Run through its registered tool session", 
 test("a message that joined a Run is claimed when a sweep interrupts the Run or the user stops it", async () => {
   const { repository, supervisor } = await setup({ execute: async (_run, control) => {
     await new Promise<void>((resolve) => control.signal.addEventListener("abort", () => resolve()));
-  } }, () => ({ interrupt: "used a local tool" }));
+  } });
   const consumed = async (runId: string) => (await repository.snapshot(conversationId)).events.filter((event) => event.runId === runId && event.type === "message.consumed").length;
   const orphan = await repository.acceptSubmission(message(0, new Date(Date.now() - 1000).toISOString()));
   await repository.acceptSubmission(message(1));
@@ -158,7 +156,7 @@ test("a message that joins on another instance wakes the instance that executes 
     control.onSteer(() => woken.push(run.id));
     await new Promise<void>((resolve) => control.signal.addEventListener("abort", () => resolve()));
   } };
-  const build = (executorId: string) => new RunSupervisor(repository, executor, { decide: async () => "restart" }, { executorId, leaseMs: 60_000, sweepMs: 60_000, steers }, runTerminators(repository, hub, executorId));
+  const build = (executorId: string) => new RunSupervisor(repository, executor, async () => undefined, { executorId, leaseMs: 60_000, sweepMs: 60_000, steers }, runTerminators(repository, hub, executorId));
   const [owner, other] = [build("owner"), build("other")];
   await Promise.all([owner.start(), other.start()]);
   const started = await repository.acceptSubmission(message(0));

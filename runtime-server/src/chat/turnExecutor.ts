@@ -1,6 +1,6 @@
 import { ClientToolBroker } from "../clientBroker.js";
-import { type ConversationRecord, type ConversationRepository, type ConversationRunRecord, type ToolCallRecord } from "../conversationRepository.js";
-import { type BoundRunStart, type ConversationMessage, type OutboundMessage, type ToolRequest } from "../protocol.js";
+import { type ConversationRecord, type ConversationRepository, type ConversationRunRecord } from "../conversationRepository.js";
+import { type BoundRunStart, type ConversationMessage, type OutboundMessage } from "../protocol.js";
 import { RunStateMachine } from "../runState.js";
 import type { RuntimeStore } from "../store.js";
 import type { ClientAttributes } from "../surfaces/contract.js";
@@ -9,8 +9,7 @@ import type { RunRegistry } from "./chatService.js";
 import type { RunCompactions, TurnCompaction } from "./chatCompaction.js";
 import type { RunEventHub } from "./runEventHub.js";
 import type { RunTerminator } from "./runTerminator.js";
-import { RunHandoff, type RunControl, type RunExecutor } from "./runSupervisor.js";
-import type { ToolRecovery } from "./toolRecovery.js";
+import { type RunControl, type RunExecutor } from "./runSupervisor.js";
 import { CLIENT_TOOL_NAMES } from "./toolSurface.js";
 
 /** Everything one execution of a Run needs, with no transport in it. */
@@ -19,8 +18,8 @@ export type Turn<Scope> = {
   conversation: ConversationRecord;
   scope: Scope;
   /**
-   * The Run starts from the transcript's last message. A user message is prompted; anything else (a tool
-   * result after a restart, a history compacted after an overflow) is continued: `task_start` with no content.
+   * The Run starts from the transcript's last message. A user message is prompted; anything else (a history
+   * compacted after an overflow) is continued: `task_start` with no content.
    */
   input: BoundRunStart;
   persistedUser: ConversationMessage;
@@ -48,19 +47,13 @@ export interface ScopeResolver<Scope> {
   resolve(conversation: ConversationRecord, signal: AbortSignal): Promise<Scope>;
 }
 
-const FALLBACK_CLIENT: ClientAttributes = { client: "web" };
-
-const requestOf = (call: ToolCallRecord): ToolRequest => ({
-  type: "tool_call.request", run_id: call.runId, tool_call_id: call.toolCallId, name: call.name,
-  arguments: call.arguments, approval: call.approval,
-  ...(call.scope ? { scope: call.scope } : {}), ...(call.skillRunId ? { skill_run_id: call.skillRunId } : {})
-});
-
-const sleep = (ms: number, signal: AbortSignal): Promise<void> => new Promise((resolve, reject) => {
-  const timer = setTimeout(() => { signal.removeEventListener("abort", stop); resolve(); }, ms);
-  const stop = (): void => { clearTimeout(timer); reject(signal.reason); };
-  signal.addEventListener("abort", stop, { once: true });
-});
+/** A running turn always has the client of its latest message; one that does not cannot say which tools may run. */
+export class RunClientMissing extends Error {
+  constructor(conversationId: string) {
+    super(`No client is registered for conversation ${conversationId}, so its tools cannot be authorised`);
+    this.name = "RunClientMissing";
+  }
+}
 
 export class TurnExecutor<Scope> implements RunExecutor {
   constructor(private readonly deps: {
@@ -72,10 +65,8 @@ export class TurnExecutor<Scope> implements RunExecutor {
     registry: RunRegistry<Scope>;
     scopes: ScopeResolver<Scope>;
     runner: TurnRunner<Scope>;
-    recovery: Pick<ToolRecovery, "plan">;
     compactions: RunCompactions;
     toolTimeoutMs: number;
-    toolPollMs?: number;
   }) {}
 
   async execute(run: ConversationRunRecord, control: RunControl): Promise<void> {
@@ -105,14 +96,10 @@ export class TurnExecutor<Scope> implements RunExecutor {
       // Cancelling records the state change in the transcript before it cancels the waiting tool calls.
       cancelRun: async (runId, reason) => { await state.cancel(reason).catch(() => undefined); return broker.cancelRun(runId, reason); }
     });
-    // An explicit stop must not leave a tool call hanging. A handoff is not an end: the calls stay recorded for the next instance.
-    const releaseTools = (): void => {
-      if (control.signal.reason instanceof RunHandoff) broker.abandon();
-      else void broker.cancelAll("The Run stopped").catch(() => undefined);
-    };
+    // However the Run stops, no tool call is left hanging.
+    const releaseTools = (): void => { void broker.cancelAll("The Run stopped").catch(() => undefined); };
     control.signal.addEventListener("abort", releaseTools, { once: true });
     try {
-      if (!await this.recover(run, conversation, state, publish, control.signal)) return;
       await claimSteered();
       const history = await store.readConversation(conversation.id);
       const last = [...history].reverse().find((message) => message.role === "user");
@@ -130,7 +117,7 @@ export class TurnExecutor<Scope> implements RunExecutor {
       };
       await this.deps.runner.run({
         run, conversation, scope, input, persistedUser: last, state, broker, publish, signal: control.signal,
-        clientOf: () => registry.clientOf(conversation.id) ?? FALLBACK_CLIENT,
+        clientOf: () => registry.clientOf(conversation.id) ?? (() => { throw new RunClientMissing(conversation.id); })(),
         claimSteered,
         onSteer: control.onSteer,
         compaction: this.deps.compactions.forRun({ run, conversation, state, publish, signal: control.signal })
@@ -138,35 +125,6 @@ export class TurnExecutor<Scope> implements RunExecutor {
     } finally {
       control.signal.removeEventListener("abort", releaseTools);
       await partial.flush();
-    }
-  }
-
-  /**
-   * A Run taken over after a crash first settles the calls the dead executor left open: results are written
-   * to the transcript, a local tool that a client may still answer is waited for, and a call that may have
-   * had an effect interrupts the Run. False when the Run ended here.
-   */
-  private async recover(run: ConversationRunRecord, conversation: ConversationRecord, state: RunStateMachine, publish: (message: OutboundMessage) => void, signal: AbortSignal): Promise<boolean> {
-    let announced = false;
-    for (;;) {
-      signal.throwIfAborted();
-      const plan = await this.deps.recovery.plan(run, await this.deps.store.readConversation(conversation.id));
-      if (plan.kind === "interrupt") {
-        await state.interrupt(plan.reason);
-        return false;
-      }
-      if (plan.kind === "ready") {
-        for (const message of plan.results) await this.deps.store.append({ type: "conversation.model_message", conversation_id: conversation.id, run_id: run.id, message });
-        if (state.status === "waiting_for_tool") await state.resumeFromTool();
-        return true;
-      }
-      if (!announced) {
-        announced = true;
-        await state.waitForTool();
-        // Observers on this instance learn what the Run waits for; any client can answer it, on any instance.
-        for (const call of plan.calls) publish(requestOf(call));
-      }
-      await sleep(this.deps.toolPollMs ?? 250, signal);
     }
   }
 }
