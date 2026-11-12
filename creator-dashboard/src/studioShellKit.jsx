@@ -117,6 +117,7 @@ export function humanStatus(value, t) { if (!value) return t("notProvided"); con
 
 export function friendlyError(error, t) {
   if (!error) return t("unexpectedError");
+  if (error.code === "usage_cap_exceeded") return t("sxuCapReached");
   if (error.status === 401) return t("sessionExpired");
   if (error.status === 403) return t("creatorForbidden");
   if (error.status === 404) return t("requestedResourceMissing");

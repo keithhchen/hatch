@@ -95,7 +95,7 @@ test("the report has the dashboard's shape: tokens are input + output, every day
   const report = await usageReport(ledger, "acct", "2026-11-11", "2026-11-13", 1000, new Date("2026-11-13T08:00:00Z"));
   assert.deepEqual(report.month_to_date, { studio: 120, chat_api: 15, chat_web: 0, total: 135, split: report.month_to_date.split });
   assert.deepEqual(report.month_to_date.split.studio, { input: 100, cachedInput: 40, output: 20, reasoning: 5 });
-  assert.deepEqual(report.cap, { monthly_tokens: 1000 });
+  assert.deepEqual(report.cap, { monthly_tokens: 1000, remaining_tokens: 865 });
   assert.deepEqual(report.daily, [
     { day: "2026-11-11", studio: 0, chat_api: 0, chat_web: 0 },
     { day: "2026-11-12", studio: 120, chat_api: 0, chat_web: 0 },
@@ -130,7 +130,7 @@ test("GET /v1/creator/usage answers the signed-in Expert from the ledger, and on
     assert.equal(response.status, 200);
     const body = await response.json() as { month_to_date: Record<string, unknown>; cap: unknown; daily: Array<Record<string, unknown>> };
     assert.deepEqual(Object.keys(body).sort(), ["cap", "daily", "month_to_date"]);
-    assert.deepEqual(body.cap, { monthly_tokens: 2_000_000 });
+    assert.deepEqual(body.cap, { monthly_tokens: 2_000_000, remaining_tokens: 2_000_000 });
     assert.equal(body.month_to_date.total, 0);
     assert.equal(body.daily.length, 30);
     assert.deepEqual(Object.keys(body.daily[0]!).sort(), ["chat_api", "chat_web", "day", "studio"]);

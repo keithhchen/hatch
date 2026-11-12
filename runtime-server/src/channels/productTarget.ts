@@ -17,7 +17,7 @@ export class ProductTarget implements ChatTarget {
 
   async linked(): Promise<string> { return "连上了。可以开始聊了。\nConnected. You can start talking."; }
 
-  wording = { tooLarge: () => "这个文件太大了。\nThat file is too large.", unreadable: "这种消息我还读不了，可以发文字、图片或文档。\nI can't read that kind of message yet." };
+  wording = { tooLarge: () => "这个文件太大了。\nThat file is too large.", unreadable: "这种消息我还读不了，可以发文字、图片或文档。\nI can't read that kind of message yet.", capReached: "这个助手本月的使用额度已用完。\nThis assistant has reached its monthly limit." };
 
   async admit({ connection, principal }: Inbound): Promise<string | undefined> {
     if (connection.target.kind !== "product") throw new Error("Not a Product Connection");

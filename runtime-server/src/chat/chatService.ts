@@ -8,6 +8,7 @@ import type { RunTerminator } from "./runTerminator.js";
 import type { RunSupervisor } from "./runSupervisor.js";
 import { ChatError } from "./principal.js";
 import { assertProductUsable } from "./toolSurface.js";
+import type { RunCap } from "../usage/usageCap.js";
 
 /** Capacity for one more Run. Reserving can fail; the returned function gives the capacity back. */
 export interface RunAdmission {
@@ -89,6 +90,8 @@ export class ChatService<Scope> {
     admission: RunAdmission;
     registry: RunRegistry<Scope>;
     limits?: PrincipalLimits;
+    /** Asked before a new Run starts, never for a message that joins one: whoever pays for the Run may be out of budget. */
+    cap?: RunCap<Scope>;
     /** A message that may start a Run first ends the conversation's background compaction, on any instance. */
     compaction?: { preempt(conversationId: string): Promise<void> };
   }) {}
@@ -98,7 +101,7 @@ export class ChatService<Scope> {
    * refused (409) while a Run is active or when the latest Run is not failed or interrupted. A repeated key replays its Run.
    */
   async retry(command: RetryCommand<Scope>): Promise<Retried> {
-    const { repository, supervisor, hub, admission, registry, limits, compaction } = this.deps;
+    const { repository, supervisor, hub, admission, registry, limits, compaction, cap } = this.deps;
     const binding = command.conversation;
     const accept = () => repository.acceptRetry({
       binding,
@@ -108,6 +111,7 @@ export class ChatService<Scope> {
     if (await repository.getRunByClientMessageId(binding.id, command.key)) return { outcome: "replayed", run: (await accept()).run };
     assertProductUsable(command.requiresLocalTools, command.client.client);
     await limits?.check(command.principal, binding);
+    await cap?.(command.scope);
     if (supervisor.holdsConversation(binding.id)) throw new ChatError("conversation_busy", "The previous run is still stopping. Try again in a moment.", 409);
     const release = admission.reserve(command.principal);
     try {
@@ -126,12 +130,14 @@ export class ChatService<Scope> {
   }
 
   async submit(command: SubmitCommand<Scope>): Promise<Submission> {
-    const { repository, supervisor, hub, admission, registry, limits, compaction, terminator } = this.deps;
+    const { repository, supervisor, hub, admission, registry, limits, compaction, terminator, cap } = this.deps;
     assertProductUsable(command.requiresLocalTools, command.client.client);
     await limits?.check(command.principal, command.conversation);
     // A message that joins a Run adds no work, so capacity is only reserved for one that may start a Run.
     const known = await repository.hasAcceptedMessage(command.conversation.id, command.clientMessageId);
     const joining = command.mode === "start_only" ? undefined : await repository.getActiveRun(command.conversation.id);
+    // A message this conversation already accepted starts nothing new, so it is not asked again.
+    if (!joining && !known) await cap?.(command.scope);
     // A cancelled Run whose executor is still winding down must not overlap the next one in the same conversation.
     if (!joining && supervisor.holdsConversation(command.conversation.id)) {
       throw new ChatError("conversation_busy", "The previous run is still stopping. Try again in a moment.", 409);
@@ -156,7 +162,7 @@ export class ChatService<Scope> {
       const outcome = accepted.created ? "started" : accepted.steered ? "steered" : "replayed";
       if (outcome === "started" && joining) {
         // The Run we meant to join ended first, so this one starts a Run after all: admit it now.
-        try { release = admission.reserve(command.principal); }
+        try { await cap?.(command.scope); release = admission.reserve(command.principal); }
         catch (error) {
           const failure = error instanceof ChatError ? { code: error.code, message: error.message } : failures.translate(error, { run: accepted.run.id, conversation: command.conversation.id });
           await terminator.end(accepted.run.id, { status: "failed", failure });

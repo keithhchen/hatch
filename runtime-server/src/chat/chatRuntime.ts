@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { CompactionStrategy } from "../compactionStrategy.js";
 import { chatCompactionStrategy, type RuntimeCompactionMessage } from "../compaction.js";
 import type { UsageRecording } from "../usage/usage.js";
+import type { RunCap } from "../usage/usageCap.js";
 import type { ConversationRepository } from "../conversationRepository.js";
 import type { ClientToolName, ToolRequest, ToolResult } from "../protocol.js";
 import type { ClientGroup } from "../surfaces/contract.js";
@@ -50,6 +51,8 @@ export type ChatRuntimeOptions<Scope> = {
   compactionStrategy?: () => CompactionStrategy<RuntimeCompactionMessage>;
   /** Where each Run's model calls are recorded, and who pays for them. */
   usage?: UsageRecording<Scope>;
+  /** Refuses a new Run when whoever pays for it is out of budget. */
+  cap?: RunCap<Scope>;
 };
 
 /**
@@ -91,7 +94,7 @@ export class ChatRuntime<Scope> {
       { executorId, leaseMs: options.leaseMs ?? DEFAULT_RUN_LEASE_MS, sweepMs: options.sweepMs ?? 5_000, toolPollMs: options.toolPollMs, afterReply: (run) => this.compaction.afterReply(run), stops: options.stops, steers: options.steers },
       terminators
     );
-    this.service = new ChatService({ repository, terminator: terminators.external, supervisor: this.supervisor, hub: this.hub, admission: options.admission, registry: this.registry, limits: options.limits, compaction: this.compaction });
+    this.service = new ChatService({ repository, terminator: terminators.external, supervisor: this.supervisor, hub: this.hub, admission: options.admission, registry: this.registry, limits: options.limits, cap: options.cap, compaction: this.compaction });
   }
 
   /** Ends the Runs a previous instance left behind as interrupted, then keeps watching for more. */

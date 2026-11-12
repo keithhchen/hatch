@@ -4,6 +4,7 @@ import { ChatError } from "../chat/principal.js";
 import { ConversationRepositoryError } from "../conversationRepository.js";
 import { ConversationError } from "../conversations/conversation.js";
 import { EntitlementError } from "../entitlements.js";
+import { resetDay, USAGE_CAP_EXCEEDED, UsageCapExceeded } from "../usage/usageCap.js";
 
 export type ErrorType =
   | "invalid_request_error" | "authentication_error" | "permission_error" | "not_found_error" | "conflict_error"
@@ -54,6 +55,7 @@ const CHAT_CODES: Record<string, { status: number; type: ErrorType; code: string
   too_large: { status: 413, type: "invalid_request_error", code: "file_too_large" },
   unsupported_type: { status: 415, type: "invalid_request_error", code: "unsupported_file_type" },
   runtime_run_capacity: { status: 503, type: "service_unavailable", code: "service_unavailable", retryAfter: 5 },
+  [USAGE_CAP_EXCEEDED]: { status: 429, type: "insufficient_quota", code: USAGE_CAP_EXCEEDED },
   user_run_capacity: { status: 429, type: "rate_limit_error", code: "rate_limit_exceeded", retryAfter: 2 },
   authorization_busy: { status: 429, type: "rate_limit_error", code: "rate_limit_exceeded", retryAfter: 2 },
   user_authorization_busy: { status: 429, type: "rate_limit_error", code: "rate_limit_exceeded", retryAfter: 2 }
@@ -69,6 +71,9 @@ function fromCode(code: string, status: number, message: string): ApiError | und
 /** What the adapter makes of any failure: the OpenAI-shaped error and whether it was unexpected (the caller logs those with the request id). */
 export function toApiError(error: unknown): { error: ApiError; internal: boolean } {
   if (error instanceof ApiError) return { error, internal: false };
+  if (error instanceof UsageCapExceeded) {
+    return { error: new ApiError(429, "insufficient_quota", USAGE_CAP_EXCEEDED, `Monthly token limit reached (${error.used}/${error.cap}). It resets on ${resetDay(error.resetsAt)}.`), internal: false };
+  }
   if (error instanceof ChatError) {
     const mapped = fromCode(error.code, error.status, error.message);
     if (mapped) return { error: mapped, internal: false };

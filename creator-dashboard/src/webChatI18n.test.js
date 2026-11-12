@@ -20,6 +20,13 @@ test("Web Chat translates interpolated copy and known client errors", () => {
   assert.equal(webChatErrorText({ code: "agent_unavailable", message: "The published Agent could not be found." }, "en"), "This AI is currently unavailable. It may not be published yet, or it may be paused.");
 });
 
+test("a spent monthly usage limit is a real state in every language, not the server's English", () => {
+  const error = { code: "usage_cap_exceeded", status: 429, message: "Monthly token limit reached. It resets on 2026-12-01." };
+  assert.match(webChatErrorText(error, "en"), /monthly usage limit/);
+  assert.match(webChatErrorText(error, "zh"), /使用额度/);
+  assert.match(webChatErrorText(error, "ja"), /利用上限/);
+});
+
 test("Web Chat UI copy stays neutral: no exclamations, questions, or chatty phrasing", () => {
   for (const [locale, copy] of Object.entries(webChatCopy)) {
     for (const [key, text] of Object.entries(copy)) assert.doesNotMatch(text, /[!！?？]|聊|話して|chat with/i, `${locale}.${key}`);

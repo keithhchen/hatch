@@ -56,7 +56,8 @@ import { ChatAssets, TextPartsReader, type PartsReader } from "./chat/assets.js"
 import { attachmentToolDefinitions } from "./chat/attachmentTools.js";
 import { failRun, runModelTurn } from "./chat/modelTurn.js";
 import { toolRegistry } from "./tools.js";
-import { attributeByScope, type UsageReader, type UsageRecorder } from "./usage/usage.js";
+import { attributeByScope, monthlyTokenCap, payerByScope, type UsageReader, type UsageRecorder } from "./usage/usage.js";
+import { UsageCap } from "./usage/usageCap.js";
 import { PostgresUsageLedger } from "./usage/postgresUsage.js";
 import { RegistryConnectionDirectory } from "./chat/registryConnections.js";
 import { openChatAssets } from "./chat/openChatAssets.js";
@@ -114,6 +115,8 @@ export type RuntimeServerOptions = {
   conversationStore?: RuntimeStore;
   /** Where model calls are recorded for the account that pays for them. Without one nothing is metered. */
   usage?: UsageRecorder;
+  /** Refuses a new Run, on any surface, when the account that pays for it has spent its month. Without one nothing is capped. */
+  usageCap?: UsageCap;
   /** Optional injected store for tests; production defaults beside transcripts. */
   assetStore?: RuntimeAssetStore;
   /** Durable Conversation/Run control-plane. Defaults to Postgres or local app-data. */
@@ -301,7 +304,7 @@ export async function createRuntimeServerFromEnvironment(
         ? new FilesystemAgentCorpusResolver(runtimeCorpusRoot)
         : undefined,
     conversationStore,
-    ...(conversationStore instanceof PostgresStore ? { usage: new PostgresUsageLedger(conversationStore.pool as never) } : {}),
+    ...(conversationStore instanceof PostgresStore ? (() => { const ledger = new PostgresUsageLedger(conversationStore.pool as never); return { usage: ledger, usageCap: new UsageCap(ledger, monthlyTokenCap(environment)) }; })() : {}),
     ...(chatAssets ? { chatAssets } : {}),
     assetStore: runtimeAssetStoreFromEnvironment(environment, runtimeDataDir),
     chatServiceToken: config.chatServiceToken,
@@ -526,6 +529,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     toolTimeoutMs: options.clientToolTimeoutMs ?? clientToolTimeoutMs(),
     compactionStrategy: options.compactionStrategy,
     ...(options.usage ? { usage: { recorder: options.usage, attribute: attributeByScope } } : {}),
+    ...(options.usageCap ? { cap: options.usageCap.guard(payerByScope) } : {}),
     // With a shared database every instance sees every Run's live events.
     ...(conversationStore instanceof PostgresStore ? { relay: new PostgresEventRelay(conversationStore.pool as never), stops: new PostgresStopRelay(conversationStore.pool as never), steers: new PostgresStopRelay(conversationStore.pool as never, { channel: "hatch_run_steers" }) } : {})
   });

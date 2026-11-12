@@ -58,8 +58,9 @@ export type UsageRecording<Scope> = { recorder: UsageRecorder; attribute: UsageA
 
 /** The surface and key a conversation's scope carries; a scope that says nothing is web or app chat. */
 export type UsageScope = { creatorId: string; productId: string; usageSurface?: UsageSurface; apiKeyId?: string };
+export const payerByScope = (scope: UsageScope): string => scope.creatorId;
 export const attributeByScope: UsageAttributor<UsageScope> = (scope, run) => ({
-  accountId: scope.creatorId, surface: scope.usageSurface ?? "chat_web", productId: scope.productId, runId: run.id,
+  accountId: payerByScope(scope), surface: scope.usageSurface ?? "chat_web", productId: scope.productId, runId: run.id,
   ...(scope.apiKeyId ? { apiKeyId: scope.apiKeyId } : {})
 });
 
@@ -110,7 +111,7 @@ export async function usageReport(reader: UsageReader, accountId: string, from: 
   const sums = tokens(month);
   return {
     month_to_date: { ...sums, total: sums.studio + sums.chat_api + sums.chat_web, split: month },
-    cap: { monthly_tokens: cap },
+    cap: { monthly_tokens: cap, remaining_tokens: cap === null ? null : Math.max(0, cap - sums.studio - sums.chat_api - sums.chat_web) },
     daily
   };
 }

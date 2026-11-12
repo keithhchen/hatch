@@ -8,6 +8,7 @@ import { AssistantChat } from "./assistant/chat.js";
 import { InMemoryUsageLedger } from "./usage/memoryUsage.js";
 import { PostgresUsageLedger } from "./usage/postgresUsage.js";
 import { monthlyTokenCap, usageReport, utcDay, type UsageReader } from "./usage/usage.js";
+import { UsageCap } from "./usage/usageCap.js";
 import { studioTools, studioToolDefinitions } from "./assistant/studioTools.js";
 import { LegacyAssistantHistory } from "./assistant/history.js";
 import { PostgresAssistantState } from "./assistant/state.js";
@@ -212,7 +213,8 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   // With a database every Product workspace journals each Run from its start; without one Studio has no conversations to record.
   // One ledger for every Studio model call, and the source of the usage the Expert reads back.
   const usage = registryPool ? new PostgresUsageLedger(registryPool) : new InMemoryUsageLedger();
-  const factoryAgents = new FactoryAgentsService(path.join(factoryRoot, "agent-chats"), environment, factoryAgentDefinitions, registryPool ? () => new EventLogJournal(conversationPorts.eventLog, event => event.sessionId) : undefined, usage);
+  const usageCap = UsageCap.fromEnvironment(usage, environment);
+  const factoryAgents = new FactoryAgentsService(path.join(factoryRoot, "agent-chats"), environment, factoryAgentDefinitions, registryPool ? () => new EventLogJournal(conversationPorts.eventLog, event => event.sessionId) : undefined, usage, usageCap);
   const objectStore = objectStoreFromEnvironment(environment);
   const productObjectStore = objectStoreFromEnvironment(environment, path.join(factoryRoot, "product-files"));
   if (!productObjectStore) throw new Error("Product File object storage is not configured");
@@ -427,7 +429,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       deliveries: await PostgresDeliveries.open(registryPool),
       exclusive: postgresExclusive(registryPool),
       search: new FirecrawlSearchProvider({ apiKey: environment.FIRECRAWL_API_KEY }),
-      env: environment, ingest, usage,
+      env: environment, ingest, usage, usageCap,
     });
     ingest.onSettled(job => assistant.ingested(job));
     // The Assistant is a conversation on Chat's runtime, with its own transcript in this database and the Studio tools.
@@ -444,7 +446,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       repository: conversations, store: transcripts, chatAssets, state: assistantState, tools,
       assetStore: new RuntimeAssetStore(path.join(factoryRoot, "assistant-assets")),
       history: new LegacyAssistantHistory({ backend: accountId => new PostgresWorkbenchBackend(registryPool, `assistant:${accountId}`), state: assistantState, store: transcripts }),
-      prompt: assistantPrompt, liveState: accountId => assistant.liveState(accountId), env: environment, usage,
+      prompt: assistantPrompt, liveState: accountId => assistant.liveState(accountId), env: environment, usage, usageCap,
     });
     assistant.bind(assistantChat, new ExpertMaterials({ assets: chatAssets, conversation: accountId => assistantChat.conversation(accountId) }));
     routed.bindLocal(assistantChat.gateway);

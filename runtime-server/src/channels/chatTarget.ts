@@ -1,4 +1,5 @@
 import { ChatError } from "../chat/principal.js";
+import { USAGE_CAP_EXCEEDED } from "../usage/usageCap.js";
 import type { UploadedRef } from "../chat/gateway.js";
 import type { ChannelConnection } from "./connections.js";
 import type { Handled, Inbound, ReplyPolicy, TargetHandler } from "./ports.js";
@@ -26,7 +27,7 @@ export interface ChatTarget {
   /** Whether this sender may speak here now. Throws when the Connection was never meant for them; a returned text is told to the sender, and nothing starts. */
   admit(inbound: Inbound): Promise<string | undefined>;
   /** What this Agent says to a sender whose file is too big, and whose message it cannot read. */
-  wording: { tooLarge(inbound: Inbound): string; unreadable: string };
+  wording: { tooLarge(inbound: Inbound): string; unreadable: string; capReached: string };
   /** Stores a file in the conversation and returns the asset a message refers to. */
   upload(inbound: Inbound, file: { name: string; bytes: Buffer }): Promise<UploadedRef>;
   /** Steers the conversation's Run or starts one. `key` is the message's identity: sending it again is the same message. */
@@ -69,7 +70,7 @@ export class ChatFlow implements TargetHandler {
       return { replied: false, runId };
     } catch (error) {
       if (!(error instanceof ChatError) || error.retryable) throw error;
-      await inbound.notify(error.message);
+      await inbound.notify(error.code === USAGE_CAP_EXCEEDED ? target.wording.capReached : error.message);
       return DONE;
     }
   }

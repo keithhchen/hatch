@@ -12,16 +12,19 @@ import { MessageAlreadyAccepted, WorkbenchRuntime } from "./runtime.js";
 import { WorkerConversation } from "../conversations/workerConversation.js";
 import { WORKERS } from "../conversations/workers.js";
 import { WorkbenchStore } from "./store.js";
+import { emptySurfaces } from "../usage/usage.js";
+import { UsageCap, UsageCapExceeded } from "../usage/usageCap.js";
 
 type Call = { tools: Array<{ name: string; description: string }>; last: string };
 
 /** Real store and runtime; only the model is scripted. `plan(call)` is the tool the model calls, if any. */
-async function harness(options: { plan?: (call: number) => string | undefined; toolSupport?: (name: string) => readonly ("web" | "cli")[] | "*"; delayMs?: number; fail?: (call: number) => boolean } = {}) {
+async function harness(options: { plan?: (call: number) => string | undefined; toolSupport?: (name: string) => readonly ("web" | "cli")[] | "*"; delayMs?: number; fail?: (call: number) => boolean; cap?: UsageCap } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-send-"));
   const store = new WorkbenchStore(root, { creatorId: "c1", productId: "p1" }, new MemoryAgentDefinitionRepository(await initialAgentDefinitions()));
   const calls: Call[] = [];
   const build = () => new WorkbenchRuntime(store, {
     env: { HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash" },
+    ...(options.cap ? { usage: { recorder: { record: async () => undefined }, accountId: "c1", cap: options.cap } } : {}),
     toolSupport: options.toolSupport as never,
     agentFactory: factory => new Agent({ ...factory.agentOptions, initialState: { ...factory.initialState, model: createFactoryLlmModel({ env: factory.env }) }, streamFn: (_model, context, streamOptions) => {
       const call = calls.length + 1;

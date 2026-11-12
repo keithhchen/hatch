@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { Type } from "@earendil-works/pi-ai";
 import type { UsageRecorder } from "../usage/usage.js";
+import type { UsageCap } from "../usage/usageCap.js";
 import { WorkbenchStore, type AgentDefinitionSource, type AssistantRole, type Role, type Session, type Todo, type WorkbenchBackend } from "../factoryAgents/store.js";
 import { WorkbenchRuntime, safeError, type WorkbenchRuntimeOptions } from "../factoryAgents/runtime.js";
 import type { FactoryWorkspace } from "../factoryAgents/service.js";
@@ -83,6 +84,7 @@ export type AssistantDependencies = {
   runtime?: Pick<WorkbenchRuntimeOptions, "agentFactory" | "deadlineMs" | "maxTurns">;
   /** Where its workers' model calls are recorded, as Studio usage of the Expert. */
   usage?: UsageRecorder;
+  usageCap?: UsageCap;
   ingest?: AssistantIngest;
 };
 
@@ -654,7 +656,7 @@ export class AssistantService implements StudioOperations {
     const store = new WorkbenchStore(this.deps.backend(accountId), undefined, this.definitions);
     await store.recover();
     const notes = (await store.getOrCreate("assistant", "Hatch 助理")).session;
-    const runtime = new WorkbenchRuntime(store, { ...this.deps.runtime, ...(this.deps.usage ? { usage: { recorder: this.deps.usage, accountId } } : {}), env: { ...this.deps.env, HATCH_FACTORY_LLM_PROFILE: modelRole("worker", this.deps.env) } });
+    const runtime = new WorkbenchRuntime(store, { ...this.deps.runtime, ...(this.deps.usage ? { usage: { recorder: this.deps.usage, accountId, cap: this.deps.usageCap } } : {}), env: { ...this.deps.env, HATCH_FACTORY_LLM_PROFILE: modelRole("worker", this.deps.env) } });
     const desk: Desk = { accountId, store, runtime, sessionId: notes.id };
     runtime.events.on("event", (event: { sessionId?: string; type?: string }) => {
       if (!event.sessionId || !event.type || !RUN_END.has(event.type)) return;
