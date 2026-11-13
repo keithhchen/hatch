@@ -3,8 +3,8 @@ import type { StallLimits } from "./providerStall.js";
 import { ModelProfileError } from "./errors/modelProfile.js";
 
 /** The catalogue of usable models. Which role runs on which profile is data (`hatch_model_roles`), not code: see modelRoles.ts. */
-export const RUNTIME_LLM_PROFILE_NAMES = ["deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro", "deepseek-v4-pro"] as const;
-export const FACTORY_LLM_PROFILE_NAMES = ["deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro"] as const;
+export const RUNTIME_LLM_PROFILE_NAMES = ["deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro", "deepseek-v4-pro", "gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen"] as const;
+export const FACTORY_LLM_PROFILE_NAMES = ["deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro", "gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen"] as const;
 export type FactoryLlmProfileName = (typeof FACTORY_LLM_PROFILE_NAMES)[number];
 export const LLM_PROFILE_NAMES = RUNTIME_LLM_PROFILE_NAMES;
 export type LlmProfileName = RuntimeLlmProfileName | FactoryLlmProfileName;
@@ -130,6 +130,54 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     // thinking). Three simultaneous first calls once got nothing for 120s+ while a new call at that moment answered in 11s: a hung
     // request does not recover, so wait 45s and ask again instead of waiting longer.
     // A connection that drops before any output ("fetch failed") is asked again too, after a backoff, within the same restarts.
+    stall: { firstEventMs: 45_000, silenceMs: 60_000, restarts: 2, backoffMs: 1_000 }
+  },
+  "gemini-4-argon": {
+    name: "gemini-4-argon",
+    family: "gemini",
+    provider: "google",
+    providerName: "Google Gemini API",
+    api: "google-generative-ai",
+    model: "gemini-4-argon",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+    apiKeyEnv: "GEMINI_API_KEY",
+    contextWindow: 1_048_576,
+    maxTokens: 32_768,
+    reasoning: true,
+    // The API rejects "minimal" for Gemini 4 (400); low, medium and high are accepted.
+    thinkingLevel: "low",
+    stall: { firstEventMs: 45_000, silenceMs: 60_000, restarts: 2, backoffMs: 1_000 }
+  },
+  "gemini-4-carbon": {
+    name: "gemini-4-carbon",
+    family: "gemini",
+    provider: "google",
+    providerName: "Google Gemini API",
+    api: "google-generative-ai",
+    model: "gemini-4-carbon",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+    apiKeyEnv: "GEMINI_API_KEY",
+    contextWindow: 1_048_576,
+    maxTokens: 32_768,
+    reasoning: true,
+    // The API rejects "minimal" for Gemini 4 (400); low, medium and high are accepted.
+    thinkingLevel: "low",
+    stall: { firstEventMs: 45_000, silenceMs: 60_000, restarts: 2, backoffMs: 1_000 }
+  },
+  "gemini-4-hydrogen": {
+    name: "gemini-4-hydrogen",
+    family: "gemini",
+    provider: "google",
+    providerName: "Google Gemini API",
+    api: "google-generative-ai",
+    model: "gemini-4-hydrogen",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+    apiKeyEnv: "GEMINI_API_KEY",
+    contextWindow: 1_048_576,
+    maxTokens: 65_536,
+    reasoning: true,
+    // The API rejects "minimal" for Gemini 4 (400); low, medium and high are accepted.
+    thinkingLevel: "low",
     stall: { firstEventMs: 45_000, silenceMs: 60_000, restarts: 2, backoffMs: 1_000 }
   }
 };
