@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { IconButton, SearchInput, Spinner } from "@hatch/ui";
-import { FileText, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, FileText, Trash2 } from "lucide-react";
 import { FILTER_FROM, groupFiles, pageGroups } from "./fileListModel.js";
 import "./fileList.css";
 
@@ -40,9 +40,9 @@ export function FileList({ title, records, onOpen, onDelete, deletable = () => t
       })}</ul>
     </div>) : <p className="fl__empty">{t("noFiles")}</p>}
     {pages > 1 ? <footer className="fl__pager">
-      <button type="button" disabled={page <= 1} onClick={() => setPageAt(page - 1)}>{t("previousPage")}</button>
+      <IconButton className="fl__page" label={t("previousPage")} size="small" disabled={page <= 1} onClick={() => setPageAt(page - 1)}><ChevronLeft aria-hidden="true" /></IconButton>
       <span>{page}/{pages}</span>
-      <button type="button" disabled={page >= pages} onClick={() => setPageAt(page + 1)}>{t("nextPage")}</button>
+      <IconButton className="fl__page" label={t("nextPage")} size="small" disabled={page >= pages} onClick={() => setPageAt(page + 1)}><ChevronRight aria-hidden="true" /></IconButton>
     </footer> : null}
   </section>;
 }

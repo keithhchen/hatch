@@ -15,9 +15,7 @@
 .fl__row.is-failed .fl__state { color: var(--web-fail); }
 .fl__actions { display: flex; align-items: center; justify-content: flex-end; min-width: 28px; }
 .fl__pager { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; border-top: 1px solid var(--web-rule); color: var(--web-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-.fl__pager button { padding: 4px 8px; border: 0; border-radius: 8px; background: none; color: var(--web-ink); font: inherit; cursor: pointer; }
-.fl__pager button:hover:not(:disabled) { background: var(--web-yolk-soft); }
-.fl__pager button:disabled { color: var(--web-muted); opacity: .5; cursor: default; }
+@media (max-width: 900px) { .fl__pager .fl__page { min-width: 44px; min-height: 44px; } }
 .fl__empty { margin: 0; padding: 16px 14px; color: var(--web-muted); font-size: 13px; }
 
 .fv { display: grid; gap: 12px; }

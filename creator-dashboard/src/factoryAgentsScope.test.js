@@ -350,3 +350,12 @@ test('Factory no longer exposes the obsolete manual output handoff controls', as
   assert.match(source, /<FileList key="output" records=\{outputFiles\} pageSize=\{FILE_PAGE_SIZE\}/);
   assert.match(source, /method: "DELETE", body: \{ path: record\.path \}/);
 });
+
+test('File pager uses localized chevron icon buttons with 44px mobile targets', async () => {
+  const source = await readFile(new URL('./FileList.jsx', import.meta.url), 'utf8');
+  const css = await readFile(new URL('./fileList.css', import.meta.url), 'utf8');
+  assert.match(source, /<IconButton className="fl__page" label=\{t\("previousPage"\)\}[^>]*disabled=\{page <= 1\}[^>]*><ChevronLeft/);
+  assert.match(source, /<IconButton className="fl__page" label=\{t\("nextPage"\)\}[^>]*disabled=\{page >= pages\}[^>]*><ChevronRight/);
+  assert.match(source, /<span>\{page\}\/\{pages\}<\/span>/);
+  assert.match(css, /\.fl__pager \.fl__page \{ min-width: 44px; min-height: 44px; \}/);
+});
