@@ -1,0 +1,64 @@
+{
+ "safety": {
+  "status": 200,
+  "body": "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Partial answer\"}]}}],\"responseId\":\"r\"}\n\ndata: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[]},\"finishReason\":\"SAFETY\"}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":5,\"thoughtsTokenCount\":7,\"totalTokenCount\":22},\"responseId\":\"r\"}\n\n"
+ },
+ "recitation": {
+  "status": 200,
+  "body": "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Partial answer\"}]}}],\"responseId\":\"r\"}\n\ndata: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[]},\"finishReason\":\"RECITATION\"}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":5,\"thoughtsTokenCount\":7,\"totalTokenCount\":22},\"responseId\":\"r\"}\n\n"
+ },
+ "malformed_function_call": {
+  "status": 200,
+  "body": "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[]},\"finishReason\":\"MALFORMED_FUNCTION_CALL\"}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":5,\"thoughtsTokenCount\":7,\"totalTokenCount\":22},\"responseId\":\"r\"}\n\n"
+ },
+ "safety_after_function_call": {
+  "status": 200,
+  "body": "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"functionCall\":{\"name\":\"get_weather\",\"args\":{\"city\":\"Paris\"}},\"thoughtSignature\":\"c2lnbmF0dXJl\"}]}}],\"responseId\":\"r\"}\n\ndata: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[]},\"finishReason\":\"SAFETY\"}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":5,\"thoughtsTokenCount\":7,\"totalTokenCount\":22},\"responseId\":\"r\"}\n\n"
+ },
+ "max_tokens_after_function_call": {
+  "status": 200,
+  "body": "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"functionCall\":{\"name\":\"get_weather\",\"args\":{\"city\":\"Paris\"}},\"thoughtSignature\":\"c2lnbmF0dXJl\"}]}}],\"responseId\":\"r\"}\n\ndata: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[]},\"finishReason\":\"MAX_TOKENS\"}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":5,\"thoughtsTokenCount\":7,\"totalTokenCount\":22},\"responseId\":\"r\"}\n\n"
+ },
+ "empty_stop": {
+  "status": 200,
+  "body": "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"\",\"thoughtSignature\":\"c2lnbmF0dXJl\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":5,\"thoughtsTokenCount\":7,\"totalTokenCount\":22},\"responseId\":\"r\"}\n\n"
+ },
+ "no_finish_reason": {
+  "status": 200,
+  "body": "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Partial answer\"}]}}],\"responseId\":\"r\"}\n\n"
+ },
+ "thought_only_then_stop": {
+  "status": 200,
+  "body": "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"thinking...\",\"thought\":true}]}}],\"responseId\":\"r\"}\n\ndata: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Answer\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":5,\"thoughtsTokenCount\":7,\"totalTokenCount\":22},\"responseId\":\"r\"}\n\n"
+ },
+ "http_429": {
+  "status": 429,
+  "contentType": "application/json",
+  "body": "{\"error\":{\"code\":429,\"message\":\"Resource has been exhausted (e.g. check quota).\",\"status\":\"RESOURCE_EXHAUSTED\"}}"
+ },
+ "http_429_quota": {
+  "status": 429,
+  "contentType": "application/json",
+  "body": "{\"error\":{\"code\":429,\"message\":\"You exceeded your current quota, please check your plan and billing details.\",\"status\":\"RESOURCE_EXHAUSTED\"}}"
+ },
+ "http_503_overloaded": {
+  "status": 503,
+  "contentType": "application/json",
+  "body": "{\"error\":{\"code\":503,\"message\":\"The model is overloaded. Please try again later.\",\"status\":\"UNAVAILABLE\"}}"
+ },
+ "http_500": {
+  "status": 500,
+  "contentType": "application/json",
+  "body": "{\"error\":{\"code\":500,\"message\":\"An internal error has occurred. Please retry or report in https://developers.generativeai.google/guide/troubleshooting\",\"status\":\"INTERNAL\"}}"
+ },
+ "http_400_bad_key": {
+  "status": 400,
+  "contentType": "application/json",
+  "body": "{\"error\":{\"code\":400,\"message\":\"API key not valid. Please pass a valid API key.\",\"status\":\"INVALID_ARGUMENT\"}}"
+ },
+ "http_400_context": {
+  "status": 400,
+  "contentType": "application/json",
+  "body": "{\"error\":{\"code\":400,\"message\":\"The input token count (1200000) exceeds the maximum number of tokens allowed (1048576).\",\"status\":\"INVALID_ARGUMENT\"}}"
+ }
+}

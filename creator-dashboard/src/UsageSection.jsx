@@ -3,7 +3,7 @@ import { InlineAlert } from "@hatch/ui";
 import { SURFACE_COLOR, UsageClient, formatTokens, usageView } from "./usage.js";
 import { friendlyError, LoadingState } from "./studioShellKit.jsx";
 
-const LABELS = { studio: "sxuStudio", chat_api: "sxuChatApi", chat_web: "sxuChatWeb" };
+const LABELS = { studio_web: "sxuStudioWeb", studio_api: "sxuStudioApi", chat_web: "sxuChatWeb", responses_api: "sxuResponsesApi" };
 const BAR = 10;
 const HEIGHT = 96;
 

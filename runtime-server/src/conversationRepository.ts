@@ -2206,7 +2206,7 @@ export function endingWrites(run: ConversationRunRecord, ending: RunEnding, at: 
     ? [{ type: "conversation.model_message", ...scope, message_id: replyId, message: kept.message, finish_reason: kept.finishReason, visible_parts: kept.visibleParts }]
     : [];
   const repliedJournal: Array<Pick<ConversationJournalEvent, "type" | "payload">> = kept
-    ? [{ type: "message.created", payload: { role: "assistant", message_id: replyId, ...(kept.finishReason === "content_filter" ? { finish_reason: "content_filter" } : {}) } }]
+    ? [{ type: "message.created", payload: { role: "assistant", message_id: replyId, ...(kept.finishReason !== "stop" ? { finish_reason: kept.finishReason } : {}) } }]
     : [];
   const replied = reply.length > 0;
   if (unanswered) return { claims: false, ends: false, replied, transcript: reply, journal: repliedJournal };

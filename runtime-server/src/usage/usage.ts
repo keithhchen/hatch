@@ -1,8 +1,8 @@
 import type { Usage } from "@earendil-works/pi-ai";
 import type { Log } from "../observability/log.js";
 
-/** Who spent the tokens: Chat over the API, Chat in an app or channel, or the Expert building in Studio. */
-export const USAGE_SURFACES = ["studio", "chat_api", "chat_web"] as const;
+/** Who spent the tokens: the Expert building in Studio (in the web app, or with an API key), Chat in an app or channel, or Chat over the Responses API. */
+export const USAGE_SURFACES = ["studio_web", "studio_api", "chat_web", "responses_api"] as const;
 export type UsageSurface = typeof USAGE_SURFACES[number];
 
 export type TokenCount = { input: number; cachedInput: number; output: number; reasoning: number };
@@ -38,7 +38,7 @@ export interface UsageReader {
 }
 
 export const emptyTokens = (): TokenCount => ({ input: 0, cachedInput: 0, output: 0, reasoning: 0 });
-export const emptySurfaces = (): SurfaceTokens => ({ studio: emptyTokens(), chat_api: emptyTokens(), chat_web: emptyTokens() });
+export const emptySurfaces = (): SurfaceTokens => Object.fromEntries(USAGE_SURFACES.map(surface => [surface, emptyTokens()])) as SurfaceTokens;
 export const billableTokens = (count: TokenCount): number => count.input + count.output;
 export const utcDay = (at: Date): string => at.toISOString().slice(0, 10);
 export const monthStart = (now: Date): string => `${utcDay(now).slice(0, 7)}-01`;
@@ -52,7 +52,12 @@ export function monthlyTokenCap(env: NodeJS.ProcessEnv): number | null {
 /** Who pays for a run's model calls, attributed once per run and carried to every call. */
 export type UsageAttribution = { accountId: string; surface: UsageSurface; apiKeyId?: string; productId?: string; runId?: string };
 
-/** How a host decides, from its own scope, who pays for a Run. A Responses API Run says `chat_api` and its key here. */
+/** Studio work is the API's when an API key made the request and the web's otherwise; the key is recorded with it. */
+export const studioAttribution = (accountId: string, apiKeyId: string | undefined, rest: { productId?: string; runId?: string } = {}): UsageAttribution => ({
+  accountId, surface: apiKeyId ? "studio_api" : "studio_web", ...(apiKeyId ? { apiKeyId } : {}), ...rest
+});
+
+/** How a host decides, from its own scope, who pays for a Run. A Responses API Run says `responses_api` and its key here. */
 export type UsageAttributor<Scope> = (scope: Scope, run: { id: string }) => UsageAttribution;
 export type UsageRecording<Scope> = { recorder: UsageRecorder; attribute: UsageAttributor<Scope> };
 
@@ -98,9 +103,8 @@ export function usageSink(recorder: UsageRecorder | undefined, attribution: Usag
 
 /** The shape the creator dashboard reads: tokens are input + output, per surface, with every day of the range present. */
 export async function usageReport(reader: UsageReader, accountId: string, from: string, to: string, cap: number | null, now = new Date()) {
-  const tokens = (surfaces: SurfaceTokens) => ({
-    studio: billableTokens(surfaces.studio), chat_api: billableTokens(surfaces.chat_api), chat_web: billableTokens(surfaces.chat_web)
-  });
+  const tokens = (surfaces: SurfaceTokens) => Object.fromEntries(USAGE_SURFACES.map(surface => [surface, billableTokens(surfaces[surface])])) as Record<UsageSurface, number>;
+  const total = (sums: Record<UsageSurface, number>) => USAGE_SURFACES.reduce((sum, surface) => sum + sums[surface], 0);
   const month = await reader.monthToDate(accountId, now);
   const byDay = new Map((await reader.daily(accountId, from, to)).map(({ day, usage }) => [day, usage]));
   const daily: Array<{ day: string } & ReturnType<typeof tokens>> = [];
@@ -110,8 +114,8 @@ export async function usageReport(reader: UsageReader, accountId: string, from: 
   }
   const sums = tokens(month);
   return {
-    month_to_date: { ...sums, total: sums.studio + sums.chat_api + sums.chat_web, split: month },
-    cap: { monthly_tokens: cap, remaining_tokens: cap === null ? null : Math.max(0, cap - sums.studio - sums.chat_api - sums.chat_web) },
+    month_to_date: { ...sums, total: total(sums), split: month },
+    cap: { monthly_tokens: cap, remaining_tokens: cap === null ? null : Math.max(0, cap - total(sums)) },
     daily
   };
 }

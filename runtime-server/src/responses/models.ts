@@ -59,7 +59,7 @@ export class ModelCatalog {
         { sub: caller.accountId }, signal
       );
       // The run's model calls are the Chat API's, billed to the owner, and to the key that made the request.
-      return { ...binding, usageSurface: "chat_api", ...(caller.clientType === "api_key" && caller.sessionId ? { apiKeyId: caller.sessionId } : {}) };
+      return { ...binding, usageSurface: "responses_api", ...(caller.clientType === "api_key" && caller.sessionId ? { apiKeyId: caller.sessionId } : {}) };
     } catch (error) {
       const gone = error instanceof AgentReleaseUnavailableError
         || (error instanceof EntitlementError && error.code === "entitlement_required")

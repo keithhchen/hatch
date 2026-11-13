@@ -49,7 +49,7 @@ Response object:
   output_text (SDK convenience, joined text), error: null | { code, message }, incomplete_details: null | { reason },
   usage: { input_tokens, input_tokens_details:{ cached_tokens }, output_tokens, output_tokens_details:{ reasoning_tokens }, total_tokens } }
 ```
-- Run failure → `status:"failed"`, `error:{ code, message }` (existing failure code; reference id in message). Content filter → `incomplete`, `{reason:"content_filter"}`. Interrupted by restart → `failed` with code `run_interrupted`.
+- Run failure → `status:"failed"`, `error:{ code, message }` (existing failure code; reference id in message). Content filter (Hatch's output guard or the provider's own safety stop) → `incomplete`, `{reason:"content_filter"}`. Output limit reached → `incomplete`, `{reason:"max_output_tokens"}`. Interrupted by restart → `failed` with code `run_interrupted`.
 - `usage` = sum over every model call of the run (from the persisted per-call Usage).
 
 Delivery modes:
@@ -83,10 +83,10 @@ Delivery modes:
 
 ## Usage metering, dashboard, caps (phase 2)
 - **One ledger.** Append-only `hatch_usage_events(id, account_id, surface, api_key_id null, product_id null, run_id null, model, input_tokens, cached_input_tokens, output_tokens, reasoning_tokens, created_at)` plus a daily rollup `hatch_usage_daily(account_id, surface, day, input_tokens, cached_input_tokens, output_tokens, reasoning_tokens)` maintained with an atomic `INSERT … ON CONFLICT … DO UPDATE SET x = x + EXCLUDED.x` in the same transaction. Additive DDL only.
-- `surface`: `chat_api` (Responses API), `chat_web` (web/desktop/channel product chat), `studio` (Studio API, Studio web, Assistant, factory agents, ingest). Attribution: the account that pays = the product owner for owner chats; Studio = the expert.
+- `surface`: `responses_api` (Responses API), `chat_web` (web/desktop/channel product chat), `studio_web` and `studio_api` (Studio work: factory runs, Nodes, factory agents, Assistant; `studio_api` when the request was authenticated by an API key, which is then recorded as `api_key_id`, otherwise `studio_web`). Attribution: the account that pays = the product owner for owner chats; Studio = the expert. An existing three-surface ledger is migrated at boot (`chat_api` → `responses_api`; `studio` → `studio_api` where `api_key_id` is set, else `studio_web`; the daily rollup is rebuilt from events).
 - **One hook**: record usage where a model call completes (the pi runtime already produces `Usage` per assistant message; compaction too) via a `UsageRecorder` port passed the attribution context; Studio paths (factory agents, Assistant workers, hosted ingest) call the same port.
 - **Caps**: monthly token cap per account (`HATCH_MONTHLY_TOKEN_CAP`, default generous; per-account override later). Checked before starting any run on any surface from the rollup (month-to-date total). Over cap → 429 `insufficient_quota` / `usage_cap_exceeded` on the APIs and a real "monthly usage limit reached" state in the web UI. A run already in flight finishes.
-- **Dashboard**: Studio → Settings → Usage: this month's tokens by surface (Studio, Chat API, Chat web), a small daily chart for the last 30 days, and cap progress. Endpoint `GET /v1/creator/usage?from&to` (owner). Responses API responses carry `usage`.
+- **Dashboard**: Studio → Settings → Usage: this month's tokens by surface (Studio web, Studio API, Chat web, Responses API), a small daily chart for the last 30 days, and cap progress. Endpoint `GET /v1/creator/usage?from&to` (owner). Responses API responses carry `usage`.
 
 ## Implementation notes (phase 1, where the code differs from the text above)
 - `metadata` supports `title` only (conversation `metadata.title`); any other key, and any metadata on a response, is 400 `unsupported_parameter`. The domain keeps no other metadata and no column was added for it.
@@ -95,7 +95,7 @@ Delivery modes:
 - `created` of a model is 0 (a Corpus carries no release time). `GET /conversations?after=` takes a conversation id.
 - Approvals: a pending approval surfaces as `mcp_approval_request`. Only denying is supported (400 `unsupported_parameter` for `approve: true`): approving runs a tool on the caller's machine, and the API has none. The `mcp` client cannot reach local tools, so in practice no approval arises yet.
 - Attachments and Files: built, not public yet (see above). Inline data URLs, https URLs (public addresses only, no redirects, 10 s, 20/50 MB by kind) and the Files API work only with `HATCH_RESPONSES_ATTACHMENTS=on`.
-- Usage on a response is summed from the persisted per-call usage and is present once the run has ended. The run is billed to the owner on the `chat_api` surface under the API key's session id.
+- Usage on a response is summed from the persisted per-call usage and is present once the run has ended. The run is billed to the owner on the `responses_api` surface under the API key's session id.
 
 ## Docs
 - Developers page gets a "Responses API" (Chat API) section next to the Studio API: base URL, SDK snippet (Python, Node, curl), models, conversations with Task Brief, streaming, files, errors table, limits. `docs/unified-api-guide.md` gets the same.

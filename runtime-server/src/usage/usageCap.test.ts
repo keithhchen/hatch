@@ -16,9 +16,9 @@ import { emptySurfaces, usageReport, type SurfaceTokens, type UsageEvent } from 
 import { UsageCap, UsageCapExceeded } from "./usageCap.js";
 
 const NOW = new Date("2026-11-13T10:00:00Z");
-const month = (studio: number, chatApi = 0, chatWeb = 0): SurfaceTokens => {
+const month = (studio: number, responsesApi = 0, chatWeb = 0): SurfaceTokens => {
   const tokens = emptySurfaces();
-  tokens.studio.input = studio; tokens.chat_api.output = chatApi; tokens.chat_web.input = chatWeb;
+  tokens.studio_web.input = studio; tokens.responses_api.output = responsesApi; tokens.chat_web.input = chatWeb;
   return tokens;
 };
 const counting = (tokens: () => SurfaceTokens) => {
@@ -39,8 +39,9 @@ test("below the cap a Run may start; at or over it, the typed error says who, ho
 test("the cap counts input and output across every surface, and December resets into January", async () => {
   const ledger = new InMemoryUsageLedger();
   const event = (overrides: Partial<UsageEvent>): UsageEvent => ({ id: "x", accountId: "acct", surface: "chat_web", model: "m", inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0, at: new Date("2026-12-05T00:00:00Z"), ...overrides });
-  await ledger.record(event({ id: "a", surface: "studio", inputTokens: 60, cachedInputTokens: 50 }));
-  await ledger.record(event({ id: "b", surface: "chat_api", outputTokens: 40, reasoningTokens: 30 }));
+  await ledger.record(event({ id: "a", surface: "studio_web", inputTokens: 60, cachedInputTokens: 50 }));
+  await ledger.record(event({ id: "b", surface: "responses_api", outputTokens: 30, reasoningTokens: 30 }));
+  await ledger.record(event({ id: "b2", surface: "studio_api", outputTokens: 10 }));
   await ledger.record(event({ id: "c", inputTokens: 999, at: new Date("2026-11-30T00:00:00Z") }));
   const cap = new UsageCap(ledger, 100, { now: () => new Date("2026-12-20T00:00:00Z") });
   await assert.rejects(cap.assertWithinCap("acct"), (error: unknown) => error instanceof UsageCapExceeded && error.used === 100 && error.resetsAt.toISOString() === "2027-01-01T00:00:00.000Z");
@@ -74,7 +75,7 @@ test("a below-cap reading is remembered for the window, per account; an over-cap
 
 test("the dashboard read carries the cap and what remains of it", async () => {
   const ledger = new InMemoryUsageLedger();
-  await ledger.record({ id: "a", accountId: "acct", surface: "studio", model: "m", inputTokens: 70, cachedInputTokens: 0, outputTokens: 20, reasoningTokens: 0, at: NOW });
+  await ledger.record({ id: "a", accountId: "acct", surface: "studio_web", model: "m", inputTokens: 70, cachedInputTokens: 0, outputTokens: 20, reasoningTokens: 0, at: NOW });
   assert.deepEqual((await usageReport(ledger, "acct", "2026-11-13", "2026-11-13", 100, NOW)).cap, { monthly_tokens: 100, remaining_tokens: 10 });
   assert.deepEqual((await usageReport(ledger, "acct", "2026-11-13", "2026-11-13", 50, NOW)).cap, { monthly_tokens: 50, remaining_tokens: 0 });
   assert.deepEqual((await usageReport(ledger, "acct", "2026-11-13", "2026-11-13", null, NOW)).cap, { monthly_tokens: null, remaining_tokens: null });

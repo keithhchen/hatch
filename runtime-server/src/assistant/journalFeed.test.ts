@@ -86,6 +86,7 @@ test("a step is Chat's own words for it, never its arguments or result, and reas
     { type: "thinking_end", contentIndex: 0, content: "想", run_id: "run-1" }
   ]);
   assert.ok(!JSON.stringify(shown).includes("internal"));
+  assert.deepEqual(studioVocabulary({ hub: { type: "tool_call.delta", ...call, status: "cancelled" } }), [{ type: "tool_end", name: "list_tasks", id: "call-1", activity: "看看有什么事项", isError: false, cancelled: true, run_id: "run-1" }]);
   assert.deepEqual(studioVocabulary({ hub: { type: "assistant.delta", run_id: "run-1", delta: { kind: "text", content: "你好", offset: 3 } } }), [{ type: "delta", text: "你好", offset: 3, run_id: "run-1" }]);
   assert.deepEqual(studioVocabulary({ hub: { type: "turn.state", run_id: "run-1", status: "completed" } }), [], "what the journal records is not said twice");
 });

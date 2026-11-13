@@ -21,7 +21,8 @@ import { declareTools, studioToolSupport, type ClientSupport } from "./toolSurfa
 import type { LlmProfile } from "../llmProfiles.js";
 import type { ModelRole, ModelRoleResolver } from "../modelRoles.js";
 import { log } from "../observability/log.js";
-import { usageSink, type UsageRecorder, type UsageSink } from "../usage/usage.js";
+import { currentContext } from "../observability/context.js";
+import { studioAttribution, usageSink, type UsageRecorder, type UsageSink } from "../usage/usage.js";
 import { UsageCapExceeded, type UsageCap } from "../usage/usageCap.js";
 
 const WEB: ClientAttributes = { client: "web" };
@@ -61,6 +62,8 @@ export class WorkbenchRuntime {
   private scribeRuns = new Map<string, Promise<void>>();
   private scribeControllers = new Set<AbortController>();
   private runIds = new Map<string, string>();
+  /** The API key behind the request that started each session's latest Run, if any: its calls are Studio API usage. */
+  private runKeys = new Map<string, string>();
   private liveAgents = new Map<string, Agent>();
   /** Which queued item ids this run has taken (started with or steered in). The queue itself lives on the session. */
   private delivered = new Map<string, Set<string>>();
@@ -85,7 +88,7 @@ export class WorkbenchRuntime {
   private usageFor(id: string): UsageSink | undefined {
     const { usage } = this.options;
     const productId = this.store.scope?.productId;
-    return usage && usageSink(usage.recorder, { accountId: usage.accountId, surface: "studio", ...(productId ? { productId } : {}), runId: this.runIds.get(id) }, log);
+    return usage && usageSink(usage.recorder, studioAttribution(usage.accountId, this.runKeys.get(id), { ...(productId ? { productId } : {}), ...(this.runIds.get(id) ? { runId: this.runIds.get(id)! } : {}) }), log);
   }
   private clientOf(id: string): ClientAttributes { return this.clients.get(id) ?? WEB; }
   emit(id: string, type: string, data: Record<string, unknown> = {}): void {
@@ -120,6 +123,8 @@ export class WorkbenchRuntime {
     const runId = `run_${randomUUID()}`;
     this.active.set(id, controller);
     this.runIds.set(id, runId);
+    const apiKeyId = currentContext()?.api_key_id;
+    if (apiKeyId) this.runKeys.set(id, apiKeyId); else this.runKeys.delete(id);
     try {
       // The run is already ours; background compaction yields and ends before the message proceeds.
       await this.background.preempt(id);

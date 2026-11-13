@@ -5,7 +5,7 @@ import { RunObserver, parseSse, resumable } from "./run.js";
 const enc = encodeURIComponent;
 
 // Adapters: where a conversation lives. The same ConversationApi runs over any of them.
-// `scope` is added to every query; `afterParam` names the resume cursor parameter; `sent` shapes a send answer.
+// `scope` is added to every query; `afterParam` names the snapshot's cursor parameter (events always resume with `after_cursor`); `sent` shapes a send answer.
 export const chatRoutes = (id, product) => {
   const base = `/v1/conversations/${enc(id)}`;
   return {
@@ -42,7 +42,7 @@ export class ConversationApi {
   stream({ content, key }) {
     return sseOf(this.client.stream("POST", this.url(this.routes.messages), { content, client_message_id: key }, { "idempotency-key": key }));
   }
-  events(after) { return sseOf(this.client.stream("GET", this.url(this.routes.events, { [this.routes.afterParam]: after }))); }
+  events(after) { return sseOf(this.client.stream("GET", this.url(this.routes.events, { after_cursor: after }))); }
   snapshot(after) { return this.client.get(this.url(this.routes.snapshot, { [this.routes.afterParam]: after })); }
   cancel(runId) { return this.client.post(this.url(this.routes.cancel(runId)), {}); }
 }

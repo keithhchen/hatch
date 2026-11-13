@@ -34,6 +34,7 @@ import type { LegacyAssistantHistory } from "./history.js";
 import type { AssistantHost } from "../conversations/assistantConversation.js";
 import type { AssetDesk } from "../conversations/assets.js";
 import { log } from "../observability/log.js";
+import { bindContext, currentContext } from "../observability/context.js";
 import { memoizeSuccess } from "../memoizeSuccess.js";
 import type { ModelRoleResolver } from "../modelRoles.js";
 
@@ -84,9 +85,14 @@ class AssistantBinder implements PrincipalBinder<AssistantScope> {
   }
 }
 
-const scopeOfConversation = (conversation: Pick<ConversationRecord, "ownerAccountId">): AssistantScope => ({
-  creatorId: conversation.ownerAccountId, userId: conversation.ownerAccountId, productId: ASSISTANT_AGENT_ID, corpusDigest: ASSISTANT_AGENT_ID, accountId: conversation.ownerAccountId, usageSurface: "studio"
-});
+/** Studio work: the API's when an API key made the request that is binding the Run, the web's otherwise. */
+export const scopeOfConversation = (conversation: Pick<ConversationRecord, "ownerAccountId">): AssistantScope => {
+  const apiKeyId = currentContext()?.api_key_id;
+  return {
+    creatorId: conversation.ownerAccountId, userId: conversation.ownerAccountId, productId: ASSISTANT_AGENT_ID, corpusDigest: ASSISTANT_AGENT_ID, accountId: conversation.ownerAccountId,
+    usageSurface: apiKeyId ? "studio_api" : "studio_web", ...(apiKeyId ? { apiKeyId } : {})
+  };
+};
 
 /**
  * The Assistant as a conversation on Chat's runtime: the same Runs, steering, resume, compaction, idempotency and
@@ -168,6 +174,8 @@ export class AssistantChat implements AssistantHost {
     const { deps } = this;
     return { run: async turn => {
       const { accountId } = turn.scope;
+      // Workers the Assistant starts in this Run are the same request's usage.
+      if (turn.scope.apiKeyId) bindContext({ api_key_id: turn.scope.apiKeyId });
       try {
         const serverTools = new ServerToolExecutor(deps.toolTimeoutMs ?? 120_000);
         serverTools.setAttachments(deps.chatAssets.toolsFor(turn.conversation));

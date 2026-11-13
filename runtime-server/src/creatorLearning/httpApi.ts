@@ -9,6 +9,8 @@ export type CreatorFactoryHttpRequest = {
   headers: Record<string, string | undefined>;
   body?: Record<string, unknown>;
   creator: Pick<Account, "id" | "display_name">;
+  /** Set when an API key, not a web session, made the request. */
+  apiKeyId?: string;
 };
 
 export type CreatorFactoryHttpResponse = {
@@ -110,7 +112,8 @@ export async function handleCreatorFactoryHttp(
         answers,
         ...(numberField(body.expected_version) === undefined ? {} : { expectedVersion: numberField(body.expected_version)! }),
         ...(typeof body.submission_id === "string" ? { submissionId: body.submission_id } : {}),
-        questionBatchId: body.question_batch_id
+        questionBatchId: body.question_batch_id,
+        ...(request.apiKeyId ? { apiKeyId: request.apiKeyId } : {})
       });
       return { status: 202, body: publicView(view) };
     }
@@ -121,7 +124,8 @@ export async function handleCreatorFactoryHttp(
       const view = await service.retry(
         request.creator.id,
         decodeURIComponent(retryMatch[1]!),
-        numberField(body.expected_version)
+        numberField(body.expected_version),
+        request.apiKeyId
       );
       return { status: 202, body: publicView(view) };
     }

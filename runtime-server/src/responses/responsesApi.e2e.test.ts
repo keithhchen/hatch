@@ -384,13 +384,13 @@ test("an inline image goes through the shared asset path; without an asset servi
   assert.equal((await refused(plain.openai.responses.create({ model: `hatch:${PRODUCT}`, input: [{ role: "user", content: [{ type: "input_image", image_url: image, detail: "auto" }] }] }))).status, 501);
 });
 
-test("a Responses API run is billed to the owner on the chat_api surface, under the key that made it", async () => {
+test("a Responses API run is billed to the owner on the responses_api surface, under the key that made it", async () => {
   const { openai, usage } = await fixture();
   const response = await openai.responses.create({ model: `hatch:${PRODUCT}`, input: "count this" });
   assert.equal(usage.length, 1);
   assert.deepEqual(
     { accountId: usage[0]!.accountId, surface: usage[0]!.surface, apiKeyId: usage[0]!.apiKeyId, productId: usage[0]!.productId, runId: `resp_${usage[0]!.runId!.replace(/^run_/, "")}`, input: usage[0]!.inputTokens, cached: usage[0]!.cachedInputTokens, output: usage[0]!.outputTokens },
-    { accountId: OWNER, surface: "chat_api", apiKeyId: "session-1", productId: PRODUCT, runId: response.id, input: 130, cached: 30, output: 20 }
+    { accountId: OWNER, surface: "responses_api", apiKeyId: "session-1", productId: PRODUCT, runId: response.id, input: 130, cached: 30, output: 20 }
   );
 });
 
