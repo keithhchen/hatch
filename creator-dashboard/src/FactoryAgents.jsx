@@ -97,16 +97,18 @@ export function FactoryAgents({ productId, tab = "build", section, agent, naviga
   const ingest = useMemo(() => createIngestPort(dashboardRequest), []);
   const patchUpload = (id, change) => setUploadItems(previous => previous.map(item => item.id === id ? { ...item, ...change } : item));
   const jobs = useMemo(() => createJobStore(productId), [productId]);
-  const rowState = (id, jobId) => state => {
-    if (state.status !== "ingesting" && jobId()) jobs.remove(jobId());
-    if (state.status !== "completed") { patchUpload(id, state); return; }
+  const rowState = (id, jobId, retry) => state => {
+    if (state.status !== "ingesting" && state.status !== "uploading" && jobId()) jobs.remove(jobId());
+    if (state.status !== "completed") { patchUpload(id, { ...state, ...(state.code ? { error: t(UPLOAD_ERROR_TEXT[state.code] ?? "uploadFailed") } : {}), ...(state.code?.startsWith("upload_") ? { retry } : {}) }); return; }
     setUploadItems(previous => previous.filter(item => item.id !== id)); refreshConfig();
   };
   const uploadProjectFiles = files => Promise.all(files.map(file => {
     const id = `${file.name}-${file.lastModified}-${Math.random()}`; let jobId = "";
     if (tooLarge(file)) { setUploadItems(previous => [{ id, path: `input/manual/${file.name}`, status: "unsupported" }, ...previous]); return; }
-    setUploadItems(previous => [{ id, path: `input/manual/${file.name}`, status: "uploading" }, ...previous]);
-    return ingestFile(ingest, productId, file, rowState(id, () => jobId), { onJob: job => { jobId = job.id; jobs.add(job.id, file.name); } });
+    setUploadItems(previous => [{ id, path: `input/manual/${file.name}`, status: "uploading", progress: 0 }, ...previous]);
+    // Retrying a failed upload replaces its row and sends only that file again, under a new upload and a new key.
+    const retry = () => { dismissUpload(id); return uploadProjectFiles([file]); };
+    return ingestFile(ingest, productId, file, rowState(id, () => jobId, retry), { onJob: job => { jobId = job.id; jobs.add(job.id, file.name); } });
   }));
   useEffect(() => { jobs.list().forEach(({ jobId, name }) => {
     const id = `resume-${jobId}`;
@@ -183,7 +185,8 @@ function AgentIntro({ entry, agents, onOpenAgent, agentName, locale, t }) {
   </section>;
 }
 
-const uploadStatusLabel = t => record => t({ uploading: "uploadProcessing", ingesting: "ingesting", failed: "uploadFailed", partial: "ingestPartial", unsupported: "fileTooLarge" }[record.status]);
+const UPLOAD_ERROR_TEXT = { upload_timeout: "uploadTimedOut", upload_failed: "uploadNetworkFailed", unsupported_media_type: "unsupportedType" };
+const uploadStatusLabel = t => record => t({ uploading: "uploading", ingesting: "ingesting", failed: "uploadFailed", partial: "ingestPartial", unsupported: "fileTooLarge" }[record.status]);
 
 function SourceUploadWorkspace({ onOpenFile, manualFiles, uploadItems, importPicker, uploadProjectFiles, saveManualText, locale, deleteManualFile, dismissUpload, onOpenAgent, t }) {
   const [dragging, setDragging] = useState(false);
@@ -196,7 +199,7 @@ function SourceUploadWorkspace({ onOpenFile, manualFiles, uploadItems, importPic
     </button>
     <input ref={importPicker} hidden type="file" multiple aria-label={t("uploadInputFiles")} onChange={event => { uploadProjectFiles([...event.target.files]); event.target.value = ""; }} />
     <ImportFromAi saveManualText={saveManualText} locale={locale} t={t} />
-    <FileList title={t("factoryUploadedTitle")} records={records} onOpen={onOpenFile} onDelete={record => record.id ? dismissUpload(record.id) : deleteManualFile(record)} statusLabel={statusLabel} t={t} />
+    <FileList title={t("factoryUploadedTitle")} records={records} onOpen={onOpenFile} onDelete={record => record.id ? dismissUpload(record.id) : deleteManualFile(record)} onRetry={record => record.retry?.()} statusLabel={statusLabel} t={t} />
     <HatchButton variant="secondary" trailing={<ArrowRight aria-hidden="true" />} onClick={() => onOpenAgent("voice")}>{t("factoryUploadNext")}</HatchButton>
   </section>;
 }

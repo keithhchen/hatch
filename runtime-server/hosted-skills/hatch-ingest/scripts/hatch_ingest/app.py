@@ -118,7 +118,7 @@ def main(argv: Sequence[str] | None = None, env: Mapping[str, str] = os.environ)
     browser: Browser = PlaywrightBrowser(env)
     ledger = ProfileLedger()
     ingestor = Ingestor(
-        SourceRegistry([LinkSource(browser, profiles), FileSource(upload)]), default_registry(), out,
+        SourceRegistry([LinkSource(browser, profiles), FileSource()]), default_registry(), out,
         lambda wd: ConversionContext(wd, shell, extractor, transcriber),
         Path(args.work or root / "work"), ledger, log)
     try:

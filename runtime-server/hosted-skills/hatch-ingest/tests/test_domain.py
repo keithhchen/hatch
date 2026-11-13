@@ -15,7 +15,7 @@ class FrontmatterTest(unittest.TestCase):
         self.assertTrue(fm.startswith("---\n") and fm.endswith("---\n"))
 
     def test_content_fields_transcription_and_chinese(self):
-        item = Item("i1", "file", name="talk.mp4", upload_name="talk.mp4")
+        item = Item("i1", "file", name="talk.mp4")
         p = Payload(item, Path("x.mp4"), ".mp4", title="演讲", source_name="talk.mp4")
         c = Converted(Path("x.mp4"), "media", transcription={"provider": "dashscope", "model": "m"})
         f = content_fields(p, c, "2026-01-01T00:00:00+00:00")

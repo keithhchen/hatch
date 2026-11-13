@@ -44,7 +44,7 @@ Workers: `research`, `interview`, `builder`, `cases`, `evaluator`. `chat --wait`
 
 Chat (`ask`, `conversation ...`) is consumer Chat with a published Product, separate from the Studio workers. The Runtime binds every Chat call to a Product, so every command takes `--product`. `ask` without `--conversation` starts a conversation and prints its `conversation_id`; with it, continues one. Every send carries a `client_message_id` (`--key` to choose it; the JSON result returns it): pass the same key to retry a send without sending it twice. `--stream` prints the reply as it arrives and, if the connection drops, reconnects with `after_cursor` set to the last journal cursor (live text deltas carry no cursor and are not replayed, so read the full reply with `conversation show`); if it gives up it prints the cursor for `conversation watch <id> --after <cursor>`. The Run belongs to the server: closing the CLI never stops it, only `conversation stop` does. Browser login and API keys both work for all of these.
 
-Every command takes `--json`. `ingest` accepts links and files of any type (30 MB total); `--wait` polls every 5 s until the job finishes.
+Every command takes `--json`. `ingest` accepts links and files of any type (50 MB per file, uploaded straight to storage); `--wait` polls every 5 s until the job finishes.
 
 ## Coding agents
 

@@ -53,15 +53,26 @@ export class ProductWorkspaceSink implements IngestSink {
     private readonly productPrefix: (accountId: string, productId: string) => string,
   ) {}
 
-  async store(scope: { accountId: string; productId: string; jobId: string }, item: { id: string; label: string }, result: Result): Promise<Placement> {
+  async store(scope: { accountId: string; productId: string; jobId: string }, item: { id: string; label: string; upload?: { objectKey: string; name: string } }, result: Result): Promise<Placement> {
     const markdown = result.markdown?.trim() ? await this.one(`${scope.accountId}/${scope.productId}`, async () =>
       placeManual(await this.manual(scope.accountId, scope.productId), item.label, Buffer.from(result.markdown!, "utf8"))) : undefined;
-    const original = result.original && await this.putOriginal(scope, item, result.original);
+    const original = item.upload ? await this.copyOriginal(scope, item.id, item.upload) : result.original && await this.putOriginal(scope, item, result.original);
     return { ...(markdown ? { markdown_path: markdown } : {}), ...(original ? { original_ref: original } : {}) };
   }
 
+  private originalKey(scope: { accountId: string; productId: string; jobId: string }, itemId: string, name: string) {
+    return `${this.productPrefix(scope.accountId, scope.productId)}/ingest/${scope.jobId}/${itemId}/${name}`;
+  }
+
+  /** An uploaded file is its own original: it moves from staging to the Product's prefix inside the store, never through this process. */
+  private async copyOriginal(scope: { accountId: string; productId: string; jobId: string }, itemId: string, upload: { objectKey: string; name: string }) {
+    const key = this.originalKey(scope, itemId, safeName(upload.name));
+    await this.objects.copy(upload.objectKey, key);
+    return key;
+  }
+
   private async putOriginal(scope: { accountId: string; productId: string; jobId: string }, item: { id: string; label: string }, original: NonNullable<Result["original"]>) {
-    const key = `${this.productPrefix(scope.accountId, scope.productId)}/ingest/${scope.jobId}/${item.id}/${originalName(item.label, original.name)}`;
+    const key = this.originalKey(scope, item.id, originalName(item.label, original.name));
     await this.objects.put(key, original.bytes, { contentType: mediaTypeOf(original.name, original.mediaType) });
     return key;
   }

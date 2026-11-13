@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import type { CredentialSeal } from "../assistant/channelCredentials.js";
 import type { ArtifactObjectStore } from "../creatorLearning/objectStore.js";
+import type { StagedUploads } from "./ports.js";
 import { HostedIngest } from "../hostedAgents/ingest.js";
 import { INGEST_SANDBOX, ingestAgent, ingestSecrets } from "../hostedAgents/ingestAgent.js";
 import { PostgresBrowserProfiles } from "../hostedAgents/browserProfiles.js";
@@ -29,7 +30,7 @@ export class NoBrowserProfiles implements BrowserProfileStore {
 export const HOSTED_NOT_CONFIGURED = "Hosted ingest is not configured";
 
 /** The hosted engine when a Kimi key is set; otherwise an engine that says why it cannot run. */
-export const hostedEngineFromEnvironment = async (environment: NodeJS.ProcessEnv, pool: Pool, models: ModelRoleResolver, seal?: CredentialSeal) => {
+export const hostedEngineFromEnvironment = async (environment: NodeJS.ProcessEnv, pool: Pool, models: ModelRoleResolver, staged: StagedUploads, seal?: CredentialSeal) => {
   const apiKey = environment.HATCH_MANAGED_AGENTS_API_KEY?.trim();
   if (!apiKey) return new UnavailableEngine(HOSTED_NOT_CONFIGURED);
   const api = new KimiApi({ apiKey });
@@ -37,8 +38,16 @@ export const hostedEngineFromEnvironment = async (environment: NodeJS.ProcessEnv
   const model = async () => (await models.resolve("ingest")).model;
   const agent = new TracedHostedAgent(new KimiHostedAgent(api, new Provisioner(api, INGEST_SANDBOX, async () => ingestAgent(await model()), zipDirectory)), "kimi_hosted_agents", model);
   const profiles = seal ? await PostgresBrowserProfiles.open(pool, seal) : new NoBrowserProfiles();
-  return new HostedEngine(new HostedIngest(agent, profiles, ingestSecrets(environment)));
+  return new HostedEngine(new HostedIngest(agent, profiles, ingestSecrets(environment)), staged);
 };
+
+/** A hosted run takes a while: the download link outlives a typical run. */
+const DOWNLOAD_SECONDS = 60 * 60;
+
+export const stagedUploads = (objects: ArtifactObjectStore): StagedUploads => ({
+  read: key => objects.get(key),
+  downloadUrl: async key => (await objects.presign(key, { method: "GET", expiresSeconds: DOWNLOAD_SECONDS })).url,
+});
 
 /** Registry's ingest: jobs in Postgres, plain text stored directly, the rest on the hosted agent. */
 export const createIngestService = async (deps: {
@@ -55,11 +64,13 @@ export const createIngestService = async (deps: {
   owns: (accountId: string, productId: string) => Promise<boolean>;
   usageCap?: UsageCap;
 }): Promise<IngestService> => {
+  const staged = stagedUploads(deps.objects);
   const service = new IngestService({
     owns: deps.owns,
     usageCap: deps.usageCap,
     jobs: await PostgresIngestJobs.open(deps.pool),
-    engine: new RoutingEngine([new PlainTextEngine(), await hostedEngineFromEnvironment(deps.environment, deps.pool, deps.models, deps.seal)]),
+    objects: deps.objects,
+    engine: new RoutingEngine([new PlainTextEngine(staged), await hostedEngineFromEnvironment(deps.environment, deps.pool, deps.models, staged, deps.seal)]),
     sink: new ProductWorkspaceSink(deps.manual, deps.objects, deps.productPrefix),
   });
   await service.recoverInterrupted();

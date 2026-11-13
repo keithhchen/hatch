@@ -11,13 +11,15 @@ Turns each item into `original` + `content.md`. Never summarize, never invent me
 ## Steps
 
 1. Find `task.json` (and `browser-profiles.json`) by name: they are uploaded like any other
-   file, so search `/mnt/agents/upload/` recursively, or `/mnt/agents/`. Read it.
+   file, so search `/mnt/agents/upload/` recursively, or `/mnt/agents/`. Do not print it: file items
+   carry `download_url`, a short-lived credential. The script downloads each file itself and checks
+   `bytes` and `sha256`; never download or print those URLs yourself.
 2. Run (use `xvfb-run -a` when any item is a link; Chromium is headed):
    `xvfb-run -a python3 /mnt/agents/skills/hatch-ingest/scripts/ingest.py`
    (files only: omit `xvfb-run`). Flags: `--only ID` (repeatable) to redo items,
    `--task PATH`, `--profiles PATH`, `--root`, `--upload`, `--output`.
 3. Read `/mnt/agents/output/result.json`. For each `failed`/`partial` item decide:
-   - `upload not found`: report it, do not guess another file.
+   - `download failed` (HTTP error, size or sha256 mismatch): report it, do not guess another file.
    - `login required` (profile `needs_login`): do not try to log in; report it.
    - Media or text missing on a platform link (Douyin, Instagram, Xiaohongshu, X, WeChat, Zhihu,
      podcast pages): read `references/platforms.md` for that platform's route and stop rules, inspect the
@@ -28,7 +30,7 @@ Turns each item into `original` + `content.md`. Never summarize, never invent me
    - Missing tool/format: retry with another approach; otherwise leave it and report.
 4. `save_artifact` every file in `/mnt/agents/output/` (the script prints them as `SAVE <name>`).
    Output is flat; names are unique because artifacts are keyed by basename:
-   - `<id>.original.<ext>` - re-encoded media (mp4 H.264 720p / m4a AAC 64k mono), images
+   - `<id>.original.<ext>` - links only (an uploaded file is already stored; never write its original): re-encoded media (mp4 H.264 720p / m4a AAC 64k mono), images
      (JPEG q85, longest edge 2048, PNG kept if alpha), documents untouched, links: main media
      or page PDF or HTML snapshot
    - `<id>.content.md` - YAML frontmatter + full text / transcript

@@ -346,6 +346,33 @@ test("Creator browser session proxies Product BriefSpec writes to Registry", asy
   }]);
 });
 
+test("ingest uploads are requested through the Dashboard and file bytes stream to the Registry without a body-size cap", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-ingest-upload-"));
+  const ingestCalls = [];
+  const registry = registryFixture({ signedIn: "owner", ingestCalls });
+  await listen(registry);
+  context.after(() => registry.close());
+  const dashboard = await createDashboardApp({ ledgerPath: path.join(directory, "ledger.jsonl"), registryUrl: serverUrl(registry) });
+  const api = createServer(dashboard.handler);
+  await listen(api);
+  context.after(() => api.close());
+  const login = await fetch(`${serverUrl(api)}/v1/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "creator@example.test", password: "test-only" }) });
+  const setCookies = login.headers.getSetCookie();
+  const cookie = setCookies.map((value) => value.split(";", 1)[0]).join("; ");
+  const csrf = decodeURIComponent(setCookies.find((value) => value.startsWith("hatch_web_csrf=")).split(";", 1)[0].slice("hatch_web_csrf=".length));
+  const issued = await fetch(`${serverUrl(api)}/v1/creator/products/${catalogAgent.product_id}/ingest/uploads`, {
+    method: "POST", headers: { cookie, "x-csrf-token": csrf, "content-type": "application/json" },
+    body: JSON.stringify({ name: "talk.mp4", bytes: 3, media_type: "video/mp4" })
+  });
+  assert.equal(issued.status, 201);
+  assert.equal((await issued.json()).upload_id, "u1");
+  assert.deepEqual(ingestCalls[0].body, { name: "talk.mp4", bytes: 3, media_type: "video/mp4" });
+  const bytes = Buffer.alloc(1024 * 1024 + 7, 97);
+  const put = await fetch(`${serverUrl(api)}/v1/local-objects/k?sig=s`, { method: "PUT", headers: { "content-type": "video/mp4" }, body: bytes });
+  assert.equal(put.status, 200);
+  assert.deepEqual(ingestCalls[1], { route: "put", query: "?sig=s", contentType: "video/mp4", bytes: bytes.length, authorization: undefined });
+});
+
 test("browser OAuth PKCE keeps state and authorizes Product Ingest without Version scope", async (context) => {
   const account = {
     id: catalogAgent.creator_id,
@@ -1594,6 +1621,7 @@ function registryFixture({
   briefCalls = [],
   publishCalls = [],
   deploymentCalls = [],
+  ingestCalls = [],
   activationFailures = 0
 }) {
   let remainingActivationFailures = activationFailures;
@@ -1658,6 +1686,18 @@ function registryFixture({
         brief_spec: body.brief_spec,
         updated_at: "2026-08-16T00:00:01.000Z"
       }));
+      return;
+    }
+    if (requestUrl.pathname === `/v1/creator/products/${agent.product_id}/ingest/uploads` && request.method === "POST") {
+      ingestCalls.push({ route: "uploads", body: JSON.parse(content), authorization: request.headers.authorization });
+      response.statusCode = 201;
+      response.end(JSON.stringify({ upload_id: "u1", url: "/v1/local-objects/k?sig=s", method: "PUT", headers: { "content-type": "video/mp4" } }));
+      return;
+    }
+    if (requestUrl.pathname === "/v1/local-objects/k" && request.method === "PUT") {
+      ingestCalls.push({ route: "put", query: requestUrl.search, contentType: request.headers["content-type"], bytes: content.length, authorization: request.headers.authorization });
+      response.statusCode = 200;
+      response.end("{}");
       return;
     }
     if (requestUrl.pathname === "/v1/creator/factory-runs" && request.method === "GET") {

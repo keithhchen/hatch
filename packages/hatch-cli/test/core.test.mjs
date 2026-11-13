@@ -8,7 +8,7 @@ import { FileCredentialStore } from "../src/credentialStore.js";
 import { HatchClient } from "../src/client.js";
 import { CommandRegistry } from "../src/registry.js";
 import { COMMANDS } from "../src/commands.js";
-import { buildIngestItems, MAX_TOTAL_BYTES } from "../src/ingest.js";
+import { buildIngestItems, MAX_FILE_BYTES, uploader } from "../src/ingest.js";
 import { json, makeContext, ME } from "./helpers.mjs";
 
 test("PKCE pair: challenge is base64url sha256 of verifier", () => {
@@ -87,22 +87,37 @@ test("registry dispatch prefers the longest command name", () => {
   assert.equal(registry.resolve(["nope"]), null);
 });
 
-test("ingest encodes files as base64 with media type, urls as url items", async () => {
+test("ingest uploads files and references them by upload id, urls as url items", async () => {
   const { home } = await makeContext();
   await writeFile(join(home, "a.pdf"), "PDFDATA");
-  const items = await buildIngestItems(["https://e.com/x", "a.pdf"], { cwd: home });
-  assert.deepEqual(items[0], { url: "https://e.com/x" });
-  assert.deepEqual(items[1], { name: "a.pdf", content_base64: Buffer.from("PDFDATA").toString("base64"), media_type: "application/pdf" });
-  await assert.rejects(buildIngestItems(["missing.txt"], { cwd: home }), { code: "file_not_found" });
+  const seen = [];
+  const upload = async (file) => { seen.push(file); return { upload_id: "u1", name: file.name }; };
+  const items = await buildIngestItems(["https://e.com/x", "a.pdf"], { cwd: home, upload });
+  assert.deepEqual(items, [{ url: "https://e.com/x" }, { upload_id: "u1", name: "a.pdf" }]);
+  assert.deepEqual(seen.map(({ name, media_type }) => ({ name, media_type })), [{ name: "a.pdf", media_type: "application/pdf" }]);
+  await assert.rejects(buildIngestItems(["missing.txt"], { cwd: home, upload }), { code: "file_not_found" });
   await mkdir(join(home, "d"));
-  await assert.rejects(buildIngestItems(["d"], { cwd: home }), { code: "not_a_file" });
+  await assert.rejects(buildIngestItems(["d"], { cwd: home, upload }), { code: "not_a_file" });
 });
 
-test("ingest rejects total size over 30 MB before reading", async () => {
-  let read = false;
-  const fs = { stat: async () => ({ isFile: () => true, size: MAX_TOTAL_BYTES / 2 + 1 }), readFile: async () => { read = true; return Buffer.alloc(0); } };
-  await assert.rejects(buildIngestItems(["a.mp4", "b.mp4"], { cwd: "/", fs }), (e) => e.code === "too_large" && /30 MB/.test(e.message));
-  assert.equal(read, false);
+test("ingest rejects a file over 50 MB before uploading anything", async () => {
+  let uploaded = false;
+  const fs = { stat: async () => ({ isFile: () => true, size: MAX_FILE_BYTES + 1 }) };
+  await assert.rejects(buildIngestItems(["a.mp4"], { cwd: "/", fs, upload: async () => { uploaded = true; } }), (e) => e.code === "too_large" && /50 MB/.test(e.message));
+  assert.equal(uploaded, false);
+});
+
+test("the uploader PUTs the bytes to the issued url with the issued headers, relative urls on the API origin", async () => {
+  const puts = [];
+  const fetch = async (url, init) => { puts.push([url, init.method, init.headers, init.body.toString()]); return new Response(null, { status: 200 }); };
+  const posts = [];
+  const client = { post: async (route, body) => { posts.push([route, body]); return { upload_id: "u1", url: "/v1/local-objects/k?sig=s", method: "PUT", headers: { "content-type": "application/pdf" } }; } };
+  const id = await uploader({ client, fetch, baseUrl: "http://api.test/", route: "/r/uploads", readBytes: async () => Buffer.from("ABC") })({ path: "/x/a.pdf", name: "a.pdf", media_type: "application/pdf" });
+  assert.deepEqual(id, { upload_id: "u1", name: "a.pdf", bytes: 3, sha256: "b5d4045c3f466fa91fe2cc6abe79232a1a57cdf104f7a26e716e0a1e2789df78", media_type: "application/pdf" });
+  assert.deepEqual(posts, [["/r/uploads", { name: "a.pdf", bytes: 3, sha256: "b5d4045c3f466fa91fe2cc6abe79232a1a57cdf104f7a26e716e0a1e2789df78", media_type: "application/pdf" }]]);
+  assert.deepEqual(puts, [["http://api.test/v1/local-objects/k?sig=s", "PUT", { "content-type": "application/pdf" }, "ABC"]]);
+  const refused = uploader({ client, fetch: async () => new Response(null, { status: 403 }), baseUrl: "http://api.test", route: "/r", readBytes: async () => Buffer.from("A") });
+  await assert.rejects(refused({ path: "p", name: "a.pdf" }), { code: "upload_failed", message: /403/ });
 });
 
 test("login --api-key-stdin verifies with /me and stores an api_key", async () => {

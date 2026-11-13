@@ -14,15 +14,15 @@ const run = async port => {
 
 test("a file is ingested through the job API and settles on the server's word", async () => {
   const reads = [job("running"), job("done", { status: "ok", markdown_path: "input/manual/talk.md" })];
-  const states = await run({ submit: async () => job("queued"), get: async () => reads.shift() });
-  assert.deepEqual(states, [{ status: "ingesting" }, { status: "ingesting" }, { status: "completed" }]);
+  const states = await run({ upload: async () => "u", submit: async () => job("queued"), get: async () => reads.shift() });
+  assert.deepEqual(states.filter(state => state.status !== "uploading"), [{ status: "ingesting" }, { status: "ingesting" }, { status: "completed" }]);
 });
 
 test("the server's error is what the Studio shows, from the job or from the request", async () => {
-  const failed = await run({ submit: async () => job("failed", { status: "failed", error: "Could not read the PDF" }), get: async () => undefined });
-  assert.deepEqual(failed, [{ status: "failed", error: "Could not read the PDF" }]);
-  const rejected = await run({ submit: async () => { throw new Error("Inline files may total at most 30 MB"); }, get: async () => undefined });
-  assert.deepEqual(rejected, [{ status: "failed", error: "Inline files may total at most 30 MB" }]);
+  const failed = await run({ upload: async () => "u", submit: async () => job("failed", { status: "failed", error: "Could not read the PDF" }), get: async () => undefined });
+  assert.deepEqual(failed.at(-1), { status: "failed", error: "Could not read the PDF" });
+  const rejected = await run({ upload: async () => "u", submit: async () => { throw new Error("Inline files may total at most 30 MB"); }, get: async () => undefined });
+  assert.deepEqual(rejected.at(-1), { status: "failed", error: "Inline files may total at most 30 MB" });
 });
 
 test("a partly ingested file is not reported as success", () => {
@@ -30,17 +30,41 @@ test("a partly ingested file is not reported as success", () => {
   assert.equal(ingestOutcome(job("done", { status: "ok" })).status, "completed");
 });
 
-test("the port posts base64 content to the product's ingest route and reads jobs back", async () => {
+test("the port asks for an upload slot, puts the raw file with the issued headers, then submits the upload with its facts", async () => {
   const calls = [];
-  const port = createIngestPort(async (route, options) => { calls.push([route, options?.method ?? "GET", options?.body]); return { job: { id: "j9" } }; });
-  globalThis.FileReader = class { readAsDataURL() { this.result = "data:application/pdf;base64,QUJD"; this.onload(); } };
-  await port.submit("a b", file);
+  const bytes = new TextEncoder().encode("ABC");
+  const big = { ...file, size: 3, arrayBuffer: async () => bytes.buffer };
+  const request = async (route, options) => { calls.push([route, options?.method ?? "GET", options?.body, options?.headers]); return route.endsWith("/uploads") ? { upload_id: "u1", url: "https://oss.test/k", headers: { "content-type": "application/pdf" } } : { job: { id: "j9" } }; };
+  const puts = [];
+  const port = createIngestPort(request, async (url, f, headers, options) => { puts.push([url, f, headers]); options.onProgress(0.5); });
+  const progress = [];
+  const item = await port.upload("a b", big, { onProgress: value => progress.push(value) });
+  const created = await port.submit("a b", item, "k1");
   await port.get("a b", "j9");
-  delete globalThis.FileReader;
-  assert.equal(calls[0][0], "/v1/creator/products/a%20b/ingest");
-  assert.equal(calls[0][1], "POST");
-  assert.deepEqual(JSON.parse(calls[0][2]), { items: [{ name: "talk.pdf", content_base64: "QUJD", media_type: "application/pdf" }] });
-  assert.deepEqual(calls[1].slice(0, 2), ["/v1/creator/products/a%20b/ingest/j9", "GET"]);
+  assert.equal(calls[0][0], "/v1/creator/products/a%20b/ingest/uploads");
+  assert.deepEqual(JSON.parse(calls[0][2]), { name: "talk.pdf", bytes: 3, sha256: "b5d4045c3f466fa91fe2cc6abe79232a1a57cdf104f7a26e716e0a1e2789df78", media_type: "application/pdf" });
+  assert.deepEqual(puts, [["https://oss.test/k", big, { "content-type": "application/pdf" }]]);
+  assert.deepEqual(progress, [0.5]);
+  assert.equal(calls[1][0], "/v1/creator/products/a%20b/ingest");
+  assert.equal(calls[1][3]["Idempotency-Key"], "k1");
+  assert.deepEqual(JSON.parse(calls[1][2]), { items: [{ upload_id: "u1", name: "talk.pdf", bytes: 3, sha256: "b5d4045c3f466fa91fe2cc6abe79232a1a57cdf104f7a26e716e0a1e2789df78", media_type: "application/pdf" }] });
+  assert.equal(created.id, "j9");
+  assert.deepEqual(calls[2].slice(0, 2), ["/v1/creator/products/a%20b/ingest/j9", "GET"]);
+});
+
+test("a failed upload makes no job and says why: timed out, failed (retryable), too large, unsupported", async () => {
+  const fail = async error => { const states = []; await ingestFile({ upload: async () => { throw error; }, submit: async () => assert.fail("no job for a failed upload") }, "p1", file, state => states.push(state)); return states.at(-1); };
+  assert.deepEqual(await fail(Object.assign(new Error("t"), { code: "upload_timeout" })), { status: "failed", error: "t", code: "upload_timeout" });
+  assert.deepEqual(await fail(Object.assign(new Error("n"), { code: "upload_failed" })), { status: "failed", error: "n", code: "upload_failed" });
+  assert.deepEqual(await fail(Object.assign(new Error("big"), { status: 413, code: "file_too_large" })), { status: "unsupported" });
+  assert.deepEqual(await fail(Object.assign(new Error("type"), { status: 415 })), { status: "failed", code: "unsupported_media_type" });
+});
+
+test("upload progress is reported as uploading states before the job settles", async () => {
+  const states = [];
+  const port = { upload: async (_, __, { onProgress }) => { onProgress(0.25); return "u1"; }, submit: async () => job("done", { status: "ok" }), get: async () => undefined };
+  await ingestFile(port, "p1", file, state => states.push(state));
+  assert.deepEqual(states, [{ status: "uploading", progress: 0 }, { status: "uploading", progress: 0.25 }, { status: "completed" }]);
 });
 
 test("files group by folder, filter by name, and walk in the order shown", () => {
