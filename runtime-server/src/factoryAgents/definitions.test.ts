@@ -121,4 +121,5 @@ test("the shelved person-centred method is not loaded; the interview method is s
   for (const loaded of [voice, done, assistant]) assert.doesNotMatch(loaded, /Intellectual Genealogy|Reciprocal disclosure/);
   assert.match(done, /^# 访谈方法/m);
   assert.match(assistant, /「访谈方法」/);
+  assert.match(await readFile(new URL("factory-agents/voice/FORM_PAGE.md", prompts), "utf8"), /说法不一致，请定一个/);
 });
