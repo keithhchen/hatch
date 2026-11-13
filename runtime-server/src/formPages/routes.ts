@@ -25,7 +25,7 @@ async function readBody(request: http.IncomingMessage): Promise<Record<string, u
 
 /**
  * The Expert's side of a form page, under /form/: open it, save or clear one answer, submit. The signed link (`t`) is the only
- * credential, so these run before sign-in. Returns false for a path that is not a form page.
+ * credential: these never read a cookie or session, so they run before sign-in and work in a fresh browser. Returns false for a path that is not a form page.
  */
 export async function handleFormRoute(request: http.IncomingMessage, response: http.ServerResponse, url: URL, forms: FormPages | undefined): Promise<boolean> {
   const match = ROUTE.exec(url.pathname);
@@ -56,6 +56,12 @@ export async function handleFormRoute(request: http.IncomingMessage, response: h
   } catch (error) {
     const status = (error as { status?: number }).status;
     if (!status) throw error;
+    // The page itself, with a missing or wrong link: a plain "invalid" page. No sign-in, no hint that the page exists.
+    if (status === 404 && request.method === "GET" && !submit && !answer) {
+      response.writeHead(404, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "no-referrer" });
+      response.end('<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>链接无效</title></head><body style="font:16px/1.75 system-ui,sans-serif;margin:0;padding:48px 24px;text-align:center;color:#17150f;background:#faf8f2">链接无效</body></html>');
+      return true;
+    }
     json(response, status, { error: { code: error instanceof FormConflict ? "conflict" : "form_request_failed", message: (error as Error).message } });
   }
   return true;

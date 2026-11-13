@@ -23,7 +23,7 @@ const CLIENT = `(function () {
   var base = "/form/" + d.formId, token = "t=" + encodeURIComponent(d.token);
   var hatch = window.hatch = { schema: d.schema, answers: d.answers, status: d.status, save: save, clear: clear, submit: submit };
   function call(method, path, body) {
-    return fetch(base + path + (path.indexOf("?") < 0 ? "?" : "&") + token, { method: method, headers: body ? { "content-type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined })
+    return fetch(base + path + (path.indexOf("?") < 0 ? "?" : "&") + token, { method: method, credentials: "omit", headers: body ? { "content-type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined })
       .catch(function () { throw new Error("网络不通，内容还在，稍后再试"); })
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error((j.error && j.error.message) || "没保存成功，内容还在，稍后再试"); return j; }); });
   }

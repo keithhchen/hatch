@@ -211,3 +211,35 @@ test("a page that never calls hatch.save or hatch.submit is refused with how to 
     await h.forms.publish({ accountId: ACCOUNT, ...ORIGIN }, { title: "t", html: PAGE, schema: schema("C01") });
   } finally { await h.close(); }
 });
+
+test("the link is the only credential: it works with no cookie, and another account's cookie does not help without it", async () => {
+  const h = await formsHarness();
+  const server = http.createServer((request, response) => { handleFormRoute(request, response, new URL(request.url!, "http://x"), h.forms).catch(() => { response.writeHead(500); response.end(); }); });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const other = { cookie: "hatch_session=another-accounts-session; sid=abc" };
+  try {
+    const { form_id, url } = await h.forms.publish({ accountId: ACCOUNT, ...ORIGIN }, { title: "t", html: PAGE, schema: schema("C01") });
+    const t = h.tokenOf(url);
+    // A fresh browser: only the link. Page and save work, and nothing redirects to sign-in.
+    const page = await fetch(`${base}/form/${form_id}?t=${t}`, { redirect: "manual" });
+    assert.equal(page.status, 200);
+    assert.equal(page.headers.get("set-cookie"), null);
+    const saved = await fetch(`${base}/form/${form_id}/answers/C01?t=${t}`, { method: "POST", body: JSON.stringify({ value: "a", base: 0 }), redirect: "manual" });
+    assert.equal(saved.status, 200);
+    // Another account's cookie changes nothing: a valid link still works, a missing or wrong one is a plain "invalid" page.
+    assert.equal((await fetch(`${base}/form/${form_id}?t=${t}`, { headers: other })).status, 200);
+    for (const query of ["", "?t=wrong", `?t=${h.links.token(form_id, OTHER)}`]) {
+      const bad = await fetch(`${base}/form/${form_id}${query}`, { headers: other, redirect: "manual" });
+      assert.equal(bad.status, 404);
+      assert.match(bad.headers.get("content-type")!, /text\/html/);
+      const body = await bad.text();
+      assert.match(body, /链接无效/);
+      assert.ok(!/sign|login|登录|<form/i.test(body) && !body.includes(form_id), "no sign-in prompt and no hint the page exists");
+    }
+    for (const [method, path] of [["POST", `/answers/C01?t=wrong`], ["DELETE", `/answers/C01?t=wrong&base=1`], ["POST", `/submit?t=wrong`]] as const) {
+      assert.equal((await fetch(`${base}/form/${form_id}${path}`, { method, headers: other, body: method === "POST" ? JSON.stringify({ value: "x", base: 1 }) : undefined, redirect: "manual" })).status, 404, `${method} ${path}`);
+    }
+    assert.deepEqual((await h.forms.read(ACCOUNT, form_id)).answers, { C01: "a" }, "the rejected calls changed nothing");
+  } finally { server.close(); await h.close(); }
+});
