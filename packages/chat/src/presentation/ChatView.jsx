@@ -6,7 +6,7 @@ import { ACTIVITY_KINDS, ChatTimeline, groupTimelineEntries, withoutRepeatedStep
 import { sharedScrollPositions } from "../domain/scroll-positions.js";
 import { OPEN_FREE_CHAT } from "../domain/free-chat.js";
 import { ActivityBlock, ActivityModal, ApprovalActivity } from "./Activity.jsx";
-import { PagePanel, useFormPageViewer } from "./FormPageViewer.jsx";
+import { PagePanel, useComposerReserve, useFormPageViewer } from "./FormPageViewer.jsx";
 import { ImageViewer } from "./ImageViewer.jsx";
 import { MessageResponse } from "./MessageResponse.jsx";
 import { Shimmer } from "./Shimmer.jsx";
@@ -237,6 +237,8 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
   const awaitingConversation = !conversationId && state.conversations.length > 0;
   const messagesRef = useRef(null);
   const viewer = useFormPageViewer(messages, conversationId);
+  const dockRef = useRef(null);
+  useComposerReserve(dockRef);
   const followOutputRef = useRef(true);
   // The dots say what the reply is doing; a connection or loading status is not a reply's.
   const typingText = status.text ?? (REPLY_STATUSES.includes(status.key) ? t(status.key) : "");
@@ -330,7 +332,7 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
         }) : null}
       </div>
     </div>
-    <div className="web-chat__dock">
+    <div className="web-chat__dock" ref={dockRef}>
       {error ? <div className="web-chat__notice" role="alert"><CircleAlert aria-hidden="true" /><span>{errorText(error)}</span>{state.failedRun && !controller.canRetryRun ? null : <button type="button" onClick={() => state.failedRun ? controller.retryRun() : controller.retry()}><RotateCw aria-hidden="true" /><span>{t("retry")}</span></button>}</div> : null}
       {dockAccessory}
       {freeChat.locked && !activeRun ? <FreeChatPaywall access={freeChat} creatorName={identity.creatorName} t={t} />

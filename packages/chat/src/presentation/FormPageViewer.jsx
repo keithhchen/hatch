@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { ExternalLink, PanelRight, PanelRightClose, X } from "lucide-react";
 import { latestFormLink, linkKind } from "../domain/form-pages.js";
 
+const shortTitle = href => { try { const url = new URL(href); return `${url.host}${url.pathname}`; } catch { return href; } };
 const storageKey = conversationId => `hatch:page-panel:${conversationId}`;
 const read = conversationId => {
   try { return JSON.parse(localStorage.getItem(storageKey(conversationId))) ?? {}; } catch { return {}; }
@@ -24,7 +25,7 @@ export function useFormPageViewer(messages, conversationId) {
     setState(previous => {
       const current = previous.id === conversationId ? previous : { ...read(conversationId), id: conversationId };
       if (!latest || current.seen === latest.key) return current;
-      return write(conversationId, { ...current, page: { url: latest.url, title: latest.url }, mode: "open", seen: latest.key });
+      return write(conversationId, { ...current, page: { url: latest.url, title: shortTitle(latest.url) }, mode: "open", seen: latest.key });
     });
   }, [conversationId, latest?.key]);
   const update = patch => setState(previous => write(conversationId, { ...previous, ...patch }));
@@ -34,9 +35,10 @@ export function useFormPageViewer(messages, conversationId) {
     if (linkKind(anchor.href, window.location.origin) === "other") return;
     event.preventDefault();
     event.stopPropagation();
-    update({ page: { url: anchor.href, title: anchor.textContent || anchor.href }, mode: "open" });
+    update({ page: { url: anchor.href, title: anchor.textContent || shortTitle(anchor.href) }, mode: "open" });
   };
-  return { page: state.page, mode: state.mode ?? "closed", setMode: mode => update({ mode }), onClickCapture };
+  const setTitle = title => setState(previous => previous.page && previous.page.title !== title ? write(conversationId, { ...previous, page: { ...previous.page, title } }) : previous);
+  return { page: state.page, mode: state.mode ?? "closed", setMode: mode => update({ mode }), setTitle, onClickCapture };
 }
 
 /** A floating sidebar above the whole app: open, collapsed to an edge tab, or closed (gone). Full-screen sheet on narrow screens. */
@@ -52,6 +54,24 @@ export function PagePanel({ viewer, t }) {
         <button type="button" aria-label={t("collapse")} onClick={() => setMode("collapsed")}><PanelRightClose aria-hidden="true" /></button>
         <button type="button" aria-label={t("close")} onClick={() => setMode("closed")}><X aria-hidden="true" /></button>
       </header>
-      <iframe key={page.url} src={page.url} title={page.title} loading="lazy" sandbox="allow-scripts allow-same-origin allow-forms" />
+      <iframe key={page.url} src={page.url} title={page.title} loading="lazy" onLoad={event => { try { const title = event.currentTarget.contentDocument?.title?.trim(); if (title) viewer.setTitle(title); } catch { /* cross-origin page keeps its link title */ } }} sandbox="allow-scripts allow-same-origin allow-forms" />
     </aside>, document.body);
+}
+
+/**
+ * Keeps `--web-chat-reserve` (the height of the composer band, from the viewport bottom) on the document,
+ * so the floating page panel stops above the composer. Attach the ref to the host's composer container.
+ */
+export function useComposerReserve(ref) {
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return undefined;
+    const root = document.documentElement;
+    const measure = () => root.style.setProperty("--web-chat-reserve", `${Math.max(0, Math.round(window.innerHeight - element.getBoundingClientRect().top)) + 8}px`);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    window.addEventListener("resize", measure);
+    return () => { observer.disconnect(); window.removeEventListener("resize", measure); root.style.removeProperty("--web-chat-reserve"); };
+  }, [ref]);
 }

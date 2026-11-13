@@ -5,4 +5,4 @@ export { MessageResponse } from "./MessageResponse.jsx";
 export { Shimmer } from "./Shimmer.jsx";
 export { FreeChatPaywall } from "./FreeChatPaywall.jsx";
 export { MicButton, RecordingActions, RecordingWave, canRecord, useVoiceInput } from "./VoiceInput.jsx";
-export { PagePanel, useFormPageViewer } from "./FormPageViewer.jsx";
+export { PagePanel, useComposerReserve, useFormPageViewer } from "./FormPageViewer.jsx";
