@@ -121,5 +121,11 @@ test("the shelved person-centred method is not loaded; the interview method is s
   for (const loaded of [voice, done, assistant]) assert.doesNotMatch(loaded, /Intellectual Genealogy|Reciprocal disclosure/);
   assert.match(done, /^# 访谈方法/m);
   assert.match(assistant, /「访谈方法」/);
-  assert.match(await readFile(new URL("factory-agents/voice/FORM_PAGE.md", prompts), "utf8"), /说法不一致，请定一个/);
+  const form = await readFile(new URL("factory-agents/voice/FORM_PAGE.md", prompts), "utf8");
+  assert.match(form, /说法不一致，请定一个/);
+  const count = (text: string, needle: string) => text.split(needle).length - 1;
+  assert.equal(count(done, "婚礼摄影师，只示范形式"), 1);
+  assert.equal(count(done, "元问题和具体问题"), 1);
+  assert.equal(count(form, "婚礼摄影师的骨架"), 1);
+  for (const other of [voice, assistant]) assert.equal(count(other, "婚礼摄影师"), 0, "each example lives in one place only");
 });
