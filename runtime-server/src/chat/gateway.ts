@@ -45,6 +45,11 @@ export interface ChatGateway {
   send(principal: Principal, conversation: ConversationRef, client: ClientAttributes, messageId: string, parts: ContentPart[]): Promise<SentMessage>;
   /** Stores a file in the conversation's scope and returns the asset a message refers to. Its kind, decided by the content, is the type of the part that carries it. */
   upload(principal: Principal, conversation: ConversationRef, input: { name: string; bytes: Buffer }): Promise<UploadedRef>;
+  /**
+   * Starts a fresh conversation in a chat thread for the principal; the old one stays as history and its Runs go on in it.
+   * `key` is the request's identity, such as the platform's event id: a repeat is the same fresh conversation and moves nothing again.
+   */
+  restart(principal: Principal, thread: Extract<ConversationRef, { kind: "thread" }>, key: string): Promise<{ conversationId: string }>;
   /** Undefined for a Run that does not exist. One reply per Run, however many messages joined it. */
   progress(runId: string): Promise<RunProgress | undefined>;
 }

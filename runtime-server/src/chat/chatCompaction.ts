@@ -34,7 +34,10 @@ export interface RunCompactions {
   forRun(run: { run: ConversationRunRecord; conversation: ConversationRecord; state: RunStateMachine; publish: (message: OutboundMessage) => void; signal: AbortSignal; usage?: UsageSink }): TurnCompaction;
 }
 
-type Repository = Pick<ConversationRepository, "appendEvent" | "beginCompaction" | "requestCompactionPreempt" | "compactionStopped" | "runningCompaction" | "endCompaction" | "commitCompaction">;
+type Repository = Pick<ConversationRepository, "appendEvent" | "beginCompaction" | "renewCompaction" | "runningCompaction" | "endCompaction" | "commitCompaction">;
+
+/** How long past the summary's timeout a compaction claim lives without a renewal. */
+const LEASE_MARGIN_MS = 10_000;
 
 type Request = { trigger: CompactionTrigger; phase: CompactionPhase; reason: CompactionReason; force?: boolean; tailScale?: number; turnWaiting?: boolean };
 
@@ -44,7 +47,7 @@ const messageOf = (outcome: Exclude<CompactionOutcome<RuntimeCompactionMessage>,
 
 /**
  * Chat's compaction, one strategy for every moment it can happen. After a reply it runs in the background
- * and a new message preempts it, on any instance; otherwise it runs inside the Run that needs room.
+ * and a new message waits for it, on any instance; otherwise it runs inside the Run that needs room.
  */
 export class ChatCompaction implements RunCompactions {
   private readonly background = new BackgroundCompactor<string>();
@@ -60,10 +63,10 @@ export class ChatCompaction implements RunCompactions {
     strategy: (conversationId: string) => Promise<CompactionStrategy<RuntimeCompactionMessage>>;
     executorId: string;
     now?: () => number;
-    /** How often a running background compaction checks whether a new message asked it to stop. */
-    stopPollMs?: number;
-    /** The longest a new message waits for a compaction another instance runs. */
-    preemptWaitMs?: number;
+    /** How often a message waiting for another instance's compaction looks again. */
+    waitPollMs?: number;
+    /** How long past the summary's timeout a claim lives unrenewed. */
+    leaseMarginMs?: number;
   }) {}
 
   /** The channel layer's single notice per compaction hangs off this: one `started` per compaction id. */
@@ -77,14 +80,14 @@ export class ChatCompaction implements RunCompactions {
     this.background.schedule(run.conversationId, (signal) => this.inBackground(run, signal));
   }
 
-  /** A new message aborts this conversation's compaction, wherever it runs, and waits for it to end. */
-  async preempt(conversationId: string): Promise<void> {
-    await this.background.preempt(conversationId);
-    if (!await this.deps.repository.requestCompactionPreempt(conversationId)) return;
-    const until = (this.deps.now ?? Date.now)() + (this.deps.preemptWaitMs ?? 10_000);
-    while (await this.deps.repository.runningCompaction(conversationId) && (this.deps.now ?? Date.now)() < until) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
+  /**
+   * A new message waits for this conversation's compaction to finish, wherever it runs, and then runs on the compacted history.
+   * The compaction ends by its own result, timeout or lease: a compactor that crashed stops blocking when its lease expires,
+   * and whatever it commits late is refused because a Run has begun since.
+   */
+  async waitForCompaction(conversationId: string): Promise<void> {
+    await this.background.settle(conversationId);
+    while (await this.deps.repository.runningCompaction(conversationId)) await new Promise((resolve) => setTimeout(resolve, this.deps.waitPollMs ?? 50));
   }
 
   async drain(): Promise<void> { await this.background.drain(); }
@@ -134,19 +137,19 @@ export class ChatCompaction implements RunCompactions {
     const { repository, store } = this.deps;
     const strategy = await this.deps.strategy(run.conversationId);
     const compactionId = newCompactionId();
-    const claim = await repository.beginCompaction({ id: compactionId, conversationId: run.conversationId, executorId: this.deps.executorId, leaseMs: strategy.policy.timeoutMs * 2 });
+    // The lease outlasts the summary's own timeout by a margin; while this process is alive it keeps renewing, so a slow
+    // compaction is never taken for a dead one and run twice, and a dead one frees the conversation within one lease.
+    const leaseMs = strategy.policy.timeoutMs + (this.deps.leaseMarginMs ?? LEASE_MARGIN_MS);
+    const claim = await repository.beginCompaction({ id: compactionId, conversationId: run.conversationId, executorId: this.deps.executorId, leaseMs });
     if (!claim.claimed) return;
-    // A new message on any instance marks the claim; this is how this job hears about it.
-    const stopped = new AbortController();
+    const heartbeat = setInterval(() => void repository.renewCompaction(compactionId, leaseMs).catch((error) => log.error("compaction_renew_failed", { compaction_id: compactionId, error: String(error) })), Math.max(10, Math.floor(leaseMs / 3)));
     let started = false;
     let committed = false;
-    // An interval has no caller to throw to: a failed poll is logged, and the next one asks again.
-    const poll = setInterval(() => void repository.compactionStopped(compactionId).then((stop) => { if (stop) stopped.abort(new CompactionAborted()); }, (error) => log.error("compaction_poll_failed", { compaction_id: compactionId, error: String(error) })), this.deps.stopPollMs ?? 300);
     try {
       const now = (this.deps.now ?? Date.now)();
       const messages = await store.readConversation(run.conversationId);
       const cacheTouchedAt = await store.lastActivityAt(run.conversationId);
-      const request = { now, cacheTouchedAt, signal: AbortSignal.any([signal, stopped.signal]), usage: this.sinks.get(run.conversationId) };
+      const request = { now, cacheTouchedAt, signal, usage: this.sinks.get(run.conversationId) };
       if (!strategy.wants(messages, request)) {
         // Large but under the summary trigger: old tool results can go once the provider's cache has expired.
         const waitMs = strategy.policy.cacheTtlMs - (now - (cacheTouchedAt ?? 0)) + 1_000;
@@ -157,10 +160,10 @@ export class ChatCompaction implements RunCompactions {
       const outcome = await strategy.compact(messages, request);
       if (outcome.kind !== "none") committed = Boolean(await this.commit(run.conversationId, run.id, compactionId, { trigger: "auto", phase: "background", reason: "context_limit" }, outcome, { latestRunId: claim.latestRunId }));
     } catch (error) {
-      // Preempted: the history is untouched and the new message proceeds. Anything else is retried after the next reply.
+      // Stopped (shutdown): the history is untouched. Anything else is retried after the next reply.
       if (!(error instanceof CompactionAborted)) throw error;
     } finally {
-      clearInterval(poll);
+      clearInterval(heartbeat);
       if (started && !committed) await this.announce({ conversationId: run.conversationId, runId: run.id, compactionId, state: "aborted" });
       await repository.endCompaction(compactionId);
     }

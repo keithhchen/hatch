@@ -3,6 +3,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { regexMatcher } from "../assets/matchers.js";
 import { detectMediaType, projectSource } from "../creatorLearning/sourceLibrary.js";
 import { result } from "./files.js";
+import { REFERENCE_PATH } from "../formPages/tools.js";
 import { WorkbenchStore } from "./store.js";
 
 /** Main agents see live outputs and immutable input during a turn. */
@@ -18,7 +19,7 @@ export function fileTools(store: WorkbenchStore, id: string, options: { changed?
       const mimeType = detectMediaType(a.path, record.mimeType === "application/octet-stream" ? undefined : record.mimeType, bytes);
       if (mimeType.startsWith("image/")) return { content: [{ type: "image" as const, data: bytes.toString("base64"), mimeType }], details: { path: a.path } };
       if (/\.(mp3|mp4|wav|m4a|mov|webm|ogg)$/i.test(a.path)) throw new Error("Media requires transcribe tool; original media is retained");
-      const plain = /\.(md|txt|srt|vtt|log)$/i.test(a.path);
+      const plain = /\.(md|txt|srt|vtt|log)$/i.test(a.path) || a.path === REFERENCE_PATH;
       const projection = plain ? undefined : await projectSource(a.path, mimeType, bytes);
       const text = plain ? bytes.toString("utf8") : (projection as { __content?: string }).__content;
       if (typeof text !== "string") throw new Error("Document has no readable text projection");
@@ -38,7 +39,7 @@ export function fileTools(store: WorkbenchStore, id: string, options: { changed?
       const { bytes } = await store.read(id, record.path);
       const mimeType = detectMediaType(record.path, record.mimeType === "application/octet-stream" ? undefined : record.mimeType, bytes);
       if (mimeType.startsWith("image/") || /\.(mp3|mp4|wav|m4a|mov|webm|ogg)$/i.test(record.path)) continue;
-      const plain = /\.(md|txt|srt|vtt|log)$/i.test(record.path);
+      const plain = /\.(md|txt|srt|vtt|log)$/i.test(record.path) || record.path === REFERENCE_PATH;
       const text = plain ? bytes.toString("utf8") : ((await projectSource(record.path, mimeType, bytes).catch(() => undefined)) as { __content?: string } | undefined)?.__content;
       if (typeof text !== "string") continue;
       const lines = text.split("\n");

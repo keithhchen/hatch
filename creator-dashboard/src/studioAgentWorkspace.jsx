@@ -7,6 +7,7 @@ import { Button, Checkbox, DropdownMenu, FormField, Input, Textarea } from "@hat
 import { ApiKeysBanner } from "./ApiKeysBanner.jsx";
 import { FirstBuildIntro } from "./FirstBuildDialog.jsx";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
+import { TelegramBotSetup } from "./TelegramBotSetup.jsx";
 import { creatorFactoryPath, creatorProductPath } from "./creatorRoutes.js";
 import { isProductLive } from "./studioPath.js";
 import { WebChatRoute } from "./webChatRoute.js";
@@ -97,6 +98,7 @@ function PublishTab({ product, productId, request, navigate, locale, t, profile,
         <DetailsForm product={product} productId={productId} request={request} t={t} onSaved={reloadAll} />
         <BriefSpecForm product={product} productId={productId} request={request} t={t} onSaved={reloadAll} />
         <PricingForm product={product} productId={productId} request={request} t={t} onSaved={reloadAll} />
+        <TelegramBotSetup productId={productId} live={!status.data || status.data.is_live === true} request={request} t={t} />
       </div>
       <section className="sx-publish__preview" aria-labelledby="sx-preview-title">
         <PreviewPane resource={preview} profile={profile} t={t} />

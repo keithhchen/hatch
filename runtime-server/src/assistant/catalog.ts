@@ -20,7 +20,7 @@ export interface AgentCatalog {
   create(accountId: string, name: string, promise: string): Promise<CatalogAgent>;
   apply(accountId: string, productId: string, change: AgentChange): Promise<void>;
   /** The Product's release state, from the same interface Studio uses. Null when publishing is unavailable. */
-  live(accountId: string, productId: string): Promise<unknown>;
+  live(accountId: string, productId: string, known?: CatalogAgent): Promise<unknown>;
   /** A session token that authorizes background work on this account's Product workspaces. */
   token(accountId: string): Promise<string>;
 }

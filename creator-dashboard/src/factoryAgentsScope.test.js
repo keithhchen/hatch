@@ -101,14 +101,15 @@ test('Deep Research starts from Creator identity and public evidence, not manual
   assert.match(prompt, /不要一开始就要求用户上传文件/);
 });
 
-test('The Interview is a whole-person interview rather than a single-judgment prompt', async () => {
+test('The Interview opens with a few light questions, then writes the whole review page', async () => {
   const i18n = await readFile(new URL('./factoryAgentsI18n.js', import.meta.url), 'utf8');
+  const shared = await readFile(new URL('../../runtime-server/prompts/assistant/INTERVIEW_DONE.md', import.meta.url), 'utf8');
   const prompt = await readFile(new URL('../../runtime-server/prompts/factory-agents/voice/SYSTEM.md', import.meta.url), 'utf8');
-  assert.match(i18n, /voice: '从你的经历、影响、价值取舍、审美和矛盾讲起/);
-  assert.doesNotMatch(i18n, /voice: '说说你最近做过的一次判断，以及为什么这样决定/);
-  assert.match(prompt, /1\. Intellectual Genealogy/);
-  assert.match(prompt, /9\. Tensions & Contradictions/);
-  assert.match(prompt, /specific cases.*not abstractions/);
+  assert.match(i18n, /voice: '说说你为什么想做这个 Agent，想让它替你做什么/);
+  assert.doesNotMatch(i18n, /voice: '从你的经历、影响、价值取舍、审美和矛盾讲起/);
+  assert.match(shared, /^# 访谈方法/m);
+  assert.match(shared, /先宽，再一次写全/);
+  assert.doesNotMatch(prompt, /Intellectual Genealogy/);
 });
 
 test('Agent Builder owns the judgment design and receives review-oriented user input', async () => {
@@ -254,11 +255,9 @@ test('Factory uses the MUI X Chat Composer for the real session message endpoint
   assert.doesNotMatch(source, /<TextField fullWidth multiline minRows=\{2\}/);
 });
 
-test('Factory todo panel exposes every todo in an independently scrollable region', async () => {
+test('Factory workbench does not render the todo panel or the published card', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
-  assert.match(source, /className="factory-todo-list" sx=\{\{ maxHeight: 220, overflowY: "auto"/);
-  assert.match(source, /todos\.map\(\(todo, index\)/);
-  assert.doesNotMatch(source, /todos\.slice\(0, 5\)/);
+  assert.doesNotMatch(source, /factory-todo-list|function Binding|agentPublished/);
 });
 
 test('Factory chat header removes terminal status and message-count chrome', async () => {
@@ -348,6 +347,6 @@ test('Factory no longer exposes the obsolete manual output handoff controls', as
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /selectedOutputs|destinationRole|handoffNotice|transferOutputs|sendOutputsTo|destinationAgent|sendFiles|handoffHint|\/transfer/);
   assert.doesNotMatch(source, /selectable selectedOutputs/);
-  assert.match(source, /<FileList title=\{t\("outputs"\)\}/);
+  assert.match(source, /<FileList key="output" records=\{outputFiles\} pageSize=\{FILE_PAGE_SIZE\}/);
   assert.match(source, /method: "DELETE", body: \{ path: record\.path \}/);
 });
