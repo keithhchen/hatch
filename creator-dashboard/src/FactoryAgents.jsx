@@ -39,7 +39,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button as HatchButton, Dialog, DialogContent, IconButton as HatchIconButton, InlineAlert, SegmentedControl, Textarea, hatchMuiThemeOptions } from "@hatch/ui";
 import { ArrowRight, ArrowUpRight, Play, Sparkles, ChevronLeft as PrevIcon, ChevronRight as NextIcon, Download as DownloadIcon, Plus, Send as SendIcon } from "lucide-react";
-import { MicButton, RecordingActions, RecordingWave, canRecord, useVoiceInput } from "@hatch/chat/react";
+import { FormPageViewer, MicButton, RecordingActions, RecordingWave, canRecord, useFormPageViewer, useVoiceInput } from "@hatch/chat/react";
 import { dashboardRequest } from "./data.js";
 import { FileList } from "./FileList.jsx";
 import { AI_LINKS, copyImportPrompt } from "./importDialog.js";
@@ -248,6 +248,7 @@ function Workspace({ root, id, entry, agents, config, onChanged, onOpenAgent, ag
 
 function ChatPanel({ dictation, session, entry, agents, root, id, config, busy, draft, setDraft, stream, settled, activity, activityVisible, composer, composerAdapter, chat, stick, running, locked, error, setError, perform, onOpenFile, onUseLatest, agentName, t }) {
   const entries = groupToolEntries(chatEntries(session.messages));
+  const viewer = useFormPageViewer([...session.messages, ...settled.map(content => ({ role: "assistant", content })), ...(stream ? [{ role: "assistant", content: stream }] : [])], id);
   const pendingAskUser = [...entries].reverse().find(item => item.type === "askUser" && item.pending);
   const updatedDependencies = updatedSources(entry);
   const composerDisabled = locked || busy || Boolean(pendingAskUser) || !config?.services.model;
@@ -259,7 +260,7 @@ function ChatPanel({ dictation, session, entry, agents, root, id, config, busy, 
   const recording = voice.phase === "recording";
   const composerSx = { border: "1px solid var(--hatch-ui-border-soft)", borderRadius: "var(--hatch-radius-dialog)", backgroundColor: "var(--hatch-ui-surface-solid)", px: 1.5, py: 1, "&:focus-within": { borderColor: "var(--hatch-ui-border-soft)", boxShadow: "none" }, "&:focus-within:not([data-disabled])": { borderColor: "var(--hatch-ui-border-soft)", boxShadow: "none" }, "& textarea:focus": { outline: "none", boxShadow: "none" } };
   return <Box className="factory-chat-panel" sx={{ minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", bgcolor: "background.paper" }}>
-    <Box className="factory-chat-scroll" ref={chat} sx={{ flex: 1, minHeight: 0, overflow: "auto", overscrollBehavior: "contain", px: 2.5, py: 2 }} onScroll={event => { const target = event.currentTarget; stick.current = target.scrollHeight - target.scrollTop - target.clientHeight < 80; }}>
+    <Box className="factory-chat-scroll" ref={chat} onClickCapture={viewer.onClickCapture} sx={{ flex: 1, minHeight: 0, overflow: "auto", overscrollBehavior: "contain", px: 2.5, py: 2 }} onScroll={event => { const target = event.currentTarget; stick.current = target.scrollHeight - target.scrollTop - target.clientHeight < 80; }}>
       {!session.messages.length && <div className="factory-chat-empty"><AutoAwesome aria-hidden="true" /><h3>{agentName(session.role)}</h3><p>{t("factoryYouDoRole", session.role)}</p></div>}
       {entries.map(item => item.type === "toolGroup" ? <ToolGroup key={item.key} items={item.items} running={running && item.isCurrentTurn} t={t} /> : item.type === "tool" ? <ToolMessage key={item.key} call={item.call} result={item.result} running={running && item.isCurrentTurn} t={t} /> : item.type === "askUser" ? <AskUserBlock key={item.key} entry={item} onSubmit={answerAskUser} t={t} /> : <Message key={item.key} message={item.message} files={session.files} onOpenFile={onOpenFile} t={t} />)}
       {settled.map((text, index) => <Message key={`settled-${index}`} message={{ role: "assistant", content: text }} files={session.files} onOpenFile={onOpenFile} t={t} />)}
@@ -267,6 +268,7 @@ function ChatPanel({ dictation, session, entry, agents, root, id, config, busy, 
       {session.status === "failed" && session.error ? <div className="factory-failure" role="alert"><strong>{t("factoryFailedTitle")}</strong><p>{t("factoryFailedBody")}</p><p className="factory-failure__detail">{session.errorCode === "usage_cap_exceeded" ? t("usageCapReached") : session.error}</p></div> : null}
       {running && activityVisible && <Stack direction="row" spacing={1} alignItems="center" sx={{ py: 1 }}><CircularProgress size={14} /><Typography variant="caption" color="primary.main">{activity || (session.activeTool ? t("callingTool", t(toolActionKey(session.activeTool))) : t("working"))}</Typography></Stack>}
     </Box>
+    <FormPageViewer page={viewer.page} onClose={viewer.close} closeLabel={t("close")} />
     <ErrorNotice error={error || (["interrupted", "failed"].includes(session.status) ? "" : session.error)} onClose={() => setError("")} />
     <Stack className="factory-composer-toolbar" direction="row" spacing={1} alignItems="center" sx={{ px: 1.5, pb: 1 }}>
       <StartAgentButton role={session.role} draft={draft} setDraft={setDraft} composer={composer} disabled={composerDisabled || running} t={t} />

@@ -6,6 +6,7 @@ import { ACTIVITY_KINDS, ChatTimeline, groupTimelineEntries, withoutRepeatedStep
 import { sharedScrollPositions } from "../domain/scroll-positions.js";
 import { OPEN_FREE_CHAT } from "../domain/free-chat.js";
 import { ActivityBlock, ActivityModal, ApprovalActivity } from "./Activity.jsx";
+import { FormPageViewer, useFormPageViewer } from "./FormPageViewer.jsx";
 import { ImageViewer } from "./ImageViewer.jsx";
 import { MessageResponse } from "./MessageResponse.jsx";
 import { Shimmer } from "./Shimmer.jsx";
@@ -235,6 +236,7 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
   const snapshotPending = controller.snapshotPending;
   const awaitingConversation = !conversationId && state.conversations.length > 0;
   const messagesRef = useRef(null);
+  const viewer = useFormPageViewer(messages, conversationId);
   const followOutputRef = useRef(true);
   // The dots say what the reply is doing; a connection or loading status is not a reply's.
   const typingText = status.text ?? (REPLY_STATUSES.includes(status.key) ? t(status.key) : "");
@@ -301,7 +303,7 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
 
   return <main className="web-chat__main" inert={inert}>
     {header}
-    <div className="web-chat__messages" ref={messagesRef} onScroll={onScroll} aria-label={t("chatMessages")}>
+    <div className="web-chat__messages" ref={messagesRef} onScroll={onScroll} onClickCapture={viewer.onClickCapture} aria-label={t("chatMessages")}>
       <div className="web-chat__thread">
         {!snapshotPending && historyCursor ? <button type="button" className="web-chat__history" onClick={loadHistory}><ChevronUp aria-hidden="true" /><span>{t("viewEarlierMessages")}</span></button> : null}
         {(snapshotPending || awaitingConversation) && !error ? <div className="web-chat__loading" role="status">{loadingIndicator}<span>{t("loadingConversation")}</span></div> : null}
@@ -328,6 +330,7 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
         }) : null}
       </div>
     </div>
+    <FormPageViewer page={viewer.page} onClose={viewer.close} closeLabel={t("close")} />
     <div className="web-chat__dock">
       {error ? <div className="web-chat__notice" role="alert"><CircleAlert aria-hidden="true" /><span>{errorText(error)}</span>{state.failedRun && !controller.canRetryRun ? null : <button type="button" onClick={() => state.failedRun ? controller.retryRun() : controller.retry()}><RotateCw aria-hidden="true" /><span>{t("retry")}</span></button>}</div> : null}
       {dockAccessory}
