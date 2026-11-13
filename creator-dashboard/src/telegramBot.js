@@ -18,6 +18,7 @@ export function botOf(channels) {
 export function telegramErrorKey(error) {
   if (error?.code === "telegram_probe_failed" || error?.code === "invalid_credentials") return "sxtgInvalidToken";
   if (error?.code === "telegram_bot_in_use") return "sxtgInUse";
+  if (error?.code === "telegram_bot_active_elsewhere") return "sxtgActiveElsewhere";
   if (error?.code === "channel_unavailable") return "sxtgUnavailable";
   if (error?.code === "product_not_found") return "sxtgProductMissing";
   if (!error?.status) return "sxtgNetwork";

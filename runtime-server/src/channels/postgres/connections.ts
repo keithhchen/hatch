@@ -265,9 +265,9 @@ export class PostgresConnections implements ConnectionRepository {
     });
   }
 
-  async botHolder(channel: ChannelKind, scope: string): Promise<{ ownerAccountId: string; target: AgentTarget } | undefined> {
-    const row = (await this.pool.query("SELECT owner_account_id, target FROM hatch_connections WHERE channel = $1 AND scope = $2 AND audience = 'public'", [channel, scope])).rows[0];
-    return row && { ownerAccountId: row.owner_account_id, target: row.target };
+  async botHolder(channel: ChannelKind, scope: string): Promise<{ ownerAccountId: string; target: AgentTarget; live: boolean } | undefined> {
+    const row = (await this.pool.query("SELECT owner_account_id, target, credentials IS NOT NULL AS live FROM hatch_connections WHERE channel = $1 AND scope = $2 AND audience = 'public'", [channel, scope])).rows[0];
+    return row && { ownerAccountId: row.owner_account_id, target: row.target, live: row.live };
   }
 
   /** Moves a Connection to a new scope with everything that is kept under the old one. Not when another Connection already holds the new scope. */
@@ -285,11 +285,14 @@ export class PostgresConnections implements ConnectionRepository {
       // A bot made before bots had a scope of their own: it is the same bot, under the scope it was saved with. Its Connection moves.
       const live = legacy && (await client.query(`SELECT id FROM hatch_connections WHERE ${mine} AND scope = $4 AND credentials IS NOT NULL FOR UPDATE`, [...ours, legacy.scope])).rows[0];
       if (live) await this.rescope(client, live.id, channel, legacy!.scope, legacy!.as);
-      const held = (await client.query("SELECT id, owner_account_id, target_key FROM hatch_connections WHERE channel = $1 AND scope = $2 AND audience = 'public' FOR UPDATE", [channel, scope])).rows[0];
-      if (held && (held.owner_account_id !== ownerAccountId || held.target_key !== ours[2])) throw Object.assign(new Error("This bot is already connected to another Agent."), { status: 409, code: `${channel}_bot_in_use` });
+      const held = (await client.query("SELECT id, owner_account_id, target_key, credentials IS NOT NULL AS live FROM hatch_connections WHERE channel = $1 AND scope = $2 AND audience = 'public' FOR UPDATE", [channel, scope])).rows[0];
+      if (held && held.owner_account_id !== ownerAccountId) throw Object.assign(new Error("This bot is already connected to another account."), { status: 409, code: `${channel}_bot_in_use` });
+      const elsewhere = held && held.target_key !== ours[2];
+      if (elsewhere && held.live) throw Object.assign(new Error("This bot is live on another Agent. Disconnect it there first."), { status: 409, code: `${channel}_bot_active_elsewhere` });
       // The Product has one live bot: any other goes dormant, with its contacts and conversations.
       await client.query(`UPDATE hatch_connections SET credentials = NULL WHERE ${mine} AND scope <> $4 AND credentials IS NOT NULL`, [...ours, scope]);
-      if (held) await client.query("UPDATE hatch_connections SET credentials = $2, state = 'active' WHERE id = $1", [held.id, sealed]);
+      // A dormant bot of the same account moves here with its contacts; their conversations follow it when they next write (see ThreadConversations.current).
+      if (held) await client.query("UPDATE hatch_connections SET credentials = $2, state = 'active', target = $3, target_key = $4 WHERE id = $1", [held.id, sealed, JSON.stringify(target), ours[2]]);
       else await client.query("INSERT INTO hatch_connections (owner_account_id, channel, scope, target, target_key, audience, credentials) VALUES ($1, $2, $3, $4, $5, 'public', $6)", [ownerAccountId, channel, scope, JSON.stringify(target), ours[2], sealed]);
     });
   }

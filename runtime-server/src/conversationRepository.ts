@@ -291,6 +291,8 @@ export interface ConversationRepository {
   adoptThread(key: ThreadKey, conversationId: string): Promise<string>;
   /** Moves the thread to `conversationId`. */
   moveThread(key: ThreadKey, conversationId: string): Promise<void>;
+  /** The conversation now belongs to another Product (its bot moved): same id, same history. `productIdAtCreation` stays. Returns the updated record. */
+  rebindConversation(id: string, binding: Pick<ConversationBinding, "creatorId" | "agentId" | "productId" | "corpusDigest">): Promise<ConversationRecord | undefined>;
   /** A conversation by the id its client knows, within one account's own Products (owner path): no Product needs to be named. */
   findOwnedConversation(owner: OwnerScope, publicId: string): Promise<ConversationRecord | undefined>;
   /** Immutable createdAt DESC, id DESC order; cursors never track activity. Without `agentId`, every Product of the owner. */
@@ -480,6 +482,14 @@ export class InMemoryConversationRepository implements ConversationRepository {
   }
 
   async moveThread(key: ThreadKey, conversationId: string): Promise<void> { this.threads.set(threadKeyOf(key), conversationId); }
+
+  async rebindConversation(id: string, { creatorId, agentId, productId, corpusDigest }: Pick<ConversationBinding, "creatorId" | "agentId" | "productId" | "corpusDigest">): Promise<ConversationRecord | undefined> {
+    const existing = this.conversations.get(id);
+    if (!existing) return undefined;
+    const moved = { ...existing, creatorId, agentId, productId, corpusDigest };
+    this.conversations.set(id, moved);
+    return cloneConversation(moved);
+  }
 
   async createConversation(input: CreateConversationInput): Promise<{ conversation: ConversationRecord; created: boolean }> {
     return this.write(async () => {
@@ -1715,6 +1725,12 @@ export class PostgresConversationRepository implements ConversationRepository {
       INSERT INTO hatch_contact_threads (connection_id, thread_id, principal_id, conversation_id) VALUES ($1, $2, $3, $4)
       ON CONFLICT (connection_id, thread_id, principal_id) DO UPDATE SET conversation_id = EXCLUDED.conversation_id, updated_at = now()
     `, [connectionId, threadId, principalId, conversationId]);
+  }
+
+  async rebindConversation(id: string, { creatorId, agentId, productId, corpusDigest }: Pick<ConversationBinding, "creatorId" | "agentId" | "productId" | "corpusDigest">): Promise<ConversationRecord | undefined> {
+    await this.initialize();
+    const result = await this.pool.query<ConversationRow>("UPDATE hatch_conversations SET creator_id = $2, agent_id = $3, product_id = $4, corpus_digest = $5 WHERE id = $1 RETURNING *", [id, creatorId, agentId, productId, corpusDigest]);
+    return result.rows[0] ? conversationFromRow(result.rows[0]) : undefined;
   }
 
   async getConversation(id: string): Promise<ConversationRecord | undefined> {

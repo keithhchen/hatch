@@ -29,7 +29,7 @@ export class ContactBinder {
   constructor(
     private readonly connections: ConnectionDirectory,
     private readonly products: { resolveByProduct(productId: string, signal?: AbortSignal): Promise<ResolvedAgentCorpus> },
-    private readonly repository: Pick<ConversationRepository, "createConversation" | "getConversation" | "threadConversation" | "adoptThread" | "moveThread">
+    private readonly repository: Pick<ConversationRepository, "createConversation" | "getConversation" | "threadConversation" | "adoptThread" | "moveThread" | "rebindConversation">
   ) { this.threads = new ThreadConversations(repository); }
 
   /** Starts a fresh conversation for the contact in this thread; the old one stays as history. Repeating the same `startedBy` changes nothing. */

@@ -43,6 +43,7 @@ test("each failure maps to plain copy, and a dropped connection is a network mes
   assert.equal(telegramErrorKey({ status: 422, code: "telegram_probe_failed" }), "sxtgInvalidToken");
   assert.equal(telegramErrorKey({ status: 400, code: "invalid_credentials" }), "sxtgInvalidToken");
   assert.equal(telegramErrorKey({ status: 409, code: "telegram_bot_in_use" }), "sxtgInUse");
+  assert.equal(telegramErrorKey({ status: 409, code: "telegram_bot_active_elsewhere" }), "sxtgActiveElsewhere");
   assert.equal(telegramErrorKey({ status: 503, code: "channel_unavailable" }), "sxtgUnavailable");
   assert.equal(telegramErrorKey({ status: 404, code: "product_not_found" }), "sxtgProductMissing");
   assert.equal(telegramErrorKey(new TypeError("fetch failed")), "sxtgNetwork");

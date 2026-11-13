@@ -1408,19 +1408,35 @@ test("Saving the live bot's token again wipes nobody", options, async () => isol
   assert.equal(await env.stores.connections.contactCount(bot.id), 1);
 }));
 
-test("A bot another Product or account holds is refused with 409 before its webhook is touched, live or dormant", options, async () => isolated(async pool => {
+test("A bot live on another Product of the account, or held by another account, is refused with 409 before its webhook is touched", options, async () => isolated(async pool => {
   const env = await productBots(pool, { "111:aaa": "shop_bot" });
   const [owner, other] = [randomUUID(), randomUUID()];
   await env.apps.save(owner, "telegram", "p1", { token: "111:aaa" });
   env.api.calls.length = 0;
-  const inUse = (error: any) => error.status === 409 && error.code === "telegram_bot_in_use";
-  await assert.rejects(env.apps.save(owner, "telegram", "p2", { token: "111:aaa" }), inUse);
-  await assert.rejects(env.apps.save(other, "telegram", "p9", { token: "111:aaa" }), inUse);
+  const refused = (code: string) => (error: any) => error.status === 409 && error.code === code;
+  await assert.rejects(env.apps.save(owner, "telegram", "p2", { token: "111:aaa" }), refused("telegram_bot_active_elsewhere"));
+  await assert.rejects(env.apps.save(other, "telegram", "p9", { token: "111:aaa" }), refused("telegram_bot_in_use"));
   assert.deepEqual(env.api.calls, [], "the first Product's webhook is untouched");
   assert.equal((await botOf(env, owner, "p1"))!.scope, "111");
   await env.apps.remove(owner, "telegram", "p1");
-  await assert.rejects(env.apps.save(owner, "telegram", "p2", { token: "111:aaa" }), inUse);
+  await assert.rejects(env.apps.save(other, "telegram", "p9", { token: "111:aaa" }), refused("telegram_bot_in_use"));
   await env.apps.save(owner, "telegram", "p1", { token: "111:aaa" });
+}));
+
+test("A dormant bot moves to another Product of the same account, with its contacts", options, async () => isolated(async pool => {
+  const env = await productBots(pool, { "111:aaa": "shop_bot" });
+  const owner = randomUUID();
+  await env.apps.save(owner, "telegram", "p1", { token: "111:aaa" });
+  const bot = (await botOf(env, owner, "p1"))!;
+  await env.service.accept(await env.adapterOf(bot.scope), [message("walker", "hi")]);
+  await env.settle();
+  await env.apps.remove(owner, "telegram", "p1");
+  await env.apps.save(owner, "telegram", "p2", { token: "111:aaa" });
+  const moved = (await botOf(env, owner, "p2"))!;
+  assert.equal(moved.id, bot.id, "the same Connection");
+  assert.deepEqual(moved.target, { kind: "product", productId: "p2" });
+  assert.equal(await botOf(env, owner, "p1"), undefined);
+  assert.equal(await env.stores.connections.contactCount(moved.id), 1);
 }));
 
 test("A bot saved before bots had their own scope moves to its bot id in place on the next save, keeping its contacts", options, async () => isolated(async pool => {

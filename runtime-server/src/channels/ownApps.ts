@@ -51,7 +51,8 @@ export class OwnApps {
     const scope = stable ?? randomUUID();
     // Before the platform is pointed at us: a bot another Agent holds must not lose its webhook to this one.
     const holder = stable ? await this.deps.connections.botHolder(kind, scope) : undefined;
-    if (holder && (holder.ownerAccountId !== accountId || targetKey(holder.target) !== targetKey(target))) throw failure(409, `${kind}_bot_in_use`, "This bot is already connected to another Agent.");
+    if (holder && holder.ownerAccountId !== accountId) throw failure(409, `${kind}_bot_in_use`, "This bot is already connected to another account.");
+    if (holder?.live && targetKey(holder.target) !== targetKey(target)) throw failure(409, `${kind}_bot_active_elsewhere`, "This bot is live on another Agent. Disconnect it there first.");
     const previous = await this.current(accountId, kind, target);
     // A platform that is not told where to post (the Gateway) has nothing to provision: its probe is the proof.
     const adapter = form.build(credentials, scope);
