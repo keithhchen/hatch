@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { LocalArtifactObjectStore } from "../creatorLearning/objectStore.js";
 import { FormLinks } from "./links.js";
+import type { ReviewFile } from "./reviewFile.js";
 import type { FormPage, FormRepository } from "./repository.js";
 import { MemoryFormRepository } from "./repository.js";
 import { FormClosed, FormConflict, parseFormSchema } from "./schema.js";
@@ -17,10 +18,10 @@ export const schema = (...ids: string[]) => ({ questions: ids.map(id => ({ id, t
 
 export async function formsHarness(repository: FormRepository = new MemoryFormRepository()) {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-forms-"));
-  const submitted: Array<Pick<FormPage, "id" | "title" | "origin">> = [];
+  const submitted: Array<Pick<FormPage, "id" | "title" | "origin"> & { review: ReviewFile }> = [];
   let failNotice = false;
   const links = new FormLinks("test-secret", "https://hatch.test");
-  const forms = new FormPages({ repository, store: new LocalArtifactObjectStore(root), links, submissions: { submitted: async page => { if (failNotice) throw new Error("down"); submitted.push(page); } } });
+  const forms = new FormPages({ repository, store: new LocalArtifactObjectStore(root), links, submissions: { submitted: async (page, review) => { if (failNotice) throw new Error("down"); submitted.push({ ...page, review }); } } });
   const tokenOf = (url: string) => new URL(url).searchParams.get("t");
   return { forms, links, submitted, tokenOf, failNotice: (value: boolean) => { failNotice = value; }, close: () => rm(root, { recursive: true, force: true }) };
 }

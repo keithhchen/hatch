@@ -12,7 +12,7 @@ import { REFERENCE_PATH, formTools, provideFormReference } from "./tools.js";
 const run = async (tools: ReturnType<typeof formTools>, name: string, args: Record<string, unknown>) =>
   JSON.parse(((await tools.find(tool => tool.name === name)!.execute("c", args as never)).content[0] as { text: string }).text);
 
-test("the interview agent publishes a page, reads it back, and the origin remembers its Assistant task", async () => {
+test("the interview agent publishes a page and the origin remembers its Assistant task", async () => {
   const h = await formsHarness();
   let taskId: string | undefined = "task-1";
   const tools = formTools(h.forms, { accountId: ACCOUNT, productId: "p1", sessionId: "s1", taskId: async () => taskId });
@@ -20,7 +20,6 @@ test("the interview agent publishes a page, reads it back, and the origin rememb
     const published = await run(tools, "publish_form", { title: "审阅", html: "<html><head></head><body><script>hatch.save; hatch.submit</script></body></html>", schema: schema("C01") });
     assert.match(published.url, /^https:\/\/hatch\.test\/form\/[0-9a-f-]{36}\?t=/);
     await h.forms.save(published.form_id, h.tokenOf(published.url), "C01", "好", 0);
-    assert.deepEqual(await run(tools, "read_form", { form_id: published.form_id }), { status: "open", answers: { C01: "好" } });
     await h.forms.submit(published.form_id, h.tokenOf(published.url));
     assert.deepEqual(h.submitted[0]!.origin, { productId: "p1", sessionId: "s1", taskId: "task-1" });
     // An invalid schema is the agent's to fix: the call fails with the reason.
@@ -36,7 +35,7 @@ test("only the interview session is granted the form tools, whatever its stored 
     const store = new WorkbenchStore(root, { creatorId: ACCOUNT, productId: "p1" });
     const extraTools = formTools(h.forms, { accountId: ACCOUNT, productId: "p1", sessionId: "s1", taskId: async () => undefined });
     const names = async (role: string) => (await factoryAgentTools({ store, id: "s1", definition: { role, tools: ["update_todo"] }, signal: new AbortController().signal, changed: () => undefined, extraTools })).map(tool => tool.name);
-    assert.deepEqual((await names("voice")).filter(name => name.endsWith("_form")).sort(), ["publish_form", "read_form"]);
+    assert.deepEqual((await names("voice")).filter(name => name.endsWith("_form")).sort(), ["publish_form"]);
     assert.deepEqual((await names("research")).filter(name => name.endsWith("_form")), []);
   } finally { await h.close(); await rm(root, { recursive: true, force: true }); }
 });

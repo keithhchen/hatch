@@ -13,6 +13,7 @@ import { UpstreamError } from "../errors/upstream.js";
 import type { RunFailure } from "./runFailure.js";
 import { INPUT_ROLES, RUN_HEARTBEAT_MS, RUN_STALE_MS, RESTART_NOTE, endIfOrphaned, WorkbenchStore, isAssistantRole, itemIdOf, settleMessage, type AgentDefinitionSource, type AnyRole, type Session } from "./store.js";
 import { factoryAgentTools } from "./factoryTools.js";
+import { reviewAnswers } from "../formPages/reviewFile.js";
 import { provideFormReference } from "../formPages/tools.js";
 import { fileTools } from "./tools.js";
 import { traceAgentTools, withLangfuseTurn, type LangfuseTurnIdentifiers } from "../langfuse.js";
@@ -337,6 +338,8 @@ export class WorkbenchRuntime {
       const definition = await this.store.definition(s.role);
       system = await this.prompt(s.role, definition);
       if (s.role === "generation") system += `\n宿主提供的目标 Runtime 工具：内建 hatch.web_search。额外声明：${this.env.HATCH_FACTORY_TARGET_TOOLS_JSON ?? "[]"}。外部连接的实际可用性由现有 Registry/Runtime 验证。当前 Product 已由宿主固定；corpus_upload 会发布到它，不要查找、选择或创建 Product。`;
+      // The Expert's submitted review answers are part of the interview's material: handed over here, not left to be looked up.
+      if (s.role === "voice" || s.role === "generation") { const answers = await reviewAnswers(this.store, id); if (answers) system += `\n\n# 专家在审阅页上的回答（原文）\n\n${answers}`; }
       if (s.role === "voice") system += `\n\n${await readFile(fileURLToPath(new URL("../../prompts/assistant/INTERVIEW_DONE.md", import.meta.url)), "utf8")}`;
       if (s.role === "voice" && s.assistantTaskId) system += `\n\n${await readFile(fileURLToPath(new URL("voice/ASSISTANT_INTERVIEW.md", new URL("../../prompts/factory-agents/", import.meta.url))), "utf8")}`;
       if (s.role === "evaluator") system += `\n当前 Product 已由宿主固定；hatch_tool 只会运行它，不要查找或选择 Product。启动时如需 brief_answers，从案例中选择客户可见的信息作答；不能泄露评分标准。当前 Brief 字段：${JSON.stringify(this.store.scope?.briefSpec ?? null)}。`;

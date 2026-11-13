@@ -981,25 +981,26 @@ test("A submitted review page is the Expert saying so in the conversation it cam
     await env.state.expertSpoke(ACCOUNT, { source: "telegram", at: new Date(Date.now() - 3600_000).toISOString() });
     const voice = (await env.productStore.getOrCreate("voice")).session;
     const task = await env.tasks.create({ accountId: ACCOUNT, productId: PRODUCT, kind: "interview", origin: { source: "web" }, summary: "访谈" });
-    const submitted = (id: string, title: string, taskId?: string) => env.assistant.formSubmitted({ id, accountId: ACCOUNT, title, origin: { sessionId: voice.id, productId: PRODUCT, ...(taskId ? { taskId } : {}) } });
+    const submitted = (id: string, title: string, taskId?: string) => env.assistant.formSubmitted({ id, accountId: ACCOUNT, title, origin: { sessionId: voice.id, productId: PRODUCT, ...(taskId ? { taskId } : {}) } }, { name: `${title}-${id.slice(0, 8)}.md`, markdown: `# ${title}\n\n专家的回答：\n> 看地段\n` });
     await submitted("form_aaaaaaaaaaaaaaaaaaaa", "选址审阅", task.id);
     await submitted("form_aaaaaaaaaaaaaaaaaaaa", "选址审阅", task.id);
     await env.idle();
-    assert.deepEqual(env.model.state.turns.flatMap(turn => turn.said), ["我填好了《选址审阅》，你看一下。(form_id: form_aaaaaaaaaaaaaaaaaaaa)"], "a user message that started a turn, once");
+    assert.deepEqual(env.model.state.turns.flatMap(turn => turn.said), ["我填好了《选址审阅》，答案如下，也已存在访谈的 output/review/选址审阅-form_aaa.md。\n\n# 选址审阅\n\n专家的回答：\n> 看地段\n"], "a user message that started a turn, once, carrying the answers the Assistant cannot read from a file");
     assert.equal((await env.chat.lines(ACCOUNT)).filter(line => line.role === "user").length, 1);
     assert.equal((await env.productStore.get(voice.id)).messages.length, 0, "the interview session was not started: the Assistant was told");
+    assert.match((await env.productStore.read(voice.id, "output/review/选址审阅-form_aaa.md")).bytes.toString(), /看地段/, "the answers are in the interview outputs for the interview and the build");
     // The Assistant's reply is owed like any Run it started, so it reaches the Expert's IM chat.
     await env.assistant.settleDeliveries();
     assert.deepEqual(env.pushed.map(sent => [sent.text, sent.prefer]), [["收到", "telegram"]]);
 
     await submitted("form_bbbbbbbbbbbbbbbbbbbb", "直接访谈");
-    await waitFor(async () => (await env.productStore.get(voice.id)).messages.some(message => JSON.stringify(message).includes("form_bbbbbbbbbbbbbbbbbbbb")));
+    await waitFor(async () => (await env.productStore.get(voice.id)).messages.some(message => JSON.stringify(message).includes("直接访谈-form_bbb")));
     assert.equal(env.model.state.calls, 1, "the Assistant heard nothing about it");
     await submitted("form_bbbbbbbbbbbbbbbbbbbb", "直接访谈");
     await env.productRuntime.drain();
-    const said = (await env.productStore.get(voice.id)).messages.filter(message => message.role === "user" && JSON.stringify(message).includes("form_bbbbbbbbbbbbbbbbbbbb"));
+    const said = (await env.productStore.get(voice.id)).messages.filter(message => message.role === "user" && JSON.stringify(message).includes("直接访谈-form_bbb"));
     assert.equal(said.length, 1, "a double submit is one message");
-    assert.match(JSON.stringify(said[0]), /我填好了《直接访谈》，你看一下。\(form_id: form_bbbbbbbbbbbbbbbbbbbb\)/);
+    assert.match(JSON.stringify(said[0]), /我填好了《直接访谈》，答案在 output\/review\/直接访谈-form_bbb\.md。/);
   } finally { await env.close(); }
 });
 
