@@ -232,9 +232,6 @@ Corpus contract but keep their HTTP processes separate.
 Set the model and credentials in `.env`:
 
 ```text
-HATCH_CREATOR_MODEL=kimi-k3.1-pro
-HATCH_REVIEWER_MODEL=kimi-k3.1-pro
-HATCH_COMPACTION_MODEL=kimi-k3.1-pro
 PORT=8400
 LLM_API_KEY=...
 OPENAI_BASE_URL=https://api.moonshot.cn/v1
@@ -252,22 +249,15 @@ Dashboard, never Runtime. Public user
 sessions can read `GET /v1/user/product-access`; only the checkout service may
 call the private entitlement mutation after it has committed a matching order.
 
-Spec v1 defaults Creator execution and delivery review to Kimi K3.1. A
-deployment may explicitly set `HATCH_FACTORY_LLM_PROFILE=deepseek-v4-flash`
-when its provider credentials are available; this is a deliberate profile
-selection, never a silent fallback. Kimi thinking is always enabled through
-Pi's normal thinking-level option; provider-specific sampling follows the
-selected contract. Pi owns the model profile, context estimate, compaction
-policy, retries, and output behavior. Use `LLM_API_KEY` for Kimi or
-`DEEPSEEK_API_KEY` for the explicit DeepSeek Factory profile.
+Which model each role runs on is a database row, not an environment variable: see "Choosing models" below. Kimi thinking is always
+enabled through Pi's normal thinking-level option; provider-specific sampling follows the selected contract. Pi owns the model
+profile, context estimate, compaction policy, retries, and output behavior. The environment holds only the API key of each profile
+a row may name: `LLM_API_KEY` for Kimi, `GEMINI_API_KEY` for Gemini, `DEEPSEEK_API_KEY` for DeepSeek.
 Corpus Evals are the default Creator quality gate. Ordinary Creator products stream Kimi's actual response to the Consumer Desktop. `HATCH_RUNTIME_DELIVERY_AUDIT=enforce` is an optional regulated-deployment override: it performs a second Kimi claim audit before delivery and intentionally withholds text streaming until that audit finishes.
-`HATCH_LLM_PROFILE` has no default and must be set (an unset or unknown value fails at startup); set it to
-`deepseek-v4-flash` only when the deployment has a valid `DEEPSEEK_API_KEY`.
 There is no implicit provider fallback. For the Kimi profile,
 `OPENAI_BASE_URL` falls back to `https://api.moonshot.cn/v1` and is restricted
 to official Moonshot endpoints (plus loopback test doubles). Use the `.ai`
-endpoint only with a matching international Kimi key. If any Kimi model
-override is present, it must be exactly `kimi-k3.1-pro` or startup fails closed.
+endpoint only with a matching international Kimi key.
 `HATCH_MCP_SERVERS` is optional. When set, the model can call `mcp_call`; the server sends MCP `tools/call` JSON-RPC requests and the client never sees MCP credentials.
 `hatch.web_search` is a Hatch built-in tool. With `HATCH_WEB_SEARCH_PROVIDER=bocha`, Runtime uses the existing CWebSearch contract (`query`, `freshness`, `summary`, `count`) and normalizes Bocha's response to Hatch's stable `{ query, results }` shape. `HATCH_WEB_SEARCH_API_KEY` stays server-side and never enters the Agent Corpus or Desktop. Creator-owned HTTP/MCP tools are resolved exclusively through the Registry Control Plane using `HATCH_REGISTRY_URL` and `HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN`; the Runtime never reads connection URLs or credentials from the Corpus or local environment.
 
@@ -276,6 +266,42 @@ Then run:
 ```bash
 npm run serve
 ```
+
+## Choosing models
+
+Switching a model needs no deploy, rebuild or restart: edit the database. Profiles (the catalogue of usable models: provider,
+endpoint, limits, which API key) live in code, in `src/llmProfiles.ts`; API keys live in the environment. Which profile a role runs
+on lives in two tables, created and seeded on first use by whichever process reads them first (`src/modelRoles.ts`):
+
+| Table | Key | Meaning |
+| --- | --- | --- |
+| `hatch_model_roles` | `role` | The global model of a role. |
+| `hatch_product_models` | `product_id` | Overrides the `chat` role for one Product. |
+
+| Role | Seed | What runs on it |
+| --- | --- | --- |
+| `chat` | `kimi-k3.1-pro` | Every Run of a published Product in the Runtime, its compaction and delivery review, and Creator Factory's candidate evaluation. |
+| `assistant` | `gemini-api` | The Studio Assistant's own chat and its compaction. |
+| `worker` | `kimi-k3.1-pro` | The Assistant's background workers (Product workspace Agents the Assistant drives) and their compaction. |
+| `factory` | `gemini-3.1-pro` | Creator Factory: the Product workbench, evidence extraction, evaluation, Corpus compilation. |
+| `ingest` | `kimi-k3.1-pro` | The hosted ingest agent. Kimi profiles only. |
+
+A seed row is inserted only when its role has no row; after that the database rules. List the valid profile names with
+`node -e 'import("./dist/llmProfiles.js").then(m => console.log(m.LLM_PROFILE_NAMES.join("\n")))'` (`chat` and `assistant` accept all
+of them, `worker` and `factory` all but `deepseek-v4-pro`, `ingest` only `kimi-k3.1-pro`).
+
+```sql
+-- Switch the global chat model.
+UPDATE hatch_model_roles SET profile = 'kimi-k3.1-pro', updated_at = now() WHERE role = 'chat';
+-- Run one Product's chat on another model; DELETE the row to put it back on the global one.
+INSERT INTO hatch_product_models (product_id, profile) VALUES ('<product id>', 'gemini-api')
+  ON CONFLICT (product_id) DO UPDATE SET profile = EXCLUDED.profile, updated_at = now();
+```
+
+Each process reads a choice at most every 30 seconds, so a change reaches every instance within 30 seconds. It is read at the start
+of each Run, job and compaction: a Run in progress keeps the model it began with. An unknown profile name, a profile not allowed for
+the role, or a profile whose API key is missing fails the Run with the logged error `model_profile_invalid`; nothing falls back to
+another model. Without a database (local development and tests) the seed rows apply.
 
 ## Protocol
 

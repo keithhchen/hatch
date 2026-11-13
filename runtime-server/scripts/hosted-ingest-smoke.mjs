@@ -9,6 +9,7 @@ import { Provisioner } from "../dist/hostedAgents/provisioner.js";
 import { KimiHostedAgent } from "../dist/hostedAgents/kimiHostedAgent.js";
 import { HostedIngest } from "../dist/hostedAgents/ingest.js";
 import { INGEST_SANDBOX, ingestAgent, ingestSecrets } from "../dist/hostedAgents/ingestAgent.js";
+import { MODEL_ROLES } from "../dist/modelRoles.js";
 import { MemoryBrowserProfiles, cookiesFromExport, hostsForCookies } from "../dist/hostedAgents/browserProfiles.js";
 
 const [outDir, ...inputs] = process.argv.slice(2);
@@ -32,7 +33,7 @@ const items = await Promise.all(inputs.map(async (input, i) => /^https?:\/\//.te
   : { id: `i${i + 1}`, kind: "file", name: path.basename(input), bytes: await readFile(input) }));
 
 const api = new KimiApi({ apiKey });
-const agent = new KimiHostedAgent(api, new Provisioner(api, INGEST_SANDBOX, ingestAgent(process.env.HATCH_INGEST_MODEL ?? "kimi-k3.1-pro"), zipDirectory));
+const agent = new KimiHostedAgent(api, new Provisioner(api, INGEST_SANDBOX, async () => ingestAgent(MODEL_ROLES.ingest), zipDirectory));
 const started = Date.now();
 const outcome = await new HostedIngest(agent, profiles, ingestSecrets(process.env)).ingest({ accountId, items, context: "Hatch smoke test" });
 

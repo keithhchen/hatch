@@ -6,6 +6,12 @@ const ROOT = "/v1/creator/assistant/conversation";
 /** The Assistant is one conversation per Expert; the page names it, the server knows it by the account. */
 export const ASSISTANT_CONVERSATION = "assistant";
 
+const RUN_END_ERRORS = {
+  failed: { code: "run_failed", message: "The reply failed. Send the message again." },
+  cancelled: { code: "run_cancelled", message: "The reply was stopped." },
+  interrupted: { code: "run_interrupted", message: "The reply was interrupted. Answer again." }
+};
+
 /** What the Assistant page's event stream says, as the Runtime's wire events the shared reducer already understands. */
 export function wireEventsOf(event) {
   const run = event.run_id ? { run_id: event.run_id } : {};
@@ -17,19 +23,18 @@ export function wireEventsOf(event) {
     case "tool":
     case "tool_end": return [{
       type: "tool_call.delta", ...run, tool_call_id: event.id, name: event.name, activity_message: event.activity, locality: "server",
-      status: event.type === "tool" ? "requested" : event.isError ? "failed" : "completed"
+      status: event.type === "tool" ? "requested" : event.cancelled ? "cancelled" : event.isError ? "failed" : "completed"
     }];
     case "message": return [{ type: "conversation.changed", committed: "user" }];
     case "message_end": return [{ type: "conversation.changed", committed: "assistant" }];
     // A queued message was taken up, a Run changed stage, or something no Run shows changed (a chat was linked).
     case "state": return [{ type: "conversation.changed", committed: "claimed" }];
     case "compacting": return [{ type: "turn.state", ...run, status: "compacting" }];
-    // A stopped Run ends as the chat's cancellation (`run_cancelled`), which is neither a reply nor a failure that can be answered again.
-    case "run_end": return event.status === "failed"
-      ? [{ type: "turn.failed", ...run, error: event.error ?? { code: "run_failed", message: "The reply failed. Send the message again." } }]
-      : event.status === "cancelled"
-        ? [{ type: "turn.failed", ...run, error: { code: "run_cancelled", message: "Run canceled" } }]
-        : [{ type: "turn.completed", ...run, finish_reason: event.status }];
+    // Only a completed Run is a reply. A cancelled or interrupted one saved none: it ends as a failure the page need not wait on
+    // (the server lets an interrupted Run be answered again, which the failed state offers).
+    case "run_end": return event.status === "completed"
+      ? [{ type: "turn.completed", ...run, finish_reason: event.status }]
+      : [{ type: "turn.failed", ...run, error: event.error ?? RUN_END_ERRORS[event.status] ?? RUN_END_ERRORS.failed }];
     default: return [];
   }
 }
@@ -157,7 +162,10 @@ export class StudioConnection extends RuntimeConnection {
   }
 
   toolResult() {}
-  cancel() {}
+  /** Asks the server to stop the Run; the stream then says how it ended. */
+  cancel() {
+    this.transport.request(`${ROOT}/stop`, { method: "POST", body: "{}" }).catch(() => undefined);
+  }
   get ready() { return this.opened && !this.closed; }
 
   close() {

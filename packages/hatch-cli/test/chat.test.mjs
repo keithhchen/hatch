@@ -4,6 +4,7 @@ import { PassThrough } from "node:stream";
 import test from "node:test";
 import { main } from "../src/cli.js";
 import { COMMANDS } from "../src/commands.js";
+import { ConversationApi, assistantRoutes, workerRoutes } from "../src/conversation.js";
 import { McpServer } from "../src/mcp.js";
 import { CommandRegistry } from "../src/registry.js";
 import { RunObserver, isTerminal, parseSse, resumable } from "../src/run.js";
@@ -366,4 +367,13 @@ test("ask sends --brief answers when it starts a conversation, and MCP sends bri
     const chatSend = COMMANDS.find((c) => c.mcp?.name === "chat_send");
     assert.deepEqual(chatSend.mcp.toArgs({ content: "hi", product_id: "p1", brief_answers: { goal: "ship" } }).flags.brief, ["goal=ship"]);
   });
+});
+
+test("worker and assistant event streams resume with after_cursor, the parameter the server reads", async () => {
+  for (const routes of [workerRoutes("p1", "research"), assistantRoutes()]) {
+    const urls = [];
+    const client = { stream: (_method, url) => { urls.push(url); return Promise.resolve(new Response("").body); } };
+    await new ConversationApi(client, routes).events("7").next();
+    assert.match(urls[0], /\/events\?after_cursor=7$/);
+  }
 });

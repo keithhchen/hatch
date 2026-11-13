@@ -376,6 +376,7 @@ async function runModelTurnInternal(
     abortSignal.throwIfAborted();
     const briefSnapshot = (await conversationRepository.getConversation(input.conversation_id))?.briefSnapshot;
     const contextFor = (messages: ConversationMessage[]): RunContext => ({
+      productId: binding.productId,
       clientBroker: broker,
       assetStore,
       serverTools,
@@ -469,9 +470,7 @@ async function runModelTurnInternal(
           return;
         }
         await commitTerminal(
-          event.finish_reason === "content_filter" || final.blocked
-            ? "content_filter"
-            : "stop"
+          final.blocked ? "content_filter" : event.finish_reason
         );
         return;
       }

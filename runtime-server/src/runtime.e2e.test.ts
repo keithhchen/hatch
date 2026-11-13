@@ -863,8 +863,6 @@ afterEach(async () => {
   delete process.env.OPENAI_BASE_URL;
   delete process.env.OPENAI_API_KEY;
   delete process.env.LLM_API_KEY;
-  delete process.env.HATCH_CREATOR_MODEL;
-  delete process.env.HATCH_COMPACTION_MODEL;
   delete process.env.HATCH_MCP_SERVERS;
 });
 

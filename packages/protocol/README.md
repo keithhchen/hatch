@@ -44,9 +44,8 @@ GET   /v1/conversations/:id/runs/:runId
 POST  /v1/conversations/:id/runs/:runId/cancel
 ```
 
-`POST /v1/conversations/:id/runs` intentionally returns
-`409 executor_attach_required`: a REST request cannot safely create a queued
-Run without an executor window that can answer local-tool and approval work.
+`POST /v1/conversations/:id/runs` is not supported and returns
+`405 method_not_allowed`: a Run starts or is steered by `POST /messages`.
 
 ### Product session binding
 

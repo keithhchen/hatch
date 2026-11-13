@@ -33,19 +33,11 @@ export function kimiModelRuntimeRecord(): KimiModelRuntimeRecord {
 
 /**
  * Spec v1 has one model contract. Creator execution, delivery review, and
- * compaction all use Kimi K3.1 through an official Moonshot endpoint.  Model
- * overrides are validated instead of silently falling back to another model.
+ * compaction all use Kimi K3.1 through an official Moonshot endpoint.
  */
 export function requireKimiProviderConfig(env: NodeJS.ProcessEnv = process.env): KimiProviderConfig {
   const apiKey = env.LLM_API_KEY?.trim();
   if (!apiKey) throw new Error("Missing LLM_API_KEY for the Kimi-only runtime");
-
-  for (const name of ["HATCH_CREATOR_MODEL", "HATCH_REVIEWER_MODEL", "HATCH_COMPACTION_MODEL"] as const) {
-    const configured = env[name]?.trim();
-    if (configured && configured !== KIMI_MODEL) {
-      throw new Error(`${name} must be ${KIMI_MODEL}; spec v1 does not fall back to another model`);
-    }
-  }
 
   const baseURL = (env.OPENAI_BASE_URL ?? KIMI_DEFAULT_BASE_URL).trim().replace(/\/$/, "");
   let endpoint: URL;

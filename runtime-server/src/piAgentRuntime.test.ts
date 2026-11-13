@@ -8,12 +8,13 @@ import { strToU8, zipSync } from "fflate";
 import { toolEventBase, type RunContext } from "./agentRuntime.js";
 import { RuntimeAssetStore } from "./assetStore.js";
 import { PiAgentRuntime } from "./piAgentRuntime.js";
+import { InMemoryModelRoleResolver } from "./modelRoles.js";
 import { TASK_START_MESSAGE_CONTENT, type ConversationMessage, type OutboundMessage, type RunStart } from "./protocol.js";
 import { discoverSkills, renderSkillsSection } from "./skills.js";
 import { persistToolMessage } from "./toolMessage.js";
 
 test("Pi thinking lifecycle preserves each event kind, content index and payload", async () => {
-  const runtime = new PiAgentRuntime({ toolDefinitions: [] });
+  const runtime = new PiAgentRuntime({ models: new InMemoryModelRoleResolver(), toolDefinitions: [] });
   const input = {
     type: "client.message",
     run_id: "run_pi_thinking",
@@ -48,13 +49,9 @@ test("Pi thinking lifecycle preserves each event kind, content index and payload
 });
 
 test("committed user and tool images reach repeated provider requests without asset reads", async (t) => {
-  const originalProfile = process.env.HATCH_LLM_PROFILE;
   const originalKey = process.env.LLM_API_KEY;
-  process.env.HATCH_LLM_PROFILE = "kimi-k3.1-pro";
   process.env.LLM_API_KEY = "test-only";
   t.after(() => {
-    if (originalProfile === undefined) delete process.env.HATCH_LLM_PROFILE;
-    else process.env.HATCH_LLM_PROFILE = originalProfile;
     if (originalKey === undefined) delete process.env.LLM_API_KEY;
     else process.env.LLM_API_KEY = originalKey;
   });
@@ -83,7 +80,7 @@ test("committed user and tool images reach repeated provider requests without as
   } as unknown as RunContext;
   for (let run = 0; run < 2; run++) {
     const events = [];
-    for await (const event of new PiAgentRuntime({ toolDefinitions: [] }).run(input, context)) events.push(event);
+    for await (const event of new PiAgentRuntime({ models: new InMemoryModelRoleResolver(), toolDefinitions: [] }).run(input, context)) events.push(event);
     assert.ok(events.some((event) => event.type === "turn.completed"));
   }
   assert.equal(reads, 0);
@@ -97,9 +94,7 @@ test("committed user and tool images reach repeated provider requests without as
 test("task_start keeps its marked history turn while omitting the marker from the provider request", async () => {
   const requests: Array<Record<string, unknown>> = [];
   const originalFetch = globalThis.fetch;
-  const originalProfile = process.env.HATCH_LLM_PROFILE;
   const originalApiKey = process.env.LLM_API_KEY;
-  process.env.HATCH_LLM_PROFILE = "kimi-k3.1-pro";
   process.env.LLM_API_KEY = "task-start-test-key";
   globalThis.fetch = (async (_input, init) => {
     requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
@@ -135,7 +130,7 @@ test("task_start keeps its marked history turn while omitting the marker from th
       message: { role: "user", content: TASK_START_MESSAGE_CONTENT }
     } as RunStart;
     const events = [];
-    const runtime = new PiAgentRuntime({ toolDefinitions: [] });
+    const runtime = new PiAgentRuntime({ models: new InMemoryModelRoleResolver(), toolDefinitions: [] });
     for await (const event of runtime.run(input, {
       state: { status: "running" },
       // The current marked row is part of the canonical assembled history.
@@ -178,8 +173,6 @@ test("task_start keeps its marked history turn while omitting the marker from th
     assert.ok(userMessages.every((message) => !String(message.content).includes("Available runtime guidance.")));
   } finally {
     globalThis.fetch = originalFetch;
-    if (originalProfile === undefined) delete process.env.HATCH_LLM_PROFILE;
-    else process.env.HATCH_LLM_PROFILE = originalProfile;
     if (originalApiKey === undefined) delete process.env.LLM_API_KEY;
     else process.env.LLM_API_KEY = originalApiKey;
   }
@@ -188,10 +181,8 @@ test("task_start keeps its marked history turn while omitting the marker from th
 test("Pi runtime preserves legacy DOCX references without reading or re-parsing asset bytes", async () => {
   const requests: Array<Record<string, unknown>> = [];
   const originalFetch = globalThis.fetch;
-  const originalProfile = process.env.HATCH_LLM_PROFILE;
   const originalApiKey = process.env.LLM_API_KEY;
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-pi-asset-"));
-  process.env.HATCH_LLM_PROFILE = "kimi-k3.1-pro";
   process.env.LLM_API_KEY = "asset-test-key";
   globalThis.fetch = (async (_input, init) => {
     requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
@@ -245,7 +236,7 @@ test("Pi runtime preserves legacy DOCX references without reading or re-parsing 
       message: { role: "user", content: "Summarize the upload.", attachments: [reference] }
     } as RunStart;
     const events = [];
-    for await (const event of new PiAgentRuntime({ toolDefinitions: [] }).run(input, {
+    for await (const event of new PiAgentRuntime({ models: new InMemoryModelRoleResolver(), toolDefinitions: [] }).run(input, {
       state: { status: "running" },
       messages: [input.message],
       sessionSkills: {
@@ -277,7 +268,7 @@ test("Pi runtime preserves legacy DOCX references without reading or re-parsing 
     } as RunStart;
     for (let replay = 0; replay < 2; replay += 1) {
       const replayEvents = [];
-      for await (const event of new PiAgentRuntime({ toolDefinitions: [] }).run(followUp, {
+      for await (const event of new PiAgentRuntime({ models: new InMemoryModelRoleResolver(), toolDefinitions: [] }).run(followUp, {
         state: { status: "running" },
         messages: [input.message, followUp.message],
         sessionSkills: {
@@ -299,8 +290,6 @@ test("Pi runtime preserves legacy DOCX references without reading or re-parsing 
       "repeated continuation of the same committed boundary must keep its provider messages");
   } finally {
     globalThis.fetch = originalFetch;
-    if (originalProfile === undefined) delete process.env.HATCH_LLM_PROFILE;
-    else process.env.HATCH_LLM_PROFILE = originalProfile;
     if (originalApiKey === undefined) delete process.env.LLM_API_KEY;
     else process.env.LLM_API_KEY = originalApiKey;
     await rm(root, { recursive: true, force: true });
@@ -310,13 +299,9 @@ test("Pi runtime preserves legacy DOCX references without reading or re-parsing 
 for (const scenario of ["invalid_resource", "execution_error", "unknown_tool"] as const) {
   const toolName = scenario === "unknown_tool" ? "unknown_tool" : "file_read";
   test(`Pi loop ${scenario === "invalid_resource" ? "preserves an invalid Skill resource error and lets the model recover" : scenario === "execution_error" ? "preserves native Pi exception text when result details are empty and recovers" : "aborts a genuinely unregistered tool without another provider turn"}`, async (t) => {
-    const originalProfile = process.env.HATCH_LLM_PROFILE;
     const originalKey = process.env.LLM_API_KEY;
-    process.env.HATCH_LLM_PROFILE = "kimi-k3.1-pro";
     process.env.LLM_API_KEY = "tool-classification-test-only";
     t.after(() => {
-      if (originalProfile === undefined) delete process.env.HATCH_LLM_PROFILE;
-      else process.env.HATCH_LLM_PROFILE = originalProfile;
       if (originalKey === undefined) delete process.env.LLM_API_KEY;
       else process.env.LLM_API_KEY = originalKey;
     });
@@ -376,7 +361,7 @@ for (const scenario of ["invalid_resource", "execution_error", "unknown_tool"] a
       return new Response(`${chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("")}data: [DONE]\n\n`,
         { headers: { "content-type": "text/event-stream" } });
     });
-    const runtime = new PiAgentRuntime({ toolDefinitions: [{ type: "function", function: {
+    const runtime = new PiAgentRuntime({ models: new InMemoryModelRoleResolver(), toolDefinitions: [{ type: "function", function: {
       name: "file_read", description: "Read an authorized file or Skill resource",
       parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] }
     } }] });

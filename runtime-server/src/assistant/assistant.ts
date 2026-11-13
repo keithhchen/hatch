@@ -25,7 +25,7 @@ import type { Material } from "./materials.js";
 import type { IngestJob } from "../ingest/job.js";
 import { readPage, type AgentOverview, type StudioOperations, type WorkerKind } from "./studioTools.js";
 import { log } from "../observability/log.js";
-import { modelRole } from "../modelRoles.js";
+import type { ModelRoleResolver } from "../modelRoles.js";
 
 const WORKER_LEASE_MS = 35 * 60_000;
 const RUN_END = new Set(["voice.run_completed", "voice.run_failed", "voice.run_interrupted"]);
@@ -81,6 +81,8 @@ export type AssistantDependencies = {
   /** Where its public web searches go. */
   search: WebSearchProvider;
   env: NodeJS.ProcessEnv;
+  /** Where the workers' model is chosen (role `worker`): read at the start of each worker Run. */
+  models: ModelRoleResolver;
   runtime?: Pick<WorkbenchRuntimeOptions, "agentFactory" | "deadlineMs" | "maxTurns">;
   /** Where its workers' model calls are recorded, as Studio usage of the Expert. */
   usage?: UsageRecorder;
@@ -656,7 +658,7 @@ export class AssistantService implements StudioOperations {
     const store = new WorkbenchStore(this.deps.backend(accountId), undefined, this.definitions);
     await store.recover();
     const notes = (await store.getOrCreate("assistant", "Hatch 助理")).session;
-    const runtime = new WorkbenchRuntime(store, { ...this.deps.runtime, ...(this.deps.usage ? { usage: { recorder: this.deps.usage, accountId, cap: this.deps.usageCap } } : {}), env: { ...this.deps.env, HATCH_FACTORY_LLM_PROFILE: modelRole("worker", this.deps.env) } });
+    const runtime = new WorkbenchRuntime(store, { ...this.deps.runtime, ...(this.deps.usage ? { usage: { recorder: this.deps.usage, accountId, cap: this.deps.usageCap } } : {}), models: this.deps.models, role: "worker", env: this.deps.env });
     const desk: Desk = { accountId, store, runtime, sessionId: notes.id };
     runtime.events.on("event", (event: { sessionId?: string; type?: string }) => {
       if (!event.sessionId || !event.type || !RUN_END.has(event.type)) return;

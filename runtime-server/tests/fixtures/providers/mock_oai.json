@@ -1,0 +1,65 @@
+{
+ "content_filter": {
+  "status": 200,
+  "body": "data: {\"id\":\"x\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Partial answer\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"x\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"content_filter\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}\n\ndata: [DONE]\n\n"
+ },
+ "no_finish_reason": {
+  "status": 200,
+  "body": "data: {\"id\":\"x\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Partial answer\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\n"
+ },
+ "connection_closed_no_done": {
+  "status": 200,
+  "body": "data: {\"id\":\"x\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Partial answer\"},\"finish_reason\":null}]}\n\n"
+ },
+ "midstream_error_object": {
+  "status": 200,
+  "body": "data: {\"id\":\"x\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Partial\"},\"finish_reason\":null}]}\n\ndata: {\"error\":{\"message\":\"Internal server error\",\"type\":\"server_error\"}}\n\n"
+ },
+ "invalid_tool_args": {
+  "status": 200,
+  "body": "data: {\"id\":\"x\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":\"{\\\"city\\\": \\\"Par\"}}]},\"finish_reason\":null}]}\n\ndata: {\"id\":\"x\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}\n\ndata: [DONE]\n\n"
+ },
+ "length_mid_tool_call": {
+  "status": 200,
+  "body": "data: {\"id\":\"x\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":\"{\\\"ci\"}}]},\"finish_reason\":null}]}\n\ndata: {\"id\":\"x\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}\n\ndata: [DONE]\n\n"
+ },
+ "empty_stop": {
+  "status": 200,
+  "body": "data: {\"id\":\"x\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"x\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}\n\ndata: [DONE]\n\n"
+ },
+ "moonshot_429_rpm": {
+  "status": 429,
+  "contentType": "application/json",
+  "body": "{\"error\":{\"message\":\"Your account org-abc123 request reached organization max RPM: 3, please try again after 1 seconds\",\"type\":\"rate_limit_reached_error\"}}"
+ },
+ "moonshot_429_overloaded": {
+  "status": 429,
+  "contentType": "application/json",
+  "body": "{\"error\":{\"message\":\"The engine is currently overloaded, please try again later\",\"type\":\"engine_overloaded_error\"}}"
+ },
+ "moonshot_403_quota": {
+  "status": 403,
+  "contentType": "application/json",
+  "body": "{\"error\":{\"message\":\"Your account org-abc123 is suspended, please check your plan and billing details\",\"type\":\"exceeded_current_quota_error\"}}"
+ },
+ "deepseek_402_balance": {
+  "status": 402,
+  "contentType": "application/json",
+  "body": "{\"error\":{\"message\":\"Insufficient Balance\",\"type\":\"unknown_error\",\"param\":null,\"code\":\"invalid_request_error\"}}"
+ },
+ "deepseek_503_busy": {
+  "status": 503,
+  "contentType": "application/json",
+  "body": "{\"error\":{\"message\":\"Server overloaded, please try again later\",\"type\":\"service_unavailable_error\"}}"
+ },
+ "http_500": {
+  "status": 500,
+  "contentType": "application/json",
+  "body": "{\"error\":{\"message\":\"Internal error\",\"type\":\"internal_error\"}}"
+ },
+ "http_400_context": {
+  "status": 400,
+  "contentType": "application/json",
+  "body": "{\"error\":{\"message\":\"Invalid request: Your request exceeded model token limit: 262144\",\"type\":\"invalid_request_error\"}}"
+ }
+}

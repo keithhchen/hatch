@@ -3,16 +3,21 @@ import test from "node:test";
 import { KIMI_MODEL as PROVIDER_KIMI_MODEL } from "./kimiProvider.js";
 import {
   FACTORY_LLM_MODEL,
-  FACTORY_LLM_CONTEXT_WINDOW,
-  FACTORY_LLM_MAX_COMPLETION_TOKENS,
   FACTORY_LLM_WALL_CLOCK_TIMEOUT_MS,
   createFactoryLlmModel,
   createFactoryLlmPromptRunner
 } from "./creatorLearning/factoryLlm.js";
 import { UpstreamError } from "./errors/upstream.js";
 import type { FactoryPromptFailureTelemetry } from "./creatorLearning/types.js";
-import { PI_FACTORY_MODEL, runFactoryPromptWithPi } from "./creatorLearning/piGateway.js";
+import { factoryModelRecord, factoryPromptRunner } from "./creatorLearning/piGateway.js";
+import { ModelProfileError } from "./errors/modelProfile.js";
+import { llmProfile } from "./llmProfiles.js";
+import { InMemoryModelRoleResolver } from "./modelRoles.js";
 import { KIMI_MODEL, createKimiModel } from "./piModel.js";
+
+const kimiFactory = new InMemoryModelRoleResolver({ roles: { factory: "kimi-k3.1-pro" } });
+const FACTORY_LLM_CONTEXT_WINDOW = llmProfile("kimi-k3.1-pro").contextWindow;
+const FACTORY_LLM_MAX_COMPLETION_TOKENS = llmProfile("kimi-k3.1-pro").maxTokens;
 
 function streamResponse(text: string, finishReason: "stop" | "length" = "stop"): Response {
   const chunks = [
@@ -109,7 +114,7 @@ test("Factory Evidence/Eval/Corpus prompt gateway uses dedicated Kimi K3.1 low-r
     return responses.shift() ?? streamResponse("unexpected extra turn");
   };
 
-  const output = await runFactoryPromptWithPi({
+  const output = await factoryPromptRunner(kimiFactory)({
     purpose: "evidence.extract",
     systemPrompt: "FACTORY_LLM_SYSTEM_MARKER",
     prompt: "FACTORY_LLM_PROMPT_MARKER",
@@ -146,7 +151,7 @@ test("Factory Evidence/Eval/Corpus prompt gateway uses dedicated Kimi K3.1 low-r
   assert.match(JSON.stringify(body.messages), /FACTORY_LLM_SYSTEM_MARKER/);
   assert.match(JSON.stringify(body.messages), /FACTORY_LLM_PROMPT_MARKER/);
 
-  const factoryModel = createFactoryLlmModel({ env: { OPENAI_BASE_URL: process.env.OPENAI_BASE_URL } });
+  const factoryModel = createFactoryLlmModel({ profile: llmProfile("kimi-k3.1-pro"), env: { OPENAI_BASE_URL: process.env.OPENAI_BASE_URL } });
   assert.equal(factoryModel.id, FACTORY_LLM_MODEL);
   assert.equal(factoryModel.contextWindow, FACTORY_LLM_CONTEXT_WINDOW);
   assert.equal(factoryModel.maxTokens, FACTORY_LLM_MAX_COMPLETION_TOKENS);
@@ -155,7 +160,7 @@ test("Factory Evidence/Eval/Corpus prompt gateway uses dedicated Kimi K3.1 low-r
   assert.equal(factoryModel.compat?.supportsStrictMode, true);
   assert.equal(factoryModel.compat?.maxTokensField, "max_completion_tokens");
   assert.equal(factoryModel.compat?.thinkingFormat, "deepseek");
-  assert.deepEqual(PI_FACTORY_MODEL, { provider: "moonshot", model: FACTORY_LLM_MODEL });
+  assert.deepEqual(await factoryModelRecord(kimiFactory)(), { provider: "moonshot", model: FACTORY_LLM_MODEL });
 
   assert.equal(KIMI_MODEL, "kimi-k3.1-pro");
   assert.equal(PROVIDER_KIMI_MODEL, "kimi-k3.1-pro");
@@ -167,9 +172,8 @@ test("Factory Evidence/Eval/Corpus prompt gateway uses dedicated Kimi K3.1 low-r
 
 test("Factory can use an explicitly selected DeepSeek profile without Kimi payload fields", async () => {
   const calls: Array<{ url: string; init: RequestInit }> = [];
-  const runner = createFactoryLlmPromptRunner({
+  const runner = createFactoryLlmPromptRunner(new InMemoryModelRoleResolver({ roles: { factory: "deepseek-v4-flash" } }), {
     env: {
-      HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash",
       DEEPSEEK_API_KEY: "factory-deepseek-test-key"
     },
     fetch: async (input, init) => {
@@ -202,14 +206,14 @@ test("Factory can use an explicitly selected DeepSeek profile without Kimi paylo
   assert.equal("reasoning_effort" in body, false);
   assert.equal(body.max_tokens !== undefined, true);
   assert.equal(new Headers(calls[0]!.init.headers).get("authorization"), "Bearer factory-deepseek-test-key");
-  const deepseekModel = createFactoryLlmModel({ env: { HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash", DEEPSEEK_API_KEY: "test" } });
+  const deepseekModel = createFactoryLlmModel({ profile: llmProfile("deepseek-v4-flash"), env: { DEEPSEEK_API_KEY: "test" } });
   assert.equal(deepseekModel.id, "deepseek-v4-flash");
   assert.equal(deepseekModel.provider, "deepseek");
   assert.equal(deepseekModel.baseUrl, "https://api.deepseek.com");
 });
 
 test("Factory Kimi K3.1 rejects a length-truncated response even when it contains text", async () => {
-  const runner = createFactoryLlmPromptRunner({
+  const runner = createFactoryLlmPromptRunner(kimiFactory, {
     apiKey: "factory-k3-length-test-key",
     baseUrl: "https://api.moonshot.ai/v1",
     fetch: async () => streamResponse("PARTIAL_OUTPUT_MUST_NOT_BE_ACCEPTED", "length")
@@ -229,7 +233,7 @@ test("Factory Kimi K3.1 rejects a length-truncated response even when it contain
 test("Factory Kimi K3.1 has a hard wall-clock deadline in addition to HTTP idle timeout", async () => {
   const controller = new AbortController();
   const telemetry: FactoryPromptFailureTelemetry[] = [];
-  const runner = createFactoryLlmPromptRunner({
+  const runner = createFactoryLlmPromptRunner(kimiFactory, {
     apiKey: "factory-k3-wall-clock-test-key",
     baseUrl: "https://api.moonshot.ai/v1",
     maxRetries: 0,
@@ -261,7 +265,7 @@ test("Factory Kimi K3.1 classifies quota exhaustion and never rethrows provider 
   const organizationId = "org-fefa47391cab4497943886467d066f97";
   const keyId = "ak-fbauirzdz8n111dq1iu1";
   const telemetry: FactoryPromptFailureTelemetry[] = [];
-  const runner = createFactoryLlmPromptRunner({
+  const runner = createFactoryLlmPromptRunner(kimiFactory, {
     apiKey: "factory-k3-quota-test-key",
     baseUrl: "https://api.moonshot.ai/v1",
     maxRetries: 0,
@@ -312,7 +316,7 @@ test("Factory Kimi K3.1 sanitizes transient and configuration provider errors wh
 
   for (const row of cases) {
     const telemetry: FactoryPromptFailureTelemetry[] = [];
-    const runner = createFactoryLlmPromptRunner({
+    const runner = createFactoryLlmPromptRunner(kimiFactory, {
       apiKey: "factory-k3-provider-error-test-key",
       baseUrl: "https://api.moonshot.ai/v1",
       maxRetries: 0,
@@ -347,4 +351,26 @@ test("Factory provider classification does not mask private harness response err
     UpstreamError.of(new Error("Factory Hatch harness rejected the Runtime response: turn failed during candidate execution")).kind,
     "unknown"
   );
+});
+
+test("Factory prompt runner reads the factory role at each prompt and fails loudly on an invalid profile", async () => {
+  const roles = new InMemoryModelRoleResolver({ roles: { factory: "kimi-k3.1-pro" } });
+  const urls: string[] = [];
+  const runner = createFactoryLlmPromptRunner(roles, {
+    env: { LLM_API_KEY: "k", DEEPSEEK_API_KEY: "d" },
+    maxRetries: 0,
+    fetch: async (input) => {
+      urls.push(input instanceof Request ? input.url : String(input));
+      return new Response("{}", { status: 500, headers: { "content-type": "application/json" } });
+    }
+  });
+  const call = { purpose: "evidence.extract" as const, systemPrompt: "s", prompt: "p", outputContract: { kind: "evidence_ledger" as const, requiredSections: ["Product evidence"] } };
+  await assert.rejects(() => runner(call));
+  roles.setRole("factory", "deepseek-v4-flash");
+  await assert.rejects(() => runner(call));
+  assert.match(urls[0]!, /moonshot/);
+  assert.match(urls.at(-1)!, /deepseek/);
+
+  roles.setRole("factory", "no-such-model");
+  await assert.rejects(() => runner(call), (error: unknown) => error instanceof ModelProfileError && error.code === "model_profile_invalid");
 });

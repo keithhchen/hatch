@@ -11,6 +11,7 @@ import {
 import type { ClientToolBroker } from "./clientBroker.js";
 import type { RunStateMachine } from "./runState.js";
 import type { ActivatedSkill } from "./store.js";
+import type { ModelRoleResolver } from "./modelRoles.js";
 import type { SkillRuntime } from "./skillRuntime.js";
 import type { ToolBridge, ToolRuntimeScope } from "./toolBridge.js";
 import { RUNTIME_CONTEXT_PREFIX, type RuntimeCompactionMessage } from "./compaction.js";
@@ -53,6 +54,8 @@ export type RuntimeSessionSkills = {
 };
 
 export type RunContext = {
+  /** The Product this Run chats for: the scope of its model choice (`hatch_product_models`). */
+  productId?: string;
   clientBroker: ClientToolBroker;
   /** Runtime-owned binary attachment store; bytes never enter the transcript. */
   assetStore?: RuntimeAssetStore;
@@ -678,9 +681,9 @@ function isWorkspaceMutationTool(toolName: string): boolean {
   return toolName === "file_write" || toolName === "file_patch";
 }
 
-export function createAgentRuntime(): AgentRuntime {
+export function createAgentRuntime(models: ModelRoleResolver): AgentRuntime {
   // Production Runtime uses Pi Core's implemented Agent loop.
-  return new PiAgentRuntime();
+  return new PiAgentRuntime({ models });
 }
 
 function searchQuery(prompt: string): string {

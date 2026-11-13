@@ -6,6 +6,7 @@ import { test } from "node:test";
 import type { Usage } from "@earendil-works/pi-ai";
 import type { RunContext } from "../agentRuntime.js";
 import { PiAgentRuntime } from "../piAgentRuntime.js";
+import { InMemoryModelRoleResolver } from "../modelRoles.js";
 import type { RunStart } from "../protocol.js";
 import { createRegistryServerFromEnvironment } from "../registryServer.js";
 import { InMemoryUsageLedger } from "./memoryUsage.js";
@@ -55,7 +56,7 @@ test("a recorder that fails never fails the run: the error is logged with the ru
   const usage = piUsage();
 
   // The pi runtime awaits the sink when a model call ends; the Run goes on.
-  const runtime = new PiAgentRuntime({ toolDefinitions: [] });
+  const runtime = new PiAgentRuntime({ models: new InMemoryModelRoleResolver(), toolDefinitions: [] });
   const handleEvent = Reflect.get(runtime, "handleEvent") as (options: unknown) => Promise<void>;
   const finals: unknown[] = [];
   await Reflect.apply(handleEvent, runtime, [{
@@ -74,7 +75,7 @@ test("a recorder that fails never fails the run: the error is logged with the ru
 test("the pi runtime records each completed model call once, keyed by run and message time", async () => {
   const ledger = new InMemoryUsageLedger();
   const sink = usageSink(ledger, { accountId: "acct", surface: "studio_web", runId: "run_1" }, { error() {} });
-  const runtime = new PiAgentRuntime({ toolDefinitions: [] });
+  const runtime = new PiAgentRuntime({ models: new InMemoryModelRoleResolver(), toolDefinitions: [] });
   const handleEvent = Reflect.get(runtime, "handleEvent") as (options: unknown) => Promise<void>;
   const end = (timestamp: number) => Reflect.apply(handleEvent, runtime, [{
     event: { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ok" }], api: "openai-completions", provider: "p", model: "kimi", usage: piUsage(), stopReason: "stop", timestamp } },

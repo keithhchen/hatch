@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { InMemoryModelRoleResolver } from "../modelRoles.js";
 import http from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
@@ -15,7 +16,7 @@ test("Factory workspaces are partitioned by authenticated Creator and existing P
   // Authentication and Product ownership are deliberately supplied by this unit transport.
   // Registry verifies both before mounting the handler in production.
   const definitions = new MemoryAgentDefinitionRepository(await initialAgentDefinitions());
-  let service = new FactoryAgentsService(root, {}, definitions);
+  let service = new FactoryAgentsService(root, {}, new InMemoryModelRoleResolver(), definitions);
   const server = http.createServer((req, res) => {
     const creatorId = String(req.headers["x-test-creator"]);
     const productId = String(req.headers["x-test-product"]);
@@ -51,7 +52,7 @@ test("Factory workspaces are partitioned by authenticated Creator and existing P
     const otherCreator = await (await call("creator-b", PRODUCT_A, "sessions", "POST", { role: "research" })).json() as { id: string };
     const productBListing = await (await call("creator-a", PRODUCT_B, "sessions")).text();
     assert.ok(!productBListing.includes(a.id)); assert.ok(!productBListing.includes("Product A evidence"));
-    await service.close(); service = new FactoryAgentsService(root, {}, definitions);
+    await service.close(); service = new FactoryAgentsService(root, {}, new InMemoryModelRoleResolver(), definitions);
     const saved = await (await call("creator-a", PRODUCT_A, `sessions/${a.id}/files?path=output/RESEARCH.md`)).json() as { content: string };
     assert.equal(saved.content, "Product A evidence");
   } finally { await service.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(root, { recursive: true, force: true }); }

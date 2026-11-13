@@ -49,7 +49,7 @@ Response object:
   output_text (SDK convenience, joined text), error: null | { code, message }, incomplete_details: null | { reason },
   usage: { input_tokens, input_tokens_details:{ cached_tokens }, output_tokens, output_tokens_details:{ reasoning_tokens }, total_tokens } }
 ```
-- Run failure → `status:"failed"`, `error:{ code, message }` (existing failure code; reference id in message). Content filter → `incomplete`, `{reason:"content_filter"}`. Interrupted by restart → `failed` with code `run_interrupted`.
+- Run failure → `status:"failed"`, `error:{ code, message }` (existing failure code; reference id in message). Content filter (Hatch's output guard or the provider's own safety stop) → `incomplete`, `{reason:"content_filter"}`. Output limit reached → `incomplete`, `{reason:"max_output_tokens"}`. Interrupted by restart → `failed` with code `run_interrupted`.
 - `usage` = sum over every model call of the run (from the persisted per-call Usage).
 
 Delivery modes:

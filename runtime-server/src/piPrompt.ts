@@ -1,4 +1,5 @@
-import { createPiAgent } from "./piModel.js";
+import type { AdapterOptions } from "./modelAdapters/adapter.js";
+import { createPiAgent, type PiProfileOptions } from "./piModel.js";
 
 export type PiAgentPromptOptions = {
   systemPrompt?: string;
@@ -15,9 +16,10 @@ export type PiAgentPromptRunner = (options: PiAgentPromptOptions) => Promise<str
  * main runtime. Product workflows may choose the prompt and provider payload,
  * but they do not get a second model client or a separate turn budget.
  */
-export async function runPiAgentPrompt(options: PiAgentPromptOptions): Promise<string> {
+export async function runPiAgentPrompt(model: PiProfileOptions<Pick<AdapterOptions, "env">>, options: PiAgentPromptOptions): Promise<string> {
   options.signal?.throwIfAborted();
   const agent = createPiAgent({
+    ...model,
     initialState: {
       systemPrompt: options.systemPrompt ?? "",
       messages: [],

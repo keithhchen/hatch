@@ -1,6 +1,8 @@
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import type { StallLimits } from "./providerStall.js";
+import { ModelProfileError } from "./errors/modelProfile.js";
 
+/** The catalogue of usable models. Which role runs on which profile is data (`hatch_model_roles`), not code: see modelRoles.ts. */
 export const RUNTIME_LLM_PROFILE_NAMES = ["deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro", "deepseek-v4-pro"] as const;
 export const FACTORY_LLM_PROFILE_NAMES = ["deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro"] as const;
 export type FactoryLlmProfileName = (typeof FACTORY_LLM_PROFILE_NAMES)[number];
@@ -35,6 +37,8 @@ export type LlmProfile = {
   thinkingType?: "enabled" | "disabled";
   /** Moonshot's top-level `reasoning_effort`, sent on every request in place of a `thinking` field. */
   reasoningEffort?: "low" | "high" | "max";
+  /** What the model reads; both text and images when absent. */
+  input?: Array<"text" | "image">;
   /** How long a call may stay silent; the default of providerStall when absent. */
   stall?: StallLimits;
 };
@@ -71,6 +75,7 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     reasoning: false,
     thinkingLevel: "minimal",
     thinkingType: "disabled",
+    input: ["text"],
   },
   "gemini-api": {
     name: "gemini-api",
@@ -85,6 +90,8 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     maxTokens: 65_536,
     reasoning: true,
     thinkingLevel: "low",
+    // Same policy as gemini-3.1-pro: a hung or overloaded (503) call that said nothing is asked again.
+    stall: { firstEventMs: 45_000, silenceMs: 60_000, restarts: 2, backoffMs: 1_000 }
   },
   // The one Kimi profile (plain pro, not -highspeed). K3.1 always reasons and rejects the `thinking` field; depth is the top-level
   // `reasoning_effort`, which defaults to "max" and then took 150 s+ for a non-stream call. "low" keeps the reasoning in
@@ -131,33 +138,11 @@ export function llmProfile(name: LlmProfileName): LlmProfile {
   return { ...PROFILES[name] };
 }
 
-export function resolveLlmProfile(env: NodeJS.ProcessEnv = process.env): LlmProfile {
-  const configured = env.HATCH_LLM_PROFILE?.trim() as RuntimeLlmProfileName | undefined;
-  if (!configured) throw new Error(`HATCH_LLM_PROFILE is not set. Expected one of: ${RUNTIME_LLM_PROFILE_NAMES.join(", ")}`);
-  const profile = PROFILES[configured];
-  if (!profile || !RUNTIME_LLM_PROFILE_NAMES.includes(configured)) {
-    throw new Error(`Unknown Runtime HATCH_LLM_PROFILE: ${configured}. Expected one of: ${RUNTIME_LLM_PROFILE_NAMES.join(", ")}`);
-  }
-  return { ...profile };
-}
-
-/**
- * Resolve the provider used by Creator Factory. Kimi remains the default and
- * the profile is an explicit deployment choice, never an implicit fallback.
- * This lets production switch to a configured provider when an account is
- * paused for quota/billing without changing the Product/Factory contract.
- */
-export function resolveFactoryLlmProfile(env: NodeJS.ProcessEnv = process.env): LlmProfile {
-  const configured = (env.HATCH_FACTORY_LLM_PROFILE?.trim() || "kimi-k3.1-pro") as FactoryLlmProfileName;
-  const profile = PROFILES[configured];
-  if (!profile || !FACTORY_LLM_PROFILE_NAMES.includes(configured)) {
-    throw new Error(`Unknown Factory HATCH_FACTORY_LLM_PROFILE: ${configured}. Expected one of: ${FACTORY_LLM_PROFILE_NAMES.join(", ")}`);
-  }
-  return { ...profile };
-}
+/** What a stored assistant message with no model record was written by: those predate recorded models and came from Kimi. */
+export const HISTORY_MODEL = { provider: PROFILES["kimi-k3.1-pro"].provider, model: KIMI_MODEL } as const;
 
 export function requireLlmApiKey(profile: LlmProfile, env: NodeJS.ProcessEnv = process.env): string {
   const apiKey = env[profile.apiKeyEnv]?.trim();
-  if (!apiKey) throw new Error(`Missing ${profile.apiKeyEnv} for LLM profile ${profile.name}`);
+  if (!apiKey) throw new ModelProfileError(`Missing ${profile.apiKeyEnv} for LLM profile ${profile.name}`);
   return apiKey;
 }

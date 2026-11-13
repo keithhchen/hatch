@@ -78,8 +78,11 @@ const CONSOLIDATED_EVIDENCE_SECTIONS = [
   "Fragment preservation audit"
 ];
 
+type ModelRecord = { provider: string; model: string };
+
 export type CreatorFactoryOptions = {
-  model?: { provider: string; model: string };
+  /** The model recorded with each call: a fixed record, or read when the call starts (the `factory` role may change between calls). */
+  model?: ModelRecord | (() => Promise<ModelRecord>);
   /** Production artifacts are authoritative in the configured Object Store. */
   objectStore?: ArtifactObjectStore;
   /** Postgres-backed append-only graph and quality-gate authority. */
@@ -1477,6 +1480,7 @@ export class CreatorFactory {
     sealed: boolean
   ): Promise<string> {
     const clock = this.executionClock();
+    const recorded = typeof this.options.model === "function" ? await this.options.model() : this.options.model;
     const timing = await store.beginExecution({
       startedAt: clock.wallNow().toISOString(),
       sealed,
@@ -1484,8 +1488,8 @@ export class CreatorFactory {
         boundary: "factory_llm",
         purpose: call.purpose,
         promptVersion: PROMPT_VERSION,
-        provider: this.options.model?.provider ?? "unspecified",
-        model: this.options.model?.model ?? "unspecified"
+        provider: recorded?.provider ?? "unspecified",
+        model: recorded?.model ?? "unspecified"
       }
     });
     const monotonicStart = clock.monotonicNow();
@@ -1522,8 +1526,8 @@ export class CreatorFactory {
           `# ${call.purpose}`,
           "",
           `Prompt version: ${PROMPT_VERSION}`,
-          `Provider: ${this.options.model?.provider ?? "unspecified"}`,
-          `Model: ${this.options.model?.model ?? "unspecified"}`,
+          `Provider: ${recorded?.provider ?? "unspecified"}`,
+          `Model: ${recorded?.model ?? "unspecified"}`,
           "",
           "## System prompt",
           "",
@@ -1543,8 +1547,8 @@ export class CreatorFactory {
       await store.recordEvent("llm_call_completed", {
         purpose: call.purpose,
         promptVersion: PROMPT_VERSION,
-        provider: this.options.model?.provider ?? "unspecified",
-        model: this.options.model?.model ?? "unspecified",
+        provider: recorded?.provider ?? "unspecified",
+        model: recorded?.model ?? "unspecified",
         trace: trace.path,
         traceDigest: trace.sha256,
         sealed
@@ -1562,6 +1566,7 @@ export class CreatorFactory {
     sealed: boolean
   ): Promise<string> {
     const clock = this.executionClock();
+    const recorded = typeof this.options.model === "function" ? await this.options.model() : this.options.model;
     const timing = await store.beginExecution({
       startedAt: clock.wallNow().toISOString(),
       sealed,

@@ -616,7 +616,7 @@
       "properties": {
         "type": { "const": "turn.completed" },
         "run_id": { "type": "string" },
-        "finish_reason": { "enum": ["stop", "content_filter"] },
+        "finish_reason": { "enum": ["stop", "content_filter", "length"] },
         "receipt_status": { "enum": ["recorded", "syncing"] }
       }
     },

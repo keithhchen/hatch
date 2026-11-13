@@ -41,7 +41,7 @@ async function harness(summarize: Summarize, options: { stopPollMs?: number; har
   await repository.createConversation({ ...binding, id: conversationId, publicId: "compaction" });
   const hub = new RunEventHub();
   const strategy = new CompactionStrategy(chatCompactionAdapter(summarize), { ...policyFor(20_000), prune: 150, trigger: 300, hard: options.hard ?? 300, tail: 80, cacheTtlMs: 1_000, timeoutMs: 3_000, maxOverflowRetries: 2 });
-  const compaction = (executorId: string) => new ChatCompaction({ repository, store, hub, strategy: () => strategy, executorId, stopPollMs: options.stopPollMs ?? 10 });
+  const compaction = (executorId: string) => new ChatCompaction({ repository, store, hub, strategy: async () => strategy, executorId, stopPollMs: options.stopPollMs ?? 10 });
   /** A finished conversation: the first Run's question, a file it wrote, and its answer. */
   const finished = async () => {
     const { run } = await repository.acceptSubmission(submission(1, `Please write out/report.md for order 88231045 (${uuid})`));

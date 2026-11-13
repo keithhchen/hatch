@@ -5,6 +5,7 @@ import { stat } from "node:fs/promises";
 import path from "node:path";
 import { WebSocketServer } from "ws";
 import { createAgentRuntime, type AgentRuntime, type RuntimeSessionSkills } from "./agentRuntime.js";
+import { InMemoryModelRoleResolver, PostgresModelRoleResolver, type ModelRoleResolver } from "./modelRoles.js";
 import { MAX_RICH_TOOL_RESULT_BYTES } from "./protocol.js";
 import { failures } from "./errors/failures.js";
 import { PostgresFailureLedger } from "./errors/postgresFailureLedger.js";
@@ -110,6 +111,8 @@ export type RuntimeServer = {
 export const MAX_RUNTIME_WEBSOCKET_PAYLOAD_BYTES = MAX_RICH_TOOL_RESULT_BYTES;
 
 export type RuntimeServerOptions = {
+  /** Where each role's model is chosen. Defaults to the Runtime database's `hatch_model_roles`, or the seed choices without one. */
+  models?: ModelRoleResolver;
   createRuntime?: () => AgentRuntime;
   /** Chat's compaction strategy; tests inject one with a test-only summarizer. */
   compactionStrategy?: ChatRuntimeOptions<SessionBinding>["compactionStrategy"];
@@ -338,7 +341,6 @@ export async function createRuntimeServerFromEnvironment(
 
 export function createRuntimeServer(options: RuntimeServerOptions = {}): RuntimeServer {
   const connectionTasks = new Set<Promise<void>>();
-  const createRuntime = options.createRuntime ?? createAgentRuntime;
   const unconfigured = !options.entitlementResolver && !options.agentCorpusResolver && options.insecureLocalMode !== true;
   const entitlementResolver = unconfigured ? unconfiguredEntitlementResolver : options.entitlementResolver;
   const authIdentityResolver = options.authIdentityResolver
@@ -388,6 +390,8 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       : options.conversationRepository instanceof PostgresConversationRepository
         ? new PostgresStore({ pool: options.conversationRepository.pool }) : createConversationStore());
   const conversationRepository = options.conversationRepository ?? createConversationRepository(conversationStore);
+  const models = options.models ?? (conversationStore instanceof PostgresStore ? new PostgresModelRoleResolver(conversationStore.pool) : new InMemoryModelRoleResolver());
+  const createRuntime = options.createRuntime ?? (() => createAgentRuntime(models));
   if (conversationStore instanceof PostgresStore && conversationRepository instanceof PostgresConversationRepository) {
     conversationRepository.bindSubmissionStore(conversationStore);
     failures.attach(new PostgresFailureLedger(conversationStore.pool as never));
@@ -533,7 +537,9 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     admission,
     limits: options.principalLimits ?? new SentMessageLimits(conversationRepository, options.maxContactMessages ?? DEFAULT_MAX_CONTACT_MESSAGES),
     toolTimeoutMs: options.clientToolTimeoutMs ?? clientToolTimeoutMs(),
-    compactionStrategy: options.compactionStrategy,
+    ...(options.compactionStrategy
+      ? { compactionStrategy: options.compactionStrategy }
+      : { compactionProfile: async (conversationId: string) => models.resolve("chat", { productId: (await conversationRepository.getConversation(conversationId))?.productId }) }),
     ...(options.usage ? { usage: { recorder: options.usage, attribute: attributeByScope } } : {}),
     ...(options.usageCap ? { cap: options.usageCap.guard(payerByScope) } : {}),
     // With a shared database every instance sees every Run's live events.

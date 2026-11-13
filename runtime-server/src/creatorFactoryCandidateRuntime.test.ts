@@ -3,6 +3,7 @@ import { readdir } from "node:fs/promises";
 import os from "node:os";
 import test from "node:test";
 import { createHatchCandidateRuntimeExecutor } from "./creatorLearning/candidateRuntime.js";
+import { InMemoryModelRoleResolver } from "./modelRoles.js";
 import { KIMI_MODEL } from "./piModel.js";
 
 function streamResponse(text: string): Response {
@@ -85,7 +86,7 @@ test("Factory candidate evaluation uses Hatch PiAgentRuntime without Creator ref
     return streamResponse("RUNTIME_RESULT");
   };
 
-  const execute = createHatchCandidateRuntimeExecutor();
+  const execute = createHatchCandidateRuntimeExecutor(new InMemoryModelRoleResolver());
   const result = await execute({
     runId: "factory-runtime-seam",
     corpusVersion: 3,
@@ -142,7 +143,7 @@ test("Factory candidate Runtime rejects undeclared tool calls without executing 
       : streamResponse("SAFE_WITHOUT_TOOL");
   };
 
-  const execute = createHatchCandidateRuntimeExecutor();
+  const execute = createHatchCandidateRuntimeExecutor(new InMemoryModelRoleResolver());
   await assert.rejects(execute({
     runId: "factory-runtime-forbidden-tool",
     corpusVersion: 1,
@@ -185,7 +186,7 @@ test("Factory candidate Runtime honors cancellation and removes its scratch run"
   const before = new Set((await readdir(os.tmpdir())).filter((name) => name.startsWith(scratchPrefix)));
   const controller = new AbortController();
   controller.abort();
-  const execute = createHatchCandidateRuntimeExecutor();
+  const execute = createHatchCandidateRuntimeExecutor(new InMemoryModelRoleResolver());
   await assert.rejects(execute({
     runId: "factory-runtime-cancelled",
     corpusVersion: 1,
@@ -233,7 +234,7 @@ test("Factory candidate Runtime aborts an in-flight model request on lease loss"
   const scratchPrefix = "hatch-candidate-runtime-";
   const before = new Set((await readdir(os.tmpdir())).filter((name) => name.startsWith(scratchPrefix)));
   const controller = new AbortController();
-  const execute = createHatchCandidateRuntimeExecutor();
+  const execute = createHatchCandidateRuntimeExecutor(new InMemoryModelRoleResolver());
   const pending = execute({
     runId: "factory-runtime-lease-loss",
     corpusVersion: 1,

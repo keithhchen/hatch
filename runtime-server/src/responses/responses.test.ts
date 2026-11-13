@@ -111,6 +111,22 @@ test("mapping: the response object has its output, text, usage and place in the 
   assert.deepEqual(hidden.output.map((item: { type: string }) => item.type), ["message"], "tool activity is shown only on request");
 });
 
+test("mapping: a safety stop and a reply cut at the output limit are incomplete responses with their reason", () => {
+  const filtered = responseObject(conversation, view({ finishReason: "content_filter", text: "" })) as Record<string, any>;
+  assert.equal(filtered.status, "incomplete");
+  assert.deepEqual(filtered.incomplete_details, { reason: "content_filter" });
+  const cut = responseObject(conversation, view({ finishReason: "length", text: "The first half" })) as Record<string, any>;
+  assert.equal(cut.status, "incomplete");
+  assert.deepEqual(cut.incomplete_details, { reason: "max_output_tokens" });
+  assert.equal(cut.error, null);
+  assert.equal(cut.output_text, "The first half");
+  assert.equal(cut.output[0].status, "incomplete", "the cut message is not presented as complete");
+  assert.equal((responseObject(conversation, view({ finishReason: "stop" })) as Record<string, any>).status, "completed");
+  const seen: Array<Record<string, any>> = [];
+  new ResponseEvents("run_abc", (event) => seen.push(event)).finish(cut);
+  assert.equal(seen.at(-1)!.type, "response.incomplete");
+});
+
 test("mapping: the ledger's total for a run is the response's usage", () => {
   assert.deepEqual(usageOf({ input: 150, cachedInput: 30, output: 25, reasoning: 5 }), {
     input_tokens: 150, input_tokens_details: { cached_tokens: 30 }, output_tokens: 25, output_tokens_details: { reasoning_tokens: 5 }, total_tokens: 175

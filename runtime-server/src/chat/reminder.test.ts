@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PiAgentRuntime } from "../piAgentRuntime.js";
+import { InMemoryModelRoleResolver } from "../modelRoles.js";
 import { alice, dm, ended, text, thread, withFixture } from "./kit.test.js";
 
 const reminders = (value: unknown): number => JSON.stringify(value).split("<system-reminder>").length - 1;
@@ -15,17 +16,16 @@ const provider = (t: import("node:test").TestContext, requests: Array<Array<{ ro
 };
 
 test("a system reminder ends every model call and is never persisted, so it is never in what compaction reads", async (t) => {
-  const keep = { profile: process.env.HATCH_LLM_PROFILE, key: process.env.LLM_API_KEY };
-  process.env.HATCH_LLM_PROFILE = "kimi-k3.1-pro";
+  const keep = { key: process.env.LLM_API_KEY };
   process.env.LLM_API_KEY = "test-only";
   t.after(() => {
-    for (const [name, value] of [["HATCH_LLM_PROFILE", keep.profile], ["LLM_API_KEY", keep.key]] as const) {
+    for (const [name, value] of [["LLM_API_KEY", keep.key]] as const) {
       if (value === undefined) delete process.env[name]; else process.env[name] = value;
     }
   });
   const requests: Array<Array<{ role: string; content: unknown }>> = [];
   provider(t, requests);
-  await withFixture({ runtime: new PiAgentRuntime({ toolDefinitions: [] }) }, async ({ runtime, repository, store }) => {
+  await withFixture({ runtime: new PiAgentRuntime({ models: new InMemoryModelRoleResolver(), toolDefinitions: [] }) }, async ({ runtime, repository, store }) => {
     const first = await runtime.chat.send(alice, thread, dm, "evt-1", text("hello"));
     assert.equal((await ended(runtime.chat, first.runId)).status, "completed");
     const second = await runtime.chat.send(alice, thread, dm, "evt-2", text("and again"));

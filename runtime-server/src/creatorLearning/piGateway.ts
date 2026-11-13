@@ -1,35 +1,21 @@
-import { FACTORY_LLM_MODEL, runFactoryLlmPrompt } from "./factoryLlm.js";
-import { resolveFactoryLlmProfile } from "../llmProfiles.js";
+import { createFactoryLlmPromptRunner } from "./factoryLlm.js";
 import { factoryAdapterFor } from "../modelAdapters/factory.js";
+import type { ModelRoleResolver } from "../modelRoles.js";
 import type { FactoryPromptRunner } from "./types.js";
-
-export const PI_FACTORY_MODEL = {
-  provider: "moonshot",
-  model: FACTORY_LLM_MODEL
-} as const;
-
-/** Return the durable metadata for the explicitly selected Factory profile. */
-export function factoryModelForEnvironment(environment: NodeJS.ProcessEnv = process.env): { provider: string; model: string } {
-  const profile = resolveFactoryLlmProfile(environment);
-  return {
-    provider: factoryAdapterFor(profile).recordedProvider(profile),
-    model: profile.model
-  };
-}
 
 /**
  * Evidence extraction, evaluation, and Corpus compilation use the Factory's
  * provider-neutral prompt seam through the product-owned Pi Agent primitive.
+ * Each prompt runs on whatever model the `factory` role names when it starts.
  */
-export const runFactoryPromptWithPi: FactoryPromptRunner = async (call) => {
-  return runFactoryLlmPrompt({
-    purpose: call.purpose,
-    systemPrompt: call.systemPrompt,
-    prompt: call.prompt,
-    ...(call.images ? { images: call.images } : {}),
-    ...(call.outputContract ? { outputContract: call.outputContract } : {}),
-    ...(call.reportFailureTelemetry ? { reportFailureTelemetry: call.reportFailureTelemetry } : {}),
-    ...(call.signal ? { signal: call.signal } : {}),
-    ...(call.onModelCall ? { onModelCall: call.onModelCall } : {})
-  });
-};
+export function factoryPromptRunner(models: ModelRoleResolver, environment: NodeJS.ProcessEnv = process.env): FactoryPromptRunner {
+  return createFactoryLlmPromptRunner(models, { env: environment });
+}
+
+/** The durable metadata for the model the `factory` role names now: recorded with each Factory call. */
+export function factoryModelRecord(models: ModelRoleResolver): () => Promise<{ provider: string; model: string }> {
+  return async () => {
+    const profile = await models.resolve("factory");
+    return { provider: factoryAdapterFor(profile).recordedProvider(profile), model: profile.model };
+  };
+}

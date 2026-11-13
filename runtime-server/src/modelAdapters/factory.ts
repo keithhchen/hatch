@@ -47,6 +47,8 @@ export class FactoryOpenAICompatibleAdapter extends OpenAICompatibleAdapter impl
 
   protected override sendsReasoning(): boolean { return true; }
 
+  protected override checksToolArguments(): boolean { return false; }
+
   override normalizePayload(_profile: LlmProfile, payload: unknown): unknown {
     return isRecord(payload) ? { ...payload, thinking: { type: "disabled" } } : payload;
   }
@@ -60,6 +62,8 @@ export class FactoryOpenAICompatibleAdapter extends OpenAICompatibleAdapter impl
 
 /** Moonshot Kimi K3.1: KimiAdapter's request (no `thinking`, `reasoning_effort` from the profile), tool choice left to the model, and the sampling knobs Moonshot rejects removed. */
 export class FactoryKimiAdapter extends KimiAdapter implements FactoryModelAdapter {
+  protected override checksToolArguments(): boolean { return false; }
+
   override resolve(profile: LlmProfile, options: AdapterOptions): ResolvedModelOptions {
     return withProfileMaxTokens(profile, super.resolve(profile, options));
   }

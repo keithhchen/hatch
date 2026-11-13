@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { parseCorpusCompilation, parseEvaluation, parseQuestions } from "./creatorLearning/markdown.js";
 import { createFactoryLlmPromptRunner } from "./creatorLearning/factoryLlm.js";
+import { InMemoryModelRoleResolver } from "./modelRoles.js";
+
+const kimiFactory = new InMemoryModelRoleResolver({ roles: { factory: "kimi-k3.1-pro" } });
 import type { FactoryPromptCall } from "./creatorLearning/types.js";
 
 type SubmittedToolCall = {
@@ -82,7 +85,7 @@ async function run(
   responses: Response[]
 ): Promise<{ output: string; requests: Array<Record<string, unknown>> }> {
   const requests: Array<Record<string, unknown>> = [];
-  const runner = createFactoryLlmPromptRunner({
+  const runner = createFactoryLlmPromptRunner(kimiFactory, {
     apiKey: "submission-test-key",
     baseUrl: "https://api.moonshot.ai/v1",
     fetch: async (_input, init) => {
@@ -288,7 +291,7 @@ test("Evidence accepts a complete submit turn followed by a finalize-only turn",
 
 test("a length-terminated batch carrying complete-looking tool args never finalizes", async () => {
   let telemetry: Parameters<NonNullable<FactoryPromptCall["reportFailureTelemetry"]>>[0] | undefined;
-  const runner = createFactoryLlmPromptRunner({
+  const runner = createFactoryLlmPromptRunner(kimiFactory, {
     apiKey: "submission-test-key",
     baseUrl: "https://api.moonshot.ai/v1",
     fetch: async () => toolTurnWithFinish([
@@ -438,7 +441,7 @@ test("a repeated finalizer validation code stops semantic repair loops even when
   ];
   let providerTurns = 0;
   let telemetry: Parameters<NonNullable<FactoryPromptCall["reportFailureTelemetry"]>>[0] | undefined;
-  const runner = createFactoryLlmPromptRunner({
+  const runner = createFactoryLlmPromptRunner(kimiFactory, {
     apiKey: "submission-test-key",
     baseUrl: "https://api.moonshot.ai/v1",
     fetch: async () => {
@@ -473,7 +476,7 @@ test("a repeated batch without its required finalizer is classified without weak
     toolTurn([{ id: "missing-finalizer-one", name: "submit_question", arguments: { id: "Q1", question: "one", intent: "one", leakage_group: "one" } }]),
     toolTurn([{ id: "missing-finalizer-two", name: "submit_question", arguments: { id: "Q1", question: "one", intent: "one", leakage_group: "one" } }])
   ];
-  const runner = createFactoryLlmPromptRunner({
+  const runner = createFactoryLlmPromptRunner(kimiFactory, {
     apiKey: "submission-test-key",
     baseUrl: "https://api.moonshot.ai/v1",
     fetch: async () => responses.shift() ?? (() => { throw new Error("cycle not stopped"); })()
@@ -495,7 +498,7 @@ test("runner refuses normal prose completion without an accepted finalize", asyn
     textTurn("I wrote the artifact in prose but did not submit it."),
     textTurn("I still wrote the artifact in prose and did not submit it.")
   ];
-  const runner = createFactoryLlmPromptRunner({
+  const runner = createFactoryLlmPromptRunner(kimiFactory, {
     apiKey: "submission-test-key",
     baseUrl: "https://api.moonshot.ai/v1",
     fetch: async () => responses.shift() ?? (() => { throw new Error("unexpected extra provider turn"); })()

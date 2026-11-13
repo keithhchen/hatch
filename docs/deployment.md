@@ -23,12 +23,11 @@ or separate production Runtime exists. The server uses two Compose projects:
    scraping when selected.
    Never commit this file or put these values in GitHub Actions.
    The file must also contain the non-empty `HATCH_DATABASE_URL`.
-   Runtime uses the `kimi-k2.6-no-thinking` profile. Production CD sets
-   `HATCH_LLM_PROFILE=kimi-k2.6-no-thinking` and
-   `HATCH_FACTORY_LLM_PROFILE=gemini-api`. Runtime Kimi uses the server-side
-   `LLM_API_KEY`.
-   DeepSeek remains an explicitly selectable provider and requires
-   `DEEPSEEK_API_KEY`; there is no automatic fallback.
+   Which model each role runs on is a database row (`hatch_model_roles`, and
+   `hatch_product_models` per Product), switched with SQL and no deploy; see
+   `runtime-server/README.md`. The environment only holds the API keys of the
+   profiles a row may name: Kimi uses `LLM_API_KEY`, Gemini `GEMINI_API_KEY`,
+   DeepSeek `DEEPSEEK_API_KEY`. There is no automatic fallback.
    This simple deployment uses one database login for all four services.
    It must also contain `HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN` and
    `HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN`, and `HATCH_RUNTIME_CHAT_SERVICE_TOKEN`

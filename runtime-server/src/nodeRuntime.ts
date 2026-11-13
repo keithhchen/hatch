@@ -3,6 +3,7 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { createFactoryPiAgent } from "./creatorLearning/factoryPi.js";
+import type { ModelRoleResolver } from "./modelRoles.js";
 import type { UsageSink } from "./usage/usage.js";
 import {
   defaultAgentInput,
@@ -31,9 +32,11 @@ export type NodeAgentFactory = (options: {
   systemPrompt: string;
   messages: AgentMessage[];
   tools: AgentTool[];
-}) => Agent;
+}) => Agent | Promise<Agent>;
 
 export type NodeRuntimeOptions = {
+  /** Where the agents' model is chosen (role `factory`), read when each agent starts. Required without `agentFactory`. */
+  models?: ModelRoleResolver;
   sessionStore?: NodeSessionStore;
   executionStore?: NodeExecutionStore;
   storage?: NodeStorage;
@@ -87,7 +90,8 @@ export class NodeRuntime {
     this.storage = options.storage;
     this.maxRounds = positiveInteger(options.maxRounds ?? 10, "maxRounds");
     this.maxAgentTurns = positiveInteger(options.maxAgentTurns ?? 16, "maxAgentTurns");
-    this.agentFactory = options.agentFactory ?? defaultAgentFactory;
+    if (!options.agentFactory && !options.models) throw new Error("NodeRuntime needs models or an agentFactory");
+    this.agentFactory = options.agentFactory ?? factoryAgentFactory(options.models!);
   }
 
   async run<Input, Candidate, Feedback>(
@@ -414,7 +418,7 @@ export class NodeRuntime {
       if (names.has(tool.name)) throw new NodeRuntimeError("duplicate_tool", `Tool ${tool.name} is registered more than once`);
       names.add(tool.name);
     }
-    const agent = this.agentFactory({
+    const agent = await this.agentFactory({
       sessionId: sessionIdValue,
       systemPrompt,
       messages,
@@ -494,8 +498,9 @@ export class NodeRuntime {
   }
 }
 
-function defaultAgentFactory(options: Parameters<NodeAgentFactory>[0]): Agent {
-  return createFactoryPiAgent({
+function factoryAgentFactory(models: ModelRoleResolver): NodeAgentFactory {
+  return async options => createFactoryPiAgent({
+    profile: await models.resolve("factory"),
     initialState: {
       systemPrompt: options.systemPrompt,
       messages: options.messages,

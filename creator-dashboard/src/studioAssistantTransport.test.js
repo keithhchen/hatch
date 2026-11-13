@@ -26,7 +26,7 @@ const view = (extra = {}) => ({
 function setup(request) {
   const sent = [];
   const answer = async (path, init) => {
-    if (init?.method === "POST") { sent.push({ path, key: init.headers["idempotency-key"], body: JSON.parse(init.body) }); return { run_id: "run_1", queued: false, message: {} }; }
+    if (init?.method === "POST") { sent.push({ path, key: init.headers?.["idempotency-key"], body: JSON.parse(init.body) }); return { run_id: "run_1", queued: false, message: {} }; }
     if (init?.method === "PUT") return { timezone: "UTC" };
     return request(path);
   };
@@ -92,7 +92,10 @@ test("Studio's events are the Runtime's: words keep their offset, steps their ca
   assert.deepEqual(wireEventsOf({ type: "delta", text: "ab", offset: 5, run_id: "r" }), [{ type: "assistant.delta", run_id: "r", delta: { kind: "text", content: "ab", offset: 5 } }]);
   assert.deepEqual(wireEventsOf({ type: "tool_end", id: "t", name: "n", isError: true, run_id: "r" }).map(event => [event.tool_call_id, event.status]), [["t", "failed"]]);
   assert.equal(wireEventsOf({ type: "run_end", status: "failed", error: { code: "x", message: "m", reference: "ref" }, run_id: "r" })[0].error.reference, "ref");
-  assert.deepEqual(wireEventsOf({ type: "run_end", status: "cancelled", run_id: "r" })[0].error.code, "run_cancelled");
+  assert.equal(wireEventsOf({ type: "run_end", status: "completed", run_id: "r" })[0].type, "turn.completed");
+  // A Run that saved no reply must end as a terminal the page can settle, never as a success it waits on.
+  for (const status of ["cancelled", "interrupted"]) assert.deepEqual(wireEventsOf({ type: "run_end", status, run_id: "r" }).map(event => [event.type, event.error.code]), [["turn.failed", `run_${status}`]]);
+  assert.equal(wireEventsOf({ type: "tool_end", id: "t", name: "n", cancelled: true, run_id: "r" })[0].status, "cancelled");
   assert.deepEqual(wireEventsOf({ type: "message_end" }), [{ type: "conversation.changed", committed: "assistant" }]);
 });
 
@@ -149,4 +152,28 @@ test("a file goes up as its own bytes with its name in the query, and the upload
   assert.equal(calls[0].init.headers["content-type"], "text/plain");
   assert.equal(calls[0].init.body, file, "no base64, no JSON");
   assert.deepEqual([ready.asset_id, ready.type, ready.display_name], ["a-9", "file", "my notes.txt"]);
+});
+
+test("an interrupted Run ends the page's wait and offers to answer again; Stop posts to /stop", async () => {
+  FakeSource.all = [];
+  const { controller } = setup(async () => view({ status: { state: "running" }, run_id: "run_1", messages: [] }));
+  controller.open(ASSISTANT_CONVERSATION);
+  await flush();
+  await flush();
+  FakeSource.all.at(-1).emit({ type: "run_end", status: "interrupted", run_id: "run_1" }, "8");
+  await flush();
+  await flush();
+  assert.notEqual(controller.state.status.key, "syncingReply");
+  assert.equal(controller.state.failedRun?.id, "run_1");
+  assert.equal(controller.canRetryRun, true);
+  controller.dispose();
+
+  const stopped = setup(async () => view({ status: { state: "running" }, run_id: "run_2", messages: [] }));
+  stopped.controller.open(ASSISTANT_CONVERSATION);
+  await flush();
+  await flush();
+  stopped.controller.cancel();
+  await flush();
+  assert.equal(stopped.sent.at(-1)?.path, "/v1/creator/assistant/conversation/stop");
+  stopped.controller.dispose();
 });

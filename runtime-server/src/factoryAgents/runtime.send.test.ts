@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { InMemoryModelRoleResolver } from "../modelRoles.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -23,10 +24,10 @@ async function harness(options: { plan?: (call: number) => string | undefined; t
   const store = new WorkbenchStore(root, { creatorId: "c1", productId: "p1" }, new MemoryAgentDefinitionRepository(await initialAgentDefinitions()));
   const calls: Call[] = [];
   const build = () => new WorkbenchRuntime(store, {
-    env: { HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash" },
+    models: new InMemoryModelRoleResolver({ roles: { factory: "deepseek-v4-flash", worker: "deepseek-v4-flash" } }), role: "factory",
     ...(options.cap ? { usage: { recorder: { record: async () => undefined }, accountId: "c1", cap: options.cap } } : {}),
     toolSupport: options.toolSupport as never,
-    agentFactory: factory => new Agent({ ...factory.agentOptions, initialState: { ...factory.initialState, model: createFactoryLlmModel({ env: factory.env }) }, streamFn: (_model, context, streamOptions) => {
+    agentFactory: factory => new Agent({ ...factory.agentOptions, initialState: { ...factory.initialState, model: createFactoryLlmModel({ profile: factory.profile, env: factory.env }) }, streamFn: (_model, context, streamOptions) => {
       const call = calls.length + 1;
       const final = context.messages.at(-1);
       calls.push({ tools: (context.tools ?? []).map(tool => ({ name: tool.name, description: tool.description })), last: JSON.stringify(final?.content) });

@@ -94,11 +94,11 @@ export class KimiHostedAgent implements HostedAgentProvider {
 
 /** Traces each hosted run: the agent's model, the provider's session id, and how it ended. */
 export class TracedHostedAgent implements HostedAgentProvider {
-  constructor(private readonly inner: HostedAgentProvider, private readonly provider: string, private readonly model: string) {}
-  run(task: HostedTask, signal?: AbortSignal): Promise<HostedResult> {
+  constructor(private readonly inner: HostedAgentProvider, private readonly provider: string, private readonly model: () => Promise<string>) {}
+  async run(task: HostedTask, signal?: AbortSignal): Promise<HostedResult> {
     return traceGeneration(
       "hosted-agent.run",
-      { provider: this.provider, model: this.model, input: task.prompt, metadata: { title: task.title, files: task.files.length, secrets: task.secrets.length } },
+      { provider: this.provider, model: await this.model(), input: task.prompt, metadata: { title: task.title, files: task.files.length, secrets: task.secrets.length } },
       () => this.inner.run(task, signal),
       result => ({
         output: result.text,
