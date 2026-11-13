@@ -141,6 +141,10 @@ export class PostgresInbox implements Inbox {
     return row && itemOf(row);
   }
 
+  async inboundCount(channel: ChannelKind, scope: string): Promise<number> {
+    return (await this.pool.query("SELECT count(*)::int AS n FROM hatch_channel_inbox WHERE channel = $1 AND scope = $2 AND NOT (event ?| ARRAY['button', 'unbound', 'revoked', 'unreachable'])", [channel, scope])).rows[0].n;
+  }
+
   async lastInbound(channel: ChannelKind, scope: string, threadId: string): Promise<Date | undefined> {
     return (await this.pool.query("SELECT max(received_at) AS at FROM hatch_channel_inbox WHERE channel = $1 AND scope = $2 AND thread_id = $3", [channel, scope, threadId])).rows[0]?.at ?? undefined;
   }

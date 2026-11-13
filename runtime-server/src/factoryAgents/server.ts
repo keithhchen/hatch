@@ -10,6 +10,7 @@ import { corpusTools } from "./corpusTools.js";
 import { formTools } from "../formPages/tools.js";
 import type { FormPages } from "../formPages/service.js";
 import { agentEntries, assertAgentAvailable, type AgentDefinitionRepository } from "./definitions.js";
+import { configuredSearch } from "./search.js";
 import { factoryAgentTools } from "./factoryTools.js";
 import { convertUpload } from "./markdownConverter.js";
 import type { ModelRoleResolver } from "../modelRoles.js";
@@ -99,7 +100,7 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
         return;
       }
       if (url.pathname === "/api/config" && req.method === "GET") {
-        return json(res, 200, { roles: ROLES, agents: await entries(), manualFiles: await store.listManualFiles(), runtimeUrl: env.HATCH_FACTORY_RUNTIME_URL ?? "", services: { model: await modelConfigured(), search: Boolean(env.FIRECRAWL_API_KEY?.trim()), scrape: Boolean(env.HATCH_FACTORY_SCRAPE_PROVIDER === "firecrawl" ? env.FIRECRAWL_API_KEY : env.TAVILY_API_KEY), hatch: Boolean(env.HATCH_FACTORY_RUNTIME_URL && env.HATCH_FACTORY_CREATOR_TOKEN), corpus: Boolean(env.HATCH_FACTORY_REGISTRY_URL && env.HATCH_FACTORY_CREATOR_TOKEN) } });
+        return json(res, 200, { roles: ROLES, agents: await entries(), manualFiles: await store.listManualFiles(), runtimeUrl: env.HATCH_FACTORY_RUNTIME_URL ?? "", services: { model: await modelConfigured(), search: Boolean(configuredSearch(env)), scrape: Boolean(env.HATCH_FACTORY_SCRAPE_PROVIDER === "firecrawl" ? env.FIRECRAWL_API_KEY : env.TAVILY_API_KEY), hatch: Boolean(env.HATCH_FACTORY_RUNTIME_URL && env.HATCH_FACTORY_CREATOR_TOKEN), corpus: Boolean(env.HATCH_FACTORY_REGISTRY_URL && env.HATCH_FACTORY_CREATOR_TOKEN) } });
       }
 
       if (url.pathname === "/api/sessions" && req.method === "GET") { const sessions = await store.list(); const manualFiles = await store.listManualFiles(); return json(res, 200, { sessions: sessions.map(s => ({ ...publicSession(s), messages: undefined })), agents: agentEntries(await options.definitions.list(), sessions, manualFiles), manualFiles }); }
@@ -127,6 +128,12 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
         }
         if (action === "files" && req.method === "GET") {
           const data = await store.read(id, url.searchParams.get("path") ?? "");
+          const inlineType = /\.(jpe?g|png|webp)$/i.test(data.record.path) ? data.record.mimeType : /\.html$/i.test(data.record.path) ? "text/html; charset=utf-8" : undefined;
+          if (url.searchParams.get("inline") === "1" && inlineType) {
+            // Agent-written HTML never runs with the app's origin: a sandboxed document with no script and no outbound requests but images and fonts.
+            res.writeHead(200, { "Content-Type": inlineType, "Content-Disposition": "inline", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "sandbox; default-src 'none'; img-src data: https:; style-src 'unsafe-inline'; font-src data: https:" });
+            res.end(data.bytes); return;
+          }
           if (url.searchParams.get("download") === "1") { res.writeHead(200, { "Content-Type": data.record.mimeType, "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(path.basename(data.record.path))}` }); res.end(data.bytes); return; }
           return json(res, 200, { ...data.record, content: /^text\//.test(data.record.mimeType) || /\.(md|txt|json|csv|srt|vtt)$/.test(data.record.path) ? data.bytes.toString("utf8") : null });
         }

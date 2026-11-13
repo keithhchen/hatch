@@ -284,6 +284,8 @@ on lives in two tables, created and seeded on first use by whichever process rea
 | `assistant` | `gemini-api` | The Studio Assistant's own chat and its compaction. |
 | `factory` | `gemini-3.1-pro` | Creator Factory: the Product workbench, evidence extraction, evaluation, Corpus compilation. |
 | `ingest` | `kimi-k3.1-pro` | The hosted ingest agent. Kimi profiles only. |
+| `inspiration` | `kimi-k3.1-pro` | The Inspiration node of a Product workspace (research on the open web). |
+| `content` | `kimi-k3.1-pro` | The Content Creation node of a Product workspace. |
 
 A seed row is inserted only when its role has no row; after that the database rules. List the valid profile names with
 `node -e 'import("./dist/llmProfiles.js").then(m => console.log(m.LLM_PROFILE_NAMES.join("\n")))'` (`chat` and `assistant` accept all

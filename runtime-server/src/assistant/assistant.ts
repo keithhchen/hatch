@@ -12,7 +12,7 @@ import type { FormPages } from "../formPages/service.js";
 import type { FactoryWorkspace } from "../factoryAgents/service.js";
 import type { AgentCatalog, AgentChange, CatalogAgent } from "./catalog.js";
 import { scrapeProviderFrom } from "../factoryAgents/webProviders.js";
-import type { WebSearchProvider } from "../factoryAgents/webTypes.js";
+import type { SearchProvider } from "../factoryAgents/search.js";
 import { CHANNEL_KINDS, type ChannelKind, type OutboundMessage } from "../channels/types.js";
 import type { AssistantChannels } from "../channels/ports.js";
 import { localDate, localHour, type AccountReach } from "./reach.js";
@@ -83,9 +83,8 @@ export type AssistantDependencies = {
   /** Runs fn only if this process holds the named cluster-wide lock. */
   exclusive: (name: string, fn: () => Promise<void>) => Promise<void>;
   /** Where its public web searches go. */
-  search: WebSearchProvider;
+  search: SearchProvider;
   env: NodeJS.ProcessEnv;
-  /** Where the workers' model is chosen (role `worker`): read at the start of each worker Run. */
   models: ModelRoleResolver;
   runtime?: Pick<WorkbenchRuntimeOptions, "agentFactory" | "deadlineMs" | "maxTurns">;
   /** Where its workers' model calls are recorded, as Studio usage of the Expert. */
@@ -572,9 +571,9 @@ export class AssistantService implements StudioOperations {
   // ── Studio and channel surfaces ───────────────────────────────────────
 
   /** Public web evidence for the Assistant, from the provider the Registry is configured with. */
-  searchWeb(input: { query: string; max_results?: number; domains?: string[]; topic?: "general" | "news" }, signal?: AbortSignal): Promise<unknown> {
+  searchWeb(input: { query: string; objective: string }, signal?: AbortSignal): Promise<unknown> {
     return this.deps.search.search(
-      { query: input.query, maxResults: input.max_results ?? 6, includeDomains: input.domains, topic: input.topic, searchDepth: "advanced" },
+      { query: input.query, objective: input.objective },
       AbortSignal.any([signal ?? new AbortController().signal, AbortSignal.timeout(90_000)])
     );
   }

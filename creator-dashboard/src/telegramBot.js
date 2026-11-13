@@ -11,12 +11,14 @@ export const botLink = (username) => `https://t.me/${String(username).replace(/^
 /** The Product's bot out of a channels view: its @username, or null when it has none. */
 export function botOf(channels) {
   const telegram = (channels ?? []).find((channel) => channel.kind === "telegram");
-  return telegram?.configured && telegram.handle ? { username: String(telegram.handle).replace(/^@/, "") } : null;
+  return telegram?.configured && telegram.handle ? { username: String(telegram.handle).replace(/^@/, ""), users: telegram.users ?? 0, messages: telegram.messages ?? 0 } : null;
 }
 
 /** Which copy key says why a call failed, in words an Expert who has never seen a bot can act on. Null: use the generic message. */
 export function telegramErrorKey(error) {
   if (error?.code === "telegram_probe_failed" || error?.code === "invalid_credentials") return "sxtgInvalidToken";
+  if (error?.code === "telegram_bot_in_use") return "sxtgInUse";
+  if (error?.code === "telegram_bot_active_elsewhere") return "sxtgActiveElsewhere";
   if (error?.code === "channel_unavailable") return "sxtgUnavailable";
   if (error?.code === "product_not_found") return "sxtgProductMissing";
   if (!error?.status) return "sxtgNetwork";

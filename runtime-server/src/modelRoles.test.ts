@@ -5,7 +5,7 @@ import { MODEL_ROLES, InMemoryModelRoleResolver, PostgresModelRoleResolver, prof
 const quiet = async <T>(work: () => Promise<T>): Promise<T> => { const log = console.error; console.error = () => undefined; try { return await work(); } finally { console.error = log; } };
 
 test("the seed rows keep today's production choices", () => {
-  assert.deepEqual({ ...MODEL_ROLES }, { chat: "kimi-k3.1-pro", assistant: "gemini-api", factory: "gemini-3.1-pro", ingest: "kimi-k3.1-pro" });
+  assert.deepEqual({ ...MODEL_ROLES }, { chat: "kimi-k3.1-pro", assistant: "gemini-api", factory: "gemini-3.1-pro", ingest: "kimi-k3.1-pro", inspiration: "kimi-k3.1-pro", content: "kimi-k3.1-pro" });
 });
 
 /** A database of two tables, counting the reads that reach it. */

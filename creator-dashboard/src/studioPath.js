@@ -8,10 +8,13 @@ export const STUDIO_PATH = Object.freeze([
   { id: "ship", title: "stepShip", body: "stepShipBody", key: null, items: [] }
 ]);
 
-/** Deep Research, Case Builder and Evaluator: always open, never part of the path's progress. */
+/** Deep Research, Case Builder, Evaluator and Content Creation: always open, never part of the path's progress. */
 export const ADVANCED_STEP = Object.freeze({
-  id: "advanced", title: "stepAdvanced", items: [["sources", "research"], ["evaluate", "case-generation"], ["evaluate", "evaluator"]]
+  id: "advanced", title: "stepAdvanced", items: [["sources", "research"], ["evaluate", "case-generation"], ["evaluate", "evaluator"], ["create", "content-creation"]]
 });
+
+/** Shown after Publish, outside the numbered path: it has no state and no progress. */
+export const INSPIRATION_STEP = Object.freeze({ id: "inspiration", title: "stepInspiration", items: [["inspire", "inspiration"]] });
 
 export function isProductLive(product) {
   return product?.status === "published" || product?.status === "live";
@@ -42,6 +45,7 @@ export function studioNextStep(states) {
 }
 
 export function studioStepForRoute(section, page) {
+  if (page === "inspiration") return INSPIRATION_STEP.id;
   if (ADVANCED_STEP.items.some(([, role]) => role === page)) return "advanced";
   if (section === "sources") return page === "voice" ? "ask" : "upload";
   if (section === "build") return "build";

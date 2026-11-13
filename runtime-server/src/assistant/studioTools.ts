@@ -37,7 +37,7 @@ export interface StudioOperations {
   poke(accountId: string, taskId: string, question: string): Promise<AssistantTask>;
   finish(accountId: string, taskId: string, answered: boolean): Promise<AssistantTask>;
   /** Public web evidence: links and snippets, no generated answer. */
-  searchWeb(input: { query: string; max_results?: number; domains?: string[]; topic?: "general" | "news" }, signal?: AbortSignal): Promise<unknown>;
+  searchWeb(input: { query: string; objective: string }, signal?: AbortSignal): Promise<unknown>;
   /** One public page's main text as Markdown, with its URL. */
   readPage(url: string, signal?: AbortSignal): Promise<unknown>;
   /** Adds material the Expert sent to the Agent: plain text into its manual input, anything more complex and links to Ingest. Returns where each item went. */
@@ -99,9 +99,9 @@ export function studioTools(ops: StudioOperations): StudioTool[] {
   const created = async (call: StudioCall, task: AssistantTask) => taskView(await ops.inRun(task, call.runId));
   return [
     { name: "search_web", readOnly: true,
-      schema: z.object({ query: text(1, 500), max_results: z.number().int().min(1).max(10).optional(), domains: z.array(z.string()).max(10).optional(), topic: z.enum(["general", "news"]).optional() }).strict(),
+      schema: z.object({ query: text(1, 500).describe("关键词式查询，几个有区分度的词"), objective: text(1, 1000).describe("这次搜索要查清什么、哪类来源该排前面") }).strict(),
       description: "搜公开网页，返回来源链接和摘要，不是核实过的全文，也不生成回答。需要很快查一个事实时直接用。",
-      run: async (call, args) => done(await ops.searchWeb(args as { query: string; max_results?: number; domains?: string[]; topic?: "general" | "news" }, call.signal)) },
+      run: async (call, args) => done(await ops.searchWeb(args as { query: string; objective: string }, call.signal)) },
     { name: "read_page", readOnly: true, schema: z.object({ url: text(1, 2000) }).strict(),
       description: "读一个公开网页的正文（Markdown），带原网址。专家要看某篇文章、某个页面的全文时用；搜索结果只有摘要。读不了登录后的页面，也不转写视频。",
       run: async (call, args) => done(await ops.readPage(String(args.url), call.signal)) },

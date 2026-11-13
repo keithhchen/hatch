@@ -5,7 +5,7 @@ import path from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { atomicWrite } from "./files.js";
 
-export const ROLES = ["research", "voice", "generation", "case-generation", "evaluator"] as const;
+export const ROLES = ["research", "voice", "generation", "case-generation", "evaluator", "inspiration", "content-creation"] as const;
 export type Role = typeof ROLES[number];
 /** Account-level Assistant workspace roles. They never appear in a Product workspace or its Factory Agent definitions. */
 export const ASSISTANT_ROLES = ["assistant"] as const;
@@ -13,7 +13,8 @@ export type AssistantRole = typeof ASSISTANT_ROLES[number];
 export type AnyRole = Role | AssistantRole;
 /** Upstream outputs an Agent may read as input/<role>/. Reading never gates or updates anything. */
 export const INPUT_ROLES: Record<Role, readonly Role[]> = {
-  research: [], voice: [], generation: ["voice"], "case-generation": ["generation"], evaluator: ["generation", "case-generation"],
+  research: [], voice: [], generation: ["voice", "inspiration"], "case-generation": ["generation"], evaluator: ["generation", "case-generation"],
+  inspiration: ["generation"], "content-creation": ["generation"],
 };
 export const isAssistantRole = (role: string): role is AssistantRole => (ASSISTANT_ROLES as readonly string[]).includes(role);
 export type Todo = { title: string; status: "pending" | "in_progress" | "completed" };
@@ -316,12 +317,12 @@ export class WorkbenchStore {
     filePath(name);
     if (!bytes.length || bytes.length > 20 * 1024 * 1024) throw new Error("File must contain 1 byte to 20 MiB");
     if (options.actor === "user" && name.startsWith("input/manual/")) { await this.backend.writeManual(name, bytes); return (await this.backend.listManual()).find(file => file.path === name)!; }
-    if (options.actor === "agent" && (!name.startsWith("output/") || !name.endsWith(".md"))) throw new Error("Agent may only write output Markdown");
+    if (options.actor === "agent" && (!name.startsWith("output/") || !/\.(md|html)$/.test(name))) throw new Error("Agent may only write output Markdown or HTML");
     return this.update(id, async s => {
       const old = s.files.find(f => f.path === name);
       if (options.actor !== "host" && (old?.readonly || (s.role === "generation" && name === "output/CORPUS.md") || (s.role === "evaluator" && /^(output\/RESULT\.md|output\/results\/)/.test(name)))) throw new Error("Runtime result is immutable; save a proposed revision under another name");
       if (options.actor === "user" && s.status === "running") throw new Error("请停止运行后再保存文件；当前编辑草稿可以保留。");
-      const record: FileRecord = { path: name, bytes: bytes.length, mimeType: options.mimeType ?? (name.endsWith(".md") ? "text/markdown" : "application/octet-stream"), ...(options.origin ? { origin: options.origin } : {}), ...(options.readonly ? { readonly: true } : {}) };
+      const record: FileRecord = { path: name, bytes: bytes.length, mimeType: options.mimeType ?? (name.endsWith(".md") ? "text/markdown" : name.endsWith(".html") ? "text/html" : "application/octet-stream"), ...(options.origin ? { origin: options.origin } : {}), ...(options.readonly ? { readonly: true } : {}) };
       await this.backend.writeFile(id, name, bytes);
       s.files = [...s.files.filter(f => f.path !== name), record];
       if (name.startsWith("output/") && options.countsAsOutput !== false) s.outputUpdatedAt = new Date().toISOString();

@@ -14,7 +14,7 @@ test("a token is trimmed and shape-checked before it is sent", () => {
 });
 
 test("the bot is the Product's telegram channel, only when configured with a handle", () => {
-  assert.deepEqual(botOf([{ kind: "line" }, { kind: "telegram", bot: true, configured: true, handle: "example_bot" }]), { username: "example_bot" });
+  assert.deepEqual(botOf([{ kind: "line" }, { kind: "telegram", bot: true, configured: true, handle: "example_bot" }]), { username: "example_bot", users: 0, messages: 0 });
   assert.equal(botOf([{ kind: "telegram", bot: true, configured: false }]), null);
   assert.equal(botOf(undefined), null);
   assert.equal(botLink("@example_bot"), "https://t.me/example_bot");
@@ -25,7 +25,7 @@ test("get, connect and disconnect call the Registry routes for this Product", as
   const { calls, request } = recorder([{ channels: [] }, { channels: [channel] }, { channels: [{ kind: "telegram", bot: true, configured: false }] }]);
   const client = new TelegramBotClient(request, "p/1");
   assert.equal(await client.get(), null);
-  assert.deepEqual(await client.connect(`  ${TOKEN} `), { username: "example_bot" });
+  assert.deepEqual(await client.connect(`  ${TOKEN} `), { username: "example_bot", users: 0, messages: 0 });
   await client.disconnect();
   assert.deepEqual(calls, [
     ["/v1/creator/connections?product_id=p%2F1", undefined],
@@ -42,6 +42,8 @@ test("a rejected token is the Registry's failure, surfaced as it came", async ()
 test("each failure maps to plain copy, and a dropped connection is a network message", () => {
   assert.equal(telegramErrorKey({ status: 422, code: "telegram_probe_failed" }), "sxtgInvalidToken");
   assert.equal(telegramErrorKey({ status: 400, code: "invalid_credentials" }), "sxtgInvalidToken");
+  assert.equal(telegramErrorKey({ status: 409, code: "telegram_bot_in_use" }), "sxtgInUse");
+  assert.equal(telegramErrorKey({ status: 409, code: "telegram_bot_active_elsewhere" }), "sxtgActiveElsewhere");
   assert.equal(telegramErrorKey({ status: 503, code: "channel_unavailable" }), "sxtgUnavailable");
   assert.equal(telegramErrorKey({ status: 404, code: "product_not_found" }), "sxtgProductMissing");
   assert.equal(telegramErrorKey(new TypeError("fetch failed")), "sxtgNetwork");
@@ -62,4 +64,13 @@ test("the bot link becomes a QR code made here, with the quiet zone scanners nee
   assert.equal(matrix[2][2], true);
   assert.equal(qrSide(matrix), matrix.length + 8);
   assert.match(qrPath(matrix), /^M4 4h1v1h-1z/);
+});
+
+test("the bot carries its user and message counts, and each locale says them plainly", () => {
+  const bot = botOf([{ kind: "telegram", bot: true, configured: true, handle: "example_bot", users: 128, messages: 2341 }]);
+  assert.deepEqual([bot.users, bot.messages], [128, 2341]);
+  const say = (locale) => createCreatorTranslator(locale)("sxtgUsage", bot.users, bot.messages);
+  assert.equal(say("en"), "128 users · 2,341 messages");
+  assert.equal(say("zh"), "128 位用户 · 2,341 条消息");
+  assert.equal(say("ja"), "128 人のユーザー · 2,341 件のメッセージ");
 });
