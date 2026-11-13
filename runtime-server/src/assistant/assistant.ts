@@ -8,7 +8,7 @@ import { WorkbenchStore, type Role, type Session, type Todo, type WorkbenchBacke
 import { WorkbenchRuntime, MessageAlreadyAccepted, safeError, type WorkbenchRuntimeOptions } from "../factoryAgents/runtime.js";
 import { userMessage } from "../factoryAgents/imageRefs.js";
 import type { FormPage } from "../formPages/repository.js";
-import type { FormPages } from "../formPages/service.js";
+import { writeReview, type ReviewFile } from "../formPages/reviewFile.js";
 import type { FactoryWorkspace } from "../factoryAgents/service.js";
 import type { AgentCatalog, AgentChange, CatalogAgent } from "./catalog.js";
 import { scrapeProviderFrom } from "../factoryAgents/webProviders.js";
@@ -91,8 +91,6 @@ export type AssistantDependencies = {
   usage?: UsageRecorder;
   usageCap?: UsageCap;
   ingest?: AssistantIngest;
-  /** The review pages the Expert fills in; the Assistant reads their answers. */
-  forms?: Pick<FormPages, "read">;
 };
 
 /** Why an Agent may not be built yet, or undefined when its interview is finished and confirmed (every outline item ✓). */
@@ -222,14 +220,18 @@ export class AssistantService implements StudioOperations {
   }
 
   /**
-   * The Expert submitted a review page: they say so in the conversation it came from, which continues. A page written for one of
+   * The Expert submitted a review page. Their answers are written into the interview session's output first (the file the interview
+   * and the build both read), then they say so in the conversation it came from, which continues. A page written for one of
    * the Assistant's tasks is said to the Assistant (its reply owed like any Run it started, so it reaches the Expert's IM chat too);
-   * a page the Expert was handed by the interview session itself is said to that session. Keyed by the page: a double submit is one message.
+   * the Assistant cannot read a Product's workspace files, so its message carries the answers themselves. A page the Expert was
+   * handed by the interview session is said to that session, pointing at the file. Keyed by the page: a double submit is one message.
    */
-  async formSubmitted(form: Pick<FormPage, "id" | "accountId" | "title" | "origin">): Promise<void> {
-    const text = `我填好了《${form.title}》，你看一下。(form_id: ${form.id})`;
+  async formSubmitted(form: Pick<FormPage, "id" | "accountId" | "title" | "origin">, review: ReviewFile): Promise<void> {
+    const { runtime } = await this.workspace(form.accountId, form.origin.productId);
+    const path = await writeReview(runtime.store, form.origin.sessionId, form.id, review, () => runtime.emit(form.origin.sessionId, "files"));
     const id = `form-submitted:${form.id}`;
     if (form.origin.taskId) {
+      const text = `我填好了《${form.title}》，答案如下，也已存在访谈的 ${path}。\n\n${review.markdown}`;
       // They filled the page in on the web, but they are where they last spoke: their reply goes there, unless that is Studio.
       const source = (await this.deps.state.lastExpert(form.accountId))?.source ?? "web";
       const sent = await this.hear(form.accountId, { id, source: source as ExpertSource, parts: [{ type: "text", text }] });
@@ -238,14 +240,8 @@ export class AssistantService implements StudioOperations {
       if (task) await this.inRun(task, sent.runId);
       return;
     }
-    const { runtime } = await this.workspace(form.accountId, form.origin.productId);
+    const text = `我填好了《${form.title}》，答案在 ${path}。`;
     await runtime.send(form.origin.sessionId, userMessage(text, [], { kind: "expert", itemId: id, text })).catch(error => { if (!(error instanceof MessageAlreadyAccepted)) throw error; });
-  }
-
-  /** What the Expert has answered on one of their review pages. */
-  readForm(accountId: string, formId: string) {
-    if (!this.deps.forms) throw new Error("审阅页现在不可用");
-    return this.deps.forms.read(accountId, formId);
   }
 
   /** Ingest settled a job for one of the Expert's Agents, whoever submitted it: the Assistant hears what came of each item. */
@@ -343,7 +339,7 @@ export class AssistantService implements StudioOperations {
     await this.deps.tasks.update(task.id, { status: "done", leaseExpiresAt: undefined });
     // A review page the worker published for this task: the Assistant sends its link.
     const page = [...JSON.stringify(voice.messages).matchAll(/https?:\/\/[^"\\\s]*\/form\/[0-9a-f-]{36}\?t=[\w-]+/g)].at(-1)?.[0];
-    await this.news(task.accountId, task.id, `访谈大纲写好了。${page ? `审阅页也写好了，把这个链接发给专家：${page}。他提交后会通知你，到时用 read_form 读回答，勾掉聊完的项。` : "接下来你自己在对话里一个一个问专家，用 tick_outline 勾掉聊完的项。"}${outlineText(voice.todos)}`, `finished:${voice.messages.length}`);
+    await this.news(task.accountId, task.id, `访谈大纲写好了。${page ? `审阅页也写好了，把这个链接发给专家：${page}。他提交后会把答案连同题目发给你，到时勾掉聊完的项。` : "接下来你自己在对话里一个一个问专家，用 tick_outline 勾掉聊完的项。"}${outlineText(voice.todos)}`, `finished:${voice.messages.length}`);
   }
 
   // ── Tasks ──────────────────────────────────────────────────────────────

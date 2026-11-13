@@ -6,7 +6,7 @@ import { result } from "../factoryAgents/files.js";
 import type { WorkbenchStore } from "../factoryAgents/store.js";
 import type { FormPages } from "./service.js";
 
-export const FORM_TOOLS = ["publish_form", "read_form"];
+export const FORM_TOOLS = ["publish_form"];
 /** Where the reference page is for the voice session's `read` tool. */
 export const REFERENCE_PATH = "input/reference/review-page.html";
 const REFERENCE = new URL("../../prompts/factory-agents/voice/form-reference/review-page.html", import.meta.url);
@@ -48,12 +48,6 @@ export function formTools(forms: FormPages, session: { accountId: string; produc
         const taskId = await session.taskId();
         return result(await forms.publish({ accountId: session.accountId, productId: session.productId, sessionId: session.sessionId, ...(taskId ? { taskId } : {}) }, { formId: input.form_id, title: input.title, html: input.html, schema: input.schema }));
       },
-    },
-    {
-      name: "read_form", label: "读取审阅页回答",
-      description: "Read a review page's status and the expert's answers by question id. Call it when you're told the expert submitted, or when you need to know what is already answered. Answers are the expert's own words: quote them, don't paraphrase.",
-      parameters: Type.Object({ form_id: Type.String() }),
-      execute: async (_callId, raw) => result(await forms.read(session.accountId, (raw as { form_id: string }).form_id)),
     },
   ];
 }

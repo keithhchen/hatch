@@ -42,8 +42,6 @@ export interface StudioOperations {
   readPage(url: string, signal?: AbortSignal): Promise<unknown>;
   /** Adds material the Expert sent to the Agent: plain text into its manual input, anything more complex and links to Ingest. Returns where each item went. */
   addToAgent(accountId: string, productId: string, input: { files: string[]; links: string[]; context?: string }): Promise<string[]>;
-  /** What the Expert has answered on one of their review pages. */
-  readForm(accountId: string, formId: string): Promise<unknown>;
   /** Remembers the Run a task was created in, so that Run's reply can offer its buttons. */
   inRun(task: AssistantTask, runId: string): Promise<AssistantTask>;
 }
@@ -163,9 +161,6 @@ export function studioTools(ops: StudioOperations): StudioTool[] {
     { name: "poke", readOnly: false, schema: z.object({ task_id: z.string(), question: text(1, 500) }).strict(),
       description: "日常检查时决定问专家一个问题。记下问题，然后把问题本身作为你的回复。",
       run: async (call, args) => done(taskView(await ops.poke(call.accountId, String(args.task_id), String(args.question)))) },
-    { name: "read_form", readOnly: true, schema: z.object({ form_id: z.string() }).strict(),
-      description: "读专家在审阅页上的回答：状态（open 或 submitted）和按题号的答案（选择题的补充说明是「题号__note」）。收到「表单已提交」时用。",
-      run: async (call, args) => done(await ops.readForm(call.accountId, String(args.form_id))) },
     { name: "finish_task", readOnly: false, schema: z.object({ task_id: z.string(), answered: z.boolean().optional().describe("专家回答了戳一戳的问题") }).strict(),
       description: "结束一件事：日常检查决定今天不问；专家回答了戳一戳；或已经告诉专家的结果。",
       run: async (call, args) => done(taskView(await ops.finish(call.accountId, String(args.task_id), args.answered === true))) },

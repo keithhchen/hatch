@@ -3,19 +3,21 @@ import type { ArtifactObjectStore } from "../creatorLearning/objectStore.js";
 import { renderFormPage } from "./inject.js";
 import type { FormLinks } from "./links.js";
 import type { FormOrigin, FormPage, FormRepository } from "./repository.js";
+import { renderReview, type ReviewFile } from "./reviewFile.js";
 import { FormInvalid, FormNotFound, checkAnswer, parseFormSchema, shownAnswerIds } from "./schema.js";
 
 const HTML_MAX_BYTES = 2 * 1024 * 1024;
 
 /** What happens in the conversation a form came from when the Expert submits it. */
 export interface FormSubmissions {
-  submitted(page: Pick<FormPage, "id" | "accountId" | "title" | "origin">): Promise<void>;
+  /** `review` is the answers as a file, for the conversation's workspace: where the agents read them. */
+  submitted(page: Pick<FormPage, "id" | "accountId" | "title" | "origin" | "submittedAt">, review: ReviewFile): Promise<void>;
 }
 
 export type FormReading = { status: "open" | "submitted"; answers: Record<string, unknown>; submitted_at?: string };
 
 /**
- * The agent's form pages: published as HTML, filled in by the Expert through a signed link, read back by the agent.
+ * The agent's form pages: published as HTML, filled in by the Expert through a signed link, read back as a file in the agent's workspace.
  * The HTML lives in the object store, one immutable object per published version; answers live with the page's record.
  */
 export class FormPages {
@@ -41,7 +43,7 @@ export class FormPages {
     return { form_id: id, url: this.deps.links.url(id, accountId) };
   }
 
-  /** What the Expert has answered so far, for the agent: the answers to the questions the page shows now. */
+  /** What the Expert has answered so far: the answers to the questions the page shows now. Agents do not call this; they read the review file written at submit. */
   async read(accountId: string, formId: string): Promise<FormReading> {
     const page = await this.owned(accountId, formId);
     const shown = shownAnswerIds(page.schema);
@@ -79,7 +81,7 @@ export class FormPages {
     await this.linked(formId, token);
     const { page } = await this.deps.repository.submit(formId);
     if (page.notifiedAt) return;
-    await this.deps.submissions.submitted(page);
+    await this.deps.submissions.submitted(page, renderReview(page, page.schema, (await this.read(page.accountId, formId)).answers));
     await this.deps.repository.notified(formId);
   }
 

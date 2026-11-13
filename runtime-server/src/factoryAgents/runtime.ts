@@ -11,8 +11,9 @@ import { createFactoryLlmModel, createFactoryPiAgent, createFactoryPiModels, typ
 import { failures } from "../errors/failures.js";
 import { UpstreamError } from "../errors/upstream.js";
 import type { RunFailure } from "./runFailure.js";
-import { INPUT_ROLES, RUN_HEARTBEAT_MS, WorkbenchStore, isAssistantRole, itemIdOf, settleMessage, type AgentDefinitionSource, type AnyRole, type Session } from "./store.js";
+import { INPUT_ROLES, RUN_HEARTBEAT_MS, RUN_STALE_MS, RESTART_NOTE, endIfOrphaned, WorkbenchStore, isAssistantRole, itemIdOf, settleMessage, type AgentDefinitionSource, type AnyRole, type Session } from "./store.js";
 import { factoryAgentTools } from "./factoryTools.js";
+import { reviewAnswers } from "../formPages/reviewFile.js";
 import { provideFormReference } from "../formPages/tools.js";
 import { fileTools } from "./tools.js";
 import { traceAgentTools, withLangfuseTurn, type LangfuseTurnIdentifiers } from "../langfuse.js";
@@ -48,6 +49,13 @@ export type WorkbenchRuntimeOptions = {
   usage?: { recorder: UsageRecorder; accountId: string; /** A Run is not started when the account has spent its month. */ cap?: UsageCap };
   deadlineMs?: number;
   maxTurns?: number;
+  /** Heartbeat and staleness of a Run; tests shorten them. */
+  heartbeatMs?: number;
+  staleMs?: number;
+  /** How often this process looks for Runs whose process is gone; 0 turns it off. */
+  sweepMs?: number;
+  /** The longest close waits for a Run to settle before it ends the Session itself. */
+  closeMs?: number;
   /** One strategy with Chat; this is Studio's adapter. Tests inject a test-only summarizer and a small window. */
   compaction?: { summarize?: (input: SummarizeInput<AgentMessage>) => Promise<string>; contextWindow?: number; policy?: Partial<CompactionPolicy>; now?: () => number };
 };
@@ -81,7 +89,16 @@ export class WorkbenchRuntime {
   private readonly env: NodeJS.ProcessEnv;
   constructor(readonly store: WorkbenchStore, private options: WorkbenchRuntimeOptions) {
     this.env = options.env ?? process.env;
+    const sweepMs = options.sweepMs ?? 30_000;
+    if (sweepMs > 0) { this.sweeper = setInterval(() => void this.sweep(), sweepMs); this.sweeper.unref(); }
   }
+  private sweeper?: NodeJS.Timeout;
+  /** Ends what a process that died (OOM, kill -9) left running; a live owner keeps its heartbeat fresh, so it is never touched. */
+  async sweep(): Promise<void> {
+    if (this.closing) return;
+    for (const id of await this.store.sweepOrphans(id => this.active.has(id), this.options.staleMs).catch(() => [])) this.announceEnded(id);
+  }
+  private announceEnded(id: string): void { this.emit(id, "state"); this.emit(id, "run_end", { status: "interrupted" }); }
   /** The model of the session's role: nodes with a role of their own (hatch_model_roles), else the workspace's. */
   private async profile(id: string): Promise<LlmProfile> {
     const own = NODE_MODEL_ROLES[(await this.store.get(id)).role as string];
@@ -135,11 +152,12 @@ export class WorkbenchRuntime {
     try {
       // The run is already ours; background compaction yields and ends before the message proceeds.
       await this.background.preempt(id);
-      await this.store.update(id, s => { if (s.title === s.role) s.title = message.trim().slice(0, 60); s.turn++; s.status = "running"; s.lastRunAt = new Date().toISOString(); delete s.error; delete s.errorCode; delete s.errorRef; delete s.activeTool; });
+      await this.store.update(id, s => { if (s.title === s.role) s.title = message.trim().slice(0, 60); s.turn++; s.status = "running"; s.lastRunAt = new Date().toISOString(); delete s.error; delete s.errorCode; delete s.errorRef; delete s.activeTool; delete s.stopRequested; });
     } catch (error) { this.active.delete(id); throw error; }
     this.emit(id, "state");
     this.emit(id, "voice.run_started", { runId });
-    const beat = setInterval(() => void this.store.update(id, () => undefined).catch(() => undefined), RUN_HEARTBEAT_MS);
+    // The heartbeat also takes a Stop that reached another instance (a deploy overlaps the old and the new).
+    const beat = setInterval(() => void this.store.update(id, s => { const requested = !!s.stopRequested; delete s.stopRequested; return requested; }).then(requested => { if (requested) controller.abort(); }).catch(() => undefined), this.options.heartbeatMs ?? RUN_HEARTBEAT_MS);
     beat.unref();
     const run = withLangfuseTurn("studio.turn", message, () => this.main(id, input, controller, images), this.traceIdentifiers()).catch(error => {
       if (!controller.signal.aborted) this.emit(id, "error", { message: safeError(error) });
@@ -147,7 +165,21 @@ export class WorkbenchRuntime {
     this.runs.set(id, run);
     void run.finally(() => { clearInterval(beat); if (this.runs.get(id) === run) this.runs.delete(id); });
   }
-  stop(id: string): void { this.active.get(id)?.abort(); }
+  /**
+   * Aborts the Run if this process owns it. A Run this process does not own is either alive in another instance,
+   * which takes the request on its next heartbeat, or lost with its process, which Stop then ends so it never stays running.
+   */
+  async stop(id: string): Promise<void> {
+    const controller = this.active.get(id);
+    if (controller) { controller.abort(); return; }
+    const orphaned = await this.store.update(id, s => {
+      if (s.status !== "running") return false;
+      if (endIfOrphaned(s, this.options.staleMs ?? RUN_STALE_MS)) return true;
+      s.stopRequested = true;
+      return false;
+    }, false);
+    if (orphaned) this.announceEnded(id);
+  }
   isRunning(id: string): boolean { return this.active.has(id); }
   /**
    * Deliver a message. It is written to the session's queue first, so it survives a crash and a replay finds it;
@@ -268,12 +300,21 @@ export class WorkbenchRuntime {
   async drain(): Promise<void> {
     await Promise.allSettled([...this.runs.values(), ...this.scribeRuns.values()]);
   }
+  /** Ends every Run of this process: aborted, kept as interrupted with the restart note, never replayed. A Run that does not settle in time is ended here. */
   async close(): Promise<void> {
     this.closing = true;
+    clearInterval(this.sweeper);
+    const held = [...this.active.keys()];
     for (const controller of this.active.values()) controller.abort();
     await this.background.drain();
     for (const controller of this.scribeControllers) controller.abort();
-    await Promise.allSettled([...this.runs.values(), ...this.scribeRuns.values()]);
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<void>(resolve => { timer = setTimeout(resolve, this.options.closeMs ?? 15_000); });
+    await Promise.race([Promise.allSettled([...this.runs.values(), ...this.scribeRuns.values()]), late]);
+    clearTimeout(timer);
+    for (const id of held) {
+      if (await this.store.update(id, s => { if (s.status !== "running") return false; s.status = "interrupted"; s.error = RESTART_NOTE; delete s.activeTool; delete s.stopRequested; return true; }).catch(() => false)) this.announceEnded(id);
+    }
   }
 
   private async runScribeVoiceEvidence(id: string, evidence: AgentMessage[]): Promise<void> {
@@ -297,6 +338,8 @@ export class WorkbenchRuntime {
       const definition = await this.store.definition(s.role);
       system = await this.prompt(s.role, definition);
       if (s.role === "generation") system += `\n宿主提供的目标 Runtime 工具：内建 hatch.web_search。额外声明：${this.env.HATCH_FACTORY_TARGET_TOOLS_JSON ?? "[]"}。外部连接的实际可用性由现有 Registry/Runtime 验证。当前 Product 已由宿主固定；corpus_upload 会发布到它，不要查找、选择或创建 Product。`;
+      // The Expert's submitted review answers are part of the interview's material: handed over here, not left to be looked up.
+      if (s.role === "voice" || s.role === "generation") { const answers = await reviewAnswers(this.store, id); if (answers) system += `\n\n# 专家在审阅页上的回答（原文）\n\n${answers}`; }
       if (s.role === "voice") system += `\n\n${await readFile(fileURLToPath(new URL("../../prompts/assistant/INTERVIEW_DONE.md", import.meta.url)), "utf8")}`;
       if (s.role === "voice" && s.assistantTaskId) system += `\n\n${await readFile(fileURLToPath(new URL("voice/ASSISTANT_INTERVIEW.md", new URL("../../prompts/factory-agents/", import.meta.url))), "utf8")}`;
       if (s.role === "evaluator") system += `\n当前 Product 已由宿主固定；hatch_tool 只会运行它，不要查找或选择 Product。启动时如需 brief_answers，从案例中选择客户可见的信息作答；不能泄露评分标准。当前 Brief 字段：${JSON.stringify(this.store.scope?.briefSpec ?? null)}。`;
@@ -329,7 +372,7 @@ export class WorkbenchRuntime {
           const evidence = latest.messages.slice(messageCount);
           this.triggerScribeVoiceEvidence(id, evidence);
         }
-        await this.store.update(id, state => { state.status = controller.signal.aborted ? "interrupted" : "completed"; delete state.activeTool; });
+        await this.store.update(id, state => { state.status = controller.signal.aborted ? "interrupted" : "completed"; if (this.closing && controller.signal.aborted) state.error = RESTART_NOTE; delete state.activeTool; });
         break;
       }
       ended = controller.signal.aborted ? "interrupted" : "completed";
@@ -343,7 +386,8 @@ export class WorkbenchRuntime {
         if (!failure) {
           // A user stop is a normal terminal state, not an error notice.
           s.status = "interrupted";
-          delete s.error; delete s.errorCode; delete s.errorRef;
+          if (this.closing) s.error = RESTART_NOTE; else delete s.error;
+          delete s.errorCode; delete s.errorRef;
         } else {
           s.status = "failed";
           s.error = failure.message; s.errorCode = failure.code; s.errorRef = failure.reference;
