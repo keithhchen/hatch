@@ -95,6 +95,9 @@ test("generate_image mirrors the model's parameters, reads edit inputs from the 
     const { paths } = JSON.parse((out.content[0] as { text: string }).text);
     assert.match(paths[0], /^output\/images\/image-[0-9a-f]+\.jpg$/);
     assert.equal((await store.read(session.id, paths[0])).bytes.toString(), "jpg");
+    // Only workspace paths come back: nothing URL-like for the model to repeat to the Creator.
+    assert.deepEqual(Object.keys(JSON.parse((out.content[0] as { text: string }).text)), ["paths"]);
+    assert.doesNotMatch((out.content[0] as { text: string }).text, /https?:|data:|fal|\/\/[a-z]/i);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
