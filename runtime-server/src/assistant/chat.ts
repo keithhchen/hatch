@@ -3,7 +3,7 @@ import type { AgentRuntime } from "../agentRuntime.js";
 import { PiAgentRuntime } from "../piAgentRuntime.js";
 import type { RuntimeAssetStore } from "../assetStore.js";
 import type { CompactionStrategy } from "../compactionStrategy.js";
-import type { RuntimeCompactionMessage } from "../compaction.js";
+import { chatCompactionStrategy, type RuntimeCompactionMessage } from "../compaction.js";
 import type { ConversationRecord, ConversationRepository, ConversationRunRecord } from "../conversationRepository.js";
 import { failureOfReason } from "../errors/failures.js";
 import { ChatAssets, attachmentMessageId } from "../chat/assets.js";
@@ -41,6 +41,13 @@ import type { ModelRoleResolver } from "../modelRoles.js";
 /** The Assistant is one Agent, not a Product: its conversation is bound to the account, under this id. A UUID, as every Agent id is once the identity migration has run. */
 export const ASSISTANT_AGENT_ID = "a5515700-0000-4000-8000-000000000001";
 const ACTIVE = new Set(["queued", "running", "waiting_for_tool", "compacting"]);
+
+/**
+ * The Assistant's history is the Expert's whole working life, so its context is held to a fixed budget instead of the model's
+ * window: a summary after the reply that crosses `trigger`, the newest `tail` tokens kept verbatim, old tool results pruned from `prune`.
+ * `hard` is the size at which a turn that is about to run waits for a summary rather than ride on.
+ */
+export const ASSISTANT_CONTEXT_BUDGET = { trigger: 40_000, tail: 15_000, prune: 25_000, hard: 100_000 } as const;
 
 /** What a Run of the Assistant needs beyond the binding every Chat Run has. */
 export type AssistantScope = TurnBinding & { accountId: string };
@@ -116,7 +123,7 @@ export class AssistantChat implements AssistantHost {
       admission: { reserve: () => () => undefined },
       toolTimeoutMs: deps.toolTimeoutMs ?? 120_000,
       leaseMs: deps.leaseMs, sweepMs: deps.sweepMs,
-      ...(deps.compactionStrategy ? { compactionStrategy: deps.compactionStrategy } : { compactionProfile: () => deps.models.resolve("assistant") }),
+      compactionStrategy: deps.compactionStrategy ?? (async () => chatCompactionStrategy(await deps.models.resolve("assistant"), { budget: ASSISTANT_CONTEXT_BUDGET })),
       ...(deps.usage ? { usage: { recorder: deps.usage, attribute: attributeByScope } } : {}),
       ...(deps.usageCap ? { cap: deps.usageCap.guard(payerByScope) } : {})
     });
@@ -261,10 +268,11 @@ export class AssistantChat implements AssistantHost {
     const conversation = await this.conversation(accountId);
     const runs = await this.deps.repository.listRuns(conversation.id);
     const last = runs.at(-1);
-    if (!last) return { state: "idle" };
-    if (ACTIVE.has(last.status)) return { state: "running", runId: last.id };
+    if (last && ACTIVE.has(last.status)) return { state: "running", runId: last.id, ...(last.status === "compacting" ? { compacting: true as const } : {}) };
+    // Between Runs a summary can still be under way: a refreshed page learns that from here, not from events it missed.
+    const compacting = await this.deps.repository.runningCompaction(conversation.id) ? { compacting: true as const } : {};
     // A Run that failed or was interrupted can be answered again, so the page is told which one.
-    return last.status === "failed" || last.status === "interrupted" ? { state: "failed", runId: last.id, error: last.failure ?? failureOfReason(undefined) } : { state: "idle" };
+    return last && (last.status === "failed" || last.status === "interrupted") ? { state: "failed", runId: last.id, error: last.failure ?? failureOfReason(undefined), ...compacting } : { state: "idle", ...compacting };
   }
 
   /**

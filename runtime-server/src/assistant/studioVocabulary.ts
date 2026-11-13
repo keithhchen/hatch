@@ -45,6 +45,10 @@ function ofJournal(event: ConversationJournalEvent): ConversationEvent[] {
       }
       return [{ type: "state", ...about(undefined) }];
     }
+    // A summary of the history began or ended, in a Run or between Runs: a page that is closed or refreshed meanwhile reads the end from here.
+    case "compaction.started": return [{ type: "compaction_start", compaction_id: payload.compaction_id, ...about(undefined) }];
+    case "compaction.completed": return [{ type: "compaction_end", compaction_id: payload.compaction_id, ...about(undefined) }];
+    case "compaction.aborted": return [{ type: "compaction_end", compaction_id: payload.compaction_id, aborted: true, ...about(undefined) }];
     default: return [];
   }
 }

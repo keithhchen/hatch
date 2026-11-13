@@ -121,13 +121,10 @@ for (const backend of ["memory", "file", "postgres"] as const) {
     assert.equal(await repository.answerToolCall(id, start.run.id, "t2", { status: "ok", result: {} }), false);
   }));
 
-  test(`${backend}: one compaction runs per conversation; a new message preempts it; a Run that started makes its commit stale`, options, async () => withBackend(backend, async ({ repository, store }) => {
+  test(`${backend}: one compaction runs per conversation; a Run that started makes its commit stale`, options, async () => withBackend(backend, async ({ repository, store }) => {
     const first = await repository.beginCompaction({ id: "cmp_1", conversationId: id, executorId: "a", leaseMs: 60_000 });
     assert.equal(first.claimed, true);
     assert.equal((await repository.beginCompaction({ id: "cmp_2", conversationId: id, executorId: "b", leaseMs: 60_000 })).claimed, false);
-    assert.equal(await repository.compactionStopped("cmp_1"), false);
-    assert.equal(await repository.requestCompactionPreempt(id), true);
-    assert.equal(await repository.compactionStopped("cmp_1"), true);
     assert.ok(await repository.runningCompaction(id));
     await repository.endCompaction("cmp_1");
     assert.equal(await repository.runningCompaction(id), undefined);

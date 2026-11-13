@@ -18,7 +18,7 @@ import {
 import { createPiModels } from "./piModel.js";
 import { HISTORY_MODEL, type LlmProfile } from "./llmProfiles.js";
 import { persistToolMessage, restoreToolMessage } from "./toolMessage.js";
-import { CompactionStrategy, policyFor, type CompactionAdapter, type CompactionMemory, type Entry, type SummarizeInput } from "./compactionStrategy.js";
+import { CompactionStrategy, policyFor, type CompactionAdapter, type CompactionPolicy, type CompactionMemory, type Entry, type SummarizeInput } from "./compactionStrategy.js";
 import { describePiMessage, summarizeWithPi } from "./piCompaction.js";
 
 export const SUMMARY_PREFIX = COMPACTION_SUMMARY_PREFIX;
@@ -98,6 +98,8 @@ export type ChatCompactionOptions = {
   /** Defaults to the model's window. */
   contextWindow?: number;
   cacheTtlMs?: number;
+  /** A fixed budget in tokens in place of the one the window gives; the window stays the ceiling. */
+  budget?: Partial<Pick<CompactionPolicy, "trigger" | "tail" | "prune" | "hard">>;
   /** Chat conversations have no memory layer, so none is wired; the port stays for one that does. */
   memory?: CompactionMemory<RuntimeCompactionMessage>;
 };
@@ -107,7 +109,7 @@ export function chatCompactionStrategy(profile: LlmProfile, options: ChatCompact
   const cacheTtlMs = options.cacheTtlMs ?? (Number(process.env.HATCH_PROVIDER_CACHE_TTL_MS) || undefined);
   return new CompactionStrategy(
     chatCompactionAdapter(options.summarize ?? summarizeWithPi((message) => toPiMessage({ ...message, model_images: undefined }), () => createPiModels({ profile }), 8_000)),
-    policyFor(options.contextWindow ?? profile.contextWindow, { cacheTtlMs }),
+    { ...policyFor(options.contextWindow ?? profile.contextWindow, { cacheTtlMs }), ...options.budget },
     options.memory
   );
 }

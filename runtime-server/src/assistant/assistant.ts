@@ -1,3 +1,4 @@
+import { mapLimit } from "../bounded.js";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { Type } from "@earendil-works/pi-ai";
@@ -607,16 +608,17 @@ export class AssistantService implements StudioOperations {
   /** One page's full text, through the scrape provider Workers use. */
   readPage(url: string, signal?: AbortSignal): Promise<unknown> { return readPage(scrapeProviderFrom(this.deps.env), url, signal); }
 
-  /** The Assistant's view of things right now. Rebuilt for every model call and never stored. */
+  /** The Assistant's view of things right now. Built once for each Run and never stored. */
   async liveState(accountId: string): Promise<string> {
     const tasks = await this.deps.tasks.open(accountId);
     const agents = await this.deps.catalog.list(accountId);
-    const lines = await Promise.all(agents.map(async agent => {
-      const live = await this.deps.catalog.live(accountId, agent.productId) as { is_live?: boolean; pending_changes?: string[]; public_url?: string; chat_url?: string; telegram_url?: string } | null;
+    // Bounded: an Expert with many Agents must not hold every connection of the pool at once.
+    const lines = await mapLimit(agents, 4, async agent => {
+      const live = await this.deps.catalog.live(accountId, agent.productId, agent) as { is_live?: boolean; pending_changes?: string[]; public_url?: string; chat_url?: string; telegram_url?: string } | null;
       const outline = await this.interviewOutline(accountId, agent);
       const links = live?.is_live ? [["主页", live.public_url], ["聊天页", live.chat_url], ["Telegram", live.telegram_url]].filter(([, url]) => url).map(([label, url]) => `${label} ${url}`) : [];
       return [`- 「${agent.name}」（${agent.productId}）：${live?.is_live ? "在线" : "未上线"}${live?.pending_changes?.length ? `，待发布：${live.pending_changes.join("、")}` : ""}${links.length ? `，${links.join("，")}` : ""}`, ...outline.map(todo => `  ${todo.status === "completed" ? "✓" : "○"} ${todo.title}`)].join("\n");
-    }));
+    });
     return `<当前状态>\n系统自动生成，不是专家说的，不要复述。\n事项：\n${tasks.map(task => `- ${task.kind}（${task.id}）${task.status}${task.needs ? `/${task.needs}` : ""}：${task.summary ?? ""}`).join("\n") || "（没有）"}\nAgent 和访谈大纲：\n${lines.join("\n") || "（没有）"}\n</当前状态>`;
   }
 

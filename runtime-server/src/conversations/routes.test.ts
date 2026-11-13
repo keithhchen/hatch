@@ -72,12 +72,13 @@ class FakeWorkspace implements WorkerWorkspace {
 class FakeAssistant implements AssistantHost {
   said: PublicMessage[] = [{ id: "m1", role: "assistant", text: "Hello", created_at: "2026-01-01T00:00:00.000Z" }];
   running = false;
+  compacting = false;
   ingested: SendInput[] = [];
   stopped = 0;
   desk!: AssetDesk;
   /** Looks at the world the moment a message is delivered. */
   onDelivery: () => void = () => undefined;
-  status = async (): Promise<ConversationStatus> => this.running ? { state: "running", runId: "arun-1" } : { state: "idle" };
+  status = async (): Promise<ConversationStatus> => this.running ? { state: "running", runId: "arun-1", ...(this.compacting ? { compacting: true as const } : {}) } : { state: "idle", ...(this.compacting ? { compacting: true as const } : {}) };
   lines = async (_account: string, after?: string, limit?: number) => page(this.said, after, limit);
   /** Pages of two, newest first; the cursor is how many messages are older than the page. */
   history = async (_account: string, options: { limit?: number; before?: string }) => {
@@ -483,6 +484,19 @@ test("view: the snapshot of the newest page with where earlier ones begin, the t
     assert.deepEqual(view.tasks, [{ id: "task-1", status: "needs_you", needs: "review" }]);
     assert.deepEqual(view.channels, [{ kind: "telegram", available: true, linked: false }]);
     assert.equal((await h.call("/v1/creator/assistant/conversation/view", { token: null })).status, 401);
+  } finally { await h.close(); }
+});
+
+test("view: says that history is being summarized, in a Run or between Runs, so a refreshed page can lock its input", async () => {
+  const h = await harness();
+  try {
+    const read = async () => (await (await h.call("/v1/creator/assistant/conversation/view")).json() as { status: Record<string, unknown> }).status;
+    h.assistant.compacting = true;
+    assert.deepEqual(await read(), { state: "idle", compacting: true });
+    h.assistant.running = true;
+    assert.deepEqual(await read(), { state: "running", runId: "arun-1", compacting: true });
+    h.assistant.compacting = false;
+    assert.deepEqual(await read(), { state: "running", runId: "arun-1" });
   } finally { await h.close(); }
 });
 

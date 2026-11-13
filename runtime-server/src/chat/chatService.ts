@@ -93,7 +93,7 @@ export class ChatService<Scope> {
     /** Asked before a new Run starts, never for a message that joins one: whoever pays for the Run may be out of budget. */
     cap?: RunCap<Scope>;
     /** A message that may start a Run first ends the conversation's background compaction, on any instance. */
-    compaction?: { preempt(conversationId: string): Promise<void> };
+    compaction?: { waitForCompaction(conversationId: string): Promise<void> };
   }) {}
 
   /**
@@ -115,7 +115,7 @@ export class ChatService<Scope> {
     if (supervisor.holdsConversation(binding.id)) throw new ChatError("conversation_busy", "The previous run is still stopping. Try again in a moment.", 409);
     const release = admission.reserve(command.principal);
     try {
-      await compaction?.preempt(binding.id);
+      await compaction?.waitForCompaction(binding.id);
       const accepted = await accept();
       if (!accepted.created) { release(); return { outcome: "replayed", run: accepted.run }; }
       registry.rememberClient(binding.id, command.client, command.timeZone);
@@ -145,7 +145,7 @@ export class ChatService<Scope> {
     let release = joining ? () => undefined : admission.reserve(command.principal);
     try {
       // The new message aborts a compaction running after the last reply, and waits until it has ended.
-      if (!joining) await compaction?.preempt(command.conversation.id);
+      if (!joining) await compaction?.waitForCompaction(command.conversation.id);
       const accepted = await repository.acceptSubmission({
         binding: command.conversation,
         run: {
