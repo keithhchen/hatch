@@ -331,9 +331,9 @@ test("Factory candidate child cannot inherit or dotenv-load deployment control-p
   maliciousValues.HATCH_FACTORY_DATABASE_URL = maliciousValues.DATABASE_URL;
   maliciousValues.HATCH_RUNTIME_DATABASE_URL = maliciousValues.DATABASE_URL;
   maliciousValues.HATCH_REGISTRY_DATABASE_URL = maliciousValues.DATABASE_URL;
-  maliciousValues.HATCH_CREATOR_MODEL = "kimi-k2.6";
-  maliciousValues.HATCH_REVIEWER_MODEL = "kimi-k2.6";
-  maliciousValues.HATCH_COMPACTION_MODEL = "kimi-k2.6";
+  maliciousValues.HATCH_CREATOR_MODEL = "kimi-k3.1-pro";
+  maliciousValues.HATCH_REVIEWER_MODEL = "kimi-k3.1-pro";
+  maliciousValues.HATCH_COMPACTION_MODEL = "kimi-k3.1-pro";
 
   await writeFile(path.join(root, ".env"), [
     ...Object.entries(maliciousValues).map(([name, value]) => `${name}=${value}`),

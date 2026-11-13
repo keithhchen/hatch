@@ -33,7 +33,7 @@ async function harness(options: { summarize?: (input: SummarizeInput<AgentMessag
       const n = modelCalls.push(context.messages as AgentMessage[]);
       log.push("model call");
       const error = options.fail?.(n);
-      const message: AssistantMessage = { role: "assistant", api: "openai-completions", provider: "moonshotai-cn", model: "kimi-k2.6", timestamp: Date.now(), content: error ? [] : [{ type: "text", text: `Reply ${n}` }], stopReason: error ? "error" : "stop", ...(error ? { errorMessage: error } : {}), usage };
+      const message: AssistantMessage = { role: "assistant", api: "openai-completions", provider: "moonshotai-cn", model: "kimi-k3.1-pro", timestamp: Date.now(), content: error ? [] : [{ type: "text", text: `Reply ${n}` }], stopReason: error ? "error" : "stop", ...(error ? { errorMessage: error } : {}), usage };
       const stream = createAssistantMessageEventStream();
       setTimeout(() => { stream.push({ type: "start", partial: message }); stream.push({ type: "done", reason: "stop", message }); stream.end(message); }, options.delayMs ?? 20);
       return stream;

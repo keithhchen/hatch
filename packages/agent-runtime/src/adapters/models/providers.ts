@@ -25,8 +25,8 @@ export class KimiModelAdapter extends PiModelAdapter {
 			region === "cn" ? moonshotaiCnProvider() : moonshotaiProvider(),
 			{
 				...options,
-				model: options.model ?? "kimi-k2.6",
-				reasoning: options.reasoning ?? "high",
+				model: options.model ?? "kimi-k3",
+				reasoning: options.reasoning ?? "low",
 				temperature: options.temperature ?? 1,
 			},
 		);

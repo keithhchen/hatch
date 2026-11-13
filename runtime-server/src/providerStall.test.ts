@@ -77,7 +77,7 @@ test("the caller's own abort still reaches the provider", async () => {
 });
 
 test("an upstream failure names the provider that was called even when its error text does not", () => {
-  assert.equal(UpstreamError.of("Connection error.", "kimi kimi-k2.6").provider, "moonshot");
+  assert.equal(UpstreamError.of("Connection error.", "kimi kimi-k3.1-pro").provider, "moonshot");
 });
 
 /** A provider that sends `events`, one every `gapMs`, then finishes. */
@@ -111,7 +111,6 @@ test("the first event and the silence between events have their own limits", asy
 test("a reasoning Gemini profile asks again when its first event never comes, and still bounds it", () => {
   const { stall } = resolveLlmProfile({ HATCH_LLM_PROFILE: "gemini-3.1-pro" });
   assert.ok(stall && Number.isFinite(stall.firstEventMs) && (stall.restarts ?? 0) > 0);
-  assert.equal(resolveLlmProfile({ HATCH_LLM_PROFILE: "kimi-k2.6-no-thinking" }).stall, undefined);
 });
 
 /** A provider whose first `hung` requests never answer and whose next one answers; `seen` counts the requests. */

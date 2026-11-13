@@ -3,7 +3,7 @@ import { sleep } from "./util.mjs";
 /**
  * VERIFICATION TOOL ONLY. Helpers for the compaction scenario.
  *
- * The compaction thresholds derive from the model's window (Kimi K2.6: 262,144 tokens; summarize at 262,144 - 16,384 - 10% = 219,546
+ * The compaction thresholds derive from the model's window (Kimi K3.1: 262,144 tokens; summarize at 262,144 - 16,384 - 10% = 219,546
  * estimated tokens, estimate = chars / 4) and no env var changes it, so a conversation must really be that large. `chunk()` makes
  * text that the product's estimator counts at chars / 4 while Kimi's tokenizer sees far fewer tokens (long runs of "="), which keeps
  * a real run affordable. It changes only how cheaply the trigger is reached, not the compaction logic.

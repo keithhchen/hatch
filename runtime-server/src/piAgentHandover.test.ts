@@ -14,7 +14,7 @@ function toolThenText(requests: unknown[], toolName: string) {
     const delta = first
       ? { role: "assistant", tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: toolName, arguments: '{"activity_message":"请对方接着聊"}' } }] }
       : { role: "assistant", content: "后来的话" };
-    const chunk = { id: "t", object: "chat.completion.chunk", created: 1, model: "kimi-k2.6", choices: [{ index: 0, delta, finish_reason: first ? "tool_calls" : "stop" }] };
+    const chunk = { id: "t", object: "chat.completion.chunk", created: 1, model: "kimi-k3.1-pro", choices: [{ index: 0, delta, finish_reason: first ? "tool_calls" : "stop" }] };
     return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
   };
 }
@@ -23,7 +23,7 @@ function toolThenText(requests: unknown[], toolName: string) {
 async function runWithJoiningMessage(t: test.TestContext, toolResult: Record<string, unknown>) {
   const originalProfile = process.env.HATCH_LLM_PROFILE;
   const originalKey = process.env.LLM_API_KEY;
-  process.env.HATCH_LLM_PROFILE = "kimi-k2.6-no-thinking";
+  process.env.HATCH_LLM_PROFILE = "kimi-k3.1-pro";
   process.env.LLM_API_KEY = "test-only";
   t.after(() => {
     if (originalProfile === undefined) delete process.env.HATCH_LLM_PROFILE; else process.env.HATCH_LLM_PROFILE = originalProfile;

@@ -92,7 +92,7 @@ name = "github:yeet"
 enabled = false
 ```
 
-This package implements the Agent Skills protocol semantics over a Pi Core Agent using Kimi K2.6 through Pi AI:
+This package implements the Agent Skills protocol semantics over a Pi Core Agent using Kimi K3.1 through Pi AI:
 
 ```text
 startup context: skill name + description + public SKILL.md locator
@@ -232,9 +232,9 @@ Corpus contract but keep their HTTP processes separate.
 Set the model and credentials in `.env`:
 
 ```text
-HATCH_CREATOR_MODEL=kimi-k2.6
-HATCH_REVIEWER_MODEL=kimi-k2.6
-HATCH_COMPACTION_MODEL=kimi-k2.6
+HATCH_CREATOR_MODEL=kimi-k3.1-pro
+HATCH_REVIEWER_MODEL=kimi-k3.1-pro
+HATCH_COMPACTION_MODEL=kimi-k3.1-pro
 PORT=8400
 LLM_API_KEY=...
 OPENAI_BASE_URL=https://api.moonshot.cn/v1
@@ -252,7 +252,7 @@ Dashboard, never Runtime. Public user
 sessions can read `GET /v1/user/product-access`; only the checkout service may
 call the private entitlement mutation after it has committed a matching order.
 
-Spec v1 defaults Creator execution and delivery review to Kimi K2.6. A
+Spec v1 defaults Creator execution and delivery review to Kimi K3.1. A
 deployment may explicitly set `HATCH_FACTORY_LLM_PROFILE=deepseek-v4-flash`
 when its provider credentials are available; this is a deliberate profile
 selection, never a silent fallback. Kimi thinking is always enabled through
@@ -267,7 +267,7 @@ There is no implicit provider fallback. For the Kimi profile,
 `OPENAI_BASE_URL` falls back to `https://api.moonshot.cn/v1` and is restricted
 to official Moonshot endpoints (plus loopback test doubles). Use the `.ai`
 endpoint only with a matching international Kimi key. If any Kimi model
-override is present, it must be exactly `kimi-k2.6` or startup fails closed.
+override is present, it must be exactly `kimi-k3.1-pro` or startup fails closed.
 `HATCH_MCP_SERVERS` is optional. When set, the model can call `mcp_call`; the server sends MCP `tools/call` JSON-RPC requests and the client never sees MCP credentials.
 `hatch.web_search` is a Hatch built-in tool. With `HATCH_WEB_SEARCH_PROVIDER=bocha`, Runtime uses the existing CWebSearch contract (`query`, `freshness`, `summary`, `count`) and normalizes Bocha's response to Hatch's stable `{ query, results }` shape. `HATCH_WEB_SEARCH_API_KEY` stays server-side and never enters the Agent Corpus or Desktop. Creator-owned HTTP/MCP tools are resolved exclusively through the Registry Control Plane using `HATCH_REGISTRY_URL` and `HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN`; the Runtime never reads connection URLs or credentials from the Corpus or local environment.
 

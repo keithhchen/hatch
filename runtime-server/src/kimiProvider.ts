@@ -1,12 +1,9 @@
-import { KIMI_K26_MODEL } from "./llmProfiles.js";
+import { KIMI_MODEL } from "./llmProfiles.js";
 
-export const KIMI_MODEL = KIMI_K26_MODEL;
-// Keep the provider profile in one place so Factory, Runtime, and audits all
-// use the same thinking-enabled Kimi contract.
-// Kimi K2.6 currently accepts only temperature=1. Thinking remains enabled;
-// this is a provider contract, not a user-facing creativity setting.
+export { KIMI_MODEL };
+// Kimi K3.1 accepts only temperature=1 and always reasons; this is a provider
+// contract, not a user-facing creativity setting.
 export const KIMI_TEMPERATURE = 1;
-export const KIMI_THINKING = { type: "enabled" } as const;
 export const KIMI_DEFAULT_BASE_URL = "https://api.moonshot.cn/v1";
 
 export type KimiProviderConfig = {
@@ -14,7 +11,6 @@ export type KimiProviderConfig = {
   baseURL: string;
   model: typeof KIMI_MODEL;
   temperature: typeof KIMI_TEMPERATURE;
-  thinking: typeof KIMI_THINKING;
 };
 
 export type KimiModelRuntimeRecord = {
@@ -23,13 +19,7 @@ export type KimiModelRuntimeRecord = {
   reviewer_model: typeof KIMI_MODEL;
   compaction_model: typeof KIMI_MODEL;
   temperature: typeof KIMI_TEMPERATURE;
-  thinking_mode: "enabled";
 };
-
-/** Send the explicit thinking mode so every runtime role is observable. */
-export function kimiThinkingPayload(): { thinking: typeof KIMI_THINKING } {
-  return { thinking: KIMI_THINKING };
-}
 
 export function kimiModelRuntimeRecord(): KimiModelRuntimeRecord {
   return {
@@ -37,14 +27,13 @@ export function kimiModelRuntimeRecord(): KimiModelRuntimeRecord {
     creator_model: KIMI_MODEL,
     reviewer_model: KIMI_MODEL,
     compaction_model: KIMI_MODEL,
-    temperature: KIMI_TEMPERATURE,
-    thinking_mode: KIMI_THINKING.type
+    temperature: KIMI_TEMPERATURE
   };
 }
 
 /**
  * Spec v1 has one model contract. Creator execution, delivery review, and
- * compaction all use Kimi K2.6 through an official Moonshot endpoint.  Model
+ * compaction all use Kimi K3.1 through an official Moonshot endpoint.  Model
  * overrides are validated instead of silently falling back to another model.
  */
 export function requireKimiProviderConfig(env: NodeJS.ProcessEnv = process.env): KimiProviderConfig {
@@ -77,7 +66,6 @@ export function requireKimiProviderConfig(env: NodeJS.ProcessEnv = process.env):
     apiKey,
     baseURL,
     model: KIMI_MODEL,
-    temperature: KIMI_TEMPERATURE,
-    thinking: KIMI_THINKING
+    temperature: KIMI_TEMPERATURE
   };
 }

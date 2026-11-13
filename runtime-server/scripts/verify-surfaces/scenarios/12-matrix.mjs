@@ -38,7 +38,7 @@ class Matrix extends Scenario {
     const matrix = {};
     const hasKimi = Boolean(process.env.LLM_API_KEY);
     rec.note("Fakes in this scenario: the fake messaging platform (incl. Feishu token/bot-info responders added here), and DB-inserted org/public/self-product Connections (no product API creates them). Everything else is the real product through its real doors.");
-    if (!hasKimi) rec.note("LLM_API_KEY is absent: the Assistant (pinned to kimi-k2.6) cannot run, so every Studio cell is BLOCKED.");
+    if (!hasKimi) rec.note("LLM_API_KEY is absent: the Assistant (pinned to kimi-k3.1-pro) cannot run, so every Studio cell is BLOCKED.");
     installFeishuResponders(stack.platform);
     const groups = [
       ["coding agent -> Studio", () => this.codingAgentToStudio(stack, rec, matrix, hasKimi)],
@@ -91,7 +91,7 @@ class Matrix extends Scenario {
   }
 
   async codingAgentToStudio(stack, rec, matrix, hasKimi) {
-    if (!hasKimi) { for (const id of ["1a", "1b"]) matrix[id] = { status: "BLOCKED", reason: "LLM_API_KEY (kimi-k2.6) is absent, the Studio Assistant cannot run" }; return; }
+    if (!hasKimi) { for (const id of ["1a", "1b"]) matrix[id] = { status: "BLOCKED", reason: "LLM_API_KEY (kimi-k3.1-pro) is absent, the Studio Assistant cannot run" }; return; }
     const httpDecision = (studio) => ({
       approve: async (id) => { const r = await studio.call("POST", `/v1/creator/assistant/tasks/${id}/approve`, { body: {}, headers: { "idempotency-key": randomUUID() } }); return { ok: r.status === 200, detail: { status: r.status, body: r.text.slice(0, 160) } }; },
       decline: async (id) => { const r = await studio.call("POST", `/v1/creator/assistant/tasks/${id}/decline`, { body: {}, headers: { "idempotency-key": randomUUID() } }); return { ok: r.status === 200, detail: { status: r.status, body: r.text.slice(0, 160) } }; }
@@ -264,7 +264,7 @@ class Matrix extends Scenario {
   // ── Row 2 x Studio: IM to the Assistant ──────────────────────────────
 
   async telegramToStudio(stack, rec, matrix, hasKimi) {
-    if (!hasKimi) { for (const id of ["3a", "3b", "3c", "3d"]) matrix[id] = { status: "BLOCKED", reason: "LLM_API_KEY (kimi-k2.6) is absent, the Studio Assistant cannot run" }; return; }
+    if (!hasKimi) { for (const id of ["3a", "3b", "3c", "3d"]) matrix[id] = { status: "BLOCKED", reason: "LLM_API_KEY (kimi-k3.1-pro) is absent, the Studio Assistant cannot run" }; return; }
     const account = await stack.account("tg-owner");
     const studio = new StudioApi(stack.url, Auth.bearer(account.apiKey));
     const hooks = new TelegramWebhooks(stack.registryUrl);
@@ -483,7 +483,7 @@ class Matrix extends Scenario {
     let linked = false;
 
     await walk(matrix, rec, "3e", "Feishu -> Studio: own-app credentials, signed+encrypted webhook, link code, the Assistant answers and a card button confirms a price change", async (cell) => {
-      if (!hasKimi) cell.block("LLM_API_KEY (kimi-k2.6) is absent, the Studio Assistant cannot run");
+      if (!hasKimi) cell.block("LLM_API_KEY (kimi-k3.1-pro) is absent, the Studio Assistant cannot run");
       const posted = await studio.call("POST", "/v1/creator/connections/feishu/credentials", { body: FEISHU_CREDENTIALS });
       const view = posted.json?.channels?.find((c) => c.kind === "feishu");
       const probes = platform.calls.filter((c) => c.host === "open.feishu.cn").map((c) => c.path);
@@ -568,7 +568,7 @@ class Matrix extends Scenario {
     };
 
     await walk(matrix, rec, "3f", "WeCom -> Studio: own-app credentials, encrypted webhook, link code, the Assistant answers via response_url, a price change confirmed by text (no buttons on WeCom)", async (cell) => {
-      if (!hasKimi) cell.block("LLM_API_KEY (kimi-k2.6) is absent, the Studio Assistant cannot run");
+      if (!hasKimi) cell.block("LLM_API_KEY (kimi-k3.1-pro) is absent, the Studio Assistant cannot run");
       await prepare(cell);
       const code = (await studio.call("POST", "/v1/creator/connections/wecom/connect", { body: {} })).json?.code;
       const link = await exchange(owner, code);

@@ -106,7 +106,7 @@ test("one Pi Agent per chat persists todo without a shadow; histories and writes
         { name: "update_todo", arguments: { todos: [{ title: `Check ${index}`, status: "completed" }] } },
       ];
       const action = actions[step++];
-      const message: AssistantMessage = { role: "assistant", api: "openai-completions", provider: "moonshotai-cn", model: "kimi-k2.6", timestamp: Date.now(),
+      const message: AssistantMessage = { role: "assistant", api: "openai-completions", provider: "moonshotai-cn", model: "kimi-k3.1-pro", timestamp: Date.now(),
         content: action ? [{ type: "toolCall", id: `call-${index}-${step}`, ...action }] : [{ type: "text", text: `Done ${index}` }],
         stopReason: action ? "toolUse" : "stop", usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
       };
@@ -181,7 +181,7 @@ test("model readiness follows the selected provider, not the presence of a Kimi 
     for (const [env, ready] of [
       [{ HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash", DEEPSEEK_API_KEY: "unit-test-key" }, true],
       [{ HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash", LLM_API_KEY: "unit-test-key" }, false],
-      [{ HATCH_FACTORY_LLM_PROFILE: "kimi-k2.6", LLM_API_KEY: "unit-test-key" }, true],
+      [{ HATCH_FACTORY_LLM_PROFILE: "kimi-k3.1-pro", LLM_API_KEY: "unit-test-key" }, true],
     ] as const) {
       const app = await createWorkbenchServer({ root, scope: { creatorId: "11111111-1111-4111-8111-111111111111", productId: "22222222-2222-4222-8222-222222222222" }, definitions: new MemoryAgentDefinitionRepository(await initialAgentDefinitions()), env });
       await new Promise<void>(resolve => app.server.listen(0, "127.0.0.1", resolve));

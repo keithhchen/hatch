@@ -56,8 +56,8 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
     return { ...(payload as Record<string, unknown>), thinking: { type: profile.thinkingType } };
   }
 
-  /** Whether the profile's thinking level is sent with every request; by default only when the provider requires it. */
-  protected sendsReasoning(profile: LlmProfile): boolean { return profile.thinkingRequired === true; }
+  /** Whether the profile's thinking level is sent with every request. */
+  protected sendsReasoning(_profile: LlmProfile): boolean { return false; }
 
   streamFn(profile: LlmProfile, config: ResolvedModelOptions): StreamFn {
     const api = openAICompletionsApi();

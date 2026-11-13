@@ -26,8 +26,6 @@ test("every profile names a family that resolves to an adapter", () => {
   assert.deepEqual(
     RUNTIME_LLM_PROFILE_NAMES.map((name) => [name, llmProfile(name).family]),
     [
-      ["kimi-k2.6", "kimi"],
-      ["kimi-k2.6-no-thinking", "kimi"],
       ["deepseek-v4-flash", "openai-compatible"],
       ["gemini-api", "gemini"],
       ["gemini-3.1-pro", "gemini"],
@@ -37,27 +35,23 @@ test("every profile names a family that resolves to an adapter", () => {
   );
 });
 
-test("KimiAdapter omits empty tool-call content and applies the profile's thinking type", () => {
+test("KimiAdapter omits empty tool-call content and sends reasoning_effort without a thinking field", () => {
   const profile = llmProfile("kimi-k3.1-pro");
-  const body = new KimiAdapter().normalizePayload(profile, toolCallHistory) as typeof toolCallHistory & { thinking: unknown };
+  const body = new KimiAdapter().normalizePayload(profile, { ...toolCallHistory, thinking: { type: "enabled" } }) as typeof toolCallHistory & Record<string, unknown>;
   assert.equal("content" in body.messages[1]!, false);
   assert.equal(body.messages[2]!.content, "kept");
   assert.equal(body.messages[3]!.content, "");
-  assert.deepEqual(body.thinking, { type: "enabled" });
-  const disabled = new KimiAdapter().normalizePayload(llmProfile("kimi-k2.6-no-thinking"), toolCallHistory) as { thinking: unknown };
-  assert.deepEqual(disabled.thinking, { type: "disabled" });
-  // K2.6 leaves thinking to pi-ai's reasoning level.
-  assert.equal("thinking" in (new KimiAdapter().normalizePayload(llmProfile("kimi-k2.6"), toolCallHistory) as object), false);
+  assert.equal("thinking" in body, false);
+  assert.equal(body.reasoning_effort, "low");
 });
 
 test("KimiAdapter only accepts official Moonshot endpoints and honors the profile's endpoint env", () => {
   const adapter = new KimiAdapter();
-  assert.throws(() => adapter.endpoint(llmProfile("kimi-k2.6"), { baseUrl: "https://api.openai.com/v1" }), /official Moonshot/);
+  assert.throws(() => adapter.endpoint(llmProfile("kimi-k3.1-pro"), { baseUrl: "https://api.openai.com/v1" }), /official Moonshot/);
   assert.deepEqual(
-    adapter.endpoint(llmProfile("kimi-k2.6"), { env: { OPENAI_BASE_URL: "https://api.moonshot.ai" } }),
+    adapter.endpoint(llmProfile("kimi-k3.1-pro"), { env: { OPENAI_BASE_URL: "https://api.moonshot.ai" } }),
     { baseUrl: "https://api.moonshot.ai/v1", provider: "moonshotai" }
   );
-  assert.equal(adapter.endpoint(llmProfile("kimi-k3.1-pro"), { env: { OPENAI_BASE_URL: "https://api.moonshot.ai" } }).baseUrl, "https://api.moonshot.cn/v1");
 });
 
 test("OpenAICompatibleAdapter keeps tool-call content and only adds the thinking type", () => {
@@ -74,23 +68,23 @@ test("GeminiAdapter leaves the payload to pi-ai", () => {
   assert.equal(new GeminiAdapter().model(profile, { baseUrl: profile.baseUrl, provider: profile.provider }).api, "google-generative-ai");
 });
 
-test("Factory adapters are chosen by the profile's factoryFamily and own the tool-call requirement", async () => {
+test("Factory adapters are chosen by the profile's family and own the tool-call requirement", async () => {
   const { factoryAdapterFor } = await import("./factory.js");
   const body = { model: "m", tool_choice: "auto" };
   const flash = llmProfile("deepseek-v4-flash");
-  const k26 = llmProfile("kimi-k2.6");
   const k3 = llmProfile("kimi-k3.1-pro");
   assert.deepEqual(factoryAdapterFor(flash).requireToolChoice(flash, body), { ...body, tool_choice: "required" });
-  assert.equal(factoryAdapterFor(k26).requireToolChoice(k26, body), body);
-  // Factory runs K3.1 as a plain provider: thinking disabled, not Moonshot's enabled.
-  assert.deepEqual((factoryAdapterFor(k3).normalizePayload(k3, body) as { thinking: unknown }).thinking, { type: "disabled" });
-  assert.equal(factoryAdapterFor(k3).recordedProvider(k3), "moonshotai-cn");
-  assert.equal(factoryAdapterFor(k26).recordedProvider(k26), "moonshot");
+  assert.equal(factoryAdapterFor(k3).requireToolChoice(k3, body), body);
+  assert.equal(factoryAdapterFor(k3).recordedProvider(k3), "moonshot");
 });
 
-test("adapters refuse to turn off thinking when the profile requires it", () => {
-  assert.throws(
-    () => adapterFor(llmProfile("kimi-k2.6")).resolve(llmProfile("kimi-k2.6"), { apiKey: "k", thinkingLevel: "off" as never }),
-    /Thinking must be enabled/
-  );
+test("Factory K3.1 request has reasoning_effort low and no thinking field, with Moonshot's rejected knobs removed", async () => {
+  const { factoryAdapterFor } = await import("./factory.js");
+  const k3 = llmProfile("kimi-k3.1-pro");
+  const body = factoryAdapterFor(k3).normalizePayload(k3, { model: "m", thinking: { type: "disabled" }, temperature: 0.2, max_tokens: 5, messages: [] }) as Record<string, unknown>;
+  assert.equal("thinking" in body, false);
+  assert.equal(body.reasoning_effort, "low");
+  assert.equal(body.tool_choice, "auto");
+  assert.equal("temperature" in body, false);
+  assert.equal("max_tokens" in body, false);
 });

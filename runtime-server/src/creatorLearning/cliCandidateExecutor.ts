@@ -181,7 +181,7 @@ function isolatedChildEnvironment(
     // to filtering this name instead of the Registry credential above.
     "HATCH_RUNTIME_SERVICE_TOKEN",
     // Factory uses its own model process. The evaluated product Runtime must
-    // select its normal K2.6 profile while retaining only the shared API
+    // select its normal K3.1 profile while retaining only the shared API
     // credential and endpoint (LLM_API_KEY and OPENAI_BASE_URL).
     "HATCH_CREATOR_MODEL",
     "HATCH_REVIEWER_MODEL",

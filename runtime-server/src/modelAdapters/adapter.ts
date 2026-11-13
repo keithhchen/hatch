@@ -76,9 +76,6 @@ export function nonNegativeIntegerOption(name: string, value: number | undefined
 export function resolveOptions(profile: LlmProfile, options: AdapterOptions, endpoint: Endpoint): ResolvedModelOptions {
   const env = options.env ?? process.env;
   const thinkingLevel = options.thinkingLevel ?? profile.thinkingLevel;
-  if (profile.thinkingRequired && (!thinkingLevel || thinkingLevel === ("off" as string))) {
-    throw new Error(`Thinking must be enabled for LLM profile ${profile.name}`);
-  }
   return {
     apiKey: options.apiKey?.trim() || requireLlmApiKey(profile, env),
     ...endpoint,

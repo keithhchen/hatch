@@ -50,7 +50,7 @@ test("Pi thinking lifecycle preserves each event kind, content index and payload
 test("committed user and tool images reach repeated provider requests without asset reads", async (t) => {
   const originalProfile = process.env.HATCH_LLM_PROFILE;
   const originalKey = process.env.LLM_API_KEY;
-  process.env.HATCH_LLM_PROFILE = "kimi-k2.6-no-thinking";
+  process.env.HATCH_LLM_PROFILE = "kimi-k3.1-pro";
   process.env.LLM_API_KEY = "test-only";
   t.after(() => {
     if (originalProfile === undefined) delete process.env.HATCH_LLM_PROFILE;
@@ -61,7 +61,7 @@ test("committed user and tool images reach repeated provider requests without as
   const requests: unknown[] = [];
   t.mock.method(globalThis, "fetch", async (_url: unknown, init: RequestInit) => {
     requests.push(JSON.parse(String(init.body)).messages);
-    return new Response('data: {"id":"test","object":"chat.completion.chunk","created":1,"model":"kimi-k2.6","choices":[{"index":0,"delta":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+    return new Response('data: {"id":"test","object":"chat.completion.chunk","created":1,"model":"kimi-k3.1-pro","choices":[{"index":0,"delta":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
       { headers: { "content-type": "text/event-stream" } });
   });
   let reads = 0;
@@ -99,7 +99,7 @@ test("task_start keeps its marked history turn while omitting the marker from th
   const originalFetch = globalThis.fetch;
   const originalProfile = process.env.HATCH_LLM_PROFILE;
   const originalApiKey = process.env.LLM_API_KEY;
-  process.env.HATCH_LLM_PROFILE = "kimi-k2.6-no-thinking";
+  process.env.HATCH_LLM_PROFILE = "kimi-k3.1-pro";
   process.env.LLM_API_KEY = "task-start-test-key";
   globalThis.fetch = (async (_input, init) => {
     requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
@@ -108,14 +108,14 @@ test("task_start keeps its marked history turn while omitting the marker from th
         id: "chatcmpl-task-start",
         object: "chat.completion.chunk",
         created: 1,
-        model: "kimi-k2.6",
+        model: "kimi-k3.1-pro",
         choices: [{ index: 0, delta: { role: "assistant", content: "Task started." }, finish_reason: null }]
       },
       {
         id: "chatcmpl-task-start",
         object: "chat.completion.chunk",
         created: 1,
-        model: "kimi-k2.6",
+        model: "kimi-k3.1-pro",
         choices: [{ index: 0, delta: {}, finish_reason: "stop" }]
       }
     ];
@@ -191,7 +191,7 @@ test("Pi runtime preserves legacy DOCX references without reading or re-parsing 
   const originalProfile = process.env.HATCH_LLM_PROFILE;
   const originalApiKey = process.env.LLM_API_KEY;
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-pi-asset-"));
-  process.env.HATCH_LLM_PROFILE = "kimi-k2.6-no-thinking";
+  process.env.HATCH_LLM_PROFILE = "kimi-k3.1-pro";
   process.env.LLM_API_KEY = "asset-test-key";
   globalThis.fetch = (async (_input, init) => {
     requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
@@ -200,14 +200,14 @@ test("Pi runtime preserves legacy DOCX references without reading or re-parsing 
         id: "chatcmpl-asset",
         object: "chat.completion.chunk",
         created: 1,
-        model: "kimi-k2.6",
+        model: "kimi-k3.1-pro",
         choices: [{ index: 0, delta: { role: "assistant", content: "Document received." }, finish_reason: null }]
       },
       {
         id: "chatcmpl-asset",
         object: "chat.completion.chunk",
         created: 1,
-        model: "kimi-k2.6",
+        model: "kimi-k3.1-pro",
         choices: [{ index: 0, delta: {}, finish_reason: "stop" }]
       }
     ];
@@ -312,7 +312,7 @@ for (const scenario of ["invalid_resource", "execution_error", "unknown_tool"] a
   test(`Pi loop ${scenario === "invalid_resource" ? "preserves an invalid Skill resource error and lets the model recover" : scenario === "execution_error" ? "preserves native Pi exception text when result details are empty and recovers" : "aborts a genuinely unregistered tool without another provider turn"}`, async (t) => {
     const originalProfile = process.env.HATCH_LLM_PROFILE;
     const originalKey = process.env.LLM_API_KEY;
-    process.env.HATCH_LLM_PROFILE = "kimi-k2.6-no-thinking";
+    process.env.HATCH_LLM_PROFILE = "kimi-k3.1-pro";
     process.env.LLM_API_KEY = "tool-classification-test-only";
     t.after(() => {
       if (originalProfile === undefined) delete process.env.HATCH_LLM_PROFILE;
@@ -364,13 +364,13 @@ for (const scenario of ["invalid_resource", "execution_error", "unknown_tool"] a
       assert.ok(requests.length <= 2, "the recovery must finish in the next provider turn");
       const first = requests.length === 1;
       const chunks = [{
-        id: toolCallId, object: "chat.completion.chunk", created: 1, model: "kimi-k2.6",
+        id: toolCallId, object: "chat.completion.chunk", created: 1, model: "kimi-k3.1-pro",
         choices: [{ index: 0, delta: first
           ? { role: "assistant", tool_calls: [{ index: 0, id: toolCallId, type: "function",
             function: { name: toolName, arguments: JSON.stringify(providerArgs) } }] }
           : { role: "assistant", content: "The reference is unavailable; I can continue without it." }, finish_reason: null }]
       }, {
-        id: toolCallId, object: "chat.completion.chunk", created: 1, model: "kimi-k2.6",
+        id: toolCallId, object: "chat.completion.chunk", created: 1, model: "kimi-k3.1-pro",
         choices: [{ index: 0, delta: {}, finish_reason: first ? "tool_calls" : "stop" }]
       }];
       return new Response(`${chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("")}data: [DONE]\n\n`,

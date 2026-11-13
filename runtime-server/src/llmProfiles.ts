@@ -1,15 +1,15 @@
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import type { StallLimits } from "./providerStall.js";
 
-export const RUNTIME_LLM_PROFILE_NAMES = ["kimi-k2.6", "kimi-k2.6-no-thinking", "deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro", "deepseek-v4-pro"] as const;
-export const FACTORY_LLM_PROFILE_NAMES = ["kimi-k2.6", "deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro"] as const;
+export const RUNTIME_LLM_PROFILE_NAMES = ["deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro", "deepseek-v4-pro"] as const;
+export const FACTORY_LLM_PROFILE_NAMES = ["deepseek-v4-flash", "gemini-api", "gemini-3.1-pro", "kimi-k3.1-pro"] as const;
 export type FactoryLlmProfileName = (typeof FACTORY_LLM_PROFILE_NAMES)[number];
 export const LLM_PROFILE_NAMES = RUNTIME_LLM_PROFILE_NAMES;
 export type LlmProfileName = RuntimeLlmProfileName | FactoryLlmProfileName;
 export type RuntimeLlmProfileName = (typeof RUNTIME_LLM_PROFILE_NAMES)[number];
 
-/** The model the Kimi K2.6 profiles run; the one place its name is spelled outside the profile table. */
-export const KIMI_K26_MODEL = "kimi-k2.6" as const;
+/** The model every Kimi use runs; the one place its name is spelled outside the profile table. */
+export const KIMI_MODEL = "kimi-k3.1-pro" as const;
 
 /** Which provider adapter owns a profile's endpoint, model object and request normalization. */
 export type ModelFamily = "kimi" | "openai-compatible" | "gemini";
@@ -17,8 +17,6 @@ export type ModelFamily = "kimi" | "openai-compatible" | "gemini";
 export type LlmProfile = {
   name: LlmProfileName;
   family: ModelFamily;
-  /** The family Creator Factory's rules follow when they differ from `family` (Factory runs this model as a plain provider). */
-  factoryFamily?: ModelFamily;
   provider: string;
   providerName: string;
   api: "openai-completions" | "google-generative-ai";
@@ -30,52 +28,18 @@ export type LlmProfile = {
   reasoning: boolean;
   thinkingLevel: ThinkingLevel;
   temperature?: number;
-  /** The thinking level is part of the provider contract: a caller may not turn it off. */
-  thinkingRequired?: boolean;
   /** Env var that may override baseUrl (validated by the adapter). */
   endpointEnv?: string;
   displayName?: string;
   cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
   thinkingType?: "enabled" | "disabled";
+  /** Moonshot's top-level `reasoning_effort`, sent on every request in place of a `thinking` field. */
+  reasoningEffort?: "low" | "high" | "max";
   /** How long a call may stay silent; the default of providerStall when absent. */
   stall?: StallLimits;
 };
 
 const PROFILES: Record<LlmProfileName, LlmProfile> = {
-  "kimi-k2.6": {
-    name: "kimi-k2.6",
-    family: "kimi",
-    provider: "moonshotai-cn",
-    providerName: "Moonshot Kimi",
-    api: "openai-completions",
-    model: "kimi-k2.6",
-    baseUrl: "https://api.moonshot.cn/v1",
-    apiKeyEnv: "LLM_API_KEY",
-    contextWindow: 262_144,
-    maxTokens: 262_144,
-    reasoning: true,
-    thinkingLevel: "high",
-    temperature: 1,
-    thinkingRequired: true,
-    endpointEnv: "OPENAI_BASE_URL",
-    displayName: "Kimi K2.6",
-    cost: { input: 0.95, output: 4, cacheRead: 0.16, cacheWrite: 0 }
-  },
-  "kimi-k2.6-no-thinking": {
-    name: "kimi-k2.6-no-thinking",
-    family: "kimi",
-    provider: "moonshotai-cn",
-    providerName: "Moonshot Kimi",
-    api: "openai-completions",
-    model: "kimi-k2.6",
-    baseUrl: "https://api.moonshot.cn/v1",
-    apiKeyEnv: "LLM_API_KEY",
-    contextWindow: 262_144,
-    maxTokens: 32_768,
-    reasoning: false,
-    thinkingLevel: "minimal",
-    thinkingType: "disabled",
-  },
   "deepseek-v4-flash": {
     name: "deepseek-v4-flash",
     family: "openai-compatible",
@@ -122,24 +86,24 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     reasoning: true,
     thinkingLevel: "low",
   },
-  // The plain pro, not -highspeed: that is the variant the user picked. K3.1 reasons either way: with `thinking: disabled` and
-  // a tool-heavy prompt it writes thousands of characters of reasoning into `content`, which the chat shows as the reply.
-  // Enabled, the reasoning goes to `reasoning_content` (rendered as thinking) and stays short.
+  // The one Kimi profile (plain pro, not -highspeed). K3.1 always reasons and rejects the `thinking` field; depth is the top-level
+  // `reasoning_effort`, which defaults to "max" and then took 150 s+ for a non-stream call. "low" keeps the reasoning in
+  // `reasoning_content` (rendered as thinking) and short. Reasoning tokens count against max_tokens. temperature is fixed at 1.
   "kimi-k3.1-pro": {
     name: "kimi-k3.1-pro",
     family: "kimi",
-    factoryFamily: "openai-compatible",
     provider: "moonshotai-cn",
     providerName: "Moonshot Kimi",
     api: "openai-completions",
-    model: "kimi-k3.1-pro",
+    model: KIMI_MODEL,
     baseUrl: "https://api.moonshot.cn/v1",
     apiKeyEnv: "LLM_API_KEY",
+    endpointEnv: "OPENAI_BASE_URL",
     contextWindow: 262_144,
     maxTokens: 32_768,
     reasoning: true,
     thinkingLevel: "low",
-    thinkingType: "enabled",
+    reasoningEffort: "low",
     stall: { firstEventMs: 45_000, silenceMs: 60_000, restarts: 2, backoffMs: 1_000 }
   },
   "gemini-3.1-pro": {
@@ -177,7 +141,6 @@ export function resolveLlmProfile(env: NodeJS.ProcessEnv = process.env): LlmProf
   return { ...profile };
 }
 
-/** Creator Factory is pinned to the same provider-neutral Kimi K2.6 profile. */
 /**
  * Resolve the provider used by Creator Factory. Kimi remains the default and
  * the profile is an explicit deployment choice, never an implicit fallback.
@@ -185,7 +148,7 @@ export function resolveLlmProfile(env: NodeJS.ProcessEnv = process.env): LlmProf
  * paused for quota/billing without changing the Product/Factory contract.
  */
 export function resolveFactoryLlmProfile(env: NodeJS.ProcessEnv = process.env): LlmProfile {
-  const configured = (env.HATCH_FACTORY_LLM_PROFILE?.trim() || "kimi-k2.6") as FactoryLlmProfileName;
+  const configured = (env.HATCH_FACTORY_LLM_PROFILE?.trim() || "kimi-k3.1-pro") as FactoryLlmProfileName;
   const profile = PROFILES[configured];
   if (!profile || !FACTORY_LLM_PROFILE_NAMES.includes(configured)) {
     throw new Error(`Unknown Factory HATCH_FACTORY_LLM_PROFILE: ${configured}. Expected one of: ${FACTORY_LLM_PROFILE_NAMES.join(", ")}`);

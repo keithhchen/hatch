@@ -1,5 +1,5 @@
 import type { Agent, AgentOptions, StreamFn } from "@earendil-works/pi-agent-core";
-import { KIMI_K26_MODEL, resolveFactoryLlmProfile } from "../llmProfiles.js";
+import { KIMI_MODEL, resolveFactoryLlmProfile } from "../llmProfiles.js";
 import { factoryAdapterFor } from "../modelAdapters/factory.js";
 import { agentFor, modelFor, modelsFor, streamFnFor } from "../modelAdapters/assemble.js";
 import type { AdapterOptions, AgentAdapterOptions, PiModel } from "../modelAdapters/adapter.js";
@@ -10,7 +10,7 @@ import type { AdapterOptions, AgentAdapterOptions, PiModel } from "../modelAdapt
  * Factory adapter (`modelAdapters/factory.ts`).
  */
 
-export const FACTORY_LLM_MODEL = KIMI_K26_MODEL;
+export const FACTORY_LLM_MODEL = KIMI_MODEL;
 
 export type FactoryLlmModel = PiModel;
 export type FactoryPiAdapterOptions = AdapterOptions;
