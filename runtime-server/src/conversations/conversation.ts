@@ -40,7 +40,8 @@ export type SendInput = {
 
 export type ConversationState = "idle" | "running" | "failed";
 /** `runId` names the Run in progress; it is not the conversation, and a conversation has many Runs. `error` is why the last Run failed. */
-export type ConversationStatus = { state: ConversationState; error?: RunFailure; runId?: string };
+/** `compacting` is set while history is being summarized: inside the running Run, or in the background after a reply. */
+export type ConversationStatus = { state: ConversationState; error?: RunFailure; runId?: string; compacting?: true };
 /** `runId` is the Run that took the message, when the conversation can say. */
 export type Sent = { conversationId: string; message: PublicMessage; queued: boolean; runId?: string };
 export type ConversationEvent = { type: string; [key: string]: unknown };

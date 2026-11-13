@@ -356,6 +356,13 @@ export class BackgroundCompactor<K> {
     await job.done;
   }
 
+  /** Waits for a job that is running to finish; one that is only waiting for its delay is cancelled, since it has not begun. */
+  async settle(key: K): Promise<void> {
+    const job = this.jobs.get(key);
+    if (job && !job.timer) await job.done;
+    else await this.preempt(key);
+  }
+
   has(key: K): boolean { return this.jobs.has(key); }
 
   async drain(): Promise<void> {

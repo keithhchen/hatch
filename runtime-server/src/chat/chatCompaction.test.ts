@@ -34,14 +34,14 @@ const output = (id: string, size: number): ConversationMessage => ({
 /** A test-only model: answers from a function, never from a real provider. */
 type Summarize = (input: SummarizeInput<RuntimeCompactionMessage>) => Promise<string>;
 
-async function harness(summarize: Summarize, options: { stopPollMs?: number; hard?: number } = {}) {
+async function harness(summarize: Summarize, options: { hard?: number; timeoutMs?: number; leaseMarginMs?: number } = {}) {
   const authority = new LocalRuntimeAuthority();
   const repository = new InMemoryConversationRepository(authority);
   const store = new RuntimeStore(authority);
   await repository.createConversation({ ...binding, id: conversationId, publicId: "compaction" });
   const hub = new RunEventHub();
-  const strategy = new CompactionStrategy(chatCompactionAdapter(summarize), { ...policyFor(20_000), prune: 150, trigger: 300, hard: options.hard ?? 300, tail: 80, cacheTtlMs: 1_000, timeoutMs: 3_000, maxOverflowRetries: 2 });
-  const compaction = (executorId: string) => new ChatCompaction({ repository, store, hub, strategy: async () => strategy, executorId, stopPollMs: options.stopPollMs ?? 10 });
+  const strategy = new CompactionStrategy(chatCompactionAdapter(summarize), { ...policyFor(20_000), prune: 150, trigger: 300, hard: options.hard ?? 300, tail: 80, cacheTtlMs: 1_000, timeoutMs: options.timeoutMs ?? 3_000, maxOverflowRetries: 2 });
+  const compaction = (executorId: string) => new ChatCompaction({ repository, store, hub, strategy: async () => strategy, executorId, waitPollMs: 10, leaseMarginMs: options.leaseMarginMs });
   /** A finished conversation: the first Run's question, a file it wrote, and its answer. */
   const finished = async () => {
     const { run } = await repository.acceptSubmission(submission(1, `Please write out/report.md for order 88231045 (${uuid})`));
@@ -94,20 +94,44 @@ const blocking = () => {
   return { summarize, release, started };
 };
 
-test("a new message preempts background compaction and waits for it to end; the history is untouched", async () => {
+test("a new message waits for a background compaction to finish and then sees the new summary", async () => {
   const model = blocking();
   const { store, repository, compaction, finished } = await harness(model.summarize);
   const instance = compaction("a");
   instance.afterReply(await finished());
   await settled(() => model.started.length === 1, "summarizer asked");
-  await instance.preempt(conversationId);
-  assert.equal(await repository.runningCompaction(conversationId), undefined, "ended before the message proceeds");
-  assert.equal((await store.readConversation(conversationId))[0]!.role, "user");
-  assert.deepEqual((await repository.snapshot(conversationId)).events.filter((row) => row.type === "compaction.completed"), []);
-  const types = (await repository.snapshot(conversationId)).events.filter((row) => row.type.startsWith("compaction.")).map((row) => `${row.type}:${(row.payload as { compaction_id: string }).compaction_id}`);
-  assert.equal(types.length, 2, "started and aborted");
-  assert.deepEqual(types.map((type) => type.split(":")[0]), ["compaction.started", "compaction.aborted"]);
-  assert.equal(new Set(types.map((type) => type.split(":")[1])).size, 1, "the same durable id");
+  let proceeded = false;
+  const waiting = instance.waitForCompaction(conversationId).then(() => { proceeded = true; });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.equal(proceeded, false, "the message is held while the summary is written");
+  assert.ok(await repository.runningCompaction(conversationId));
+  model.release();
+  await waiting;
+  assert.equal(await repository.runningCompaction(conversationId), undefined);
+  assert.equal((await store.readConversation(conversationId))[0]!.role, "compactionSummary", "it runs on the compacted history");
+  const types = (await repository.snapshot(conversationId)).events.filter((row) => row.type.startsWith("compaction.")).map((row) => row.type);
+  assert.deepEqual(types, ["compaction.started", "compaction.completed"]);
+});
+
+test("a slow compactor that is alive keeps its claim: nobody else takes it while its lease would have expired", async () => {
+  const model = answers();
+  const { repository, store, compaction, finished } = await harness(async (input) => { await new Promise((resolve) => setTimeout(resolve, 600)); return model.summarize(input); }, { timeoutMs: 100, leaseMarginMs: 100 });
+  compaction("a").afterReply(await finished());
+  await settled(async () => Boolean(await repository.runningCompaction(conversationId)), "claimed");
+  await new Promise((resolve) => setTimeout(resolve, 450));
+  assert.ok(await repository.runningCompaction(conversationId), "still claimed past the 200 ms lease");
+  assert.equal((await repository.beginCompaction({ id: "cmp_other", conversationId, executorId: "b", leaseMs: 200 })).claimed, false, "no second compaction");
+  await settled(async () => !(await repository.runningCompaction(conversationId)), "ended");
+  assert.ok((await store.readConversation(conversationId)).length > 0);
+});
+
+test("a compactor that crashed stops blocking the message once its lease expires", async () => {
+  const { repository, compaction } = await harness(answers().summarize);
+  assert.equal((await repository.beginCompaction({ id: "cmp_dead", conversationId, executorId: "gone", leaseMs: 80 })).claimed, true);
+  const started = Date.now();
+  await compaction("b").waitForCompaction(conversationId);
+  assert.ok(Date.now() - started >= 50 && Date.now() - started < 2_000);
+  assert.equal(await repository.runningCompaction(conversationId), undefined);
 });
 
 test("a turn that is about to run answers without a summary while the history fits the hard limit", async () => {
@@ -125,14 +149,19 @@ test("a turn that is about to run answers without a summary while the history fi
   void first;
 });
 
-test("a new message on another instance preempts it too", async () => {
+test("a message on another instance waits for it too", async () => {
   const model = blocking();
   const { repository, compaction, finished } = await harness(model.summarize);
   const first = compaction("a");
   const second = compaction("b");
   first.afterReply(await finished());
   await settled(() => model.started.length === 1, "summarizer asked");
-  await second.preempt(conversationId);
+  let proceeded = false;
+  const waiting = second.waitForCompaction(conversationId).then(() => { proceeded = true; });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.equal(proceeded, false);
+  model.release();
+  await waiting;
   assert.equal(await repository.runningCompaction(conversationId), undefined);
 });
 
@@ -142,7 +171,7 @@ test("a Run that started while it summarized makes the result stale: the new mes
   const instance = compaction("a");
   instance.afterReply(await finished());
   await settled(() => model.started.length === 1, "summarizer asked");
-  // The message is accepted without the preempt the service performs: the database guard must hold on its own.
+  // The message is accepted without the wait the service performs: the database guard must hold on its own.
   await repository.acceptSubmission(submission(2, "a new message"));
   model.release();
   await settled(async () => (await repository.runningCompaction(conversationId)) === undefined, "job ended");

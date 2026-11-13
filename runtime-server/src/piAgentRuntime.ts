@@ -41,6 +41,7 @@ import { SUMMARY_PREFIX, SUMMARY_SUFFIX } from "./compaction.js";
 import { renderSystemReminder } from "./surfaces/contract.js";
 import { createPiModel, createPiStreamFn } from "./piModel.js";
 import { withStallGuard, type StallLimits } from "./providerStall.js";
+import { withoutEarlierReasoning } from "./replayHygiene.js";
 import { SteerInterrupt } from "./steerInterrupt.js";
 import { providerFinish, type ProviderFinish } from "./modelAdapters/finish.js";
 import { traceAgentTools } from "./langfuse.js";
@@ -218,6 +219,9 @@ export class PiAgentRuntime implements AgentRuntime {
       message,
       storedAssetImages
     ));
+    // The turns that are over: only the current turn's tool loop replays its reasoning.
+    const earlierTurns = new Set<AgentMessage>(storedMessages);
+    let liveState: Promise<string | undefined> | undefined;
     const currentAssetImages = input.task_start
       ? []
       : ctx.messages.at(-1)?.model_images
@@ -311,9 +315,11 @@ export class PiAgentRuntime implements AgentRuntime {
         return undefined;
       },
       transformContext: async (messages) => {
-        const live = await ctx.liveState?.();
+        // Read once per Run: it is a snapshot for the Run, and a call after every tool step would repeat its cost.
+        liveState ??= ctx.liveState?.();
+        const live = await liveState;
         return [
-          ...await compactContext(messages),
+          ...withoutEarlierReasoning(await compactContext(messages), earlierTurns),
           // Request-only: Pi sends the transformed list but keeps its own
           // transcript, so the reminder is never stored or repeated in history.
           piUserMessage([
