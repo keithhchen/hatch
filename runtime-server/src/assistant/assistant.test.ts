@@ -1001,12 +1001,13 @@ test("The Assistant's context is held to its budget, not to the model's window",
   const { ASSISTANT_CONTEXT_BUDGET } = await import("./chat.js");
   const profile = { name: "t", contextWindow: 1_000_000 } as never;
   const strategy = chatCompactionStrategy(profile, { budget: ASSISTANT_CONTEXT_BUDGET, summarize: async () => "s" });
-  assert.equal(strategy.policy.trigger, 40_000);
-  assert.equal(strategy.policy.tail, 15_000);
+  assert.equal(strategy.policy.trigger, 60_000);
+  assert.equal(strategy.policy.tail, 10_000);
+  assert.equal(strategy.policy.timeoutMs, 20_000);
   const messages = (tokens: number) => [{ role: "user" as const, content: "x".repeat(tokens * 4) }, { role: "assistant" as const, content: "ok" }];
   const request = { now: Date.now(), signal: new AbortController().signal };
-  assert.equal(strategy.wants(messages(30_000), request), false);
-  assert.equal(strategy.wants(messages(45_000), request), true);
+  assert.equal(strategy.wants(messages(50_000), request), false);
+  assert.equal(strategy.wants(messages(70_000), request), true);
   const product = chatCompactionStrategy(profile, { summarize: async () => "s" });
-  assert.equal(product.wants(messages(45_000), request), false, "a Product's conversation keeps the window-derived policy");
+  assert.equal(product.wants(messages(70_000), request), false, "a Product's conversation keeps the window-derived policy");
 });

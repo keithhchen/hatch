@@ -352,6 +352,8 @@ export interface ConversationRepository {
    */
   beginCompaction(input: { id: string; conversationId: string; executorId: string; leaseMs: number }): Promise<{ claimed: boolean; latestRunId?: string }>;
   runningCompaction(conversationId: string): Promise<CompactionClaim | undefined>;
+  /** Pushes the claim's lease out by `leaseMs` from now: a compactor that is alive keeps its claim. False when the claim has ended. */
+  renewCompaction(compactionId: string, leaseMs: number): Promise<boolean>;
   endCompaction(compactionId: string): Promise<void>;
   /** Appends the transcript checkpoint and the journal entry together, and ends the claim. False when stale. */
   commitCompaction(input: CommitCompactionInput): Promise<boolean>;
@@ -715,6 +717,15 @@ export class InMemoryConversationRepository implements ConversationRepository {
     await this.readReady();
     const running = [...this.compactions.values()].find((claim) => claim.conversationId === conversationId && !claim.endedAt && Date.parse(claim.leaseExpiresAt) > Date.now());
     return running ? { ...running } : undefined;
+  }
+
+  async renewCompaction(compactionId: string, leaseMs: number): Promise<boolean> {
+    return this.write(async () => {
+      const claim = this.compactions.get(compactionId);
+      if (!claim || claim.endedAt) return false;
+      this.compactions.set(compactionId, { ...claim, leaseExpiresAt: new Date(Date.now() + leaseMs).toISOString() });
+      return true;
+    });
   }
 
   async endCompaction(compactionId: string): Promise<void> {
@@ -1443,6 +1454,12 @@ export class PostgresConversationRepository implements ConversationRepository {
     const result = await this.pool.query<CompactionRow>("SELECT * FROM hatch_conversation_compactions WHERE conversation_id = $1 AND ended_at IS NULL AND lease_expires_at > now()", [conversationId]);
     const row = result.rows[0];
     return row ? { id: row.id, conversationId: row.conversation_id, executorId: row.executor_id, leaseExpiresAt: new Date(row.lease_expires_at).toISOString() } : undefined;
+  }
+
+  async renewCompaction(compactionId: string, leaseMs: number): Promise<boolean> {
+    await this.initialize();
+    const result = await this.pool.query("UPDATE hatch_conversation_compactions SET lease_expires_at = now() + ($2::bigint * interval '1 millisecond') WHERE id = $1 AND ended_at IS NULL RETURNING id", [compactionId, leaseMs]);
+    return result.rows.length > 0;
   }
 
   async endCompaction(compactionId: string): Promise<void> {

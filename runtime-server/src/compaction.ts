@@ -99,7 +99,7 @@ export type ChatCompactionOptions = {
   contextWindow?: number;
   cacheTtlMs?: number;
   /** A fixed budget in tokens in place of the one the window gives; the window stays the ceiling. */
-  budget?: Partial<Pick<CompactionPolicy, "trigger" | "tail" | "prune" | "hard">>;
+  budget?: Partial<Pick<CompactionPolicy, "trigger" | "tail" | "prune" | "hard" | "timeoutMs">>;
   /** Chat conversations have no memory layer, so none is wired; the port stays for one that does. */
   memory?: CompactionMemory<RuntimeCompactionMessage>;
 };

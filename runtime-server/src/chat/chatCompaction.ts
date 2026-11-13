@@ -34,7 +34,10 @@ export interface RunCompactions {
   forRun(run: { run: ConversationRunRecord; conversation: ConversationRecord; state: RunStateMachine; publish: (message: OutboundMessage) => void; signal: AbortSignal; usage?: UsageSink }): TurnCompaction;
 }
 
-type Repository = Pick<ConversationRepository, "appendEvent" | "beginCompaction" | "runningCompaction" | "endCompaction" | "commitCompaction">;
+type Repository = Pick<ConversationRepository, "appendEvent" | "beginCompaction" | "renewCompaction" | "runningCompaction" | "endCompaction" | "commitCompaction">;
+
+/** How long past the summary's timeout a compaction claim lives without a renewal. */
+const LEASE_MARGIN_MS = 10_000;
 
 type Request = { trigger: CompactionTrigger; phase: CompactionPhase; reason: CompactionReason; force?: boolean; tailScale?: number; turnWaiting?: boolean };
 
@@ -62,6 +65,8 @@ export class ChatCompaction implements RunCompactions {
     now?: () => number;
     /** How often a message waiting for another instance's compaction looks again. */
     waitPollMs?: number;
+    /** How long past the summary's timeout a claim lives unrenewed. */
+    leaseMarginMs?: number;
   }) {}
 
   /** The channel layer's single notice per compaction hangs off this: one `started` per compaction id. */
@@ -132,8 +137,12 @@ export class ChatCompaction implements RunCompactions {
     const { repository, store } = this.deps;
     const strategy = await this.deps.strategy(run.conversationId);
     const compactionId = newCompactionId();
-    const claim = await repository.beginCompaction({ id: compactionId, conversationId: run.conversationId, executorId: this.deps.executorId, leaseMs: strategy.policy.timeoutMs * 2 });
+    // The lease outlasts the summary's own timeout by a margin; while this process is alive it keeps renewing, so a slow
+    // compaction is never taken for a dead one and run twice, and a dead one frees the conversation within one lease.
+    const leaseMs = strategy.policy.timeoutMs + (this.deps.leaseMarginMs ?? LEASE_MARGIN_MS);
+    const claim = await repository.beginCompaction({ id: compactionId, conversationId: run.conversationId, executorId: this.deps.executorId, leaseMs });
     if (!claim.claimed) return;
+    const heartbeat = setInterval(() => void repository.renewCompaction(compactionId, leaseMs).catch((error) => log.error("compaction_renew_failed", { compaction_id: compactionId, error: String(error) })), Math.max(10, Math.floor(leaseMs / 3)));
     let started = false;
     let committed = false;
     try {
@@ -154,6 +163,7 @@ export class ChatCompaction implements RunCompactions {
       // Stopped (shutdown): the history is untouched. Anything else is retried after the next reply.
       if (!(error instanceof CompactionAborted)) throw error;
     } finally {
+      clearInterval(heartbeat);
       if (started && !committed) await this.announce({ conversationId: run.conversationId, runId: run.id, compactionId, state: "aborted" });
       await repository.endCompaction(compactionId);
     }

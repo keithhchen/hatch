@@ -45,9 +45,10 @@ const ACTIVE = new Set(["queued", "running", "waiting_for_tool", "compacting"]);
 /**
  * The Assistant's history is the Expert's whole working life, so its context is held to a fixed budget instead of the model's
  * window: a summary after the reply that crosses `trigger`, the newest `tail` tokens kept verbatim, old tool results pruned from `prune`.
+ * A summary that takes longer than `timeoutMs` degrades to the tail, so a message never waits much longer than that (plus the lease margin if the compactor died).
  * `hard` is the size at which a turn that is about to run waits for a summary rather than ride on.
  */
-export const ASSISTANT_CONTEXT_BUDGET = { trigger: 40_000, tail: 15_000, prune: 25_000, hard: 100_000 } as const;
+export const ASSISTANT_CONTEXT_BUDGET = { trigger: 60_000, tail: 10_000, prune: 40_000, hard: 150_000, timeoutMs: 20_000 } as const;
 
 /** What a Run of the Assistant needs beyond the binding every Chat Run has. */
 export type AssistantScope = TurnBinding & { accountId: string };

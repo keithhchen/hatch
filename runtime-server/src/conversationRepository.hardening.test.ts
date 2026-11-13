@@ -126,7 +126,10 @@ for (const backend of ["memory", "file", "postgres"] as const) {
     assert.equal(first.claimed, true);
     assert.equal((await repository.beginCompaction({ id: "cmp_2", conversationId: id, executorId: "b", leaseMs: 60_000 })).claimed, false);
     assert.ok(await repository.runningCompaction(id));
+    assert.equal(await repository.renewCompaction("cmp_1", 120_000), true);
+    assert.ok(Date.parse((await repository.runningCompaction(id))!.leaseExpiresAt) > Date.now() + 100_000, "renewing pushes the lease out");
     await repository.endCompaction("cmp_1");
+    assert.equal(await repository.renewCompaction("cmp_1", 1_000), false, "an ended claim is not renewed");
     assert.equal(await repository.runningCompaction(id), undefined);
 
     const event = { type: "conversation.compacted" as const, conversation_id: id, run_id: "run-0", compaction_id: "cmp_3", trigger: "auto" as const, phase: "pre_turn" as const, reason: "context_limit" as const, message: "m", replacement_history: [{ role: "compactionSummary" as const, content: "summary" }] };
