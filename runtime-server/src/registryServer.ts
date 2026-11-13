@@ -139,7 +139,7 @@ import { CorpusPublisher, CorpusPublishError } from "./creatorLearning/corpusPub
 import { imageMime } from "./factoryAgents/imageRefs.js";
 import { createProductLive, ExpertProduct, SystemMissing, type ProductLiveService } from "./creatorLearning/productLive/index.js";
 import { CreatorRegistryReleaseStore, type CreatorRegistryRelease } from "./creatorLearning/creatorRegistryRelease.js";
-import { corpusOutputSchema } from "./creatorLearning/corpusNode.js";
+import { parseStoredCorpus } from "./creatorLearning/corpusNode.js";
 import { flushLangfuseObservability, initializeLangfuseObservability } from "./langfuse.js";
 import { accountAvatarApplicationServiceFromEnvironment, MAX_ACCOUNT_AVATAR_BYTES } from "./accountAvatar.js";
 import {
@@ -1609,7 +1609,7 @@ async function resolvePublishedCreatorToolConnection(
     throw new Error("published Expert release does not match the requested product");
   }
   if (!context.nodeObjectStore) throw new Error("Expert Registry object storage is unavailable");
-  const corpus = corpusOutputSchema.parse(
+  const corpus = parseStoredCorpus(
     JSON.parse((await context.nodeObjectStore.get(release.corpus_ref)).toString("utf8"))
   );
   const declared = corpus.tools.find((tool) => tool.id === toolId);

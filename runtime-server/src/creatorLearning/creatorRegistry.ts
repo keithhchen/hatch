@@ -3,7 +3,7 @@ import { z } from "zod";
 import { normalizeNodeObjectPath } from "../node.js";
 import type { PostgresQueryExecutor } from "../postgresStore.js";
 import { normalizeBriefSpec, type BriefSpec } from "../brief.js";
-import { corpusOutputSchema, type CorpusOutput } from "./corpusNode.js";
+import { corpusOutputSchema, parseStoredCorpus, type CorpusOutput } from "./corpusNode.js";
 import { isObjectStoreNotFound, type ArtifactObjectStore } from "./objectStore.js";
 
 const RELEASE_REF_SCHEMA = z.object({
@@ -450,7 +450,7 @@ type RegistryReleaseRow = {
 
 function parseCorpus(bytes: Buffer): CorpusOutput {
   try {
-    return corpusOutputSchema.parse(JSON.parse(bytes.toString("utf8")));
+    return parseStoredCorpus(JSON.parse(bytes.toString("utf8")));
   } catch (error) {
     throw new CreatorRegistryError("invalid_corpus", `The Corpus output is invalid: ${error instanceof Error ? error.message : String(error)}`);
   }
