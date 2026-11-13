@@ -1,11 +1,11 @@
-import { createHash } from "node:crypto";
-import type { ConversationRecord, ConversationRepository } from "../conversationRepository.js";
+import type { ConversationBinding, ConversationRecord, ConversationRepository, ThreadKey } from "../conversationRepository.js";
 import type { AgentCorpus, ResolvedAgentCorpus } from "../agentCorpus.js";
 import type { Connection, Principal } from "../surfaces/contract.js";
 import type { PrincipalLimits } from "./chatService.js";
 import { ChatError, principalKey, type ContactPrincipal } from "./principal.js";
 import { productRequiresLocalTools } from "./toolSurface.js";
 import type { ConversationRef } from "./gateway.js";
+import { ThreadConversations } from "./threadConversations.js";
 
 /** Where Connections live. The channel layer owns the table; the Chat API only reads it. */
 export interface ConnectionDirectory {
@@ -18,21 +18,28 @@ export type BoundContact = {
   requiresLocalTools: boolean;
 };
 
-const shortHash = (value: string): string => createHash("sha256").update(value).digest("hex").slice(0, 24);
-
 /**
  * Gives a contact the Product its Connection answers with. The binding depends
  * on the Connection and the Product's live release, never on an order or purchase,
- * and the contact's conversations are owned by (connection, contact) alone.
+ * and the contact's conversations are owned by (connection, contact) alone. In a thread the contact is in
+ * the conversation its pointer names; in a group every person has their own.
  */
 export class ContactBinder {
+  private readonly threads: ThreadConversations;
   constructor(
     private readonly connections: ConnectionDirectory,
     private readonly products: { resolveByProduct(productId: string, signal?: AbortSignal): Promise<ResolvedAgentCorpus> },
-    private readonly repository: Pick<ConversationRepository, "createConversation" | "getConversation">
-  ) {}
+    private readonly repository: Pick<ConversationRepository, "createConversation" | "getConversation" | "threadConversation" | "adoptThread" | "moveThread">
+  ) { this.threads = new ThreadConversations(repository); }
 
-  async bind(principal: ContactPrincipal, ref: ConversationRef, signal?: AbortSignal): Promise<BoundContact> {
+  /** Starts a fresh conversation for the contact in this thread; the old one stays as history. Repeating the same `startedBy` changes nothing. */
+  async restart(principal: ContactPrincipal, ref: Extract<ConversationRef, { kind: "thread" }>, startedBy: string, signal?: AbortSignal): Promise<ConversationRecord> {
+    if (ref.connectionId !== principal.connectionId) throw new ChatError("conversation_not_found", "Conversation was not found.", 404);
+    const { binding } = await this.resolve(principal, signal);
+    return this.threads.restart(threadKey(principal, ref), binding, startedBy);
+  }
+
+  private async resolve(principal: ContactPrincipal, signal?: AbortSignal) {
     const connection = await this.connections.get(principal.connectionId);
     if (!connection || connection.state !== "active") throw new ChatError("connection_unavailable", "This channel connection is not active.", 409);
     // `org` members and `public` customers are both contacts; only the owner's `self` Connection acts as an account.
@@ -40,14 +47,19 @@ export class ContactBinder {
       throw new ChatError("connection_not_shared", "This connection does not serve contacts.", 403);
     }
     const corpus = await this.products.resolveByProduct(connection.target.productId, signal);
-    const owner = principalKey(principal);
-    const binding = {
-      ownerAccountId: owner,
+    const binding: ConversationBinding = {
+      ownerAccountId: principalKey(principal),
       creatorId: corpus.corpus.creator.id,
       agentId: corpus.corpus.product.id,
       productId: corpus.corpus.product.id,
       corpusDigest: corpus.digest
     };
+    return { corpus, binding };
+  }
+
+  async bind(principal: ContactPrincipal, ref: ConversationRef, signal?: AbortSignal): Promise<BoundContact> {
+    const { corpus, binding } = await this.resolve(principal, signal);
+    const owner = binding.ownerAccountId;
     const requiresLocalTools = productRequiresLocalTools(corpus.corpus as AgentCorpus);
     if (ref.kind === "conversation") {
       const existing = await this.repository.getConversation(ref.id);
@@ -57,16 +69,11 @@ export class ContactBinder {
       return { conversation: existing, corpus, requiresLocalTools };
     }
     if (ref.connectionId !== principal.connectionId) throw new ChatError("conversation_not_found", "Conversation was not found.", 404);
-    const key = `thread:${ref.connectionId}:${ref.threadId}:${principal.contactId}`;
-    const created = await this.repository.createConversation({
-      ...binding,
-      id: `conversation:${shortHash([owner, binding.creatorId, binding.productId, ref.threadId].join("\u0000"))}:${shortHash(key)}`,
-      publicId: `conv_${shortHash(key)}`,
-      clientRequestId: key
-    });
-    return { conversation: created.conversation, corpus, requiresLocalTools };
+    return { conversation: await this.threads.current(threadKey(principal, ref), binding), corpus, requiresLocalTools };
   }
 }
+
+const threadKey = (principal: ContactPrincipal, ref: Extract<ConversationRef, { kind: "thread" }>): ThreadKey => ({ connectionId: ref.connectionId, threadId: ref.threadId, principalId: principal.contactId });
 
 /** A contact may send a bounded number of messages to a Product: the repository counts them. */
 export class SentMessageLimits implements PrincipalLimits {

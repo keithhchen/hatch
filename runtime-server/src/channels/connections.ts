@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { AgentTarget, Audience, Connection, ConnectionState, Principal } from "../surfaces/contract.js";
-import type { ChannelKind } from "./types.js";
+import type { ChannelKind, SenderProfile } from "./types.js";
 
 /** A Connection as the channel layer holds it. `scope` is the platform tenant it was authorized on: empty for our shared account. */
 export type ChannelConnection = Connection & { scope: string };
@@ -34,6 +34,13 @@ export function principalFor(connection: ChannelConnection, identity: Identity):
     : { kind: "contact", connectionId: connection.id, contactId: identity.id };
 }
 
+/**
+ * Platforms whose sender id is the same user id in every bot, so Hatch can tell that two Connections met one person. Not
+ * LINE, Lark, Messenger, Instagram or Slack (an id per provider, app, page or workspace), and not WhatsApp, whose thread carries the
+ * business account and phone number around the sender's number.
+ */
+export const GLOBAL_USER_ID_CHANNELS: ReadonlySet<ChannelKind> = new Set<ChannelKind>(["telegram", "discord"]);
+
 /** Port: who each platform sender is, and which Agent answers them. */
 export interface ConnectionRepository {
   /** A one-time code the owner sends from the platform, to bind their chat to the Assistant (Studio) or to one of their Products (Chat). The self Connection is created on the first call. */
@@ -48,7 +55,11 @@ export interface ConnectionRepository {
    */
   resolveConnection(payload: { channel: ChannelKind; scope: string; senderId: string }): Promise<Resolved | undefined>;
   /** A contact writes in to a `public` Connection: remember them. */
-  meet(connection: ChannelConnection, who: { senderId: string; threadId: string }): Promise<Identity>;
+  meet(connection: ChannelConnection, who: { senderId: string; threadId: string; profile?: SenderProfile }): Promise<Identity>;
+  /** A contact wrote again: keep what Hatch knows of the person current. Hatch-internal; no Connection's owner sees it. */
+  recognize(connection: ChannelConnection, who: { senderId: string; profile?: SenderProfile }): Promise<void>;
+  /** The person behind this platform user signed in as `accountId`. False when they are already linked to another account. */
+  linkAccount(channel: ChannelKind, platformUserId: string, accountId: string): Promise<boolean>;
   /** The Assistant Connections the account owns that someone is linked to, most recently active first: where the Assistant reaches them. */
   linked(ownerAccountId: string): Promise<Resolved[]>;
   /** Every Connection the account owns, linked or not, with what Studio shows of it. */

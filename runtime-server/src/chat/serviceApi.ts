@@ -23,6 +23,8 @@ const Client = z.object({ client: z.enum(["im", "dm"]), device: z.string().optio
 const Send = z.object({ principal: Principal, conversation: Conversation, client: Client, message_id: text, parts: z.array(Part).min(1) }).strict();
 const Upload = z.object({ principal: Principal, conversation: Conversation, name: z.string().min(1).max(512) }).strict();
 
+const Restart = z.object({ principal: Principal, thread: z.object({ kind: z.literal("thread"), connectionId: text, threadId: text }).strict(), key: text }).strict();
+
 const ROOT = "/v1/service/chat";
 /** The largest file the asset pipeline accepts, plus nothing: a larger body is refused before it is read. */
 const MAX_UPLOAD_BYTES = Math.max(...Object.values(MAX_BYTES));
@@ -71,6 +73,11 @@ export class ChatServiceApi {
     if (req.method === "POST" && route === "/messages") {
       const input = parse(Send, json((await readBytes(req, 1_048_576)).toString("utf8")));
       reply(200, await this.deps.gateway.send(input.principal, input.conversation, normalizeClientAttributes(input.client), input.message_id, input.parts));
+      return true;
+    }
+    if (req.method === "POST" && route === "/conversations/restart") {
+      const input = parse(Restart, json((await readBytes(req, 65_536)).toString("utf8")));
+      reply(200, await this.deps.gateway.restart(input.principal, input.thread, input.key));
       return true;
     }
     if (req.method === "POST" && route === "/uploads") {

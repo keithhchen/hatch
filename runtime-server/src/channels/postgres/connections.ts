@@ -1,7 +1,7 @@
 import type { Pool, PoolClient } from "pg";
 import type { AgentTarget, Audience, ConnectionState } from "../../surfaces/contract.js";
-import { newLinkCode, STUDIO_TARGET, targetKey, type ChannelConnection, type ConnectionRepository, type Identity, type Linked, type OwnedConnection, type Resolved } from "../connections.js";
-import type { ChannelKind } from "../types.js";
+import { newLinkCode, STUDIO_TARGET, targetKey, type ChannelConnection, type ConnectionRepository, type Identity, type Linked, type OwnedConnection, type Resolved, GLOBAL_USER_ID_CHANNELS } from "../connections.js";
+import type { ChannelKind, SenderProfile } from "../types.js";
 
 const LINK_CODE_MS = 15 * 60_000;
 
@@ -54,6 +54,27 @@ export class PostgresConnections implements ConnectionRepository {
       CREATE INDEX IF NOT EXISTS hatch_channel_identities_connection_idx ON hatch_channel_identities (connection_id);
       -- Rows that an earlier version stored as role 'guest' stay in place and are never read: only 'owner' rows are admitted.
       ALTER TABLE hatch_channel_identities ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'owner' CHECK (role IN ('owner', 'guest'));
+      -- The person behind a platform user, across every Connection that met them. Only Hatch reads it; contacts stay isolated per Connection.
+      CREATE TABLE IF NOT EXISTS hatch_channel_people (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        channel TEXT NOT NULL,
+        platform_user_id TEXT NOT NULL,
+        display_name TEXT,
+        username TEXT,
+        language TEXT,
+        first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        account_id UUID,
+        UNIQUE (channel, platform_user_id)
+      );
+      ALTER TABLE hatch_channel_identities ADD COLUMN IF NOT EXISTS person_id UUID REFERENCES hatch_channel_people (id);
+      -- Idempotent backfill: contacts met before people were recorded, on the platforms where the sender id is a global user id.
+      INSERT INTO hatch_channel_people (channel, platform_user_id)
+        SELECT DISTINCT i.channel, i.sender_id FROM hatch_channel_identities i JOIN hatch_connections c ON c.id = i.connection_id
+        WHERE i.person_id IS NULL AND c.audience <> 'self' AND i.channel IN (${[...GLOBAL_USER_ID_CHANNELS].map(channel => `'${channel}'`).join(", ")})
+        ON CONFLICT (channel, platform_user_id) DO NOTHING;
+      UPDATE hatch_channel_identities i SET person_id = p.id FROM hatch_channel_people p, hatch_connections c
+        WHERE i.person_id IS NULL AND c.id = i.connection_id AND c.audience <> 'self' AND p.channel = i.channel AND p.platform_user_id = i.sender_id;
     `);
     const client = await pool.connect();
     try {
@@ -131,10 +152,45 @@ export class PostgresConnections implements ConnectionRepository {
     return tenant ? { connection: connectionOf(tenant) } : undefined;
   }
 
-  async meet(connection: ChannelConnection, who: { senderId: string; threadId: string }): Promise<Identity> {
-    const row = (await this.pool.query(`INSERT INTO hatch_channel_identities (connection_id, channel, scope, sender_id, thread_id) VALUES ($1, $2, $3, $4, $5)
-      ON CONFLICT (channel, scope, sender_id) DO UPDATE SET thread_id = EXCLUDED.thread_id WHERE hatch_channel_identities.connection_id = EXCLUDED.connection_id
-      RETURNING id, connection_id, sender_id, thread_id`, [connection.id, connection.channel, connection.scope, who.senderId, who.threadId])).rows[0];
+  /** The person a platform user is, made on first sight. Name, username and language follow the platform; an hour of silence also counts as a visit. */
+  private async person(channel: string, platformUserId: string, profile: SenderProfile = {}): Promise<string | null> {
+    if (!GLOBAL_USER_ID_CHANNELS.has(channel as ChannelKind)) return null;
+    const row = (await this.pool.query(`
+      WITH seen AS (
+        INSERT INTO hatch_channel_people (channel, platform_user_id, display_name, username, language) VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (channel, platform_user_id) DO UPDATE SET
+          display_name = COALESCE(EXCLUDED.display_name, hatch_channel_people.display_name),
+          username = COALESCE(EXCLUDED.username, hatch_channel_people.username),
+          language = COALESCE(EXCLUDED.language, hatch_channel_people.language),
+          last_seen_at = now()
+        WHERE (EXCLUDED.display_name IS NOT NULL AND EXCLUDED.display_name IS DISTINCT FROM hatch_channel_people.display_name)
+           OR (EXCLUDED.username IS NOT NULL AND EXCLUDED.username IS DISTINCT FROM hatch_channel_people.username)
+           OR (EXCLUDED.language IS NOT NULL AND EXCLUDED.language IS DISTINCT FROM hatch_channel_people.language)
+           OR hatch_channel_people.last_seen_at < now() - interval '1 hour'
+        RETURNING id
+      )
+      SELECT id FROM seen UNION ALL SELECT id FROM hatch_channel_people WHERE channel = $1 AND platform_user_id = $2 LIMIT 1
+    `, [channel, platformUserId, profile.name ?? null, profile.username?.replace(/^@/, "") ?? null, profile.language ?? null])).rows[0];
+    return row.id;
+  }
+
+  async recognize(connection: ChannelConnection, who: { senderId: string; profile?: SenderProfile }): Promise<void> {
+    const personId = await this.person(connection.channel, who.senderId, who.profile);
+    if (personId) await this.pool.query("UPDATE hatch_channel_identities SET person_id = $4 WHERE channel = $1 AND scope = $2 AND sender_id = $3 AND person_id IS NULL", [connection.channel, connection.scope, who.senderId, personId]);
+  }
+
+  async linkAccount(channel: ChannelKind, platformUserId: string, accountId: string): Promise<boolean> {
+    const result = await this.pool.query(`INSERT INTO hatch_channel_people (channel, platform_user_id, account_id) VALUES ($1, $2, $3)
+      ON CONFLICT (channel, platform_user_id) DO UPDATE SET account_id = EXCLUDED.account_id WHERE hatch_channel_people.account_id IS NULL OR hatch_channel_people.account_id = EXCLUDED.account_id
+      RETURNING id`, [channel, platformUserId, accountId]);
+    return result.rowCount === 1;
+  }
+
+  async meet(connection: ChannelConnection, who: { senderId: string; threadId: string; profile?: SenderProfile }): Promise<Identity> {
+    const personId = await this.person(connection.channel, who.senderId, who.profile);
+    const row = (await this.pool.query(`INSERT INTO hatch_channel_identities (connection_id, channel, scope, sender_id, thread_id, person_id) VALUES ($1, $2, $3, $4, $5, $6)
+      ON CONFLICT (channel, scope, sender_id) DO UPDATE SET thread_id = EXCLUDED.thread_id, person_id = COALESCE(hatch_channel_identities.person_id, EXCLUDED.person_id) WHERE hatch_channel_identities.connection_id = EXCLUDED.connection_id
+      RETURNING id, connection_id, sender_id, thread_id`, [connection.id, connection.channel, connection.scope, who.senderId, who.threadId, personId])).rows[0];
     // The sender already belongs to another Connection: a contact is never shared between them.
     if (!row) throw new Error("This sender belongs to another Connection");
     return identityOf(row);

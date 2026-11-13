@@ -82,6 +82,8 @@ class RecordingTarget implements TargetHandler {
 class FakeGateway implements ChatGateway {
   submitted: Array<{ principal: Principal; conversation: ConversationRef; client: ClientAttributes; messageId: string; parts: ContentPart[] }> = [];
   uploaded: Array<{ principal: Principal; conversation: ConversationRef; name: string }> = [];
+  restarted: string[] = [];
+  async restart(_principal: Principal, _thread: unknown, key: string) { this.restarted.push(key); return { conversationId: "conversation-2" }; }
   /** A failure for the next call to `send`: a ChatError is a refusal, anything else is a gateway that could not be reached. */
   failSend: Error | undefined;
   private runs = new Map<string, RunProgress>();
@@ -254,6 +256,67 @@ test("One endpoint, several tenants: each event resolves to its own Connection, 
   assert.notEqual(metA.id, metB.id, "the same person is a different contact in each Connection");
   assert.equal((await connections.resolveConnection({ channel: "telegram", scope: "page-b", senderId: "u1" }))?.connection.id, pageB.id);
   assert.equal(await connections.resolveConnection({ channel: "telegram", scope: "page-c", senderId: "u1" }), undefined);
+}));
+
+test("People: one person behind a Telegram user in every bot, contacts apart per Connection, never shown to an Expert", options, async () => isolated(async pool => {
+  const { connections } = await stack(pool);
+  const connect = async (channel: string, scope: string) => {
+    const id = (await pool.query("INSERT INTO hatch_connections (owner_account_id, channel, scope, target, target_key, audience) VALUES ($1, $2, $3, $4, $5, 'public') RETURNING id", [randomUUID(), channel, scope, JSON.stringify({ kind: "product", productId: scope }), `product:${scope}`])).rows[0].id;
+    return (await connections.get(id))!;
+  };
+  const botA = await connect("telegram", "bot-a");
+  const botB = await connect("telegram", "bot-b");
+  const ada = { name: "Ada Lovelace", username: "@ada", language: "en" };
+  const inA = await connections.meet(botA, { ...address("u1"), profile: ada });
+  const inB = await connections.meet(botB, address("u1"));
+  assert.notEqual(inA.id, inB.id, "two contacts");
+  assert.deepEqual(Object.keys(inA).sort(), ["connectionId", "id", "senderId", "threadId"], "an Expert's side holds no person");
+  const people = async () => (await pool.query("SELECT * FROM hatch_channel_people")).rows;
+  const [person] = await people();
+  assert.equal((await people()).length, 1, "one person");
+  assert.deepEqual([person.display_name, person.username, person.language, person.account_id], ["Ada Lovelace", "ada", "en", null]);
+  const links = (await pool.query("SELECT person_id FROM hatch_channel_identities ORDER BY connection_id")).rows;
+  assert.deepEqual(links.map(link => link.person_id), [person.id, person.id]);
+  // Each message keeps the profile current; a field the message lacks is kept.
+  await connections.recognize(botB, { senderId: "u1", profile: { name: "Ada King", language: "fr" } });
+  const [renamed] = await people();
+  assert.deepEqual([renamed.display_name, renamed.username, renamed.language], ["Ada King", "ada", "fr"]);
+  await connections.recognize(botB, { senderId: "u1", profile: { name: "Ada King", language: "fr" } });
+  assert.equal((await people())[0].last_seen_at.getTime(), renamed.last_seen_at.getTime(), "nothing changed, nothing written");
+  // A platform whose sender id is not a global user id gets no person.
+  const line = await connect("line", "line-1");
+  await connections.meet(line, address("u1"));
+  assert.equal((await people()).length, 1);
+  assert.equal((await pool.query("SELECT count(*)::int AS n FROM hatch_channel_identities WHERE person_id IS NULL")).rows[0].n, 1);
+  // Signing in on the platform attaches the account, once.
+  const [first, second] = [randomUUID(), randomUUID()];
+  assert.equal(await connections.linkAccount("telegram", "u1", first), true);
+  assert.equal(await connections.linkAccount("telegram", "u1", first), true);
+  assert.equal(await connections.linkAccount("telegram", "u1", second), false, "already another account's");
+  assert.equal((await people())[0].account_id, first);
+  assert.equal(await connections.linkAccount("telegram", "never-wrote", second), true, "a person who never wrote to a bot");
+}));
+
+test("People: the backfill links the contacts met before, once", options, async () => isolated(async pool => {
+  const first = await stack(pool);
+  const botA = (await pool.query("INSERT INTO hatch_connections (owner_account_id, channel, scope, target, target_key, audience) VALUES ($1, 'telegram', 'bot-a', '{}', 'product:a', 'public') RETURNING id", [randomUUID()])).rows[0].id;
+  const botB = (await pool.query("INSERT INTO hatch_connections (owner_account_id, channel, scope, target, target_key, audience) VALUES ($1, 'telegram', 'bot-b', '{}', 'product:b', 'org') RETURNING id", [randomUUID()])).rows[0].id;
+  const self = (await pool.query("INSERT INTO hatch_connections (owner_account_id, channel, scope, target, target_key, audience) VALUES ($1, 'telegram', '', '{}', 'assistant', 'self') RETURNING id", [randomUUID()])).rows[0].id;
+  const line = (await pool.query("INSERT INTO hatch_connections (owner_account_id, channel, scope, target, target_key, audience) VALUES ($1, 'line', 'l', '{}', 'product:l', 'public') RETURNING id", [randomUUID()])).rows[0].id;
+  for (const [connection, channel, scope, sender] of [[botA, "telegram", "bot-a", "u1"], [botB, "telegram", "bot-b", "u1"], [botB, "telegram", "bot-b", "u2"], [self, "telegram", "", "owner"], [line, "line", "l", "u1"]]) {
+    await pool.query("INSERT INTO hatch_channel_identities (connection_id, channel, scope, sender_id, thread_id) VALUES ($1, $2, $3, $4, 't')", [connection, channel, scope, sender]);
+  }
+  await first.service.close();
+  const state = async () => (await pool.query("SELECT i.channel, i.scope, i.sender_id, p.platform_user_id, p.id AS pid FROM hatch_channel_identities i LEFT JOIN hatch_channel_people p ON p.id = i.person_id ORDER BY i.channel, i.scope, i.sender_id")).rows;
+  const again = await stack(pool);
+  const done = await state();
+  assert.deepEqual(done.map(row => row.platform_user_id), [null, null, "u1", "u1", "u2"], "the line contact and the owner's own chat are no one's person");
+  assert.equal(done.find(row => row.scope === "bot-a")!.pid, done.find(row => row.scope === "bot-b" && row.sender_id === "u1")!.pid);
+  await again.service.close();
+  const third = await stack(pool);
+  assert.deepEqual(await state(), done);
+  assert.equal((await pool.query("SELECT count(*)::int AS n FROM hatch_channel_people")).rows[0].n, 2);
+  await third.service.close();
 }));
 
 // ── Inbox ──
@@ -965,6 +1028,28 @@ test("Eligibility is checked before Chat: a Product that is not live and the own
   } finally { await env.service.close(); }
 }));
 
+test("/new starts a fresh conversation without a Run; a Run still going answers in its own conversation and is delivered", options, async () => isolated(async pool => {
+  const gateway = new FakeGateway();
+  const env = await stack(pool, { gateway });
+  env.service.register("product", new ChatFlow(new ProductTarget({ gateway, limiter: env.limiter })));
+  await orgMember(pool);
+  env.service.start();
+  try {
+    await env.service.accept(env.adapter, [message("member", "hello")]);
+    await env.settle();
+    assert.equal(gateway.submitted.length, 1);
+    const reset = message("member", "/new@shop_bot");
+    await env.service.accept(env.adapter, [reset, reset]);
+    await env.settle();
+    assert.equal(gateway.submitted.length, 1, "a command is not a message");
+    assert.deepEqual(gateway.restarted, [`telegram::${reset.eventId}`], "delivered twice, started once");
+    assert.match(env.adapter.texts.at(-1)!, /starting fresh/);
+    gateway.finish("run-1", { ok: true, text: "the answer" });
+    await env.settle();
+    assert.ok(env.adapter.texts.includes("the answer"), "the old Run's reply is not lost to the new conversation");
+  } finally { await env.service.close(); }
+}));
+
 test("A Registry restart loses neither a reply nor a compaction notice: both are read from Chat's durable state", options, async () => isolated(async pool => {
   const gateway = new FakeGateway();
   const first = await stack(pool, { gateway });
@@ -1164,7 +1249,7 @@ test("Saving a bot token proves it, points the webhook at that bot, and the Prod
   const env = await productBots(pool, { "111:aaa": "shop_bot" });
   const owner = randomUUID();
   await env.apps.save(owner, "telegram", "p1", { token: " 111:aaa " });
-  assert.deepEqual(env.api.calls.map(call => call.method), ["getMe", "setWebhook"]);
+  assert.deepEqual(env.api.calls.map(call => call.method), ["getMe", "setWebhook", "setMyCommands", "setMyCommands"]);
   const bot = (await botOf(env, owner, "p1"))!;
   assert.equal(bot.audience, "public");
   assert.equal(await env.apps.username(owner, "telegram", "p1"), "shop_bot");
@@ -1217,10 +1302,10 @@ test("Replacing the token lets the old bot go; saving the same token again does 
   await env.settle();
   env.api.calls.length = 0;
   await env.apps.save(owner, "telegram", "p1", { token: "111:aaa" });
-  assert.deepEqual(env.api.calls.map(call => call.method), ["getMe", "setWebhook"], "the same bot is not let go");
+  assert.deepEqual(env.api.calls.map(call => call.method), ["getMe", "setWebhook", "setMyCommands", "setMyCommands"], "the same bot is not let go");
   env.api.calls.length = 0;
   await env.apps.save(owner, "telegram", "p1", { token: "222:bbb" });
-  assert.deepEqual(env.api.calls.map(call => [call.method, call.token]), [["getMe", "222:bbb"], ["setWebhook", "222:bbb"], ["deleteWebhook", "111:aaa"]]);
+  assert.deepEqual(env.api.calls.map(call => [call.method, call.token]), [["getMe", "222:bbb"], ["setWebhook", "222:bbb"], ["setMyCommands", "222:bbb"], ["setMyCommands", "222:bbb"], ["deleteWebhook", "111:aaa"]]);
   const current = (await botOf(env, owner, "p1"))!;
   assert.equal(await env.stores.connections.credentialsOf("telegram", old.scope), undefined, "the old bot's credentials are gone");
   assert.equal((await env.adapterOf(current.scope)).handle, "new_bot");

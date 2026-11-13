@@ -56,13 +56,14 @@ export class ChannelRouter {
     }
     const resolved = await connections.resolveConnection({ channel, scope, senderId: event.address.senderId });
     // `public` takes anyone as a contact; every other audience takes only senders that were admitted.
-    const identity = resolved?.identity ?? (resolved?.connection.audience === "public" ? await connections.meet(resolved.connection, event.address) : undefined);
+    const identity = resolved?.identity ?? (resolved?.connection.audience === "public" ? await connections.meet(resolved.connection, { ...event.address, ...(event.sender ? { profile: event.sender } : {}) }) : undefined);
     if (!resolved || !identity) {
       // In a group, silence: the bot is not for everyone who can mention it.
       if (!event.group && !await offerSignIn()) await say(`请先从 Hatch Studio 连接 ${CHANNEL_LABELS[channel]}。`);
       return { replied: true };
     }
     const { connection } = resolved;
+    if (connection.audience !== "self") await connections.recognize(connection, { senderId: event.address.senderId, ...(event.sender ? { profile: event.sender } : {}) });
     assertReachable(connection);
     await connections.touch(connection.id);
     const adapter = (await this.deps.hub.get(channel, scope))!;

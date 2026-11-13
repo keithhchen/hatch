@@ -18,6 +18,7 @@ export class RoutedChatGateway implements ChatGateway {
   }
 
   send(...args: Parameters<ChatGateway["send"]>) { return this.runtime().send(...args); }
+  restart(...args: Parameters<ChatGateway["restart"]>) { return this.runtime().restart(...args); }
   upload(...args: Parameters<ChatGateway["upload"]>) { return this.runtime().upload(...args); }
 
   async progress(runId: string): Promise<RunProgress | undefined> {

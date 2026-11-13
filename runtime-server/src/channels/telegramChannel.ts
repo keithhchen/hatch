@@ -5,7 +5,7 @@ import { ChannelSendError, failureForStatus, guardSend, lostAccess, type Channel
 type TelegramUpdate = {
   update_id: number;
   message?: {
-    message_id: number; media_group_id?: string; chat: { id: number; type: string }; from?: { id: number }; text?: string; caption?: string;
+    message_id: number; media_group_id?: string; chat: { id: number; type: string }; from?: { id: number; first_name?: string; last_name?: string; username?: string; language_code?: string }; text?: string; caption?: string;
     entities?: Array<{ type: string; offset: number; length: number }>; caption_entities?: Array<{ type: string; offset: number; length: number }>;
     reply_to_message?: { from?: { username?: string; is_bot?: boolean } };
     document?: { file_id: string; file_name?: string; file_size?: number }; photo?: Array<{ file_id: string; file_size?: number }>;
@@ -76,7 +76,9 @@ export class TelegramChannel implements ChannelAdapter {
     const body = (message.text?.replace(/^\/start\s+/, "") ?? message.caption ?? "");
     const text = (group ? body.replace(this.mention, "") : body).trim();
     const address = { threadId: String(message.chat.id), senderId: String(message.from?.id ?? message.chat.id) };
-    return { events: [{ eventId, sequence, address, ...(group ? { group: true as const } : {}), messageRef: String(message.message_id), ...(text ? { text } : {}), ...(file ? { file } : {}), ...(file && message.media_group_id ? { album: message.media_group_id } : {}) }] };
+    const name = [message.from?.first_name, message.from?.last_name].filter(Boolean).join(" ");
+    const sender = { ...(name ? { name } : {}), ...(message.from?.username ? { username: message.from.username } : {}), ...(message.from?.language_code ? { language: message.from.language_code } : {}) };
+    return { events: [{ eventId, sequence, address, ...(Object.keys(sender).length ? { sender } : {}), ...(group ? { group: true as const } : {}), messageRef: String(message.message_id), ...(text ? { text } : {}), ...(file ? { file } : {}), ...(file && message.media_group_id ? { album: message.media_group_id } : {}) }] };
   }
   /** In a group the bot answers only when named or replied to. */
   private addressed(message: NonNullable<TelegramUpdate["message"]>): boolean {
@@ -114,6 +116,11 @@ export class TelegramChannel implements ChannelAdapter {
    */
   async setWebhook(url: string, secret: string): Promise<void> {
     await this.call("setWebhook", { url, secret_token: secret, allowed_updates: ["message", "callback_query", "my_chat_member"], max_connections: WEBHOOK_MAX_CONNECTIONS });
+  }
+  /** The commands the bot's menu offers, in the sender's language. */
+  async setCommands(): Promise<void> {
+    await this.call("setMyCommands", { commands: [{ command: "new", description: "Start a new conversation" }] });
+    await this.call("setMyCommands", { commands: [{ command: "new", description: "开始新的对话" }], language_code: "zh" });
   }
   async deleteWebhook(): Promise<void> { await this.call("deleteWebhook", {}); }
   async download(file: InboundFile): Promise<Buffer> {
