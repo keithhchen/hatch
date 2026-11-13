@@ -42,7 +42,7 @@ async function runtimeOn(log: EventLog) {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-journal-"));
   const store = new WorkbenchStore(root, { creatorId: "c1", productId: "p1" }, new MemoryAgentDefinitionRepository(await initialAgentDefinitions()));
   const runtime = new WorkbenchRuntime(store, {
-    models: new InMemoryModelRoleResolver({ roles: { factory: "deepseek-v4-flash", worker: "deepseek-v4-flash" } }), role: "factory",
+    models: new InMemoryModelRoleResolver({ roles: { factory: "deepseek-v4-flash" } }), role: "factory",
     journal: new EventLogJournal(log, event => event.sessionId),
     agentFactory: factory => new Agent({ ...factory.agentOptions, initialState: { ...factory.initialState, model: createFactoryLlmModel({ profile: factory.profile, env: factory.env }) }, streamFn: (_model, context) => {
       const call = context.messages.length;

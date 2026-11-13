@@ -30,7 +30,7 @@ async function harness(options: { summarize?: (input: SummarizeInput<AgentMessag
   const log: string[] = [];
   const modelCalls: AgentMessage[][] = [];
   const runtime = new WorkbenchRuntime(store, {
-    models: new InMemoryModelRoleResolver({ roles: { factory: "deepseek-v4-flash", worker: "deepseek-v4-flash" } }), role: "factory",
+    models: new InMemoryModelRoleResolver({ roles: { factory: "deepseek-v4-flash" } }), role: "factory",
     compaction: { contextWindow: 4_096, policy, now: () => clock.now, summarize: options.summarize ?? (async () => "## Goal\nsummary") },
     agentFactory: factory => new Agent({ ...factory.agentOptions, initialState: { ...factory.initialState, model: createFactoryLlmModel({ profile: factory.profile, env: factory.env }) }, streamFn: (_model, context) => {
       const n = modelCalls.push(context.messages as AgentMessage[]);

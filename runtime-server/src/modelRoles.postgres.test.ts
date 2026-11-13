@@ -30,11 +30,11 @@ test("first use creates the tables and seeds every role; concurrent boots and la
     assert.deepEqual(await rolesOf(pool), Object.fromEntries(MODEL_ROLE_NAMES.map(role => [role, MODEL_ROLES[role]]).sort()));
     // The database rules once a row exists: a boot never writes a seed over it.
     await pool.query("UPDATE hatch_model_roles SET profile = 'gemini-api' WHERE role = 'chat'");
-    await pool.query("DELETE FROM hatch_model_roles WHERE role = 'worker'");
+    await pool.query("DELETE FROM hatch_model_roles WHERE role = 'ingest'");
     await new PostgresModelRoleResolver(pool).resolve("assistant");
     const roles = await rolesOf(pool);
     assert.equal(roles.chat, "gemini-api");
-    assert.equal(roles.worker, MODEL_ROLES.worker, "a missing row is seeded again");
+    assert.equal(roles.ingest, MODEL_ROLES.ingest, "a missing row is seeded again");
     assert.equal((await pool.query("SELECT count(*)::int AS n FROM hatch_model_roles")).rows[0].n, MODEL_ROLE_NAMES.length);
   });
 });
