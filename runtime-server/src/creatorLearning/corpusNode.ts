@@ -49,6 +49,20 @@ export const corpusOutputSchema = z.object({
   tools: z.array(corpusToolSchema).default([])
 }).strict();
 
+/**
+ * Read-time migration for corpora stored before the knowledge layer was retired (PR #278): published releases still
+ * carry `knowledge`. New corpora are validated strictly; stored ones drop the retired key before the same strict parse.
+ */
+const RETIRED_CORPUS_KEYS = ["knowledge"] as const;
+export function parseStoredCorpus(value: unknown): CorpusOutput {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const current = { ...(value as Record<string, unknown>) };
+    for (const key of RETIRED_CORPUS_KEYS) delete current[key];
+    return corpusOutputSchema.parse(current);
+  }
+  return corpusOutputSchema.parse(value);
+}
+
 export const corpusCriticOutputSchema = criticVerdictSchema(z.string());
 
 export type CorpusInput = z.infer<typeof corpusInputSchema>;
