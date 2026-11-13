@@ -266,13 +266,17 @@ An Assistant reply may carry `steps`: `{ "parts": [...], "tool_calls": [{ "tool_
 
 The Chat API is described in `docs/spec-surfaces-v1.md`. Same API key or browser session.
 
+Every call names the Product in the query as `?product_id=` (the body does not take it). The conversation id is `conversation.id` in the create answer.
+
 ```sh
-curl -s -X POST https://gethatchapp.com/v1/conversations -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" -d '{"product_id":"'"$PRODUCT_ID"'"}'
-curl -s -X POST "https://gethatchapp.com/v1/conversations/$CONVERSATION_ID/messages?wait=60" -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" \
+CONVERSATION_ID=$(curl -s -X POST "https://gethatchapp.com/v1/conversations?product_id=$PRODUCT_ID" -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" -d '{}' | jq -r .conversation.id)
+curl -s -X POST "https://gethatchapp.com/v1/conversations/$CONVERSATION_ID/messages?product_id=$PRODUCT_ID&wait=60" -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" \
   -d '{"client_message_id":"'"$(uuidgen)"'","content":"What do you recommend?"}'
-curl -N "https://gethatchapp.com/v1/conversations/$CONVERSATION_ID/events?after=$CURSOR" -H "Authorization: Bearer $HATCH_API_KEY"
-curl -s -X POST "https://gethatchapp.com/v1/conversations/$CONVERSATION_ID/runs/$RUN_ID/cancel" -H "Authorization: Bearer $HATCH_API_KEY"
+curl -N "https://gethatchapp.com/v1/conversations/$CONVERSATION_ID/events?product_id=$PRODUCT_ID&after_cursor=$CURSOR" -H "Authorization: Bearer $HATCH_API_KEY" -H "Accept: text/event-stream"
+curl -s -X POST "https://gethatchapp.com/v1/conversations/$CONVERSATION_ID/runs/$RUN_ID/cancel?product_id=$PRODUCT_ID" -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" -d '{}'
 ```
+
+Without `Accept: text/event-stream`, `/events` answers one JSON page after the cursor instead of a stream.
 
 ## MCP
 

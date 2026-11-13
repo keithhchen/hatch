@@ -115,6 +115,25 @@ test("Conversation HTTP API owns metadata, pagination, versions, and cursor snap
   assert.equal((afterAgentUpdate.body as { conversation: { id: string } }).conversation.id, first.conversation.id);
 });
 
+test("the guide's consumer-chat calls: the Product is in the query, never the body; events stream only for text/event-stream", async () => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-guide-"));
+  runtime = createRuntimeServer({ insecureLocalMode: true, conversationStore: new RuntimeStore(dataDir) });
+  const base = await listen(runtime.server);
+  const scope = new URLSearchParams(binding).toString();
+
+  const bodyProduct = await json(base, `/v1/conversations?${scope}`, { method: "POST", body: { product_id: binding.product_id } });
+  assert.equal(bodyProduct.response.status, 400);
+  const created = await json(base, `/v1/conversations?${scope}`, { method: "POST", body: {} });
+  assert.equal(created.response.status, 201);
+  const id = (created.body as { conversation: { id: string } }).conversation.id;
+
+  const plain = await fetch(`${base}/v1/conversations/${id}/events?${scope}&after_cursor=0`);
+  assert.match(plain.headers.get("content-type") ?? "", /application\/json/);
+  const stream = await fetch(`${base}/v1/conversations/${id}/events?${scope}&after_cursor=0`, { headers: { accept: "text/event-stream" } });
+  assert.match(stream.headers.get("content-type") ?? "", /text\/event-stream/);
+  await stream.body?.cancel();
+});
+
 test("paged history keeps stable complete turns while new messages arrive", async () => {
   const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-history-pages-")));
   runtime = createRuntimeServer({ insecureLocalMode: true, conversationStore: store });

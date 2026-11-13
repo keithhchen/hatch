@@ -209,7 +209,7 @@ export class ConversationRoutes {
     stream.end();
   }
 
-  /** Replay after the cursor (`after`, or Last-Event-ID), then follow. Without either, from now. */
+  /** Replay after the cursor (`after_cursor`, or Last-Event-ID), then follow. Without either, from now. */
   private async events(conversation: Conversation, request: http.IncomingMessage, response: http.ServerResponse, url: URL): Promise<void> {
     const feed = await conversation.feedKey();
     if (!feed) throw new ConversationError(404, "conversation_not_started", "This worker has no conversation yet. Send it a message first.");
