@@ -25,12 +25,12 @@ class ArchiveTest(unittest.TestCase):
     def run_archive(self, path: Path, converter=None):
         work = self.dir / "work"
         work.mkdir(exist_ok=True)
-        payload = Payload(Item("i1", "file", name="a.zip", upload_name="a.zip"), path, ".zip")
+        payload = Payload(Item("i1", "file", name="a.zip"), path, ".zip")
         ctx = ConversionContext(work, None, None, None)
         return (converter or default_registry().select(payload)).convert(payload, ctx)
 
     def test_registry_routes_zip_to_archive(self):
-        payload = Payload(Item("i1", "file", name="a.zip", upload_name="a.zip"), Path("a.zip"), ".zip")
+        payload = Payload(Item("i1", "file", name="a.zip"), Path("a.zip"), ".zip")
         self.assertIsInstance(default_registry().select(payload), ArchiveConverter)
 
     def test_text_entries_become_one_document_with_contents(self):

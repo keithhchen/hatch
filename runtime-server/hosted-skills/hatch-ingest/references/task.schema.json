@@ -19,12 +19,14 @@
           },
           {
             "type": "object",
-            "required": ["id", "kind", "upload_name"],
+            "required": ["id", "kind", "name", "download_url"],
             "properties": {
               "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" },
               "kind": { "const": "file" },
               "name": { "type": "string", "description": "Display name; its extension decides the converter." },
-              "upload_name": { "type": "string", "description": "Name to look up under /mnt/agents/upload/ (file name or sibling metadata title)." }
+              "bytes": { "type": "integer", "description": "Expected size; the download fails on mismatch." },
+              "sha256": { "type": "string", "description": "Expected digest; the download fails on mismatch." },
+              "download_url": { "type": "string", "format": "uri", "description": "Short-lived presigned GET of the original. Never print it." }
             }
           }
         ]

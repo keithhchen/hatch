@@ -12,12 +12,13 @@ from hatch_ingest.converters import (BaseConverter, ConversionContext, Converter
 from hatch_ingest.delivery import OutputDelivery
 from hatch_ingest.domain import Converted, Item, LoginRequired, Payload, ProfileLedger, ToolError
 from hatch_ingest.resilience import never_fail, retry
+from hatch_ingest.domain import DownloadFailed
 from hatch_ingest.sources import FileSource, SourceRegistry, UploadIndex
 from hatch_ingest.transcribe import NullTranscriber, fixed_segments
 
 
 def payload(ext, html=None, name="n"):
-    return Payload(Item("i1", "file", name=name, upload_name=name), Path("f" + ext), ext, html=html)
+    return Payload(Item("i1", "file", name=name), Path("f" + ext), ext, html=html)
 
 
 class RegistryTest(unittest.TestCase):
@@ -80,47 +81,66 @@ class ResilienceTest(unittest.TestCase):
 class IngestorTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
-        up = self.tmp / "upload" / "files" / "blob"
-        up.mkdir(parents=True)
-        (up / "abc123").write_text("hello 世界")
-        (up / "abc123.json").write_text(json.dumps({"title": "notes.txt", "id": "abc123"}))
-        self.uploads = UploadIndex(self.tmp / "upload")
+        self.remote = {}  # url -> bytes: what the presigned URLs serve
+
+    def fetch_url(self, url, dest):
+        if url not in self.remote:
+            raise DownloadFailed("download failed: HTTP 403")
+        dest.write_bytes(self.remote[url])
+
+    def file(self, item_id, name, data=b"", url=None, **extra):
+        url = url or f"https://oss.test/{item_id}?Signature=secret"
+        self.remote.setdefault(url, data)
+        return Item(item_id, "file", name=name, download_url=url, **extra)
 
     def ingestor(self, ledger=None):
         ctx = lambda wd: ConversionContext(wd, None, HtmlExtractor(), NullTranscriber())  # noqa: E731
-        return Ingestor(SourceRegistry([FileSource(self.uploads)]), default_registry(),
+        return Ingestor(SourceRegistry([FileSource(self.fetch_url)]), default_registry(),
                         OutputDelivery(self.tmp / "out", clock=lambda: "T"), ctx, self.tmp / "work",
                         ledger or ProfileLedger(), lambda m: None)
 
     def test_archive_is_one_document_and_an_unsafe_one_fails_the_item(self):
-        import zipfile
-        blob = self.tmp / "upload" / "files" / "blob"
-        for name, entries in (("good", {"a.md": "alpha"}), ("evil", {"../x.txt": "x"})):
-            with zipfile.ZipFile(blob / name, "w") as zf:
+        import io, zipfile
+        def zipped(entries):
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w") as zf:
                 for entry, text in entries.items():
                     zf.writestr(entry, text)
-            (blob / f"{name}.json").write_text(json.dumps({"title": f"{name}.zip", "id": name}))
-        self.uploads = UploadIndex(self.tmp / "upload")
-        good, evil = self.ingestor().run([Item("g", "file", name="good.zip", upload_name="good.zip"),
-                                          Item("e", "file", name="evil.zip", upload_name="evil.zip")])
+            return buf.getvalue()
+        good, evil = self.ingestor().run([self.file("g", "good.zip", zipped({"a.md": "alpha"})),
+                                          self.file("e", "evil.zip", zipped({"../x.txt": "x"}))])
         self.assertEqual((good.status, good.original, good.markdown, good.error), ("ok", "g.original.zip", "g.content.md", None))
         self.assertIn("## a.md\n\nalpha", (self.tmp / "out" / "g.content.md").read_text())
         self.assertEqual(evil.status, "failed")
         self.assertIn("unsafe path", evil.error)
 
     def test_end_to_end_flat_output_and_batch_continues(self):
-        items = [Item("i1", "file", name="notes.txt", upload_name="notes.txt"),
-                 Item("i2", "file", name="gone.txt", upload_name="gone.txt"),
-                 Item("i3", "file", name="blob.xyz", upload_name="notes.txt")]
+        text = "hello 世界".encode()
+        items = [self.file("i1", "notes.txt", text),
+                 Item("i2", "file", name="gone.txt", download_url="https://oss.test/gone?Signature=secret"),
+                 self.file("i3", "blob.xyz", text)]
         r = self.ingestor().run(items)
         self.assertEqual([x.status for x in r], ["ok", "failed", "partial"])
-        self.assertIn("upload not found", r[1].error)
+        self.assertIn("download failed: HTTP 403", r[1].error)
+        self.assertNotIn("Signature", r[1].error)
         self.assertEqual((r[0].original, r[0].markdown), ("i1.original.txt", "i1.content.md"))
         md = (self.tmp / "out" / "i1.content.md").read_text()
         self.assertIn("hello 世界", md)
         self.assertIn('converter: "text"', md)
         self.assertIsNone(r[2].markdown)  # passthrough keeps the original, invents nothing
         self.assertTrue((self.tmp / "out" / "i3.original.xyz").exists())
+
+    def test_download_is_verified_against_size_and_digest(self):
+        import hashlib
+        data = b"hello"
+        ok, wrong_size, wrong_sha = self.ingestor().run([
+            self.file("a", "a.txt", data, bytes=5, sha256=hashlib.sha256(data).hexdigest()),
+            self.file("b", "b.txt", data, bytes=6),
+            self.file("c", "c.txt", data, bytes=5, sha256="0" * 64)])
+        self.assertEqual(ok.status, "ok")
+        self.assertIn("got 5 bytes, expected 6", wrong_size.error)
+        self.assertIn("sha256 mismatch", wrong_sha.error)
+        self.assertEqual((wrong_size.status, wrong_sha.status), ("failed", "failed"))
 
     def test_finish_lists_flat_files(self):
         out = OutputDelivery(self.tmp / "o2")
@@ -161,19 +181,14 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class ContentAddressedUploadTest(unittest.TestCase):
-    def test_finds_renamed_upload_by_digest_and_manifest_by_shape(self):
-        import hashlib, tempfile
+class ManifestUploadTest(unittest.TestCase):
+    def test_finds_manifest_by_shape(self):
         root = Path(tempfile.mkdtemp()) / "upload"
-        (root / "files" / "blob").mkdir(parents=True)
-        (root / "files" / "blob" / "speech (1).aiff").write_bytes(b"audio-bytes")
+        root.mkdir()
         (root / "task (1).json").write_text(json.dumps({"items": []}))
         idx = UploadIndex(root)
-        self.assertEqual(idx.by_digest(hashlib.sha256(b"audio-bytes").hexdigest()).name, "speech (1).aiff")
         self.assertEqual(idx.by_shape("items").name, "task (1).json")
         self.assertIsNone(idx.by_shape("profiles"))
-        with self.assertRaises(FileNotFoundError):
-            idx.by_digest("0" * 64)
 
 
 class HttpTranscriberTest(unittest.TestCase):

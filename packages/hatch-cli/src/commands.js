@@ -5,7 +5,7 @@ import { CHAT_COMMANDS } from "./chatCommands.js";
 import { need, object } from "./command.js";
 import { ConversationApi, assistantRoutes, formatMessages, formatSent, send, sendOptions, workerRoutes } from "./conversation.js";
 import { HatchError } from "./errors.js";
-import { buildIngestItems, isFinished, waitForJob } from "./ingest.js";
+import { buildIngestItems, isFinished, uploader, waitForJob } from "./ingest.js";
 import { createPkce, randomState } from "./pkce.js";
 
 // A command: { name, describe, usage, options, run(ctx, args), format?(result), mcp? }
@@ -248,8 +248,9 @@ const ingestSubmit = {
   options: { context: { type: "string", describe: "Free-text context for the ingest" }, wait: { type: "boolean", describe: "Poll the job every 5 s until it finishes" } },
   async run(ctx, args) {
     const [id, ...inputs] = need(this, args, 2);
-    const items = await buildIngestItems(inputs, { cwd: ctx.cwd });
     const client = await ctx.client();
+    const baseUrl = (await ctx.credentials())?.api_url ?? ctx.apiUrl;
+    const items = await buildIngestItems(inputs, { cwd: ctx.cwd, upload: uploader({ client, fetch: ctx.fetch, baseUrl, route: productPath(id, "/ingest/uploads") }) });
     const body = { items, ...(args.flags.context ? { context: args.flags.context } : {}) };
     let job = (await client.post(productPath(id, "/ingest"), body)).job;
     if (args.flags.wait && !isFinished(job)) {

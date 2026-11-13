@@ -9,9 +9,11 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Sequence
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit
+from urllib.request import urlopen
 
-from .domain import Item, LoginRequired, Payload, Profile, UploadNotFound
+from .domain import DownloadFailed, Item, LoginRequired, Payload, Profile, UploadNotFound
 from .ports import Browser, Source
 
 _IGNORED_MANIFESTS = {"task.json", "browser-profiles.json"}
@@ -81,14 +83,6 @@ class UploadIndex:
                     found.update(self._by_basename(Path(v).name))
         return {p for p in found if p.suffix != ".json" or p.name == name}
 
-    def by_digest(self, sha256: str) -> Path:
-        """Content-addressed lookup: the provider may rename uploads, but never changes their bytes."""
-        hits = [p for p in self._files if _sha256(p) == sha256.lower()]
-        if len(hits) == 1:
-            return hits[0]
-        raise UploadNotFound(f"upload not found: sha256 {sha256}" if not hits
-                             else f"upload ambiguous: sha256 {sha256} matches {len(hits)} files")
-
     def by_shape(self, key: str) -> Path | None:
         """The one uploaded JSON object with top-level `key` (our manifests are recognised by shape, not name)."""
         hits = [p for p in self._files if p.suffix == ".json" and key in (_json_object(p) or {})]
@@ -105,26 +99,41 @@ class UploadIndex:
                              else f"upload ambiguous: {name} matches {len(candidates)} files")
 
 
+def download(url: str, dest: Path, timeout: float = 300) -> None:
+    """GET `url` into `dest`. Errors never carry the URL: it is a bearer credential."""
+    try:
+        with urlopen(url, timeout=timeout) as response, dest.open("wb") as out:
+            shutil.copyfileobj(response, out, 1 << 20)
+    except HTTPError as e:
+        raise DownloadFailed(f"download failed: HTTP {e.code}") from None
+    except (URLError, OSError, ValueError) as e:
+        raise DownloadFailed(f"download failed: {type(e).__name__}") from None
+
+
 class FileSource:
-    def __init__(self, uploads: UploadIndex):
-        self.uploads = uploads
+    def __init__(self, fetch_url=download):
+        self.fetch_url = fetch_url
 
     def supports(self, item: Item) -> bool:
         return item.kind == "file"
 
-    def fetch(self, item: Item, workdir: Path) -> Payload:
-        name = item.upload_name or item.name or ""
-        blob = self.uploads.by_digest(item.sha256) if item.sha256 else self.uploads.find(name)
-        shown = item.name or name
-        ext = Path(shown).suffix.lower() or blob.suffix.lower()
+    def _download(self, item: Item, workdir: Path) -> Path:
+        ext = Path(item.name or "").suffix.lower()
         workdir.mkdir(parents=True, exist_ok=True)
-        link = workdir / f"source{ext}"  # blobs have no extension; tools sniff by it
-        link.unlink(missing_ok=True)
-        try:
-            os.symlink(blob, link)
-        except OSError:
-            shutil.copy2(blob, link)
-        return Payload(item=item, path=link, ext=ext, title=Path(shown).stem, source_name=shown)
+        path = workdir / f"source{ext}"
+        self.fetch_url(item.download_url, path)
+        if item.bytes is not None and path.stat().st_size != item.bytes:
+            raise DownloadFailed(f"download failed: got {path.stat().st_size} bytes, expected {item.bytes}")
+        if item.sha256 and _sha256(path) != item.sha256.lower():
+            raise DownloadFailed("download failed: sha256 mismatch")
+        return path
+
+    def fetch(self, item: Item, workdir: Path) -> Payload:
+        if not item.download_url:
+            raise DownloadFailed("download failed: the task has no download_url for this file")
+        path = self._download(item, workdir)
+        shown = item.name or path.name
+        return Payload(item=item, path=path, ext=path.suffix, title=Path(shown).stem, source_name=shown)
 
 
 class LinkSource:

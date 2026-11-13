@@ -134,7 +134,7 @@ test("an Assistant Run bound by a request from an API key is Studio API usage un
 
 test("an ingest job is not started once the Expert has spent the month", async () => {
   const jobs = new MemoryIngestJobs();
-  const service = new IngestService({ jobs, owns: async () => true, engine: new UnavailableEngine("off"), sink: {} as never, usageCap: await spentMonth(CREATOR), inBackground: () => undefined });
+  const service = new IngestService({ jobs, owns: async () => true, engine: new UnavailableEngine("off"), sink: {} as never, objects: {} as never, usageCap: await spentMonth(CREATOR), inBackground: () => undefined });
   await assert.rejects(service.submit(CREATOR, PRODUCT, [{ url: "https://example.com" }]), (error: { code?: string; status?: number }) => error.code === USAGE_CAP_EXCEEDED && error.status === 429);
   assert.deepEqual(await jobs.recent(CREATOR, PRODUCT, 10), []);
 });

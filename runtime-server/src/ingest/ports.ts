@@ -1,7 +1,14 @@
 import type { IngestJob, ProviderSession } from "./job.js";
 
 /** One thing to ingest, with the bytes in hand. */
-export type Source = { id: string } & ({ kind: "link"; url: string } | { kind: "file"; name: string; bytes: Buffer; mimeType?: string });
+export type Source = { id: string } & ({ kind: "link"; url: string } | { kind: "file"; name: string; size: number; sha256?: string; mimeType?: string; objectKey: string });
+
+/** The files a browser uploaded straight to the object store, waiting for their job. */
+export interface StagedUploads {
+  read(objectKey: string): Promise<Buffer>;
+  /** A short-lived URL a hosted sandbox downloads the file from. */
+  downloadUrl(objectKey: string): Promise<string>;
+}
 export type Original = { name: string; bytes: Buffer; mediaType?: string };
 export type Result = { id: string; status: "ok" | "partial" | "failed"; original?: Original; markdown?: string; session?: ProviderSession; error?: string };
 

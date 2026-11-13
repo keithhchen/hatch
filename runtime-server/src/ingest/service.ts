@@ -1,15 +1,20 @@
 import { createHash, randomUUID } from "node:crypto";
 import { deterministicId, idempotent } from "../idempotency.js";
 import { fail, finish, interrupt, queuedJob, start, type IngestInput, type IngestJob, type ItemOutcome } from "./job.js";
-import { labelOfUrl, safeName, stemOf } from "./names.js";
+import { LocalArtifactObjectStore, type ArtifactObjectStore } from "../creatorLearning/objectStore.js";
+import { labelOfUrl, mediaTypeOf, safeName, stemOf } from "./names.js";
 import type { IngestEngine, IngestJobRepository, IngestSink, Result, Source } from "./ports.js";
 import { log } from "../observability/log.js";
 import type { UsageCap } from "../usage/usageCap.js";
 
 export const MAX_ITEMS = 50;
 export const MAX_FILE_BYTES = 50 * 1024 * 1024;
-/** The request body that can carry a file of MAX_FILE_BYTES as base64 inside JSON. */
-export const INGEST_BODY_MAX_BYTES = Math.ceil(MAX_FILE_BYTES * 4 / 3) + 1024 * 1024;
+/** Files never travel in the request: a body only names uploads and links. */
+export const INGEST_BODY_MAX_BYTES = 256 * 1024;
+/** Where uploads wait for their job. A prefix of its own, so one bucket lifecycle rule can expire what no job claimed. */
+export const UPLOADS_ROOT = "ingest-uploads";
+/** How long a browser has to PUT a file after asking for the upload. */
+export const UPLOAD_SECONDS = 15 * 60;
 const MAX_CONTEXT = 4000;
 const RECENT = 20;
 const HEARTBEAT_MS = 30_000;
@@ -20,18 +25,37 @@ export class IngestError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
 }
 
-/** One item as the API receives it. */
-export type RawItem = { url?: unknown; name?: unknown; content_base64?: unknown; media_type?: unknown };
+/** One item as the API receives it: a link, or a file the browser already uploaded to its slot. */
+export type RawItem = { url?: unknown; upload_id?: unknown; name?: unknown; bytes?: unknown; media_type?: unknown; sha256?: unknown };
+/** What the browser tells about a file when it asks where to upload it. */
+export type UploadRequest = Omit<RawItem, "url" | "upload_id">;
+export type StagedFileItem = { upload_id: string; name: string; bytes: number; media_type: string; sha256: string };
+export type UploadSlot = { upload_id: string; url: string; method: "PUT"; headers: Record<string, string>; expires_at: string };
 
 /** Runs work away from the request. Tests pass one that lets them wait for the work. */
 export type InBackground = (work: () => Promise<void>) => void;
 export const detached: InBackground = work => { void work().catch(error => log.error("ingest_failed", { error })); };
 
 const invalid = (message: string) => new IngestError(400, "invalid_ingest", message);
-const BASE64 = /^[A-Za-z0-9+/\r\n]*={0,2}$/;
+const UPLOAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const SHA256 = /^[0-9a-f]{64}$/;
+
+/** The file facts both the upload request and the submit carry, validated. */
+const describeFile = (item: UploadRequest) => {
+  const name = typeof item.name === "string" ? safeName(item.name, "") : "";
+  if (!name) throw invalid("A file needs a name");
+  if (typeof item.bytes !== "number" || !Number.isInteger(item.bytes) || item.bytes < 1) throw invalid(`${name}: bytes must be the file's size, above zero`);
+  if (item.bytes > MAX_FILE_BYTES) throw new IngestError(413, "file_too_large", `${name} is larger than ${MAX_FILE_BYTES / 1024 / 1024} MB`);
+  const sha256 = typeof item.sha256 === "string" ? item.sha256.toLowerCase() : undefined;
+  if (item.sha256 !== undefined && !(sha256 && SHA256.test(sha256))) throw invalid(`${name}: sha256 must be 64 hex characters`);
+  const declared = typeof item.media_type === "string" && item.media_type.trim() ? item.media_type.trim().slice(0, 200) : undefined;
+  return { name, bytes: item.bytes, ...(sha256 ? { sha256 } : {}), ...(declared ? { declared } : {}), contentType: mediaTypeOf(name, declared) };
+};
+
+const base = (contentType: string) => contentType.split(";")[0]!.trim().toLowerCase();
 
 /** Validates one raw item into a source and the input the job records. */
-const accept = (raw: unknown, id: string): { source: Source; input: IngestInput } => {
+const accept = async (raw: unknown, id: string, objects: UploadChecks): Promise<{ source: Source; input: IngestInput }> => {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw invalid("Each item must be an object");
   const item = raw as RawItem;
   if (typeof item.url === "string") {
@@ -39,33 +63,34 @@ const accept = (raw: unknown, id: string): { source: Source; input: IngestInput 
     if (url.protocol !== "http:" && url.protocol !== "https:") throw invalid("Only http and https links can be ingested");
     return { source: { id, kind: "link", url: url.toString() }, input: { url: url.toString() } };
   }
-  if (typeof item.name === "string" && typeof item.content_base64 === "string") {
-    const name = safeName(item.name, "");
-    if (!name) throw invalid("A file needs a name");
-    if (!BASE64.test(item.content_base64)) throw invalid(`${name}: content_base64 is not valid base64`);
-    const bytes = Buffer.from(item.content_base64, "base64");
-    if (!bytes.length) throw invalid(`${name}: the file is empty`);
-    if (bytes.length > MAX_FILE_BYTES) throw new IngestError(413, "file_too_large", `${name} is larger than ${MAX_FILE_BYTES / 1024 / 1024} MB`);
-    const declared = typeof item.media_type === "string" && item.media_type.trim() ? item.media_type.trim().slice(0, 200) : undefined;
+  if (typeof item.upload_id === "string") {
+    const file = describeFile(item);
+    if (!UPLOAD_ID.test(item.upload_id)) throw invalid(`${file.name}: upload_id is not valid`);
+    const objectKey = objects.keyOf(item.upload_id, file.name);
+    const stored = await objects.head(objectKey);
+    if (!stored) throw new IngestError(409, "upload_not_found", `${file.name} was not uploaded (or its upload link expired). Upload it again.`);
+    if (stored.bytes !== file.bytes) throw new IngestError(422, "upload_size_mismatch", `${file.name}: ${stored.bytes} bytes arrived, ${file.bytes} expected. Upload it again.`);
+    if (stored.contentType && base(stored.contentType) !== base(file.contentType)) throw new IngestError(422, "upload_type_mismatch", `${file.name}: stored as ${stored.contentType}, expected ${file.contentType}. Upload it again.`);
     return {
-      source: { id, kind: "file", name, bytes, ...(declared ? { mimeType: declared } : {}) },
-      input: { name, bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), ...(declared ? { media_type: declared } : {}) },
+      source: { id, kind: "file", name: file.name, size: file.bytes, objectKey, ...(file.sha256 ? { sha256: file.sha256 } : {}), ...(file.declared ? { mimeType: file.declared } : {}) },
+      input: { name: file.name, bytes: file.bytes, ...(file.sha256 ? { sha256: file.sha256 } : {}), ...(file.declared ? { media_type: file.declared } : {}) },
     };
   }
-  throw invalid("Each item needs a url, or a name with content_base64");
+  throw invalid("Each item needs a url, or an upload_id with name and bytes");
 };
 
-const parse = (items: unknown): Array<{ source: Source; input: IngestInput }> => {
+type UploadChecks = { keyOf(uploadId: string, name: string): string; head: ArtifactObjectStore["head"] };
+
+const parse = async (items: unknown, objects: UploadChecks): Promise<Array<{ source: Source; input: IngestInput }>> => {
   if (!Array.isArray(items) || !items.length) throw invalid("items must be a non-empty array");
   if (items.length > MAX_ITEMS) throw invalid(`At most ${MAX_ITEMS} items per job`);
-  const accepted = items.map((raw, index) => {
-    try { return accept(raw, `i${index + 1}`); }
+  return Promise.all(items.map(async (raw, index) => {
+    try { return await accept(raw, `i${index + 1}`, objects); }
     catch (error) {
       if (error instanceof IngestError) throw error;
       throw invalid(`Item ${index + 1} is not a valid url`);
     }
-  });
-  return accepted;
+  }));
 };
 
 /** The file name stem or link label an item is stored under. */
@@ -81,6 +106,8 @@ export class IngestService {
     owns: (accountId: string, productId: string) => Promise<boolean>;
     /** A job is not started when the account has spent its month: the hosted agent's model calls are the Expert's. */
     usageCap?: UsageCap;
+    /** Where browsers upload files to, and where a job finds them. */
+    objects: ArtifactObjectStore;
     inBackground?: InBackground;
     newId?: () => string;
     now?: () => string;
@@ -97,13 +124,42 @@ export class IngestService {
 
   private now() { return this.deps.now?.() ?? new Date().toISOString(); }
 
+  private keyOf(accountId: string, productId: string, uploadId: string, name: string) {
+    return `${UPLOADS_ROOT}/${accountId}/${productId}/${uploadId}/${name}`;
+  }
+
+  /** Where the browser PUTs one file: a short-lived link to a key only this Product's job can claim. */
+  async requestUpload(accountId: string, productId: string, request: UploadRequest): Promise<UploadSlot> {
+    await this.assertOwns(accountId, productId);
+    const file = describeFile(request);
+    const uploadId = this.deps.newId?.() ?? randomUUID();
+    const signed = await this.deps.objects.presign(this.keyOf(accountId, productId, uploadId, file.name), { method: "PUT", expiresSeconds: UPLOAD_SECONDS, contentType: file.contentType });
+    return { upload_id: uploadId, url: signed.url, method: "PUT", headers: signed.headers, expires_at: signed.expiresAt };
+  }
+
+  /** For callers that already hold the bytes (the Assistant): stores them in a slot and returns the submit item that names it. */
+  async stage(accountId: string, productId: string, file: { name: string; bytes: Buffer; media_type: string }): Promise<StagedFileItem> {
+    await this.assertOwns(accountId, productId);
+    const item = { name: file.name, bytes: file.bytes.length, media_type: file.media_type, sha256: createHash("sha256").update(file.bytes).digest("hex") };
+    const described = describeFile(item);
+    const uploadId = this.deps.newId?.() ?? randomUUID();
+    await this.deps.objects.put(this.keyOf(accountId, productId, uploadId, described.name), file.bytes, { contentType: described.contentType });
+    return { upload_id: uploadId, ...item, name: described.name };
+  }
+
+  /** Dev only: the Local store's upload links point at the Registry, which stores the bytes when the signed link is valid. */
+  async receiveLocalUpload(key: string, query: URLSearchParams, bytes: Buffer, contentType: string | undefined): Promise<void> {
+    if (!(this.deps.objects instanceof LocalArtifactObjectStore)) throw new IngestError(404, "not_found", "Not found.");
+    await this.deps.objects.receive(key, query, bytes, contentType).catch(error => { throw new IngestError(403, "upload_link_invalid", error instanceof Error ? error.message : String(error)); });
+  }
+
   /** With an Idempotency-Key the job id comes from the key, so a repeat finds the first job instead of making another. */
   async submit(accountId: string, productId: string, items: unknown, context?: unknown, idempotencyKey?: string): Promise<IngestJob> {
     await this.assertOwns(accountId, productId);
     await this.deps.usageCap?.assertWithinCap(accountId);
     if (context !== undefined && typeof context !== "string") throw invalid("context must be text");
     if ((context ?? "").length > MAX_CONTEXT) throw invalid(`context may be at most ${MAX_CONTEXT} characters`);
-    const accepted = parse(items);
+    const accepted = await parse(items, { keyOf: (uploadId, name) => this.keyOf(accountId, productId, uploadId, name), head: key => this.deps.objects.head(key) });
     const id = idempotencyKey ? deterministicId(accountId, productId, "ingest", idempotencyKey) : this.deps.newId?.() ?? randomUUID();
     const fresh = queuedJob(id, accountId, productId, accepted.map(entry => entry.input), context?.trim() ?? "", this.now());
     const { value: job, replayed } = await this.once(fresh);

@@ -121,6 +121,8 @@ test("worker treats a missing OSS state object as a new run", async (t) => {
   t.after(() => rm(root, { recursive: true, force: true }));
   const objects = new Map<string, Buffer>();
   const objectStore: ArtifactObjectStore = {
+    async presign() { throw new Error("not used"); },
+    async head() { return undefined; },
     async put(key, content) {
       const bytes = Buffer.isBuffer(content) ? content : Buffer.from(content, "utf8");
       objects.set(key, Buffer.from(bytes));

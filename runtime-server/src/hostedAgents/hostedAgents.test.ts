@@ -112,7 +112,7 @@ const profile = (over: Partial<BrowserProfile> = {}): BrowserProfile => ({
 });
 
 test("Only platforms covering a link in the batch are needed", () => {
-  const items = [{ id: "1", kind: "link" as const, url: "https://www.xiaohongshu.com/explore/abc" }, { id: "2", kind: "file" as const, name: "a.pdf", bytes: Buffer.alloc(0) }];
+  const items = [{ id: "1", kind: "link" as const, url: "https://www.xiaohongshu.com/explore/abc" }, { id: "2", kind: "file" as const, name: "a.pdf", bytes: 0, downloadUrl: "https://oss.example.com/a" }];
   assert.deepEqual(platformsFor(items, [profile(), profile({ id: "x", platform: "douyin", hosts: ["*.douyin.com"] })]), ["xiaohongshu"]);
 });
 
@@ -154,9 +154,12 @@ test("Ingest maps the skill's result to items and writes refreshed cookies back 
     },
   };
   const outcome = await new HostedIngest(agentRun, store, [{ name: "DASHSCOPE_API_KEY", value: "k", hosts: ["dashscope.aliyuncs.com"] }])
-    .ingest({ accountId: "acct", context: "", items: [{ id: "i1", kind: "link", url: "https://www.xiaohongshu.com/explore/abc" }, { id: "i2", kind: "file", name: "a.pdf", bytes: Buffer.from("%PDF") }] });
+    .ingest({ accountId: "acct", context: "", items: [{ id: "i1", kind: "link", url: "https://www.xiaohongshu.com/explore/abc" }, { id: "i2", kind: "file", name: "a.pdf", bytes: 4, sha256: "ab", downloadUrl: "https://oss.example.com/a.pdf?Signature=x" }] });
   assert.deepEqual(outcome.items.map(i => [i.id, i.status, i.original?.name, i.markdown]), [["i1", "ok", "i1.original.mp4", "# hi"], ["i2", "failed", undefined, undefined]]);
-  assert.deepEqual(task!.files.map(f => f.name), ["task.json", "browser-profiles.json", "a.pdf"]);
+  assert.deepEqual(task!.files.map(f => f.name), ["task.json", "browser-profiles.json"]);
+  const manifest = JSON.parse(task!.files[0]!.bytes.toString());
+  assert.deepEqual(manifest.items[1], { id: "i2", kind: "file", name: "a.pdf", bytes: 4, sha256: "ab", download_url: "https://oss.example.com/a.pdf?Signature=x" });
+  assert.doesNotMatch(task!.prompt, /Signature/);
   assert.deepEqual(task!.secrets.map(s => s.name), ["DASHSCOPE_API_KEY", "HATCH_CK_11111111_0"]);
   assert.deepEqual(released, [{ leaseId: `lease-${p.id}`, outcome: { status: "ready", cookies: [{ name: "web_session", value: "NEW", domain: ".xiaohongshu.com", path: "/" }] } }]);
 });

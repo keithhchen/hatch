@@ -31,6 +31,10 @@ class LoginRequired(IngestError):
         self.url, self.profile_id = url, profile_id
 
 
+class DownloadFailed(IngestError):
+    pass
+
+
 class UploadNotFound(IngestError, FileNotFoundError):
     pass
 
@@ -54,8 +58,9 @@ class Item:
     kind: str  # "link" | "file"
     url: str | None = None
     name: str | None = None
-    upload_name: str | None = None
     sha256: str | None = None
+    bytes: int | None = None
+    download_url: str | None = None  # short-lived presigned GET; never printed
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> "Item":
@@ -64,11 +69,12 @@ class Item:
             raise ValueError(f"invalid item id {item_id!r}")
         if kind == "link" and not d.get("url"):
             raise ValueError("link item needs url")
-        if kind == "file" and not (d.get("sha256") or d.get("upload_name") or d.get("name")):
-            raise ValueError("file item needs sha256 or upload_name")
+        if kind == "file" and not d.get("download_url"):
+            raise ValueError("file item needs download_url")
         if kind not in ("link", "file"):
             raise ValueError(f"unknown kind {kind!r}")
-        return cls(item_id, kind, d.get("url"), d.get("name"), d.get("upload_name"), d.get("sha256"))
+        return cls(item_id, kind, d.get("url"), d.get("name"), d.get("sha256"),
+                   d.get("bytes"), d.get("download_url"))
 
 
 @dataclass(frozen=True)

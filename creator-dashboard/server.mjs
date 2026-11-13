@@ -44,8 +44,8 @@ const SELF_PURCHASE_ERROR = Object.freeze({
 });
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export const CREATOR_FACTORY_JSON_BODY_MAX_BYTES = 32 * 1024 * 1024;
-/** An ingest submit carries one file of up to 50 MB as base64 in JSON; the Registry enforces the 50 MB file cap itself. */
-export const CREATOR_INGEST_JSON_BODY_MAX_BYTES = 68 * 1024 * 1024;
+/** Ingest bodies carry upload ids and links, never file bytes: files go straight to object storage. */
+export const CREATOR_INGEST_JSON_BODY_MAX_BYTES = 256 * 1024;
 
 // Browser OAuth is deliberately an authorization-code + PKCE bridge to the
 // existing Hatch web session. OAuth records live in PortalStateStore, which is
@@ -1552,6 +1552,18 @@ export async function createDashboardApp(options = {}) {
         return send(response, outcome.replayed ? 200 : 201, checkoutOutcomePublic(outcome.body, session, creatorName));
       }
 
+      // Local development object store: the browser PUTs the file here and it streams on to the Registry, never buffered.
+      if (request.method === "PUT" && url.pathname.startsWith("/v1/local-objects/")) {
+        const upstream = await fetchImpl(new URL(`${url.pathname}${url.search}`, registryUrl), {
+          method: "PUT",
+          headers: Object.fromEntries(["content-type", "content-length"].flatMap(name => request.headers[name] ? [[name, String(request.headers[name])]] : [])),
+          body: Readable.toWeb(request),
+          duplex: "half"
+        });
+        response.writeHead(upstream.status, { "content-type": upstream.headers.get("content-type") ?? "application/json" });
+        return response.end(Buffer.from(await upstream.arrayBuffer()));
+      }
+
       const accessMatch = url.pathname.match(/^\/v1\/user\/products\/([^/]+)\/access$/);
       if (request.method === "POST" && accessMatch) {
         return send(response, 404, { error: { code: "not_found", message: "Route not found." } });
@@ -1565,7 +1577,7 @@ export async function createDashboardApp(options = {}) {
         request.method === "POST" || request.method === "PATCH" || request.method === "PUT"
       ) && (
         url.pathname === "/v1/creator/products"
-        || /\/(brief-spec|pricing|ingest)$/.test(url.pathname)
+        || /\/(brief-spec|pricing|ingest|ingest\/uploads)$/.test(url.pathname)
         || /\/withdraw$/.test(url.pathname)
         || /\/listing$/.test(url.pathname)
         || productNodeContract
@@ -1596,7 +1608,7 @@ export async function createDashboardApp(options = {}) {
         requireOAuthScope(request, requiredScope, url.pathname);
         const body = request.method === "GET" || request.method === "DELETE"
           ? undefined
-          : JSON.stringify(await readJson(request, url.pathname.endsWith("/ingest") ? Math.max(factoryRequestMaxBytes, CREATOR_INGEST_JSON_BODY_MAX_BYTES) : factoryRequestMaxBytes));
+          : JSON.stringify(await readJson(request, url.pathname.includes("/ingest") ? CREATOR_INGEST_JSON_BODY_MAX_BYTES : factoryRequestMaxBytes));
         const payload = await registryRequest(registryUrl, `${url.pathname}${url.search}`, {
           method: request.method,
           ...(body === undefined ? {} : { body }),
@@ -2801,7 +2813,7 @@ function oauthEndpointScope(request) {
   const ingestMatch = pathname.match(/^\/v1\/creator\/products\/[^/]+\/ingest(?:\/[^/]+)?$/);
   if (ingestMatch) {
     if (method === "GET") return "creator:files:read";
-    if (method === "POST" && pathname.endsWith("/ingest")) return "creator:files:write";
+    if (method === "POST" && (pathname.endsWith("/ingest") || pathname.endsWith("/ingest/uploads"))) return "creator:files:write";
   }
   return undefined;
 }

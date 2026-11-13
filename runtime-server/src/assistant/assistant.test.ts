@@ -433,7 +433,9 @@ const callTool = (env: { tools: ReturnType<typeof studioTools> }, name: string, 
 
 const ingestRecorder = () => {
   const submitted: Array<{ productId: string; items: unknown; context?: string }> = [];
-  const ingest: AssistantIngest = { submit: async (_account, productId, items, context) => { submitted.push({ productId, items, context }); return { id: "job-1", status: "queued" }; } };
+  const ingest: AssistantIngest = {
+    stage: async (_account, _product, file) => ({ upload_id: `staged-${file.name}`, name: file.name, bytes: file.bytes.length, media_type: file.media_type, sha256: "s" }),
+    submit: async (_account, productId, items, context) => { submitted.push({ productId, items, context }); return { id: "job-1", status: "queued" }; } };
   return { submitted, ingest };
 };
 const PDF = Buffer.from("%PDF-1.4 选址清单");
@@ -459,7 +461,7 @@ test("add_to_agent: a PDF goes to Ingest with its original bytes, never into the
     const upload = await env.assistant.upload(ACCOUNT, "list.pdf", PDF);
     await env.assistant.hear(ACCOUNT, { id: "pdf-1", source: "web", parts: [{ type: "text", text: "这是我的清单" }, { type: "file", assetId: upload.assetId }] });
     await env.idle();
-    assert.deepEqual(submitted, [{ productId: PRODUCT, context: "选址清单", items: [{ name: "list.pdf", content_base64: PDF.toString("base64"), media_type: "application/pdf" }] }]);
+    assert.deepEqual(submitted, [{ productId: PRODUCT, context: "选址清单", items: [{ upload_id: "staged-list.pdf", name: "list.pdf", bytes: PDF.length, media_type: "application/pdf", sha256: "s" }] }]);
     assert.equal((await env.productStore.backend.listManual()).length, 0);
   } finally { await env.close(); }
 });
@@ -475,7 +477,7 @@ for (const [label, name, bytes, mediaType] of [
       const upload = await env.assistant.upload(ACCOUNT, name, bytes);
       await env.assistant.hear(ACCOUNT, { id: `bin-${name}`, source: "web", parts: [{ type: "text", text: "这个也是资料" }, { type: "file", assetId: upload.assetId }] });
       await env.idle();
-      assert.deepEqual(submitted, [{ productId: PRODUCT, context: undefined, items: [{ name, content_base64: bytes.toString("base64"), media_type: mediaType }] }]);
+      assert.deepEqual(submitted, [{ productId: PRODUCT, context: undefined, items: [{ upload_id: `staged-${name}`, name, bytes: bytes.length, media_type: mediaType, sha256: "s" }] }]);
       assert.equal((await env.productStore.backend.listManual()).length, 0);
     } finally { await env.close(); }
   });
