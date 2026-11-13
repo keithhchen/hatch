@@ -14,18 +14,18 @@ test("a token is trimmed and shape-checked before it is sent", () => {
 });
 
 test("the bot is the Product's telegram channel, only when configured with a handle", () => {
-  assert.deepEqual(botOf([{ kind: "line" }, { kind: "telegram", bot: true, configured: true, handle: "lorem_ipsum_bot" }]), { username: "lorem_ipsum_bot" });
+  assert.deepEqual(botOf([{ kind: "line" }, { kind: "telegram", bot: true, configured: true, handle: "example_bot" }]), { username: "example_bot" });
   assert.equal(botOf([{ kind: "telegram", bot: true, configured: false }]), null);
   assert.equal(botOf(undefined), null);
-  assert.equal(botLink("@lorem_ipsum_bot"), "https://t.me/lorem_ipsum_bot");
+  assert.equal(botLink("@example_bot"), "https://t.me/example_bot");
 });
 
 test("get, connect and disconnect call the Registry routes for this Product", async () => {
-  const channel = { kind: "telegram", bot: true, configured: true, handle: "lorem_ipsum_bot" };
+  const channel = { kind: "telegram", bot: true, configured: true, handle: "example_bot" };
   const { calls, request } = recorder([{ channels: [] }, { channels: [channel] }, { channels: [{ kind: "telegram", bot: true, configured: false }] }]);
   const client = new TelegramBotClient(request, "p/1");
   assert.equal(await client.get(), null);
-  assert.deepEqual(await client.connect(`  ${TOKEN} `), { username: "lorem_ipsum_bot" });
+  assert.deepEqual(await client.connect(`  ${TOKEN} `), { username: "example_bot" });
   await client.disconnect();
   assert.deepEqual(calls, [
     ["/v1/creator/connections?product_id=p%2F1", undefined],
@@ -55,7 +55,7 @@ test("every locale has every Telegram setup string, and the invalid-token messag
 });
 
 test("the bot link becomes a QR code made here, with the quiet zone scanners need", () => {
-  const matrix = qrMatrix("https://t.me/lorem_ipsum_bot");
+  const matrix = qrMatrix("https://t.me/example_bot");
   assert.equal(matrix.length, matrix[0].length);
   assert.deepEqual(matrix[0].slice(0, 7), Array(7).fill(true));
   assert.equal(matrix[1][1], false);
