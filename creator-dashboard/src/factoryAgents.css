@@ -22,7 +22,7 @@
 .factory-rail { display: flex; flex-direction: column; gap: 14px; }
 .factory-stepper { display: flex; flex-direction: column; gap: 0; margin: 0; padding: 0; list-style: none; }
 .factory-stepper li { display: flex; flex-direction: column; }
-.factory-stepper__sub button { padding-left: 28px; }
+.factory-stepper .factory-stepper__sub button { padding-left: 28px; }
 .factory-stepper li:nth-child(n+6)::before { display: none; }
 .factory-stepper__caret { border-color: transparent !important; background: none !important; }
 .factory-stepper__caret svg { width: 16px; height: 16px; }
@@ -237,7 +237,7 @@
   .factory-app--workbench .factory-step { overflow: visible; }
   .factory-stepper { flex-wrap: wrap; overflow: visible; gap: 2px; }
   .factory-stepper .factory-stepper__aside::before { display: none; }
-  .factory-stepper__sub button { padding-left: 4px; }
+  .factory-stepper .factory-stepper__sub button { padding-left: 18px; }
   .factory-stepper li + li::before { width: 6px; margin-right: 2px; }
   .factory-stepper button { padding: 0 8px 0 4px; gap: 6px; font-size: 13px; }
   .factory-workspace { grid-template-columns: 1fr; }
