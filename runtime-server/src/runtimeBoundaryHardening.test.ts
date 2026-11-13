@@ -26,6 +26,8 @@ import {
 import { RuntimeStore, LocalRuntimeAuthority } from "./store.js";
 import { PiAgentRuntime } from "./piAgentRuntime.js";
 import { runPiAgentPrompt } from "./piPrompt.js";
+import { llmProfile } from "./llmProfiles.js";
+import { InMemoryModelRoleResolver } from "./modelRoles.js";
 import type { RunStart } from "./protocol.js";
 
 test("pre-aborted Pi entry points never start a provider prompt", async () => {
@@ -40,11 +42,11 @@ test("pre-aborted Pi entry points never start a provider prompt", async () => {
   }) as typeof globalThis.fetch;
   try {
     await assert.rejects(
-      runPiAgentPrompt({ prompt: "must not run", signal: controller.signal }),
+      runPiAgentPrompt({ profile: llmProfile("kimi-k3.1-pro") }, { prompt: "must not run", signal: controller.signal }),
       (error) => error === reason
     );
 
-    const runtime = new PiAgentRuntime();
+    const runtime = new PiAgentRuntime({ models: new InMemoryModelRoleResolver() });
     const input = clientMessage("pre-aborted-run", "pre-aborted-conversation") as RunStart;
     await assert.rejects(async () => {
       for await (const _event of runtime.run(input, {

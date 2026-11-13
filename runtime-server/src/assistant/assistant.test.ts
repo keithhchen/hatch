@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { InMemoryModelRoleResolver } from "../modelRoles.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -90,7 +91,7 @@ type WorkerStep = { text?: string; tool?: { name: string; arguments: Record<stri
 /** The interview and other workers still run on the factory runtime: a scripted model for them. */
 function scriptedWorkers(script: (context: Context, call: number) => WorkerStep) {
   let calls = 0;
-  return (options: FactoryPiAgentOptions) => new Agent({ ...options.agentOptions, initialState: { ...options.initialState, model: createFactoryLlmModel({ env: options.env }) }, streamFn: (_model, context) => {
+  return (options: FactoryPiAgentOptions) => new Agent({ ...options.agentOptions, initialState: { ...options.initialState, model: createFactoryLlmModel({ profile: options.profile, env: options.env }) }, streamFn: (_model, context) => {
     const step = script(context, ++calls);
     const message: AssistantMessage = { role: "assistant", api: "openai-completions", provider: "moonshotai-cn", model: "kimi-k3.1-pro", timestamp: Date.now(),
       content: step.tool ? [{ type: "toolCall", id: `call-worker-${calls}`, ...step.tool }] : [{ type: "text", text: step.text ?? "" }],
@@ -135,7 +136,7 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
   const productStore = new WorkbenchStore(path.join(root, "product"), { creatorId: ACCOUNT, productId: PRODUCT }, new MemoryAgentDefinitionRepository(await initialAgentDefinitions()));
   let withheldTools: Parameters<ProductWorkspaces["attachAssistant"]>[0]["withheldTools"] | undefined;
   const agentFactory = scriptedWorkers(options.worker ?? (() => ({ text: "完成" })));
-  const productRuntime = new WorkbenchRuntime(productStore, { env: { HATCH_FACTORY_LLM_PROFILE: "kimi-k3.1-pro" }, agentFactory, maxTurns: 6, withheldTools: async session => await withheldTools?.({ creatorId: ACCOUNT, productId: PRODUCT }, session) ?? [] });
+  const productRuntime = new WorkbenchRuntime(productStore, { models: new InMemoryModelRoleResolver(), role: "factory", agentFactory, maxTurns: 6, withheldTools: async session => await withheldTools?.({ creatorId: ACCOUNT, productId: PRODUCT }, session) ?? [] });
   const workspace = { store: productStore, runtime: productRuntime } as unknown as FactoryWorkspace;
   const scopes: Array<{ creatorId: string; productId: string; briefSpec?: unknown }> = [];
   let opened: ((scope: { creatorId: string; productId: string }, workspace: FactoryWorkspace) => void) | undefined;
@@ -154,7 +155,8 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
     backend: () => legacy,
     exclusive: async (_name, fn) => fn(),
     search: { search: async () => { throw new Error("no web search in tests"); } },
-    env: { HATCH_FACTORY_LLM_PROFILE: "kimi-k3.1-pro" },
+    env: {},
+    models: new InMemoryModelRoleResolver({ roles: { worker: "kimi-k3.1-pro" } }),
     runtime: { agentFactory },
     ...(options.ingest ? { ingest: options.ingest } : {}),
   });
@@ -170,7 +172,7 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
   const chat = new AssistantChat({
     repository, store, chatAssets, state, tools, assetStore: new RuntimeAssetStore(dataDir),
     history: new LegacyAssistantHistory({ backend: () => legacy, state, store }),
-    prompt: async () => "你是 Hatch 助理。", liveState: id => assistant.liveState(id), env: {}, createRuntime: () => model.runtime,
+    prompt: async () => "你是 Hatch 助理。", liveState: id => assistant.liveState(id), env: {}, models: new InMemoryModelRoleResolver(), createRuntime: () => model.runtime,
     sweepMs: 60_000,
   });
   const materials = new ExpertMaterials({ assets: chatAssets, conversation: id => chat.conversation(id) });

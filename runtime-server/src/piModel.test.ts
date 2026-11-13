@@ -11,6 +11,7 @@ import {
   createPiModel,
   normalizeKimiBaseUrl
 } from "./piModel.js";
+import { llmProfile } from "./llmProfiles.js";
 
 function streamResponse(text = "pong"): Response {
   const chunks = [
@@ -238,18 +239,18 @@ test("active DeepSeek profile uses its own model, endpoint, and credential", asy
     calls.push({ url: input instanceof Request ? input.url : String(input), init: init ?? {} });
     return streamResponse("deepseek pong");
   };
+  const profile = llmProfile("deepseek-v4-flash");
   const env = {
-    HATCH_LLM_PROFILE: "deepseek-v4-flash",
     DEEPSEEK_API_KEY: "deepseek-test-key",
     LLM_API_KEY: "unused-kimi-key"
   };
 
-  const model = createPiModel({ env });
+  const model = createPiModel({ profile, env });
   assert.equal(model.id, "deepseek-v4-flash");
   assert.equal(model.provider, "deepseek");
   assert.equal(model.baseUrl, "https://api.deepseek.com");
 
-  const agent = createPiAgent({ env, fetch, timeoutMs: 8_000 });
+  const agent = createPiAgent({ profile, env, fetch, timeoutMs: 8_000 });
   await agent.prompt("Say pong");
   assert.equal(calls.length, 1);
   assert.equal(calls[0]!.url, "https://api.deepseek.com/chat/completions");
@@ -261,18 +262,18 @@ test("active DeepSeek profile uses its own model, endpoint, and credential", asy
 });
 
 test("active Gemini API profile uses Pi's native Google protocol", () => {
+  const profile = llmProfile("gemini-api");
   const env = {
-    HATCH_LLM_PROFILE: "gemini-api",
     GEMINI_API_KEY: "gemini-test-key",
     LLM_API_KEY: "unused-kimi-key"
   };
 
-  const model = createPiModel({ env });
+  const model = createPiModel({ profile, env });
   assert.equal(model.id, "gemini-3.8-flash");
   assert.equal(model.api, "google-generative-ai");
   assert.equal(model.provider, "google");
   assert.equal(model.baseUrl, "https://generativelanguage.googleapis.com/v1beta");
-  const agent = createPiAgent({ env, timeoutMs: 8_000 });
+  const agent = createPiAgent({ profile, env, timeoutMs: 8_000 });
   assert.equal(agent.state.model.api, "google-generative-ai");
   assert.equal(agent.state.thinkingLevel, "low");
 });
@@ -283,9 +284,9 @@ test("Kimi K3.1 profile sends reasoning_effort low and no thinking field", async
     calls.push({ init: init ?? {} });
     return streamResponse("pong");
   };
-  const env = { HATCH_LLM_PROFILE: "kimi-k3.1-pro", LLM_API_KEY: "kimi-test-key" };
+  const env = { LLM_API_KEY: "kimi-test-key" };
 
-  const agent = createPiAgent({ env, fetch, timeoutMs: 8_000 });
+  const agent = createPiAgent({ profile: llmProfile("kimi-k3.1-pro"), env, fetch, timeoutMs: 8_000 });
   await agent.prompt("Say pong");
 
   const body = JSON.parse(String(calls[0]!.init.body)) as Record<string, unknown>;
@@ -294,14 +295,13 @@ test("Kimi K3.1 profile sends reasoning_effort low and no thinking field", async
   assert.equal(body.reasoning_effort, "low");
 });
 
-test("active profile rejects unknown names and missing provider credentials", () => {
-  assert.throws(() => createPiModel({ env: { HATCH_LLM_PROFILE: "unknown" } }), /Unknown (?:Runtime )?HATCH_LLM_PROFILE/);
+test("active profile rejects missing provider credentials", () => {
   assert.throws(
-    () => createPiAgent({ env: { HATCH_LLM_PROFILE: "deepseek-v4-flash" } }),
+    () => createPiAgent({ profile: llmProfile("deepseek-v4-flash"), env: {} }),
     /Missing DEEPSEEK_API_KEY/
   );
   assert.throws(
-    () => createPiAgent({ env: { HATCH_LLM_PROFILE: "gemini-api" } }),
+    () => createPiAgent({ profile: llmProfile("gemini-api"), env: {} }),
     /Missing GEMINI_API_KEY/
   );
 });
@@ -312,7 +312,7 @@ test("DeepSeek V4 Pro profile sends its model with thinking disabled to DeepSeek
     calls.push({ url: String(input), init: init ?? {} });
     return streamResponse("pong");
   };
-  const agent = createPiAgent({ env: { HATCH_LLM_PROFILE: "deepseek-v4-pro", DEEPSEEK_API_KEY: "deepseek-test-key" }, fetch, timeoutMs: 8_000 });
+  const agent = createPiAgent({ profile: llmProfile("deepseek-v4-pro"), env: { DEEPSEEK_API_KEY: "deepseek-test-key" }, fetch, timeoutMs: 8_000 });
   await agent.prompt("Say pong");
   const body = JSON.parse(String(calls[0]!.init.body)) as Record<string, unknown>;
   assert.match(calls[0]!.url, /^https:\/\/api\.deepseek\.com\//);

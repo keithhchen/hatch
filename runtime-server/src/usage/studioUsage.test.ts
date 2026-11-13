@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { InMemoryModelRoleResolver } from "../modelRoles.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -44,8 +45,8 @@ async function spentMonth(accountId: string) {
 test("the Factory prompt runner reports each model call, and the ledger counts a retried write once", async () => {
   const ledger = new CapturingLedger();
   const sink = usageSink(ledger, { accountId: CREATOR, surface: "studio", productId: PRODUCT, runId: "run-1" }, quiet);
-  const runner = createFactoryLlmPromptRunner({
-    env: { HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash", DEEPSEEK_API_KEY: "test" },
+  const runner = createFactoryLlmPromptRunner(new InMemoryModelRoleResolver({ roles: { factory: "deepseek-v4-flash" } }), {
+    env: { DEEPSEEK_API_KEY: "test" },
     fetch: async () => new Response(`${[
       { id: "c", object: "chat.completion.chunk", created: 1, model: "deepseek-v4-flash", choices: [{ index: 0, delta: { role: "assistant", tool_calls: [
         { index: 0, id: "a", type: "function", function: { name: "submit_evidence_section", arguments: JSON.stringify({ section: "Product evidence", markdown: "E" }) } },

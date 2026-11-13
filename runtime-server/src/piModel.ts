@@ -1,6 +1,6 @@
 import type { Agent, AgentOptions, StreamFn } from "@earendil-works/pi-agent-core";
 import type { Models } from "@earendil-works/pi-ai";
-import { resolveLlmProfile } from "./llmProfiles.js";
+import type { LlmProfile } from "./llmProfiles.js";
 import { adapterFor } from "./modelAdapters/index.js";
 import { agentFor, agentOptionsFor, modelFor, modelsFor, streamFnFor } from "./modelAdapters/assemble.js";
 import type { AdapterOptions, AgentAdapterOptions, PiModel } from "./modelAdapters/adapter.js";
@@ -20,33 +20,36 @@ export {
   type KimiModel
 } from "./modelAdapters/kimi.js";
 
-/** The active profile and the adapter it names; every Pi building block below goes through them. */
-function active(options: AdapterOptions) {
-  const profile = resolveLlmProfile(options.env ?? process.env);
+/** Which model a Pi building block is for: the profile its role resolved to (see modelRoles.ts), never an environment variable. */
+export type PiProfileOptions<Options> = Options & { profile: LlmProfile };
+
+/** The profile and the adapter it names; every Pi building block below goes through them. */
+function active(options: { profile: LlmProfile }) {
+  const { profile } = options;
   return { profile, adapter: adapterFor(profile) };
 }
 
-export function createPiModel(options: AdapterOptions = {}): PiModel {
+export function createPiModel(options: PiProfileOptions<AdapterOptions>): PiModel {
   const { profile, adapter } = active(options);
   return modelFor(adapter, profile, options);
 }
 
-export function createPiStreamFn(options: AdapterOptions = {}): StreamFn {
+export function createPiStreamFn(options: PiProfileOptions<AdapterOptions>): StreamFn {
   const { profile, adapter } = active(options);
   return streamFnFor(adapter, profile, options);
 }
 
-export function createPiModels(options: AdapterOptions = {}): { models: Models; model: PiModel } {
+export function createPiModels(options: PiProfileOptions<AdapterOptions>): { models: Models; model: PiModel } {
   const { profile, adapter } = active(options);
   return modelsFor(adapter, profile, options);
 }
 
-export function createPiAgentOptions(options: AgentAdapterOptions = {}): AgentOptions {
+export function createPiAgentOptions(options: PiProfileOptions<AgentAdapterOptions>): AgentOptions {
   const { profile, adapter } = active(options);
   return agentOptionsFor(adapter, profile, options);
 }
 
-export function createPiAgent(options: AgentAdapterOptions = {}): Agent {
+export function createPiAgent(options: PiProfileOptions<AgentAdapterOptions>): Agent {
   const { profile, adapter } = active(options);
   return agentFor(adapter, profile, options);
 }

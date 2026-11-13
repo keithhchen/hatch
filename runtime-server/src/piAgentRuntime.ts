@@ -43,7 +43,8 @@ import { createPiModel, createPiStreamFn } from "./piModel.js";
 import { withStallGuard, type StallLimits } from "./providerStall.js";
 import { SteerInterrupt } from "./steerInterrupt.js";
 import { traceAgentTools } from "./langfuse.js";
-import { resolveLlmProfile } from "./llmProfiles.js";
+import { HISTORY_MODEL, type LlmProfile } from "./llmProfiles.js";
+import type { ModelRole, ModelRoleResolver } from "./modelRoles.js";
 import { runPiAgentPrompt, type PiAgentPromptRunner } from "./piPrompt.js";
 import {
   findDocumentSkillForAsset,
@@ -80,8 +81,12 @@ export type PiToolDefinition = {
 
 export type PiAgentRuntimeOptions = {
   toolDefinitions?: PiToolDefinition[];
-  /** The environment that names the model profile; the process's own when absent. */
+  /** The environment that holds the model's API key and endpoint; the process's own when absent. */
   env?: NodeJS.ProcessEnv;
+  /** Where the model is chosen: read at the start of each Run, which keeps that model to its end. */
+  models: ModelRoleResolver;
+  /** The role this runtime serves; product chat when absent. */
+  role?: Extract<ModelRole, "chat" | "assistant">;
   /** How long a model call may stay silent before the Run fails; the model profile's own limits when absent (60s to the first event and 60s between events unless the profile says otherwise). */
   stall?: StallLimits;
 };
@@ -150,12 +155,14 @@ function separateActivityMessage(args: Record<string, unknown>): {
  * the client projection.
  */
 export class PiAgentRuntime implements AgentRuntime {
-  constructor(private readonly options: PiAgentRuntimeOptions = {}) {}
+  constructor(private readonly options: PiAgentRuntimeOptions) {}
 
   async *run(input: RunStart, ctx: RunContext): AsyncIterable<OutboundMessage> {
     ctx.abortSignal?.throwIfAborted();
-    const model = createPiModel({ env: this.options.env });
-    const stallGuarded = withStallGuard(createPiStreamFn({ env: this.options.env }), this.options.stall ?? resolveLlmProfile(this.options.env).stall);
+    const profile = await this.options.models.resolve(this.options.role ?? "chat", { productId: ctx.productId });
+    ctx.abortSignal?.throwIfAborted();
+    const model = createPiModel({ profile, env: this.options.env });
+    const stallGuarded = withStallGuard(createPiStreamFn({ profile, env: this.options.env }), this.options.stall ?? profile.stall);
     // A joining message cuts a streaming model call. A delivery draft is audited whole, so it is never cut.
     const steer = new SteerInterrupt();
     const streamFn = ctx.deliveryWorkflow ? stallGuarded : steer.wrap(stallGuarded);
@@ -177,7 +184,7 @@ export class PiAgentRuntime implements AgentRuntime {
     let compacting = false;
     let hasExecutedTool = false;
     const deliveryWorkflow = ctx.deliveryWorkflow;
-    const deliveryReviewer = deliveryWorkflow ? await createDeliveryReviewer() : undefined;
+    const deliveryReviewer = deliveryWorkflow ? createDeliveryReviewer(profile, this.options.env) : undefined;
     const transcriptMessages: ConversationMessage[] = [];
 
     // ctx.messages always contains the canonical current user turn. For
@@ -271,7 +278,7 @@ export class PiAgentRuntime implements AgentRuntime {
       initialState: {
         systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow, ctx.briefSnapshot, ctx.clientTools, skillsSection, ctx.ownPrompt),
         model,
-        thinkingLevel: resolveLlmProfile(this.options.env).thinkingLevel,
+        thinkingLevel: profile.thinkingLevel,
         messages: [...contextMessages, ...storedMessages],
         tools: traceAgentTools(tools)
       },
@@ -768,8 +775,9 @@ function interruptedReply(message: AssistantMessage): AssistantMessage | undefin
   return content.length ? { ...message, content, stopReason: "stop", errorMessage: undefined } : undefined;
 }
 
-function createDeliveryReviewer(): PiAgentPromptRunner {
-  return runPiAgentPrompt;
+/** The delivery review runs on the Run's own model. */
+function createDeliveryReviewer(profile: LlmProfile, env: NodeJS.ProcessEnv | undefined): PiAgentPromptRunner {
+  return (options) => runPiAgentPrompt({ profile, env }, options);
 }
 
 function auditMessagesForRun(
@@ -885,8 +893,8 @@ function toPiMessage(
     role: "assistant",
     content,
     api: "openai-completions",
-    provider: createPiModel().provider,
-    model: createPiModel().id,
+    provider: HISTORY_MODEL.provider,
+    model: HISTORY_MODEL.model,
     usage: message.usage ?? emptyUsage(),
     stopReason: message.tool_calls?.length ? "toolUse" : "stop",
     timestamp: Date.now()

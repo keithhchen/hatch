@@ -3,6 +3,7 @@ import test from "node:test";
 import type { RunContext } from "./agentRuntime.js";
 import { creatorModelToolName } from "./creatorTools.js";
 import { PiAgentRuntime } from "./piAgentRuntime.js";
+import { InMemoryModelRoleResolver } from "./modelRoles.js";
 import type { ConversationMessage, OutboundMessage, RunStart } from "./protocol.js";
 import { renderSkillsSection } from "./skills.js";
 
@@ -21,12 +22,9 @@ function toolThenText(requests: unknown[], toolName: string) {
 
 /** A Run whose one tool call is the moment the Expert's next message joins it. */
 async function runWithJoiningMessage(t: test.TestContext, toolResult: Record<string, unknown>) {
-  const originalProfile = process.env.HATCH_LLM_PROFILE;
   const originalKey = process.env.LLM_API_KEY;
-  process.env.HATCH_LLM_PROFILE = "kimi-k3.1-pro";
   process.env.LLM_API_KEY = "test-only";
   t.after(() => {
-    if (originalProfile === undefined) delete process.env.HATCH_LLM_PROFILE; else process.env.HATCH_LLM_PROFILE = originalProfile;
     if (originalKey === undefined) delete process.env.LLM_API_KEY; else process.env.LLM_API_KEY = originalKey;
   });
   const definition = { id: "handover", description: "hand over", input_schema: { type: "object", properties: {} } };
@@ -43,7 +41,7 @@ async function runWithJoiningMessage(t: test.TestContext, toolResult: Record<str
     claimSteered: async () => waiting.splice(0)
   } as unknown as RunContext;
   const events: OutboundMessage[] = [];
-  const runtime = new PiAgentRuntime({ toolDefinitions: [{ type: "function", function: { name, description: "hand over", parameters: { type: "object", properties: {}, required: [] } } }] });
+  const runtime = new PiAgentRuntime({ models: new InMemoryModelRoleResolver(), toolDefinitions: [{ type: "function", function: { name, description: "hand over", parameters: { type: "object", properties: {}, required: [] } } }] });
   for await (const event of runtime.run(input, ctx)) events.push(event);
   return { requests, waiting, events };
 }

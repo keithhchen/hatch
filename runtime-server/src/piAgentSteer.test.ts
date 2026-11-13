@@ -3,6 +3,7 @@ import test from "node:test";
 import type { RunContext } from "./agentRuntime.js";
 import { creatorModelToolName } from "./creatorTools.js";
 import { PiAgentRuntime } from "./piAgentRuntime.js";
+import { InMemoryModelRoleResolver } from "./modelRoles.js";
 import type { ConversationMessage, OutboundMessage, RunStart } from "./protocol.js";
 import { renderSkillsSection } from "./skills.js";
 
@@ -23,11 +24,10 @@ function stalling(written: string, init: RequestInit): Response {
 }
 
 function environment(t: test.TestContext) {
-  const saved = [process.env.HATCH_LLM_PROFILE, process.env.LLM_API_KEY];
-  process.env.HATCH_LLM_PROFILE = "kimi-k3.1-pro";
+  const saved = [process.env.LLM_API_KEY];
   process.env.LLM_API_KEY = "test-only";
   t.after(() => {
-    for (const [name, value] of [["HATCH_LLM_PROFILE", saved[0]], ["LLM_API_KEY", saved[1]]] as const) {
+    for (const [name, value] of [["LLM_API_KEY", saved[0]]] as const) {
       if (value === undefined) delete process.env[name]; else process.env[name] = value;
     }
   });
@@ -55,7 +55,7 @@ test("A message that joins mid-stream cuts the call and keeps what was written a
   const joined: ConversationMessage[] = [{ role: "user", content: "补充一句" }];
   const { ctx, wake, claims } = contextWith({}, joined);
   const events: OutboundMessage[] = [];
-  for await (const event of new PiAgentRuntime().run(input, ctx)) {
+  for await (const event of new PiAgentRuntime({ models: new InMemoryModelRoleResolver() }).run(input, ctx)) {
     events.push(event);
     if (event.type === "assistant.delta" && event.delta.kind === "text") wake();
   }
@@ -79,7 +79,7 @@ test("A message that joins before the call has written anything is read by a fre
   const harness = contextWith({}, joined);
   wake = harness.wake;
   const events: OutboundMessage[] = [];
-  for await (const event of new PiAgentRuntime().run(input, harness.ctx)) events.push(event);
+  for await (const event of new PiAgentRuntime({ models: new InMemoryModelRoleResolver() }).run(input, harness.ctx)) events.push(event);
   assert.equal(bodies.length, 2);
   assert.match(bodies[1], /其实我想问别的/);
   assert.match(bodies[1], /写一篇长文/);
@@ -112,7 +112,7 @@ test("A message that joins while a tool executes waits for the tool, then is rea
     } }
   } as unknown as Partial<RunContext>, joined);
   holder.wake = harness.wake;
-  const runtime = new PiAgentRuntime({ toolDefinitions: [{ type: "function", function: { name, description: "slow", parameters: { type: "object", properties: {}, required: [] } } }] });
+  const runtime = new PiAgentRuntime({ models: new InMemoryModelRoleResolver(), toolDefinitions: [{ type: "function", function: { name, description: "slow", parameters: { type: "object", properties: {}, required: [] } } }] });
   const events: OutboundMessage[] = [];
   for await (const event of runtime.run(input, harness.ctx)) events.push(event);
   assert.ok(toolFinished);
@@ -124,7 +124,6 @@ test("A message that joins while a tool executes waits for the tool, then is rea
 
 test("A call cut while thinking ends its thinking block, so the next call may start block 0 again", async (t) => {
   environment(t);
-  process.env.HATCH_LLM_PROFILE = "kimi-k3.1-pro";
   const encoder = new TextEncoder();
   const bodies: string[] = [];
   let wake = (): void => undefined;
@@ -144,7 +143,7 @@ test("A call cut while thinking ends its thinking block, so the next call may st
   const harness = contextWith({}, [{ role: "user", content: "其实我想问别的" }]);
   wake = harness.wake;
   const events: OutboundMessage[] = [];
-  for await (const event of new PiAgentRuntime().run(input, harness.ctx)) events.push(event);
+  for await (const event of new PiAgentRuntime({ models: new InMemoryModelRoleResolver() }).run(input, harness.ctx)) events.push(event);
   const thinking = events.flatMap((event) => event.type === "assistant.delta" && event.delta.kind.startsWith("thinking_") ? [`${event.delta.kind}:${(event.delta as { contentIndex: number }).contentIndex}`] : []);
   assert.equal(bodies.length, 2);
   assert.deepEqual(thinking.filter((kind) => !kind.startsWith("thinking_delta")), ["thinking_start:0", "thinking_end:0", "thinking_start:0", "thinking_end:0"]);

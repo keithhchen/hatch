@@ -15,7 +15,8 @@ import {
   type ContextAttachment,
   type ConversationMessage
 } from "./protocol.js";
-import { createPiModel, createPiModels } from "./piModel.js";
+import { createPiModels } from "./piModel.js";
+import { HISTORY_MODEL, type LlmProfile } from "./llmProfiles.js";
 import { persistToolMessage, restoreToolMessage } from "./toolMessage.js";
 import { CompactionStrategy, policyFor, type CompactionAdapter, type CompactionMemory, type Entry, type SummarizeInput } from "./compactionStrategy.js";
 import { describePiMessage, summarizeWithPi } from "./piCompaction.js";
@@ -102,12 +103,11 @@ export type ChatCompactionOptions = {
 };
 
 /** The one strategy with Chat's adapter. The policy comes from the model's window. */
-export function chatCompactionStrategy(options: ChatCompactionOptions = {}): CompactionStrategy<RuntimeCompactionMessage> {
-  const model = createPiModel();
+export function chatCompactionStrategy(profile: LlmProfile, options: ChatCompactionOptions = {}): CompactionStrategy<RuntimeCompactionMessage> {
   const cacheTtlMs = options.cacheTtlMs ?? (Number(process.env.HATCH_PROVIDER_CACHE_TTL_MS) || undefined);
   return new CompactionStrategy(
-    chatCompactionAdapter(options.summarize ?? summarizeWithPi((message) => toPiMessage({ ...message, model_images: undefined }), createPiModels, 8_000)),
-    policyFor(options.contextWindow ?? model.contextWindow, { cacheTtlMs }),
+    chatCompactionAdapter(options.summarize ?? summarizeWithPi((message) => toPiMessage({ ...message, model_images: undefined }), () => createPiModels({ profile }), 8_000)),
+    policyFor(options.contextWindow ?? profile.contextWindow, { cacheTtlMs }),
     options.memory
   );
 }
@@ -188,7 +188,6 @@ function toPiMessage(message: RuntimeCompactionMessage): AgentMessage {
     return restoreToolMessage({ ...message, content: message.content ?? null });
   }
 
-  const model = createPiModel();
   const content: AssistantMessage["content"] = [];
   if (message.content) content.push({ type: "text", text: message.content });
   for (const call of toolCalls(message.tool_calls)) {
@@ -198,8 +197,8 @@ function toPiMessage(message: RuntimeCompactionMessage): AgentMessage {
     role: "assistant",
     content,
     api: "openai-completions",
-    provider: model.provider,
-    model: model.id,
+    provider: HISTORY_MODEL.provider,
+    model: HISTORY_MODEL.model,
     usage: message.usage ?? emptyUsage(),
     stopReason: content.some((block) => block.type === "toolCall") ? "toolUse" : "stop",
     timestamp: Date.now()

@@ -12,6 +12,7 @@ import { ServerToolExecutor } from "./serverTools.js";
 import { SkillRuntime } from "./skillRuntime.js";
 import type { SkillRecord } from "./skills.js";
 import { RuntimeStore } from "./store.js";
+import { InMemoryModelRoleResolver } from "./modelRoles.js";
 import { ToolBridge } from "./toolBridge.js";
 
 const parentInput: RunStart = {
@@ -79,6 +80,7 @@ async function createHarness(
   const serverTools = new ServerToolExecutor(timeoutMs);
   const bridge = new ToolBridge(broker, serverTools);
   const runtime = new SkillRuntime({
+    models: new InMemoryModelRoleResolver(),
     parentInput,
     parentState: state,
     sessionSkills: sessionSkills(skill),

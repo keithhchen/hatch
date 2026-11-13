@@ -112,7 +112,8 @@ import {
 } from "./creatorLearning/repository.js";
 import { CreatorFactoryService } from "./creatorLearning/service.js";
 import { CreatorFactory } from "./creatorLearning/engine.js";
-import { factoryModelForEnvironment, runFactoryPromptWithPi } from "./creatorLearning/piGateway.js";
+import { factoryModelRecord, factoryPromptRunner } from "./creatorLearning/piGateway.js";
+import { InMemoryModelRoleResolver, PostgresModelRoleResolver } from "./modelRoles.js";
 import { createHatchCliCandidateExecutor } from "./creatorLearning/cliCandidateExecutor.js";
 import { CreatorFactoryWorker } from "./creatorLearning/worker.js";
 import type { CreatorProductRecord } from "./creatorLearning/products.js";
@@ -214,7 +215,9 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   // One ledger for every Studio model call, and the source of the usage the Expert reads back.
   const usage = registryPool ? new PostgresUsageLedger(registryPool) : new InMemoryUsageLedger();
   const usageCap = UsageCap.fromEnvironment(usage, environment);
-  const factoryAgents = new FactoryAgentsService(path.join(factoryRoot, "agent-chats"), environment, factoryAgentDefinitions, registryPool ? () => new EventLogJournal(conversationPorts.eventLog, event => event.sessionId) : undefined, usage, usageCap);
+  // Which model each role runs on lives in the database; without one (local development) the seed choices apply.
+  const models = registryPool ? new PostgresModelRoleResolver(registryPool) : new InMemoryModelRoleResolver();
+  const factoryAgents = new FactoryAgentsService(path.join(factoryRoot, "agent-chats"), environment, models, factoryAgentDefinitions, registryPool ? () => new EventLogJournal(conversationPorts.eventLog, event => event.sessionId) : undefined, usage, usageCap);
   const objectStore = objectStoreFromEnvironment(environment);
   const productObjectStore = objectStoreFromEnvironment(environment, path.join(factoryRoot, "product-files"));
   if (!productObjectStore) throw new Error("Product File object storage is not configured");
@@ -228,6 +231,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const factoryNodeService = nodePersistence && nodeObjectStore
     ? new FactoryNodeService(
       new NodeRuntime({
+        models,
         sessionStore: nodePersistence,
         executionStore: nodePersistence,
         storage: { objectStore: nodeObjectStore },
@@ -278,12 +282,13 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     factoryRepository,
     new CreatorFactory(
       factoryRoot,
-      runFactoryPromptWithPi,
+      factoryPromptRunner(models, environment),
       createHatchCliCandidateExecutor({
+        models,
         timeoutMs: integerEnvironment(environment.HATCH_CREATOR_FACTORY_HATCH_TIMEOUT_MS, 15 * 60_000),
         environment
       }),
-      { model: factoryModelForEnvironment(environment), objectStore, graphStore }
+      { model: factoryModelRecord(models), objectStore, graphStore }
     ),
     {
       workerId: `factory-http-${process.pid}-${randomUUID()}`,
@@ -415,7 +420,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     const assistantState = await PostgresAssistantState.open(registryPool);
     const productsPrefix = environment.HATCH_CREATOR_PRODUCT_FILES_PREFIX?.trim() || "creator-products";
     const ingest = await createIngestService({
-      environment, pool: registryPool, seal, objects: productObjectStore,
+      environment, pool: registryPool, seal, models, objects: productObjectStore,
       manual: async (accountId, productId) => {
         const { backend } = (await factoryAgents.workspace({ creatorId: accountId, productId }, await catalog.token(accountId))).store;
         return { list: async () => (await backend.listManual()).map(file => file.path), read: name => backend.readManual(name), write: (name, bytes) => backend.writeManual(name, bytes) };
@@ -433,7 +438,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       deliveries: await PostgresDeliveries.open(registryPool),
       exclusive: postgresExclusive(registryPool),
       search: new FirecrawlSearchProvider({ apiKey: environment.FIRECRAWL_API_KEY }),
-      env: environment, ingest, usage, usageCap,
+      env: environment, models, ingest, usage, usageCap,
     });
     ingest.onSettled(job => assistant.ingested(job));
     // The Assistant is a conversation on Chat's runtime, with its own transcript in this database and the Studio tools.
@@ -450,7 +455,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       repository: conversations, store: transcripts, chatAssets, state: assistantState, tools,
       assetStore: new RuntimeAssetStore(path.join(factoryRoot, "assistant-assets")),
       history: new LegacyAssistantHistory({ backend: accountId => new PostgresWorkbenchBackend(registryPool, `assistant:${accountId}`), state: assistantState, store: transcripts }),
-      prompt: assistantPrompt, liveState: accountId => assistant.liveState(accountId), env: environment, usage, usageCap,
+      prompt: assistantPrompt, liveState: accountId => assistant.liveState(accountId), env: environment, models, usage, usageCap,
     });
     assistant.bind(assistantChat, new ExpertMaterials({ assets: chatAssets, conversation: accountId => assistantChat.conversation(accountId) }));
     routed.bindLocal(assistantChat.gateway);

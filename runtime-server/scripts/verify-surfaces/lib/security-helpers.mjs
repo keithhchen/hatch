@@ -133,7 +133,7 @@ export class ServiceApi {
 /** A second Stack of the product as shipped (content moderation off, as on any server without the output guard). */
 export async function startSecondStack(name, options = {}) {
   const { Stack } = await import("./stack.mjs");
-  return Stack.start({ name, llmProfile: process.env.HATCH_LLM_PROFILE || "gemini-api", ...options });
+  return Stack.start({ name, llmProfile: process.env.VERIFY_LLM_PROFILE || "gemini-api", ...options });
 }
 
 export const digest = (value) => createHash("sha256").update(value).digest("hex").slice(0, 12);

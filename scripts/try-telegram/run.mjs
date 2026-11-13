@@ -61,6 +61,14 @@ try {
   const admin = new pg.Pool({ connectionString: cluster.url(), max: 1 });
   for (const db of ["registry", "runtime"]) await admin.query(`CREATE DATABASE ${db}`);
   await admin.end();
+  // The product reads each role's model from its database (hatch_model_roles): everything here runs on Gemini.
+  const { MODEL_ROLES_SCHEMA } = await import(path.join(repo, "runtime-server/dist/modelRoles.js"));
+  for (const db of ["registry", "runtime"]) {
+    const pool = new pg.Pool({ connectionString: cluster.url(db), max: 1 });
+    await pool.query(MODEL_ROLES_SCHEMA);
+    for (const role of db === "registry" ? ["assistant", "factory"] : ["chat"]) await pool.query("INSERT INTO hatch_model_roles (role, profile) VALUES ($1, 'gemini-api') ON CONFLICT (role) DO UPDATE SET profile = 'gemini-api'", [role]);
+    await pool.end();
+  }
 
   const [edgePort, registryPort, runtimePort, dashboardPort] = await Promise.all([freePort(), freePort(), freePort(), freePort()]);
   const local = `http://127.0.0.1:${edgePort}`;
@@ -81,14 +89,14 @@ try {
     ...base, REGISTRY_HOST: "127.0.0.1", REGISTRY_PORT: String(registryPort),
     HATCH_REGISTRY_DATABASE_URL: cluster.url("registry"), HATCH_AGENT_CORPUS_ROOT: path.join(run, "registry-corpora"), HATCH_CREATOR_FACTORY_ROOT: path.join(run, "factory"),
     HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN: tok.toRegistry, HATCH_RUNTIME_CHAT_URL: local, HATCH_RUNTIME_CHAT_SERVICE_TOKEN: tok.toRuntime,
-    HATCH_CREDENTIALS_KEY: randomBytes(24).toString("hex"), HATCH_STUDIO_ASSISTANT_URL: `${publicUrl}/studio/assistant`, HATCH_FACTORY_LLM_PROFILE: "gemini-api",
+    HATCH_CREDENTIALS_KEY: randomBytes(24).toString("hex"), HATCH_STUDIO_ASSISTANT_URL: `${publicUrl}/studio/assistant`,
     ...(bot ? { HATCH_TELEGRAM_BOT_TOKEN: bot.token, HATCH_TELEGRAM_BOT_USERNAME: bot.username, HATCH_TELEGRAM_WEBHOOK_SECRET: secret } : {})
   } });
   start("runtime", process.execPath, [path.join(runtimeSrv, "dist/index.js")], { cwd: runtimeSrv, env: {
     ...base, PORT: String(runtimePort), HATCH_RUNTIME_HOST: "127.0.0.1",
     HATCH_RUNTIME_DATABASE_URL: cluster.url("runtime"), HATCH_RUNTIME_DATA_DIR: path.join(run, "runtime-data"), HATCH_RUNTIME_CORPUS_ROOT: path.join(run, "corpora"),
     HATCH_REGISTRY_URL: `http://127.0.0.1:${registryPort}`, HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN: tok.toRegistry, HATCH_RUNTIME_CHAT_SERVICE_TOKEN: tok.toRuntime,
-    HATCH_LLM_PROFILE: "gemini-api", HATCH_RUNTIME_ALLOWED_ORIGINS: `${local},${publicUrl}`
+    HATCH_RUNTIME_ALLOWED_ORIGINS: `${local},${publicUrl}`
   } });
   start("dashboard", process.execPath, [path.join(repo, "creator-dashboard/server.mjs")], { cwd: path.join(repo, "creator-dashboard"), env: {
     NODE_ENV: "development", HATCH_CREATOR_DASHBOARD_API_HOST: "127.0.0.1", HATCH_CREATOR_DASHBOARD_API_PORT: String(dashboardPort),

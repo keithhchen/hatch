@@ -14,7 +14,7 @@ import { PostgresIngestJobs } from "./jobs.js";
 import { ProductWorkspaceSink, type ManualFiles } from "./sink.js";
 import { IngestService, STALE_MS } from "./service.js";
 import { log } from "../observability/log.js";
-import { modelRole } from "../modelRoles.js";
+import type { ModelRoleResolver } from "../modelRoles.js";
 import type { UsageCap } from "../usage/usageCap.js";
 
 /** A deployment without a profile seal has no stored logins: links run anonymously. */
@@ -29,12 +29,13 @@ export class NoBrowserProfiles implements BrowserProfileStore {
 export const HOSTED_NOT_CONFIGURED = "Hosted ingest is not configured";
 
 /** The hosted engine when a Kimi key is set; otherwise an engine that says why it cannot run. */
-export const hostedEngineFromEnvironment = async (environment: NodeJS.ProcessEnv, pool: Pool, seal?: CredentialSeal) => {
+export const hostedEngineFromEnvironment = async (environment: NodeJS.ProcessEnv, pool: Pool, models: ModelRoleResolver, seal?: CredentialSeal) => {
   const apiKey = environment.HATCH_MANAGED_AGENTS_API_KEY?.trim();
   if (!apiKey) return new UnavailableEngine(HOSTED_NOT_CONFIGURED);
   const api = new KimiApi({ apiKey });
-  const model = modelRole("ingest", environment);
-  const agent = new TracedHostedAgent(new KimiHostedAgent(api, new Provisioner(api, INGEST_SANDBOX, ingestAgent(model), zipDirectory)), "kimi_hosted_agents", model);
+  // The agent's model is the `ingest` role's, read for each job: a changed row reprovisions the hosted agent on its next run.
+  const model = async () => (await models.resolve("ingest")).model;
+  const agent = new TracedHostedAgent(new KimiHostedAgent(api, new Provisioner(api, INGEST_SANDBOX, async () => ingestAgent(await model()), zipDirectory)), "kimi_hosted_agents", model);
   const profiles = seal ? await PostgresBrowserProfiles.open(pool, seal) : new NoBrowserProfiles();
   return new HostedEngine(new HostedIngest(agent, profiles, ingestSecrets(environment)));
 };
@@ -43,6 +44,7 @@ export const hostedEngineFromEnvironment = async (environment: NodeJS.ProcessEnv
 export const createIngestService = async (deps: {
   environment: NodeJS.ProcessEnv;
   pool: Pool;
+  models: ModelRoleResolver;
   seal?: CredentialSeal;
   objects: ArtifactObjectStore;
   /** The Product's shared manual files. */
@@ -57,7 +59,7 @@ export const createIngestService = async (deps: {
     owns: deps.owns,
     usageCap: deps.usageCap,
     jobs: await PostgresIngestJobs.open(deps.pool),
-    engine: new RoutingEngine([new PlainTextEngine(), await hostedEngineFromEnvironment(deps.environment, deps.pool, deps.seal)]),
+    engine: new RoutingEngine([new PlainTextEngine(), await hostedEngineFromEnvironment(deps.environment, deps.pool, deps.models, deps.seal)]),
     sink: new ProductWorkspaceSink(deps.manual, deps.objects, deps.productPrefix),
   });
   await service.recoverInterrupted();

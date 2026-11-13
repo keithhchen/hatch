@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { CompactionStrategy } from "../compactionStrategy.js";
 import { chatCompactionStrategy, type RuntimeCompactionMessage } from "../compaction.js";
+import type { LlmProfile } from "../llmProfiles.js";
 import type { UsageRecording } from "../usage/usage.js";
 import type { RunCap } from "../usage/usageCap.js";
 import type { ConversationRepository } from "../conversationRepository.js";
@@ -47,8 +48,10 @@ export type ChatRuntimeOptions<Scope> = {
   steers?: StopRelay;
   /** The hub the Runs publish to, when a host also wants to hear every event; by default one over `relay`. */
   hub?: RunEventHub;
-  /** The compaction strategy; by default Chat's, built from the model's window on first use. */
-  compactionStrategy?: () => CompactionStrategy<RuntimeCompactionMessage>;
+  /** The compaction strategy of a conversation; by default Chat's, built from `compactionProfile`. */
+  compactionStrategy?: (conversationId: string) => CompactionStrategy<RuntimeCompactionMessage> | Promise<CompactionStrategy<RuntimeCompactionMessage>>;
+  /** The model a conversation runs on, resolved when it is compacted: Chat's strategy takes its window and its summarizer. Required without `compactionStrategy`. */
+  compactionProfile?: (conversationId: string) => Promise<LlmProfile>;
   /** Where each Run's model calls are recorded, and who pays for them. */
   usage?: UsageRecording<Scope>;
   /** Refuses a new Run when whoever pays for it is out of budget. */
@@ -73,10 +76,11 @@ export class ChatRuntime<Scope> {
     const executorId = `executor_${randomUUID().replaceAll("-", "")}`;
     this.hub = options.hub ?? new RunEventHub(options.relay);
     this.feed = new ConversationFeed(repository, this.hub, options.feedPollMs);
-    let strategy: CompactionStrategy<RuntimeCompactionMessage> | undefined;
+    const { compactionStrategy, compactionProfile } = options;
+    if (!compactionStrategy && !compactionProfile) throw new Error("ChatRuntime needs compactionStrategy or compactionProfile");
     this.compaction = new ChatCompaction({
       repository, store, hub: this.hub, executorId,
-      strategy: () => strategy ??= (options.compactionStrategy ?? chatCompactionStrategy)()
+      strategy: async (conversationId) => compactionStrategy ? compactionStrategy(conversationId) : chatCompactionStrategy(await compactionProfile!(conversationId))
     });
     const terminators = runTerminators(repository, this.hub, executorId);
     this.supervisor = new RunSupervisor(

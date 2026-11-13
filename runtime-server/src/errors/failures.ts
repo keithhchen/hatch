@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { currentContext } from "../observability/context.js";
 import { log } from "../observability/log.js";
+import { ModelProfileError } from "./modelProfile.js";
 import { UpstreamError, type UpstreamCause } from "./upstream.js";
 
 /** The only shape of a failure that crosses to a client. `reference` is what staff look up. */
@@ -43,13 +44,13 @@ export class FailureBoundary {
     const record: FailureRecord = {
       reference, at: new Date().toISOString(),
       scope: ambient ? { request_id: ambient.request_id, account: ambient.account_id, conversation: ambient.conversation_id, run: ambient.run_id, ...scope } : scope,
-      code: upstream ? UPSTREAM_CODE : "run_failed",
+      code: upstream ? UPSTREAM_CODE : error instanceof ModelProfileError ? error.code : "run_failed",
       ...(upstream ? { cause: { kind: upstream.kind, provider: upstream.provider, ...(upstream.status ? { status: upstream.status } : {}) } } : {}),
       detail: upstream ? upstream.detail : own
     };
     log.error("failure", { ...record });
     void this.ledger?.record(record).catch(failure => log.error("failure_ledger_unavailable", { reference, error: String(failure) }));
-    return upstream ? { code: UPSTREAM_CODE, message: upstreamMessage(reference), reference } : { code: "run_failed", message: own, reference };
+    return upstream ? { code: UPSTREAM_CODE, message: upstreamMessage(reference), reference } : { code: record.code, message: own, reference };
   }
 
   /** Runs `work`; a throw is translated once and handed to `onFailure`, so callers do not catch. */

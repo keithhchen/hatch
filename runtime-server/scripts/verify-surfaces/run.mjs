@@ -28,7 +28,7 @@ if (args.includes("--list")) { for (const s of scenarios) console.log(`${s.id}\t
 
 const selected = scenarios.filter((s) => !only || only.includes(String(s.id)));
 const runner = new ScenarioRunner({
-  createStack: (scenario) => Stack.start({ name: `s${scenario.id}`, llmProfile: process.env.HATCH_LLM_PROFILE || "gemini-api", ...(scenario.stackOptions ?? {}) })
+  createStack: (scenario) => Stack.start({ name: `s${scenario.id}`, llmProfile: process.env.VERIFY_LLM_PROFILE || "gemini-api", ...(scenario.stackOptions ?? {}) })
 });
 mkdirSync(path.join(here, "results"), { recursive: true });
 for (const scenario of selected) {

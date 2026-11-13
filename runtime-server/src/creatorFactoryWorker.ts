@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { createHatchCliCandidateExecutor } from "./creatorLearning/cliCandidateExecutor.js";
 import { CreatorFactory } from "./creatorLearning/engine.js";
-import { factoryModelForEnvironment, runFactoryPromptWithPi } from "./creatorLearning/piGateway.js";
+import { factoryModelRecord, factoryPromptRunner } from "./creatorLearning/piGateway.js";
+import { PostgresModelRoleResolver } from "./modelRoles.js";
 import { PostgresCreatorFactoryRepository } from "./creatorLearning/repository.js";
 import { CreatorFactoryWorker } from "./creatorLearning/worker.js";
 import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
@@ -18,14 +19,16 @@ export async function runCreatorFactoryWorker(environment: NodeJS.ProcessEnv = p
   const objectStore = objectStoreFromEnvironment(environment);
   const graphStore = new PostgresDistillationGraphStore(repository.pool);
   await graphStore.initialize();
+  const models = new PostgresModelRoleResolver(repository.pool);
   const factory = new CreatorFactory(
     factoryRoot,
-    runFactoryPromptWithPi,
+    factoryPromptRunner(models, environment),
     createHatchCliCandidateExecutor({
+      models,
       timeoutMs: integerEnvironment(environment.HATCH_CREATOR_FACTORY_HATCH_TIMEOUT_MS, 15 * 60_000),
       environment
     }),
-    { model: factoryModelForEnvironment(environment), objectStore, graphStore }
+    { model: factoryModelRecord(models), objectStore, graphStore }
   );
   const worker = new CreatorFactoryWorker(repository, factory, {
     workerId: environment.HATCH_CREATOR_FACTORY_WORKER_ID?.trim() || `factory-${process.pid}-${randomUUID()}`,
