@@ -8,6 +8,9 @@ export type InputPart =
   | { type: "image"; source: AttachmentSource }
   | { type: "file"; source: AttachmentSource; filename?: string };
 
+/** What this deployment of the API offers. Attachments (image and file input, the Files API) are built but not public yet. */
+export type ResponsesFeatures = { attachments: boolean };
+
 /** The caller's answer to a tool that asked for approval (`mcp_approval_response`). */
 export type ApprovalAnswer = { requestId: string; approve: boolean; reason?: string; param: string };
 
@@ -87,11 +90,14 @@ function sourceOf(value: unknown, param: string, kind: "image" | "file"): Attach
   throw invalidRequest("invalid_request", `${param} must be a data URL or an https URL.`, param);
 }
 
-function partOf(part: unknown, param: string): InputPart {
+function partOf(part: unknown, param: string, features: ResponsesFeatures): InputPart {
   if (!isRecord(part)) throw invalidRequest("invalid_request", `${param} must be an object.`, param);
   if (part.type === "input_text") {
     if (typeof part.text !== "string") throw invalidRequest("invalid_request", `${param}.text must be a string.`, `${param}.text`);
     return { type: "text", text: part.text };
+  }
+  if ((part.type === "input_image" || part.type === "input_file") && !features.attachments) {
+    throw unsupported(param, "Image and file input are not available yet.");
   }
   if (part.type === "input_image") {
     if (present(part.file_id)) return { type: "image", source: fileSource(part.file_id, `${param}.file_id`) };
@@ -106,7 +112,7 @@ function partOf(part: unknown, param: string): InputPart {
   throw unsupported(`${param}.type`, `Input content of type ${JSON.stringify(part.type)} is not supported.`);
 }
 
-function parseInput(input: unknown): { parts: InputPart[]; approvals: ApprovalAnswer[] } {
+function parseInput(input: unknown, features: ResponsesFeatures): { parts: InputPart[]; approvals: ApprovalAnswer[] } {
   const parts: InputPart[] = [];
   const approvals: ApprovalAnswer[] = [];
   if (!present(input)) return { parts, approvals };
@@ -129,13 +135,13 @@ function parseInput(input: unknown): { parts: InputPart[]; approvals: ApprovalAn
       return;
     }
     if (!Array.isArray(item.content)) throw invalidRequest("invalid_request", `${param}.content must be a string or an array.`, `${param}.content`);
-    item.content.forEach((part, at) => parts.push(partOf(part, `${param}.content[${at}]`)));
+    item.content.forEach((part, at) => parts.push(partOf(part, `${param}.content[${at}]`, features)));
   });
   return { parts, approvals };
 }
 
 /** The body of `POST /responses`, validated: what it asks for in the domain's terms, or the first parameter this API refuses. */
-export function parseCreateResponse(body: Record<string, unknown>): CreateResponseRequest {
+export function parseCreateResponse(body: Record<string, unknown>, features: ResponsesFeatures): CreateResponseRequest {
   rejectUnsupported(body);
   for (const flag of ["stream", "background"] as const) {
     if (present(body[flag]) && typeof body[flag] !== "boolean") throw invalidRequest("invalid_request", `${flag} must be a boolean.`, flag);
@@ -146,7 +152,7 @@ export function parseCreateResponse(body: Record<string, unknown>): CreateRespon
   const conversationId = typeof reference === "string" ? reference : isRecord(reference) && typeof reference.id === "string" ? reference.id : undefined;
   if (present(reference) && !conversationId) throw invalidRequest("invalid_request", "conversation must be an id or an object with an id.", "conversation");
   if (conversationId && present(body.previous_response_id)) throw invalidRequest("invalid_request", "Send conversation or previous_response_id, not both.", "previous_response_id");
-  const { parts, approvals } = parseInput(body.input);
+  const { parts, approvals } = parseInput(body.input, features);
   if (approvals.length && parts.length) throw invalidRequest("invalid_request", "Answer approvals in their own request: input cannot mix mcp_approval_response with messages.", "input");
   return {
     ...(typeof body.model === "string" ? { model: body.model } : {}),

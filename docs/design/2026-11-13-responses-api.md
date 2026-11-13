@@ -58,6 +58,8 @@ Delivery modes:
 - `background: true` → return immediately with `status: "queued"`/`"in_progress"`.
 - `GET /responses/v1/responses/{id}` (poll; `?stream=true` re-streams from the start: replay persisted events then live), `POST /responses/v1/responses/{id}/cancel`, `GET /responses/v1/responses/{id}/input_items`. `DELETE /responses/{id}` → 400 `unsupported_parameter` (responses are part of the conversation record).
 
+**Attachments and Files: built, not public yet (`HATCH_RESPONSES_ATTACHMENTS=on` turns them on).** By default `input_image` and `input_file` are 400 `unsupported_parameter` with `param` set to the content part (e.g. `input[0].content[1]`), and `/files*` is not routed (404 `not_found`). Docs do not mention them.
+
 ## Files — `POST /responses/v1/files` (multipart `file`, `purpose` ignored/accepted), `GET /files/{id}`, `GET /files/{id}/content`
 - Account-scoped upload (limits: image 20 MB, file 50 MB, audio 20 MB; existing media rules). Bound to a conversation when first used in an input item. `file_id` = `file_…`.
 - Inline `image_url: "data:…"` / `file_data` and `https://` URLs (fetched server-side, same limits, 10 s timeout) are accepted in input items.
@@ -92,7 +94,7 @@ Delivery modes:
 - `previous_response_id` must be the latest response of its conversation (conversations are linear), otherwise 400 `invalid_request`; a retry of the request that made a later response is replayed, not refused.
 - `created` of a model is 0 (a Corpus carries no release time). `GET /conversations?after=` takes a conversation id.
 - Approvals: a pending approval surfaces as `mcp_approval_request`. Only denying is supported (400 `unsupported_parameter` for `approve: true`): approving runs a tool on the caller's machine, and the API has none. The `mcp` client cannot reach local tools, so in practice no approval arises yet.
-- The Files API (`/files`, `file_id`) is not implemented: `file_id` is 400 `unsupported_parameter`, `/files*` is 404. Inline data URLs and https URLs (public addresses only, no redirects, 10 s, 20/50 MB by kind) work.
+- Attachments and Files: built, not public yet (see above). Inline data URLs, https URLs (public addresses only, no redirects, 10 s, 20/50 MB by kind) and the Files API work only with `HATCH_RESPONSES_ATTACHMENTS=on`.
 - Usage on a response is summed from the persisted per-call usage and is present once the run has ended. The run is billed to the owner on the `chat_api` surface under the API key's session id.
 
 ## Docs

@@ -519,96 +519,7 @@ response.completed | response.failed | response.incomplete
 error
 ```
 
-### 7. Send images and files
-
-`input_image` takes a `data:` or `https:` URL. `input_file` takes `file_data` (a data URL) with `filename`; or pass a public https URL as `file_url`.
-
-```python
-import base64
-
-photo = base64.b64encode(open("photo.png", "rb").read()).decode()
-notes = base64.b64encode(open("notes.pdf", "rb").read()).decode()
-response = client.responses.create(
-    model="hatch:<product_id>",
-    conversation=conversation.id,
-    input=[{
-        "role": "user",
-        "content": [
-            {"type": "input_text", "text": "Compare these"},
-            {"type": "input_image", "image_url": f"data:image/png;base64,{photo}"},
-            {"type": "input_file", "filename": "notes.pdf", "file_data": f"data:application/pdf;base64,{notes}"},
-        ],
-    }],
-)
-```
-
-```javascript
-import { readFileSync } from "node:fs";
-
-const photo = readFileSync("photo.png").toString("base64");
-const notes = readFileSync("notes.pdf").toString("base64");
-const response = await client.responses.create({
-  model: "hatch:<product_id>",
-  conversation: conversation.id,
-  input: [{
-    role: "user",
-    content: [
-      { type: "input_text", text: "Compare these" },
-      { type: "input_image", image_url: "data:image/png;base64," + photo },
-      { type: "input_file", filename: "notes.pdf", file_data: "data:application/pdf;base64," + notes },
-    ],
-  }],
-});
-```
-
-```sh
-curl -s -X POST https://gethatchapp.com/responses/v1/responses -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" \
-  -d '{"model":"hatch:<product_id>","conversation":"'"$CONVERSATION_ID"'","input":[{"role":"user","content":[{"type":"input_text","text":"Describe this"},{"type":"input_image","image_url":"data:image/png;base64,'"$(base64 < photo.png | tr -d '\n')"'"}]}]}'
-```
-
-### 8. Upload a file once, use it by id
-
-`client.files.create` sends the file as multipart (`purpose` is accepted and ignored). Use the returned `file_id` in `input_image` or `input_file`. Files are private to your account: images up to 20 MB, other files up to 50 MB. List with `GET /files`, read with `GET /files/{id}` and `GET /files/{id}/content`, remove with `DELETE /files/{id}`. An unknown or deleted id returns 404 `file_not_found`; a larger file returns 413 `file_too_large`, and a type Hatch cannot take returns 415 `unsupported_file_type` right away (a corrupt file of a supported type fails when it is used). Each account can store 500 MB; beyond that, 400 `storage_quota_exceeded`, and deleting files frees space.
-
-```python
-file = client.files.create(file=open("notes.pdf", "rb"), purpose="user_data")
-response = client.responses.create(
-    model="hatch:<product_id>",
-    conversation=conversation.id,
-    input=[{
-        "role": "user",
-        "content": [
-            {"type": "input_text", "text": "Summarise this"},
-            {"type": "input_file", "file_id": file.id},
-        ],
-    }],
-)
-```
-
-```javascript
-import { createReadStream } from "node:fs";
-
-const file = await client.files.create({ file: createReadStream("notes.pdf"), purpose: "user_data" });
-const response = await client.responses.create({
-  model: "hatch:<product_id>",
-  conversation: conversation.id,
-  input: [{
-    role: "user",
-    content: [
-      { type: "input_text", text: "Summarise this" },
-      { type: "input_file", file_id: file.id },
-    ],
-  }],
-});
-```
-
-```sh
-curl -s -X POST https://gethatchapp.com/responses/v1/files -H "Authorization: Bearer $HATCH_API_KEY" -F purpose=user_data -F file=@notes.pdf
-curl -s -X POST https://gethatchapp.com/responses/v1/responses -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" \
-  -d '{"model":"hatch:<product_id>","conversation":"'"$CONVERSATION_ID"'","input":[{"role":"user","content":[{"type":"input_text","text":"Summarise this"},{"type":"input_file","file_id":"'"$FILE_ID"'"}]}]}'
-```
-
-### 9. Continue a conversation
+### 7. Continue a conversation
 
 Pass `conversation`, or `previous_response_id` of the latest response in that conversation. An empty `input` on a new conversation starts the run from the Task Brief alone; `task_brief` is only accepted when a new conversation is created.
 
@@ -634,9 +545,9 @@ curl -s -X POST https://gethatchapp.com/responses/v1/responses -H "Authorization
   -d '{"model":"hatch:<product_id>","task_brief":{"goal":"Plan a launch"},"input":""}'
 ```
 
-### 10. Errors and limits
+### 8. Errors and limits
 
-Errors use the OpenAI shape. Not supported, returning 400 `unsupported_parameter` with `param`: `instructions`, `tools`, `tool_choice` other than auto, `text.format`, `reasoning`, `max_output_tokens`, system, developer or assistant input roles, `store: false`, and `metadata` other than `title`. Ignored: `temperature`, `top_p`, `user`, `service_tier`. Files: 413 `file_too_large`, 415 `unsupported_file_type`, 404 `file_not_found`, 400 `storage_quota_exceeded` (500 MB per account).
+Errors use the OpenAI shape. Not supported, returning 400 `unsupported_parameter` with `param`: `instructions`, `tools`, `tool_choice` other than auto, `text.format`, `reasoning`, `max_output_tokens`, system, developer or assistant input roles, `store: false`, and `metadata` other than `title`. Ignored: `temperature`, `top_p`, `user`, `service_tier`.
 
 ```json
 { "error": { "message": "…", "type": "conflict_error", "param": null, "code": "conversation_busy" } }
@@ -647,8 +558,6 @@ Errors use the OpenAI shape. Not supported, returning 400 `unsupported_parameter
 404  model_not_found  conversation_not_found  response_not_found
 409  conversation_busy  idempotency_key_reused
 400  task_brief_required  unsupported_parameter
-413  file_too_large
-415  unsupported_file_type
 429  rate_limit_exceeded  insufficient_quota (usage_cap_exceeded)
 500  internal_error
 503  service_unavailable

@@ -187,7 +187,7 @@ export type RuntimeServerOptions = {
   /** Maximum serialized JSON response size for discovery and history. */
   maxHttpResponseBytes?: number;
   /** Test seams of the Responses API: how URLs are fetched, how long a request is held, the keep-alive interval. */
-  responsesApi?: Pick<ConstructorParameters<typeof ResponsesHttpApi>[0], "urls" | "accountFiles" | "holdMs" | "keepAliveMs">;
+  responsesApi?: Pick<ConstructorParameters<typeof ResponsesHttpApi>[0], "urls" | "accountFiles" | "features" | "holdMs" | "keepAliveMs">;
 };
 
 /**
@@ -310,7 +310,8 @@ export async function createRuntimeServerFromEnvironment(
     conversationStore,
     ...(conversationStore instanceof PostgresStore ? (() => { const ledger = new PostgresUsageLedger(conversationStore.pool as never); return { usage: ledger, usageCap: new UsageCap(ledger, monthlyTokenCap(environment)) }; })() : {}),
     ...(chatAssets ? { chatAssets } : {}),
-    ...(accountFiles ? { responsesApi: { accountFiles } } : {}),
+    /** Image and file input and the Files API are built but not public yet. */
+    responsesApi: { ...(accountFiles ? { accountFiles } : {}), features: { attachments: environment.HATCH_RESPONSES_ATTACHMENTS === "on" } },
     assetStore: runtimeAssetStoreFromEnvironment(environment, runtimeDataDir),
     chatServiceToken: config.chatServiceToken,
     maxContactMessages: config.maxContactMessages,

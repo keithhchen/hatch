@@ -9,7 +9,7 @@ import type { ConversationsApi } from "./conversations.js";
 import { invalidRequest, notFound, unsupported } from "./errors.js";
 import { isTerminal, runIdOf, type Json } from "./mapping.js";
 import { modelIdOf, productIdOf, type ModelCatalog } from "./models.js";
-import { parseCreateResponse, type ApprovalAnswer, type CreateResponseRequest } from "./request.js";
+import { parseCreateResponse, type ApprovalAnswer, type CreateResponseRequest, type ResponsesFeatures } from "./request.js";
 import type { RunViews } from "./runs.js";
 
 /** How long a plain request waits for its response to finish before answering `in_progress` (under the proxy's 100 s). */
@@ -35,12 +35,13 @@ export class ResponsesApi {
     views: RunViews;
     /** Verifies a session; the cached one, so a burst of turns asks the Registry once. */
     identities?: AuthIdentityResolver;
+    features: ResponsesFeatures;
     holdMs?: number;
   }) {}
 
   async create(caller: ApiCaller, body: Record<string, unknown>, idempotencyKey: string | undefined, signal?: AbortSignal): Promise<Delivery> {
     const { repository, edge, catalog } = this.deps;
-    const request = parseCreateResponse(body);
+    const request = parseCreateResponse(body, this.deps.features);
     if (idempotencyKey && idempotencyKey.length > MAX_KEY) throw invalidRequest("invalid_request", "Idempotency-Key is limited to 256 characters.");
     const conversation = await this.conversationOf(caller, request, idempotencyKey, signal);
     const binding = await catalog.bind(caller, modelIdOf(conversation.productId), signal);
