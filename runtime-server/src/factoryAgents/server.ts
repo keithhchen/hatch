@@ -7,6 +7,8 @@ import { WorkbenchStore, ROLES, isAssistantRole, type Comment, type FactoryProdu
 import { WorkbenchRuntime, safeError, type WorkbenchRuntimeOptions } from "./runtime.js";
 import { hatchTool } from "./hatchTool.js";
 import { corpusTools } from "./corpusTools.js";
+import { formTools } from "../formPages/tools.js";
+import type { FormPages } from "../formPages/service.js";
 import { agentEntries, assertAgentAvailable, type AgentDefinitionRepository } from "./definitions.js";
 import { factoryAgentTools } from "./factoryTools.js";
 import { convertUpload } from "./markdownConverter.js";
@@ -16,11 +18,11 @@ import type { ModelRoleResolver } from "../modelRoles.js";
 const MESSAGE_KEYS_KEPT = 100;
 export function publicSession(s: Session) { const { context, messageKeys, queue, ...publicData } = s; return publicData; }
 
-export async function createFactoryHandler(options: { root: string; scope: FactoryProductScope; definitions: AgentDefinitionRepository; models: ModelRoleResolver; env?: NodeJS.ProcessEnv; runtime?: Partial<WorkbenchRuntimeOptions>; withheldTools?: (session: Session) => Promise<string[]> }) {
+export async function createFactoryHandler(options: { root: string; scope: FactoryProductScope; definitions: AgentDefinitionRepository; models: ModelRoleResolver; env?: NodeJS.ProcessEnv; runtime?: Partial<WorkbenchRuntimeOptions>; withheldTools?: (session: Session) => Promise<string[]>; forms?: () => FormPages | undefined }) {
   const env: NodeJS.ProcessEnv = options.env ?? process.env;
   const store = new WorkbenchStore(options.root, options.scope, options.definitions);
   await store.recover();
-  const runtime = new WorkbenchRuntime(store, { models: options.models, role: "factory", env, ...options.runtime, withheldTools: options.runtime?.withheldTools ?? options.withheldTools, extraTools: options.runtime?.extraTools ?? (async (s, _signal, changed) => [...corpusTools(store, s.id, changed, options.scope, env), hatchTool(store, s.id, changed, options.scope, env)]) });
+  const runtime = new WorkbenchRuntime(store, { models: options.models, role: "factory", env, ...options.runtime, withheldTools: options.runtime?.withheldTools ?? options.withheldTools, extraTools: options.runtime?.extraTools ?? (async (s, _signal, changed) => [...corpusTools(store, s.id, changed, options.scope, env), hatchTool(store, s.id, changed, options.scope, env), ...(options.forms?.() ? formTools(options.forms()!, { accountId: options.scope.creatorId, productId: options.scope.productId, sessionId: s.id, taskId: async () => (await store.get(s.id)).assistantTaskId }) : [])]) });
   /** Whether the `factory` role's model has its API key. An invalid role row is logged by the resolver and reads as not configured here. */
   const modelConfigured = async () => options.models.resolve("factory").then(profile => Boolean(env[profile.apiKeyEnv]?.trim()), () => false);
   const streams = new Set<ServerResponse>();

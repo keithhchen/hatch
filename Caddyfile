@@ -128,6 +128,12 @@
         import upstream registry 8100
     }
 
+    # Review pages the interview agent publishes (/form/<uuid>): opened and filled in through a signed link, no session. The Registry owns them.
+    @form_pages path /form/*
+    handle @form_pages {
+        import upstream registry 8100
+    }
+
     # All browser APIs belong to the cookie-backed Dashboard BFF. In
     # particular, /v1/auth/me must not be shadowed by Registry.
     handle /v1/* {

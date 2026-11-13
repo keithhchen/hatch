@@ -25,6 +25,11 @@ export class ProductTarget implements ChatTarget {
     return principal.kind === "contact" && connection.audience === "public" && await this.deps.limiter.take(`contact:${connection.id}:${principal.contactId}`, this.deps.contactRate ?? CONTACT_RATE) ? BUSY : undefined;
   }
 
+  async restart({ connection, principal, address }: Inbound, key: string): Promise<string> {
+    await this.deps.gateway.restart(principal, thread(connection, address), key);
+    return "好的，我们重新开始。\nOK, starting fresh.";
+  }
+
   upload({ connection, principal, address }: Inbound, file: { name: string; bytes: Buffer }) { return this.deps.gateway.upload(principal, thread(connection, address), file); }
 
   send({ connection, principal, address }: Inbound, { key, parts }: { key: string; parts: ContentPart[] }) {
