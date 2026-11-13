@@ -96,7 +96,7 @@ test("one Pi Agent per chat persists todo without a shadow; histories and writes
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-progress-unit-"));
   const store = new WorkbenchStore(root, undefined, new MemoryAgentDefinitionRepository(await initialAgentDefinitions()));
   let instances = 0;
-  const runtime = new WorkbenchRuntime(store, { models: new InMemoryModelRoleResolver({ roles: { factory: "deepseek-v4-flash", worker: "deepseek-v4-flash" } }), role: "factory", agentFactory: options => {
+  const runtime = new WorkbenchRuntime(store, { models: new InMemoryModelRoleResolver({ roles: { factory: "deepseek-v4-flash" } }), role: "factory", agentFactory: options => {
     assert.equal(options.profile.name, "deepseek-v4-flash");
     const index = ++instances; let step = 0;
     return new Agent({ ...options.agentOptions, initialState: { ...options.initialState, model: createFactoryLlmModel({ profile: options.profile, env: options.env }) }, streamFn: () => {

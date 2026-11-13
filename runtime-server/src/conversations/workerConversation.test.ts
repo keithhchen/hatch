@@ -23,7 +23,7 @@ test("a worker conversation runs a real turn: stable ids, final reply, no intern
   const definitions = new MemoryAgentDefinitionRepository(await initialAgentDefinitions());
   const store = new WorkbenchStore(root, { creatorId: "c1", productId: "p1" }, definitions);
   let calls = 0;
-  const runtime = new WorkbenchRuntime(store, { models: new InMemoryModelRoleResolver({ roles: { factory: "deepseek-v4-flash", worker: "deepseek-v4-flash" } }), role: "worker", agentFactory: options => new Agent({ ...options.agentOptions, initialState: { ...options.initialState, model: createFactoryLlmModel({ profile: options.profile, env: options.env }) }, streamFn: () => {
+  const runtime = new WorkbenchRuntime(store, { models: new InMemoryModelRoleResolver({ roles: { factory: "deepseek-v4-flash" } }), role: "factory", agentFactory: options => new Agent({ ...options.agentOptions, initialState: { ...options.initialState, model: createFactoryLlmModel({ profile: options.profile, env: options.env }) }, streamFn: () => {
     const call = ++calls;
     const action = call % 2 === 1 ? { name: "list", arguments: { directory: "input" } } : undefined;
     const message: AssistantMessage = { role: "assistant", api: "openai-completions", provider: "moonshotai-cn", model: "kimi-k3.1-pro", timestamp: Date.now(),
@@ -69,7 +69,7 @@ test("a failed Run is a failed conversation with a stable code and no provider t
   const definitions = new MemoryAgentDefinitionRepository(await initialAgentDefinitions());
   const store = new WorkbenchStore(root, { creatorId: "c1", productId: "p1" }, definitions);
   const providerBody = '429 {"error":{"message":"Your account org-abc123<ak-secret9> is suspended due to insufficient balance","type":"exceeded_current_quota_error"}}';
-  const runtime = new WorkbenchRuntime(store, { models: new InMemoryModelRoleResolver({ roles: { factory: "deepseek-v4-flash", worker: "deepseek-v4-flash" } }), role: "worker", agentFactory: options => new Agent({ ...options.agentOptions, initialState: { ...options.initialState, model: createFactoryLlmModel({ profile: options.profile, env: options.env }) }, streamFn: () => {
+  const runtime = new WorkbenchRuntime(store, { models: new InMemoryModelRoleResolver({ roles: { factory: "deepseek-v4-flash" } }), role: "factory", agentFactory: options => new Agent({ ...options.agentOptions, initialState: { ...options.initialState, model: createFactoryLlmModel({ profile: options.profile, env: options.env }) }, streamFn: () => {
     const message: AssistantMessage = { role: "assistant", api: "openai-completions", provider: "moonshotai-cn", model: "kimi-k3.1-pro", timestamp: Date.now(), content: [], stopReason: "error", errorMessage: providerBody,
       usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
     const stream = createAssistantMessageEventStream();

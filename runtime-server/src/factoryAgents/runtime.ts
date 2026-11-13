@@ -30,8 +30,8 @@ const WEB: ClientAttributes = { client: "web" };
 export type WorkbenchRuntimeOptions = {
   /** Where the model is chosen: read at the start of each Run, which keeps that model to its end. */
   models: ModelRoleResolver;
-  /** The role this workspace's Agents run as: `factory` for a Product workspace, `worker` for the Assistant's. */
-  role: Extract<ModelRole, "factory" | "worker">;
+  /** The role this workspace's Agents run as. */
+  role: Extract<ModelRole, "factory">;
   /** What holds the model's API key and the tools' settings; the process's own when absent. */
   env?: NodeJS.ProcessEnv;
   agentFactory?: (options: FactoryPiAgentOptions) => Agent;

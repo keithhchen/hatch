@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { Type } from "@earendil-works/pi-ai";
 import type { UsageRecorder } from "../usage/usage.js";
 import type { UsageCap } from "../usage/usageCap.js";
-import { WorkbenchStore, type AgentDefinitionSource, type AssistantRole, type Role, type Session, type Todo, type WorkbenchBackend } from "../factoryAgents/store.js";
+import { WorkbenchStore, type Role, type Session, type Todo, type WorkbenchBackend } from "../factoryAgents/store.js";
 import { WorkbenchRuntime, safeError, type WorkbenchRuntimeOptions } from "../factoryAgents/runtime.js";
 import type { FactoryWorkspace } from "../factoryAgents/service.js";
 import type { AgentCatalog, AgentChange, CatalogAgent } from "./catalog.js";
@@ -33,7 +33,7 @@ const RUN_END = new Set(["voice.run_completed", "voice.run_failed", "voice.run_i
 /** Where the Expert's own notes and the Assistant's findings live in its workspace; the files the Expert sent live in the conversation. */
 const MATERIALS = "input/materials/";
 const REVIEW_LABELS: Partial<Record<TaskKind, [string, string]>> = {
-  content: ["定稿", "不要"], change: ["确认", "取消"],
+  change: ["确认", "取消"],
 };
 /** How long after the Expert last spoke in Studio the Assistant does not also message them elsewhere. */
 const STUDIO_ACTIVE_MS = 10 * 60_000;
@@ -102,7 +102,6 @@ const notReadyToBuild = (name: string, outline: Todo[]): string | undefined => {
 type Desk = {
   accountId: string;
   store: WorkbenchStore;
-  runtime: WorkbenchRuntime;
   /** The Assistant's notes: findings and the Expert's say-so about sources, kept as files workers can read. */
   sessionId: string;
 };
@@ -122,7 +121,6 @@ const isChannel = (source: string): source is ChannelKind => (CHANNEL_KINDS as r
 export class AssistantService implements StudioOperations {
   private desks = new Map<string, Promise<Desk>>();
   private observed = new WeakSet<FactoryWorkspace>();
-  private definitions: AgentDefinitionSource;
   private closing = false;
   private conversation?: { chat: AssistantChat; materials: ExpertMaterials };
   private deliveryLoop?: NodeJS.Timeout;
@@ -133,18 +131,6 @@ export class AssistantService implements StudioOperations {
       needsAgent: true,
       start: input => this.startInterview(input),
       finish: async () => undefined,
-    },
-    content: {
-      about: "content 把访谈里专家的原话写成一篇内容（需要 agent_id）",
-      needsAgent: true,
-      start: this.workspaceWorker({ role: "content", summary: name => `为「${name}」写内容`, prepare: async (input, desk, workerId) => { await this.copyInterview(input.accountId, input.productId!, desk.store, workerId); await this.copyMaterials(desk, workerId); } }),
-      finish: this.review("output/CONTENT.md", "内容写好了，等专家定稿："),
-    },
-    research: {
-      about: "research 查专家是谁并读他的公开资料（不需要 agent_id，instruction 写专家的身份或线索：名字、职业、机构、链接）",
-      needsAgent: false,
-      start: this.workspaceWorker({ role: "profile-research", summary: () => "读公开资料", message: instruction => `关于专家：${instruction}`, prepare: (_input, desk, workerId) => this.copyMaterials(desk, workerId) }),
-      finish: (task, session, store) => this.finishResearch(task, session, store),
     },
     agent_research: {
       about: "agent_research 为某个 Agent 做深度人物调研，写进它的构建资料（需要 agent_id）",
@@ -170,7 +156,6 @@ export class AssistantService implements StudioOperations {
   };
 
   constructor(private deps: AssistantDependencies) {
-    this.definitions = assistantDefinitions();
     deps.products.attachAssistant({
       // Publishing is the Assistant's tool, after the Expert confirms. A build it started has no way to go live.
       withheldTools: async (_scope, session) => session.role === "generation" && (await this.deps.tasks.bySession(session.id))?.kind === "build" ? ["corpus_upload"] : [],
@@ -376,19 +361,6 @@ export class AssistantService implements StudioOperations {
     return (await workspace.store.list()).find(session => session.role === "voice")?.todos ?? [];
   }
 
-  /** A worker that runs in the Assistant's own workspace. */
-  private workspaceWorker(spec: { role: AssistantRole; summary: (agentName: string) => string; message?: (instruction: string) => string; prepare: (input: WorkerStart, desk: Desk, workerId: string) => Promise<void> }): WorkerSpec["start"] {
-    return async input => {
-      const desk = await this.desk(input.accountId);
-      const summary = spec.summary(input.agentName ?? "");
-      const worker = await desk.store.create(spec.role, summary);
-      await spec.prepare(input, desk, worker.id);
-      const task = await this.deps.tasks.create({ accountId: input.accountId, productId: input.productId, kind: input.kind, origin: input.origin, session: { scope: "assistant", sessionId: worker.id }, payload: { instruction: input.instruction }, summary, leaseExpiresAt: lease() });
-      await desk.runtime.start(worker.id, spec.message ? spec.message(input.instruction) : input.instruction);
-      return task;
-    };
-  }
-
   /** A worker made of Product roles that run in order. */
   private pipeline(label: string): WorkerSpec["start"] {
     return async input => {
@@ -414,17 +386,6 @@ export class AssistantService implements StudioOperations {
     for (const file of notes) {
       const { bytes } = await desk.store.read(desk.sessionId, file.path);
       await workspace.store.backend.writeManual(`input/manual/${file.path.slice(MATERIALS.length)}`, bytes);
-    }
-  }
-
-  private async copyMaterials(desk: Desk, workerId: string): Promise<void> {
-    const session = await desk.store.get(desk.sessionId);
-    for (const file of session.files.filter(candidate => candidate.path.startsWith(MATERIALS))) {
-      const { bytes } = await desk.store.read(desk.sessionId, file.path);
-      await desk.store.put(workerId, file.path, bytes, { actor: "host", mimeType: file.mimeType });
-    }
-    for (const material of (await this.materials.list(desk.accountId)).filter(candidate => candidate.kind === "file" && candidate.bytes)) {
-      await desk.store.put(workerId, `${MATERIALS}${material.name}`, material.bytes!, { actor: "host", mimeType: material.mimeType });
     }
   }
 
@@ -520,16 +481,6 @@ export class AssistantService implements StudioOperations {
     await worker.finish(task, session, store);
   }
 
-  /** The result waits for the Expert's decision. */
-  private review(file: string, lead: string): WorkerFinish {
-    return async (task, session, store) => {
-      const body = await outputText(store, session.id, file);
-      if (!body) return this.block(task, `没有写出 ${file}`, session.messages.length);
-      await this.deps.tasks.update(task.id, { status: "needs_you", needs: "review", leaseExpiresAt: undefined, outputRef: `assistant:${session.id}:${file}` });
-      await this.news(task.accountId, task.id, `${lead}\n${excerpt(body)}`, `finished:${session.messages.length}`);
-    };
-  }
-
   /** The work is done: tell the Assistant what came out. */
   private announce(lead: string, file?: string): WorkerFinish {
     return async (task, session, store) => {
@@ -537,19 +488,6 @@ export class AssistantService implements StudioOperations {
       await this.deps.tasks.update(task.id, { status: "done", leaseExpiresAt: undefined, ...(file ? { outputRef: `product:${session.id}:${file}` } : {}) });
       await this.news(task.accountId, task.id, `${lead}\n${excerpt(body || finalText(session.messages))}`, `finished:${session.messages.length}`);
     };
-  }
-
-  private async finishResearch(task: AssistantTask, session: Session, store: WorkbenchStore): Promise<void> {
-    const desk = await this.desk(task.accountId);
-    const profile = await outputText(store, session.id, "output/PUBLIC_PROFILE.md");
-    if (!profile.trim()) {
-      await this.deps.tasks.update(task.id, { status: "done", leaseExpiresAt: undefined, summary: "没有读到公开资料" });
-      await this.news(task.accountId, task.id, `没有读到公开资料。它的说明：${finalText(session.messages)}\n如实告诉专家是什么情况：搜索失败不等于网上没有。`, `finished:${session.messages.length}`);
-      return;
-    }
-    await desk.store.put(desk.sessionId, `${MATERIALS}公开资料.md`, Buffer.from(profile), { actor: "host" });
-    await this.deps.tasks.update(task.id, { status: "done", leaseExpiresAt: undefined, outputRef: `assistant:${desk.sessionId}:${MATERIALS}公开资料.md` });
-    await this.news(task.accountId, task.id, `公开资料读完了：\n${excerpt(profile)}\n\n把发现自然地接进对话，告诉专家你看过哪些来源，他可以说哪篇不算数。`, `finished:${session.messages.length}`);
   }
 
   /** `turn` is what tells one block from the next: the worker's session length when its turn ended, or the attempt count. A retry of the same block has the same one. */
@@ -568,6 +506,8 @@ export class AssistantService implements StudioOperations {
   }
 
   private async recover(task: AssistantTask): Promise<void> {
+    // Tasks of kinds that no longer exist (the Assistant's own research and content workers) have nothing to resume: close them.
+    if (!this.workers[task.kind as WorkerKind]) return void await this.deps.tasks.update(task.id, { status: "done", leaseExpiresAt: undefined });
     if (task.attempts >= 3) return this.block(task, "多次中断，没能完成", task.attempts);
     const runtime = await this.sessionRuntime(task);
     await this.deps.tasks.update(task.id, { attempted: true, leaseExpiresAt: lease() });
@@ -631,16 +571,11 @@ export class AssistantService implements StudioOperations {
 
   /** Resolves when the Studio Runs this process holds have ended. */
   async drain(): Promise<void> {
-    for (const pending of this.desks.values()) await (await pending.catch(() => undefined))?.runtime.drain();
   }
 
   async close(): Promise<void> {
     this.closing = true;
     if (this.deliveryLoop) clearInterval(this.deliveryLoop);
-    for (const pending of this.desks.values()) {
-      const desk = await pending.catch(() => undefined);
-      await desk?.runtime.close();
-    }
   }
 
   // ── Internals ──────────────────────────────────────────────────────────
@@ -657,15 +592,10 @@ export class AssistantService implements StudioOperations {
   }
 
   private async openDesk(accountId: string): Promise<Desk> {
-    const store = new WorkbenchStore(this.deps.backend(accountId), undefined, this.definitions);
+    const store = new WorkbenchStore(this.deps.backend(accountId));
     await store.recover();
     const notes = (await store.getOrCreate("assistant", "Hatch 助理")).session;
-    const runtime = new WorkbenchRuntime(store, { ...this.deps.runtime, ...(this.deps.usage ? { usage: { recorder: this.deps.usage, accountId, cap: this.deps.usageCap } } : {}), models: this.deps.models, role: "worker", env: this.deps.env });
-    const desk: Desk = { accountId, store, runtime, sessionId: notes.id };
-    runtime.events.on("event", (event: { sessionId?: string; type?: string }) => {
-      if (!event.sessionId || !event.type || !RUN_END.has(event.type)) return;
-      void this.deps.tasks.bySession(event.sessionId).then(task => { if (task) return this.workerTurnEnded(task, store, undefined, event.type!); }).catch(error => this.report(accountId, error));
-    });
+    const desk: Desk = { accountId, store, sessionId: notes.id };
     return desk;
   }
 
@@ -689,31 +619,14 @@ export class AssistantService implements StudioOperations {
   }
 
   private async sessionRuntime(task: AssistantTask): Promise<WorkbenchRuntime> {
-    if (!task.session) throw new Error("这件事没有对应的执行会话");
-    return task.session.scope === "product" ? (await this.workspace(task.accountId, task.productId!)).runtime : (await this.desk(task.accountId)).runtime;
+    if (task.session?.scope !== "product") throw new Error("这件事没有对应的执行会话");
+    return (await this.workspace(task.accountId, task.productId!)).runtime;
   }
 
   private async ownedTask(accountId: string, taskId: string): Promise<AssistantTask> {
     const task = await this.deps.tasks.get(taskId);
     if (!task || task.accountId !== accountId) throw Object.assign(new Error("Task was not found"), { status: 404 });
     return task;
-  }
-
-  /** Content needs the interview: copy the persona, voice notes and transcript into the worker's input. */
-  private async copyInterview(accountId: string, productId: string, store: WorkbenchStore, workerId: string): Promise<void> {
-    const workspace = await this.workspace(accountId, productId);
-    const voice = (await workspace.store.list()).find(session => session.role === "voice");
-    if (!voice) throw new Error("这个 Agent 还没有访谈记录，先补访谈");
-    for (const file of ["output/CREATOR_PERSONA.md", "output/VOICE.md"]) {
-      const body = await outputText(workspace.store, voice.id, file);
-      if (body.trim()) await store.put(workerId, `input/interview/${file.slice("output/".length)}`, Buffer.from(body), { actor: "host" });
-    }
-    const transcript = voice.messages.flatMap(message => {
-      const text = message.role === "user" || message.role === "assistant" ? textOfMessage(message).trim() : "";
-      return text ? [`**${message.role === "user" ? "专家" : "访谈"}**：${text}`] : [];
-    }).join("\n\n");
-    if (!transcript) throw new Error("这个 Agent 的访谈还是空的，先补访谈");
-    await store.put(workerId, "input/interview/TRANSCRIPT.md", Buffer.from(transcript), { actor: "host" });
   }
 
   private report(scope: string, error: unknown): void { log.error("assistant_failed", { scope, error: safeError(error) }); }
@@ -723,21 +636,6 @@ export class AssistantService implements StudioOperations {
 export async function assistantPrompt(): Promise<string> {
   const read = (name: string) => readFile(fileURLToPath(new URL(`../../prompts/assistant/${name}`, import.meta.url)), "utf8");
   return `${await read("ASSISTANT.md")}\n\n${await read("INTERVIEW_DONE.md")}`;
-}
-
-function assistantDefinitions(): AgentDefinitionSource {
-  const prompts = new Map<string, Promise<string>>();
-  const prompt = (name: string) => {
-    let pending = prompts.get(name);
-    if (!pending) { pending = readFile(fileURLToPath(new URL(`../../prompts/assistant/${name}.md`, import.meta.url)), "utf8"); prompts.set(name, pending); }
-    return pending;
-  };
-  return {
-    list: async () => [
-      { role: "profile-research" as const, systemPrompt: await prompt("PROFILE_RESEARCH"), tools: ["list", "read", "write", "web_search", "web_scrape"] },
-      { role: "content" as const, systemPrompt: await prompt("CONTENT"), tools: ["list", "read", "write"] },
-    ],
-  };
 }
 
 const textOf = (parts: ContentPart[]): string => parts.flatMap(part => part.type === "text" ? [part.text] : []).join("\n");
