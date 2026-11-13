@@ -76,6 +76,10 @@ import { DiscordIdentity, lineIdentity, lineOidc, telegramIdentity, telegramOidc
 import { PlatformLogin, PostgresLoginStore, type IdentityProvider } from "./auth/platformLogin.js";
 import { DiscordChannel } from "./channels/discordChannel.js";
 import { PostgresTaskRepository } from "./assistant/tasks.js";
+import { FormPages } from "./formPages/service.js";
+import { FormLinks } from "./formPages/links.js";
+import { PostgresFormRepository } from "./formPages/repository.js";
+import { handleFormRoute } from "./formPages/routes.js";
 import type { AgentCatalog, AgentChange, CatalogAgent } from "./assistant/catalog.js";
 import "dotenv/config";
 import http from "node:http";
@@ -160,6 +164,7 @@ type RegistryContext = {
   /** Attachments for Studio; with the Registry database. */
   studioAssets?: StudioDeps["assets"];
   assistant?: AssistantService;
+  forms?: FormPages;
   /** The Assistant's conversation, on Chat's runtime. */
   assistantChat?: AssistantChat;
   /** What the Assistant's conversation reads and writes: made here, so closed here once the conversation has stopped. */
@@ -430,8 +435,13 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       owns: ownsProduct,
       usageCap,
     });
+    // Review pages are opened through links signed with the credentials key. Without it there are no pages, and the interview is not offered the tools.
+    const formKey = environment.HATCH_CREDENTIALS_KEY?.trim();
+    if (!formKey) log.error("form_pages_unavailable", { reason: "HATCH_CREDENTIALS_KEY is not set: review pages cannot be signed" });
+    const forms: FormPages | undefined = formKey ? new FormPages({ repository: await PostgresFormRepository.open(registryPool), store: nodeObjectStore, links: new FormLinks(formKey, siteOrigin), submissions: { submitted: async page => assistant.formSubmitted(page) } }) : undefined;
+    if (forms) factoryAgents.attachForms(forms);
     const assistant = new AssistantService({
-      tasks, reach, channels,
+      tasks, reach, channels, forms,
       products: factoryAgents,
       catalog,
       backend: accountId => new PostgresWorkbenchBackend(registryPool, `assistant:${accountId}`),
@@ -469,7 +479,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     const productChannelsUnavailable = gateway || productChannelsOff ? undefined : "Product channels need HATCH_RUNTIME_CHAT_URL and HATCH_RUNTIME_CHAT_SERVICE_TOKEN; set both, or set HATCH_PRODUCT_CHANNELS=off.";
     if (gateway) channels.register("product", guarded(new GuardedTarget(new ChatFlow(new ProductTarget({ gateway, limiter: stores.limiter })), [liveOwnProduct(releaseStore)]), eligibility));
     channels.start();
-    Object.assign(registryContext, { productChannelsUnavailable, assistant, assistantChat, assistantStorage: [transcripts, conversations], ingest, channels, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin, studioUrl, platformLogin,...(seal ? { ownApps: new OwnApps({ connections: stores.connections, seal, forms: CREDENTIAL_FORMS, origin: telegramOrigin, ownsProduct }) } : {}) });
+    Object.assign(registryContext, { productChannelsUnavailable, assistant, forms, assistantChat, assistantStorage: [transcripts, conversations], ingest, channels, reach, credentialSeal: seal, publicOrigin: new URL(studioUrl).origin, studioUrl, platformLogin,...(seal ? { ownApps: new OwnApps({ connections: stores.connections, seal, forms: CREDENTIAL_FORMS, origin: telegramOrigin, ownsProduct }) } : {}) });
     // A platform that pushes over its own connection runs here, in one process at a time. A dropped connection comes back; credentials added or removed are picked up.
     channelListeners = new ChannelListeners({
       hub, connections: stores.connections, exclusive: postgresExclusive(registryPool),
@@ -666,6 +676,9 @@ async function route(
   if (await new ConversationRoutes(conversationDeps(response, context)).handle(request, response, url)) return;
 
   if (url.pathname === "/v1/transcriptions" && request.method === "POST") { await transcribe(request, response, context); return; }
+
+  // A review page is opened and filled in through its signed link, before any sign-in.
+  if (url.pathname.startsWith("/form/") && await handleFormRoute(request, response, url, context.forms)) return;
 
   if (url.pathname.startsWith("/v1/channels/") || url.pathname.startsWith("/v1/creator/assistant") || url.pathname.startsWith("/v1/creator/connections")) {
     await assistantRoute(request, response, url, context);

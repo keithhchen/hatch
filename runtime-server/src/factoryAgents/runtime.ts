@@ -13,6 +13,7 @@ import { UpstreamError } from "../errors/upstream.js";
 import type { RunFailure } from "./runFailure.js";
 import { INPUT_ROLES, RUN_HEARTBEAT_MS, WorkbenchStore, isAssistantRole, itemIdOf, settleMessage, type AgentDefinitionSource, type AnyRole, type Session } from "./store.js";
 import { factoryAgentTools } from "./factoryTools.js";
+import { provideFormReference } from "../formPages/tools.js";
 import { fileTools } from "./tools.js";
 import { traceAgentTools, withLangfuseTurn, type LangfuseTurnIdentifiers } from "../langfuse.js";
 import { renderSystemReminder, type ClientAttributes } from "../surfaces/contract.js";
@@ -306,6 +307,8 @@ export class WorkbenchRuntime {
         extraTools: await this.options.extraTools?.(s, controller.signal, changed),
         withheldTools: await this.options.withheldTools?.(s),
       }), this.options.toolSupport ?? studioToolSupport, () => this.clientOf(id).client);
+      if (tools.some(tool => tool.name === "publish_form")) await provideFormReference(this.store, id);
+      if (tools.some(tool => tool.name === "publish_form")) system += `\n\n${await readFile(fileURLToPath(new URL("voice/FORM_PAGE.md", new URL("../../prompts/factory-agents/", import.meta.url))), "utf8")}`;
       const messageCount = s.messages.length;
       let history = s.context;
       let input = message;
