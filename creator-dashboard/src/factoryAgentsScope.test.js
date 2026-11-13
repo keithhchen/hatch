@@ -255,11 +255,9 @@ test('Factory uses the MUI X Chat Composer for the real session message endpoint
   assert.doesNotMatch(source, /<TextField fullWidth multiline minRows=\{2\}/);
 });
 
-test('Factory todo panel exposes every todo in an independently scrollable region', async () => {
+test('Factory workbench does not render the todo panel or the published card', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
-  assert.match(source, /className="factory-todo-list" sx=\{\{ maxHeight: 220, overflowY: "auto"/);
-  assert.match(source, /todos\.map\(\(todo, index\)/);
-  assert.doesNotMatch(source, /todos\.slice\(0, 5\)/);
+  assert.doesNotMatch(source, /factory-todo-list|function Binding|agentPublished/);
 });
 
 test('Factory chat header removes terminal status and message-count chrome', async () => {
@@ -349,6 +347,6 @@ test('Factory no longer exposes the obsolete manual output handoff controls', as
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /selectedOutputs|destinationRole|handoffNotice|transferOutputs|sendOutputsTo|destinationAgent|sendFiles|handoffHint|\/transfer/);
   assert.doesNotMatch(source, /selectable selectedOutputs/);
-  assert.match(source, /<FileList title=\{t\("outputs"\)\}/);
+  assert.match(source, /<FileList key="output" records=\{outputFiles\} pageSize=\{FILE_PAGE_SIZE\}/);
   assert.match(source, /method: "DELETE", body: \{ path: record\.path \}/);
 });

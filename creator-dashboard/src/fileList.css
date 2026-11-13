@@ -14,6 +14,10 @@
 .fl__state { min-width: 0; flex: 1 1 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--web-muted); font-size: 12px; }
 .fl__row.is-failed .fl__state { color: var(--web-fail); }
 .fl__actions { display: flex; align-items: center; justify-content: flex-end; min-width: 28px; }
+.fl__pager { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; border-top: 1px solid var(--web-rule); color: var(--web-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.fl__pager button { padding: 4px 8px; border: 0; border-radius: 8px; background: none; color: var(--web-ink); font: inherit; cursor: pointer; }
+.fl__pager button:hover:not(:disabled) { background: var(--web-yolk-soft); }
+.fl__pager button:disabled { color: var(--web-muted); opacity: .5; cursor: default; }
 .fl__empty { margin: 0; padding: 16px 14px; color: var(--web-muted); font-size: 13px; }
 
 .fv { display: grid; gap: 12px; }
@@ -41,3 +45,7 @@
 .factory-import__open svg { width: 16px; height: 16px; }
 .factory-import__rule { width: 100%; margin: 4px 0; border: 0; border-top: 1px solid var(--web-rule); }
 .factory-import__paste { font-size: 14px; font-weight: 600; color: var(--web-ink); }
+.fl-tabs { display: flex; gap: 4px; }
+.fl-tabs button { padding: 4px 10px; border: 0; border-radius: 999px; background: none; color: var(--web-muted); font: inherit; font-weight: 650; cursor: pointer; }
+.fl-tabs button.is-active { background: var(--web-card); color: var(--web-ink); box-shadow: inset 0 0 0 1px var(--web-rule); }
+.fl-tabs button span { font-variant-numeric: tabular-nums; font-weight: 500; }

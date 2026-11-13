@@ -4,6 +4,7 @@ import { Avatar } from "@hatch/ui";
 import { approvalDecision, partitionAttachments } from "../domain/activity.js";
 import { ACTIVITY_KINDS, ChatTimeline, groupTimelineEntries, withoutRepeatedSteps } from "../domain/timeline.js";
 import { sharedScrollPositions } from "../domain/scroll-positions.js";
+import { createClickThrottle } from "../domain/click-throttle.js";
 import { OPEN_FREE_CHAT } from "../domain/free-chat.js";
 import { ActivityBlock, ActivityModal, ApprovalActivity } from "./Activity.jsx";
 import { PagePanel, useComposerReserve, useFormPageViewer } from "./FormPageViewer.jsx";
@@ -153,14 +154,9 @@ export function Composer({ controller, state, snapshotPending = false, agentName
   const { draft, images, activeRun } = state;
   // A host whose server takes a message while a Run is active keeps the composer open and has no Stop here.
   const busy = snapshotPending || (Boolean(activeRun) && !steer);
-  // Send turns into Stop the moment a Run starts: a double-click on Send must not land on Stop and cancel the message it just sent.
-  const [stoppable, setStoppable] = useState(false);
-  useEffect(() => {
-    setStoppable(false);
-    if (!activeRun) return undefined;
-    const timer = setTimeout(() => setStoppable(true), 700);
-    return () => clearTimeout(timer);
-  }, [activeRun]);
+  // Send turns into Stop the moment a Run starts, so the click that sends must not also land on Stop. Throttle after a click, never lock Stop up front: a Run another tab or the server started is stoppable at once.
+  const throttle = useRef(null);
+  throttle.current ??= createClickThrottle();
 
   useEffect(() => {
     const composer = draftRef.current;
@@ -174,7 +170,7 @@ export function Composer({ controller, state, snapshotPending = false, agentName
 
   const submit = event => {
     event.preventDefault();
-    onSend();
+    throttle.current(onSend);
   };
   // Dictation only fills the box: the user edits the text and decides whether to send.
   const voice = useVoiceInput({
@@ -192,7 +188,7 @@ export function Composer({ controller, state, snapshotPending = false, agentName
       {accessory}
       {dictate && canRecord() ? <MicButton voice={voice} t={t} disabled={busy} /> : null}
       {activeRun && !steer
-        ? <button type="button" className="web-chat__stop" aria-label={t("stopReply")} disabled={!stoppable} onClick={() => controller.cancel()}><Square aria-hidden="true" /><span>{t("stopReply")}</span></button>
+        ? <button type="button" className="web-chat__stop" aria-label={t("stopReply")} onClick={() => throttle.current(() => controller.cancel())}><Square aria-hidden="true" /><span>{t("stopReply")}</span></button>
         : <button type="submit" className="web-chat__send" aria-label={t("sendMessage")} disabled={snapshotPending || (!draft.trim() && !images.length)}><ArrowUp aria-hidden="true" /></button>}
     </div>}
   </form>;

@@ -129,8 +129,6 @@ export type CompactionClaim = {
   conversationId: string;
   executorId: string;
   leaseExpiresAt: string;
-  /** A new message asked it to stop. */
-  preempted: boolean;
   endedAt?: string;
 };
 
@@ -353,11 +351,9 @@ export interface ConversationRepository {
    * `latestRunId` is the Run the compaction's history ends with.
    */
   beginCompaction(input: { id: string; conversationId: string; executorId: string; leaseMs: number }): Promise<{ claimed: boolean; latestRunId?: string }>;
-  /** Asks the running compaction to stop. False when none is running. */
-  requestCompactionPreempt(conversationId: string): Promise<boolean>;
-  /** True when the claim was preempted or has ended: the job must stop. */
-  compactionStopped(compactionId: string): Promise<boolean>;
   runningCompaction(conversationId: string): Promise<CompactionClaim | undefined>;
+  /** Pushes the claim's lease out by `leaseMs` from now: a compactor that is alive keeps its claim. False when the claim has ended. */
+  renewCompaction(compactionId: string, leaseMs: number): Promise<boolean>;
   endCompaction(compactionId: string): Promise<void>;
   /** Appends the transcript checkpoint and the journal entry together, and ends the claim. False when stale. */
   commitCompaction(input: CommitCompactionInput): Promise<boolean>;
@@ -712,30 +708,24 @@ export class InMemoryConversationRepository implements ConversationRepository {
       if (running && Date.parse(running.leaseExpiresAt) > Date.now()) return { claimed: false };
       if (running) this.compactions.set(running.id, { ...running, endedAt: now() });
       this.compactions.set(input.id, { id: input.id, conversationId: input.conversationId, executorId: input.executorId,
-        leaseExpiresAt: new Date(Date.now() + input.leaseMs).toISOString(), preempted: false });
+        leaseExpiresAt: new Date(Date.now() + input.leaseMs).toISOString() });
       return { claimed: true, ...(runs.at(-1) ? { latestRunId: runs.at(-1)!.id } : {}) };
     });
-  }
-
-  async requestCompactionPreempt(conversationId: string): Promise<boolean> {
-    return this.write(async () => {
-      const running = [...this.compactions.values()].find((claim) => claim.conversationId === conversationId && !claim.endedAt);
-      if (!running) return false;
-      this.compactions.set(running.id, { ...running, preempted: true });
-      return true;
-    });
-  }
-
-  async compactionStopped(compactionId: string): Promise<boolean> {
-    await this.readReady();
-    const claim = this.compactions.get(compactionId);
-    return !claim || claim.preempted || claim.endedAt !== undefined;
   }
 
   async runningCompaction(conversationId: string): Promise<CompactionClaim | undefined> {
     await this.readReady();
     const running = [...this.compactions.values()].find((claim) => claim.conversationId === conversationId && !claim.endedAt && Date.parse(claim.leaseExpiresAt) > Date.now());
     return running ? { ...running } : undefined;
+  }
+
+  async renewCompaction(compactionId: string, leaseMs: number): Promise<boolean> {
+    return this.write(async () => {
+      const claim = this.compactions.get(compactionId);
+      if (!claim || claim.endedAt) return false;
+      this.compactions.set(compactionId, { ...claim, leaseExpiresAt: new Date(Date.now() + leaseMs).toISOString() });
+      return true;
+    });
   }
 
   async endCompaction(compactionId: string): Promise<void> {
@@ -1204,7 +1194,6 @@ CREATE TABLE IF NOT EXISTS hatch_conversation_compactions (
   conversation_id TEXT NOT NULL REFERENCES hatch_conversations(id) ON DELETE CASCADE,
   executor_id TEXT NOT NULL,
   lease_expires_at TIMESTAMPTZ NOT NULL,
-  preempted BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   ended_at TIMESTAMPTZ
 );
@@ -1460,23 +1449,17 @@ export class PostgresConversationRepository implements ConversationRepository {
     });
   }
 
-  async requestCompactionPreempt(conversationId: string): Promise<boolean> {
-    await this.initialize();
-    const result = await this.pool.query("UPDATE hatch_conversation_compactions SET preempted = true WHERE conversation_id = $1 AND ended_at IS NULL RETURNING id", [conversationId]);
-    return result.rows.length > 0;
-  }
-
-  async compactionStopped(compactionId: string): Promise<boolean> {
-    await this.initialize();
-    const result = await this.pool.query<{ stopped: boolean }>("SELECT preempted OR ended_at IS NOT NULL AS stopped FROM hatch_conversation_compactions WHERE id = $1", [compactionId]);
-    return result.rows[0]?.stopped ?? true;
-  }
-
   async runningCompaction(conversationId: string): Promise<CompactionClaim | undefined> {
     await this.initialize();
     const result = await this.pool.query<CompactionRow>("SELECT * FROM hatch_conversation_compactions WHERE conversation_id = $1 AND ended_at IS NULL AND lease_expires_at > now()", [conversationId]);
     const row = result.rows[0];
-    return row ? { id: row.id, conversationId: row.conversation_id, executorId: row.executor_id, leaseExpiresAt: new Date(row.lease_expires_at).toISOString(), preempted: row.preempted } : undefined;
+    return row ? { id: row.id, conversationId: row.conversation_id, executorId: row.executor_id, leaseExpiresAt: new Date(row.lease_expires_at).toISOString() } : undefined;
+  }
+
+  async renewCompaction(compactionId: string, leaseMs: number): Promise<boolean> {
+    await this.initialize();
+    const result = await this.pool.query("UPDATE hatch_conversation_compactions SET lease_expires_at = now() + ($2::bigint * interval '1 millisecond') WHERE id = $1 AND ended_at IS NULL RETURNING id", [compactionId, leaseMs]);
+    return result.rows.length > 0;
   }
 
   async endCompaction(compactionId: string): Promise<void> {
@@ -2035,7 +2018,7 @@ type ToolCallRow = QueryResultRow & {
 };
 
 type CompactionRow = QueryResultRow & {
-  id: string; conversation_id: string; executor_id: string; lease_expires_at: Date | string; preempted: boolean;
+  id: string; conversation_id: string; executor_id: string; lease_expires_at: Date | string;
 };
 
 type RunRow = QueryResultRow & {

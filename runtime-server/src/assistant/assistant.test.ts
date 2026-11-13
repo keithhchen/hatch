@@ -30,7 +30,7 @@ import { LegacyAssistantHistory } from "./history.js";
 import { ExpertMaterials } from "./materials.js";
 import type { AccountReach } from "./reach.js";
 import { MemoryAssistantState } from "./state.js";
-import { assistantConversationId, assistantFeedKey } from "./studioVocabulary.js";
+import { assistantConversationId, assistantFeedKey, studioVocabulary } from "./studioVocabulary.js";
 import { messageKey } from "../chat/messageKey.js";
 import { studioToolDefinitions, studioTools } from "./studioTools.js";
 import { ChatFlow } from "../channels/chatTarget.js";
@@ -197,7 +197,7 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
   const say = (text: string, id = `m-${Math.random().toString(36).slice(2)}`) => chat.say(ACCOUNT, { id, parts: [{ type: "text", text }], origin: { source: "web", client: { client: "web" } } });
   const idle = async () => { await sleep(30); await chat.idle(ACCOUNT, 20_000); await sleep(30); };
   return {
-    root, scopes, tasks, state, deliveries, pushed, notices, log, applied, telegramCalls, telegramUpdate, assistant, chat, target, model, productStore, productRuntime, say, idle, legacy, store, kit, tools, chatAssets, materials,
+    repository, root, scopes, tasks, state, deliveries, pushed, notices, log, applied, telegramCalls, telegramUpdate, assistant, chat, target, model, productStore, productRuntime, say, idle, legacy, store, kit, tools, chatAssets, materials,
     setReachable: (value: boolean) => { reachable = value; },
     failPushes: (count: number) => { pushFailures = count; },
     close: async () => { await assistant.close(); await chat.close(); await store.close(); await repository.close(); await productRuntime.close(); await rm(root, { recursive: true, force: true, maxRetries: 5 }); },
@@ -1001,4 +1001,41 @@ test("A submitted review page is the Expert saying so in the conversation it cam
     assert.equal(said.length, 1, "a double submit is one message");
     assert.match(JSON.stringify(said[0]), /我填好了《直接访谈》，你看一下。\(form_id: form_bbbbbbbbbbbbbbbbbbbb\)/);
   } finally { await env.close(); }
+});
+
+test("The view says a summary is under way, between Runs as well, and the journal says when it ended", async () => {
+  const env = await setup({ model: () => ({ text: "好" }) });
+  try {
+    await env.say("你好");
+    await env.idle();
+    assert.deepEqual(await env.chat.status(ACCOUNT), { state: "idle" });
+    const conversation = await env.chat.conversation(ACCOUNT);
+    assert.equal((await env.repository.beginCompaction({ id: "cmp_view", conversationId: conversation.id, executorId: "x", leaseMs: 60_000 })).claimed, true);
+    assert.deepEqual(await env.chat.status(ACCOUNT), { state: "idle", compacting: true });
+    await env.repository.endCompaction("cmp_view");
+    assert.deepEqual(await env.chat.status(ACCOUNT), { state: "idle" });
+  } finally { await env.close(); }
+});
+
+test("The journal's compaction records reach Studio observers as compaction_start and compaction_end", () => {
+  const event = (type: string) => ({ cursor: 1, conversationId: "c", runId: "run_1", type, payload: { compaction_id: "cmp_1" } }) as never;
+  assert.deepEqual(studioVocabulary({ journal: event("compaction.started") }), [{ type: "compaction_start", compaction_id: "cmp_1", run_id: "run_1" }]);
+  assert.deepEqual(studioVocabulary({ journal: event("compaction.completed") }), [{ type: "compaction_end", compaction_id: "cmp_1", run_id: "run_1" }]);
+  assert.deepEqual(studioVocabulary({ journal: event("compaction.aborted") }), [{ type: "compaction_end", compaction_id: "cmp_1", aborted: true, run_id: "run_1" }]);
+});
+
+test("The Assistant's context is held to its budget, not to the model's window", async () => {
+  const { chatCompactionStrategy } = await import("../compaction.js");
+  const { ASSISTANT_CONTEXT_BUDGET } = await import("./chat.js");
+  const profile = { name: "t", contextWindow: 1_000_000 } as never;
+  const strategy = chatCompactionStrategy(profile, { budget: ASSISTANT_CONTEXT_BUDGET, summarize: async () => "s" });
+  assert.equal(strategy.policy.trigger, 60_000);
+  assert.equal(strategy.policy.tail, 10_000);
+  assert.equal(strategy.policy.timeoutMs, 20_000);
+  const messages = (tokens: number) => [{ role: "user" as const, content: "x".repeat(tokens * 4) }, { role: "assistant" as const, content: "ok" }];
+  const request = { now: Date.now(), signal: new AbortController().signal };
+  assert.equal(strategy.wants(messages(50_000), request), false);
+  assert.equal(strategy.wants(messages(70_000), request), true);
+  const product = chatCompactionStrategy(profile, { summarize: async () => "s" });
+  assert.equal(product.wants(messages(70_000), request), false, "a Product's conversation keeps the window-derived policy");
 });

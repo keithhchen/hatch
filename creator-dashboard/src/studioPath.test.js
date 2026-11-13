@@ -36,7 +36,7 @@ test("Factory routes map onto the guided steps and the advanced tab", () => {
   assert.equal(studioStepForRoute(null, null), null);
 });
 
-test("Overview is a top tab, Advanced is a separate rail control, Start Agent and todos use the product style", async () => {
+test("Overview is a top tab, Advanced sits under the rail steps, Start Agent and todos use the product style", async () => {
   const { readFile } = await import("node:fs/promises");
   const read = (name) => readFile(new URL(name, import.meta.url), "utf8");
   const [workspace, factory, css, web] = await Promise.all([read("./studioAgentWorkspace.jsx"), read("./FactoryAgents.jsx"), read("./factoryAgents.css"), read("./web/web.css")]);
@@ -46,8 +46,8 @@ test("Overview is a top tab, Advanced is a separate rail control, Start Agent an
   assert.match(factory, /<HatchButton type="button" size="small" variant="secondary" leading=\{<Play/);
   assert.doesNotMatch(factory, /line-through/);
   assert.doesNotMatch(web, /pro-tasks[^\n]*line-through/);
-  assert.match(css, /\.factory-advanced \{[^}]*justify-self: end/);
-  assert.doesNotMatch(factory.match(/<nav className="factory-rail"[^]*?<\/nav>/)[0], /factory-advanced/);
+  assert.match(factory.match(/<nav className="factory-rail"[^]*?<\/nav>/)[0], /factory-advanced/);
+  assert.match(css, /grid-template-columns: max-content minmax\(0, 1fr\)/);
 });
 
 test("Agent header has one Product links dropdown: copy, open page, open chat; en/zh/ja", async () => {
@@ -69,7 +69,7 @@ test("Advanced pill matches step pill type and shows the same selected state wit
   const css = await readFile(new URL("./factoryAgents.css", import.meta.url), "utf8");
   const factory = await readFile(new URL("./FactoryAgents.jsx", import.meta.url), "utf8");
   const rule = (selector) => css.match(new RegExp(`^${selector.replace(/[.]/g, "\\.")} \\{([^}]*)\\}`, "m"))[1];
-  assert.match(rule(".factory-app .factory-advanced"), /align-self: start;[^}]*font-size: 14px; font-weight: 650/);
+  assert.match(rule(".factory-advanced"), /font-size: 14px; font-weight: 650/);
   assert.equal(rule(".factory-advanced.is-current"), rule(".factory-stepper .is-current"));
   assert.match(factory, /factory-advanced\$\{currentStep === ADVANCED_STEP\.id \? " is-current" : ""\}`\} aria-current=\{currentStep === ADVANCED_STEP\.id \? "page"/);
 });

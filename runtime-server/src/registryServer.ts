@@ -1,3 +1,4 @@
+import { mapLimit, singleFlight } from "./bounded.js";
 import { HistoryCursorError } from "./conversationHistory.js";
 import { FactoryAgentsService } from "./factoryAgents/service.js";
 import { PostgresAgentDefinitionRepository } from "./factoryAgents/definitions.js";
@@ -1835,22 +1836,24 @@ async function productForCreator(
 ): Promise<CreatorProductBoundary | undefined> {
   const products = await context.factoryService.listProducts(creatorId);
   const product = products.find((entry) => publicProductId(entry) === productId);
-  if (product) {
-    const release = await context.releaseStore.getLive(productId);
-    return {
-      productId,
-      name: product.name,
-      promise: publicProductPromise(product),
-      status: release ? "published" : product.runId ? "working" : "draft",
-      ...(product.briefSpec ? { brief_spec: product.briefSpec } : {}),
-      ...(product.pricing ? { pricing: product.pricing } : {}),
-      createdAt: product.createdAt,
-      updatedAt: product.updatedAt,
-      ...(release ? { release } : {}),
-      repositoryId: product.id
-    };
-  }
-  return undefined;
+  return product ? productBoundary(context, product) : undefined;
+}
+
+async function productBoundary(context: RegistryContext, product: Awaited<ReturnType<RegistryContext["factoryService"]["listProducts"]>>[number]): Promise<CreatorProductBoundary> {
+  const productId = publicProductId(product);
+  const release = await context.releaseStore.getLive(productId);
+  return {
+    productId,
+    name: product.name,
+    promise: publicProductPromise(product),
+    status: release ? "published" : product.runId ? "working" : "draft",
+    ...(product.briefSpec ? { brief_spec: product.briefSpec } : {}),
+    ...(product.pricing ? { pricing: product.pricing } : {}),
+    createdAt: product.createdAt,
+    updatedAt: product.updatedAt,
+    ...(release ? { release } : {}),
+    repositoryId: product.id
+  };
 }
 
 function publicCreatorProduct(product: {
@@ -2125,6 +2128,14 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 /** The Expert's Agents as seen by the Assistant: the same authority and rules as the Studio product routes. */
 function registryAgentCatalog(context: RegistryContext): AgentCatalog {
   const tokens = new Map<string, { token: string; expiresAt: number }>();
+  // A cold cache with many callers at once (every agent's workspace asks) mints one session, not one each.
+  const mint = singleFlight(async (accountId: string) => {
+    const account = await context.accounts.getById(accountId);
+    if (!account) throw new Error("Account was not found");
+    const issued = await context.accounts.createSession(account);
+    tokens.set(accountId, { token: issued.token, expiresAt: Math.min(Date.parse(issued.session.absolute_expires_at), Date.parse(issued.session.idle_expires_at)) });
+    return issued.token;
+  });
   const view = (product: CreatorProductBoundary): CatalogAgent => ({
     productId: product.productId, name: product.name, promise: product.promise,
     status: product.status === "published" ? "published" : product.status === "working" ? "working" : "draft",
@@ -2137,9 +2148,9 @@ function registryAgentCatalog(context: RegistryContext): AgentCatalog {
   };
   return {
     list: async accountId => {
+      // One read of the Expert's products, not one per product: each boundary is built from the row already in hand.
       const products = await context.factoryService.listProducts(accountId);
-      const views = await Promise.all(products.map(product => get(accountId, publicProductId(product))));
-      return views.filter((agent): agent is CatalogAgent => Boolean(agent));
+      return mapLimit(products, 4, async product => view(await productBoundary(context, product)));
     },
     get,
     create: async (accountId, name, promise) => {
@@ -2164,8 +2175,8 @@ function registryAgentCatalog(context: RegistryContext): AgentCatalog {
         await context.productLive.publish(new ExpertProduct(accountId, productId, latest.name, latest.promise, latest.brief_spec));
       }
     },
-    live: async (accountId, productId) => {
-      const product = await productForCreator(context, accountId, productId);
+    live: async (accountId, productId, known) => {
+      const product = known ? { name: known.name, promise: known.promise, brief_spec: known.briefSpec } : await productForCreator(context, accountId, productId);
       if (!product || !context.productLive) return null;
       const status = (await context.productLive.status(new ExpertProduct(accountId, productId, product.name, product.promise, product.brief_spec))).toJSON();
       const bot = status.is_live ? await context.ownApps?.username(accountId, "telegram", productId) : undefined;
@@ -2173,12 +2184,7 @@ function registryAgentCatalog(context: RegistryContext): AgentCatalog {
     },
     token: async accountId => {
       const cached = tokens.get(accountId);
-      if (cached && cached.expiresAt - Date.now() > 3_600_000) return cached.token;
-      const account = await context.accounts.getById(accountId);
-      if (!account) throw new Error("Account was not found");
-      const issued = await context.accounts.createSession(account);
-      tokens.set(accountId, { token: issued.token, expiresAt: Math.min(Date.parse(issued.session.absolute_expires_at), Date.parse(issued.session.idle_expires_at)) });
-      return issued.token;
+      return cached && cached.expiresAt - Date.now() > 3_600_000 ? cached.token : mint(accountId);
     },
   };
 }
