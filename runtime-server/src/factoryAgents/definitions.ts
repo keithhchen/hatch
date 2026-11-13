@@ -6,7 +6,7 @@ import { ROLES, type Role, type Session } from "./store.js";
 
 const roleSchema = z.enum(ROLES);
 const localizedSchema = z.object({ en: z.string().min(1).max(200), zh: z.string().min(1).max(200), ja: z.string().min(1).max(200) }).strict();
-const toolSchema = z.enum(["update_todo", "list", "read", "write", "web_search", "web_scrape", "youtube_transcript", "corpus_upload", "hatch_tool"]);
+const toolSchema = z.enum(["update_todo", "list", "read", "write", "web_search", "web_scrape", "youtube_transcript", "corpus_upload", "hatch_tool", "generate_image"]);
 const definitionSchema = z.object({
   role: roleSchema,
   order: z.number().int().nonnegative(),
@@ -74,7 +74,7 @@ export class PostgresAgentDefinitionRepository implements AgentDefinitionReposit
     `);
     const count = Number((await pool.query("SELECT COUNT(*)::int AS count FROM hatch_factory_agent_definitions")).rows[0]?.count ?? 0);
     if (count === 0) await repository.bootstrap();
-    else await repository.migrateTemporaryYoutubeTranscriptDisable();
+    else { await repository.bootstrap(); await repository.migrateTemporaryYoutubeTranscriptDisable(); }
     await repository.list();
     return repository;
   }
@@ -107,6 +107,7 @@ export class PostgresAgentDefinitionRepository implements AgentDefinitionReposit
       throw error;
     } finally { client.release(); }
   }
+  /** Inserts the seed definitions a database lacks (a new node kind arrives here); existing rows are never touched. */
   private async bootstrap(): Promise<void> {
     const definitions = await initialAgentDefinitions();
     const client = await this.pool.connect();
@@ -146,6 +147,8 @@ export async function initialAgentDefinitions(): Promise<AgentDefinition[]> {
     { role: "generation", order: 3, name: { en: "Agent Builder", zh: "Agent 构建", ja: "Agent 構築" }, hint: { en: "Turn the Expert's identity and judgment into an executable expert Agent.", zh: "把 Expert 的人格与判断变成可执行的专家 Agent。", ja: "Expert の人格と判断を、実行可能な専門 Agent に変えます。" }, tools: ["update_todo", "list", "read", "write", "corpus_upload"] },
     { role: "case-generation", order: 4, name: { en: "Case Builder", zh: "案例构建", ja: "ケース構築" }, hint: { en: "Build one realistic client situation that demands expert judgment.", zh: "构造一个真正需要专家判断的现实客户情境。", ja: "専門家の判断が本当に必要な顧客状況を構築します。" }, tools: ["update_todo", "list", "read", "write"] },
     { role: "evaluator", order: 5, name: { en: "Evaluator", zh: "效果评估", ja: "効果評価" }, hint: { en: "Find the few changes that matter most, then calibrate them with the Expert.", zh: "找出最影响客户结果的少数错位，再请 Expert 校准。", ja: "結果を大きく変える少数のずれを見つけ、Expert と校正します。" }, tools: ["update_todo", "list", "read", "write", "hatch_tool"] },
+    { role: "inspiration", order: 6, name: { en: "Inspiration", zh: "灵感", ja: "インスピレーション" }, hint: { en: "Find methods, audience questions, competitors and trends worth learning from.", zh: "找值得借鉴的方法论、受众问题、竞品与趋势。", ja: "学ぶ価値のある手法、受け手の疑問、競合、トレンドを探します。" }, tools: ["update_todo", "list", "read", "write", "web_search", "web_scrape"] },
+    { role: "content-creation", order: 7, name: { en: "Content Creation", zh: "内容创作", ja: "コンテンツ制作" }, hint: { en: "Write content that promotes your Agent, or content the way you would write it.", zh: "推广你的 Agent，或按你的方式写社交内容。", ja: "あなたの Agent を広める、またはあなたらしく書くコンテンツ。" }, tools: ["update_todo", "list", "read", "write", "generate_image"] },
   ] as const;
   return validateDefinitions(await Promise.all(seed.map(async definition => ({
     ...definition,

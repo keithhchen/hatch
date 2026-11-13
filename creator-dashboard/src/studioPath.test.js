@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ADVANCED_STEP, STUDIO_PATH, studioNextStep, studioPathStates, studioStepForRoute } from "./studioPath.js";
+import { ADVANCED_STEP, INSPIRATION_STEP, STUDIO_PATH, studioNextStep, studioPathStates, studioStepForRoute } from "./studioPath.js";
 
 const agent = (role, state) => ({ role, state });
 const file = { path: "input/manual/a.md" };
 
 test("Studio path is upload, interview, build and publish; the advanced Agents are a separate tab", () => {
   assert.deepEqual(STUDIO_PATH.map((step) => step.id), ["upload", "ask", "build", "ship"]);
-  assert.deepEqual(ADVANCED_STEP.items.map(([, role]) => role), ["research", "case-generation", "evaluator"]);
+  assert.deepEqual(ADVANCED_STEP.items.map(([, role]) => role), ["research", "case-generation", "evaluator", "content-creation"]);
   assert.equal(STUDIO_PATH.some((step) => step.items.some(([, role]) => ADVANCED_STEP.items.some(([, advanced]) => advanced === role))), false);
 });
 
@@ -72,4 +72,15 @@ test("Advanced pill matches step pill type and shows the same selected state wit
   assert.match(rule(".factory-app .factory-advanced"), /align-self: start;[^}]*font-size: 14px; font-weight: 650/);
   assert.equal(rule(".factory-advanced.is-current"), rule(".factory-stepper .is-current"));
   assert.match(factory, /factory-advanced\$\{currentStep === ADVANCED_STEP\.id \? " is-current" : ""\}`\} aria-current=\{currentStep === ADVANCED_STEP\.id \? "page"/);
+});
+
+test("Inspiration sits after Publish but is not a step: no state, no progress; Content Creation is inside Advanced", async () => {
+  assert.equal(STUDIO_PATH.some((step) => step.id === "inspiration"), false);
+  assert.equal(studioPathStates([agent("inspiration", "complete")], null, []).length, STUDIO_PATH.length);
+  assert.equal(studioStepForRoute("inspire", "inspiration"), "inspiration");
+  assert.equal(studioStepForRoute("create", "content-creation"), "advanced");
+  const { readFile } = await import("node:fs/promises");
+  const jsx = await readFile(new URL("./FactoryAgents.jsx", import.meta.url), "utf8");
+  assert.ok(jsx.indexOf("<FactoryStepper") < jsx.indexOf("factory-inspiration"), "the Inspiration entry follows the stepper");
+  assert.equal(INSPIRATION_STEP.items[0][1], "inspiration");
 });

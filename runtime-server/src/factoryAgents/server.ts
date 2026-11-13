@@ -8,6 +8,7 @@ import { WorkbenchRuntime, safeError, type WorkbenchRuntimeOptions } from "./run
 import { hatchTool } from "./hatchTool.js";
 import { corpusTools } from "./corpusTools.js";
 import { agentEntries, assertAgentAvailable, type AgentDefinitionRepository } from "./definitions.js";
+import { configuredSearch } from "./search.js";
 import { factoryAgentTools } from "./factoryTools.js";
 import { convertUpload } from "./markdownConverter.js";
 import type { ModelRoleResolver } from "../modelRoles.js";
@@ -97,7 +98,7 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
         return;
       }
       if (url.pathname === "/api/config" && req.method === "GET") {
-        return json(res, 200, { roles: ROLES, agents: await entries(), manualFiles: await store.listManualFiles(), runtimeUrl: env.HATCH_FACTORY_RUNTIME_URL ?? "", services: { model: await modelConfigured(), search: Boolean(env.FIRECRAWL_API_KEY?.trim()), scrape: Boolean(env.HATCH_FACTORY_SCRAPE_PROVIDER === "firecrawl" ? env.FIRECRAWL_API_KEY : env.TAVILY_API_KEY), hatch: Boolean(env.HATCH_FACTORY_RUNTIME_URL && env.HATCH_FACTORY_CREATOR_TOKEN), corpus: Boolean(env.HATCH_FACTORY_REGISTRY_URL && env.HATCH_FACTORY_CREATOR_TOKEN) } });
+        return json(res, 200, { roles: ROLES, agents: await entries(), manualFiles: await store.listManualFiles(), runtimeUrl: env.HATCH_FACTORY_RUNTIME_URL ?? "", services: { model: await modelConfigured(), search: Boolean(configuredSearch(env)), scrape: Boolean(env.HATCH_FACTORY_SCRAPE_PROVIDER === "firecrawl" ? env.FIRECRAWL_API_KEY : env.TAVILY_API_KEY), hatch: Boolean(env.HATCH_FACTORY_RUNTIME_URL && env.HATCH_FACTORY_CREATOR_TOKEN), corpus: Boolean(env.HATCH_FACTORY_REGISTRY_URL && env.HATCH_FACTORY_CREATOR_TOKEN) } });
       }
 
       if (url.pathname === "/api/sessions" && req.method === "GET") { const sessions = await store.list(); const manualFiles = await store.listManualFiles(); return json(res, 200, { sessions: sessions.map(s => ({ ...publicSession(s), messages: undefined })), agents: agentEntries(await options.definitions.list(), sessions, manualFiles), manualFiles }); }

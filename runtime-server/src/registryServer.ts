@@ -2,7 +2,7 @@ import { HistoryCursorError } from "./conversationHistory.js";
 import { FactoryAgentsService } from "./factoryAgents/service.js";
 import { PostgresAgentDefinitionRepository } from "./factoryAgents/definitions.js";
 import { PostgresWorkbenchBackend } from "./factoryAgents/store.js";
-import { FirecrawlSearchProvider } from "./factoryAgents/webProviders.js";
+import { lazySearchProvider } from "./factoryAgents/search.js";
 import { AssistantService, assistantPrompt } from "./assistant/assistant.js";
 import { AssistantChat } from "./assistant/chat.js";
 import { InMemoryUsageLedger } from "./usage/memoryUsage.js";
@@ -437,7 +437,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       state: assistantState,
       deliveries: await PostgresDeliveries.open(registryPool),
       exclusive: postgresExclusive(registryPool),
-      search: new FirecrawlSearchProvider({ apiKey: environment.FIRECRAWL_API_KEY }),
+      search: lazySearchProvider(environment),
       env: environment, models, ingest, usage, usageCap,
     });
     ingest.onSettled(job => assistant.ingested(job));

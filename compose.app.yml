@@ -96,6 +96,11 @@ services:
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.moonshot.cn/v1}
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
+      # Inspiration and Content Creation nodes: web search (parallel|exa) and image generation. A node whose key is missing fails with that reason.
+      HATCH_SEARCH_PROVIDER: ${HATCH_SEARCH_PROVIDER:-parallel}
+      PARALLEL_API_KEY: ${PARALLEL_API_KEY:-}
+      EXA_API_KEY: ${EXA_API_KEY:-}
+      FAL_KEY: ${FAL_KEY:-}
       ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
       HATCH_FACTORY_STT_PROVIDER: ${HATCH_FACTORY_STT_PROVIDER:-qwen}
       HATCH_FACTORY_VOICE_PAUSE_MS: ${HATCH_FACTORY_VOICE_PAUSE_MS:-2500}

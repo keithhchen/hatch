@@ -3,6 +3,8 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { result } from "./files.js";
 import { fileTools } from "./tools.js";
 import { webTools } from "./web.js";
+import { configuredSearch, searchProviderFrom, webSearchTool } from "./search.js";
+import { imageGeneratorFrom, imageTool } from "./image.js";
 import { WorkbenchStore } from "./store.js";
 
 export type FactoryToolDefinition = { role: string; tools: string[] };
@@ -25,6 +27,9 @@ export async function factoryAgentTools(options: {
     createTodoTool(options.store, options.id, options.todosChanged ?? options.changed),
     ...fileTools(options.store, options.id, { changed: options.changed }),
     ...webTools(options.store, options.id, options.changed, options.env),
+    // A granted capability without its key fails the Run with the real reason; no other tool stands in for it.
+    ...webSearch(options),
+    ...(options.definition.tools.includes("generate_image") ? [imageTool(options.store, options.id, options.changed, imageGeneratorFrom(options.env ?? process.env))] : []),
     ...(await options.extraTools ?? []),
   ];
   // askuser is a host capability for text Factory Agents only. Voice uses a
@@ -117,4 +122,14 @@ export function createTodoTool(store: WorkbenchStore, id: string, changed: () =>
       return result({ todos: (await store.get(id)).todos, saved: true });
     },
   };
+}
+
+/** web_search where a search is configured. The Inspiration node is a search: without one its Run fails with the reason, the others simply have no search. */
+function webSearch(options: { definition: FactoryToolDefinition; env?: NodeJS.ProcessEnv }): AgentTool[] {
+  if (!options.definition.tools.includes("web_search")) return [];
+  const env = options.env ?? process.env;
+  const provider = configuredSearch(env);
+  if (provider) return [webSearchTool(provider)];
+  if (options.definition.role === "inspiration") searchProviderFrom(env);
+  return [];
 }

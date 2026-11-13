@@ -51,7 +51,7 @@ import { subscribeFactoryEvents } from "./factoryEvents.js";
 import { createFactoryAgentTranslator } from "./factoryAgentsI18n.js";
 import { BUILD_NEEDS, agentStateKey, localizeAgentText, updatedSources } from "./factoryAgentState.js";
 import { creatorFactoryPath, creatorProductPath, factorySectionForAgent } from "./creatorRoutes.js";
-import { ADVANCED_STEP, STUDIO_PATH, studioNextStep, studioPathStates, studioStepForRoute } from "./studioPath.js";
+import { ADVANCED_STEP, INSPIRATION_STEP, STUDIO_PATH, studioNextStep, studioPathStates, studioStepForRoute } from "./studioPath.js";
 import "./factoryAgents.css";
 
 const api = (route, options = {}) => dashboardRequest(route, { ...options, body: options.body === undefined ? undefined : JSON.stringify(options.body) });
@@ -59,7 +59,7 @@ const textBase64 = text => { const bytes = new TextEncoder().encode(text); let b
 const factoryRoot = productId => `/v1/creator/products/${encodeURIComponent(productId)}/factory-agents`;
 const endpoint = (root, id, action = "") => `${root}/sessions/${id}${action ? `/${action}` : ""}`;
 // A section URL without a page opens the first task of that step.
-const FIRST_PAGE = { sources: "uploads", build: "generation", evaluate: "case-generation" };
+const FIRST_PAGE = { sources: "uploads", build: "generation", evaluate: "case-generation", inspire: "inspiration", create: "content-creation" };
 const STEP_STATE_KEY = { done: "stepDone", running: "stepRunning", todo: "stepReady", locked: "stepLocked" };
 
 const theme = createTheme({ ...hatchMuiThemeOptions, components: { ...hatchMuiThemeOptions.components, MuiTextField: { defaultProps: { size: "small" } } } });
@@ -124,12 +124,13 @@ export function FactoryAgents({ productId, tab = "build", section, agent, naviga
   const deleteManualFile = async record => { const transport = agentSession("research"); if (!transport) return; try { await api(endpoint(root, transport.id, "files"), { method: "DELETE", body: { path: record.path } }); setManualFiles(previous => previous.filter(file => file.path !== record.path)); setUploadItems(previous => previous.filter(item => item.path !== record.path)); } catch (e) { setError(factoryError(e, t, agentName)); } };
   const states = studioPathStates(agents, product, manualFiles);
   const currentStep = studioStepForRoute(stage, selected);
-  const step = tab === "overview" ? null : [...STUDIO_PATH, ADVANCED_STEP].find(item => item.id === currentStep);
+  const step = tab === "overview" ? null : [...STUDIO_PATH, ADVANCED_STEP, INSPIRATION_STEP].find(item => item.id === currentStep);
   const selectedEntry = selected ? agentEntry(selected) : null; const selectedSession = selected ? agentSession(selected) : null;
   const workbench = Boolean(selected && selected !== "uploads" && selectedSession);
   return <ThemeProvider theme={theme}><div className={`factory-app${workbench ? " factory-app--workbench" : ""}`} aria-label={t("factory")}>
     {tab === "overview" ? null : <nav className="factory-rail" aria-label={t("factoryStepsLabel")}>
       <FactoryStepper states={states} current={currentStep} onStep={goToStep} t={t} />
+      <button type="button" className={`factory-inspiration${currentStep === INSPIRATION_STEP.id ? " is-current" : ""}`} aria-current={currentStep === INSPIRATION_STEP.id ? "page" : undefined} onClick={() => goToStep(INSPIRATION_STEP)}>{t(INSPIRATION_STEP.title)}</button>
     </nav>}
     {tab === "overview" ? null : <button type="button" className={`factory-advanced${currentStep === ADVANCED_STEP.id ? " is-current" : ""}`} aria-current={currentStep === ADVANCED_STEP.id ? "page" : undefined} onClick={() => goToStep(ADVANCED_STEP)}>{t(ADVANCED_STEP.title)}</button>}
     <ErrorNotice error={error} onClose={() => setError("")} />

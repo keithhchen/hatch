@@ -46,7 +46,7 @@ export function fileTools(store: WorkbenchStore, id: string, options: { changed?
     }
     return result({ matches, truncated: matches.length >= limit });
   } });
-  tools.push({ name: "write", label: "写入 Markdown", description: "Save one actual output/*.md file. Read an existing file before editing it. Writing the same path replaces its current contents. A failed call means nothing was saved. Input files and Runtime results are read-only.", parameters: Type.Object({ path: Type.String(), content: Type.String({ minLength: 1 }) }), execute: async (_id, raw) => {
+  tools.push({ name: "write", label: "写入 Markdown", description: "Save one actual output/*.md (or, when your role produces web pages, output/*.html) file. Read an existing file before editing it. Writing the same path replaces its current contents. A failed call means nothing was saved. Input files and Runtime results are read-only.", parameters: Type.Object({ path: Type.String(), content: Type.String({ minLength: 1 }) }), execute: async (_id, raw) => {
     const a = raw as { path: string; content: string };
     const record = await store.put(id, a.path, Buffer.from(a.content), { actor: "agent" });
     options.changed?.();

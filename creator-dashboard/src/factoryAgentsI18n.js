@@ -89,6 +89,16 @@ for (const [locale, text] of Object.entries(evaluatorUpdateMessage)) {
   const previous = messages.useLatestMessage;
   messages.useLatestMessage = role => role === 'evaluator' ? text : previous;
 }
+const nodeStartMessages = {
+  en: { inspiration: 'Look at my Agent and materials, work out what I am missing, and find methods, audience questions, competitors or trends worth learning from. Ask me if it is unclear what I need.', 'content-creation': 'Help me write content. Ask me what it is for and where it will be published if that is not clear.' },
+  zh: { inspiration: '请看看我的 Agent 和资料，弄清我还缺什么，替我找值得借鉴的方法论、受众的真实问题、竞品或趋势。不清楚我要什么就问我。', 'content-creation': '请帮我写内容。如果不清楚用来做什么、发在哪里，先问我。' },
+  ja: { inspiration: '私の Agent と資料を見て、足りないものを見極め、参考にすべき手法、受け手の疑問、競合やトレンドを探してください。必要なものが不明なら質問してください。', 'content-creation': 'コンテンツを書くのを手伝ってください。目的や公開先が不明なら先に質問してください。' },
+};
+for (const [locale, texts] of Object.entries(nodeStartMessages)) {
+  const messages = MESSAGES[locale];
+  const previous = messages.startAgentMessage;
+  messages.startAgentMessage = role => texts[role] ?? previous(role);
+}
 MESSAGES.en.toolActionEvaluate = 'Surfacing high-leverage gaps';
 MESSAGES.zh.toolActionEvaluate = '正在识别需要确认的关键问题';
 MESSAGES.ja.toolActionEvaluate = '確認が必要な重要事項を特定しています';
