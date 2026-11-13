@@ -19,6 +19,7 @@ export const STUDIO_COPY = {
     stepBuild: "Build",
     stepBuildBody: "Generate the Agent from your sources and interview.",
     stepAdvanced: "Advanced",
+    stepInspiration: "Inspiration",
     stepShip: "Publish",
     stepShipBody: "Preview the client page, publish, and share the link.",
     stepDone: "Done",
@@ -100,7 +101,9 @@ export const STUDIO_COPY = {
       voice: "Describe your experience and how you make decisions.",
       generation: "The Agent is generated from your sources and interview. Review the result and mark what needs to change.",
       "case-generation": "A realistic client case is generated to test the Agent. Confirm that it reflects real situations.",
-      evaluator: "After the Agent handles the case, the 1–3 most important decisions are listed for you to confirm."
+      evaluator: "After the Agent handles the case, the 1–3 most important decisions are listed for you to confirm.",
+      inspiration: "Say what you want to strengthen or learn. The Agent researches and saves what it finds, with sources.",
+      "content-creation": "Say what the content is for and where it will be published. The Agent writes it from your Agent and documents."
     }[role] ?? "Answer the Agent's questions to continue."),
     // Preview
     previewPill: "Preview",
@@ -127,6 +130,7 @@ export const STUDIO_COPY = {
     stepBuild: "构建",
     stepBuildBody: "根据资料和访谈生成 Agent。",
     stepAdvanced: "进阶",
+    stepInspiration: "灵感",
     stepShip: "发布",
     stepShipBody: "预览客户页面，发布并分享链接。",
     stepDone: "已完成",
@@ -204,7 +208,9 @@ export const STUDIO_COPY = {
       voice: "介绍你的经验和判断方式。",
       generation: "根据资料和访谈生成 Agent。请检查结果并标注需要修改的内容。",
       "case-generation": "生成一个真实的客户案例，用于测试 Agent。请确认案例是否符合实际情况。",
-      evaluator: "Agent 处理案例后，会列出 1–3 个最关键的判断点，由你确认。"
+      evaluator: "Agent 处理案例后，会列出 1–3 个最关键的判断点，由你确认。",
+      inspiration: "说说你想加强或想了解什么。Agent 会去查，并保存带来源的发现。",
+      "content-creation": "说明内容用来做什么、发在哪里。Agent 会根据你的 Agent 和资料来写。"
     }[role] ?? "按照 Agent 的提示回答问题。"),
     previewPill: "预览",
     previewTitle: "客户页面",
@@ -229,6 +235,7 @@ export const STUDIO_COPY = {
     stepBuild: "構築",
     stepBuildBody: "資料とインタビューをもとに Agent を生成します。",
     stepAdvanced: "高度な設定",
+    stepInspiration: "インスピレーション",
     stepShip: "公開",
     stepShipBody: "顧客向けページを確認し、公開してリンクを共有します。",
     stepDone: "完了",
@@ -306,7 +313,9 @@ export const STUDIO_COPY = {
       voice: "経験と判断の方法について説明します。",
       generation: "資料とインタビューをもとに Agent を生成します。結果を確認し、修正が必要な箇所を指摘してください。",
       "case-generation": "Agent をテストするための現実的な顧客ケースを生成します。実際の状況に即しているか確認してください。",
-      evaluator: "Agent がケースを処理した後、特に重要な 1〜3 点の判断を提示します。内容を確認してください。"
+      evaluator: "Agent がケースを処理した後、特に重要な 1〜3 点の判断を提示します。内容を確認してください。",
+      inspiration: "強化したいこと、知りたいことを伝えます。Agent が調べ、出典付きで保存します。",
+      "content-creation": "コンテンツの目的と公開先を伝えます。Agent があなたの Agent と資料から書きます。"
     }[role] ?? "Agent の案内に従って質問に回答してください。"),
     previewPill: "プレビュー",
     previewTitle: "顧客向けページ",

@@ -85,22 +85,22 @@ test("database cold start seeds atomically, then the database remains the only a
     connect: async () => ({ query, release() {} }),
   } as unknown as Pool;
   const repository = await PostgresAgentDefinitionRepository.open(pool);
-  assert.equal(inserts, 5);
-  assert.equal((await repository.list()).length, 5);
+  assert.equal(inserts, 7);
+  assert.equal((await repository.list()).length, 7);
   const replacement = await initialAgentDefinitions();
   replacement.find(row => row.role === "voice")!.order = 2;
   await repository.replace(replacement);
-  await assert.rejects(repository.replace(replacement.slice(0, 4)));
+  await assert.rejects(repository.replace(replacement.slice(0, 6)));
   await assert.rejects(repository.replace(replacement.map((row, index) => ({ ...row, order: index === 1 ? replacement[0]!.order : row.order }))));
   await assert.rejects(repository.replace(replacement.map(row => row.role === "research" ? { ...row, dependencies: { required: ["research"], normal: [], updates: [] } } : row)), "the retired dependencies field is not accepted from a writer");
-  assert.equal((await repository.list()).length, 5);
+  assert.equal((await repository.list()).length, 7);
 
   // Rows stored while dependencies existed still carry the field; it is dropped on read and the row is left as it was.
   const legacy = await initialAgentDefinitions();
   rows.splice(0, rows.length, ...legacy.map(definition => ({ role: definition.role, definition: { ...structuredClone(definition), dependencies: { required: ["research"], normal: [], updates: [] } } })));
   const migrated = await PostgresAgentDefinitionRepository.open(pool);
   assert.equal("dependencies" in (await migrated.list())[0]!, false);
-  assert.equal((await migrated.list()).length, 5);
+  assert.equal((await migrated.list()).length, 7);
   const customHint = { en: "Custom English", zh: "自定义中文", ja: "カスタム" };
   (rows.find(row => row.role === "research")!.definition as { hint?: unknown }).hint = customHint;
   assert.deepEqual((await (await PostgresAgentDefinitionRepository.open(pool)).list()).find(item => item.role === "research")?.hint, customHint);

@@ -29,5 +29,8 @@ export const blockedBy = (entry: AgentEntry): Blocked | undefined =>
 
 export const blockedMessage = (workerId: string) => `${workerId} cannot start yet: upload material or do the interview first.`;
 
-/** Keeps `ROLES` and the registry in step: every role has exactly one public worker. */
-export const unmappedRoles = (workers: WorkerRegistry = WORKERS): Role[] => ROLES.filter(role => workers.all.filter(worker => worker.role === role).length !== 1);
+/** Node kinds the Expert opens in Studio; the Assistant does not drive them. */
+const STUDIO_ONLY: readonly Role[] = ["inspiration", "content-creation"];
+
+/** Keeps `ROLES` and the registry in step: every role the Assistant drives has exactly one public worker. */
+export const unmappedRoles = (workers: WorkerRegistry = WORKERS): Role[] => ROLES.filter(role => !STUDIO_ONLY.includes(role) && workers.all.filter(worker => worker.role === role).length !== 1);

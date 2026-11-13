@@ -120,3 +120,17 @@ test("real PG: the backfill points each thread at the conversation made under th
   assert.equal(await migrated.threadConversation(key("conn-1", "T1", "alice")), fresh.id, "the backfill does not take a moved thread back");
   assert.equal(await migrated.threadConversation(key("conn-1", "T1:PN1:C1", "C1")), colons);
 }));
+
+test("real PG: a bot that moves to another Product keeps each contact's conversation, now bound to that Product", options, async () => isolated(async pool => {
+  const repository = new PostgresConversationRepository(pool);
+  const other = "33333333-3333-4333-8333-333333333333";
+  let target = productId;
+  const asProduct = (id: string) => ({ ...corpus, corpus: { ...corpus.corpus, product: { ...corpus.corpus.product, id }, agent_id: id } }) as unknown as ResolvedAgentCorpus;
+  const binder = new ContactBinder({ get: async () => ({ ...connection, target: { kind: "product", productId: target } }) }, { resolveByProduct: async () => asProduct(target) }, repository);
+  const before = (await binder.bind(alice, ref("t1"))).conversation;
+  target = other;
+  const after = (await binder.bind(alice, ref("t1"))).conversation;
+  assert.equal(after.id, before.id);
+  assert.deepEqual([after.productId, after.agentId, after.productIdAtCreation], [other, other, productId]);
+  assert.equal((await pool.query("SELECT count(*)::int AS n FROM hatch_conversations")).rows[0].n, 1);
+}));

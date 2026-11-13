@@ -14,7 +14,7 @@ export class SelfBinder {
   constructor(
     private readonly connections: ConnectionDirectory,
     private readonly products: { resolveByProduct(productId: string, signal?: AbortSignal): Promise<ResolvedAgentCorpus> },
-    private readonly repository: Pick<ConversationRepository, "createConversation" | "getConversation" | "threadConversation" | "adoptThread" | "moveThread">
+    private readonly repository: Pick<ConversationRepository, "createConversation" | "getConversation" | "threadConversation" | "adoptThread" | "moveThread" | "rebindConversation">
   ) { this.threads = new ThreadConversations(repository); }
 
   async conversationFor(accountId: string, ref: Extract<ConversationRef, { kind: "thread" }>, signal?: AbortSignal): Promise<ConversationRecord> {

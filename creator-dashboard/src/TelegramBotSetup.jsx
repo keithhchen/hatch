@@ -2,16 +2,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Copy, Download, Eye, EyeOff, ExternalLink } from "lucide-react";
 import { Button, ConfirmDialog, Input } from "@hatch/ui";
 import { InlineError, LoadingState, SectionHead, friendlyError, useCopy } from "./studioShellKit.jsx";
-import { BOTFATHER_URL, TelegramBotClient, botLink, cleanToken, isTokenShape, qrMatrix, qrPath, qrSide, telegramErrorKey } from "./telegramBot.js";
-
-const STEPS = ["sxtgStep1", "sxtgStep2", "sxtgStep3", "sxtgStep4", "sxtgStep5", "sxtgStep6"];
-
-/** A step's `code` spans become code; @BotFather opens BotFather. */
-function Rich({ text }) {
-  return text.split(/`([^`]+)`/).map((part, index) => index % 2 === 0 ? part
-    : part === "@BotFather" ? <a key={index} className="sx-link" href={BOTFATHER_URL} target="_blank" rel="noreferrer">{part}</a>
-    : <code key={index}>{part}</code>);
-}
+import { Rich, TelegramSteps } from "./TelegramSteps.jsx";
+import { TelegramBotClient, botLink, cleanToken, isTokenShape, qrMatrix, qrPath, qrSide, telegramErrorKey } from "./telegramBot.js";
 
 const PNG_SCALE = 10;
 /** The QR code as a PNG, drawn from its modules, and handed to the browser to save. */
@@ -76,6 +68,7 @@ export function TelegramBotSetup({ productId, live, request, t }) {
         <svg className="sx-tg__qr" viewBox={`0 0 ${qrSide(matrix)} ${qrSide(matrix)}`} role="img" aria-label={t("sxtgQrAlt")} shapeRendering="crispEdges"><rect width="100%" height="100%" fill="#fff" /><path d={qrPath(matrix)} fill="#000" /></svg>
         <div className="sx-tg__who">
           <p className="sx-tg__bot"><strong>{t("sxtgConnected", bot.username)}</strong></p>
+          <p>{t("sxtgUsage", bot.users, bot.messages)}</p>
           <p className="sx-tg__url">{botLink(bot.username).replace("https://", "")}</p>
           <Button variant="secondary" type="button" leading={<Download aria-hidden="true" />} onClick={() => downloadQr(matrix, `telegram-${bot.username}`)}>{t("sxtgDownloadQr")}</Button>
         </div>
@@ -88,7 +81,7 @@ export function TelegramBotSetup({ productId, live, request, t }) {
       </div>
       {error ? <InlineError>{error}</InlineError> : null}
     </> : <form className="sx-tg__form" onSubmit={submit}>
-      <ol className="sx-tg__steps">{STEPS.map((key) => <li key={key}><Rich text={t(key)} /></li>)}</ol>
+      <TelegramSteps t={t} />
       <p className="sx-quiet"><Rich text={t("sxtgTip")} /></p>
       <div className="sx-tg__token">
         <Input type={shown ? "text" : "password"} aria-label={t("sxtgTokenLabel")} placeholder="123456789:AA…" value={token} autoComplete="off" autoCapitalize="off" spellCheck={false}

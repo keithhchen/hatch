@@ -13,9 +13,9 @@ test("public worker ids map to internal roles", () => {
   assert.equal(WORKERS.idOf("voice"), "interview");
 });
 
-test("every role has exactly one worker and ids are unique", () => {
+test("every role the Assistant drives has exactly one worker and ids are unique", () => {
   assert.deepEqual(unmappedRoles(), []);
-  assert.equal(WORKERS.all.length, ROLES.length);
+  assert.equal(WORKERS.all.length, ROLES.length - 2, "Inspiration and Content Creation are Studio-only nodes");
   assert.equal(new Set(WORKERS.all.map(w => w.id)).size, WORKERS.all.length);
   assert.deepEqual(unmappedRoles(new WorkerRegistry([{ id: "research", role: "research" }])), ["voice", "generation", "case-generation", "evaluator"]);
 });

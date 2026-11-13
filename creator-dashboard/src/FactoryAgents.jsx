@@ -32,7 +32,7 @@ import remarkGfm from "remark-gfm";
 import { Button as HatchButton, Dialog, DialogContent, IconButton as HatchIconButton, InlineAlert, SegmentedControl, Textarea, hatchMuiThemeOptions } from "@hatch/ui";
 import { ArrowRight, ArrowUpRight, Play, Sparkles, ChevronLeft as PrevIcon, ChevronRight as NextIcon, Download as DownloadIcon, Plus, Send as SendIcon } from "lucide-react";
 import { ConversationController } from "@hatch/chat";
-import { ChatView } from "@hatch/chat/react";
+import { ChatView, MessageResponse } from "@hatch/chat/react";
 import { dashboardRequest } from "./data.js";
 import { FileList } from "./FileList.jsx";
 import { AI_LINKS, copyImportPrompt } from "./importDialog.js";
@@ -47,7 +47,7 @@ import { subscribeFactoryEvents } from "./factoryEvents.js";
 import { createFactoryAgentTranslator } from "./factoryAgentsI18n.js";
 import { BUILD_NEEDS, agentStateKey, localizeAgentText, updatedSources } from "./factoryAgentState.js";
 import { creatorFactoryPath, creatorProductPath, factorySectionForAgent } from "./creatorRoutes.js";
-import { ADVANCED_STEP, STUDIO_PATH, studioNextStep, studioPathStates, studioStepForRoute } from "./studioPath.js";
+import { ADVANCED_STEP, INSPIRATION_STEP, STUDIO_PATH, studioNextStep, studioPathStates, studioStepForRoute } from "./studioPath.js";
 import "./webChat.css";
 import "./factoryAgents.css";
 
@@ -56,7 +56,7 @@ const textBase64 = text => { const bytes = new TextEncoder().encode(text); let b
 const factoryRoot = productId => `/v1/creator/products/${encodeURIComponent(productId)}/factory-agents`;
 const endpoint = (root, id, action = "") => `${root}/sessions/${id}${action ? `/${action}` : ""}`;
 // A section URL without a page opens the first task of that step.
-const FIRST_PAGE = { sources: "uploads", build: "generation", evaluate: "case-generation" };
+const FIRST_PAGE = { sources: "uploads", build: "generation", evaluate: "case-generation", inspire: "inspiration", create: "content-creation" };
 const STEP_STATE_KEY = { done: "stepDone", running: "stepRunning", todo: "stepReady", locked: "stepLocked" };
 
 const theme = createTheme({ ...hatchMuiThemeOptions, components: { ...hatchMuiThemeOptions.components, MuiTextField: { defaultProps: { size: "small" } } } });
@@ -121,12 +121,13 @@ export function FactoryAgents({ productId, tab = "build", section, agent, naviga
   const deleteManualFile = async record => { const transport = agentSession("research"); if (!transport) return; try { await api(endpoint(root, transport.id, "files"), { method: "DELETE", body: { path: record.path } }); setManualFiles(previous => previous.filter(file => file.path !== record.path)); setUploadItems(previous => previous.filter(item => item.path !== record.path)); } catch (e) { setError(factoryError(e, t, agentName)); } };
   const states = studioPathStates(agents, product, manualFiles);
   const currentStep = studioStepForRoute(stage, selected);
-  const step = tab === "overview" ? null : [...STUDIO_PATH, ADVANCED_STEP].find(item => item.id === currentStep);
+  const step = tab === "overview" ? null : [...STUDIO_PATH, ADVANCED_STEP, INSPIRATION_STEP].find(item => item.id === currentStep);
   const selectedEntry = selected ? agentEntry(selected) : null; const selectedSession = selected ? agentSession(selected) : null;
   const workbench = Boolean(selected && selected !== "uploads" && selectedSession);
   return <ThemeProvider theme={theme}><div className={`factory-app${workbench ? " factory-app--workbench" : ""}`} aria-label={t("factory")}>
     {tab === "overview" ? null : <nav className="factory-rail" aria-label={t("factoryStepsLabel")}>
       <FactoryStepper states={states} current={currentStep} onStep={goToStep} t={t} />
+      <button type="button" className={`factory-inspiration${currentStep === INSPIRATION_STEP.id ? " is-current" : ""}`} aria-current={currentStep === INSPIRATION_STEP.id ? "page" : undefined} onClick={() => goToStep(INSPIRATION_STEP)}>{t(INSPIRATION_STEP.title)}</button>
       <button type="button" className={`factory-advanced${currentStep === ADVANCED_STEP.id ? " is-current" : ""}`} aria-current={currentStep === ADVANCED_STEP.id ? "page" : undefined} onClick={() => goToStep(ADVANCED_STEP)}>{t(ADVANCED_STEP.title)}</button>
     </nav>}
     <ErrorNotice error={error} onClose={() => setError("")} />
@@ -280,11 +281,17 @@ function ChatPanel({ chat, dictation, session, entry, config, busy, locked, loca
 }
 
 const FILE_PAGE_SIZE = 8;
+const IMAGE_FILE = /\.(jpe?g|png|webp)$/i;
 function InspectorPanel({ entry, agents, session, root, id, running, busy, file, setFile, addToChat, agentName, onOpenAgent, t, perform }) {
   const inputFiles = session.files.filter(record => record.path.startsWith("input/") && !record.path.startsWith("input/handoff/")); const outputFiles = session.files.filter(record => record.path.startsWith("output/"));
   const selectedFile = file ? session.files.find(record => record.path === file) : null;
   const [filesTab, setFilesTab] = useState("input");
-  return <Box component="aside" className="factory-inspector" aria-label={t("nextSteps")} sx={{ height: "100%", minWidth: 0, display: "flex", flexDirection: "column", bgcolor: "var(--hatch-ui-surface-sidebar)" }}>{entry && entry.state !== "complete" ? <div className="factory-inspector-status"><AgentState entry={entry} agentName={agentName} t={t} /></div> : null}<Box className="factory-inspector-scroll" sx={{ overflow: "auto", flex: 1, minHeight: 0, p: 1.5 }}>{entry && <NextSteps entry={entry} agents={agents} onOpenAgent={onOpenAgent} agentName={agentName} t={t} />}<div className="fl-panel"><div className="fl-panel__head"><div className="fl-tabs" role="tablist" aria-label={t("files")}>{[["input", "attachments"], ["output", "outputs"]].map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={filesTab === key} className={filesTab === key ? "is-active" : ""} onClick={() => setFilesTab(key)}>{t(label)}</button>)}</div>{filesTab === "input" ? <HatchButton size="small" variant="secondary" onClick={() => onOpenAgent("uploads")}>{t("addFiles")}</HatchButton> : null}</div>{filesTab === "input" ? <FileList key="input" records={inputFiles} pageSize={FILE_PAGE_SIZE} onOpen={setFile} onDelete={record => perform(() => api(endpoint(root, id, "files"), { method: "DELETE", body: { path: record.path } }))} deletable={record => !running && /^input\/manual\//.test(record.path)} t={t} /> : <FileList key="output" records={outputFiles} pageSize={FILE_PAGE_SIZE} onOpen={setFile} t={t} />}</div>{selectedFile && <FileViewer key={file} root={root} running={running} id={id} record={selectedFile} siblings={selectedFile.path.startsWith("output/") ? outputFiles : inputFiles} onOpenFile={setFile} onAddToChat={addToChat} onClose={() => setFile(null)} t={t} perform={perform} />}</Box></Box>;
+  const [htmlPage, setHtmlPage] = useState(null); const [htmlMode, setHtmlMode] = useState("open");
+  const fileUrl = path => `${endpoint(root, id, "files")}?path=${encodeURIComponent(path)}&inline=1`;
+  // An HTML output opens in the floating page panel; everything else opens in the file dialog.
+  const openOutput = path => { if (/\.html$/i.test(path)) { setHtmlPage({ url: fileUrl(path), title: path.split("/").at(-1) }); setHtmlMode("open"); } else setFile(path); };
+  const htmlViewer = { page: htmlPage, mode: htmlMode, setMode: setHtmlMode, setTitle: () => undefined };
+  return <Box component="aside" className="factory-inspector" aria-label={t("nextSteps")} sx={{ height: "100%", minWidth: 0, display: "flex", flexDirection: "column", bgcolor: "var(--hatch-ui-surface-sidebar)" }}>{entry && entry.state !== "complete" ? <div className="factory-inspector-status"><AgentState entry={entry} agentName={agentName} t={t} /></div> : null}<Box className="factory-inspector-scroll" sx={{ overflow: "auto", flex: 1, minHeight: 0, p: 1.5 }}>{entry && <NextSteps entry={entry} agents={agents} onOpenAgent={onOpenAgent} agentName={agentName} t={t} />}<div className="fl-panel"><div className="fl-panel__head"><div className="fl-tabs" role="tablist" aria-label={t("files")}>{[["input", "attachments"], ["output", "outputs"]].map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={filesTab === key} className={filesTab === key ? "is-active" : ""} onClick={() => setFilesTab(key)}>{t(label)}</button>)}</div>{filesTab === "input" ? <HatchButton size="small" variant="secondary" onClick={() => onOpenAgent("uploads")}>{t("addFiles")}</HatchButton> : null}</div>{filesTab === "input" ? <FileList key="input" records={inputFiles} pageSize={FILE_PAGE_SIZE} onOpen={setFile} onDelete={record => perform(() => api(endpoint(root, id, "files"), { method: "DELETE", body: { path: record.path } }))} deletable={record => !running && /^input\/manual\//.test(record.path)} t={t} /> : <FileList key="output" records={outputFiles} pageSize={FILE_PAGE_SIZE} onOpen={openOutput} thumbnail={record => IMAGE_FILE.test(record.path) ? fileUrl(record.path) : undefined} t={t} />}</div><PagePanel viewer={htmlViewer} t={t} />{selectedFile && <FileViewer key={file} root={root} running={running} id={id} record={selectedFile} siblings={selectedFile.path.startsWith("output/") ? outputFiles : inputFiles} onOpenFile={setFile} onAddToChat={addToChat} onClose={() => setFile(null)} t={t} perform={perform} />}</Box></Box>;
 }
 
 function FileViewer({ root, running, id, record, siblings, onOpenFile, onClose, onAddToChat, t, perform }) {
@@ -306,8 +313,8 @@ function FileViewer({ root, running, id, record, siblings, onOpenFile, onClose, 
         </div>
       </div>
       {readError ? <InlineAlert tone="error">{readError}</InlineAlert> : null}
-      {!file ? <p className="fl__empty">{readError ? "" : t("loadingFile")}</p> : file.content === null ? <p className="fl__empty">{t("downloadToView")}</p> : <>
-        <div className="fv__body">{mode === "rendered" ? <Markdown filePath={record.path} files={siblings} onOpenFile={onOpenFile} t={t}>{edit}</Markdown> : <textarea className="fv__raw" value={edit} onChange={event => setEdit(event.target.value)} aria-label={t("markdownEditor")} />}</div>
+      {IMAGE_FILE.test(record.path) ? <div className="fv__body"><img className="fv__image" src={`${fileUrl}&inline=1`} alt={name} /></div> : !file ? <p className="fl__empty">{readError ? "" : t("loadingFile")}</p> : file.content === null ? <p className="fl__empty">{t("downloadToView")}</p> : <>
+        <div className="fv__body">{mode === "rendered" ? <MessageResponse>{edit}</MessageResponse> : <textarea className="fv__raw" value={edit} onChange={event => setEdit(event.target.value)} aria-label={t("markdownEditor")} />}</div>
         {requiresCopyName ? <input className="hui-input fv__copy" value={copyName} onChange={event => setCopyName(event.target.value)} placeholder={t("revisionFilenamePlaceholder")} aria-label={t("revisionFilename")} /> : null}
       </>}
     </div>
