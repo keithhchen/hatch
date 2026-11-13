@@ -31,6 +31,8 @@ export type Session = {
   id: string; role: AnyRole; title: string; createdAt: string; updatedAt: string;
   revision: number; turn: number; status: "idle" | "running" | "completed" | "failed" | "interrupted";
   outputUpdatedAt?: string; lastRunAt?: string;
+  /** A Stop that reached an instance which does not own the Run; the owner's heartbeat takes it. */
+  stopRequested?: boolean;
   error?: string; /** Stable code of a failed Run; `error` is its message. */ errorCode?: string; errorRef?: string; activeTool?: string;
   files: FileRecord[]; comments: Comment[];
   messages: AgentMessage[]; context: AgentMessage[]; scribeContext?: AgentMessage[]; todos: Todo[];
@@ -231,7 +233,7 @@ export class PostgresWorkbenchBackend implements WorkbenchBackend {
 
 /** A live run touches its Session every RUN_HEARTBEAT_MS; one running and silent for RUN_STALE_MS lost its process. */
 export const RUN_HEARTBEAT_MS = 15_000;
-const RUN_STALE_MS = 60_000;
+export const RUN_STALE_MS = 60_000;
 
 /** Each chat owns ordinary files; completed Runtime results retain their own paths. */
 export class WorkbenchStore {

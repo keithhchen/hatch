@@ -11,7 +11,7 @@ import { createFactoryLlmModel, createFactoryPiAgent, createFactoryPiModels, typ
 import { failures } from "../errors/failures.js";
 import { UpstreamError } from "../errors/upstream.js";
 import type { RunFailure } from "./runFailure.js";
-import { INPUT_ROLES, RUN_HEARTBEAT_MS, WorkbenchStore, isAssistantRole, itemIdOf, settleMessage, type AgentDefinitionSource, type AnyRole, type Session } from "./store.js";
+import { INPUT_ROLES, RUN_HEARTBEAT_MS, RUN_STALE_MS, WorkbenchStore, isAssistantRole, itemIdOf, settleMessage, type AgentDefinitionSource, type AnyRole, type Session } from "./store.js";
 import { factoryAgentTools } from "./factoryTools.js";
 import { provideFormReference } from "../formPages/tools.js";
 import { fileTools } from "./tools.js";
@@ -48,6 +48,9 @@ export type WorkbenchRuntimeOptions = {
   usage?: { recorder: UsageRecorder; accountId: string; /** A Run is not started when the account has spent its month. */ cap?: UsageCap };
   deadlineMs?: number;
   maxTurns?: number;
+  /** Heartbeat and staleness of a Run; tests shorten them. */
+  heartbeatMs?: number;
+  staleMs?: number;
   /** One strategy with Chat; this is Studio's adapter. Tests inject a test-only summarizer and a small window. */
   compaction?: { summarize?: (input: SummarizeInput<AgentMessage>) => Promise<string>; contextWindow?: number; policy?: Partial<CompactionPolicy>; now?: () => number };
 };
@@ -135,11 +138,12 @@ export class WorkbenchRuntime {
     try {
       // The run is already ours; background compaction yields and ends before the message proceeds.
       await this.background.preempt(id);
-      await this.store.update(id, s => { if (s.title === s.role) s.title = message.trim().slice(0, 60); s.turn++; s.status = "running"; s.lastRunAt = new Date().toISOString(); delete s.error; delete s.errorCode; delete s.errorRef; delete s.activeTool; });
+      await this.store.update(id, s => { if (s.title === s.role) s.title = message.trim().slice(0, 60); s.turn++; s.status = "running"; s.lastRunAt = new Date().toISOString(); delete s.error; delete s.errorCode; delete s.errorRef; delete s.activeTool; delete s.stopRequested; });
     } catch (error) { this.active.delete(id); throw error; }
     this.emit(id, "state");
     this.emit(id, "voice.run_started", { runId });
-    const beat = setInterval(() => void this.store.update(id, () => undefined).catch(() => undefined), RUN_HEARTBEAT_MS);
+    // The heartbeat also takes a Stop that reached another instance (a deploy overlaps the old and the new).
+    const beat = setInterval(() => void this.store.update(id, s => { const requested = !!s.stopRequested; delete s.stopRequested; return requested; }).then(requested => { if (requested) controller.abort(); }).catch(() => undefined), this.options.heartbeatMs ?? RUN_HEARTBEAT_MS);
     beat.unref();
     const run = withLangfuseTurn("studio.turn", message, () => this.main(id, input, controller, images), this.traceIdentifiers()).catch(error => {
       if (!controller.signal.aborted) this.emit(id, "error", { message: safeError(error) });
@@ -147,7 +151,21 @@ export class WorkbenchRuntime {
     this.runs.set(id, run);
     void run.finally(() => { clearInterval(beat); if (this.runs.get(id) === run) this.runs.delete(id); });
   }
-  stop(id: string): void { this.active.get(id)?.abort(); }
+  /**
+   * Aborts the Run if this process owns it. A Run this process does not own is either alive in another instance,
+   * which takes the request on its next heartbeat, or lost with its process, which Stop then ends so it never stays running.
+   */
+  async stop(id: string): Promise<void> {
+    const controller = this.active.get(id);
+    if (controller) { controller.abort(); return; }
+    const orphaned = await this.store.update(id, s => {
+      if (s.status !== "running") return false;
+      if (Date.now() - Date.parse(s.updatedAt) <= (this.options.staleMs ?? RUN_STALE_MS)) { s.stopRequested = true; return false; }
+      s.status = "interrupted"; delete s.activeTool; delete s.error; delete s.errorCode; delete s.errorRef; delete s.stopRequested;
+      return true;
+    });
+    if (orphaned) { this.emit(id, "state"); this.emit(id, "run_end", { status: "interrupted" }); }
+  }
   isRunning(id: string): boolean { return this.active.has(id); }
   /**
    * Deliver a message. It is written to the session's queue first, so it survives a crash and a replay finds it;

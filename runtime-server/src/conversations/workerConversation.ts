@@ -80,7 +80,7 @@ export class WorkerConversation implements Conversation {
 
   async feedKey(): Promise<string | undefined> { return (await this.session())?.id; }
 
-  async stop(): Promise<void> { const session = await this.session(); if (session) this.workspace.runtime.stop(session.id); }
+  async stop(): Promise<void> { const session = await this.session(); if (session) await this.workspace.runtime.stop(session.id); }
 
   private async assertAvailable(): Promise<void> {
     try { await this.workspace.assertRoleAvailable(this.worker.role); } catch (error) {

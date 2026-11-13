@@ -117,7 +117,7 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
         if (!action && req.method === "GET") { const session = await store.get(id); return json(res, 200, { ...publicSession(session), agent: (await entries()).find(entry => entry.role === session.role), files: await store.contextFiles(id) }); }
         if (action === "prompt" && req.method === "GET") return json(res, 200, { content: await runtime.prompt((await store.get(id)).role) });
         if (action === "message" && req.method === "POST") { const session = await store.get(id); await assertRoleAvailable(session.role); const b = z.object({ content: z.string().min(1).max(100000) }).parse(await body(req)); const key = idempotencyKey(req.headers["idempotency-key"]); if (key === undefined) await runtime.start(id, b.content); else await sendOnce(id, key, b.content); return json(res, 202, { accepted: true }); }
-        if (action === "stop" && req.method === "POST") { await body(req); runtime.stop(id); return json(res, 202, { requested: true }); }
+        if (action === "stop" && req.method === "POST") { await body(req); await runtime.stop(id); return json(res, 202, { requested: true }); }
         if (action === "files" && req.method === "POST") {
           const b = z.object({ path: z.string(), base64: z.string(), mimeType: z.string().optional() }).parse(await body(req));
           const bytes = Buffer.from(b.base64, "base64");

@@ -19,14 +19,14 @@ import { UsageCap, UsageCapExceeded } from "../usage/usageCap.js";
 type Call = { tools: Array<{ name: string; description: string }>; last: string };
 
 /** Real store and runtime; only the model is scripted. `plan(call)` is the tool the model calls, if any. */
-async function harness(options: { plan?: (call: number) => string | undefined; toolSupport?: (name: string) => readonly ("web" | "cli")[] | "*"; delayMs?: number; fail?: (call: number) => boolean; cap?: UsageCap } = {}) {
+async function harness(options: { plan?: (call: number) => string | undefined; toolSupport?: (name: string) => readonly ("web" | "cli")[] | "*"; delayMs?: number; heartbeatMs?: number; staleMs?: number; fail?: (call: number) => boolean; cap?: UsageCap } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-send-"));
   const store = new WorkbenchStore(root, { creatorId: "c1", productId: "p1" }, new MemoryAgentDefinitionRepository(await initialAgentDefinitions()));
   const calls: Call[] = [];
   const build = () => new WorkbenchRuntime(store, {
     models: new InMemoryModelRoleResolver({ roles: { factory: "deepseek-v4-flash" } }), role: "factory",
     ...(options.cap ? { usage: { recorder: { record: async () => undefined }, accountId: "c1", cap: options.cap } } : {}),
-    toolSupport: options.toolSupport as never,
+    toolSupport: options.toolSupport as never, heartbeatMs: options.heartbeatMs, staleMs: options.staleMs,
     agentFactory: factory => new Agent({ ...factory.agentOptions, initialState: { ...factory.initialState, model: createFactoryLlmModel({ profile: factory.profile, env: factory.env }) }, streamFn: (_model, context, streamOptions) => {
       const call = calls.length + 1;
       const final = context.messages.at(-1);
@@ -279,5 +279,30 @@ test("send: a message that lands as a Run ends, over the cap, settles the sessio
     const done = await h.store.get(h.session.id);
     assert.equal(done.status, "completed");
     assert.deepEqual(userTexts(done.messages), ["one", "late", "again"], "the held message is answered with the resend");
+  } finally { await h.close(); }
+});
+
+test("stop: a session left running by a lost process is ended by Stop", async () => {
+  const h = await harness({ staleMs: 0 });
+  try {
+    await h.store.update(h.session.id, s => { s.status = "running"; s.activeTool = "web_search"; });
+    await new Promise(resolve => setTimeout(resolve, 5));
+    await h.runtime.stop(h.session.id);
+    const after = await h.store.get(h.session.id);
+    assert.equal(after.status, "interrupted");
+    assert.equal(after.activeTool, undefined);
+    assert.ok(h.events.some(event => event.type === "run_end"));
+  } finally { await h.close(); }
+});
+
+test("stop: a Stop that reaches an instance which does not own the Run aborts it through the heartbeat", async () => {
+  const h = await harness({ delayMs: 5000, heartbeatMs: 20 });
+  try {
+    await h.runtime.send(h.session.id, h.say("go"));
+    const other = h.build();
+    await other.stop(h.session.id);
+    await h.idle();
+    assert.equal((await h.store.get(h.session.id)).status, "interrupted");
+    await other.close();
   } finally { await h.close(); }
 });
