@@ -19,14 +19,14 @@ import { UsageCap, UsageCapExceeded } from "../usage/usageCap.js";
 type Call = { tools: Array<{ name: string; description: string }>; last: string };
 
 /** Real store and runtime; only the model is scripted. `plan(call)` is the tool the model calls, if any. */
-async function harness(options: { plan?: (call: number) => string | undefined; toolSupport?: (name: string) => readonly ("web" | "cli")[] | "*"; delayMs?: number; heartbeatMs?: number; staleMs?: number; fail?: (call: number) => boolean; cap?: UsageCap } = {}) {
+async function harness(options: { plan?: (call: number) => string | undefined; toolSupport?: (name: string) => readonly ("web" | "cli")[] | "*"; delayMs?: number; heartbeatMs?: number; staleMs?: number; sweepMs?: number; closeMs?: number; fail?: (call: number) => boolean; cap?: UsageCap } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-send-"));
   const store = new WorkbenchStore(root, { creatorId: "c1", productId: "p1" }, new MemoryAgentDefinitionRepository(await initialAgentDefinitions()));
   const calls: Call[] = [];
-  const build = () => new WorkbenchRuntime(store, {
+  const build = (extra: Partial<ConstructorParameters<typeof WorkbenchRuntime>[1]> = {}) => new WorkbenchRuntime(store, {
     models: new InMemoryModelRoleResolver({ roles: { factory: "deepseek-v4-flash" } }), role: "factory",
     ...(options.cap ? { usage: { recorder: { record: async () => undefined }, accountId: "c1", cap: options.cap } } : {}),
-    toolSupport: options.toolSupport as never, heartbeatMs: options.heartbeatMs, staleMs: options.staleMs,
+    toolSupport: options.toolSupport as never, heartbeatMs: options.heartbeatMs, staleMs: options.staleMs, sweepMs: options.sweepMs ?? 0, closeMs: options.closeMs, ...extra,
     agentFactory: factory => new Agent({ ...factory.agentOptions, initialState: { ...factory.initialState, model: createFactoryLlmModel({ profile: factory.profile, env: factory.env }) }, streamFn: (_model, context, streamOptions) => {
       const call = calls.length + 1;
       const final = context.messages.at(-1);
@@ -304,5 +304,63 @@ test("stop: a Stop that reaches an instance which does not own the Run aborts it
     await h.idle();
     assert.equal((await h.store.get(h.session.id)).status, "interrupted");
     await other.close();
+  } finally { await h.close(); }
+});
+
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+test("shutdown: an in-flight run ends interrupted with the restart note, and says so", async () => {
+  const h = await harness({ delayMs: 5000 });
+  try {
+    await h.runtime.send(h.session.id, h.say("go"));
+    await h.runtime.close();
+    const after = await h.store.get(h.session.id);
+    assert.equal(after.status, "interrupted");
+    assert.match(after.error ?? "", /服务已重启/);
+    assert.ok(after.messages.some(message => message.role === "user"), "history is kept");
+    assert.ok(h.events.some(event => event.type === "run_end"));
+  } finally { await h.close(); }
+});
+
+test("shutdown: a run that ignores the abort is still ended by close", async () => {
+  const h = await harness({ delayMs: 5000, closeMs: 50 });
+  try {
+    await h.runtime.send(h.session.id, h.say("go"));
+    await h.store.update(h.session.id, s => { s.status = "running"; });
+    await h.runtime.close();
+    assert.equal((await h.store.get(h.session.id)).status, "interrupted");
+  } finally { await h.close(); }
+});
+
+test("sweep: a session whose owner was hard-killed is interrupted within the window", async () => {
+  const h = await harness({ sweepMs: 20, staleMs: 80 });
+  try {
+    await h.store.update(h.session.id, s => { s.status = "running"; s.activeTool = "web_search"; });
+    await wait(400);
+    const after = await h.store.get(h.session.id);
+    assert.equal(after.status, "interrupted");
+    assert.match(after.error ?? "", /服务已重启/);
+    assert.ok(h.events.some(event => event.type === "run_end"));
+  } finally { await h.close(); }
+});
+
+test("sweep: a live owner is never interrupted", async () => {
+  const h = await harness({ delayMs: 600, heartbeatMs: 10 });
+  const sweeper = h.build({ sweepMs: 10, staleMs: 120 });
+  try {
+    await h.runtime.send(h.session.id, h.say("go"));
+    await wait(450);
+    assert.equal((await h.store.get(h.session.id)).status, "running");
+    await h.idle();
+    assert.equal((await h.store.get(h.session.id)).status, "completed");
+  } finally { await sweeper.close(); await h.close(); }
+});
+
+test("stop: pressing Stop again and again does not keep a dead owner's session alive", async () => {
+  const h = await harness({ staleMs: 150 });
+  try {
+    await h.store.update(h.session.id, s => { s.status = "running"; });
+    for (let i = 0; i < 8; i++) { await h.runtime.stop(h.session.id); await wait(40); }
+    assert.equal((await h.store.get(h.session.id)).status, "interrupted");
   } finally { await h.close(); }
 });

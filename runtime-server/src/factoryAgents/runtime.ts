@@ -11,7 +11,7 @@ import { createFactoryLlmModel, createFactoryPiAgent, createFactoryPiModels, typ
 import { failures } from "../errors/failures.js";
 import { UpstreamError } from "../errors/upstream.js";
 import type { RunFailure } from "./runFailure.js";
-import { INPUT_ROLES, RUN_HEARTBEAT_MS, RUN_STALE_MS, WorkbenchStore, isAssistantRole, itemIdOf, settleMessage, type AgentDefinitionSource, type AnyRole, type Session } from "./store.js";
+import { INPUT_ROLES, RUN_HEARTBEAT_MS, RUN_STALE_MS, RESTART_NOTE, endIfOrphaned, WorkbenchStore, isAssistantRole, itemIdOf, settleMessage, type AgentDefinitionSource, type AnyRole, type Session } from "./store.js";
 import { factoryAgentTools } from "./factoryTools.js";
 import { provideFormReference } from "../formPages/tools.js";
 import { fileTools } from "./tools.js";
@@ -51,6 +51,10 @@ export type WorkbenchRuntimeOptions = {
   /** Heartbeat and staleness of a Run; tests shorten them. */
   heartbeatMs?: number;
   staleMs?: number;
+  /** How often this process looks for Runs whose process is gone; 0 turns it off. */
+  sweepMs?: number;
+  /** The longest close waits for a Run to settle before it ends the Session itself. */
+  closeMs?: number;
   /** One strategy with Chat; this is Studio's adapter. Tests inject a test-only summarizer and a small window. */
   compaction?: { summarize?: (input: SummarizeInput<AgentMessage>) => Promise<string>; contextWindow?: number; policy?: Partial<CompactionPolicy>; now?: () => number };
 };
@@ -84,7 +88,16 @@ export class WorkbenchRuntime {
   private readonly env: NodeJS.ProcessEnv;
   constructor(readonly store: WorkbenchStore, private options: WorkbenchRuntimeOptions) {
     this.env = options.env ?? process.env;
+    const sweepMs = options.sweepMs ?? 30_000;
+    if (sweepMs > 0) { this.sweeper = setInterval(() => void this.sweep(), sweepMs); this.sweeper.unref(); }
   }
+  private sweeper?: NodeJS.Timeout;
+  /** Ends what a process that died (OOM, kill -9) left running; a live owner keeps its heartbeat fresh, so it is never touched. */
+  async sweep(): Promise<void> {
+    if (this.closing) return;
+    for (const id of await this.store.sweepOrphans(id => this.active.has(id), this.options.staleMs).catch(() => [])) this.announceEnded(id);
+  }
+  private announceEnded(id: string): void { this.emit(id, "state"); this.emit(id, "run_end", { status: "interrupted" }); }
   /** The model of the session's role: nodes with a role of their own (hatch_model_roles), else the workspace's. */
   private async profile(id: string): Promise<LlmProfile> {
     const own = NODE_MODEL_ROLES[(await this.store.get(id)).role as string];
@@ -160,11 +173,11 @@ export class WorkbenchRuntime {
     if (controller) { controller.abort(); return; }
     const orphaned = await this.store.update(id, s => {
       if (s.status !== "running") return false;
-      if (Date.now() - Date.parse(s.updatedAt) <= (this.options.staleMs ?? RUN_STALE_MS)) { s.stopRequested = true; return false; }
-      s.status = "interrupted"; delete s.activeTool; delete s.error; delete s.errorCode; delete s.errorRef; delete s.stopRequested;
-      return true;
-    });
-    if (orphaned) { this.emit(id, "state"); this.emit(id, "run_end", { status: "interrupted" }); }
+      if (endIfOrphaned(s, this.options.staleMs ?? RUN_STALE_MS)) return true;
+      s.stopRequested = true;
+      return false;
+    }, false);
+    if (orphaned) this.announceEnded(id);
   }
   isRunning(id: string): boolean { return this.active.has(id); }
   /**
@@ -286,12 +299,21 @@ export class WorkbenchRuntime {
   async drain(): Promise<void> {
     await Promise.allSettled([...this.runs.values(), ...this.scribeRuns.values()]);
   }
+  /** Ends every Run of this process: aborted, kept as interrupted with the restart note, never replayed. A Run that does not settle in time is ended here. */
   async close(): Promise<void> {
     this.closing = true;
+    clearInterval(this.sweeper);
+    const held = [...this.active.keys()];
     for (const controller of this.active.values()) controller.abort();
     await this.background.drain();
     for (const controller of this.scribeControllers) controller.abort();
-    await Promise.allSettled([...this.runs.values(), ...this.scribeRuns.values()]);
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<void>(resolve => { timer = setTimeout(resolve, this.options.closeMs ?? 15_000); });
+    await Promise.race([Promise.allSettled([...this.runs.values(), ...this.scribeRuns.values()]), late]);
+    clearTimeout(timer);
+    for (const id of held) {
+      if (await this.store.update(id, s => { if (s.status !== "running") return false; s.status = "interrupted"; s.error = RESTART_NOTE; delete s.activeTool; delete s.stopRequested; return true; }).catch(() => false)) this.announceEnded(id);
+    }
   }
 
   private async runScribeVoiceEvidence(id: string, evidence: AgentMessage[]): Promise<void> {
@@ -347,7 +369,7 @@ export class WorkbenchRuntime {
           const evidence = latest.messages.slice(messageCount);
           this.triggerScribeVoiceEvidence(id, evidence);
         }
-        await this.store.update(id, state => { state.status = controller.signal.aborted ? "interrupted" : "completed"; delete state.activeTool; });
+        await this.store.update(id, state => { state.status = controller.signal.aborted ? "interrupted" : "completed"; if (this.closing && controller.signal.aborted) state.error = RESTART_NOTE; delete state.activeTool; });
         break;
       }
       ended = controller.signal.aborted ? "interrupted" : "completed";
@@ -361,7 +383,8 @@ export class WorkbenchRuntime {
         if (!failure) {
           // A user stop is a normal terminal state, not an error notice.
           s.status = "interrupted";
-          delete s.error; delete s.errorCode; delete s.errorRef;
+          if (this.closing) s.error = RESTART_NOTE; else delete s.error;
+          delete s.errorCode; delete s.errorRef;
         } else {
           s.status = "failed";
           s.error = failure.message; s.errorCode = failure.code; s.errorRef = failure.reference;
