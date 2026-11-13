@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { IconButton, SearchInput, Spinner } from "@hatch/ui";
-import { ChevronLeft, ChevronRight, FileText, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, FileText, RotateCw, Trash2 } from "lucide-react";
 import { FILTER_FROM, groupFiles, pageGroups } from "./fileListModel.js";
 import "./fileList.css";
 
@@ -10,7 +10,7 @@ const BUSY = new Set(["uploading", "ingesting"]);
  * Every place a node shows files: compact rows grouped by folder, filterable, name column then actions column.
  * A record is `{ path, status?, error? }`; `status` is only set while the file is not settled.
  */
-export function FileList({ title, records, onOpen, onDelete, deletable = () => true, statusLabel, pageSize, thumbnail, t }) {
+export function FileList({ title, records, onOpen, onDelete, onRetry, deletable = () => true, statusLabel, pageSize, thumbnail, t }) {
   const [query, setQuery] = useState("");
   const [pageAt, setPageAt] = useState(1);
   const all = groupFiles(records, query);
@@ -30,10 +30,11 @@ export function FileList({ title, records, onOpen, onDelete, deletable = () => t
           <button type="button" className="fl__name" disabled={!openable} onClick={() => onOpen?.(record.path)} title={record.name}>
             {thumbnail?.(record) ? <img className="fl__thumb" src={thumbnail(record)} alt="" loading="lazy" /> : <FileText aria-hidden="true" />}
             <span className="fl__label">{record.name}</span>
-            {record.status ? <small className="fl__state" title={record.error || undefined}>{[statusLabel?.(record), record.error].filter(Boolean).join(": ")}</small> : null}
+            {record.status ? <small className="fl__state" title={record.error || undefined}>{[statusLabel?.(record), record.status === "uploading" ? `${Math.round((record.progress ?? 0) * 100)}%` : record.error].filter(Boolean).join(": ")}</small> : null}
           </button>
           <span className="fl__actions">
             {busy ? <Spinner label={statusLabel?.(record)} size="small" /> : null}
+            {onRetry && record.retry ? <IconButton label={t("retryFile")} size="small" onClick={() => onRetry(record)}><RotateCw aria-hidden="true" /></IconButton> : null}
             {onDelete && !busy && deletable(record) ? <IconButton label={t("removeFile", record.path)} size="small" onClick={() => onDelete(record)}><Trash2 aria-hidden="true" /></IconButton> : null}
           </span>
         </li>;

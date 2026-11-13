@@ -40,7 +40,8 @@ import { Studio, type StudioDeps } from "./conversations/studio.js";
 import { StudioSockets, STUDIO_SOCKET_PATH } from "./conversations/socket.js";
 import { createIngestService } from "./ingest/boot.js";
 import { InflightResponses, drainMsFromEnvironment, exitOnSignal, gracefulShutdown } from "./gracefulShutdown.js";
-import { INGEST_BODY_MAX_BYTES, IngestError, IngestService } from "./ingest/service.js";
+import { INGEST_BODY_MAX_BYTES, IngestError, IngestService, MAX_FILE_BYTES } from "./ingest/service.js";
+import { LOCAL_OBJECTS_PATH } from "./creatorLearning/objectStore.js";
 import { publicJob } from "./ingest/job.js";
 import { IdempotencyKeyReused, idempotencyKey } from "./idempotency.js";
 import { AccountReach, validTimezone } from "./assistant/reach.js";
@@ -1414,7 +1415,24 @@ async function route(
     return;
   }
 
+  // The Local object store's upload links (dev and tests). The link's signature is the authorization.
+  if (request.method === "PUT" && url.pathname.startsWith(LOCAL_OBJECTS_PATH) && context.ingest) {
+    const key = url.pathname.slice(LOCAL_OBJECTS_PATH.length).split("/").map(decodeURIComponent).join("/");
+    await context.ingest.receiveLocalUpload(key, url.searchParams, await readRawBody(request, MAX_FILE_BYTES), request.headers["content-type"]).then(
+      () => { response.writeHead(200, corsHeaders()); response.end(); },
+      error => {
+        if (!(error instanceof IngestError)) throw error;
+        sendJson(response, error.status, { error: { code: error.code, message: error.message } });
+      });
+    return;
+  }
+
   const ingestMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/ingest(?:\/([^/]+))?$/);
+  const ingestFailure = (error: unknown) => {
+    const failure = error instanceof IdempotencyKeyReused ? new IngestError(422, "idempotency_key_reused", error.message) : error;
+    if (!(failure instanceof IngestError || failure instanceof ChatError)) throw failure;
+    sendJson(response, failure.status, { error: { code: failure.code, message: failure.message }, detail: failure.message });
+  };
   if (ingestMatch) {
     const account = await authenticate(request, response, context);
     if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
@@ -1422,16 +1440,16 @@ async function route(
     const jobId = ingestMatch[2] ? decodeURIComponent(ingestMatch[2]) : undefined;
     if (!await productForCreator(context, account.id, productId)) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
     if (!context.ingest) { sendJson(response, 503, { error: { code: "ingest_unavailable", message: "Ingest requires the Registry database." } }); return; }
+    if (request.method === "POST" && jobId === "uploads") {
+      await context.ingest.requestUpload(account.id, productId, await readJson(request, INGEST_BODY_MAX_BYTES)).then(
+        slot => sendJson(response, 201, slot), ingestFailure);
+      return;
+    }
     if (request.method === "POST" && !jobId) {
       const body = await readJson(request, INGEST_BODY_MAX_BYTES);
       const key = idempotencyKey(request.headers["idempotency-key"]);
       await context.ingest.submit(account.id, productId, body.items, body.context, key).then(
-        job => sendJson(response, 202, { job: publicJob(job) }),
-        error => {
-          const failure = error instanceof IdempotencyKeyReused ? new IngestError(422, "idempotency_key_reused", error.message) : error;
-          if (!(failure instanceof IngestError || failure instanceof ChatError)) throw failure;
-          sendJson(response, failure.status, { error: { code: failure.code, message: failure.message }, detail: failure.message });
-        });
+        job => sendJson(response, 202, { job: publicJob(job) }), ingestFailure);
       return;
     }
     if (request.method === "GET" && !jobId) {

@@ -1,6 +1,7 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { createRequire } from "node:module";
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import path from "node:path";
 import * as CredentialPackage from "@alicloud/credentials";
 
@@ -17,11 +18,23 @@ export type ObjectStoreObject = {
   contentType?: string;
 };
 
+/** A short-lived URL for one object: PUT it from a browser, or GET it from a sandbox. Send exactly `headers` with it. */
+export type PresignedRequest = { url: string; method: "PUT" | "GET"; headers: Record<string, string>; expiresAt: string };
+export type PresignOptions = { method: "PUT" | "GET"; expiresSeconds: number; contentType?: string };
+
 export interface ArtifactObjectStore {
   put(key: string, content: Buffer | string, options?: ObjectStorePutOptions): Promise<ObjectStoreObject>;
   get(key: string): Promise<Buffer>;
   list(prefix: string): Promise<string[]>;
+  /** Copies one object to a new key inside the store, without its bytes passing through the caller. An existing target is left as it is. */
+  copy(from: string, to: string): Promise<void>;
+  presign(key: string, options: PresignOptions): Promise<PresignedRequest>;
+  /** Size and content type of an object, without reading it; undefined when there is none. */
+  head(key: string): Promise<{ bytes: number; contentType?: string } | undefined>;
 }
+
+/** Where the Local store's browser uploads are received: the Registry route that calls `LocalArtifactObjectStore.receive`. */
+export const LOCAL_OBJECTS_PATH = "/v1/local-objects/";
 
 /**
  * Local object-store implementation used by unit tests and explicit local
@@ -29,7 +42,47 @@ export interface ArtifactObjectStore {
  * network boundary out of tests.
  */
 export class LocalArtifactObjectStore implements ArtifactObjectStore {
+  private readonly secret = randomBytes(32);
+  private readonly types = new Map<string, string>();
   constructor(private readonly root: string) {}
+
+  private sign(key: string, expires: number, contentType: string) {
+    return createHmac("sha256", this.secret).update(`${key}\n${expires}\n${contentType}`).digest("hex");
+  }
+
+  /** Dev and tests only. Uploads are accepted by the Registry itself; a sandbox cannot reach this machine, so downloads are refused. */
+  async presign(key: string, options: PresignOptions): Promise<PresignedRequest> {
+    if (options.method === "GET") throw new Error("The local object store cannot serve downloads to a hosted sandbox; configure HATCH_CREATOR_OBJECT_STORE_BUCKET");
+    safeKey(key);
+    const expires = Date.now() + options.expiresSeconds * 1000;
+    const contentType = options.contentType ?? "application/octet-stream";
+    const query = new URLSearchParams({ expires: String(expires), type: contentType, sig: this.sign(key, expires, contentType) });
+    return { url: `${LOCAL_OBJECTS_PATH}${key.split("/").map(encodeURIComponent).join("/")}?${query}`, method: "PUT", headers: { "Content-Type": contentType }, expiresAt: new Date(expires).toISOString() };
+  }
+
+  /** Stores the bytes of a browser upload when the signed query is valid and unexpired. */
+  async receive(key: string, query: URLSearchParams, bytes: Buffer, contentType: string | undefined): Promise<void> {
+    const expires = Number(query.get("expires"));
+    const type = query.get("type") ?? "";
+    const given = Buffer.from(query.get("sig") ?? "", "hex");
+    const expected = Buffer.from(this.sign(key, expires, type), "hex");
+    if (!(expires > Date.now()) || given.length !== expected.length || !timingSafeEqual(given, expected)) throw new Error("The upload link is invalid or expired");
+    if ((contentType ?? "").split(";")[0]!.trim() !== type) throw new Error("The upload's Content-Type does not match the link");
+    await this.put(key, bytes, { contentType: type, immutable: false });
+  }
+
+  async copy(from: string, to: string): Promise<void> {
+    const destination = containedPath(this.root, to);
+    await mkdir(path.dirname(destination), { recursive: true });
+    await copyFile(containedPath(this.root, from), destination, fsConstants.COPYFILE_EXCL).catch((error: unknown) => { if (!isFileAlreadyExists(error)) throw error; });
+    const type = this.types.get(from);
+    if (type) this.types.set(to, type);
+  }
+
+  async head(key: string) {
+    const bytes = await stat(containedPath(this.root, key)).then(info => info.size, (error: unknown) => { if (isMissing(error)) return undefined; throw error; });
+    return bytes === undefined ? undefined : { bytes, ...(this.types.has(key) ? { contentType: this.types.get(key) } : {}) };
+  }
 
   async put(key: string, content: Buffer | string, options: ObjectStorePutOptions = {}): Promise<ObjectStoreObject> {
     const bytes = Buffer.isBuffer(content) ? content : Buffer.from(content, "utf8");
@@ -44,6 +97,7 @@ export class LocalArtifactObjectStore implements ArtifactObjectStore {
         if (!existing.equals(bytes)) throw new Error(`Immutable object key already contains different bytes: ${key}`);
       });
     }
+    if (options.contentType) this.types.set(key, options.contentType);
     return {
       key,
       sha256: sha256(bytes),
@@ -72,6 +126,9 @@ type AliOssClient = {
   generateObjectUrl(name: string): string;
   get(name: string, options?: Record<string, unknown>): Promise<{ content: Buffer }>;
   delete(name: string): Promise<unknown>;
+  copy(name: string, source: string, options?: Record<string, unknown>): Promise<unknown>;
+  head(name: string): Promise<{ res?: { headers?: Record<string, unknown> } }>;
+  signatureUrl(name: string, options: Record<string, unknown>): string;
   putACL(name: string, acl: "private" | "public-read" | "public-read-write"): Promise<{ res?: { status?: number } }>;
   processObjectSave(source: string, target: string, process: string): Promise<{
     res?: { status?: number; headers?: Record<string, unknown> };
@@ -224,6 +281,35 @@ export class AliyunArtifactObjectStore implements ArtifactObjectStore {
       throw this.withContext("LIST", error);
     }
     return names;
+  }
+
+  /** Signed with the public endpoint, since the browser and the sandbox are outside the VPC. A fresh client each time takes the current STS credential. */
+  async presign(key: string, options: PresignOptions): Promise<PresignedRequest> {
+    const client = await this.createClient(true);
+    const contentType = options.contentType ?? "application/octet-stream";
+    const url = client.signatureUrl(objectKey(this.options.prefix, key), {
+      method: options.method, expires: options.expiresSeconds, ...(options.method === "PUT" ? { "Content-Type": contentType } : {})
+    });
+    return { url, method: options.method, headers: options.method === "PUT" ? { "Content-Type": contentType } : {}, expiresAt: new Date(Date.now() + options.expiresSeconds * 1000).toISOString() };
+  }
+
+  /** Server-side CopyObject: the bytes never leave OSS. The immutable-key header makes a repeat a no-op. */
+  async copy(from: string, to: string): Promise<void> {
+    try {
+      await (await this.client()).copy(objectKey(this.options.prefix, to), objectKey(this.options.prefix, from), { headers: { "x-oss-forbid-overwrite": "true" } });
+    } catch (error) {
+      if (!isAlreadyExists(error)) throw this.withContext("COPY", error);
+    }
+  }
+
+  async head(key: string) {
+    try {
+      const headers = (await (await this.client()).head(objectKey(this.options.prefix, key))).res?.headers ?? {};
+      return { bytes: Number(headers["content-length"]), ...(typeof headers["content-type"] === "string" ? { contentType: headers["content-type"] } : {}) };
+    } catch (error) {
+      if (isObjectStoreNotFound(error)) return undefined;
+      throw this.withContext("HEAD", error);
+    }
   }
 
   async generatePublicObjectUrl(key: string): Promise<string> {

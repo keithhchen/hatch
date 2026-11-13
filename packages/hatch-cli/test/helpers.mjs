@@ -13,7 +13,7 @@ export function fakeFetch(routes) {
   const fn = async (url, init = {}) => {
     const path = new URL(url).pathname;
     const key = `${init.method ?? "GET"} ${path}`;
-    const call = { key, url, headers: init.headers ?? {}, body: init.body ? JSON.parse(init.body) : undefined };
+    const call = { key, url, headers: init.headers ?? {}, body: typeof init.body === "string" ? JSON.parse(init.body) : init.body };
     calls.push(call);
     const handler = routes[key];
     if (!handler) return json({ error: { message: `no route ${key}` } }, 404);

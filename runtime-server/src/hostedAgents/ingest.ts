@@ -1,9 +1,9 @@
-import { createHash } from "node:crypto";
 import type { BrowserProfile, BrowserProfileStore, HostedAgentProvider, HostedArtifact, HostedFile, HostedSecret, ProfileLease } from "./ports.js";
 
 export type IngestItem =
   | { id: string; kind: "link"; url: string }
-  | { id: string; kind: "file"; name: string; bytes: Buffer; mimeType?: string };
+  /** A file already in the object store: the sandbox downloads it from `downloadUrl`, a short-lived presigned GET. */
+  | { id: string; kind: "file"; name: string; bytes: number; sha256?: string; mimeType?: string; downloadUrl: string };
 
 export type IngestedItem = {
   id: string;
@@ -58,6 +58,7 @@ export const exposeProfile = ({ profile }: ProfileLease) => {
 
 const PROMPT = (context: string) => [
   "Use the hatch-ingest skill. The task manifest is task.json and the browser profiles are browser-profiles.json, both under /mnt/agents/upload/.",
+  "Files are not uploaded: the skill's script downloads each one itself and checks its size and sha256. Never print or cat task.json (it holds download URLs); a failed download is reported per item in result.json.",
   "Ingest every item, save every file the skill writes to /mnt/agents/output/ with save_artifact, then report in one paragraph.",
   context ? `Context: ${context}` : "",
 ].filter(Boolean).join("\n");
@@ -85,10 +86,8 @@ export class HostedIngest {
         prompt: PROMPT(request.context),
         secrets: [...this.platformSecrets, ...exposed.flatMap(e => e.secrets)],
         files: [
-          // Files are found by content: the provider may rename uploads on mount, but never their bytes.
-          json("task.json", { context: request.context, items: request.items.map(item => item.kind === "link" ? item : { id: item.id, kind: "file", name: item.name, sha256: createHash("sha256").update(item.bytes).digest("hex") }) }),
+          json("task.json", { context: request.context, items: request.items.map(item => item.kind === "link" ? item : { id: item.id, kind: "file", name: item.name, bytes: item.bytes, ...(item.sha256 ? { sha256: item.sha256 } : {}), download_url: item.downloadUrl }) }),
           json("browser-profiles.json", { profiles: exposed.map(e => e.manifest) }),
-          ...request.items.flatMap(item => item.kind === "file" ? [{ name: item.name, bytes: item.bytes, mimeType: item.mimeType }] : []),
         ],
       }, signal);
       const byName = new Map(run.artifacts.map(a => [a.name, a]));

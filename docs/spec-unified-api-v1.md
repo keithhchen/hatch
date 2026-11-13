@@ -36,7 +36,8 @@ The existing `/v1/creator/products` routes are the product API: list/create (`GE
 
 Per product. Anything goes in: links and files of any type.
 
-- `POST /v1/creator/products/:id/ingest` with `{ items: [ {url} | {name, content_base64, media_type?} ], context? }` → `202 {job}`.
+- `POST /v1/creator/products/:id/ingest/uploads` with `{name, bytes, media_type?, sha256?}` → `201 {upload_id, url, method: "PUT", headers, expires_at}`: a 15-minute link the client PUTs the raw file to (at most 50 MB, straight to object storage; send exactly `headers`).
+- `POST /v1/creator/products/:id/ingest` with `{ items: [ {url} | {upload_id, name, bytes, media_type?, sha256?} ], context? }` → `202 {job}`. The Registry checks each upload exists with the stated size and type (`409 upload_not_found`, `422 upload_size_mismatch`/`upload_type_mismatch`). Files never travel in this request.
 - `GET /v1/creator/products/:id/ingest/:job_id` → `{job}`; `GET /v1/creator/products/:id/ingest` lists recent jobs.
 - `job = { id, product_id, status: queued|running|done|failed, items: [{ id, input, status: ok|partial|failed, markdown_path?, original_ref?, error? }], created_at, updated_at, error? }`.
 - Plain text (`.md`, `.txt`) is stored as is. Everything else runs on the thick hosted agent (Kimi Hosted Agents, `runtime-server/src/hostedAgents/`): links are crawled with the account's browser profiles, files are converted, media is compressed and transcribed.

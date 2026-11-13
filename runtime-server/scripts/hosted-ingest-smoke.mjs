@@ -1,4 +1,5 @@
 // Development tool, not a product path: runs one real ingest on Kimi Hosted Agents and writes what came back.
+// A file input needs its original at HATCH_SMOKE_DOWNLOAD_URL (a presigned GET stand-in); its local copy only gives name and size.
 // Usage: KIMI_API_KEY=... [DASHSCOPE_API_KEY=...] node scripts/hosted-ingest-smoke.mjs <out-dir> <url-or-file>...
 // Browser profiles come from an in-memory store seeded by HATCH_SMOKE_COOKIES=<platform>:<cookie-export.json>.
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -30,7 +31,7 @@ if (process.env.HATCH_SMOKE_COOKIES) {
 
 const items = await Promise.all(inputs.map(async (input, i) => /^https?:\/\//.test(input)
   ? { id: `i${i + 1}`, kind: "link", url: input }
-  : { id: `i${i + 1}`, kind: "file", name: path.basename(input), bytes: await readFile(input) }));
+  : { id: `i${i + 1}`, kind: "file", name: path.basename(input), bytes: (await readFile(input)).length, downloadUrl: process.env.HATCH_SMOKE_DOWNLOAD_URL }));
 
 const api = new KimiApi({ apiKey });
 const agent = new KimiHostedAgent(api, new Provisioner(api, INGEST_SANDBOX, async () => ingestAgent(MODEL_ROLES.ingest), zipDirectory));

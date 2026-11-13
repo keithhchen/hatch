@@ -166,13 +166,17 @@ JOB_ID=$(curl -s -X POST https://gethatchapp.com/v1/creator/products/$PRODUCT_ID
 
 ### 7. Ingest a file
 
-Inline files total at most 30 MB. `media_type` is optional.
+Files go straight to storage, at most 50 MB each; send the same `Content-Type` you declared. `media_type` is optional. The job names each upload with the same `name`, `bytes` and `media_type`, plus its `upload_id`.
 
 ```sh
-{ printf '{"items":[{"name":"notes.pdf","media_type":"application/pdf","content_base64":"'
-  base64 -i notes.pdf | tr -d '\n'
-  printf '"}]}'; } \
-  | curl -s -X POST https://gethatchapp.com/v1/creator/products/$PRODUCT_ID/ingest -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" --data-binary @-
+SLOT=$(curl -s -X POST https://gethatchapp.com/v1/creator/products/$PRODUCT_ID/ingest/uploads -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" \
+  -d "{\"name\":\"notes.pdf\",\"media_type\":\"application/pdf\",\"bytes\":$(wc -c < notes.pdf | tr -d ' ')}")
+curl -s -X PUT "$(echo "$SLOT" | jq -r .url)" -H "Content-Type: application/pdf" --data-binary @notes.pdf
+```
+
+```sh
+curl -s -X POST https://gethatchapp.com/v1/creator/products/$PRODUCT_ID/ingest -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" \
+  -d "{\"items\":[{\"upload_id\":\"$(echo "$SLOT" | jq -r .upload_id)\",\"name\":\"notes.pdf\",\"media_type\":\"application/pdf\",\"bytes\":$(wc -c < notes.pdf | tr -d ' ')}]}"
 ```
 
 ### 8. Check the job

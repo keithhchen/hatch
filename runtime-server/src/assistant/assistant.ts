@@ -27,6 +27,7 @@ import type { ExpertMaterials } from "./materials.js";
 import type { AssistantStateRepository } from "./state.js";
 import type { Material } from "./materials.js";
 import type { IngestJob } from "../ingest/job.js";
+import type { StagedFileItem } from "../ingest/service.js";
 import { readPage, type AgentOverview, type StudioOperations, type WorkerKind } from "./studioTools.js";
 import { log } from "../observability/log.js";
 import type { ModelRoleResolver } from "../modelRoles.js";
@@ -64,7 +65,9 @@ export type ProductWorkspaces = {
 
 /** Where the Assistant hands material that needs converting; Ingest is what answers. */
 export interface AssistantIngest {
-  submit(accountId: string, productId: string, items: Array<{ url: string } | { name: string; content_base64: string; media_type: string }>, context?: string): Promise<{ id: string; status: string }>;
+  /** Puts a file the Assistant holds where Ingest can take it, and returns the item that names it. */
+  stage(accountId: string, productId: string, file: { name: string; bytes: Buffer; media_type: string }): Promise<StagedFileItem>;
+  submit(accountId: string, productId: string, items: Array<{ url: string } | StagedFileItem>, context?: string): Promise<{ id: string; status: string }>;
 }
 
 export type AssistantDependencies = {
@@ -326,7 +329,7 @@ export class AssistantService implements StudioOperations {
     const workspace = await this.workspace(accountId, productId);
     const went = await Promise.all(plain.map(async material => `${material.chatPath} → ${await this.writeManual(workspace, material)}`));
     if (!ingested.length) return went;
-    const originals = await Promise.all(complex.map(async ({ original }) => ({ name: original.name, content_base64: (await original.read()).toString("base64"), media_type: original.mimeType })));
+    const originals = await Promise.all(complex.map(async ({ original }) => this.deps.ingest!.stage(accountId, productId, { name: original.name, bytes: await original.read(), media_type: original.mimeType })));
     const { id } = await this.deps.ingest!.submit(accountId, productId, [...originals, ...input.links.map(url => ({ url }))], input.context);
     return [...went, ...ingested.map(item => `${item} → ingest job ${id}，整理好会放进 input/manual`)];
   }
