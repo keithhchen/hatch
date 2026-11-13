@@ -4,6 +4,7 @@ import { result } from "./files.js";
 import { fileTools } from "./tools.js";
 import { webTools } from "./web.js";
 import { WorkbenchStore } from "./store.js";
+import { FORM_TOOLS } from "../formPages/tools.js";
 
 export type FactoryToolDefinition = { role: string; tools: string[] };
 
@@ -33,7 +34,9 @@ export async function factoryAgentTools(options: {
   return [...candidates.filter(tool => tool.name !== "youtube_transcript" && !options.withheldTools?.includes(tool.name)
     && (options.definition.tools.includes(tool.name) || (tool.name === "askuser" && options.definition.role !== "voice")
       // grep is how an Agent searches what read can open: stored definitions that grant read grant it too.
-      || (tool.name === "grep" && options.definition.tools.includes("read"))))];
+      || (tool.name === "grep" && options.definition.tools.includes("read"))
+      // The review page tools are a host capability of the interview: stored definitions predate them.
+      || (FORM_TOOLS.includes(tool.name) && options.definition.role === "voice")))];
 }
 
 const askUserOption = Type.Object({

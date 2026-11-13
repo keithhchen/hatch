@@ -4,7 +4,10 @@ import { Type } from "@earendil-works/pi-ai";
 import type { UsageRecorder } from "../usage/usage.js";
 import type { UsageCap } from "../usage/usageCap.js";
 import { WorkbenchStore, type AgentDefinitionSource, type AssistantRole, type Role, type Session, type Todo, type WorkbenchBackend } from "../factoryAgents/store.js";
-import { WorkbenchRuntime, safeError, type WorkbenchRuntimeOptions } from "../factoryAgents/runtime.js";
+import { WorkbenchRuntime, MessageAlreadyAccepted, safeError, type WorkbenchRuntimeOptions } from "../factoryAgents/runtime.js";
+import { userMessage } from "../factoryAgents/imageRefs.js";
+import type { FormPage } from "../formPages/repository.js";
+import type { FormPages } from "../formPages/service.js";
 import type { FactoryWorkspace } from "../factoryAgents/service.js";
 import type { AgentCatalog, AgentChange, CatalogAgent } from "./catalog.js";
 import { scrapeProviderFrom } from "../factoryAgents/webProviders.js";
@@ -88,6 +91,8 @@ export type AssistantDependencies = {
   usage?: UsageRecorder;
   usageCap?: UsageCap;
   ingest?: AssistantIngest;
+  /** The review pages the Expert fills in; the Assistant reads their answers. */
+  forms?: Pick<FormPages, "read">;
 };
 
 /** Why an Agent may not be built yet, or undefined when its interview is finished and confirmed (every outline item ✓). */
@@ -231,6 +236,24 @@ export class AssistantService implements StudioOperations {
     await this.hearSystem(accountId, kind === "tick" ? `[日常检查 · 任务 ${taskId}] ${text}` : `[任务 ${taskId}] ${text}`, taskId, `task:${taskId}:${event}`);
   }
 
+  /**
+   * The Expert submitted a review page: the conversation it came from continues. A page written for one of the Assistant's tasks
+   * is news to the Assistant (and so reaches the Expert's chat too); a page the Expert was handed by the interview session
+   * itself starts a turn on that session. The notice is keyed by the page, so a retry is the same notice.
+   */
+  async formSubmitted(form: Pick<FormPage, "id" | "accountId" | "title" | "origin">): Promise<void> {
+    const text = `[表单已提交] 专家提交了审阅页「${form.title}」（${form.id}）。用 read_form 读他的回答，然后接着往下做。`;
+    if (form.origin.taskId) return this.news(form.accountId, form.origin.taskId, text, `form:${form.id}`);
+    const { runtime } = await this.workspace(form.accountId, form.origin.productId);
+    await runtime.send(form.origin.sessionId, userMessage(text, [], { kind: "system", itemId: `form:${form.id}`, text })).catch(error => { if (!(error instanceof MessageAlreadyAccepted)) throw error; });
+  }
+
+  /** What the Expert has answered on one of their review pages. */
+  readForm(accountId: string, formId: string) {
+    if (!this.deps.forms) throw new Error("审阅页现在不可用");
+    return this.deps.forms.read(accountId, formId);
+  }
+
   /** Ingest settled a job for one of the Expert's Agents, whoever submitted it: the Assistant hears what came of each item. */
   async ingested(job: IngestJob): Promise<void> {
     const items = job.items.map(item => `- ${"url" in item.input ? item.input.url : item.input.name}：${item.status === "failed" ? `没成，${item.error ?? "没有原因"}` : `${item.status === "partial" ? "部分完成，" : ""}已放进 ${item.markdown_path ?? item.original_ref}`}`);
@@ -324,7 +347,9 @@ export class AssistantService implements StudioOperations {
     await workspace.store.update(voice.id, s => { if (s.assistantTaskId === task.id) delete s.assistantTaskId; });
     if (type !== "voice.run_completed") return this.block(task, voice.error ?? "访谈大纲没写成", voice.messages.length);
     await this.deps.tasks.update(task.id, { status: "done", leaseExpiresAt: undefined });
-    await this.news(task.accountId, task.id, `访谈大纲写好了。接下来你自己在对话里一个一个问专家，用 tick_outline 勾掉聊完的项。${outlineText(voice.todos)}`, `finished:${voice.messages.length}`);
+    // A review page the worker published for this task: the Assistant sends its link.
+    const page = [...JSON.stringify(voice.messages).matchAll(/https?:\/\/[^"\\\s]*\/f\/form_[a-f0-9]{20}\?t=[\w-]+/g)].at(-1)?.[0];
+    await this.news(task.accountId, task.id, `访谈大纲写好了。${page ? `审阅页也写好了，把这个链接发给专家：${page}。他提交后会通知你，到时用 read_form 读回答，勾掉聊完的项。` : "接下来你自己在对话里一个一个问专家，用 tick_outline 勾掉聊完的项。"}${outlineText(voice.todos)}`, `finished:${voice.messages.length}`);
   }
 
   // ── Tasks ──────────────────────────────────────────────────────────────

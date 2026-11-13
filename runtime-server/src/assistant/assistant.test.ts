@@ -974,3 +974,24 @@ test("A Product workspace the Assistant opens carries the Agent's BriefSpec, as 
     assert.deepEqual(env.scopes, [{ creatorId: ACCOUNT, productId: PRODUCT, briefSpec: BRIEF_SPEC }]);
   } finally { await env.close(); }
 });
+
+test("A submitted review page continues the conversation it came from: the Assistant for a task it wrote the page for, the interview session otherwise", async () => {
+  const env = await setup({ model: () => ({ text: "收到" }), worker: () => ({ text: "好" }) });
+  try {
+    const voice = (await env.productStore.getOrCreate("voice")).session;
+    const task = await env.tasks.create({ accountId: ACCOUNT, productId: PRODUCT, kind: "interview", origin: { source: "web" }, summary: "访谈" });
+    await env.assistant.formSubmitted({ id: "form_aaaaaaaaaaaaaaaaaaaa", accountId: ACCOUNT, title: "选址审阅", origin: { sessionId: voice.id, productId: PRODUCT, taskId: task.id } });
+    await env.idle();
+    const heard = env.model.state.turns.flatMap(turn => turn.said).join("\n");
+    assert.match(heard, new RegExp(`\\[任务 ${task.id}\\] \\[表单已提交\\].*选址审阅.*form_aaaaaaaaaaaaaaaaaaaa.*read_form`));
+    assert.equal((await env.productStore.get(voice.id)).messages.length, 0, "the interview session was not started: the Assistant was told");
+
+    await env.assistant.formSubmitted({ id: "form_bbbbbbbbbbbbbbbbbbbb", accountId: ACCOUNT, title: "直接访谈", origin: { sessionId: voice.id, productId: PRODUCT } });
+    await waitFor(async () => (await env.productStore.get(voice.id)).messages.some(message => JSON.stringify(message).includes("form_bbbbbbbbbbbbbbbbbbbb")));
+    assert.equal(env.model.state.calls, 1, "the Assistant heard nothing about it");
+    // The same notice again is the same message.
+    await env.assistant.formSubmitted({ id: "form_bbbbbbbbbbbbbbbbbbbb", accountId: ACCOUNT, title: "直接访谈", origin: { sessionId: voice.id, productId: PRODUCT } });
+    await env.productRuntime.drain();
+    assert.equal((await env.productStore.get(voice.id)).messages.filter(message => message.role === "user" && JSON.stringify(message).includes("form_bbbbbbbbbbbbbbbbbbbb")).length, 1);
+  } finally { await env.close(); }
+});
