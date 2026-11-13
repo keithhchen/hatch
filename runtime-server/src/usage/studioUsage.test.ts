@@ -16,7 +16,9 @@ import { MemoryIngestJobs } from "../ingest/jobs.js";
 import { UnavailableEngine } from "../ingest/engines.js";
 import { IngestService } from "../ingest/service.js";
 import { InMemoryUsageLedger } from "./memoryUsage.js";
-import { usageSink, type UsageEvent } from "./usage.js";
+import { scopeOfConversation } from "../assistant/chat.js";
+import { bindContext, runInContext } from "../observability/context.js";
+import { attributeByScope, usageSink, type UsageEvent } from "./usage.js";
 import { USAGE_CAP_EXCEEDED, UsageCap } from "./usageCap.js";
 
 const CREATOR = "11111111-1111-4111-8111-111111111111";
@@ -37,13 +39,13 @@ const usage = (input: number, output: number): Usage => ({
 /** A ledger already holding `tokens` of this month's Studio usage, and a cap of one token. */
 async function spentMonth(accountId: string) {
   const ledger = new CapturingLedger();
-  await ledger.record({ id: "spent", accountId, surface: "studio", model: "m", inputTokens: 5, cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0 });
+  await ledger.record({ id: "spent", accountId, surface: "studio_web", model: "m", inputTokens: 5, cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0 });
   return new UsageCap(ledger, 1);
 }
 
 test("the Factory prompt runner reports each model call, and the ledger counts a retried write once", async () => {
   const ledger = new CapturingLedger();
-  const sink = usageSink(ledger, { accountId: CREATOR, surface: "studio", productId: PRODUCT, runId: "run-1" }, quiet);
+  const sink = usageSink(ledger, { accountId: CREATOR, surface: "studio_web", productId: PRODUCT, runId: "run-1" }, quiet);
   const runner = createFactoryLlmPromptRunner({
     env: { HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash", DEEPSEEK_API_KEY: "test" },
     fetch: async () => new Response(`${[
@@ -59,10 +61,10 @@ test("the Factory prompt runner reports each model call, and the ledger counts a
   assert.equal(ledger.events.length, 1);
   assert.equal(ledger.events[0]!.id, "0");
   assert.equal(ledger.events[0]!.model, "deepseek-v4-flash");
-  assert.deepEqual((await ledger.monthToDate(CREATOR)).studio, { input: 8, cachedInput: 0, output: 2, reasoning: 0 });
+  assert.deepEqual((await ledger.monthToDate(CREATOR)).studio_web, { input: 8, cachedInput: 0, output: 2, reasoning: 0 });
   // The same call written again (a retry of the write) changes nothing.
   await sink({ id: "0", model: "deepseek-v4-flash", usage: usage(8, 2) });
-  assert.deepEqual((await ledger.monthToDate(CREATOR)).studio, { input: 8, cachedInput: 0, output: 2, reasoning: 0 });
+  assert.deepEqual((await ledger.monthToDate(CREATOR)).studio_web, { input: 8, cachedInput: 0, output: 2, reasoning: 0 });
 });
 
 test("a Factory run's model calls are the owning Expert's Studio usage, per run and product", async (t) => {
@@ -92,8 +94,41 @@ test("a Factory run's model calls are the owning Expert's Studio usage, per run 
   const [event, again] = ledger.events;
   assert.equal(event!.id, again!.id);
   assert.match(event!.id, /^[0-9a-f-]{36}:0$/);
-  assert.deepEqual({ accountId: event!.accountId, surface: event!.surface, productId: event!.productId, runId: event!.runId }, { accountId: CREATOR, surface: "studio", productId: PRODUCT, runId: "run-usage" });
+  assert.deepEqual({ accountId: event!.accountId, surface: event!.surface, productId: event!.productId, runId: event!.runId }, { accountId: CREATOR, surface: "studio_web", productId: PRODUCT, runId: "run-usage" });
   assert.deepEqual(await ledger.forRun("run-usage"), { input: 100, cachedInput: 0, output: 20, reasoning: 0 });
+});
+
+test("a Factory run queued by an API key is Studio API usage under that key; one queued by a session is Studio web", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-studio-usage-api-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const repository = new InMemoryCreatorFactoryRepository();
+  const input = (runId: string): FactoryStartInput => ({
+    runId, creator: { id: CREATOR, name: "Expert" }, productId: PRODUCT, productName: "P", productPromise: "Promise.",
+    sources: [{ id: "S1", authority: "creator_current", title: "Method", content: "Do it." }],
+    config: { developmentQuestions: 1, heldoutQuestions: 1, maxCorpusRevisions: 1 }
+  });
+  await repository.create({ id: "by-key", creatorId: CREATOR, idempotencyKey: "k1", input: input("by-key"), apiKeyId: "key-1" });
+  await repository.create({ id: "by-session", creatorId: CREATOR, idempotencyKey: "k2", input: input("by-session") });
+  const ledger = new CapturingLedger();
+  const factory = new CreatorFactory(root, async call => {
+    await call.onModelCall?.({ id: "0", model: "factory-model", usage: usage(10, 2) });
+    throw new Error("stop after the first call");
+  }, async () => "unused");
+  const worker = new CreatorFactoryWorker(repository, factory, { workerId: "w", leaseMs: 60_000, heartbeatMs: 0, usage: ledger });
+  await worker.workOnce();
+  await worker.workOnce();
+
+  const byRun = (runId: string) => ledger.events.find(event => event.runId === runId)!;
+  assert.deepEqual({ surface: byRun("by-key").surface, apiKeyId: byRun("by-key").apiKeyId }, { surface: "studio_api", apiKeyId: "key-1" });
+  assert.deepEqual({ surface: byRun("by-session").surface, apiKeyId: byRun("by-session").apiKeyId }, { surface: "studio_web", apiKeyId: undefined });
+});
+
+test("an Assistant Run bound by a request from an API key is Studio API usage under that key; otherwise Studio web", () => {
+  const owner = { ownerAccountId: "acct" };
+  const viaKey = runInContext({ request_id: "req" }, () => { bindContext({ api_key_id: "key-1" }); return attributeByScope(scopeOfConversation(owner), { id: "run-1" }); });
+  assert.deepEqual({ surface: viaKey.surface, apiKeyId: viaKey.apiKeyId, accountId: viaKey.accountId }, { surface: "studio_api", apiKeyId: "key-1", accountId: "acct" });
+  const viaSession = runInContext({ request_id: "req" }, () => attributeByScope(scopeOfConversation(owner), { id: "run-2" }));
+  assert.deepEqual({ surface: viaSession.surface, apiKeyId: viaSession.apiKeyId }, { surface: "studio_web", apiKeyId: undefined });
 });
 
 test("an ingest job is not started once the Expert has spent the month", async () => {

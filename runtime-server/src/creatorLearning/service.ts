@@ -123,6 +123,8 @@ export type SubmitFactoryAnswersRequest = {
   expectedVersion?: number;
   submissionId?: string;
   questionBatchId: string;
+  /** The API key that made the request; its model calls are Studio API usage. */
+  apiKeyId?: string;
 };
 
 export type CreatorReviewAction = "accept" | "correct" | "reject_question" | "judge_dispute" | "heldout_correction" | "rerun";
@@ -417,7 +419,9 @@ export class CreatorFactoryService {
   async create(
     creator: { id: string; name: string },
     request: CreateFactoryRunRequest,
-    idempotencyKey: string
+    idempotencyKey: string,
+    /** The API key that made the request; its model calls are Studio API usage. */
+    apiKeyId?: string
   ): Promise<{ run: CreatorFactoryRunView; created: boolean }> {
     const normalized = validateCreateRequest(request);
     await this.usageCap?.assertWithinCap(creator.id);
@@ -529,7 +533,8 @@ export class CreatorFactoryService {
       id: runId,
       creatorId: creator.id,
       idempotencyKey: requestIdempotencyKey,
-      input
+      input,
+      ...(apiKeyId ? { apiKeyId } : {})
     });
     if (product) {
       await this.graphStore?.initialize();
@@ -889,7 +894,8 @@ export class CreatorFactoryService {
         questionBatchId,
         ...(request.submissionId?.trim() ? { submissionId: request.submissionId.trim() } : {})
       },
-      ...(request.expectedVersion === undefined ? {} : { expectedVersion: request.expectedVersion })
+      ...(request.expectedVersion === undefined ? {} : { expectedVersion: request.expectedVersion }),
+      ...(request.apiKeyId ? { apiKeyId: request.apiKeyId } : {})
     });
     const started = await this.startImmediately(runId);
     return this.project(started ?? updated, false);
@@ -924,7 +930,7 @@ export class CreatorFactoryService {
     return this.project(updated, true);
   }
 
-  async retry(creatorId: string, runId: string, expectedVersion?: number): Promise<CreatorFactoryRunView> {
+  async retry(creatorId: string, runId: string, expectedVersion?: number, apiKeyId?: string): Promise<CreatorFactoryRunView> {
     const current = await this.requireRun(creatorId, runId);
     await this.usageCap?.assertWithinCap(creatorId);
     if (current.status !== "needs_attention" || !current.state?.retryStage) {
@@ -934,6 +940,7 @@ export class CreatorFactoryService {
       creatorId,
       runId,
       stage: current.state.retryStage,
+      ...(apiKeyId ? { apiKeyId } : {}),
       ...(expectedVersion === undefined ? {} : { expectedVersion })
     });
     const started = await this.startImmediately(runId);

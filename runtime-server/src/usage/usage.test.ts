@@ -9,7 +9,7 @@ import { PiAgentRuntime } from "../piAgentRuntime.js";
 import type { RunStart } from "../protocol.js";
 import { createRegistryServerFromEnvironment } from "../registryServer.js";
 import { InMemoryUsageLedger } from "./memoryUsage.js";
-import { attributeByScope, monthlyTokenCap, usageReport, usageSink, type UsageEvent, type UsageRecorder } from "./usage.js";
+import { attributeByScope, monthlyTokenCap, studioAttribution, usageReport, usageSink, type UsageEvent, type UsageRecorder } from "./usage.js";
 
 const event = (overrides: Partial<UsageEvent> = {}): UsageEvent => ({
   id: "call-1", accountId: "acct", surface: "chat_web", model: "m", inputTokens: 100, cachedInputTokens: 40, outputTokens: 20, reasoningTokens: 5, at: new Date("2026-11-10T12:00:00Z"), ...overrides
@@ -27,25 +27,25 @@ test("the same call recorded twice counts once", async () => {
 test("month to date sums the month's days per surface and leaves other months and accounts out", async () => {
   const ledger = new InMemoryUsageLedger();
   await ledger.record(event({ id: "a" }));
-  await ledger.record(event({ id: "b", surface: "studio", at: new Date("2026-11-02T00:00:00Z") }));
+  await ledger.record(event({ id: "b", surface: "studio_web", at: new Date("2026-11-02T00:00:00Z") }));
   await ledger.record(event({ id: "c", at: new Date("2026-10-31T23:59:59Z") }));
   await ledger.record(event({ id: "d", accountId: "other" }));
   const month = await ledger.monthToDate("acct", new Date("2026-11-13T00:00:00Z"));
   assert.equal(month.chat_web.input, 100);
-  assert.equal(month.studio.input, 100);
-  assert.equal(month.chat_api.input, 0);
+  assert.equal(month.studio_web.input, 100);
+  assert.equal(month.responses_api.input, 0);
 });
 
 test("a model call becomes one event: input counts the cached prompt, attribution rides along", async () => {
   const seen: UsageEvent[] = [];
-  const sink = usageSink({ record: async (next) => { seen.push(next); } }, { accountId: "acct", surface: "chat_api", apiKeyId: "key_1", productId: "p", runId: "run_1" }, { error() {} });
+  const sink = usageSink({ record: async (next) => { seen.push(next); } }, { accountId: "acct", surface: "responses_api", apiKeyId: "key_1", productId: "p", runId: "run_1" }, { error() {} });
   await sink({ id: "run_1:7", model: "kimi", usage: piUsage({ cacheWrite: 10, reasoning: 8 }) });
-  assert.deepEqual(seen, [{ id: "run_1:7", accountId: "acct", surface: "chat_api", apiKeyId: "key_1", productId: "p", runId: "run_1", model: "kimi", inputTokens: 110, cachedInputTokens: 40, outputTokens: 20, reasoningTokens: 8 }]);
+  assert.deepEqual(seen, [{ id: "run_1:7", accountId: "acct", surface: "responses_api", apiKeyId: "key_1", productId: "p", runId: "run_1", model: "kimi", inputTokens: 110, cachedInputTokens: 40, outputTokens: 20, reasoningTokens: 8 }]);
 });
 
 test("a scope that names no surface is web chat; one that names the API and a key is attributed to both", () => {
   assert.deepEqual(attributeByScope({ creatorId: "c", productId: "p" }, { id: "r" }), { accountId: "c", surface: "chat_web", productId: "p", runId: "r" });
-  assert.deepEqual(attributeByScope({ creatorId: "c", productId: "p", usageSurface: "chat_api", apiKeyId: "k" }, { id: "r" }), { accountId: "c", surface: "chat_api", productId: "p", runId: "r", apiKeyId: "k" });
+  assert.deepEqual(attributeByScope({ creatorId: "c", productId: "p", usageSurface: "responses_api", apiKeyId: "k" }, { id: "r" }), { accountId: "c", surface: "responses_api", productId: "p", runId: "r", apiKeyId: "k" });
 });
 
 test("a recorder that fails never fails the run: the error is logged with the run id", async () => {
@@ -73,7 +73,7 @@ test("a recorder that fails never fails the run: the error is logged with the ru
 
 test("the pi runtime records each completed model call once, keyed by run and message time", async () => {
   const ledger = new InMemoryUsageLedger();
-  const sink = usageSink(ledger, { accountId: "acct", surface: "studio", runId: "run_1" }, { error() {} });
+  const sink = usageSink(ledger, { accountId: "acct", surface: "studio_web", runId: "run_1" }, { error() {} });
   const runtime = new PiAgentRuntime({ toolDefinitions: [] });
   const handleEvent = Reflect.get(runtime, "handleEvent") as (options: unknown) => Promise<void>;
   const end = (timestamp: number) => Reflect.apply(handleEvent, runtime, [{
@@ -85,23 +85,29 @@ test("the pi runtime records each completed model call once, keyed by run and me
     setFinalAssistant() {}, setTerminalError() {}, setHandedOver() {}, handedOver: () => false
   }]);
   await end(1); await end(1); await end(2);
-  assert.equal((await ledger.monthToDate("acct")).studio.output, 40);
+  assert.equal((await ledger.monthToDate("acct")).studio_web.output, 40);
 });
 
 test("the report has the dashboard's shape: tokens are input + output, every day present, the cap passed through", async () => {
   const ledger = new InMemoryUsageLedger();
-  await ledger.record(event({ id: "a", surface: "studio", at: new Date("2026-11-12T00:00:00Z") }));
-  await ledger.record(event({ id: "b", surface: "chat_api", at: new Date("2026-11-13T00:00:00Z"), inputTokens: 10, outputTokens: 5 }));
+  await ledger.record(event({ id: "a", surface: "studio_web", at: new Date("2026-11-12T00:00:00Z") }));
+  await ledger.record(event({ id: "b", surface: "responses_api", at: new Date("2026-11-13T00:00:00Z"), inputTokens: 10, outputTokens: 5 }));
+  await ledger.record(event({ id: "c", surface: "studio_api", at: new Date("2026-11-13T00:00:00Z"), inputTokens: 1, outputTokens: 1 }));
   const report = await usageReport(ledger, "acct", "2026-11-11", "2026-11-13", 1000, new Date("2026-11-13T08:00:00Z"));
-  assert.deepEqual(report.month_to_date, { studio: 120, chat_api: 15, chat_web: 0, total: 135, split: report.month_to_date.split });
-  assert.deepEqual(report.month_to_date.split.studio, { input: 100, cachedInput: 40, output: 20, reasoning: 5 });
-  assert.deepEqual(report.cap, { monthly_tokens: 1000, remaining_tokens: 865 });
+  assert.deepEqual(report.month_to_date, { studio_web: 120, studio_api: 2, chat_web: 0, responses_api: 15, total: 137, split: report.month_to_date.split });
+  assert.deepEqual(report.month_to_date.split.studio_web, { input: 100, cachedInput: 40, output: 20, reasoning: 5 });
+  assert.deepEqual(report.cap, { monthly_tokens: 1000, remaining_tokens: 863 });
   assert.deepEqual(report.daily, [
-    { day: "2026-11-11", studio: 0, chat_api: 0, chat_web: 0 },
-    { day: "2026-11-12", studio: 120, chat_api: 0, chat_web: 0 },
-    { day: "2026-11-13", studio: 0, chat_api: 15, chat_web: 0 }
+    { day: "2026-11-11", studio_web: 0, studio_api: 0, chat_web: 0, responses_api: 0 },
+    { day: "2026-11-12", studio_web: 120, studio_api: 0, chat_web: 0, responses_api: 0 },
+    { day: "2026-11-13", studio_web: 0, studio_api: 2, chat_web: 0, responses_api: 15 }
   ]);
   assert.equal((await usageReport(ledger, "nobody", "2026-11-11", "2026-11-11", null)).cap.monthly_tokens, null);
+});
+
+test("Studio work is Studio API when an API key made the request, and Studio web otherwise", () => {
+  assert.deepEqual(studioAttribution("c", undefined, { productId: "p", runId: "r" }), { accountId: "c", surface: "studio_web", productId: "p", runId: "r" });
+  assert.deepEqual(studioAttribution("c", "key_1", { productId: "p" }), { accountId: "c", surface: "studio_api", apiKeyId: "key_1", productId: "p" });
 });
 
 test("the monthly cap is a positive integer or nothing", () => {
@@ -133,7 +139,7 @@ test("GET /v1/creator/usage answers the signed-in Expert from the ledger, and on
     assert.deepEqual(body.cap, { monthly_tokens: 2_000_000, remaining_tokens: 2_000_000 });
     assert.equal(body.month_to_date.total, 0);
     assert.equal(body.daily.length, 30);
-    assert.deepEqual(Object.keys(body.daily[0]!).sort(), ["chat_api", "chat_web", "day", "studio"]);
+    assert.deepEqual(Object.keys(body.daily[0]!).sort(), ["chat_web", "day", "responses_api", "studio_api", "studio_web"]);
     assert.equal((await get("?from=2026-11-05&to=2026-11-01", token)).status, 400);
     assert.equal((await get("?from=garbage", token)).status, 400);
     assert.equal(((await (await get("?from=2026-11-01&to=2026-11-03", token)).json()) as { daily: unknown[] }).daily.length, 3);

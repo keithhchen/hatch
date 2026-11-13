@@ -5,7 +5,7 @@ const DDL = [
   `CREATE TABLE IF NOT EXISTS hatch_usage_events (
     id TEXT PRIMARY KEY,
     account_id TEXT NOT NULL,
-    surface TEXT NOT NULL CHECK (surface IN ('studio', 'chat_api', 'chat_web')),
+    surface TEXT NOT NULL CHECK (surface IN ('studio_web', 'studio_api', 'chat_web', 'responses_api')),
     api_key_id TEXT,
     product_id TEXT,
     run_id TEXT,
@@ -30,6 +30,30 @@ const DDL = [
 ];
 
 /**
+ * Tables made before the four surfaces carry 'studio' and 'chat_api'. Rewrites them once: events by who made the request
+ * (a Studio call with an API key is studio_api), then the rollup from the events, which are its source. The old CHECK is
+ * the marker, so a later boot finds nothing to do.
+ */
+export const MIGRATE_SURFACES = `
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'hatch_usage_events'::regclass AND conname = 'hatch_usage_events_surface_check' AND pg_get_constraintdef(oid) LIKE '%chat_api%') THEN
+    ALTER TABLE hatch_usage_events DROP CONSTRAINT hatch_usage_events_surface_check;
+    UPDATE hatch_usage_events SET surface = CASE
+      WHEN surface = 'chat_api' THEN 'responses_api'
+      WHEN surface = 'studio' AND api_key_id IS NOT NULL THEN 'studio_api'
+      WHEN surface = 'studio' THEN 'studio_web'
+      ELSE surface END
+      WHERE surface IN ('studio', 'chat_api');
+    ALTER TABLE hatch_usage_events ADD CONSTRAINT hatch_usage_events_surface_check
+      CHECK (surface IN ('studio_web', 'studio_api', 'chat_web', 'responses_api'));
+    DELETE FROM hatch_usage_daily;
+    INSERT INTO hatch_usage_daily (account_id, surface, day, input_tokens, cached_input_tokens, output_tokens, reasoning_tokens)
+      SELECT account_id, surface, (created_at AT TIME ZONE 'UTC')::date, SUM(input_tokens), SUM(cached_input_tokens), SUM(output_tokens), SUM(reasoning_tokens)
+      FROM hatch_usage_events GROUP BY account_id, surface, (created_at AT TIME ZONE 'UTC')::date;
+  END IF;
+END $$`;
+
+/**
  * The ledger in Postgres. An event is appended and the day's rollup incremented in one transaction; the event's id is its
  * identity, so a retried write finds it and changes nothing.
  */
@@ -38,8 +62,24 @@ export class PostgresUsageLedger implements UsageRecorder, UsageReader {
   constructor(private readonly pool: Pool) {}
 
   private schema(): Promise<void> {
-    this.ready ??= (async () => { for (const statement of DDL) await this.pool.query(statement); })().catch(error => { this.ready = undefined; throw error; });
+    this.ready ??= this.migrate().catch(error => { this.ready = undefined; throw error; });
     return this.ready;
+  }
+
+  /** One transaction under an advisory lock, so boots running together take turns and the later one finds nothing to do. */
+  private async migrate(): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('hatch_usage_schema'))");
+      for (const statement of [...DDL, MIGRATE_SURFACES]) await client.query(statement);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async record(event: UsageEvent): Promise<void> {

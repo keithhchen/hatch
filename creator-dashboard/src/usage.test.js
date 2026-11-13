@@ -10,12 +10,12 @@ import { createCreatorTranslator } from "./creatorI18n.js";
 
 // A report of the shape Registry returns. It exists only in this test file.
 const fixture = {
-  month_to_date: { studio: 1200, chat_api: 300, chat_web: 500, total: 2000 },
+  month_to_date: { studio_web: 1000, studio_api: 200, chat_web: 500, responses_api: 300, total: 2000 },
   cap: { monthly_tokens: 4000 },
   daily: [
-    { day: "2026-11-11", studio: 0, chat_api: 0, chat_web: 0 },
-    { day: "2026-11-12", studio: 1000, chat_api: 0, chat_web: 500 },
-    { day: "2026-11-13", studio: 200, chat_api: 300, chat_web: 0 }
+    { day: "2026-11-11", studio_web: 0, studio_api: 0, chat_web: 0, responses_api: 0 },
+    { day: "2026-11-12", studio_web: 1000, studio_api: 0, chat_web: 500, responses_api: 0 },
+    { day: "2026-11-13", studio_web: 0, studio_api: 200, chat_web: 0, responses_api: 300 }
   ]
 };
 
@@ -28,7 +28,7 @@ test("the client reads the Expert's usage from the dashboard route", async () =>
 test("the view has per-surface totals, bars scaled to the busiest day and cap progress", () => {
   const view = usageView(fixture);
   assert.equal(view.total, 2000);
-  assert.deepEqual(view.surfaces, [{ surface: "studio", tokens: 1200 }, { surface: "chat_api", tokens: 300 }, { surface: "chat_web", tokens: 500 }]);
+  assert.deepEqual(view.surfaces, [{ surface: "studio_web", tokens: 1000 }, { surface: "studio_api", tokens: 200 }, { surface: "chat_web", tokens: 500 }, { surface: "responses_api", tokens: 300 }]);
   assert.equal(view.busiest, 1500);
   assert.deepEqual(view.days.map((day) => day.total), [0, 1500, 500]);
   assert.deepEqual(view.cap, { limit: 4000, used: 2000, ratio: 0.5, over: false });
@@ -37,7 +37,7 @@ test("the view has per-surface totals, bars scaled to the busiest day and cap pr
 
 test("no cap hides the bar, nothing spent is the empty state, a spent cap says so", () => {
   assert.equal(usageView({ ...fixture, cap: { monthly_tokens: null } }).cap, null);
-  const none = usageView({ month_to_date: { studio: 0, chat_api: 0, chat_web: 0, total: 0 }, cap: { monthly_tokens: null }, daily: [{ day: "2026-11-13", studio: 0, chat_api: 0, chat_web: 0 }] });
+  const none = usageView({ month_to_date: { studio_web: 0, studio_api: 0, chat_web: 0, responses_api: 0, total: 0 }, cap: { monthly_tokens: null }, daily: [{ day: "2026-11-13", studio_web: 0, studio_api: 0, chat_web: 0, responses_api: 0 }] });
   assert.equal(none.empty, true);
   assert.equal(usageView({ ...fixture, cap: { monthly_tokens: 1500 } }).cap.over, true);
   assert.equal(usageView({ ...fixture, cap: { monthly_tokens: 1500 } }).cap.ratio, 1);
@@ -52,7 +52,7 @@ test("token counts read in the viewer's locale", () => {
 test("the Usage section copy exists in every locale and Settings renders the section", async () => {
   for (const locale of ["en", "zh", "ja"]) {
     const t = createCreatorTranslator(locale);
-    for (const key of ["sxUsage", "sxuMonth", "sxuStudio", "sxuChatApi", "sxuChatWeb", "sxuDaily", "sxuCap", "sxuEmpty"]) assert.notEqual(t(key), key, `${locale}.${key}`);
+    for (const key of ["sxUsage", "sxuMonth", "sxuStudioWeb", "sxuStudioApi", "sxuChatWeb", "sxuResponsesApi", "sxuDaily", "sxuCap", "sxuEmpty"]) assert.notEqual(t(key), key, `${locale}.${key}`);
     assert.match(t("sxuCapOf", "1", "2"), /1.*2/);
   }
   assert.equal(createCreatorTranslator("en")("sxUsage"), "Usage");

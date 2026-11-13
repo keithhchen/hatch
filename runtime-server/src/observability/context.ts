@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes } from "node:crypto";
 
 /** The ids one request carries through every layer. Each is optional until the layer that learns it binds it. */
-export type RequestContext = { request_id: string; account_id?: string; conversation_id?: string; run_id?: string };
+export type RequestContext = { request_id: string; account_id?: string; api_key_id?: string; conversation_id?: string; run_id?: string };
 
 const storage = new AsyncLocalStorage<RequestContext>();
 
