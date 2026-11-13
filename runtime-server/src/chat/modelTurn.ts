@@ -65,7 +65,7 @@ export type TurnBinding = {
   agentCorpusRoot?: string;
   entitlementId?: string;
   orderId?: string;
-  /** Where the Run's tokens are counted. Absent is app or channel chat; the Responses API says `chat_api` and its key. */
+  /** Where the Run's tokens are counted. Absent is app or channel chat; the Responses API says `responses_api` and its key. */
   usageSurface?: UsageSurface;
   apiKeyId?: string;
 };

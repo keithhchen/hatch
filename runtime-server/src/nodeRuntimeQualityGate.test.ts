@@ -54,7 +54,7 @@ test("NodeRuntime reports each model call of an execution to the usage sink", as
   const ledger = new InMemoryUsageLedger();
   const events: UsageEvent[] = [];
   const recorder = { record: async (event: UsageEvent) => { events.push(event); await ledger.record(event); } };
-  const sink = usageSink(recorder, { accountId: "creator-one", surface: "studio", productId: "product-one" }, { error: () => undefined });
+  const sink = usageSink(recorder, { accountId: "creator-one", surface: "studio_web", productId: "product-one" }, { error: () => undefined });
   const scope: NodeScope = { productId: "product-one", nodeName: "corpus", executionId: "corpus-usage" };
 
   await runtime.run(corpusNode, scope, input, undefined, sink);
@@ -62,11 +62,11 @@ test("NodeRuntime reports each model call of an execution to the usage sink", as
   // Two actor calls and one critic call, each its own event.
   assert.equal(events.length, 3);
   assert.equal(new Set(events.map((event) => event.id)).size, 3);
-  assert.ok(events.every((event) => event.id.startsWith("corpus:corpus-usage:") && event.accountId === "creator-one" && event.productId === "product-one" && event.surface === "studio" && event.model === "scripted-model"));
-  assert.deepEqual((await ledger.monthToDate("creator-one")).studio, { input: 90, cachedInput: 0, output: 15, reasoning: 0 });
+  assert.ok(events.every((event) => event.id.startsWith("corpus:corpus-usage:") && event.accountId === "creator-one" && event.productId === "product-one" && event.surface === "studio_web" && event.model === "scripted-model"));
+  assert.deepEqual((await ledger.monthToDate("creator-one")).studio_web, { input: 90, cachedInput: 0, output: 15, reasoning: 0 });
   // Writing a call again, as a retried write would, counts nothing more.
   await recorder.record(events[0]!);
-  assert.deepEqual((await ledger.monthToDate("creator-one")).studio, { input: 90, cachedInput: 0, output: 15, reasoning: 0 });
+  assert.deepEqual((await ledger.monthToDate("creator-one")).studio_web, { input: 90, cachedInput: 0, output: 15, reasoning: 0 });
 });
 
 const input: CorpusInput = {

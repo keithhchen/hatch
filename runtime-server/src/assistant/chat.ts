@@ -83,7 +83,7 @@ class AssistantBinder implements PrincipalBinder<AssistantScope> {
 }
 
 const scopeOfConversation = (conversation: Pick<ConversationRecord, "ownerAccountId">): AssistantScope => ({
-  creatorId: conversation.ownerAccountId, userId: conversation.ownerAccountId, productId: ASSISTANT_AGENT_ID, corpusDigest: ASSISTANT_AGENT_ID, accountId: conversation.ownerAccountId, usageSurface: "studio"
+  creatorId: conversation.ownerAccountId, userId: conversation.ownerAccountId, productId: ASSISTANT_AGENT_ID, corpusDigest: ASSISTANT_AGENT_ID, accountId: conversation.ownerAccountId, usageSurface: "studio_web"
 });
 
 /**

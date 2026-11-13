@@ -247,7 +247,7 @@ test("send: a Run starts only while the account is within its cap; one in flight
   const h = await harness({ cap, delayMs: 60 });
   try {
     await h.runtime.send(h.session.id, h.say("one"));
-    month.studio.input = 100; // the month is spent while the Run is in flight
+    month.studio_web.input = 100; // the month is spent while the Run is in flight
     assert.equal((await h.runtime.send(h.session.id, h.say("steer"))).queued, true, "steering into a Run is allowed");
     await h.idle();
     assert.equal((await h.store.get(h.session.id)).status, "completed", "the Run in flight finished");
@@ -265,14 +265,14 @@ test("send: a message that lands as a Run ends, over the cap, settles the sessio
   try {
     await h.runtime.send(h.session.id, h.say("one"));
     await h.idle();
-    month.studio.input = 100;
+    month.studio_web.input = 100;
     await h.store.enqueue(h.session.id, h.say("late")); // landed as the Run ended
     await (h.runtime as unknown as { resume(id: string): Promise<void> }).resume(h.session.id);
     const session = await h.store.get(h.session.id);
     assert.deepEqual([session.status, session.errorCode, h.runtime.isRunning(h.session.id)], ["failed", "usage_cap_exceeded", false]);
     assert.equal((session.queue ?? []).length, 1, "the message is not lost");
     assert.equal(h.events.at(-1)?.type, "state");
-    month.studio.input = 0; // the cap was raised or the month reset
+    month.studio_web.input = 0; // the cap was raised or the month reset
     await h.runtime.send(h.session.id, h.say("again"));
     await h.idle();
     const done = await h.store.get(h.session.id);

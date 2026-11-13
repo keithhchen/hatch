@@ -3,7 +3,7 @@ import type { CreatorFactoryRepository, FactoryRunRecord } from "./repository.js
 import type { FactoryExecutionControl, FactoryRunState } from "./types.js";
 import { requireQuestionBatchId } from "./questionBatch.js";
 import { log } from "../observability/log.js";
-import { usageSink, type UsageRecorder } from "../usage/usage.js";
+import { studioAttribution, usageSink, type UsageRecorder } from "../usage/usage.js";
 
 export type CreatorFactoryWorkerOptions = {
   workerId: string;
@@ -80,7 +80,7 @@ export class CreatorFactoryWorker {
 
     const control: FactoryExecutionControl = {
       signal: execution.signal,
-      ...(this.options.usage ? { usage: usageSink(this.options.usage, { accountId: claimed.creatorId, surface: "studio", ...(claimed.input.productId ? { productId: claimed.input.productId } : {}), runId: claimed.id }, log) } : {}),
+      ...(this.options.usage ? { usage: usageSink(this.options.usage, studioAttribution(claimed.creatorId, claimed.usageApiKeyId, { ...(claimed.input.productId ? { productId: claimed.input.productId } : {}), runId: claimed.id }), log) } : {}),
       beforeCommit: async () => {
         try {
           await this.repository.assertLease({

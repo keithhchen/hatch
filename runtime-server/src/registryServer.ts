@@ -138,7 +138,7 @@ import { accountAvatarApplicationServiceFromEnvironment, MAX_ACCOUNT_AVATAR_BYTE
 import {
   httpRequestLimitOptionsFromEnvironment,
 } from "./registryRequestLimits.js";
-import { bindContext } from "./observability/context.js";
+import { bindContext, currentContext } from "./observability/context.js";
 import { startObservability } from "./observability/start.js";
 import { observed } from "./observability/http.js";
 import { log } from "./observability/log.js";
@@ -1129,13 +1129,13 @@ async function route(
     };
 
     if (request.method === "GET" && executionId && !isAnswers) {
-      const execution = await context.factoryNodeService.getExecution(productId, node, executionId, account.id);
+      const execution = await context.factoryNodeService.getExecution(productId, node, executionId, account.id, currentContext()?.api_key_id);
       if (!execution) { sendJson(response, 404, { error: { code: "execution_not_found", message: "Node execution was not found." } }); return; }
       sendJson(response, 200, publicFactoryNodeExecution(execution));
       return;
     }
     if (request.method === "GET" && !executionId && !isAnswers) {
-      const execution = await context.factoryNodeService.getLatestExecution(productId, node, account.id);
+      const execution = await context.factoryNodeService.getLatestExecution(productId, node, account.id, currentContext()?.api_key_id);
       sendJson(response, 200, execution
         ? publicFactoryNodeExecution(execution)
         : { node, product_id: productId, status: "not_started" });
@@ -1173,6 +1173,7 @@ async function route(
     const result = node === "about-you"
       ? await context.factoryNodeService.startAboutYou({
         creatorId: account.id,
+        ...apiKeyOfRequest(),
         product: nodeProduct,
         ...(fileIds === undefined ? {} : { fileIds }),
         ...(filePaths === undefined ? {} : { filePaths }),
@@ -1180,6 +1181,7 @@ async function route(
       })
       : await context.factoryNodeService.startCorpus({
         creatorId: account.id,
+        ...apiKeyOfRequest(),
         product: nodeProduct,
         aboutYouRef: requiredNodeBodyText(body.about_you_ref ?? body.about_you, "about_you_ref"),
         ...(fileIds === undefined ? {} : { fileIds }),
@@ -1206,7 +1208,8 @@ async function route(
       query: Object.fromEntries(url.searchParams.entries()),
       headers: { "idempotency-key": request.headers["idempotency-key"]?.toString() },
       ...(request.method === "GET" ? {} : { body: await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES) }),
-      creator: account
+      creator: account,
+      ...apiKeyOfRequest()
     }, context.factoryService);
     if (result) { sendJson(response, result.status, result.body); return; }
   }
@@ -1608,7 +1611,7 @@ async function authenticate(
   context: RegistryContext,
 ): Promise<Account | undefined> {
   const session = await context.accounts.resolveSession(bearer(request));
-  if (session) { bindContext({ account_id: session.account.id }); return session.account; }
+  if (session) { bindContext({ account_id: session.account.id, ...(session.session.client_type === "api_key" ? { api_key_id: session.session.id } : {}) }); return session.account; }
   const claims = verifyAuthToken(bearer(request), context.authSecret);
   if (!claims) return undefined;
   bindContext({ account_id: claims.sub });
@@ -2328,4 +2331,10 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
     }
   }
   sendJson(response, 404, { error: { code: "not_found", message: "Route not found." } });
+}
+
+/** The API key that made the request in flight, if one did: it makes the Expert's Studio work API usage rather than web usage. */
+function apiKeyOfRequest(): { apiKeyId?: string } {
+  const id = currentContext()?.api_key_id;
+  return id ? { apiKeyId: id } : {};
 }

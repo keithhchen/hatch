@@ -1,8 +1,8 @@
 // Usage: a port over the dashboard `request` helper plus the pure view model the Usage section renders.
 // Every number comes from Registry's ledger; nothing here is estimated or filled in.
 const ROOT = "/v1/creator/usage";
-export const USAGE_SURFACES = ["studio", "chat_api", "chat_web"];
-export const SURFACE_COLOR = { studio: "var(--web-yolk)", chat_api: "var(--web-blue)", chat_web: "var(--web-pass)" };
+export const USAGE_SURFACES = ["studio_web", "studio_api", "chat_web", "responses_api"];
+export const SURFACE_COLOR = { studio_web: "var(--web-yolk)", studio_api: "var(--web-lilac)", chat_web: "var(--web-pass)", responses_api: "var(--web-blue)" };
 const INTL = { en: "en", zh: "zh-CN", ja: "ja-JP" };
 
 export class UsageClient {

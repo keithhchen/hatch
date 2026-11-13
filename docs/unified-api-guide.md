@@ -264,7 +264,7 @@ An Assistant reply may carry `steps`: `{ "parts": [...], "tool_calls": [{ "tool_
 
 ### 15. Chat with a published product
 
-The Chat API is described in `docs/spec-surfaces-v1.md`. Same API key or browser session.
+The Chat API is described in `docs/spec-surfaces-v1.md`. Same API key or browser session. Usage is counted per surface: Studio web, Studio API (Studio calls made with an API key), Chat web and Responses API.
 
 ```sh
 curl -s -X POST https://gethatchapp.com/v1/conversations -H "Authorization: Bearer $HATCH_API_KEY" -H "Content-Type: application/json" -d '{"product_id":"'"$PRODUCT_ID"'"}'

@@ -67,6 +67,8 @@ export type FactoryRunRecord = {
   leaseExpiresAt?: string;
   attempts: number;
   lastError?: string;
+  /** The API key whose request queued the work in progress; absent when a web session did. Its model calls are Studio API usage. */
+  usageApiKeyId?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -77,6 +79,7 @@ export type CreateFactoryRunInput = {
   idempotencyKey: string;
   input: FactoryStartInput;
   nextAttemptAt?: string;
+  apiKeyId?: string;
 };
 
 export type ClaimFactoryRunInput = {
@@ -105,11 +108,13 @@ export type SubmitFactoryAnswersInput = {
   answers: PendingCreatorAnswers;
   expectedVersion?: number;
   now?: string;
+  apiKeyId?: string;
 };
 
 export type RetryFactoryRunInput = {
   creatorId: string;
   runId: string;
+  apiKeyId?: string;
   /** The durable stage the worker will resume after this retry. */
   stage?: Exclude<FactoryStage, "ready" | "needs_attention" | "awaiting_creator_answers">;
   expectedVersion?: number;
@@ -327,6 +332,7 @@ export class InMemoryCreatorFactoryRepository implements CreatorFactoryRepositor
         version: 1,
         nextAttemptAt: normalized.nextAttemptAt ?? createdAt,
         attempts: 0,
+        ...(normalized.apiKeyId ? { usageApiKeyId: normalized.apiKeyId } : {}),
         createdAt,
         updatedAt: createdAt
       };
@@ -428,6 +434,7 @@ export class InMemoryCreatorFactoryRepository implements CreatorFactoryRepositor
       run.status = "queued";
       run.nextAttemptAt = iso(now);
       run.lastError = undefined;
+      run.usageApiKeyId = input.apiKeyId;
       run.version += 1;
       run.updatedAt = iso(now);
       return cloneRun(run);
@@ -473,6 +480,7 @@ export class InMemoryCreatorFactoryRepository implements CreatorFactoryRepositor
       run.factoryStage = input.stage;
       run.nextAttemptAt = iso(now);
       run.lastError = undefined;
+      run.usageApiKeyId = input.apiKeyId;
       run.version += 1;
       run.updatedAt = iso(now);
       return cloneRun(run);
@@ -646,6 +654,8 @@ ALTER TABLE hatch_creator_factory_runs
   ADD COLUMN IF NOT EXISTS answer_submissions JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE hatch_creator_factory_runs
   ADD COLUMN IF NOT EXISTS answer_drafts JSONB;
+ALTER TABLE hatch_creator_factory_runs
+  ADD COLUMN IF NOT EXISTS usage_api_key_id TEXT;
 ALTER TABLE hatch_creator_products
   ADD COLUMN IF NOT EXISTS latest_revision_id TEXT;
 ALTER TABLE hatch_creator_products
@@ -863,8 +873,8 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
     try {
       const result = await this.pool.query<FactoryRunRow>(`
         INSERT INTO hatch_creator_factory_runs (
-          id, creator_id, idempotency_key, input_digest, input_jsonb, status, version, next_attempt_at, attempts
-        ) VALUES ($1, $2, $3, $4, $5::jsonb, 'queued', 1, COALESCE($6::timestamptz, clock_timestamp()), 0)
+          id, creator_id, idempotency_key, input_digest, input_jsonb, status, version, next_attempt_at, attempts, usage_api_key_id
+        ) VALUES ($1, $2, $3, $4, $5::jsonb, 'queued', 1, COALESCE($6::timestamptz, clock_timestamp()), 0, $7)
         RETURNING *
       `, [
         normalized.id,
@@ -872,7 +882,8 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
         normalized.idempotencyKey,
         inputDigest,
         JSON.stringify(normalized.input),
-        normalized.nextAttemptAt ?? null
+        normalized.nextAttemptAt ?? null,
+        normalized.apiKeyId ?? null
       ]);
       return { run: runFromRow(requireRow(result.rows[0], "Factory run insert returned no row")), created: true };
     } catch (error) {
@@ -1021,6 +1032,7 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
             )
           END,
           last_error = NULL,
+          usage_api_key_id = $10::text,
           version = version + 1,
           updated_at = timing.now_at
       FROM timing
@@ -1046,7 +1058,8 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
       submissionId,
       answerDigest,
       answers.submittedAt ?? iso(now),
-      answers.questionBatchId
+      answers.questionBatchId,
+      input.apiKeyId ?? null
     ]);
     if (result.rows[0]) return runFromRow(result.rows[0]);
     const currentRow = await this.findRowForCreator(input.creatorId, input.runId);
@@ -1119,6 +1132,7 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
           factory_stage = $5,
           next_attempt_at = timing.now_at,
           last_error = NULL,
+          usage_api_key_id = $6::text,
           version = version + 1,
           updated_at = timing.now_at
       FROM timing
@@ -1132,7 +1146,8 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
       input.creatorId,
       input.now ? iso(input.now) : null,
       input.expectedVersion ?? null,
-      input.stage ?? null
+      input.stage ?? null,
+      input.apiKeyId ?? null
     ]);
     if (result.rows[0]) return runFromRow(result.rows[0]);
     const current = await this.getForCreator(input.creatorId, input.runId);
@@ -1263,6 +1278,7 @@ type FactoryRunRow = QueryResultRow & {
   lease_expires_at: string | Date | null;
   attempts: string | number;
   last_error: string | null;
+  usage_api_key_id?: string | null;
   created_at: string | Date;
   updated_at: string | Date;
 };
@@ -1330,6 +1346,7 @@ function runFromRow(row: FactoryRunRow): FactoryRunRecord {
     ...(row.lease_expires_at ? { leaseExpiresAt: iso(row.lease_expires_at) } : {}),
     attempts: Number(row.attempts),
     ...(row.last_error ? { lastError: row.last_error } : {}),
+    ...(row.usage_api_key_id ? { usageApiKeyId: row.usage_api_key_id } : {}),
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at)
   };
