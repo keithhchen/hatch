@@ -4,6 +4,7 @@ import type { Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import type { LlmProfile } from "../llmProfiles.js";
 import { traceProviderStream } from "../langfuse.js";
 import { finishAwareFetch } from "./finishAwareFetch.js";
+import { withFinishGuard } from "./finish.js";
 import {
   resolveOptions,
   type AdapterOptions,
@@ -36,7 +37,7 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
       provider: endpoint.provider,
       baseUrl: endpoint.baseUrl,
       reasoning: profile.reasoning,
-      input: ["text", "image"],
+      input: profile.input ?? ["text", "image"],
       cost: { ...(profile.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }) },
       contextWindow: profile.contextWindow,
       maxTokens: profile.maxTokens,
@@ -58,6 +59,9 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
 
   /** Whether the profile's thinking level is sent with every request. */
   protected sendsReasoning(_profile: LlmProfile): boolean { return false; }
+
+  /** Whether tool-call arguments that are not complete JSON end the reply as cut. Factory's submission gate reads the raw arguments itself. */
+  protected checksToolArguments(): boolean { return true; }
 
   streamFn(profile: LlmProfile, config: ResolvedModelOptions): StreamFn {
     const api = openAICompletionsApi();
@@ -86,7 +90,7 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
           : {}),
         timeoutMs: options?.timeoutMs ?? config.timeoutMs
       };
-      return traceProviderStream(() => api.streamSimple(model, context, streamOptions), model, context, streamOptions);
+      return withFinishGuard((m, c, o) => traceProviderStream(() => api.streamSimple(m, c, o), m, c, o), { toolArguments: this.checksToolArguments() })(model, context, streamOptions);
     };
   }
 }

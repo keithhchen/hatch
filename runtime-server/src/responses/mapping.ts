@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { BriefSnapshot } from "../brief.js";
 import type { ConversationRecord, ConversationRunRecord } from "../conversationRepository.js";
 import type { VisibleConversationMessage, VisibleConversationToolCall } from "../store.js";
+import type { OutputFinishReason } from "../protocol.js";
 import { modelIdOf } from "./models.js";
 import { taskBriefObject } from "./taskBrief.js";
 
@@ -64,7 +65,7 @@ export type RunView = {
   run: ConversationRunRecord;
   /** The reply the model produced; empty while there is none. */
   text: string;
-  finishReason?: "stop" | "content_filter";
+  finishReason?: OutputFinishReason;
   toolCalls: Array<Pick<VisibleConversationToolCall, "tool_call_id" | "name" | "status" | "arguments" | "result" | "error">>;
   approvals: Array<{ toolCallId: string; name: string; arguments: Record<string, unknown> }>;
   usage: Json | null;
@@ -82,7 +83,9 @@ export function statusOf(view: Pick<RunView, "run" | "finishReason" | "approvals
   switch (run.status) {
     case "queued": return { status: "queued", error: null, incomplete: null };
     case "completed":
-      return view.finishReason === "content_filter" ? { status: "incomplete", error: null, incomplete: { reason: "content_filter" } } : { status: "completed", error: null, incomplete: null };
+      return view.finishReason === "content_filter" ? { status: "incomplete", error: null, incomplete: { reason: "content_filter" } }
+        : view.finishReason === "length" ? { status: "incomplete", error: null, incomplete: { reason: "max_output_tokens" } }
+        : { status: "completed", error: null, incomplete: null };
     case "failed": return { status: "failed", error: failure ?? { code: "run_failed", message: "The run failed." }, incomplete: null };
     case "interrupted": return { status: "failed", error: { code: "run_interrupted", message: failure?.message ?? "The run was interrupted by a restart. Send the request again." }, incomplete: null };
     case "cancelled": return { status: "cancelled", error: null, incomplete: null };
@@ -96,7 +99,7 @@ export function outputOf(view: RunView): Json[] {
   const { run } = view;
   const settled = isTerminal(run.status);
   const text = view.text || (run.status === "failed" || run.status === "cancelled" || run.status === "interrupted" ? run.partialOutput ?? "" : "");
-  const messageStatus = !settled ? "in_progress" : run.status === "completed" && view.finishReason !== "content_filter" ? "completed" : "incomplete";
+  const messageStatus = !settled ? "in_progress" : run.status === "completed" && (view.finishReason ?? "stop") === "stop" ? "completed" : "incomplete";
   return [
     ...(text || (settled && run.status === "completed" && view.finishReason === "content_filter") ? [messageItem(run.id, text, messageStatus)] : []),
     ...(view.includeToolCalls ? view.toolCalls.map(toolCallItem) : []),

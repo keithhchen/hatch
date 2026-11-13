@@ -401,7 +401,8 @@ export type ConversationMessage = {
   tool_call_id?: string;
 };
 
-export type OutputFinishReason = "stop" | "content_filter";
+/** `content_filter`: the reply was stopped for safety (Hatch's guard or the provider's). `length`: the model hit its output limit. */
+export type OutputFinishReason = "stop" | "content_filter" | "length";
 
 export type RuntimeReady = {
   type: "session.ready";
