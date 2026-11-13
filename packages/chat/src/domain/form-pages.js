@@ -1,5 +1,5 @@
 const HATCH_DOMAIN = "gethatchapp.com";
-const FORM_PATH = /^\/f\/form_\w+$/;
+const FORM_PATH = /^\/form\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const URL_IN_TEXT = /https?:\/\/[^\s)\]>"'<]+/g;
 
 /** "form" for an agent-written form page, "hatch" for any other page of this product, else "other". */

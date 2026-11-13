@@ -17,8 +17,8 @@ test("the interview agent publishes a page, reads it back, and the origin rememb
   let taskId: string | undefined = "task-1";
   const tools = formTools(h.forms, { accountId: ACCOUNT, productId: "p1", sessionId: "s1", taskId: async () => taskId });
   try {
-    const published = await run(tools, "publish_form", { title: "审阅", html: "<html><head></head><body>x</body></html>", schema: schema("C01") });
-    assert.match(published.url, /^https:\/\/hatch\.test\/f\/form_[a-f0-9]{20}\?t=/);
+    const published = await run(tools, "publish_form", { title: "审阅", html: "<html><head></head><body><script>hatch.save; hatch.submit</script></body></html>", schema: schema("C01") });
+    assert.match(published.url, /^https:\/\/hatch\.test\/form\/[0-9a-f-]{36}\?t=/);
     await h.forms.save(published.form_id, h.tokenOf(published.url), "C01", "好", 0);
     assert.deepEqual(await run(tools, "read_form", { form_id: published.form_id }), { status: "open", answers: { C01: "好" } });
     await h.forms.submit(published.form_id, h.tokenOf(published.url));

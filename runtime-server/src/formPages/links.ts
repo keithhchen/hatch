@@ -23,6 +23,6 @@ export class FormLinks {
   }
 
   url(formId: string, accountId: string): string {
-    return `${this.origin}/f/${formId}?t=${this.token(formId, accountId)}`;
+    return `${this.origin}/form/${formId}?t=${this.token(formId, accountId)}`;
   }
 }

@@ -677,7 +677,7 @@ async function route(
   if (url.pathname === "/v1/transcriptions" && request.method === "POST") { await transcribe(request, response, context); return; }
 
   // A review page is opened and filled in through its signed link, before any sign-in.
-  if (url.pathname.startsWith("/f/") && await handleFormRoute(request, response, url, context.forms)) return;
+  if (url.pathname.startsWith("/form/") && await handleFormRoute(request, response, url, context.forms)) return;
 
   if (url.pathname.startsWith("/v1/channels/") || url.pathname.startsWith("/v1/creator/assistant") || url.pathname.startsWith("/v1/creator/connections")) {
     await assistantRoute(request, response, url, context);

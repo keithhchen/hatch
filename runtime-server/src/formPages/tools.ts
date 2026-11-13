@@ -21,7 +21,7 @@ export async function provideFormReference(store: WorkbenchStore, id: string): P
 const question = Type.Object({
   id: Type.String({ description: "Stable id such as C01. Never renumber when editing; answers are matched by it." }),
   group: Type.Optional(Type.String()),
-  type: Type.Union([Type.Literal("open"), Type.Literal("choice"), Type.Literal("multi")]),
+  type: Type.Union([Type.Literal("open"), Type.Literal("choice"), Type.Literal("multi")], { description: "open = free text, choice = pick one option, multi = pick several. Nothing else is valid." }),
   title: Type.String(),
   scenario: Type.Optional(Type.String({ description: "Background: the expert's own words quoted from the chat or materials." })),
   prompt: Type.String({ description: "One clear question." }),

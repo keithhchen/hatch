@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { ArtifactObjectStore } from "../creatorLearning/objectStore.js";
 import { renderFormPage } from "./inject.js";
 import type { FormLinks } from "./links.js";
@@ -27,9 +27,12 @@ export class FormPages {
     const title = input.title.trim();
     if (!title) throw new FormInvalid("title is required");
     if (!input.html.trim() || Buffer.byteLength(input.html) > HTML_MAX_BYTES) throw new FormInvalid("html must be a full page of at most 2MB");
+    // A page whose buttons call nothing would look finished and do nothing: refuse it, and say how to fix it.
+    const unwired = ["hatch.save", "hatch.submit"].filter(call => !input.html.includes(call));
+    if (unwired.length) throw new FormInvalid(`The page never calls ${unwired.map(call => `${call}()`).join(" or ")}, so its fields and buttons would do nothing. Read input/reference/review-page.html and keep its script: it renders the questions from window.hatch.schema, autosaves, and submits.`);
     const { accountId, ...origin } = owner;
     const existing = input.formId ? await this.owned(accountId, input.formId) : undefined;
-    const id = existing?.id ?? `form_${randomBytes(10).toString("hex")}`;
+    const id = existing?.id ?? randomUUID();
     const version = (existing?.version ?? 0) + 1;
     const htmlKey = `${this.deps.prefix ?? "form-pages"}/${id}/${version}.html`;
     await this.deps.store.put(htmlKey, input.html, { contentType: "text/html; charset=utf-8", immutable: true });

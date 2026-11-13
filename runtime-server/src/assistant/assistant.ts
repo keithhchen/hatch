@@ -357,7 +357,7 @@ export class AssistantService implements StudioOperations {
     if (type !== "voice.run_completed") return this.block(task, voice.error ?? "访谈大纲没写成", voice.messages.length);
     await this.deps.tasks.update(task.id, { status: "done", leaseExpiresAt: undefined });
     // A review page the worker published for this task: the Assistant sends its link.
-    const page = [...JSON.stringify(voice.messages).matchAll(/https?:\/\/[^"\\\s]*\/f\/form_[a-f0-9]{20}\?t=[\w-]+/g)].at(-1)?.[0];
+    const page = [...JSON.stringify(voice.messages).matchAll(/https?:\/\/[^"\\\s]*\/form\/[0-9a-f-]{36}\?t=[\w-]+/g)].at(-1)?.[0];
     await this.news(task.accountId, task.id, `访谈大纲写好了。${page ? `审阅页也写好了，把这个链接发给专家：${page}。他提交后会通知你，到时用 read_form 读回答，勾掉聊完的项。` : "接下来你自己在对话里一个一个问专家，用 tick_outline 勾掉聊完的项。"}${outlineText(voice.todos)}`, `finished:${voice.messages.length}`);
   }
 

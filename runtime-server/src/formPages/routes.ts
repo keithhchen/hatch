@@ -2,7 +2,7 @@ import type http from "node:http";
 import type { FormPages } from "./service.js";
 import { FormConflict } from "./schema.js";
 
-const ROUTE = /^\/f\/(form_[a-f0-9]{20})(?:\/(submit)|\/answers\/([^/]+))?$/;
+const ROUTE = /^\/form\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(submit)|\/answers\/([^/]+))?$/;
 const BODY_MAX_BYTES = 64 * 1024;
 
 const json = (response: http.ServerResponse, status: number, body: unknown) => {
@@ -24,7 +24,7 @@ async function readBody(request: http.IncomingMessage): Promise<Record<string, u
 }
 
 /**
- * The Expert's side of a form page, under /f/: open it, save or clear one answer, submit. The signed link (`t`) is the only
+ * The Expert's side of a form page, under /form/: open it, save or clear one answer, submit. The signed link (`t`) is the only
  * credential, so these run before sign-in. Returns false for a path that is not a form page.
  */
 export async function handleFormRoute(request: http.IncomingMessage, response: http.ServerResponse, url: URL, forms: FormPages | undefined): Promise<boolean> {

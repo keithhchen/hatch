@@ -12,7 +12,7 @@ import { MemoryFormRepository } from "./repository.js";
 import { handleFormRoute } from "./routes.js";
 import { FormClosed, FormConflict, FormInvalid, FormNotFound, parseFormSchema } from "./schema.js";
 
-const PAGE = "<html><head><title>t</title></head><body><script>window.ran = typeof window.hatch</script></body></html>";
+const PAGE = "<html><head><title>t</title></head><body><script>window.ran = typeof window.hatch; window.wired = [hatch.save, hatch.submit]</script></body></html>";
 
 formConformance("Memory forms", async () => ({ repository: new MemoryFormRepository(), close: async () => undefined }));
 
@@ -34,7 +34,7 @@ test("a link is signed for its page and owner, and never expires", () => {
   assert.equal(links.verify("form_a", ACCOUNT, `${token}x`), false);
   assert.equal(links.verify("form_a", ACCOUNT, null), false);
   assert.equal(new FormLinks("secret-b", "https://hatch.test").verify("form_a", ACCOUNT, token), false, "another secret");
-  assert.equal(links.url("form_a", ACCOUNT), `https://hatch.test/f/form_a?t=${token}`);
+  assert.equal(links.url("form_a", ACCOUNT), `https://hatch.test/form/form_a?t=${token}`);
   assert.throws(() => new FormLinks(" ", "https://hatch.test"));
 });
 
@@ -53,7 +53,7 @@ test("publish, fill in, edit and submit: answers are kept by question id and a s
   const h = await formsHarness();
   try {
     const { form_id, url } = await h.forms.publish({ accountId: ACCOUNT, ...ORIGIN }, { title: "审阅", html: PAGE, schema: schema("C01", "C02") });
-    assert.match(form_id, /^form_[a-f0-9]{20}$/);
+    assert.match(form_id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
     const token = h.tokenOf(url);
     assert.equal((await h.forms.save(form_id, token, "C01", "我的回答", 0)).version, 1);
     await h.forms.save(form_id, token, "C02", "另一个", 0);
@@ -128,22 +128,22 @@ test("the HTTP route: open the page, save, conflict, clear, submit, closed", asy
   try {
     const { form_id, url } = await h.forms.publish({ accountId: ACCOUNT, ...ORIGIN }, { title: "t", html: PAGE, schema: schema("C01") });
     const t = h.tokenOf(url);
-    const page = await fetch(`${base}/f/${form_id}?t=${t}`);
+    const page = await fetch(`${base}/form/${form_id}?t=${t}`);
     assert.equal(page.status, 200);
     assert.match(page.headers.get("content-type")!, /text\/html; charset=utf-8/);
     assert.equal(page.headers.get("referrer-policy"), "no-referrer");
     assert.match(await page.text(), /window\.hatch/);
-    assert.equal((await fetch(`${base}/f/${form_id}?t=wrong`)).status, 404);
-    assert.equal((await fetch(`${base}/f/${form_id}`)).status, 404);
-    const post = (id: string, body: unknown) => fetch(`${base}/f/${form_id}/answers/${id}?t=${t}`, { method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" } });
+    assert.equal((await fetch(`${base}/form/${form_id}?t=wrong`)).status, 404);
+    assert.equal((await fetch(`${base}/form/${form_id}`)).status, 404);
+    const post = (id: string, body: unknown) => fetch(`${base}/form/${form_id}/answers/${id}?t=${t}`, { method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" } });
     assert.deepEqual(await (await post("C01", { value: "a", base: 0 })).json(), { version: 1 });
     const stale = await post("C01", { value: "b", base: 0 });
     assert.equal(stale.status, 409);
     assert.equal((await stale.json() as any).error.code, "conflict");
     assert.equal((await post("C01", { value: 3, base: 1 })).status, 400);
     assert.equal((await post("C01", { base: 1 })).status, 400);
-    assert.deepEqual(await (await fetch(`${base}/f/${form_id}/answers/C01?t=${t}&base=1`, { method: "DELETE" })).json(), { version: 2 });
-    assert.equal((await fetch(`${base}/f/${form_id}/submit?t=${t}`, { method: "POST" })).status, 200);
+    assert.deepEqual(await (await fetch(`${base}/form/${form_id}/answers/C01?t=${t}&base=1`, { method: "DELETE" })).json(), { version: 2 });
+    assert.equal((await fetch(`${base}/form/${form_id}/submit?t=${t}`, { method: "POST" })).status, 200);
     const late = await post("C01", { value: "c", base: 2 });
     assert.equal(late.status, 409);
     assert.match((await late.json() as any).error.message, /已提交/);
@@ -156,7 +156,7 @@ test("without a configured service the route says so", async () => {
   const server = http.createServer((request, response) => { handleFormRoute(request, response, new URL(request.url!, "http://x"), undefined).catch(() => undefined); });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   try {
-    const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/f/form_${"a".repeat(20)}?t=x`);
+    const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/form/00000000-0000-4000-8000-000000000000?t=x`);
     assert.equal(response.status, 503);
   } finally { server.close(); }
 });
@@ -202,4 +202,12 @@ test("the injected window.hatch saves, clears and submits through the route, and
     await assert.rejects(() => hatch.save("C01", "晚了"), /已提交/);
     assert.equal(h.submitted.length, 1);
   } finally { server.close(); await h.close(); }
+});
+
+test("a page that never calls hatch.save or hatch.submit is refused with how to fix it", async () => {
+  const h = await formsHarness();
+  try {
+    await assert.rejects(() => h.forms.publish({ accountId: ACCOUNT, ...ORIGIN }, { title: "t", html: "<html><body><button class=save>保存</button></body></html>", schema: schema("C01") }), /hatch\.save\(\) or hatch\.submit\(\).*review-page\.html/);
+    await h.forms.publish({ accountId: ACCOUNT, ...ORIGIN }, { title: "t", html: PAGE, schema: schema("C01") });
+  } finally { await h.close(); }
 });

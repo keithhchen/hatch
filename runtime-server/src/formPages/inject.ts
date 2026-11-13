@@ -20,7 +20,7 @@ export const formBaseCss = (): string => baseCss ??= readFileSync(fileURLToPath(
 /** The `window.hatch` of one page. It carries the page's link token, so the agent's own code never handles one. */
 const CLIENT = `(function () {
   var d = window.__HATCH_FORM__; delete window.__HATCH_FORM__;
-  var base = "/f/" + d.formId, token = "t=" + encodeURIComponent(d.token);
+  var base = "/form/" + d.formId, token = "t=" + encodeURIComponent(d.token);
   var hatch = window.hatch = { schema: d.schema, answers: d.answers, status: d.status, save: save, clear: clear, submit: submit };
   function call(method, path, body) {
     return fetch(base + path + (path.indexOf("?") < 0 ? "?" : "&") + token, { method: method, headers: body ? { "content-type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined })
