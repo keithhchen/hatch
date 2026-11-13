@@ -648,6 +648,16 @@ CREATE TABLE IF NOT EXISTS hatch_creator_factory_runs (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (creator_id, idempotency_key)
 );
+-- Production once had these columns as uuid (the retired UUID cutover); ids here are text (contact principals are not uuids). One-time, idempotent, under the schema lock.
+DO $$
+DECLARE col text;
+BEGIN
+  FOREACH col IN ARRAY ARRAY['creator_id'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'hatch_creator_factory_runs'::regclass AND attname = col AND atttypid = 'uuid'::regtype) THEN
+      EXECUTE format('ALTER TABLE hatch_creator_factory_runs ALTER COLUMN %I TYPE text USING %I::text', col, col);
+    END IF;
+  END LOOP;
+END $$;
 ALTER TABLE hatch_creator_factory_runs
   ADD COLUMN IF NOT EXISTS input_digest TEXT;
 ALTER TABLE hatch_creator_factory_runs

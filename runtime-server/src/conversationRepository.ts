@@ -1160,6 +1160,16 @@ CREATE TABLE IF NOT EXISTS hatch_conversations (
   UNIQUE (owner_account_id, creator_id, agent_id, client_request_id)
 );
 ALTER TABLE hatch_conversations ADD COLUMN IF NOT EXISTS brief_snapshot JSONB;
+-- Production once had these columns as uuid (the retired UUID cutover); ids here are text (contact principals are not uuids). One-time, idempotent, under the schema lock.
+DO $$
+DECLARE col text;
+BEGIN
+  FOREACH col IN ARRAY ARRAY['owner_account_id','creator_id','agent_id','product_id','product_id_at_creation'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'hatch_conversations'::regclass AND attname = col AND atttypid = 'uuid'::regtype) THEN
+      EXECUTE format('ALTER TABLE hatch_conversations ALTER COLUMN %I TYPE text USING %I::text', col, col);
+    END IF;
+  END LOOP;
+END $$;
 CREATE INDEX IF NOT EXISTS hatch_conversations_owner_public_idx
   ON hatch_conversations (owner_account_id, public_id);
 CREATE INDEX IF NOT EXISTS hatch_conversations_library_created_idx
@@ -1176,7 +1186,7 @@ CREATE TABLE IF NOT EXISTS hatch_contact_threads (
   PRIMARY KEY (connection_id, thread_id, principal_id)
 );
 -- One-time, idempotent backfill (delete once every environment has run it): conversations made under the old deterministic ids carry
--- their thread in client_request_id (owner_account_id is cast: production's public.hatch_conversations has it as uuid), \`thread:<connection>:<thread>:<contact>\` for a contact (owner \`contact:<connection>:<contact>\`) and
+-- their thread in client_request_id, \`thread:<connection>:<thread>:<contact>\` for a contact (owner \`contact:<connection>:<contact>\`) and
 -- \`thread:<connection>:<thread>\` for a self Connection (owner is the account id). Connection ids hold no colon; threads and contacts may.
 INSERT INTO hatch_contact_threads (connection_id, thread_id, principal_id, conversation_id)
 SELECT DISTINCT ON (connection_id, thread_id, principal_id) connection_id, thread_id, principal_id, id
@@ -1187,16 +1197,16 @@ FROM (
     SELECT id, created_at, split_part(owner_account_id, ':', 2) AS conn,
            substr(owner_account_id, 8 + length(split_part(owner_account_id, ':', 2)) + 2) AS contact,
            substr(client_request_id, 7 + length(split_part(owner_account_id, ':', 2)) + 2) AS rest
-    FROM (SELECT id, created_at, owner_account_id::text AS owner_account_id, client_request_id FROM hatch_conversations) conversations
+    FROM hatch_conversations
     WHERE owner_account_id LIKE 'contact:%'
       AND client_request_id LIKE 'thread:' || split_part(owner_account_id, ':', 2) || ':%'
   ) contacts
   WHERE right(rest, length(contact) + 1) = ':' || contact AND length(rest) > length(contact) + 1
   UNION ALL
-  SELECT id, created_at, split_part(client_request_id, ':', 2), owner_account_id::text,
+  SELECT id, created_at, split_part(client_request_id, ':', 2), owner_account_id,
          substr(client_request_id, 7 + length(split_part(client_request_id, ':', 2)) + 2)
   FROM hatch_conversations
-  WHERE owner_account_id::text NOT LIKE 'contact:%' AND client_request_id LIKE 'thread:%:%'
+  WHERE owner_account_id NOT LIKE 'contact:%' AND client_request_id LIKE 'thread:%:%'
 ) found
 ORDER BY connection_id, thread_id, principal_id, created_at DESC, id
 ON CONFLICT DO NOTHING;

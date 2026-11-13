@@ -24,7 +24,6 @@
 .fv__pos { color: var(--web-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .fv__body { max-height: min(520px, 60vh); overflow: auto; padding: 16px; border: 1px solid var(--web-rule); border-radius: 16px; background: var(--web-paper); }
 .fv__raw { box-sizing: border-box; width: 100%; min-height: 320px; resize: vertical; border: 0; background: transparent; color: var(--web-ink); font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; outline: none; }
-.fv__copy { max-width: 360px; }
 
 .factory-import { width: min(520px, calc(100vw - 24px)); }
 .factory-import .hui-dialog__body { display: grid; gap: 12px; justify-items: start; }

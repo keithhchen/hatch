@@ -286,7 +286,7 @@ test('Factory file previews use a real modal while preserving live file actions'
   assert.doesNotMatch(source, /<Tabs value=\{mode\}/);
   assert.doesNotMatch(source, /label=\{t\("read"\)\}/);
   assert.doesNotMatch(source, /writeRevision/);
-  assert.match(source, /onClick=\{\(\) => onAddToChat\(record\.path\)\}/);
+  assert.doesNotMatch(source, /SendIcon|onAddToChat\(record\.path\)/);
   assert.match(source, /method: "POST", body: \{ path: target, base64: textBase64\(edit\) \}/);
   assert.match(source, /discardEdits/);
   assert.match(source, /download/);

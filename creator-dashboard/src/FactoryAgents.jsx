@@ -30,7 +30,7 @@ import { createTheme, ThemeProvider } from "@mui/material/styles";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button as HatchButton, Dialog, DialogContent, IconButton as HatchIconButton, InlineAlert, SegmentedControl, Textarea, hatchMuiThemeOptions } from "@hatch/ui";
-import { ArrowRight, ArrowUpRight, Play, Sparkles, ChevronLeft as PrevIcon, ChevronRight as NextIcon, Download as DownloadIcon, Plus, Send as SendIcon } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Play, Sparkles, ChevronDown, ChevronLeft as PrevIcon, ChevronRight as NextIcon, Download as DownloadIcon, Plus } from "lucide-react";
 import { ConversationController } from "@hatch/chat";
 import { ChatView, MessageResponse, PagePanel } from "@hatch/chat/react";
 import { dashboardRequest } from "./data.js";
@@ -47,7 +47,7 @@ import { subscribeFactoryEvents } from "./factoryEvents.js";
 import { createFactoryAgentTranslator } from "./factoryAgentsI18n.js";
 import { BUILD_NEEDS, agentStateKey, localizeAgentText, updatedSources } from "./factoryAgentState.js";
 import { creatorFactoryPath, creatorProductPath, factorySectionForAgent } from "./creatorRoutes.js";
-import { ADVANCED_STEP, INSPIRATION_STEP, STUDIO_PATH, studioNextStep, studioPathStates, studioStepForRoute } from "./studioPath.js";
+import { ADVANCED_STEPS, CONTENT_STEP, INSPIRATION_STEP, STUDIO_PATH, studioNextStep, studioPathStates, studioStepForRoute } from "./studioPath.js";
 import "./webChat.css";
 import "./factoryAgents.css";
 
@@ -121,26 +121,35 @@ export function FactoryAgents({ productId, tab = "build", section, agent, naviga
   const deleteManualFile = async record => { const transport = agentSession("research"); if (!transport) return; try { await api(endpoint(root, transport.id, "files"), { method: "DELETE", body: { path: record.path } }); setManualFiles(previous => previous.filter(file => file.path !== record.path)); setUploadItems(previous => previous.filter(item => item.path !== record.path)); } catch (e) { setError(factoryError(e, t, agentName)); } };
   const states = studioPathStates(agents, product, manualFiles);
   const currentStep = studioStepForRoute(stage, selected);
-  const step = tab === "overview" ? null : [...STUDIO_PATH, ADVANCED_STEP, INSPIRATION_STEP].find(item => item.id === currentStep);
+  const step = tab === "overview" ? null : [...STUDIO_PATH, INSPIRATION_STEP, CONTENT_STEP, ...ADVANCED_STEPS].find(item => item.id === currentStep);
   const selectedEntry = selected ? agentEntry(selected) : null; const selectedSession = selected ? agentSession(selected) : null;
   const workbench = Boolean(selected && selected !== "uploads" && selectedSession);
   return <ThemeProvider theme={theme}><div className={`factory-app${workbench ? " factory-app--workbench" : ""}`} aria-label={t("factory")}>
     {tab === "overview" ? null : <nav className="factory-rail" aria-label={t("factoryStepsLabel")}>
-      <FactoryStepper states={states} current={currentStep} aside={INSPIRATION_STEP} onStep={goToStep} t={t} />
-      <button type="button" className={`factory-advanced${currentStep === ADVANCED_STEP.id ? " is-current" : ""}`} aria-current={currentStep === ADVANCED_STEP.id ? "page" : undefined} onClick={() => goToStep(ADVANCED_STEP)}>{t(ADVANCED_STEP.title)}</button>
+      <FactoryStepper states={states} current={currentStep} onStep={goToStep} t={t} />
     </nav>}
     <ErrorNotice error={error} onClose={() => setError("")} />
     {selected === "uploads" && preview && manualFiles.some(file => file.path === preview.path) ? <FileViewer key={preview.path} root={root} running={false} id={preview.id} record={manualFiles.find(file => file.path === preview.path)} siblings={manualFiles} onOpenFile={path => setPreview({ ...preview, path })} onClose={() => setPreview(null)} t={t} perform={async fn => { try { await fn(); refreshConfig(); } catch (e) { setError(factoryError(e, t, agentName)); } }} /> : null}
     {step ? <div className="factory-step">
-      {step.items.length > 1 ? <nav className="factory-tasks" aria-label={t("factoryTasksLabel")}>{step.items.map(([itemSection, page]) => <button key={page} type="button" className={page === selected ? "is-active" : ""} aria-current={page === selected ? "page" : undefined} onClick={() => goToFactory(itemSection, page)}>{page === "uploads" ? t("uploadSources") : agentName(page) || t("loadingAgentState")}{page !== "uploads" && agentEntry(page) ? <span className={`factory-dot is-${agentEntry(page).state}`} aria-hidden="true" /> : null}</button>)}</nav> : null}
       {selected === "uploads" ? <SourceUploadWorkspace manualFiles={manualFiles} uploadItems={uploadItems} importPicker={importPicker} uploadProjectFiles={uploadProjectFiles} saveManualText={saveManualText} locale={locale} onOpenFile={previewFile} deleteManualFile={deleteManualFile} dismissUpload={dismissUpload} onOpenAgent={openAgent} t={t} /> : selectedSession ? <Workspace key={selectedSession.id} root={root} id={selectedSession.id} entry={selectedEntry} agents={agents} config={config} onChanged={() => undefined} onOpenAgent={openAgent} agentName={agentName} locale={locale} t={t} /> : <AgentIntro entry={selectedEntry} agents={agents} onOpenAgent={openAgent} agentName={agentName} locale={locale} t={t} />}
     </div> : <FactoryOverview product={product} states={states} agentEntry={agentEntry} agentName={agentName} goToStep={goToStep} t={t} />}
   </div></ThemeProvider>;
 }
 
-function FactoryStepper({ states, current, aside, onStep, t }) {
+const ADVANCED_OPEN_KEY = "studio-rail-more-open";
+const readAdvancedOpen = () => { try { return localStorage.getItem(ADVANCED_OPEN_KEY) === "1"; } catch { return false; } };
+
+function FactoryStepper({ states, current, onStep, t }) {
   const next = studioNextStep(states);
-  return <ol className="factory-stepper" aria-label={t("factoryStepsLabel")}>{states.map(({ step, state }) => <li key={step.id}><button type="button" className={`is-${state}${current === step.id ? " is-current" : ""}${next?.step.id === step.id ? " is-next" : ""}`} aria-current={current === step.id ? "step" : undefined} onClick={() => onStep(step)}><span className="factory-stepper__n" aria-hidden="true">{state === "done" ? "✓" : ""}</span><span className="factory-stepper__text"><span>{t(step.title)}</span><small>{t(next?.step.id === step.id && state === "todo" ? "stepNow" : STEP_STATE_KEY[state])}</small></span></button></li>)}{aside ? <li key={aside.id} className="factory-stepper__aside"><button type="button" className={current === aside.id ? "is-current" : ""} aria-current={current === aside.id ? "page" : undefined} onClick={() => onStep(aside)}><span className="factory-stepper__n" aria-hidden="true" /><span className="factory-stepper__text"><span>{t(aside.title)}</span></span></button></li> : null}</ol>;
+  const [open, setOpen] = useState(() => readAdvancedOpen() || ADVANCED_STEPS.some(step => step.id === current));
+  const toggle = () => setOpen(value => { try { localStorage.setItem(ADVANCED_OPEN_KEY, value ? "0" : "1"); } catch { /* storage unavailable */ } return !value; });
+  const item = (step, className, children) => <li key={step.id} className={className}><button type="button" className={current === step.id ? "is-current" : ""} aria-current={current === step.id ? "page" : undefined} onClick={() => onStep(step)}><span className="factory-stepper__n" aria-hidden="true" /><span className="factory-stepper__text"><span>{t(step.title)}</span></span></button></li>;
+  return <ol className="factory-stepper" aria-label={t("factoryStepsLabel")}>{states.map(({ step, state }) => <li key={step.id}><button type="button" className={`is-${state}${current === step.id ? " is-current" : ""}${next?.step.id === step.id ? " is-next" : ""}`} aria-current={current === step.id ? "page" : undefined} onClick={() => onStep(step)}><span className="factory-stepper__n" aria-hidden="true">{state === "done" ? "✓" : ""}</span><span className="factory-stepper__text"><span>{t(step.title)}</span><small>{t(next?.step.id === step.id && state === "todo" ? "stepNow" : STEP_STATE_KEY[state])}</small></span></button></li>)}
+    {item(INSPIRATION_STEP, "factory-stepper__aside")}
+    {item(CONTENT_STEP)}
+    <li><button type="button" aria-expanded={open} onClick={toggle}><span className="factory-stepper__n factory-stepper__caret" aria-hidden="true">{open ? <ChevronDown /> : <NextIcon />}</span><span className="factory-stepper__text"><span>{t("stepAdvanced")}</span></span></button></li>
+    {open ? ADVANCED_STEPS.map(step => item(step, "factory-stepper__sub")) : null}
+  </ol>;
 }
 
 function FactoryOverview({ product, states, agentEntry, agentName, goToStep, t }) {
@@ -226,9 +235,8 @@ function Workspace({ root, id, entry, agents, config, onChanged, onOpenAgent, ag
   if (!chat || !session) return <Stack className="factory-workspace-loading" spacing={1}><Skeleton width="35%" /><Skeleton width="80%" /><Skeleton width="70%" /><ErrorNotice error={error} onClose={() => setError("")} /></Stack>;
   const running = session.status === "running"; const locked = entry?.state === "locked"; const visibleSession = { ...session, files: session.files.filter(record => !record.path.startsWith("input/handoff/")) };
   const { controller } = chat;
-  const addToChat = (path, quote) => { const reference = `${t("fileReference", path)}${quote ? `\n\n${quote.split("\n").map(line => `> ${line}`).join("\n")}` : ""}`; const previous = controller.getState().draft; controller.setDraft(`${previous}${previous.trim() ? "\n\n" : ""}${reference}\n\n`); requestAnimationFrame(() => document.querySelector(".factory-chat textarea")?.focus()); };
   const useLatest = () => perform(async () => { controller.setDraft(t("useLatestMessage", session.role)); await controller.send(); });
-  return <div className="factory-workspace"><div className="factory-workspace-pane factory-workspace-main"><ChatPanel chat={chat} dictation={dictation} session={visibleSession} entry={entry} config={config} busy={busy} locked={locked} locale={locale} onOpenFile={setFile} onUseLatest={useLatest} agentName={agentName} t={t} /></div><div className="factory-workspace-pane factory-workspace-side"><InspectorPanel entry={entry} agents={agents} session={visibleSession} root={root} id={id} running={running} busy={busy} file={file} setFile={setFile} addToChat={addToChat} agentName={agentName} onOpenAgent={onOpenAgent} t={t} perform={perform} /><ErrorNotice error={error} onClose={() => setError("")} /></div></div>;
+  return <div className="factory-workspace"><div className="factory-workspace-pane factory-workspace-main"><ChatPanel chat={chat} dictation={dictation} session={visibleSession} entry={entry} config={config} busy={busy} locked={locked} locale={locale} onOpenFile={setFile} onUseLatest={useLatest} agentName={agentName} t={t} /></div><div className="factory-workspace-pane factory-workspace-side"><InspectorPanel entry={entry} agents={agents} session={visibleSession} root={root} id={id} running={running} busy={busy} file={file} setFile={setFile} agentName={agentName} onOpenAgent={onOpenAgent} t={t} perform={perform} /><ErrorNotice error={error} onClose={() => setError("")} /></div></div>;
 }
 
 const noopSubscribe = () => () => undefined; const nullSession = () => null;
@@ -283,7 +291,7 @@ function ChatPanel({ chat, dictation, session, entry, config, busy, locked, loca
 
 const FILE_PAGE_SIZE = 8;
 const IMAGE_FILE = /\.(jpe?g|png|webp)$/i;
-function InspectorPanel({ entry, agents, session, root, id, running, busy, file, setFile, addToChat, agentName, onOpenAgent, t, perform }) {
+function InspectorPanel({ entry, agents, session, root, id, running, busy, file, setFile, agentName, onOpenAgent, t, perform }) {
   const inputFiles = session.files.filter(record => record.path.startsWith("input/") && !record.path.startsWith("input/handoff/")); const outputFiles = session.files.filter(record => record.path.startsWith("output/"));
   const selectedFile = file ? session.files.find(record => record.path === file) : null;
   const [filesTab, setFilesTab] = useState("input");
@@ -296,12 +304,12 @@ function InspectorPanel({ entry, agents, session, root, id, running, busy, file,
 }
 
 function FileViewer({ root, running, id, record, siblings, onOpenFile, onClose, onAddToChat, t, perform }) {
-  const draftKey = `factory-file-draft:${id}:${record.path}`; const [savedDraft] = useState(() => { try { return JSON.parse(sessionStorage.getItem(draftKey) || "null"); } catch { return null; } }); const [file, setFile] = useState(savedDraft?.file || null); const [edit, setEdit] = useState(savedDraft?.edit || ""); const [copyName, setCopyName] = useState(savedDraft?.copyName || ""); const [readError, setReadError] = useState(""); const [mode, setMode] = useState(/\.(md|markdown)$/i.test(record.path) ? "rendered" : "raw"); const dirty = Boolean(file && file.content !== null && edit !== file.content);
-  useEffect(() => { if (!file) return; if (dirty) sessionStorage.setItem(draftKey, JSON.stringify({ file, edit, copyName })); else sessionStorage.removeItem(draftKey); }, [draftKey, file, edit, copyName, dirty]); useEffect(() => { api(`${endpoint(root, id, "files")}?path=${encodeURIComponent(record.path)}`).then(value => { setReadError(""); if (!dirty) { setFile(value); setEdit(value.content || ""); } }).catch(e => setReadError(e.message)); }, [root, id, record.path]);
-  const requiresCopyName = record.readonly || record.path.startsWith("input/"); const saveDisabled = running || !dirty || (requiresCopyName && !copyName.trim());
-  const save = () => perform(async () => { const target = requiresCopyName ? `output/${copyName}` : record.path; if (!target.endsWith(".md") || target.includes("..")) throw new Error(t("markdownFilenameRequired")); await api(endpoint(root, id, "files"), { method: "POST", body: { path: target, base64: textBase64(edit) } }); sessionStorage.removeItem(draftKey); setFile({ ...file, content: edit }); });
+  const draftKey = `factory-file-draft:${id}:${record.path}`; const [savedDraft] = useState(() => { try { return JSON.parse(sessionStorage.getItem(draftKey) || "null"); } catch { return null; } }); const [file, setFile] = useState(savedDraft?.file || null); const [edit, setEdit] = useState(savedDraft?.edit || ""); const [readError, setReadError] = useState(""); const [mode, setMode] = useState(/\.(md|markdown)$/i.test(record.path) ? "rendered" : "raw"); const dirty = Boolean(file && file.content !== null && edit !== file.content);
+  useEffect(() => { if (!file) return; if (dirty) sessionStorage.setItem(draftKey, JSON.stringify({ file, edit })); else sessionStorage.removeItem(draftKey); }, [draftKey, file, edit, dirty]); useEffect(() => { api(`${endpoint(root, id, "files")}?path=${encodeURIComponent(record.path)}`).then(value => { setReadError(""); if (!dirty) { setFile(value); setEdit(value.content || ""); } }).catch(e => setReadError(e.message)); }, [root, id, record.path]);
+  const readOnly = record.readonly || record.path.startsWith("input/"); const saveDisabled = running || !dirty;
+  const save = () => perform(async () => { const target = record.path; if (!target.endsWith(".md") || target.includes("..")) throw new Error(t("markdownFilenameRequired")); await api(endpoint(root, id, "files"), { method: "POST", body: { path: target, base64: textBase64(edit) } }); sessionStorage.removeItem(draftKey); setFile({ ...file, content: edit }); });
   const paths = orderedPaths(siblings); const previous = neighbour(paths, record.path, -1); const next = neighbour(paths, record.path, 1); const name = record.path.split("/").at(-1); const fileUrl = `${endpoint(root, id, "files")}?path=${encodeURIComponent(record.path)}`;
-  return <Dialog open onOpenChange={open => { if (!open) onClose(); }}><DialogContent title={<span title={record.path}>{name}</span>} className="fv-dialog" aria-describedby={undefined} footer={file && file.content !== null ? <><HatchButton size="small" disabled={saveDisabled} onClick={save}>{t("save")}</HatchButton><HatchButton size="small" variant="secondary" disabled={!dirty} onClick={() => { setEdit(file.content || ""); sessionStorage.removeItem(draftKey); }}>{t("discardEdits")}</HatchButton></> : undefined}>
+  return <Dialog open onOpenChange={open => { if (!open) onClose(); }}><DialogContent title={<span title={record.path}>{name}</span>} className="fv-dialog" aria-describedby={undefined} footer={file && file.content !== null && !readOnly ? <><HatchButton size="small" disabled={saveDisabled} onClick={save}>{t("save")}</HatchButton><HatchButton size="small" variant="secondary" disabled={!dirty} onClick={() => { setEdit(file.content || ""); sessionStorage.removeItem(draftKey); }}>{t("discardEdits")}</HatchButton></> : undefined}>
     <div className="fv">
       <div className="fv__bar">
         <HatchIconButton label={t("previousFile")} size="small" disabled={!previous} onClick={() => onOpenFile(previous)}><PrevIcon aria-hidden="true" /></HatchIconButton>
@@ -309,14 +317,12 @@ function FileViewer({ root, running, id, record, siblings, onOpenFile, onClose, 
         <HatchIconButton label={t("nextFile")} size="small" disabled={!next} onClick={() => onOpenFile(next)}><NextIcon aria-hidden="true" /></HatchIconButton>
         {file && file.content !== null ? <SegmentedControl value={mode} onValueChange={setMode} ariaLabel={t("markdownEditor")} items={[{ value: "rendered", label: t("viewRendered") }, { value: "raw", label: t("viewRaw") }]} /> : null}
         <div className="fv__bar-end">
-          {onAddToChat ? <HatchIconButton label={t("addToChat")} size="small" onClick={() => onAddToChat(record.path)}><SendIcon aria-hidden="true" /></HatchIconButton> : null}
           <HatchIconButton asChild label={t("download")} size="small"><a href={`${fileUrl}&download=1`}><DownloadIcon aria-hidden="true" /></a></HatchIconButton>
         </div>
       </div>
       {readError ? <InlineAlert tone="error">{readError}</InlineAlert> : null}
       {IMAGE_FILE.test(record.path) ? <div className="fv__body"><img className="fv__image" src={`${fileUrl}&inline=1`} alt={name} /></div> : !file ? <p className="fl__empty">{readError ? "" : t("loadingFile")}</p> : file.content === null ? <p className="fl__empty">{t("downloadToView")}</p> : <>
-        <div className="fv__body">{mode === "rendered" ? <MessageResponse>{edit}</MessageResponse> : <textarea className="fv__raw" value={edit} onChange={event => setEdit(event.target.value)} aria-label={t("markdownEditor")} />}</div>
-        {requiresCopyName ? <input className="hui-input fv__copy" value={copyName} onChange={event => setCopyName(event.target.value)} placeholder={t("revisionFilenamePlaceholder")} aria-label={t("revisionFilename")} /> : null}
+        <div className="fv__body">{mode === "rendered" ? <MessageResponse>{edit}</MessageResponse> : <textarea className="fv__raw" value={edit} readOnly={readOnly} onChange={event => setEdit(event.target.value)} aria-label={t("markdownEditor")} />}</div>
       </>}
     </div>
   </DialogContent></Dialog>;
