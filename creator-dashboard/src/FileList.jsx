@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { IconButton, SearchInput, Spinner } from "@hatch/ui";
-import { FileText, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, FileText, Trash2 } from "lucide-react";
 import { FILTER_FROM, groupFiles, pageGroups } from "./fileListModel.js";
 import "./fileList.css";
 
@@ -10,7 +10,7 @@ const BUSY = new Set(["uploading", "ingesting"]);
  * Every place a node shows files: compact rows grouped by folder, filterable, name column then actions column.
  * A record is `{ path, status?, error? }`; `status` is only set while the file is not settled.
  */
-export function FileList({ title, records, onOpen, onDelete, deletable = () => true, statusLabel, pageSize, t }) {
+export function FileList({ title, records, onOpen, onDelete, deletable = () => true, statusLabel, pageSize, thumbnail, t }) {
   const [query, setQuery] = useState("");
   const [pageAt, setPageAt] = useState(1);
   const all = groupFiles(records, query);
@@ -28,7 +28,7 @@ export function FileList({ title, records, onOpen, onDelete, deletable = () => t
         const openable = !record.status;
         return <li key={record.path} className={`fl__row${failed ? " is-failed" : ""}`}>
           <button type="button" className="fl__name" disabled={!openable} onClick={() => onOpen?.(record.path)} title={record.name}>
-            <FileText aria-hidden="true" />
+            {thumbnail?.(record) ? <img className="fl__thumb" src={thumbnail(record)} alt="" loading="lazy" /> : <FileText aria-hidden="true" />}
             <span className="fl__label">{record.name}</span>
             {record.status ? <small className="fl__state" title={record.error || undefined}>{[statusLabel?.(record), record.error].filter(Boolean).join(": ")}</small> : null}
           </button>
@@ -40,9 +40,9 @@ export function FileList({ title, records, onOpen, onDelete, deletable = () => t
       })}</ul>
     </div>) : <p className="fl__empty">{t("noFiles")}</p>}
     {pages > 1 ? <footer className="fl__pager">
-      <button type="button" disabled={page <= 1} onClick={() => setPageAt(page - 1)}>{t("previousPage")}</button>
+      <IconButton className="fl__page" label={t("previousPage")} size="small" disabled={page <= 1} onClick={() => setPageAt(page - 1)}><ChevronLeft aria-hidden="true" /></IconButton>
       <span>{page}/{pages}</span>
-      <button type="button" disabled={page >= pages} onClick={() => setPageAt(page + 1)}>{t("nextPage")}</button>
+      <IconButton className="fl__page" label={t("nextPage")} size="small" disabled={page >= pages} onClick={() => setPageAt(page + 1)}><ChevronRight aria-hidden="true" /></IconButton>
     </footer> : null}
   </section>;
 }

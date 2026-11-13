@@ -10,7 +10,7 @@ import type { AssistantTask, TaskOrigin } from "./tasks.js";
 /** Studio is operated from these clients. A Product's customers never reach it. */
 export const STUDIO_CLIENTS: readonly ClientGroup[] = ["web", "cli", "mcp", "im"];
 
-export const WORKER_KINDS = ["interview", "content", "research", "agent_research", "build", "evaluate"] as const;
+export const WORKER_KINDS = ["interview", "agent_research", "build", "evaluate"] as const;
 export type WorkerKind = typeof WORKER_KINDS[number];
 
 /** An Agent as the Assistant sees it: what it promises, whether it is live, and how far its interview has got. */
@@ -37,7 +37,7 @@ export interface StudioOperations {
   poke(accountId: string, taskId: string, question: string): Promise<AssistantTask>;
   finish(accountId: string, taskId: string, answered: boolean): Promise<AssistantTask>;
   /** Public web evidence: links and snippets, no generated answer. */
-  searchWeb(input: { query: string; max_results?: number; domains?: string[]; topic?: "general" | "news" }, signal?: AbortSignal): Promise<unknown>;
+  searchWeb(input: { query: string; objective: string }, signal?: AbortSignal): Promise<unknown>;
   /** One public page's main text as Markdown, with its URL. */
   readPage(url: string, signal?: AbortSignal): Promise<unknown>;
   /** Adds material the Expert sent to the Agent: plain text into its manual input, anything more complex and links to Ingest. Returns where each item went. */
@@ -99,9 +99,9 @@ export function studioTools(ops: StudioOperations): StudioTool[] {
   const created = async (call: StudioCall, task: AssistantTask) => taskView(await ops.inRun(task, call.runId));
   return [
     { name: "search_web", readOnly: true,
-      schema: z.object({ query: text(1, 500), max_results: z.number().int().min(1).max(10).optional(), domains: z.array(z.string()).max(10).optional(), topic: z.enum(["general", "news"]).optional() }).strict(),
+      schema: z.object({ query: text(1, 500).describe("关键词式查询，几个有区分度的词"), objective: text(1, 1000).describe("这次搜索要查清什么、哪类来源该排前面") }).strict(),
       description: "搜公开网页，返回来源链接和摘要，不是核实过的全文，也不生成回答。需要很快查一个事实时直接用。",
-      run: async (call, args) => done(await ops.searchWeb(args as { query: string; max_results?: number; domains?: string[]; topic?: "general" | "news" }, call.signal)) },
+      run: async (call, args) => done(await ops.searchWeb(args as { query: string; objective: string }, call.signal)) },
     { name: "read_page", readOnly: true, schema: z.object({ url: text(1, 2000) }).strict(),
       description: "读一个公开网页的正文（Markdown），带原网址。专家要看某篇文章、某个页面的全文时用；搜索结果只有摘要。读不了登录后的页面，也不转写视频。",
       run: async (call, args) => done(await ops.readPage(String(args.url), call.signal)) },
@@ -122,8 +122,8 @@ export function studioTools(ops: StudioOperations): StudioTool[] {
         return done(await created(call, await ops.propose(call.accountId, input.agent_id, { release: input.release, name: input.name, promise: input.promise, pricing: input.pricing, briefSpec: input.opening_questions }, await call.origin())));
       } },
     { name: "start_task", readOnly: false,
-      schema: z.object({ kind: z.enum(WORKER_KINDS), agent_id: z.string().optional().describe("要做哪个 Agent 的事：Agent 的 id，或它的名字。interview、build、content、evaluate、agent_research 在专家有两个以上 Agent 时必填；只有一个 Agent 时可省；research 不用写"), instruction: text(1, 4000).describe("要做什么、专家的原话、为什么现在做") }).strict(),
-      description: `派一件事，立刻返回，做完会告诉你。派活的这一轮不写预告，也不写"我这就""接下来"这类话。interview 只写访谈大纲，不和专家说话；大纲写好会告诉你，之后由你来问专家。build 只在这个 Agent 的访谈大纲全是 ✓ 后才会接受。专家有两个以上 Agent 时，除 research 外都必须写 agent_id（id 或名字，用 list_agents 看）；只有一个时可以不写。${WORKER_KINDS.map(kind => ops.describeWorker(kind)).join("；")}。`,
+      schema: z.object({ kind: z.enum(WORKER_KINDS), agent_id: z.string().optional().describe("要做哪个 Agent 的事：Agent 的 id，或它的名字。interview、build、evaluate、agent_research 在专家有两个以上 Agent 时必填；只有一个 Agent 时可省"), instruction: text(1, 4000).describe("要做什么、专家的原话、为什么现在做") }).strict(),
+      description: `派一件事，立刻返回，做完会告诉你。派活的这一轮不写预告，也不写"我这就""接下来"这类话。interview 只写访谈大纲，不和专家说话；大纲写好会告诉你，之后由你来问专家。build 只在这个 Agent 的访谈大纲全是 ✓ 后才会接受。专家有两个以上 Agent 时必须写 agent_id（id 或名字，用 list_agents 看）；只有一个时可以不写。${WORKER_KINDS.map(kind => ops.describeWorker(kind)).join("；")}。`,
       run: async (call, args) => {
         const input = args as { kind: WorkerKind; agent_id?: string; instruction: string };
         let agentId = input.agent_id;

@@ -5,7 +5,7 @@ import { MODEL_ROLES, InMemoryModelRoleResolver, PostgresModelRoleResolver, prof
 const quiet = async <T>(work: () => Promise<T>): Promise<T> => { const log = console.error; console.error = () => undefined; try { return await work(); } finally { console.error = log; } };
 
 test("the seed rows keep today's production choices", () => {
-  assert.deepEqual({ ...MODEL_ROLES }, { chat: "kimi-k3.1-pro", assistant: "gemini-api", worker: "kimi-k3.1-pro", factory: "gemini-3.1-pro", ingest: "kimi-k3.1-pro" });
+  assert.deepEqual({ ...MODEL_ROLES }, { chat: "kimi-k3.1-pro", assistant: "gemini-api", factory: "gemini-3.1-pro", ingest: "kimi-k3.1-pro", inspiration: "kimi-k3.1-pro", content: "kimi-k3.1-pro" });
 });
 
 /** A database of two tables, counting the reads that reach it. */
@@ -37,7 +37,7 @@ test("the global role resolves to its profile; a product override applies to cha
   products.set("product-1", "gemini-api");
   assert.equal((await resolver.resolve("chat", { productId: "product-1" })).name, "gemini-api");
   assert.equal((await resolver.resolve("chat", { productId: "product-2" })).name, "kimi-k3.1-pro", "another product keeps the global choice");
-  assert.equal((await resolver.resolve("worker", { productId: "product-1" })).name, "kimi-k3.1-pro", "only chat has a per-product override");
+  assert.equal((await resolver.resolve("factory", { productId: "product-1" })).name, "gemini-3.1-pro", "only chat has a per-product override");
 });
 
 test("a choice is cached for 30 seconds per key, then read again", async () => {
@@ -71,8 +71,8 @@ test("an unknown profile, a profile the role does not allow, or a missing row is
   await assert.rejects(quiet(() => resolver.resolve("ingest")), invalid, "ingest runs on Kimi only");
   roles.set("factory", "deepseek-v4-pro");
   await assert.rejects(quiet(() => resolver.resolve("factory")), invalid, "factory does not allow deepseek-v4-pro");
-  roles.delete("worker");
-  await assert.rejects(quiet(() => resolver.resolve("worker")), invalid);
+  roles.delete("assistant");
+  await assert.rejects(quiet(() => resolver.resolve("assistant")), invalid);
   roles.set("chat", "kimi-k3.1-pro");
   products.set("p", "typo");
   await assert.rejects(quiet(() => resolver.resolve("chat", { productId: "p" })), invalid, "a bad product row does not fall back to the global role");

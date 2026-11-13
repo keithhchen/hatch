@@ -11,12 +11,14 @@ export const MODEL_ROLES = {
   chat: "kimi-k3.1-pro",
   /** The Studio Assistant's own chat, and its compaction. */
   assistant: "gemini-api",
-  /** The Assistant's background workers (a Product workspace's Agents run for the Assistant), and their compaction. */
-  worker: "kimi-k3.1-pro",
   /** Creator Factory: the Product workbench, evidence extraction, evaluation and Corpus compilation. */
   factory: "gemini-3.1-pro",
   /** Hosted ingest's agent. Must be a Kimi profile: the hosted-agents API runs Kimi only. */
-  ingest: "kimi-k3.1-pro"
+  ingest: "kimi-k3.1-pro",
+  /** The Inspiration node: research over the open web. */
+  inspiration: "kimi-k3.1-pro",
+  /** The Content Creation node. */
+  content: "kimi-k3.1-pro"
 } as const satisfies Record<string, LlmProfileName>;
 
 export type ModelRole = keyof typeof MODEL_ROLES;
@@ -24,8 +26,8 @@ export const MODEL_ROLE_NAMES = Object.keys(MODEL_ROLES) as ModelRole[];
 
 const ALLOWED: Record<ModelRole, readonly string[]> = {
   chat: RUNTIME_LLM_PROFILE_NAMES, assistant: RUNTIME_LLM_PROFILE_NAMES,
-  worker: FACTORY_LLM_PROFILE_NAMES, factory: FACTORY_LLM_PROFILE_NAMES,
-  ingest: ["kimi-k3.1-pro"]
+  factory: FACTORY_LLM_PROFILE_NAMES,
+  ingest: ["kimi-k3.1-pro"], inspiration: FACTORY_LLM_PROFILE_NAMES, content: FACTORY_LLM_PROFILE_NAMES
 };
 
 /** What a use of a role is about: the Product whose chat this is, when it is one. */

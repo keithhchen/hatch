@@ -10,12 +10,16 @@ const RETIRED_PRODUCT_TABS = new Set(["overview", "files", "about-you", "corpus"
 export const FACTORY_SECTION_AGENTS = Object.freeze({
   sources: Object.freeze(["research", "voice"]),
   build: Object.freeze(["generation"]),
-  evaluate: Object.freeze(["case-generation", "evaluator"])
+  evaluate: Object.freeze(["case-generation", "evaluator"]),
+  inspire: Object.freeze(["inspiration"]),
+  create: Object.freeze(["content-creation"])
 });
 export const FACTORY_SECTION_PAGES = Object.freeze({
   sources: Object.freeze(["uploads"]),
   build: Object.freeze([]),
-  evaluate: Object.freeze([])
+  evaluate: Object.freeze([]),
+  inspire: Object.freeze([]),
+  create: Object.freeze([])
 });
 
 export function factorySectionForAgent(role) {

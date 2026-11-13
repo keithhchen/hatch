@@ -282,13 +282,14 @@ on lives in two tables, created and seeded on first use by whichever process rea
 | --- | --- | --- |
 | `chat` | `kimi-k3.1-pro` | Every Run of a published Product in the Runtime, its compaction and delivery review, and Creator Factory's candidate evaluation. |
 | `assistant` | `gemini-api` | The Studio Assistant's own chat and its compaction. |
-| `worker` | `kimi-k3.1-pro` | The Assistant's background workers (Product workspace Agents the Assistant drives) and their compaction. |
 | `factory` | `gemini-3.1-pro` | Creator Factory: the Product workbench, evidence extraction, evaluation, Corpus compilation. |
 | `ingest` | `kimi-k3.1-pro` | The hosted ingest agent. Kimi profiles only. |
+| `inspiration` | `kimi-k3.1-pro` | The Inspiration node of a Product workspace (research on the open web). |
+| `content` | `kimi-k3.1-pro` | The Content Creation node of a Product workspace. |
 
 A seed row is inserted only when its role has no row; after that the database rules. List the valid profile names with
 `node -e 'import("./dist/llmProfiles.js").then(m => console.log(m.LLM_PROFILE_NAMES.join("\n")))'` (`chat` and `assistant` accept all
-of them, `worker` and `factory` all but `deepseek-v4-pro`, `ingest` only `kimi-k3.1-pro`).
+of them, `factory` all but `deepseek-v4-pro`, `ingest` only `kimi-k3.1-pro`).
 
 ```sql
 -- Switch the global chat model.

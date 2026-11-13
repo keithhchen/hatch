@@ -19,6 +19,8 @@ type FormFields = {
 };
 export type OwnAppForm = FormFields & {
   build(credentials: any, scope: string): ChannelAdapter;
+  /** What the platform calls this bot, for good. Its scope: the same bot is always the same Connection. Absent: each save is a fresh tenant. */
+  botId?(credentials: Record<string, any>): string | undefined;
   /** One app for each Product, public to anyone who writes to it, instead of one for the Expert's account. Each save is a tenant of its own. */
   perProduct?: true;
   /** Proves the credentials work before they are saved. Returns what to keep from the proof. */
@@ -61,6 +63,7 @@ const lark = (domain: "lark" | "feishu"): OwnAppForm => ({
 const telegramBot: OwnAppForm = {
   perProduct: true,
   fields: [{ field: "token", key: "token", required: true }],
+  botId: credentials => /^(\d+):/.exec(String(credentials.token))?.[1],
   build: (credentials, scope) => new TelegramChannel(credentials, scope),
   provision: async (adapter: TelegramChannel, { webhookUrl, secret }) => { const username = await adapter.probe(); await adapter.setWebhook(webhookUrl, secret); await adapter.setCommands(); return { username, webhookSecret: secret }; },
   release: (adapter: TelegramChannel) => adapter.deleteWebhook(),

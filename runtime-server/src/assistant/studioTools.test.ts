@@ -11,7 +11,7 @@ function startTask(agents: AgentOverview[]) {
   const dispatched: Array<{ kind: WorkerKind; productId?: string }> = [];
   const ops = {
     agents: async () => agents,
-    needsAgent: (kind: WorkerKind) => kind !== "research",
+    needsAgent: (_kind: WorkerKind) => true,
     describeWorker: (kind: WorkerKind) => kind,
     dispatch: async (_account: string, kind: WorkerKind, productId?: string) => { dispatched.push({ kind, productId }); return { id: "t1", kind, status: "working", payload: {}, productId } as unknown as AssistantTask; },
     inRun: async (task: AssistantTask) => task,
@@ -32,12 +32,6 @@ test("start_task without agent_id lists the Agents when there are several", asyn
   const { dispatched, run } = startTask([agent("p1", "美本顾问", done), agent("p2", "UCAS 顾问", done)]);
   await assert.rejects(run({ kind: "interview", instruction: "聊" }), /要指定 Agent.*「美本顾问」 → p1.*「UCAS 顾问」 → p2.*agent_id/);
   assert.deepEqual(dispatched, []);
-});
-
-test("research needs no Agent", async () => {
-  const { dispatched, run } = startTask([agent("p1", "a", []), agent("p2", "b", [])]);
-  await run({ kind: "research", instruction: "林婉清" });
-  assert.deepEqual(dispatched, [{ kind: "research", productId: undefined }]);
 });
 
 test("with two Agents, agent_id may be the Agent's name, and an unknown one lists the choices", async () => {

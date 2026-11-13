@@ -154,9 +154,9 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
     products: { workspace: async scope => { scopes.push(scope); opened?.({ creatorId: ACCOUNT, productId: PRODUCT }, workspace); return workspace; }, attachAssistant: hooks => { opened = hooks.opened; withheldTools = hooks.withheldTools; } },
     backend: () => legacy,
     exclusive: async (_name, fn) => fn(),
-    search: { search: async () => { throw new Error("no web search in tests"); } },
+    search: { name: "test", search: async () => { throw new Error("no web search in tests"); } },
     env: {},
-    models: new InMemoryModelRoleResolver({ roles: { worker: "kimi-k3.1-pro" } }),
+    models: new InMemoryModelRoleResolver(),
     runtime: { agentFactory },
     ...(options.ingest ? { ingest: options.ingest } : {}),
   });
@@ -317,7 +317,7 @@ test("start_task is one tool: a new kind runs its steps in order and reports", a
     assert.ok(started.some(text => text.includes("构造一个新的真实客户案例")));
     assert.ok(started.some(text => text.includes("评测线上 Agent")));
     await waitFor(() => heard.some(text => text.includes("评测跑完了")));
-    await assert.rejects(env.assistant.dispatch(ACCOUNT, "content", undefined, "写", { source: "web" }), /指定 Agent/);
+    await assert.rejects(env.assistant.dispatch(ACCOUNT, "build", undefined, "写", { source: "web" }), /指定 Agent/);
   } finally { await env.close(); }
 });
 

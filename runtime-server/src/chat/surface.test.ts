@@ -159,7 +159,7 @@ test("in a group every person has their own conversation, and /new moves only th
   assert.equal((await binder.bind(alice, threadRef("dm"))).conversation.id, aliceDM);
 });
 
-test("a thread whose Connection now serves another Product moves to a conversation of that Product", async () => {
+test("a thread whose Connection now serves another Product keeps its conversation, now bound to that Product", async () => {
   const repository = new InMemoryConversationRepository();
   let current = productId;
   const products = { resolveByProduct: async () => ({ ...corpus([]), corpus: { ...corpus([]).corpus, product: { id: current, name: "P", boundaries: [], presentation: {} } } }) as unknown as ResolvedAgentCorpus };
@@ -168,6 +168,8 @@ test("a thread whose Connection now serves another Product moves to a conversati
   const before = (await binder.bind(alice, threadRef("t"))).conversation;
   current = "33333333-3333-4333-8333-333333333333";
   const after = (await binder.bind(alice, threadRef("t"))).conversation;
-  assert.notEqual(after.id, before.id);
-  assert.equal((await binder.bind(alice, threadRef("t"))).conversation.id, after.id);
+  assert.equal(after.id, before.id, "the conversation follows the bot");
+  assert.equal(after.productId, current);
+  assert.equal((await repository.getConversation(before.id))!.productIdAtCreation, productId, "its origin is kept");
+  assert.equal((await binder.bind(alice, threadRef("t"))).conversation.id, before.id);
 });

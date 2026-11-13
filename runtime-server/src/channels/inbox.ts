@@ -46,6 +46,8 @@ export interface Inbox {
   /** Releases the lease after `delayMs`; after `maxAttempts` the event is given up and kept as failed. */
   retry(lease: Lease, error: string, delayMs: number, maxAttempts: number, now?: Date): Promise<"pending" | "failed" | undefined>;
   get(id: string): Promise<InboxItem | undefined>;
+  /** How many messages people have sent to a platform tenant: every stored event but the system ones (a button press, a block, an uninstall). Counted on the tenant, so it follows the bot. */
+  inboundCount(channel: ChannelKind, scope: string): Promise<number>;
   /** When the platform last wrote to this thread. */
   lastInbound(channel: ChannelKind, scope: string, threadId: string): Promise<Date | undefined>;
   /** These events have been answered, and nothing else has. */

@@ -29,7 +29,7 @@
 | 概念 | 落在哪里 | 新增？ |
 |---|---|---|
 | 助理 | 账户级的 workbench 会话，角色 `assistant` | 新角色，复用 `WorkbenchRuntime` |
-| Worker | workbench 角色：`research`、`voice`（访谈；名字不改，助理只用文字）、`generation`、`case-generation`、`evaluator`，加 `content`、`profile-research` | 两个新角色 |
+| Worker | workbench 角色：`research`、`voice`（访谈；名字不改，助理只用文字）、`generation`、`case-generation`、`evaluator` | 助理不再有自己的 worker 角色：写内容、读公开资料由助理在自己的回合里用 `search_web`、`read_page` 自己做 |
 | 任务 | `hatch_assistant_tasks` | **新表** |
 | "需要你"列表 | 查 `status = 'needs_you'` 的任务 | 否 |
 | 来源（Source） | port：Web、Telegram、消费者"找真人"、定时 | adapter |
@@ -62,7 +62,7 @@ hatch_assistant_tasks
 ```
 Source                     助理（每账户一个）              Worker（workbench 会话）
 Web 对话 ──┐                                          ┌─> interview     补访谈
-Telegram ──┤──> 代码过滤 ──> 判断 Agent + 环节 ────────┼─> content       写内容
+Telegram ──┤──> 代码过滤 ──> 判断 Agent + 环节 ────────┼─> agent_research 深度调研
 找真人 ────┤   （是本人吗、     建任务、派活            ├─> generation → case-generation → evaluator   rebuild
 定时 ──────┘    重复吗）         ▲
                                  └──── 完成 / 卡住 / 要问你 ────┘
@@ -87,11 +87,11 @@ Telegram ──┤──> 代码过滤 ──> 判断 Agent + 环节 ───�
 
 ### 3.1b 存储
 
-助理工作区（助理、写内容、公开资料）的会话和文件存 Postgres（`hatch_workbench_sessions`、`hatch_workbench_files`），通过 `WorkbenchBackend` port 接入。产品工作区仍用磁盘文件。
+助理工作区（助理的笔记）的会话和文件存 Postgres（`hatch_workbench_sessions`、`hatch_workbench_files`），通过 `WorkbenchBackend` port 接入。产品工作区仍用磁盘文件。
 
 ### 3.1c 资料
 
-资料存在助理会话的 `input/materials/`，派活时复制到对应 Agent 的 `input/manual/`，写内容和读公开资料的 worker 也会拿到一份。
+资料存在助理会话的 `input/materials/`，派活时复制到对应 Agent 的 `input/manual/`。
 
 ### 3.1f 消息渠道
 
@@ -120,10 +120,8 @@ Telegram、LINE、Lark、iMessage 都实现同一个 `ChannelAdapter` port，助
 | 事 | 执行 | 何时需要专家 |
 |---|---|---|
 | 补访谈 | `voice` 角色（找缺口 → 1 到 3 个问题 → 直通访谈） | 回答问题 |
-| 写内容 | 新角色 `content`：只用访谈原话排序、删减，不编造 | 定稿（review） |
 | 构建 | 现有 `generation`（Agent Builder）。助理派的构建拿不到 `corpus_upload`，只构建不发布 | 不需要 |
 | 评测 | 现有 `case-generation` → `evaluator`，测的是线上版本 | 评测需要校准时（answer） |
-| 读公开资料 | 新角色 `profile-research`，身份确认后在后台运行 | 不需要；读完助理把发现接进对话 |
 | 产品发布 | 不是 worker：助理通过 `propose_change` 调用产品的发布接口，`list_agents` 读在线状态和待发布改动 | 发布、下架前（review） |
 | 戳一戳 | 助理自己，由定时触发；不需要 worker | 回答（可不回） |
 

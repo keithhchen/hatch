@@ -18,9 +18,11 @@ or separate production Runtime exists. The server uses two Compose projects:
 1. Install Docker Engine and the Compose plugin on the Shanghai host.
 2. Create `/opt/hatch/.env` from the root `.env.example` and fill the LLM,
    DashScope, Postgres, web search, and publish-token values. User Runtime
-   search remains on Bocha; Creator Factory production search requires a
-   non-empty `FIRECRAWL_API_KEY`. `TAVILY_API_KEY` remains available for Factory
-   scraping when selected.
+   search remains on Bocha; Creator Factory and Assistant web search use
+   `HATCH_SEARCH_PROVIDER` (`parallel`, the default, or `exa`) and require that
+   provider's non-empty `PARALLEL_API_KEY` / `EXA_API_KEY`. Factory scraping
+   requires `FIRECRAWL_API_KEY` (or `TAVILY_API_KEY` when selected).
+   `FAL_KEY` enables image generation in the Content Creation node.
    Never commit this file or put these values in GitHub Actions.
    The file must also contain the non-empty `HATCH_DATABASE_URL`.
    Which model each role runs on is a database row (`hatch_model_roles`, and

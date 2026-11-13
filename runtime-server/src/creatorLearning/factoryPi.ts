@@ -13,7 +13,7 @@ import type { AdapterOptions, AgentAdapterOptions, PiModel } from "../modelAdapt
 export const FACTORY_LLM_MODEL = KIMI_MODEL;
 
 export type FactoryLlmModel = PiModel;
-/** `profile` is what the `factory` or `worker` role resolved to for this call (see modelRoles.ts). */
+/** `profile` is what the `factory` role resolved to for this call (see modelRoles.ts). */
 export type FactoryPiAdapterOptions = AdapterOptions & { profile: LlmProfile };
 export type FactoryPiAgentOptions = AgentAdapterOptions & {
   profile: LlmProfile;
