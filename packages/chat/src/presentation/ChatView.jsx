@@ -126,12 +126,12 @@ const CompactionDivider = ({ t }) => <div className="web-chat__divider" role="se
 
 const REPLY_STATUSES = ["sending", "agentReplying", "syncingReply", "stopping", "reconnecting"];
 
-function ChatMessage({ message, identity, typingText, compacting, attachments, Viewer, assetSource, activityKinds, t, errorText, loadToolDetail, approvals }) {
+function ChatMessage({ message, continued, identity, typingText, compacting, attachments, Viewer, assetSource, activityKinds, t, errorText, loadToolDetail, approvals }) {
   const { files, pictures } = partitionAttachments(message, mediaType => attachments.accepts(mediaType));
   const live = message.transient && message.timeline?.filter(entry => !ACTIVITY_KINDS.includes(entry.kind) || activityKinds.includes(entry.kind)).length;
   const timelineProps = { activityKinds, t, errorText, loadToolDetail, approvals };
   return <article className={`web-chat__message web-chat__message--${message.role}${message.state ? ` web-chat__message--${message.state}` : ""}`}>
-    {message.role === "assistant" ? <Avatar className="web-chat__message-avatar" src={identity.creatorAvatarUrl} name={identity.creatorName} size="small" /> : null}
+    {message.role === "assistant" ? <Avatar className={`web-chat__message-avatar${continued ? " web-chat__message-avatar--continued" : ""}`} src={identity.creatorAvatarUrl} name={identity.creatorName} size="small" /> : null}
     <div className="web-chat__message-body">
       {message.role === "assistant"
         ? message.transient
@@ -323,12 +323,12 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
           <h2>{t("emptyHeadline")}</h2>
           <p>{t("emptyConversationBody", { agent: agentName })}</p>
         </section> : null}
-        {!snapshotPending || messages.length ? withoutRepeatedSteps(messages).map(message => {
+        {!snapshotPending || messages.length ? withoutRepeatedSteps(messages).map((message, index, shown) => {
           const key = message.renderKey ?? `${message.run_id}-${message.role}`;
           const compacting = Boolean(message.transient && activeRun && message.run_id === activeRun && state.runState === "compacting");
           return <React.Fragment key={key}>
             {message.role === "assistant" && compactedRuns.has(message.run_id) ? <CompactionDivider t={t} /> : null}
-            <ChatMessage message={message} compacting={compacting} {...messageProps} />
+            <ChatMessage message={message} continued={message.role === "assistant" && shown[index - 1]?.role === "assistant"} compacting={compacting} {...messageProps} />
           </React.Fragment>;
         }) : null}
       </div>

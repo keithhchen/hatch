@@ -32,7 +32,7 @@ import remarkGfm from "remark-gfm";
 import { Button as HatchButton, Dialog, DialogContent, IconButton as HatchIconButton, InlineAlert, SegmentedControl, Textarea, hatchMuiThemeOptions } from "@hatch/ui";
 import { ArrowRight, ArrowUpRight, Play, Sparkles, ChevronLeft as PrevIcon, ChevronRight as NextIcon, Download as DownloadIcon, Plus, Send as SendIcon } from "lucide-react";
 import { ConversationController } from "@hatch/chat";
-import { ChatView, MessageResponse } from "@hatch/chat/react";
+import { ChatView, MessageResponse, PagePanel } from "@hatch/chat/react";
 import { dashboardRequest } from "./data.js";
 import { FileList } from "./FileList.jsx";
 import { AI_LINKS, copyImportPrompt } from "./importDialog.js";
@@ -252,6 +252,8 @@ function openFactoryChat({ root, id, t, locale }) {
 function ChatPanel({ chat, dictation, session, entry, config, busy, locked, locale, onOpenFile, onUseLatest, agentName, t }) {
   const { controller, describeError } = chat;
   const wrap = useRef(null);
+  // On a phone the chat is what the page opens on: it fills the screen under the top bar, the steps above it and the files below.
+  useEffect(() => { if (window.matchMedia("(max-width: 900px)").matches) wrap.current?.scrollIntoView({ block: "start" }); }, []);
   const draft = useSyncExternalStore(controller.subscribe, () => controller.getState().draft);
   const pendingAskUser = [...chatEntries(session.messages)].reverse().find(item => item.type === "askUser" && item.pending);
   const updatedDependencies = updatedSources(entry);

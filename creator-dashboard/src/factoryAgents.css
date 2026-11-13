@@ -196,7 +196,8 @@
 
 /* Phones and small tablets: the page scrolls as one column. */
 @media (max-width: 900px) {
-  .factory-chat.web-chat.web-chat--embedded { height: max(460px, calc(100dvh - 200px)); }
+  /* The chat takes the screen under the top bar, its composer at the bottom, as the product chat does; the files follow below. */
+  .factory-chat.web-chat.web-chat--embedded { height: max(460px, calc(100dvh - var(--cpv2-topbar))); scroll-margin-top: var(--cpv2-topbar); }
   .factory-app, .factory-step, .factory-overview { height: auto; overflow: visible; }
   .factory-app--workbench .factory-step { overflow: visible; }
   .factory-stepper { overflow-x: auto; scrollbar-width: none; gap: 2px; }
