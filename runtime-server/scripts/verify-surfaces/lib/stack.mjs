@@ -40,6 +40,7 @@ export class Stack {
     for (const name of Object.values(this.dbNames)) await this.admin.query(`CREATE DATABASE "${name}"`);
     this.registryPool = new pg.Pool({ connectionString: this.cluster.url(this.dbNames.registry), max: 4 });
     this.runtimePool = new pg.Pool({ connectionString: this.cluster.url(this.dbNames.runtime), max: 4 });
+    await this.chooseModels();
     this.platform = await new FakePlatform().start();
     this.platform.bots.set(TELEGRAM.token, TELEGRAM.username);
     this.edge = await new Edge().start();
@@ -52,6 +53,15 @@ export class Stack {
     await this.startRegistry();
     const first = await this.startRuntime();
     return first;
+  }
+
+  /** The product reads each role's model from its database (hatch_model_roles): the Runtime's chat and the Registry's factory run on `llmProfile`. */
+  async chooseModels() {
+    const { MODEL_ROLES_SCHEMA } = await import(pathToFileURL(path.join(dist, "modelRoles.js")));
+    for (const [pool, role] of [[this.runtimePool, "chat"], [this.registryPool, "factory"]]) {
+      await pool.query(MODEL_ROLES_SCHEMA);
+      await pool.query("INSERT INTO hatch_model_roles (role, profile) VALUES ($1, $2) ON CONFLICT (role) DO UPDATE SET profile = $2", [role, this.options.llmProfile]);
+    }
   }
 
   get url() { return this.edge.url; }
@@ -69,7 +79,7 @@ export class Stack {
       PORT: String(port), HATCH_RUNTIME_HOST: "127.0.0.1",
       HATCH_RUNTIME_DATABASE_URL: this.cluster.url(this.dbNames.runtime), HATCH_RUNTIME_DATA_DIR: this.dataDir, HATCH_RUNTIME_CORPUS_ROOT: this.corpusRoot,
       HATCH_REGISTRY_URL: this.registryUrl, HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN: TOKENS.runtimeToRegistry, HATCH_RUNTIME_CHAT_SERVICE_TOKEN: TOKENS.registryToRuntime,
-      HATCH_LLM_PROFILE: this.options.llmProfile, HATCH_WEB_SEARCH_URL: `${this.platform.url}/search`, HATCH_WEB_SEARCH_PROVIDER: "",
+      HATCH_WEB_SEARCH_URL: `${this.platform.url}/search`, HATCH_WEB_SEARCH_PROVIDER: "",
       HATCH_RUNTIME_ALLOWED_ORIGINS: BROWSER_ORIGIN,
       HATCH_RUNTIME_MAX_ACTIVE_RUNS_PER_USER: "40", HATCH_RUNTIME_MAX_ACTIVE_RUNS_GLOBAL: "80", HATCH_RUNTIME_MAX_PENDING_TURN_AUTHORIZATIONS: "80", HATCH_RUNTIME_MAX_PENDING_TURN_AUTHORIZATIONS_PER_USER: "40",
       ...this.options.runtimeEnv
@@ -100,7 +110,7 @@ export class Stack {
       HATCH_TELEGRAM_BOT_TOKEN: TELEGRAM.token, HATCH_TELEGRAM_BOT_USERNAME: TELEGRAM.username, HATCH_TELEGRAM_WEBHOOK_SECRET: TELEGRAM.secret,
       HATCH_TELEGRAM_LOGIN_CLIENT_ID: this.platform.login.clientId, HATCH_TELEGRAM_LOGIN_CLIENT_SECRET: this.platform.login.clientSecret,
       HATCH_CREDENTIALS_KEY: CREDENTIALS_KEY, HATCH_STUDIO_ASSISTANT_URL: `${BROWSER_ORIGIN}/studio/assistant`,
-      HATCH_FACTORY_LLM_PROFILE: this.options.llmProfile, VERIFY_PLATFORM_URL: this.platform.url, ...this.options.registryEnv, ...extraEnv
+      VERIFY_PLATFORM_URL: this.platform.url, ...this.options.registryEnv, ...extraEnv
     };
     this.registry = new ManagedProcess("registry", process.execPath, ["--import", this.preload, path.join(dist, "registryServer.js")], { cwd: serverRoot, env });
     await until("the Registry", async () => { if (!this.registry.alive) throw new Error(`registry exited:\n${this.registry.tail(3000)}`); return (await fetch(`${this.registryUrl}/healthz`)).ok; }, { timeoutMs: 90_000 });

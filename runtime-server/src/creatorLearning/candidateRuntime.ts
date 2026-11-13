@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { ClientToolBroker } from "../clientBroker.js";
+import type { ModelRoleResolver } from "../modelRoles.js";
 import { PiAgentRuntime } from "../piAgentRuntime.js";
 import { RunStateMachine, transcriptEnds } from "../runState.js";
 import { ServerToolExecutor } from "../serverTools.js";
@@ -19,7 +20,7 @@ import type { HatchCandidateExecutor } from "./types.js";
  * scratch events are removed after each case; the Factory writes the durable,
  * correctly sealed trace after this function returns.
  */
-export function createHatchCandidateRuntimeExecutor(): HatchCandidateExecutor {
+export function createHatchCandidateRuntimeExecutor(models: ModelRoleResolver): HatchCandidateExecutor {
   return async (execution) => {
     const scratch = await mkdtemp(path.join(os.tmpdir(), "hatch-candidate-runtime-"));
     let broker: ClientToolBroker | undefined;
@@ -42,6 +43,7 @@ export function createHatchCandidateRuntimeExecutor(): HatchCandidateExecutor {
       // Passing an explicit empty list is materially different from relying on
       // the ordinary Runtime defaults, which include always-available tools.
       const runtime = new PiAgentRuntime({
+        models,
         toolDefinitions: []
       });
       const chunks: string[] = [];

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { InMemoryModelRoleResolver } from "../modelRoles.js";
 import http from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
@@ -95,10 +96,10 @@ test("one Pi Agent per chat persists todo without a shadow; histories and writes
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-progress-unit-"));
   const store = new WorkbenchStore(root, undefined, new MemoryAgentDefinitionRepository(await initialAgentDefinitions()));
   let instances = 0;
-  const runtime = new WorkbenchRuntime(store, { env: { HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash" }, agentFactory: options => {
-    assert.equal(options.env?.HATCH_FACTORY_LLM_PROFILE, "deepseek-v4-flash");
+  const runtime = new WorkbenchRuntime(store, { models: new InMemoryModelRoleResolver({ roles: { factory: "deepseek-v4-flash", worker: "deepseek-v4-flash" } }), role: "factory", agentFactory: options => {
+    assert.equal(options.profile.name, "deepseek-v4-flash");
     const index = ++instances; let step = 0;
-    return new Agent({ ...options.agentOptions, initialState: { ...options.initialState, model: createFactoryLlmModel({ env: options.env }) }, streamFn: () => {
+    return new Agent({ ...options.agentOptions, initialState: { ...options.initialState, model: createFactoryLlmModel({ profile: options.profile, env: options.env }) }, streamFn: () => {
       const actions = [
         { name: "list", arguments: { directory: "input" } },
         { name: "read", arguments: { path: "input/brief.md" } },
@@ -178,12 +179,12 @@ test("write uses ordinary paths and overwrites output", async () => {
 test("model readiness follows the selected provider, not the presence of a Kimi key", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-model-readiness-"));
   try {
-    for (const [env, ready] of [
-      [{ HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash", DEEPSEEK_API_KEY: "unit-test-key" }, true],
-      [{ HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash", LLM_API_KEY: "unit-test-key" }, false],
-      [{ HATCH_FACTORY_LLM_PROFILE: "kimi-k3.1-pro", LLM_API_KEY: "unit-test-key" }, true],
+    for (const [profile, env, ready] of [
+      ["deepseek-v4-flash", { DEEPSEEK_API_KEY: "unit-test-key" }, true],
+      ["deepseek-v4-flash", { LLM_API_KEY: "unit-test-key" }, false],
+      ["kimi-k3.1-pro", { LLM_API_KEY: "unit-test-key" }, true],
     ] as const) {
-      const app = await createWorkbenchServer({ root, scope: { creatorId: "11111111-1111-4111-8111-111111111111", productId: "22222222-2222-4222-8222-222222222222" }, definitions: new MemoryAgentDefinitionRepository(await initialAgentDefinitions()), env });
+      const app = await createWorkbenchServer({ root, scope: { creatorId: "11111111-1111-4111-8111-111111111111", productId: "22222222-2222-4222-8222-222222222222" }, definitions: new MemoryAgentDefinitionRepository(await initialAgentDefinitions()), models: new InMemoryModelRoleResolver({ roles: { factory: profile } }), env });
       await new Promise<void>(resolve => app.server.listen(0, "127.0.0.1", resolve));
       try {
         const address = app.server.address(); assert.ok(address && typeof address !== "string");
@@ -199,7 +200,7 @@ test("model readiness follows the selected provider, not the presence of a Kimi 
 test("Factory SSE sends complete snapshots while chat SSE stays event-specific", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-sse-"));
   const definitions = new MemoryAgentDefinitionRepository(await initialAgentDefinitions());
-  const app = await createWorkbenchServer({ root, scope: { creatorId: "11111111-1111-4111-8111-111111111111", productId: "22222222-2222-4222-8222-222222222222" }, definitions });
+  const app = await createWorkbenchServer({ root, scope: { creatorId: "11111111-1111-4111-8111-111111111111", productId: "22222222-2222-4222-8222-222222222222" }, definitions, models: new InMemoryModelRoleResolver() });
   const readSse = async (reader: ReadableStreamDefaultReader<Uint8Array>, carry = "") => {
     let buffer = carry;
     while (true) {
@@ -241,7 +242,7 @@ test("one Runtime turn composes its prompt from one definition snapshot", async 
   const definitions = await initialAgentDefinitions();
   const source = { list: async () => { reads++; return structuredClone(definitions); } };
   const store = new WorkbenchStore(root, undefined, source);
-  const runtime = new WorkbenchRuntime(store);
+  const runtime = new WorkbenchRuntime(store, { models: new InMemoryModelRoleResolver(), role: "factory" });
   try {
     const snapshot = await store.definition("research");
     const prompt = await runtime.prompt("research", snapshot);
@@ -256,7 +257,7 @@ test("Voice Agent stays conversational and never receives askuser", async () => 
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-voice-no-askuser-"));
   const definitions = await initialAgentDefinitions();
   const store = new WorkbenchStore(root, undefined, new MemoryAgentDefinitionRepository(definitions));
-  const runtime = new WorkbenchRuntime(store);
+  const runtime = new WorkbenchRuntime(store, { models: new InMemoryModelRoleResolver(), role: "factory" });
   try {
     const voice = definitions.find(definition => definition.role === "voice")!;
     const research = definitions.find(definition => definition.role === "research")!;
@@ -289,7 +290,7 @@ test("Product-scoped stores reject unowned sessions instead of adopting them", a
 test("cached Product handler accepts only a fresh BriefSpec for the same scope", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-brief-refresh-"));
   const definitions = new MemoryAgentDefinitionRepository(await initialAgentDefinitions());
-  const app = await createWorkbenchServer({ root, scope: { creatorId: "11111111-1111-4111-8111-111111111111", productId: "22222222-2222-4222-8222-222222222222", briefSpec: { old: true } }, definitions });
+  const app = await createWorkbenchServer({ root, scope: { creatorId: "11111111-1111-4111-8111-111111111111", productId: "22222222-2222-4222-8222-222222222222", briefSpec: { old: true } }, definitions, models: new InMemoryModelRoleResolver() });
   try {
     app.setScope({ creatorId: "11111111-1111-4111-8111-111111111111", productId: "22222222-2222-4222-8222-222222222222", briefSpec: { current: true } });
     assert.deepEqual(app.store.scope?.briefSpec, { current: true });

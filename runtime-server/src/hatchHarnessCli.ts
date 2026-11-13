@@ -13,6 +13,7 @@ import type { BriefSpec } from "./brief.js";
 import { FileConversationRepository } from "./conversationRepository.js";
 import type { EntitlementBinding, EntitlementLookup, EntitlementResolver } from "./entitlements.js";
 import { createRuntimeServer, type RuntimeServer } from "./index.js";
+import { InMemoryModelRoleResolver } from "./modelRoles.js";
 import { createOutputGuardFromEnvironment } from "./outputGuard.js";
 import { requireUuidV4 } from "./identity.js";
 import {
@@ -53,6 +54,8 @@ const FACTORY_HARNESS_BRIEF_SPEC: BriefSpec = {
 };
 
 export type HatchHarnessCliInput = {
+  /** The profile the `chat` role named when the candidate started: the product's model, never a Factory model. */
+  chatProfile: string;
   corpusRoot: string;
   creatorId: string;
   agentId: string;
@@ -125,6 +128,7 @@ export async function runHatchHarness(
     const store = new RuntimeStore(runtimeData);
     runtime = createRuntimeServer({
       ...(dependencies.createRuntime ? { createRuntime: dependencies.createRuntime } : {}),
+      models: new InMemoryModelRoleResolver({ roles: { chat: input.chatProfile } }),
       conversationStore: store,
       conversationRepository: new FileConversationRepository(runtimeData),
       entitlementResolver: factoryHarnessEntitlementResolver(input, verifiedSource.product.id),
@@ -747,6 +751,7 @@ function delay(milliseconds: number): Promise<void> {
 }
 
 function validateInput(input: HatchHarnessCliInput): void {
+  if (!input.chatProfile?.trim()) throw new Error("chatProfile is required");
   if (!path.isAbsolute(input.corpusRoot)) throw new Error("corpusRoot must be an absolute path");
   requireUuidV4(input.creatorId, "creatorId");
   requireUuidV4(input.agentId, "agentId/productId");

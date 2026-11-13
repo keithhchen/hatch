@@ -83,8 +83,8 @@ test("a streaming recognizer session is one generation, closed with the audio it
 
 test("a hosted run is an observation with the provider session id and outcome", async () => {
   const task = { title: "ingest 1 item(s)", prompt: "go", files: [], secrets: [] };
-  const done = new TracedHostedAgent({ run: async () => ({ sessionId: "sess-1", status: "done", text: "ok", artifacts: [] }) }, "kimi_hosted_agents", "kimi-k3");
-  const failed = new TracedHostedAgent({ run: async () => ({ sessionId: "sess-2", status: "failed", text: "", artifacts: [], error: "sandbox died" }) }, "kimi_hosted_agents", "kimi-k3");
+  const done = new TracedHostedAgent({ run: async () => ({ sessionId: "sess-1", status: "done", text: "ok", artifacts: [] }) }, "kimi_hosted_agents", async () => "kimi-k3");
+  const failed = new TracedHostedAgent({ run: async () => ({ sessionId: "sess-2", status: "failed", text: "", artifacts: [], error: "sandbox died" }) }, "kimi_hosted_agents", async () => "kimi-k3");
   await done.run(task);
   await failed.run(task);
   const [a, b] = await spansNamed("hosted-agent.run");

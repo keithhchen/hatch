@@ -4,12 +4,15 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { HatchHarnessCliInput, HatchHarnessCliResult } from "../hatchHarnessCli.js";
+import type { ModelRoleResolver } from "../modelRoles.js";
 import type { HatchCandidateExecutor } from "./types.js";
 
 const MAX_CHILD_STDOUT_BYTES = 18 * 1024 * 1024;
 const MAX_CHILD_STDERR_BYTES = 2 * 1024 * 1024;
 
 export type HatchCliCandidateExecutorOptions = {
+  /** The child has no database: the candidate runs on the model the `chat` role names when it starts, handed over as data. */
+  models: ModelRoleResolver;
   cliPath?: string;
   timeoutMs?: number;
   environment?: NodeJS.ProcessEnv;
@@ -17,14 +20,16 @@ export type HatchCliCandidateExecutorOptions = {
 
 /** Spawn the one-shot wrapper; the child itself reuses the full Hatch Runtime. */
 export function createHatchCliCandidateExecutor(
-  options: HatchCliCandidateExecutorOptions = {}
+  options: HatchCliCandidateExecutorOptions
 ): HatchCandidateExecutor {
   // The child runs from a hermetic working directory. Resolve an optional
   // relative wrapper while it still has the Factory worker's cwd.
   const cliPath = path.resolve(options.cliPath ?? fileURLToPath(new URL("../hatchHarnessCli.js", import.meta.url)));
   return async (execution) => {
     if (execution.signal?.aborted) throw abortError(execution.signal);
+    const chat = await options.models.resolve("chat");
     const input: HatchHarnessCliInput = {
+      chatProfile: chat.name,
       corpusRoot: execution.agentCorpusRoot,
       creatorId: execution.creatorId,
       agentId: execution.agentId,
@@ -180,12 +185,6 @@ function isolatedChildEnvironment(
     // Remove the obsolete near-match too; it must not hide a regression back
     // to filtering this name instead of the Registry credential above.
     "HATCH_RUNTIME_SERVICE_TOKEN",
-    // Factory uses its own model process. The evaluated product Runtime must
-    // select its normal K3.1 profile while retaining only the shared API
-    // credential and endpoint (LLM_API_KEY and OPENAI_BASE_URL).
-    "HATCH_CREATOR_MODEL",
-    "HATCH_REVIEWER_MODEL",
-    "HATCH_COMPACTION_MODEL"
   ]);
   for (const key of Object.keys(child)) {
     if (

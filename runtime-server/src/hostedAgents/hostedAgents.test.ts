@@ -62,18 +62,30 @@ test("Reconcile creates, then reuses, then updates when the declaration moves", 
 
 test("Provisioning is memoized and skills upload only when the agent must change", async () => {
   const { api, calls } = fakeApi();
-  const provisioner = new Provisioner(api, sandbox, agent, pack);
+  const provisioner = new Provisioner(api, sandbox, async () => agent, pack);
   assert.deepEqual(await provisioner.ensure(), { environmentId: "env_1", agentId: "agent_1" });
   await provisioner.ensure();
   assert.deepEqual(calls.filter(c => !c.startsWith("find")), ["createEnvironment", "uploadSkill sk", "createAgent skill_1"]);
   calls.length = 0;
-  await new Provisioner(api, sandbox, agent, pack).ensure();
+  await new Provisioner(api, sandbox, async () => agent, pack).ensure();
   assert.deepEqual(calls.filter(c => !c.startsWith("find")), [], "a fresh process with the same declaration changes nothing");
+});
+
+test("A changed model reprovisions the agent on the next run, without a new Provisioner", async () => {
+  const { api, calls } = fakeApi();
+  let model = "m1";
+  const provisioner = new Provisioner(api, sandbox, async () => ({ ...agent, model }), pack);
+  await provisioner.ensure();
+  await provisioner.ensure();
+  assert.equal(calls.filter(c => c.startsWith("createAgent")).length, 1);
+  model = "m2";
+  await provisioner.ensure();
+  assert.ok(calls.some(c => c.startsWith("updateAgent")), "the new model updates the provider's agent");
 });
 
 test("A run mounts files and secrets, reads the final message, collects artifacts and cleans up", async () => {
   const { api, calls } = fakeApi(finished("done"), { "result.json": "{}" });
-  const runner = new KimiHostedAgent(api, new Provisioner(api, sandbox, agent, pack));
+  const runner = new KimiHostedAgent(api, new Provisioner(api, sandbox, async () => agent, pack));
   const result = await runner.run({ title: "t", prompt: "p", files: [{ name: "a.txt", bytes: Buffer.from("a") }], secrets: [{ name: "K", value: "v", hosts: ["h.com"] }] });
   assert.equal(result.status, "done");
   assert.equal(result.text, "done");
@@ -84,7 +96,7 @@ test("A run mounts files and secrets, reads the final message, collects artifact
 
 test("A run that ends in an error is reported as failed, and still cleans up", async () => {
   const { api, calls } = fakeApi([{ type: "session.status", data: { status: "running" } }, { type: "session.error", data: { error: { message: "boom" } } }]);
-  const result = await new KimiHostedAgent(api, new Provisioner(api, sandbox, agent, pack)).run({ title: "t", prompt: "p", files: [], secrets: [] });
+  const result = await new KimiHostedAgent(api, new Provisioner(api, sandbox, async () => agent, pack)).run({ title: "t", prompt: "p", files: [], secrets: [] });
   assert.equal(result.status, "failed");
   assert.equal(result.error, "boom");
   assert.ok(calls.includes("archiveSession"));

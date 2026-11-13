@@ -36,7 +36,7 @@ import type { AssetDesk } from "../conversations/assets.js";
 import { log } from "../observability/log.js";
 import { bindContext, currentContext } from "../observability/context.js";
 import { memoizeSuccess } from "../memoizeSuccess.js";
-import { modelRole } from "../modelRoles.js";
+import type { ModelRoleResolver } from "../modelRoles.js";
 
 /** The Assistant is one Agent, not a Product: its conversation is bound to the account, under this id. A UUID, as every Agent id is once the identity migration has run. */
 export const ASSISTANT_AGENT_ID = "a5515700-0000-4000-8000-000000000001";
@@ -58,6 +58,8 @@ export type AssistantChatDeps = {
   /** What the Assistant sees of the Expert's Agents and tasks right now; rebuilt for every model call. */
   liveState: (accountId: string) => Promise<string>;
   env: NodeJS.ProcessEnv;
+  /** Where the Assistant's model is chosen (role `assistant`): read at the start of each Run and each compaction. */
+  models: ModelRoleResolver;
   /** Replaces the model, for tests. */
   createRuntime?: () => AgentRuntime;
   outputGuard?: OutputGuard;
@@ -114,7 +116,7 @@ export class AssistantChat implements AssistantHost {
       admission: { reserve: () => () => undefined },
       toolTimeoutMs: deps.toolTimeoutMs ?? 120_000,
       leaseMs: deps.leaseMs, sweepMs: deps.sweepMs,
-      ...(deps.compactionStrategy ? { compactionStrategy: deps.compactionStrategy } : {}),
+      ...(deps.compactionStrategy ? { compactionStrategy: deps.compactionStrategy } : { compactionProfile: () => deps.models.resolve("assistant") }),
       ...(deps.usage ? { usage: { recorder: deps.usage, attribute: attributeByScope } } : {}),
       ...(deps.usageCap ? { cap: deps.usageCap.guard(payerByScope) } : {})
     });
@@ -160,7 +162,7 @@ export class AssistantChat implements AssistantHost {
 
 
   private agentRuntime(): AgentRuntime {
-    return this.deps.createRuntime?.() ?? new PiAgentRuntime({ env: { ...this.deps.env, HATCH_LLM_PROFILE: modelRole("assistant", this.deps.env) } });
+    return this.deps.createRuntime?.() ?? new PiAgentRuntime({ env: this.deps.env, models: this.deps.models, role: "assistant" });
   }
 
   /** Where the Expert last spoke: the origin of what the Assistant starts. */

@@ -1,5 +1,5 @@
 import type { Agent, AgentOptions, StreamFn } from "@earendil-works/pi-agent-core";
-import { KIMI_MODEL, resolveFactoryLlmProfile } from "../llmProfiles.js";
+import { KIMI_MODEL, type LlmProfile } from "../llmProfiles.js";
 import { factoryAdapterFor } from "../modelAdapters/factory.js";
 import { agentFor, modelFor, modelsFor, streamFnFor } from "../modelAdapters/assemble.js";
 import type { AdapterOptions, AgentAdapterOptions, PiModel } from "../modelAdapters/adapter.js";
@@ -13,34 +13,36 @@ import type { AdapterOptions, AgentAdapterOptions, PiModel } from "../modelAdapt
 export const FACTORY_LLM_MODEL = KIMI_MODEL;
 
 export type FactoryLlmModel = PiModel;
-export type FactoryPiAdapterOptions = AdapterOptions;
+/** `profile` is what the `factory` or `worker` role resolved to for this call (see modelRoles.ts). */
+export type FactoryPiAdapterOptions = AdapterOptions & { profile: LlmProfile };
 export type FactoryPiAgentOptions = AgentAdapterOptions & {
+  profile: LlmProfile;
   /** Optional provider-native structured-output contract for one Agent. */
   responseFormat?: unknown;
 };
 
-/** The Factory profile the environment selects, and the adapter that owns its rules. */
-function selected(options: FactoryPiAdapterOptions) {
-  const profile = resolveFactoryLlmProfile(options.env ?? process.env);
+/** The call's profile, and the Factory adapter that owns its rules. */
+function selected(options: { profile: LlmProfile }) {
+  const { profile } = options;
   return { profile, adapter: factoryAdapterFor(profile) };
 }
 
 /** Build the Factory model profile without requiring an API key. */
-export function createFactoryLlmModel(options: FactoryPiAdapterOptions = {}): FactoryLlmModel {
+export function createFactoryLlmModel(options: FactoryPiAdapterOptions): FactoryLlmModel {
   const { profile, adapter } = selected(options);
   return modelFor(adapter, profile, options);
 }
 
 /** Pi still owns message conversion, tool execution, retries and the turn loop; the adapter shapes each request. */
-export function createFactoryPiStreamFn(options: FactoryPiAdapterOptions = {}): StreamFn {
+export function createFactoryPiStreamFn(options: FactoryPiAdapterOptions): StreamFn {
   const { profile, adapter } = selected(options);
   return streamFnFor(adapter, profile, options);
 }
 
 /** Build a Factory-owned Pi Agent using the low-level Pi Agent class. */
-export function createFactoryPiAgent(options: FactoryPiAgentOptions = {}): Agent {
+export function createFactoryPiAgent(options: FactoryPiAgentOptions): Agent {
   const { profile, adapter } = selected(options);
-  const { responseFormat, ...rest } = options;
+  const { responseFormat, profile: _profile, ...rest } = options;
   const agentOptions = responseFormat === undefined
     ? rest.agentOptions
     : { ...(rest.agentOptions ?? {}), onPayload: structuredOutputPayload(responseFormat, rest.agentOptions?.onPayload) };
@@ -62,7 +64,7 @@ function structuredOutputPayload(
 }
 
 /** Expose a Pi provider collection for Factory diagnostics/compaction callers. */
-export function createFactoryPiModels(options: FactoryPiAdapterOptions = {}) {
+export function createFactoryPiModels(options: FactoryPiAdapterOptions) {
   const { profile, adapter } = selected(options);
   return modelsFor(adapter, profile, options);
 }

@@ -8,6 +8,7 @@ import { UpstreamError } from "./errors/upstream.js";
 import { llmProfile, type LlmProfileName } from "./llmProfiles.js";
 import { adapterFor } from "./modelAdapters/index.js";
 import { providerFinish } from "./modelAdapters/finish.js";
+import { InMemoryModelRoleResolver } from "./modelRoles.js";
 import { PiAgentRuntime } from "./piAgentRuntime.js";
 import type { ConversationMessage, OutboundMessage, RunStart } from "./protocol.js";
 import { withStallGuard } from "./providerStall.js";
@@ -145,11 +146,10 @@ const toolDefinitions = [{ type: "function" as const, function: { name: "get_wea
 
 /** A Run on the Kimi profile against canned provider bodies; what it emitted and what it persisted for the model. */
 async function run(t: TestContext, ...entries: Entry[]): Promise<{ events: OutboundMessage[]; persisted: ConversationMessage[]; requests: Array<Record<string, any>>; failure?: Error }> {
-  const saved = { profile: process.env.HATCH_LLM_PROFILE, key: process.env.LLM_API_KEY };
-  process.env.HATCH_LLM_PROFILE = "kimi-k3.1-pro";
+  const saved = { key: process.env.LLM_API_KEY };
   process.env.LLM_API_KEY = "test-key";
   t.after(() => {
-    for (const [name, value] of [["HATCH_LLM_PROFILE", saved.profile], ["LLM_API_KEY", saved.key]] as const) {
+    for (const [name, value] of [["LLM_API_KEY", saved.key]] as const) {
       if (value === undefined) delete process.env[name]; else process.env[name] = value;
     }
   });
@@ -163,7 +163,7 @@ async function run(t: TestContext, ...entries: Entry[]): Promise<{ events: Outbo
   } as unknown as RunContext;
   let failure: Error | undefined;
   try {
-    for await (const event of new PiAgentRuntime({ toolDefinitions, env: process.env, stall: { firstEventMs: 5_000, silenceMs: 5_000 } }).run(input, context)) events.push(event);
+    for await (const event of new PiAgentRuntime({ models: new InMemoryModelRoleResolver(), toolDefinitions, env: process.env, stall: { firstEventMs: 5_000, silenceMs: 5_000 } }).run(input, context)) events.push(event);
   } catch (error) { failure = error as Error; }
   return { events, persisted, requests, failure };
 }

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { InMemoryModelRoleResolver } from "../modelRoles.js";
 import http from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
@@ -11,7 +12,7 @@ const PRODUCT = "22222222-2222-4222-8222-222222222222";
 
 test("A factory session message sent under one Idempotency-Key starts one turn, even when retried after the turn ended", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "factory-idempotency-test-"));
-  const service = new FactoryAgentsService(root, {}, new MemoryAgentDefinitionRepository(await initialAgentDefinitions()));
+  const service = new FactoryAgentsService(root, {}, new InMemoryModelRoleResolver(), new MemoryAgentDefinitionRepository(await initialAgentDefinitions()));
   const server = http.createServer((req, res) => { void service.handle({ creatorId: "creator-a", productId: PRODUCT }, "test-secret", req, res); });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");

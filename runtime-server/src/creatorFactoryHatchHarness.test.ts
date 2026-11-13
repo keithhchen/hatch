@@ -9,6 +9,9 @@ import { createHatchCliCandidateExecutor } from "./creatorLearning/cliCandidateE
 import { materializeAgentCorpusBundle } from "./creatorLearning/corpusBundle.js";
 import { FactoryFileStore } from "./creatorLearning/fileStore.js";
 import { runHatchHarness } from "./hatchHarnessCli.js";
+import { InMemoryModelRoleResolver } from "./modelRoles.js";
+
+const models = new InMemoryModelRoleResolver();
 import { PROTOCOL_VERSION } from "./protocol.js";
 
 const CANONICAL_LOCAL_TOOLS = [
@@ -79,6 +82,7 @@ test("one-shot harness binds a verified Corpus and traverses the full Hatch Runt
     }
   };
   const result = await runHatchHarness({
+    chatProfile: "kimi-k3.1-pro",
     corpusRoot,
     creatorId: "11111111-1111-4111-8111-111111111111",
     agentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
@@ -122,6 +126,7 @@ test("one-shot harness rejects a stale whole-Corpus digest before Runtime starts
     heldOut: [{}]
   });
   await assert.rejects(runHatchHarness({
+    chatProfile: "kimi-k3.1-pro",
     corpusRoot: path.join(store.directory, ...bundle.bundleRoot.split("/")),
     creatorId: "11111111-1111-4111-8111-111111111111",
     agentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
@@ -178,6 +183,7 @@ test("one-shot harness returns the last successful file delivery instead of assi
   };
 
   const result = await runHatchHarness({
+    chatProfile: "kimi-k3.1-pro",
     corpusRoot,
     creatorId: "11111111-1111-4111-8111-111111111111",
     agentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
@@ -218,6 +224,7 @@ test("one-shot harness forwards a local tool error and lets the Hatch Agent reco
   };
 
   const result = await runHatchHarness({
+    chatProfile: "kimi-k3.1-pro",
     corpusRoot,
     creatorId: "11111111-1111-4111-8111-111111111111",
     agentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
@@ -237,6 +244,7 @@ test("one-shot harness fails before advertising tools when LocalRunner is unavai
   const { bundle, corpusRoot } = await createMinimalHarnessCorpus(root, "run-no-runner");
   let runtimeCreated = false;
   await assert.rejects(runHatchHarness({
+    chatProfile: "kimi-k3.1-pro",
     corpusRoot,
     creatorId: "11111111-1111-4111-8111-111111111111",
     agentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
@@ -276,7 +284,7 @@ test("Factory candidate adapter uses a child CLI contract and propagates cancell
     systemInstructions: "Not sent as an alternative prompt path.",
     question: "One generated product"
   };
-  const execute = createHatchCliCandidateExecutor({ cliPath: successCli });
+  const execute = createHatchCliCandidateExecutor({ models, cliPath: successCli });
   const cliResult = await execute(execution);
   assert.notEqual(typeof cliResult, "string");
   assert.equal(typeof cliResult === "string" ? cliResult : cliResult.output, "CLI:One generated product");
@@ -284,7 +292,7 @@ test("Factory candidate adapter uses a child CLI contract and propagates cancell
   const waitingCli = path.join(root, "waiting.mjs");
   await writeFile(waitingCli, "process.stdin.resume(); setInterval(() => {}, 1000);\n", "utf8");
   const controller = new AbortController();
-  const pending = createHatchCliCandidateExecutor({ cliPath: waitingCli })({ ...execution, signal: controller.signal });
+  const pending = createHatchCliCandidateExecutor({ models, cliPath: waitingCli })({ ...execution, signal: controller.signal });
   controller.abort(new Error("lease lost"));
   await assert.rejects(pending, /lease lost/);
 });
@@ -318,10 +326,7 @@ test("Factory candidate child cannot inherit or dotenv-load deployment control-p
     "HATCH_DELIVERY_OUTBOX_FILE",
     "HATCH_CREATOR_FACTORY_ROOT",
     "HATCH_CREATOR_FACTORY_WORKER_ID",
-    "HATCH_AUTH_SIGNING_SECRET",
-    "HATCH_CREATOR_MODEL",
-    "HATCH_REVIEWER_MODEL",
-    "HATCH_COMPACTION_MODEL"
+    "HATCH_AUTH_SIGNING_SECRET"
   ];
   const maliciousValues = Object.fromEntries(
     isolatedNames.map((name) => [name, `malicious-${name.toLowerCase()}`])
@@ -331,9 +336,6 @@ test("Factory candidate child cannot inherit or dotenv-load deployment control-p
   maliciousValues.HATCH_FACTORY_DATABASE_URL = maliciousValues.DATABASE_URL;
   maliciousValues.HATCH_RUNTIME_DATABASE_URL = maliciousValues.DATABASE_URL;
   maliciousValues.HATCH_REGISTRY_DATABASE_URL = maliciousValues.DATABASE_URL;
-  maliciousValues.HATCH_CREATOR_MODEL = "kimi-k3.1-pro";
-  maliciousValues.HATCH_REVIEWER_MODEL = "kimi-k3.1-pro";
-  maliciousValues.HATCH_COMPACTION_MODEL = "kimi-k3.1-pro";
 
   await writeFile(path.join(root, ".env"), [
     ...Object.entries(maliciousValues).map(([name, value]) => `${name}=${value}`),
@@ -367,6 +369,7 @@ test("Factory candidate child cannot inherit or dotenv-load deployment control-p
     // A relative CLI path verifies that changing the spawned child's cwd does
     // not lose the already-built dist/harness wrapper contract.
     result = await createHatchCliCandidateExecutor({
+      models,
       cliPath: "./inspect-child.mjs",
       environment: {
         ...process.env,
@@ -471,3 +474,32 @@ async function writeFakeLocalRunner(root: string): Promise<string> {
   await chmod(runner, 0o755);
   return runner;
 }
+
+test("Factory candidate runs on the chat role's profile, never the factory role's", async (t) => {
+  const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const root = await mkdtemp(path.join(packageRoot, ".hatch-chat-profile-test-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(path.join(root, "echo-child.mjs"), [
+    "const chunks = [];",
+    "for await (const chunk of process.stdin) chunks.push(chunk);",
+    "const input = JSON.parse(Buffer.concat(chunks).toString('utf8'));",
+    "process.stdout.write(JSON.stringify({ok:true,output:JSON.stringify({chatProfile:input.chatProfile,keys:Object.keys(input)}),runId:'echo-run',corpusDigest:input.corpusDigest,finishReason:'stop',terminalStatus:'completed',protocolEvents:[{type:'turn.completed'},{type:'turn.state',status:'completed'}],protocolTraceTruncated:false}));"
+  ].join("\n"), "utf8");
+  const roles = new InMemoryModelRoleResolver({ roles: { chat: "deepseek-v4-pro", factory: "gemini-3.1-pro" } });
+  const execution = {
+    runId: "factory-chat-profile",
+    corpusVersion: 1,
+    agentCorpusRoot: "/tmp/candidate-corpus",
+    creatorId: "11111111-1111-4111-8111-111111111111",
+    agentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    corpusDigest: `sha256:${"c".repeat(64)}`,
+    systemInstructions: "unused",
+    question: "Which model?"
+  };
+  const execute = createHatchCliCandidateExecutor({ models: roles, cliPath: path.join(root, "echo-child.mjs") });
+  const first = await execute(execution);
+  assert.deepEqual(JSON.parse(typeof first === "string" ? first : first.output).chatProfile, "deepseek-v4-pro");
+  roles.setRole("chat", "kimi-k3.1-pro");
+  const second = await execute(execution);
+  assert.equal(JSON.parse(typeof second === "string" ? second : second.output).chatProfile, "kimi-k3.1-pro");
+});

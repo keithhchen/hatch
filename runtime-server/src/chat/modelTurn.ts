@@ -376,6 +376,7 @@ async function runModelTurnInternal(
     abortSignal.throwIfAborted();
     const briefSnapshot = (await conversationRepository.getConversation(input.conversation_id))?.briefSnapshot;
     const contextFor = (messages: ConversationMessage[]): RunContext => ({
+      productId: binding.productId,
       clientBroker: broker,
       assetStore,
       serverTools,

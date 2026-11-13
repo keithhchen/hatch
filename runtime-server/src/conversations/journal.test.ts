@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { InMemoryModelRoleResolver } from "../modelRoles.js";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
@@ -41,9 +42,9 @@ async function runtimeOn(log: EventLog) {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-journal-"));
   const store = new WorkbenchStore(root, { creatorId: "c1", productId: "p1" }, new MemoryAgentDefinitionRepository(await initialAgentDefinitions()));
   const runtime = new WorkbenchRuntime(store, {
-    env: { HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash" },
+    models: new InMemoryModelRoleResolver({ roles: { factory: "deepseek-v4-flash", worker: "deepseek-v4-flash" } }), role: "factory",
     journal: new EventLogJournal(log, event => event.sessionId),
-    agentFactory: factory => new Agent({ ...factory.agentOptions, initialState: { ...factory.initialState, model: createFactoryLlmModel({ env: factory.env }) }, streamFn: (_model, context) => {
+    agentFactory: factory => new Agent({ ...factory.agentOptions, initialState: { ...factory.initialState, model: createFactoryLlmModel({ profile: factory.profile, env: factory.env }) }, streamFn: (_model, context) => {
       const call = context.messages.length;
       const tool = call % 4 === 1 ? "list" : undefined;
       const message: AssistantMessage = { role: "assistant", api: "openai-completions", provider: "moonshotai-cn", model: "kimi-k3.1-pro", timestamp: Date.now(),

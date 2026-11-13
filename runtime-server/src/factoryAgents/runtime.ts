@@ -18,7 +18,8 @@ import { traceAgentTools, withLangfuseTurn, type LangfuseTurnIdentifiers } from 
 import { renderSystemReminder, type ClientAttributes } from "../surfaces/contract.js";
 import type { Journal } from "./journal.js";
 import { declareTools, studioToolSupport, type ClientSupport } from "./toolSurface.js";
-import { modelRole } from "../modelRoles.js";
+import type { LlmProfile } from "../llmProfiles.js";
+import type { ModelRole, ModelRoleResolver } from "../modelRoles.js";
 import { log } from "../observability/log.js";
 import { currentContext } from "../observability/context.js";
 import { studioAttribution, usageSink, type UsageRecorder, type UsageSink } from "../usage/usage.js";
@@ -27,6 +28,11 @@ import { UsageCapExceeded, type UsageCap } from "../usage/usageCap.js";
 const WEB: ClientAttributes = { client: "web" };
 
 export type WorkbenchRuntimeOptions = {
+  /** Where the model is chosen: read at the start of each Run, which keeps that model to its end. */
+  models: ModelRoleResolver;
+  /** The role this workspace's Agents run as: `factory` for a Product workspace, `worker` for the Assistant's. */
+  role: Extract<ModelRole, "factory" | "worker">;
+  /** What holds the model's API key and the tools' settings; the process's own when absent. */
   env?: NodeJS.ProcessEnv;
   agentFactory?: (options: FactoryPiAgentOptions) => Agent;
   extraTools?: (session: Session, signal: AbortSignal, changed: () => void) => Promise<AgentTool[]>;
@@ -65,15 +71,15 @@ export class WorkbenchRuntime {
   private background = new BackgroundCompactor<string>();
   /** When each conversation's prefix last reached the provider: the cache is alive for the policy's ttl after. */
   private touched = new Map<string, number>();
-  private strategyCache?: CompactionStrategy<AgentMessage>;
+  private readonly strategies = new Map<string, CompactionStrategy<AgentMessage>>();
   /** The client of the latest message of each running conversation. */
   private clients = new Map<string, ClientAttributes>();
   private closing = false;
   private readonly env: NodeJS.ProcessEnv;
-  constructor(readonly store: WorkbenchStore, private options: WorkbenchRuntimeOptions = {}) {
-    const env = options.env ?? process.env;
-    this.env = { ...env, HATCH_FACTORY_LLM_PROFILE: modelRole("factory", env) };
+  constructor(readonly store: WorkbenchStore, private options: WorkbenchRuntimeOptions) {
+    this.env = options.env ?? process.env;
   }
+  private profile(): Promise<LlmProfile> { return this.options.models.resolve(this.options.role); }
   private traceIdentifiers(): LangfuseTurnIdentifiers | undefined {
     const scope = this.store.scope;
     return scope ? { productId: scope.productId, userId: scope.creatorId } : undefined;
@@ -190,18 +196,21 @@ export class WorkbenchRuntime {
     }
   }
   /** Studio has no memory layer for conversations, so the strategy gets no CompactionMemory. */
-  private strategy(): CompactionStrategy<AgentMessage> {
-    if (this.strategyCache) return this.strategyCache;
+  private strategy(profile: LlmProfile): CompactionStrategy<AgentMessage> {
+    const cached = this.strategies.get(profile.name);
+    if (cached) return cached;
     const override = this.options.compaction;
-    const window = override?.contextWindow ?? createFactoryLlmModel({ env: this.env, maxTokens: 8000 }).contextWindow;
+    const window = override?.contextWindow ?? createFactoryLlmModel({ profile, env: this.env, maxTokens: 8000 }).contextWindow;
     const adapter: CompactionAdapter<AgentMessage> = { describe: describePiMessage, prune: prunePiMessage, summaryMessage: piSummaryMessage,
-      summarize: override?.summarize ?? summarizeWithPi(message => imagesAsText([message])[0]!, () => createFactoryPiModels({ env: this.env, maxTokens: 8000 })) };
-    return this.strategyCache = new CompactionStrategy(adapter, { ...policyFor(window, { outputTokens: OUTPUT_TOKENS }), ...override?.policy });
+      summarize: override?.summarize ?? summarizeWithPi(message => imagesAsText([message])[0]!, () => createFactoryPiModels({ profile, env: this.env, maxTokens: 8000 })) };
+    const strategy = new CompactionStrategy(adapter, { ...policyFor(window, { outputTokens: OUTPUT_TOKENS }), ...override?.policy });
+    this.strategies.set(profile.name, strategy);
+    return strategy;
   }
   private now(): number { return this.options.compaction?.now?.() ?? Date.now(); }
   /** One compaction, visible as `compacting` then `compacted` (both journaled with the same id); degraded also says so. */
-  private async compactNow(id: string, messages: AgentMessage[], signal: AbortSignal, extra: Partial<CompactionRequest> = {}): Promise<CompactionOutcome<AgentMessage>> {
-    const strategy = this.strategy();
+  private async compactNow(id: string, messages: AgentMessage[], signal: AbortSignal, profile: LlmProfile, extra: Partial<CompactionRequest> = {}): Promise<CompactionOutcome<AgentMessage>> {
+    const strategy = this.strategy(profile);
     const compactionId = newCompactionId();
     if (extra.force || strategy.tokensOf(messages) >= strategy.policy.trigger) this.emit(id, "compacting", { compactionId });
     const outcome = await strategy.compact(messages, { now: this.now(), cacheTouchedAt: this.touched.get(id), signal, usage: this.usageFor(id), ...extra });
@@ -213,7 +222,8 @@ export class WorkbenchRuntime {
   private scheduleBackground(id: string): void {
     void (async () => {
       if (this.closing) return;
-      const strategy = this.strategy();
+      const profile = await this.profile();
+      const strategy = this.strategy(profile);
       const tokens = strategy.tokensOf((await this.store.get(id)).context);
       const remaining = strategy.policy.cacheTtlMs - (this.now() - (this.touched.get(id) ?? Number.NEGATIVE_INFINITY));
       // Below the summary trigger, pruning waits for the provider cache to expire.
@@ -221,7 +231,7 @@ export class WorkbenchRuntime {
       this.background.schedule(id, async signal => {
         if (this.active.has(id)) return;
         const context = (await this.store.get(id)).context;
-        const outcome = await this.compactNow(id, context, signal);
+        const outcome = await this.compactNow(id, context, signal, profile);
         if (outcome.kind === "none") return;
         await this.store.update(id, state => { if (!this.active.has(id) && state.context.length === context.length) state.context = outcome.messages; });
       }, delay);
@@ -345,6 +355,8 @@ export class WorkbenchRuntime {
   }
   private async run(id: string, systemPrompt: string, history: AgentMessage[], userText: string | AgentMessage[], tools: AgentTool[], controller: AbortController, channel: "visible" | "scribe" = "visible", images: string[] = []): Promise<AgentMessage[]> {
     const factory = this.options.agentFactory ?? createFactoryPiAgent;
+    // The Run keeps the model it began with, whatever the database says later.
+    const profile = await this.profile();
     let turnCount = 0;
     let persistence = Promise.resolve();
     let persistenceError: unknown;
@@ -353,10 +365,10 @@ export class WorkbenchRuntime {
     let base = 0;
     if (channel === "visible") {
       // Fallback before a turn: a conversation already over the trigger is compacted now.
-      const early = await this.compactNow(id, history, controller.signal);
+      const early = await this.compactNow(id, history, controller.signal, profile);
       if (early.kind !== "none") { history = early.messages; await this.store.update(id, state => { state.context = history; }); }
     }
-    const agent = factory({ env: this.env, maxTokens: 32768, initialState: { systemPrompt, messages: history, tools: traceAgentTools(tools) }, agentOptions: {
+    const agent = factory({ profile, env: this.env, maxTokens: 32768, initialState: { systemPrompt, messages: history, tools: traceAgentTools(tools) }, agentOptions: {
       toolExecution: "sequential",
       // askuser is a turn boundary. The tool result is persisted as a normal
       // tool result, then the next user message starts a fresh Agent turn.
@@ -374,7 +386,7 @@ export class WorkbenchRuntime {
         this.compacting.add(id);
         try {
           // Between tool steps: the same strategy, with the cache clock of the previous model call.
-          const outcome = await this.compactNow(id, effective, signal ?? controller.signal);
+          const outcome = await this.compactNow(id, effective, signal ?? controller.signal, profile);
           this.touched.set(id, this.now());
           if (outcome.kind === "none") return forModel(effective);
           // The tail is the same message objects as before, so what was replaced is everything in front of it.
@@ -424,12 +436,12 @@ export class WorkbenchRuntime {
       // the same step as the last empty check, so a later message waits for the next pass instead of vanishing.
       while (agent.hasQueuedMessages() && !controller.signal.aborted) await agent.continue();
       // A provider overflow is recovered by compacting harder and continuing, a bounded number of times.
-      const strategy = this.strategy();
+      const strategy = this.strategy(profile);
       for (let attempt = 1; channel === "visible" && !controller.signal.aborted && attempt <= strategy.policy.maxOverflowRetries; attempt++) {
         const last = agent.state.messages.at(-1);
         if (last?.role !== "assistant" || last.stopReason !== "error" || !isContextOverflow(last, this.options.compaction?.contextWindow)) break;
         await persistence;
-        const outcome = await this.compactNow(id, agent.state.messages.slice(0, -1), controller.signal, { force: true, tailScale: 0.5 ** attempt });
+        const outcome = await this.compactNow(id, agent.state.messages.slice(0, -1), controller.signal, profile, { force: true, tailScale: 0.5 ** attempt });
         if (outcome.kind === "none") break;
         await this.store.update(id, state => { state.context = outcome.messages; });
         replaced = []; base = 0;

@@ -17,11 +17,11 @@ const countTrue = (flags) => Object.values(flags).filter(Boolean).length;
 const lastCompleted = async (probe, conversationId) => (await probe.journal(conversationId)).filter((e) => e.type === "compaction.completed").at(-1);
 
 class Compaction extends Scenario {
-  constructor() { super({ id: 10, title: "Compaction: long real conversation, survival, background cost, preemption, one IM notice", stackOptions: { llmProfile: "kimi-k3.1-pro", registryEnv: { HATCH_FACTORY_LLM_PROFILE: "kimi-k3.1-pro" } } }); }
+  constructor() { super({ id: 10, title: "Compaction: long real conversation, survival, background cost, preemption, one IM notice", stackOptions: { llmProfile: "kimi-k3.1-pro" } }); }
 
   async run(stack, rec) {
     if (!process.env.LLM_API_KEY) rec.block("LLM_API_KEY (Kimi) is not set: compaction and this profile need it");
-    rec.note(`The summarize trigger derives from Kimi K3.1's 262,144-token window (${TRIGGER} estimated tokens, chars/4) and no env var overrides it, so the conversation really is that large. Padding text is long runs of '=' (the product counts chars/4, Kimi far fewer real tokens) to keep the run affordable; this changes only how cheaply the trigger is reached. Stack option: registryEnv HATCH_FACTORY_LLM_PROFILE=kimi-k3.1-pro, because the Registry rejects the Runtime-only profile name kimi-k3.1-pro.`);
+    rec.note(`The summarize trigger derives from Kimi K3.1's 262,144-token window (${TRIGGER} estimated tokens, chars/4) and the chat role's row (hatch_model_roles) names that model, so the conversation really is that large. Padding text is long runs of '=' (the product counts chars/4, Kimi far fewer real tokens) to keep the run affordable; this changes only how cheaply the trigger is reached.`);
     rec.note("Observed while building this (not reproduced by the final steps): asking Kimi for a 450-word text on Chat HTTP failed the Run with reason \"file_write is not available on mcp. Available on: desktop, cli.\"; the Run ended `failed` after streaming the text instead of the model getting a tool error. The numbered-list reply used here avoids it.");
     rec.note("Prune stage (old tool results after the provider cache expires) and the failure/timeout (degraded) path are NOT exercised: no tool is called here, and the summarizer shares the chat model's provider config, so no env fails only the compaction call.");
     const probe = new CompactionProbe(stack.runtimePool);
@@ -245,7 +245,7 @@ const nonNoticeFree = (sends) => sends.filter((s) => NOTICE.test(s.body.text));
 
 /** Cold provider cache: a conversation between the prune and summarize thresholds that holds no tool results has nothing to prune. */
 class ColdCache extends Scenario {
-  constructor() { super({ id: "10b", title: "Compaction: cold cache with nothing to prune must not announce a compaction", stackOptions: { llmProfile: "kimi-k3.1-pro", registryEnv: { HATCH_FACTORY_LLM_PROFILE: "kimi-k3.1-pro" }, runtimeEnv: { HATCH_PROVIDER_CACHE_TTL_MS: "2000" } } }); }
+  constructor() { super({ id: "10b", title: "Compaction: cold cache with nothing to prune must not announce a compaction", stackOptions: { llmProfile: "kimi-k3.1-pro", runtimeEnv: { HATCH_PROVIDER_CACHE_TTL_MS: "2000" } } }); }
   async run(stack, rec) {
     if (!process.env.LLM_API_KEY) rec.block("LLM_API_KEY (Kimi) is not set");
     rec.note("Tool setting: HATCH_PROVIDER_CACHE_TTL_MS=2000 (default 5 minutes) so the cache goes cold within seconds. The conversation is about 190k estimated tokens (prune threshold 131k, summarize trigger 219.5k) and has no tool calls.");

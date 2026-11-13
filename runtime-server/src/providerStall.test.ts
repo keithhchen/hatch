@@ -6,7 +6,7 @@ import { createKimiModel } from "./piModel.js";
 import { withStallGuard } from "./providerStall.js";
 import { UpstreamError } from "./errors/upstream.js";
 import { failures, UPSTREAM_CODE } from "./errors/failures.js";
-import { resolveLlmProfile } from "./llmProfiles.js";
+import { llmProfile } from "./llmProfiles.js";
 
 const limits = { firstEventMs: 40, silenceMs: 40 };
 const model = createKimiModel({ env: { LLM_API_KEY: "test-key" } } as never);
@@ -109,7 +109,7 @@ test("the first event and the silence between events have their own limits", asy
 });
 
 test("a reasoning Gemini profile asks again when its first event never comes, and still bounds it", () => {
-  const { stall } = resolveLlmProfile({ HATCH_LLM_PROFILE: "gemini-3.1-pro" });
+  const { stall } = llmProfile("gemini-3.1-pro");
   assert.ok(stall && Number.isFinite(stall.firstEventMs) && (stall.restarts ?? 0) > 0);
 });
 

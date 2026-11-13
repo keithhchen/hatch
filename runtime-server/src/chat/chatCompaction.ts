@@ -56,8 +56,8 @@ export class ChatCompaction implements RunCompactions {
     repository: Repository;
     store: Pick<RuntimeStore, "readConversation" | "readCompactionState" | "lastActivityAt">;
     hub: RunEventHub;
-    /** Built on first use: its policy needs the model's window. */
-    strategy: () => CompactionStrategy<RuntimeCompactionMessage>;
+    /** Built when a conversation needs it: its policy needs the window of the model that conversation runs on, which the database may change. */
+    strategy: (conversationId: string) => Promise<CompactionStrategy<RuntimeCompactionMessage>>;
     executorId: string;
     now?: () => number;
     /** How often a running background compaction checks whether a new message asked it to stop. */
@@ -94,7 +94,7 @@ export class ChatCompaction implements RunCompactions {
     if (usage) this.sinks.set(conversation.id, usage);
     let overflows = 0;
     const compact = async (messages: RuntimeCompactionMessage[], request: Request): Promise<CompactionCheckpoint | undefined> => {
-      const strategy = this.deps.strategy();
+      const strategy = await this.deps.strategy(conversation.id);
       // Most turns are small: decide that before touching the store.
       if (!request.force && strategy.tokensOf(messages) < Math.min(strategy.policy.prune, strategy.policy.trigger)) return undefined;
       const now = (this.deps.now ?? Date.now)();
@@ -122,7 +122,7 @@ export class ChatCompaction implements RunCompactions {
       ifNeeded: (messages, phase) => compact(messages, { trigger: "auto", phase, reason: "context_limit", turnWaiting: phase === "pre_turn" }),
       manual: (messages) => compact(messages, { trigger: "manual", phase: "standalone_turn", reason: "user_requested", force: true }),
       recoverFromOverflow: async (messages) => {
-        if (overflows >= this.deps.strategy().policy.maxOverflowRetries) return undefined;
+        if (overflows >= (await this.deps.strategy(conversation.id)).policy.maxOverflowRetries) return undefined;
         overflows += 1;
         // Each attempt keeps half the tail of the one before.
         return compact(messages, { trigger: "auto", phase: "overflow_recovery", reason: "provider_overflow", force: true, tailScale: 0.5 ** overflows });
@@ -132,7 +132,7 @@ export class ChatCompaction implements RunCompactions {
 
   private async inBackground(run: Pick<ConversationRunRecord, "id" | "conversationId">, signal: AbortSignal): Promise<void | { again: number }> {
     const { repository, store } = this.deps;
-    const strategy = this.deps.strategy();
+    const strategy = await this.deps.strategy(run.conversationId);
     const compactionId = newCompactionId();
     const claim = await repository.beginCompaction({ id: compactionId, conversationId: run.conversationId, executorId: this.deps.executorId, leaseMs: strategy.policy.timeoutMs * 2 });
     if (!claim.claimed) return;

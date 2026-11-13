@@ -18,6 +18,7 @@ import {
   type SkillRecord
 } from "./skills.js";
 import type { ActivatedSkill, RuntimeStore } from "./store.js";
+import type { ModelRoleResolver } from "./modelRoles.js";
 import type { ToolBridge } from "./toolBridge.js";
 
 export type SkillRunArgs = {
@@ -27,6 +28,9 @@ export type SkillRunArgs = {
 };
 
 type SkillRuntimeOptions = {
+  /** Where the worker's model (and its compaction's) is chosen, for the Product's chat. */
+  models: ModelRoleResolver;
+  productId?: string;
   parentInput: RunStart;
   parentState: RunStateMachine;
   sessionSkills: RuntimeSessionSkills;
@@ -48,7 +52,7 @@ type SkillRuntimeOptions = {
   emit: (event: OutboundMessage) => Promise<void>;
   createWorkerRuntime?: () => AgentRuntime;
   /** The shared compaction strategy; the worker's session is compacted as any conversation is. */
-  compaction?: () => CompactionStrategy<RuntimeCompactionMessage>;
+  compaction?: () => CompactionStrategy<RuntimeCompactionMessage> | Promise<CompactionStrategy<RuntimeCompactionMessage>>;
 };
 
 /**
@@ -61,6 +65,12 @@ export class SkillRuntime {
   private readonly cancelledParents = new Set<string>();
 
   constructor(private readonly options: SkillRuntimeOptions) {}
+
+  /** The worker's compaction runs on the model the Product's `chat` role names, read when the worker first needs it. */
+  private async compactionStrategy(): Promise<CompactionStrategy<RuntimeCompactionMessage>> {
+    if (this.options.compaction) return this.options.compaction();
+    return chatCompactionStrategy(await this.options.models.resolve("chat", { productId: this.options.productId }));
+  }
 
   async execute(args: SkillRunArgs): Promise<Record<string, unknown>> {
     const skill = findSkill(args.skill_id, this.options.sessionSkills.records);
@@ -147,9 +157,10 @@ export class SkillRuntime {
         }
       }
     };
-    let compaction: CompactionStrategy<RuntimeCompactionMessage> | undefined;
+    let compaction: Promise<CompactionStrategy<RuntimeCompactionMessage>> | undefined;
     let windowState: ReturnType<typeof nextWindow> | undefined;
     const workerContext: RunContext = {
+      ...(this.options.productId ? { productId: this.options.productId } : {}),
       clientBroker: this.options.clientBroker,
       serverTools: this.options.serverTools,
       toolBridge: this.options.toolBridge,
@@ -172,7 +183,8 @@ export class SkillRuntime {
       },
       compactMessagesIfNeeded: async (messages) => {
         // Between tool steps the provider's cache is alive, so only a summary or a bounded tail can apply.
-        const outcome = await (compaction ??= (this.options.compaction ?? chatCompactionStrategy)()).compact(messages, { now: Date.now(), cacheTouchedAt: Date.now(), signal: controller.signal });
+        const strategy = await (compaction ??= this.compactionStrategy());
+        const outcome = await strategy.compact(messages, { now: Date.now(), cacheTouchedAt: Date.now(), signal: controller.signal });
         if (outcome.kind === "none") return undefined;
         const replacement = outcome.messages as ConversationMessage[];
         workerMessages.splice(0, workerMessages.length, ...replacement);
@@ -194,7 +206,7 @@ export class SkillRuntime {
       }
     };
 
-    const runtime = this.options.createWorkerRuntime?.() ?? createAgentRuntime();
+    const runtime = this.options.createWorkerRuntime?.() ?? createAgentRuntime(this.options.models);
     try {
       let output = "";
       for await (const event of runtime.run(workerInput, workerContext)) {

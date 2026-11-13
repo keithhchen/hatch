@@ -1,19 +1,13 @@
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { createFactoryPiAgent, type FactoryPiAdapterOptions } from "./factoryPi.js";
-import { resolveFactoryLlmProfile } from "../llmProfiles.js";
 import { factoryAdapterFor } from "../modelAdapters/factory.js";
 import { UpstreamError } from "../errors/upstream.js";
 import { createFactorySubmissionProtocol } from "./factorySubmission.js";
 import type { FactoryPromptFailureTelemetry, FactoryPromptRunner } from "./types.js";
-import { modelRole } from "../modelRoles.js";
+import type { ModelRoleResolver } from "../modelRoles.js";
 
-const FACTORY_LLM_PROFILE = resolveFactoryLlmProfile({ HATCH_FACTORY_LLM_PROFILE: modelRole("factory") });
 /** A single Factory turn must not hold a worker lease indefinitely. */
 export const FACTORY_LLM_WALL_CLOCK_TIMEOUT_MS = 15 * 60_000;
-/** Total input + preserved multi-turn history + output capacity. */
-export const FACTORY_LLM_CONTEXT_WINDOW = FACTORY_LLM_PROFILE.contextWindow;
-/** Moonshot's documented Kimi K3.1 default maximum for one completion. */
-export const FACTORY_LLM_MAX_COMPLETION_TOKENS = FACTORY_LLM_PROFILE.maxTokens;
 /**
  * A provider may end a normal assistant turn without using the host-owned
  * submission tools even though tools are available. Give the protocol one
@@ -22,7 +16,7 @@ export const FACTORY_LLM_MAX_COMPLETION_TOKENS = FACTORY_LLM_PROFILE.maxTokens;
 const MAX_SUBMISSION_REPAIR_TURNS = 1;
 const SUBMISSION_REPAIR_PROMPT = `Protocol repair required: the previous assistant turn ended without an accepted finalize tool call. Do not return the artifact as prose. Continue from the host-retained draft, use the available local submission tool(s), and call the contract's required finalize tool as the last tool call. If no draft was retained, submit the complete result first, then finalize. Stop immediately after the host accepts FINALIZED.`;
 
-type FactoryLlmAdapterOptions = FactoryPiAdapterOptions & {
+type FactoryLlmAdapterOptions = Omit<FactoryPiAdapterOptions, "profile"> & {
   /** Hard deadline for one prompt, in addition to the HTTP idle timeout. */
   wallClockTimeoutMs?: number;
 };
@@ -49,16 +43,19 @@ function failureCode(
 /**
  * Build a one-shot Factory prompt runner on the same Pi Agent/stream primitive
  * as Hatch, without leaking provider selection into Factory workflow code.
+ * Each prompt runs on the model the `factory` role names when it starts.
  */
 export function createFactoryLlmPromptRunner(
+  models: ModelRoleResolver,
   adapterOptions: FactoryLlmAdapterOptions = {}
 ): FactoryPromptRunner {
   return async (options): Promise<string> => {
-    const selected = resolveFactoryLlmProfile(adapterOptions.env ?? process.env);
+    const selected = await models.resolve("factory");
     const adapter = factoryAdapterFor(selected);
     const submission = createFactorySubmissionProtocol(options.purpose, options.outputContract);
     const agent = createFactoryPiAgent({
       ...adapterOptions,
+      profile: selected,
       initialState: {
         systemPrompt: `${options.systemPrompt}\n\n# Local Factory submission protocol\n${submission.systemInstructions}`,
         messages: [],
@@ -202,4 +199,3 @@ export function createFactoryLlmPromptRunner(
   };
 }
 
-export const runFactoryLlmPrompt = createFactoryLlmPromptRunner();

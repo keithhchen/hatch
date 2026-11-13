@@ -43,28 +43,30 @@ export type Provisioned = { environmentId: string; agentId: string };
 
 /**
  * Keeps one environment and one agent on the provider in step with Hatch's declarations.
- * Provisioning is memoized per declaration, so every run after the first costs two lookups at most.
+ * The agent is declared afresh for each run (its model is a database choice), and provisioning is memoized per
+ * declaration, so every run with the same declaration costs two lookups at most.
  */
 export class Provisioner {
   private current?: { digest: string; value: Promise<Provisioned> };
   constructor(
     private readonly api: KimiHostedApi,
     private readonly sandbox: SandboxSpec,
-    private readonly agent: AgentSpec,
+    private readonly agent: () => Promise<AgentSpec>,
     private readonly pack: (dir: string) => Promise<Buffer>,
   ) {}
 
-  ensure(signal?: AbortSignal): Promise<Provisioned> {
-    const digest = specDigest({ sandbox: this.sandbox, agent: this.agent });
+  async ensure(signal?: AbortSignal): Promise<Provisioned> {
+    const agent = await this.agent();
+    const digest = specDigest({ sandbox: this.sandbox, agent });
     if (this.current?.digest !== digest) {
-      const value = this.provision(signal);
+      const value = this.provision(agent, signal);
       value.catch(() => { if (this.current?.value === value) this.current = undefined; });
       this.current = { digest, value };
     }
     return this.current.value;
   }
 
-  private async provision(signal?: AbortSignal): Promise<Provisioned> {
+  private async provision(agentSpec: AgentSpec, signal?: AbortSignal): Promise<Provisioned> {
     const api = this.api;
     const environment = await reconcile<SandboxSpec>({
       find: name => api.findEnvironment(name),
@@ -72,13 +74,13 @@ export class Provisioner {
       update: (id, spec, description) => api.updateEnvironment(id, spec, description),
     })(this.sandbox, specDigest(this.sandbox));
     // Skill code is part of the agent: its bytes join the digest, and packages upload only when the agent must change.
-    const packages = await Promise.all(this.agent.skills.map(async skill => ({ name: skill.name, zip: await this.pack(skill.dir) })));
+    const packages = await Promise.all(agentSpec.skills.map(async skill => ({ name: skill.name, zip: await this.pack(skill.dir) })));
     const uploaded = memo(() => Promise.all(packages.map(p => api.uploadSkill(p.name, p.zip))));
     const agent = await reconcile<AgentSpec>({
       find: name => api.findAgent(name),
       create: async (spec, description) => api.createAgent(spec, await uploaded(), description),
       update: async (id, spec, description) => api.updateAgent(id, spec, await uploaded(), description),
-    })(this.agent, specDigest({ agent: this.agent, skills: packages.map(p => createHash("sha256").update(p.zip).digest("hex")) }));
+    })(agentSpec, specDigest({ agent: agentSpec, skills: packages.map(p => createHash("sha256").update(p.zip).digest("hex")) }));
     await until(async () => {
       const status = await api.environmentStatus(environment.id);
       if (status.buildStatus === "failed") throw new Error(`Hosted sandbox build failed${status.error ? `: ${status.error}` : ""}`);
