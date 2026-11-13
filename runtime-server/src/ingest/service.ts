@@ -206,13 +206,15 @@ export class IngestService {
 
   private async process(job: IngestJob, sources: Source[]): Promise<Map<string, ItemOutcome>> {
     const results = await this.deps.engine.ingest(job.accountId, sources, job.context);
-    const labels = new Map(sources.map(source => [source.id, labelOf(source)]));
-    const outcomes = await Promise.all(results.filter(result => labels.has(result.id)).map(async (result): Promise<[string, ItemOutcome]> =>
-      [result.id, await this.place(job, { id: result.id, label: labels.get(result.id)! }, result)]));
+    const byId = new Map(sources.map(source => [source.id, source]));
+    const outcomes = await Promise.all(results.filter(result => byId.has(result.id)).map(async (result): Promise<[string, ItemOutcome]> => {
+      const source = byId.get(result.id)!;
+      return [result.id, await this.place(job, { id: result.id, label: labelOf(source), ...(source.kind === "file" ? { upload: { objectKey: source.objectKey, name: source.name } } : {}) }, result)];
+    }));
     return new Map(outcomes);
   }
 
-  private async place(job: IngestJob, item: { id: string; label: string }, result: Result): Promise<ItemOutcome> {
+  private async place(job: IngestJob, item: { id: string; label: string; upload?: { objectKey: string; name: string } }, result: Result): Promise<ItemOutcome> {
     const session = result.session ? { session: result.session } : {};
     if (result.status === "failed") return { status: "failed", error: result.error ?? "Ingest failed", ...session };
     try {

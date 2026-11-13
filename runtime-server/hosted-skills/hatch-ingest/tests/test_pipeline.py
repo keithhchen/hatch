@@ -109,7 +109,7 @@ class IngestorTest(unittest.TestCase):
             return buf.getvalue()
         good, evil = self.ingestor().run([self.file("g", "good.zip", zipped({"a.md": "alpha"})),
                                           self.file("e", "evil.zip", zipped({"../x.txt": "x"}))])
-        self.assertEqual((good.status, good.original, good.markdown, good.error), ("ok", "g.original.zip", "g.content.md", None))
+        self.assertEqual((good.status, good.original, good.markdown, good.error), ("ok", None, "g.content.md", None))
         self.assertIn("## a.md\n\nalpha", (self.tmp / "out" / "g.content.md").read_text())
         self.assertEqual(evil.status, "failed")
         self.assertIn("unsafe path", evil.error)
@@ -123,12 +123,12 @@ class IngestorTest(unittest.TestCase):
         self.assertEqual([x.status for x in r], ["ok", "failed", "partial"])
         self.assertIn("download failed: HTTP 403", r[1].error)
         self.assertNotIn("Signature", r[1].error)
-        self.assertEqual((r[0].original, r[0].markdown), ("i1.original.txt", "i1.content.md"))
+        self.assertEqual((r[0].original, r[0].markdown), (None, "i1.content.md"))
         md = (self.tmp / "out" / "i1.content.md").read_text()
         self.assertIn("hello 世界", md)
         self.assertIn('converter: "text"', md)
         self.assertIsNone(r[2].markdown)  # passthrough keeps the original, invents nothing
-        self.assertTrue((self.tmp / "out" / "i3.original.xyz").exists())
+        self.assertEqual(sorted(p.name for p in (self.tmp / "out").glob("*.original.*")), [], "an uploaded file is never returned as an artifact")
 
     def test_download_is_verified_against_size_and_digest(self):
         import hashlib

@@ -22,7 +22,8 @@ export type Placement = { markdown_path?: string; original_ref?: string };
 
 /** Puts a result where the Product keeps its material. */
 export interface IngestSink {
-  store(scope: { accountId: string; productId: string; jobId: string }, item: { id: string; label: string }, result: Result): Promise<Placement>;
+  /** `upload` is the staged file an item came from: its original is that file, copied inside the store. */
+  store(scope: { accountId: string; productId: string; jobId: string }, item: { id: string; label: string; upload?: { objectKey: string; name: string } }, result: Result): Promise<Placement>;
 }
 
 export interface IngestJobRepository {

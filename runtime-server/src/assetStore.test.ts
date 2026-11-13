@@ -35,6 +35,7 @@ class FakeObjectStore implements ArtifactObjectStore {
   }
 
   async presign(): Promise<never> { throw new Error("not used"); }
+  async copy(): Promise<never> { throw new Error("not used"); }
   async head(key: string) { const bytes = this.objects.get(key); return bytes && { bytes: bytes.length }; }
 }
 

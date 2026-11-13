@@ -1,6 +1,6 @@
 """Delivery adapter: flat output dir with unique basenames (artifact store keys by basename).
 
-  <id>.original.<ext>   <id>.content.md   result.json   profile.<profile-id>.json
+  <id>.original.<ext> (links only)   <id>.content.md   result.json   profile.<profile-id>.json
 """
 from __future__ import annotations
 
@@ -24,9 +24,11 @@ class OutputDelivery:
         root.mkdir(parents=True, exist_ok=True)
 
     def deliver(self, item: Item, payload: Payload, converted: Converted) -> ItemResult:
-        ext = converted.original.suffix.lower() or ".bin"
-        original = f"{item.id}.original{ext}"
-        shutil.copy2(converted.original, self.root / original)
+        # An uploaded file's original already sits in object storage and is copied there server-side: only links return one.
+        original = None
+        if item.kind == "link":
+            original = f"{item.id}.original{converted.original.suffix.lower() or '.bin'}"
+            shutil.copy2(converted.original, self.root / original)
         markdown = None
         if converted.body.strip() or converted.notes:
             markdown = f"{item.id}.content.md"

@@ -30,7 +30,7 @@ Turns each item into `original` + `content.md`. Never summarize, never invent me
    - Missing tool/format: retry with another approach; otherwise leave it and report.
 4. `save_artifact` every file in `/mnt/agents/output/` (the script prints them as `SAVE <name>`).
    Output is flat; names are unique because artifacts are keyed by basename:
-   - `<id>.original.<ext>` - re-encoded media (mp4 H.264 720p / m4a AAC 64k mono), images
+   - `<id>.original.<ext>` - links only (an uploaded file is already stored; never write its original): re-encoded media (mp4 H.264 720p / m4a AAC 64k mono), images
      (JPEG q85, longest edge 2048, PNG kept if alpha), documents untouched, links: main media
      or page PDF or HTML snapshot
    - `<id>.content.md` - YAML frontmatter + full text / transcript

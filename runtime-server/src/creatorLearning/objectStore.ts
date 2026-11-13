@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { createRequire } from "node:module";
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import path from "node:path";
 import * as CredentialPackage from "@alicloud/credentials";
 
@@ -25,6 +26,8 @@ export interface ArtifactObjectStore {
   put(key: string, content: Buffer | string, options?: ObjectStorePutOptions): Promise<ObjectStoreObject>;
   get(key: string): Promise<Buffer>;
   list(prefix: string): Promise<string[]>;
+  /** Copies one object to a new key inside the store, without its bytes passing through the caller. An existing target is left as it is. */
+  copy(from: string, to: string): Promise<void>;
   presign(key: string, options: PresignOptions): Promise<PresignedRequest>;
   /** Size and content type of an object, without reading it; undefined when there is none. */
   head(key: string): Promise<{ bytes: number; contentType?: string } | undefined>;
@@ -66,6 +69,14 @@ export class LocalArtifactObjectStore implements ArtifactObjectStore {
     if (!(expires > Date.now()) || given.length !== expected.length || !timingSafeEqual(given, expected)) throw new Error("The upload link is invalid or expired");
     if ((contentType ?? "").split(";")[0]!.trim() !== type) throw new Error("The upload's Content-Type does not match the link");
     await this.put(key, bytes, { contentType: type, immutable: false });
+  }
+
+  async copy(from: string, to: string): Promise<void> {
+    const destination = containedPath(this.root, to);
+    await mkdir(path.dirname(destination), { recursive: true });
+    await copyFile(containedPath(this.root, from), destination, fsConstants.COPYFILE_EXCL).catch((error: unknown) => { if (!isFileAlreadyExists(error)) throw error; });
+    const type = this.types.get(from);
+    if (type) this.types.set(to, type);
   }
 
   async head(key: string) {
@@ -115,6 +126,7 @@ type AliOssClient = {
   generateObjectUrl(name: string): string;
   get(name: string, options?: Record<string, unknown>): Promise<{ content: Buffer }>;
   delete(name: string): Promise<unknown>;
+  copy(name: string, source: string, options?: Record<string, unknown>): Promise<unknown>;
   head(name: string): Promise<{ res?: { headers?: Record<string, unknown> } }>;
   signatureUrl(name: string, options: Record<string, unknown>): string;
   putACL(name: string, acl: "private" | "public-read" | "public-read-write"): Promise<{ res?: { status?: number } }>;
@@ -279,6 +291,15 @@ export class AliyunArtifactObjectStore implements ArtifactObjectStore {
       method: options.method, expires: options.expiresSeconds, ...(options.method === "PUT" ? { "Content-Type": contentType } : {})
     });
     return { url, method: options.method, headers: options.method === "PUT" ? { "Content-Type": contentType } : {}, expiresAt: new Date(Date.now() + options.expiresSeconds * 1000).toISOString() };
+  }
+
+  /** Server-side CopyObject: the bytes never leave OSS. The immutable-key header makes a repeat a no-op. */
+  async copy(from: string, to: string): Promise<void> {
+    try {
+      await (await this.client()).copy(objectKey(this.options.prefix, to), objectKey(this.options.prefix, from), { headers: { "x-oss-forbid-overwrite": "true" } });
+    } catch (error) {
+      if (!isAlreadyExists(error)) throw this.withContext("COPY", error);
+    }
   }
 
   async head(key: string) {

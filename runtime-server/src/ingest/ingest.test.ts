@@ -294,14 +294,16 @@ test("Without the hosted agent, hosted items fail with a clear error while plain
 });
 
 test("A hosted run lands its Markdown and original; a sink failure fails only that item", async () => {
-  const { provider } = fakeHosted(() => ({ items: [{ id: "i1", status: "ok", original: "r.pdf", markdown: "r.md" }, { id: "i2", status: "partial", markdown: "s.md", error: "no audio" }], files: { "r.pdf": "%PDF", "r.md": "# r", "s.md": "# s" } }));
+  const { provider } = fakeHosted(() => ({ items: [{ id: "i1", status: "ok", original: "r.pdf", markdown: "r.md" }, { id: "i2", status: "partial", markdown: "s.md", error: "no audio" }], files: { "r.pdf": "RE-ENCODED", "r.md": "# r", "s.md": "# s" } }));
   const hosted = new HostedEngine(new HostedIngest(provider, new MemoryBrowserProfiles()), FAKE_STAGED);
-  const { service, manual, settle, stage } = await harness({ hosted });
+  const { service, manual, settle, stage, objects } = await harness({ hosted });
   const job = await service.submit(ACCOUNT, PRODUCT, [await stage("r.pdf", "%PDF"), { url: "https://x.test/video" }]);
   await settle();
   const done = (await service.get(ACCOUNT, PRODUCT, job.id))!;
   assert.deepEqual(done.items.map(item => [item.status, item.markdown_path, item.error]), [["ok", "input/manual/r.md", undefined], ["partial", "input/manual/x.test-video.md", "no audio"]]);
   assert.match(done.items[0]!.original_ref!, /\/ingest\/.+\/i1\/r\.pdf$/);
+  assert.equal((await objects.get(done.items[0]!.original_ref!)).toString(), "%PDF", "an uploaded file's original is the upload itself, copied in the store, not what the agent returned");
+  assert.match(done.items[1]!.original_ref ?? "", /^$/, "a link without an original artifact has none");
   assert.deepEqual(done.items.map(item => item.session?.id), ["sesn_1", "sesn_1"]);
   assert.deepEqual(publicJob(done).items.map(item => item.session?.provider), ["kimi_hosted_agents", "kimi_hosted_agents"]);
   assert.equal(manual.files.size, 2);
