@@ -339,7 +339,11 @@ workspace.diff
 tool_call.request
 turn.completed
 turn.failed
+session.error
+frame.rejected
 ```
+
+`turn.failed` means a Run ended without a reply; a Run the user stopped ends as `turn.failed` with `error.code` `run_cancelled`, which clients show as a cancellation. `session.error` is a refused session (hello, binding, an unreadable frame). `frame.rejected {run_id, error}` is one refused frame about a Run (a stale `turn.cancel`, an unknown `tool_call.result`); the Run is as it was.
 
 Future restricted-mode outbound schema entries:
 

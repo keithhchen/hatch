@@ -9,6 +9,7 @@ import {
 import { EntitlementError } from "../entitlements.js";
 import { creatorAgentView } from "../chat/creatorAgentCatalog.js";
 import { errorMessage } from "../chat/modelTurn.js";
+import { AgentReleaseUnavailableError } from "../runtimeCorpusResolver.js";
 import { SocketSink, projecting } from "../chat/sinks.js";
 import {
   conversationBinding,
@@ -335,16 +336,19 @@ export async function handleRuntimeSocket(
           }
         }
       } catch (error) {
-        const malformed = error instanceof SyntaxError || error instanceof ZodError;
-        const failure = {
-          code: error instanceof EntitlementError || error instanceof ConversationRepositoryError ? error.code : malformed ? "invalid_frame" : "protocol_error",
-          // A person may read this: never the raw validation report.
-          message: malformed ? "The Runtime could not accept that message." : errorMessage(error)
-        };
         const rawMessage = raw as { type?: unknown; run_id?: unknown } | undefined;
-        // A message the Runtime could not read never started its Run, so that Run ends here; anything else is a refusal of the session.
-        if (rawMessage?.type === "client.message" && typeof rawMessage.run_id === "string") await send({ type: "turn.failed", run_id: rawMessage.run_id, error: failure });
-        else await sessionError(failure.code, failure.message);
+        const unreadableMessage = (error instanceof SyntaxError || error instanceof ZodError) && rawMessage?.type === "client.message" && typeof rawMessage.run_id === "string";
+        // A message the Runtime could not read never started its Run, so that Run ends here, with text a person may read (never the validation report).
+        if (unreadableMessage) {
+          await send({ type: "turn.failed", run_id: rawMessage.run_id as string, error: { code: "invalid_frame", message: "The Runtime could not accept that message." } });
+          return;
+        }
+        if (error instanceof AgentReleaseUnavailableError) {
+          await sessionError("agent_unavailable", "This Agent is not available.");
+          return;
+        }
+        // Anything else is a refusal of the session; its text is for the client's developer.
+        await sessionError(error instanceof EntitlementError || error instanceof ConversationRepositoryError ? error.code : "protocol_error", errorMessage(error));
       }
     })();
     messageTasks.add(messageTask);

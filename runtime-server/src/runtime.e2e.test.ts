@@ -2239,8 +2239,8 @@ test("server rejects protocol 0.7 and a missing conversation before accepting bo
     conversation_id: "conversation-protocol-current",
     license_token: "license_protocol_07"
   }));
-  const rejected = await waitForSocketMessage(messages, (message) => message.type === "turn.failed");
-  assert.ok(rejected.type === "turn.failed");
+  const rejected = await waitForSocketMessage(messages, (message) => message.type === "session.error");
+  assert.ok(rejected.type === "session.error");
   assert.equal(rejected.error.code, "protocol_error");
   assert.match(rejected.error.message, /0\.8/);
 
@@ -2251,9 +2251,9 @@ test("server rejects protocol 0.7 and a missing conversation before accepting bo
   }));
   const missingConversation = await waitForSocketMessage(
     messages,
-    (message) => message.type === "turn.failed" && message !== rejected
+    (message) => message.type === "session.error" && message !== rejected
   );
-  assert.ok(missingConversation.type === "turn.failed");
+  assert.ok(missingConversation.type === "session.error");
   assert.equal(missingConversation.error.code, "protocol_error");
   assert.match(missingConversation.error.message, /conversation_id/);
   socket.close();
@@ -2376,23 +2376,20 @@ test("server requires client hello before tool results", async () => {
 test("a message the Runtime cannot read ends its own Run with plain text; an unreadable frame is a session error", async () => {
   const dataDir = await tempWorkspace();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  runtimeServer = createRuntimeServer({ insecureLocalMode: true });
+  const store = new RuntimeStore(dataDir);
+  runtimeServer = createRuntimeServer({ insecureLocalMode: true, conversationStore: store, conversationRepository: await seedLocalConversations(store, ["conv_unreadable"]) });
   const serverUrl = await listen(runtimeServer);
-  const socket = new WebSocket(serverUrl);
   const messages: OutboundMessage[] = [];
-  socket.on("message", (data) => { messages.push(JSON.parse(String(data)) as OutboundMessage); });
-  await new Promise<void>((resolve, reject) => { socket.once("open", resolve); socket.once("error", reject); });
-  socket.send(JSON.stringify({ type: "client.hello", protocol_version: PROTOCOL_VERSION, conversation_id: "unreadable-frames", license_token: "license_unreadable", local_tools: [] }));
-  await waitForSocketMessage(messages, (message) => message.type === "session.ready");
+  const socket = await openConversationSocket(serverUrl, "conv_unreadable", messages);
 
-  socket.send(JSON.stringify({ type: "client.message", run_id: "run_unreadable", conversation_id: "unreadable-frames", local_tools: [], message: { role: "user" } }));
+  socket.send(JSON.stringify({ type: "client.message", run_id: "run_unreadable", conversation_id: "conv_unreadable", local_tools: [], message: { role: "user" } }));
   const failed = await waitForSocketMessage(messages, (message) => message.type === "turn.failed" && message.run_id === "run_unreadable");
   assert.ok(failed.type === "turn.failed");
   assert.equal(failed.error.code, "invalid_frame");
   assert.ok(!/path|expected|received|invalid_type/i.test(failed.error.message), failed.error.message);
 
   socket.send(JSON.stringify({ type: "no.such.frame" }));
-  const refused = await waitForSocketMessage(messages, (message) => message.type === "session.error" && message.error.code === "invalid_frame");
+  const refused = await waitForSocketMessage(messages, (message) => message.type === "session.error" && message.error.code === "protocol_error");
   assert.ok(refused.type === "session.error");
   assert.ok(!messages.some((message) => message.type === "turn.failed" && !message.run_id));
   socket.close();
