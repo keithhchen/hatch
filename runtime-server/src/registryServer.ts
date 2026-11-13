@@ -2070,10 +2070,12 @@ function sendJson(
   response.end(JSON.stringify(status >= 400 ? withStandardError(status, payload) : payload));
 }
 const ERROR_CODES: Record<number, string> = { 400: "invalid_request", 401: "unauthorized", 403: "forbidden", 404: "not_found", 405: "method_not_allowed", 422: "invalid_request", 503: "unavailable" };
-/** Every client reads `{error: {code, message}}`; a registry failure that only says `detail` gets it too, and keeps `detail` for older readers. */
+/** A Registry failure has one shape, `{error: {code, message}}`; the older `{detail}` (and a top-level `code`) is folded into it, and other fields stay. */
 function withStandardError(status: number, payload: unknown): unknown {
-  const { detail, error } = (payload ?? {}) as { detail?: unknown; error?: unknown };
-  return typeof detail === "string" && error === undefined ? { error: { code: ERROR_CODES[status] ?? (status >= 500 ? "internal_error" : "request_failed"), message: detail }, ...(payload as object) } : payload;
+  if (!payload || typeof payload !== "object") return payload;
+  const { detail, code, error, ...rest } = payload as Record<string, unknown>;
+  if (typeof detail !== "string") return payload;
+  return { error: error ?? { code: typeof code === "string" ? code : ERROR_CODES[status] ?? (status >= 500 ? "internal_error" : "request_failed"), message: detail }, ...rest };
 }
 function sendError(response: http.ServerResponse, error: unknown, known: Record<string, [number, string]> = {}): void {
   const message = error instanceof Error ? error.message : String(error);
