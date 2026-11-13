@@ -64,6 +64,8 @@ export interface ConnectionRepository {
   linked(ownerAccountId: string): Promise<Resolved[]>;
   /** Every Connection the account owns, linked or not, with what Studio shows of it. */
   owned(ownerAccountId: string): Promise<OwnedConnection[]>;
+  /** How many people are bound to a Connection as contacts: those who have written to it. */
+  contactCount(connectionId: string): Promise<number>;
   get(id: string): Promise<ChannelConnection | undefined>;
   touch(id: string): Promise<void>;
   /** `degraded` only from `active`; back to `active` only from `degraded`. */
@@ -83,6 +85,16 @@ export interface ConnectionRepository {
    */
   saveCredentials(ownerAccountId: string, channel: ChannelKind, sealed: string, scope?: string, target?: AgentTarget): Promise<void>;
   credentials(ownerAccountId: string, channel: ChannelKind): Promise<string | undefined>;
+  /** Who holds a Product's bot: the Connection under this scope, live or dormant. */
+  botHolder(channel: ChannelKind, scope: string): Promise<{ ownerAccountId: string; target: AgentTarget } | undefined>;
+  /**
+   * A Product's own bot is one Connection for as long as the bot exists: `scope` names the bot itself. Binding makes it the Product's live bot,
+   * creating the Connection or waking the dormant one with its contacts and conversations, and puts any other bot of the Product to sleep.
+   * `legacy` is the Product's live bot from before bots had a scope of their own: it moves to the scope `as` first. A bot another Product or account holds is refused (409 `<channel>_bot_in_use`).
+   */
+  bindBot(ownerAccountId: string, channel: ChannelKind, target: AgentTarget, scope: string, sealed: string, legacy?: { scope: string; as: string }): Promise<void>;
+  /** The Product lets its live bot go: credentials are cleared and the Connection is kept, dormant, with everyone who wrote to it. `as` is the scope a legacy bot takes first. */
+  sleepBot(ownerAccountId: string, channel: ChannelKind, target: AgentTarget, as?: string): Promise<void>;
   /** The sealed credentials of a platform tenant on a shared app, whoever owns its Connection. Absent once access is gone. */
   credentialsOf(channel: ChannelKind, scope: string): Promise<string | undefined>;
   /** Who a still-valid link code was issued to, for a platform's install redirect that carries it as `state`. */

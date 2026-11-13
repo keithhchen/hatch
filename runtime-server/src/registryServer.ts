@@ -2227,7 +2227,7 @@ const botKind = (kind: ChannelKind, target: AgentTarget) => target.kind === "pro
 /** The chat platforms an account's Assistant, or one of its Products, can be reached on, as Studio lists them. */
 async function channelsOf(context: RegistryContext, channels: ChannelService, accountId: string, target: AgentTarget = STUDIO_TARGET) {
   return (await channels.view(accountId, target)).map(status => botKind(status.kind, target)
-    ? { kind: status.kind, bot: true, available: Boolean(context.ownApps), configured: status.configured, ...(status.handle ? { handle: status.handle } : {}), ...(status.state ? { state: status.state } : {}) }
+    ? { kind: status.kind, bot: true, available: Boolean(context.ownApps), configured: status.configured, ...(status.users === undefined ? {} : { users: status.users, messages: status.messages }), ...(status.handle ? { handle: status.handle } : {}), ...(status.state ? { state: status.state } : {}) }
     : {
       kind: status.kind, available: status.available, linked: status.linked,
       ...(status.senderId ? { sender_id: status.senderId } : {}),
@@ -2242,7 +2242,7 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
   const assistant = context.assistant;
   const channels = context.channels;
   if (!assistant || !context.reach || !channels) { sendJson(response, 503, { error: { code: "assistant_unavailable", message: "The Assistant requires the Registry database." } }); return; }
-  const webhook = url.pathname.match(/^\/v1\/channels\/([a-z]+)(?:\/([0-9a-f-]{36}))?\/webhook$/);
+  const webhook = url.pathname.match(/^\/v1\/channels\/([a-z]+)(?:\/([0-9A-Za-z_-]{1,64}))?\/webhook$/);
   // A platform sends the person who installed the app back here with a code; the `state` they carry is the link code Studio issued.
   const install = url.pathname.match(/^\/v1\/channels\/([a-z]+)\/oauth\/callback$/);
   if (install && request.method === "GET") {

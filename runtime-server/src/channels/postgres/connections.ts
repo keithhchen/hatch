@@ -4,6 +4,8 @@ import { newLinkCode, STUDIO_TARGET, targetKey, type ChannelConnection, type Con
 import type { ChannelKind, SenderProfile } from "../types.js";
 
 const LINK_CODE_MS = 15 * 60_000;
+/** The rows that count as the live Connection of an owner to a target: a Product's dormant bots (no credentials) are kept beside it. */
+const ACTIVE = "WHERE credentials IS NOT NULL OR audience <> 'public'";
 
 const COLUMNS = "id, owner_account_id, channel, scope, client, target, audience, task_specific, state";
 const IDENTITY_COLUMNS = "i.id AS identity_id, i.sender_id, i.thread_id";
@@ -34,9 +36,15 @@ export class PostgresConnections implements ConnectionRepository {
         link_expires_at TIMESTAMPTZ,
         last_event_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        CHECK (audience = 'self' OR target_key <> 'assistant'),
-        UNIQUE (owner_account_id, channel, audience, target_key)
+        CHECK (audience = 'self' OR target_key <> 'assistant')
       );
+      -- Once a table-level UNIQUE (owner, channel, audience, target_key). A Product keeps one row for each bot it has had, so only the live ones are unique: see ACTIVE.
+      DO $$ DECLARE name text; BEGIN
+        FOR name IN SELECT conname FROM pg_constraint WHERE conrelid = 'hatch_connections'::regclass AND contype = 'u' LOOP EXECUTE format('ALTER TABLE hatch_connections DROP CONSTRAINT %I', name); END LOOP;
+      END $$;
+      CREATE UNIQUE INDEX IF NOT EXISTS hatch_connections_active_idx ON hatch_connections (owner_account_id, channel, audience, target_key) WHERE credentials IS NOT NULL OR audience <> 'public';
+      -- A bot is one Connection, whichever Product or account holds it.
+      CREATE UNIQUE INDEX IF NOT EXISTS hatch_connections_bot_idx ON hatch_connections (channel, scope) WHERE audience = 'public' AND scope <> '';
       ALTER TABLE hatch_connections ADD COLUMN IF NOT EXISTS task_specific BOOLEAN NOT NULL DEFAULT false;
       ALTER TABLE hatch_connections DROP COLUMN IF EXISTS start_code;
       ALTER TABLE hatch_connections ADD COLUMN IF NOT EXISTS redeemed_by TEXT;
@@ -113,7 +121,7 @@ export class PostgresConnections implements ConnectionRepository {
     const code = newLinkCode();
     await this.pool.query(`INSERT INTO hatch_connections (owner_account_id, channel, scope, target, target_key, audience, link_code, link_expires_at)
       VALUES ($1, $2, $3, $6, $7, 'self', $4, $5)
-      ON CONFLICT (owner_account_id, channel, audience, target_key) DO UPDATE SET scope = CASE WHEN hatch_connections.credentials IS NOT NULL THEN hatch_connections.scope ELSE $3 END, link_code = $4, link_expires_at = $5, redeemed_by = NULL`,
+      ON CONFLICT (owner_account_id, channel, audience, target_key) ${ACTIVE} DO UPDATE SET scope = CASE WHEN hatch_connections.credentials IS NOT NULL THEN hatch_connections.scope ELSE $3 END, link_code = $4, link_expires_at = $5, redeemed_by = NULL`,
     [ownerAccountId, channel, this.scopeOf(ownerAccountId, channel), code, new Date(now.getTime() + LINK_CODE_MS), JSON.stringify(target), targetKey(target)]);
     return code;
   }
@@ -206,9 +214,13 @@ export class PostgresConnections implements ConnectionRepository {
   async owned(ownerAccountId: string): Promise<OwnedConnection[]> {
     return (await this.pool.query(`SELECT ${COLUMNS}, credentials IS NOT NULL AS has_credentials, last_event_at, EXISTS (SELECT 1 FROM hatch_channel_identities i WHERE i.connection_id = c.id AND i.role = 'owner') AS linked,
       (SELECT i.sender_id FROM hatch_channel_identities i WHERE i.connection_id = c.id AND i.role = 'owner' LIMIT 1) AS sender_id
-      FROM hatch_connections c WHERE owner_account_id = $1 ORDER BY created_at`, [ownerAccountId])).rows.map(row => ({
+      FROM hatch_connections c WHERE owner_account_id = $1 AND (credentials IS NOT NULL OR audience <> 'public') ORDER BY created_at`, [ownerAccountId])).rows.map(row => ({
       ...connectionOf(row), linked: row.linked, hasCredentials: row.has_credentials, ...(row.sender_id ? { senderId: row.sender_id } : {}), ...(row.last_event_at ? { lastEventAt: new Date(row.last_event_at).toISOString() } : {}),
     }));
+  }
+
+  async contactCount(connectionId: string): Promise<number> {
+    return (await this.pool.query("SELECT count(*)::int AS n FROM hatch_channel_identities WHERE connection_id = $1", [connectionId])).rows[0].n;
   }
 
   async get(id: string): Promise<ChannelConnection | undefined> {
@@ -241,15 +253,53 @@ export class PostgresConnections implements ConnectionRepository {
   async saveCredentials(ownerAccountId: string, channel: ChannelKind, sealed: string, scope = this.scopeOf(ownerAccountId, channel), target: AgentTarget = STUDIO_TARGET): Promise<void> {
     await this.transaction(async client => {
       const audience = target.kind === "assistant" ? "self" : "public";
-      const before = (await client.query("SELECT scope FROM hatch_connections WHERE owner_account_id = $1 AND channel = $2 AND audience = $3 AND target_key = $4 FOR UPDATE", [ownerAccountId, channel, audience, targetKey(target)])).rows[0];
+      const before = (await client.query("SELECT scope FROM hatch_connections WHERE owner_account_id = $1 AND channel = $2 AND audience = $3 AND target_key = $4 AND (credentials IS NOT NULL OR audience <> 'public') FOR UPDATE", [ownerAccountId, channel, audience, targetKey(target)])).rows[0];
       const id = (await client.query(`INSERT INTO hatch_connections (owner_account_id, channel, scope, target, target_key, audience, credentials)
         VALUES ($1, $2, $3, $5, $6, $7, $4)
-        ON CONFLICT (owner_account_id, channel, audience, target_key) DO UPDATE SET credentials = $4, scope = $3, state = 'active' RETURNING id`,
+        ON CONFLICT (owner_account_id, channel, audience, target_key) ${ACTIVE} DO UPDATE SET credentials = $4, scope = $3, state = 'active' RETURNING id`,
       [ownerAccountId, channel, scope, sealed, JSON.stringify(target), targetKey(target), audience])).rows[0].id;
       // Under a new scope nobody who was bound under the old one is known any more.
       if (before && before.scope !== scope) {
         await client.query("DELETE FROM hatch_channel_identities WHERE connection_id = $1", [id]);
       }
+    });
+  }
+
+  async botHolder(channel: ChannelKind, scope: string): Promise<{ ownerAccountId: string; target: AgentTarget } | undefined> {
+    const row = (await this.pool.query("SELECT owner_account_id, target FROM hatch_connections WHERE channel = $1 AND scope = $2 AND audience = 'public'", [channel, scope])).rows[0];
+    return row && { ownerAccountId: row.owner_account_id, target: row.target };
+  }
+
+  /** Moves a Connection to a new scope with everything that is kept under the old one. Not when another Connection already holds the new scope. */
+  private async rescope(client: PoolClient, id: string, channel: ChannelKind, from: string, to: string): Promise<boolean> {
+    if (from === to || (await client.query("SELECT 1 FROM hatch_connections WHERE channel = $1 AND scope = $2", [channel, to])).rowCount) return false;
+    await client.query("UPDATE hatch_connections SET scope = $2 WHERE id = $1", [id, to]);
+    for (const table of ["hatch_channel_identities", "hatch_channel_inbox", "hatch_channel_outbox"]) await client.query(`UPDATE ${table} SET scope = $3 WHERE channel = $1 AND scope = $2`, [channel, from, to]);
+    return true;
+  }
+
+  async bindBot(ownerAccountId: string, channel: ChannelKind, target: AgentTarget, scope: string, sealed: string, legacy?: { scope: string; as: string }): Promise<void> {
+    await this.transaction(async client => {
+      const mine = "owner_account_id = $1 AND channel = $2 AND audience = 'public' AND target_key = $3";
+      const ours = [ownerAccountId, channel, targetKey(target)];
+      // A bot made before bots had a scope of their own: it is the same bot, under the scope it was saved with. Its Connection moves.
+      const live = legacy && (await client.query(`SELECT id FROM hatch_connections WHERE ${mine} AND scope = $4 AND credentials IS NOT NULL FOR UPDATE`, [...ours, legacy.scope])).rows[0];
+      if (live) await this.rescope(client, live.id, channel, legacy!.scope, legacy!.as);
+      const held = (await client.query("SELECT id, owner_account_id, target_key FROM hatch_connections WHERE channel = $1 AND scope = $2 AND audience = 'public' FOR UPDATE", [channel, scope])).rows[0];
+      if (held && (held.owner_account_id !== ownerAccountId || held.target_key !== ours[2])) throw Object.assign(new Error("This bot is already connected to another Agent."), { status: 409, code: `${channel}_bot_in_use` });
+      // The Product has one live bot: any other goes dormant, with its contacts and conversations.
+      await client.query(`UPDATE hatch_connections SET credentials = NULL WHERE ${mine} AND scope <> $4 AND credentials IS NOT NULL`, [...ours, scope]);
+      if (held) await client.query("UPDATE hatch_connections SET credentials = $2, state = 'active' WHERE id = $1", [held.id, sealed]);
+      else await client.query("INSERT INTO hatch_connections (owner_account_id, channel, scope, target, target_key, audience, credentials) VALUES ($1, $2, $3, $4, $5, 'public', $6)", [ownerAccountId, channel, scope, JSON.stringify(target), ours[2], sealed]);
+    });
+  }
+
+  async sleepBot(ownerAccountId: string, channel: ChannelKind, target: AgentTarget, as?: string): Promise<void> {
+    await this.transaction(async client => {
+      const live = (await client.query("SELECT id, scope FROM hatch_connections WHERE owner_account_id = $1 AND channel = $2 AND audience = 'public' AND target_key = $3 AND credentials IS NOT NULL FOR UPDATE", [ownerAccountId, channel, targetKey(target)])).rows[0];
+      if (!live) return;
+      if (as) await this.rescope(client, live.id, channel, live.scope, as);
+      await client.query("UPDATE hatch_connections SET credentials = NULL WHERE id = $1", [live.id]);
     });
   }
 
