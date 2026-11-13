@@ -31,6 +31,8 @@ export type Session = {
   id: string; role: AnyRole; title: string; createdAt: string; updatedAt: string;
   revision: number; turn: number; status: "idle" | "running" | "completed" | "failed" | "interrupted";
   outputUpdatedAt?: string; lastRunAt?: string;
+  /** A Stop that reached an instance which does not own the Run; the owner's heartbeat takes it. */
+  stopRequested?: boolean;
   error?: string; /** Stable code of a failed Run; `error` is its message. */ errorCode?: string; errorRef?: string; activeTool?: string;
   files: FileRecord[]; comments: Comment[];
   messages: AgentMessage[]; context: AgentMessage[]; scribeContext?: AgentMessage[]; todos: Todo[];
@@ -71,7 +73,7 @@ export interface WorkbenchBackend {
   load(id: string): Promise<{ session: Omit<Session, "todos">; todos: Todo[] }>;
   insert(session: Session): Promise<void>;
   /** Read-modify-write one session atomically. */
-  transact<T>(id: string, change: (session: Session) => T | Promise<T>): Promise<T>;
+  transact<T>(id: string, change: (session: Session) => T | Promise<T>, touch?: boolean): Promise<T>;
   readFile(id: string, name: string): Promise<Buffer>;
   writeFile(id: string, name: string, bytes: Buffer): Promise<void>;
   removeFile(id: string, name: string): Promise<void>;
@@ -116,10 +118,10 @@ export class FileWorkbenchBackend implements WorkbenchBackend {
     await atomicWrite(path.join(directory, "todo.json"), JSON.stringify({ todos }));
   }
   private async save(session: Session): Promise<void> { const { todos, ...metadata } = session; await Promise.all([atomicWrite(path.join(this.directory(session.id), "session.json"), JSON.stringify(metadata)), atomicWrite(path.join(this.directory(session.id), "todo.json"), JSON.stringify({ todos }))]); }
-  async transact<T>(id: string, change: (session: Session) => T | Promise<T>): Promise<T> {
+  async transact<T>(id: string, change: (session: Session) => T | Promise<T>, touch = true): Promise<T> {
     const session = withTodos(await this.load(id));
     const result = await change(session);
-    session.updatedAt = new Date().toISOString();
+    if (touch) session.updatedAt = new Date().toISOString();
     await this.save(session);
     return result;
   }
@@ -198,7 +200,7 @@ export class PostgresWorkbenchBackend implements WorkbenchBackend {
     const { todos, ...data } = session;
     await this.pool.query("INSERT INTO hatch_workbench_sessions (workspace, id, data, todos) VALUES ($1, $2, $3::jsonb, $4::jsonb)", [this.workspace, sessionId(session.id), JSON.stringify(data), JSON.stringify(todos)]);
   }
-  async transact<T>(id: string, change: (session: Session) => T | Promise<T>): Promise<T> {
+  async transact<T>(id: string, change: (session: Session) => T | Promise<T>, touch = true): Promise<T> {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
@@ -206,7 +208,7 @@ export class PostgresWorkbenchBackend implements WorkbenchBackend {
       if (!row) throw Object.assign(new Error("Session not found"), { code: "ENOENT" });
       const session = withTodos({ session: row.data, todos: row.todos });
       const result = await change(session);
-      session.updatedAt = new Date().toISOString();
+      if (touch) session.updatedAt = new Date().toISOString();
       const { todos, ...data } = session;
       await client.query("UPDATE hatch_workbench_sessions SET data = $3::jsonb, todos = $4::jsonb, updated_at = NOW() WHERE workspace = $1 AND id = $2", [this.workspace, id, JSON.stringify(data), JSON.stringify(todos)]);
       await client.query("COMMIT");
@@ -231,7 +233,14 @@ export class PostgresWorkbenchBackend implements WorkbenchBackend {
 
 /** A live run touches its Session every RUN_HEARTBEAT_MS; one running and silent for RUN_STALE_MS lost its process. */
 export const RUN_HEARTBEAT_MS = 15_000;
-const RUN_STALE_MS = 60_000;
+export const RUN_STALE_MS = 60_000;
+export const RESTART_NOTE = "服务已重启；请检查已有结果后继续，未自动重放操作。";
+/** Ends a Session that is running but silent past `staleMs`: its process is gone. Call it inside `update`, which is what makes the check and the write one step. */
+export function endIfOrphaned(session: Session, staleMs = RUN_STALE_MS, now = Date.now()): boolean {
+  if (session.status !== "running" || now - Date.parse(session.updatedAt) <= staleMs) return false;
+  session.status = "interrupted"; session.error = RESTART_NOTE; delete session.errorCode; delete session.errorRef; delete session.activeTool; delete session.stopRequested;
+  return true;
+}
 
 /** Each chat owns ordinary files; completed Runtime results retain their own paths. */
 export class WorkbenchStore {
@@ -299,9 +308,10 @@ export class WorkbenchStore {
   }
   private async upstream(id: string): Promise<Array<{ role: Role; session: Session }>> { if (!this.definitions) return []; const current = await this.get(id); const allowed = isAssistantRole(current.role) ? [] : INPUT_ROLES[current.role]; if (!allowed.length) return []; const sessions = await this.list(); return allowed.flatMap(role => { const session = sessions.filter(candidate => candidate.role === role && candidate.id !== id).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]; return session ? [{ role, session }] : []; }); }
   async contextFiles(id: string): Promise<FileRecord[]> { const current = await this.get(id); const manual = await this.backend.listManual(); const inherited = (await this.upstream(id)).flatMap(({ role, session }) => session.files.filter(file => file.path.startsWith("output/")).map(file => ({ ...file, path: `input/${role}/${file.path.slice(7)}`, origin: { sessionId: session.id, path: file.path }, readonly: true }))); return [...current.files.filter(file => !file.path.startsWith("input/manual/") && !file.path.startsWith("input/handoff/")), ...manual, ...inherited]; }
-  async update<T>(id: string, change: (session: Session) => T | Promise<T>): Promise<T> {
+  /** `touch: false` leaves `updatedAt` alone: only a live Run's heartbeat may say it is alive, so a look that changes nothing must not. */
+  async update<T>(id: string, change: (session: Session) => T | Promise<T>, touch = true): Promise<T> {
     const previous = this.queues.get(id) ?? Promise.resolve();
-    const operation = previous.catch(() => undefined).then(() => this.backend.transact(id, session => change(this.checkScope(session))));
+    const operation = previous.catch(() => undefined).then(() => this.backend.transact(id, session => change(this.checkScope(session)), touch));
     this.queues.set(id, operation);
     try { return await operation; } finally { if (this.queues.get(id) === operation) this.queues.delete(id); }
   }
@@ -350,13 +360,22 @@ export class WorkbenchStore {
     await this.update(id, s => { s.comments.push(comment); });
     return comment;
   }
+  /** The Sessions of this workspace that another process lost mid-Run, now ended. `owned` are the ones a live Run of this process holds. */
+  async sweepOrphans(owned: (id: string) => boolean, staleMs = RUN_STALE_MS): Promise<string[]> {
+    const ended: string[] = [];
+    for (const s of await this.list()) {
+      if (s.status !== "running" || owned(s.id)) continue;
+      if (await this.update(s.id, current => !owned(s.id) && endIfOrphaned(current, staleMs), false).catch(() => false)) ended.push(s.id);
+    }
+    return ended;
+  }
   async recover(): Promise<void> {
     for (const s of await this.list()) await this.update(s.id, current => {
       // One-time metadata cutover. Current input/output files already exist on disk.
       current.files = current.files.map(f => ({ path: f.path, bytes: f.bytes, mimeType: f.mimeType, ...(f.readonly ? { readonly: true } : {}), ...(f.origin ? { origin: { sessionId: f.origin.sessionId, path: f.origin.path } } : {}) }));
       current.comments = current.comments.map(({ id, path, start, end, quote, text, replacement, createdAt }) => ({ id, path, start, end, quote, text, replacement, createdAt }));
       // A running Session whose process still heartbeats belongs to another live instance (a deploy overlaps old and new).
-      if (current.status === "running" && Date.now() - Date.parse(current.updatedAt) > RUN_STALE_MS) { current.status = "interrupted"; current.error = "服务已重启；请检查已有结果后继续，未自动重放操作。"; }
+      endIfOrphaned(current);
     });
   }
 }

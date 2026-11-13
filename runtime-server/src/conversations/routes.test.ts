@@ -63,7 +63,7 @@ class FakeWorkspace implements WorkerWorkspace {
       return { queued, runId: this.runs.get(id)! };
     },
     runId: (id: string) => this.runs.get(id),
-    stop: (id: string) => { this.stopped.push(id); },
+    stop: async (id: string) => { this.stopped.push(id); },
   };
   entries = async () => agentEntries(await this.definitions, this.sessions, [...this.manual.keys()]);
   assertRoleAvailable = async (role: Role) => assertAgentAvailable(await this.entries(), role);
