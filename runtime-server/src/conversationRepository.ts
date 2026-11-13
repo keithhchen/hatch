@@ -178,6 +178,9 @@ export type ConversationJournalPage = {
   through_cursor: number;
 };
 
+/** Who is talking where: a chat thread on a Connection, as one principal (a contact id, or the account of a `self` Connection). */
+export type ThreadKey = { connectionId: string; threadId: string; principalId: string };
+
 export type CreateConversationInput = ConversationBinding & {
   id: string;
   publicId: string;
@@ -282,6 +285,12 @@ export interface ConversationRepository {
   close(): Promise<void>;
   createConversation(input: CreateConversationInput): Promise<{ conversation: ConversationRecord; created: boolean }>;
   getConversation(id: string): Promise<ConversationRecord | undefined>;
+  /** The conversation a thread is in now, if it has one. */
+  threadConversation(key: ThreadKey): Promise<string | undefined>;
+  /** Points the thread at `conversationId` unless it already points somewhere; returns where it points, so concurrent first messages agree. */
+  adoptThread(key: ThreadKey, conversationId: string): Promise<string>;
+  /** Moves the thread to `conversationId`. */
+  moveThread(key: ThreadKey, conversationId: string): Promise<void>;
   /** A conversation by the id its client knows, within one account's own Products (owner path): no Product needs to be named. */
   findOwnedConversation(owner: OwnerScope, publicId: string): Promise<ConversationRecord | undefined>;
   /** Immutable createdAt DESC, id DESC order; cursors never track activity. Without `agentId`, every Product of the owner. */
@@ -444,6 +453,7 @@ export class InMemoryConversationRepository implements ConversationRepository {
   protected runs = new Map<string, ConversationRunRecord>();
   protected events: ConversationJournalEvent[] = [];
   protected conversationRequests = new Map<string, string>();
+  private threads = new Map<string, string>();
   protected toolCalls = new Map<string, ToolCallRecord>();
   protected compactions = new Map<string, CompactionClaim>();
   protected nextCursor = 1;
@@ -458,6 +468,18 @@ export class InMemoryConversationRepository implements ConversationRepository {
   async close(): Promise<void> {
     await this.localAuthority.close();
   }
+
+  async threadConversation(key: ThreadKey): Promise<string | undefined> { return this.threads.get(threadKeyOf(key)); }
+
+  async adoptThread(key: ThreadKey, conversationId: string): Promise<string> {
+    const k = threadKeyOf(key);
+    const current = this.threads.get(k);
+    if (current) return current;
+    this.threads.set(k, conversationId);
+    return conversationId;
+  }
+
+  async moveThread(key: ThreadKey, conversationId: string): Promise<void> { this.threads.set(threadKeyOf(key), conversationId); }
 
   async createConversation(input: CreateConversationInput): Promise<{ conversation: ConversationRecord; created: boolean }> {
     return this.write(async () => {
@@ -1134,6 +1156,41 @@ CREATE INDEX IF NOT EXISTS hatch_conversations_library_created_idx
   ON hatch_conversations (owner_account_id, creator_id, agent_id, created_at DESC, id COLLATE "C" DESC);
 DROP INDEX IF EXISTS hatch_conversations_library_idx;
 
+-- Where each chat thread currently is: one pointer per (connection, thread, principal). \`/new\` moves it; the old conversation stays as history.
+CREATE TABLE IF NOT EXISTS hatch_contact_threads (
+  connection_id TEXT NOT NULL,
+  thread_id TEXT NOT NULL,
+  principal_id TEXT NOT NULL,
+  conversation_id TEXT NOT NULL REFERENCES hatch_conversations(id) ON DELETE CASCADE,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (connection_id, thread_id, principal_id)
+);
+-- One-time, idempotent backfill (delete once every environment has run it): conversations made under the old deterministic ids carry
+-- their thread in client_request_id, \`thread:<connection>:<thread>:<contact>\` for a contact (owner \`contact:<connection>:<contact>\`) and
+-- \`thread:<connection>:<thread>\` for a self Connection (owner is the account id). Connection ids hold no colon; threads and contacts may.
+INSERT INTO hatch_contact_threads (connection_id, thread_id, principal_id, conversation_id)
+SELECT DISTINCT ON (connection_id, thread_id, principal_id) connection_id, thread_id, principal_id, id
+FROM (
+  SELECT id, created_at, conn AS connection_id, contact AS principal_id,
+         left(rest, length(rest) - length(contact) - 1) AS thread_id
+  FROM (
+    SELECT id, created_at, split_part(owner_account_id, ':', 2) AS conn,
+           substr(owner_account_id, 8 + length(split_part(owner_account_id, ':', 2)) + 2) AS contact,
+           substr(client_request_id, 7 + length(split_part(owner_account_id, ':', 2)) + 2) AS rest
+    FROM hatch_conversations
+    WHERE owner_account_id LIKE 'contact:%'
+      AND client_request_id LIKE 'thread:' || split_part(owner_account_id, ':', 2) || ':%'
+  ) contacts
+  WHERE right(rest, length(contact) + 1) = ':' || contact AND length(rest) > length(contact) + 1
+  UNION ALL
+  SELECT id, created_at, split_part(client_request_id, ':', 2), owner_account_id,
+         substr(client_request_id, 7 + length(split_part(client_request_id, ':', 2)) + 2)
+  FROM hatch_conversations
+  WHERE owner_account_id NOT LIKE 'contact:%' AND client_request_id LIKE 'thread:%:%'
+) found
+ORDER BY connection_id, thread_id, principal_id, created_at DESC, id
+ON CONFLICT DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS hatch_conversation_runs (
   id TEXT PRIMARY KEY,
   conversation_id TEXT NOT NULL REFERENCES hatch_conversations(id) ON DELETE CASCADE,
@@ -1633,6 +1690,33 @@ export class PostgresConversationRepository implements ConversationRepository {
     }
   }
 
+  async threadConversation({ connectionId, threadId, principalId }: ThreadKey): Promise<string | undefined> {
+    await this.initialize();
+    const result = await this.pool.query<{ conversation_id: string }>("SELECT conversation_id FROM hatch_contact_threads WHERE connection_id = $1 AND thread_id = $2 AND principal_id = $3", [connectionId, threadId, principalId]);
+    return result.rows[0]?.conversation_id;
+  }
+
+  async adoptThread({ connectionId, threadId, principalId }: ThreadKey, conversationId: string): Promise<string> {
+    await this.initialize();
+    const result = await this.pool.query<{ conversation_id: string }>(`
+      WITH adopted AS (
+        INSERT INTO hatch_contact_threads (connection_id, thread_id, principal_id, conversation_id) VALUES ($1, $2, $3, $4)
+        ON CONFLICT DO NOTHING RETURNING conversation_id
+      )
+      SELECT conversation_id FROM adopted
+      UNION ALL SELECT conversation_id FROM hatch_contact_threads WHERE connection_id = $1 AND thread_id = $2 AND principal_id = $3
+    `, [connectionId, threadId, principalId, conversationId]);
+    return requireRow(result.rows[0], "Thread pointer was not found").conversation_id;
+  }
+
+  async moveThread({ connectionId, threadId, principalId }: ThreadKey, conversationId: string): Promise<void> {
+    await this.initialize();
+    await this.pool.query(`
+      INSERT INTO hatch_contact_threads (connection_id, thread_id, principal_id, conversation_id) VALUES ($1, $2, $3, $4)
+      ON CONFLICT (connection_id, thread_id, principal_id) DO UPDATE SET conversation_id = EXCLUDED.conversation_id, updated_at = now()
+    `, [connectionId, threadId, principalId, conversationId]);
+  }
+
   async getConversation(id: string): Promise<ConversationRecord | undefined> {
     await this.initialize();
     const result = await this.pool.query<ConversationRow>("SELECT * FROM hatch_conversations WHERE id = $1", [id]);
@@ -2121,6 +2205,8 @@ function isQueryExecutor(value: unknown): value is PostgresQueryExecutor {
 function isUniqueViolation(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === "23505";
 }
+
+const threadKeyOf = ({ connectionId, threadId, principalId }: ThreadKey): string => [connectionId, threadId, principalId].join("\u0000");
 
 function conversationRequestKey(
   binding: Pick<ConversationBinding, "ownerAccountId" | "creatorId" | "agentId">,

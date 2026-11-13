@@ -731,6 +731,10 @@ function chatGatewayFor(
           const bound = await contactBinder.bind(principal, ref);
           const scope = await scopes.resolve(bound.conversation, new AbortController().signal);
           return { conversation: bound.conversation, scope: { ...scope, userId: principalKey(principal) }, corpusDigest: bound.corpus.digest, requiresLocalTools: bound.requiresLocalTools };
+        },
+        async restart(principal, ref, key) {
+          if (principal.kind !== "contact" || !contactBinder) return unavailable("Customer");
+          return contactBinder.restart(principal, ref, key);
         }
       },
       account: {
@@ -742,6 +746,10 @@ function chatGatewayFor(
           if (!conversation || conversation.ownerAccountId !== principal.accountId) throw new ChatError("conversation_not_found", "Conversation was not found.", 404);
           const scope = await scopes.resolve(conversation, new AbortController().signal);
           return { conversation, scope, corpusDigest: scope.corpusDigest, requiresLocalTools: scope.agentCorpus ? productRequiresLocalTools(scope.agentCorpus) : false };
+        },
+        async restart(principal, ref, key) {
+          if (principal.kind !== "account" || !selfBinder) return unavailable("Self-use");
+          return selfBinder.restart(principal.accountId, ref, key);
         }
       }
     }

@@ -121,3 +121,53 @@ test("a contact is refused on a degraded or self Connection, an org member is bo
   await assert.rejects(limits.check(alice, bound.conversation), (error: unknown) => error instanceof ChatError && error.status === 429);
   await new SentMessageLimits({ countSentMessages: async () => 3 }, 3).check({ kind: "account", accountId: "a" }, bound.conversation);
 });
+
+const threadRef = (threadId: string, connectionId = "conn-1") => ({ kind: "thread" as const, connectionId, threadId });
+
+test("a contact's thread points at its current conversation; /new moves the pointer and keeps the old one", async () => {
+  const repository = new InMemoryConversationRepository();
+  const binder = new ContactBinder({ get: async () => connection() }, { resolveByProduct: async () => corpus([{ kind: "http_function" }]) }, repository);
+  const alice = { kind: "contact" as const, connectionId: "conn-1", contactId: "alice" };
+  const first = (await binder.bind(alice, threadRef("t1"))).conversation;
+  const fresh = await binder.restart(alice, threadRef("t1"), "telegram::e1");
+  assert.notEqual(fresh.id, first.id);
+  assert.equal((await binder.bind(alice, threadRef("t1"))).conversation.id, fresh.id, "the next message goes to the new conversation");
+  assert.equal((await repository.getConversation(first.id))?.id, first.id, "the old conversation is kept");
+  // The same event again starts nothing more, even after the contact went on talking.
+  assert.equal((await binder.restart(alice, threadRef("t1"), "telegram::e1")).id, fresh.id);
+  assert.equal((await binder.bind(alice, threadRef("t1"))).conversation.id, fresh.id);
+  const second = await binder.restart(alice, threadRef("t1"), "telegram::e2");
+  assert.notEqual(second.id, fresh.id);
+  assert.equal((await binder.restart(alice, threadRef("t1"), "telegram::e1")).id, fresh.id);
+  assert.equal((await binder.bind(alice, threadRef("t1"))).conversation.id, second.id, "a repeated old /new does not move the pointer back");
+  await assert.rejects(binder.restart(alice, threadRef("t1", "conn-2"), "x"), { code: "conversation_not_found" });
+});
+
+test("in a group every person has their own conversation, and /new moves only theirs", async () => {
+  const repository = new InMemoryConversationRepository();
+  const binder = new ContactBinder({ get: async () => connection() }, { resolveByProduct: async () => corpus([{ kind: "http_function" }]) }, repository);
+  const alice = { kind: "contact" as const, connectionId: "conn-1", contactId: "alice" };
+  const bob = { ...alice, contactId: "bob" };
+  const aliceFirst = (await binder.bind(alice, threadRef("group"))).conversation.id;
+  const bobFirst = (await binder.bind(bob, threadRef("group"))).conversation.id;
+  assert.notEqual(aliceFirst, bobFirst);
+  const aliceDM = (await binder.bind(alice, threadRef("dm"))).conversation.id;
+  assert.notEqual(aliceDM, aliceFirst, "another thread, another conversation");
+  await binder.restart(alice, threadRef("group"), "e1");
+  assert.notEqual((await binder.bind(alice, threadRef("group"))).conversation.id, aliceFirst);
+  assert.equal((await binder.bind(bob, threadRef("group"))).conversation.id, bobFirst);
+  assert.equal((await binder.bind(alice, threadRef("dm"))).conversation.id, aliceDM);
+});
+
+test("a thread whose Connection now serves another Product moves to a conversation of that Product", async () => {
+  const repository = new InMemoryConversationRepository();
+  let current = productId;
+  const products = { resolveByProduct: async () => ({ ...corpus([]), corpus: { ...corpus([]).corpus, product: { id: current, name: "P", boundaries: [], presentation: {} } } }) as unknown as ResolvedAgentCorpus };
+  const binder = new ContactBinder({ get: async () => connection() }, products, repository);
+  const alice = { kind: "contact" as const, connectionId: "conn-1", contactId: "alice" };
+  const before = (await binder.bind(alice, threadRef("t"))).conversation;
+  current = "33333333-3333-4333-8333-333333333333";
+  const after = (await binder.bind(alice, threadRef("t"))).conversation;
+  assert.notEqual(after.id, before.id);
+  assert.equal((await binder.bind(alice, threadRef("t"))).conversation.id, after.id);
+});

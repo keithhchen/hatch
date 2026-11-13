@@ -62,7 +62,7 @@ const telegramBot: OwnAppForm = {
   perProduct: true,
   fields: [{ field: "token", key: "token", required: true }],
   build: (credentials, scope) => new TelegramChannel(credentials, scope),
-  provision: async (adapter: TelegramChannel, { webhookUrl, secret }) => { const username = await adapter.probe(); await adapter.setWebhook(webhookUrl, secret); return { username, webhookSecret: secret }; },
+  provision: async (adapter: TelegramChannel, { webhookUrl, secret }) => { const username = await adapter.probe(); await adapter.setWebhook(webhookUrl, secret); await adapter.setCommands(); return { username, webhookSecret: secret }; },
   release: (adapter: TelegramChannel) => adapter.deleteWebhook(),
 };
 
