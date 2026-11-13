@@ -204,7 +204,8 @@ export class ConversationController {
     const generation = this.generation;
     const result = await this.sync.refresh(id, {
       current: () => this.state.messages,
-      activeRunId: () => this.run && !this.run.provisional ? this.run.id : null,
+      // A Run id the page minted for a message the server has not acknowledged is not the server's to know yet.
+      activeRunId: () => this.run && !this.run.provisional && ![...this.pendings.values()].some(entry => entry.runId === this.run.id) ? this.run.id : null,
       isCurrent: () => generation === this.generation && this.state.conversationId === id
     });
     if (!result) return { stale: true };
@@ -694,13 +695,15 @@ export class ConversationController {
       if (submission.leadsRun) { this.run = null; this.resetTimeline(); }
       this.showSubmission(submission);
       this.writeDraft({ draft: "", images: [] });
-      if (connection?.ready) {
+      // Only a session the server has answered with session.ready takes run messages; a socket that is merely open is still saying hello.
+      if (connection?.ready && this.state.connection === "open") {
         submission.dispatched = true;
         await this.dispatch(connection, { runId, clientMessageId, content, attachments });
-      } else {
+      } else if (!connection) {
         this.attempts = 0;
         this.reconnect();
       }
+      // Otherwise the session is on its way up: its session.ready dispatches every pending submission.
     } catch (cause) {
       if (submission) this.refuse(submission, cause);
       else this.fail(cause);

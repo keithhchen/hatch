@@ -294,3 +294,39 @@ test("message.accepted tells whether the message started the Run or joined it", 
   assert.equal(controller.getState().messages.find(message => message.role === "user").state, "queued");
   controller.dispose();
 });
+
+test("a message sent while the socket is open but the session is not ready waits for session.ready", async () => {
+  const { transport, controller } = setup();
+  controller.open("conv");
+  await flush();
+  const connection = transport.connections[0];
+  connection.handlers.onOpen();
+  controller.setDraft("early");
+  await controller.send();
+  assert.deepEqual(connection.sent.map(frame => frame.type), ["client.hello"]);
+  assert.equal(transport.connections.length, 1, "the connecting session is not torn down");
+  assert.deepEqual(controller.getState().messages.map(message => message.role), ["user", "assistant"]);
+  connection.emit({ type: "session.ready", conversation_id: "conv" });
+  await flush();
+  const sent = connection.sent.filter(frame => frame.type === "client.message");
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].content, "early");
+  controller.dispose();
+});
+
+test("a Run id the server has not acknowledged is not looked up while the page refreshes", async () => {
+  const { transport, controller } = setup();
+  const looked = [];
+  transport.run = (_id, runId) => { looked.push(runId); return Promise.reject(new Error("Run was not found.")); };
+  controller.open("conv");
+  await flush();
+  const connection = transport.connections[0];
+  connection.handlers.onOpen();
+  connection.emit({ type: "session.ready", conversation_id: "conv" });
+  controller.setDraft("hi");
+  await controller.send();
+  await controller.refresh("conv");
+  assert.deepEqual(looked, []);
+  assert.equal(controller.getState().error, null);
+  controller.dispose();
+});
