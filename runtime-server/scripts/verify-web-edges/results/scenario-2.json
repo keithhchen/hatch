@@ -1,0 +1,76 @@
+{
+  "id": "2",
+  "title": "Network offline for 5 s mid-reply, then back online",
+  "durationMs": 30631,
+  "notes": [
+    "while offline the UI showed: []"
+  ],
+  "findings": [],
+  "evidence": {
+    "ui:tab": [
+      "user: Write a 200 word story about a lighthouse keeper. Plain prose only: no",
+      "assistant: Thomas climbed the spiral iron stairs as dusk bruised the Atlantic hor"
+    ],
+    "server": [
+      "user: Write a 200 word story about a lighthouse keeper. Plain prose only: no",
+      "assistant: Thomas climbed the spiral iron stairs as dusk bruised the Atlantic hor"
+    ],
+    "alerts": [],
+    "frames": [
+      {
+        "client": "tab",
+        "frames": [
+          "1097 1open ws.open",
+          "1098 1-> client.hello",
+          "1108 1<- session.ready",
+          "1175 1-> client.message 000bc3",
+          "1188 1<- message.accepted 000bc3",
+          "1189 1<- turn.state queued 000bc3",
+          "1204 1<- turn.state running 000bc3",
+          "8277 1<- assistant.delta 000bc3",
+          "8284 1<- assistant.delta 000bc3",
+          "8286 1<- assistant.delta 000bc3",
+          "13353 1<- assistant.delta 000bc3",
+          "13354 1<- assistant.delta 000bc3",
+          "15603 1<- assistant.delta 000bc3",
+          "18278 1<- assistant.delta 000bc3",
+          "20854 1<- assistant.delta 000bc3",
+          "23854 1<- assistant.delta 000bc3",
+          "26166 1<- assistant.delta 000bc3",
+          "26176 1<- assistant.delta 000bc3",
+          "26340 1<- assistant.delta 000bc3",
+          "26452 1<- assistant.delta 000bc3",
+          "26604 1<- assistant.delta 000bc3",
+          "26713 1<- assistant.delta 000bc3",
+          "27184 1<- assistant.delta 000bc3",
+          "27191 1<- assistant.delta 000bc3",
+          "27197 1<- assistant.delta 000bc3",
+          "27366 1<- assistant.delta 000bc3",
+          "27372 1<- assistant.delta 000bc3",
+          "27751 1<- turn.completed 000bc3",
+          "27755 1<- assistant.message 000bc3",
+          "27755 1<- turn.state completed 000bc3"
+        ]
+      }
+    ],
+    "http": [],
+    "requests": [
+      {
+        "client": "tab",
+        "requests": [
+          "141 POST 200 /v1/auth/sign-in",
+          "162 GET 200 /v1/auth/me",
+          "475 GET 200 /v1/user/product-access",
+          "485 GET 200 /v1/web-chat/conversations",
+          "1063 POST 201 /v1/web-chat/conversations",
+          "1092 GET 200 /v1/web-chat/conversations/conv_0d514774e8904fb691966c2761469c6d/snapshot",
+          "27764 GET 200 /v1/web-chat/conversations/conv_0d514774e8904fb691966c2761469c6d/events",
+          "27777 GET 200 /v1/web-chat/conversations/conv_0d514774e8904fb691966c2761469c6d/snapshot"
+        ]
+      }
+    ],
+    "console": [],
+    "serverLogs": []
+  },
+  "verdict": "PASS"
+}

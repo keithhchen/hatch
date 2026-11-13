@@ -83,6 +83,8 @@ export class ConversationController {
     this.terminalRun = null;
     /** Runs whose end the stream told: a snapshot read before that cannot bring them back. */
     this.endedRuns = new Set();
+    /** Local tool executions by tool_call_id: one call is executed once, however often the Runtime asks. */
+    this.toolRuns = new Map();
     this.connection = null;
     this.link = null;
     this.reconnectTimer = null;
@@ -190,6 +192,7 @@ export class ConversationController {
     this.hasBeenReady = false;
     this.terminalRun = null;
     this.endedRuns.clear();
+    this.toolRuns.clear();
     this.sync.reset();
     this.reveal.discard();
     this.resetTimeline();
@@ -244,7 +247,7 @@ export class ConversationController {
     const awaited = this.awaitedRunId();
     const terminal = this.terminalRun;
     const settled = terminal && projected.some(message => message.run_id === terminal.id && message.role === "assistant" && !message.transient);
-    if (settled || terminal?.failed) {
+    if (settled || terminal?.failed || terminal?.cancelled) {
       this.terminalRun = null;
       if (!settled) this.updateMessages(current => current.filter(message => !(message.transient && message.run_id === terminal.id && message.role === "assistant")));
       this.resetTimeline();
@@ -278,7 +281,7 @@ export class ConversationController {
     this.run = null;
     this.updateMessages(current => current.filter(message => !(message.transient && message.run_id === run.id)));
     this.resetTimeline();
-    if (record.status === "failed") this.failReply(run.id, record.failure);
+    if (record.status === "failed" || record.status === "interrupted") this.failReply(run.id, record.failure);
   }
 
   /** On opening a conversation whose last reply failed, before any stream saw it: the same error, answerable again. */
@@ -489,7 +492,9 @@ export class ConversationController {
 
   async handleEvent(event, connection, link, conversationId) {
     if (!link.live) return;
-    if (this.run?.provisional && event.run_id && event.run_id !== this.run.id && isRunEvent(event)) this.adoptRun(event.run_id);
+    // The server said which Run a message joined: when that is not the Run this page minted for it (another tab's Run was live), the page follows the server.
+    const rival = event.type === "message.accepted" && this.run && event.run_id !== this.run.id && this.pendings.get(event.client_message_id)?.runId === this.run.id;
+    if ((this.run?.provisional || rival) && event.run_id && event.run_id !== this.run.id && isRunEvent(event)) this.adoptRun(event.run_id);
     const boundary = textRevealBoundary(event);
     if (boundary === "flush") this.reveal.flush(event.run_id);
     else if (boundary === "discard") this.reveal.discard(event.run_id);
@@ -516,7 +521,9 @@ export class ConversationController {
     async tool_request(outcome, { connection }) {
       const request = outcome.request;
       this.publishTimeline(timeline => timeline.upsertTool({ ...request, locality: "client", status: "requested" }));
-      await this.reportToolResult(request, connection, await this.tools.execute(request));
+      // A Runtime that replays an unanswered request (after a reconnect) gets the one execution's result, never a second execution.
+      if (!this.toolRuns.has(request.tool_call_id)) this.toolRuns.set(request.tool_call_id, Promise.resolve(this.tools.execute(request)));
+      await this.reportToolResult(request, connection, await this.toolRuns.get(request.tool_call_id));
     },
     async approval_request(outcome, { connection }) {
       const request = outcome.request;
@@ -592,7 +599,7 @@ export class ConversationController {
       // A Run that ended before the server took the message that started it sends the words back; a server that steers keeps them.
       const unaccepted = this.transport.steerable ? undefined : [...this.pendings.values()].find(submission => submission.runId === event.run_id);
       if (unaccepted) this.restoreSubmission(unaccepted);
-      else this.terminalRun = { id: event.run_id, failed: outcome.failed };
+      else this.terminalRun = { id: event.run_id, failed: outcome.failed, cancelled: outcome.cancelled === true };
       this.run = null;
       this.setState({ runState: null });
       if (outcome.failed) this.failReply(event.run_id, outcome.error);
@@ -721,12 +728,18 @@ export class ConversationController {
 
   syncPolling() {
     const { activeRun, conversationId } = this.state;
-    const key = activeRun && conversationId ? `${conversationId}:${activeRun}` : null;
+    // Polling is for a Run the page has no stream for: one it is not holding, or one whose session is gone and out of retries (an outage that outlasted them). The key follows that, so polling starts the moment either becomes true.
+    const streamless = this.run?.id !== activeRun || this.state.connection === "idle";
+    const key = activeRun && conversationId && streamless ? `${conversationId}:${activeRun}` : null;
     if (key === this.pollKey) return;
     this.pollKey = key;
     clearInterval(this.pollTimer);
     this.pollTimer = null;
-    if (!key || this.run?.id === activeRun) return;
-    this.pollTimer = setInterval(() => void this.refresh(conversationId).catch(this.fail), this.pollMs);
+    if (!key) return;
+    // A read that failed (an outage) shows its error; the read that succeeds after it takes that error back, and only that one.
+    this.pollTimer = setInterval(() => void this.refresh(conversationId).then(() => {
+      if (this.readFailure && this.state.error === this.readFailure) this.setState({ error: null });
+      this.readFailure = null;
+    }, cause => { this.readFailure = cause; this.fail(cause); }), this.pollMs);
   }
 }

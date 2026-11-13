@@ -636,6 +636,7 @@
       }
     },
     "turnFailed": {
+      "description": "A Run ended without a reply. A Run the user stopped ends here with error.code run_cancelled; that is a cancellation, not a failure.",
       "type": "object",
       "additionalProperties": false,
       "required": ["type", "error"],
@@ -645,8 +646,31 @@
         "error": { "$ref": "#/$defs/error" }
       }
     },
+    "sessionError": {
+      "description": "The session itself was refused (hello, binding, an unreadable frame). No Run ended.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "error"],
+      "properties": {
+        "type": { "const": "session.error" },
+        "error": { "$ref": "#/$defs/error" }
+      }
+    },
+    "frameRejected": {
+      "description": "One frame about a Run was refused (a stale cancel, an unknown tool call). The Run is as it was.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "run_id", "error"],
+      "properties": {
+        "type": { "const": "frame.rejected" },
+        "run_id": { "type": "string", "minLength": 1 },
+        "error": { "$ref": "#/$defs/error" }
+      }
+    },
     "outboundMessage": {
       "oneOf": [
+        { "$ref": "#/$defs/sessionError" },
+        { "$ref": "#/$defs/frameRejected" },
         { "$ref": "#/$defs/sessionReady" },
         { "$ref": "#/$defs/assistantDelta" },
         { "$ref": "#/$defs/toolCallRequest" },

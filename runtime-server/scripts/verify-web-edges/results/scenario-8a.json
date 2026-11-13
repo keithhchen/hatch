@@ -1,0 +1,60 @@
+{
+  "id": "8a",
+  "title": "Fresh page load into a conversation whose run (started over the API) is in progress",
+  "durationMs": 34229,
+  "notes": [
+    "API send -> 202"
+  ],
+  "findings": [],
+  "evidence": {
+    "ui:tab": [
+      "user: Write a 200 word story about a lighthouse keeper. Plain prose only: no",
+      "assistant: The salt had eaten into the brass gears three winters ago, but Donald "
+    ],
+    "server": [
+      "user: Write a 200 word story about a lighthouse keeper. Plain prose only: no",
+      "assistant: The salt had eaten into the brass gears three winters ago, but Donald "
+    ],
+    "alerts": [],
+    "frames": [
+      {
+        "client": "tab",
+        "frames": [
+          "481 1open ws.open",
+          "483 1-> client.hello",
+          "491 1<- session.ready",
+          "4090 1<- assistant.delta d2d1f8",
+          "4398 1<- assistant.delta d2d1f8",
+          "4767 1<- assistant.delta d2d1f8",
+          "5041 1<- assistant.delta d2d1f8",
+          "5796 1<- assistant.delta d2d1f8",
+          "5804 1<- assistant.delta d2d1f8",
+          "6439 1<- assistant.delta d2d1f8",
+          "6449 1<- assistant.delta d2d1f8",
+          "6457 1<- assistant.delta d2d1f8",
+          "6635 1<- turn.completed d2d1f8",
+          "6636 1<- assistant.message d2d1f8",
+          "6636 1<- turn.state completed d2d1f8"
+        ]
+      }
+    ],
+    "http": [],
+    "requests": [
+      {
+        "client": "tab",
+        "requests": [
+          "116 POST 200 /v1/auth/sign-in",
+          "134 GET 200 /v1/auth/me",
+          "445 GET 200 /v1/user/product-access",
+          "459 GET 200 /v1/web-chat/conversations/conv_16ef299156904977912e2d1f16cd670a/snapshot",
+          "460 GET 200 /v1/web-chat/conversations",
+          "6644 GET 200 /v1/web-chat/conversations/conv_16ef299156904977912e2d1f16cd670a/events",
+          "6655 GET 200 /v1/web-chat/conversations/conv_16ef299156904977912e2d1f16cd670a/snapshot"
+        ]
+      }
+    ],
+    "console": [],
+    "serverLogs": []
+  },
+  "verdict": "PASS"
+}

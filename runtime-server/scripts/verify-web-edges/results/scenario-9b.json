@@ -1,0 +1,43 @@
+{
+  "id": "9b",
+  "title": "The session hello is refused by the Runtime (binding mismatch)",
+  "durationMs": 8065,
+  "notes": [
+    "UI after a refused hello: alerts [\"This AI is currently unavailable. It may not be published yet, or it may be paused.\\nRetry\"]; failed-run controls: 1; sockets opened 1"
+  ],
+  "findings": [],
+  "evidence": {
+    "server": [],
+    "alerts": [
+      "[tab +500] This AI is currently unavailable. It may not be published yet, or it may be paused.\nRetry"
+    ],
+    "frames": [
+      {
+        "client": "tab",
+        "frames": [
+          "488 1open ws.open",
+          "493 1-> client.hello",
+          "497 1<- session.error agent_unavailable"
+        ]
+      }
+    ],
+    "http": [],
+    "requests": [
+      {
+        "client": "tab",
+        "requests": [
+          "123 POST 200 /v1/auth/sign-in",
+          "144 GET 200 /v1/auth/me",
+          "457 GET 200 /v1/user/product-access",
+          "469 GET 200 /v1/web-chat/conversations",
+          "479 GET 200 /v1/web-chat/conversations/conv_d8aa21c5c12e45acab5c3e16c6a6d3cd/snapshot"
+        ]
+      }
+    ],
+    "console": [],
+    "serverLogs": [
+      "registry: {\"ts\":\"2026-11-13T12:24:03.969Z\",\"level\":\"info\",\"event\":\"access\",\"service\":\"registry\",\"request_id\":\"req_01ba54bc9f41d897\",\"method\":\"GET\",\"path\":\"/v1/runtime/products/00000000-0000-4000-8000-000000000000/release\",\"status\":404,\"duration_ms\":0.66}"
+    ]
+  },
+  "verdict": "PASS"
+}

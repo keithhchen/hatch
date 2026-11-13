@@ -1,0 +1,47 @@
+{
+  "id": "9a",
+  "title": "A message over the Runtime's size limit (256K characters)",
+  "durationMs": 6339,
+  "notes": [
+    "UI after the oversize send: alerts [\"The Runtime could not accept that message.\\nRetry\"]; messages []; draft length 262145; busy false"
+  ],
+  "findings": [],
+  "evidence": {
+    "ui:tab": [],
+    "server": [],
+    "alerts": [
+      "[tab +1346] The Runtime could not accept that message.\nRetry"
+    ],
+    "frames": [
+      {
+        "client": "tab",
+        "frames": [
+          "1068 1open ws.open",
+          "1068 1-> client.hello",
+          "1077 1<- session.ready",
+          "1311 1-> client.message 7094ee",
+          "1346 1<- turn.failed invalid_frame 7094ee"
+        ]
+      }
+    ],
+    "http": [],
+    "requests": [
+      {
+        "client": "tab",
+        "requests": [
+          "140 POST 200 /v1/auth/sign-in",
+          "159 GET 200 /v1/auth/me",
+          "472 GET 200 /v1/user/product-access",
+          "483 GET 200 /v1/web-chat/conversations",
+          "1040 POST 201 /v1/web-chat/conversations",
+          "1064 GET 200 /v1/web-chat/conversations/conv_32633612035f4b1fb7e33c508f9b4fd4/snapshot",
+          "1362 GET 200 /v1/web-chat/conversations/conv_32633612035f4b1fb7e33c508f9b4fd4/events",
+          "1371 GET 200 /v1/web-chat/conversations/conv_32633612035f4b1fb7e33c508f9b4fd4/snapshot"
+        ]
+      }
+    ],
+    "console": [],
+    "serverLogs": []
+  },
+  "verdict": "PASS"
+}

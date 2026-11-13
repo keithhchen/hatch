@@ -1,0 +1,75 @@
+{
+  "id": "6b",
+  "title": "Send while the WebSocket is still connecting (hello delayed 4 s)",
+  "durationMs": 34875,
+  "notes": [],
+  "findings": [],
+  "evidence": {
+    "ui:tab": [
+      "user: Write a 200 word story about a lighthouse keeper. Plain prose only: no",
+      "assistant: Arthur climbed the iron spiral before dusk, his knees clicking in time"
+    ],
+    "server": [
+      "user: Write a 200 word story about a lighthouse keeper. Plain prose only: no",
+      "assistant: Arthur climbed the iron spiral before dusk, his knees clicking in time"
+    ],
+    "alerts": [],
+    "frames": [
+      {
+        "client": "tab",
+        "frames": [
+          "490 1open ws.open",
+          "4491 1-> client.hello",
+          "4498 1<- session.ready",
+          "4503 1-> client.message 1998b5",
+          "4514 1<- message.accepted 1998b5",
+          "4514 1<- turn.state queued 1998b5",
+          "4528 1<- turn.state running 1998b5",
+          "10833 1<- assistant.delta 1998b5",
+          "10834 1<- assistant.delta 1998b5",
+          "10834 1<- assistant.delta 1998b5",
+          "12919 1<- assistant.delta 1998b5",
+          "15433 1<- assistant.delta 1998b5",
+          "17304 1<- assistant.delta 1998b5",
+          "19998 1<- assistant.delta 1998b5",
+          "22335 1<- assistant.delta 1998b5",
+          "24020 1<- assistant.delta 1998b5",
+          "27296 1<- assistant.delta 1998b5",
+          "30083 1<- assistant.delta 1998b5",
+          "30084 1<- assistant.delta 1998b5",
+          "30085 1<- assistant.delta 1998b5",
+          "30085 1<- assistant.delta 1998b5",
+          "30098 1<- assistant.delta 1998b5",
+          "30116 1<- assistant.delta 1998b5",
+          "30117 1<- assistant.delta 1998b5",
+          "30118 1<- assistant.delta 1998b5",
+          "30208 1<- assistant.delta 1998b5",
+          "30930 1<- assistant.delta 1998b5",
+          "30931 1<- assistant.delta 1998b5",
+          "30931 1<- assistant.delta 1998b5",
+          "30953 1<- turn.completed 1998b5",
+          "30957 1<- assistant.message 1998b5",
+          "30958 1<- turn.state completed 1998b5"
+        ]
+      }
+    ],
+    "http": [],
+    "requests": [
+      {
+        "client": "tab",
+        "requests": [
+          "120 POST 200 /v1/auth/sign-in",
+          "144 GET 200 /v1/auth/me",
+          "456 GET 200 /v1/user/product-access",
+          "472 GET 200 /v1/web-chat/conversations",
+          "484 GET 200 /v1/web-chat/conversations/conv_bbb276981e2f4cc9b2665e2435679319/snapshot",
+          "30979 GET 200 /v1/web-chat/conversations/conv_bbb276981e2f4cc9b2665e2435679319/events",
+          "30990 GET 200 /v1/web-chat/conversations/conv_bbb276981e2f4cc9b2665e2435679319/snapshot"
+        ]
+      }
+    ],
+    "console": [],
+    "serverLogs": []
+  },
+  "verdict": "PASS"
+}

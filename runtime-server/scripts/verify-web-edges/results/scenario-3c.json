@@ -1,0 +1,112 @@
+{
+  "id": "3c",
+  "title": "Runtime outage: the only Runtime is down for 5 s mid-reply, then a new one starts",
+  "durationMs": 29491,
+  "notes": [
+    "after the outage the UI shows [[\"user\",\"\",\"Write a 200 word story about a lighthous\"],[\"assistant\",\"\",\"Old Thomas climbed the iron spiral befor\"]]; alerts now: []"
+  ],
+  "findings": [],
+  "evidence": {
+    "ui:tab": [
+      "user: Write a 200 word story about a lighthouse keeper. Plain prose only: no",
+      "assistant: Old Thomas climbed the iron spiral before dusk, his boots ringing agai",
+      "user: Reply with exactly the single word: pong",
+      "assistant: pong"
+    ],
+    "server": [
+      "user: Write a 200 word story about a lighthouse keeper. Plain prose only: no",
+      "assistant: Old Thomas climbed the iron spiral before dusk, his boots ringing agai",
+      "user: Reply with exactly the single word: pong",
+      "assistant: pong"
+    ],
+    "alerts": [
+      "[tab +8460] Hatch is temporarily unavailable. Try again shortly.\nRetry"
+    ],
+    "frames": [
+      {
+        "client": "tab",
+        "frames": [
+          "1103 1open ws.open",
+          "1104 1-> client.hello",
+          "1113 1<- session.ready",
+          "1195 1-> client.message 6a99b7",
+          "1211 1<- message.accepted 6a99b7",
+          "1212 1<- turn.state queued 6a99b7",
+          "1227 1<- turn.state running 6a99b7",
+          "6224 1<- assistant.delta 6a99b7",
+          "6228 1<- assistant.delta 6a99b7",
+          "7301 1<- assistant.delta 6a99b7",
+          "7309 1<- assistant.delta 6a99b7",
+          "7522 1<- assistant.delta 6a99b7",
+          "7529 1<- assistant.delta 6a99b7",
+          "7541 1<- assistant.delta 6a99b7",
+          "7549 1<- assistant.delta 6a99b7",
+          "7556 1<- assistant.delta 6a99b7",
+          "7669 1<- assistant.delta 6a99b7",
+          "8450 1<- turn.completed 6a99b7",
+          "8453 1<- assistant.message 6a99b7",
+          "8453 1<- turn.state completed 6a99b7",
+          "8463 1close ws.close",
+          "8851 2open ws.open",
+          "8854 2-> client.hello",
+          "8856 2close ws.close",
+          "9549 3open ws.open",
+          "9551 3-> client.hello",
+          "9552 3close ws.close",
+          "11011 4open ws.open",
+          "11014 4-> client.hello",
+          "11014 4close ws.close",
+          "17492 5open ws.open",
+          "17492 5-> client.hello",
+          "17507 5<- session.ready",
+          "17507 5-> client.message 2e607f",
+          "17526 5<- message.accepted 2e607f",
+          "17526 5<- turn.state queued 2e607f",
+          "17561 5<- turn.state running 2e607f",
+          "26365 5<- assistant.delta 2e607f",
+          "26660 5<- turn.completed 2e607f",
+          "26665 5<- assistant.message 2e607f",
+          "26665 5<- turn.state completed 2e607f"
+        ]
+      }
+    ],
+    "http": [
+      "[tab +8455] GET 502 /v1/web-chat/conversations/conv_c9ed08877efd4cc0bd2ad89648128df9/events?product_id=6d46eafe-c694-4c91-b576-39755452863c&view=page&after_cursor=30&limit=100",
+      "[tab +10456] GET 502 /v1/web-chat/conversations/conv_c9ed08877efd4cc0bd2ad89648128df9/events?product_id=6d46eafe-c694-4c91-b576-39755452863c&view=page&after_cursor=30&limit=100",
+      "[tab +12455] GET 502 /v1/web-chat/conversations/conv_c9ed08877efd4cc0bd2ad89648128df9/events?product_id=6d46eafe-c694-4c91-b576-39755452863c&view=page&after_cursor=30&limit=100"
+    ],
+    "requests": [
+      {
+        "client": "tab",
+        "requests": [
+          "142 POST 200 /v1/auth/sign-in",
+          "166 GET 200 /v1/auth/me",
+          "481 GET 200 /v1/user/product-access",
+          "500 GET 200 /v1/web-chat/conversations",
+          "1075 POST 201 /v1/web-chat/conversations",
+          "1099 GET 200 /v1/web-chat/conversations/conv_c9ed08877efd4cc0bd2ad89648128df9/snapshot",
+          "8455 GET 502 /v1/web-chat/conversations/conv_c9ed08877efd4cc0bd2ad89648128df9/events",
+          "10456 GET 502 /v1/web-chat/conversations/conv_c9ed08877efd4cc0bd2ad89648128df9/events",
+          "12455 GET 502 /v1/web-chat/conversations/conv_c9ed08877efd4cc0bd2ad89648128df9/events",
+          "14493 GET 200 /v1/web-chat/conversations/conv_c9ed08877efd4cc0bd2ad89648128df9/events",
+          "14514 GET 200 /v1/web-chat/conversations/conv_c9ed08877efd4cc0bd2ad89648128df9/snapshot",
+          "17518 GET 200 /v1/web-chat/conversations/conv_c9ed08877efd4cc0bd2ad89648128df9/events",
+          "17534 GET 200 /v1/web-chat/conversations/conv_c9ed08877efd4cc0bd2ad89648128df9/snapshot",
+          "26676 GET 200 /v1/web-chat/conversations/conv_c9ed08877efd4cc0bd2ad89648128df9/events",
+          "26687 GET 200 /v1/web-chat/conversations/conv_c9ed08877efd4cc0bd2ad89648128df9/snapshot"
+        ]
+      }
+    ],
+    "console": [
+      "[tab +8455] error: Failed to load resource: the server responded with a status of 502 (Bad Gateway)",
+      "[tab +10457] error: Failed to load resource: the server responded with a status of 502 (Bad Gateway)",
+      "[tab +12455] error: Failed to load resource: the server responded with a status of 502 (Bad Gateway)"
+    ],
+    "serverLogs": [
+      "dashboard: {\"ts\":\"2026-11-13T12:19:19.037Z\",\"level\":\"info\",\"event\":\"access\",\"service\":\"dashboard\",\"request_id\":\"req_b95d1194a66c135f\",\"account_id\":\"361f78bd-118f-4258-97fe-1af29ac39f01\",\"method\":\"GET\",\"path\":\"/v1/web-chat/conversations/conv_c9ed08877efd4cc0bd2ad89648128d",
+      "dashboard: {\"ts\":\"2026-11-13T12:19:21.039Z\",\"level\":\"info\",\"event\":\"access\",\"service\":\"dashboard\",\"request_id\":\"req_c94bf3053352b1ed\",\"account_id\":\"361f78bd-118f-4258-97fe-1af29ac39f01\",\"method\":\"GET\",\"path\":\"/v1/web-chat/conversations/conv_c9ed08877efd4cc0bd2ad89648128d",
+      "dashboard: {\"ts\":\"2026-11-13T12:19:23.037Z\",\"level\":\"info\",\"event\":\"access\",\"service\":\"dashboard\",\"request_id\":\"req_6b902829a7fc4e16\",\"account_id\":\"361f78bd-118f-4258-97fe-1af29ac39f01\",\"method\":\"GET\",\"path\":\"/v1/web-chat/conversations/conv_c9ed08877efd4cc0bd2ad89648128d"
+    ]
+  },
+  "verdict": "PASS"
+}

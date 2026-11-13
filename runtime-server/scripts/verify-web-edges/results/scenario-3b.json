@@ -1,0 +1,81 @@
+{
+  "id": "3b",
+  "title": "Runtime killed (kill -9) mid-reply, new process, then send again",
+  "durationMs": 49001,
+  "notes": [
+    "after kill the UI shows [[\"user\",\"\",\"Write a 200 word story about a lighthous\"],[\"assistant\",\"\",\"Old\"]]; alerts now: [\"The Runtime restarted while this Run was in progress. Send the message again to continue.\\nRetry\"]"
+  ],
+  "findings": [],
+  "evidence": {
+    "ui:tab": [
+      "user: Write a 200 word story about a lighthouse keeper. Plain prose only: no",
+      "assistant: Old",
+      "user: Reply with exactly the single word: pong",
+      "assistant: pong"
+    ],
+    "server": [
+      "user: Write a 200 word story about a lighthouse keeper. Plain prose only: no",
+      "assistant: Old",
+      "user: Reply with exactly the single word: pong",
+      "assistant: pong"
+    ],
+    "alerts": [
+      "[tab +38480] The Runtime restarted while this Run was in progress. Send the message again to continue.\nRetry"
+    ],
+    "frames": [
+      {
+        "client": "tab",
+        "frames": [
+          "1107 1open ws.open",
+          "1109 1-> client.hello",
+          "1118 1<- session.ready",
+          "1217 1-> client.message ab803b",
+          "1235 1<- message.accepted ab803b",
+          "1235 1<- turn.state queued ab803b",
+          "1254 1<- turn.state running ab803b",
+          "7645 1<- assistant.delta ab803b",
+          "7937 1<- assistant.delta ab803b",
+          "8232 1<- assistant.delta ab803b",
+          "8527 1close ws.close",
+          "8843 2open ws.open",
+          "8846 2-> client.hello",
+          "8891 2<- session.ready",
+          "38477 2<- assistant.message ab803b",
+          "38480 2<- turn.failed run_interrupted ab803b",
+          "38481 2<- turn.state interrupted ab803b",
+          "41586 2-> client.message 2a08c6",
+          "41602 2<- message.accepted 2a08c6",
+          "41603 2<- turn.state queued 2a08c6",
+          "41635 2<- turn.state running 2a08c6",
+          "46260 2<- assistant.delta 2a08c6",
+          "46274 2<- turn.completed 2a08c6",
+          "46276 2<- assistant.message 2a08c6",
+          "46276 2<- turn.state completed 2a08c6"
+        ]
+      }
+    ],
+    "http": [],
+    "requests": [
+      {
+        "client": "tab",
+        "requests": [
+          "152 POST 200 /v1/auth/sign-in",
+          "173 GET 200 /v1/auth/me",
+          "490 GET 200 /v1/user/product-access",
+          "503 GET 200 /v1/web-chat/conversations",
+          "1079 POST 201 /v1/web-chat/conversations",
+          "1103 GET 200 /v1/web-chat/conversations/conv_dfa2a2cfe3cf4617ba64c661099e7561/snapshot",
+          "8908 GET 200 /v1/web-chat/conversations/conv_dfa2a2cfe3cf4617ba64c661099e7561/events",
+          "8924 GET 200 /v1/web-chat/conversations/conv_dfa2a2cfe3cf4617ba64c661099e7561/snapshot",
+          "38494 GET 200 /v1/web-chat/conversations/conv_dfa2a2cfe3cf4617ba64c661099e7561/events",
+          "38514 GET 200 /v1/web-chat/conversations/conv_dfa2a2cfe3cf4617ba64c661099e7561/snapshot",
+          "46286 GET 200 /v1/web-chat/conversations/conv_dfa2a2cfe3cf4617ba64c661099e7561/events",
+          "46296 GET 200 /v1/web-chat/conversations/conv_dfa2a2cfe3cf4617ba64c661099e7561/snapshot"
+        ]
+      }
+    ],
+    "console": [],
+    "serverLogs": []
+  },
+  "verdict": "PASS"
+}

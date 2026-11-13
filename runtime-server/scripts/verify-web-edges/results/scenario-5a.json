@@ -1,0 +1,98 @@
+{
+  "id": "5a",
+  "title": "Two tabs on one conversation: B sends while A's reply streams",
+  "durationMs": 46377,
+  "notes": [],
+  "findings": [],
+  "evidence": {
+    "ui:A": [
+      "user: Write a 200 word story about a lighthouse keeper. Plain prose only: no",
+      "assistant: Thomas climbed the iron spiral before the gales could steal his footin",
+      "user: Reply with exactly the single word: bravo",
+      "assistant: bravo"
+    ],
+    "server": [
+      "user: Write a 200 word story about a lighthouse keeper. Plain prose only: no",
+      "assistant: Thomas climbed the iron spiral before the gales could steal his footin",
+      "user: Reply with exactly the single word: bravo",
+      "assistant: bravo"
+    ],
+    "ui:B": [
+      "user: Write a 200 word story about a lighthouse keeper. Plain prose only: no",
+      "assistant: Thomas climbed the iron spiral before the gales could steal his footin",
+      "user: Reply with exactly the single word: bravo",
+      "assistant: bravo"
+    ],
+    "alerts": [],
+    "frames": [
+      {
+        "client": "A",
+        "frames": [
+          "1058 1open ws.open",
+          "1058 1-> client.hello",
+          "1068 1<- session.ready",
+          "32069 1-> client.message cd093c",
+          "32092 1<- message.accepted cd093c",
+          "32093 1<- turn.state queued cd093c",
+          "32114 1<- turn.state running cd093c",
+          "36503 1<- assistant.delta cd093c",
+          "36603 1<- message.accepted cd093c",
+          "36610 1<- assistant.message cd093c",
+          "40142 1<- assistant.delta cd093c",
+          "40958 1<- turn.completed cd093c",
+          "40961 1<- assistant.message cd093c",
+          "40961 1<- turn.state completed cd093c"
+        ]
+      },
+      {
+        "client": "B",
+        "frames": [
+          "412 1open ws.open",
+          "416 1-> client.hello",
+          "433 1<- session.ready",
+          "30982 1<- message.accepted cd093c",
+          "30982 1<- turn.state queued cd093c",
+          "31005 1<- turn.state running cd093c",
+          "35385 1<- assistant.delta cd093c",
+          "35483 1-> client.message 75187a",
+          "35537 1<- message.accepted cd093c",
+          "35537 1<- assistant.message cd093c",
+          "39041 1<- assistant.delta cd093c",
+          "39849 1<- turn.completed cd093c",
+          "39852 1<- assistant.message cd093c",
+          "39852 1<- turn.state completed cd093c"
+        ]
+      }
+    ],
+    "http": [],
+    "requests": [
+      {
+        "client": "A",
+        "requests": [
+          "120 POST 200 /v1/auth/sign-in",
+          "140 GET 200 /v1/auth/me",
+          "454 GET 200 /v1/user/product-access",
+          "465 GET 200 /v1/web-chat/conversations",
+          "1027 POST 201 /v1/web-chat/conversations",
+          "1053 GET 200 /v1/web-chat/conversations/conv_34c5ec1ad95b43ee961682ac423496f2/snapshot",
+          "40979 GET 200 /v1/web-chat/conversations/conv_34c5ec1ad95b43ee961682ac423496f2/events",
+          "41003 GET 200 /v1/web-chat/conversations/conv_34c5ec1ad95b43ee961682ac423496f2/snapshot"
+        ]
+      },
+      {
+        "client": "B",
+        "requests": [
+          "83 GET 200 /v1/auth/me",
+          "395 GET 200 /v1/user/product-access",
+          "410 GET 200 /v1/web-chat/conversations/conv_34c5ec1ad95b43ee961682ac423496f2/snapshot",
+          "416 GET 200 /v1/web-chat/conversations",
+          "39860 GET 200 /v1/web-chat/conversations/conv_34c5ec1ad95b43ee961682ac423496f2/events",
+          "39873 GET 200 /v1/web-chat/conversations/conv_34c5ec1ad95b43ee961682ac423496f2/snapshot"
+        ]
+      }
+    ],
+    "console": [],
+    "serverLogs": []
+  },
+  "verdict": "PASS"
+}

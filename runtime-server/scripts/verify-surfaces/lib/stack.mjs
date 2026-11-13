@@ -175,7 +175,7 @@ export class Stack {
     }));
     await writeFile(path.join(root, "runtime/manifest.json"), JSON.stringify({
       contract_version: "1", creator: { id: creator.id }, product: { id: productId, name, promise: "Answers during a verification run." },
-      corpus_digest: corpusDigest, system_ref: { path: "runtime/instructions/system.md", sha256: sha(system) }, skills: [], brief_spec: brief
+      corpus_digest: corpusDigest, system_ref: { path: "runtime/instructions/system.md", sha256: sha(system) }, skills: [], knowledge: [], brief_spec: brief
     }));
     const releases = new CreatorRegistryReleaseStore(this.registryPool);
     await releases.ensureSchema();

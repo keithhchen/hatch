@@ -628,7 +628,20 @@ export type RunError = {
   };
 };
 
-export type OutboundMessage = RuntimeReady | DeliveryReady | AgentDelta | ToolRequest | ApprovalRequest | ApprovalResult | ToolEvent | SkillRunEvent | WorkspaceDiffEvent | SkillEvent | SkillActivatedEvent | RunStateEvent | MessageAccepted | CompactionEvent | RunFinal | RunError;
+/** The session itself was refused (hello, binding, an unreadable frame). No Run ended. */
+export type SessionError = {
+  type: "session.error";
+  error: { code: string; message: string; reference?: string };
+};
+
+/** One frame about a Run was refused (a stale cancel, an unknown tool call). The Run is as it was. */
+export type FrameRejected = {
+  type: "frame.rejected";
+  run_id: string;
+  error: { code: string; message: string; reference?: string };
+};
+
+export type OutboundMessage = SessionError | FrameRejected | RuntimeReady | DeliveryReady | AgentDelta | ToolRequest | ApprovalRequest | ApprovalResult | ToolEvent | SkillRunEvent | WorkspaceDiffEvent | SkillEvent | SkillActivatedEvent | RunStateEvent | MessageAccepted | CompactionEvent | RunFinal | RunError;
 
 export function contextAttachmentTextSha256(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");

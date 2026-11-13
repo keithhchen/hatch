@@ -1,0 +1,56 @@
+{
+  "id": "7b",
+  "title": "Stop pressed just as the reply completes (the cancel frame reaches the Runtime after turn.completed)",
+  "durationMs": 12490,
+  "notes": [],
+  "findings": [],
+  "evidence": {
+    "ui:tab": [
+      "user: Reply with exactly the single word: done",
+      "assistant: done"
+    ],
+    "server": [
+      "user: Reply with exactly the single word: done",
+      "assistant: done"
+    ],
+    "alerts": [],
+    "frames": [
+      {
+        "client": "tab",
+        "frames": [
+          "490 1open ws.open",
+          "505 1-> client.hello",
+          "520 1<- session.ready",
+          "2566 1-> client.message e88523",
+          "2578 1<- message.accepted e88523",
+          "2578 1<- turn.state queued e88523",
+          "2592 1<- turn.state running e88523",
+          "6629 1<- assistant.delta e88523",
+          "6724 1<- turn.completed e88523",
+          "6726 1-> turn.cancel e88523",
+          "6727 1<- assistant.message e88523",
+          "6728 1<- turn.state completed e88523",
+          "6732 1<- frame.rejected unknown_run e88523"
+        ]
+      }
+    ],
+    "http": [],
+    "requests": [
+      {
+        "client": "tab",
+        "requests": [
+          "143 POST 200 /v1/auth/sign-in",
+          "165 GET 200 /v1/auth/me",
+          "477 GET 200 /v1/user/product-access",
+          "487 GET 200 /v1/web-chat/conversations/conv_81b4429e2fe94c5191aede661432bd99/snapshot",
+          "493 GET 200 /v1/web-chat/conversations",
+          "6740 GET 200 /v1/web-chat/conversations/conv_81b4429e2fe94c5191aede661432bd99/events",
+          "6750 GET 200 /v1/web-chat/conversations/conv_81b4429e2fe94c5191aede661432bd99/snapshot"
+        ]
+      }
+    ],
+    "console": [],
+    "serverLogs": []
+  },
+  "verdict": "PASS"
+}

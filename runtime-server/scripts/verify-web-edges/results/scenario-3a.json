@@ -1,0 +1,86 @@
+{
+  "id": "3a",
+  "title": "Runtime restart mid-reply (deploy: SIGTERM, new process), then send again",
+  "durationMs": 21304,
+  "notes": [
+    "after restart the UI shows [[\"user\",\"\",\"Write a 200 word story about a lighthous\"],[\"assistant\",\"\",\"The gale rattled the iron lantern room a\"]]; alerts now: []"
+  ],
+  "findings": [],
+  "evidence": {
+    "ui:tab": [
+      "user: Write a 200 word story about a lighthouse keeper. Plain prose only: no",
+      "assistant: The gale rattled the iron lantern room as Thomas trimmed the wick. For",
+      "user: Reply with exactly the single word: pong",
+      "assistant: pong"
+    ],
+    "server": [
+      "user: Write a 200 word story about a lighthouse keeper. Plain prose only: no",
+      "assistant: The gale rattled the iron lantern room as Thomas trimmed the wick. For",
+      "user: Reply with exactly the single word: pong",
+      "assistant: pong"
+    ],
+    "alerts": [],
+    "frames": [
+      {
+        "client": "tab",
+        "frames": [
+          "1080 1open ws.open",
+          "1081 1-> client.hello",
+          "1089 1<- session.ready",
+          "1170 1-> client.message 8d31bd",
+          "1184 1<- message.accepted 8d31bd",
+          "1185 1<- turn.state queued 8d31bd",
+          "1200 1<- turn.state running 8d31bd",
+          "8153 1<- assistant.delta 8d31bd",
+          "8159 1<- assistant.delta 8d31bd",
+          "8169 1<- assistant.delta 8d31bd",
+          "8296 1<- assistant.delta 8d31bd",
+          "8769 1<- assistant.delta 8d31bd",
+          "10092 1<- assistant.delta 8d31bd",
+          "10100 1<- assistant.delta 8d31bd",
+          "10108 1<- assistant.delta 8d31bd",
+          "10507 1<- assistant.delta 8d31bd",
+          "10517 1<- assistant.delta 8d31bd",
+          "10522 1<- turn.completed 8d31bd",
+          "10522 1<- assistant.message 8d31bd",
+          "10522 1<- turn.state completed 8d31bd",
+          "10523 1close ws.close",
+          "10988 2open ws.open",
+          "10990 2-> client.hello",
+          "11008 2<- session.ready",
+          "13724 2-> client.message 00aa2f",
+          "13740 2<- message.accepted 00aa2f",
+          "13741 2<- turn.state queued 00aa2f",
+          "13774 2<- turn.state running 00aa2f",
+          "18410 2<- assistant.delta 00aa2f",
+          "18428 2<- turn.completed 00aa2f",
+          "18434 2<- assistant.message 00aa2f",
+          "18434 2<- turn.state completed 00aa2f"
+        ]
+      }
+    ],
+    "http": [],
+    "requests": [
+      {
+        "client": "tab",
+        "requests": [
+          "135 POST 200 /v1/auth/sign-in",
+          "158 GET 200 /v1/auth/me",
+          "468 GET 200 /v1/user/product-access",
+          "481 GET 200 /v1/web-chat/conversations",
+          "1051 POST 201 /v1/web-chat/conversations",
+          "1075 GET 200 /v1/web-chat/conversations/conv_4e4d4a2c2b7843e5ae8876fa751d6cf8/snapshot",
+          "10564 GET 200 /v1/web-chat/conversations/conv_4e4d4a2c2b7843e5ae8876fa751d6cf8/events",
+          "10587 GET 200 /v1/web-chat/conversations/conv_4e4d4a2c2b7843e5ae8876fa751d6cf8/snapshot",
+          "11023 GET 200 /v1/web-chat/conversations/conv_4e4d4a2c2b7843e5ae8876fa751d6cf8/events",
+          "11034 GET 200 /v1/web-chat/conversations/conv_4e4d4a2c2b7843e5ae8876fa751d6cf8/snapshot",
+          "18447 GET 200 /v1/web-chat/conversations/conv_4e4d4a2c2b7843e5ae8876fa751d6cf8/events",
+          "18464 GET 200 /v1/web-chat/conversations/conv_4e4d4a2c2b7843e5ae8876fa751d6cf8/snapshot"
+        ]
+      }
+    ],
+    "console": [],
+    "serverLogs": []
+  },
+  "verdict": "PASS"
+}

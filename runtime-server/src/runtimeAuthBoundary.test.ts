@@ -14,6 +14,7 @@ import {
   type EntitlementResolver
 } from "./entitlements.js";
 import { createRuntimeServer, durableConversationId, type RuntimeServer } from "./index.js";
+import { AgentReleaseUnavailableError } from "./runtimeCorpusResolver.js";
 import { PROTOCOL_VERSION } from "./protocol.js";
 
 const USER_ID = "11111111-1111-4111-8111-111111111111";
@@ -131,7 +132,7 @@ test("Runtime rejects another user's entitlement for an introspected session", a
     }, {
       libraryStatus: 403,
       libraryError: "entitlement_lookup_failed",
-      helloType: "turn.failed",
+      helloType: "session.error",
       helloError: "agent_entitlement_mismatch"
     });
   } finally {
@@ -400,7 +401,7 @@ test("Runtime admits only one client hello while Registry authorization is pendi
       (message) => (message.error as { code?: string } | undefined)?.code === "duplicate_hello"
     );
     socket.send(JSON.stringify(hello));
-    assert.equal((await duplicateFailure).type, "turn.failed");
+    assert.equal((await duplicateFailure).type, "session.error");
     assert.equal(identityCalls, 1);
 
     const readyResponse = waitForSocketMessage(socket, (message) => message.type === "session.ready");
@@ -939,8 +940,34 @@ test("product_id hello from a non-owner is rejected even when hello.creator_id c
       local_tools: []
     }));
     const failed = await response;
-    assert.equal(failed.type, "turn.failed");
+    assert.equal(failed.type, "session.error");
     assert.equal((failed.error as { code?: string }).code, "entitlement_required");
+  } finally {
+    socket?.close();
+    await runtime.close();
+  }
+});
+
+test("a hello for a Product with no live release is refused as agent_unavailable, never with the Registry path in the text", async () => {
+  const runtime = createRuntimeServer({
+    authIdentityResolver: { resolveIdentity: async (token) => token === "buyer-session" ? { sub: USER_ID } : undefined },
+    agentCorpusResolver: {
+      resolveByProduct: async () => { throw new AgentReleaseUnavailableError(`/v1/runtime/products/${PRODUCT_ID}/release`); }
+    } as unknown as AgentCorpusResolver,
+    conversationRepository: new InMemoryConversationRepository()
+  });
+  await new Promise<void>((resolve) => runtime.server.listen(0, "127.0.0.1", resolve));
+  let socket: WebSocket | undefined;
+  try {
+    const address = runtime.server.address(); assert.ok(address && typeof address !== "string");
+    socket = new WebSocket(`ws://127.0.0.1:${address.port}/runtime`);
+    await new Promise<void>((resolve, reject) => { socket!.once("open", resolve); socket!.once("error", reject); });
+    const response = nextSocketMessage(socket);
+    socket.send(JSON.stringify({ type: "client.hello", protocol_version: PROTOCOL_VERSION, conversation_id: "conversation-withdrawn", auth_token: "buyer-session", product_id: PRODUCT_ID, local_tools: [] }));
+    const failed = await response;
+    assert.equal(failed.type, "session.error");
+    assert.equal((failed.error as { code?: string }).code, "agent_unavailable");
+    assert.ok(!String((failed.error as { message?: string }).message).includes("/v1/runtime"));
   } finally {
     socket?.close();
     await runtime.close();

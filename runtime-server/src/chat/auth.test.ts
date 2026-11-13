@@ -88,7 +88,7 @@ test("a browser session and an API key both authenticate HTTP and WebSocket agai
       // The same token opens the WebSocket: the key goes in the first message, never the URL.
       const socket = new WebSocket(`${base.replace("http", "ws")}/runtime`);
       const ready = new Promise<string>((resolve, reject) => {
-        socket.on("message", (data) => { const message = JSON.parse(String(data)); if (message.type === "session.ready" || message.type === "turn.failed") resolve(message.type); });
+        socket.on("message", (data) => { const message = JSON.parse(String(data)); if (message.type === "session.ready" || message.type === "session.error") resolve(message.type); });
         socket.once("error", reject);
       });
       await new Promise<void>((resolve) => socket.once("open", () => resolve()));

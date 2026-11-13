@@ -67,11 +67,15 @@ export class WebConversationTransport extends ConversationTransport {
     return this.request(this.url("", cursor ? { cursor } : {}));
   }
 
+  /** One key per user intent: a double-click, or a retry after a failure, is the same conversation. The key ends when the server answers. */
   create({ briefAnswers } = {}) {
+    const intent = JSON.stringify(briefAnswers ?? null);
+    if (this.creating?.intent !== intent) this.creating = { intent, id: crypto.randomUUID() };
+    const { id } = this.creating;
     return this.request(this.url(), {
       method: "POST",
-      body: JSON.stringify({ client_request_id: crypto.randomUUID(), ...(briefAnswers ? { brief_answers: briefAnswers } : {}) })
-    });
+      body: JSON.stringify({ client_request_id: id, ...(briefAnswers ? { brief_answers: briefAnswers } : {}) })
+    }).then(created => { if (this.creating?.id === id) this.creating = null; return created; });
   }
 
   snapshot(conversationId) {

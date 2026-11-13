@@ -2,6 +2,12 @@ import { WebSocket } from "ws";
 
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
 
+// The only refusals a browser may send for a tool call or approval, each with the Runtime-facing text fixed here, never taken from the client.
+const BROWSER_REFUSALS = Object.freeze({
+  web_local_tool_unavailable: "此浏览器不能运行本地工具。",
+  browser_approval_unavailable: "此浏览器不能批准工具调用。"
+});
+
 export class WebChatCapabilityPolicy {
   prepare(message, helloSent, token) {
     if (!helloSent) {
@@ -22,13 +28,13 @@ export class WebChatCapabilityPolicy {
     }
     if (message?.type === "tool_call.result"
       && message.status === "error"
-      && message.error?.code === "web_local_tool_unavailable") {
+      && Object.hasOwn(BROWSER_REFUSALS, message.error?.code)) {
       return {
         type: "tool_call.result",
         run_id: message.run_id,
         tool_call_id: message.tool_call_id,
         status: "error",
-        error: { code: "web_local_tool_unavailable", message: "此浏览器不能运行本地工具。" }
+        error: { code: message.error.code, message: BROWSER_REFUSALS[message.error.code] }
       };
     }
     if (message?.type === "turn.cancel") return message;
