@@ -31,3 +31,18 @@ export function neighbour(paths, path, step) {
 
 /** Below this many files a filter box is clutter. */
 export const FILTER_FROM = 6;
+
+/** One page of grouped files: the pageSize-long slice of the flat list, regrouped by folder. */
+export function pageGroups(groups, page, size) {
+  const total = groups.reduce((sum, group) => sum + group.records.length, 0);
+  const pages = Math.max(1, Math.ceil(total / size));
+  const at = Math.min(Math.max(page, 1), pages);
+  let skip = (at - 1) * size, take = size;
+  const shown = [];
+  for (const group of groups) {
+    const records = group.records.slice(skip, skip + take);
+    skip = Math.max(0, skip - group.records.length); take -= records.length;
+    if (records.length) shown.push({ ...group, records });
+  }
+  return { groups: shown, page: at, pages };
+}
