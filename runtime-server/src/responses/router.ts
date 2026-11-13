@@ -14,6 +14,7 @@ import { ApiError, errorBody, invalidRequest, notFound, toApiError, unsupported 
 import { FilesApi } from "./files.js";
 import type { Json } from "./mapping.js";
 import { ModelCatalog } from "./models.js";
+import type { ResponsesFeatures } from "./request.js";
 import { ResponsesApi, type Delivery } from "./responses.js";
 import { RunViews } from "./runs.js";
 import type { UsageReader } from "../usage/usage.js";
@@ -30,6 +31,8 @@ export type ResponsesHttpDeps = {
   edge: ChatEdge;
   corpora: AgentCorpusResolverLike | undefined;
   identities: AuthIdentityResolver | undefined;
+  /** What is switched on; attachments (image and file input, the Files API) are off unless the composition root turns them on. */
+  features?: ResponsesFeatures;
   urls?: UrlFetcher;
   /** Where the Files API keeps an account's files; without it the Files API answers 501. */
   accountFiles?: AccountFiles;
@@ -50,8 +53,10 @@ export class ResponsesHttpApi {
   private readonly responses: ResponsesApi;
   private readonly views: RunViews;
   private readonly files: FilesApi;
+  private readonly features: ResponsesFeatures;
 
   constructor(private readonly deps: ResponsesHttpDeps) {
+    this.features = deps.features ?? { attachments: false };
     this.files = new FilesApi(deps.accountFiles, deps.edge.chatAssets);
     const identities = deps.identities ? cachingIdentityResolver(deps.identities) : undefined;
     this.authenticator = new ApiAuthenticator(identities);
@@ -61,7 +66,7 @@ export class ResponsesHttpApi {
     this.responses = new ResponsesApi({
       repository: deps.repository, store: deps.store, edge: deps.edge, catalog: this.models, conversations: this.conversations,
       attachments: new InlineAttachments({ assets: deps.edge.chatAssets, urls: deps.urls ?? new PublicHttpsFetcher(), files: this.files }),
-      views: this.views, ...(identities ? { identities } : {}), ...(deps.holdMs ? { holdMs: deps.holdMs } : {})
+      views: this.views, features: this.features, ...(identities ? { identities } : {}), ...(deps.holdMs ? { holdMs: deps.holdMs } : {})
     });
   }
 
@@ -133,6 +138,7 @@ export class ResponsesHttpApi {
         if (parts.length === 3 && parts[2] === "input_items") { only("GET"); return ok(await this.responses.inputItems(caller, parts[1]!)); }
         break;
       case "files":
+        if (!this.features.attachments) break;
         if (parts.length === 1) {
           only("GET", "POST");
           return ok(method === "GET" ? await this.files.list(caller, url.searchParams) : await this.files.create(caller, await readForm(req)));

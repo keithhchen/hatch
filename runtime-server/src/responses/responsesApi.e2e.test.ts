@@ -57,7 +57,7 @@ afterEach(async () => { await Promise.all(runtimes.splice(0).map((server) => ser
 type Gate = { open(): void; wait: Promise<void> };
 const gate = (): Gate => { let open!: () => void; const wait = new Promise<void>((resolve) => { open = resolve; }); return { open, wait }; };
 
-async function fixture(options: { holdMs?: number; keepAliveMs?: number; assets?: boolean; quota?: number; withoutAudio?: boolean } = {}) {
+async function fixture(options: { holdMs?: number; keepAliveMs?: number; assets?: boolean; quota?: number; withoutAudio?: boolean; attachments?: boolean } = {}) {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-responses-api-"));
   const store = new RuntimeStore(dataDir);
   const repository = new InMemoryConversationRepository(store.localAuthority);
@@ -94,7 +94,7 @@ async function fixture(options: { holdMs?: number; keepAliveMs?: number; assets?
   const runtime = createRuntimeServer({
     conversationStore: store, conversationRepository: repository, authIdentityResolver: identities, agentCorpusResolver: corpora,
     createRuntime: () => model, usage: recorder, ...(chatAssets ? { chatAssets } : {}),
-    responsesApi: { accountFiles: new InMemoryAccountFiles(options.quota), ...(options.holdMs ? { holdMs: options.holdMs } : {}), ...(options.keepAliveMs ? { keepAliveMs: options.keepAliveMs } : {}) }
+    responsesApi: { accountFiles: new InMemoryAccountFiles(options.quota), features: { attachments: options.attachments ?? true }, ...(options.holdMs ? { holdMs: options.holdMs } : {}), ...(options.keepAliveMs ? { keepAliveMs: options.keepAliveMs } : {}) }
   });
   runtimes.push(runtime);
   await new Promise<void>((resolve) => (runtime.server as http.Server).listen(0, "127.0.0.1", () => resolve()));
@@ -463,4 +463,19 @@ test("Files API: an account's storage is capped; going over is 400 storage_quota
   await upload(client("hatch_test_key_stranger"), 100);
   await openai.files.delete(first.id);
   await upload(openai, 60);
+});
+
+test("attachments are closed by default: input_image and input_file are 400 unsupported_parameter, the Files API is not routed", async () => {
+  const { origin, openai } = await fixture({ attachments: false });
+  const closed = { status: 400, code: "unsupported_parameter", type: "invalid_request_error" };
+  const image = await refused(openai.responses.create({ model: `hatch:${PRODUCT}`, input: [{ role: "user", content: [{ type: "input_text", text: "a" }, { type: "input_image", image_url: "https://example.com/a.png", detail: "auto" }] }] }));
+  assert.deepEqual(image, { ...closed, param: "input[0].content[1]" });
+  const file = await refused(openai.responses.create({ model: `hatch:${PRODUCT}`, input: [{ role: "user", content: "x" }, { role: "user", content: [{ type: "input_file", file_id: "file_1" }] }] }));
+  assert.deepEqual(file, { ...closed, param: "input[1].content[0]" });
+  const headers = { authorization: `Bearer ${KEY}` };
+  for (const [method, path] of [["POST", "files"], ["GET", "files"], ["GET", "files/file_1"], ["GET", "files/file_1/content"], ["DELETE", "files/file_1"]] as const) {
+    const response = await fetch(`${origin}/responses/v1/${path}`, { method, headers });
+    assert.equal(response.status, 404, `${method} /${path}`);
+    assert.deepEqual(((await response.json()) as { error: { type: string; code: string } }).error.type, "not_found_error");
+  }
 });

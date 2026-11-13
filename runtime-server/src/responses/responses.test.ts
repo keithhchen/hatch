@@ -39,7 +39,7 @@ test("errors: retry-after travels with 429 and 503, and an unexpected failure is
   assert.deepEqual(errorBody(new ApiError(400, "invalid_request_error", "unsupported_parameter", "m", "tools")).error, { message: "m", type: "invalid_request_error", param: "tools", code: "unsupported_parameter" });
 });
 
-const body = (extra: Record<string, unknown>) => parseCreateResponse({ model: "hatch:m", input: "hi", ...extra });
+const body = (extra: Record<string, unknown>) => parseCreateResponse({ model: "hatch:m", input: "hi", ...extra }, { attachments: true });
 const refusal = (extra: Record<string, unknown>) => { try { body(extra); } catch (error) { return (error as ApiError).param; } return "accepted"; };
 
 test("request: unsupported parameters name themselves; ignored ones pass", () => {
