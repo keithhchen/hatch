@@ -70,6 +70,8 @@ function ofHub(event: Hubbed): ConversationEvent[] {
       const name = String(event.name ?? "");
       const step = { name, id: event.tool_call_id, ...(event.activity_message ? { activity: event.activity_message } : {}), ...about };
       if (event.status === "requested") return [{ type: "tool", ...step }];
+      // A step that was cancelled with its Run has ended too: it must not keep spinning.
+      if (event.status === "cancelled") return [{ type: "tool_end", ...step, isError: false, cancelled: true }];
       return event.status === "completed" || event.status === "failed" ? [{ type: "tool_end", ...step, isError: event.status === "failed" }] : [];
     }
     // Something no Run shows changed, such as a chat being linked: observers look again.

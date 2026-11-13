@@ -237,7 +237,10 @@ test("TypeScript Registry mints typed sessions and API keys only from interactiv
 
     assert.equal((await post("/v1/auth/api-keys", web, { name: "" })).status, 400);
     assert.equal((await post("/v1/auth/api-keys", web, { name: "x".repeat(81) })).status, 400);
-    assert.equal((await post("/v1/auth/api-keys", undefined, { name: "ci" })).status, 401);
+    const refused = await post("/v1/auth/api-keys", undefined, { name: "ci" });
+    assert.equal(refused.status, 401);
+    // Registry failures have one shape, `{error: {code, message}}`, and no `detail`.
+    assert.deepEqual(await refused.json(), { error: { code: "unauthorized", message: "A valid account session is required." } });
     const created = await post("/v1/auth/api-keys", web, { name: "ci" });
     assert.equal(created.status, 201);
     const key = await created.json() as { id: string; name: string; token: string; created_at: string; expires_at: string };

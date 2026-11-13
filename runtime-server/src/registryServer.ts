@@ -2070,7 +2070,15 @@ function sendJson(
   headers: Record<string, string> = {}
 ): void {
   response.writeHead(status, { ...corsHeaders(), "content-type": "application/json; charset=utf-8", ...headers });
-  response.end(JSON.stringify(payload));
+  response.end(JSON.stringify(status >= 400 ? withStandardError(status, payload) : payload));
+}
+const ERROR_CODES: Record<number, string> = { 400: "invalid_request", 401: "unauthorized", 403: "forbidden", 404: "not_found", 405: "method_not_allowed", 422: "invalid_request", 503: "unavailable" };
+/** A Registry failure has one shape, `{error: {code, message}}`; the older `{detail}` (and a top-level `code`) is folded into it, and other fields stay. */
+function withStandardError(status: number, payload: unknown): unknown {
+  if (!payload || typeof payload !== "object") return payload;
+  const { detail, code, error, ...rest } = payload as Record<string, unknown>;
+  if (typeof detail !== "string") return payload;
+  return { error: error ?? { code: typeof code === "string" ? code : ERROR_CODES[status] ?? (status >= 500 ? "internal_error" : "request_failed"), message: detail }, ...rest };
 }
 function sendError(response: http.ServerResponse, error: unknown, known: Record<string, [number, string]> = {}): void {
   const message = error instanceof Error ? error.message : String(error);

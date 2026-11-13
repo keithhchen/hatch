@@ -69,7 +69,7 @@ export class ConversationRoutes {
     const assistant = asset ? undefined : url.pathname.match(ASSISTANT_ROUTE);
     if (!workers && !assistant && !asset) return false;
     const account = await this.deps.authenticate(request);
-    if (!account) { this.deps.json(response, 401, { detail: "A valid account token is required." }); return true; }
+    if (!account) { this.deps.json(response, 401, { error: { code: "unauthorized", message: "A valid account token is required." } }); return true; }
     try {
       if (workers && !workers[2]) {
         if (request.method !== "GET") throw new ConversationError(405, "method_not_allowed", "Method not allowed.");
@@ -81,7 +81,7 @@ export class ConversationRoutes {
     } catch (error) {
       if (!(error instanceof ConversationError)) throw error;
       const { status, code, message, details } = toProblem(error);
-      this.deps.json(response, status, { error: { code, message, ...(details === undefined ? {} : { details }) }, detail: message });
+      this.deps.json(response, status, { error: { code, message, ...(details === undefined ? {} : { details }) } });
     }
     return true;
   }
@@ -209,7 +209,7 @@ export class ConversationRoutes {
     stream.end();
   }
 
-  /** Replay after the cursor (`after`, or Last-Event-ID), then follow. Without either, from now. */
+  /** Replay after the cursor (`after_cursor`, or Last-Event-ID), then follow. Without either, from now. */
   private async events(conversation: Conversation, request: http.IncomingMessage, response: http.ServerResponse, url: URL): Promise<void> {
     const feed = await conversation.feedKey();
     if (!feed) throw new ConversationError(404, "conversation_not_started", "This worker has no conversation yet. Send it a message first.");
