@@ -117,22 +117,14 @@
 .factory-workspace { display: grid; flex: 1; min-height: 0; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; }
 .factory-workspace-pane { min-width: 0; min-height: 0; }
 .factory-workspace-loading { padding: 32px; }
-.factory-chat-panel { height: 100%; overflow: hidden; border-radius: 24px; background: var(--web-card) !important; box-shadow: var(--web-shadow); }
-.factory-chat-scroll { min-height: 0; padding: 24px clamp(16px, 3vw, 32px) !important; overscroll-behavior: contain; scrollbar-gutter: stable; background: var(--web-card); }
 .factory-chat-empty { max-width: 520px; margin: 6vh auto; text-align: center; }
 .factory-chat-empty svg { width: 34px; height: 34px; color: var(--web-yolk); }
 .factory-chat-empty h3 { margin: 10px 0 0; font-size: 22px; }
 .factory-chat-empty p { margin: 10px 0 0; color: var(--web-body); font-size: 16px; line-height: 1.6; }
-.factory-composer-toolbar,
-.factory-chat-composer { background: var(--web-card); }
-.factory-chat-composer { --chat-ink: var(--web-ink); --chat-muted: var(--web-muted); --chat-panel: var(--web-panel); }
-.factory-chat-composer { border-top: 1px solid var(--web-rule) !important; }
-.factory-composer-toolbar { flex-wrap: wrap; row-gap: 8px; padding-top: 8px; }
-.factory-app .factory-composer-toolbar .MuiButton-root { border-radius: 999px; text-transform: none; }
-.factory-failure { max-width: 760px; margin: 8px 0 16px; padding: 18px 20px; border-radius: 18px; background: #f8e2db; color: #6e2a1b; }
-.factory-failure strong { font-size: 16px; }
-.factory-failure p { margin: 6px 0 0; line-height: 1.6; }
-.factory-failure__detail { overflow-wrap: anywhere; font-size: 14px; opacity: .9; }
+.factory-chat.web-chat.web-chat--embedded { height: 100%; border-radius: 24px; background: var(--web-card); box-shadow: var(--web-shadow); }
+.factory-chat .web-chat__main { flex: 1; min-height: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+.factory-composer-toolbar { display: flex; flex-wrap: wrap; gap: 8px; max-width: 780px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 32px) 8px; box-sizing: border-box; width: 100%; }
+.factory-composer-toolbar:empty { display: none; }
 
 .factory-inspector { height: 100%; overflow: hidden; border-radius: 24px; background: color-mix(in srgb, var(--web-card) 60%, transparent) !important; }
 .factory-inspector-status { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; padding: 12px 14px 0; }
@@ -146,42 +138,8 @@
 .factory-app .MuiAccordionDetails-root { padding: 0 14px 12px; }
 
 /* Tool calls in the chat: one readable line each, parameters and result on demand. */
-.factory-tool-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
-.factory-tool-list > li + li { border-top: 1px solid var(--web-rule); }
-.factory-tool { font-family: var(--web-sans); font-size: 14px; line-height: 1.55; color: var(--web-body); }
-.factory-tool-list .factory-tool { padding: 8px 0; }
-.factory-tool--single { margin-bottom: 8px; padding: 10px 14px; border: 1px solid var(--web-rule); border-radius: 14px; background: var(--web-paper); }
-.factory-tool.is-failed .factory-tool__summary { color: var(--web-fail); }
-.factory-tool__row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.factory-tool__summary { min-width: 0; overflow-wrap: anywhere; color: var(--web-ink); }
-.factory-tool__toggle { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 2px; padding: 2px 0; border: 0; background: none; color: var(--web-muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
-.factory-tool__toggle:hover { color: var(--web-ink); }
-.factory-tool__toggle svg { transition: transform 160ms ease; }
-.factory-tool__toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
-.factory-tool__details { display: grid; gap: 10px; margin-top: 10px; }
-.factory-tool-block { display: grid; gap: 8px; padding: 12px 14px; border-radius: 12px; background: var(--web-panel); }
-.factory-tool-block__title { color: var(--web-muted); font-size: 12px; font-weight: 600; }
-.factory-tool-block dl { display: grid; gap: 6px; margin: 0; }
-.factory-tool-block dl { grid-template-columns: max-content minmax(0, 1fr); column-gap: 16px; }
-.factory-tool-block dl > div { display: contents; }
-.factory-tool-block dl > div.is-plain dd { grid-column: 1 / -1; }
-.factory-tool-block dt { color: var(--web-muted); font-size: 13px; }
-.factory-tool-block dd { max-height: 240px; margin: 0; overflow: auto; color: var(--web-ink); font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
-.factory-tool-block p { margin: 0; color: var(--web-muted); font-size: 13px; }
 .factory-app .MuiButton-root { border-radius: 999px; text-transform: none; font-weight: 650; }
 
-.factory-message-content { min-width: 0; max-width: min(100%, 760px); }
-.factory-message-bubble { min-width: 0; max-width: min(82%, 640px); padding: 0.75rem 1.05rem; border-radius: 18px 18px 6px 18px; color: var(--web-paper); background: var(--hatch-ui-primary, var(--web-ink)); }
-.factory-message-bubble .factory-markdown { color: inherit; }
-.factory-message-bubble .factory-markdown > * { margin-block: 0 0.55rem; }
-.factory-message-bubble .factory-markdown > *:last-child { margin-bottom: 0; }
-.factory-message-bubble .factory-markdown h1,
-.factory-message-bubble .factory-markdown h2,
-.factory-message-bubble .factory-markdown h3,
-.factory-message-bubble .factory-markdown a { color: inherit; }
-.factory-message-bubble .factory-markdown blockquote { color: inherit; border-color: color-mix(in srgb, currentColor 42%, transparent); }
-.factory-message-bubble .factory-markdown pre,
-.factory-message-bubble .factory-markdown code { background: color-mix(in srgb, currentColor 14%, transparent); }
 
 .factory-ask-user { max-width: min(100%, 760px); border: 2px solid var(--web-yolk) !important; border-radius: 22px !important; background: var(--web-yolk-soft) !important; }
 .factory-ask-user .MuiFormLabel-root.Mui-focused { color: var(--web-ink); }
@@ -233,6 +191,8 @@
 
 /* Phones and small tablets: the page scrolls as one column. */
 @media (max-width: 900px) {
+  /* The chat takes the screen under the top bar, its composer at the bottom, as the product chat does; the files follow below. */
+  .factory-chat.web-chat.web-chat--embedded { height: max(460px, calc(100dvh - var(--cpv2-topbar))); scroll-margin-top: var(--cpv2-topbar); }
   .factory-app, .factory-step, .factory-overview { height: auto; overflow: visible; }
   .factory-app--workbench .factory-step { overflow: visible; }
   .factory-stepper { flex-wrap: wrap; overflow: visible; gap: 2px; }
@@ -241,7 +201,6 @@
   .factory-stepper li + li::before { width: 6px; margin-right: 2px; }
   .factory-stepper button { padding: 0 8px 0 4px; gap: 6px; font-size: 13px; }
   .factory-workspace { grid-template-columns: 1fr; }
-  .factory-chat-panel { height: max(460px, calc(100dvh - 200px)); }
   .factory-inspector { height: auto; }
   .factory-path__step { grid-template-columns: 40px minmax(0, 1fr) 20px; gap: 12px; padding: 16px; }
   .factory-path__state { grid-column: 2; grid-row: 2; justify-self: start; }

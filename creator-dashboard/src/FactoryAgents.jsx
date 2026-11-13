@@ -1,9 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   Alert,
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
   Box,
   Button,
   Chip,
@@ -26,32 +23,32 @@ import {
 import {
   ArrowForward,
   AutoAwesome,
-  ExpandMore,
   Lock,
-  Send,
-  Stop,
   UploadFile
 } from "@mui/icons-material";
 import { createTheme, ThemeProvider } from "@mui/material/styles";
-import { ChatComposer, ChatComposerTextArea, ChatComposerToolbar } from "@mui/x-chat";
-import { ChatProvider } from "@mui/x-chat/headless";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button as HatchButton, Dialog, DialogContent, IconButton as HatchIconButton, InlineAlert, SegmentedControl, Textarea, hatchMuiThemeOptions } from "@hatch/ui";
 import { ArrowRight, ArrowUpRight, Play, Sparkles, ChevronDown, ChevronLeft as PrevIcon, ChevronRight as NextIcon, Download as DownloadIcon, Plus } from "lucide-react";
-import { MessageResponse, MicButton, PagePanel, RecordingActions, RecordingWave, canRecord, useComposerReserve, useFormPageViewer, useVoiceInput } from "@hatch/chat/react";
+import { ConversationController } from "@hatch/chat";
+import { ChatView, MessageResponse, PagePanel } from "@hatch/chat/react";
 import { dashboardRequest } from "./data.js";
 import { FileList } from "./FileList.jsx";
 import { AI_LINKS, copyImportPrompt } from "./importDialog.js";
 import { createIngestPort, createJobStore, ingestFile, settleJob, tooLarge } from "./ingestPort.js";
 import { neighbour, orderedPaths } from "./fileListModel.js";
-import { browserDictation } from "./webChatClient.js";
-import { chatEntries, describeToolCall, groupToolEntries, toolDetailRows, toolResultRows } from "./factoryMessages.js";
+import { UnavailableToolExecutor, browserDictation } from "./webChatClient.js";
+import { SessionPendingStore } from "./studioAssistantTransport.js";
+import { FactorySessionTransport, NoAttachments, SessionDraftStore } from "./factorySessionTransport.js";
+import { webChatErrorText, webChatT } from "./webChatI18n.js";
+import { chatEntries } from "./factoryMessages.js";
 import { subscribeFactoryEvents } from "./factoryEvents.js";
 import { createFactoryAgentTranslator } from "./factoryAgentsI18n.js";
 import { BUILD_NEEDS, agentStateKey, localizeAgentText, updatedSources } from "./factoryAgentState.js";
 import { creatorFactoryPath, creatorProductPath, factorySectionForAgent } from "./creatorRoutes.js";
 import { ADVANCED_STEPS, CONTENT_STEP, INSPIRATION_STEP, STUDIO_PATH, studioNextStep, studioPathStates, studioStepForRoute } from "./studioPath.js";
+import "./webChat.css";
 import "./factoryAgents.css";
 
 const api = (route, options = {}) => dashboardRequest(route, { ...options, body: options.body === undefined ? undefined : JSON.stringify(options.body) });
@@ -92,7 +89,7 @@ export function FactoryAgents({ productId, tab = "build", section, agent, naviga
   const applyNavigation = value => { setSessions(value.sessions || []); setAgents(value.agents || []); setManualFiles(value.manualFiles || []); };
   const refreshConfig = () => api(`${root}/config`).then(value => { setConfig(value); if (value.agents) setAgents(value.agents); if (value.manualFiles) setManualFiles(value.manualFiles); }).catch(e => setError(e.message));
   const refreshProduct = () => api(`/v1/creator/products/${encodeURIComponent(productId)}`).then(value => setProduct(value.product ?? value)).catch(e => setError(e.message));
-  useEffect(() => { refreshConfig(); refreshProduct(); return subscribeFactoryEvents({ url: `${root}/events`, onMessage: event => { const value = JSON.parse(event.data); if (value.type === "snapshot") applyNavigation(value); }, onError: () => setError(t("workspaceConnectionLost")), onOpen: () => { setError(""); refreshConfig(); refreshProduct(); } }); }, [productId, root, t]);
+  useEffect(() => { refreshConfig(); refreshProduct(); return subscribeFactoryEvents({ url: `${root}/events`, onMessage: event => { const value = JSON.parse(event.data); if (value.type === "snapshot") applyNavigation(value); }, onOpen: () => { refreshConfig(); refreshProduct(); } }); }, [productId, root, t]);
   const agentEntry = role => agents.find(item => item.role === role);
   const agentName = role => localizeAgentText(agentEntry(role)?.name, locale);
   const agentSession = role => sessions.filter(item => item.role === role).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
@@ -136,7 +133,7 @@ export function FactoryAgents({ productId, tab = "build", section, agent, naviga
     <ErrorNotice error={error} onClose={() => setError("")} />
     {selected === "uploads" && preview && manualFiles.some(file => file.path === preview.path) ? <FileViewer key={preview.path} root={root} running={false} id={preview.id} record={manualFiles.find(file => file.path === preview.path)} siblings={manualFiles} onOpenFile={path => setPreview({ ...preview, path })} onClose={() => setPreview(null)} t={t} perform={async fn => { try { await fn(); refreshConfig(); } catch (e) { setError(factoryError(e, t, agentName)); } }} /> : null}
     {step ? <div className="factory-step">
-      {selected === "uploads" ? <SourceUploadWorkspace manualFiles={manualFiles} uploadItems={uploadItems} importPicker={importPicker} uploadProjectFiles={uploadProjectFiles} saveManualText={saveManualText} locale={locale} onOpenFile={previewFile} deleteManualFile={deleteManualFile} dismissUpload={dismissUpload} onOpenAgent={openAgent} t={t} /> : selectedSession ? <Workspace key={selectedSession.id} root={root} id={selectedSession.id} entry={selectedEntry} agents={agents} config={config} onChanged={() => undefined} onOpenAgent={openAgent} agentName={agentName} t={t} /> : <AgentIntro entry={selectedEntry} agents={agents} onOpenAgent={openAgent} agentName={agentName} locale={locale} t={t} />}
+      {selected === "uploads" ? <SourceUploadWorkspace manualFiles={manualFiles} uploadItems={uploadItems} importPicker={importPicker} uploadProjectFiles={uploadProjectFiles} saveManualText={saveManualText} locale={locale} onOpenFile={previewFile} deleteManualFile={deleteManualFile} dismissUpload={dismissUpload} onOpenAgent={openAgent} t={t} /> : selectedSession ? <Workspace key={selectedSession.id} root={root} id={selectedSession.id} entry={selectedEntry} agents={agents} config={config} onChanged={() => undefined} onOpenAgent={openAgent} agentName={agentName} locale={locale} t={t} /> : <AgentIntro entry={selectedEntry} agents={agents} onOpenAgent={openAgent} agentName={agentName} locale={locale} t={t} />}
     </div> : <FactoryOverview product={product} states={states} agentEntry={agentEntry} agentName={agentName} goToStep={goToStep} t={t} />}
   </div></ThemeProvider>;
 }
@@ -227,93 +224,77 @@ function ImportFromAi({ saveManualText, locale, t }) {
   </>;
 }
 
-function Workspace({ root, id, entry, agents, config, onChanged, onOpenAgent, agentName, t }) {
-  const [session, setSession] = useState(null); const [error, setError] = useState(""); const [draft, setDraft] = useState(() => sessionStorage.getItem(`factory-draft:${id}`) || ""); const [stream, setStream] = useState(""); const [settled, setSettled] = useState([]); const [activity, setActivity] = useState(""); const [activityVisible, setActivityVisible] = useState(true); const [file, setFile] = useState(null); const [busy, setBusy] = useState(false);
-  const composer = useRef(null); const chat = useRef(null); const stick = useRef(true); const refresh = () => api(endpoint(root, id)).then(setSession);
-  useEffect(() => { let live = true; let seq = 0; const load = () => { const mine = ++seq; return api(endpoint(root, id)).then(value => { if (!live || mine !== seq) return; setSession(value); setError(""); const saved = savedReplyTexts(value); setSettled(previous => previous.filter(text => !saved.has(replyKey(text)))); }).catch(e => { if (live && mine === seq) setError(e.message); }); }; load(); const unsubscribe = subscribeFactoryEvents({ url: `${root}/sessions/${id}/events`, onMessage: event => { const value = JSON.parse(event.data); if (!value?.type) return; if (value.type === "delta") { setActivityVisible(false); setStream(previous => previous + value.text); } if (value.type === "message_end") { setStream(previous => { if (previous) setSettled(list => [...list, previous]); return ""; }); setActivityVisible(false); } if (value.type === "message") load(); if (value.type === "state") load(); if (value.type === "tool") { setActivityVisible(true); setActivity(t("callingTool", t(toolActionKey(value.name)))); } if (value.type === "thinking") { setActivityVisible(true); setActivity(t("thinking")); } if (value.type === "compacting") { setActivityVisible(true); setActivity(t("compacting")); } if (value.type === "tool_end") { setActivityVisible(true); setActivity(value.isError ? t("toolErrorContinuing") : t("continuing")); } if (["files", "todos"].includes(value.type)) load(); }, onError: () => { if (live) setActivity(t("reconnecting")); }, onOpen: () => { if (live) { setActivity(""); setStream(""); setSettled([]); load(); } } }); return () => { live = false; unsubscribe(); }; }, [root, id, t]);
-  useEffect(() => { sessionStorage.setItem(`factory-draft:${id}`, draft); }, [id, draft]); useEffect(() => { if (stick.current && chat.current) chat.current.scrollTop = chat.current.scrollHeight; }, [stream, session?.messages.length]);
-  const perform = async fn => { setError(""); setBusy(true); try { await fn(); await refresh(); onChanged(); } catch (e) { setError(factoryError(e, t, agentName)); } finally { setBusy(false); } };
+function Workspace({ root, id, entry, agents, config, onChanged, onOpenAgent, agentName, locale, t }) {
+  const [error, setError] = useState(""); const [file, setFile] = useState(null); const [busy, setBusy] = useState(false);
+  const [chat, setChat] = useState(null);
+  useEffect(() => {
+    const opened = openFactoryChat({ root, id, t, locale });
+    setChat(opened);
+    return () => opened.controller.dispose();
+  }, [root, id, t, locale]);
+  const session = useSyncExternalStore(chat ? chat.transport.subscribe : noopSubscribe, chat ? chat.transport.getSession : nullSession);
   const dictation = useMemo(() => browserDictation(dashboardRequest), []);
-  // One key per message the user sends: the composer's retry of the same message sends the same key.
-  const sendKeys = useRef(new Map()); const sendKey = messageId => { if (messageId === undefined) return crypto.randomUUID(); if (!sendKeys.current.has(messageId)) sendKeys.current.set(messageId, crypto.randomUUID()); return sendKeys.current.get(messageId); };
-  const composerAdapter = useMemo(() => ({
-    sendMessage: async ({ message, signal }) => {
-      const content = (message.parts || []).filter(part => part.type === "text").map(part => part.text).join("\n").trim();
-      if (!content) return new ReadableStream({ start(controller) { controller.close(); } });
-      setError(""); setActivityVisible(true); setActivity(t("thinking"));
-      try {
-        await api(endpoint(root, id, "message"), { method: "POST", headers: { "Idempotency-Key": sendKey(message.id) }, body: { content }, signal });
-        onChanged();
-        return new ReadableStream({ start(controller) { controller.close(); } });
-      } catch (e) {
-        setError(factoryError(e, t, agentName));
-        throw e;
-      }
-    },
-    stop: () => { void perform(() => api(endpoint(root, id, "stop"), { method: "POST", body: {} })); }
-  }), [root, id, t, agentName, onChanged]);
-  if (!session) return <Stack className="factory-workspace-loading" spacing={1}><Skeleton width="35%" /><Skeleton width="80%" /><Skeleton width="70%" /><ErrorNotice error={error} onClose={() => setError("")} /></Stack>;
+  const perform = async fn => { setError(""); setBusy(true); try { await fn(); await chat?.transport.reload(); onChanged(); } catch (e) { setError(factoryError(e, t, agentName)); } finally { setBusy(false); } };
+  if (!chat || !session) return <Stack className="factory-workspace-loading" spacing={1}><Skeleton width="35%" /><Skeleton width="80%" /><Skeleton width="70%" /><ErrorNotice error={error} onClose={() => setError("")} /></Stack>;
   const running = session.status === "running"; const locked = entry?.state === "locked"; const visibleSession = { ...session, files: session.files.filter(record => !record.path.startsWith("input/handoff/")) };
-  const openFile = path => setFile(path); const addToChat = (path, quote) => { const reference = `${t("fileReference", path)}${quote ? `\n\n${quote.split("\n").map(line => `> ${line}`).join("\n")}` : ""}`; setDraft(previous => `${previous}${previous.trim() ? "\n\n" : ""}${reference}\n\n`); requestAnimationFrame(() => composer.current?.focus()); }; const useLatest = () => { setActivityVisible(true); return perform(async () => { await api(endpoint(root, id, "message"), { method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() }, body: { content: t("useLatestMessage", session.role) } }); setActivity(t("thinking")); }); };
-  return <div className="factory-workspace"><div className="factory-workspace-pane factory-workspace-main"><ChatPanel dictation={dictation} session={visibleSession} entry={entry} agents={agents} root={root} id={id} config={config} busy={busy} draft={draft} setDraft={setDraft} stream={stream} settled={settled} activity={activity} activityVisible={activityVisible} composer={composer} composerAdapter={composerAdapter} chat={chat} stick={stick} running={running} locked={locked} error={error} setError={setError} perform={perform} onOpenFile={openFile} onUseLatest={useLatest} agentName={agentName} t={t} /></div><div className="factory-workspace-pane factory-workspace-side"><InspectorPanel entry={entry} agents={agents} session={visibleSession} root={root} id={id} running={running} busy={busy} file={file} setFile={setFile} addToChat={addToChat} agentName={agentName} onOpenAgent={onOpenAgent} t={t} perform={perform} /></div></div>;
+  const { controller } = chat;
+  const useLatest = () => perform(async () => { controller.setDraft(t("useLatestMessage", session.role)); await controller.send(); });
+  return <div className="factory-workspace"><div className="factory-workspace-pane factory-workspace-main"><ChatPanel chat={chat} dictation={dictation} session={visibleSession} entry={entry} config={config} busy={busy} locked={locked} locale={locale} onOpenFile={setFile} onUseLatest={useLatest} agentName={agentName} t={t} /></div><div className="factory-workspace-pane factory-workspace-side"><InspectorPanel entry={entry} agents={agents} session={visibleSession} root={root} id={id} running={running} busy={busy} file={file} setFile={setFile} agentName={agentName} onOpenAgent={onOpenAgent} t={t} perform={perform} /><ErrorNotice error={error} onClose={() => setError("")} /></div></div>;
 }
 
-function ChatPanel({ dictation, session, entry, agents, root, id, config, busy, draft, setDraft, stream, settled, activity, activityVisible, composer, composerAdapter, chat, stick, running, locked, error, setError, perform, onOpenFile, onUseLatest, agentName, t }) {
-  const entries = groupToolEntries(chatEntries(session.messages));
-  const composerBand = useRef(null); useComposerReserve(composerBand);
-  const viewer = useFormPageViewer([...session.messages, ...settled.map(content => ({ role: "assistant", content })), ...(stream ? [{ role: "assistant", content: stream }] : [])], id);
-  const pendingAskUser = [...entries].reverse().find(item => item.type === "askUser" && item.pending);
+const noopSubscribe = () => () => undefined; const nullSession = () => null;
+// Thinking and tool steps, as Product web chat shows them.
+const STEP_KINDS = ["thinking", "tool"];
+
+/** The Agent's build chat is a conversation of the shared chat, over the workbench session. */
+function openFactoryChat({ root, id, t, locale }) {
+  const transport = new FactorySessionTransport(dashboardRequest, { root, id, activityOf: name => t("callingTool", t(toolActionKey(name))) });
+  const describeError = cause => cause?.code || cause?.status ? factoryError(cause, t, () => "") : webChatErrorText(cause, locale);
+  const controller = new ConversationController({
+    transport, attachments: new NoAttachments(), tools: new UnavailableToolExecutor(), describeError,
+    pendingStore: new SessionPendingStore(() => globalThis.sessionStorage, `hatch.studio.factory.pending.${id}`), drafts: new SessionDraftStore(`factory-draft:${id}`),
+    draftScope: id, reconnectAttempts: Number.POSITIVE_INFINITY
+  });
+  controller.open(id);
+  return { transport, controller, describeError };
+}
+
+function ChatPanel({ chat, dictation, session, entry, config, busy, locked, locale, onOpenFile, onUseLatest, agentName, t }) {
+  const { controller, describeError } = chat;
+  const wrap = useRef(null);
+  // On a phone the chat is what the page opens on: it fills the screen under the top bar, the steps above it and the files below.
+  useEffect(() => { if (window.matchMedia("(max-width: 900px)").matches) wrap.current?.scrollIntoView({ block: "start" }); }, []);
+  const draft = useSyncExternalStore(controller.subscribe, () => controller.getState().draft);
+  const pendingAskUser = [...chatEntries(session.messages)].reverse().find(item => item.type === "askUser" && item.pending);
   const updatedDependencies = updatedSources(entry);
-  const composerDisabled = locked || busy || Boolean(pendingAskUser) || !config?.services.model;
-  const sendDisabled = composerDisabled || !(draft || "").trim();
-  const stopResponse = () => perform(() => api(endpoint(root, id, "stop"), { method: "POST", body: {} }));
-  const answerAskUser = content => composerAdapter.sendMessage({ message: { parts: [{ type: "text", text: content }] } });
-  // Dictation only fills the box, like the Assistant's: the Expert edits the text and decides whether to send.
-  const voice = useVoiceInput({ dictate: dictation, onText: text => { if (text) { setDraft(previous => previous.trim() ? `${previous.trimEnd()} ${text}` : text); composer.current?.focus(); } }, onError: dictationError => setError(dictationError?.message || String(dictationError)) });
-  const recording = voice.phase === "recording";
-  const composerSx = { border: "1px solid var(--hatch-ui-border-soft)", borderRadius: "var(--hatch-radius-dialog)", backgroundColor: "var(--hatch-ui-surface-solid)", px: 1.5, py: 1, "&:focus-within": { borderColor: "var(--hatch-ui-border-soft)", boxShadow: "none" }, "&:focus-within:not([data-disabled])": { borderColor: "var(--hatch-ui-border-soft)", boxShadow: "none" }, "& textarea:focus": { outline: "none", boxShadow: "none" } };
-  return <><Box className="factory-chat-panel" sx={{ minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", bgcolor: "background.paper" }}>
-    <Box className="factory-chat-scroll" ref={chat} onClickCapture={viewer.onClickCapture} sx={{ flex: 1, minHeight: 0, overflow: "auto", overscrollBehavior: "contain", px: 2.5, py: 2 }} onScroll={event => { const target = event.currentTarget; stick.current = target.scrollHeight - target.scrollTop - target.clientHeight < 80; }}>
-      {!session.messages.length && <div className="factory-chat-empty"><AutoAwesome aria-hidden="true" /><h3>{agentName(session.role)}</h3><p>{t("factoryYouDoRole", session.role)}</p></div>}
-      {entries.map(item => item.type === "toolGroup" ? <ToolGroup key={item.key} items={item.items} running={running && item.isCurrentTurn} t={t} /> : item.type === "tool" ? <ToolMessage key={item.key} call={item.call} result={item.result} running={running && item.isCurrentTurn} t={t} /> : item.type === "askUser" ? <AskUserBlock key={item.key} entry={item} onSubmit={answerAskUser} t={t} /> : <Message key={item.key} message={item.message} files={session.files} onOpenFile={onOpenFile} t={t} />)}
-      {settled.map((text, index) => <Message key={`settled-${index}`} message={{ role: "assistant", content: text }} files={session.files} onOpenFile={onOpenFile} t={t} />)}
-      {stream && <Message message={{ role: "assistant", content: stream }} files={session.files} onOpenFile={onOpenFile} t={t} />}
-      {session.status === "failed" && session.error ? <div className="factory-failure" role="alert"><strong>{t("factoryFailedTitle")}</strong><p>{t("factoryFailedBody")}</p><p className="factory-failure__detail">{session.errorCode === "usage_cap_exceeded" ? t("usageCapReached") : session.error}</p></div> : null}
-      {running && activityVisible && <Stack direction="row" spacing={1} alignItems="center" sx={{ py: 1 }}><CircularProgress size={14} /><Typography variant="caption" color="primary.main">{activity || (session.activeTool ? t("callingTool", t(toolActionKey(session.activeTool))) : t("working"))}</Typography></Stack>}
-    </Box>
-    <ErrorNotice error={error || (["interrupted", "failed"].includes(session.status) ? "" : session.error)} onClose={() => setError("")} />
-    <Stack className="factory-composer-toolbar" direction="row" spacing={1} alignItems="center" sx={{ px: 1.5, pb: 1 }}>
-      <StartAgentButton role={session.role} draft={draft} setDraft={setDraft} composer={composer} disabled={composerDisabled || running} t={t} />
-      {updatedDependencies.length > 0 && <Button size="small" variant="contained" color="primary" disabled={busy} onClick={onUseLatest} sx={{ ml: "auto", maxWidth: "100%", whiteSpace: "normal", textAlign: "left" }}>{`${updatedDependencies.map(role => t("dependencyUpdated", agentName(role))).join(" · ")} · ${t("improveWithLatest")}`}</Button>}
-    </Stack>
-    <Box className="factory-chat-composer" ref={composerBand} sx={{ p: 1.5, borderTop: 1, borderColor: "divider" }}>
-      <ChatProvider adapter={composerAdapter} composerValue={draft} onComposerValueChange={setDraft}>
-        <ChatComposer disabled={composerDisabled} features={{ attachments: false }} sx={composerSx}>
-          {recording ? <RecordingWave voice={voice} /> : <ChatComposerTextArea ref={composer} maxRows={7} disabled={running} aria-label={t("messageLabel")} placeholder={t(locked ? "completeDependenciesToStart" : "messagePlaceholder", session.role)} />}
-          <ChatComposerToolbar sx={{ minHeight: 30, pt: 0.5 }}>
-            {recording ? <RecordingActions voice={voice} t={t} /> : <>
-            {canRecord() ? <Box sx={{ ml: "auto" }}><MicButton voice={voice} t={t} disabled={composerDisabled || running} /></Box> : null}
-            {running ? <IconButton type="button" aria-label={t("stop")} onClick={stopResponse} disabled={busy} size="small" sx={{ ml: canRecord() ? 0 : "auto", width: 36, height: 36, borderRadius: "50%", bgcolor: "error.main", color: "error.contrastText", "&:hover": { bgcolor: "error.dark" } }}><Stop fontSize="small" /></IconButton> : <IconButton type="submit" aria-label={t("send")} disabled={sendDisabled} size="small" sx={{ ml: canRecord() ? 0 : "auto", width: 36, height: 36, borderRadius: "50%", bgcolor: "primary.main", color: "primary.contrastText", "&:hover": { bgcolor: "primary.dark" }, "&.Mui-disabled": { bgcolor: "action.disabledBackground", color: "action.disabled" } }}><Send fontSize="small" /></IconButton>}
-            </>}
-          </ChatComposerToolbar>
-        </ChatComposer>
-      </ChatProvider>
-    </Box>
-  </Box><PagePanel viewer={viewer} t={t} /></>;
-}
-
-function StartAgentButton({ role, draft, setDraft, composer, disabled, t }) {
-  const start = () => {
-    const message = t("startAgentMessage", role);
-    setDraft(current => current.trim() ? current : message);
-    requestAnimationFrame(() => composer.current?.focus());
+  const composerDisabled = locked || !config?.services.model;
+  const chatT = useCallback((key, values) => key === "messagePlaceholder" ? t(locked ? "completeDependenciesToStart" : "messagePlaceholder", session.role) : webChatT(locale, key, values), [locale, locked, session.role, t]);
+  const identity = { creatorName: agentName(session.role), productName: agentName(session.role) };
+  const openLocalLink = event => {
+    const href = event.target.closest?.("a[href]")?.getAttribute("href");
+    if (!href || /^(?:[a-z][\w+.-]*:|\/\/|#)/i.test(href)) return;
+    const path = decodeURIComponent(href.replace(/^\//, ""));
+    if (session.files.some(record => record.path === path)) { event.preventDefault(); onOpenFile(path); }
   };
-  return <HatchButton type="button" size="small" variant="secondary" leading={<Play aria-hidden="true" />} disabled={disabled || Boolean(draft.trim())} onClick={start}>{t("startAgentLabel", role)}</HatchButton>;
+  const startAgent = () => { if (!draft.trim()) controller.setDraft(t("startAgentMessage", session.role)); requestAnimationFrame(() => wrap.current?.querySelector("textarea")?.focus()); };
+  const accessory = <>
+    {pendingAskUser ? <AskUserBlock entry={pendingAskUser} onSubmit={content => { controller.setDraft(content); return controller.send(); }} t={t} /> : null}
+    <div className="factory-composer-toolbar">
+      <HatchButton type="button" size="small" variant="secondary" leading={<Play aria-hidden="true" />} disabled={composerDisabled || session.status === "running" || Boolean(draft.trim())} onClick={startAgent}>{t("startAgentLabel", session.role)}</HatchButton>
+      {updatedDependencies.length > 0 && <HatchButton size="small" disabled={busy} onClick={onUseLatest}>{`${updatedDependencies.map(role => t("dependencyUpdated", agentName(role))).join(" · ")} · ${t("improveWithLatest")}`}</HatchButton>}
+    </div>
+  </>;
+  return <div className="factory-chat web-chat web-chat--embedded" ref={wrap} onClickCapture={openLocalLink}>
+    <ChatView controller={controller} identity={identity} agentName={agentName(session.role)} t={chatT} errorText={describeError}
+      attachments={controller.attachments} activityKinds={STEP_KINDS} dictate={dictation} attachControl={false} composerDisabled={composerDisabled} onNewConversation={() => undefined}
+      empty={<div className="factory-chat-empty"><AutoAwesome aria-hidden="true" /><h3>{agentName(session.role)}</h3><p>{t("factoryYouDoRole", session.role)}</p></div>}
+      dockAccessory={accessory} />
+  </div>;
 }
 
 const FILE_PAGE_SIZE = 8;
 const IMAGE_FILE = /\.(jpe?g|png|webp)$/i;
-function InspectorPanel({ entry, agents, session, root, id, running, busy, file, setFile, addToChat, agentName, onOpenAgent, t, perform }) {
+function InspectorPanel({ entry, agents, session, root, id, running, busy, file, setFile, agentName, onOpenAgent, t, perform }) {
   const inputFiles = session.files.filter(record => record.path.startsWith("input/") && !record.path.startsWith("input/handoff/")); const outputFiles = session.files.filter(record => record.path.startsWith("output/"));
   const selectedFile = file ? session.files.find(record => record.path === file) : null;
   const [filesTab, setFilesTab] = useState("input");
@@ -322,7 +303,7 @@ function InspectorPanel({ entry, agents, session, root, id, running, busy, file,
   // An HTML output opens in the floating page panel; everything else opens in the file dialog.
   const openOutput = path => { if (/\.html$/i.test(path)) { setHtmlPage({ url: fileUrl(path), title: path.split("/").at(-1) }); setHtmlMode("open"); } else setFile(path); };
   const htmlViewer = { page: htmlPage, mode: htmlMode, setMode: setHtmlMode, setTitle: () => undefined };
-  return <Box component="aside" className="factory-inspector" aria-label={t("nextSteps")} sx={{ height: "100%", minWidth: 0, display: "flex", flexDirection: "column", bgcolor: "var(--hatch-ui-surface-sidebar)" }}>{entry && entry.state !== "complete" ? <div className="factory-inspector-status"><AgentState entry={entry} agentName={agentName} t={t} /></div> : null}<Box className="factory-inspector-scroll" sx={{ overflow: "auto", flex: 1, minHeight: 0, p: 1.5 }}>{entry && <NextSteps entry={entry} agents={agents} onOpenAgent={onOpenAgent} agentName={agentName} t={t} />}<div className="fl-panel"><div className="fl-panel__head"><div className="fl-tabs" role="tablist" aria-label={t("files")}>{[["input", "attachments"], ["output", "outputs"]].map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={filesTab === key} className={filesTab === key ? "is-active" : ""} onClick={() => setFilesTab(key)}>{t(label)}</button>)}</div>{filesTab === "input" ? <HatchButton size="small" variant="secondary" onClick={() => onOpenAgent("uploads")}>{t("addFiles")}</HatchButton> : null}</div>{filesTab === "input" ? <FileList key="input" records={inputFiles} pageSize={FILE_PAGE_SIZE} onOpen={setFile} onDelete={record => perform(() => api(endpoint(root, id, "files"), { method: "DELETE", body: { path: record.path } }))} deletable={record => !running && /^input\/manual\//.test(record.path)} t={t} /> : <FileList key="output" records={outputFiles} pageSize={FILE_PAGE_SIZE} onOpen={openOutput} thumbnail={record => IMAGE_FILE.test(record.path) ? fileUrl(record.path) : undefined} t={t} />}</div><PagePanel viewer={htmlViewer} t={t} />{selectedFile && <FileViewer key={file} root={root} running={running} id={id} record={selectedFile} siblings={selectedFile.path.startsWith("output/") ? outputFiles : inputFiles} onOpenFile={setFile} onAddToChat={addToChat} onClose={() => setFile(null)} t={t} perform={perform} />}</Box></Box>;
+  return <Box component="aside" className="factory-inspector" aria-label={t("nextSteps")} sx={{ height: "100%", minWidth: 0, display: "flex", flexDirection: "column", bgcolor: "var(--hatch-ui-surface-sidebar)" }}>{entry && entry.state !== "complete" ? <div className="factory-inspector-status"><AgentState entry={entry} agentName={agentName} t={t} /></div> : null}<Box className="factory-inspector-scroll" sx={{ overflow: "auto", flex: 1, minHeight: 0, p: 1.5 }}>{entry && <NextSteps entry={entry} agents={agents} onOpenAgent={onOpenAgent} agentName={agentName} t={t} />}<div className="fl-panel"><div className="fl-panel__head"><div className="fl-tabs" role="tablist" aria-label={t("files")}>{[["input", "attachments"], ["output", "outputs"]].map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={filesTab === key} className={filesTab === key ? "is-active" : ""} onClick={() => setFilesTab(key)}>{t(label)}</button>)}</div>{filesTab === "input" ? <HatchButton size="small" variant="secondary" onClick={() => onOpenAgent("uploads")}>{t("addFiles")}</HatchButton> : null}</div>{filesTab === "input" ? <FileList key="input" records={inputFiles} pageSize={FILE_PAGE_SIZE} onOpen={setFile} onDelete={record => perform(() => api(endpoint(root, id, "files"), { method: "DELETE", body: { path: record.path } }))} deletable={record => !running && /^input\/manual\//.test(record.path)} t={t} /> : <FileList key="output" records={outputFiles} pageSize={FILE_PAGE_SIZE} onOpen={openOutput} thumbnail={record => IMAGE_FILE.test(record.path) ? fileUrl(record.path) : undefined} t={t} />}</div><PagePanel viewer={htmlViewer} t={t} />{selectedFile && <FileViewer key={file} root={root} running={running} id={id} record={selectedFile} siblings={selectedFile.path.startsWith("output/") ? outputFiles : inputFiles} onOpenFile={setFile} onClose={() => setFile(null)} t={t} perform={perform} />}</Box></Box>;
 }
 
 function FileViewer({ root, running, id, record, siblings, onOpenFile, onClose, onAddToChat, t, perform }) {
@@ -369,11 +350,6 @@ function NextSteps({ entry, agents, onOpenAgent, agentName, t }) {
   </Stack>;
 }
 const toolActionKey = name => { const value = String(name || "").toLowerCase(); if (value.includes("update_todo")) return "toolActionUpdateTodo"; if (value.includes("corpus_upload")) return "toolActionCorpusUpload"; if (value.includes("evaluate")) return "toolActionEvaluate"; if (value.includes("search")) return "toolActionSearch"; if (value.includes("write")) return "toolActionWrite"; if (value.includes("read")) return "toolActionRead"; if (value.includes("list")) return "toolActionList"; return "toolActionUnknown"; };
-const toolWorkKey = items => { const names = items.map(item => item.call?.name || item.result?.toolName || "").join(" ").toLowerCase(); if (names.includes("corpus_upload")) return "toolWorkPublish"; if (names.includes("list") || names.includes("read") || names.includes("search")) return "toolWorkGather"; if (names.includes("write") || names.includes("update_todo")) return "toolWorkBuild"; return "toolWorkMethod"; };
-function ToolGroup({ items, running, t }) { const pending = items.some(item => !item.result); const failed = items.some(item => item.result?.isError); const status = pending ? t(running ? "toolCalling" : "toolMissing") : failed ? t("toolFailed") : ""; return <Accordion disableGutters variant="outlined" className="factory-tool-group" sx={{ mb: 1, "&:before": { display: "none" } }}><AccordionSummary expandIcon={<ExpandMore />}><Stack spacing={0.25}><Typography variant="body2" fontWeight={700}>{t(toolWorkKey(items))}</Typography><Typography variant="caption" color="text.secondary">{t("toolActionsCompleted", items.length)}{status ? ` · ${status}` : ""}</Typography></Stack></AccordionSummary><AccordionDetails sx={{ pt: 0 }}><ul className="factory-tool-list">{items.map(item => <li key={item.key}><ToolMessage call={item.call} result={item.result} running={running && item.isCurrentTurn} t={t} bare /></li>)}</ul></AccordionDetails></Accordion>; }
-function toolSummary(call, result, t) { const { key, target, count } = describeToolCall(call, result); const head = t(key, target ?? ""); if (count === null || count === undefined || key === "toolSumTodo") return key === "toolSumTodo" && count ? `${head} · ${t("toolItemCount", count)}` : head; return `${head} · ${count ? t("toolFileCount", count) : t("toolNoFiles")}`; }
-function ToolDetailBlock({ title, rows, t }) { return <div className="factory-tool-block"><span className="factory-tool-block__title">{title}</span>{rows.length ? <dl>{rows.map((row, index) => <div key={`${row.key}-${index}`} className={row.key ? "" : "is-plain"}>{row.key ? <dt>{t("toolKeyLabel", row.key)}</dt> : null}<dd>{row.value ?? t("toolNone")}</dd></div>)}</dl> : <p>{t("toolNone")}</p>}</div>; }
-function ToolMessage({ call, result, running, t, bare = false }) { const [open, setOpen] = useState(false); const status = result?.isError ? t("toolFailed") : result ? "" : t(running ? "toolCalling" : "toolMissing"); return <div className={`factory-tool${bare ? "" : " factory-tool--single"}${result?.isError ? " is-failed" : ""}`}><div className="factory-tool__row"><span className="factory-tool__summary">{toolSummary(call, result, t)}{status ? ` · ${status}` : ""}</span><button type="button" className="factory-tool__toggle" aria-expanded={open} onClick={() => setOpen(value => !value)}>{t("toolDetails")}<ExpandMore fontSize="inherit" aria-hidden="true" /></button></div>{open ? <div className="factory-tool__details">{call ? <ToolDetailBlock title={t("toolArguments")} rows={toolDetailRows(call.arguments)} t={t} /> : null}{result ? <ToolDetailBlock title={t("toolResult")} rows={toolResultRows(result)} t={t} /> : null}</div> : null}</div>; }
 function askUserOption(option, index) { return { id: option?.id || `option-${index + 1}`, content: option?.content || "" }; }
 function AskUserBlock({ entry, onSubmit, t }) {
   const questions = Array.isArray(entry?.call?.arguments?.questions) ? entry.call.arguments.questions : [];
@@ -399,9 +375,5 @@ function AskUserBlock({ entry, onSubmit, t }) {
   };
   return <Paper className="factory-ask-user" variant="outlined" sx={{ mb: 2, p: 2, borderColor: "primary.main", bgcolor: "background.paper", opacity: pending ? 1 : 0.72 }}><Stack spacing={2}><Box><Typography variant="subtitle1" fontWeight={750}>{t("askUserTitle")}</Typography><Typography variant="body2" color="text.secondary">{t("askUserDescription")}</Typography></Box>{questions.map((question, index) => { const id = question.id || `question-${index + 1}`; const answer = answers[id] || { selected: question.multiSelect ? [] : "", other: "" }; const options = (question.options || []).map(askUserOption); return <Box key={id}><FormControl fullWidth required={question.required !== false}><FormLabel sx={{ color: "text.primary", mb: 0.75 }}>{question.question}</FormLabel>{question.multiSelect ? <FormGroup>{options.map(option => <FormControlLabel key={option.id} control={<Checkbox disabled={!pending || submitting} checked={Array.isArray(answer.selected) && answer.selected.includes(option.id)} onChange={event => update(id, { selected: event.target.checked ? [...(answer.selected || []), option.id] : (answer.selected || []).filter(value => value !== option.id) })} />} label={option.content} />)}</FormGroup> : <RadioGroup value={answer.selected || ""} onChange={event => update(id, { selected: event.target.value })}>{options.map(option => <FormControlLabel key={option.id} value={option.id} disabled={!pending || submitting} control={<Radio />} label={option.content} />)}</RadioGroup>}<TextField disabled={!pending || submitting} fullWidth size="small" multiline minRows={2} value={answer.other || ""} onChange={event => update(id, { other: event.target.value })} placeholder={t("askUserOtherPlaceholder")} sx={{ mt: 1 }} /></FormControl></Box>; })}{pending && <Button variant="contained" onClick={submit} disabled={!complete || submitting} sx={{ alignSelf: "flex-start" }}>{submitting ? t("askUserSubmitting") : t("askUserSubmit")}</Button>}</Stack></Paper>;
 }
-// A streamed reply and its saved message match when their text matches, ignoring whitespace between text blocks.
-function replyKey(text) { return String(text || "").replace(/\s+/g, ""); }
-function savedReplyTexts(session) { return new Set((session?.messages || []).filter(message => message.role === "assistant").map(message => replyKey(typeof message.content === "string" ? message.content : (message.content || []).filter(item => item.type === "text").map(item => item.text).join("")))); }
 
-function Message({ message, files, onOpenFile, t }) { if (!message) return null; const text = typeof message.content === "string" ? message.content : message.content?.filter(item => item.type === "text").map(item => item.text).join("\n"); if (!text) return null; const user = message.role === "user"; return <Box component="article" className={`factory-message factory-message--${user ? "user" : "assistant"}`} sx={{ mb: 2.5, display: "flex", justifyContent: user ? "flex-end" : "flex-start" }}><Box className={user ? "factory-message-bubble" : "factory-message-content"}>{message.role === "assistant" ? <Markdown files={files} onOpenFile={onOpenFile} t={t}>{text}</Markdown> : <Markdown files={files} onOpenFile={onOpenFile} t={t}>{text}</Markdown>}</Box></Box>; }
 function factoryError(error, t, agentName) { if (error?.code === "usage_cap_exceeded") return t("usageCapReached"); if (error?.code === "build_not_ready") return t("finishOneAgentFirst", [t("uploadSources"), agentName("voice")].join(t("roleSeparator"))); if (error?.code === "agent_definitions_unavailable" || error?.code === "agent_definitions_invalid") return t("agentSetupUnavailable"); return error?.message || t("unknownFactoryError"); }

@@ -124,14 +124,14 @@ const RuntimeStatus = ({ children }) => <div className="web-chat__runtime-status
 /** Where the Runtime compacted the conversation's context. */
 const CompactionDivider = ({ t }) => <div className="web-chat__divider" role="separator"><span>{t("compaction.done")}</span></div>;
 
-const REPLY_STATUSES = ["sending", "agentReplying", "syncingReply", "stopping"];
+const REPLY_STATUSES = ["sending", "agentReplying", "syncingReply", "stopping", "reconnecting"];
 
-function ChatMessage({ message, identity, typingText, compacting, attachments, Viewer, assetSource, activityKinds, t, errorText, loadToolDetail, approvals }) {
+function ChatMessage({ message, continued, identity, typingText, compacting, attachments, Viewer, assetSource, activityKinds, t, errorText, loadToolDetail, approvals }) {
   const { files, pictures } = partitionAttachments(message, mediaType => attachments.accepts(mediaType));
   const live = message.transient && message.timeline?.filter(entry => !ACTIVITY_KINDS.includes(entry.kind) || activityKinds.includes(entry.kind)).length;
   const timelineProps = { activityKinds, t, errorText, loadToolDetail, approvals };
   return <article className={`web-chat__message web-chat__message--${message.role}${message.state ? ` web-chat__message--${message.state}` : ""}`}>
-    {message.role === "assistant" ? <Avatar className="web-chat__message-avatar" src={identity.creatorAvatarUrl} name={identity.creatorName} size="small" /> : null}
+    {message.role === "assistant" ? <Avatar className={`web-chat__message-avatar${continued ? " web-chat__message-avatar--continued" : ""}`} src={identity.creatorAvatarUrl} name={identity.creatorName} size="small" /> : null}
     <div className="web-chat__message-body">
       {message.role === "assistant"
         ? message.transient
@@ -149,11 +149,15 @@ function ChatMessage({ message, identity, typingText, compacting, attachments, V
 const fileKey = file => file.id ?? `${file.name}-${file.lastModified}`;
 
 /** The composer: draft, attachment chips, picker, Enter to send, Shift+Enter for a newline. Hosts with their own thread reuse it with a controller-shaped adapter. */
-export function Composer({ controller, state, snapshotPending = false, agentName, t, onSend, attachControl, accessory, onPaste, accept = "image/*", dictate, steer = false }) {
+export function Composer({ controller, state, snapshotPending = false, agentName, t, onSend, attachControl, accessory, onPaste, accept = "image/*", dictate, steer = false, disabled = false }) {
   const draftRef = useRef(null);
   const { draft, images, activeRun } = state;
   // A host whose server takes a message while a Run is active keeps the composer open and has no Stop here.
-  const busy = snapshotPending || (Boolean(activeRun) && !steer);
+  // The history being summarized holds the composer until the summary is done. A page still loading takes a message: it is sent when the conversation is ready.
+  const compacting = state.compacting || state.runState === "compacting";
+  const busy = disabled || compacting || (Boolean(activeRun) && !steer);
+  // A host that takes messages during a Run still offers Stop while there is nothing to send.
+  const stoppable = Boolean(activeRun) && (!steer || (!draft.trim() && !images.length));
   // Send turns into Stop the moment a Run starts, so the click that sends must not also land on Stop. Throttle after a click, never lock Stop up front: a Run another tab or the server started is stoppable at once.
   const throttle = useRef(null);
   throttle.current ??= createClickThrottle();
@@ -180,16 +184,16 @@ export function Composer({ controller, state, snapshotPending = false, agentName
   });
   const recording = voice.phase === "recording";
 
-  return <form className="web-chat__composer" aria-busy={snapshotPending} onSubmit={submit}>
-    {images.length ? <div className="web-chat__images" aria-label={t("imagesToSend")}>{images.map(file => <span className="web-chat__image-chip" key={fileKey(file)}><Paperclip aria-hidden="true" /><span title={file.name}>{file.name}</span><button type="button" aria-label={t("removeImage", { name: file.name })} onClick={() => controller.removeImage(file)} disabled={snapshotPending}><X aria-hidden="true" /></button></span>)}</div> : null}
+  return <form className="web-chat__composer" aria-busy={snapshotPending || compacting} onSubmit={submit}>
+    {images.length ? <div className="web-chat__images" aria-label={t("imagesToSend")}>{images.map(file => <span className="web-chat__image-chip" key={fileKey(file)}><Paperclip aria-hidden="true" /><span title={file.name}>{file.name}</span><button type="button" aria-label={t("removeImage", { name: file.name })} onClick={() => controller.removeImage(file)} disabled={compacting}><X aria-hidden="true" /></button></span>)}</div> : null}
     {recording ? <RecordingWave voice={voice} /> : <textarea ref={draftRef} aria-label={t("messageAgent", { agent: agentName })} value={draft} onChange={event => controller.setDraft(event.target.value)} placeholder={t("messagePlaceholder")} disabled={busy} onPaste={onPaste} onKeyDown={event => { if (event.key !== "Enter" || event.shiftKey || isImeConfirmation(event)) return; submit(event); }} />}
     {recording ? <RecordingActions voice={voice} t={t} /> : <div className="web-chat__actions">
-      {attachControl ?? <AttachButton accept={accept} disabled={busy} onFiles={files => controller.addImages(files)} t={t} />}
+      {attachControl === undefined ? <AttachButton accept={accept} disabled={busy} onFiles={files => controller.addImages(files)} t={t} /> : attachControl}
       {accessory}
       {dictate && canRecord() ? <MicButton voice={voice} t={t} disabled={busy} /> : null}
-      {activeRun && !steer
+      {stoppable
         ? <button type="button" className="web-chat__stop" aria-label={t("stopReply")} onClick={() => throttle.current(() => controller.cancel())}><Square aria-hidden="true" /><span>{t("stopReply")}</span></button>
-        : <button type="submit" className="web-chat__send" aria-label={t("sendMessage")} disabled={snapshotPending || (!draft.trim() && !images.length)}><ArrowUp aria-hidden="true" /></button>}
+        : <button type="submit" className="web-chat__send" aria-label={t("sendMessage")} disabled={busy || (!draft.trim() && !images.length)}><ArrowUp aria-hidden="true" /></button>}
     </div>}
   </form>;
 }
@@ -213,6 +217,7 @@ export function Composer({ controller, state, snapshotPending = false, agentName
  * @param {React.ReactNode} [props.dockAccessory] slot above the composer (e.g. pending approvals)
  * @param {React.ReactNode} [props.attachControl] replaces the default image picker
  * @param {React.ReactNode} [props.composerAccessory] extra composer controls
+ * @param {boolean} [props.composerDisabled] the host does not take a message now
  * @param {(event) => void} [props.onComposerPaste]
  * @param {string} [props.accept] file types the picker offers; images only by default
  * @param {React.ReactNode} [props.empty] replaces the welcome shown for a conversation with no messages
@@ -224,7 +229,7 @@ export function Composer({ controller, state, snapshotPending = false, agentName
  * @param {import("../domain/scroll-positions.js").ScrollPositions} [props.scrollPositions]
  *   where each conversation was left; defaults to one in-memory store per page.
  */
-export function ChatView({ controller, identity, agentName, t, errorText, attachments, AttachmentViewer = ImageViewer, header, loadingIndicator, onNewConversation, activityKinds = ACTIVITY_KINDS, inert, dockAccessory, attachControl, composerAccessory, onComposerPaste, onApprovalDecision, dictate, accept, empty, scrollPositions = sharedScrollPositions }) {
+export function ChatView({ controller, identity, agentName, t, errorText, attachments, AttachmentViewer = ImageViewer, header, loadingIndicator, onNewConversation, activityKinds = ACTIVITY_KINDS, inert, dockAccessory, attachControl, composerAccessory, composerDisabled, onComposerPaste, onApprovalDecision, dictate, accept, empty, scrollPositions = sharedScrollPositions }) {
   const state = useChatState(controller);
   const meter = controller.freeChat ?? OPEN_FREE_CHAT;
   const freeChat = useSyncExternalStore(meter.subscribe, meter.getSnapshot);
@@ -318,12 +323,12 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
           <h2>{t("emptyHeadline")}</h2>
           <p>{t("emptyConversationBody", { agent: agentName })}</p>
         </section> : null}
-        {!snapshotPending ? withoutRepeatedSteps(messages).map(message => {
+        {!snapshotPending || messages.length ? withoutRepeatedSteps(messages).map((message, index, shown) => {
           const key = message.renderKey ?? `${message.run_id}-${message.role}`;
           const compacting = Boolean(message.transient && activeRun && message.run_id === activeRun && state.runState === "compacting");
           return <React.Fragment key={key}>
             {message.role === "assistant" && compactedRuns.has(message.run_id) ? <CompactionDivider t={t} /> : null}
-            <ChatMessage message={message} compacting={compacting} {...messageProps} />
+            <ChatMessage message={message} continued={message.role === "assistant" && shown[index - 1]?.role === "assistant"} compacting={compacting} {...messageProps} />
           </React.Fragment>;
         }) : null}
       </div>
@@ -331,8 +336,9 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
     <div className="web-chat__dock" ref={dockRef}>
       {error ? <div className="web-chat__notice" role="alert"><CircleAlert aria-hidden="true" /><span>{errorText(error)}</span>{state.failedRun && !controller.canRetryRun ? null : <button type="button" onClick={() => state.failedRun ? controller.retryRun() : controller.retry()}><RotateCw aria-hidden="true" /><span>{t("retry")}</span></button>}</div> : null}
       {dockAccessory}
+      {state.compacting && state.runState !== "compacting" ? <RuntimeStatus>{t("compaction.running")}</RuntimeStatus> : null}
       {freeChat.locked && !activeRun ? <FreeChatPaywall access={freeChat} creatorName={identity.creatorName} t={t} />
-        : conversationId ? <Composer controller={controller} state={state} snapshotPending={snapshotPending} agentName={agentName} t={t} onSend={send} attachControl={attachControl} accessory={composerAccessory} onPaste={onComposerPaste} dictate={dictate} accept={accept} steer={controller.steerable} /> : null}
+        : conversationId ? <Composer controller={controller} state={state} snapshotPending={snapshotPending} agentName={agentName} t={t} onSend={send} attachControl={attachControl} accessory={composerAccessory} onPaste={onComposerPaste} dictate={dictate} accept={accept} steer={controller.steerable} disabled={composerDisabled} /> : null}
     </div>
   </main><PagePanel viewer={viewer} t={t} /></>;
 }

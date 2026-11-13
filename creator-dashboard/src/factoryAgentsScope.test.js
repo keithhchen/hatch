@@ -135,7 +135,7 @@ test('Factory connection errors use a floating toast and plain-language copy', a
   assert.match(source, /<Snackbar open=\{Boolean\(error\)\}/);
   assert.match(source, /anchorOrigin=\{\{ vertical: "bottom", horizontal: "right" \}\}/);
   assert.doesNotMatch(source, /function ErrorNotice\(\{ error \}\) \{ return error \? <Alert/);
-  assert.match(i18n, /workspaceConnectionLost: '连接暂时中断，正在恢复。'/);
+  assert.doesNotMatch(source + i18n, /workspaceConnectionLost/, 'a dropped stream retries silently');
   assert.doesNotMatch(i18n, /与工作区服务的连接中断/);
 });
 
@@ -149,22 +149,21 @@ test('Factory JSX keeps visible copy in i18n and reads Agent identity from datab
 test('Factory uses live dependency state at each interaction boundary', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   assert.match(source, /const updatedDependencies = updatedSources\(entry\)/);
-  assert.match(source, /updatedDependencies\.length > 0 && <Button[^>]*variant="contained"[^>]*color="primary"[^>]*onClick=\{onUseLatest\}/);
-  assert.match(source, /const composerDisabled = locked \|\| busy \|\| Boolean\(pendingAskUser\) \|\| !config\?\.services\.model/);
-  assert.match(source, /<ChatComposer disabled=\{composerDisabled\}/);
+  assert.match(source, /updatedDependencies\.length > 0 && <HatchButton[^>]*onClick=\{onUseLatest\}/);
+  assert.match(source, /const composerDisabled = locked \|\| !config\?\.services\.model/);
+  assert.match(source, /composerDisabled=\{composerDisabled\}/);
   assert.match(source, /const targetStage = factorySectionForAgent\(role\)/);
   assert.doesNotMatch(source, /availability\?\.updatedDependencies/);
   assert.doesNotMatch(source, /comments\/export|annotateLines|line-selection|lineSelection/);
 });
 
-test('Factory composer exposes send, stop, and disabled states without a focus ring', async () => {
+test('Factory chat is the shared chat: its composer, thread and steps are the Product chat components', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
-  assert.match(source, /<IconButton type="submit" aria-label=\{t\("send"\)\} disabled=\{sendDisabled\}[^>]*>\s*<Send/);
-  assert.match(source, /const sendDisabled = composerDisabled \|\| !\(draft \|\| ""\)\.trim\(\)/);
-  assert.match(source, /running \? <IconButton type="button" aria-label=\{t\("stop"\)\}/);
-  assert.match(source, /disabled=\{busy\} size="small"/);
-  assert.match(source, /const composerSx = .*"&:focus-within": \{ borderColor: "var\(--hatch-ui-border-soft\)", boxShadow: "none" \}/);
-  assert.match(source, /<ChatComposerTextArea[^]*?disabled=\{running\}/);
+  assert.match(source, /<ChatView controller=\{controller\}/);
+  assert.match(source, /attachControl=\{false\}/);
+  assert.match(source, /activityKinds=\{STEP_KINDS\}/);
+  assert.match(source, /dictate=\{dictation\}/);
+  assert.doesNotMatch(source, /@mui\/x-chat|ChatComposer|function ToolGroup|function ToolMessage|function Message\(/);
 });
 
 test('Factory askuser options are content-only single-line choices with free input', async () => {
@@ -178,12 +177,10 @@ test('Factory askuser options are content-only single-line choices with free inp
 test('Every chat offers a start button that fills the Composer without sending', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   const i18n = await readFile(new URL('./factoryAgentsI18n.js', import.meta.url), 'utf8');
-  assert.match(source, /<StartAgentButton role=\{session\.role\}/);
-  assert.match(source, /function StartAgentButton/);
-  assert.match(source, /setDraft\(current => current\.trim\(\) \? current : message\)/);
-  assert.match(source, /requestAnimationFrame\(\(\) => composer\.current\?\.focus\(\)\)/);
+  assert.match(source, /t\("startAgentLabel", session\.role\)/);
+  assert.match(source, /controller\.setDraft\(t\("startAgentMessage", session\.role\)\)/);
+  assert.match(source, /querySelector\("textarea"\)\?\.focus\(\)/);
   assert.match(i18n, /startAgentMessage: role =>/);
-  assert.match(source, /t\("startAgentLabel", role\)/);
   assert.match(i18n, /startAgentLabel = role => role === 'evaluator'/);
 });
 
@@ -204,18 +201,18 @@ test('Factory chat keeps scrolling inside the workbench pane', async () => {
   const factoryStyles = await readFile(new URL('./factoryAgents.css', import.meta.url), 'utf8');
   assert.match(portal, /cpv2-main\$\{workbench \? " cpv2-main--workbench" : ""\}/);
   assert.match(portal, /const workbench = route\.kind === "agent" && route\.tab === "build"/);
-  assert.match(source, /className="factory-chat-scroll"/);
-  assert.match(source, /overscrollBehavior: "contain"/);
+  assert.match(source, /className="factory-chat web-chat web-chat--embedded"/);
   assert.match(`${portalStyles}\n${factoryStyles}`, /\.cpv2-main--workbench\s*\{[^}]*overflow:\s*hidden/);
-  assert.match(factoryStyles, /\.factory-chat-scroll\s*\{[^}]*overscroll-behavior:\s*contain/);
+  assert.match(factoryStyles, /\.factory-chat \.web-chat__main\s*\{[^}]*min-height:\s*0/);
   assert.doesNotMatch(factoryStyles, /\.factory-app\s*\{[^}]*overflow:\s*auto/);
 });
 
-test('Factory Composer toolbar shares the Hatch chat surface', async () => {
+test('Factory chat keeps its start and update buttons in the shared chat dock', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   const styles = await readFile(new URL('./factoryAgents.css', import.meta.url), 'utf8');
+  assert.match(source, /dockAccessory=\{accessory\}/);
   assert.match(source, /className="factory-composer-toolbar"/);
-  assert.match(styles, /\.factory-composer-toolbar,[\s\S]*\.factory-chat-composer\s*\{[^}]*var\(--web-card/s);
+  assert.match(styles, /\.factory-composer-toolbar\s*\{/);
 });
 
 test('Factory workbench is a two-pane chat grid inside the Studio shell', async () => {
@@ -226,33 +223,22 @@ test('Factory workbench is a two-pane chat grid inside the Studio shell', async 
   assert.match(source, /className="factory-workspace"/);
   assert.match(factoryStyles, /\.factory-workspace\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 340px/);
   assert.match(portalStyles, /\.cpv2-main--workbench\s*\{[^}]*overflow:\s*hidden/);
-  assert.match(factoryStyles, /\.factory-chat-scroll\s*\{[^}]*background:/);
   assert.match(factoryStyles, /\.factory-inspector-scroll\s*\{[^}]*background:/);
   assert.match(factoryStyles, /\.factory-app \.MuiAccordion-root\s*\{/);
 });
 
-test('Factory chat uses right-aligned user bubbles without speaker labels', async () => {
+test('Factory chat has no bubbles or speaker labels of its own', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   const styles = await readFile(new URL('./factoryAgents.css', import.meta.url), 'utf8');
-  assert.match(source, /factory-message-bubble/);
-  assert.match(source, /justifyContent: user \? "flex-end" : "flex-start"/);
-  assert.doesNotMatch(source, /t\(message\.role === "user" \? "you" : "agent"\)/);
-  assert.match(styles, /\.factory-message-bubble\s*\{/);
-  assert.match(styles, /background:\s*var\(--hatch-ui-primary/);
-  assert.match(styles, /max-width:\s*min\(82%, 640px\)/);
+  assert.doesNotMatch(source, /factory-message-bubble|t\(message\.role === "user" \? "you" : "agent"\)/);
+  assert.doesNotMatch(styles, /\.factory-message-bubble|\.factory-tool/);
 });
 
-test('Factory uses the MUI X Chat Composer for the real session message endpoint', async () => {
-  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
-  const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
-  assert.equal(typeof packageJson.dependencies['@mui/x-chat'], 'string');
-  assert.match(source, /from "@mui\/x-chat"/);
-  assert.match(source, /from "@mui\/x-chat\/headless"/);
-  assert.match(source, /<ChatProvider adapter=\{composerAdapter\}/);
-  assert.match(source, /await api\(endpoint\(root, id, "message"\)/);
-  assert.match(source, /"Idempotency-Key": sendKey\(message\.id\)/);
-  assert.match(source, /features=\{\{ attachments: false \}\}/);
-  assert.doesNotMatch(source, /<TextField fullWidth multiline minRows=\{2\}/);
+test('Factory sends through the real session message endpoint with one key per message', async () => {
+  const transport = await readFile(new URL('./factorySessionTransport.js', import.meta.url), 'utf8');
+  assert.match(transport, /\/message`, \{ method: "POST", headers: \{ "Idempotency-Key": clientMessageId \}/);
+  assert.match(transport, /\/stop`/);
+  assert.match(transport, /\/events`/);
 });
 
 test('Factory workbench does not render the todo panel or the published card', async () => {
@@ -270,19 +256,6 @@ test('Factory composer does not render a redundant message label', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /<Typography variant="caption" color="text\.secondary">\{t\("messageLabel"\)\}<\/Typography>/);
 });
-
-test('Factory tool call summaries omit the redundant successful-return label', async () => {
-  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
-  assert.doesNotMatch(source, /t\("toolReturned"\)/);
-  assert.match(source, /status \? ` · \$\{status\}` : ""/);
-});
-
-test('Factory renders grouped tool calls as ToolGroup instead of treating them as messages', async () => {
-  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
-    assert.match(source, /item\.type === "toolGroup" \? <ToolGroup key=\{item\.key\} items=\{item\.items\}/);
-    assert.match(source, /item\.type === "tool" \? <ToolMessage/);
-    assert.match(source, /function Message\(\{ message, files, onOpenFile, t \}\) \{ if \(!message\) return null;/);
-  });
 
 test('Factory consumes the shared Hatch UI theme instead of an indigo local theme', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
@@ -327,20 +300,6 @@ test('Collect sources lists the real manual-upload files from the research sessi
   assert.match(source, /setManualFiles\(value\.manualFiles \|\| \[\]\)/);
   assert.match(source, /<FileList title=\{t\("factoryUploadedTitle"\)\}/);
   assert.match(source, /t\("factoryUploadedTitle"\)/);
-});
-
-test('Factory chat keeps streamed blocks stable through terminal persistence', async () => {
-  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
-  assert.match(source, /const \[activityVisible, setActivityVisible\] = useState\(true\)/);
-  // A finished reply settles at message_end (in stream order) and stays until the saved history contains it.
-  assert.match(source, /if \(value\.type === "message_end"\) \{ setStream\(previous => \{ if \(previous\) setSettled\(list => \[\.\.\.list, previous\]\); return ""; \}\);/);
-  assert.match(source, /setSettled\(previous => previous\.filter\(text => !saved\.has\(replyKey\(text\)\)\)\)/);
-  // Only the newest history request may update the chat; a reconnect starts from saved history.
-  assert.match(source, /if \(!live \|\| mine !== seq\) return;/);
-  assert.match(source, /onOpen: \(\) => \{ if \(live\) \{ setActivity\(""\); setStream\(""\); setSettled\(\[\]\); load\(\); \} \}/);
-  assert.match(source, /\{running && activityVisible && <Stack/);
-  assert.match(source, /if \(value\.type === "delta"\) \{ setActivityVisible\(false\);/);
-  assert.doesNotMatch(source, /if \(value\.type === "message" \|\| value\.type === "state"\) \{ setStream\(""\); load\(\); \}/);
 });
 
 test('Factory no longer exposes the obsolete manual output handoff controls', async () => {

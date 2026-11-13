@@ -59,6 +59,8 @@
 .web-chat__message--user .web-chat__message-body { max-width: min(84%, 620px); align-items: flex-end; }
 .web-chat__message--assistant .web-chat__message-body { flex: 1; align-items: flex-start; }
 .hui-avatar.web-chat__message-avatar { width: 32px; height: 32px; min-width: 32px; flex-shrink: 0; margin-top: 0; }
+/* One avatar a reply turn: the messages that follow in the same turn keep its place and leave it empty. */
+.hui-avatar.web-chat__message-avatar--continued { visibility: hidden; }
 
 .web-chat__bubble { max-width: 100%; padding: 12px 16px; border-radius: 22px; }
 .web-chat__message--user .web-chat__bubble { padding: 9px 15px; border-radius: 18px; color: var(--web-paper); background: var(--chat-ink); font-size: 15px; line-height: 1.55; }

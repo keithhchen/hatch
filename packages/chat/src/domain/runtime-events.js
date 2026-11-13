@@ -61,9 +61,11 @@ const sessionHandlers = Object.freeze({
   "session.error": (_timeline, event) => outcome("session_error", { error: event.error }),
   // One frame about a Run was refused (a stale cancel, an unknown tool call). The Run is as it was.
   "frame.rejected": () => IGNORED,
+  // A summary of the history began or ended, in a Run or between Runs.
+  "conversation.compaction": (_timeline, event) => outcome("compaction", { active: event.active === true }),
   "session.compacted": (_timeline, event) => outcome("compacted", { compaction: event }),
   // The conversation changed in a way the stream does not carry: a message was saved (`committed`: "assistant" or "user"), or a queued one was taken up ("claimed").
-  "conversation.changed": (_timeline, event) => outcome("changed", { committed: event.committed })
+  "conversation.changed": (_timeline, event) => outcome("changed", { committed: event.committed, messageId: event.message_id })
 });
 
 /** Whether the event belongs to one Run, as opposed to the session or the conversation. */

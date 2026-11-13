@@ -25,11 +25,14 @@ export function wireEventsOf(event) {
       type: "tool_call.delta", ...run, tool_call_id: event.id, name: event.name, activity_message: event.activity, locality: "server",
       status: event.type === "tool" ? "requested" : event.cancelled ? "cancelled" : event.isError ? "failed" : "completed"
     }];
-    case "message": return [{ type: "conversation.changed", committed: "user" }];
+    case "message": return [{ type: "conversation.changed", committed: "user", ...(event.message_id ? { message_id: event.message_id } : {}) }];
     case "message_end": return [{ type: "conversation.changed", committed: "assistant" }];
     // A queued message was taken up, a Run changed stage, or something no Run shows changed (a chat was linked).
     case "state": return [{ type: "conversation.changed", committed: "claimed" }];
     case "compacting": return [{ type: "turn.state", ...run, status: "compacting" }];
+    // The history is being summarized, in a Run or after a reply: the page waits for the end.
+    case "compaction_start": return [{ type: "conversation.compaction", active: true }];
+    case "compaction_end": return [{ type: "conversation.compaction", active: false }];
     // Only a completed Run is a reply. A cancelled or interrupted one saved none: it ends as a failure the page need not wait on
     // (the server lets an interrupted Run be answered again, which the failed state offers).
     case "run_end": return event.status === "completed"
@@ -111,7 +114,7 @@ export class StudioAssistantTransport extends ConversationTransport {
     return {
       conversation: { id: ASSISTANT_CONVERSATION },
       messages: view.messages.map(messageOf), events: [], cursor: Number(view.cursor),
-      has_more: view.has_more, ...(view.before_cursor ? { before_cursor: view.before_cursor } : {}),
+      compacting: view.status?.compacting === true, has_more: view.has_more, ...(view.before_cursor ? { before_cursor: view.before_cursor } : {}),
       // The page lists the Run in progress, or the last one when it failed; a Run it does not list has ended well.
       runs: view.status?.state === "running" ? [{ id: view.run_id, status: "running", ...(view.partial ? { partial_output: view.partial } : {}) }]
         : failed ? [{ id: view.status.runId, status: "failed", failure: view.status.error }] : []
