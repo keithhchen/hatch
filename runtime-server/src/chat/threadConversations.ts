@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ConversationBinding, ConversationRecord, ConversationRepository, ThreadKey } from "../conversationRepository.js";
 
-type Repository = Pick<ConversationRepository, "createConversation" | "getConversation" | "threadConversation" | "adoptThread" | "moveThread">;
+type Repository = Pick<ConversationRepository, "createConversation" | "getConversation" | "threadConversation" | "adoptThread" | "moveThread" | "rebindConversation">;
 
 const requestId = (kind: string, { connectionId, threadId, principalId }: ThreadKey, ...rest: string[]) => [kind, connectionId, threadId, principalId, ...rest].join(":");
 
@@ -12,14 +12,14 @@ const requestId = (kind: string, { connectionId, threadId, principalId }: Thread
 export class ThreadConversations {
   constructor(private readonly repository: Repository) {}
 
-  /** Where the thread is, made on first use. A pointer to a conversation of another Product (the Connection was retargeted) is moved. */
+  /** Where the thread is, made on first use. A pointer to a conversation of another Product (a bot moved to another Product) is kept: the conversation follows the Connection, history and all, and is bound to the new Product. */
   async current(key: ThreadKey, binding: ConversationBinding): Promise<ConversationRecord> {
     const id = await this.repository.threadConversation(key);
     const pointed = id ? await this.repository.getConversation(id) : undefined;
     if (pointed && pointed.creatorId === binding.creatorId && pointed.agentId === binding.agentId) return pointed;
+    if (pointed) return (await this.repository.rebindConversation(pointed.id, binding)) ?? pointed;
     // A fixed request id per thread and Product, so concurrent first messages make one conversation.
     const { conversation } = await this.create(binding, requestId("start", key, binding.agentId));
-    if (pointed) { await this.repository.moveThread(key, conversation.id); return conversation; }
     const winner = await this.repository.adoptThread(key, conversation.id);
     return winner === conversation.id ? conversation : (await this.repository.getConversation(winner)) ?? conversation;
   }

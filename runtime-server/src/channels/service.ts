@@ -27,6 +27,8 @@ export type ChannelStatus = {
   configured: boolean;
   /** What people call the account on the platform (a bot's username). */
   handle?: string;
+  /** A Product bot only: the contacts bound to it, and the messages they have sent it. */
+  users?: number; messages?: number;
 };
 
 /**
@@ -171,8 +173,10 @@ export class ChannelService implements AssistantChannels {
     return Promise.all(CHANNEL_KINDS.map(async kind => {
       const own = this.ownedFor(owned, kind, target);
       const adapter = await this.deps.hub.get(kind, own?.hasCredentials ? own.scope : this.deps.scopeOf(accountId, kind));
+      const [users, messages] = target.kind === "product" && own?.hasCredentials ? await Promise.all([this.connections.contactCount(own.id), this.inbox.inboundCount(kind, own.scope)]) : [];
       return {
         kind, available: Boolean(adapter), linked: Boolean(own?.linked), configured: Boolean(own?.hasCredentials),
+        ...(users === undefined ? {} : { users, messages }),
         ...(adapter?.handle ? { handle: adapter.handle } : {}),
         ...(own ? { state: own.state } : {}), ...(own?.lastEventAt ? { lastEventAt: own.lastEventAt } : {}), ...(own?.linked && own.senderId ? { senderId: own.senderId } : {}),
       };

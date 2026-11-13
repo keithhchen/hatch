@@ -113,12 +113,12 @@ const address = (sender: string, thread = sender): PlatformAddress => ({ senderI
 let counter = 0;
 const message = (sender: string, text: string, extra: Partial<InboundEvent> = {}): InboundEvent => ({ eventId: `e${++counter}`, address: address(sender), text, messageRef: `m${counter}`, ...extra });
 
-async function stack(pool: Pool, config: { adapters?: FakeAdapter[]; gateway?: ChatGateway; rates?: ConstructorParameters<typeof ChannelService>[0]["rates"]; signIn?: SignIn; claim?: Claim; own?: ConstructorParameters<typeof ChannelHub>[1] } = {}) {
+async function stack(pool: Pool, config: { adapters?: FakeAdapter[]; gateway?: ChatGateway; rates?: ConstructorParameters<typeof ChannelService>[0]["rates"]; signIn?: SignIn; claim?: Claim; own?: ConstructorParameters<typeof ChannelHub>[1]; audienceOf?: ConstructorParameters<typeof ChannelService>[0]["audienceOf"] } = {}) {
   const adapters = config.adapters ?? [new FakeAdapter()];
   const stores = await openChannelStores(pool, scopeOf);
   const clock = { at: at(0) };
   const errors: unknown[] = [];
-  const service = new ChannelService({ ...stores, hub: new ChannelHub(adapters, config.own), scopeOf, now: () => clock.at, ...(config.signIn ? { signIn: config.signIn } : {}), ...(config.claim ? { claim: config.claim } : {}), onError: error => errors.push(error), rates: config.rates ?? { chat: { capacity: 100, perSecond: 100 }, connection: { capacity: 100, perSecond: 100 } }, ...(config.gateway ? { gateway: config.gateway } : {}) });
+  const service = new ChannelService({ ...stores, hub: new ChannelHub(adapters, config.own), scopeOf, now: () => clock.at, ...(config.audienceOf ? { audienceOf: config.audienceOf } : {}), ...(config.signIn ? { signIn: config.signIn } : {}), ...(config.claim ? { claim: config.claim } : {}), onError: error => errors.push(error), rates: config.rates ?? { chat: { capacity: 100, perSecond: 100 }, connection: { capacity: 100, perSecond: 100 } }, ...(config.gateway ? { gateway: config.gateway } : {}) });
   const target = new RecordingTarget();
   service.register("assistant", target);
   /** With the loops running, they may hold an event or a delivery while drain finds nothing: wait until nothing is open. */
@@ -520,7 +520,7 @@ test("A refused send is retried a bounded number of times, then failed", options
 
 /** A Product's Connection on an Expert's own bot (scope `page-1`), which serves anyone who writes to it. */
 async function publicConnection(pool: Pool, owner: string): Promise<string> {
-  return (await pool.query("INSERT INTO hatch_connections (owner_account_id, channel, scope, target, target_key, audience) VALUES ($1, 'telegram', 'page-1', $2, 'product:p1', 'public') RETURNING id", [owner, JSON.stringify({ kind: "product", productId: "p1" })])).rows[0].id;
+  return (await pool.query("INSERT INTO hatch_connections (owner_account_id, channel, scope, target, target_key, audience, credentials) VALUES ($1, 'telegram', 'page-1', $2, 'product:p1', 'public', 'sealed') RETURNING id", [owner, JSON.stringify({ kind: "product", productId: "p1" })])).rows[0].id;
 }
 
 test("Lost access on a Connection that serves others marks it degraded; a later send that works restores it", options, async () => isolated(async pool => {
@@ -1200,7 +1200,7 @@ async function productBots(pool: Pool, tokens: Record<string, string>) {
     const sealed = kind === "telegram" ? await stores.connections.credentialsOf(kind, scope) : undefined;
     return sealed ? new TelegramChannel(seal.open(sealed), scope, api.fetchImpl) : undefined;
   };
-  const env = await stack(pool, { adapters: [], gateway, own });
+  const env = await stack(pool, { adapters: [], gateway, own, audienceOf: (_kind, target) => target.kind === "product" ? "public" : "self" });
   env.service.register("product", new ChatFlow(new ProductTarget({ gateway, limiter: env.limiter })));
   const apps = new OwnApps({ connections: stores.connections, seal, forms: { telegram: telegramForm }, origin: "https://site.test", ownsProduct: async (_account, product) => product !== "foreign" });
   const adapterOf = async (scope: string) => (await env.service.hub.get("telegram", scope))!;
@@ -1283,6 +1283,26 @@ test("Each Product's bot is its own tenant: the same person is a different conta
   assert.deepEqual([a, b].map(sent => (sent!.conversation as any).connectionId), [first.id, second.id]);
 }));
 
+test("A Product's bot view counts its contacts and their messages, for that bot alone", options, async () => isolated(async pool => {
+  const env = await productBots(pool, { "111:aaa": "shop_bot", "222:bbb": "faq_bot" });
+  const owner = randomUUID();
+  const productView = async (productId: string) => (await env.service.view(owner, { kind: "product", productId })).find(status => status.kind === "telegram")!;
+  assert.equal((await productView("p1")).users, undefined, "no bot, no counts");
+  await env.apps.save(owner, "telegram", "p1", { token: "111:aaa" });
+  await env.apps.save(owner, "telegram", "p2", { token: "222:bbb" });
+  const [first, second] = [(await botOf(env, owner, "p1"))!, (await botOf(env, owner, "p2"))!];
+  const shop = await env.adapterOf(first.scope);
+  await env.service.accept(shop, [message("walker", "hi"), message("walker", "price?"), message("ada", "hello")]);
+  await env.service.accept(shop, [{ eventId: "press", address: address("ada"), button: { taskId: "", action: "decline" } }, { eventId: "block", address: address("zed"), unbound: true }]);
+  await env.service.accept(await env.adapterOf(second.scope), [message("walker", "other bot")]);
+  await env.settle();
+  assert.deepEqual([await env.stores.connections.contactCount(first.id), await env.stores.inbox.inboundCount("telegram", first.scope)], [2, 3]);
+  const view = await productView("p1");
+  assert.deepEqual([view.users, view.messages], [2, 3], "a button press or a block is not a message");
+  const other = await productView("p2");
+  assert.deepEqual([other.users, other.messages], [1, 1]);
+}));
+
 test("A bad token is refused and nothing is saved; a product that is not theirs is refused", options, async () => isolated(async pool => {
   const env = await productBots(pool, { "111:aaa": "shop_bot" });
   const owner = randomUUID();
@@ -1293,7 +1313,7 @@ test("A bad token is refused and nothing is saved; a product that is not theirs 
   await assert.rejects(env.apps.save(owner, "telegram", "p1", {}), (error: any) => error.status === 400);
 }));
 
-test("Replacing the token lets the old bot go; saving the same token again does not", options, async () => isolated(async pool => {
+test("Replacing the token lets the old bot go, to sleep with its contacts; saving the same token again changes nothing", options, async () => isolated(async pool => {
   const env = await productBots(pool, { "111:aaa": "shop_bot", "222:bbb": "new_bot" });
   const owner = randomUUID();
   await env.apps.save(owner, "telegram", "p1", { token: "111:aaa" });
@@ -1309,11 +1329,12 @@ test("Replacing the token lets the old bot go; saving the same token again does 
   const current = (await botOf(env, owner, "p1"))!;
   assert.equal(await env.stores.connections.credentialsOf("telegram", old.scope), undefined, "the old bot's credentials are gone");
   assert.equal((await env.adapterOf(current.scope)).handle, "new_bot");
-  assert.equal((await pool.query("SELECT count(*)::int AS n FROM hatch_connections WHERE owner_account_id = $1 AND channel = 'telegram'", [owner])).rows[0].n, 1, "a Product has one bot");
-  assert.equal((await pool.query("SELECT count(*)::int AS n FROM hatch_channel_identities WHERE connection_id = $1", [current.id])).rows[0].n, 0, "nobody carries over to the new bot");
+  assert.equal((await pool.query("SELECT count(*)::int AS n FROM hatch_connections WHERE owner_account_id = $1 AND channel = 'telegram' AND credentials IS NOT NULL", [owner])).rows[0].n, 1, "a Product has one live bot");
+  assert.equal(await env.stores.connections.contactCount(current.id), 0, "nobody carries over to the new bot");
+  assert.equal(await env.stores.connections.contactCount(old.id), 1, "the old bot keeps its contact, asleep");
 }));
 
-test("Removing a bot ends its webhook, its credentials and its conversations", options, async () => isolated(async pool => {
+test("Removing a bot ends its webhook and its credentials, and keeps its contacts", options, async () => isolated(async pool => {
   const env = await productBots(pool, { "111:aaa": "shop_bot" });
   const owner = randomUUID();
   await env.apps.save(owner, "telegram", "p1", { token: "111:aaa" });
@@ -1325,6 +1346,126 @@ test("Removing a bot ends its webhook, its credentials and its conversations", o
   assert.equal(await env.service.hub.get("telegram", bot.scope), undefined);
   await env.apps.save(owner, "telegram", "p1", { token: "111:aaa" });
   assert.equal((await botOf(env, owner, "p1"))!.state, "active", "a bot can be added again");
+}));
+
+const contactsOf = async (pool: Pool, id: string) => (await pool.query("SELECT id, sender_id FROM hatch_channel_identities WHERE connection_id = $1 ORDER BY sender_id", [id])).rows;
+const principalOf = (env: Awaited<ReturnType<typeof productBots>>, index: number) => JSON.stringify(env.gateway.submitted[index]!.principal) + JSON.stringify((env.gateway.submitted[index]!.conversation as any).connectionId);
+
+test("Disconnecting a bot makes it dormant, and the same token brings back its contacts, counts and conversations", options, async () => isolated(async pool => {
+  const env = await productBots(pool, { "111:aaa": "shop_bot" });
+  const owner = randomUUID();
+  await env.apps.save(owner, "telegram", "p1", { token: "111:aaa" });
+  const bot = (await botOf(env, owner, "p1"))!;
+  assert.equal(bot.scope, "111", "the bot's own id names it");
+  await env.service.accept(await env.adapterOf(bot.scope), [message("walker", "hi")]);
+  await env.settle();
+  const before = await contactsOf(pool, bot.id);
+  await env.apps.remove(owner, "telegram", "p1");
+  assert.equal(await botOf(env, owner, "p1"), undefined);
+  assert.equal(await env.service.hub.get("telegram", bot.scope), undefined, "a dormant bot answers nobody");
+  const view = async () => (await env.service.view(owner, { kind: "product", productId: "p1" })).find(status => status.kind === "telegram")!;
+  assert.deepEqual([(await view()).configured, (await view()).users], [false, undefined]);
+  await env.apps.save(owner, "telegram", "p1", { token: "111:aaa" });
+  const back = (await botOf(env, owner, "p1"))!;
+  assert.equal(back.id, bot.id, "the same Connection");
+  assert.deepEqual(await contactsOf(pool, back.id), before);
+  await env.service.accept(await env.adapterOf(back.scope), [message("walker", "I am back")]);
+  await env.settle();
+  assert.equal(principalOf(env, 1), principalOf(env, 0), "the returning user is the same contact in the same Connection, so their conversation resumes");
+  const counts = await view();
+  assert.deepEqual([counts.users, counts.messages], [1, 2], "counted across the dormant period");
+}));
+
+test("Switching bots A to B to A puts the other to sleep and wakes A with its contacts", options, async () => isolated(async pool => {
+  const env = await productBots(pool, { "111:aaa": "bot_a", "222:bbb": "bot_b" });
+  const owner = randomUUID();
+  await env.apps.save(owner, "telegram", "p1", { token: "111:aaa" });
+  const a = (await botOf(env, owner, "p1"))!;
+  await env.service.accept(await env.adapterOf(a.scope), [message("walker", "to a")]);
+  await env.settle();
+  await env.apps.save(owner, "telegram", "p1", { token: "222:bbb" });
+  const b = (await botOf(env, owner, "p1"))!;
+  assert.notEqual(b.id, a.id);
+  assert.equal(await env.service.hub.get("telegram", a.scope), undefined);
+  assert.equal(await env.stores.connections.contactCount(b.id), 0);
+  await env.apps.save(owner, "telegram", "p1", { token: "111:aaa" });
+  const again = (await botOf(env, owner, "p1"))!;
+  assert.equal(again.id, a.id);
+  assert.equal(await env.stores.connections.contactCount(a.id), 1);
+  assert.equal(await env.service.hub.get("telegram", b.scope), undefined, "B sleeps");
+  assert.equal((await pool.query("SELECT count(*)::int AS n FROM hatch_connections WHERE channel = 'telegram' AND credentials IS NOT NULL")).rows[0].n, 1);
+}));
+
+test("Saving the live bot's token again wipes nobody", options, async () => isolated(async pool => {
+  const env = await productBots(pool, { "111:aaa": "shop_bot" });
+  const owner = randomUUID();
+  await env.apps.save(owner, "telegram", "p1", { token: "111:aaa" });
+  const bot = (await botOf(env, owner, "p1"))!;
+  await env.service.accept(await env.adapterOf(bot.scope), [message("walker", "hi")]);
+  await env.settle();
+  await env.apps.save(owner, "telegram", "p1", { token: "111:aaa" });
+  assert.equal((await botOf(env, owner, "p1"))!.id, bot.id);
+  assert.equal(await env.stores.connections.contactCount(bot.id), 1);
+}));
+
+test("A bot live on another Product of the account, or held by another account, is refused with 409 before its webhook is touched", options, async () => isolated(async pool => {
+  const env = await productBots(pool, { "111:aaa": "shop_bot" });
+  const [owner, other] = [randomUUID(), randomUUID()];
+  await env.apps.save(owner, "telegram", "p1", { token: "111:aaa" });
+  env.api.calls.length = 0;
+  const refused = (code: string) => (error: any) => error.status === 409 && error.code === code;
+  await assert.rejects(env.apps.save(owner, "telegram", "p2", { token: "111:aaa" }), refused("telegram_bot_active_elsewhere"));
+  await assert.rejects(env.apps.save(other, "telegram", "p9", { token: "111:aaa" }), refused("telegram_bot_in_use"));
+  assert.deepEqual(env.api.calls, [], "the first Product's webhook is untouched");
+  assert.equal((await botOf(env, owner, "p1"))!.scope, "111");
+  await env.apps.remove(owner, "telegram", "p1");
+  await assert.rejects(env.apps.save(other, "telegram", "p9", { token: "111:aaa" }), refused("telegram_bot_in_use"));
+  await env.apps.save(owner, "telegram", "p1", { token: "111:aaa" });
+}));
+
+test("A dormant bot moves to another Product of the same account, with its contacts", options, async () => isolated(async pool => {
+  const env = await productBots(pool, { "111:aaa": "shop_bot" });
+  const owner = randomUUID();
+  await env.apps.save(owner, "telegram", "p1", { token: "111:aaa" });
+  const bot = (await botOf(env, owner, "p1"))!;
+  await env.service.accept(await env.adapterOf(bot.scope), [message("walker", "hi")]);
+  await env.settle();
+  await env.apps.remove(owner, "telegram", "p1");
+  await env.apps.save(owner, "telegram", "p2", { token: "111:aaa" });
+  const moved = (await botOf(env, owner, "p2"))!;
+  assert.equal(moved.id, bot.id, "the same Connection");
+  assert.deepEqual(moved.target, { kind: "product", productId: "p2" });
+  assert.equal(await botOf(env, owner, "p1"), undefined);
+  assert.equal(await env.stores.connections.contactCount(moved.id), 1);
+}));
+
+test("A bot saved before bots had their own scope moves to its bot id in place on the next save, keeping its contacts", options, async () => isolated(async pool => {
+  const env = await productBots(pool, { "111:aaa": "shop_bot" });
+  const owner = randomUUID();
+  const legacyScope = randomUUID();
+  await env.stores.connections.saveCredentials(owner, "telegram", env.seal.seal({ token: "111:aaa", username: "shop_bot", webhookSecret: "old" }), legacyScope, { kind: "product", productId: "p1" });
+  const legacy = (await botOf(env, owner, "p1"))!;
+  await env.service.accept(await env.adapterOf(legacyScope), [message("walker", "hi")]);
+  await env.settle();
+  await env.apps.save(owner, "telegram", "p1", { token: "111:aaa" });
+  const moved = (await botOf(env, owner, "p1"))!;
+  assert.deepEqual([moved.id, moved.scope], [legacy.id, "111"]);
+  assert.equal(await env.stores.connections.contactCount(moved.id), 1);
+  assert.equal(await env.stores.inbox.inboundCount("telegram", "111"), 1, "its messages move with it");
+  await env.service.accept(await env.adapterOf("111"), [message("walker", "again")]);
+  await env.settle();
+  assert.equal(principalOf(env, 1), principalOf(env, 0));
+}));
+
+test("A Product's bot never touches an Expert's Studio connection", options, async () => isolated(async pool => {
+  const env = await productBots(pool, { "111:aaa": "shop_bot" });
+  const owner = randomUUID();
+  await env.stores.connections.redeem("telegram", "", await env.stores.connections.issueCode(owner, "telegram"), { senderId: "42", threadId: "42" });
+  await env.apps.save(owner, "telegram", "p1", { token: "111:aaa" });
+  await env.apps.remove(owner, "telegram", "p1");
+  assert.equal((await env.stores.connections.linked(owner)).length, 1, "Studio is still linked");
+  const own = await env.stores.connections.owned(owner);
+  assert.deepEqual(own.map(connection => connection.audience), ["self"], "a dormant bot is not listed");
 }));
 
 // ── Effects: no lost or duplicated messages ──
