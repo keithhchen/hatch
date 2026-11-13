@@ -438,10 +438,10 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     // Review pages are opened through links signed with the credentials key. Without it there are no pages, and the interview is not offered the tools.
     const formKey = environment.HATCH_CREDENTIALS_KEY?.trim();
     if (!formKey) log.error("form_pages_unavailable", { reason: "HATCH_CREDENTIALS_KEY is not set: review pages cannot be signed" });
-    const forms: FormPages | undefined = formKey ? new FormPages({ repository: await PostgresFormRepository.open(registryPool), store: nodeObjectStore, links: new FormLinks(formKey, siteOrigin), submissions: { submitted: async page => assistant.formSubmitted(page) } }) : undefined;
+    const forms: FormPages | undefined = formKey ? new FormPages({ repository: await PostgresFormRepository.open(registryPool), store: nodeObjectStore, links: new FormLinks(formKey, siteOrigin), submissions: { submitted: async (page, review) => assistant.formSubmitted(page, review) } }) : undefined;
     if (forms) factoryAgents.attachForms(forms);
     const assistant = new AssistantService({
-      tasks, reach, channels, forms,
+      tasks, reach, channels,
       products: factoryAgents,
       catalog,
       backend: accountId => new PostgresWorkbenchBackend(registryPool, `assistant:${accountId}`),
