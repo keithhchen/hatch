@@ -8,7 +8,7 @@ import { atomicWrite } from "./files.js";
 export const ROLES = ["research", "voice", "generation", "case-generation", "evaluator", "inspiration", "content-creation"] as const;
 export type Role = typeof ROLES[number];
 /** Account-level Assistant workspace roles. They never appear in a Product workspace or its Factory Agent definitions. */
-export const ASSISTANT_ROLES = ["assistant", "content", "profile-research"] as const;
+export const ASSISTANT_ROLES = ["assistant"] as const;
 export type AssistantRole = typeof ASSISTANT_ROLES[number];
 export type AnyRole = Role | AssistantRole;
 /** Upstream outputs an Agent may read as input/<role>/. Reading never gates or updates anything. */
