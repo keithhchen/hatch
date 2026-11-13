@@ -281,7 +281,7 @@ export class ConversationController {
     this.run = null;
     this.updateMessages(current => current.filter(message => !(message.transient && message.run_id === run.id)));
     this.resetTimeline();
-    if (record.status === "failed") this.failReply(run.id, record.failure);
+    if (record.status === "failed" || record.status === "interrupted") this.failReply(run.id, record.failure);
   }
 
   /** On opening a conversation whose last reply failed, before any stream saw it: the same error, answerable again. */
@@ -728,12 +728,18 @@ export class ConversationController {
 
   syncPolling() {
     const { activeRun, conversationId } = this.state;
-    const key = activeRun && conversationId ? `${conversationId}:${activeRun}` : null;
+    // Polling is for a Run the page has no stream for: one it is not holding, or one whose session is gone and out of retries (an outage that outlasted them). The key follows that, so polling starts the moment either becomes true.
+    const streamless = this.run?.id !== activeRun || this.state.connection === "idle";
+    const key = activeRun && conversationId && streamless ? `${conversationId}:${activeRun}` : null;
     if (key === this.pollKey) return;
     this.pollKey = key;
     clearInterval(this.pollTimer);
     this.pollTimer = null;
-    if (!key || this.run?.id === activeRun) return;
-    this.pollTimer = setInterval(() => void this.refresh(conversationId).catch(this.fail), this.pollMs);
+    if (!key) return;
+    // A read that failed (an outage) shows its error; the read that succeeds after it takes that error back, and only that one.
+    this.pollTimer = setInterval(() => void this.refresh(conversationId).then(() => {
+      if (this.readFailure && this.state.error === this.readFailure) this.setState({ error: null });
+      this.readFailure = null;
+    }, cause => { this.readFailure = cause; this.fail(cause); }), this.pollMs);
   }
 }
