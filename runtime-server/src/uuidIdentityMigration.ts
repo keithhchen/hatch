@@ -79,20 +79,6 @@ export async function migrateUuidAuthorityIds(executor: IdentityMigrationExecuto
         collect(values, "product", row.agent_id);
       }
     }
-    if (tables.has("hatch_creator_factory_runs")) {
-      const rows = await db.query("SELECT creator_id FROM hatch_creator_factory_runs");
-      for (const row of rows.rows ?? []) collect(values, "creator", row.creator_id);
-    }
-    if (tables.has("hatch_conversations")) {
-      const rows = await db.query("SELECT owner_account_id, creator_id, agent_id, product_id, product_id_at_creation FROM hatch_conversations");
-      for (const row of rows.rows ?? []) {
-        collect(values, "account", row.owner_account_id);
-        collect(values, "creator", row.creator_id);
-        collect(values, "product", row.agent_id);
-        collect(values, "product", row.product_id);
-        collect(values, "product", row.product_id_at_creation);
-      }
-    }
 
     for (const table of ["commerce_events", "commerce_outbox", "commerce_inbox", "portal_workflow_state"]) {
       if (!tables.has(table)) continue;
@@ -146,9 +132,6 @@ export async function migrateUuidAuthorityIds(executor: IdentityMigrationExecuto
         if (tables.has("account_sessions")) {
           await db.query("UPDATE account_sessions SET account_id=$1 WHERE account_id=$2", [uuid, legacyId]);
         }
-        if (tables.has("hatch_conversations")) {
-          await db.query("UPDATE hatch_conversations SET owner_account_id=$1 WHERE owner_account_id=$2", [uuid, legacyId]);
-        }
       }
     }
 
@@ -163,15 +146,6 @@ export async function migrateUuidAuthorityIds(executor: IdentityMigrationExecuto
       }
     }
 
-    if (tables.has("hatch_conversations")) {
-      for (const [key, uuid] of mappings) {
-        const [kind, legacyId] = key.split("\u0000");
-        if (kind === "account") await db.query("UPDATE hatch_conversations SET owner_account_id=$1 WHERE owner_account_id=$2", [uuid, legacyId]);
-        if (kind === "creator") await db.query("UPDATE hatch_conversations SET creator_id=$1 WHERE creator_id=$2", [uuid, legacyId]);
-        if (kind === "product") await db.query("UPDATE hatch_conversations SET agent_id=$1, product_id=$1, product_id_at_creation=$1 WHERE agent_id=$2 OR product_id=$2 OR product_id_at_creation=$2", [uuid, legacyId]);
-      }
-    }
-
     if (tables.has("tool_connections")) {
       for (const [key, uuid] of mappings) {
         const [kind, legacyId] = key.split("\u0000");
@@ -183,12 +157,6 @@ export async function migrateUuidAuthorityIds(executor: IdentityMigrationExecuto
         const [kind, legacyId] = key.split("\u0000");
         if (kind === "creator") await db.query("UPDATE agent_tool_bindings SET tenant_id=$1 WHERE tenant_id=$2", [uuid, legacyId]);
         if (kind === "product") await db.query("UPDATE agent_tool_bindings SET agent_id=$1 WHERE agent_id=$2", [uuid, legacyId]);
-      }
-    }
-    if (tables.has("hatch_creator_factory_runs")) {
-      for (const [key, uuid] of mappings) {
-        const [kind, legacyId] = key.split("\u0000");
-        if (kind === "creator") await db.query("UPDATE hatch_creator_factory_runs SET creator_id=$1 WHERE creator_id=$2", [uuid, legacyId]);
       }
     }
 
@@ -297,7 +265,7 @@ async function existingTables(db: IdentityMigrationExecutor): Promise<Set<string
       AND table_name = ANY($1::text[])`, [[
     "accounts", "account_sessions", "agent_access", "commerce_events", "commerce_outbox",
     "commerce_inbox", "commerce_read_models", "commerce_read_model_state", "portal_workflow_state",
-    "hatch_conversations", "tool_connections", "agent_tool_bindings", "hatch_creator_factory_runs"
+    "tool_connections", "agent_tool_bindings"
   ]]);
   return new Set((result.rows ?? []).map((row) => String(row.table_name)));
 }
@@ -407,8 +375,8 @@ async function convertUuidColumns(db: IdentityMigrationExecutor, tables: Set<str
     FROM information_schema.columns
     WHERE table_schema=current_schema()
       AND table_name = ANY($1::text[])`, [[
-    "accounts", "account_sessions", "agent_access", "commerce_read_models", "hatch_conversations",
-    "tool_connections", "agent_tool_bindings", "hatch_creator_factory_runs"
+    "accounts", "account_sessions", "agent_access", "commerce_read_models",
+    "tool_connections", "agent_tool_bindings"
   ]]);
   const typeOf = (table: string, column: string) => types.rows?.find((row) => row.table_name === table && row.column_name === column)?.data_type;
   const alter = async (table: string, column: string, nullable = false) => {
@@ -428,13 +396,7 @@ async function convertUuidColumns(db: IdentityMigrationExecutor, tables: Set<str
   for (const column of ["buyer_id", "creator_id", "product_id", "order_id", "entitlement_id"]) {
     await alter("commerce_read_models", column, true);
   }
-  await alter("hatch_conversations", "owner_account_id");
-  await alter("hatch_conversations", "creator_id");
-  await alter("hatch_conversations", "agent_id");
-  await alter("hatch_conversations", "product_id");
-  await alter("hatch_conversations", "product_id_at_creation");
   await alter("tool_connections", "tenant_id");
   await alter("agent_tool_bindings", "tenant_id");
   await alter("agent_tool_bindings", "agent_id");
-  await alter("hatch_creator_factory_runs", "creator_id");
 }
