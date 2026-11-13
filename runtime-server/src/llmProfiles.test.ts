@@ -18,3 +18,16 @@ test("Kimi is only K3.1: no K2.6 profile, reasoning_effort low and no thinking t
   assert.equal(profile.reasoningEffort, "low");
   assert.equal(profile.thinkingType, undefined);
 });
+
+test("Gemini 4 profiles: the API's own limits, thinking low, and valid for the roles that take any Gemini", () => {
+  const limits = { "gemini-4-argon": 32_768, "gemini-4-carbon": 32_768, "gemini-4-hydrogen": 65_536 } as const;
+  for (const [name, maxTokens] of Object.entries(limits)) {
+    const profile = llmProfile(name as keyof typeof limits);
+    assert.equal(profile.model, name);
+    assert.equal(profile.family, "gemini");
+    assert.equal(profile.contextWindow, 1_048_576);
+    assert.equal(profile.maxTokens, maxTokens);
+    assert.equal(profile.thinkingLevel, "low");
+    assert.deepEqual(profile.stall, llmProfile("gemini-3.1-pro").stall);
+  }
+});

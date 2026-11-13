@@ -102,3 +102,10 @@ test("the in-memory resolver serves the seeds and what a test sets, uncached", a
   resolver.setRole("chat", "bogus");
   await assert.rejects(quiet(() => resolver.resolve("chat")), (error: unknown) => (error as { code?: string }).code === "model_profile_invalid");
 });
+
+test("the Gemini 4 profiles are valid names for every role that takes a catalogue profile, and not for ingest", () => {
+  for (const name of ["gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen"]) {
+    for (const role of ["chat", "assistant", "factory", "inspiration", "content"] as const) assert.equal(profileForRole(role, name, "test").name, name);
+    assert.throws(() => profileForRole("ingest", name, "test"), { code: "model_profile_invalid" });
+  }
+});
