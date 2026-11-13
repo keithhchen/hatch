@@ -90,6 +90,6 @@ test("Inspiration sits after Publish but is not a step: no state, no progress; C
   assert.equal(studioStepForRoute("create", "content-creation"), "advanced");
   const { readFile } = await import("node:fs/promises");
   const jsx = await readFile(new URL("./FactoryAgents.jsx", import.meta.url), "utf8");
-  assert.ok(jsx.indexOf("<FactoryStepper") < jsx.indexOf("factory-inspiration"), "the Inspiration entry follows the stepper");
+  assert.match(jsx, /<FactoryStepper[^>]*aside=\{INSPIRATION_STEP\}/, "the Inspiration entry is a stepper item");
   assert.equal(INSPIRATION_STEP.items[0][1], "inspiration");
 });
