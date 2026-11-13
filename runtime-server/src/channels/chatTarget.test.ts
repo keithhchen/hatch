@@ -55,7 +55,7 @@ function rigOf(target: ChatFlow, shape: { connection: ChannelConnection; princip
 
 targetConformance("Product target", () => {
   const { state, store, upload } = backend();
-  const gateway: ChatGateway = { send: async (_principal, _conversation, _client, key, parts) => ({ ...store(key, parts), outcome: "started", conversationId: "c", messageId: key, acceptedAt: "" }), upload: (_p, _c, input) => upload(input.name), progress: async () => undefined };
+  const gateway: ChatGateway = { send: async (_principal, _conversation, _client, key, parts) => ({ ...store(key, parts), outcome: "started", conversationId: "c", messageId: key, acceptedAt: "" }), upload: (_p, _c, input) => upload(input.name), restart: async (_p, _t, key) => { state.trace.push(`restart:${key}`); return { conversationId: "c2" }; }, progress: async () => undefined };
   const shape = { connection: connection({ kind: "product", productId: "p1" }), principal: { kind: "account" as const, accountId: ACCOUNT } };
   return rigOf(new ChatFlow(new ProductTarget({ gateway, limiter: { take: async () => 0 } })), shape, state);
 });
@@ -77,3 +77,18 @@ targetConformance("Assistant target", () => {
   const shape = { connection: connection({ kind: "assistant" }), principal: { kind: "account" as const, accountId: ACCOUNT } };
   return rigOf(new ChatFlow(new AssistantTarget(assistant)), shape, state);
 }, { button: { eventId: "b1", address: { threadId: "42", senderId: "42" }, button: { taskId: "11111111-1111-4111-8111-111111111111", action: "approve" } } });
+
+test("/new and /new@Bot restart a Product conversation instead of being sent; text after it is a message", async () => {
+  const { state, store, upload } = backend();
+  const gateway: ChatGateway = { send: async (_p, _c, _cl, key, parts) => ({ ...store(key, parts), outcome: "started", conversationId: "c", messageId: key, acceptedAt: "" }), upload: (_p, _c, input) => upload(input.name), restart: async (_p, _t, key) => { state.trace.push(`restart:${key}`); return { conversationId: "c2" }; }, progress: async () => undefined };
+  const rig = rigOf(new ChatFlow(new ProductTarget({ gateway, limiter: { take: async () => 0 } })), { connection: connection({ kind: "product", productId: "p1" }), principal: { kind: "contact", connectionId: "c0000000-0000-4000-8000-000000000001", contactId: "u1" } }, state);
+  for (const text of ["/new", " /NEW@shop_bot "]) {
+    const handled = await rig.deliver({ eventId: `e-${text.trim()}`, address: { threadId: "42", senderId: "42" }, text });
+    assert.deepEqual(handled, { replied: true });
+  }
+  assert.deepEqual(rig.trace(), ["restart:telegram::e-/new", "restart:telegram::e-/NEW@shop_bot"]);
+  assert.equal(rig.messages().length, 0);
+  assert.match(rig.notices().at(-1)!, /starting fresh/);
+  await rig.deliver({ eventId: "e3", address: { threadId: "42", senderId: "42" }, text: "/news please" });
+  assert.equal(rig.messages().length, 1, "only the command is special");
+});

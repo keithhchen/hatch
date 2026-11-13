@@ -200,9 +200,20 @@ test("a link goes out as a URL button; the bot, its scope and webhook are manage
   assert.equal(await telegram.probe(), "shop_bot");
   await telegram.setWebhook("https://site.test/hook", "sec");
   assert.deepEqual(calls.at(-1)!.body, { url: "https://site.test/hook", secret_token: "sec", allowed_updates: ["message", "callback_query", "my_chat_member"], max_connections: 1 }, "one connection: Telegram delivers in update_id order");
+  await telegram.setCommands();
+  assert.deepEqual(calls.slice(-2).map(call => call.body), [
+    { commands: [{ command: "new", description: "Start a new conversation" }] },
+    { commands: [{ command: "new", description: "开始新的对话" }], language_code: "zh" }
+  ], "the menu offers /new, in the sender's language");
   await telegram.deleteWebhook();
-  assert.deepEqual(calls.map(call => call.url.split("/").pop()), ["sendMessage", "getMe", "setWebhook", "deleteWebhook"]);
+  assert.deepEqual(calls.map(call => call.url.split("/").pop()), ["sendMessage", "getMe", "setWebhook", "setMyCommands", "setMyCommands", "deleteWebhook"]);
   const bot = new TelegramChannel({ token: "t", username: "shop_bot", webhookSecret: "s" }, "scope-1");
   assert.deepEqual([bot.scope, bot.handle], ["scope-1", "shop_bot"]);
   await assert.rejects(channel(() => Response.json({ ok: true, result: {} })).telegram.probe(), /did not say which bot/);
+});
+
+test("a message carries who sent it, as Telegram names them; absent fields are absent", () => {
+  const [named] = parse(privateMessage({ text: "hi", from: { id: 42, first_name: "Ada", last_name: "Lovelace", username: "ada", language_code: "en" } }));
+  assert.deepEqual(named?.sender, { name: "Ada Lovelace", username: "ada", language: "en" });
+  assert.equal(parse(privateMessage({ text: "hi" }))[0]?.sender, undefined);
 });

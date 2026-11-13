@@ -6,6 +6,7 @@ import type { Handled, Inbound, ReplyPolicy, TargetHandler } from "./ports.js";
 import { filesOf } from "./types.js";
 import type { ContentPart } from "../surfaces/contract.js";
 
+const NEW_COMMAND = /^\/new(?:@\w+)?$/i;
 const DONE: Handled = { replied: true };
 
 /**
@@ -32,6 +33,8 @@ export interface ChatTarget {
   upload(inbound: Inbound, file: { name: string; bytes: Buffer }): Promise<UploadedRef>;
   /** Steers the conversation's Run or starts one. `key` is the message's identity: sending it again is the same message. */
   send(inbound: Inbound, message: { key: string; parts: ContentPart[] }): Promise<{ runId: string }>;
+  /** Starts a fresh conversation for this sender, if the Agent has more than one. `key` is the event's identity: repeating it starts nothing more. Returns what is told to the sender. Without it, `/new` is an ordinary message. */
+  restart?(inbound: Inbound, key: string): Promise<string>;
   /** A pressed button. `key` is the press's identity: whatever it does is done once however often the press is retried, and every retry answers the same. Without it, buttons are cleared and ignored. */
   press?(inbound: Inbound, key: string): Promise<Handled>;
 }
@@ -56,6 +59,14 @@ export class ChatFlow implements TargetHandler {
     const refusal = await target.admit(inbound);
     if (refusal) { await inbound.notify(refusal); return DONE; }
     const files = filesOf(event);
+    // `/new`, or `/new@Bot` in a group: a command, not a message.
+    if (target.restart && !files.length && NEW_COMMAND.test(event.text?.trim() ?? "")) {
+      try { await inbound.notify(await target.restart(inbound, key)); } catch (error) {
+        if (!(error instanceof ChatError) || error.retryable) throw error;
+        await inbound.notify(error.message);
+      }
+      return DONE;
+    }
     if (files.some(file => (file.size ?? 0) > adapter.maxFileBytes)) { await inbound.notify(target.wording.tooLarge(inbound)); return DONE; }
     const text = event.text?.trim() || undefined;
     const parts: ContentPart[] = text ? [{ type: "text", text }] : [];

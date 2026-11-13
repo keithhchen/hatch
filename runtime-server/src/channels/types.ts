@@ -14,6 +14,9 @@ export type OutboundMessage = { text: string; buttons?: Button[]; replyTo?: stri
 /** Where on a platform: the thread a message lives in, and the person who sent it. Permission follows the sender. */
 export type PlatformAddress = Omit<ChannelAddress, "connectionId">;
 
+/** How a platform names a sender: shown to nobody outside Hatch. */
+export type SenderProfile = { name?: string; username?: string; language?: string };
+
 export type InboundFile = { ref: string; name: string; size?: number };
 /** One thing that happened on a platform, in our terms. No text and no file means a type we can't read yet. */
 export type InboundEvent = {
@@ -25,6 +28,8 @@ export type InboundEvent = {
    */
   sequence?: number;
   address: PlatformAddress;
+  /** Who the sender says they are, where the platform tells us with the message. */
+  sender?: SenderProfile;
   /** The platform tenant the event belongs to. Absent: the adapter's own scope. A platform whose one endpoint serves many tenants sets it per event. */
   scope?: string;
   /** The platform ended this tenant's access (an uninstall, a revoked token): no message. Its Connections are unbound at once. */

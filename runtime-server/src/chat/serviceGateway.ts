@@ -18,6 +18,8 @@ export type BoundPrincipal<Scope> = {
 /** Turns a principal and a conversation reference into something a Run can execute. One per principal kind. */
 export interface PrincipalBinder<Scope> {
   bind(principal: Principal, ref: ConversationRef): Promise<BoundPrincipal<Scope>>;
+  /** A fresh conversation in the thread; the old one stays. Absent where a principal has one conversation only. */
+  restart?(principal: Principal, ref: Extract<ConversationRef, { kind: "thread" }>, key: string): Promise<ConversationRecord>;
 }
 
 /** Stores a file the way the conversation's scope requires. Chat has one; a Runtime without an asset service has none. */
@@ -44,6 +46,12 @@ export class ServiceChatGateway<Scope> implements ChatGateway {
       runId: `run_${randomUUID().replaceAll("-", "")}`
     });
     return { outcome: submission.outcome, conversationId: bound.conversation.id, runId: submission.run.id, messageId, acceptedAt: submission.acceptedAt };
+  }
+
+  async restart(principal: Principal, ref: Extract<ConversationRef, { kind: "thread" }>, key: string): Promise<{ conversationId: string }> {
+    const binder = this.deps.binders[principal.kind];
+    if (!binder.restart) throw new ChatError("restart_unavailable", "This conversation cannot be restarted.", 409);
+    return { conversationId: (await binder.restart(principal, ref, key)).id };
   }
 
   async upload(principal: Principal, ref: ConversationRef, input: { name: string; bytes: Buffer }): Promise<UploadedRef> {
