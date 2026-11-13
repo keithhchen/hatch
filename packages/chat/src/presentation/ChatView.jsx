@@ -6,7 +6,7 @@ import { ACTIVITY_KINDS, ChatTimeline, groupTimelineEntries, withoutRepeatedStep
 import { sharedScrollPositions } from "../domain/scroll-positions.js";
 import { OPEN_FREE_CHAT } from "../domain/free-chat.js";
 import { ActivityBlock, ActivityModal, ApprovalActivity } from "./Activity.jsx";
-import { FormPageViewer, useFormPageViewer } from "./FormPageViewer.jsx";
+import { PageSplit, useFormPageViewer } from "./FormPageViewer.jsx";
 import { ImageViewer } from "./ImageViewer.jsx";
 import { MessageResponse } from "./MessageResponse.jsx";
 import { Shimmer } from "./Shimmer.jsx";
@@ -301,7 +301,7 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
   const compactedRuns = new Set(compactions.filter(entry => entry.conversationId === conversationId).map(entry => entry.runId));
   const messageProps = { identity, typingText, attachments, Viewer: AttachmentViewer, assetSource, activityKinds, t, errorText, loadToolDetail, approvals };
 
-  return <main className="web-chat__main" inert={inert}>
+  return <PageSplit viewer={viewer} t={t}><main className="web-chat__main" inert={inert}>
     {header}
     <div className="web-chat__messages" ref={messagesRef} onScroll={onScroll} onClickCapture={viewer.onClickCapture} aria-label={t("chatMessages")}>
       <div className="web-chat__thread">
@@ -330,12 +330,11 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
         }) : null}
       </div>
     </div>
-    <FormPageViewer page={viewer.page} onClose={viewer.close} closeLabel={t("close")} />
     <div className="web-chat__dock">
       {error ? <div className="web-chat__notice" role="alert"><CircleAlert aria-hidden="true" /><span>{errorText(error)}</span>{state.failedRun && !controller.canRetryRun ? null : <button type="button" onClick={() => state.failedRun ? controller.retryRun() : controller.retry()}><RotateCw aria-hidden="true" /><span>{t("retry")}</span></button>}</div> : null}
       {dockAccessory}
       {freeChat.locked && !activeRun ? <FreeChatPaywall access={freeChat} creatorName={identity.creatorName} t={t} />
         : conversationId ? <Composer controller={controller} state={state} snapshotPending={snapshotPending} agentName={agentName} t={t} onSend={send} attachControl={attachControl} accessory={composerAccessory} onPaste={onComposerPaste} dictate={dictate} accept={accept} steer={controller.steerable} /> : null}
     </div>
-  </main>;
+  </main></PageSplit>;
 }
