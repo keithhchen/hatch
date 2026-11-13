@@ -23,9 +23,6 @@
 .factory-advanced { display: flex; width: 100%; justify-content: center; height: 44px; align-items: center; white-space: nowrap; padding: 0 14px; border: 1px solid var(--web-rule); border-radius: 999px; background: none; color: var(--web-muted); font-family: inherit; font-size: 14px; font-weight: 650; cursor: pointer; transition: background 160ms ease, box-shadow 160ms ease, color 160ms ease; }
 .factory-advanced:hover { background: color-mix(in srgb, var(--web-card) 80%, transparent); color: var(--web-ink); }
 .factory-advanced.is-current { border-color: var(--web-rule); background: var(--web-card); color: var(--web-ink); box-shadow: none; }
-.factory-inspiration { align-self: stretch; min-height: 44px; margin-top: 4px; padding: 6px 10px; border: 0; border-top: 1px solid var(--web-rule); border-radius: 0 0 14px 14px; background: none; color: var(--web-muted); font-family: inherit; font-size: 14px; font-weight: 650; text-align: left; cursor: pointer; transition: background 160ms ease, color 160ms ease; }
-.factory-inspiration:hover { background: color-mix(in srgb, var(--web-card) 80%, transparent); color: var(--web-ink); }
-.factory-inspiration.is-current { background: var(--web-card); color: var(--web-ink); }
 .factory-stepper { display: flex; flex-direction: column; gap: 0; margin: 0; padding: 0; list-style: none; }
 .factory-stepper li { display: flex; flex-direction: column; }
 .factory-stepper li + li::before { width: 2px; height: 14px; margin-left: 18px; border-radius: 2px; background: var(--web-rule); content: ""; }
@@ -218,15 +215,16 @@
   .factory-workspace { grid-template-columns: minmax(0, 1fr) 300px; }
 }
 
+@media (min-width: 1181px) { .factory-stepper .factory-stepper__aside::before { width: auto; height: 0; margin: 8px 0; border-top: 1px solid var(--web-rule); border-radius: 0; background: none; } }
+
 /* Medium widths: the rail becomes a horizontal stepper above the content. */
 @media (max-width: 1180px) {
-  .factory-app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; gap: 14px 8px; }
+  .factory-app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); align-content: start; gap: 14px 8px; }
   .factory-rail { grid-column: 1; grid-row: 1; }
   .factory-advanced { width: auto; flex: none; }
-  .factory-rail { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .factory-rail { flex-direction: row; flex-wrap: wrap; align-items: center; align-content: flex-start; align-self: start; gap: 8px; }
   .factory-stepper { min-width: 0; flex: 1 1 100%; overflow-x: auto; scrollbar-width: none; }
   .factory-stepper::-webkit-scrollbar { display: none; }
-  .factory-inspiration { align-self: center; flex: 0 0 auto; min-height: 44px; margin: 0; padding: 0 14px; border: 0; border-radius: 12px; white-space: nowrap; }
   .factory-stepper { flex-direction: row; gap: 6px; }
   .factory-stepper li { flex-direction: row; align-items: center; }
   .factory-stepper li + li::before { width: 14px; height: 2px; margin: 0 6px 0 0; }
@@ -240,7 +238,8 @@
 @media (max-width: 900px) {
   .factory-app, .factory-step, .factory-overview { height: auto; overflow: visible; }
   .factory-app--workbench .factory-step { overflow: visible; }
-  .factory-stepper { overflow-x: auto; scrollbar-width: none; gap: 2px; }
+  .factory-stepper { flex-wrap: wrap; overflow: visible; gap: 2px; }
+  .factory-stepper .factory-stepper__aside::before { display: none; }
   .factory-stepper li + li::before { width: 6px; margin-right: 2px; }
   .factory-stepper button { padding: 0 8px 0 4px; gap: 6px; font-size: 13px; }
   .factory-advanced { height: 36px; font-size: 13px; }

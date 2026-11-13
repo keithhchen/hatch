@@ -129,8 +129,7 @@ export function FactoryAgents({ productId, tab = "build", section, agent, naviga
   const workbench = Boolean(selected && selected !== "uploads" && selectedSession);
   return <ThemeProvider theme={theme}><div className={`factory-app${workbench ? " factory-app--workbench" : ""}`} aria-label={t("factory")}>
     {tab === "overview" ? null : <nav className="factory-rail" aria-label={t("factoryStepsLabel")}>
-      <FactoryStepper states={states} current={currentStep} onStep={goToStep} t={t} />
-      <button type="button" className={`factory-inspiration${currentStep === INSPIRATION_STEP.id ? " is-current" : ""}`} aria-current={currentStep === INSPIRATION_STEP.id ? "page" : undefined} onClick={() => goToStep(INSPIRATION_STEP)}>{t(INSPIRATION_STEP.title)}</button>
+      <FactoryStepper states={states} current={currentStep} aside={INSPIRATION_STEP} onStep={goToStep} t={t} />
       <button type="button" className={`factory-advanced${currentStep === ADVANCED_STEP.id ? " is-current" : ""}`} aria-current={currentStep === ADVANCED_STEP.id ? "page" : undefined} onClick={() => goToStep(ADVANCED_STEP)}>{t(ADVANCED_STEP.title)}</button>
     </nav>}
     <ErrorNotice error={error} onClose={() => setError("")} />
@@ -142,9 +141,9 @@ export function FactoryAgents({ productId, tab = "build", section, agent, naviga
   </div></ThemeProvider>;
 }
 
-function FactoryStepper({ states, current, onStep, t }) {
+function FactoryStepper({ states, current, aside, onStep, t }) {
   const next = studioNextStep(states);
-  return <ol className="factory-stepper" aria-label={t("factoryStepsLabel")}>{states.map(({ step, state }) => <li key={step.id}><button type="button" className={`is-${state}${current === step.id ? " is-current" : ""}${next?.step.id === step.id ? " is-next" : ""}`} aria-current={current === step.id ? "step" : undefined} onClick={() => onStep(step)}><span className="factory-stepper__n" aria-hidden="true">{state === "done" ? "✓" : ""}</span><span className="factory-stepper__text"><span>{t(step.title)}</span><small>{t(next?.step.id === step.id && state === "todo" ? "stepNow" : STEP_STATE_KEY[state])}</small></span></button></li>)}</ol>;
+  return <ol className="factory-stepper" aria-label={t("factoryStepsLabel")}>{states.map(({ step, state }) => <li key={step.id}><button type="button" className={`is-${state}${current === step.id ? " is-current" : ""}${next?.step.id === step.id ? " is-next" : ""}`} aria-current={current === step.id ? "step" : undefined} onClick={() => onStep(step)}><span className="factory-stepper__n" aria-hidden="true">{state === "done" ? "✓" : ""}</span><span className="factory-stepper__text"><span>{t(step.title)}</span><small>{t(next?.step.id === step.id && state === "todo" ? "stepNow" : STEP_STATE_KEY[state])}</small></span></button></li>)}{aside ? <li key={aside.id} className="factory-stepper__aside"><button type="button" className={current === aside.id ? "is-current" : ""} aria-current={current === aside.id ? "page" : undefined} onClick={() => onStep(aside)}><span className="factory-stepper__n" aria-hidden="true" /><span className="factory-stepper__text"><span>{t(aside.title)}</span></span></button></li> : null}</ol>;
 }
 
 function FactoryOverview({ product, states, agentEntry, agentName, goToStep, t }) {
