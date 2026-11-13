@@ -69,9 +69,9 @@ export function useComposerReserve(ref) {
     const root = document.documentElement;
     const measure = () => root.style.setProperty("--web-chat-reserve", `${Math.max(0, Math.round(window.innerHeight - element.getBoundingClientRect().top)) + 8}px`);
     measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(measure);
+    observer?.observe(element);
     window.addEventListener("resize", measure);
-    return () => { observer.disconnect(); window.removeEventListener("resize", measure); root.style.removeProperty("--web-chat-reserve"); };
+    return () => { observer?.disconnect(); window.removeEventListener("resize", measure); root.style.removeProperty("--web-chat-reserve"); };
   }, [ref]);
 }
