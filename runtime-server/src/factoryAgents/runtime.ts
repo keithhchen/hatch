@@ -27,6 +27,8 @@ import { studioAttribution, usageSink, type UsageRecorder, type UsageSink } from
 import { UsageCapExceeded, type UsageCap } from "../usage/usageCap.js";
 
 const WEB: ClientAttributes = { client: "web" };
+/** Node kinds that run on a model role of their own. */
+const NODE_MODEL_ROLES: Record<string, ModelRole> = { inspiration: "inspiration", "content-creation": "content" };
 
 export type WorkbenchRuntimeOptions = {
   /** Where the model is chosen: read at the start of each Run, which keeps that model to its end. */
@@ -80,7 +82,11 @@ export class WorkbenchRuntime {
   constructor(readonly store: WorkbenchStore, private options: WorkbenchRuntimeOptions) {
     this.env = options.env ?? process.env;
   }
-  private profile(): Promise<LlmProfile> { return this.options.models.resolve(this.options.role); }
+  /** The model of the session's role: nodes with a role of their own (hatch_model_roles), else the workspace's. */
+  private async profile(id: string): Promise<LlmProfile> {
+    const own = NODE_MODEL_ROLES[(await this.store.get(id)).role as string];
+    return this.options.models.resolve(own ?? this.options.role);
+  }
   private traceIdentifiers(): LangfuseTurnIdentifiers | undefined {
     const scope = this.store.scope;
     return scope ? { productId: scope.productId, userId: scope.creatorId } : undefined;
@@ -223,7 +229,7 @@ export class WorkbenchRuntime {
   private scheduleBackground(id: string): void {
     void (async () => {
       if (this.closing) return;
-      const profile = await this.profile();
+      const profile = await this.profile(id);
       const strategy = this.strategy(profile);
       const tokens = strategy.tokensOf((await this.store.get(id)).context);
       const remaining = strategy.policy.cacheTtlMs - (this.now() - (this.touched.get(id) ?? Number.NEGATIVE_INFINITY));
@@ -359,7 +365,7 @@ export class WorkbenchRuntime {
   private async run(id: string, systemPrompt: string, history: AgentMessage[], userText: string | AgentMessage[], tools: AgentTool[], controller: AbortController, channel: "visible" | "scribe" = "visible", images: string[] = []): Promise<AgentMessage[]> {
     const factory = this.options.agentFactory ?? createFactoryPiAgent;
     // The Run keeps the model it began with, whatever the database says later.
-    const profile = await this.profile();
+    const profile = await this.profile(id);
     let turnCount = 0;
     let persistence = Promise.resolve();
     let persistenceError: unknown;

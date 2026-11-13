@@ -154,7 +154,7 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
     products: { workspace: async scope => { scopes.push(scope); opened?.({ creatorId: ACCOUNT, productId: PRODUCT }, workspace); return workspace; }, attachAssistant: hooks => { opened = hooks.opened; withheldTools = hooks.withheldTools; } },
     backend: () => legacy,
     exclusive: async (_name, fn) => fn(),
-    search: { search: async () => { throw new Error("no web search in tests"); } },
+    search: { name: "test", search: async () => { throw new Error("no web search in tests"); } },
     env: {},
     models: new InMemoryModelRoleResolver({ roles: { worker: "kimi-k3.1-pro" } }),
     runtime: { agentFactory },
