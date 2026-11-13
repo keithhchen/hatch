@@ -953,7 +953,7 @@ test("a tool result sent through another conversation never reaches the Run that
   const attackerMessages: OutboundMessage[] = [];
   const attacker = await openRuntimeSocket(base, "conversation_attacker", attackerMessages, ["file_search"]);
   attacker.send(JSON.stringify({ type: "tool_call.result", run_id: "run_victim", tool_call_id: request.tool_call_id, status: "ok", result: { matches: [] } }));
-  await waitForSocket(attackerMessages, (message) => message.type === "turn.failed");
+  await waitForSocket(attackerMessages, (message) => message.type === "frame.rejected");
   await new Promise((resolve) => setTimeout(resolve, 200));
   assert.equal((await repository.getRun("conversation_victim", "run_victim"))?.status, "waiting_for_tool");
   assert.equal((await repository.listToolCalls("run_victim"))[0]?.outcome, undefined);
