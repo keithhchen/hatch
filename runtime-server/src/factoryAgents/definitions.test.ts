@@ -111,3 +111,14 @@ test("database cold start seeds atomically, then the database remains the only a
   } as unknown as Pool));
   assert.equal(inserts, 0);
 });
+
+test("the shelved person-centred method is not loaded; the interview method is shared by the voice and Assistant prompts", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const prompts = new URL("../../prompts/", import.meta.url);
+  const voice = (await initialAgentDefinitions()).find(definition => definition.role === "voice")!.systemPrompt;
+  const done = await readFile(new URL("assistant/INTERVIEW_DONE.md", prompts), "utf8");
+  const assistant = await readFile(new URL("assistant/ASSISTANT.md", prompts), "utf8");
+  for (const loaded of [voice, done, assistant]) assert.doesNotMatch(loaded, /Intellectual Genealogy|Reciprocal disclosure/);
+  assert.match(done, /^# 访谈方法/m);
+  assert.match(assistant, /「访谈方法」/);
+});

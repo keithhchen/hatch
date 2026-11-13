@@ -237,15 +237,24 @@ export class AssistantService implements StudioOperations {
   }
 
   /**
-   * The Expert submitted a review page: the conversation it came from continues. A page written for one of the Assistant's tasks
-   * is news to the Assistant (and so reaches the Expert's chat too); a page the Expert was handed by the interview session
-   * itself starts a turn on that session. The notice is keyed by the page, so a retry is the same notice.
+   * The Expert submitted a review page: they say so in the conversation it came from, which continues. A page written for one of
+   * the Assistant's tasks is said to the Assistant (its reply owed like any Run it started, so it reaches the Expert's IM chat too);
+   * a page the Expert was handed by the interview session itself is said to that session. Keyed by the page: a double submit is one message.
    */
   async formSubmitted(form: Pick<FormPage, "id" | "accountId" | "title" | "origin">): Promise<void> {
-    const text = `[表单已提交] 专家提交了审阅页「${form.title}」（${form.id}）。用 read_form 读他的回答，然后接着往下做。`;
-    if (form.origin.taskId) return this.news(form.accountId, form.origin.taskId, text, `form:${form.id}`);
+    const text = `我填好了《${form.title}》，你看一下。(form_id: ${form.id})`;
+    const id = `form-submitted:${form.id}`;
+    if (form.origin.taskId) {
+      // They filled the page in on the web, but they are where they last spoke: their reply goes there, unless that is Studio.
+      const source = (await this.deps.state.lastExpert(form.accountId))?.source ?? "web";
+      const sent = await this.hear(form.accountId, { id, source: source as ExpertSource, parts: [{ type: "text", text }] });
+      if (sent.outcome === "started" || sent.outcome === "replayed") await this.deps.deliveries.owe(sent.runId, form.accountId);
+      const task = await this.deps.tasks.get(form.origin.taskId);
+      if (task) await this.inRun(task, sent.runId);
+      return;
+    }
     const { runtime } = await this.workspace(form.accountId, form.origin.productId);
-    await runtime.send(form.origin.sessionId, userMessage(text, [], { kind: "system", itemId: `form:${form.id}`, text })).catch(error => { if (!(error instanceof MessageAlreadyAccepted)) throw error; });
+    await runtime.send(form.origin.sessionId, userMessage(text, [], { kind: "expert", itemId: id, text })).catch(error => { if (!(error instanceof MessageAlreadyAccepted)) throw error; });
   }
 
   /** What the Expert has answered on one of their review pages. */

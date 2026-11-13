@@ -3,6 +3,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { readFileSync } from "node:fs";
+import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 import { ACCOUNT, ORIGIN, OTHER, formConformance, formsHarness, schema } from "./formKit.js";
 import { formBaseCss, renderFormPage } from "./inject.js";
@@ -170,4 +171,35 @@ test("the base styles keep the web theme's tokens, except the three the form pag
     if (overrides.has(name)) assert.notEqual(value, theme[name], `${name} is meant to differ`);
     else assert.equal(value, theme[name], `${name} drifted from webTheme.css`);
   }
+});
+
+test("the injected window.hatch saves, clears and submits through the route, and shows the server's reason on failure", async () => {
+  const h = await formsHarness();
+  const server = http.createServer((request, response) => { handleFormRoute(request, response, new URL(request.url!, "http://x"), h.forms).catch(() => { response.writeHead(500); response.end(); }); });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    const { form_id, url } = await h.forms.publish({ accountId: ACCOUNT, ...ORIGIN }, { title: "t", html: PAGE, schema: schema("C01", "C02") });
+    const html = await h.forms.open(form_id, h.tokenOf(url));
+    const script = /<script>(window\.__HATCH_FORM__[\s\S]*?)<\/script>/.exec(html)![1]!;
+    const sandbox: Record<string, unknown> = { fetch: (path: string, init?: RequestInit) => fetch(`${base}${path}`, init), encodeURIComponent };
+    sandbox.window = sandbox;
+    vm.runInNewContext(script, sandbox);
+    const hatch = sandbox.hatch as { schema: unknown; answers: Record<string, unknown>; status: string; save(id: string, value: unknown): Promise<void>; clear(id: string): Promise<void>; submit(): Promise<void> };
+    assert.equal(hatch.status, "open");
+    await hatch.save("C01", "一");
+    await hatch.save("C01", "二");
+    await hatch.save("C02", "x");
+    assert.equal(JSON.stringify(hatch.answers), JSON.stringify({ C01: "二", C02: "x" }));
+    await hatch.clear("C02");
+    assert.deepEqual((await h.forms.read(ACCOUNT, form_id)).answers, { C01: "二" });
+    await hatch.save("C02", "又写了");
+    await assert.rejects(() => hatch.save("C99", "x"), /没有这道题/);
+    await h.forms.save(form_id, h.tokenOf(url), "C01", "别处改的", 2);
+    await assert.rejects(() => hatch.save("C01", "旧页面"), /刷新页面/);
+    await hatch.submit();
+    assert.equal(hatch.status, "submitted");
+    await assert.rejects(() => hatch.save("C01", "晚了"), /已提交/);
+    assert.equal(h.submitted.length, 1);
+  } finally { server.close(); await h.close(); }
 });

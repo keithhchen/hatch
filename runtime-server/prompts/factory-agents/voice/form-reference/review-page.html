@@ -1,6 +1,30 @@
+<!doctype html>
+<!--
+  REFERENCE PAGE. The server injects Hatch's base CSS before this page, so this is only an HTML
+  backbone: no <style> unless the page truly needs something the base classes do not cover.
+  The published page is ONE self-contained html file, like this one: script inlined, no external requests.
+  Change the title and the data at the top of the script; keep the rest unless the page needs more.
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>审阅页</title>
+</head>
+<body>
+<aside class="sidebar" id="side"><nav id="toc" aria-label="目录"></nav></aside>
+<div class="workspace"><main id="main"></main></div>
+<div class="actions">
+  <div class="error" id="error" role="alert" hidden></div>
+  <div class="buttons" id="btns">
+    <button class="save" id="save" type="button"></button>
+    <button class="submit" id="submit" type="button">提交</button>
+  </div>
+  <div class="done" id="done" hidden>已提交</div>
+</div>
+<script>
 /*
-  REFERENCE SCRIPT. The published page must be ONE self-contained html file:
-  paste this whole file into the <script> tag of index.html (no src, no external requests).
+  REFERENCE SCRIPT.
   Only use window.hatch: schema, answers, status, save(id, value), clear(id), submit().
   Replace the EXAMPLE data below with the real content; delete a block you do not need.
   Questions are rendered entirely from hatch.schema, never hard-code them here.
@@ -183,3 +207,7 @@ $('submit').addEventListener('click', submit);
 refresh();
 show(sections.length ? sections[0].id : '');
 if (submitted) lock();
+
+</script>
+</body>
+</html>

@@ -2,7 +2,7 @@
 
 几轮对话后，如果有好几件事要专家确认，把它们写成一张审阅页发给专家，不要在聊天里一题一题问。专家多半在手机上、在 Telegram 或 WhatsApp 里打开它。
 
-工具：`publish_form({form_id?, title, html, schema})` 发布；`read_form({form_id})` 读取专家的回答；`form_reference()` 返回参考页的 index.html、app.js 和基础样式 base.css 全文，写第一张页面之前先读它。
+工具：`publish_form({form_id?, title, html, schema})` 发布；`read_form({form_id})` 读取专家的回答；写第一张页面之前，先用 `read` 读参考页 `input/reference/review-page.html`，照它的结构和类名写。
 
 ### 理念
 
@@ -45,6 +45,6 @@
 
 ### 发布与修改
 
-- 发布的 `html` 必须是一个自包含的 HTML 文件：把参考页的 app.js 内联进 `<script>`，不引用任何外部资源。
+- 发布的 `html` 必须是一个自包含的 HTML 文件：脚本内联在 `<script>` 里，不引用任何外部资源。
 - 修改页面 = 用同一个 `form_id` 再调用一次 `publish_form`：链接不变，已有回答按题号保留。绝不重新编号；新增题用新题号，删题不复用旧题号。
-- 发布后把链接发给专家，然后继续手头的工作。收到「表单已提交」通知后，调用 `read_form` 读取回答，接着往下做。
+- 发布后把链接发给专家，然后继续手头的工作。专家提交后，会像专家说话一样收到一条「我填好了《…》，你看一下。(form_id: …)」，这时调用 `read_form` 读取回答，接着往下做。
