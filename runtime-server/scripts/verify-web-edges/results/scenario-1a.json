@@ -1,0 +1,69 @@
+{
+  "id": "1a",
+  "title": "Reload the page mid-reply",
+  "durationMs": 39952,
+  "notes": [],
+  "findings": [],
+  "evidence": {
+    "ui:tab": [
+      "user: Write a 200 word story about a lighthouse keeper. Plain prose only: no",
+      "assistant: The Atlantic wind rattled the iron casing of the lantern room, but Tho"
+    ],
+    "server": [
+      "user: Write a 200 word story about a lighthouse keeper. Plain prose only: no",
+      "assistant: The Atlantic wind rattled the iron casing of the lantern room, but Tho"
+    ],
+    "alerts": [],
+    "frames": [
+      {
+        "client": "tab",
+        "frames": [
+          "1214 1open ws.open",
+          "1218 1-> client.hello",
+          "1238 1<- session.ready",
+          "1344 1-> client.message f57232",
+          "1365 1<- message.accepted f57232",
+          "1366 1<- turn.state queued f57232",
+          "1392 1<- turn.state running f57232",
+          "6451 1<- assistant.delta f57232",
+          "6457 1<- assistant.delta f57232",
+          "6820 2open ws.open",
+          "6831 2-> client.hello",
+          "6839 2<- session.ready",
+          "6944 2<- assistant.delta f57232",
+          "7665 2<- assistant.delta f57232",
+          "7673 2<- assistant.delta f57232",
+          "7998 2<- assistant.delta f57232",
+          "8219 2<- assistant.delta f57232",
+          "8527 2<- assistant.delta f57232",
+          "8549 2<- turn.completed f57232",
+          "8551 2<- assistant.message f57232",
+          "8553 2<- turn.state completed f57232"
+        ]
+      }
+    ],
+    "http": [],
+    "requests": [
+      {
+        "client": "tab",
+        "requests": [
+          "240 POST 200 /v1/auth/sign-in",
+          "267 GET 200 /v1/auth/me",
+          "581 GET 200 /v1/user/product-access",
+          "624 GET 200 /v1/web-chat/conversations",
+          "1160 POST 201 /v1/web-chat/conversations",
+          "1208 GET 200 /v1/web-chat/conversations/conv_d2e67119b3ae42d1bfb393daa28c20c5/snapshot",
+          "6489 GET 200 /v1/auth/me",
+          "6796 GET 200 /v1/user/product-access",
+          "6818 GET 200 /v1/web-chat/conversations/conv_d2e67119b3ae42d1bfb393daa28c20c5/snapshot",
+          "6822 GET 200 /v1/web-chat/conversations",
+          "8562 GET 200 /v1/web-chat/conversations/conv_d2e67119b3ae42d1bfb393daa28c20c5/events",
+          "8575 GET 200 /v1/web-chat/conversations/conv_d2e67119b3ae42d1bfb393daa28c20c5/snapshot"
+        ]
+      }
+    ],
+    "console": [],
+    "serverLogs": []
+  },
+  "verdict": "PASS"
+}

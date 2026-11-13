@@ -346,7 +346,7 @@ async function executeOneTurn(
           } else if (["failed", "cancelled", "interrupted"].includes(status)) {
             fail(new Error(`Hatch Runtime entered terminal state ${status}: ${String(message.reason ?? "")}`));
           }
-        } else if (type === "turn.failed" && (!message.run_id || matchingRun)) {
+        } else if (type === "session.error" || (type === "turn.failed" && (!message.run_id || matchingRun))) {
           const detail = message.error as Record<string, unknown> | undefined;
           fail(new Error(`Hatch Runtime failed: ${String(detail?.code ?? "unknown")}: ${String(detail?.message ?? "")}`));
         }

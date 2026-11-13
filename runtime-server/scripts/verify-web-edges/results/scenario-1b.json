@@ -1,0 +1,67 @@
+{
+  "id": "1b",
+  "title": "Close the tab mid-reply and reopen the conversation",
+  "durationMs": 40869,
+  "notes": [],
+  "findings": [],
+  "evidence": {
+    "ui:tab": [
+      "user: Write a 200 word story about a lighthouse keeper. Plain prose only: no",
+      "assistant: Arthur wound the brass clockwork as the Atlantic gale rattled the lant"
+    ],
+    "server": [
+      "user: Write a 200 word story about a lighthouse keeper. Plain prose only: no",
+      "assistant: Arthur wound the brass clockwork as the Atlantic gale rattled the lant"
+    ],
+    "alerts": [],
+    "frames": [
+      {
+        "client": "tab",
+        "frames": [
+          "1074 1open ws.open",
+          "1075 1-> client.hello",
+          "1086 1<- session.ready",
+          "1165 1-> client.message 46844f",
+          "1179 1<- message.accepted 46844f",
+          "1181 1<- turn.state queued 46844f",
+          "1196 1<- turn.state running 46844f",
+          "5815 1<- assistant.delta 46844f",
+          "7814 2open ws.open",
+          "7818 2-> client.hello",
+          "7837 2<- session.ready",
+          "8125 2<- assistant.delta 46844f",
+          "8133 2<- assistant.delta 46844f",
+          "8143 2<- assistant.delta 46844f",
+          "8499 2<- assistant.delta 46844f",
+          "8644 2<- assistant.delta 46844f",
+          "8906 2<- turn.completed 46844f",
+          "8909 2<- assistant.message 46844f",
+          "8909 2<- turn.state completed 46844f"
+        ]
+      }
+    ],
+    "http": [],
+    "requests": [
+      {
+        "client": "tab",
+        "requests": [
+          "138 POST 200 /v1/auth/sign-in",
+          "158 GET 200 /v1/auth/me",
+          "470 GET 200 /v1/user/product-access",
+          "480 GET 200 /v1/web-chat/conversations",
+          "1039 POST 201 /v1/web-chat/conversations",
+          "1070 GET 200 /v1/web-chat/conversations/conv_e6296196df26479fa6e4e09de921c344/snapshot",
+          "7445 GET 200 /v1/auth/me",
+          "7757 GET 200 /v1/user/product-access",
+          "7774 GET 200 /v1/web-chat/conversations",
+          "7786 GET 200 /v1/web-chat/conversations/conv_e6296196df26479fa6e4e09de921c344/snapshot",
+          "8916 GET 200 /v1/web-chat/conversations/conv_e6296196df26479fa6e4e09de921c344/events",
+          "8929 GET 200 /v1/web-chat/conversations/conv_e6296196df26479fa6e4e09de921c344/snapshot"
+        ]
+      }
+    ],
+    "console": [],
+    "serverLogs": []
+  },
+  "verdict": "PASS"
+}

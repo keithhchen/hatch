@@ -50,12 +50,17 @@ const runHandlers = Object.freeze({
   "turn.state": (_timeline, event) => outcome("turn_state", { state: event.status }),
   "message.accepted": (_timeline, event) => outcome("accepted", { receipt: event }),
   "turn.completed": (_timeline, event) => outcome("terminal", { failed: false, finishReason: event.finish_reason }),
-  "turn.failed": (_timeline, event) => outcome("terminal", { failed: true, error: event.error })
+  // A Run the user stopped ends as `turn.failed` with this code: it is a cancellation, never a failure to report.
+  "turn.failed": (_timeline, event) => event.error?.code === "run_cancelled"
+    ? outcome("terminal", { failed: false, cancelled: true })
+    : outcome("terminal", { failed: true, error: event.error })
 });
 
 const sessionHandlers = Object.freeze({
   "session.ready": (_timeline, event) => outcome("ready", { session: event }),
   "session.error": (_timeline, event) => outcome("session_error", { error: event.error }),
+  // One frame about a Run was refused (a stale cancel, an unknown tool call). The Run is as it was.
+  "frame.rejected": () => IGNORED,
   "session.compacted": (_timeline, event) => outcome("compacted", { compaction: event }),
   // The conversation changed in a way the stream does not carry: a message was saved (`committed`: "assistant" or "user"), or a queued one was taken up ("claimed").
   "conversation.changed": (_timeline, event) => outcome("changed", { committed: event.committed })

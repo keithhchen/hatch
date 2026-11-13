@@ -1,0 +1,72 @@
+{
+  "id": "7",
+  "title": "Cancel mid-reply, then send again",
+  "durationMs": 15246,
+  "notes": [
+    "after Stop the UI shows [[\"user\",\"\",\"Write a 200 word story about a lighthous\"],[\"assistant\",\"\",\"For forty years, Thomas climbed the spir\"]]"
+  ],
+  "findings": [],
+  "evidence": {
+    "ui:tab": [
+      "user: Write a 200 word story about a lighthouse keeper. Plain prose only: no",
+      "assistant: For forty years, Thomas climbed the spiral iron stairs at dusk, his oi",
+      "user: Reply with exactly the single word: pong",
+      "assistant: pong"
+    ],
+    "server": [
+      "user: Write a 200 word story about a lighthouse keeper. Plain prose only: no",
+      "assistant: For forty years, Thomas climbed the spiral iron stairs at dusk, his oi",
+      "user: Reply with exactly the single word: pong",
+      "assistant: pong"
+    ],
+    "alerts": [],
+    "frames": [
+      {
+        "client": "tab",
+        "frames": [
+          "1074 1open ws.open",
+          "1075 1-> client.hello",
+          "1083 1<- session.ready",
+          "1162 1-> client.message d6aa6f",
+          "1174 1<- message.accepted d6aa6f",
+          "1174 1<- turn.state queued d6aa6f",
+          "1186 1<- turn.state running d6aa6f",
+          "5395 1<- assistant.delta d6aa6f",
+          "5448 1-> turn.cancel d6aa6f",
+          "5461 1<- assistant.message d6aa6f",
+          "5463 1<- turn.failed run_cancelled d6aa6f",
+          "5463 1<- turn.state cancelled d6aa6f",
+          "8349 1-> client.message 3ce49f",
+          "8363 1<- message.accepted 3ce49f",
+          "8363 1<- turn.state queued 3ce49f",
+          "8376 1<- turn.state running 3ce49f",
+          "12477 1<- assistant.delta 3ce49f",
+          "12482 1<- turn.completed 3ce49f",
+          "12484 1<- assistant.message 3ce49f",
+          "12484 1<- turn.state completed 3ce49f"
+        ]
+      }
+    ],
+    "http": [],
+    "requests": [
+      {
+        "client": "tab",
+        "requests": [
+          "132 POST 200 /v1/auth/sign-in",
+          "151 GET 200 /v1/auth/me",
+          "470 GET 200 /v1/user/product-access",
+          "480 GET 200 /v1/web-chat/conversations",
+          "1049 POST 201 /v1/web-chat/conversations",
+          "1070 GET 200 /v1/web-chat/conversations/conv_c6b45dba25eb4489b2e1cece9aa1aaa9/snapshot",
+          "5474 GET 200 /v1/web-chat/conversations/conv_c6b45dba25eb4489b2e1cece9aa1aaa9/events",
+          "5484 GET 200 /v1/web-chat/conversations/conv_c6b45dba25eb4489b2e1cece9aa1aaa9/snapshot",
+          "12494 GET 200 /v1/web-chat/conversations/conv_c6b45dba25eb4489b2e1cece9aa1aaa9/events",
+          "12505 GET 200 /v1/web-chat/conversations/conv_c6b45dba25eb4489b2e1cece9aa1aaa9/snapshot"
+        ]
+      }
+    ],
+    "console": [],
+    "serverLogs": []
+  },
+  "verdict": "PASS"
+}

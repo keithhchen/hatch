@@ -1,4 +1,5 @@
 import { WebSocket } from "ws";
+import { ZodError } from "zod";
 import {
   assertConversationBinding,
   ConversationRepositoryError,
@@ -131,6 +132,10 @@ export async function handleRuntimeSocket(
       throw error;
     });
   };
+  // `turn.failed` means a Run ended. A refused frame is not that: a session-level refusal is `session.error`, and a refused frame about a Run
+  // (a stale cancel, an unknown tool call) is `frame.rejected`, which leaves the Run as it was.
+  const sessionError = (code: string, message: string) => send({ type: "session.error", error: { code, message } });
+  const frameRejected = (runId: string, error: { code: string; message: string }) => send({ type: "frame.rejected", run_id: runId, error });
   /** Local-tool calls still waiting for a client: whoever reconnects can answer them. */
   const replayPendingToolRequests = async (conversationId: string): Promise<void> => {
     for (const request of await chat.pendingToolRequests(conversationId)) sink.push(request as unknown as Record<string, unknown>);
@@ -140,18 +145,14 @@ export async function handleRuntimeSocket(
     lastClientActivityAt = Date.now();
     awaitingPong = false;
     const messageTask = (async () => {
+      let raw: unknown;
       try {
-        const message = parseInboundMessage(withUpgradeToken(JSON.parse(String(data)), upgradeToken));
+        raw = JSON.parse(String(data));
+        const message = parseInboundMessage(withUpgradeToken(raw, upgradeToken));
 
         if (message.type === "client.hello") {
           if (hello || helloPending) {
-            await send({
-              type: "turn.failed",
-              error: {
-                code: "duplicate_hello",
-                message: "client.hello can only be sent once per runtime connection"
-              }
-            });
+            await sessionError("duplicate_hello", "client.hello can only be sent once per runtime connection");
             return;
           }
           helloPending = true;
@@ -254,20 +255,17 @@ export async function handleRuntimeSocket(
         }
 
         if (!hello || !binding || !connectionConversation) {
-          await send({
-            type: "turn.failed",
-            error: {
-              code: "hello_required",
-              message: "client.hello must be sent before run messages"
-            }
-          });
+          const error = { code: "hello_required", message: "client.hello must be sent before run messages" };
+          // A message that never reached a session never started its Run: the client takes its words back.
+          if (message.type === "client.message") await send({ type: "turn.failed", run_id: message.run_id, error });
+          else await sessionError(error.code, error.message);
           return;
         }
         const conversation = connectionConversation;
 
         if (message.type === "conversation.subscribe") {
           if (message.conversation_id !== conversation.publicId) {
-            await send({ type: "turn.failed", error: { code: "conversation_mismatch", message: `This connection is bound to conversation ${conversation.publicId}.` } });
+            await sessionError("conversation_mismatch", `This connection is bound to conversation ${conversation.publicId}.`);
             return;
           }
           detach?.();
@@ -279,7 +277,7 @@ export async function handleRuntimeSocket(
 
         if (message.type === "tool_call.result") {
           const answer = await chat.answerTool(conversation.id, message, client.client);
-          if (answer.outcome !== "accepted") await send({ type: "turn.failed", run_id: message.run_id, error: answer.error });
+          if (answer.outcome !== "accepted") await frameRejected(message.run_id, answer.error);
           return;
         }
 
@@ -292,7 +290,7 @@ export async function handleRuntimeSocket(
             return;
           }
           const cancelled = await chat.cancel(conversation.id, message.run_id, reason);
-          if (cancelled.outcome !== "cancelled") await send({ type: "turn.failed", run_id: message.run_id, error: cancelled.error });
+          if (cancelled.outcome !== "cancelled") await frameRejected(message.run_id, cancelled.error);
           return;
         }
 
@@ -337,15 +335,16 @@ export async function handleRuntimeSocket(
           }
         }
       } catch (error) {
-        await send({
-          type: "turn.failed",
-          error: {
-            code: error instanceof EntitlementError || error instanceof ConversationRepositoryError
-              ? error.code
-              : "protocol_error",
-            message: errorMessage(error)
-          }
-        });
+        const malformed = error instanceof SyntaxError || error instanceof ZodError;
+        const failure = {
+          code: error instanceof EntitlementError || error instanceof ConversationRepositoryError ? error.code : malformed ? "invalid_frame" : "protocol_error",
+          // A person may read this: never the raw validation report.
+          message: malformed ? "The Runtime could not accept that message." : errorMessage(error)
+        };
+        const rawMessage = raw as { type?: unknown; run_id?: unknown } | undefined;
+        // A message the Runtime could not read never started its Run, so that Run ends here; anything else is a refusal of the session.
+        if (rawMessage?.type === "client.message" && typeof rawMessage.run_id === "string") await send({ type: "turn.failed", run_id: rawMessage.run_id, error: failure });
+        else await sessionError(failure.code, failure.message);
       }
     })();
     messageTasks.add(messageTask);

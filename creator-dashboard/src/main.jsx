@@ -132,6 +132,12 @@ function App() {
     if (!error || error.status === 401) clearSession();
   }, [clearSession]);
 
+  // A chat whose session ended mid-conversation goes to sign-in (and back, via returnTo), not to a Retry that can only fail again.
+  const chatRequest = useCallback(async (path, options) => {
+    try { return await dashboardRequest(path, options); }
+    catch (error) { if (error?.status === 401) clearSession(); throw error; }
+  }, [clearSession]);
+
   const buyerSession = {
     status: sessionStatus,
     user: profile,
@@ -176,7 +182,7 @@ function App() {
     if (sessionStatus !== "authenticated") {
       return <RouteRedirect to={`/sign-in?returnTo=${encodeURIComponent(location.href)}`} navigate={location.navigate} />;
     }
-    return <Suspense fallback={<AppLoading />}><WebChatPage productId={chatRoute.productId} conversationId={chatRoute.conversationId} request={dashboardRequest} navigate={location.navigate} profile={profile} onSignOut={signOutFromChat} /></Suspense>;
+    return <Suspense fallback={<AppLoading />}><WebChatPage productId={chatRoute.productId} conversationId={chatRoute.conversationId} request={chatRequest} navigate={location.navigate} profile={profile} onSignOut={signOutFromChat} /></Suspense>;
   }
 
   if (location.pathname === CREATOR_ROOT

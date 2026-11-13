@@ -596,7 +596,7 @@ async function connectRuntime(
 async function connectRuntimeExpectFailure(runtimeUrl: string, entitlementId: string) {
   const connection = await openRuntimeSocket(runtimeUrl);
   connection.send(hello(entitlementId, "conversation-run-success"));
-  const failure = await connection.waitFor((message) => message.type === "turn.failed" && !message.run_id);
+  const failure = await connection.waitFor((message) => message.type === "session.error");
   return { ...connection, failure };
 }
 

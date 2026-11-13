@@ -1,0 +1,98 @@
+{
+  "id": "8b",
+  "title": "Fresh browser (new context, same account) opens a conversation whose run another browser started",
+  "durationMs": 41128,
+  "notes": [],
+  "findings": [],
+  "evidence": {
+    "ui:A": [
+      "user: Write a 200 word story about a lighthouse keeper. Plain prose only: no",
+      "assistant: Old Arthur climbed the spiral iron stairs as dusk swallowed the jagged"
+    ],
+    "server": [
+      "user: Write a 200 word story about a lighthouse keeper. Plain prose only: no",
+      "assistant: Old Arthur climbed the spiral iron stairs as dusk swallowed the jagged"
+    ],
+    "ui:B": [
+      "user: Write a 200 word story about a lighthouse keeper. Plain prose only: no",
+      "assistant: Old Arthur climbed the spiral iron stairs as dusk swallowed the jagged"
+    ],
+    "alerts": [],
+    "frames": [
+      {
+        "client": "A",
+        "frames": [
+          "1074 1open ws.open",
+          "1076 1-> client.hello",
+          "1084 1<- session.ready",
+          "1154 1-> client.message 6575ef",
+          "1166 1<- message.accepted 6575ef",
+          "1167 1<- turn.state queued 6575ef",
+          "1179 1<- turn.state running 6575ef",
+          "4921 1<- assistant.delta 6575ef",
+          "5178 1<- assistant.delta 6575ef",
+          "5448 1<- assistant.delta 6575ef",
+          "5743 1<- assistant.delta 6575ef",
+          "6159 1<- assistant.delta 6575ef",
+          "6494 1<- assistant.delta 6575ef",
+          "6752 1<- assistant.delta 6575ef",
+          "7017 1<- assistant.delta 6575ef",
+          "7292 1<- assistant.delta 6575ef",
+          "7335 1<- assistant.delta 6575ef",
+          "7345 1<- turn.completed 6575ef",
+          "7347 1<- assistant.message 6575ef",
+          "7347 1<- turn.state completed 6575ef"
+        ]
+      },
+      {
+        "client": "B",
+        "frames": [
+          "502 1open ws.open",
+          "506 1-> client.hello",
+          "516 1<- session.ready",
+          "796 1<- assistant.delta 6575ef",
+          "1212 1<- assistant.delta 6575ef",
+          "1547 1<- assistant.delta 6575ef",
+          "1805 1<- assistant.delta 6575ef",
+          "2070 1<- assistant.delta 6575ef",
+          "2345 1<- assistant.delta 6575ef",
+          "2388 1<- assistant.delta 6575ef",
+          "2399 1<- turn.completed 6575ef",
+          "2400 1<- assistant.message 6575ef",
+          "2400 1<- turn.state completed 6575ef"
+        ]
+      }
+    ],
+    "http": [],
+    "requests": [
+      {
+        "client": "A",
+        "requests": [
+          "140 POST 200 /v1/auth/sign-in",
+          "160 GET 200 /v1/auth/me",
+          "478 GET 200 /v1/user/product-access",
+          "488 GET 200 /v1/web-chat/conversations",
+          "1041 POST 201 /v1/web-chat/conversations",
+          "1071 GET 200 /v1/web-chat/conversations/conv_e75c2a5e188b4577bc89b275370bc953/snapshot",
+          "7358 GET 200 /v1/web-chat/conversations/conv_e75c2a5e188b4577bc89b275370bc953/events",
+          "7370 GET 200 /v1/web-chat/conversations/conv_e75c2a5e188b4577bc89b275370bc953/snapshot"
+        ]
+      },
+      {
+        "client": "B",
+        "requests": [
+          "123 POST 200 /v1/auth/sign-in",
+          "147 GET 200 /v1/auth/me",
+          "455 GET 200 /v1/user/product-access",
+          "472 GET 200 /v1/web-chat/conversations",
+          "482 GET 200 /v1/web-chat/conversations/conv_e75c2a5e188b4577bc89b275370bc953/snapshot",
+          "2410 GET 200 /v1/web-chat/conversations/conv_e75c2a5e188b4577bc89b275370bc953/events",
+          "2432 GET 200 /v1/web-chat/conversations/conv_e75c2a5e188b4577bc89b275370bc953/snapshot"
+        ]
+      }
+    ],
+    "console": [],
+    "serverLogs": []
+  },
+  "verdict": "PASS"
+}

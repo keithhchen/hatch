@@ -1,0 +1,39 @@
+{
+  "id": "10",
+  "title": "Double-click on Start conversation creates one conversation",
+  "durationMs": 3975,
+  "notes": [],
+  "findings": [],
+  "evidence": {
+    "server": [],
+    "alerts": [],
+    "frames": [
+      {
+        "client": "tab",
+        "frames": [
+          "1045 1open ws.open",
+          "1046 1-> client.hello",
+          "1053 1<- session.ready"
+        ]
+      }
+    ],
+    "http": [],
+    "requests": [
+      {
+        "client": "tab",
+        "requests": [
+          "134 POST 200 /v1/auth/sign-in",
+          "157 GET 200 /v1/auth/me",
+          "472 GET 200 /v1/user/product-access",
+          "482 GET 200 /v1/web-chat/conversations",
+          "1015 POST 201 /v1/web-chat/conversations",
+          "1016 POST 200 /v1/web-chat/conversations",
+          "1041 GET 200 /v1/web-chat/conversations/conv_e2b5251fbc044fe8b26fd33f6185c19e/snapshot"
+        ]
+      }
+    ],
+    "console": [],
+    "serverLogs": []
+  },
+  "verdict": "PASS"
+}

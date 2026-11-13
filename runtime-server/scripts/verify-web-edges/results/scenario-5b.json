@@ -1,0 +1,91 @@
+{
+  "id": "5b",
+  "title": "Two tabs on one conversation: both send at the same instant (idle)",
+  "durationMs": 43865,
+  "notes": [],
+  "findings": [],
+  "evidence": {
+    "ui:A": [
+      "user: Reply with exactly the single word: bravo",
+      "user: Reply with exactly the single word: alpha",
+      "assistant: alpha"
+    ],
+    "server": [
+      "user: Reply with exactly the single word: bravo",
+      "user: Reply with exactly the single word: alpha",
+      "assistant: alpha"
+    ],
+    "ui:B": [
+      "user: Reply with exactly the single word: bravo",
+      "user: Reply with exactly the single word: alpha",
+      "assistant: alpha"
+    ],
+    "alerts": [],
+    "frames": [
+      {
+        "client": "A",
+        "frames": [
+          "1077 1open ws.open",
+          "1078 1-> client.hello",
+          "1086 1<- session.ready",
+          "32104 1-> client.message 9c5b19",
+          "32117 1<- message.accepted cc2a76",
+          "32118 1<- turn.state queued cc2a76",
+          "32119 1<- message.accepted cc2a76",
+          "32135 1<- turn.state running cc2a76",
+          "37071 1<- assistant.delta cc2a76",
+          "37081 1<- turn.completed cc2a76",
+          "37085 1<- assistant.message cc2a76",
+          "37085 1<- turn.state completed cc2a76"
+        ]
+      },
+      {
+        "client": "B",
+        "frames": [
+          "430 1open ws.open",
+          "430 1-> client.hello",
+          "440 1<- session.ready",
+          "30972 1-> client.message cc2a76",
+          "31026 1<- message.accepted cc2a76",
+          "31026 1<- turn.state queued cc2a76",
+          "31026 1<- message.accepted cc2a76",
+          "31027 1<- turn.state running cc2a76",
+          "35953 1<- assistant.delta cc2a76",
+          "35963 1<- turn.completed cc2a76",
+          "35967 1<- assistant.message cc2a76",
+          "35967 1<- turn.state completed cc2a76"
+        ]
+      }
+    ],
+    "http": [],
+    "requests": [
+      {
+        "client": "A",
+        "requests": [
+          "133 POST 200 /v1/auth/sign-in",
+          "154 GET 200 /v1/auth/me",
+          "471 GET 200 /v1/user/product-access",
+          "482 GET 200 /v1/web-chat/conversations",
+          "1052 POST 201 /v1/web-chat/conversations",
+          "1073 GET 200 /v1/web-chat/conversations/conv_6c802d762b6f4927b4083f6e203a5cc5/snapshot",
+          "37103 GET 200 /v1/web-chat/conversations/conv_6c802d762b6f4927b4083f6e203a5cc5/events",
+          "37118 GET 200 /v1/web-chat/conversations/conv_6c802d762b6f4927b4083f6e203a5cc5/snapshot"
+        ]
+      },
+      {
+        "client": "B",
+        "requests": [
+          "77 GET 200 /v1/auth/me",
+          "398 GET 200 /v1/user/product-access",
+          "416 GET 200 /v1/web-chat/conversations",
+          "425 GET 200 /v1/web-chat/conversations/conv_6c802d762b6f4927b4083f6e203a5cc5/snapshot",
+          "35976 GET 200 /v1/web-chat/conversations/conv_6c802d762b6f4927b4083f6e203a5cc5/events",
+          "35989 GET 200 /v1/web-chat/conversations/conv_6c802d762b6f4927b4083f6e203a5cc5/snapshot"
+        ]
+      }
+    ],
+    "console": [],
+    "serverLogs": []
+  },
+  "verdict": "PASS"
+}

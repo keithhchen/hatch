@@ -400,7 +400,7 @@ test("Runtime admits only one client hello while Registry authorization is pendi
       (message) => (message.error as { code?: string } | undefined)?.code === "duplicate_hello"
     );
     socket.send(JSON.stringify(hello));
-    assert.equal((await duplicateFailure).type, "turn.failed");
+    assert.equal((await duplicateFailure).type, "session.error");
     assert.equal(identityCalls, 1);
 
     const readyResponse = waitForSocketMessage(socket, (message) => message.type === "session.ready");

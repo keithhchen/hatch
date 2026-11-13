@@ -2328,8 +2328,9 @@ test("server rejects duplicate client hello on the same connection", async () =>
     license_token: "license_twice",
     local_tools: []
   }));
-  const error = await waitForSocketMessage(messages, (message) => message.type === "turn.failed");
-  assert.ok(error.type === "turn.failed");
+  // A refused session is `session.error`: no Run ended, so no `turn.failed`.
+  const error = await waitForSocketMessage(messages, (message) => message.type === "session.error");
+  assert.ok(error.type === "session.error");
   assert.equal(error.error.code, "duplicate_hello");
   socket.close();
 
@@ -2363,13 +2364,38 @@ test("server requires client hello before tool results", async () => {
     status: "ok",
     result: { ok: true }
   }));
-  const error = await waitForSocketMessage(messages, (message) => message.type === "turn.failed");
-  assert.ok(error.type === "turn.failed");
+  const error = await waitForSocketMessage(messages, (message) => message.type === "session.error");
+  assert.ok(error.type === "session.error");
   assert.equal(error.error.code, "hello_required");
   socket.close();
 
   const events = await new RuntimeStore(dataDir).readEvents();
   assert.ok(!events.some((event) => event.type === "tool.call"));
+});
+
+test("a message the Runtime cannot read ends its own Run with plain text; an unreadable frame is a session error", async () => {
+  const dataDir = await tempWorkspace();
+  process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
+  runtimeServer = createRuntimeServer({ insecureLocalMode: true });
+  const serverUrl = await listen(runtimeServer);
+  const socket = new WebSocket(serverUrl);
+  const messages: OutboundMessage[] = [];
+  socket.on("message", (data) => { messages.push(JSON.parse(String(data)) as OutboundMessage); });
+  await new Promise<void>((resolve, reject) => { socket.once("open", resolve); socket.once("error", reject); });
+  socket.send(JSON.stringify({ type: "client.hello", protocol_version: PROTOCOL_VERSION, conversation_id: "unreadable-frames", license_token: "license_unreadable", local_tools: [] }));
+  await waitForSocketMessage(messages, (message) => message.type === "session.ready");
+
+  socket.send(JSON.stringify({ type: "client.message", run_id: "run_unreadable", conversation_id: "unreadable-frames", local_tools: [], message: { role: "user" } }));
+  const failed = await waitForSocketMessage(messages, (message) => message.type === "turn.failed" && message.run_id === "run_unreadable");
+  assert.ok(failed.type === "turn.failed");
+  assert.equal(failed.error.code, "invalid_frame");
+  assert.ok(!/path|expected|received|invalid_type/i.test(failed.error.message), failed.error.message);
+
+  socket.send(JSON.stringify({ type: "no.such.frame" }));
+  const refused = await waitForSocketMessage(messages, (message) => message.type === "session.error" && message.error.code === "invalid_frame");
+  assert.ok(refused.type === "session.error");
+  assert.ok(!messages.some((message) => message.type === "turn.failed" && !message.run_id));
+  socket.close();
 });
 
 async function openConversationSocket(serverUrl: string, conversationId: string, messages: OutboundMessage[]): Promise<WebSocket> {
@@ -2526,9 +2552,11 @@ test("run cancel for an unknown run does not cancel the active run", async () =>
     run_id: "run_cancel_missing",
     reason: "wrong run"
   }));
-  const unknown = await waitForSocketMessage(messages, (message) => message.type === "turn.failed" && message.run_id === "run_cancel_missing");
-  assert.equal(unknown.type, "turn.failed");
+  // A stale cancel is a refused frame, not the end of a Run: `frame.rejected`, never `turn.failed`.
+  const unknown = await waitForSocketMessage(messages, (message) => message.type === "frame.rejected" && message.run_id === "run_cancel_missing");
+  assert.equal(unknown.type, "frame.rejected");
   assert.equal(unknown.error.code, "unknown_run");
+  assert.ok(!messages.some((message) => message.type === "turn.failed" && message.run_id === "run_cancel_missing"));
 
   const eventsAfterUnknownCancel = await new RuntimeStore(dataDir).readEvents();
   assert.ok(!eventsAfterUnknownCancel.some((event) => event.type === "turn.state" && event.run_id === "run_cancel_active" && event.to === "cancelled"));

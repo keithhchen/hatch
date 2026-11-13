@@ -92,7 +92,7 @@ test("Studio's events are the Runtime's: words keep their offset, steps their ca
   assert.deepEqual(wireEventsOf({ type: "delta", text: "ab", offset: 5, run_id: "r" }), [{ type: "assistant.delta", run_id: "r", delta: { kind: "text", content: "ab", offset: 5 } }]);
   assert.deepEqual(wireEventsOf({ type: "tool_end", id: "t", name: "n", isError: true, run_id: "r" }).map(event => [event.tool_call_id, event.status]), [["t", "failed"]]);
   assert.equal(wireEventsOf({ type: "run_end", status: "failed", error: { code: "x", message: "m", reference: "ref" }, run_id: "r" })[0].error.reference, "ref");
-  assert.equal(wireEventsOf({ type: "run_end", status: "cancelled", run_id: "r" })[0].type, "turn.completed");
+  assert.deepEqual(wireEventsOf({ type: "run_end", status: "cancelled", run_id: "r" })[0].error.code, "run_cancelled");
   assert.deepEqual(wireEventsOf({ type: "message_end" }), [{ type: "conversation.changed", committed: "assistant" }]);
 });
 

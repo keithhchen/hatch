@@ -24,9 +24,12 @@ export function wireEventsOf(event) {
     // A queued message was taken up, a Run changed stage, or something no Run shows changed (a chat was linked).
     case "state": return [{ type: "conversation.changed", committed: "claimed" }];
     case "compacting": return [{ type: "turn.state", ...run, status: "compacting" }];
+    // A stopped Run ends as the chat's cancellation (`run_cancelled`), which is neither a reply nor a failure that can be answered again.
     case "run_end": return event.status === "failed"
       ? [{ type: "turn.failed", ...run, error: event.error ?? { code: "run_failed", message: "The reply failed. Send the message again." } }]
-      : [{ type: "turn.completed", ...run, finish_reason: event.status }];
+      : event.status === "cancelled"
+        ? [{ type: "turn.failed", ...run, error: { code: "run_cancelled", message: "Run canceled" } }]
+        : [{ type: "turn.completed", ...run, finish_reason: event.status }];
     default: return [];
   }
 }
