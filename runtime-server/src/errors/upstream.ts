@@ -6,11 +6,14 @@ const RATE_LIMITED = /\b429\b|rate[\s_-]*limit|too many requests/i;
 const IDENTIFIER = /(?:\borg-[a-z0-9][a-z0-9_-]*\b|<?\bak-[a-z0-9][a-z0-9_-]*\b>?|\bsk-[a-z0-9][a-z0-9_-]*\b)/i;
 // Keep this allow-list narrow: "request" and "response" also occur in Hatch's own harness boundary.
 const SHAPED = /(?:provider|moonshot|openai|api[\s_-]*key|network|fetch|rate[\s_-]*limit|too many requests|timeout|timed out|socket|connection|econn[a-z]*|eai_again)/i;
-const TRANSIENT = /(?:rate[\s_-]*limit|too many requests|temporar|timeout|timed out|network|fetch|socket|connection|econn[a-z]*|eai_again)/i;
+const TRANSIENT = /(?:rate[\s_-]*limit|too many requests|temporar|timeout|timed out|network|fetch|socket|connection|econn[a-z]*|eai_again|overloaded|\bunavailable\b|internal[\s_-]*error)/i;
+// A provider that has no capacity right now (Moonshot sends it as a 429): asking again after a backoff works, unlike a rate limit.
+const OVERLOADED = /overloaded/i;
 const PROVIDERS: Array<[RegExp, string]> = [[/moonshot|kimi/i, "moonshot"], [/openai/i, "openai"], [/anthropic|claude/i, "anthropic"], [/gemini|google/i, "google"], [/bailian|dashscope|qwen/i, "bailian"]];
 
 const httpStatus = (text: string): number | undefined => {
-  const match = /^\s*([45]\d\d)\b/.exec(text) ?? /\b(?:http(?:\s+error)?|status(?:\s+code)?)\s*[:=]?\s*([45]\d\d)\b/i.exec(text);
+  // Google sends no status prefix: its JSON body carries it as `"code":503`.
+  const match = /^\s*([45]\d\d)\b/.exec(text) ?? /\b(?:http(?:\s+error)?|status(?:\s+code)?)\s*[:=]?\s*([45]\d\d)\b/i.exec(text) ?? /"code"\s*:\s*([45]\d\d)\b/.exec(text);
   return match ? Number(match[1]) : undefined;
 };
 
@@ -41,6 +44,7 @@ export class UpstreamError extends Error {
     const quota = QUOTA.test(text);
     const shaped = quota || status !== undefined || IDENTIFIER.test(text) || SHAPED.test(text);
     const kind: UpstreamCause = quota ? "quota"
+      : OVERLOADED.test(text) ? "transient"
       : RATE_LIMITED.test(text) ? "rate_limited"
       : status === 408 || status === 409 || status === 425 || (status !== undefined && status >= 500) || TRANSIENT.test(text) ? "transient"
       : shaped ? "configuration"

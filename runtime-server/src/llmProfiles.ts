@@ -35,6 +35,8 @@ export type LlmProfile = {
   thinkingType?: "enabled" | "disabled";
   /** Moonshot's top-level `reasoning_effort`, sent on every request in place of a `thinking` field. */
   reasoningEffort?: "low" | "high" | "max";
+  /** What the model reads; both text and images when absent. */
+  input?: Array<"text" | "image">;
   /** How long a call may stay silent; the default of providerStall when absent. */
   stall?: StallLimits;
 };
@@ -71,6 +73,7 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     reasoning: false,
     thinkingLevel: "minimal",
     thinkingType: "disabled",
+    input: ["text"],
   },
   "gemini-api": {
     name: "gemini-api",
@@ -85,6 +88,8 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     maxTokens: 65_536,
     reasoning: true,
     thinkingLevel: "low",
+    // Same policy as gemini-3.1-pro: a hung or overloaded (503) call that said nothing is asked again.
+    stall: { firstEventMs: 45_000, silenceMs: 60_000, restarts: 2, backoffMs: 1_000 }
   },
   // The one Kimi profile (plain pro, not -highspeed). K3.1 always reasons and rejects the `thinking` field; depth is the top-level
   // `reasoning_effort`, which defaults to "max" and then took 150 s+ for a non-stream call. "low" keeps the reasoning in

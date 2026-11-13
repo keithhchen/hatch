@@ -469,9 +469,7 @@ async function runModelTurnInternal(
           return;
         }
         await commitTerminal(
-          event.finish_reason === "content_filter" || final.blocked
-            ? "content_filter"
-            : "stop"
+          final.blocked ? "content_filter" : event.finish_reason
         );
         return;
       }

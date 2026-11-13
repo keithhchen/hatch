@@ -42,6 +42,7 @@ import { renderSystemReminder } from "./surfaces/contract.js";
 import { createPiModel, createPiStreamFn } from "./piModel.js";
 import { withStallGuard, type StallLimits } from "./providerStall.js";
 import { SteerInterrupt } from "./steerInterrupt.js";
+import { providerFinish, type ProviderFinish } from "./modelAdapters/finish.js";
 import { traceAgentTools } from "./langfuse.js";
 import { resolveLlmProfile } from "./llmProfiles.js";
 import { runPiAgentPrompt, type PiAgentPromptRunner } from "./piPrompt.js";
@@ -173,6 +174,8 @@ export class PiAgentRuntime implements AgentRuntime {
     const openThinking = new Set<number>();
     let terminalError: Error | undefined;
     let finalAssistant: AssistantMessage | undefined;
+    /** Set when the provider ended the last reply on purpose (a safety stop, the output limit): the Run completes with that reason. */
+    let cut: ProviderFinish | undefined;
     let handedOver = false;
     let compacting = false;
     let hasExecutedTool = false;
@@ -342,6 +345,7 @@ export class PiAgentRuntime implements AgentRuntime {
           transcriptMessages,
           setFinalAssistant: (message) => { finalAssistant = message; },
           setTerminalError: (error) => { terminalError ??= error; },
+          setCut: (finish) => { cut = finish; },
           setHandedOver: () => { handedOver = true; },
           handedOver: () => handedOver,
           steer
@@ -383,6 +387,12 @@ export class PiAgentRuntime implements AgentRuntime {
       }
       await promptPromise;
       if (terminalError) throw terminalError;
+      if (cut) {
+        // The reply is not complete, so it is not audited or delivered. A reply that came out empty says why, in words the user reads.
+        if (cut === "length" && (!finalAssistant || deliveryWorkflow)) yield { type: "assistant.delta", run_id: input.run_id, delta: { kind: "text", content: OUTPUT_LIMIT_NOTE } };
+        yield { type: "turn.completed", run_id: input.run_id, finish_reason: cut };
+        return;
+      }
       if (!finalAssistant && ctx.mayStaySilent) {
         // The agent had nothing to say, or a tool handed the conversation over: the Run completes with no reply.
         yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
@@ -508,6 +518,7 @@ export class PiAgentRuntime implements AgentRuntime {
     transcriptMessages: ConversationMessage[];
     setFinalAssistant: (message: AssistantMessage) => void;
     setTerminalError: (error: Error) => void;
+    setCut: (finish: ProviderFinish) => void;
     setHandedOver: () => void;
     handedOver: () => boolean;
     steer?: SteerInterrupt;
@@ -529,6 +540,7 @@ export class PiAgentRuntime implements AgentRuntime {
       transcriptMessages,
       setFinalAssistant,
       setTerminalError,
+      setCut,
       setHandedOver,
       handedOver,
       steer
@@ -612,13 +624,16 @@ export class PiAgentRuntime implements AgentRuntime {
         if (assistant.usage.totalTokens > 0) await ctx.usage?.({ id: `${input.run_id}:${assistant.timestamp}`, model: assistant.model, usage: assistant.usage });
         const hasToolCall = assistant.content.some((block) => block.type === "toolCall");
         const hasText = assistant.content.some((block) => block.type === "text" && block.text.trim().length > 0);
-        if (hasToolCall) {
+        // A turn the provider cut or the Agent failed has no results coming for its tool calls: persisting them would replay phantom calls.
+        if (hasToolCall && assistant.stopReason !== "error" && assistant.stopReason !== "aborted") {
           // Assistant text is guarded at the unified outbound boundary. Keep
           // only the tool-call structure in durable model history so a later
           // blocked text segment cannot race Pi's message_end persistence.
           await ctx.persistModelMessage?.({ ...converted, content: null });
         }
-        if (assistant.stopReason === "error" || assistant.stopReason === "aborted") {
+        if (providerFinish(assistant) === "content_filter") {
+          setCut("content_filter");
+        } else if (assistant.stopReason === "error" || assistant.stopReason === "aborted") {
           setTerminalError(assistant.stopReason === "error" ? UpstreamError.of(assistant.errorMessage ?? "Pi Agent stopped: error", `${assistant.provider} ${assistant.model}`) : new Error(assistant.errorMessage ?? `Pi Agent stopped: ${assistant.stopReason}`));
         } else if (assistant.stopReason === "stop" && !hasToolCall) {
           if (hasText) setFinalAssistant(assistant);
@@ -734,7 +749,12 @@ export class PiAgentRuntime implements AgentRuntime {
 
     if (event.type === "agent_end") {
       const last = [...event.messages].reverse().find((message) => message.role === "assistant") as AssistantMessage | undefined;
-      if (last && !last.errorMessage && last.stopReason !== "error" && last.stopReason !== "aborted"
+      const lastFinish = last && providerFinish(last);
+      // A reply the provider stopped for safety, or cut at the output limit with no tool call to answer, is an ending of its own, not a failure.
+      if (last && (lastFinish === "content_filter" || (lastFinish === "length" && !last.content.some((block) => block.type === "toolCall")))) {
+        setCut(lastFinish!);
+        if (lastFinish === "length" && last.content.some((block) => block.type === "text" && block.text.trim().length > 0)) setFinalAssistant(last);
+      } else if (last && !last.errorMessage && last.stopReason !== "error" && last.stopReason !== "aborted"
         && last.content.some((block) => block.type === "text" && block.text.trim().length > 0)
         && !last.content.some((block) => block.type === "toolCall")) {
         setFinalAssistant(last);
@@ -761,6 +781,9 @@ export class PiAgentRuntime implements AgentRuntime {
     }
   }
 }
+
+/** What the user reads when the model hit its output limit before writing any reply. */
+const OUTPUT_LIMIT_NOTE = "The reply was cut off because it reached the length limit before any text was written. Ask again, or ask for a shorter answer.";
 
 /** What a cut call had written, as a finished reply: its text only, since a half-written tool call or thought is not a reply. */
 function interruptedReply(message: AssistantMessage): AssistantMessage | undefined {
