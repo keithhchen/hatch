@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ADVANCED_STEP, INSPIRATION_STEP, STUDIO_PATH, studioNextStep, studioPathStates, studioStepForRoute } from "./studioPath.js";
+import { ADVANCED_STEPS, CONTENT_STEP, INSPIRATION_STEP, STUDIO_PATH, studioNextStep, studioPathStates, studioStepForRoute } from "./studioPath.js";
 
 const agent = (role, state) => ({ role, state });
 const file = { path: "input/manual/a.md" };
 
 test("Studio path is upload, interview, build and publish; the advanced Agents are a separate tab", () => {
   assert.deepEqual(STUDIO_PATH.map((step) => step.id), ["upload", "ask", "build", "ship"]);
-  assert.deepEqual(ADVANCED_STEP.items.map(([, role]) => role), ["research", "case-generation", "evaluator", "content-creation"]);
-  assert.equal(STUDIO_PATH.some((step) => step.items.some(([, role]) => ADVANCED_STEP.items.some(([, advanced]) => advanced === role))), false);
+  assert.deepEqual(ADVANCED_STEPS.map((step) => step.items[0][1]), ["case-generation", "evaluator"]);
+  assert.equal(CONTENT_STEP.items[0][1], "content-creation");
+  const railRoles = [...ADVANCED_STEPS, CONTENT_STEP, INSPIRATION_STEP].map((step) => step.items[0][1]);
+  assert.equal(railRoles.includes("research"), false, "Deep Research is hidden from the rail");
+  assert.equal(STUDIO_PATH.some((step) => step.items.some(([, role]) => railRoles.includes(role))), false);
 });
 
 test("Studio path derives step state only from the live Factory snapshot", () => {
@@ -32,7 +35,9 @@ test("Factory routes map onto the guided steps and the advanced tab", () => {
   assert.equal(studioStepForRoute("sources", "uploads"), "upload");
   assert.equal(studioStepForRoute("sources", "voice"), "ask");
   assert.equal(studioStepForRoute("build", "generation"), "build");
-  for (const [section, page] of ADVANCED_STEP.items) assert.equal(studioStepForRoute(section, page), "advanced");
+  assert.equal(studioStepForRoute("evaluate", "case-generation"), "cases");
+  assert.equal(studioStepForRoute("evaluate", "evaluator"), "evaluator");
+  assert.equal(studioStepForRoute("sources", "research"), "upload", "a direct Deep Research URL shows the normal workbench");
   assert.equal(studioStepForRoute(null, null), null);
 });
 
@@ -42,11 +47,13 @@ test("Overview is a top tab, Advanced sits under the rail steps, Start Agent and
   const [workspace, factory, css, web] = await Promise.all([read("./studioAgentWorkspace.jsx"), read("./FactoryAgents.jsx"), read("./factoryAgents.css"), read("./web/web.css")]);
   assert.match(workspace, /\{ value: "overview", label: "sxNavOverview" \},\s*\{ value: "build"[^}]*\},\s*\{ value: "publish"/);
   assert.doesNotMatch(factory, /factory-rail__overview|factory-stepper__advanced/);
-  assert.match(factory, /className=\{`factory-advanced/);
+  assert.doesNotMatch(factory, /factory-advanced|factory-tasks/);
+  assert.match(factory, /aria-expanded=\{open\}/);
+  assert.match(factory, /localStorage\.getItem\(ADVANCED_OPEN_KEY\)/);
   assert.match(factory, /<HatchButton type="button" size="small" variant="secondary" leading=\{<Play/);
   assert.doesNotMatch(factory, /line-through/);
   assert.doesNotMatch(web, /pro-tasks[^\n]*line-through/);
-  assert.match(factory.match(/<nav className="factory-rail"[^]*?<\/nav>/)[0], /factory-advanced/);
+  assert.match(factory.match(/<nav className="factory-rail"[^]*?<\/nav>/)[0], /<FactoryStepper/);
   assert.match(css, /grid-template-columns: max-content minmax\(0, 1fr\)/);
 });
 
@@ -64,16 +71,6 @@ test("Agent header has one Product links dropdown: copy, open page, open chat; e
   assert.match(copy, /sxProductLinks: "プロダクトのリンク"/);
 });
 
-test("Advanced pill matches step pill type and shows the same selected state with aria-current=page", async () => {
-  const { readFile } = await import("node:fs/promises");
-  const css = await readFile(new URL("./factoryAgents.css", import.meta.url), "utf8");
-  const factory = await readFile(new URL("./FactoryAgents.jsx", import.meta.url), "utf8");
-  const rule = (selector) => css.match(new RegExp(`^${selector.replace(/[.]/g, "\\.")} \\{([^}]*)\\}`, "m"))[1];
-  assert.match(rule(".factory-advanced"), /font-size: 14px; font-weight: 650/);
-  assert.equal(rule(".factory-advanced.is-current"), rule(".factory-stepper .is-current"));
-  assert.match(factory, /factory-advanced\$\{currentStep === ADVANCED_STEP\.id \? " is-current" : ""\}`\} aria-current=\{currentStep === ADVANCED_STEP\.id \? "page"/);
-});
-
 test("Output tab previews images inline and opens HTML in the floating page panel", async () => {
   const { readFile } = await import("node:fs/promises");
   const jsx = await readFile(new URL("./FactoryAgents.jsx", import.meta.url), "utf8");
@@ -83,13 +80,13 @@ test("Output tab previews images inline and opens HTML in the floating page pane
   assert.match(jsx, /<MessageResponse>\{edit\}<\/MessageResponse>/);
 });
 
-test("Inspiration sits after Publish but is not a step: no state, no progress; Content Creation is inside Advanced", async () => {
+test("Inspiration sits after Publish but is not a step: no state, no progress; Content Creation is its own rail row", async () => {
   assert.equal(STUDIO_PATH.some((step) => step.id === "inspiration"), false);
   assert.equal(studioPathStates([agent("inspiration", "complete")], null, []).length, STUDIO_PATH.length);
   assert.equal(studioStepForRoute("inspire", "inspiration"), "inspiration");
-  assert.equal(studioStepForRoute("create", "content-creation"), "advanced");
+  assert.equal(studioStepForRoute("create", "content-creation"), "content");
   const { readFile } = await import("node:fs/promises");
   const jsx = await readFile(new URL("./FactoryAgents.jsx", import.meta.url), "utf8");
-  assert.match(jsx, /<FactoryStepper[^>]*aside=\{INSPIRATION_STEP\}/, "the Inspiration entry is a stepper item");
+  assert.match(jsx, /item\(INSPIRATION_STEP, "factory-stepper__aside"\)/, "the Inspiration entry is a stepper item");
   assert.equal(INSPIRATION_STEP.items[0][1], "inspiration");
 });
