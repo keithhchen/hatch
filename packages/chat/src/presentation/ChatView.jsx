@@ -6,7 +6,7 @@ import { ACTIVITY_KINDS, ChatTimeline, groupTimelineEntries, withoutRepeatedStep
 import { sharedScrollPositions } from "../domain/scroll-positions.js";
 import { OPEN_FREE_CHAT } from "../domain/free-chat.js";
 import { ActivityBlock, ActivityModal, ApprovalActivity } from "./Activity.jsx";
-import { PageSplit, useFormPageViewer } from "./FormPageViewer.jsx";
+import { PagePanel, useFormPageViewer } from "./FormPageViewer.jsx";
 import { ImageViewer } from "./ImageViewer.jsx";
 import { MessageResponse } from "./MessageResponse.jsx";
 import { Shimmer } from "./Shimmer.jsx";
@@ -301,7 +301,7 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
   const compactedRuns = new Set(compactions.filter(entry => entry.conversationId === conversationId).map(entry => entry.runId));
   const messageProps = { identity, typingText, attachments, Viewer: AttachmentViewer, assetSource, activityKinds, t, errorText, loadToolDetail, approvals };
 
-  return <PageSplit viewer={viewer} t={t}><main className="web-chat__main" inert={inert}>
+  return <><main className="web-chat__main" inert={inert}>
     {header}
     <div className="web-chat__messages" ref={messagesRef} onScroll={onScroll} onClickCapture={viewer.onClickCapture} aria-label={t("chatMessages")}>
       <div className="web-chat__thread">
@@ -336,5 +336,5 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
       {freeChat.locked && !activeRun ? <FreeChatPaywall access={freeChat} creatorName={identity.creatorName} t={t} />
         : conversationId ? <Composer controller={controller} state={state} snapshotPending={snapshotPending} agentName={agentName} t={t} onSend={send} attachControl={attachControl} accessory={composerAccessory} onPaste={onComposerPaste} dictate={dictate} accept={accept} steer={controller.steerable} /> : null}
     </div>
-  </main></PageSplit>;
+  </main><PagePanel viewer={viewer} t={t} /></>;
 }
