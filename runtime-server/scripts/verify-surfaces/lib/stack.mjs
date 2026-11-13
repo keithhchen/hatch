@@ -15,6 +15,8 @@ export const TELEGRAM = { token: "verify-bot-token", username: "hatch_verify_bot
 export const BROWSER_ORIGIN = "http://studio.verify.local";
 const TOKENS = { runtimeToRegistry: "verify-runtime-to-registry", registryToRuntime: "verify-registry-to-runtime" };
 const CREDENTIALS_KEY = "verify-credentials-key";
+// A Postgres far from this machine makes the Registry/Runtime schema setup slow; VERIFY_STARTUP_TIMEOUT_MS widens the wait.
+const STARTUP_TIMEOUT_MS = Number(process.env.VERIFY_STARTUP_TIMEOUT_MS) || 90_000;
 
 /**
  * VERIFICATION TOOL ONLY. An isolated local stack of the real product: throwaway Postgres 16, the real `dist/registryServer.js`
@@ -25,6 +27,12 @@ export class Stack {
   /** options: { name, llmProfile, runtimeEnv, registryEnv } */
   constructor(options = {}) {
     this.options = { name: "surfaces", llmProfile: "gemini-api", runtimeEnv: {}, registryEnv: {}, ...options };
+    // A far-away Postgres (VERIFY_DATABASE_URL) needs the servers' per-query timeouts widened: VERIFY_DB_TIMEOUT_MS.
+    const wait = process.env.VERIFY_DB_TIMEOUT_MS;
+    if (wait) {
+      this.options.registryEnv = { HATCH_REGISTRY_DB_TIMEOUT_MS: wait, ...this.options.registryEnv };
+      this.options.runtimeEnv = { HATCH_RUNTIME_DATABASE_CONNECTION_TIMEOUT_MS: wait, HATCH_RUNTIME_DATABASE_QUERY_TIMEOUT_MS: wait, HATCH_RUNTIME_DATABASE_STATEMENT_TIMEOUT_MS: wait, ...this.options.runtimeEnv };
+    }
     this.runtimes = [];
     this.products = new Map();
     this.accounts = [];
@@ -34,12 +42,15 @@ export class Stack {
 
   async up() {
     this.root = makeRoot(this.options.name);
-    this.cluster = await PostgresCluster.start(this.root);
-    this.admin = new pg.Pool({ connectionString: this.cluster.url(), max: 2 });
+    // VERIFY_DATABASE_URL points the stack at one existing Postgres (a copy, never production) shared by Registry and Runtime, as in production.
+    const external = process.env.VERIFY_DATABASE_URL;
+    this.cluster = external ? { url: () => external, stop: async () => undefined } : await PostgresCluster.start(this.root);
+    const harnessMax = external ? 1 : 4; // a pooler caps clients, so the harness keeps its own pools minimal
+    this.admin = new pg.Pool({ connectionString: this.cluster.url(), max: external ? 1 : 2 });
     this.dbNames = { registry: "verify_registry", runtime: "verify_runtime" };
-    for (const name of Object.values(this.dbNames)) await this.admin.query(`CREATE DATABASE "${name}"`);
-    this.registryPool = new pg.Pool({ connectionString: this.cluster.url(this.dbNames.registry), max: 4 });
-    this.runtimePool = new pg.Pool({ connectionString: this.cluster.url(this.dbNames.runtime), max: 4 });
+    if (!external) for (const name of Object.values(this.dbNames)) await this.admin.query(`CREATE DATABASE "${name}"`);
+    this.registryPool = new pg.Pool({ connectionString: this.cluster.url(this.dbNames.registry), max: harnessMax });
+    this.runtimePool = new pg.Pool({ connectionString: this.cluster.url(this.dbNames.runtime), max: harnessMax });
     await this.chooseModels();
     this.platform = await new FakePlatform().start();
     this.platform.bots.set(TELEGRAM.token, TELEGRAM.username);
@@ -91,7 +102,7 @@ export class Stack {
     const proc = new ManagedProcess(`runtime:${port}`, process.execPath, [...(this.options.runtimeNodeArgs ?? []), path.join(dist, "index.js")], { cwd: serverRoot, env: { ...this.runtimeEnv(port), ...extraEnv } });
     const instance = { port, proc, id: `runtime-${this.runtimes.length + 1}` };
     this.runtimes.push(instance);
-    await until(`${instance.id} ready`, async () => { if (!proc.alive) throw new Error(`runtime exited:\n${proc.tail(3000)}`); return (await fetch(`http://127.0.0.1:${port}/readyz`)).ok; }, { timeoutMs: 90_000 }).catch((error) => { throw new Error(`${error.message}\n${proc.tail(3000)}`); });
+    await until(`${instance.id} ready`, async () => { if (!proc.alive) throw new Error(`runtime exited:\n${proc.tail(3000)}`); return (await fetch(`http://127.0.0.1:${port}/readyz`)).ok; }, { timeoutMs: STARTUP_TIMEOUT_MS }).catch((error) => { throw new Error(`${error.message}\n${proc.tail(3000)}`); });
     this.edge.setRuntimes(this.runtimes.filter((r) => r.proc.alive).map((r) => r.port));
     return instance;
   }
@@ -113,7 +124,7 @@ export class Stack {
       VERIFY_PLATFORM_URL: this.platform.url, ...this.options.registryEnv, ...extraEnv
     };
     this.registry = new ManagedProcess("registry", process.execPath, ["--import", this.preload, path.join(dist, "registryServer.js")], { cwd: serverRoot, env });
-    await until("the Registry", async () => { if (!this.registry.alive) throw new Error(`registry exited:\n${this.registry.tail(3000)}`); return (await fetch(`${this.registryUrl}/healthz`)).ok; }, { timeoutMs: 90_000 });
+    await until("the Registry", async () => { if (!this.registry.alive) throw new Error(`registry exited:\n${this.registry.tail(3000)}`); return (await fetch(`${this.registryUrl}/healthz`)).ok; }, { timeoutMs: STARTUP_TIMEOUT_MS });
     return this.registry;
   }
   async killRegistry() { await this.registry.kill9(); }

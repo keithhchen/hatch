@@ -36,7 +36,7 @@ export class WebStack {
       HATCH_PORTAL_TELEMETRY_PATH: path.join(state, "telemetry.jsonl")
     };
     this.dashboard = new ManagedProcess("dashboard", process.execPath, [path.join(dashboardRoot, "server.mjs")], { cwd: dashboardRoot, env });
-    await until("the Dashboard", async () => { if (!this.dashboard.alive) throw new Error(`dashboard exited:\n${this.dashboard.tail(3000)}`); return (await fetch(`${this.url}/healthz`)).ok; }, { timeoutMs: 60_000 });
+    await until("the Dashboard", async () => { if (!this.dashboard.alive) throw new Error(`dashboard exited:\n${this.dashboard.tail(3000)}`); return (await fetch(`${this.url}/healthz`)).ok; }, { timeoutMs: Number(process.env.VERIFY_STARTUP_TIMEOUT_MS) || 60_000 });
   }
 
   /** Every server log, by process, for scanning. */
