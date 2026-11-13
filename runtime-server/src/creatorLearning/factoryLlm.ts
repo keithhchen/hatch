@@ -12,7 +12,7 @@ const FACTORY_LLM_PROFILE = resolveFactoryLlmProfile({ HATCH_FACTORY_LLM_PROFILE
 export const FACTORY_LLM_WALL_CLOCK_TIMEOUT_MS = 15 * 60_000;
 /** Total input + preserved multi-turn history + output capacity. */
 export const FACTORY_LLM_CONTEXT_WINDOW = FACTORY_LLM_PROFILE.contextWindow;
-/** Moonshot's documented Kimi K2.6 default maximum for one completion. */
+/** Moonshot's documented Kimi K3.1 default maximum for one completion. */
 export const FACTORY_LLM_MAX_COMPLETION_TOKENS = FACTORY_LLM_PROFILE.maxTokens;
 /**
  * A provider may end a normal assistant turn without using the host-owned
@@ -138,10 +138,10 @@ export function createFactoryLlmPromptRunner(
         // that deadline (or after the caller has lost its lease); doing so
         // would create a fresh Agent run with a fresh abort signal.
         if (wallClockTimedOut) {
-          throw new Error(`Factory Kimi K2.6 prompt timed out after ${wallClockTimeoutMs}ms`);
+          throw new Error(`Factory Kimi K3.1 prompt timed out after ${wallClockTimeoutMs}ms`);
         }
         if (options.signal?.aborted) {
-          throw new Error("Factory Kimi K2.6 prompt aborted");
+          throw new Error("Factory Kimi K3.1 prompt aborted");
         }
         let repairTurns = 0;
         while (
@@ -154,31 +154,31 @@ export function createFactoryLlmPromptRunner(
         }
       } catch (error) {
         if (wallClockTimedOut) {
-          throw new Error(`Factory Kimi K2.6 prompt timed out after ${wallClockTimeoutMs}ms`);
+          throw new Error(`Factory Kimi K3.1 prompt timed out after ${wallClockTimeoutMs}ms`);
         }
         if (rejectedStop) {
-          throw new Error(rejectedStop.message ?? `Factory Kimi K2.6 prompt did not complete: ${rejectedStop.reason}`);
+          throw new Error(rejectedStop.message ?? `Factory Kimi K3.1 prompt did not complete: ${rejectedStop.reason}`);
         }
         throw error;
       }
       if (wallClockTimedOut) {
-        throw new Error(`Factory Kimi K2.6 prompt timed out after ${wallClockTimeoutMs}ms`);
+        throw new Error(`Factory Kimi K3.1 prompt timed out after ${wallClockTimeoutMs}ms`);
       }
       if (rejectedStop) {
-        throw new Error(rejectedStop.message ?? `Factory Kimi K2.6 prompt did not complete: ${rejectedStop.reason}`);
+        throw new Error(rejectedStop.message ?? `Factory Kimi K3.1 prompt did not complete: ${rejectedStop.reason}`);
       }
-      if (options.signal?.aborted) throw new Error("Factory Kimi K2.6 prompt aborted");
+      if (options.signal?.aborted) throw new Error("Factory Kimi K3.1 prompt aborted");
       const message = [...agent.state.messages]
         .reverse()
         .find((candidate) => candidate.role === "assistant");
       if (!message || message.role !== "assistant") {
-        throw new Error("Factory Kimi K2.6 prompt ended without an assistant response");
+        throw new Error("Factory Kimi K3.1 prompt ended without an assistant response");
       }
       // A finalize-only tool turn can legitimately terminate with toolUse.
       // Every other terminal reason still fails closed unless the side-effect-
       // free host FSM had already atomically committed FINALIZED output.
       if (message.stopReason !== "stop" && message.stopReason !== "toolUse") {
-        throw new Error(message.errorMessage ?? `Factory Kimi K2.6 prompt did not complete: ${message.stopReason}`);
+        throw new Error(message.errorMessage ?? `Factory Kimi K3.1 prompt did not complete: ${message.stopReason}`);
       }
       return submission.finalizedOutput();
     } catch (error) {

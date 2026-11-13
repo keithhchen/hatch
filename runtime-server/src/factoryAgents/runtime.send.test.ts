@@ -31,7 +31,7 @@ async function harness(options: { plan?: (call: number) => string | undefined; t
       const final = context.messages.at(-1);
       calls.push({ tools: (context.tools ?? []).map(tool => ({ name: tool.name, description: tool.description })), last: JSON.stringify(final?.content) });
       const tool = options.plan?.(call);
-      const message: AssistantMessage = { role: "assistant", api: "openai-completions", provider: "moonshotai-cn", model: "kimi-k2.6", timestamp: Date.now(),
+      const message: AssistantMessage = { role: "assistant", api: "openai-completions", provider: "moonshotai-cn", model: "kimi-k3.1-pro", timestamp: Date.now(),
         content: tool ? [{ type: "toolCall", id: `call-${call}`, name: tool, arguments: { directory: "input" } }] : [{ type: "text", text: `Reply ${call}` }],
         stopReason: options.fail?.(call) ? "error" : tool ? "toolUse" : "stop", ...(options.fail?.(call) ? { errorMessage: "model down" } : {}), usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
       const stream = createAssistantMessageEventStream();

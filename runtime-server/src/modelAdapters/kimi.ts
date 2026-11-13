@@ -1,12 +1,12 @@
 import type { Agent, AgentOptions, StreamFn } from "@earendil-works/pi-agent-core";
 import type { Models, Model } from "@earendil-works/pi-ai";
 import type { LlmProfile } from "../llmProfiles.js";
-import { KIMI_K26_MODEL, llmProfile } from "../llmProfiles.js";
+import { KIMI_MODEL as PROFILE_KIMI_MODEL, llmProfile } from "../llmProfiles.js";
 import { OpenAICompatibleAdapter } from "./openAiCompatible.js";
 import type { AdapterOptions, AgentAdapterOptions, Endpoint } from "./adapter.js";
 import { agentFor, agentOptionsFor, modelFor, modelsFor, streamFnFor } from "./assemble.js";
 
-export const KIMI_MODEL = KIMI_K26_MODEL;
+export const KIMI_MODEL = PROFILE_KIMI_MODEL;
 export const KIMI_DEFAULT_BASE_URL = "https://api.moonshot.cn/v1";
 
 const KIMI_PROVIDER_CN = "moonshotai-cn" as const;
@@ -73,7 +73,7 @@ export function omitEmptyToolCallContent(payload: unknown): unknown {
   };
 }
 
-/** The whole Moonshot Kimi family (k2.6, k3.1, with or without thinking). */
+/** Moonshot Kimi K3.1: no `thinking` field (it always reasons); depth is the profile's `reasoning_effort`. */
 export class KimiAdapter extends OpenAICompatibleAdapter {
   override endpoint(profile: LlmProfile, options: AdapterOptions): Endpoint {
     const env = options.env ?? process.env;
@@ -83,30 +83,33 @@ export class KimiAdapter extends OpenAICompatibleAdapter {
   }
 
   override normalizePayload(profile: LlmProfile, payload: unknown): unknown {
-    return super.normalizePayload(profile, omitEmptyToolCallContent(payload));
+    const body = omitEmptyToolCallContent(payload);
+    if (!body || typeof body !== "object" || Array.isArray(body)) return body;
+    const { thinking: _thinking, ...rest } = body as Record<string, unknown>;
+    return { ...rest, reasoning_effort: profile.reasoningEffort };
   }
 }
 
-// Direct Kimi K2.6 entry points for callers that bypass profile selection.
+// Direct Kimi entry points for callers that bypass profile selection.
 const adapter = new KimiAdapter();
-const kimiK26 = (): LlmProfile => llmProfile(KIMI_MODEL);
+const kimiProfile = (): LlmProfile => llmProfile(KIMI_MODEL);
 
 export function createKimiModel(options: Pick<KimiAdapterOptions, "baseUrl" | "baseURL" | "env"> = {}): KimiModel {
-  return modelFor(adapter, kimiK26(), options) as KimiModel;
+  return modelFor(adapter, kimiProfile(), options) as KimiModel;
 }
 
 export function createKimiStreamFn(options: KimiAdapterOptions = {}): StreamFn {
-  return streamFnFor(adapter, kimiK26(), options);
+  return streamFnFor(adapter, kimiProfile(), options);
 }
 
 export function createKimiModels(options: KimiAdapterOptions = {}): { models: Models; model: KimiModel } {
-  return modelsFor(adapter, kimiK26(), options) as { models: Models; model: KimiModel };
+  return modelsFor(adapter, kimiProfile(), options) as { models: Models; model: KimiModel };
 }
 
 export function createKimiAgentOptions(options: KimiAgentOptions = {}): AgentOptions {
-  return agentOptionsFor(adapter, kimiK26(), options);
+  return agentOptionsFor(adapter, kimiProfile(), options);
 }
 
 export function createKimiAgent(options: KimiAgentOptions = {}): Agent {
-  return agentFor(adapter, kimiK26(), options);
+  return agentFor(adapter, kimiProfile(), options);
 }

@@ -60,7 +60,7 @@ import type {
 
 const PROMPT_VERSION = "creator-factory-v7-provenance-and-reasoning-contract";
 const SEALED_FAILURE_MESSAGE = "Sealed Factory operation failed; sensitive diagnostics were not persisted";
-// Conservative character ceiling leaves ample room inside Kimi K2.6's context
+// Conservative character ceiling leaves ample room inside Kimi K3.1's context
 // context for instructions, multilingual tokenization, reasoning, and output.
 const EVIDENCE_CHUNK_CHARACTERS = 600_000;
 const INITIAL_EVIDENCE_SECTIONS = [

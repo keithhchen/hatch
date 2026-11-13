@@ -57,7 +57,7 @@ test("Kimi model is fixed to the official Moonshot profile", () => {
   });
 });
 
-test("AgentOptions resolves LLM_API_KEY and enables Kimi thinking", () => {
+test("AgentOptions resolves LLM_API_KEY and uses the profile thinking level", () => {
   const options = createKimiAgentOptions({
     env: { LLM_API_KEY: "  kimi-test-key  " },
     timeoutMs: 12_345
@@ -65,11 +65,11 @@ test("AgentOptions resolves LLM_API_KEY and enables Kimi thinking", () => {
 
   assert.equal(options.getApiKey?.("moonshotai-cn"), "kimi-test-key");
   assert.equal(options.initialState?.model?.id, KIMI_MODEL);
-  assert.equal(options.initialState?.thinkingLevel, "high");
+  assert.equal(options.initialState?.thinkingLevel, "low");
   assert.equal(typeof options.streamFn, "function");
 });
 
-test("Pi AI request uses Moonshot endpoint, key, model, and enabled thinking", async () => {
+test("Pi AI request uses Moonshot endpoint, key, model, and reasoning effort", async () => {
   const calls: Array<{ url: string; init: RequestInit }> = [];
   const fetch: typeof globalThis.fetch = async (input, init) => {
     calls.push({ url: input instanceof Request ? input.url : String(input), init: init ?? {} });
@@ -92,11 +92,10 @@ test("Pi AI request uses Moonshot endpoint, key, model, and enabled thinking", a
   const body = JSON.parse(String(request.init.body)) as Record<string, unknown>;
   assert.equal(body.model, KIMI_MODEL);
   assert.equal(body.stream, true);
-  assert.deepEqual(body.thinking, { type: "enabled" });
-  // No Hatch delivery/turn cap is injected. Pi derives this from the Kimi
-  // model profile and clamps it against the actual request context.
+  assert.equal("thinking" in body, false);
+  assert.equal(body.reasoning_effort, "low");
+  // No Hatch delivery/turn cap is injected; Pi derives this from the Kimi model profile.
   assert.equal(typeof body.max_tokens, "number");
-  assert.ok(Number(body.max_tokens) > 100_000);
   assert.equal(agent.state.messages.at(-1)?.role, "assistant");
 });
 
@@ -278,33 +277,7 @@ test("active Gemini API profile uses Pi's native Google protocol", () => {
   assert.equal(agent.state.thinkingLevel, "low");
 });
 
-test("Kimi no-thinking profile sends the official disabled payload without temperature", async () => {
-  const calls: Array<{ url: string; init: RequestInit }> = [];
-  const fetch: typeof globalThis.fetch = async (input, init) => {
-    calls.push({ url: input instanceof Request ? input.url : String(input), init: init ?? {} });
-    return streamResponse("fast pong");
-  };
-  const env = {
-    HATCH_LLM_PROFILE: "kimi-k2.6-no-thinking",
-    LLM_API_KEY: "kimi-test-key"
-  };
-
-  const model = createPiModel({ env });
-  assert.equal(model.id, KIMI_MODEL);
-  assert.equal(model.reasoning, false);
-  const agent = createPiAgent({ env, fetch, timeoutMs: 8_000 });
-  await agent.prompt("Say pong");
-
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0]!.url, `${KIMI_DEFAULT_BASE_URL}/chat/completions`);
-  const body = JSON.parse(String(calls[0]!.init.body)) as Record<string, unknown>;
-  assert.equal(body.model, KIMI_MODEL);
-  assert.deepEqual(body.thinking, { type: "disabled" });
-  assert.equal(body.temperature, undefined);
-  assert.equal(body.reasoning_effort, undefined);
-});
-
-test("Kimi K3.1 profile sends thinking enabled so reasoning stays out of the reply", async () => {
+test("Kimi K3.1 profile sends reasoning_effort low and no thinking field", async () => {
   const calls: Array<{ init: RequestInit }> = [];
   const fetch: typeof globalThis.fetch = async (_input, init) => {
     calls.push({ init: init ?? {} });
@@ -317,7 +290,8 @@ test("Kimi K3.1 profile sends thinking enabled so reasoning stays out of the rep
 
   const body = JSON.parse(String(calls[0]!.init.body)) as Record<string, unknown>;
   assert.equal(body.model, "kimi-k3.1-pro");
-  assert.deepEqual(body.thinking, { type: "enabled" });
+  assert.equal("thinking" in body, false);
+  assert.equal(body.reasoning_effort, "low");
 });
 
 test("active profile rejects unknown names and missing provider credentials", () => {

@@ -124,7 +124,7 @@ test("a signed platform webhook becomes one Run and one outbound delivery across
   const modelRequests: string[] = [];
   const model = await listen(async (request, response) => {
     modelRequests.push(await body(request));
-    const chunk = (delta: Record<string, unknown>, finish: string | null) => `data: ${JSON.stringify({ id: "e2e", object: "chat.completion.chunk", created: 1, model: "kimi-k2.6", choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+    const chunk = (delta: Record<string, unknown>, finish: string | null) => `data: ${JSON.stringify({ id: "e2e", object: "chat.completion.chunk", created: 1, model: "kimi-k3.1-pro", choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
     response.writeHead(200, { "content-type": "text/event-stream" });
     response.end(`${chunk({ role: "assistant", content: "pong from the test model" }, null)}${chunk({}, "stop")}data: [DONE]\n\n`);
   });
@@ -154,7 +154,7 @@ globalThis.fetch = (input, init) => { const url = typeof input === "string" ? in
     HATCH_RUNTIME_DATABASE_URL: urlFor(names.runtime), HATCH_RUNTIME_DATA_DIR: path.join(root, "runtime-data"), HATCH_RUNTIME_CORPUS_ROOT: corpusRoot,
     HATCH_REGISTRY_URL: `http://127.0.0.1:${ports.registry}`, HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN: TOKENS.runtimeToRegistry,
     HATCH_RUNTIME_CHAT_SERVICE_TOKEN: TOKENS.registryToRuntime,
-    HATCH_LLM_PROFILE: "kimi-k2.6", LLM_API_KEY: "e2e-model-key", OPENAI_BASE_URL: `http://127.0.0.1:${model.port}/v1`
+    HATCH_LLM_PROFILE: "kimi-k3.1-pro", LLM_API_KEY: "e2e-model-key", OPENAI_BASE_URL: `http://127.0.0.1:${model.port}/v1`
   });
   const registry = start("registryServer.js", {
     REGISTRY_PORT: String(ports.registry), REGISTRY_HOST: "127.0.0.1",

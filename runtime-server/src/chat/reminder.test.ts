@@ -7,7 +7,7 @@ const reminders = (value: unknown): number => JSON.stringify(value).split("<syst
 
 /** A model that only answers: what Chat sends it is what the test inspects. */
 const provider = (t: import("node:test").TestContext, requests: Array<Array<{ role: string; content: unknown }>>) => {
-  const chunk = (delta: object, finish: string | null) => `data: ${JSON.stringify({ id: "c", object: "chat.completion.chunk", created: 1, model: "kimi-k2.6", choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+  const chunk = (delta: object, finish: string | null) => `data: ${JSON.stringify({ id: "c", object: "chat.completion.chunk", created: 1, model: "kimi-k3.1-pro", choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
   t.mock.method(globalThis, "fetch", async (_url: unknown, init: RequestInit) => {
     requests.push(JSON.parse(String(init.body)).messages);
     return new Response(`${chunk({ role: "assistant", content: "ok" }, null)}${chunk({}, "stop")}data: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
@@ -16,7 +16,7 @@ const provider = (t: import("node:test").TestContext, requests: Array<Array<{ ro
 
 test("a system reminder ends every model call and is never persisted, so it is never in what compaction reads", async (t) => {
   const keep = { profile: process.env.HATCH_LLM_PROFILE, key: process.env.LLM_API_KEY };
-  process.env.HATCH_LLM_PROFILE = "kimi-k2.6-no-thinking";
+  process.env.HATCH_LLM_PROFILE = "kimi-k3.1-pro";
   process.env.LLM_API_KEY = "test-only";
   t.after(() => {
     for (const [name, value] of [["HATCH_LLM_PROFILE", keep.profile], ["LLM_API_KEY", keep.key]] as const) {

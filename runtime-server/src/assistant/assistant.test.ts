@@ -92,7 +92,7 @@ function scriptedWorkers(script: (context: Context, call: number) => WorkerStep)
   let calls = 0;
   return (options: FactoryPiAgentOptions) => new Agent({ ...options.agentOptions, initialState: { ...options.initialState, model: createFactoryLlmModel({ env: options.env }) }, streamFn: (_model, context) => {
     const step = script(context, ++calls);
-    const message: AssistantMessage = { role: "assistant", api: "openai-completions", provider: "moonshotai-cn", model: "kimi-k2.6", timestamp: Date.now(),
+    const message: AssistantMessage = { role: "assistant", api: "openai-completions", provider: "moonshotai-cn", model: "kimi-k3.1-pro", timestamp: Date.now(),
       content: step.tool ? [{ type: "toolCall", id: `call-worker-${calls}`, ...step.tool }] : [{ type: "text", text: step.text ?? "" }],
       stopReason: step.tool ? "toolUse" : "stop", usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
     const stream = createAssistantMessageEventStream();
@@ -135,7 +135,7 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
   const productStore = new WorkbenchStore(path.join(root, "product"), { creatorId: ACCOUNT, productId: PRODUCT }, new MemoryAgentDefinitionRepository(await initialAgentDefinitions()));
   let withheldTools: Parameters<ProductWorkspaces["attachAssistant"]>[0]["withheldTools"] | undefined;
   const agentFactory = scriptedWorkers(options.worker ?? (() => ({ text: "完成" })));
-  const productRuntime = new WorkbenchRuntime(productStore, { env: { HATCH_FACTORY_LLM_PROFILE: "kimi-k2.6" }, agentFactory, maxTurns: 6, withheldTools: async session => await withheldTools?.({ creatorId: ACCOUNT, productId: PRODUCT }, session) ?? [] });
+  const productRuntime = new WorkbenchRuntime(productStore, { env: { HATCH_FACTORY_LLM_PROFILE: "kimi-k3.1-pro" }, agentFactory, maxTurns: 6, withheldTools: async session => await withheldTools?.({ creatorId: ACCOUNT, productId: PRODUCT }, session) ?? [] });
   const workspace = { store: productStore, runtime: productRuntime } as unknown as FactoryWorkspace;
   const scopes: Array<{ creatorId: string; productId: string; briefSpec?: unknown }> = [];
   let opened: ((scope: { creatorId: string; productId: string }, workspace: FactoryWorkspace) => void) | undefined;
@@ -154,7 +154,7 @@ async function setup(options: { model: Parameters<typeof scriptedModel>[0]; work
     backend: () => legacy,
     exclusive: async (_name, fn) => fn(),
     search: { search: async () => { throw new Error("no web search in tests"); } },
-    env: { HATCH_FACTORY_LLM_PROFILE: "kimi-k2.6" },
+    env: { HATCH_FACTORY_LLM_PROFILE: "kimi-k3.1-pro" },
     runtime: { agentFactory },
     ...(options.ingest ? { ingest: options.ingest } : {}),
   });

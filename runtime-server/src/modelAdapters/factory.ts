@@ -58,42 +58,24 @@ export class FactoryOpenAICompatibleAdapter extends OpenAICompatibleAdapter impl
   recordedProvider(profile: LlmProfile): string { return profile.provider; }
 }
 
-/** Moonshot Kimi K2.6: thinking on, tool choice left to the model, and the sampling knobs Moonshot rejects removed. */
+/** Moonshot Kimi K3.1: KimiAdapter's request (no `thinking`, `reasoning_effort` from the profile), tool choice left to the model, and the sampling knobs Moonshot rejects removed. */
 export class FactoryKimiAdapter extends KimiAdapter implements FactoryModelAdapter {
   override resolve(profile: LlmProfile, options: AdapterOptions): ResolvedModelOptions {
     return withProfileMaxTokens(profile, super.resolve(profile, options));
   }
 
   override model(profile: LlmProfile, endpoint: Endpoint): PiModel {
-    return {
-      id: profile.model,
-      name: profile.displayName ?? profile.model,
-      api: "openai-completions",
-      provider: endpoint.provider,
-      baseUrl: endpoint.baseUrl,
-      reasoning: profile.reasoning,
-      thinkingLevelMap: { off: null, minimal: null, low: "low", medium: null, high: "high", xhigh: null, max: "max" },
-      input: ["text", "image"],
-      cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 },
-      contextWindow: profile.contextWindow,
-      maxTokens: profile.maxTokens,
-      compat: {
-        supportsStore: false,
-        supportsDeveloperRole: false,
-        supportsReasoningEffort: false,
-        maxTokensField: "max_completion_tokens",
-        supportsStrictMode: true,
-        thinkingFormat: "deepseek",
-        requiresReasoningContentOnAssistantMessages: true
-      }
-    } as PiModel;
+    const model = super.model(profile, endpoint);
+    const { compat } = model as { compat: object };
+    return { ...model, compat: { ...compat, maxTokensField: "max_completion_tokens", supportsStrictMode: true, requiresReasoningContentOnAssistantMessages: true } } as PiModel;
   }
 
-  override normalizePayload(_profile: LlmProfile, payload: unknown): unknown {
-    if (!isRecord(payload)) return payload;
-    const body: Record<string, unknown> = { ...payload, thinking: { type: "enabled" }, tool_choice: "auto" };
-    for (const key of ["reasoning_effort", "temperature", "top_p", "n", "presence_penalty", "frequency_penalty", "max_tokens"]) delete body[key];
-    return body;
+  override normalizePayload(profile: LlmProfile, payload: unknown): unknown {
+    const body = super.normalizePayload(profile, payload);
+    if (!isRecord(body)) return body;
+    const out: Record<string, unknown> = { ...body, tool_choice: "auto" };
+    for (const key of ["temperature", "top_p", "n", "presence_penalty", "frequency_penalty", "max_tokens"]) delete out[key];
+    return out;
   }
 
   requireToolChoice(_profile: LlmProfile, payload: unknown): unknown { return payload; }
@@ -124,7 +106,7 @@ const FACTORY_ADAPTERS: Record<ModelFamily, FactoryModelAdapter> = {
   gemini: new FactoryGeminiAdapter()
 };
 
-/** The adapter Creator Factory uses for a profile, chosen by the profile's family data. */
+/** The adapter Creator Factory uses for a profile, chosen by the profile's family. */
 export function factoryAdapterFor(profile: LlmProfile): FactoryModelAdapter {
-  return FACTORY_ADAPTERS[profile.factoryFamily ?? profile.family];
+  return FACTORY_ADAPTERS[profile.family];
 }

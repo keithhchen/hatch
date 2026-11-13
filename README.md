@@ -132,11 +132,8 @@ Copy `.env.example` to `.env`, supply a Moonshot credential, then run:
 ./scripts/dev.sh
 ```
 
-Hatch product Runtime remains on its existing `kimi-k2.6` path. Creator Factory's
-three LLM roles—Evidence, Eval, and Corpus—use a separate `kimi-k3` profile with
-the 1,048,576-token context profile and maximum reasoning effort; that Factory
-profile is never passed into candidate Runtime execution. These roles do not
-silently fall back to another model. Provider credentials
+Every Kimi use, Hatch product Runtime and Creator Factory alike, runs `kimi-k3.1-pro` with
+`reasoning_effort: low`. Factory roles do not silently fall back to another model. Provider credentials
 remain process environment only and must never enter an Agent Corpus or proof
 bundle.
 

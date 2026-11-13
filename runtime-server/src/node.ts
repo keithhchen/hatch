@@ -97,7 +97,7 @@ export type CriticVerdict<Feedback> =
 export function criticVerdictSchema<Feedback>(
   feedbackSchema: z.ZodType<Feedback>
 ): z.ZodType<CriticVerdict<Feedback>> {
-  // Keep this a flat object. Kimi K2.6 is less reliable with oneOf/anyOf
+  // Keep this a flat object. Kimi K3.1 is less reliable with oneOf/anyOf
   // schemas. The Node Runtime exposes this as the argument schema of the
   // host-owned submit_output tool. It is not a business-quality gate.
   return z.object({

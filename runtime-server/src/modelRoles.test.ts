@@ -3,7 +3,7 @@ import test from "node:test";
 import { MODEL_ROLES, modelRole } from "./modelRoles.js";
 
 test("model roles keep today's choices", () => {
-  assert.deepEqual({ ...MODEL_ROLES }, { assistant: "kimi-k3.1-pro", worker: "kimi-k2.6", factory: "kimi-k2.6", ingest: "kimi-k3.1-pro" });
+  assert.deepEqual({ ...MODEL_ROLES }, { assistant: "gemini-api", worker: "kimi-k3.1-pro", factory: "kimi-k3.1-pro", ingest: "kimi-k3.1-pro" });
 });
 
 test("an overridable role takes its environment override, else the MODEL_ROLES default", () => {
@@ -15,7 +15,7 @@ test("an overridable role takes its environment override, else the MODEL_ROLES d
 });
 
 test("the Assistant and worker ignore the compose-wide profile variables", () => {
-  const env = { HATCH_LLM_PROFILE: "kimi-k2.6", HATCH_FACTORY_LLM_PROFILE: "gemini-3.1-pro" };
+  const env = { HATCH_LLM_PROFILE: "kimi-k3.1-pro", HATCH_FACTORY_LLM_PROFILE: "gemini-3.1-pro" };
   assert.equal(modelRole("assistant", env), MODEL_ROLES.assistant);
   assert.equal(modelRole("worker", env), MODEL_ROLES.worker);
 });

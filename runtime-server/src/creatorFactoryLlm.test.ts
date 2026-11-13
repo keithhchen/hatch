@@ -76,7 +76,7 @@ function toolStreamResponse(
   });
 }
 
-test("Factory Evidence/Eval/Corpus prompt gateway uses dedicated Kimi K2.6 high-reasoning profile", async (t) => {
+test("Factory Evidence/Eval/Corpus prompt gateway uses dedicated Kimi K3.1 low-reasoning-effort profile", async (t) => {
   const previousKey = process.env.LLM_API_KEY;
   const previousBaseUrl = process.env.OPENAI_BASE_URL;
   const previousFetch = globalThis.fetch;
@@ -124,10 +124,10 @@ test("Factory Evidence/Eval/Corpus prompt gateway uses dedicated Kimi K2.6 high-
 
   const body = JSON.parse(String(request.init.body)) as Record<string, unknown>;
   assert.equal(body.model, FACTORY_LLM_MODEL);
-  assert.deepEqual(body.thinking, { type: "enabled" });
-  assert.equal("reasoning_effort" in body, false);
-  // Kimi K2.6 only accepts the provider-compatible automatic choice while
-  // thinking is enabled; the host submission FSM still requires a complete
+  assert.equal("thinking" in body, false);
+  assert.equal(body.reasoning_effort, "low");
+  // Kimi K3.1 only accepts the provider-compatible automatic choice while
+  // it reasons; the host submission FSM still requires a complete
   // tool batch and finalizer before accepting output.
   assert.equal(body.tool_choice, "auto");
   // Pi reserves the prompt/context tokens before sending the request, so the
@@ -157,11 +157,11 @@ test("Factory Evidence/Eval/Corpus prompt gateway uses dedicated Kimi K2.6 high-
   assert.equal(factoryModel.compat?.thinkingFormat, "deepseek");
   assert.deepEqual(PI_FACTORY_MODEL, { provider: "moonshot", model: FACTORY_LLM_MODEL });
 
-  assert.equal(KIMI_MODEL, "kimi-k2.6");
-  assert.equal(PROVIDER_KIMI_MODEL, "kimi-k2.6");
+  assert.equal(KIMI_MODEL, "kimi-k3.1-pro");
+  assert.equal(PROVIDER_KIMI_MODEL, "kimi-k3.1-pro");
   assert.equal(
     createKimiModel({ env: { OPENAI_BASE_URL: "https://api.moonshot.ai/v1" } }).id,
-    "kimi-k2.6"
+    "kimi-k3.1-pro"
   );
 });
 
@@ -208,7 +208,7 @@ test("Factory can use an explicitly selected DeepSeek profile without Kimi paylo
   assert.equal(deepseekModel.baseUrl, "https://api.deepseek.com");
 });
 
-test("Factory Kimi K2.6 rejects a length-truncated response even when it contains text", async () => {
+test("Factory Kimi K3.1 rejects a length-truncated response even when it contains text", async () => {
   const runner = createFactoryLlmPromptRunner({
     apiKey: "factory-k3-length-test-key",
     baseUrl: "https://api.moonshot.ai/v1",
@@ -226,7 +226,7 @@ test("Factory Kimi K2.6 rejects a length-truncated response even when it contain
   );
 });
 
-test("Factory Kimi K2.6 has a hard wall-clock deadline in addition to HTTP idle timeout", async () => {
+test("Factory Kimi K3.1 has a hard wall-clock deadline in addition to HTTP idle timeout", async () => {
   const controller = new AbortController();
   const telemetry: FactoryPromptFailureTelemetry[] = [];
   const runner = createFactoryLlmPromptRunner({
@@ -257,7 +257,7 @@ test("Factory Kimi K2.6 has a hard wall-clock deadline in addition to HTTP idle 
   assert.ok(FACTORY_LLM_WALL_CLOCK_TIMEOUT_MS > 0);
 });
 
-test("Factory Kimi K2.6 classifies quota exhaustion and never rethrows provider account JSON", async () => {
+test("Factory Kimi K3.1 classifies quota exhaustion and never rethrows provider account JSON", async () => {
   const organizationId = "org-fefa47391cab4497943886467d066f97";
   const keyId = "ak-fbauirzdz8n111dq1iu1";
   const telemetry: FactoryPromptFailureTelemetry[] = [];
@@ -296,7 +296,7 @@ test("Factory Kimi K2.6 classifies quota exhaustion and never rethrows provider 
   assert.equal(telemetry[0]!.code, "provider_quota");
 });
 
-test("Factory Kimi K2.6 sanitizes transient and configuration provider errors while preserving retry guidance", async () => {
+test("Factory Kimi K3.1 sanitizes transient and configuration provider errors while preserving retry guidance", async () => {
   const cases = [
     {
       status: 503,

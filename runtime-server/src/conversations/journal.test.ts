@@ -46,7 +46,7 @@ async function runtimeOn(log: EventLog) {
     agentFactory: factory => new Agent({ ...factory.agentOptions, initialState: { ...factory.initialState, model: createFactoryLlmModel({ env: factory.env }) }, streamFn: (_model, context) => {
       const call = context.messages.length;
       const tool = call % 4 === 1 ? "list" : undefined;
-      const message: AssistantMessage = { role: "assistant", api: "openai-completions", provider: "moonshotai-cn", model: "kimi-k2.6", timestamp: Date.now(),
+      const message: AssistantMessage = { role: "assistant", api: "openai-completions", provider: "moonshotai-cn", model: "kimi-k3.1-pro", timestamp: Date.now(),
         content: tool ? [{ type: "toolCall", id: `call-${call}`, name: tool, arguments: { directory: "input" } }] : [{ type: "text", text: `Reply ${call}` }],
         stopReason: tool ? "toolUse" : "stop", usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
       const stream = createAssistantMessageEventStream();

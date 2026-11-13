@@ -7,7 +7,7 @@ import type { ConversationMessage, OutboundMessage, RunStart } from "./protocol.
 import { renderSkillsSection } from "./skills.js";
 
 const chunk = (delta: Record<string, unknown>, finish: string | null = null) =>
-  `data: ${JSON.stringify({ id: "t", object: "chat.completion.chunk", created: 1, model: "kimi-k2.6", choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+  `data: ${JSON.stringify({ id: "t", object: "chat.completion.chunk", created: 1, model: "kimi-k3.1-pro", choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
 const sse = (body: BodyInit) => new Response(body, { headers: { "content-type": "text/event-stream" } });
 const whole = (delta: Record<string, unknown>, finish: string) => sse(`${chunk(delta, finish)}data: [DONE]\n\n`);
 
@@ -24,7 +24,7 @@ function stalling(written: string, init: RequestInit): Response {
 
 function environment(t: test.TestContext) {
   const saved = [process.env.HATCH_LLM_PROFILE, process.env.LLM_API_KEY];
-  process.env.HATCH_LLM_PROFILE = "kimi-k2.6-no-thinking";
+  process.env.HATCH_LLM_PROFILE = "kimi-k3.1-pro";
   process.env.LLM_API_KEY = "test-only";
   t.after(() => {
     for (const [name, value] of [["HATCH_LLM_PROFILE", saved[0]], ["LLM_API_KEY", saved[1]]] as const) {
@@ -124,7 +124,7 @@ test("A message that joins while a tool executes waits for the tool, then is rea
 
 test("A call cut while thinking ends its thinking block, so the next call may start block 0 again", async (t) => {
   environment(t);
-  process.env.HATCH_LLM_PROFILE = "kimi-k2.6";
+  process.env.HATCH_LLM_PROFILE = "kimi-k3.1-pro";
   const encoder = new TextEncoder();
   const bodies: string[] = [];
   let wake = (): void => undefined;

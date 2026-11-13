@@ -34,7 +34,7 @@ test("a failed Run tells its observers one upstream failure, keeps the messages 
   await failRun({
     run: first.run, conversation: { id } as never, signal: new AbortController().signal,
     state: { fail: async (failure: PublicFailure) => { failedWith = failure; await terminator.end(first.run.id, { status: "failed", failure }); } } as never
-  }, new UpstreamError("transient", "moonshot", undefined, "kimi-k2.6 stream timed out"));
+  }, new UpstreamError("transient", "moonshot", undefined, "kimi-k3.1-pro stream timed out"));
 
   const failure = (heard.find((event) => event.type === "turn.failed") as { error: PublicFailure }).error;
   assert.equal(failure.code, "upstream_error");

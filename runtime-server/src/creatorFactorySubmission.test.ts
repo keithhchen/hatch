@@ -28,7 +28,7 @@ function toolTurnWithFinish(calls: SubmittedToolCall[], finishReason: "tool_call
       id: `chatcmpl-${calls[0]?.id ?? "tools"}`,
       object: "chat.completion.chunk",
       created: 1,
-      model: "kimi-k2.6",
+      model: "kimi-k3.1-pro",
       choices: [{
         index: 0,
         delta: {
@@ -50,7 +50,7 @@ function toolTurnWithFinish(calls: SubmittedToolCall[], finishReason: "tool_call
       id: `chatcmpl-${calls[0]?.id ?? "tools"}`,
       object: "chat.completion.chunk",
       created: 1,
-      model: "kimi-k2.6",
+      model: "kimi-k3.1-pro",
       choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
       usage: { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 }
     }
@@ -63,14 +63,14 @@ function textTurn(text = "done", finishReason: "stop" | "length" = "stop"): Resp
       id: "chatcmpl-text",
       object: "chat.completion.chunk",
       created: 1,
-      model: "kimi-k2.6",
+      model: "kimi-k3.1-pro",
       choices: [{ index: 0, delta: { role: "assistant", content: text }, finish_reason: null }]
     },
     {
       id: "chatcmpl-text",
       object: "chat.completion.chunk",
       created: 1,
-      model: "kimi-k2.6",
+      model: "kimi-k3.1-pro",
       choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
       usage: { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 }
     }

@@ -54,7 +54,7 @@ const gemini = new GeminiModelAdapter({ apiKey: process.env.GEMINI_API_KEY! });
 const deepseek = new DeepSeekModelAdapter({ apiKey: process.env.DEEPSEEK_API_KEY! });
 ```
 
-Kimi defaults to `kimi-k2.6` and the China endpoint; `region: "global"` selects Moonshot's global endpoint. Gemini defaults to `gemini-3.8-flash`; DeepSeek defaults to `deepseek-v4-flash`. Each adapter accepts an explicit model ID and common stream settings. API keys are passed by the consuming application's secret/configuration layer.
+Kimi defaults to `kimi-k3` and the China endpoint; `region: "global"` selects Moonshot's global endpoint. Gemini defaults to `gemini-3.8-flash`; DeepSeek defaults to `deepseek-v4-flash`. Each adapter accepts an explicit model ID and common stream settings. API keys are passed by the consuming application's secret/configuration layer.
 
 ## Persistence adapters
 

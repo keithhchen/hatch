@@ -20,7 +20,7 @@ class Phase {
 const requestsOn = (socket) => socket.frames.filter((f) => f.type === "tool_call.request");
 
 class ToolSurfaceKv extends Scenario {
-  constructor() { super({ id: 9, title: "Tool surface and KV: stable tools and system prompt, reminder never persisted, unsupported local tool runs 0 times, Kimi cache hit rate", stackOptions: { llmProfile: "kimi-k2.6-no-thinking", ...records.stackOptions(), registryEnv: { HATCH_FACTORY_LLM_PROFILE: "kimi-k2.6" } } }); }
+  constructor() { super({ id: 9, title: "Tool surface and KV: stable tools and system prompt, reminder never persisted, unsupported local tool runs 0 times, Kimi cache hit rate", stackOptions: { llmProfile: "kimi-k3.1-pro", ...records.stackOptions(), registryEnv: { HATCH_FACTORY_LLM_PROFILE: "kimi-k3.1-pro" } } }); }
 
   async run(stack, rec) {
     if (!process.env.LLM_API_KEY) rec.block("LLM_API_KEY (Kimi) is not set: the Kimi cache and the Kimi tool surface cannot be measured");
