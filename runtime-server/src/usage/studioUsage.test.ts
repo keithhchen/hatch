@@ -16,7 +16,9 @@ import { MemoryIngestJobs } from "../ingest/jobs.js";
 import { UnavailableEngine } from "../ingest/engines.js";
 import { IngestService } from "../ingest/service.js";
 import { InMemoryUsageLedger } from "./memoryUsage.js";
-import { usageSink, type UsageEvent } from "./usage.js";
+import { scopeOfConversation } from "../assistant/chat.js";
+import { bindContext, runInContext } from "../observability/context.js";
+import { attributeByScope, usageSink, type UsageEvent } from "./usage.js";
 import { USAGE_CAP_EXCEEDED, UsageCap } from "./usageCap.js";
 
 const CREATOR = "11111111-1111-4111-8111-111111111111";
@@ -119,6 +121,14 @@ test("a Factory run queued by an API key is Studio API usage under that key; one
   const byRun = (runId: string) => ledger.events.find(event => event.runId === runId)!;
   assert.deepEqual({ surface: byRun("by-key").surface, apiKeyId: byRun("by-key").apiKeyId }, { surface: "studio_api", apiKeyId: "key-1" });
   assert.deepEqual({ surface: byRun("by-session").surface, apiKeyId: byRun("by-session").apiKeyId }, { surface: "studio_web", apiKeyId: undefined });
+});
+
+test("an Assistant Run bound by a request from an API key is Studio API usage under that key; otherwise Studio web", () => {
+  const owner = { ownerAccountId: "acct" };
+  const viaKey = runInContext({ request_id: "req" }, () => { bindContext({ api_key_id: "key-1" }); return attributeByScope(scopeOfConversation(owner), { id: "run-1" }); });
+  assert.deepEqual({ surface: viaKey.surface, apiKeyId: viaKey.apiKeyId, accountId: viaKey.accountId }, { surface: "studio_api", apiKeyId: "key-1", accountId: "acct" });
+  const viaSession = runInContext({ request_id: "req" }, () => attributeByScope(scopeOfConversation(owner), { id: "run-2" }));
+  assert.deepEqual({ surface: viaSession.surface, apiKeyId: viaSession.apiKeyId }, { surface: "studio_web", apiKeyId: undefined });
 });
 
 test("an ingest job is not started once the Expert has spent the month", async () => {
