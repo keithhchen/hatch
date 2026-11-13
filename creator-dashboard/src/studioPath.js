@@ -8,12 +8,13 @@ export const STUDIO_PATH = Object.freeze([
   { id: "ship", title: "stepShip", body: "stepShipBody", key: null, items: [] }
 ]);
 
-/** Deep Research, Case Builder, Evaluator and Content Creation: always open, never part of the path's progress. */
-export const ADVANCED_STEP = Object.freeze({
-  id: "advanced", title: "stepAdvanced", items: [["sources", "research"], ["evaluate", "case-generation"], ["evaluate", "evaluator"], ["create", "content-creation"]]
-});
+/** Rail rows outside the numbered path: no state, no progress. Deep Research is not listed: the Assistant runs it in the background. */
+export const CONTENT_STEP = Object.freeze({ id: "content", title: "stepContent", items: [["create", "content-creation"]] });
+export const CASES_STEP = Object.freeze({ id: "cases", title: "stepCases", items: [["evaluate", "case-generation"]] });
+export const EVALUATOR_STEP = Object.freeze({ id: "evaluator", title: "stepEvaluator", items: [["evaluate", "evaluator"]] });
+/** Under the Advanced disclosure, in order. */
+export const ADVANCED_STEPS = Object.freeze([CASES_STEP, EVALUATOR_STEP]);
 
-/** Shown after Publish, outside the numbered path: it has no state and no progress. */
 export const INSPIRATION_STEP = Object.freeze({ id: "inspiration", title: "stepInspiration", items: [["inspire", "inspiration"]] });
 
 export function isProductLive(product) {
@@ -46,7 +47,9 @@ export function studioNextStep(states) {
 
 export function studioStepForRoute(section, page) {
   if (page === "inspiration") return INSPIRATION_STEP.id;
-  if (ADVANCED_STEP.items.some(([, role]) => role === page)) return "advanced";
+  if (page === "content-creation") return CONTENT_STEP.id;
+  if (page === "case-generation") return CASES_STEP.id;
+  if (page === "evaluator") return EVALUATOR_STEP.id;
   if (section === "sources") return page === "voice" ? "ask" : "upload";
   if (section === "build") return "build";
   return null;

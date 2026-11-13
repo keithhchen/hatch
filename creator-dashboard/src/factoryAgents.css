@@ -20,11 +20,12 @@
 .factory-app { display: grid; grid-template-columns: max-content minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 10px 20px; }
 .factory-rail { grid-column: 1; grid-row: 1 / span 2; min-width: 0; }
 .factory-rail { display: flex; flex-direction: column; gap: 14px; }
-.factory-advanced { display: flex; width: 100%; justify-content: center; height: 44px; align-items: center; white-space: nowrap; padding: 0 14px; border: 1px solid var(--web-rule); border-radius: 999px; background: none; color: var(--web-muted); font-family: inherit; font-size: 14px; font-weight: 650; cursor: pointer; transition: background 160ms ease, box-shadow 160ms ease, color 160ms ease; }
-.factory-advanced:hover { background: color-mix(in srgb, var(--web-card) 80%, transparent); color: var(--web-ink); }
-.factory-advanced.is-current { border-color: var(--web-rule); background: var(--web-card); color: var(--web-ink); box-shadow: none; }
 .factory-stepper { display: flex; flex-direction: column; gap: 0; margin: 0; padding: 0; list-style: none; }
 .factory-stepper li { display: flex; flex-direction: column; }
+.factory-stepper__sub button { padding-left: 28px; }
+.factory-stepper li:nth-child(n+6)::before { display: none; }
+.factory-stepper__caret { border-color: transparent !important; background: none !important; }
+.factory-stepper__caret svg { width: 16px; height: 16px; }
 .factory-stepper li + li::before { width: 2px; height: 14px; margin-left: 18px; border-radius: 2px; background: var(--web-rule); content: ""; }
 .factory-stepper button { display: flex; width: 100%; min-height: 52px; align-items: center; gap: 10px; padding: 6px 10px; border: 1px solid transparent; border-radius: 14px; background: none; color: var(--web-body); font-size: 14px; font-weight: 650; text-align: left; cursor: pointer; transition: background 160ms ease, box-shadow 160ms ease, color 160ms ease; }
 .factory-stepper button:hover { background: color-mix(in srgb, var(--web-card) 80%, transparent); color: var(--web-ink); }
@@ -75,9 +76,6 @@
 .factory-step { display: flex; min-height: 0; flex-direction: column; overflow: auto; padding: 0; }
 .factory-app--workbench .factory-step { overflow: hidden; }
 .factory-step > * { width: 100%; }
-.factory-tasks { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
-.factory-tasks button { display: inline-flex; min-height: 38px; align-items: center; gap: 8px; padding: 0 16px; border: 1px solid var(--web-rule); border-radius: 999px; background: transparent; color: var(--web-body); font-size: 14px; font-weight: 600; cursor: pointer; }
-.factory-tasks button.is-active { border-color: var(--web-ink); background: var(--web-ink); color: var(--web-paper); }
 .factory-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--web-rule); }
 .factory-dot.is-complete, .factory-dot.is-update_available { background: var(--web-pass); }
 .factory-dot.is-running { background: var(--web-yolk); animation: factory-pulse 1.6s ease-in-out infinite; }
@@ -221,7 +219,6 @@
 @media (max-width: 1180px) {
   .factory-app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); align-content: start; gap: 14px 8px; }
   .factory-rail { grid-column: 1; grid-row: 1; }
-  .factory-advanced { width: auto; flex: none; }
   .factory-rail { flex-direction: row; flex-wrap: wrap; align-items: center; align-content: flex-start; align-self: start; gap: 8px; }
   .factory-stepper { min-width: 0; flex: 1 1 100%; overflow-x: auto; scrollbar-width: none; }
   .factory-stepper::-webkit-scrollbar { display: none; }
@@ -240,9 +237,9 @@
   .factory-app--workbench .factory-step { overflow: visible; }
   .factory-stepper { flex-wrap: wrap; overflow: visible; gap: 2px; }
   .factory-stepper .factory-stepper__aside::before { display: none; }
+  .factory-stepper__sub button { padding-left: 4px; }
   .factory-stepper li + li::before { width: 6px; margin-right: 2px; }
   .factory-stepper button { padding: 0 8px 0 4px; gap: 6px; font-size: 13px; }
-  .factory-advanced { height: 36px; font-size: 13px; }
   .factory-workspace { grid-template-columns: 1fr; }
   .factory-chat-panel { height: max(460px, calc(100dvh - 200px)); }
   .factory-inspector { height: auto; }
