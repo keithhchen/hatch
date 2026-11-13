@@ -1,0 +1,28 @@
+<!doctype html>
+<!--
+  REFERENCE PAGE. The server injects Hatch's base CSS before this page, so this is only an HTML
+  backbone: no <style> unless the page truly needs something the base classes do not cover.
+  The published page must be ONE self-contained html file: inline app.js into the <script> at the bottom
+  (replace the src), no external requests. Only change the title and the data at the top of app.js.
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>审阅页</title>
+</head>
+<body>
+<aside class="sidebar" id="side"><nav id="toc" aria-label="目录"></nav></aside>
+<div class="workspace"><main id="main"></main></div>
+<div class="actions">
+  <div class="error" id="error" role="alert" hidden></div>
+  <div class="buttons" id="btns">
+    <button class="save" id="save" type="button"></button>
+    <button class="submit" id="submit" type="button">提交</button>
+  </div>
+  <div class="done" id="done" hidden>已提交</div>
+</div>
+<!-- Inline the contents of app.js here when publishing. -->
+<script src="app.js"></script>
+</body>
+</html>
