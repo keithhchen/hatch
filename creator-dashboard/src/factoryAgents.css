@@ -220,8 +220,8 @@
   .factory-app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; gap: 14px 8px; }
   .factory-rail { grid-column: 1; grid-row: 1; }
   .factory-advanced { width: auto; flex: none; }
-  .factory-rail { flex-direction: row; align-items: center; gap: 8px; }
-  .factory-stepper { min-width: 0; flex: 1 1 auto; overflow-x: auto; scrollbar-width: none; }
+  .factory-rail { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .factory-stepper { min-width: 0; flex: 1 1 100%; overflow-x: auto; scrollbar-width: none; }
   .factory-stepper::-webkit-scrollbar { display: none; }
   .factory-stepper { flex-direction: row; gap: 6px; }
   .factory-stepper li { flex-direction: row; align-items: center; }
@@ -236,7 +236,10 @@
 @media (max-width: 900px) {
   .factory-app, .factory-step, .factory-overview { height: auto; overflow: visible; }
   .factory-app--workbench .factory-step { overflow: visible; }
-  .factory-stepper { overflow-x: auto; scrollbar-width: none; }
+  .factory-stepper { overflow-x: auto; scrollbar-width: none; gap: 2px; }
+  .factory-stepper li + li::before { width: 6px; margin-right: 2px; }
+  .factory-stepper button { padding: 0 8px 0 4px; gap: 6px; font-size: 13px; }
+  .factory-advanced { height: 36px; font-size: 13px; }
   .factory-workspace { grid-template-columns: 1fr; }
   .factory-chat-panel { height: max(460px, calc(100dvh - 200px)); }
   .factory-inspector { height: auto; }
