@@ -4,16 +4,18 @@ export function subscribeFactoryEvents({ url, onMessage, onOpen, onError }) {
   let disposed = false;
   let stream;
   let retry;
+  let attempt = 0;
   const connect = () => {
     if (disposed) return;
     stream = new EventSource(url);
     stream.onmessage = onMessage;
-    stream.onopen = onOpen;
+    stream.onopen = () => { attempt = 0; onOpen?.(); };
     stream.onerror = () => {
       stream.onmessage = stream.onopen = stream.onerror = null;
       stream.close();
       onError?.();
-      if (!disposed) retry = setTimeout(connect, 2000);
+      // Silent retries, without end: 2 s, doubling to 30 s.
+      if (!disposed) retry = setTimeout(connect, Math.min(30_000, 2000 * 2 ** attempt++));
     };
   };
   connect();

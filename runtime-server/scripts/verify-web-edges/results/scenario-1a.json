@@ -1,44 +1,44 @@
 {
   "id": "1a",
   "title": "Reload the page mid-reply",
-  "durationMs": 39952,
+  "durationMs": 39996,
   "notes": [],
   "findings": [],
   "evidence": {
     "ui:tab": [
       "user: Write a 200 word story about a lighthouse keeper. Plain prose only: no",
-      "assistant: The Atlantic wind rattled the iron casing of the lantern room, but Tho"
+      "assistant: The salt had long since settled into Arthur’s skin, white and stiff ag"
     ],
     "server": [
       "user: Write a 200 word story about a lighthouse keeper. Plain prose only: no",
-      "assistant: The Atlantic wind rattled the iron casing of the lantern room, but Tho"
+      "assistant: The salt had long since settled into Arthur’s skin, white and stiff ag"
     ],
     "alerts": [],
     "frames": [
       {
         "client": "tab",
         "frames": [
-          "1214 1open ws.open",
-          "1218 1-> client.hello",
-          "1238 1<- session.ready",
-          "1344 1-> client.message f57232",
-          "1365 1<- message.accepted f57232",
-          "1366 1<- turn.state queued f57232",
-          "1392 1<- turn.state running f57232",
-          "6451 1<- assistant.delta f57232",
-          "6457 1<- assistant.delta f57232",
-          "6820 2open ws.open",
-          "6831 2-> client.hello",
-          "6839 2<- session.ready",
-          "6944 2<- assistant.delta f57232",
-          "7665 2<- assistant.delta f57232",
-          "7673 2<- assistant.delta f57232",
-          "7998 2<- assistant.delta f57232",
-          "8219 2<- assistant.delta f57232",
-          "8527 2<- assistant.delta f57232",
-          "8549 2<- turn.completed f57232",
-          "8551 2<- assistant.message f57232",
-          "8553 2<- turn.state completed f57232"
+          "1721 1open ws.open",
+          "1729 1-> client.hello",
+          "1786 1<- session.ready",
+          "1860 1-> client.message a9e5a6",
+          "1966 1<- message.accepted a9e5a6",
+          "1967 1<- turn.state queued a9e5a6",
+          "2021 1<- turn.state running a9e5a6",
+          "6197 1<- assistant.delta a9e5a6",
+          "6800 2open ws.open",
+          "6852 2-> client.hello",
+          "6961 2<- session.ready",
+          "7085 2<- assistant.delta a9e5a6",
+          "7351 2<- assistant.delta a9e5a6",
+          "7558 2<- assistant.delta a9e5a6",
+          "7899 2<- assistant.delta a9e5a6",
+          "8264 2<- assistant.delta a9e5a6",
+          "8493 2<- assistant.delta a9e5a6",
+          "8699 2<- assistant.delta a9e5a6",
+          "8741 2<- turn.completed a9e5a6",
+          "8753 2<- assistant.message a9e5a6",
+          "8753 2<- turn.state completed a9e5a6"
         ]
       }
     ],
@@ -47,18 +47,18 @@
       {
         "client": "tab",
         "requests": [
-          "240 POST 200 /v1/auth/sign-in",
-          "267 GET 200 /v1/auth/me",
-          "581 GET 200 /v1/user/product-access",
-          "624 GET 200 /v1/web-chat/conversations",
-          "1160 POST 201 /v1/web-chat/conversations",
-          "1208 GET 200 /v1/web-chat/conversations/conv_d2e67119b3ae42d1bfb393daa28c20c5/snapshot",
-          "6489 GET 200 /v1/auth/me",
-          "6796 GET 200 /v1/user/product-access",
-          "6818 GET 200 /v1/web-chat/conversations/conv_d2e67119b3ae42d1bfb393daa28c20c5/snapshot",
-          "6822 GET 200 /v1/web-chat/conversations",
-          "8562 GET 200 /v1/web-chat/conversations/conv_d2e67119b3ae42d1bfb393daa28c20c5/events",
-          "8575 GET 200 /v1/web-chat/conversations/conv_d2e67119b3ae42d1bfb393daa28c20c5/snapshot"
+          "392 POST 200 /v1/auth/sign-in",
+          "427 GET 200 /v1/auth/me",
+          "747 GET 200 /v1/user/product-access",
+          "868 GET 200 /v1/web-chat/conversations",
+          "1424 POST 201 /v1/web-chat/conversations",
+          "1716 GET 200 /v1/web-chat/conversations/conv_9a77dfefab774aac9234df5bbde640e5/snapshot",
+          "6267 GET 200 /v1/auth/me",
+          "6659 GET 200 /v1/user/product-access",
+          "6748 GET 200 /v1/web-chat/conversations",
+          "6770 GET 200 /v1/web-chat/conversations/conv_9a77dfefab774aac9234df5bbde640e5/snapshot",
+          "8782 GET 200 /v1/web-chat/conversations/conv_9a77dfefab774aac9234df5bbde640e5/events",
+          "8803 GET 200 /v1/web-chat/conversations/conv_9a77dfefab774aac9234df5bbde640e5/snapshot"
         ]
       }
     ],

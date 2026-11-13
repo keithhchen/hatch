@@ -37,12 +37,39 @@ export class ChatTimeline {
     this.entries = [];
     this.sequence = 0;
     this.activeThinking = new Map();
+    /** Entries below `sealed` belong to a message the Run has ended: later words start an entry of their own. */
+    this.sealed = 0;
+    /** How many leading entries were handed over to saved messages. */
+    this.dropped = 0;
   }
 
   reset() {
     this.entries = [];
     this.sequence = 0;
+    this.sealed = 0;
+    this.dropped = 0;
     this.activeThinking.clear();
+    return this.entries;
+  }
+
+  /** Entries ever held, counting those already handed over to saved messages. */
+  get length() { return this.dropped + this.entries.length; }
+
+  /** What is shown so far is one message; the next words are another. Returns the position to hand over to the saved message. */
+  seal() {
+    this.sealed = this.entries.length;
+    return this.length;
+  }
+
+  /** The saved message holds everything up to `position` (as `seal` returned it): those entries leave the live row, the rest stay. */
+  discardThrough(position) {
+    const count = Math.min(this.entries.length, Math.max(0, position - this.dropped));
+    if (!count) return this.entries;
+    const gone = new Set(this.entries.slice(0, count).map(entry => entry.id));
+    for (const [index, id] of this.activeThinking) if (gone.has(id)) this.activeThinking.delete(index);
+    this.entries = this.entries.slice(count);
+    this.dropped += count;
+    this.sealed = Math.max(0, this.sealed - count);
     return this.entries;
   }
 
@@ -52,7 +79,7 @@ export class ChatTimeline {
 
   appendText(content) {
     if (!content) return this.entries;
-    const current = this.entries.at(-1);
+    const current = this.entries.length > this.sealed ? this.entries.at(-1) : undefined;
     if (current?.kind === "text") {
       this.entries = [...this.entries.slice(0, -1), { ...current, content: current.content + content }];
     } else {

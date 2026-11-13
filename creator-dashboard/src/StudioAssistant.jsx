@@ -16,7 +16,6 @@ const CHANNEL_NAMES = { telegram: "Telegram", line: "LINE", lark: "Lark", feishu
 // Thinking and tool steps, as Product web chat shows them.
 const STEP_KINDS = ["thinking", "tool"];
 const REVIEW_ACTIONS = { content: ["sxaContentYes", "sxaContentNo"], change: ["sxaChangeYes", "sxaChangeNo"] };
-const ATTACHABLE = "image/*,.txt,.md,.docx,.pptx,.xlsx,.pdf";
 
 /** The Assistant's conversation on the shared chat: what the Expert sends goes out through the transport, the replies come back through it. */
 function openAssistant(request, describeError) {
@@ -78,7 +77,7 @@ function Assistant({ transport, controller, dictate, request, t, chatT, errorTex
     <section className="sxa-chat web-chat web-chat--embedded" aria-label={t("sxNavAssistant")} ref={chatRef}>
       <h1 className="sxa-title">{t("sxNavAssistant")}</h1>
       <ChatView controller={controller} identity={identity} agentName={t("sxNavAssistant")} t={chatT} errorText={errorText}
-        attachments={controller.attachments} activityKinds={STEP_KINDS} dictate={dictate} accept={ATTACHABLE} onNewConversation={() => undefined}
+        attachments={controller.attachments} activityKinds={STEP_KINDS} dictate={dictate} attachControl={false} onNewConversation={() => undefined}
         empty={<p className="sxa-empty">{t("sxaEmpty")}</p>}
         dockAccessory={error ? <InlineAlert tone="error">{error}</InlineAlert> : null} />
     </section>

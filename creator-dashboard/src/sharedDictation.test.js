@@ -9,12 +9,12 @@ test("every composer renders the one shared speech-to-text button", async () => 
   const factory = await read("./FactoryAgents.jsx");
   const shared = await read("../../packages/chat/src/presentation/VoiceInput.jsx");
   // Studio Assistant and web chat both render ChatView's Composer; the Factory/Studio workers render the same parts.
-  for (const source of [chat, factory]) {
-    assert.match(source, /<MicButton voice=\{voice\}/);
-    assert.match(source, /<RecordingWave voice=\{voice\} \/>/);
-    assert.match(source, /<RecordingActions voice=\{voice\} t=\{t\} \/>/);
-    assert.match(source, /useVoiceInput\(/);
-  }
+  assert.match(chat, /<MicButton voice=\{voice\}/);
+  assert.match(chat, /<RecordingWave voice=\{voice\} \/>/);
+  assert.match(chat, /<RecordingActions voice=\{voice\} t=\{t\} \/>/);
+  assert.match(chat, /useVoiceInput\(/);
+  // The workbench chat is that same ChatView, handed the dictation.
+  assert.match(factory, /<ChatView [^>]*dictate=\{dictation\}/s);
   // Nothing re-implements the microphone.
   for (const source of [chat, factory]) assert.doesNotMatch(source, /getUserMedia|MediaRecorder|<Mic\b/);
   assert.equal(shared.match(/<Mic aria-hidden/g)?.length, 1);

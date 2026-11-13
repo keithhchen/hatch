@@ -32,7 +32,9 @@ export const INITIAL_CHAT_STATE = Object.freeze({
   session: null,
   connection: "idle",
   approvals: Object.freeze({}),
-  compactions: Object.freeze([])
+  compactions: Object.freeze([]),
+  /** The history is being summarized (in a Run or after a reply): the composer waits. */
+  compacting: false
 });
 
 /**
@@ -41,6 +43,9 @@ export const INITIAL_CHAT_STATE = Object.freeze({
  * session — no Conversation, or the automatic retries ran out. Idle is not an
  * error: the next send reconnects.
  */
+/** How long a lost session is retried without saying so. */
+export const QUIET_OUTAGE_MS = 8000;
+
 export const CONNECTION_STATES = Object.freeze(["idle", "connecting", "open"]);
 export const APPROVAL_DECISIONS = Object.freeze(["pending", "allowed", "denied"]);
 
@@ -78,7 +83,8 @@ export class ConversationController {
     this.pendings = new Map();
     this.runText = new RunText();
     this.hasBeenReady = false;
-    this.settleNext = false;
+    /** Messages the Run has ended whose saved copy the page has not read yet: `{ runId, entries, saved }`. */
+    this.settleMarks = [];
     this.taskStart = null;
     this.terminalRun = null;
     /** Runs whose end the stream told: a snapshot read before that cannot bring them back. */
@@ -87,6 +93,11 @@ export class ConversationController {
     this.toolRuns = new Map();
     this.connection = null;
     this.link = null;
+    /** When the live session was lost and has not come back; a status shows only once a send meets a session down this long. */
+    this.downSince = null;
+    this.compactionEpoch = 0;
+    this.refreshing = null;
+    this.refreshAgain = false;
     this.reconnectTimer = null;
     this.pollTimer = null;
     this.pollKey = null;
@@ -141,6 +152,7 @@ export class ConversationController {
   }
 
   resetTimeline() {
+    this.settleMarks = [];
     this.timeline.reset();
   }
 
@@ -194,9 +206,12 @@ export class ConversationController {
     this.endedRuns.clear();
     this.toolRuns.clear();
     this.sync.reset();
+    this.downSince = null;
+    this.refreshing = null;
+    this.refreshAgain = false;
     this.reveal.discard();
     this.resetTimeline();
-    this.setState({ conversationId: id, historyCursor: null, snapshotConversationId: null, messages: [], activeRun: null, failedRun: null, runState: null, session: null, connection: "idle", error: null, ...(id ? { status: { key: "loadingConversation" } } : {}) });
+    this.setState({ conversationId: id, historyCursor: null, snapshotConversationId: null, messages: [], activeRun: null, failedRun: null, runState: null, session: null, connection: "idle", error: null, compacting: false, ...(id ? { status: { key: "loadingConversation" } } : {}) });
     if (!id) return;
     void this.refresh(id).catch(cause => {
       if (generation === this.generation) this.fail(cause);
@@ -205,6 +220,7 @@ export class ConversationController {
 
   async refresh(id) {
     const generation = this.generation;
+    const epoch = this.compactionEpoch;
     const result = await this.sync.refresh(id, {
       current: () => this.state.messages,
       // A Run id the page minted for a message the server has not acknowledged is not the server's to know yet.
@@ -214,6 +230,8 @@ export class ConversationController {
     if (!result) return { stale: true };
     const { snapshot } = result;
     const firstSnapshot = this.state.snapshotConversationId !== id;
+    // What the read says of a compaction holds unless the stream said otherwise while it was in flight.
+    if (typeof snapshot.compacting === "boolean" && epoch === this.compactionEpoch && snapshot.compacting !== this.state.compacting) this.setState({ compacting: snapshot.compacting });
     const conversation = snapshot.conversation;
     this.setState(state => ({
       snapshotConversationId: id,
@@ -229,11 +247,8 @@ export class ConversationController {
     if (running && held !== running.id) this.adoptRun(running.id);
     // The page's rows were read before the adoption: they are keyed by the Run it held, and move with it.
     let projected = running && held && held !== running.id ? rekeyRun(result.messages, held, running.id) : result.messages;
-    if (this.settleNext) {
-      // The reply the live row was showing is now a saved message: the live row starts again from the next words.
-      this.settleNext = false;
-      this.resetTimeline();
-    }
+    // A message the live row showed is handed over only once the page holds its saved copy: a read that started before it was saved leaves the words where they are.
+    const handedOver = this.settleSaved(projected, Boolean(running));
     if (running) {
       const tail = typeof running.partial_output === "string" ? this.runText.tail(running.id, running.partial_output, this.savedText(projected, running.id)) : "";
       if (tail) this.timeline.appendText(tail);
@@ -243,6 +258,7 @@ export class ConversationController {
         projected = projected.map(message => message.transient && message.run_id === running.id ? { ...message, timeline: this.timeline.snapshot() } : message);
       }
     }
+    if (handedOver && running) projected = projected.map(message => message.transient && message.run_id === running.id ? { ...message, timeline: this.timeline.snapshot() } : message);
     this.updateMessages(projected);
     const awaited = this.awaitedRunId();
     const terminal = this.terminalRun;
@@ -260,6 +276,39 @@ export class ConversationController {
     if (firstSnapshot) { this.offerAnswerAgain(snapshot, running); this.resumePending(id, projected); this.connect(); }
     this.reconcilePending(projected);
     return { stale: false };
+  }
+
+  /** A refresh the stream asked for: one read at a time, and one more after it when something changed meanwhile. */
+  requestRefresh(conversationId) {
+    if (this.refreshing) { this.refreshAgain = true; return; }
+    const done = () => {
+      this.refreshing = null;
+      if (this.refreshAgain && this.state.conversationId === conversationId) { this.refreshAgain = false; this.requestRefresh(conversationId); }
+    };
+    this.refreshing = this.refresh(conversationId).catch(cause => { if (this.state.conversationId === conversationId) this.fail(cause); }).finally(done);
+  }
+
+  /** How many replies of this Run the messages hold as saved. */
+  savedReplies(messages, runId) {
+    return messages.filter(message => message.run_id === runId && message.role === "assistant" && !message.transient).length;
+  }
+
+  /** The Run ended a message: its entries leave the live row when the saved message shows them. */
+  markSettled() {
+    const runId = this.run?.id ?? null;
+    const pending = this.settleMarks.filter(mark => mark.runId === runId).length;
+    this.settleMarks.push({ runId, entries: this.timeline.seal(), saved: runId ? this.savedReplies(this.state.messages, runId) + pending + 1 : 0 });
+  }
+
+  /** Hands the live row's entries over to the saved messages the page now holds. Returns whether it did. */
+  settleSaved(messages, running) {
+    if (!this.settleMarks.length) return false;
+    if (!running) { this.resetTimeline(); return true; }
+    let last = null;
+    while (this.settleMarks.length && (!this.settleMarks[0].runId || this.savedReplies(messages, this.settleMarks[0].runId) >= this.settleMarks[0].saved)) last = this.settleMarks.shift();
+    if (!last) return false;
+    this.timeline.discardThrough(last.entries);
+    return true;
   }
 
   /** The text of this Run already in saved messages. */
@@ -313,7 +362,7 @@ export class ConversationController {
   /** After a reload: what the server did not acknowledge is sent again, under the same key. */
   resumePending(conversationId, messages) {
     for (const record of this.pendingStore.load(conversationId)) {
-      if (record.kind === "retry") continue;
+      if (record.kind === "retry" || this.pendings.has(record.clientMessageId)) continue;
       if (messages.some(message => message.id === record.clientMessageId)) { this.pendingStore.settle(record.clientMessageId); continue; }
       const submission = PendingSubmission.fromRecord(record, { runId: this.run?.id ?? newId("run"), stableId: this.transport.steerable });
       submission.leadsRun = !this.run;
@@ -429,6 +478,7 @@ export class ConversationController {
     // A socket that dies takes an unacknowledged message with it; a request that outlives its stream does not.
     if (!this.transport.steerable) for (const submission of [...this.pendings.values()]) if (submission.conversationId === conversationId) this.restoreSubmission(submission, true);
     if (this.connection === connection) this.connection = null;
+    this.downSince ??= Date.now();
     if (this.attempts >= this.reconnectAttempts) {
       this.setState({ connection: "idle" });
       return;
@@ -511,8 +561,10 @@ export class ConversationController {
       this.setState({ status: outcome.status });
     },
     changed(outcome, { conversationId }) {
-      if (outcome.committed === "assistant") this.settleNext = true;
-      void this.refresh(conversationId).catch(cause => { if (this.state.conversationId === conversationId) this.fail(cause); });
+      // The message this page sent is on the page already; only one it did not send (another tab, a channel) needs a read.
+      if (outcome.committed === "user" && outcome.messageId && this.state.messages.some(message => message.id === outcome.messageId)) return;
+      if (outcome.committed === "assistant") this.markSettled();
+      this.requestRefresh(conversationId);
     },
     timeline(outcome) {
       this.publishTimeline(timeline => timeline.snapshot());
@@ -534,6 +586,10 @@ export class ConversationController {
     turn_state(outcome) {
       this.setState({ runState: outcome.state });
     },
+    compaction(outcome) {
+      this.compactionEpoch += 1;
+      this.setState({ compacting: outcome.active });
+    },
     compacted(outcome, { conversationId }) {
       const { run_id: runId, window_id: windowId } = outcome.compaction;
       const id = `compaction-${runId}-${windowId}`;
@@ -548,7 +604,8 @@ export class ConversationController {
         return;
       }
       this.attempts = 0;
-      this.setState({ session, connection: "open" });
+      this.downSince = null;
+      this.setState(state => ({ session, connection: "open", ...(state.status.key === "reconnecting" ? { status: { key: "connected" } } : {}) }));
       this.dispatchPending(connection, conversationId);
       // Whatever happened while the session was down was not heard: read it.
       if (this.hasBeenReady) void this.refresh(conversationId).catch(cause => { if (this.state.conversationId === conversationId) this.fail(cause); });
@@ -681,8 +738,11 @@ export class ConversationController {
     const { conversationId, activeRun, draft, images } = this.state;
     if (conversationId && (draft.trim() || images.length)) this.setState({ failedRun: null });
     const steering = this.transport.steerable && Boolean(this.run);
-    if (!conversationId || this.snapshotPending || (activeRun && !this.transport.steerable) || (!draft.trim() && images.length === 0)) return;
+    // A page still reading its first snapshot takes the message too: it shows at once and is sent when the session is up.
+    if (!conversationId || (activeRun && !this.transport.steerable) || (!draft.trim() && images.length === 0)) return;
     const connection = this.connection;
+    // Only a send that meets a session down for a while says so; until then the retries are silent.
+    if (this.downSince && Date.now() - this.downSince > QUIET_OUTAGE_MS && this.state.connection !== "open") this.setState({ status: { key: "reconnecting" } });
     this.setState({ error: null });
     let submission = null;
     try {
@@ -729,8 +789,8 @@ export class ConversationController {
   syncPolling() {
     const { activeRun, conversationId } = this.state;
     // Polling is for a Run the page has no stream for: one it is not holding, or one whose session is gone and out of retries (an outage that outlasted them). The key follows that, so polling starts the moment either becomes true.
-    const streamless = this.run?.id !== activeRun || this.state.connection === "idle";
-    const key = activeRun && conversationId && streamless ? `${conversationId}:${activeRun}` : null;
+    const streamless = this.run?.id !== activeRun || this.state.connection !== "open";
+    const key = conversationId && this.state.snapshotConversationId === conversationId && ((activeRun && streamless) || this.state.compacting) ? `${conversationId}:${activeRun ?? ""}:${this.state.compacting}` : null;
     if (key === this.pollKey) return;
     this.pollKey = key;
     clearInterval(this.pollTimer);
