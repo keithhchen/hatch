@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { NODE_EXPLAINERS, explainerFor, explainerNodeForRole } from "./nodeExplainers.js";
+import { explainerFor, explainerNodeForRole } from "./nodeExplainers.js";
+import { HELP_ITEMS, helpItemForNode, localizeHelpItem } from "../helpCatalog.mjs";
 
 test("explainer is picked by UI locale and falls back to the no-subtitle version", () => {
   assert.equal(explainerFor("interview", "zh").src, "/assets/web/interview-16x9-zh.mp4");
@@ -23,6 +24,8 @@ test("nodes without a video have no explainer", () => {
   assert.ok(explainerFor(explainerNodeForRole("voice"), "en"));
 });
 
-test("every manifest entry names all three locales and a poster", () => {
-  for (const [node, entry] of Object.entries(NODE_EXPLAINERS)) for (const key of ["zh", "en", "ja", "poster"]) assert.ok(entry[key], `${node}.${key}`);
+test("the explainer is the Help catalog's video, not a second copy", () => {
+  const item = helpItemForNode("interview");
+  assert.deepEqual(explainerFor("interview", "ja"), (({ src, poster }) => ({ src, poster }))(localizeHelpItem(item, "ja")));
+  assert.ok(HELP_ITEMS.includes(item));
 });

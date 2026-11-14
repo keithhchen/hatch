@@ -1,5 +1,5 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Bot, Check, ChevronsUpDown, Copy, ExternalLink, Languages, LayoutDashboard, LogOut, Menu, MessageCircle, MoreHorizontal, Plus, ReceiptText, Search, Settings, X } from "lucide-react";
+import { ArrowLeft, Bot, Check, ChevronsUpDown, CircleHelp, Copy, ExternalLink, Languages, LayoutDashboard, LogOut, Menu, MessageCircle, MoreHorizontal, Plus, ReceiptText, Search, Settings, X } from "lucide-react";
 import { Button, CommandMenu, ConfirmDialog, DropdownMenu, IconButton } from "@hatch/ui";
 import { ButtonBase, Divider as MuiDivider, ListItemIcon, ListItemText, Menu as MuiMenu, MenuItem as MuiMenuItem } from "@mui/material";
 import { createTheme, ThemeProvider } from "@mui/material/styles";
@@ -95,6 +95,7 @@ export function CreatorPortalV2({
       {navItems.map(({ section, href, label, Icon }) => <NavLink key={section} href={href} navigate={go} active={route.section === section}><Icon aria-hidden="true" /><span>{t(label)}</span></NavLink>)}
     </nav>
     <Button className="sx-new" variant="secondary" type="button" leading={<Plus aria-hidden="true" />} onClick={() => go(`${ROOT}/products/new`)}>{t("newAgent")}</Button>
+    <a className="sx-nav__item sx-help" href="/help" onClick={(event) => { event.preventDefault(); go("/help"); }}><CircleHelp aria-hidden="true" /><span>{t("sxHelp")}</span></a>
     <ButtonBase
       className="cpv2-account-trigger sx-account"
       onClick={(event) => setAccountAnchorEl(event.currentTarget)}

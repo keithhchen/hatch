@@ -5,6 +5,7 @@ import { HatchUIProvider, UnavailableState } from "@hatch/ui";
 import { LocaleProvider } from "./locale.jsx";
 import { dashboardRequest } from "./data.js";
 import { parseDevelopersRoute } from "./developersGuide.js";
+import { parseHelpRoute } from "./helpRoute.js";
 import { WebChatRoute } from "./webChatRoute.js";
 import { WebBrand } from "./WebBrand.jsx";
 import "./styles.css";
@@ -20,6 +21,7 @@ const BuyerPortalV2 = lazyWithReload(() => import("./BuyerPortalV2.jsx").then(({
 const CreatorPortalV2 = lazyWithReload(() => import("./CreatorPortalV2.jsx").then(({ CreatorPortalV2: Component }) => ({ default: Component })));
 const DownloadPage = lazyWithReload(() => import("./DownloadPage.jsx").then(({ DownloadPage: Component }) => ({ default: Component })));
 const DevelopersPage = lazyWithReload(() => import("./DevelopersPage.jsx"));
+const HelpPage = lazyWithReload(() => import("./HelpPage.jsx"));
 const WebPage = lazyWithReload(() => import("./web/WebPage.jsx"));
 const WebChatPage = lazyWithReload(() => import("./WebChatPage.jsx"));
 const DesktopSignInPage = lazyWithReload(() => import("./DesktopSignInPage.jsx"));
@@ -58,6 +60,7 @@ function App() {
   const isDownloadRoute = location.pathname === "/download";
   const isWebRoute = location.pathname === "/";
   const developersRoute = parseDevelopersRoute(location.pathname);
+  const helpRoute = parseHelpRoute(location.pathname);
   const [profile, setProfile] = useState(null);
   const [sessionStatus, setSessionStatus] = useState("loading");
 
@@ -75,7 +78,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (isDownloadRoute || isWebRoute || developersRoute) {
+    if (isDownloadRoute || isWebRoute || developersRoute || helpRoute) {
       setSessionStatus("anonymous");
       return undefined;
     }
@@ -93,7 +96,7 @@ function App() {
         else setSessionStatus(profile ? "authenticated" : "anonymous");
     });
     return () => { active = false; };
-  }, [clearSession, isDownloadRoute, isWebRoute, Boolean(developersRoute)]);
+  }, [clearSession, isDownloadRoute, isWebRoute, Boolean(developersRoute), Boolean(helpRoute)]);
 
   const signIn = useCallback(async (credentials) => {
     const result = await dashboardRequest("/v1/auth/login", {
@@ -158,6 +161,10 @@ function App() {
 
   if (developersRoute) {
     return <Suspense fallback={<AppLoading />}><DevelopersPage tab={developersRoute.tab} navigate={location.navigate} /></Suspense>;
+  }
+
+  if (helpRoute) {
+    return <Suspense fallback={<AppLoading />}><HelpPage slug={helpRoute.slug} search={location.search} navigate={location.navigate} /></Suspense>;
   }
 
   if (isWebRoute) {

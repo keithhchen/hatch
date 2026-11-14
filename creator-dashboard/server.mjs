@@ -31,6 +31,7 @@ import {
   injectProductMetadata,
   injectProductNoScriptFallback
 } from "./publicMetadata.mjs";
+import { helpPage, injectHelpPage, robotsTxt, sitemapXml } from "./helpSeo.mjs";
 import { PortalTelemetryStore } from "./telemetry.mjs";
 import { WebChatRuntimeBridge } from "./webChatRuntimeBridge.mjs";
 import { bindAccount, currentContext, logEvent, observed, propagatingFetch, requestIdFrom } from "./observability.mjs";
@@ -813,6 +814,16 @@ export async function createDashboardApp(options = {}) {
         response.writeHead(301, { location: `${retiredRedirect}${url.search}`, "cache-control": "no-cache" });
         return response.end();
       }
+      if (request.method === "GET" && url.pathname === "/sitemap.xml") {
+        response.writeHead(200, { "content-type": "application/xml; charset=utf-8", "cache-control": "public, max-age=3600" });
+        return response.end(sitemapXml());
+      }
+      if (request.method === "GET" && url.pathname === "/robots.txt") {
+        response.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=3600" });
+        return response.end(robotsTxt());
+      }
+      const help = request.method === "GET" ? helpPage(url.pathname, url.search, { mediaBase: process.env.HATCH_WEB_MEDIA_BASE_URL || undefined }) : null;
+      if (help) return servePortalIndex(response, createDefaultMetadata(publicOrigin, "/explore"), help.status, undefined, help);
       if (request.method === "GET" && isPublicPortalRoute(url.pathname)) {
         let metadata = createDefaultMetadata(publicOrigin, "/explore");
         let portalStatus = 200;
@@ -4623,12 +4634,18 @@ function isPublicPortalRoute(pathname) {
     || pathname === "/desktop/sign-in"
     || pathname === "/developers"
     || pathname.startsWith("/developers/")
+    || pathname === "/help"
+    || pathname.startsWith("/help/")
     || pathname === "/download";
 }
 
-async function servePortalIndex(response, metadata, status = 200, noScriptFallback) {
+async function servePortalIndex(response, metadata, status = 200, noScriptFallback, helpPageResult) {
   try {
     const source = await readFile(path.join(currentDirectory, "dist", "index.html"), "utf8");
+    if (helpPageResult?.status === 200) {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" });
+      return response.end(injectHelpPage(source, helpPageResult));
+    }
     const withMetadata = metadata ? injectProductMetadata(source, metadata) : source;
     const body = noScriptFallback
       ? injectProductNoScriptFallback(withMetadata, noScriptFallback)
