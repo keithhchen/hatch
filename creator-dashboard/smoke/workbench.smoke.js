@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 // Mounts the real Studio workbench in Chromium against stubbed API responses, so a render crash
-// (AppErrorBoundary: "Hatch could not open this page.") fails CI before deploy.
+// (full-page "Hatch could not open this page." or the Studio region fallback) fails CI before deploy.
 const PRODUCT = "11111111-1111-4111-8111-111111111111";
 const ROOT = `/v1/creator/products/${PRODUCT}/factory-agents`;
 const agents = ["voice", "generation"].map(role => ({ role, name: role, state: role === "voice" ? "ready" : "locked" }));
@@ -21,17 +21,19 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+const CRASHED = /Hatch could not open this page\.|This part of the page failed to open\./;
 for (const [name, path, ready] of [
-  ["Workspace and ChatPanel", "sources/voice", "textbox"],
-  ["ImportFromAi", "sources/uploads", "button"],
-  ["AgentIntro", "build/generation", "button"]
+  ["Workspace and ChatPanel", "sources/voice", ".factory-chat textarea"],
+  ["ImportFromAi", "sources/uploads", ".factory-import__open"],
+  ["AgentIntro", "build/generation", ".factory-agent-intro"]
 ]) {
   test(`${name} render without crashing`, async ({ page }) => {
     const errors = [];
     page.on("pageerror", error => errors.push(error.message));
     await page.goto(`/studio/factory/${PRODUCT}/${path}`);
-    await expect(page.getByRole(ready).first()).toBeVisible();
-    await expect(page.getByText("Hatch could not open this page.")).toHaveCount(0);
+    await expect(page.locator(ready).or(page.getByText(CRASHED)).first()).toBeVisible();
+    await expect(page.getByText(CRASHED)).toHaveCount(0);
+    await expect(page.locator(ready).first()).toBeVisible();
     expect(errors).toEqual([]);
   });
 }
