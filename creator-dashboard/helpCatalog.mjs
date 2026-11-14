@@ -14,7 +14,7 @@ export const HELP_ITEMS = Object.freeze([
     kind: "video",
     node: "upload",
     published: "2026-11-14",
-    duration: "PT0M45S",
+    duration: "PT44S",
     poster: "upload-poster.jpg",
     video: { zh: "upload-16x9-zh.mp4", en: "upload-16x9-none.mp4", ja: "upload-16x9-ja.mp4" },
     copy: {
