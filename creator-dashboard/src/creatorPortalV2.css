@@ -47,6 +47,8 @@
 .sx-new.hui-button { border: 1px solid var(--web-rule); background: var(--web-card); color: var(--web-ink); }
 .sx-new.hui-button { width: 100%; justify-content: center; }
 .sx-account { display: flex !important; width: 100%; align-items: center; gap: 10px; min-height: 48px; margin-top: auto !important; padding: 6px 8px !important; border-radius: 14px !important; color: inherit !important; text-align: left; }
+.sx-help { margin-top: auto; }
+.sx-help + .sx-account { margin-top: 4px !important; }
 .sx-account:hover { background: var(--web-card) !important; }
 .cpv2-account-name { flex: 1; min-width: 0; overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .sx-account__chevron { width: 16px; height: 16px; color: var(--web-muted); }
