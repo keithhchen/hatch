@@ -51,7 +51,7 @@ export default function HelpPage({ slug, search, navigate }) {
                 {group.items.map((card) => (
                   <li key={card.id}>
                     <a className="help-page__card" href={helpPath(card)} onClick={open(helpPath(card))}>
-                      {card.poster ? <img src={card.poster} alt="" loading="lazy" /> : null}
+                      {card.poster ? <img src={card.poster} alt="" /> : null}
                       <strong>{card.title}</strong>
                       <span>{card.description}</span>
                     </a>
