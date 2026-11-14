@@ -1,23 +1,18 @@
 import React, { useEffect } from "react";
 import { WebBrand } from "./WebBrand.jsx";
 import { LanguageSwitcher } from "./LanguageSwitcher.jsx";
-import { normalizeLocale, useLocale } from "./locale.jsx";
+import { useLocale } from "./locale.jsx";
 import { HELP_PAGE_COPY, helpGroups, helpItem, helpPath, localizeHelpItem } from "../helpCatalog.mjs";
 import "./helpPage.css";
 
 const MEDIA_BASE = import.meta.env?.VITE_HATCH_WEB_MEDIA_BASE_URL || undefined;
 
-/** The public Help center: /help lists every catalog item, /help/<slug> shows one. A `?lang=` link opens in that language. */
-export default function HelpPage({ slug, search, navigate }) {
-  const { locale, setLocale } = useLocale();
+/** The public Help center: /help lists every catalog item, /help/<slug> shows one. Language is the site's own (stored preference, then browser). */
+export default function HelpPage({ slug, navigate }) {
+  const { locale } = useLocale();
   const copy = HELP_PAGE_COPY[locale];
   const entry = slug ? helpItem(slug) : null;
   const item = entry && localizeHelpItem(entry, locale, MEDIA_BASE);
-
-  useEffect(() => {
-    const requested = normalizeLocale(new URLSearchParams(search).get("lang"));
-    if (requested) setLocale(requested);
-  }, [search, setLocale]);
 
   useEffect(() => {
     const previous = document.title;

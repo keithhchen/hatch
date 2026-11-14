@@ -822,7 +822,7 @@ export async function createDashboardApp(options = {}) {
         response.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=3600" });
         return response.end(robotsTxt());
       }
-      const help = request.method === "GET" ? helpPage(url.pathname, url.search, { mediaBase: process.env.HATCH_WEB_MEDIA_BASE_URL || undefined }) : null;
+      const help = request.method === "GET" ? helpPage(url.pathname, request.headers["accept-language"], { mediaBase: process.env.HATCH_WEB_MEDIA_BASE_URL || undefined }) : null;
       if (help) return servePortalIndex(response, createDefaultMetadata(publicOrigin, "/explore"), help.status, undefined, help);
       if (request.method === "GET" && isPublicPortalRoute(url.pathname)) {
         let metadata = createDefaultMetadata(publicOrigin, "/explore");
@@ -4643,7 +4643,7 @@ async function servePortalIndex(response, metadata, status = 200, noScriptFallba
   try {
     const source = await readFile(path.join(currentDirectory, "dist", "index.html"), "utf8");
     if (helpPageResult?.status === 200) {
-      response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" });
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache", vary: "Accept-Language" });
       return response.end(injectHelpPage(source, helpPageResult));
     }
     const withMetadata = metadata ? injectProductMetadata(source, metadata) : source;
