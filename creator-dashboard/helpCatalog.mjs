@@ -1,7 +1,7 @@
 // The Help catalog: every article and video Hatch publishes, as data. The Help pages, the Studio node explainers,
 // the server's SEO head and the sitemap all read this one list; adding an item here adds it everywhere.
 // Video files live in public/assets/web/ and are published to OSS by Web CI (see .github/workflows/web.yml).
-// `en` is the version without subtitles and the fallback for any other locale.
+// The voice-over is English in every file; only the burned-in subtitles differ. `en` is the version without subtitles and the fallback for any other locale.
 export const HELP_LOCALES = Object.freeze(["en", "zh", "ja"]);
 export const HELP_KINDS = Object.freeze(["video", "article"]);
 export const LOCAL_MEDIA_BASE = "/assets/web";
@@ -25,9 +25,9 @@ export const HELP_ITEMS = Object.freeze([
 
 /** Page chrome per locale; `video` and `article` are the group headings. */
 export const HELP_PAGE_COPY = Object.freeze({
-  en: { index: "Help", description: "Videos and guides for building your Agent with Hatch.", video: "Videos", article: "Articles", notFound: "Not found" },
-  zh: { index: "帮助", description: "用 Hatch 构建你的 Agent 的视频与指南。", video: "视频", article: "文章", notFound: "未找到" },
-  ja: { index: "ヘルプ", description: "Hatch で Agent を作るための動画とガイド。", video: "動画", article: "記事", notFound: "見つかりません" }
+  en: { index: "Help", description: "Videos and guides for building your Agent with Hatch.", video: "Videos", article: "Articles", notFound: "Not found", subtitled: "" },
+  zh: { index: "帮助", description: "用 Hatch 构建你的 Agent 的视频与指南。", video: "视频", article: "文章", notFound: "未找到", subtitled: "（含中文字幕）" },
+  ja: { index: "ヘルプ", description: "Hatch で Agent を作るための動画とガイド。", video: "動画", article: "記事", notFound: "見つかりません", subtitled: "（日本語字幕付き）" }
 });
 
 export const helpItem = (id, items = HELP_ITEMS) => items.find(item => item.id === id) ?? null;

@@ -26,7 +26,8 @@ test("the video page carries title, description, canonical, hreflang, Open Graph
   assert.equal(ld.thumbnailUrl, "https://gethatchapp.com/assets/web/interview-poster.jpg");
   assert.equal(ld.uploadDate, "2026-11-14");
   assert.equal(ld.duration, "PT1M6S");
-  assert.equal(ld.inLanguage, "ja-JP");
+  assert.equal(ld.inLanguage, "en");
+  assert.ok(ld.description.endsWith("（日本語字幕付き）"));
   assert.match(html, /<div id="root"><main>.*<h1>インタビューの進め方<\/h1>/);
 });
 

@@ -16,8 +16,8 @@ const alternates = (origin, item) => [...HELP_LOCALES.map(lang => [HREFLANG[lang
 function videoObject(origin, item, lang, mediaBase) {
   const v = localizeHelpItem(item, lang, mediaBase);
   return {
-    "@context": "https://schema.org", "@type": "VideoObject", name: v.title, description: v.description,
-    thumbnailUrl: absolute(origin, v.poster), uploadDate: v.published, duration: v.duration, inLanguage: HTML_LANG[lang],
+    "@context": "https://schema.org", "@type": "VideoObject", name: v.title, description: `${v.description}${PAGE[lang].subtitled}`,
+    thumbnailUrl: absolute(origin, v.poster), uploadDate: v.published, duration: v.duration, inLanguage: "en",
     contentUrl: absolute(origin, v.src), embedUrl: absolute(origin, helpPath(item, lang))
   };
 }
