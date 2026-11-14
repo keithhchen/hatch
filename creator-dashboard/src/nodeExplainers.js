@@ -2,7 +2,7 @@
 // Files live in public/assets/web/ and are published to OSS by Web CI (see .github/workflows/web.yml);
 // `en` is the version without subtitles and the fallback for any other locale.
 export const NODE_EXPLAINERS = Object.freeze({
-  interview: { zh: "interview-16x9-zh.mp4", en: "interview-16x9-none.mp4", ja: "interview-16x9-ja.mp4", poster: "interview-poster.png" }
+  interview: { zh: "interview-16x9-zh.mp4", en: "interview-16x9-none.mp4", ja: "interview-16x9-ja.mp4", poster: "interview-poster.jpg" }
 });
 
 /** The Studio Agent role that runs each node. */

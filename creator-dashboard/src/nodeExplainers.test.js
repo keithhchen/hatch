@@ -7,13 +7,13 @@ test("explainer is picked by UI locale and falls back to the no-subtitle version
   assert.equal(explainerFor("interview", "ja").src, "/assets/web/interview-16x9-ja.mp4");
   assert.equal(explainerFor("interview", "en").src, "/assets/web/interview-16x9-none.mp4");
   assert.equal(explainerFor("interview", "fr").src, "/assets/web/interview-16x9-none.mp4");
-  assert.equal(explainerFor("interview", "en").poster, "/assets/web/interview-poster.png");
+  assert.equal(explainerFor("interview", "en").poster, "/assets/web/interview-poster.jpg");
 });
 
 test("videos come from the published media base when one is configured; the poster stays local", () => {
   const found = explainerFor("interview", "zh", "https://oss.example/desktop/web/abc/");
   assert.equal(found.src, "https://oss.example/desktop/web/abc/interview-16x9-zh.mp4");
-  assert.equal(found.poster, "/assets/web/interview-poster.png");
+  assert.equal(found.poster, "/assets/web/interview-poster.jpg");
 });
 
 test("nodes without a video have no explainer", () => {
