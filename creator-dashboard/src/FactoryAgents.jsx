@@ -135,7 +135,7 @@ export function FactoryAgents({ productId, tab = "build", section, agent, naviga
     <ErrorNotice error={error} onClose={() => setError("")} />
     {selected === "uploads" && preview && manualFiles.some(file => file.path === preview.path) ? <FileViewer key={preview.path} root={root} running={false} id={preview.id} record={manualFiles.find(file => file.path === preview.path)} siblings={manualFiles} onOpenFile={path => setPreview({ ...preview, path })} onClose={() => setPreview(null)} t={t} perform={async fn => { try { await fn(); refreshConfig(); } catch (e) { setError(factoryError(e, t, agentName)); } }} /> : null}
     {step ? <div className="factory-step">
-      {selected === "uploads" ? <SourceUploadWorkspace manualFiles={manualFiles} uploadItems={uploadItems} importPicker={importPicker} uploadProjectFiles={uploadProjectFiles} saveManualText={saveManualText} locale={locale} onOpenFile={previewFile} deleteManualFile={deleteManualFile} dismissUpload={dismissUpload} onOpenAgent={openAgent} t={t} /> : selectedSession ? <Workspace key={selectedSession.id} root={root} id={selectedSession.id} entry={selectedEntry} agents={agents} config={config} onChanged={() => undefined} onOpenAgent={openAgent} agentName={agentName} locale={locale} /> : <AgentIntro entry={selectedEntry} agents={agents} onOpenAgent={openAgent} agentName={agentName} locale={locale} />}
+      {selected === "uploads" ? <SourceUploadWorkspace manualFiles={manualFiles} uploadItems={uploadItems} importPicker={importPicker} uploadProjectFiles={uploadProjectFiles} saveManualText={saveManualText} locale={locale} onOpenFile={previewFile} deleteManualFile={deleteManualFile} dismissUpload={dismissUpload} onOpenAgent={openAgent} t={t} /> : selectedSession ? <Workspace key={selectedSession.id} root={root} id={selectedSession.id} entry={selectedEntry} agents={agents} config={config} onChanged={() => undefined} onOpenAgent={openAgent} agentName={agentName} locale={locale} t={t} /> : <AgentIntro entry={selectedEntry} agents={agents} onOpenAgent={openAgent} agentName={agentName} locale={locale} t={t} />}
     </div> : <FactoryOverview product={product} states={states} agentEntry={agentEntry} agentName={agentName} goToStep={goToStep} t={t} />}
   </div></ThemeProvider>;
 }
@@ -200,7 +200,7 @@ function SourceUploadWorkspace({ onOpenFile, manualFiles, uploadItems, importPic
       <UploadFile aria-hidden="true" /><strong>{t("factoryUploadDrop")}</strong>
     </button>
     <input ref={importPicker} hidden type="file" multiple aria-label={t("uploadInputFiles")} onChange={event => { uploadProjectFiles([...event.target.files]); event.target.value = ""; }} />
-    <ImportFromAi saveManualText={saveManualText} locale={locale} />
+    <ImportFromAi saveManualText={saveManualText} locale={locale} t={t} />
     <FileList title={t("factoryUploadedTitle")} records={records} onOpen={onOpenFile} onDelete={record => record.id ? dismissUpload(record.id) : deleteManualFile(record)} onRetry={record => record.retry?.()} statusLabel={statusLabel} t={t} />
     <HatchButton variant="secondary" trailing={<ArrowRight aria-hidden="true" />} onClick={() => onOpenAgent("voice")}>{t("factoryUploadNext")}</HatchButton>
   </section>;
