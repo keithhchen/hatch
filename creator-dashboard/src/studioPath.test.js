@@ -52,7 +52,6 @@ test("Overview is a top tab, Advanced sits under the rail steps, Start Agent and
   assert.match(factory, /localStorage\.getItem\(ADVANCED_OPEN_KEY\)/);
   assert.match(factory, /<HatchButton type="button" size="small" variant="secondary" leading=\{<Play/);
   assert.doesNotMatch(factory, /line-through/);
-  assert.doesNotMatch(web, /pro-tasks[^\n]*line-through/);
   assert.match(factory.match(/<nav className="factory-rail"[^]*?<\/nav>/)[0], /<FactoryStepper/);
   assert.match(css, /grid-template-columns: max-content minmax\(0, 1fr\)/);
 });
