@@ -316,3 +316,10 @@ test('File pager uses localized chevron icon buttons with 44px mobile targets', 
   assert.match(source, /<span>\{page\}\/\{pages\}<\/span>/);
   assert.match(css, /\.fl__pager \.fl__page \{ min-width: 44px; min-height: 44px; \}/);
 });
+
+test('A crashed Studio region retries by reloading, since a failed lazy chunk never re-imports on re-render', async () => {
+  const kit = await readFile(new URL('./studioShellKit.jsx', import.meta.url), 'utf8');
+  const boundary = kit.match(/export class RegionBoundary[^]*?\n}\n/)[0];
+  assert.match(boundary, /onAction=\{\(\) => window\.location\.reload\(\)\}/);
+  assert.doesNotMatch(boundary, /setState\(\{ error: null \}\)/);
+});

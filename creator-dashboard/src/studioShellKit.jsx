@@ -47,7 +47,10 @@ export function PageBoundary({ resource, title, t, children }) {
   return <>{children(resource.data)}</>;
 }
 
-/** Keeps a render crash inside one region; the rest of Studio stays usable. Resets when resetKey changes. */
+/**
+ * Keeps a render crash inside one region; the rest of Studio stays usable. Resets when resetKey changes.
+ * Retry reloads the page: React.lazy keeps a failed chunk import rejected, so re-rendering could never recover it.
+ */
 export class RegionBoundary extends React.Component {
   state = { error: null, key: this.props.resetKey };
   static getDerivedStateFromError(error) { return { error }; }
@@ -56,7 +59,7 @@ export class RegionBoundary extends React.Component {
   render() {
     const { t, children } = this.props;
     if (!this.state.error) return children;
-    return <RouteProblem title={t("regionCrashed")} body={t("regionCrashedBody")} action={t("retry")} onAction={() => this.setState({ error: null })} />;
+    return <RouteProblem title={t("regionCrashed")} body={t("regionCrashedBody")} action={t("retry")} onAction={() => window.location.reload()} />;
   }
 }
 
