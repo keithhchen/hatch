@@ -164,7 +164,7 @@ function App() {
   }
 
   if (helpRoute) {
-    return <Suspense fallback={<AppLoading />}><HelpPage slug={helpRoute.slug} search={location.search} navigate={location.navigate} /></Suspense>;
+    return <Suspense fallback={<AppLoading />}><HelpPage slug={helpRoute.slug} navigate={location.navigate} /></Suspense>;
   }
 
   if (isWebRoute) {

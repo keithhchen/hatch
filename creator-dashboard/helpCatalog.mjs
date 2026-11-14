@@ -32,8 +32,8 @@ export const HELP_PAGE_COPY = Object.freeze({
 
 export const helpItem = (id, items = HELP_ITEMS) => items.find(item => item.id === id) ?? null;
 export const helpItemForNode = (node, items = HELP_ITEMS) => items.find(item => item.node === node && item.video) ?? null;
-/** /help, /help/<id>; a non-English language is the ?lang= query. */
-export const helpPath = (item, lang) => `/help${item ? `/${item.id}` : ""}${lang && lang !== "en" ? `?lang=${lang}` : ""}`;
+/** /help or /help/<id>: one URL per page, whatever the language. */
+export const helpPath = item => `/help${item ? `/${item.id}` : ""}`;
 
 /** An item in one locale: text falls back to English, the video to the no-subtitle file. `base` is where videos are hosted (OSS or local). */
 export function localizeHelpItem(item, locale, base = LOCAL_MEDIA_BASE) {

@@ -46,10 +46,9 @@ test("groups follow kind order and omit empty kinds", () => {
   assert.deepEqual(helpGroups("ja", undefined, withArticle).map(group => group.kind), ["video", "article"]);
 });
 
-test("paths: English is bare, other languages use ?lang=", () => {
+test("one path per page, whatever the language", () => {
   assert.equal(helpPath(null), "/help");
-  assert.equal(helpPath(null, "en"), "/help");
-  assert.equal(helpPath(helpItem("interview"), "zh"), "/help/interview?lang=zh");
+  assert.equal(helpPath(helpItem("interview")), "/help/interview");
 });
 
 test("route parsing", () => {
