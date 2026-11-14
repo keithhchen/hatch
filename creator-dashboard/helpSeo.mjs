@@ -1,22 +1,19 @@
 // Server-rendered head and body for the public Help pages, so a crawler that never runs JavaScript still sees
 // the title, description, a VideoObject and the text, in the language of its Accept-Language. The SPA replaces the body once it loads.
 import { HELP_ITEMS, HELP_LOCALES, HELP_PAGE_COPY as PAGE, helpGroups, helpItem, helpPath, localizeHelpItem } from "./helpCatalog.mjs";
+import { documentLanguage, pickLocale } from "./localeCore.mjs";
 import { injectProductMetadata } from "./publicMetadata.mjs";
 
 export const HELP_ORIGIN = "https://gethatchapp.com";
-const HTML_LANG = { en: "en", zh: "zh-CN", ja: "ja-JP" };
 
 const esc = value => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 const absolute = (origin, value) => new URL(value, origin).toString();
-/** The first supported language (zh, ja, en) in an Accept-Language header, by quality; English when none. */
-export function acceptedLocale(header = "") {
-  const ranked = String(header).split(",").map(part => {
-    const [tag, ...params] = part.trim().split(";");
-    const q = Number(params.find(p => p.trim().startsWith("q="))?.split("=")[1] ?? 1);
-    return { locale: tag.trim().toLowerCase().slice(0, 2), q: Number.isFinite(q) ? q : 0 };
-  }).filter(entry => entry.q > 0 && HELP_LOCALES.includes(entry.locale));
-  return ranked.sort((a, b) => b.q - a.q)[0]?.locale ?? "en";
-}
+/** An Accept-Language header as an ordered candidate list: highest quality first, q=0 dropped. */
+const acceptLanguageCandidates = (header = "") => String(header).split(",")
+  .map(part => { const [tag, ...params] = part.trim().split(";"); const q = Number(params.find(p => p.trim().startsWith("q="))?.split("=")[1] ?? 1); return { tag: tag.trim(), q }; })
+  .filter(({ tag, q }) => tag && q > 0)
+  .sort((a, b) => b.q - a.q)
+  .map(({ tag }) => tag);
 
 function videoObject(origin, item, lang, mediaBase) {
   const v = localizeHelpItem(item, lang, mediaBase);
@@ -31,7 +28,7 @@ function videoObject(origin, item, lang, mediaBase) {
 export function helpPage(pathname, acceptLanguage, { origin = HELP_ORIGIN, mediaBase } = {}) {
   const match = pathname.match(/^\/help(?:\/([^/]+))?\/?$/);
   if (!match) return null;
-  const lang = acceptedLocale(acceptLanguage);
+  const lang = pickLocale(acceptLanguageCandidates(acceptLanguage));
   const copy = PAGE[lang];
   const item = match[1] ? helpItem(decodeURIComponent(match[1])) : null;
   if (match[1] && !item) return { status: 404 };
@@ -52,7 +49,7 @@ export function helpPage(pathname, acceptLanguage, { origin = HELP_ORIGIN, media
 export function injectHelpPage(documentHtml, page) {
   return injectProductMetadata(documentHtml, page.metadata)
     .replace(/<\/head>/i, () => `    ${page.headExtras}\n  </head>`)
-    .replace(/<html lang="[^"]*"/i, `<html lang="${HTML_LANG[page.lang]}"`)
+    .replace(/<html lang="[^"]*"/i, `<html lang="${documentLanguage(page.lang)}"`)
     .replace('<div id="root"></div>', () => `<div id="root">${page.body}</div>`);
 }
 
