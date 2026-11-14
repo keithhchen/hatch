@@ -2,53 +2,17 @@ name: Hatch Desktop CI
 
 on:
   workflow_call:
-  pull_request:
-    paths:
-      - "desktop-app/**"
-      - "local-runner/**"
-      - "runtime-server/skills/**"
-      - "desktop-app/runtime/**"
-      - "packages/ui/**"
-      - "packages/chat/**"
-      - "packages/protocol/**"
-      - "scripts/uat/**"
-      - "scripts/release/**"
-      - "release/**"
-      - "package.json"
-      - "package-lock.json"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "tauri.conf.json"
-      - ".github/workflows/desktop-ci.yml"
+  # Desktop is paused: it builds only for a release tag or by hand.
   push:
-    branches: [master]
-    paths:
-      - "desktop-app/**"
-      - "local-runner/**"
-      - "runtime-server/skills/**"
-      - "desktop-app/runtime/**"
-      - "packages/ui/**"
-      - "packages/chat/**"
-      - "packages/protocol/**"
-      - "scripts/uat/**"
-      - "scripts/release/**"
-      - "release/**"
-      - "package.json"
-      - "package-lock.json"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "tauri.conf.json"
-      - ".github/workflows/desktop-ci.yml"
     tags: ["v*.*.*"]
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# A newer push to the same pull request replaces the older run. Master runs are left alone: they publish releases.
 concurrency:
   group: desktop-ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 jobs:
   desktop-renderer:
