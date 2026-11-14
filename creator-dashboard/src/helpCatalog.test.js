@@ -7,7 +7,7 @@ test("every item has text in every locale and a video in every locale plus a pos
   for (const item of HELP_ITEMS) {
     assert.ok(HELP_KINDS.includes(item.kind), item.id);
     for (const locale of HELP_LOCALES) {
-      assert.ok(item.copy[locale]?.title && item.copy[locale]?.description, `${item.id}.${locale}`);
+      assert.ok(item.copy[locale]?.title && item.copy[locale]?.description && (!item.node || item.copy[locale].tipLabel), `${item.id}.${locale}`);
       if (item.kind === "video") assert.ok(item.video[locale], `${item.id}.video.${locale}`);
     }
     if (item.kind === "video") assert.ok(item.poster && item.duration && item.published, item.id);

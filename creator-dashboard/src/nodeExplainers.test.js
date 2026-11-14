@@ -26,6 +26,13 @@ test("nodes without a video have no explainer", () => {
 
 test("the explainer is the Help catalog's video, not a second copy", () => {
   const item = helpItemForNode("interview");
-  assert.deepEqual(explainerFor("interview", "ja"), (({ src, poster }) => ({ src, poster }))(localizeHelpItem(item, "ja")));
+  assert.deepEqual(explainerFor("interview", "ja"), (({ src, poster, tipLabel }) => ({ src, poster, label: tipLabel }))(localizeHelpItem(item, "ja")));
   assert.ok(HELP_ITEMS.includes(item));
+});
+
+test("the entry label is the node's own tips title per locale, English as fallback", () => {
+  assert.equal(explainerFor("interview", "zh").label, "访谈小贴士");
+  assert.equal(explainerFor("interview", "en").label, "Interview tips");
+  assert.equal(explainerFor("interview", "ja").label, "インタビューのコツ");
+  assert.equal(explainerFor("interview", "fr").label, "Interview tips");
 });

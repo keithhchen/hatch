@@ -6,10 +6,10 @@ const NODE_OF_ROLE = Object.freeze({ voice: "interview" });
 
 export const explainerNodeForRole = role => NODE_OF_ROLE[role] ?? null;
 
-/** { src, poster } for a node in a locale, or null when the node has no video. */
+/** { src, poster, label } for a node in a locale, or null when the node has no video. */
 export function explainerFor(node, locale, base, items) {
   const item = helpItemForNode(node, items);
   if (!item) return null;
-  const { src, poster } = localizeHelpItem(item, locale, base);
-  return { src, poster };
+  const { src, poster, tipLabel } = localizeHelpItem(item, locale, base);
+  return { src, poster, label: tipLabel };
 }
