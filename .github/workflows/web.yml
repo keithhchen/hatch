@@ -141,9 +141,8 @@ jobs:
               --acl public-read \
               "${endpoint[@]}"
           }
-          for locale in en ja zh; do
-            source="creator-dashboard/public/assets/web/hatch-launch-${locale}.mp4"
-            key="${WEB_MEDIA_PREFIX}/hatch-launch-${locale}.mp4"
+          for source in creator-dashboard/public/assets/web/*.mp4; do
+            key="${WEB_MEDIA_PREFIX}/$(basename "$source")"
             expected_bytes="$(wc -c < "$source" | tr -d '[:space:]')"
             aws s3 cp "$source" "s3://${HATCH_OSS_BUCKET}/${key}" "${endpoint[@]}" \
               --acl public-read \

@@ -207,3 +207,7 @@
   .factory-path__step > svg { grid-column: 3; grid-row: 1 / span 2; }
   .factory-path__n { font-size: 28px; }
 }
+
+/* Node explainer modal: 16:9 player that fits a phone */
+.hui-dialog.node-explainer { width: min(960px, calc(100vw - 24px)); max-width: none; }
+.node-explainer__video { display: block; width: 100%; aspect-ratio: 16 / 9; max-height: calc(100dvh - 140px); border-radius: 12px; background: #000; }

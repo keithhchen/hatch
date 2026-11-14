@@ -45,6 +45,8 @@ import { webChatErrorText, webChatT } from "./webChatI18n.js";
 import { chatEntries } from "./factoryMessages.js";
 import { subscribeFactoryEvents } from "./factoryEvents.js";
 import { createFactoryAgentTranslator } from "./factoryAgentsI18n.js";
+import { NodeExplainer } from "./NodeExplainer.jsx";
+import { explainerNodeForRole } from "./nodeExplainers.js";
 import { BUILD_NEEDS, agentStateKey, localizeAgentText, updatedSources } from "./factoryAgentState.js";
 import { creatorFactoryPath, creatorProductPath, factorySectionForAgent } from "./creatorRoutes.js";
 import { ADVANCED_STEPS, CONTENT_STEP, INSPIRATION_STEP, STUDIO_PATH, studioNextStep, studioPathStates, studioStepForRoute } from "./studioPath.js";
@@ -281,6 +283,7 @@ function ChatPanel({ chat, dictation, session, entry, config, busy, locked, loca
     {pendingAskUser ? <AskUserBlock entry={pendingAskUser} onSubmit={content => { controller.setDraft(content); return controller.send(); }} t={t} /> : null}
     <div className="factory-composer-toolbar">
       <HatchButton type="button" size="small" variant="secondary" leading={<Play aria-hidden="true" />} disabled={composerDisabled || session.status === "running" || Boolean(draft.trim())} onClick={startAgent}>{t("startAgentLabel", session.role)}</HatchButton>
+      <NodeExplainer node={explainerNodeForRole(session.role)} locale={locale} t={t} />
       {updatedDependencies.length > 0 && <HatchButton size="small" disabled={busy} onClick={onUseLatest}>{`${updatedDependencies.map(role => t("dependencyUpdated", agentName(role))).join(" · ")} · ${t("improveWithLatest")}`}</HatchButton>}
     </div>
   </>;
