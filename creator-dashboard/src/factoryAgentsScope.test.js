@@ -62,7 +62,7 @@ test('Factory overview is a guided path, not an admin tree', async () => {
   assert.match(source, /step\.id === "ship" \? navigate\(creatorProductPath\(productId, "publish"\)\)/);
 });
 
-test('Publish tab edits details and brief and publishes through the publish endpoint', async () => {
+test('Publish tab edits details and brief and keeps only the unlisted toggle; the Agent publishes', async () => {
   const workspace = await readFile(new URL('./studioAgentWorkspace.jsx', import.meta.url), 'utf8');
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   assert.match(source, /function FactoryOverview/);
@@ -71,10 +71,8 @@ test('Publish tab edits details and brief and publishes through the publish endp
   assert.match(workspace, /\/storefront-preview`/);
   assert.doesNotMatch(workspace, /\/rollback`/);
   assert.match(workspace, /useRemote\(request, `\$\{base\}\/live`\)/);
-  assert.match(workspace, /request\(`\$\{base\}\/live`, \{ method: "POST", headers: \{ "Idempotency-Key": mutationKey\(\) \}, body: JSON\.stringify\(\{\}\) \}\)/);
-  assert.match(workspace, /error\.code === "system_missing"/);
-  assert.match(workspace, /disabled=\{!info\.can_publish \|\| \(live && pending\.length === 0\)\}/);
-  assert.match(workspace, /creatorFactoryPath\(productId, "build", "generation"\)/);
+  assert.doesNotMatch(workspace, /method: "POST"[^\n]*\/live`|sxPublishAction|sxBuildIncomplete|sxStatusDraft/);
+  assert.match(workspace, /`\$\{base\}\/listing`, \{ method: "PUT"/);
   assert.doesNotMatch(workspace, /\/release`|candidate_id|readinessChecklist|"storefront"|"readiness"/);
   assert.doesNotMatch(source, /<TextField label=\{t\("productName"\)\}/);
 });

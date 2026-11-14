@@ -8,12 +8,12 @@ import { ApiKeysBanner } from "./ApiKeysBanner.jsx";
 import { FirstBuildIntro } from "./FirstBuildDialog.jsx";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
 import { TelegramBotSetup } from "./TelegramBotSetup.jsx";
-import { creatorFactoryPath, creatorProductPath } from "./creatorRoutes.js";
+import { creatorProductPath } from "./creatorRoutes.js";
 import { isProductLive } from "./studioPath.js";
 import { WebChatRoute } from "./webChatRoute.js";
 import {
   InlineError, LoadingState, PageBoundary, RouteProblem, SectionHead, StatusPill, SuccessNotice, STUDIO_ROOT,
-  absoluteUrl, arrayOf, dateTime, friendlyError, idOf, mutationKey, productName, publicPathOf, safePublicUrl, unwrap, useCopy, useRemote
+  absoluteUrl, arrayOf, friendlyError, idOf, mutationKey, productName, publicPathOf, safePublicUrl, unwrap, useCopy, useRemote
 } from "./studioShellKit.jsx";
 
 const TABS = [
@@ -90,9 +90,9 @@ function PublishTab({ product, productId, request, navigate, locale, t, profile,
   const preview = useRemote(request, `${base}/storefront-preview`);
   const reloadAll = () => { reload(); status.retry(); preview.retry(); };
   const publicUrl = (status.state === "ready" || status.state === "refreshing") ? status.data?.public_url ?? null : null;
-  // One page: a sticky status bar (publish + share link), edits on the left, the client page on the right.
+  // One page: a sticky bar (unlisted toggle + share link), edits on the left, the client page on the right.
   return <div className="sx-publish">
-    <PublishStatus status={status} base={base} productId={productId} request={request} navigate={navigate} locale={locale} t={t} onPublished={reloadAll} publicUrl={publicUrl ?? publicPathOf(product)} />
+    <ListingStatus status={status} base={base} request={request} t={t} publicUrl={publicUrl ?? publicPathOf(product)} />
     <div className="sx-publish__grid">
       <div className="sx-publish__edit">
         <DetailsForm product={product} productId={productId} request={request} t={t} onSaved={reloadAll} />
@@ -107,54 +107,32 @@ function PublishTab({ product, productId, request, navigate, locale, t, profile,
   </div>;
 }
 
-function PublishStatus({ status, base, productId, request, navigate, locale, t, onPublished, publicUrl }) {
-  const [state, setState] = useState({ busy: false, error: "", result: null });
-  const [listing, setListing] = useState({ unlisted: null, saving: false });
+function ListingStatus({ status, base, request, t, publicUrl }) {
+  const [listing, setListing] = useState({ unlisted: null, saving: false, error: "" });
   const { copied, copy } = useCopy();
   if (status.state === "loading" || status.state === "idle") return <LoadingState t={t} />;
   if (status.state === "error") return <section className="sx-summary is-error" role="alert">
-    <div><h2>{t("sxPublishStatusError")}</h2><p>{friendlyError(status.error, t)}</p></div>
+    <div><p>{friendlyError(status.error, t)}</p></div>
     <Button variant="secondary" type="button" onClick={status.retry}>{t("retry")}</Button>
   </section>;
   const info = status.data ?? {};
-  const live = info.is_live === true;
-  const pending = arrayOf(info.pending_changes);
-  async function publish() {
-    setState({ busy: true, error: "", result: null });
-    try {
-      const result = await request(`${base}/live`, { method: "POST", headers: { "Idempotency-Key": mutationKey() }, body: JSON.stringify({}) });
-      setState({ busy: false, error: "", result });
-      onPublished();
-    } catch (error) {
-      setState({ busy: false, error: error.code === "system_missing" ? t("sxBuildIncomplete") : (error.message || friendlyError(error, t)), result: null });
-    }
-  }
   const unlisted = listing.unlisted ?? info.listed === false;
   async function setUnlisted(next) {
-    setState({ busy: false, error: "", result: null });
-    setListing({ unlisted, saving: true });
+    setListing({ unlisted, saving: true, error: "" });
     try {
       await request(`${base}/listing`, { method: "PUT", headers: { "Idempotency-Key": mutationKey() }, body: JSON.stringify({ listed: !next }) });
-      setListing({ unlisted: next, saving: false });
+      setListing({ unlisted: next, saving: false, error: "" });
     } catch (error) {
-      setListing({ unlisted, saving: false });
-      setState({ busy: false, error: friendlyError(error, t), result: null });
+      setListing({ unlisted, saving: false, error: friendlyError(error, t) });
     }
   }
-  const shareUrl = live ? (state.result?.public_url ?? publicUrl) : null;
-  const goToBuild = () => navigate(creatorFactoryPath(productId, "build", "generation"));
-  return <section className={`sx-summary${live ? " is-live" : ""}`}>
+  const shareUrl = info.is_live === true ? publicUrl : null;
+  return <section className="sx-summary">
     <div>
-      <h2>{live ? t("sxStatusLive") : t("sxStatusDraft")}</h2>
-      {live && info.published_at ? <p>{t("sxPublishedAt", dateTime(info.published_at, locale))}</p> : null}
-      {live && pending.length ? <p className="sx-summary__pending">{t("sxPendingChanges")}</p> : null}
-      {!info.can_publish ? <p>{t("sxBuildIncomplete")} <button type="button" className="sx-link" onClick={goToBuild}>{t("sxGoToBuild")}</button></p> : null}
       <Checkbox className={`sx-listing${listing.saving ? " is-saving" : ""}`} checked={unlisted} disabled={listing.saving} onCheckedChange={(checked) => void setUnlisted(checked === true)} label={t("sxUnlisted")} />
       {shareUrl ? <p className="sx-summary__link"><a className="sx-link" href={safePublicUrl(shareUrl)} target="_blank" rel="noreferrer">{absoluteUrl(shareUrl)}</a><button type="button" className="sx-link" onClick={() => void copy(shareUrl)}><Copy aria-hidden="true" />{copied ? t("copied") : t("copyLink")}</button></p> : null}
     </div>
-    <Button className="web-btn-yolk" type="button" loading={state.busy} disabled={!info.can_publish || (live && pending.length === 0)} onClick={publish}>{live ? t("sxUpdateAction") : t("sxPublishAction")}</Button>
-    {state.error ? <div className="sx-summary__note"><InlineError>{state.error}</InlineError></div> : null}
-    {state.result ? <div className="sx-summary__note"><SuccessNotice>{t("sxPublishedNotice")}</SuccessNotice></div> : null}
+    {listing.error ? <div className="sx-summary__note"><InlineError>{listing.error}</InlineError></div> : null}
   </section>;
 }
 
