@@ -348,53 +348,6 @@ function Memory({ t }: { t: LandingCopy }) {
   );
 }
 
-function Proactive({ t }: { t: LandingCopy }) {
-  const ref = useRef<HTMLElement>(null);
-  const [p, setP] = useState(0);
-  useEffect(() => {
-    const onScroll = () => {
-      const el = ref.current;
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      setP(Math.min(1, Math.max(0, -r.top / Math.max(1, r.height - window.innerHeight))));
-    };
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-  }, []);
-  const k = Math.min(1, Math.max(0, (p - 0.3) / 0.35));
-  return (
-    <section className="pro-scroll" ref={ref}>
-      <div className="pro-sticky">
-        <span className="pill">{t.proLabel}</span>
-        <h2 className="title center">{t.proTitle}</h2>
-        <p className="lead center">{t.proBody}</p>
-        <div className="pro-cards">
-          <div className="pro-card" style={{ transform: `scale(${1 - 0.06 * k})`, opacity: 1 - 0.5 * k }}>
-            <Photo className="fill" id="pro" alt={t.proPhoto.alt} />
-            <div className="pro-bubble">
-              <Egg size={20} />
-              <p>{t.proBubble}</p>
-            </div>
-          </div>
-          <div className="pro-card pro-card-2" style={{ transform: `translateY(${(1 - k) * 110}%)` }}>
-            <Photo className="fill" id="pro2" alt={t.proPhoto2.alt} />
-            <div className="glass pro-tasks">
-              {t.proTasks.map((task, i) => (
-                <p key={task.t} className={p > 0.7 + i * 0.07 ? "done" : ""}>
-                  <i className="ring" />
-                  <span><b>{task.t}</b><small>{task.m}</small></span>
-                </p>
-              ))}
-            </div>
-          </div>
-          <div className="pro-dots"><i className={k < 0.5 ? "on" : ""} /><i className={k >= 0.5 ? "on" : ""} /></div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
 function useInView<T extends HTMLElement>() {
   const ref = useRef<T>(null);
   const [inView, setInView] = useState(false);
@@ -777,7 +730,6 @@ export default function HatchPage() {
 
       <Reveal key={`reveal-${lang}`} segments={t.revealSegments} />
       <Memory t={t} />
-      <Proactive t={t} />
 
       <Asset t={t} />
 
