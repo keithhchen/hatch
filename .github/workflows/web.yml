@@ -78,6 +78,8 @@ jobs:
           npm ci
           npm test
           npm run build
+          npx playwright install --with-deps chromium-headless-shell
+          npm run test:smoke
           npm run build-storybook
       - uses: docker/setup-buildx-action@v3
       - name: Build Dashboard container
