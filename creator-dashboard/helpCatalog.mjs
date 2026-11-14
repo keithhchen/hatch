@@ -1,8 +1,10 @@
+import { LOCALES } from "./localeCore.mjs";
+
 // The Help catalog: every article and video Hatch publishes, as data. The Help pages, the Studio node explainers,
 // the server's SEO head and the sitemap all read this one list; adding an item here adds it everywhere.
 // Video files live in public/assets/web/ and are published to OSS by Web CI (see .github/workflows/web.yml).
 // `tipLabel` names the node's entry in Studio ("<Node> tips"). The voice-over is English in every file; only the burned-in subtitles differ. `en` is the version without subtitles and the fallback for any other locale.
-export const HELP_LOCALES = Object.freeze(["en", "zh", "ja"]);
+export const HELP_LOCALES = LOCALES;
 export const HELP_KINDS = Object.freeze(["video", "article"]);
 export const LOCAL_MEDIA_BASE = "/assets/web";
 

@@ -1,17 +1,10 @@
+import { LOCALES, documentLanguage, normalizeLocale, pickLocale } from "../localeCore.mjs";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
-export const LOCALES = ["en", "zh", "ja"];
+export { LOCALES, documentLanguage, normalizeLocale };
 export const LOCALE_STORAGE_KEY = "hatch.locale";
 
 const LocaleContext = createContext(null);
-
-export function normalizeLocale(value) {
-  const locale = String(value ?? "").trim().toLowerCase();
-  if (locale === "zh" || locale.startsWith("zh-")) return "zh";
-  if (locale === "ja" || locale.startsWith("ja-")) return "ja";
-  if (locale === "en" || locale.startsWith("en-")) return "en";
-  return null;
-}
 
 export function readInitialLocale(storage, browser) {
   try {
@@ -22,15 +15,7 @@ export function readInitialLocale(storage, browser) {
   }
   const browserSettings = browser ?? globalThis.navigator;
   const candidates = browserSettings?.languages?.length ? browserSettings.languages : [browserSettings?.language];
-  for (const candidate of candidates ?? []) {
-    const locale = normalizeLocale(candidate);
-    if (locale) return locale;
-  }
-  return "en";
-}
-
-export function documentLanguage(locale) {
-  return locale === "zh" ? "zh-CN" : locale === "ja" ? "ja-JP" : "en";
+  return pickLocale(candidates);
 }
 
 export function LocaleProvider({ children }) {

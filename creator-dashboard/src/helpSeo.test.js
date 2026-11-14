@@ -1,17 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { HELP_ORIGIN, acceptedLocale, helpPage, injectHelpPage, robotsTxt, sitemapXml } from "../helpSeo.mjs";
+import { HELP_ORIGIN, helpPage, injectHelpPage, robotsTxt, sitemapXml } from "../helpSeo.mjs";
 
 const SHELL = '<!doctype html><html lang="en"><head><title>Hatch</title></head><body><div id="root"></div></body></html>';
 const MEDIA = "https://oss.example/desktop/web/abc";
 
-test("Accept-Language picks zh, ja or en by quality and defaults to en", () => {
-  assert.equal(acceptedLocale("zh-CN,zh;q=0.9,en;q=0.8"), "zh");
-  assert.equal(acceptedLocale("ja-JP"), "ja");
-  assert.equal(acceptedLocale("fr, en;q=0.5, ja;q=0.9"), "ja");
-  assert.equal(acceptedLocale("ja;q=0, en"), "en");
-  assert.equal(acceptedLocale("fr-FR"), "en");
-  assert.equal(acceptedLocale(undefined), "en");
+const langOf = header => helpPage("/help", header).lang;
+
+test("Accept-Language picks zh, ja or en by quality, through the shared locale rules, and defaults to en", () => {
+  assert.equal(langOf("zh-CN,zh;q=0.9,en;q=0.8"), "zh");
+  assert.equal(langOf("ja-JP"), "ja");
+  assert.equal(langOf("fr, en;q=0.5, ja;q=0.9"), "ja");
+  assert.equal(langOf("ja;q=0, en"), "en");
+  assert.equal(langOf("fr-FR"), "en");
+  assert.equal(langOf(undefined), "en");
 });
 
 test("non-help paths are not handled; an unknown slug is a 404", () => {
