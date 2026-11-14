@@ -216,3 +216,6 @@
 .node-explainer-card__poster svg { width: 36px; height: 36px; padding: 9px; border-radius: 50%; background: rgba(0, 0, 0, .55); color: #fff; transition: transform .15s ease; }
 .node-explainer-card:hover .node-explainer-card__poster svg, .node-explainer-card:focus-visible .node-explainer-card__poster svg { transform: scale(1.08); }
 .node-explainer-card__label { font-size: 13px; font-weight: 500; }
+.factory-upload-layout { display: grid; grid-template-columns: minmax(0, 880px) 260px; gap: 32px; align-items: start; }
+.factory-upload-side:empty { display: none; }
+@media (max-width: 1100px) { .factory-upload-layout { grid-template-columns: minmax(0, 1fr); } .factory-upload-side { order: -1; max-width: 320px; } }

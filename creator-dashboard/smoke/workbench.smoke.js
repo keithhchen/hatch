@@ -37,3 +37,15 @@ for (const [name, path, ready] of [
     expect(errors).toEqual([]);
   });
 }
+
+test("first Agent, empty Interview: the tips player opens once and does not play", async ({ page }) => {
+  await page.route(/\/v1\/creator\/products$/, route => route.fulfill(json({ products: [{ product_id: PRODUCT }] })));
+  await page.goto(`/studio/factory/${PRODUCT}/sources/voice`);
+  const video = page.locator("video.node-explainer__video");
+  await expect(video).toBeVisible();
+  expect(await video.evaluate(element => element.paused && !element.autoplay)).toBe(true);
+  await page.keyboard.press("Escape");
+  await page.reload();
+  await expect(page.locator(".factory-chat textarea")).toBeVisible();
+  await expect(video).toHaveCount(0);
+});

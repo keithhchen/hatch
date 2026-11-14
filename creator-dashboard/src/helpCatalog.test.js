@@ -41,7 +41,7 @@ test("lookup by id and by node; unknown ids are null", () => {
 test("groups follow kind order and omit empty kinds", () => {
   const groups = helpGroups("en");
   assert.deepEqual(groups.map(group => group.kind), ["video"]);
-  assert.equal(groups[0].items[0].id, "interview");
+  assert.deepEqual(groups[0].items.map(item => item.id), ["upload", "interview"]);
   const withArticle = [...HELP_ITEMS, { id: "a", kind: "article", copy: { en: { title: "A", description: "d" } } }];
   assert.deepEqual(helpGroups("ja", undefined, withArticle).map(group => group.kind), ["video", "article"]);
 });

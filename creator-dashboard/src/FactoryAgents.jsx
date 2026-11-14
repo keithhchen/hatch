@@ -92,6 +92,8 @@ export function FactoryAgents({ productId, tab = "build", section, agent, naviga
   const refreshConfig = () => api(`${root}/config`).then(value => { setConfig(value); if (value.agents) setAgents(value.agents); if (value.manualFiles) setManualFiles(value.manualFiles); }).catch(e => setError(e.message));
   const refreshProduct = () => api(`/v1/creator/products/${encodeURIComponent(productId)}`).then(value => setProduct(value.product ?? value)).catch(e => setError(e.message));
   useEffect(() => { refreshConfig(); refreshProduct(); return subscribeFactoryEvents({ url: `${root}/events`, onMessage: event => { const value = JSON.parse(event.data); if (value.type === "snapshot") applyNavigation(value); }, onOpen: () => { refreshConfig(); refreshProduct(); } }); }, [productId, root, t]);
+  const [firstAgent, setFirstAgent] = useState(false);
+  useEffect(() => { api("/v1/creator/products").then(value => { const list = value.products ?? value; setFirstAgent(Array.isArray(list) && list.length === 1); }).catch(() => setFirstAgent(false)); }, []);
   const agentEntry = role => agents.find(item => item.role === role);
   const agentName = role => localizeAgentText(agentEntry(role)?.name, locale);
   const agentSession = role => sessions.filter(item => item.role === role).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
@@ -135,7 +137,7 @@ export function FactoryAgents({ productId, tab = "build", section, agent, naviga
     <ErrorNotice error={error} onClose={() => setError("")} />
     {selected === "uploads" && preview && manualFiles.some(file => file.path === preview.path) ? <FileViewer key={preview.path} root={root} running={false} id={preview.id} record={manualFiles.find(file => file.path === preview.path)} siblings={manualFiles} onOpenFile={path => setPreview({ ...preview, path })} onClose={() => setPreview(null)} t={t} perform={async fn => { try { await fn(); refreshConfig(); } catch (e) { setError(factoryError(e, t, agentName)); } }} /> : null}
     {step ? <div className="factory-step">
-      {selected === "uploads" ? <SourceUploadWorkspace manualFiles={manualFiles} uploadItems={uploadItems} importPicker={importPicker} uploadProjectFiles={uploadProjectFiles} saveManualText={saveManualText} locale={locale} onOpenFile={previewFile} deleteManualFile={deleteManualFile} dismissUpload={dismissUpload} onOpenAgent={openAgent} t={t} /> : selectedSession ? <Workspace key={selectedSession.id} root={root} id={selectedSession.id} entry={selectedEntry} agents={agents} config={config} onChanged={() => undefined} onOpenAgent={openAgent} agentName={agentName} locale={locale} t={t} /> : <AgentIntro entry={selectedEntry} agents={agents} onOpenAgent={openAgent} agentName={agentName} locale={locale} t={t} />}
+      {selected === "uploads" ? <SourceUploadWorkspace autoTips={Boolean(config) && firstAgent && !manualFiles.length && !uploadItems.length} manualFiles={manualFiles} uploadItems={uploadItems} importPicker={importPicker} uploadProjectFiles={uploadProjectFiles} saveManualText={saveManualText} locale={locale} onOpenFile={previewFile} deleteManualFile={deleteManualFile} dismissUpload={dismissUpload} onOpenAgent={openAgent} t={t} /> : selectedSession ? <Workspace key={selectedSession.id} firstAgent={firstAgent} root={root} id={selectedSession.id} entry={selectedEntry} agents={agents} config={config} onChanged={() => undefined} onOpenAgent={openAgent} agentName={agentName} locale={locale} t={t} /> : <AgentIntro entry={selectedEntry} agents={agents} onOpenAgent={openAgent} agentName={agentName} locale={locale} t={t} />}
     </div> : <FactoryOverview product={product} states={states} agentEntry={agentEntry} agentName={agentName} goToStep={goToStep} t={t} />}
   </div></ThemeProvider>;
 }
@@ -190,11 +192,11 @@ function AgentIntro({ entry, agents, onOpenAgent, agentName, locale, t }) {
 const UPLOAD_ERROR_TEXT = { upload_timeout: "uploadTimedOut", upload_failed: "uploadNetworkFailed", unsupported_media_type: "unsupportedType" };
 const uploadStatusLabel = t => record => t({ uploading: "uploading", ingesting: "ingesting", failed: "uploadFailed", partial: "ingestPartial", unsupported: "fileTooLarge" }[record.status]);
 
-function SourceUploadWorkspace({ onOpenFile, manualFiles, uploadItems, importPicker, uploadProjectFiles, saveManualText, locale, deleteManualFile, dismissUpload, onOpenAgent, t }) {
+function SourceUploadWorkspace({ autoTips, onOpenFile, manualFiles, uploadItems, importPicker, uploadProjectFiles, saveManualText, locale, deleteManualFile, dismissUpload, onOpenAgent, t }) {
   const [dragging, setDragging] = useState(false);
   const records = [...(uploadItems || []), ...(manualFiles || [])];
   const statusLabel = uploadStatusLabel(t);
-  return <section className="factory-upload-page">
+  return <div className="factory-upload-layout"><section className="factory-upload-page">
     <div className="factory-upload-intro"><h2>{t("uploadSources")}</h2><p>{t("factoryYouDoRole", "uploads")}</p></div>
     <button type="button" className={`factory-dropzone${dragging ? " is-dragging" : ""}`} onClick={() => importPicker.current?.click()} onDragOver={event => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={event => { event.preventDefault(); setDragging(false); uploadProjectFiles([...event.dataTransfer.files]); }}>
       <UploadFile aria-hidden="true" /><strong>{t("factoryUploadDrop")}</strong>
@@ -203,7 +205,7 @@ function SourceUploadWorkspace({ onOpenFile, manualFiles, uploadItems, importPic
     <ImportFromAi saveManualText={saveManualText} locale={locale} t={t} />
     <FileList title={t("factoryUploadedTitle")} records={records} onOpen={onOpenFile} onDelete={record => record.id ? dismissUpload(record.id) : deleteManualFile(record)} onRetry={record => record.retry?.()} statusLabel={statusLabel} t={t} />
     <HatchButton variant="secondary" trailing={<ArrowRight aria-hidden="true" />} onClick={() => onOpenAgent("voice")}>{t("factoryUploadNext")}</HatchButton>
-  </section>;
+  </section><aside className="factory-upload-side"><NodeExplainer node="upload" locale={locale} autoOpen={autoTips} /></aside></div>;
 }
 
 function ImportFromAi({ saveManualText, locale, t }) {
@@ -226,7 +228,7 @@ function ImportFromAi({ saveManualText, locale, t }) {
   </>;
 }
 
-function Workspace({ root, id, entry, agents, config, onChanged, onOpenAgent, agentName, locale, t }) {
+function Workspace({ firstAgent, root, id, entry, agents, config, onChanged, onOpenAgent, agentName, locale, t }) {
   const [error, setError] = useState(""); const [file, setFile] = useState(null); const [busy, setBusy] = useState(false);
   const [chat, setChat] = useState(null);
   useEffect(() => {
@@ -241,7 +243,7 @@ function Workspace({ root, id, entry, agents, config, onChanged, onOpenAgent, ag
   const running = session.status === "running"; const locked = entry?.state === "locked"; const visibleSession = { ...session, files: session.files.filter(record => !record.path.startsWith("input/handoff/")) };
   const { controller } = chat;
   const useLatest = () => perform(async () => { controller.setDraft(t("useLatestMessage", session.role)); await controller.send(); });
-  return <div className="factory-workspace"><div className="factory-workspace-pane factory-workspace-main"><ChatPanel chat={chat} dictation={dictation} session={visibleSession} entry={entry} config={config} busy={busy} locked={locked} locale={locale} onOpenFile={setFile} onUseLatest={useLatest} agentName={agentName} t={t} /></div><div className="factory-workspace-pane factory-workspace-side"><InspectorPanel entry={entry} agents={agents} session={visibleSession} root={root} id={id} running={running} busy={busy} file={file} setFile={setFile} agentName={agentName} onOpenAgent={onOpenAgent} locale={locale} t={t} perform={perform} /><ErrorNotice error={error} onClose={() => setError("")} /></div></div>;
+  return <div className="factory-workspace"><div className="factory-workspace-pane factory-workspace-main"><ChatPanel chat={chat} dictation={dictation} session={visibleSession} entry={entry} config={config} busy={busy} locked={locked} locale={locale} onOpenFile={setFile} onUseLatest={useLatest} agentName={agentName} t={t} /></div><div className="factory-workspace-pane factory-workspace-side"><InspectorPanel firstAgent={firstAgent} entry={entry} agents={agents} session={visibleSession} root={root} id={id} running={running} busy={busy} file={file} setFile={setFile} agentName={agentName} onOpenAgent={onOpenAgent} locale={locale} t={t} perform={perform} /><ErrorNotice error={error} onClose={() => setError("")} /></div></div>;
 }
 
 const noopSubscribe = () => () => undefined; const nullSession = () => null;
@@ -296,7 +298,7 @@ function ChatPanel({ chat, dictation, session, entry, config, busy, locked, loca
 
 const FILE_PAGE_SIZE = 8;
 const IMAGE_FILE = /\.(jpe?g|png|webp)$/i;
-function InspectorPanel({ entry, agents, session, root, id, running, busy, file, setFile, agentName, onOpenAgent, locale, t, perform }) {
+function InspectorPanel({ firstAgent, entry, agents, session, root, id, running, busy, file, setFile, agentName, onOpenAgent, locale, t, perform }) {
   const inputFiles = session.files.filter(record => record.path.startsWith("input/") && !record.path.startsWith("input/handoff/")); const outputFiles = session.files.filter(record => record.path.startsWith("output/"));
   const selectedFile = file ? session.files.find(record => record.path === file) : null;
   const [filesTab, setFilesTab] = useState("input");
@@ -305,7 +307,7 @@ function InspectorPanel({ entry, agents, session, root, id, running, busy, file,
   // An HTML output opens in the floating page panel; everything else opens in the file dialog.
   const openOutput = path => { if (/\.html$/i.test(path)) { setHtmlPage({ url: fileUrl(path), title: path.split("/").at(-1) }); setHtmlMode("open"); } else setFile(path); };
   const htmlViewer = { page: htmlPage, mode: htmlMode, setMode: setHtmlMode, setTitle: () => undefined };
-  return <Box component="aside" className="factory-inspector" aria-label={t("nextSteps")} sx={{ height: "100%", minWidth: 0, display: "flex", flexDirection: "column", bgcolor: "var(--hatch-ui-surface-sidebar)" }}>{entry && entry.state !== "complete" ? <div className="factory-inspector-status"><AgentState entry={entry} agentName={agentName} t={t} /></div> : null}<Box className="factory-inspector-scroll" sx={{ overflow: "auto", flex: 1, minHeight: 0, p: 1.5 }}><NodeExplainer node={explainerNodeForRole(session.role)} locale={locale} />{entry && <NextSteps entry={entry} agents={agents} onOpenAgent={onOpenAgent} agentName={agentName} t={t} />}<div className="fl-panel"><div className="fl-panel__head"><div className="fl-tabs" role="tablist" aria-label={t("files")}>{[["input", "attachments"], ["output", "outputs"]].map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={filesTab === key} className={filesTab === key ? "is-active" : ""} onClick={() => setFilesTab(key)}>{t(label)}</button>)}</div>{filesTab === "input" ? <HatchButton size="small" variant="secondary" onClick={() => onOpenAgent("uploads")}>{t("addFiles")}</HatchButton> : null}</div>{filesTab === "input" ? <FileList key="input" records={inputFiles} pageSize={FILE_PAGE_SIZE} onOpen={setFile} onDelete={record => perform(() => api(endpoint(root, id, "files"), { method: "DELETE", body: { path: record.path } }))} deletable={record => !running && /^input\/manual\//.test(record.path)} t={t} /> : <FileList key="output" records={outputFiles} pageSize={FILE_PAGE_SIZE} onOpen={openOutput} thumbnail={record => IMAGE_FILE.test(record.path) ? fileUrl(record.path) : undefined} t={t} />}</div><PagePanel viewer={htmlViewer} t={t} />{selectedFile && <FileViewer key={file} root={root} running={running} id={id} record={selectedFile} siblings={selectedFile.path.startsWith("output/") ? outputFiles : inputFiles} onOpenFile={setFile} onClose={() => setFile(null)} t={t} perform={perform} />}</Box></Box>;
+  return <Box component="aside" className="factory-inspector" aria-label={t("nextSteps")} sx={{ height: "100%", minWidth: 0, display: "flex", flexDirection: "column", bgcolor: "var(--hatch-ui-surface-sidebar)" }}>{entry && entry.state !== "complete" ? <div className="factory-inspector-status"><AgentState entry={entry} agentName={agentName} t={t} /></div> : null}<Box className="factory-inspector-scroll" sx={{ overflow: "auto", flex: 1, minHeight: 0, p: 1.5 }}><NodeExplainer node={explainerNodeForRole(session.role)} locale={locale} autoOpen={firstAgent && !session.messages.length} />{entry && <NextSteps entry={entry} agents={agents} onOpenAgent={onOpenAgent} agentName={agentName} t={t} />}<div className="fl-panel"><div className="fl-panel__head"><div className="fl-tabs" role="tablist" aria-label={t("files")}>{[["input", "attachments"], ["output", "outputs"]].map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={filesTab === key} className={filesTab === key ? "is-active" : ""} onClick={() => setFilesTab(key)}>{t(label)}</button>)}</div>{filesTab === "input" ? <HatchButton size="small" variant="secondary" onClick={() => onOpenAgent("uploads")}>{t("addFiles")}</HatchButton> : null}</div>{filesTab === "input" ? <FileList key="input" records={inputFiles} pageSize={FILE_PAGE_SIZE} onOpen={setFile} onDelete={record => perform(() => api(endpoint(root, id, "files"), { method: "DELETE", body: { path: record.path } }))} deletable={record => !running && /^input\/manual\//.test(record.path)} t={t} /> : <FileList key="output" records={outputFiles} pageSize={FILE_PAGE_SIZE} onOpen={openOutput} thumbnail={record => IMAGE_FILE.test(record.path) ? fileUrl(record.path) : undefined} t={t} />}</div><PagePanel viewer={htmlViewer} t={t} />{selectedFile && <FileViewer key={file} root={root} running={running} id={id} record={selectedFile} siblings={selectedFile.path.startsWith("output/") ? outputFiles : inputFiles} onOpenFile={setFile} onClose={() => setFile(null)} t={t} perform={perform} />}</Box></Box>;
 }
 
 function FileViewer({ root, running, id, record, siblings, onOpenFile, onClose, onAddToChat, t, perform }) {

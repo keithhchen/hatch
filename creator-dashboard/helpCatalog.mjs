@@ -10,6 +10,20 @@ export const LOCAL_MEDIA_BASE = "/assets/web";
 
 export const HELP_ITEMS = Object.freeze([
   {
+    id: "upload",
+    kind: "video",
+    node: "upload",
+    published: "2026-11-14",
+    duration: "PT0M45S",
+    poster: "upload-poster.jpg",
+    video: { zh: "upload-16x9-zh.mp4", en: "upload-16x9-none.mp4", ja: "upload-16x9-ja.mp4" },
+    copy: {
+      en: { tipLabel: "Upload tips", title: "What to upload", description: "Why Hatch wants your richest, messiest material, and how it traces your method from the details. Your files stay yours: delete them any time, never used to train any AI." },
+      zh: { tipLabel: "上传小贴士", title: "该上传什么", description: "为什么 Hatch 想要你最丰富、最杂乱的资料，以及它怎样从细节里抽丝剥茧出你的方法。资料始终属于你，随时可删，绝不用于训练任何 AI。" },
+      ja: { tipLabel: "アップロードのコツ", title: "何をアップロードするか", description: "Hatch が多くて雑多な資料ほど歓迎する理由と、細部からあなたのやり方を見つけ出す仕組み。資料はあなたのもの。いつでも削除でき、どの AI の学習にも使いません。" }
+    }
+  },
+  {
     id: "interview",
     kind: "video",
     node: "interview",

@@ -6,9 +6,11 @@ import { explainerFor } from "./nodeExplainers.js";
 const MEDIA_BASE = import.meta.env?.VITE_HATCH_WEB_MEDIA_BASE_URL || undefined;
 
 /** tips card (poster + label) and modal player and modal player for one node; renders nothing for a node without a video. */
-export function NodeExplainer({ node, locale }) {
+export function NodeExplainer({ node, locale, autoOpen = false }) {
   const [open, setOpen] = React.useState(false);
   const video = explainerFor(node, locale, MEDIA_BASE);
+  // First Agent, nothing entered yet: open the player once per node (never autoplay).
+  React.useEffect(() => { if (autoOpen && video && !tipSeen(node)) { markTipSeen(node); setOpen(true); } }, [autoOpen, Boolean(video), node]);
   if (!video) return null;
   return <>
     <button type="button" className="node-explainer-card" onClick={() => setOpen(true)}>
@@ -22,3 +24,7 @@ export function NodeExplainer({ node, locale }) {
     </Dialog>
   </>;
 }
+
+const seenKey = node => `hatch-tips-seen:${node}`;
+function tipSeen(node) { try { return localStorage.getItem(seenKey(node)) === "1"; } catch { return false; } }
+function markTipSeen(node) { try { localStorage.setItem(seenKey(node), "1"); } catch { /* the player still opens; it may open again next time */ } }
