@@ -13,7 +13,7 @@ import { isProductLive } from "./studioPath.js";
 import { StudioPathCards } from "./studioPathCards.jsx";
 import { useLocale } from "./locale.jsx";
 import {
-  EmptyState, InlineError, LoadingState, PageBoundary, PageHeader, RouteProblem, SectionHead, StatusPill, STUDIO_ROOT as ROOT,
+  EmptyState, InlineError, LoadingState, PageBoundary, PageHeader, RegionBoundary, RouteProblem, SectionHead, StatusPill, STUDIO_ROOT as ROOT,
   arrayOf, dateOnly, dateTime, friendlyError, humanStatus, idOf, money, mutationKey, productName, publicPathOf, unwrap, useAgentPath, useCopy, useRemote,
   StepProgress,
 } from "./studioShellKit.jsx";
@@ -136,7 +136,9 @@ export function CreatorPortalV2({
           {onLogout ? <><MuiDivider /><MuiMenuItem onClick={() => { closeAccountMenu(); void onLogout(); }}><ListItemIcon><LogOut size={18} /></ListItemIcon><ListItemText primary={t("signOut")} /></MuiMenuItem></> : null}
         </MuiMenu>
         <main id="creator-main" className={`cpv2-main${workbench ? " cpv2-main--workbench" : ""}`} ref={mainRef}>
-          <CreatorRoute route={route} request={request} navigate={go} locale={locale} t={t} profile={profile} onProfileChange={onProfileChange} />
+          <RegionBoundary resetKey={pathname} t={t}>
+            <CreatorRoute route={route} request={request} navigate={go} locale={locale} t={t} profile={profile} onProfileChange={onProfileChange} />
+          </RegionBoundary>
         </main>
         <StudioCommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} request={request} navigate={go} t={t} navItems={navItems} />
       </div>

@@ -211,3 +211,8 @@
 /* Node explainer modal: 16:9 player that fits a phone */
 .hui-dialog.node-explainer { width: min(960px, calc(100vw - 24px)); max-width: none; }
 .node-explainer__video { display: block; width: 100%; aspect-ratio: 16 / 9; max-height: calc(100dvh - 140px); border-radius: 12px; background: #000; }
+.node-explainer-card { display: flex; flex-direction: column; gap: 6px; width: 100%; margin: 0 0 12px; padding: 0; border: 0; background: none; cursor: pointer; text-align: left; font: inherit; color: var(--hatch-ui-text, inherit); }
+.node-explainer-card__poster { position: relative; display: grid; place-items: center; width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; background: var(--hatch-ui-surface-muted, #eee) center / cover no-repeat; overflow: hidden; }
+.node-explainer-card__poster svg { width: 36px; height: 36px; padding: 9px; border-radius: 50%; background: rgba(0, 0, 0, .55); color: #fff; transition: transform .15s ease; }
+.node-explainer-card:hover .node-explainer-card__poster svg, .node-explainer-card:focus-visible .node-explainer-card__poster svg { transform: scale(1.08); }
+.node-explainer-card__label { font-size: 13px; font-weight: 500; }

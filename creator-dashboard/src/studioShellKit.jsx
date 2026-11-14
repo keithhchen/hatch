@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Button, InlineAlert, Skeleton, UnavailableState } from "@hatch/ui";
 import { formatMoney } from "./data.js";
+import { captureRenderError } from "./sentry.js";
 import { isProductLive, studioNextStep, studioPathStates } from "./studioPath.js";
 
 export const STUDIO_ROOT = "/studio";
@@ -44,6 +45,19 @@ export function PageBoundary({ resource, title, t, children }) {
   if (resource.state === "loading" || resource.state === "idle") return <LoadingState t={t} />;
   if (resource.state === "error") return <RouteProblem title={title} body={friendlyError(resource.error, t)} action={t("retry")} onAction={resource.retry} />;
   return <>{children(resource.data)}</>;
+}
+
+/** Keeps a render crash inside one region; the rest of Studio stays usable. Resets when resetKey changes. */
+export class RegionBoundary extends React.Component {
+  state = { error: null, key: this.props.resetKey };
+  static getDerivedStateFromError(error) { return { error }; }
+  static getDerivedStateFromProps(props, state) { return props.resetKey === state.key ? null : { error: null, key: props.resetKey }; }
+  componentDidCatch(error, details) { console.error("Studio region failed to render", error, details); captureRenderError(error, details); }
+  render() {
+    const { t, children } = this.props;
+    if (!this.state.error) return children;
+    return <RouteProblem title={t("regionCrashed")} body={t("regionCrashedBody")} action={t("retry")} onAction={() => this.setState({ error: null })} />;
+  }
 }
 
 export function PageHeader({ title, body, actions, children }) {
