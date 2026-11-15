@@ -48,8 +48,8 @@ test("Overview is a top tab, Advanced sits under the rail steps, Start Agent and
   assert.match(workspace, /\{ value: "overview", label: "sxNavOverview" \},\s*\{ value: "build"[^}]*\},\s*\{ value: "publish"/);
   assert.doesNotMatch(factory, /factory-rail__overview|factory-stepper__advanced/);
   assert.doesNotMatch(factory, /factory-advanced|factory-tasks/);
-  assert.match(factory, /aria-expanded=\{open\}/);
-  assert.match(factory, /localStorage\.getItem\(ADVANCED_OPEN_KEY\)/);
+  assert.match(factory, /<DropdownMenu label=\{t\("stepAdvanced"\)\}[^]*ADVANCED_STEPS\.map\(step => \(\{ value: step\.id/, "Advanced steps are a menu");
+  assert.doesNotMatch(factory, /ADVANCED_OPEN_KEY/);
   assert.match(factory, /<HatchButton type="button" size="small" variant="secondary" leading=\{<Play/);
   assert.doesNotMatch(factory, /line-through/);
   assert.match(factory.match(/<nav className="factory-rail"[^]*?<\/nav>/)[0], /<FactoryStepper/);
@@ -86,6 +86,6 @@ test("Inspiration sits after Publish but is not a step: no state, no progress; C
   assert.equal(studioStepForRoute("create", "content-creation"), "content");
   const { readFile } = await import("node:fs/promises");
   const jsx = await readFile(new URL("./FactoryAgents.jsx", import.meta.url), "utf8");
-  assert.match(jsx, /item\(INSPIRATION_STEP, "factory-stepper__aside"\)/, "the Inspiration entry is a stepper item");
+  assert.match(jsx, /row\(INSPIRATION_STEP, undefined, "factory-stepper__aside"\)/, "the Inspiration entry is a stepper item");
   assert.equal(INSPIRATION_STEP.items[0][1], "inspiration");
 });

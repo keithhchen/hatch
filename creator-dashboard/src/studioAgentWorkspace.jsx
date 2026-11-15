@@ -2,7 +2,7 @@
 // Overview, Build (Factory path) and Publish. Studio shows no version history.
 // Every control calls an existing Creator endpoint; nothing is simulated.
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ChevronDown, Copy, ExternalLink, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, ChevronDown, Copy, ExternalLink, Plus, Trash2, Link2 } from "lucide-react";
 import { Button, Checkbox, DropdownMenu, FormField, Input, Textarea } from "@hatch/ui";
 import { ApiKeysBanner } from "./ApiKeysBanner.jsx";
 import { FirstBuildIntro } from "./FirstBuildDialog.jsx";
@@ -35,20 +35,18 @@ export function StudioAgentWorkspace({ route, request, navigate, locale, t, prof
 
   return <div className={`sx-agent${tab === "build" ? " sx-agent--build" : ""}`}>
     <header className="sx-agent__head">
-      <button type="button" className="sx-crumb" onClick={() => navigate(`${STUDIO_ROOT}/products`)}><ArrowLeft aria-hidden="true" />{t("sxNavAgents")}</button>
-      <div className="sx-agent__row">
-        <div className="sx-agent__title">
-          <h1>{product ? productName(product, t) : "…"}</h1>
-          {product ? <StatusPill live={live} t={t} /> : null}
-          <FirstBuildIntro request={request} productId={productId} profile={profile} locale={locale} navigate={navigate} />
-        </div>
+      <div className="sx-agent__bar">
+        <button type="button" className="sx-crumb" aria-label={t("sxNavAgents")} title={t("sxNavAgents")} onClick={() => navigate(`${STUDIO_ROOT}/products`)}><ArrowLeft aria-hidden="true" /></button>
+        <h1>{product ? productName(product, t) : "…"}</h1>
+        {product ? <StatusPill live={live} t={t} /> : null}
+        <FirstBuildIntro request={request} productId={productId} profile={profile} locale={locale} navigate={navigate} />
+        <nav className="sx-tabs" aria-label={t("sxAgentTabs")}>
+          {TABS.map((item) => <a key={item.value} href={creatorProductPath(productId, item.value)} aria-current={tab === item.value ? "page" : undefined} className={tab === item.value ? "is-active" : ""} onClick={(event) => { event.preventDefault(); navigate(creatorProductPath(productId, item.value)); }}>
+            {t(item.label)}
+          </a>)}
+        </nav>
         {product ? <AgentHeaderActions product={product} live={live} t={t} /> : null}
       </div>
-      <nav className="sx-tabs" aria-label={t("sxAgentTabs")}>
-        {TABS.map((item) => <a key={item.value} href={creatorProductPath(productId, item.value)} aria-current={tab === item.value ? "page" : undefined} className={tab === item.value ? "is-active" : ""} onClick={(event) => { event.preventDefault(); navigate(creatorProductPath(productId, item.value)); }}>
-          {t(item.label)}
-        </a>)}
-      </nav>
     </header>
     <div className="sx-agent__body">
       {tab === "overview" ? <ApiKeysBanner request={request} navigate={navigate} t={t} /> : null}
@@ -70,7 +68,7 @@ function AgentHeaderActions({ product, live, t }) {
   return href ? <div className="sx-agent__actions">
     <DropdownMenu
       label={t("sxProductLinks")}
-      trigger={<Button variant="secondary" type="button" trailing={<ChevronDown aria-hidden="true" />}>{copied ? t("copied") : t("sxProductLinks")}</Button>}
+      trigger={<Button className="sx-links-btn" variant="secondary" type="button" leading={<Link2 aria-hidden="true" />} trailing={<ChevronDown aria-hidden="true" />}><span>{copied ? t("copied") : t("sxProductLinks")}</span></Button>}
       items={[
         { value: "copy", label: t("sxCopyProductLink"), icon: <Copy aria-hidden="true" />, onSelect: copyLink(href) },
         { value: "page", label: t("sxOpenProductPage"), icon: <ExternalLink aria-hidden="true" />, onSelect: () => open(href) },

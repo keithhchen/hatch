@@ -16,27 +16,23 @@
 .factory-app h1, .factory-app h2, .factory-app h3 { font-family: var(--web-sans); font-weight: 700; letter-spacing: -0.02em; color: var(--web-ink); }
 .factory-app pre, .factory-app code { font-family: var(--web-sans); }
 
-/* Step rail: the five steps beside the step content on wide screens. */
-.factory-app { display: grid; grid-template-columns: max-content minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 10px 20px; }
-.factory-rail { grid-column: 1; grid-row: 1 / span 2; min-width: 0; }
-.factory-rail { display: flex; flex-direction: column; gap: 14px; }
-.factory-stepper { display: flex; flex-direction: column; gap: 0; margin: 0; padding: 0; list-style: none; }
-.factory-stepper li { display: flex; flex-direction: column; }
-.factory-stepper .factory-stepper__sub button { padding-left: 28px; }
-.factory-stepper li:nth-child(n+6)::before { display: none; }
-.factory-stepper__caret { border-color: transparent !important; background: none !important; }
-.factory-stepper__caret svg { width: 16px; height: 16px; }
-.factory-stepper li + li::before { width: 2px; height: 14px; margin-left: 18px; border-radius: 2px; background: var(--web-rule); content: ""; }
-.factory-stepper button { display: flex; width: 100%; min-height: 52px; align-items: center; gap: 10px; padding: 6px 10px; border: 1px solid transparent; border-radius: 14px; background: none; color: var(--web-body); font-size: 14px; font-weight: 650; text-align: left; cursor: pointer; transition: background 160ms ease, box-shadow 160ms ease, color 160ms ease; }
+/* Step rail: a narrow column of status icon + short label beside the step content. Advanced steps are a menu. */
+.factory-app { display: grid; grid-template-columns: max-content minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 0 16px; }
+.factory-rail { grid-column: 1; grid-row: 1 / span 2; width: 76px; min-width: 0; overflow-y: auto; scrollbar-width: none; }
+.factory-stepper { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.factory-stepper > li { display: flex; flex-direction: column; }
+.factory-stepper > li.factory-stepper__aside { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--web-rule); }
+.factory-stepper button { display: flex; width: 100%; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; border: 1px solid transparent; border-radius: 14px; background: none; color: var(--web-body); font-size: 11px; font-weight: 650; line-height: 1.25; text-align: center; cursor: pointer; transition: background 160ms ease, color 160ms ease; }
 .factory-stepper button:hover { background: color-mix(in srgb, var(--web-card) 80%, transparent); color: var(--web-ink); }
-.factory-stepper__n { display: grid; width: 18px; height: 18px; flex: 0 0 18px; place-items: center; border: 2px solid var(--web-rule); border-radius: 50%; background: var(--web-card); color: var(--web-pass); font-size: 11px; font-weight: 700; line-height: 1; }
-.factory-stepper__text { display: flex; min-width: 0; flex-direction: column; gap: 1px; }
-.factory-stepper__text small { color: var(--web-muted); font-size: 12px; font-weight: 500; }
+.factory-stepper__label { display: -webkit-box; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.factory-stepper__n { display: grid; width: 22px; height: 22px; flex: 0 0 22px; place-items: center; border: 2px solid var(--web-rule); border-radius: 50%; background: var(--web-card); color: var(--web-pass); }
+.factory-stepper__n svg { width: 13px; height: 13px; stroke-width: 3; }
+.factory-stepper .is-done { padding: 6px 4px; color: var(--web-muted); font-weight: 550; }
 .factory-stepper .is-done .factory-stepper__n { border-color: var(--web-pass-soft); background: var(--web-pass-soft); }
 .factory-stepper .is-locked { color: var(--web-muted); }
 .factory-stepper .is-next .factory-stepper__n { border-color: var(--web-yolk); background: var(--web-yolk); }
 .factory-stepper .is-running .factory-stepper__n { border-color: var(--web-yolk); background: var(--web-yolk-soft); animation: factory-pulse 1.6s ease-in-out infinite; }
-.factory-stepper .is-current { border-color: var(--web-rule); background: var(--web-card); color: var(--web-ink); box-shadow: none; }
+.factory-stepper .is-current { border-color: var(--web-rule); background: var(--web-card); color: var(--web-ink); }
 .factory-app > .factory-step { grid-column: 2; grid-row: 2; }
 .factory-app > .factory-overview { grid-column: 1 / -1; grid-row: 1; }
 
@@ -113,23 +109,42 @@
 .factory-files__head span { color: var(--web-muted); }
 .factory-files__empty { margin: 0; padding: 20px; color: var(--web-muted); }
 
-/* Chat workbench */
-.factory-workspace { display: grid; flex: 1; min-height: 0; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; }
+/* Chat workbench: the chat is the canvas; sources open in a drawer. */
+.factory-workspace { position: relative; display: flex; flex: 1; min-height: 0; }
 .factory-workspace-pane { min-width: 0; min-height: 0; }
+.factory-workspace-main { display: flex; flex: 1 1 0; flex-direction: column; }
 .factory-workspace-loading { padding: 32px; }
+.factory-workspace-main { position: relative; }
+/* Floats in the chat card's corner instead of taking a row. */
+.factory-topbar { position: absolute; top: 10px; right: 12px; z-index: 3; display: flex; align-items: center; gap: 8px; pointer-events: none; }
+.factory-topbar > * { pointer-events: auto; }
+.factory-sources-button { box-shadow: var(--web-shadow); }
+.factory-chat .web-chat__thread { padding-top: 56px; }
 .factory-chat-empty { max-width: 520px; margin: 6vh auto; text-align: center; }
 .factory-chat-empty svg { width: 34px; height: 34px; color: var(--web-yolk); }
 .factory-chat-empty h3 { margin: 10px 0 0; font-size: 22px; }
 .factory-chat-empty p { margin: 10px 0 0; color: var(--web-body); font-size: 16px; line-height: 1.6; }
-.factory-chat.web-chat.web-chat--embedded { height: 100%; border-radius: 24px; background: var(--web-card); box-shadow: var(--web-shadow); }
+.factory-chat-empty .node-explainer-card { max-width: 360px; margin: 24px auto 0; }
+.factory-chat.web-chat.web-chat--embedded { flex: 1; min-height: 0; height: auto; border-radius: 20px; background: var(--web-card); box-shadow: var(--web-shadow); }
 .factory-chat .web-chat__main { flex: 1; min-height: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
-.factory-composer-toolbar { display: flex; flex-wrap: wrap; gap: 8px; max-width: 780px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 32px) 8px; box-sizing: border-box; width: 100%; }
+.factory-chat .web-chat__thread, .factory-chat .web-chat__dock { width: min(740px, 100%); }
+.factory-chat .web-chat__message--user .web-chat__bubble { background: var(--web-panel); color: var(--chat-ink); }
+.factory-chat .web-chat__message--user .web-chat__content code { background: rgba(23, 21, 15, .08); }
+/* The composer starts as one line; the textarea grows it. */
+.factory-chat .web-chat__composer { display: flex; flex-wrap: wrap; align-items: flex-end; border-radius: 24px; }
+.factory-chat .web-chat__composer > textarea { flex: 1; min-width: 0; min-height: 48px; padding: 13px 6px 11px 20px; }
+.factory-chat .web-chat__composer > .web-chat__images { flex: 1 0 100%; }
+.factory-chat .web-chat__composer > .web-chat__actions { min-height: 0; flex: none; padding: 0 8px 6px 0; }
+.factory-composer-toolbar { display: flex; flex-wrap: wrap; gap: 8px; width: 100%; }
 .factory-composer-toolbar:empty { display: none; }
 
-.factory-inspector { height: 100%; overflow: hidden; border-radius: 24px; background: color-mix(in srgb, var(--web-card) 60%, transparent) !important; }
-.factory-inspector-status { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; padding: 12px 14px 0; }
-.factory-inspector-scroll { scrollbar-gutter: stable; background: transparent; }
-.factory-app .factory-inspector .MuiPaper-outlined { border-color: var(--web-rule); border-radius: 18px; background: var(--web-card); }
+.factory-drawer { position: absolute; top: 0; right: -440px; bottom: 0; z-index: 6; display: flex; width: min(400px, 100%); flex-direction: column; overflow: hidden; border-radius: 20px; background: var(--web-card); box-shadow: var(--web-shadow-lift); visibility: hidden; transition: right 200ms ease, visibility 0s linear 200ms; }
+.factory-drawer.is-open { right: 0; visibility: visible; transition: right 200ms ease; }
+.factory-drawer.is-docked { position: static; flex: 0 0 380px; margin-left: 16px; box-shadow: var(--web-shadow); transition: none; }
+.factory-drawer-scrim { position: absolute; inset: 0; z-index: 5; border-radius: 20px; background: rgba(23, 21, 15, .18); }
+.factory-drawer__head { display: flex; align-items: center; gap: 4px; padding: 12px 12px 4px 18px; }
+.factory-drawer__head strong { flex: 1; font-size: 15px; }
+.factory-drawer__body { flex: 1; min-height: 0; overflow: auto; padding: 4px 14px 16px; scrollbar-gutter: stable; }
 
 .factory-app .MuiPaper-outlined { border-color: var(--web-rule); box-shadow: none; }
 .factory-app .MuiAccordion-root { border-color: var(--web-rule); border-radius: 14px !important; background: var(--web-paper); box-shadow: none; }
@@ -167,45 +182,38 @@
 @keyframes factory-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(245, 183, 0, 0.45); } 50% { box-shadow: 0 0 0 6px rgba(245, 183, 0, 0); } }
 @media (prefers-reduced-motion: reduce) { .factory-app *, .factory-app *::before { animation: none !important; transition: none !important; } }
 
-@media (max-width: 1500px) {
-  .factory-workspace { grid-template-columns: minmax(0, 1fr) 300px; }
-}
+@media (min-width: 1024px) and (max-width: 1439px) { .factory-chat .web-chat__thread { padding-inline: 20px; } }
 
-@media (min-width: 1181px) { .factory-stepper .factory-stepper__aside::before { width: auto; height: 0; margin: 8px 0; border-top: 1px solid var(--web-rule); border-radius: 0; background: none; } }
-
-/* Medium widths: the rail becomes a horizontal stepper above the content. */
-@media (max-width: 1180px) {
-  .factory-app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); align-content: start; gap: 14px 8px; }
-  .factory-rail { grid-column: 1; grid-row: 1; }
-  .factory-rail { flex-direction: row; flex-wrap: wrap; align-items: center; align-content: flex-start; align-self: start; gap: 8px; }
-  .factory-stepper { min-width: 0; flex: 1 1 100%; overflow-x: auto; scrollbar-width: none; }
+/* Below 1024px the rail is a horizontal step bar above the chat. */
+@media (max-width: 1023px) {
+  .factory-app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); align-content: start; gap: 8px; }
+  .factory-rail { grid-column: 1; grid-row: 1; width: auto; overflow: visible; }
+  .factory-stepper { flex-direction: row; align-items: center; gap: 2px; overflow-x: auto; scrollbar-width: none; }
   .factory-stepper::-webkit-scrollbar { display: none; }
-  .factory-stepper { flex-direction: row; gap: 6px; }
-  .factory-stepper li { flex-direction: row; align-items: center; }
-  .factory-stepper li + li::before { width: 14px; height: 2px; margin: 0 6px 0 0; }
-  .factory-stepper button { width: auto; min-height: 44px; padding: 0 14px 0 6px; white-space: nowrap; }
-  .factory-stepper__text small { display: none; }
+  .factory-stepper > li { flex: 0 0 auto; flex-direction: row; }
+  .factory-stepper > li.factory-stepper__aside { margin: 0 0 0 4px; padding: 0 0 0 4px; border-top: 0; border-left: 1px solid var(--web-rule); }
+  .factory-stepper button { width: auto; min-height: 36px; flex-direction: row; gap: 6px; padding: 0 12px 0 8px; font-size: 13px; white-space: nowrap; }
+  .factory-stepper .is-done { padding: 0 8px; }
+  .factory-stepper .is-done:not(.is-current) .factory-stepper__label { display: none; }
+  .factory-stepper__label { display: block; -webkit-line-clamp: unset; }
   .factory-app > .factory-step { grid-column: 1 / -1; grid-row: 2; min-height: 0; }
-  .factory-workspace { grid-template-columns: minmax(0, 1fr) 280px; }
 }
 
 /* Phones and small tablets: the page scrolls as one column. */
 @media (max-width: 900px) {
-  /* The chat takes the screen under the top bar, its composer at the bottom, as the product chat does; the files follow below. */
-  .factory-chat.web-chat.web-chat--embedded { height: max(460px, calc(100dvh - var(--cpv2-topbar))); scroll-margin-top: var(--cpv2-topbar); }
+  .factory-chat.web-chat.web-chat--embedded { height: max(420px, calc(100dvh - var(--cpv2-topbar) - 190px)); flex: none; }
   .factory-app, .factory-step, .factory-overview { height: auto; overflow: visible; }
   .factory-app--workbench .factory-step { overflow: visible; }
-  .factory-stepper { flex-wrap: wrap; overflow: visible; gap: 2px; }
-  .factory-stepper .factory-stepper__aside::before { display: none; }
-  .factory-stepper .factory-stepper__sub button { padding-left: 18px; }
-  .factory-stepper li + li::before { width: 6px; margin-right: 2px; }
-  .factory-stepper button { padding: 0 8px 0 4px; gap: 6px; font-size: 13px; }
-  .factory-workspace { grid-template-columns: 1fr; }
-  .factory-inspector { height: auto; }
+  .factory-workspace { min-height: 0; }
   .factory-path__step { grid-template-columns: 40px minmax(0, 1fr) 20px; gap: 12px; padding: 16px; }
   .factory-path__state { grid-column: 2; grid-row: 2; justify-self: start; }
   .factory-path__step > svg { grid-column: 3; grid-row: 1 / span 2; }
   .factory-path__n { font-size: 28px; }
+}
+@media (max-width: 640px) {
+  .factory-stepper button:not(.is-current) .factory-stepper__label { display: none; }
+  .factory-stepper button:not(.is-current) { padding: 0 8px; }
+  .factory-drawer { border-radius: 16px; }
 }
 
 /* Node explainer modal: 16:9 player that fits a phone */

@@ -271,6 +271,25 @@ export function withoutRepeatedSteps(messages) {
 }
 
 /**
+ * Replies that only passed through steps (no text) and follow one another fold into the first of them,
+ * so a stretch of steps is one row. `kinds` are the activity kinds the host shows.
+ */
+export function foldStepOnlyMessages(messages, kinds = ACTIVITY_KINDS) {
+  const stepsOnly = message => {
+    if (message.role !== "assistant" || message.transient) return false;
+    const entries = ChatTimeline.fromHistory(message);
+    return entries.length > 0 && entries.every(entry => kinds.includes(entry.kind));
+  };
+  const folded = [];
+  for (const message of messages) {
+    const last = folded.at(-1);
+    if (last && stepsOnly(last) && stepsOnly(message)) folded[folded.length - 1] = { ...last, foldedMessages: [...(last.foldedMessages ?? []), message] };
+    else folded.push(message);
+  }
+  return folded;
+}
+
+/**
  * A message the user submitted that the Runtime has not yet confirmed. `clientMessageId` is minted when the user sends
  * and is the message's id everywhere. With `stableId` the placeholder carries that id, so the saved row replaces it by id;
  * without it the placeholder is matched to the saved row by Run and role.

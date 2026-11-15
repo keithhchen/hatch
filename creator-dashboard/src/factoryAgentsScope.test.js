@@ -24,7 +24,8 @@ test('Agent workspace header uses the real Product name and the inspector keeps 
   assert.doesNotMatch(source, /<Typography variant="subtitle1" fontWeight=\{750\}>\{t\("nextSteps"\)\}<\/Typography>/);
   assert.doesNotMatch(source, /backToStage/);
   assert.doesNotMatch(source, /<Refresh/);
-  assert.match(source, /entry\?\.state === "complete" \|\| entry\?\.state === "update_available"/);
+  assert.doesNotMatch(source, /function AgentState|<AgentState/);
+  assert.match(source, /session\.messages\.length === 0 \? <HatchButton[^\n]*startAgentLabel/);
 });
 
 test('Published Products expose their canonical public link in the Agent header and Agent rows', async () => {
@@ -213,15 +214,22 @@ test('Factory chat keeps its start and update buttons in the shared chat dock', 
   assert.match(styles, /\.factory-composer-toolbar\s*\{/);
 });
 
-test('Factory workbench is a two-pane chat grid inside the Studio shell', async () => {
+test('Factory workbench is a chat canvas with a sources drawer inside the Studio shell', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   const portalStyles = await readFile(new URL('./creatorPortalV2.css', import.meta.url), 'utf8');
   const factoryStyles = await readFile(new URL('./factoryAgents.css', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /factory-stage-rail|react-resizable-panels/);
-  assert.match(source, /className="factory-workspace"/);
-  assert.match(factoryStyles, /\.factory-workspace\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 340px/);
+  assert.match(source, /className=\{`factory-workspace\$\{docked \? " is-docked" : ""\}`\}/);
+  assert.match(source, /<aside className=\{`factory-drawer\$\{open \? " is-open" : ""\}[^`]*`\}[^>]*inert=\{!open\}/, 'the drawer is closed by default and inert while closed');
+  assert.match(source, /useState\(\(\) => readPinned\(\) && window\.matchMedia\(WIDE\)\.matches\)/);
+  assert.match(source, /localStorage\.setItem\(SOURCES_PIN_KEY/);
+  assert.match(source, /<NodeExplainer node=\{explainerNodeForRole\(session\.role\)\}[^>]*\/><\/div>\}/, 'the interview tips card lives in the empty chat only');
+  assert.doesNotMatch(source, /<Box component="aside" className="factory-inspector"/);
+  assert.match(source, /<ChatView[^]*?\bmergeSteps\b/);
+  assert.match(factoryStyles, /\.factory-drawer\s*\{[^}]*position:\s*absolute/);
+  assert.match(factoryStyles, /\.factory-chat \.web-chat__thread, \.factory-chat \.web-chat__dock\s*\{[^}]*width:\s*min\(740px, 100%\)/);
+  assert.match(factoryStyles, /\.factory-chat \.web-chat__message--user \.web-chat__bubble\s*\{[^}]*var\(--web-panel\)/);
   assert.match(portalStyles, /\.cpv2-main--workbench\s*\{[^}]*overflow:\s*hidden/);
-  assert.match(factoryStyles, /\.factory-inspector-scroll\s*\{[^}]*background:/);
   assert.match(factoryStyles, /\.factory-app \.MuiAccordion-root\s*\{/);
 });
 

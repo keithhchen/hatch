@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore }
 import { ArrowUp, ChevronDown, ChevronUp, CircleAlert, Paperclip, Plus, RotateCw, Square, X } from "lucide-react";
 import { Avatar } from "@hatch/ui";
 import { approvalDecision, partitionAttachments } from "../domain/activity.js";
-import { ACTIVITY_KINDS, ChatTimeline, groupTimelineEntries, withoutRepeatedSteps } from "../domain/timeline.js";
+import { ACTIVITY_KINDS, ChatTimeline, foldStepOnlyMessages, groupTimelineEntries, withoutRepeatedSteps } from "../domain/timeline.js";
 import { sharedScrollPositions } from "../domain/scroll-positions.js";
 import { createClickThrottle } from "../domain/click-throttle.js";
 import { OPEN_FREE_CHAT } from "../domain/free-chat.js";
@@ -138,7 +138,7 @@ function ChatMessage({ message, continued, identity, typingText, compacting, att
           ? live
             ? <><TimelineEntries timeline={message.timeline} live {...timelineProps} />{compacting ? <RuntimeStatus>{t("compaction.running")}</RuntimeStatus> : null}</>
             : compacting ? <RuntimeStatus>{t("compaction.running")}</RuntimeStatus> : <div className="web-chat__bubble web-chat__typing" role="status"><span className="web-chat__typing-dots" aria-hidden="true"><i /><i /><i /></span>{typingText ? <span>{typingText}</span> : null}</div>
-          : <TimelineEntries timeline={ChatTimeline.fromHistory(message)} live={false} {...timelineProps} />
+          : <TimelineEntries timeline={[message, ...(message.foldedMessages ?? [])].flatMap(part => ChatTimeline.fromHistory(part))} live={false} {...timelineProps} />
         : message.content ? <div className="web-chat__bubble web-chat__content"><MessageResponse>{message.content}</MessageResponse></div> : null}
       {files.length ? <div className="web-chat__attachments">{files.map(item => <span key={item.attachment_id}><Paperclip aria-hidden="true" />{item.display_name}{item.source_bytes ? ` · ${sizeOf(item.source_bytes)}` : ""}</span>)}</div> : null}
       {pictures.length ? <div className="web-chat__pictures">{pictures.map(item => <AssetPicture key={item.attachment_id} assetId={item.asset_id} name={item.display_name} Viewer={Viewer} assetSource={assetSource} t={t} />)}</div> : null}
@@ -226,10 +226,11 @@ export function Composer({ controller, state, snapshotPending = false, agentName
  *   the host's approval gate. A tool row the host marked "pending" with
  *   `controller.markApproval` shows Allow / Deny only when this is supplied;
  *   the row is marked "allowed" / "denied" as soon as the user answers.
+ * @param {boolean} [props.mergeSteps] consecutive replies of only steps show as one steps row
  * @param {import("../domain/scroll-positions.js").ScrollPositions} [props.scrollPositions]
  *   where each conversation was left; defaults to one in-memory store per page.
  */
-export function ChatView({ controller, identity, agentName, t, errorText, attachments, AttachmentViewer = ImageViewer, header, loadingIndicator, onNewConversation, activityKinds = ACTIVITY_KINDS, inert, dockAccessory, attachControl, composerAccessory, composerDisabled, onComposerPaste, onApprovalDecision, dictate, accept, empty, scrollPositions = sharedScrollPositions }) {
+export function ChatView({ controller, identity, agentName, t, errorText, attachments, AttachmentViewer = ImageViewer, header, loadingIndicator, onNewConversation, activityKinds = ACTIVITY_KINDS, inert, dockAccessory, attachControl, composerAccessory, composerDisabled, onComposerPaste, onApprovalDecision, dictate, accept, empty, mergeSteps = false, scrollPositions = sharedScrollPositions }) {
   const state = useChatState(controller);
   const meter = controller.freeChat ?? OPEN_FREE_CHAT;
   const freeChat = useSyncExternalStore(meter.subscribe, meter.getSnapshot);
@@ -323,7 +324,7 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
           <h2>{t("emptyHeadline")}</h2>
           <p>{t("emptyConversationBody", { agent: agentName })}</p>
         </section> : null}
-        {!snapshotPending || messages.length ? withoutRepeatedSteps(messages).map((message, index, shown) => {
+        {!snapshotPending || messages.length ? (mergeSteps ? foldStepOnlyMessages(withoutRepeatedSteps(messages), activityKinds) : withoutRepeatedSteps(messages)).map((message, index, shown) => {
           const key = message.renderKey ?? `${message.run_id}-${message.role}`;
           const compacting = Boolean(message.transient && activeRun && message.run_id === activeRun && state.runState === "compacting");
           return <React.Fragment key={key}>

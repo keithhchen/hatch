@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ChatTimeline, groupTimelineEntries, PendingSubmission, withoutRepeatedSteps } from "../src/domain/timeline.js";
+import { ChatTimeline, foldStepOnlyMessages, groupTimelineEntries, PendingSubmission, withoutRepeatedSteps } from "../src/domain/timeline.js";
 
 test("a Run's steps are shown once, on the last assistant message it passed through", () => {
   const tool = { tool_call_id: "call-1", name: "search_web", status: "completed" };
@@ -225,4 +225,14 @@ test("Web Chat history preserves the stored text and tool-call order", () => {
   assert.deepEqual(timeline.map(entry => entry.kind), ["text", "tool", "text"]);
   assert.equal(timeline[0].content, "before");
   assert.equal(timeline[2].content, "after");
+});
+
+test("consecutive replies of only steps fold into the first; text and the user break a run", () => {
+  const step = id => ({ role: "assistant", run_id: id, content: "", tool_calls: [{ tool_call_id: id, name: "read", status: "completed" }], parts: [{ type: "tool_call", tool_call_id: id }] });
+  const text = { role: "assistant", run_id: "t", content: "hello" };
+  const user = { role: "user", run_id: "u", content: "hi" };
+  const folded = foldStepOnlyMessages([user, step("a"), step("b"), step("c"), text, step("d"), user, step("e")]);
+  assert.deepEqual(folded.map(message => message.run_id), ["u", "a", "t", "d", "u", "e"]);
+  assert.equal(folded[1].foldedMessages.length, 2);
+  assert.equal(folded[3].foldedMessages, undefined);
 });

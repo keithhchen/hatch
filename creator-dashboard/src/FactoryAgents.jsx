@@ -29,8 +29,8 @@ import {
 import { createTheme, ThemeProvider } from "@mui/material/styles";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Button as HatchButton, Dialog, DialogContent, IconButton as HatchIconButton, InlineAlert, SegmentedControl, Textarea, hatchMuiThemeOptions } from "@hatch/ui";
-import { ArrowRight, ArrowUpRight, Play, Sparkles, ChevronDown, ChevronLeft as PrevIcon, ChevronRight as NextIcon, Download as DownloadIcon, Plus } from "lucide-react";
+import { Button as HatchButton, Dialog, DialogContent, DropdownMenu, IconButton as HatchIconButton, InlineAlert, SegmentedControl, Textarea, hatchMuiThemeOptions } from "@hatch/ui";
+import { ArrowRight, ArrowUpRight, Play, Sparkles, Check, ChevronLeft as PrevIcon, ChevronRight as NextIcon, Download as DownloadIcon, Plus, MoreHorizontal, Paperclip, Pin, PinOff, X as CloseIcon } from "lucide-react";
 import { ConversationController } from "@hatch/chat";
 import { ChatView, MessageResponse, PagePanel } from "@hatch/chat/react";
 import { dashboardRequest } from "./data.js";
@@ -142,19 +142,19 @@ export function FactoryAgents({ productId, tab = "build", section, agent, naviga
   </div></ThemeProvider>;
 }
 
-const ADVANCED_OPEN_KEY = "studio-rail-more-open";
-const readAdvancedOpen = () => { try { return localStorage.getItem(ADVANCED_OPEN_KEY) === "1"; } catch { return false; } };
-
+// A narrow rail of status icon + short label (full name and state in the tooltip); Advanced steps live in a menu.
 function FactoryStepper({ states, current, onStep, t }) {
   const next = studioNextStep(states);
-  const [open, setOpen] = useState(() => readAdvancedOpen() || ADVANCED_STEPS.some(step => step.id === current));
-  const toggle = () => setOpen(value => { try { localStorage.setItem(ADVANCED_OPEN_KEY, value ? "0" : "1"); } catch { /* storage unavailable */ } return !value; });
-  const item = (step, className, children) => <li key={step.id} className={className}><button type="button" className={current === step.id ? "is-current" : ""} aria-current={current === step.id ? "page" : undefined} onClick={() => onStep(step)}><span className="factory-stepper__n" aria-hidden="true" /><span className="factory-stepper__text"><span>{t(step.title)}</span></span></button></li>;
-  return <ol className="factory-stepper" aria-label={t("factoryStepsLabel")}>{states.map(({ step, state }) => <li key={step.id}><button type="button" className={`is-${state}${current === step.id ? " is-current" : ""}${next?.step.id === step.id ? " is-next" : ""}`} aria-current={current === step.id ? "page" : undefined} onClick={() => onStep(step)}><span className="factory-stepper__n" aria-hidden="true">{state === "done" ? "✓" : ""}</span><span className="factory-stepper__text"><span>{t(step.title)}</span><small>{t(next?.step.id === step.id && state === "todo" ? "stepNow" : STEP_STATE_KEY[state])}</small></span></button></li>)}
-    {item(INSPIRATION_STEP, "factory-stepper__aside")}
-    {item(CONTENT_STEP)}
-    <li><button type="button" aria-expanded={open} onClick={toggle}><span className="factory-stepper__n factory-stepper__caret" aria-hidden="true">{open ? <ChevronDown /> : <NextIcon />}</span><span className="factory-stepper__text"><span>{t("stepAdvanced")}</span></span></button></li>
-    {open ? ADVANCED_STEPS.map(step => item(step, "factory-stepper__sub")) : null}
+  const row = (step, state, className) => {
+    const label = t(step.title); const status = state ? t(next?.step.id === step.id && state === "todo" ? "stepNow" : STEP_STATE_KEY[state]) : "";
+    return <li key={step.id} className={className}><button type="button" className={`${state ? `is-${state}` : ""}${current === step.id ? " is-current" : ""}${next?.step.id === step.id ? " is-next" : ""}`} title={status ? `${label} · ${status}` : label} aria-label={status ? `${label}, ${status}` : label} aria-current={current === step.id ? "page" : undefined} onClick={() => onStep(step)}><span className="factory-stepper__n" aria-hidden="true">{state === "done" ? <Check /> : null}</span><span className="factory-stepper__label">{label}</span></button></li>;
+  };
+  const advancedCurrent = ADVANCED_STEPS.some(step => step.id === current);
+  return <ol className="factory-stepper" aria-label={t("factoryStepsLabel")}>
+    {states.map(({ step, state }) => row(step, state))}
+    {row(INSPIRATION_STEP, undefined, "factory-stepper__aside")}
+    {row(CONTENT_STEP)}
+    <li><DropdownMenu label={t("stepAdvanced")} align="start" trigger={<button type="button" className={advancedCurrent ? "is-current" : ""} title={t("stepAdvanced")} aria-label={t("stepAdvanced")}><span className="factory-stepper__n" aria-hidden="true"><MoreHorizontal /></span><span className="factory-stepper__label">{t("stepAdvanced")}</span></button>} items={ADVANCED_STEPS.map(step => ({ value: step.id, label: t(step.title), active: current === step.id, onSelect: () => onStep(step) }))} /></li>
   </ol>;
 }
 
@@ -228,9 +228,24 @@ function ImportFromAi({ saveManualText, locale, t }) {
   </>;
 }
 
+const SOURCES_PIN_KEY = "studio-sources-pinned"; const WIDE = "(min-width: 1440px)";
+const readPinned = () => { try { return localStorage.getItem(SOURCES_PIN_KEY) === "1"; } catch { return false; } };
+// Sources drawer: closed by default, an overlay below 1440px; at 1440px and up the user may pin it open beside the chat (remembered).
+function useSourcesDrawer() {
+  const [wide, setWide] = useState(() => window.matchMedia(WIDE).matches);
+  const [pinned, setPinned] = useState(readPinned);
+  const [open, setOpen] = useState(() => readPinned() && window.matchMedia(WIDE).matches);
+  useEffect(() => { const query = window.matchMedia(WIDE); const sync = () => setWide(query.matches); query.addEventListener("change", sync); return () => query.removeEventListener("change", sync); }, []);
+  const togglePin = () => { const next = !pinned; setPinned(next); if (next) setOpen(true); try { localStorage.setItem(SOURCES_PIN_KEY, next ? "1" : "0"); } catch { /* the pin lasts for this visit only */ } };
+  const docked = wide && pinned && open;
+  useEffect(() => { if (!open || docked) return; const onKey = event => { if (event.key === "Escape") setOpen(false); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, [open, docked]);
+  return { open, setOpen, wide, pinned, togglePin, docked };
+}
+
 function Workspace({ firstAgent, root, id, entry, agents, config, onChanged, onOpenAgent, agentName, locale, t }) {
   const [error, setError] = useState(""); const [file, setFile] = useState(null); const [busy, setBusy] = useState(false);
   const [chat, setChat] = useState(null);
+  const { open, setOpen, wide, pinned, togglePin, docked } = useSourcesDrawer();
   useEffect(() => {
     const opened = openFactoryChat({ root, id, t, locale });
     setChat(opened);
@@ -243,7 +258,19 @@ function Workspace({ firstAgent, root, id, entry, agents, config, onChanged, onO
   const running = session.status === "running"; const locked = entry?.state === "locked"; const visibleSession = { ...session, files: session.files.filter(record => !record.path.startsWith("input/handoff/")) };
   const { controller } = chat;
   const useLatest = () => perform(async () => { controller.setDraft(t("useLatestMessage", session.role)); await controller.send(); });
-  return <div className="factory-workspace"><div className="factory-workspace-pane factory-workspace-main"><ChatPanel chat={chat} dictation={dictation} session={visibleSession} entry={entry} config={config} busy={busy} locked={locked} locale={locale} onOpenFile={setFile} onUseLatest={useLatest} agentName={agentName} t={t} /></div><div className="factory-workspace-pane factory-workspace-side"><InspectorPanel firstAgent={firstAgent} entry={entry} agents={agents} session={visibleSession} root={root} id={id} running={running} busy={busy} file={file} setFile={setFile} agentName={agentName} onOpenAgent={onOpenAgent} locale={locale} t={t} perform={perform} /><ErrorNotice error={error} onClose={() => setError("")} /></div></div>;
+  const inputCount = visibleSession.files.filter(record => record.path.startsWith("input/")).length;
+  return <div className={`factory-workspace${docked ? " is-docked" : ""}`}>
+    <div className="factory-workspace-pane factory-workspace-main">
+      <div className="factory-topbar">
+        <HatchButton className="factory-sources-button" size="small" variant="secondary" leading={<Paperclip aria-hidden="true" />} aria-expanded={open} onClick={() => setOpen(value => !value)}>{t("sourcesCount", inputCount)}</HatchButton>
+      </div>
+      {entry?.state === "locked" ? <NextSteps entry={entry} agents={agents} onOpenAgent={onOpenAgent} agentName={agentName} t={t} /> : null}
+      <ChatPanel chat={chat} dictation={dictation} session={visibleSession} entry={entry} config={config} busy={busy} locked={locked} locale={locale} firstAgent={firstAgent} onOpenFile={setFile} onUseLatest={useLatest} agentName={agentName} t={t} />
+    </div>
+    {open && !docked ? <div className="factory-drawer-scrim" aria-hidden="true" onClick={() => setOpen(false)} /> : null}
+    <InspectorPanel open={open} docked={docked} wide={wide} pinned={pinned} onClose={() => setOpen(false)} onTogglePin={togglePin} session={visibleSession} root={root} id={id} running={running} file={file} setFile={setFile} onOpenAgent={onOpenAgent} t={t} perform={perform} />
+    <ErrorNotice error={error} onClose={() => setError("")} />
+  </div>;
 }
 
 const noopSubscribe = () => () => undefined; const nullSession = () => null;
@@ -263,7 +290,7 @@ function openFactoryChat({ root, id, t, locale }) {
   return { transport, controller, describeError };
 }
 
-function ChatPanel({ chat, dictation, session, entry, config, busy, locked, locale, onOpenFile, onUseLatest, agentName, t }) {
+function ChatPanel({ chat, dictation, session, entry, config, busy, locked, locale, firstAgent, onOpenFile, onUseLatest, agentName, t }) {
   const { controller, describeError } = chat;
   const wrap = useRef(null);
   // On a phone the chat is what the page opens on: it fills the screen under the top bar, the steps above it and the files below.
@@ -284,21 +311,21 @@ function ChatPanel({ chat, dictation, session, entry, config, busy, locked, loca
   const accessory = <>
     {pendingAskUser ? <AskUserBlock entry={pendingAskUser} onSubmit={content => { controller.setDraft(content); return controller.send(); }} t={t} /> : null}
     <div className="factory-composer-toolbar">
-      <HatchButton type="button" size="small" variant="secondary" leading={<Play aria-hidden="true" />} disabled={composerDisabled || session.status === "running" || Boolean(draft.trim())} onClick={startAgent}>{t("startAgentLabel", session.role)}</HatchButton>
+      {session.messages.length === 0 ? <HatchButton type="button" size="small" variant="secondary" leading={<Play aria-hidden="true" />} disabled={composerDisabled || session.status === "running" || Boolean(draft.trim())} onClick={startAgent}>{t("startAgentLabel", session.role)}</HatchButton> : null}
       {updatedDependencies.length > 0 && <HatchButton size="small" disabled={busy} onClick={onUseLatest}>{`${updatedDependencies.map(role => t("dependencyUpdated", agentName(role))).join(" · ")} · ${t("improveWithLatest")}`}</HatchButton>}
     </div>
   </>;
   return <div className="factory-chat web-chat web-chat--embedded" ref={wrap} onClickCapture={openLocalLink}>
     <ChatView controller={controller} identity={identity} agentName={agentName(session.role)} t={chatT} errorText={describeError}
       attachments={controller.attachments} activityKinds={STEP_KINDS} dictate={dictation} attachControl={false} composerDisabled={composerDisabled} onNewConversation={() => undefined}
-      empty={<div className="factory-chat-empty"><AutoAwesome aria-hidden="true" /><h3>{agentName(session.role)}</h3><p>{t("factoryYouDoRole", session.role)}</p></div>}
+      mergeSteps empty={<div className="factory-chat-empty"><AutoAwesome aria-hidden="true" /><h3>{agentName(session.role)}</h3><p>{t("factoryYouDoRole", session.role)}</p><NodeExplainer node={explainerNodeForRole(session.role)} locale={locale} autoOpen={firstAgent} /></div>}
       dockAccessory={accessory} />
   </div>;
 }
 
 const FILE_PAGE_SIZE = 8;
 const IMAGE_FILE = /\.(jpe?g|png|webp)$/i;
-function InspectorPanel({ firstAgent, entry, agents, session, root, id, running, busy, file, setFile, agentName, onOpenAgent, locale, t, perform }) {
+function InspectorPanel({ open, docked, wide, pinned, onClose, onTogglePin, session, root, id, running, file, setFile, onOpenAgent, t, perform }) {
   const inputFiles = session.files.filter(record => record.path.startsWith("input/") && !record.path.startsWith("input/handoff/")); const outputFiles = session.files.filter(record => record.path.startsWith("output/"));
   const selectedFile = file ? session.files.find(record => record.path === file) : null;
   const [filesTab, setFilesTab] = useState("input");
@@ -307,7 +334,19 @@ function InspectorPanel({ firstAgent, entry, agents, session, root, id, running,
   // An HTML output opens in the floating page panel; everything else opens in the file dialog.
   const openOutput = path => { if (/\.html$/i.test(path)) { setHtmlPage({ url: fileUrl(path), title: path.split("/").at(-1) }); setHtmlMode("open"); } else setFile(path); };
   const htmlViewer = { page: htmlPage, mode: htmlMode, setMode: setHtmlMode, setTitle: () => undefined };
-  return <Box component="aside" className="factory-inspector" aria-label={t("nextSteps")} sx={{ height: "100%", minWidth: 0, display: "flex", flexDirection: "column", bgcolor: "var(--hatch-ui-surface-sidebar)" }}>{entry && entry.state !== "complete" ? <div className="factory-inspector-status"><AgentState entry={entry} agentName={agentName} t={t} /></div> : null}<Box className="factory-inspector-scroll" sx={{ overflow: "auto", flex: 1, minHeight: 0, p: 1.5 }}><NodeExplainer node={explainerNodeForRole(session.role)} locale={locale} autoOpen={firstAgent && !session.messages.length} />{entry && <NextSteps entry={entry} agents={agents} onOpenAgent={onOpenAgent} agentName={agentName} t={t} />}<div className="fl-panel"><div className="fl-panel__head"><div className="fl-tabs" role="tablist" aria-label={t("files")}>{[["input", "attachments"], ["output", "outputs"]].map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={filesTab === key} className={filesTab === key ? "is-active" : ""} onClick={() => setFilesTab(key)}>{t(label)}</button>)}</div>{filesTab === "input" ? <HatchButton size="small" variant="secondary" onClick={() => onOpenAgent("uploads")}>{t("addFiles")}</HatchButton> : null}</div>{filesTab === "input" ? <FileList key="input" records={inputFiles} pageSize={FILE_PAGE_SIZE} onOpen={setFile} onDelete={record => perform(() => api(endpoint(root, id, "files"), { method: "DELETE", body: { path: record.path } }))} deletable={record => !running && /^input\/manual\//.test(record.path)} t={t} /> : <FileList key="output" records={outputFiles} pageSize={FILE_PAGE_SIZE} onOpen={openOutput} thumbnail={record => IMAGE_FILE.test(record.path) ? fileUrl(record.path) : undefined} t={t} />}</div><PagePanel viewer={htmlViewer} t={t} />{selectedFile && <FileViewer key={file} root={root} running={running} id={id} record={selectedFile} siblings={selectedFile.path.startsWith("output/") ? outputFiles : inputFiles} onOpenFile={setFile} onClose={() => setFile(null)} t={t} perform={perform} />}</Box></Box>;
+  // The drawer stays mounted so a file link in the chat still opens its viewer while the drawer is closed.
+  return <>
+    <aside className={`factory-drawer${open ? " is-open" : ""}${docked ? " is-docked" : ""}`} aria-label={t("attachments")} inert={!open}>
+      <div className="factory-drawer__head">
+        <strong>{t("attachments")}</strong>
+        {wide ? <HatchIconButton label={t(pinned ? "unpinPanel" : "pinPanel")} size="small" aria-pressed={pinned} onClick={onTogglePin}>{pinned ? <PinOff aria-hidden="true" /> : <Pin aria-hidden="true" />}</HatchIconButton> : null}
+        <HatchIconButton label={t("close")} size="small" onClick={onClose}><CloseIcon aria-hidden="true" /></HatchIconButton>
+      </div>
+      <div className="factory-drawer__body"><div className="fl-panel"><div className="fl-panel__head"><div className="fl-tabs" role="tablist" aria-label={t("files")}>{[["input", "attachments"], ["output", "outputs"]].map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={filesTab === key} className={filesTab === key ? "is-active" : ""} onClick={() => setFilesTab(key)}>{t(label)}</button>)}</div>{filesTab === "input" ? <HatchButton size="small" variant="secondary" onClick={() => onOpenAgent("uploads")}>{t("addFiles")}</HatchButton> : null}</div>{filesTab === "input" ? <FileList key="input" records={inputFiles} pageSize={FILE_PAGE_SIZE} onOpen={setFile} onDelete={record => perform(() => api(endpoint(root, id, "files"), { method: "DELETE", body: { path: record.path } }))} deletable={record => !running && /^input\/manual\//.test(record.path)} t={t} /> : <FileList key="output" records={outputFiles} pageSize={FILE_PAGE_SIZE} onOpen={openOutput} thumbnail={record => IMAGE_FILE.test(record.path) ? fileUrl(record.path) : undefined} t={t} />}</div></div>
+    </aside>
+    <PagePanel viewer={htmlViewer} t={t} />
+    {selectedFile && <FileViewer key={file} root={root} running={running} id={id} record={selectedFile} siblings={selectedFile.path.startsWith("output/") ? outputFiles : inputFiles} onOpenFile={setFile} onClose={() => setFile(null)} t={t} perform={perform} />}
+  </>;
 }
 
 function FileViewer({ root, running, id, record, siblings, onOpenFile, onClose, onAddToChat, t, perform }) {
@@ -335,7 +374,6 @@ function FileViewer({ root, running, id, record, siblings, onOpenFile, onClose, 
   </DialogContent></Dialog>;
 }
 
-function AgentState({ entry, agentName, t, compact = false }) { if (entry?.state === "complete" || entry?.state === "update_available") return null; let text = t(agentStateKey(entry)); if (entry?.state === "locked") text = t("finishOneAgentFirst", BUILD_NEEDS.map(need => need === "uploads" ? t("uploadSources") : agentName(need)).join(t("roleSeparator"))); return <Chip size="small" icon={entry?.state === "locked" ? <Lock /> : undefined} label={compact ? undefined : text} color={entry?.state === "failed" ? "error" : entry?.state === "running" ? "primary" : "default"} variant={entry?.state === "running" ? "filled" : "outlined"} sx={compact ? { width: 10, height: 10, "& .MuiChip-icon": { display: "none" }, "& .MuiChip-label": { display: "none" } } : undefined} />; }
 function NextSteps({ entry, agents, onOpenAgent, agentName, t }) {
   const locked = entry?.state === "locked";
   if (!locked) return null;
