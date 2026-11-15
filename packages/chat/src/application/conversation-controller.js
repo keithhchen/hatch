@@ -158,6 +158,9 @@ export class ConversationController {
 
   fail = cause => this.setState({ error: cause });
 
+  /** A background read that failed: shown, and taken back by the next read that succeeds. */
+  failRead = cause => { this.readFailure = cause; this.fail(cause); };
+
   // Library ---------------------------------------------------------------
 
   async loadLibrary() {
@@ -275,17 +278,23 @@ export class ConversationController {
     }
     if (firstSnapshot) { this.offerAnswerAgain(snapshot, running); this.resumePending(id, projected); this.connect(); }
     this.reconcilePending(projected);
+    if (this.readFailure && this.state.error === this.readFailure) this.setState({ error: null });
+    this.readFailure = null;
     return { stale: false };
   }
 
-  /** A refresh the stream asked for: one read at a time, and one more after it when something changed meanwhile. */
-  requestRefresh(conversationId) {
+  /** A refresh the stream asked for: one read at a time, and one more after it when something changed meanwhile. A read that fails is tried once more before it is shown. */
+  requestRefresh(conversationId, retry = false) {
     if (this.refreshing) { this.refreshAgain = true; return; }
     const done = () => {
       this.refreshing = null;
       if (this.refreshAgain && this.state.conversationId === conversationId) { this.refreshAgain = false; this.requestRefresh(conversationId); }
     };
-    this.refreshing = this.refresh(conversationId).catch(cause => { if (this.state.conversationId === conversationId) this.fail(cause); }).finally(done);
+    this.refreshing = this.refresh(conversationId).catch(cause => {
+      if (this.state.conversationId !== conversationId) return;
+      if (retry) this.failRead(cause);
+      else setTimeout(() => { if (this.state.conversationId === conversationId) this.requestRefresh(conversationId, true); }, this.pollMs);
+    }).finally(done);
   }
 
   /** How many replies of this Run the messages hold as saved. */
@@ -608,7 +617,7 @@ export class ConversationController {
       this.setState(state => ({ session, connection: "open", ...(state.status.key === "reconnecting" ? { status: { key: "connected" } } : {}) }));
       this.dispatchPending(connection, conversationId);
       // Whatever happened while the session was down was not heard: read it.
-      if (this.hasBeenReady) void this.refresh(conversationId).catch(cause => { if (this.state.conversationId === conversationId) this.fail(cause); });
+      if (this.hasBeenReady) this.requestRefresh(conversationId);
       this.hasBeenReady = true;
       if (this.taskStart === conversationId) {
         this.taskStart = null;
@@ -650,7 +659,7 @@ export class ConversationController {
         // Not the Run this page holds (never adopted, or another adopted since): its row goes and the saved reply is read.
         this.updateMessages(current => current.filter(message => !(message.transient && message.run_id === event.run_id)));
         if (outcome.failed) this.failReply(event.run_id, outcome.error);
-        await this.refresh(conversationId);
+        await this.refresh(conversationId).catch(this.failRead);
         return;
       }
       // A Run that ended before the server took the message that started it sends the words back; a server that steers keeps them.
@@ -661,7 +670,8 @@ export class ConversationController {
       this.setState({ runState: null });
       if (outcome.failed) this.failReply(event.run_id, outcome.error);
       if (!unaccepted) this.setState({ activeRun: event.run_id, status: { key: "syncingReply" } });
-      await this.refresh(conversationId);
+      // A read that fails here is taken back by the polling that the reply still syncing starts.
+      await this.refresh(conversationId).catch(this.failRead);
     },
     session_error(outcome) {
       const unaccepted = this.transport.steerable ? undefined : [...this.pendings.values()].find(submission => submission.runId === this.run?.id);
@@ -796,10 +806,6 @@ export class ConversationController {
     clearInterval(this.pollTimer);
     this.pollTimer = null;
     if (!key) return;
-    // A read that failed (an outage) shows its error; the read that succeeds after it takes that error back, and only that one.
-    this.pollTimer = setInterval(() => void this.refresh(conversationId).then(() => {
-      if (this.readFailure && this.state.error === this.readFailure) this.setState({ error: null });
-      this.readFailure = null;
-    }, cause => { this.readFailure = cause; this.fail(cause); }), this.pollMs);
+    this.pollTimer = setInterval(() => void this.refresh(conversationId).catch(this.failRead), this.pollMs);
   }
 }

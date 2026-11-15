@@ -108,3 +108,42 @@ test("a Run whose session died for good (retries spent, no terminal frame) is fr
   assert.equal(state.error?.code, "runtime_restarted");
   controller.dispose();
 });
+
+test("a read the stream asked for that fails once is tried again, and no error is shown", async () => {
+  const transport = new OutageTransport();
+  transport.page = { conversation: { id: "conv" }, messages: [], runs: [], events: [], cursor: 1, has_more: false };
+  const controller = new ConversationController({ transport, attachments: new NoAttachments(), tools: new NoTools(), pollMs: 20, reconnectAttempts: 0 });
+  controller.open("conv");
+  await flush();
+  transport.connections[0].emit({ type: "session.ready", conversation_id: "conv" });
+  const reads = transport.reads;
+  let failures = 1;
+  transport.snapshot = () => { transport.reads += 1; return failures-- > 0 ? Promise.reject(new Error("Something went wrong. Try again.")) : Promise.resolve({ ...transport.page, messages: [{ id: "u1", run_id: "r1", role: "user", content: "hi" }] }); };
+  transport.connections[0].emit({ type: "conversation.changed", committed: "assistant" });
+  await wait(10);
+  assert.equal(controller.getState().error, null, "one failed read shows nothing");
+  await wait(60);
+  assert.ok(transport.reads >= reads + 2, "the read is tried again");
+  assert.equal(controller.getState().error, null);
+  assert.deepEqual(controller.getState().messages.map(message => message.content), ["hi"]);
+  controller.dispose();
+});
+
+test("a read error that is shown goes away when a later read succeeds", async () => {
+  const transport = new OutageTransport();
+  transport.page = { conversation: { id: "conv" }, messages: [], runs: [], events: [], cursor: 1, has_more: false };
+  const controller = new ConversationController({ transport, attachments: new NoAttachments(), tools: new NoTools(), pollMs: 20, reconnectAttempts: 0 });
+  controller.open("conv");
+  await flush();
+  const connection = transport.connections[0];
+  connection.emit({ type: "session.ready", conversation_id: "conv" });
+  transport.down = true;
+  connection.emit({ type: "conversation.changed", committed: "assistant" });
+  await wait(60);
+  assert.ok(controller.getState().error, "two failed reads in a row are shown");
+  transport.down = false;
+  connection.emit({ type: "conversation.changed", committed: "assistant" });
+  await wait(20);
+  assert.equal(controller.getState().error, null, "the next good read takes it back");
+  controller.dispose();
+});
