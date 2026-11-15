@@ -142,8 +142,7 @@
 .factory-drawer.is-open { right: 0; visibility: visible; transition: right 200ms ease; }
 .factory-drawer.is-docked { position: static; flex: 0 0 380px; margin-left: 16px; box-shadow: var(--web-shadow); transition: none; }
 .factory-drawer-scrim { position: absolute; inset: 0; z-index: 5; border-radius: 20px; background: rgba(23, 21, 15, .18); }
-.factory-drawer__head { display: flex; align-items: center; gap: 4px; padding: 12px 12px 4px 18px; }
-.factory-drawer__head strong { flex: 1; font-size: 15px; }
+.factory-drawer__head { display: flex; justify-content: flex-end; align-items: center; gap: 4px; padding: 8px 8px 0; }
 .factory-drawer__body { flex: 1; min-height: 0; overflow: auto; padding: 4px 14px 16px; scrollbar-gutter: stable; }
 
 .factory-app .MuiPaper-outlined { border-color: var(--web-rule); box-shadow: none; }

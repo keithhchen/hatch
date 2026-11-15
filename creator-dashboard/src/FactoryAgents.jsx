@@ -262,7 +262,7 @@ function Workspace({ firstAgent, root, id, entry, agents, config, onChanged, onO
   return <div className={`factory-workspace${docked ? " is-docked" : ""}`}>
     <div className="factory-workspace-pane factory-workspace-main">
       <div className="factory-topbar">
-        <HatchButton className="factory-sources-button" size="small" variant="secondary" leading={<Paperclip aria-hidden="true" />} aria-expanded={open} onClick={() => setOpen(value => !value)}>{t("sourcesCount", inputCount)}</HatchButton>
+        {open ? null : <HatchButton className="factory-sources-button" size="small" variant="secondary" leading={<Paperclip aria-hidden="true" />} aria-expanded={open} onClick={() => setOpen(true)}>{t("sourcesCount", inputCount)}</HatchButton>}
       </div>
       {entry?.state === "locked" ? <NextSteps entry={entry} agents={agents} onOpenAgent={onOpenAgent} agentName={agentName} t={t} /> : null}
       <ChatPanel chat={chat} dictation={dictation} session={visibleSession} entry={entry} config={config} busy={busy} locked={locked} locale={locale} firstAgent={firstAgent} onOpenFile={setFile} onUseLatest={useLatest} agentName={agentName} t={t} />
@@ -338,7 +338,6 @@ function InspectorPanel({ open, docked, wide, pinned, onClose, onTogglePin, sess
   return <>
     <aside className={`factory-drawer${open ? " is-open" : ""}${docked ? " is-docked" : ""}`} aria-label={t("attachments")} inert={!open}>
       <div className="factory-drawer__head">
-        <strong>{t("attachments")}</strong>
         {wide ? <HatchIconButton label={t(pinned ? "unpinPanel" : "pinPanel")} size="small" aria-pressed={pinned} onClick={onTogglePin}>{pinned ? <PinOff aria-hidden="true" /> : <Pin aria-hidden="true" />}</HatchIconButton> : null}
         <HatchIconButton label={t("close")} size="small" onClick={onClose}><CloseIcon aria-hidden="true" /></HatchIconButton>
       </div>
