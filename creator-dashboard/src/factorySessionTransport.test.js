@@ -43,3 +43,21 @@ test("the Assistant's compaction events lock and unlock the page, and its own us
   assert.deepEqual(wireEventsOf({ type: "compaction_end", compaction_id: "c", aborted: true }), [{ type: "conversation.compaction", active: false }]);
   assert.deepEqual(wireEventsOf({ type: "message", message_id: "m1" }), [{ type: "conversation.changed", committed: "user", message_id: "m1" }]);
 });
+
+test("a reload reads only the messages after the ones the page holds, and all of them when the server's copy changed", async () => {
+  const urls = [];
+  const replies = [
+    { id: "s1", status: "running", messagesFrom: 0, messages: [{ role: "user", content: "a", timestamp: 1 }] },
+    { id: "s1", status: "completed", messagesFrom: 1, messages: [{ role: "assistant", content: [{ type: "text", text: "b" }], timestamp: 2 }] },
+    { id: "s1", status: "completed", messagesFrom: 0, messages: [{ role: "user", content: "fresh", timestamp: 9 }] }
+  ];
+  const transport = new FactorySessionTransport(async url => { urls.push(url); return replies.shift(); }, { root: "/r", id: "s1", activityOf, stream: () => ({ close() {} }) });
+  await transport.reload();
+  const session = await transport.reload();
+  assert.deepEqual(urls, ["/r/sessions/s1", "/r/sessions/s1?after=1&tail=1"]);
+  assert.deepEqual(session.messages.map(message => message.timestamp), [1, 2]);
+  assert.equal(session.status, "completed");
+  await transport.reload();
+  assert.equal(urls[2], "/r/sessions/s1?after=2&tail=2");
+  assert.deepEqual(transport.getSession().messages.map(message => message.timestamp), [9]);
+});

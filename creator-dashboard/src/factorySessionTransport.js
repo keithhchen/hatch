@@ -59,7 +59,11 @@ export class FactorySessionTransport extends ConversationTransport {
 
   /** The session as the workbench shows it beside the chat (files, todos, status); read on every snapshot and when they change. */
   async reload() {
-    this.session = await this.request(this.base);
+    // Only the messages after the ones the page holds come down; the server sends them all when its copy no longer matches.
+    const known = this.session?.messages ?? [];
+    const tail = known.at(-1)?.timestamp;
+    const read = await this.request(tail === undefined ? this.base : `${this.base}?after=${known.length}&tail=${encodeURIComponent(tail)}`);
+    this.session = { ...read, messages: [...known.slice(0, read.messagesFrom ?? 0), ...(read.messages ?? [])] };
     for (const listener of this.listeners) listener();
     return this.session;
   }

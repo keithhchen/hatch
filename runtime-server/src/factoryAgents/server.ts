@@ -17,7 +17,14 @@ import type { ModelRoleResolver } from "../modelRoles.js";
 
 /** How many message keys a session remembers. */
 const MESSAGE_KEYS_KEPT = 100;
-export function publicSession(s: Session) { const { context, messageKeys, queue, ...publicData } = s; return publicData; }
+export function publicSession(s: Session) { const { context, scribeContext, messageKeys, queue, ...publicData } = s; return publicData; }
+/** Where a read of the session's messages starts: after the `after` messages the client holds, when its last one (`tail`, a timestamp) is still the server's message there; otherwise from the start. */
+export function messagesFrom(messages: Session["messages"], params: URLSearchParams): number {
+  const after = Number(params.get("after"));
+  if (!Number.isInteger(after) || after <= 0 || after > messages.length) return 0;
+  const tail = (messages[after - 1] as { timestamp?: unknown }).timestamp;
+  return tail !== undefined && String(tail) === params.get("tail") ? after : 0;
+}
 
 export async function createFactoryHandler(options: { root: string; scope: FactoryProductScope; definitions: AgentDefinitionRepository; models: ModelRoleResolver; env?: NodeJS.ProcessEnv; runtime?: Partial<WorkbenchRuntimeOptions>; withheldTools?: (session: Session) => Promise<string[]>; forms?: () => FormPages | undefined }) {
   const env: NodeJS.ProcessEnv = options.env ?? process.env;
@@ -114,7 +121,7 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
       const match = url.pathname.match(/^\/api\/sessions\/([0-9a-f-]{36})(?:\/(.*))?$/);
       if (match) {
         const id = match[1]!; const action = match[2] ?? "";
-        if (!action && req.method === "GET") { const session = await store.get(id); return json(res, 200, { ...publicSession(session), agent: (await entries()).find(entry => entry.role === session.role), files: await store.contextFiles(id) }); }
+        if (!action && req.method === "GET") { const session = await store.get(id); const from = messagesFrom(session.messages, url.searchParams); return json(res, 200, { ...publicSession(session), messages: session.messages.slice(from), messagesFrom: from, agent: (await entries()).find(entry => entry.role === session.role), files: await store.contextFiles(id) }); }
         if (action === "prompt" && req.method === "GET") return json(res, 200, { content: await runtime.prompt((await store.get(id)).role) });
         if (action === "message" && req.method === "POST") { const session = await store.get(id); await assertRoleAvailable(session.role); const b = z.object({ content: z.string().min(1).max(100000) }).parse(await body(req)); const key = idempotencyKey(req.headers["idempotency-key"]); if (key === undefined) await runtime.start(id, b.content); else await sendOnce(id, key, b.content); return json(res, 202, { accepted: true }); }
         if (action === "stop" && req.method === "POST") { await body(req); await runtime.stop(id); return json(res, 202, { requested: true }); }
