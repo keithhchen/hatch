@@ -21,7 +21,7 @@ The page should feel like being interviewed by a good professional interviewer: 
 - One question asks one thing. "Would you say that? If not, what do you say instead?" is one thing. A list of details ("how much, what kind of job, and what did you decide") is several: keep the one that matters, or split them into separate cards.
 - Ask about one specific, recent time, not about principles. People remember events, not their own rules; the rule comes out while they tell the event.
 - Open with their own words, quoted. The background must add something: their exact phrase, or how the Agent would answer today. Never restate a topic back to them ("You listed X as a question").
-- Start where they have energy: the things they talked about with the most life, and the 2–3 kinds of requests they get most. Those get full coverage; everything else goes in a final group marked optional, to fill in now or later.
+- Start where they have energy: the things they talked about with the most life, and the 2–3 kinds of requests they get most. Those, and what the Agent must never do, get full coverage; everything else goes in a final group marked optional, to fill in now or later.
 - Easy before hard: choices and short answers first, story questions after. Sensitive topics last, asked plainly, with one line on why it matters and a clear note that they can skip.
 - Say in one short clause what the answer changes for their clients, in their terms. Not "this helps us train the Agent".
 - Give them something to push against, never words to agree with. Do not write their answer for them or guess what they would say. Instead quote the common, generic answer people in their field give, and ask whether they would say it. People answer fastest, and most truly, when they disagree.
@@ -52,6 +52,7 @@ Before publishing, read every card once as the Expert, on a phone: does it ask e
 - Background is optional. Write one only when it carries their exact words or the generic answer to push against; otherwise ask the question on its own. A background that only names the topic again ("You listed X", "X is one of your top questions", "You mentioned X") is worse than none: delete it.
 - One group for each of their top 2–3 kinds of requests: what was going on the last time, where they disagree with the usual advice, and when they would say the opposite. Other kinds of requests get one optional question each.
 - Always ask "what you must ask the client before making a judgment" and "what you say when you meet a situation you have not handled before".
+- Always ask where the Agent must stop. This is core, never in the optional group: an Agent that answers everything puts the Expert's name at risk. Ask it inside each main kind of request ("In [that request], when do you say 'that's not something I do' or 'you need someone else for this'?"), and in its own group (see the skeleton). Give them things to push against: two or three lines people in their field are often asked to cross, such as guaranteeing a result, quoting a price without seeing the case, or giving a legal, medical or tax call, and ask which ones the Agent must refuse and what it should say instead. Ask for their own words when they turn someone down or send them elsewhere, and where they send them.
 - When the material or chat contains conflicting accounts (price, minimum order quantity, policy), make it a multiple-choice question "Versions disagree, please pick one", list the different accounts as options, and add a supplement box. This is the most valuable question on the whole page.
 - Ask for voice samples: ask directly on the page for "the thing you have said to clients a hundred times", how you address clients, how you decline.
 - When the person speaking is not the Expert in person (an assistant, an employee), tell them the page will be forwarded to the Expert, and write the page so that the Expert alone can finish it with text answers.
@@ -61,14 +62,14 @@ Before publishing, read every card once as the Expert, on a phone: does it ask e
 
 A real review page has this shape. It is only structure: the brackets are placeholders, and the wording on a real page comes from this Expert's own field and words.
 
-- Size: as many questions as they can answer in about ten minutes, usually 8–15 and never more than 15. Cover every part of the Agent with the fewest questions; the 2–3 kinds of requests they get most come first and in full, everything else is optional at the end.
+- Size: as many questions as they can answer in about ten minutes, usually 8–15 and never more than 15. Cover every part of the Agent with the fewest questions; the 2–3 kinds of requests they get most and "What it should never do" come first and in full, everything else is optional at the end.
 - Agent introduction (not questions), short: what it will do for [their clients], how it opens a conversation, how it sounds, when it hands over to them. This is the Agent's current understanding, for the Expert to correct.
 - Grouped questions, each group with a plain heading the Expert would use:
   - "Versions disagree, please pick one" (only when the material or chat really disagrees): the background quotes the different accounts, "'[account one]', '[account two]'", and asks "Which one should every client hear?", with those accounts as options plus a supplement box.
   - "Knowledge gaps": "When someone just says '[a vague opening request]', what do you ask first?" and "When someone brings you a case you have never handled, what do you say?"
   - One group per main kind of request (their top 2–3): "The last time someone came to you with [that request], what was going on?"; "The usual advice is '[generic answer]'. Would you say that?"; "When would you tell someone the opposite?"
   - "How it sounds": "A line you've said a hundred times"; "What you say when you think someone is wrong".
-  - "What it should never do": topics it must not answer, situations that must come straight to them, things it must never say on their behalf.
+  - "What it should never do" (always, never optional): "People often ask [someone in their field] to [a line commonly crossed, e.g. promise a result]. Should the Agent refuse? What should it say?"; "Which cases must come straight to you instead of the Agent?"; "Is there anything it must never say in your name?"; "When you turn someone down, what do you say, and where do you send them?"
   - "If you have time" (optional): the other kinds of requests, one question each.
 
 ### Semantic structure
