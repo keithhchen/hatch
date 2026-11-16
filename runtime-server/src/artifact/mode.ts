@@ -25,10 +25,10 @@ export const REPORT_TOOL_CALL_LIMIT = { max: 100, uncounted: ["publish_report"] 
 
 /**
  * When a report Run summarizes its context. At 120k it summarized eleven times in one report: every summary is a model
- * call, and the records it drops get read again. With a 1M window, 400k lets a report run whole or summarize once, and
+ * call, and the records it drops get read again. With a 1M window, 750k lets a report run whole, and
  * the notes file keeps what matters if it does.
  */
-export const REPORT_CONTEXT_BUDGET = { trigger: 400_000, prune: 300_000, tail: 60_000, hard: 700_000 } as const;
+export const REPORT_CONTEXT_BUDGET = { trigger: 750_000, prune: 600_000, tail: 80_000, hard: 950_000 } as const;
 
 /**
  * The last thing the model reads on every call of a report Run, in place of the chat reply reminder: a buyer chat reply
