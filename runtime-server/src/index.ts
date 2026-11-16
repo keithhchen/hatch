@@ -59,9 +59,10 @@ import { clientMessageInputDigest } from "./protocol.js";
 import { ArtifactRetrier } from "./artifact/retrier.js";
 import { ARTIFACT_RETRY_MESSAGE } from "./artifact/prompt.js";
 import { openArtifactMode } from "./artifact/open.js";
-import type { ArtifactMode } from "./artifact/mode.js";
+import { REPORT_CONTEXT_BUDGET, type ArtifactMode } from "./artifact/mode.js";
 import { artifactToolDefinitions } from "./artifact/toolDefinitions.js";
 import { ChromiumReportRenderer } from "./artifact/chromiumRenderer.js";
+import { chatCompactionStrategy } from "./compaction.js";
 import { configuredSearch } from "./factoryAgents/search.js";
 import { attachmentToolDefinitions } from "./chat/attachmentTools.js";
 import { failRun, runModelTurn } from "./chat/modelTurn.js";
@@ -570,7 +571,12 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     toolTimeoutMs: options.clientToolTimeoutMs ?? clientToolTimeoutMs(),
     ...(options.compactionStrategy
       ? { compactionStrategy: options.compactionStrategy }
-      : { compactionProfile: async (conversationId: string) => models.resolve("chat", { productId: (await conversationRepository.getConversation(conversationId))?.productId }) }),
+      : { compactionStrategy: async (conversationId: string) => {
+        const profile = await models.resolve("chat", { productId: (await conversationRepository.getConversation(conversationId))?.productId });
+        // A report conversation summarizes early: its notes file keeps what matters (see REPORT_CONTEXT_BUDGET).
+        const report = artifact ? await artifact.reports.get(conversationId) : undefined;
+        return chatCompactionStrategy(profile, report ? { budget: REPORT_CONTEXT_BUDGET } : {});
+      } }),
     ...(options.usage ? { usage: { recorder: options.usage, attribute: attributeByScope } } : {}),
     ...(options.usageCap ? { cap: options.usageCap.guard(payerByScope) } : {}),
     ...(options.analytics ? { analytics: new ChatAnalytics(options.analytics, conversationRepository) } : {}),

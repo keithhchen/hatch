@@ -24,6 +24,12 @@ export type ArtifactTurn = { promptSuffix: string; extraTools: string[]; tools: 
 export const REPORT_TOOL_CALL_LIMIT = { max: 100, uncounted: ["publish_report"] };
 
 /**
+ * A report reads far more than it keeps: what applies goes into /report/notes.md, so the raw records can be summarized
+ * early. Summarizing at 120k leaves a batch of reads room even in a 262k window, and keeps every call cheap.
+ */
+export const REPORT_CONTEXT_BUDGET = { trigger: 120_000, prune: 80_000, tail: 30_000, hard: 200_000 } as const;
+
+/**
  * The last thing the model reads on every call of a report Run, in place of the chat reply reminder: a buyer chat reply
  * is one to three sentences, a report Run never replies in chat, so the chat reminder must not reach it.
  */
