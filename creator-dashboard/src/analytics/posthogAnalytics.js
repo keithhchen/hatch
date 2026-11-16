@@ -5,6 +5,8 @@ const OPTIONS = {
   ui_host: "https://us.posthog.com",
   defaults: "2026-08-30",
   autocapture: false,
+  // Heatmaps record where people click and how far they scroll (positions only, no text); clickmaps would need autocapture, which stays off.
+  capture_heatmaps: true,
   disable_session_recording: true,
   disable_surveys: true,
   advanced_disable_flags: true,
