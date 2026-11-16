@@ -11,7 +11,7 @@ test("askuser normalizes one question batch and ends the current turn", async ()
         question: "Who is this for?",
         options: [{ content: "Creators" }, { content: "Consumers" }],
       },
-      { id: "channel", question: "Which channel matters first?", options: [], multiSelect: true },
+      { id: "channel", question: "Which channel matters first?", multiSelect: true },
     ],
   });
   assert.equal(response.terminate, true);
@@ -25,9 +25,8 @@ test("askuser normalizes one question batch and ends the current turn", async ()
         { id: "option-2", content: "Consumers" },
       ],
       multiSelect: false,
-      required: true,
     },
-    { id: "channel", question: "Which channel matters first?", options: [], multiSelect: true, required: true },
+    { id: "channel", question: "Which channel matters first?", options: [], multiSelect: true },
   ]);
   assert.equal("label" in response.details.questions[0].options[0], false);
   assert.equal("description" in response.details.questions[0].options[0], false);

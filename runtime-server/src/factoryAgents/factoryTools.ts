@@ -52,9 +52,8 @@ const askUserQuestion = Type.Object({
   id: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
   header: Type.Optional(Type.String({ maxLength: 40 })),
   question: Type.String({ minLength: 1, maxLength: 1000 }),
-  options: Type.Array(askUserOption, { maxItems: 8 }),
+  options: Type.Optional(Type.Array(askUserOption, { maxItems: 8 })),
   multiSelect: Type.Optional(Type.Boolean()),
-  required: Type.Optional(Type.Boolean()),
 });
 
 /**
@@ -66,16 +65,15 @@ export function createAskUserTool(): AgentTool {
   return {
     name: "askuser",
     label: "询问用户",
-    description: "Ask the Creator for information or a decision that materially affects the work. Put related questions into one questions array. When useful, provide options as objects with one single-line content field; the interface always also provides a free-form answer field. Do not ask for routine confirmation or facts already available in the inputs.",
+    description: "Ask the Creator for information or a decision that materially affects the work. Put related questions into one questions array. When useful, provide options as objects with one single-line content field; the interface always also provides a free-form answer field, and the Creator may skip any question. Do not ask for routine confirmation or facts already available in the inputs.",
     parameters: Type.Object({ questions: Type.Array(askUserQuestion, { minItems: 1, maxItems: 8 }) }),
     execute: async (_callId, raw) => {
       const input = raw as { questions: Array<{
         id?: string;
         header?: string;
         question: string;
-        options: Array<{ content: string }>;
+        options?: Array<{ content: string }>;
         multiSelect?: boolean;
-        required?: boolean;
       }> };
       const seen = new Set<string>();
       const questions = input.questions.map((question, index) => {
@@ -86,12 +84,11 @@ export function createAskUserTool(): AgentTool {
           id,
           ...(question.header?.trim() ? { header: question.header.trim() } : {}),
           question: question.question.trim(),
-          options: question.options.map((option, optionIndex) => ({
+          options: (question.options ?? []).map((option, optionIndex) => ({
             id: `option-${optionIndex + 1}`,
             content: option.content.trim(),
           })),
           multiSelect: question.multiSelect === true,
-          required: question.required !== false,
         };
       });
       return {

@@ -48,7 +48,7 @@ test("Overview is a top tab, Advanced sits under the rail steps, Start Agent and
   assert.match(workspace, /\{ value: "overview", label: "sxNavOverview" \},\s*\{ value: "build"[^}]*\},\s*\{ value: "publish"/);
   assert.doesNotMatch(factory, /factory-rail__overview|factory-stepper__advanced/);
   assert.doesNotMatch(factory, /factory-advanced|factory-tasks/);
-  assert.match(factory, /<DropdownMenu label=\{t\("stepAdvanced"\)\}[^]*ADVANCED_STEPS\.map\(step => \(\{ value: step\.id/, "Advanced steps are a menu");
+  assert.doesNotMatch(factory, /stepAdvanced/, "Cases and Evaluator are hidden from the rail");
   assert.doesNotMatch(factory, /ADVANCED_OPEN_KEY/);
   assert.match(factory, /<HatchButton type="button" size="small" variant="secondary" leading=\{<Play/);
   assert.doesNotMatch(factory, /line-through/);

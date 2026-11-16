@@ -29,8 +29,8 @@ import {
 import { createTheme, ThemeProvider } from "@mui/material/styles";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Button as HatchButton, Dialog, DialogContent, DropdownMenu, IconButton as HatchIconButton, InlineAlert, SegmentedControl, Textarea, hatchMuiThemeOptions } from "@hatch/ui";
-import { ArrowRight, ArrowUpRight, Play, Sparkles, Check, ChevronLeft as PrevIcon, ChevronRight as NextIcon, Download as DownloadIcon, Plus, MoreHorizontal, Paperclip, Pin, PinOff, X as CloseIcon } from "lucide-react";
+import { Button as HatchButton, Dialog, DialogContent, IconButton as HatchIconButton, InlineAlert, SegmentedControl, Textarea, hatchMuiThemeOptions } from "@hatch/ui";
+import { ArrowRight, ArrowUpRight, Play, Sparkles, Check, ChevronLeft as PrevIcon, ChevronRight as NextIcon, Download as DownloadIcon, Plus, Paperclip, Pin, PinOff, X as CloseIcon } from "lucide-react";
 import { ConversationController } from "@hatch/chat";
 import { ChatView, MessageResponse, PagePanel } from "@hatch/chat/react";
 import { dashboardRequest } from "./data.js";
@@ -142,19 +142,17 @@ export function FactoryAgents({ productId, tab = "build", section, agent, naviga
   </div></ThemeProvider>;
 }
 
-// A narrow rail of status icon + short label (full name and state in the tooltip); Advanced steps live in a menu.
+// A narrow rail of status icon + short label (full name and state in the tooltip). Cases and Evaluator are hidden from Experts.
 function FactoryStepper({ states, current, onStep, t }) {
   const next = studioNextStep(states);
   const row = (step, state, className) => {
     const label = t(step.title); const status = state ? t(next?.step.id === step.id && state === "todo" ? "stepNow" : STEP_STATE_KEY[state]) : "";
     return <li key={step.id} className={className}><button type="button" className={`${state ? `is-${state}` : ""}${current === step.id ? " is-current" : ""}${next?.step.id === step.id ? " is-next" : ""}`} title={status ? `${label} · ${status}` : label} aria-label={status ? `${label}, ${status}` : label} aria-current={current === step.id ? "page" : undefined} onClick={() => onStep(step)}><span className="factory-stepper__n" aria-hidden="true">{state === "done" ? <Check /> : null}</span><span className="factory-stepper__label">{label}</span></button></li>;
   };
-  const advancedCurrent = ADVANCED_STEPS.some(step => step.id === current);
   return <ol className="factory-stepper" aria-label={t("factoryStepsLabel")}>
     {states.map(({ step, state }) => row(step, state))}
     {row(INSPIRATION_STEP, undefined, "factory-stepper__aside")}
     {row(CONTENT_STEP)}
-    <li><DropdownMenu label={t("stepAdvanced")} align="start" trigger={<button type="button" className={advancedCurrent ? "is-current" : ""} title={t("stepAdvanced")} aria-label={t("stepAdvanced")}><span className="factory-stepper__n" aria-hidden="true"><MoreHorizontal /></span><span className="factory-stepper__label">{t("stepAdvanced")}</span></button>} items={ADVANCED_STEPS.map(step => ({ value: step.id, label: t(step.title), active: current === step.id, onSelect: () => onStep(step) }))} /></li>
   </ol>;
 }
 
@@ -400,11 +398,6 @@ function AskUserBlock({ entry, onSubmit, t }) {
   useEffect(() => { setAnswers(Object.fromEntries(questions.map((question, index) => [question.id || `question-${index + 1}`, { selected: question.multiSelect ? [] : "", other: "" }]))); setSubmitting(false); }, [entry?.call?.id]);
   if (!questions.length) return null;
   const update = (id, change) => setAnswers(previous => ({ ...previous, [id]: { ...previous[id], ...change } }));
-  const complete = questions.every((question, index) => {
-    if (question.required === false) return true;
-    const answer = answers[question.id || `question-${index + 1}`] || {};
-    return Boolean((Array.isArray(answer.selected) ? answer.selected.length : answer.selected) || answer.other?.trim());
-  });
   const submit = async () => {
     if (!pending) return;
     const lines = questions.map((question, index) => {
@@ -414,7 +407,7 @@ function AskUserBlock({ entry, onSubmit, t }) {
     setSubmitting(true);
     try { await onSubmit(lines.join("\n")); } catch { setSubmitting(false); }
   };
-  return <Paper className="factory-ask-user" variant="outlined" sx={{ mb: 2, p: 2, borderColor: "primary.main", bgcolor: "background.paper", opacity: pending ? 1 : 0.72 }}><Stack spacing={2}><Box><Typography variant="subtitle1" fontWeight={750}>{t("askUserTitle")}</Typography><Typography variant="body2" color="text.secondary">{t("askUserDescription")}</Typography></Box>{questions.map((question, index) => { const id = question.id || `question-${index + 1}`; const answer = answers[id] || { selected: question.multiSelect ? [] : "", other: "" }; const options = (question.options || []).map(askUserOption); return <Box key={id}><FormControl fullWidth required={question.required !== false}><FormLabel sx={{ color: "text.primary", mb: 0.75 }}>{question.question}</FormLabel>{question.multiSelect ? <FormGroup>{options.map(option => <FormControlLabel key={option.id} control={<Checkbox disabled={!pending || submitting} checked={Array.isArray(answer.selected) && answer.selected.includes(option.id)} onChange={event => update(id, { selected: event.target.checked ? [...(answer.selected || []), option.id] : (answer.selected || []).filter(value => value !== option.id) })} />} label={option.content} />)}</FormGroup> : <RadioGroup value={answer.selected || ""} onChange={event => update(id, { selected: event.target.value })}>{options.map(option => <FormControlLabel key={option.id} value={option.id} disabled={!pending || submitting} control={<Radio />} label={option.content} />)}</RadioGroup>}<TextField disabled={!pending || submitting} fullWidth size="small" multiline minRows={2} value={answer.other || ""} onChange={event => update(id, { other: event.target.value })} placeholder={t("askUserOtherPlaceholder")} sx={{ mt: 1 }} /></FormControl></Box>; })}{pending && <Button variant="contained" onClick={submit} disabled={!complete || submitting} sx={{ alignSelf: "flex-start" }}>{submitting ? t("askUserSubmitting") : t("askUserSubmit")}</Button>}</Stack></Paper>;
+  return <Paper className="factory-ask-user" variant="outlined" sx={{ mb: 2, p: 2, borderColor: "primary.main", bgcolor: "background.paper", opacity: pending ? 1 : 0.72 }}><Stack spacing={2}><Box><Typography variant="subtitle1" fontWeight={750}>{t("askUserTitle")}</Typography><Typography variant="body2" color="text.secondary">{t("askUserDescription")}</Typography></Box>{questions.map((question, index) => { const id = question.id || `question-${index + 1}`; const answer = answers[id] || { selected: question.multiSelect ? [] : "", other: "" }; const options = (question.options || []).map(askUserOption); return <Box key={id}><FormControl fullWidth><FormLabel sx={{ color: "text.primary", mb: 0.75 }}>{question.question}</FormLabel>{question.multiSelect ? <FormGroup>{options.map(option => <FormControlLabel key={option.id} control={<Checkbox disabled={!pending || submitting} checked={Array.isArray(answer.selected) && answer.selected.includes(option.id)} onChange={event => update(id, { selected: event.target.checked ? [...(answer.selected || []), option.id] : (answer.selected || []).filter(value => value !== option.id) })} />} label={option.content} />)}</FormGroup> : <RadioGroup value={answer.selected || ""} onChange={event => update(id, { selected: event.target.value })}>{options.map(option => <FormControlLabel key={option.id} value={option.id} disabled={!pending || submitting} control={<Radio />} label={option.content} />)}</RadioGroup>}<TextField disabled={!pending || submitting} fullWidth size="small" multiline minRows={2} value={answer.other || ""} onChange={event => update(id, { other: event.target.value })} placeholder={t("askUserOtherPlaceholder")} sx={{ mt: 1 }} /></FormControl></Box>; })}{pending && <Button variant="contained" onClick={submit} disabled={submitting} sx={{ alignSelf: "flex-start" }}>{submitting ? t("askUserSubmitting") : t("askUserSubmit")}</Button>}</Stack></Paper>;
 }
 
 function factoryError(error, t, agentName) { if (error?.code === "usage_cap_exceeded") return t("usageCapReached"); if (error?.code === "build_not_ready") return t("finishOneAgentFirst", [t("uploadSources"), agentName("voice")].join(t("roleSeparator"))); if (error?.code === "agent_definitions_unavailable" || error?.code === "agent_definitions_invalid") return t("agentSetupUnavailable"); return error?.message || t("unknownFactoryError"); }
