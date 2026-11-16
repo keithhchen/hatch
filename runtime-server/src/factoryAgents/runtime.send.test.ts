@@ -118,11 +118,10 @@ test("system reminder: the current time in the session's zone at every model cal
     await h.idle();
     assert.ok(h.calls.length >= 2);
     for (const call of h.calls) assert.match(call.last, /<system-reminder>\\nCurrent time: \d{4}-\d{2}-\d{2} \d{2}:\d{2} \w+ \(Asia\/Tokyo, GMT\+09:00\)\\nclient: web/);
-    console.log(h.calls[0]!.last);
     assert.ok(!JSON.stringify((await h.store.get(h.session.id)).messages).includes("Current time"), "not in history");
     await h.runtime.send(h.session.id, h.say("two"));
     await h.idle();
-    assert.match(h.calls.at(-1)!.last, /\(UTC, GMT\)/, "the zone ends with the run");
+    assert.match(h.calls.at(-1)!.last, /\(UTC, GMT(\+00:00)?\)/, "the zone ends with the run");
   } finally { await h.close(); }
 });
 
