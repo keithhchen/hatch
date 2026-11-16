@@ -72,6 +72,13 @@ export class ServerToolExecutor {
     this.observer?.(name, parsedArgs);
     const requestSignal = boundedSignal(signal, this.timeoutMs);
 
+    // /report/ is the report's own files, mounted beside /attachments/: the same read and ls reach either.
+    if (this.artifact && (name === "attachments.read" || name === "attachments.ls") && typeof parsedArgs.path === "string" && parsedArgs.path.startsWith("/report/")) {
+      const result = await this.artifact.run(name.slice("attachments.".length), parsedArgs, requestSignal);
+      assertBoundedJsonValue(result);
+      return result;
+    }
+
     if (name.startsWith("attachments.")) {
       if (!this.attachments) throw new Error("This conversation has no attachments service.");
       const output = await this.attachments.run(name.slice("attachments.".length), parsedArgs);

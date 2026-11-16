@@ -77,7 +77,7 @@ export const draftFiles = (store: DraftStore, conversationId: string) => ({
   async edit(args: Record<string, unknown>): Promise<string> {
     const path = draftPath(args.path);
     const current = await store.read(conversationId, path);
-    if (current === undefined) throw new DraftError(`${path} does not exist yet; create it with write_file.`);
+    if (current === undefined) throw new DraftError(`${path} does not exist yet; create it with write.`);
     const { old_string: oldString, new_string: newString } = args;
     if (typeof oldString !== "string" || !oldString || typeof newString !== "string") throw new DraftError("old_string (non-empty) and new_string are strings.");
     const count = current.split(oldString).length - 1;

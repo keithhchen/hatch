@@ -95,8 +95,8 @@ async function mode() {
 }
 
 /** The agent's way: write the report file, then publish it by path. */
-async function publishFile(turn: { tools: { run(name: string, args: Record<string, unknown>): Promise<{ output: unknown }> } }, html: string) {
-  await turn.tools.run("write_file", { path: "/report/report.html", content: html });
+async function publishFile(turn: { tools: { run(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> } }, html: string) {
+  await turn.tools.run("write", { path: "/report/report.html", content: html });
   return turn.tools.run("publish_report", { path: "/report/report.html" });
 }
 
@@ -105,18 +105,18 @@ test("draft files work like a coding agent's: write, edit exactly once, read, li
   const c = conversation();
   await reports.create({ conversationId: c.id, productId: "p1", ownerAccountId: c.ownerAccountId });
   const turn = (await artifact.turnFor(c, { createdAt: new Date().toISOString() }))!;
-  assert.ok(turn.extraTools.includes("artifact.write_file") && turn.extraTools.includes("artifact.edit_file") && turn.extraTools.includes("artifact.read_file"));
+  assert.ok(turn.extraTools.includes("artifact.write") && turn.extraTools.includes("artifact.edit"));
   const run = (name: string, args: Record<string, unknown>) => turn.tools.run(name, args).then((r) => String(r.output));
-  assert.match(await run("write_file", { path: "/report/report.html", content: "<h1>A</h1><!-- ch2 --><!-- ch3 -->" }), /Wrote \/report\/report.html/);
-  assert.match(await run("edit_file", { path: "/report/report.html", old_string: "<!-- ch2 -->", new_string: "<p>two</p>" }), /Edited/);
-  assert.equal(await run("read_file", { path: "/report/report.html" }), "<h1>A</h1><p>two</p><!-- ch3 -->");
-  assert.match(await run("read_file", {}), /\/report\/report.html  \d+ bytes/);
-  await assert.rejects(run("edit_file", { path: "/report/report.html", old_string: "<!-- ch2 -->", new_string: "x" }), /not found/);
-  await assert.rejects(run("write_file", { path: "/etc/passwd", content: "x" }), /files under \/report\//);
-  await assert.rejects(run("write_file", { path: "/report/../x", content: "x" }), /files under/);
-  await assert.rejects(run("read_file", { path: "/report/none.html" }), /does not exist/);
+  assert.match(await run("write", { path: "/report/report.html", content: "<h1>A</h1><!-- ch2 --><!-- ch3 -->" }), /Wrote \/report\/report.html/);
+  assert.match(await run("edit", { path: "/report/report.html", old_string: "<!-- ch2 -->", new_string: "<p>two</p>" }), /Edited/);
+  assert.equal(await run("read", { path: "/report/report.html" }), "<h1>A</h1><p>two</p><!-- ch3 -->");
+  assert.match(await run("ls", { path: "/report/" }), /\/report\/report.html  \d+ bytes/);
+  await assert.rejects(run("edit", { path: "/report/report.html", old_string: "<!-- ch2 -->", new_string: "x" }), /not found/);
+  await assert.rejects(run("write", { path: "/etc/passwd", content: "x" }), /files under \/report\//);
+  await assert.rejects(run("write", { path: "/report/../x", content: "x" }), /files under/);
+  await assert.rejects(run("read", { path: "/report/none.html" }), /does not exist/);
   const again = (await artifact.turnFor(c, { createdAt: new Date().toISOString() }))!;
-  assert.equal(String((await again.tools.run("read_file", { path: "/report/report.html" })).output), "<h1>A</h1><p>two</p><!-- ch3 -->", "a retry finds the draft");
+  assert.equal(String((await again.tools.run("read", { path: "/report/report.html" })).output), "<h1>A</h1><p>two</p><!-- ch3 -->", "a retry finds the draft");
 });
 
 test("lifecycle: draft, generating, ready; and failed when a run ends without a report", async () => {
@@ -130,7 +130,7 @@ test("lifecycle: draft, generating, ready; and failed when a run ends without a 
   assert.equal((await reports.get(c.id))?.status, "generating");
 
   const turn = (await artifact.turnFor(c, { createdAt: new Date(Date.now() - 5000).toISOString() }))!;
-  assert.deepEqual(turn.extraTools, ["artifact.publish_report", "artifact.write_file", "artifact.edit_file", "artifact.read_file"]);
+  assert.deepEqual(turn.extraTools, ["artifact.publish_report", "artifact.write", "artifact.edit"]);
   assert.match(turn.promptSuffix, /TEMPLATE-TEXT/);
   assert.match(turn.promptSuffix, /Report mode/);
 
@@ -163,12 +163,12 @@ test("web_search is offered only when search is configured, and asks it with que
   const c = conversation();
   await reports.create({ conversationId: c.id, productId: "p1", ownerAccountId: c.ownerAccountId });
   const run = { createdAt: new Date().toISOString() };
-  assert.deepEqual((await artifact.turnFor(c, run))!.extraTools, ["artifact.publish_report", "artifact.write_file", "artifact.edit_file", "artifact.read_file"]);
+  assert.deepEqual((await artifact.turnFor(c, run))!.extraTools, ["artifact.publish_report", "artifact.write", "artifact.edit"]);
   const asked: unknown[] = [];
   const search = { name: "fake", search: async (input: { query: string; objective: string }) => { asked.push(input); return { provider: "fake", query: input.query, retrievedAt: "t", results: [] }; } };
   const withSearch = new ArtifactMode({ ...artifact.deps, search });
   const turn = (await withSearch.turnFor(c, run))!;
-  assert.deepEqual(turn.extraTools, ["artifact.publish_report", "artifact.write_file", "artifact.edit_file", "artifact.read_file", "artifact.web_search"]);
+  assert.deepEqual(turn.extraTools, ["artifact.publish_report", "artifact.write", "artifact.edit", "artifact.web_search"]);
   assert.match(String((await turn.tools.run("web_search", { query: "MIT deadline", objective: "official date" })).output), /"provider":"fake"/);
   assert.deepEqual(asked, [{ query: "MIT deadline", objective: "official date" }]);
   await assert.rejects(turn.tools.run("web_search", { query: "x" }), /query and objective/);
@@ -321,6 +321,19 @@ test("the server tool path carries an image beside the text, in the shape the mo
   assert.deepEqual(result, { output: "p, page 1 of 1", content_type: "image", mime_type: "image/png", data_base64: "QUJD" });
   executor.setAttachments({ run: async () => "plain" });
   assert.deepEqual(await executor.execute("attachments.ls", {}), { output: "plain" });
+});
+
+test("/report/ is mounted beside /attachments/: the same read and ls reach the report files", async () => {
+  const { files } = await flat();
+  for (const definition of attachmentToolDefinitions(attachmentTools(files))) toolRegistry.set(definition.name, definition);
+  const executor = new ServerToolExecutor();
+  const asked: string[] = [];
+  executor.setAttachments({ run: async (name: string) => { asked.push(`attachments:${name}`); return "attachment"; } });
+  executor.setArtifact({ run: async (name, args) => { asked.push(`report:${name}:${String(args.path)}`); return { output: "draft" }; } });
+  assert.deepEqual(await executor.execute("attachments.read", { path: "/report/report.html" }), { output: "draft" });
+  assert.deepEqual(await executor.execute("attachments.ls", { path: "/report/" }), { output: "draft" });
+  assert.deepEqual(await executor.execute("attachments.read", { path: "/attachments/a.pdf" }), { output: "attachment" });
+  assert.deepEqual(asked, ["report:read:/report/report.html", "report:ls:/report/", "attachments:read"]);
 });
 
 test("report tools are registered for artifact conversations only", async () => {
