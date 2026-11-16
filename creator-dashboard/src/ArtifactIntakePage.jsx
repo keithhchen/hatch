@@ -5,8 +5,7 @@ import { ArrowUp, Check, Paperclip, X } from "lucide-react";
 import { useAnalytics } from "./analytics/AnalyticsProvider.jsx";
 import { intakeStarted, intakeSubmitted } from "./analytics/events.js";
 import {
-  FORM_FILE_NAME, INTAKE_FILE_ACCEPT, MAX_FILE_BYTES, MAX_INTAKE_FILES, answeredCount, assignNames, buildFormMd, draftStore, fileCount, fileMediaType, isAcceptedFile, submissionIds, validateIntake
-} from "./artifactForm.js";
+  FORM_FILE_NAME, INTAKE_FILE_ACCEPT, MAX_FILE_BYTES, MAX_INTAKE_FILES, answeredCount, assignNames, buildFormMd, draftStore, fileCount, fileMediaType, isAcceptedFile, submissionIds, validateIntake, localizeIntake } from "./artifactForm.js";
 import { BrowserImageAttachments } from "./webChatClient.js";
 import { webChatErrorText } from "./webChatI18n.js";
 
@@ -44,7 +43,7 @@ function FilesField({ field, files, uploads, disabled, onPick, onRemove, t }) {
 
 export function ArtifactIntakePage({ api, definition, productId, productName, draftConversationId, conversationPath, navigate, t, locale }) {
   const analytics = useAnalytics();
-  const fields = definition.intake.fields;
+  const fields = useMemo(() => localizeIntake(definition.intake, locale).fields, [definition, locale]);
   const draft = useMemo(() => draftStore(storage(), productId), [productId]);
   const [answers, setAnswers] = useState(() => draft.load());
   const [files, setFiles] = useState({});

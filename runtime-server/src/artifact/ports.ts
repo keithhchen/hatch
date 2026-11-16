@@ -7,13 +7,16 @@ export interface ReportRenderer {
   render(input: { fullHtml: string; freeHtml: string }, signal?: AbortSignal): Promise<RenderedReport>;
 }
 
+/** One string, or the same text per language. */
+export type LocalizedText = string | Partial<Record<"zh" | "en" | "ja", string>>;
+
 export type IntakeField = {
   id: string;
-  label: string;
+  label: LocalizedText;
   type: "text" | "long_text" | "choice" | "multi" | "files";
   required?: boolean;
-  options?: string[];
-  help?: string;
+  options?: LocalizedText[];
+  help?: LocalizedText;
 };
 export type Intake = { fields: IntakeField[] };
 

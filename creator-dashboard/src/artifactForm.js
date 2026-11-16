@@ -1,7 +1,21 @@
 // Pure rules of the artifact intake: counting, validation, form.md. No DOM, no network.
-// The UI cap on user files; 问卷.md comes on top. The Runtime enforces its own cap.
+// The UI cap on user files; form.md comes on top. The Runtime enforces its own cap.
 export const MAX_INTAKE_FILES = 20;
-export const FORM_FILE_NAME = "问卷.md";
+export const FORM_FILE_NAME = "form.md";
+
+const FALLBACK = ["en", "zh", "ja"];
+/** A localized text in the reader's language, else the first one given. */
+export const localized = (text, locale) => typeof text === "string" ? text : (text?.[locale] ?? FALLBACK.map(code => text?.[code]).find(Boolean) ?? "");
+/** The intake as the reader sees it: every label, help and option in their language. Answers carry the text they chose. */
+export const localizeIntake = (intake, locale) => ({
+  ...intake,
+  fields: intake.fields.map(field => ({
+    ...field,
+    label: localized(field.label, locale),
+    ...(field.help !== undefined ? { help: localized(field.help, locale) } : {}),
+    ...(field.options ? { options: field.options.map(option => localized(option, locale)) } : {})
+  }))
+});
 export const MAX_FILE_BYTES = 50 * 1024 * 1024;
 
 const MEDIA_TYPES = Object.freeze({
@@ -53,7 +67,7 @@ export function assignNames(names) {
 
 /**
  * form.md: the product name, each answered field as `## label` with its answer (a files field ends with its file paths),
- * then `## 文件`: every file of the conversation by the path the Agent will see, with the question it answers.
+ * then `## Files`: every file of the conversation by the path the Agent will see, with the question it answers.
  * `fileNames` are the final unique upload names per files field.
  */
 export function buildFormMd(productName, fields, answers, fileNames = {}) {
@@ -62,8 +76,8 @@ export function buildFormMd(productName, fields, answers, fileNames = {}) {
     const body = [text(answers[field.id]), ...(fileNames[field.id] ?? []).map(name => `- ${path(name)}`)].filter(Boolean).join("\n");
     return body ? [`## ${field.label}\n\n${body}`] : [];
   });
-  const listing = [`- ${path(FORM_FILE_NAME)}`, ...fields.flatMap(field => (fileNames[field.id] ?? []).map(name => `- ${path(name)} （回答：${field.label}）`))];
-  return [`# ${productName}`, ...sections, `## 文件\n\n${listing.join("\n")}`].join("\n\n") + "\n";
+  const listing = [`- ${path(FORM_FILE_NAME)}`, ...fields.flatMap(field => (fileNames[field.id] ?? []).map(name => `- ${path(name)} (${field.label})`))];
+  return [`# ${productName}`, ...sections, `## Files\n\n${listing.join("\n")}`].join("\n\n") + "\n";
 }
 
 /**

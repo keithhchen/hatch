@@ -2,13 +2,20 @@ import { z } from "zod";
 import type { PostgresQueryExecutor } from "../postgresStore.js";
 import type { ArtifactConfig, ArtifactConfigRepository, Intake } from "./ports.js";
 
+/** Text a buyer reads: one string, or one per language (zh, en, ja); the web shows the reader's and falls back to another. */
+const Localized = (max: number) => z.union([
+  z.string().min(1).max(max),
+  z.object({ zh: z.string().min(1).max(max), en: z.string().min(1).max(max), ja: z.string().min(1).max(max) }).partial().strict()
+    .refine((text) => Object.keys(text).length > 0, { message: "give the text in at least one language" })
+]);
+
 const FieldSchema = z.object({
   id: z.string().regex(/^[a-z][a-z0-9_]*$/),
-  label: z.string().min(1).max(500),
+  label: Localized(500),
   type: z.enum(["text", "long_text", "choice", "multi", "files"]),
   required: z.boolean().optional(),
-  options: z.array(z.string().min(1)).max(30).optional(),
-  help: z.string().max(500).optional()
+  options: z.array(Localized(200)).max(30).optional(),
+  help: Localized(500).optional()
 }).strict().refine(
   (field) => (field.type === "choice" || field.type === "multi") === (field.options !== undefined && field.options.length > 0),
   { message: "choice and multi fields need options, and no other field takes them" }

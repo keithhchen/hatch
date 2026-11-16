@@ -23,9 +23,9 @@ test("form.md: answers, a files field's paths, then a 文件 section listing eve
   assert.equal(md, [
     "# 升学规划", "## 孩子现在读几年级？\n\n初三", "## 最近的情况\n\n暂无", "## 弱项科目\n\n数学、英语",
     "## 成绩单\n\n见附件\n- /attachments/期中.pdf\n- /attachments/期末.jpg",
-    "## 文件\n\n- /attachments/问卷.md\n- /attachments/期中.pdf （回答：成绩单）\n- /attachments/期末.jpg （回答：成绩单）"
+    "## Files\n\n- /attachments/form.md\n- /attachments/期中.pdf (成绩单)\n- /attachments/期末.jpg (成绩单)"
   ].join("\n\n") + "\n");
-  assert.equal(buildFormMd("P", fields, { grade: "初二" }, {}), "# P\n\n## 孩子现在读几年级？\n\n初二\n\n## 文件\n\n- /attachments/问卷.md\n");
+  assert.equal(buildFormMd("P", fields, { grade: "初二" }, {}), "# P\n\n## 孩子现在读几年级？\n\n初二\n\n## Files\n\n- /attachments/form.md\n");
 });
 
 test("file names are made unique like the Runtime's flat view: same name gets (2), (3) before the extension, in upload order", () => {
@@ -33,10 +33,10 @@ test("file names are made unique like the Runtime's flat view: same name gets (2
   assert.deepEqual(assignNames(["a (2).jpg", "a.jpg", "a.jpg"]), ["a (2).jpg", "a.jpg", "a (3).jpg"], "a taken name is never reused");
   assert.deepEqual(assignNames(["x", "x", ".env", ".env"]), ["x", "x (2)", ".env", ".env (2)"]);
   const md = buildFormMd("P", fields, {}, { reports: assignNames(["奖状.jpg", "奖状.jpg"]) });
-  assert.match(md, /- \/attachments\/奖状 \(2\)\.jpg （回答：成绩单）/);
+  assert.match(md, /- \/attachments\/奖状 \(2\)\.jpg \(成绩单\)/);
 });
 
-test("intake validation: required fields, a typed 暂无 counts, files answer a files field, at most 20 files (问卷.md comes on top)", () => {
+test("intake validation: required fields, a typed 暂无 counts, files answer a files field, at most 20 files (form.md comes on top)", () => {
   assert.deepEqual(validateIntake(fields, {}, {}), [{ field: "grade", code: "required" }, { field: "story", code: "required" }]);
   assert.deepEqual(validateIntake(fields, { grade: "初二", story: "暂无/不确定" }, {}), []);
   assert.deepEqual(validateIntake(fields, { grade: "初二", story: "  " }, {}).map(problem => problem.field), ["story"]);
@@ -92,7 +92,7 @@ test("loading an artifact product: definition and the buyer's reports; a chat-on
   await assert.rejects(loadArtifact(async () => { throw Object.assign(new Error("boom"), { status: 500 }); }, {}, "p"), /boom/);
 });
 
-test("submit sequence: create, upload 问卷.md then every file, then a message with the form text only", async () => {
+test("submit sequence: create, upload form.md then every file, then a message with the form text only", async () => {
   const log = [];
   const request = async (url, init) => { log.push(`${init?.method ?? "GET"} ${url.split("?")[0]} key=${init?.headers?.["idempotency-key"]}`); return { conversation_id: "c1" }; };
   const api = new ArtifactApi(request, { entitlement_id: "e1" });
@@ -104,11 +104,11 @@ test("submit sequence: create, upload 问卷.md then every file, then a message 
   };
   const ids = submissionIds("k1");
   const conversationId = await api.createConversation("p1", "k1");
-  await api.upload(conversationId, {}, "问卷.md", "text/markdown");
+  await api.upload(conversationId, {}, "form.md", "text/markdown");
   await api.upload(conversationId, {}, "a.pdf", "application/pdf");
   await api.sendFirstMessage(conversationId, "# P\n", ids);
   assert.deepEqual(log, [
-    "POST /v1/web-chat/products/p1/artifact/conversations key=k1", "upload c1 问卷.md text/markdown", "upload c1 a.pdf application/pdf",
+    "POST /v1/web-chat/products/p1/artifact/conversations key=k1", "upload c1 form.md text/markdown", "upload c1 a.pdf application/pdf",
     'message ["clientMessageId","content","localTools","runId"] message_k1 run_k1'
   ]);
 });
@@ -197,4 +197,13 @@ test("resume decision comes from the server's reports: draft continues the intak
   assert.deepEqual(resumeView(list, "c3"), { view: "intake", draftConversationId: "c3" });
   assert.deepEqual(resumeView(list.slice(1), null, { startNew: true }), { view: "intake", draftConversationId: null }, "new report after a finished one");
   assert.deepEqual(resumeView(list, "zzz"), { view: "report", conversationId: "zzz" });
+});
+
+test("a trilingual intake shows each reader their language, and falls back when one is missing", async () => {
+  const { localizeIntake, localized } = await import("./artifactForm.js");
+  const intake = { fields: [{ id: "grade", type: "choice", label: { zh: "几年级", en: "Grade", ja: "学年" }, help: { zh: "选一个" }, options: [{ zh: "初二", en: "Grade 8", ja: "中学2年" }, "Other"] }] };
+  assert.deepEqual(localizeIntake(intake, "ja").fields[0], { id: "grade", type: "choice", label: "学年", help: "选一个", options: ["中学2年", "Other"] });
+  assert.equal(localizeIntake(intake, "en").fields[0].options[0], "Grade 8");
+  assert.equal(localized("plain", "ja"), "plain");
+  assert.equal(localized({ zh: "只有中文" }, "en"), "只有中文");
 });
