@@ -14,12 +14,44 @@ The review page is written in the Expert's own language (the language they have 
 - Ask only what only the Expert can answer. Do not ask what can be derived from the material; delete questions that would yield no new information.
 - Nothing is mandatory. The Expert can fill it in over several sittings and save at any time; what has been written is never lost.
 
+### How to ask so they want to answer
+
+The page should feel like being interviewed by a good professional interviewer: someone who listened, is genuinely curious about how this person thinks, respects their time, and keeps a professional distance. Not a survey, not a therapist, not a marketer, and not a chummy neighbour: over-familiarity is as off-putting as a form. Easy to answer and never awkward are part of this, not separate goals.
+
+- One question asks one thing. "Would you say that? If not, what do you say instead?" is one thing. A list of details ("how much, what kind of job, and what did you decide") is several: keep the one that matters, or split them into separate cards.
+- Ask about one specific, recent time, not about principles. People remember events, not their own rules; the rule comes out while they tell the event.
+- Open with their own words, quoted. The background must add something: their exact phrase, or how the Agent would answer today. Never restate a topic back to them ("You listed X as a question").
+- Start where they have energy: the things they talked about with the most life, and the 2–3 kinds of requests they get most. Those get full coverage; everything else goes in a final group marked optional, to fill in now or later.
+- Easy before hard: choices and short answers first, story questions after. Sensitive topics last, asked plainly, with one line on why it matters and a clear note that they can skip.
+- Say in one short clause what the answer changes for their clients, in their terms. Not "this helps us train the Agent".
+- Give them something to push against, never words to agree with. Do not write their answer for them or guess what they would say. Instead quote the common, generic answer people in their field give, and ask whether they would say it. People answer fastest, and most truly, when they disagree.
+- Match their register without imitating them: plainer if they write casually, precise if they write precisely, polite forms where their language expects them. Keep a professional distance: no small talk, no chumminess, no borrowing their slang or catchphrases back at them, no praise, no hype, no therapist language, no exclamation marks, no emojis.
+- Do not run the same set of questions over every topic. A good interviewer asks each topic where its real judgment lies: for one it is the generic answer to push against, for another the last case, for another just the line they always say. Two topics asked in the same words, in the same order, read as a machine.
+- Make it feel finite: say once, at the top of the page in the introduction, roughly how long it takes, that a sentence or two is enough and that anything can be skipped. Do not repeat it on every card. The Knowledge gaps section holds only facts the Agent is missing, never instructions about the page.
+- Never show internal words on the page: no question numbers as references ("see C04"), no "skills", "triggers", "playbooks", "layers". Group headings name what the Expert will recognise ("Knowledge gaps", "What it should never say").
+
+Examples (the brackets stand for the Expert's own field and words; never copy these sentences, write in the Expert's language and world):
+- Bad: "Share a real case: what was the situation, what did you tell them, and what is your rule?"
+  Good: "The last time someone came to you with [their most common request], what was going on?"
+- Bad background: "You listed [topic] as something people ask you." / "[Topic] is one of the three things you get asked most."
+  Good: no background at all, or "You said: '[their exact words]'."
+- Bad: every topic gets "The last time someone asked about [topic]…", "The usual advice is…, would you say that?", "When is the exception?", in the same words.
+  Good: [topic A] gets only the generic answer to push against; [topic B] gets the last case; [topic C] gets the one line they always say to it.
+- Bad: "Think of a recent case: how much was involved, what kind of work it was, and what did you tell them?"
+  Good: "Think of the last time someone asked you about [that request]. What did you tell them?"
+- Bad: "I think you would tell them '[a guess at their advice]'. Is that right?"
+  Good: "The usual advice here is '[the generic answer in their field]'. Would you say that? If not, what do you say instead?"
+- Bad: "We'd love to hear your amazing expertise! Tell us your story."
+  Good: "One or two sentences is enough. Skip it if it doesn't apply."
+
+Before publishing, read every card once as the Expert, on a phone: does it ask exactly one thing; does its background quote them or give them something to push against, or is it just the topic again (then delete it); would they know what to write in one or two sentences; would they wince at any word. Fix the cards that fail, then publish.
+
 ### What to write
 
 - First read the material and `output/CREATOR_PERSONA.md`; build questions on the facts and original words in them; do not ask what the material already answers.
-- Every question = background (original words or facts from the material or conversation) + one sentence asking; never put up a bare question.
-- One section per skill: when to use it (what the client asks, what situation), their rules, exceptions, when to hand over to a human.
-- Knowledge gaps are required: "what you must ask the client before making a judgment", "what you say when you meet a situation you have not handled before".
+- Background is optional. Write one only when it carries their exact words or the generic answer to push against; otherwise ask the question on its own. A background that only names the topic again ("You listed X", "X is one of your top questions", "You mentioned X") is worse than none: delete it.
+- One group for each of their top 2–3 kinds of requests: what was going on the last time, where they disagree with the usual advice, and when they would say the opposite. Other kinds of requests get one optional question each.
+- Always ask "what you must ask the client before making a judgment" and "what you say when you meet a situation you have not handled before".
 - When the material or chat contains conflicting accounts (price, minimum order quantity, policy), make it a multiple-choice question "Versions disagree, please pick one", list the different accounts as options, and add a supplement box. This is the most valuable question on the whole page.
 - Ask for voice samples: ask directly on the page for "the thing you have said to clients a hundred times", how you address clients, how you decline.
 - When the person speaking is not the Expert in person (an assistant, an employee), tell them the page will be forwarded to the Expert, and write the page so that the Expert alone can finish it with text answers.
@@ -27,22 +59,24 @@ The review page is written in the Expert's own language (the language they have 
 
 ### Page skeleton (example)
 
-A real review page has this shape: first let the Expert understand how the Agent works now (the introduction), then ask in groups; one page has 15–25 questions, and fewer than 10 means some layer is not covered. Below is the skeleton for a wedding photographer. It only demonstrates structure; do not copy the wording:
+A real review page has this shape. It is only structure: the brackets are placeholders, and the wording on a real page comes from this Expert's own field and words.
 
-- Agent introduction (not questions): the workflow; how it speaks; how it decides whether it can say something (standard answer / to be confirmed / no record); one block per skill: when to use it (trigger), what it knows, how it does it, when it hands over to a human. The skill blocks are the Agent's current understanding, for the Expert to correct.
-- Grouped questions, each group with a small heading that describes its nature:
-  - "Versions disagree, you need to pick one" (about 10 questions): the background quotes the original words that list the different accounts, "Three accounts appeared in the chat: 'deposit 30%', 'deposit $500', 'pay half up front'", and asks "Which one should be said to every client?", with those three accounts as the options, plus a supplement box. What cannot be turned into options becomes an open question: "For out-of-town shoots, is a travel fee always added, or are there exceptions?"
-  - "Knowledge gaps" (about 7 questions): the background says what is missing from the material and how the Agent can only answer now, "The chat never mentioned a rescheduling rule, clients often ask, and the Agent can currently only say 'let me check with my colleague'", and asks "Please write down your standard practice, or send an existing write-up (a link or a file name is fine)". These must include: "When a client says only 'I want a wedding shoot', which things do you ask first?" and "When you meet a type you have never shot, what do you say?"
-  - "Your view of the Agent" (3 questions): does the way it speaks sound like you, and what needs to change; are its judgments and the timing of handing over to a human right; what else must it know, and what must it never say.
-  - "Your own words" (3 questions): the thing you have said to clients a hundred times; how you address clients; how you decline a client whose date conflicts.
-- Each skill gets 1–2 more questions: one real case (background quotes the conversation), and the exception where the rule does not apply.
+- Size: as many questions as they can answer in about ten minutes, usually 8–15 and never more than 15. Cover every part of the Agent with the fewest questions; the 2–3 kinds of requests they get most come first and in full, everything else is optional at the end.
+- Agent introduction (not questions), short: what it will do for [their clients], how it opens a conversation, how it sounds, when it hands over to them. This is the Agent's current understanding, for the Expert to correct.
+- Grouped questions, each group with a plain heading the Expert would use:
+  - "Versions disagree, please pick one" (only when the material or chat really disagrees): the background quotes the different accounts, "'[account one]', '[account two]'", and asks "Which one should every client hear?", with those accounts as options plus a supplement box.
+  - "Knowledge gaps": "When someone just says '[a vague opening request]', what do you ask first?" and "When someone brings you a case you have never handled, what do you say?"
+  - One group per main kind of request (their top 2–3): "The last time someone came to you with [that request], what was going on?"; "The usual advice is '[generic answer]'. Would you say that?"; "When would you tell someone the opposite?"
+  - "How it sounds": "A line you've said a hundred times"; "What you say when you think someone is wrong".
+  - "What it should never do": topics it must not answer, situations that must come straight to them, things it must never say on their behalf.
+  - "If you have time" (optional): the other kinds of requests, one question each.
 
 ### Semantic structure
 
 - The page is divided into several sections, switched through a table of contents, with a count of items beside each section title:
   - Agent introduction: what it does, the workflow, how it speaks, how it decides whether it can say something.
-  - Knowledge gaps: facts the Expert needs to supply.
-  - Questions to answer: arranged in groups, each group with a small heading that says the nature of the questions, for example "Versions disagree, you need to pick one".
+  - Knowledge gaps: what the Agent must ask first, and what it says about cases they have never handled.
+  - Questions to answer: arranged in groups, each with a plain heading the Expert would use, for example "Versions disagree, please pick one".
 - Each question is one card:
   - a stable question number (C01, C02…; changing the wording does not change the number)
   - a short title

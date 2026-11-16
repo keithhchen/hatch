@@ -126,6 +126,7 @@ test("the shelved person-centred method is not loaded; the interview method is s
   const count = (text: string, needle: string) => text.split(needle).length - 1;
   assert.equal(count(done, "a wedding photographer; shows the form only"), 1);
   assert.equal(count(done, "Meta questions and specific questions"), 1);
-  assert.equal(count(form, "skeleton for a wedding photographer"), 1);
+  assert.equal(count(form, "wedding photographer"), 0, "the review page guide uses no industry example");
+  assert.match(form, /Give them something to push against, never words to agree with/);
   for (const other of [voice, assistant]) assert.equal(count(other, "wedding photographer"), 0, "each example lives in one place only");
 });
