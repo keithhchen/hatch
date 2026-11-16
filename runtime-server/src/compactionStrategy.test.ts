@@ -179,3 +179,13 @@ test("a new message preempts background compaction and waits for it to end", asy
   assert.deepEqual(events, ["job ended", "message proceeds"]);
   assert.equal(background.has("c"), false);
 });
+
+test("a CJK character counts as about one token, so a Chinese context reaches the trigger before the provider's window", async () => {
+  const { describePiMessage } = await import("./piCompaction.js");
+  const english = describePiMessage({ role: "user", content: "a".repeat(4000), timestamp: 0 } as never).tokens;
+  const chinese = describePiMessage({ role: "user", content: "中".repeat(4000), timestamp: 0 } as never).tokens;
+  const toolResult = describePiMessage({ role: "toolResult", toolCallId: "t", toolName: "read", content: [{ type: "text", text: "适用背景".repeat(1000) }], isError: false, timestamp: 0 } as never).tokens;
+  assert.ok(english >= 1000 && english < 1100, `English stays at four characters a token (${english})`);
+  assert.ok(chinese >= 4000, `4000 Chinese characters are at least 4000 tokens (${chinese})`);
+  assert.ok(toolResult >= 4000, `a Chinese tool result counts the same (${toolResult})`);
+});

@@ -28,8 +28,21 @@ const pathsOf = (block: Block): Array<{ path: string; mode: "read" | "write" }> 
   return PATH_KEYS.flatMap((key) => typeof args[key] === "string" ? [{ path: args[key] as string, mode }] : []);
 };
 
+/** Han, kana and hangul characters. */
+const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu;
+
+/**
+ * Pi estimates a token as four characters, which holds for English. A CJK character is about one token, so a Chinese
+ * conversation was counted at a quarter of its size and never reached the compaction trigger before the provider's window
+ * did. The estimate adds the three quarters Pi leaves out for each CJK character, in text and in tool call arguments.
+ */
+export function estimatePiMessageTokens(message: AgentMessage): number {
+  const cjk = JSON.stringify((message as { content?: unknown; summary?: unknown }).content ?? (message as { summary?: unknown }).summary ?? "").match(CJK)?.length ?? 0;
+  return estimateTokens(message) + Math.ceil(cjk * 0.75);
+}
+
 export function describePiMessage(message: AgentMessage): Entry {
-  const tokens = estimateTokens(message);
+  const tokens = estimatePiMessageTokens(message);
   if (message.role === "compactionSummary") return { role: "summary", tokens, text: message.summary };
   if (message.role === "user") return { role: "user", tokens, text: textOf(message) };
   if (message.role === "toolResult") {
