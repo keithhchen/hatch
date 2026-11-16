@@ -94,10 +94,10 @@ test('Deep Research starts from Creator identity and public evidence, not manual
   assert.match(i18n, /sourcesStage: '认识你'/);
   assert.match(i18n, /sourcesStage: 'Get to know you'/);
   assert.match(i18n, /sourcesStage: 'あなたを知る'/);
-  assert.match(prompt, /不是一个等待用户整理资料的资料摄入 Agent/);
-  assert.match(prompt, /主动使用 web_search 和 web_scrape/);
+  assert.match(prompt, /not an ingestion Agent waiting for the user to organize material/);
+  assert.match(prompt, /proactively use web_search and web_scrape/);
   assert.doesNotMatch(prompt, /youtube_transcript/);
-  assert.match(prompt, /不要一开始就要求用户上传文件/);
+  assert.match(prompt, /Don't start by asking the user to upload/);
 });
 
 test('The Interview opens with a few light questions, then writes the whole review page', async () => {
@@ -106,8 +106,8 @@ test('The Interview opens with a few light questions, then writes the whole revi
   const prompt = await readFile(new URL('../../runtime-server/prompts/factory-agents/voice/SYSTEM.md', import.meta.url), 'utf8');
   assert.match(i18n, /voice: '说说你为什么想做这个 Agent，想让它替你做什么/);
   assert.doesNotMatch(i18n, /voice: '从你的经历、影响、价值取舍、审美和矛盾讲起/);
-  assert.match(shared, /^# 访谈方法/m);
-  assert.match(shared, /先宽，再一次写全/);
+  assert.match(shared, /^# Interview method/m);
+  assert.match(shared, /broad first, then write everything once/);
   assert.doesNotMatch(prompt, /Intellectual Genealogy/);
 });
 
@@ -116,7 +116,7 @@ test('Agent Builder owns the judgment design and receives review-oriented user i
   const prompt = await readFile(new URL('../../runtime-server/prompts/factory-agents/generation/SYSTEM.md', import.meta.url), 'utf8');
   assert.match(i18n, /generation: '查看 Agent 构建的结果，或指出需要调整的地方/);
   assert.doesNotMatch(i18n, /generation: '说明这个 Agent 应该如何判断和行动/);
-  assert.match(prompt, /先理解产品要完成的工作，再编写判断、行动、条件、例外与完成标准/);
+  assert.match(prompt, /First understand the work the product must get done, then write the judgments, actions, conditions, exceptions and completion standards/);
 });
 
 test('Case Builder creates the client case and receives realism feedback', async () => {
@@ -124,8 +124,8 @@ test('Case Builder creates the client case and receives realism feedback', async
   const prompt = await readFile(new URL('../../runtime-server/prompts/factory-agents/case-generation/SYSTEM.md', import.meta.url), 'utf8');
   assert.match(i18n, /'case-generation': '查看 Agent 构建的客户案例，或指出哪里不符合真实情况/);
   assert.doesNotMatch(i18n, /'case-generation': '描述一个真实客户会遇到的情境/);
-  assert.match(prompt, /每次准备一个完整客户案例/);
-  assert.match(prompt, /构造有生活质感、内在一致的情境/);
+  assert.match(prompt, /Each time, you prepare one complete client case/);
+  assert.match(prompt, /Build a situation with the texture of real life and internal consistency/);
 });
 
 test('Factory connection errors use a floating toast and plain-language copy', async () => {
