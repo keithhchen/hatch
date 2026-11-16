@@ -16,6 +16,8 @@ export interface WorkerWorkspace {
   entries(): Promise<AgentEntry[]>;
   /** Throws BuildNotReadyError when Build has neither uploads nor interview output. */
   assertRoleAvailable(role: Role): Promise<void>;
+  /** Tells analytics the Expert sent a message into a session of this role. */
+  expertSpoke?(role: string): void;
 }
 
 const originOf = (message: AgentMessage) => (message as { origin?: MessageOrigin }).origin;
@@ -71,6 +73,7 @@ export class WorkerConversation implements Conversation {
     // The session's own record decides a repeat, across instances: the runtime refuses an item id it already holds.
     const delivered = await this.workspace.runtime.send(session.id, message, input.client).catch(error => { if (error instanceof MessageAlreadyAccepted) return undefined; throw error; });
     if (!delivered) return (await this.replay(input))!;
+    this.workspace.expertSpoke?.(session.role);
     const { queued, runId } = delivered;
     return {
       conversationId: session.id, queued, runId,

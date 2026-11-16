@@ -19,6 +19,9 @@ import { draftBriefSpecForProduct, normalizeBriefSpec, type BriefSpec } from "..
 import { normalizeProductPricing } from "./pricing.js";
 import { log } from "../observability/log.js";
 import type { UsageCap } from "../usage/usageCap.js";
+import { agentCreated } from "../analytics/events.js";
+import { safely } from "../analytics/safe.js";
+import type { ProductAnalytics } from "../analytics/port.js";
 
 export type CreatorCorpusAssetLayer = "manifest" | "system" | "skill" | "reference";
 
@@ -249,6 +252,7 @@ export type CreatorFactoryImmediateStarter = (runId: string) => Promise<FactoryR
 
 export class CreatorFactoryService {
   private readonly sourceLibrary: CreatorSourceLibrary;
+  private readonly analytics: ProductAnalytics;
 
   constructor(
     private readonly repository: CreatorFactoryRepository,
@@ -259,8 +263,10 @@ export class CreatorFactoryService {
     private readonly productFileStore?: ProductFileStore,
     private readonly startRun?: CreatorFactoryImmediateStarter,
     /** A run, or work on one, is not started when the Expert has spent the month. */
-    private readonly usageCap?: UsageCap
+    private readonly usageCap?: UsageCap,
+    analytics?: ProductAnalytics
   ) {
+    this.analytics = safely(analytics);
     this.sourceLibrary = sourceLibrary ?? new CreatorSourceLibrary(path.join(factoryRoot, "source-library"), objectStore, graphStore);
   }
 
@@ -355,6 +361,7 @@ export class CreatorFactoryService {
         payload: { nameLength: product.name.length }
       });
     }
+    this.analytics.capture(product.creatorId, agentCreated(product.id));
     return product;
   }
 

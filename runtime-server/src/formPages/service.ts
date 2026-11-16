@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { ArtifactObjectStore } from "../creatorLearning/objectStore.js";
+import { reviewPageOpened, reviewPageSubmitted } from "../analytics/events.js";
+import type { ProductAnalytics } from "../analytics/port.js";
+import { safely } from "../analytics/safe.js";
 import { renderFormPage } from "./inject.js";
 import type { FormLinks } from "./links.js";
 import type { FormOrigin, FormPage, FormRepository } from "./repository.js";
@@ -21,7 +24,11 @@ export type FormReading = { status: "open" | "submitted"; answers: Record<string
  * The HTML lives in the object store, one immutable object per published version; answers live with the page's record.
  */
 export class FormPages {
-  constructor(private deps: { repository: FormRepository; store: ArtifactObjectStore; links: FormLinks; submissions: FormSubmissions; prefix?: string }) {}
+  constructor(private deps: {
+    repository: FormRepository; store: ArtifactObjectStore; links: FormLinks; submissions: FormSubmissions; prefix?: string; analytics?: ProductAnalytics;
+    /** PostHog's public project key: when given, each page carries its own tracker (answers saved, time on page). */
+    trackingKey?: string;
+  }) {}
 
   /** Publishes a new page, or a new version of one of the owner's own (`formId`): same id and link, the answers kept by question id. */
   async publish(owner: { accountId: string } & FormOrigin, input: { formId?: string; title: string; html: string; schema: unknown }): Promise<{ form_id: string; url: string }> {
@@ -65,7 +72,9 @@ export class FormPages {
       versions[answer.questionId] = answer.version;
       if (answer.value !== null && shown.has(answer.questionId)) answers[answer.questionId] = answer.value;
     }
-    return renderFormPage(html, { formId, token: token!, schema: page.schema, answers, versions, status: page.status });
+    safely(this.deps.analytics).capture(page.accountId, reviewPageOpened(page.origin.productId, formId, page.status === "submitted"));
+    const tracking = this.deps.trackingKey ? { projectKey: this.deps.trackingKey, distinctId: page.accountId, agentId: page.origin.productId, formId, questions: shown.size } : undefined;
+    return renderFormPage(html, { formId, token: token!, schema: page.schema, answers, versions, status: page.status }, tracking);
   }
 
   /** Stores (or, with a null value, clears) one answer. Returns its new version. */
@@ -79,7 +88,11 @@ export class FormPages {
   /** Closes the page and tells the conversation it came from. A retry after a failed notice sends the notice again, never twice. */
   async submit(formId: string, token: string | null): Promise<void> {
     await this.linked(formId, token);
-    const { page } = await this.deps.repository.submit(formId);
+    const { page, first } = await this.deps.repository.submit(formId);
+    if (first) {
+      const answered = Object.keys((await this.read(page.accountId, formId)).answers).length;
+      safely(this.deps.analytics).capture(page.accountId, reviewPageSubmitted(page.origin.productId, formId, shownAnswerIds(page.schema).size, answered));
+    }
     if (page.notifiedAt) return;
     await this.deps.submissions.submitted(page, renderReview(page, page.schema, (await this.read(page.accountId, formId)).answers));
     await this.deps.repository.notified(formId);

@@ -9,6 +9,7 @@ import type { RunSupervisor } from "./runSupervisor.js";
 import { ChatError } from "./principal.js";
 import { assertProductUsable } from "./toolSurface.js";
 import type { RunCap } from "../usage/usageCap.js";
+import type { ChatAnalytics } from "./chatAnalytics.js";
 
 /** Capacity for one more Run. Reserving can fail; the returned function gives the capacity back. */
 export interface RunAdmission {
@@ -94,6 +95,8 @@ export class ChatService<Scope> {
     cap?: RunCap<Scope>;
     /** A message that may start a Run first ends the conversation's background compaction, on any instance. */
     compaction?: { waitForCompaction(conversationId: string): Promise<void> };
+    /** Told of each message taken, for product analytics. */
+    analytics?: ChatAnalytics;
   }) {}
 
   /**
@@ -130,7 +133,7 @@ export class ChatService<Scope> {
   }
 
   async submit(command: SubmitCommand<Scope>): Promise<Submission> {
-    const { repository, supervisor, hub, admission, registry, limits, compaction, terminator, cap } = this.deps;
+    const { repository, supervisor, hub, admission, registry, limits, compaction, terminator, cap, analytics } = this.deps;
     assertProductUsable(command.requiresLocalTools, command.client.client);
     await limits?.check(command.principal, command.conversation);
     // A message that joins a Run adds no work, so capacity is only reserved for one that may start a Run.
@@ -169,7 +172,10 @@ export class ChatService<Scope> {
           throw error;
         }
       }
-      if (outcome !== "replayed") registry.rememberClient(command.conversation.id, command.client, command.timeZone);
+      if (outcome !== "replayed") {
+        registry.rememberClient(command.conversation.id, command.client, command.timeZone);
+        if (!known) analytics?.messageAccepted({ conversation: command.conversation, principal: command.principal, client: command.client });
+      }
       if (outcome === "started") {
         registry.rememberScope(accepted.run.id, command.scope);
         supervisor.adopt(accepted.run, () => { registry.forget(accepted.run.id); release(); });

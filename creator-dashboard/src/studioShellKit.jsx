@@ -4,6 +4,8 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Button, InlineAlert, Skeleton, UnavailableState } from "@hatch/ui";
 import { formatMoney } from "./data.js";
 import { captureRenderError } from "./sentry.js";
+import { useAnalytics } from "./analytics/AnalyticsProvider.jsx";
+import { errorShown } from "./analytics/events.js";
 import { isProductLive, studioNextStep, studioPathStates } from "./studioPath.js";
 
 export const STUDIO_ROOT = "/studio";
@@ -59,7 +61,7 @@ export class RegionBoundary extends React.Component {
   render() {
     const { t, children } = this.props;
     if (!this.state.error) return children;
-    return <RouteProblem title={t("regionCrashed")} body={t("regionCrashedBody")} action={t("retry")} onAction={() => window.location.reload()} />;
+    return <RouteProblem title={t("regionCrashed")} body={t("regionCrashedBody")} action={t("retry")} onAction={() => window.location.reload()} category="render" />;
   }
 }
 
@@ -85,7 +87,9 @@ export function EmptyState({ title, body, action, onAction }) {
   return <section className="sx-empty"><h2>{title}</h2><p>{body}</p>{action ? <Button className="web-btn-yolk" type="button" onClick={onAction}>{action}</Button> : null}</section>;
 }
 
-export function RouteProblem({ title, body, action, onAction }) {
+export function RouteProblem({ title, body, action, onAction, category = "load" }) {
+  const analytics = useAnalytics();
+  useEffect(() => analytics.track(errorShown({ area: "studio", category })), [analytics, category]);
   return <UnavailableState className="cpv2-problem" title={title} body={body} action={action ? { label: action, onClick: onAction } : undefined} />;
 }
 
@@ -93,14 +97,16 @@ export function LoadingState({ t }) {
   return <section className="cpv2-loading" aria-busy="true" aria-label={t?.("loadingCreatorPage") ?? ""}><Skeleton lines={4} /></section>;
 }
 
-/** Copy an absolute public URL and report the real clipboard result. */
+/** Copy an absolute public URL and report the real clipboard result; a successful copy tracks `event` when given. */
 export function useCopy() {
+  const analytics = useAnalytics();
   const [copied, setCopied] = useState("");
-  const copy = useCallback(async (value) => {
+  const copy = useCallback(async (value, event) => {
     await navigator.clipboard.writeText(absoluteUrl(value));
+    if (event) analytics.track(event);
     setCopied(value);
     setTimeout(() => setCopied((current) => current === value ? "" : current), 2000);
-  }, []);
+  }, [analytics]);
   return { copied, copy };
 }
 

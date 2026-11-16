@@ -6,6 +6,9 @@ import { labelOfUrl, mediaTypeOf, safeName, stemOf } from "./names.js";
 import type { IngestEngine, IngestJobRepository, IngestSink, Result, Source } from "./ports.js";
 import { log } from "../observability/log.js";
 import type { UsageCap } from "../usage/usageCap.js";
+import { materialUploaded } from "../analytics/events.js";
+import { safely } from "../analytics/safe.js";
+import type { ProductAnalytics } from "../analytics/port.js";
 
 export const MAX_ITEMS = 50;
 export const MAX_FILE_BYTES = 50 * 1024 * 1024;
@@ -106,6 +109,8 @@ export class IngestService {
     owns: (accountId: string, productId: string) => Promise<boolean>;
     /** A job is not started when the account has spent its month: the hosted agent's model calls are the Expert's. */
     usageCap?: UsageCap;
+    /** Told of the files and links an Expert adds. */
+    analytics?: ProductAnalytics;
     /** Where browsers upload files to, and where a job finds them. */
     objects: ArtifactObjectStore;
     inBackground?: InBackground;
@@ -164,6 +169,11 @@ export class IngestService {
     const fresh = queuedJob(id, accountId, productId, accepted.map(entry => entry.input), context?.trim() ?? "", this.now());
     const { value: job, replayed } = await this.once(fresh);
     if (replayed) return job;
+    const analytics = safely(this.deps.analytics);
+    for (const kind of ["file", "link"] as const) {
+      const count = accepted.filter(entry => (entry.source.kind === "link") === (kind === "link")).length;
+      if (count) analytics.capture(accountId, materialUploaded(productId, kind, count));
+    }
     (this.deps.inBackground ?? detached)(() => this.track(this.run(job, accepted.map(entry => entry.source))));
     return job;
   }

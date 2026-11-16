@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useAnalytics } from "./analytics/AnalyticsProvider.jsx";
+import { ownAgentOpened } from "./analytics/events.js";
 import { ArrowLeft, ArrowUp, ChevronDown, Menu, Plus, RotateCw, X } from "lucide-react";
 import { Avatar } from "@hatch/ui";
 import { ChatError, ConversationController, FreeChatMeter, resolveCreatorIdentity } from "@hatch/chat";
@@ -251,6 +253,10 @@ export default function WebChatPage({ productId, conversationId: routedConversat
       controller?.dispose();
     };
   }, [productId, request]);
+
+  const analytics = useAnalytics();
+  const ownerChat = Boolean(workspace) && !workspace.access.entitlement_id;
+  useEffect(() => { if (ownerChat) analytics.track(ownAgentOpened({ agentId: productId })); }, [analytics, ownerChat, productId]);
 
   useEffect(() => {
     workspace?.controller.open(routedConversationId ?? "");

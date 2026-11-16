@@ -1,4 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useAnalytics } from "./analytics/AnalyticsProvider.jsx";
+import { agentPageViewed, chatStarted, errorShown, ownAgentOpened, signupStarted, viaFromReferrer } from "./analytics/events.js";
+import { withTracking } from "./analytics/tracking.js";
 import { AlertCircle, ArrowRight, Check, Inbox, Pencil, SearchX } from "lucide-react";
 import {
   Button,
@@ -432,6 +435,8 @@ function ProductPage({ route, request, navigate, session }) {
   const resource = useRemote(async (signal) => unwrap(await callRequest(request, endpoint, { signal }), ["agent", "product"]), endpoint);
   const product = resource.data;
   usePageTitle(product ? productName(product, t) : t("Agent details"));
+  const analytics = useAnalytics();
+  useEffect(() => { if (product) analytics.track(agentPageViewed({ agentId: productId, via: viaFromReferrer(document.referrer, window.location.origin) })); }, [analytics, productId, Boolean(product)]);
 
   if (resource.status === "loading") return <div className="buyer-v2__container buyer-v2__page"><DetailSkeleton /></div>;
   if (resource.status === "error") return <div className="buyer-v2__container buyer-v2__page"><RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} session={session} returnTo={path} /></div>;
@@ -481,6 +486,9 @@ function ProductAction({ product, currentPath, request, navigate, session, embed
     && product.status !== "withdrawn";
   const isAnonymous = session.status !== "authenticated";
   const isOwner = isOwnProduct(session, product);
+  const analytics = useAnalytics();
+  useEffect(() => { if (isOwner) analytics.track(ownAgentOpened({ agentId: productId(product) })); }, [analytics, isOwner]);
+  const trackChat = withTracking(analytics, chatStarted({ agentId: productId(product) }))();
 
   async function startCheckout() {
     if (!purchasable || mutation.status === "pending") return;
@@ -509,7 +517,7 @@ function ProductAction({ product, currentPath, request, navigate, session, embed
   } else if (status === "active" || status === "reserved") {
     title = status === "reserved" ? t("Setting up access") : t("Added to My Agents");
     body = status === "reserved" ? t("No need to add it again.") : t("Chat in the browser.");
-    action = <><LinkButton className="web-btn-yolk" to={`/chat/product/${encodeURIComponent(productId(product))}`} navigate={navigate}>{t('Start chat')}</LinkButton></>;
+    action = <><LinkButton className="web-btn-yolk" to={`/chat/product/${encodeURIComponent(productId(product))}`} navigate={navigate} onClick={trackChat}>{t('Start chat')}</LinkButton></>;
   } else if (status === "pending") {
     title = t("Setting up access…");
     body = t("Order confirmed. Access appears here when ready.");
@@ -683,6 +691,8 @@ function AuthPage({ mode, search, request, navigate, session }) {
   const authBrandClassName = "buyer-v2__brand";
   const photo = signingUp ? "v_morning" : "v_window";
   usePageTitle(presentation.title);
+  const analytics = useAnalytics();
+  useEffect(() => { if (signingUp) analytics.track(signupStarted({ method: "email" })); }, [analytics, signingUp]);
 
   useEffect(() => {
     if (session.status === "authenticated") navigateTo(navigate, returnTo, { replace: true });
@@ -1073,6 +1083,8 @@ function CreatorIdentity({ value, name: knownName, className = "" }) {
 function RouteError({ error, onRetry, navigate, session, returnTo }) {
   const t = useBuyerCopy();
   const status = error?.status;
+  const analytics = useAnalytics();
+  useEffect(() => analytics.track(errorShown({ area: "buyer", category: String(status ?? "unknown") })), [analytics, status]);
   if (status === 401) return <StatePanel title={t('Session expired')} body={t('Sign in again to continue. You will return to this page.')}><LinkButton className="web-btn-yolk" to={`/sign-in?returnTo=${encodeURIComponent(safeReturnTo(returnTo))}`} navigate={navigate}>{t('Sign in')}</LinkButton></StatePanel>;
   if (status === 403) return <StatePanel icon={AlertCircle} title={t("No access to this page")} body={t("This page may belong to another account. Check the email you are signed in with.")}><LinkButton to="/account/help" navigate={navigate}>{t('Account help')}</LinkButton><LinkButton variant="secondary" to={EXPLORE_ROOT} navigate={navigate}>{t('Browse Agents')}</LinkButton></StatePanel>;
   if (status === 404) return <StatePanel icon={SearchX} title={t('Not found')} body={session?.status === "authenticated" ? t("It may have been removed. Past receipts remain in Orders.") : t("It may have been removed, or the link is incomplete.")}>{session?.status === "authenticated" ? <LinkButton variant="secondary" to={ORDERS_ROOT} navigate={navigate}>{t('View orders')}</LinkButton> : null}<LinkButton to={EXPLORE_ROOT} navigate={navigate}>{t('Browse Agents')}</LinkButton></StatePanel>;

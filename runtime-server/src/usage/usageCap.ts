@@ -1,3 +1,6 @@
+import { safely } from "../analytics/safe.js";
+import { usageCapReached, type Surface } from "../analytics/events.js";
+import type { ProductAnalytics } from "../analytics/port.js";
 import { ChatError } from "../chat/principal.js";
 import { billableTokens, monthlyTokenCap, USAGE_SURFACES, type UsageReader } from "./usage.js";
 
@@ -23,19 +26,20 @@ export type RunCap<Scope> = (scope: Scope) => Promise<void>;
  */
 export class UsageCap {
   private readonly seen = new Map<string, number>();
+  private readonly analytics: ProductAnalytics;
 
   constructor(
     private readonly reader: Pick<UsageReader, "monthToDate">,
     readonly cap: number | null,
-    private readonly options: { ttlMs?: number; now?: () => Date } = {}
-  ) {}
+    private readonly options: { ttlMs?: number; now?: () => Date; analytics?: ProductAnalytics } = {}
+  ) { this.analytics = safely(options.analytics); }
 
-  static fromEnvironment(reader: Pick<UsageReader, "monthToDate">, env: NodeJS.ProcessEnv): UsageCap {
-    return new UsageCap(reader, monthlyTokenCap(env));
+  static fromEnvironment(reader: Pick<UsageReader, "monthToDate">, env: NodeJS.ProcessEnv, analytics?: ProductAnalytics): UsageCap {
+    return new UsageCap(reader, monthlyTokenCap(env), { analytics });
   }
 
-  /** Throws UsageCapExceeded when the account has reached the cap. No cap, no read. */
-  async assertWithinCap(accountId: string): Promise<void> {
+  /** Throws UsageCapExceeded when the account has reached the cap. No cap, no read. `surface` says what was refused, for analytics. */
+  async assertWithinCap(accountId: string, surface: Surface = "studio"): Promise<void> {
     const { cap } = this;
     if (cap === null) return;
     const now = (this.options.now ?? (() => new Date()))();
@@ -43,12 +47,12 @@ export class UsageCap {
     if (checkedAt !== undefined && now.getTime() - checkedAt <= (this.options.ttlMs ?? 10_000)) return;
     const month = await this.reader.monthToDate(accountId, now);
     const used = USAGE_SURFACES.reduce((sum, surface) => sum + billableTokens(month[surface]), 0);
-    if (used >= cap) { this.seen.delete(accountId); throw new UsageCapExceeded(accountId, used, cap, nextMonth(now)); }
+    if (used >= cap) { this.seen.delete(accountId); this.analytics.capture(accountId, usageCapReached(surface)); throw new UsageCapExceeded(accountId, used, cap, nextMonth(now)); }
     this.seen.set(accountId, now.getTime());
   }
 
   /** A guard for a host whose Runs are paid by `payer(scope)`. */
-  guard<Scope>(payer: (scope: Scope) => string): RunCap<Scope> {
-    return scope => this.assertWithinCap(payer(scope));
+  guard<Scope>(payer: (scope: Scope) => string, surface: Surface = "chat"): RunCap<Scope> {
+    return scope => this.assertWithinCap(payer(scope), surface);
   }
 }

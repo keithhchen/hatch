@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { shareLinkCopied } from "./analytics/events.js";
 import { Copy, Download, Eye, EyeOff, ExternalLink } from "lucide-react";
 import { Button, ConfirmDialog, Input } from "@hatch/ui";
 import { InlineError, LoadingState, SectionHead, friendlyError, useCopy } from "./studioShellKit.jsx";
@@ -75,7 +76,7 @@ export function TelegramBotSetup({ productId, live, request, t }) {
       </div>
       <div className="sx-form__foot">
         <Button asChild leading={<ExternalLink aria-hidden="true" />}><a href={botLink(bot.username)} target="_blank" rel="noreferrer">{t("sxtgOpen")}</a></Button>
-        <Button variant="secondary" type="button" leading={<Copy aria-hidden="true" />} onClick={() => void copy(botLink(bot.username))}>{copied ? t("copied") : t("sxtgCopyLink")}</Button>
+        <Button variant="secondary" type="button" leading={<Copy aria-hidden="true" />} onClick={() => void copy(botLink(bot.username), shareLinkCopied({ agentId: productId, link: "telegram" }))}>{copied ? t("copied") : t("sxtgCopyLink")}</Button>
         <Button variant="secondary" type="button" onClick={() => { setReplacing(true); setError(""); }}>{t("sxtgReplace")}</Button>
         <Button variant="ghost" type="button" onClick={() => setDisconnecting(true)}>{t("sxtgDisconnect")}</Button>
       </div>

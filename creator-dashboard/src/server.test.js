@@ -1118,6 +1118,7 @@ test("an owner reaches their published Agent by product_id and cannot acquire it
 test("zero-value checkout creates an idempotent Agent Corpus order and entitlement", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-checkout-"));
   const accessBodies = [];
+  const captured = [];
   const registry = registryFixture({ signedIn: "buyer", accessBodies });
   await listen(registry);
   context.after(() => registry.close());
@@ -1126,6 +1127,7 @@ test("zero-value checkout creates an idempotent Agent Corpus order and entitleme
     registryAccessServiceToken: "test-access-service",
     registryDeploymentServiceToken: "test-deployment-service",
     registryUrl: serverUrl(registry),
+    analytics: { capture: (distinctId, event) => captured.push({ distinctId, ...event }) },
     exposeBearerTokens: true
   });
   const api = createServer(dashboard.handler);
@@ -1159,6 +1161,8 @@ test("zero-value checkout creates an idempotent Agent Corpus order and entitleme
   const replay = await checkout();
   assert.equal(replay.status, 200);
   assert.equal(dashboard.ledger.listEvents().length, 2);
+  // Subscribing is recorded once, for the buyer's account id; a replay records nothing.
+  assert.deepEqual(captured.filter((entry) => entry.event === "agent_subscribed"), [{ distinctId: "buyer-zero", event: "agent_subscribed", properties: { agent_id: catalogAgent.product_id } }]);
 
   await new Promise((resolve) => setTimeout(resolve, 20));
   const secondPurchase = await checkout("legacy-free-checkout-two");

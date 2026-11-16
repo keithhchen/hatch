@@ -10,6 +10,7 @@ import { InMemoryUsageLedger } from "./usage/memoryUsage.js";
 import { PostgresUsageLedger } from "./usage/postgresUsage.js";
 import { monthlyTokenCap, usageReport, utcDay, type UsageReader } from "./usage/usage.js";
 import { UsageCap } from "./usage/usageCap.js";
+import { createProductAnalytics } from "./analytics/index.js";
 import { studioTools, studioToolDefinitions } from "./assistant/studioTools.js";
 import { LegacyAssistantHistory } from "./assistant/history.js";
 import { PostgresAssistantState } from "./assistant/state.js";
@@ -204,6 +205,9 @@ type RegistryContext = {
   authSecret: string;
 };
 
+/** The longest shutdown waits to send the events still queued. */
+const ANALYTICS_FLUSH_MS = 3_000;
+
 export async function createRegistryServerFromEnvironment(environment: NodeJS.ProcessEnv = process.env): Promise<RegistryServer> {
   initializeLangfuseObservability(environment);
   const passwordWorkOptions = passwordWorkOptionsFromEnvironment(environment);
@@ -221,10 +225,11 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   // With a database every Product workspace journals each Run from its start; without one Studio has no conversations to record.
   // One ledger for every Studio model call, and the source of the usage the Expert reads back.
   const usage = registryPool ? new PostgresUsageLedger(registryPool) : new InMemoryUsageLedger();
-  const usageCap = UsageCap.fromEnvironment(usage, environment);
+  const analytics = createProductAnalytics(environment);
+  const usageCap = UsageCap.fromEnvironment(usage, environment, analytics);
   // Which model each role runs on lives in the database; without one (local development) the seed choices apply.
   const models = registryPool ? new PostgresModelRoleResolver(registryPool) : new InMemoryModelRoleResolver();
-  const factoryAgents = new FactoryAgentsService(path.join(factoryRoot, "agent-chats"), environment, models, factoryAgentDefinitions, registryPool ? () => new EventLogJournal(conversationPorts.eventLog, event => event.sessionId) : undefined, usage, usageCap);
+  const factoryAgents = new FactoryAgentsService(path.join(factoryRoot, "agent-chats"), environment, models, factoryAgentDefinitions, registryPool ? () => new EventLogJournal(conversationPorts.eventLog, event => event.sessionId) : undefined, usage, usageCap, analytics);
   const objectStore = objectStoreFromEnvironment(environment);
   const productObjectStore = objectStoreFromEnvironment(environment, path.join(factoryRoot, "product-files"));
   if (!productObjectStore) throw new Error("Product File object storage is not configured");
@@ -269,10 +274,10 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     })
     : graphPool;
   const ownsReleasePool = Boolean(releaseDatabaseUrl);
-  const releaseStore = new CreatorRegistryReleaseStore(releasePool);
+  const releaseStore = new CreatorRegistryReleaseStore(releasePool, analytics);
   await releaseStore.ensureSchema();
   const corpusPublisher = nodeObjectStore
-    ? new CorpusPublisher(factoryNodeService, nodeObjectStore, store, releaseStore, environment.HATCH_RUNTIME_CORPUS_ROOT?.trim() || "runtime-corpora")
+    ? new CorpusPublisher(factoryNodeService, nodeObjectStore, store, releaseStore, environment.HATCH_RUNTIME_CORPUS_ROOT?.trim() || "runtime-corpora", analytics)
     : undefined;
   const studioUrl = environment.HATCH_STUDIO_ASSISTANT_URL?.trim() || "https://gethatchapp.com/studio/assistant";
   // The site its users know: the alias domain. Products and the Telegram bots are reached here.
@@ -316,7 +321,8 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     graphStore,
     productFileStore,
     (runId) => immediateFactoryWorker.startRun(runId, immediateFactoryStop.signal),
-    usageCap
+    usageCap,
+    analytics
   );
   const publishToken = environment.HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN?.trim() || "";
   const runtimeServiceToken = environment.HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN?.trim() || "";
@@ -434,12 +440,12 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       },
       productPrefix: (accountId, productId) => `${productsPrefix}/${accountId}/${productId}`,
       owns: ownsProduct,
-      usageCap,
+      usageCap, analytics,
     });
     // Review pages are opened through links signed with the credentials key. Without it there are no pages, and the interview is not offered the tools.
     const formKey = environment.HATCH_CREDENTIALS_KEY?.trim();
     if (!formKey) log.error("form_pages_unavailable", { reason: "HATCH_CREDENTIALS_KEY is not set: review pages cannot be signed" });
-    const forms: FormPages | undefined = formKey ? new FormPages({ repository: await PostgresFormRepository.open(registryPool), store: nodeObjectStore, links: new FormLinks(formKey, siteOrigin), submissions: { submitted: async (page, review) => assistant.formSubmitted(page, review) } }) : undefined;
+    const forms: FormPages | undefined = formKey ? new FormPages({ repository: await PostgresFormRepository.open(registryPool), store: nodeObjectStore, links: new FormLinks(formKey, siteOrigin), analytics, trackingKey: environment.POSTHOG_PROJECT_API_KEY?.trim() || undefined, submissions: { submitted: async (page, review) => assistant.formSubmitted(page, review) } }) : undefined;
     if (forms) factoryAgents.attachForms(forms);
     const assistant = new AssistantService({
       tasks, reach, channels,
@@ -467,7 +473,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       repository: conversations, store: transcripts, chatAssets, state: assistantState, tools,
       assetStore: new RuntimeAssetStore(path.join(factoryRoot, "assistant-assets")),
       history: new LegacyAssistantHistory({ backend: accountId => new PostgresWorkbenchBackend(registryPool, `assistant:${accountId}`), state: assistantState, store: transcripts }),
-      prompt: assistantPrompt, liveState: accountId => assistant.liveState(accountId), env: environment, models, usage, usageCap,
+      prompt: assistantPrompt, liveState: accountId => assistant.liveState(accountId), env: environment, models, usage, usageCap, analytics,
     });
     assistant.bind(assistantChat, new ExpertMaterials({ assets: chatAssets, conversation: accountId => assistantChat.conversation(accountId) }));
     routed.bindLocal(assistantChat.gateway);
@@ -605,6 +611,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     await factoryRepository.close();
     await store.close();
     await flushLangfuseObservability();
+    await analytics.shutdown(ANALYTICS_FLUSH_MS);
     if (ownsReleasePool) await releasePool?.end();
   };
   return { server, close, shutdown: deadlineMs => gracefulShutdown({

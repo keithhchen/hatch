@@ -11,6 +11,9 @@ import type { ChatGateway, ConversationRef, SentMessage, UploadedRef } from "../
 import { ChatRuntime } from "../chat/chatRuntime.js";
 import { attributeByScope, payerByScope, type UsageRecorder } from "../usage/usage.js";
 import type { UsageCap } from "../usage/usageCap.js";
+import { assistantMessageSent } from "../analytics/events.js";
+import type { ProductAnalytics } from "../analytics/port.js";
+import { safely } from "../analytics/safe.js";
 import { NO_SKILLS, failRun, runModelTurn, type TurnBinding } from "../chat/modelTurn.js";
 import { ChatError, accountPrincipal } from "../chat/principal.js";
 import type { Retried } from "../chat/chatService.js";
@@ -80,6 +83,8 @@ export type AssistantChatDeps = {
   usage?: UsageRecorder;
   /** Refuses a new Assistant Run when the Expert has spent their month. */
   usageCap?: UsageCap;
+  /** Told of each message the Expert says to the Assistant. */
+  analytics?: ProductAnalytics;
 };
 
 /** The Assistant's one conversation per account is the account's own: nothing else binds to it. */
@@ -126,7 +131,7 @@ export class AssistantChat implements AssistantHost {
       leaseMs: deps.leaseMs, sweepMs: deps.sweepMs,
       compactionStrategy: deps.compactionStrategy ?? (async () => chatCompactionStrategy(await deps.models.resolve("assistant"), { budget: ASSISTANT_CONTEXT_BUDGET })),
       ...(deps.usage ? { usage: { recorder: deps.usage, attribute: attributeByScope } } : {}),
-      ...(deps.usageCap ? { cap: deps.usageCap.guard(payerByScope) } : {})
+      ...(deps.usageCap ? { cap: deps.usageCap.guard(payerByScope, "studio") } : {})
     });
     this.feed = new JournalFeed({ repository: deps.repository, hub: this.runtime.hub });
     this.gateway = new ServiceChatGateway<AssistantScope>({
@@ -216,6 +221,7 @@ export class AssistantChat implements AssistantHost {
     if (isSystemMessageId(input.id)) throw new ChatError("invalid_message_id", `A message id cannot start with ${SYSTEM_MESSAGE_PREFIX}.`, 400);
     const { source, messageRef, client } = input.origin;
     const sent = await this.submit(accountId, input.id, input.parts, client);
+    if (sent.outcome !== "replayed") safely(this.deps.analytics).capture(accountId, assistantMessageSent(source));
     if (sent.outcome !== "replayed") await this.deps.state.expertSpoke(accountId, { source, at: sent.acceptedAt, ...(messageRef ? { messageRef } : {}) });
     return sent;
   }

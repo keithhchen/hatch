@@ -11,9 +11,12 @@ import { WebBrand } from "./WebBrand.jsx";
 import "./styles.css";
 import "./webTheme.css";
 import { captureRenderError, initSentry } from "./sentry.js";
+import { AnalyticsProvider, useAccountIdentity } from "./analytics/AnalyticsProvider.jsx";
+import { createAnalytics } from "./analytics/createAnalytics.js";
 import { lazyWithReload, reloadOnStaleBuild } from "./staleBuild.js";
 
 initSentry(import.meta.env);
+const analytics = createAnalytics(import.meta.env);
 reloadOnStaleBuild();
 
 const CREATOR_ROOT = "/studio";
@@ -63,6 +66,7 @@ function App() {
   const helpRoute = parseHelpRoute(location.pathname);
   const [profile, setProfile] = useState(null);
   const [sessionStatus, setSessionStatus] = useState("loading");
+  useAccountIdentity(profile?.id);
 
   const clearSession = useCallback(() => {
     setProfile(null);
@@ -267,9 +271,11 @@ function AppLoading() {
 
 createRoot(document.getElementById("root")).render(
   <AppErrorBoundary>
-    <HatchUIProvider atmosphere toasts className="hatch-app-paper">
-      <LocaleProvider><App /></LocaleProvider>
-    </HatchUIProvider>
+    <AnalyticsProvider analytics={analytics}>
+      <HatchUIProvider atmosphere toasts className="hatch-app-paper">
+        <LocaleProvider><App /></LocaleProvider>
+      </HatchUIProvider>
+    </AnalyticsProvider>
   </AppErrorBoundary>
 );
 

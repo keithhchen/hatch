@@ -1,3 +1,6 @@
+import { agentUnpublished } from "../analytics/events.js";
+import type { ProductAnalytics } from "../analytics/port.js";
+import { safely } from "../analytics/safe.js";
 import { EMPTY_PRODUCT_PRICING, normalizeProductPricing, type ProductPricing } from "./pricing.js";
 import type { Pool } from "pg";
 import { isUuidV4, requireUuidV4 } from "../identity.js";
@@ -32,7 +35,9 @@ export class CreatorRegistryReleaseStore {
   private readonly unlisted = new Set<string>();
   private readonly everPublished = new Set<string>();
 
-  constructor(private readonly pool?: Pool) {}
+  private readonly analytics: ProductAnalytics;
+
+  constructor(private readonly pool?: Pool, analytics?: ProductAnalytics) { this.analytics = safely(analytics); }
 
   /** Exposed only for readiness/diagnostic reporting; never includes a DSN. */
   persistenceMode(): "postgres" | "memory" {
@@ -188,12 +193,13 @@ export class CreatorRegistryReleaseStore {
     if (!this.pool) {
       const current = this.memory.get(productId);
       if (current?.creator_id === creatorId) this.memory.delete(productId);
-      return;
+    } else {
+      await this.pool.query(
+        `DELETE FROM hatch_creator_registry_live WHERE product_id=$1 AND creator_id=$2`,
+        [productId, creatorId]
+      );
     }
-    await this.pool.query(
-      `DELETE FROM hatch_creator_registry_live WHERE product_id=$1 AND creator_id=$2`,
-      [productId, creatorId]
-    );
+    this.analytics.capture(creatorId, agentUnpublished(productId));
   }
 
   /** Product-level setting: survives withdraw and republish. */

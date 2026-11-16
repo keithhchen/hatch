@@ -343,6 +343,8 @@ export interface ConversationRepository {
    * Throw RangeError unless afterCursor <= throughCursor <= current high water.
    */
   journalPage(conversationId: string, afterCursor: number, throughCursor?: number, limit?: number): Promise<ConversationJournalPage>;
+  /** How many messages the conversation has taken: each Run's own, and those that steered one. A retry counts as one more. */
+  countUserMessages(conversationId: string): Promise<number>;
   /** Whether this client key was already accepted, so a retry needs no asset work. */
   hasAcceptedMessage(conversationId: string, clientMessageId: string): Promise<boolean>;
   /** The conversation's one active Run, if any. */
@@ -675,6 +677,11 @@ export class InMemoryConversationRepository implements ConversationRepository {
     }
     const run = this.runs.get(entry.runId!)!;
     return { created: false, steered: false, run: cloneRun(run), receipt: { run_id: run.id, client_message_id: entry.clientMessageId, accepted_at: entry.acceptedAt } };
+  }
+
+  async countUserMessages(conversationId: string): Promise<number> {
+    await this.readReady();
+    return [...this.runs.values()].filter(run => run.conversationId === conversationId).reduce((total, run) => total + 1 + run.steeredCount, 0);
   }
 
   async hasAcceptedMessage(conversationId: string, clientMessageId: string): Promise<boolean> {
@@ -1414,6 +1421,11 @@ export class PostgresConversationRepository implements ConversationRepository {
     } finally {
       client.release(failure);
     }
+  }
+
+  async countUserMessages(conversationId: string): Promise<number> {
+    await this.initialize();
+    return (await this.pool.query<{ n: number }>("SELECT COALESCE(SUM(1 + steered_count), 0)::int AS n FROM hatch_conversation_runs WHERE conversation_id = $1", [conversationId])).rows[0]?.n ?? 0;
   }
 
   async hasAcceptedMessage(conversationId: string, clientMessageId: string): Promise<boolean> {

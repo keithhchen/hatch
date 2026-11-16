@@ -9,6 +9,8 @@ services:
     stop_grace_period: 120s
     environment:
       NODE_ENV: production
+      # Product analytics: the public PostHog project key; empty means analytics is off.
+      POSTHOG_PROJECT_API_KEY: ${POSTHOG_PROJECT_API_KEY:-}
       REGISTRY_HOST: 0.0.0.0
       REGISTRY_PORT: 8100
       # Backend logs and traces go to any OTLP endpoint (Axiom in production); empty means off.
@@ -187,6 +189,8 @@ services:
     stop_grace_period: 120s
     environment:
       NODE_ENV: production
+      # Product analytics: the public PostHog project key; empty means analytics is off.
+      POSTHOG_PROJECT_API_KEY: ${POSTHOG_PROJECT_API_KEY:-}
       HATCH_RUNTIME_HOST: 0.0.0.0
       PORT: 8400
       # Backend logs and traces go to any OTLP endpoint (Axiom in production); empty means off.
@@ -295,6 +299,8 @@ services:
     stop_grace_period: 120s
     environment:
       NODE_ENV: production
+      # Product analytics: the public PostHog project key; empty means analytics is off.
+      POSTHOG_PROJECT_API_KEY: ${POSTHOG_PROJECT_API_KEY:-}
       HATCH_CREATOR_DASHBOARD_API_HOST: 0.0.0.0
       HATCH_CREATOR_DASHBOARD_API_PORT: 8500
       HATCH_REGISTRY_URL: http://registry:8100

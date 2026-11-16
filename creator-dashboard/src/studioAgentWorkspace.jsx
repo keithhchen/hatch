@@ -1,6 +1,7 @@
 // One workspace per Agent: header (name, status, public link) and three tabs —
 // Overview, Build (Factory path) and Publish. Studio shows no version history.
 // Every control calls an existing Creator endpoint; nothing is simulated.
+import { shareLinkCopied } from "./analytics/events.js";
 import React, { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ChevronDown, Copy, ExternalLink, Plus, Trash2, Link2 } from "lucide-react";
 import { Button, Checkbox, DropdownMenu, FormField, Input, Textarea } from "@hatch/ui";
@@ -63,16 +64,17 @@ function AgentHeaderActions({ product, live, t }) {
   const { copied, copy } = useCopy();
   const [failed, setFailed] = useState(false);
   const href = live ? safePublicUrl(publicPathOf(product)) : null;
-  const copyLink = (url) => () => { setFailed(false); copy(url).catch(() => setFailed(true)); };
+  const agentId = idOf(product, "product");
+  const copyLink = (url, link) => () => { setFailed(false); copy(url, shareLinkCopied({ agentId, link })).catch(() => setFailed(true)); };
   const open = (url) => window.open(url, "_blank", "noopener,noreferrer");
   return href ? <div className="sx-agent__actions">
     <DropdownMenu
       label={t("sxProductLinks")}
       trigger={<Button className="sx-links-btn" variant="secondary" type="button" leading={<Link2 aria-hidden="true" />} trailing={<ChevronDown aria-hidden="true" />}><span>{copied ? t("copied") : t("sxProductLinks")}</span></Button>}
       items={[
-        { value: "copy", label: t("sxCopyProductLink"), icon: <Copy aria-hidden="true" />, onSelect: copyLink(href) },
+        { value: "copy", label: t("sxCopyProductLink"), icon: <Copy aria-hidden="true" />, onSelect: copyLink(href, "home") },
         { value: "page", label: t("sxOpenProductPage"), icon: <ExternalLink aria-hidden="true" />, onSelect: () => open(href) },
-        { value: "copy-chat", label: t("sxCopyChatLink"), icon: <Copy aria-hidden="true" />, onSelect: copyLink(chatPathOf(product)) },
+        { value: "copy-chat", label: t("sxCopyChatLink"), icon: <Copy aria-hidden="true" />, onSelect: copyLink(chatPathOf(product), "chat") },
         { value: "chat", label: t("sxTryProductChat"), icon: <ExternalLink aria-hidden="true" />, onSelect: () => open(chatPathOf(product)) }
       ]}
     />
@@ -90,7 +92,7 @@ function PublishTab({ product, productId, request, navigate, locale, t, profile,
   const publicUrl = (status.state === "ready" || status.state === "refreshing") ? status.data?.public_url ?? null : null;
   // One page: a sticky bar (unlisted toggle + share link), edits on the left, the client page on the right.
   return <div className="sx-publish">
-    <ListingStatus status={status} base={base} request={request} t={t} publicUrl={publicUrl ?? publicPathOf(product)} />
+    <ListingStatus status={status} base={base} request={request} t={t} publicUrl={publicUrl ?? publicPathOf(product)} agentId={idOf(product, "product")} />
     <div className="sx-publish__grid">
       <div className="sx-publish__edit">
         <DetailsForm product={product} productId={productId} request={request} t={t} onSaved={reloadAll} />
@@ -105,7 +107,7 @@ function PublishTab({ product, productId, request, navigate, locale, t, profile,
   </div>;
 }
 
-function ListingStatus({ status, base, request, t, publicUrl }) {
+function ListingStatus({ status, base, request, t, publicUrl, agentId }) {
   const [listing, setListing] = useState({ unlisted: null, saving: false, error: "" });
   const { copied, copy } = useCopy();
   if (status.state === "loading" || status.state === "idle") return <LoadingState t={t} />;
@@ -128,7 +130,7 @@ function ListingStatus({ status, base, request, t, publicUrl }) {
   return <section className="sx-summary">
     <div>
       <Checkbox className={`sx-listing${listing.saving ? " is-saving" : ""}`} checked={unlisted} disabled={listing.saving} onCheckedChange={(checked) => void setUnlisted(checked === true)} label={t("sxUnlisted")} />
-      {shareUrl ? <p className="sx-summary__link"><a className="sx-link" href={safePublicUrl(shareUrl)} target="_blank" rel="noreferrer">{absoluteUrl(shareUrl)}</a><button type="button" className="sx-link" onClick={() => void copy(shareUrl)}><Copy aria-hidden="true" />{copied ? t("copied") : t("copyLink")}</button></p> : null}
+      {shareUrl ? <p className="sx-summary__link"><a className="sx-link" href={safePublicUrl(shareUrl)} target="_blank" rel="noreferrer">{absoluteUrl(shareUrl)}</a><button type="button" className="sx-link" onClick={() => void copy(shareUrl, shareLinkCopied({ agentId, link: "home" }))}><Copy aria-hidden="true" />{copied ? t("copied") : t("copyLink")}</button></p> : null}
     </div>
     {listing.error ? <div className="sx-summary__note"><InlineError>{listing.error}</InlineError></div> : null}
   </section>;

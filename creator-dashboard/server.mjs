@@ -32,7 +32,8 @@ import {
   injectProductNoScriptFallback
 } from "./publicMetadata.mjs";
 import { helpPage, injectHelpPage, robotsTxt, sitemapXml } from "./helpSeo.mjs";
-import { PortalTelemetryStore } from "./telemetry.mjs";
+import { createServerAnalytics } from "./analytics.mjs";
+import { agentSubscribed, agentUnsubscribed, signedIn, signupCompleted } from "./analyticsEvents.mjs";
 import { WebChatRuntimeBridge } from "./webChatRuntimeBridge.mjs";
 import { bindAccount, currentContext, logEvent, observed, propagatingFetch, requestIdFrom } from "./observability.mjs";
 
@@ -129,26 +130,21 @@ export async function createDashboardApp(options = {}) {
     readJson,
     send
   });
-  const telemetry = options.telemetry ?? await PortalTelemetryStore.open(commerceDatabaseUrl
-    ? {
-        Pool: PostgresPool,
-        connectionString: commerceDatabaseUrl,
-        poolOptions: { max: 2 }
-      }
-    : {
-        filePath: options.telemetryPath
-          ?? process.env.HATCH_PORTAL_TELEMETRY_PATH
-          ?? `${portalStatePath}.telemetry.jsonl`
-      });
-  const recordTelemetry = (eventName, attributes, idempotencyKey) => telemetry
-    .record(eventName, attributes, { idempotencyKey })
-    .catch(() => undefined);
-  const startWebSession = async (request, response, requestId, auth) => {
+  const analytics = options.analytics ?? createServerAnalytics(process.env);
+  // Send-and-forget: a failing analytics adapter never reaches a request.
+  const track = (distinctId, { event, properties }) => {
+    try { if (distinctId) analytics.capture(distinctId, { event, properties }); } catch { /* analytics must never fail a request */ }
+  };
+  const trackCheckout = (outcome, session) => {
+    if (!outcome?.entitlement_id || outcome?.entitlement?.status === "revoked") return;
+    track(session?.buyer?.id, agentSubscribed(session?.product?.product_id));
+  };
+  const startWebSession = async (request, response, auth, method, created = false) => {
     const profile = publicProfile(auth.account);
     const webSession = await portalState.createWebSession(auth.token, profile, {
       registryTokenCiphertext: encryptOAuthSecret(auth.token, oauthStateKey)
     });
-    await recordTelemetry("auth_completed", { request_id: requestId }, `auth-completed:${webSession.session_id}`);
+    track(profile.id, created ? signupCompleted(method) : signedIn(method));
     setWebSessionCookies(request, response, webSession.session_id);
     return profile;
   };
@@ -537,7 +533,6 @@ export async function createDashboardApp(options = {}) {
           }
           await ledger.ready?.();
           await portalState.ready?.();
-          await telemetry.ready?.();
           const registryHealth = await fetchImpl(new URL("/readyz", registryUrl), {
             signal: AbortSignal.timeout(2_000)
           });
@@ -560,18 +555,6 @@ export async function createDashboardApp(options = {}) {
         return send(response, result.status, result.body);
       }
       if (url.pathname.startsWith("/v1/")) await portalState.refresh?.();
-      if (request.method === "POST" && url.pathname === "/v1/analytics/events") {
-        const originError = crossSiteMutationError(request);
-        if (originError) return send(response, originError.status, originError.body);
-        const body = await readJson(request);
-        // The HTTP request id is response metadata, not part of the durable
-        // analytics intent. Omitting a generated id here lets a browser retry
-        // the same Idempotency-Key after response loss without a false conflict.
-        const event = await telemetry.record(body.event_name, body.attributes ?? {}, {
-          idempotencyKey: requireCommandKey(request, body)
-        });
-        return send(response, 202, { accepted: true, event_id: event.event_id });
-      }
       const providerWebhookMatch = url.pathname.match(/^\/v1\/provider-webhooks\/(payment|payout)$/);
       if (request.method === "POST" && providerWebhookMatch) {
         if (!paymentProvider.configured) {
@@ -625,12 +608,7 @@ export async function createDashboardApp(options = {}) {
                 transaction
               });
               checkoutStatus = outcome.body.status;
-              await recordCheckoutTelemetry(recordTelemetry, outcome.body, updated, requestId);
-            } else if (["failed", "cancelled"].includes(recorded.payment.status)) {
-              await recordCheckoutTelemetry(recordTelemetry, {
-                status: recorded.payment.status,
-                payment: recorded.payment
-              }, updated, requestId);
+              trackCheckout(outcome.body, updated);
             }
           }
           return send(response, 200, {
@@ -708,11 +686,6 @@ export async function createDashboardApp(options = {}) {
           const result = await commerce.authorizeAndReserve(body, {
             idempotencyKey: requireCommandKey(request, body)
           });
-          await recordTelemetry("delivery_reserved", {
-            creator_id: result.entitlement.creator_id,
-            product_id: result.entitlement.product_id,
-            request_id: requestId
-          }, `delivery-reserved:${result.reservation.reservation_id}`);
           return send(response, 201, result);
         }
         const entitlementAuthorizationMatch = url.pathname.match(/^\/v1\/internal\/commerce\/entitlements\/([^/]+)\/authorization$/);
@@ -782,11 +755,6 @@ export async function createDashboardApp(options = {}) {
           const result = await commerce.completeDelivery(body, {
             idempotencyKey: requireCommandKey(request, body)
           });
-          await recordTelemetry("delivery_completed", {
-            creator_id: result.delivery.creator_id,
-            product_id: result.delivery.product_id,
-            request_id: requestId
-          }, `delivery-completed:${result.delivery.delivery_id}`);
           return send(response, 201, result);
         }
         if (request.method === "POST" && url.pathname === "/v1/internal/commerce/reconcile-reservations") {
@@ -799,7 +767,7 @@ export async function createDashboardApp(options = {}) {
           return send(response, 200, await commerce.reconcilePendingRevenue());
         }
         if (request.method === "GET" && url.pathname === "/v1/internal/commerce/operations") {
-          return send(response, 200, await commerceOperationsSnapshot({ ledger, commerce, portalState, telemetry }));
+          return send(response, 200, await commerceOperationsSnapshot({ ledger, commerce, portalState }));
         }
         return send(response, 404, { error: { code: "not_found", message: "Internal Commerce route not found." } });
       }
@@ -917,7 +885,7 @@ export async function createDashboardApp(options = {}) {
             body: JSON.stringify({ code: url.searchParams.get("code") ?? "", state }),
             fetchImpl
           });
-          await startWebSession(request, response, requestId, auth);
+          await startWebSession(request, response, auth, loginKind, auth.created === true);
           response.setHeader("set-cookie", [...response.getHeader("set-cookie"), clearState]);
           return redirect(response, safeLocalPath(auth.return_to));
         } catch {
@@ -929,13 +897,12 @@ export async function createDashboardApp(options = {}) {
         const originError = crossSiteMutationError(request);
         if (originError) return send(response, originError.status, originError.body);
         const body = await readJson(request);
-        await recordTelemetry("auth_started", { request_id: requestId }, `auth-started:${requestId}`);
         const auth = await registryRequest(registryUrl, "/v1/auth/signin", {
           method: "POST",
           body: JSON.stringify({ email: body.email, password: body.password }),
           fetchImpl
         });
-        const profile = await startWebSession(request, response, requestId, auth);
+        const profile = await startWebSession(request, response, auth, "password");
         return send(response, 200, {
           ...(exposeBearerTokens ? { token: auth.token } : {}),
           profile
@@ -945,7 +912,6 @@ export async function createDashboardApp(options = {}) {
         const originError = crossSiteMutationError(request);
         if (originError) return send(response, originError.status, originError.body);
         const body = await readJson(request);
-        await recordTelemetry("auth_started", { request_id: requestId }, `auth-started:${requestId}`);
         const auth = await registryRequest(registryUrl, "/v1/auth/signup", {
           method: "POST",
           body: JSON.stringify({
@@ -955,7 +921,7 @@ export async function createDashboardApp(options = {}) {
           }),
           fetchImpl
         });
-        const profile = await startWebSession(request, response, requestId, auth);
+        const profile = await startWebSession(request, response, auth, "password", true);
         return send(response, 201, {
           ...(exposeBearerTokens ? { token: auth.token } : {}),
           profile
@@ -1176,7 +1142,6 @@ export async function createDashboardApp(options = {}) {
         const sourceEntitlements = buyer ? commerce.listBuyerEntitlements(buyer.id) : [];
         const creatorNames = await resolveCreatorNames(sourceEntitlements.map((entry) => entry.creator_id));
         const entitlements = buyer ? enrichEntitlements(sourceEntitlements, catalog, [], creatorNames) : [];
-        await recordTelemetry("catalog_viewed", { request_id: requestId }, `catalog-viewed:${requestId}`);
         // Unlisted Agents stay reachable by link but leave every listing.
         const visible = catalog.filter((agent) => agent.listed !== false && portalState.getCreatorProduct(agent.creator_id, agent.product_id)?.status !== "withdrawn");
         const products = await Promise.all(visible.map(async (agent) => {
@@ -1233,12 +1198,6 @@ export async function createDashboardApp(options = {}) {
         const sourceEntitlements = buyer ? commerce.listBuyerEntitlements(buyer.id) : [];
         const creatorNames = await resolveCreatorNames(sourceEntitlements.map((entry) => entry.creator_id));
         const entitlements = buyer ? enrichEntitlements(sourceEntitlements, catalog, [], creatorNames) : [];
-        await recordTelemetry("product_viewed", {
-          creator_id: agent.creator_id,
-          product_id: agent.product_id,
-          release_id: creatorState?.release?.release_id ?? agent.corpus_digest,
-          request_id: requestId
-        }, `product-viewed:${requestId}`);
         return send(response, 200, {
           product: withBuyerAccess(
             publicCatalogAgent(agent, creatorState),
@@ -1296,12 +1255,6 @@ export async function createDashboardApp(options = {}) {
             version_policy: "pinned"
           }
         });
-        await recordTelemetry("checkout_started", {
-          creator_id: product.creator_id,
-          product_id: product.product_id,
-          release_id: product.release_id,
-          request_id: requestId
-        }, `checkout-started:${session.checkout_session_id}`);
         return send(response, existing ? 200 : 201, { checkout_session: checkoutSessionPublic(session, creatorName) });
       }
 
@@ -1343,7 +1296,7 @@ export async function createDashboardApp(options = {}) {
           commandKey,
           paymentScenario: body.sandbox_scenario
         });
-        await recordCheckoutTelemetry(recordTelemetry, outcome.body, session, requestId);
+        if (!outcome.replayed) trackCheckout(outcome.body, session);
         return send(response, outcome.replayed ? 200 : 201, checkoutOutcomePublic(outcome.body, session, creatorName));
       }
 
@@ -1472,6 +1425,7 @@ export async function createDashboardApp(options = {}) {
           reason: String(body.reason ?? "buyer_request"),
           ...providerRefund
         }, { idempotencyKey: commandKey });
+        track(authentication.profile.id, agentUnsubscribed(current.product_id));
         return send(response, 201, { refund: order.refunds.at(-1), order: orderDetail(order, [], creatorName), access_status: "revoked" });
       }
 
@@ -1560,6 +1514,7 @@ export async function createDashboardApp(options = {}) {
           paymentProvider,
           commandKey
         });
+        if (!outcome.replayed) trackCheckout(outcome.body, session);
         return send(response, outcome.replayed ? 200 : 201, checkoutOutcomePublic(outcome.body, session, creatorName));
       }
 
@@ -1718,10 +1673,6 @@ export async function createDashboardApp(options = {}) {
             body.expected_version,
             requireCommandKey(request, body)
           );
-          await recordTelemetry(draft.version === 1 ? "factory_draft_started" : "factory_draft_saved", {
-            creator_id: authentication.profile.id,
-            request_id: requestId
-          }, `factory-draft:${authentication.profile.id}:${draft.draft_id}:${draft.version}`);
           return send(response, 200, { draft });
         }
       }
@@ -1867,11 +1818,6 @@ export async function createDashboardApp(options = {}) {
           });
           const candidate = candidateFromFactoryRun(run, productId);
           candidate.resource_version = portalState.getCreatorProduct(profile.id, productId)?.version ?? 0;
-          await recordTelemetry("candidate_ready", {
-            creator_id: profile.id,
-            product_id: productId,
-            release_version: candidate.version
-          }, `candidate-ready:${candidateId}:${candidate.report_digest}`);
           return send(response, 200, { candidate });
         }
 
@@ -1900,12 +1846,6 @@ export async function createDashboardApp(options = {}) {
               reason: body.reason ?? "creator_rejection",
               command_key: commandKey
             });
-            await recordTelemetry("candidate_rejected", {
-              creator_id: profile.id,
-              product_id: productId,
-              request_id: requestId,
-              error_category: String(body.reason ?? "creator_rejection")
-            }, `candidate-rejected:${commandKey}`);
             return send(response, 200, {
               product
             });
@@ -1932,12 +1872,6 @@ export async function createDashboardApp(options = {}) {
               command_key: commandKey,
               acknowledgements: [...acknowledgements].sort()
             });
-          await recordTelemetry("candidate_approved", {
-            creator_id: profile.id,
-            product_id: productId,
-            release_version: candidate.version,
-            request_id: requestId
-          }, `candidate-approved:${commandKey}`);
           return send(response, 200, {
             product: approvedProduct,
             candidate
@@ -1950,12 +1884,6 @@ export async function createDashboardApp(options = {}) {
           const product = (await creatorProducts()).find((entry) => entry.product_id === productId);
           if (!product) return send(response, 404, { error: { code: "product_not_found", message: "Product was not found." } });
           const state = portalState.getCreatorProduct(profile.id, productId);
-          await recordTelemetry("preview_viewed", {
-            creator_id: profile.id,
-            product_id: productId,
-            release_id: state?.release?.release_id,
-            request_id: requestId
-          }, `preview-viewed:${requestId}`);
           return send(response, 200, storefrontPreview(product, profile, state, paymentMode));
         }
 
@@ -1987,11 +1915,6 @@ export async function createDashboardApp(options = {}) {
               });
             }
             const product = (await creatorProducts()).find((entry) => entry.product_id === productId);
-            await recordTelemetry("publish_succeeded", {
-              creator_id: profile.id,
-              product_id: productId,
-              release_id: current.release?.release_id
-            }, `publish-succeeded:${current.release?.release_id}`);
             return send(response, 200, { product, release: current.release, public_url: current.public_url, canonical_url: canonicalPublicUrl(current.public_url) });
           }
           let product = (await creatorProducts()).find((entry) => entry.product_id === productId);
@@ -2066,11 +1989,6 @@ export async function createDashboardApp(options = {}) {
             previous_release_id: current?.release?.release_id ?? null
           });
           const operation = pending.publish_operation;
-          await recordTelemetry("publish_started", {
-            creator_id: profile.id,
-            product_id: productId,
-            request_id: requestId
-          }, `publish-started:${operation.operation_id}`);
           const state = await resumePublishDeployment({
             creatorId: profile.id,
             productId,
@@ -2081,12 +1999,6 @@ export async function createDashboardApp(options = {}) {
             registryDeploymentServiceToken,
             creatorBearer: bearerToken(request)
           });
-          await recordTelemetry("publish_succeeded", {
-            creator_id: profile.id,
-            product_id: productId,
-            release_id: state.release?.release_id,
-            request_id: requestId
-          }, `publish-succeeded:${state.release?.release_id}`);
           return send(response, 201, {
             product: creatorProductView(
               state.release?.catalog_snapshot ?? (await creatorProducts()).find((entry) => entry.product_id === productId),
@@ -2321,14 +2233,6 @@ export async function createDashboardApp(options = {}) {
       }
       return send(response, 404, { error: { code: "not_found", message: "Route not found." } });
     } catch (error) {
-      const failedPublish = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/publish$/);
-      if (request.method === "POST" && failedPublish) {
-        await recordTelemetry("publish_failed", {
-          product_id: decodeURIComponent(failedPublish[1]),
-          request_id: requestId,
-          error_category: error.code ?? "internal_error"
-        }, `publish-failed:${requestId}`);
-      }
       const failure = publicRequestError(error);
       return send(response, failure.status, { error: failure.error });
     }
@@ -2425,7 +2329,7 @@ export async function createDashboardApp(options = {}) {
     ledger,
     commerce,
     portalState,
-    telemetry,
+    analytics,
     reconcilePendingCheckouts,
     dispatchCommerceOutbox,
     reconcilePayouts,
@@ -2473,7 +2377,7 @@ export async function startDashboardServer(options = {}) {
   const release = () => released ??= (async () => {
     stopTimers();
     app.closeSockets();
-    await Promise.allSettled([app.ledger.close?.(), app.portalState.close?.(), app.telemetry.close?.()]);
+    await Promise.allSettled([app.ledger.close?.(), app.portalState.close?.(), app.analytics.shutdown(3_000)]);
   })();
   server.once("close", () => void release());
   let serverClosed;
@@ -2992,49 +2896,6 @@ function mergeRegistryAgents(access, catalog) {
       presentation: entry.presentation ?? {}
     }];
   });
-}
-
-async function recordCheckoutTelemetry(recordTelemetry, outcome, session, requestId) {
-  const product = session?.product ?? {};
-  const release = session?.release ?? {};
-  const attributes = {
-    creator_id: product.creator_id,
-    product_id: product.product_id,
-    release_id: release.release_id,
-    request_id: requestId
-  };
-  const checkoutId = session?.checkout_session_id;
-  const paymentStatus = outcome?.payment?.status ?? outcome?.status;
-  const tasks = [];
-
-  if (outcome?.order_id) {
-    tasks.push(recordTelemetry(
-      "checkout_confirmed",
-      attributes,
-      `checkout-confirmed:${checkoutId}`
-    ));
-  }
-  if (paymentStatus === "succeeded") {
-    tasks.push(recordTelemetry(
-      "payment_succeeded",
-      attributes,
-      `payment-succeeded:${checkoutId}`
-    ));
-  } else if (["failed", "cancelled"].includes(paymentStatus)) {
-    tasks.push(recordTelemetry(
-      "payment_failed",
-      { ...attributes, error_category: outcome?.payment?.failure?.code ?? paymentStatus },
-      `payment-failed:${checkoutId}:${paymentStatus}`
-    ));
-  }
-  if (outcome?.entitlement_id && outcome?.entitlement?.status !== "revoked") {
-    tasks.push(recordTelemetry(
-      "entitlement_activated",
-      attributes,
-      `entitlement-activated:${outcome.entitlement_id}`
-    ));
-  }
-  await Promise.all(tasks);
 }
 
 async function confirmCheckoutSession({ session, authentication, registryUrl, fetchImpl, commerce, portalState }) {
@@ -4471,7 +4332,7 @@ function csvCell(value) {
   return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 
-async function commerceOperationsSnapshot({ ledger, commerce, portalState, telemetry, now = new Date() }) {
+async function commerceOperationsSnapshot({ ledger, commerce, portalState, now = new Date() }) {
   await ledger.refresh?.();
   await portalState.refresh?.();
   const nowMs = now.getTime();
@@ -4563,7 +4424,6 @@ async function commerceOperationsSnapshot({ ledger, commerce, portalState, telem
   ];
   return {
     generated_at: now.toISOString(),
-    funnel: await telemetry?.summary?.() ?? {},
     slas_ms,
     counts: {
       fulfillment_pending: checkouts.length,

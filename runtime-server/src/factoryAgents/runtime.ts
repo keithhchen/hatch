@@ -26,8 +26,12 @@ import { log } from "../observability/log.js";
 import { currentContext } from "../observability/context.js";
 import { studioAttribution, usageSink, type UsageRecorder, type UsageSink } from "../usage/usage.js";
 import { UsageCapExceeded, type UsageCap } from "../usage/usageCap.js";
+import { buildCompleted, buildFailed, buildStarted } from "../analytics/events.js";
+import type { AnalyticsEvent, ProductAnalytics } from "../analytics/port.js";
+import { safely } from "../analytics/safe.js";
 
 const WEB: ClientAttributes = { client: "web" };
+const seconds = (since: number): number => Math.round((Date.now() - since) / 100) / 10;
 /** Node kinds that run on a model role of their own. */
 const NODE_MODEL_ROLES: Record<string, ModelRole> = { inspiration: "inspiration", "content-creation": "content" };
 
@@ -47,6 +51,8 @@ export type WorkbenchRuntimeOptions = {
   journal?: Journal;
   /** Whose Studio usage this workspace's model calls are, and where they are recorded. */
   usage?: { recorder: UsageRecorder; accountId: string; /** A Run is not started when the account has spent its month. */ cap?: UsageCap };
+  /** Told when a build (the generation Agent's Run) starts and how it ends. */
+  analytics?: ProductAnalytics;
   deadlineMs?: number;
   maxTurns?: number;
   /** Heartbeat and staleness of a Run; tests shorten them. */
@@ -113,6 +119,11 @@ export class WorkbenchRuntime {
     const { usage } = this.options;
     const productId = this.store.scope?.productId;
     return usage && usageSink(usage.recorder, studioAttribution(usage.accountId, this.runKeys.get(id), { ...(productId ? { productId } : {}), ...(this.runIds.get(id) ? { runId: this.runIds.get(id)! } : {}) }), log);
+  }
+  /** Tells analytics of a fact about this workspace's Product, as its Expert. Nothing is sent for a workspace with no Product. */
+  private track(event: (agentId: string) => AnalyticsEvent): void {
+    const scope = this.store.scope;
+    if (scope) safely(this.options.analytics).capture(scope.creatorId, event(scope.productId));
   }
   private clientOf(id: string): ClientAttributes { return this.clients.get(id) ?? WEB; }
   emit(id: string, type: string, data: Record<string, unknown> = {}): void {
@@ -333,8 +344,10 @@ export class WorkbenchRuntime {
     let system = "";
     let ended: "completed" | "interrupted" | "failed" = "failed";
     let failure: RunFailure | undefined;
+    let buildStartedAt: number | undefined;
     try {
       const s = await this.store.get(id);
+      if (s.role === "generation") { buildStartedAt = Date.now(); this.track(buildStarted); }
       const definition = await this.store.definition(s.role);
       system = await this.prompt(s.role, definition);
       if (s.role === "generation") system += `\nTarget Runtime tools provided by the host: built-in hatch.web_search. Additional declarations: ${this.env.HATCH_FACTORY_TARGET_TOOLS_JSON ?? "[]"}. The actual availability of external connections is verified by the existing Registry/Runtime. The current Product is fixed by the host; corpus_upload publishes to it, so do not look up, choose or create a Product.`;
@@ -376,12 +389,14 @@ export class WorkbenchRuntime {
         break;
       }
       ended = controller.signal.aborted ? "interrupted" : "completed";
+      if (ended === "completed" && buildStartedAt !== undefined) this.track(agentId => buildCompleted(agentId, seconds(buildStartedAt!)));
       this.emit(id, controller.signal.aborted ? "voice.run_interrupted" : "voice.run_completed", { runId: this.runIds.get(id) });
     } catch (error) {
       // Messages acknowledged to clients stay in history even when the run did not take them.
       for (const message of (await this.store.get(id).catch(() => undefined))?.queue ?? []) await this.commit(id, () => this.store.update(id, state => settleMessage(state, message))).catch(() => undefined);
       ended = controller.signal.aborted ? "interrupted" : "failed";
       if (!controller.signal.aborted) failure = failures.translate(error, { run: this.runIds.get(id), session: id });
+      if (failure && buildStartedAt !== undefined) this.track(agentId => buildFailed(agentId, seconds(buildStartedAt!), failure!.code));
       await this.store.update(id, s => {
         if (!failure) {
           // A user stop is a normal terminal state, not an error notice.

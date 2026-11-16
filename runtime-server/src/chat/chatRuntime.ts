@@ -4,6 +4,7 @@ import { chatCompactionStrategy, type RuntimeCompactionMessage } from "../compac
 import type { LlmProfile } from "../llmProfiles.js";
 import type { UsageRecording } from "../usage/usage.js";
 import type { RunCap } from "../usage/usageCap.js";
+import type { ChatAnalytics } from "./chatAnalytics.js";
 import type { ConversationRepository } from "../conversationRepository.js";
 import type { ClientToolName, ToolRequest, ToolResult } from "../protocol.js";
 import type { ClientGroup } from "../surfaces/contract.js";
@@ -56,6 +57,8 @@ export type ChatRuntimeOptions<Scope> = {
   usage?: UsageRecording<Scope>;
   /** Refuses a new Run when whoever pays for it is out of budget. */
   cap?: RunCap<Scope>;
+  /** Tells product analytics of each message and each failed reply. Absent for the Assistant's own conversation. */
+  analytics?: ChatAnalytics;
 };
 
 /**
@@ -82,7 +85,9 @@ export class ChatRuntime<Scope> {
       repository, store, hub: this.hub, executorId,
       strategy: async (conversationId) => compactionStrategy ? compactionStrategy(conversationId) : chatCompactionStrategy(await compactionProfile!(conversationId))
     });
-    const terminators = runTerminators(repository, this.hub, executorId);
+    const terminators = runTerminators(repository, this.hub, executorId, (ended, ending) => {
+      if (ending.status === "failed") void options.analytics?.runFailed(ended.run, ending.failure.code, this.registry.clientOf(ended.run.conversationId));
+    });
     this.supervisor = new RunSupervisor(
       repository,
       new TurnExecutor({
@@ -98,7 +103,7 @@ export class ChatRuntime<Scope> {
       { executorId, leaseMs: options.leaseMs ?? DEFAULT_RUN_LEASE_MS, sweepMs: options.sweepMs ?? 5_000, toolPollMs: options.toolPollMs, afterReply: (run) => this.compaction.afterReply(run), stops: options.stops, steers: options.steers },
       terminators
     );
-    this.service = new ChatService({ repository, terminator: terminators.external, supervisor: this.supervisor, hub: this.hub, admission: options.admission, registry: this.registry, limits: options.limits, cap: options.cap, compaction: this.compaction });
+    this.service = new ChatService({ repository, terminator: terminators.external, supervisor: this.supervisor, hub: this.hub, admission: options.admission, registry: this.registry, limits: options.limits, cap: options.cap, compaction: this.compaction, analytics: options.analytics });
   }
 
   /** Ends the Runs a previous instance left behind as interrupted, then keeps watching for more. */

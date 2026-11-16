@@ -15,6 +15,9 @@ import {
   verifyAgentCorpus
 } from "../registryCorpus.js";
 import { CreatorRegistryReleaseStore, type CreatorRegistryRelease } from "./creatorRegistryRelease.js";
+import { agentPublished } from "../analytics/events.js";
+import type { ProductAnalytics } from "../analytics/port.js";
+import { safely } from "../analytics/safe.js";
 
 export class CorpusPublishError extends Error {
   readonly status: number;
@@ -44,7 +47,11 @@ export class CorpusPublisher {
     private readonly registry: RegistryStoreTs,
     private readonly releases: CreatorRegistryReleaseStore,
     private readonly runtimeRoot: string,
-  ) {}
+    /** Told of each new live release (not of a publish that found the same release already live). */
+    analytics?: ProductAnalytics,
+  ) { this.analytics = safely(analytics); }
+
+  private readonly analytics: ProductAnalytics;
 
   async publishLatest(input: {
     creatorId: string;
@@ -191,6 +198,7 @@ export class CorpusPublisher {
     publishStage = "postgres_release_pointer";
     const release = await this.releases.publish(releaseInput);
     await rm(staging, { recursive: true, force: true });
+    this.analytics.capture(input.creatorId, agentPublished(input.productId));
     return { execution_id: input.executionId, output_ref: input.outputRef, corpus_digest: sourceDigest, published: staged, release };
     } catch (error) {
       if (error instanceof CorpusPublishError) throw error;

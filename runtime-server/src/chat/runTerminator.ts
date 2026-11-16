@@ -10,11 +10,14 @@ import { fenced } from "./runFence.js";
 export class RunTerminator {
   constructor(
     private readonly repository: Pick<ConversationRepository, "endRun">,
-    private readonly hub: Pick<RunEventHub, "publish">
+    private readonly hub: Pick<RunEventHub, "publish">,
+    /** Told of every ending that happened (not of one that found the Run already over). */
+    private readonly onEnded?: (ended: EndedRun, ending: RunEnding) => void
   ) {}
 
   async end(runId: string, ending: RunEnding): Promise<EndedRun> {
     const ended = await this.repository.endRun(runId, ending);
+    if (ended.ended) try { this.onEnded?.(ended, ending); } catch { /* an observer never changes how a Run ends */ }
     // A reply that was written is told even when the Run stays open for a message that joined it.
     if (ended.messageId) this.hub.publish(ended.run.conversationId, { type: "assistant.message", run_id: runId, message_id: ended.messageId });
     if (ended.ended) this.announce(ended.run.conversationId, runId, ending);
@@ -34,8 +37,9 @@ export type RunTerminators = { external: RunTerminator; executing: RunTerminator
 export const runTerminators = (
   repository: Pick<ConversationRepository, "endRun">,
   hub: Pick<RunEventHub, "publish">,
-  executorId: string
+  executorId: string,
+  onEnded?: (ended: EndedRun, ending: RunEnding) => void
 ): RunTerminators => ({
-  external: new RunTerminator(repository, hub),
-  executing: new RunTerminator(fenced(repository, executorId, { endRun: 2 }), hub)
+  external: new RunTerminator(repository, hub, onEnded),
+  executing: new RunTerminator(fenced(repository, executorId, { endRun: 2 }), hub, onEnded)
 });

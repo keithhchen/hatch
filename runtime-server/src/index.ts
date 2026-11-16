@@ -59,6 +59,8 @@ import { failRun, runModelTurn } from "./chat/modelTurn.js";
 import { toolRegistry } from "./tools.js";
 import { attributeByScope, monthlyTokenCap, payerByScope, type UsageReader, type UsageRecorder } from "./usage/usage.js";
 import { UsageCap } from "./usage/usageCap.js";
+import { createProductAnalytics, type ProductAnalytics } from "./analytics/index.js";
+import { ChatAnalytics } from "./chat/chatAnalytics.js";
 import { PostgresUsageLedger } from "./usage/postgresUsage.js";
 import { RegistryConnectionDirectory } from "./chat/registryConnections.js";
 import { openChatAssets } from "./chat/openChatAssets.js";
@@ -110,6 +112,9 @@ export type RuntimeServer = {
 // base64 body, structured metadata, and a rich local-tool result envelope.
 export const MAX_RUNTIME_WEBSOCKET_PAYLOAD_BYTES = MAX_RICH_TOOL_RESULT_BYTES;
 
+/** The longest shutdown waits to send the events still queued. */
+const ANALYTICS_FLUSH_MS = 3_000;
+
 export type RuntimeServerOptions = {
   /** Where each role's model is chosen. Defaults to the Runtime database's `hatch_model_roles`, or the seed choices without one. */
   models?: ModelRoleResolver;
@@ -121,6 +126,8 @@ export type RuntimeServerOptions = {
   usage?: UsageRecorder;
   /** Refuses a new Run, on any surface, when the account that pays for it has spent its month. Without one nothing is capped. */
   usageCap?: UsageCap;
+  /** Product analytics: buyer messages and failed replies. Without one nothing is sent. */
+  analytics?: ProductAnalytics;
   /** Optional injected store for tests; production defaults beside transcripts. */
   assetStore?: RuntimeAssetStore;
   /** Durable Conversation/Run control-plane. Defaults to Postgres or local app-data. */
@@ -269,6 +276,7 @@ export async function createRuntimeServerFromEnvironment(
       hmacSecret: config.legacyHmacSecret!
     })
     : undefined;
+  const analytics = createProductAnalytics(environment);
   const commerceEventSink = await commerceEventSinkFromEnvironment(environment);
   const deliveryOutboxFile = environment.HATCH_DELIVERY_OUTBOX_FILE?.trim()
     || (environment.HATCH_RUNTIME_DATA_DIR?.trim()
@@ -311,7 +319,8 @@ export async function createRuntimeServerFromEnvironment(
         ? new FilesystemAgentCorpusResolver(runtimeCorpusRoot)
         : undefined,
     conversationStore,
-    ...(conversationStore instanceof PostgresStore ? (() => { const ledger = new PostgresUsageLedger(conversationStore.pool as never); return { usage: ledger, usageCap: new UsageCap(ledger, monthlyTokenCap(environment)) }; })() : {}),
+    analytics,
+    ...(conversationStore instanceof PostgresStore ? (() => { const ledger = new PostgresUsageLedger(conversationStore.pool as never); return { usage: ledger, usageCap: new UsageCap(ledger, monthlyTokenCap(environment), { analytics }) }; })() : {}),
     ...(chatAssets ? { chatAssets } : {}),
     /** Image and file input and the Files API are built but not public yet. */
     responsesApi: { ...(accountFiles ? { accountFiles } : {}), features: { attachments: environment.HATCH_RESPONSES_ATTACHMENTS === "on" } },
@@ -542,6 +551,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       : { compactionProfile: async (conversationId: string) => models.resolve("chat", { productId: (await conversationRepository.getConversation(conversationId))?.productId }) }),
     ...(options.usage ? { usage: { recorder: options.usage, attribute: attributeByScope } } : {}),
     ...(options.usageCap ? { cap: options.usageCap.guard(payerByScope) } : {}),
+    ...(options.analytics ? { analytics: new ChatAnalytics(options.analytics, conversationRepository) } : {}),
     // With a shared database every instance sees every Run's live events.
     ...(conversationStore instanceof PostgresStore ? { relay: new PostgresEventRelay(conversationStore.pool as never), stops: new PostgresStopRelay(conversationStore.pool as never), steers: new PostgresStopRelay(conversationStore.pool as never, { channel: "hatch_run_steers" }) } : {})
   });
@@ -697,6 +707,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     await conversationStore.close();
     await conversationRepository.close();
     await flushLangfuseObservability();
+    await options.analytics?.shutdown(ANALYTICS_FLUSH_MS);
   }
 }
 

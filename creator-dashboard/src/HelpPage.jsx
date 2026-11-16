@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { TrackedVideo } from "./analytics/TrackedVideo.jsx";
 import { WebBrand } from "./WebBrand.jsx";
 import { LanguageSwitcher } from "./LanguageSwitcher.jsx";
 import { useLocale } from "./locale.jsx";
@@ -35,7 +36,7 @@ export default function HelpPage({ slug, navigate }) {
         </> : item ? <>
           <a className="help-page__link" href="/help" onClick={open("/help")}>{copy.index}</a>
           <h1>{item.title}</h1>
-          {item.src ? <video key={item.src} className="help-page__player" src={item.src} poster={item.poster} controls playsInline preload="metadata" /> : null}
+          {item.src ? <TrackedVideo key={item.src} className="help-page__player" src={item.src} poster={item.poster} controls playsInline preload="metadata" /> : null}
           <p className="help-page__text">{item.description}</p>
         </> : <>
           <h1>{copy.index}</h1>

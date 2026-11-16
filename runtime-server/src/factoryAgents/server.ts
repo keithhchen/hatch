@@ -1,3 +1,6 @@
+import { studioMessageSent, studioStep } from "../analytics/events.js";
+import type { ProductAnalytics } from "../analytics/port.js";
+import { safely } from "../analytics/safe.js";
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -26,11 +29,13 @@ export function messagesFrom(messages: Session["messages"], params: URLSearchPar
   return tail !== undefined && String(tail) === params.get("tail") ? after : 0;
 }
 
-export async function createFactoryHandler(options: { root: string; scope: FactoryProductScope; definitions: AgentDefinitionRepository; models: ModelRoleResolver; env?: NodeJS.ProcessEnv; runtime?: Partial<WorkbenchRuntimeOptions>; withheldTools?: (session: Session) => Promise<string[]>; forms?: () => FormPages | undefined }) {
+export async function createFactoryHandler(options: { root: string; scope: FactoryProductScope; definitions: AgentDefinitionRepository; models: ModelRoleResolver; env?: NodeJS.ProcessEnv; runtime?: Partial<WorkbenchRuntimeOptions>; analytics?: ProductAnalytics; withheldTools?: (session: Session) => Promise<string[]>; forms?: () => FormPages | undefined }) {
   const env: NodeJS.ProcessEnv = options.env ?? process.env;
   const store = new WorkbenchStore(options.root, options.scope, options.definitions);
   await store.recover();
-  const runtime = new WorkbenchRuntime(store, { models: options.models, role: "factory", env, ...options.runtime, withheldTools: options.runtime?.withheldTools ?? options.withheldTools, extraTools: options.runtime?.extraTools ?? (async (s, _signal, changed) => [...corpusTools(store, s.id, changed, options.scope, env), hatchTool(store, s.id, changed, options.scope, env), ...(options.forms?.() ? formTools(options.forms()!, { accountId: options.scope.creatorId, productId: options.scope.productId, sessionId: s.id, taskId: async () => (await store.get(s.id)).assistantTaskId }) : [])]) });
+  const runtime = new WorkbenchRuntime(store, { models: options.models, role: "factory", env, analytics: options.analytics, ...options.runtime, withheldTools: options.runtime?.withheldTools ?? options.withheldTools, extraTools: options.runtime?.extraTools ?? (async (s, _signal, changed) => [...corpusTools(store, s.id, changed, options.scope, env), hatchTool(store, s.id, changed, options.scope, env), ...(options.forms?.() ? formTools(options.forms()!, { accountId: options.scope.creatorId, productId: options.scope.productId, sessionId: s.id, taskId: async () => (await store.get(s.id)).assistantTaskId }) : [])]) });
+  /** The Expert sent a message into one of this Product's Studio sessions. */
+  const expertSpoke = (role: string) => safely(options.analytics).capture(options.scope.creatorId, studioMessageSent(options.scope.productId, studioStep(role)));
   /** Whether the `factory` role's model has its API key. An invalid role row is logged by the resolver and reads as not configured here. */
   const modelConfigured = async () => options.models.resolve("factory").then(profile => Boolean(env[profile.apiKeyEnv]?.trim()), () => false);
   const streams = new Set<ServerResponse>();
@@ -76,9 +81,10 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
       create: fresh => store.update(id, s => { const keys = s.messageKeys ?? []; if (keys.some(([known]) => known === fresh.key)) return false; s.messageKeys = [...keys, [fresh.key, fresh.digest] as [string, string]].slice(-MESSAGE_KEYS_KEPT); return true; }),
       find: async fresh => { const found = (await store.get(id)).messageKeys?.find(([known]) => known === fresh.key); return found && { key: found[0], digest: found[1] }; }
     }, (stored, fresh) => stored.digest === fresh.digest)({ key, digest });
-    if (replayed) return;
+    if (replayed) return false;
     // The key is only held for a turn that started: a refused send (already running) can be sent again.
     await runtime.start(id, content).catch(async error => { await store.update(id, s => { s.messageKeys = s.messageKeys?.filter(([known]) => known !== key); }); throw error; });
+    return true;
   };
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     try {
@@ -123,7 +129,7 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
         const id = match[1]!; const action = match[2] ?? "";
         if (!action && req.method === "GET") { const session = await store.get(id); const from = messagesFrom(session.messages, url.searchParams); return json(res, 200, { ...publicSession(session), messages: session.messages.slice(from), messagesFrom: from, agent: (await entries()).find(entry => entry.role === session.role), files: await store.contextFiles(id) }); }
         if (action === "prompt" && req.method === "GET") return json(res, 200, { content: await runtime.prompt((await store.get(id)).role) });
-        if (action === "message" && req.method === "POST") { const session = await store.get(id); await assertRoleAvailable(session.role); const b = z.object({ content: z.string().min(1).max(100000) }).parse(await body(req)); const key = idempotencyKey(req.headers["idempotency-key"]); if (key === undefined) await runtime.start(id, b.content); else await sendOnce(id, key, b.content); return json(res, 202, { accepted: true }); }
+        if (action === "message" && req.method === "POST") { const session = await store.get(id); await assertRoleAvailable(session.role); const b = z.object({ content: z.string().min(1).max(100000) }).parse(await body(req)); const key = idempotencyKey(req.headers["idempotency-key"]); if (key === undefined) await runtime.start(id, b.content); if (key === undefined || await sendOnce(id, key, b.content)) expertSpoke(session.role); return json(res, 202, { accepted: true }); }
         if (action === "stop" && req.method === "POST") { await body(req); await runtime.stop(id); return json(res, 202, { requested: true }); }
         if (action === "files" && req.method === "POST") {
           const b = z.object({ path: z.string(), base64: z.string(), mimeType: z.string().optional() }).parse(await body(req));
@@ -166,7 +172,7 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
       json(res, status, typeof structured?.code === "string" ? { error: { code: structured.code, message, ...(structured.details === undefined ? {} : { details: structured.details }) }, detail: message } : { error: message });
     }
   };
-  return { handle, store, runtime, entries, assertRoleAvailable, setScope: (scope: FactoryProductScope) => { if (scope.creatorId !== options.scope.creatorId || scope.productId !== options.scope.productId) throw new Error("Cannot retarget a Product workspace"); options.scope.briefSpec = scope.briefSpec; }, setCreatorToken: (token: string) => { env.HATCH_FACTORY_CREATOR_TOKEN = token; }, close: async () => { for (const response of streams) response.end(); for (const response of chatStreams) response.end(); await runtime.close(); } };
+  return { handle, store, runtime, entries, assertRoleAvailable, expertSpoke, setScope: (scope: FactoryProductScope) => { if (scope.creatorId !== options.scope.creatorId || scope.productId !== options.scope.productId) throw new Error("Cannot retarget a Product workspace"); options.scope.briefSpec = scope.briefSpec; }, setCreatorToken: (token: string) => { env.HATCH_FACTORY_CREATOR_TOKEN = token; }, close: async () => { for (const response of streams) response.end(); for (const response of chatStreams) response.end(); await runtime.close(); } };
 }
 
 const reviewCopy = {

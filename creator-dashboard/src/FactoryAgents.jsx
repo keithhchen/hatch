@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useAnalytics } from "./analytics/AnalyticsProvider.jsx";
+import { askuserAnswered, studioStepOpened } from "./analytics/events.js";
 import {
   Alert,
   Box,
@@ -128,6 +130,8 @@ export function FactoryAgents({ productId, tab = "build", section, agent, naviga
   const states = studioPathStates(agents, product, manualFiles);
   const currentStep = studioStepForRoute(stage, selected);
   const step = tab === "overview" ? null : [...STUDIO_PATH, INSPIRATION_STEP, CONTENT_STEP, ...ADVANCED_STEPS].find(item => item.id === currentStep);
+  const analytics = useAnalytics();
+  useEffect(() => { if (step) analytics.track(studioStepOpened({ agentId: productId, step: step.id })); }, [analytics, productId, step?.id]);
   const selectedEntry = selected ? agentEntry(selected) : null; const selectedSession = selected ? agentSession(selected) : null;
   const workbench = Boolean(selected && selected !== "uploads" && selectedSession);
   return <ThemeProvider theme={theme}><div className={`factory-app${workbench ? " factory-app--workbench" : ""}`} aria-label={t("factory")}>
@@ -391,6 +395,7 @@ function NextSteps({ entry, agents, onOpenAgent, agentName, t }) {
 const toolActionKey = name => { const value = String(name || "").toLowerCase(); if (value.includes("update_todo")) return "toolActionUpdateTodo"; if (value.includes("corpus_upload")) return "toolActionCorpusUpload"; if (value.includes("evaluate")) return "toolActionEvaluate"; if (value.includes("search")) return "toolActionSearch"; if (value.includes("write")) return "toolActionWrite"; if (value.includes("read")) return "toolActionRead"; if (value.includes("list")) return "toolActionList"; return "toolActionUnknown"; };
 function askUserOption(option, index) { return { id: option?.id || `option-${index + 1}`, content: option?.content || "" }; }
 function AskUserBlock({ entry, onSubmit, t }) {
+  const analytics = useAnalytics();
   const questions = Array.isArray(entry?.call?.arguments?.questions) ? entry.call.arguments.questions : [];
   const pending = entry?.pending === true;
   const [answers, setAnswers] = useState(() => Object.fromEntries(questions.map((question, index) => [question.id || `question-${index + 1}`, { selected: question.multiSelect ? [] : "", other: "" }])));
@@ -404,6 +409,7 @@ function AskUserBlock({ entry, onSubmit, t }) {
       const id = question.id || `question-${index + 1}`; const answer = answers[id] || {}; const options = (question.options || []).map(askUserOption); const selected = (Array.isArray(answer.selected) ? answer.selected : [answer.selected]).filter(Boolean).map(value => options.find(option => option.id === value)?.content || value);
       return `${question.header || question.question}: ${[selected.join(", "), answer.other?.trim()].filter(Boolean).join("; ") || "(blank)"}`;
     });
+    analytics.track(askuserAnswered({ questions: lines.length, skipped: lines.filter(line => line.endsWith(": (blank)")).length }));
     setSubmitting(true);
     try { await onSubmit(lines.join("\n")); } catch { setSubmitting(false); }
   };

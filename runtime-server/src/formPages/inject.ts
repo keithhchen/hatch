@@ -37,6 +37,39 @@ const CLIENT = `(function () {
   function submit() { return call("POST", "/submit").then(function () { hatch.status = "submitted"; }); }
 })();`;
 
+/**
+ * What the page's own tracker needs, given only when product analytics is on: the public project key, whose events
+ * these are (the form's owner, so a phone with no session still counts as the Expert), and the page's ids.
+ */
+export type FormTracking = { projectKey: string; distinctId: string; agentId: string; formId: string; questions: number };
+
+/**
+ * The page's tracker: each answer saved, and one `review_page_left` when the page is hidden or closed, with how long it
+ * was open and how much was answered. Sent with sendBeacon to our own /relay (PostHog), so it never waits or blocks the page.
+ */
+const TRACKER = `(function () {
+  var t = window.__HATCH_TRACK__; delete window.__HATCH_TRACK__;
+  var hatch = window.hatch, opened = Date.now(), left = false;
+  function send(event, props) {
+    try {
+      var p = { form_id: t.formId, agent_id: t.agentId };
+      for (var k in props) p[k] = props[k];
+      navigator.sendBeacon("/relay/i/v0/e/", JSON.stringify({ api_key: t.projectKey, event: event, distinct_id: t.distinctId, properties: p }));
+    } catch (e) {}
+  }
+  function answered() { return hatch ? Object.keys(hatch.answers).length : 0; }
+  if (hatch) {
+    var save = hatch.save;
+    hatch.save = function (id, value) { return save(id, value).then(function (r) { send("review_question_answered", { answered: answered(), questions: t.questions }); return r; }); };
+  }
+  function leave() {
+    if (left) return; left = true;
+    send("review_page_left", { seconds: Math.round((Date.now() - opened) / 1000), answered: answered(), questions: t.questions, submitted: !!hatch && hatch.status === "submitted" });
+  }
+  addEventListener("pagehide", leave);
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "hidden") leave(); });
+})();`;
+
 /** `</script>`, and the two line separators JSON allows but scripts do not, cannot end or break the data. */
 const embedded = (value: unknown) => JSON.stringify(value).replace(/</g, "\\u003c").replace(new RegExp("[\\u2028\\u2029]", "g"), c => `\\u${c.charCodeAt(0).toString(16)}`);
 
@@ -44,9 +77,10 @@ const embedded = (value: unknown) => JSON.stringify(value).replace(/</g, "\\u003
  * The page the agent wrote, with what Hatch adds, first in <head> so the agent's own CSS and scripts come after:
  * the base styles, the page's data and the client. A page without a <head> gets one.
  */
-export function renderFormPage(html: string, view: FormView): string {
+export function renderFormPage(html: string, view: FormView, tracking?: FormTracking): string {
   const css = formBaseCss().split("</style").join("<\\/style");
-  const inject = `<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><style data-hatch-base>${css}</style><script>window.__HATCH_FORM__=${embedded(view)};${CLIENT}</script>`;
+  const tracker = tracking ? `window.__HATCH_TRACK__=${embedded(tracking)};${TRACKER}` : "";
+  const inject = `<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><style data-hatch-base>${css}</style><script>window.__HATCH_FORM__=${embedded(view)};${CLIENT}${tracker}</script>`;
   const head = /<head(\s[^>]*)?>/i.exec(html);
   if (head) return html.slice(0, head.index + head[0].length) + inject + html.slice(head.index + head[0].length);
   const root = /<html(\s[^>]*)?>/i.exec(html);

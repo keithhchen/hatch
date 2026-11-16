@@ -62,8 +62,8 @@ test("Agent header has one Product links dropdown: copy, open page, open chat; e
   const copy = await readFile(new URL("./studioShellCopy.js", import.meta.url), "utf8");
   assert.match(source, /return href \? <div className="sx-agent__actions">[^]*<DropdownMenu[^]*sxCopyProductLink[^]*sxOpenProductPage[^]*sxTryProductChat/);
   assert.match(source, /WebChatRoute\.productPath/);
-  assert.match(source, /copyLink\(chatPathOf\(product\)\)/);
-  assert.match(source, /copy\(url\)\.catch\(\(\) => setFailed\(true\)\)/);
+  assert.match(source, /copyLink\(chatPathOf\(product\), "chat"\)/);
+  assert.match(source, /copy\(url, shareLinkCopied\(\{ agentId, link \}\)\)\.catch\(\(\) => setFailed\(true\)\)/);
   assert.doesNotMatch(source, /sxOpenPublic|sxTryChat|variant="secondary" leading=\{<Copy/);
   for (const key of ["sxProductLinks", "sxCopyProductLink", "sxOpenProductPage", "sxTryProductChat", "sxCopyChatLink"]) assert.equal(copy.match(new RegExp(`${key}: "`, "g")).length, 3);
   assert.match(copy, /sxProductLinks: "查看产品链接"/);

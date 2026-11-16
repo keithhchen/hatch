@@ -219,13 +219,9 @@ test("Runtime Commerce API is service-authenticated, idempotent, and privacy-saf
     assert.equal(persistedCommerce.includes(privateNeedle), false);
   }
 
-  await dashboard.telemetry.record("checkout_started", {}, {
-    idempotencyKey: "operations-funnel-checkout-started"
-  });
   const operations = await fetch(`${base}/v1/internal/commerce/operations`, { headers });
   const operational = await operations.json();
   assert.equal(operations.status, 200);
-  assert.equal(operational.funnel.checkout_started, 1);
   assert.equal(operational.counts.revenue_pending, 0);
   assert.equal(operational.counts.refund_projection_lag, 0);
   assert.equal(operational.counts.stale_reservations, 0);

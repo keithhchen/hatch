@@ -1,6 +1,7 @@
 import React from "react";
 import { Dialog, DialogContent } from "@hatch/ui";
 import { Play } from "lucide-react";
+import { TrackedVideo } from "./analytics/TrackedVideo.jsx";
 import { explainerFor } from "./nodeExplainers.js";
 
 const MEDIA_BASE = import.meta.env?.VITE_HATCH_WEB_MEDIA_BASE_URL || undefined;
@@ -19,7 +20,7 @@ export function NodeExplainer({ node, locale, autoOpen = false }) {
     </button>
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent title={video.label} className="node-explainer" aria-describedby={undefined}>
-        <video key={video.src} className="node-explainer__video" src={video.src} poster={video.poster} controls playsInline preload="none" />
+        <TrackedVideo key={video.src} className="node-explainer__video" src={video.src} poster={video.poster} controls playsInline preload="none" />
       </DialogContent>
     </Dialog>
   </>;

@@ -49,6 +49,29 @@ test("the page gets Hatch's base styles and the client first in <head>, and the 
   assert.match(renderFormPage("<html><body>x</body></html>", view), /<html><head>.*<\/head><body>x/s);
 });
 
+test("with a tracking key the page reports each saved answer and one leave, by beacon to our own /relay; without one it carries no tracker", async () => {
+  const view = { formId: "form_a", token: "t", schema: parseFormSchema(schema("C01", "C02")), answers: {}, versions: {}, status: "open" as const };
+  assert.ok(!renderFormPage(PAGE, view).includes("__HATCH_TRACK__"), "no key, no tracker");
+  const out = renderFormPage(PAGE, view, { projectKey: "phc_test", distinctId: ACCOUNT, agentId: "agent_a", formId: "form_a", questions: 2 });
+  const script = /<script>(window\.__HATCH_FORM__[^]*?)<\/script>/.exec(out)![1]!;
+  const beacons: Array<{ url: string; body: { api_key: string; event: string; distinct_id: string; properties: Record<string, unknown> } }> = [];
+  const listeners: Record<string, () => void> = {};
+  const window: Record<string, unknown> = {
+    fetch: async () => ({ ok: true, json: async () => ({ version: 1 }) }),
+    navigator: { sendBeacon: (url: string, body: string) => { beacons.push({ url, body: JSON.parse(body) }); return true; } },
+    addEventListener: (name: string, fn: () => void) => { listeners[name] = fn; },
+    document: { visibilityState: "visible", addEventListener: (name: string, fn: () => void) => { listeners[`doc:${name}`] = fn; } }
+  };
+  window.window = window;
+  vm.runInNewContext(script, window);
+  await (window.hatch as { save(id: string, value: unknown): Promise<void> }).save("C01", "answer");
+  listeners.pagehide!();
+  listeners.pagehide!();
+  assert.deepEqual(beacons.map(beacon => [beacon.url, beacon.body.event]), [["/relay/i/v0/e/", "review_question_answered"], ["/relay/i/v0/e/", "review_page_left"]], "one leave, however often the page hides");
+  assert.deepEqual({ key: beacons[1]!.body.api_key, who: beacons[1]!.body.distinct_id }, { key: "phc_test", who: ACCOUNT });
+  assert.deepEqual({ ...beacons[1]!.body.properties, seconds: 0 }, { form_id: "form_a", agent_id: "agent_a", seconds: 0, answered: 1, questions: 2, submitted: false });
+});
+
 test("publish, fill in, edit and submit: answers are kept by question id and a submit closes the page", async () => {
   const h = await formsHarness();
   try {

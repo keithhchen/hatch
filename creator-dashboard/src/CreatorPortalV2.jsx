@@ -1,4 +1,5 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { shareLinkCopied } from "./analytics/events.js";
 import { ArrowLeft, Bot, Check, ChevronsUpDown, CircleHelp, Copy, ExternalLink, Languages, LayoutDashboard, LogOut, Menu, MessageCircle, MoreHorizontal, Plus, ReceiptText, Search, Settings, X } from "lucide-react";
 import { Button, CommandMenu, ConfirmDialog, DropdownMenu, IconButton } from "@hatch/ui";
 import { ButtonBase, Divider as MuiDivider, ListItemIcon, ListItemText, Menu as MuiMenu, MenuItem as MuiMenuItem } from "@mui/material";
@@ -329,7 +330,7 @@ function AgentRow({ product, request, navigate, onChanged, t, locale }) {
     { value: "open", label: t("agentOpen"), onSelect: open },
     ...(publicHref ? [{ value: "view", label: t("viewProduct"), icon: <ExternalLink aria-hidden="true" />, onSelect: () => window.open(publicHref, "_blank", "noopener,noreferrer") }] : []),
     { value: "publish", label: t("sxTabPublish"), onSelect: () => navigate(creatorProductPath(productId, "publish")) },
-    ...(publicHref ? [{ value: "copy", label: t("copyLink"), icon: <Copy aria-hidden="true" />, onSelect: () => void copy(publicPathOf(product) || publicHref).catch(() => setError(t("copyFailed"))) }] : []),
+    ...(publicHref ? [{ value: "copy", label: t("copyLink"), icon: <Copy aria-hidden="true" />, onSelect: () => void copy(publicPathOf(product) || publicHref, shareLinkCopied({ agentId: productId, link: "home" })).catch(() => setError(t("copyFailed"))) }] : []),
     { type: "separator" },
     published
       ? { value: "withdraw", label: t("agentUnpublish"), destructive: true, onSelect: () => setConfirm("withdraw") }

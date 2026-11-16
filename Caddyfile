@@ -140,6 +140,39 @@
         import upstream dashboard 8500
     }
 
+    # Browser product analytics: PostHog through our own origin (US cloud), so ad blockers and CSP see first-party traffic.
+    # The upstream must see its own Host, never the visitor's cookies, and only a PostHog key as Authorization.
+    @posthog_foreign_authorization {
+        header Authorization *
+        not header_regexp Authorization ^Bearer\s+(phc_|phs_|phx_)
+    }
+    @posthog_assets path /relay/static* /relay/array*
+    handle @posthog_assets {
+        uri strip_prefix /relay
+        request_header @posthog_foreign_authorization -Authorization
+        reverse_proxy us-assets.i.posthog.com:443 {
+            transport http {
+                tls
+            }
+            header_up Host us-assets.i.posthog.com
+            header_up -Cookie
+            header_down -Access-Control-Allow-Origin
+        }
+    }
+    @posthog_ingest path /relay*
+    handle @posthog_ingest {
+        uri strip_prefix /relay
+        request_header @posthog_foreign_authorization -Authorization
+        reverse_proxy us.i.posthog.com:443 {
+            transport http {
+                tls
+            }
+            header_up Host us.i.posthog.com
+            header_up -Cookie
+            header_down -Access-Control-Allow-Origin
+        }
+    }
+
     # Static assets and all addressable public/private pages are served by the
     # Dashboard. The browser app owns auth/returnTo and private authorization.
     handle /assets/* {
