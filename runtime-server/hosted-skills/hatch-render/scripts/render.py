@@ -70,12 +70,13 @@ def page_count(path: Path) -> int:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--upload", default="/mnt/agents")
-    ap.add_argument("--output", default="/mnt/agents/output")
+    ap.add_argument("--full", required=True, help="the uploaded report's file name; unique per render, because the upload folder keeps earlier files")
+    ap.add_argument("--upload", default="/mnt/agents/upload")
+    ap.add_argument("--output", required=True, help="a folder of this render's own")
     args = ap.parse_args()
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=True)
-    full = find(Path(args.upload), "full.html")
+    full = find(Path(args.upload), args.full)
 
     with sync_playwright() as p:
         browser = p.chromium.launch()

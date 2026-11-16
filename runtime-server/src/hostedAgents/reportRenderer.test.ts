@@ -19,7 +19,12 @@ test("uploads both HTML files and returns the three validated outputs", async ()
   const { provider, tasks } = fake({ artifacts: [{ name: "full.pdf", bytes: pdf }, { name: "free.pdf", bytes: pdf }, { name: "preview.png", bytes: png }, { name: "result.json", bytes: Buffer.from("{}") }] });
   const out = await new HostedReportRenderer(provider).render(input);
   assert.equal(out.preview, png);
-  assert.deepEqual(tasks[0]!.files.map(f => [f.name, f.bytes.toString()]), [["full.html", "<p>full</p>"], ["free.html", "<p>free</p>"]]);
+  const [file] = tasks[0]!.files;
+  assert.equal(tasks[0]!.files.length, 1, "only the full report goes up; free.pdf is its first page");
+  assert.match(file!.name, /^full-[0-9a-f]{12}\.html$/, "a name of its own: the hosted upload folder keeps earlier files");
+  assert.equal(file!.bytes.toString(), "<p>full</p>");
+  const id = file!.name.slice(5, -5);
+  assert.ok(tasks[0]!.prompt.includes(`full-${id}.html`) && tasks[0]!.prompt.includes(`/mnt/agents/output/${id}`));
   assert.deepEqual(tasks[0]!.secrets, []);
 });
 

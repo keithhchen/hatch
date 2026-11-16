@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { KimiApi } from "./kimiApi.js";
@@ -27,13 +28,14 @@ export const renderAgent = (model: string): AgentSpec => ({
   model,
   system: [
     "You turn two uploaded HTML files into PDFs and a preview image by running one fixed script of the hatch-render skill.",
-    "Run it exactly as the skill says, then save full.pdf, free.pdf, preview.png and result.json with save_artifact.",
+    "Run it exactly as the skill says, with the file name and output folder the task gives, then save full.pdf, free.pdf, preview.png and result.json with save_artifact.",
     "Never read, edit or summarize the HTML. Never create or alter output files yourself. If the script fails, report its error and stop.",
   ].join("\n"),
   skills: [{ name: "hatch-render", dir: path.join(SKILLS_ROOT, "hatch-render") }],
 });
 
-const PROMPT = "Use the hatch-render skill. full.html and free.html are uploaded. Run its script, save full.pdf, free.pdf, preview.png and result.json with save_artifact, then reply with one sentence.";
+/** Each render names its own upload and output folder: the hosted upload folder keeps earlier files, so a fixed name collides. */
+const prompt = (id: string) => `Use the hatch-render skill. The report is uploaded as full-${id}.html; this task's output folder is /mnt/agents/output/${id}. Run its script with those, save full.pdf, free.pdf, preview.png and result.json from that folder with save_artifact, then reply with one sentence.`;
 
 const MIN_BYTES = 1000;
 const PDF_MAGIC = Buffer.from("%PDF-");
@@ -48,14 +50,12 @@ export class HostedReportRenderer implements ReportRenderer {
   constructor(private readonly agent: HostedAgentProvider) {}
 
   async render(input: { fullHtml: string; freeHtml: string }, signal?: AbortSignal): Promise<RenderedReport> {
+    const id = randomUUID().replaceAll("-", "").slice(0, 12);
     const run = await this.agent.run({
       title: "render report",
-      prompt: PROMPT,
+      prompt: prompt(id),
       secrets: [],
-      files: [
-        { name: "full.html", bytes: Buffer.from(input.fullHtml), mimeType: "text/html" },
-        { name: "free.html", bytes: Buffer.from(input.freeHtml), mimeType: "text/html" },
-      ],
+      files: [{ name: `full-${id}.html`, bytes: Buffer.from(input.fullHtml), mimeType: "text/html" }],
     }, signal);
     const get = (name: string) => {
       const found = run.artifacts.find(a => a.name === name)?.bytes;
