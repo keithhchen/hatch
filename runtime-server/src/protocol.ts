@@ -36,7 +36,7 @@ export const MAX_CONTEXT_ASSET_TOTAL_BYTES = 100 * 1024 * 1024;
 export const MAX_CONTEXT_ASSET_BASE64_CHARS = Math.ceil(MAX_CONTEXT_ASSET_BYTES / 3) * 4;
 export const MAX_ERROR_MESSAGE_CHARS = 16 * 1024;
 /** Canonical model-visible content for the internal task-start user turn. */
-export const TASK_START_MESSAGE_CONTENT = "<system-reminder>\n这条消息由系统发出，不是用户写的。\n开始 Brief 里描述的任务。\n</system-reminder>";
+export const TASK_START_MESSAGE_CONTENT = "<system-reminder>\nThis message was sent by the system, not written by the user.\nStart the task described in the Brief.\n</system-reminder>";
 const ProtocolIdSchema = z.string().min(1).max(MAX_PROTOCOL_ID_CHARS);
 /** The client's IANA time zone (browser `Intl` resolved zone), e.g. "Asia/Tokyo". */
 export const TimeZoneSchema = z.string().min(1).max(64).refine((zone) => {

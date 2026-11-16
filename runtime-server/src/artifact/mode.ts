@@ -1,3 +1,4 @@
+import { REPLY_LANGUAGE_RULE } from "../agentRuntime.js";
 import type { ProductAnalytics } from "../analytics/port.js";
 import { safely } from "../analytics/safe.js";
 import type { AssetBlobs } from "../assets/domain.js";
@@ -38,6 +39,7 @@ export const reportTurnReminder = (now: Date): string => [
   "<system-reminder>",
   `Current time: ${now.toISOString()}`,
   "This is report mode, not a chat. Nobody will answer a question: do not ask one and do not write a chat reply. Read the form and the files, consult your knowledge, then deliver the whole report by calling publish_report once. Your Run is finished only when publish_report has returned \"Report published.\".",
+  REPLY_LANGUAGE_RULE,
   "</system-reminder>"
 ].join("\n");
 

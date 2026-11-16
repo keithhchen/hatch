@@ -12,15 +12,15 @@ const quoted = (text: string) => text.trim().split("\n").map(line => `> ${line}`
 
 /** Every question of the page with the Expert's own words under it, verbatim. A question left empty says so. */
 export function renderReview(page: Pick<FormPage, "id" | "title" | "submittedAt">, schema: FormSchema, answers: Record<string, unknown>): ReviewFile {
-  const out = [`# ${page.title}`, "", `提交时间：${page.submittedAt ?? new Date().toISOString()}`];
+  const out = [`# ${page.title}`, "", `Submitted: ${page.submittedAt ?? new Date().toISOString()}`];
   for (const item of schema.questions) {
     const answer = answers[item.id];
     const picked = typeof answer === "string" ? answer : Array.isArray(answer) ? answer.join("、") : "";
     const note = answers[`${item.id}__note`];
-    out.push("", `## ${item.id} ${item.title}`, "", ...(item.group ? [`分组：${item.group}`] : []), ...(item.scenario ? [`场景：${item.scenario}`] : []), `问题：${item.prompt}`);
-    if (item.options?.length) out.push(`选项：${item.options.join(" / ")}`);
-    out.push("", "专家的回答：", picked.trim() ? quoted(picked) : "未回答");
-    if (typeof note === "string" && note.trim()) out.push("", "补充说明：", quoted(note));
+    out.push("", `## ${item.id} ${item.title}`, "", ...(item.group ? [`Group: ${item.group}`] : []), ...(item.scenario ? [`Scenario: ${item.scenario}`] : []), `Question: ${item.prompt}`);
+    if (item.options?.length) out.push(`Options: ${item.options.join(" / ")}`);
+    out.push("", "Expert's answer:", picked.trim() ? quoted(picked) : "Not answered");
+    if (typeof note === "string" && note.trim()) out.push("", "Additional note:", quoted(note));
   }
   return { name: `${slug(page.title)}-${shortId(page.id)}.md`, markdown: `${out.join("\n")}\n` };
 }

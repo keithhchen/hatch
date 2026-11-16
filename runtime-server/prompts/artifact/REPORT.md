@@ -77,7 +77,7 @@ Read the whole file with `read`, slowly, as a careful editor who did not write i
 1. Every number, date, name, school, score and award in the report: find it again in the form, a file or a knowledge record. If you are not sure, read the source again. Correct it or remove it.
 2. The same fact is the same everywhere: a score, a grade, a year or a name does not change between sections.
 3. Every past case: each detail is in its case file, and nothing in it identifies the person.
-4. Language: one language throughout (the form's), no typos, no half-translated terms, no sentence cut off, no leftover notes or placeholders.
+4. No typos, no half-translated terms, no sentence cut off, no leftover notes or placeholders.
 5. Then the checklist below.
 
 ## Before you publish
@@ -87,6 +87,5 @@ Read your HTML once as the client would, then check:
 2. The first free section is unmistakably about this person.
 3. Every item the template marks as required is in its section. Every paid section ends with something to do or decide.
 4. No promises of outcomes; uncertain facts are marked as such.
-5. Language and form of address match the form.
-6. Every top-level section has data-access and starts with its heading; there is no script and nothing external.
-7. Print rules: cover full width, headings kept with their content, cards and rows unsplit, nothing below 8pt.
+5. Every top-level section has data-access and starts with its heading; there is no script and nothing external.
+6. Print rules: cover full width, headings kept with their content, cards and rows unsplit, nothing below 8pt.

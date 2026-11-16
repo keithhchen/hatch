@@ -27,14 +27,14 @@ test("submit hands the review file to the conversation with the answers verbatim
     const { review } = h.submitted[0]!;
     assert.match(review.name, /^审阅-开场-语气-[0-9a-f]{8}\.md$/);
     assert.match(review.markdown, /## C01 怎么开场/);
-    assert.match(review.markdown, /分组：开场/);
-    assert.match(review.markdown, /场景：他说过「先问预算」/);
-    assert.match(review.markdown, /问题：你怎么开场？/);
-    assert.match(review.markdown, /选项：温和 \/ 直接/);
+    assert.match(review.markdown, /Group: 开场/);
+    assert.match(review.markdown, /Scenario: 他说过「先问预算」/);
+    assert.match(review.markdown, /Question: 你怎么开场？/);
+    assert.match(review.markdown, /Options: 温和 \/ 直接/);
     assert.match(review.markdown, /> 先问预算，\n> 再问时间。/);
     assert.match(review.markdown, /> 直接/);
-    assert.match(review.markdown, /补充说明：\n> 客户喜欢快/);
-    assert.match(review.markdown, /## C03 没答的[\s\S]*未回答/);
+    assert.match(review.markdown, /Additional note:\n> 客户喜欢快/);
+    assert.match(review.markdown, /## C03 没答的[\s\S]*Not answered/);
   } finally { await h.close(); }
 });
 
