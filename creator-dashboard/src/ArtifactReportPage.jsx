@@ -42,6 +42,19 @@ function PdfPages({ src, title, failed }) {
   </>;
 }
 
+/** The preview image: page 1 as printed, then the next pages blurred. The unlock control sits just below page 1. */
+function ReportPreview({ src, alt, children }) {
+  const [top, setTop] = useState(null);
+  const placed = (event) => {
+    const { naturalWidth: width, naturalHeight: height } = event.currentTarget;
+    if (width && height) setTop(`${((width * Math.SQRT2) / height) * 100}%`); // an A4 page is √2 as tall as it is wide
+  };
+  return <figure className="artifact__preview">
+    <img src={src} alt={alt} onLoad={placed} />
+    {top ? <figcaption style={{ top }}>{children}</figcaption> : null}
+  </figure>;
+}
+
 /** The report of one conversation, always read from the server: on load, on refresh, after a long absence. */
 export function ArtifactReportPage({ api, conversationId, productId, onDraft, debug, t, locale }) {
   const analytics = useAnalytics();
@@ -101,15 +114,11 @@ export function ArtifactReportPage({ api, conversationId, productId, onDraft, de
     {status === "ready" ? <>
       {report.files?.full_html
         ? <PdfPages src={api.reportFileUrl(conversationId, "full.pdf")} title={t("artifactReportTitle")} failed={t("artifactStatusUnavailable")} />
-        : <>
-          <PdfPages src={api.reportFileUrl(conversationId, "free.pdf")} title={t("artifactReportTitle")} failed={t("artifactStatusUnavailable")} />
-          <figure className="artifact__preview">
-            <img src={api.reportFileUrl(conversationId, "preview.png")} alt={t("artifactPreviewAlt")} />
-            <figcaption>{report.files?.full_pdf
-              ? <a className="web-chat__button web-chat__button--yolk" href={api.reportFileUrl(conversationId, "full.pdf")} download onClick={() => analytics.track(reportFileOpened({ agentId: productId, name: "full.pdf" }))}><Lock aria-hidden="true" />{t("artifactUnlock")}</a>
-              : <><Lock aria-hidden="true" />{t("artifactLocked")}</>}</figcaption>
-          </figure>
-        </>}
+        : <ReportPreview src={api.reportFileUrl(conversationId, "preview.png")} alt={t("artifactPreviewAlt")}>
+          {report.files?.full_pdf
+            ? <a className="web-chat__button web-chat__button--yolk" href={api.reportFileUrl(conversationId, "full.pdf")} download onClick={() => analytics.track(reportFileOpened({ agentId: productId, name: "full.pdf" }))}><Lock aria-hidden="true" />{t("artifactUnlock")}</a>
+            : <span className="artifact__locked"><Lock aria-hidden="true" />{t("artifactLocked")}</span>}
+        </ReportPreview>}
     </> : null}
   </div></div>;
 }

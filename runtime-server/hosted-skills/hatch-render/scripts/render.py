@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic HTML to PDF renderer: full.pdf, free.pdf, and preview.png: the paid part's first printed pages, blurred."""
+"""Deterministic HTML to PDF renderer: full.pdf; free.pdf, its first page; preview.png, page 1 clear and the next pages blurred."""
 import argparse
 import json
 import re
@@ -10,7 +10,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-PREVIEW_PAGES = 3  # the first pages of the paid part, blurred, shown on the web under the free pages
+PREVIEW_PAGES = 3  # pages after the first, blurred, shown on the web under page 1
 PREVIEW_DPI, BLUR_RADIUS, PAGE_GAP = 96, 7, 16
 
 def find(root: Path, name: str) -> Path:
@@ -31,16 +31,25 @@ def pdf(page, source: Path, out: Path) -> None:
     page.pdf(path=str(out), format="A4", print_background=True, prefer_css_page_size=True)
 
 
-def preview(full_pdf: Path, free_pdf: Path, out: Path) -> None:
-    """The paid part's first pages as they print: the full PDF's pages after the free ones, blurred, stacked with a gap."""
+def first_page(full_pdf: Path, out: Path) -> None:
+    """free.pdf is the full report's first page, nothing else."""
+    from pypdf import PdfReader, PdfWriter
+    writer = PdfWriter()
+    writer.add_page(PdfReader(str(full_pdf)).pages[0])
+    with open(out, "wb") as f:
+        writer.write(f)
+
+
+def preview(full_pdf: Path, out: Path) -> None:
+    """What the web shows: page 1 as printed, then the next pages blurred, stacked with a gap."""
     from PIL import Image, ImageFilter
-    first = page_count(free_pdf) + 1
-    last = min(page_count(full_pdf), first + PREVIEW_PAGES - 1)
-    if first > last:
-        raise SystemExit("error: full.pdf has no pages after the free part")
+    last = min(page_count(full_pdf), 1 + PREVIEW_PAGES)
+    if last < 2:
+        raise SystemExit("error: full.pdf has only one page")
     with tempfile.TemporaryDirectory() as tmp:
-        subprocess.run(["pdftoppm", "-r", str(PREVIEW_DPI), "-png", "-f", str(first), "-l", str(last), str(full_pdf), f"{tmp}/p"], check=True)
-        pages = [Image.open(p).convert("RGB").filter(ImageFilter.GaussianBlur(BLUR_RADIUS)) for p in sorted(Path(tmp).glob("p*.png"))]
+        subprocess.run(["pdftoppm", "-r", str(PREVIEW_DPI), "-png", "-f", "1", "-l", str(last), str(full_pdf), f"{tmp}/p"], check=True)
+        files = sorted(Path(tmp).glob("p*.png"))
+        pages = [Image.open(files[0]).convert("RGB")] + [Image.open(p).convert("RGB").filter(ImageFilter.GaussianBlur(BLUR_RADIUS)) for p in files[1:]]
     width = max(p.width for p in pages)
     sheet = Image.new("RGBA", (width, sum(p.height for p in pages) + PAGE_GAP * (len(pages) - 1)), (0, 0, 0, 0))
     y = 0
@@ -66,7 +75,7 @@ def main() -> None:
     args = ap.parse_args()
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=True)
-    full, free = find(Path(args.upload), "full.html"), find(Path(args.upload), "free.html")
+    full = find(Path(args.upload), "full.html")
 
     with sync_playwright() as p:
         browser = p.chromium.launch()
@@ -74,10 +83,10 @@ def main() -> None:
         offline(ctx)
         page = ctx.new_page()
         pdf(page, full, out / "full.pdf")
-        pdf(page, free, out / "free.pdf")
         ctx.close()
         browser.close()
-    preview(out / "full.pdf", out / "free.pdf", out / "preview.png")
+    first_page(out / "full.pdf", out / "free.pdf")
+    preview(out / "full.pdf", out / "preview.png")
 
     result = {}
     for name in ("full.pdf", "free.pdf", "preview.png"):
