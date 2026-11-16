@@ -93,12 +93,12 @@ class AssistantBinder implements PrincipalBinder<AssistantScope> {
   }
 }
 
-/** Studio work: the API's when an API key made the request that is binding the Run, the web's otherwise. */
+/** The Assistant has its own usage surface on every channel; an API key that made the request is recorded with it. */
 export const scopeOfConversation = (conversation: Pick<ConversationRecord, "ownerAccountId">): AssistantScope => {
   const apiKeyId = currentContext()?.api_key_id;
   return {
     creatorId: conversation.ownerAccountId, userId: conversation.ownerAccountId, productId: ASSISTANT_AGENT_ID, corpusDigest: ASSISTANT_AGENT_ID, accountId: conversation.ownerAccountId,
-    usageSurface: apiKeyId ? "studio_api" : "studio_web", ...(apiKeyId ? { apiKeyId } : {})
+    usageSurface: "assistant", ...(apiKeyId ? { apiKeyId } : {})
   };
 };
 

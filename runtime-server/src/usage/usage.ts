@@ -2,7 +2,8 @@ import type { Usage } from "@earendil-works/pi-ai";
 import type { Log } from "../observability/log.js";
 
 /** Who spent the tokens: the Expert building in Studio (in the web app, or with an API key), Chat in an app or channel, or Chat over the Responses API. */
-export const USAGE_SURFACES = ["studio_web", "studio_api", "chat_web", "responses_api"] as const;
+/** Studio work (web or API key), the Hatch Assistant (any channel), buyer chat on the web, and the Responses API. */
+export const USAGE_SURFACES = ["studio_web", "studio_api", "assistant", "chat_web", "responses_api"] as const;
 export type UsageSurface = typeof USAGE_SURFACES[number];
 
 export type TokenCount = { input: number; cachedInput: number; output: number; reasoning: number };

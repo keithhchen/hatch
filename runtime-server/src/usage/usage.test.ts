@@ -95,13 +95,13 @@ test("the report has the dashboard's shape: tokens are input + output, every day
   await ledger.record(event({ id: "b", surface: "responses_api", at: new Date("2026-11-13T00:00:00Z"), inputTokens: 10, outputTokens: 5 }));
   await ledger.record(event({ id: "c", surface: "studio_api", at: new Date("2026-11-13T00:00:00Z"), inputTokens: 1, outputTokens: 1 }));
   const report = await usageReport(ledger, "acct", "2026-11-11", "2026-11-13", 1000, new Date("2026-11-13T08:00:00Z"));
-  assert.deepEqual(report.month_to_date, { studio_web: 120, studio_api: 2, chat_web: 0, responses_api: 15, total: 137, split: report.month_to_date.split });
+  assert.deepEqual(report.month_to_date, { studio_web: 120, studio_api: 2, assistant: 0, chat_web: 0, responses_api: 15, total: 137, split: report.month_to_date.split });
   assert.deepEqual(report.month_to_date.split.studio_web, { input: 100, cachedInput: 40, output: 20, reasoning: 5 });
   assert.deepEqual(report.cap, { monthly_tokens: 1000, remaining_tokens: 863 });
   assert.deepEqual(report.daily, [
-    { day: "2026-11-11", studio_web: 0, studio_api: 0, chat_web: 0, responses_api: 0 },
-    { day: "2026-11-12", studio_web: 120, studio_api: 0, chat_web: 0, responses_api: 0 },
-    { day: "2026-11-13", studio_web: 0, studio_api: 2, chat_web: 0, responses_api: 15 }
+    { day: "2026-11-11", studio_web: 0, studio_api: 0, assistant: 0, chat_web: 0, responses_api: 0 },
+    { day: "2026-11-12", studio_web: 120, studio_api: 0, assistant: 0, chat_web: 0, responses_api: 0 },
+    { day: "2026-11-13", studio_web: 0, studio_api: 2, assistant: 0, chat_web: 0, responses_api: 15 }
   ]);
   assert.equal((await usageReport(ledger, "nobody", "2026-11-11", "2026-11-11", null)).cap.monthly_tokens, null);
 });
@@ -140,7 +140,7 @@ test("GET /v1/creator/usage answers the signed-in Expert from the ledger, and on
     assert.deepEqual(body.cap, { monthly_tokens: 2_000_000, remaining_tokens: 2_000_000 });
     assert.equal(body.month_to_date.total, 0);
     assert.equal(body.daily.length, 30);
-    assert.deepEqual(Object.keys(body.daily[0]!).sort(), ["chat_web", "day", "responses_api", "studio_api", "studio_web"]);
+    assert.deepEqual(Object.keys(body.daily[0]!).sort(), ["assistant", "chat_web", "day", "responses_api", "studio_api", "studio_web"]);
     assert.equal((await get("?from=2026-11-05&to=2026-11-01", token)).status, 400);
     assert.equal((await get("?from=garbage", token)).status, 400);
     assert.equal(((await (await get("?from=2026-11-01&to=2026-11-03", token)).json()) as { daily: unknown[] }).daily.length, 3);

@@ -28,7 +28,7 @@ test("the client reads the Expert's usage from the dashboard route", async () =>
 test("the view has per-surface totals, bars scaled to the busiest day and cap progress", () => {
   const view = usageView(fixture);
   assert.equal(view.total, 2000);
-  assert.deepEqual(view.surfaces, [{ surface: "studio_web", tokens: 1000 }, { surface: "studio_api", tokens: 200 }, { surface: "chat_web", tokens: 500 }, { surface: "responses_api", tokens: 300 }]);
+  assert.deepEqual(view.surfaces, [{ surface: "studio_web", tokens: 1000 }, { surface: "studio_api", tokens: 200 }, { surface: "assistant", tokens: 0 }, { surface: "chat_web", tokens: 500 }, { surface: "responses_api", tokens: 300 }]);
   assert.equal(view.busiest, 1500);
   assert.deepEqual(view.days.map((day) => day.total), [0, 1500, 500]);
   assert.deepEqual(view.cap, { limit: 4000, used: 2000, ratio: 0.5, over: false });

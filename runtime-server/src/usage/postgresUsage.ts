@@ -5,7 +5,7 @@ const DDL = [
   `CREATE TABLE IF NOT EXISTS hatch_usage_events (
     id TEXT PRIMARY KEY,
     account_id TEXT NOT NULL,
-    surface TEXT NOT NULL CHECK (surface IN ('studio_web', 'studio_api', 'chat_web', 'responses_api')),
+    surface TEXT NOT NULL CHECK (surface IN ('studio_web', 'studio_api', 'assistant', 'chat_web', 'responses_api')),
     api_key_id TEXT,
     product_id TEXT,
     run_id TEXT,
@@ -30,22 +30,24 @@ const DDL = [
 ];
 
 /**
- * Tables made before the four surfaces carry 'studio' and 'chat_api'. Rewrites them once: events by who made the request
- * (a Studio call with an API key is studio_api), then the rollup from the events, which are its source. The old CHECK is
- * the marker, so a later boot finds nothing to do.
+ * Tables made before the Assistant had its own surface. Rewrites them once: events by who made the request (the Assistant's
+ * Agent id, ASSISTANT_AGENT_ID in assistant/chat.ts, is the Assistant; otherwise a Studio call with an API key is studio_api; the oldest 'studio' and 'chat_api' rows
+ * map the same way), then the rollup from the events, which are its source. A CHECK without 'assistant' is the marker, so a
+ * later boot finds nothing to do.
  */
 export const MIGRATE_SURFACES = `
 DO $$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'hatch_usage_events'::regclass AND conname = 'hatch_usage_events_surface_check' AND pg_get_constraintdef(oid) LIKE '%chat_api%') THEN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'hatch_usage_events'::regclass AND conname = 'hatch_usage_events_surface_check' AND pg_get_constraintdef(oid) NOT LIKE '%assistant%') THEN
     ALTER TABLE hatch_usage_events DROP CONSTRAINT hatch_usage_events_surface_check;
     UPDATE hatch_usage_events SET surface = CASE
       WHEN surface = 'chat_api' THEN 'responses_api'
+      WHEN surface IN ('studio', 'studio_web', 'studio_api') AND product_id = 'a5515700-0000-4000-8000-000000000001' THEN 'assistant'
       WHEN surface = 'studio' AND api_key_id IS NOT NULL THEN 'studio_api'
       WHEN surface = 'studio' THEN 'studio_web'
       ELSE surface END
-      WHERE surface IN ('studio', 'chat_api');
+      WHERE surface IN ('studio', 'chat_api') OR product_id = 'a5515700-0000-4000-8000-000000000001';
     ALTER TABLE hatch_usage_events ADD CONSTRAINT hatch_usage_events_surface_check
-      CHECK (surface IN ('studio_web', 'studio_api', 'chat_web', 'responses_api'));
+      CHECK (surface IN ('studio_web', 'studio_api', 'assistant', 'chat_web', 'responses_api'));
     DELETE FROM hatch_usage_daily;
     INSERT INTO hatch_usage_daily (account_id, surface, day, input_tokens, cached_input_tokens, output_tokens, reasoning_tokens)
       SELECT account_id, surface, (created_at AT TIME ZONE 'UTC')::date, SUM(input_tokens), SUM(cached_input_tokens), SUM(output_tokens), SUM(reasoning_tokens)

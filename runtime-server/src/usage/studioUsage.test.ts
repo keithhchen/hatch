@@ -124,12 +124,12 @@ test("a Factory run queued by an API key is Studio API usage under that key; one
   assert.deepEqual({ surface: byRun("by-session").surface, apiKeyId: byRun("by-session").apiKeyId }, { surface: "studio_web", apiKeyId: undefined });
 });
 
-test("an Assistant Run bound by a request from an API key is Studio API usage under that key; otherwise Studio web", () => {
+test("an Assistant Run is Assistant usage on every channel; an API key that made the request is recorded with it", () => {
   const owner = { ownerAccountId: "acct" };
   const viaKey = runInContext({ request_id: "req" }, () => { bindContext({ api_key_id: "key-1" }); return attributeByScope(scopeOfConversation(owner), { id: "run-1" }); });
-  assert.deepEqual({ surface: viaKey.surface, apiKeyId: viaKey.apiKeyId, accountId: viaKey.accountId }, { surface: "studio_api", apiKeyId: "key-1", accountId: "acct" });
+  assert.deepEqual({ surface: viaKey.surface, apiKeyId: viaKey.apiKeyId, accountId: viaKey.accountId }, { surface: "assistant", apiKeyId: "key-1", accountId: "acct" });
   const viaSession = runInContext({ request_id: "req" }, () => attributeByScope(scopeOfConversation(owner), { id: "run-2" }));
-  assert.deepEqual({ surface: viaSession.surface, apiKeyId: viaSession.apiKeyId }, { surface: "studio_web", apiKeyId: undefined });
+  assert.deepEqual({ surface: viaSession.surface, apiKeyId: viaSession.apiKeyId }, { surface: "assistant", apiKeyId: undefined });
 });
 
 test("an ingest job is not started once the Expert has spent the month", async () => {
