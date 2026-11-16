@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
@@ -41,15 +42,12 @@ export async function registryRequest(env: NodeJS.ProcessEnv, route: string, bod
 export function corpusTools(store: WorkbenchStore, id: string, changed: () => void, scope: FactoryProductScope, env: NodeJS.ProcessEnv = process.env): AgentTool[] {
   const product = Object.freeze({ creatorId: scope.creatorId, productId: scope.productId });
   return [{
-    name: "corpus_upload", label: "上传可执行 Corpus", description: "Pass title (storefront name), promise and opening_questions (the short form clients fill in before the chat) for the Product, then read saved output SYSTEM.md and selected skills/references, assemble the existing Corpus schema and publish it to this workspace's Product through the Product Registry API. The host fixes the Product; this tool cannot select or create one. Skill paths look like output/skills/<name>/SKILL.md with references under output/skills/<name>/references/. Only output/SYSTEM.md is required: names are repaired automatically, and any file that cannot be read is skipped and listed in skipped so you can fix it and upload again; formatting never blocks the upload. Tool declarations come from host configuration. Saves CORPUS.md with the actual publication status. Re-upload after definition edits. No target Agent execution here.",
+    name: "corpus_upload", label: "上传可执行 Corpus", description: "Read saved output SYSTEM.md and selected skills/references, assemble the existing Corpus schema and publish it to this workspace's Product through the Product Registry API. The host fixes the Product; this tool cannot select or create one. Skill paths look like output/skills/<name>/SKILL.md with references under output/skills/<name>/references/. Only output/SYSTEM.md is required: names are repaired automatically, and any file that cannot be read is skipped and listed in skipped so you can fix it and upload again; formatting never blocks the upload. Tool declarations come from host configuration. Re-upload after definition edits. No target Agent execution here.",
     parameters: Type.Object({
-      title: Type.Optional(Type.String({ description: "Storefront title: short, names the job this Agent does. No Creator name or marketing filler. Omit only to keep the current title." })),
-      opening_questions: Type.Optional(Type.Array(Type.Object({ label: Type.String(), required: Type.Optional(Type.Boolean()) }), { description: "1–5 questions the client answers before the chat starts: only facts the Agent needs first and the client can answer immediately. Omit only to keep the current questions." })),
-      promise: Type.Optional(Type.String({ description: "One or two customer-facing sentences stating who this helps, when, and what valuable result it delivers. No methods, evidence, feature lists, boundaries, or disclaimers." })),
       skills: Type.Optional(Type.Array(Type.Object({ path: Type.String(), references: Type.Optional(Type.Array(Type.Object({ path: Type.String(), kind: Type.Optional(Type.String({ description: "method (working procedure), style (communication style), example (worked example) or few_shots (input/output demonstrations); anything else is treated as method." })) }))) }))),
     }),
     execute: async (_call, raw, signal) => {
-      const a = raw as { title?: string; opening_questions?: Array<{ label: string; required?: boolean }>; promise?: string; skills?: Array<{ path: string; references?: Array<{ path: string; kind?: string }> }> };
+      const a = raw as { skills?: Array<{ path: string; references?: Array<{ path: string; kind?: string }> }> };
       // Completion over quality: anything repairable is repaired, anything else is skipped
       // and reported back to the Builder. Only SYSTEM.md is required.
       const skipped: string[] = [];
@@ -83,17 +81,6 @@ export function corpusTools(store: WorkbenchStore, id: string, changed: () => vo
         } catch (error) { skipped.push(`${skill.path}: ${reason(error)}`); }
       }
       const system = await read("output/SYSTEM.md").catch(() => { throw new Error("Write output/SYSTEM.md first; it is the only file the upload requires."); });
-      const title = a.title?.trim().slice(0, 240);
-      const promise = a.promise?.trim() || (title ? (await registryRequest(env, `/v1/creator/products/${encodeURIComponent(product.productId)}`) as { product?: { promise?: string } }).product?.promise : undefined);
-      if (promise) {
-        const updated = z.object({ product_id: z.string().uuid() }).passthrough().parse(await registryRequest(env, `/v1/creator/products/${encodeURIComponent(product.productId)}`, { promise, ...(title ? { name: title } : {}) }, signal, `factory-promise-${id}-${digest(`${title ?? ""}\n${promise}`).slice(7)}`, "PATCH"));
-        if (updated.product_id !== product.productId) throw new Error("Registry updated a different Product");
-      }
-      const questions = (a.opening_questions ?? []).map(question => ({ label: String(question.label ?? "").trim().slice(0, 500), required: question.required !== false })).filter(question => question.label).slice(0, 16);
-      if (questions.length) {
-        const fields = questions.map((question, index) => ({ id: `q${index + 1}`, label: question.label, required: question.required }));
-        await registryRequest(env, `/v1/creator/products/${encodeURIComponent(product.productId)}/brief-spec`, { brief_spec: { contract_version: "1", fields } }, signal, `factory-brief-${id}-${digest(JSON.stringify(fields)).slice(7)}`, "PUT");
-      }
       let corpus: CorpusOutput;
       let reply: z.infer<typeof corpusReceiptSchema>;
       try {
@@ -106,8 +93,31 @@ export function corpusTools(store: WorkbenchStore, id: string, changed: () => vo
       const receipt = { ...reply, creator_id: product.creatorId, files };
       await store.update(id, state => { state.corpus = receipt; });
       const published = { product_id: reply.product_id, status: reply.status, published_at: reply.published_at, files };
-      await store.put(id, "output/CORPUS.md", Buffer.from(`# Agent 已发布\n\n\`\`\`json\n${JSON.stringify(published, null, 2)}\n\`\`\`\n`), { actor: "host", readonly: true });
       changed(); return result(skipped.length ? { ...published, skipped } : published);
+    },
+  }, {
+    name: "product_card", label: "Agent 店面信息", description: "Read or overwrite this Agent's storefront card: name, promise, and the opening questions clients answer before the chat. Call with no fields to read. Fields you pass replace the current ones; fields you omit stay as they are. The host fixes the Agent; this tool cannot select or create one.",
+    parameters: Type.Object({
+      name: Type.Optional(Type.String({ description: "Storefront name: short, names the job this Agent does. No expert name or marketing filler." })),
+      promise: Type.Optional(Type.String({ description: "One or two customer-facing sentences stating who this helps, when, and what valuable result it delivers. No methods, evidence, feature lists, boundaries, or disclaimers." })),
+      opening_questions: Type.Optional(Type.Array(Type.Object({ label: Type.String(), required: Type.Optional(Type.Boolean()) }), { minItems: 1, maxItems: 5, description: "1–5 questions the client answers before the chat starts: only facts the Agent needs first and the client can answer immediately." })),
+    }),
+    execute: async (_call, raw, signal) => {
+      // Setting the card is naturally idempotent; the key only makes one call's retries one write, never replays an older call.
+      const key = randomUUID();
+      const a = raw as { name?: string; promise?: string; opening_questions?: Array<{ label: string; required?: boolean }> };
+      if ((await store.get(id)).role !== "generation") throw new Error("Only the agent builder may change the storefront card");
+      const route = `/v1/creator/products/${encodeURIComponent(product.productId)}`;
+      const name = a.name?.trim().slice(0, 240), promise = a.promise?.trim();
+      if (name || promise) {
+        const body = { ...(name ? { name } : {}), ...(promise ? { promise } : {}) };
+        const updated = z.object({ product_id: z.string().uuid() }).passthrough().parse(await registryRequest(env, route, body, signal, `factory-card-${id}-${key}`, "PATCH"));
+        if (updated.product_id !== product.productId) throw new Error("Registry updated a different Product");
+      }
+      const fields = (a.opening_questions ?? []).map(question => ({ label: String(question.label ?? "").trim().slice(0, 500), required: question.required !== false })).filter(question => question.label).slice(0, 5).map((question, index) => ({ id: `q${index + 1}`, ...question }));
+      if (fields.length) await registryRequest(env, `${route}/brief-spec`, { brief_spec: { contract_version: "1", fields } }, signal, `factory-brief-${id}-${key}`, "PUT");
+      const current = (await registryRequest(env, route) as { product: { name: string; promise: string; brief_spec?: { fields?: Array<{ label: string; required: boolean }> } } }).product;
+      return result({ name: current.name, promise: current.promise, opening_questions: (current.brief_spec?.fields ?? []).map(({ label, required }) => ({ label, required })) });
     },
   }];
 }

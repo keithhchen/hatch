@@ -347,10 +347,9 @@ export class WorkbenchRuntime {
     let buildStartedAt: number | undefined;
     try {
       const s = await this.store.get(id);
-      if (s.role === "generation") { buildStartedAt = Date.now(); this.track(buildStarted); }
       const definition = await this.store.definition(s.role);
       system = await this.prompt(s.role, definition);
-      if (s.role === "generation") system += `\nTarget Runtime tools provided by the host: built-in hatch.web_search. Additional declarations: ${this.env.HATCH_FACTORY_TARGET_TOOLS_JSON ?? "[]"}. The actual availability of external connections is verified by the existing Registry/Runtime. The current Product is fixed by the host; corpus_upload publishes to it, so do not look up, choose or create a Product.`;
+      if (s.role === "generation") system += `\nTarget Runtime tools provided by the host: built-in hatch.web_search. Additional declarations: ${this.env.HATCH_FACTORY_TARGET_TOOLS_JSON ?? "[]"}. The actual availability of external connections is verified by the existing Registry/Runtime. The current Product is fixed by the host; corpus_upload and product_card act on it, so do not look up, choose or create a Product.`;
       // The Expert's submitted review answers are part of the interview's material: handed over here, not left to be looked up.
       if (s.role === "voice" || s.role === "generation") { const answers = await reviewAnswers(this.store, id); if (answers) system += `\n\n# The Expert's answers on the review page (verbatim)\n\n${answers}`; }
       if (s.role === "voice") system += `\n\n${await readFile(fileURLToPath(new URL("../../prompts/assistant/INTERVIEW_DONE.md", import.meta.url)), "utf8")}`;
@@ -358,7 +357,13 @@ export class WorkbenchRuntime {
       if (s.role === "evaluator") system += `\nThe current Product is fixed by the host; hatch_tool only runs it, so do not look up or choose a Product. If brief_answers are needed at start, answer from the client-visible information in the case; do not leak the scoring criteria. Current Brief fields: ${JSON.stringify(this.store.scope?.briefSpec ?? null)}.`;
       const changed = () => this.emit(id, "files");
       const todosChanged = () => this.emit(id, "todos");
-      const tools = declareTools(await factoryAgentTools({
+      // A build starts at the first file the Builder saves under output/; turns spent only talking are not builds.
+      const startBuild = (tool: AgentTool): AgentTool => s.role === "generation" && tool.name === "write" ? { ...tool, execute: async (callId, params, signal, onUpdate) => {
+        const written = await tool.execute(callId, params, signal, onUpdate);
+        if (buildStartedAt === undefined && String((params as { path?: unknown }).path).startsWith("output/")) { buildStartedAt = Date.now(); this.track(buildStarted); }
+        return written;
+      } } : tool;
+      const tools = declareTools((await factoryAgentTools({
         store: this.store,
         id,
         definition,
@@ -368,7 +373,7 @@ export class WorkbenchRuntime {
         env: this.env,
         extraTools: await this.options.extraTools?.(s, controller.signal, changed),
         withheldTools: await this.options.withheldTools?.(s),
-      }), this.options.toolSupport ?? studioToolSupport, () => this.clientOf(id).client);
+      })).map(startBuild), this.options.toolSupport ?? studioToolSupport, () => this.clientOf(id).client);
       if (tools.some(tool => tool.name === "publish_form")) await provideFormReference(this.store, id);
       if (tools.some(tool => tool.name === "publish_form")) system += `\n\n${await readFile(fileURLToPath(new URL("voice/FORM_PAGE.md", new URL("../../prompts/factory-agents/", import.meta.url))), "utf8")}`;
       const messageCount = s.messages.length;

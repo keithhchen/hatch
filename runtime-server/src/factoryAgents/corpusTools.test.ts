@@ -45,9 +45,8 @@ test("Generation uploads canonical files through Registry and the existing Runti
     const upload = tools.find(t => t.name === "corpus_upload")!;
     const exposedParameters = JSON.stringify(upload.parameters);
     assert.ok(!exposedParameters.includes("productId") && !exposedParameters.includes("product_id") && !exposedParameters.includes('"name"'));
-    const args = { title: "Argument review", opening_questions: [{ label: "Paste the argument to review.", required: true }, { label: "Who is the audience?", required: false }], promise: "Review an argument using its evidence.", skills: [{ path: "output/skills/review/SKILL.md", references: [{ path: "output/skills/review/references/evidence.md", kind: "method" }] }] };
-    const { title: _title, opening_questions: _questions, ...withoutStorefront } = args;
-    await assert.doesNotReject(upload.execute("publish-without-storefront", withoutStorefront));
+    const args = { skills: [{ path: "output/skills/review/SKILL.md", references: [{ path: "output/skills/review/references/evidence.md", kind: "method" }] }] };
+    assert.ok(!exposedParameters.includes("promise") && !exposedParameters.includes("opening_questions") && !exposedParameters.includes("title"));
     await upload.execute("publish", args);
     const saved = await store.get(session.id); assert.ok(saved.corpus);
     assert.equal(saved.corpus.product_id, productId);
@@ -62,14 +61,22 @@ test("Generation uploads canonical files through Registry and the existing Runti
     await materializeAgentCorpus(resolved.root, "Review this claim", [], resolved.runtimeDigest);
     assert.equal(resolved.corpus.skills[0]?.id, "review");
     const revisedPromise = "Turn a customer argument into a clear, evidence-based recommendation.";
-    await upload.execute("retry", { ...args, promise: revisedPromise });
+    await upload.execute("retry", args);
     assert.equal((await store.get(session.id)).corpus?.release_digest, saved.corpus.release_digest);
+    assert.equal(await store.read(session.id, "output/CORPUS.md").catch(() => null), null, "no receipt file is written");
+
+    const card = tools.find(t => t.name === "product_card")!;
+    const read = async (params: object) => JSON.parse((await card.execute("card", params) as { content: Array<{ text: string }> }).content[0]!.text) as { name: string; promise: string; opening_questions: Array<{ label: string; required: boolean }> };
+    assert.equal((await read({})).name, "Canonical definition test");
+    const questions = [{ label: "Paste the argument to review.", required: true }, { label: "Who is the audience?", required: false }];
+    assert.deepEqual(await read({ name: "Argument review", promise: revisedPromise, opening_questions: questions }), { name: "Argument review", promise: revisedPromise, opening_questions: questions });
+    assert.deepEqual(await read({ promise: "Second promise." }), { name: "Argument review", promise: "Second promise.", opening_questions: questions }, "omitted fields stay");
+    await read({ promise: revisedPromise });
     const revisedProduct = await registryRequest(env, `/v1/creator/products/${productId}`) as { product: { promise: string } };
     assert.equal(revisedProduct.product.promise, revisedPromise);
     const written = revisedProduct.product as unknown as { name: string; brief_spec: { fields: Array<{ id: string; label: string; required: boolean }> } };
     assert.equal(written.name, "Argument review");
     assert.deepEqual(written.brief_spec.fields, [{ id: "q1", label: "Paste the argument to review.", required: true }, { id: "q2", label: "Who is the audience?", required: false }]);
-    await assert.rejects(store.put(session.id, "output/CORPUS.md", Buffer.from("fake receipt"), { actor: "agent" }), /immutable/);
 
     // Completion over quality: a missing file or a broken Skill is skipped and reported to the Builder, never blocking.
     const lenient = await upload.execute("unknown-file", { ...args, skills: [...args.skills, { path: "output/skills/missing/SKILL.md", references: [] }] }) as { details?: unknown; content?: Array<{ text?: string }> };

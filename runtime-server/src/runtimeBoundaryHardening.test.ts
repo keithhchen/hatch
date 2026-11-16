@@ -439,7 +439,6 @@ test("global per-turn authorization capacity rejects N+1 without another Registr
     agentCorpusResolver: fixtureCorpusResolver(entitlement),
     maxPendingTurnAuthorizations: 2,
     maxActiveRunsGlobal: 10,
-    maxActiveRunsPerUser: 10,
     conversationRepository
   });
   const port = await listen(runtime);
@@ -506,7 +505,6 @@ test("per-user turn authorization capacity prevents one account from occupying t
     agentCorpusResolver: fixtureCorpusResolver(entitlement),
     maxPendingTurnAuthorizations: 4,
     maxPendingTurnAuthorizationsPerUser: 1,
-    maxActiveRunsPerUser: 4,
     conversationRepository
   });
   const port = await listen(runtime);
@@ -596,7 +594,7 @@ test("global active-run capacity rejects excess model work and releases on compl
   }
 });
 
-test("per-user active-run capacity preserves room for another account", async () => {
+test("one account may run several tasks at once: only the global capacity applies", async () => {
   let runCalls = 0;
   const runReleases: Array<() => void> = [];
   const agentRuntime: AgentRuntime = {
@@ -621,8 +619,7 @@ test("per-user active-run capacity preserves room for another account", async ()
         sub: token === "fair-run-token-three" ? "fair-run-other-account" : "fair-run-shared-account",
       })
     },
-    maxActiveRunsGlobal: 3,
-    maxActiveRunsPerUser: 1
+    maxActiveRunsGlobal: 3
   });
   const port = await listen(runtime);
   const first = await openSocket(port);
@@ -641,13 +638,12 @@ test("per-user active-run capacity preserves room for another account", async ()
 
     first.send(JSON.stringify(clientMessage("fair-run-first", "fair-run-conversation-first")));
     await waitUntil(() => runCalls === 1);
-    const sameUserRejected = waitForMessage(sameUser, (message) => message.run_id === "fair-run-same-user"
-      && (message.error as { code?: string } | undefined)?.code === "user_run_capacity");
+    // One account runs as many tasks at once as the Runtime has room for: no per-account cap.
     sameUser.send(JSON.stringify(clientMessage("fair-run-same-user", "fair-run-conversation-same-user")));
-    assert.equal(((await sameUserRejected).error as { code?: string }).code, "user_run_capacity");
+    await waitUntil(() => runCalls === 2);
 
     otherUser.send(JSON.stringify(clientMessage("fair-run-other-user", "fair-run-conversation-other-user")));
-    await waitUntil(() => runCalls === 2);
+    await waitUntil(() => runCalls === 3);
   } finally {
     for (const release of runReleases) release();
     first.close();
@@ -729,7 +725,6 @@ test("turn.cancel retains the conversation lease until an abort-ignoring Runtime
     conversationStore: store,
     conversationRepository: await seedLocalConversations(store, ["cancel-conversation-shared"]),
     maxActiveRunsGlobal: 4,
-    maxActiveRunsPerUser: 4
   });
   const port = await listen(runtime);
   const first = await openSocket(port);

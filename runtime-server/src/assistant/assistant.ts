@@ -163,7 +163,7 @@ export class AssistantService implements StudioOperations {
   constructor(private deps: AssistantDependencies) {
     deps.products.attachAssistant({
       // Publishing is the Assistant's tool, after the Expert confirms. A build it started has no way to go live.
-      withheldTools: async (_scope, session) => session.role === "generation" && (await this.deps.tasks.bySession(session.id))?.kind === "build" ? ["corpus_upload"] : [],
+      withheldTools: async (_scope, session) => session.role === "generation" && (await this.deps.tasks.bySession(session.id))?.kind === "build" ? ["corpus_upload", "product_card"] : [],
       opened: (scope, workspace) => this.observe(scope.creatorId, workspace),
     });
   }

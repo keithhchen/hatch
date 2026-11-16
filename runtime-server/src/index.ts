@@ -189,7 +189,6 @@ export type RuntimeServerOptions = {
   /** The token the channel layer presents to reach Chat from another process; without it that door stays shut. */
   chatServiceToken?: string;
   /** Pending and active runs admitted for one authenticated user. */
-  maxActiveRunsPerUser?: number;
   /** Pending and active runs admitted across the Runtime process. */
   maxActiveRunsGlobal?: number;
   /** Ping interval used to reap connections that no longer answer. */
@@ -351,7 +350,6 @@ export async function createRuntimeServerFromEnvironment(
     maxPendingTurnAuthorizations: config.maxPendingTurnAuthorizations,
     maxPendingTurnAuthorizationsPerUser: config.maxPendingTurnAuthorizationsPerUser,
     allowedOrigins: config.allowedOrigins,
-    maxActiveRunsPerUser: config.maxActiveRunsPerUser,
     maxActiveRunsGlobal: config.maxActiveRunsGlobal,
     maxSocketBufferedBytes: config.maxSocketBufferedBytes,
     maxConsumerBufferedBytes: config.maxConsumerBufferedBytes,
@@ -398,10 +396,6 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   const activeRunGate = new CapacityGate(
     options.maxActiveRunsGlobal ?? 16,
     "maxActiveRunsGlobal"
-  );
-  const activeRunPerUserGate = new KeyedCapacityGate(
-    options.maxActiveRunsPerUser ?? 2,
-    "maxActiveRunsPerUser"
   );
   const connectionHeartbeatMs = options.connectionHeartbeatMs ?? 30_000;
   if (!Number.isSafeInteger(connectionHeartbeatMs) || connectionHeartbeatMs < 1) {
@@ -502,12 +496,8 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     reserve(principal) {
       const releaseGlobal = activeRunGate.tryAcquire();
       if (!releaseGlobal) throw new ChatError("runtime_run_capacity", "Hatch is already running the maximum number of tasks. Try again shortly.", 503);
-      const releaseUser = activeRunPerUserGate.tryAcquire(principalKey(principal));
-      if (!releaseUser) {
-        releaseGlobal();
-        throw new ChatError("user_run_capacity", "This account already has the maximum number of pending or active tasks.", 429);
-      }
-      return once(combineCapacityReleases(releaseGlobal, releaseUser));
+      // No per-account cap: one account may run as many tasks at once as the Runtime has room for.
+      return once(releaseGlobal);
     }
   };
   const scopes: ScopeResolver<SessionBinding> = {

@@ -270,7 +270,7 @@ test("The Assistant's build runs the Product's builder, which cannot go live", a
     await env.say("熟客店菜单可以长");
     await waitFor(async () => (await env.productStore.list()).some(session => session.role === "generation") && (await env.tasks.open(ACCOUNT)).length === 0);
     assert.ok(toolNames.length > 0);
-    assert.ok(toolNames.every(names => !names.includes("corpus_upload")), "publishing stays with the Assistant");
+    assert.ok(toolNames.every(names => !names.includes("corpus_upload") && !names.includes("product_card")), "publishing stays with the Assistant");
     assert.deepEqual(env.applied, [], "a build changes nothing outward");
   } finally { await env.close(); }
 });

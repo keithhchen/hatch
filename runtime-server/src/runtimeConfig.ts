@@ -13,7 +13,6 @@ export type RuntimeConfig = {
   maxPendingTurnAuthorizations: number;
   maxPendingTurnAuthorizationsPerUser: number;
   maxActiveRunsGlobal: number;
-  maxActiveRunsPerUser: number;
   maxSocketBufferedBytes: number;
   maxConsumerBufferedBytes: number;
   connectionHeartbeatMs: number;
@@ -56,12 +55,6 @@ export function readRuntimeConfig(environment: NodeJS.ProcessEnv): RuntimeConfig
     "HATCH_RUNTIME_MAX_ACTIVE_RUNS_GLOBAL",
     environment.HATCH_RUNTIME_MAX_ACTIVE_RUNS_GLOBAL,
     16,
-    10_000
-  );
-  const maxActiveRunsPerUser = runtimeCapacityLimit(
-    "HATCH_RUNTIME_MAX_ACTIVE_RUNS_PER_USER",
-    environment.HATCH_RUNTIME_MAX_ACTIVE_RUNS_PER_USER,
-    2,
     10_000
   );
   const maxSocketBufferedBytes = runtimeCapacityLimit(
@@ -155,7 +148,6 @@ export function readRuntimeConfig(environment: NodeJS.ProcessEnv): RuntimeConfig
     maxPendingTurnAuthorizations,
     maxPendingTurnAuthorizationsPerUser,
     maxActiveRunsGlobal,
-    maxActiveRunsPerUser,
     maxSocketBufferedBytes,
     maxConsumerBufferedBytes,
     connectionHeartbeatMs,

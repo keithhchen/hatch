@@ -56,7 +56,6 @@ const CHAT_CODES: Record<string, { status: number; type: ErrorType; code: string
   unsupported_type: { status: 415, type: "invalid_request_error", code: "unsupported_file_type" },
   runtime_run_capacity: { status: 503, type: "service_unavailable", code: "service_unavailable", retryAfter: 5 },
   [USAGE_CAP_EXCEEDED]: { status: 429, type: "insufficient_quota", code: USAGE_CAP_EXCEEDED },
-  user_run_capacity: { status: 429, type: "rate_limit_error", code: "rate_limit_exceeded", retryAfter: 2 },
   authorization_busy: { status: 429, type: "rate_limit_error", code: "rate_limit_exceeded", retryAfter: 2 },
   user_authorization_busy: { status: 429, type: "rate_limit_error", code: "rate_limit_exceeded", retryAfter: 2 }
 };
