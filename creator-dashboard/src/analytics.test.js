@@ -11,6 +11,7 @@ const recorder = () => { const seen = []; return { seen, identify: (id) => seen.
 
 test("catalog functions return [name, props] tuples", () => {
   assert.deepEqual(events.studioStepOpened({ agentId: "a1", step: "build" }), ["studio_step_opened", { agent_id: "a1", step: "build" }]);
+  assert.deepEqual(events.studioStepOpened({ agentId: "a1", step: "ask" }), ["studio_step_opened", { agent_id: "a1", step: "interview" }], "named as the server names it");
   assert.deepEqual(events.videoPlayed({ videoId: "v", positionS: 1, durationS: 60 }), ["video_played", { video_id: "v", position_s: 1, duration_s: 60 }]);
   assert.deepEqual(events.askuserAnswered({ questions: 3, skipped: 1 }), ["askuser_answered", { questions: 3, skipped: 1 }]);
   assert.deepEqual(events.shareLinkCopied({ agentId: "a1", link: "chat" }), ["share_link_copied", { agent_id: "a1", link: "chat" }]);

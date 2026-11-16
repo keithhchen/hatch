@@ -1,7 +1,9 @@
 // The browser event catalog: the only place event names and property shapes are written.
 // Each function returns an AnalyticsEvent tuple for Analytics.track.
 export const signupStarted = ({ method }) => ["signup_started", { method }];
-export const studioStepOpened = ({ agentId, step }) => ["studio_step_opened", { agent_id: agentId, step }];
+// The rail's step ids, named as the server's events name them, so browser and server steps line up.
+const STEP_NAMES = { ask: "interview", ship: "publish" };
+export const studioStepOpened = ({ agentId, step }) => ["studio_step_opened", { agent_id: agentId, step: STEP_NAMES[step] ?? step }];
 export const videoPlayed = ({ videoId, positionS, durationS }) => ["video_played", { video_id: videoId, position_s: positionS, duration_s: durationS }];
 export const videoProgress = ({ videoId, percent }) => ["video_progress", { video_id: videoId, percent }];
 export const videoCompleted = ({ videoId, durationS }) => ["video_completed", { video_id: videoId, duration_s: durationS }];
