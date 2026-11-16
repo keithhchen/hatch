@@ -5,9 +5,10 @@ import type { RenderedReport, ReportRenderer } from "./ports.js";
 
 /** Pages after the first shown blurred under page 1 on the web. */
 export const PREVIEW_PAGES = 3;
-const PAGE_WIDTH_PX = 794; // A4 at 96 dpi
-const BLUR_SIGMA = 7;
-const PAGE_GAP_PX = 16;
+// A4 at 192 dpi: sharp on a phone or a retina screen, where the image is drawn at about 400–800 CSS pixels wide.
+const PAGE_WIDTH_PX = 1588;
+const BLUR_SIGMA = 14;
+const PAGE_GAP_PX = 32;
 const RENDER_TIMEOUT_MS = 120_000;
 
 const PRINT = { format: "A4", printBackground: true, preferCSSPageSize: true } as const;
@@ -66,7 +67,7 @@ export class ChromiumReportRenderer implements ReportRenderer {
     const width = Math.max(...sizes.map((s) => s.width ?? 0));
     let top = 0;
     const layers = shots.map((input, i) => { const layer = { input, top, left: 0 }; top += (sizes[i]!.height ?? 0) + PAGE_GAP_PX; return layer; });
-    return sharp({ create: { width, height: top - PAGE_GAP_PX, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).composite(layers).png().toBuffer();
+    return sharp({ create: { width, height: top - PAGE_GAP_PX, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).composite(layers).png({ compressionLevel: 9 }).toBuffer();
   }
 }
 
