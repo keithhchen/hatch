@@ -47,6 +47,7 @@ The document is printed to A4 PDF by Chromium. Design for paper:
 
 Calm, editorial, specific. It should look like a thoughtful advisor made it for this one family, not like a template or a dashboard.
 - One dark ink colour for text (near-black navy or charcoal), one accent hue used sparingly (rules, labels, small markers), and two or three very light tints of it for panels. No more colours. Accent on at most a tenth of the page.
+- The cover band is its own block at the top of page 1 and is at most half the page tall. Nothing else has a dark background: not `body`, not `main`, not a wrapper around the sections. Content after the cover sits on white paper, so a section that runs onto the next page never carries a dark edge with it.
 - The cover is the one bold moment: a full-width band in the dark colour or a restrained two-stop gradient of it, the title in white at 26–30pt, a short subtitle, a few small outlined chips with the key facts (for example grade, curriculum, target regions). Everything after it is quiet.
 - Build from a small set of components and reuse them consistently:
   - an "at a glance" strip of 3 tiles (label + one line each);
