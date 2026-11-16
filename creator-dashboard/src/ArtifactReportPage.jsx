@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { InlineAlert } from "@hatch/ui";
 import { Lock } from "lucide-react";
 import { useAnalytics } from "./analytics/AnalyticsProvider.jsx";
-import { reportViewed } from "./analytics/events.js";
+import { reportFileOpened, reportViewed } from "./analytics/events.js";
 import { formatElapsed, isWaiting } from "./artifactForm.js";
 import { WebChatEgg } from "./webChatGate.jsx";
 import { webChatErrorText } from "./webChatI18n.js";
@@ -95,7 +95,9 @@ export function ArtifactReportPage({ api, conversationId, productId, onDraft, de
           <ReportFrame src={api.reportFileUrl(conversationId, "free.html")} title={t("artifactReportTitle")} hideLocked />
           <figure className="artifact__preview">
             <img src={api.reportFileUrl(conversationId, "preview.png")} alt={t("artifactPreviewAlt")} />
-            <figcaption><Lock aria-hidden="true" />{t("artifactLocked")}</figcaption>
+            <figcaption>{report.files?.full_pdf
+              ? <a className="web-chat__button web-chat__button--yolk" href={api.reportFileUrl(conversationId, "full.pdf")} download onClick={() => analytics.track(reportFileOpened({ agentId: productId, name: "full.pdf" }))}><Lock aria-hidden="true" />{t("artifactUnlock")}</a>
+              : <><Lock aria-hidden="true" />{t("artifactLocked")}</>}</figcaption>
           </figure>
         </>}
     </> : null}

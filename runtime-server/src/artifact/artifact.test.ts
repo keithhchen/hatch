@@ -185,7 +185,7 @@ function fakeResponse() {
   return { res: res as unknown as http.ServerResponse, out };
 }
 
-test("a locked viewer never gets full.pdf; the unlocked viewer and the product owner do", async () => {
+test("a locked viewer gets the full PDF (payment is not live) but never the full HTML; the unlocked viewer and the owner get both", async () => {
   const { reports, artifact } = await mode();
   const c = conversation();
   await reports.create({ conversationId: c.id, productId: "p1", ownerAccountId: c.ownerAccountId });
@@ -204,12 +204,12 @@ test("a locked viewer never gets full.pdf; the unlocked viewer and the product o
   assert.equal((await get("/report/files/free.pdf", buyer)).status, 404, "nothing before ready");
   await turn.tools.run("publish_report", { html: good });
   const status = JSON.parse((await get("/report", buyer)).body.toString());
-  assert.deepEqual({ ...status, steps: undefined, started_at: undefined }, { status: "ready", unlocked: false, files: { free_pdf: true, free_html: true, preview: true, full_pdf: false, full_html: false }, stage: "ready", attempt: 1, steps: undefined, started_at: undefined });
+  assert.deepEqual({ ...status, steps: undefined, started_at: undefined }, { status: "ready", unlocked: false, files: { free_pdf: true, free_html: true, preview: true, full_pdf: true, full_html: false }, stage: "ready", attempt: 1, steps: undefined, started_at: undefined });
   const free = await get("/report/files/free.pdf", buyer);
   assert.equal(free.body.toString(), "%PDF-FREEPDF");
   assert.equal(free.headers["cache-control"], "private, no-store");
   assert.equal((await get("/report/files/preview.png", buyer)).headers["content-type"], "image/png");
-  assert.equal((await get("/report/files/full.pdf", buyer)).status, 403);
+  assert.equal((await get("/report/files/full.pdf", buyer)).body.toString(), "%PDF-FULLPDF", "until payment is live, unlock downloads the full PDF");
   assert.equal((await get("/report/files/full.html", buyer)).status, 403, "the full HTML is locked like the full PDF");
   const freeHtml = await get("/report/files/free.html", buyer);
   assert.equal(freeHtml.headers["content-type"], "text/html; charset=utf-8");
