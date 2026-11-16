@@ -79,37 +79,35 @@ test("the first message starts one Run even when it is sent twice; the report fo
   await w.chat.stop();
 });
 
-test("failed or ended without a report: three attempts with backoff on a fake clock, failed only after the last", async () => {
-  const w = await world(["fail", "complete", "fail"]);
+test("a Run that ends without a report is not a failure: the conversation continues 5 s later, up to 5 Runs; only the last end fails it", async () => {
+  const w = await world(["fail", "complete", "fail", "complete", "fail"]);
   await w.submit(w.conversation, "first", "run-1", "the form");
   await w.settled(1);
   let report = (await w.reports.get(w.id))!;
-  assert.deepEqual([report.status, report.stage, report.attempt, report.error], ["generating", "queued", 1, "model down"]);
-  assert.equal(report.retryAt, "2026-01-01T00:00:30.000Z");
+  assert.deepEqual([report.status, report.attempt, report.error], ["generating", 1, undefined], "still generating, no error shown");
+  assert.equal(report.retryAt, "2026-01-01T00:00:05.000Z");
   assert.equal(await w.retrier.tick(), 0, "not due yet");
 
-  // a late end of attempt 1 is a no-op for a newer attempt
-  w.clock.now = new Date("2026-01-01T00:00:30Z");
+  w.clock.now = new Date("2026-01-01T00:00:05Z");
   const [t1, t2] = await Promise.all([w.retrier.tick(), w.retrier.tick()]);
-  assert.equal(t1 + t2, 1, "two instances claim one attempt");
+  assert.equal(t1 + t2, 1, "two instances claim one continuation");
   await w.settled(2);
-  const attempt2 = (await w.reports.get(w.id))!;
-  assert.deepEqual([attempt2.status, attempt2.attempt], ["generating", 2]);
-  assert.equal(attempt2.error, "The agent finished without publishing a report.", "a Run that completed with no report is an attempt that failed");
-  assert.equal(attempt2.retryAt, "2026-01-01T00:02:30.000Z");
+  const second = (await w.reports.get(w.id))!;
+  assert.deepEqual([second.status, second.attempt, second.error], ["generating", 2, undefined]);
   await w.artifact.lifecycle.runEnded({ id: "run-1" }, { status: "failed", failure: { code: "x", message: "late" } } as never);
-  assert.deepEqual((await w.reports.get(w.id))?.error, attempt2.error, "an older attempt's end changes nothing");
+  assert.equal((await w.reports.get(w.id))?.retryAt, second.retryAt, "an older Run's end changes nothing");
 
-  w.clock.now = new Date("2026-01-01T00:01:30Z");
-  assert.equal(await w.retrier.tick(), 0, "the second backoff is two minutes");
-  w.clock.now = new Date("2026-01-01T00:02:30Z");
-  assert.equal(await w.retrier.tick(), 1);
-  await w.settled(3);
+  for (const [n, at] of [[3, "00:00:10"], [4, "00:00:15"], [5, "00:00:20"]] as const) {
+    w.clock.now = new Date(`2026-01-01T${at}Z`);
+    assert.equal(await w.retrier.tick(), 1, `Run ${n} continues the conversation`);
+    await w.settled(n);
+  }
   report = (await w.reports.get(w.id))!;
-  assert.deepEqual([report.status, report.stage, report.attempt, report.error, report.retryAt], ["failed", "failed", 3, "model down", undefined]);
+  assert.deepEqual([report.status, report.stage, report.attempt, report.error, report.retryAt], ["failed", "failed", 5, "model down", undefined]);
   assert.equal(w.analytics.names().filter((n) => n === "report_failed").length, 1);
+  w.clock.now = new Date("2026-01-01T01:00:00Z");
   assert.equal(await w.retrier.tick(), 0, "nothing more to start");
-  assert.equal(w.runs.length, 3);
+  assert.equal(w.runs.length, 5);
   await w.chat.stop();
 });
 

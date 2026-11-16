@@ -33,9 +33,13 @@ export type ReportStage = "queued" | "reading" | "consulting" | "researching" | 
 export type ReportKeys = { fullHtml: string; freeHtml: string; fullPdf: string; freePdf: string; preview: string };
 export type ReportStep = { at: string; stage: ReportStage; detail?: string };
 export const MAX_REPORT_STEPS = 20;
-export const MAX_REPORT_ATTEMPTS = 3;
-/** Wait before attempt 2 and before attempt 3. */
-export const RETRY_BACKOFF_MS = [30_000, 120_000] as const;
+/**
+ * A report is up to this many Runs of one conversation. A Run that ends without publishing is not a failure: the
+ * conversation simply continues with the next Run, shortly after. Only the last Run's end fails the report.
+ */
+export const MAX_REPORT_ATTEMPTS = 5;
+/** The pause before the next Run continues the conversation. */
+export const CONTINUE_DELAY_MS = 5_000;
 
 export type ReportRecord = {
   conversationId: string;

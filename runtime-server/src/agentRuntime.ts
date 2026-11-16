@@ -806,7 +806,7 @@ export function buildRuntimeSystemPrompt(
   const activityMessageInstructions = "Write an activity_message on every tool call: one line of progress for the user, in the user's language, starting with a verb and no subject, saying what this step helps them find out or move forward; do not mention means such as tools, files, paths or queries, do not repeat the previous one, and do not state progress the results have not yet confirmed.";
   return [
     ownPrompt ? "" : REPLY_STYLE_PROMPT,
-    PRODUCT_IDENTITY_PROMPT,
+    ownPrompt ? "" : PRODUCT_IDENTITY_PROMPT,
     prompt,
     skillsSection ? skillCatalogPromptBlock(skillsSection) : "",
     briefSnapshot ? briefSnapshotPromptBlock(briefSnapshot) : "",

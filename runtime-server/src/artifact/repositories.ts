@@ -1,5 +1,5 @@
 import type { PostgresQueryExecutor } from "../postgresStore.js";
-import { MAX_REPORT_ATTEMPTS, MAX_REPORT_STEPS, RETRY_BACKOFF_MS, type ReportKeys, type ReportRecord, type ReportRepository, type ReportStage, type ReportStep } from "./ports.js";
+import { CONTINUE_DELAY_MS, MAX_REPORT_ATTEMPTS, MAX_REPORT_STEPS, type ReportKeys, type ReportRecord, type ReportRepository, type ReportStage, type ReportStep } from "./ports.js";
 
 export const POSTGRES_ARTIFACT_REPORT_SCHEMA = `
 CREATE TABLE IF NOT EXISTS hatch_artifact_reports (
@@ -36,8 +36,6 @@ const restore = (row: Row | undefined): ReportRecord | undefined => row && {
   ...(row.unlocked_at ? { unlockedAt: iso(row.unlocked_at) } : {}), ...(row.retry_at ? { retryAt: iso(row.retry_at) } : {})
 };
 
-const BACKOFF = [...RETRY_BACKOFF_MS];
-const backoffMs = (attempt: number) => BACKOFF[Math.min(attempt, BACKOFF.length) - 1]!;
 
 export class PostgresReportRepository implements ReportRepository {
   constructor(private readonly db: PostgresQueryExecutor) {}
@@ -99,11 +97,11 @@ export class PostgresReportRepository implements ReportRepository {
     return this.one(
       `UPDATE hatch_artifact_reports SET
          status = CASE WHEN attempt >= $3 THEN 'failed' ELSE 'generating' END,
-         stage = CASE WHEN attempt >= $3 THEN 'failed' ELSE 'queued' END,
-         error = $2,
-         retry_at = CASE WHEN attempt >= $3 THEN NULL ELSE $4::timestamptz + (CASE WHEN attempt = 1 THEN $5::int ELSE $6::int END) * interval '1 millisecond' END
+         stage = CASE WHEN attempt >= $3 THEN 'failed' ELSE stage END,
+         error = CASE WHEN attempt >= $3 THEN $2 ELSE NULL END,
+         retry_at = CASE WHEN attempt >= $3 THEN NULL ELSE $4::timestamptz + $5::int * interval '1 millisecond' END
        WHERE run_id = $1 AND status IN ('draft', 'generating') RETURNING *`,
-      [runId, reason, MAX_REPORT_ATTEMPTS, now, backoffMs(1), backoffMs(2)]);
+      [runId, reason, MAX_REPORT_ATTEMPTS, now, CONTINUE_DELAY_MS]);
   }
 
   async due(now: Date) {
@@ -162,7 +160,8 @@ export class InMemoryReportRepository implements ReportRepository {
     const row = [...this.rows.values()].find((r) => r.runId === runId);
     if (!row || (row.status !== "draft" && row.status !== "generating")) return undefined;
     if (row.attempt >= MAX_REPORT_ATTEMPTS) { const { retryAt: _retryAt, ...rest } = row; return this.put({ ...rest, status: "failed", stage: "failed", error: reason }); }
-    return this.put({ ...row, status: "generating", stage: "queued", error: reason, retryAt: new Date(now.getTime() + backoffMs(row.attempt)).toISOString() });
+    const { error: _error, ...rest } = row;
+    return this.put({ ...rest, status: "generating", retryAt: new Date(now.getTime() + CONTINUE_DELAY_MS).toISOString() });
   }
   async due(now: Date) {
     return [...this.rows.values()].filter((r) => r.status === "generating" && r.retryAt && Date.parse(r.retryAt) <= now.getTime()).map((r) => ({ conversationId: r.conversationId, attempt: r.attempt }));

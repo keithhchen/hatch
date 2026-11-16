@@ -18,4 +18,4 @@ export async function artifactPrompt(config: ArtifactConfig): Promise<string> {
 }
 
 /** What a new attempt is told: the form is already in the conversation, and so is whatever the earlier attempt did. */
-export const ARTIFACT_RETRY_MESSAGE = "The earlier attempt ended before the report was published. Your files under /report/ are kept: list them with ls /report/, continue the report from where it stopped, proofread it and call publish_report.";
+export const ARTIFACT_RETRY_MESSAGE = "Continue. The report is not published yet. Your files under /report/ are as you left them: check them with ls /report/, carry on from where you stopped, proofread, and call publish_report.";

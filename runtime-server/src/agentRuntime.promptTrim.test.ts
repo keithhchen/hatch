@@ -18,3 +18,8 @@ test("a Studio run drops hatch_web_search; other runs keep it", () => {
   assert.ok(names([]).includes("hatch_web_search"));
   assert.ok(!names(["studio.search_web"]).includes("hatch_web_search"));
 });
+
+test("the product identity line is for product prompts only; an own prompt (Studio Assistant) keeps its own identity", () => {
+  assert.match(buildRuntimeSystemPrompt("Expert prompt"), /you are this product/);
+  assert.doesNotMatch(buildRuntimeSystemPrompt("You are Hatch Studio", undefined, undefined, [], "", true), /you are this product/);
+});
