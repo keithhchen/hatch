@@ -106,7 +106,9 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     baseUrl: "https://api.moonshot.cn/v1",
     apiKeyEnv: "LLM_API_KEY",
     endpointEnv: "OPENAI_BASE_URL",
-    contextWindow: 262_144,
+    // Moonshot's /v1/models reports context_length 1,048,576 (checked 2026-11-16). A smaller number here clamps the
+    // output allowance to the window: past 258k the model was left one token to answer and stopped with "length".
+    contextWindow: 1_048_576,
     maxTokens: 32_768,
     reasoning: true,
     thinkingLevel: "low",
