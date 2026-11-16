@@ -1,6 +1,7 @@
 import { studioMessageSent, studioStep } from "../analytics/events.js";
 import type { ProductAnalytics } from "../analytics/port.js";
 import { safely } from "../analytics/safe.js";
+import { TimeZoneSchema } from "../protocol.js";
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -129,7 +130,7 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
         const id = match[1]!; const action = match[2] ?? "";
         if (!action && req.method === "GET") { const session = await store.get(id); const from = messagesFrom(session.messages, url.searchParams); return json(res, 200, { ...publicSession(session), messages: session.messages.slice(from), messagesFrom: from, agent: (await entries()).find(entry => entry.role === session.role), files: await store.contextFiles(id) }); }
         if (action === "prompt" && req.method === "GET") return json(res, 200, { content: await runtime.prompt((await store.get(id)).role) });
-        if (action === "message" && req.method === "POST") { const session = await store.get(id); await assertRoleAvailable(session.role); const b = z.object({ content: z.string().min(1).max(100000) }).parse(await body(req)); const key = idempotencyKey(req.headers["idempotency-key"]); if (key === undefined) await runtime.start(id, b.content); if (key === undefined || await sendOnce(id, key, b.content)) expertSpoke(session.role); return json(res, 202, { accepted: true }); }
+        if (action === "message" && req.method === "POST") { const session = await store.get(id); await assertRoleAvailable(session.role); const b = z.object({ content: z.string().min(1).max(100000), time_zone: TimeZoneSchema.optional().catch(undefined) }).parse(await body(req)); runtime.rememberTimeZone(id, b.time_zone); const key = idempotencyKey(req.headers["idempotency-key"]); if (key === undefined) await runtime.start(id, b.content); if (key === undefined || await sendOnce(id, key, b.content)) expertSpoke(session.role); return json(res, 202, { accepted: true }); }
         if (action === "stop" && req.method === "POST") { await body(req); await runtime.stop(id); return json(res, 202, { requested: true }); }
         if (action === "files" && req.method === "POST") {
           const b = z.object({ path: z.string(), base64: z.string(), mimeType: z.string().optional() }).parse(await body(req));

@@ -152,7 +152,7 @@ export class FactoryConnection extends RuntimeConnection {
 
   async send({ runId, clientMessageId, content = "" }) {
     this.transport.bind(runId);
-    await this.transport.request(`${this.transport.base}/message`, { method: "POST", headers: { "Idempotency-Key": clientMessageId }, body: JSON.stringify({ content }) });
+    await this.transport.request(`${this.transport.base}/message`, { method: "POST", headers: { "Idempotency-Key": clientMessageId }, body: JSON.stringify({ content, time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone }) });
     this.onEvent({ type: "message.accepted", conversation_id: this.conversationId, run_id: runId, client_message_id: clientMessageId, outcome: "started" });
   }
 

@@ -17,6 +17,7 @@ import { reviewAnswers } from "../formPages/reviewFile.js";
 import { provideFormReference } from "../formPages/tools.js";
 import { fileTools } from "./tools.js";
 import { traceAgentTools, withLangfuseTurn, type LangfuseTurnIdentifiers } from "../langfuse.js";
+import { clientLocalTime } from "../agentRuntime.js";
 import { renderSystemReminder, type ClientAttributes } from "../surfaces/contract.js";
 import type { Journal } from "./journal.js";
 import { declareTools, studioToolSupport, type ClientSupport } from "./toolSurface.js";
@@ -91,6 +92,8 @@ export class WorkbenchRuntime {
   private readonly strategies = new Map<string, CompactionStrategy<AgentMessage>>();
   /** The client of the latest message of each running conversation. */
   private clients = new Map<string, ClientAttributes>();
+  /** The browser's IANA time zone of the latest message that sent one; UTC when none did. */
+  private timeZones = new Map<string, string>();
   private closing = false;
   private readonly env: NodeJS.ProcessEnv;
   constructor(readonly store: WorkbenchStore, private options: WorkbenchRuntimeOptions) {
@@ -125,6 +128,7 @@ export class WorkbenchRuntime {
     const scope = this.store.scope;
     if (scope) safely(this.options.analytics).capture(scope.creatorId, event(scope.productId));
   }
+  rememberTimeZone(id: string, timeZone: string | undefined): void { if (timeZone) this.timeZones.set(id, timeZone); }
   private clientOf(id: string): ClientAttributes { return this.clients.get(id) ?? WEB; }
   emit(id: string, type: string, data: Record<string, unknown> = {}): void {
     const event = { sessionId: id, type, ...data };
@@ -420,6 +424,7 @@ export class WorkbenchRuntime {
       if (ended === "completed") this.scheduleBackground(id);
       this.runIds.delete(id);
       this.clients.delete(id);
+      this.timeZones.delete(id);
       this.delivered.delete(id);
       this.emit(id, "run_end", { status: ended, ...(failure ? { error: failure } : {}) });
       this.emit(id, "state");
@@ -451,7 +456,7 @@ export class WorkbenchRuntime {
           const hydrated = await hydrateImages(current, async file => (await this.store.read(id, file)).bytes);
           if (channel !== "visible") return hydrated;
           // After all history, rebuilt for every call and never stored: the cached prefix stays intact.
-          const tail = renderSystemReminder(this.clientOf(id));
+          const tail = renderSystemReminder(this.clientOf(id), clientLocalTime(new Date(), this.timeZones.get(id)));
           return [...hydrated, { role: "user" as const, content: tail, timestamp: Date.now() }];
         };
         const effective = [...replaced, ...messages.slice(base)];

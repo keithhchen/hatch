@@ -27,8 +27,8 @@ export function normalizeClientAttributes(raw: { client: string; device?: unknow
 }
 
 /** Appended after all history on each model call and never persisted, so the cached prefix survives. */
-export function renderSystemReminder(attributes: ClientAttributes): string {
-  const lines = (["client", "device", "locale", "language"] as const).flatMap(key => attributes[key] ? [`${key}: ${attributes[key]}`] : []);
+export function renderSystemReminder(attributes: ClientAttributes, time?: string): string {
+  const lines = [...(time ? [`Current time: ${time}`] : []), ...(["client", "device", "locale", "language"] as const).flatMap(key => attributes[key] ? [`${key}: ${attributes[key]}`] : [])];
   return `<system-reminder>\n${lines.join("\n")}\n</system-reminder>`;
 }
 

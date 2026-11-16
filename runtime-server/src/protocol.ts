@@ -39,7 +39,7 @@ export const MAX_ERROR_MESSAGE_CHARS = 16 * 1024;
 export const TASK_START_MESSAGE_CONTENT = "<system-reminder>\n这条消息由系统发出，不是用户写的。\n开始 Brief 里描述的任务。\n</system-reminder>";
 const ProtocolIdSchema = z.string().min(1).max(MAX_PROTOCOL_ID_CHARS);
 /** The client's IANA time zone (browser `Intl` resolved zone), e.g. "Asia/Tokyo". */
-const TimeZoneSchema = z.string().min(1).max(64).refine((zone) => {
+export const TimeZoneSchema = z.string().min(1).max(64).refine((zone) => {
   try {
     new Intl.DateTimeFormat("en", { timeZone: zone });
     return true;
