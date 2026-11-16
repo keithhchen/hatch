@@ -57,3 +57,39 @@ export const withFinishGuard = (inner: StreamFn, check: { toolArguments?: boolea
   });
   return out;
 };
+
+/**
+ * Gemini sometimes names a call `<something>:<tool>` (seen: `default_grep_fallback:creator_grep`). When the part after the
+ * last colon is a tool this request declared, that is the tool it meant; any other name is left for the Agent to refuse.
+ */
+export const withToolNameRepair = (inner: StreamFn): StreamFn => (model, context, options) => {
+  const source = inner(model, context, options) as ReturnType<typeof createAssistantMessageEventStream>;
+  const declared = new Set((context.tools ?? []).map((tool) => tool.name));
+  const repair = (block: unknown) => {
+    const call = block as { type?: string; name?: unknown } | undefined;
+    if (call?.type !== "toolCall" || typeof call.name !== "string" || declared.has(call.name) || !call.name.includes(":")) return;
+    const meant = call.name.slice(call.name.lastIndexOf(":") + 1);
+    if (declared.has(meant)) call.name = meant;
+  };
+  const out = createAssistantMessageEventStream();
+  void (async () => {
+    for await (const event of source) {
+      const e = event as { toolCall?: unknown; partial?: { content?: unknown[] }; message?: { content?: unknown[] }; error?: { content?: unknown[] } };
+      repair(e.toolCall);
+      for (const holder of [e.partial, e.message, e.error]) for (const block of holder?.content ?? []) repair(block);
+      out.push(event);
+    }
+    out.end();
+  })().catch((error) => {
+    out.push({
+      type: "error", reason: "error",
+      error: {
+        role: "assistant", content: [], api: model.api, provider: model.provider, model: model.id,
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+        stopReason: "error", errorMessage: error instanceof Error ? error.message : String(error), timestamp: Date.now()
+      }
+    });
+    out.end();
+  });
+  return out;
+};

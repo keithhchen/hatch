@@ -3,7 +3,7 @@ import { googleGenerativeAIApi } from "@earendil-works/pi-ai/api/google-generati
 import type { SimpleStreamOptions } from "@earendil-works/pi-ai";
 import type { LlmProfile } from "../llmProfiles.js";
 import { traceProviderStream } from "../langfuse.js";
-import { withFinishGuard } from "./finish.js";
+import { withFinishGuard, withToolNameRepair } from "./finish.js";
 import {
   resolveOptions,
   type AdapterOptions,
@@ -55,7 +55,7 @@ export class GeminiAdapter implements ModelAdapter {
         reasoning: options?.reasoning ?? config.thinkingLevel,
         timeoutMs: options?.timeoutMs ?? config.timeoutMs
       };
-      return withFinishGuard((m, c, o) => traceProviderStream(() => api.streamSimple(m, c, o), m, c, o))(model, context, streamOptions);
+      return withToolNameRepair(withFinishGuard((m, c, o) => traceProviderStream(() => api.streamSimple(m, c, o), m, c, o)))(model, context, streamOptions);
     };
   }
 }

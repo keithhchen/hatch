@@ -91,3 +91,21 @@ test("Factory K3.1 request has reasoning_effort low and no thinking field, with 
   assert.equal("temperature" in body, false);
   assert.equal("max_tokens" in body, false);
 });
+
+test("a Gemini call named <prefix>:<declared tool> is the declared tool; other names are left alone", async () => {
+  const { withToolNameRepair } = await import("./finish.js");
+  const { createAssistantMessageEventStream } = await import("@earendil-works/pi-ai");
+  const block = (name: string) => ({ type: "toolCall", id: "1", name, arguments: {} });
+  const inner = (() => {
+    const s = createAssistantMessageEventStream();
+    queueMicrotask(() => {
+      s.push({ type: "done", reason: "toolUse", message: { content: [block("default_grep_fallback:creator_grep"), block("nope:unknown"), block("creator_read")] } } as never);
+      s.end();
+    });
+    return s;
+  }) as never;
+  const out = withToolNameRepair(inner)({} as never, { tools: [{ name: "creator_grep" }, { name: "creator_read" }] } as never, {} as never) as AsyncIterable<{ message?: { content: Array<{ name: string }> } }>;
+  const names: string[] = [];
+  for await (const event of out) names.push(...(event.message?.content ?? []).map((b) => b.name));
+  assert.deepEqual(names, ["creator_grep", "nope:unknown", "creator_read"]);
+});

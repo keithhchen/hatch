@@ -79,6 +79,14 @@ export class ServerToolExecutor {
       return result;
     }
 
+    // A report Run searches through its own configured provider, whichever search tool name the model picked.
+    if (this.artifact && (name === "web.search" || name === "hatch.web_search")) {
+      const query = String(parsedArgs.query ?? "");
+      const result = await this.artifact.run("web_search", { query, objective: String(parsedArgs.objective ?? query) }, requestSignal);
+      assertBoundedJsonValue(result);
+      return result;
+    }
+
     if (name.startsWith("attachments.")) {
       if (!this.attachments) throw new Error("This conversation has no attachments service.");
       const output = await this.attachments.run(name.slice("attachments.".length), parsedArgs);
