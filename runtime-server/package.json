@@ -36,6 +36,7 @@
     "parse5": "^7.3.0",
     "pdf-parse": "^2.4.5",
     "pg": "^8.22.0",
+    "playwright-core": "1.62.1",
     "posthog-node": "^5.74.0",
     "sharp": "^0.34.5",
     "ws": "^8.18.0",

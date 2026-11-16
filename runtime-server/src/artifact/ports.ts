@@ -2,7 +2,7 @@
 
 export type RenderedReport = { fullPdf: Buffer; freePdf: Buffer; preview: Buffer /* PNG */ };
 
-/** Turns the report's HTML into its PDFs and a blurred preview. Adapters: Kimi Hosted Agents; tests use a double. */
+/** Turns the report's HTML into its PDFs and a blurred preview. Adapter: headless Chromium in the Runtime; tests use a double. */
 export interface ReportRenderer {
   render(input: { fullHtml: string; freeHtml: string }, signal?: AbortSignal): Promise<RenderedReport>;
 }

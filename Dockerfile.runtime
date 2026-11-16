@@ -51,6 +51,14 @@ RUN chmod 755 /usr/local/bin/yt-dlp
 
 COPY --from=dependencies /workspace/runtime-server/package.json ./package.json
 COPY --from=production-dependencies /workspace/runtime-server/node_modules ./node_modules
+
+# Report mode prints its HTML to PDF with headless Chromium in the Runtime: the shell Playwright pins, its system
+# libraries, and CJK fonts so Chinese and Japanese reports print with real glyphs. The build fails if it cannot install.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends fonts-noto-cjk \
+  && node node_modules/playwright-core/cli.js install --with-deps chromium-headless-shell \
+  && rm -rf /var/lib/apt/lists/*
 COPY --from=build /workspace/runtime-server/dist ./dist
 COPY runtime-server/scripts/convert_to_markdown.py ./scripts/convert_to_markdown.py
 COPY --from=local-runner-build /workspace/local-runner/target/release/hatch-local-runner /usr/local/bin/hatch-local-runner
@@ -59,7 +67,7 @@ COPY runtime-server/scripts/transfer-creator-product.mjs ./scripts/transfer-crea
 COPY desktop-app/package.json /app/desktop-app/package.json
 COPY desktop-app/src/renderer/conversation-client.js /app/desktop-app/src/renderer/
 COPY runtime-server/skills ./skills
-# Hosted ingest uploads this skill to the hosted agent; ingestAgent.ts resolves it next to dist.
+# Hosted ingest uploads its skill to the hosted agent; ingestAgent.ts resolves it next to dist.
 COPY runtime-server/hosted-skills ./hosted-skills
 COPY scripts/create-agent-zip.mjs ./scripts/create-agent-zip.mjs
 

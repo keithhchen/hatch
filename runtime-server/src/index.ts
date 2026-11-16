@@ -61,7 +61,7 @@ import { ARTIFACT_RETRY_MESSAGE } from "./artifact/prompt.js";
 import { openArtifactMode } from "./artifact/open.js";
 import type { ArtifactMode } from "./artifact/mode.js";
 import { artifactToolDefinitions } from "./artifact/toolDefinitions.js";
-import { createHostedReportRenderer } from "./hostedAgents/reportRenderer.js";
+import { ChromiumReportRenderer } from "./artifact/chromiumRenderer.js";
 import { configuredSearch } from "./factoryAgents/search.js";
 import { attachmentToolDefinitions } from "./chat/attachmentTools.js";
 import { failRun, runModelTurn } from "./chat/modelTurn.js";
@@ -307,7 +307,7 @@ export async function createRuntimeServerFromEnvironment(
     : undefined;
   // Report files live beside chat assets. The hosted renderer says "not configured" itself when it has no key.
   const artifact = conversationStore instanceof PostgresStore && chatAssets
-    ? await openArtifactMode({ pool: conversationStore.pool, blobs: chatBlobs!, assets: chatAssets, renderer: createHostedReportRenderer(environment), analytics, search: configuredSearch(environment) })
+    ? await openArtifactMode({ pool: conversationStore.pool, blobs: chatBlobs!, assets: chatAssets, renderer: new ChromiumReportRenderer(), analytics, search: configuredSearch(environment) })
     : undefined;
   // The Files API stores an account's files in the same database; without one it answers 501.
   const accountFiles = conversationStore instanceof PostgresStore ? new PostgresAccountFiles(conversationStore.pool as never, Number(environment.HATCH_ACCOUNT_FILES_QUOTA_BYTES) || DEFAULT_ACCOUNT_FILES_QUOTA_BYTES) : undefined;
