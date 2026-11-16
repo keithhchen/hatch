@@ -483,10 +483,11 @@ async function pdfToMarkdown(bytes: Buffer): Promise<string> {
   // DOMMatrix at module load in that case. Provide the tiny affine surface
   // needed by the text-only path so PDF upload does not depend on canvas.
   const globalScope = globalThis as typeof globalThis & { DOMMatrix?: unknown };
+  // Where the canvas binding exists, use its real DOMMatrix: pdf.js decides at load, and report mode renders pages in this process.
   if (!globalScope.DOMMatrix) Object.defineProperty(globalThis, "DOMMatrix", {
     configurable: true,
     writable: true,
-    value: TextOnlyDOMMatrix
+    value: (await import("@napi-rs/canvas").catch(() => undefined))?.DOMMatrix ?? TextOnlyDOMMatrix
   });
   const { PDFParse } = await import("pdf-parse");
   const parser = new PDFParse({ data: new Uint8Array(bytes) });

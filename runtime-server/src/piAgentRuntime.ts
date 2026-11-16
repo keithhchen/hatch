@@ -324,9 +324,11 @@ export class PiAgentRuntime implements AgentRuntime {
           // transcript, so the reminder is never stored or repeated in history.
           piUserMessage([
             ...(live ? [live] : []),
-            ctx.clientAttributes
-              ? `${runtimeReplyReminder(new Date(), input.time_zone)}\n${renderSystemReminder(ctx.clientAttributes())}`
-              : runtimeReplyReminder(new Date(), input.time_zone)
+            ctx.turnReminder
+              ? ctx.turnReminder(new Date())
+              : ctx.clientAttributes
+                ? `${runtimeReplyReminder(new Date(), input.time_zone)}\n${renderSystemReminder(ctx.clientAttributes())}`
+                : runtimeReplyReminder(new Date(), input.time_zone)
           ].join("\n"))
         ];
       }
@@ -468,12 +470,14 @@ export class PiAgentRuntime implements AgentRuntime {
         ensureNotCancelled(ctx);
         if (signal?.aborted) throw new Error("Tool execution aborted");
         const { toolArguments } = separateActivityMessage(args as Record<string, unknown>);
-        if (toolCallBudget.used >= MAX_TOOL_CALLS_PER_RUN) {
+        const limit = ctx.toolCallLimit?.max ?? MAX_TOOL_CALLS_PER_RUN;
+        const counted = !ctx.toolCallLimit?.uncounted.includes(definition.function.name);
+        if (counted && toolCallBudget.used >= limit) {
           const result = {
             status: "error",
             error: {
               code: "tool_call_limit_exceeded",
-              message: `本次回复的工具调用次数已达到 ${MAX_TOOL_CALLS_PER_RUN} 次上限。请整理已收集的证据；证据不足时说明不确定之处，再作答。`
+              message: `本次回复的工具调用次数已达到 ${limit} 次上限。请整理已收集的证据；证据不足时说明不确定之处，再作答。`
             }
           };
           const modelResult = modelVisibleToolResult(definition.function.name, result);
@@ -482,7 +486,7 @@ export class PiAgentRuntime implements AgentRuntime {
             details: boundToolResult(stripBinaryToolPayload(modelResult))
           };
         }
-        toolCallBudget.used += 1;
+        if (counted) toolCallBudget.used += 1;
         const result = await executeChatTool(
           input,
           ctx,

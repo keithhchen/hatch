@@ -1,5 +1,6 @@
 import { requireTool } from "./tools.js";
 import type { RuntimeCreatorTool } from "./creatorTools.js";
+import type { ToolOutput } from "./assets/toolOutput.js";
 import { assertBoundedJsonValue, readBoundedJsonObject, readBoundedResponseText } from "./boundedResponse.js";
 
 type McpServerConfig = {
@@ -7,7 +8,7 @@ type McpServerConfig = {
   headers?: Record<string, string>;
 };
 
-type AttachmentRunner = { run(name: string, args: unknown): Promise<string> };
+type AttachmentRunner = { run(name: string, args: unknown): Promise<ToolOutput> };
 /** A host's own tools, already bound to the conversation they serve: a call never names whose data it touches. */
 export type HostToolRunner = { run(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown>> };
 
@@ -15,6 +16,8 @@ export class ServerToolExecutor {
   private resolvedCreatorTools = new Map<string, RuntimeCreatorTool>();
   private attachments?: AttachmentRunner;
   private studio?: HostToolRunner;
+  private artifact?: HostToolRunner;
+  private observer?: (name: string, args: Record<string, unknown>) => void;
 
   constructor(private readonly timeoutMs = 120000) {}
 
@@ -28,6 +31,16 @@ export class ServerToolExecutor {
     this.studio = runner;
   }
 
+  /** Hears every server tool call of the turn, as it starts: what a progress display is built from. */
+  observe(listener: ((name: string, args: Record<string, unknown>) => void) | undefined): void {
+    this.observer = listener;
+  }
+
+  /** The report tools of an artifact conversation (`artifact.*`). */
+  setArtifact(runner: HostToolRunner | undefined): void {
+    this.artifact = runner;
+  }
+
   setResolvedCreatorTools(tools: RuntimeCreatorTool[] = []): void {
     this.resolvedCreatorTools = new Map(tools.map((tool) => [tool.id, tool]));
   }
@@ -37,6 +50,7 @@ export class ServerToolExecutor {
     args: Record<string, unknown>,
     signal?: AbortSignal
   ): Promise<Record<string, unknown>> {
+    this.observer?.(`creator.${tool.id}`, args);
     const resolved = this.resolvedCreatorTools.get(tool.id);
     if (!resolved) throw new Error(`Creator tool is not resolved by the Registry Control Plane: ${tool.id}`);
     const result = await resolved.execute(args, boundedSignal(signal, this.timeoutMs));
@@ -55,11 +69,15 @@ export class ServerToolExecutor {
     }
 
     const parsedArgs = tool.schema.parse(args) as Record<string, unknown>;
+    this.observer?.(name, parsedArgs);
     const requestSignal = boundedSignal(signal, this.timeoutMs);
 
     if (name.startsWith("attachments.")) {
       if (!this.attachments) throw new Error("This conversation has no attachments service.");
-      const result = { output: await this.attachments.run(name.slice("attachments.".length), parsedArgs) };
+      const output = await this.attachments.run(name.slice("attachments.".length), parsedArgs);
+      // An image rides beside the text in the shape the model layer already turns into an image block.
+      const result = typeof output === "string" ? { output }
+        : { output: output.text, ...output.image ? { content_type: "image", mime_type: output.image.mimeType, data_base64: output.image.data } : {} };
       assertBoundedJsonValue(result);
       return result;
     }
@@ -67,6 +85,14 @@ export class ServerToolExecutor {
     if (name.startsWith("studio.")) {
       if (!this.studio) throw new Error("This conversation has no Studio tools.");
       const result = await this.studio.run(name.slice("studio.".length), parsedArgs, requestSignal);
+      assertBoundedJsonValue(result);
+      return result;
+    }
+
+    if (name.startsWith("artifact.")) {
+      if (!this.artifact) throw new Error("This conversation has no report tools.");
+      // The tool sets its own deadline: publishing renders PDFs, which takes longer than a network call.
+      const result = await this.artifact.run(name.slice("artifact.".length), parsedArgs, signal);
       assertBoundedJsonValue(result);
       return result;
     }

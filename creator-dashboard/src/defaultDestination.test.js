@@ -34,7 +34,7 @@ test("retired /home and /library go to /studio; /orders stays under /explore", (
 test("every brand logo links to /", () => {
   assert.match(buyer, /className=\{?"?buyer-v2__brand"?[^>]*to="\/"/);
   assert.match(buyer, /className=\{authBrandClassName\} to="\/"/);
-  assert.match(read("WebChatPage.jsx"), /<WebBrand href="\/" className="web-chat__brand"/);
+  assert.match(read("WebChatShell.jsx"), /<WebBrand href="\/" className="web-chat__brand"/);
   assert.match(read("DevelopersPage.jsx"), /<WebBrand className="developers-page__brand" href="\/"/);
   assert.match(read("DownloadPage.jsx"), /<WebBrand className="download-page__brand" href="\/"/);
   assert.match(read("webChatGate.jsx"), /<WebBrand href="\/" \/>/);
@@ -43,5 +43,5 @@ test("every brand logo links to /", () => {
 test("non-logo home links go to /studio", () => {
   assert.match(read("CreatorPortalV2.jsx"), /className="sx-back" href="\/"[^\n]*go\("\/"\)/);
   assert.match(read("DownloadPage.jsx"), /className="download-page__web" href="\/studio"/);
-  assert.equal((read("WebChatPage.jsx").match(/href="\/studio"/g) || []).length, 2);
+  assert.equal((read("WebChatShell.jsx").match(/href="\/studio"/g) || []).length + (read("productAccess.jsx").match(/href="\/studio"/g) || []).length, 2);
 });

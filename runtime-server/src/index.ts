@@ -54,6 +54,14 @@ import { checkUpgrade } from "./chat/originPolicy.js";
 import { ServiceChatGateway } from "./chat/serviceGateway.js";
 import { ChatServiceApi } from "./chat/serviceApi.js";
 import { ChatAssets, TextPartsReader, type PartsReader } from "./chat/assets.js";
+import { accountPrincipal } from "./chat/principal.js";
+import { clientMessageInputDigest } from "./protocol.js";
+import { ArtifactRetrier } from "./artifact/retrier.js";
+import { ARTIFACT_RETRY_MESSAGE } from "./artifact/prompt.js";
+import { openArtifactMode } from "./artifact/open.js";
+import type { ArtifactMode } from "./artifact/mode.js";
+import { artifactToolDefinitions } from "./artifact/toolDefinitions.js";
+import { createHostedReportRenderer } from "./hostedAgents/reportRenderer.js";
 import { attachmentToolDefinitions } from "./chat/attachmentTools.js";
 import { failRun, runModelTurn } from "./chat/modelTurn.js";
 import { toolRegistry } from "./tools.js";
@@ -174,6 +182,8 @@ export type RuntimeServerOptions = {
   connectionDirectory?: ConnectionDirectory;
   /** Uploads, attachments in messages, and the ls/grep/read tools over them. Without it a message takes text only. */
   chatAssets?: ChatAssets;
+  /** Report mode: products that offer it, and conversations that are reports. */
+  artifact?: ArtifactMode;
   /** The token the channel layer presents to reach Chat from another process; without it that door stays shut. */
   chatServiceToken?: string;
   /** Pending and active runs admitted for one authenticated user. */
@@ -290,8 +300,13 @@ export async function createRuntimeServerFromEnvironment(
   }
   const conversationStore = createConversationStore(environment);
   // Attachments need records that outlive a restart: without a Runtime database a message takes text only.
+  const chatBlobs = conversationStore instanceof PostgresStore ? objectStoreFromEnvironment(environment, path.join(runtimeDataDir, "chat-assets"))! : undefined;
   const chatAssets = conversationStore instanceof PostgresStore
-    ? await openChatAssets({ pool: conversationStore.pool, blobs: objectStoreFromEnvironment(environment, path.join(runtimeDataDir, "chat-assets"))!, environment })
+    ? await openChatAssets({ pool: conversationStore.pool, blobs: chatBlobs!, environment })
+    : undefined;
+  // Report files live beside chat assets. The hosted renderer says "not configured" itself when it has no key.
+  const artifact = conversationStore instanceof PostgresStore && chatAssets
+    ? await openArtifactMode({ pool: conversationStore.pool, blobs: chatBlobs!, assets: chatAssets, renderer: createHostedReportRenderer(environment), analytics })
     : undefined;
   // The Files API stores an account's files in the same database; without one it answers 501.
   const accountFiles = conversationStore instanceof PostgresStore ? new PostgresAccountFiles(conversationStore.pool as never, Number(environment.HATCH_ACCOUNT_FILES_QUOTA_BYTES) || DEFAULT_ACCOUNT_FILES_QUOTA_BYTES) : undefined;
@@ -322,6 +337,7 @@ export async function createRuntimeServerFromEnvironment(
     analytics,
     ...(conversationStore instanceof PostgresStore ? (() => { const ledger = new PostgresUsageLedger(conversationStore.pool as never); return { usage: ledger, usageCap: new UsageCap(ledger, monthlyTokenCap(environment), { analytics }) }; })() : {}),
     ...(chatAssets ? { chatAssets } : {}),
+    ...(artifact ? { artifact } : {}),
     /** Image and file input and the Files API are built but not public yet. */
     responsesApi: { ...(accountFiles ? { accountFiles } : {}), features: { attachments: environment.HATCH_RESPONSES_ATTACHMENTS === "on" } },
     assetStore: runtimeAssetStoreFromEnvironment(environment, runtimeDataDir),
@@ -476,6 +492,8 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   // The attachment tools are part of the Chat tool set whenever this Runtime can hold attachments, for every Run.
   const chatAssets = options.chatAssets;
   if (chatAssets) for (const definition of attachmentToolDefinitions(chatAssets.tools())) toolRegistry.set(definition.name, definition);
+  const artifact = options.artifact;
+  if (artifact) for (const definition of artifactToolDefinitions()) toolRegistry.set(definition.name, definition);
   const parts: PartsReader = chatAssets ?? new TextPartsReader();
 
   const admission: RunAdmission = {
@@ -522,7 +540,10 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
             turn.signal
           ));
         }
-        if (chatAssets) serverTools.setAttachments(chatAssets.toolsFor(turn.conversation));
+        // A report conversation sees its files flat and has the report tools; a chat conversation has neither.
+        const report = await artifact?.turnFor(turn.conversation, turn.run);
+        if (chatAssets) serverTools.setAttachments(chatAssets.toolsFor(turn.conversation, report ? "flat" : "messages"));
+        if (report) { serverTools.setArtifact(report.tools); serverTools.observe(report.onTool); }
         const sessionSkills = await buildSessionSkills(binding.agentCorpusRoot);
         await runModelTurn(
           turn.input, turn.persistedUser, sessionSkills, binding, turn.broker, serverTools,
@@ -531,7 +552,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
           async (message) => turn.publish(message), outputGuard, turn.signal,
           commerceEventSink, deliveryAccountingOutbox, scheduleDeliveryReconciliation,
           turn.clientOf, turn.claimSteered, turn.onSteer, turn.compaction,
-          { usage: turn.usage }
+          { usage: turn.usage, ...report ? { extraTools: report.extraTools, promptSuffix: report.promptSuffix, turnReminder: report.turnReminder, toolCallLimit: report.toolCallLimit } : {} }
         );
       } catch (error) {
         await failRun(turn, error);
@@ -552,10 +573,26 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     ...(options.usage ? { usage: { recorder: options.usage, attribute: attributeByScope } } : {}),
     ...(options.usageCap ? { cap: options.usageCap.guard(payerByScope) } : {}),
     ...(options.analytics ? { analytics: new ChatAnalytics(options.analytics, conversationRepository) } : {}),
+    ...(artifact ? { artifacts: artifact.lifecycle } : {}),
     // With a shared database every instance sees every Run's live events.
     ...(conversationStore instanceof PostgresStore ? { relay: new PostgresEventRelay(conversationStore.pool as never), stops: new PostgresStopRelay(conversationStore.pool as never), steers: new PostgresStopRelay(conversationStore.pool as never, { channel: "hatch_run_steers" }) } : {})
   });
-  void repositoryReady.then(() => chat.start()).catch(() => undefined);
+  // Nobody types again in a report conversation: an attempt that ended with no report (failure, restart) is started again.
+  const artifactRetrier = artifact ? new ArtifactRetrier({
+    reports: artifact.reports, lifecycle: artifact.lifecycle,
+    async start(record, runId) {
+      const conversation = await conversationRepository.getConversation(record.conversationId);
+      if (!conversation) throw new Error(`Conversation ${record.conversationId} was not found`);
+      const scope = await scopes.resolve(conversation, new AbortController().signal);
+      const content = ARTIFACT_RETRY_MESSAGE;
+      await chat.service.submit({
+        principal: accountPrincipal(conversation.ownerAccountId), conversation, scope, client: { client: "web" },
+        clientMessageId: `artifact-retry-${runId}`, message: async () => ({ role: "user", content }), digest: clientMessageInputDigest({ content }),
+        runId, corpusDigest: scope.corpusDigest, requiresLocalTools: false, mode: "start_only"
+      });
+    }
+  }) : undefined;
+  void repositoryReady.then(() => { void chat.start(); artifactRetrier?.start(); }).catch(() => undefined);
   const edge: ChatEdge = {
     chat, parts, chatAssets, turnAuthorizationGate, turnAuthorizationPerUserGate,
     entitlementResolver, authIdentityResolver, agentCorpusResolver,
@@ -608,7 +645,8 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       edge,
       responses,
       readiness,
-      allowedOrigins
+      allowedOrigins,
+      artifact
     }, requestAbortController.signal);
     void requestTask.catch((error) => {
       if (!res.destroyed && !res.writableEnded) handleHttpRequestFailure(res, error);
@@ -702,6 +740,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     await serverClosed;
     await Promise.allSettled([...connectionTasks]);
     // Runs are handed off, not failed: another instance continues them.
+    artifactRetrier?.stop();
     await chat.stop();
     await Promise.allSettled([...reconciliationTasks]);
     await conversationStore.close();

@@ -1,0 +1,81 @@
+import type { ProductAnalytics } from "../analytics/port.js";
+import { safely } from "../analytics/safe.js";
+import type { AssetBlobs } from "../assets/domain.js";
+import type { ChatAssets } from "../chat/assets.js";
+import type { ConversationRecord, ConversationRunRecord } from "../conversationRepository.js";
+import { ConversationError } from "../conversations/conversation.js";
+import type { HostToolRunner } from "../serverTools.js";
+import { ArtifactLifecycle } from "./lifecycle.js";
+import type { ArtifactConfigRepository, ReportRenderer, ReportRepository } from "./ports.js";
+import { artifactPrompt } from "./prompt.js";
+import { ReportProgress } from "./progress.js";
+import { ReportPublisher } from "./publisher.js";
+import { PUBLISH_REPORT_TOOL, reportToolRunner } from "./toolDefinitions.js";
+
+/** At most this many files may be uploaded to one artifact conversation. */
+export const MAX_ARTIFACT_FILES = 20;
+
+/** What a Run of an artifact conversation has beyond a chat Run. */
+export type ArtifactTurn = { promptSuffix: string; extraTools: string[]; tools: HostToolRunner; onTool: ReportProgress["onTool"]; turnReminder: (now: Date) => string; toolCallLimit: { max: number; uncounted: string[] } };
+
+/** A report reads far more than a chat reply: the form, every file, the knowledge base. Its delivery never counts, so it is always callable. */
+export const REPORT_TOOL_CALL_LIMIT = { max: 60, uncounted: ["publish_report"] };
+
+/**
+ * The last thing the model reads on every call of a report Run, in place of the chat reply reminder: a buyer chat reply
+ * is one to three sentences, a report Run never replies in chat, so the chat reminder must not reach it.
+ */
+export const reportTurnReminder = (now: Date): string => [
+  "<system-reminder>",
+  `Current time: ${now.toISOString()}`,
+  "This is report mode, not a chat. Nobody will answer a question: do not ask one and do not write a chat reply. Read the form and the files, consult your knowledge, then deliver the whole report by calling publish_report once. Your Run is finished only when publish_report has returned \"Report published.\".",
+  "</system-reminder>"
+].join("\n");
+
+/**
+ * Artifact mode as the Runtime composes it. A product offers it with a config row; a conversation is an artifact
+ * conversation iff it has a report row, so a product's chat conversations are untouched.
+ */
+export class ArtifactMode {
+  readonly lifecycle: ArtifactLifecycle;
+  readonly publisher: ReportPublisher;
+
+  constructor(readonly deps: {
+    configs: ArtifactConfigRepository;
+    reports: ReportRepository;
+    renderer: ReportRenderer;
+    blobs: AssetBlobs;
+    assets: Pick<ChatAssets, "uploadedCount">;
+    analytics?: ProductAnalytics;
+    maxFiles?: number;
+    /** Test seams of publishing: pauses, sleep, clock, ids. */
+    publishing?: Partial<ConstructorParameters<typeof ReportPublisher>[0]>;
+    clock?: () => Date;
+  }) {
+    const analytics = safely(deps.analytics);
+    this.lifecycle = new ArtifactLifecycle(deps.reports, analytics, deps.clock);
+    this.publisher = new ReportPublisher({ reports: deps.reports, renderer: deps.renderer, blobs: deps.blobs, analytics, ...deps.publishing });
+  }
+
+  get configs() { return this.deps.configs; }
+  get reports() { return this.deps.reports; }
+  get blobs() { return this.deps.blobs; }
+
+  /** Refuses an upload that would pass the cap, for an artifact conversation only. Returns whether it is one. */
+  async assertCanUpload(conversation: Pick<ConversationRecord, "id" | "ownerAccountId">): Promise<boolean> {
+    if (!await this.deps.reports.get(conversation.id)) return false;
+    const max = this.deps.maxFiles ?? MAX_ARTIFACT_FILES;
+    if (await this.deps.assets.uploadedCount(conversation) >= max) throw new ConversationError(413, "too_many_files", `A report takes at most ${max} files.`);
+    return true;
+  }
+
+  /** The turn's additions when the conversation is an artifact conversation; otherwise nothing. */
+  async turnFor(conversation: ConversationRecord, run: Pick<ConversationRunRecord, "createdAt">): Promise<ArtifactTurn | undefined> {
+    const report = await this.deps.reports.get(conversation.id);
+    if (!report) return undefined;
+    const config = await this.deps.configs.get(conversation.productId);
+    if (!config) throw new Error(`Product ${conversation.productId} has an artifact conversation but no artifact configuration.`);
+    const progress = new ReportProgress(this.deps.reports, { conversationId: conversation.id, attempt: report.attempt });
+    return { promptSuffix: await artifactPrompt(config), extraTools: [PUBLISH_REPORT_TOOL], tools: reportToolRunner(this.publisher, conversation, run, report.attempt, progress), onTool: progress.onTool, turnReminder: reportTurnReminder, toolCallLimit: REPORT_TOOL_CALL_LIMIT };
+  }
+}

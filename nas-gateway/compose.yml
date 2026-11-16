@@ -1,0 +1,50 @@
+# Hatch NAS gateway on hatch-prod: read-only access to the shared Aliyun NAS for Agents (MCP at http://nas-gateway:8000/mcp, internal only).
+services:
+  nas-gateway:
+    build:
+      context: .
+    image: nas-gateway:local
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+    environment:
+      NAS_GATEWAY_BASE: /data/workspaces
+      NAS_GATEWAY_DB: /var/lib/nas-gateway/gateway.sqlite3
+      NAS_GATEWAY_MAX_READ_BYTES: 4194304
+      NAS_GATEWAY_READDIR_MAX_ENTRIES: 5000
+      NAS_GATEWAY_FIND_MAX_RESULTS: 1000
+      NAS_GATEWAY_FIND_MAX_ENTRIES: 20000
+      NAS_GATEWAY_GREP_MAX_RESULTS: 1000
+      NAS_GATEWAY_GREP_MAX_FILES: 10000
+      NAS_GATEWAY_GREP_MAX_BYTES: 67108864
+      NAS_GATEWAY_MCP_ALLOWED_HOSTS: nas-gateway:8000
+    volumes:
+      - /mnt/workspaces:/data/workspaces:ro
+      - gateway_data:/var/lib/nas-gateway
+    networks:
+      hatch_internal:
+        aliases:
+          - nas-gateway
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/healthz\", timeout=2).read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+volumes:
+  gateway_data:
+    name: hatch_nas_gateway_data
+
+networks:
+  hatch_internal:
+    external: true

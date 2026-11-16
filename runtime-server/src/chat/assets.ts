@@ -5,6 +5,8 @@ import type { AssetPipeline } from "../assets/pipeline.js";
 import { attachmentTools, type AttachmentTool } from "../assets/tools.js";
 import { fileLine, imageLabel, pathsFor } from "../assets/views.js";
 import type { AttachmentFiles } from "../assets/files.js";
+import type { FlatAttachmentFiles } from "../assets/flatFiles.js";
+import type { ToolOutput } from "../assets/toolOutput.js";
 import type { AssetDesk, UploadedAsset } from "../conversations/assets.js";
 import { PipelineAssets } from "../conversations/pipelineAssets.js";
 import { clientMessageInputDigest, MAX_USER_MESSAGE_CHARS, type ConversationMessage } from "../protocol.js";
@@ -68,7 +70,7 @@ class ChatBoundAssets extends PipelineAssets {
 
 /** The upload pipeline as Chat uses it, for every client: ready assets in the conversation's scope. */
 export class ChatAssets implements PartsReader {
-  constructor(private readonly deps: { pipeline: AssetPipeline; blobs: AssetBlobs; files: AttachmentFiles }) {}
+  constructor(private readonly deps: { pipeline: AssetPipeline; blobs: AssetBlobs; files: AttachmentFiles; /** The files of a report conversation, by their own names. */ flatFiles?: FlatAttachmentFiles }) {}
 
   /** Upload first, reference by assetId: the file is a ready asset, or refused with the reason, before any message is sent. */
   async upload(conversation: ConversationRecord, input: { name: string; bytes: Buffer }): Promise<UploadedAsset> {
@@ -147,13 +149,20 @@ export class ChatAssets implements PartsReader {
     return this.deps.blobs.get(`${scopeKey(assetScopeOf(conversation))}/${asset.record.sha256}/original`);
   }
 
+  /** How many files have been uploaded to the conversation, attached to a message or not. */
+  async uploadedCount(conversation: Pick<ConversationRecord, "id" | "ownerAccountId">): Promise<number> {
+    if (!this.deps.flatFiles) throw new Error("This Runtime has no flat attachment view");
+    return this.deps.flatFiles.count(assetScopeOf(conversation));
+  }
+
   /** The full list, declared once for every Run. */
   tools(): AttachmentTool[] { return attachmentTools(this.deps.files); }
 
-  /** The scope arrives with the conversation, never from the model. */
-  toolsFor(conversation: Pick<ConversationRecord, "id" | "ownerAccountId">): { run(name: string, args: unknown): Promise<string> } {
+  /** The scope arrives with the conversation, never from the model. `flat`: a report conversation, whose files are /attachments/<name>. */
+  toolsFor(conversation: Pick<ConversationRecord, "id" | "ownerAccountId">, view: "messages" | "flat" = "messages"): { run(name: string, args: unknown): Promise<ToolOutput> } {
     const scope = assetScopeOf(conversation);
-    const byName = new Map(this.tools().map((tool) => [tool.name, tool]));
+    if (view === "flat" && !this.deps.flatFiles) throw new Error("This Runtime has no flat attachment view");
+    const byName = new Map((view === "flat" ? attachmentTools(this.deps.flatFiles!) : this.tools()).map((tool) => [tool.name, tool]));
     return { run: async (name, args) => {
       const tool = byName.get(name);
       if (!tool) throw new Error(`No attachment tool: ${name}`);

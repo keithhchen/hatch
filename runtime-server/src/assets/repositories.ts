@@ -35,6 +35,10 @@ export class InMemoryAssetRepository implements AssetRepository {
   async release(scope: AssetScope, id: string, messageId: string) {
     if (this.find(scope, id)) this.links.delete(`${id}\0${messageId}`);
   }
+  async listScope(scope: AssetScope) {
+    const key = scopeKey(scope);
+    return [...this.rows.values()].filter(a => a.state === "ready" && scopeKey(a.record.scope) === key);
+  }
   async listAttached(scope: AssetScope, messageIds?: readonly string[]): Promise<AttachedAsset[]> {
     const key = scopeKey(scope);
     return [...this.links].flatMap(link => {
@@ -122,6 +126,10 @@ export class PostgresAssetRepository implements AssetRepository {
   }
   async release(scope: AssetScope, id: string, messageId: string) {
     await this.db.query(`DELETE FROM hatch_asset_messages WHERE scope_key = $1 AND asset_id = $2 AND message_id = $3`, [scopeKey(scope), id, messageId]);
+  }
+  async listScope(scope: AssetScope) {
+    const result = await this.db.query<Row>(`SELECT record FROM hatch_assets WHERE scope_key = $1 AND state = 'ready' ORDER BY created_at, id`, [scopeKey(scope)]);
+    return result.rows.map(row => restore(row)!);
   }
   async listAttached(scope: AssetScope, messageIds?: readonly string[]): Promise<AttachedAsset[]> {
     const result = await this.db.query<Row & { message_id: string }>(

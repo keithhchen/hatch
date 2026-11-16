@@ -18,6 +18,8 @@ export const assistantMessageSent = (channel: string): AnalyticsEvent => ["assis
 export const firstMessageSent = (agentId: string, channel: ChatChannel): AnalyticsEvent => ["first_message_sent", { agent_id: agentId, channel }];
 export const messageSent = (agentId: string, channel: ChatChannel, n: number): AnalyticsEvent => ["message_sent", { agent_id: agentId, channel, n }];
 export const replyFailed = (agentId: string, channel: ChatChannel, reason: string): AnalyticsEvent => ["reply_failed", { agent_id: agentId, channel, reason }];
+export const reportReady = (durationS: number): AnalyticsEvent => ["report_ready", { duration_s: durationS }];
+export const reportFailed = (reason: string): AnalyticsEvent => ["report_failed", { reason }];
 export const usageCapReached = (surface: Surface): AnalyticsEvent => ["usage_cap_reached", { surface }];
 
 /** An event of someone with no account (an IM contact): counted, but given no person profile. */

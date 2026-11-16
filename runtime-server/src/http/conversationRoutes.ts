@@ -6,7 +6,6 @@ import { MAX_BYTES as MAX_ASSET_BYTES } from "../assets/pipeline.js";
 import { createBriefSnapshot } from "../brief.js";
 import { ChatConversationReadModel } from "../chat/conversationReadModel.js";
 import { publicJournalPayload } from "../chat/messageLedger.js";
-import { sessionTokenFromCookie } from "../chat/originPolicy.js";
 import { publicRun } from "../chat/publicRun.js";
 import { finalAssistantText, TERMINAL_STATUSES, waitForTerminalRun } from "../chat/runResult.js";
 import {
@@ -19,6 +18,8 @@ import {
 import { projecting, SseSink, type EventProjection } from "../chat/sinks.js";
 import type { Submission } from "../chat/chatService.js";
 import { retryRun, submitUserMessage, type ChatEdge } from "../chat/turnSubmission.js";
+import { handleReportRequest } from "../artifact/routes.js";
+import type { ArtifactMode } from "../artifact/mode.js";
 import { ConversationError as ConversationHttpError } from "../conversations/conversation.js";
 import type {
   ConversationJournalEvent,
@@ -44,7 +45,7 @@ import {
   valueString,
   writeJsonBounded
 } from "./httpSupport.js";
-import { requireBoundConversation, requireConversationBinding } from "./requestBinding.js";
+import { requireAllowedOrigin, requireBoundConversation, requireConversationBinding } from "./requestBinding.js";
 
 /** What the /v1/conversations routes need from the rest of the Runtime; the router supplies it. */
 export type ConversationRouteDeps = {
@@ -58,6 +59,8 @@ export type ConversationRouteDeps = {
   edge: ChatEdge | undefined;
   maxHttpResponseBytes: number;
   allowedOrigins: readonly string[];
+  /** Report mode, when this Runtime has it. */
+  artifact?: ArtifactMode;
 };
 
 /** The largest file the asset pipeline takes: a larger upload is refused before it is read. */
@@ -93,10 +96,7 @@ export async function handleConversationHttpRequest(
   const writeResponse = (status: number, body: unknown) => writeJsonBounded(res, status, body, maxHttpResponseBytes);
   const authToken = bearerToken(req);
   // A cookie is sent by the browser on any cross-site request, so changing anything with one needs an allowed Origin.
-  if (req.method !== "GET" && typeof req.headers.authorization !== "string" && sessionTokenFromCookie(req.headers.cookie)
-    && !(typeof req.headers.origin === "string" && allowedOrigins.includes(req.headers.origin))) {
-    throw new ConversationHttpError(403, "origin_not_allowed", "This origin may not use a browser session.");
-  }
+  if (req.method !== "GET") requireAllowedOrigin(req, allowedOrigins);
   const requireEdge = (): ChatEdge => {
     if (!edge) throw new ConversationHttpError(503, "chat_unavailable", "The Chat API is unavailable.");
     return edge;
@@ -146,6 +146,8 @@ export async function handleConversationHttpRequest(
     if (req.method !== "POST") throw new ConversationHttpError(405, "method_not_allowed", "Use POST to upload a file.");
     const conversation = await requireBoundConversation(repository, binding, decodeURIComponent(uploadMatch[1] ?? ""));
     const chatAssets = requireEdge().chatAssets;
+    // A report conversation takes a bounded number of files, counted before this one is read.
+    await deps.artifact?.assertCanUpload(conversation);
     if (!chatAssets) throw new ConversationHttpError(501, "attachments_unavailable", "This Runtime cannot take attachments.");
     // The file is the request body and its name is `?name=`: it becomes a ready asset, or is refused with the reason.
     const name = url.searchParams.get("name")?.trim();
@@ -153,6 +155,14 @@ export async function handleConversationHttpRequest(
     const bytes = await readBoundedBytes(req, MAX_UPLOAD_BYTES);
     if (!bytes.length) throw new ConversationHttpError(400, "invalid_upload", "The file is empty.");
     writeResponse(201, await chatAssets.upload(conversation, { name, bytes }));
+    return;
+  }
+
+  const reportMatch = url.pathname.match(/^\/v1\/conversations\/([^/]+)(\/report(?:\/files\/[^/]+)?)$/);
+  if (reportMatch) {
+    if (!deps.artifact) throw new ConversationHttpError(404, "report_not_found", "This conversation has no report.");
+    const conversation = await requireBoundConversation(repository, binding, decodeURIComponent(reportMatch[1] ?? ""));
+    await handleReportRequest(req, res, reportMatch[2]!, conversation, binding, deps.artifact, maxHttpResponseBytes);
     return;
   }
 

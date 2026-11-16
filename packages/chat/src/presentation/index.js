@@ -1,5 +1,6 @@
 export { ChatView, Composer, TimelineEntries, CreatorHeading, TaskBriefDropdown, useChatState } from "./ChatView.jsx";
 export { ActivityBlock, ActivityModal, ApprovalActivity, ThinkingTicker, ToolDetails, activityPresentations, approvalSubject } from "./Activity.jsx";
+export { AttachButton } from "./AttachButton.jsx";
 export { ImageViewer } from "./ImageViewer.jsx";
 export { MessageResponse } from "./MessageResponse.jsx";
 export { Shimmer } from "./Shimmer.jsx";

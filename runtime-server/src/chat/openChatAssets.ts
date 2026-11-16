@@ -3,6 +3,8 @@ import { FfmpegAudioNormalizer, transcriberFromEnvironment } from "../assets/ada
 import { aliyunModeratorFromEnvironment } from "../assets/aliyunModerator.js";
 import type { AssetBlobs, ContentModerator } from "../assets/domain.js";
 import { AttachmentFiles } from "../assets/files.js";
+import { FlatAttachmentFiles } from "../assets/flatFiles.js";
+import { PdfParsePageRenderer } from "../assets/pdfPages.js";
 import { AssetPipeline } from "../assets/pipeline.js";
 import { FileProcessor, ImageProcessor, VoiceProcessor } from "../assets/processors.js";
 import { PostgresAssetRepository } from "../assets/repositories.js";
@@ -19,5 +21,5 @@ export async function openChatAssets(options: { pool: PostgresQueryExecutor; blo
   await repository.initialize();
   const pipeline = new AssetPipeline(repository, options.blobs, options.moderator ?? aliyunModeratorFromEnvironment(options.environment) ?? new NoModeration(),
     [new ImageProcessor(), new FileProcessor(), new VoiceProcessor(new FfmpegAudioNormalizer(), transcriberFromEnvironment(options.environment))]);
-  return new ChatAssets({ pipeline, blobs: options.blobs, files: new AttachmentFiles(repository, options.blobs) });
+  return new ChatAssets({ pipeline, blobs: options.blobs, files: new AttachmentFiles(repository, options.blobs), flatFiles: new FlatAttachmentFiles(repository, options.blobs, new PdfParsePageRenderer()) });
 }

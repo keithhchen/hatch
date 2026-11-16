@@ -1,0 +1,25 @@
+/* Artifact mode: what chat has no equivalent for. Shell, gates, buttons, chips, attach control and tokens come from webChat.css and @hatch/chat. */
+.artifact__form, .artifact__report { display: flex; flex-direction: column; gap: 20px; }
+.artifact__progress { position: sticky; top: -32px; z-index: 2; padding: 8px 0; background: var(--chat-canvas); }
+.artifact__field { display: flex; flex-direction: column; gap: 10px; padding: 16px; border: 1px solid var(--chat-border); border-radius: 20px; background: var(--chat-card); }
+.artifact__field.is-invalid { border-color: var(--web-fail); }
+.artifact__field h2 { margin: 0; }
+.artifact__help { margin: 0; color: var(--chat-muted); font-size: 14px; line-height: 1.5; }
+.artifact input, .artifact textarea { font-size: 16px; }
+.artifact__options { display: flex; flex-wrap: wrap; gap: 8px; }
+.artifact__option { min-height: 44px; padding: 0 18px; border: 1px solid var(--chat-border); border-radius: 999px; background: var(--chat-card); cursor: pointer; font-size: 15px; }
+.artifact__option[aria-checked="true"] { border-color: var(--web-yolk); background: var(--web-yolk-soft); font-weight: 650; }
+.artifact__files { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.artifact__files .web-chat__images { padding: 0; }
+.artifact__file-progress { width: 72px; }
+.artifact__file-error { color: var(--web-fail); font-size: 12px; }
+.artifact__bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.artifact__count { color: var(--chat-muted); font-size: 14px; }
+.artifact__generating { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 48px 0; text-align: center; }
+.artifact__elapsed { color: var(--chat-muted); font-variant-numeric: tabular-nums; }
+.artifact__preview { position: relative; margin: 0; overflow: hidden; border: 1px solid var(--chat-border); border-radius: 20px; background: var(--chat-card); }
+.artifact__preview img { display: block; width: 100%; height: auto; }
+.artifact__preview figcaption { position: absolute; inset: auto 0 0; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 16px; background: color-mix(in srgb, var(--chat-canvas) 88%, transparent); font-weight: 650; }
+.artifact__downloads { display: flex; flex-direction: column; gap: 10px; }
+.artifact__debug { width: 100%; font-size: 12px; color: var(--chat-muted); }
+.artifact__debug ol { margin: 6px 0 0; padding-left: 18px; }

@@ -14,6 +14,8 @@ import type { ConversationRepository } from "../conversationRepository.js";
 import { EntitlementError, type AuthIdentity, type AuthIdentityResolver, type EntitlementResolver } from "../entitlements.js";
 import type { RuntimeStore } from "../store.js";
 import { ResponsesHttpApi } from "../responses/router.js";
+import type { ArtifactMode } from "../artifact/mode.js";
+import { handleProductArtifactRequest } from "../artifact/routes.js";
 import { handleConversationHttpRequest } from "./conversationRoutes.js";
 import {
   bearerToken,
@@ -48,6 +50,8 @@ export type RuntimeHttpDeps = {
   responses?: ResponsesHttpApi;
   readiness?: RuntimeReadiness;
   allowedOrigins: readonly string[];
+  /** Report mode: products that offer it, and conversations that are reports. */
+  artifact?: ArtifactMode;
 };
 
 export async function handleHttpRequest(
@@ -58,7 +62,7 @@ export async function handleHttpRequest(
 ): Promise<void> {
   const {
     entitlementResolver, agentCorpusResolver, conversationStore, assetStore, authIdentityResolver,
-    legacyHmacAuth, maxHttpResponseBytes, conversationRepository, repositoryReady, edge, readiness, allowedOrigins, responses
+    legacyHmacAuth, maxHttpResponseBytes, conversationRepository, repositoryReady, edge, readiness, allowedOrigins, responses, artifact
   } = deps;
   setCorsHeaders(res);
   if (req.method === "OPTIONS") {
@@ -154,12 +158,26 @@ export async function handleHttpRequest(
         legacyHmacAuth,
         edge,
         maxHttpResponseBytes,
-        allowedOrigins
+        allowedOrigins,
+        artifact
       }, signal);
     } catch (error) {
       writeConversationHttpError(req, res, error);
     }
     return;
+  }
+
+  if (url.pathname.startsWith("/v1/products/") && artifact && conversationRepository) {
+    try {
+      await repositoryReady;
+      if (await handleProductArtifactRequest(req, res, url, {
+        artifact, repository: conversationRepository, entitlementResolver, agentCorpusResolver, authIdentityResolver,
+        legacyHmacAuth, maxHttpResponseBytes, allowedOrigins
+      })) return;
+    } catch (error) {
+      writeConversationHttpError(req, res, error);
+      return;
+    }
   }
 
   res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });

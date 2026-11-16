@@ -7,6 +7,7 @@ import { dashboardRequest } from "./data.js";
 import { parseDevelopersRoute } from "./developersGuide.js";
 import { parseHelpRoute } from "./helpRoute.js";
 import { WebChatRoute } from "./webChatRoute.js";
+import { ArtifactRoute } from "./artifactRoute.js";
 import { WebBrand } from "./WebBrand.jsx";
 import "./styles.css";
 import "./webTheme.css";
@@ -27,6 +28,7 @@ const DevelopersPage = lazyWithReload(() => import("./DevelopersPage.jsx"));
 const HelpPage = lazyWithReload(() => import("./HelpPage.jsx"));
 const WebPage = lazyWithReload(() => import("./web/WebPage.jsx"));
 const WebChatPage = lazyWithReload(() => import("./WebChatPage.jsx"));
+const ArtifactPage = lazyWithReload(() => import("./ArtifactPage.jsx"));
 const DesktopSignInPage = lazyWithReload(() => import("./DesktopSignInPage.jsx"));
 
 class AppErrorBoundary extends React.Component {
@@ -194,6 +196,15 @@ function App() {
       return <RouteRedirect to={`/sign-in?returnTo=${encodeURIComponent(location.href)}`} navigate={location.navigate} />;
     }
     return <Suspense fallback={<AppLoading />}><WebChatPage productId={chatRoute.productId} conversationId={chatRoute.conversationId} request={chatRequest} navigate={location.navigate} profile={profile} onSignOut={signOutFromChat} /></Suspense>;
+  }
+
+  const artifactRoute = ArtifactRoute.parse(location.pathname);
+  if (artifactRoute) {
+    if (sessionStatus === "loading") return <AppLoading />;
+    if (sessionStatus !== "authenticated") {
+      return <RouteRedirect to={`/sign-in?returnTo=${encodeURIComponent(location.href)}`} navigate={location.navigate} />;
+    }
+    return <Suspense fallback={<AppLoading />}><ArtifactPage productId={artifactRoute.productId} conversationId={artifactRoute.conversationId} search={location.search} request={chatRequest} navigate={location.navigate} profile={profile} onSignOut={signOutFromChat} /></Suspense>;
   }
 
   if (location.pathname === CREATOR_ROOT

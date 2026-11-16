@@ -1,4 +1,4 @@
-import { Readable } from "node:stream";
+import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createServer } from "node:http";
 import { InflightResponses, drainMsFromEnvironment, exitOnSignal, gracefulShutdown } from "./gracefulShutdown.mjs";
@@ -497,7 +497,7 @@ export async function createDashboardApp(options = {}) {
       if (request.method === "GET" && url.pathname === "/healthz") {
         return send(response, 200, { ok: true });
       }
-      if (url.pathname === "/v1/web-chat/conversations" || url.pathname.startsWith("/v1/web-chat/conversations/")) {
+      if (url.pathname === "/v1/web-chat/conversations" || url.pathname.startsWith("/v1/web-chat/conversations/") || ARTIFACT_DEFINITION_PATH.test(url.pathname)) {
         if (!["GET", "POST", "PATCH"].includes(request.method)) {
           return send(response, 405, { error: { code: "method_not_allowed", message: "Method not allowed." } });
         }
@@ -509,13 +509,24 @@ export async function createDashboardApp(options = {}) {
         }
         const suffix = url.pathname.slice("/v1/web-chat".length);
         const upstreamUrl = new URL(`/v1${suffix}${url.search}`, runtimeUrl);
+        // An asset upload is raw bytes streamed through, never parsed as JSON.
+        const upload = request.method === "POST" && CONVERSATION_ASSET_UPLOAD_PATH.test(url.pathname);
+        const contentType = String(request.headers["content-type"] ?? "application/octet-stream");
+        const uploadLimit = contentType.startsWith("image/") ? WEB_CHAT_IMAGE_UPLOAD_MAX_BYTES : WEB_CHAT_FILE_UPLOAD_MAX_BYTES;
+        if (upload) {
+          const declared = Number(request.headers["content-length"]);
+          if (!Number.isFinite(declared)) return send(response, 411, { error: { code: "length_required", message: "Upload length is required." } });
+          if (declared > uploadLimit) return send(response, 413, { error: { code: "request_body_too_large", message: `Upload exceeds the ${uploadLimit}-byte limit.` } });
+        }
         const upstream = await fetchImpl(upstreamUrl, {
           method: request.method,
           headers: {
             authorization: `Bearer ${authentication.token}`,
-            ...(request.method !== "GET" ? { "content-type": "application/json" } : {})
+            ...(request.headers["idempotency-key"] ? { "idempotency-key": String(request.headers["idempotency-key"]) } : {}),
+            ...(upload ? { "content-type": contentType, "content-length": request.headers["content-length"] } : request.method !== "GET" ? { "content-type": "application/json" } : {})
           },
-          ...(request.method !== "GET" ? { body: JSON.stringify(await readJson(request)) } : {})
+          ...(upload ? { body: Readable.toWeb(request.pipe(byteLimit(uploadLimit))), duplex: "half" }
+            : request.method !== "GET" ? { body: JSON.stringify(await readJson(request)) } : {})
         });
         response.statusCode = upstream.status;
         response.setHeader("content-type", upstream.headers.get("content-type") ?? "application/json");
@@ -4129,6 +4140,22 @@ function crossSiteMutationError(request) {
   return undefined;
 }
 
+const ARTIFACT_DEFINITION_PATH = /^\/v1\/web-chat\/products\/[^/]+\/artifact(?:\/conversations)?$/;
+const CONVERSATION_ASSET_UPLOAD_PATH = /^\/v1\/web-chat\/conversations\/[^/]+\/assets$/;
+const WEB_CHAT_IMAGE_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
+const WEB_CHAT_FILE_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
+
+/** A pass-through that fails once more than maxBytes went by, whatever the declared length said. */
+function byteLimit(maxBytes) {
+  let size = 0;
+  return new Transform({
+    transform(chunk, _encoding, callback) {
+      size += chunk.length;
+      callback(size > maxBytes ? requestBodyTooLarge(maxBytes) : null, chunk);
+    }
+  });
+}
+
 async function readJson(request, maxBytes = DEFAULT_JSON_BODY_MAX_BYTES) {
   const raw = await readRawBody(request, maxBytes);
   if (!raw.length) return {};
@@ -4483,6 +4510,7 @@ function isPublicPortalRoute(pathname) {
     || pathname === "/products"
     || pathname.startsWith("/products/")
     || pathname.startsWith("/chat/product/")
+    || pathname.startsWith("/artifact/")
     || pathname === "/checkout"
     || pathname.startsWith("/checkout/")
     || pathname === "/studio"

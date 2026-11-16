@@ -1,5 +1,6 @@
 import type { Asset, AssetBlobs, AssetRepository, AssetScope, AttachedAsset } from "./domain.js";
 import { FileToolError, REGEX_TIMEOUT_MS, fixedMatcher, regexMatcher } from "./matchers.js";
+import type { ToolOutput } from "./toolOutput.js";
 import { ATTACHMENTS_ROOT, pathsFor } from "./views.js";
 
 export { FileToolError };
@@ -67,15 +68,12 @@ export class AttachmentFiles {
     return [...shown, ...lines.length > shown.length ? [`... ${lines.length - shown.length} more`] : []].join("\n") || "(empty)";
   }
 
-  /** Size in pages, and for markdown the headings with the offset to read each from: a map of the whole file. */
   private async outline(entry: Entry): Promise<string[]> {
     const text = await this.text(entry);
-    if (text === undefined) return [];
-    const pages = Math.ceil(text.length / FILE_LIMITS.readChars);
-    const headings: string[] = [];
-    for (const match of text.matchAll(/^#{1,6} .+$/gm)) headings.push(`  offset ${match.index}: ${match[0].slice(0, 80)}`);
-    return [`${text.length} chars, ${pages} pages of ${FILE_LIMITS.readChars} chars. Reading all ${pages} covers the whole file; the pages you skip are not in your answer.`, ...headings.length ? ["Outline:", ...headings] : []];
+    return text === undefined ? [] : outlineOf(text);
   }
+
+  async readTool(scope: AssetScope, args: { path: string; offset?: number }): Promise<ToolOutput> { return JSON.stringify(await this.read(scope, args.path, args.offset)); }
 
   async read(scope: AssetScope, path: string, offset = 0, limit: number = FILE_LIMITS.readChars): Promise<{ path: string; content: string; offset: number; next_offset: number | null; total_chars: number; remaining_chars: number; note?: string }> {
     const parts = segments(path);
@@ -84,45 +82,63 @@ export class AttachmentFiles {
     const [entry] = this.select(await this.index(scope), parts);
     const text = await this.text(entry!);
     if (text === undefined) throw new FileToolError("This file has no text form here (for example an image or an archive)");
-    let end = Math.min(text.length, offset + Math.min(limit, FILE_LIMITS.readCharsMax));
-    if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1] ?? "")) end -= 1;
-    return { path: entry!.path, content: text.slice(offset, end), offset, next_offset: end < text.length ? end : null, total_chars: text.length, remaining_chars: text.length - end, ...end < text.length && { note: `Partial: ${text.length - end} of ${text.length} chars not read yet. Call read again with offset=${end}.` } };
+    return pageOf(entry!.path, text, offset, limit);
   }
 
   async grep(scope: AssetScope, query: GrepQuery): Promise<string> {
-    const { pattern, fixed = false, ignoreCase = false, context = 0, path = ATTACHMENTS_ROOT } = query;
-    const maxMatches = Math.min(query.maxMatches ?? FILE_LIMITS.grepMatches, FILE_LIMITS.grepMatchesMax);
-    const around = Math.max(0, Math.min(context, FILE_LIMITS.grepContextMax));
-    if (!pattern || pattern.length > FILE_LIMITS.patternChars) throw new FileToolError(`Pattern must be 1 to ${FILE_LIMITS.patternChars} characters`);
-    const matcher = fixed ? fixedMatcher(pattern, ignoreCase) : regexMatcher(pattern, ignoreCase);
-    const entries = this.select(await this.index(scope), segments(path));
-    if (entries.length > FILE_LIMITS.grepFiles) throw new FileToolError(`Too many files (${entries.length}); narrow the path`);
-
-    const started = Date.now();
-    let scanned = 0;
-    let matches = 0;
-    const out: string[] = [];
-    for (const entry of entries) {
-      if (matches >= maxMatches) break;
-      if (Date.now() - started > FILE_LIMITS.grepMs) { out.push("[stopped: time limit]"); break; }
-      const text = await this.text(entry);
-      if (text === undefined) continue;
-      scanned += text.length;
-      if (scanned > FILE_LIMITS.grepScanBytes) { out.push("[stopped: scan limit]"); break; }
-      const lines = text.split("\n");
-      const hits = await matcher(lines.map(line => line.slice(0, FILE_LIMITS.lineChars * 10)), maxMatches - matches);
-      matches += hits.length;
-      const show = new Set<number>();
-      for (const hit of hits) for (let i = Math.max(0, hit - around); i <= Math.min(lines.length - 1, hit + around); i++) show.add(i);
-      let previous = -2;
-      for (const i of [...show].sort((a, b) => a - b)) {
-        if (around && previous >= 0 && i > previous + 1) out.push("--");
-        out.push(`${entry.path}${hits.includes(i) ? ":" : "-"}${i + 1}${hits.includes(i) ? ":" : "-"} ${lines[i]!.slice(0, FILE_LIMITS.lineChars)}`);
-        previous = i;
-      }
-    }
-    return clip(out.length ? out.join("\n") : "No matches", FILE_LIMITS.grepOutputChars);
+    const entries = this.select(await this.index(scope), segments(query.path ?? ATTACHMENTS_ROOT));
+    return grepTexts(entries.map(entry => ({ path: entry.path, text: () => this.text(entry) })), query);
   }
+}
+
+/** Size in pages, and for markdown the headings with the offset to read each from: a map of the whole file. */
+export function outlineOf(text: string): string[] {
+  const pages = Math.ceil(text.length / FILE_LIMITS.readChars);
+  const headings: string[] = [];
+  for (const match of text.matchAll(/^#{1,6} .+$/gm)) headings.push(`  offset ${match.index}: ${match[0].slice(0, 80)}`);
+  return [`${text.length} chars, ${pages} pages of ${FILE_LIMITS.readChars} chars. Reading all ${pages} covers the whole file; the pages you skip are not in your answer.`, ...headings.length ? ["Outline:", ...headings] : []];
+}
+
+/** The page of `text` at `offset`: the one way every view pages a file. */
+export function pageOf(path: string, text: string, offset: number, limit: number) {
+  let end = Math.min(text.length, offset + Math.min(limit, FILE_LIMITS.readCharsMax));
+  if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1] ?? "")) end -= 1;
+  return { path, content: text.slice(offset, end), offset, next_offset: end < text.length ? end : null, total_chars: text.length, remaining_chars: text.length - end, ...end < text.length && { note: `Partial: ${text.length - end} of ${text.length} chars not read yet. Call read again with offset=${end}.` } };
+}
+
+/** grep over files whose text is read on demand: the one way every view searches. */
+export async function grepTexts(entries: Array<{ path: string; text(): Promise<string | undefined> }>, query: GrepQuery): Promise<string> {
+  const { pattern, fixed = false, ignoreCase = false, context = 0 } = query;
+  const maxMatches = Math.min(query.maxMatches ?? FILE_LIMITS.grepMatches, FILE_LIMITS.grepMatchesMax);
+  const around = Math.max(0, Math.min(context, FILE_LIMITS.grepContextMax));
+  if (!pattern || pattern.length > FILE_LIMITS.patternChars) throw new FileToolError(`Pattern must be 1 to ${FILE_LIMITS.patternChars} characters`);
+  const matcher = fixed ? fixedMatcher(pattern, ignoreCase) : regexMatcher(pattern, ignoreCase);
+  if (entries.length > FILE_LIMITS.grepFiles) throw new FileToolError(`Too many files (${entries.length}); narrow the path`);
+
+  const started = Date.now();
+  let scanned = 0;
+  let matches = 0;
+  const out: string[] = [];
+  for (const entry of entries) {
+    if (matches >= maxMatches) break;
+    if (Date.now() - started > FILE_LIMITS.grepMs) { out.push("[stopped: time limit]"); break; }
+    const text = await entry.text();
+    if (text === undefined) continue;
+    scanned += text.length;
+    if (scanned > FILE_LIMITS.grepScanBytes) { out.push("[stopped: scan limit]"); break; }
+    const lines = text.split("\n");
+    const hits = await matcher(lines.map(line => line.slice(0, FILE_LIMITS.lineChars * 10)), maxMatches - matches);
+    matches += hits.length;
+    const show = new Set<number>();
+    for (const hit of hits) for (let i = Math.max(0, hit - around); i <= Math.min(lines.length - 1, hit + around); i++) show.add(i);
+    let previous = -2;
+    for (const i of [...show].sort((a, b) => a - b)) {
+      if (around && previous >= 0 && i > previous + 1) out.push("--");
+      out.push(`${entry.path}${hits.includes(i) ? ":" : "-"}${i + 1}${hits.includes(i) ? ":" : "-"} ${lines[i]!.slice(0, FILE_LIMITS.lineChars)}`);
+      previous = i;
+    }
+  }
+  return clip(out.length ? out.join("\n") : "No matches", FILE_LIMITS.grepOutputChars);
 }
 
 export type GrepQuery = { pattern: string; fixed?: boolean; ignoreCase?: boolean; context?: number; maxMatches?: number; path?: string };

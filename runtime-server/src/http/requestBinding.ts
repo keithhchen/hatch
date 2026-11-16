@@ -20,6 +20,7 @@ import {
 } from "../conversationRepository.js";
 import { EntitlementError, type AuthIdentityResolver, type EntitlementResolver } from "../entitlements.js";
 import { toProblem } from "../errors/problem.js";
+import { sessionTokenFromCookie } from "../chat/originPolicy.js";
 import { bearerToken } from "./httpSupport.js";
 
 export async function bindingFromHistoryRequest(
@@ -122,4 +123,12 @@ export async function requireBoundConversation(
     throw error;
   }
   return conversation;
+}
+
+/** A cookie is sent by the browser on any cross-site request, so changing anything with one needs an allowed Origin. */
+export function requireAllowedOrigin(req: http.IncomingMessage, allowedOrigins: readonly string[]): void {
+  if (typeof req.headers.authorization !== "string" && sessionTokenFromCookie(req.headers.cookie)
+    && !(typeof req.headers.origin === "string" && allowedOrigins.includes(req.headers.origin))) {
+    throw new ConversationHttpError(403, "origin_not_allowed", "This origin may not use a browser session.");
+  }
 }

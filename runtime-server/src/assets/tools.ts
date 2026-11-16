@@ -1,12 +1,13 @@
 import { z } from "zod";
 import type { SurfaceTool } from "../surfaces/contract.js";
 import type { AssetScope } from "./domain.js";
-import { FileToolError, type AttachmentFiles } from "./files.js";
+import { FileToolError } from "./files.js";
+import type { AttachmentToolView, ToolOutput } from "./toolOutput.js";
 
 /** A SurfaceTool plus how to run it. The scope comes from the authenticated conversation, never from the model. */
-export type AttachmentTool = SurfaceTool & { parameters: Record<string, unknown>; run(scope: AssetScope, args: unknown): Promise<string> };
+export type AttachmentTool = SurfaceTool & { parameters: Record<string, unknown>; run(scope: AssetScope, args: unknown): Promise<ToolOutput> };
 
-const define = <S extends z.ZodType>(meta: SurfaceTool, schema: S, body: (scope: AssetScope, args: z.infer<S>) => Promise<string>): AttachmentTool => ({
+const define = <S extends z.ZodType>(meta: SurfaceTool, schema: S, body: (scope: AssetScope, args: z.infer<S>) => Promise<ToolOutput>): AttachmentTool => ({
   ...meta,
   parameters: z.toJSONSchema(schema) as Record<string, unknown>,
   async run(scope, args) {
@@ -21,13 +22,13 @@ const define = <S extends z.ZodType>(meta: SurfaceTool, schema: S, body: (scope:
 });
 
 /** The Chat API's Unix-style retrieval: ls, grep, paged read. All three are read-only. */
-export const attachmentTools = (files: AttachmentFiles): AttachmentTool[] => [
+export const attachmentTools = (files: AttachmentToolView): AttachmentTool[] => [
   define({ name: "ls", supportedClients: "*", description: "List attachments. Paths look like /attachments/<message_id>/<name>. Without a path, lists the messages that have attachments. With a file path, also shows its length in chars and pages and, for markdown, an outline of headings with the offset to read each from." },
     z.object({ path: z.string().optional() }), (scope, { path }) => files.ls(scope, path)),
   define({ name: "grep", supportedClients: "*", description: "Search attachment text for a fixed string (fixed=true) or a regular expression. Prints path:line: text with optional context lines. Output is bounded; narrow with path." },
     z.object({ pattern: z.string(), path: z.string().optional(), fixed: z.boolean().optional(), ignoreCase: z.boolean().optional(), context: z.number().int().optional(), maxMatches: z.number().int().optional() }),
     (scope, args) => files.grep(scope, args)),
   define({ name: "read", supportedClients: "*", description: "Read an attachment's text in pages. Returns content, offset, next_offset, total_chars and remaining_chars (what you have not read yet); call again with offset=next_offset to continue until it is null. A long file spans many pages and one read returns only the first; a summary or judgment of a file you have not read to the end rests on its beginning alone. To cover a whole document, read every page (grep finds facts, it does not cover a document); ls on the file shows its pages and outline." },
-    z.object({ path: z.string(), offset: z.number().int().optional() }),
-    async (scope, { path, offset }) => JSON.stringify(await files.read(scope, path, offset)))
+    z.object({ path: z.string(), offset: z.number().int().optional(), page: z.number().int().optional().describe("Report conversations only: which page of an original PDF to view as an image (default 1).") }),
+    (scope, args) => files.readTool(scope, args))
 ];

@@ -85,6 +85,14 @@ export type TurnProfile = {
   mayStaySilent?: boolean;
   /** Records each model call against whoever pays for the Run. */
   usage?: UsageSink;
+  /** Server tools this turn may use beyond the agent's own, by registry name. */
+  extraTools?: string[];
+  /** Appended to the agent's system prompt. */
+  promptSuffix?: string;
+  /** Replaces the chat reply reminder on every model call of this Run. */
+  turnReminder?: (now: Date) => string;
+  /** This Run's tool budget, when it differs from a chat reply's. */
+  toolCallLimit?: { max: number; uncounted: string[] };
 };
 
 export async function runModelTurn(...args: Parameters<typeof runModelTurnInternal>): Promise<void> {
@@ -385,7 +393,7 @@ async function runModelTurnInternal(
       sessionSkills,
       activatedSkills: [],
       clientTools: materializedAgent?.localTools ?? input.local_tools,
-      allowedExternalTools: materializedAgent?.externalTools,
+      allowedExternalTools: profile?.extraTools ? [...materializedAgent?.externalTools ?? [], ...profile.extraTools] : materializedAgent?.externalTools,
       externalToolDefinitions: materializedAgent?.externalToolDefinitions,
       usage: profile?.usage,
       persistModelMessage: async (message) => {
@@ -399,8 +407,10 @@ async function runModelTurnInternal(
       compactMessagesIfNeeded: async (runtimeMessages: RuntimeCompactionMessage[], phase) => (await compaction.ifNeeded(runtimeMessages, phase))?.replacement_history,
       toolBridge,
       toolScope: "main",
-      agentSystemPrompt: materializedAgent?.systemPrompt,
+      agentSystemPrompt: materializedAgent && profile?.promptSuffix ? `${materializedAgent.systemPrompt}\n\n${profile.promptSuffix}` : materializedAgent?.systemPrompt,
       ...(profile?.liveState ? { liveState: profile.liveState } : {}),
+      ...(profile?.turnReminder ? { turnReminder: profile.turnReminder } : {}),
+      ...(profile?.toolCallLimit ? { toolCallLimit: profile.toolCallLimit } : {}),
       ...(profile?.ownPrompt ? { ownPrompt: true } : {}),
       ...(profile?.mayStaySilent ? { mayStaySilent: true } : {}),
       briefSnapshot,

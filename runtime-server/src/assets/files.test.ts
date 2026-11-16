@@ -141,9 +141,9 @@ test("tools declare SurfaceTool metadata, validate arguments and take scope from
     assert.equal(describeTool(tool), tool.description);
     assert.equal((tool.parameters as { type: string }).type, "object");
   }
-  assert.match(await tools.get("grep")!.run(scopeA, { pattern: "needle", fixed: true }), /a\.txt:1: needle here/);
-  assert.equal(JSON.parse(await tools.get("read")!.run(scopeA, { path: "/attachments/m1/a.txt" })).next_offset, null);
-  assert.match(await tools.get("read")!.run(scopeA, { offset: 1 }), /^Error: path/);
-  assert.match(await tools.get("read")!.run(scopeB, { path: "/attachments/m1/a.txt" }), /^Error: No such file/);
-  assert.match(await tools.get("grep")!.run(scopeA, { pattern: "(a+)+$" }), /^(Error: .*took too long|No matches)/);
+  assert.match((await tools.get("grep")!.run(scopeA, { pattern: "needle", fixed: true }) as string), /a\.txt:1: needle here/);
+  assert.equal(JSON.parse((await tools.get("read")!.run(scopeA, { path: "/attachments/m1/a.txt" }) as string)).next_offset, null);
+  assert.match((await tools.get("read")!.run(scopeA, { offset: 1 }) as string), /^Error: path/);
+  assert.match((await tools.get("read")!.run(scopeB, { path: "/attachments/m1/a.txt" }) as string), /^Error: No such file/);
+  assert.match((await tools.get("grep")!.run(scopeA, { pattern: "(a+)+$" }) as string), /^(Error: .*took too long|No matches)/);
 });

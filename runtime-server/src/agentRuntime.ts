@@ -101,6 +101,10 @@ export type RunContext = {
   onSteer?: (listener: () => void) => () => void;
   /** What the host sees right now. Appended to each model call like the reminder, and never stored. */
   liveState?: () => Promise<string | undefined>;
+  /** Replaces the chat reply reminder appended to each model call: a Run that delivers something other than a chat reply says so here. */
+  turnReminder?: (now: Date) => string;
+  /** Tool calls one Run may make, and the model-visible tool names that never count (a Run's delivery must always be callable). Defaults to the chat budget. */
+  toolCallLimit?: { max: number; uncounted: string[] };
   /** `agentSystemPrompt` is the agent's own whole prompt, not an Expert's instructions inside the Expert Agent frame. */
   ownPrompt?: boolean;
   /** A Run may end having said nothing: the agent had nothing to tell the user, or a tool handed the conversation over. */
@@ -944,8 +948,8 @@ export function chatToolsForRun(
       || spec.runtimeName.startsWith("hatch.")
       // Chat's Unix-style attachment retrieval is part of every Run's fixed surface.
       || spec.runtimeName.startsWith("attachments.")
-      // Studio tools belong to the Assistant alone: a conversation has them only when its agent names them.
-      || (allowed === undefined ? !spec.runtimeName.startsWith("studio.") : allowed.has(spec.runtimeName))
+      // Studio and report tools belong to one kind of conversation: it has them only when its agent names them.
+      || (allowed === undefined ? !spec.runtimeName.startsWith("studio.") && !spec.runtimeName.startsWith("artifact.") : allowed.has(spec.runtimeName))
     ))
     .map((spec) => tool(spec.name, spec.clientTool ? describeLocalTool(spec.clientTool, spec.description) : spec.description, spec.properties, spec.required));
   const creatorTools = externalToolDefinitions.map((definition) => tool(

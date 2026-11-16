@@ -97,6 +97,8 @@ export class ChatService<Scope> {
     compaction?: { waitForCompaction(conversationId: string): Promise<void> };
     /** Told of each message taken, for product analytics. */
     analytics?: ChatAnalytics;
+    /** A report conversation's report becomes 'generating' with the Run its first message starts. */
+    artifacts?: { runAccepted(conversation: ConversationRecord, run: ConversationRunRecord): Promise<void> };
   }) {}
 
   /**
@@ -104,7 +106,7 @@ export class ChatService<Scope> {
    * refused (409) while a Run is active or when the latest Run is not failed or interrupted. A repeated key replays its Run.
    */
   async retry(command: RetryCommand<Scope>): Promise<Retried> {
-    const { repository, supervisor, hub, admission, registry, limits, compaction, cap } = this.deps;
+    const { repository, supervisor, hub, admission, registry, limits, compaction, cap, artifacts } = this.deps;
     const binding = command.conversation;
     const accept = () => repository.acceptRetry({
       binding,
@@ -121,6 +123,7 @@ export class ChatService<Scope> {
       await compaction?.waitForCompaction(binding.id);
       const accepted = await accept();
       if (!accepted.created) { release(); return { outcome: "replayed", run: accepted.run }; }
+      await artifacts?.runAccepted(binding, accepted.run);
       registry.rememberClient(binding.id, command.client, command.timeZone);
       registry.rememberScope(accepted.run.id, command.scope);
       supervisor.adopt(accepted.run, () => { registry.forget(accepted.run.id); release(); });
@@ -133,7 +136,7 @@ export class ChatService<Scope> {
   }
 
   async submit(command: SubmitCommand<Scope>): Promise<Submission> {
-    const { repository, supervisor, hub, admission, registry, limits, compaction, terminator, cap, analytics } = this.deps;
+    const { repository, supervisor, hub, admission, registry, limits, compaction, terminator, cap, analytics, artifacts } = this.deps;
     assertProductUsable(command.requiresLocalTools, command.client.client);
     await limits?.check(command.principal, command.conversation);
     // A message that joins a Run adds no work, so capacity is only reserved for one that may start a Run.
@@ -174,6 +177,7 @@ export class ChatService<Scope> {
       }
       if (outcome !== "replayed") {
         registry.rememberClient(command.conversation.id, command.client, command.timeZone);
+        if (outcome === "started") await artifacts?.runAccepted(command.conversation, accepted.run);
         if (!known) analytics?.messageAccepted({ conversation: command.conversation, principal: command.principal, client: command.client });
       }
       if (outcome === "started") {
