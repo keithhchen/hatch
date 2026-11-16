@@ -112,7 +112,7 @@ export async function handleConversationHttpRequest(
         ...(limit ? { limit } : {})
       });
       writeResponse(200, {
-        conversations: page.conversations.map(publicConversation),
+        conversations: (deps.artifact ? await deps.artifact.withoutReports(page.conversations) : page.conversations).map(publicConversation),
         ...(page.nextCursor ? { next_cursor: page.nextCursor } : {}),
         sent_message_count: await repository.countSentMessages(repoBinding)
       });

@@ -1,6 +1,7 @@
 import type { ProductAnalytics } from "../analytics/port.js";
 import { reportFailed } from "../analytics/events.js";
 import type { ConversationRecord, ConversationRunRecord, RunEnding } from "../conversationRepository.js";
+import { ChatError } from "../chat/principal.js";
 import { log } from "../observability/log.js";
 import type { ReportRepository } from "./ports.js";
 
@@ -11,6 +12,16 @@ import type { ReportRepository } from "./ports.js";
  */
 export class ArtifactLifecycle {
   constructor(private readonly reports: ReportRepository, private readonly analytics?: ProductAnalytics, private readonly clock: () => Date = () => new Date()) {}
+
+  /**
+   * A report conversation takes its form, and the Run the retrier claimed for a later attempt. Anything else is refused;
+   * chat conversations are untouched.
+   */
+  async assertAcceptsMessage(conversation: Pick<ConversationRecord, "id">, runId: string): Promise<void> {
+    const report = await this.reports.get(conversation.id);
+    if (!report || report.status === "draft" || (report.status === "generating" && report.runId === runId)) return;
+    throw new ChatError("report_conversation", "This is a report, not a chat: it takes no further messages.", 409);
+  }
 
   async runAccepted(conversation: Pick<ConversationRecord, "id">, run: Pick<ConversationRunRecord, "id">): Promise<void> {
     try { await this.reports.begin(conversation.id, run.id, this.clock()); }

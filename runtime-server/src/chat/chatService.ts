@@ -98,7 +98,7 @@ export class ChatService<Scope> {
     /** Told of each message taken, for product analytics. */
     analytics?: ChatAnalytics;
     /** A report conversation's report becomes 'generating' with the Run its first message starts. */
-    artifacts?: { runAccepted(conversation: ConversationRecord, run: ConversationRunRecord): Promise<void> };
+    artifacts?: { runAccepted(conversation: ConversationRecord, run: ConversationRunRecord): Promise<void>; assertAcceptsMessage(conversation: ConversationRecord, runId: string): Promise<void> };
   }) {}
 
   /**
@@ -141,6 +141,7 @@ export class ChatService<Scope> {
     await limits?.check(command.principal, command.conversation);
     // A message that joins a Run adds no work, so capacity is only reserved for one that may start a Run.
     const known = await repository.hasAcceptedMessage(command.conversation.id, command.clientMessageId);
+    if (!known) await artifacts?.assertAcceptsMessage(command.conversation, command.runId);
     const joining = command.mode === "start_only" ? undefined : await repository.getActiveRun(command.conversation.id);
     // A message this conversation already accepted starts nothing new, so it is not asked again.
     if (!joining && !known) await cap?.(command.scope);

@@ -62,6 +62,8 @@ export type ReportRecord = {
 export interface ReportRepository {
   initialize(): Promise<void>;
   get(conversationId: string): Promise<ReportRecord | undefined>;
+  /** Which of these conversations are report conversations. */
+  reportConversations(conversationIds: string[]): Promise<Set<string>>;
   /** A new artifact conversation's report, 'draft'. Creating it again changes nothing. */
   create(input: { conversationId: string; productId: string; ownerAccountId: string }): Promise<ReportRecord>;
   /** The owner's reports for a product, newest first. */

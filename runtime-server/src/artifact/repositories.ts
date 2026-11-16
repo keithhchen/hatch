@@ -48,6 +48,12 @@ export class PostgresReportRepository implements ReportRepository {
 
   get(conversationId: string) { return this.one("SELECT * FROM hatch_artifact_reports WHERE conversation_id = $1", [conversationId]); }
 
+  async reportConversations(conversationIds: string[]) {
+    if (!conversationIds.length) return new Set<string>();
+    const { rows } = await this.db.query("SELECT conversation_id FROM hatch_artifact_reports WHERE conversation_id = ANY($1::text[])", [conversationIds]);
+    return new Set(rows.map(row => String(row.conversation_id)));
+  }
+
   async create(input: { conversationId: string; productId: string; ownerAccountId: string }) {
     await this.db.query("INSERT INTO hatch_artifact_reports (conversation_id, product_id, owner_account_id, status) VALUES ($1, $2, $3, 'draft') ON CONFLICT DO NOTHING",
       [input.conversationId, input.productId, input.ownerAccountId]);
@@ -125,6 +131,7 @@ export class InMemoryReportRepository implements ReportRepository {
 
   async initialize() { return; }
   async get(conversationId: string) { return this.rows.get(conversationId); }
+  async reportConversations(conversationIds: string[]) { return new Set(conversationIds.filter(id => this.rows.has(id))); }
 
   async create(input: { conversationId: string; productId: string; ownerAccountId: string }) {
     return this.rows.get(input.conversationId) ?? this.put({ ...input, status: "draft", stage: "queued", attempt: 1, steps: [], createdAt: new Date().toISOString() });

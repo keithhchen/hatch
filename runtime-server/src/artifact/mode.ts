@@ -69,6 +69,12 @@ export class ArtifactMode {
     return true;
   }
 
+  /** The chat list leaves report conversations out: they open on their own page. */
+  async withoutReports<T extends { id: string }>(conversations: T[]): Promise<T[]> {
+    const reports = await this.deps.reports.reportConversations(conversations.map(conversation => conversation.id));
+    return conversations.filter(conversation => !reports.has(conversation.id));
+  }
+
   /** The turn's additions when the conversation is an artifact conversation; otherwise nothing. */
   async turnFor(conversation: ConversationRecord, run: Pick<ConversationRunRecord, "createdAt">): Promise<ArtifactTurn | undefined> {
     const report = await this.deps.reports.get(conversation.id);

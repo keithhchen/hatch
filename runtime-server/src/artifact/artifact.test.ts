@@ -146,6 +146,20 @@ test("the upload cap applies to report conversations only", async () => {
   await assert.rejects(artifact.assertCanUpload(c), /at most 2 files/);
 });
 
+test("a report conversation takes only its form and stays out of the chat list; chat conversations are untouched", async () => {
+  const { artifact, reports } = await mode();
+  const chat = { ...conversation(), id: "chat-1" };
+  const report = { ...conversation(), id: "report-1" };
+  await artifact.lifecycle.assertAcceptsMessage(chat, "run-x");
+  await reports.create({ conversationId: report.id, productId: "p1", ownerAccountId: report.ownerAccountId });
+  await artifact.lifecycle.assertAcceptsMessage(report, "run-1");
+  await artifact.lifecycle.runAccepted(report, { id: "run-1" } as never);
+  await artifact.lifecycle.assertAcceptsMessage(report, "run-1"); // the claimed Run itself
+  await assert.rejects(artifact.lifecycle.assertAcceptsMessage(report, "run-2"), /takes no further messages/);
+  assert.deepEqual((await artifact.withoutReports([chat, report])).map(c => c.id), ["chat-1"]);
+  assert.deepEqual(await artifact.withoutReports([]), []);
+});
+
 function fakeResponse() {
   const out = { status: 0, headers: {} as Record<string, unknown>, body: Buffer.alloc(0) };
   const res = {
