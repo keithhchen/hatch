@@ -227,6 +227,29 @@ test("Web Chat history preserves the stored text and tool-call order", () => {
   assert.equal(timeline[2].content, "after");
 });
 
+test("steps no text interrupts are one row across replies: steps then a reply that opens with steps, and text-then-steps then steps", () => {
+  const step = id => ({ role: "assistant", run_id: id, content: "", tool_calls: [{ tool_call_id: id, name: "read", status: "completed" }], parts: [{ type: "tool_call", tool_call_id: id }] });
+  const stepsThenText = id => ({ role: "assistant", run_id: id, content: "answer", tool_calls: [{ tool_call_id: id, name: "read", status: "completed" }], parts: [{ type: "tool_call", tool_call_id: id }, { type: "text", start: 0, end: 6 }] });
+  const textThenSteps = id => ({ role: "assistant", run_id: id, content: "let me look", tool_calls: [{ tool_call_id: id, name: "read", status: "completed" }], parts: [{ type: "text", start: 0, end: 11 }, { type: "tool_call", tool_call_id: id }] });
+  const text = { role: "assistant", run_id: "t", content: "hello" };
+  const user = { role: "user", run_id: "u", content: "hi" };
+  const rows = messages => foldStepOnlyMessages(messages).map(message => groupTimelineEntries([message, ...(message.foldedMessages ?? [])].flatMap(part => ChatTimeline.fromHistory(part))).map(entry => entry.kind));
+  assert.deepEqual(rows([user, step("a"), step("b"), stepsThenText("c")]), [["text"], ["activity_group", "text"]], "one steps row, then the answer");
+  assert.deepEqual(rows([textThenSteps("a"), step("b")]), [["text", "activity_group"]], "the steps after the text and the next reply's steps are one row");
+  assert.deepEqual(rows([text, step("b")]), [["text"], ["activity_group"]], "text ends a stretch: nothing to join");
+  assert.deepEqual(rows([step("a"), user, step("b")]), [["activity_group"], ["text"], ["activity_group"]], "the user breaks it");
+});
+
+test("a live reply that opens with steps joins the saved steps before it; one that opens with text does not", () => {
+  const step = id => ({ role: "assistant", run_id: "r", content: "", tool_calls: [{ tool_call_id: id, name: "read", status: "completed" }], parts: [{ type: "tool_call", tool_call_id: id }] });
+  const live = first => ({ role: "assistant", run_id: "r", transient: true, timeline: [first] });
+  const joined = foldStepOnlyMessages([step("a"), live({ id: "t1", kind: "thinking", content: "hmm", streaming: true })]);
+  assert.equal(joined.length, 1);
+  assert.equal(joined[0].liveTail.transient, true);
+  const apart = foldStepOnlyMessages([step("a"), live({ id: "x1", kind: "text", content: "Here is" })]);
+  assert.equal(apart.length, 2, "text after the steps is a new row");
+});
+
 test("consecutive replies of only steps fold into the first; text and the user break a run", () => {
   const step = id => ({ role: "assistant", run_id: id, content: "", tool_calls: [{ tool_call_id: id, name: "read", status: "completed" }], parts: [{ type: "tool_call", tool_call_id: id }] });
   const text = { role: "assistant", run_id: "t", content: "hello" };

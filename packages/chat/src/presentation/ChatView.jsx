@@ -128,6 +128,10 @@ const REPLY_STATUSES = ["sending", "agentReplying", "syncingReply", "stopping", 
 
 function ChatMessage({ message, continued, identity, typingText, compacting, attachments, Viewer, assetSource, activityKinds, t, errorText, loadToolDetail, approvals }) {
   const { files, pictures } = partitionAttachments(message, mediaType => attachments.accepts(mediaType));
+  const saved = () => [message, ...(message.foldedMessages ?? [])].flatMap(part => ChatTimeline.fromHistory(part));
+  // Saved steps the live reply continues: one row, live, until the Run's saved copy replaces it.
+  // A step the live row still holds after its saved copy arrived is the same step: the live one, the latest, is kept.
+  if (message.liveTail) message = { ...message.liveTail, timeline: [...new Map([...saved(), ...(message.liveTail.timeline ?? [])].map(entry => [entry.id, entry])).values()] };
   const live = message.transient && message.timeline?.filter(entry => !ACTIVITY_KINDS.includes(entry.kind) || activityKinds.includes(entry.kind)).length;
   const timelineProps = { activityKinds, t, errorText, loadToolDetail, approvals };
   return <article className={`web-chat__message web-chat__message--${message.role}${message.state ? ` web-chat__message--${message.state}` : ""}`}>
@@ -326,7 +330,8 @@ export function ChatView({ controller, identity, agentName, t, errorText, attach
         </section> : null}
         {!snapshotPending || messages.length ? (mergeSteps ? foldStepOnlyMessages(withoutRepeatedSteps(messages), activityKinds) : withoutRepeatedSteps(messages)).map((message, index, shown) => {
           const key = message.renderKey ?? `${message.run_id}-${message.role}`;
-          const compacting = Boolean(message.transient && activeRun && message.run_id === activeRun && state.runState === "compacting");
+          const liveRun = message.liveTail ?? message;
+          const compacting = Boolean(liveRun.transient && activeRun && liveRun.run_id === activeRun && state.runState === "compacting");
           return <React.Fragment key={key}>
             {message.role === "assistant" && compactedRuns.has(message.run_id) ? <CompactionDivider t={t} /> : null}
             <ChatMessage message={message} continued={message.role === "assistant" && shown[index - 1]?.role === "assistant"} compacting={compacting} {...messageProps} />

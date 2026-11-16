@@ -271,19 +271,23 @@ export function withoutRepeatedSteps(messages) {
 }
 
 /**
- * Replies that only passed through steps (no text) and follow one another fold into the first of them,
- * so a stretch of steps is one row. `kinds` are the activity kinds the host shows.
+ * Steps that no text interrupts are one row, even when they span replies: a reply that starts with steps folds into the
+ * reply before it when that one ended with steps, so "steps | steps then text" and "text then steps | steps" each show a
+ * single steps row. The live reply joins the same way, as `liveTail`, so a Run's saved steps and its running ones are one
+ * row while it works. `kinds` are the activity kinds the host shows; empty thinking and blank text count as nothing.
  */
 export function foldStepOnlyMessages(messages, kinds = ACTIVITY_KINDS) {
-  const stepsOnly = message => {
-    if (message.role !== "assistant" || message.transient) return false;
-    const entries = ChatTimeline.fromHistory(message);
-    return entries.length > 0 && entries.every(entry => kinds.includes(entry.kind));
-  };
+  const shown = entry => !(entry.kind === "thinking" && !entry.streaming && !entry.content?.trim()) && !(entry.kind === "text" && !String(entry.content ?? "").trim())
+    && (!ACTIVITY_KINDS.includes(entry.kind) || kinds.includes(entry.kind));
+  const entriesOf = message => ChatTimeline.fromHistory(message).filter(shown);
+  const isStep = entry => entry !== undefined && kinds.includes(entry.kind);
+  const foldable = message => message.role === "assistant" && !message.transient;
   const folded = [];
   for (const message of messages) {
     const last = folded.at(-1);
-    if (last && stepsOnly(last) && stepsOnly(message)) folded[folded.length - 1] = { ...last, foldedMessages: [...(last.foldedMessages ?? []), message] };
+    const lastEntries = last && foldable(last) ? [last, ...(last.foldedMessages ?? [])].flatMap(entriesOf) : [];
+    if (foldable(message) && isStep(lastEntries.at(-1)) && isStep(entriesOf(message)[0])) folded[folded.length - 1] = { ...last, foldedMessages: [...(last.foldedMessages ?? []), message] };
+    else if (message.role === "assistant" && message.transient && isStep(lastEntries.at(-1)) && isStep((message.timeline ?? []).filter(shown)[0])) folded[folded.length - 1] = { ...last, liveTail: message };
     else folded.push(message);
   }
   return folded;
