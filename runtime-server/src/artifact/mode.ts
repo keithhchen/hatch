@@ -10,7 +10,8 @@ import type { ArtifactConfigRepository, ReportRenderer, ReportRepository } from 
 import { artifactPrompt } from "./prompt.js";
 import { ReportProgress } from "./progress.js";
 import { ReportPublisher } from "./publisher.js";
-import { PUBLISH_REPORT_TOOL, WEB_SEARCH_TOOL, reportToolRunner } from "./toolDefinitions.js";
+import { DRAFT_TOOLS, PUBLISH_REPORT_TOOL, WEB_SEARCH_TOOL, reportToolRunner } from "./toolDefinitions.js";
+import { InMemoryDraftStore, type DraftStore } from "./drafts.js";
 import type { SearchProvider } from "../factoryAgents/search.js";
 
 /** At most this many files may be uploaded to one artifact conversation. */
@@ -51,15 +52,19 @@ export class ArtifactMode {
     maxFiles?: number;
     /** The public web, for facts that change; absent when the server has no search configured. */
     search?: SearchProvider;
+    /** The report's working files; in memory when not given (tests). */
+    drafts?: DraftStore;
     /** Test seams of publishing: pauses, sleep, clock, ids. */
     publishing?: Partial<ConstructorParameters<typeof ReportPublisher>[0]>;
     clock?: () => Date;
   }) {
     const analytics = safely(deps.analytics);
     this.lifecycle = new ArtifactLifecycle(deps.reports, analytics, deps.clock);
+    this.drafts = deps.drafts ?? new InMemoryDraftStore();
     this.publisher = new ReportPublisher({ reports: deps.reports, renderer: deps.renderer, blobs: deps.blobs, analytics, ...deps.publishing });
   }
 
+  private readonly drafts: DraftStore;
   get configs() { return this.deps.configs; }
   get reports() { return this.deps.reports; }
   get blobs() { return this.deps.blobs; }
@@ -85,6 +90,6 @@ export class ArtifactMode {
     const config = await this.deps.configs.get(conversation.productId);
     if (!config) throw new Error(`Product ${conversation.productId} has an artifact conversation but no artifact configuration.`);
     const progress = new ReportProgress(this.deps.reports, { conversationId: conversation.id, attempt: report.attempt });
-    return { promptSuffix: await artifactPrompt(config), extraTools: this.deps.search ? [PUBLISH_REPORT_TOOL, WEB_SEARCH_TOOL] : [PUBLISH_REPORT_TOOL], tools: reportToolRunner(this.publisher, conversation, run, report.attempt, progress, this.deps.search), onTool: progress.onTool, turnReminder: reportTurnReminder, toolCallLimit: REPORT_TOOL_CALL_LIMIT };
+    return { promptSuffix: await artifactPrompt(config), extraTools: [PUBLISH_REPORT_TOOL, ...DRAFT_TOOLS, ...(this.deps.search ? [WEB_SEARCH_TOOL] : [])], tools: reportToolRunner(this.publisher, conversation, run, report.attempt, progress, this.drafts, this.deps.search), onTool: progress.onTool, turnReminder: reportTurnReminder, toolCallLimit: REPORT_TOOL_CALL_LIMIT };
   }
 }

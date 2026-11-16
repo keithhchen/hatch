@@ -9,7 +9,8 @@ const TOOLS = `# Report tools
 - \`read(path, offset?, page?)\`: a .md path returns its text in pages. An original image is shown to you. An original PDF shows page \`page\` (default 1) as an image, with "page N of M". Any other original (docx, xlsx...) is read through its .md.
 - \`grep\` searches the .md texts.
 - \`web_search(query, objective)\` searches the public web, for facts that change over time.
-- \`publish_report(html)\` publishes the report once; it returns "Report published." or the exact errors to fix.`;
+- \`write_file(path, content)\`, \`edit_file(path, old_string, new_string)\` and \`read_file(path)\` work on your report files under /report/, like a coding agent's files.
+- \`publish_report(path)\` publishes the report file once; it returns "Report published." or the exact errors to fix in the file.`;
 
 /** What an artifact conversation's agent is told beyond the Expert's own instructions: the shared report rules, the product's template, the tools. */
 export async function artifactPrompt(config: ArtifactConfig): Promise<string> {
@@ -17,4 +18,4 @@ export async function artifactPrompt(config: ArtifactConfig): Promise<string> {
 }
 
 /** What a new attempt is told: the form is already in the conversation, and so is whatever the earlier attempt did. */
-export const ARTIFACT_RETRY_MESSAGE = "The earlier attempt ended before the report was published. Start again from the form above: read what you need and call publish_report.";
+export const ARTIFACT_RETRY_MESSAGE = "The earlier attempt ended before the report was published. Your files under /report/ are kept: list them with read_file, continue the report from where it stopped, proofread it and call publish_report.";

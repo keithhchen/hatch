@@ -26,7 +26,7 @@ export interface ArtifactConfigRepository {
 }
 
 export type ReportStatus = "draft" | "generating" | "ready" | "failed";
-export type ReportStage = "queued" | "reading" | "consulting" | "researching" | "writing" | "rendering" | "ready" | "failed";
+export type ReportStage = "queued" | "reading" | "consulting" | "researching" | "writing" | "proofreading" | "rendering" | "ready" | "failed";
 export type ReportKeys = { fullHtml: string; freeHtml: string; fullPdf: string; freePdf: string; preview: string };
 export type ReportStep = { at: string; stage: ReportStage; detail?: string };
 export const MAX_REPORT_STEPS = 20;

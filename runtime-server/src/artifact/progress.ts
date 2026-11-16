@@ -7,7 +7,9 @@ export function stageOf(name: string, args: Record<string, unknown>): { stage: R
   if (name.startsWith("attachments.")) return { stage: "reading", detail: `${name.slice("attachments.".length)}${path}` };
   if (name.startsWith("creator.")) return { stage: "consulting", detail: name };
   if (name === "web.search" || name === "hatch.web_search" || name === "artifact.web_search") return { stage: "researching", detail: "web_search" };
-  if (name === "artifact.publish_report") return { stage: "writing", detail: "publish_report" };
+  if (name === "artifact.write_file" || name === "artifact.edit_file") return { stage: "writing", detail: `${name.slice("artifact.".length)}${path}` };
+  if (name === "artifact.read_file") return { stage: "proofreading", detail: `read_file${path}` };
+  if (name === "artifact.publish_report") return { stage: "rendering", detail: "publish_report" };
   return undefined;
 }
 

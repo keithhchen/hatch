@@ -94,6 +94,31 @@ async function mode() {
   return { ...kit, reports, analytics, artifact, r, uploads, clock };
 }
 
+/** The agent's way: write the report file, then publish it by path. */
+async function publishFile(turn: { tools: { run(name: string, args: Record<string, unknown>): Promise<{ output: unknown }> } }, html: string) {
+  await turn.tools.run("write_file", { path: "/report/report.html", content: html });
+  return turn.tools.run("publish_report", { path: "/report/report.html" });
+}
+
+test("draft files work like a coding agent's: write, edit exactly once, read, list; bad paths and edits are told back", async () => {
+  const { reports, artifact } = await mode();
+  const c = conversation();
+  await reports.create({ conversationId: c.id, productId: "p1", ownerAccountId: c.ownerAccountId });
+  const turn = (await artifact.turnFor(c, { createdAt: new Date().toISOString() }))!;
+  assert.ok(turn.extraTools.includes("artifact.write_file") && turn.extraTools.includes("artifact.edit_file") && turn.extraTools.includes("artifact.read_file"));
+  const run = (name: string, args: Record<string, unknown>) => turn.tools.run(name, args).then((r) => String(r.output));
+  assert.match(await run("write_file", { path: "/report/report.html", content: "<h1>A</h1><!-- ch2 --><!-- ch3 -->" }), /Wrote \/report\/report.html/);
+  assert.match(await run("edit_file", { path: "/report/report.html", old_string: "<!-- ch2 -->", new_string: "<p>two</p>" }), /Edited/);
+  assert.equal(await run("read_file", { path: "/report/report.html" }), "<h1>A</h1><p>two</p><!-- ch3 -->");
+  assert.match(await run("read_file", {}), /\/report\/report.html  \d+ bytes/);
+  await assert.rejects(run("edit_file", { path: "/report/report.html", old_string: "<!-- ch2 -->", new_string: "x" }), /not found/);
+  await assert.rejects(run("write_file", { path: "/etc/passwd", content: "x" }), /files under \/report\//);
+  await assert.rejects(run("write_file", { path: "/report/../x", content: "x" }), /files under/);
+  await assert.rejects(run("read_file", { path: "/report/none.html" }), /does not exist/);
+  const again = (await artifact.turnFor(c, { createdAt: new Date().toISOString() }))!;
+  assert.equal(String((await again.tools.run("read_file", { path: "/report/report.html" })).output), "<h1>A</h1><p>two</p><!-- ch3 -->", "a retry finds the draft");
+});
+
 test("lifecycle: draft, generating, ready; and failed when a run ends without a report", async () => {
   const { reports, artifact, analytics, r } = await mode();
   r.fail = undefined;
@@ -105,21 +130,21 @@ test("lifecycle: draft, generating, ready; and failed when a run ends without a 
   assert.equal((await reports.get(c.id))?.status, "generating");
 
   const turn = (await artifact.turnFor(c, { createdAt: new Date(Date.now() - 5000).toISOString() }))!;
-  assert.deepEqual(turn.extraTools, ["artifact.publish_report"]);
+  assert.deepEqual(turn.extraTools, ["artifact.publish_report", "artifact.write_file", "artifact.edit_file", "artifact.read_file"]);
   assert.match(turn.promptSuffix, /TEMPLATE-TEXT/);
   assert.match(turn.promptSuffix, /Report mode/);
 
-  const bad = await turn.tools.run("publish_report", { html: doc("<p>x</p>") });
+  const bad = await publishFile(turn, doc("<p>x</p>"));
   assert.match(String(bad.output), /^Not published/);
   assert.equal((await reports.get(c.id))?.status, "generating");
 
   r.fail = "boom";
-  await assert.rejects(turn.tools.run("publish_report", { html: good }), /Rendering the report failed: boom/);
+  await assert.rejects(publishFile(turn, good), /Rendering the report failed: boom/);
   assert.equal(r.calls, 3, "a failing rendering is tried again twice inside the tool");
   assert.equal((await reports.get(c.id))?.status, "generating");
 
   r.fail = undefined;
-  assert.deepEqual(await turn.tools.run("publish_report", { html: good }), { output: "Report published." });
+  assert.deepEqual(await publishFile(turn, good), { output: "Report published." });
   const ready = (await reports.get(c.id))!;
   assert.equal(ready.status, "ready");
   assert.ok(ready.keys!.fullPdf.endsWith("/report/pub1/full.pdf"));
@@ -138,12 +163,12 @@ test("web_search is offered only when search is configured, and asks it with que
   const c = conversation();
   await reports.create({ conversationId: c.id, productId: "p1", ownerAccountId: c.ownerAccountId });
   const run = { createdAt: new Date().toISOString() };
-  assert.deepEqual((await artifact.turnFor(c, run))!.extraTools, ["artifact.publish_report"]);
+  assert.deepEqual((await artifact.turnFor(c, run))!.extraTools, ["artifact.publish_report", "artifact.write_file", "artifact.edit_file", "artifact.read_file"]);
   const asked: unknown[] = [];
   const search = { name: "fake", search: async (input: { query: string; objective: string }) => { asked.push(input); return { provider: "fake", query: input.query, retrievedAt: "t", results: [] }; } };
   const withSearch = new ArtifactMode({ ...artifact.deps, search });
   const turn = (await withSearch.turnFor(c, run))!;
-  assert.deepEqual(turn.extraTools, ["artifact.publish_report", "artifact.web_search"]);
+  assert.deepEqual(turn.extraTools, ["artifact.publish_report", "artifact.write_file", "artifact.edit_file", "artifact.read_file", "artifact.web_search"]);
   assert.match(String((await turn.tools.run("web_search", { query: "MIT deadline", objective: "official date" })).output), /"provider":"fake"/);
   assert.deepEqual(asked, [{ query: "MIT deadline", objective: "official date" }]);
   await assert.rejects(turn.tools.run("web_search", { query: "x" }), /query and objective/);
@@ -201,7 +226,7 @@ test("a locked viewer gets the full PDF (payment is not live) but never the full
   const generating = JSON.parse((await get("/report", buyer)).body.toString());
   assert.deepEqual([generating.status, generating.files.full_pdf, generating.stage, generating.attempt], ["generating", false, "queued", 1]);
   assert.equal((await get("/report/files/free.pdf", buyer)).status, 404, "nothing before ready");
-  await turn.tools.run("publish_report", { html: good });
+  await publishFile(turn, good);
   const status = JSON.parse((await get("/report", buyer)).body.toString());
   assert.deepEqual({ ...status, steps: undefined, started_at: undefined }, { status: "ready", unlocked: false, files: { free_pdf: true, free_html: true, preview: true, full_pdf: true, full_html: false }, stage: "ready", attempt: 1, steps: undefined, started_at: undefined });
   const free = await get("/report/files/free.pdf", buyer);

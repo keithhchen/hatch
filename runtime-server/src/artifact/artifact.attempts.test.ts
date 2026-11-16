@@ -205,7 +205,7 @@ test("progress follows the Run's own tool calls: stages, safe details, the last 
   turn.onTool("some.other", {});
   turn.onTool("artifact.publish_report", { html: "SECRET" });
   await sleep(10);
-  assert.deepEqual((await w.reports.get(w.id))!.steps.map((s) => [s.stage, s.detail]), [["reading", "read /attachments/a.pdf"], ["consulting", "creator.nas_search"], ["researching", "web_search"], ["writing", "publish_report"]]);
+  assert.deepEqual((await w.reports.get(w.id))!.steps.map((s) => [s.stage, s.detail]), [["reading", "read /attachments/a.pdf"], ["consulting", "creator.nas_search"], ["researching", "web_search"], ["rendering", "publish_report"]]);
   assert.ok(!JSON.stringify((await w.reports.get(w.id))!.steps).includes("child"));
   for (let i = 0; i < 30; i++) turn.onTool("attachments.ls", { path: `/attachments/${i}` });
   await sleep(20);
