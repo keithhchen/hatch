@@ -5,7 +5,7 @@ import { buildRuntimeSystemPrompt, chatToolsForRun, withActivityMessage } from "
 test("activity_message boilerplate is one short rule and one short parameter description", () => {
   const prompt = buildRuntimeSystemPrompt("Expert prompt", undefined, undefined, [], "", true);
   assert.match(prompt, /Write an activity_message on every tool call/);
-  assert.ok(prompt.length < 800, `system prompt grew to ${prompt.length}`);
+  assert.ok(prompt.length < 900, `system prompt grew to ${prompt.length}`);
   const [tool] = chatToolsForRun([]).map(withActivityMessage);
   const parameter = (tool!.function.parameters.properties as Record<string, { description: string }>).activity_message!;
   assert.ok(parameter.description.length < 160);

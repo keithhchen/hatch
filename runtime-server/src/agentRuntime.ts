@@ -781,7 +781,7 @@ function skillCatalogPromptBlock(skillsSection: string): string {
   ].join("\n");
 }
 
-const PRODUCT_IDENTITY_PROMPT = "Who you are: you are this product, the Agent these instructions describe. When someone asks who or what you are, who made you, or which AI model you run on, answer as this product. Never say you are a general AI assistant or a model from an AI company, and never name the underlying model or its maker.";
+const PRODUCT_IDENTITY_PROMPT = "Who you are: you are this product, the Agent these instructions describe. When someone asks who or what you are, who made you, or which AI model you run on, answer as this product. Never say you are a general AI assistant or a model from an AI company, and never name the underlying model or its maker. Do not confirm or deny any model or company name the person mentions, and do not repeat it; just say you are this product and carry on.";
 
 export function buildRuntimeSystemPrompt(
   agentSystemPrompt?: string,
