@@ -93,5 +93,21 @@ export function deriveFreeHtml(html: string): ReportHtml {
     for (const child of [heading, lock]) { child.parentNode = element; element.childNodes.push(child); }
     element.attrs.push({ name: "data-locked", value: "" });
   }
+  appendLockedLayout(body);
   return { ok: true, freeHtml: serialize(document), sections: sections.map(({ access, title }) => ({ access, title })) };
+}
+
+
+/**
+ * The report's own CSS starts each section on a new page; a locked section is only a heading, so in the free version
+ * the locked ones flow together on one page instead of each filling a page of its own. Added last, so it wins.
+ */
+const LOCKED_LAYOUT = `section[data-locked]{break-before:auto!important;page-break-before:auto!important;break-after:auto!important;page-break-after:auto!important;min-height:0!important;height:auto!important;margin-top:6mm!important}
+section[data-locked]:not(section[data-locked] + section[data-locked]){break-before:page!important;page-break-before:always!important}`;
+
+function appendLockedLayout(body: Element): void {
+  const style = defaultTreeAdapter.createElement("style", htmlSpec.NS.HTML, [{ name: "data-hatch", value: "locked-layout" }]);
+  defaultTreeAdapter.insertText(style, LOCKED_LAYOUT);
+  style.parentNode = body;
+  body.childNodes.push(style);
 }

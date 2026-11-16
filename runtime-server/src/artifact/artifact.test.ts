@@ -32,6 +32,7 @@ test("free HTML keeps headings, drops paid content, marks locked sections", () =
   assert.ok(!out.freeHtml.includes(PAID));
   assert.match(out.freeHtml, /free text/);
   assert.match(out.freeHtml, /<section data-access="paid" data-locked=""><h2>Your plan<\/h2><p class="locked"><\/p><\/section>/);
+  assert.match(out.freeHtml, /<style data-hatch="locked-layout">section\[data-locked\]\{break-before:auto!important/, "locked sections flow together instead of a page each");
   assert.match(out.freeHtml, /<style>p\{color:#111\}<\/style>/);
   assert.deepEqual(out.sections, [{ access: "free", title: "Who you are" }, { access: "paid", title: "Your plan" }]);
   assert.ok(deriveFreeHtml(good.replace("<header>", "<main><header>").replace("</section>\n<section data-access=\"paid\">", "</section><section data-access=\"paid\">") + "").ok || true);

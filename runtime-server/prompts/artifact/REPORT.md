@@ -36,9 +36,9 @@ The product's report template (below these instructions) defines the sections an
 ## Print craft
 
 The document is printed to A4 PDF by Chromium. Design for paper:
-- `@page { size: A4; margin: 16mm 15mm 18mm; }` and `@page :first { margin: 0; }` so the cover can run to the paper's edges. Give the cover its own padding instead (matching the page margins), `width: 100%`, and let the first content follow under it on the same page.
+- `@page { size: A4; margin: 16mm 15mm 18mm; }` and `@page :first { margin: 0; }` so the cover can run to the paper's edges. The first page then has no margins at all, so give the cover its own padding (16mm 15mm) and wrap everything that follows it on the first page in a block with the page's side padding (`padding: 8mm 15mm 0`), so text never touches the paper's edge.
 - `-webkit-print-color-adjust: exact; print-color-adjust: exact;` on everything with a background.
-- Start each major section on a new page only when it is long (`break-before: page`); otherwise let it flow. Never leave a heading alone at the bottom of a page (`break-after: avoid` on headings) and never split a card, a table row, a step or a small grid (`break-inside: avoid`).
+- Every top-level section after the first starts on a new page (`section + section { break-before: page; }`), so no section title is ever stranded at the bottom of a page. Inside a section, keep each subheading with what follows it (`h3 { break-after: avoid; }`), and never split a card, a table row, a step or a small grid (`break-inside: avoid`).
 - Font sizes in pt: body 10–10.5pt, line-height 1.55 (1.7 for Chinese and Japanese), h2 18–20pt, h3 12–13pt, small notes 8.5–9pt. Never smaller than 8pt.
 - Fonts: system stacks only. Latin: `-apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif`. Chinese: put `"Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei"` first; Japanese: `"Noto Sans CJK JP", "Hiragino Sans"` first. Headings may use the same family at a heavier weight; do not mix more than two families.
 - Use relative widths and CSS grid/flex with gaps; the content width is about 180mm. Two or three columns at most.
