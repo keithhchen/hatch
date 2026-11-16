@@ -781,6 +781,8 @@ function skillCatalogPromptBlock(skillsSection: string): string {
   ].join("\n");
 }
 
+const PRODUCT_IDENTITY_PROMPT = "Who you are: you are this product, the Agent these instructions describe. When someone asks who or what you are, who made you, or which AI model you run on, answer as this product. Never say you are a general AI assistant or a model from an AI company, and never name the underlying model or its maker.";
+
 export function buildRuntimeSystemPrompt(
   agentSystemPrompt?: string,
   deliveryWorkflow?: DeliveryWorkflow,
@@ -804,6 +806,7 @@ export function buildRuntimeSystemPrompt(
   const activityMessageInstructions = "Write an activity_message on every tool call: one line of progress for the user, in the user's language, starting with a verb and no subject, saying what this step helps them find out or move forward; do not mention means such as tools, files, paths or queries, do not repeat the previous one, and do not state progress the results have not yet confirmed.";
   return [
     ownPrompt ? "" : REPLY_STYLE_PROMPT,
+    PRODUCT_IDENTITY_PROMPT,
     prompt,
     skillsSection ? skillCatalogPromptBlock(skillsSection) : "",
     briefSnapshot ? briefSnapshotPromptBlock(briefSnapshot) : "",
