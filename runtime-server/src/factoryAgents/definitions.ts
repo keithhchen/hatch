@@ -38,8 +38,8 @@ function disableYoutubeTranscriptAccess(definitions: AgentDefinition[]): AgentDe
           .join("\n")
           .trimEnd()}
 
-# 临时能力限制
-YouTube 视频字幕转录能力当前暂时不可用。不要尝试调用任何字幕转录工具；仅使用当前实际提供的其他工具。`
+# Temporary capability limits
+YouTube video transcript transcription is temporarily unavailable. Do not try to call any transcript transcription tool; use only the other tools actually provided.`
       : definition.systemPrompt;
     return { ...definition, tools: definition.tools.filter(tool => tool !== "youtube_transcript"), systemPrompt };
   });

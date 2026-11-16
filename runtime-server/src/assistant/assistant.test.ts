@@ -314,10 +314,10 @@ test("start_task is one tool: a new kind runs its steps in order and reports", a
     const task = await env.assistant.dispatch(ACCOUNT, "evaluate", PRODUCT, "看看现在怎么样", { source: "web" });
     assert.equal(task.status, "working", "evaluate changes nothing outward, so it needs no confirmation");
     await waitFor(async () => (await env.tasks.get(task.id))!.status === "done");
-    assert.ok(started.some(text => text.includes("构造一个新的真实客户案例")));
-    assert.ok(started.some(text => text.includes("评测线上 Agent")));
+    assert.ok(started.some(text => text.includes("construct a new realistic client case")));
+    assert.ok(started.some(text => text.includes("Evaluate the live Agent")));
     await waitFor(() => heard.some(text => text.includes("评测跑完了")));
-    await assert.rejects(env.assistant.dispatch(ACCOUNT, "build", undefined, "写", { source: "web" }), /指定 Agent/);
+    await assert.rejects(env.assistant.dispatch(ACCOUNT, "build", undefined, "写", { source: "web" }), /specified/);
   } finally { await env.close(); }
 });
 
@@ -335,10 +335,10 @@ test("Interview is an ordinary worker: it writes the outline on the Product's se
   });
   try {
     await env.telegramUpdate(update(1, "我选址先看隔壁活了几年"));
-    await waitFor(async () => env.model.state.turns.some(turn => turn.said.some(text => text.includes("访谈大纲写好了"))));
+    await waitFor(async () => env.model.state.turns.some(turn => turn.said.some(text => text.includes("The interview outline is written"))));
     await env.idle();
-    assert.match(voiceInputs[0]!, /^\[Hatch 助理请你写访谈大纲\]/, "the worker is told it was dispatched by the Assistant");
-    const outline = env.model.state.turns.flatMap(turn => turn.said).find(text => text.includes("访谈大纲写好了"))!;
+    assert.match(voiceInputs[0]!, /^\[Hatch Assistant asks you to write the interview outline\]/, "the worker is told it was dispatched by the Assistant");
+    const outline = env.model.state.turns.flatMap(turn => turn.said).find(text => text.includes("The interview outline is written"))!;
     assert.match(outline, /○ 技能·选址.*\n○ 底线/, "the Assistant hears the outline");
     assert.equal((await env.productStore.list()).find(session => session.role === "voice")!.assistantTaskId, undefined, "the dispatch mark is cleared when the worker is done");
     assert.equal((await env.chat.lines(ACCOUNT)).filter(line => line.role === "assistant").some(line => line.text.startsWith("[访谈]")), false);
@@ -352,10 +352,10 @@ test("Interview is an ordinary worker: it writes the outline on the Product's se
     assert.equal(voiceInputs.some(text => text.includes("三年还在")), false, "the worker heard nothing of it");
 
     const build = () => callTool(env, "start_task", { kind: "build", agent_id: PRODUCT, instruction: "构建" });
-    await assert.rejects(build(), /还有没聊完的：技能·选址.*、底线/);
-    await assert.rejects(callTool(env, "tick_outline", { item: "不存在的项" }), /大纲里没有这一项/);
+    await assert.rejects(build(), /not finished: 技能·选址.*, 底线/);
+    await assert.rejects(callTool(env, "tick_outline", { item: "不存在的项" }), /The outline has no such item/);
     await callTool(env, "tick_outline", { item: "技能·选址" });
-    await assert.rejects(build(), /还有没聊完的：底线：不答什么/);
+    await assert.rejects(build(), /not finished: 底线：不答什么/);
     await callTool(env, "tick_outline", { item: "底线" });
     assert.deepEqual((await env.productStore.list()).find(session => session.role === "voice")!.todos.map(todo => todo.status), ["completed", "completed"]);
     await build();
@@ -449,8 +449,8 @@ test("add_to_agent: plain text is written into the manual input by its form; an 
     const [manual] = await env.productStore.backend.listManual();
     assert.match(manual!.path, /notes\.md\.md$/);
     assert.match((await env.productStore.backend.readManual(manual!.path)).toString(), /选址很重要/);
-    await assert.rejects(callTool(env, "add_to_agent", { files: ["/attachments/none/x.md"] }), /专家没有发过这个文件：\/attachments\/none\/x\.md.*notes\.md/);
-    await assert.rejects(callTool(env, "add_to_agent", {}), /至少要给一个/);
+    await assert.rejects(callTool(env, "add_to_agent", { files: ["/attachments/none/x.md"] }), /The Expert has not sent this file: \/attachments\/none\/x\.md.*notes\.md/);
+    await assert.rejects(callTool(env, "add_to_agent", {}), /at least one/);
   } finally { await env.close(); }
 });
 
@@ -498,7 +498,7 @@ test("add_to_agent: links go to Ingest; a mixed call writes the text now and sub
     const went = (JSON.parse(String(result.output)) as { went: string[] }).went;
     assert.equal(went.length, 3);
     assert.ok(went.some(line => /notes\.md → input\/manual\/.*notes\.md\.md$/.test(line)));
-    assert.ok(went.filter(line => line.includes("ingest job job-1，整理好会放进 input/manual")).length === 2);
+    assert.ok(went.filter(line => line.includes("ingest job job-1, will be placed in input/manual")).length === 2);
     assert.equal((await env.productStore.backend.listManual()).length, 1);
   } finally { await env.close(); }
 });
@@ -511,8 +511,8 @@ test("add_to_agent: without Ingest a call with a non-text item is refused whole,
     await env.assistant.hear(ACCOUNT, { id: "bare-1", source: "web", parts: [{ type: "file", assetId: text.assetId }, { type: "file", assetId: pdf.assetId }] });
     await env.idle();
     const paths = (await env.materials.list(ACCOUNT)).map(material => material.chatPath);
-    await assert.rejects(callTool(env, "add_to_agent", { files: paths }), /Ingest 没有配置，收不了：.*list\.pdf.*什么都没有加进资料/);
-    await assert.rejects(callTool(env, "add_to_agent", { links: ["https://example.com/a"] }), /Ingest 没有配置/);
+    await assert.rejects(callTool(env, "add_to_agent", { files: paths }), /Ingest is not configured.*list\.pdf.*Nothing was added/);
+    await assert.rejects(callTool(env, "add_to_agent", { links: ["https://example.com/a"] }), /Ingest is not configured/);
     assert.equal((await env.productStore.backend.listManual()).length, 0);
     await callTool(env, "add_to_agent", { files: paths.filter(path => path.endsWith("notes.md")) });
     assert.equal((await env.productStore.backend.listManual()).length, 1, "plain text alone needs no Ingest");
@@ -531,8 +531,8 @@ test("A settled Ingest job reaches the Assistant once, with what came of each it
     await env.idle();
     const heard = env.model.state.turns.flatMap(turn => turn.said).filter(text => text.includes("[资料 job-9"));
     assert.equal(heard.length, 1, "the same job is heard once");
-    assert.match(heard[0]!, /deck\.pdf：已放进 input\/manual\/deck\.md/);
-    assert.match(heard[0]!, /https:\/\/example\.com\/a：没成，页面打不开/);
+    assert.match(heard[0]!, /deck\.pdf: placed in input\/manual\/deck\.md/);
+    assert.match(heard[0]!, /https:\/\/example\.com\/a: failed, 页面打不开/);
   } finally { await env.close(); }
 });
 
@@ -591,9 +591,9 @@ test("Live state gives links only for a live Product, with its own bot when it h
   const live = await setup({ model: () => ({ text: "好" }), live: { is_live: true, pending_changes: [], ...links, telegram_url: "https://t.me/essay_bot" } });
   const draft = await setup({ model: () => ({ text: "好" }), live: { is_live: false, pending_changes: [], public_url: null, chat_url: null } });
   try {
-    assert.match(await live.assistant.liveState(ACCOUNT), /在线[\s\S]*https:\/\/hatch\.test\/products\/p1[\s\S]*https:\/\/hatch\.test\/chat\/product\/p1[\s\S]*https:\/\/t\.me\/essay_bot/);
+    assert.match(await live.assistant.liveState(ACCOUNT), /live[\s\S]*https:\/\/hatch\.test\/products\/p1[\s\S]*https:\/\/hatch\.test\/chat\/product\/p1[\s\S]*https:\/\/t\.me\/essay_bot/);
     const unpublished = await draft.assistant.liveState(ACCOUNT);
-    assert.ok(unpublished.includes("未上线") && !unpublished.includes("http"), "no links before publish");
+    assert.ok(unpublished.includes("not live") && !unpublished.includes("http"), "no links before publish");
   } finally { await live.close(); await draft.close(); }
 });
 
@@ -943,9 +943,9 @@ test("One key is one message whichever way it arrives: the page and the API shar
 test("A build is refused by the service until the interview outline is all ticked, whoever asks", async () => {
   const env = await setup({ model: () => ({ text: "好" }) });
   try {
-    await assert.rejects(env.assistant.dispatch(ACCOUNT, "build", PRODUCT, "构建", { source: "web" }), /还没有访谈大纲/);
+    await assert.rejects(env.assistant.dispatch(ACCOUNT, "build", PRODUCT, "构建", { source: "web" }), /has no interview outline yet/);
     await env.productStore.update((await env.productStore.create("voice")).id, session => { session.todos = [{ title: "底线", status: "pending" }]; });
-    await assert.rejects(env.assistant.dispatch(ACCOUNT, "build", PRODUCT, "构建", { source: "web" }), /还有没聊完的：底线/);
+    await assert.rejects(env.assistant.dispatch(ACCOUNT, "build", PRODUCT, "构建", { source: "web" }), /not finished: 底线/);
     assert.equal((await env.productStore.list()).some(session => session.role === "generation"), false, "no builder session was made");
     assert.deepEqual(await env.tasks.open(ACCOUNT), []);
   } finally { await env.close(); }
@@ -956,7 +956,7 @@ test("The Assistant touches only Agents the account owns: an unknown or another 
   const env = await setup({ ingest, model: () => ({ text: "好" }) });
   try {
     const STRANGER = "33333333-3333-4333-8333-333333333333";
-    const refused = /没有找到这个 Agent/;
+    const refused = /Agent not found/;
     await assert.rejects(env.assistant.tickOutline(ACCOUNT, STRANGER, "x"), refused);
     await assert.rejects(env.assistant.addToAgent(ACCOUNT, STRANGER, { files: [], links: ["https://example.com/a"] }), refused);
     await assert.rejects(env.assistant.dispatch(ACCOUNT, "interview", STRANGER, "聊", { source: "web" }), refused);
@@ -972,7 +972,7 @@ test("The Assistant touches only Agents the account owns: an unknown or another 
 test("A Product workspace the Assistant opens carries the Agent's BriefSpec, as Studio's routes give it", async () => {
   const env = await setup({ model: () => ({ text: "好" }) });
   try {
-    await assert.rejects(env.assistant.tickOutline(ACCOUNT, PRODUCT, "x"), /大纲里没有这一项/);
+    await assert.rejects(env.assistant.tickOutline(ACCOUNT, PRODUCT, "x"), /The outline has no such item/);
     assert.deepEqual(env.scopes, [{ creatorId: ACCOUNT, productId: PRODUCT, briefSpec: BRIEF_SPEC }]);
   } finally { await env.close(); }
 });

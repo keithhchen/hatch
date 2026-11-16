@@ -5,22 +5,22 @@
   The published page is ONE self-contained html file, like this one: script inlined, no external requests.
   Change the title and the data at the top of the script; keep the rest unless the page needs more.
 -->
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>审阅页</title>
+<title>Review page</title>
 </head>
 <body>
-<aside class="sidebar" id="side"><nav id="toc" aria-label="目录"></nav></aside>
+<aside class="sidebar" id="side"><nav id="toc" aria-label="Contents"></nav></aside>
 <div class="workspace"><main id="main"></main></div>
 <div class="actions">
   <div class="error" id="error" role="alert" hidden></div>
   <div class="buttons" id="btns">
     <button class="save" id="save" type="button"></button>
-    <button class="submit" id="submit" type="button">提交</button>
+    <button class="submit" id="submit" type="button">Submit</button>
   </div>
-  <div class="done" id="done" hidden>已提交</div>
+  <div class="done" id="done" hidden>Submitted</div>
 </div>
 <script>
 /*
@@ -30,16 +30,16 @@
   Questions are rendered entirely from hatch.schema, never hard-code them here.
 */
 
-// EXAMPLE placeholder for the "Agent 介绍" section. Replace with the real content, or set INTRO = [] to drop the section.
-// Each block: { h: 小标题, items?: [要点], say?: [Agent 原话], compare?: { bad, good } }
+// EXAMPLE placeholder for the "Agent introduction" section. Replace with the real content, or set INTRO = [] to drop the section.
+// Each block: { h: subheading, items?: [key points], say?: [what the Agent would say], compare?: { bad, good } }
 const INTRO = [
-  { h: '它做什么', items: ['（示例）一两句话说明这个 Agent 替专家做什么'] },
-  { h: '怎么说话', say: ['（示例）Agent 会这么说'], compare: { bad: '（示例）不好的说法', good: '（示例）好的说法' } },
+  { h: 'What it does', items: ['(Example) One or two sentences on what this Agent does for the Expert'] },
+  { h: 'How it speaks', say: ['(Example) The Agent would say this'], compare: { bad: '(Example) A bad way to say it', good: '(Example) A good way to say it' } },
 ];
 
-// EXAMPLE placeholder for the "知识缺口" section: facts the expert should supply. Replace, or set GAPS = [] to drop it.
+// EXAMPLE placeholder for the "Knowledge gaps" section: facts the expert should supply. Replace, or set GAPS = [] to drop it.
 const GAPS = [
-  { h: '（示例）缺口标题', items: ['（示例）需要专家补充的事实'] },
+  { h: '(Example) Gap title', items: ['(Example) A fact the Expert needs to supply'] },
 ];
 
 const hatch = window.hatch;
@@ -48,9 +48,9 @@ const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls)
 const NOTE = id => id + '__note';
 const questions = hatch.schema.questions;
 const sections = [
-  INTRO.length && { id: 'intro', title: 'Agent 介绍', blocks: INTRO },
-  GAPS.length && { id: 'gaps', title: '知识缺口', blocks: GAPS, count: GAPS.length },
-  questions.length && { id: 'questions', title: '待回答问题', count: questions.length },
+  INTRO.length && { id: 'intro', title: 'Agent introduction', blocks: INTRO },
+  GAPS.length && { id: 'gaps', title: 'Knowledge gaps', blocks: GAPS, count: GAPS.length },
+  questions.length && { id: 'questions', title: 'Questions to answer', count: questions.length },
 ].filter(Boolean);
 
 // One field per stored answer id: { id, read(), write(value), base }. base = last value known to be stored.
@@ -66,7 +66,7 @@ function showError(message) { $('error').textContent = message || ''; $('error')
 function refresh() {
   const n = pending().length;
   $('save').disabled = submitted || saving || !n;
-  $('save').textContent = saving ? '保存中…' : n ? `保存（${n} 题有修改）` : '已保存';
+  $('save').textContent = saving ? 'Saving…' : n ? `Save (${n} changed)` : 'Saved';
   $('submit').disabled = submitted || saving;
 }
 
@@ -83,7 +83,7 @@ async function saveChanged() {
     }
     return true;
   } catch (e) {
-    showError(e && e.message ? e.message : '保存失败，请再试一次');
+    showError(e && e.message ? e.message : 'Saving failed, please try again');
     return false;
   } finally { saving = false; refresh(); }
 }
@@ -130,13 +130,13 @@ function renderQuestion(q) {
   const head = el('div', 'q-head');
   head.append(el('span', 'q-id', q.id), el('h3', '', q.title));
   card.append(head);
-  if (q.scenario) card.append(el('p', 'scenario', '背景：' + q.scenario));
+  if (q.scenario) card.append(el('p', 'scenario', 'Background: ' + q.scenario));
   card.append(el('p', 'prompt', q.prompt));
   const mine = q.type === 'open'
-    ? [textField(q.id, '在这里填写')]
-    : [optionsField(q), textField(NOTE(q.id), '补充说明（可不填）')];
+    ? [textField(q.id, 'Write here')]
+    : [optionsField(q), textField(NOTE(q.id), 'Additional notes (optional)')];
   mine.forEach(f => card.append(f.node));
-  const clear = el('button', 'clear', '清除这题');
+  const clear = el('button', 'clear', 'Clear this question');
   clear.type = 'button';
   clear.addEventListener('click', () => { mine.forEach(f => f.write(Array.isArray(f.base) ? [] : '')); changed(); });
   card.append(clear);
@@ -152,8 +152,8 @@ function renderBlocks(blocks) {
     if (b.say) { const p = el('p'); b.say.forEach(t => p.append(el('span', 'say', '「' + t + '」'))); card.append(p); }
     if (b.compare) {
       const row = el('div', 'example');
-      const bad = el('div'); bad.append(el('b', '', '不好的说法'), document.createTextNode(b.compare.bad));
-      const good = el('div', 'good'); good.append(el('b', '', '好的说法'), document.createTextNode(b.compare.good));
+      const bad = el('div'); bad.append(el('b', '', 'Bad wording'), document.createTextNode(b.compare.bad));
+      const good = el('div', 'good'); good.append(el('b', '', 'Good wording'), document.createTextNode(b.compare.good));
       row.append(bad, good); card.append(row);
     }
     frag.append(card);
@@ -190,7 +190,7 @@ async function submit() {
   if (!(await saveChanged())) return;
   $('submit').disabled = true;
   try { await hatch.submit(); lock(); }
-  catch (e) { showError(e && e.message ? e.message : '提交失败，请再试一次'); refresh(); }
+  catch (e) { showError(e && e.message ? e.message : 'Submitting failed, please try again'); refresh(); }
 }
 
 sections.forEach(s => {

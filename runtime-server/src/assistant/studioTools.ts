@@ -67,13 +67,13 @@ const targetAgent = (agents: AgentOverview[], agentId: string | undefined): { ag
   const named = agentId?.trim();
   if (named) {
     const found = agents.find(agent => agent.productId === named) ?? agents.find(agent => agent.name === named);
-    return found ? { agent: found } : { refusal: `没有这个 Agent：${named}。${agentChoices(agents)}` };
+    return found ? { agent: found } : { refusal: `No such Agent: ${named}. ${agentChoices(agents)}` };
   }
   if (agents.length === 1) return { agent: agents[0] };
-  return { refusal: agents.length ? `这件事要指定 Agent。${agentChoices(agents)}` : "专家还没有 Agent，先用 create_agent 建一个。" };
+  return { refusal: agents.length ? `An Agent must be specified for this. ${agentChoices(agents)}` : "The Expert has no Agent yet; create one with create_agent first." };
 };
 
-const agentChoices = (agents: AgentOverview[]) => `专家有这几个（名字 → id）：${agents.map(agent => `「${agent.name}」 → ${agent.productId}`).join("；")}。请再调用一次，把 agent_id 设成其中一个。`;
+const agentChoices = (agents: AgentOverview[]) => `The Expert has these (name → id): ${agents.map(agent => `"${agent.name}" → ${agent.productId}`).join("; ")}. Call again with agent_id set to one of them.`;
 
 const agentFor = async (ops: StudioOperations, accountId: string, agentId: unknown): Promise<string> => {
   const { agent, refusal } = targetAgent(await ops.agents(accountId), agentId as string | undefined);
@@ -97,31 +97,31 @@ export function studioTools(ops: StudioOperations): StudioTool[] {
   const created = async (call: StudioCall, task: AssistantTask) => taskView(await ops.inRun(task, call.runId));
   return [
     { name: "search_web", readOnly: true,
-      schema: z.object({ query: text(1, 500).describe("关键词式查询，几个有区分度的词"), objective: text(1, 1000).describe("这次搜索要查清什么、哪类来源该排前面") }).strict(),
-      description: "搜公开网页，返回来源链接和摘要，不是核实过的全文，也不生成回答。需要很快查一个事实时直接用。",
+      schema: z.object({ query: text(1, 500).describe("A keyword-style query: a few distinctive words"), objective: text(1, 1000).describe("What this search must find out, and which kinds of sources should rank first") }).strict(),
+      description: "Search the public web; returns source links and snippets, not verified full text, and does not generate an answer. Use it directly when you need to check a fact quickly.",
       run: async (call, args) => done(await ops.searchWeb(args as { query: string; objective: string }, call.signal)) },
     { name: "read_page", readOnly: true, schema: z.object({ url: text(1, 2000) }).strict(),
-      description: "读一个公开网页的正文（Markdown），带原网址。专家要看某篇文章、某个页面的全文时用；搜索结果只有摘要。读不了登录后的页面，也不转写视频。",
+      description: "Read the body text (Markdown) of a public web page, with its original URL. Use it when the Expert wants the full text of an article or page; search results have only snippets. It cannot read pages behind a login and does not transcribe video.",
       run: async (call, args) => done(await ops.readPage(String(args.url), call.signal)) },
     { name: "list_agents", readOnly: true, schema: z.object({}).strict(),
-      description: "专家的全部 Agent：id、名字、承诺、状态、价格、开场问题，是否在线和待发布的改动（live），以及访谈大纲的进度。",
+      description: "All of the Expert's Agents: id, name, promise, status, price, opening questions, whether it is live and its pending changes (live), and the progress of the interview outline.",
       run: async call => done(await ops.agents(call.accountId)) },
     { name: "list_tasks", readOnly: true, schema: z.object({}).strict(),
-      description: "还没结束的事：进行中的，和等专家回答、确认或卡住的。",
+      description: "Things not yet finished: those in progress, and those waiting for the Expert to answer or confirm, or stuck.",
       run: async call => done((await ops.openTasks(call.accountId)).map(taskView)) },
-    { name: "create_agent", readOnly: false, schema: z.object({ name: text(1, 240), promise: text(1, 2000).describe("一句话：这个 Agent 帮谁解决什么") }).strict(),
-      description: "为专家新建一个草稿 Agent。草稿不对外，不需要确认。",
+    { name: "create_agent", readOnly: false, schema: z.object({ name: text(1, 240), promise: text(1, 2000).describe("One sentence: who this Agent helps and what it solves for them") }).strict(),
+      description: "Create a new draft Agent for the Expert. A draft is not public and needs no confirmation.",
       run: async (call, args) => done(await ops.createAgent(call.accountId, String(args.name), String(args.promise))) },
     { name: "propose_change", readOnly: false,
       schema: z.object({ agent_id: z.string(), release: z.enum(["publish", "withdraw"]).optional(), name: z.string().max(240).optional(), promise: z.string().max(2000).optional(), pricing: z.any().optional(), opening_questions: z.any().optional() }).strict(),
-      description: "改名字、承诺、价格、开场问题，或发布、下架产品（release）。这些对外可见，会先请专家确认，确认后才生效。pricing 的结构和 list_agents 返回的一致。",
+      description: "Change the name, promise, price or opening questions, or publish or unpublish the product (release). These are publicly visible, so the Expert is asked to confirm first and it takes effect only after confirmation. The pricing structure is the same as what list_agents returns.",
       run: async (call, args) => {
         const input = args as { agent_id: string; release?: "publish" | "withdraw"; name?: string; promise?: string; pricing?: unknown; opening_questions?: unknown };
         return done(await created(call, await ops.propose(call.accountId, input.agent_id, { release: input.release, name: input.name, promise: input.promise, pricing: input.pricing, briefSpec: input.opening_questions }, await call.origin())));
       } },
     { name: "start_task", readOnly: false,
-      schema: z.object({ kind: z.enum(WORKER_KINDS), agent_id: z.string().optional().describe("要做哪个 Agent 的事：Agent 的 id，或它的名字。interview、build、evaluate、agent_research 在专家有两个以上 Agent 时必填；只有一个 Agent 时可省"), instruction: text(1, 4000).describe("要做什么、专家的原话、为什么现在做") }).strict(),
-      description: `派一件事，立刻返回，做完会告诉你。派活的这一轮不写预告，也不写"我这就""接下来"这类话。interview 只写访谈大纲，不和专家说话；大纲写好会告诉你，之后由你来问专家。build 只在这个 Agent 的访谈大纲全是 ✓ 后才会接受。专家有两个以上 Agent 时必须写 agent_id（id 或名字，用 list_agents 看）；只有一个时可以不写。${WORKER_KINDS.map(kind => ops.describeWorker(kind)).join("；")}。`,
+      schema: z.object({ kind: z.enum(WORKER_KINDS), agent_id: z.string().optional().describe("Which Agent this is for: the Agent's id, or its name. Required for interview, build, evaluate and agent_research when the Expert has two or more Agents; may be omitted when there is only one"), instruction: text(1, 4000).describe("What to do, the Expert's own words, and why now") }).strict(),
+      description: `Dispatch a piece of work; returns immediately and you are told when it is done. In the turn where you dispatch, do not write a preview or phrases like "I'm on it" or "next". interview only writes the interview outline and does not talk to the Expert; you are told when the outline is written, and then you ask the Expert yourself. build is accepted only once every item in this Agent's interview outline is ✓. When the Expert has two or more Agents, agent_id is required (id or name; see list_agents); with only one it may be omitted. ${WORKER_KINDS.map(kind => ops.describeWorker(kind)).join("; ")}.`,
       run: async (call, args) => {
         const input = args as { kind: WorkerKind; agent_id?: string; instruction: string };
         let agentId = input.agent_id;
@@ -135,34 +135,34 @@ export function studioTools(ops: StudioOperations): StudioTool[] {
         return done(await created(call, task));
       } },
     { name: "tick_outline", readOnly: false,
-      schema: z.object({ agent_id: z.string().optional().describe("Agent 的 id 或名字；专家只有一个 Agent 时可省"), item: text(1, 160).describe("大纲里这一项的标题（照 list_agents 里的写，写一段能唯一对上的就行）") }).strict(),
-      description: "勾掉访谈大纲里的一项：只有专家自己的话已经满足提示词里「聊完的标准」，这一项才算聊完。没满足就不要勾，继续追问。大纲全勾完才能派 build。",
+      schema: z.object({ agent_id: z.string().optional().describe("The Agent's id or name; may be omitted when the Expert has only one Agent"), item: text(1, 160).describe("The title of this outline item (as written in list_agents; a fragment that matches it uniquely is enough)") }).strict(),
+      description: "Tick off one item of the interview outline: an item counts as finished only when the Expert's own words already meet the \"When an item is done\" criterion in the prompt. If not met, do not tick it; keep asking. build can be dispatched only after the whole outline is ticked.",
       run: async (call, args) => done({ outline: await ops.tickOutline(call.accountId, await agentFor(ops, call.accountId, args.agent_id), String(args.item)) }) },
     { name: "add_to_agent", readOnly: false,
-      schema: z.object({ agent_id: z.string().optional().describe("Agent 的 id 或名字；专家只有一个 Agent 时可省"), files: z.array(z.string()).max(20).optional().describe("专家发来的文件在对话里显示的路径"), links: z.array(z.string()).max(20).optional().describe("要抓取的网页链接"), context: text(1, 2000).optional().describe("这些资料是什么、为什么给") }).strict(),
-      description: "专家发来的文件或链接，按常识（看文件名和内容）明显属于某个 Agent 的资料时，加进它的资料；只是发来随便看看的，留在对话里，什么都不用做。放在哪里是自动的，不用你选。",
+      schema: z.object({ agent_id: z.string().optional().describe("The Agent's id or name; may be omitted when the Expert has only one Agent"), files: z.array(z.string()).max(20).optional().describe("The path under which a file the Expert sent is shown in the conversation"), links: z.array(z.string()).max(20).optional().describe("Web page links to fetch"), context: text(1, 2000).optional().describe("What these materials are and why they were given") }).strict(),
+      description: "A file or link the Expert sent: when, by common sense (file name and content), it clearly belongs to some Agent's materials, add it to that Agent's materials; if it was just sent for a casual look, leave it in the conversation and do nothing. Where it goes is automatic; you do not choose.",
       run: async (call, args) => {
         const input = args as { files?: string[]; links?: string[]; context?: string };
-        if (!input.files?.length && !input.links?.length) throw new Error("files 和 links 至少要给一个。");
+        if (!input.files?.length && !input.links?.length) throw new Error("Give at least one of files and links.");
         return done({ went: await ops.addToAgent(call.accountId, await agentFor(ops, call.accountId, args.agent_id), { files: input.files ?? [], links: input.links ?? [], context: input.context }) });
       } },
     { name: "exclude_source", readOnly: false, schema: z.object({ source: text(1, 500), reason: z.string().max(500).optional() }).strict(),
-      description: "专家说某个来源不算数时调用。之后所有工作都不再采用它。",
-      run: async (call, args) => { await ops.excludeSource(call.accountId, String(args.source), args.reason as string | undefined); return done("已记下"); } },
+      description: "Call when the Expert says a source does not count. All later work will stop using it.",
+      run: async (call, args) => { await ops.excludeSource(call.accountId, String(args.source), args.reason as string | undefined); return done("Noted"); } },
     { name: "answer_task", readOnly: false, schema: z.object({ task_id: z.string(), answer: text(1, 20000) }).strict(),
-      description: "把专家对某件事的回答原样交回给它。",
+      description: "Hand the Expert's answer to something back to it, verbatim.",
       run: async (call, args) => done(taskView(await ops.answer(call.accountId, String(args.task_id), String(args.answer), `run:${call.runId}:answer:${args.task_id}`))) },
     { name: "approve_task", readOnly: false, schema: z.object({ task_id: z.string() }).strict(),
-      description: "专家在对话里同意了某件需要确认的事。",
+      description: "The Expert agreed in the conversation to something that needs confirmation.",
       run: async (call, args) => done(taskView(await ops.approve(call.accountId, String(args.task_id), `run:${call.runId}:approve:${args.task_id}`))) },
     { name: "decline_task", readOnly: false, schema: z.object({ task_id: z.string() }).strict(),
-      description: "专家拒绝了某件需要确认的事，或某件卡住的事不再需要。",
+      description: "The Expert refused something that needs confirmation, or something stuck is no longer needed.",
       run: async (call, args) => done(taskView(await ops.decline(call.accountId, String(args.task_id), `run:${call.runId}:decline:${args.task_id}`))) },
     { name: "poke", readOnly: false, schema: z.object({ task_id: z.string(), question: text(1, 500) }).strict(),
-      description: "日常检查时决定问专家一个问题。记下问题，然后把问题本身作为你的回复。",
+      description: "During a daily check, decide to ask the Expert a question. Record the question, then give the question itself as your reply.",
       run: async (call, args) => done(taskView(await ops.poke(call.accountId, String(args.task_id), String(args.question)))) },
-    { name: "finish_task", readOnly: false, schema: z.object({ task_id: z.string(), answered: z.boolean().optional().describe("专家回答了戳一戳的问题") }).strict(),
-      description: "结束一件事：日常检查决定今天不问；专家回答了戳一戳；或已经告诉专家的结果。",
+    { name: "finish_task", readOnly: false, schema: z.object({ task_id: z.string(), answered: z.boolean().optional().describe("The Expert answered the poke question") }).strict(),
+      description: "Finish a piece of work: a daily check that decides not to ask today; the Expert answered a poke; or a result the Expert has already been told.",
       run: async (call, args) => done(taskView(await ops.finish(call.accountId, String(args.task_id), args.answered === true))) },
   ];
 }

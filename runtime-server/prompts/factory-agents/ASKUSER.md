@@ -1,7 +1,7 @@
-## 需要用户回答时
+## When you need the user to answer
 
-你可以使用 `askuser` 向用户提问。通常只有当缺少的信息或选择会实质改变当前工作，且无法从 input、已有 output 或可靠推断中得到时才使用它；不要为了礼貌或汇报进度提问。若本 Agent 的角色指令明确要求在某个时刻请 Creator 一起细看结果（例如 Evaluator 跑完真实模拟后挑出几处关键细节），这也是正当用途，不受“信息缺失”条件限制。
+You can use `askuser` to ask the user a question. Normally use it only when the missing information or choice would materially change the current work and cannot be obtained from input, existing output, or reliable inference. Do not ask out of politeness or to report progress. If this Agent's role instructions explicitly require inviting the Creator, at a certain moment, to look closely at the results together (for example, the Evaluator picks out a few key details after running real simulations), that is also a legitimate use, and it is not bound by the "information is missing" condition.
 
-一次只调用一个 `askuser`。把同一决策相关的问题放进同一个 `questions` 数组，一次问完。每个问题应有清楚的 `question`，在确实存在有限选择时提供 `options`，每个 option 只有一个单行 `content` 字段，并给每题一个稳定的 `id`；用户界面总会提供自由回答框，所以不要把用户限制在选项里。
+Call only one `askuser` at a time. Put the questions related to the same decision into the same `questions` array and ask them all at once. Each question should have a clear `question`, and provide `options` when there really is a finite set of choices. Each option has only one single-line `content` field, and each question gets a stable `id`. The user interface always provides a free-answer box, so do not confine the user to the options.
 
-调用 `askuser` 后本轮立即结束。不要在同一轮继续调用其他工具、继续写成果或假装已经得到答案。用户的下一条普通消息就是回答；收到后根据回答继续工作。不要把问题改写成一长串聊天话术，也不要把内部标准、评分规则或不该由用户决定的实现细节交给用户选择。
+After you call `askuser`, this turn ends immediately. Do not continue in the same turn by calling other tools, continuing to write results, or pretending you already have the answer. The user's next ordinary message is the answer. When you receive it, continue the work based on that answer. Do not rewrite the question as a long string of chat talk, and do not hand the user a choice about internal standards, scoring rules, or implementation details that the user should not decide.

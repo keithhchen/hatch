@@ -131,11 +131,11 @@ export class WorkbenchRuntime {
   async prompt(role: AnyRole, snapshot?: Awaited<ReturnType<AgentDefinitionSource["list"]>>[number]): Promise<string> {
     const definition = snapshot ?? await this.store.definition(role);
     const folders = ["input/manual", ...(isAssistantRole(role) ? [] : INPUT_ROLES[role]).map(source => `input/${source}`)];
-    if (isAssistantRole(role)) return `${definition.systemPrompt}\n\n# 本会话的 Input\n\n宿主为当前任务放入的材料在 \`input/\` 下，只读。使用 list 查看，使用 read 读取。`;
+    if (isAssistantRole(role)) return `${definition.systemPrompt}\n\n# This session's Input\n\nThe host placed the materials for the current task under \`input/\`, read-only. Use list to browse and read to read them.`;
     const interaction = role === "voice"
       ? ""
-      : `# 向用户提问\n\n你可以使用 askuser，但通常只在缺少的信息或选择会实质改变当前工作、且无法从已有输入得到时使用。${role === "evaluator" ? "完成一轮真实模拟后，按照 Evaluator 的角色指令用一次 askuser，请 Creator 一起看几处真正需要他拿捏的细节；这不是例行确认。" : ""}一次只调用一个 askuser，把相关问题合并到 questions 数组；如果提供 options，每个 option 必须是只有一个单行 \`content\` 字段的对象；选项之外用户界面总会提供自由回答框。调用后本轮立即结束，不要继续调用工具或写成果；用户下一条普通消息就是回答。不要用它做进度汇报或把内部标准交给用户决定。`;
-    return `${definition.systemPrompt}\n\n# 本 Agent 的 Input\n\n你有且只有这些输入文件夹：${folders.map(folder => `\`${folder}/\``).join("、")}。\n\`input/manual/\` 是用户为当前 Product 上传的公共文件；其余目录是上游 Agent 的实时只读 output projection。使用 list 查看，使用 read 读取。不要要求用户复制或转发上游文件，也不要尝试修改上游目录。\n\n${interaction}`;
+      : `# Asking the user\n\nYou may use askuser, but usually only when missing information or a choice would materially change the current work and cannot be obtained from the existing input.${role === "evaluator" ? "After completing a round of real simulation, follow the Evaluator role instructions and use askuser once to ask the Creator to look together at a few details that truly need his judgment; this is not a routine confirmation." : ""}Call only one askuser at a time and merge related questions into the questions array; if you provide options, each option must be an object with only a single-line \`content\` field; the user interface always provides a free-answer box besides the options. After the call this turn ends immediately: do not keep calling tools or write results; the user's next ordinary message is the answer. Do not use it for progress reports or to hand internal standards to the user to decide.`;
+    return `${definition.systemPrompt}\n\n# This Agent's Input\n\nThese are the only input folders you have: ${folders.map(folder => `\`${folder}/\``).join(", ")}.\n\`input/manual/\` holds the public files the user uploaded for the current Product; the other directories are live read-only output projections of upstream Agents. Use list to browse and read to read them. Do not ask the user to copy or forward upstream files, and do not try to modify the upstream directories.\n\n${interaction}`;
   }
   async start(id: string, input: string | AgentMessage[], images: string[] = []): Promise<void> {
     const message = typeof input === "string" ? input : input.map(messageText).join("\n\n");
@@ -337,12 +337,12 @@ export class WorkbenchRuntime {
       const s = await this.store.get(id);
       const definition = await this.store.definition(s.role);
       system = await this.prompt(s.role, definition);
-      if (s.role === "generation") system += `\n宿主提供的目标 Runtime 工具：内建 hatch.web_search。额外声明：${this.env.HATCH_FACTORY_TARGET_TOOLS_JSON ?? "[]"}。外部连接的实际可用性由现有 Registry/Runtime 验证。当前 Product 已由宿主固定；corpus_upload 会发布到它，不要查找、选择或创建 Product。`;
+      if (s.role === "generation") system += `\nTarget Runtime tools provided by the host: built-in hatch.web_search. Additional declarations: ${this.env.HATCH_FACTORY_TARGET_TOOLS_JSON ?? "[]"}. The actual availability of external connections is verified by the existing Registry/Runtime. The current Product is fixed by the host; corpus_upload publishes to it, so do not look up, choose or create a Product.`;
       // The Expert's submitted review answers are part of the interview's material: handed over here, not left to be looked up.
-      if (s.role === "voice" || s.role === "generation") { const answers = await reviewAnswers(this.store, id); if (answers) system += `\n\n# 专家在审阅页上的回答（原文）\n\n${answers}`; }
+      if (s.role === "voice" || s.role === "generation") { const answers = await reviewAnswers(this.store, id); if (answers) system += `\n\n# The Expert's answers on the review page (verbatim)\n\n${answers}`; }
       if (s.role === "voice") system += `\n\n${await readFile(fileURLToPath(new URL("../../prompts/assistant/INTERVIEW_DONE.md", import.meta.url)), "utf8")}`;
       if (s.role === "voice" && s.assistantTaskId) system += `\n\n${await readFile(fileURLToPath(new URL("voice/ASSISTANT_INTERVIEW.md", new URL("../../prompts/factory-agents/", import.meta.url))), "utf8")}`;
-      if (s.role === "evaluator") system += `\n当前 Product 已由宿主固定；hatch_tool 只会运行它，不要查找或选择 Product。启动时如需 brief_answers，从案例中选择客户可见的信息作答；不能泄露评分标准。当前 Brief 字段：${JSON.stringify(this.store.scope?.briefSpec ?? null)}。`;
+      if (s.role === "evaluator") system += `\nThe current Product is fixed by the host; hatch_tool only runs it, so do not look up or choose a Product. If brief_answers are needed at start, answer from the client-visible information in the case; do not leak the scoring criteria. Current Brief fields: ${JSON.stringify(this.store.scope?.briefSpec ?? null)}.`;
       const changed = () => this.emit(id, "files");
       const todosChanged = () => this.emit(id, "todos");
       const tools = declareTools(await factoryAgentTools({
@@ -456,9 +456,9 @@ export class WorkbenchRuntime {
     if (channel === "visible") { this.liveAgents.set(id, agent); this.release(id); }
     const abort = () => agent.abort();
     controller.signal.addEventListener("abort", abort, { once: true });
-    const timer = setTimeout(() => controller.abort(new Error("运行达到时间预算，可检查已有文件后继续")), this.options.deadlineMs ?? 1800000);
+    const timer = setTimeout(() => controller.abort(new Error("The run reached its time budget; check the existing files and continue")), this.options.deadlineMs ?? 1800000);
     const unsubscribe = agent.subscribe(event => {
-      if (event.type === "turn_start" && ++turnCount > (this.options.maxTurns ?? 80)) controller.abort(new Error("运行达到工具轮次预算，可检查已有文件后继续"));
+      if (event.type === "turn_start" && ++turnCount > (this.options.maxTurns ?? 80)) controller.abort(new Error("The run reached its tool-turn budget; check the existing files and continue"));
       if (event.type === "message_end" && event.message.role === "assistant" && event.message.usage.totalTokens > 0) {
         void this.usageFor(id)?.({ id: `${this.runIds.get(id) ?? id}:${event.message.timestamp}`, model: event.message.model, usage: event.message.usage });
       }

@@ -99,8 +99,8 @@ export type AssistantDependencies = {
 /** Why an Agent may not be built yet, or undefined when its interview is finished and confirmed (every outline item ✓). */
 const notReadyToBuild = (name: string, outline: Todo[]): string | undefined => {
   const open = outline.filter(item => item.status !== "completed").map(item => item.title);
-  if (!outline.length) return `「${name}」还没有访谈大纲，不能构建。先派 interview 写大纲，再去问专家。`;
-  if (open.length) return `「${name}」的访谈大纲还有没聊完的：${open.join("、")}。构建只依据专家确认过的访谈：接着问专家，聊完一项勾一项（tick_outline）。`;
+  if (!outline.length) return `"${name}" has no interview outline yet, so it cannot be built. Dispatch interview to write the outline first, then go ask the Expert.`;
+  if (open.length) return `"${name}" still has outline items not finished: ${open.join(", ")}. A build relies only on interviews the Expert has confirmed: keep asking the Expert, and tick each item as it is finished (tick_outline).`;
 };
 
 /** One workspace per account: where the Assistant's workers run, and its notes. The conversation is Chat's. */
@@ -132,27 +132,27 @@ export class AssistantService implements StudioOperations {
   /** Adding a worker means adding one entry here: the tool, dispatch and completion all read from it. */
   private workers: Record<WorkerKind, WorkerSpec> = {
     interview: {
-      about: "interview 写这个 Agent 的访谈大纲，交给你去问专家（需要 agent_id）",
+      about: "interview writes this Agent's interview outline and hands it to you to ask the Expert (needs agent_id)",
       needsAgent: true,
       start: input => this.startInterview(input),
       finish: async () => undefined,
     },
     agent_research: {
-      about: "agent_research 为某个 Agent 做深度人物调研，写进它的构建资料（需要 agent_id）",
+      about: "agent_research does deep research on the person behind an Agent and writes it into the Agent's build materials (needs agent_id)",
       needsAgent: true,
       steps: ["research"],
       start: this.pipeline("调研"),
       finish: this.announce("调研写好了：", "output/RESEARCH.md"),
     },
     build: {
-      about: "build 按最新的访谈和专家要的改动构建 Agent，只构建不发布（需要 agent_id）",
+      about: "build builds the Agent from the latest interviews and the changes the Expert asked for; it builds only and does not publish (needs agent_id)",
       needsAgent: true,
       steps: ["generation"],
       start: this.pipeline("构建"),
       finish: this.announce("构建好了，还没发布："),
     },
     evaluate: {
-      about: "evaluate 用新案例评测线上 Agent，不改动它（需要 agent_id）",
+      about: "evaluate evaluates the live Agent with a new case and does not change it (needs agent_id)",
       needsAgent: true,
       steps: ["case-generation", "evaluator"],
       start: this.pipeline("评测"),
@@ -249,8 +249,8 @@ export class AssistantService implements StudioOperations {
 
   /** Ingest settled a job for one of the Expert's Agents, whoever submitted it: the Assistant hears what came of each item. */
   async ingested(job: IngestJob): Promise<void> {
-    const items = job.items.map(item => `- ${"url" in item.input ? item.input.url : item.input.name}：${item.status === "failed" ? `没成，${item.error ?? "没有原因"}` : `${item.status === "partial" ? "部分完成，" : ""}已放进 ${item.markdown_path ?? item.original_ref}`}`);
-    await this.hearSystem(job.accountId, `[资料 ${job.id} · Agent ${job.productId}] Ingest ${job.status === "failed" ? "没做成" : "做完了"}：\n${items.join("\n")}`, undefined, `ingested:${job.id}`);
+    const items = job.items.map(item => `- ${"url" in item.input ? item.input.url : item.input.name}: ${item.status === "failed" ? `failed, ${item.error ?? "no reason given"}` : `${item.status === "partial" ? "partly done, " : ""}placed in ${item.markdown_path ?? item.original_ref}`}`);
+    await this.hearSystem(job.accountId, `[资料 ${job.id} · Agent ${job.productId}] Ingest ${job.status === "failed" ? "failed" : "finished"}:\n${items.join("\n")}`, undefined, `ingested:${job.id}`);
   }
 
   private async hearSystem(accountId: string, text: string, taskId: string | undefined, key: string): Promise<void> {
@@ -310,7 +310,7 @@ export class AssistantService implements StudioOperations {
     const all = await this.materials.list(accountId);
     return paths.map(path => {
       const found = all.find(material => material.chatPath === path);
-      if (!found) throw new Error(`专家没有发过这个文件：${path}。发过的有：${all.map(material => material.chatPath).join("、") || "没有"}。`);
+      if (!found) throw new Error(`The Expert has not sent this file: ${path}. Files sent so far: ${all.map(material => material.chatPath).join(", ") || "none"}.`);
       return found;
     });
   }
@@ -325,24 +325,24 @@ export class AssistantService implements StudioOperations {
     const plain = materials.filter(isPlainText);
     const complex = materials.filter(material => !isPlainText(material));
     const ingested = [...complex.map(material => material.chatPath), ...input.links];
-    if (ingested.length && !this.deps.ingest) throw new Error(`Ingest 没有配置，收不了：${ingested.join("、")}。这次什么都没有加进资料。`);
+    if (ingested.length && !this.deps.ingest) throw new Error(`Ingest is not configured, so these cannot be accepted: ${ingested.join(", ")}. Nothing was added to the materials this time.`);
     const workspace = await this.workspace(accountId, productId);
     const went = await Promise.all(plain.map(async material => `${material.chatPath} → ${await this.writeManual(workspace, material)}`));
     if (!ingested.length) return went;
     const originals = await Promise.all(complex.map(async ({ original }) => this.deps.ingest!.stage(accountId, productId, { name: original.name, bytes: await original.read(), media_type: original.mimeType })));
     const { id } = await this.deps.ingest!.submit(accountId, productId, [...originals, ...input.links.map(url => ({ url }))], input.context);
-    return [...went, ...ingested.map(item => `${item} → ingest job ${id}，整理好会放进 input/manual`)];
+    return [...went, ...ingested.map(item => `${item} → ingest job ${id}, will be placed in input/manual when processed`)];
   }
 
   /** The interview worker wrote the outline and stopped: the Assistant now asks the Expert and ticks it off. */
   private async interviewTurnEnded(task: AssistantTask, workspace: FactoryWorkspace, type: string): Promise<void> {
     const voice = await workspace.store.get(task.session!.sessionId);
     await workspace.store.update(voice.id, s => { if (s.assistantTaskId === task.id) delete s.assistantTaskId; });
-    if (type !== "voice.run_completed") return this.block(task, voice.error ?? "访谈大纲没写成", voice.messages.length);
+    if (type !== "voice.run_completed") return this.block(task, voice.error ?? "The interview outline was not written", voice.messages.length);
     await this.deps.tasks.update(task.id, { status: "done", leaseExpiresAt: undefined });
     // A review page the worker published for this task: the Assistant sends its link.
     const page = [...JSON.stringify(voice.messages).matchAll(/https?:\/\/[^"\\\s]*\/form\/[0-9a-f-]{36}\?t=[\w-]+/g)].at(-1)?.[0];
-    await this.news(task.accountId, task.id, `访谈大纲写好了。${page ? `审阅页也写好了，把这个链接发给专家：${page}。他提交后会把答案连同题目发给你，到时勾掉聊完的项。` : "接下来你自己在对话里一个一个问专家，用 tick_outline 勾掉聊完的项。"}${outlineText(voice.todos)}`, `finished:${voice.messages.length}`);
+    await this.news(task.accountId, task.id, `The interview outline is written. ${page ? `A review page is also written; send this link to the Expert: ${page}. When he submits it, his answers will be sent to you together with the questions; tick off the finished items then.` : "Next, ask the Expert the items one by one in the conversation yourself, and tick off the finished ones with tick_outline."}${outlineText(voice.todos)}`, `finished:${voice.messages.length}`);
   }
 
   // ── Tasks ──────────────────────────────────────────────────────────────
@@ -353,9 +353,9 @@ export class AssistantService implements StudioOperations {
   /** Start one piece of work. What it takes and how it ends is declared in this.workers. */
   async dispatch(accountId: string, kind: WorkerKind, productId: string | undefined, instruction: string, origin: TaskOrigin): Promise<AssistantTask> {
     const worker = this.workers[kind];
-    if (worker.needsAgent && !productId) throw new Error("这件事要指定 Agent");
+    if (worker.needsAgent && !productId) throw new Error("This needs an Agent to be specified");
     const agent = productId ? await this.deps.catalog.get(accountId, productId) : undefined;
-    if (productId && !agent) throw Object.assign(new Error("没有找到这个 Agent"), { status: 404 });
+    if (productId && !agent) throw Object.assign(new Error("Agent not found"), { status: 404 });
     if (kind === "build" && agent) {
       const unready = notReadyToBuild(agent.name, await this.interviewOutline(accountId, agent));
       if (unready) throw new Error(unready);
@@ -368,10 +368,10 @@ export class AssistantService implements StudioOperations {
     const { accountId, kind, instruction, origin } = input; const productId = input.productId!;
     const workspace = await this.workspace(accountId, productId);
     const voice = (await workspace.store.getOrCreate("voice")).session;
-    if (workspace.runtime.isRunning(voice.id)) throw new Error("这个 Agent 的访谈正在 Studio 里进行，稍后再试");
+    if (workspace.runtime.isRunning(voice.id)) throw new Error("This Agent's interview is in progress in Studio; try again later");
     const task = await this.deps.tasks.create({ accountId, productId, kind, origin, session: { scope: "product", sessionId: voice.id }, payload: { instruction }, summary: `写「${input.agentName}」的访谈大纲`, leaseExpiresAt: lease() });
     await workspace.store.update(voice.id, s => { s.assistantTaskId = task.id; });
-    await workspace.runtime.start(voice.id, `[Hatch 助理请你写访谈大纲]\n\n要了解的：${instruction}`);
+    await workspace.runtime.start(voice.id, `[Hatch Assistant asks you to write the interview outline]\n\nWhat to find out: ${instruction}`);
     return task;
   }
 
@@ -381,7 +381,7 @@ export class AssistantService implements StudioOperations {
     const voice = (await workspace.store.list()).find(session => session.role === "voice");
     const wanted = item.trim();
     const matches = (voice?.todos ?? []).filter(todo => todo.title === wanted || todo.title.includes(wanted));
-    if (matches.length !== 1) throw new Error(`${matches.length ? "这个说法对应不止一项" : "大纲里没有这一项"}：${wanted}。大纲现在是：${(voice?.todos ?? []).map(todo => todo.title).join("；") || "（空）"}`);
+    if (matches.length !== 1) throw new Error(`${matches.length ? "This matches more than one item" : "The outline has no such item"}: ${wanted}. The outline is now: ${(voice?.todos ?? []).map(todo => todo.title).join("; ") || "(empty)"}`);
     await workspace.store.update(voice!.id, s => { s.todos = s.todos.map(todo => todo === matches[0] || todo.title === matches[0]!.title ? { ...todo, status: "completed" as const } : todo); });
     workspace.runtime.emit(voice!.id, "todos");
     return (await workspace.store.get(voice!.id)).todos;
@@ -406,7 +406,7 @@ export class AssistantService implements StudioOperations {
     const desk = await this.desk(accountId);
     const file = `${MATERIALS}不算数的来源.md`;
     const existing = await outputText(desk.store, desk.sessionId, file);
-    await desk.store.put(desk.sessionId, file, Buffer.from(`${existing || "# 专家说这些来源不算数，不要采用\n"}\n- ${source}${reason ? `：${reason}` : ""}`), { actor: "host" });
+    await desk.store.put(desk.sessionId, file, Buffer.from(`${existing || "# The Expert said these sources do not count; do not use them\n"}\n- ${source}${reason ? `: ${reason}` : ""}`), { actor: "host" });
   }
 
   /** Copy the Assistant's notes into a Product's shared input, where its Agents read them. Files the Expert sent get there only through add_to_agent. */
@@ -423,9 +423,9 @@ export class AssistantService implements StudioOperations {
 
   async propose(accountId: string, productId: string, change: AgentChange, origin: TaskOrigin): Promise<AssistantTask> {
     const agent = await this.deps.catalog.get(accountId, productId);
-    if (!agent) throw new Error("没有找到这个 Agent");
+    if (!agent) throw new Error("Agent not found");
     const fields = Object.keys(change).filter(key => change[key as keyof AgentChange] !== undefined);
-    if (!fields.length) throw new Error("没有要改的内容");
+    if (!fields.length) throw new Error("Nothing to change");
     return this.deps.tasks.create({ accountId, productId, kind: "change", origin, status: "needs_you", needs: "review", payload: { change }, summary: change.release ? `${change.release === "publish" ? "发布" : "下架"}「${agent.name}」` : `修改「${agent.name}」：${fields.join("、")}` });
   }
 
@@ -448,7 +448,7 @@ export class AssistantService implements StudioOperations {
   async answer(accountId: string, taskId: string, text: string, key: string): Promise<AssistantTask> {
     const task = await this.ownedTask(accountId, taskId);
     if (task.payload.answerKey === key) return task;
-    if (task.status !== "needs_you" || task.needs !== "answer") throw new Error("这件事现在不需要回答");
+    if (task.status !== "needs_you" || task.needs !== "answer") throw new Error("This does not need an answer right now");
     const answerKey = { answerKey: key };
     if (task.kind === "poke") return this.deps.tasks.update(task.id, { status: "done", answeredAt: new Date().toISOString(), payload: answerKey });
     const runtime = await this.sessionRuntime(task);
@@ -467,13 +467,13 @@ export class AssistantService implements StudioOperations {
 
   async poke(accountId: string, taskId: string, question: string): Promise<AssistantTask> {
     const task = await this.ownedTask(accountId, taskId);
-    if (task.kind !== "poke") throw new Error("只有日常检查可以戳一戳");
+    if (task.kind !== "poke") throw new Error("Only a daily check can poke");
     return this.deps.tasks.update(task.id, { status: "needs_you", needs: "answer", payload: { question } });
   }
 
   async finish(accountId: string, taskId: string, answered: boolean): Promise<AssistantTask> {
     const task = await this.ownedTask(accountId, taskId);
-    if (task.status === "working" && task.session) throw new Error("这件事还在进行中，不能结束");
+    if (task.status === "working" && task.session) throw new Error("This is still in progress and cannot be finished");
     return this.deps.tasks.update(task.id, { status: "done", ...(answered ? { answeredAt: new Date().toISOString() } : {}) });
   }
 
@@ -483,11 +483,11 @@ export class AssistantService implements StudioOperations {
   private async runStep(task: AssistantTask, step: Role): Promise<AssistantTask> {
     const workspace = await this.workspace(task.accountId, task.productId!);
     const session = (await workspace.store.getOrCreate(step)).session;
-    if (workspace.runtime.isRunning(session.id)) throw new Error("这个 Agent 正在 Studio 里构建，稍后再试");
+    if (workspace.runtime.isRunning(session.id)) throw new Error("This Agent is being built in Studio; try again later");
     const instruction = String(task.payload.instruction ?? "");
-    const message = step === "generation" ? `按最新的访谈和评测构建这个 Agent。专家这次想改的：${instruction}\n这次只构建：写好并核对文件就结束，发布由助理负责。`
-      : step === "case-generation" ? "根据刚更新的 Agent，构造一个新的真实客户案例。"
-        : step === "evaluator" ? "用最新案例评测线上 Agent。" : instruction;
+    const message = step === "generation" ? `Build this Agent from the latest interviews and evaluations. What the Expert wants changed this time: ${instruction}\nBuild only this time: finish once the files are written and checked; publishing is the Assistant's job.`
+      : step === "case-generation" ? "Based on the Agent that was just updated, construct a new realistic client case."
+        : step === "evaluator" ? "Evaluate the live Agent with the latest case." : instruction;
     const updated = await this.deps.tasks.update(task.id, { status: "working", session: { scope: "product", sessionId: session.id }, payload: { step }, leaseExpiresAt: lease() });
     await workspace.runtime.start(session.id, message);
     return updated;
@@ -498,16 +498,16 @@ export class AssistantService implements StudioOperations {
     if (this.closing) return;
     if (task.kind === "interview" && workspace) return this.interviewTurnEnded(task, workspace, type);
     const session = await store.get(task.session!.sessionId);
-    if (type !== "voice.run_completed") return void await this.block(task, session.error ?? "被中断了", session.messages.length);
+    if (type !== "voice.run_completed") return void await this.block(task, session.error ?? "It was interrupted", session.messages.length);
     const questions = trailingQuestions(session.messages);
     if (questions.length) {
       await this.deps.tasks.update(task.id, { status: "needs_you", needs: "answer", leaseExpiresAt: undefined, payload: { questions } });
       // Each question the worker asks is a turn of its own: the length of its session tells them apart, and tells a replay of one from the next.
-      await this.news(task.accountId, task.id, `想问专家：\n${questions.map((question, index) => `${index + 1}. ${question}`).join("\n")}`, `asked:${session.messages.length}`);
+      await this.news(task.accountId, task.id, `Wants to ask the Expert:\n${questions.map((question, index) => `${index + 1}. ${question}`).join("\n")}`, `asked:${session.messages.length}`);
       return;
     }
     const worker = this.workers[task.kind as WorkerKind];
-    if (!worker) return void await this.block(task, `不认识的任务类型：${task.kind}`, session.messages.length);
+    if (!worker) return void await this.block(task, `Unknown task type: ${task.kind}`, session.messages.length);
     const next = worker.steps?.[worker.steps.indexOf(task.payload.step as Role) + 1];
     if (next) return void await this.runStep(task, next);
     await worker.finish(task, session, store);
@@ -525,7 +525,7 @@ export class AssistantService implements StudioOperations {
   /** `turn` is what tells one block from the next: the worker's session length when its turn ended, or the attempt count. A retry of the same block has the same one. */
   private async block(task: AssistantTask, reason: string, turn: number): Promise<void> {
     await this.deps.tasks.update(task.id, { status: "needs_you", needs: "blocked", lastError: reason, leaseExpiresAt: undefined });
-    await this.news(task.accountId, task.id, `卡住了：${reason}`, `blocked:${turn}`);
+    await this.news(task.accountId, task.id, `Stuck: ${reason}`, `blocked:${turn}`);
   }
 
   // ── Tick: recovery and the daily check ─────────────────────────────────
@@ -540,11 +540,11 @@ export class AssistantService implements StudioOperations {
   private async recover(task: AssistantTask): Promise<void> {
     // Old tasks of kinds that no longer exist (the Assistant's own research and content workers) have nothing to resume.
     if (!this.workers[task.kind as WorkerKind]) return;
-    if (task.attempts >= 3) return this.block(task, "多次中断，没能完成", task.attempts);
+    if (task.attempts >= 3) return this.block(task, "Interrupted several times and could not be completed", task.attempts);
     const runtime = await this.sessionRuntime(task);
     await this.deps.tasks.update(task.id, { attempted: true, leaseExpiresAt: lease() });
     if (runtime.isRunning(task.session!.sessionId)) return;
-    await runtime.start(task.session!.sessionId, "服务重启过，上一轮被中断了。先检查已有的结果，再从中断的地方继续。");
+    await runtime.start(task.session!.sessionId, "The service was restarted and the previous turn was interrupted. First check the existing results, then continue from where it stopped.");
   }
 
   private async dailyCheck(accountId: string, timezone: string, now: Date): Promise<void> {
@@ -563,8 +563,8 @@ export class AssistantService implements StudioOperations {
     if (ignored && latest && now.getTime() - Date.parse(latest.createdAt) < 3 * 24 * 3600_000) return;
     for (const poke of pokes) if (poke.status !== "done") await this.deps.tasks.update(poke.id, { status: "done" });
     const task = await this.deps.tasks.create({ accountId, kind: "poke", origin: { source: "tick" }, summary: "日常检查" });
-    const clock = new Intl.DateTimeFormat("zh-CN", { timeZone: timezone, weekday: "short", hour: "2-digit", minute: "2-digit" }).format(now);
-    await this.news(accountId, task.id, `专家当地时间 ${clock}。看看他的 Agent 和最近的事，决定今天要不要戳一戳他。`, "tick", "tick");
+    const clock = new Intl.DateTimeFormat("en-US", { timeZone: timezone, weekday: "short", hour: "2-digit", minute: "2-digit" }).format(now);
+    await this.news(accountId, task.id, `The Expert's local time is ${clock}. Look at his Agents and recent events, and decide whether to poke him today.`, "tick", "tick");
   }
 
   // ── Studio and channel surfaces ───────────────────────────────────────
@@ -588,10 +588,10 @@ export class AssistantService implements StudioOperations {
     const lines = await mapLimit(agents, 4, async agent => {
       const live = await this.deps.catalog.live(accountId, agent.productId, agent) as { is_live?: boolean; pending_changes?: string[]; public_url?: string; chat_url?: string; telegram_url?: string } | null;
       const outline = await this.interviewOutline(accountId, agent);
-      const links = live?.is_live ? [["主页", live.public_url], ["聊天页", live.chat_url], ["Telegram", live.telegram_url]].filter(([, url]) => url).map(([label, url]) => `${label} ${url}`) : [];
-      return [`- 「${agent.name}」（${agent.productId}）：${live?.is_live ? "在线" : "未上线"}${live?.pending_changes?.length ? `，待发布：${live.pending_changes.join("、")}` : ""}${links.length ? `，${links.join("，")}` : ""}`, ...outline.map(todo => `  ${todo.status === "completed" ? "✓" : "○"} ${todo.title}`)].join("\n");
+      const links = live?.is_live ? [["Home", live.public_url], ["Chat page", live.chat_url], ["Telegram", live.telegram_url]].filter(([, url]) => url).map(([label, url]) => `${label} ${url}`) : [];
+      return [`- "${agent.name}" (${agent.productId}): ${live?.is_live ? "live" : "not live"}${live?.pending_changes?.length ? `, pending release: ${live.pending_changes.join(", ")}` : ""}${links.length ? `, ${links.join(", ")}` : ""}`, ...outline.map(todo => `  ${todo.status === "completed" ? "✓" : "○"} ${todo.title}`)].join("\n");
     });
-    return `<当前状态>\n系统自动生成，不是专家说的，不要复述。\n事项：\n${tasks.map(task => `- ${task.kind}（${task.id}）${task.status}${task.needs ? `/${task.needs}` : ""}：${task.summary ?? ""}`).join("\n") || "（没有）"}\nAgent 和访谈大纲：\n${lines.join("\n") || "（没有）"}\n</当前状态>`;
+    return `<当前状态>\nGenerated automatically by the system, not said by the Expert; do not repeat it.\nTasks:\n${tasks.map(task => `- ${task.kind} (${task.id}) ${task.status}${task.needs ? `/${task.needs}` : ""}: ${task.summary ?? ""}`).join("\n") || "(none)"}\nAgents and interview outlines:\n${lines.join("\n") || "(none)"}\n</当前状态>`;
   }
 
   /** Someone linked their chat to this Assistant. Returns what to say to them. */
@@ -646,12 +646,12 @@ export class AssistantService implements StudioOperations {
   /** The Product's workspace, for an Agent this account owns (a stranger's or unknown id is refused), with its BriefSpec as Studio's routes give it. */
   private async workspace(accountId: string, productId: string, known?: CatalogAgent): Promise<FactoryWorkspace> {
     const agent = known ?? await this.deps.catalog.get(accountId, productId);
-    if (!agent) throw Object.assign(new Error("没有找到这个 Agent"), { status: 404 });
+    if (!agent) throw Object.assign(new Error("Agent not found"), { status: 404 });
     return this.deps.products.workspace({ creatorId: accountId, productId, briefSpec: agent.briefSpec }, await this.deps.catalog.token(accountId));
   }
 
   private async sessionRuntime(task: AssistantTask): Promise<WorkbenchRuntime> {
-    if (task.session?.scope !== "product") throw new Error("这件事没有对应的执行会话");
+    if (task.session?.scope !== "product") throw new Error("This task has no execution session");
     return (await this.workspace(task.accountId, task.productId!)).runtime;
   }
 
@@ -708,6 +708,6 @@ function lease(): string { return new Date(Date.now() + WORKER_LEASE_MS).toISOSt
 
 function outlineText(todos: Todo[]): string {
   if (!todos.length) return "";
-  return `\n\n大纲：\n${todos.map(todo => `${todo.status === "completed" ? "✓" : "○"} ${todo.title}`).join("\n")}`;
+  return `\n\nOutline:\n${todos.map(todo => `${todo.status === "completed" ? "✓" : "○"} ${todo.title}`).join("\n")}`;
 }
 

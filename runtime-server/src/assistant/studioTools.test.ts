@@ -30,7 +30,7 @@ test("start_task defaults to the only Agent", async () => {
 
 test("start_task without agent_id lists the Agents when there are several", async () => {
   const { dispatched, run } = startTask([agent("p1", "美本顾问", done), agent("p2", "UCAS 顾问", done)]);
-  await assert.rejects(run({ kind: "interview", instruction: "聊" }), /要指定 Agent.*「美本顾问」 → p1.*「UCAS 顾问」 → p2.*agent_id/);
+  await assert.rejects(run({ kind: "interview", instruction: "聊" }), /must be specified.*"美本顾问" → p1.*"UCAS 顾问" → p2.*agent_id/);
   assert.deepEqual(dispatched, []);
 });
 
@@ -39,7 +39,7 @@ test("with two Agents, agent_id may be the Agent's name, and an unknown one list
   await run({ kind: "build", agent_id: "UCAS 顾问", instruction: "构建" });
   await run({ kind: "build", agent_id: "p1", instruction: "构建" });
   assert.deepEqual(dispatched, [{ kind: "build", productId: "p2" }, { kind: "build", productId: "p1" }]);
-  await assert.rejects(run({ kind: "build", agent_id: "不存在", instruction: "构建" }), /没有这个 Agent：不存在.*「UCAS 顾问」 → p2.*agent_id/);
+  await assert.rejects(run({ kind: "build", agent_id: "不存在", instruction: "构建" }), /No such Agent: 不存在.*"UCAS 顾问" → p2.*agent_id/);
 });
 
 test("the Assistant has read_page, and it reads through the ops", async () => {

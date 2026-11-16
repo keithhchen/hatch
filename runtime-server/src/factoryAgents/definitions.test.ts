@@ -48,13 +48,13 @@ test("Build is updatable only by the interview, never by advanced output", async
 test("Evaluator is a Creator calibration loop, not a publishing or scoring loop", async () => {
   const evaluator = (await initialAgentDefinitions()).find(definition => definition.role === "evaluator");
   assert.ok(evaluator);
-  assert.match(evaluator.systemPrompt, /找出最可能改变下一版 Agent 的少数关键错位/);
-  assert.match(evaluator.systemPrompt, /挑出 1–3 个高杠杆/);
-  assert.match(evaluator.systemPrompt, /调用 askuser 后不得自动重跑案例/);
-  assert.match(evaluator.systemPrompt, /一次真实运行最多发出一个 askuser 批次/);
-  assert.match(evaluator.systemPrompt, /观察到的行为 → 对客户\/交付的后果/);
-  assert.match(evaluator.systemPrompt, /上传 corpus、发布 Product/);
-  assert.match(evaluator.systemPrompt, /不要把报告写成 pass\/fail 评分表/);
+  assert.match(evaluator.systemPrompt, /find the few key misalignments most likely to change the next version of the Agent/);
+  assert.match(evaluator.systemPrompt, /pick 1–3 high-leverage/);
+  assert.match(evaluator.systemPrompt, /After calling askuser, do not automatically rerun the case/);
+  assert.match(evaluator.systemPrompt, /Send at most one askuser batch per real run/);
+  assert.match(evaluator.systemPrompt, /observed behavior → consequence for the client\/deliverable/);
+  assert.match(evaluator.systemPrompt, /upload a corpus, publish a Product/);
+  assert.match(evaluator.systemPrompt, /Do not write the report as a pass\/fail scoring table/);
 });
 
 test("definition repository is read dynamically for each request", async () => {
@@ -119,13 +119,13 @@ test("the shelved person-centred method is not loaded; the interview method is s
   const done = await readFile(new URL("assistant/INTERVIEW_DONE.md", prompts), "utf8");
   const assistant = await readFile(new URL("assistant/ASSISTANT.md", prompts), "utf8");
   for (const loaded of [voice, done, assistant]) assert.doesNotMatch(loaded, /Intellectual Genealogy|Reciprocal disclosure/);
-  assert.match(done, /^# 访谈方法/m);
-  assert.match(assistant, /「访谈方法」/);
+  assert.match(done, /^# Interview method/m);
+  assert.match(assistant, /“Interview method”/);
   const form = await readFile(new URL("factory-agents/voice/FORM_PAGE.md", prompts), "utf8");
-  assert.match(form, /说法不一致，请定一个/);
+  assert.match(form, /Versions disagree, please pick one/);
   const count = (text: string, needle: string) => text.split(needle).length - 1;
-  assert.equal(count(done, "婚礼摄影师，只示范形式"), 1);
-  assert.equal(count(done, "元问题和具体问题"), 1);
-  assert.equal(count(form, "婚礼摄影师的骨架"), 1);
-  for (const other of [voice, assistant]) assert.equal(count(other, "婚礼摄影师"), 0, "each example lives in one place only");
+  assert.equal(count(done, "a wedding photographer; shows the form only"), 1);
+  assert.equal(count(done, "Meta questions and specific questions"), 1);
+  assert.equal(count(form, "skeleton for a wedding photographer"), 1);
+  for (const other of [voice, assistant]) assert.equal(count(other, "wedding photographer"), 0, "each example lives in one place only");
 });
