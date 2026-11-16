@@ -21,13 +21,17 @@ export type ArtifactRouteDeps = {
   allowedOrigins: readonly string[];
 };
 
-const FILES = { "free.pdf": ["freePdf", "application/pdf"], "preview.png": ["preview", "image/png"], "full.pdf": ["fullPdf", "application/pdf"] } as const;
+const HTML = "text/html; charset=utf-8";
+const FILES = { "free.pdf": ["freePdf", "application/pdf"], "preview.png": ["preview", "image/png"], "full.pdf": ["fullPdf", "application/pdf"], "free.html": ["freeHtml", HTML], "full.html": ["fullHtml", HTML] } as const;
+/** The report HTML is the agent's: it is shown framed, may run nothing and load nothing but inline styles and data: images. */
+const REPORT_HTML_POLICY = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; sandbox allow-same-origin";
 
 /** What a viewer may fetch of a report: the free files once it is ready, the full PDF once it is unlocked or the viewer owns the product (an owner is bound with creatorId = userId). */
 export function reportAccess(record: ReportRecord, binding: Pick<SessionBinding, "creatorId" | "userId">) {
   const ready = record.status === "ready";
   const unlocked = Boolean(record.unlockedAt);
-  return { ready, unlocked, files: { free_pdf: ready, preview: ready, full_pdf: ready && (unlocked || binding.creatorId === binding.userId) } };
+  const full = ready && (unlocked || binding.creatorId === binding.userId);
+  return { ready, unlocked, files: { free_pdf: ready, free_html: ready, preview: ready, full_pdf: full, full_html: full } };
 }
 
 /** `/v1/products/:productId/artifact[/conversations]`: the intake, and the viewer's artifact conversations. */
@@ -100,9 +104,12 @@ export async function handleReportRequest(
   const file = FILES[name];
   if (!file) throw new ConversationHttpError(404, "report_file_not_found", "Unknown report file.");
   if (!access.ready || !record.keys) throw new ConversationHttpError(404, "report_not_ready", "The report is not ready.");
-  if (name === "full.pdf" && !access.files.full_pdf) throw new ConversationHttpError(403, "report_locked", "The full report is locked.");
+  if ((name === "full.pdf" || name === "full.html") && !access.files.full_pdf) throw new ConversationHttpError(403, "report_locked", "The full report is locked.");
   const bytes = await artifact.blobs.get(record.keys[file[0]]);
-  res.writeHead(200, { "content-type": file[1], "content-length": bytes.length, "cache-control": "private, no-store" });
+  res.writeHead(200, {
+    "content-type": file[1], "content-length": bytes.length, "cache-control": "private, no-store",
+    ...(file[1] === HTML ? { "content-security-policy": REPORT_HTML_POLICY, "x-content-type-options": "nosniff" } : {})
+  });
   res.end(bytes);
   return true;
 }

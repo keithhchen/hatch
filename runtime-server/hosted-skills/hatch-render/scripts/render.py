@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic HTML to PDF renderer: full.pdf, free.pdf and a blurred preview.png of the paid sections."""
+"""Deterministic HTML to PDF renderer: full.pdf, free.pdf and preview.png, the first pages of the paid part blurred."""
 import argparse
 import json
 import re
@@ -10,6 +10,7 @@ from playwright.sync_api import sync_playwright
 
 PAGE_W, PAGE_H, SCALE = 794, 1123, 2  # A4 at 96 dpi
 BLUR_PX = 8
+PREVIEW_PAGES = 3  # the first pages of the paid part, blurred, under the free part shown on the web
 PREVIEW_CSS = (
     '[data-access="free"] { display: none !important; }'
     f'[data-access="paid"] {{ filter: blur({BLUR_PX}px) !important; }}'
@@ -43,7 +44,8 @@ def preview(browser, source: Path, out: Path) -> None:
     page.evaluate("document.fonts.ready")
     if page.locator('[data-access="paid"]').count() == 0:
         raise SystemExit("error: full.html has no [data-access=paid] section")
-    page.screenshot(path=str(out), clip={"x": 0, "y": 0, "width": PAGE_W, "height": PAGE_H})
+    height = min(page.evaluate("document.documentElement.scrollHeight"), PREVIEW_PAGES * PAGE_H)
+    page.screenshot(path=str(out), full_page=True, clip={"x": 0, "y": 0, "width": PAGE_W, "height": height})
     ctx.close()
 
 
