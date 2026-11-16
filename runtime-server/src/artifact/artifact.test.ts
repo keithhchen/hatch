@@ -134,6 +134,22 @@ test("lifecycle: draft, generating, ready; and failed when a run ends without a 
 
 });
 
+test("web_search is offered only when search is configured, and asks it with query and objective", async () => {
+  const { artifact, reports } = await mode();
+  const c = conversation();
+  await reports.create({ conversationId: c.id, productId: "p1", ownerAccountId: c.ownerAccountId });
+  const run = { createdAt: new Date().toISOString() };
+  assert.deepEqual((await artifact.turnFor(c, run))!.extraTools, ["artifact.publish_report"]);
+  const asked: unknown[] = [];
+  const search = { name: "fake", search: async (input: { query: string; objective: string }) => { asked.push(input); return { provider: "fake", query: input.query, retrievedAt: "t", results: [] }; } };
+  const withSearch = new ArtifactMode({ ...artifact.deps, search });
+  const turn = (await withSearch.turnFor(c, run))!;
+  assert.deepEqual(turn.extraTools, ["artifact.publish_report", "artifact.web_search"]);
+  assert.match(String((await turn.tools.run("web_search", { query: "MIT deadline", objective: "official date" })).output), /"provider":"fake"/);
+  assert.deepEqual(asked, [{ query: "MIT deadline", objective: "official date" }]);
+  await assert.rejects(turn.tools.run("web_search", { query: "x" }), /query and objective/);
+});
+
 test("the upload cap applies to report conversations only", async () => {
   const { artifact, reports, uploads } = await mode();
   const c = conversation();

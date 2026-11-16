@@ -6,7 +6,7 @@ export function stageOf(name: string, args: Record<string, unknown>): { stage: R
   const path = typeof args.path === "string" ? ` ${args.path.slice(0, 80)}` : "";
   if (name.startsWith("attachments.")) return { stage: "reading", detail: `${name.slice("attachments.".length)}${path}` };
   if (name.startsWith("creator.")) return { stage: "consulting", detail: name };
-  if (name === "web.search" || name === "hatch.web_search") return { stage: "researching", detail: "web_search" };
+  if (name === "web.search" || name === "hatch.web_search" || name === "artifact.web_search") return { stage: "researching", detail: "web_search" };
   if (name === "artifact.publish_report") return { stage: "writing", detail: "publish_report" };
   return undefined;
 }

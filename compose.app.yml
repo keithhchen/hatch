@@ -205,6 +205,8 @@ services:
       HATCH_RUNTIME_CHAT_SERVICE_TOKEN: ${HATCH_RUNTIME_CHAT_SERVICE_TOKEN:?set HATCH_RUNTIME_CHAT_SERVICE_TOKEN in /opt/hatch/.env}
       # Kimi Hosted Agents: renders artifact reports to PDF. Report mode fails loudly when unset.
       HATCH_MANAGED_AGENTS_API_KEY: ${HATCH_MANAGED_AGENTS_API_KEY:-}
+      # Public web search for report mode (HATCH_SEARCH_PROVIDER picks the provider; default parallel).
+      PARALLEL_API_KEY: ${PARALLEL_API_KEY:-}
       # What one contact may send to one Product, in all.
       HATCH_RUNTIME_MAX_CONTACT_MESSAGES: ${HATCH_RUNTIME_MAX_CONTACT_MESSAGES:-1000}
       # Voice messages are transcribed by the first of these that works: gemini (GEMINI_API_KEY), then qwen (DASHSCOPE_API_KEY).

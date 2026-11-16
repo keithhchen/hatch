@@ -8,6 +8,7 @@ const TOOLS = `# Report tools
 - \`ls\` lists the client's files as /attachments/<name>, and /attachments/<name>.md for each file that has a text form.
 - \`read(path, offset?, page?)\`: a .md path returns its text in pages. An original image is shown to you. An original PDF shows page \`page\` (default 1) as an image, with "page N of M". Any other original (docx, xlsx...) is read through its .md.
 - \`grep\` searches the .md texts.
+- \`web_search(query, objective)\` searches the public web, for facts that change over time.
 - \`publish_report(html)\` publishes the report once; it returns "Report published." or the exact errors to fix.`;
 
 /** What an artifact conversation's agent is told beyond the Expert's own instructions: the shared report rules, the product's template, the tools. */

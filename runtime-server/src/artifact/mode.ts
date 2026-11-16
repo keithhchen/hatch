@@ -10,7 +10,8 @@ import type { ArtifactConfigRepository, ReportRenderer, ReportRepository } from 
 import { artifactPrompt } from "./prompt.js";
 import { ReportProgress } from "./progress.js";
 import { ReportPublisher } from "./publisher.js";
-import { PUBLISH_REPORT_TOOL, reportToolRunner } from "./toolDefinitions.js";
+import { PUBLISH_REPORT_TOOL, WEB_SEARCH_TOOL, reportToolRunner } from "./toolDefinitions.js";
+import type { SearchProvider } from "../factoryAgents/search.js";
 
 /** At most this many files may be uploaded to one artifact conversation. */
 export const MAX_ARTIFACT_FILES = 20;
@@ -19,7 +20,7 @@ export const MAX_ARTIFACT_FILES = 20;
 export type ArtifactTurn = { promptSuffix: string; extraTools: string[]; tools: HostToolRunner; onTool: ReportProgress["onTool"]; turnReminder: (now: Date) => string; toolCallLimit: { max: number; uncounted: string[] } };
 
 /** A report reads far more than a chat reply: the form, every file, the knowledge base. Its delivery never counts, so it is always callable. */
-export const REPORT_TOOL_CALL_LIMIT = { max: 60, uncounted: ["publish_report"] };
+export const REPORT_TOOL_CALL_LIMIT = { max: 100, uncounted: ["publish_report"] };
 
 /**
  * The last thing the model reads on every call of a report Run, in place of the chat reply reminder: a buyer chat reply
@@ -48,6 +49,8 @@ export class ArtifactMode {
     assets: Pick<ChatAssets, "uploadedCount">;
     analytics?: ProductAnalytics;
     maxFiles?: number;
+    /** The public web, for facts that change; absent when the server has no search configured. */
+    search?: SearchProvider;
     /** Test seams of publishing: pauses, sleep, clock, ids. */
     publishing?: Partial<ConstructorParameters<typeof ReportPublisher>[0]>;
     clock?: () => Date;
@@ -82,6 +85,6 @@ export class ArtifactMode {
     const config = await this.deps.configs.get(conversation.productId);
     if (!config) throw new Error(`Product ${conversation.productId} has an artifact conversation but no artifact configuration.`);
     const progress = new ReportProgress(this.deps.reports, { conversationId: conversation.id, attempt: report.attempt });
-    return { promptSuffix: await artifactPrompt(config), extraTools: [PUBLISH_REPORT_TOOL], tools: reportToolRunner(this.publisher, conversation, run, report.attempt, progress), onTool: progress.onTool, turnReminder: reportTurnReminder, toolCallLimit: REPORT_TOOL_CALL_LIMIT };
+    return { promptSuffix: await artifactPrompt(config), extraTools: this.deps.search ? [PUBLISH_REPORT_TOOL, WEB_SEARCH_TOOL] : [PUBLISH_REPORT_TOOL], tools: reportToolRunner(this.publisher, conversation, run, report.attempt, progress, this.deps.search), onTool: progress.onTool, turnReminder: reportTurnReminder, toolCallLimit: REPORT_TOOL_CALL_LIMIT };
   }
 }
