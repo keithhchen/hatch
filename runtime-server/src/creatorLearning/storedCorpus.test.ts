@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { corpusOutputSchema, parseStoredCorpus } from "./corpusNode.js";
+import { corpusOutputSchema, parseStoredCorpus } from "./corpusSchema.js";
 
 const stored = {
   system_instructions: "x".repeat(10),

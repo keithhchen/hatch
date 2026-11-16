@@ -1546,8 +1546,7 @@ export async function createDashboardApp(options = {}) {
         return send(response, 404, { error: { code: "not_found", message: "Route not found." } });
       }
 
-      const productContractPath = url.pathname.match(/^\/v1\/creator\/products(?:\/[^/]+(?:\/ingest(?:\/[^/]+)?|\/graph|\/brief-spec|\/registry|\/live|\/withdraw|\/listing|\/pricing|\/nodes\/(?:about-you|corpus)\/executions(?:\/[^/]+(?:\/answers)?)?)?)?$/);
-      const productNodeContract = /\/nodes\/(?:about-you|corpus)\/executions(?:\/[^/]+(?:\/answers)?)?$/.test(url.pathname);
+      const productContractPath = url.pathname.match(/^\/v1\/creator\/products(?:\/[^/]+(?:\/ingest(?:\/[^/]+)?|\/brief-spec|\/registry|\/live|\/withdraw|\/listing|\/pricing)?)?$/);
       const productRegistryContract = /\/registry$/.test(url.pathname);
       const productLiveContract = /\/live$/.test(url.pathname);
       const productContractWrite = productContractPath && (
@@ -1557,7 +1556,6 @@ export async function createDashboardApp(options = {}) {
         || /\/(brief-spec|pricing|ingest|ingest\/uploads)$/.test(url.pathname)
         || /\/withdraw$/.test(url.pathname)
         || /\/listing$/.test(url.pathname)
-        || productNodeContract
         || productRegistryContract
         || productLiveContract
         || /^\/v1\/creator\/products\/[^/]+$/.test(url.pathname)
@@ -1569,9 +1567,7 @@ export async function createDashboardApp(options = {}) {
         url.pathname === "/v1/creator/products"
         || /^\/v1\/creator\/products\/[^/]+$/.test(url.pathname)
         || /\/ingest(?:\/[^/]+)?$/.test(url.pathname)
-        || /\/graph$/.test(url.pathname)
         || productLiveContract
-        || productNodeContract
       );
       if (productContractWrite || productContractRead || productContractDelete) {
         const authentication = await authenticate(request, registryUrl, fetchImpl, portalState);
@@ -1598,7 +1594,7 @@ export async function createDashboardApp(options = {}) {
         const status = request.method === "DELETE"
           ? 204
           : request.method === "POST"
-            ? ((productNodeContract && url.pathname.endsWith("/executions")) || url.pathname.endsWith("/ingest") ? 202 : 201)
+            ? (url.pathname.endsWith("/ingest") ? 202 : 201)
             : 200;
         return send(response, status, payload);
       }

@@ -4,8 +4,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { zipSync } from "fflate";
 import type { ArtifactObjectStore } from "./objectStore.js";
-import type { FactoryNodeService } from "./nodeService.js";
-import { corpusInputSchema, corpusOutputSchema, type CorpusInput, type CorpusOutput } from "./corpusNode.js";
+import { corpusOutputSchema, type CorpusOutput } from "./corpusSchema.js";
 import type { RegistryStoreTs, PublishedAgentCorpus } from "../registryStore.js";
 import {
   AgentCorpusVerificationError,
@@ -39,10 +38,9 @@ export type PublishResult = {
   release: CreatorRegistryRelease;
 };
 
-/** Shared publication boundary for validated Corpus definitions and existing Node output. */
+/** Shared publication boundary for validated Corpus definitions. */
 export class CorpusPublisher {
   constructor(
-    private readonly nodes: FactoryNodeService | undefined,
     private readonly objectStore: ArtifactObjectStore,
     private readonly registry: RegistryStoreTs,
     private readonly releases: CreatorRegistryReleaseStore,
@@ -53,32 +51,6 @@ export class CorpusPublisher {
 
   private readonly analytics: ProductAnalytics;
 
-  async publishLatest(input: {
-    creatorId: string;
-    productId: string;
-    productName: string;
-    productPromise: string;
-    briefSpec?: unknown;
-    force?: boolean;
-  }): Promise<PublishResult> {
-    let outerStage = "latest_completed_corpus";
-    try {
-    const execution = await this.nodes?.getLatestCompletedExecution(input.productId, "corpus");
-    if (!execution?.outputRef) throw new Error("No completed Corpus Node execution is available");
-    const expected = `${input.productId}/corpus/${execution.executionId}/output.json`;
-    if (execution.outputRef !== expected) throw new Error("Corpus output_ref is not canonical");
-    outerStage = "oss_corpus_output";
-    const bytes = await this.objectStore.get(execution.outputRef);
-    outerStage = "parse_corpus_output";
-    const corpus = parseCorpusOutput(bytes);
-    outerStage = "read_corpus_input";
-    const corpusInput = await readCorpusInput(this.objectStore, execution.inputRef);
-    return await this.publishDefinition({ ...input, corpus, bytes, executionId: execution.executionId, outputRef: execution.outputRef });
-    } catch (error) {
-      if (error instanceof CorpusPublishError) throw error;
-      throw new CorpusPublishError("publish_stage_failed", `Registry publish failed during ${outerStage}: ${error instanceof Error ? error.message : String(error)}`, 422, { cause: error });
-    }
-  }
 
   /** File-based Factory uses the same schema/materializer/indexer/release pointer. */
   async publishUploaded(input: {
@@ -425,15 +397,6 @@ async function makeRuntimeBundle(input: {
   };
   put("agent.json", JSON.stringify(manifest, null, 2));
   return Buffer.from(zipSync(files));
-}
-
-async function readCorpusInput(objectStore: ArtifactObjectStore, reference: string | undefined): Promise<CorpusInput> {
-  if (!reference) throw new Error("Completed Corpus execution has no input_ref");
-  try {
-    return corpusInputSchema.parse(JSON.parse((await objectStore.get(reference)).toString("utf8")));
-  } catch (error) {
-    throw new Error(`Corpus input is unavailable or invalid: ${error instanceof Error ? error.message : String(error)}`);
-  }
 }
 
 function digestBytes(content: Uint8Array): string {

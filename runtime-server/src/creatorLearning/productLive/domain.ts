@@ -1,4 +1,4 @@
-import { corpusOutputSchema, type CorpusOutput } from "../corpusNode.js";
+import { corpusOutputSchema, type CorpusOutput } from "../corpusSchema.js";
 
 /**
  * Product Live domain. An Expert's Product goes live by publishing the Agent

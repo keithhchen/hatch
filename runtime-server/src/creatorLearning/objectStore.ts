@@ -488,6 +488,20 @@ export function isObjectStoreNotFound(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && ["ENOENT", "NoSuchKey", "NoSuchObject", "NotFound", "404"].includes(String((error as { code?: string; status?: number }).code ?? (error as { status?: number }).status)));
 }
 
+/** A non-empty object key with no leading slash, scheme, or empty, `.` or `..` segment. */
+export function normalizeObjectPath(value: string): string {
+  const normalized = value.trim().replaceAll("\\", "/");
+  if (
+    !normalized
+    || normalized.startsWith("/")
+    || normalized.includes("://")
+    || normalized.split("/").some((part) => !part || part === "." || part === "..")
+  ) {
+    throw new Error(`OSS object path must be a non-empty object key: ${value}`);
+  }
+  return normalized;
+}
+
 function isAlreadyExists(error: unknown): boolean {
   const value = error as { code?: string; status?: number } | undefined;
   return Boolean(value && ["PreconditionFailed", "ObjectAlreadyExists", "FileAlreadyExists", "409", "412"].includes(String(value.code ?? value.status)));

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { Pool } from "pg";
 import { POSTGRES_CONVERSATION_REPOSITORY_SCHEMA, PostgresConversationRepository } from "./conversationRepository.js";
-import { POSTGRES_CREATOR_FACTORY_REPOSITORY_SCHEMA, PostgresCreatorFactoryRepository } from "./creatorLearning/repository.js";
+import { PostgresCreatorFactoryRepository } from "./creatorLearning/repository.js";
 
 const connectionString = process.env.HATCH_TEST_DATABASE_URL;
 const options = { skip: !connectionString, timeout: 60_000 };
@@ -11,7 +11,7 @@ const options = { skip: !connectionString, timeout: 60_000 };
 /** Every column the code declares as text that production once held as uuid. The drift query compares these with the live catalog. */
 const EXPECTED_TEXT_COLUMNS = [
   ["hatch_conversations", "owner_account_id"], ["hatch_conversations", "creator_id"], ["hatch_conversations", "agent_id"],
-  ["hatch_conversations", "product_id"], ["hatch_conversations", "product_id_at_creation"], ["hatch_creator_factory_runs", "creator_id"]
+  ["hatch_conversations", "product_id"], ["hatch_conversations", "product_id_at_creation"]
 ];
 
 async function drift(pool: Pool): Promise<string[]> {
@@ -49,12 +49,11 @@ test("ensure-schema converts production's uuid id columns to text, keeps rows, a
   // The tables as production has them: the code's own DDL with the id columns uuid.
   const uuidColumns = /^(\s+(?:owner_account_id|creator_id|agent_id|product_id|product_id_at_creation)) TEXT/gm;
   await pool.query(tableDdl(POSTGRES_CONVERSATION_REPOSITORY_SCHEMA, "hatch_conversations").replace(uuidColumns, "$1 UUID"));
-  await pool.query(tableDdl(POSTGRES_CREATOR_FACTORY_REPOSITORY_SCHEMA, "hatch_creator_factory_runs").replace(uuidColumns, "$1 UUID"));
   const [owner, creator, agent] = [randomUUID(), randomUUID(), randomUUID()];
   await pool.query(
     `INSERT INTO hatch_conversations (id, public_id, owner_account_id, creator_id, agent_id, product_id, corpus_digest, product_id_at_creation, status, version)
      VALUES ('old', 'pub-old', $1, $2, $3, $3, 'c', $3, 'active', 1)`, [owner, creator, agent]);
-  assert.equal((await drift(pool)).length, 6, "the seed reproduces production's drift");
+  assert.equal((await drift(pool)).length, 5, "the seed reproduces production's drift");
 
   const conversations = new PostgresConversationRepository(pool);
   await conversations.initialize();

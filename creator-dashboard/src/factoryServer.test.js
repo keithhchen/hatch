@@ -25,12 +25,6 @@ test("Dashboard BFF removes the legacy Factory API and forwards Product Node req
       response.end(JSON.stringify({ id: "creator-factory", email: "creator@example.test", display_name: "Factory Creator" }));
       return;
     }
-    if (url.pathname === "/v1/creator/products/product-1/nodes/about-you/executions") {
-      forwarded.push({ method: request.method, headers: request.headers, body: content ? JSON.parse(content) : undefined });
-      response.statusCode = 202;
-      response.end(JSON.stringify({ node: "about-you", product_id: "product-1", execution_id: "about_you_1", status: "queued", round: 1 }));
-      return;
-    }
     if (request.method === "DELETE" && url.pathname === "/v1/creator/products/product-1") {
       forwarded.push({ method: request.method, headers: request.headers, body: undefined });
       response.statusCode = 204;
@@ -58,22 +52,13 @@ test("Dashboard BFF removes the legacy Factory API and forwards Product Node req
   assert.equal(legacy.status, 404);
   assert.equal(forwarded.length, 0);
 
-  const response = await fetch(`${serverUrl(api)}/v1/creator/products/product-1/nodes/about-you/executions`, {
+  const retiredNodes = await fetch(`${serverUrl(api)}/v1/creator/products/product-1/nodes/about-you/executions`, {
     method: "POST",
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": "application/json",
-      "idempotency-key": "node-request-1"
-    },
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: JSON.stringify({ file_ids: ["file_1"] })
   });
-  assert.equal(response.status, 202);
-  assert.equal((await response.json()).execution_id, "about_you_1");
-  assert.equal(forwarded.length, 1);
-  assert.equal(forwarded[0].headers.authorization, "Bearer signed-creator-token");
-  assert.equal(forwarded[0].headers["idempotency-key"], "node-request-1");
-  assert.deepEqual(forwarded[0].body, { file_ids: ["file_1"] });
-  assert.equal("creator_id" in forwarded[0].body, false);
+  assert.equal(retiredNodes.status, 404);
+  assert.equal(forwarded.length, 0);
 
   const deleted = await fetch(`${serverUrl(api)}/v1/creator/products/product-1`, {
     method: "DELETE",
@@ -81,9 +66,9 @@ test("Dashboard BFF removes the legacy Factory API and forwards Product Node req
   });
   assert.equal(deleted.status, 204);
   assert.equal(await deleted.text(), "");
-  assert.equal(forwarded.length, 2);
-  assert.equal(forwarded[1].method, "DELETE");
-  assert.equal(forwarded[1].headers.authorization, "Bearer signed-creator-token");
+  assert.equal(forwarded.length, 1);
+  assert.equal(forwarded[0].method, "DELETE");
+  assert.equal(forwarded[0].headers.authorization, "Bearer signed-creator-token");
 });
 
 async function login(server) {

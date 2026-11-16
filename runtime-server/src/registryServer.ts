@@ -109,7 +109,6 @@ import { RegistryStoreTs } from "./registryStore.js";
 import { RegistryDeploymentConflictError } from "./registryStore.js";
 import { BriefValidationError, normalizeBriefSpec, type BriefSpec } from "./brief.js";
 import { ProductPricingError, type ProductPricing } from "./creatorLearning/pricing.js";
-import { handleCreatorFactoryHttp } from "./creatorLearning/httpApi.js";
 import { isUuidV4 } from "./identity.js";
 import {
   CreatorFactoryRepositoryError,
@@ -118,29 +117,15 @@ import {
   type CreatorFactoryRepository
 } from "./creatorLearning/repository.js";
 import { CreatorFactoryService } from "./creatorLearning/service.js";
-import { CreatorFactory } from "./creatorLearning/engine.js";
-import { factoryModelRecord, factoryPromptRunner } from "./creatorLearning/piGateway.js";
 import { InMemoryModelRoleResolver, PostgresModelRoleResolver } from "./modelRoles.js";
-import { createHatchCliCandidateExecutor } from "./creatorLearning/cliCandidateExecutor.js";
-import { CreatorFactoryWorker } from "./creatorLearning/worker.js";
 import type { CreatorProductRecord } from "./creatorLearning/products.js";
 import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
-import { ProductFileStore, ProductFilesError, type ProductFileView } from "./creatorLearning/productFiles.js";
-import { NodeRuntime } from "./nodeRuntime.js";
-import { PostgresNodeStore } from "./nodeSession.js";
-import {
-  FactoryNodeService,
-  FactoryNodeServiceError,
-  type FactoryNodeExecutionView,
-  type FactoryNodeRunView
-} from "./creatorLearning/nodeService.js";
-import type { AboutYouAnswerPair } from "./creatorLearning/aboutYouNode.js";
 import { PostgresDistillationGraphStore } from "./creatorLearning/distillationGraphStore.js";
 import { CorpusPublisher, CorpusPublishError } from "./creatorLearning/corpusPublisher.js";
 import { imageMime } from "./factoryAgents/imageRefs.js";
 import { createProductLive, ExpertProduct, SystemMissing, type ProductLiveService } from "./creatorLearning/productLive/index.js";
 import { CreatorRegistryReleaseStore, type CreatorRegistryRelease } from "./creatorLearning/creatorRegistryRelease.js";
-import { parseStoredCorpus } from "./creatorLearning/corpusNode.js";
+import { parseStoredCorpus } from "./creatorLearning/corpusSchema.js";
 import { flushLangfuseObservability, initializeLangfuseObservability } from "./langfuse.js";
 import { accountAvatarApplicationServiceFromEnvironment, MAX_ACCOUNT_AVATAR_BYTES } from "./accountAvatar.js";
 import {
@@ -196,8 +181,6 @@ type RegistryContext = {
   factoryService: CreatorFactoryService;
   factoryAgents: FactoryAgentsService;
   factoryAgentDefinitions?: PostgresAgentDefinitionRepository;
-  productFileStore: ProductFileStore;
-  factoryNodeService?: FactoryNodeService;
   corpusPublisher?: CorpusPublisher;
   productLive?: ProductLiveService;
   nodeObjectStore?: ReturnType<typeof objectStoreFromEnvironment>;
@@ -232,31 +215,8 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const factoryAgents = new FactoryAgentsService(path.join(factoryRoot, "agent-chats"), environment, models, factoryAgentDefinitions, registryPool ? () => new EventLogJournal(conversationPorts.eventLog, event => event.sessionId) : undefined, usage, usageCap, analytics);
   const objectStore = objectStoreFromEnvironment(environment);
   const productObjectStore = objectStoreFromEnvironment(environment, path.join(factoryRoot, "product-files"));
-  if (!productObjectStore) throw new Error("Product File object storage is not configured");
-  const productFileStore = new ProductFileStore(
-    productObjectStore,
-    environment.HATCH_CREATOR_PRODUCT_FILES_PREFIX?.trim() || "creator-products"
-  );
+  if (!productObjectStore) throw new Error("Product object storage is not configured");
   const nodeObjectStore = objectStore ?? productObjectStore;
-  const nodePool = registryPool;
-  const nodePersistence = nodePool ? new PostgresNodeStore({ pool: nodePool }) : undefined;
-  const factoryNodeService = nodePersistence && nodeObjectStore
-    ? new FactoryNodeService(
-      new NodeRuntime({
-        models,
-        sessionStore: nodePersistence,
-        executionStore: nodePersistence,
-        storage: { objectStore: nodeObjectStore },
-        maxRounds: integerEnvironment(environment.HATCH_FACTORY_NODE_MAX_ROUNDS, 10),
-        maxAgentTurns: integerEnvironment(environment.HATCH_FACTORY_NODE_MAX_AGENT_TURNS, 16)
-      }),
-      nodePersistence,
-      { objectStore: nodeObjectStore },
-      productFileStore,
-      environment.HATCH_CREATOR_PRODUCT_FILES_PREFIX?.trim() || "creator-products",
-      { recorder: usage, cap: usageCap }
-    )
-    : undefined;
   const graphPool = store.databasePool();
   // Registry releases are the cross-process publish authority. Bind this
   // store directly to the configured production Postgres URL so a release
@@ -277,7 +237,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const releaseStore = new CreatorRegistryReleaseStore(releasePool, analytics);
   await releaseStore.ensureSchema();
   const corpusPublisher = nodeObjectStore
-    ? new CorpusPublisher(factoryNodeService, nodeObjectStore, store, releaseStore, environment.HATCH_RUNTIME_CORPUS_ROOT?.trim() || "runtime-corpora", analytics)
+    ? new CorpusPublisher(nodeObjectStore, store, releaseStore, environment.HATCH_RUNTIME_CORPUS_ROOT?.trim() || "runtime-corpora", analytics)
     : undefined;
   const studioUrl = environment.HATCH_STUDIO_ASSISTANT_URL?.trim() || "https://gethatchapp.com/studio/assistant";
   // The site its users know: the alias domain. Products and the Telegram bots are reached here.
@@ -287,41 +247,9 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     : undefined;
   const graphStore = graphPool ? new PostgresDistillationGraphStore(graphPool) : undefined;
   await graphStore?.initialize();
-  // User commands start the Factory directly in the registry process. The
-  // standalone worker remains a durable restart/recovery consumer, but a new
-  // Product revision no longer waits for its polling loop to notice a row.
-  const immediateFactoryWorker = new CreatorFactoryWorker(
-    factoryRepository,
-    new CreatorFactory(
-      factoryRoot,
-      factoryPromptRunner(models, environment),
-      createHatchCliCandidateExecutor({
-        models,
-        timeoutMs: integerEnvironment(environment.HATCH_CREATOR_FACTORY_HATCH_TIMEOUT_MS, 15 * 60_000),
-        environment
-      }),
-      { model: factoryModelRecord(models), objectStore, graphStore }
-    ),
-    {
-      workerId: `factory-http-${process.pid}-${randomUUID()}`,
-      usage,
-      // The direct HTTP starter and the durable recovery worker share this
-      // lease. It must exceed the Factory LLM's 15-minute hard deadline so a
-      // slow prompt is not reclaimed while the request is still executing.
-      leaseMs: integerEnvironment(environment.HATCH_CREATOR_FACTORY_LEASE_MS, 20 * 60_000),
-      heartbeatMs: integerEnvironment(environment.HATCH_CREATOR_FACTORY_HEARTBEAT_MS, 60_000)
-    }
-  );
-  const immediateFactoryStop = new AbortController();
   const factoryService = new CreatorFactoryService(
     factoryRepository,
-    factoryRoot,
-    undefined,
-    objectStore,
     graphStore,
-    productFileStore,
-    (runId) => immediateFactoryWorker.startRun(runId, immediateFactoryStop.signal),
-    usageCap,
     analytics
   );
   const publishToken = environment.HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN?.trim() || "";
@@ -330,7 +258,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const legacyHmacEnabled = environment.HATCH_ENABLE_LEGACY_HMAC_AUTH?.trim().toLowerCase() === "true";
   const authSecret = legacyHmacEnabled ? environment.HATCH_AUTH_SIGNING_SECRET?.trim() || "" : "";
   const httpLimits = httpRequestLimitOptionsFromEnvironment(environment);
-  const registryContext: RegistryContext = { usage, monthlyTokenCap: monthlyTokenCap(environment), dictation: new Dictation(new VoiceProcessor(new FfmpegAudioNormalizer(), transcriberFromEnvironment(environment))), store, accounts, accountAvatars, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, productLive, nodeObjectStore, releaseStore, authSecret, conversationPorts, studioAssets: registryPool ? await openProductAssets(registryPool, productObjectStore, environment) : undefined };
+  const registryContext: RegistryContext = { usage, monthlyTokenCap: monthlyTokenCap(environment), dictation: new Dictation(new VoiceProcessor(new FfmpegAudioNormalizer(), transcriberFromEnvironment(environment))), store, accounts, accountAvatars, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, corpusPublisher, productLive, nodeObjectStore, releaseStore, authSecret, conversationPorts, studioAssets: registryPool ? await openProductAssets(registryPool, productObjectStore, environment) : undefined };
   const studio = new Studio(studioDeps(registryContext));
   const studioSockets = new StudioSockets({ studio, identify: token => identifyToken(registryContext, token) });
   let assistantTick: NodeJS.Timeout | undefined;
@@ -506,20 +434,6 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       .catch((error) => {
         const status = errorStatus(error);
         if (status >= 500) log.error("Registry request failed", { error, status });
-        if (error instanceof ProductFilesError) {
-          sendJson(response, status, {
-            error: { code: error.code, message: error.message },
-            detail: error.message
-          });
-          return;
-        }
-        if (error instanceof FactoryNodeServiceError) {
-          sendJson(response, status, {
-            error: { code: error.code, message: error.message },
-            detail: error.message
-          });
-          return;
-        }
         if (error instanceof BriefValidationError) {
           sendJson(response, status, {
             error: { code: error.code, message: error.message },
@@ -602,8 +516,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     await registryContext.assistant?.close();
     await registryContext.assistantChat?.close();
     for (const storage of registryContext.assistantStorage ?? []) await storage.close();
-    immediateFactoryStop.abort();
-    await factoryAgents.close();
+      await factoryAgents.close();
     inflight.endAll();
     studioSockets.close();
     server.closeAllConnections();
@@ -624,13 +537,6 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     closeStorage: close,
     onError: (step, error) => log.error("registry_shutdown_step_failed", { step, error }),
   }) };
-}
-
-function integerEnvironment(raw: string | undefined, fallback: number): number {
-  if (raw === undefined || raw.trim() === "") return fallback;
-  const value = Number(raw);
-  if (!Number.isInteger(value) || value < 1) throw new Error(`Expected a positive integer, received ${raw}`);
-  return value;
 }
 
 export function creatorFactoryRepositoryForRegistry(
@@ -1045,44 +951,6 @@ async function route(
     return;
   }
 
-  const internalFactoryStageMatch = url.pathname.match(/^\/v1\/internal\/deployments\/factory-runs\/([^/]+)\/stage$/);
-  if (internalFactoryStageMatch && request.method === "POST") {
-    requireDeploymentServiceAuth(request, context.deploymentServiceToken);
-    const body = await readJson(request);
-    const creatorId = requiredDeploymentField(body, "creator_id");
-    const operationId = requiredDeploymentField(body, "operation_id");
-    const corpusDigest = requiredDeploymentField(body, "corpus_digest");
-    const productId = requiredDeploymentField(body, "product_id");
-    const runId = decodeURIComponent(internalFactoryStageMatch[1]!);
-    const candidate = await context.factoryService.publishableCorpus(creatorId, runId);
-    if (candidate.corpusDigest !== corpusDigest) {
-      sendJson(response, 409, {
-        code: "candidate_changed",
-        detail: "The Factory candidate changed. Review it again.",
-        expected_corpus_digest: corpusDigest,
-        current_corpus_digest: candidate.corpusDigest
-      });
-      return;
-    }
-    if (candidate.agentId !== productId) throw new Error("product_id does not match the Factory candidate");
-    const product = await productForCreator(context, creatorId, productId);
-    const briefSpec = product?.brief_spec ? normalizeBriefSpec(product.brief_spec) : undefined;
-    if (!briefSpec) {
-      const error = new Error("brief_spec_required");
-      (error as Error & { status?: number }).status = 422;
-      throw error;
-    }
-    const staged = await context.store.stageAgentCorpusDirectory(
-      creatorId,
-      candidate.agentId,
-      candidate.corpusRoot,
-      candidate.corpusDigest,
-      briefSpec
-    );
-    sendJson(response, 201, { ...staged, factory_run_id: runId, operation_id: operationId, current: false });
-    return;
-  }
-
   const internalActivationMatch = url.pathname.match(/^\/v1\/internal\/deployments\/agent-corpora\/([^/]+)\/releases\/([^/]+)\/activate$/);
   if (internalActivationMatch && request.method === "POST") {
     requireDeploymentServiceAuth(request, context.deploymentServiceToken);
@@ -1112,10 +980,7 @@ async function route(
         corpusDigest,
         { operationId, expectedCurrentDigest, briefSpec }
       );
-      const release = typeof body.factory_run_id === "string" && typeof body.product_id === "string"
-        ? await context.factoryService.recordRelease(creatorId, body.factory_run_id, body.product_id)
-        : undefined;
-      sendJson(response, 200, { agent_corpus: activated, current: true, operation_id: operationId, ...(release ? { release } : {}) });
+      sendJson(response, 200, { agent_corpus: activated, current: true, operation_id: operationId });
     } catch (error) {
       if (error instanceof RegistryDeploymentConflictError) {
         sendJson(response, 409, {
@@ -1130,115 +995,6 @@ async function route(
       }
     }
     return;
-  }
-
-  const factoryNodeMatch = url.pathname.match(
-    /^\/v1\/creator\/products\/([^/]+)\/nodes\/(about-you|corpus)\/executions(?:\/([^/]+))?(\/answers)?$/
-  );
-  if (factoryNodeMatch) {
-    const account = await authenticate(request, response, context);
-    if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
-    if (!context.factoryNodeService) {
-      sendJson(response, 503, { error: { code: "node_unavailable", message: "Factory Node runtime is unavailable." } });
-      return;
-    }
-    const productId = decodeURIComponent(factoryNodeMatch[1]!);
-    const node = factoryNodeMatch[2] as "about-you" | "corpus";
-    const executionId = factoryNodeMatch[3] ? decodeURIComponent(factoryNodeMatch[3]) : undefined;
-    const isAnswers = Boolean(factoryNodeMatch[4]);
-    const product = await productForCreator(context, account.id, productId);
-    if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
-    const nodeProduct = {
-      productId,
-      name: product.name,
-      promise: product.promise,
-      ...(product.brief_spec ? { briefSpec: product.brief_spec } : {})
-    };
-
-    if (request.method === "GET" && executionId && !isAnswers) {
-      const execution = await context.factoryNodeService.getExecution(productId, node, executionId, account.id, currentContext()?.api_key_id);
-      if (!execution) { sendJson(response, 404, { error: { code: "execution_not_found", message: "Node execution was not found." } }); return; }
-      sendJson(response, 200, publicFactoryNodeExecution(execution));
-      return;
-    }
-    if (request.method === "GET" && !executionId && !isAnswers) {
-      const execution = await context.factoryNodeService.getLatestExecution(productId, node, account.id, currentContext()?.api_key_id);
-      sendJson(response, 200, execution
-        ? publicFactoryNodeExecution(execution)
-        : { node, product_id: productId, status: "not_started" });
-      return;
-    }
-    if (request.method !== "POST") {
-      sendJson(response, 405, { detail: "Factory Node route supports POST and execution GET only." });
-      return;
-    }
-    const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
-    if (isAnswers) {
-      if (node !== "about-you" || !executionId) {
-        sendJson(response, 404, { error: { code: "execution_not_found", message: "Expert answers belong to an About You execution." } });
-        return;
-      }
-      const answers = parseAboutYouAnswers(body.answers);
-      const saved = await context.factoryNodeService.saveAboutYouAnswers({
-        productId,
-        executionId,
-        answers
-      });
-      sendJson(response, 201, {
-        node,
-        product_id: productId,
-        execution_id: executionId,
-        about_you_ref: saved.answersRef
-      });
-      return;
-    }
-
-    const fileIds = stringArrayField(body.file_ids);
-    const filePaths = stringArrayField(body.files ?? body.file_paths);
-    const requestedExecutionId = executionId
-      ?? (typeof body.execution_id === "string" ? body.execution_id : undefined);
-    const result = node === "about-you"
-      ? await context.factoryNodeService.startAboutYou({
-        creatorId: account.id,
-        ...apiKeyOfRequest(),
-        product: nodeProduct,
-        ...(fileIds === undefined ? {} : { fileIds }),
-        ...(filePaths === undefined ? {} : { filePaths }),
-        ...(requestedExecutionId === undefined ? {} : { executionId: requestedExecutionId })
-      })
-      : await context.factoryNodeService.startCorpus({
-        creatorId: account.id,
-        ...apiKeyOfRequest(),
-        product: nodeProduct,
-        aboutYouRef: requiredNodeBodyText(body.about_you_ref ?? body.about_you, "about_you_ref"),
-        ...(fileIds === undefined ? {} : { fileIds }),
-        ...(filePaths === undefined ? {} : { filePaths }),
-        ...(requestedExecutionId === undefined ? {} : { executionId: requestedExecutionId })
-      });
-    sendJson(response, 202, publicFactoryNodeExecution(result));
-    return;
-  }
-
-  if (url.pathname.startsWith("/v1/creator/factory-runs")
-    || url.pathname.startsWith("/v1/creator/source-documents")
-    || url.pathname.startsWith("/v1/creator/source-snapshots")
-    // Product Graph is implemented by the Factory service and must use the
-    // same authenticated Product-scoped boundary as the other Factory views.
-    // Keep the route explicit here so it is not swallowed by the Registry's
-    // Product/File/Snapshot compatibility handlers below.
-    || /^\/v1\/creator\/products\/[^/]+\/graph$/.test(url.pathname)) {
-    const account = await authenticate(request, response, context);
-    if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
-    const result = await handleCreatorFactoryHttp({
-      method: request.method ?? "GET",
-      pathname: url.pathname,
-      query: Object.fromEntries(url.searchParams.entries()),
-      headers: { "idempotency-key": request.headers["idempotency-key"]?.toString() },
-      ...(request.method === "GET" ? {} : { body: await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES) }),
-      creator: account,
-      ...apiKeyOfRequest()
-    }, context.factoryService);
-    if (result) { sendJson(response, result.status, result.body); return; }
   }
 
   // Product is the only user-facing authoring boundary. Files and Snapshots
@@ -1913,68 +1669,6 @@ function publicProductPromise(product: { brief?: string; promise?: string }): st
   return product.promise ?? product.brief ?? "";
 }
 
-function publicFactoryNodeRun(run: FactoryNodeRunView): Record<string, unknown> {
-  return {
-    node: run.node,
-    product_id: run.productId,
-    execution_id: run.executionId,
-    input: run.input,
-    output: run.output,
-    output_ref: run.outputRef,
-    ...(run.candidateRef ? { candidate_ref: run.candidateRef } : {}),
-    ...(run.feedbackRef ? { feedback_ref: run.feedbackRef } : {}),
-    actor_session_ids: run.actorSessionIds,
-    critic_session_ids: run.criticSessionIds
-  };
-}
-
-function publicFactoryNodeExecution(execution: FactoryNodeExecutionView): Record<string, unknown> {
-  return {
-    node: execution.node,
-    product_id: execution.productId,
-    execution_id: execution.executionId,
-    status: execution.status,
-    round: execution.round,
-    ...(execution.phase ? { phase: execution.phase } : {}),
-    ...(execution.inputRef ? { input_ref: execution.inputRef } : {}),
-    ...(execution.candidateRef ? { candidate_ref: execution.candidateRef } : {}),
-    ...(execution.feedbackRef ? { feedback_ref: execution.feedbackRef } : {}),
-    ...(execution.outputRef ? { output_ref: execution.outputRef } : {}),
-    ...(execution.handoffRef ? { handoff_ref: execution.handoffRef } : {}),
-    ...(execution.decision ? { decision: execution.decision } : {}),
-    ...(execution.lastError ? { last_error: execution.lastError } : {}),
-    ...(execution.output === undefined ? {} : { output: execution.output }),
-    ...(execution.details === undefined ? {} : { details: execution.details })
-  };
-}
-
-function parseAboutYouAnswers(value: unknown): AboutYouAnswerPair[] {
-  if (!Array.isArray(value)) throw new Error("answers must be an array");
-  return value.map((item) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("Each answer must be an object");
-    const row = item as Record<string, unknown>;
-    return {
-      question: requiredNodeBodyText(row.question, "answers.question"),
-      answer: requiredNodeBodyText(row.answer, "answers.answer")
-    };
-  });
-}
-
-function stringArrayField(value: unknown): string[] | undefined {
-  if (value === undefined) return undefined;
-  if (!Array.isArray(value)) throw new Error("Node file input must be an array");
-  return value.map((item) => requiredNodeBodyText(item, "files"));
-}
-
-function requiredNodeBodyText(value: unknown, field: string): string {
-  if (typeof value !== "string" || !value.trim()) {
-    const error = new Error(`${field} is required`);
-    (error as Error & { status?: number }).status = 400;
-    throw error;
-  }
-  return value.trim();
-}
-
 function requiredProductText(value: unknown, field: string, max: number): string {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${field} is required`);
   const normalized = value.trim();
@@ -2008,11 +1702,6 @@ function errorStatus(error: unknown): number {
   if (error instanceof Error && error.message === "Request body is too large") return 413;
   if (error instanceof BriefValidationError) return 422;
   if (error instanceof ProductPricingError) return 422;
-  if (error instanceof ProductFilesError) {
-    if (error.code === "idempotency_conflict") return 409;
-    return error.code === "product_file_not_found" || error.code === "product_snapshot_not_found" || error.code === "product_mismatch" ? 404 : 422;
-  }
-  if (error instanceof FactoryNodeServiceError) return error.status;
   if (error instanceof CreatorFactoryRepositoryError) {
     if (["idempotency_conflict", "run_id_conflict", "version_conflict"].includes(error.code)) return 409;
     if (error.code === "run_not_found") return 404;
@@ -2390,8 +2079,3 @@ async function assistantRoute(request: http.IncomingMessage, response: http.Serv
   sendJson(response, 404, { error: { code: "not_found", message: "Route not found." } });
 }
 
-/** The API key that made the request in flight, if one did: it makes the Expert's Studio work API usage rather than web usage. */
-function apiKeyOfRequest(): { apiKeyId?: string } {
-  const id = currentContext()?.api_key_id;
-  return id ? { apiKeyId: id } : {};
-}

@@ -3,7 +3,7 @@ import path from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { z } from "zod";
-import { corpusOutputSchema, type CorpusOutput } from "../creatorLearning/corpusNode.js";
+import { corpusOutputSchema, type CorpusOutput } from "../creatorLearning/corpusSchema.js";
 import { parseSkillMarkdown } from "../skills.js";
 import { repairSkillSource, runtimeId } from "../creatorLearning/productLive/adapters/workbenchDefinitions.js";
 import { result, digest } from "./files.js";

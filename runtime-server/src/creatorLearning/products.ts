@@ -44,7 +44,6 @@ export type CreatorProductRepository = {
   saveBriefSpec(creatorId: string, productId: string, input: { briefSpec: BriefSpec; expectedUpdatedAt?: string }): Promise<CreatorProductRecord>;
   savePricing(creatorId: string, productId: string, input: { pricing: ProductPricing; expectedUpdatedAt?: string }): Promise<CreatorProductRecord>;
   softDeleteProduct(creatorId: string, productId: string): Promise<CreatorProductRecord>;
-  setProductRevision(creatorId: string, productId: string, input: { runId: string; revisionId: string }): Promise<CreatorProductRecord>;
 };
 
 export function isCreatorProductRepository(value: unknown): value is CreatorProductRepository {
@@ -55,8 +54,7 @@ export function isCreatorProductRepository(value: unknown): value is CreatorProd
     && typeof (value as { updateProductPromise?: unknown }).updateProductPromise === "function"
     && typeof (value as { saveBriefSpec?: unknown }).saveBriefSpec === "function"
     && typeof (value as { savePricing?: unknown }).savePricing === "function"
-    && typeof (value as { softDeleteProduct?: unknown }).softDeleteProduct === "function"
-    && typeof (value as { setProductRevision?: unknown }).setProductRevision === "function");
+    && typeof (value as { softDeleteProduct?: unknown }).softDeleteProduct === "function");
 }
 
 export function validateProductText(value: string, label: string, max = 100_000): string {

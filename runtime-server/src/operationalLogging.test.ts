@@ -93,10 +93,10 @@ test("hostile exception accessors cannot break or enrich the summary", () => {
       throw new Error("Bearer should-never-escape");
     }
   });
-  assert.deepEqual(summarizeOperationalError("creator_factory_worker_failed", error), {
+  assert.deepEqual(summarizeOperationalError("registry_startup_failed", error), {
     name: "NonError",
-    code: "creator_factory_worker_failed",
-    category: "creator_factory_worker"
+    code: "registry_startup_failed",
+    category: "registry_startup"
   });
 });
 
