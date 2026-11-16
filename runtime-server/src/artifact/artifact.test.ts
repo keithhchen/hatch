@@ -25,14 +25,13 @@ const good = doc(`<header><h1>Cover</h1></header>
 <section data-access="free"><h2>Who you are</h2><p>free text</p></section>
 <section data-access="paid"><div><h2>Your plan</h2></div><p>${PAID}</p><table><tr><td>${PAID}</td></tr></table></section>`);
 
-test("free HTML keeps headings, drops paid content, marks locked sections", () => {
+test("free HTML holds the free sections only: no paid section, heading or content", () => {
   const out = deriveFreeHtml(good);
   assert.ok(out.ok);
   if (!out.ok) return;
   assert.ok(!out.freeHtml.includes(PAID));
   assert.match(out.freeHtml, /free text/);
-  assert.match(out.freeHtml, /<section data-access="paid" data-locked=""><h2>Your plan<\/h2><p class="locked"><\/p><\/section>/);
-  assert.match(out.freeHtml, /<style data-hatch="locked-layout">section\[data-locked\]\{break-before:auto!important/, "locked sections flow together instead of a page each");
+  assert.ok(!out.freeHtml.includes("Your plan") && !out.freeHtml.includes('data-access="paid"'), "no trace of a paid section");
   assert.match(out.freeHtml, /<style>p\{color:#111\}<\/style>/);
   assert.deepEqual(out.sections, [{ access: "free", title: "Who you are" }, { access: "paid", title: "Your plan" }]);
   assert.ok(deriveFreeHtml(good.replace("<header>", "<main><header>").replace("</section>\n<section data-access=\"paid\">", "</section><section data-access=\"paid\">") + "").ok || true);

@@ -1,21 +1,17 @@
 #!/usr/bin/env python3
-"""Deterministic HTML to PDF renderer: full.pdf, free.pdf and preview.png, the first pages of the paid part blurred."""
+"""Deterministic HTML to PDF renderer: full.pdf, free.pdf, and preview.png: the paid part's first printed pages, blurred."""
 import argparse
 import json
 import re
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-PAGE_W, PAGE_H, SCALE = 794, 1123, 2  # A4 at 96 dpi
-BLUR_PX = 8
-PREVIEW_PAGES = 3  # the first pages of the paid part, blurred, under the free part shown on the web
-PREVIEW_CSS = (
-    '[data-access="free"] { display: none !important; }'
-    f'[data-access="paid"] {{ filter: blur({BLUR_PX}px) !important; }}'
-)
-
+PREVIEW_PAGES = 3  # the first pages of the paid part, blurred, shown on the web under the free pages
+PREVIEW_DPI, BLUR_RADIUS, PAGE_GAP = 96, 7, 16
 
 def find(root: Path, name: str) -> Path:
     hits = sorted(p for p in root.rglob(name) if p.is_file())
@@ -35,18 +31,23 @@ def pdf(page, source: Path, out: Path) -> None:
     page.pdf(path=str(out), format="A4", print_background=True, prefer_css_page_size=True)
 
 
-def preview(browser, source: Path, out: Path) -> None:
-    ctx = browser.new_context(viewport={"width": PAGE_W, "height": PAGE_H}, device_scale_factor=SCALE)
-    offline(ctx)
-    page = ctx.new_page()
-    page.goto(source.resolve().as_uri(), wait_until="load")
-    page.add_style_tag(content=PREVIEW_CSS)
-    page.evaluate("document.fonts.ready")
-    if page.locator('[data-access="paid"]').count() == 0:
-        raise SystemExit("error: full.html has no [data-access=paid] section")
-    height = min(page.evaluate("document.documentElement.scrollHeight"), PREVIEW_PAGES * PAGE_H)
-    page.screenshot(path=str(out), full_page=True, clip={"x": 0, "y": 0, "width": PAGE_W, "height": height})
-    ctx.close()
+def preview(full_pdf: Path, free_pdf: Path, out: Path) -> None:
+    """The paid part's first pages as they print: the full PDF's pages after the free ones, blurred, stacked with a gap."""
+    from PIL import Image, ImageFilter
+    first = page_count(free_pdf) + 1
+    last = min(page_count(full_pdf), first + PREVIEW_PAGES - 1)
+    if first > last:
+        raise SystemExit("error: full.pdf has no pages after the free part")
+    with tempfile.TemporaryDirectory() as tmp:
+        subprocess.run(["pdftoppm", "-r", str(PREVIEW_DPI), "-png", "-f", str(first), "-l", str(last), str(full_pdf), f"{tmp}/p"], check=True)
+        pages = [Image.open(p).convert("RGB").filter(ImageFilter.GaussianBlur(BLUR_RADIUS)) for p in sorted(Path(tmp).glob("p*.png"))]
+    width = max(p.width for p in pages)
+    sheet = Image.new("RGBA", (width, sum(p.height for p in pages) + PAGE_GAP * (len(pages) - 1)), (0, 0, 0, 0))
+    y = 0
+    for page in pages:
+        sheet.paste(page, (0, y))
+        y += page.height + PAGE_GAP
+    sheet.save(out, optimize=True)
 
 
 def page_count(path: Path) -> int:
@@ -75,8 +76,8 @@ def main() -> None:
         pdf(page, full, out / "full.pdf")
         pdf(page, free, out / "free.pdf")
         ctx.close()
-        preview(browser, full, out / "preview.png")
         browser.close()
+    preview(out / "full.pdf", out / "free.pdf", out / "preview.png")
 
     result = {}
     for name in ("full.pdf", "free.pdf", "preview.png"):

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { InlineAlert } from "@hatch/ui";
 import { Lock } from "lucide-react";
 import { useAnalytics } from "./analytics/AnalyticsProvider.jsx";
@@ -8,28 +8,38 @@ import { WebChatEgg } from "./webChatGate.jsx";
 import { webChatErrorText } from "./webChatI18n.js";
 
 const POLL_MS = 5000;
-/** The free view shows the free sections only; the blurred pages under it stand for the paid part. */
-const FREE_VIEW_CSS = "section[data-locked]{display:none!important}";
-
-/** The report's own HTML, framed: it runs nothing (the server's policy), and the frame grows to its full height. */
-function ReportFrame({ src, hideLocked, title }) {
-  const frame = useRef(null);
-  const [height, setHeight] = useState(0);
-  const fit = useCallback(() => {
-    const doc = frame.current?.contentDocument;
-    if (!doc?.documentElement) return;
-    if (hideLocked && !doc.querySelector("style[data-hatch=free-view]")) {
-      const style = doc.createElement("style");
-      style.dataset.hatch = "free-view";
-      style.textContent = FREE_VIEW_CSS;
-      doc.head.appendChild(style);
-    }
-    setHeight(doc.documentElement.scrollHeight);
-    const observer = new ResizeObserver(() => setHeight(doc.documentElement.scrollHeight));
-    observer.observe(doc.body);
-    frame.current.addEventListener("load", () => observer.disconnect(), { once: true });
-  }, [hideLocked]);
-  return <iframe ref={frame} className="artifact__frame" src={src} title={title} sandbox="allow-same-origin" onLoad={fit} style={{ height: height || 600 }} />;
+/** A PDF shown as its pages, drawn by pdf.js at the column's width: the same pages a download would give. */
+function PdfPages({ src, title, failed }) {
+  const box = useRef(null);
+  const [error, setError] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    let doc;
+    (async () => {
+      const [pdfjs, worker] = await Promise.all([import("pdfjs-dist"), import("pdfjs-dist/build/pdf.worker.min.mjs?url")]);
+      pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
+      doc = await pdfjs.getDocument({ url: src, withCredentials: true }).promise;
+      const host = box.current;
+      if (cancelled || !host) return;
+      host.replaceChildren();
+      const ratio = window.devicePixelRatio || 1;
+      for (let n = 1; n <= doc.numPages && !cancelled; n += 1) {
+        const page = await doc.getPage(n);
+        const viewport = page.getViewport({ scale: (host.clientWidth / page.getViewport({ scale: 1 }).width) * ratio });
+        const canvas = document.createElement("canvas");
+        canvas.className = "artifact__page";
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        host.appendChild(canvas);
+        await page.render({ canvas, canvasContext: canvas.getContext("2d"), viewport }).promise;
+      }
+    })().catch((cause) => { if (!cancelled) setError(cause); });
+    return () => { cancelled = true; void doc?.destroy(); };
+  }, [src]);
+  return <>
+    <div ref={box} className="artifact__pages" role="document" aria-label={title} />
+    {error ? <InlineAlert tone="error" title={failed} /> : null}
+  </>;
 }
 
 /** The report of one conversation, always read from the server: on load, on refresh, after a long absence. */
@@ -90,9 +100,9 @@ export function ArtifactReportPage({ api, conversationId, productId, onDraft, de
     {status === "failed" ? <InlineAlert tone="error" title={t("artifactFailedTitle")}>{report.error ?? ""}<br />{t("artifactReference", { id: conversationId })}</InlineAlert> : null}
     {status === "ready" ? <>
       {report.files?.full_html
-        ? <ReportFrame src={api.reportFileUrl(conversationId, "full.html")} title={t("artifactReportTitle")} />
+        ? <PdfPages src={api.reportFileUrl(conversationId, "full.pdf")} title={t("artifactReportTitle")} failed={t("artifactStatusUnavailable")} />
         : <>
-          <ReportFrame src={api.reportFileUrl(conversationId, "free.html")} title={t("artifactReportTitle")} hideLocked />
+          <PdfPages src={api.reportFileUrl(conversationId, "free.pdf")} title={t("artifactReportTitle")} failed={t("artifactStatusUnavailable")} />
           <figure className="artifact__preview">
             <img src={api.reportFileUrl(conversationId, "preview.png")} alt={t("artifactPreviewAlt")} />
             <figcaption>{report.files?.full_pdf

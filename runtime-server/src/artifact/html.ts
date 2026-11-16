@@ -53,8 +53,8 @@ const firstHeading = (section: Element): Element | undefined => { for (const ele
 const textOf = (node: Node): string => "value" in node && node.nodeName === "#text" ? node.value : children(node).map(textOf).join("");
 
 /**
- * Validates the report and derives the free HTML with a real HTML parser. A locked section keeps only its first
- * heading and an empty `<p class="locked">`, and gains `data-locked`; what was in it is not in the output at all.
+ * Validates the report and derives the free HTML with a real HTML parser: the free sections only. A paid section is not
+ * in the output at all; the web shows its first pages blurred (the renderer's preview) after the free pages.
  */
 export function deriveFreeHtml(html: string): ReportHtml {
   if (typeof html !== "string" || !html.trim()) return { ok: false, errors: ["html is empty"] };
@@ -87,27 +87,9 @@ export function deriveFreeHtml(html: string): ReportHtml {
 
   for (const { access, element } of sections) {
     if (access !== "paid") continue;
-    const heading = firstHeading(element)!;
-    const lock = defaultTreeAdapter.createElement("p", htmlSpec.NS.HTML, [{ name: "class", value: "locked" }]);
-    element.childNodes = [];
-    for (const child of [heading, lock]) { child.parentNode = element; element.childNodes.push(child); }
-    element.attrs.push({ name: "data-locked", value: "" });
+    const parent = element.parentNode as Element;
+    parent.childNodes = parent.childNodes.filter((child) => child !== element);
   }
-  appendLockedLayout(body);
   return { ok: true, freeHtml: serialize(document), sections: sections.map(({ access, title }) => ({ access, title })) };
 }
 
-
-/**
- * The report's own CSS starts each section on a new page; a locked section is only a heading, so in the free version
- * the locked ones flow together on one page instead of each filling a page of its own. Added last, so it wins.
- */
-const LOCKED_LAYOUT = `section[data-locked]{break-before:auto!important;page-break-before:auto!important;break-after:auto!important;page-break-after:auto!important;min-height:0!important;height:auto!important;margin-top:6mm!important}
-section[data-locked]:not(section[data-locked] + section[data-locked]){break-before:page!important;page-break-before:always!important}`;
-
-function appendLockedLayout(body: Element): void {
-  const style = defaultTreeAdapter.createElement("style", htmlSpec.NS.HTML, [{ name: "data-hatch", value: "locked-layout" }]);
-  defaultTreeAdapter.insertText(style, LOCKED_LAYOUT);
-  style.parentNode = body;
-  body.childNodes.push(style);
-}

@@ -37,7 +37,6 @@ The product's report template (below these instructions) defines the sections an
 - One complete, self-contained HTML document: `<!doctype html>`, `<meta charset="utf-8">`, one inline `<style>`. No `<script>`, no external fonts, images, stylesheets or links to load.
 - Every top-level section is `<section data-access="free">` or `<section data-access="paid">`, directly inside `<body>` or one wrapper `<main>`. Each section starts with its heading (h1, h2 or h3); that heading is all a locked reader sees of a paid section, so make it specific and intriguing ("Where your time and money should go next term", not "Section 4").
 - At least one free and one paid section, in the order the template gives.
-- Locked sections are rendered with `[data-locked]` and an empty `p.locked`; style them so a locked section looks deliberate: keep the heading, show a soft panel with a lock mark drawn in CSS (for example a small rounded rectangle with a border), a light background, nothing else.
 
 ## Print craft
 

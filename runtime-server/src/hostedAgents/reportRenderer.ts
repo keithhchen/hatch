@@ -15,7 +15,7 @@ export const RENDER_NOT_CONFIGURED = "Report rendering is not configured";
 /** Chromium and CJK fonts preinstalled. The build needs the network (a limited sandbox cannot run the install); render.py blocks every non-file request in the browser. */
 export const RENDER_SANDBOX: SandboxSpec = {
   name: "hatch-render",
-  packages: { apt: ["fonts-noto-cjk", "fonts-noto-cjk-extra"], pip: ["playwright", "pypdf"] },
+  packages: { apt: ["fonts-noto-cjk", "fonts-noto-cjk-extra", "poppler-utils"], pip: ["playwright", "pypdf", "pillow"] },
   setupScript: "python3 -m playwright install --with-deps chromium",
   networking: { type: "unrestricted" },
 };
