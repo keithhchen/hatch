@@ -1,24 +1,26 @@
-# Hatch Web、Desktop 与零元购买规范
+# Hatch Web、Desktop 与 Open Access 规范
 
 状态：Current
 取代：旧 Web Dashboard / Commerce V2 中的 Offer、active offer、pricing workflow 设计
-范围：公开浏览、Creator 发布、零元购买、Entitlement、Desktop、Runtime
+范围：公开浏览、Creator 发布、Open Access、My library、Desktop、Runtime
 
 ## 1. 产品规则
 
-Hatch 当前只有一种商业状态：
+Hatch 是 Open Access：没有购买、结账、订阅或确认步骤，任何人（含未登录的访客）都可以和任何 live Agent 对话。
 
-- Product 未发布：不可公开浏览，也不可购买。
-- Product 已发布：任何人可公开浏览；登录后可以完成一次零元购买，获得永久 access。
-- Product withdrawn：停止新购买；历史 Order 和已有 Entitlement 保留。
+- Product 未发布：不可公开浏览，也不可对话。
+- Product 已发布：任何人可公开浏览并直接对话；Studio 里关闭 listing 的 Agent 只是不出现在列表，链接仍可用。
+- Product withdrawn：停止新对话；历史 Run 保留。
 
-当前不做付费、订阅、价格编辑或 payout。系统中没有 Offer、active offer、offer revision、not-for-sale，也不能因为旧数据缺少这些字段而把已发布 Product 判为 unavailable。
+“My library” 是账号在 Access ledger（`packages/commerce`）里的 active 免费 entitlement：账号第一次对某个 Agent 发起 Run 时由 Runtime 调 Dashboard 自动保存（`POST /v1/internal/library/save`），用户用 `DELETE /v1/library/{product_uuid}` 移除；移除不删除对话。Entitlement 不门控 chat。
+
+当前不做付费、订阅、价格编辑或 payout 的购买入口。系统中没有 Offer、checkout session、order 管理或买家退款。
 
 用户看到的完整链路是：
 
 ```text
-公开 Product → 登录/注册 → 确认零元购买 → Order receipt
-→ Library → Open Hatch Desktop → Runtime access
+公开 Product 或分享链接 → 直接对话（访客或登录账号）
+→ 登录账号的 Run 自动进入 My library
 ```
 
 Creator 的完整链路是：
@@ -26,7 +28,7 @@ Creator 的完整链路是：
 ```text
 Factory autosave → Candidate review → Approve
 → Storefront preview → Publish → Share UUID URL
-→ Access records
+→ Studio Users（谁在用、对话与消息数）
 ```
 
 ## 2. 身份与 URL
@@ -36,8 +38,8 @@ Factory autosave → Candidate review → Approve
 ```text
 /creators/{creator_uuid}
 /products/{product_uuid}
-/library/{entitlement_uuid}
-/orders/{order_uuid}
+/library
+/chat/product/{product_uuid}
 /studio/products/{product_uuid}
 ```
 
@@ -52,22 +54,22 @@ Factory autosave → Candidate review → Approve
 | Account identity、session token | Registry |
 | Creator、Product、Corpus release、current release | Registry |
 | Factory draft、candidate、approval、publish/rollback workflow | Portal state |
-| Order、Entitlement、access status、purchase receipt | Access ledger（代码包历史名为 `packages/commerce`） |
+| My library（active 免费 entitlement）、Creator 收益/payout 账务 | Access ledger（代码包历史名为 `packages/commerce`） |
 | Conversation、run、artifact lifecycle | Runtime |
 
 Registry 不保存、不返回、不投影用户 ownership。`agent_access` 是废弃数据，不能参与读取或授权。
 
 Web、Desktop、Runtime 必须读取同一份 Access ledger：
 
-- Web Library：Dashboard BFF → Access ledger。
+- Web Library：`GET /v1/library` → Dashboard BFF → Access ledger。
 - Desktop Library：`GET /v1/user/product-access` → Dashboard BFF → Access ledger。
-- Runtime authorization：Registry 只验证 bearer identity；Runtime 再通过内部 Access API 查询 Entitlement。
+- Runtime：Registry 只验证 bearer identity；Runtime 通过内部 Access API 列出资料库，并在 Run 开始时保存。
 
 任何一边不可 fallback 到 Registry `agent_access`、fixture、local fake ID 或猜测的 Corpus digest。
 
 ## 4. Product 与 release
 
-Product 是用户选择和购买的对象，最小字段：
+Product 是用户选择和对话的对象，最小字段：
 
 ```json
 {
@@ -84,49 +86,22 @@ Product 是用户选择和购买的对象，最小字段：
 }
 ```
 
-每次 publish 生成 immutable release。Current release 只影响后续公开浏览和新购买；已有 Entitlement 默认 pinned 到购买时的 `purchased_corpus_digest`。Rollback 只切 current pointer，不改历史 Order 或 Entitlement。
+每次 publish 生成 immutable release。Current release 影响公开浏览和新对话；Rollback 只切 current pointer，不改历史 Entitlement。
 
 旧 immutable Corpus 中若仍含 `product.offer`，读取时必须丢弃该字段但保持原始 bytes 与 digest 不变。新 Corpus 不得再生成该字段。
 
-## 5. 零元购买
+## 5. 保存到 My library
 
-### 5.1 Create checkout session
-
-```http
-POST /v1/checkout-sessions
-Idempotency-Key: <buyer intent uuid>
-Content-Type: application/json
-
-{ "product_id": "uuid-v4" }
-```
-
-Server 从 Registry 解析 published Product 和 current release。Client 不提交 Creator ID、Corpus digest、金额或 entitlement scope。
-
-Session snapshot 固定：
-
-- buyer ID；
-- Creator/Product UUID；
-- current release ID 与 Corpus digest；
-- `total_minor = 0`；
-- `payment_status = not_required`；
-- `access_mode = "unmetered"`；
-- `version_policy = pinned`。
-
-### 5.2 Confirm
+Runtime 在登录账号开始 Run 时调用：
 
 ```http
-POST /v1/checkout-sessions/{checkout_uuid}/confirm
-Idempotency-Key: <confirmation intent uuid>
+POST /v1/internal/library/save   (service token)
+{ "account_id": "uuid", "product_id": "uuid-v4" }
 ```
 
-确认必须在同一个 Access transaction 中创建一个 Order 和一个 Entitlement。相同 key + 相同 payload 返回原结果；相同 key + 不同 payload 返回 409。
+Dashboard 从 Registry 解析 published Product 和 current release，在 Access ledger 里创建一条 `unmetered`、`total_minor = 0`、`version_policy = pinned` 的免费 entitlement。同一 (account, product) 的并发保存只写一次；Creator 不能保存自己的 Agent（返回 `own_product`）。
 
-如果 Product 已 withdrawn 或 current release 已变化：
-
-- 返回 `409 release_changed`；
-- 旧 session 终止；
-- 不创建 Order 或 Entitlement；
-- 用户回到 Product 重新确认。
+移除（`DELETE /v1/library/{product_uuid}`）撤销该 entitlement；之后再次对话会再保存一份新的。
 
 ## 6. Entitlement contract
 
@@ -146,7 +121,7 @@ Idempotency-Key: <confirmation intent uuid>
 }
 ```
 
-Runtime 只接受 active、UUID 完整、Order 完整、Creator/Product 匹配且包含 purchased/effective digest 的 binding。字段缺失必须 fail closed，不能改用 current Corpus 猜测。
+`order_id` 是库内部的免费 grant 记录，不对用户展示。字段缺失必须 fail closed，不能改用 current Corpus 猜测。
 
 ## 7. Desktop 与 Runtime
 
@@ -158,19 +133,12 @@ Desktop 使用 Registry opaque bearer：
 
 前两个由 Registry 处理；第三个由 Dashboard 处理。Caddy 必须让 bearer-free OPTIONS preflight 到达正确 owner，并允许 Desktop WebView 使用 `Authorization`。
 
-Runtime session：
+Runtime 与 Dashboard 之间只有两条内部 Access/Library 路由（service token，不经公网 Caddy）：
 
-1. Runtime 向 Registry `/v1/auth/me` 验证用户 UUID；
-2. Runtime 使用 service token 调 Dashboard：
-   - `GET /v1/internal/access/users/{user_uuid}/entitlements`
-   - `GET /v1/internal/access/entitlements/{entitlement_uuid}?user_id={user_uuid}`
-3. Runtime 加载 exact `effective_corpus_digest`；
-4. 每次 turn 重新确认 active Entitlement；零元购买不扣次数、不 reserve、不 consume、不生成 delivery 记录；
-5. Runtime 只负责执行和保存对话/产物，Access ledger 只记录购买与授权状态。
+- `GET /v1/internal/access/users/{user_uuid}/entitlements`：列出资料库；
+- `POST /v1/internal/library/save`：保存。
 
-零元购买一旦确认就是有效的永久购买。Buyer 不提供取消、退款或“移除免费访问”操作；Creator/管理员的显式撤销是独立的治理动作，不是购买次数或 delivery 机制。
-
-内部 Access routes 不得经公网 Caddy 暴露。
+Runtime 不再 resolve 单个 Entitlement，不 reserve、不 consume、不生成 delivery 记录；Entitlement 也不决定能否对话。
 
 ## 8. Creator workflow
 
@@ -178,10 +146,10 @@ Runtime session：
 - Candidate approval绑定 candidate ID、Corpus digest、report digest 与 acknowledgements。
 - Approval 后直接进入 storefront preview；没有定价步骤。
 - Publish 校验 approval freshness，stage immutable Corpus，commit Portal release，再 CAS 激活 Registry current pointer。
-- Share URL 固定为 `/products/{product_uuid}`。
+- Share URL 固定为 `/products/{product_uuid}`；对话入口为 `/chat/product/{product_uuid}`。
 - Rollback 要求 exact release、expected version 和 audit reason；失败可用同一 operation 重试。
 
-Creator Orders 页面展示 Access record 与购买状态，不展示价格、Offer 或 payout。付费能力以后若重启，应另写新规范与迁移，不得把旧 Offer 字段重新接回当前流程。
+Studio 的 Users 页（`/studio/users`，`GET /v1/creator/users`）展示谁在用：访客、账号、IM 联系人各自的对话数、消息数与首末时间，不展示 Workspace、对话内容或文件路径。Creator 收益与 payout 页面保持原样。
 
 ## 9. 数据迁移
 
@@ -190,7 +158,7 @@ Creator Orders 页面展示 Access record 与购买状态，不展示价格、Of
 1. Portal persisted state 删除 `offer_snapshot`、`quote_change`、`offer_draft`、`offer_active`、operation 中的 offer fields；`offer_required` 映射为 `ready_to_preview`。
 2. Registry `agent_access` 先精确备份再清空；之后没有产品代码读写它。
 3. 已发布 Product 保持 published/current release，不因旧 Offer 缺失变 unavailable。
-4. Order/Entitlement 保留 UUID、release snapshot 与 Corpus digest；旧免费数据中的 unit/delivery 事件只作兼容读取，不再改变 access 状态或出现在用户响应中。
+4. 既有 Entitlement 保留 UUID、release snapshot 与 Corpus digest，成为 My library；旧 unit/delivery 事件只作历史读取，不再改变 access 状态或出现在用户响应中。Portal persisted state 中的 `checkout_sessions` 在下一次写入时被丢弃。
 5. 旧 Corpus 只做 read-time field stripping，不重写 content-addressed release。
 
 迁移后，同一账号在 Web、Desktop、Runtime 看到的 active Entitlement ID 集合必须完全相同。
@@ -198,8 +166,8 @@ Creator Orders 页面展示 Access record 与购买状态，不展示价格、Of
 ## 10. 安全与隐私
 
 - Browser 使用 HttpOnly、Secure、SameSite cookie + CSRF；Desktop 使用 Registry opaque bearer，两者不互相复制。
-- 所有 mutation 要求 durable Idempotency-Key。
-- Public Product 仅包含公开 presentation；Buyer Workspace path/content、conversation、artifact body 不进入 Access ledger、Creator views、telemetry 或 logs。
+- Creator 侧 mutation 要求 durable Idempotency-Key。
+- Public Product 仅包含公开 presentation；用户 Workspace path/content、conversation、artifact body 不进入 Access ledger、Creator views、telemetry 或 logs。
 - Runtime operational logs 只记录 allowlisted code/category，不输出 exception message、stack 或 private payload。
 - Internal service token 不进入浏览器或 Desktop。
 
@@ -208,16 +176,15 @@ Creator Orders 页面展示 Access record 与购买状态，不展示价格、Of
 上线前全部满足：
 
 - unit：Dashboard、Access ledger、Runtime 全绿；
-- browser E2E：public no-signin、signup returnTo、free confirm、lost-response retry、release_changed、Creator approve→preview→publish、rollback、responsive、keyboard、Axe；
-- cross-process：真实 Dashboard child + Runtime HTTP/WS，覆盖 checkout 后发现、pinned release、重复 turn 永久可用、零 delivery/revenue 事件、restart 后仍可用、buyer 取消被拒绝且 access 不变；
+- 真实 Dashboard + Runtime：访客打开 `/chat/product/{id}` 能对话；登录账号的第一个 Run 之后 `/library` 列出该 Agent，移除后消失而对话保留；
+- Studio Users 页对真实对话显示正确计数；
 - Caddy/Compose config validation；
-- 生产真实账号核对 Web、Desktop、Runtime 三边 Entitlement IDs；
-- 生产公开 Creator/Product UUID URL、Creator↔Product link、zero-price purchase CTA、receipt、Desktop open；
-- 代码和产品响应中不存在平台 Offer 字段或路由；仅允许 migration sanitizer 与明确的 negative compatibility test 出现旧字段名。
+- 生产真实账号核对 Web、Desktop、Runtime 三边 library 的 Product IDs；
+- 代码和产品响应中不存在 Offer、checkout、order 管理路由；仅允许 migration sanitizer 与明确的 negative test 出现旧名字。
 
 ## 12. 明确不做
 
-- 支付、价格、订阅、退款资金流、payout、任何按次数计量的 delivery；
+- 购买/结账/订阅 UI、买家退款、按次数计量的 delivery；
 - slug identity 或旧 URL 兼容；
 - Registry ownership projection；
 - 为缺失 release/digest/UUID 猜值；
@@ -226,7 +193,7 @@ Creator Orders 页面展示 Access record 与购买状态，不展示价格、Of
 ## 13. 免费聊与展示价格
 
 - Expert 在 Studio Publish 页可选填三项，存于 `hatch_creator_products.pricing`（USD，金额为 minor units）：`free_messages`、`human_hourly_minor`、`agent_monthly_minor`。设置了 `free_messages` 时至少要有一个价格。
-- 这些是展示条款，不是订单：Product 仍按第 12 节免费领取，不生成 offer、payment 或 entitlement 变化。
+- 这些是展示条款，不是订单：Product 仍是 Open Access，不生成 offer 或 payment。
 - `pricing` 是实时 Product 设置，不进 release snapshot；随公开 Product、`/v1/user/product-access` 的 `product` 和 Creator Product 视图返回。
 - Runtime `GET /v1/conversations` 返回 `sent_message_count`（该账户对该 Product 的非 failed run 数）。`@hatch/chat` 的 `FreeChatMeter`（每个 Agent 一个，owner 不计量）同步该计数并在 accepted 时加一，共享 `ChatView` 在用完后用 `FreeChatPaywall` 替换输入框，Web 与 Desktop 同时阻止新对话；客户可选择一个选项，界面如实显示在线支付暂未开通。
 - 当前只做前端拦截，Runtime 不拒绝超额消息。

@@ -96,21 +96,19 @@ or separate production Runtime exists. The server uses two Compose projects:
    rejected by production CD.
    Provider mode is also rejected before any container switch unless
    `HATCH_COMMERCE_PAID_LAUNCH_APPROVED=true`; this flag is an operational
-   approval record, not a substitute for the provider, tax, region, refund,
-   payout/KYC, currency, and reserve decisions.
+   approval record, not a substitute for the provider, tax, region,
+   payout/KYC, currency, and reserve decisions. The provider is used only for
+   Creator payouts; there is no buyer checkout.
    The current payout scheduler supports only the explicit policy
    `HATCH_PAYOUT_SCHEDULE=immediate` with a positive
    `HATCH_PAYOUT_MINIMUM_MINOR`. The default is `disabled`; unsupported or
    unstated schedules never submit provider transfers.
-   Configure `HATCH_SMOKE_EMAIL` and `HATCH_SMOKE_PASSWORD` with a dedicated
-   Buyer UAT account. CD never passes these values to application containers;
-   after health checks it uses them to verify the canonical public product,
-   cookie/CSRF login, a product-release-keyed idempotent free access confirmation,
-   production cookie attributes, immutable order/access snapshots, durable receipt,
-   Order/Entitlement detail, success URL, and Desktop download route. Set
-   `HATCH_SMOKE_CREATOR_ID` / `HATCH_SMOKE_PRODUCT_ID` only when the canonical
-   zero-value smoke product differs from `maya-chen/signal-resume-review`.
-   CD validates these names without printing their values.
+   `scripts/production-smoke.mjs` (run manually with `HATCH_SMOKE_ORIGIN`) checks
+   the canonical public product page and API; with `HATCH_SMOKE_EMAIL` and
+   `HATCH_SMOKE_PASSWORD` for a dedicated UAT account it also checks cookie/CSRF
+   login, production cookie attributes, the `/v1/library` listing and the
+   Desktop download route. Set `HATCH_SMOKE_CREATOR_ID` / `HATCH_SMOKE_PRODUCT_ID`
+   only when the canonical smoke product differs from the defaults.
 3. Create the external network once:
 
    ```bash
@@ -170,10 +168,9 @@ tag exists, it stops the unverified application stack and removes the failed
 release marker instead of leaving it public or treating it as the next
 rollback target.
 
-Commerce alerts, safe replay commands, refund/access convergence, payout
-failure handling, and legacy UAT isolation are documented in
+Access ledger alerts, outbox replay and payout failure handling are documented in
 [`commerce-operations-runbook.md`](./commerce-operations-runbook.md). Run that
-playbook from the private application network; internal Commerce routes are
+playbook from the private application network; internal Dashboard routes are
 not exposed by Caddy.
 
 The Desktop app is not part of the server Compose project. A `vMAJOR.MINOR.PATCH`

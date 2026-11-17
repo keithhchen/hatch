@@ -6,9 +6,9 @@
 
 ## 0. User flow（free-only cutover）
 
-Buyer：匿名浏览 Explore 或分享的 Product URL → 查看完整 offer → 点击免费领取时再登录/注册 → 确认 → 得到唯一 Order receipt 与 Entitlement detail → `Open Hatch Desktop` → Desktop 用同一组 UUID 校验并开始工作。
+Buyer：匿名浏览 Explore 或分享的 Product URL → 直接对话（Open Access，无购买步骤）→ 登录账号的第一个 Run 自动进入 My library → Desktop 用同一组 UUID 校验并开始工作。
 
-Creator：进入 Studio → Factory 自动保存 → 查看 candidate/evidence → Approve → 设置一个免费 per-delivery offer → Storefront preview → Publish → 复制 Product URL → 查看 Orders/Delivery；Payout 显示真实的 unavailable/setup 状态，不伪造余额。
+Creator：进入 Studio → Factory 自动保存 → 查看 candidate/evidence → Approve → Storefront preview → Publish → 复制 Product URL → 查看 Users；Payout 显示真实的 unavailable/setup 状态，不伪造余额。
 
 付费 checkout、subscription 和 provider payout 本轮不开放；任何非零 offer 在 production 必须 fail closed。
 
@@ -163,9 +163,7 @@ Caddy 只把以下页面交给 Dashboard：
 /creators/*
 /products/*
 /explore
-/library/*
-/orders/*
-/checkout/*
+/library
 ```
 
 `/agents/*`、旧 `/portal/*` 和旧 slug 形式不做 redirect，直接返回 404。Runtime、Registry internal routes 继续保持内部，不因新 public route 暴露。

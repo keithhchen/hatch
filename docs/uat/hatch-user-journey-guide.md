@@ -132,19 +132,7 @@ Hatch 只使用你明确选择并有权使用的内容。你可以先预览，�
 
 ![Buyer 的 Product 详情页：先确认承诺、边界和访问方式](screenshots/buyer-product-detail-real.png)
 
-确认适合之后，点击 **Get access**。如果这是一个需要加入账户的 Product，Hatch 会先让你确认当前的 Product 和 release：
-
-- Product 名称和 Creator 是否正确。
-- 你获得的是哪一个已批准版本。
-- 访问是否为永久访问，以及是否需要付款。
-
-![Buyer 的访问确认页：确认 Product 和 release](screenshots/buyer-checkout-confirm-real.png)
-
-点击 **Add to my account** 后，访问会写入你的账户。成功页会给出下一步：打开 Desktop、查看订单收据，或查看访问详情。
-
-![Buyer 的访问成功页：打开 Desktop 或查看访问详情](screenshots/buyer-order-success-real.png)
-
-![Buyer 获得 Product 访问权限](screenshots/buyer-entitlement-success-20260819.png)
+确认适合之后，点击 **Chat** 直接开始：不需要购买或确认，未登录也可以对话。登录账号发起第一次对话后，这个 Agent 会自动保存到你的 Library，之后可以随时回来继续或移除。
 
 ### 2. 回答开始问题
 

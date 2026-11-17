@@ -81,7 +81,7 @@ path. It is not the production orchestrator for the v1 Graph.
 
 The TypeScript Registry in `runtime-server/src/registryServer.ts` verifies and
 installs each Agent Corpus as an immutable digest-addressed release, then
-atomically switches the current pointer. Purchased entitlements keep resolving
+atomically switches the current pointer. Library entitlements keep resolving
 their pinned digest after later publications or rollbacks.
 The Registry catalog keeps the current `(creator_id, agent_id)` metadata row;
 the separate Creator Factory run table durably stores its authorized input and

@@ -47,14 +47,8 @@ no writes.
 
 The operation requires the Registry database, Creator object storage, shared
 Runtime corpus directory, and Factory chat directory. After it completes,
-refresh the Dashboard's in-memory Commerce and Portal views through the
-authenticated operations endpoint from the Dashboard container:
-
-```bash
-docker exec "$(docker ps -q -f label=com.docker.compose.service=dashboard)" sh -lc 'curl --fail --silent --show-error \
-  -H "Authorization: Bearer $HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN" \
-  http://127.0.0.1:8500/v1/internal/commerce/operations >/dev/null'
-```
+refresh the Dashboard's in-memory Commerce and Portal views by restarting the
+Dashboard container (a restart is safe: commands use durable idempotency keys).
 
 It refuses to proceed if the audited counts, IDs, ownership bindings, active
 Run state, event types, release pointer, Product Files, or Factory sessions have
@@ -75,8 +69,7 @@ envelopes and invalidates the Commerce projection version for supported
 recovery. The durable operation records a SHA-safe connection ownership
 manifest for recovery and final verification.
 
-Portal migration includes both checkout snapshots and the Creator Product
-workflow record used when returning a buyer's purchase-time BriefSpec. Runtime
+Portal migration includes the Creator Product workflow record. Runtime
 Conversation storage IDs are recomputed from the target Creator binding; public
 Conversation IDs, buyer account IDs, Run IDs, event cursors, and transcript
 payloads remain intact.
