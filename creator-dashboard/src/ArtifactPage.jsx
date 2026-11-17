@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { resolveCreatorIdentity } from "@hatch/chat";
 import { ProductAccessGate, useProductAccess } from "./productAccess.jsx";
 import { WebChatShell } from "./WebChatShell.jsx";
+import { Download } from "lucide-react";
 import { ArtifactIntakePage } from "./ArtifactIntakePage.jsx";
 import { ArtifactReportPage } from "./ArtifactReportPage.jsx";
 import { loadArtifact } from "./artifactClient.js";
@@ -26,6 +27,7 @@ export default function ArtifactPage({ productId, conversationId: routedConversa
   const access = accessState.access;
   const [mode, setMode] = useState(null);
   const [error, setError] = useState(null);
+  const [download, setDownload] = useState(null);
   const params = new URLSearchParams(search);
 
   useEffect(() => {
@@ -50,12 +52,14 @@ export default function ArtifactPage({ productId, conversationId: routedConversa
   const sidebar = mode.conversations.map(entry => ({ id: entry.conversation_id, title: t(STATUS_KEYS[entry.status] ?? "artifactStatusWaiting"), created_at: entry.created_at }));
   const select = id => navigate(mode.conversations.find(entry => entry.conversation_id === id)?.status === "draft" ? ArtifactRoute.productPath(productId) : ArtifactRoute.conversationPath(productId, id));
 
-  return <WebChatShell identity={identity} agentName={agentName} conversations={sidebar} selectedId={shown.conversationId ?? shown.draftConversationId} hasMore={false}
+  const headerExtra = download ? <a className="web-chat__button web-chat__button--yolk artifact__header-download" href={download.href} download onClick={download.track}><Download aria-hidden="true" />{t("artifactDownload")}</a> : null;
+
+  return <WebChatShell identity={identity} agentName={agentName} conversations={sidebar} selectedId={shown.conversationId ?? shown.draftConversationId} hasMore={false} headerExtra={headerExtra}
     onSelect={select} onNew={() => navigate(`${ArtifactRoute.productPath(productId)}?new=1`)} newLabel={t("artifactNew")} profile={profile} onSignOut={onSignOut} t={t} locale={locale}>
     {header => <main className="web-chat__main">
       {header}
       {shown.view === "report"
-        ? <ArtifactReportPage key={shown.conversationId} api={mode.api} conversationId={shown.conversationId} productId={productId} onDraft={toIntake} debug={params.get("debug") === "1"} t={t} locale={locale} />
+        ? <ArtifactReportPage key={shown.conversationId} api={mode.api} conversationId={shown.conversationId} productId={productId} onDraft={toIntake} onDownload={setDownload} debug={params.get("debug") === "1"} t={t} locale={locale} />
         : <ArtifactIntakePage api={mode.api} definition={mode.definition} productId={productId} productName={identity.productName} draftConversationId={shown.draftConversationId}
           conversationPath={id => ArtifactRoute.conversationPath(productId, id)} navigate={navigate} t={t} locale={locale} />}
     </main>}

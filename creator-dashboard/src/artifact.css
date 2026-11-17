@@ -28,3 +28,5 @@
 .artifact__debug { width: 100%; font-size: 12px; color: var(--chat-muted); }
 .artifact__debug ol { margin: 6px 0 0; padding-left: 18px; }
 .artifact__steps { width: 100%; max-width: 420px; }
+.artifact__header-download { margin-left: auto; flex: none; }
+@media (max-width: 640px) { .artifact__header-download { padding-inline: 12px; } }

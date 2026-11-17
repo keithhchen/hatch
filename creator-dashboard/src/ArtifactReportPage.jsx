@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { InlineAlert, Progress } from "@hatch/ui";
-import { Download, Lock } from "lucide-react";
+import { Lock } from "lucide-react";
 import { useAnalytics } from "./analytics/AnalyticsProvider.jsx";
 import { reportFileOpened, reportViewed } from "./analytics/events.js";
 import { REPORT_STEPS, formatElapsed, isWaiting, reportStep } from "./artifactForm.js";
@@ -56,7 +56,7 @@ function LockedSummary({ summaryUrl, onUnlock, unlocking, t }) {
 }
 
 /** The report of one conversation, always read from the server: on load, on refresh, after a long absence. */
-export function ArtifactReportPage({ api, conversationId, productId, onDraft, debug, t, locale }) {
+export function ArtifactReportPage({ api, conversationId, productId, onDraft, onDownload, debug, t, locale }) {
   const analytics = useAnalytics();
   const [report, setReport] = useState(null);
   const [error, setError] = useState(null);
@@ -98,6 +98,14 @@ export function ArtifactReportPage({ api, conversationId, productId, onDraft, de
     if (status) analytics.track(reportViewed({ agentId: productId, status, unlocked: report.unlocked === true }));
   }, [analytics, productId, status, report?.unlocked]);
 
+  // Once the full report is ready its download sits in the page header, where it stays in reach while the reader scrolls.
+  const fullReady = status === "ready" && report?.phase === "full";
+  useEffect(() => {
+    if (!fullReady) return undefined;
+    onDownload?.({ href: api.reportFileUrl(conversationId, "full.pdf"), track: () => analytics.track(reportFileOpened({ agentId: productId, name: "full.pdf" })) });
+    return () => onDownload?.(null);
+  }, [fullReady, api, conversationId, productId, analytics, onDownload]);
+
   const unlock = async () => {
     setUnlocking(true);
     setUnlockError(null);
@@ -132,7 +140,6 @@ export function ArtifactReportPage({ api, conversationId, productId, onDraft, de
     {status === "failed" ? <InlineAlert tone="error" title={t("artifactFailedTitle")}>{report.error ?? ""}<br />{t("artifactReference", { id: conversationId })}</InlineAlert> : null}
     {status === "ready" && report.phase === "full" ? <>
       <PdfPages src={api.reportFileUrl(conversationId, "full.pdf")} title={t("artifactReportTitle")} failed={t("artifactStatusUnavailable")} />
-      <a className="web-chat__button web-chat__button--yolk" href={api.reportFileUrl(conversationId, "full.pdf")} download onClick={() => analytics.track(reportFileOpened({ agentId: productId, name: "full.pdf" }))}><Download aria-hidden="true" />{t("artifactDownload")}</a>
     </> : null}
     {status === "ready" && report.phase === "summary" ? <>
       <LockedSummary summaryUrl={api.reportFileUrl(conversationId, "summary.png")} onUnlock={unlock} unlocking={unlocking} t={t} />
