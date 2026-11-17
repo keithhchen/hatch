@@ -57,9 +57,10 @@ import { ChatAssets, TextPartsReader, type PartsReader } from "./chat/assets.js"
 import { accountPrincipal } from "./chat/principal.js";
 import { clientMessageInputDigest } from "./protocol.js";
 import { ArtifactRetrier } from "./artifact/retrier.js";
-import { ARTIFACT_RETRY_MESSAGE } from "./artifact/prompt.js";
+import { ARTIFACT_FULL_MESSAGE, ARTIFACT_RETRY_MESSAGE } from "./artifact/prompt.js";
 import { openArtifactMode } from "./artifact/open.js";
 import { REPORT_CONTEXT_BUDGET, type ArtifactMode } from "./artifact/mode.js";
+import type { ReportRecord } from "./artifact/ports.js";
 import { artifactToolDefinitions } from "./artifact/toolDefinitions.js";
 import { ChromiumReportRenderer } from "./artifact/chromiumRenderer.js";
 import { chatCompactionStrategy } from "./compaction.js";
@@ -574,20 +575,21 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     // With a shared database every instance sees every Run's live events.
     ...(conversationStore instanceof PostgresStore ? { relay: new PostgresEventRelay(conversationStore.pool as never), stops: new PostgresStopRelay(conversationStore.pool as never), steers: new PostgresStopRelay(conversationStore.pool as never, { channel: "hatch_run_steers" }) } : {})
   });
+  const startArtifactRun = async (record: ReportRecord, runId: string, content: string, clientMessageId: string) => {
+    const conversation = await conversationRepository.getConversation(record.conversationId);
+    if (!conversation) throw new Error(`Conversation ${record.conversationId} was not found`);
+    const scope = await scopes.resolve(conversation, new AbortController().signal);
+    await chat.service.submit({
+      principal: accountPrincipal(conversation.ownerAccountId), conversation, scope, client: { client: "web" },
+      clientMessageId, message: async () => ({ role: "user", content }), digest: clientMessageInputDigest({ content }),
+      runId, corpusDigest: scope.corpusDigest, requiresLocalTools: false, mode: "start_only"
+    });
+  };
+  if (artifact) artifact.startFullRun = (record, runId) => startArtifactRun(record, runId, ARTIFACT_FULL_MESSAGE, `artifact-full-${runId}`);
   // Nobody types again in a report conversation: an attempt that ended with no report (failure, restart) is started again.
   const artifactRetrier = artifact ? new ArtifactRetrier({
     reports: artifact.reports, lifecycle: artifact.lifecycle,
-    async start(record, runId) {
-      const conversation = await conversationRepository.getConversation(record.conversationId);
-      if (!conversation) throw new Error(`Conversation ${record.conversationId} was not found`);
-      const scope = await scopes.resolve(conversation, new AbortController().signal);
-      const content = ARTIFACT_RETRY_MESSAGE;
-      await chat.service.submit({
-        principal: accountPrincipal(conversation.ownerAccountId), conversation, scope, client: { client: "web" },
-        clientMessageId: `artifact-retry-${runId}`, message: async () => ({ role: "user", content }), digest: clientMessageInputDigest({ content }),
-        runId, corpusDigest: scope.corpusDigest, requiresLocalTools: false, mode: "start_only"
-      });
-    }
+    start: (record, runId) => startArtifactRun(record, runId, ARTIFACT_RETRY_MESSAGE, `artifact-retry-${runId}`)
   }) : undefined;
   void repositoryReady.then(() => { void chat.start(); artifactRetrier?.start(); }).catch(() => undefined);
   const edge: ChatEdge = {

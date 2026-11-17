@@ -1,5 +1,5 @@
 import type { PostgresQueryExecutor } from "../postgresStore.js";
-import { CONTINUE_DELAY_MS, MAX_REPORT_ATTEMPTS, MAX_REPORT_STEPS, type ReportKeys, type ReportRecord, type ReportRepository, type ReportStage, type ReportStep } from "./ports.js";
+import { CONTINUE_DELAY_MS, MAX_REPORT_ATTEMPTS, MAX_REPORT_STEPS, type ReportKeys, type ReportPhase, type ReportRecord, type ReportRepository, type ReportStage, type ReportStep } from "./ports.js";
 
 export const POSTGRES_ARTIFACT_REPORT_SCHEMA = `
 CREATE TABLE IF NOT EXISTS hatch_artifact_reports (
@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS hatch_artifact_reports (
   owner_account_id TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('draft', 'generating', 'ready', 'failed')),
   stage TEXT NOT NULL DEFAULT 'queued',
+  phase TEXT NOT NULL DEFAULT 'summary',
   attempt INTEGER NOT NULL DEFAULT 1,
   run_id TEXT,
   error TEXT,
@@ -19,18 +20,20 @@ CREATE TABLE IF NOT EXISTS hatch_artifact_reports (
   unlocked_at TIMESTAMPTZ,
   retry_at TIMESTAMPTZ
 );
+ALTER TABLE hatch_artifact_reports ADD COLUMN IF NOT EXISTS phase TEXT NOT NULL DEFAULT 'summary';
+UPDATE hatch_artifact_reports SET phase = 'full' WHERE keys ? 'fullPdf' AND phase = 'summary';
 CREATE INDEX IF NOT EXISTS hatch_artifact_reports_owner ON hatch_artifact_reports (owner_account_id, product_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS hatch_artifact_reports_retry ON hatch_artifact_reports (retry_at) WHERE retry_at IS NOT NULL;
 `;
 
 type Row = {
-  conversation_id: string; product_id: string; owner_account_id: string; status: ReportRecord["status"]; stage: ReportStage; attempt: number; run_id: string | null;
+  conversation_id: string; product_id: string; owner_account_id: string; status: ReportRecord["status"]; stage: ReportStage; phase: ReportPhase; attempt: number; run_id: string | null;
   error: string | null; keys: ReportKeys | null; steps: ReportStep[]; created_at: Date | string; started_at: Date | string | null;
   ready_at: Date | string | null; unlocked_at: Date | string | null; retry_at: Date | string | null;
 };
 const iso = (value: Date | string) => new Date(value).toISOString();
 const restore = (row: Row | undefined): ReportRecord | undefined => row && {
-  conversationId: row.conversation_id, productId: row.product_id, ownerAccountId: row.owner_account_id, status: row.status, stage: row.stage, attempt: row.attempt,
+  conversationId: row.conversation_id, productId: row.product_id, ownerAccountId: row.owner_account_id, status: row.status, stage: row.stage, phase: row.phase, attempt: row.attempt,
   ...(row.run_id ? { runId: row.run_id } : {}), ...(row.error ? { error: row.error } : {}), ...(row.keys ? { keys: row.keys } : {}), steps: row.steps ?? [],
   createdAt: iso(row.created_at), ...(row.started_at ? { startedAt: iso(row.started_at) } : {}), ...(row.ready_at ? { readyAt: iso(row.ready_at) } : {}),
   ...(row.unlocked_at ? { unlockedAt: iso(row.unlocked_at) } : {}), ...(row.retry_at ? { retryAt: iso(row.retry_at) } : {})
@@ -86,11 +89,11 @@ export class PostgresReportRepository implements ReportRepository {
       [conversationId, attempt, stage, JSON.stringify([step])]);
   }
 
-  ready(conversationId: string, attempt: number, keys: ReportKeys, now: Date) {
+  ready(conversationId: string, attempt: number, phase: ReportPhase, keys: ReportKeys, now: Date) {
     return this.one(
-      `UPDATE hatch_artifact_reports SET status = 'ready', stage = 'ready', error = NULL, keys = $3, ready_at = $4, retry_at = NULL
-       WHERE conversation_id = $1 AND attempt = $2 AND status IN ('generating', 'ready') RETURNING *`,
-      [conversationId, attempt, JSON.stringify(keys), now]);
+      `UPDATE hatch_artifact_reports SET status = 'ready', stage = 'ready', error = NULL, keys = COALESCE(keys, '{}'::jsonb) || $4::jsonb, ready_at = $5, retry_at = NULL
+       WHERE conversation_id = $1 AND attempt = $2 AND phase = $3 AND status IN ('generating', 'ready') RETURNING *`,
+      [conversationId, attempt, phase, JSON.stringify(keys), now]);
   }
 
   runEnded(runId: string, reason: string, now: Date) {
@@ -117,8 +120,12 @@ export class PostgresReportRepository implements ReportRepository {
       [conversationId, attempt, runId, now, leaseMs]);
   }
 
-  async unlock(conversationId: string) {
-    await this.db.query("UPDATE hatch_artifact_reports SET unlocked_at = COALESCE(unlocked_at, now()) WHERE conversation_id = $1", [conversationId]);
+  unlock(conversationId: string, runId: string, now: Date) {
+    return this.one(
+      `UPDATE hatch_artifact_reports SET phase = 'full', status = 'generating', stage = 'queued', attempt = 1, run_id = $2, error = NULL, steps = '[]'::jsonb,
+         started_at = $3, unlocked_at = $3, retry_at = NULL
+       WHERE conversation_id = $1 AND phase = 'summary' AND status = 'ready' RETURNING *`,
+      [conversationId, runId, now]);
   }
 }
 
@@ -132,7 +139,7 @@ export class InMemoryReportRepository implements ReportRepository {
   async reportConversations(conversationIds: string[]) { return new Set(conversationIds.filter(id => this.rows.has(id))); }
 
   async create(input: { conversationId: string; productId: string; ownerAccountId: string }) {
-    return this.rows.get(input.conversationId) ?? this.put({ ...input, status: "draft", stage: "queued", attempt: 1, steps: [], createdAt: new Date().toISOString() });
+    return this.rows.get(input.conversationId) ?? this.put({ ...input, status: "draft", stage: "queued", phase: "summary", attempt: 1, steps: [], createdAt: new Date().toISOString() });
   }
   async list(ownerAccountId: string, productId: string) {
     return [...this.rows.values()].filter((r) => r.ownerAccountId === ownerAccountId && r.productId === productId).reverse();
@@ -150,11 +157,11 @@ export class InMemoryReportRepository implements ReportRepository {
     if (row?.status !== "generating" || row.attempt !== attempt) return;
     this.put({ ...row, stage, steps: [...row.steps, { at: now.toISOString(), stage, ...(detail ? { detail } : {}) }].slice(-MAX_REPORT_STEPS) });
   }
-  async ready(conversationId: string, attempt: number, keys: ReportKeys, now: Date) {
+  async ready(conversationId: string, attempt: number, phase: ReportPhase, keys: ReportKeys, now: Date) {
     const row = this.rows.get(conversationId);
-    if (!row || row.attempt !== attempt || (row.status !== "generating" && row.status !== "ready")) return undefined;
+    if (!row || row.attempt !== attempt || row.phase !== phase || (row.status !== "generating" && row.status !== "ready")) return undefined;
     const { error: _error, retryAt: _retryAt, ...rest } = row;
-    return this.put({ ...rest, status: "ready", stage: "ready", keys, readyAt: now.toISOString() });
+    return this.put({ ...rest, status: "ready", stage: "ready", keys: { ...row.keys, ...keys }, readyAt: now.toISOString() });
   }
   async runEnded(runId: string, reason: string, now: Date) {
     const row = [...this.rows.values()].find((r) => r.runId === runId);
@@ -171,8 +178,10 @@ export class InMemoryReportRepository implements ReportRepository {
     if (!row || row.attempt !== attempt || row.status !== "generating" || !row.retryAt || Date.parse(row.retryAt) > now.getTime()) return undefined;
     return this.put({ ...row, attempt: attempt + 1, stage: "queued", runId, retryAt: new Date(now.getTime() + leaseMs).toISOString() });
   }
-  async unlock(conversationId: string) {
+  async unlock(conversationId: string, runId: string, now: Date) {
     const row = this.rows.get(conversationId);
-    if (row) this.put({ ...row, unlockedAt: row.unlockedAt ?? new Date().toISOString() });
+    if (row?.phase !== "summary" || row.status !== "ready") return undefined;
+    const { error: _error, retryAt: _retryAt, ...rest } = row;
+    return this.put({ ...rest, phase: "full", status: "generating", stage: "queued", attempt: 1, runId, steps: [], startedAt: now.toISOString(), unlockedAt: now.toISOString() });
   }
 }

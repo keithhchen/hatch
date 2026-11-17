@@ -113,6 +113,15 @@ test("submit sequence: create, upload form.md then every file, then a message wi
   ]);
 });
 
+test("unlocking a report is a POST to the report's unlock route, and the files are the summary's and the full report's", async () => {
+  const calls = [];
+  const request = async (url, init) => { calls.push(`${init?.method ?? "GET"} ${url} ${init?.body ?? ""}`); return { status: "generating", phase: "full" }; };
+  const api = new ArtifactApi(request, { entitlement_id: "e1" });
+  assert.deepEqual(await api.unlockReport("c1"), { status: "generating", phase: "full" });
+  assert.deepEqual(calls, ["POST /v1/web-chat/conversations/c1/report/unlock?entitlement_id=e1 {}"]);
+  assert.equal(api.reportFileUrl("c1", "summary.png"), "/v1/web-chat/conversations/c1/report/files/summary.png?entitlement_id=e1");
+});
+
 // Explicit upstream stub for proxy transport tests, never product UAT: it checks only that bytes pass through unchanged.
 test("the web-chat proxy streams asset uploads up and report files down as raw bytes, and routes the artifact definition", { timeout: 15000 }, async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "dashboard-artifact-proxy-"));
@@ -147,10 +156,14 @@ test("the web-chat proxy streams asset uploads up and report files down as raw b
     assert.equal(seen[0].authorization, "Bearer api-key-1");
     assert.deepEqual(seen[0].body, pdf);
 
-    const download = await fetch(`${base}/v1/web-chat/conversations/c1/report/files/free.pdf?entitlement_id=e1`, { headers });
+    const download = await fetch(`${base}/v1/web-chat/conversations/c1/report/files/summary.pdf?entitlement_id=e1`, { headers });
     assert.equal(download.status, 200);
     assert.equal(download.headers.get("content-type"), "application/pdf");
     assert.deepEqual(Buffer.from(await download.arrayBuffer()), pdf);
+
+    const unlock = await fetch(`${base}/v1/web-chat/conversations/c1/report/unlock?entitlement_id=e1`, { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: "{}" });
+    assert.equal(unlock.status, 200);
+    assert.deepEqual([seen.at(-1).method, seen.at(-1).url], ["POST", "/v1/conversations/c1/report/unlock?entitlement_id=e1"]);
 
     const definition = await fetch(`${base}/v1/web-chat/products/p1/artifact?entitlement_id=e1`, { headers });
     assert.equal(definition.status, 200);
@@ -206,4 +219,12 @@ test("a trilingual intake shows each reader their language, and falls back when 
   assert.equal(localizeIntake(intake, "en").fields[0].options[0], "Grade 8");
   assert.equal(localized("plain", "ja"), "plain");
   assert.equal(localized({ zh: "只有中文" }, "en"), "只有中文");
+});
+
+test("the step a report shows only moves forward", async () => {
+  const { reportStep } = await import("./artifactForm.js");
+  assert.equal(reportStep({ stage: "queued", steps: [] }), 1);
+  assert.equal(reportStep({ stage: "consulting", steps: [{ stage: "reading" }] }), 2);
+  assert.equal(reportStep({ stage: "reading", steps: [{ stage: "reading" }, { stage: "writing" }] }), 4, "reading again after writing stays at writing");
+  assert.equal(reportStep({ stage: "rendering", steps: [] }), 6);
 });

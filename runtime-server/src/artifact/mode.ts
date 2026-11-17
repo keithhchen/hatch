@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { REPLY_LANGUAGE_RULE } from "../agentRuntime.js";
 import type { ProductAnalytics } from "../analytics/port.js";
 import { safely } from "../analytics/safe.js";
@@ -6,8 +7,9 @@ import type { ChatAssets } from "../chat/assets.js";
 import type { ConversationRecord, ConversationRunRecord } from "../conversationRepository.js";
 import { ConversationError } from "../conversations/conversation.js";
 import type { HostToolRunner } from "../serverTools.js";
+import { log } from "../observability/log.js";
 import { ArtifactLifecycle } from "./lifecycle.js";
-import type { ArtifactConfigRepository, ReportRenderer, ReportRepository } from "./ports.js";
+import type { ArtifactConfigRepository, ReportRecord, ReportRenderer, ReportRepository } from "./ports.js";
 import { artifactPrompt } from "./prompt.js";
 import { ReportProgress } from "./progress.js";
 import { ReportPublisher } from "./publisher.js";
@@ -38,7 +40,7 @@ export const REPORT_CONTEXT_BUDGET = { trigger: 750_000, prune: 600_000, tail: 8
 export const reportTurnReminder = (now: Date): string => [
   "<system-reminder>",
   `Current time: ${now.toISOString()}`,
-  "This is report mode, not a chat. Nobody will answer a question: do not ask one and do not write a chat reply. Read the form and the files, consult your knowledge, then deliver the whole report by calling publish_report once. Your Run is finished only when publish_report has returned \"Report published.\".",
+  "This is report mode, not a chat. Nobody will answer a question: do not ask one and do not write a chat reply. Read the form and the files, consult your knowledge, then deliver what this Run's instructions ask by calling publish_report once. Your Run is finished only when publish_report has returned \"Report published.\".",
   REPLY_LANGUAGE_RULE,
   "</system-reminder>"
 ].join("\n");
@@ -74,6 +76,8 @@ export class ArtifactMode {
   }
 
   private readonly drafts: DraftStore;
+  /** Starts a Run of the conversation under this Run id with the full phase's message; set by the Runtime once its chat exists. */
+  startFullRun?: (record: ReportRecord, runId: string) => Promise<void>;
   get configs() { return this.deps.configs; }
   get reports() { return this.deps.reports; }
   get blobs() { return this.deps.blobs; }
@@ -84,6 +88,28 @@ export class ArtifactMode {
     const max = this.deps.maxFiles ?? MAX_ARTIFACT_FILES;
     if (await this.deps.assets.uploadedCount(conversation) >= max) throw new ConversationError(413, "too_many_files", `A report takes at most ${max} files.`);
     return true;
+  }
+
+  /**
+   * The parent unlocks the full report (payment is not live: anyone bound to the conversation may). One conditional write moves the
+   * summary to the full phase and a Run starts; unlocking again returns the report as it is, and the summary still generating is refused.
+   */
+  async unlock(conversationId: string): Promise<ReportRecord> {
+    const { reports, clock = () => new Date() } = this.deps;
+    const current = await reports.get(conversationId);
+    if (!current) throw new ConversationError(404, "report_not_found", "This conversation has no report.");
+    if (current.phase === "full") return current;
+    const runId = `run_${randomUUID().replaceAll("-", "")}`;
+    const record = await reports.unlock(conversationId, runId, clock());
+    if (!record) {
+      const latest = (await reports.get(conversationId))!;
+      if (latest.phase === "full") return latest; // another caller unlocked first
+      throw new ConversationError(409, "report_not_ready", "The summary is not ready yet.");
+    }
+    if (!this.startFullRun) throw new Error("The Runtime cannot start the full report's Run.");
+    try { await this.startFullRun(record, runId); }
+    catch (error) { log.error("artifact_full_not_started", { conversationId, error }); await this.lifecycle.attemptNotStarted(runId, error); }
+    return (await reports.get(conversationId))!;
   }
 
   /** The chat list leaves report conversations out: they open on their own page. */
@@ -99,6 +125,6 @@ export class ArtifactMode {
     const config = await this.deps.configs.get(conversation.productId);
     if (!config) throw new Error(`Product ${conversation.productId} has an artifact conversation but no artifact configuration.`);
     const progress = new ReportProgress(this.deps.reports, { conversationId: conversation.id, attempt: report.attempt });
-    return { promptSuffix: await artifactPrompt(config), extraTools: [PUBLISH_REPORT_TOOL, ...DRAFT_TOOLS, ...(this.deps.search ? [WEB_SEARCH_TOOL] : [])], tools: reportToolRunner(this.publisher, conversation, run, report.attempt, progress, this.drafts, this.deps.search), onTool: progress.onTool, turnReminder: reportTurnReminder, toolCallLimit: REPORT_TOOL_CALL_LIMIT };
+    return { promptSuffix: await artifactPrompt(config, report.phase), extraTools: [PUBLISH_REPORT_TOOL, ...DRAFT_TOOLS, ...(this.deps.search ? [WEB_SEARCH_TOOL] : [])], tools: reportToolRunner(this.publisher, conversation, run, report.phase, report.attempt, progress, this.drafts, this.deps.search), onTool: progress.onTool, turnReminder: reportTurnReminder, toolCallLimit: REPORT_TOOL_CALL_LIMIT };
   }
 }

@@ -158,11 +158,11 @@ export async function handleConversationHttpRequest(
     return;
   }
 
-  const reportMatch = url.pathname.match(/^\/v1\/conversations\/([^/]+)(\/report(?:\/files\/[^/]+)?)$/);
+  const reportMatch = url.pathname.match(/^\/v1\/conversations\/([^/]+)(\/report(?:\/files\/[^/]+|\/unlock)?)$/);
   if (reportMatch) {
     if (!deps.artifact) throw new ConversationHttpError(404, "report_not_found", "This conversation has no report.");
     const conversation = await requireBoundConversation(repository, binding, decodeURIComponent(reportMatch[1] ?? ""));
-    await handleReportRequest(req, res, reportMatch[2]!, conversation, binding, deps.artifact, maxHttpResponseBytes);
+    await handleReportRequest(req, res, reportMatch[2]!, conversation, deps.artifact, maxHttpResponseBytes, allowedOrigins);
     return;
   }
 

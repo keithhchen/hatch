@@ -124,3 +124,11 @@ export function formatElapsed(ms) {
   const seconds = Math.max(0, Math.floor(ms / 1000));
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
+
+/** The steps a report goes through, in the order a reader is told them; each is a stage the Runtime records. */
+export const REPORT_STEPS = ["reading", "consulting", "researching", "writing", "proofreading", "rendering"];
+/** How far a report has come: the furthest step it has reached, so a step taken again (reading after writing) never moves it back. */
+export function reportStep(report) {
+  const seen = [report.stage, ...(report.steps ?? []).map(step => step.stage)].map(stage => REPORT_STEPS.indexOf(stage));
+  return Math.max(0, ...seen) + 1;
+}

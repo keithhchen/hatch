@@ -9,49 +9,24 @@ import { attachmentToolDefinitions } from "../chat/attachmentTools.js";
 import { ServerToolExecutor } from "../serverTools.js";
 import { toolRegistry } from "../tools.js";
 import { InMemoryArtifactConfigRepository, InvalidArtifactConfig } from "./config.js";
-import { deriveFreeHtml } from "./html.js";
+import { validateReportHtml } from "./html.js";
 import { ArtifactMode } from "./mode.js";
 import type { ReportRenderer } from "./ports.js";
 import { InMemoryReportRepository } from "./repositories.js";
-import { reportAccess, handleReportRequest } from "./routes.js";
+import { handleReportRequest } from "./routes.js";
 import { artifactToolDefinitions } from "./toolDefinitions.js";
 import type { ConversationRecord } from "../conversationRepository.js";
-import type { SessionBinding } from "../chat/sessionBinding.js";
 import type http from "node:http";
 
-const PAID = "SECRET-PAID-TEXT";
 const doc = (body: string, head = "<style>p{color:#111}</style>") => `<!doctype html><html><head><meta charset="utf-8">${head}</head><body>${body}</body></html>`;
-const good = doc(`<header><h1>Cover</h1></header>
-<section data-access="free"><h2>Who you are</h2><p>free text</p></section>
-<section data-access="paid"><div><h2>Your plan</h2></div><p>${PAID}</p><table><tr><td>${PAID}</td></tr></table></section>`);
+const good = doc(`<h1>Cover</h1><p>report text</p>`);
 
-test("free HTML holds the free sections only: no paid section, heading or content", () => {
-  const out = deriveFreeHtml(good);
-  assert.ok(out.ok);
-  if (!out.ok) return;
-  assert.ok(!out.freeHtml.includes(PAID));
-  assert.match(out.freeHtml, /free text/);
-  assert.ok(!out.freeHtml.includes("Your plan") && !out.freeHtml.includes('data-access="paid"'), "no trace of a paid section");
-  assert.match(out.freeHtml, /<style>p\{color:#111\}<\/style>/);
-  assert.deepEqual(out.sections, [{ access: "free", title: "Who you are" }, { access: "paid", title: "Your plan" }]);
-  assert.ok(deriveFreeHtml(good.replace("<header>", "<main><header>").replace("</section>\n<section data-access=\"paid\">", "</section><section data-access=\"paid\">") + "").ok || true);
-});
-
-test("a wrapper <main> holds the sections", () => {
-  const wrapped = doc(`<main><section data-access="free"><h1>A</h1></section><section data-access="paid"><h1>B</h1><p>${PAID}</p></section></main>`);
-  const out = deriveFreeHtml(wrapped);
-  assert.ok(out.ok && !out.freeHtml.includes(PAID));
-});
-
-test("validation errors are precise and all reported", () => {
-  const errors = (html: string): string => { const r = deriveFreeHtml(html); assert.ok(!r.ok); return r.ok ? "" : r.errors.join("\n"); };
-  assert.match(errors(doc(`<section><h2>x</h2></section>`)), /Section 1 needs data-access/);
-  assert.match(errors(doc(`<section data-access="free"><p>no heading</p></section><section data-access="paid"><h2>b</h2></section>`)), /Section 1 needs a heading/);
-  assert.match(errors(doc(`<section data-access="free"><h2>a</h2></section>`)), /at least one data-access="paid"/);
-  assert.match(errors(doc(`<section data-access="paid"><h2>a</h2></section>`)), /at least one data-access="free"/);
-  assert.match(errors(doc(`<p>loose</p>`)), /no top-level <section>/);
+test("a good document has no errors; every way a document breaks the contract is reported at once", () => {
+  assert.deepEqual(validateReportHtml(good), []);
+  assert.deepEqual(validateReportHtml(doc(`<p>loose</p>`)), [], "sections are not required any more");
+  const errors = (html: string): string => { const r = validateReportHtml(html); assert.ok(r.length); return r.join("\n"); };
   assert.match(errors(good.replace("</body>", "<script>1</script></body>")), /<script> is not allowed/);
-  assert.match(errors(good.replace("<p>free text", '<img src="https://x/y.png"><p>free text')), /must not load anything external/);
+  assert.match(errors(good.replace("<p>report text", '<img src="https://x/y.png"><p>report text')), /must not load anything external/);
   assert.match(errors(good.replace("p{color:#111}", "@import url(https://x/f.css);")), /self-contained/);
   assert.match(errors(good.replace("<!doctype html>", "")), /doctype/);
   assert.match(errors(good.replace(/<style>.*<\/style>/, "")), /inline <style>/);
@@ -70,13 +45,14 @@ test("a bad artifact config row is an error, not an absence", async () => {
 
 const conversation = (id = "c1", owner = "acct-1"): ConversationRecord => ({ id, ownerAccountId: owner, productId: "p1", creatorId: "creator" } as ConversationRecord);
 
-const renderer = (): ReportRenderer & { calls: number; fail?: string } => ({
+const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.from("PNGDATA")]);
+const renderer = (): ReportRenderer & { calls: number; pages: number; fail?: string } => ({
   calls: 0,
-  async render(input) {
+  pages: 1,
+  async render(html) {
     this.calls++;
     if (this.fail) throw new Error(this.fail);
-    assert.ok(input.fullHtml.includes(PAID) && !input.freeHtml.includes(PAID));
-    return { fullPdf: Buffer.from("%PDF-FULLPDF"), freePdf: Buffer.from("%PDF-FREEPDF"), preview: Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.from("PNGDATA")]) };
+    return { pdf: Buffer.from(`%PDF-${html.includes("SUMMARY") ? "SUMMARY" : "FULL"}PDF`), pages: this.pages, firstPagePng: PNG };
   }
 });
 
@@ -94,11 +70,13 @@ async function mode() {
   return { ...kit, reports, analytics, artifact, r, uploads, clock };
 }
 
-/** The agent's way: write the report file, then publish it by path. */
-async function publishFile(turn: { tools: { run(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> } }, html: string) {
-  await turn.tools.run("write", { path: "/report/report.html", content: html });
-  return turn.tools.run("publish_report", { path: "/report/report.html" });
+/** The agent's way: write the phase's file, then publish it by path. */
+async function publishFile(turn: { tools: { run(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> } }, html: string, path = "/report/report.html") {
+  await turn.tools.run("write", { path, content: html });
+  return turn.tools.run("publish_report", { path });
 }
+const summaryHtml = doc("<h1>SUMMARY</h1>");
+const fullHtml = doc("<h1>Report</h1><p>FULLTEXT</p>");
 
 test("draft files work like a coding agent's: write, edit exactly once, read, list; bad paths and edits are told back", async () => {
   const { reports, artifact } = await mode();
@@ -119,43 +97,98 @@ test("draft files work like a coding agent's: write, edit exactly once, read, li
   assert.equal(String((await again.tools.run("read", { path: "/report/report.html" })).output), "<h1>A</h1><p>two</p><!-- ch3 -->", "a retry finds the draft");
 });
 
-test("lifecycle: draft, generating, ready; and failed when a run ends without a report", async () => {
+test("lifecycle: draft, generating, summary ready; failed renders and bad documents leave it generating", async () => {
   const { reports, artifact, analytics, r } = await mode();
-  r.fail = undefined;
   const c = conversation();
   assert.equal(await artifact.turnFor(c, { createdAt: new Date().toISOString() }), undefined, "no report row: a chat conversation");
   await reports.create({ conversationId: c.id, productId: "p1", ownerAccountId: c.ownerAccountId });
-  assert.equal((await reports.get(c.id))?.status, "draft");
+  assert.deepEqual([(await reports.get(c.id))?.status, (await reports.get(c.id))?.phase], ["draft", "summary"]);
   await artifact.lifecycle.runAccepted(c, { id: "run-1" } as never);
   assert.equal((await reports.get(c.id))?.status, "generating");
 
   const turn = (await artifact.turnFor(c, { createdAt: new Date(Date.now() - 5000).toISOString() }))!;
   assert.deepEqual(turn.extraTools, ["artifact.publish_report", "artifact.write", "artifact.edit"]);
   assert.match(turn.promptSuffix, /TEMPLATE-TEXT/);
-  assert.match(turn.promptSuffix, /Report mode/);
+  assert.match(turn.promptSuffix, /the executive summary page only/, "the summary phase's instructions");
+  assert.doesNotMatch(turn.promptSuffix, /# This Run: the full report/);
 
-  const bad = await publishFile(turn, doc("<p>x</p>"));
+  const bad = await publishFile(turn, "<p>x</p>", "/report/summary.html");
   assert.match(String(bad.output), /^Not published/);
-  assert.equal((await reports.get(c.id))?.status, "generating");
-
   r.fail = "boom";
-  await assert.rejects(publishFile(turn, good), /Rendering the report failed: boom/);
+  await assert.rejects(publishFile(turn, summaryHtml, "/report/summary.html"), /Rendering the report failed: boom/);
   assert.equal(r.calls, 3, "a failing rendering is tried again twice inside the tool");
   assert.equal((await reports.get(c.id))?.status, "generating");
 
   r.fail = undefined;
-  assert.deepEqual(await publishFile(turn, good), { output: "Report published." });
+  assert.deepEqual(await publishFile(turn, summaryHtml, "/report/summary.html"), { output: "Report published." });
   const ready = (await reports.get(c.id))!;
-  assert.equal(ready.status, "ready");
-  assert.ok(ready.keys!.fullPdf.endsWith("/report/pub1/full.pdf"));
-  assert.equal((await artifact.blobs.get(ready.keys!.freePdf)).toString(), "%PDF-FREEPDF");
-  assert.ok(!(await artifact.blobs.get(ready.keys!.freeHtml)).toString().includes(PAID));
-  assert.ok((await artifact.blobs.get(ready.keys!.fullHtml)).toString().includes(PAID));
+  assert.deepEqual([ready.status, ready.phase], ["ready", "summary"]);
+  assert.deepEqual(Object.keys(ready.keys!).sort(), ["summaryHtml", "summaryPdf", "summaryPng"]);
+  assert.ok(ready.keys!.summaryPdf!.endsWith("/report/pub1/summary.pdf"));
+  assert.equal((await artifact.blobs.get(ready.keys!.summaryPdf!)).toString(), "%PDF-SUMMARYPDF");
+  assert.deepEqual(await artifact.blobs.get(ready.keys!.summaryPng!), PNG);
   assert.equal(analytics.captured.find((e) => e.event === "report_ready")?.props.duration_s, 5);
 
   await artifact.lifecycle.runEnded({ id: "run-1" }, { status: "completed", reply: {} as never });
   assert.equal((await reports.get(c.id))?.status, "ready", "a ready report stays ready");
+});
 
+test("the summary must print on exactly one page: more is refused with text and publishes nothing", async () => {
+  const { reports, artifact, r } = await mode();
+  const c = conversation();
+  await reports.create({ conversationId: c.id, productId: "p1", ownerAccountId: c.ownerAccountId });
+  await artifact.lifecycle.runAccepted(c, { id: "run-1" } as never);
+  const turn = (await artifact.turnFor(c, { createdAt: new Date().toISOString() }))!;
+  r.pages = 2;
+  assert.deepEqual(await publishFile(turn, summaryHtml, "/report/summary.html"), { output: "Not published: the summary runs over one page (2 pages); shorten it and publish again." });
+  assert.equal((await reports.get(c.id))?.status, "generating");
+  assert.equal((await reports.get(c.id))?.keys, undefined);
+  r.pages = 1;
+  assert.deepEqual(await publishFile(turn, summaryHtml, "/report/summary.html"), { output: "Report published." });
+});
+
+test("unlock is one conditional write from (summary, ready) to (full, generating, attempt 1) and starts one Run; again changes nothing", async () => {
+  const { reports, artifact, clock } = await mode();
+  const c = conversation();
+  const started: Array<[string, string]> = [];
+  artifact.startFullRun = async (record, runId) => { started.push([record.conversationId, runId]); };
+  await reports.create({ conversationId: c.id, productId: "p1", ownerAccountId: c.ownerAccountId });
+  await assert.rejects(artifact.unlock(c.id), /not ready/, "draft");
+  await artifact.lifecycle.runAccepted(c, { id: "run-1" } as never);
+  await assert.rejects(artifact.unlock(c.id), /not ready/, "the summary still generating");
+  const summary = (await artifact.turnFor(c, { createdAt: new Date().toISOString() }))!;
+  await publishFile(summary, summaryHtml, "/report/summary.html");
+  const summaryKeys = (await reports.get(c.id))!.keys;
+
+  const [a, b] = await Promise.all([artifact.unlock(c.id), artifact.unlock(c.id)]);
+  assert.equal(started.length, 1, "two callers start one Run");
+  assert.deepEqual([a.phase, b.phase], ["full", "full"]);
+  const record = (await reports.get(c.id))!;
+  assert.deepEqual([record.phase, record.status, record.stage, record.attempt, record.runId, record.unlockedAt, record.keys], ["full", "generating", "queued", 1, started[0]![1], clock.now.toISOString(), summaryKeys]);
+  assert.equal((await artifact.unlock(c.id)).runId, record.runId, "unlocking again starts nothing");
+  assert.equal(started.length, 1);
+
+  await artifact.lifecycle.assertAcceptsMessage(c, started[0]![1]);
+  await artifact.lifecycle.runAccepted(c, { id: started[0]![1] } as never);
+  const full = (await artifact.turnFor(c, { createdAt: new Date().toISOString() }))!;
+  assert.match(full.promptSuffix, /# This Run: the full report/);
+  assert.deepEqual(await publishFile(full, fullHtml), { output: "Report published." });
+  const done = (await reports.get(c.id))!;
+  assert.deepEqual([done.status, done.phase], ["ready", "full"]);
+  assert.deepEqual(Object.keys(done.keys!).sort(), ["fullHtml", "fullPdf", "summaryHtml", "summaryPdf", "summaryPng"], "the summary files stay");
+  assert.equal((await artifact.blobs.get(done.keys!.fullPdf!)).toString(), "%PDF-FULLPDF");
+  assert.equal(await reports.ready(c.id, 1, "summary", { summaryPdf: "late" }, clock.now), undefined, "a late summary publish cannot touch the full phase");
+});
+
+test("a failed start of the full Run is retried like any Run that did not start", async () => {
+  const { reports, artifact } = await mode();
+  const c = conversation();
+  artifact.startFullRun = async () => { throw new Error("no capacity"); };
+  await reports.create({ conversationId: c.id, productId: "p1", ownerAccountId: c.ownerAccountId });
+  await artifact.lifecycle.runAccepted(c, { id: "run-1" } as never);
+  await publishFile((await artifact.turnFor(c, { createdAt: new Date().toISOString() }))!, summaryHtml, "/report/summary.html");
+  const record = await artifact.unlock(c.id);
+  assert.deepEqual([record.phase, record.status, Boolean(record.retryAt)], ["full", "generating", true]);
 });
 
 test("web_search is offered only when search is configured, and asks it with query and objective", async () => {
@@ -209,44 +242,51 @@ function fakeResponse() {
   return { res: res as unknown as http.ServerResponse, out };
 }
 
-test("a locked viewer gets the full PDF (payment is not live) but never the full HTML; the unlocked viewer and the owner get both", async () => {
+test("files are served per phase: summary files once the summary is ready, full files once the full phase is ready; unlock needs POST and an allowed origin", async () => {
   const { reports, artifact } = await mode();
   const c = conversation();
+  artifact.startFullRun = async () => undefined;
   await reports.create({ conversationId: c.id, productId: "p1", ownerAccountId: c.ownerAccountId });
   await artifact.lifecycle.runAccepted(c, { id: "run-1" } as never);
-  const turn = (await artifact.turnFor(c, { createdAt: new Date().toISOString() }))!;
-  const buyer = { creatorId: "creator", userId: "acct-1" } as SessionBinding;
-  const owner = { creatorId: "acct-1", userId: "acct-1" } as SessionBinding;
-  const get = async (rest: string, binding: SessionBinding) => {
+  const origins = ["https://hatch.example"];
+  const call = async (method: string, rest: string, headers: Record<string, string> = { origin: origins[0]!, cookie: "hatch_session=t" }) => {
     const { res, out } = fakeResponse();
-    try { await handleReportRequest({ method: "GET" } as http.IncomingMessage, res, rest, c, binding, artifact, 1 << 20); } catch (error) { return { status: (error as { status: number }).status, body: Buffer.alloc(0), headers: {} }; }
+    try { await handleReportRequest({ method, headers } as unknown as http.IncomingMessage, res, rest, c, artifact, 1 << 20, origins); } catch (error) { return { status: (error as { status: number }).status, body: Buffer.alloc(0), headers: {} }; }
     return out;
   };
-  assert.equal((await get("/report", buyer)).status, 200);
-  const generating = JSON.parse((await get("/report", buyer)).body.toString());
-  assert.deepEqual([generating.status, generating.files.full_pdf, generating.stage, generating.attempt], ["generating", false, "queued", 1]);
-  assert.equal((await get("/report/files/free.pdf", buyer)).status, 404, "nothing before ready");
-  await publishFile(turn, good);
-  const status = JSON.parse((await get("/report", buyer)).body.toString());
-  assert.deepEqual({ ...status, steps: undefined, started_at: undefined }, { status: "ready", unlocked: false, files: { free_pdf: true, free_html: true, preview: true, full_pdf: true, full_html: false }, stage: "ready", attempt: 1, steps: undefined, started_at: undefined });
-  const free = await get("/report/files/free.pdf", buyer);
-  assert.equal(free.body.toString(), "%PDF-FREEPDF");
-  assert.equal(free.headers["cache-control"], "private, no-store");
-  assert.equal((await get("/report/files/preview.png", buyer)).headers["content-type"], "image/png");
-  assert.equal((await get("/report/files/full.pdf", buyer)).body.toString(), "%PDF-FULLPDF", "until payment is live, unlock downloads the full PDF");
-  assert.equal((await get("/report/files/full.html", buyer)).status, 403, "the full HTML is locked like the full PDF");
-  const freeHtml = await get("/report/files/free.html", buyer);
-  assert.equal(freeHtml.headers["content-type"], "text/html; charset=utf-8");
-  assert.match(String(freeHtml.headers["content-security-policy"]), /default-src 'none'.*sandbox/);
-  assert.ok(!freeHtml.body.toString().includes(PAID), "the free HTML holds no paid content");
-  assert.ok((await get("/report/files/full.html", owner)).body.toString().includes(PAID));
-  assert.equal((await get("/report/files/full.pdf", owner)).body.toString(), "%PDF-FULLPDF");
-  await reports.unlock(c.id);
-  assert.equal((await get("/report/files/full.pdf", buyer)).body.toString(), "%PDF-FULLPDF");
-  assert.equal(reportAccess((await reports.get(c.id))!, buyer).unlocked, true);
+  const json = async (method: string, rest: string) => JSON.parse((await call(method, rest)).body.toString());
+  const generating = await json("GET", "/report");
+  assert.deepEqual([generating.status, generating.phase, generating.files, generating.stage, generating.attempt], ["generating", "summary", { summary_png: false, summary_pdf: false, full_pdf: false }, "queued", 1]);
+  assert.equal((await call("GET", "/report/files/summary.png")).status, 404, "nothing before ready");
+  assert.equal((await call("POST", "/report/unlock")).status, 409, "the summary is not ready");
+
+  await publishFile((await artifact.turnFor(c, { createdAt: new Date().toISOString() }))!, summaryHtml, "/report/summary.html");
+  const ready = await json("GET", "/report");
+  assert.deepEqual({ ...ready, steps: undefined, started_at: undefined }, { status: "ready", phase: "summary", unlocked: false, files: { summary_png: true, summary_pdf: true, full_pdf: false }, stage: "ready", attempt: 1, steps: undefined, started_at: undefined });
+  const png = await call("GET", "/report/files/summary.png");
+  assert.deepEqual([png.headers["content-type"], png.headers["cache-control"]], ["image/png", "private, no-store"]);
+  assert.equal((await call("GET", "/report/files/summary.pdf")).body.toString(), "%PDF-SUMMARYPDF");
+  assert.equal((await call("GET", "/report/files/full.pdf")).status, 404, "the full report does not exist yet");
+  assert.equal((await call("GET", "/report/files/free.pdf")).status, 404);
+  assert.equal((await call("GET", "/report/unlock")).status, 405);
+  assert.equal((await call("POST", "/report/unlock", { origin: "https://evil.example", cookie: "hatch_session=t" })).status, 403);
+  assert.equal((await json("GET", "/report")).phase, "summary", "a refused unlock changed nothing");
+
+  const unlocked = await json("POST", "/report/unlock");
+  assert.deepEqual([unlocked.status, unlocked.phase, unlocked.stage, unlocked.unlocked, unlocked.files], ["generating", "full", "queued", true, { summary_png: true, summary_pdf: true, full_pdf: false }]);
+  assert.equal((await call("GET", "/report/files/summary.png")).status, 200, "the summary stays while the full report is written");
+  assert.equal((await call("GET", "/report/files/full.pdf")).status, 404);
+  assert.equal((await json("POST", "/report/unlock")).phase, "full", "again is the same report");
+
+  await artifact.lifecycle.runAccepted(c, { id: (await reports.get(c.id))!.runId! } as never);
+  await publishFile((await artifact.turnFor(c, { createdAt: new Date().toISOString() }))!, fullHtml);
+  assert.equal((await json("GET", "/report")).files.full_pdf, true);
+  assert.equal((await call("GET", "/report/files/full.pdf")).body.toString(), "%PDF-FULLPDF");
+  const html = await call("GET", "/report/files/full.html");
+  assert.match(String(html.headers["content-security-policy"]), /default-src 'none'.*sandbox/);
+  assert.match(html.body.toString(), /FULLTEXT/);
   const chat = conversation("chat-1");
-  assert.equal((await get("/report", buyer)).status, 200);
-  await assert.rejects(handleReportRequest({ method: "GET" } as http.IncomingMessage, fakeResponse().res, "/report", chat, buyer, artifact, 1 << 20), /no report/);
+  await assert.rejects(handleReportRequest({ method: "GET" } as http.IncomingMessage, fakeResponse().res, "/report", chat, artifact, 1 << 20, origins), /no report/);
 });
 
 // A one-page PDF: enough for pdf.js to render.

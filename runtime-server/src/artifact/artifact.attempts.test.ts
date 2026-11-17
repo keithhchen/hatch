@@ -10,7 +10,7 @@ import { clientMessageInputDigest } from "../protocol.js";
 import { LocalRuntimeAuthority, RuntimeStore } from "../store.js";
 import { InMemoryArtifactConfigRepository } from "./config.js";
 import { ArtifactMode } from "./mode.js";
-import { ARTIFACT_RETRY_MESSAGE } from "./prompt.js";
+import { ARTIFACT_FULL_MESSAGE, ARTIFACT_RETRY_MESSAGE } from "./prompt.js";
 import { ArtifactRetrier } from "./retrier.js";
 import { InMemoryReportRepository } from "./repositories.js";
 import type { ReportRenderer } from "./ports.js";
@@ -19,7 +19,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const binding = { ownerAccountId: "buyer", creatorId: "creator", agentId: "p1", productId: "p1", corpusDigest: "corpus" };
 const PDF = Buffer.from("%PDF-1.7 ok");
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.from("data")]);
-const html = `<!doctype html><html><head><style>p{}</style></head><body><section data-access="free"><h2>A</h2><p>a</p></section><section data-access="paid"><h2>B</h2><p>SECRET</p></section></body></html>`;
+const html = `<!doctype html><html><head><style>p{}</style></head><body><h1>Summary</h1></body></html>`;
 
 type Behavior = "fail" | "complete" | "slow-publish";
 
@@ -32,7 +32,7 @@ async function world(script: Behavior[]) {
   const reports = new InMemoryReportRepository();
   const clock = { now: new Date("2026-01-01T00:00:00Z") };
   const analytics = new RecordingAnalytics();
-  const renderer: ReportRenderer = { render: async () => ({ fullPdf: PDF, freePdf: PDF, preview: PNG }) };
+  const renderer: ReportRenderer = { render: async () => ({ pdf: PDF, pages: 1, firstPagePng: PNG }) };
   const artifact = new ArtifactMode({ configs: new InMemoryArtifactConfigRepository(), reports, renderer, blobs: kit.blobs, assets: { uploadedCount: async () => 0 }, analytics, clock: () => clock.now,
     publishing: { sleep: async () => undefined, pausesMs: [0, 0] } });
   const runs: string[] = [];
@@ -47,7 +47,7 @@ async function world(script: Behavior[]) {
       if (behavior === "slow-publish") {
         await sleep(30);
         const report = (await reports.get(turn.conversation.id))!;
-        await reports.ready(turn.conversation.id, report.attempt, { fullHtml: "a", freeHtml: "b", fullPdf: "c", freePdf: "d", preview: "e" }, clock.now);
+        await reports.ready(turn.conversation.id, report.attempt, "summary", { summaryHtml: "a", summaryPdf: "b", summaryPng: "c" }, clock.now);
       }
       await turn.state.complete({ message: { role: "assistant", content: "done" }, finishReason: "stop", visibleParts: [] });
     } }
@@ -120,7 +120,7 @@ test("a claim is a compare-and-set on the attempt", async () => {
   assert.equal(await w.reports.claim(w.id, 1, "r3", w.clock.now, 1000), undefined);
   assert.equal((await w.reports.get(w.id))?.runId, "r2");
   // the publish of the older attempt is refused
-  assert.equal(await w.reports.ready(w.id, 1, { fullHtml: "a", freeHtml: "b", fullPdf: "c", freePdf: "d", preview: "e" }, w.clock.now), undefined);
+  assert.equal(await w.reports.ready(w.id, 1, "summary", { summaryHtml: "a" }, w.clock.now), undefined);
   await w.chat.stop();
 });
 
@@ -167,17 +167,17 @@ test("publishing replaces the report as one unit; a failed publish leaves the pr
   const render: { fail?: boolean; bad?: boolean } = {};
   (w.artifact.deps as { renderer: ReportRenderer }).renderer.render = async () => {
     if (render.fail) throw new Error("render down");
-    return render.bad ? { fullPdf: Buffer.from("junk"), freePdf: PDF, preview: PNG } : { fullPdf: PDF, freePdf: PDF, preview: PNG };
+    return { pdf: render.bad ? Buffer.from("junk") : PDF, pages: 1, firstPagePng: PNG };
   };
   await w.reports.begin(w.id, "r1", w.clock.now);
-  const publish = () => w.artifact.publisher.publish({ conversation: w.conversation, attempt: 1, html, startedAt: Date.now() });
+  const publish = () => w.artifact.publisher.publish({ conversation: w.conversation, phase: "summary", attempt: 1, html, startedAt: Date.now() });
   assert.equal(await publish(), "Report published.");
   const first = (await w.reports.get(w.id))!;
   const blobs = w.artifact.blobs;
-  for (const key of Object.values(first.keys!)) assert.ok((await blobs.get(key)).length > 0);
+  for (const key of Object.values(first.keys!)) assert.ok((await blobs.get(key!)).length > 0);
 
   render.bad = true;
-  await assert.rejects(publish(), /invalid full\.pdf/);
+  await assert.rejects(publish(), /invalid summary\.pdf/);
   render.bad = false; render.fail = true;
   await assert.rejects(publish(), /render down/);
   assert.deepEqual((await w.reports.get(w.id))?.keys, first.keys, "readers still see the previous complete set");
@@ -185,9 +185,9 @@ test("publishing replaces the report as one unit; a failed publish leaves the pr
   render.fail = false;
   assert.equal(await publish(), "Report published.");
   const second = (await w.reports.get(w.id))!;
-  assert.notEqual(second.keys!.fullPdf, first.keys!.fullPdf);
-  assert.equal(new Set(Object.values(second.keys!).map((k) => k.split("/").slice(0, -1).join("/"))).size, 1, "five files under one fresh prefix");
-  assert.ok((await blobs.get(first.keys!.fullPdf)).length > 0, "the old set may stay");
+  assert.notEqual(second.keys!.summaryPdf, first.keys!.summaryPdf);
+  assert.equal(new Set(Object.values(second.keys!).map((k) => k!.split("/").slice(0, -1).join("/"))).size, 1, "the files under one fresh prefix");
+  assert.ok((await blobs.get(first.keys!.summaryPdf!)).length > 0, "the old set may stay");
   assert.equal(second.status, "ready");
   await w.chat.stop();
 });
@@ -210,5 +210,31 @@ test("progress follows the Run's own tool calls: stages, safe details, the last 
   const steps = (await w.reports.get(w.id))!.steps;
   assert.equal(steps.length, 20);
   assert.equal(steps.at(-1)?.detail, "ls /attachments/29");
+  await w.chat.stop();
+});
+
+test("the full phase starts its own Run with attempt 1 and continues up to 5 Runs of its own; the summary stays", async () => {
+  const w = await world(["complete", "fail", "fail", "fail", "fail", "fail"]);
+  w.artifact.startFullRun = async (record, runId) => { await w.submit((await w.repository.getConversation(record.conversationId))!, `artifact-full-${runId}`, runId, ARTIFACT_FULL_MESSAGE); };
+  await w.submit(w.conversation, "first", "run-1", "the form");
+  await w.settled(1);
+  await w.reports.runEnded("run-1", "x", w.clock.now); // the scripted Run never published: put the summary there by hand
+  w.clock.now = new Date("2026-01-01T00:00:05Z");
+  await w.retrier.tick();
+  await w.settled(2);
+  const attempt2 = (await w.reports.get(w.id))!;
+  assert.equal(attempt2.attempt, 2);
+  assert.ok(await w.reports.ready(w.id, 2, "summary", { summaryPdf: "s" }, w.clock.now));
+
+  const unlocked = await w.artifact.unlock(w.id);
+  assert.deepEqual([unlocked.phase, unlocked.attempt, unlocked.keys], ["full", 1, { summaryPdf: "s" }]);
+  await w.settled(3);
+  for (const n of [4, 5, 6, 7]) {
+    w.clock.now = new Date(w.clock.now.getTime() + 5000);
+    assert.equal(await w.retrier.tick(), 1, `Run ${n} continues the full phase`);
+    await w.settled(n);
+  }
+  const report = (await w.reports.get(w.id))!;
+  assert.deepEqual([report.status, report.phase, report.attempt], ["failed", "full", 5]);
   await w.chat.stop();
 });

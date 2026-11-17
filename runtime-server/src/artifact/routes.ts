@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type http from "node:http";
 import type { AgentCorpusResolverLike as AgentCorpusResolver } from "../agentCorpus.js";
-import { conversationBinding, durableConversationId, type LegacyHmacAuth, type SessionBinding } from "../chat/sessionBinding.js";
+import { conversationBinding, durableConversationId, type LegacyHmacAuth } from "../chat/sessionBinding.js";
 import { ConversationError as ConversationHttpError } from "../conversations/conversation.js";
 import type { ConversationRecord, ConversationRepository } from "../conversationRepository.js";
 import type { AuthIdentityResolver, EntitlementResolver } from "../entitlements.js";
@@ -22,18 +22,27 @@ export type ArtifactRouteDeps = {
 };
 
 const HTML = "text/html; charset=utf-8";
-const FILES = { "free.pdf": ["freePdf", "application/pdf"], "preview.png": ["preview", "image/png"], "full.pdf": ["fullPdf", "application/pdf"], "free.html": ["freeHtml", HTML], "full.html": ["fullHtml", HTML] } as const;
+const FILES = { "summary.png": ["summaryPng", "image/png"], "summary.pdf": ["summaryPdf", "application/pdf"], "full.pdf": ["fullPdf", "application/pdf"], "full.html": ["fullHtml", HTML] } as const;
 /** The report HTML is the agent's: it is shown framed, may run nothing and load nothing but inline styles and data: images. */
 const REPORT_HTML_POLICY = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; sandbox allow-same-origin";
 
-/** What a viewer may fetch of a report: the free files once it is ready, the full PDF once it is unlocked or the viewer owns the product (an owner is bound with creatorId = userId). */
-export function reportAccess(record: ReportRecord, binding: Pick<SessionBinding, "creatorId" | "userId">) {
-  const ready = record.status === "ready";
-  const unlocked = Boolean(record.unlockedAt);
-  const full = ready && (unlocked || binding.creatorId === binding.userId);
-  // Payment is not live yet: the page still shows the paid part blurred, and "unlock" downloads the full PDF.
-  return { ready, unlocked, files: { free_pdf: ready, free_html: ready, preview: ready, full_pdf: ready, full_html: full } };
-}
+/** What a viewer may fetch: the summary files once the summary is published, the full files once the full phase is ready. */
+const availableFiles = (record: ReportRecord): Record<keyof typeof FILES, boolean> => {
+  const full = record.status === "ready" && record.phase === "full";
+  return { "summary.png": Boolean(record.keys?.summaryPng), "summary.pdf": Boolean(record.keys?.summaryPdf), "full.pdf": full && Boolean(record.keys?.fullPdf), "full.html": full && Boolean(record.keys?.fullHtml) };
+};
+
+const reportJson = (record: ReportRecord) => {
+  const files = availableFiles(record);
+  return {
+    status: record.status, phase: record.phase, unlocked: Boolean(record.unlockedAt),
+    files: { summary_png: files["summary.png"], summary_pdf: files["summary.pdf"], full_pdf: files["full.pdf"] },
+    ...(record.error ? { error: record.error } : {}),
+    stage: record.stage, attempt: record.attempt, ...(record.startedAt ? { started_at: record.startedAt } : {}),
+    // Development only: the waiting animation's raw steps. To be limited to the product owner or hidden once the UI is settled.
+    steps: record.steps
+  };
+};
 
 /** `/v1/products/:productId/artifact[/conversations]`: the intake, and the viewer's artifact conversations. */
 export async function handleProductArtifactRequest(req: http.IncomingMessage, res: http.ServerResponse, url: URL, deps: ArtifactRouteDeps): Promise<boolean> {
@@ -81,32 +90,31 @@ export async function handleProductArtifactRequest(req: http.IncomingMessage, re
   return true;
 }
 
-/** `/v1/conversations/:id/report[/files/:name]`, for a conversation already bound and authorized by the caller. */
+/** `/v1/conversations/:id/report[/files/:name | /unlock]`, for a conversation already bound and authorized by the caller. */
 export async function handleReportRequest(
-  req: http.IncomingMessage, res: http.ServerResponse, rest: string, conversation: ConversationRecord, binding: SessionBinding,
-  artifact: ArtifactMode, maxHttpResponseBytes: number
+  req: http.IncomingMessage, res: http.ServerResponse, rest: string, conversation: ConversationRecord,
+  artifact: ArtifactMode, maxHttpResponseBytes: number, allowedOrigins: readonly string[]
 ): Promise<boolean> {
-  const match = rest.match(/^\/report(?:\/files\/([^/]+))?$/);
+  const match = rest.match(/^\/report(?:\/files\/([^/]+)|(\/unlock))?$/);
   if (!match) return false;
+  if (match[2]) {
+    if (req.method !== "POST") throw new ConversationHttpError(405, "method_not_allowed", "Use POST.");
+    requireAllowedOrigin(req, allowedOrigins);
+    writeJsonBounded(res, 200, reportJson(await artifact.unlock(conversation.id)), maxHttpResponseBytes);
+    return true;
+  }
   if (req.method !== "GET") throw new ConversationHttpError(405, "method_not_allowed", "Use GET.");
   const record = await artifact.reports.get(conversation.id);
   if (!record) throw new ConversationHttpError(404, "report_not_found", "This conversation has no report.");
-  const access = reportAccess(record, binding);
   if (!match[1]) {
-    writeJsonBounded(res, 200, {
-      status: record.status, unlocked: access.unlocked, files: access.files, ...(record.error ? { error: record.error } : {}),
-      stage: record.stage, attempt: record.attempt, ...(record.startedAt ? { started_at: record.startedAt } : {}),
-      // Development only: the waiting animation's raw steps. To be limited to the product owner or hidden once the UI is settled.
-      steps: record.steps
-    }, maxHttpResponseBytes);
+    writeJsonBounded(res, 200, reportJson(record), maxHttpResponseBytes);
     return true;
   }
   const name = decodeURIComponent(match[1]) as keyof typeof FILES;
   const file = FILES[name];
   if (!file) throw new ConversationHttpError(404, "report_file_not_found", "Unknown report file.");
-  if (!access.ready || !record.keys) throw new ConversationHttpError(404, "report_not_ready", "The report is not ready.");
-  if ((name === "full.pdf" && !access.files.full_pdf) || (name === "full.html" && !access.files.full_html)) throw new ConversationHttpError(403, "report_locked", "The full report is locked.");
-  const bytes = await artifact.blobs.get(record.keys[file[0]]);
+  if (!availableFiles(record)[name]) throw new ConversationHttpError(404, "report_not_ready", "That file is not ready.");
+  const bytes = await artifact.blobs.get(record.keys![file[0]]!);
   res.writeHead(200, {
     "content-type": file[1], "content-length": bytes.length, "cache-control": "private, no-store",
     ...(file[1] === HTML ? { "content-security-policy": REPORT_HTML_POLICY, "x-content-type-options": "nosniff" } : {})

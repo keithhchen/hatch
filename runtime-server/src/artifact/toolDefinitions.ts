@@ -4,8 +4,9 @@ import type { HostToolRunner } from "../serverTools.js";
 import type { ConversationRecord, ConversationRunRecord } from "../conversationRepository.js";
 import type { ReportPublisher } from "./publisher.js";
 import type { ReportProgress } from "./progress.js";
+import type { ReportPhase } from "./ports.js";
 import type { SearchProvider } from "../factoryAgents/search.js";
-import { draftFiles, REPORT_FILE, type DraftStore } from "./drafts.js";
+import { draftFiles, REPORT_FILES, type DraftStore } from "./drafts.js";
 
 export const PUBLISH_REPORT_TOOL = "artifact.publish_report";
 export const WEB_SEARCH_TOOL = "artifact.web_search";
@@ -26,13 +27,13 @@ export const artifactToolDefinitions = (): ToolDefinition[] => [{
   model: {
     name: "publish_report",
     locality: "server",
-    description: `Publish the report file: one complete, self-contained HTML document under /report/ (normally ${REPORT_FILE}), written with write and edit and proofread with read. Call it once when the file is final. It returns "Report published." or the exact errors to fix in the file before calling again. Rendering can take a minute.`,
-    properties: { path: { type: "string", description: `The report file, normally ${REPORT_FILE}.` } },
+    description: `Publish this Run's file: one complete, self-contained HTML document under /report/ (${REPORT_FILES.summary} for the summary, ${REPORT_FILES.full} for the full report, as this Run's instructions say), written with write and edit and proofread with read. Call it once when the file is final. It returns "Report published." or the exact errors to fix in the file before calling again. Rendering can take a minute.`,
+    properties: { path: { type: "string", description: `The file of this Run: ${REPORT_FILES.summary} or ${REPORT_FILES.full}.` } },
     required: ["path"]
   }
 },
-draftTool("artifact.write", "write", `Create or replace a file under /report/ with the whole content given. Use it to start ${REPORT_FILE} (doctype, style, cover and an empty <section> for each chapter), then fill the chapters with edit. Keep each call small.`,
-  { path: { type: "string", description: `A file under /report/, e.g. ${REPORT_FILE}.` }, content: { type: "string", description: "The whole file." } }, ["path", "content"]),
+draftTool("artifact.write", "write", `Create or replace a file under /report/ with the whole content given. Use it to start the report file (doctype, style, and an empty <section> for each chapter), then fill the chapters with edit. Keep each call small.`,
+  { path: { type: "string", description: `A file under /report/, e.g. ${REPORT_FILES.full}.` }, content: { type: "string", description: "The whole file." } }, ["path", "content"]),
 draftTool("artifact.edit", "edit", "Replace exact text in a file under /report/: old_string must appear exactly once (or set replace_all). Use it to fill one chapter at a time and to fix what proofreading finds.",
   { path: { type: "string", description: "A file under /report/." }, old_string: { type: "string", description: "The exact text to replace." }, new_string: { type: "string", description: "The text to put in its place." }, replace_all: { type: "boolean", description: "Replace every occurrence." } }, ["path", "old_string", "new_string"]),
 {
@@ -52,7 +53,7 @@ draftTool("artifact.edit", "edit", "Replace exact text in a file under /report/:
 }];
 
 /** The report tools of one Run of one artifact conversation. */
-export const reportToolRunner = (publisher: ReportPublisher, conversation: ConversationRecord, run: Pick<ConversationRunRecord, "createdAt">, attempt: number, progress: ReportProgress, drafts: DraftStore, search?: SearchProvider): HostToolRunner => ({
+export const reportToolRunner = (publisher: ReportPublisher, conversation: ConversationRecord, run: Pick<ConversationRunRecord, "createdAt">, phase: ReportPhase, attempt: number, progress: ReportProgress, drafts: DraftStore, search?: SearchProvider): HostToolRunner => ({
   async run(name, args, signal) {
     const files = draftFiles(drafts, conversation.id);
     if (name === "write") return { output: await files.write(args) };
@@ -67,7 +68,7 @@ export const reportToolRunner = (publisher: ReportPublisher, conversation: Conve
       return { output: JSON.stringify(await search.search({ query, objective }, signal)) };
     }
     if (name !== "publish_report") throw new Error(`No report tool: ${name}`);
-    const html = await files.read({ path: args.path ?? REPORT_FILE });
-    return { output: await publisher.publish({ conversation, html, attempt, progress, startedAt: Date.parse(run.createdAt) || Date.now(), signal }) };
+    const html = await files.read({ path: args.path ?? REPORT_FILES[phase] });
+    return { output: await publisher.publish({ conversation, html, phase, attempt, progress, startedAt: Date.parse(run.createdAt) || Date.now(), signal }) };
   }
 });

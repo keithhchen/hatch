@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
-import { InlineAlert } from "@hatch/ui";
-import { Lock } from "lucide-react";
+import { InlineAlert, Progress } from "@hatch/ui";
+import { Download, Lock } from "lucide-react";
 import { useAnalytics } from "./analytics/AnalyticsProvider.jsx";
 import { reportFileOpened, reportViewed } from "./analytics/events.js";
-import { formatElapsed, isWaiting } from "./artifactForm.js";
+import { REPORT_STEPS, formatElapsed, isWaiting, reportStep } from "./artifactForm.js";
 import { WebChatEgg } from "./webChatGate.jsx";
 import { webChatErrorText } from "./webChatI18n.js";
 
@@ -42,16 +42,16 @@ function PdfPages({ src, title, failed }) {
   </>;
 }
 
-/** The preview image: page 1 as printed, then the next pages blurred. The unlock control sits just below page 1. */
-function ReportPreview({ src, alt, children }) {
-  const [top, setTop] = useState(null);
-  const placed = (event) => {
-    const { naturalWidth: width, naturalHeight: height } = event.currentTarget;
-    if (width && height) setTop(`${((width * Math.SQRT2) / height) * 100}%`); // an A4 page is √2 as tall as it is wide
-  };
-  return <figure className="artifact__preview">
-    <img src={src} alt={alt} onLoad={placed} />
-    {top ? <figcaption style={{ top }}>{children}</figcaption> : null}
+const LOCKED_REST = "/assets/web/report-locked.webp";
+
+/** The summary page as printed, and under it a blurred stand-in for the rest of the report with the unlock control over it. */
+function LockedSummary({ summaryUrl, onUnlock, unlocking, t }) {
+  return <figure className="artifact__summary">
+    <img className="artifact__summary-page" src={summaryUrl} alt={t("artifactSummaryAlt")} />
+    <div className="artifact__rest">
+      <img src={LOCKED_REST} alt="" aria-hidden="true" />
+      <button type="button" className="web-chat__button web-chat__button--yolk" onClick={onUnlock} disabled={unlocking}><Lock aria-hidden="true" />{t("artifactUnlock")}</button>
+    </div>
   </figure>;
 }
 
@@ -61,6 +61,9 @@ export function ArtifactReportPage({ api, conversationId, productId, onDraft, de
   const [report, setReport] = useState(null);
   const [error, setError] = useState(null);
   const [now, setNow] = useState(Date.now());
+  const [round, setRound] = useState(0);
+  const [unlocking, setUnlocking] = useState(false);
+  const [unlockError, setUnlockError] = useState(null);
   const status = report?.status;
   const waiting = report ? isWaiting(report) : false;
 
@@ -83,7 +86,7 @@ export function ArtifactReportPage({ api, conversationId, productId, onDraft, de
     };
     void poll();
     return () => { live = false; clearTimeout(timer); };
-  }, [api, conversationId, onDraft]);
+  }, [api, conversationId, onDraft, round]);
 
   useEffect(() => {
     if (!waiting) return undefined;
@@ -95,6 +98,16 @@ export function ArtifactReportPage({ api, conversationId, productId, onDraft, de
     if (status) analytics.track(reportViewed({ agentId: productId, status, unlocked: report.unlocked === true }));
   }, [analytics, productId, status, report?.unlocked]);
 
+  const unlock = async () => {
+    setUnlocking(true);
+    setUnlockError(null);
+    try {
+      setReport(await api.unlockReport(conversationId));
+      setRound(count => count + 1); // the full report is being written: poll again
+    } catch (cause) { setUnlockError(cause); }
+    setUnlocking(false);
+  };
+
   const startedAt = Date.parse(report?.started_at ?? "");
 
   return <div className="web-chat__messages"><div className="web-chat__thread artifact__report">
@@ -102,7 +115,13 @@ export function ArtifactReportPage({ api, conversationId, productId, onDraft, de
       ? <InlineAlert tone="error" title={t("artifactStatusUnavailable")}>{webChatErrorText(error, locale)}</InlineAlert>
       : <div className="web-chat__loading" role="status"><WebChatEgg size={34} className="web-chat-egg--bob" /></div>) : null}
     {waiting ? <div className="artifact__generating">
-      <div className="web-chat__loading" role="status"><WebChatEgg size={34} className="web-chat-egg--bob" /><span>{t("artifactGenerating")}</span></div>
+      <div className="web-chat__loading" role="status"><WebChatEgg size={34} className="web-chat-egg--bob" /><span>{t(report.phase === "full" ? "artifactGeneratingFull" : "artifactGenerating")}</span></div>
+      {(() => {
+        const step = reportStep(report);
+        return <div className="artifact__steps">
+          <Progress value={(step - 1) / REPORT_STEPS.length * 100 + 100 / REPORT_STEPS.length / 2} label={t("artifactStep", { step, total: REPORT_STEPS.length, label: t(`artifactStep_${REPORT_STEPS[step - 1]}`) })} />
+        </div>;
+      })()}
       {Number.isNaN(startedAt) ? null : <span className="artifact__elapsed">{t("artifactElapsed", { time: formatElapsed(now - startedAt) })}</span>}
       {error ? <InlineAlert tone="warning" title={t("artifactStatusUnavailable")}>{webChatErrorText(error, locale)}</InlineAlert> : null}
       {debug ? <div className="artifact__debug">
@@ -111,14 +130,13 @@ export function ArtifactReportPage({ api, conversationId, productId, onDraft, de
       </div> : null}
     </div> : null}
     {status === "failed" ? <InlineAlert tone="error" title={t("artifactFailedTitle")}>{report.error ?? ""}<br />{t("artifactReference", { id: conversationId })}</InlineAlert> : null}
-    {status === "ready" ? <>
-      {report.files?.full_html
-        ? <PdfPages src={api.reportFileUrl(conversationId, "full.pdf")} title={t("artifactReportTitle")} failed={t("artifactStatusUnavailable")} />
-        : <ReportPreview src={api.reportFileUrl(conversationId, "preview.png")} alt={t("artifactPreviewAlt")}>
-          {report.files?.full_pdf
-            ? <a className="web-chat__button web-chat__button--yolk" href={api.reportFileUrl(conversationId, "full.pdf")} download onClick={() => analytics.track(reportFileOpened({ agentId: productId, name: "full.pdf" }))}><Lock aria-hidden="true" />{t("artifactUnlock")}</a>
-            : <span className="artifact__locked"><Lock aria-hidden="true" />{t("artifactLocked")}</span>}
-        </ReportPreview>}
+    {status === "ready" && report.phase === "full" ? <>
+      <PdfPages src={api.reportFileUrl(conversationId, "full.pdf")} title={t("artifactReportTitle")} failed={t("artifactStatusUnavailable")} />
+      <a className="web-chat__button web-chat__button--yolk" href={api.reportFileUrl(conversationId, "full.pdf")} download onClick={() => analytics.track(reportFileOpened({ agentId: productId, name: "full.pdf" }))}><Download aria-hidden="true" />{t("artifactDownload")}</a>
+    </> : null}
+    {status === "ready" && report.phase === "summary" ? <>
+      <LockedSummary summaryUrl={api.reportFileUrl(conversationId, "summary.png")} onUnlock={unlock} unlocking={unlocking} t={t} />
+      {unlockError ? <InlineAlert tone="error" title={t("artifactUnlockFailed")}>{webChatErrorText(unlockError, locale)}</InlineAlert> : null}
     </> : null}
   </div></div>;
 }

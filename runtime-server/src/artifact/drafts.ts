@@ -11,7 +11,8 @@ export interface DraftStore {
 }
 
 export const DRAFT_ROOT = "/report/";
-export const REPORT_FILE = "/report/report.html";
+/** The file each phase's Run writes and publishes. */
+export const REPORT_FILES = { summary: "/report/summary.html", full: "/report/report.html" } as const;
 export const MAX_DRAFT_BYTES = 2 * 1024 * 1024;
 
 export class DraftError extends Error {}
@@ -20,7 +21,7 @@ export class DraftError extends Error {}
 export function draftPath(raw: unknown): string {
   const path = typeof raw === "string" ? raw.trim() : "";
   if (!path.startsWith(DRAFT_ROOT) || path.includes("..") || path.endsWith("/") || path.length > 200) {
-    throw new DraftError(`Paths are files under ${DRAFT_ROOT}, for example ${REPORT_FILE} (got ${JSON.stringify(raw)}).`);
+    throw new DraftError(`Paths are files under ${DRAFT_ROOT}, for example ${REPORT_FILES.full} (got ${JSON.stringify(raw)}).`);
   }
   return path;
 }

@@ -1,10 +1,10 @@
 /** Artifact mode: a product whose buyer fills one intake form and receives one rendered report instead of chatting. */
 
-export type RenderedReport = { fullPdf: Buffer; freePdf: Buffer; preview: Buffer /* PNG */ };
+export type RenderedReport = { pdf: Buffer; pages: number; firstPagePng: Buffer };
 
-/** Turns the report's HTML into its PDFs and a blurred preview. Adapter: headless Chromium in the Runtime; tests use a double. */
+/** Turns a report document's HTML into its PDF, the PDF's page count and its first page as a PNG. Adapter: headless Chromium in the Runtime; tests use a double. */
 export interface ReportRenderer {
-  render(input: { fullHtml: string; freeHtml: string }, signal?: AbortSignal): Promise<RenderedReport>;
+  render(html: string, signal?: AbortSignal): Promise<RenderedReport>;
 }
 
 /** One string, or the same text per language. */
@@ -30,7 +30,9 @@ export interface ArtifactConfigRepository {
 
 export type ReportStatus = "draft" | "generating" | "ready" | "failed";
 export type ReportStage = "queued" | "reading" | "consulting" | "researching" | "writing" | "proofreading" | "rendering" | "ready" | "failed";
-export type ReportKeys = { fullHtml: string; freeHtml: string; fullPdf: string; freePdf: string; preview: string };
+/** The report is written in two phases: the one-page summary first, the full report once the parent unlocks it. */
+export type ReportPhase = "summary" | "full";
+export type ReportKeys = { summaryHtml?: string; summaryPdf?: string; summaryPng?: string; fullHtml?: string; fullPdf?: string };
 export type ReportStep = { at: string; stage: ReportStage; detail?: string };
 export const MAX_REPORT_STEPS = 20;
 /**
@@ -47,7 +49,8 @@ export type ReportRecord = {
   ownerAccountId: string;
   status: ReportStatus;
   stage: ReportStage;
-  /** 1-based; every write about a Run is conditioned on the attempt (or Run) it belongs to. */
+  phase: ReportPhase;
+  /** 1-based, per phase; every write about a Run is conditioned on the attempt (or Run) it belongs to. */
   attempt: number;
   /** The Run of the current attempt. */
   runId?: string;
@@ -79,8 +82,8 @@ export interface ReportRepository {
   begin(conversationId: string, runId: string, now: Date): Promise<ReportRecord | undefined>;
   /** A step of the attempt: sets the stage and appends to the last steps. Only while that attempt is generating. */
   progress(conversationId: string, attempt: number, stage: ReportStage, detail: string | undefined, now: Date): Promise<void>;
-  /** One UPDATE: the new keys, status 'ready', stage, ready_at. A publish after a publish replaces the files as one unit. Only for the attempt that publishes. */
-  ready(conversationId: string, attempt: number, keys: ReportKeys, now: Date): Promise<ReportRecord | undefined>;
+  /** One UPDATE: the phase's keys merged into the row's, status 'ready', stage, ready_at. A publish after a publish replaces that phase's files as one unit. Only for the attempt of that phase that publishes. */
+  ready(conversationId: string, attempt: number, phase: ReportPhase, keys: ReportKeys, now: Date): Promise<ReportRecord | undefined>;
   /**
    * The Run ended with no report published. If its attempt was not the last, the next is due after the backoff; otherwise the report
    * fails. Matches only the current Run of a draft or generating report: a late end of an older attempt changes nothing.
@@ -90,6 +93,9 @@ export interface ReportRepository {
   due(now: Date): Promise<Array<{ conversationId: string; attempt: number }>>;
   /** Compare-and-set on the attempt: attempt + 1, this new Run, a lease. Undefined when another instance claimed it first. */
   claim(conversationId: string, attempt: number, runId: string, now: Date, leaseMs: number): Promise<ReportRecord | undefined>;
-  /** The pilot's manual unlock: one UPDATE. */
-  unlock(conversationId: string): Promise<void>;
+  /**
+   * The parent unlocks the full report: one conditional UPDATE from (summary, ready) to (full, generating, queued, attempt 1) with
+   * this new Run. Undefined when the report is in any other state, so only one caller wins.
+   */
+  unlock(conversationId: string, runId: string, now: Date): Promise<ReportRecord | undefined>;
 }

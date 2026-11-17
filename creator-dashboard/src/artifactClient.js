@@ -43,6 +43,11 @@ export class ArtifactApi {
     return this.request(this.transport.conversationUrl(conversationId, "/report"));
   }
 
+  /** The parent unlocks the full report: it starts being written, and the report comes back as it now is. Unlocking again changes nothing. */
+  unlockReport(conversationId) {
+    return this.request(this.transport.conversationUrl(conversationId, "/report/unlock"), { method: "POST", body: "{}" });
+  }
+
   reportFileUrl(conversationId, name) {
     return this.transport.conversationUrl(conversationId, `/report/files/${encodeURIComponent(name)}`);
   }

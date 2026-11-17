@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import type { ArtifactConfig } from "./ports.js";
+import type { ArtifactConfig, ReportPhase } from "./ports.js";
 
 const read = (name: string) => readFile(fileURLToPath(new URL(`../../prompts/artifact/${name}`, import.meta.url)), "utf8");
 
@@ -9,13 +9,19 @@ const TOOLS = `# Report tools
 - \`read(path, offset?, page?)\`: a .md path returns its text in pages. An original image is shown to you. An original PDF shows page \`page\` (default 1) as an image, with "page N of M". Any other original (docx, xlsx...) is read through its .md.
 - \`grep\` searches the .md texts.
 - \`web_search(query, objective)\` searches the public web, for facts that change over time.
-- \`write(path, content)\` and \`edit(path, old_string, new_string)\` create and change your report files under /report/; \`read\` and \`ls\` reach them too. /report/ sits beside /attachments/ like any directory.
+- \`write(path, content)\` and \`edit(path, old_string, new_string)\` create and change your files under /report/; \`read\` and \`ls\` reach them too. /report/ sits beside /attachments/ like any directory.
 - \`publish_report(path)\` publishes the report file once; it returns "Report published." or the exact errors to fix in the file.`;
 
-/** What an artifact conversation's agent is told beyond the Expert's own instructions: the shared report rules, the product's template, the tools. */
-export async function artifactPrompt(config: ArtifactConfig): Promise<string> {
-  return [await read("REPORT.md"), `# This product's report template\n\n${config.reportTemplate}`, TOOLS].join("\n\n");
+const PHASE_FILES = { summary: "SUMMARY.md", full: "FULL.md" } as const;
+
+/** What an artifact conversation's agent is told beyond the Expert's own instructions: the shared report rules, the product's template, the tools, and what this phase's Run delivers. */
+export async function artifactPrompt(config: ArtifactConfig, phase: ReportPhase): Promise<string> {
+  return [await read("REPORT.md"), `# This product's report template\n\n${config.reportTemplate}`, TOOLS, await read(PHASE_FILES[phase])].join("\n\n");
 }
 
 /** What a new attempt is told: the form is already in the conversation, and so is whatever the earlier attempt did. */
 export const ARTIFACT_RETRY_MESSAGE = "Continue. The report is not published yet. Your files under /report/ are as you left them: check them with ls /report/, carry on from where you stopped, proofread, and call publish_report.";
+
+
+/** What the Run of the full phase is told: the parent has unlocked the report. */
+export const ARTIFACT_FULL_MESSAGE = "The parent has unlocked the full report. Write it now, as your instructions for this Run describe.";
